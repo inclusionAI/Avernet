@@ -18,45 +18,6 @@ from . import vector_sync
 logger = logging.getLogger(__name__)
 
 
-def _reconcile_vector_state(worker_id, worker_store, runtime_state_store):
-    """Restore the latest persisted discovery state after profile indexing."""
-    try:
-        worker = worker_store.get_by_id(worker_id)
-        if worker is None:
-            logger.info("[SYNC-VECTORS] reconciliation skipped: worker_id=%s missing", worker_id)
-            return
-
-        worker_state = worker.get("state", {}) if isinstance(worker, dict) else worker.state
-        state = (
-            runtime_state_store.get_runtime_state(worker_id)
-            if runtime_state_store else None
-        )
-        if isinstance(state, dict):
-            state = state.get("state")
-        if state is None:
-            state = (
-                worker_state.get("runtime_state")
-                if isinstance(worker_state, dict) else worker_state.runtime_state
-            )
-        if hasattr(state, "value"):
-            state = state.value
-        availability = (
-            worker_state.get("availability")
-            if isinstance(worker_state, dict) else worker_state.availability
-        )
-        if hasattr(availability, "value"):
-            availability = availability.value
-
-        vector_sync._sync_runtime_state_to_vector_store(worker_id, state)
-        vector_sync._sync_availability_to_vector_store(worker_id, availability)
-        logger.info(
-            "[SYNC-VECTORS] reconciled latest state: worker_id=%s runtime_state=%s availability=%s",
-            worker_id, state, availability,
-        )
-    except Exception:
-        logger.exception("[SYNC-VECTORS] reconciliation failed: worker_id=%s", worker_id)
-
-
 @common.api_router.post(
     "/workers/{worker_id}/sync",
     summary="Sync worker",
@@ -643,11 +604,6 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
             logger.warning(
                 f"[SYNC_PROFILE_SKIP] worker_id={worker_id}, profile_store_class=None, "
                 f"reason='profile_store provider not available'"
-            )
-
-        if profile_activated:
-            await run_in_threadpool(
-                _reconcile_vector_state, worker_id, worker_store, runtime_state_store
             )
 
         # Preserve the internal sync contract: when capability verification is

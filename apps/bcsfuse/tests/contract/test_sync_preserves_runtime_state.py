@@ -1,7 +1,5 @@
 """Both OSS sync routes preserve runtime state on visibility-only updates."""
 
-from concurrent.futures import ThreadPoolExecutor
-from threading import Event
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -18,7 +16,6 @@ from src.infra.public.audit.in_memory_worker_audit_log_store import (
     InMemoryWorkerAuditLogStore,
 )
 from src.interfaces.api import worker_profile_parity_routes as routes
-from src.interfaces.api.dependencies import fusion_dependencies
 from src.interfaces.api.worker_profile_routes import analysis, common, vector_sync
 
 
@@ -62,50 +59,6 @@ def seed_worker(workers, runtime, state):
         state=WorkerState(availability=Availability.PRIVATE, trust_level=TrustLevel.UNVERIFIED, runtime_state=state),
     ))
     runtime.set_runtime_state("bot:owner", state, updated_by="user-publication")
-
-
-def test_sync_reconciles_state_changed_while_index_builds(sync_app, monkeypatch):
-    client, workers, runtime, _, _ = sync_app
-    seed_worker(workers, runtime, WorkerRuntimeState.ONLINE)
-    payload = {}
-    index_started = Event()
-    resume_index = Event()
-
-    monkeypatch.setattr(
-        vector_sync, "_sync_runtime_state_to_vector_store",
-        lambda worker_id, state: payload.update(runtime_state=state),
-    )
-    monkeypatch.setattr(
-        vector_sync, "_sync_availability_to_vector_store",
-        lambda worker_id, availability: payload.update(availability=availability),
-    )
-
-    def rebuild(worker_id):
-        state_at_start = runtime.get_runtime_state(worker_id).value
-        availability_at_start = workers.get_by_id(worker_id).state.availability.value
-        index_started.set()
-        assert resume_index.wait(timeout=5)
-        payload.update(runtime_state=state_at_start, availability=availability_at_start)
-        return True
-
-    monkeypatch.setattr(fusion_dependencies, "_build_vector_index_for_worker", rebuild)
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(client.post, "/v1/workers/bot:owner/sync", json={
-            "name": "Bot", "availability": "protected", "profile": {"profile_id": "default"},
-        })
-        try:
-            assert index_started.wait(timeout=5)
-            runtime.set_runtime_state("bot:owner", WorkerRuntimeState.OFFLINE, updated_by="test")
-            worker = workers.get_by_id("bot:owner")
-            worker.state.availability = Availability.PUBLIC
-            workers.update(worker)
-            payload.update(runtime_state="offline", availability="public")
-        finally:
-            resume_index.set()
-        response = future.result(timeout=5)
-
-    assert response.status_code == 200, response.text
-    assert payload == {"runtime_state": "offline", "availability": "public"}
 
 
 @pytest.mark.parametrize("prefix", ["/v1", "/api/v1"])
