@@ -26,6 +26,25 @@ fn binding_now_ms() -> ServiceResult<u64> {
 
 #[async_trait]
 impl BotProviderRepoPort for MemoryBotProviderStore {
+    async fn collaboration_actors(&self, ids: &[String]) -> ServiceResult<Vec<bcs_service_api::port::repo::collaboration_actor::CollaborationActor>> {
+        use bcs_service_api::port::repo::collaboration_actor::CollaborationActor;
+        if ids.len() > 256 { return Err(ServiceError::InvalidOperation { message: "collaboration actor batch exceeds 256".into(), request_id: None }); }
+        let records = self.records.read().await.clone();
+        let mut result = Vec::new();
+        for id in ids {
+            if let Some(bot) = self.bots.try_get(id).await? {
+                let provider_id = records.get(id).map(|record| record.provider_id.clone());
+                let provider = match provider_id.as_deref() {
+                    Some(provider_id) => self.bindings.get_provider(provider_id).await?,
+                    None => None,
+                };
+                result.push(CollaborationActor { actor_id: id.clone(), owner: bot.created_by, provider_id,
+                    provider_config: provider.as_ref().map(|provider| provider.config.clone()),
+                    provider_disabled: provider.is_some_and(|provider| provider.disabled) });
+            }
+        }
+        Ok(result)
+    }
     async fn get_provider_bot_by_ref(&self, provider_id: &str, provider_bot_ref: &str) -> ServiceResult<Option<BotProviderRecord>> {
         Ok(self.records.read().await.values().find(|r| r.provider_id == provider_id && r.provider_bot_ref == provider_bot_ref).cloned())
     }

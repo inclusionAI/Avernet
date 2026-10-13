@@ -89,3 +89,7 @@ credential can trigger one extra bounded existence query (Bot and binding keys,
 including tombstones). Any persisted identity blocks this fallback, so stale
 memory tokens cannot bypass revocation, deletion or Provider state. Unknown
 tokens incur no extra query; no writes or new cache are introduced.
+
+## Provider collaboration scope
+
+Bot Provider authorization uses a bounded fresh environment-scoped LEFT JOIN (maximum 256 actors per read); no policy cache or group policy table is introduced. Provider metadata writes atomically reject relaxation of same_owner, including stale ordinary PATCH config.

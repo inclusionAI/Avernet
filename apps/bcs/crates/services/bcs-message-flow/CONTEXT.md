@@ -221,3 +221,7 @@ reply routing. ChatRun final content is checkpointed before delivery settlement;
 queries and bounded recovery reconcile state. Disablement drains existing lane work.
 See `apps/bcs/specs/2026-09-20-direct-a2a-message-queue/spec.md` for storage costs,
 policy readiness, cancellation uncertainty and the v3 HTTP/CLI contract.
+
+## Provider collaboration scope
+
+Direct A2A and group caller authorization enforce Provider collaboration scope before legacy public/friend/organization exemptions; the authenticated caller and all group participants are checked.

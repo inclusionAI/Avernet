@@ -25,10 +25,16 @@ use serde_json::{Value, json};
 #[derive(Clone)]
 pub struct GroupCore {
     repo: Arc<dyn GroupRepoPort>,
+    collaboration_registry: Option<Arc<dyn bcs_service_api::BotRegistryCoreService>>,
     event_record_factory: Option<Arc<dyn EventRecordFactoryPort>>,
 }
 
 impl GroupCore {
+    pub fn with_collaboration_registry(mut self, registry: Arc<dyn bcs_service_api::BotRegistryCoreService>) -> Self {
+        self.collaboration_registry = Some(registry);
+        self
+    }
+
     pub fn new() -> Self {
         Self::memory()
     }
@@ -36,6 +42,7 @@ impl GroupCore {
     pub fn with_repo(repo: Arc<dyn GroupRepoPort>) -> Self {
         Self {
             repo,
+            collaboration_registry: None,
             event_record_factory: None,
         }
     }
@@ -82,6 +89,19 @@ impl GroupCoreService for GroupCore {
             .try_get(&command.group_id)
             .await?
             .ok_or_else(|| ServiceError::GroupNotFound(command.group_id.clone()))?;
+        if let Some(registry) = &self.collaboration_registry {
+            let mut actors = current.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+            match &command.mutation {
+                GroupMutationKind::AddParticipant { participant, .. } => actors.push(participant.bot_uuid.clone()),
+                GroupMutationKind::RemoveParticipant { actor_id, .. } => actors.retain(|id| id != actor_id),
+                _ => {},
+            }
+            if registry.collaboration_owner(&actors).await?.is_some() {
+                if matches!(&command.mutation, GroupMutationKind::PatchMutableFields(patch) if patch.visibility.as_deref() == Some("public")) {
+                    return Err(ServiceError::Forbidden("same_owner groups must remain private".into()));
+                }
+            }
+        }
         let next_version = current.version.checked_add(1).ok_or_else(|| {
             ServiceError::Conflict(format!("Group '{}' version overflow", current.id))
         })?;

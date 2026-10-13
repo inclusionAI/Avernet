@@ -187,7 +187,7 @@ impl ProviderManagementService for ProviderManagement {
     ) -> ServiceResult<RegisterProviderOutcome> {
         let registered = self
             .provider_core
-            .register_provider_with_slug(
+            .register_provider_with_policy(
                 command.name,
                 command.webhook_url,
                 command.auth_mode,
@@ -196,6 +196,7 @@ impl ProviderManagementService for ProviderManagement {
                 command.coordination,
                 command.slug,
                 command.admin_callback_url,
+                command.collaboration_scope,
             )
             .await?;
         Ok(RegisterProviderOutcome {
@@ -230,7 +231,7 @@ impl ProviderManagementService for ProviderManagement {
     ) -> ServiceResult<ProviderRecord> {
         self
             .provider_core
-            .update_provider_with_slug(
+            .update_provider_with_policy(
                 &command.provider_id,
                 &command.provider_admin_token,
                 &command.authenticated_staff_id,
@@ -241,6 +242,7 @@ impl ProviderManagementService for ProviderManagement {
                 command.organization_management,
                 command.slug,
                 command.admin_callback_url,
+                command.collaboration_scope,
             )
             .await
     }

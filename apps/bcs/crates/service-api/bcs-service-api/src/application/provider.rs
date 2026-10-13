@@ -56,6 +56,7 @@ pub struct RegisterProviderCommand {
     /// Downlink protocol version ("1.0" | "2.0"); None = "1.0".
     pub protocol_version: Option<String>,
     pub coordination: Option<ProviderCoordinationConfig>,
+    pub collaboration_scope: Option<crate::ProviderCollaborationScope>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +78,7 @@ pub struct UpdateProviderCommand {
     pub protocol_version: Option<String>,
     pub coordination: Option<ProviderCoordinationConfig>,
     pub organization_management: Option<ProviderOrganizationManagementConfig>,
+    pub collaboration_scope: Option<crate::ProviderCollaborationScope>,
 }
 
 #[derive(Debug, Clone)]

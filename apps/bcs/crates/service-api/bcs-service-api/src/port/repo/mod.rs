@@ -92,3 +92,4 @@ pub use session_file::{
     NewSessionFileParams, SessionFileListPage, SessionFileListParams, SessionFileRepoPort,
 };
 pub use user_identity::{UserIdentity, UserIdentityRepoPort};
+pub mod collaboration_actor;

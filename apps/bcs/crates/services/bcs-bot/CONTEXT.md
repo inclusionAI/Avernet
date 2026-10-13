@@ -107,3 +107,7 @@ parent/token plus optional Actor against current environment-scoped metadata;
 subbots require Actor for parent credentials, while Static Tokens identify their
 Bot directly. Provider events and runtime connection use cases enforce the same
 identity before mutation. See `docs/agentpass-subbots.md` for the full contract.
+
+## Provider collaboration scope
+
+Provider collaboration scope is resolved from live Provider metadata by BotRegistryCoreService.collaboration_owner. Same-owner authorization uses persisted created_by; missing affiliated Providers and malformed policies fail closed. Provider admin commands expose optional scope, and cannot relax same_owner. See specs/2026-10-13-provider-collaboration-scope/spec.md.

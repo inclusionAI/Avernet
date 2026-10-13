@@ -109,6 +109,7 @@ pub async fn register_provider(
         .services
         .provider_management
         .register_provider(RegisterProviderCommand {
+            collaboration_scope: parse_collaboration_scope(req.collaboration_scope.as_deref())?,
             name: req.name,
             slug: req.slug,
             webhook_url: req.webhook_url,
@@ -184,6 +185,7 @@ pub async fn patch_provider(
         .services
         .provider_management
         .update_provider(UpdateProviderCommand {
+            collaboration_scope: parse_collaboration_scope(req.collaboration_scope.as_deref())?,
             provider_id,
             provider_admin_token,
             authenticated_staff_id,
@@ -852,6 +854,15 @@ fn provider_error(error: ServiceError) -> ProviderRouteError {
     }
 }
 
+fn parse_collaboration_scope(value: Option<&str>) -> Result<Option<bcs_service_api::ProviderCollaborationScope>, ProviderRouteError> {
+    match value {
+        None => Ok(None),
+        Some("standard") => Ok(Some(bcs_service_api::ProviderCollaborationScope::Standard)),
+        Some("same_owner") => Ok(Some(bcs_service_api::ProviderCollaborationScope::SameOwner)),
+        _ => Err(ProviderRouteError::bad_request("invalid collaboration_scope")),
+    }
+}
+
 fn provider_to_response(provider: ProviderRecord) -> Result<ProviderInfoResponse, ServiceError> {
     let config: Value = serde_json::from_str(&provider.config)?;
     let downlink = config.get("downlink").unwrap_or(&Value::Null);
@@ -877,7 +888,9 @@ fn provider_to_response(provider: ProviderRecord) -> Result<ProviderInfoResponse
         })
         .transpose()?;
 
+    let scope = bcs_service_api::ProviderCollaborationScope::from_config(&provider.config)?;
     Ok(ProviderInfoResponse {
+        collaboration_scope: Some(match scope { bcs_service_api::ProviderCollaborationScope::Standard => "standard", bcs_service_api::ProviderCollaborationScope::SameOwner => "same_owner" }.into()),
         provider_id: provider.provider_id,
         slug: provider.slug,
         name: provider.name,

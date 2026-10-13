@@ -15,3 +15,5 @@ pub use provider_core::ProviderCore;
 pub type BotRegistry = BotCore;
 
 mod agent_identity;
+
+mod collaboration_policy;

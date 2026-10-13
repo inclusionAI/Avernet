@@ -76,3 +76,7 @@ with upper-quarter jitter. Missing ceilings preserve base polling. A nonempty
 iteration or error resets to the base; errors remain visible. Retention uses a
 fixed interval. Cancellation interrupts idle waits without cancelling a claimed
 batch. Bootstrap injects validated limits; Eventing does not read configuration.
+
+## Provider collaboration scope
+
+Group Event Subscription authorization checks current participants and the authenticated Human/Bot against the live Provider boundary before accepting a management actor. Existing subscription authority cannot widen same_owner.

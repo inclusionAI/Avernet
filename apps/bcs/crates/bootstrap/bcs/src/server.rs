@@ -2232,7 +2232,7 @@ impl Default for BcsServerState {
         let group_metrics_snapshot: Arc<dyn GroupMetricsSnapshotPort> = group_repo.clone();
         let group_repo_for_session: Arc<dyn GroupRepoPort> = group_repo.clone();
         let sessions = Arc::new(
-            GroupCore::with_repo(group_repo).with_event_record_factory(group_event_factory.clone()),
+            GroupCore::with_repo(group_repo).with_collaboration_registry(bot_registry.clone()).with_event_record_factory(group_event_factory.clone()),
         );
         let router = Arc::new(MessageRouter::new());
         let fusion = Arc::new(LocalFusionService::new(config.bots_base_dir.clone()));
@@ -3875,7 +3875,7 @@ impl BcsServer {
         let group_metrics_snapshot: Arc<dyn GroupMetricsSnapshotPort> = group_repo.clone();
         let group_repo_for_session: Arc<dyn GroupRepoPort> = group_repo.clone();
         let sessions = Arc::new(
-            GroupCore::with_repo(group_repo).with_event_record_factory(group_event_factory.clone()),
+            GroupCore::with_repo(group_repo).with_collaboration_registry(bot_registry.clone()).with_event_record_factory(group_event_factory.clone()),
         );
         let router = Arc::new(MessageRouter::new());
         let proposals = Arc::new(ProposalStore::new());
@@ -4494,7 +4494,7 @@ impl BcsServer {
                 crate::eventing_wiring::event_record_factory(&config, event_repo.clone());
             (
                 Arc::new(
-                    GroupCore::with_repo(repo.clone()).with_event_record_factory(event_factory),
+                    GroupCore::with_repo(repo.clone()).with_collaboration_registry(bot_registry.clone()).with_event_record_factory(event_factory),
                 ),
                 repo.clone() as Arc<dyn GroupMetricsSnapshotPort>,
                 repo as Arc<dyn GroupRepoPort>,
@@ -4704,7 +4704,8 @@ impl BcsServer {
                 friend_auth_sync.clone(),
                 edge_permission_env,
             )
-            .with_friendship_writeback(Some(friendship_writeback)),
+            .with_friendship_writeback(Some(friendship_writeback))
+            .with_collaboration_registry(bot_registry.clone()),
         );
         let connect_service: Arc<dyn bcs_service_api::application::ConnectService> =
             connect_service_impl.clone();
@@ -4730,7 +4731,7 @@ impl BcsServer {
                 edge_grant_store.clone(),
                 bot_config_store.clone(),
                 profile_store.clone(),
-            ));
+            ).with_collaboration_registry(bot_registry.clone()));
         let bot_connections = Arc::new(BotConnectionRegistry::new());
         let mut bot_runtime_for_session =
             Bot::new_with_friend(bot_registry.clone(), friend_svc.clone())
@@ -6089,6 +6090,7 @@ mod tests {
 
         let registered = provider_management
             .register_provider(RegisterProviderCommand {
+                collaboration_scope: None,
                 slug: None,
                 name: "Provider".to_string(),
                 webhook_url: Some("https://provider.example.com/bcs/webhook".to_string()),
@@ -6627,6 +6629,7 @@ mod tests {
             .services
             .provider_management
             .register_provider(RegisterProviderCommand {
+                collaboration_scope: None,
                 slug: None,
                 name: "Admin Provider".to_string(),
                 webhook_url: Some(callback_url.clone()),

@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+pub use bcs_domain::provider::ProviderCollaborationScope;
 use bcs_domain::{
     BotCapabilities, ProviderAuthMode, ProviderBotBinding, ProviderBotConnectionMode,
     ProviderCoordinationConfig, ProviderCredential, ProviderOrganizationManagementConfig,
@@ -72,6 +73,25 @@ pub trait ProviderCoreService: Send + Sync {
             message: "provider slug lookup is not configured".to_string(),
             request_id: None,
         })
+    }
+
+    async fn register_provider_with_policy(
+        &self, name: String, webhook_url: Option<String>, auth_mode: ProviderAuthMode,
+        created_by: String, protocol_version: Option<String>, coordination: Option<ProviderCoordinationConfig>,
+        slug: Option<String>, admin_callback_url: Option<String>, scope: Option<ProviderCollaborationScope>,
+    ) -> ServiceResult<RegisteredProvider> {
+        if scope.is_some() { return Err(ServiceError::InternalError("Provider policy registration is not configured".into())); }
+        self.register_provider_with_slug(name, webhook_url, auth_mode, created_by, protocol_version, coordination, slug, admin_callback_url).await
+    }
+
+    async fn update_provider_with_policy(
+        &self, provider_id: &str, provider_admin_token: &str, authenticated_staff_id: &str,
+        name: Option<String>, webhook_url: Option<String>, protocol_version: Option<String>, coordination: Option<ProviderCoordinationConfig>,
+        organization_management: Option<ProviderOrganizationManagementConfig>, slug: Option<String>, admin_callback_url: Option<String>,
+        scope: Option<ProviderCollaborationScope>,
+    ) -> ServiceResult<ProviderRecord> {
+        if scope.is_some() { return Err(ServiceError::InternalError("Provider policy update is not configured".into())); }
+        self.update_provider_with_slug(provider_id, provider_admin_token, authenticated_staff_id, name, webhook_url, protocol_version, coordination, organization_management, slug, admin_callback_url).await
     }
 
     /// Additive registration entry point preserving callers of register_provider.

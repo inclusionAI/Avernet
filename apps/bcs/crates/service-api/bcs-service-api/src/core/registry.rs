@@ -72,6 +72,11 @@ pub enum ConnectStreamError {
 /// Service for bot registration and discovery.
 #[async_trait]
 pub trait BotRegistryCoreService: Send + Sync {
+    /// Enforce the Provider boundary across the entire actor set. Some(owner)
+    /// means same-owner admission; None retains existing authorization rules.
+    async fn collaboration_owner(&self, _actor_ids: &[String]) -> ServiceResult<Option<String>> {
+        Ok(None)
+    }
     /// Atomic create-only registration; existing active/deleted identities must
     /// never be updated. Storage errors propagate, not an absent-record result.
     async fn create_registration_if_absent(

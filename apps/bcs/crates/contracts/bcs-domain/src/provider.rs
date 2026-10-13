@@ -2,6 +2,26 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+/// Provider-owned collaboration boundary, independent of visibility and friendship.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderCollaborationScope {
+    #[default]
+    Standard,
+    SameOwner,
+}
+
+impl ProviderCollaborationScope {
+    /// Missing configuration preserves legacy behavior; malformed policy fails closed.
+    pub fn from_config(config: &str) -> Result<Self, serde_json::Error> {
+        let value: serde_json::Map<String, serde_json::Value> = serde_json::from_str(config)?;
+        match value.get("collaboration_scope") {
+            None => Ok(Self::Standard),
+            Some(scope) => serde_json::from_value(scope.clone()),
+        }
+    }
+}
+
 fn default_worker_send_task_message_enabled() -> bool {
     true
 }
