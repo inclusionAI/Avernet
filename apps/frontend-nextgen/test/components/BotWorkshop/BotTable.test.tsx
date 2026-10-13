@@ -603,7 +603,7 @@ describe('Agent Coding Bot row actions', () => {
     expect(screen.getByText('发布与阶段推进')).toBeInTheDocument();
   });
 
-  test('Coding Bot 保留去使用，同时展示后端声明的库存操作', () => {
+  test('Coding Bot 主要操作仅保留去使用，更多操作菜单仍可用', () => {
     const bot = mapBotDto({
       bot_id: 'agent-template',
       bot_name: 'Agent Coding 模版 Bot',
@@ -612,7 +612,7 @@ describe('Agent Coding Bot row actions', () => {
       engine_properties: { template_config: { capabilities: { upgrade_service_bot: true } } },
       bot_type: 'personal',
       display_state: 'running',
-      actions: ['chat', 'view', 'edit', 'restart', 'engine_restart', 'delete'],
+      actions: ['chat', 'view', 'edit', 'restart', 'delete'],
     }).item;
 
     renderTable(bot, {
@@ -634,20 +634,49 @@ describe('Agent Coding Bot row actions', () => {
     });
 
     expect(screen.getByRole('button', { name: '去使用 Agent Coding 模版 Bot' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '查看 Agent Coding 模版 Bot 详情' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '编辑 Agent Coding 模版 Bot' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Agent Coding 模版 Bot 健康检查' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '查看 Agent Coding 模版 Bot 日志' })).toBeInTheDocument();
+    const primaryActions = within(screen.getByRole('group', { name: 'Agent Coding 模版 Bot 主要操作' }));
+    expect(primaryActions.getAllByRole('button')).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: '查看 Agent Coding 模版 Bot 详情' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '编辑 Agent Coding 模版 Bot' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Agent Coding 模版 Bot 健康检查' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '查看 Agent Coding 模版 Bot 日志' })).not.toBeInTheDocument();
 
+    expect(screen.getByRole('button', { name: '管理 Agent Coding 模版 Bot' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '管理 Agent Coding 模版 Bot' }));
     expect(screen.getByText('开启服务化')).toBeInTheDocument();
     expect(screen.getByText('重启 Bot')).toBeInTheDocument();
     expect(screen.getByLabelText('重启 Bot说明')).toBeInTheDocument();
     expect(screen.getByText('变更归属空间')).toBeInTheDocument();
     expect(screen.getByText('删除')).toBeInTheDocument();
-    expect(screen.queryByText('重启引擎')).not.toBeInTheDocument();
-    expect(screen.queryByText('发布与阶段推进')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /重启引擎/ })).toBeEnabled();
     expect(screen.queryByText('授权')).not.toBeInTheDocument();
+  });
+
+  test('服务化 Coding Bot 预设引擎重启并触发 engine_restart', async () => {
+    const bot = mapBotDto({
+      bot_id: 'coding-service-engine-restart',
+      bot_name: '服务化 Coding Bot',
+      engine: 'claude_code',
+      template_type: 'generalCC',
+      bot_type: 'service',
+      kind: 'service',
+      display_state: 'service_draft',
+      actions: ['chat', 'delete'],
+    }).item;
+    const onAction = jest.fn().mockResolvedValue(undefined);
+
+    renderTable(bot, {
+      onAction,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '管理 服务化 Coding Bot' }));
+    expect(screen.getByRole('button', { name: /重启引擎/ })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /重启引擎/ }));
+    expect(screen.getByText('将重新拉取 Coding 引擎二进制并重启运行时，进行中的会话可能中断。')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+
+    await waitFor(() => expect(onAction).toHaveBeenCalledWith('engine_restart', bot));
   });
 
   test('Coding Bot 点击整行进入对话而非详情', () => {
