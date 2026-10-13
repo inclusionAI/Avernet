@@ -119,7 +119,9 @@ RevisionId = str   # identity of a revision: "sha256:" + 64 hex chars, the hash 
                    # Example: "sha256:7c1e…" (shortened here and below)
 Digest = str       # address of stored bytes: "sha256:" + 64 hex chars of the bytes themselves.
                    # Example: "sha256:3f9a…" is the address of one SOUL.md file;
-                   # GET …/genome/content/sha256:3f9a… returns "# Soul\nYou are a patient support agent…" (§9.1)
+                   # GET …/genome/content/sha256:3f9a… returns "# Soul\nYou are a patient support agent…" (§9.1).
+                   # One store and one endpoint serve every digest below (persona file, skill, memory items,
+                   # resource, MCP config, CLI tool, script); the field that holds a digest says what the bytes are.
 # RiskTier (T0 < T1 < T2 < T3) is defined once in 08-promotion.md §5.
 # BotRef {owner_id, bot_id}: the bot's full identity (a bot_id alone is not unique
 # across users); defined once in 09-evolution-api.md §2.7.
