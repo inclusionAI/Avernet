@@ -75,6 +75,7 @@ def import_all_models() -> None:
     import agentclaw.community.core.market_favorites.repository.models  # noqa: F401  ac_market_favorite
     import agentclaw.community.core.bot_message_feedback.models  # noqa: F401  ac_bot_message_feedback
     import agentclaw.community.core.work_orders.repository.models  # noqa: F401  ac_work_order / ac_work_order_notification
+    import agentclaw.community.core.agentcompute.repository.registry  # noqa: F401  ac_agent_compute_* (run/agent/message/result_shard/round/guard_event/job/audit)
 
 
 def _metadatas() -> list[MetaData]:
