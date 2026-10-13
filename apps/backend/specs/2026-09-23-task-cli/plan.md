@@ -45,7 +45,7 @@ TaskService.execute -> TaskOpResult -> existing Relay/Centralized runtime
 
 ## CLI changes
 
-Create an independent Rust package under `apps/avernet-goal-cli/` with no dependency on BCS business crates.
+Create an independent Rust package in the CLI organization's standalone `avernet-goal-cli` repository, with no dependency on Avernet or BCS business crates. Avernet retains only the Backend contracts and cross-repository design documentation.
 
 - Root command submits one Goal.
 - Repeated `--to bot:<ref>` expands into independent sessions.

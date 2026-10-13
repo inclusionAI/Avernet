@@ -1257,7 +1257,7 @@ class GoalBatchSubmitResult:
 
 ### 18.2 独立 avernet-goal-cli Rust Package
 
-位于 `apps/avernet-goal-cli/`，通过 Ant CLI 工程初始化；它与 Backend 领域代码解耦，负责：
+源码由 CLI 组织下的独立 `avernet-goal-cli` 仓库维护，通过 Ant CLI 工程初始化；Avernet 仓库不再保存 CLI 源码副本。它与 Backend 领域代码解耦，负责：
 
 - Rust 命令解析；
 - 统一认证 SDK；

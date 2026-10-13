@@ -2,7 +2,7 @@
 
 > Relay 单个 Target Execution 的实现合同，2026-10-12。CLI 命令、Batch Schema、一个 Goal 多目标、Intake 和 `/start` 聚合响应以 [avernet-goal-cli 发起与澄清设计](design.md) 为唯一权威；本文只描述其中一个独立 Target Execution 进入 [Bot S1–S6 函数式执行协议](../2026-09-16-distributed-relay-execution/bot-s1-s8-functional-contract.md) 后的执行链路。本文残留的单目标命令和单结果示例不构成 CLI 合同。
 
-> 分支核对（2026-10-12）：当前 Backend 实现位于 `apps/backend/`。Relay、intake/start、节点级 context、统一 report 和 S6 dispatch 已完成上一阶段重构；独立 Rust `avernet-goal-cli` 及最新多目标/Batch 合同尚未实现。
+> 实现核对（2026-10-13）：Backend 实现位于 `apps/backend/`。Relay、intake/start、节点级 context、统一 report 和 S6 dispatch 已完成重构；Rust `avernet-goal-cli` 已迁移至 CLI 组织下的独立同名仓库并发布，Avernet 仓库只保留 Backend 实现与跨仓协议设计。
 
 ## 1. 一页结论
 
