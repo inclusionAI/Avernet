@@ -1918,7 +1918,8 @@ export class EvolveRepository {
       device_provider: string | null; device_id: string | null;
       device_props: unknown; binding_status: string | null; env: string | null;
     }>(
-      `SELECT b.entity_id, b.entity_type, b.active_engine, b.bot_type, b.status AS bot_status, b.binding_id,
+      `SELECT b.active_engine, b.bot_type, b.status AS bot_status, b.binding_id,
+              b.entity_id, b.entity_type,
               d.device_provider, d.device_id, d.device_props, d.status AS binding_status,
               COALESCE(d.env, b.env) AS env
        FROM ac_bots b
