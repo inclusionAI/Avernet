@@ -68,3 +68,8 @@ def collaborator_admin() -> FrozenSet[str]:
 def device_admin() -> FrozenSet[str]:
     """Staff IDs allowed to list/manage all connectable devices (admin only)."""
     return _scope("device_admin")
+
+
+def cron_admin() -> FrozenSet[str]:
+    """Staff IDs allowed to list/disable published service-Bot cron jobs."""
+    return _scope("cron_admin")

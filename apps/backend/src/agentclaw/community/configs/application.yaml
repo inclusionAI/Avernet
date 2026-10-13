@@ -195,6 +195,10 @@ user_config:
   # test_shipped_config_no_corp_identifiers 守卫）。实际工号由各部署环境的
   # overlay 配置提供（见对应环境覆盖配置），不进入社区源码。
 
+  # Privileged cron operations deny everyone until the deployment supplies IDs.
+  admin:
+    cron_admin: []
+
   # 操作员白名单（控制 /api/v1/access/allow、/disallow 等管理接口的调用权限）
   # 中性默认为空（无特权操作员）；corp env overlay 提供工号列表，community 在
   # application-community.yaml 中列自己的 admin subject id。

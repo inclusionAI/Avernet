@@ -45,6 +45,9 @@ from __future__ import annotations
 
 import inspect
 
+from agentclaw.community.api.cron_admin_service import CronAdminServiceProtocol
+from agentclaw.community.core.cron.services.cron_admin import CronAdminService
+
 import pytest
 from agentclaw.community.api.file_count_service import FileCountServiceProtocol
 from agentclaw.community.api.mcp_scoped_config_service import MCPScopedConfigServiceProtocol
@@ -316,6 +319,7 @@ from agentclaw.community.core.spaces.services import (
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
 _PAIRS = [
+    (CronAdminServiceProtocol, CronAdminService),
     (MCPScopedConfigServiceProtocol, MCPScopedConfigService),
     (FileCountServiceProtocol, FileCountService),
     (BuildIgnoreServiceProtocol, BuildIgnoreService),
