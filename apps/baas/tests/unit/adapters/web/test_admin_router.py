@@ -5,7 +5,7 @@ Covers:
 - Input validation (negative publish_id, missing tenant, empty modifier)
 - PublishNotFoundError propagation to 404
 - _to_response helper converting ForceSuccessResult → ForceSuccessResponse
-- restore_bot_endpoint (POST /api/v1/admin/bots/{bot_id}/restore):
+- restore_bot_endpoint (POST /api/v1/admin/bots/restore, bot_id in body):
   success envelope, 404 not-found, 409 conflict, no tenant/env input
 """
 
@@ -521,7 +521,7 @@ class TestUpdateBotStatusRequest:
     def test_missing_status_returns_422(self, client):
         resp = client.post(
             "/api/v1/admin/bots/123/status",
-            json={"operator": "ops.alice"},
+            json={"bot_id": 123, "operator": "ops.alice"},
         )
         assert resp.status_code == 422
 
@@ -783,32 +783,47 @@ class TestRestoreBotRequest:
     """RestoreBotRequest input validation and cross-env request contract."""
 
     def test_valid_request_construction(self):
-        req = RestoreBotRequest(operator="ops.alice")
+        req = RestoreBotRequest(bot_id=123, operator="ops.alice")
+        assert req.bot_id == 123
         assert req.operator == "ops.alice"
 
     def test_request_contracts_has_no_tenant_or_env_fields(self):
-        assert set(RestoreBotRequest.model_fields) == {"operator"}, (
-            "the cross-env restore request must carry ONLY the operator"
+        assert set(RestoreBotRequest.model_fields) == {"bot_id", "operator"}, (
+            "the cross-env restore request must carry ONLY bot_id and operator"
         )
 
     def test_empty_operator_returns_422(self, client):
         resp = client.post(
-            "/api/v1/admin/bots/123/restore",
-            json={"operator": ""},
+            "/api/v1/admin/bots/restore",
+            json={"bot_id": 123, "operator": ""},
         )
         assert resp.status_code == 422
 
     def test_missing_operator_returns_422(self, client):
         resp = client.post(
-            "/api/v1/admin/bots/123/restore",
-            json={},
+            "/api/v1/admin/bots/restore",
+            json={"bot_id": 123},
+        )
+        assert resp.status_code == 422
+
+    def test_missing_bot_id_returns_422(self, client):
+        resp = client.post(
+            "/api/v1/admin/bots/restore",
+            json={"operator": "ops.alice"},
+        )
+        assert resp.status_code == 422
+
+    def test_non_positive_bot_id_returns_422(self, client):
+        resp = client.post(
+            "/api/v1/admin/bots/restore",
+            json={"bot_id": 0, "operator": "ops.alice"},
         )
         assert resp.status_code == 422
 
     def test_operator_too_long_returns_422(self, client):
         resp = client.post(
-            "/api/v1/admin/bots/123/restore",
-            json={"operator": "x" * 129},
+            "/api/v1/admin/bots/restore",
+            json={"bot_id": 123, "operator": "x" * 129},
         )
         assert resp.status_code == 422
 
@@ -820,13 +835,13 @@ class TestRestoreBotRequest:
         )
 
         dep_callable = _get_endpoint_dep_callable(
-            client.app.router, path_contains="/bots/{bot_id}/restore"
+            client.app.router, path_contains="/bots/restore"
         )
         client.app.dependency_overrides[dep_callable] = lambda: mock_admin_svc
         try:
             resp = client.post(
-                "/api/v1/admin/bots/123/restore",
-                json={"operator": operator},
+                "/api/v1/admin/bots/restore",
+                json={"bot_id": 123, "operator": operator},
             )
         finally:
             del client.app.dependency_overrides[dep_callable]
@@ -879,7 +894,7 @@ class TestToRestoreBotResponse:
 
 
 class TestRestoreBotEndpoint:
-    """Tests for POST /api/v1/admin/bots/{bot_id}/restore endpoint."""
+    """Tests for POST /api/v1/admin/bots/restore endpoint (bot_id in body)."""
 
     def test_happy_path_returns_200_with_response_data(self, client):
         mock_admin_svc = AsyncMock()
@@ -888,13 +903,13 @@ class TestRestoreBotEndpoint:
         )
 
         dep_callable = _get_endpoint_dep_callable(
-            client.app.router, path_contains="/bots/{bot_id}/restore"
+            client.app.router, path_contains="/bots/restore"
         )
         client.app.dependency_overrides[dep_callable] = lambda: mock_admin_svc
         try:
             resp = client.post(
-                "/api/v1/admin/bots/123/restore",
-                json={"operator": "ops.alice"},
+                "/api/v1/admin/bots/restore",
+                json={"bot_id": 123, "operator": "ops.alice"},
             )
         finally:
             del client.app.dependency_overrides[dep_callable]
@@ -916,13 +931,13 @@ class TestRestoreBotEndpoint:
         mock_admin_svc.restore_bot.return_value = _make_restore_result()
 
         dep_callable = _get_endpoint_dep_callable(
-            client.app.router, path_contains="/bots/{bot_id}/restore"
+            client.app.router, path_contains="/bots/restore"
         )
         client.app.dependency_overrides[dep_callable] = lambda: mock_admin_svc
         try:
             client.post(
-                "/api/v1/admin/bots/123/restore",
-                json={"operator": "ops.alice"},
+                "/api/v1/admin/bots/restore",
+                json={"bot_id": 123, "operator": "ops.alice"},
             )
         finally:
             del client.app.dependency_overrides[dep_callable]
@@ -935,18 +950,18 @@ class TestRestoreBotEndpoint:
         assert "tenant" not in kwargs
         assert "env" not in kwargs
 
-    def test_calls_restore_bot_with_path_bot_id(self, client):
+    def test_calls_restore_bot_with_body_bot_id(self, client):
         mock_admin_svc = AsyncMock()
         mock_admin_svc.restore_bot.return_value = _make_restore_result(bot_id=9999)
 
         dep_callable = _get_endpoint_dep_callable(
-            client.app.router, path_contains="/bots/{bot_id}/restore"
+            client.app.router, path_contains="/bots/restore"
         )
         client.app.dependency_overrides[dep_callable] = lambda: mock_admin_svc
         try:
             client.post(
-                "/api/v1/admin/bots/9999/restore",
-                json={"operator": "ops.alice"},
+                "/api/v1/admin/bots/restore",
+                json={"bot_id": 9999, "operator": "ops.alice"},
             )
         finally:
             del client.app.dependency_overrides[dep_callable]
@@ -960,13 +975,13 @@ class TestRestoreBotEndpoint:
         )
 
         dep_callable = _get_endpoint_dep_callable(
-            client.app.router, path_contains="/bots/{bot_id}/restore"
+            client.app.router, path_contains="/bots/restore"
         )
         client.app.dependency_overrides[dep_callable] = lambda: mock_admin_svc
         try:
             resp = client.post(
-                "/api/v1/admin/bots/9999/restore",
-                json={"operator": "ops.alice"},
+                "/api/v1/admin/bots/restore",
+                json={"bot_id": 9999, "operator": "ops.alice"},
             )
         finally:
             del client.app.dependency_overrides[dep_callable]
@@ -981,13 +996,13 @@ class TestRestoreBotEndpoint:
         )
 
         dep_callable = _get_endpoint_dep_callable(
-            client.app.router, path_contains="/bots/{bot_id}/restore"
+            client.app.router, path_contains="/bots/restore"
         )
         client.app.dependency_overrides[dep_callable] = lambda: mock_admin_svc
         try:
             resp = client.post(
-                "/api/v1/admin/bots/123/restore",
-                json={"operator": "ops.alice"},
+                "/api/v1/admin/bots/restore",
+                json={"bot_id": 123, "operator": "ops.alice"},
             )
         finally:
             del client.app.dependency_overrides[dep_callable]
@@ -1000,13 +1015,13 @@ class TestRestoreBotEndpoint:
         mock_admin_svc.restore_bot.return_value = _make_restore_result()
 
         dep_callable = _get_endpoint_dep_callable(
-            client.app.router, path_contains="/bots/{bot_id}/restore"
+            client.app.router, path_contains="/bots/restore"
         )
         client.app.dependency_overrides[dep_callable] = lambda: mock_admin_svc
         try:
             resp = client.post(
-                "/api/v1/admin/bots/123/restore",
-                json={"operator": "ops.alice"},
+                "/api/v1/admin/bots/restore",
+                json={"bot_id": 123, "operator": "ops.alice"},
             )
         finally:
             del client.app.dependency_overrides[dep_callable]
@@ -1024,8 +1039,8 @@ class TestRestoreBotEndpoint:
 
     def test_success_rejected_when_operator_missing(self, client):
         resp = client.post(
-            "/api/v1/admin/bots/123/restore",
-            json={"tenant": "someone", "env": "somewhere"},
+            "/api/v1/admin/bots/restore",
+            json={"bot_id": 123, "tenant": "someone", "env": "somewhere"},
         )
         assert resp.status_code == 422, (
             "tenant/env placeholders must NOT substitute for the required operator"

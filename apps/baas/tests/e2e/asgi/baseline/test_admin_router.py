@@ -3,7 +3,7 @@
 Tests cover admin, config, and BCN downlink routers not already tested:
 - Admin API Key management: list/create/revoke/get (via /api/v1/admin/api-keys)
 - Admin Publish management: force-success, device status update (/api/v1/admin/*)
-- Admin Bot restore: POST /api/v1/admin/bots/{bot_id}/restore (atomic record restore)
+- Admin Bot restore: POST /api/v1/admin/bots/restore (atomic record restore, bot_id in body)
 - System Config management: list/create/update/delete (/api/v1/system-configs)
 - QPM Config management: set/get/delete per bot (/api/v1/bot-qpm)
 - Admin publish: retry non-admin path (/api/v1/publishes/{id}/retry)
@@ -600,11 +600,11 @@ class TestAdminGrantRevokeExtended:
 
 
 class TestAdminRestoreBot:
-    """POST /api/v1/admin/bots/{bot_id}/restore — atomic admin record restore."""
+    """POST /api/v1/admin/bots/restore — atomic admin record restore."""
 
     def _get_restore_dep_callable(self, app):
         for route in iter_api_routes(app):
-            if route.path == "/api/v1/admin/bots/{bot_id}/restore":
+            if route.path == "/api/v1/admin/bots/restore":
                 for dep in route.dependant.dependencies:
                     return dep.call
         raise RuntimeError("restore route not found in app routes")
@@ -659,8 +659,8 @@ class TestAdminRestoreBot:
         )
 
         response = await api.client.post(
-            f"/api/v1/admin/bots/{target_id}/restore",
-            json={"operator": "e2e-ops"},
+            "/api/v1/admin/bots/restore",
+            json={"bot_id": target_id, "operator": "e2e-ops"},
         )
 
         assert response.status_code == 200, (
@@ -698,8 +698,8 @@ class TestAdminRestoreBot:
     async def test_restore_unknown_bot_returns_404(self, api: APITestHelper) -> None:
         """Restore with a bot_id matching no record (live or deleted) → 404."""
         response = await api.client.post(
-            "/api/v1/admin/bots/99999999/restore",
-            json={"operator": "e2e-ops"},
+            "/api/v1/admin/bots/restore",
+            json={"bot_id": 99999999, "operator": "e2e-ops"},
         )
 
         assert response.status_code == 404, (
@@ -722,8 +722,8 @@ class TestAdminRestoreBot:
         _testclient_app.dependency_overrides[dep_callable] = lambda: mock_admin_svc
         try:
             response = await api.client.post(
-                "/api/v1/admin/bots/123/restore",
-                json={"operator": "e2e-ops"},
+                "/api/v1/admin/bots/restore",
+                json={"bot_id": 123, "operator": "e2e-ops"},
             )
         finally:
             del _testclient_app.dependency_overrides[dep_callable]

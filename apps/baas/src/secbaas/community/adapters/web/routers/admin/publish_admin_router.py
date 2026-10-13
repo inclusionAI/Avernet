@@ -7,7 +7,7 @@ Endpoints:
 - POST /api/v1/admin/force-success - Force a publish and all related entities to success states
 - POST /api/v1/admin/devices/{device_uuid}/status - Update a device's status directly
 - POST /api/v1/admin/bots/{bot_id}/status - Update a bot's status directly
-- POST /api/v1/admin/bots/{bot_id}/restore - Restore a bot record to live ACTIVE
+- POST /api/v1/admin/bots/restore - Restore a bot record to live ACTIVE (bot_id in request body)
 """
 
 from typing import Annotated
@@ -241,6 +241,11 @@ async def update_bot_status_endpoint(
 
 
 class RestoreBotRequest(BaseModel):
+    bot_id: int = Field(
+        ...,
+        gt=0,
+        description="Bot ID (primary key) to restore",
+    )
     operator: str = Field(
         ...,
         min_length=1,
@@ -276,15 +281,11 @@ def _to_restore_bot_response(result: RestoreBotResult) -> RestoreBotResponse:
 
 
 @router.post(
-    "/bots/{bot_id}/restore",
+    "/bots/restore",
     response_model=ApiResponse[RestoreBotResponse],
 )
 @inject
 async def restore_bot_endpoint(
-    bot_id: Annotated[
-        int,
-        Path(description="Bot ID (primary key) to restore"),
-    ],
     request: RestoreBotRequest,
     admin_service: PublishAdminService = Depends(
         Provide[ApplicationContainer.services.publish_admin_service]
@@ -298,6 +299,9 @@ async def restore_bot_endpoint(
     convention). Conflicting unique-key states (e.g. a concurrent restore
     or publish race) roll the whole transaction back and surface as 409.
 
+    The ``bot_id`` and ``operator`` travel in the JSON request body; the
+    path carries no record identifier.
+
     **WARNING**: This is a state-machine-bypassing admin recovery tool —
     it intentionally deviates from "RELEASED is terminal" and performs no
     lifecycle validation. Cross-env by design: target lookup is by
@@ -306,20 +310,20 @@ async def restore_bot_endpoint(
     """
     try:
         result = await admin_service.restore_bot(
-            bot_id=bot_id,
+            bot_id=request.bot_id,
             operator=request.operator,
         )
     except PublishConflictError as exc:
         raise HTTPException(
             status_code=409,
             detail=(
-                f"Bot {bot_id} restore conflicts with a live unique-key slot; "
+                f"Bot {request.bot_id} restore conflicts with a live unique-key slot; "
                 f"no changes applied: {exc.message}"
             ),
         )
     except PublishNotFoundError:
         raise HTTPException(
             status_code=404,
-            detail=f"Bot {bot_id} not found",
+            detail=f"Bot {request.bot_id} not found",
         )
     return ApiResponse(data=_to_restore_bot_response(result))
