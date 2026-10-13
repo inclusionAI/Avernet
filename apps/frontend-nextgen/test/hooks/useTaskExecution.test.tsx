@@ -37,8 +37,12 @@ function taskRecord(mode?: 'centralized' | 'relay') {
           ? {
               orchestration_mode: 'relay',
               root_node_id: 'root-1',
-              root_execution_instruction:
-                '[task-execute]\ntask_id=task-1; node_id=root-1\nrelay_token=x\nbackend_url=https://backend.example',
+              root_execution_instruction: [
+                '[task-execute]',
+                'task_id=task-1; node_id=root-1',
+                'relay_token=x',
+                'backend_url=https://backend.example',
+              ].join('\n'),
             }
           : {},
     },
