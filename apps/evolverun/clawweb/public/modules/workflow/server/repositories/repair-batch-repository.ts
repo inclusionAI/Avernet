@@ -228,7 +228,7 @@ export class RepairBatchRepository {
     if (current.stateVersion !== expectedStateVersion || current.phase !== 'drafting') conflict('STATE_CONFLICT', 'Draft result was already settled');
   }
   async completeDraft(tx: IDatabase, input: RevisionIdentity & {
-    draft: Record<string, unknown>; checks: Record<string, unknown>; phase: 'review' | 'blocked' | 'no_change';
+    draft: Record<string, unknown>; checks: Record<string, unknown>; phase: 'review' | 'blocked' | 'no_change'; recoverRead?: boolean;
   }): Promise<RepairRevision> {
     const current = await this.currentAttempt(tx, input);
     if (!['review', 'blocked', 'no_change'].includes(input.phase)
@@ -238,12 +238,13 @@ export class RepairBatchRepository {
     const checksJson = boundedRepairJson(input.checks, MAX_REPORT_BYTES);
     if (current.phase === input.phase && current.draft !== null && current.checks !== null
       && canonicalRepairJson(current.draft) === draftJson && canonicalRepairJson(current.checks) === checksJson) return current;
-    this.requireDraftCas(current, input.expectedStateVersion);
+    if (!(input.recoverRead && current.phase === 'failed' && ['GIT_RESULT_UNAVAILABLE', 'AIS_FAILED', 'AIS_STOPPED', 'AIS_TIMEOUT'].includes(String(current.error?.code))
+      && current.stateVersion === input.expectedStateVersion)) this.requireDraftCas(current, input.expectedStateVersion);
     const result = await tx.exec(`UPDATE workflow_repair_revisions SET phase = ?, state_version = state_version + 1,
       draft_json = ?, checks_json = ?, candidate_digest = ?, checks_digest = ?, updated_at_ms = ?
-      WHERE workflow_id = ? AND task_id = ? AND revision = ? AND state_version = ? AND phase = 'drafting' AND draft_json IS NULL`,
+      WHERE workflow_id = ? AND task_id = ? AND revision = ? AND state_version = ? AND phase = ? AND draft_json IS NULL`,
     [input.phase, draftJson, checksJson, digestRepairJson(input.draft), digestRepairJson(input.checks), Date.now(),
-      input.workflowId, input.taskId, input.revision, input.expectedStateVersion]);
+      input.workflowId, input.taskId, input.revision, input.expectedStateVersion, current.phase]);
     if (result.affectedRows !== 1) conflict('STATE_CONFLICT', 'Draft result was already settled');
     if (input.phase === 'no_change') {
       await tx.exec(`UPDATE workflow_repair_items SET state = 'pending', active_task_id = NULL, active_revision = NULL,

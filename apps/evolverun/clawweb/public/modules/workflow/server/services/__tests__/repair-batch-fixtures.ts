@@ -4,6 +4,7 @@ import { migrations } from '@avernet/clawweb-shared/server/schema';
 import { repairBatchMigrations } from '@avernet/clawweb-shared/server/schema-repair-batch';
 import { digestRepairJson, type RepairItem } from '../../contracts/repair-batch.js';
 import type { RepairExecutionPort, RepairGeneratedResult, RepairSourcePort } from '../../contracts/repair-workbench.js';
+import { RepairResultAbsentError } from '../../contracts/repair-workbench.js';
 
 export async function repairFixture(count = 2) {
   const raw = new Database(':memory:');
@@ -31,7 +32,7 @@ export async function repairFixture(count = 2) {
     async dispatch(input) { calls.push(input); return { jobId: 'job-1' }; },
     async status() { return remoteStatus; },
     async readResult() {
-      if (!generatedResult) throw new Error('result not ready');
+      if (!generatedResult) throw new RepairResultAbsentError('result not ready');
       return generatedResult;
     },
     async stop(input) { stops.push(input); },

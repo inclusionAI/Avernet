@@ -10,7 +10,7 @@ import type {
   RepairWorkbenchService, RepairSourcePort, RepairExecutionPort, RepairSelectionRequest,
   RepairFeedbackRequest, RepairCandidatesResponse, RepairTaskDetail, RepairInboxItem, RepairCapabilities, RepairCandidatesQuery, RepairInboxFilter,
 } from '../contracts/repair-workbench.js';
-import { repairSignatureKey } from '../contracts/repair-workbench.js';
+import { repairSignatureKey, RepairResultAbsentError } from '../contracts/repair-workbench.js';
 import { RepairBatchRepository } from '../repositories/repair-batch-repository.js';
 import { RepairTaskRepository } from '../repositories/repair-task-repository.js';
 import { REPAIR_ACTIVE_LOOKBACK_DAYS, structuredRepairProposalIdentity } from '../repositories/repair-source-adapter.js';
@@ -266,6 +266,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     if (!identity(taskId, 64) || !safeInteger(raw.expectedAttemptRevision, 1)
       || !requiredText(raw.feedback, MAX_INSTRUCTIONS_CHARS, true)
       || !(raw.parentCandidateCommit === null || /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(raw.parentCandidateCommit))) fail('INVALID_INPUT', 'Invalid feedback request');
+    if (this.execution && await this.requireStoppedAttempt(await this.task(taskId), actorId)) fail('STATE_CONFLICT', 'The original candidate was recovered; refresh it before submitting feedback');
     return this.generate(actorId, taskId, { ...base, expectedAttemptRevision: raw.expectedAttemptRevision, parentCandidateCommit: raw.parentCandidateCommit, feedback: raw.feedback });
   }
   private async generate(actorId: string, taskId: string | null, request: RepairSelectionRequest | RepairFeedbackRequest): Promise<RepairRevision> {
@@ -341,6 +342,78 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         || message.includes('token/projectName 未配置') ? 'rejected' : 'uncertain';
     }
     await this.tx(tx => new RepairTaskRepository(tx).finishDispatch(revision.taskId, revision.revision, jobId, failure));
+  }
+  async retryResult(actorId: string, taskId: string, expectedRevision: number): Promise<void> {
+    this.actor(actorId);
+    if (!this.execution) fail('CAPABILITY_UNAVAILABLE', 'Repair generation provider is unavailable');
+    const task = await this.task(taskId);
+    if (!safeInteger(expectedRevision, 1) || task.latestAttempt.revision !== expectedRevision) fail('STATE_CONFLICT', 'Result is no longer current');
+    if (task.latestAttempt.draft) return;
+    const run = task.execution;
+    if (task.latestAttempt.phase !== 'failed' || task.latestAttempt.error?.code !== 'GIT_RESULT_UNAVAILABLE'
+      || !run?.jobId || !run.executionId) fail('STATE_CONFLICT', 'Only an unavailable Git result can be reread');
+    const result = await this.execution.readResult({ input: task.latestAttempt.input, actorId, jobId: run.jobId,
+      identity: { stepId: new RepairTaskRepository(this.db).stepId(taskId, expectedRevision), attempt: run.attempt, executionId: run.executionId } });
+    if (result.status === 'failed') fail('STATE_CONFLICT', 'No successful candidate is available');
+    await this.report({ workflowId: task.workflowId, taskId, revision: expectedRevision,
+      expectedStateVersion: task.latestAttempt.stateVersion, ...result }, true);
+  }
+  private async requireStoppedAttempt(task: RepairTaskDetail, actorId: string): Promise<RepairRevision | null> {
+    const run = task.execution;
+    if (task.latestAttempt.phase === 'failed' && task.latestAttempt.error?.code === 'GIT_RESULT_UNAVAILABLE') fail('STATE_CONFLICT', 'Reread the original Git result before generating again');
+    if (task.latestAttempt.phase !== 'failed' || !run?.jobId || !run.executionId) return null;
+    let remote: Awaited<ReturnType<RepairExecutionPort['status']>>;
+    try {
+      remote = await this.execution!.status({ input: task.latestAttempt.input, actorId, jobId: run.jobId,
+        identity: { stepId: new RepairTaskRepository(this.db).stepId(task.taskId, task.latestAttempt.revision),
+          attempt: run.attempt, executionId: run.executionId } });
+    } catch { fail('STATE_CONFLICT', 'Remote execution state is unknown; reconcile before generating again'); }
+    if (remote.status === 'running') fail('STATE_CONFLICT', 'Previous AIS execution is still running; stop or reconcile it first');
+    if (!['AIS_FAILED', 'AIS_STOPPED', 'AIS_TIMEOUT'].includes(String(task.latestAttempt.error?.code))) return null;
+    // A Job can fail after its result has already been pushed. Recover the exact
+    // execution before deciding its branch is safe for another generation.
+    let result: Awaited<ReturnType<RepairExecutionPort['readResult']>>;
+    try {
+      result = await this.execution!.readResult({ input: task.latestAttempt.input, actorId, jobId: run.jobId,
+        identity: { stepId: new RepairTaskRepository(this.db).stepId(task.taskId, task.latestAttempt.revision),
+          attempt: run.attempt, executionId: run.executionId } });
+    } catch (error) {
+      if (remote.status !== 'success' && error instanceof RepairResultAbsentError) return null;
+      fail('STATE_CONFLICT', 'Original Git result could not be confirmed; retry its read before generating again');
+    }
+    if (result.status === 'failed') return null;
+    return this.report({ workflowId: task.workflowId, taskId: task.taskId, revision: task.latestAttempt.revision,
+      expectedStateVersion: task.latestAttempt.stateVersion, ...result }, true);
+  }
+  async retryGeneration(actorId: string, taskId: string, request: { expectedRevision: number; requestId: string }): Promise<RepairRevision> {
+    this.actor(actorId);
+    if (!this.execution) fail('CAPABILITY_UNAVAILABLE', 'Repair generation provider is unavailable');
+    if (!safeInteger(request.expectedRevision, 1) || !requiredText(request.requestId, 128)) fail('INVALID_INPUT', 'Invalid retry request');
+    const task = await this.task(taskId);
+    if (task.latestAttempt.revision === request.expectedRevision && task.latestAttempt.draft
+      && ['AIS_FAILED', 'AIS_STOPPED', 'AIS_TIMEOUT'].includes(String(task.latestAttempt.error?.code))) return task.latestAttempt;
+    const digest = digestRepairJson({ actorId, taskId, retry: request });
+    let next = await serial(this.db, () => new RepairBatchRepository(this.db).findRequest(task.workflowId, request.requestId, digest));
+    if (!next) {
+      if (task.latestAttempt.phase !== 'failed' || task.latestAttempt.revision !== request.expectedRevision) fail('STATE_CONFLICT', 'Only the latest failed attempt can be regenerated');
+      const recovered = await this.requireStoppedAttempt(task, actorId);
+      if (recovered) return recovered;
+      next = await this.tx(async tx => {
+        const repo = new RepairBatchRepository(tx);
+        await repo.lockWorkflow(tx, task.workflowId);
+        const committed = await repo.findRequest(task.workflowId, request.requestId, digest);
+        if (committed) return committed;
+        const input = { ...task.latestAttempt.input, revision: request.expectedRevision + 1,
+          parentCandidateCommit: typeof task.latestSuccessful?.draft?.candidateCommit === 'string' ? task.latestSuccessful.draft.candidateCommit : null,
+          previousReportRef: task.latestSuccessful ? `${taskId}/revisions/${task.latestSuccessful.revision}` : null };
+        const created = await repo.createRevision(tx, { input, requestId: request.requestId, requestDigest: digest,
+          expectedAttemptRevision: request.expectedRevision });
+        await new RepairTaskRepository(tx).append(created, actorId);
+        return created;
+      });
+    }
+    await this.dispatch(next, actorId);
+    return (await this.task(taskId)).revisions.find(r => r.revision === next!.revision)!;
   }
   async retryDispatch(actorId: string, taskId: string, expectedRevision: number): Promise<void> {
     this.actor(actorId);
@@ -462,7 +535,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     return result;
   }
   /** Trusted Host call only. The AIS owner must verify the execution ticket before invoking. */
-  async report(input: TrustedRepairReport): Promise<RepairRevision> {
+  async report(input: TrustedRepairReport, recoverRead = false): Promise<RepairRevision> {
     if (!input || !['succeeded', 'blocked', 'no_change', 'failed'].includes(input.status) || !identity(input.workflowId, 190) || !identity(input.taskId, 64)
       || !safeInteger(input.revision, 1) || !safeInteger(input.expectedStateVersion)) fail('INVALID_INPUT', 'Invalid report identity');
     return this.tx(async tx => {
@@ -492,7 +565,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         const checkFailed = staticStatus === 'failed' || mockStatus === 'failed';
         if ((input.status === 'blocked') !== checkFailed || (input.status === 'no_change' && itemResults.some(item => item.status !== 'not_needed')))
           fail('INVALID_INPUT', 'AIS status does not match checks or item results');
-        settled = await repo.completeDraft(tx, { ...input, phase: input.status === 'blocked' ? 'blocked'
+        settled = await repo.completeDraft(tx, { ...input, recoverRead, phase: input.status === 'blocked' ? 'blocked'
           : input.status === 'no_change' ? 'no_change' : 'review' });
       }
       await new RepairTaskRepository(tx).settle(settled);

@@ -136,6 +136,18 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
     await service.cancel(selected.actor.actorId, selected.task.taskId, revision(req.body?.expectedRevision));
     res.json({ ok: true });
   }));
+  router.post('/:taskId/retry-result', handle(async (req, res) => {
+    const selected = await taskAccess(req, res, 'edit');
+    if (!selected) return;
+    await service.retryResult(selected.actor.actorId, selected.task.taskId, revision(req.body?.expectedRevision));
+    res.status(202).json({ ok: true });
+  }));
+  router.post('/:taskId/retry-generation', handle(async (req, res) => {
+    const selected = await taskAccess(req, res, 'edit');
+    if (!selected) return;
+    res.status(202).json(await service.retryGeneration(selected.actor.actorId, selected.task.taskId,
+      { expectedRevision: revision(req.body?.expectedRevision), requestId: text(req.body?.requestId, 'requestId') }));
+  }));
   router.post('/:taskId/retry-dispatch', handle(async (req, res) => {
     const selected = await taskAccess(req, res, 'edit');
     if (!selected) return;

@@ -7,6 +7,7 @@ const repairApi = vi.hoisted(() => ({
   task: vi.fn(),
   candidates: vi.fn(),
   retryDispatch: vi.fn(),
+  retryGeneration: vi.fn(),
   cancel: vi.fn(),
   revise: vi.fn(),
   diff: vi.fn(),
@@ -56,10 +57,32 @@ const candidates = () => ({
   page: { page: 1, pageSize: 20, total: 1, totalPages: 1 }, limits: { maxItems: 100, maxRequestBytes: 65536 },
 })
 
-beforeEach(() => Object.values(repairApi).forEach(mock => mock.mockReset()))
+beforeEach(() => { Object.values(repairApi).forEach(mock => mock.mockReset()); repairApi.diff.mockResolvedValue({ files: [], truncated: false }) })
 afterEach(() => vi.useRealTimers())
 
 describe('RepairTaskDialog', () => {
+  it('regenerates a first failure without requiring feedback or reading current candidates', async () => {
+    const failed = taskDetail('drafting', undefined, ['item-1']);
+    failed.latestAttempt.phase = 'failed'; failed.latestAttempt.error = { code: 'AIS_FAILED' };
+    failed.execution!.status = 'failed';
+    repairApi.task.mockResolvedValue(failed); repairApi.retryGeneration.mockResolvedValue({});
+    render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false}
+      canEdit onClose={() => {}} onChanged={() => {}} />);
+    await userEvent.click(await screen.findByRole('button', { name: '重新生成 Pack' }));
+    expect(repairApi.retryGeneration).toHaveBeenCalledWith('FIX-1', expect.objectContaining({ expectedRevision: 1, requestId: expect.any(String) }));
+    expect(repairApi.candidates).not.toHaveBeenCalled(); expect(repairApi.cancel).not.toHaveBeenCalled();
+  });
+  it('keeps the last candidate visible after failure and separates its review from retry', async () => {
+    const detail = taskDetail('review', '保留的候选', ['item-1']);
+    detail.latestAttempt = { ...detail.latestAttempt, revision: 2, phase: 'failed', draft: null, checks: null, error: { code: 'AIS_FAILED' } };
+    detail.revisions.push(detail.latestAttempt); repairApi.task.mockResolvedValue(detail);
+    render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false}
+      canEdit onClose={() => {}} onChanged={() => {}} />);
+    expect(await screen.findByText('保留的候选')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重新生成 Pack' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '返回上一成功候选审核' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '调整范围与要求' })).toBeEnabled();
+  });
   it('polls an active generation until the task becomes reviewable', async () => {
     vi.useFakeTimers()
     repairApi.task.mockResolvedValueOnce(taskDetail('drafting')).mockResolvedValueOnce(taskDetail('review', '候选已生成'))

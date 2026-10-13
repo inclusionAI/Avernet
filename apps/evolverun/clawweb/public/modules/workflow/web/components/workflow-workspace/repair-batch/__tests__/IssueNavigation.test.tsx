@@ -338,13 +338,13 @@ it('retains selections across issue pages and reviews their actual titles before
   await user.click(within(screen.getByRole('region', { name: '问题分页' })).getByRole('button', { name: '下一页' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '生成修复草稿（2）' })).toBeEnabled())
   await user.click(screen.getByRole('button', { name: '生成修复草稿（2）' }))
-  const confirmation = screen.getByRole('dialog', { name: '生成修复草稿' })
-  expect(within(confirmation).getByText('retry')).toBeVisible()
-  expect(within(confirmation).getByText('timeout')).toBeVisible()
-  expect(within(confirmation).getByRole('button', { name: '确认生成草稿' })).toBeEnabled()
+  const confirmation = screen.getByRole('region', { name: 'Workflow 修复工作区' })
+  expect(within(confirmation).getAllByText('retry')[0]).toBeVisible()
+  expect(within(confirmation).getAllByText('timeout')[0]).toBeVisible()
+  expect(within(confirmation).getByRole('button', { name: '生成 Pack 草稿' })).toBeEnabled()
 })
 
-it('requires a choice between conflicting modifications before draft generation', async () => {
+it('retains conflicting sources for candidate review without silently choosing a proposal', async () => {
   result.items = [600, 90].map(value => ({ ...item(String(value)),
     proposal: { summary: String(value), operations: [{ nodeId: 'fetch', path: '/executor/timeoutMs', value }] } }))
   const user = userEvent.setup()
@@ -357,11 +357,11 @@ it('requires a choice between conflicting modifications before draft generation'
   await user.click(choices().getByRole('checkbox', { name: '选择 90' }))
   await user.click(within(screen.getByRole('dialog', { name: '问题详情' })).getByRole('button', { name: '关闭' }))
   await user.click(screen.getByRole('button', { name: '生成修复草稿（2）' }))
-  const confirmation = screen.getByRole('dialog', { name: '生成修复草稿' })
-  expect(within(confirmation).getByRole('alert')).toHaveTextContent('同一配置')
-  expect(within(confirmation).getByRole('button', { name: '确认生成草稿' })).toBeDisabled()
-  await user.click(within(confirmation).getByRole('button', { name: '移除 90' }))
-  expect(within(confirmation).getByRole('button', { name: '确认生成草稿' })).toBeEnabled()
+  const confirmation = screen.getByRole('region', { name: 'Workflow 修复工作区' })
+  expect(within(confirmation).getByRole('alert')).toHaveTextContent('结构冲突')
+  expect(within(confirmation).getByRole('button', { name: '生成 Pack 草稿' })).toBeEnabled()
+  await user.click(within(confirmation).getAllByRole('button', { name: '移除' })[1])
+  expect(within(confirmation).getByRole('button', { name: '生成 Pack 草稿' })).toBeEnabled()
 })
 
 it('opens a selected item directly even when neither its issue nor its suggestion is on the current page', async () => {

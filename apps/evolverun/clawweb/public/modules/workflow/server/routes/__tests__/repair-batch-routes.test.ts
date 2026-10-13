@@ -51,6 +51,21 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     expect((await f.request(`/${created.body.taskId}/revisions/1`, undefined, 'viewer')).status).toBe(200);
     expect((await f.request(`/${created.body.taskId}/revisions/999`)).status).toBe(404);
   });
+  it('authorizes frozen-input retry and returns the same revision for duplicate requests', async () => {
+    const f = await setup();
+    const inbox = await f.request('/candidates?workflowId=wf-1');
+    const created = await f.request('/', { workflowId: 'wf-1', inputDigest: inbox.body.inputDigest,
+      itemIds: ['item-0'], instructions: 'Keep rules', requestId: 'first' });
+    f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: 'model failed' });
+    await f.service.reconcile();
+    const path = `/${created.body.taskId}/retry-generation`;
+    const input = { expectedRevision: 1, requestId: 'retry-first' };
+    expect((await f.request(path, input, 'viewer')).status).toBe(403);
+    const [first, repeated] = await Promise.all([f.request(path, input), f.request(path, input)]);
+    expect(first.status).toBe(202); expect(repeated.status).toBe(202);
+    expect(first.body.revision).toBe(2); expect(repeated.body).toEqual(first.body);
+    expect(f.calls).toHaveLength(2);
+  });
   it('validates and forwards server-side inbox pagination', async () => {
     const f = await setup();
     const page = await f.request('/candidates?workflowId=wf-1&state=pending&page=1&pageSize=1');

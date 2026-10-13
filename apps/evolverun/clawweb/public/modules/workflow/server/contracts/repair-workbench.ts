@@ -81,7 +81,11 @@ export interface RepairWorkbenchService {
   disposition(actorId: string, input: { workflowId: string; itemId: string; inputDigest: string; expectedStateVersion: number;
     contentRevision: number; action: 'no_action' | 'restore'; reason: string; requestId: string; includeHistorical?: boolean }): Promise<StoredRepairItem>;
   cancel(actorId: string, taskId: string, expectedRevision: number): Promise<void>;
+  retryResult(actorId: string, taskId: string, expectedRevision: number): Promise<void>;
+  retryGeneration(actorId: string, taskId: string, request: { expectedRevision: number; requestId: string }): Promise<RepairRevision>;
   retryDispatch(actorId: string, taskId: string, expectedRevision: number): Promise<void>;
   reconcile(limit?: number): Promise<number>;
   diff(taskId: string, revision: number, base: 'baseline' | 'parent'): Promise<RepairDiff>;
 }
+/** Trusted adapter has positively confirmed there is no result for this execution. */
+export class RepairResultAbsentError extends Error {}
