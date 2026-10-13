@@ -2,10 +2,7 @@
 
 import logging
 from datetime import datetime
-from time import perf_counter
-
-from fastapi import BackgroundTasks, HTTPException, Request, status
-
+from fastapi import Request, HTTPException, status
 from src.interfaces.api.schemas.worker_management_schemas import (
     WorkerSyncRequest,
     WorkerSyncResponse,
@@ -20,50 +17,6 @@ from . import vector_sync
 logger = logging.getLogger(__name__)
 
 
-def _sync_vectors_after_response(worker_id, worker_store, runtime_state_store, build_index):
-    """Refresh discovery data from the latest persisted worker state."""
-    started_at = perf_counter()
-    logger.info("[SYNC-VECTORS] phase=start worker_id=%s build_index=%s", worker_id, build_index)
-    try:
-        if build_index:
-            from src.interfaces.api.dependencies.fusion_dependencies import (
-                _build_vector_index_for_worker,
-            )
-            from src.interfaces.api.profile_routes import _trigger_index_sync
-
-            _trigger_index_sync(worker_id)
-            index_started_at = perf_counter()
-            index_success = _build_vector_index_for_worker(worker_id)
-            logger.info(
-                "[SYNC_EAGER_INDEX_RESULT] worker_id=%s result=%s elapsed_ms=%.1f method=_build_vector_index_for_worker",
-                worker_id, "PASS" if index_success else "FAIL",
-                (perf_counter() - index_started_at) * 1000,
-            )
-
-        worker = worker_store.get_by_id(worker_id)
-        if worker is None:
-            logger.info("[SYNC-VECTORS] phase=skipped worker_id=%s reason=worker_missing", worker_id)
-            return
-        state = runtime_state_store.get_runtime_state(worker_id) if runtime_state_store else None
-        if isinstance(state, dict):
-            state = state.get("state")
-        if state is None:
-            state = worker.state.runtime_state
-        if hasattr(state, "value"):
-            state = state.value
-        availability = worker.state.availability
-        if hasattr(availability, "value"):
-            availability = availability.value
-        vector_sync._sync_runtime_state_to_vector_store(worker_id, state)
-        vector_sync._sync_availability_to_vector_store(worker_id, availability)
-        logger.info(
-            "[SYNC-VECTORS] phase=done worker_id=%s runtime_state=%s availability=%s elapsed_ms=%.1f",
-            worker_id, state, availability, (perf_counter() - started_at) * 1000,
-        )
-    except Exception:
-        logger.exception("[SYNC-VECTORS] phase=failed worker_id=%s elapsed_ms=%.1f", worker_id, (perf_counter() - started_at) * 1000)
-
-
 @common.api_router.post(
     "/workers/{worker_id}/sync",
     summary="Sync worker",
@@ -71,7 +24,7 @@ def _sync_vectors_after_response(worker_id, worker_store, runtime_state_store, b
     response_model=WorkerSyncResponse,
     tags=["Workers"],
 )
-async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest, background_tasks: BackgroundTasks):
+async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
     """
     P1: Sync worker and profile without changing omitted runtime state.
 
@@ -108,8 +61,6 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest, 
     created = False
     worker_created = False  # For compensation logic
     profile_activated = False
-    index_profile = False
-    analysis_snapshot = None
     profile_id = req.profile.profile_id  # Use profile_id from request (root_original contract)
     effective_runtime_state = req.runtime_state
 
@@ -277,8 +228,26 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest, 
                                 "failed to persist worker runtime-state mirror"
                             ) from e_state
 
+                    # Sync runtime_state + availability to vector store payloads (Faiss + Qdrant)
+                    try:
+                        vector_sync._sync_runtime_state_to_vector_store(worker_id, effective_runtime_state)
+                        if isinstance(current_worker, dict):
+                            avail = (current_worker.get("state") or {}).get("availability", "protected")
+                        else:
+                            avail = getattr(getattr(current_worker, 'state', None), 'availability', 'protected')
+                            if hasattr(avail, 'value'):
+                                avail = avail.value
+                        vector_sync._sync_availability_to_vector_store(worker_id, avail)
+                    except Exception as sync_err:
+                        logger.warning(f"[Workers R3 Sync] Vector payload sync failed: {sync_err}")
+
             elif not update_runtime_state:
                 logger.info(f"[Workers R3 Sync] Runtime state preserved: {worker_id} -> {effective_runtime_state}")
+                # Availability still changed even though runtime state did not.
+                try:
+                    vector_sync._sync_availability_to_vector_store(worker_id, availability.value)
+                except Exception as sync_err:
+                    logger.warning(f"[Workers R3 Sync] Vector availability sync failed: {sync_err}")
             else:
                 logger.warning(f"[Workers R3 Sync] Runtime state store not available, skipping runtime state update")
         except Exception as e:
@@ -386,7 +355,6 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest, 
 
                 # Upsert profile
                 profile_store.upsert_profile(worker_id, profile_id, profile_data)
-                index_profile = True
                 logger.info(
                     f"[SYNC_PROFILE_UPSERT] worker_id={worker_id}, profile_id={profile_id}, "
                     f"profile_key={worker_id}:{profile_id}, profile_store_class={type(profile_store).__name__}, "
@@ -497,6 +465,64 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest, 
                         )
                         logger.warning(f"[Workers R3 Sync] Failed to update worker active_profile_key: {e_active}")
 
+                # CRITICAL FIX: Trigger index sync (root_original: _trigger_index_sync)
+                # This ensures search/recommend can find the new profile
+                logger.info(f"[SYNC_INDEX_SYNC_START] worker_id={worker_id}")
+                try:
+                    from src.interfaces.api.profile_routes import _trigger_index_sync
+                    _trigger_index_sync(worker_id)
+                    logger.info(
+                        f"[SYNC_INDEX_SYNC] worker_id={worker_id}, success=True, method=_trigger_index_sync"
+                    )
+                    logger.info(f"[Workers R3 Sync] Index sync triggered for: {worker_id}")
+                except Exception as e_index:
+                    logger.warning(
+                        f"[SYNC_INDEX_SYNC] worker_id={worker_id}, success=False, "
+                        f"exception_type={type(e_index).__name__}, exception_preview={str(e_index)[:200]}"
+                    )
+                    logger.warning(f"[Workers R3 Sync] Failed to trigger index sync: {e_index}")
+
+                # P0-SEARCH-RECOMMEND-EAGER-INDEXING-FIX:
+                # Immediately trigger incremental indexing for the current worker/profile.
+                # This ensures the newly synced worker is searchable within 5 seconds,
+                # avoiding the lazy full-scan on first search/recommend request.
+                logger.info(
+                    f"[SYNC_EAGER_INDEX_TRIGGER] worker_id={worker_id}, "
+                    f"profile_id={profile_id}, profile_key={worker_id}:{profile_id}, "
+                    f"mode=current_profile_incremental"
+                )
+                try:
+                    from src.interfaces.api.dependencies.fusion_dependencies import _build_vector_index_for_worker
+                    import time
+                    start_time = time.time()
+
+                    index_success = _build_vector_index_for_worker(worker_id)
+
+                    elapsed_ms = int((time.time() - start_time) * 1000)
+
+                    if index_success:
+                        logger.info(
+                            f"[SYNC_EAGER_INDEX_RESULT] worker_id={worker_id}, "
+                            f"profile_id={profile_id}, profile_key={worker_id}:{profile_id}, "
+                            f"result=PASS, elapsed_ms={elapsed_ms}, "
+                            f"method=_build_vector_index_for_worker"
+                        )
+                    else:
+                        logger.warning(
+                            f"[SYNC_EAGER_INDEX_RESULT] worker_id={worker_id}, "
+                            f"profile_id={profile_id}, profile_key={worker_id}:{profile_id}, "
+                            f"result=FAIL, elapsed_ms={elapsed_ms}, "
+                            f"method=_build_vector_index_for_worker"
+                        )
+                except Exception as e_eager:
+                    logger.error(
+                        f"[SYNC_EAGER_INDEX_ERROR] worker_id={worker_id}, "
+                        f"profile_id={profile_id}, profile_key={worker_id}:{profile_id}, "
+                        f"exception_type={type(e_eager).__name__}, "
+                        f"message_preview={str(e_eager)[:200]}",
+                        exc_info=True
+                    )
+
                 logger.info(
                     f"[SYNC_ACTIVE_PROFILE_VERIFY] worker_id={worker_id}, "
                     f"expected_profile_key={worker_id}:{profile_id}, "
@@ -515,11 +541,33 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest, 
                     # (background task runs after response, needs a snapshot)
                     profile_data_snapshot = dict(profile_data)
 
-                    analysis_snapshot = profile_data_snapshot
-                    logger.info(
-                        "[SYNC_LLM] worker_id=%s mode=background requested_sync_llm=%s",
-                        worker_id, req.sync_llm,
-                    )
+                    if req.sync_llm:
+                        # Synchronous: await before returning HTTP response
+                        logger.info(
+                            f"[SYNC_LLM] worker_id={worker_id}, mode=synchronous"
+                        )
+                        try:
+                            await analysis._analyze_and_persist_async(
+                                worker_id=worker_id,
+                                profile_id=profile_id,
+                                profile_data=profile_data_snapshot,
+                            )
+                            logger.info(f"[SYNC_LLM] worker_id={worker_id}, mode=synchronous, result=success")
+                        except Exception as e_llm:
+                            logger.warning(f"[SYNC_LLM] Synchronous LLM analysis failed: {e_llm}")
+                    else:
+                        # Asynchronous: fire-and-forget background task
+                        import asyncio
+                        asyncio.create_task(
+                            analysis._analyze_and_persist_async(
+                                worker_id=worker_id,
+                                profile_id=profile_id,
+                                profile_data=profile_data_snapshot,
+                            )
+                        )
+                        logger.info(
+                            f"[SYNC_LLM] worker_id={worker_id}, mode=async, LLM analysis scheduled in background"
+                        )
                 else:
                     logger.info(
                         f"[SYNC_LLM] worker_id={worker_id}, skipped "
@@ -590,18 +638,6 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest, 
                     verification_error,
                 )
 
-        background_tasks.add_task(
-            _sync_vectors_after_response, worker_id, worker_store, runtime_state_store, index_profile,
-        )
-        logger.info("[SYNC-VECTORS] phase=scheduled worker_id=%s build_index=%s", worker_id, index_profile)
-        if analysis_snapshot is not None:
-            background_tasks.add_task(
-                analysis._analyze_and_persist_async,
-                worker_id=worker_id,
-                profile_id=profile_id,
-                profile_data=analysis_snapshot,
-            )
-
         # Return canonical response (root_original contract)
         logger.info(
             f"[SYNC_RESPONSE] success=True, worker_id={worker_id}, created={created}, "
@@ -637,6 +673,6 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest, 
     tags=["Workers"],
     deprecated=True,
 )
-async def sync_worker_compat(worker_id: str, request: Request, req: WorkerSyncRequest, background_tasks: BackgroundTasks):
+async def sync_worker_compat(worker_id: str, request: Request, req: WorkerSyncRequest):
     """Backward-compatible alias for sync_worker at /v1 prefix."""
-    return await sync_worker(worker_id, request, req, background_tasks)
+    return await sync_worker(worker_id, request, req)

@@ -54,8 +54,6 @@ Authorization: Bearer <BCSFUSE_AUTH_TOKEN>
 
 注册或同步 Worker，原子操作：创建/更新 Worker → 上线 → 写入/激活 Profile。
 
-接口在 Worker、运行态和 Profile 写入完成后返回；向量同步、索引构建和 LLM 分析在响应后执行，搜索可见性可能稍有延迟。`sync_llm` 参数保留兼容，但不再让请求等待分析完成。
-
 ### 路径参数
 
 | 参数 | 类型 | 必填 | 说明 |

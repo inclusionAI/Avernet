@@ -192,7 +192,7 @@ class WorkerSyncRequest(BaseModel):
     )
     sync_llm: bool = Field(
         default=False,
-        description="Legacy flag; profile analysis runs after the response for both values",
+        description="Whether to call LLM analysis synchronously. True=wait, False=async",
     )
 
 

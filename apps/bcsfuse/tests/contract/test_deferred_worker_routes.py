@@ -1,20 +1,10 @@
-"""Worker writes finish before vector work, and responses precede background work."""
+"""Online state writes finish before deferred vector work."""
 
 import asyncio
 import json
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import FastAPI
 from src.bootstrap import oss_worker_lifecycle_routes as lifecycle
-from src.infra.adapters.in_memory_worker_registry_store import (
-    InMemoryWorkerRegistryStore,
-)
-from src.infra.adapters.in_memory_worker_runtime_state_store import (
-    InMemoryWorkerRuntimeStateStore,
-)
-from src.interfaces.api import worker_profile_parity_routes as profile_routes
-from src.interfaces.api.worker_profile_routes import analysis, common, sync
 
 
 async def _invoke(app, method, path, payload=None, timeline=None):
@@ -68,39 +58,3 @@ def test_online_returns_before_vector_sync(monkeypatch):
     assert body_events[0] == ("status", 200)
     assert body_events[1] == ("response", {"worker_id": "bot:owner"})
     assert events == ["state_written", "response", "vector_synced"]
-
-
-def test_sync_returns_before_index_and_analysis(monkeypatch):
-    events = []
-    workers = InMemoryWorkerRegistryStore()
-    runtime = InMemoryWorkerRuntimeStateStore()
-    profiles = MagicMock()
-    app = FastAPI()
-    app.state.context = SimpleNamespace(registry={
-        "worker_registry_store": workers,
-        "worker_runtime_state_store": runtime,
-        "worker_profile_content_store": profiles,
-    })
-    app.include_router(profile_routes.compat_router, prefix="/v1")
-    monkeypatch.setattr(common, "_require_auth", lambda request: None)
-    monkeypatch.setattr("src.application.utils.drm_config_helper.is_capability_verify_enabled", lambda: False)
-
-    def background_vectors(worker_id, worker_store, runtime_store, build_index):
-        assert worker_store.get_by_id(worker_id) is not None
-        assert profiles.upsert_profile.called
-        events.append("vectors")
-
-    async def background_analysis(**kwargs):
-        events.append("analysis")
-
-    monkeypatch.setattr(sync, "_sync_vectors_after_response", background_vectors)
-    monkeypatch.setattr(analysis, "_analyze_and_persist_async", AsyncMock(side_effect=background_analysis))
-
-    body_events = asyncio.run(_invoke(app, "POST", "/v1/workers/bot:owner/sync", {
-        "name": "Bot", "sync_llm": True, "profile": {"profile_id": "default"},
-    }, timeline=events))
-
-    assert body_events[0] == ("status", 200)
-    assert body_events[1][0] == "response"
-    assert body_events[1][1]["success"] is True
-    assert events == ["response", "vectors", "analysis"]

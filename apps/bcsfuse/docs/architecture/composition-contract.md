@@ -265,12 +265,6 @@ aliases share a handler. New workers honor the supported `type` values
 write. Updates retain an existing worker's type. With `profile.activate=false`,
 sync saves the profile but preserves the existing active content, binding,
 and worker mirror, including the valid state with no active profile.
-Both aliases return after Worker, runtime-state, and Profile writes complete.
-Vector payload updates, index refresh, and optional LLM analysis run after the
-HTTP response. The legacy `sync_llm` flag no longer makes the request wait for
-analysis. A successful response acknowledges the persisted records, while
-search visibility may lag. Background failures are logged and require a later
-sync or reconciliation to retry; process termination can interrupt the work.
 
 With `ENABLE_PROFILE_EMBEDDING_INDEX=true`, successful explicit profile
 activation also refreshes the selected profile's vectors. Other profiles'
