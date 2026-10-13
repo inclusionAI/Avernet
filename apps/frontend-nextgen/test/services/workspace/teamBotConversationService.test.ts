@@ -50,6 +50,22 @@ test('按 total 分页且按完整 bot_id/entity_id 去重，保留后端顺序'
   ]);
 });
 
+test('团队 Bot 直接消费接口返回的 Coding 模板', async () => {
+  list.mockResolvedValue({
+    code: 200000,
+    data: {
+      items: [dto({ engine: 'claude_code', template_type: 'applicationCoding', template_name: '应用 Bot' })],
+      total: 1,
+    },
+  });
+
+  const result = await teamBotConversationService.listBots('viewer');
+
+  expect(result.ok && result.data[0]).toMatchObject({
+    isAgentCodingBot: true,
+  });
+});
+
 test('缺 entity_id 不猜 owner 或 viewer，保留不可聊天行', async () => {
   list.mockResolvedValue({ code: 200000, data: { items: [dto({ entity_id: '' })], total: 1 } });
   const result = await teamBotConversationService.listBots('viewer');

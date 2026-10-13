@@ -45,6 +45,8 @@ export interface BotMetadataDto {
   bot_name: string;
   bot_desc?: string;
   engine?: string;
+  template_type?: string;
+  template_name?: string;
   bot_type?: string;
   status?: string;
 }
