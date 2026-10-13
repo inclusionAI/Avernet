@@ -42,6 +42,28 @@ export function isReservedWorkflowId(id: string | null | undefined): boolean {
 const RESERVED_ID_MESSAGE =
   "workflowId 使用了系统保留前缀（以 __ 开头并以 __ 结尾），请改用普通 workflow id";
 
+/** Defensive JSON array parser for DB JSON columns. */
+function parseJsonArray(raw: string | null | undefined): unknown[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Defensive JSON object parser for DB JSON columns. */
+function parseJsonObject(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Map a raw http_callback_configs row (snake_case, notify_on as JSON string)
  * to the camelCase DTO the frontend expects (notifyOn as string[]).
@@ -764,6 +786,8 @@ export function createWorkflowsRouter(
         onFailureGroups: JSON.parse(row.on_failure_groups),
         onFailureMessageTitle: row.on_failure_message_title,
         onFailureMessageIncludeRunLink: row.on_failure_message_include_run_link === 1,
+        notifyOn: parseJsonArray(row.notify_on),
+        eventOptions: parseJsonObject(row.event_options),
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -780,13 +804,18 @@ export function createWorkflowsRouter(
       return;
     }
     try {
-      const { robotCode, appSecret, onFailureUsers, onFailureGroups, onFailureMessageTitle, onFailureMessageIncludeRunLink } = req.body as {
+      const {
+        robotCode, appSecret, onFailureUsers, onFailureGroups,
+        onFailureMessageTitle, onFailureMessageIncludeRunLink, notifyOn, eventOptions,
+      } = req.body as {
         robotCode?: string;
         appSecret?: string;
         onFailureUsers?: Array<{ userId: string; name?: string }>;
         onFailureGroups?: Array<{ openConversationId: string; name?: string }>;
         onFailureMessageTitle?: string | null;
         onFailureMessageIncludeRunLink?: boolean;
+        notifyOn?: string[];
+        eventOptions?: Record<string, unknown>;
       };
 
       if (!robotCode || !appSecret) {
@@ -806,6 +835,8 @@ export function createWorkflowsRouter(
         onFailureGroups,
         onFailureMessageTitle: onFailureMessageTitle ?? null,
         onFailureMessageIncludeRunLink: onFailureMessageIncludeRunLink !== false,
+        notifyOn: notifyOn && notifyOn.length > 0 ? notifyOn as import("../../../../shared/web/types.js").DingTalkNotifyEvent[] : undefined,
+        eventOptions: eventOptions && Object.keys(eventOptions).length > 0 ? eventOptions : undefined,
       });
 
       workflowsCache.invalidate();

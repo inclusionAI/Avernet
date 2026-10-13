@@ -255,6 +255,26 @@ export type DingTalkGroupTarget = {
   name?: string
 }
 
+export type DingTalkEventOptions = {
+  title?: string
+  includeRunLink?: boolean
+  includeNodeOutput?: boolean
+  maxOutputFields?: number
+  maxOutputValueLen?: number
+}
+
+/** Supported workflow lifecycle events for DingTalk notifications. */
+export type DingTalkNotifyEvent =
+  | "workflow_started"
+  | "node_started"
+  | "node_succeeded"
+  | "node_failed"
+  | "node_rejected"
+  | "node_skipped"
+  | "workflow_succeeded"
+  | "workflow_failed"
+  | "workflow_cancelled"
+
 export type NotificationConfig = {
   workflowId: string
   robotCode: string
@@ -263,6 +283,11 @@ export type NotificationConfig = {
   onFailureGroups: DingTalkGroupTarget[]
   onFailureMessageTitle?: string | null
   onFailureMessageIncludeRunLink: boolean
+  /** Lifecycle events that trigger DingTalk notifications.
+   *  If omitted, the legacy behavior (only node_failed + workflow_failed) applies. */
+  notifyOn?: DingTalkNotifyEvent[]
+  /** Per-event message customization keyed by event name. */
+  eventOptions?: Partial<Record<DingTalkNotifyEvent, DingTalkEventOptions>>
 }
 
 interface TERNUser {
