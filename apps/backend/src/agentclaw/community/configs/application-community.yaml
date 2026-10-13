@@ -327,3 +327,10 @@ user_config:
   #   (content routing/materialize stays green on a bare/CI build); only a real
   #   dispatch then degrades (BCS rejects a literal ${...}).
   merchant_task_bot_bindings: "${MERCHANT_TASK_BOT_BINDINGS:-}"
+
+# The swarm runtime's operational knobs. The LLM comes from the top-level
+# `llm:` yaml block (the same one the harness reads) — no agentswarm-specific
+# LLM config exists.
+agentswarm:
+  enabled: true
+  artifact_store_root: "${AGENTSWARM_ARTIFACT_ROOT:-/tmp/agentswarm/artifacts}"
