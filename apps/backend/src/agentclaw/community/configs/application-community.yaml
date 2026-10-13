@@ -327,3 +327,27 @@ user_config:
   #   (content routing/materialize stays green on a bare/CI build); only a real
   #   dispatch then degrades (BCS rejects a literal ${...}).
   merchant_task_bot_bindings: "${MERCHANT_TASK_BOT_BINDINGS:-}"
+
+# Host binding for the agentcompute BotPlatform seam (swarm persona provision:
+# create-with-manifest + grt_chat for the chat leg). owner_work_no is the
+# account swarm-created bots belong to — required, no service-account fallback.
+agentcompute_platform:
+  engine_type: "openclaw"
+  cluster_name: "ACRA"
+  bot_type: "personal"
+  identity_file: "SOUL.md"
+  owner_work_no: "${AGENTCOMPUTE_PLATFORM_OWNER:-}"
+
+# The swarm runtime's operation knobs (AgentComputeConfig.from_block in
+# core/agentcompute/config/settings.py — an absent sub-block leaves that
+# group at its default). LLM credentials are env-injected: unset means
+# fail-clear at submit (400 missing LLM config), a working submit needs
+# AGENTCOMPUTE_LLM_BASE_URL + AGENTCOMPUTE_LLM_MODEL (+ API key when the
+# endpoint requires one).
+agentcompute:
+  enabled: true
+  llm:
+    base_url: "${AGENTCOMPUTE_LLM_BASE_URL:-}"
+    api_key: "${AGENTCOMPUTE_LLM_API_KEY:-}"
+    default_model: "${AGENTCOMPUTE_LLM_MODEL:-}"
+  artifact_store_root: "${AGENTCOMPUTE_ARTIFACT_ROOT:-/tmp/agentcompute/artifacts}"

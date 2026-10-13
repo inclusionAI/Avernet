@@ -94,6 +94,12 @@ dependencies = [
   # state; aiomysql pulls it in transitively but pinning it explicitly avoids
   # a "No module named 'greenlet'" at runtime if the transitive dep is absent.
   "greenlet>=3.0.0",
+  # jsonschema: agentcompute validates subagent results against the spawn
+  # envelope's output_schema before routing (design D42; Draft202012Validator,
+  # cached per schema). Runtime src import — the dev-group entry was test-only,
+  # so the main dependency list must name it for a standalone community
+  # install to run the agentcompute worker.
+  "jsonschema>=4.20",
 ]
 
 # Community test tooling — so the extracted community repo can run its own CI.
