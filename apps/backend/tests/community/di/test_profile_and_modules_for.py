@@ -220,6 +220,7 @@ def test_modules_for_community_is_isolated():
         "CommunityObjectStorageModule",
         "CommunityIdentityModule",
         "CommunityHealthModule",
+        "CommunityMetricsModule",
         "CommunityHarnessModule",
         "CommunityTracerModule",
         "CommunityOutboundRulesModule",
