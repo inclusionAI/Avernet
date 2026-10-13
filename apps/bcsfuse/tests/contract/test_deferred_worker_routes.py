@@ -150,7 +150,7 @@ def test_sync_waits_for_index_and_optional_analysis_without_blocking_loop(
         return request_thread
 
     request_thread = asyncio.run(run())
-    assert len(vector_threads) == 2
+    assert len(vector_threads) == 4
     assert all(thread != request_thread for thread in vector_threads)
     assert len(index_threads) == 1
     assert index_threads[0] != request_thread
