@@ -4,6 +4,9 @@
       "collaborator_admin": [
         "100000"
       ],
+      "cron_admin": [
+        "100000"
+      ],
       "device_admin": [
         "100000"
       ],
