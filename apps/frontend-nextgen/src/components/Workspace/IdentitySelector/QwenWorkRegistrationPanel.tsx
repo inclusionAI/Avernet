@@ -162,8 +162,8 @@ export function QwenWorkRegistrationPanel({ open }: { open: boolean }) {
         </p>
         <Command label="启动命令" value={QWEN_START_COMMAND} />
         <p>
-          本机 health 应返回 qwen_connected=true、faulted=false。它只检查千问连接；BCN 在线状态请回到外部 Bot
-          列表刷新确认。
+          执行初始化输出的 Check: 命令检查本机 health（地址随监听端口变化），应返回
+          qwen_connected=true、faulted=false。它只检查千问连接；BCN 在线状态请回到外部 Bot 列表刷新确认。
         </p>
       </section>
     </div>

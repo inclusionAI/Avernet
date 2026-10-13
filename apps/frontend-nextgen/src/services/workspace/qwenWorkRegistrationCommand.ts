@@ -3,7 +3,7 @@ import type { BridgeRelease } from './bridgeReleaseService';
 
 export const QWEN_CONFIG_ARGUMENT = '"$HOME/.bcn-bridge/qwenwork.toml"';
 const BINARY = '"$HOME/.local/bin/bcs-bridge"';
-export const QWEN_START_COMMAND = `${BINARY} --config ${QWEN_CONFIG_ARGUMENT} start --daemon\n${BINARY} status\ncurl --fail http://127.0.0.1:52491/health`;
+export const QWEN_START_COMMAND = `${BINARY} --config ${QWEN_CONFIG_ARGUMENT} start --daemon\n${BINARY} status`;
 export const QWEN_INIT_COMMAND = `if ${BINARY} init --help >/dev/null 2>&1; then\n  ${BINARY} --config ${QWEN_CONFIG_ARGUMENT} init --engine qwenwork\nelse\n  printf '%s\\n' '当前 Bridge 不支持自动初始化，请先升级到包含 init 的版本。' >&2\n  false\nfi`;
 
 function downloadDirectory(release: BridgeRelease): string {
@@ -41,7 +41,7 @@ export function buildQwenWorkRegistrationCommand({
   let upstream: URL;
   try {
     const api = new URL(apiUrl);
-    upstream = new URL('/ws/bot', bcsEndpoint);
+    upstream = new URL(`${bcsEndpoint.replace(/\/+$/, '')}/ws/bot`);
     if (
       ![api.protocol, upstream.protocol].every((p) => p === 'http:' || p === 'https:') ||
       api.username ||

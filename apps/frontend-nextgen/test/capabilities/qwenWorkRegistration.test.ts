@@ -1,7 +1,9 @@
+/** @jest-environment jsdom */
 import { defaultCapabilities } from '@/capabilities/defaultCapabilities';
 
 afterEach(() => {
   Reflect.deleteProperty(globalThis, 'QWENWORK_PROVIDER_SLUG');
+  Reflect.deleteProperty(window, 'AVERNET_RUNTIME_CONFIG');
 });
 
 it('does not enable QwenWork on an unprovisioned deployment', () => {
@@ -18,4 +20,20 @@ it('requires explicit deployment opt-in and a BCS endpoint', () => {
     value: { providerSlug: 'local' },
   });
   expect(defaultCapabilities.getQwenWorkBotRegistrationConfig('').status).toBe('unsupported');
+});
+
+it('uses runtime provider configuration and allows runtime disable of a baked-in default', () => {
+  Object.defineProperty(globalThis, 'QWENWORK_PROVIDER_SLUG', { value: 'build-provider', configurable: true });
+  Object.defineProperty(window, 'AVERNET_RUNTIME_CONFIG', {
+    value: { QWENWORK_PROVIDER_SLUG: 'runtime-provider' },
+    configurable: true,
+  });
+  expect(defaultCapabilities.getQwenWorkBotRegistrationConfig('https://example.com').value.providerSlug).toBe(
+    'runtime-provider',
+  );
+  Object.defineProperty(window, 'AVERNET_RUNTIME_CONFIG', {
+    value: { QWENWORK_PROVIDER_SLUG: '' },
+    configurable: true,
+  });
+  expect(defaultCapabilities.getQwenWorkBotRegistrationConfig('https://example.com').status).toBe('unsupported');
 });

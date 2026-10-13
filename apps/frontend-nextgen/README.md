@@ -58,3 +58,13 @@ initialization with the registered engine callback. Initialization owns secrets,
 database detection, backups and Hook merging. The recommended beta.2 distribution includes `init`; its native archives and
 installer initialization smoke were verified before updating download links. The local health endpoint
 checks QwenWork connectivity; the external Bot list reports BCN reachability.
+
+The deployed container entrypoint writes optional `QWENWORK_PROVIDER_SLUG` into
+`runtime-config.js`. Runtime values (including an explicit empty value disabling
+onboarding) take precedence over build defaults. WebSocket registration preserves
+reverse-proxy endpoint prefixes. Use the `Check:` URL printed by initialization
+for health probes after choosing a custom listener.
+
+The workspace now prepares beta.3 for optional failure-Hook migration and deinit.
+The verified download pin remains beta.2 until beta.3 is actually published and
+its platform archives/installer pass release gates; then update all pinned links.

@@ -2,7 +2,11 @@
 # Minimal local QwenWork validation stack. No desktop configuration mutations.
 set -e
 QWENWORK_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export FRONTEND_VARIANT=nextgen
 source "${QWENWORK_SCRIPT_DIR}/singlebox.sh"
+# Local overrides may select another variant; reselect before all lifecycle actions.
+export FRONTEND_VARIANT=nextgen
+frontend_select_variant
 
 qwenwork_main() {
     local action="${1:-start}"

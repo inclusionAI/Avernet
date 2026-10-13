@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+unset FRONTEND_VARIANT
 source "${ROOT}/singlebox/qwenwork.sh"
+[ "$FRONTEND_DIR" = "${ROOT}/apps/frontend-nextgen" ]
 TEST_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 CALLS="${TEST_ROOT}/calls"

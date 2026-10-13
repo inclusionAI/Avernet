@@ -30,6 +30,7 @@ struct Options {
     hook_secret: String,
     database_path: PathBuf,
     mcp_socket_path: Option<PathBuf>,
+    settings_path: Option<PathBuf>,
 }
 
 impl Options {
@@ -57,6 +58,9 @@ impl Options {
         }
         if value.mcp_socket_path.as_ref().is_some_and(|p| !p.is_absolute()) {
             return Err("qwenwork mcp_socket_path must be absolute".into());
+        }
+        if value.settings_path.as_ref().is_some_and(|p| !p.is_absolute()) {
+            return Err("qwenwork settings_path must be absolute".into());
         }
         Ok(value)
     }

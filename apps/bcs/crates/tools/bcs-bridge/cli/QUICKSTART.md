@@ -69,8 +69,22 @@ the archive and copy only `bcs-bridge` into a directory on your PATH.
 
 Use `--config /absolute/path/to/bridge.toml` to choose a non-default config.
 The installer does not change QwenWork settings, register a Bot or start a
-background service. Uninstall by stopping the bridge and removing its binary;
-keep or remove local configuration separately as needed.
+background service. Before uninstalling, disable the QwenWork WeCom channel, stop the bridge, then
+remove its owned global Hooks while you still have the binary and configuration:
+
+```sh
+bcs-bridge stop
+bcs-bridge --config "$HOME/.bcn-bridge/qwenwork.toml" deinit --engine qwenwork
+```
+
+`deinit` requires beta.3 or newer and preserves unrelated Hooks and Bot identity.
+Reload/restart desktop Hooks after cleanup, then remove the binary if desired.
+For beta.2, remove only HTTP Hook entries matching the saved listener URL and
+`hook_secret` from the configured desktop settings JSON; keep other Hooks and
+back up that file privately first. If a custom settings path was used before
+beta.3, pass the same `--option settings_path=/absolute/path/settings.json`.
+Do not restore an old whole settings backup over newer unrelated settings.
+Keep or remove local bridge configuration separately as needed.
 
 ## Preview limitations
 

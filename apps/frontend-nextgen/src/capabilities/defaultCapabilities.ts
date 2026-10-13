@@ -198,7 +198,13 @@ export const defaultCapabilities: AppCapabilities = {
     value: true,
   }),
   getQwenWorkBotRegistrationConfig: (bcsEndpoint) => {
-    const providerSlug = typeof QWENWORK_PROVIDER_SLUG === 'string' ? QWENWORK_PROVIDER_SLUG.trim() : '';
+    const runtime =
+      typeof window === 'undefined'
+        ? undefined
+        : (window as { AVERNET_RUNTIME_CONFIG?: { QWENWORK_PROVIDER_SLUG?: string } }).AVERNET_RUNTIME_CONFIG;
+    const providerSlug = (
+      runtime?.QWENWORK_PROVIDER_SLUG ?? (typeof QWENWORK_PROVIDER_SLUG === 'string' ? QWENWORK_PROVIDER_SLUG : '')
+    ).trim();
     return {
       status: providerSlug && bcsEndpoint ? 'available' : 'unsupported',
       value: { providerSlug, apiUrl: bcsEndpoint },

@@ -32,7 +32,7 @@ bcs_port_has_healthy_server() {
     printf '%s\n' "$payload" | grep -Eq '"service"[[:space:]]*:[[:space:]]*"bcs"'
 }
 
-source "${SCRIPT_DIR}/modules/bcs_runtime_config.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/bcs_runtime_config.sh"
 
 # Build BCS, bcs-cli, and bcs-admin.
 build_bcs() {
@@ -908,7 +908,7 @@ bcs_prereqs() {
             has_error=true
         else
             prereq_warn "Port ${BCS_PORT} is in use"
-            print_port_conflict_guidance "${BCS_PORT}" "${PROJECT_ROOT}" "BCS" "$(singlebox_cmd stop bcs)" "set BCS_PORT=<free-port> in .env.local" false
+            print_port_conflict_guidance "${BCS_PORT}" "${PROJECT_ROOT}" "BCS" "$(singlebox_cmd stop bcs)" "set BCS_PORT=<free-port> in singlebox/.env.local" false
         fi
     fi
 

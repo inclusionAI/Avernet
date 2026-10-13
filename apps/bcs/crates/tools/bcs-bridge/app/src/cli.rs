@@ -21,6 +21,8 @@ enum Commands {
     Register(Box<registration::RegisterArgs>),
     /// Initialize registered engine configuration and print desktop connection instructions
     Init(InitArgs),
+    /// Remove owned engine Hooks; keep Bot registration and runtime configuration
+    Deinit(InitArgs),
     /// Run the bridge in the foreground, or detach with --daemon
     Start(StartArgs),
     /// Show this user's bridge instance without loading configuration
@@ -91,7 +93,9 @@ pub async fn run(cli: Cli, app: &BridgeApp) -> anyhow::Result<()> {
     };
     match cli.command {
         Commands::Register(args) => registration::register(*args, &config_path, app).await,
-        Commands::Init(args) => {
+        command @ (Commands::Init(_) | Commands::Deinit(_)) => {
+            let cleanup = matches!(command, Commands::Deinit(_));
+            let args = match command { Commands::Init(args) | Commands::Deinit(args) => args, _ => unreachable!() };
             let mut options = toml::Table::new();
             for option in args.options {
                 let (key, value) = option.split_once('=').context("--option must use key=value")?;
@@ -99,7 +103,9 @@ pub async fn run(cli: Cli, app: &BridgeApp) -> anyhow::Result<()> {
                     bail!("Initializer options must be nonempty and unique");
                 }
             }
-            println!("{}", app.initialize(&args.engine, &config_path, &options)?);
+            let message = if cleanup { app.deinitialize(&args.engine, &config_path, &options)? }
+                else { app.initialize(&args.engine, &config_path, &options)? };
+            println!("{message}");
             Ok(())
         }
         Commands::Start(args) => {

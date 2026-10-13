@@ -131,7 +131,7 @@ edition      = "2024"
 license      = "Apache-2.0"
 repository   = "https://github.com/inclusionAI/Avernet"
 rust-version = "1.91"
-version      = "0.1.4-beta.2"
+version      = "0.1.4-beta.3"
 
 [workspace.dependencies]
 # Async runtime

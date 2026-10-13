@@ -251,3 +251,30 @@ When changing the listener with `init --option listen=...`, initialization remov
 only Hooks matching the previously saved listener URL and Hook credential.
 Other Hooks, including those sharing that URL with another credential, are preserved.
 A conflict at the new listener leaves both configuration files unchanged.
+
+## Hook migration and cleanup (beta.3)
+
+If `PostToolUseFailure` was configured for a compatible SDK, repeated init retains
+its matcher/timeout and listener migration updates its URL and credential. Init
+never adds this optional event on desktops that have not opted into it.
+
+Disable the WeCom channel and run `bcs-bridge stop`, then
+`bcs-bridge --config <registered-config> deinit --engine qwenwork` before removing
+the binary/config. Deinit removes only HTTP Hooks matching this Bot's saved URL
+and credential, including optional failure Hooks; it preserves other settings,
+creates a private backup and never reads/writes the desktop database. Reload
+Hooks afterward. Init persists the selected `settings_path` in engine options;
+older configurations using custom paths must pass it explicitly to deinit.
+The optional settings_path field requires beta.3; restore a pre-init backup before
+rolling its configuration back to beta.2. Configuration symlinks are preserved.
+Backups contain credentials: keep them private, and remove superseded backups
+manually when rollback is no longer needed. Cleanup does not revoke BCS tokens.
+
+QwenWorkCN 1.2.5's bundled SDK treats HTTP transport failures as non-blocking
+errors and continues PreToolUse when no decision is produced. Isolated execution
+of the bundled HTTP/aggregation/PreToolUse methods with a closed localhost port
+confirmed this behavior; a full model-driven desktop round trip was not performed.
+A slow endpoint
+can still delay a tool until its Hook deadline (300 seconds for opted-in questions).
+This is version-specific behavior, not a guarantee for future SDKs. Always remove
+unused global Hooks; do not rely on the bridge being unreachable as cleanup.

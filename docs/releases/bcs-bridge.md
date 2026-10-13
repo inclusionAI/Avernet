@@ -48,7 +48,8 @@ temporary directory, or use an existing dist 0.33.0:
 ```sh
 DIST_TOOL_DIR=/tmp/bridge-release-tools bash devops/release/install_dist.sh
 python3 -m unittest discover -s devops/release/tests -v
-dist plan --tag bcs-bridge-v0.1.4-beta.1 --output-format json > plan-dist-manifest.json
+RELEASE_TAG=$(python3 devops/release/bcs_bridge_release.py metadata | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag"])')
+dist plan --tag "$RELEASE_TAG" --output-format json > plan-dist-manifest.json
 python3 devops/release/bcs_bridge_release.py plan --manifest plan-dist-manifest.json
 ```
 
@@ -56,10 +57,10 @@ For a local native build, replace the example version/target with the configured
 version and your CPU. Run from the repository root:
 
 ```sh
-dist build --artifacts local --target aarch64-apple-darwin --tag bcs-bridge-v0.1.4-beta.1 --output-format json > local-dist-manifest.json
+dist build --artifacts local --target aarch64-apple-darwin --tag "$RELEASE_TAG" --output-format json > local-dist-manifest.json
 python3 devops/release/bcs_bridge_release.py native --targets aarch64-apple-darwin
 cp local-dist-manifest.json target/distrib/aarch64-apple-darwin-dist-manifest.json
-dist build --artifacts global --tag bcs-bridge-v0.1.4-beta.1 --output-format json > global-dist-manifest.json
+dist build --artifacts global --tag "$RELEASE_TAG" --output-format json > global-dist-manifest.json
 python3 devops/release/bcs_bridge_release.py prepare --targets aarch64-apple-darwin
 python3 devops/release/smoke_bcs_bridge.py --directory target/distrib
 ```
@@ -77,8 +78,9 @@ creates the matching tag on `dev`, or on `codex/bcs-bridge-release` for beta/rc
 verification before merge. For the current workspace version:
 
 ```sh
-git tag -a bcs-bridge-v0.1.4-beta.1 -m 'BCS bridge 0.1.4-beta.1 macOS preview'
-git push origin bcs-bridge-v0.1.4-beta.1
+RELEASE_TAG=$(python3 devops/release/bcs_bridge_release.py metadata | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag"])')
+git tag -a "$RELEASE_TAG" -m "BCS bridge $RELEASE_TAG macOS preview"
+git push origin "$RELEASE_TAG"
 ```
 
 This triggers a public beta Release. Do not reuse a published tag. A future
@@ -99,3 +101,9 @@ GitHub prerelease flag from the version; changing the title alone does not
 change the channel. Update `[workspace.package].version` and the workspace
 packages in `Cargo.lock` together. This changes the shared Rust package versions,
 but the release artifact allow-list still publishes only `bcs-bridge`.
+
+Beta.2 is immutable. The next version is beta.3, which includes failure-Hook
+migration and deinit. Do not update `VERIFIED_BRIDGE_BETA` before that prerelease
+is published and both archives plus the installer have been verified. The
+workspace version remains shared with BCS server libraries by the existing
+packaging contract; distributing only bridge does not decouple those versions.

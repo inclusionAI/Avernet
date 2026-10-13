@@ -48,6 +48,7 @@ pub struct BridgeApp {
     defaults: CliDefaults,
     registration_permission_modes: BTreeMap<String, String>,
     initializers: BTreeMap<String, EngineInitializer>,
+    deinitializers: BTreeMap<String, EngineInitializer>,
 }
 
 impl BridgeApp {
@@ -64,6 +65,7 @@ impl BridgeApp {
             defaults: CliDefaults::default(),
             registration_permission_modes: BTreeMap::new(),
             initializers: BTreeMap::new(),
+            deinitializers: BTreeMap::new(),
         })
     }
 
@@ -82,6 +84,12 @@ impl BridgeApp {
         let initialize = self.initializers.get(engine)
             .with_context(|| format!("No initializer registered for engine '{engine}'"))?;
         initialize(path, options)
+    }
+
+    pub fn deinitialize(&self, engine: &str, path: &std::path::Path, options: &toml::Table) -> anyhow::Result<String> {
+        let cleanup = self.deinitializers.get(engine)
+            .with_context(|| format!("No deinitializer registered for engine '{engine}'"))?;
+        cleanup(path, options)
     }
 
     /// The identity resolver selected by `--provider-auth`.
@@ -121,6 +129,11 @@ impl BridgeAppBuilder {
 
     pub fn initializer(mut self, engine: &str, initialize: EngineInitializer) -> Self {
         self.0.initializers.insert(engine.to_owned(), initialize);
+        self
+    }
+
+    pub fn deinitializer(mut self, engine: &str, cleanup: EngineInitializer) -> Self {
+        self.0.deinitializers.insert(engine.to_owned(), cleanup);
         self
     }
 

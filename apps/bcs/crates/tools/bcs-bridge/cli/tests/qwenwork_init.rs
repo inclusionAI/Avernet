@@ -21,4 +21,17 @@ fn init_is_wired_into_the_public_binary_and_does_not_construct_a_listener() {
     assert!(settings.exists());
     let parsed: toml::Value = toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
     assert_eq!(parsed["bot"][0]["engine_options"]["database_path"].as_str(), database.to_str());
+    let original = fs::read(&config).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_bcs-bridge")).arg("--config").arg(&config)
+        .args(["deinit", "--engine", "qwenwork"]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Removed 7 owned Hooks"));
+    assert_eq!(fs::read(&config).unwrap(), original);
+}
+
+#[test]
+fn deinit_help_is_wired_without_loading_configuration() {
+    let output = Command::new(env!("CARGO_BIN_EXE_bcs-bridge")).args(["deinit", "--help"]).output().unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("--engine"));
 }

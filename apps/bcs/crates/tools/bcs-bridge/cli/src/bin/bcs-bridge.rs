@@ -52,5 +52,6 @@ use bcs_bridge_app::BridgeApp;
 
 fn main() -> ExitCode {
     BridgeApp::builder().engine(bcs_bridge_qwenwork::QwenWorkFactory)
-        .initializer("qwenwork", bcs_bridge_qwenwork::setup::initialize).build().main()
+        .initializer("qwenwork", bcs_bridge_qwenwork::setup::initialize)
+        .deinitializer("qwenwork", bcs_bridge_qwenwork::setup::deinitialize).build().main()
 }

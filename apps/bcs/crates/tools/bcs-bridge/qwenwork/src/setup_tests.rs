@@ -19,6 +19,7 @@ fn detects_database_preserves_other_hooks_and_reuses_credentials_on_repeat() {
     let (root, config, settings) = fixture();
     let message = initialize_at(&config, &toml::Table::new(), root.path()).unwrap();
     assert!(message.contains("WebSocket URL: ws://127.0.0.1:52491/ws"));
+    assert!(message.contains("Check: curl http://127.0.0.1:52491/health"));
     let first: toml::Table = toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
     let engine = &first["bot"][0]["engine_options"];
     assert_ne!(engine["secret"], engine["hook_secret"]);
@@ -94,6 +95,7 @@ fn listener_change_removes_only_previously_owned_hooks_and_is_idempotent() {
     let options = toml::Table::from_iter([("listen".into(), "127.0.0.1:52495".into())]);
     let message = initialize_at(&config, &options, root.path()).unwrap();
     assert!(message.contains("WebSocket URL: ws://127.0.0.1:52495/ws"));
+    assert!(message.contains("Check: curl http://127.0.0.1:52495/health"));
     let after: toml::Table = toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
     assert_eq!(before["bot"][0]["token"], after["bot"][0]["token"]);
     assert_eq!(old_engine["hook_secret"], after["bot"][0]["engine_options"]["hook_secret"]);
@@ -126,4 +128,64 @@ fn listener_migration_conflict_preserves_both_original_files() {
     assert!(initialize_at(&config, &options, root.path()).is_err());
     assert_eq!(fs::read(&config).unwrap(), original_config);
     assert_eq!(fs::read(&settings).unwrap(), original_settings);
+}
+
+#[test]
+fn optional_failure_hooks_survive_repeat_and_migrate_with_matcher_and_timeout() {
+    let (root, config, settings) = fixture();
+    initialize_at(&config, &toml::Table::new(), root.path()).unwrap();
+    let cfg: toml::Table = toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+    let auth = format!("Bearer {}", cfg["bot"][0]["engine_options"]["hook_secret"].as_str().unwrap());
+    let mut value: Value = serde_json::from_slice(&fs::read(&settings).unwrap()).unwrap();
+    assert!(value["hooks"].get("PostToolUseFailure").is_none());
+    value["hooks"]["PostToolUseFailure"] = json!([{"matcher":"Read", "hooks":[{
+        "type":"http", "url":"http://127.0.0.1:52491/hooks", "headers":{"Authorization":auth}, "timeout":7
+    }]}]);
+    fs::write(&settings, serde_json::to_vec(&value).unwrap()).unwrap();
+    for listen in ["127.0.0.1:52491", "127.0.0.1:52497"] {
+        let options = toml::Table::from_iter([("listen".into(), listen.into())]);
+        initialize_at(&config, &options, root.path()).unwrap();
+        let migrated: Value = serde_json::from_slice(&fs::read(&settings).unwrap()).unwrap();
+        let failure = &migrated["hooks"]["PostToolUseFailure"];
+        assert_eq!(failure.as_array().unwrap().len(), 1);
+        assert_eq!(failure[0]["matcher"], "Read");
+        assert_eq!(failure[0]["hooks"][0]["url"], format!("http://{listen}/hooks"));
+        assert_eq!(failure[0]["hooks"][0]["timeout"], 7);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn deinit_preserves_symlink_and_foreign_hooks_without_database_access() {
+    let (root, config, settings) = fixture();
+    let target = root.path().join("real-settings.json");
+    fs::rename(&settings, &target).unwrap();
+    std::os::unix::fs::symlink(&target, &settings).unwrap();
+    initialize_at(&config, &toml::Table::new(), root.path()).unwrap();
+    let original_config = fs::read(&config).unwrap();
+    let mut value: Value = serde_json::from_slice(&fs::read(&settings).unwrap()).unwrap();
+    value["hooks"]["PostToolUseFailure"] = json!([{"hooks":[{"type":"http", "url":"http://127.0.0.1:52491/hooks", "headers":{"Authorization":"Bearer foreign"}}]}]);
+    fs::write(&target, serde_json::to_vec(&value).unwrap()).unwrap();
+    fs::remove_file(root.path().join("Library/Application Support/QwenWorkCN/data/agents.db")).unwrap();
+    let message = deinitialize_at(&config, &toml::Table::new(), root.path()).unwrap();
+    assert!(message.contains("Removed 7 owned Hooks"));
+    assert!(fs::symlink_metadata(&settings).unwrap().file_type().is_symlink());
+    assert_eq!(fs::read(&config).unwrap(), original_config);
+    let after: Value = serde_json::from_slice(&fs::read(&target).unwrap()).unwrap();
+    assert_eq!(after["theme"], "dark");
+    assert_eq!(after["hooks"]["PostToolUseFailure"], value["hooks"]["PostToolUseFailure"]);
+    assert!(after.to_string().contains("keep-me"));
+    assert!(deinitialize_at(&config, &toml::Table::new(), root.path()).unwrap().contains("nothing removed"));
+}
+
+#[cfg(unix)]
+#[test]
+fn init_rejects_settings_symlink_to_registered_config_without_writes() {
+    let (root, config, settings) = fixture();
+    let original = fs::read(&config).unwrap();
+    fs::remove_file(&settings).unwrap();
+    std::os::unix::fs::symlink(&config, &settings).unwrap();
+    assert!(initialize_at(&config, &toml::Table::new(), root.path()).unwrap_err().to_string().contains("same file"));
+    assert_eq!(fs::read(&config).unwrap(), original);
+    assert!(fs::symlink_metadata(&settings).unwrap().file_type().is_symlink());
 }

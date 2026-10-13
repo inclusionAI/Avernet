@@ -69,3 +69,7 @@ qwenwork`, not while loading an engine or serving a turn. It owns local TOML and
 user settings bootstrap, never writes the desktop database, and reads its schema
 once before modifying configuration. Existing secrets and unrelated Hooks are
 preserved; ambiguous installations and conflicting listeners fail closed.
+
+Deinitialization uses the same composition-root callback boundary and config lock.
+It removes owned global HTTP Hooks using URL/credential identity, preserves
+unrelated settings and registration, and performs zero database operations.

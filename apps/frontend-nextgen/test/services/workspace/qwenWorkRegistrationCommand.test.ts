@@ -3,6 +3,7 @@ import {
   buildBridgeInstallCommand,
   buildQwenWorkRegistrationCommand,
   QWEN_INIT_COMMAND,
+  QWEN_START_COMMAND,
 } from '@/services/workspace/qwenWorkRegistrationCommand';
 import { execFileSync, spawnSync } from 'node:child_process';
 
@@ -60,4 +61,25 @@ it('downloads separately and checks checksum before executing the downloaded ins
   expect(spawnSync('sh', ['-n'], { input: download }).status).toBe(0);
   expect(QWEN_INIT_COMMAND).toContain('init --engine qwenwork');
   expect(QWEN_INIT_COMMAND).not.toContain('secret');
+});
+
+it.each(['https://bcs.example.com/bcn', 'https://bcs.example.com/bcn/'])(
+  'preserves the reverse proxy prefix %s',
+  (endpoint) => {
+    expect(
+      buildQwenWorkRegistrationCommand({
+        token: 'token',
+        botName: 'Qwen',
+        cwd: '/tmp',
+        apiUrl: endpoint,
+        bcsEndpoint: endpoint,
+      }),
+    ).toContain('--upstream-url wss://bcs.example.com/bcn/ws/bot');
+  },
+);
+
+it('does not probe a fixed port when initialization may choose a different listener', () => {
+  expect(QWEN_START_COMMAND).toContain('status');
+  expect(QWEN_START_COMMAND).not.toContain('curl');
+  expect(QWEN_START_COMMAND).not.toContain('52491');
 });
