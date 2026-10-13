@@ -28,6 +28,10 @@ from typing import Any, Callable, TYPE_CHECKING
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.bot_management.data_init_service_protocol import DataInitServiceProtocol
+from agentclaw.community.core.devices.repository.record import DataInitExecutionClaim
+from agentclaw.community.core.bot_management.services.claimed_data_init_state import (
+    ClaimedDataInitBotState, DataInitClaimLostError,
+)
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -118,6 +122,7 @@ class DataInitService(DataInitServiceProtocol):
         force: bool = False,
         iam_token: str | None = None,
         resume_stale_in_progress: bool = False,
+        execution_claim: DataInitExecutionClaim | None = None,
     ) -> dict[str, str]:
         """触发 Bot 数据初始化流程。
 
@@ -136,6 +141,8 @@ class DataInitService(DataInitServiceProtocol):
             iam_token: HTTP 边界传入的临时 IAM 凭证；仅在本次初始化需要时暂存
             resume_stale_in_progress: 调用方已持有当前启动实例的过期 claim，
                 允许越过第二次 in_progress 并发保护；普通入口必须保持 False
+            execution_claim: Pool 自动初始化 worker 的持久 claim；所有状态写入
+                均以它做 fencing。普通/手动入口不提供，保留原链路。
 
         Returns:
             dict with keys: status, message
@@ -146,6 +153,12 @@ class DataInitService(DataInitServiceProtocol):
         )
 
         bot_service = self._bot_service_provider()
+        if execution_claim is not None:
+            bot_service = ClaimedDataInitBotState(
+                bot_service=bot_service, device_service=self._device_service, claim=execution_claim,
+            )
+            # Outside read/idempotency catches: DB write failures are not skips.
+            bot_service.assert_current(bot_id, owner_id)
 
         # 1. 幂等检查（force=True 时跳过）
         if not self._should_run_init(bot_id, owner_id, bot_service, force=force):
@@ -270,11 +283,15 @@ class DataInitService(DataInitServiceProtocol):
         """
         logger.info(f"bot_id={bot_id} execute_with_retry start")
         for attempt in range(1, self.MAX_RETRIES + 1):
+            if isinstance(bot_service, ClaimedDataInitBotState):
+                bot_service.assert_current(bot_id, owner_id)
             try:
                 logger.info(f"bot_id={bot_id} execute_with_retry attempt={attempt}/{self.MAX_RETRIES}")
                 await self._execute_init(bot_id, owner_id, entity_id, entity_type, bot_service)
                 logger.info(f"bot_id={bot_id} execute_with_retry success")
                 return True
+            except DataInitClaimLostError:
+                raise
             except Exception as exc:
                 logger.warning(
                     f"bot_id={bot_id} execute_with_retry attempt={attempt}/{self.MAX_RETRIES} failed exc={exc}",
@@ -419,6 +436,12 @@ class DataInitService(DataInitServiceProtocol):
 
         summary = llm_result.get("summary", {})
 
+        # A long-running LLM may outlive its dispatch lease. Discard a
+        # superseded result before any downstream effect, and renew a current
+        # lease for the bounded downstream HTTP calls.
+        if isinstance(bot_service, ClaimedDataInitBotState):
+            bot_service.assert_current(bot_id, owner_id)
+
         # 3. 同步到 ECB + BCS Fuse（fire-and-forget）
         # 下游同步失败不影响初始化状态，只打日志 + 写入 ext 供查询
         downstream_sync = {
@@ -432,7 +455,7 @@ class DataInitService(DataInitServiceProtocol):
                 owner_id,
                 summary,
                 self._resource_repo,
-                self._bot_service_provider(),
+                bot_service,
                 bcsfuse_base_url=self._bcsfuse_base_url,
                 ecb_base_url=self._ecb_base_url,
             )

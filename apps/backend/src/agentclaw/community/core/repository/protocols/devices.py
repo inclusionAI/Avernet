@@ -14,6 +14,7 @@ from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.repository.record import (
         DataInitTriggerClaim,
+        DataInitExecutionClaim,
         DeviceBindingRecord,
     )
 
@@ -347,6 +348,18 @@ class DeviceBindingRepository(Protocol):
         claim_token: str,
     ) -> bool:
         """Release the matching Pool trigger lease after dispatch failure."""
+        ...
+
+    @abstractmethod
+    def update_pool_data_init_ext_if_claim_matches(
+        self, *, bot_id: str, owner_id: str, claim: DataInitExecutionClaim,
+        updates: dict[str, Any],
+    ) -> bool:
+        """Atomically validate the worker claim, merge Bot.ext and renew its lease.
+
+        Empty updates only validate/renew. False means the worker was superseded;
+        persistence errors must propagate.
+        """
         ...
 
     @abstractmethod

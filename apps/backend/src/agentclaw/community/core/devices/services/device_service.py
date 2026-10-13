@@ -28,6 +28,7 @@ from agentclaw.community.core.repository.protocols.devices import (
     OssToNasRecordRepository,
 )
 from agentclaw.community.core.devices.repository.record import (
+    DataInitExecutionClaim,
     DataInitTriggerClaim,
     DeviceBindingRecord,
 )
@@ -344,6 +345,15 @@ class DeviceService:
 
         Providers without a separate creation confirmation need no action.
         """
+
+    def update_pool_data_init_ext_if_claim_matches(
+        self, *, bot_id: str, owner_id: str, claim: DataInitExecutionClaim,
+        updates: dict,
+    ) -> bool:
+        """Fence data-init state writes through the shared binding repository."""
+        return self._repo.update_pool_data_init_ext_if_claim_matches(
+            bot_id=bot_id, owner_id=owner_id, claim=claim, updates=updates,
+        )
 
     def _query_device_info(
         self,
@@ -1953,6 +1963,12 @@ class DeviceService:
                 _t_start = _time.time()
                 logger.info(f"bot_id={bot_id} data_init_trigger thread_started")
                 try:
+                    claim_kwargs = {}
+                    if claimed_startup_identity is not None and claim_token is not None:
+                        claim_kwargs["execution_claim"] = DataInitExecutionClaim(
+                            binding_id=record.id, device_id=device_id,
+                            startup_identity=claimed_startup_identity, claim_token=claim_token,
+                        )
                     result = asyncio.run(
                         data_init_service.trigger_init(
                             bot_id=bot_id,
@@ -1960,6 +1976,7 @@ class DeviceService:
                             entity_id=entity_id,
                             entity_type=entity_type,
                             resume_stale_in_progress=resume_stale_in_progress,
+                            **claim_kwargs,
                         )
                     )
                     if result.get("status") != "completed":

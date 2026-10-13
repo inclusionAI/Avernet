@@ -10,7 +10,7 @@ from uuid import uuid4
 from sqlalchemy import func, or_
 
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
-from agentclaw.community.core.devices.repository.record import DataInitTriggerClaim
+from agentclaw.community.core.devices.repository.record import DataInitExecutionClaim, DataInitTriggerClaim
 from agentclaw.community.core.devices.protocols import (
     LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY,
 )
@@ -74,6 +74,22 @@ def load_device_props(raw: Any) -> dict[str, Any]:
     except (json.JSONDecodeError, TypeError):
         return {}
     return props if isinstance(props, dict) else {}
+
+
+def _pool_data_init_claim_matches(
+    binding: EntityDeviceBinding | None, props: dict[str, Any], *,
+    device_id: str, startup_identity: str, claim_token: str,
+) -> bool:
+    return (
+        binding is not None
+        and binding.device_id == device_id
+        and binding.device_provider in {"arca", "baas"}
+        and binding.status == _ACTIVE
+        and resolve_startup_identity(props) == startup_identity
+        and str(props.get(LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY) or "") == startup_identity
+        and str(props.get("data_init_triggered_startup_identity") or "") == startup_identity
+        and str(props.get("data_init_trigger_claim_token") or "") == claim_token
+    )
 
 
 class BaasGuardedLifecycleRepositoryMixin:
@@ -473,24 +489,60 @@ class BaasGuardedLifecycleRepositoryMixin:
                     if binding is not None
                     else {}
                 )
-                if (
-                    binding is None
-                    or binding.device_id != device_id
-                    or binding.device_provider not in {"arca", "baas"}
-                    or binding.status != _ACTIVE
-                    or resolve_startup_identity(props) != startup_identity
-                    or str(
-                        props.get(LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY) or ""
-                    )
-                    != startup_identity
-                    or str(props.get(marker_key) or "") != startup_identity
-                    or str(props.get(token_key) or "") != claim_token
+                if not _pool_data_init_claim_matches(
+                    binding, props, device_id=device_id,
+                    startup_identity=startup_identity, claim_token=claim_token,
                 ):
                     db.rollback()
                     return False
                 props.pop(marker_key, None)
                 props.pop(token_key, None)
                 props.pop(claimed_at_key, None)
+                binding.device_props = json.dumps(props, ensure_ascii=False)
+                binding.gmt_modified = func.now()
+                db.commit()
+                return True
+            except Exception:
+                db.rollback()
+                raise
+
+    def update_pool_data_init_ext_if_claim_matches(
+        self, *, bot_id: str, owner_id: str, claim: DataInitExecutionClaim,
+        updates: dict[str, Any],
+    ) -> bool:
+        with self._db.orm_session() as db:
+            try:
+                begin_guarded_transaction(db, purpose="Pool data-init fenced state write")
+                binding = (
+                    db.query(EntityDeviceBinding)
+                    .filter(EntityDeviceBinding.id == claim.binding_id)
+                    .with_for_update().one_or_none()
+                )
+                props = load_device_props(binding.device_props) if binding is not None else {}
+                if not _pool_data_init_claim_matches(
+                    binding, props, device_id=claim.device_id,
+                    startup_identity=claim.startup_identity, claim_token=claim.claim_token,
+                ):
+                    db.rollback()
+                    return False
+                bot = (
+                    db.query(BotModel).filter(
+                        BotModel.bot_id == bot_id, BotModel.owner_id == owner_id,
+                        BotModel.binding_id == claim.binding_id,
+                        BotModel.device_id == claim.device_id,
+                        BotModel.status == _ACTIVE, BotModel.is_delete == 0,
+                        self._bot_env(),
+                    ).with_for_update().one_or_none()
+                )
+                if bot is None:
+                    db.rollback()
+                    return False
+                if updates:
+                    ext = load_device_props(bot.ext)
+                    ext.update(updates)
+                    bot.ext = json.dumps(ext, ensure_ascii=False)
+                    bot.gmt_modified = func.now()
+                props["data_init_trigger_claimed_at"] = datetime.now(timezone.utc).isoformat()
                 binding.device_props = json.dumps(props, ensure_ascii=False)
                 binding.gmt_modified = func.now()
                 db.commit()

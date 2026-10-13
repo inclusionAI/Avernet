@@ -50,3 +50,13 @@ class DataInitTriggerClaim:
 
     claim_token: str
     resume_stale_in_progress: bool
+
+
+@dataclass(frozen=True, slots=True)
+class DataInitExecutionClaim:
+    """Immutable identity used to fence one Pool data-init worker's writes."""
+
+    binding_id: int
+    device_id: str
+    startup_identity: str
+    claim_token: str

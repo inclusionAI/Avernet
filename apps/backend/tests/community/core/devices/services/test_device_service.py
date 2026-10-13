@@ -21,6 +21,7 @@ from agentclaw.community.core.devices.models import (
     OperatorContext,
 )
 from agentclaw.community.core.devices.repository.record import (
+    DataInitExecutionClaim,
     DataInitTriggerClaim,
     DeviceBindingRecord,
 )
@@ -1261,6 +1262,7 @@ class TestReportDeviceAlive:
             entity_id="u001",
             entity_type="staff",
             resume_stale_in_progress=True,
+            execution_claim=DataInitExecutionClaim(active.id, active.device_id, "17", "claim-stale"),
         )
         repo.release_pool_data_init_trigger_if_matches.assert_not_called()
 

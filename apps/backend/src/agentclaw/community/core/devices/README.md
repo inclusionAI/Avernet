@@ -81,3 +81,11 @@ runtime. A matching persisted confirmation makes recovery idempotent. Legacy
 and pre-Native Pool bindings retain their old startup wire. The HTTP adapter
 catches `LayoutInitializationConfirmationError` through the devices contract,
 not through the concrete Skills Pool implementation.
+
+Pool data-init dispatch passes an immutable binding/device/startup/claim token
+to the worker. Its `in_progress`, `completed`, `failed` and temporary credential
+writes use the same Binding→Bot guarded transaction as the dispatch lease;
+an expired worker cannot overwrite its replacement's state. Current checkpoints
+renew the lease without changing Bot state. A delayed LLM result must pass a
+claim checkpoint before bounded downstream sync; a superseded result is dropped.
+Legacy/manual calls without a claim retain the existing BotService write path.
