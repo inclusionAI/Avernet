@@ -81,6 +81,7 @@ def test_sync_waits_for_index_and_optional_analysis_without_blocking_loop(
 ):
     timeline = []
     index_threads = []
+    vector_threads = []
     app = FastAPI()
     app.state.context = SimpleNamespace(registry={
         "worker_registry_store": InMemoryWorkerRegistryStore(),
@@ -90,8 +91,12 @@ def test_sync_waits_for_index_and_optional_analysis_without_blocking_loop(
     app.include_router(worker_profile_parity_routes.api_router, prefix="/api/v1")
     app.include_router(worker_profile_parity_routes.compat_router, prefix="/v1")
     monkeypatch.setattr(common, "_require_auth", lambda request: None)
-    monkeypatch.setattr(vector_sync, "_sync_runtime_state_to_vector_store", lambda *args: None)
-    monkeypatch.setattr(vector_sync, "_sync_availability_to_vector_store", lambda *args: None)
+
+    def sync_vector(*args):
+        vector_threads.append(threading.get_ident())
+
+    monkeypatch.setattr(vector_sync, "_sync_runtime_state_to_vector_store", sync_vector)
+    monkeypatch.setattr(vector_sync, "_sync_availability_to_vector_store", sync_vector)
     monkeypatch.setattr(profile_routes, "_trigger_index_sync", lambda worker_id: None)
     monkeypatch.setattr(
         "src.application.utils.drm_config_helper.is_capability_verify_enabled",
@@ -145,5 +150,7 @@ def test_sync_waits_for_index_and_optional_analysis_without_blocking_loop(
         return request_thread
 
     request_thread = asyncio.run(run())
+    assert len(vector_threads) == 2
+    assert all(thread != request_thread for thread in vector_threads)
     assert len(index_threads) == 1
     assert index_threads[0] != request_thread
