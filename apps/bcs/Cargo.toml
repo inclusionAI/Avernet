@@ -129,9 +129,9 @@ unwrap_used = "deny"
 [workspace.package]
 edition      = "2024"
 license      = "Apache-2.0"
-repository   = "https://github.com/inclusionAI/bcs"
+repository   = "https://github.com/inclusionAI/Avernet"
 rust-version = "1.91"
-version      = "0.1.3"
+version      = "0.1.4-beta.2"
 
 [workspace.dependencies]
 # Async runtime
@@ -361,3 +361,8 @@ opt-level = 3
 
 [profile.dev.package.num-bigint-dig]
 opt-level = 3
+
+# Optimized public CLI artifacts built by cargo-dist.
+[profile.dist]
+inherits = "release"
+lto = "thin"

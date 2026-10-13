@@ -197,10 +197,13 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: true,
   }),
-  getQwenWorkBotRegistrationConfig: (bcsEndpoint) => ({
-    status: 'available',
-    value: { providerSlug: 'local', apiUrl: bcsEndpoint },
-  }),
+  getQwenWorkBotRegistrationConfig: (bcsEndpoint) => {
+    const providerSlug = typeof QWENWORK_PROVIDER_SLUG === 'string' ? QWENWORK_PROVIDER_SLUG.trim() : '';
+    return {
+      status: providerSlug && bcsEndpoint ? 'available' : 'unsupported',
+      value: { providerSlug, apiUrl: bcsEndpoint },
+    };
+  },
   // Open Core（外部部署）暂不提供群高级配置与内部渠道绑定能力，避免展示不可用配置并发起无效请求。
   getGroupAdvancedConfigEnabled: (): CapabilityResult<boolean> => ({
     status: 'available',

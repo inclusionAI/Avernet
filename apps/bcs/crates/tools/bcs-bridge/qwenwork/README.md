@@ -247,3 +247,8 @@ Tests: `cargo test -p bcs-bridge-qwenwork`. The ignored
 `QWENWORK_LIVE_SOCKET` and `QWENWORK_LIVE_PROMPT` values pointing to private local
 configuration. It never passes merely because a model prints the chosen answer:
 it requires an actual requested interaction and native tool result.
+
+When changing the listener with `init --option listen=...`, initialization removes
+only Hooks matching the previously saved listener URL and Hook credential.
+Other Hooks, including those sharing that URL with another credential, are preserved.
+A conflict at the new listener leaves both configuration files unchanged.

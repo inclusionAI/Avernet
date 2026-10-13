@@ -79,3 +79,51 @@ fn interaction_hooks_use_the_long_question_timeout() {
     assert_eq!(settings["hooks"]["PreToolUse"][1]["matcher"], "AskUserQuestion");
     assert_eq!(settings["hooks"]["PreToolUse"][1]["hooks"][0]["timeout"], 300);
 }
+
+#[test]
+fn listener_change_removes_only_previously_owned_hooks_and_is_idempotent() {
+    let (root, config, settings) = fixture();
+    initialize_at(&config, &toml::Table::new(), root.path()).unwrap();
+    let before: toml::Table = toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+    let old_engine = &before["bot"][0]["engine_options"];
+    let mut hooks: Value = serde_json::from_slice(&fs::read(&settings).unwrap()).unwrap();
+    hooks["hooks"]["PreToolUse"].as_array_mut().unwrap().push(json!({"matcher":"Read", "hooks":[{
+        "type":"http", "url":"http://127.0.0.1:52491/hooks", "headers":{"Authorization":"Bearer foreign"}
+    }]}));
+    fs::write(&settings, serde_json::to_vec(&hooks).unwrap()).unwrap();
+    let options = toml::Table::from_iter([("listen".into(), "127.0.0.1:52495".into())]);
+    let message = initialize_at(&config, &options, root.path()).unwrap();
+    assert!(message.contains("WebSocket URL: ws://127.0.0.1:52495/ws"));
+    let after: toml::Table = toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+    assert_eq!(before["bot"][0]["token"], after["bot"][0]["token"]);
+    assert_eq!(old_engine["hook_secret"], after["bot"][0]["engine_options"]["hook_secret"]);
+    let updated: Value = serde_json::from_slice(&fs::read(&settings).unwrap()).unwrap();
+    for entries in updated["hooks"].as_object().unwrap().values() {
+        let all: Vec<_> = entries.as_array().unwrap().iter().flat_map(|e| e["hooks"].as_array().unwrap()).collect();
+        assert_eq!(all.iter().filter(|h| h["url"] == "http://127.0.0.1:52495/hooks").count(), 1);
+        for hook in all.iter().filter(|h| h["url"] == "http://127.0.0.1:52491/hooks") {
+            assert_eq!(hook["headers"]["Authorization"], "Bearer foreign");
+        }
+    }
+    assert!(updated.to_string().contains("keep-me"));
+    initialize_at(&config, &options, root.path()).unwrap();
+    let repeated: Value = serde_json::from_slice(&fs::read(&settings).unwrap()).unwrap();
+    assert_eq!(updated, repeated);
+}
+
+#[test]
+fn listener_migration_conflict_preserves_both_original_files() {
+    let (root, config, settings) = fixture();
+    initialize_at(&config, &toml::Table::new(), root.path()).unwrap();
+    let mut hooks: Value = serde_json::from_slice(&fs::read(&settings).unwrap()).unwrap();
+    hooks["hooks"]["QueryEnd"].as_array_mut().unwrap().push(json!({"hooks":[{
+        "type":"http", "url":"http://127.0.0.1:52495/hooks", "headers":{"Authorization":"Bearer foreign"}
+    }]}));
+    fs::write(&settings, serde_json::to_vec(&hooks).unwrap()).unwrap();
+    let original_config = fs::read(&config).unwrap();
+    let original_settings = fs::read(&settings).unwrap();
+    let options = toml::Table::from_iter([("listen".into(), "127.0.0.1:52495".into())]);
+    assert!(initialize_at(&config, &options, root.path()).is_err());
+    assert_eq!(fs::read(&config).unwrap(), original_config);
+    assert_eq!(fs::read(&settings).unwrap(), original_settings);
+}

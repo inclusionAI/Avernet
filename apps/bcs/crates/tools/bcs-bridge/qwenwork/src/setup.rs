@@ -33,6 +33,9 @@ fn initialize_at(config_path: &Path, overrides: &toml::Table, home: &Path) -> Re
     if indexes.len() != 1 { bail!("Initialization requires exactly one qwenwork Bot in the selected configuration"); }
     let bot = bots[indexes[0]].as_table_mut().context("Invalid Bot configuration")?;
     let mut engine = bot.get("engine_options").and_then(toml::Value::as_table).cloned().unwrap_or_default();
+    let previous_hook = engine.get("listen").and_then(toml::Value::as_str)
+        .zip(engine.get("hook_secret").and_then(toml::Value::as_str))
+        .map(|(listen, secret)| (format!("http://{listen}/hooks"), format!("Bearer {secret}")));
     for key in ["database_path", "listen"] {
         if let Some(value) = overrides.get(key) { engine.insert(key.into(), value.clone()); }
     }
@@ -66,6 +69,9 @@ fn initialize_at(config_path: &Path, overrides: &toml::Table, home: &Path) -> Re
         Some(bytes) => serde_json::from_slice(bytes).map_err(|_| anyhow::anyhow!("Invalid desktop settings JSON; no files changed"))?,
         None => json!({}),
     };
+    if let Some((url, authorization)) = previous_hook {
+        remove_owned_hooks(&mut settings, &url, &authorization);
+    }
     merge_hooks(&mut settings, &format!("http://{}/hooks", parsed.listen), &parsed.hook_secret, parsed.mcp_socket_path.is_some())?;
     bot.insert("engine_options".into(), engine.into());
     let config_bytes = toml::to_string_pretty(&document).context("Cannot serialize bridge configuration")?.into_bytes();
@@ -80,6 +86,20 @@ fn initialize_at(config_path: &Path, overrides: &toml::Table, home: &Path) -> Re
         return Err(error).context("Cannot save desktop Hooks; bridge configuration restored");
     }
     Ok(format!("QwenWork initialization complete.\nBridge config: {}\nConfig backup: {}\nSettings: {}\nSettings backup: {}\n\nFill these values in QwenWork's WeCom Bot channel (keep Secret private):\nWebSocket URL: ws://{}/ws\nBot ID: {}\nSecret: {}\n\nReload desktop Hooks, start bridge with the selected --config, then enable the channel.\nCheck: curl http://{}/health\n", config_path.display(), config_backup.display(), settings_path.display(), settings_backup.map(|p| p.display().to_string()).unwrap_or_else(|| "new settings file".into()), parsed.listen, parsed.bot_id, parsed.secret, parsed.listen))
+}
+
+fn remove_owned_hooks(settings: &mut Value, url: &str, authorization: &str) {
+    let Some(events) = settings.get_mut("hooks").and_then(Value::as_object_mut) else { return; };
+    for entries in events.values_mut().filter_map(Value::as_array_mut) {
+        for entry in entries.iter_mut() {
+            if let Some(list) = entry.get_mut("hooks").and_then(Value::as_array_mut) {
+                list.retain(|hook| !(hook.get("type").and_then(Value::as_str) == Some("http")
+                    && hook.get("url").and_then(Value::as_str) == Some(url)
+                    && hook.pointer("/headers/Authorization").and_then(Value::as_str) == Some(authorization)));
+            }
+        }
+        entries.retain(|entry| entry.get("hooks").and_then(Value::as_array).is_none_or(|hooks| !hooks.is_empty()));
+    }
 }
 
 fn merge_hooks(settings: &mut Value, url: &str, secret: &str, interaction: bool) -> Result<()> {
