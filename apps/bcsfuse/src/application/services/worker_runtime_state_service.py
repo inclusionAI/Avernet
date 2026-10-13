@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from time import perf_counter
 from typing import Optional, TYPE_CHECKING
 
 from src.domain.models.worker import Worker
@@ -110,8 +111,13 @@ class WorkerRuntimeStateService:
             WorkerNotFoundException: Worker 不存在
             ValueError: 生命周期状态不允许设为 online
         """
+        started_at = perf_counter()
         # 获取 worker
         worker = self._registry_store.get_by_id(worker_id)
+        logger.info(
+            "[ONLINE-TIMING] phase=registry_read worker_id=%s elapsed_ms=%.1f",
+            worker_id, (perf_counter() - started_at) * 1000,
+        )
         if worker is None:
             raise WorkerNotFoundException(worker_id)
 
@@ -135,7 +141,12 @@ class WorkerRuntimeStateService:
                 )
 
         # 获取当前 runtime state
+        phase_started_at = perf_counter()
         old_state = self._runtime_state_store.get_runtime_state(worker_id)
+        logger.info(
+            "[ONLINE-TIMING] phase=runtime_read worker_id=%s elapsed_ms=%.1f",
+            worker_id, (perf_counter() - phase_started_at) * 1000,
+        )
         if old_state is None:
             old_state = WorkerRuntimeState.OFFLINE
 
@@ -146,15 +157,24 @@ class WorkerRuntimeStateService:
             if isinstance(worker, dict):
                 # OSS mode: dict worker
                 # Already online, just return
+                logger.info(
+                    "[ONLINE-TIMING] phase=already_online worker_id=%s total_ms=%.1f",
+                    worker_id, (perf_counter() - started_at) * 1000,
+                )
                 return worker
             else:
                 # Object mode: check and update runtime_state
                 if worker.state.runtime_state != WorkerRuntimeState.ONLINE:
                     worker.state.runtime_state = WorkerRuntimeState.ONLINE
                     worker = self._registry_store.update(worker)
+                logger.info(
+                    "[ONLINE-TIMING] phase=already_online worker_id=%s total_ms=%.1f",
+                    worker_id, (perf_counter() - started_at) * 1000,
+                )
                 return worker
 
         # 设置新状态
+        phase_started_at = perf_counter()
         self._runtime_state_store.set_runtime_state(
             worker_id=worker_id,
             runtime_state=WorkerRuntimeState.ONLINE,
@@ -176,8 +196,13 @@ class WorkerRuntimeStateService:
                     updated_by=updated_by,
                 )
                 raise
+        logger.info(
+            "[ONLINE-TIMING] phase=persist_state worker_id=%s elapsed_ms=%.1f",
+            worker_id, (perf_counter() - phase_started_at) * 1000,
+        )
 
         # Phase C1: Sync denormalized column workers.runtime_state
+        phase_started_at = perf_counter()
         # Try to call sync_runtime_state_mirror if registry_store has it
         try:
             if hasattr(self._registry_store, 'sync_runtime_state_mirror'):
@@ -204,8 +229,13 @@ class WorkerRuntimeStateService:
                 f"[RuntimeStateService] Error syncing runtime_state mirror: {e}",
                 exc_info=True
             )
+        logger.info(
+            "[ONLINE-TIMING] phase=runtime_mirror worker_id=%s elapsed_ms=%.1f",
+            worker_id, (perf_counter() - phase_started_at) * 1000,
+        )
 
         # 记录审计日志
+        phase_started_at = perf_counter()
         if self._audit_log_adapter:
             try:
                 self._audit_log_adapter.append_log(WorkerAuditLog(
@@ -233,24 +263,46 @@ class WorkerRuntimeStateService:
                 logger.warning(f"[RuntimeStateService] Failed to trigger index sync: {e}")
         else:
             logger.debug(f"[RuntimeStateService] No index sync adapter, skipping index sync")
+        logger.info(
+            "[ONLINE-TIMING] phase=audit_and_index_sync worker_id=%s elapsed_ms=%.1f",
+            worker_id, (perf_counter() - phase_started_at) * 1000,
+        )
 
         self._sync_vector_runtime_state(worker_id, WorkerRuntimeState.ONLINE)
 
         logger.info(f"[RuntimeStateService] Worker {worker_id} set to ONLINE by {updated_by}")
 
         # Return fresh worker from store
-        return self._registry_store.get_by_id(worker_id)
+        worker = self._registry_store.get_by_id(worker_id)
+        logger.info(
+            "[ONLINE-TIMING] phase=completed worker_id=%s total_ms=%.1f",
+            worker_id, (perf_counter() - started_at) * 1000,
+        )
+        return worker
 
     def _sync_vector_runtime_state(self, worker_id: str, state: WorkerRuntimeState) -> None:
         if self._vector_store is None:
+            if state == WorkerRuntimeState.ONLINE:
+                logger.info("[ONLINE-TIMING] phase=vector_sync_skipped worker_id=%s reason=no_store", worker_id)
             return
         from src.application.services.worker_vector_state_sync import sync_worker_vector_state
 
+        started_at = perf_counter()
         count = sync_worker_vector_state(self._vector_store, worker_id, state.value)
+        if state == WorkerRuntimeState.ONLINE:
+            logger.info(
+                "[ONLINE-TIMING] phase=vector_payload_sync worker_id=%s vectors=%s elapsed_ms=%.1f",
+                worker_id, count, (perf_counter() - started_at) * 1000,
+            )
         # Initial online publication still creates an index. Existing profiles
         # only need payload updates: do not re-embed or delete their vectors.
         if count == 0 and state == WorkerRuntimeState.ONLINE:
+            rebuild_started_at = perf_counter()
             self._rebuild_worker_vectors(worker_id)
+            logger.info(
+                "[ONLINE-TIMING] phase=vector_rebuild worker_id=%s elapsed_ms=%.1f",
+                worker_id, (perf_counter() - rebuild_started_at) * 1000,
+            )
 
     def _rebuild_worker_vectors(self, worker_id: str) -> None:
         """
