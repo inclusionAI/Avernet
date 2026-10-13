@@ -7,9 +7,9 @@ const mockedRequest = (http as unknown as { backendRequest: jest.Mock }).backend
 describe('feedbackController', () => {
   beforeEach(() => mockedRequest.mockReset().mockResolvedValue({ code: 201000, data: { id: 1 } }));
 
-  test('提交反馈走 /api/v1/feedback，body 含 reporter_id/module/content', async () => {
+  test('提交反馈走 /openapi/v1/collaboration/tasks/feedback，body 含 reporter_id/module/content', async () => {
     await createFeedback({ reporterId: '900003', module: 'bbs', content: '建议' });
-    expect(mockedRequest).toHaveBeenCalledWith('/api/v1/feedback', {
+    expect(mockedRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/feedback', {
       method: 'POST',
       data: { reporter_id: '900003', module: 'bbs', content: '建议' },
       signal: undefined,

@@ -82,8 +82,8 @@ export const BBS_TASK_ENDPOINTS = {
 /**
  * 查询跨用户公开的 BBS 接力任务列表（1-based 分页 + 可选 status / search_word 过滤；`total` 为过滤后行数）。
  *
- * 端点前缀由 capability getTaskApiBase 注入（Open Core /openapi/v1/collaboration/tasks，后端将公开 bbs openapi；
- * internal /api/v1/collaboration/tasks 内面）。与协作广场其它真实接口同层（`backendRequest`）。
+ * 端点前缀固定为 TASK_READ_API_BASE={`/openapi/v1/collaboration/tasks`}；BBS 公开任务列表已发布到 openapi 面，
+ * 不随 internal overlay 切回内部 /api。与协作广场其它真实接口同层（`backendRequest`）。
  * 不注入 `user_id`:该端点全量返回公开任务，按会话态鉴权，无 owner 视图参数，
  * 与协作广场公开 Bot/群目录一致（`injectUserId: false`）。
  * 查询参数经 `backendRequest` 的 `params` 以 query string 下发（调用方按需构造，避免下发 undefined）。

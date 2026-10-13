@@ -4,14 +4,17 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
 import type { CommunityReply, CommunityTopic } from '@/domain/community/types';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, User } from 'lucide-react';
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 
 function formatDateTime(value: string) {
   if (!value) return '时间未知';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '时间未知';
-  return date.toLocaleString('zh-CN');
+  const pad = (input: number) => String(input).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(
+    date.getMinutes(),
+  )}`;
 }
 
 interface FloorProps {
@@ -21,17 +24,29 @@ interface FloorProps {
   createdAt: string;
 }
 
-// 布局：头像+名字+楼层 tag 一行（垂直居中）；正文与时间缩进对齐到名字下方。floor 0 = 楼主，N>0 = N 楼。
+// 布局：头像+名字+楼层 tag 一行（垂直居中）；正文与时间缩进对齐到名字下方。floor 0 = 楼主，N>0 = N楼。
 function Floor({ floor, author, body, createdAt }: FloorProps) {
   return (
-    <article className="flex flex-col gap-2 border-b border-border py-5 last:border-b-0">
-      <div className="flex items-center gap-3">
+    <article className="border-b border-border/60 py-4 last:border-b-0">
+      <div className="flex items-center gap-2">
         <CommunityAuthorAvatar author={author} size={36} />
-        <span className="font-medium text-foreground">{author.displayName}</span>
-        <Badge tone={floor === 0 ? 'primary' : 'neutral'}>{floor === 0 ? '楼主' : `${floor} 楼`}</Badge>
+        <span className="text-sm font-semibold text-foreground">{author.displayName}</span>
+        <Badge
+          tone={floor === 0 ? 'primary' : 'neutral'}
+          className={
+            floor === 0
+              ? 'gap-1 rounded bg-foreground px-1.5 py-0.5 text-[10px] text-background'
+              : 'h-6 rounded px-2 py-0 text-[10px]'
+          }
+        >
+          {floor === 0 ? <User className="size-3" aria-hidden /> : null}
+          {floor === 0 ? '楼主' : `${floor}楼`}
+        </Badge>
       </div>
-      <div className="pl-12">
-        <p className="whitespace-pre-wrap text-sm leading-7 text-foreground">{body}</p>
+      <div className="mt-2 pl-[44px] pr-[44px]">
+        <div className="min-h-[120px]">
+          <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{body}</p>
+        </div>
         <div className="mt-2 text-xs text-muted-foreground">发表于：{formatDateTime(createdAt)}</div>
       </div>
     </article>
@@ -74,64 +89,62 @@ export function CommunityTopicDetail({
 
   return (
     <div className="flex h-full flex-col bg-background">
-      {/* 顶栏 sticky：返回/标题/结帖 + 回帖分页器（分页器置顶，滚动时常驻；不用滚到底再翻页）。 */}
-      <div className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur">
-        <header className="mx-auto flex w-full max-w-[1600px] items-center gap-2 px-4 py-3 sm:px-6">
-          <Button
-            variant="ghost"
-            size="icon"
-            leftIcon={<ArrowLeft className="size-4" aria-hidden />}
-            onClick={onBack}
-            aria-label="返回社区列表"
-          />
-          <div className="min-w-0 flex-1">
-            <h1 className="m-0 truncate text-base font-semibold text-foreground">{topic?.title || '主题详情'}</h1>
+      {/* 原型结构：头部固定、主题流单独滚动。返回 / 标题 / 状态 / 分页收敛在同一行右列。 */}
+      <header className="flex w-full items-start gap-3 px-4 pb-4 pt-6 sm:px-6 lg:px-10">
+        <Button variant="ghost" size="icon" onClick={onBack} aria-label="返回社区列表" className="mt-1 shrink-0">
+          <ArrowLeft className="size-4" aria-hidden />
+        </Button>
+        <div className="min-w-0 flex-1">
+          <h2 className="m-0 min-w-0 truncate text-lg font-semibold text-foreground">{topic?.title || '主题详情'}</h2>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          <div className="flex items-center gap-2">
+            {topic?.status === 'closed' && <Badge tone="outline">已结帖</Badge>}
+            {topic?.canClose && (
+              <ConfirmDialog
+                title="确认结帖？"
+                description="结帖后该主题将显示为已结束，本期暂不支持重新打开。"
+                confirmText="确认结帖"
+                loading={closing}
+                onConfirm={async () => {
+                  await onCloseTopic();
+                }}
+              >
+                <Button variant="outline" size="sm" className="h-8 px-3 text-xs">
+                  结帖
+                </Button>
+              </ConfirmDialog>
+            )}
           </div>
-          {topic?.status === 'closed' && <Badge tone="neutral">已结帖</Badge>}
-          {topic?.canClose && (
-            <ConfirmDialog
-              title="确认结帖？"
-              description="结帖后该主题将显示为已结束，本期暂不支持重新打开。"
-              confirmText="确认结帖"
-              loading={closing}
-              onConfirm={async () => {
-                await onCloseTopic();
-              }}
-            >
-              <Button variant="outline" size="sm">
-                结帖
-              </Button>
-            </ConfirmDialog>
-          )}
-        </header>
-        {replyPageCount > 1 && (
-          <nav className="border-t border-border bg-background/80" aria-label="回帖分页">
-            <div className="mx-auto flex w-full max-w-[1600px] items-center justify-end gap-3 px-4 py-2 sm:px-6 text-sm">
+          {replyPageCount > 1 && (
+            <div className="flex items-center gap-1 text-xs text-muted-foreground" aria-label="回帖分页">
               <Button
                 variant="outline"
                 size="sm"
+                className="h-7 px-2.5"
                 disabled={replyPage <= 1 || replyLoading}
                 onClick={() => onGoToReplyPage(replyPage - 1)}
               >
                 上一页
               </Button>
-              <span className="text-muted-foreground">
-                第 {replyPage} / {replyPageCount} 页
+              <span className="px-1 tabular-nums">
+                {replyPage} / {replyPageCount}
               </span>
               <Button
                 variant="outline"
                 size="sm"
+                className="h-7 px-2.5"
                 disabled={replyPage >= replyPageCount || replyLoading}
                 onClick={() => onGoToReplyPage(replyPage + 1)}
               >
                 下一页
               </Button>
             </div>
-          </nav>
-        )}
-      </div>
+          )}
+        </div>
+      </header>
       <main className="app-scrollbar min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-[1600px] flex-col p-4 sm:p-6 lg:p-8">
+        <div className="flex w-full flex-col px-4 pb-6 sm:px-6 lg:px-10">
           {loading ? (
             <div className="space-y-3 py-4">
               <Skeleton.ListItem />

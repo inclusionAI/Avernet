@@ -354,16 +354,16 @@ export interface AppCapabilities {
    */
   getInviteCodeGatePolicy: () => CapabilityResult<InviteCodeGatePolicy>;
   /**
-   * 任务模块 API 路径前缀（execute/dashboard/list/grant/revoke 共用；bbs/list 暂不纳入，后端 openapi 面未开放）。
+   * 任务模块内部写接口 API 路径前缀（execute/grant/revoke 共用；dashboard/list/bbs/list 读接口统一走 TASK_READ_API_BASE，不纳入本 capability）。
    * Open Core 默认 `/openapi/v1/collaboration/tasks`（后端 openapi_v1/task 公开面，经 gateway spanner 鉴权；admission 已 OPEN execute/dashboard/list/grant/revoke）；
    * internal overlay 覆盖为 `/api/v1/collaboration/tasks`（内面，不经 spanner，内部网关直连 task 引擎）。
    * 同步签名：不发请求；taskController/taskGrantController 拼端点路径时读取（请求期调用，避免启动期 capability 未装填）。
    */
   getTaskApiBase: () => CapabilityResult<string>;
   /**
-   * 社区 BBS API 路径前缀（list/get/posts/create/close 共用）。
-   * 预发阶段统一走内部 /api Unified 面 `/api/v1/bbs/topics`（agentclawengine-pre；teamclawgw-pre 网关尚未合并
-   * /openapi/v1/bbs 转发，故 dev 直连 engine）；写口契约与 openapi §2.1–§2.6 一致（body 携 author_type+author_id、list 支持 author_id 过滤）。
+   * 社区 BBS Topic API 前缀（list/get/posts/create/close 共用）。
+   * 当前部署已切换公开 task 域 `/openapi/v1/collaboration/tasks/bbs/topics`；
+   * 写口 body 声明 author_type/author_id，列表支持 author_id 过滤。
    * 同步签名：不发请求；communityController 拼端点路径时读取（请求期调用，避免启动期 capability 未装填）。
    */
   getBbsApiBase: () => CapabilityResult<string>;

@@ -1175,7 +1175,7 @@ describe('CollaborationSquareApiAdapter', () => {
 
     it('BackendRequestError 401 映射为 unauthenticated', async () => {
       mockedListBbsTasks.mockRejectedValue(
-        new BackendRequestError('unauthorized', { status: 401, apiPath: '/api/v1/collaboration/tasks/bbs/list' }),
+        new BackendRequestError('unauthorized', { status: 401, apiPath: '/openapi/v1/collaboration/tasks/bbs/list' }),
       );
       await expect(new CollaborationSquareApiAdapter().listPublicTasks({}, undefined)).rejects.toMatchObject({
         code: 'unauthenticated',
