@@ -40323,7 +40323,9 @@
             "schema": {
               "description": "Decimal public identifier of the shared Repo Skill.",
               "title": "Skill Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -80736,7 +80738,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -80960,7 +80964,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -81169,7 +81175,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -81390,7 +81398,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -81616,7 +81626,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -81842,7 +81854,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -82063,7 +82077,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -82274,7 +82290,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -82485,7 +82503,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -82720,7 +82740,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -82957,7 +82979,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -83229,7 +83253,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -83478,7 +83504,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -83700,7 +83728,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -83911,7 +83941,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -84146,7 +84178,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {

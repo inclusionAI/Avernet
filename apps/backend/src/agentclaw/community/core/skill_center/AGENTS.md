@@ -26,6 +26,8 @@
 
 精确 HTTP method、分页、状态码和请求字段直接检查以上 Router 与同目录 `schemas.py`。例如已有资产加入 Set 使用 PUT `/{set_id}/skills/{skill_id}`；SC Public 引用使用专门的异步 POST，不能混用两种身份。
 
+OpenAPI 的 SkillSet `set_id`（含 SC Reference 地址）与共享 Repo Skill `skill_id` 保持十进制字符串合同：HTTP Path 校验非数字及超出持久层范围的输入并返回 422；格式和范围正确但资源不存在返回 404。不要让非法字符串进入 Repository 的 `int()` 转换，也不要全局将 `ValueError` 当作资源不存在。
+
 Router 使用 `PublicAPIRoute`、`ActingCaller`/scope dependencies、`Injected(Protocol)` 与 `envelope_errors`。修改接口需同时检查 `authorization.py`、`admission.py`、`errors_skill_center.py`、`errors_space_skill.py`，以及上层 Router 的注册和功能开关。`AdmissionMode.REFUSED` 的含义需按调用者模式理解，不能解释成产品接口整体不可用。
 
 `apps/gateway/configs/schemas/bots.openapi.json` 是生成产物。改公开 Router/DTO 后使用 `apps/gateway/scripts/dump_and_publish.sh` 及其门禁生成，保持 Backend Router 为合同来源。
