@@ -6,9 +6,16 @@ from pathlib import Path
 import yaml
 
 from gateway.community.core.forwarding import DomainMap
-from tests.unit.core.forwarding.test_domain_map import _VARS
 
 _GATEWAY = Path(__file__).resolve().parents[4]
+_VARS = {
+    "backend_server_url": "http://backend:8080",
+    "baas_server_url": "http://baas:9090",
+    "bcs_server_url": "http://bcs:8081",
+    "engine_proxy_server_url": "https://engineproxy:20003",
+    "bcsfuse_server_url": "http://bcsfuse:8765",
+    "clawweb_server_url": "http://clawweb:8082",
+}
 
 
 def test_classification_uses_the_backend_domain_and_published_minimal_schema():
