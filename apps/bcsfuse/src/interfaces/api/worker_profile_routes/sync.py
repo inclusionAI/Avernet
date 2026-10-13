@@ -3,6 +3,7 @@
 import logging
 from datetime import datetime
 from fastapi import Request, HTTPException, status
+from starlette.concurrency import run_in_threadpool
 from src.interfaces.api.schemas.worker_management_schemas import (
     WorkerSyncRequest,
     WorkerSyncResponse,
@@ -496,7 +497,9 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                     import time
                     start_time = time.time()
 
-                    index_success = _build_vector_index_for_worker(worker_id)
+                    index_success = await run_in_threadpool(
+                        _build_vector_index_for_worker, worker_id
+                    )
 
                     elapsed_ms = int((time.time() - start_time) * 1000)
 
