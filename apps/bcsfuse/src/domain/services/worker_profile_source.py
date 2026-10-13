@@ -142,4 +142,13 @@ class WorkerProfileSource(Protocol):
         ...
 
 
-__all__ = ["WorkerProfileSource"]
+@runtime_checkable
+class WorkerScopedProfileSource(Protocol):
+    """Optional bounded scan with the same filtering and merge rules as scan()."""
+
+    def scan_for_workers(self, worker_ids: list[str]) -> WorkerProfileScanResult:
+        """Return scan profiles owned by the specified exact Worker IDs."""
+        ...
+
+
+__all__ = ["WorkerProfileSource", "WorkerScopedProfileSource"]

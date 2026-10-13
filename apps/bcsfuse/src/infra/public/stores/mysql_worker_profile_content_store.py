@@ -489,6 +489,26 @@ class MySQLWorkerProfileContentStore:
     # Dict-compatible API used by OSS routes
     # =========================================================
 
+    def get_active_by_workers(self, worker_ids: list[str]) -> list[WorkerProfileContent]:
+        """Read the same active records as get_all_active, scoped at the SQL boundary."""
+        if not worker_ids:
+            return []
+        conn = self._pool.get_connection()
+        try:
+            cursor = conn.cursor(dictionary=True)
+            try:
+                placeholders = ", ".join(["%s"] * len(worker_ids))
+                cursor.execute(
+                    "SELECT * FROM bcsfuse_worker_profile_contents "
+                    f"WHERE is_active = 1 AND worker_id IN ({placeholders})",
+                    tuple(worker_ids),
+                )
+                return [self._row_to_content(row) for row in cursor.fetchall()]
+            finally:
+                cursor.close()
+        finally:
+            conn.close()
+
     def upsert_profile(self, worker_id: str, profile_id: str, content: dict) -> bool:
         """Upsert profile content from dict (OSS route compatibility)."""
         profile_id = profile_id or "default"

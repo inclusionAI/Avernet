@@ -236,6 +236,16 @@ Replaceable vector persistence providers follow the versioned
 when they expose incremental synchronization. Baseline providers that do not
 implement that optional protocol remain compatible with full index rebuilds.
 
+Single-vector consumers may use `PointLookupVectorPersistenceBackend.load_by_id`
+to read an exact active ID. Providers without this optional extension retain
+the existing full-read fallback. `WorkerScopedProfileSource.scan_for_workers`
+preserves `scan()` lifecycle/runtime filtering, active-record conversion, source
+priority, and legacy `bot_` alias merging while limiting results to exact owners.
+Built-in stores implement `WorkerScopedProfileContentStore.get_active_by_workers`
+with a Worker ID predicate at the SQL boundary. Worker index builds retain
+active-profile preference and the existing first-profile fallback; these lookup
+extensions do not change HTTP responses or embedding/update policy.
+
 The composed application exposes the canonical Worker/Profile lifecycle under
 `/v1`: worker creation and lookup, online/offline transitions, profile upsert,
 activation and lookup, and worker deletion. Missing workers use HTTP 404 with
