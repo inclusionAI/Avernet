@@ -1,0 +1,323 @@
+//! Shared SQLite `BotAuthorityRepoPort` contract
+//! fixture (the post-migration 034-shaped schema and
+//! the real `DbBotAuthorityStore`), hosted here so the
+//! store suite and the R25 conformance entries drive
+//! the exact same fixture (Rule 25 mechanical
+//! publication; bot-authority Task 8).
+
+#![allow(clippy::expect_used, reason = "test fixture")]
+
+use std::sync::Arc;
+
+use async_trait::async_trait;
+
+use bcs_db_api::{DbExecuteResult, DbPlugin, DbStatement, DbValue};
+use bcs_db_local::LocalSqliteDbPlugin;
+use bcs_edge_permission_store::DbBotAuthorityStore;
+use bcs_service_api::port::repo::BotAuthorityRepoPort;
+use bcs_service_api::types::bot_authority::BotAccessRelation;
+use crate::contract::bot_authority_contract::{
+    BotAuthorityContractFixture, HarnessAuditRow,
+};
+
+/// One scenario DB + store + fixture. Fresh instance per
+/// scenario so corrupt-state cases cannot contaminate others.
+pub struct SqlAuthorityFixture {
+    pub db: Arc<dyn DbPlugin>,
+    pub store: Arc<DbBotAuthorityStore>,
+}
+
+pub async fn new_fixture(env: &str) -> SqlAuthorityFixture {
+    let db = Arc::new(LocalSqliteDbPlugin::new().expect("local sqlite"));
+    for statement in SCHEMA_STATEMENTS {
+        db.execute(DbStatement::new(*statement)).await.expect("authority fixture schema");
+    }
+    let store = Arc::new(DbBotAuthorityStore::new(
+        db.clone(),
+        bcs_db_api::DbSqlFlavor::Sqlite,
+        env.to_string(),
+    ));
+    SqlAuthorityFixture { db, store }
+}
+
+pub async fn execute(db: &dyn DbPlugin, sql: &str, params: Vec<DbValue>) -> DbExecuteResult {
+    db.execute(DbStatement::with_params(sql, params)).await.expect("fixture execute")
+}
+
+#[async_trait]
+impl BotAuthorityContractFixture for SqlAuthorityFixture {
+    fn authority_repo(&self) -> Arc<dyn BotAuthorityRepoPort> {
+        self.store.clone()
+    }
+
+    async fn seed_bot(&self, env: &str, bot_id: &str, ownership_version: u64) {
+        execute(
+            self.db.as_ref(),
+            "INSERT INTO bcs_bots (bot_uuid, env, name, ownership_version) \
+             VALUES (?, ?, ?, ?) \
+             ON CONFLICT(bot_uuid, env) DO UPDATE \
+             SET ownership_version = excluded.ownership_version, is_deleted = 0",
+            vec![
+                DbValue::from(bot_id),
+                DbValue::from(env),
+                DbValue::from(format!("name-of-{bot_id}")),
+                DbValue::from(ownership_version),
+            ],
+        )
+        .await;
+    }
+
+    async fn delete_bot(&self, env: &str, bot_id: &str) {
+        execute(
+            self.db.as_ref(),
+            "UPDATE bcs_bots SET is_deleted = 1 WHERE bot_uuid = ? AND env = ?",
+            vec![DbValue::from(bot_id), DbValue::from(env)],
+        )
+        .await;
+    }
+
+    async fn grant_edge(&self, env: &str, bot_id: &str, actor_id: &str, kind: BotAccessRelation) {
+        let kind = grant_kind_str(kind);
+        let updated = execute(
+            self.db.as_ref(),
+            "UPDATE edge_grants SET status = 'approved', gmt_modified = CURRENT_TIMESTAMP \
+             WHERE from_id = ? AND to_id = ? AND env = ? AND grant_kind = ? AND grant_ref_id = 0",
+            vec![
+                DbValue::from(actor_id),
+                DbValue::from(bot_id),
+                DbValue::from(env),
+                DbValue::from(kind),
+            ],
+        )
+        .await;
+        if updated.affected_rows == 0 {
+            execute(
+                self.db.as_ref(),
+                "INSERT INTO edge_grants \
+                 (env, from_id, to_id, grant_kind, grant_ref_id, rules, status, \
+                  originator_policy_type, originator_policy_data) \
+                 VALUES (?, ?, ?, ?, 0, NULL, 'approved', 'same_as_from', NULL)",
+                vec![
+                    DbValue::from(env),
+                    DbValue::from(actor_id),
+                    DbValue::from(bot_id),
+                    DbValue::from(kind),
+                ],
+            )
+            .await;
+        }
+    }
+
+    async fn revoke_edge(&self, env: &str, bot_id: &str, actor_id: &str, kind: BotAccessRelation) {
+        execute(
+            self.db.as_ref(),
+            "UPDATE edge_grants SET status = 'revoked', gmt_modified = CURRENT_TIMESTAMP \
+             WHERE from_id = ? AND to_id = ? AND env = ? AND grant_kind = ? AND grant_ref_id = 0",
+            vec![
+                DbValue::from(actor_id),
+                DbValue::from(bot_id),
+                DbValue::from(env),
+                DbValue::from(grant_kind_str(kind)),
+            ],
+        )
+        .await;
+    }
+
+    async fn seed_runtime_edge(&self, env: &str, bot_id: &str, actor_id: &str) {
+        execute(
+            self.db.as_ref(),
+            "INSERT INTO edge_grants \
+             (env, from_id, to_id, grant_kind, grant_ref_id, rules, status, \
+              originator_policy_type, originator_policy_data) \
+             VALUES (?, ?, ?, 'permission_profile', 42, NULL, 'approved', 'any', NULL)",
+            vec![
+                DbValue::from(env),
+                DbValue::from(actor_id),
+                DbValue::from(bot_id),
+            ],
+        )
+        .await;
+    }
+
+    async fn seed_human(&self, env: &str, user_id: &str) {
+        let _ = env;
+        execute(
+            self.db.as_ref(),
+            "INSERT INTO bcs_user_identities (user_id, auth_source, external_user_id, env) \
+             VALUES (?, 'fixture', ?, 'fixture') \
+             ON CONFLICT(user_id) DO NOTHING",
+            vec![
+                DbValue::from(user_id),
+                DbValue::from(format!("reads-fixture-{user_id}")),
+            ],
+        )
+        .await;
+    }
+
+    async fn remove_human(&self, env: &str, user_id: &str) {
+        let _ = env;
+        execute(
+            self.db.as_ref(),
+            "DELETE FROM bcs_user_identities WHERE user_id = ?",
+            vec![DbValue::from(user_id)],
+        )
+        .await;
+    }
+
+    async fn seed_audit_conflict(&self, env: &str, mutation_id: &str, sequence: u64) {
+        execute(
+            self.db.as_ref(),
+            "INSERT INTO bot_authority_changes \
+             (env, bot_id, mutation_id, sequence, action, actor_kind, actor_id, \
+              subject_id, before_state, after_state) \
+             VALUES (?, 'fixture-seed', ?, ?, 'seed_conflict', 'system', 'system_seed', \
+                     'none', NULL, NULL)",
+            vec![
+                DbValue::from(env),
+                DbValue::from(mutation_id),
+                DbValue::from(sequence),
+            ],
+        )
+        .await;
+    }
+
+    async fn audit_rows(&self, env: &str) -> Vec<HarnessAuditRow> {
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                "SELECT mutation_id, sequence, action, actor_kind, actor_id, subject_id, \
+                        before_state, after_state \
+                 FROM bot_authority_changes WHERE env = ? ORDER BY sequence, id",
+                vec![DbValue::from(env)],
+            ))
+            .await
+            .expect("read audit rows");
+        rows.iter()
+            .map(|row| HarnessAuditRow {
+                mutation_id: row.get_string("mutation_id").expect("mutation_id").unwrap(),
+                sequence: row.get_i64("sequence").expect("sequence").unwrap() as u64,
+                action: row.get_string("action").expect("action").unwrap(),
+                actor_kind: row.get_string("actor_kind").expect("actor_kind").unwrap(),
+                actor_id: row.get_string("actor_id").expect("actor_id").unwrap(),
+                subject_id: row.get_string("subject_id").expect("subject_id").unwrap(),
+                before_state: row.get_string("before_state").expect("before"),
+                after_state: row.get_string("after_state").expect("after"),
+            })
+            .collect()
+    }
+
+    async fn seed_corrupt_duplicate_owner(&self, env: &str, bot_id: &str, actor_id: &str) {
+        // Genuine corrupt legacy data cannot exist under the
+        // partial unique index: emulate a pre-index database by
+        // dropping the constraint, writing the second approved
+        // owner, and leaving the constraint dropped.
+        self.db
+            .execute(DbStatement::new("DROP INDEX IF EXISTS uk_edge_approved_owner"))
+            .await
+            .expect("drop owner index");
+        execute(
+            self.db.as_ref(),
+            "INSERT INTO edge_grants \
+             (env, from_id, to_id, grant_kind, grant_ref_id, rules, status, \
+              originator_policy_type, originator_policy_data) \
+             VALUES (?, ?, ?, 'owner', 0, NULL, 'approved', 'same_as_from', NULL)",
+            vec![
+                DbValue::from(env),
+                DbValue::from(actor_id),
+                DbValue::from(bot_id),
+            ],
+        )
+        .await;
+    }
+}
+
+fn grant_kind_str(kind: BotAccessRelation) -> &'static str {
+    match kind {
+        BotAccessRelation::Owner => "owner",
+        BotAccessRelation::Manager => "manager",
+    }
+}
+
+/// Post-migration SQLite schema for the authority store.
+const SCHEMA_STATEMENTS: &[&str] = &[
+    "CREATE TABLE bcs_bots (\
+        id INTEGER PRIMARY KEY AUTOINCREMENT, \
+        bot_uuid TEXT NOT NULL, \
+        env TEXT NOT NULL, \
+        name TEXT NOT NULL DEFAULT '', \
+        status TEXT NOT NULL DEFAULT 'online', \
+        is_deleted INTEGER NOT NULL DEFAULT 0, \
+        ownership_version INTEGER NOT NULL DEFAULT 0, \
+        gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+        gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+        UNIQUE (bot_uuid, env))",
+    "CREATE TABLE edge_grants (\
+        id INTEGER PRIMARY KEY AUTOINCREMENT, \
+        env TEXT NOT NULL, \
+        from_id TEXT NOT NULL, \
+        to_id TEXT NOT NULL, \
+        grant_kind TEXT NOT NULL, \
+        grant_ref_id INTEGER NOT NULL, \
+        rules TEXT, \
+        status TEXT NOT NULL DEFAULT 'approved', \
+        originator_policy_type TEXT NOT NULL DEFAULT 'any', \
+        originator_policy_data TEXT, \
+        gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+        gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+        UNIQUE (from_id, to_id, env, grant_kind, grant_ref_id))",
+    "CREATE UNIQUE INDEX uk_edge_approved_owner \
+        ON edge_grants(env, to_id) \
+        WHERE grant_kind = 'owner' AND status = 'approved'",
+    "CREATE TABLE bot_ownership_transfers (\
+        id INTEGER PRIMARY KEY AUTOINCREMENT, \
+        env TEXT NOT NULL, \
+        bot_id TEXT NOT NULL, \
+        target_owner_actor_id TEXT NOT NULL, \
+        from_owner_actor_id TEXT NOT NULL, \
+        expected_ownership_version INTEGER NOT NULL, \
+        status TEXT NOT NULL DEFAULT 'pending', \
+        requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+        expires_at TEXT NOT NULL, \
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+        decided_at TEXT, \
+        decided_by_kind TEXT, \
+        decided_by_id TEXT, \
+        reason TEXT, \
+        result_ownership_version INTEGER, \
+        bot_name_snapshot TEXT, \
+        gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+        gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+        UNIQUE (env, bot_id, target_owner_actor_id))",
+    "CREATE UNIQUE INDEX uk_transfer_pending \
+        ON bot_ownership_transfers(env, bot_id) WHERE status = 'pending'",
+    "CREATE INDEX idx_transfer_received \
+        ON bot_ownership_transfers(env, target_owner_actor_id, status, requested_at)",
+    "CREATE INDEX idx_transfer_sent \
+        ON bot_ownership_transfers(env, from_owner_actor_id, status, requested_at)",
+    "CREATE TABLE bot_authority_changes (\
+        id INTEGER PRIMARY KEY AUTOINCREMENT, \
+        env TEXT NOT NULL, \
+        bot_id TEXT NOT NULL, \
+        mutation_id TEXT NOT NULL, \
+        sequence INTEGER NOT NULL, \
+        action TEXT NOT NULL, \
+        actor_kind TEXT NOT NULL, \
+        actor_id TEXT NOT NULL, \
+        subject_id TEXT NOT NULL, \
+        before_state TEXT, \
+        after_state TEXT, \
+        gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+        gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+        UNIQUE (env, mutation_id, sequence))",
+    "CREATE INDEX idx_change_bot ON bot_authority_changes(env, bot_id, sequence)",
+    "CREATE TABLE bcs_user_identities (\
+        id INTEGER PRIMARY KEY AUTOINCREMENT, \
+        user_id TEXT NOT NULL, \
+        auth_source TEXT NOT NULL, \
+        external_user_id TEXT NOT NULL, \
+        user_name TEXT, \
+        env TEXT NOT NULL, \
+        gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+        gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+        UNIQUE (user_id))",
+];

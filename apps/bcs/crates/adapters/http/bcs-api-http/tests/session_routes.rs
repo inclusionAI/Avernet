@@ -917,7 +917,7 @@ async fn shared_file_content_preserves_infrastructure_failures() {
 }
 
 #[tokio::test]
-async fn session_file_routes_admit_bot_and_reject_mismatched_or_app_only_callers() {
+async fn session_file_route_keeps_only_the_protocol_identity_check() {
     let session = Arc::new(FakeSessionService::default());
     let message = Arc::new(FakeSessionMessageService::default());
     let bot = AuthenticatedBotIdentity {
@@ -962,6 +962,14 @@ async fn session_file_routes_admit_bot_and_reject_mismatched_or_app_only_callers
             access_key: None,
         },
     );
+    // The route no longer decides the Human→Bot leg
+    // from claims: the mismatched-claim hybrid (whose
+    // historical owner no longer says "owned") is
+    // carried to the application facade — the live
+    // `resolve_authorized_principal` decision lives
+    // there (6c file.rs cutover; a revoked A is
+    // denied and a current manager passes at the
+    // facade level, cutover suite).
     let response = mismatched
         .oneshot(authenticated_request(
             "GET",
@@ -970,7 +978,7 @@ async fn session_file_routes_admit_bot_and_reject_mismatched_or_app_only_callers
         ))
         .await
         .expect("mismatched User/Bot response");
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response.status(), StatusCode::OK);
 
     let app_only = test_session_router_for_caller(
         session,
@@ -1033,16 +1041,13 @@ async fn create_session_returns_created_and_forwards_principal() {
     assert_eq!(body["data"]["session_id"], "session-1");
     assert_eq!(body["data"]["group_id"], "group-1");
     {
+        // Protocol adaptation only: the adapter carries
+        // the raw authenticated caller; the application
+        // resolves the effective SessionCaller (live
+        // hybrid rule).
         let created = session.created.lock().expect("create lock");
         let created = created.as_ref().expect("create command");
-        assert_eq!(
-            created.caller,
-            SessionCaller::Human {
-                actor_id: "human_staff-1".into(),
-                owner_id: "staff-1".into(),
-                display_name: None,
-            }
-        );
+        assert_eq!(created.caller, caller());
         assert_eq!(created.group_id, "group-1");
         assert_eq!(created.title.as_deref(), Some("Planning"));
         assert_eq!(
@@ -1103,14 +1108,7 @@ async fn create_session_accepts_explicit_authenticated_human_actor() {
 
     let created = session.created.lock().expect("create lock");
     let created = created.as_ref().expect("create command");
-    assert_eq!(
-        created.caller,
-        SessionCaller::Human {
-            actor_id: "human_staff-1".into(),
-            owner_id: "staff-1".into(),
-            display_name: None,
-        }
-    );
+    assert_eq!(created.caller, caller());
     assert_eq!(created.acting_bot_id.as_deref(), Some("human_staff-1"));
     assert_eq!(created.creator_role, Some(ParticipantRole::Observer));
 }
@@ -1147,12 +1145,11 @@ async fn create_session_accepts_bot_identity_and_raw_string_input() {
     assert_eq!(response.status(), StatusCode::CREATED);
     let created = session.created.lock().expect("create lock");
     let created = created.as_ref().expect("create command");
-    assert_eq!(
-        created.caller,
-        SessionCaller::Bot {
-            bot_uuid: "bot-1".into()
-        }
-    );
+    // The raw Bot credential is carried to the application
+    // (the effective Bot-caller choice is its live rule).
+    assert!(created.caller.bot.is_some());
+    assert_eq!(created.caller.bot.as_ref().expect("bot").bot_uuid, "bot-1");
+    assert!(created.caller.user.is_none());
     assert_eq!(created.input, Some(json!("run this task")));
 }
 

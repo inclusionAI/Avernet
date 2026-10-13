@@ -252,6 +252,15 @@ async fn conformance_live_group_admission_uses_defaults_and_blocks_drain_bypass(
         row.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::PendingContext), "unbound history survives for the observer's next Send");
 }
 
+/// Real authority chain for the manual-resolution
+/// ownership leg: the fixture regsitry `created_by`
+/// ("1") is mirrored as a live owner edge.
+fn authority() -> Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityHook> {
+    let chain = bcs_test_support::lazy_authority_chain();
+    chain.hook.seed_owner("bot-driver", "1");
+    chain.hook
+}
+
 #[tokio::test]
 async fn manual_resolution_checks_human_scope_ownership_and_version() {
     use bcs_service_api::{ManagedMessageDeliveryService, DeliveryTransitionCommand, ResolveMessageDeliveryCommand, DeliveryResolution, ServiceError};
@@ -264,7 +273,8 @@ async fn manual_resolution_checks_human_scope_ownership_and_version() {
     let flow = BcsMessageFlow::new(support.group.clone(), support.routing.clone(), support.registry.clone(), support.bot_delivery.clone(), support.frontend_delivery.clone())
         .with_message_repo(repo).with_managed_deliveries(service.clone())
         .with_group_delivery_limits(std::collections::BTreeMap::from([("bot-driver".into(), 10)]))
-        .with_session_management(Arc::new(StaticSessionManagement::new(test_session("group-1:resolve", "group-1", group.participants))));
+        .with_session_management(Arc::new(StaticSessionManagement::new(test_session("group-1:resolve", "group-1", group.participants))))
+        .with_bot_authority_hook(Some(authority()));
     let human = CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "1".into() });
     let admitted = flow.handle_web_send(WebSendCommand {
         caller: human.clone(), group_id: "group-1".into(), session_id: Some("group-1:resolve".into()), from_actor_id: "human_1".into(),

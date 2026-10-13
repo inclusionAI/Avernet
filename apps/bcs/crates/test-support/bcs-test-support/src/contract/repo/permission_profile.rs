@@ -92,3 +92,13 @@ pub async fn run_permission_profile_repo_contract<T: PermissionProfileRepoPort +
         "unknown bot has no default"
     );
 }
+/// Rule 25 conformance entry over the same real
+/// [`run_permission_profile_repo_contract`] suite.
+pub async fn permission_profile_repo_port_contract_tests<
+    T: PermissionProfileRepoPort + ?Sized,
+>(
+    repo: &T,
+    env: &str,
+) {
+    run_permission_profile_repo_contract(repo, env).await;
+}

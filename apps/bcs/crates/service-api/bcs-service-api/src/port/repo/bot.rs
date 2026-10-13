@@ -38,6 +38,88 @@ pub trait BotRepoPort: Send + Sync {
         Err(crate::types::ServiceError::InternalError("atomic registration creation is not configured".into()))
     }
 
+    /// Trusted atomic registration with ownership initialization
+    /// (bot authority spec §10.2).
+    ///
+    /// One store transaction commits: the Bot identity (created only
+    /// when absent; existing active/deleted records are never
+    /// updated, so a reused Bot ID never resets its owner), the
+    /// Human for `initialization.owner_user_id` — the identity row
+    /// (`bcs_user_identities`, insert-or-ignore) and the Human ACTOR
+    /// row (`bcs_bots`) are ensured in the SAME transaction so the
+    /// Task-2/3 human-existence guards accept the fresh owner —
+    /// the approved owner edge, `ownership_version = 1`
+    /// (never from a version-0 runtime path), the default runtime
+    /// permission profile, the Provider gateway projection when the
+    /// command needs one, and the `initialize` audit row. The
+    /// owner is also the first `created_by`; later re-registrations
+    /// or onboards only update their own fields and never reset the
+    /// owner. Failure is all-or-nothing: everything unwritten, no
+    /// token mapped, no cache publish and no runtime activation.
+    ///
+    /// `initialization.owner_user_id` comes only from a verified
+    /// registration token; the mutation keeps the real initiator.
+    async fn create_registration_if_absent_with_ownership(
+        &self, _bot_id: String, _capabilities: BotCapabilities,
+        _created_by: &str, _token: &str,
+        _initialization: crate::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<bool> {
+        Err(crate::types::ServiceError::InternalError("trusted ownership registration is not configured".into()))
+    }
+
+    /// Initialize ownership on an already-existing live Bot (governance
+    /// backfill; never used for trusted registration, which uses
+    /// [`Self::create_registration_if_absent_with_ownership`]).
+    ///
+    /// Returns the current owner view. When the Bot is already
+    /// initialized (version > 0) nothing is written; a repeat by
+    /// the SAME owner is idempotent and returns the CURRENT owner,
+    /// while a different owner is REFUSED — a reused or transferred
+    /// Bot ID never has its owner reset. Deleted IDs never
+    /// resurrect ownership.
+    async fn initialize_ownership(
+        &self, _bot_id: &str, _owner_user_id: &str,
+        _mutation: crate::types::bot_authority::AuthorityMutation,
+    ) -> ServiceResult<crate::types::bot_authority::BotOwnershipView> {
+        Err(crate::types::ServiceError::InternalError("ownership initialization is not configured".into()))
+    }
+
+    /// Governance facts of ONE Bot for the bcs-admin
+    /// ownership-backfill dry-run read (bot-authority spec
+    /// §10.4/§10.5). Pure read over the SAME facts the
+    /// [`Self::initialize_ownership`] guard checks — live
+    /// state, `created_by`, the Human identity registry,
+    /// the current version and the approved owner edges —
+    /// so the dry-run classification and the apply write
+    /// can never disagree about the world. `None` when the
+    /// Bot is unknown; failures propagate.
+    async fn ownership_governance_state(
+        &self,
+        _bot_id: &str,
+    ) -> ServiceResult<Option<crate::types::bot_authority::BotOwnershipGovernance>> {
+        Err(crate::types::ServiceError::InternalError("the ownership governance read is not configured".into()))
+    }
+
+    /// Atomic ordinary-Bot retirement (bot authority spec §7.1).
+    ///
+    /// ONE transaction commits the Bot tombstone, the owner/
+    /// manager edge revocation, the pending-transfer closure
+    /// (system decision, fixed reason) and the `retire` audit —
+    /// the real mutation actor is the audit initiator. This is
+    /// the ordinary-retirement command; a Provider-managed Bot
+    /// must go through `BotProviderRepoPort::retire_with_authority`
+    /// instead (never chained one after the other). `Ok(true)`
+    /// when this command executed the tombstone transition;
+    /// `Ok(false)` when the Bot was already tombstoned
+    /// (idempotent re-execution, no duplicate audit; the
+    /// revocation/closure steps still run and are no-ops).
+    async fn retire_with_authority(
+        &self, _bot_id: &str,
+        _mutation: crate::types::bot_authority::AuthorityMutation,
+    ) -> ServiceResult<bool> {
+        Err(crate::types::ServiceError::InternalError("bot retirement with authority is not configured".into()))
+    }
+
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()>;
 
     async fn register_with_owner_and_token(

@@ -9,6 +9,7 @@ version = { workspace = true }
 
 [dependencies]
 async-trait = { workspace = true }
+bcs-config = { workspace = true }
 bcs-db-api = { workspace = true }
 bcs-domain = { workspace = true }
 bcs-event-store = { workspace = true }
@@ -19,7 +20,11 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+bcs-config-api  = { workspace = true }
+bcs-db-mysql    = { workspace = true }
+mysql_async     = { workspace = true }
 bcs-db-local = { workspace = true }
+bcs-group-store = { workspace = true }
 bcs-test-support = { workspace = true }
 tokio-test = "0.4"
 # migrations.rs is pulled into integration tests via #[path]; it needs sha2/hex

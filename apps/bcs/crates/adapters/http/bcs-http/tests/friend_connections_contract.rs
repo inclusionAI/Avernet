@@ -319,16 +319,41 @@ async fn build_app(
     user_identity: Option<Arc<dyn UserIdentityPort>>,
     token_map: Option<(&str, &str)>,
 ) -> axum::Router {
+    build_app_with_authority(
+        temp_dir,
+        connect,
+        bot_query,
+        user_identity,
+        token_map,
+        None,
+    )
+    .await
+}
+
+/// Human act-as-Bot entries consult the REAL
+/// authority hook (bot-authority plan Task 6.5);
+/// pass a seeded chain via `authority`.
+async fn build_app_with_authority(
+    temp_dir: &TempDir,
+    connect: Arc<dyn ConnectService>,
+    bot_query: Arc<dyn BotQueryService>,
+    user_identity: Option<Arc<dyn UserIdentityPort>>,
+    token_map: Option<(&str, &str)>,
+    authority: Option<Arc<bcs_test_support::LazySeedAuthorityHook>>,
+) -> axum::Router {
     let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
     if let Some((token, bot_id)) = token_map {
         registry
             .store_token_mapping(token.to_string(), bot_id.to_string())
             .await;
     }
-    let services = Services::builder()
+    let mut services = Services::builder()
         .registry(registry)
-        .bot_query(bot_query)
-        .build_for_test();
+        .bot_query(bot_query);
+    if let Some(authority) = authority {
+        services = services.bot_authority_hook(authority);
+    }
+    let services = services.build_for_test();
     let state = if let Some(user_identity) = user_identity {
         HttpAppState::new(services)
             .with_connect(connect)
@@ -428,18 +453,20 @@ async fn friend_connection_request_forwards_whitelisted_auth_headers_to_connect_
 
 #[tokio::test]
 async fn friend_connection_request_allows_human_to_act_as_owned_bot() {
+    // LIVE authority: the act-as judgment follows the
+    // current owner edge; no `created_by` mirror.
     let connect = Arc::new(RecordingConnectService::default());
-    let bot_query = Arc::new(RecordingBotQueryService::with_owned_bot(
-        "bot-owned",
-        "10001",
-    ));
+    let authority = bcs_test_support::lazy_authority_chain().hook;
+    authority.seed_owner("bot-owned", "10001");
+    let bot_query = Arc::new(RecordingBotQueryService::default());
     let temp_dir = TempDir::new().unwrap();
-    let app = build_app(
+    let app = build_app_with_authority(
         &temp_dir,
         connect.clone(),
         bot_query.clone(),
         Some(Arc::new(StaticUserIdentityPort::human("10001"))),
         None,
+        Some(authority),
     )
     .await;
 
@@ -476,21 +503,30 @@ async fn friend_connection_request_allows_human_to_act_as_owned_bot() {
         calls.as_slice(),
         &[("bot-owned".to_string(), "peer-bot".to_string(), Some("hello".to_string()))]
     );
+    // The legacy creator listing is no longer consulted.
     let owner_calls = bot_query.list_bots_by_creator_calls.lock().await;
-    assert_eq!(owner_calls.as_slice(), &["10001".to_string()]);
+    assert!(owner_calls.is_empty());
 }
 
 #[tokio::test]
 async fn friend_connection_request_rejects_unowned_bot_impersonation() {
+    // LIVE authority: no edge for the impersonating
+    // Bot → clean 403 (the unprovisioned reader
+    // never consults authority, so an unwired-suite
+    // chain cannot turn this into a 500).
     let connect = Arc::new(RecordingConnectService::default());
+    let authority = bcs_test_support::lazy_authority_chain().hook;
+    authority.seed_manager("decoy-bot", "10001");
+    authority.revoke_manager("decoy-bot", "10001");
     let bot_query = Arc::new(RecordingBotQueryService::default());
     let temp_dir = TempDir::new().unwrap();
-    let app = build_app(
+    let app = build_app_with_authority(
         &temp_dir,
         connect.clone(),
         bot_query.clone(),
         Some(Arc::new(StaticUserIdentityPort::human("10001"))),
         None,
+        Some(authority),
     )
     .await;
 

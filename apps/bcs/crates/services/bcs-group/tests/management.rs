@@ -1341,10 +1341,15 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             message_view_scope: None,
         })
         .await;
+    // Row 14 cutover (bot-authority plan Task 6.3):
+    // acting THROUGH a Bot the Human does not
+    // control is rejected at the control leg, before
+    // the coordinator check that used to catch it via
+    // the legacy `created_by = None` auto-claim.
     assert!(matches!(
         non_coordinator,
         Err(GroupUseCaseError::Forbidden(message))
-            if message.contains("group coordinator")
+            if message.contains("Not authorized as bot 'other-bot'")
     ));
 
     let protected_stranger = service
@@ -2767,6 +2772,11 @@ struct Fixture {
     friend: Arc<FakeFriendCoreService>,
     relation: Arc<FakeRelationCoreService>,
     provider_downlink_bots: Arc<RwLock<HashSet<String>>>,
+    /// The authority chain backing the control
+    /// legs (rows 14/15/16): a LAZY-seed live hook
+    /// whose owner edges the sync `with_bot`
+    /// builder enqueues.
+    authority: Arc<bcs_test_support::LazySeedAuthorityHook>,
 }
 
 impl Fixture {
@@ -2777,6 +2787,7 @@ impl Fixture {
             friend: Arc::new(FakeFriendCoreService::default()),
             relation: Arc::new(FakeRelationCoreService::default()),
             provider_downlink_bots: Arc::new(RwLock::new(HashSet::new())),
+            authority: bcs_test_support::lazy_authority_chain().hook,
         }
     }
 
@@ -2819,6 +2830,7 @@ impl Fixture {
             session_management,
             Arc::new(NoopSystemMessageService),
         )
+        .with_bot_authority(self.authority.clone())
         .with_bot_runtime(Arc::new(FakeBotRuntimeConnectionService {
             provider_downlink_bots: self.provider_downlink_bots.clone(),
         }))
@@ -2846,6 +2858,7 @@ impl Fixture {
             ))),
             system_message,
         )
+        .with_bot_authority(self.authority.clone())
         .with_bot_runtime(Arc::new(FakeBotRuntimeConnectionService {
             provider_downlink_bots: self.provider_downlink_bots.clone(),
         }))
@@ -2860,6 +2873,11 @@ impl Fixture {
     ) -> Self {
         self.registry
             .insert(bot(bot_uuid, name, visibility, created_by));
+        // Rows 14/15/16: the CURRENT owner edge
+        // replaces the historical `created_by`.
+        if let Some(owner) = created_by {
+            self.authority.seed_owner(bot_uuid, owner);
+        }
         self
     }
 
@@ -2877,6 +2895,9 @@ impl Fixture {
     ) -> Self {
         self.registry
             .insert(bot(bot_uuid, name, visibility, created_by));
+        if let Some(owner) = created_by {
+            self.authority.seed_owner(bot_uuid, owner);
+        }
         self.provider_downlink_bots
             .write()
             .unwrap()

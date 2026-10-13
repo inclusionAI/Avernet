@@ -6,12 +6,14 @@ use bcs_service_api::{
     ActorKind, BotCatalogCleanupPort, BotControlPlaneCoreService, BotRegistryCoreService,
     BotTaskModesQuery,
     ChannelBindingCleanupPort, DeleteProviderBotCommand, DeleteProviderBotOutcome,
-    NoopBotCatalogCleanupPort, NoopChannelBindingCleanupPort, ProviderBotBinding,
+    NoopBotCatalogCleanupPort, NoopChannelBindingCleanupPort,
+    ProviderBotBinding,
     ProviderBotCoreService,
     ProviderBotRosterItem, ProviderBotTaskModesFilter, ProviderCoreService,
     ProviderManagementService, ProviderRecord, RegisterProviderBotCommand,
     RegisterProviderBotOutcome, RegisterProviderBotParams, RegisterProviderCommand,
-    RegisterProviderOutcome, RelationCoreService, ServiceError, ServiceResult,
+    RegisterProviderOutcome, RelationCoreService, RetireProviderBotParams,
+    ServiceError, ServiceResult,
     UpdateProviderBotCommand, UpdateProviderBotOutcome, UpdateProviderCommand,
 };
 use bcs_user_directory_api::UserDirectoryPlugin;
@@ -378,69 +380,57 @@ impl ProviderManagementService for ProviderManagement {
         self.ensure_provider_admin_active(&command.provider_id, &command.provider_admin_token)
             .await?;
 
-        if let Some(result) = self.provider_bot_core.delete_registered_provider_bot(
-            &command.provider_id, &command.provider_admin_token, &command.provider_bot_ref,
-        ).await? {
-            self.cleanup_deleted_bot(&result.bot_uuid).await?;
-            return Ok(DeleteProviderBotOutcome {
-                bot_uuid: result.bot_uuid, provider_id: command.provider_id,
-                provider_bot_ref: command.provider_bot_ref, deleted: result.deleted,
-            });
-        }
-        let mut was_active_binding = false;
-        let binding = self
+        // ONE atomic Provider retirement (spec §7.1): the
+        // Core verifies the Provider credential, resolves the
+        // branch and commits the tombstone, binding disable,
+        // authority cleanup and retire audit in one store
+        // transaction. No ordinary delete is chained after a
+        // committed Provider deletion.
+        let retirement = self
             .provider_bot_core
-            .get_provider_bot_binding_by_ref(&command.provider_id, &command.provider_bot_ref)
+            .retire_registered_bot(RetireProviderBotParams {
+                provider_id: command.provider_id.clone(),
+                provider_admin_token: command.provider_admin_token.clone(),
+                provider_bot_ref: command.provider_bot_ref.clone(),
+                allow_unbound_owner_suffixed_bot: command.allow_unbound_owner_suffixed_bot,
+            })
             .await?;
-        let (bot_uuid, cleanup_before_soft_delete) = match binding {
-            Some(binding) => {
-                was_active_binding = !binding.disabled;
-                if binding.provider_id != command.provider_id {
-                    return Err(ServiceError::Forbidden("provider_id_mismatch".to_string()));
-                }
-                let _ = self
-                    .provider_bot_core
-                    .set_provider_bot_disabled(
-                        &command.provider_id,
-                        &binding.bot_uuid,
-                        &command.provider_admin_token,
-                        true,
-                    )
-                    .await?;
-                (binding.bot_uuid, false)
-            }
-            // Legacy bots on allowed-switch providers reuse provider_bot_ref as bot_uuid
-            // and may have no binding row.
-            None if command.allow_unbound_owner_suffixed_bot
-                && is_owner_suffixed_bot_id(&command.provider_bot_ref) =>
-            {
-                if self.registry.get(&command.provider_bot_ref).await.is_none() {
-                    return Err(ServiceError::BotNotFound(command.provider_bot_ref));
-                }
-                (command.provider_bot_ref.clone(), true)
-            }
-            None => {
-                return Err(ServiceError::BotNotFound(command.provider_bot_ref));
-            }
-        };
 
-        // Binding-backed bots can be tombstoned before cleanup because their
-        // binding retains the identity needed for retries. Unbound legacy bots
-        // have no such durable lookup key, so keep the registry identity active
-        // until cleanup succeeds and a failed request remains retryable.
-        let deleted = if cleanup_before_soft_delete {
-            self.cleanup_deleted_bot(&bot_uuid).await?;
-            self.registry.soft_delete(&bot_uuid).await
-        } else {
-            let deleted = self.registry.soft_delete(&bot_uuid).await || was_active_binding;
-            self.cleanup_deleted_bot(&bot_uuid).await?;
-            deleted
-        };
+        // Post-commit (spec §7.1): invalidate the
+        // runtime/token/metadata caches FIRST — a stale
+        // cache must never resurrect a valid identity from
+        // before the tombstone — then run the existing
+        // external cleanup.
+        self.registry.soft_delete(&retirement.bot_id).await;
+        if let Err(error) = self.cleanup_deleted_bot(&retirement.bot_id).await {
+            // Stable `retirement_cleanup_pending`: the
+            // durable retirement is committed and is NEVER
+            // rolled back, but the caller does NOT get a
+            // full success either. A retry re-derives the
+            // identity from the retained
+            // tombstone/metadata/binding (all three
+            // branches) and is idempotent: no resurrected
+            // Bot, no duplicate retire audit, no outbox.
+            tracing::warn!(
+                request_id = %bcs_observability::CurrentRequestId,
+                bot_uuid = %retirement.bot_id,
+                provider_id = %command.provider_id,
+                error = %error,
+                "retirement external cleanup failed; cleanup pending"
+            );
+            return Err(ServiceError::Conflict(format!(
+                "{}: bot {} retirement is committed; retry the \
+                 external cleanup",
+                bcs_service_api::application::v1::bot_authority::
+                    ERROR_RETIREMENT_CLEANUP_PENDING,
+                retirement.bot_id
+            )));
+        }
         Ok(DeleteProviderBotOutcome {
-            bot_uuid,
+            bot_uuid: retirement.bot_id,
             provider_id: command.provider_id,
             provider_bot_ref: command.provider_bot_ref,
-            deleted,
+            deleted: retirement.changed,
         })
     }
 
@@ -511,10 +501,4 @@ impl ProviderManagementService for ProviderManagement {
             visibility: capabilities.visibility,
         })
     }
-}
-
-fn is_owner_suffixed_bot_id(bot_uuid: &str) -> bool {
-    bot_uuid
-        .rsplit_once(':')
-        .is_some_and(|(prefix, owner)| !prefix.trim().is_empty() && !owner.trim().is_empty())
 }

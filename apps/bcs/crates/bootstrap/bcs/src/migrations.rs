@@ -126,6 +126,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     },
     SqliteMigration { version: 32, name: "session_registry" },
     SqliteMigration { version: 33, name: "provider_slug" },
+    SqliteMigration { version: 34, name: "bot_authority" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -402,6 +403,10 @@ async fn apply_sqlite_migration_body(
             db.transaction(steps).await?;
             Ok(())
         }
+        // Bot authority (spec §4): bcs_bots.ownership_version,
+        // edge_grants unique-key swap + approved-owner partial
+        // unique index, and the two authority tables/indexes.
+        34 => add_sqlite_bot_authority_schema(db).await,
         _ => Ok(()),
     }
 }

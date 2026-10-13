@@ -1,9 +1,12 @@
 //! Authoritative Agent registration reads, independent of runtime caches.
 
+use bcs_config::resolve_env_str as resolve_env;
+use bcs_db_api::{DbSqlFlavor, DbValue as Value, db_get_column, db_get_column_opt};
 use bcs_service_api::types::AgentBotRegistration;
+use bcs_service_api::{ServiceError, ServiceResult};
 use serde::Deserialize;
 
-use super::{DbSqlFlavor, PersistentBotRepo, ServiceError, ServiceResult, Value, db_get_column, db_get_column_opt, resolve_env};
+use super::PersistentBotRepo;
 
 #[derive(Deserialize)]
 struct PublicBotInfo {

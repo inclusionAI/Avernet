@@ -1,5 +1,6 @@
 //! Authorized public projections and per-target cancellation.
 use crate::BcsMessageFlow;
+use crate::group_flow::human_controls_bot;
 use bcs_domain::{PersistedMessage, Session};
 use bcs_service_api::{CallerContext, ServiceError, ServiceResult};
 use bcs_service_api::{
@@ -159,9 +160,10 @@ pub async fn resolve(
         .map_err(|_| ServiceError::InternalError("delivery resolution lookup failed".into()))?
         .into_iter().find(|row| row.delivery_id == command.delivery_id && row.session_id == session.id)
         .ok_or_else(|| ServiceError::Conflict("delivery not found".into()))?;
-    if message.sender_id != actor && !flow.registry.get(&row.target_bot_id).await
-        .is_some_and(|bot| bot.created_by.as_deref() == Some(human.staff_no.as_str())) {
-        return Err(ServiceError::Forbidden("only the sender or target Bot owner can resolve delivery".into()));
+    if message.sender_id != actor
+        && !human_controls_bot(flow, &human.staff_no, &row.target_bot_id).await?
+    {
+        return Err(ServiceError::Forbidden("only the sender or the current manager of the target Bot can resolve delivery".into()));
     }
     if row.state.kind != bcs_domain::DeliveryType::Send
         || !matches!(row.state.status, Status::Unknown | Status::CancelUnknown)
@@ -249,9 +251,7 @@ async fn visible(
         let allowed = owner == actor
             || match caller {
                 CallerContext::Human(human) => {
-                    flow.registry.get(owner).await.is_some_and(|bot| {
-                        bot.created_by.as_deref() == Some(human.staff_no.as_str())
-                    })
+                    human_controls_bot(flow, &human.staff_no, owner).await?
                 }
                 _ => false,
             };

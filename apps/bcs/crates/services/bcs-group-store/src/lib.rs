@@ -38,6 +38,7 @@ use bcs_service_api::{
     Workspace,
 };
 
+pub mod authorization_snapshot;
 pub mod memory;
 
 pub use bcs_service_api::port::repo::GroupRepoPort;

@@ -25,6 +25,10 @@ pub struct BcsGroupMessageHistory {
     registry: Arc<dyn BotRegistryCoreService>,
     bot_delivery: Arc<dyn BotDeliveryPort>,
     bot_request: Arc<dyn GroupHistoryBotRequestPort>,
+    /// Narrow bot-authority hook for Human→Bot control
+    /// judgments (bot-authority plan Task 6.5); unwired
+    /// instances fail closed at those judgments.
+    bot_authority: Option<Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityHook>>,
 }
 
 impl BcsGroupMessageHistory {
@@ -39,7 +43,81 @@ impl BcsGroupMessageHistory {
             registry,
             bot_delivery,
             bot_request,
+            bot_authority: None,
         }
+    }
+
+    /// Wire the narrow bot-authority hook (Task 6.5). A
+    /// history service without one fails closed at its
+    /// Human→Bot control judgments instead of consulting
+    /// legacy `created_by` data.
+    pub fn with_bot_authority_hook(
+        mut self,
+        hook: Option<Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityHook>>,
+    ) -> Self {
+        self.bot_authority = hook;
+        self
+    }
+
+    fn authority(
+        &self,
+    ) -> Result<&dyn bcs_service_api::port::bot_authority::BotAuthorityHook, GroupUseCaseError> {
+        use bcs_service_api::ServiceError;
+        self.bot_authority
+            .as_deref()
+            .ok_or_else(|| {
+                GroupUseCaseError::from(ServiceError::InternalError(
+                    "bot authority hook is not wired".into(),
+                ))
+            })
+    }
+
+    /// Live Human→Bot control judgment (spec §8).
+    async fn human_controls_bot(
+        &self,
+        staff_no: &str,
+        bot_id: &str,
+    ) -> Result<bool, GroupUseCaseError> {
+        match self.authority()?.can_manage(staff_no, bot_id).await {
+            Ok(controlled) => Ok(controlled),
+            Err(error) => Err(GroupUseCaseError::from(ServiceError::InternalError(
+                format!("bot authority lookup failed: {error}"),
+            ))),
+        }
+    }
+
+    /// Live group access for a Human caller: self-participation
+    /// counts directly; a controlled participant Bot counts
+    /// through the authority hook. The legacy `created_by` /
+    /// owner-suffix probes are gone.
+    async fn human_has_group_access(
+        &self,
+        group: &Group,
+        actor_id: &str,
+        staff_no: &str,
+    ) -> Result<bool, GroupUseCaseError> {
+        if group
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == actor_id)
+        {
+            return Ok(true);
+        }
+
+        for participant in group
+            .participants
+            .iter()
+            .filter(|participant| participant.is_bot())
+        {
+            if self
+                .human_controls_bot(staff_no, &participant.bot_uuid)
+                .await?
+            {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 }
 
@@ -277,29 +355,11 @@ impl BcsGroupMessageHistory {
         group: &Group,
         caller: &HumanActor,
     ) -> Result<(), GroupUseCaseError> {
-        if group
-            .participants
-            .iter()
-            .any(|participant| participant.bot_uuid == caller.actor_id)
+        if self
+            .human_has_group_access(group, &caller.actor_id, &caller.staff_no)
+            .await?
         {
             return Ok(());
-        }
-
-        for participant in group
-            .participants
-            .iter()
-            .filter(|participant| participant.is_bot())
-        {
-            let Some(bot) = self.registry.get(&participant.bot_uuid).await else {
-                continue;
-            };
-            if bot_belongs_to_staff(
-                &participant.bot_uuid,
-                bot.created_by.as_deref(),
-                &caller.staff_no,
-            ) {
-                return Ok(());
-            }
         }
 
         Err(GroupUseCaseError::Forbidden(format!(
@@ -321,22 +381,21 @@ impl BcsGroupMessageHistory {
             return Ok(());
         }
 
-        // A human may own a Bot that was pulled into this session without being
-        // a group participant (e.g. a driver Bot dispatching to the human's Bot).
-        // Such a session is visible in the Bot tab, so reading its messages must
-        // be allowed — same ownership rule as the group-level check below.
+        // A human may control a Bot that was pulled into this
+        // session without being a group participant (e.g. a
+        // driver Bot dispatching to the human's Bot). Such a
+        // session is visible in the Bot tab, so reading its
+        // messages must be allowed — the SAME live-edge rule as
+        // the group-level check (spec §8; the legacy
+        // `created_by` probe is gone).
         for participant in session_participants
             .iter()
             .filter(|participant| participant.is_bot())
         {
-            let Some(bot) = self.registry.get(&participant.bot_uuid).await else {
-                continue;
-            };
-            if bot_belongs_to_staff(
-                &participant.bot_uuid,
-                bot.created_by.as_deref(),
-                &caller.staff_no,
-            ) {
+            if self
+                .human_controls_bot(&caller.staff_no, &participant.bot_uuid)
+                .await?
+            {
                 return Ok(());
             }
         }
@@ -358,14 +417,16 @@ impl BcsGroupMessageHistory {
 
         if let Some(actor) = self.registry.get(view_bot_id).await {
             if actor.actor_kind == ActorKind::Bot
-                && bot_belongs_to_staff(view_bot_id, actor.created_by.as_deref(), &caller.staff_no)
+                && self
+                    .human_controls_bot(&caller.staff_no, view_bot_id)
+                    .await?
             {
                 return Ok(());
             }
         }
 
         Err(GroupUseCaseError::Forbidden(format!(
-            "view_bot_id '{}' must be the current Human '{}' or a Bot owned by them",
+            "view_bot_id '{}' must be the current Human '{}' or a Bot controlled by them",
             view_bot_id, caller.actor_id
         )))
     }
@@ -1087,19 +1148,6 @@ fn apply_window(messages: Vec<GroupMessage>, limit: u64, before: Option<u64>) ->
 
 fn next_before_from_messages(messages: &[GroupMessage]) -> Option<u64> {
     messages.iter().map(|message| message.timestamp).min()
-}
-
-fn bot_belongs_to_staff(bot_uuid: &str, created_by: Option<&str>, staff_no: &str) -> bool {
-    if created_by == Some(staff_no) {
-        return true;
-    }
-    if created_by.is_some() {
-        return false;
-    }
-    bot_uuid
-        .rsplit_once(':')
-        .map(|(_, suffix)| suffix == staff_no)
-        .unwrap_or(false)
 }
 
 fn handle_queued_message(content: &str) -> Vec<(String, Option<String>, Option<String>)> {

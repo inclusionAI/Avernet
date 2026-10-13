@@ -1,7 +1,7 @@
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthenticatedCaller, CreateSession, DeliveryType, IdentityPolicy,
-    MessageViewScope, ParticipantMode, ParticipantRole, Principal, SessionCaller, SessionKind,
-    SessionStatus, UpdateSession, select_principal,
+    ApplicationError, AuthenticatedCaller, CreateSession, DeliveryType,
+    MessageViewScope, ParticipantMode, ParticipantRole, SessionKind,
+    SessionStatus, UpdateSession,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -76,9 +76,14 @@ pub struct CreateSessionRequest {
 }
 
 impl CreateSessionRequest {
+    /// Protocol adaptation only. The effective
+    /// Human/Bot caller choice is the application's
+    /// (bcs-app-session `create` resolves the live
+    /// hybrid rule); this carries the raw
+    /// authenticated caller.
     pub fn into_command(
         self,
-        caller: &AuthenticatedCaller,
+        caller: AuthenticatedCaller,
         group_id: String,
     ) -> Result<CreateSession, ApplicationError> {
         if self.acting_bot_id.as_deref() == Some("") {
@@ -90,16 +95,6 @@ impl CreateSessionRequest {
         if let Some(meta) = self.meta.as_ref() {
             validate_session_metadata(meta)?;
         }
-        let caller = match select_principal(caller, IdentityPolicy::HumanOrOwnedBot)? {
-            Principal::Human(human) => SessionCaller::Human {
-                actor_id: format!("human_{}", human.subject.id),
-                owner_id: human.subject.id,
-                display_name: human.subject.display_name.or(human.subject.full_name),
-            },
-            Principal::Bot(bot) => SessionCaller::Bot {
-                bot_uuid: bot.bot_uuid,
-            },
-        };
         Ok(CreateSession {
             caller,
             group_id,

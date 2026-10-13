@@ -20,6 +20,14 @@ async fn exercise_registration_contract(auth_mode: ProviderAuthMode) {
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(MemoryProviderStore::new());
     let bots = Arc::new(MemoryBotRepo::with_base_dir(dir.path().into()));
+    // The trusted registration validates its owner against the
+    // Human registry (spec §10.2/§5.2): the fixture presets
+    // it like the Backend-synced SQL paths do.
+    bots.authority_state()
+        .write()
+        .await
+        .humans
+        .insert("owner".to_string());
     let metadata = Arc::new(MemoryBotProviderStore::new(bots.clone(), store.clone()));
     let registry = Arc::new(BotCore::with_provider_repos(
         bots,

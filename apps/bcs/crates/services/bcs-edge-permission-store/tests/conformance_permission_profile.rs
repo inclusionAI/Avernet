@@ -11,13 +11,13 @@ use std::sync::Arc;
 use bcs_db_api::{DbPlugin, DbStatement};
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_edge_permission_store::DbPermissionProfileStore;
-use bcs_test_support::contract::repo::run_permission_profile_repo_contract;
+use bcs_test_support::contract::repo::permission_profile_repo_port_contract_tests;
 
 #[tokio::test]
 async fn permission_profile_repo_contract_sqlite() {
     let db = sqlite_with_schema().await;
     let store = DbPermissionProfileStore::sqlite(db);
-    run_permission_profile_repo_contract(&store, "test").await;
+    permission_profile_repo_port_contract_tests(&store, "test").await;
 }
 
 /// Fresh LocalSqliteDbPlugin with the full 14-column `permission_profiles`

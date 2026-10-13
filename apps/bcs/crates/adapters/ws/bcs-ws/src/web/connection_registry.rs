@@ -5,12 +5,15 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use bcs_domain::{ActorStatus, HumanMessageView, MessageAudience, MessageVisibilityDomain};
+use bcs_service_api::application::v1::{DeliveryVisibility, ProtectedDeliveryBinding};
 use bcs_service_api::port::{ParticipantViewBindingPort, ParticipantViewScopeChangeLease};
 use bcs_service_api::{BotDetailCommand, BotQueryService, ServiceError, ServiceResult};
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock, mpsc};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
+
+use crate::shared::OutboundFrame;
 
 #[derive(Debug)]
 struct FrontendConnection {
@@ -29,6 +32,24 @@ struct FrontendConnection {
     conn_id: u64,
     human_view: Option<HumanMessageView>,
     shutdown: CancellationToken,
+    /// Protected-delivery binding of THIS connection (real
+    /// User/token tenant/resource/authorized view; the
+    /// instance id is stamped to `conn_id` at insert).
+    /// Fanout frames for connections with a binding flow as
+    /// typed protected frames through the connection's
+    /// bounded queue and are finally authorized per frame at
+    /// the socket writer (bot-authority spec §8.2).
+    protected: Option<ProtectedConnectionDelivery>,
+}
+
+/// The protected delivery channels of one registry
+/// connection: the bounded out-of-band frame queue plus THIS
+/// connection's binding (fanout authorizes per
+/// (connection, frame)).
+#[derive(Debug, Clone)]
+pub struct ProtectedConnectionDelivery {
+    pub queue: mpsc::Sender<OutboundFrame>,
+    pub binding: ProtectedDeliveryBinding,
 }
 
 static NEXT_CONN_ID: AtomicU64 = AtomicU64::new(1);
@@ -92,6 +113,10 @@ impl WorkbenchConnectionRegistry {
         .await
     }
 
+    /// Subscribing WITHOUT protection keeps the legacy registry
+    /// behavior (per-connection `human_view` filter over the raw
+    /// String channel). Production Workbench connections subscribe
+    /// through [`Self::subscribe_protected_with_shutdown`].
     pub async fn subscribe_with_shutdown(
         &self,
         session_id: String,
@@ -99,6 +124,60 @@ impl WorkbenchConnectionRegistry {
         user_id: Option<String>,
         human_view: Option<HumanMessageView>,
         shutdown: CancellationToken,
+    ) -> ServiceResult<u64> {
+        self.do_subscribe(
+            session_id,
+            tx,
+            user_id,
+            human_view,
+            shutdown,
+            None,
+        )
+        .await
+    }
+
+    /// Subscribe with a protected-delivery binding: fanout frames to
+    /// this connection flow as `OutboundFrame::Protected` into the
+    /// connection's bounded queue and are re-authorized per frame at
+    /// the final writer. The binding's connection-instance id is
+    /// stamped to the allocated `conn_id`.
+    pub async fn subscribe_protected_with_shutdown(
+        &self,
+        session_id: String,
+        tx: mpsc::Sender<String>,
+        user_id: Option<String>,
+        human_view: Option<HumanMessageView>,
+        shutdown: CancellationToken,
+        mut binding: ProtectedDeliveryBinding,
+        queue: mpsc::Sender<OutboundFrame>,
+    ) -> ServiceResult<u64> {
+        self.do_subscribe(
+            session_id,
+            tx,
+            user_id,
+            human_view,
+            shutdown,
+            Some(ProtectedConnectionDelivery {
+                queue,
+                binding: {
+                    // The instance id is stamped below; a placeholder
+                    // keeps the binding whole until insert.
+                    binding.connection_instance_id = 0;
+                    binding
+                },
+            }),
+        )
+        .await
+    }
+
+    async fn do_subscribe(
+        &self,
+        session_id: String,
+        tx: mpsc::Sender<String>,
+        user_id: Option<String>,
+        human_view: Option<HumanMessageView>,
+        shutdown: CancellationToken,
+        protected: Option<ProtectedConnectionDelivery>,
     ) -> ServiceResult<u64> {
         // Hold the barrier mutex until the connection is inserted. This makes
         // subscribe linearizable with begin_scope_change: either the new
@@ -120,6 +199,10 @@ impl WorkbenchConnectionRegistry {
         // sessions lock — so the broadcast hot path never awaits a remote lookup
         // (and never awaits one while holding the sessions write lock).
         let silent = self.resolve_silent_for_user(user_id.as_deref()).await;
+        let protected = protected.map(|mut delivery| {
+            delivery.binding.connection_instance_id = conn_id;
+            delivery
+        });
         let conn = FrontendConnection {
             tx,
             user_id,
@@ -128,6 +211,7 @@ impl WorkbenchConnectionRegistry {
             conn_id,
             human_view,
             shutdown,
+            protected,
         };
 
         self.sessions
@@ -138,6 +222,26 @@ impl WorkbenchConnectionRegistry {
             .push(conn);
         drop(barriers);
         Ok(conn_id)
+    }
+
+    /// The protected binding of ONE connection instance (fanout
+    /// replay paths re-use the connection's own binding). `None` on
+    /// legacy/unprotected subscriptions.
+    pub async fn protected_binding(
+        &self,
+        session_id: &str,
+        conn_id: u64,
+    ) -> Option<ProtectedDeliveryBinding> {
+        self.sessions
+            .read()
+            .await
+            .get(session_id)
+            .and_then(|connections| {
+                connections
+                    .iter()
+                    .find(|conn| conn.conn_id == conn_id)
+            })
+            .and_then(|conn| conn.protected.as_ref().map(|p| p.binding.clone()))
     }
 
     pub async fn unsubscribe(&self, session_id: &str, conn_id: u64) {
@@ -219,58 +323,114 @@ impl WorkbenchConnectionRegistry {
     }
 
     async fn broadcast_selected(&self, session_id: &str, event_json: &str, visibility_domain: MessageVisibilityDomain, audience: Option<&MessageAudience>, exclude_conn_id: Option<u64>, actor_ids: Option<&[String]>) -> usize {
-        let mut sessions = self.sessions.write().await;
-        let Some(connections) = sessions.get_mut(session_id) else {
-            return 0;
-        };
-
-        let mut delivered = 0usize;
-        let mut disconnected = Vec::new();
-        for conn in connections.iter() {
-            if actor_ids.is_some_and(|ids| conn.user_id.as_ref().is_none_or(|actor| !ids.contains(actor))) {
-                continue;
-            }
-            if conn.shutdown.is_cancelled() {
-                continue;
-            }
-            if exclude_conn_id.is_some_and(|id| conn.conn_id == id) {
-                continue;
-            }
-            if conn
-                .human_view
-                .as_ref()
-                .is_some_and(|view| !view.allows_artifact(visibility_domain, audience))
-            {
-                continue;
-            }
-
-            // Read the flag resolved once at subscribe time — no remote lookup
-            // on the broadcast hot path, so a slow/failing BotQuery can never
-            // re-stall SSE delivery.
-            let payload = if conn.silent {
-                stamp_silent_true(event_json)
-            } else {
-                event_json.to_string()
+        // Protected connections receive the frame as a TYPED
+        // protected frame into their bounded queue; the final writer
+        // re-authorizes it per (connection, frame) against CURRENT
+        // authorization facts (bot-authority spec §8.2). Unprotected
+        // (legacy) connections keep the existing human_view filter.
+        //
+        // Registry lock discipline: the write lock only COLLECTS the
+        // eligible (connection, binding, payload) jobs — it is
+        // dropped BEFORE any enqueue await.
+        let (protected_jobs, mut delivered) = {
+            let mut sessions = self.sessions.write().await;
+            let Some(connections) = sessions.get_mut(session_id) else {
+                return 0;
             };
 
-            match conn.tx.try_send(payload) {
+            let mut protected_jobs = Vec::new();
+            let mut legacy_delivered = 0usize;
+            let mut disconnected = Vec::new();
+            for conn in connections.iter() {
+                if actor_ids.is_some_and(|ids| conn.user_id.as_ref().is_none_or(|actor| !ids.contains(actor))) {
+                    continue;
+                }
+                if conn.shutdown.is_cancelled() {
+                    continue;
+                }
+                if exclude_conn_id.is_some_and(|id| conn.conn_id == id) {
+                    continue;
+                }
+                // Read the flag resolved once at subscribe time — no remote
+                // lookup on the broadcast hot path, so a slow/failing BotQuery
+                // can never re-stall SSE delivery.
+                let payload = if conn.silent {
+                    stamp_silent_true(event_json)
+                } else {
+                    event_json.to_string()
+                };
+                if let Some(protected) = &conn.protected {
+                    protected_jobs.push((protected.clone(), payload));
+                    continue;
+                }
+                if conn
+                    .human_view
+                    .as_ref()
+                    .is_some_and(|view| !view.allows_artifact(visibility_domain, audience))
+                {
+                    continue;
+                }
+
+                match conn.tx.try_send(payload) {
+                    Ok(()) => {
+                        legacy_delivered += 1;
+                        debug!(
+                            session_id = %session_id,
+                            conn_id = conn.conn_id,
+                            connected_ms = conn.connected_at.elapsed().as_millis() as u64,
+                            "frontend event delivered"
+                        );
+                    }
+                    Err(mpsc::error::TrySendError::Closed(_)) => disconnected.push(conn.conn_id),
+                    Err(mpsc::error::TrySendError::Full(_)) => {
+                        warn!(request_id = %bcs_observability::CurrentRequestId, session_id = %session_id, conn_id = conn.conn_id, "frontend channel full");
+                    }
+                }
+            }
+            connections.retain(|conn| !disconnected.contains(&conn.conn_id));
+            (protected_jobs, legacy_delivered)
+        };
+
+        // Outside the registry lock: enqueue one protected frame per
+        // (connection, frame) — WITHOUT awaiting any subscriber's
+        // queue. A saturated slow subscriber (its final writer
+        // stopped keeping up) applies the same slow-consumer policy
+        // as the legacy lane above: the frame is dropped for THAT
+        // connection only; the remaining subscribers and the
+        // upstream caller (Bot event → message-flow → frontend
+        // delivery) never wait on it. A queue whose writer is gone
+        // retires that stale subscription.
+        let mut stale_queues = Vec::new();
+        for (protected, payload) in protected_jobs {
+            let conn_id = protected.binding.connection_instance_id;
+            let frame = OutboundFrame::Protected {
+                binding: protected.binding,
+                visibility: DeliveryVisibility {
+                    domain: visibility_domain,
+                    audience: audience.cloned(),
+                },
+                payload,
+            };
+            match protected.queue.try_send(frame) {
                 Ok(()) => {
                     delivered += 1;
-                    debug!(
+                }
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    warn!(
+                        request_id = %bcs_observability::CurrentRequestId,
                         session_id = %session_id,
-                        conn_id = conn.conn_id,
-                        connected_ms = conn.connected_at.elapsed().as_millis() as u64,
-                        "frontend event delivered"
+                        conn_id = conn_id,
+                        "frontend protected fanout queue full; frame dropped for slow subscriber"
                     );
                 }
-                Err(mpsc::error::TrySendError::Closed(_)) => disconnected.push(conn.conn_id),
-                Err(mpsc::error::TrySendError::Full(_)) => {
-                    warn!(request_id = %bcs_observability::CurrentRequestId, session_id = %session_id, conn_id = conn.conn_id, "frontend channel full");
+                Err(mpsc::error::TrySendError::Closed(_)) => {
+                    stale_queues.push(conn_id);
                 }
             }
         }
-
-        connections.retain(|conn| !disconnected.contains(&conn.conn_id));
+        for conn_id in stale_queues {
+            self.unsubscribe(session_id, conn_id).await;
+        }
         delivered
     }
 

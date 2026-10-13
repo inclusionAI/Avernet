@@ -48,6 +48,23 @@ use crate::MSG_LOG_TARGET;
 use crate::protocol_context::{group_context_input, group_type_wire};
 use crate::task_store::TaskStore;
 
+/// Live Human→Bot control judgment (bot-authority plan
+/// Task 6.5, spec §8): the legacy `created_by` comparison
+/// is replaced by the authority hook. A failing authority
+/// read is an internal error — never a deny-as-verdict.
+pub(crate) async fn human_controls_bot(
+    flow: &BcsMessageFlow,
+    staff_no: &str,
+    bot_id: &str,
+) -> ServiceResult<bool> {
+    match flow.authority()?.can_manage(staff_no, bot_id).await {
+        Ok(controlled) => Ok(controlled),
+        Err(error) => Err(ServiceError::InternalError(format!(
+            "bot authority lookup failed: {error}"
+        ))),
+    }
+}
+
 pub struct BcsMessageFlow {
     pub direct_chat: Option<Arc<crate::a2a_chat::A2aChat>>,
     pub group: Arc<dyn GroupCoreService>,
@@ -74,6 +91,10 @@ pub struct BcsMessageFlow {
     pub bot_terminal_observer: Arc<dyn BotTerminalObserverPort>,
     pub human_mention_notify: Option<Arc<dyn HumanMentionNotifyPort>>,
     pub managed_deliveries: Option<Arc<dyn bcs_service_api::application::message_delivery::ManagedMessageDeliveryService>>,
+    /// Narrow bot-authority hook consulted for Human→Bot control
+    /// judgments (bot-authority plan Task 6.5). Unwired flows fail
+    /// closed at any judgment that needs live facts.
+    pub bot_authority: Option<Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityHook>>,
     /// Composition supplies only Bots enabled for new Group admissions.
     pub group_delivery_limits: BTreeMap<String, u32>,
     pub delivery_policy: Option<Arc<crate::delivery_policy::LiveDeliveryPolicy>>,
@@ -119,6 +140,7 @@ impl BcsMessageFlow {
             channel: Arc::new(OnceLock::new()),
             bot_terminal_observer: Arc::new(NoopBotTerminalObserver),
             human_mention_notify: None,
+            bot_authority: None,
             managed_deliveries: None,
             group_delivery_limits: BTreeMap::new(),
             delivery_policy: None,
@@ -134,6 +156,27 @@ impl BcsMessageFlow {
     }
 
     pub fn with_direct_chat(mut self, direct: Arc<crate::a2a_chat::A2aChat>) -> Self { self.direct_chat = Some(direct); self }
+
+    /// Wire the narrow bot-authority hook (Task 6.5). A flow
+    /// without one fails closed at its Human→Bot control
+    /// judgments instead of consulting legacy `created_by` data.
+    pub fn with_bot_authority_hook(
+        mut self,
+        hook: Option<Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityHook>>,
+    ) -> Self {
+        self.bot_authority = hook;
+        self
+    }
+
+    /// The authority hook; failing to wire one is an error, never
+    /// a deny-as-Ok nor a deny-as-forbidden.
+    pub(crate) fn authority(
+        &self,
+    ) -> Result<&dyn bcs_service_api::port::bot_authority::BotAuthorityHook, ServiceError> {
+        self.bot_authority
+            .as_deref()
+            .ok_or_else(|| ServiceError::InternalError("bot authority hook is not wired".into()))
+    }
 
     pub fn with_coordination_intents(mut self, port: Option<Arc<dyn CoordinationIntentPort>>) -> Self {
         self.coordination_intents = port;

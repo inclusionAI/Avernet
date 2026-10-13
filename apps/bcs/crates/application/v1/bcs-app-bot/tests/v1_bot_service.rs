@@ -115,7 +115,8 @@ impl Fixture {
             Arc::new(NoopConnectService),
             Arc::new(RecordingCandidateSearch::empty()),
             BotServiceConfig { env: env.clone() },
-        );
+        )
+        .with_bot_authority_hook(bcs_test_support::authority_hook_for(repo.clone()));
         Self {
             service,
             repo,
@@ -144,10 +145,48 @@ impl Fixture {
             )
             .await
             .expect("register bot");
+        if !owner.is_empty() {
+            bcs_test_support::grant_owner_edge(&self.repo, bot_id, owner)
+                .await;
+        }
         self.repo
             .update_actor_status(bot_id, status)
             .await
             .expect("update actor status");
+    }
+
+    /// A bot the Human CONTROLS under the authority model:
+    /// the preset Human registry entry plus the governance
+    /// initialize (owner edge + version 1) on top of
+    /// `add_bot`'s created_by registration.
+    async fn add_controlled_bot(
+        &self,
+        bot_id: &str,
+        owner: &str,
+        visibility: &str,
+        status: ActorStatus,
+    ) {
+        self.repo
+            .authority_state()
+            .write()
+            .await
+            .humans
+            .insert(owner.to_string());
+        self.add_bot(bot_id, owner, visibility, status).await;
+        self.repo
+            .initialize_ownership(
+                bot_id,
+                owner,
+                bcs_service_api::types::bot_authority::AuthorityMutation {
+                    mutation_id: format!("fixture-{bot_id}"),
+                    actor: bcs_service_api::types::bot_authority::AuthorityActor::
+                        Human {
+                            user_id: owner.to_string(),
+                        },
+                },
+            )
+            .await
+            .expect("initialize ownership");
     }
 }
 
@@ -468,7 +507,13 @@ async fn ownership_denial_precedes_provider_hydration() {
         Arc::new(NoopConnectService),
         Arc::new(RecordingCandidateSearch::empty()),
         BotServiceConfig { env },
-    );
+    )
+    // Row 2: the descriptor patch consults the CURRENT
+    // owner edge; the authority store holds no edge for
+    // this Bot, so staff-2 is denied at the hook.
+    .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+        Arc::new(MemoryBotRepo::new()),
+    ));
 
     let error = service
         .update(UpdateBot {
@@ -514,8 +559,12 @@ async fn search_candidates_calls_core_once_and_preserves_ranked_enrichment() {
         Arc::new(NoopConnectService),
         candidate_search.clone(),
         BotServiceConfig { env },
-    );
+    )
+    .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+        repo.clone(),
+    ));
 
+    bcs_test_support::grant_owner_edge(&repo, "acting", "staff-1").await;
     for bot_id in ["acting", "recommended-a", "recommended-b"] {
         repo.register_with_owner_and_token(
             bot_id.to_string(),
@@ -649,7 +698,11 @@ async fn search_candidates_normalizes_missing_empty_and_whitespace_queries() {
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
         },
-    );
+    )
+    .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+        repo.clone(),
+    ));
+    bcs_test_support::grant_owner_edge(&repo, "acting", "staff-1").await;
     repo.register_with_owner_and_token(
         "acting".to_string(),
         BotCapabilities {
@@ -662,6 +715,7 @@ async fn search_candidates_normalizes_missing_empty_and_whitespace_queries() {
     )
     .await
     .expect("register acting bot");
+    bcs_test_support::grant_owner_edge(&repo, "acting", "staff-1").await;
 
     for query in [None, Some(String::new()), Some("  \t\n ".to_string())] {
         let result = service
@@ -725,7 +779,11 @@ async fn search_candidates_preserves_name_fallback_order_and_omits_semantic_enri
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
         },
-    );
+    )
+    .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+        repo.clone(),
+    ));
+    bcs_test_support::grant_owner_edge(&repo, "acting", "staff-1").await;
     for bot_id in ["acting", "fallback-a", "fallback-b"] {
         repo.register_with_owner_and_token(
             bot_id.to_string(),
@@ -803,7 +861,11 @@ async fn search_candidates_omits_enrichment_for_empty_query_mode() {
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
         },
-    );
+    )
+    .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+        repo.clone(),
+    ));
+    bcs_test_support::grant_owner_edge(&repo, "acting", "staff-1").await;
     for bot_id in ["acting", "unexpected-empty-hit"] {
         repo.register_with_owner_and_token(
             bot_id.to_string(),
@@ -871,7 +933,10 @@ async fn search_candidates_never_projects_human_hits_as_physical_bots() {
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
         },
-    );
+    )
+    .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+        repo.clone(),
+    ));
     repo.register_with_owner_and_token(
         "acting".to_string(),
         BotCapabilities {
@@ -884,6 +949,7 @@ async fn search_candidates_never_projects_human_hits_as_physical_bots() {
     )
     .await
     .expect("register acting bot");
+    bcs_test_support::grant_owner_edge(&repo, "acting", "staff-1").await;
     repo.ensure_human_actor("staff-2", "Other Human")
         .await
         .expect("ensure human actor");
@@ -922,7 +988,10 @@ async fn search_candidates_denies_unauthorized_perspective_before_core_search() 
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
         },
-    );
+    )
+    .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+        repo.clone(),
+    ));
     repo.register_with_owner_and_token(
         "acting".to_string(),
         BotCapabilities {
@@ -935,6 +1004,7 @@ async fn search_candidates_denies_unauthorized_perspective_before_core_search() 
     )
     .await
     .expect("register acting bot");
+    bcs_test_support::grant_owner_edge(&repo, "acting", "staff-1").await;
 
     let error = service
         .search_candidates(SearchBotCandidates {
@@ -1136,14 +1206,22 @@ async fn eligible_candidates_use_edge_permission_but_keep_the_same_projection() 
             kind: ActorKind::Human,
         },
     ]));
-    let service = BotServiceImpl::new(
+        let eligible_authority_repo = Arc::new(MemoryBotRepo::new());
+    bcs_test_support::grant_owner_edge(&eligible_authority_repo, "acting", "staff-1").await;
+let service = BotServiceImpl::new(
         control_plane.clone(),
         Arc::new(NoopBotRegistryCoreService),
         Arc::new(NoopFriendCoreService),
         connect,
         Arc::new(RecordingCandidateSearch::empty()),
         BotServiceConfig { env: env.clone() },
-    );
+    )
+    // Row 1: the acting Bot's CURRENT owner edge
+    // lives in the authority store; staff-1 holds
+    // it, staff-2 does not.
+    .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+        eligible_authority_repo.clone(),
+    ));
 
     let page = service
         .list_eligible_candidates(ListBotCandidates {
@@ -1462,10 +1540,10 @@ async fn mine_validates_pagination_before_materializing_the_human() {
 async fn mine_accepts_tenantless_users_and_callers_without_user_are_forbidden() {
     let fixture = Fixture::new();
     fixture
-        .add_bot("reachable", "staff-1", "public", ActorStatus::Online)
+        .add_controlled_bot("reachable", "staff-1", "public", ActorStatus::Online)
         .await;
     fixture
-        .add_bot("unreachable", "staff-1", "public", ActorStatus::Online)
+        .add_controlled_bot("unreachable", "staff-1", "public", ActorStatus::Online)
         .await;
     fixture
         .repo

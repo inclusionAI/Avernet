@@ -288,7 +288,7 @@ async fn authorize_conversation_lookup(
                 &actor_id,
                 &staff_no,
             )
-            .await
+            .await?
         }
     };
     if !authorized {

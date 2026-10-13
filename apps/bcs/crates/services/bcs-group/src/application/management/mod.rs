@@ -5,6 +5,7 @@ use std::{collections::HashSet, sync::Arc};
 use async_trait::async_trait;
 use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::core::{GroupMutationCommand, GroupMutationKind};
+use bcs_service_api::port::bot_authority::BotAuthorityHook;
 use bcs_service_api::port::{NoopParticipantViewBindingPort, ParticipantViewBindingPort};
 
 use crate::core::validate_service_spec_patch;
@@ -80,6 +81,11 @@ pub struct GroupManagement {
     bot_runtime: Option<Arc<dyn BotRuntimeConnectionService>>,
     outbound_url_guard: OutboundUrlGuard,
     v1_openapi_create_policy: bool,
+    /// The narrow authority hook (bot-authority plan
+    /// Task 6.3): the Human→Bot control judgments in
+    /// this service consult it live; a missing wiring
+    /// fails closed.
+    bot_authority: Option<Arc<dyn BotAuthorityHook>>,
 }
 
 pub struct GroupManagementWithRuntimeCleanup {
@@ -256,12 +262,55 @@ impl GroupManagement {
             bot_runtime: None,
             outbound_url_guard: OutboundUrlGuard::strict(),
             v1_openapi_create_policy: false,
+            bot_authority: None,
         }
     }
 
     pub fn with_bot_runtime(mut self, bot_runtime: Arc<dyn BotRuntimeConnectionService>) -> Self {
         self.bot_runtime = Some(bot_runtime);
         self
+    }
+
+    /// Wire the authority hook (rows 14/15/16,
+    /// bot-authority plan Task 6.3).
+    pub fn with_bot_authority(mut self, bot_authority: Arc<dyn BotAuthorityHook>) -> Self {
+        self.bot_authority = Some(bot_authority);
+        self
+    }
+
+    /// The wired authority hook; failing to wire one is
+    /// a composition error and must fail closed (never
+    /// deny-as-Ok).
+    pub(crate) fn authority(
+        &self,
+    ) -> Result<&dyn BotAuthorityHook, GroupUseCaseError> {
+        self.bot_authority.as_deref().ok_or_else(|| {
+            GroupUseCaseError::Service(ServiceError::InternalError(
+                "bot authority hook is not wired".to_string(),
+            ))
+        })
+    }
+
+    /// Row 14/15/16 Human→Bot control leg: a live
+    /// `can_manage` edge for the staff id; the
+    /// historical `created_by` fact, the creator
+    /// relation edge and the bot-id owner suffix no
+    /// longer authorize anything here (spec §3.2).
+    pub(crate) async fn human_controls_bot(
+        &self,
+        staff_no: &str,
+        bot_id: &str,
+    ) -> Result<bool, GroupUseCaseError> {
+        match self.authority()?.can_manage(staff_no, bot_id).await {
+            Ok(result) => Ok(result),
+            Err(ServiceError::Forbidden(message)) => {
+                Err(GroupUseCaseError::Forbidden(message))
+            }
+            Err(other) => Err(ServiceError::InternalError(format!(
+                "bot authority lookup failed: {other}"
+            ))
+            .into()),
+        }
     }
 
     pub fn with_channel_binding_cleanup(
@@ -333,18 +382,27 @@ pub(crate) fn staff_no_from_bound_actor(bound_actor_id: Option<&str>) -> Result<
     Ok(staff_no)
 }
 
+/// Whether the bound Human participates in `group` directly,
+/// or through a Bot participant it CURRENTLY controls (rows
+/// 14/15, bot-authority plan Task 6.3): a live `can_manage`
+/// edge per Bot participant — never the historical
+/// `created_by` and never the bot-id owner suffix. A
+/// same-named manager role inside the Group is NOT what this
+/// helper checks: Group-level management gating continues to
+/// derive from the Group's own rules (driver/originator
+/// strategy).
 pub(crate) async fn human_has_group_access(
-    registry: &dyn BotRegistryCoreService,
+    service: &GroupManagement,
     group: &DomainGroup,
     actor_id: &str,
     staff_no: &str,
-) -> bool {
+) -> Result<bool, GroupUseCaseError> {
     if group
         .participants
         .iter()
         .any(|participant| participant.bot_uuid == actor_id)
     {
-        return true;
+        return Ok(true);
     }
 
     for participant in group
@@ -352,28 +410,15 @@ pub(crate) async fn human_has_group_access(
         .iter()
         .filter(|participant| participant.is_bot())
     {
-        let Some(bot) = registry.get(&participant.bot_uuid).await else {
-            continue;
-        };
-        if bot_belongs_to_staff(&participant.bot_uuid, bot.created_by.as_deref(), staff_no) {
-            return true;
+        if service
+            .human_controls_bot(staff_no, &participant.bot_uuid)
+            .await?
+        {
+            return Ok(true);
         }
     }
 
-    false
-}
-
-pub(crate) fn bot_belongs_to_staff(bot_uuid: &str, created_by: Option<&str>, staff_no: &str) -> bool {
-    if created_by == Some(staff_no) {
-        return true;
-    }
-    if created_by.is_some() {
-        return false;
-    }
-    bot_uuid
-        .rsplit_once(':')
-        .map(|(_, suffix)| suffix == staff_no)
-        .unwrap_or(false)
+    Ok(false)
 }
 
 pub(crate) fn find_session_participant(

@@ -78,6 +78,14 @@ pub struct BotQueryEntry {
     pub friend_check_in_strategy: String,
     #[serde(default)]
     pub is_friend: Option<bool>,
+    /// Mine-page sampled authority relation (bot-authority
+    /// spec §8 mine row) of the calling Human on THIS row:
+    /// `owner` | `manager` for physical Bots, `self` for
+    /// the caller's own Human self row. Present only on the
+    /// legacy mine page; every other list omits the field,
+    /// and the sampled value is not an authorization result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_relation: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

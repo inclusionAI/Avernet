@@ -78,7 +78,7 @@ async fn frontend_delivery_falls_back_to_run_channel_when_group_has_no_bound_cha
     let delivery = WorkbenchFrontendDelivery::new(connections, run_channels.clone());
     let (run_tx, mut run_rx) = mpsc::channel(2);
     run_channels
-        .register(
+        .register_internal(
             "run-1".to_string(),
             "chat:session-1".to_string(),
             run_tx,
@@ -141,7 +141,7 @@ async fn frontend_delivery_does_not_run_fallback_when_group_channel_is_bound() {
         .await
         .unwrap();
     run_channels
-        .register(
+        .register_internal(
             "run-1".to_string(),
             "group-1".to_string(),
             run_tx,

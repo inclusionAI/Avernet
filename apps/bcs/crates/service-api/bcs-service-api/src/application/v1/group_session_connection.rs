@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use time::OffsetDateTime;
 
+use super::delivery_authorization::ConnectionView;
 use super::{ApplicationError, AuthenticatedCaller, SessionParticipant};
 
 pub const GROUP_SESSION_WS_TOKEN_TTL_SECONDS: u64 = 300;
@@ -36,11 +37,20 @@ pub struct GroupSessionConnectionBinding {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthorizeGroupSessionConnection {
     pub binding: GroupSessionConnectionBinding,
+    /// The view explicitly selected over the existing `view_actor_id`
+    /// wire field (spec §8.3): token issuance never pre-selects a
+    /// view; `HumanSelf` is the default, another Human actor is
+    /// rejected by the adapter, and a Bot view is a selection
+    /// parameter whose management edge and resource qualification
+    /// are re-verified here.
+    pub view: ConnectionView,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthorizedGroupSessionConnection {
     pub participants: Vec<SessionParticipant>,
+    /// The view the application actually authorized.
+    pub view: ConnectionView,
 }
 
 #[derive(Debug, thiserror::Error)]
