@@ -112,3 +112,62 @@ Repository 原文件接近 1,000 行，因此将列表查询移入同目录 `lis
 
 测试证明站内通知记录及列表/已读接口语义，不证明 IM/聊天消息送达。
 没有运行浏览器 E2E、真实 BCN 联调或全仓完整 CI。
+
+
+## 2026-10-13 补充验证：AUTO HTTP 与通知接收人
+
+本次修改两条通用 events HTTP 入口，取消 AUTO 的一律拒绝；保留原有认证、
+用户委托、申请人与 actor 一致性校验，以及通用入口对 Skill APPROVAL 的限制。
+AUTO 是否适用由调用业务方决定，不新增模块白名单或额外身份验证。
+AUTO 结果通知只使用规范化后的 `recipient_user_ids`，`approver_user_ids`
+忽略并按空列表传入仓库；没有旧字段回退。MANUAL、NOTICE 契约保持不变。
+Skill 内部 AUTO 调用、字段描述、Protocol、README 和网关发布描述同步更新。
+
+验证结果：
+
+- 相关单测、HTTP/领域/仓库契约、SQLite 场景及六项架构测试：**419 passed**，
+  18 条已有依赖弃用警告；不是 Backend 全仓测试。
+- 文件 SQLite HTTP、业务旅程与列表旅程：**48 passed**，包含在以上 419 项中。
+  最终追加复跑上述 SQLite 48 项和 HTTP Router 29 项：**77 passed**。
+- `git diff HEAD` 新增/修改的生产可执行行覆盖率 **100%（2/2）**。
+  多行参数和描述属于已有语句行；按 AST 映射到受影响可执行语句，
+  **8/8 覆盖**。删除的拒绝分支与非执行注释不算覆盖率分母。
+- 修改过的生产 Python 文件整体行覆盖率：HTTP 两个 Router、DTO、Protocol
+  100%；创建仓库 96.91%；Skill 申请服务 97.87%；WorkOrder Service 91.19%。
+  以上均超过 90%，不代表 Backend 全仓达到该覆盖率。
+- 本次修改/新增 Python 文件 Ruff 检查通过，`git diff --check` 通过；每个文件
+  不超过 1,000 行。原超长 OpenAPI 契约测试按创建/查询职责拆分，没有删减用例。
+- 通过 Backend `scripts/dump_openapi.py` 生成当前描述，只同步本次变更的请求
+  component（全量发布描述还存在无关历史差异），通过 Gateway 发布兼容性门禁；
+  新增用例校验三项字段描述与 DTO 一致。此门禁不检测接收人字段的业务语义迁移。
+
+新增 `test_work_order_sqlite_http_auto.py` 使用真实 Router、WorkOrder Service、
+Repository 和文件 SQLite，认证 dependency 在该集成测试中固定为已认证用户，
+认证失败另由 HTTP 单测覆盖。外部 BCN HTTP 仍为 mock，不连接真实 BCN。
+在两条 HTTP 路由上分别验证：
+
+1. 回调时数据库仍为 PROCESSING，无人工审批记录、无提前结果通知。
+2. 回调成功或异常后，数据库和 HTTP 返回终态一致，仅指定接收人得到结果通知。
+3. 接收人去空格、去空白、去重复；非空 approvers 不成为接收人或人工审批人。
+4. 空/全空白 recipients 即使有 approvers 也返回错误，并且零工单写入、零回调。
+5. 伪造 applicant 返回拒绝，零工单写入、零回调。
+
+独立复现 SQLite（从 `apps/backend` 执行）：
+
+```bash
+.venv/bin/python -m pytest \
+  tests/community/core/repository/implementations/test_work_order_sqlite_http_auto.py \
+  tests/community/core/repository/implementations/test_work_order_sqlite_journeys.py \
+  tests/community/core/repository/implementations/test_work_order_sqlite_listing.py \
+  -q -s
+```
+
+本轮没有发现这两个修改引入的新失败。上述历史风险仍然存在：远端成功后本地
+持久化失败需对账；回调超时不能证明远端未执行；Bot 提交后下游同步失败无持久
+恢复；Bot 专用 AUTO 的正式模式标记仍有历史差异。未新增幂等、Outbox、恢复队列，
+未验证生产数据库并发、真实 BCN、浏览器或外部消息送达。测试通过不是绝对正确性证明。
+
+兼容性：旧 AUTO 调用方必须把通知用户 ID 从 `approver_user_ids` 移到
+`recipient_user_ids`，否则会在写入前失败。数据库结构无需迁移。
+取消 AUTO 特有拒绝后，有效用户/委托用户可以直接选择 AUTO；业务方及部署入口
+必须自行控制此能力的使用，不应把原有登录验证解释为自动审批业务资格校验。

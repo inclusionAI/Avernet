@@ -195,13 +195,12 @@ class WorkOrderService(WorkOrderServiceProtocol):
                     "manual approval events require approvers and no recipients"
                 )
             if approval_mode is WorkOrderApprovalMode.AUTO:
-                if not approvers:
+                if not recipients:
                     raise WorkOrderInvalidEventError(
-                        "AUTO requires nonempty approver_user_ids for result notifications"
+                        "AUTO requires nonempty recipient_user_ids for result notifications"
                     )
-                # AUTO uses this field only for result recipients, never approval rights.
-                # recipient_user_ids is deliberately ignored, even when supplied.
-                recipients = approvers
+                # AUTO has no human approvers; recipients only receive terminal notices.
+                approvers = []
         elif event_category is NotificationCategory.NOTICE:
             if not recipients or approvers or applicant_user_id is not None:
                 raise WorkOrderInvalidEventError(

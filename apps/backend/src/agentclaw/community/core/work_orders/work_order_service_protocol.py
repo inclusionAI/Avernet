@@ -48,11 +48,12 @@ class WorkOrderServiceProtocol(Protocol):
         actor_id: str,
         callback_auth: WorkOrderCallbackCredential | None = None,
     ) -> WorkOrderEventCreatedResult:
-        """Create an event; AUTO is for trusted in-process callers only.
+        """Create an event; business callers own eligibility for AUTO.
 
-        AUTO requires nonblank approver_user_ids (normalized/deduplicated), used
+        AUTO requires nonblank recipient_user_ids (normalized/deduplicated), used
         exclusively for success/failure result notices, not human approval rights.
-        recipient_user_ids is ignored for AUTO; it remains required for NOTICE.
+        approver_user_ids is ignored for AUTO; send an empty list. No fallback.
+        MANUAL requires approvers and no recipients; NOTICE requires recipients.
         After confirmed remote success, local write failure raises
         WorkOrderLocalFinalizeError, not a false FAILED result. This API does not
         provide automatic reconciliation or remote exactly-once execution.
