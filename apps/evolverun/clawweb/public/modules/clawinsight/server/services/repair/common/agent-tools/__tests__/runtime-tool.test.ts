@@ -1,12 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ResolvedBaasConfig } from "@avernet/clawweb-shared/server/db";
-import type { RepairTaskContext } from "../contracts.js";
+import type { AgentToolContext } from "../contracts.js";
 import {
-  buildRepairRuntimeCommand,
-  buildRepairRuntimeUserCommand,
-  RepairRuntimeTool,
+  buildAgentRuntimeCommand,
+  AgentRuntimeTool,
 } from "../runtime-tool.js";
-import type { ArcaCommandTransport } from "../arca-command-transport.js";
+import { BotRuntimeClient, BaasRuntimeProvider } from "@avernet/clawweb-shared/server/services/bot-runtime";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -35,27 +34,15 @@ function baasConfig(): ResolvedBaasConfig {
   };
 }
 
-function runtimeContext(provider = "baas"): RepairTaskContext {
+function runtimeContext(provider = "baas"): AgentToolContext {
   return {
-    schemaVersion: "ce-repair/v1",
     taskId: "REPAIR-001",
-    stepId: "STEP-001",
-    attempt: 1,
-    phase: "repair_plan",
     issue: {
-      symptom: "Bot 无法响应",
       traceId: null,
       relatedTaskId: null,
       errorText: null,
       timeRange: { from: 1_786_000_000, to: 1_786_000_060 },
     },
-    authorizationScope: {
-      actorUserId: "user-001",
-      ownerId: "user-001",
-      botId: "bot-001",
-      environment: "pre",
-    },
-    authorizationScopeDigest: "scope-digest",
     target: {
       environment: "pre",
       ownerId: "user-001",
@@ -70,14 +57,12 @@ function runtimeContext(provider = "baas"): RepairTaskContext {
       observedAt: "2026-08-19T00:00:00.000Z",
       source: "ocb_backend_current",
     },
-    targetFingerprint: "target-fingerprint",
-    runtimeTargetVersion: 1,
   };
 }
 
-describe("buildRepairRuntimeCommand", () => {
+describe("buildAgentRuntimeCommand", () => {
   it("builds broad read-only filesystem commands with a remote realpath guard", () => {
-    const command = buildRepairRuntimeCommand({
+    const command = buildAgentRuntimeCommand({
       operation: "fs_search",
       path: "/home/admin/.openclaw/openclaw.json",
       pattern: "gateway",
@@ -87,20 +72,20 @@ describe("buildRepairRuntimeCommand", () => {
     expect(command).not.toContain("/home/admin/*");
     expect(command).toContain("find -P");
     expect(command).toContain("grep -nHF");
-    expect(command).toContain("head -n 50");
+    expect(command).toContain("NR <= 50");
   });
 
   it("allows absolute readable paths while still rejecting raw shell fields on structured operations", () => {
-    expect(buildRepairRuntimeCommand({ operation: "fs_read", path: "/var/log/messages" }))
+    expect(buildAgentRuntimeCommand({ operation: "fs_read", path: "/var/log/messages" }))
       .toContain("/var/log/messages");
-    expect(() => buildRepairRuntimeCommand({
+    expect(() => buildAgentRuntimeCommand({
       operation: "process_list",
       command: "rm -rf /",
     } as never)).toThrow("不接受原始 command");
   });
 
   it("wraps an explicitly authorized diagnostic shell command without interpolating it", () => {
-    const command = buildRepairRuntimeCommand({
+    const command = buildAgentRuntimeCommand({
       operation: "shell_exec",
       command: "git -C /tmp/openclaw status --short\nprintf 'done\\n'",
     });
@@ -109,28 +94,15 @@ describe("buildRepairRuntimeCommand", () => {
   });
 
   it("only permits HTTP GET to a validated loopback port and path", () => {
-    expect(buildRepairRuntimeCommand({ operation: "http_get", port: 18789, path: "/readyz" }))
+    expect(buildAgentRuntimeCommand({ operation: "http_get", port: 18789, path: "/readyz" }))
       .toContain("http://127.0.0.1:18789/readyz");
-    expect(() => buildRepairRuntimeCommand({
+    expect(() => buildAgentRuntimeCommand({
       operation: "http_get", port: 18789, path: "https://attacker.example",
     })).toThrow("loopback");
   });
 });
 
-describe("buildRepairRuntimeUserCommand", () => {
-  it("runs root transports as admin and rejects every other inherited user", () => {
-    const command = buildRepairRuntimeUserCommand("id -un && touch /tmp/repair-owned");
-
-    expect(command).toContain('if [ "$repair_uid" = "0" ]');
-    expect(command).toContain("su admin -c");
-    expect(command).toContain('test "$(id -un)" = admin');
-    expect(command).toContain("HOME=/home/admin");
-    expect(command).toContain("umask 077");
-    expect(command).toContain("id -un && touch /tmp/repair-owned");
-  });
-});
-
-describe("RepairRuntimeTool", () => {
+describe("AgentRuntimeTool", () => {
   it("executes an approved container-local Engine API call through the generic command transport", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       code: 0,
@@ -144,7 +116,7 @@ describe("RepairRuntimeTool", () => {
     vi.stubGlobal("fetch", fetchMock);
     const command = "curl -fsS -X POST http://127.0.0.1:18789/api/engine/action";
 
-    await expect(new RepairRuntimeTool(baasConfig()).applyApprovedAction(
+    await expect(new AgentRuntimeTool(new BotRuntimeClient({ providers: { baas: new BaasRuntimeProvider(baasConfig()) } })).applyApprovedAction(
       runtimeContext(),
       {
         actionId: "call-container-engine-api",
@@ -164,8 +136,6 @@ describe("RepairRuntimeTool", () => {
     const body = JSON.parse(String(init?.body));
     expect(body.cmd).toContain(Buffer.from(command, "utf8").toString("base64"));
     expect(body.cmd).toContain("base64 -d | bash");
-    expect(body.cmd).toContain("su admin -c");
-    expect(body.cmd).toContain("HOME=/home/admin");
   });
 
   it("executes once through the logical Bot route without resolving physical instances", async () => {
@@ -180,7 +150,7 @@ describe("RepairRuntimeTool", () => {
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await new RepairRuntimeTool(baasConfig()).inspect(
+    const result = await new AgentRuntimeTool(new BotRuntimeClient({ providers: { baas: new BaasRuntimeProvider(baasConfig()) } })).inspect(
       runtimeContext(),
       { operation: "process_list" },
     );
@@ -195,8 +165,6 @@ describe("RepairRuntimeTool", () => {
     const body = JSON.parse(String(init?.body));
     expect(body.timeout_seconds).toBe(30);
     expect(body.cmd).toContain("ps -ef");
-    expect(body.cmd).toContain("su admin -c");
-    expect(body.cmd).toContain('test "$(id -un)" = admin');
     expect(result).toMatchObject({
       status: "success",
       operation: "process_list",
@@ -223,7 +191,7 @@ describe("RepairRuntimeTool", () => {
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await new RepairRuntimeTool(baasConfig()).inspect(
+    const result = await new AgentRuntimeTool(new BotRuntimeClient({ providers: { baas: new BaasRuntimeProvider(baasConfig()) } })).inspect(
       runtimeContext(),
       { operation: "fs_read", path: "/home/admin/reference.md" },
     );
@@ -245,7 +213,7 @@ describe("RepairRuntimeTool", () => {
         data: { exit_code: 0, stdout: "/home/admin\n", stderr: "", execution_time_ms: 2 },
       }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
-    const tool = new RepairRuntimeTool(baasConfig());
+    const tool = new AgentRuntimeTool(new BotRuntimeClient({ providers: { baas: new BaasRuntimeProvider(baasConfig()) } }));
 
     await expect(tool.inspect(runtimeContext(), { operation: "process_list" }))
       .resolves.toMatchObject({ evidenceLocators: ["/opt/runtime/server.js"] });
@@ -272,7 +240,7 @@ describe("RepairRuntimeTool", () => {
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(new RepairRuntimeTool(baasConfig()).inspect(
+    await expect(new AgentRuntimeTool(new BotRuntimeClient({ providers: { baas: new BaasRuntimeProvider(baasConfig()) } })).inspect(
       runtimeContext(),
       { operation: "fs_list", path: "/opt/logs" },
     )).resolves.toMatchObject({
@@ -284,7 +252,7 @@ describe("RepairRuntimeTool", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(new RepairRuntimeTool(baasConfig()).inspect(
+    await expect(new AgentRuntimeTool(new BotRuntimeClient({ providers: { baas: new BaasRuntimeProvider(baasConfig()) } })).inspect(
       runtimeContext("teclaw"),
       { operation: "port_list" },
     )).rejects.toMatchObject({ status: 422, code: "unsupported_runtime_provider" });
@@ -299,7 +267,7 @@ describe("RepairRuntimeTool", () => {
       stderr: "",
       durationMs: 8,
     }));
-    const tool = new RepairRuntimeTool(baasConfig(), { execute } as unknown as ArcaCommandTransport);
+    const tool = new AgentRuntimeTool({ executeShell: execute });
 
     await expect(tool.inspect(
       runtimeContext("arca"),
@@ -311,10 +279,8 @@ describe("RepairRuntimeTool", () => {
       stdout: "arca-ok\n",
     });
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({
-      environment: "pre",
-      bindingId: "binding-001",
-      sandboxId: "ARCA-SANDBOX-123",
-      command: expect.stringContaining("su admin -c"),
+      target: expect.objectContaining({ environment: "pre", bindingId: "binding-001", sandboxId: "ARCA-SANDBOX-123" }),
+      command: expect.stringContaining("ps -ef"),
     }));
   });
 });

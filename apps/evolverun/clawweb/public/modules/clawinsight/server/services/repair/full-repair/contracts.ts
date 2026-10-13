@@ -1,4 +1,7 @@
-import type { AisArtifactSpec } from "../ais-task-runner.js";
+import type { AgentTarget as RepairTarget, AgentRuntimeTargetSnapshot as RepairRuntimeTargetSnapshot, AgentPlanAction as RepairPlanAction, AgentLogIdentifier as RepairLogIdentifier, AgentDiscoveredIdentifierKind as RepairDiscoveredIdentifierKind, AgentDiscoveredIdentifierCandidate as RepairDiscoveredIdentifierCandidate, AgentDiscoveredIdentifier as RepairDiscoveredIdentifier, AgentLogSearchInput as RepairLogSearchInput, AgentRuntimeInspectInput as RepairRuntimeInspectInput } from "../common/agent-tools/contracts.js";
+export type { AgentTarget as RepairTarget, AgentRuntimeTargetSnapshot as RepairRuntimeTargetSnapshot, AgentPlanAction as RepairPlanAction, AgentLogIdentifier as RepairLogIdentifier, AgentDiscoveredIdentifierKind as RepairDiscoveredIdentifierKind, AgentDiscoveredIdentifierCandidate as RepairDiscoveredIdentifierCandidate, AgentDiscoveredIdentifier as RepairDiscoveredIdentifier, AgentLogSearchInput as RepairLogSearchInput, AgentRuntimeInspectInput as RepairRuntimeInspectInput } from "../common/agent-tools/contracts.js";
+import type { AisArtifactContract } from "@avernet/clawevolve/server/services/ais/ais-artifact-contract";
+import type { AisArtifactSpec } from "../../ais-task-runner.js";
 
 export const REPAIR_CONTRACT_VERSION = "ce-repair/v1";
 export const LEGACY_REPAIR_PLAN_VERSION = "ce-repair-plan/v1";
@@ -27,32 +30,6 @@ export type RepairAuthorizationScope = {
    * Optional for backwards-compatible reads of pre-existing task configs.
    */
   executionMode?: RepairExecutionMode;
-};
-
-export type RepairTarget = {
-  environment: RepairTargetEnvironment;
-  ownerId: string;
-  botId: string;
-  botType: "personal";
-  botStatus: string | null;
-  bindingId: string;
-  bindingStatus: string | null;
-  provider: string;
-  deviceId: string;
-  /** Present only for a directly reachable legacy ARCA binding. */
-  sandboxId?: string;
-  /** Raw ARCA PaaS instance id used to sign the proxypass target. */
-  arcaInstanceId?: string;
-  observedAt: string;
-  source: "clawweb_runtime_catalog" | "ocb_backend_current";
-};
-
-export type RepairRuntimeTargetSnapshot = {
-  version: number;
-  fingerprint: string;
-  target: RepairTarget;
-  /** `ocb_context` is retained only for previously persisted snapshots. */
-  reason: "task_created" | "browser_relay" | "ocb_context" | "before_action" | "after_action" | "resume";
 };
 
 export type RepairTimeRange = { from: number; to: number };
@@ -190,6 +167,8 @@ export type RepairTaskConfig = {
   cfuseModel: string | null;
   execution: RepairExecutionState;
   publicBaseUrl: string;
+  aisExecution?: AisArtifactContract;
+  executionNo?: number;
   artifacts: RepairStepArtifacts;
 };
 
@@ -256,19 +235,6 @@ export type RepairCfuseLoginReportInput = {
   status?: unknown;
   errorCode?: unknown;
   errorMessage?: unknown;
-};
-
-export type RepairPlanAction = {
-  actionId: string;
-  type: "container_command" | "ocb_operation";
-  summary: string;
-  risk: string;
-  verification: string;
-  rollback: string | null;
-  dependsOn?: string[];
-  rollbackActionId?: string | null;
-  command?: string;
-  operation?: { type: string; params?: Record<string, unknown> };
 };
 
 export type RepairPlanQuality = "verified" | "partially_verified" | "blocked" | "unknown";
@@ -342,34 +308,6 @@ export type RepairTaskContext = {
   targetFingerprint: string;
   runtimeTargetVersion: number;
 };
-
-export type RepairLogIdentifier = "botId" | "ownerId" | "traceId" | "relatedTaskId" | "errorText";
-export type RepairDiscoveredIdentifierKind = "bindingId" | "publishId" | "deviceUuid" | "sessionId" | "traceId" | "taskId";
-export type RepairDiscoveredIdentifierCandidate = { kind: RepairDiscoveredIdentifierKind; value: string };
-export type RepairDiscoveredIdentifier = RepairDiscoveredIdentifierCandidate & { evidenceId: string };
-
-export type RepairLogSearchInput = {
-  clientRequestId?: unknown;
-  purpose?: unknown;
-  identifiers?: RepairLogIdentifier[];
-  discoveredIdentifiers?: RepairDiscoveredIdentifier[];
-  sources?: string[];
-  from?: number;
-  to?: number;
-  limit?: number;
-};
-
-export type RepairRuntimeInspectInput = ({ clientRequestId?: unknown; purpose?: unknown } & (
-  | { operation: "fs_list"; path: string; maxEntries?: number }
-  | { operation: "fs_find"; path: string; name: string; maxDepth?: number; maxEntries?: number }
-  | { operation: "fs_stat"; path: string }
-  | { operation: "fs_read"; path: string; startLine?: number; lines?: number }
-  | { operation: "fs_search"; path: string; pattern: string; maxMatches?: number }
-  | { operation: "process_list"; pattern?: string }
-  | { operation: "port_list" }
-  | { operation: "http_get"; port: number; path: string }
-  | { operation: "shell_exec"; command: string }
-));
 
 export type RepairApplyActionInput = {
   clientRequestId?: unknown;

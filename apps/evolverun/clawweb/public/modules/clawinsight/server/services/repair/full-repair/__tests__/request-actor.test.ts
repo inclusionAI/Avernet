@@ -1,6 +1,6 @@
 import type { Request } from "express";
 import { describe, expect, it } from "vitest";
-import { resolveRepairRequestActor } from "../request-actor.js";
+import { resolveRepairRequestActor } from "../../common/request-actor.js";
 
 function request(headers: Record<string, string>, cookies?: Record<string, string>): Request {
   const normalized = Object.fromEntries(

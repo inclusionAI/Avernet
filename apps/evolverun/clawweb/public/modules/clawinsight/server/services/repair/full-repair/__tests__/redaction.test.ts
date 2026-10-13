@@ -1,13 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
-  containsRepairSecret,
+  containsSecret as containsRepairSecret,
   redactPersistableLines,
   redactPersistableText,
   redactText,
   redactValue,
-} from "../redaction.js";
+  redactEvidenceValue,
+} from "@avernet/clawweb-shared/server/services/redaction";
 
 describe("Repair redaction", () => {
+  it("preserves Owner-scoped source evidence while removing credential fields and inline values", () => {
+    const body = "原工具失败的消息原文".repeat(600);
+    const result = redactEvidenceValue({ messages: [{ record: { message: { role: "assistant", content: body } } }],
+      headers: { Authorization: "Bearer example-private-value" }, diagnostic: "操作失败；api_key=test-token;核对权限后继续" });
+    expect(JSON.stringify(result)).toContain(body);
+    expect(JSON.stringify(result)).not.toContain("private-value");
+    expect(JSON.stringify(result)).not.toContain("test-token");
+    expect(containsRepairSecret(result)).toBe(false);
+    expect(redactValue({ content: body })).toEqual({ content: "[REDACTED_BUSINESS_BODY]" });
+  });
   it("removes common PII and inline business bodies before model or OSS output", () => {
     const output = redactText("user=13800138000 email=a@example.com --api-key secret-value\nprompt: 这是一段 完整业务正文\ninput: another private body\noutput: private model answer");
     expect(output).not.toContain("13800138000");

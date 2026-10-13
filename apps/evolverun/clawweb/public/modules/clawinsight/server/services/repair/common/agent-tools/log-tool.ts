@@ -1,16 +1,16 @@
-import type { AntLogsCollector } from "../antlogs-collector.js";
+import type { AntLogsCollector } from "../../../antlogs-collector.js";
 import type {
-  RepairDiscoveredIdentifierCandidate,
-  RepairDiscoveredIdentifierKind,
-  RepairTaskContext,
-  RepairLogIdentifier,
-  RepairLogSearchInput,
+  AgentDiscoveredIdentifierCandidate,
+  AgentDiscoveredIdentifierKind,
+  AgentToolContext,
+  AgentLogIdentifier,
+  AgentLogSearchInput,
 } from "./contracts.js";
-import { RepairError, repairUnavailable, repairValidation } from "./errors.js";
-import { containsRepairSecret, redactPersistableText, redactText } from "./redaction.js";
+import { AgentToolError, agentToolUnavailable, agentToolValidation } from "./errors.js";
+import { containsSecret, redactPersistableText, redactText } from "@avernet/clawweb-shared/server/services/redaction";
 
-const IDENTIFIERS = new Set<RepairLogIdentifier>(["botId", "ownerId", "traceId", "relatedTaskId", "errorText"]);
-const DISCOVERED_KEYS = new Map<string, RepairDiscoveredIdentifierKind>([
+const IDENTIFIERS = new Set<AgentLogIdentifier>(["botId", "ownerId", "traceId", "relatedTaskId", "errorText"]);
+const DISCOVERED_KEYS = new Map<string, AgentDiscoveredIdentifierKind>([
   ["bindingid", "bindingId"],
   ["publishid", "publishId"],
   ["deviceuuid", "deviceUuid"],
@@ -26,7 +26,7 @@ const MAX_QUERY_TOKEN_LENGTH = 256;
 const MAX_IDENTIFIER_QUERY_TOKENS = 8;
 const MAX_ERROR_TEXT_QUERY_TOKENS = 5;
 
-function discoveredKind(key: string): RepairDiscoveredIdentifierKind | null {
+function discoveredKind(key: string): AgentDiscoveredIdentifierKind | null {
   return DISCOVERED_KEYS.get(key.replaceAll(/[^A-Za-z0-9]/g, "").toLowerCase()) ?? null;
 }
 
@@ -34,15 +34,15 @@ function safeDiscoveredValue(value: unknown): string | null {
   if (typeof value !== "string" && typeof value !== "number") return null;
   const normalized = String(value).trim();
   if (!normalized || normalized.length > 256 || !/^[A-Za-z0-9_.:@/-]+$/.test(normalized)) return null;
-  if (containsRepairSecret(normalized)) return null;
+  if (containsSecret(normalized)) return null;
   return normalized;
 }
 
 function extractDiscoveredIdentifiers(
   entries: Array<{ message?: unknown; metadata?: unknown }>,
-): RepairDiscoveredIdentifierCandidate[] {
-  const found = new Map<string, RepairDiscoveredIdentifierCandidate>();
-  const add = (kind: RepairDiscoveredIdentifierKind | null, value: unknown) => {
+): AgentDiscoveredIdentifierCandidate[] {
+  const found = new Map<string, AgentDiscoveredIdentifierCandidate>();
+  const add = (kind: AgentDiscoveredIdentifierKind | null, value: unknown) => {
     const normalized = safeDiscoveredValue(value);
     if (!kind || !normalized || found.size >= 20) return;
     found.set(`${kind}:${normalized}`, { kind, value: normalized });
@@ -71,7 +71,7 @@ function extractDiscoveredIdentifiers(
   return [...found.values()];
 }
 
-function identifierValue(input: RepairTaskContext, identifier: RepairLogIdentifier): string | null {
+function identifierValue(input: AgentToolContext, identifier: AgentLogIdentifier): string | null {
   if (identifier === "botId") return input.target.botId;
   if (identifier === "ownerId") return input.target.ownerId;
   if (identifier === "traceId") return input.issue.traceId;
@@ -87,8 +87,8 @@ function identifierValue(input: RepairTaskContext, identifier: RepairLogIdentifi
  * LogQL syntax.
  */
 function safeQueryTokens(value: string, errorText: boolean): string[] {
-  if (containsRepairSecret(value)) {
-    repairValidation("unsafe_log_identifier_value", "日志标识包含不可用于查询的敏感信息");
+  if (containsSecret(value)) {
+    agentToolValidation("unsafe_log_identifier_value", "日志标识包含不可用于查询的敏感信息");
   }
   const normalized = value.trim();
   const candidates = !errorText
@@ -103,10 +103,10 @@ function safeQueryTokens(value: string, errorText: boolean): string[] {
   ))];
   const limit = errorText ? MAX_ERROR_TEXT_QUERY_TOKENS : MAX_IDENTIFIER_QUERY_TOKENS;
   if (tokens.length < 1) {
-    repairValidation("invalid_log_identifier_value", "日志标识无法安全转换为查询词");
+    agentToolValidation("invalid_log_identifier_value", "日志标识无法安全转换为查询词");
   }
   if (!errorText && tokens.length > limit) {
-    repairValidation("invalid_log_identifier_value", "日志标识无法安全转换为查询词");
+    agentToolValidation("invalid_log_identifier_value", "日志标识无法安全转换为查询词");
   }
   return tokens.slice(0, limit);
 }
@@ -114,7 +114,7 @@ function safeQueryTokens(value: string, errorText: boolean): string[] {
 function safeEpoch(value: unknown, fallback: number, field: string): number {
   if (value == null) return fallback;
   const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) repairValidation("invalid_log_time", `${field} 必须是 unix 秒`);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) agentToolValidation("invalid_log_time", `${field} 必须是 unix 秒`);
   return parsed;
 }
 
@@ -131,7 +131,7 @@ function jsonBytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
 
-export type RepairLogSourceCoverage = {
+export type AgentLogSourceCoverage = {
   coveredSources: Array<{
     name: string;
     status: "success" | "partial";
@@ -145,7 +145,7 @@ export type RepairLogSourceCoverage = {
   interpretation?: string;
 };
 
-export function selectRepairLogSources(sources: Array<{
+export function selectAgentLogSources(sources: Array<{
   name: string;
   app?: string;
   defaultEnabled?: boolean;
@@ -176,7 +176,7 @@ function safeSourceName(value: unknown, index: number): string {
 }
 
 function sourceFailureReason(error: unknown): Pick<
-  RepairLogSourceCoverage["unavailableSources"][number],
+  AgentLogSourceCoverage["unavailableSources"][number],
   "reasonCode" | "reason"
 > {
   const text = typeof error === "string" ? error : "";
@@ -197,9 +197,9 @@ function sourceFailureReason(error: unknown): Pick<
  * browser and Agent summaries can reason about missing evidence without
  * treating the observed service as failed.
  */
-export function deriveRepairLogSourceCoverage(sources: unknown): RepairLogSourceCoverage {
-  const coveredSources: RepairLogSourceCoverage["coveredSources"] = [];
-  const unavailableSources: RepairLogSourceCoverage["unavailableSources"] = [];
+export function deriveAgentLogSourceCoverage(sources: unknown): AgentLogSourceCoverage {
+  const coveredSources: AgentLogSourceCoverage["coveredSources"] = [];
+  const unavailableSources: AgentLogSourceCoverage["unavailableSources"] = [];
   if (Array.isArray(sources)) {
     sources.forEach((value, index) => {
       const source = value && typeof value === "object" && !Array.isArray(value)
@@ -235,7 +235,7 @@ function boundedLogResult(input: {
   entries: Array<{ timestamp: string; level: string; source: string; message: string; traceId: string | null }>;
   evidenceEntries: Array<{ message?: unknown; metadata?: unknown }>;
   sources: Array<Record<string, unknown>>;
-  sourceCoverage: RepairLogSourceCoverage;
+  sourceCoverage: AgentLogSourceCoverage;
   durationMs: number;
 }): Record<string, unknown> {
   const selected = [...input.entries];
@@ -262,12 +262,12 @@ function boundedLogResult(input: {
     output = build();
   }
   if (jsonBytes(output) > MAX_INLINE_RESULT_BYTES) {
-    throw new RepairError(502, "repair_log_result_too_large", "AntLogs 元数据超过 Repair 内联结果上限");
+    throw new AgentToolError(502, "repair_log_result_too_large", "AntLogs 元数据超过 Repair 内联结果上限");
   }
   return output;
 }
 
-export class RepairLogTool {
+export class AgentLogTool {
   readonly sourceNames: string[];
   private readonly sourceNameSet: Set<string>;
   private readonly defaultSourceNames: string[];
@@ -283,25 +283,25 @@ export class RepairLogTool {
   }
 
   async search(
-    run: RepairTaskContext,
-    request: RepairLogSearchInput,
-    verifiedDiscovered: RepairDiscoveredIdentifierCandidate[] = [],
+    run: AgentToolContext,
+    request: AgentLogSearchInput,
+    verifiedDiscovered: AgentDiscoveredIdentifierCandidate[] = [],
   ): Promise<Record<string, unknown>> {
-    if (!this.collector) return repairUnavailable("repair_antlogs_not_configured", "Repair AntLogs OpenAPI 未配置");
-    const unsafe = request as RepairLogSearchInput & { query?: unknown; logql?: unknown };
+    if (!this.collector) return agentToolUnavailable("repair_antlogs_not_configured", "Repair AntLogs OpenAPI 未配置");
+    const unsafe = request as AgentLogSearchInput & { query?: unknown; logql?: unknown };
     if (unsafe.query != null || unsafe.logql != null) {
-      repairValidation("raw_log_query_forbidden", "Repair 日志工具不接受原始 query 或 LogQL");
+      agentToolValidation("raw_log_query_forbidden", "Repair 日志工具不接受原始 query 或 LogQL");
     }
     const requestedIdentifiers = request.identifiers ?? [];
     if (!Array.isArray(requestedIdentifiers) || !Array.isArray(request.discoveredIdentifiers ?? [])) {
-      repairValidation("invalid_log_identifiers", "日志查询标识格式不合法");
+      agentToolValidation("invalid_log_identifiers", "日志查询标识格式不合法");
     }
     const identifiers = [...new Set(requestedIdentifiers)];
     if (identifiers.length + verifiedDiscovered.length < 1 || identifiers.length + verifiedDiscovered.length > 5) {
-      repairValidation("invalid_log_identifiers", "日志查询必须选择 1 到 5 个已登记或已发现标识");
+      agentToolValidation("invalid_log_identifiers", "日志查询必须选择 1 到 5 个已登记或已发现标识");
     }
     if (identifiers.some((identifier) => !IDENTIFIERS.has(identifier))) {
-      repairValidation("invalid_log_identifiers", "日志查询包含未允许的标识");
+      agentToolValidation("invalid_log_identifiers", "日志查询包含未允许的标识");
     }
     const values = identifiers.map((identifier) => ({
       identifier,
@@ -309,21 +309,21 @@ export class RepairLogTool {
     }));
     const missing = values.filter((item) => !item.value).map((item) => item.identifier);
     if (missing.length > 0) {
-      repairValidation("missing_log_identifiers", `Repair Task 未登记以下日志标识: ${missing.join(", ")}`);
+      agentToolValidation("missing_log_identifiers", `Repair Task 未登记以下日志标识: ${missing.join(", ")}`);
     }
     const sources = request.sources?.length ? [...new Set(request.sources)] : [...this.defaultSourceNames];
     if (sources?.some((source) => !this.sourceNameSet.has(source))) {
-      repairValidation("invalid_log_sources", "日志查询包含未配置的 source");
+      agentToolValidation("invalid_log_sources", "日志查询包含未配置的 source");
     }
     if (sources.length === 0) {
-      return repairUnavailable("repair_antlogs_sources_not_configured", "Repair 没有可用的默认日志源");
+      return agentToolUnavailable("repair_antlogs_sources_not_configured", "Repair 没有可用的默认日志源");
     }
     const from = safeEpoch(request.from, run.issue.timeRange.from, "from");
     const to = safeEpoch(request.to, run.issue.timeRange.to, "to");
-    if (from >= to) repairValidation("invalid_log_time_range", "日志查询 from 必须早于 to");
+    if (from >= to) agentToolValidation("invalid_log_time_range", "日志查询 from 必须早于 to");
     const limit = request.limit == null ? 100 : Number(request.limit);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) {
-      repairValidation("invalid_log_limit", "日志查询 limit 必须在 1 到 200 之间");
+      agentToolValidation("invalid_log_limit", "日志查询 limit 必须在 1 到 200 之间");
     }
     const queryTokens = [
       ...values.flatMap((item) => safeQueryTokens(item.value as string, item.identifier === "errorText")),
@@ -341,7 +341,7 @@ export class RepairLogTool {
         suppressQueryLog: true,
       });
     } catch {
-      throw new RepairError(
+      throw new AgentToolError(
         502,
         "antlogs_query_failed",
         "AntLogs 查询失败",
@@ -377,7 +377,7 @@ export class RepairLogTool {
       })),
       evidenceEntries: entries,
       sources: sourceResults,
-      sourceCoverage: deriveRepairLogSourceCoverage(sourceResults),
+      sourceCoverage: deriveAgentLogSourceCoverage(sourceResults),
       durationMs: result.durationMs,
     });
   }

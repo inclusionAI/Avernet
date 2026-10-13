@@ -1,6 +1,6 @@
 import type { RepairAuthorizationScope, RepairTargetEnvironment } from "./contracts.js";
-import { RepairError, repairValidation } from "./errors.js";
-import { redactPersistableText } from "./redaction.js";
+import { AgentToolError as RepairError, agentToolValidation as repairValidation } from "../common/agent-tools/errors.js";
+import { redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
 
 export const OCB_REPAIR_OPERATION_TYPES = ["restart_bot"] as const;
 /** OCB is retained only as the authenticated Bot restart control plane. */

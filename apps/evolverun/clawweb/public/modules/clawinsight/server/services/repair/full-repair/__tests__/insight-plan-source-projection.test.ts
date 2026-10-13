@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { assertRepairAuditSecretFree } from "../../../repositories/repair-repository.js";
-import { digestJson } from "../../evolve/plan-source-contract.js";
+import { assertRepairAuditSecretFree } from "../../../../repositories/repair/repair-repository.js";
+import { digestJson } from "../../../evolve/plan-source-contract.js";
 import {
   projectInsightPlanSourceForRepair,
 } from "../insight-plan-source-projection.js";

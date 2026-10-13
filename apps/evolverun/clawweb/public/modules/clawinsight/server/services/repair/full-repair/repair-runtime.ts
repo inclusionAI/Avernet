@@ -1,3 +1,4 @@
+import { BotEngineOperations } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import { createHash, randomUUID } from "node:crypto";
 import type { EvolveRepository, EvolveStepRow, EvolveTaskRow } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import {
@@ -8,10 +9,10 @@ import {
   type RepairToolCall,
   type RepairToolCallLedgerContext,
   type RepairToolCallTerminalStatus,
-} from "../../repositories/repair-repository.js";
-import { AisTaskRunner, type AisTaskDefinition } from "../ais-task-runner.js";
-import type { AistudioService } from "../aistudio-service.js";
-import type { MistOssObjectStore } from "../object-storage/oss-object-store.js";
+} from "../../../repositories/repair/repair-repository.js";
+import { AisTaskRunner, type AisTaskDefinition } from "../../ais-task-runner.js";
+import type { AistudioService } from "../../aistudio-service.js";
+import type { MistOssObjectStore } from "../../object-storage/oss-object-store.js";
 import type {
   ApprovedRepairPlan,
   RepairAgentExecutionInput,
@@ -62,14 +63,14 @@ import {
   type RepairConfig,
 } from "./config.js";
 import {
-  RepairError,
-  repairFinalizationRejected,
-  repairForbidden,
-  repairNotFound,
-  repairUnavailable,
-  repairValidation,
-} from "./errors.js";
-import { deriveRepairLogSourceCoverage, type RepairLogTool } from "./log-tool.js";
+  AgentToolError as RepairError,
+  agentToolFinalizationRejected as repairFinalizationRejected,
+  agentToolForbidden as repairForbidden,
+  agentToolNotFound as repairNotFound,
+  agentToolUnavailable as repairUnavailable,
+  agentToolValidation as repairValidation,
+} from "../common/agent-tools/errors.js";
+import { deriveAgentLogSourceCoverage, type AgentLogTool } from "../common/agent-tools/log-tool.js";
 import {
   parseOcbRepairOperation,
   type OcbRepairGateway,
@@ -77,10 +78,11 @@ import {
   type OcbRepairOperation,
 } from "./ocb-gateway.js";
 import type { RepairTargetResolver } from "./repository-target-resolver.js";
-import { containsRepairSecret, redactPersistableText, redactText, redactValue } from "./redaction.js";
-import { buildRepairRuntimeCommand, type RepairRuntimeTool } from "./runtime-tool.js";
-import type { ImprovementDetail } from "../insight/contracts.js";
-import { issueRepairExecutionTicket } from "./workload-verifier.js";
+import { containsSecret as containsRepairSecret, redactPersistableText, redactText, redactValue } from "@avernet/clawweb-shared/server/services/redaction";
+import { buildAgentRuntimeCommand, type AgentRuntimeTool } from "../common/agent-tools/runtime-tool.js";
+import type { ImprovementDetail } from "../../insight/contracts.js";
+import { sameAgentExecutionReport, AgentExecutionService, createAgentExecutionStep } from "../common/agent-execution.js";
+import type { AisStatusHandler } from "@avernet/clawevolve/server/services/ais/status-handler";
 import {
   projectInsightPlanSourceForRepair,
   unavailableInsightPlanSource,
@@ -186,8 +188,8 @@ export type RepairTaskServiceDeps = {
   ais: AistudioService;
   targets: RepairTargetResolver;
   ocb: OcbRepairGateway;
-  logs: RepairLogTool;
-  runtimeTool: RepairRuntimeTool;
+  logs: AgentLogTool;
+  runtimeTool: AgentRuntimeTool;
   insightBridge?: RepairInsightBridge;
   nowSeconds?: () => number;
 };
@@ -1062,7 +1064,7 @@ function assertPlanV2Chinese(plan: RepairPlanArtifactV2): void {
 function assertExecutablePayloadSecretFree(action: RepairPlanAction): void {
   const payload = action.type === "container_command"
     ? { command: action.command }
-    : action.operation?.params ?? {};
+    : action.type === "engine_operation" ? action.engineOperation : action.operation?.params ?? {};
   if (containsRepairSecret(payload)) {
     repairValidation("invalid_repair_plan_secret", "Repair Plan 的可执行内容不能包含凭据或密钥");
   }
@@ -1161,7 +1163,10 @@ function validatePlanBody(
     if (action.rollback != null) requiredText(action.rollback, "action.rollback", 4_000);
     if (action.type === "container_command") {
       requiredText(action.command, "action.command", 16_384);
-      if (action.operation != null) repairValidation("invalid_repair_plan", "container action 不能包含 OCB operation");
+      if (action.operation != null || action.engineOperation != null) repairValidation("invalid_repair_plan", "container action 不能包含其他 operation");
+    } else if (action.type === "engine_operation") {
+      if (!action.engineOperation || typeof action.engineOperation !== "object" || Array.isArray(action.engineOperation)
+        || action.command != null || action.operation != null) repairValidation("invalid_engine_action", "Engine action requires a single engineOperation");
     } else if (action.type === "ocb_operation") {
       const operation = requiredText(action.operation?.type, "action.operation.type", 64);
       const allowedOperations = options.allowHistoricalEngineConfigReplace
@@ -1481,6 +1486,7 @@ function repairApplyAttemptStatus(status: string): "succeeded" | "failed" | "unk
 
 function validatePlan(plan: RepairPlanArtifact, expected: RepairTaskConfig): void {
   validatePlanBody(plan);
+  for (const action of plan.actions) if (action.type === "engine_operation") BotEngineOperations.validate(expected.runtimeTarget.target.activeEngine, action.engineOperation!, true);
   if (plan.taskId !== expected.taskId
     || plan.stepId !== expected.current.stepId
     || plan.attempt !== expected.current.attempt
@@ -1593,9 +1599,20 @@ function definition(config: RepairConfig): AisTaskDefinition<RepairDispatchConfi
       ),
       executionId: task.execution.executionId,
     }),
-    buildGlobalParams: (task, uploadArtifacts) => ({
-      [REPAIR_PARAMS_KEY]: JSON.stringify(safeTaskEnvelope(task, uploadArtifacts, task.executionTicket)),
-    }),
+    buildGlobalParams: (task, uploadArtifacts) => {
+      const envelope = safeTaskEnvelope(task, uploadArtifacts, task.executionTicket);
+      if (!config.packageId) return { [REPAIR_PARAMS_KEY]: JSON.stringify(envelope) };
+      if (!task.aisExecution) throw new Error("Repair Base execution contract is missing");
+      const runtime = envelope.runtime as Record<string, unknown>;
+      delete runtime.executionTicket;
+      runtime.artifacts = Object.fromEntries(Object.entries(task.artifacts).map(([name, spec]) => [name, { objectKey: spec.objectKey }]));
+      const openclaw = ((envelope.input as Record<string, unknown>).agent as { openclaw?: Record<string, unknown> }).openclaw;
+      if (openclaw) delete openclaw.modelApiKey;
+      return { [REPAIR_PARAMS_KEY]: JSON.stringify({ taskType: "repair", taskId: task.taskId,
+        stepId: task.aisExecution.stepId, attempt: task.executionNo, input: { repair: envelope,
+          credentials: { executionTicket: task.executionTicket, artifacts: uploadArtifacts, ...(task.llmApiKey ? { modelApiKey: task.llmApiKey } : {}) } },
+        runtime: { clawwebUrl: task.publicBaseUrl, package: { packageId: config.packageId } } }) };
+    },
   };
 }
 
@@ -1798,7 +1815,7 @@ function safeReadInvocation(call: RepairToolCall, payload: unknown): Record<stri
     try {
       return {
         kind: "readonly_command",
-        command: buildRepairRuntimeCommand(payload as RepairRuntimeInspectInput),
+        command: buildAgentRuntimeCommand(payload as RepairRuntimeInspectInput),
       };
     } catch {
       return null;
@@ -1838,7 +1855,7 @@ function browserResultSummary(call: RepairToolCall, canViewDetails = true): stri
   if (call.toolName === "antlogs") {
     const returned = Number.isSafeInteger(result.returnedEntries) ? Number(result.returnedEntries) : null;
     const total = Number.isSafeInteger(result.totalEntries) ? Number(result.totalEntries) : null;
-    const coverage = deriveRepairLogSourceCoverage(result.sources);
+    const coverage = deriveAgentLogSourceCoverage(result.sources);
     const hasCovered = coverage.coveredSources.length > 0;
     const hasUnavailable = coverage.unavailableSources.length > 0;
     const outcome = hasCovered && hasUnavailable
@@ -2143,6 +2160,7 @@ function browserPlan(plan: RepairPlanArtifact | null, canViewDetails: boolean): 
       ...(canViewDetails && action.operation != null
         ? { operation: action.operation }
         : {}),
+      ...(canViewDetails && action.engineOperation != null ? { engineOperation: action.engineOperation } : {}),
     })),
   };
 }
@@ -2179,11 +2197,13 @@ type RepairViewAccess = {
 export class RepairTaskService {
   private readonly runner: AisTaskRunner<RepairDispatchConfig>;
   private readonly now: () => number;
+  private readonly executions: AgentExecutionService;
   private readonly cfuseAuthCodes = new Map<string, CfuseAuthCodeSlot>();
 
   constructor(private readonly deps: RepairTaskServiceDeps) {
     this.runner = new AisTaskRunner(deps.repo, deps.store, deps.ais, definition(deps.config));
     this.now = deps.nowSeconds ?? (() => Math.floor(Date.now() / 1_000));
+    this.executions = new AgentExecutionService({ leaseSeconds: deps.config.executionLeaseSeconds, nowSeconds: this.now });
   }
 
   async listBots(actorUserId: string, isAdmin = false, requestedOwnerId?: unknown) {
@@ -2390,7 +2410,8 @@ export class RepairTaskService {
     const taskId = `REPAIR-${randomUUID()}`;
     const stepId = `${taskId}-PLAN-1`;
     const artifacts = artifactsFor(taskId, stepId, "repair_plan");
-    const ticket = issueRepairExecutionTicket();
+    const issued = this.executions.issue(`exec-${randomUUID()}`, stepId, this.deps.config.decisionGraceSeconds);
+    const ticket = { ticket: issued.ticket, digest: issued.execution.ticketDigest };
     const now = this.now();
     const snapshot = targetSnapshot(target, 1, "task_created");
     const config: RepairTaskConfig = {
@@ -2421,7 +2442,7 @@ export class RepairTaskService {
       cfuseEngine: selectedAgent.cfuseEngine,
       cfuseModel: selectedAgent.cfuseModel,
       execution: {
-        executionId: `exec-${randomUUID()}`,
+        executionId: issued.execution.executionId,
         ticketDigest: ticket.digest,
         jobId: null,
         ccSessionId: null,
@@ -3022,7 +3043,8 @@ export class RepairTaskService {
         ocbRead: [],
         ocbApply: [...WRITE_OCB_OPERATIONS],
         runtimeRead: [
-          "fs_list", "fs_find", "fs_stat", "fs_read", "fs_search", "process_list", "port_list", "http_get",
+          ...(this.deps.runtimeTool.hasTrajectories ? ["trajectory_read"] : []),
+          "engine_read", "fs_list", "fs_find", "fs_stat", "fs_read", "fs_search", "process_list", "port_list", "http_get",
           ...(config.diagnosticMode === "deep" ? ["shell_exec"] : []),
         ],
         applyAction: context.phase === "repair_apply",
@@ -3031,6 +3053,9 @@ export class RepairTaskService {
         shellObservedLocators: "unverified_confirm_v1",
         rawShell: config.diagnosticMode === "deep",
         rawHttp: false,
+        engine: BotEngineOperations.capabilities(context.target.activeEngine),
+        nasSessionRead: context.target.activeEngine !== "teclaw",
+        supportedActionTypes: context.target.activeEngine === "teclaw" ? ["engine_operation"] : ["container_command", "engine_operation", "ocb_operation"],
       },
     };
     if (insightPlanSource) {
@@ -3111,13 +3136,7 @@ export class RepairTaskService {
       : requiredText(body.ccSessionId, "ccSessionId", 255);
     const next: RepairTaskConfig = {
       ...config,
-      execution: {
-        ...config.execution,
-        ccSessionId,
-        state: config.execution.state === "dispatching" ? "running" : config.execution.state,
-        leaseExpiresAt: now + this.deps.config.executionLeaseSeconds,
-        lastHeartbeatAt: now,
-      },
+      execution: this.executions.heartbeat(config.execution, ccSessionId ?? undefined),
     };
     const updated = await this.deps.repairRepo.compareAndSetTaskConfig({
       taskId: task.task_id,
@@ -3501,7 +3520,7 @@ export class RepairTaskService {
     const plan = await this.loadApprovedPlan(config);
     const action = plan.actions.find((item) => item.actionId === actionId);
     if (!action) repairNotFound("repair_action_not_approved", "actionId 不在当前获批方案内");
-    if (action.type !== "container_command") {
+    if (action.type !== "container_command" && action.type !== "engine_operation") {
       repairValidation("repair_action_wrong_tool", "OCB action 必须通过 OCB relay 执行");
     }
     await this.assertDependenciesSatisfied(task.task_id, context.stepId, action);
@@ -4403,10 +4422,11 @@ export class RepairTaskService {
       next.history[next.history.length - 1].artifactDigest = digest;
       next.history[next.history.length - 1].status = previousStep.status;
     }
-    const ticket = issueRepairExecutionTicket();
+    const issued = this.executions.issue(`exec-${randomUUID()}`, next.current.stepId, this.deps.config.decisionGraceSeconds);
+    const ticket = { ticket: issued.ticket, digest: issued.execution.ticketDigest };
     const now = this.now();
     next.execution = {
-      executionId: `exec-${randomUUID()}`,
+      executionId: issued.execution.executionId,
       ticketDigest: ticket.digest,
       jobId: null,
       ccSessionId: null,
@@ -4512,10 +4532,20 @@ export class RepairTaskService {
     executionTicket: string,
     llmApiKey: string | null = null,
   ): Promise<void> {
-    const task = await this.deps.repo.findTask(taskId);
+    let task = await this.deps.repo.findTask(taskId);
     if (!task) repairNotFound("repair_task_not_found", "Repair Task 不存在");
-    const config = taskConfig(task);
+    let config = taskConfig(task);
     assertExecutionSupported(config);
+    if (this.deps.config.packageId) {
+      const executionNo = (config.executionNo ?? 0) + 1;
+      const aisExecution = await createAgentExecutionStep(this.deps.repo, { taskId, executionId: config.execution.executionId, executionNo, handler: "repair" });
+      const saved = await this.deps.repairRepo.compareAndSetTaskConfig({ taskId, expectedTaskStatuses: [task.status],
+        expectedCurrentStepId: config.current.stepId, expectedTaskConfigDigest: storedConfigDigest(task.config_json),
+        nextConfig: { ...config, executionNo, aisExecution } });
+      if (!saved) throw new RepairError(409, "repair_dispatch_conflict", "Repair 派发状态已变化");
+      task = (await this.deps.repo.findTask(taskId))!;
+      config = taskConfig(task);
+    }
     try {
       const jobId = await this.runner.dispatch(task, config.current.stepId, task.created_by, {
         ...config,
@@ -4523,6 +4553,7 @@ export class RepairTaskService {
         executionTicket,
         ...(llmApiKey ? { llmApiKey } : {}),
       });
+      if (config.aisExecution) await this.deps.repo.markExternalDispatched(config.aisExecution.stepId, jobId, { executionId: config.execution.executionId, jobId });
       const latestTask = await this.deps.repo.findTask(taskId);
       if (!latestTask) return;
       const latest = taskConfig(latestTask);
@@ -4560,10 +4591,39 @@ export class RepairTaskService {
       const safe = httpStatus
         ? `Repair AIS dispatch failed (HTTP ${httpStatus})`
         : "Repair AIS dispatch failed";
+      if (config.aisExecution) await this.deps.repo.updateStepStatus(config.aisExecution.stepId, {
+        status: "failed", summary: safe, errorCode: "DISPATCH_FAILED", errorMessage: safe, retryable: true,
+      });
       await this.deps.repo.markDispatchFailed(config.current.stepId, safe);
       throw new RepairError(502, "repair_ais_dispatch_failed", safe);
     }
   }
+
+  readonly handleAisStatus: AisStatusHandler = async ({ task: reportedTask, step, report }) => {
+    const task = await this.deps.repo.findTask(reportedTask.task_id);
+    if (!task || task.task_type !== "repair") return { applied: false };
+    const config = taskConfig(task), contract = config.aisExecution;
+    if (step.step_type !== "agent_execution" || step.task_id !== task.task_id) return { applied: false };
+    const currentExecution = contract?.stepId === step.step_id && contract.aisBase.executionId === config.execution.executionId;
+    if (["succeeded", "failed"].includes(step.status)) {
+      const identical = sameAgentExecutionReport(step, report);
+      return { applied: identical, duplicate: identical };
+    }
+    if (currentExecution && report.status !== "running" && config.execution.state !== "ended") {
+      const current = await this.currentStep(task, config);
+      const interrupted = ["pending", "running"].includes(task.status);
+      const outcome = await this.deps.repairRepo.transitionStep({ taskId: task.task_id,
+        expectedTaskStatuses: [task.status], expectedCurrentStepId: config.current.stepId,
+        expectedTaskConfigDigest: storedConfigDigest(task.config_json), nextTaskStatus: interrupted ? "waiting_context" : task.status,
+        nextConfig: { ...config, execution: this.executions.end(config.execution) },
+        previousStep: { stepId: current.step_id, expectedStatuses: [current.status],
+          status: interrupted ? "interrupted" : current.status,
+          ...(interrupted ? { errorCode: report.errorCode ?? "AIS_EXECUTION_INTERRUPTED", errorMessage: "容器执行结束；已保存业务进度，可核对现场后恢复", retryable: true } : {}) } });
+      if (outcome.outcome !== "transitioned") return { applied: false };
+    }
+    const applied = await this.deps.repo.updateStepStatus(step.step_id, { ...report, expectedStep: { status: step.status, output_json: step.output_json } });
+    return { applied };
+  };
 
   private async continuationEnvelope(config: RepairTaskConfig): Promise<Record<string, unknown>> {
     assertExecutionSupported(config);

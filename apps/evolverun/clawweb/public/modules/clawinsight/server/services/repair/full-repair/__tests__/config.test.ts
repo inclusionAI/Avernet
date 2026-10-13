@@ -45,7 +45,7 @@ describe("resolveRepairConfig", () => {
     expect(config.decisionGraceSeconds).toBe(900);
     expect(config.contextWaitSeconds).toBe(1800);
     expect(config.executionLeaseSeconds).toBe(90);
-    expect(config.heartbeatIntervalSeconds).toBe(30);
+    expect(config.heartbeatIntervalSeconds).toBe(20);
     expect(config.agentTimeoutSeconds).toBe(2100);
     expect(config.agentCloseoutTimeoutSeconds).toBe(180);
     expect(config.maxAgentAutoRecoveries).toBe(2);
@@ -62,6 +62,10 @@ describe("resolveRepairConfig", () => {
     expect(config).not.toHaveProperty("ocbBaseUrls");
     expect(config.publicBaseUrl).toBe(resolveInsightHandoffConfig().publicBaseUrl);
     expect(config.baas).toEqual(resolveBaasConfig());
+  });
+  it("selects the standard Repair package without changing business waiting deadlines", () => {
+    vi.stubEnv("REPAIR_AIS_USE_BASE", "true");
+    expect(resolveRepairConfig()).toMatchObject({ packageId: "clawevolve-repair", decisionGraceSeconds: 900 });
   });
 
   it.each([
