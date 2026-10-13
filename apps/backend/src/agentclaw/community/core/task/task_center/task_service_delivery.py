@@ -36,6 +36,33 @@ class TaskServiceDeliveryMixin:
             return node
         if state != "CLAIMED" or lease_token is None:
             raise TaskStateError(f"relay delivery is not claimable: {state}")
+        if node.run_info.extend_props.get("relay_root"):
+            # Compatibility cleanup for roots created by the old protocol.
+            # The first baton is now forwarded in the already-open Bot
+            # conversation, so retrying this legacy intent through Runner would
+            # create a duplicate session or permission-solving group forever.
+            intents.mark_delivery_intent(
+                task_id, node_id, lease_token, delivered=True
+            )
+            self._graph.append_action_event(
+                task_id,
+                node_id,
+                NodeAction.DISPATCH,
+                {
+                    "phase": "delivery",
+                    "action_result": "retired_legacy_root_intent",
+                    "run_mode": node.run_info.run_mode,
+                    "assignee": node.run_info.assignee,
+                },
+                status_from=initial_status,
+                status_to=node.status,
+            )
+            logger.warning(
+                "retired legacy relay root delivery intent task=%s node=%s",
+                task_id,
+                node_id,
+            )
+            return node
         try:
             if node.status == Status.PENDING and node.run_info.run_mode != "bbs":
                 self._report_node_patch(TaskNodePatch(

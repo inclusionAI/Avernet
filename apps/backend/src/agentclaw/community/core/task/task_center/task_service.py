@@ -65,6 +65,7 @@ from agentclaw.community.core.task.task_center import task_service_queries
 from agentclaw.community.core.task.task_center.task_service_support import (
     STATIC_PLAN_TEMPLATES,
     build_submit_trajectory_event_kwargs,
+    normalize_owner_bot_id,
 )
 
 from agentclaw.community.core.task.task_center.task_service_execution import (
@@ -188,6 +189,7 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
             recovery_strategies,
         )
         self._wire_semantic_dispatcher()
+
         # Relay consumes explicit adapter ports; it does not orchestrate through
         # or reach into the centralized lifecycle.
         # fire-and-forget 后台推进任务跟踪(防 GC + 异常可见 + drain seam)
@@ -412,43 +414,13 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
         """供执行实体(bot workflow / bcn 协作群)PUSH 回投的入口(适配层 → 编排核 on_report)。"""
         return self._callback
 
-    @staticmethod
-    def _normalize_owner_bot_id(request: TaskInfoRequest) -> TaskInfoRequest:
-        """Keep new task_info rows semantically split while accepting legacy composite input.
-
-        归属解耦(A):当 owner_bot_id 内嵌归属与 owner_user_id(执行用户/人类观察者)不一致时,**保留**
-        owner_bot_id 复合(真实归属不被覆盖),owner_user_id 仍为执行用户 —— owner bot 寻址用真实归属,
-        执行用户仅作人类观察者(P1)。归属一致或缺执行用户时维持原行为(拆为 bare bot_id + owner_user_id)。"""
-        bot_id, separator, embedded_owner_id = str(
-            request.owner_bot_id or ""
-        ).partition(":")
-        if not separator:
-            return request
-        owner_user_id = request.owner_user_id or embedded_owner_id
-        if (
-            request.owner_user_id
-            and embedded_owner_id
-            and request.owner_user_id != embedded_owner_id
-        ):
-            logger.warning(
-                "[task][execute] owner identity mismatch: owner_bot_id=%s owner_user_id=%s; "
-                "keep owner_bot's real owner (embedded), owner_user_id is the executing observer",
-                request.owner_bot_id,
-                request.owner_user_id,
-            )
-            # 保留 owner_bot_id 复合(真实归属),不拆为 bare —— 供 _run_yaml 直接用作 owner bot 寻址。
-            return replace(
-                request, owner_bot_id=request.owner_bot_id, owner_user_id=owner_user_id
-            )
-        return replace(request, owner_bot_id=bot_id, owner_user_id=owner_user_id)
-
     async def execute(self, request: TaskInfoRequest) -> TaskOpResult:
-        """提交执行任务:生成 task_id → 持久化 task_info(PENDING)→ initialize_graph →
-        后台 on_execute 首帧推进,立即返回 TaskOpResult(含 task_id + run_id)。
+        """提交执行任务并返回根节点标识。
 
-        持久化失败(IntegrityError,如 task_id 冲突)→ 返回 success=False,不建图。
+        Relay 返回 Backend 生成的当前会话首棒指令；中心化模式继续由后台
+        on_execute 首帧推进。持久化失败返回 ``success=False``，不建图。
 
-        fire-and-forget:on_execute 在后台 asyncio.Task 推进,不阻塞调用方(HTTP 响应秒回);
+        中心化 fire-and-forget 不阻塞调用方；
         长编排(owner bot ``send_and_wait_async`` 分钟级 + dispatch 投递)异步进行,
         调用方经 ``get_task_dashboard`` 轮询观察推进。后台任务异常经 done_callback 记 log
         (不向调用方抛;图停在中间态由 harness 旁路巡检兜底复位)。"""
@@ -471,10 +443,20 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
                     extend_props={
                         "orchestration_mode": previous_mode,
                         "root_node_id": previous.task_id,
+                        **(
+                            {
+                                "root_execution_instruction":
+                                    self._build_relay_root_execution_instruction(
+                                        previous.task_id
+                                    )
+                            }
+                            if previous_mode == "relay"
+                            else {}
+                        ),
                     },
                 )
         else:
-            request = self._normalize_owner_bot_id(request)
+            request = normalize_owner_bot_id(request)
         requested_orchestration_mode = self._normalize_orchestration_mode(
             request.execution_config.get("orchestration_mode")
         )
@@ -491,6 +473,10 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
             request = replace(request, execution_config=config)
         if request.execution_config.get("orchestration_mode") != "relay":
             request = self._materialize_static_plan_if_needed(request)
+        elif not str(self._api_base_url or "").strip():
+            raise TaskStateError(
+                "relay task creation requires task_dispatch.backend_url"
+            )
         task_id = self._task_id_provider()
         logger.info(
             "[task][execute][mode] task=%s task_type=%s default_mode=%s "
@@ -536,6 +522,16 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
                     extend_props={
                         "orchestration_mode": previous_mode,
                         "root_node_id": previous.task_id,
+                        **(
+                            {
+                                "root_execution_instruction":
+                                    self._build_relay_root_execution_instruction(
+                                        previous.task_id
+                                    )
+                            }
+                            if previous_mode == "relay"
+                            else {}
+                        ),
                     },
                 )
         else:
@@ -558,15 +554,15 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
         )
         task_type = request.execution_config.get("task_type")
         if request.execution_config.get("orchestration_mode") == "relay":
+            instruction = self._build_relay_root_execution_instruction(task_id)
             result = TaskOpResult(
                 task_id=task_id, success=True, node_id=task_id, run_id=graph.run_id,
-                extend_props={"orchestration_mode": "relay", "root_node_id": task_id},
+                extend_props={
+                    "orchestration_mode": "relay",
+                    "root_node_id": task_id,
+                    "root_execution_instruction": instruction,
+                },
             )
-            if self._harness is not None:
-                self._harness.register(task_id)
-            bg = asyncio.create_task(self.dispatch_node(task_id, task_id))
-            self._bg_tasks.add(bg)
-            bg.add_done_callback(self._on_bg_done)
             return result
         if task_type == TaskType.WORKFLOW:
             return await self._run_workflow(task_id, request, task_info, graph.run_id)

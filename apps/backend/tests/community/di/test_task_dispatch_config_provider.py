@@ -28,3 +28,20 @@ def test_task_dispatch_does_not_select_backend_by_runtime_environment(
     monkeypatch.setenv("BACKEND_URL", "https://ignored.example")
 
     assert ConfigModule().task_dispatch().backend_url == "https://backend.example"
+
+
+def test_task_dispatch_reuses_standard_callback_origin_when_override_is_empty(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        config_module,
+        "_user_config",
+        lambda: {
+            "task_dispatch": {"backend_url": ""},
+            "bcs_client": {
+                "task_callback_url": "https://backend.example/api/v1/callback"
+            },
+        },
+    )
+
+    assert ConfigModule().task_dispatch().backend_url == "https://backend.example"

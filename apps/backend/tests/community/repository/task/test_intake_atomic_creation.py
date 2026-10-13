@@ -72,17 +72,49 @@ def _setup(*, mode: TaskExecutionMode = TaskExecutionMode.RELAY):
     return db, graph_service, repo, task_info, result
 
 
-def test_intake_task_root_and_delivery_intent_commit_together() -> None:
+def _plan_successor(graph_service: TaskGraphService) -> tuple[str, str]:
+    root = graph_service.query_task_dashboard("task-1").tasks[0]
+    relay_token = root.run_info.extend_props["relay_token"]
+    graph_service.apply_relay_report(TaskReportCommand(
+        task_id="task-1", node_id="task-1",
+        event_id="execution-helper", relay_token=relay_token,
+        event_type=TaskReportEventType.EXECUTION_RESULT,
+        event=TaskNodePatch(
+            task_id="task-1", node_id="task-1", execution_decision="ACCEPTED",
+            actual_goal=Goal("完成首棒", []),
+            local_acceptance_result=AcceptanceResult(AcceptanceVerdict.DONE),
+            output_patch={"result": "首棒事实"},
+        ),
+    ))
+    planned = graph_service.apply_relay_report(TaskReportCommand(
+        task_id="task-1", node_id="task-1",
+        event_id="plan-helper", relay_token=relay_token,
+        event_type=TaskReportEventType.PLAN_RESULT,
+        event=TaskNode(
+            node_id=None, task_id="task-1", status=None,
+            task_spec=TaskSpec(Context("下一棒", title="下一棒"), Goal("完成剩余目标", [])),
+            run_info=RuntimeInfo(run_mode="single_bot", assignee="bot-2"),
+            node_run_graph=None,
+        ),
+    ))
+    node_id = str(planned.target_node_id)
+    successor = next(
+        node for node in graph_service.query_task_dashboard("task-1").tasks
+        if node.node_id == node_id
+    )
+    return node_id, successor.run_info.extend_props["relay_token"]
+
+
+def test_intake_task_root_commits_without_delivery_intent() -> None:
     db, graph_service, _, task_info, result = _setup()
     graph = graph_service.initialize_intake_graph(task_info, result.session_id)
     assert graph.tasks[0].run_info.assignee == "bot-1"
     with db.orm_session() as session:
         info = session.query(TaskInfoModel).one()
         root = session.query(TaskNodeModel).one()
-        intent = session.query(TaskDeliveryIntentModel).one()
         assert info.intake_session_id == result.session_id
-        assert root.node_id == intent.node_id == task_info.task_id
-        assert intent.state == "PENDING"
+        assert root.node_id == task_info.task_id
+        assert session.query(TaskDeliveryIntentModel).count() == 0
 
 
 def test_intake_creation_rolls_back_on_graph_write_failure(monkeypatch) -> None:
@@ -100,22 +132,50 @@ def test_intake_creation_rolls_back_on_graph_write_failure(monkeypatch) -> None:
         assert session.query(TaskDeliveryIntentModel).count() == 0
 
 
+def test_legacy_root_delivery_intent_is_retired_without_runner_dispatch() -> None:
+    db, graph_service, repo, task_info, result = _setup()
+    graph_service.initialize_intake_graph(task_info, result.session_id)
+    root = graph_service.query_task_dashboard("task-1").tasks[0]
+    with db.orm_session() as session:
+        session.add(TaskDeliveryIntentModel(
+            task_id="task-1",
+            node_id="task-1",
+            relay_token=root.run_info.extend_props["relay_token"],
+            state="PENDING",
+            attempt=0,
+        ))
+    service = TaskService(graph_service, delivery_intents=repo)
+
+    class Dispatcher:
+        async def dispatch(self, node):
+            raise AssertionError("legacy relay root must not reach Runner dispatch")
+
+    service._relay_adapter._dispatcher = Dispatcher()
+
+    assert asyncio.run(service.dispatch_pending_intents()) == 1
+    with db.orm_session() as session:
+        intent = session.query(TaskDeliveryIntentModel).one()
+        assert intent.state == "DELIVERED"
+    actions = repo.load_action_logs("task-1")["task-1"]
+    assert actions[-1].payload["action_result"] == "retired_legacy_root_intent"
+
+
 def test_delivery_intent_claim_is_exclusive_and_recoverable() -> None:
     db, graph_service, repo, task_info, result = _setup()
     graph_service.initialize_intake_graph(task_info, result.session_id)
-    relay_token = graph_service.query_task_dashboard("task-1").tasks[0].run_info.extend_props["relay_token"]
-    assert repo.list_pending_delivery_intents() == [("task-1", "task-1")]
-    state, token = repo.claim_delivery_intent("task-1", "task-1", relay_token)
+    node_id, relay_token = _plan_successor(graph_service)
+    assert repo.list_pending_delivery_intents() == [("task-1", node_id)]
+    state, token = repo.claim_delivery_intent("task-1", node_id, relay_token)
     assert state == "CLAIMED" and token
-    assert repo.claim_delivery_intent("task-1", "task-1", relay_token)[0] == "DELIVERING"
+    assert repo.claim_delivery_intent("task-1", node_id, relay_token)[0] == "DELIVERING"
     assert repo.list_pending_delivery_intents() == []
 
-    repo.mark_delivery_intent("task-1", "task-1", token, delivered=False, error="timeout")
-    assert repo.list_pending_delivery_intents() == [("task-1", "task-1")]
-    state, retry_token = repo.claim_delivery_intent("task-1", "task-1", relay_token)
+    repo.mark_delivery_intent("task-1", node_id, token, delivered=False, error="timeout")
+    assert repo.list_pending_delivery_intents() == [("task-1", node_id)]
+    state, retry_token = repo.claim_delivery_intent("task-1", node_id, relay_token)
     assert state == "CLAIMED" and retry_token != token
-    repo.mark_delivery_intent("task-1", "task-1", retry_token, delivered=True)
-    assert repo.claim_delivery_intent("task-1", "task-1", relay_token) == ("DELIVERED", None)
+    repo.mark_delivery_intent("task-1", node_id, retry_token, delivered=True)
+    assert repo.claim_delivery_intent("task-1", node_id, relay_token) == ("DELIVERED", None)
     with db.orm_session() as session:
         assert session.query(TaskDeliveryIntentModel).one().attempt == 2
 
@@ -123,22 +183,25 @@ def test_delivery_intent_claim_is_exclusive_and_recoverable() -> None:
 def test_retry_reopens_same_node_delivery_with_new_generation() -> None:
     db, graph_service, repo, task_info, result = _setup()
     graph_service.initialize_intake_graph(task_info, result.session_id)
-    old_token = graph_service.query_task_dashboard("task-1").tasks[0].run_info.extend_props["relay_token"]
-    state, old_lease = repo.claim_delivery_intent("task-1", "task-1", old_token)
+    node_id, old_token = _plan_successor(graph_service)
+    state, old_lease = repo.claim_delivery_intent("task-1", node_id, old_token)
     assert state == "CLAIMED" and old_lease
-    repo.mark_delivery_intent("task-1", "task-1", old_lease, delivered=True)
+    repo.mark_delivery_intent("task-1", node_id, old_lease, delivered=True)
 
     graph_service.update_task_node_info(TaskNodePatch(
-        task_id="task-1", node_id="task-1",
+        task_id="task-1", node_id=node_id,
         extend_props_patch={"harness_retries": 1},
     ))
-    new_token = graph_service.query_task_dashboard("task-1").tasks[0].run_info.extend_props["relay_token"]
+    new_token = next(
+        node for node in graph_service.query_task_dashboard("task-1").tasks
+        if node.node_id == node_id
+    ).run_info.extend_props["relay_token"]
     assert new_token != old_token
-    assert repo.claim_delivery_intent("task-1", "task-1", old_token) == ("STALE", None)
-    assert repo.list_pending_delivery_intents() == [("task-1", "task-1")]
-    state, new_lease = repo.claim_delivery_intent("task-1", "task-1", new_token)
+    assert repo.claim_delivery_intent("task-1", node_id, old_token) == ("STALE", None)
+    assert repo.list_pending_delivery_intents() == [("task-1", node_id)]
+    state, new_lease = repo.claim_delivery_intent("task-1", node_id, new_token)
     assert state == "CLAIMED" and new_lease
-    repo.mark_delivery_intent("task-1", "task-1", new_lease, delivered=True)
+    repo.mark_delivery_intent("task-1", node_id, new_lease, delivered=True)
     with db.orm_session() as session:
         intent = session.query(TaskDeliveryIntentModel).one()
         assert intent.relay_token == new_token
@@ -150,6 +213,7 @@ def test_execute_confirmed_intake_reuses_the_same_root() -> None:
     service = TaskService(
         graph_service, task_info_repo=TaskInfoRepository(db),
         delivery_intents=repo, task_id_provider=lambda: "task-1",
+        api_base_url="https://backend.example",
     )
     request = build_task_info_request(result)
 
@@ -165,7 +229,9 @@ def test_execute_confirmed_intake_reuses_the_same_root() -> None:
     with db.orm_session() as session:
         assert session.query(TaskInfoModel).count() == 1
         assert session.query(TaskNodeModel).count() == 1
-        assert session.query(TaskDeliveryIntentModel).count() == 1
+        assert session.query(TaskDeliveryIntentModel).count() == 0
+    assert first.extend_props["root_execution_instruction"].startswith("[task-execute]")
+    assert "backend_url=https://backend.example" in first.extend_props["root_execution_instruction"]
 
 
 def test_execute_confirmed_centralized_intake_reuses_root_without_delivery_intent() -> None:
@@ -195,6 +261,7 @@ def test_execute_confirmed_centralized_intake_reuses_root_without_delivery_inten
 def test_dispatch_node_acknowledges_only_after_real_dispatch() -> None:
     db, graph_service, repo, task_info, result = _setup()
     graph_service.initialize_intake_graph(task_info, result.session_id)
+    node_id, _ = _plan_successor(graph_service)
     service = TaskService(graph_service, delivery_intents=repo)
 
     class Dispatcher:
@@ -208,14 +275,14 @@ def test_dispatch_node_acknowledges_only_after_real_dispatch() -> None:
     service._relay_adapter._dispatcher = dispatcher
 
     async def dispatch_twice():
-        first = await service.dispatch_node("task-1", "task-1")
-        second = await service.dispatch_node("task-1", "task-1")
+        first = await service.dispatch_node("task-1", node_id)
+        second = await service.dispatch_node("task-1", node_id)
         return first, second
 
     first, second = asyncio.run(dispatch_twice())
-    assert first.node_id == second.node_id == "task-1"
+    assert first.node_id == second.node_id == node_id
     assert dispatcher.calls == 1
-    actions = repo.load_action_logs("task-1")["task-1"]
+    actions = repo.load_action_logs("task-1")[node_id]
     assert actions[-1].action is NodeAction.DISPATCH
     assert actions[-1].payload["action_result"] == "delivered"
     with db.orm_session() as session:
@@ -253,7 +320,7 @@ def test_report_and_successor_delivery_intent_commit_together() -> None:
     assert planned.target_node_id is not None
     with db.orm_session() as session:
         assert session.query(TaskNodeModel).count() == 2
-        assert session.query(TaskDeliveryIntentModel).count() == 2
+        assert session.query(TaskDeliveryIntentModel).count() == 1
         assert session.query(TaskDeliveryIntentModel).filter_by(node_id=planned.target_node_id).one().state == "PENDING"
 
     # Another service instance hydrates the same immutable result after a lost response.

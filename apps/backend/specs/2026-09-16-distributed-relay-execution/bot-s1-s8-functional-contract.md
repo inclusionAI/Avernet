@@ -4,7 +4,7 @@ task-cli 的命令、intake session 和 HTTP adapter 设计见 [`task-cli/design
 
 ## 1. 文档定位
 
-本文定义分布式 Relay 模式下 S1-S6 的目标协议：Bot 执行 S1–S5.5 并通过 HTTP 触发 S6；Backend 的 `TaskDispatcher` 实际派发，首棒与失败恢复也可由后台消费者触发。每个步骤均建模为：
+本文定义分布式 Relay 模式下 S1-S6 的目标协议：Bot 执行 S1–S5.5 并通过 HTTP 触发 S6；Backend 的 `TaskDispatcher` 只实际派发后继棒。根节点由前端把 Backend 生成的权威执行指令转发到用户确认任务的当前 Bot 会话，不创建第二个 Runner 会话。每个步骤均建模为：
 
 ```text
 输入参数 -> 处理函数 -> 输出值或领域结果
@@ -12,7 +12,7 @@ task-cli 的命令、intake session 和 HTTP adapter 设计见 [`task-cli/design
 
 已有领域对象直接作为函数参数传递。只有对象本身具有独立领域语义，或需要跨 API、消息、持久化边界时才定义新类型；禁止为单个函数机械包装参数。
 
-本文定义已落地的 Relay 合同：任务级 `task_gaps` 只存在于 Bot 当前工作流；S1 一律通过节点级 context API 获得图谱投影；规划使用未落图 `TaskNode`，一次 `PLAN_RESULT` 原子登记规划和执行者决策；Bot 的执行指令固定为“更新缺口 → 规划节点 → 搜索 → 决策 → PLAN_RESULT → S6 /dispatch”。后台消费者仅承担首棒唤起、待投递意图消费与失败恢复。
+本文定义已落地的 Relay 合同：任务级 `task_gaps` 只存在于 Bot 当前工作流；S1 一律通过节点级 context API 获得图谱投影；规划使用未落图 `TaskNode`，一次 `PLAN_RESULT` 原子登记规划和执行者决策；Bot 的执行指令固定为“更新缺口 → 规划节点 → 搜索 → 决策 → PLAN_RESULT → S6 /dispatch”。Backend 待投递意图只属于后继节点；后台消费者负责后继棒未投递意图的恢复。
 
 本文只讨论 Relay 模式，不改变 centralized、static plan、workflow、YAML 等模式。
 
@@ -22,12 +22,12 @@ task-cli 的命令、intake session 和 HTTP adapter 设计见 [`task-cli/design
 
 Bot 只消费一种 `TaskContext`，且只能由节点级 context API 返回：
 
-- 第一棒：`TaskService.execute()` 创建根节点并在同一事务登记待投递意图，返回 `TaskOpResult(task_id, node_id)`；Backend 通过统一 Dispatcher/Runner 向目标 Bot 投递根节点指令。
+- 第一棒：`TaskService.execute()` 创建根节点并返回 `TaskOpResult(task_id, node_id)`，同时在 `extend_props.root_execution_instruction` 返回 Backend 生成的权威执行指令；前端将该指令原样发送到用户确认任务的当前 Bot 会话。
 - 后续棒：S5.5 创建下一节点时同事务登记待投递意图；当前棒 Skill 调用 S6 HTTP 派发，后台消费者在未投递时恢复。派发消息只携带下一节点的 `task_id` 与 `node_id`。
 - S1：Bot Runtime 以这两个标识调用节点级 context API，取得 `TaskContext`。
 - harness 恢复：使用已持有的同一对标识调用同一接口。
 
-`TaskService.execute()` 本身不等待根节点投递，也不返回或注入 `TaskContext`；它原子登记投递意图，Backend 异步唤起首棒。后续棒沿用同一机制。Task Module 只在处理节点级 context API 时构造 `TaskContext`；正常执行与恢复因此没有两套业务上下文来源。
+`TaskService.execute()` 不返回或注入 `TaskContext`；它只返回根节点执行指令。根 Bot 收到指令后仍必须调用节点级 context API 获取唯一权威 `TaskContext`。后续棒才通过待投递意图、Dispatcher 和 Runner 交接，因此根节点与后继节点的启动通道不同，但业务上下文来源始终只有节点级 context API。
 
 ### 2.2 事实与推理分离
 
@@ -71,8 +71,8 @@ Bot 本地推理：
   -> CLI POST /start {session_id}
   -> P2 Backend 读取 CONFIRMED Result 并构造内部 TaskInfoRequest
   -> TaskService.execute(TaskInfoRequest)
-  -> 返回 TaskOpResult(task_id, node_id)
-  -> Backend S6 消费根节点投递意图，发送 task_id + node_id
+  -> 返回 TaskOpResult(task_id, node_id, root_execution_instruction)
+  -> Frontend 将 root_execution_instruction 发送到当前 Bot 会话
   -> 首棒 S1 读取节点级 TaskContext
   -> S2 calculate_task_gaps
   -> S3 match_bot_capability
@@ -367,8 +367,8 @@ TaskInfoRequest
   -> 持久化 TaskInfo
   -> initialize_graph(TaskInfo)
   -> 创建唯一根 TaskNode
-  -> 同事务登记根节点 PENDING 投递意图
-  -> 返回 TaskOpResult
+  -> Backend 生成包含 task_id/node_id/relay_token/backend_url 的根节点执行指令
+  -> 返回 TaskOpResult；根节点不登记 delivery intent
 ```
 
 #### 输出对象
@@ -423,17 +423,19 @@ HTTP 请求体仅为 `{"session_id": "..."}`；Backend 应用层按认证用户�
     "run_id": 1,
     "error": null,
     "extend_props": {
-      "orchestration_mode": "relay"
+      "orchestration_mode": "relay",
+      "root_node_id": "task-001",
+      "root_execution_instruction": "[task-execute]\\n..."
     }
   }
 }
 ```
 
-成功的 `TaskOpResult` 直接返回 task-cli；`TaskIntakeResult` 不保存或返回 `task_id/node_id`，仍只代表同一份已完备的澄清结果。Task Module 以 `execution_config.session_id` 保存内部创建幂等关联。根节点后续派发属于 Task Module 的后台执行分支。
+成功的 `TaskOpResult` 直接返回 task-cli；`TaskIntakeResult` 不保存或返回 `task_id/node_id`，仍只代表同一份已完备的澄清结果。Task Module 以 `execution_config.session_id` 保存内部创建幂等关联。根节点执行指令由创建响应返回并在当前 Bot 会话触发，不属于后台派发分支。
 
 内部创建幂等关联一旦存在，Task Intake 拒绝该 intake session 的后续 `CONTINUE`、`CANCEL`；不把“已提交”、`task_id` 或 `node_id` 反写到 `TaskIntakeResult`。任务是否已经创建只由 Task Module 的内部关联和 `TaskOpResult` 表示。
 
-### 3.7 P3：登记并投递第一棒（Task Module 内部）
+### 3.7 P3：在当前会话启动第一棒
 
 #### 输入参数
 
@@ -456,12 +458,12 @@ Group 目标 -> root_node.run_info.run_mode == "coop_group"
 
 #### 处理函数
 
-`TaskService.execute()` 在创建根节点的同一事务登记唯一待投递意图，并将 `TaskOpResult(task_id, node_id)` 返回创建调用方；它不等待投递。Backend 消费该意图，从图谱重新读取权威根 `TaskNode`，直接调用 `TaskDispatcher.dispatch(root_node)`；接力派发策略内部调用 `TaskRunner.start_run(root_node)`，向目标 Bot 发送含节点标识的任务指令。`TaskInfoRequest` 仅用于创建任务，不能替代包含节点和执行事实的 `TaskContext`。
+`TaskService.execute()` 从已持久化根节点读取服务端生成的 `relay_token`，结合部署配置中的 `backend_url` 生成完整 `root_execution_instruction`，随 `TaskOpResult` 返回。前端不得解释或重建协议，只把该指令隐藏附加到任务面板消息并发送给当前 Bot 会话。根节点不调用 `TaskDispatcher.dispatch(root_node)` 或 `TaskRunner.start_run(root_node)`，避免创建新会话或触发权限兜底建群。`TaskInfoRequest` 仅用于创建任务，不能替代包含节点和执行事实的 `TaskContext`。
 
 #### 输出对象
 
 ```python
-投递通道接纳状态；Bot 收到 task_id: str、node_id: str
+TaskOpResult；当前 Bot 收到 Backend 生成的 root_execution_instruction
 ```
 
 首棒不变量：
@@ -474,15 +476,15 @@ all_done_output == []
 
 第一棒实际进入 S1 时，由 Bot Runtime 调用节点级 context API；该接口使用持久化的 `TaskInfo` 和根 `TaskNode` 构造 `TaskContext`。不得在 `start` 路径根据 `TaskInfoRequest` 手工拼装另一份上下文。
 
-P3 的根节点指令由 Backend 后台消费者通过 S6 派发，后续棒优先由当前棒 Skill 调用 S6 HTTP 接口触发；两者最终进入同一个 `TaskDispatcher.dispatch(node)`。不新增 `FirstTaskDispatchInput` 或 `FirstTaskDispatchResult`。Bot 收到节点标识后自行进入 S1；可靠恢复仍由 Backend 待投递意图承担。
+P3 的根节点指令由 Backend 生成、Frontend 在当前会话转发；只有后续棒由当前棒 Skill 调用 S6 HTTP 接口并进入 `TaskDispatcher.dispatch(node)`。不新增 `FirstTaskDispatchInput` 或 `FirstTaskDispatchResult`。Bot 收到节点标识后自行进入 S1。
 
-`TaskOpResult` 返回 `task_id` 和 `node_id` 给创建调用方，但不承担 Bot 上下文传输；首棒与后续棒 Bot 均从 Runner 指令取得标识，再调用节点级 context API。
+`TaskOpResult` 返回 `task_id`、`node_id` 和根节点执行指令，但不承担 `TaskContext` 传输；首棒从创建响应中的指令取得标识，后续棒从 Runner 指令取得标识，随后都调用同一个节点级 context API。
 
 ### 3.8 S1-S6 数据流与对象转换
 
 ```text
-首棒 / 后续派发 / harness 恢复路径
-  Backend 首棒或后续棒派发消息 / 恢复记录中的 task_id + node_id
+首棒 / 后续派发路径
+  当前会话根指令 / 后续 Runner 派发消息中的 task_id + node_id
     -> load_task_context
     -> TaskContext
     -> S2
@@ -1342,14 +1344,13 @@ HTTP Adapter 对未落图 `TaskNode` 只序列化 `task_id`、`task_spec` 及允
 
 ## 12. S6：Backend 实际交接
 
-S6 有供当前棒 Skill 调用的 HTTP 入口；HTTP Adapter 将请求映射为 Backend 内部的 `TaskDispatcher.dispatch(next_node)`。`TaskService.execute()` 为根节点、S5.5 的 `PLAN_RESULT(HIT_*)` 为后继节点，在创建节点的同一事务登记以 `(task_id,target_node_id)` 唯一标识的待投递意图。根节点由后台消费者触发，后继节点优先由 Skill 调用触发；后台消费者同时负责未投递意图的恢复。任务完成、规划失败或 `MISS/BBS` 不登记此类执行投递意图，也不调用 S6。
+S6 有供当前棒 Skill 调用的 HTTP 入口；HTTP Adapter 将请求映射为 Backend 内部的 `TaskDispatcher.dispatch(next_node)`。只有 S5.5 的 `PLAN_RESULT(HIT_*)` 后继节点在创建节点的同一事务登记以 `(task_id,target_node_id)` 唯一标识的待投递意图。后继节点优先由 Skill 调用触发，后台消费者负责未投递意图的恢复。根节点不进入 S6；任务完成、规划失败或 `MISS/BBS` 也不调用 S6。
 
 ### 12.1 输入参数与直接调用接口
 
 ```python
 # 后继棒 Skill 从 planning_report.target_node_id 取得目标标识；
 # HTTP 只传 task_id、target_node_id，不传 Bot 本地临时 TaskNode。
-# 首棒与恢复由后台消费者从持久化意图取得同一对标识。
 next_node: TaskNode = await task_graph_service.get_node(task_id, target_node_id)
 
 class TaskDispatcher:
@@ -1364,7 +1365,7 @@ class TaskRunner:
 
 ```text
 Skill: planning_report(APPLIED, target_node_id) -> POST /dispatch(task_id, target_node_id)
-或 Backend 首棒/恢复消费者: 待投递意图(task_id, target_node_id)
+或 Backend 后继棒恢复消费者: 待投递意图(task_id, target_node_id)
   -> HTTP Adapter 解析认证身份；Backend 读取权威 next_node: TaskNode（已落图）
   -> TaskDispatcher.dispatch(next_node) -> dispatched_node: TaskNode
      -> Dispatcher 校验可信调用身份与节点状态，原子认领唯一投递意图
@@ -1374,7 +1375,7 @@ Skill: planning_report(APPLIED, target_node_id) -> POST /dispatch(task_id, targe
   -> 下一棒 S1 调节点级 context API -> TaskContext
 ```
 
-`dispatch(next_node)` 成功返回 `dispatched_node` 仅表示投递通道已接纳指令，不表示下一棒执行完成；Runner 返回 `False` 或抛错时，接力派发策略必须抛出投递失败，不能返回成功节点。HTTP 将该成功节点序列化给调用方，不返回下一棒 `TaskContext`。Relay `relay_handoff` 派发策略校验图谱中已持久化的执行者和模态，不重新搜索、改派或落图；内部 Runner 按执行模态生成接力任务指令并真实投递。首棒与后续棒共用该流程。
+`dispatch(next_node)` 成功返回 `dispatched_node` 仅表示投递通道已接纳指令，不表示下一棒执行完成；Runner 返回 `False` 或抛错时，接力派发策略必须抛出投递失败，不能返回成功节点。HTTP 将该成功节点序列化给调用方，不返回下一棒 `TaskContext`。Relay `relay_handoff` 派发策略校验图谱中已持久化的执行者和模态，不重新搜索、改派或落图；内部 Runner 按执行模态生成接力任务指令并真实投递。该流程仅适用于后继棒。
 
 `HIT_MULTI_BOTS` 建群是外部副作用：Backend 为目标节点派生稳定建群键，每次重试向 BCS 复用同一键，并在建群响应丢失时先查询/对账原群，再把 Group ID 持久化到目标节点后投递。不得每次重试生成随机建群键；BCS 若不支持稳定去重且无法对账，Relay 首版不能开放动态建群。执行指令也须携带目标节点的稳定投递标识，由接收端在启动本棒前按该标识去重；这不等于承诺 Bot 工具外部副作用恰好一次。
 
@@ -1386,13 +1387,13 @@ Bot 在 S5.5 获得 `TaskReportResult(APPLIED, target_node_id)` 且命中执行�
 
 ### 12.4 API 映射
 
-Skill 通过 `POST /api/v1/collaboration/tasks/dispatch` 触发 S6，请求仅携带 `task_id` 和 `target_node_id`。HTTP Adapter 从认证上下文取得可信调用身份、读取已落图 `next_node`，再调用 `TaskDispatcher.dispatch(next_node)`；不能信任请求体提供的完整节点或执行者。身份授权、节点状态及待投递意图认领由 Dispatcher 所在的核心链路校验，不放进 HTTP Adapter 的业务判断。HTTP 成功响应序列化已有 `TaskNode` 的可传输节点字段，不传图谱反向引用；投递中返回可重试的处理中响应。`TaskRunner.start_run(next_node)` 是接力派发策略内部实现，不作为第二个 HTTP 接口。Backend 首棒/恢复消费者也复用同一 Dispatcher，不额外定义 `TaskService.dispatch_task` 包装方法。
+Skill 通过 `POST /api/v1/collaboration/tasks/dispatch` 触发 S6，请求仅携带 `task_id` 和 `target_node_id`。HTTP Adapter 从认证上下文取得可信调用身份、读取已落图 `next_node`，再调用 `TaskDispatcher.dispatch(next_node)`；不能信任请求体提供的完整节点或执行者。身份授权、节点状态及待投递意图认领由 Dispatcher 所在的核心链路校验，不放进 HTTP Adapter 的业务判断。HTTP 成功响应序列化已有 `TaskNode` 的可传输节点字段，不传图谱反向引用；投递中返回可重试的处理中响应。`TaskRunner.start_run(next_node)` 是接力派发策略内部实现，不作为第二个 HTTP 接口。Backend 后继棒恢复消费者复用同一 Dispatcher，不额外定义 `TaskService.dispatch_task` 包装方法。
 
 ## 13. 步骤总表
 
 | 步骤 | 功能描述 | 入参 | 执行方式 | 出参 | API |
 | --- | --- | --- | --- | --- | --- |
-| S1 | S1：获取上下文 | `task_id: str`、`node_id: str`。首棒与后续棒均取自 Runner 派发消息；恢复时取自恢复记录 | Bot Runtime 调节点级 context API；不由 Skill 推理补全上下文 | `TaskContext` | `GET /tasks/{task_id}/nodes/{node_id}/context` |
+| S1 | S1：获取上下文 | `task_id: str`、`node_id: str`。首棒取自 Backend 创建响应的当前会话指令；后续棒取自 Runner 派发消息 | Bot Runtime 调节点级 context API；不由 Skill 推理补全上下文 | `TaskContext` | `GET /tasks/{task_id}/nodes/{node_id}/context` |
 | S2 | S2：计算缺口 | `task_context: TaskContext` | Bot Skill 本地推理根任务验收项与 `all_done_output` 的覆盖情况 | `task_gaps: list[str]` | 无 |
 | S3 | S3：能力匹配 | `current_task_spec: TaskSpec`、`task_gaps: list[str]`、`bot_capability: BotCapability` | Bot Skill 本地能力推理；读取当前 Bot 已激活的 Skill/工具事实 | `CapabilityMatchResult` | 无 |
 | S4a：执行 | S4a：执行任务 | `task_context: TaskContext`、`capability_match_result: CapabilityMatchResult` | `ACCEPTED` 时 Bot 仅对 `actual_goal` 调用获准工具，形成业务产出和节点级验收事实；`DECLINED` 时不执行业务任务。本步不写任务图谱 | `node_patch: TaskNodePatch`，其中关键字段：`output_patch: dict[str, Any]`、`actual_goal_acceptance_result: AcceptanceResult` | 无 |
@@ -1402,7 +1403,7 @@ Skill 通过 `POST /api/v1/collaboration/tasks/dispatch` 触发 S6，请求仅�
 | S5.3 | 搜索候选 | `task_context: TaskContext`、`next_node: TaskNode`；调用依赖 `task_service: TaskService` | 直接以 `next_node.task_spec.goal.objective` 调用 `search_bots`；`task_context.node_id` 只用于当前棒轨迹归属 | `candidates: list[BotCandidate]` | `POST /search` |
 | S5.4 | 决定执行者 | `next_node: TaskNode`、`candidates: list[BotCandidate]` | Skill 本地决策，向同一个未落图节点填入执行模式、执行者；MISS 显式标记 BBS | 已填执行者的 `next_node: TaskNode` | 无 |
 | S5.5 | 上报规划节点 | `command: TaskReportCommand`；由 S5.1 根任务验收、S5.4 `next_node` 或 S5.2 规划异常三选一构造；前置条件为执行上报 `APPLIED` | Runtime 调 `TaskService.report(command)`，只上报一次 `PLAN_RESULT`；Backend 原子收口或创建唯一后继并写入选人决策 | `planning_report: TaskReportResult` | `POST /callback/report`，`PLAN_RESULT` |
-| S6 | 实际交接 | 后继棒：`task_id`、`planning_report.target_node_id`；首棒/恢复：Backend 待投递意图。Backend 均据此读取权威 `next_node: TaskNode` | Skill 调 HTTP；Adapter 校验身份并读取节点，调用 `TaskDispatcher.dispatch(next_node)`。接力策略内部调用 Runner 投递；后台消费者复用同一派发逻辑 | `dispatched_node: TaskNode`；成功表示通道接纳，下一棒进入 S1 | `POST /api/v1/collaboration/tasks/dispatch` → `TaskDispatcher.dispatch(next_node)` |
+| S6 | 实际交接 | 后继棒：`task_id`、`planning_report.target_node_id`；Backend 据此读取权威 `next_node: TaskNode` | Skill 调 HTTP；Adapter 校验身份并读取节点，调用 `TaskDispatcher.dispatch(next_node)`。接力策略内部调用 Runner 投递；后台消费者恢复未投递后继意图 | `dispatched_node: TaskNode`；成功表示通道接纳，下一棒进入 S1 | `POST /api/v1/collaboration/tasks/dispatch` → `TaskDispatcher.dispatch(next_node)` |
 
 S4a 的两个关键业务字段定义：
 

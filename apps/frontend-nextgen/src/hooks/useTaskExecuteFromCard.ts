@@ -133,12 +133,7 @@ export function useTaskExecuteFromCard({
               finishedAt: record.finish_time,
             },
           });
-          const launchMessage = buildTaskLaunchMessage(panelMessage, record, {
-            holderId: context.ownerBotId,
-            instruction: form.instruction,
-            objective: form.objective,
-            acceptances: form.acceptances,
-          });
+          const launchMessage = buildTaskLaunchMessage(panelMessage, record);
           if (launchMessage.shouldTriggerBot) {
             (submitTaskExecutionMessage ?? submitPanelMessage)(launchMessage.content, context.ownerBotId);
           } else {

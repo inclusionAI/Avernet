@@ -213,6 +213,7 @@ stateDiagram-v2
 
 - 中心化模式已由 Graph 语义事件启动：`PLAN_REQUESTED → DISPATCH_REQUESTED`。规划、派发、投递、结果收敛、恢复和轨迹分别归属 `TaskPlanner`、`TaskDispatcher`、`TaskRunner`、`TaskGraphService`、`TaskHarness` 与 `TaskTrajectoryService`；`static_plan.py` 只保留 Static Plan 定义和纯 Runtime，Static Plan 的编排动作归还上述现有模块；`CentralizedExecutionAdapter` 仅保留模式路由、端口装配和兼容事件入口。
 - Relay 模式由当前 Bot 的 task-loop Skill 计算能力范围和 GAP；每次 `PLAN_RESULT` 最多创建一个下一棒，Graph 生成节点 ID，后续节点不回写前序节点运行事实。
+- Relay 根节点复用用户确认任务的当前 Bot 会话：`TaskService.execute()` 返回 Backend 生成的 `root_execution_instruction`，Frontend 只负责原样转发；根节点不登记 delivery intent，也不调用 Dispatcher/Runner。只有后继节点通过 delivery intent、`TaskDispatcher` 和 `TaskRunner` 跨会话交接。
 - Relay Runner 指令只注入 `S1 读取节点上下文 → S2/S3 本地推理 → EXECUTION_RESULT → S5 本地规划和选人 → PLAN_RESULT → S6 /dispatch` 协议；Relay 任务拒绝中心化 `status/output/acceptance_result` 节点终态回投，避免错误协议把节点推成一次性终态。
 - Relay BBS 是目标节点级认领；认领 Bot 执行同一 Relay 闭环，不进入中心化根节点收敛。
 

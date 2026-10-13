@@ -34,6 +34,7 @@ export async function executeTaskService({ form, ctx, apiBaseUrl }: ExecuteTaskA
     const resp = unwrapEnvelope(await executeTask(req, apiBaseUrl));
     const isRelay = resp.extend_props?.orchestration_mode === 'relay';
     const rootNodeId = resp.extend_props?.root_node_id;
+    const rootExecutionInstruction = resp.extend_props?.root_execution_instruction;
     const record: TaskRecord = {
       task_id: resp.task_id,
       task_info: {
@@ -61,6 +62,8 @@ export async function executeTaskService({ form, ctx, apiBaseUrl }: ExecuteTaskA
             ? {
                 orchestration_mode: 'relay' as const,
                 root_node_id: rootNodeId ?? resp.task_id,
+                root_execution_instruction:
+                  typeof rootExecutionInstruction === 'string' ? rootExecutionInstruction : undefined,
               }
             : {}),
         },

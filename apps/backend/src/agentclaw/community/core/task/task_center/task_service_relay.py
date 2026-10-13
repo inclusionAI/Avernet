@@ -13,10 +13,43 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     TaskReportCommand,
     TaskReportResult,
+    task_spec_instruction,
+)
+from agentclaw.community.core.task.task_runner.client.relay_prompt import (
+    format_relay_execution_instruction,
 )
 
 
 class TaskServiceRelayMixin:
+    def _build_relay_root_execution_instruction(self, task_id: str) -> str:
+        """Build the first baton for the existing requester/Bot session."""
+        backend_url = str(self._api_base_url or "").strip().rstrip("/")
+        if not backend_url:
+            raise TaskStateError(
+                "relay task creation requires task_dispatch.backend_url"
+            )
+        graph = self._graph.query_task_dashboard(task_id)
+        root = next(
+            (node for node in graph.tasks if node.node_id == task_id), None
+        )
+        if root is None:
+            raise TaskStateError("relay root node is unavailable")
+        relay_token = str(root.run_info.extend_props.get("relay_token") or "")
+        if not relay_token:
+            raise TaskStateError("relay root node has no run generation")
+        return format_relay_execution_instruction(
+            task_id=task_id,
+            node_id=root.node_id,
+            relay_token=relay_token,
+            backend_url=backend_url,
+            objective=root.task_spec.goal.objective,
+            instruction=task_spec_instruction(root.task_spec),
+            acceptances=[
+                {"id": item.id, "description": item.description}
+                for item in root.task_spec.goal.acceptances
+            ],
+        )
+
     async def report(self, command: TaskReportCommand) -> TaskReportResult:
         """Atomically apply EXECUTION_RESULT or PLAN_RESULT to the task graph."""
         return self._graph.apply_relay_report(command)

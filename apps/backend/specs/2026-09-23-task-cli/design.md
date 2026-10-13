@@ -63,7 +63,7 @@ Target Execution 是“一个输入 Goal 在一个目标上的独立澄清和执
 - 独立 `task_id`；
 - 独立根 `node_id`；
 - 独立 `TaskExecutionGraph`；
-- 独立根节点 Runner 执行会话；
+- 复用该目标完成澄清与确认的当前 Bot 会话执行根节点；
 - 独立状态、输出、验收结果、gaps 和 Relay 接力链。
 
 多个 Target Execution 只共享最初输入的 Goal 文本及公共 CLI 参数，不共享澄清结果、确认后的 `TaskSpec` 或任务图运行状态。
@@ -72,7 +72,7 @@ Target Execution 是“一个输入 Goal 在一个目标上的独立澄清和执
 
 Runner 执行会话是 Bot 或 Group 执行一个 `TaskNode` 的运行时会话。它不是 Goal Intake Session。
 
-Relay 模式下，一个 Target Execution 除根节点会话外，还可能为后继节点创建更多 Runner 执行会话。
+Relay 模式下，根节点复用现有确认会话；后继节点才可能创建更多 Runner 执行会话。
 
 ### 2.5 数量关系
 
@@ -84,7 +84,7 @@ Goal Intake Session 数量  = N
 Target Execution 数量     = N
 TaskExecutionGraph 数量   = N
 根 TaskNode 数量          = N
-初始 Runner 执行会话数量  = N
+新增根节点 Runner 会话数量 = 0
 ```
 
 对于包含 M 个 Goal 的 Batch：
@@ -875,12 +875,9 @@ async def start_confirmed_goal(
 对成功的 `TaskOpResult`：
 
 ```text
-读取权威根 TaskNode
--> TaskDispatcher.dispatch(root_node)
--> 对应 Runtime Profile 的 dispatch strategy
--> TaskRunner.start_run(root_node)
--> 为该根节点创建独立 Runner 执行会话
--> 向执行目标发送含 task_id/node_id 的启动指令
+读取 TaskOpResult.extend_props.root_execution_instruction
+-> Frontend 不解析协议，原样附加到任务面板消息
+-> 发送到完成澄清与确认的当前 Bot 会话
 -> 目标 Bot S1 调节点级 context API
 ```
 
@@ -1027,7 +1024,7 @@ UNIQUE(session_id)
 TaskInfo
 根 TaskNode / TaskExecutionGraph
 session_id 唯一创建关联
-根节点待投递意图
+Backend 生成的根节点执行指令
 ```
 
 `/start` 重试时：
@@ -1213,12 +1210,12 @@ class GoalBatchSubmitResult:
 - 每个 `/start` 返回一个 `TaskOpResult`；
 - N 个 target 创建 N 个不同 `task_id` 和根 `node_id`；
 - 每个 Task 拥有独立 `TaskExecutionGraph`；
-- 各根节点分别产生 Runner 执行会话；
+- 各根节点分别复用对应目标完成澄清与确认的当前 Bot 会话；
 - 多目标不共享 Intake Session、TaskSpec 或运行时状态；
 - 单个 target 失败由 CLI 聚合为部分成功，不回滚其他任务；
 - 同一 `session_id` 重试返回原任务；
 - 成功目标不会因 `/start` 重试产生第二个 task；
-- TaskInfo、根节点、唯一关联和投递意图故障注入验证原子提交；
+- TaskInfo、根节点和唯一关联故障注入验证原子提交；根节点执行指令必须来自已提交的权威节点；
 - Relay 与 Centralized 根据服务端 Runtime Profile 选择不同策略。
 
 ### 17.4 Batch 与 Agent

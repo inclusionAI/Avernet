@@ -302,7 +302,8 @@ class TaskGraphRepositoryProtocol(Protocol):
     def create_intake_graph(self, task_info, graph, session_id: str) -> int:
         """Atomically persist confirmed TaskInfo and root graph.
 
-        Relay graphs also create their root delivery intent in the same transaction.
+        Relay roots run in the already-open intake Bot conversation; only
+        successor nodes create Backend delivery intents.
         """
         ...
 

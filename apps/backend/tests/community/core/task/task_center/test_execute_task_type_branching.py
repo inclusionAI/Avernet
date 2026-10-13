@@ -21,6 +21,9 @@ from agentclaw.community.core.task.domain.requests import (
 )
 from agentclaw.community.core.task.task_runner.execution_adapters import CoopGroupStart
 from agentclaw.community.core.task.task_center.task_service import TaskService
+from agentclaw.community.core.task.task_center.task_service_support import (
+    normalize_owner_bot_id,
+)
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
 
@@ -164,7 +167,7 @@ def test_normalize_owner_bot_id_preserves_real_owner_on_mismatch():
         owner_user_id="35983",
         yaml="kind: collab",
     )
-    norm = TaskService._normalize_owner_bot_id(req)
+    norm = normalize_owner_bot_id(req)
     assert norm.owner_bot_id == "default:146836"  # 真实归属保留(不被 35983 覆盖)
     assert norm.owner_user_id == "35983"  # 执行用户(人类观察者)
 

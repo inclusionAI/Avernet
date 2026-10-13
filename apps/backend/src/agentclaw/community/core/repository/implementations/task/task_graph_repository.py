@@ -201,8 +201,8 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
         """One transaction commits the confirmed source and root graph.
 
         The unique ``intake_session_id`` index arbitrates concurrent /start
-        attempts. Relay additionally commits the root delivery intent; centralized
-        execution continues through its existing semantic-planning lifecycle.
+        attempts. A Relay root is executed in the already-open intake Bot
+        conversation, so only successor nodes own Backend delivery intents.
         """
         with self._transaction() as db:
             intake = db.get(TaskIntakeSessionModel, session_id)
@@ -229,14 +229,6 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             ))
             db.flush()
             self._upsert_current_rows(db, graph)
-            if graph.is_relay:
-                db.add(TaskDeliveryIntentModel(
-                    task_id=task_info.task_id,
-                    node_id=task_info.task_id,
-                    relay_token=graph.tasks[0].run_info.extend_props["relay_token"],
-                    state="PENDING",
-                    attempt=0,
-                ))
             db.flush()
         return 1
 
@@ -281,6 +273,11 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
         if not graph.is_relay:
             return
         for node in graph.tasks:
+            if node.run_info.extend_props.get("relay_root"):
+                # The first baton stays in the conversation where the user
+                # confirmed the task. Dispatching it through Runner would create
+                # a second session (or permission-solving collaboration group).
+                continue
             if node.status not in {Status.PENDING, Status.RUNNING}:
                 continue
             if node.run_info.run_mode not in {"single_bot", "coop_group", "bbs"}:

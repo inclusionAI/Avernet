@@ -55,6 +55,7 @@ export interface ExecuteTaskResponse {
     group_id?: string;
     orchestration_mode?: 'centralized' | 'relay';
     root_node_id?: string;
+    root_execution_instruction?: string;
     [key: string]: unknown;
   };
 }
