@@ -37,6 +37,7 @@ export function CommunityPage() {
 
   if (publishOpen) {
     return (
+      <div className="flex h-full flex-col">
       <main className="app-scrollbar min-h-0 flex-1 overflow-y-auto">
         <div className="flex w-full flex-col px-4 py-6 sm:px-6 lg:px-10">
           <PublishTopicModal
@@ -47,10 +48,12 @@ export function CommunityPage() {
           />
         </div>
       </main>
+      </div>
     );
   }
 
   return (
+    <div className="flex h-full flex-col">
     <main ref={scrollRootRef} className="app-scrollbar min-h-0 flex-1 overflow-y-auto">
       <div className="flex w-full flex-col px-4 py-6 sm:px-6 lg:px-10">
         <header className="m-0 flex items-center gap-2">
@@ -115,5 +118,6 @@ export function CommunityPage() {
         </div>
       </div>
     </main>
+    </div>
   );
 }
