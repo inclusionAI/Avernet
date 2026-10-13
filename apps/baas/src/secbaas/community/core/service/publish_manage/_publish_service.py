@@ -197,15 +197,30 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
         publish_id: int,
         operator: str,
     ) -> None:
-        """Clean up orphaned PENDING bot clone when an UPDATE publish fails.
+        """Abandon the still-PENDING clone reserved by an UPDATE publish.
 
-        When an UPDATE publish transitions to FAILED, the PENDING clone created
-        during create_publish() must be cleaned up to free the unique key slot
-        (tenant, bot_uuid, env, status=PENDING, is_deleted=0). Without this
-        cleanup, subsequent UPDATE publishes for the same bot_uuid will hit a
-        duplicate key violation.
+        An UPDATE publish reserves its deployment slot by cloning the source
+        bot row into a PENDING bot row (create_publish Step 4.5) and recording
+        the clone id in ``baas_publish.extra_config["target_bot_id"]``. The
+        clone must not stay live once its publish reaches a terminal outcome,
+        or it permanently occupies the unique key slot
+        (tenant, bot_uuid, env, status=PENDING, is_deleted=0) and every later
+        publish for the bot_uuid fails with a duplicate key violation.
 
-        Also soft-deletes any bot_device_rel rows on the orphan clone (should
+        Callers cover every terminal path of an UPDATE publish: stage and
+        execution failures (FAILED), the create-time orphan auto-clean and
+        stale auto-fail, rejection (REJECTED), revocation (REVOKED), and the
+        admin force-success abandonment. Per design D2 the call happens
+        BEFORE the terminal status write, so a cleanup failure leaves the
+        publish non-terminal and the error surfaces.
+
+        Defensive no-ops: the publish is missing, its extra_config has no
+        ``target_bot_id`` pointer (crash window between the clone insert and
+        the pointer write), the target row is gone, or the target is no
+        longer live PENDING — another terminal path may have resolved it or
+        the transfer may have promoted it.
+
+        Also soft-deletes any bot_device_rel rows on the clone (should
         always be zero since device transfer happens only at SUCCESS, but the
         cleanup is harmless and future-proof).
         """
@@ -251,8 +266,8 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             modifier=operator,
         )
         logger.info(
-            f"[cleanup_pending] Soft-deleted orphan PENDING bot {target_bot_id} "
-            f"after UPDATE publish {publish_id} → FAILED"
+            f"[cleanup_pending] Soft-deleted still-PENDING clone bot {target_bot_id} "
+            f"abandoned by UPDATE publish {publish_id} terminal resolution"
         )
 
     # ====================================================================
@@ -394,12 +409,37 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
         config: PublishConfig | None,
         env: str,
     ) -> PublishResponse:
-        # Step 2: Check for concurrent active publish (SVC-PUB-15)
+        # Step 2: Check for concurrent active publish (SVC-PUB-15).
+        # Generation-coverage per design D5.1: an UPDATE publish's bot_id is
+        # its SOURCE bot row id, so a single-id lookup can miss a non-terminal
+        # publish attached to another live generation of the same bot_uuid.
+        # Resolve ALL live generation ids for the uuid, list the non-terminal
+        # publishes pointing at any of them (id descending, newest first), and
+        # route every returned active through the existing four-branch
+        # classifier below unchanged. Orphan and stale resolutions fall
+        # through to re-query; a different-type conflict raises and a
+        # same-type repeat returns idempotently.
         publish_repo = self._publish_repo
-        active_publish = publish_repo.get_active_by_bot_id(
-            bot_id=bot_id, tenant=tenant, env=env
-        )
-        if active_publish is not None:
+        # Termination guard: each active publish is processed at most once, so the
+        # loop cannot spin when a status write does not take effect; an
+        # unresolved repeat later surfaces at the classifier's conflict or
+        # idempotent branches.
+        processed_active_ids: set[int] = set()
+        while True:
+            generation_ids = [
+                r.id for r in self._bot_repo.list_by_bot_uuid(bot.bot_uuid, tenant, env)
+            ]
+            actives = [
+                p
+                for p in publish_repo.list_active_by_bot_ids(
+                    generation_ids, tenant, env
+                )
+                if p.id not in processed_active_ids
+            ]
+            if not actives:
+                break
+            active_publish = actives[0]
+            processed_active_ids.add(active_publish.id)
             # Check if active publish is an orphan (has no batch records),
             # which indicates the previous create_publish call was interrupted
             # after inserting baas_publish but before inserting baas_publish_batch.
@@ -467,6 +507,17 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                         f"{publish_type.value} publish to proceed."
                     )
                     await self._check_and_handle_timeout(active_publish, tenant)
+                    if active_publish.publish_type == PublishType.UPDATE.value:
+                        # Abandon the still-PENDING clone before the terminal
+                        # FAILED write (design D2), mirroring the orphan branch
+                        # above, so the new publish's own clone reservation
+                        # cannot collide with the leaked slot. A cleanup
+                        # error surfaces: the stale publish stays non-terminal.
+                        self._cleanup_pending_clone_on_update_failure(
+                            tenant=tenant,
+                            publish_id=active_publish.id,
+                            operator=operator,
+                        )
                     publish_repo.update_status(
                         publish_id=active_publish.id,
                         tenant=tenant,
@@ -506,6 +557,25 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                         f"instead of creating new one"
                     )
                     return self._build_publish_response(active_publish)
+
+        # Reconcile sweep for unclaimed clones (design D5, strictly BEFORE the
+        # Step 4 insert so the publish this call creates can never sweep its
+        # own clone): with the classifier confirming zero non-terminal
+        # publishes for ANY generation of the uuid, every still-live PENDING
+        # row of the uuid is garbage from a past terminal-path leak or the
+        # creation crash window. The sweep runs in one repository session;
+        # the resolved source bot row is excluded (D5.6) so a never-published
+        # first-generation PENDING row that fronts this very CREATE publish
+        # is never touched. If a concurrent competitor claimed a clone in the
+        # race window, the unique keys arbitrate — never a delete.
+        reconciled = self._bot_repo.reconcile_unclaimed_pending_bots(
+            bot.bot_uuid, tenant, env, modifier=operator, exclude_bot_id=bot_id
+        )
+        if reconciled:
+            logger.warning(
+                f"Reconcile sweep reclaimed {reconciled} unclaimed PENDING clone(s) "
+                f"for bot {bot.bot_uuid} before creating {publish_type.value} publish"
+            )
 
         # Step 2.5: Infer device count and derive scale_amount
         # For non-CREATE types, we need the current device count:
@@ -579,13 +649,21 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                 ) or RestartScope.ALL
 
                 include_updating = True
-                active_publish = publish_repo.get_active_by_bot_id(
-                    bot.id, tenant=tenant, env=env
+                # Generation-coverage per design D5.1: consult the same
+                # uuid-scoped resolver as Step 2 (a live publish attached to
+                # any generation of the uuid means an update may be touching
+                # this bot's devices right now), not only the current row id.
+                restart_generation_ids = [
+                    r.id
+                    for r in self._bot_repo.list_by_bot_uuid(bot.bot_uuid, tenant, env)
+                ]
+                restart_actives = publish_repo.list_active_by_bot_ids(
+                    restart_generation_ids, tenant, env
                 )
-                if active_publish:
+                if restart_actives:
                     logger.info(
                         f"[create_publish] RESTART bot_id={bot.id} has active publish "
-                        f"{active_publish.id}, excluding UPDATING devices"
+                        f"{restart_actives[0].id}, excluding UPDATING devices"
                     )
                     include_updating = False
 
@@ -1748,6 +1826,16 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                 f"Expected status: PENDING or APPROVING"
             )
 
+        # Abandon the still-PENDING clone before the terminal REJECTED write
+        # (design D2): a cleanup failure propagates and leaves the publish
+        # non-terminal — the clone must never hide behind a terminal status.
+        if publish_record.publish_type == PublishType.UPDATE.value:
+            self._cleanup_pending_clone_on_update_failure(
+                tenant=tenant,
+                publish_id=publish_id,
+                operator=operator,
+            )
+
         # Update status to REJECTED
         repo = self._publish_repo
         repo.update_status(
@@ -1794,6 +1882,16 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             raise ValueError(
                 f"Cannot revoke publish in status '{publish_record.status}'. "
                 f"Expected status: APPROVING"
+            )
+
+        # Abandon the still-PENDING clone before the terminal REVOKED write
+        # (design D2): a cleanup failure propagates and leaves the publish
+        # non-terminal — the clone must never hide behind a terminal status.
+        if publish_record.publish_type == PublishType.UPDATE.value:
+            self._cleanup_pending_clone_on_update_failure(
+                tenant=tenant,
+                publish_id=publish_id,
+                operator=operator,
             )
 
         # Update status to REVOKED
