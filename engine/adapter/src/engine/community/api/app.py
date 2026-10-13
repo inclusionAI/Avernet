@@ -289,6 +289,8 @@ app.include_router(zero_check_router)
 from engine.community.api.routers import openclaw_http_router, ws_router  # noqa: E402
 app.include_router(openclaw_http_router)
 app.include_router(ws_router)
+from engine.community.api.transport.a2a.router import router as a2a_router  # noqa: E402
+app.include_router(a2a_router)
 # Router surface is profile-invariant and OSS-scoped. The base
 # SharedRoutersModule contributes only the OpenClaw/Claude Code delivery surface
 # for every profile; community/corp differences must be expressed behind router
