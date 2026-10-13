@@ -224,6 +224,49 @@ class GateIsReportOnlyTest(unittest.TestCase):
         self.assertEqual(details["status"], "unavailable")
         self.assertNotIn("rate", details)
 
+    def gate_with(self, hits, *extra):
+        """Run the >60% gate on the fixture's two changed lines (lines 2 and 3)."""
+        report = self.root / "cobertura.xml"
+        report.write_text(cobertura(str(self.bcs), [("crates/a/src/lib.rs", hits)]))
+        return self.run_gate("--cobertura", str(report), "--base-ref", "HEAD~1",
+                             "--ignore-filename-regex", IGNORE, "--changed-line-min", "60", *extra)
+
+    def test_changed_line_gate_is_strictly_greater_than(self):
+        # 2 instrumentable changed lines; min-lines lowered to exercise the threshold.
+        passed = self.gate_with([(1, 1), (2, 1), (3, 1)], "--changed-line-min-lines", "2")
+        self.assertEqual(passed.returncode, 0, passed.stdout)
+        self.assertIn("100.00% (2 / 2 changed lines; requirement: >60.00%) — OK", passed.stdout)
+        failed = self.gate_with([(1, 1), (2, 1), (3, 0)], "--changed-line-min-lines", "2")
+        self.assertEqual(failed.returncode, 1, failed.stdout)
+        self.assertIn("50.00% (1 / 2 changed lines) is not > 60.00%", failed.stdout)
+        exact = self.gate_with([(1, 1), (2, 1), (3, 0)], "--changed-line-min-lines", "2",
+                               "--changed-line-min", "50")
+        self.assertEqual(exact.returncode, 1, "50%% must not pass a >50%% gate: " + exact.stdout)
+
+    def test_changed_line_gate_reports_only_below_min_lines(self):
+        proc = self.gate_with([(1, 1), (2, 0), (3, 0)])  # default min-lines 20 > 2
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("fewer than 20 lines in scope — reported only", proc.stdout)
+
+    def test_changed_line_gate_passes_when_not_applicable(self):
+        proc = self.gate_with([(1, 1)])  # changed lines 2-3 not instrumentable
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("not applicable", proc.stdout)
+
+    def test_changed_line_gate_fails_closed(self):
+        missing_base = self.run_gate("--changed-line-min", "60")
+        self.assertEqual(missing_base.returncode, 1, missing_base.stdout)
+        self.assertIn("requires --cobertura and --base-ref", missing_base.stdout)
+        bad_xml = self.run_gate("--cobertura", str(self.root / "missing.xml"), "--base-ref",
+                                "HEAD~1", "--changed-line-min", "60")
+        self.assertEqual(bad_xml.returncode, 1, bad_xml.stdout)
+        report = self.root / "cobertura.xml"
+        report.write_text(cobertura(str(self.bcs), [("crates/other/src/lib.rs", [(1, 1)])]))
+        unmapped = self.run_gate("--cobertura", str(report), "--base-ref", "HEAD~1",
+                                 "--changed-line-min", "60")
+        self.assertEqual(unmapped.returncode, 1, unmapped.stdout)
+        self.assertIn("missing from the e2e report", unmapped.stdout)
+
     def test_line_threshold_still_gates(self):
         self.summary.write_text(json.dumps({"data": [{"totals": {
             "lines": {"covered": 40, "count": 100},

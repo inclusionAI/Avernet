@@ -27,8 +27,8 @@ set -euo pipefail
 #   bash apps/bcs/scripts/e2e_coverage.sh --bcs-line-min 41 --bcs-method-min 36
 #                                                    # gate line >=41%, method >=36%
 #   bash apps/bcs/scripts/e2e_coverage.sh --force-rebuild # force-rebuild instrumented bcs (ignore cache)
-#   bash apps/bcs/scripts/e2e_coverage.sh --changed-base-ref origin/dev
-#                                                    # also report changed-line coverage (report-only)
+#   bash apps/bcs/scripts/e2e_coverage.sh --changed-base-ref origin/dev [--changed-line-min 60]
+#                                                    # changed-line coverage (gated when min > 0)
 #
 # Coverage scope: bcs server (crate bcs) only; excludes the 5 bots / Python.
 
@@ -42,8 +42,12 @@ bcsfuse_port="${BCSFUSE_PORT:-8765}"
 compat_min="${BCS_E2E_COVERAGE_MIN:-0}"
 line_min="${BCS_E2E_LINE_MIN:-$compat_min}"
 method_min="${BCS_E2E_METHOD_MIN:-$compat_min}"
-# Base ref for the report-only E2E changed-line coverage; empty skips it.
+# Base ref for E2E changed-line coverage; empty skips it.
 changed_base_ref="${BCS_E2E_CHANGED_BASE_REF:-}"
+# Changed-line coverage must be > this % once the change has at least
+# changed_line_min_lines instrumentable lines in scope; 0 = report only.
+changed_line_min="${BCS_E2E_CHANGED_LINE_MIN:-0}"
+changed_line_min_lines="${BCS_E2E_CHANGED_LINE_MIN_LINES:-20}"
 # The coverage runner is a local test launcher, so explicitly provide the same
 # non-production Principal key to both the BCS child and the E2E client.
 export AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
@@ -80,6 +84,12 @@ while [[ "$#" -gt 0 ]]; do
         exit 2
       fi
       changed_base_ref="$2"; shift 2 ;;
+    --changed-line-min)
+      if [[ "$#" -lt 2 ]]; then
+        echo "Error: --changed-line-min requires a value" >&2
+        exit 2
+      fi
+      changed_line_min="$2"; shift 2 ;;
     --force-rebuild) force_rebuild=1; shift ;;
     -h|--help)      sed -n '2,32p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -324,13 +334,15 @@ if [[ "$no_stop" -eq 0 ]]; then
   #     itself failed, so coverage thresholds appeared not to take effect).
   # A threshold of 0 is report-only. Pre-push/CI gate line >=41% and method
   # >=36%; --bcs-min remains available to set both to one value.
-  # With a base ref, also report changed-line coverage from cobertura.xml.
-  # That metric is report-only: e2e_cov_gate.py never fails on it.
-  changed_args=()
+  # With a base ref, also measure changed-line coverage from cobertura.xml.
+  # It gates only when changed_line_min > 0 (e2e_cov_gate.py fails closed
+  # then, including when no base ref was given).
+  changed_args=(--changed-line-min "$changed_line_min"
+    --changed-line-min-lines "$changed_line_min_lines")
   # Never ship a previous run's changed-line report as this run's result.
   rm -f "$cov_dir/changed_line_coverage.json"
   if [[ -n "$changed_base_ref" ]]; then
-    changed_args=(--cobertura "$out_xml" --base-ref "$changed_base_ref"
+    changed_args+=(--cobertura "$out_xml" --base-ref "$changed_base_ref"
       --ignore-filename-regex "$cov_ignore_regex"
       --changed-json "$cov_dir/changed_line_coverage.json")
   fi

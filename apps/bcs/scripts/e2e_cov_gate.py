@@ -17,14 +17,23 @@ A threshold of 0 means "report only, never fail on this metric".
 
 With --cobertura and --base-ref it also reports E2E changed-line coverage: the
 share of instrumentable lines added under apps/bcs since the base ref that the
-e2e run executed. This metric is report-only and never fails the gate, even
-when it cannot be computed.
+e2e run executed. Scope: Rust files in the e2e report (files matching
+--ignore-filename-regex, test-only files and non-Rust files are not counted).
+
+--changed-line-min N gates it: coverage must be strictly greater than N%, but
+only when the change has at least --changed-line-min-lines (default 20)
+instrumentable lines in scope; smaller changes are reported only, and changes
+with no lines in scope are not applicable. With the gate on, the check fails
+closed: a missing base ref, a calculation error or a changed in-scope Rust file
+absent from the report fails the run instead of passing unverified. With the
+gate off (0, the default) the metric is report-only and never fails.
 
 Usage:
   python3 scripts/e2e_cov_gate.py --summary <summary.json> \
       [--line-min 20] [--method-min 20] [--region-min 0] \
       [--cobertura <cobertura.xml> --base-ref <git_ref> \
-       [--ignore-filename-regex <regex>] [--changed-json <out.json>]]
+       [--ignore-filename-regex <regex>] [--changed-json <out.json>] \
+       [--changed-line-min 60] [--changed-line-min-lines 20]]
 """
 
 import argparse
@@ -69,6 +78,11 @@ def parse_args():
                    help="regex the report excluded from its scope (labels excluded files)")
     p.add_argument("--changed-json",
                    help="write per-file changed-line coverage details to this path")
+    p.add_argument("--changed-line-min", type=float, default=0.0,
+                   help="changed-line coverage must be > this %% (0 = report only)")
+    p.add_argument("--changed-line-min-lines", type=int, default=20,
+                   help="gate changed-line coverage only with at least this many "
+                        "instrumentable changed lines in scope")
     return p.parse_args()
 
 
@@ -107,11 +121,14 @@ def write_changed_json(path, payload):
 
 
 def report_changed_lines(args):
-    """Report E2E changed-line coverage. Report-only: never affects the exit code.
+    """Report (and, with --changed-line-min, gate) E2E changed-line coverage.
 
-    Any previous --changed-json output is removed first, so a failed or skipped
+    Returns True when OK or report-only, False when the gate fails. Any
+    previous --changed-json output is removed first, so a failed or skipped
     calculation never leaves an older run's result looking current.
     """
+    gated = args.changed_line_min > 0
+    level = "::error::" if gated else "::warning::"
     if args.changed_json:
         try:
             os.remove(args.changed_json)
@@ -120,11 +137,14 @@ def report_changed_lines(args):
         except OSError as e:
             gh("::warning::cannot remove stale %s: %s" % (args.changed_json, e))
     if not args.cobertura or not args.base_ref:
-        gh("::notice::E2E changed-line coverage: no base ref provided — skipped")
+        if gated:
+            gh("::error::E2E changed-line coverage gate requires --cobertura and --base-ref")
+        else:
+            gh("::notice::E2E changed-line coverage: no base ref provided — skipped")
         write_changed_json(args.changed_json, {
             "status": "unavailable", "reason": "no base ref provided",
             "base_ref": args.base_ref})
-        return
+        return not gated
     bcs_dir = os.getcwd()
     try:
         repo_root = subprocess.run(
@@ -134,19 +154,37 @@ def report_changed_lines(args):
         changed = changed_line_cov.git_changed_lines(repo_root, args.base_ref)
         coverage = changed_line_cov.load_cobertura(args.cobertura, bcs_dir)
     except (OSError, subprocess.CalledProcessError, changed_line_cov.ET.ParseError) as e:
-        gh("::warning::E2E changed-line coverage could not be computed: %s" % e)
+        gh("%sE2E changed-line coverage could not be computed: %s" % (level, e))
         write_changed_json(args.changed_json, {
             "status": "unavailable", "reason": str(e), "base_ref": args.base_ref})
-        return
+        return not gated
     result = changed_line_cov.measure(changed, coverage, args.ignore_filename_regex)
 
     rate = result.rate
+    ok = True
     if rate is None:
+        status = "not_applicable"
         gh("::notice::E2E changed-line coverage: no instrumentable changed lines in e2e scope "
-           "— not applicable (reporting only, no threshold)")
-    else:
+           "— not applicable")
+    elif not gated:
+        status = "reported"
         gh("::notice::E2E changed-line coverage %.2f%% (%d / %d changed lines; reporting only, "
            "no threshold)" % (rate, result.covered, result.instrumentable))
+    elif result.instrumentable < args.changed_line_min_lines:
+        status = "below_min_lines"
+        gh("::notice::E2E changed-line coverage %.2f%% (%d / %d changed lines; fewer than %d "
+           "lines in scope — reported only)" % (rate, result.covered, result.instrumentable,
+                                                args.changed_line_min_lines))
+    elif rate <= args.changed_line_min:
+        status = "failed"
+        ok = False
+        gh("::error::E2E changed-line coverage %.2f%% (%d / %d changed lines) is not > %.2f%%"
+           % (rate, result.covered, result.instrumentable, args.changed_line_min))
+    else:
+        status = "passed"
+        gh("::notice::E2E changed-line coverage %.2f%% (%d / %d changed lines; requirement: "
+           ">%.2f%%) — OK" % (rate, result.covered, result.instrumentable, args.changed_line_min))
+    if rate is not None:
         ranked = sorted((f for f in result.files if f.instrumentable),
                         key=lambda f: (f.covered - f.instrumentable, f.path))
         for f in ranked[:20]:
@@ -157,12 +195,20 @@ def report_changed_lines(args):
     if result.test_code:
         gh("    %d changed test-only file(s) (not counted)" % len(result.test_code))
     if result.unmapped:
-        gh("::warning::%d changed Rust file(s) missing from the e2e report (not counted): %s"
-           % (len(result.unmapped), ", ".join(result.unmapped[:10])))
+        # In scope but absent from the report: with the gate on these lines
+        # cannot be verified, so fail closed rather than pass them unseen.
+        gh("%s%d changed in-scope Rust file(s) missing from the e2e report: %s"
+           % (level, len(result.unmapped), ", ".join(result.unmapped[:10])))
+        if gated:
+            ok = False
+            status = "failed"
 
     write_changed_json(args.changed_json, {
-        "status": "ok" if rate is not None else "not_applicable",
-        "base_ref": args.base_ref, **result.to_dict()})
+        "status": status, "base_ref": args.base_ref,
+        "threshold": args.changed_line_min if gated else None,
+        "min_lines": args.changed_line_min_lines if gated else None,
+        **result.to_dict()})
+    return ok
 
 
 def main():
@@ -205,7 +251,8 @@ def main():
     # Branches: the e2e instrumented build (-Cinstrument-coverage) does not emit
     # branch coverage, so count is 0 -> reported as not measured.
     report("branch", b_c, b_t, 0.0)
-    report_changed_lines(args)
+    if not report_changed_lines(args):
+        fail = True
 
     if fail:
         gh("::error::E2E coverage gate FAILED — metric(s) above below threshold.")
