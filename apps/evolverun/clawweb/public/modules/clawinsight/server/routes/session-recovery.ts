@@ -1,18 +1,17 @@
+import { AgentToolCallIdempotencyConflictError } from "../repositories/repair/agent-tool-call-record.js";
 import { resolveRepairRequestActor } from "../services/repair/common/request-actor.js";
 import { parseAgentExecutionTicket } from "../services/repair/common/agent-execution.js";
-import type { SessionRecoveryAgentService } from "../services/repair/session-recovery/agent-service.js";
 import { AgentToolError } from "../services/repair/common/agent-tools/errors.js";
-import type { SessionRecoveryTaskService } from "../services/repair/session-recovery/task-service.js";
 import type { RecoveryActor } from "../services/repair/session-recovery/contracts.js";
 import { timingSafeEqual } from "node:crypto";
 import { Router, json, type Request } from "express";
-import type { SessionRecoveryApi } from "../services/repair/session-recovery/contracts.js";
+import type { SessionRecoveryApi, SessionRecoveryTaskApi, SessionRecoveryAgentApi } from "../services/repair/session-recovery/contracts.js";
 import { SessionRecoveryError } from "../services/repair/session-recovery/errors.js";
 import { BotRuntimeError } from "@avernet/clawweb-shared/server/services/bot-runtime";
 export type SessionRecoveryRuntime = {
   service: SessionRecoveryApi; triggerToken: string;
-  tasks?: SessionRecoveryTaskService;
-  agent?: SessionRecoveryAgentService;
+  tasks?: SessionRecoveryTaskApi;
+  agent?: SessionRecoveryAgentApi;
   maintenance?: () => Promise<void>;
   resolveActor?: (req: Request) => Promise<RecoveryActor | null>;
 };
@@ -106,6 +105,7 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRuntime): 
   router.use((error: unknown, req: Request, res: import("express").Response, next: import("express").NextFunction) => {
     if (!/^\/(?:internal\/)?monitoring\/session-recoveries(?:\/|$)/.test(req.path)) { next(error); return; }
     const failure = error instanceof SessionRecoveryError || error instanceof BotRuntimeError || error instanceof AgentToolError ? error
+      : error instanceof AgentToolCallIdempotencyConflictError ? new SessionRecoveryError(409, "recovery_request_conflict", "同一工具请求标识不能用于不同内容")
       : (error as { type?: string })?.type === "entity.too.large" ? new SessionRecoveryError(413, "invalid_session_recovery", "请求过大")
       : (error as { type?: string })?.type === "entity.parse.failed" ? new SessionRecoveryError(422, "invalid_session_recovery", "JSON 格式无效")
       : new SessionRecoveryError(503, "recovery_unavailable", "自愈发送服务暂不可用；发送结果可能未知");

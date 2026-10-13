@@ -126,7 +126,10 @@ it("approves one plan in the same execution, retries the original session, recov
   await service.annotate(task.taskId, actor, { layer: "effect", correct: true, reason: "原操作前后已核验", evidence_ids: [evidence.evidenceId] }); expect((await current(task.taskId)).timeline.some(event => event.kind === "annotation")).toBe(true);
 });
 it("Debug logs proposed actions without messages, writes or Owner notification", async () => {
-  let task = await create("debug"); await expect(agent.apply(task, { actionId: "fix" })).rejects.toMatchObject({ status: 403 }); await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId); expect(task.status).toBe("completed"); expect(task.judgment!.effect).toBe("not_intervened"); expect(runtime.sendMessage).not.toHaveBeenCalled(); expect(notifier.notify).not.toHaveBeenCalled();
+  let task = await create("debug"); await expect(agent.apply(task, { actionId: "fix" })).rejects.toMatchObject({ status: 403 });
+  const read = await inspect(task);
+  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "environment", summary: "拟修复局部配置", evidence_ids: [read.evidenceId] });
+  task = await current(task.taskId); await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId); expect(task.status).toBe("completed"); expect(task.judgment!.effect).toBe("not_intervened"); expect(runtime.sendMessage).not.toHaveBeenCalled(); expect(notifier.notify).not.toHaveBeenCalled();
 });
 it("Owner expiry creates a new execution for the same task and isolates the old Base callback", async () => {
   let task = await toPlan(await create()); await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId); const oldStep = (await repo.findStep(task.aisExecution!.stepId))!, oldId = task.execution!.executionId;
@@ -332,7 +335,7 @@ it("accepts actual Engine parameters independent of the saved execution referenc
   expect(second.status).toBe("succeeded");
   expect(runtime.request).toHaveBeenLastCalledWith(expect.objectContaining(actual));
   expect((await agent.toolGet(await current(task.taskId), second.toolCallId)).request).toMatchObject({ engineOperation: {
-    ...actual, upload: { ...actual.upload, content: "[REDACTED_BUSINESS_BODY]" },
+    ...actual, upload: { ...actual.upload, content: actual.upload.content },
   } });
   expect((await current(task.taskId)).plan!.actions[0].engineOperation).toEqual(reference);
 });
@@ -367,4 +370,69 @@ it("TE adjusts and verifies an approved cron action through actual API calls wit
   await expect(agent.apply(await current(task.taskId), { clientRequestId: "no-shell", purpose: "TE不能执行Shell", actionId: "remove-cron", command: "true" })).rejects.toMatchObject({ status: 422 });
   await expect(agent.apply(await current(task.taskId), { ...operation, clientRequestId: "undeclared", engineOperation: { method: "POST", path: "/api/v1/engine/restart" } })).rejects.toThrow();
   await expect(agent.apply(await current(task.taskId), { ...operation, clientRequestId: "with-headers", engineOperation: { ...operation.engineOperation, headers: {} } })).rejects.toMatchObject({ status: 422 });
+});
+
+it("old release cannot end a replacement execution after a version conflict", async () => {
+  const task = await create();
+  const update = tasks.update.bind(tasks);
+  vi.spyOn(tasks, "update").mockImplementationOnce(async () => {
+    await update(task.taskId, task.version, value => ({ ...value, version: value.version + 1,
+      execution: { ...value.execution!, executionId: "replacement", jobId: "replacement-job" } }));
+    return null;
+  });
+  await agent.release(task);
+  expect((await current(task.taskId)).execution).toMatchObject({ executionId: "replacement", state: "dispatching", jobId: "replacement-job" });
+});
+
+it("old dispatch cannot attach its job to a replacement execution after a version conflict", async () => {
+  let task = await create();
+  await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1,
+    execution: { ...value.execution!, state: "ended" } }));
+  task = await current(task.taskId);
+  const update = tasks.update.bind(tasks);
+  vi.spyOn(tasks, "update").mockImplementationOnce(update).mockImplementationOnce(async (id, version) => {
+    await update(id, version, value => ({ ...value, version: value.version + 1,
+      execution: { ...value.execution!, executionId: "replacement", jobId: "replacement-job" } }));
+    return null;
+  });
+  await agent.start(task);
+  expect((await current(task.taskId)).execution).toMatchObject({ executionId: "replacement", jobId: "replacement-job" });
+  expect(ais.stopExecution).toHaveBeenCalledWith("job-2");
+});
+
+it("the same tool key cannot identify changed advice, and audit retains the advice", async () => {
+  const task = await create();
+  const body = { clientRequestId: "advice-content", purpose: "纠正调用后继续", message: "请核对参数并重试原操作" };
+  const sent = await agent.retryMessage(task, body);
+  const call = await agent.toolGet(await current(task.taskId), sent.toolCallId);
+  expect(call.request).toMatchObject({ message: body.message, requestDigest: expect.stringMatching(/^[a-f0-9]{64}$/) });
+  await expect(agent.retryMessage(await current(task.taskId), { ...body, message: "请跳过原操作" })).rejects.toThrow(/idempotency conflict/);
+  expect(runtime.sendMessage).toHaveBeenCalledTimes(1);
+});
+
+it("the same tool key cannot identify changed uploaded content", async () => {
+  let task = await create("automatic");
+  const read = await inspect(task);
+  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "environment", summary: "配置内容需要调整", evidence_ids: [read.evidenceId] });
+  await agent.report(await current(task.taskId), { kind: "plan", phase: "plan", plan });
+  task = await current(task.taskId);
+  vi.mocked(runtime.request).mockResolvedValue({ status: 200, body: { success: true } });
+  const body = { actionId: "fix", clientRequestId: "upload-content", purpose: "落实获批配置调整", engineOperation: { method: "POST", path: "/api/file/upload", upload: { targetPath: "/workspace/config.json", content: '{"enabled":true}' } } };
+  const result = await agent.apply(task, body);
+  expect((await agent.toolGet(task, result.toolCallId)).request).toMatchObject({ engineOperation: { upload: { content: body.engineOperation.upload.content } } });
+  await expect(agent.apply(await current(task.taskId), { ...body, engineOperation: { ...body.engineOperation, upload: { ...body.engineOperation.upload, content: '{"enabled":false}' } } })).rejects.toThrow(/idempotency conflict/);
+  expect(runtime.request).toHaveBeenCalledTimes(1);
+});
+
+it("Debug records a targeted message and its decision without delivering it", async () => {
+  let task = await create("debug");
+  const read = await inspect(task);
+  const body = { clientRequestId: "draft-message", purpose: "演练针对性消息", message: "请核对真实权限返回后继续原步骤" };
+  const draft = await agent.retryMessage(await current(task.taskId), body);
+  expect(draft.result).toMatchObject({ status: "not_intervened", dry_run: true, message: body.message });
+  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "message", summary: "建议原 Bot 调整错误行为", evidence_ids: [read.evidenceId, draft.evidenceId] });
+  task = await current(task.taskId);
+  expect(task).toMatchObject({ status: "completed", judgment: { effect: "not_intervened" } });
+  expect(task.timeline.some(event => (event.payload.result as any)?.message === body.message)).toBe(true);
+  expect(task.delivery).toBeUndefined(); expect(runtime.sendMessage).not.toHaveBeenCalled(); expect(notifier.notify).not.toHaveBeenCalled();
 });
