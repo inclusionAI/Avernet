@@ -22,8 +22,12 @@ lookup used for runtime-state updates. It returns active points owned by the
 exact payload `worker_id`, including points missing from the local index.
 Providers that support it should constrain the database read before decoding
 vectors. The public SQL implementation uses the complete `worker_id + ':'` ID
-prefix on the primary key and escapes SQL `LIKE` wildcards. Providers without
-this capability retain the existing `load_all()` fallback.
+prefix on the primary key and escapes SQL `LIKE` wildcards. Because vector
+IDs are not required to carry that prefix, it also checks payload ownership
+for non-prefixed IDs before fetching their vectors by primary key. This
+metadata check still scans rows outside the prefix until ownership has its own
+index. Providers without this capability retain the existing `load_all()`
+fallback.
 
 ## Bounded rebuild reads
 

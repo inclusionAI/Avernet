@@ -276,17 +276,24 @@ class TestMySQLVectorPersistenceBackendContract:
             def __init__(self):
                 self.sql = None
                 self.params = None
+                self.calls = []
                 self.closed = False
 
             def execute(self, sql, params=None):
                 self.sql = sql
                 self.params = params
+                self.calls.append((sql, params))
 
             def fetchall(self):
+                if "JSON_UNQUOTE" in self.sql:
+                    return [("legacy-random-id",)]
                 return [
                     (f"{owner}:default:full", vector, json.dumps({"worker_id": owner})),
                     (f"{owner}:nested:full", vector, json.dumps({"worker_id": f"{owner}:nested"})),
                 ]
+
+            def fetchone(self):
+                return ("legacy-random-id", vector, json.dumps({"worker_id": owner}))
 
             def close(self):
                 self.closed = True
@@ -311,10 +318,14 @@ class TestMySQLVectorPersistenceBackendContract:
 
         points = backend.load_by_worker(owner)
 
-        assert [point.id for point in points] == [f"{owner}:default:full"]
-        assert points[0].vector == [0.1, 0.2]
-        assert "`id` LIKE %s ESCAPE '!'" in backend._conn.read_cursor.sql
-        assert backend._conn.read_cursor.params == ("team!_!!!%:worker:%",)
+        assert [point.id for point in points] == [f"{owner}:default:full", "legacy-random-id"]
+        assert all(point.vector == [0.1, 0.2] for point in points)
+        calls = backend._conn.read_cursor.calls
+        assert "`id` LIKE %s ESCAPE '!'" in calls[0][0]
+        assert calls[0][1] == ("team!_!!!%:worker:%",)
+        assert "JSON_UNQUOTE(JSON_EXTRACT" in calls[1][0]
+        assert calls[1][1] == ("team!_!!!%:worker:%", owner)
+        assert calls[2][1] == ("legacy-random-id",)
         assert backend._conn.read_cursor.closed
         assert backend._conn.rollback_calls == 1
 
@@ -412,6 +423,26 @@ class TestMySQLVectorPersistenceBackendIntegration:
 
         # Cleanup
         mysql_backend.delete("test_point_1")
+
+    def test_worker_lookup_includes_non_prefixed_id(self, mysql_backend):
+        from uuid import uuid4
+
+        from src.domain.models.vector_point import VectorPoint
+
+        worker_id = f"lookup-test-{uuid4().hex}"
+        prefixed_id = f"{worker_id}:default:full"
+        arbitrary_id = f"legacy-{uuid4().hex}"
+        try:
+            mysql_backend.save_batch([
+                VectorPoint(id=point_id, vector=[0.1, 0.2],
+                            payload={"worker_id": worker_id})
+                for point_id in (prefixed_id, arbitrary_id)
+            ])
+            assert {point.id for point in mysql_backend.load_by_worker(worker_id)} == {
+                prefixed_id, arbitrary_id,
+            }
+        finally:
+            mysql_backend.delete_batch([prefixed_id, arbitrary_id])
 
     def test_exists_and_count(self, mysql_backend):
         """Test exists and count operations."""
