@@ -19,6 +19,9 @@ from .rule_shape_audit import assert_member_writes_name_explicit_origin
 #: No row is :class:`Check` yet: this change builds the seam, and moving each
 #: group onto it is its own session (``spec.md`` *Decisions* 4).
 AUTHORIZATION: dict[tuple[str, str], Authorization] = {
+    ("GET", "/openapi/v1/bots/{bot_id}/classification"): NoCheck(
+        "authenticated minimal classification before establishing Bot collaboration"
+    ),
     ("GET", "/openapi/v1/bots/{bot_id}/avatar"): OWNER_SCOPED,
     ("PUT", "/openapi/v1/bots/{bot_id}/avatar"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/links"): OWNER_SCOPED,

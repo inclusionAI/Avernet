@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import { CreateGroupModal } from '@/pages/Workspace/components/Modals/CreateGroupModal';
+import { queryIsServiceBot } from '@/services/workspace/botClassificationService';
 import { collaborationCandidateService } from '@/services/workspace/collaborationCandidateService';
 import { groupService } from '@/services/workspace/groupService';
 import { beforeEach, expect, it, jest } from '@jest/globals';
@@ -13,6 +14,7 @@ jest.mock('@/pages/Workspace/components/Modals/YamlEditor', () => ({
   ),
 }));
 jest.mock('@/services/workspace/groupService');
+jest.mock('@/services/workspace/botClassificationService');
 jest.mock('@/services/workspace/collaborationCandidateService');
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const gs = groupService as unknown as Record<string, jest.Mock<any>>;
@@ -44,6 +46,7 @@ Object.defineProperty(globalThis, 'ResizeObserver', {
 });
 
 beforeEach(() => {
+  jest.mocked(queryIsServiceBot).mockReset().mockResolvedValue(false);
   gs.createGroup.mockReset();
   gs.createGroup.mockResolvedValue({ ok: true, data: { groupId: 'g9' } });
   cs.listFriends.mockReset();
@@ -74,6 +77,7 @@ it('用户身份建群展示视角下拉框，选参与者视角后 human 参与
 
   fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
   await selectLeader('群主 Bot', /Alpha/);
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
 
   await waitFor(() =>
@@ -89,6 +93,7 @@ it('bot 身份建群不展示视角下拉框且参与者不携带 scope', async 
   render(<CreateGroupModal open activeIdentity={botIdentity} onClose={jest.fn()} onCreated={jest.fn()} />);
   expect(screen.queryByRole('button', { name: '消息视角' })).not.toBeInTheDocument();
   fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
   await waitFor(() =>
     expect(gs.createGroup).toHaveBeenCalledWith(

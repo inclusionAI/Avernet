@@ -268,6 +268,8 @@ def _without_request_id(response) -> dict:
 #: between "this operation has no user dimension" and "somebody found the
 #: parameter inconvenient".
 _NO_USER_DIMENSION = {
+    # The minimal classification is tenant-wide, not owner-scoped.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/classification"),
     # Name uniqueness is checked across the tenant, not within one user's bots.
     ("get", f"{PUBLIC_API_PREFIX}/bots/check-name"),
     # Source credentials (W3, #1471): tenant-level named objects on an
@@ -530,7 +532,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # (/openapi/v1/bots/{bot_id}/avatar and /openapi/v1/bots/{bot_id}/links[/{resource_id}],
 # six path-addressed user-scoped operations) joins the public schema, so
 # ``path`` grows 172 -> 178.
-_BOT_ID_PLACEMENT = {"path": 178, "query": 1, "none": 125}
+_BOT_ID_PLACEMENT = {"path": 179, "query": 1, "none": 125}
 
 
 def _schema() -> dict:

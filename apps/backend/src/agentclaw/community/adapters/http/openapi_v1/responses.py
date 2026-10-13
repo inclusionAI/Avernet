@@ -45,7 +45,10 @@ from agentclaw.community.adapters.http.openapi_v1.response_envelope import (
     unmapped_error_response,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_payloads import error_data
-from agentclaw.community.core.bot_management.errors import BotCreationRetainedError
+from agentclaw.community.core.bot_management.errors import (
+    BotCreationRetainedError,
+    BotLookupAmbiguousError,
+)
 from agentclaw.community.api.bot_startup_script_service import (
     MAX_SCRIPT_BYTES,
     StartupScriptNotEncodableError,
@@ -411,6 +414,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     InvalidBotLogQueryError: (400, "Invalid log query"),
     SessionNotFoundError: (404, "Not found"),
     BotNotFoundError: (404, "Not found"),
+    BotLookupAmbiguousError: (409, "Bot ID is ambiguous; provide entity_id"),
     ChannelNotFoundError: (404, "Not found"),
     ChannelSyncError: (502, "Channel synchronization failed"),
     ChannelModeViolationError: (422, "Channel mode violation"),

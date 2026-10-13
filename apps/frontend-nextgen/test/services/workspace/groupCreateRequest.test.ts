@@ -1,0 +1,35 @@
+/** @jest-environment node */
+import { buildCreateGroupBody, type CreateGroupInput } from '@/services/workspace/groupCreateRequest';
+import { createGroupViaExecute } from '@/services/workspace/groupExecuteService';
+import { expect, it, jest } from '@jest/globals';
+
+const input: CreateGroupInput = {
+  name: '群',
+  strategy: 'chat',
+  driverBotUuid: 'service',
+  originator: 'human_1',
+  participants: [
+    { actor_id: 'service', tags: ['online'] },
+    { actor_id: 'human_1', message_view_scope: 'participant' },
+    { actor_id: 'personal' },
+  ],
+  definitionYaml: 'participants: []',
+};
+it.each(['chat', 'manager_worker', 'state_machine'] as const)(
+  '%s preserves tags and human visibility scope',
+  (strategy) => {
+    expect(buildCreateGroupBody({ ...input, strategy }).participants).toEqual([
+      expect.objectContaining({ actor_id: 'service', tags: ['online'] }),
+      expect.objectContaining({ actor_id: 'human_1', message_view_scope: 'participant' }),
+      expect.objectContaining({ actor_id: 'personal' }),
+    ]);
+    expect(buildCreateGroupBody({ ...input, strategy }).participants[2]).not.toHaveProperty('tags');
+  },
+);
+
+it('rejects unsupported execute routing before sending a task that would lose tags', async () => {
+  const fallback = jest.fn<typeof createGroupViaExecute>();
+  const res = await createGroupViaExecute({ ...input, strategy: 'state_machine' }, '1', fallback);
+  expect(res).toEqual({ ok: false, error: expect.objectContaining({ code: 'GROUP_ROUTE_UNSUPPORTED' }) });
+  expect(fallback).not.toHaveBeenCalled();
+});
