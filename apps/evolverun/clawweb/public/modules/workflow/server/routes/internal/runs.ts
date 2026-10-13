@@ -34,18 +34,21 @@ export function createInternalRunsRouter(
 
   /** POST / — insert a flow run */
   router.post("/", asyncHandler(async (req: Request, res: Response) => {
-    apiLogBody("WRITE", "/runs", req.body);
+    // State snapshots can be large and may contain workflow inputs; keep them out of request logs.
+    const { state_json: stateJsonForLog, ...bodyForLog } = (req.body ?? {}) as Record<string, unknown>;
+    apiLogBody("WRITE", "/runs", bodyForLog, { stateJsonBytes: typeof stateJsonForLog === "string" ? Buffer.byteLength(stateJsonForLog) : 0 });
     if (!flowRunRepo) {
       apiLog("WRITE", "/runs", { status: 503, error: "Database not configured" });
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
     try {
-      const { flow_id, workflow_id, workflow_title, status, triggered_by, params_json, input_json, node_count, identity_key, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number } = req.body as {
+      const { flow_id, workflow_id, workflow_title, status, state_json, triggered_by, params_json, input_json, node_count, identity_key, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number } = req.body as {
         flow_id?: string;
         workflow_id?: string;
         workflow_title?: string;
         status?: string;
+        state_json?: string | null;
         triggered_by?: string;
         params_json?: string;
         input_json?: string;
@@ -69,6 +72,20 @@ export function createInternalRunsRouter(
         return;
       }
 
+      if (state_json != null) {
+        if (typeof state_json !== "string") {
+          res.status(400).json({ success: false, error: "Bad Request", message: "state_json must be a JSON object string" });
+          return;
+        }
+        try {
+          const state = JSON.parse(state_json);
+          if (state === null || typeof state !== "object" || Array.isArray(state)) throw new Error("not an object");
+        } catch {
+          res.status(400).json({ success: false, error: "Bad Request", message: "state_json must be a JSON object string" });
+          return;
+        }
+      }
+
       for (const [field, value] of Object.entries({ workflow_version, workflow_deploy_number })) {
         // A Git snapshot/draft run is not bound to a published release, even if
         // this workflow has releases. Keep ClawMind's sentinel without inventing a version.
@@ -84,6 +101,7 @@ export function createInternalRunsRouter(
         workflowId: workflow_id,
         workflowTitle: workflow_title ?? null,
         status,
+        stateJson: state_json ?? null,
         triggeredBy: triggered_by ?? null,
         paramsJson: params_json ?? null,
         inputJson: input_json ?? null,

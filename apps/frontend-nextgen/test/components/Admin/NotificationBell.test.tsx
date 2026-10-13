@@ -61,3 +61,21 @@ describe('NotificationBell 深链路由', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/ticket-center?category=APPROVAL');
   });
 });
+
+// 折叠态侧栏工具簇经 size/className 透传收 28px + muted 色阶（与导航项做主次区分），
+// 未读红点挂在IconButton 外层 span 上做绝对定位，不随规格联动。规格断言锁 AppSidebar 折叠态的区分信号。
+describe('NotificationBell 规格透传', () => {
+  it('size="sm" + muted：按钮收 28px 且色阶降级，未读红点不受影响', () => {
+    mockRecent = [];
+    mockUnreadCount = 1;
+    const view = render(<NotificationBell size="sm" className="text-muted-foreground" />);
+    expect(view.getByRole('button', { name: '通知中心' })).toHaveClass('h-7', 'w-7', 'text-muted-foreground');
+    expect(view.getByLabelText('1 条未读')).toBeInTheDocument();
+  });
+
+  it('未传 size 维持默认 32px（md），既有调用点视觉不变', () => {
+    mockUnreadCount = 0;
+    const view = render(<NotificationBell />);
+    expect(view.getByRole('button', { name: '通知中心' })).toHaveClass('h-8', 'w-8');
+  });
+});

@@ -97,8 +97,9 @@ export function SpaceSwitcher({ compact = false, collapsed = false }: { compact?
   const popoverHeader = (
     <div className="flex items-center justify-between px-3 pb-2 pt-2 text-xs font-semibold text-muted-foreground">
       <span>空间切换</span>
+      {/* size=icon 提供 p-0：沿用 default 尺寸的 px-4 会在 w-7(28px) 定宽下把 flex 内容区挤成 0，图标缩到不可见 */}
       {spacesManageable && (
-        <Button variant="ghost" aria-label="空间管理" className="h-7 w-7" onClick={goSpaceAdmin}>
+        <Button variant="ghost" size="icon" aria-label="空间管理" className="h-7 w-7" onClick={goSpaceAdmin}>
           <Settings className="h-3.5 w-3.5" aria-hidden />
         </Button>
       )}

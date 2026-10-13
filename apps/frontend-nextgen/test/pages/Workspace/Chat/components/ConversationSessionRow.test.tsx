@@ -179,9 +179,12 @@ describe('ConversationSessionRow 收藏动作', () => {
       />,
     );
     const star = screen.getByRole('button', { name: '收藏会话' });
-    expect(star).toHaveClass('opacity-0', 'group-hover/row:opacity-100', 'group-focus-within/row:opacity-100');
+    // 显隐/定位挂外层包装 span：Button 基类 disabled:opacity-50 特异性更高，
+    // 加载更多在途（全列表星标 disabled）会顶穿按钮级 opacity-0 → 未 hover 全量显影。
+    const starSlot = star.parentElement as HTMLElement;
+    expect(starSlot).toHaveClass('opacity-0', 'group-hover/row:opacity-100', 'group-focus-within/row:opacity-100');
     // 星标右缘槽位固定（稿 x267..283 → right-7），不随热区分级漂移。
-    expect(star).toHaveClass('absolute', 'right-7');
+    expect(starSlot).toHaveClass('absolute', 'right-7');
     fireEvent.click(star);
     expect(onToggleFavorite).toHaveBeenCalledTimes(1);
     expect(onSelect).not.toHaveBeenCalled();
@@ -199,7 +202,8 @@ describe('ConversationSessionRow 收藏动作', () => {
     );
     const star = screen.getByRole('button', { name: '取消收藏' });
     expect(star).toBeDisabled();
-    expect(star).not.toHaveClass('opacity-0');
+    // 常驻 = 外层包装 span 无隐藏档（button 自身不再承运显隐）。
+    expect(star.parentElement).not.toHaveClass('opacity-0');
     expect(star.querySelector('svg')).toHaveClass('fill-star', 'text-star');
   });
 

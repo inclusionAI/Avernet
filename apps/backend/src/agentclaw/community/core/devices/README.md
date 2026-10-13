@@ -64,3 +64,28 @@ internal_dependencies:
 ### Change impact
 
 Owns the engine/device binding lifecycle. Schema changes (binding table, engine config dir) require migration. Health-probe contract is consumed by Prom-style monitoring outside the repo.
+
+### Pool-native creation recovery
+
+An ACTIVE BaaS binding can outlive a failed Bot-link write. After the guarded
+repository recovery links it to its Bot, an unconfirmed `pool_initializing`
+startup re-dispatches only the existing instance-bound watchdog callback. Both
+`create_bot` and `provision_bot` retries also delegate pending confirmation to
+the binding's provider before returning an already bound Bot, so a transport
+failure after committing the recovered link remains retryable. This does not
+allocate another device or repeat container initialization. It
+uses the retained callback token and current startup identity; it does not repeat
+bootstrap, container initialization, publish polling, or migration. Dispatch
+errors propagate so the same creation can be retried without failing the ACTIVE
+runtime. A matching persisted confirmation makes recovery idempotent. Legacy
+and pre-Native Pool bindings retain their old startup wire. The HTTP adapter
+catches `LayoutInitializationConfirmationError` through the devices contract,
+not through the concrete Skills Pool implementation.
+
+Pool data-init dispatch passes an immutable binding/device/startup/claim token
+to the worker. Its `in_progress`, `completed`, `failed` and temporary credential
+writes use the same Binding→Bot guarded transaction as the dispatch lease;
+an expired worker cannot overwrite its replacement's state. Current checkpoints
+renew the lease without changing Bot state. A delayed LLM result must pass a
+claim checkpoint before bounded downstream sync; a superseded result is dropped.
+Legacy/manual calls without a claim retain the existing BotService write path.

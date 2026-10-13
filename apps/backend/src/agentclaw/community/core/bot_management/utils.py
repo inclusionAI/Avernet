@@ -40,6 +40,31 @@ def clear_baas_publish_failure_ext(ext: Any) -> dict[str, Any]:
     return cleaned
 
 
+def build_baas_restart_ext(
+    *,
+    current_ext: dict[str, Any],
+    status: str,
+    publish_id: int | None,
+    failure_message: str | None = None,
+) -> dict[str, Any]:
+    """Build the Bot ext persisted with one guarded BaaS restart result."""
+    restart_publish_id = str(publish_id) if publish_id is not None else None
+    ext = clear_baas_publish_failure_ext(current_ext)
+    if status == "ACTIVE":
+        if restart_publish_id is not None:
+            ext["restart_publish_id"] = restart_publish_id
+        return ext
+    if status == "FAILED":
+        ext["start_status"] = "FAILED"
+        ext["start_message"] = (
+            failure_message
+            or f"BaaS publish FAILED: publish_id={restart_publish_id}"
+        )
+        if restart_publish_id is not None:
+            ext["restart_publish_id"] = restart_publish_id
+    return ext
+
+
 def extract_agent_code_from_ext(bot: dict[str, Any]) -> str | None:
     """从 bot dict 的 ext 字段提取 agent_code。
 

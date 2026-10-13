@@ -124,6 +124,57 @@ const baseProps = {
 };
 
 describe('ChatPanel interactive', () => {
+  it('副屏镜像开时渲染右上「收起」悬浮钮并触发 toggle；未开或未提供 toggle 时不渲染', () => {
+    const onToggleSidePane = jest.fn();
+    const { rerender } = render(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        {...baseProps}
+        sidePaneOpen
+        onToggleSidePane={onToggleSidePane}
+      />,
+    );
+
+    // 开态：右上悬浮钮存在（PanelRightClose 图标），点按触发一次 toggle 关闭。
+    const collapse = screen.getByRole('button', { name: '收起副屏' });
+    expect(collapse.querySelector('svg')).toHaveClass('lucide-panel-right-close');
+    fireEvent.click(collapse);
+    expect(onToggleSidePane).toHaveBeenCalledTimes(1);
+
+    // 关态：不渲染。
+    rerender(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        {...baseProps}
+        sidePaneOpen={false}
+        onToggleSidePane={onToggleSidePane}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: '收起副屏' })).toBeNull();
+  });
+
   it('窄屏会话列表入口位于单聊标题左侧并使用右箭头图标', () => {
     const onOpenSessionList = jest.fn();
     render(

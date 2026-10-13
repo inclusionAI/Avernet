@@ -30,10 +30,17 @@ export interface InvitationAcceptResult {
 }
 
 export const invitationService = {
-  async createGroupShare(groupId: string): Promise<DomainResult<{ invitationUrl: string }>> {
+  /**
+   * 生成协作群邀请链接。expiresInSeconds 缺省回落 1 天（SHARE_TTL_SECONDS）；
+   * 分享弹窗「链接有效期」选择值（dmore artboard-010）透传至此，接口契约可选参数。
+   */
+  async createGroupShare(
+    groupId: string,
+    expiresInSeconds: number = SHARE_TTL_SECONDS,
+  ): Promise<DomainResult<{ invitationUrl: string }>> {
     try {
       const resp = await createGroupInvitation(groupId, {
-        expires_in_seconds: SHARE_TTL_SECONDS,
+        expires_in_seconds: expiresInSeconds,
       });
       const token = resp.data?.token;
       if (!token) {
@@ -54,10 +61,13 @@ export const invitationService = {
     }
   },
 
-  async createSessionShare(sessionId: string): Promise<DomainResult<{ invitationUrl: string }>> {
+  async createSessionShare(
+    sessionId: string,
+    expiresInSeconds: number = SHARE_TTL_SECONDS,
+  ): Promise<DomainResult<{ invitationUrl: string }>> {
     try {
       const resp = await createSessionInvitation(sessionId, {
-        expires_in_seconds: SHARE_TTL_SECONDS,
+        expires_in_seconds: expiresInSeconds,
       });
       const token = resp.data?.token;
       if (!token) {

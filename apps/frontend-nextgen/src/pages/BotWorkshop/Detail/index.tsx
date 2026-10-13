@@ -62,12 +62,14 @@ const BotWorkshopDetailPage: React.FC = () => {
   );
   const [tab, setTab] = useState<MainTab>('capability');
   const [more, setMore] = useState<MoreConfigTab>();
+  const [debugOpen, setDebugOpen] = useState(true);
   useEffect(() => {
     if (!isOwner && more === 'engine') setMore(undefined);
   }, [isOwner, more]);
   useEffect(() => {
     setTab('capability');
     setMore(undefined);
+    setDebugOpen(true);
   }, [id]);
   if (!id)
     return (
@@ -98,7 +100,17 @@ const BotWorkshopDetailPage: React.FC = () => {
   const bot = detail.bot;
   return (
     <main className="bot-editor-shell flex h-full min-h-0 flex-col bg-background">
-      <DetailHeader bot={bot} editable={editable} isOwner={isOwner} onBack={detail.back} />
+      <DetailHeader
+        bot={bot}
+        editable={editable}
+        isOwner={isOwner}
+        debugOpen={debugOpen}
+        saving={detail.saving}
+        onBack={detail.back}
+        onOpenDebug={() => setDebugOpen(true)}
+        onSaveBasic={detail.save}
+        onReload={() => void detail.retry()}
+      />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <nav
           aria-label="Bot 编辑模块"
@@ -156,7 +168,12 @@ const BotWorkshopDetailPage: React.FC = () => {
               </Button>
             ))}
         </nav>
-        <section className="app-scrollbar min-w-0 flex-1 border-r border-border bg-background overflow-y-auto lg:w-[56%] lg:max-w-none lg:flex-none">
+        <section
+          className={cn(
+            'app-scrollbar min-w-0 flex-1 bg-background overflow-y-auto lg:max-w-none',
+            debugOpen && 'border-r border-border lg:w-[56%] lg:flex-none',
+          )}
+        >
           {editor.loading ? (
             <Spin tip="加载编辑配置…" />
           ) : more === 'md' ? (
@@ -259,9 +276,16 @@ const BotWorkshopDetailPage: React.FC = () => {
             <TaskEscort bot={bot} />
           )}
         </section>
-        <div className="hidden min-w-0 flex-1 lg:flex">
-          <DebugChatPanel bot={bot} runtimeStage={runtimeStage} ownerId={addressedOwnerId} />
-        </div>
+        {debugOpen ? (
+          <div className="hidden min-w-0 flex-1 lg:flex">
+            <DebugChatPanel
+              bot={bot}
+              runtimeStage={runtimeStage}
+              ownerId={addressedOwnerId}
+              onClose={() => setDebugOpen(false)}
+            />
+          </div>
+        ) : null}
       </div>
     </main>
   );

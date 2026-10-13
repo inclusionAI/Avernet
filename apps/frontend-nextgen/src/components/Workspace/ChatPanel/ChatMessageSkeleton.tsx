@@ -143,14 +143,22 @@ function ChatTypingEchoRow({ index }: { index: number }) {
 }
 
 /** 消息历史首拉在途的画布占位。ariaLabel 可由宿主覆写（如展开 Bot 时
- * 会话列表未定，ConversationSessionPlaceholder 借用本骨架时读屏话术应为「加载会话列表」）。 */
-export function ChatMessageSkeleton({ ariaLabel = '加载会话消息' }: { ariaLabel?: string }) {
+ * 会话列表未定，ConversationSessionPlaceholder 借用本骨架时读屏话术应为「加载会话列表」）；
+ * paddingClassName 同理由宿主对齐真实消息列表的画布 padding（协作群 BubbleList 为
+ * px-3 py-3 sm:px-6 sm:py-4），保证真消息换入零横跳。 */
+export function ChatMessageSkeleton({
+  ariaLabel = '加载会话消息',
+  paddingClassName = 'px-3 py-3 sm:py-4 sm:pl-14 sm:pr-3',
+}: {
+  ariaLabel?: string;
+  paddingClassName?: string;
+}) {
   const typingRowIndex = EXCHANGES.length;
   return (
     <div
       role="status"
       aria-label={ariaLabel}
-      className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background px-3 py-3 sm:py-4 sm:pl-14 sm:pr-3"
+      className={cn('flex min-h-0 flex-1 flex-col overflow-hidden bg-background', paddingClassName)}
     >
       <div className="flex flex-col">
         {/* dmore SystemNotice 形态：居中弱文本行（showIcon=false），不是灰胶囊。 */}

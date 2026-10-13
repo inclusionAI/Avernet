@@ -24,9 +24,6 @@ from tests.community.adapters.http.openapi_v1.conftest import (
     mount_public_error_handlers,
     user_scoped_client,
 )
-from agentclaw.community.core.bot_collaborator.protocols import (
-    CollaboratorServiceProtocol,
-)
 from agentclaw.community.adapters.http.openapi_v1.bots.engine_config import (
     router as engine_config_router,
 )
@@ -42,7 +39,6 @@ from agentclaw.community.api.policy_service import PolicyServiceProtocol
 from agentclaw.community.api.skill_set_service_factory import (
     SkillSetServiceFactoryProtocol,
 )
-from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotOperationNotAllowedError,
@@ -787,7 +783,7 @@ def test_create_bot_owner_relationship_failure_is_enveloped_502(
     assert resp.status_code == 502
     assert resp.json()["code"] == 502000
     assert resp.json()["message"] == "Authorization relationship service error"
-    assert resp.json()["data"] is None
+    assert resp.json()["data"] == {"bot_id": "default", "retryable": True}
 
 
 def test_create_bot_normalizes_unexpected_relationship_failure(
@@ -804,6 +800,7 @@ def test_create_bot_normalizes_unexpected_relationship_failure(
     assert response.status_code == 502
     assert response.json()["code"] == 502000
     assert response.json()["message"] == "Authorization relationship service error"
+    assert response.json()["data"] == {"bot_id": "default", "retryable": True}
 
 
 def test_create_bot_rejects_unresolved_business_space_before_side_effects(

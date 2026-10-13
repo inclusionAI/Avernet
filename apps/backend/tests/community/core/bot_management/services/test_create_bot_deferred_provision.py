@@ -44,6 +44,10 @@ class _Repo:
         self.rows[data["bot_id"]] = {"id": 1, **data}
         return dict(self.rows[data["bot_id"]])
 
+    def insert_with_initial_skill_layout(self, data, *, layout):
+        del layout
+        return self.insert(data)
+
     def update_by_owner(self, bot_id, user_id, fields):
         self._log.append(("update", bot_id, dict(fields)))
         self.rows[bot_id].update(fields)
@@ -83,6 +87,10 @@ def _device_result() -> DeviceBindingRecord:
 
 def _service(log: list, *, teclaw: bool = False) -> BotService:
     svc = BotService.__new__(BotService)
+    svc._skills_pool_native_creation_policy = MagicMock(
+        select=MagicMock(return_value=None)
+    )
+    svc._skill_layout_repository = MagicMock()
     svc._bot_storage_policy = None
     svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = _Repo(log)
@@ -173,10 +181,9 @@ def test_deferred_provisioning_makes_the_same_writes_in_the_same_order(teclaw: b
 
     # The record-only step: PENDING, no binding.
     assert first["status"] == "PENDING" and first["binding_id"] is None
-    # The golden property, the deferred path's durable claim aside: it is the
-    # one write the inline path has no need for (nothing re-enters create_bot
-    # mid-provisioning — the record's existence short-circuits it).
-    assert [w for w in deferred_log if w[0] != "claim"] == inline_log
+    # Inline creation delegates to the same claim-based provisioning path, so
+    # both forms make the same durable writes in the same order.
+    assert deferred_log == inline_log
     assert ("claim", "g-1") in deferred_log
     assert deferred_record == inline_record
     assert deferred_record["binding_id"] == (9 if teclaw else 7)
@@ -243,6 +250,7 @@ def test_a_failed_provisioning_releases_the_claim_when_the_record_survives() -> 
     with pytest.raises(BotServiceError):
         with patch.object(BotService, "_is_claude_code_bcn_register_enabled", return_value=False):
             svc.provision_bot("g-1", "u1", "nick")
-    # The unexpected error soft-deletes the record inside step 2, so nothing
-    # is left to release; a record that survived would read PENDING again.
-    assert svc._repository.rows["g-1"]["is_delete"] == 1
+    # The Bot and its initial layout choice remain durable; releasing the
+    # claim makes the same row retryable without re-evaluating rollout.
+    assert svc._repository.rows["g-1"]["is_delete"] == 0
+    assert svc._repository.rows["g-1"]["status"] == "PENDING"

@@ -474,6 +474,10 @@ def _create_bot_service() -> BotService:
         ),
         device_status_client=MagicMock(),
         cron_auto_setup_service_provider=lambda: MagicMock(),
+        skills_pool_native_creation_policy=MagicMock(
+            select=MagicMock(return_value=None)
+        ),
+        skill_layout_repository=MagicMock(),
     )
     # Drive create_bot past the pre-device gates so it reaches Step 1.5.
     service.check_create_bot_preflight = MagicMock()
@@ -507,7 +511,7 @@ def test_workspace_creation_exception_is_fatal() -> None:
     )
     with pytest.raises(BotServiceError):
         _create(svc)
-    svc._repository.soft_delete_by_owner.assert_called_once_with("b1", "u1")
+    svc._repository.soft_delete_by_owner.assert_not_called()
 
 
 def test_workspace_creation_falsy_return_is_fatal() -> None:
@@ -518,7 +522,7 @@ def test_workspace_creation_falsy_return_is_fatal() -> None:
     )
     with pytest.raises(BotServiceError):
         _create(svc)
-    svc._repository.soft_delete_by_owner.assert_called_once_with("b1", "u1")
+    svc._repository.soft_delete_by_owner.assert_not_called()
 
 
 def test_template_creation_failure_is_fatal() -> None:
@@ -530,7 +534,33 @@ def test_template_creation_failure_is_fatal() -> None:
     svc._template_service.create_template = MagicMock(side_effect=RuntimeError("boom"))
     with pytest.raises(BotServiceError):
         _create(svc)
-    svc._repository.soft_delete_by_owner.assert_called_once_with("b1", "u1")
+    svc._repository.soft_delete_by_owner.assert_not_called()
+
+
+def test_creation_uses_idempotent_workspace_ensure_before_template_insert() -> None:
+    svc = _create_bot_service()
+    svc._template_service.exists_template.side_effect = [False, True]
+
+    def create_workspace(**kwargs):
+        kwargs["template_config"]["dima_space_id"] = "ws-1"
+        return "ws-1"
+
+    svc._workspace_hosting_service.create_workspace_for_bot.side_effect = (
+        create_workspace
+    )
+
+    svc._prepare_creation_template(
+        bot_id="b1",
+        user_id="u1",
+        bot_name="app-coding-bot",
+        bot_type="personal",
+        active_engine="claude_code",
+        template_type="applicationCoding",
+        template_config={"devflow_workflow": "x"},
+    )
+
+    svc._template_service.create_or_update_template.assert_called_once()
+    svc._template_service.create_template.assert_not_called()
 
 
 def test_is_workspace_hosting_available() -> None:

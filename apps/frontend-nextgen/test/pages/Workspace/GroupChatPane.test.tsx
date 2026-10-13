@@ -168,6 +168,9 @@ function renderPane(overrides: Partial<React.ComponentProps<typeof GroupChatPane
         canManageGroup={{ allowed: false }}
         activePanel="none"
         onTogglePanel={() => {}}
+        favorites={{ favorite: false, disabled: false, onToggle: () => {} }}
+        sidePaneOpen={false}
+        onToggleSidePane={() => {}}
         onRequestDissolve={() => {}}
         onRequestShareGroup={() => Promise.resolve({ ok: true, data: { invitationUrl: 'https://example.test/g' } })}
         onRequestShareSession={() => Promise.resolve({ ok: true, data: { invitationUrl: 'https://example.test/s' } })}
@@ -179,10 +182,9 @@ function renderPane(overrides: Partial<React.ComponentProps<typeof GroupChatPane
 }
 
 describe('GroupChatPane', () => {
-  it('renders group name and session title in header when group/session provided', () => {
+  it('header 呈现群身份 chip（群名），不显会话标题（artboard-010 口径，会话由 Key 胶囊表达）', () => {
     renderPane();
-    expect(screen.getByText(/主站协作群/)).toBeInTheDocument();
-    expect(screen.getByText(/主会话/)).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: /主站协作群/ })).toBeInTheDocument();
   });
 
   it('shows Driver processing for a free-chat group independently from user request state', () => {
@@ -336,6 +338,9 @@ describe('GroupChatPane', () => {
           canManageGroup={{ allowed: false }}
           activePanel="none"
           onTogglePanel={() => {}}
+          favorites={{ favorite: false, disabled: false, onToggle: () => {} }}
+          sidePaneOpen={false}
+          onToggleSidePane={() => {}}
           onRequestDissolve={() => {}}
           onRequestShareGroup={() => Promise.resolve({ ok: true, data: { invitationUrl: 'https://example.test/g' } })}
           onRequestShareSession={() => Promise.resolve({ ok: true, data: { invitationUrl: 'https://example.test/s' } })}
@@ -436,7 +441,7 @@ describe('GroupChatBubble alignment and participant identity', () => {
       </>,
     );
     expect((mockBubbleRenders[0].sender as { align?: string }).align).toBe('right');
-    expect((mockBubbleRenders[0].sender as { bubbleColor?: string }).bubbleColor).toBe('hsl(var(--primary) / 0.1)');
+    expect((mockBubbleRenders[0].sender as { bubbleColor?: string }).bubbleColor).toBe('hsl(var(--muted))');
     expect((mockBubbleRenders[1].sender as { align?: string }).align).toBe('left');
     expect((mockBubbleRenders[1].sender as { bubbleColor?: string }).bubbleColor).toBeUndefined();
     const messageMeta = screen.getAllByTestId('message-sender-meta');

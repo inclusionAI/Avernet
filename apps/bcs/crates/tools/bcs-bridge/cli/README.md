@@ -118,6 +118,11 @@ fn main() -> std::process::ExitCode {
 | `credentials::CredentialSource` | app | `EnvCredentials` | Webhook Bearer token per Provider (gateway mode) |
 | `identity::IdentityResolver` | app | `StaticBearer` | `provider_bot_ref` for `--provider-auth <id>`, with an optional preflight |
 
+Distributions can call `.registration_permission_mode("my-engine", "<mode>")`
+on the application builder to write `permission_mode` into newly registered
+Bots using that engine. Engines without an entry omit this field; existing
+runtime configurations are unaffected. The open-source defaults have no entries.
+
 The built-in drivers can be reused for launchers that speak the same protocol:
 `ClaudeCodeFactory::custom(id, default_bin, prefix_args)` and
 `CodexAppServerFactory::custom(...)` insert `prefix_args` before the protocol

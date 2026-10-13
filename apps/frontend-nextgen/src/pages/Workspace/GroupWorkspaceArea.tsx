@@ -1,11 +1,13 @@
 import { getCapabilities } from '@/capabilities';
 import type { MessageViewScope } from '@/domain/collaboration/types';
 import type { GroupPanelKind } from '@/pages/Workspace/components/GroupHeader';
+import { filterVisibleGroupMessages } from '@/pages/Workspace/hooks/groupChatHistoryUtils';
 import { sessionService } from '@/services/workspace/sessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import React, { useState } from 'react';
 import { GroupChatAbortUnsupportedDialog } from './components/GroupChatAbortUnsupportedDialog';
 import { GroupChatPane } from './components/GroupChatPane';
+import { GroupHistorySidebar } from './components/GroupChatPane/GroupHistorySidebar';
 import { SessionFilesSidebar } from './components/GroupChatPane/SessionFilesSidebar';
 import { GroupMembersPanelSlot } from './components/GroupMembersPanelSlot';
 import type { GroupSidebarProps } from './components/GroupSidebar';
@@ -17,6 +19,7 @@ import type { GroupWorkspaceAreaProps } from './GroupWorkspaceArea.types';
 import { useGroupChat } from './hooks/useGroupChat';
 import { useGroupCreateDialog } from './hooks/useGroupCreateDialog';
 import { useGroupManagement } from './hooks/useGroupManagement';
+import { useGroupChatHeaderPanels } from './hooks/useGroupChatHeaderPanels';
 import { useGroupSessions } from './hooks/useGroupSessions';
 import { useGroupWorkspace } from './hooks/useGroupWorkspace';
 import { useOpenDefaultGroupSession } from './hooks/useOpenDefaultGroupSession';
@@ -43,6 +46,14 @@ export function GroupWorkspaceArea({
   );
   const chat = useGroupChat(scope && !ws.selectedGroup ? null : sessions.selectedSession);
   const [activePanel, setActivePanel] = useState<GroupPanelKind>('none');
+  // 头部六图标域（收藏/历史消息/副屏）：搜索口径与消息区渲染同源（filterVisibleGroupMessages），
+  // 保证历史面板每条结果都能在消息区定位到（useGroupChatDisplayStatus 同款同源约定）。
+  const headerPanels = useGroupChatHeaderPanels({
+    session: sessions.selectedSession,
+    messages: filterVisibleGroupMessages(chat.chat.messages ?? []),
+    panelRef: chat.panelRef,
+    toggleFavorite: sessions.toggleFavorite,
+  });
   const groupAdvancedConfigEnabled = getCapabilities().getGroupAdvancedConfigEnabled().value;
   const groupManage = useGroupManagement(
     ws.selectedGroupId,
@@ -99,14 +110,14 @@ export function GroupWorkspaceArea({
     }
     return ok;
   };
-  const handleShareGroup = () =>
+  const handleShareGroup = (expiresInSeconds?: number) =>
     selectedGroup
-      ? groupManage.createShare()
+      ? groupManage.createShare(undefined, expiresInSeconds)
       : Promise.resolve({
           ok: false as const,
           error: { code: 'GROUP_MISSING', friendlyMessage: '未选择协作群', canRetry: false },
         });
-  const handleShareSession = () => sessionManage.createShare();
+  const handleShareSession = (expiresInSeconds?: number) => sessionManage.createShare(undefined, expiresInSeconds);
   const handleCreateSession = (groupId: string, scope?: MessageViewScope) =>
     void sessions.createSessionIn(groupId, undefined, undefined, scope);
   const handleCreateGroup = () => createGroupDialog.openModal();
@@ -125,9 +136,9 @@ export function GroupWorkspaceArea({
     });
     setActivePanel('sessionManage');
   };
-  const handleShareGroupFromSidebar = (groupId: string) => {
+  const handleShareGroupFromSidebar = (groupId: string, expiresInSeconds?: number) => {
     ws.onSelectGroup(groupId);
-    return groupManage.createShare(groupId);
+    return groupManage.createShare(groupId, expiresInSeconds);
   };
   const handleDissolveGroupFromSidebar = (groupId: string) => void ws.dissolveGroup(groupId);
   // 内流侧栏（≥lg）与 <lg 抽屉共用同一份 props，避免两处分叉。抽屉内选中会话后追加收起。
@@ -226,6 +237,11 @@ export function GroupWorkspaceArea({
         canManageGroup={canManage}
         activePanel={activePanel}
         onTogglePanel={handleTogglePanel}
+        favorites={headerPanels.favorites}
+        sidePaneOpen={headerPanels.sidePaneOpen}
+        sidePaneDisabled={headerPanels.sidePaneDisabled}
+        onToggleSidePane={headerPanels.toggleSidePane}
+        highlightMessageId={headerPanels.highlightMessageId}
         onRequestDissolve={handleDissolve}
         onRequestShareGroup={handleShareGroup}
         onRequestShareSession={handleShareSession}
@@ -280,9 +296,15 @@ export function GroupWorkspaceArea({
         /* 验收微调：会话文件由全屏 Modal 改为右侧副屏（与单聊侧同构容器）。 */
         <SessionFilesSidebar
           sessionId={sessions.selectedSession.sessionId}
-          sessionName={sessions.selectedSession.title}
           participants={sessions.selectedSession.participants}
           authenticatedUser={userIdentityId ? { userId: userIdentityId, name: userIdentityName } : null}
+          onClose={() => setActivePanel('none')}
+        />
+      )}
+      {activePanel === 'history' && sessions.selectedSession && (
+        <GroupHistorySidebar
+          search={headerPanels.historySearch}
+          onLocate={headerPanels.locateMessage}
           onClose={() => setActivePanel('none')}
         />
       )}

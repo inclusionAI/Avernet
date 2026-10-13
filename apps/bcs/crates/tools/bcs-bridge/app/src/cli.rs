@@ -30,7 +30,7 @@ enum Commands {
 #[derive(Args)]
 struct StartArgs {
     /// Run in the background and wait for successful initialization (Unix only)
-    #[arg(long, visible_alias = "deamon")]
+    #[arg(long)]
     daemon: bool,
     #[arg(long, hide = true, conflicts_with = "daemon")]
     daemon_child: bool,
@@ -110,4 +110,19 @@ pub async fn run(cli: Cli, app: &BridgeApp) -> anyhow::Result<()> {
 #[cfg(unix)]
 fn runtime_dir() -> anyhow::Result<PathBuf> {
     Ok(dirs::home_dir().context("Cannot locate home directory for bridge instance management")?.join(".bcn-bridge"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn start_rejects_misspelled_daemon_flag() {
+        let error = match Cli::try_parse_from(["bcs-bridge", "start", "--deamon"]) {
+            Err(error) => error,
+            Ok(_) => panic!("the misspelled --deamon flag must be rejected"),
+        };
+        assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+        assert!(error.to_string().contains("--deamon"));
+    }
 }

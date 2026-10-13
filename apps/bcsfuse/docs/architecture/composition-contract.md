@@ -305,8 +305,12 @@ numbered skill fragments. Existing vectors and other payload fields are retained
 the transition does not re-embed existing profiles. Initial online publication
 still builds an index when no owned vectors exist. Repeating a transition repairs
 payload synchronization even when the Worker already has the requested state.
-An existing-vector write failure propagates through `RUNTIME_STATE_UPDATE_ERROR`;
-the saved Worker state is not rolled back, and callers can retry the same request.
+The composed `/online` routes return after the Worker state is persisted and
+perform online vector updates after the HTTP response. Repeating `/online`
+retries that work. If the Worker has since gone offline or been disabled, the
+deferred online update is skipped. Background write failures are logged and
+do not change the response already sent. The `/offline` route still waits for
+its existing vector cleanup and propagates its write failures.
 
 Durable vector providers use `update_payload_by_worker(worker_id, updates)` when
 available: it must match exact payload ownership, enumerate the durable source

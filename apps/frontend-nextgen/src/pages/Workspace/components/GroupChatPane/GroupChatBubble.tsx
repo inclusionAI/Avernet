@@ -83,7 +83,8 @@ export function GroupChatBubble({
               role: message.role,
               align: message.role === 'user' ? 'right' : 'left',
               name: undefined,
-              bubbleColor: message.role === 'user' ? 'hsl(var(--primary) / 0.1)' : undefined,
+              // dmore 用户气泡口径：与 chat 页一致（#F5F5F5 灰底 rx12，替代 v1 的 primary/0.1）。
+              bubbleColor: message.role === 'user' ? 'hsl(var(--muted))' : undefined,
               maxWidth: '48rem',
             }}
             timestamp={undefined}

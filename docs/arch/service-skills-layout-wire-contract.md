@@ -30,6 +30,7 @@ and recreate:
 |---|---|---|
 | `AGENTCLAW_SKILLS_LAYOUT` | `legacy` or `pool` | Repo mount layout recorded in the Skills manifest |
 | `AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION` | empty for Legacy; `skills-pool-p3-v1` for Pool | Exact Pool directory contract supported by the image |
+| `AGENTCLAW_SKILLS_LAYOUT_PHASE` | empty for Legacy; `pool_initializing`, `pool_active`, or `recovery_required` for Pool | Trusted persisted phase used to distinguish fresh initialization, steady-state marker repair, and strict recovery |
 
 Rules:
 
@@ -49,3 +50,11 @@ Rules:
 6. Old images may ignore these added environment variables. Consequently a new
    Backend remains compatible with old images for Legacy manifests; Pool
    publication is enabled only after compatible images are rolled out.
+7. `AGENTCLAW_SKILLS_LAYOUT_PHASE` is emitted only from persisted layout state
+   (or a frozen Pool service artifact). It is not inferred from Bot lifecycle or
+   filesystem markers. A compatible image may repair a missing active marker in
+   the presence of historical preparation state only when this value is
+   `pool_active`; missing, `pool_initializing`, or `recovery_required` remains on
+   the strict recovery path. Any persisted Pool phase outside the two startup
+   phases is deliberately collapsed to `recovery_required` rather than exposed
+   as a new wire value.

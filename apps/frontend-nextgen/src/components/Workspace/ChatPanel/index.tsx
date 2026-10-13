@@ -2,6 +2,7 @@ import { getCapabilities } from '@/capabilities';
 import { Empty } from '@/components/ui';
 import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
 import { ChatPanelHeader } from '@/components/Workspace/ChatPanel/ChatPanelHeader';
+import { SidePanelCollapseButton } from '@/components/Workspace/SidePanelCollapseButton';
 import { MessageEditBar, MessageQuoteBar } from '@/components/Workspace/MessageInteractionToolbar';
 import type { IdentityView } from '@/domain/collaboration';
 import { useMessageAreaSkeleton } from '@/pages/Workspace/hooks/useMessageAreaSkeleton';
@@ -75,6 +76,10 @@ interface Props {
   headerActions?: ReactNode;
   /** 待定位高亮的消息 id（历史面板结果点击）；由消息列表滚动至该消息并短暂高亮。 */
   highlightMessageId?: string | null;
+  /** 副屏镜像开合态（chat-header-panels）：与 Monitor 图标同源；开时渲染副屏右上「收起」悬浮钮。 */
+  sidePaneOpen?: boolean;
+  /** 副屏开合 toggle（chat-header-panels）：镜像开时悬浮钮点按 = 关闭并同步镜像。 */
+  onToggleSidePane?: () => void;
 }
 export function ChatPanel({
   target,
@@ -112,6 +117,8 @@ export function ChatPanel({
   onManageFiles,
   headerActions,
   highlightMessageId,
+  sidePaneOpen,
+  onToggleSidePane,
 }: Props) {
   const messageInteractions = useMessageInteractions({
     sessionId: target?.id,
@@ -220,7 +227,8 @@ export function ChatPanel({
   };
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+    // relative 供副屏右上「收起」悬浮钮绝对定位（SidePanelCollapseButton）。
+    <section className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-background">
       <ChatLayout className="min-h-0 flex-1">
         <ChatPanelHeader
           target={target}
@@ -310,6 +318,8 @@ export function ChatPanel({
 
         <ChatLayout.Panel ref={panelRef} onAction={onPanelAction} bridge={chatBridge} />
       </ChatLayout>
+      {/* 副屏右上「收起」钮：镜像态开时悬于副屏 TopBar 右侧，点按关闭并同步镜像。 */}
+      {sidePaneOpen && onToggleSidePane ? <SidePanelCollapseButton onClick={onToggleSidePane} /> : null}
     </section>
   );
 }

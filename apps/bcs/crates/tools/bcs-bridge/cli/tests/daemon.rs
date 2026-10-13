@@ -93,31 +93,29 @@ async fn lifecycle_help_and_stopped_commands_need_no_config_or_credentials() {
 #[allow(unsafe_code)] // Read the test-owned daemon's session ID without signalling it.
 #[tokio::test]
 async fn daemon_is_ready_detached_and_can_stop_after_config_is_deleted() {
-    for flag in ["--daemon", "--deamon"] {
-        let fixture = Fixture::new();
-        let output = fixture.daemon(flag).await;
-        success(&output);
-        assert!(fixture.ping().await, "daemon returned before webhook became ready");
-        let record = fixture.record();
-        let pid = record["pid"].as_u64().unwrap() as i32;
-        assert_eq!(unsafe { libc::getsid(pid) }, pid);
-        assert_eq!(Path::new(record["config"].as_str().unwrap()), fixture.config.canonicalize().unwrap());
-        for name in ["bridge.pid.json", "bridge.log", "bridge.lock", "bridge.sock"] {
-            assert_eq!(fs::metadata(fixture.runtime(name)).unwrap().permissions().mode() & 0o777, 0o600);
-        }
-        fs::remove_file(&fixture.config).unwrap();
-        let status = fixture.command().arg("status").env("BRIDGE_CONFIG", "/missing")
-            .env("BCS_BRIDGE_PROVIDER_TOKENS", "invalid").output().await.unwrap();
-        success(&status);
-        assert!(diagnostic(&status).contains("running"));
-        assert!(diagnostic(&status).contains(&pid.to_string()));
-        success(&fixture.output(&["stop"]).await);
-        assert!(!fixture.ping().await);
-        assert!(!fixture.runtime("bridge.pid.json").exists());
-        assert!(fixture.runtime("bridge.lock").exists(), "never unlink the lock inode");
-        assert!(diagnostic(&fixture.output(&["status"]).await).contains("stopped"));
-        assert!(!fs::read_to_string(fixture.runtime("bridge.log")).unwrap().contains("test-webhook-secret"));
+    let fixture = Fixture::new();
+    let output = fixture.daemon("--daemon").await;
+    success(&output);
+    assert!(fixture.ping().await, "daemon returned before webhook became ready");
+    let record = fixture.record();
+    let pid = record["pid"].as_u64().unwrap() as i32;
+    assert_eq!(unsafe { libc::getsid(pid) }, pid);
+    assert_eq!(Path::new(record["config"].as_str().unwrap()), fixture.config.canonicalize().unwrap());
+    for name in ["bridge.pid.json", "bridge.log", "bridge.lock", "bridge.sock"] {
+        assert_eq!(fs::metadata(fixture.runtime(name)).unwrap().permissions().mode() & 0o777, 0o600);
     }
+    fs::remove_file(&fixture.config).unwrap();
+    let status = fixture.command().arg("status").env("BRIDGE_CONFIG", "/missing")
+        .env("BCS_BRIDGE_PROVIDER_TOKENS", "invalid").output().await.unwrap();
+    success(&status);
+    assert!(diagnostic(&status).contains("running"));
+    assert!(diagnostic(&status).contains(&pid.to_string()));
+    success(&fixture.output(&["stop"]).await);
+    assert!(!fixture.ping().await);
+    assert!(!fixture.runtime("bridge.pid.json").exists());
+    assert!(fixture.runtime("bridge.lock").exists(), "never unlink the lock inode");
+    assert!(diagnostic(&fixture.output(&["status"]).await).contains("stopped"));
+    assert!(!fs::read_to_string(fixture.runtime("bridge.log")).unwrap().contains("test-webhook-secret"));
 }
 
 #[tokio::test]

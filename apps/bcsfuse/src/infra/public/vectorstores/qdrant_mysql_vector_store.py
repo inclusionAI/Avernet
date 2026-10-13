@@ -114,7 +114,7 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
     # Write path
     # ------------------------------------------------------------------
 
-    def upsert(self, points: List[VectorPoint]) -> None:
+    def upsert(self, points: List[VectorPoint], *, timing_worker_id: str | None = None) -> None:
         """Insert or update vector points.
 
         Write-through: durable MySQL first, then local Qdrant index.
@@ -124,7 +124,19 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
             return
 
         # 1. Durable write to MySQL (must succeed)
-        self._persistence.save_batch(points)
+        write_started_at = time.perf_counter()
+        write_status = "failed"
+        try:
+            self._persistence.save_batch(points)
+            write_status = "ok"
+        finally:
+            if timing_worker_id is not None:
+                logger.info(
+                    "[VECTOR-TIMING] phase=durable_write worker_id=%s backend=%s "
+                    "points=%d status=%s elapsed_ms=%.1f",
+                    timing_worker_id, type(self._persistence).__name__, len(points),
+                    write_status, (time.perf_counter() - write_started_at) * 1000,
+                )
         log_storage_event(
             logger,
             logging.DEBUG,
@@ -138,8 +150,11 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         )
 
         # 2. Update local Qdrant index
+        local_started_at = time.perf_counter()
+        local_status = "failed"
         try:
-            self._upsert_local(points)
+            self._upsert_local(points, timing_worker_id=timing_worker_id)
+            local_status = "ok"
         except Exception as e:
             log_storage_error(
                 logger,
@@ -158,22 +173,56 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
                 "DEGRADED_REBUILD_REQUIRED: "
                 "QDRANT_INDEX_UPDATE_FAILED_AFTER_DURABLE_WRITE. Rebuild required"
             ) from e
+        finally:
+            if timing_worker_id is not None:
+                logger.info(
+                    "[VECTOR-TIMING] phase=local_index worker_id=%s points=%d status=%s elapsed_ms=%.1f",
+                    timing_worker_id, len(points), local_status,
+                    (time.perf_counter() - local_started_at) * 1000,
+                )
 
     def update_payload_by_worker(self, worker_id: str, payload_updates: dict) -> int:
         """Write through all exact-owner points, including locally unseen ones."""
-        with self._index_lock:
-            if isinstance(self._persistence, WorkerScopedVectorPersistenceBackend):
-                source_points = self._persistence.load_by_worker(worker_id)
-            else:
-                source_points = self._persistence.load_all()
-            points = [
-                VectorPoint(id=point.id, vector=point.vector,
-                            payload={**point.payload, **payload_updates})
-                for point in source_points
-                if point.payload.get("worker_id") == worker_id
-            ]
-            self.upsert(points)
-            return len(points)
+        started_at = time.perf_counter()
+        lock_wait_ms = read_ms = prepare_ms = upsert_ms = 0.0
+        read_method = "unknown"
+        candidates = updated = 0
+        outcome = "failed"
+        try:
+            with self._index_lock:
+                lock_wait_ms = (time.perf_counter() - started_at) * 1000
+                phase_started_at = time.perf_counter()
+                if isinstance(self._persistence, WorkerScopedVectorPersistenceBackend):
+                    read_method = "load_by_worker"
+                    source_points = self._persistence.load_by_worker(worker_id)
+                else:
+                    read_method = "load_all"
+                    source_points = self._persistence.load_all()
+                read_ms = (time.perf_counter() - phase_started_at) * 1000
+                candidates = len(source_points)
+                phase_started_at = time.perf_counter()
+                points = [
+                    VectorPoint(id=point.id, vector=point.vector,
+                                payload={**point.payload, **payload_updates})
+                    for point in source_points
+                    if point.payload.get("worker_id") == worker_id
+                ]
+                prepare_ms = (time.perf_counter() - phase_started_at) * 1000
+                updated = len(points)
+                phase_started_at = time.perf_counter()
+                self.upsert(points, timing_worker_id=worker_id)
+                upsert_ms = (time.perf_counter() - phase_started_at) * 1000
+                outcome = "ok"
+                return updated
+        finally:
+            logger.info(
+                "[VECTOR-TIMING] phase=payload_sync worker_id=%s backend=%s read_method=%s "
+                "candidates=%d updated=%d status=%s lock_wait_ms=%.1f read_ms=%.1f "
+                "prepare_ms=%.1f upsert_ms=%.1f total_ms=%.1f",
+                worker_id, type(self._persistence).__name__, read_method,
+                candidates, updated, outcome, lock_wait_ms, read_ms,
+                prepare_ms, upsert_ms, (time.perf_counter() - started_at) * 1000,
+            )
 
     def delete_by_worker(self, worker_id: str) -> int:
         """Delete owned vectors from durable storage and the local index."""
@@ -442,12 +491,32 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         except Exception as e:
             logger.warning("[QdrantMySQLVectorStore] Failed to close MySQL: %s", e)
 
-    def _upsert_local(self, points: list[VectorPoint]) -> None:
+    def _upsert_local(
+        self, points: list[VectorPoint], *, timing_worker_id: str | None = None,
+    ) -> None:
         with self._index_lock:
+            phase_started_at = time.perf_counter()
             self._ensure_client()
+            if timing_worker_id is not None:
+                logger.info(
+                    "[VECTOR-TIMING] phase=local_client_ready worker_id=%s elapsed_ms=%.1f",
+                    timing_worker_id, (time.perf_counter() - phase_started_at) * 1000,
+                )
             try:
+                phase_started_at = time.perf_counter()
                 self._qdrant.upsert(points)
+                if timing_worker_id is not None:
+                    logger.info(
+                        "[VECTOR-TIMING] phase=dense_index worker_id=%s points=%d elapsed_ms=%.1f",
+                        timing_worker_id, len(points), (time.perf_counter() - phase_started_at) * 1000,
+                    )
+                phase_started_at = time.perf_counter()
                 self._keywords.upsert(points)
+                if timing_worker_id is not None:
+                    logger.info(
+                        "[VECTOR-TIMING] phase=keyword_index worker_id=%s points=%d elapsed_ms=%.1f",
+                        timing_worker_id, len(points), (time.perf_counter() - phase_started_at) * 1000,
+                    )
             except Exception:
                 self._keywords_ready = False
                 raise

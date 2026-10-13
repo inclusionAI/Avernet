@@ -5,14 +5,14 @@ import { getBotTypeLabel } from '@/domain/botType';
 import { resolveOpenApiUserId } from '@/domain/userIdentity';
 import type { Identity } from '@/services/workspace/workspaceModel';
 import { cn } from '@/utils/cn';
-import { Check, ChevronDown, Info } from 'lucide-react';
+import { Check, ChevronDown, Info, Settings2 } from 'lucide-react';
 import { forwardRef, type ReactNode } from 'react';
 
 function isAvatarUrl(avatar: string): boolean {
   return /^https?:\/\//.test(avatar);
 }
 
-export type IdentitySelectorLayout = 'default' | 'sidebar' | 'collapsed' | 'collaboration';
+export type IdentitySelectorLayout = 'default' | 'sidebar' | 'collapsed' | 'collaboration' | 'sidebarChip';
 
 /** 非折叠布局头部标签区，保留 default/sidebar 标题与 Tooltip 合同。 */
 export function IdentitySectionHeader({
@@ -73,11 +73,11 @@ export function IdentityAvatar({
   userAvatarUrl,
 }: {
   identity: Identity;
-  size?: 'xs' | 'sm' | 'md' | 'lg';
+  size?: 'xxs' | 'xs' | 'sm' | 'md' | 'lg';
   userAvatarUrl?: string;
 }) {
   const avatarUrl = identity.kind === 'user' ? userAvatarUrl : identity.avatar;
-  const avatarSize = size === 'xs' ? 24 : size === 'sm' ? 32 : size === 'lg' ? 48 : 36;
+  const avatarSize = size === 'xxs' ? 16 : size === 'xs' ? 24 : size === 'sm' ? 32 : size === 'lg' ? 48 : 36;
   return (
     <span className="shrink-0">
       <Avatar
@@ -177,6 +177,7 @@ export const IdentityTriggerButton = forwardRef<HTMLButtonElement, IdentityTrigg
     const sidebarLayout = layout === 'sidebar';
     const collapsedLayout = layout === 'collapsed';
     const collaborationLayout = layout === 'collaboration';
+    const sidebarChipLayout = layout === 'sidebarChip';
     const navigationLayout = sidebarLayout || collapsedLayout;
 
     return (
@@ -189,12 +190,14 @@ export const IdentityTriggerButton = forwardRef<HTMLButtonElement, IdentityTrigg
         className={cn(
           collapsedLayout
             ? 'h-8 w-8 shrink-0 rounded-full border border-border bg-muted/40 p-0 text-xs font-semibold text-primary hover:bg-muted hover:text-primary'
+            : sidebarChipLayout
+            ? 'h-8 w-full rounded-lg bg-transparent px-2 text-left hover:bg-accent/50 hover:text-foreground'
             : collaborationLayout
             ? 'h-auto min-h-10 w-full justify-between gap-2 rounded-lg border border-border bg-muted/40 px-4 py-2 text-left text-xs text-foreground hover:bg-muted hover:text-foreground'
             : 'h-auto w-full justify-between gap-2 text-left',
           sidebarLayout
             ? 'min-h-9 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-foreground hover:bg-muted hover:text-foreground'
-            : !collapsedLayout && !collaborationLayout && 'min-h-10 rounded-lg px-2 py-1',
+            : !collapsedLayout && !collaborationLayout && !sidebarChipLayout && 'min-h-10 rounded-lg px-2 py-1',
           navigationLayout && open && 'border-primary',
           className,
         )}
@@ -205,6 +208,40 @@ export const IdentityTriggerButton = forwardRef<HTMLButtonElement, IdentityTrigg
           ) : (
             <span aria-hidden>{Array.from(identity.name.trim())[0] ?? '?'}</span>
           )
+        ) : sidebarChipLayout ? (
+          /* v2 设计稿(dmore artboard-010 Frame 1912056221)协作侧栏身份行：16px 头像 +
+             名称 + (短 ID) + 用户|Bot 身份分段指示 + 右端设置入口；整行触发身份切换 Popover。 */
+          <>
+            <IdentityAvatar identity={identity} size="xxs" userAvatarUrl={userAvatarUrl} />
+            <span className="min-w-0 shrink truncate text-xs text-foreground">{identity.name}</span>
+            <span className="shrink-0 truncate text-xs text-muted-foreground">
+              ({resolveOpenApiUserId(identity.id)})
+            </span>
+            <span
+              aria-hidden="true"
+              className="ml-1 flex h-[18px] shrink-0 items-center gap-0.5 rounded-md bg-muted p-0.5"
+            >
+              {(
+                [
+                  { key: 'user' as const, label: '用户' },
+                  { key: 'bot' as const, label: 'Bot' },
+                ]
+              ).map((seg) => (
+                <span
+                  key={seg.key}
+                  className={cn(
+                    'flex h-4 items-center rounded-[4px] px-1.5 text-[11px] leading-none',
+                    identity.kind === seg.key
+                      ? 'bg-background font-medium text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.1)]'
+                      : 'text-muted-foreground',
+                  )}
+                >
+                  {seg.label}
+                </span>
+              ))}
+            </span>
+            <Settings2 className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          </>
         ) : (
           <>
             <IdentityAvatar
@@ -253,8 +290,9 @@ function IdentityOption({
         if (!active) onSelect(identity.id);
       }}
       className={cn(
-        'h-auto min-h-10 w-full justify-start gap-2 rounded-lg px-2 py-1 text-left',
-        active ? 'bg-accent text-foreground hover:bg-accent' : 'hover:bg-accent',
+        // v2 气泡精修：36px 紧凑选项行（原 40px），静止态仅 hover 微透 accent，选中实底 + Check。
+        'h-auto min-h-9 w-full justify-start gap-2 rounded-md px-1.5 py-1 text-left',
+        active ? 'bg-accent text-foreground hover:bg-accent' : 'hover:bg-accent/50',
       )}
     >
       <IdentityAvatar identity={identity} size="sm" userAvatarUrl={userAvatarUrl} />
@@ -280,10 +318,13 @@ export function IdentitySection({
   if (identities.length === 0) return null;
   return (
     <section aria-labelledby={`identity-section-${title}`}>
-      <h3 id={`identity-section-${title}`} className="px-2.5 pb-1 text-xs font-medium text-muted-foreground">
+      <h3
+        id={`identity-section-${title}`}
+        className="px-2 pb-1 text-[11px] font-medium text-muted-foreground"
+      >
         {title}
       </h3>
-      <div className="space-y-1">
+      <div className="space-y-0.5">
         {identities.map((identity) => (
           <IdentityOption
             key={identity.id}

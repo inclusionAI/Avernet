@@ -115,6 +115,24 @@ def test_migration_child_ignore_omits_only_selected_cli(migration):
 
 
 @pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
+@pytest.mark.parametrize("name", ["cfuse", "cfuse-claude", "cfuse-codex"])
+def test_migration_skips_runtime_managed_cfuse_wrapper(migration, name):
+    source, artifact, _, migrate = migration
+    source_home = source.parent
+    source_bin = source_home / ".local/bin"
+    source_bin.mkdir(parents=True)
+    tool_dir = source_home / ".local/tools"
+    tool_dir.mkdir()
+    (tool_dir / "wrapped").write_text("runtime-managed")
+    (source_bin / "keep").write_text("#!/bin/sh\nprintf 'keep'\n")
+    (source_bin / name).symlink_to("../tools/wrapped")
+
+    assert migrate()
+    assert (artifact.parent / ".local/bin/keep").is_file()
+    assert not (artifact.parent / f".local/bin/{name}").exists()
+
+
+@pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
 def test_missing_home_bin_never_republishes_stale_engine_snapshot(migration, caplog):
     caplog.set_level("INFO")
     source, target, _, migrate = migration
@@ -275,6 +293,46 @@ def test_restore_rejects_symlink_artifact_parents(tmp_path, parent, caplog):
     run.assert_not_called()
     assert "service_bot.local_bin.restore.failure" in caplog.text
     assert "error_type=ValueError" in caplog.text
+
+
+@pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
+def test_restore_preserves_runtime_managed_cfuse_wrappers(tmp_path):
+    artifact = tmp_path / "versions/3/openclaw"
+    artifact.mkdir(parents=True)
+    artifact_bin = artifact.parent / ".local/bin"
+    artifact_bin.mkdir(parents=True)
+    (artifact_bin / "keep").write_text("published")
+    for name in ("cfuse", "cfuse-claude", "cfuse-codex"):
+        (artifact_bin / name).write_text("published wrapper")
+
+    target_home = tmp_path / "home"
+    target_bin = target_home / ".local/bin"
+    target_bin.mkdir(parents=True)
+    (target_bin / "keep").write_text("originally local")
+    for name in ("cfuse", "cfuse-claude", "cfuse-codex"):
+        (target_bin / name).write_text("runtime wrapper")
+
+    def run_command(**kwargs):
+        cmd = kwargs["cmd"]
+        result = subprocess.run(
+            [arg for arg in cmd[1:] if not arg.startswith("--chown=")],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode:
+            raise BotBuildMigrationError(result.stderr)
+
+    restore_local_bin_artifact(
+        artifact_dir=artifact,
+        target_home=target_home,
+        bot_id="restore-cli",
+        version=3,
+        run_command=run_command,
+        timeout_seconds=30,
+    )
+    assert (target_bin / "keep").read_text() == "published"
+    for name in ("cfuse", "cfuse-claude", "cfuse-codex"):
+        assert (target_bin / name).read_text() == "runtime wrapper"
 
 
 def test_restore_copy_failure_propagates_and_logs(tmp_path, caplog):

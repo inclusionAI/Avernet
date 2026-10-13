@@ -4,12 +4,12 @@ import type { GroupView, IdentityView, SessionView } from '@/domain/collaboratio
 import type { PolicyResult } from '@/services/workspace/groupService';
 import type { DomainResult } from '@/services/workspace/identityService';
 import { Link as LinkIcon, LogOut, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { EditableName } from './EditableName';
 import { ManagePanelHeader } from './ManagePanelHeader';
 import { MemberList } from './MemberList';
-import { ShareDialog } from './ShareDialog';
+import { SharePopover } from './SharePopover';
 
 export interface SessionManagePanelProps {
   session: SessionView;
@@ -26,7 +26,7 @@ export interface SessionManagePanelProps {
   onLeaveSession: (actorId: string) => Promise<boolean>;
   onAddMember: (actorId: string) => Promise<boolean>;
   onRemoveMember: (actorId: string) => Promise<boolean>;
-  onShare: () => Promise<DomainResult<{ invitationUrl: string }>>;
+  onShare: (expiresInSeconds?: number) => Promise<DomainResult<{ invitationUrl: string }>>;
 }
 
 const GROUP_KIND_LABEL: Record<GroupView['kind'], string> = {
@@ -49,8 +49,7 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
     onLeaveSession,
   } = props;
   const [shareOpen, setShareOpen] = useState(false);
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const [sharing, setSharing] = useState(false);
+  const shareAnchorRef = useRef<HTMLButtonElement | null>(null);
   // 会话级权限判断：driver/manager 或会话创建者可删除会话，其他成员可退出会话。
   // 参考 open-claw：isCreator（createdBy === 当前身份）|| isDriver/Manager（participants role）。
   const isCreator = !!session.createdBy && !!activeIdentity && session.createdBy === activeIdentity.id;
@@ -66,13 +65,8 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
     return success;
   };
 
-  const handleShare = async () => {
-    setShareOpen(true);
-    setSharing(true);
-    const res = await props.onShare();
-    setSharing(false);
-    if (res.ok) setShareUrl(res.data.invitationUrl);
-  };
+  // 打开即止：生成流程收敛在 SharePopover 气泡（有效期 → 生成链接），气泡锚在分享操作钮下。
+  const handleShare = () => setShareOpen(true);
 
   return (
     <aside className="flex h-full flex-col bg-background">
@@ -142,6 +136,7 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
             <p className="m-0 mb-1 text-sm font-medium text-foreground">操作</p>
             <div className="flex flex-col divide-y divide-border">
               <Button
+                ref={shareAnchorRef}
                 variant="ghost"
                 onClick={() => void handleShare()}
                 className="h-auto w-full justify-start px-2 py-2 text-left text-xs text-primary hover:bg-primary/10 hover:text-primary"
@@ -201,11 +196,12 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
         </div>
       </div>
 
-      <ShareDialog
+      <SharePopover
         open={shareOpen}
+        anchorRef={shareAnchorRef}
+        align="start"
         title="会话"
-        inviting={sharing}
-        invitationUrl={shareUrl}
+        onCreate={(expiresInSeconds) => props.onShare(expiresInSeconds)}
         onClose={() => setShareOpen(false)}
       />
     </aside>

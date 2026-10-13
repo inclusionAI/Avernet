@@ -56,7 +56,7 @@ describe('CollabPanel', () => {
   it('用户协作 tab:human 未加入显示「未加入当前会话」与加入按钮', () => {
     render(<CollabPanel panel={makePanel()} />);
     fireEvent.click(screen.getByText('用户协作'));
-    expect(screen.getByText('未加入当前会话')).toBeInTheDocument();
+    expect(screen.getByText('用户暂未加入当前会话')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '加入当前会话' })).toBeInTheDocument();
   });
 
@@ -75,7 +75,7 @@ describe('CollabPanel', () => {
   it('human 视角 absent:仅显示加入条,无 tab', () => {
     const panel = makePanel({ humanAbsentOnly: true });
     render(<CollabPanel panel={panel} />);
-    expect(screen.getByText('未加入当前会话')).toBeInTheDocument();
+    expect(screen.getByText('用户暂未加入当前会话')).toBeInTheDocument();
     expect(screen.queryByText('Bot控制')).not.toBeInTheDocument();
     // 点击加入 → 二次确认 → 确认后调用 joinSession
     fireEvent.click(screen.getByRole('button', { name: '加入当前会话' }));

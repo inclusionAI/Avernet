@@ -449,6 +449,53 @@ class TestListByBotUuid:
         mock_session.query.assert_called_once()
 
 
+# ==================== list_by_bot_uuid_only_including_deleted ====================
+
+
+class TestListByBotUuidOnlyIncludingDeleted:
+    def test_returns_all_generations_including_soft_deleted(self, repo, mock_session):
+        model1, rec1 = _make_mock_bot_model(
+            id_val=1, bot_uuid="bot-x", env="dev", is_deleted=1
+        )
+        model2, rec2 = _make_mock_bot_model(
+            id_val=2, bot_uuid="bot-x", env="gray", is_deleted=0
+        )
+        model3, rec3 = _make_mock_bot_model(
+            id_val=3, bot_uuid="bot-x", env="prod", is_deleted=3
+        )
+        mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
+            model3,
+            model2,
+            model1,
+        ]
+
+        result = repo.list_by_bot_uuid_only_including_deleted("bot-x")
+
+        assert len(result) == 3
+        assert {r.id for r in result} == {1, 2, 3}
+        assert {r.env for r in result} == {"dev", "gray", "prod"}
+        assert [r.is_deleted for r in result] == [3, 0, 1]
+
+    def test_unknown_uuid_returns_empty_list(self, repo, mock_session):
+        mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+
+        result = repo.list_by_bot_uuid_only_including_deleted("nonexistent")
+
+        assert result == []
+
+    def test_filter_is_uuid_only_cross_env(self, repo, mock_session):
+        """No tenant/env/is_deleted predicate — cross-env admin semantics."""
+        mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+
+        repo.list_by_bot_uuid_only_including_deleted("bot-x")
+
+        filter_call = mock_session.query.return_value.filter.call_args
+        assert len(filter_call.args) == 1, (
+            "uuid-only lookup must carry exactly ONE predicate (no tenant/env/is_deleted)"
+        )
+        mock_session.query.assert_called_once()
+
+
 # ==================== update_bot ====================
 
 

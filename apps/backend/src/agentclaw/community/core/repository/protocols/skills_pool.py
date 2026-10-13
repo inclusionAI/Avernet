@@ -61,7 +61,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         binding_id: int,
         startup_identity: str,
     ) -> bool:
-        """Confirm Pool-native layout only for the still-current startup."""
+        """Confirm Pool layout and record only the still-current startup."""
         ...
 
     @abstractmethod

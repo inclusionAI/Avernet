@@ -117,16 +117,20 @@ describe('SessionItem 会话操作菜单（验收微调：对齐管理面板与 
     expect(handlers.onDeleteSession).toHaveBeenCalledWith('s1');
   });
 
-  it('分享会话：打开分享弹窗并请求该会话的邀请链接', async () => {
+  it('分享会话：打开气泡后按所选有效期点「生成链接」才发起请求（v2 流程）', async () => {
     const handlers = makeHandlers();
     renderSessionItem(handlers);
     openMenu();
 
     fireEvent.click(screen.getByRole('button', { name: '分享会话' }));
-    expect(handlers.onShareSession).toHaveBeenCalledWith('s1');
-    // 链接生成是异步流程，等待 ShareDialog 回显。
+    // v2：打开不自动生成，先呈现「链接有效期」选择与「生成链接」。
+    expect(handlers.onShareSession).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('链接有效期')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '生成链接' }));
+    // 默认有效期 1 天 = 86400 秒透传（spec: collaboration-session-share）。
+    expect(handlers.onShareSession).toHaveBeenCalledWith('s1', 86400);
     await waitFor(() => {
-      expect(screen.getByDisplayValue('http://example.com/invite/s1')).toBeInTheDocument();
+      expect(screen.getByLabelText('邀请链接')).toHaveTextContent('http://example.com/invite/s1');
     });
   });
 

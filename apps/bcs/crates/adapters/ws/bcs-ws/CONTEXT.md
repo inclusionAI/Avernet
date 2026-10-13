@@ -13,6 +13,8 @@
   tenant/User/Group/Session scope into the existing Workbench connection loop.
 - Shared connection-state helpers under `src/shared/`.
 - Implementations of `BotDeliveryPort` and `FrontendDeliveryPort`.
+- Task control RPCs accept explicit Session IDs and preserve V2 session-scoped
+  Group IDs. See [task RPC Session scope](docs/task-rpc-session-scope.md).
 - Opaque, per-connection identities and pinned send/abort operations. Selection
   checks the original identity under the registry lock and never redirects to
   a replacement connection. Tokens are not connection identities.

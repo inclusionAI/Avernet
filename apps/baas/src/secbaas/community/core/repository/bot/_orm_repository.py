@@ -198,6 +198,29 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
         return items
 
     @with_orm_session
+    def list_by_bot_uuid_only_including_deleted(self, bot_uuid: str) -> list[BotRecord]:
+        """List all bot records by bot_uuid only (no tenant/env filter).
+
+        Filters ONLY ``bot_uuid`` — includes soft-deleted records and
+        generations in every env. Cross-env admin semantics: mirrors the
+        ``_only`` scoping of ``get_by_id_only`` and the restore endpoint's
+        deliberately env-agnostic contract. Used by the admin bot-restore
+        resolution to gather every record id that ever held this uuid.
+        """
+        log.info("list_by_bot_uuid_only_including_deleted: bot_uuid=%s", bot_uuid)
+        rows = (
+            self._session.query(BotModel)
+            .filter(BotModel.bot_uuid == bot_uuid)
+            .order_by(BotModel.id.desc())
+            .all()
+        )
+        items = [r.to_record() for r in rows]
+        log.info(
+            "[bot:list_by_bot_uuid_only_including_deleted] result: %s rows", len(items)
+        )
+        return items
+
+    @with_orm_session
     def get_active_by_bot_uuid(
         self, bot_uuid: str, tenant: str, env: str
     ) -> BotRecord | None:

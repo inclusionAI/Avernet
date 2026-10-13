@@ -168,6 +168,27 @@ class TestDeviceServiceRouterInit:
             is router._providers[BAAS_DEVICE_PROVIDER]
         )
 
+    def test_data_init_readiness_routes_to_binding_provider(self):
+        router, repo, _, _ = _make_router(is_local=False)
+        repo.get_by_id.return_value = _make_record(
+            id=42,
+            device_id="desktop-42",
+            device_provider=BAAS_DEVICE_PROVIDER,
+        )
+        baas = router._providers[BAAS_DEVICE_PROVIDER]
+
+        router.trigger_data_init_on_device_ready(
+            device_id="desktop-42",
+            binding_id=42,
+            require_pool_confirmation=True,
+        )
+
+        baas.trigger_data_init_on_device_ready.assert_called_once_with(
+            device_id="desktop-42",
+            binding_id=42,
+            require_pool_confirmation=True,
+        )
+
     def test_invalid_default_provider_key_raises(self):
         import pytest
 

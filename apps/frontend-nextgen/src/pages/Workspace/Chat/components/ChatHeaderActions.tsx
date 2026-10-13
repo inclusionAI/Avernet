@@ -18,6 +18,8 @@ export interface ChatHeaderActionsProps {
   fileDrawerOpen: boolean;
   onToggleFileDrawer: () => void;
   sidePaneOpen: boolean;
+  /** 会话无 <AixUI type="panel"> 副屏内容时禁用（openPanel 会被 autoCloseWhenEmpty 弹回）。 */
+  sidePaneDisabled?: boolean;
   onToggleSidePane: () => void;
   className?: string;
 }
@@ -56,6 +58,7 @@ export function ChatHeaderActions({
   fileDrawerOpen,
   onToggleFileDrawer,
   sidePaneOpen,
+  sidePaneDisabled,
   onToggleSidePane,
   className,
 }: ChatHeaderActionsProps) {
@@ -86,7 +89,13 @@ export function ChatHeaderActions({
         active={fileDrawerOpen}
         onClick={onToggleFileDrawer}
       />
-      <HeaderIcon label="副屏" icon={<Monitor className="size-4" />} active={sidePaneOpen} onClick={onToggleSidePane} />
+      <HeaderIcon
+        label="副屏"
+        icon={<Monitor className="size-4" />}
+        active={sidePaneOpen}
+        disabled={sidePaneDisabled}
+        onClick={onToggleSidePane}
+      />
     </div>
   );
 }

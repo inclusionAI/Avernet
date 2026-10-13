@@ -49,6 +49,7 @@ export type FlowRunInsert = {
   workflowId: string;
   workflowTitle?: string | null;
   status: string;
+  stateJson?: string | null;
   paramsJson?: string | null;
   inputJson?: string | null;
   nodeCount?: number;
@@ -301,13 +302,14 @@ export class FlowRunRepository {
     try {
       const now = this.db.dialect.now();
       await this.db.exec(
-        `INSERT INTO flow_runs (flow_id, workflow_id, workflow_title, status, params_json, input_json, node_count, triggered_by, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number, gmt_create, gmt_modified)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO flow_runs (flow_id, workflow_id, workflow_title, status, state_json, params_json, input_json, node_count, triggered_by, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number, gmt_create, gmt_modified)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           run.flowId,
           run.workflowId,
           run.workflowTitle ?? null,
           run.status,
+          run.stateJson ?? null,
           run.paramsJson ?? null,
           run.inputJson ?? null,
           run.nodeCount ?? 0,

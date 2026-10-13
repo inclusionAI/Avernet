@@ -1,5 +1,6 @@
 import type { DeliveryStatusView, GroupView, IdentityView, ParticipantMode, SessionView } from '@/domain/collaboration';
 import type { MessageViewScope } from '@/domain/collaboration/types';
+import type { GroupChatFavoritesModel } from '@/pages/Workspace/hooks/useGroupChatHeaderPanels';
 import type { SessionMessageAttachment } from '@/services/workspace/groupChatAttachmentService';
 import type { GroupChatState } from '@/services/workspace/groupChatProvider';
 import type { PolicyResult } from '@/services/workspace/groupService';
@@ -58,9 +59,18 @@ export interface GroupChatPaneProps {
   canManageGroup: PolicyResult;
   activePanel: GroupPanelKind;
   onTogglePanel: (panel: GroupPanelKind) => void;
+  /** 头部六图标域的收藏模型（GroupWorkspaceArea 经 useGroupChatHeaderPanels 提供）。 */
+  favorites: GroupChatFavoritesModel;
+  /** 副屏镜像开合态（PanelHandle 无 isOpen 查询，本地镜像）。 */
+  sidePaneOpen: boolean;
+  /** 会话无 <AixUI type="panel"> 副屏内容时 Monitor 禁用（openPanel 会被 autoCloseWhenEmpty 弹回）。 */
+  sidePaneDisabled?: boolean;
+  onToggleSidePane: () => void;
+  /** 历史消息面板定位高亮（穿透到 GroupChatMessageList；3s 上层 hook 自清）。 */
+  highlightMessageId?: string | null;
   onRequestDissolve: () => void;
-  onRequestShareGroup: () => Promise<DomainResult<{ invitationUrl: string }>>;
-  onRequestShareSession: () => Promise<DomainResult<{ invitationUrl: string }>>;
+  onRequestShareGroup: (expiresInSeconds?: number) => Promise<DomainResult<{ invitationUrl: string }>>;
+  onRequestShareSession: (expiresInSeconds?: number) => Promise<DomainResult<{ invitationUrl: string }>>;
   /** 副屏命令式 handle（来自 useGroupChat，供 ChatLayout.Panel ref + closePanelForce）。 */
   panelRef: RefObject<PanelHandle>;
   /**

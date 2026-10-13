@@ -88,7 +88,10 @@ _ALLOWLIST: dict[str, str] = {
     "extracting it into a sibling router is a separate refactor.",
     "core/devices/services/device_service.py": "~1461 lines — device lifecycle, binding, allocation.",
     "corp/core/devices/services/arca_device_service.py": "~1147 lines — arca sandbox device adapter (corp-only prod plugin).",
-    "core/desktop_bot/services/desktop_bot_service.py": "~1492 lines — desktop-bot lifecycle service.",
+    "core/desktop_bot/services/desktop_bot_service.py":
+        "~1875 lines — legacy Desktop inventory, Passport, delete, and status "
+        "orchestration remain; creation recovery and publish/restart tracking were "
+        "extracted in #2321, with the remaining legacy split kept as a follow-up.",
     # ── other ────────────────────────────────────────────────────────
     "adapters/http/harness/router.py": "~2352 lines — harness router; patch/diagnose/templates/recordings.",
     "core/repository/implementations/skill_center/skill.py": "~1722 lines — unified ORM skill repository (covers all skill CRUD).",

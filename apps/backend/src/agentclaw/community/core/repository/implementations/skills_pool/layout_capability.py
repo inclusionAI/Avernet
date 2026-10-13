@@ -6,11 +6,13 @@ import json
 
 from sqlalchemy import func
 
+from agentclaw.community.core.devices.protocols import (
+    LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY,
+)
 from agentclaw.community.core.devices.startup_identity import (
     resolve_startup_identity,
 )
 from agentclaw.community.core.devices.models import DeviceBindingStatus
-
 from agentclaw.community.core.skills_pool.repository.models import (
     BotSkillLayoutStateModel,
 )
@@ -34,13 +36,20 @@ class SkillsPoolCapabilityRepositoryMixin:
         binding_id: int,
         startup_identity: str,
     ) -> bool:
-        """Commit ``POOL_ACTIVE`` only for the still-current startup attempt."""
+        """Confirm Pool layout only for the still-current startup attempt."""
 
         from agentclaw.community.core.devices.repository.models import (
             EntityDeviceBinding,
         )
+        from agentclaw.community.core.repository.implementations.devices.guarded_lifecycle import (
+            begin_guarded_transaction,
+        )
 
         with self._database.transactional_orm_session() as session:
+            begin_guarded_transaction(
+                session,
+                purpose="Pool layout confirmation",
+            )
             binding = (
                 session.query(EntityDeviceBinding)
                 .filter(
@@ -84,16 +93,24 @@ class SkillsPoolCapabilityRepositoryMixin:
             )
             if current is None:
                 return False
-            if (
+            native_active = (
                 current.active_layout == SkillLayout.POOL.value
                 and current.target_layout is None
                 and current.phase == SkillLayoutPhase.POOL_ACTIVE.value
                 and current.migration_generation is None
                 and current.preparation_id is None
                 and current.layout_contract_version == layout_contract_version
-            ):
-                return True
-            if not (
+            )
+            migrated_active = (
+                current.active_layout == SkillLayout.POOL.value
+                and current.target_layout is None
+                and current.phase == SkillLayoutPhase.POOL_ACTIVE.value
+                and bool(current.migration_generation)
+                and bool(current.preparation_id)
+                and current.layout_contract_version == layout_contract_version
+                and bool(current.data_plane_cutover_committed)
+            )
+            pool_initializing = (
                 current.active_layout == SkillLayout.POOL.value
                 and current.target_layout is None
                 and current.phase == SkillLayoutPhase.POOL_INITIALIZING.value
@@ -101,12 +118,17 @@ class SkillsPoolCapabilityRepositoryMixin:
                 and current.preparation_id is None
                 and current.layout_contract_version == layout_contract_version
                 and not bool(current.data_plane_cutover_committed)
-            ):
+            )
+            if not (native_active or migrated_active or pool_initializing):
                 return False
-            current.phase = SkillLayoutPhase.POOL_ACTIVE.value
-            current.pool_activated_at = func.now()
-            current.lease_owner = None
-            current.lease_expires_at = None
+            if pool_initializing:
+                current.phase = SkillLayoutPhase.POOL_ACTIVE.value
+                current.pool_activated_at = func.now()
+                current.lease_owner = None
+                current.lease_expires_at = None
+            props[LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY] = startup_identity
+            binding.device_props = json.dumps(props, ensure_ascii=False)
+            binding.gmt_modified = func.now()
         return True
 
     def _release_pre_cutover_claim(

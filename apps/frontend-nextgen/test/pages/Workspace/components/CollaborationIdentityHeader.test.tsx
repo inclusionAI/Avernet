@@ -49,23 +49,24 @@ describe('CollaborationIdentityHeader', () => {
     mockUseWorkspaceIdentitySwitcherModel.mockReset().mockReturnValue(model);
   });
 
-  it('展示当前协作身份并可切换到 Bot 身份', async () => {
+  it('v2 身份行：紧凑 chip（头像 + 名称 + (短ID) + 用户|Bot 分段），点击打开列表可切换 Bot 身份', async () => {
     render(<CollaborationIdentityHeader />);
 
-    expect(screen.getByText('当前协作身份')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '切换工作身份' })).toBeInTheDocument();
-    expect(screen.getByText('用户 ID：fengtai')).toBeInTheDocument();
+    // v2（dmore artboard-010）：无「当前协作身份」标题区与独立切换按钮，整行即触发器。
+    expect(screen.queryByText('当前协作身份')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '切换工作身份' })).not.toBeInTheDocument();
     const header = screen.getByRole('region', { name: '当前协作身份' });
-    expect(header).toHaveClass('px-3');
-    expect(header).not.toHaveClass('px-6');
+    expect(header).toHaveClass('h-12', 'px-3');
     const identityCard = screen.getByRole('button', { name: '当前协作身份：我' });
-    expect(identityCard).toHaveClass('bg-background');
-    expect(identityCard).not.toHaveClass('bg-muted/40');
-    expect(identityCard).toHaveClass('h-auto', 'min-h-10', 'gap-2', 'px-4', 'py-2');
-    expect(screen.getByRole('img', { name: '我' })).toHaveStyle({ width: '24px', height: '24px' });
-    expect(screen.getByText('我')).toHaveClass('text-xs');
+    // 宽度占满侧栏（w-full），气泡按触发宽度展开。
+    expect(identityCard).toHaveClass('h-8', 'w-full');
+    expect(identityCard).toHaveTextContent('我');
+    expect(identityCard).toHaveTextContent('(fengtai)');
+    // 16px 头像 + 分段指示（用户高亮为白胶囊）。
+    expect(screen.getByRole('img', { name: '我' })).toHaveStyle({ width: '16px', height: '16px' });
+    expect(identityCard.querySelector('[aria-hidden="true"] > span:nth-child(1)')).toHaveTextContent('用户');
 
-    fireEvent.click(screen.getByRole('button', { name: '切换工作身份' }));
+    fireEvent.click(identityCard);
     fireEvent.click(await screen.findByRole('button', { name: /协作 Bot/ }));
 
     expect(mockSwitchIdentity).toHaveBeenCalledWith('bot-1');
@@ -81,7 +82,7 @@ describe('CollaborationIdentityHeader', () => {
 
     render(<CollaborationIdentityHeader />);
 
-    expect(screen.getByRole('button', { name: '协作身份加载中' })).toHaveClass('min-h-10', 'gap-2', 'px-4', 'py-2');
+    expect(screen.getByRole('button', { name: '协作身份加载中' })).toHaveClass('h-8', 'w-full');
   });
 });
 

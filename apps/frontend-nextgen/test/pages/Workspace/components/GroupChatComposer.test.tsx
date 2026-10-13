@@ -21,6 +21,7 @@ jest.mock('@tc-chat/ui/es/Sender', () => {
         _props: {
           className?: string;
           disabled?: boolean;
+          placeholder?: string;
           fileChip?: unknown;
           imageUpload?: { enabled?: boolean };
           onPasteFile?: (files: File[]) => void;
@@ -47,6 +48,7 @@ jest.mock('@tc-chat/ui/es/Sender', () => {
             data-disabled={_props.disabled ? 'true' : 'false'}
             data-file-chip={_props.fileChip ? 'enabled' : 'disabled'}
             data-image-upload={_props.imageUpload?.enabled ? 'enabled' : 'disabled'}
+            data-placeholder={_props.placeholder}
           >
             <button
               type="button"
@@ -144,9 +146,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
         session={session}
         connectionStatus="connected"
         mentionConfig={undefined}
-        showReconnectToolbar={false}
         onSend={() => {}}
-        onReconnect={() => {}}
         draft=""
         onDraftChange={() => {}}
       />,
@@ -162,9 +162,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
         session={session}
         connectionStatus="connected"
         mentionConfig={undefined}
-        showReconnectToolbar={false}
         onSend={() => {}}
-        onReconnect={() => {}}
         draft=""
         onDraftChange={() => {}}
       />,
@@ -178,9 +176,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
         session={null}
         connectionStatus="connected"
         mentionConfig={undefined}
-        showReconnectToolbar={false}
         onSend={() => {}}
-        onReconnect={() => {}}
         draft=""
         onDraftChange={() => {}}
       />,
@@ -194,9 +190,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
         session={session}
         connectionStatus="connected"
         mentionConfig={undefined}
-        showReconnectToolbar={false}
         onSend={() => {}}
-        onReconnect={() => {}}
         draft=""
         onDraftChange={() => {}}
       />,
@@ -215,9 +209,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
         session={session}
         connectionStatus="connected"
         mentionConfig={undefined}
-        showReconnectToolbar={false}
         onSend={() => {}}
-        onReconnect={() => {}}
         draft=""
         onDraftChange={() => {}}
         inputRef={inputRef}
@@ -236,9 +228,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
         session={session}
         connectionStatus="connected"
         mentionConfig={undefined}
-        showReconnectToolbar={false}
         onSend={onSend}
-        onReconnect={() => {}}
         draft=""
         onDraftChange={() => {}}
         quote={{ messageId: 'm1', senderName: 'Bot 甲', text: '被引用的内容' }}
@@ -259,9 +249,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
         session={session}
         connectionStatus="connected"
         mentionConfig={undefined}
-        showReconnectToolbar={false}
         onSend={() => {}}
-        onReconnect={() => {}}
         draft=""
         onDraftChange={() => {}}
         inputRef={inputRef}
@@ -270,5 +258,51 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     // 桩 Sender 经 useImperativeHandle 暴露 SenderRef 子集 → inputRef.current 非 null,BridgeInputRef.insert 可达。
     expect(inputRef.current).not.toBeNull();
     expect(typeof inputRef.current?.insert).toBe('function');
+  });
+
+  it('断连四态：输入区禁用（disabled）并注入灰卡 CSS 变量（附录 B 口径）', () => {
+    const { rerender } = render(
+      <GroupChatComposer
+        session={session}
+        connectionStatus="error"
+        mentionConfig={undefined}
+        onSend={() => {}}
+        draft=""
+        onDraftChange={() => {}}
+      />,
+    );
+    const sender = screen.getByTestId('sender');
+    expect(sender).toHaveAttribute('data-disabled', 'true');
+    expect(sender).toHaveClass('[--aix-color-bg:hsl(var(--muted))]');
+
+    rerender(
+      <GroupChatComposer
+        session={session}
+        connectionStatus="connected"
+        mentionConfig={undefined}
+        onSend={() => {}}
+        draft=""
+        onDraftChange={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('sender')).toHaveAttribute('data-disabled', 'false');
+    expect(screen.getByTestId('sender')).not.toHaveClass('[--aix-color-bg:hsl(var(--muted))]');
+  });
+
+  it('placeholder 按稿换为通用能力占位（不带会话名，附录 B）', () => {
+    render(
+      <GroupChatComposer
+        session={session}
+        connectionStatus="connected"
+        mentionConfig={undefined}
+        onSend={() => {}}
+        draft=""
+        onDraftChange={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('sender')).toHaveAttribute(
+      'data-placeholder',
+      '可使用 /file 引用文件、/link 引用链接、/skill 调用能力',
+    );
   });
 });

@@ -1,8 +1,10 @@
 import { getCapabilities } from '@/capabilities';
 import { NotificationBell } from '@/components/Admin/NotificationBell';
 import { IconButton } from '@/components/ui';
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react';
+import { useState } from 'react';
 import { AccountBadge, type AccountUser } from './AccountBadge';
+import { GlobalSearchDialog } from './GlobalSearch';
 import { HelpMenu } from './HelpMenu';
 import type { NavigationItem } from './navigation';
 import { SidebarNavList } from './SidebarNavList';
@@ -18,7 +20,7 @@ interface AppSidebarProps {
 }
 
 /**
- * 内流单侧边栏外壳（refactor-global-nav-shell）：顶部品牌区（Logo + 通知中心）+
+ * 内流单侧边栏外壳（refactor-global-nav-shell）：顶部品牌区（Logo + 搜索 + 通知中心）+
  * 协作/Bot/老功能分组导航 + 底部用户行（账号身份 + 「更多」浮层）+ 边缘折叠控制。
  * 顶栏（AppHeader）已退役，原顶栏功能全部归位至本组件（功能行为零损失）。
  * ≥lg 始终在流内（折叠态=图标列，展开态=完整列表）；<lg 由 AppShell 改用抽屉呈现，本组件 hidden。
@@ -31,6 +33,8 @@ export function AppSidebar({
   onToggleCollapsed,
   currentUser,
 }: AppSidebarProps) {
+  // 全局搜索弹窗（设计稿 artboard-016）：入口固定在通知中心左侧，形态无关、不经 capability 下发。
+  const [searchOpen, setSearchOpen] = useState(false);
   // 品牌语义经 capability 解析：Open Core = Avernet 横版 wordmark；internal = 现状「蓝底色块 + TeamClaw」。
   const brand = getCapabilities().getProductBrand().value;
   // 通知中心为形态级入口（getShellVisibility.notificationBell）：Open Core（阿里云部署）默认展示；
@@ -39,12 +43,28 @@ export function AppSidebar({
 
   const shell = (
     <>
-      {/* 品牌区（SVG 稿）：行高 52px；左 Logo mark 紧凑锁版（12,15 24×22）、右上一排功能图标（通知 + 折叠控制）32px 居中。 */}
+      {/* 品牌区（SVG 稿 artboard-016 单行 52px）：mark 锚 (12,14) 由 px-3+居中给出，图标组三钮紧贴右锚（右缘 12px）。
+          单行 176px 预算 = 图标组 96px + compact 锁版 ≤80px：锁版宽度由各形态自管（Open Core 爪形 mark 24px；
+          internal 蓝 + AppWindow + 11px 字标锁版自缩至 ~75px），行结构不感知形态差异。
+          前科：锁版超预算同排曾致文字被压盖，各形态改 compact 锁版时必须按此预算自检。 */}
+      {/* 折叠态工具簇（搜索/通知/展开）与下方导航项同列易混淆，按「主次层级」做区分而非加分隔线
+          （延续 SidebarNavList 纯留白过渡的设计语言）：工具图标收 28px（sm）+ 静态 muted 色阶
+          （hover 由 ghost 自带 hover:text-foreground 恢复），导航项保持 32px 全对比度；工具簇底距
+          加大至 16px，大于分组间 8px 留白，形成与导航区的视觉断层。展开态品牌行维持原 52px 图标组不在此例。 */}
       {collapsed ? (
-        <div className="flex flex-col items-center gap-1 px-2 pb-1 pt-3.5">
-          {notificationBell && <NotificationBell />}
+        <div className="flex flex-col items-center gap-1 px-2 pb-2 pt-3.5">
+          <IconButton
+            size="sm"
+            className="text-muted-foreground"
+            label="搜索"
+            icon={<Search className="h-4 w-4" />}
+            onClick={() => setSearchOpen(true)}
+          />
+          {notificationBell && <NotificationBell size="sm" className="text-muted-foreground" />}
           {onToggleCollapsed && (
             <IconButton
+              size="sm"
+              className="text-muted-foreground"
               label={collapsed ? '展开导航' : '折叠导航'}
               icon={collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
               onClick={onToggleCollapsed}
@@ -52,9 +72,10 @@ export function AppSidebar({
           )}
         </div>
       ) : (
-        <div className="flex h-[52px] items-center gap-2 px-3">
-          <brand.Logo compact className="min-w-0" />
-          <span className="ml-auto flex shrink-0 items-center gap-1">
+        <div className="flex h-[52px] items-center px-3">
+          <brand.Logo compact />
+          <span className="ml-auto flex shrink-0 items-center gap-0">
+            <IconButton label="搜索" icon={<Search className="h-4 w-4" />} onClick={() => setSearchOpen(true)} />
             {notificationBell && <NotificationBell />}
             {onToggleCollapsed && (
               <IconButton label="折叠导航" icon={<PanelLeftClose className="h-4 w-4" />} onClick={onToggleCollapsed} />
@@ -62,6 +83,8 @@ export function AppSidebar({
           </span>
         </div>
       )}
+
+      <GlobalSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
 
       <SidebarNavList activePath={activePath} items={items} onNavigate={onNavigate} collapsed={collapsed} />
 
