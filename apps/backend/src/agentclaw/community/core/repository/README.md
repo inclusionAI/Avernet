@@ -203,6 +203,7 @@ provides:
   - SpaceSkillPublicationRepositoryProtocol
   - SkillSetRepository
   - SkillCenterReferenceRepositoryProtocol
+  - LocalSkillSecurityObservationRepositoryProtocol
   - TrackLatestRepositoryProtocol
   # skills_pool
   - QuarantineRepositoryProtocol
@@ -258,6 +259,7 @@ provides:
   - SkillVersionRepository
   - SpaceSkillPublicationRepository
   - SkillCenterReferenceRepository
+  - LocalSkillSecurityObservationRepository
   - TrackLatestRepository
   # skills_pool
   - SkillsPoolLayoutRepository

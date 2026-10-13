@@ -100,6 +100,7 @@ from agentclaw.community.core.bot_startup_script.protocols import (
 from agentclaw.community.core.mcp.mcp_auth_service_protocol import MCPAuthServiceProtocol
 from agentclaw.community.core.mcp.mcp_config_service_protocol import MCPConfigServiceProtocol
 from agentclaw.community.core.skill_center.local_skill_delete_service_protocol import LocalSkillDeleteServiceProtocol
+from agentclaw.community.core.skill_center.local_skill_security_upload_hook import LocalSkillSecurityUploadHook
 from agentclaw.community.core.ports.identity_file_port import IdentityFilePort
 from agentclaw.community.core.ports.resource_file_port import ResourceFilePort
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
@@ -223,6 +224,7 @@ class ManifestDeliveryModule(Module):
                     store,
                     validator=validator,
                     skill_repository=injector.get(SkillRepository),
+                    security_hook=injector.get(LocalSkillSecurityUploadHook),
                 ),
                 capability_reader=capability_reader_provider(),
                 package_validator=validator,

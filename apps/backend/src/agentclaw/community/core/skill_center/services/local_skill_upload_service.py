@@ -6,7 +6,10 @@ the raw request body and maps the public response.
 
 from __future__ import annotations
 
-import json
+import asyncio
+import hashlib
+import uuid
+from threading import Event
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Callable, Optional
 from uuid import uuid4
@@ -16,10 +19,7 @@ from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
-from agentclaw.community.core.repository.protocols.bot import (
-    BotCollabLogRepositoryProtocol,
-    BotRepository,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillRepository,
 )
@@ -47,6 +47,9 @@ from agentclaw.community.core.skill_center.services.local_skill_package_runtime 
     LocalSkillPackageRuntime,
     LocalSkillPackageRuntimeResult,
 )
+from agentclaw.community.core.skill_center.local_skill_security_upload_hook import (
+    LocalSkillSecurityUploadHook,
+)
 from agentclaw.community.core.skill_center.skill_package import (
     SkillPackageInvalidError,
     SkillPackageTooLargeError,
@@ -63,7 +66,9 @@ from agentclaw.community.core.skills_pool.edit_guard import (
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from agentclaw.community.log import get_logger
 from injector import inject
-from agentclaw.community.core.skill_center.local_skill_upload_service_protocol import LocalSkillUploadServiceProtocol
+from agentclaw.community.core.skill_center.local_skill_upload_service_protocol import (
+    LocalSkillUploadServiceProtocol,
+)
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -71,6 +76,8 @@ if TYPE_CHECKING:
     )
 
 logger = get_logger()
+SECURITY_HANDOFF_TIMEOUT_SECONDS = 2.0
+SECURITY_FAILURE_RECORD_TIMEOUT_SECONDS = 0.25
 
 
 class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
@@ -83,23 +90,25 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_service_factory: SkillServiceFactory,
-        audit_log_repo: BotCollabLogRepositoryProtocol,
         edit_guard: SkillsPoolEditGuard,
         device_context_resolver_provider: Callable[[], "DeviceContextResolver"],
         runtime_reconciler: BotRuntimeProjectorProtocol,
         package_validator: SkillPackageValidator,
         package_runtime: LocalSkillPackageRuntime,
+        security_observer_provider: Callable[[], LocalSkillSecurityUploadHook],
+        security_observation_enabled: bool,
     ) -> None:
         self._skill_repo = skill_repo
         self._bot_repo = bot_repo
         self._collaborators = collaborator_service
         self._skill_service_factory = skill_service_factory
-        self._audit_log_repo = audit_log_repo
         self._edit_guard = edit_guard
         self._device_context_resolver_provider = device_context_resolver_provider
         self._runtime_reconciler = runtime_reconciler
         self._package_validator = package_validator
         self._package_runtime = package_runtime
+        self._security_observer_provider = security_observer_provider
+        self._security_observation_enabled = security_observation_enabled
 
     async def installed_package_digest(
         self,
@@ -158,10 +167,14 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         self, *, bot: Mapping[str, Any], bot_id: str, owner_id: str, name: str
     ) -> bytes:
         _, storage = self._skill_service_factory.local_skill_package_storage(
-            entity_id=str(bot["entity_id"]), owner_id=owner_id, bot_id=bot_id,
-            engine_type=bot["active_engine"], entity_type=str(bot["entity_type"]),
+            entity_id=str(bot["entity_id"]),
+            owner_id=owner_id,
+            bot_id=bot_id,
+            engine_type=bot["active_engine"],
+            entity_type=str(bot["entity_type"]),
             is_desktop=bot.get("bot_type") == "desktop",
-            is_teclaw=self._is_teclaw(bot_id=bot_id, owner_id=owner_id), name=name,
+            is_teclaw=self._is_teclaw(bot_id=bot_id, owner_id=owner_id),
+            name=name,
         )
         if not await storage.exists():
             raise LocalSkillStorageError("Installed Skill package is missing")
@@ -206,6 +219,30 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             )
             if len(matches) > 1:
                 raise LocalSkillDuplicateError()
+            observation_id = str(uuid.uuid4())
+            digest = "sha256:" + hashlib.sha256(validated.canonical_zip).hexdigest()
+            security_observer: LocalSkillSecurityUploadHook | None = None
+            observe = self._security_observation_enabled
+            identity_unresolved = False
+            incarnation_id: str | None = None
+            if matches and observe:
+                try:
+                    security_observer = self._security_observer_provider()
+                    incarnation_id = security_observer.current_incarnation_id(
+                        bot_id=bot_id, owner_id=owner_id,
+                        skill_id=int(matches[0]["id"]),
+                    )
+                except Exception:
+                    # A failed security identity lookup must not fork the
+                    # provider identity or block the formal Local upload.
+                    logger.exception(
+                        "Local Skill security identity lookup failed "
+                        "bot_id=%s skill_id=%s observation_id=%s",
+                        bot_id, matches[0]["id"], observation_id,
+                    )
+                    observe = False
+                    identity_unresolved = True
+            incarnation_id = incarnation_id or str(uuid.uuid4())
             location = self._skill_service_factory.local_skill_package_location(
                 entity_id=str(bot["entity_id"]),
                 owner_id=owner_id,
@@ -225,7 +262,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             )
             if runtime_result is not None:
                 if matches:
-                    return await self._commit_runtime_replace(
+                    result = await self._commit_runtime_replace(
                         skill=matches[0],
                         owner_id=owner_id,
                         bot_id=bot_id,
@@ -233,17 +270,18 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                         description=validated.description,
                         runtime_result=runtime_result,
                     )
-                return self._commit_runtime_create(
-                    owner_id=owner_id,
-                    bot_id=bot_id,
-                    actor_id=actor_id,
-                    name=validated.name,
-                    description=validated.description,
-                    directory=location.directory,
-                    runtime_result=runtime_result,
-                )
-            if matches:
-                return await self._replace(
+                else:
+                    result = self._commit_runtime_create(
+                        owner_id=owner_id,
+                        bot_id=bot_id,
+                        actor_id=actor_id,
+                        name=validated.name,
+                        description=validated.description,
+                        directory=location.directory,
+                        runtime_result=runtime_result,
+                    )
+            elif matches:
+                result = await self._replace(
                     skill=matches[0],
                     bot=bot,
                     owner_id=owner_id,
@@ -254,18 +292,133 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                     files=list(validated.files),
                     is_teclaw=is_teclaw,
                 )
-            return await self._create(
-                bot=bot,
-                owner_id=owner_id,
-                bot_id=bot_id,
-                actor_id=actor_id,
-                name=validated.name,
-                description=validated.description,
-                files=list(validated.files),
-                is_teclaw=is_teclaw,
-            )
+            else:
+                result = await self._create(
+                    bot=bot,
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    actor_id=actor_id,
+                    name=validated.name,
+                    description=validated.description,
+                    files=list(validated.files),
+                    is_teclaw=is_teclaw,
+                )
+            request_cancelled = False
+            handoff_cancelled = Event()
+            if not observe:
+                if identity_unresolved:
+                    logger.error(
+                        "Local Skill security observation skipped after identity lookup failure "
+                        "bot_id=%s skill_id=%s observation_id=%s",
+                        bot_id, result["skill"]["id"], observation_id,
+                    )
+                return result
+            try:
+                observer = security_observer or self._security_observer_provider()
+                handoff = asyncio.create_task(
+                    asyncio.to_thread(
+                        observer.observe,
+                        bot_id=bot_id,
+                        owner_id=owner_id,
+                        actor_id=actor_id,
+                        skill_id=int(result["skill"]["id"]),
+                        operation=result["operation"],
+                        name=validated.name,
+                        description=validated.description,
+                        canonical_zip=validated.canonical_zip,
+                        observation_id=observation_id,
+                        incarnation_id=incarnation_id,
+                        cancelled=handoff_cancelled,
+                    )
+                )
+                deadline = (
+                    asyncio.get_running_loop().time() + SECURITY_HANDOFF_TIMEOUT_SECONDS
+                )
+                while (
+                    not handoff.done() and asyncio.get_running_loop().time() < deadline
+                ):
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.shield(handoff),
+                            timeout=max(
+                                0.0, deadline - asyncio.get_running_loop().time()
+                            ),
+                        )
+                    except asyncio.TimeoutError:
+                        break
+                    except asyncio.CancelledError:
+                        request_cancelled = True
+                if handoff.done():
+                    handoff.result()
+                else:
+                    handoff_cancelled.set()
+                    logger.error(
+                        "Local Skill security handoff failed stage=TIMEOUT "
+                        "bot_id=%s owner_id=%s actor_id=%s skill_id=%s "
+                        "observation_id=%s operation=%s digest=%s",
+                        bot_id,
+                        owner_id,
+                        actor_id,
+                        result["skill"]["id"],
+                        observation_id,
+                        result["operation"],
+                        digest,
+                    )
+                    failure_record = asyncio.create_task(
+                        asyncio.to_thread(
+                            observer.record_handoff_timeout,
+                            bot_id=bot_id,
+                            owner_id=owner_id,
+                            actor_id=actor_id,
+                            skill_id=int(result["skill"]["id"]),
+                            observation_id=observation_id,
+                            digest=digest,
+                            incarnation_id=incarnation_id,
+                            name=validated.name,
+                            description=validated.description,
+                            creator_id=actor_id if result["operation"] == "created" else None,
+                        )
+                    )
+                    failure_record.add_done_callback(self._log_late_security_handoff)
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.shield(failure_record),
+                            timeout=SECURITY_FAILURE_RECORD_TIMEOUT_SECONDS,
+                        )
+                    except asyncio.TimeoutError:
+                        pass
+                    except asyncio.CancelledError:
+                        request_cancelled = True
+                    # Completion is deliberately detached. A late OSS result
+                    # cannot publish a current observation once cancelled.
+                    handoff.add_done_callback(self._log_late_security_handoff)
+            except Exception:
+                logger.exception(
+                    "[LocalSkillUploadService] security observation handoff failed "
+                    "bot_id=%s owner_id=%s actor_id=%s skill_id=%s "
+                    "observation_id=%s operation=%s digest=%s",
+                    bot_id,
+                    owner_id,
+                    actor_id,
+                    result["skill"]["id"],
+                    observation_id,
+                    result["operation"],
+                    digest,
+                )
+            if request_cancelled:
+                raise asyncio.CancelledError
+            return result
         finally:
             self._edit_guard.release(lease)
+
+    @staticmethod
+    def _log_late_security_handoff(task: asyncio.Task[None]) -> None:
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.exception("Local Skill late security handoff failed")
 
     def _commit_runtime_create(
         self,
@@ -292,16 +445,6 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                     "user_id": owner_id,
                     "bolt_id": bot_id,
                     "source_type": "upload",
-                }
-            )
-            self._audit_log_repo.insert(
-                {
-                    "bot_id": bot_id,
-                    "owner_id": owner_id,
-                    "operator_id": actor_id,
-                    "detail": json.dumps(
-                        {"action": "local_skill_upload", "skill_id": skill["id"]}
-                    ),
                 }
             )
         except Exception as exc:
@@ -345,16 +488,6 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             )
             if replaced is None:
                 raise RuntimeError("Local Skill metadata switch failed")
-            self._audit_log_repo.insert(
-                {
-                    "bot_id": bot_id,
-                    "owner_id": owner_id,
-                    "operator_id": actor_id,
-                    "detail": json.dumps(
-                        {"action": "local_skill_replace", "skill_id": skill["id"]}
-                    ),
-                }
-            )
             runtime_projection = await self._sync_runtime(owner_id, bot_id)
         except Exception as exc:
             logger.error(
@@ -445,16 +578,6 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                     "source_type": "upload",
                 }
             )
-            self._audit_log_repo.insert(
-                {
-                    "bot_id": bot_id,
-                    "owner_id": owner_id,
-                    "operator_id": actor_id,
-                    "detail": json.dumps(
-                        {"action": "local_skill_upload", "skill_id": skill["id"]}
-                    ),
-                }
-            )
             return {
                 "operation": "created",
                 "skill": {**skill, "active": False},
@@ -477,14 +600,6 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             except Exception:
                 pass
             raise LocalSkillStorageError() from exc
-
-    @staticmethod
-    def _scope_for(bot: dict[str, Any], bot_id: str) -> BotSkillLayoutScope:
-        return BotSkillLayoutScope(
-            env=str(bot["env"]),
-            entity_id=str(bot["entity_id"]),
-            bot_id=bot_id,
-        )
 
     async def _replace(
         self,
@@ -594,16 +709,6 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             switched = True
             runtime_sync_attempted = True
             runtime_projection = await self._sync_runtime(owner_id, bot_id)
-            self._audit_log_repo.insert(
-                {
-                    "bot_id": bot_id,
-                    "owner_id": owner_id,
-                    "operator_id": actor_id,
-                    "detail": json.dumps(
-                        {"action": "local_skill_replace", "skill_id": skill["id"]}
-                    ),
-                }
-            )
         except Exception as exc:
             if switched or canonical_published:
                 await self._restore_replacement(
@@ -780,8 +885,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             # space member could upload but not delete — the split-between
             # -writes wart the review caught).
             permission = self._collaborators.check_collaborator_permission(
-                bot_id, owner_id, actor_id, PermissionLevel.MEMBER,
-                explicit=True
+                bot_id, owner_id, actor_id, PermissionLevel.MEMBER, explicit=True
             )
             if not permission.get("has_permission"):
                 from agentclaw.community.core.skill_center.errors import (

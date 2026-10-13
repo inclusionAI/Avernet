@@ -10,18 +10,22 @@ Lifecycle participant that runs ``core/schema.py``'s ``create_all`` at boot, the
 same bootstrap the local SQLite plugin runs, because a container deployment has
 nobody to apply DDL by hand before the pods start. An operator who provisions the
 schema out of band (or runs migrations) sets ``create_schema: false`` and the
-plugin becomes a pure connection provider again.
+plugin validates the required SQLite/PostgreSQL Skill and security-observation
+schema before serving requests. Managed MySQL/OceanBase schemas remain
+operator-migrated.
 
 ``session()`` does not auto-commit; ``orm_session()`` commits on clean exit
 (write-persistence parity with corp's ``AUTOCOMMIT`` and the local impl).
 
 A real, deployable implementation (not a ``MockSeam`` test double).
 """
+
 from __future__ import annotations
 
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.kernel.lifecycle import LifecycleBase
@@ -29,6 +33,32 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
 logger = get_logger()
+
+_SECURITY_TABLE = "ac_local_skill_security_observation"
+_SECURITY_COLUMNS = {
+    "observation_id", "upload_order", "provider_skill_id", "skill_id",
+    "incarnation_id", "snapshot_ref", "handoff_stage", "observation_committed", "snapshot_verified",
+    "processing_status", "sync_status", "report_json",
+}
+
+
+def _check_security_schema(engine: Engine, *, dialect: str) -> None:
+    """Fail at bootstrap when an operator-managed schema is still the old draft."""
+    schema = inspect(engine)
+    if not schema.has_table("ac_skill"):
+        raise RuntimeError(f"{dialect} ac_skill table is missing")
+    if not schema.has_table(_SECURITY_TABLE):
+        raise RuntimeError(
+            f"{dialect} Local Skill security table {_SECURITY_TABLE} is missing; "
+            "apply the one-table observation migration before startup"
+        )
+    columns = {column["name"] for column in schema.get_columns(_SECURITY_TABLE)}
+    missing = sorted(_SECURITY_COLUMNS - columns)
+    if missing:
+        raise RuntimeError(
+            f"{dialect} Local Skill security table {_SECURITY_TABLE} lacks "
+            f"columns {', '.join(missing)}; migrate the older draft before startup"
+        )
 
 
 def _is_sqlite(url: str) -> bool:
@@ -39,12 +69,20 @@ def _is_mysql(url: str) -> bool:
     return url.startswith("mysql")
 
 
+def _is_postgres(url: str) -> bool:
+    return url.startswith("postgresql")
+
+
 class CommunityDatabase(DatabasePlugin, LifecycleBase):
     """DatabasePlugin backed by a configured SQLAlchemy engine."""
 
-    def __init__(self, url: str, *, create_schema: bool = True) -> None:
+    def __init__(
+        self, url: str, *, create_schema: bool = True,
+        security_schema_required: bool = False,
+    ) -> None:
         self._url = url
         self._create_schema = create_schema
+        self._security_schema_required = security_schema_required
         self._engine = self._make_engine(url)
         self._session_factory = sessionmaker(
             autocommit=False, autoflush=False, bind=self._engine
@@ -57,9 +95,7 @@ class CommunityDatabase(DatabasePlugin, LifecycleBase):
             # request handling, and a per-connection ``PRAGMA foreign_keys=ON``
             # so ``ON DELETE CASCADE`` fires (parity with prod and the local
             # impl — SQLite does not enforce FKs otherwise).
-            engine = create_engine(
-                url, connect_args={"check_same_thread": False}
-            )
+            engine = create_engine(url, connect_args={"check_same_thread": False})
 
             @event.listens_for(engine, "connect")
             def _set_sqlite_pragma(dbapi_conn, _conn_record):
@@ -88,6 +124,10 @@ class CommunityDatabase(DatabasePlugin, LifecycleBase):
     async def bootstrap(self) -> None:
         """Lifecycle hook — create the schema unless the operator owns it."""
         if not self._create_schema:
+            if self._security_schema_required and _is_sqlite(self._url):
+                _check_security_schema(self._engine, dialect="SQLite")
+            elif self._security_schema_required and _is_postgres(self._url):
+                _check_security_schema(self._engine, dialect="PostgreSQL")
             logger.info(
                 "CommunityDatabase: create_schema=false — schema is operator-provisioned"
             )
@@ -96,6 +136,10 @@ class CommunityDatabase(DatabasePlugin, LifecycleBase):
         from agentclaw.community.core.schema import create_all
 
         create_all(self._engine, mysql=_is_mysql(self._url))
+        if self._security_schema_required and _is_sqlite(self._url):
+            _check_security_schema(self._engine, dialect="SQLite")
+        elif self._security_schema_required and _is_postgres(self._url):
+            _check_security_schema(self._engine, dialect="PostgreSQL")
         logger.info("CommunityDatabase: schema bootstrap complete")
 
     @contextmanager

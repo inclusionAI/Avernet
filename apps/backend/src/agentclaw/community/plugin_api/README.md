@@ -8,6 +8,7 @@ Plugin Protocol declarations (the kernel's outbound interface to swappable capab
 purpose: "Plugin Protocol declarations (the kernel's outbound interface to swappable capabilities)."
 provides:
   - "Plugin Protocol classes, including the independent SkillCenterGateway and TcResourceReadyPublisherPlugin"
+  - "LocalSkillSecurityProviderProtocol V1"
   - "Plugin marker"
   - "@plugin_impl decorator + Mode/Flavor enums"
   - "IMPL_REGISTRY"
@@ -55,6 +56,20 @@ their compatibility behavior for mutable and legacy consumers. The Community
 filesystem implementation stages conditional creates under a reserved internal
 root on the same filesystem, outside every logical object-key tree; staging
 residue is neither addressable nor returned by `list_objects`.
+
+`LocalSkillSecurityProviderProtocol` V1 is the outbound Plugin API called by
+Local Skill security workers. It accepts a verified immutable snapshot ref,
+owns transport and credentials, and separates temporary artifact exposure from
+scan submission, report polling, and formal asset metadata sync. An enabled
+enterprise adapter must confirm that metadata sync accepts DETECTING/REJECT
+assets and prevents an older revision from overwriting a newer one. The public
+unavailable adapter declares both capabilities false and fails closed. This
+interface does not infer a vendor wire contract.
+The single scan ZIP is written by the upload observer. The worker verifies its
+digest before asking the provider to expose that same object; the Plugin API
+passes no ZIP bytes. The provider must not copy the object to another store.
+``SecuritySkillInfo.snapshot_ref`` lets it refresh a short-lived access URL
+when submitting a scan or synchronizing metadata later.
 
 `ObjectCopyCapability` is the second optional capability beside
 `ObjectStoragePlugin`, for consumers that duplicate an object within the store

@@ -944,7 +944,8 @@ class SkillRepository(
             skill.user_id = _normalize_user_id(owner_id)
             skill.gmt_modified = func.now()
             db.flush()
-            return _skill_to_dict(skill)
+            result = _skill_to_dict(skill)
+            return result
 
     def delete_bot_local_skill(
         self,

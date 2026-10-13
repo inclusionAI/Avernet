@@ -181,6 +181,8 @@ def _service(
     provider="local",
     guard_error=None,
     delete_error=None,
+    security_hook=None,
+    security_enabled=False,
 ):
     files = _Files()
     skills = _Skills(
@@ -206,8 +208,41 @@ def _service(
         lambda: SimpleNamespace(
             resolve_for_bot=lambda *_args: SimpleNamespace(provider=provider)
         ),
+        lambda: security_hook or SimpleNamespace(record_deletion=lambda **_kwargs: None),
+        security_enabled,
     )
     return service, files, skills, guard
+
+
+@pytest.mark.asyncio
+async def test_security_deletion_handoff_runs_only_after_formal_delete():
+    calls = []
+    class _Hook:
+        def record_deletion(self, **kwargs):
+            assert skills.deleted is True
+            calls.append(kwargs)
+
+    service, _, skills, _ = _service(
+        security_hook=_Hook(), security_enabled=True,
+    )
+    await service.delete_local_skill(skill_id="9", owner_id="owner", user_id="owner")
+    assert calls == [{
+        "bot_id": "bot", "owner_id": "owner", "actor_id": "owner", "skill_id": 9,
+    }]
+
+
+@pytest.mark.asyncio
+async def test_security_handoff_failure_does_not_undo_successful_delete(caplog):
+    class _Hook:
+        def record_deletion(self, **_kwargs):
+            raise RuntimeError("security persistence unavailable")
+
+    service, _, skills, _ = _service(
+        security_hook=_Hook(), security_enabled=True,
+    )
+    await service.delete_local_skill(skill_id="9", owner_id="owner", user_id="owner")
+    assert skills.deleted is True
+    assert "security sync could not be recorded" in caplog.text
 
 
 @pytest.mark.asyncio

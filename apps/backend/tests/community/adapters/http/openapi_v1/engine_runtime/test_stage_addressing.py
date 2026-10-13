@@ -110,6 +110,7 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("get", "/openapi/v1/bots/{bot_id}/skills"),
     ("post", "/openapi/v1/bots/{bot_id}/skills"),
     ("post", "/openapi/v1/bots/{bot_id}/skills/upload-folder"),
+    ("get", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/security-observations"),
     (
         "post",
         "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references",

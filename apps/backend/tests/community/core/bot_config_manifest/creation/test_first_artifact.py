@@ -204,7 +204,10 @@ def _build(db):
             mcp_auth_service=FakeMcpAuth(),
             mcp_config_service=object(),
             identity_service=PlatformIdentity(store),
-            upload_service=PlatformSkillPackageUpload(store, validator=validator, skill_repository=skills),
+            upload_service=PlatformSkillPackageUpload(
+                store, validator=validator, skill_repository=skills,
+                security_hook=MagicMock(),
+            ),
             capability_reader=reader_of_active,
             package_validator=validator,
             entry_fetcher=fetcher(),

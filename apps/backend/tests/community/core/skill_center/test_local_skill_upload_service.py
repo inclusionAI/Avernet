@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import io
 import shutil
+import threading
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,7 +20,6 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
-    SkillAssetInUseError,
 )
 from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
@@ -30,6 +30,9 @@ from agentclaw.community.core.skill_center.services import (
 )
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
+)
+from agentclaw.community.core.skill_center.services.local_skill_security_upload_observer import (
+    LocalSkillSecurityUploadObserver,
 )
 from agentclaw.community.core.skill_center.services.desktop_skill_recovery import (
     DesktopSkillRecoveryService,
@@ -51,6 +54,13 @@ from agentclaw.community.core.skills_pool.types import (
     SkillLayout,
     SkillLayoutPhase,
 )
+from agentclaw.community.plugin_api.object_storage import (
+    ObjectCreateResult,
+    ObjectReadResult,
+    ObjectReadStatus,
+)
+
+
 def _skill_md(name: str = "upload-skill", description: str = "useful") -> bytes:
     return f"---\nname: {name}\ndescription: {description}\n---\n".encode()
 
@@ -91,7 +101,7 @@ class _Repo:
             "gmt_modified": None,
         }
         self.created.append(row)
-        return row
+        return {key: value for key, value in row.items() if key != "local_security_incarnation_id"}
 
     def delete(self, skill_id):
         self.created.clear()
@@ -392,6 +402,7 @@ class _Audit:
 
     def insert(self, row):
         self.rows.append(row)
+        return SimpleNamespace(id=len(self.rows))
 
 
 class _Guard:
@@ -408,6 +419,23 @@ class _Guard:
     def release(self, _lease):
         self._lock.release()
         return True
+
+
+class _CapturedSecurityObserver:
+    def __init__(self, guard=None, error=None):
+        self.guard = guard
+        self.error = error
+        self.calls = []
+
+    def current_incarnation_id(self, **_kwargs):
+        return self.calls[-1]["incarnation_id"] if self.calls else None
+
+    def observe(self, **kwargs):
+        if self.guard is not None:
+            assert self.guard._lock.locked()
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
 
 
 class _Cleanup:
@@ -551,7 +579,7 @@ class _ReplacementRepo(_Repo):
                 "user_id": kwargs["owner_id"],
             }
         )
-        return row
+        return {**row, "_local_security_incarnation_id": "incarnation-test"}
 
 
 class _ConcurrentRepo(_ReplacementRepo):
@@ -659,18 +687,21 @@ def _replacement_service(
     *,
     provider="local",
     package_runtime=None,
+    security_observer=None,
+    security_observation_enabled=True,
 ):
     return LocalSkillUploadService(
         repo,
         _Bot(),
         _Collaborators(),
         factory or _ReplacementFactory(filesystem),
-        _Audit(),
         guard or _Guard(),
         lambda: _DeviceResolver(provider),
         runtime,
         SkillPackageValidator(SkillParser()),
         package_runtime or _LegacyPackageRuntime(),
+        lambda: security_observer or _CapturedSecurityObserver(),
+        security_observation_enabled,
     )
 
 
@@ -686,19 +717,653 @@ def _service(
     provider="local",
     guard=None,
     package_runtime=None,
+    security_observer=None,
+    security_observation_enabled=True,
 ):
     return LocalSkillUploadService(
         repo or _Repo(),
         bot or _Bot(status),
         collaborators or _Collaborators(),
         factory or _Factory(filesystem),
-        audit or _Audit(),
         guard or _Guard(),
         lambda: _DeviceResolver(provider),
         _RuntimeFactory(),
         SkillPackageValidator(SkillParser()),
         package_runtime or _LegacyPackageRuntime(),
+        lambda: security_observer or _CapturedSecurityObserver(),
+        security_observation_enabled,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("engine_package", [False, True])
+@pytest.mark.parametrize("replacing", [False, True])
+async def test_successful_upload_hands_exact_package_to_security_under_edit_guard(
+    engine_package, replacing
+):
+    guard = _Guard()
+    observer = _CapturedSecurityObserver(guard)
+    filesystem = _Filesystem()
+    if replacing:
+        filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
+        repo = _ReplacementRepo([_existing_skill(active=False)])
+        service = _replacement_service(
+            filesystem,
+            repo,
+            _ReplacementRuntime(
+                [RuntimeProjectionResult.converged()] if engine_package else [True]
+            ),
+            guard=guard,
+            package_runtime=_PackageRuntime() if engine_package else None,
+            security_observer=observer,
+        )
+    else:
+        service = _service(
+            filesystem,
+            guard=guard,
+            package_runtime=_PackageRuntime() if engine_package else None,
+            security_observer=observer,
+        )
+    result = await service.upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="collaborator",
+        package=_zip({"SKILL.md": _skill_md(description="frozen description")}),
+    )
+
+    assert result["operation"] == ("updated" if replacing else "created")
+    assert len(observer.calls) == 1
+    call = observer.calls[0]
+    assert call["skill_id"] == int(result["skill"]["id"])
+    assert call["operation"] == result["operation"]
+    assert call["actor_id"] == "collaborator"
+    assert call["owner_id"] == "owner"
+    assert call["name"] == "upload-skill"
+    assert call["description"] == "frozen description"
+    assert "_security_upload_order" not in result
+    assert "_local_security_incarnation_id" not in result
+    assert "local_security_incarnation_id" not in result["skill"]
+    with zipfile.ZipFile(io.BytesIO(call["canonical_zip"])) as archive:
+        assert archive.read("SKILL.md") == _skill_md(description="frozen description")
+    assert not guard._lock.locked()
+
+
+@pytest.mark.asyncio
+async def test_upload_saves_exact_snapshot_and_schedules_independent_security_work():
+    class _Objects:
+        def __init__(self):
+            self.values = {}
+
+        def create_object_if_absent(self, key, content):
+            assert key not in self.values
+            self.values[key] = content
+            return ObjectCreateResult.CREATED
+
+        def read_object(self, key):
+            return ObjectReadResult(ObjectReadStatus.FOUND, self.values[key])
+
+    class _SecurityRepository:
+        def __init__(self):
+            self.identity_calls = []
+            self.observations = []
+            self.reserved = None
+
+        def reserve_handoff(self, **kwargs):
+            self.reserved = kwargs
+            return 1
+
+        def ensure_for_asset(self, **kwargs):
+            self.identity_calls.append(kwargs)
+            return SimpleNamespace(provider_skill_id="tc:stable")
+
+        def record_observation(self, **kwargs):
+            self.observations.append(kwargs)
+            return SimpleNamespace(observation_id=kwargs["observation_id"])
+
+    class _Queue:
+        def __init__(self):
+            self.tasks = []
+
+        def enqueue(self, task_type, payload, deadline_seconds, **kwargs):
+            self.tasks.append((task_type, payload, kwargs["idempotency_key"]))
+
+    objects = _Objects()
+    repository = _SecurityRepository()
+    queue = _Queue()
+    observer = LocalSkillSecurityUploadObserver(
+        repository=repository,
+        objects=objects,
+        queue=queue,
+        env_provider=lambda: "pre",
+    )
+    result = await _service(
+        _Filesystem(), security_observer=observer
+    ).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="collaborator",
+        package=_zip({"SKILL.md": _skill_md(description="frozen")}),
+    )
+
+    assert result["operation"] == "created"
+    assert repository.reserved is not None
+    assert (
+        repository.reserved["name"],
+        repository.reserved["description"],
+        repository.reserved["creator_id"],
+    ) == ("upload-skill", "frozen", "collaborator")
+    assert repository.identity_calls == [
+        {
+            "env": "pre",
+            "bot_id": "bot",
+            "owner_id": "owner",
+            "skill_id": 9,
+            "creator_id": "collaborator",
+            "incarnation_id": repository.reserved["incarnation_id"],
+        }
+    ]
+    observation = repository.observations[0]
+    assert observation["name"] == "upload-skill"
+    assert observation["description"] == "frozen"
+    snapshot = objects.values[observation["snapshot_ref"]]
+    assert observation["sha256"] == "sha256:" + hashlib.sha256(snapshot).hexdigest()
+    with zipfile.ZipFile(io.BytesIO(snapshot)) as archive:
+        assert archive.read("SKILL.md") == _skill_md(description="frozen")
+    assert {task[0] for task in queue.tasks} == {
+        "local_skill_security_scan",
+        "local_skill_security_sync",
+    }
+    assert all(
+        task[1]["observation_id"] == observation["observation_id"]
+        for task in queue.tasks
+    )
+
+
+@pytest.mark.asyncio
+async def test_security_handoff_failure_keeps_successful_skill_and_releases_guard(
+    caplog,
+):
+    guard = _Guard()
+    observer = _CapturedSecurityObserver(guard, RuntimeError("security unavailable"))
+    result = await _service(
+        _Filesystem(), guard=guard, security_observer=observer
+    ).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip({"SKILL.md": _skill_md()}),
+    )
+
+    assert result["operation"] == "created"
+    assert result["skill"]["id"] == "9"
+    assert not guard._lock.locked()
+    assert "security observation handoff failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_scan_enqueue_failure_is_recorded_and_does_not_cancel_sync():
+    class _Objects:
+        def __init__(self):
+            self.saved = {}
+
+        def create_object_if_absent(self, key, content):
+            self.saved[key] = content
+            return ObjectCreateResult.CREATED
+
+        def read_object(self, key):
+            return ObjectReadResult(ObjectReadStatus.FOUND, self.saved[key])
+
+    class _Repository:
+        def __init__(self):
+            self.errors = []
+
+        def reserve_handoff(self, **_kwargs):
+            return 1
+
+        def ensure_for_asset(self, **_kwargs):
+            return SimpleNamespace(provider_skill_id="tc:stable")
+
+        def record_observation(self, **kwargs):
+            return SimpleNamespace(observation_id=kwargs["observation_id"])
+
+        def mark_scan_error(self, **kwargs):
+            self.errors.append(kwargs)
+
+    class _Queue:
+        def __init__(self):
+            self.tasks = []
+
+        def enqueue(self, task_type, payload, deadline_seconds, **kwargs):
+            if task_type == "local_skill_security_scan":
+                raise RuntimeError("queue unavailable")
+            self.tasks.append(task_type)
+
+    repository = _Repository()
+    queue = _Queue()
+    observer = LocalSkillSecurityUploadObserver(
+        repository=repository,
+        objects=_Objects(),
+        queue=queue,
+        env_provider=lambda: "pre",
+    )
+    result = await _service(
+        _Filesystem(), security_observer=observer
+    ).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip({"SKILL.md": _skill_md()}),
+    )
+
+    assert result["operation"] == "created"
+    assert repository.errors[0]["error_code"] == "TASK_ENQUEUE_FAILED"
+    assert queue.tasks == ["local_skill_security_sync"]
+
+
+@pytest.mark.parametrize("known_creator", ["first-uploader", None])
+def test_first_observed_replacement_uses_only_recorded_security_identity(
+    known_creator
+):
+    class _Objects:
+        def __init__(self):
+            self.values = {}
+
+        def create_object_if_absent(self, key, content):
+            self.values[key] = content
+            return ObjectCreateResult.CREATED
+
+        def read_object(self, key):
+            return ObjectReadResult(ObjectReadStatus.FOUND, self.values[key])
+
+    class _Repository:
+        def __init__(self):
+            self.creator_id = None
+
+        def reserve_handoff(self, **_kwargs):
+            return 1
+
+        def get_identity_for_asset(self, **_kwargs):
+            return SimpleNamespace(creator_id=known_creator) if known_creator else None
+
+        def ensure_for_asset(self, **kwargs):
+            self.creator_id = kwargs["creator_id"]
+            return SimpleNamespace(provider_skill_id="tc:stable")
+
+        def record_observation(self, **kwargs):
+            return SimpleNamespace(observation_id=kwargs["observation_id"])
+
+    class _Queue:
+        def enqueue(self, task_type, payload, deadline_seconds, **kwargs):
+            return None
+
+    repository = _Repository()
+    observer = LocalSkillSecurityUploadObserver(
+        repository=repository,
+        objects=_Objects(),
+        queue=_Queue(),
+        env_provider=lambda: "pre",
+    )
+    observer.observe(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="replacer",
+        skill_id=9,
+        operation="updated",
+        name="upload-skill",
+        description="new",
+        canonical_zip=_zip({"SKILL.md": _skill_md(description="new")}),
+        observation_id="replacement-observation",
+        cancelled=threading.Event(),
+        incarnation_id="incarnation-test",
+    )
+
+    assert repository.creator_id == known_creator
+
+
+@pytest.mark.asyncio
+async def test_cancelled_upload_waits_for_observation_before_replacement():
+    class _BlockingObserver:
+        def __init__(self):
+            self.entered = threading.Event()
+            self.release = threading.Event()
+            self.calls = []
+
+        def current_incarnation_id(self, **_kwargs):
+            return "existing-incarnation"
+
+        def observe(self, **kwargs):
+            self.calls.append(kwargs["description"])
+            if len(self.calls) == 1:
+                self.entered.set()
+                assert self.release.wait(timeout=3)
+
+    observer = _BlockingObserver()
+    guard = _Guard()
+    repo = _ConcurrentRepo()
+    service = _replacement_service(
+        _Filesystem(),
+        repo,
+        _ReplacementRuntime([True]),
+        guard=guard,
+        security_observer=observer,
+    )
+    first = asyncio.create_task(
+        service.upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip({"SKILL.md": _skill_md(description="A")}),
+        )
+    )
+    assert await asyncio.to_thread(observer.entered.wait, 3)
+    first.cancel()
+    second = asyncio.create_task(
+        service.upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip({"SKILL.md": _skill_md(description="B")}),
+        )
+    )
+    await asyncio.sleep(0.02)
+    assert observer.calls == ["A"]
+    observer.release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    result = await second
+
+    assert result["operation"] == "updated"
+    assert observer.calls == ["A", "B"]
+    assert not guard._lock.locked()
+
+
+@pytest.mark.asyncio
+async def test_timed_out_snapshot_cannot_make_older_replacement_current(
+    monkeypatch, caplog
+):
+    monkeypatch.setattr(upload_module, "SECURITY_HANDOFF_TIMEOUT_SECONDS", 0.05)
+
+    class _SlowObjects:
+        def __init__(self):
+            self.entered = threading.Event()
+            self.release = threading.Event()
+            self.values = {}
+
+        def create_object_if_absent(self, key, content):
+            with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                is_a = b"description: A" in archive.read("SKILL.md")
+            if is_a:
+                self.entered.set()
+                assert self.release.wait(timeout=3)
+            self.values[key] = content
+            return ObjectCreateResult.CREATED
+
+        def read_object(self, key):
+            return ObjectReadResult(ObjectReadStatus.FOUND, self.values[key])
+
+    class _SecurityRepository:
+        def __init__(self):
+            self.current = None
+            self.failures = []
+
+        def reserve_handoff(self, **_kwargs):
+            return 1
+
+        def get_identity_for_asset(self, **_kwargs):
+            return None
+
+        def ensure_for_asset(self, **_kwargs):
+            return SimpleNamespace(provider_skill_id="tc:stable")
+
+        def record_observation(self, **kwargs):
+            self.current = kwargs["observation_id"]
+
+        def record_handoff_failure(self, **kwargs):
+            self.failures.append(kwargs)
+
+    class _Queue:
+        def enqueue(self, *_args, **_kwargs):
+            return None
+
+    objects = _SlowObjects()
+    repository = _SecurityRepository()
+    observer = LocalSkillSecurityUploadObserver(
+        repository=repository,
+        objects=objects,
+        queue=_Queue(),
+        env_provider=lambda: "pre",
+    )
+    guard = _Guard()
+    service = _replacement_service(
+        _Filesystem(),
+        _ConcurrentRepo(),
+        _ReplacementRuntime([True, True]),
+        guard=guard,
+        security_observer=observer,
+    )
+    first = asyncio.create_task(
+        service.upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip({"SKILL.md": _skill_md(description="A")}),
+        )
+    )
+    assert await asyncio.to_thread(objects.entered.wait, 3)
+    assert (await asyncio.wait_for(first, 1))["operation"] == "created"
+    second = await asyncio.wait_for(
+        service.upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip({"SKILL.md": _skill_md(description="B")}),
+        ),
+        1,
+    )
+    assert second["operation"] == "updated"
+    current_after_b = repository.current
+    objects.release.set()
+    await asyncio.sleep(0.05)
+
+    assert repository.current == current_after_b
+    assert len(repository.failures) == 1
+    assert repository.failures[0]["stage"] == "HANDOFF_TIMEOUT"
+    assert repository.failures[0]["sha256"].startswith("sha256:")
+    assert repository.failures[0]["snapshot_verified"] is False
+    assert "observation_id=" in caplog.text
+    assert not guard._lock.locked()
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_snapshot_write_retains_reconcilable_failure_fact():
+    class _BrokenObjects:
+        def create_object_if_absent(self, *_args):
+            raise RuntimeError("store unavailable")
+
+        def read_object(self, *_args):
+            raise AssertionError("must not read")
+
+    class _FailureRepository:
+        def __init__(self):
+            self.failures = []
+
+        def reserve_handoff(self, **_kwargs):
+            return 1
+
+        def record_handoff_failure(self, **kwargs):
+            self.failures.append(kwargs)
+
+    repository = _FailureRepository()
+    observer = LocalSkillSecurityUploadObserver(
+        repository=repository,
+        objects=_BrokenObjects(),
+        queue=None,
+        env_provider=lambda: "pre",
+    )
+    result = await _service(
+        _Filesystem(), security_observer=observer
+    ).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip({"SKILL.md": _skill_md()}),
+    )
+    assert result["operation"] == "created"
+    assert repository.failures[0]["stage"] == "SNAPSHOT_UNCERTAIN"
+    assert repository.failures[0]["skill_id"] == 9
+    assert repository.failures[0]["snapshot_ref"].endswith(
+        repository.failures[0]["observation_id"] + ".zip"
+    )
+
+
+@pytest.mark.asyncio
+async def test_identity_failure_keeps_verified_exact_snapshot_for_repair():
+    class _Objects:
+        def __init__(self):
+            self.values = {}
+
+        def create_object_if_absent(self, key, content):
+            self.values[key] = content
+            return ObjectCreateResult.CREATED
+
+        def read_object(self, key):
+            return ObjectReadResult(ObjectReadStatus.FOUND, self.values[key])
+
+    class _Repository:
+        def __init__(self):
+            self.failures = []
+
+        def reserve_handoff(self, **_kwargs):
+            return 1
+
+        def ensure_for_asset(self, **_kwargs):
+            raise RuntimeError("identity store unavailable")
+
+        def record_handoff_failure(self, **kwargs):
+            self.failures.append(kwargs)
+
+    objects = _Objects()
+    repository = _Repository()
+    observer = LocalSkillSecurityUploadObserver(
+        repository=repository,
+        objects=objects,
+        queue=None,
+        env_provider=lambda: "pre",
+    )
+    result = await _service(
+        _Filesystem(), security_observer=observer
+    ).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip({"SKILL.md": _skill_md()}),
+    )
+    assert result["operation"] == "created"
+    failure = repository.failures[0]
+    assert failure["stage"] == "IDENTITY_FAILED"
+    assert failure["snapshot_verified"] is True
+    assert (
+        "sha256:" + hashlib.sha256(objects.values[failure["snapshot_ref"]]).hexdigest()
+        == failure["sha256"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_reservation_finishing_after_timeout_cannot_observe_older_upload(
+    monkeypatch,
+):
+    monkeypatch.setattr(upload_module, "SECURITY_HANDOFF_TIMEOUT_SECONDS", 0.05)
+
+    class _OrderingRepository:
+        def __init__(self):
+            self.entered = threading.Event()
+            self.release = threading.Event()
+            self.order = 0
+            self.current = None
+            self.failures = []
+
+        def reserve_handoff(self, **kwargs):
+            if kwargs["observation_id"] == self.first_id:
+                self.entered.set()
+                assert self.release.wait(timeout=3)
+            self.order += 1
+            return self.order
+
+        def get_identity_for_asset(self, **_kwargs):
+            return None
+
+        def ensure_for_asset(self, **_kwargs):
+            return SimpleNamespace(provider_skill_id="tc:stable")
+
+        def record_observation(self, **kwargs):
+            self.current = kwargs["observation_id"]
+
+        def record_handoff_failure(self, **kwargs):
+            self.failures.append(kwargs)
+
+    class _Objects:
+        def __init__(self):
+            self.values = {}
+
+        def create_object_if_absent(self, key, content):
+            self.values[key] = content
+            return ObjectCreateResult.CREATED
+
+        def read_object(self, key):
+            return ObjectReadResult(ObjectReadStatus.FOUND, self.values[key])
+
+    class _Queue:
+        def enqueue(self, *_args, **_kwargs):
+            return None
+
+    repository = _OrderingRepository()
+    observer = LocalSkillSecurityUploadObserver(
+        repository=repository,
+        objects=_Objects(),
+        queue=_Queue(),
+        env_provider=lambda: "pre",
+    )
+    original_reserve = repository.reserve_handoff
+
+    def _reserve_first(**kwargs):
+        if not hasattr(repository, "first_id"):
+            repository.first_id = kwargs["observation_id"]
+        return original_reserve(**kwargs)
+
+    repository.reserve_handoff = _reserve_first
+    service = _replacement_service(
+        _Filesystem(),
+        _ConcurrentRepo(),
+        _ReplacementRuntime([True, True]),
+        security_observer=observer,
+    )
+    first = asyncio.create_task(
+        service.upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip({"SKILL.md": _skill_md(description="A")}),
+        )
+    )
+    assert await asyncio.to_thread(repository.entered.wait, 3)
+    assert (await asyncio.wait_for(first, 1))["operation"] == "created"
+    assert (
+        await asyncio.wait_for(
+            service.upload_local_skill(
+                bot_id="bot",
+                owner_id="owner",
+                actor_id="owner",
+                package=_zip({"SKILL.md": _skill_md(description="B")}),
+            ),
+            1,
+        )
+    )["operation"] == "updated"
+    current_after_b = repository.current
+    repository.release.set()
+    await asyncio.sleep(0.05)
+    assert repository.current == current_after_b
+    assert len(repository.failures) == 1
+    assert repository.failures[0]["stage"] == "HANDOFF_TIMEOUT"
 
 
 @pytest.mark.asyncio
@@ -774,8 +1439,12 @@ async def test_new_package_api_db_failure_does_not_issue_reverse_file_operation(
             raise RuntimeError("db unavailable")
 
     package_runtime = _PackageRuntime()
+    observer = _CapturedSecurityObserver()
     service = _service(
-        _Filesystem(), repo=_FailingRepo(), package_runtime=package_runtime
+        _Filesystem(),
+        repo=_FailingRepo(),
+        package_runtime=package_runtime,
+        security_observer=observer,
     )
 
     with pytest.raises(LocalSkillStorageError):
@@ -787,6 +1456,7 @@ async def test_new_package_api_db_failure_does_not_issue_reverse_file_operation(
         )
 
     assert len(package_runtime.calls) == 1
+    assert observer.calls == []
 
 
 @pytest.mark.asyncio
@@ -846,14 +1516,46 @@ async def test_upload_keeps_bot_owner_when_collaborator_is_actor():
     assert result["skill"]["user_id"] == "owner"
     assert result["actor_id"] == "collaborator"
     assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"]
-    assert audit.rows == [
-        {
-            "bot_id": "bot",
-            "owner_id": "owner",
-            "operator_id": "collaborator",
-            "detail": '{"action": "local_skill_upload", "skill_id": "9"}',
-        }
-    ]
+
+
+@pytest.mark.asyncio
+async def test_disabled_observation_creates_no_scan_handoff():
+    filesystem = _Filesystem()
+    audit = _Audit()
+    observer = _CapturedSecurityObserver()
+    service = _service(
+        filesystem, audit=audit, security_observer=observer,
+        security_observation_enabled=False,
+    )
+    result = await service.upload_local_skill(
+        bot_id="bot", owner_id="owner", actor_id="owner",
+        package=_zip({"SKILL.md": _skill_md()}),
+    )
+    assert result["operation"] == "created"
+    assert observer.calls == []
+
+
+@pytest.mark.asyncio
+async def test_disabled_replacement_never_reads_security_table():
+    class _ForbiddenObserver:
+        def current_incarnation_id(self, **_kwargs):
+            raise AssertionError("disabled observation queried security identity")
+
+        def observe(self, **_kwargs):
+            raise AssertionError("disabled observation started a scan")
+
+    filesystem = _Filesystem()
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
+    service = _replacement_service(
+        filesystem, _ReplacementRepo([_existing_skill(active=False)]),
+        _ReplacementRuntime([True]), security_observer=_ForbiddenObserver(),
+        security_observation_enabled=False,
+    )
+    result = await service.upload_local_skill(
+        bot_id="bot", owner_id="owner", actor_id="owner",
+        package=_zip({"SKILL.md": _skill_md(description="new")}),
+    )
+    assert result["operation"] == "updated"
 
 
 @pytest.mark.asyncio
@@ -1120,73 +1822,17 @@ class _FailRepo(_Repo):
         raise RuntimeError("db failure")
 
 
-class _FailAudit(_Audit):
-    def insert(self, row):
-        raise RuntimeError("audit failure")
-
-
 @pytest.mark.asyncio
-@pytest.mark.parametrize("stage", ["write", "create", "audit"])
+@pytest.mark.parametrize("stage", ["write", "create"])
 async def test_each_creation_failure_compensates_and_never_returns_success(stage):
     package = _zip({"SKILL.md": _skill_md()})
     filesystem = _Filesystem(fail=stage == "write")
     repo = _FailRepo() if stage == "create" else _Repo()
-    audit = _FailAudit() if stage == "audit" else _Audit()
-    service = _service(filesystem, repo=repo, audit=audit)
+    service = _service(filesystem, repo=repo)
     with pytest.raises(LocalSkillStorageError):
         await service.upload_local_skill(
             bot_id="bot", owner_id="owner", actor_id="owner", package=package
         )
-    assert filesystem.deleted == ["/private/skills-local/upload-skill"]
-
-
-@pytest.mark.asyncio
-async def test_failed_rollback_step_does_not_stop_package_cleanup():
-    package = _zip({"SKILL.md": _skill_md()})
-    repo = _Repo()
-    repo.delete = lambda *args: (_ for _ in ()).throw(RuntimeError())
-    service = _service(_Filesystem(), repo=repo, audit=_FailAudit())
-    with pytest.raises(LocalSkillStorageError):
-        await service.upload_local_skill(
-            bot_id="bot", owner_id="owner", actor_id="owner", package=package
-        )
-    assert service._skill_service_factory._filesystem.deleted == [
-        "/private/skills-local/upload-skill"
-    ]
-
-
-@pytest.mark.asyncio
-async def test_compensation_preserves_package_when_asset_gained_a_reference():
-    package = _zip({"SKILL.md": _skill_md()})
-    repo = _Repo()
-    repo.delete = lambda *_args: (_ for _ in ()).throw(
-        SkillAssetInUseError({"membership": 1})
-    )
-    service = _service(_Filesystem(), repo=repo, audit=_FailAudit())
-
-    with pytest.raises(SkillAssetInUseError):
-        await service.upload_local_skill(
-            bot_id="bot", owner_id="owner", actor_id="owner", package=package
-        )
-
-    assert repo.created
-    assert service._skill_service_factory._filesystem.deleted == []
-
-
-@pytest.mark.asyncio
-async def test_failed_final_cleanup_leaves_no_database_authority_or_success():
-    """A residual orphan is not retried into or exposed as a Local Skill."""
-    package = _zip({"SKILL.md": _skill_md()})
-    filesystem = _Filesystem(cleanup_results=[False, False])
-    repo = _Repo()
-    service = _service(filesystem, repo=repo, audit=_FailAudit())
-
-    with pytest.raises(LocalSkillStorageError):
-        await service.upload_local_skill(
-            bot_id="bot", owner_id="owner", actor_id="owner", package=package
-        )
-
-    assert repo.created == []
     assert filesystem.deleted == ["/private/skills-local/upload-skill"]
 
 
@@ -1336,10 +1982,14 @@ async def test_post_commit_temp_cleanup_failure_restores_old_package_and_metadat
     filesystem.files[f"{canonical}/SKILL.md"] = b"old"
     old = _existing_skill(active=False)
     repo = _ReplacementRepo([old])
+    observer = _CapturedSecurityObserver()
 
     with pytest.raises(LocalSkillStorageError):
         await _replacement_service(
-            filesystem, repo, _ReplacementRuntime([True, True])
+            filesystem,
+            repo,
+            _ReplacementRuntime([True, True]),
+            security_observer=observer,
         ).upload_local_skill(
             bot_id="bot",
             owner_id="owner",
@@ -1348,6 +1998,7 @@ async def test_post_commit_temp_cleanup_failure_restores_old_package_and_metadat
         )
 
     assert old["git_path"] == f"local://{canonical}"
+    assert observer.calls == []
     assert old["description"] == "old description"
     assert filesystem.files[f"{canonical}/SKILL.md"] == b"old"
     assert not any(

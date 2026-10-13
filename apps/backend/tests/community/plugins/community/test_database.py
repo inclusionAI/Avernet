@@ -17,6 +17,10 @@ import pytest
 from sqlalchemy import Column, ForeignKey, Integer, String
 from sqlalchemy.orm import declarative_base
 
+from agentclaw.community.core.models.local_skill_security_observation import (
+    LocalSkillSecurityObservationModel,
+)
+from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.plugins.community.database import CommunityDatabase
 
 Base = declarative_base()
@@ -34,6 +38,45 @@ class _Child(Base):
     parent_id = Column(
         Integer, ForeignKey("b3_parent.id", ondelete="CASCADE"), nullable=False
     )
+
+
+@pytest.mark.asyncio
+async def test_operator_owned_database_starts_with_security_disabled(tmp_path):
+    database = CommunityDatabase(
+        f"sqlite:///{tmp_path}/disabled.db", create_schema=False,
+        security_schema_required=False,
+    )
+    Skill.__table__.create(database._engine)
+    await database.bootstrap()
+
+
+@pytest.mark.asyncio
+async def test_operator_owned_sqlite_requires_the_one_observation_table(tmp_path):
+    database = CommunityDatabase(
+        f"sqlite:///{tmp_path}/operator.db", create_schema=False,
+        security_schema_required=True,
+    )
+    Skill.__table__.create(database._engine)
+    with pytest.raises(RuntimeError, match="ac_local_skill_security_observation"):
+        await database.bootstrap()
+    LocalSkillSecurityObservationModel.__table__.create(database._engine)
+    await database.bootstrap()
+
+
+@pytest.mark.asyncio
+async def test_old_observation_draft_requires_migration(tmp_path):
+    database = CommunityDatabase(
+        f"sqlite:///{tmp_path}/draft.db", create_schema=False,
+        security_schema_required=True,
+    )
+    Skill.__table__.create(database._engine)
+    with database._engine.begin() as connection:
+        connection.exec_driver_sql(
+            "CREATE TABLE ac_local_skill_security_observation "
+            "(id INTEGER PRIMARY KEY, observation_id VARCHAR(128))"
+        )
+    with pytest.raises(RuntimeError, match="lacks columns"):
+        await database.bootstrap()
 
 
 @pytest.fixture
@@ -140,6 +183,9 @@ class TestBootstrapSchemaOwnership:
 
         def _fake_create_all(engine, *, mysql: bool = False) -> None:
             calls.append({"engine": engine, "mysql": mysql})
+            if engine.dialect.name == "sqlite":
+                Skill.__table__.create(engine)
+                LocalSkillSecurityObservationModel.__table__.create(engine)
 
         monkeypatch.setattr(
             "agentclaw.community.core.schema.create_all", _fake_create_all
@@ -164,6 +210,8 @@ class TestBootstrapSchemaOwnership:
         database = CommunityDatabase(
             f"sqlite:///{tmp_path}/boot.db", create_schema=False
         )
+        Skill.__table__.create(database._engine)
+        LocalSkillSecurityObservationModel.__table__.create(database._engine)
 
         await database.bootstrap()
 

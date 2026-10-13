@@ -531,8 +531,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # Desktop-metadata mount (Q1 in this iteration): the avatar/links surface
 # (/openapi/v1/bots/{bot_id}/avatar and /openapi/v1/bots/{bot_id}/links[/{resource_id}],
 # six path-addressed user-scoped operations) joins the public schema, so
-# ``path`` grows 172 -> 178.
-_BOT_ID_PLACEMENT = {"path": 179, "query": 1, "none": 125}
+# ``path`` grows 172 -> 178. Classification and the Local Skill security read
+# each add another path-addressed operation.
+_BOT_ID_PLACEMENT = {"path": 180, "query": 1, "none": 125}
 
 
 def _schema() -> dict:
@@ -732,7 +733,8 @@ def test_the_pinned_number_of_operations_take_it():
 # the public schema -- six path-addressed user-scoped operations take
 # user_id like the rest of the {bot_id}-path tier, so ``taking`` grows
 # 246 -> 252 (and mirrors _BOT_ID_PLACEMENT["path"] 172 -> 178).
-    assert len(taking) == 252
+# The Local Skill security read adds one user-scoped path operation.
+    assert len(taking) == 253
 
 
 def test_the_exempt_operations_take_none():

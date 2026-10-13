@@ -74,6 +74,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.health_probe
   - agentclaw.community.plugin_api.http_client
   - agentclaw.community.plugin_api.impl_registry
+  - agentclaw.community.plugin_api.local_skill_security_provider
   - agentclaw.community.plugin_api.mcp_auth
   - agentclaw.community.plugin_api.mcp_center
   - agentclaw.community.plugin_api.notify_sender

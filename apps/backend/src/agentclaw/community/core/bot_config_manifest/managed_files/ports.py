@@ -28,6 +28,7 @@ the promotion step drives its object writes.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, Optional
 
 from agentclaw.community.core.bot_config_manifest.managed_files.store import (
@@ -51,6 +52,11 @@ from agentclaw.community.core.repository.protocols.skill_center import SkillRepo
 from agentclaw.community.core.skill_center.skill_package import (
     SkillPackageValidator,
 )
+from agentclaw.community.core.skill_center.local_skill_security_upload_hook import (
+    LocalSkillSecurityUploadHook,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class _StorePort:
@@ -232,10 +238,12 @@ class PlatformSkillPackageUpload(_StorePort, SkillPackageUploadPort):
         *,
         validator: SkillPackageValidator,
         skill_repository: SkillRepository,
+        security_hook: LocalSkillSecurityUploadHook,
     ) -> None:
         super().__init__(store)
         self._validator = validator
         self._skills = skill_repository
+        self._security_hook = security_hook
 
     async def upload_local_skill(
         self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
@@ -252,11 +260,11 @@ class PlatformSkillPackageUpload(_StorePort, SkillPackageUploadPort):
         actor_id: str,
     ) -> None:
         await asyncio.to_thread(
-            self._delete_local_skill, skill_id, name, bot_id, owner_id
+            self._delete_local_skill, skill_id, name, bot_id, owner_id, actor_id
         )
 
     def _delete_local_skill(
-        self, skill_id: str, name: str, bot_id: str, owner_id: str
+        self, skill_id: str, name: str, bot_id: str, owner_id: str, actor_id: str
     ) -> None:
         # Match the device-backed deletion road: reject durable references
         # before deleting bytes, then repeat the check under the repository's
@@ -272,6 +280,17 @@ class PlatformSkillPackageUpload(_StorePort, SkillPackageUploadPort):
         )
         if not deleted:
             raise RuntimeError("Local Skill record disappeared during deletion")
+        try:
+            self._security_hook.record_deletion(
+                bot_id=bot_id, owner_id=owner_id,
+                actor_id=actor_id, skill_id=int(skill_id),
+            )
+        except Exception:
+            logger.exception(
+                "Manifest Local Skill deletion security sync could not be recorded "
+                "bot_id=%s owner_id=%s skill_id=%s actor_id=%s",
+                bot_id, owner_id, skill_id, actor_id,
+            )
 
     def _install(self, bot_id: str, owner_id: str, actor_id: str, name: str, validated) -> dict:
         scope = self._scope(OWNER_ENTITY_TYPE, owner_id, bot_id)
