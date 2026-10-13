@@ -9,11 +9,16 @@ from __future__ import annotations
 from secbaas.community.api.publish_manage import (
     ForceSuccessResult,
     PublishAdminService,
+    PublishConflictError,
     PublishNotFoundError,
+    RestoreBotResult,
     UpdateBotStatusResult,
     UpdateDeviceStatusResult,
 )
-from secbaas.community.core.repository.bot import BotRepository
+from secbaas.community.core.repository.bot import (
+    BotRecordConflictError,
+    BotRepository,
+)
 from secbaas.community.core.repository.device import DeviceRepository
 from secbaas.community.core.repository.publish import PublishRepository
 from secbaas.community.core.repository.publish_batch import PublishBatchRepository
@@ -184,6 +189,58 @@ class DefaultPublishAdminService(PublishAdminService):
             bot_uuid=bot.bot_uuid,
             previous_status=previous_status,
             new_status=status,
+        )
+
+    async def restore_bot(
+        self,
+        *,
+        bot_id: int,
+        operator: str,
+    ) -> RestoreBotResult:
+        """Restore a bot record to live ACTIVE, bypassing the state machine.
+
+        WARNING: Admin recovery tool (like update_bot_status, this bypasses
+        normal lifecycle transitions and intentionally deviates from
+        "RELEASED is terminal"). Revives the bot_id target and retires every
+        OTHER live record sharing its bot_uuid in one atomic transaction.
+
+        Cross-env by requirement: the repository lookup and sibling matching
+        are by primary key / bot_uuid only — no env validation or filtering
+        anywhere in this chain. The repository sets ``modifier`` (the
+        operator identity) on every touched row.
+
+        Unique-key conflicts (concurrent restore or publish race) surface
+        as :class:`PublishConflictError` after the repository transaction
+        has rolled back — no partial state.
+        """
+        try:
+            snapshot = self._bot_repo.restore_bot_record_by_id(
+                bot_id, modifier=operator
+            )
+        except BotRecordConflictError as exc:
+            raise PublishConflictError(
+                f"Bot {bot_id} restore conflicts with a live unique-key "
+                f"slot; no changes applied"
+            ) from exc
+        if snapshot is None:
+            raise PublishNotFoundError(f"Bot {bot_id} not found")
+
+        logger.warning(
+            "ADMIN_RESTORE_BOT: operator=%s bot_id=%s bot_uuid=%s %s->ACTIVE, retired=%s",
+            operator,
+            bot_id,
+            snapshot.record.bot_uuid,
+            snapshot.previous_status,
+            snapshot.retired_sibling_count,
+        )
+
+        return RestoreBotResult(
+            bot_id=bot_id,
+            bot_uuid=snapshot.record.bot_uuid,
+            previous_status=snapshot.previous_status,
+            previous_is_deleted=snapshot.previous_is_deleted,
+            new_status=snapshot.record.status,
+            retired_sibling_count=snapshot.retired_sibling_count,
         )
 
     def _update_batches_and_records(
