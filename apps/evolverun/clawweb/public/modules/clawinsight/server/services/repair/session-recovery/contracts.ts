@@ -1,3 +1,6 @@
+import type { AisStatusHandler } from "@avernet/clawevolve/server/services/ais/status-handler";
+import type { RecoveryStoredTask, RecoveryJudgment, RecoveryPlan, RecoveryEvidence } from "./task-contracts.js";
+import type { AgentToolCall } from "../../../repositories/repair/agent-tool-call-record.js";
 export type RecoveryRequest = {
   event_id: string;
   tc_fault_label: string | null;
@@ -13,6 +16,37 @@ export type { MessageReceipt as DeliveryReceipt } from "@avernet/clawweb-shared/
 import type { MessageReceipt as DeliveryReceipt } from "@avernet/clawweb-shared/server/services/bot-runtime";
 export type RecoveryActor = { userId: string; isAdmin: boolean };
 export interface SessionRecoveryApi { create(body: unknown, actor: RecoveryActor): Promise<RecoveryAcknowledgment> }
+/** Task Service API, independent of the HTTP delivery adapter and implementation. */
+export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
+  create(body: unknown, actor: RecoveryActor): Promise<RecoveryAcknowledgment & { task_id: string }>;
+  list(eventId: string, actor: RecoveryActor): Promise<Array<{ task_id: string; status: RecoveryStoredTask["status"]; phase: RecoveryStoredTask["phase"]; effect: RecoveryJudgment["effect"] }>>;
+  detail(taskId: string, actor: RecoveryActor): Promise<RecoveryStoredTask>;
+  decide(taskId: string, digest: string, approved: boolean, actor: RecoveryActor, cooperationDone?: boolean, feedback?: string): Promise<void>;
+  annotate(taskId: string, actor: RecoveryActor, input: { layer: "delivery" | "response" | "effect"; correct: boolean | null; reason: string; evidence_ids: string[] }): Promise<void>;
+  resume(taskId: string): Promise<void>;
+  assess(taskId: string, version: number, input: { decision: "message" | "environment" | "observe"; summary: string; evidence_ids: string[] }): Promise<void>;
+  observe(taskId: string, version: number, judgment: RecoveryJudgment, evidence: RecoveryEvidence[]): Promise<void>;
+  plan(taskId: string, version: number, plan: RecoveryPlan): Promise<void>;
+  finishApply(taskId: string, version: number, input: { applicable: boolean; success: boolean; summary: string }): Promise<void>;
+  executionFailure(taskId: string, reason: string, executionId?: string): Promise<void>;
+  maintenance(): Promise<void>;
+}
+/** Worker Service API; the factory supplies the existing Agent service. */
+export interface SessionRecoveryAgentApi {
+  readonly handleAisStatus: AisStatusHandler;
+  verify(taskId: string, executionId: string, ticket: string, control?: boolean): Promise<RecoveryStoredTask>;
+  bootstrap(task: RecoveryStoredTask): Promise<unknown>;
+  heartbeat(task: RecoveryStoredTask, sessionId?: string): Promise<unknown>;
+  sessionRead(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
+  trajectoryRead(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
+  inspect(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
+  logs(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
+  apply(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
+  retryMessage(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
+  conclusion(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
+  report(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
+  toolGet(task: RecoveryStoredTask, id: string): Promise<AgentToolCall & { toolCallId: string }>;
+}
 
 /** Outbound contract owned by monitoring; message delivery does not imply task recovery. */
 export type RecoveryResult = {

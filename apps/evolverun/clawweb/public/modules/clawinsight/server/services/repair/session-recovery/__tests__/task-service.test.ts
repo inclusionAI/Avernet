@@ -58,7 +58,7 @@ describe("self-healing task orchestration", () => {
     expect(agent.start).toHaveBeenCalledTimes(1);
     expect(delivery.create).not.toHaveBeenCalled(); expect(notifier.notify).not.toHaveBeenCalled();
     const task = await service.detail(ack.task_id, actor);
-    expect(task.phase).toBe("plan"); expect(task.timeline[1].summary).toContain("不实际发送");
+    expect(task.phase).toBe("assess"); expect(task.timeline[1].summary).toContain("不实际发送");
   });
   it("retains the exact saved result when callback fails and never resends advice", async () => {
     const { service, records, delivery, reporter } = setup(true);
