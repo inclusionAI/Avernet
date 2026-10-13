@@ -10,7 +10,11 @@ Malformed SkillSet and shared Repo Skill path identifiers reach repository
 
 - SkillSet `set_id`, including Skill Center Reference addresses, and shared
   Repo Skill `skill_id` remain strings on the HTTP and Service API surfaces.
-  The HTTP path accepts ASCII decimal digits; other formats answer 422.
+  The HTTP path accepts ASCII decimal digits within the persistence range:
+  signed 32-bit for SkillSet IDs and portable signed 64-bit for Repo Skill IDs.
+  Other formats and out-of-range values answer 422 before repository conversion.
+  Existing leading-zero forms remain valid up to the 4,300-character request
+  bound; range comparison uses their significant digits.
 - A well-formed decimal identifier for an unavailable resource continues to
   answer 404. Existing resource lookups and authorization rules are unchanged.
 - `CronRelayError` with 400, 403, or 409 preserves that HTTP status and the

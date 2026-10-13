@@ -6,6 +6,7 @@ import asyncio
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Path, Query, Request
+from pydantic import AfterValidator
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Envelope,
@@ -30,6 +31,19 @@ from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 router = APIRouter(prefix="/openapi/v1/bots/skills", tags=["repository-skills"], route_class=PublicAPIRoute)
+
+_MAX_REPOSITORY_SKILL_ID = "9223372036854775807"
+_MAX_DECIMAL_ID_LENGTH = 4300
+
+
+def _within_repository_skill_id_range(value: str) -> str:
+    significant = value.lstrip("0") or "0"
+    if len(significant) > len(_MAX_REPOSITORY_SKILL_ID) or (
+        len(significant) == len(_MAX_REPOSITORY_SKILL_ID)
+        and significant > _MAX_REPOSITORY_SKILL_ID
+    ):
+        raise ValueError("Repository Skill identifier exceeds the supported integer range")
+    return value
 
 
 @router.get("/repository", response_model=Envelope[Page[dict[str, Any]]])
@@ -88,9 +102,11 @@ async def get_repository_skill(
     skill_id: Annotated[
         str,
         Path(
+            max_length=_MAX_DECIMAL_ID_LENGTH,
             pattern=r"^[0-9]+$",
             description="Decimal public identifier of the shared Repo Skill.",
         ),
+        AfterValidator(_within_repository_skill_id_range),
     ],
     request: Request,
     _actor_id: UserIdDep,
