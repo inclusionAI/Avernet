@@ -29,7 +29,7 @@
   ],
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
-    "build": "tsc -p tsconfig.json && mkdir -p dist/server/fixtures && cp -R server/fixtures/. dist/server/fixtures/ && cp web/pages/InsightCenter/monitoring/*.css dist/web/pages/InsightCenter/monitoring/",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/server/fixtures && cp -R server/fixtures/. dist/server/fixtures/ && cp web/pages/InsightCenter/monitoring/*.css dist/web/pages/InsightCenter/monitoring/ && cp web/pages/InsightCenter/monitoring/session-recovery/*.css dist/web/pages/InsightCenter/monitoring/session-recovery/",
     "test": "vitest run",
     "test:monitoring": "vitest run --config vitest.monitoring.config.ts",
     "monitoring:local": "node dist/server/services/monitoring/local-host.js",

@@ -1,3 +1,4 @@
+import { RecoveryTaskLinks } from "./session-recovery/RecoveryTaskLinks";
 import { useId, useState } from 'react';
 import type { DiagnosisItem } from '../../../types/monitoring';
 import { MonitoringIcon as Icon } from './MonitoringIcon';
@@ -47,6 +48,7 @@ export function DiagnosisRecord({ item, open, toggle }: { item: DiagnosisItem; o
         <Field label="会话时间" value={displayTime(item.occurredAt)} /><Field label="诊断完成时间" value={displayTime(item.diagnosedAt)} />
       </dl>
       <div className="detail-identifiers">{ids.map(([label, value]) => value && <div className="id-line" key={label}><span>{label}</span><code>{value}</code><button className="copy-btn" type="button" aria-label={`复制${label}`} onClick={() => void copy(label!, value)}><Icon name="copy" /></button></div>)}</div>
+      <RecoveryTaskLinks eventId={item.diagnosisId} />
       <p className="copy-message" role="status">{copyMessage}</p>
     </div>}
   </article>;
