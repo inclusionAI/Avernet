@@ -336,6 +336,9 @@ class DeviceService:
         """
         return False
 
+    def _after_active_binding_recovered(self, *, record: DeviceBindingRecord) -> None:
+        """Provider hook after an ACTIVE retained binding is linked to its Bot."""
+
     def _query_device_info(
         self,
         *,
@@ -696,6 +699,7 @@ class DeviceService:
                         "recovered BaaS binding disappeared before readback"
                     )
                 if recovered_record.status == DeviceBindingStatus.ACTIVE.value:
+                    self._after_active_binding_recovered(record=recovered_record)
                     return recovered_record
                 binding_id = recovered_binding_id
 

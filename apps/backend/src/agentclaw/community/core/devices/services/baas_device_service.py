@@ -19,6 +19,8 @@ from agentclaw.community.core.devices.models import (
 from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+from agentclaw.community.core.devices.protocols import LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY
+from agentclaw.community.core.devices.startup_identity import resolve_startup_identity
 from agentclaw.community.core.devices.services.baas_device_lifecycle_executor import (
     BaasDeviceLifecycleError,
     BaasDeviceLifecycleExecutor,
@@ -278,6 +280,26 @@ class BaasDeviceService(DeviceService):
             owner_id=owner_id,
             device_props=device_props,
         )
+
+    @override
+    def _after_active_binding_recovered(self, *, record: DeviceBindingRecord) -> None:
+        """Re-deliver only the current Pool callback, never repeat container init."""
+        if not self._binding_declares_pool(record):
+            return
+        if record.device_props["envs"].get("AGENTCLAW_SKILLS_LAYOUT_PHASE") != "pool_initializing":
+            return
+        identity = resolve_startup_identity(record.device_props)
+        if identity is None:
+            raise BaasDeviceServiceError("missing Skills Pool recovery startup identity")
+        if record.device_props.get(LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY) == identity:
+            return
+        ok, message = baas_publish_lifecycle.dispatch_pool_layout_confirmation(
+            binding=record,
+            startup_identity=identity,
+            dispatch_watchdog=self._container_init().dispatch_watchdog,
+        )
+        if not ok:
+            raise BaasDeviceServiceError(message)
 
     def _allocate_via_baas(
         self,
@@ -713,28 +735,14 @@ class BaasDeviceService(DeviceService):
         envs = props.get("envs")
         if not isinstance(envs, dict) or envs.get("AGENTCLAW_SKILLS_LAYOUT") != "pool":
             return True, "layout confirmation not required"
-        if (
-            envs.get("AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION")
-            != "skills-pool-p3-v1"
-        ):
-            return False, "unsupported Skills Pool restart contract"
         if str(props.get("restart_publish_id") or "") != str(publish_id):
             return False, "stale Skills Pool restart publish identity"
-        bot_uuid = str(props.get("bot_uuid") or "")
-        client_id = str(props.get("client_id") or binding.device_id)
-        callback_token = str(props.get("callback_token") or "")
-        if not bot_uuid or not client_id or not callback_token:
-            return False, "incomplete Skills Pool restart callback context"
-        try:
-            self._container_init().dispatch_watchdog(
-                bot_uuid=bot_uuid,
-                client_id=client_id,
-                token=callback_token,
-                startup_identity=str(publish_id),
-            )
-        except Exception as exc:
-            return False, f"Skills Pool restart callback dispatch failed: {exc}"
-        return True, "Skills Pool restart callback dispatched"
+        ok, message = baas_publish_lifecycle.dispatch_pool_layout_confirmation(
+            binding=binding,
+            startup_identity=str(publish_id),
+            dispatch_watchdog=self._container_init().dispatch_watchdog,
+        )
+        return (True, "Skills Pool restart callback dispatched") if ok else (ok, message)
 
     @staticmethod
     def _deserialize_symbol(symbol: str | None) -> list:

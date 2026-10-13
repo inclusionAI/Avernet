@@ -64,3 +64,16 @@ internal_dependencies:
 ### Change impact
 
 Owns the engine/device binding lifecycle. Schema changes (binding table, engine config dir) require migration. Health-probe contract is consumed by Prom-style monitoring outside the repo.
+
+### Pool-native creation recovery
+
+An ACTIVE BaaS binding can outlive a failed Bot-link write. After the guarded
+repository recovery links it to its Bot, an unconfirmed `pool_initializing`
+startup re-dispatches only the existing instance-bound watchdog callback. It
+uses the retained callback token and current startup identity; it does not repeat
+bootstrap, container initialization, publish polling, or migration. Dispatch
+errors propagate so the same creation can be retried without failing the ACTIVE
+runtime. A matching persisted confirmation makes recovery idempotent. Legacy
+and pre-Native Pool bindings retain their old startup wire. The HTTP adapter
+catches `LayoutInitializationConfirmationError` through the devices contract,
+not through the concrete Skills Pool implementation.
