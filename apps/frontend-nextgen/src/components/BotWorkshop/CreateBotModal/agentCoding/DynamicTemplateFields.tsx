@@ -1,4 +1,5 @@
 import type { ModelOption } from '@/components/BotWorkshop/CreateBotModal/agentCoding/legacy/appcoding/CodingModelConfigField';
+import type { CodeRepositoryTenant } from '@/services/botWorkshop/agentCodingLegacyService';
 import type { BotTemplateField } from '@/services/botWorkshop/agentCodingTemplateService';
 import React, { useEffect } from 'react';
 import { DynamicTemplateFieldControl } from './DynamicTemplateFieldControl';
@@ -28,6 +29,10 @@ interface DynamicTemplateFieldsProps {
   modelsLoadError?: string | null;
   botId?: string;
   onReloadModels?: () => void | Promise<void>;
+  /** 动态代码仓库字段的搜索租户，按 field_key 隔离。 */
+  codeRepoTenants?: Record<string, CodeRepositoryTenant>;
+  /** 切换动态代码仓库字段的搜索租户。 */
+  onCodeRepoTenantChange?: (fieldKey: string, tenant: CodeRepositoryTenant) => void;
   renderField?: (context: {
     field: BotTemplateField;
     label: string;
@@ -199,6 +204,8 @@ export const DynamicTemplateFields: React.FC<DynamicTemplateFieldsProps> = ({
   modelsLoadError,
   botId,
   onReloadModels,
+  codeRepoTenants,
+  onCodeRepoTenantChange,
 }) => {
   useEffect(() => {
     onValidationChange?.(validateDynamicTemplateFields(fields, value) ?? undefined);
@@ -271,6 +278,8 @@ export const DynamicTemplateFields: React.FC<DynamicTemplateFieldsProps> = ({
                 modelsLoadError,
                 botId,
                 onReloadModels,
+                codeRepoTenants,
+                onCodeRepoTenantChange,
               })}
             </div>
           );

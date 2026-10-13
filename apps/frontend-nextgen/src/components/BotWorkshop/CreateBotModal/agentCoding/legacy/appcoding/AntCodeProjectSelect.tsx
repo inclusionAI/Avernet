@@ -9,7 +9,11 @@ import { Button } from '@/components/ui/Button';
  */
 
 import { Badge } from '@/components/ui/Badge';
-import { searchAntCodeProjects, type AntCodeProject } from '@/services/botWorkshop/agentCodingLegacyService';
+import {
+  searchAntCodeProjects,
+  type AntCodeProject,
+  type CodeRepositoryTenant,
+} from '@/services/botWorkshop/agentCodingLegacyService';
 import { cn } from '@/utils/cn';
 import { Loader2, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -76,6 +80,8 @@ export interface AntCodeProjectSelectProps {
   className?: string;
   /** 校验错误状态 */
   error?: boolean;
+  /** 当前仓库租户，决定搜索主站还是消金代码平台 */
+  tenant?: CodeRepositoryTenant;
 }
 
 export function AntCodeProjectSelect({
@@ -85,6 +91,7 @@ export function AntCodeProjectSelect({
   placeholder = '输入项目名称搜索...',
   className,
   error = false,
+  tenant,
 }: AntCodeProjectSelectProps) {
   // 搜索关键词
   const [query, setQuery] = useState('');
@@ -102,6 +109,17 @@ export function AntCodeProjectSelect({
   const inputRef = useRef<HTMLInputElement>(null);
   // 点击外部关闭下拉框
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // 租户切换时抛弃旧租户的候选结果，避免混入另一套代码平台的仓库。
+  useEffect(() => {
+    requestVersionRef.current += 1;
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    setResults([]);
+    setIsLoading(false);
+  }, [tenant]);
 
   // 同步 value 到 query：直接展示完整 URL，不再从 URL 中抽取项目名
   useEffect(() => {
@@ -151,7 +169,7 @@ export function AntCodeProjectSelect({
       const currentVersion = ++requestVersionRef.current;
 
       try {
-        const data = await searchAntCodeProjects(newQuery.trim());
+        const data = await searchAntCodeProjects(newQuery.trim(), { tenant });
         // 检查请求是否过时（忽略旧请求的响应）
         if (currentVersion !== requestVersionRef.current) {
           return;
@@ -172,7 +190,7 @@ export function AntCodeProjectSelect({
         }
       }
     }, 300);
-  }, []);
+  }, [tenant]);
 
   // 选择项目：回填完整 URL（输入框与外部 value 都直接展示 URL）
   const handleSelect = useCallback(

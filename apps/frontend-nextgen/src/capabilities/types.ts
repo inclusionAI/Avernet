@@ -179,6 +179,8 @@ export interface AgentCodingInternalResources {
   codefuseTokenUrl: string | null;
   antCodeProjectsApiUrl: string | null;
   antCodeProjectBaseUrl: string | null;
+  xiaojinCodeProjectsApiUrl: string | null;
+  xiaojinCodeProjectBaseUrl: string | null;
 }
 
 /**

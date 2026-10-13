@@ -127,6 +127,8 @@ export const defaultCapabilities: AppCapabilities = {
       codefuseTokenUrl: null,
       antCodeProjectsApiUrl: null,
       antCodeProjectBaseUrl: null,
+      xiaojinCodeProjectsApiUrl: null,
+      xiaojinCodeProjectBaseUrl: null,
     },
   }),
   // Open Core 无内网 antwork 照片服务数据源 → 成员头像返回 null，成员行 UI 回退首字母占位。
