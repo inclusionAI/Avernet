@@ -149,14 +149,23 @@ cause, and the episodes that show it. Findings are inputs to the plan step
 (bench cases) and to the tune prompt.
 
 ```python
+class FindingKind(StrEnum):
+    BAD_CASE = "bad_case"         # the bot got it wrong; a candidate should fix it
+    GOOD_CASE = "good_case"       # the bot got it right; a candidate must keep it
+
+class SeverityLevel(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
 @dataclass(frozen=True)
 class Finding:
     finding_id: str               # "f_12"
-    kind: Literal["bad_case", "good_case"]
+    kind: FindingKind
     summary: str                  # one line: what the bot did
     root_cause: str               # the likely reason, in the genome's terms (e.g. a skill that did not trigger)
     episodes: list[str]           # episode ids, evidence for the candidate
-    severity: Literal["low", "medium", "high"]
+    severity: SeverityLevel
 ```
 
 ```jsonc
@@ -178,12 +187,16 @@ The case format stays byte-compatible ([07-verification.md](07-verification.md))
 over the JSON API a case travels as a string inside a JSON envelope.
 
 ```python
+class CaseFormat(StrEnum):        # proposed; new formats need a reviewed verifier change
+    CLAWBENCH_MD_1 = "clawbench-md/1"   # the ClawBench Markdown case format
+
 @dataclass(frozen=True)
 class TrainCaseProposal:
     case_key: str                 # strategy-chosen, stable per run: "<run>/<finding>/<n>"
-    format: Literal["clawbench-md/1"]   # proposed: the ClawBench Markdown case format; new formats need a reviewed verifier change
+    format: CaseFormat
     content: str                  # the Markdown case, unchanged
-    derived_from: list[str]       # evidence ids it came from, e.g. "finding:f_12", "episode:ep_91"
+    derived_from: list[EvidenceRef]   # EvidenceRef "<kind>:<id>": 01-genome.md §2.2;
+                                      # evidence ids it came from, e.g. "episode:ep_91"
 ```
 
 ```jsonc
@@ -192,7 +205,7 @@ class TrainCaseProposal:
   "case_key": "run_7f3/f_12/1",
   "format": "clawbench-md/1",
   "content": "---\nid: partial_refund_01\ngrading_type: hybrid\n---\n## Prompt\nCan I get a refund for half of my order A17?\n## Expected\n…",
-  "derived_from": ["finding:f_12", "episode:ep_91"]
+  "derived_from": ["episode:ep_91", "episode:ep_97"]
 }
 ```
 
@@ -203,12 +216,18 @@ API for it; its shape is ClawEvolve's business. Shown here because it is
 what makes ClawEvolve survive a crash and re-dispatch (§4.4).
 
 ```python
+class VerdictStatus(StrEnum):     # same set as 07-verification.md §2.6
+    PENDING = "pending"
+    ACCEPT = "accept"
+    REJECT = "reject"
+    INCONCLUSIVE = "inconclusive"
+
 @dataclass
 class RoundRecord:
     round: int                    # 0-based round number within the run
     candidate: str | None         # candidate id submitted in this round, if any
     train_score_pct: int          # the round's train score, 0..100
-    verdict: Literal["pending", "accept", "reject", "inconclusive"] | None   # None when nothing was submitted
+    verdict: VerdictStatus | None # None when nothing was submitted
 
 @dataclass
 class ClawEvolveState:
@@ -245,13 +264,18 @@ class ConsolidateMemoryParams:
     max_new_items: int = 10       # cap on memory.add ops per run
     retire_unused_days: int = 30  # memory items with no supporting use for this long are retired
 
+class LessonAction(StrEnum):      # what the lesson does to the curated memory
+    ADD = "add"                   # a new memory item
+    UPDATE = "update"             # rewrite the item with the same key
+    RETIRE = "retire"             # remove the item
+
 @dataclass(frozen=True)
 class LessonCluster:
     lesson_key: str               # becomes the memory item key
     text: str
     tags: list[str]
-    sources: list[str]            # feedback / episode ids
-    action: Literal["add", "update", "retire"]
+    sources: list[EvidenceRef]    # the feedback and episodes it was learned from
+    action: LessonAction
 
 @dataclass(frozen=True)
 class ConsolidationPlan:
@@ -259,7 +283,7 @@ class ConsolidationPlan:
     base: str
     ops: list[dict]               # Genome Patch ops (memory.add / memory.update / memory.retire)
     rationale: str
-    evidence: list[str]
+    evidence: list[EvidenceRef]
 ```
 
 ```jsonc
@@ -1219,7 +1243,7 @@ Request:
   "cases": [
     {"case_key": "run_7f3/f_12/1", "format": "clawbench-md/1",
      "content": "---\nid: partial_refund_01\ngrading_type: hybrid\n---\n## Prompt\nCan I get a refund for half of my order A17?\n",
-     "derived_from": ["finding:f_12", "episode:ep_91"]}
+     "derived_from": ["episode:ep_91", "episode:ep_97"]}
   ]
 }
 ```
@@ -1385,7 +1409,7 @@ Request (from ClawEvolve round 2):
                     {"op": "file.edit", "target": "persona/SOUL.md",
                      "edits": [{"kind": "replace_section", "heading": "## Escalation", "content": "…"}]}]},
   "rationale": "Round 2: train 82% vs best 78%; fixes trigger misses on partial refunds",
-  "evidence": ["finding:f_12", "episode:ep_91"],
+  "evidence": ["episode:ep_91", "episode:ep_97"],
   "self_metrics": {"train_score_pct": 82}       // shown to reviewers, never used for acceptance
 }
 ```
@@ -1537,7 +1561,7 @@ class ClawEvolveStrategy(EvolutionStrategy):
                     state.pending = await ctx.candidates.submit(Candidate(
                         patch=ws.to_patch(),
                         rationale=f"Round {state.next_round}: train {pct}%",
-                        evidence=[f"finding:{f.finding_id}" for f in state.findings],
+                        evidence=[f"episode:{ep}" for f in state.findings for ep in f.episodes],
                         self_metrics={"train_score_pct": pct}))
                     state.best_train_pct = pct
                     state.history.append(RoundRecord(state.next_round, state.pending,

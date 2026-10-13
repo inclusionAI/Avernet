@@ -94,14 +94,35 @@ bot 上的修订版；对服务型 bot 而言，是当时正在提供服务的�
 ```python
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal
+from enum import StrEnum
 
-Role = Literal["user", "assistant", "tool", "system"]
-OutcomeStatus = Literal["succeeded", "failed", "user_corrected", "abandoned", "unknown"]
-Engine = Literal["openclaw", "claude-code", "hermes", "teclaw"]   # the engines Avernet runs bots on
-# Personal-data categories the redactor knows. New values are added by a reviewed
-# change to the redactor, together with their rules (defaults: open decision X-4).
-PiiCategory = Literal["email", "phone", "address"]
+class Role(StrEnum):
+    USER = "user"
+    ASSISTANT = "assistant"
+    TOOL = "tool"                  # a tool's output, fed back to the model
+    SYSTEM = "system"
+
+class OutcomeStatus(StrEnum):
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    USER_CORRECTED = "user_corrected"   # the user had to correct the bot before the task was done
+    ABANDONED = "abandoned"             # the user left before the task was done
+    UNKNOWN = "unknown"                 # no signal decided the outcome
+
+class Engine(StrEnum):
+    """The engines Avernet runs bots on."""
+    OPENCLAW = "openclaw"
+    CLAUDE_CODE = "claude-code"
+    HERMES = "hermes"
+    TECLAW = "teclaw"
+
+class PiiCategory(StrEnum):
+    """Personal-data categories the redactor knows. New values are added by a reviewed
+    change to the redactor, together with their rules (defaults: open decision X-4)."""
+    EMAIL = "email"
+    PHONE = "phone"
+    ADDRESS = "address"
+
 # BotRef {owner_id, bot_id}: a bot's full identity (a bot_id alone is not unique
 # across users); defined once in 09-evolution-api.md §2.7.
 
@@ -185,21 +206,20 @@ class Episode:
 发现）。
 
 ```python
-FeedbackKind = Literal[
-    "rating",                 # user thumbs/score on an answer or session
-    "correction",             # user states what the right answer was
-    "outcome",                # task outcome reported by a product or pipeline
-    "coordination_outcome",   # BCS: how a multi-bot exchange ended
-    "run_evidence",           # TaskGuard: guard / repair / retry events of a run
-    "finding",                # a producer's diagnosis, e.g. ClawInsight plan-source/v2 items
-]
-FeedbackSource = Literal[
-    "user",                   # a person, through a product UI
-    "pipeline",               # a deterministic pipeline or product backend
-    "bcs",                    # BCS coordination outcomes
-    "taskguard",              # TaskGuard run evidence
-    "clawinsight",            # ClawInsight findings
-]
+class FeedbackKind(StrEnum):
+    RATING = "rating"                             # user thumbs/score on an answer or session
+    CORRECTION = "correction"                     # user states what the right answer was
+    OUTCOME = "outcome"                           # task outcome reported by a product or pipeline
+    COORDINATION_OUTCOME = "coordination_outcome" # BCS: how a multi-bot exchange ended
+    RUN_EVIDENCE = "run_evidence"                 # TaskGuard: guard / repair / retry events of a run
+    FINDING = "finding"                           # a producer's diagnosis, e.g. ClawInsight plan-source/v2 items
+
+class FeedbackSource(StrEnum):
+    USER = "user"                     # a person, through a product UI
+    PIPELINE = "pipeline"             # a deterministic pipeline or product backend
+    BCS = "bcs"                       # BCS coordination outcomes
+    TASKGUARD = "taskguard"           # TaskGuard run evidence
+    CLAWINSIGHT = "clawinsight"       # ClawInsight findings
 
 @dataclass(frozen=True)
 class Feedback:
@@ -261,7 +281,12 @@ class Feedback:
 划分，决定了谁有可能看到它（§6）。
 
 ```python
-Split = Literal["train", "validation", "holdout", "regression", "safety"]
+class Split(StrEnum):             # same set as 07-verification.md §2
+    TRAIN = "train"
+    VALIDATION = "validation"
+    HOLDOUT = "holdout"
+    REGRESSION = "regression"
+    SAFETY = "safety"
 
 @dataclass(frozen=True)
 class GraderResult:
@@ -315,6 +340,13 @@ class EvalTrace:
 `RetentionPolicy` 是按租户设置的数据处理配置（§7）。
 
 ```python
+class ExportStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
 @dataclass(frozen=True)
 class SessionExport:
     export_id: str                # "sx_402"
@@ -322,7 +354,7 @@ class SessionExport:
     engine: Engine                # the engine whose provider runs the export
     since: datetime               # window start (inclusive)
     until: datetime               # window end (exclusive)
-    status: Literal["queued", "running", "succeeded", "failed", "cancelled"]
+    status: ExportStatus
     package_digest: str | None    # set once succeeded: digest of the exported session package
     error: str | None             # set once failed
 
@@ -479,6 +511,9 @@ v2 相对 v1 的变化（提议）：
 ```python
 from typing import Protocol
 
+# SessionPackage: the session-package/v2 archive of a succeeded export: raw sessions
+# plus provider-normalized Episode drafts (table above).
+
 class SessionExportProvider(Protocol):
     """Engine-side provider of session export (session-export/v2). One per engine.
 
@@ -498,7 +533,7 @@ class SessionExportProvider(Protocol):
     async def get_export(self, export_id: str) -> SessionExport:
         """Look up an export by id. A short request; never waits for the export."""
 
-    async def read_package(self, export_id: str) -> "SessionPackage":
+    async def read_package(self, export_id: str) -> SessionPackage:
         """Read a succeeded export's package: raw sessions plus normalized Episode drafts."""
 ```
 
@@ -625,6 +660,9 @@ SFT、RL 和 DPO 管线所需的元组：
 ```python
 from typing import Protocol
 
+# FeedbackInput: the request body of POST …/feedback (§10).
+# EpisodeSummary: an Episode without `turns`, plus `turn_count` and `feedback_count`.
+
 @dataclass(frozen=True)
 class EpisodeFilter:
     revision: str | None = None          # None = all revisions, including unattributed
@@ -648,7 +686,7 @@ class ExperienceStore(Protocol):
         Returns the export id at once (an operation). Idempotent per window (§5).
         """
 
-    async def record_feedback(self, bot: BotRef, feedback: "FeedbackInput",
+    async def record_feedback(self, bot: BotRef, feedback: FeedbackInput,
                               *, idempotency_key: str) -> Feedback:
         """Store one feedback record after redaction and attribution.
 
@@ -661,7 +699,7 @@ class ExperienceStore(Protocol):
 
     # --- read ---------------------------------------------------------------
     async def list_episodes(self, bot: BotRef, flt: EpisodeFilter, *,
-                            page: int, page_size: int) -> Page["EpisodeSummary"]:
+                            page: int, page_size: int) -> Page[EpisodeSummary]:
         """Episode summaries (no turns), newest first."""
 
     async def get_episode(self, bot: BotRef, episode_id: str) -> Episode:

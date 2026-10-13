@@ -93,7 +93,103 @@ id，从不存储其内容。
 `GateDecision`、`RiskTier`、`ReviewItem`、`Promotion`
 （[08-promotion.zh-CN.md](08-promotion.zh-CN.md)）。
 
-### 2.1 LedgerEntry
+### 2.1 LedgerEvent
+
+对实验记录条目（§2.2）的每一次变更都是一个追加的事件。条目的顶层字段是其事件的
+折叠（fold）；事件就是审计轨迹。事件永远不会被编辑或删除。事件放在前面，是因为条目
+持有它的事件列表；下面的代码块还定义了本节其余部分用到的共享类型。
+
+```python
+from dataclasses import dataclass, field
+from enum import StrEnum
+
+class EntryKind(StrEnum):
+    EXPERIMENT = "experiment"                    # one submitted candidate and everything that happened to it
+    GOVERNANCE = "governance"                    # one audited event not tied to a submitted candidate
+
+class VerdictStatus(StrEnum):                    # same set as 07-verification.md §2.6
+    PENDING = "pending"
+    ACCEPT = "accept"
+    REJECT = "reject"
+    INCONCLUSIVE = "inconclusive"
+
+class GeneCategory(StrEnum):
+    """Top-level gene categories of a genome (01-genome.md §2.1)."""
+    PERSONA = "persona"
+    SKILLS = "skills"
+    MEMORY = "memory"
+    RESOURCES = "resources"
+    TOOLS_MCP = "tools.mcp"
+    TOOLS_CLI_TOOLS = "tools.cli_tools"
+    ENGINE_CONFIG = "engine_config"
+    SCRIPT = "script"
+
+class Split(StrEnum):                            # same set as 07-verification.md §2.2
+    TRAIN = "train"
+    VALIDATION = "validation"
+    HOLDOUT = "holdout"
+    REGRESSION = "regression"
+    SAFETY = "safety"
+
+# RiskTier (T0 < T1 < T2 < T3) is defined once in 08-promotion.md §5.
+# BotRef {owner_id, bot_id}: a bot's full identity (a bot_id alone is not unique
+# across users); defined once in 09-evolution-api.md §2.7.
+# EvidenceRef "<kind>:<id>": 01-genome.md §2.2.
+
+
+class EventType(StrEnum):
+    SUBMITTED = "submitted"                  # candidate recorded (Evolution Run)
+    VERIFIED = "verified"                    # verdict written, with verifier version (Verification)
+    GATE_DECIDED = "gate_decided"            # gate decision and risk tier (Promotion)
+    REVIEWED = "reviewed"                    # approve or reject by a human (Promotion)
+    PROMOTED = "promoted"                    # active moved to this revision (Promotion)
+    GONE_BACK = "gone_back"                  # active later moved away by promoting an earlier revision (Promotion)
+    ONLINE_OUTCOME = "online_outcome"        # delayed join of live metrics (Experience / online verification)
+    HOLDOUT_AUDIT = "holdout_audit"          # holdout score: final candidate of a run before promotion, or periodic on active (Verification)
+    REVISION_RECORDED = "revision_recorded"  # revision recorded outside a run, e.g. from a Manifest (Genome)
+
+class ActorKind(StrEnum):
+    USER = "user"                            # an owner, tenant admin, or reviewer
+    PIPELINE = "pipeline"                    # a pipeline or product backend, by client id
+    PLATFORM = "platform"                    # one of the platform's own services
+    STRATEGY_RUN = "strategy_run"            # an Evolution Run, by run id
+
+
+@dataclass(frozen=True)
+class Actor:
+    kind: ActorKind
+    id: str               # user id, pipeline client id, platform service name, or run id
+
+
+@dataclass(frozen=True)
+class LedgerEvent:
+    seq: int              # per-entry, strictly increasing from 1
+    type: EventType
+    at: str               # RFC 3339 UTC
+    actor: Actor
+    reason: str           # human-readable; required for reviewed / promoted / gone_back
+    links: list[str]      # evidence and evaluation ids, e.g. "eval:eval_301", "episode:ep_91"
+    data: dict            # type-specific payload, schema per event type
+```
+
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+{
+  "seq": 3,
+  "type": "gate_decided",
+  "at": "2026-10-09T03:30:12Z",
+  "actor": {"kind": "platform", "id": "promotion"},
+  "reason": "Floor passed; verdict accept; T2 requires human review",
+  "links": ["eval:eval_301", "eval:eval_302", "eval:eval_303"],
+  "data": {"risk_tier": "T2", "decision": "needs_review", "review_item": "rev_q_12"}
+}
+```
+
+操作者类型覆盖第一次迭代的调用方：用户（所有者、租户管理员、评审者）、流水线、
+平台自身的服务以及进化策略运行。Bot 调用方随 DR-3 推迟；如果之后被允许，
+将增加一种操作者类型。
+
+### 2.2 LedgerEntry
 
 一个实验条目包含第 3 层设计早先确定的实验 schema 的每一个字段
 （原 `04-recursion.md` §3）：
@@ -103,7 +199,7 @@ id，从不存储其内容。
 | `entry_id`、`run_id`、`iteration` | 标识。`entry_id` 是实验 id；`iteration` 是该提交在其运行内的顺序 |
 | `mechanism_revision` | 所使用的确切改进机制 M |
 | `parent_revision` → `candidate_revision` | S 和 S′（Bot 基因组修订版 id） |
-| `evidence` | 改进机制所消费的片段和发现（finding）id |
+| `evidence` | 改进机制所消费的片段和反馈 id |
 | `patch` | 它提议了什么（操作、风险等级、大小） |
 | `verdict` | 每个划分的 Bot 验证结果、门禁决定、原因 |
 | `cost` | token、金额、挂钟时间、rollout 次数 |
@@ -115,23 +211,15 @@ id，从不存储其内容。
 变异算子库所需要的。
 
 ```python
-from dataclasses import dataclass, field
-from typing import Literal
-
-EntryKind = Literal["experiment", "governance"]
-VerdictStatus = Literal["pending", "accept", "reject", "inconclusive"]
-RiskTier = Literal["T0", "T1", "T2", "T3"]
-# Top-level gene categories of a genome (01-genome.md §2.1).
-GeneCategory = Literal["persona", "skills", "memory", "resources", "tools.mcp",
-                       "tools.cli_tools", "engine_config", "script"]
-# BotRef {owner_id, bot_id}: a bot's full identity (a bot_id alone is not unique
-# across users); defined once in 09-evolution-api.md §2.7.
+class TargetKind(StrEnum):
+    """What a mechanism improves."""
+    BOT_GENOME = "bot_genome"                    # "mechanism" is added with level 3
 
 
 @dataclass(frozen=True)
 class MechanismRef:
     """The exact mechanism (M) that produced a candidate. Frozen from the run."""
-    target_kind: Literal["bot_genome"]           # "mechanism" is added with level 3
+    target_kind: TargetKind
     strategy: str                                # "clawevolve/bot-evolution"
     version: str                                 # "2.0.0"
     agent_definitions: dict[str, str]            # definition name -> content digest
@@ -150,7 +238,7 @@ class PatchSummary:
 
 @dataclass(frozen=True)
 class SplitResult:
-    split: Literal["train", "validation", "holdout", "regression", "safety"]
+    split: Split
     cases: int                                   # number of cases of this split that were run
     mean_delta: str                              # candidate minus parent, mean score; decimal as string (no floats in hashed records)
     ci_low: str | None                           # lower end of the confidence interval of mean_delta; None for must-pass splits
@@ -186,10 +274,18 @@ class Adoption:
     gone_back_by: str | None                     # promotion id that went back
 
 
+class OutcomeSource(StrEnum):
+    """Where an online outcome's live metrics come from."""
+    SHADOW = "shadow"                            # replayed or mirrored traffic, graded offline, no user impact
+    CANARY = "canary"                            # traffic split between active (S1) and canary (S2)
+    ACTIVE_VS_PREVIOUS = "active_vs_previous"    # the new active (S2) against the revision it replaced (S1)
+    RECURRENCE_CHECK = "recurrence_check"        # ClawInsight: whether the fixed failure came back
+
+
 @dataclass
 class OnlineOutcome:
     window: str                                  # "2026-10-09/2026-10-16"
-    source: Literal["shadow", "canary", "active_vs_previous", "recurrence_check"]
+    source: OutcomeSource
     metrics: dict[str, str]                      # metric name -> decimal string, S2 minus S1
     episodes_compared: int
 
@@ -208,13 +304,13 @@ class LedgerEntry:
     mechanism_revision: MechanismRef | None
     parent_revision: str | None
     candidate_revision: str | None
-    evidence: list[str] = field(default_factory=list)
+    evidence: list[EvidenceRef] = field(default_factory=list)
     patch: PatchSummary | None = None
     verdict: VerdictRecord | None = None
     cost: Cost | None = None
     adoption: Adoption | None = None
     online_outcome: list[OnlineOutcome] = field(default_factory=list)
-    events: list["LedgerEvent"] = field(default_factory=list)
+    events: list[LedgerEvent] = field(default_factory=list)
 ```
 
 可选字段之所以可选，是因为它们因领域所定义的原因而确实缺失：治理条目没有运行；
@@ -240,7 +336,7 @@ class LedgerEntry:
   },
   "parent_revision": "sha256:a90b…",               // r41
   "candidate_revision": "sha256:7c1e…",            // r42
-  "evidence": ["episode:ep_91", "episode:ep_97", "finding:f_12"],
+  "evidence": ["episode:ep_91", "episode:ep_97", "feedback:fb_311"],
   "patch": {
     "patch_digest": "sha256:d2f8…",
     "ops": ["persona/SOUL.md: replace_section Escalation", "skills/refund-policy: update SKILL.md"],
@@ -307,61 +403,6 @@ class LedgerEntry:
   ]
 }
 ```
-
-### 2.2 LedgerEvent
-
-对条目的每一次变更都是一个追加的事件。条目的顶层字段是其事件的折叠（fold）；
-事件就是审计轨迹。事件永远不会被编辑或删除。
-
-```python
-EventType = Literal[
-    "submitted",          # candidate recorded (Evolution Run)
-    "verified",           # verdict written, with verifier version (Verification)
-    "gate_decided",       # gate decision and risk tier (Promotion)
-    "reviewed",           # approve or reject by a human (Promotion)
-    "promoted",           # active moved to this revision (Promotion)
-    "gone_back",          # active later moved away by promoting an earlier revision (Promotion)
-    "online_outcome",     # delayed join of live metrics (Experience / online verification)
-    "holdout_audit",      # holdout score: final candidate of a run before promotion, or periodic on active (Verification)
-    "revision_recorded",  # revision recorded outside a run, e.g. from a Manifest (Genome)
-]
-
-ActorKind = Literal["user", "pipeline", "platform", "strategy_run"]
-
-
-@dataclass(frozen=True)
-class Actor:
-    kind: ActorKind
-    id: str               # user id, pipeline client id, platform service name, or run id
-
-
-@dataclass(frozen=True)
-class LedgerEvent:
-    seq: int              # per-entry, strictly increasing from 1
-    type: EventType
-    at: str               # RFC 3339 UTC
-    actor: Actor
-    reason: str           # human-readable; required for reviewed / promoted / gone_back
-    links: list[str]      # evidence and evaluation ids, e.g. "eval:eval_301", "episode:ep_91"
-    data: dict            # type-specific payload, schema per event type
-```
-
-```jsonc
-// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-{
-  "seq": 3,
-  "type": "gate_decided",
-  "at": "2026-10-09T03:30:12Z",
-  "actor": {"kind": "platform", "id": "promotion"},
-  "reason": "Floor passed; verdict accept; T2 requires human review",
-  "links": ["eval:eval_301", "eval:eval_302", "eval:eval_303"],
-  "data": {"risk_tier": "T2", "decision": "needs_review", "review_item": "rev_q_12"}
-}
-```
-
-操作者类型覆盖第一次迭代的调用方：用户（所有者、租户管理员、评审者）、流水线、
-平台自身的服务以及进化策略运行。Bot 调用方随 DR-3 推迟；如果之后被允许，
-将增加一种操作者类型。
 
 ### 2.3 LedgerFilter
 
@@ -473,7 +514,7 @@ class MechanismMetrics:                        # same fields as in 10-meta-evolu
 
 | 视图 | 构建自 | 使用方 |
 | --- | --- | --- |
-| Bot 的**谱系树** | 基因组修订版的 `parents`，按 `candidate_revision` 与条目关联 | UI 谱系树（RSI-20）、父版本选择器 |
+| Bot 的**谱系树** | 基因组修订版的 `parent`，按 `candidate_revision` 与条目关联 | UI 谱系树（RSI-20）、父版本选择器 |
 | **每个划分上的候选得分** | 每个条目的 `verdict.splits` | 候选报告（与晋升一起）、Pareto 选择器 |
 | **候选的来源** | `mechanism_revision`、`evidence`、`patch` | 评审者、第 3 层 |
 | **批准与晋升** | `adoption` 以及 `reviewed` / `promoted` / `gone_back` 事件 | 审计 UI |
@@ -562,13 +603,20 @@ class MechanismMetrics:                        # same fields as in 10-meta-evolu
 
 ```python
 # One value per row of the table above; a new selector is a reviewed platform change.
-SelectorName = Literal["active", "latest_best", "pareto_per_case", "map_elites", "clade_metaproductivity"]
+class SelectorName(StrEnum):
+    ACTIVE = "active"
+    LATEST_BEST = "latest_best"
+    PARETO_PER_CASE = "pareto_per_case"
+    MAP_ELITES = "map_elites"
+    CLADE_METAPRODUCTIVITY = "clade_metaproductivity"
+
+# ArchiveView: the snapshot ExperimentLedger.archive() returns (§11).
 
 class ParentSelector(Protocol):
     name: SelectorName
     version: str                               # platform version of the selector code, e.g. "1.0.0"
 
-    def select(self, bot: BotRef, archive: "ArchiveView", seed: int) -> str:
+    def select(self, bot: BotRef, archive: ArchiveView, seed: int) -> str:
         """Return the revision id a new run starts from.
 
         Deterministic for a given archive snapshot and seed, so a
@@ -623,7 +671,7 @@ Bot 类型）以及按验证器版本，从实验条目计算得出。其定义�
 ```text
 ledger-export/
   manifest.json                     # bot, filter, verifier versions, created_at, entry count
-  lineage.json                      # revision id -> parents, seq ("r41"), status
+  lineage.json                      # revision id -> parent, seq ("r41"), status
   entries/
     led_5c2.json                    # one LedgerEntry, strategy view (aggregates only)
     led_5c9.json
@@ -676,6 +724,19 @@ ledger-export/
 Protocol；[§12](#12-api) 中的公共 API 是基于读取和导出方法的交付适配器。
 
 ```python
+class LedgerView(StrEnum):
+    """How much of an entry a reader sees (§5)."""
+    FULL = "full"                  # everything: owners, tenant admins, reviewers
+    STRATEGY = "strategy"          # verdict aggregates only, for strategies
+
+class ExportFormat(StrEnum):
+    FILESYSTEM = "filesystem"      # canonical JSON files of the strategy view (§9.1)
+    TRAINING = "training"          # training data; requires tenant opt-in (§9.2)
+
+# Page: the shared page type, 09-evolution-api.md §2.2.
+# ArchiveView: a snapshot of lineage plus per-split scores, read by the selectors (§7).
+
+
 class ExperimentLedger(Protocol):
     """Append-only record of improvement experiments and governance events.
 
@@ -689,7 +750,7 @@ class ExperimentLedger(Protocol):
     async def record_submission(
         self, *, bot: BotRef, run_id: str, binding_id: str, iteration: int,
         candidate_id: str, mechanism: MechanismRef, parent_revision: str,
-        candidate_revision: str, evidence: list[str], patch: PatchSummary,
+        candidate_revision: str, evidence: list[EvidenceRef], patch: PatchSummary,
         cost: Cost, actor: Actor,
     ) -> str:
         """Create the experiment entry for a submitted candidate.
@@ -718,24 +779,24 @@ class ExperimentLedger(Protocol):
 
     # --- reads -------------------------------------------------------------
 
-    async def get(self, bot: BotRef, entry_id: str, *, view: "LedgerView") -> LedgerEntry:
+    async def get(self, bot: BotRef, entry_id: str, *, view: LedgerView) -> LedgerEntry:
         """Return one entry as the given view sees it (full or strategy)."""
         ...
 
     async def query(
-        self, bot: BotRef, flt: LedgerFilter, *, view: "LedgerView",
-    ) -> "Page[LedgerEntry]":
+        self, bot: BotRef, flt: LedgerFilter, *, view: LedgerView,
+    ) -> Page[LedgerEntry]:
         """Return one page (`flt.page`, `flt.page_size`) of entries, newest first."""
         ...
 
-    async def archive(self, bot: BotRef, *, verifier_version: str) -> "ArchiveView":
+    async def archive(self, bot: BotRef, *, verifier_version: str) -> ArchiveView:
         """Snapshot of lineage plus per-split scores, for selectors."""
         ...
 
     # --- exports and derived data -----------------------------------------
 
     async def start_export(
-        self, bot: BotRef, *, format: Literal["filesystem", "training"],
+        self, bot: BotRef, *, format: ExportFormat,
         flt: LedgerFilter, idempotency_key: str, requested_by: Actor,
     ) -> str:
         """Start an export operation and return its operation id at once.
@@ -751,9 +812,6 @@ class ExperimentLedger(Protocol):
     ) -> MechanismMetrics:
         """Derived metrics for one mechanism revision (later, level 3)."""
         ...
-
-
-LedgerView = Literal["full", "strategy"]
 ```
 
 ## 12. API
@@ -847,7 +905,7 @@ GET /openapi/v1/bots/bot_123/evolution/ledger/led_5c2
   },
   "parent_revision": "sha256:a90b…",
   "candidate_revision": "sha256:7c1e…",
-  "evidence": ["episode:ep_91", "episode:ep_97", "finding:f_12"],
+  "evidence": ["episode:ep_91", "episode:ep_97", "feedback:fb_311"],
   "patch": {
     "patch_digest": "sha256:d2f8…",
     "ops": ["persona/SOUL.md: replace_section Escalation", "skills/refund-policy: update SKILL.md"],
@@ -878,7 +936,7 @@ GET /openapi/v1/bots/bot_123/evolution/ledger/led_5c2
   "events": [
     {"seq": 1, "type": "submitted", "at": "2026-10-09T02:41:07Z",
      "actor": {"kind": "strategy_run", "id": "run_7f3"}, "reason": "Round 2 tune result",
-     "links": ["episode:ep_91", "episode:ep_97", "finding:f_12"], "data": {"candidate_id": "sha256:c41e…"}},
+     "links": ["episode:ep_91", "episode:ep_97", "feedback:fb_311"], "data": {"candidate_id": "sha256:c41e…"}},
     {"seq": 2, "type": "verified", "at": "2026-10-09T03:29:55Z",
      "actor": {"kind": "platform", "id": "verification"}, "reason": "Verdict accept",
      "links": ["eval:eval_301", "eval:eval_302", "eval:eval_303"],

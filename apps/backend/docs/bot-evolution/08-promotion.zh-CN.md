@@ -98,8 +98,7 @@ LLM 编写的技能在没有评测引导修订时往往毫无增益；harness �
 `risk_overrides`。
 
 ```python
-from enum import IntEnum
-from typing import Literal
+from enum import IntEnum, StrEnum
 
 class RiskTier(IntEnum):     # ordered, so tiers compare; serialized by name ("T0".."T3") in JSON
     T0 = 0   # annotations only
@@ -107,20 +106,24 @@ class RiskTier(IntEnum):     # ordered, so tiers compare; serialized by name ("T
     T2 = 2   # persona edits, skill add/update, allowlisted engine_config, any rewrite-flagged edit
     T3 = 3   # tools, script, memory replace mode, permissions, anything in policy: locked by default
 
-# The Genome Patch op names (01-genome.md §6.1; the full set is fixed by RSI-02).
-PatchOpName = Literal["file.edit", "skill.add", "skill.update", "memory.add",
-                      "memory.update", "memory.retire", "engine_config.set"]
+class PatchOpName(StrEnum):
+    """The Genome Patch op names (01-genome.md §6.1; the full set is fixed by RSI-02)."""
+    FILE_EDIT = "file.edit"
+    SKILL_ADD = "skill.add"
+    SKILL_UPDATE = "skill.update"
+    MEMORY_ADD = "memory.add"
+    MEMORY_UPDATE = "memory.update"
+    MEMORY_RETIRE = "memory.retire"
+    ENGINE_CONFIG_SET = "engine_config.set"
+
+class RaiseKind(StrEnum):           # why a tier was raised (§5.1)
+    REWRITE = "rewrite"             # a file.edit changed more than the rewrite threshold of a file
+    GUARDRAIL_TOUCH = "guardrail_touch"   # the patch mentions or edits guardrail-like text
 
 @dataclass(frozen=True)
 class TierRaise:                    # one raise applied after the per-op mapping (§5.1)
-    kind: Literal["rewrite", "guardrail_touch"]
+    kind: RaiseKind
     target: str | None              # the file that triggered it, e.g. "persona/SOUL.md"; None for patch-wide
-
-@dataclass(frozen=True)
-class TierAssessment:
-    tier: RiskTier                  # the patch's tier: the maximum over its ops, after raises and overrides
-    per_op: list["OpTier"]          # one entry per patch op, in patch order
-    raised_by: list[TierRaise]      # empty when no raise applied
 
 @dataclass(frozen=True)
 class OpTier:
@@ -129,6 +132,12 @@ class OpTier:
     target: str                     # what the op changes, e.g. "persona/SOUL.md", "skills/refund-policy"
     tier: RiskTier
     reason: str                     # short human-readable reason for the tier, e.g. "persona edit"
+
+@dataclass(frozen=True)
+class TierAssessment:
+    tier: RiskTier                  # the patch's tier: the maximum over its ops, after raises and overrides
+    per_op: list[OpTier]            # one entry per patch op, in patch order
+    raised_by: list[TierRaise]      # empty when no raise applied
 ```
 
 ```jsonc
@@ -151,18 +160,36 @@ class OpTier:
 
 ```python
 from dataclasses import dataclass
-from typing import Literal
 
-CheckName = Literal[
-    "static_floor", "regression_floor", "verification_verdict",
-    "holdout", "budget_matched_baseline", "risk_tier_approval",
-]
-GateOutcome = Literal["auto_promote", "needs_review", "not_promotable"]
+class CheckName(StrEnum):           # the gate checks of §4
+    STATIC_FLOOR = "static_floor"
+    REGRESSION_FLOOR = "regression_floor"
+    VERIFICATION_VERDICT = "verification_verdict"
+    HOLDOUT = "holdout"
+    BUDGET_MATCHED_BASELINE = "budget_matched_baseline"
+    RISK_TIER_APPROVAL = "risk_tier_approval"
+
+class CheckResult(StrEnum):
+    PASS = "pass"
+    FAIL = "fail"
+    NOT_REQUIRED = "not_required"   # the check does not apply to this candidate
+    NOT_RUN = "not_run"             # the check applies but has not run
+
+class GateOutcome(StrEnum):
+    AUTO_PROMOTE = "auto_promote"
+    NEEDS_REVIEW = "needs_review"
+    NOT_PROMOTABLE = "not_promotable"
+
+class VerdictStatus(StrEnum):       # same set as 07-verification.md §2.6
+    PENDING = "pending"
+    ACCEPT = "accept"
+    REJECT = "reject"
+    INCONCLUSIVE = "inconclusive"
 
 @dataclass(frozen=True)
 class GateCheck:
     name: CheckName
-    result: Literal["pass", "fail", "not_required", "not_run"]
+    result: CheckResult
     detail: str                     # short human-readable reason
     evidence: list[str]             # ids: "eval:ev_301", "scan:sc_77", ...
 
@@ -175,7 +202,7 @@ class GateDecision:
     parent_revision_id: str         # base the patch was made against
     run_id: str
     binding_id: str
-    verdict: Literal["accept", "reject", "inconclusive"]   # the final verdict the gate decided on
+    verdict: VerdictStatus          # the final verdict the gate decided on; never PENDING
     verification_profile: str       # "default@1"
     verifier_version: str           # recorded so decisions across verifier versions are not mixed
     risk: TierAssessment
@@ -218,7 +245,11 @@ class GateDecision:
 ### 2.3 ReviewItem
 
 ```python
-ReviewStatus = Literal["open", "approved", "rejected", "superseded"]
+class ReviewStatus(StrEnum):
+    OPEN = "open"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    SUPERSEDED = "superseded"       # closed without a decision: its parent is no longer active (§6.2)
 
 @dataclass(frozen=True)
 class ReviewItem:
@@ -233,7 +264,8 @@ class ReviewItem:
     risk_tier: RiskTier
     gate_decision_id: str
     rationale: str                  # from the candidate; required on every patch
-    evidence: list[str]             # "episode:ep_91", "finding:f_12"
+    evidence: list[EvidenceRef]     # EvidenceRef "<kind>:<id>": 01-genome.md §2.2;
+                                    # e.g. "episode:ep_91", "feedback:fb_311"
     self_reported_metrics: dict     # shown to reviewers, never used for acceptance
     status: ReviewStatus
     created_at: str
@@ -257,7 +289,7 @@ class ReviewItem:
   "risk_tier": "T2",
   "gate_decision_id": "gd_204",
   "rationale": "Escalation section did not cover refunds above the tier limit; 9 of 31 failed episodes were mis-escalated.",
-  "evidence": ["episode:ep_91", "finding:f_12"],
+  "evidence": ["episode:ep_91", "feedback:fb_311"],
   "self_reported_metrics": {"train_pass_rate": "0.81"},   // strategy's own claim, informational only
   "status": "open",
   "created_at": "2026-10-08T03:41:00Z",
@@ -271,17 +303,33 @@ class ReviewItem:
 ### 2.4 Promotion
 
 ```python
-PromotionStatus = Literal["applying", "applied", "apply_failed"]
-ActorKind = Literal["user", "pipeline", "gate_policy", "rollout_policy"]
+class PromotionStatus(StrEnum):
+    APPLYING = "applying"
+    APPLIED = "applied"
+    APPLY_FAILED = "apply_failed"
+
+class ActorKind(StrEnum):
+    USER = "user"
+    PIPELINE = "pipeline"
+    GATE_POLICY = "gate_policy"         # auto-promotion
+    ROLLOUT_POLICY = "rollout_policy"   # auto-rollback
+
+class PromotableRef(StrEnum):       # the refs a promotion moves (01-genome.md §5)
+    ACTIVE = "active"
+    CANARY = "canary"
+
+class ApplyKind(StrEnum):
+    MANIFEST_APPLY = "manifest_apply"     # personal bot: Manifest apply
+    SERVICE_PUBLISH = "service_publish"   # service bot: publish flow
 
 @dataclass(frozen=True)
 class Actor:
-    kind: ActorKind                 # gate_policy = auto-promotion; rollout_policy = auto-rollback
+    kind: ActorKind
     id: str                         # user id, pipeline credential name, or policy/binding id
 
 @dataclass(frozen=True)
 class ApplyResult:
-    kind: Literal["manifest_apply", "service_publish"]   # personal bot: Manifest apply; service bot: publish flow
+    kind: ApplyKind
     reference: str | None           # apply report id or published version, once known
     detail: str                     # short human-readable progress or failure text
 
@@ -289,7 +337,7 @@ class ApplyResult:
 class Promotion:
     id: str                         # "prm_5d2"
     bot: BotRef                     # the bot (owner + bot id)
-    ref: Literal["active", "canary"]
+    ref: PromotableRef
     revision_id: str                # what the ref now points at
     revision_seq: int
     from_revision_id: str           # what the ref pointed at before
@@ -329,9 +377,22 @@ class Promotion:
 不做存储。
 
 ```python
+class Split(StrEnum):               # same set as 07-verification.md §2.2
+    TRAIN = "train"
+    VALIDATION = "validation"
+    HOLDOUT = "holdout"
+    REGRESSION = "regression"
+    SAFETY = "safety"
+
+class ReportFlag(StrEnum):          # meanings in §6.1
+    REWRITE = "rewrite"
+    GUARDRAIL_TOUCH = "guardrail_touch"
+    OVERFIT_SUSPECT = "overfit_suspect"
+    WINS_BY_SPENDING = "wins_by_spending"
+
 @dataclass(frozen=True)
 class SplitSummary:
-    split: Literal["train", "validation", "holdout", "regression", "safety"]
+    split: Split
     mean_delta: str                 # candidate minus parent, mean score; decimal string (no floats in canonical JSON)
     ci_low: str | None              # confidence interval of mean_delta; None for must-pass splits
     ci_high: str | None
@@ -352,11 +413,11 @@ class CandidateReport:
     patch_summary: list[OpTier]     # ops with their tiers
     diff_path: str                  # relative API path of the genome diff
     rationale: str
-    evidence: list[str]
-    verdict: Literal["pending", "accept", "reject", "inconclusive"]
+    evidence: list[EvidenceRef]
+    verdict: VerdictStatus
     splits: list[SplitSummary]
     cost: dict                      # parent vs candidate cost per case
-    flags: list[Literal["rewrite", "guardrail_touch", "overfit_suspect", "wins_by_spending"]]   # meanings in §6.1
+    flags: list[ReportFlag]
     gate: GateDecision
     review: ReviewItem | None
 ```
@@ -667,7 +728,7 @@ ClawEvolve 的 `skill-decision` 人工批准（由
 - 候选修订版相对其父修订版的 **diff**（基因组 diff，
   [01-genome.zh-CN.md](01-genome.zh-CN.md)），附带每个操作的等级以及该
   补丁获得其等级的原因；
-- 策略的**理由**和**证据**（片段、发现）——每个
+- 策略的**理由**和**证据**（片段、反馈）——每个
   补丁都必须带有理由，非平凡操作必须引用证据；
 - 按划分的**验证摘要**：`validation` 上的配对均值差和
   置信区间，`regression` 和 `safety` 上新失败的用例，
@@ -845,6 +906,8 @@ bot 通过现有的发布流程，将其作为**下一个发布版本**获得。
 ```python
 from typing import Protocol
 
+# GenomePatch, GenomeRevision, GenomePolicy: 01-genome.md §2. Page: 09-evolution-api.md §2.2.
+
 class PromotionService(Protocol):
     """Platform-owned gate, review queue, and promotion (DR-2).
 
@@ -878,9 +941,9 @@ class PromotionService(Protocol):
         """Diff + verification summary + gate decision + review state.
         Per-case verification detail is filtered by the viewer's role."""
 
-    def review_queue(self, bot: BotRef, status: ReviewStatus | None = "open",
+    def review_queue(self, bot: BotRef, status: ReviewStatus | None = ReviewStatus.OPEN,
                      min_tier: RiskTier | None = None,
-                     page: int = 1, page_size: int = 20) -> "Page[ReviewItem]":
+                     page: int = 1, page_size: int = 20) -> Page[ReviewItem]:
         """List review items for a bot, newest first."""
 
     def approve(self, bot: BotRef, candidate_id: str, actor: Actor, reason: str,
@@ -897,28 +960,39 @@ class PromotionService(Protocol):
                idempotency_key: str) -> ReviewItem:
         """Reject an open item; the revision's status becomes rejected."""
 
-    def promote(self, bot: BotRef, revision_id: str, ref: Literal["active", "canary"], expected_revision: str,
+    def promote(self, bot: BotRef, revision_id: str, ref: PromotableRef, expected_revision: str,
                 actor: Actor, reason: str, idempotency_key: str) -> Promotion:
         """Move `ref` ("active" or "canary") to `revision_id` with CAS on
         `expected_revision`, then apply. Going back is this call with an
         earlier revision. Raises RefConflict, NotPromotable, PolicyDenied."""
 
 
+class FloorCheckName(StrEnum):      # one per row of §4.2
+    SCHEMA = "schema"
+    BASE = "base"
+    LOCKED_GENES_AND_PINS = "locked_genes_and_pins"
+    ALLOWED_GENES = "allowed_genes"
+    SECRET_PII_SCAN = "secret_pii_scan"
+    OUTBOUND_ENDPOINTS = "outbound_endpoints"
+    PERMISSION_ESCALATION = "permission_escalation"
+    SIZE_AND_REWRITE = "size_and_rewrite"
+    BUDGET = "budget"
+
+
 class FloorCheck(Protocol):
     """One platform-floor rule (§4.2). Floor checks are plugins owned by the
     platform, never by strategies; adding one is a reviewed platform change."""
 
-    name: Literal["schema", "base", "locked_genes_and_pins", "allowed_genes", "secret_pii_scan",
-                  "outbound_endpoints", "permission_escalation", "size_and_rewrite", "budget"]   # one per row of §4.2
+    name: FloorCheckName
 
-    def check(self, patch: "GenomePatch", parent: "GenomeRevision",
-              policy: "GenomePolicy", allowed_genes: list[str]) -> GateCheck: ...
+    def check(self, patch: GenomePatch, parent: GenomeRevision,
+              policy: GenomePolicy, allowed_genes: list[str]) -> GateCheck: ...
 
 
 class RiskClassifier(Protocol):
     """Maps a patch to its risk tier (§5.1), including raises and owner overrides."""
 
-    def classify(self, patch: "GenomePatch", policy: "GenomePolicy") -> TierAssessment: ...
+    def classify(self, patch: GenomePatch, policy: GenomePolicy) -> TierAssessment: ...
 ```
 
 底线背后的密钥与 PII 扫描器与
@@ -974,7 +1048,7 @@ GET /openapi/v1/bots/bot_123/evolution/candidates/sha256:c41e…
   ],
   "diff_path": "/bots/bot_123/genome/revisions/sha256:7c1e…/diff?against=sha256:a90b…",
   "rationale": "Escalation section did not cover refunds above the tier limit; 9 of 31 failed episodes were mis-escalated.",
-  "evidence": ["episode:ep_91", "finding:f_12"],
+  "evidence": ["episode:ep_91", "feedback:fb_311"],
   "verdict": "accept",
   "splits": [
     {"split": "validation", "mean_delta": "0.12", "ci_low": "0.05", "ci_high": "0.19", "newly_failing": 0, "detail_visible": true},
@@ -1031,7 +1105,7 @@ GET /openapi/v1/bots/bot_123/evolution/review-queue?status=open
       "risk_tier": "T2",
       "gate_decision_id": "gd_204",
       "rationale": "Escalation section did not cover refunds above the tier limit; 9 of 31 failed episodes were mis-escalated.",
-      "evidence": ["episode:ep_91", "finding:f_12"],
+      "evidence": ["episode:ep_91", "feedback:fb_311"],
       "self_reported_metrics": {"train_pass_rate": "0.81"},
       "status": "open",
       "created_at": "2026-10-08T03:41:00Z",

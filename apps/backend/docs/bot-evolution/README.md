@@ -74,7 +74,7 @@ ADR number:
 | Term | Meaning |
 | --- | --- |
 | **Bot Genome** | The evolvable, declarative definition of one bot: persona files, skills, memory, resources, tools, engine config. Immutable once recorded; identified by content hash. |
-| **Genome Revision** | One recorded version of a Genome, with parent pointer(s), provenance, and status. |
+| **Genome Revision** | One recorded version of a Genome, with a parent pointer, provenance, and status. |
 | **Genome Patch** | A typed, itemized change from one revision to another. The only thing a strategy may submit. |
 | **Phenotype** | The running bot (engine + workspace) produced by applying a revision. Observed, never edited by evolution. |
 | **Experience** | Normalized episodes (sessions or trajectories) and feedback collected from running bots, each tagged with the revision that produced it. |

@@ -105,7 +105,106 @@ Types that other docs own and that appear here only by id: `GenomeRevision`,
 `GateDecision`, `RiskTier`, `ReviewItem`, `Promotion`
 ([08-promotion.md](08-promotion.md)).
 
-### 2.1 LedgerEntry
+### 2.1 LedgerEvent
+
+Every change to a ledger entry (§2.2) is an appended event. The entry's
+top-level fields are the fold of its events; the events are the audit
+trail. An event is never edited or removed. Events come first because an
+entry holds its list of events; the block below also defines the shared
+types that the rest of this section uses.
+
+```python
+from dataclasses import dataclass, field
+from enum import StrEnum
+
+class EntryKind(StrEnum):
+    EXPERIMENT = "experiment"                    # one submitted candidate and everything that happened to it
+    GOVERNANCE = "governance"                    # one audited event not tied to a submitted candidate
+
+class VerdictStatus(StrEnum):                    # same set as 07-verification.md §2.6
+    PENDING = "pending"
+    ACCEPT = "accept"
+    REJECT = "reject"
+    INCONCLUSIVE = "inconclusive"
+
+class GeneCategory(StrEnum):
+    """Top-level gene categories of a genome (01-genome.md §2.1)."""
+    PERSONA = "persona"
+    SKILLS = "skills"
+    MEMORY = "memory"
+    RESOURCES = "resources"
+    TOOLS_MCP = "tools.mcp"
+    TOOLS_CLI_TOOLS = "tools.cli_tools"
+    ENGINE_CONFIG = "engine_config"
+    SCRIPT = "script"
+
+class Split(StrEnum):                            # same set as 07-verification.md §2.2
+    TRAIN = "train"
+    VALIDATION = "validation"
+    HOLDOUT = "holdout"
+    REGRESSION = "regression"
+    SAFETY = "safety"
+
+# RiskTier (T0 < T1 < T2 < T3) is defined once in 08-promotion.md §5.
+# BotRef {owner_id, bot_id}: a bot's full identity (a bot_id alone is not unique
+# across users); defined once in 09-evolution-api.md §2.7.
+# EvidenceRef "<kind>:<id>": 01-genome.md §2.2.
+
+
+class EventType(StrEnum):
+    SUBMITTED = "submitted"                  # candidate recorded (Evolution Run)
+    VERIFIED = "verified"                    # verdict written, with verifier version (Verification)
+    GATE_DECIDED = "gate_decided"            # gate decision and risk tier (Promotion)
+    REVIEWED = "reviewed"                    # approve or reject by a human (Promotion)
+    PROMOTED = "promoted"                    # active moved to this revision (Promotion)
+    GONE_BACK = "gone_back"                  # active later moved away by promoting an earlier revision (Promotion)
+    ONLINE_OUTCOME = "online_outcome"        # delayed join of live metrics (Experience / online verification)
+    HOLDOUT_AUDIT = "holdout_audit"          # holdout score: final candidate of a run before promotion, or periodic on active (Verification)
+    REVISION_RECORDED = "revision_recorded"  # revision recorded outside a run, e.g. from a Manifest (Genome)
+
+class ActorKind(StrEnum):
+    USER = "user"                            # an owner, tenant admin, or reviewer
+    PIPELINE = "pipeline"                    # a pipeline or product backend, by client id
+    PLATFORM = "platform"                    # one of the platform's own services
+    STRATEGY_RUN = "strategy_run"            # an Evolution Run, by run id
+
+
+@dataclass(frozen=True)
+class Actor:
+    kind: ActorKind
+    id: str               # user id, pipeline client id, platform service name, or run id
+
+
+@dataclass(frozen=True)
+class LedgerEvent:
+    seq: int              # per-entry, strictly increasing from 1
+    type: EventType
+    at: str               # RFC 3339 UTC
+    actor: Actor
+    reason: str           # human-readable; required for reviewed / promoted / gone_back
+    links: list[str]      # evidence and evaluation ids, e.g. "eval:eval_301", "episode:ep_91"
+    data: dict            # type-specific payload, schema per event type
+```
+
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+{
+  "seq": 3,
+  "type": "gate_decided",
+  "at": "2026-10-09T03:30:12Z",
+  "actor": {"kind": "platform", "id": "promotion"},
+  "reason": "Floor passed; verdict accept; T2 requires human review",
+  "links": ["eval:eval_301", "eval:eval_302", "eval:eval_303"],
+  "data": {"risk_tier": "T2", "decision": "needs_review", "review_item": "rev_q_12"}
+}
+```
+
+Actor kinds cover the first-iteration callers: users (owners, tenant admins,
+reviewers), pipelines, the platform's own services, and strategy runs. Bot
+callers are postponed with DR-3; if they are admitted later, they add an
+actor kind.
+
+### 2.2 LedgerEntry
 
 An experiment entry carries every field of the experiment schema that the
 level-3 design fixed early (formerly `04-recursion.md` §3):
@@ -115,7 +214,7 @@ level-3 design fixed early (formerly `04-recursion.md` §3):
 | `entry_id`, `run_id`, `iteration` | Identity. `entry_id` is the experiment id; `iteration` is the order of the submission within its run |
 | `mechanism_revision` | The exact mechanism M used |
 | `parent_revision` → `candidate_revision` | S and S′ (Bot Genome revision ids) |
-| `evidence` | Episode and finding ids the mechanism consumed |
+| `evidence` | Episode and feedback ids the mechanism consumed |
 | `patch` | What it proposed (ops, risk tier, size) |
 | `verdict` | Bot verification result per split, gate decision, reasons |
 | `cost` | Tokens, money, wall clock, rollouts |
@@ -128,23 +227,15 @@ going back, and wasted budget. That is what lets a later meta-strategy learn
 mutation-operator library would want to.
 
 ```python
-from dataclasses import dataclass, field
-from typing import Literal
-
-EntryKind = Literal["experiment", "governance"]
-VerdictStatus = Literal["pending", "accept", "reject", "inconclusive"]
-RiskTier = Literal["T0", "T1", "T2", "T3"]
-# Top-level gene categories of a genome (01-genome.md §2.1).
-GeneCategory = Literal["persona", "skills", "memory", "resources", "tools.mcp",
-                       "tools.cli_tools", "engine_config", "script"]
-# BotRef {owner_id, bot_id}: a bot's full identity (a bot_id alone is not unique
-# across users); defined once in 09-evolution-api.md §2.7.
+class TargetKind(StrEnum):
+    """What a mechanism improves."""
+    BOT_GENOME = "bot_genome"                    # "mechanism" is added with level 3
 
 
 @dataclass(frozen=True)
 class MechanismRef:
     """The exact mechanism (M) that produced a candidate. Frozen from the run."""
-    target_kind: Literal["bot_genome"]           # "mechanism" is added with level 3
+    target_kind: TargetKind
     strategy: str                                # "clawevolve/bot-evolution"
     version: str                                 # "2.0.0"
     agent_definitions: dict[str, str]            # definition name -> content digest
@@ -163,7 +254,7 @@ class PatchSummary:
 
 @dataclass(frozen=True)
 class SplitResult:
-    split: Literal["train", "validation", "holdout", "regression", "safety"]
+    split: Split
     cases: int                                   # number of cases of this split that were run
     mean_delta: str                              # candidate minus parent, mean score; decimal as string (no floats in hashed records)
     ci_low: str | None                           # lower end of the confidence interval of mean_delta; None for must-pass splits
@@ -199,10 +290,18 @@ class Adoption:
     gone_back_by: str | None                     # promotion id that went back
 
 
+class OutcomeSource(StrEnum):
+    """Where an online outcome's live metrics come from."""
+    SHADOW = "shadow"                            # replayed or mirrored traffic, graded offline, no user impact
+    CANARY = "canary"                            # traffic split between active (S1) and canary (S2)
+    ACTIVE_VS_PREVIOUS = "active_vs_previous"    # the new active (S2) against the revision it replaced (S1)
+    RECURRENCE_CHECK = "recurrence_check"        # ClawInsight: whether the fixed failure came back
+
+
 @dataclass
 class OnlineOutcome:
     window: str                                  # "2026-10-09/2026-10-16"
-    source: Literal["shadow", "canary", "active_vs_previous", "recurrence_check"]
+    source: OutcomeSource
     metrics: dict[str, str]                      # metric name -> decimal string, S2 minus S1
     episodes_compared: int
 
@@ -221,13 +320,13 @@ class LedgerEntry:
     mechanism_revision: MechanismRef | None
     parent_revision: str | None
     candidate_revision: str | None
-    evidence: list[str] = field(default_factory=list)
+    evidence: list[EvidenceRef] = field(default_factory=list)
     patch: PatchSummary | None = None
     verdict: VerdictRecord | None = None
     cost: Cost | None = None
     adoption: Adoption | None = None
     online_outcome: list[OnlineOutcome] = field(default_factory=list)
-    events: list["LedgerEvent"] = field(default_factory=list)
+    events: list[LedgerEvent] = field(default_factory=list)
 ```
 
 The optional fields are optional because they are genuinely absent for a
@@ -255,7 +354,7 @@ until the revision has been live long enough.
   },
   "parent_revision": "sha256:a90b…",               // r41
   "candidate_revision": "sha256:7c1e…",            // r42
-  "evidence": ["episode:ep_91", "episode:ep_97", "finding:f_12"],
+  "evidence": ["episode:ep_91", "episode:ep_97", "feedback:fb_311"],
   "patch": {
     "patch_digest": "sha256:d2f8…",
     "ops": ["persona/SOUL.md: replace_section Escalation", "skills/refund-policy: update SKILL.md"],
@@ -322,63 +421,6 @@ set to `null` and a `subject` naming what the event is about:
   ]
 }
 ```
-
-### 2.2 LedgerEvent
-
-Every change to an entry is an appended event. The entry's top-level fields
-are the fold of its events; the events are the audit trail. An event is
-never edited or removed.
-
-```python
-EventType = Literal[
-    "submitted",          # candidate recorded (Evolution Run)
-    "verified",           # verdict written, with verifier version (Verification)
-    "gate_decided",       # gate decision and risk tier (Promotion)
-    "reviewed",           # approve or reject by a human (Promotion)
-    "promoted",           # active moved to this revision (Promotion)
-    "gone_back",          # active later moved away by promoting an earlier revision (Promotion)
-    "online_outcome",     # delayed join of live metrics (Experience / online verification)
-    "holdout_audit",      # holdout score: final candidate of a run before promotion, or periodic on active (Verification)
-    "revision_recorded",  # revision recorded outside a run, e.g. from a Manifest (Genome)
-]
-
-ActorKind = Literal["user", "pipeline", "platform", "strategy_run"]
-
-
-@dataclass(frozen=True)
-class Actor:
-    kind: ActorKind
-    id: str               # user id, pipeline client id, platform service name, or run id
-
-
-@dataclass(frozen=True)
-class LedgerEvent:
-    seq: int              # per-entry, strictly increasing from 1
-    type: EventType
-    at: str               # RFC 3339 UTC
-    actor: Actor
-    reason: str           # human-readable; required for reviewed / promoted / gone_back
-    links: list[str]      # evidence and evaluation ids, e.g. "eval:eval_301", "episode:ep_91"
-    data: dict            # type-specific payload, schema per event type
-```
-
-```jsonc
-// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-{
-  "seq": 3,
-  "type": "gate_decided",
-  "at": "2026-10-09T03:30:12Z",
-  "actor": {"kind": "platform", "id": "promotion"},
-  "reason": "Floor passed; verdict accept; T2 requires human review",
-  "links": ["eval:eval_301", "eval:eval_302", "eval:eval_303"],
-  "data": {"risk_tier": "T2", "decision": "needs_review", "review_item": "rev_q_12"}
-}
-```
-
-Actor kinds cover the first-iteration callers: users (owners, tenant admins,
-reviewers), pipelines, the platform's own services, and strategy runs. Bot
-callers are postponed with DR-3; if they are admitted later, they add an
-actor kind.
 
 ### 2.3 LedgerFilter
 
@@ -505,7 +547,7 @@ the genome revisions:
 
 | View | Built from | Used by |
 | --- | --- | --- |
-| **Lineage tree** of a bot | Genome revisions' `parents`, joined with entries by `candidate_revision` | UI lineage tree (RSI-20), parent selectors |
+| **Lineage tree** of a bot | Genome revisions' `parent`, joined with entries by `candidate_revision` | UI lineage tree (RSI-20), parent selectors |
 | **Candidate scores per split** | `verdict.splits` of each entry | Candidate report (with Promotion), Pareto selector |
 | **Provenance of a candidate** | `mechanism_revision`, `evidence`, `patch` | Reviewers, level 3 |
 | **Approvals and promotions** | `adoption` and the `reviewed` / `promoted` / `gone_back` events | Audit UI |
@@ -616,13 +658,20 @@ Rules (proposed):
 
 ```python
 # One value per row of the table above; a new selector is a reviewed platform change.
-SelectorName = Literal["active", "latest_best", "pareto_per_case", "map_elites", "clade_metaproductivity"]
+class SelectorName(StrEnum):
+    ACTIVE = "active"
+    LATEST_BEST = "latest_best"
+    PARETO_PER_CASE = "pareto_per_case"
+    MAP_ELITES = "map_elites"
+    CLADE_METAPRODUCTIVITY = "clade_metaproductivity"
+
+# ArchiveView: the snapshot ExperimentLedger.archive() returns (§11).
 
 class ParentSelector(Protocol):
     name: SelectorName
     version: str                               # platform version of the selector code, e.g. "1.0.0"
 
-    def select(self, bot: BotRef, archive: "ArchiveView", seed: int) -> str:
+    def select(self, bot: BotRef, archive: ArchiveView, seed: int) -> str:
         """Return the revision id a new run starts from.
 
         Deterministic for a given archive snapshot and seed, so a
@@ -687,7 +736,7 @@ directory of canonical JSON files:
 ```text
 ledger-export/
   manifest.json                     # bot, filter, verifier versions, created_at, entry count
-  lineage.json                      # revision id -> parents, seq ("r41"), status
+  lineage.json                      # revision id -> parent, seq ("r41"), status
   entries/
     led_5c2.json                    # one LedgerEntry, strategy view (aggregates only)
     led_5c9.json
@@ -747,6 +796,19 @@ Protocol in `apps/evolution` core; the public API in [§12](#12-api) is a
 delivery adapter over the read and export methods.
 
 ```python
+class LedgerView(StrEnum):
+    """How much of an entry a reader sees (§5)."""
+    FULL = "full"                  # everything: owners, tenant admins, reviewers
+    STRATEGY = "strategy"          # verdict aggregates only, for strategies
+
+class ExportFormat(StrEnum):
+    FILESYSTEM = "filesystem"      # canonical JSON files of the strategy view (§9.1)
+    TRAINING = "training"          # training data; requires tenant opt-in (§9.2)
+
+# Page: the shared page type, 09-evolution-api.md §2.2.
+# ArchiveView: a snapshot of lineage plus per-split scores, read by the selectors (§7).
+
+
 class ExperimentLedger(Protocol):
     """Append-only record of improvement experiments and governance events.
 
@@ -760,7 +822,7 @@ class ExperimentLedger(Protocol):
     async def record_submission(
         self, *, bot: BotRef, run_id: str, binding_id: str, iteration: int,
         candidate_id: str, mechanism: MechanismRef, parent_revision: str,
-        candidate_revision: str, evidence: list[str], patch: PatchSummary,
+        candidate_revision: str, evidence: list[EvidenceRef], patch: PatchSummary,
         cost: Cost, actor: Actor,
     ) -> str:
         """Create the experiment entry for a submitted candidate.
@@ -789,24 +851,24 @@ class ExperimentLedger(Protocol):
 
     # --- reads -------------------------------------------------------------
 
-    async def get(self, bot: BotRef, entry_id: str, *, view: "LedgerView") -> LedgerEntry:
+    async def get(self, bot: BotRef, entry_id: str, *, view: LedgerView) -> LedgerEntry:
         """Return one entry as the given view sees it (full or strategy)."""
         ...
 
     async def query(
-        self, bot: BotRef, flt: LedgerFilter, *, view: "LedgerView",
-    ) -> "Page[LedgerEntry]":
+        self, bot: BotRef, flt: LedgerFilter, *, view: LedgerView,
+    ) -> Page[LedgerEntry]:
         """Return one page (`flt.page`, `flt.page_size`) of entries, newest first."""
         ...
 
-    async def archive(self, bot: BotRef, *, verifier_version: str) -> "ArchiveView":
+    async def archive(self, bot: BotRef, *, verifier_version: str) -> ArchiveView:
         """Snapshot of lineage plus per-split scores, for selectors."""
         ...
 
     # --- exports and derived data -----------------------------------------
 
     async def start_export(
-        self, bot: BotRef, *, format: Literal["filesystem", "training"],
+        self, bot: BotRef, *, format: ExportFormat,
         flt: LedgerFilter, idempotency_key: str, requested_by: Actor,
     ) -> str:
         """Start an export operation and return its operation id at once.
@@ -822,9 +884,6 @@ class ExperimentLedger(Protocol):
     ) -> MechanismMetrics:
         """Derived metrics for one mechanism revision (later, level 3)."""
         ...
-
-
-LedgerView = Literal["full", "strategy"]
 ```
 
 ## 12. API
@@ -921,7 +980,7 @@ Example response (`200`):
   },
   "parent_revision": "sha256:a90b…",
   "candidate_revision": "sha256:7c1e…",
-  "evidence": ["episode:ep_91", "episode:ep_97", "finding:f_12"],
+  "evidence": ["episode:ep_91", "episode:ep_97", "feedback:fb_311"],
   "patch": {
     "patch_digest": "sha256:d2f8…",
     "ops": ["persona/SOUL.md: replace_section Escalation", "skills/refund-policy: update SKILL.md"],
@@ -952,7 +1011,7 @@ Example response (`200`):
   "events": [
     {"seq": 1, "type": "submitted", "at": "2026-10-09T02:41:07Z",
      "actor": {"kind": "strategy_run", "id": "run_7f3"}, "reason": "Round 2 tune result",
-     "links": ["episode:ep_91", "episode:ep_97", "finding:f_12"], "data": {"candidate_id": "sha256:c41e…"}},
+     "links": ["episode:ep_91", "episode:ep_97", "feedback:fb_311"], "data": {"candidate_id": "sha256:c41e…"}},
     {"seq": 2, "type": "verified", "at": "2026-10-09T03:29:55Z",
      "actor": {"kind": "platform", "id": "verification"}, "reason": "Verdict accept",
      "links": ["eval:eval_301", "eval:eval_302", "eval:eval_303"],
@@ -1107,7 +1166,7 @@ records the promotion of r41 with its reason. False-acceptance rate for
 
 | Other part | Direction | What flows |
 | --- | --- | --- |
-| [01-genome.md](01-genome.md) Genome | Genome → Ledger | Revision ids, parents, `seq`, status; `revision_recorded` events for revisions recorded outside a run |
+| [01-genome.md](01-genome.md) Genome | Genome → Ledger | Revision ids, parent, `seq`, status; `revision_recorded` events for revisions recorded outside a run |
 | [01-genome.md](01-genome.md) Genome | Ledger → Genome | Content reads by digest for exports (patches); never writes |
 | [02-experience.md](02-experience.md) Experience | Experience → Ledger | Episode ids as evidence; live episodes per revision for online outcomes; data handling rules for training export |
 | [03-strategy.md](03-strategy.md) Strategy | Strategy → Ledger (via Evolution Run) | Strategy id and version, agent definition digests, models used, evidence ids, candidate submissions |

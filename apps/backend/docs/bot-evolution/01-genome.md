@@ -20,16 +20,18 @@ reads a revision and proposes a change to it, and every change that reaches a
 running bot is a revision being applied.
 
 In one sentence: a Genome Revision is **a complete, pinned Manifest, plus
-curated memory, plus lineage and a locked policy, changed only through
-patches**.
+curated memory, plus a parent pointer and a locked policy, changed only
+through patches**.
 
 The **Genome Registry** is the component that implements this. It owns:
 
-- Genome Revisions (content, lineage, provenance, status);
+- Genome Revisions (content, parent, provenance, status);
 - named **refs** (`active`, `previous`, `canary`, `draft`, `candidate/<run>/<n>`)
   and their compare-and-swap updates;
-- **Genome Patches**: their schema, validation, and application to a base
-  revision;
+- **Genome Patches**: their schema, applying them to a base revision, and
+  the structural checks run when one is recorded (it applies cleanly to its
+  base and stays inside the policy, §6.2). Whether a change is *good* is not
+  checked here: that is [Verification](07-verification.md);
 - the **genome policy** (locked genes, mutable genes, pins, risk overrides)
   and its structural enforcement when a patch is recorded;
 - content addressing: file bytes referenced by digest in the existing
@@ -66,15 +68,32 @@ independently of any evolution strategy.
 
 ## 2. Domain model
 
+![Genome domain model: a bot's revisions, their spec and policy, patches, refs, and the compiled manifest](images/genome-model.svg)
+
+How the types relate:
+
+- A bot has many **revisions**. Each revision holds one `spec` (the
+  evolvable content) and one `policy` (the owner's rules), plus metadata the
+  platform writes.
+- Every revision except the bot's first has exactly one **parent**. A
+  **patch**, a list of ops, is what turns the parent into the new revision.
+  An owner can also record a revision from a whole Manifest document, with
+  no patch.
+- **Refs** are names (`active`, `draft`, …) that point at revisions.
+- **Compiling** a revision gives the `CompiledManifest` that apply and eval
+  bots consume.
+- File content is never stored inline: every file in `spec` is a **digest**,
+  the address of its bytes in the content store.
+
 | Type | What it is | Owned by | Lifecycle |
 | --- | --- | --- | --- |
 | `GenomeRevision` | One immutable version of a bot's definition: `spec` + `policy`, plus platform-written metadata (`revision`) | Genome Registry | Recorded once (from a patch or a Manifest document), never edited; only its `status` and annotations change; never deleted |
 | `GenomeSpec` | The evolvable content of a revision: persona, skills, memory, resources, tools, engine config, script | Genome Registry (authored by owners, proposed by strategies) | Part of a revision; hashed |
 | `GenomePolicy` | The non-evolvable section: locked genes, mutable genes, pins, risk overrides | Bot owner / tenant admin | Part of a revision; hashed; copied forward verbatim by the platform; no patch may touch it |
-| `RevisionMetadata` | Id, per-bot `seq`, lineage, parents, provenance, status, evidence and evaluation links, annotations | Genome Registry (platform-written) | Written at record time; status/annotations updated later; not hashed |
-| `Provenance` | Who or what created a revision (a person, a strategy run, later a bot) and from which evidence | Genome Registry | Written once at record time |
+| `RevisionMetadata` | Id, per-bot `seq`, parent, provenance, status, evidence and evaluation ids, annotations | Genome Registry (platform-written) | Written at record time; status/annotations updated later; not hashed |
+| `Provenance` | Who or what created a revision (a person, a strategy run, later a bot) | Genome Registry | Written once at record time |
 | `GenomeRef` | A named, movable pointer to a revision (`active`, `previous`, `canary`, `draft`, `candidate/<run>/<n>`) | Genome Registry; each ref has exactly one kind of mover | Moved by compare-and-swap; every move is an audited event |
-| `GenomePatch` | A typed, itemized change against a named base revision; the only thing a strategy may submit | Submitted by strategies (via [Evolution Run](06-evolution-run.md)) or humans; validated by the Registry | Stored content-addressed; its digest is the candidate id |
+| `GenomePatch` | A typed, itemized change against a named base revision; the only thing a strategy may submit | Submitted by strategies (via [Evolution Run](06-evolution-run.md)) or humans; checked by the Registry | Stored content-addressed; its digest is the candidate id |
 | `PatchOp` | One item of a patch (`file.edit`, `skill.add`, `memory.add`, …) | Part of a patch | Each op maps to a risk tier |
 | `MemoryItem` | One curated memory fact/rule/lesson, keyed | Genome (curated memory) | Added, updated, and retired by patch ops |
 | `CompiledManifest` | A revision compiled into a pinned Manifest document plus a memory projection | Genome Registry (derived, not stored as truth) | Produced on demand for apply and eval bots |
@@ -87,91 +106,158 @@ bindings can refer to: a category (`persona`, `skills`, `memory`,
 key inside one (`engine_config.reasoning_effort`), or one item
 (`skills.refund-policy`). The gene path grammar is fixed by RSI-02.
 
-### 2.2 GenomeRevision
+### 2.2 GenomeSpec
+
+Shared aliases first; every type below uses them.
 
 ```python
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal
+from enum import StrEnum
 
-RevisionId = str          # "sha256:<hex64>" over canonical({spec, policy})
-Digest = str              # "sha256:<hex64>" address of bytes in the content store
-
-RevisionStatus = Literal["draft", "candidate", "accepted", "rejected", "promoted", "archived"]
-RiskTier = Literal["T0", "T1", "T2", "T3"]   # meaning of each tier: 08-promotion.md §5
+RevisionId = str   # identity of a revision: "sha256:" + 64 hex chars, the hash of canonical({spec, policy}) (§4.4).
+                   # Example: "sha256:7c1e…" (shortened here and below)
+Digest = str       # address of stored bytes: "sha256:" + 64 hex chars of the bytes themselves.
+                   # Example: "sha256:3f9a…" is the address of one SOUL.md file;
+                   # GET …/genome/content/sha256:3f9a… returns "# Soul\nYou are a patient support agent…" (§9.1)
+# RiskTier (T0 < T1 < T2 < T3) is defined once in 08-promotion.md §5.
 # BotRef {owner_id, bot_id}: the bot's full identity (a bot_id alone is not unique
 # across users); defined once in 09-evolution-api.md §2.7.
-
-@dataclass(frozen=True)
-class Provenance:
-    kind: Literal["user", "strategy_run", "manifest_put", "bot"]   # "bot" postponed with DR-3
-    actor: str                       # user id, or strategy "id@version"
-    run_id: str | None = None        # set only when kind == "strategy_run"
-    step: str | None = None          # the strategy's own step name, e.g. "propose"
-
-@dataclass
-class RevisionMetadata:
-    id: RevisionId
-    seq: int                         # per-bot, human-readable ("r42"); NOT an identity
-    bot: BotRef                      # the bot this revision belongs to (owner + bot id)
-    lineage_id: str                  # stable across descendants; a fork starts a new lineage
-    parents: list[RevisionId]        # [] only for a bot's first revision; >1 for merge/crossover
-    created_by: Provenance
-    created_at: datetime
-    status: RevisionStatus
-    patch_from_parent: Digest | None # digest of the stored GenomePatch; None when recorded from a document
-    evidence: list[str]              # "episode:ep_91", "finding:f_12"
-    evaluations: list[str]           # links into Verification, never embedded scores
-    annotations: dict[str, str] = field(default_factory=dict)   # review notes, experiment tags
-
-@dataclass(frozen=True)
-class GenomeRevision:
-    genome_schema: int               # 1
-    revision: RevisionMetadata       # platform-written, excluded from the hash
-    spec: "GenomeSpec"
-    policy: "GenomePolicy"
 ```
 
+Persona files and skills:
+
 ```python
-# The persona files a bot may have: VALID_IDENTITY_FILES in
-# core/services/identity.py, minus MEMORY.md and IDENTITY.md (reserved, §7),
-# plus the proposed platform-managed LESSONS.md (§7 interim).
-PersonaFileType = Literal[
-    "SOUL.md", "AGENTS.md", "RULES.md", "OKR.md", "SAFETY.md", "OUTPUT.md", "USER.md",
-    "TOOLS.md", "HEARTBEAT.md", "BOOTSTRAP.md", "KNOWLEDGE.md", "CLAUDE.md", "GREETING.md",
-    "README.md", "LESSONS.md",
-]
+class PersonaFileType(StrEnum):
+    """The persona files a bot may have: VALID_IDENTITY_FILES in core/services/identity.py,
+    minus MEMORY.md and IDENTITY.md (reserved, §7), plus the proposed platform-managed
+    LESSONS.md (§7 interim)."""
+    SOUL = "SOUL.md"
+    AGENTS = "AGENTS.md"
+    RULES = "RULES.md"
+    OKR = "OKR.md"
+    SAFETY = "SAFETY.md"
+    OUTPUT = "OUTPUT.md"
+    USER = "USER.md"
+    TOOLS = "TOOLS.md"
+    HEARTBEAT = "HEARTBEAT.md"
+    BOOTSTRAP = "BOOTSTRAP.md"
+    KNOWLEDGE = "KNOWLEDGE.md"
+    CLAUDE = "CLAUDE.md"
+    GREETING = "GREETING.md"
+    README = "README.md"
+    LESSONS = "LESSONS.md"
 
 @dataclass(frozen=True)
 class PersonaFile:
-    type: PersonaFileType            # which persona file this is
-    digest: Digest                   # address of its bytes in the content store
+    type: PersonaFileType            # which persona file, e.g. PersonaFileType.SOUL ("SOUL.md")
+    digest: Digest                   # where its bytes are, e.g. "sha256:3f9a…"
+
+class SkillOriginKind(StrEnum):
+    CENTER = "center"                # a governed skill from Skill Center: pinned by version, not copied
+    LOCAL = "local"                  # a bot-owned skill (uploaded, or created by a patch): stored by digest
+    GIT = "git"                      # fetched from a git source when the revision was recorded: stored by digest
+    OSS = "oss"                      # fetched from object storage when the revision was recorded: stored by digest
 
 @dataclass(frozen=True)
 class SkillOrigin:
-    kind: Literal["center", "local", "git", "oss"]
-    version: str | None = None       # pinned Center version when kind == "center"
+    kind: SkillOriginKind
+    version: str | None = None       # CENTER only: the pinned version, e.g. "center://refund-policy@v7"
 
 @dataclass(frozen=True)
 class SkillEntry:
-    name: str
+    name: str                        # the skill's name, e.g. "refund-policy"
     origin: SkillOrigin
-    digest: Digest | None = None     # None for Center skills: they resolve through Skill Center by version
+    digest: Digest | None = None     # where the skill's stored files are, e.g. "sha256:0c55…" for the bot-owned
+                                     # "quality-check" skill; None for CENTER skills, which Skill Center resolves by version
+```
+
+Curated memory:
+
+```python
+class EvidenceKind(StrEnum):
+    """The Experience records a change can cite (02-experience.md)."""
+    EPISODE = "episode"              # one recorded session or trajectory of the bot, id "ep_…"
+    FEEDBACK = "feedback"            # one feedback record, id "fb_…": a rating, a correction, or a producer's
+                                     # finding such as a ClawInsight improvement item
+    EVAL = "eval"                    # one evaluation rollout trace, id "et_…"
+
+EvidenceRef = str  # "<EvidenceKind>:<id>", e.g. "episode:ep_91", "feedback:fb_311". Each one names exactly one
+                   # Experience record, which GET …/experience/episodes/ep_91 (or …/feedback/fb_311) returns.
+                   # It is an id to look up, not a URL.
+
+@dataclass(frozen=True)
+class MemoryItem:
+    key: str                         # stable name of the item, e.g. "returns-window"; updates and retires address it
+    text: str                        # the fact, rule, or lesson itself, e.g. "Returns are accepted within 30 days."
+    tags: list[str]                  # free-form topic labels, e.g. ["returns"]
+    source: list[EvidenceRef]        # what the item was learned from, e.g. ["episode:ep_97"]
+
+class MemoryMode(StrEnum):
+    """How apply writes the curated items into the engine's memory (§7). Besides curated items, the
+    engine's memory holds what the bot wrote itself while running ("runtime items")."""
+    SEED = "seed"                    # write each item only if the engine has no item with that key yet;
+                                     # anything already there, including runtime items, is kept as it is
+    MERGE = "merge"                  # write every item, overwriting an existing item with the same key;
+                                     # runtime items with other keys are kept
+    REPLACE = "replace"              # the engine's memory becomes exactly the curated items; runtime items are
+                                     # dropped (T3: needs human approval)
 
 @dataclass(frozen=True)
 class MemorySpec:
-    mode: Literal["seed", "merge", "replace"]
-    items_digest: Digest             # the itemized memory set (not a raw MEMORY.md)
+    mode: MemoryMode
+    items_digest: Digest             # where the stored list of MemoryItem is, e.g. "sha256:9e20…"
+```
+
+An example of the modes. The curated set has `returns-window` = "Returns
+are accepted within 30 days." While running, the bot wrote its own
+`returns-window` = "Returns are accepted within 14 days." and a new item
+`vip-contact`. On the next apply:
+
+| Mode | `returns-window` afterwards | `vip-contact` afterwards |
+| --- | --- | --- |
+| `seed` | "14 days" (the key existed, so the bot's own item stays) | kept |
+| `merge` | "30 days" (the curated item overwrites the key) | kept |
+| `replace` | "30 days" | removed |
+
+Resources, tools, and the whole spec:
+
+```python
+@dataclass(frozen=True)
+class ResourceEntry:
+    path: str                        # where the resource appears in the bot's workspace, e.g. "data/kb/"
+    digest: Digest                   # where its stored bytes are (how a directory is stored: open decision G-1)
+
+@dataclass(frozen=True)
+class McpServerEntry:
+    server_code: str                 # the MCP server's registered code, e.g. "mcp.x.meet"
+    config_digest: Digest            # where this bot's stored config for that server is
+
+@dataclass(frozen=True)
+class CliToolEntry:
+    name: str                        # e.g. "shopctl"
+    digest: Digest                   # where the tool's stored package is
+    version: str                     # the tool's own version, e.g. "2.3.0"
+
+@dataclass(frozen=True)
+class ToolsSpec:
+    mcp: list[McpServerEntry]
+    cli_tools: list[CliToolEntry]
+
+@dataclass(frozen=True)
+class ScriptEntry:
+    digest: Digest                   # where the bot's startup script is; locked by default (§4.5)
 
 @dataclass(frozen=True)
 class GenomeSpec:
     persona: list[PersonaFile]
     skills: list[SkillEntry]
-    memory: MemorySpec | None        # None until RSI-05 lands (see §7)
-    resources: list["ResourceEntry"]          # {path, digest}
-    tools: "ToolsSpec"                        # {mcp: [{server_code, config_digest}], cli_tools: [{name, digest, version}]}
-    engine_config: dict[str, str]             # allowlisted keys; string values (no floats in hashed content)
-    script: "ScriptEntry | None"              # {digest}; locked by default
+    memory: MemorySpec | None        # None until RSI-05 lands (§7)
+    resources: list[ResourceEntry]
+    tools: ToolsSpec
+    engine_config: dict[str, str]    # allowlisted key -> value, e.g. {"reasoning_effort": "medium"};
+                                     # values are strings because hashed content has no floats (§9.3)
+    script: ScriptEntry | None       # None when the bot has no startup script
 ```
 
 Every category is present in every revision. An empty list means "none";
@@ -181,52 +267,28 @@ it never means "leave as it was" (totality, §4.3).
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 // The normative schema is work item RSI-02.
 {
-  "genome_schema": 1,
-  "revision": {                                   // computed / platform-written, not authored
-    "id": "sha256:7c1e…",                         // hash of canonical({spec, policy}): content address
-    "seq": 42,                                    // per-bot sequence number for humans ("r42"); not an identity
-    "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},   // owner + bot id; a bot id alone is not unique
-    "lineage_id": "lin_support_agent",            // stable across forks; a fork starts a new lineage
-    "parents": ["sha256:a90b…"],                  // r41; more than one parent allowed (crossover/merge)
-    "created_by": {"kind": "strategy_run", "run_id": "run_7f3", "step": "propose",
-                   "actor": "clawevolve/bot-evolution@2.0.0"},
-    "created_at": "2026-10-08T03:12:00Z",
-    "status": "candidate",                        // draft | candidate | accepted | rejected | promoted | archived
-    "patch_from_parent": "sha256:c41e…",          // digest of the stored Genome Patch = candidate id
-    "evidence": ["episode:ep_91", "episode:ep_97", "finding:f_12"],
-    "evaluations": ["eval:ev_301", "eval:ev_302"],// links into Verification, not embedded scores
-    "annotations": {"experiment": "escalation-wording"}
+  "persona": [                                    // == manifest.identity, but pinned
+    {"type": "SOUL.md", "digest": "sha256:3f9a…"},
+    {"type": "AGENTS.md", "digest": "sha256:81bd…"}
+  ],
+  "skills": [
+    {"name": "refund-policy", "origin": {"kind": "center", "version": "center://refund-policy@v7"}},  // pinned Center version, not copied
+    {"name": "quality-check", "digest": "sha256:0c55…", "origin": {"kind": "local"}}                  // bot-owned: stored, referenced by digest
+  ],
+  "memory": {                                     // new category, see §7
+    "mode": "seed",                               // seed | merge | replace (MemoryMode)
+    "items_digest": "sha256:9e20…"                // the stored list of memory items
   },
-  "spec": {                                       // the evolvable content (authored / proposed)
-    "persona": [                                  // == manifest.identity, but pinned
-      {"type": "SOUL.md", "digest": "sha256:3f9a…"},
-      {"type": "AGENTS.md", "digest": "sha256:81bd…"}
-    ],
-    "skills": [
-      {"name": "refund-policy", "origin": {"kind": "center", "version": "center://refund-policy@v7"}},  // pinned Center version, not copied
-      {"name": "quality-check", "digest": "sha256:0c55…", "origin": {"kind": "local"}}                  // bot-owned: stored, referenced by digest
-    ],
-    "memory": {                                   // new category, see §7
-      "mode": "seed",                             // seed | merge | replace
-      "items_digest": "sha256:9e20…"              // itemized memory set
-    },
-    "resources": [{"path": "data/kb/", "digest": "sha256:d4a7…"}],
-    "tools": {
-      "mcp": [{"server_code": "mcp.x.meet", "config_digest": "sha256:52c8…"}],
-      "cli_tools": [{"name": "shopctl", "digest": "sha256:a613…", "version": "2.3.0"}]
-    },
-    "engine_config": {                            // allowlisted keys only; no floats in hashed content
-      "model": "provider/model-x",
-      "reasoning_effort": "medium"
-    },
-    "script": {"digest": "sha256:e1f0…"}          // carried, but LOCKED for evolution by default
+  "resources": [{"path": "data/kb/", "digest": "sha256:d4a7…"}],
+  "tools": {
+    "mcp": [{"server_code": "mcp.x.meet", "config_digest": "sha256:52c8…"}],
+    "cli_tools": [{"name": "shopctl", "digest": "sha256:a613…", "version": "2.3.0"}]
   },
-  "policy": {                                     // NOT evolvable: copied forward verbatim by the platform
-    "locked_genes": ["script", "tools.mcp", "policy"],
-    "mutable_genes": ["persona", "skills", "memory", "resources", "engine_config.reasoning_effort"],
-    "pins": ["skills.refund-policy"],             // write-protected items (Hermes-style pinning)
-    "risk_overrides": {}
-  }
+  "engine_config": {                              // allowlisted keys only; no floats in hashed content
+    "model": "provider/model-x",
+    "reasoning_effort": "medium"
+  },
+  "script": {"digest": "sha256:e1f0…"}            // carried, but LOCKED for evolution by default
 }
 ```
 
@@ -287,19 +349,119 @@ This is where "tool and permission changes are human-only" is enforced
 genes by default, and the policy itself is outside what a patch can reach.
 Changing the policy is an owner action that records a new revision (§4.4).
 
-### 2.4 GenomeRef
+### 2.4 GenomeRevision
 
 ```python
-FixedRefName = Literal["active", "previous", "canary", "draft"]   # one each per bot (§5.1)
-# A ref name is one of the fixed names, or a run candidate ref of the exact form
-# "candidate/<run_id>/<n>" (validated on write; no other free-form names exist).
-RefName = FixedRefName | str
+class ProvenanceKind(StrEnum):
+    USER = "user"                    # a person edited the bot (UI, API, or CLI)
+    STRATEGY_RUN = "strategy_run"    # a strategy submitted it as a candidate during an Evolution Run
+    MANIFEST_PUT = "manifest_put"    # recorded through the existing PUT /config-manifest (§5.5)
+    BOT = "bot"                      # postponed with DR-3
+
+@dataclass(frozen=True)
+class Provenance:
+    kind: ProvenanceKind
+    actor: str                       # who: a user id ("user_owner_1"), or a strategy "id@version"
+                                     # ("clawevolve/bot-evolution@2.0.0")
+    run_id: str | None = None        # STRATEGY_RUN only: the Evolution Run that produced it, e.g. "run_7f3"
+    step: str | None = None          # STRATEGY_RUN only: the strategy's own label for the step, e.g. "propose"
+
+EvaluationId = str  # id of one Verification evaluation, e.g. "ev_301";
+                    # GET …/evolution/evaluations/ev_301 returns it with its scores (07-verification.md)
+
+class RevisionStatus(StrEnum):
+    """Meaning of each status and who sets it: §4.4."""
+    DRAFT = "draft"
+    CANDIDATE = "candidate"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    PROMOTED = "promoted"
+    ARCHIVED = "archived"
+
+@dataclass
+class RevisionMetadata:
+    id: RevisionId                   # the revision's identity: hash of {spec, policy} (§4.4)
+    seq: int                         # per-bot counter for people: the bot's 1st recorded revision is 1 ("r1"), the
+                                     # 42nd is 42 ("r42"). UIs and the CLI show it, and paths accept it
+                                     # (GET …/revisions/r42), but it is not an identity: other records store `id`
+    bot: BotRef                      # the bot this revision belongs to (owner + bot id)
+    parent: RevisionId | None        # the revision this one was made from: the patch's `base`, or the `base` given
+                                     # when a whole document was recorded; None only for the bot's first revision
+    created_by: Provenance
+    created_at: datetime
+    status: RevisionStatus
+    patch_digest: Digest | None      # digest of the stored GenomePatch that turned `parent` into this revision
+                                     # (= the candidate id, §6.5); None when the revision was recorded from a whole
+                                     # Manifest document instead of a patch (§4.1)
+    evidence: list[EvidenceRef]      # the Experience records that motivated the change, e.g.
+                                     # ["episode:ep_91", "feedback:fb_311"]; [] for most manual edits
+    evaluations: list[EvaluationId]  # the Verification evaluations run on this revision, e.g. ["ev_301", "ev_302"];
+                                     # ids only: scores stay in Verification
+    annotations: dict[str, str] = field(default_factory=dict)
+                                     # free-form labels people or the platform add after recording, e.g.
+                                     # {"experiment": "escalation-wording", "review_note": "checked by legal"};
+                                     # not hashed, so they change without creating a new revision
+
+@dataclass(frozen=True)
+class GenomeRevision:
+    genome_schema: int               # version of this record's format, so a reader knows how to parse it: 1 today;
+                                     # a breaking change to the shape of spec or policy bumps it (RSI-02)
+    revision: RevisionMetadata       # platform-written, excluded from the hash
+    spec: GenomeSpec
+    policy: GenomePolicy
+```
+
+A **run id** (`run_7f3`) is the id of one Evolution Run: one execution of
+one binding for one bot. Evolution Run assigns it when the run is
+submitted. It is globally unique and opaque. It is not a counter per
+strategy or per bot ([06-evolution-run.md](06-evolution-run.md)).
+
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+// `spec` and `policy` are shortened; full examples are in §2.2 and §2.3.
+{
+  "genome_schema": 1,                             // format version of this record
+  "revision": {                                   // computed / platform-written, not authored
+    "id": "sha256:7c1e…",                         // hash of canonical({spec, policy}): the identity
+    "seq": 42,                                    // the bot's 42nd revision, shown as "r42"; not an identity
+    "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},   // owner + bot id; a bot id alone is not unique
+    "parent": "sha256:a90b…",                     // r41, the patch's base
+    "created_by": {"kind": "strategy_run", "run_id": "run_7f3", "step": "propose",
+                   "actor": "clawevolve/bot-evolution@2.0.0"},
+    "created_at": "2026-10-08T03:12:00Z",
+    "status": "candidate",
+    "patch_digest": "sha256:c41e…",               // the stored Genome Patch that produced it = candidate id
+    "evidence": ["episode:ep_91", "episode:ep_97", "feedback:fb_311"],
+    "evaluations": ["ev_301", "ev_302"],          // Verification evaluation ids, not embedded scores
+    "annotations": {"experiment": "escalation-wording"}
+  },
+  "spec": {"persona": [{"type": "SOUL.md", "digest": "sha256:3f9a…"}], "skills": [], "memory": null,
+           "resources": [], "tools": {"mcp": [], "cli_tools": []},
+           "engine_config": {"reasoning_effort": "medium"}, "script": null},
+  "policy": {"locked_genes": ["script", "tools.mcp", "tools.cli_tools", "policy"],
+             "mutable_genes": ["persona", "skills", "memory"], "pins": [], "risk_overrides": {}}
+}
+```
+
+### 2.5 GenomeRef
+
+```python
+class FixedRefName(StrEnum):
+    """The refs every bot can have, at most one of each (§5.1, §5.2)."""
+    ACTIVE = "active"
+    PREVIOUS = "previous"
+    CANARY = "canary"
+    DRAFT = "draft"
+
+# A ref name is a FixedRefName value, or a run candidate ref of the exact form
+# "candidate/<run_id>/<n>" (validated on write; no other names exist).
+RefName = str
 
 @dataclass(frozen=True)
 class GenomeRef:
-    name: RefName
-    revision: RevisionId
-    seq: int                         # seq of the revision, for display ("r42")
+    name: RefName                    # e.g. "active", "candidate/run_7f3/1"
+    revision: RevisionId             # the revision it points at now
+    seq: int                         # that revision's seq, for display ("r42")
     moved_at: datetime
     moved_by: Provenance
     reason: str | None = None        # required for active/previous/canary moves
@@ -307,8 +469,9 @@ class GenomeRef:
 @dataclass(frozen=True)
 class RefUpdate:
     name: RefName
-    revision: RevisionId
-    expected_revision: RevisionId | None   # CAS: None only when the ref must not exist yet
+    revision: RevisionId             # where the ref should point
+    expected_revision: RevisionId | None   # compare-and-swap: where the caller believes it points now;
+                                           # None only when the ref must not exist yet (§5.3)
     reason: str | None = None
 ```
 
@@ -324,17 +487,32 @@ class RefUpdate:
 }
 ```
 
-### 2.5 GenomePatch and PatchOp
+### 2.6 GenomePatch and PatchOp
 
 ```python
-EditKind = Literal["replace_section", "insert_after"]   # full set fixed by RSI-02
+class EditKind(StrEnum):             # full set fixed by RSI-02
+    REPLACE_SECTION = "replace_section"   # replace the body under a Markdown heading
+    INSERT_AFTER = "insert_after"         # insert text after an anchor line
 
 @dataclass(frozen=True)
 class TextEdit:
     kind: EditKind
     content: str                     # the new text to write
-    heading: str | None = None       # for replace_section
-    anchor: str | None = None        # for insert_after
+    heading: str | None = None       # REPLACE_SECTION only, e.g. "## Escalation"
+    anchor: str | None = None        # INSERT_AFTER only, e.g. "## Tone"
+
+@dataclass(frozen=True)
+class DigestRef:
+    digest: Digest                   # a file uploaded first with PUT …/genome/content
+
+class FileOpKind(StrEnum):
+    UNIFIED_DIFF = "unified_diff"    # the only kind in v1
+
+@dataclass(frozen=True)
+class UnifiedDiff:
+    kind: FileOpKind
+    path: str                        # file inside the skill, e.g. "SKILL.md"
+    diff: str                        # a unified diff against that file in the base revision
 
 @dataclass(frozen=True)
 class FileEdit:                      # op "file.edit": persona md, SKILL.md, resource text files
@@ -344,19 +522,12 @@ class FileEdit:                      # op "file.edit": persona md, SKILL.md, res
 @dataclass(frozen=True)
 class SkillAdd:                      # op "skill.add"
     name: str                        # the new skill's name, e.g. "invoice-lookup"
-    files: dict[str, "str | DigestRef"]   # small text inline; larger files uploaded first, referenced by digest
+    files: dict[str, str | DigestRef]   # path in the skill -> small text inline, or a larger file uploaded first
 
 @dataclass(frozen=True)
 class SkillUpdate:                   # op "skill.update"
     name: str                        # an existing bot-owned skill
-    file_ops: list["UnifiedDiff"]    # {kind: "unified_diff", path, diff}
-
-@dataclass(frozen=True)
-class MemoryItem:
-    key: str                         # stable name of the item, e.g. "returns-window"; updates and retires address it
-    text: str                        # the fact, rule, or lesson itself
-    tags: list[str]                  # free-form topic labels, e.g. ["billing"]
-    source: list[str]                # evidence ids, e.g. "episode:ep_91"
+    file_ops: list[UnifiedDiff]
 
 @dataclass(frozen=True)
 class MemoryAdd:                     # op "memory.add"
@@ -380,17 +551,17 @@ PatchOp = FileEdit | SkillAdd | SkillUpdate | MemoryAdd | MemoryUpdate | MemoryR
 @dataclass(frozen=True)
 class GenomePatch:
     patch_schema: int                # schema version of the patch format; 1
-    base: RevisionId                 # the revision the patch was written against; must equal the parent (CAS on record)
+    base: RevisionId                 # the revision the patch was written against; becomes the new revision's parent
     ops: list[PatchOp]
     rationale: str                   # required; shown to reviewers
-    evidence: list[str]              # required for non-trivial ops
+    evidence: list[EvidenceRef]      # required for non-trivial ops
 ```
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "patch_schema": 1,
-  "base": "sha256:a90b…",                               // r41; must equal the parent
+  "base": "sha256:a90b…",                               // r41; becomes the parent
   "ops": [
     {"op": "file.edit", "target": "persona/SOUL.md",     // text files: persona md, SKILL.md, resources
      "edits": [
@@ -410,24 +581,24 @@ class GenomePatch:
     {"op": "engine_config.set", "key": "reasoning_effort", "value": "high"}
   ],
   "rationale": "Partial-refund requests were escalated too late in 6 of 9 failing episodes.",
-  "evidence": ["finding:f_12", "episode:ep_91"]
+  "evidence": ["feedback:fb_311", "episode:ep_91"]
 }
 ```
 
-This example shows every op kind at once. Against the §2.2 policy it would
+This example shows every op kind at once. Against the §2.3 policy it would
 be rejected, because `skills.refund-policy` is pinned there (§6.2); a real
 patch only touches mutable, unpinned genes.
 
-### 2.6 CompiledManifest
+### 2.7 CompiledManifest
 
 ```python
 @dataclass(frozen=True)
 class CompiledManifest:
     revision_id: RevisionId
-    document: dict                   # a Manifest schema-v1-compatible document; every category present;
-                                     # file entries point at the content store by digest (§8 item 6)
-    document_digest: Digest          # recorded on the apply report
-    memory_projection: "MemoryProjection | None"   # items + mode, handed to the engine (§7)
+    document: dict                   # the Manifest document apply consumes (Manifest schema v1 shape, below);
+                                     # every category present; file entries point at the content store by digest (§8 item 6)
+    document_digest: Digest          # digest of that document; recorded on the apply report
+    memory_projection: MemorySpec | None   # the curated memory and its mode, handed to the engine adapter (§7)
 ```
 
 ```jsonc
@@ -475,7 +646,7 @@ rejected, `schema/validator.py:58`; service-bot rollback one step back only,
 | Gap in Manifest v1 | Why evolution needs it | Addressed by |
 | --- | --- | --- |
 | One mutable row per bot, no revision history, no content hash | Lineage, archive, reproducibility, going back to any point | Revisions (§4) |
-| No parent pointer | Lineage tree; descendant-aware selection | `parents`, `lineage_id` |
+| No parent pointer | Lineage tree; descendant-aware selection | `parent` |
 | No optimistic concurrency control. HTTP offers it through an `ETag` (a version tag the server returns with a document) and an `If-Match` request header (the client sends back the tag it read; the server rejects the write with `412 Precondition Failed` if the document changed since). `PUT /config-manifest` has neither | A strategy and a human editing at the same time silently overwrite each other; whoever writes last wins without knowing | Compare-and-swap on refs (§5) |
 | Apply re-reads the current document; the report does not say which bytes were applied | Cannot attribute behaviour or experience to a version | Apply reports record `revision_id` and document digest (§8) |
 | Sources are moving refs (git branch, OSS key) re-resolved on each apply | A genome must be immutable: every source pinned to commit SHA / digest | Pinned content (§4.2) |
@@ -484,7 +655,7 @@ rejected, `schema/validator.py:58`; service-bot rollback one step back only,
 | `engine_config` rejected in v1 | Model / temperature / reasoning budget are legitimate tunables | Allowlisted `engine_config` (§8) |
 | A category left out of the document means "leave it untouched" | A revision must fully determine the bot; otherwise two applies of the same revision can produce different bots depending on prior state | Totality (§4.3) |
 | No place for metadata: unknown keys are rejected | Evolution needs **provenance** (who or what produced a version, from which evidence, with which patch) and **annotations** (free-form labels such as review notes or experiment tags) | Kept on the revision record, not inside the Manifest document, so the Manifest schema does not change for this |
-| Personal bots have no way back to an earlier configuration; service bots have their own publish rollback (one step back) | Going back must work for every bot and to any earlier revision | Going back = promoting an earlier revision (§5.3) |
+| Personal bots have no way back to an earlier configuration; service bots have their own publish rollback (one step back) | Going back must work for every bot and to any earlier revision | Going back = promoting an earlier revision (§5.4) |
 
 Rejected alternatives (from DR-1):
 
@@ -503,7 +674,7 @@ Rejected alternatives (from DR-1):
 Concretely, a revision adds exactly these things on top of the Manifest:
 
 1. **Revision identity and lineage**: a content-hash id plus a readable
-   per-bot sequence number, parent(s), provenance, status, and named refs
+   per-bot sequence number, a parent, provenance, status, and named refs
    moved by compare-and-swap (§5).
 2. **A non-evolvable `policy` section**: the owner's rules that bound
    evolution of this bot, recorded with every revision and changeable only by
@@ -513,7 +684,10 @@ Concretely, a revision adds exactly these things on top of the Manifest:
 4. **Totality**: every category is present in every revision (§4.3).
 5. **Patch-only change for automated actors**: strategies submit typed,
    itemized patches against a named base revision (§6). Humans can still
-   record a revision from a whole document.
+   record a revision from a whole **Manifest document**: the full YAML
+   document the Bot Config Manifest API accepts (today through
+   `PUT /config-manifest`), instead of a patch. Such a revision has no
+   `patch_digest`.
 6. **One new content category, curated memory** (§7), which needs a new
    engine contract.
 
@@ -559,10 +733,15 @@ two applies of the same revision always produce the same bot.
   id, whoever produced it. Recording content that already exists returns the
   existing revision; no duplicate is created and no new `seq` is assigned.
 - **`seq`.** A per-bot counter assigned when a new id is first recorded, for
-  humans (`r41`, `r42`). It is never an identity and never used in hashes.
-- **Lineage.** `parents` points at the base revision(s). `lineage_id` is
-  stable across descendants; a fork starts a new lineage. More than one
-  parent is allowed for merge or crossover strategies.
+  humans: the bot's first recorded revision is `r1`, the next new one `r2`,
+  and so on. Example: a strategy submits a candidate whose content is new,
+  so it becomes `r42`; a retry of the same submission returns `r42` again
+  instead of creating `r43`. It is never an identity and never used in
+  hashes: two bots both have an `r42`, and other records store the `id`.
+- **Parent.** Every revision except the bot's first has exactly one
+  `parent`: the base the patch was written against, or the `base` given
+  when a whole document was recorded. Following `parent` links gives a bot's
+  history as a tree (two candidates made from `r41` are siblings).
 - **Status** is platform-written metadata, outside the hash:
 
 | Status | Meaning (proposed) | Set by |
@@ -608,14 +787,54 @@ Refs are named, movable pointers to immutable revisions, git-style:
 
 Refs are names, not identity. Every revision has its own identity, the
 content-hash id (plus the per-bot `seq`, e.g. `r42`), whether or not any ref
-points at it. Refs are optional, movable pointers: a revision can have no
-ref, or several. `candidate/<run>/<n>` is the same kind of label as
-`active`, only scoped to one run: Evolution Run creates one for each
-candidate a run submits, so the run's candidates are addressable by name and
-kept until the gate decides. A revision made by an owner's manual edit gets
-no candidate ref.
+points at it. A revision can have no ref, or several.
 
-### 5.2 Compare-and-swap
+### 5.2 Each ref in detail
+
+The running example: a support bot runs `r41`. A nightly run `run_7f3`
+proposes two candidates, and the owner is also editing the bot by hand.
+
+**`active`: what the bot runs.** Every apply (personal bot) and every
+publish (service bot) uses the revision `active` points at, so it is the one
+ref every bot has once it has been applied. Only Promotion moves it: when a
+revision is promoted, whether newer or older ([08-promotion.md](08-promotion.md)).
+*Example:* the gate accepts `r42` and the owner approves it; Promotion moves
+`active` from `r41` to `r42` and applies `r42`.
+
+**`previous`: one step back.** The revision `active` pointed at before its
+last move. Promotion moves it in the same step as `active`, so going back
+one step needs no lookup: promote `previous`. *Example:* after the move
+above, `previous` = `r41`. If `r42` misbehaves, promoting `previous` makes
+`active` = `r41` again, and `previous` becomes `r42`.
+
+**`canary`: the trial revision on part of the fleet.** Only for
+multi-instance (service) bots whose binding uses a canary rollout. A share
+of instances runs `canary` while the rest run `active`, and Verification
+compares the two online. Promotion sets it when the trial starts. When the
+trial succeeds, `active` moves to the same revision; when it is stopped,
+the canary instances run `active` again ([08-promotion.md](08-promotion.md)).
+*Example:* `canary` = `r42` on 10% of instances for a day, then `active`
+moves to `r42`.
+
+**`draft`: the owner's work in progress.** Each manual edit (UI, API, CLI)
+records a revision and moves `draft` to it. Nothing runs `draft` until the
+owner promotes it, so an owner can save half-done work. *Example:* the owner
+edits `SOUL.md` twice; that records `r43` and `r44`, `draft` = `r44`, and
+`active` stays `r42` until the owner promotes `r44`. (The existing
+`PUT /config-manifest` also moves `active`, for backward compatibility,
+§5.5.)
+
+**`candidate/<run_id>/<n>`: one candidate of one run.** The `n`-th
+candidate (counting from 1, in submission order) that the Evolution Run
+`run_id` submitted. Evolution Run creates it when the strategy submits a
+candidate ([06-evolution-run.md](06-evolution-run.md)). It is never moved
+afterwards, so the name keeps working after the gate decides and can be used
+in the UI, CLI, and ledger links. *Example:* `run_7f3` submits two patches;
+they are recorded as `r42` and `r45`, and named `candidate/run_7f3/1` and
+`candidate/run_7f3/2`. `avn genome show candidate/run_7f3/2` shows `r45`. A
+revision made by an owner's manual edit gets no candidate ref.
+
+### 5.3 Compare-and-swap
 
 Every ref update carries `expected_revision`: the revision the caller
 believes the ref points at now. The Registry moves the ref only if that is
@@ -629,7 +848,7 @@ Every ref move is an append-only event (ref, from, to, actor, reason, time).
 The audit log and its read model are in
 [05-experiment-ledger.md](05-experiment-ledger.md).
 
-### 5.3 Going back is promotion
+### 5.4 Going back is promotion
 
 Within the evolution platform, "rolling back" to `r41` means **promoting
 `r41` again**. There is no separate rollback path. Because ids are content
@@ -649,7 +868,7 @@ neither replaces nor extends it. The promotion endpoint
 [08-promotion.md](08-promotion.md); the Genome Registry provides the CAS ref
 move and the compile step it uses.
 
-### 5.4 Relationship to today's Manifest row
+### 5.5 Relationship to today's Manifest row
 
 In P1 the existing `PUT /config-manifest` keeps working and becomes sugar
 for "record a revision from this document and move `draft` (and, for
@@ -740,7 +959,7 @@ The stored patch is content-addressed. Its digest is the **candidate id**
 used by strategies and by Promotion (`sha256:c41e…`): a retried submission of
 the same patch returns the same id and creates nothing new. The resulting
 revision has its own id (hash of `{spec, policy}`) and records the patch in
-`patch_from_parent`. Keeping both identities is open decision G-9. See [03-strategy.md](03-strategy.md) for the
+`patch_digest`. Keeping both identities is open decision G-9. See [03-strategy.md](03-strategy.md) for the
 strategy-side `ctx.candidates.submit`.
 
 ## 7. Memory
@@ -754,6 +973,22 @@ needs part of memory to be evolvable, so memory is split:
 | **Episodic / runtime memory**: what the bot writes as it works | Engine runtime | No | Captured into [Experience](02-experience.md) as evidence |
 | **Curated memory (seed)**: facts, rules, lessons the bot should start with | Genome | **Yes**, itemized | Proposed by consolidation ("dream") strategies, gated, promoted |
 
+**Why curated memory is its own category, not a persona file.** The
+Manifest's lack of a memory file is only part of the reason. Three
+things would stay true even if the Manifest accepted `MEMORY.md`:
+
+- **The bot writes its memory while it runs.** A file in the genome would
+  be overwritten by the bot between applies, and each apply would erase
+  what the bot learned. Items plus a mode (§2.2) say exactly what apply
+  writes and what it leaves alone.
+- **The format belongs to the engine.** Each engine stores memory its own
+  way. Backend must not know engine paths (below), so the genome holds
+  engine-neutral items and the engine adapter writes them.
+- **Changes are per fact.** A strategy adds, updates, or retires one item,
+  with the evidence it came from (`source`). Each change is a small,
+  reviewable op with its own risk tier (§6.3). An edit to one large file
+  would be neither.
+
 Projection onto the engine is engine-owned: Backend must not know engine
 paths, per the repository rule in `AGENTS.md` ("Physical layout ownership belongs to Engine Runtime and its versioned layout contract"; ADR 0014 is one application of it). Proposed **engine memory projection contract** (work item
 RSI-05), a Plugin API implemented by the engine adapter:
@@ -766,10 +1001,10 @@ class EngineMemoryProjection(Protocol):
         """Read the engine's runtime memory into normalized items, for consolidation strategies."""
 
     def project_memory(self, bot: BotRef, items: list[MemoryItem],
-                       mode: Literal["seed", "merge", "replace"]) -> None:
-        """Materialise curated items into the engine's layout.
-        seed: only if absent. merge: curated items upserted by key, runtime items untouched.
-        replace: the curated set becomes the memory (T3, human approval)."""
+                       mode: MemoryMode) -> None:
+        """Materialise curated items into the engine's layout. The modes and an
+        example are in §2.2: seed writes only keys the engine does not have yet,
+        merge overwrites by key, replace makes the curated set the whole memory."""
 ```
 
 - Engines declare support per mode in the capability matrix; teclaw support
@@ -863,7 +1098,7 @@ filesystem history (the Meta-Harness lesson) without git being the source
 of truth.
 
 Proposed tables (names illustrative, fixed by RSI-03): `ac_genome_revision`
-(id, owner_id, bot_id, seq, lineage, parents, provenance, status, canonical
+(id, owner_id, bot_id, seq, parent, provenance, status, canonical
 JSON of `{spec, policy}`), `ac_genome_ref` (owner_id, bot_id, name,
 revision, version for CAS),
 `ac_genome_ref_event` (append-only ref log), `ac_genome_patch` (digest,
@@ -903,7 +1138,7 @@ RFC 7396) is also defined over JSON.
 - **Teams (future).** A genome is per bot. BCS owns relationships and
   routing, so a future **team genome** (roles, routing hints, shared skills)
   would be a separate artifact owned by BCS that references member genome
-  revisions. Out of scope for v1, but nothing here prevents it: lineage ids
+  revisions. Out of scope for v1, but nothing here prevents it: revision ids
   and refs are generic.
 - **Mechanisms (level 3, later).** The Registry is designed to be generic
   over `target_kind` (`bot_genome` now, `mechanism` later): strategy versions
@@ -920,7 +1155,28 @@ The Genome Registry is a Backend core service, transport-agnostic, with a
 `apps/evolution` (Evolution Run, Verification) use it through the API in §12.
 
 ```python
-from typing import Protocol, Literal
+from typing import Protocol
+
+class GeneChangeKind(StrEnum):
+    ADDED = "added"
+    REMOVED = "removed"
+    MODIFIED = "modified"
+
+@dataclass(frozen=True)
+class GeneChange:
+    gene: str                        # gene path (§2.1), e.g. "persona.SOUL.md"
+    kind: GeneChangeKind
+    diff: str | None = None          # unified diff for modified text files; None otherwise
+
+@dataclass(frozen=True)
+class GenomeDiff:
+    revision: RevisionId             # the newer side
+    against: RevisionId              # the side it is compared with
+    changes: list[GeneChange]
+    risk_tier: RiskTier              # highest tier over the changes, by the §6.3 mapping
+    rewrite_flags: list[str]         # paths of files flagged `rewrite` (§6.2)
+
+# Page[T] {total, items}: the shared pagination shape, 09-evolution-api.md.
 
 class GenomeRegistry(Protocol):
     # --- revisions -------------------------------------------------------
@@ -928,12 +1184,12 @@ class GenomeRegistry(Protocol):
         """Accepts a revision id, "r<seq>", or a ref name. Raises NotFound."""
 
     def list_revisions(self, bot: BotRef, *, status: RevisionStatus | None = None,
-                       parent: RevisionId | None = None, lineage_id: str | None = None,
-                       page: int = 1, page_size: int = 20) -> "Page[RevisionMetadata]":
+                       parent: RevisionId | None = None,
+                       page: int = 1, page_size: int = 20) -> Page[RevisionMetadata]:
         """Metadata only, newest seq first."""
 
     def record_patch(self, bot: BotRef, patch: GenomePatch, *, created_by: Provenance,
-                     status: Literal["draft", "candidate"],
+                     status: RevisionStatus,          # DRAFT (owner) or CANDIDATE (run) only
                      allowed_genes: list[str] | None = None) -> GenomeRevision:
         """Validate (§6.2), store the patch content-addressed, apply it to `patch.base`,
         and record the resulting revision. Idempotent: the same patch returns the same
@@ -949,7 +1205,7 @@ class GenomeRegistry(Protocol):
                    *, actor: Provenance, reason: str) -> None:
         """Platform-internal (Promotion). Status is metadata; content never changes."""
 
-    def diff(self, bot: BotRef, rev: RevisionId, against: RevisionId) -> "GenomeDiff":
+    def diff(self, bot: BotRef, rev: RevisionId, against: RevisionId) -> GenomeDiff:
         """Per-category, per-item differences; text files as unified diffs."""
 
     # --- refs ------------------------------------------------------------
@@ -974,23 +1230,6 @@ class GenomeRegistry(Protocol):
         service-bot publish) and Verification (eval bot materialisation)."""
 ```
 
-```python
-GeneChangeKind = Literal["added", "removed", "modified"]
-
-@dataclass(frozen=True)
-class GeneChange:
-    gene: str                        # gene path (§2.1), e.g. "persona.SOUL.md"
-    kind: GeneChangeKind
-    diff: str | None = None          # unified diff for modified text files; None otherwise
-
-@dataclass(frozen=True)
-class GenomeDiff:
-    revision: RevisionId             # the newer side
-    against: RevisionId              # the side it is compared with
-    changes: list[GeneChange]
-    risk_tier: RiskTier              # highest tier over the changes, by the §6.3 mapping
-    rewrite_flags: list[str]         # paths of files flagged `rewrite` (§6.2)
-```
 
 Errors are typed and map onto HTTP statuses in §12: `NotFound` → 404,
 `RefConflict` / `BaseMismatch` → 409, `PatchRejected` → 422,
@@ -1021,10 +1260,9 @@ GET /openapi/v1/bots/bot_123/genome/revisions?status=candidate&parent=sha256:a90
 {
   "total": 1,
   "items": [
-    {"id": "sha256:7c1e…", "seq": 42, "parents": ["sha256:a90b…"], "status": "candidate",
-     "lineage_id": "lin_support_agent",
+    {"id": "sha256:7c1e…", "seq": 42, "parent": "sha256:a90b…", "status": "candidate",
      "created_by": {"kind": "strategy_run", "run_id": "run_7f3", "step": "propose", "actor": "clawevolve/bot-evolution@2.0.0"},
-     "created_at": "2026-10-08T03:12:00Z", "patch_from_parent": "sha256:c41e…"}
+     "created_at": "2026-10-08T03:12:00Z", "patch_digest": "sha256:c41e…"}
   ]
 }
 ```
@@ -1074,7 +1312,7 @@ content that already exists returns the existing one with `200`.
   "id": "sha256:7c1e…",
   "seq": 42,
   "status": "candidate",
-  "parents": ["sha256:a90b…"],
+  "parent": "sha256:a90b…",
   "patch_digest": "sha256:c41e…",
   "risk_tier": "T2",
   "flags": [],
@@ -1102,10 +1340,9 @@ GET /openapi/v1/bots/bot_123/genome/revisions/r41
 {
   "genome_schema": 1,
   "revision": {"id": "sha256:a90b…", "seq": 41, "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
-               "lineage_id": "lin_support_agent",
-               "parents": ["sha256:5d02…"], "status": "promoted", "created_at": "2026-09-30T02:40:00Z",
-               "created_by": {"kind": "user", "actor": "user_owner_1"}, "patch_from_parent": null,
-               "evidence": [], "evaluations": ["eval:ev_288"], "annotations": {}},
+               "parent": "sha256:5d02…", "status": "promoted", "created_at": "2026-09-30T02:40:00Z",
+               "created_by": {"kind": "user", "actor": "user_owner_1"}, "patch_digest": null,
+               "evidence": [], "evaluations": ["ev_288"], "annotations": {}},
   "spec": {"persona": [{"type": "SOUL.md", "digest": "sha256:2b77…"}], "skills": [], "memory": null,
            "resources": [], "tools": {"mcp": [], "cli_tools": []},
            "engine_config": {"reasoning_effort": "medium"}, "script": null},

@@ -19,14 +19,16 @@
 都是对某个修订版的应用。
 
 一句话概括：基因组修订版是**一份完整、已固定版本的 Manifest，加上精选记忆，
-再加上谱系和锁定的策略配置，且只能通过补丁变更**。
+再加上一个父代指针和锁定的策略配置，且只能通过补丁变更**。
 
 **基因组注册表**是实现这一点的组件。它负责：
 
-- 基因组修订版（内容、谱系、来源、状态）；
+- 基因组修订版（内容、父代、来源、状态）；
 - 具名**引用**（`active`、`previous`、`canary`、`draft`、`candidate/<run>/<n>`）
   及其比较并交换（compare-and-swap）更新；
-- **基因组补丁**（Genome Patch）：其模式、校验，以及对基础修订版的应用；
+- **基因组补丁**（Genome Patch）：其模式、将其应用到基础修订版，以及记录补丁时执行的
+  结构性检查（它能干净地应用到其基础修订版，并保持在策略配置范围内，§6.2）。变更是否
+  *良好*不在此处检查：那是[验证](07-verification.zh-CN.md)的职责；
 - **基因组策略配置**（锁定基因、可变基因、固定项、风险覆盖），以及在记录补丁时
   对其进行的结构性强制执行；
 - 内容寻址：文件字节通过摘要在现有 manifest 内容存储中被引用；
@@ -59,13 +61,27 @@
 
 ## 2. 领域模型
 
+![基因组领域模型：一个 Bot 的修订版、其 spec 与 policy、补丁、引用，以及编译后的 Manifest](images/genome-model.zh-CN.svg)
+
+各类型之间的关系：
+
+- 一个 Bot 有多个**修订版**。每个修订版持有一个 `spec`（可进化内容）和一个
+  `policy`（所有者的规则），外加平台写入的元数据。
+- 除 Bot 的第一个修订版外，每个修订版恰好有一个**父代**。**补丁**（一组操作）
+  就是把父代变成新修订版的东西。所有者也可以从一份完整的 Manifest 文档记录修订版，
+  而不使用补丁。
+- **引用**是指向修订版的名字（`active`、`draft`……）。
+- **编译**一个修订版会得到 `CompiledManifest`，供应用和评估 Bot 使用。
+- 文件内容从不内联存储：`spec` 中的每个文件都是一个**摘要**，即其字节在内容存储中的
+  地址。
+
 | 类型 | 含义 | 负责方 | 生命周期 |
 | --- | --- | --- | --- |
 | `GenomeRevision` | Bot 定义的一个不可变版本：`spec` + `policy`，加上平台写入的元数据（`revision`） | 基因组注册表 | 只记录一次（来自补丁或 Manifest 文档），从不编辑；只有其 `status` 和注解会变化；从不删除 |
 | `GenomeSpec` | 修订版的可进化内容：人设、技能、记忆、资源、工具、引擎配置、脚本 | 基因组注册表（由所有者编写，由进化策略提议） | 修订版的一部分；参与哈希 |
 | `GenomePolicy` | 不可进化的部分：锁定基因、可变基因、固定项、风险覆盖 | Bot 所有者 / 租户管理员 | 修订版的一部分；参与哈希；由平台原样向后复制；任何补丁都不得触及 |
-| `RevisionMetadata` | Id、每个 Bot 的 `seq`、谱系、父代、来源、状态、证据与评估链接、注解 | 基因组注册表（平台写入） | 在记录时写入；状态/注解之后更新；不参与哈希 |
-| `Provenance` | 谁或什么创建了修订版（某个人、某次进化策略运行、以后可能是某个 Bot），以及依据哪些证据 | 基因组注册表 | 在记录时写入一次 |
+| `RevisionMetadata` | Id、每个 Bot 的 `seq`、父代、来源、状态、证据与评估 id、注解 | 基因组注册表（平台写入） | 在记录时写入；状态/注解之后更新；不参与哈希 |
+| `Provenance` | 谁或什么创建了修订版（某个人、某次进化策略运行、以后可能是某个 Bot） | 基因组注册表 | 在记录时写入一次 |
 | `GenomeRef` | 指向某个修订版的具名、可移动指针（`active`、`previous`、`canary`、`draft`、`candidate/<run>/<n>`） | 基因组注册表；每个引用恰好有一种移动者 | 通过比较并交换移动；每次移动都是一个被审计的事件 |
 | `GenomePatch` | 针对具名基础修订版的、带类型的逐项变更；进化策略唯一可提交的内容 | 由进化策略（通过[进化运行](06-evolution-run.zh-CN.md)）或人提交；由注册表校验 | 以内容寻址方式存储；其摘要即候选 id |
 | `PatchOp` | 补丁中的一项（`file.edit`、`skill.add`、`memory.add`……） | 补丁的一部分 | 每个操作映射到一个风险等级 |
@@ -80,91 +96,157 @@
 （`engine_config.reasoning_effort`），或一个条目（`skills.refund-policy`）。
 基因路径语法由 RSI-02 确定。
 
-### 2.2 GenomeRevision
+### 2.2 GenomeSpec
+
+先列出共享的别名；下面的每个类型都会用到它们。
 
 ```python
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal
+from enum import StrEnum
 
-RevisionId = str          # "sha256:<hex64>" over canonical({spec, policy})
-Digest = str              # "sha256:<hex64>" address of bytes in the content store
-
-RevisionStatus = Literal["draft", "candidate", "accepted", "rejected", "promoted", "archived"]
-RiskTier = Literal["T0", "T1", "T2", "T3"]   # meaning of each tier: 08-promotion.md §5
+RevisionId = str   # identity of a revision: "sha256:" + 64 hex chars, the hash of canonical({spec, policy}) (§4.4).
+                   # Example: "sha256:7c1e…" (shortened here and below)
+Digest = str       # address of stored bytes: "sha256:" + 64 hex chars of the bytes themselves.
+                   # Example: "sha256:3f9a…" is the address of one SOUL.md file;
+                   # GET …/genome/content/sha256:3f9a… returns "# Soul\nYou are a patient support agent…" (§9.1)
+# RiskTier (T0 < T1 < T2 < T3) is defined once in 08-promotion.md §5.
 # BotRef {owner_id, bot_id}: the bot's full identity (a bot_id alone is not unique
 # across users); defined once in 09-evolution-api.md §2.7.
-
-@dataclass(frozen=True)
-class Provenance:
-    kind: Literal["user", "strategy_run", "manifest_put", "bot"]   # "bot" postponed with DR-3
-    actor: str                       # user id, or strategy "id@version"
-    run_id: str | None = None        # set only when kind == "strategy_run"
-    step: str | None = None          # the strategy's own step name, e.g. "propose"
-
-@dataclass
-class RevisionMetadata:
-    id: RevisionId
-    seq: int                         # per-bot, human-readable ("r42"); NOT an identity
-    bot: BotRef                      # the bot this revision belongs to (owner + bot id)
-    lineage_id: str                  # stable across descendants; a fork starts a new lineage
-    parents: list[RevisionId]        # [] only for a bot's first revision; >1 for merge/crossover
-    created_by: Provenance
-    created_at: datetime
-    status: RevisionStatus
-    patch_from_parent: Digest | None # digest of the stored GenomePatch; None when recorded from a document
-    evidence: list[str]              # "episode:ep_91", "finding:f_12"
-    evaluations: list[str]           # links into Verification, never embedded scores
-    annotations: dict[str, str] = field(default_factory=dict)   # review notes, experiment tags
-
-@dataclass(frozen=True)
-class GenomeRevision:
-    genome_schema: int               # 1
-    revision: RevisionMetadata       # platform-written, excluded from the hash
-    spec: "GenomeSpec"
-    policy: "GenomePolicy"
 ```
 
+人设文件与技能：
+
 ```python
-# The persona files a bot may have: VALID_IDENTITY_FILES in
-# core/services/identity.py, minus MEMORY.md and IDENTITY.md (reserved, §7),
-# plus the proposed platform-managed LESSONS.md (§7 interim).
-PersonaFileType = Literal[
-    "SOUL.md", "AGENTS.md", "RULES.md", "OKR.md", "SAFETY.md", "OUTPUT.md", "USER.md",
-    "TOOLS.md", "HEARTBEAT.md", "BOOTSTRAP.md", "KNOWLEDGE.md", "CLAUDE.md", "GREETING.md",
-    "README.md", "LESSONS.md",
-]
+class PersonaFileType(StrEnum):
+    """The persona files a bot may have: VALID_IDENTITY_FILES in core/services/identity.py,
+    minus MEMORY.md and IDENTITY.md (reserved, §7), plus the proposed platform-managed
+    LESSONS.md (§7 interim)."""
+    SOUL = "SOUL.md"
+    AGENTS = "AGENTS.md"
+    RULES = "RULES.md"
+    OKR = "OKR.md"
+    SAFETY = "SAFETY.md"
+    OUTPUT = "OUTPUT.md"
+    USER = "USER.md"
+    TOOLS = "TOOLS.md"
+    HEARTBEAT = "HEARTBEAT.md"
+    BOOTSTRAP = "BOOTSTRAP.md"
+    KNOWLEDGE = "KNOWLEDGE.md"
+    CLAUDE = "CLAUDE.md"
+    GREETING = "GREETING.md"
+    README = "README.md"
+    LESSONS = "LESSONS.md"
 
 @dataclass(frozen=True)
 class PersonaFile:
-    type: PersonaFileType            # which persona file this is
-    digest: Digest                   # address of its bytes in the content store
+    type: PersonaFileType            # which persona file, e.g. PersonaFileType.SOUL ("SOUL.md")
+    digest: Digest                   # where its bytes are, e.g. "sha256:3f9a…"
+
+class SkillOriginKind(StrEnum):
+    CENTER = "center"                # a governed skill from Skill Center: pinned by version, not copied
+    LOCAL = "local"                  # a bot-owned skill (uploaded, or created by a patch): stored by digest
+    GIT = "git"                      # fetched from a git source when the revision was recorded: stored by digest
+    OSS = "oss"                      # fetched from object storage when the revision was recorded: stored by digest
 
 @dataclass(frozen=True)
 class SkillOrigin:
-    kind: Literal["center", "local", "git", "oss"]
-    version: str | None = None       # pinned Center version when kind == "center"
+    kind: SkillOriginKind
+    version: str | None = None       # CENTER only: the pinned version, e.g. "center://refund-policy@v7"
 
 @dataclass(frozen=True)
 class SkillEntry:
-    name: str
+    name: str                        # the skill's name, e.g. "refund-policy"
     origin: SkillOrigin
-    digest: Digest | None = None     # None for Center skills: they resolve through Skill Center by version
+    digest: Digest | None = None     # where the skill's stored files are, e.g. "sha256:0c55…" for the bot-owned
+                                     # "quality-check" skill; None for CENTER skills, which Skill Center resolves by version
+```
+
+精选记忆：
+
+```python
+class EvidenceKind(StrEnum):
+    """The Experience records a change can cite (02-experience.md)."""
+    EPISODE = "episode"              # one recorded session or trajectory of the bot, id "ep_…"
+    FEEDBACK = "feedback"            # one feedback record, id "fb_…": a rating, a correction, or a producer's
+                                     # finding such as a ClawInsight improvement item
+    EVAL = "eval"                    # one evaluation rollout trace, id "et_…"
+
+EvidenceRef = str  # "<EvidenceKind>:<id>", e.g. "episode:ep_91", "feedback:fb_311". Each one names exactly one
+                   # Experience record, which GET …/experience/episodes/ep_91 (or …/feedback/fb_311) returns.
+                   # It is an id to look up, not a URL.
+
+@dataclass(frozen=True)
+class MemoryItem:
+    key: str                         # stable name of the item, e.g. "returns-window"; updates and retires address it
+    text: str                        # the fact, rule, or lesson itself, e.g. "Returns are accepted within 30 days."
+    tags: list[str]                  # free-form topic labels, e.g. ["returns"]
+    source: list[EvidenceRef]        # what the item was learned from, e.g. ["episode:ep_97"]
+
+class MemoryMode(StrEnum):
+    """How apply writes the curated items into the engine's memory (§7). Besides curated items, the
+    engine's memory holds what the bot wrote itself while running ("runtime items")."""
+    SEED = "seed"                    # write each item only if the engine has no item with that key yet;
+                                     # anything already there, including runtime items, is kept as it is
+    MERGE = "merge"                  # write every item, overwriting an existing item with the same key;
+                                     # runtime items with other keys are kept
+    REPLACE = "replace"              # the engine's memory becomes exactly the curated items; runtime items are
+                                     # dropped (T3: needs human approval)
 
 @dataclass(frozen=True)
 class MemorySpec:
-    mode: Literal["seed", "merge", "replace"]
-    items_digest: Digest             # the itemized memory set (not a raw MEMORY.md)
+    mode: MemoryMode
+    items_digest: Digest             # where the stored list of MemoryItem is, e.g. "sha256:9e20…"
+```
+
+模式示例。精选集合中有 `returns-window` = "Returns are accepted within 30
+days."。运行期间，Bot 自己写入了 `returns-window` = "Returns are accepted
+within 14 days."，以及一个新条目 `vip-contact`。在下一次应用时：
+
+| 模式 | 之后的 `returns-window` | 之后的 `vip-contact` |
+| --- | --- | --- |
+| `seed` | "14 days"（该键已存在，因此 Bot 自己的条目保留） | 保留 |
+| `merge` | "30 days"（精选条目覆盖该键） | 保留 |
+| `replace` | "30 days" | 被移除 |
+
+资源、工具以及完整的 spec：
+
+```python
+@dataclass(frozen=True)
+class ResourceEntry:
+    path: str                        # where the resource appears in the bot's workspace, e.g. "data/kb/"
+    digest: Digest                   # where its stored bytes are (how a directory is stored: open decision G-1)
+
+@dataclass(frozen=True)
+class McpServerEntry:
+    server_code: str                 # the MCP server's registered code, e.g. "mcp.x.meet"
+    config_digest: Digest            # where this bot's stored config for that server is
+
+@dataclass(frozen=True)
+class CliToolEntry:
+    name: str                        # e.g. "shopctl"
+    digest: Digest                   # where the tool's stored package is
+    version: str                     # the tool's own version, e.g. "2.3.0"
+
+@dataclass(frozen=True)
+class ToolsSpec:
+    mcp: list[McpServerEntry]
+    cli_tools: list[CliToolEntry]
+
+@dataclass(frozen=True)
+class ScriptEntry:
+    digest: Digest                   # where the bot's startup script is; locked by default (§4.5)
 
 @dataclass(frozen=True)
 class GenomeSpec:
     persona: list[PersonaFile]
     skills: list[SkillEntry]
-    memory: MemorySpec | None        # None until RSI-05 lands (see §7)
-    resources: list["ResourceEntry"]          # {path, digest}
-    tools: "ToolsSpec"                        # {mcp: [{server_code, config_digest}], cli_tools: [{name, digest, version}]}
-    engine_config: dict[str, str]             # allowlisted keys; string values (no floats in hashed content)
-    script: "ScriptEntry | None"              # {digest}; locked by default
+    memory: MemorySpec | None        # None until RSI-05 lands (§7)
+    resources: list[ResourceEntry]
+    tools: ToolsSpec
+    engine_config: dict[str, str]    # allowlisted key -> value, e.g. {"reasoning_effort": "medium"};
+                                     # values are strings because hashed content has no floats (§9.3)
+    script: ScriptEntry | None       # None when the bot has no startup script
 ```
 
 每个修订版中都包含所有类别。空列表表示“无”；它从不表示“保持原样”
@@ -174,52 +256,28 @@ class GenomeSpec:
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 // The normative schema is work item RSI-02.
 {
-  "genome_schema": 1,
-  "revision": {                                   // computed / platform-written, not authored
-    "id": "sha256:7c1e…",                         // hash of canonical({spec, policy}): content address
-    "seq": 42,                                    // per-bot sequence number for humans ("r42"); not an identity
-    "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},   // owner + bot id; a bot id alone is not unique
-    "lineage_id": "lin_support_agent",            // stable across forks; a fork starts a new lineage
-    "parents": ["sha256:a90b…"],                  // r41; more than one parent allowed (crossover/merge)
-    "created_by": {"kind": "strategy_run", "run_id": "run_7f3", "step": "propose",
-                   "actor": "clawevolve/bot-evolution@2.0.0"},
-    "created_at": "2026-10-08T03:12:00Z",
-    "status": "candidate",                        // draft | candidate | accepted | rejected | promoted | archived
-    "patch_from_parent": "sha256:c41e…",          // digest of the stored Genome Patch = candidate id
-    "evidence": ["episode:ep_91", "episode:ep_97", "finding:f_12"],
-    "evaluations": ["eval:ev_301", "eval:ev_302"],// links into Verification, not embedded scores
-    "annotations": {"experiment": "escalation-wording"}
+  "persona": [                                    // == manifest.identity, but pinned
+    {"type": "SOUL.md", "digest": "sha256:3f9a…"},
+    {"type": "AGENTS.md", "digest": "sha256:81bd…"}
+  ],
+  "skills": [
+    {"name": "refund-policy", "origin": {"kind": "center", "version": "center://refund-policy@v7"}},  // pinned Center version, not copied
+    {"name": "quality-check", "digest": "sha256:0c55…", "origin": {"kind": "local"}}                  // bot-owned: stored, referenced by digest
+  ],
+  "memory": {                                     // new category, see §7
+    "mode": "seed",                               // seed | merge | replace (MemoryMode)
+    "items_digest": "sha256:9e20…"                // the stored list of memory items
   },
-  "spec": {                                       // the evolvable content (authored / proposed)
-    "persona": [                                  // == manifest.identity, but pinned
-      {"type": "SOUL.md", "digest": "sha256:3f9a…"},
-      {"type": "AGENTS.md", "digest": "sha256:81bd…"}
-    ],
-    "skills": [
-      {"name": "refund-policy", "origin": {"kind": "center", "version": "center://refund-policy@v7"}},  // pinned Center version, not copied
-      {"name": "quality-check", "digest": "sha256:0c55…", "origin": {"kind": "local"}}                  // bot-owned: stored, referenced by digest
-    ],
-    "memory": {                                   // new category, see §7
-      "mode": "seed",                             // seed | merge | replace
-      "items_digest": "sha256:9e20…"              // itemized memory set
-    },
-    "resources": [{"path": "data/kb/", "digest": "sha256:d4a7…"}],
-    "tools": {
-      "mcp": [{"server_code": "mcp.x.meet", "config_digest": "sha256:52c8…"}],
-      "cli_tools": [{"name": "shopctl", "digest": "sha256:a613…", "version": "2.3.0"}]
-    },
-    "engine_config": {                            // allowlisted keys only; no floats in hashed content
-      "model": "provider/model-x",
-      "reasoning_effort": "medium"
-    },
-    "script": {"digest": "sha256:e1f0…"}          // carried, but LOCKED for evolution by default
+  "resources": [{"path": "data/kb/", "digest": "sha256:d4a7…"}],
+  "tools": {
+    "mcp": [{"server_code": "mcp.x.meet", "config_digest": "sha256:52c8…"}],
+    "cli_tools": [{"name": "shopctl", "digest": "sha256:a613…", "version": "2.3.0"}]
   },
-  "policy": {                                     // NOT evolvable: copied forward verbatim by the platform
-    "locked_genes": ["script", "tools.mcp", "policy"],
-    "mutable_genes": ["persona", "skills", "memory", "resources", "engine_config.reasoning_effort"],
-    "pins": ["skills.refund-policy"],             // write-protected items (Hermes-style pinning)
-    "risk_overrides": {}
-  }
+  "engine_config": {                              // allowlisted keys only; no floats in hashed content
+    "model": "provider/model-x",
+    "reasoning_effort": "medium"
+  },
+  "script": {"digest": "sha256:e1f0…"}            // carried, but LOCKED for evolution by default
 }
 ```
 
@@ -271,19 +329,118 @@ class GenomePolicy:
 工具变更默认位于锁定基因中，而策略配置本身处于补丁可触及的范围之外。
 更改策略配置是一项所有者操作，会记录一个新的修订版（§4.4）。
 
-### 2.4 GenomeRef
+### 2.4 GenomeRevision
 
 ```python
-FixedRefName = Literal["active", "previous", "canary", "draft"]   # one each per bot (§5.1)
-# A ref name is one of the fixed names, or a run candidate ref of the exact form
-# "candidate/<run_id>/<n>" (validated on write; no other free-form names exist).
-RefName = FixedRefName | str
+class ProvenanceKind(StrEnum):
+    USER = "user"                    # a person edited the bot (UI, API, or CLI)
+    STRATEGY_RUN = "strategy_run"    # a strategy submitted it as a candidate during an Evolution Run
+    MANIFEST_PUT = "manifest_put"    # recorded through the existing PUT /config-manifest (§5.5)
+    BOT = "bot"                      # postponed with DR-3
+
+@dataclass(frozen=True)
+class Provenance:
+    kind: ProvenanceKind
+    actor: str                       # who: a user id ("user_owner_1"), or a strategy "id@version"
+                                     # ("clawevolve/bot-evolution@2.0.0")
+    run_id: str | None = None        # STRATEGY_RUN only: the Evolution Run that produced it, e.g. "run_7f3"
+    step: str | None = None          # STRATEGY_RUN only: the strategy's own label for the step, e.g. "propose"
+
+EvaluationId = str  # id of one Verification evaluation, e.g. "ev_301";
+                    # GET …/evolution/evaluations/ev_301 returns it with its scores (07-verification.md)
+
+class RevisionStatus(StrEnum):
+    """Meaning of each status and who sets it: §4.4."""
+    DRAFT = "draft"
+    CANDIDATE = "candidate"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    PROMOTED = "promoted"
+    ARCHIVED = "archived"
+
+@dataclass
+class RevisionMetadata:
+    id: RevisionId                   # the revision's identity: hash of {spec, policy} (§4.4)
+    seq: int                         # per-bot counter for people: the bot's 1st recorded revision is 1 ("r1"), the
+                                     # 42nd is 42 ("r42"). UIs and the CLI show it, and paths accept it
+                                     # (GET …/revisions/r42), but it is not an identity: other records store `id`
+    bot: BotRef                      # the bot this revision belongs to (owner + bot id)
+    parent: RevisionId | None        # the revision this one was made from: the patch's `base`, or the `base` given
+                                     # when a whole document was recorded; None only for the bot's first revision
+    created_by: Provenance
+    created_at: datetime
+    status: RevisionStatus
+    patch_digest: Digest | None      # digest of the stored GenomePatch that turned `parent` into this revision
+                                     # (= the candidate id, §6.5); None when the revision was recorded from a whole
+                                     # Manifest document instead of a patch (§4.1)
+    evidence: list[EvidenceRef]      # the Experience records that motivated the change, e.g.
+                                     # ["episode:ep_91", "feedback:fb_311"]; [] for most manual edits
+    evaluations: list[EvaluationId]  # the Verification evaluations run on this revision, e.g. ["ev_301", "ev_302"];
+                                     # ids only: scores stay in Verification
+    annotations: dict[str, str] = field(default_factory=dict)
+                                     # free-form labels people or the platform add after recording, e.g.
+                                     # {"experiment": "escalation-wording", "review_note": "checked by legal"};
+                                     # not hashed, so they change without creating a new revision
+
+@dataclass(frozen=True)
+class GenomeRevision:
+    genome_schema: int               # version of this record's format, so a reader knows how to parse it: 1 today;
+                                     # a breaking change to the shape of spec or policy bumps it (RSI-02)
+    revision: RevisionMetadata       # platform-written, excluded from the hash
+    spec: GenomeSpec
+    policy: GenomePolicy
+```
+
+**运行 id**（`run_7f3`）是一次进化运行的 id：针对一个 Bot 执行一次绑定。进化运行
+在提交运行时分配它。它全局唯一且不透明。它不是按进化策略或按 Bot 递增的计数器
+（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。
+
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+// `spec` and `policy` are shortened; full examples are in §2.2 and §2.3.
+{
+  "genome_schema": 1,                             // format version of this record
+  "revision": {                                   // computed / platform-written, not authored
+    "id": "sha256:7c1e…",                         // hash of canonical({spec, policy}): the identity
+    "seq": 42,                                    // the bot's 42nd revision, shown as "r42"; not an identity
+    "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},   // owner + bot id; a bot id alone is not unique
+    "parent": "sha256:a90b…",                     // r41, the patch's base
+    "created_by": {"kind": "strategy_run", "run_id": "run_7f3", "step": "propose",
+                   "actor": "clawevolve/bot-evolution@2.0.0"},
+    "created_at": "2026-10-08T03:12:00Z",
+    "status": "candidate",
+    "patch_digest": "sha256:c41e…",               // the stored Genome Patch that produced it = candidate id
+    "evidence": ["episode:ep_91", "episode:ep_97", "feedback:fb_311"],
+    "evaluations": ["ev_301", "ev_302"],          // Verification evaluation ids, not embedded scores
+    "annotations": {"experiment": "escalation-wording"}
+  },
+  "spec": {"persona": [{"type": "SOUL.md", "digest": "sha256:3f9a…"}], "skills": [], "memory": null,
+           "resources": [], "tools": {"mcp": [], "cli_tools": []},
+           "engine_config": {"reasoning_effort": "medium"}, "script": null},
+  "policy": {"locked_genes": ["script", "tools.mcp", "tools.cli_tools", "policy"],
+             "mutable_genes": ["persona", "skills", "memory"], "pins": [], "risk_overrides": {}}
+}
+```
+
+### 2.5 GenomeRef
+
+```python
+class FixedRefName(StrEnum):
+    """The refs every bot can have, at most one of each (§5.1, §5.2)."""
+    ACTIVE = "active"
+    PREVIOUS = "previous"
+    CANARY = "canary"
+    DRAFT = "draft"
+
+# A ref name is a FixedRefName value, or a run candidate ref of the exact form
+# "candidate/<run_id>/<n>" (validated on write; no other names exist).
+RefName = str
 
 @dataclass(frozen=True)
 class GenomeRef:
-    name: RefName
-    revision: RevisionId
-    seq: int                         # seq of the revision, for display ("r42")
+    name: RefName                    # e.g. "active", "candidate/run_7f3/1"
+    revision: RevisionId             # the revision it points at now
+    seq: int                         # that revision's seq, for display ("r42")
     moved_at: datetime
     moved_by: Provenance
     reason: str | None = None        # required for active/previous/canary moves
@@ -291,8 +448,9 @@ class GenomeRef:
 @dataclass(frozen=True)
 class RefUpdate:
     name: RefName
-    revision: RevisionId
-    expected_revision: RevisionId | None   # CAS: None only when the ref must not exist yet
+    revision: RevisionId             # where the ref should point
+    expected_revision: RevisionId | None   # compare-and-swap: where the caller believes it points now;
+                                           # None only when the ref must not exist yet (§5.3)
     reason: str | None = None
 ```
 
@@ -308,17 +466,32 @@ class RefUpdate:
 }
 ```
 
-### 2.5 GenomePatch 与 PatchOp
+### 2.6 GenomePatch 与 PatchOp
 
 ```python
-EditKind = Literal["replace_section", "insert_after"]   # full set fixed by RSI-02
+class EditKind(StrEnum):             # full set fixed by RSI-02
+    REPLACE_SECTION = "replace_section"   # replace the body under a Markdown heading
+    INSERT_AFTER = "insert_after"         # insert text after an anchor line
 
 @dataclass(frozen=True)
 class TextEdit:
     kind: EditKind
     content: str                     # the new text to write
-    heading: str | None = None       # for replace_section
-    anchor: str | None = None        # for insert_after
+    heading: str | None = None       # REPLACE_SECTION only, e.g. "## Escalation"
+    anchor: str | None = None        # INSERT_AFTER only, e.g. "## Tone"
+
+@dataclass(frozen=True)
+class DigestRef:
+    digest: Digest                   # a file uploaded first with PUT …/genome/content
+
+class FileOpKind(StrEnum):
+    UNIFIED_DIFF = "unified_diff"    # the only kind in v1
+
+@dataclass(frozen=True)
+class UnifiedDiff:
+    kind: FileOpKind
+    path: str                        # file inside the skill, e.g. "SKILL.md"
+    diff: str                        # a unified diff against that file in the base revision
 
 @dataclass(frozen=True)
 class FileEdit:                      # op "file.edit": persona md, SKILL.md, resource text files
@@ -328,19 +501,12 @@ class FileEdit:                      # op "file.edit": persona md, SKILL.md, res
 @dataclass(frozen=True)
 class SkillAdd:                      # op "skill.add"
     name: str                        # the new skill's name, e.g. "invoice-lookup"
-    files: dict[str, "str | DigestRef"]   # small text inline; larger files uploaded first, referenced by digest
+    files: dict[str, str | DigestRef]   # path in the skill -> small text inline, or a larger file uploaded first
 
 @dataclass(frozen=True)
 class SkillUpdate:                   # op "skill.update"
     name: str                        # an existing bot-owned skill
-    file_ops: list["UnifiedDiff"]    # {kind: "unified_diff", path, diff}
-
-@dataclass(frozen=True)
-class MemoryItem:
-    key: str                         # stable name of the item, e.g. "returns-window"; updates and retires address it
-    text: str                        # the fact, rule, or lesson itself
-    tags: list[str]                  # free-form topic labels, e.g. ["billing"]
-    source: list[str]                # evidence ids, e.g. "episode:ep_91"
+    file_ops: list[UnifiedDiff]
 
 @dataclass(frozen=True)
 class MemoryAdd:                     # op "memory.add"
@@ -364,17 +530,17 @@ PatchOp = FileEdit | SkillAdd | SkillUpdate | MemoryAdd | MemoryUpdate | MemoryR
 @dataclass(frozen=True)
 class GenomePatch:
     patch_schema: int                # schema version of the patch format; 1
-    base: RevisionId                 # the revision the patch was written against; must equal the parent (CAS on record)
+    base: RevisionId                 # the revision the patch was written against; becomes the new revision's parent
     ops: list[PatchOp]
     rationale: str                   # required; shown to reviewers
-    evidence: list[str]              # required for non-trivial ops
+    evidence: list[EvidenceRef]      # required for non-trivial ops
 ```
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "patch_schema": 1,
-  "base": "sha256:a90b…",                               // r41; must equal the parent
+  "base": "sha256:a90b…",                               // r41; becomes the parent
   "ops": [
     {"op": "file.edit", "target": "persona/SOUL.md",     // text files: persona md, SKILL.md, resources
      "edits": [
@@ -394,23 +560,23 @@ class GenomePatch:
     {"op": "engine_config.set", "key": "reasoning_effort", "value": "high"}
   ],
   "rationale": "Partial-refund requests were escalated too late in 6 of 9 failing episodes.",
-  "evidence": ["finding:f_12", "episode:ep_91"]
+  "evidence": ["feedback:fb_311", "episode:ep_91"]
 }
 ```
 
-此示例一次性展示了所有操作类型。按照 §2.2 的策略配置，它会被拒绝，因为
+此示例一次性展示了所有操作类型。按照 §2.3 的策略配置，它会被拒绝，因为
 `skills.refund-policy` 在那里被固定（§6.2）；真实的补丁只会触及可变且未固定的基因。
 
-### 2.6 CompiledManifest
+### 2.7 CompiledManifest
 
 ```python
 @dataclass(frozen=True)
 class CompiledManifest:
     revision_id: RevisionId
-    document: dict                   # a Manifest schema-v1-compatible document; every category present;
-                                     # file entries point at the content store by digest (§8 item 6)
-    document_digest: Digest          # recorded on the apply report
-    memory_projection: "MemoryProjection | None"   # items + mode, handed to the engine (§7)
+    document: dict                   # the Manifest document apply consumes (Manifest schema v1 shape, below);
+                                     # every category present; file entries point at the content store by digest (§8 item 6)
+    document_digest: Digest          # digest of that document; recorded on the apply report
+    memory_projection: MemorySpec | None   # the curated memory and its mode, handed to the engine adapter (§7)
 ```
 
 ```jsonc
@@ -456,7 +622,7 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 | Manifest v1 中的缺口 | 进化为何需要它 | 解决方式 |
 | --- | --- | --- |
 | 每个 Bot 一行可变记录，没有修订历史，没有内容哈希 | 谱系、归档、可复现性、回到任意时间点 | 修订版（§4） |
-| 没有父代指针 | 谱系树；感知后代的选择 | `parents`、`lineage_id` |
+| 没有父代指针 | 谱系树；感知后代的选择 | `parent` |
 | 没有乐观并发控制。HTTP 通过 `ETag`（服务器随文档返回的版本标签）和 `If-Match` 请求头（客户端回传其读取到的标签；若文档自那以后已变更，服务器以 `412 Precondition Failed` 拒绝写入）提供这一能力。`PUT /config-manifest` 两者都没有 | 进化策略与人同时编辑时会静默地互相覆盖；最后写入者在不知情的情况下胜出 | 引用上的比较并交换（§5） |
 | 应用时重新读取当前文档；报告不说明应用的是哪些字节 | 无法将行为或经验归因到某个版本 | 应用报告记录 `revision_id` 和文档摘要（§8） |
 | 来源是可移动的引用（git 分支、OSS 键），每次应用都重新解析 | 基因组必须不可变：每个来源都固定到提交 SHA / 摘要 | 固定版本的内容（§4.2） |
@@ -465,7 +631,7 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 | v1 中拒绝 `engine_config` | 模型 / 温度 / 推理预算是合理的可调参数 | 白名单化的 `engine_config`（§8） |
 | 文档中省略的类别表示“保持不变” | 修订版必须完全确定 Bot；否则同一修订版的两次应用可能因先前状态不同而产生不同的 Bot | 完整性（§4.3） |
 | 没有存放元数据的位置：未知键会被拒绝 | 进化需要**来源**（谁或什么产生了某个版本、依据哪些证据、使用哪个补丁）和**注解**（自由格式的标签，例如评审备注或实验标签） | 保存在修订版记录上，而不是 Manifest 文档内，因此 Manifest 模式无需为此改变 |
-| 个人 Bot 无法回到更早的配置；服务 Bot 有自己的发布回滚（只能回退一步） | 回到旧版本必须对每个 Bot 都可用，并且可以回到任意更早的修订版 | 回到旧版本 = 晋升一个更早的修订版（§5.3） |
+| 个人 Bot 无法回到更早的配置；服务 Bot 有自己的发布回滚（只能回退一步） | 回到旧版本必须对每个 Bot 都可用，并且可以回到任意更早的修订版 | 回到旧版本 = 晋升一个更早的修订版（§5.4） |
 
 被否决的替代方案（来自 DR-1）：
 
@@ -481,7 +647,7 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 
 具体来说，修订版在 Manifest 之上恰好增加了以下内容：
 
-1. **修订版标识与谱系**：一个内容哈希 id 加上一个可读的每 Bot 序号、父代、来源、
+1. **修订版标识与谱系**：一个内容哈希 id 加上一个可读的每 Bot 序号、一个父代、来源、
    状态，以及通过比较并交换移动的具名引用（§5）。
 2. **一个不可进化的 `policy` 部分**：所有者为该 Bot 的进化设定的边界规则，随每个
    修订版一同记录，且只能由所有者修改（原因见 §2.3）。
@@ -489,7 +655,9 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
    产生相同的字节（§4.2）。
 4. **完整性**：每个修订版中都包含所有类别（§4.3）。
 5. **自动化参与者只能通过补丁变更**：进化策略针对具名基础修订版提交带类型的
-   逐项补丁（§6）。人仍然可以从整份文档记录修订版。
+   逐项补丁（§6）。人仍然可以从一份完整的 **Manifest 文档**记录修订版，而不是使用
+   补丁：Manifest 文档即 Bot Config Manifest API 所接受的完整 YAML 文档（目前通过
+   `PUT /config-manifest`）。这样的修订版没有 `patch_digest`。
 6. **一个新的内容类别：精选记忆**（§7），这需要新的引擎契约。
 
 刻意**不**增加的内容：
@@ -524,10 +692,13 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 - **Id。** `id = "sha256:" + hex(SHA-256(RFC8785({spec, policy})))`。`revision`
   元数据被排除在外，因此相同的内容总是具有相同的 id，无论由谁产生。记录已存在的
   内容会返回已有的修订版；不会创建重复项，也不会分配新的 `seq`。
-- **`seq`。** 一个每 Bot 计数器，在新的 id 首次被记录时分配，供人阅读
-  （`r41`、`r42`）。它从不作为标识，也从不用于哈希。
-- **谱系。** `parents` 指向基础修订版。`lineage_id` 在后代之间保持稳定；分叉会开启
-  新的谱系。合并或交叉类进化策略允许有多个父代。
+- **`seq`。** 一个每 Bot 计数器，在新的 id 首次被记录时分配，供人阅读：Bot 第一个
+  记录的修订版是 `r1`，下一个新修订版是 `r2`，依此类推。示例：进化策略提交了一个内容
+  全新的候选，于是它成为 `r42`；同一提交的重试会再次返回 `r42`，而不是创建 `r43`。
+  它从不作为标识，也从不用于哈希：两个 Bot 可以各有一个 `r42`，其他记录存储的是 `id`。
+- **父代。** 除 Bot 的第一个修订版外，每个修订版恰好有一个 `parent`：补丁所针对的基础
+  修订版，或记录整份文档时给出的 `base`。沿着 `parent` 链接可以得到 Bot 的历史，
+  它呈树状（由 `r41` 生成的两个候选互为兄弟）。
 - **状态**是平台写入的元数据，位于哈希之外：
 
 | 状态 | 含义（提议） | 设置者 |
@@ -568,13 +739,47 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 | `inbox/<id>` | Bot 提交的草稿补丁（快速循环） | 暂缓：Bot 调用方是之后单独的设计 |
 
 引用只是名字，不是身份。每个修订版都有自己的身份：内容哈希 id（加上按 bot 递增的
-`seq`，例如 `r42`），无论是否有引用指向它。引用是可选的、可移动的指针，一个修订版
-可以没有引用，也可以被多个引用指向。`candidate/<run>/<n>` 与 `active` 之类的标签
-是同一种东西，只是范围限定在一次运行内：进化运行为某次运行提交的每个候选创建一个，
-这样该运行的候选可以按名字寻址，并在门禁做出决定之前一直被保留。所有者手动编辑得到的
-修订版不会有 candidate 引用。
+`seq`，例如 `r42`），无论是否有引用指向它。一个修订版可以没有引用，也可以被多个
+引用指向。
 
-### 5.2 比较并交换
+### 5.2 逐个说明每个引用
+
+贯穿本节的示例：一个支持 Bot 正在运行 `r41`。夜间运行 `run_7f3` 提出了两个候选，
+同时所有者也在手动编辑该 Bot。
+
+**`active`：Bot 正在运行的内容。** 每次应用（个人 Bot）和每次发布（服务 Bot）
+都使用 `active` 指向的修订版，因此只要 Bot 被应用过，它就是每个 Bot 都有的那个引用。
+只有晋升会移动它：在某个修订版被晋升时，无论该修订版更新还是更旧
+（[08-promotion.zh-CN.md](08-promotion.zh-CN.md)）。
+*示例：* 门禁接受了 `r42`，所有者批准了它；晋升将 `active` 从 `r41` 移到 `r42`，
+并应用 `r42`。
+
+**`previous`：后退一步。** `active` 在上一次移动之前指向的修订版。晋升在移动
+`active` 的同一步中移动它，因此后退一步无需查找：晋升 `previous` 即可。*示例：*
+在上述移动之后，`previous` = `r41`。如果 `r42` 表现异常，晋升 `previous` 会使
+`active` 再次变为 `r41`，而 `previous` 变为 `r42`。
+
+**`canary`：在部分实例上试运行的修订版。** 仅用于绑定采用金丝雀发布的多实例
+（服务）Bot。一部分实例运行 `canary`，其余实例运行 `active`，由验证在线比较两者。
+晋升在试运行开始时设置它。试运行成功时，`active` 移到同一个修订版；试运行被停止时，
+金丝雀实例重新运行 `active`（[08-promotion.zh-CN.md](08-promotion.zh-CN.md)）。
+*示例：* `canary` = `r42`，在 10% 的实例上运行一天，然后 `active` 移到 `r42`。
+
+**`draft`：所有者正在进行的工作。** 每次手动编辑（UI、API、CLI）都会记录一个修订版，
+并将 `draft` 移到它。在所有者晋升之前，没有任何东西运行 `draft`，因此所有者可以
+保存未完成的工作。*示例：* 所有者两次编辑 `SOUL.md`；这会记录 `r43` 和 `r44`，
+`draft` = `r44`，而 `active` 保持为 `r42`，直到所有者晋升 `r44`。（为了向后兼容，
+现有的 `PUT /config-manifest` 也会移动 `active`，§5.5。）
+
+**`candidate/<run_id>/<n>`：某次运行的一个候选。** 进化运行 `run_id` 提交的第 `n`
+个候选（从 1 开始，按提交顺序计数）。当进化策略提交候选时，由进化运行创建它
+（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。它之后从不移动，因此在
+门禁做出决定后这个名字仍然有效，可以用在 UI、CLI 和实验记录链接中。*示例：*
+`run_7f3` 提交了两个补丁；它们被记录为 `r42` 和 `r45`，并分别命名为
+`candidate/run_7f3/1` 和 `candidate/run_7f3/2`。`avn genome show candidate/run_7f3/2`
+显示 `r45`。所有者手动编辑得到的修订版不会有 candidate 引用。
+
+### 5.3 比较并交换
 
 每次引用更新都携带 `expected_revision`：调用方认为该引用当前指向的修订版。
 只有在这一点仍然成立时，注册表才会移动该引用；否则返回 `409 Conflict` 及当前
@@ -585,7 +790,7 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 每次引用移动都是一个仅追加的事件（引用、源、目标、参与者、原因、时间）。
 审计日志及其读模型见 [05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md)。
 
-### 5.3 回到旧版本就是晋升
+### 5.4 回到旧版本就是晋升
 
 在进化平台内，“回滚”到 `r41` 意味着**再次晋升 `r41`**。没有单独的回滚路径。
 由于 id 是内容哈希，不会创建新的修订版：`active` 引用移回 `r41`，`previous` 移到
@@ -601,7 +806,7 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 中定义；基因组注册表提供它所使用的
 CAS 引用移动和编译步骤。
 
-### 5.4 与当前 Manifest 记录行的关系
+### 5.5 与当前 Manifest 记录行的关系
 
 在 P1 中，现有的 `PUT /config-manifest` 继续可用，并成为以下操作的语法糖：
 “从这份文档记录一个修订版，将 `draft`（以及为了向后兼容，`active`）移到它，然后
@@ -680,7 +885,7 @@ CAS 引用移动和编译步骤。
 
 存储的补丁以内容寻址。其摘要即进化策略和晋升所使用的**候选 id**
 （`sha256:c41e…`）：重试提交同一补丁会返回相同的 id，且不会创建任何新内容。
-由此产生的修订版有自己的 id（`{spec, policy}` 的哈希），并在 `patch_from_parent`
+由此产生的修订版有自己的 id（`{spec, policy}` 的哈希），并在 `patch_digest`
 中记录该补丁。同时保留这两种标识是待定决策 G-9。进化策略侧的
 `ctx.candidates.submit` 见 [03-strategy.zh-CN.md](03-strategy.zh-CN.md)。
 
@@ -694,6 +899,18 @@ CAS 引用移动和编译步骤。
 | **情景 / 运行时记忆**：Bot 在工作时写下的内容 | 引擎运行时 | 否 | 作为证据被采集到[经验](02-experience.zh-CN.md)中 |
 | **精选记忆（种子）**：Bot 启动时应具备的事实、规则、教训 | 基因组 | **是**，逐项存储 | 由整合（“dream”）类进化策略提议，经门禁检查后晋升 |
 
+**为什么精选记忆是一个独立类别，而不是人设文件。** Manifest 缺少记忆文件只是部分
+原因。即使 Manifest 接受 `MEMORY.md`，以下三点仍然成立：
+
+- **Bot 在运行时写入自己的记忆。** 基因组中的文件会在两次应用之间被 Bot 覆盖，而每次
+  应用又会抹去 Bot 学到的东西。条目加上模式（§2.2）明确规定了应用写入什么、保留什么
+  不动。
+- **格式归引擎所有。** 每个引擎都以自己的方式存储记忆。Backend 不得知晓引擎路径
+  （见下文），因此基因组保存与引擎无关的条目，由引擎适配器写入它们。
+- **变更以单条事实为单位。** 进化策略添加、更新或退役一个条目，并附上其来源证据
+  （`source`）。每次变更都是一个小型、可评审、拥有自己风险等级（§6.3）的操作。
+  对一个大文件的编辑则两者都做不到。
+
 到引擎上的投影由引擎负责：依据仓库根目录 `AGENTS.md` 的规则（“物理布局归 Engine Runtime 及其带版本的布局契约所有”；ADR 0014 是这条规则的一个应用），Backend 不得知晓引擎路径。提议的
 **引擎记忆投影契约**（工作项 RSI-05），一个由引擎适配器实现的 Plugin API：
 
@@ -705,10 +922,10 @@ class EngineMemoryProjection(Protocol):
         """Read the engine's runtime memory into normalized items, for consolidation strategies."""
 
     def project_memory(self, bot: BotRef, items: list[MemoryItem],
-                       mode: Literal["seed", "merge", "replace"]) -> None:
-        """Materialise curated items into the engine's layout.
-        seed: only if absent. merge: curated items upserted by key, runtime items untouched.
-        replace: the curated set becomes the memory (T3, human approval)."""
+                       mode: MemoryMode) -> None:
+        """Materialise curated items into the engine's layout. The modes and an
+        example are in §2.2: seed writes only keys the engine does not have yet,
+        merge overwrites by key, replace makes the curated set the whole memory."""
 ```
 
 - 引擎在能力矩阵中按模式声明支持情况；teclaw 的支持与其他类别一样，通过
@@ -788,7 +1005,7 @@ manifest 应用流水线已经为其获取的所有内容保留了平台自己�
 （Meta-Harness 的经验），而无需让 git 成为事实来源。
 
 提议的表（名称仅为示意，由 RSI-03 确定）：`ac_genome_revision`
-（id、owner_id、bot_id、seq、谱系、父代、来源、状态、`{spec, policy}` 的规范
+（id、owner_id、bot_id、seq、父代、来源、状态、`{spec, policy}` 的规范
 JSON），`ac_genome_ref`（owner_id、bot_id、名称、修订版、用于 CAS 的版本），
 `ac_genome_ref_event`（仅追加的引用日志），`ac_genome_patch`（摘要、基础、规范 JSON）。
 
@@ -820,7 +1037,7 @@ JSON），`ac_genome_ref`（owner_id、bot_id、名称、修订版、用于 CAS 
 
 - **团队（未来）。** 基因组以 Bot 为单位。BCS 负责关系和路由，因此未来的
   **团队基因组**（角色、路由提示、共享技能）将是一个由 BCS 负责、引用成员基因组
-  修订版的单独产物。不在 v1 范围内，但这里没有任何东西阻碍它：谱系 id 和引用是通用的。
+  修订版的单独产物。不在 v1 范围内，但这里没有任何东西阻碍它：修订版 id 和引用是通用的。
 - **机制（第 3 层，之后）。** 注册表被设计为对 `target_kind` 通用（现在是
   `bot_genome`，之后是 `mechanism`）：进化策略的版本可以使用同一套
   修订版 / 引用 / 补丁机制存储，引用按进化策略族划分作用域。
@@ -835,7 +1052,28 @@ Backend 中的调用方（晋升、`/config-manifest` 兼容层）在进程内�
 `apps/evolution` 中的调用方（进化运行、验证）通过 §12 中的 API 使用它。
 
 ```python
-from typing import Protocol, Literal
+from typing import Protocol
+
+class GeneChangeKind(StrEnum):
+    ADDED = "added"
+    REMOVED = "removed"
+    MODIFIED = "modified"
+
+@dataclass(frozen=True)
+class GeneChange:
+    gene: str                        # gene path (§2.1), e.g. "persona.SOUL.md"
+    kind: GeneChangeKind
+    diff: str | None = None          # unified diff for modified text files; None otherwise
+
+@dataclass(frozen=True)
+class GenomeDiff:
+    revision: RevisionId             # the newer side
+    against: RevisionId              # the side it is compared with
+    changes: list[GeneChange]
+    risk_tier: RiskTier              # highest tier over the changes, by the §6.3 mapping
+    rewrite_flags: list[str]         # paths of files flagged `rewrite` (§6.2)
+
+# Page[T] {total, items}: the shared pagination shape, 09-evolution-api.md.
 
 class GenomeRegistry(Protocol):
     # --- revisions -------------------------------------------------------
@@ -843,12 +1081,12 @@ class GenomeRegistry(Protocol):
         """Accepts a revision id, "r<seq>", or a ref name. Raises NotFound."""
 
     def list_revisions(self, bot: BotRef, *, status: RevisionStatus | None = None,
-                       parent: RevisionId | None = None, lineage_id: str | None = None,
-                       page: int = 1, page_size: int = 20) -> "Page[RevisionMetadata]":
+                       parent: RevisionId | None = None,
+                       page: int = 1, page_size: int = 20) -> Page[RevisionMetadata]:
         """Metadata only, newest seq first."""
 
     def record_patch(self, bot: BotRef, patch: GenomePatch, *, created_by: Provenance,
-                     status: Literal["draft", "candidate"],
+                     status: RevisionStatus,          # DRAFT (owner) or CANDIDATE (run) only
                      allowed_genes: list[str] | None = None) -> GenomeRevision:
         """Validate (§6.2), store the patch content-addressed, apply it to `patch.base`,
         and record the resulting revision. Idempotent: the same patch returns the same
@@ -864,7 +1102,7 @@ class GenomeRegistry(Protocol):
                    *, actor: Provenance, reason: str) -> None:
         """Platform-internal (Promotion). Status is metadata; content never changes."""
 
-    def diff(self, bot: BotRef, rev: RevisionId, against: RevisionId) -> "GenomeDiff":
+    def diff(self, bot: BotRef, rev: RevisionId, against: RevisionId) -> GenomeDiff:
         """Per-category, per-item differences; text files as unified diffs."""
 
     # --- refs ------------------------------------------------------------
@@ -887,24 +1125,6 @@ class GenomeRegistry(Protocol):
     def compile(self, bot: BotRef, rev: RevisionId) -> CompiledManifest:
         """Pinned, total Manifest document plus memory projection. Used by Promotion (apply,
         service-bot publish) and Verification (eval bot materialisation)."""
-```
-
-```python
-GeneChangeKind = Literal["added", "removed", "modified"]
-
-@dataclass(frozen=True)
-class GeneChange:
-    gene: str                        # gene path (§2.1), e.g. "persona.SOUL.md"
-    kind: GeneChangeKind
-    diff: str | None = None          # unified diff for modified text files; None otherwise
-
-@dataclass(frozen=True)
-class GenomeDiff:
-    revision: RevisionId             # the newer side
-    against: RevisionId              # the side it is compared with
-    changes: list[GeneChange]
-    risk_tier: RiskTier              # highest tier over the changes, by the §6.3 mapping
-    rewrite_flags: list[str]         # paths of files flagged `rewrite` (§6.2)
 ```
 
 错误是带类型的，并映射到 §12 中的 HTTP 状态码：`NotFound` → 404，
@@ -935,10 +1155,9 @@ GET /openapi/v1/bots/bot_123/genome/revisions?status=candidate&parent=sha256:a90
 {
   "total": 1,
   "items": [
-    {"id": "sha256:7c1e…", "seq": 42, "parents": ["sha256:a90b…"], "status": "candidate",
-     "lineage_id": "lin_support_agent",
+    {"id": "sha256:7c1e…", "seq": 42, "parent": "sha256:a90b…", "status": "candidate",
      "created_by": {"kind": "strategy_run", "run_id": "run_7f3", "step": "propose", "actor": "clawevolve/bot-evolution@2.0.0"},
-     "created_at": "2026-10-08T03:12:00Z", "patch_from_parent": "sha256:c41e…"}
+     "created_at": "2026-10-08T03:12:00Z", "patch_digest": "sha256:c41e…"}
   ]
 }
 ```
@@ -987,7 +1206,7 @@ GET /openapi/v1/bots/bot_123/genome/revisions?status=candidate&parent=sha256:a90
   "id": "sha256:7c1e…",
   "seq": 42,
   "status": "candidate",
-  "parents": ["sha256:a90b…"],
+  "parent": "sha256:a90b…",
   "patch_digest": "sha256:c41e…",
   "risk_tier": "T2",
   "flags": [],
@@ -1013,10 +1232,9 @@ GET /openapi/v1/bots/bot_123/genome/revisions/r41
 {
   "genome_schema": 1,
   "revision": {"id": "sha256:a90b…", "seq": 41, "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
-               "lineage_id": "lin_support_agent",
-               "parents": ["sha256:5d02…"], "status": "promoted", "created_at": "2026-09-30T02:40:00Z",
-               "created_by": {"kind": "user", "actor": "user_owner_1"}, "patch_from_parent": null,
-               "evidence": [], "evaluations": ["eval:ev_288"], "annotations": {}},
+               "parent": "sha256:5d02…", "status": "promoted", "created_at": "2026-09-30T02:40:00Z",
+               "created_by": {"kind": "user", "actor": "user_owner_1"}, "patch_digest": null,
+               "evidence": [], "evaluations": ["ev_288"], "annotations": {}},
   "spec": {"persona": [{"type": "SOUL.md", "digest": "sha256:2b77…"}], "skills": [], "memory": null,
            "resources": [], "tools": {"mcp": [], "cli_tools": []},
            "engine_config": {"reasoning_effort": "medium"}, "script": null},

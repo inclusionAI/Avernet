@@ -141,21 +141,23 @@ class ScheduleTrigger:
 
 @dataclass(frozen=True)
 class ManualTrigger:
-    manual: Literal[True]               # no automatic firing; runs only when submitted
+    manual: bool                        # always True: no automatic firing; runs only when submitted
 
-# Platform events a binding can be triggered by (proposed list, from §4). A new
-# event is added by a reviewed platform change, together with its producer.
-EventName = Literal[
-    "failure_rate_alert",               # the bot's failure rate crossed its alert threshold
-    "clawinsight_improvement_item",     # ClawInsight recorded an improvement item for the bot
-    "feedback_threshold_reached",       # N new feedback items arrived since the last run (memory consolidation)
-]
+class EventName(StrEnum):
+    """Platform events a binding can be triggered by (proposed list, from §4). A new
+    event is added by a reviewed platform change, together with its producer."""
+    FAILURE_RATE_ALERT = "failure_rate_alert"                       # the bot's failure rate crossed its alert threshold
+    CLAWINSIGHT_IMPROVEMENT_ITEM = "clawinsight_improvement_item"   # ClawInsight recorded an improvement item for the bot
+    FEEDBACK_THRESHOLD_REACHED = "feedback_threshold_reached"       # N new feedback items arrived since the last run
+                                                                    # (memory consolidation)
 
 @dataclass(frozen=True)
 class EventTrigger:
     event: EventName                    # fire a run when this platform event arrives for the bot
 
 Trigger = ScheduleTrigger | ManualTrigger | EventTrigger
+
+# SelectorName: 05-experiment-ledger.md §7. RiskTier (T0 < T1 < T2 < T3): 08-promotion.md §5.
 
 @dataclass(frozen=True)
 class Rollout:                          # proposed; read by Promotion (08-promotion.md). How a promoted
@@ -169,13 +171,14 @@ class Binding:
     id: str                             # chosen by the owner, unique within the bot, e.g. "bind_01"
     strategy: str                       # "<strategy id>@<version>", a registered, conformant version
     trigger: Trigger
-    parent: "SelectorName"              # which revision runs start from (05-experiment-ledger.md §7);
+    parent: SelectorName                # which revision runs start from (05-experiment-ledger.md §7);
                                         # only "active" is accepted in the first iteration
     allowed_genes: list[str]            # what this strategy may change on THIS bot; within the bot's policy
     verification_profile: str           # e.g. "default@1"; owners may pick a stricter one, never a looser one
     budget: Budget
     params: dict                        # validated against the registration's params_schema, if any, and by the strategy
-    auto_promote_ceiling: Literal["T0", "T1", "T2"] | None = "T1"   # proposed; None = never auto-promote
+    auto_promote_ceiling: RiskTier | None = RiskTier.T1   # proposed; T0..T2 only (T3 is never auto-promoted);
+                                                          # None = never auto-promote
     rollout: Rollout | None = None      # proposed; multi-instance bots only; None = promote `active` directly
 ```
 
@@ -269,19 +272,30 @@ list its candidates, and cancel it by its run id. A run never disappears
 and never restarts under a new id, even when its worker crashes.
 
 ```python
-RunStatus = Literal["queued", "running", "completed", "failed", "cancelled", "budget_exhausted"]
-# Why a run ended, when the status alone does not say (proposed; extended only by a reviewed change).
-EndReason = Literal[
-    "worker_failed",                    # the strategy reported a non-retryable failure
-    "max_attempts",                     # re-dispatched max_attempts times without finishing (§7.2)
-    "cancelled_by_owner",               # a caller cancelled it (POST …/runs/{run}:cancel)
-    "kill_switch",                      # a strategy, bot, or global kill switch stopped it (§11.3)
-    "consecutive_rejections",           # the escalation rule stopped it (§11.2)
-]
+class RunStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    BUDGET_EXHAUSTED = "budget_exhausted"   # a budget dimension was used up (§2.1)
+
+class EndReason(StrEnum):
+    """Why a run ended, when the status alone does not say (proposed; extended only by a reviewed change)."""
+    WORKER_FAILED = "worker_failed"                    # the strategy reported a non-retryable failure
+    MAX_ATTEMPTS = "max_attempts"                      # re-dispatched max_attempts times without finishing (§7.2)
+    CANCELLED_BY_OWNER = "cancelled_by_owner"          # a caller cancelled it (POST …/runs/{run}:cancel)
+    KILL_SWITCH = "kill_switch"                        # a strategy, bot, or global kill switch stopped it (§11.3)
+    CONSECUTIVE_REJECTIONS = "consecutive_rejections"  # the escalation rule stopped it (§11.2)
+
+class TriggerKind(StrEnum):
+    SCHEDULE = "schedule"
+    MANUAL = "manual"
+    EVENT = "event"
 
 @dataclass(frozen=True)
 class TriggerRecord:
-    kind: Literal["schedule", "manual", "event"]
+    kind: TriggerKind
     fire_time: datetime | None          # set for schedule triggers
     event_id: str | None                # set for event triggers
     requested_by: str | None            # set for manual submissions: the caller's user or pipeline client id
@@ -296,7 +310,7 @@ class Run:
     # frozen at submission
     strategy: str                       # "clawevolve/bot-evolution"
     strategy_version: str               # "2.0.0"
-    parent_ref: "SelectorName"          # the binding's `parent` at submission, e.g. "active"
+    parent_ref: SelectorName            # the binding's `parent` at submission, e.g. "active"
     parent_revision: str                # resolved revision id, e.g. "sha256:a90b…"
     allowed_genes: list[str]
     verification_profile: str
@@ -398,13 +412,20 @@ request: an agent session (`agents.start`) or a train evaluation
 status is looked up by id.
 
 ```python
-OperationStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
+class OperationStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+# OperationKind (agent_session, train_evaluation): 03-strategy.md §2.8.
 
 @dataclass
 class Operation:
     id: str                             # "op_19a"
     run_id: str
-    kind: Literal["agent_session", "train_evaluation"]   # same values as Operation.kind in 03-strategy.md
+    kind: OperationKind
     idempotency_key: str                # "<run>/<own step>", e.g. "run_7f3/round-1/tune"
     status: OperationStatus
     cost: BudgetUsage                   # charged to the run's budget as it accrues
@@ -1066,7 +1087,7 @@ class JobService(Protocol):
 
 
 class OperationService(Protocol):
-    async def start(self, run_id: str, kind: Literal["agent_session", "train_evaluation"], *,
+    async def start(self, run_id: str, kind: OperationKind, *,
                     idempotency_key: str, request: dict) -> str:
         """Record the operation and hand it to its executor; return the operation id.
         Returns the existing id for (run_id, idempotency_key)."""
@@ -1079,12 +1100,19 @@ class OperationService(Protocol):
         """Called when a run ends. Returns how many were cancelled."""
 
 
+class ChargeSource(StrEnum):
+    """What a budget charge came from (§11.1)."""
+    MODEL_CALL = "model_call"           # a models.complete call the platform served
+    OPERATION = "operation"             # an agent session or train evaluation
+    EXPLICIT = "explicit"               # ctx.budget.charge: a cost the strategy reports itself
+
+
 class BudgetService(Protocol):
     async def reserve(self, bot: BotRef, tenant: str, budget: Budget) -> None:
         """Raises CeilingExceeded."""
 
     async def charge(self, run_id: str, usage: BudgetUsage, *,
-                     source: Literal["model_call", "operation", "explicit"]) -> BudgetUsage:
+                     source: ChargeSource) -> BudgetUsage:
         """Add to the run's spend and return what remains. Raises BudgetExhausted
         once any dimension is used up (the run is then ended by the caller)."""
 
@@ -1501,7 +1529,7 @@ Response `200`:
 {
   "id": "sha256:a90b…",
   "seq": 41,
-  "parents": ["sha256:77f2…"],
+  "parent": "sha256:77f2…",
   "spec": {
     "persona": {"files": [{"path": "persona/SOUL.md", "digest": "sha256:1a2b…"}]},
     "skills": [{"name": "refund-policy", "files": [{"path": "skills/refund-policy/SKILL.md", "digest": "sha256:3c4d…"}]}],

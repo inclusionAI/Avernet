@@ -56,16 +56,16 @@
 ### 2.1 进化策略
 
 ```python
-class EvolutionStrategy(Protocol):
-    async def run(self, ctx: StrategyContext) -> RunSummary:
-        """Propose candidates for ctx.parent's bot. Called once per dispatch of a run;
-        a re-dispatched run calls it again with the same run id and ctx.attempt + 1."""
-        ...
-
 @dataclass(frozen=True)
 class RunSummary:
     summary: str                               # one line for the run record, e.g. "2 rounds, 1 candidate"
     metrics: dict[str, float] = field(default_factory=dict)   # strategy-reported, informational only
+
+class EvolutionStrategy(Protocol):
+    async def run(self, ctx: StrategyContext) -> RunSummary:      # StrategyContext: §2.5
+        """Propose candidates for ctx.parent's bot. Called once per dispatch of a run;
+        a re-dispatched run calls it again with the same run id and ctx.attempt + 1."""
+        ...
 ```
 
 ```jsonc
@@ -84,12 +84,26 @@ class RunSummary:
 注册一个策略版本，是在告诉平台它的存在：其代码在哪里运行（`runtime`）以及它需要哪些能力（`needs`）。它是**数据而非方法**，因为平台需要在不运行策略代码的情况下获知这些信息（例如，在作业 worker 容器尚不存在之前）。
 
 ```python
-Engine = Literal["openclaw", "claude-code", "hermes", "teclaw"]   # the engines Avernet runs bots on
-ConformanceState = Literal["pending", "passed", "failed"]          # result of the conformance kit (§8.4)
+class Engine(StrEnum):
+    """The engines Avernet runs bots on."""
+    OPENCLAW = "openclaw"
+    CLAUDE_CODE = "claude-code"
+    HERMES = "hermes"
+    TECLAW = "teclaw"
+
+class ConformanceState(StrEnum):
+    """Result of the conformance kit (§8.4)."""
+    PENDING = "pending"
+    PASSED = "passed"
+    FAILED = "failed"
+
+class RuntimeKind(StrEnum):
+    IN_PROCESS = "in_process"                  # loaded into the platform's process from a Python package
+    JOB_WORKER = "job_worker"                  # runs in its own container and claims work from the platform
 
 @dataclass(frozen=True)
 class Runtime:
-    kind: Literal["in_process", "job_worker"]
+    kind: RuntimeKind
     image: str | None = None                   # job_worker: container image pinned by digest
     package: str | None = None                 # in_process: Python package selected by configuration
 
@@ -156,9 +170,23 @@ class RegisteredStrategy:                      # what the registry stores and re
 **能力**（capability）是上下文中一个具名、带版本的部件，取自一个小型、封闭、由平台拥有的目录。每个条目都是一份契约：方法签名、数据 schema、语义、哪些调用是操作，以及每个引擎 provider 的一致性测试。
 
 ```python
-# The StrategyContext fields a catalog entry can fill (§2.5).
-ContextPart = Literal["candidates", "models", "experience", "agents", "evaluate", "ledger"]
-ProviderEngine = Engine | Literal["*"]         # "*" = one provider serves every engine
+class ContextPart(StrEnum):
+    """The StrategyContext fields a catalog entry can fill (§2.5)."""
+    CANDIDATES = "candidates"
+    MODELS = "models"
+    EXPERIENCE = "experience"
+    AGENTS = "agents"
+    EVALUATE = "evaluate"
+    LEDGER = "ledger"
+
+class AnyEngine(StrEnum):
+    ANY = "*"                                  # one provider serves every engine
+
+ProviderEngine = Engine | AnyEngine
+
+class CapabilityStatus(StrEnum):
+    ACTIVE = "active"
+    DEPRECATED = "deprecated"                  # still served; new registrations should not declare it
 
 @dataclass(frozen=True)
 class CapabilityCall:
@@ -174,7 +202,7 @@ class Capability:
     calls: list[CapabilityCall]
     arguments_schema: dict | None              # JSON Schema of the needs arguments (agents@1: definitions)
     providers: dict[ProviderEngine, str]       # engine -> id of the provider that serves it there
-    status: Literal["active", "deprecated"]
+    status: CapabilityStatus
 ```
 
 ```jsonc
@@ -221,6 +249,7 @@ class AgentDefinition:
 ### 2.5 StrategyContext
 
 ```python
+# The context parts (GenomeRevisionView, WorkspaceFactory, Operations, Candidates, …) are in §4.2.
 class StrategyContext(Protocol):
     run_id: str; params: dict                       # frozen at run start
     parent: GenomeRevisionView                      # read-only: spec, files by digest, lineage
@@ -263,7 +292,8 @@ class StrategyContext(Protocol):
 class Candidate:
     patch: GenomePatch                         # see 01-genome.md; base = the revision the workspace came from
     rationale: str
-    evidence: list[str]                        # e.g. "episode:ep_91", "eval:train_77"
+    evidence: list[EvidenceRef]                # EvidenceRef "<kind>:<id>": 01-genome.md §2.2;
+                                               # e.g. "episode:ep_91", "eval:train_77"
     self_metrics: dict[str, float] = field(default_factory=dict)   # informational only
 ```
 
@@ -284,13 +314,15 @@ class Candidate:
 ### 2.7 判定
 
 ```python
+# VerdictStatus and VerdictReasonCategory: closed sets defined in 07-verification.md §2.6.
+
 @dataclass(frozen=True)
 class Verdict:                                 # = StrategyVerdictView in 07-verification.md
     candidate: str                             # candidate id: content hash of the patch
-    status: Literal["pending", "accept", "reject", "inconclusive"]
+    status: VerdictStatus
     revision: str | None                       # the candidate revision recorded for this patch, once recorded
     aggregates: dict                           # {"validation": ...}: validation aggregates only; never per-case hidden data
-    reasons: list["VerdictReasonCategory"]     # closed set defined in 07-verification.md; no case ids
+    reasons: list[VerdictReasonCategory]       # no case ids
 ```
 
 ```jsonc
@@ -309,18 +341,25 @@ class Verdict:                                 # = StrategyVerdictView in 07-ver
 ### 2.8 操作
 
 ```python
-@dataclass(frozen=True)
-class Operation:
-    id: str                                    # "op_19a"
-    kind: Literal["agent_session", "train_evaluation"]
-    status: Literal["queued", "running", "succeeded", "failed", "cancelled"]
-    result: AgentResult | TrainResult | None   # set once status is "succeeded"
-    error: str | None                          # set once status is "failed"
-    cost_usd: float                            # charged to the run's budget
+class OperationKind(StrEnum):
+    AGENT_SESSION = "agent_session"            # an agents@1 session
+    TRAIN_EVALUATION = "train_evaluation"      # an evaluate.train@1 evaluation
+
+class OperationStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+class ExitStatus(StrEnum):
+    COMPLETED = "completed"                    # the agent finished on its own
+    ERROR = "error"                            # the agent session failed
+    TIMEOUT = "timeout"                        # the session hit its time limit and was stopped
 
 @dataclass(frozen=True)
 class AgentResult:
-    exit_status: Literal["completed", "error", "timeout"]
+    exit_status: ExitStatus
     transcript_artifact: str                   # artifact id of the session transcript
                                                # files it changed stay in the workspace
 
@@ -334,6 +373,15 @@ class CaseScore:
 class TrainResult:
     score: float                               # aggregate train score, 0..1
     cases: list[CaseScore]                     # train split only
+
+@dataclass(frozen=True)
+class Operation:
+    id: str                                    # "op_19a"
+    kind: OperationKind
+    status: OperationStatus
+    result: AgentResult | TrainResult | None   # set once status is "succeeded"
+    error: str | None                          # set once status is "failed"
+    cost_usd: float                            # charged to the run's budget
 ```
 
 ```jsonc
@@ -417,17 +465,17 @@ class GenomeRevisionView(Protocol):
     async def read(self, path: str) -> bytes: ...      # file content by path (fetched by digest)
     async def lineage(self, depth: int = 10) -> list[str]: ...
 
-class WorkspaceFactory(Protocol):
-    async def materialise(self, revision: str, *, key: str) -> Workspace:
-        """A sandbox copy of `revision`. Idempotent per key: the same key returns the
-        same sandbox, including edits already made to it."""
-
 class Workspace(Protocol):
     id: str
     base: str                                  # the revision it was materialised from
     async def read(self, path: str) -> bytes: ...
     async def write(self, path: str, content: bytes) -> None: ...   # edits the copy only
     async def to_patch(self) -> GenomePatch: ...                    # itemized diff against `base`
+
+class WorkspaceFactory(Protocol):
+    async def materialise(self, revision: str, *, key: str) -> Workspace:
+        """A sandbox copy of `revision`. Idempotent per key: the same key returns the
+        same sandbox, including edits already made to it."""
 
 class Operations(Protocol):
     async def get(self, op_id: str) -> Operation: ...               # one short status lookup
@@ -668,15 +716,6 @@ class StrategyRegistry(Protocol):
         06-evolution-run.md."""
 
 
-class CapabilityCatalog(Protocol):
-    """The closed, versioned catalog. Changing it is a reviewed platform change."""
-
-    def list(self) -> list[Capability]: ...
-    def get(self, name: str, version: int) -> Capability: ...
-    def provider(self, name: str, version: int, engine: Engine) -> "CapabilityProvider | None":
-        """The provider that serves this capability for bots of `engine`, if any."""
-
-
 class CapabilityProvider(Protocol):
     """Implemented by platform code or an engine adapter, one per (capability, engine).
     Each provider passes the capability's contract test
@@ -688,6 +727,15 @@ class CapabilityProvider(Protocol):
     def validate_arguments(self, arguments: dict) -> list[str]:
         """Check the needs arguments at registration; for agents@1 this validates
         each definition against the engine's definition contract."""
+
+
+class CapabilityCatalog(Protocol):
+    """The closed, versioned catalog. Changing it is a reviewed platform change."""
+
+    def list(self) -> list[Capability]: ...
+    def get(self, name: str, version: int) -> Capability: ...
+    def provider(self, name: str, version: int, engine: Engine) -> CapabilityProvider | None:
+        """The provider that serves this capability for bots of `engine`, if any."""
 ```
 
 `set_enabled`、`CapabilityProvider.validate_arguments` 以及上面的具体方法名是提议的；源材料只确定了行为。

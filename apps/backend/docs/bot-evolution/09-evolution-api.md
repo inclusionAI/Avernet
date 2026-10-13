@@ -171,10 +171,16 @@ rules are in [§5](#5-idempotency-keys).
 
 ```python
 from datetime import datetime
-from typing import Literal
+from enum import StrEnum
 
-# What a key can create or start (one value per row of the §5.3 table).
-IdempotentResourceKind = Literal["run", "operation", "revision", "promotion", "review_decision", "feedback"]
+class IdempotentResourceKind(StrEnum):
+    """What a key can create or start (one value per row of the §5.3 table)."""
+    RUN = "run"
+    OPERATION = "operation"
+    REVISION = "revision"
+    PROMOTION = "promotion"
+    REVIEW_DECISION = "review_decision"   # an approve or reject of a review item
+    FEEDBACK = "feedback"
 
 @dataclass(frozen=True)
 class IdempotencyRecord:
@@ -235,11 +241,17 @@ used inside strategies (agent sessions, train evaluations); see
 own status values ([06-evolution-run.md](06-evolution-run.md)).
 
 ```python
-from typing import Literal
+class OperationStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
-OperationStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
-# The public operation kinds: ad-hoc evaluations (07) and ledger exports (05).
-OperationKind = Literal["evaluation", "ledger_export"]
+class OperationKind(StrEnum):
+    """The public operation kinds."""
+    EVALUATION = "evaluation"          # an ad-hoc evaluation (07-verification.md)
+    LEDGER_EXPORT = "ledger_export"    # a ledger export (05-experiment-ledger.md)
 
 @dataclass(frozen=True)
 class OperationError:
@@ -830,67 +842,77 @@ the closed value sets of the owning docs (`RevisionStatus` in
 ```python
 from typing import AsyncIterator, Protocol
 
+# Types owned by other docs, used here by name (each defined in that doc's §2):
+#   RevisionStatus, GenomeRevision, GenomeRef, GenomePatch: 01-genome.md
+#   OutcomeStatus, Episode, Feedback: 02-experience.md
+#   Engine, ConformanceState, StrategyRegistration, Capability, Candidate: 03-strategy.md
+#   LedgerEntry: 05-experiment-ledger.md
+#   EvolutionPolicy, Run, RunStatus: 06-evolution-run.md
+#   Suite, Evaluation: 07-verification.md
+#   Promotion, ReviewItem: 08-promotion.md
+# Page, PageParams, and Operation are this doc's (§2.2, §2.5).
+
 class GenomeClient(Protocol):
-    async def list_revisions(self, bot_id: str, *, status: "RevisionStatus | None" = None,
-                             parent: str | None = None, page: PageParams = PageParams()) -> Page["GenomeRevision"]: ...
-    async def get_revision(self, bot_id: str, revision: str) -> "GenomeRevision": ...
+    async def list_revisions(self, bot_id: str, *, status: RevisionStatus | None = None,
+                             parent: str | None = None, page: PageParams = PageParams()) -> Page[GenomeRevision]: ...
+    async def get_revision(self, bot_id: str, revision: str) -> GenomeRevision: ...
     async def diff(self, bot_id: str, revision: str, *, against: str) -> dict: ...
-    async def refs(self, bot_id: str) -> list["GenomeRef"]: ...
-    async def set_draft(self, bot_id: str, revision: str, *, expected_revision: str) -> "GenomeRef":
+    async def refs(self, bot_id: str) -> list[GenomeRef]: ...
+    async def set_draft(self, bot_id: str, revision: str, *, expected_revision: str) -> GenomeRef:
         """Compare-and-swap; raises RefConflict (409010) if the draft moved."""
-    async def record_revision(self, bot_id: str, *, base: str, patch: "GenomePatch",
-                              idempotency_key: str | None = None) -> "GenomeRevision": ...
+    async def record_revision(self, bot_id: str, *, base: str, patch: GenomePatch,
+                              idempotency_key: str | None = None) -> GenomeRevision: ...
     async def promote(self, bot_id: str, revision: str, *, reason: str,
-                      idempotency_key: str | None = None) -> "Promotion":
+                      idempotency_key: str | None = None) -> Promotion:
         """Moves `active` (also used to go back to an earlier revision). Owned by 08-promotion."""
     async def get_content(self, bot_id: str, digest: str) -> bytes: ...
     async def put_content(self, bot_id: str, data: bytes) -> str: ...  # digest
 
 class ExperienceClient(Protocol):
     def iter_episodes(self, bot_id: str, *, revision: str | None = None, since: str | None = None,
-                      outcome: "OutcomeStatus | None" = None) -> AsyncIterator["Episode"]: ...
-    async def get_episode(self, bot_id: str, episode: str) -> "Episode": ...
-    async def add_feedback(self, bot_id: str, feedback: "Feedback", *,
-                           idempotency_key: str | None = None) -> "Feedback": ...
+                      outcome: OutcomeStatus | None = None) -> AsyncIterator[Episode]: ...
+    async def get_episode(self, bot_id: str, episode: str) -> Episode: ...
+    async def add_feedback(self, bot_id: str, feedback: Feedback, *,
+                           idempotency_key: str | None = None) -> Feedback: ...
 
 class StrategiesClient(Protocol):
-    async def list(self, *, engine: "Engine | None" = None,
-                   conformance: "ConformanceState | None" = None) -> Page["StrategyRegistration"]: ...
-    async def get_version(self, strategy: str, version: str) -> "StrategyRegistration": ...
-    async def capabilities(self) -> list["Capability"]: ...
+    async def list(self, *, engine: Engine | None = None,
+                   conformance: ConformanceState | None = None) -> Page[StrategyRegistration]: ...
+    async def get_version(self, strategy: str, version: str) -> StrategyRegistration: ...
+    async def capabilities(self) -> list[Capability]: ...
 
 class PolicyClient(Protocol):
-    async def get(self, bot_id: str) -> tuple["EvolutionPolicy", str]:
+    async def get(self, bot_id: str) -> tuple[EvolutionPolicy, str]:
         """Returns the policy and its ETag."""
-    async def put(self, bot_id: str, policy: "EvolutionPolicy", *, if_match: str) -> tuple["EvolutionPolicy", str]:
+    async def put(self, bot_id: str, policy: EvolutionPolicy, *, if_match: str) -> tuple[EvolutionPolicy, str]:
         """Raises PreconditionFailed (412000) if the policy changed since it was read."""
 
 class RunsClient(Protocol):
     async def start(self, bot_id: str, *, binding: str, params: dict | None = None,
-                    budget: dict | None = None, idempotency_key: str | None = None) -> "Run":
+                    budget: dict | None = None, idempotency_key: str | None = None) -> Run:
         """202: returns the run as it is now (status queued, or its current status on a replay)."""
-    async def get(self, bot_id: str, run: str) -> "Run": ...
-    def iter(self, bot_id: str, *, status: "RunStatus | None" = None) -> AsyncIterator["Run"]: ...
-    async def candidates(self, bot_id: str, run: str) -> list["Candidate"]: ...
-    async def cancel(self, bot_id: str, run: str, *, idempotency_key: str | None = None) -> "Run": ...
-    async def wait(self, bot_id: str, run: str, *, timeout_s: int, poll_s: int = 15) -> "Run":
+    async def get(self, bot_id: str, run: str) -> Run: ...
+    def iter(self, bot_id: str, *, status: RunStatus | None = None) -> AsyncIterator[Run]: ...
+    async def candidates(self, bot_id: str, run: str) -> list[Candidate]: ...
+    async def cancel(self, bot_id: str, run: str, *, idempotency_key: str | None = None) -> Run: ...
+    async def wait(self, bot_id: str, run: str, *, timeout_s: int, poll_s: int = 15) -> Run:
         """Repeats get() until the status is terminal; raises Transient on timeout."""
 
 class VerificationClient(Protocol):
-    async def list_suites(self) -> Page["Suite"]: ...
-    async def get_suite(self, suite: str) -> "Suite": ...
+    async def list_suites(self) -> Page[Suite]: ...
+    async def get_suite(self, suite: str) -> Suite: ...
     async def start_evaluation(self, bot_id: str, *, revision: str, suite: str,
                                idempotency_key: str | None = None) -> Operation: ...
-    async def get_evaluation(self, bot_id: str, evaluation: str) -> "Evaluation": ...
+    async def get_evaluation(self, bot_id: str, evaluation: str) -> Evaluation: ...
 
 class ReviewClient(Protocol):
-    async def queue(self, bot_id: str) -> Page["ReviewItem"]: ...
+    async def queue(self, bot_id: str) -> Page[ReviewItem]: ...
     async def report(self, bot_id: str, candidate: str) -> dict:
         """Diff + verification + gate decision for one candidate (08-promotion)."""
     async def approve(self, bot_id: str, candidate: str, *, reason: str,
-                      idempotency_key: str | None = None) -> "ReviewItem": ...
+                      idempotency_key: str | None = None) -> ReviewItem: ...
     async def reject(self, bot_id: str, candidate: str, *, reason: str,
-                     idempotency_key: str | None = None) -> "ReviewItem": ...
+                     idempotency_key: str | None = None) -> ReviewItem: ...
 
 class OperationsClient(Protocol):
     async def get(self, bot_id: str, operation: str) -> Operation: ...
@@ -899,8 +921,8 @@ class OperationsClient(Protocol):
         """Repeats get() until the status is terminal; raises Transient on timeout."""
 
 class LedgerClient(Protocol):
-    def iter_entries(self, bot_id: str, **filters: str) -> AsyncIterator["LedgerEntry"]: ...
-    async def get_entry(self, bot_id: str, entry: str) -> "LedgerEntry": ...
+    def iter_entries(self, bot_id: str, **filters: str) -> AsyncIterator[LedgerEntry]: ...
+    async def get_entry(self, bot_id: str, entry: str) -> LedgerEntry: ...
     async def start_export(self, bot_id: str, *, idempotency_key: str | None = None) -> Operation: ...
 
 class EvolutionClient(Protocol):
@@ -919,6 +941,8 @@ class EvolutionClient(Protocol):
 ### 12.2 Conventions interface (what each serving module implements)
 
 ```python
+from collections.abc import Awaitable, Callable
+
 class IdempotencyStore(Protocol):
     """Implements §5. Writes happen in the caller's transaction."""
 
@@ -931,8 +955,8 @@ class IdempotencyStore(Protocol):
 
 class IdempotentHandler(Protocol):
     async def handle(self, *, bot: BotRef, key: str | None, fingerprint: str,
-                     create: "Callable[[], Awaitable[tuple[str, int]]]",
-                     current: "Callable[[str], Awaitable[dict]]") -> tuple[int, dict, bool]:
+                     create: Callable[[], Awaitable[tuple[str, int]]],
+                     current: Callable[[str], Awaitable[dict]]) -> tuple[int, dict, bool]:
         """Replays (same fingerprint), refuses (409001, different fingerprint),
         or runs `create` and records the key. Returns (status, data, replayed)."""
 

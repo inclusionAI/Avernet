@@ -104,27 +104,37 @@ Backend 钩子（[§8](#8-部署位置复用与迁移)）。
 各自取判定创建时的当前版本。
 
 ```python
-RiskTier = Literal["T0", "T1", "T2", "T3"]          # meaning of each tier: 08-promotion.md
-ExecutorKind = Literal["local_sandbox", "deployed_sandbox"]   # the executor plugins of §2.3
+# RiskTier (T0 < T1 < T2 < T3) is defined once in 08-promotion.md §5, with the meaning of each tier.
 # BotRef {owner_id, bot_id}: a bot's full identity (a bot_id alone is not unique
 # across users); defined once in 09-evolution-api.md §2.7.
+
+class ExecutorKind(StrEnum):           # the executor plugins of §2.3
+    LOCAL_SANDBOX = "local_sandbox"
+    DEPLOYED_SANDBOX = "deployed_sandbox"
+
+class CaseFormat(StrEnum):             # file format of the cases; a new format is a reviewed verifier change
+    CLAWBENCH_MD_1 = "clawbench-md@1"  # the ClawBench Markdown case format
+
+class ScopeKind(StrEnum):
+    PLATFORM = "platform"              # applies to every bot, e.g. a safety suite
+    BOT = "bot"                        # one bot's own suite
+
+@dataclass(frozen=True)
+class SuiteScope:
+    kind: ScopeKind
+    bot: BotRef | None                 # the bot the suite belongs to; set only when kind == BOT
 
 @dataclass(frozen=True)
 class Suite:
     suite_id: str                      # "support-core"
     version: int                       # increments on every reviewed change
     scope: SuiteScope                  # platform-wide, or one bot
-    case_format: Literal["clawbench-md@1"]   # file format of the cases; a new format is a reviewed verifier change
-    graders: list[GraderRef]           # default graders for cases that name none
-    split_counts: dict[Split, int]     # counts are always visible; contents are not
+    case_format: CaseFormat
+    graders: list[GraderRef]           # default graders for cases that name none (GraderRef: §2.3)
+    split_counts: dict[Split, int]     # counts are always visible; contents are not (Split: §2.2)
     digest: str                        # content address of the whole suite version
     created_at: datetime
     change_reason: str                 # why this version was made; human-reviewed changes only
-
-@dataclass(frozen=True)
-class SuiteScope:
-    kind: Literal["platform", "bot"]
-    bot: BotRef | None                 # the bot the suite belongs to; set only when kind == "bot"
 ```
 
 ```jsonc
@@ -189,6 +199,16 @@ class CaseCategory(StrEnum):
     ESCALATION = "escalation"
     SAFETY = "safety"
 
+class CaseOriginKind(StrEnum):
+    AUTHORED = "authored"              # written by a person
+    MINED = "mined"                    # mined from a real episode
+    STRATEGY = "strategy"              # added by a strategy run (ctx.evaluate.add_train_cases)
+
+@dataclass(frozen=True)
+class CaseOrigin:
+    kind: CaseOriginKind
+    run_id: str | None                 # set only for kind == STRATEGY
+
 @dataclass(frozen=True)
 class Case:
     case_id: str                       # stable id within the suite
@@ -202,11 +222,6 @@ class Case:
     timeout_s: int                     # the rollout is stopped and scored as failed after this many seconds
     grading: GradingSpec               # grader kind, rubric, weights
     source_episode: str | None         # set when the case was mined from a real episode
-
-@dataclass(frozen=True)
-class CaseOrigin:
-    kind: Literal["authored", "mined", "strategy"]
-    run_id: str | None                 # set only for kind == "strategy"
 ```
 
 ```jsonc
@@ -261,18 +276,18 @@ class GraderRef:
     version: str                       # grader plugin version, e.g. "1.0.0"
 
 @dataclass(frozen=True)
+class JudgeScore:
+    model_family: str                  # recorded so it can differ from the strategy's models
+    score: float
+    critique: str
+
+@dataclass(frozen=True)
 class Grade:
     score: float                       # 0.0 = complete failure .. 1.0 = perfect, by the case's grading spec
     critique: str                      # textual feedback; shown to strategies on train only
     breakdown: dict[str, float]        # per criterion or per sub-grader
     judges: list[JudgeScore]           # empty for automated grading
     agreement: float | None            # inter-judge agreement; None when fewer than two judges
-
-@dataclass(frozen=True)
-class JudgeScore:
-    model_family: str                  # recorded so it can differ from the strategy's models
-    score: float
-    critique: str
 
 @dataclass(frozen=True)
 class Rollout:
@@ -317,23 +332,6 @@ class Rollout:
 
 ```python
 @dataclass(frozen=True)
-class VerificationProfile:
-    profile_id: str                    # "default"
-    version: int                       # profiles are referenced as "default@1"
-    stricter_than: list[str]           # profiles this one may replace in a binding
-    executor: ExecutorKind
-    seeds: SeedPolicy
-    validation: ValidationRule
-    regression_tolerance: int          # newly failing must-pass regression cases allowed
-    safety_tolerance: Literal[0]       # always zero
-    ensemble_from_tier: RiskTier       # use a judge ensemble for candidates at or above this risk tier
-    min_judge_agreement: float         # below this inter-judge agreement the verdict is inconclusive
-    holdout_on_final_candidate: bool
-    overfit_guard: OverfitRule
-    cost: CostRule
-    budget_matched_baseline: bool      # beat parent-with-extra-sampling at equal cost
-
-@dataclass(frozen=True)
 class SeedPolicy:
     initial: int                       # k seeds per case
     max: int                           # raised automatically when close to the threshold
@@ -352,6 +350,23 @@ class OverfitRule:
 @dataclass(frozen=True)
 class CostRule:
     max_cost_increase_pct: float | None  # None: cost is reported but not limited
+
+@dataclass(frozen=True)
+class VerificationProfile:
+    profile_id: str                    # "default"
+    version: int                       # profiles are referenced as "default@1"
+    stricter_than: list[str]           # profiles this one may replace in a binding
+    executor: ExecutorKind
+    seeds: SeedPolicy
+    validation: ValidationRule
+    regression_tolerance: int          # newly failing must-pass regression cases allowed
+    safety_tolerance: int              # always 0: no newly failing safety case is allowed
+    ensemble_from_tier: RiskTier       # use a judge ensemble for candidates at or above this risk tier
+    min_judge_agreement: float         # below this inter-judge agreement the verdict is inconclusive
+    holdout_on_final_candidate: bool
+    overfit_guard: OverfitRule
+    cost: CostRule
+    budget_matched_baseline: bool      # beat parent-with-extra-sampling at equal cost
 ```
 
 ```jsonc
@@ -383,23 +398,19 @@ class CostRule:
 一项长时工作，因此以操作的形式启动，并按 id 查询。
 
 ```python
-@dataclass(frozen=True)
-class Evaluation:
-    evaluation_id: str                 # "ev_301"
-    bot: BotRef                        # the bot whose revisions are evaluated (owner + bot id)
-    purpose: Literal["verification", "train", "holdout_audit", "ad_hoc", "shadow"]
-    subject: str                       # revision id, or a workspace id for train evaluations
-    baseline: str | None               # revision id; None for unpaired (train, single-revision ad-hoc)
-    suites: list[SuiteVersionRef]
-    splits: list[Split]
-    executor: ExecutorKind
-    seeds: int                         # repetitions per case (each is one rollout per revision)
-    operation_id: str                  # status lives on the operation
-    status: Literal["queued", "running", "succeeded", "failed", "cancelled"]
-    rollouts: list[Rollout]            # filled as it runs
-    cost: Cost
-    verifier: VerifierVersion
-    run_id: str | None                 # set for verification and train evaluations of a run
+class EvaluationPurpose(StrEnum):
+    VERIFICATION = "verification"      # verifying a submitted candidate against its parent
+    TRAIN = "train"                    # a strategy's train-split evaluation (evaluate.train@1)
+    HOLDOUT_AUDIT = "holdout_audit"    # scoring a revision on the sealed holdout
+    AD_HOC = "ad_hoc"                  # an operator's evaluation; never feeds promotion
+    SHADOW = "shadow"                  # online verification on replayed or mirrored traffic
+
+class EvaluationStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 @dataclass(frozen=True)
 class VerifierVersion:
@@ -408,6 +419,24 @@ class VerifierVersion:
     suites: dict[str, int]             # suite id -> version
     graders: dict[str, str]            # grader id -> version
     digest: str                        # hash over all of the above
+
+@dataclass(frozen=True)
+class Evaluation:
+    evaluation_id: str                 # "ev_301"
+    bot: BotRef                        # the bot whose revisions are evaluated (owner + bot id)
+    purpose: EvaluationPurpose
+    subject: str                       # revision id, or a workspace id for train evaluations
+    baseline: str | None               # revision id; None for unpaired (train, single-revision ad-hoc)
+    suites: list[SuiteVersionRef]
+    splits: list[Split]
+    executor: ExecutorKind
+    seeds: int                         # repetitions per case (each is one rollout per revision)
+    operation_id: str                  # status lives on the operation
+    status: EvaluationStatus
+    rollouts: list[Rollout]            # filled as it runs
+    cost: Cost
+    verifier: VerifierVersion
+    run_id: str | None                 # set for verification and train evaluations of a run
 ```
 
 ```jsonc
@@ -452,26 +481,46 @@ class VerifierVersion:
 是否晋升由门禁决定（[08-promotion.zh-CN.md](08-promotion.zh-CN.md)）。
 
 ```python
-VerdictStatus = Literal["pending", "accept", "reject", "inconclusive"]
-SanityResult = Literal["pass", "fail", "not_run"]
-OverfitFlag = Literal["gain_ratio_exceeded", "seed_fluctuation_exceeded"]   # the two OverfitRule checks
-# Reason categories a strategy may see (proposed): one per outcome of the verdict
-# policy in §4.1. They name a rule, never a case. Added only by a reviewed change.
-VerdictReasonCategory = Literal[
-    "validation_improved",             # accept: CI lower bound cleared min_effect
-    "validation_not_improved",         # reject: CI upper bound below min_effect
-    "validation_inconclusive",         # inconclusive: the interval straddles min_effect
-    "judge_disagreement",              # inconclusive: judges agreed less than min_judge_agreement
-    "must_pass_failure",               # reject: a regression or safety case newly fails beyond tolerance
-    "holdout_drop",                    # reject: the holdout audit got worse
-    "sanity_failed",                   # reject: the fail-fast case failed
-    "floor_rejected",                  # reject: Promotion's static floor refused the patch
-]
+class VerdictStatus(StrEnum):
+    PENDING = "pending"                # the comparison has not finished
+    ACCEPT = "accept"
+    REJECT = "reject"
+    INCONCLUSIVE = "inconclusive"      # the evidence was not strong enough either way
+
+class SanityResult(StrEnum):           # the fail-fast case (§4 step 2)
+    PASS = "pass"
+    FAIL = "fail"
+    NOT_RUN = "not_run"
+
+class OverfitFlag(StrEnum):            # the two OverfitRule checks
+    GAIN_RATIO_EXCEEDED = "gain_ratio_exceeded"
+    SEED_FLUCTUATION_EXCEEDED = "seed_fluctuation_exceeded"
+
+class VerdictReasonCategory(StrEnum):
+    """Reason categories a strategy may see (proposed): one per outcome of the verdict
+    policy in §4.1. They name a rule, never a case. Added only by a reviewed change."""
+    VALIDATION_IMPROVED = "validation_improved"            # accept: CI lower bound cleared min_effect
+    VALIDATION_NOT_IMPROVED = "validation_not_improved"    # reject: CI upper bound below min_effect
+    VALIDATION_INCONCLUSIVE = "validation_inconclusive"    # inconclusive: the interval straddles min_effect
+    JUDGE_DISAGREEMENT = "judge_disagreement"              # inconclusive: judges agreed less than min_judge_agreement
+    MUST_PASS_FAILURE = "must_pass_failure"                # reject: a regression or safety case newly fails beyond tolerance
+    HOLDOUT_DROP = "holdout_drop"                          # reject: the holdout audit got worse
+    SANITY_FAILED = "sanity_failed"                        # reject: the fail-fast case failed
+    FLOOR_REJECTED = "floor_rejected"                      # reject: Promotion's static floor refused the patch
 
 @dataclass(frozen=True)
 class FloorRef:                        # Promotion's static floor, run at submission (08-promotion.md)
     passed: bool
     gate_decision_ref: str | None      # GateDecision id holding the floor result; set when the floor failed
+
+@dataclass(frozen=True)
+class SplitResult:
+    cases: int
+    seeds: int
+    mean_delta: float | None           # paired mean difference (validation, holdout)
+    ci: tuple[float, float] | None
+    win_rate: float | None
+    newly_failing: list[str]           # case ids (must-pass splits); never shown to strategies
 
 @dataclass(frozen=True)
 class Verdict:
@@ -493,15 +542,6 @@ class Verdict:
     verifier: VerifierVersion
     reasons: list[str]                 # human-readable explanation for operators, e.g. "no must-pass failures"
     decided_at: datetime | None
-
-@dataclass(frozen=True)
-class SplitResult:
-    cases: int
-    seeds: int
-    mean_delta: float | None           # paired mean difference (validation, holdout)
-    ci: tuple[float, float] | None
-    win_rate: float | None
-    newly_failing: list[str]           # case ids (must-pass splits); never shown to strategies
 
 @dataclass(frozen=True)
 class AggregateScores:                 # validation aggregates a strategy may see
@@ -720,19 +760,19 @@ def decide(floor: FloorRef, sanity: SanityResult, splits: dict[Split, SplitResul
 
 ```python
 @dataclass(frozen=True)
-class TrainEvaluationResult:        # ctx.operations.get(op_id).result when succeeded
-    evaluation_id: str
-    score: float                    # mean over train cases and seeds
-    cases: list[TrainCaseResult]
-    cost: Cost
-
-@dataclass(frozen=True)
 class TrainCaseResult:
     case_id: str
     score: float
     critique: str
     breakdown: dict[str, float]
     passed: bool
+
+@dataclass(frozen=True)
+class TrainEvaluationResult:        # ctx.operations.get(op_id).result when succeeded
+    evaluation_id: str
+    score: float                    # mean over train cases and seeds
+    cases: list[TrainCaseResult]
+    cost: Cost
 ```
 
 ## 6. 留出集审计与在线验证
@@ -884,6 +924,11 @@ ClawEvolve/ClawBench 条目（ClawBench 运行器、ClawWeb Bench 存储、ClawE
 id；任何调用都不阻塞。
 
 ```python
+class HoldoutAuditReason(StrEnum):
+    FINAL_CANDIDATE = "final_candidate"   # the final candidate of a run, before promotion
+    PERIODIC = "periodic"                 # a scheduled audit of the active revision
+
+
 class VerificationService(Protocol):
     """Platform-owned verifier. Read-only to strategies; they reach it only
     through evaluate.train@1 and ctx.candidates.verdict."""
@@ -923,7 +968,7 @@ class VerificationService(Protocol):
         """Evaluation with rollouts filtered to what the caller may see."""
 
     async def audit_holdout(self, bot: BotRef, revision_id: str, *,
-                            reason: Literal["final_candidate", "periodic"],
+                            reason: HoldoutAuditReason,
                             idempotency_key: str) -> str:
         """Score a revision on the sealed holdout, paired with its parent.
         Returns an operation id. A drop is reported to Promotion."""

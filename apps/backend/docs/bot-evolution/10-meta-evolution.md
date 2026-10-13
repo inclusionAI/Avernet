@@ -99,7 +99,7 @@ candidate is a normal, recorded outcome. That outcome is evidence for H.
 ### 2.3 `MechanismRevision`
 
 A mechanism revision is a strategy version treated exactly like a Bot Genome
-revision: immutable, content-addressed, with parents and provenance, changed
+revision: immutable, content-addressed, with a parent and provenance, changed
 only by a typed patch. The id is the SHA-256 of the RFC 8785 canonical form
 of the mechanism content (registration record, agent definition digests,
 default params); the human-readable `version` plays the role the per-bot
@@ -107,13 +107,26 @@ default params); the human-readable `version` plays the role the per-bot
 
 ```python
 from dataclasses import dataclass
-from typing import Literal
+from enum import StrEnum
 
-MechanismStatus = Literal["draft", "candidate", "accepted", "rejected", "promoted", "archived"]
+class MechanismStatus(StrEnum):      # same values and meanings as RevisionStatus (01-genome.md §4.4)
+    DRAFT = "draft"
+    CANDIDATE = "candidate"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    PROMOTED = "promoted"
+    ARCHIVED = "archived"
+
+class MechanismProvenanceKind(StrEnum):
+    HUMAN = "human"                  # registered by a person
+    META_RUN = "meta_run"            # proposed by a meta-run
+
+class TargetKind(StrEnum):           # what a mechanism improves
+    BOT_GENOME = "bot_genome"        # a bot's genome (level 2)
 
 @dataclass(frozen=True)
 class MechanismProvenance:
-    kind: Literal["human", "meta_run"]   # registered by a person, or proposed by a meta-run
+    kind: MechanismProvenanceKind
     actor: str                       # user id, or the meta-strategy "id@version"
     run_id: str | None = None        # set only when kind == "meta_run"
 
@@ -122,13 +135,14 @@ class MechanismRevision:
     id: str                          # "sha256:…" over canonical mechanism content
     family: str                      # strategy id, e.g. "clawevolve/bot-evolution"
     version: str                     # human handle, e.g. "2.0.0"; not an identity
-    target_kind: Literal["bot_genome"]  # what this mechanism improves (level 2)
+    target_kind: TargetKind
     registration: dict               # the StrategyRegistration record (03-strategy.md)
     agent_definitions: dict[str, str]   # definition name → content digest
     default_params: dict             # thresholds, round limits, per-step models and budgets
-    parents: list[str]               # mechanism revision ids
+    parent: str | None               # the mechanism revision this one was made from; None for the first
     created_by: MechanismProvenance
-    patch_from_parent: str | None    # digest of the MechanismPatch; None for human-registered versions
+    patch_digest: str | None         # digest of the stored MechanismPatch that turned `parent` into this
+                                     # revision (= the candidate id); None for human-registered versions
     status: MechanismStatus
     verifier_version: str | None     # verifier version of the evidence that adopted it; None until verified
 ```
@@ -148,9 +162,9 @@ class MechanismRevision:
     "max_rounds": 3,
     "submission_filter": {"min_train_gain_pct": 2, "max_regressed_ratio_pct": 10}
   },
-  "parents": ["sha256:3f12…"],                       // 2.0.0
+  "parent": "sha256:3f12…",                          // 2.0.0
   "created_by": {"kind": "meta_run", "run_id": "run_m12", "actor": "platform/meta-evolve@0.1.0"},
-  "patch_from_parent": "sha256:d27f…",
+  "patch_digest": "sha256:d27f…",
   "status": "candidate",
   "verifier_version": null
 }
@@ -161,9 +175,16 @@ The mechanism itself (what a revision fixes) is described in §3.
 ### 2.4 `MechanismPatch`
 
 ```python
+class MechanismOpName(StrEnum):      # what each op changes: table in §3
+    PARAM_SET = "param.set"          # a default param or threshold
+    PROMPT_EDIT = "prompt.edit"      # a file inside an agent definition
+    OPERATOR_ADD = "operator.add"    # an entry in the strategy's operator library
+    FLOW_EDIT = "flow.edit"          # step order or stop rules, where exposed as data
+    PLUGIN_REPLACE = "plugin.replace"   # a pinned step or plugin version
+
 @dataclass(frozen=True)
 class MechanismOp:
-    op: Literal["param.set", "prompt.edit", "operator.add", "flow.edit", "plugin.replace"]
+    op: MechanismOpName
     target: str                      # param path, agent definition file, operator library, or flow step
     value: object | None = None      # for param.set / plugin.replace
     edits: list[dict] | None = None  # for prompt.edit / operator.add / flow.edit (same edit kinds as genome file.edit)
@@ -206,7 +227,13 @@ experiments, frozen with their inputs. Synthetic problems can be added, for
 example deliberately degraded genomes with a known fix.
 
 ```python
-ProblemSplit = Literal["mechanism_train", "mechanism_holdout"]   # §8.2
+class ProblemSplit(StrEnum):         # §8.2
+    MECHANISM_TRAIN = "mechanism_train"
+    MECHANISM_HOLDOUT = "mechanism_holdout"   # used only by mechanism verification
+
+class ProblemSource(StrEnum):
+    LEDGER = "ledger"                # frozen from a real past experiment in the ledger
+    SYNTHETIC = "synthetic"          # constructed, e.g. a deliberately degraded genome with a known fix
 
 @dataclass(frozen=True)
 class ImprovementProblem:
@@ -217,7 +244,7 @@ class ImprovementProblem:
     hidden_suites: list[str]         # used only to score the outcome
     budget: dict                     # identical for every mechanism compared
     segment: dict                    # engine and bot type, for stratification
-    source: Literal["ledger", "synthetic"]
+    source: ProblemSource
     source_entry: str | None         # ledger entry it was frozen from; None for synthetic problems
     split: ProblemSplit
     verifier_version: str            # the verifier version the problem was frozen under (§9)
@@ -276,6 +303,12 @@ class MechanismVerificationProfile:
 ### 2.7 `MechanismVerification` and its verdict
 
 ```python
+class VerdictStatus(StrEnum):        # same set as 07-verification.md §2.6
+    PENDING = "pending"
+    ACCEPT = "accept"
+    REJECT = "reject"
+    INCONCLUSIVE = "inconclusive"
+
 @dataclass(frozen=True)
 class ProblemOutcome:
     problem: str
@@ -296,7 +329,7 @@ class MechanismVerification:
     profile: str
     verifier_version: str
     operation: str                   # operation id; status by id
-    verdict: Literal["pending", "accept", "reject", "inconclusive"]
+    verdict: VerdictStatus
     comparison: dict | None          # paired statistics per mechanism metric, once finished
 ```
 
@@ -792,7 +825,7 @@ class LedgerRead(Protocol):
     """Proposed level-3 capability `ledger.read@1` on StrategyContext, granted only to
     meta-strategies that declare it."""
 
-    async def export(self, *, family: str, since: str | None = None) -> "Workspace":
+    async def export(self, *, family: str, since: str | None = None) -> Workspace:   # Workspace: 03-strategy.md §4.2
         """Materialise a filesystem export of visible ledger data into a sandbox
         workspace. Never contains hidden cases or mechanism-holdout outcomes."""
 ```
@@ -833,7 +866,7 @@ UI and `avn`.
 {
   "total": 1,
   "items": [
-    {"id": "sha256:5b0e…", "version": "2.0.1", "parents": ["sha256:3f12…"],
+    {"id": "sha256:5b0e…", "version": "2.0.1", "parent": "sha256:3f12…",
      "status": "candidate", "created_by": {"kind": "meta_run", "run_id": "run_m12"}}
   ]
 }
@@ -858,7 +891,7 @@ Returns one mechanism revision (§2.3). `{rev}` is a revision id or a version.
   "target_kind": "bot_genome",
   "agent_definitions": {"clawevolve-tune": "sha256:91aa…", "clawevolve-review": "sha256:0c7d…"},
   "default_params": {"max_rounds": 3, "submission_filter": {"min_train_gain_pct": 2, "max_regressed_ratio_pct": 10}},
-  "parents": ["sha256:3f12…"], "patch_from_parent": "sha256:d27f…",
+  "parent": "sha256:3f12…", "patch_digest": "sha256:d27f…",
   "status": "candidate", "verifier_version": null
 }
 ```
