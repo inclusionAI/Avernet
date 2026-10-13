@@ -467,3 +467,5 @@ and Direct A2A. ChatRun ports expose nullable delivery/source IDs, durable manag
 checkpoint CAS and cursor recovery pages capped at eight records. DeliveryLookup
 supports an eight-ID recovery batch. Async acceptance may include a safe queue
 summary; HTTP version negotiation remains the adapter's responsibility.
+
+SessionManagementService.authorize_collaboration is the policy contract used before HTTP self-enrollment and runtime Human input. Bootstrap injects the live registry into SessionManagementServiceImpl; the runtime-cleanup wrapper delegates the contract. Legacy implementations without Provider support retain their existing default behavior.

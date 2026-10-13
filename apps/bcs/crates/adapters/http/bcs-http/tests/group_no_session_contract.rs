@@ -80,14 +80,34 @@ struct Fixture {
     notifications: Arc<RecordingSystemMessages>,
     collaboration: Arc<MemoryCollaborationStore>,
     delivery: Arc<RecordingDelivery>,
+    providers: Option<Arc<bcs_bot_store::MemoryProviderStore>>,
+    runtime: Arc<dyn bcs_service_api::CollaborationRuntimeService>,
     _temp: TempDir,
 }
 
 impl Fixture {
-    async fn new() -> Self {
+    async fn new() -> Self { Self::with_provider_scope(false).await }
+
+    async fn with_provider_scope(scoped: bool) -> Self {
+        use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
+        use bcs_bot_store::provider::{MemoryBotProviderStore, ProviderBindingProjection};
+        use bcs_service_api::{BotRepoPort, ProviderRepoPort, ProviderRecord};
+        use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
+        use bcs_service_api::bot_provider::{BotProviderRecord, BotConnectionMode, DownlinkDetectionSource};
         let temp = TempDir::new().unwrap();
-        let registry = Arc::new(BotCore::with_base_dir(temp.path().to_path_buf()));
+        let bots = Arc::new(MemoryBotRepo::with_base_dir(temp.path().into()));
+        let providers = Arc::new(MemoryProviderStore::new());
+        let metadata: Arc<dyn BotProviderRepoPort> = Arc::new(MemoryBotProviderStore::new(bots.clone(), providers.clone()));
+        let registry = if scoped {
+            Arc::new(BotCore::with_provider_repos(bots.clone(), providers.clone(), providers.clone(),
+                Arc::new(ProviderBindingProjection::new(providers.clone(), metadata.clone(), DownlinkDetectionSource::BotConnectionMode)))
+                .with_bot_provider_repo(metadata.clone()))
+        } else { Arc::new(BotCore::with_base_dir(temp.path().into())) };
         for id in ["lead-bot", "member-bot"] {
+            if scoped {
+                bots.register_with_owner_and_token(id.into(), BotCapabilities { visibility: "public".into(), ..Default::default() }, "alice", &format!("{id}-fixture-token")).await.unwrap();
+                continue;
+            }
             registry
                 .register(
                     id.to_string(),
@@ -104,11 +124,22 @@ impl Fixture {
             .store_token_mapping("lead-token".to_string(), "lead-bot".to_string())
             .await;
         let group_repo = Arc::new(MemoryGroupRepo::new());
-        let groups = Arc::new(GroupStore::with_repo(group_repo.clone()));
+        if scoped {
+            providers.insert_provider(ProviderRecord {
+                provider_id: "local".into(), name: "Local".into(), config: "{}".into(), slug: None,
+                disabled: false, created_by: "alice".into(), owners: "[]".into(), created_at: 1, updated_at: 1,
+            }).await.unwrap();
+            metadata.attach_provider_bot(BotProviderRecord {
+                bot_uuid: "lead-bot".into(), provider_id: "local".into(), provider_bot_ref: "local-ref".into(),
+                connection_mode: BotConnectionMode::Plugin, webhook_url: None, is_deleted: false,
+            }).await.unwrap();
+            providers.bind_group_scope_source(group_repo.clone(), Arc::downgrade(&metadata));
+        }
+        let groups = Arc::new(GroupStore::with_repo(group_repo.clone()).with_collaboration_registry(registry.clone()));
         let sessions = Arc::new(SessionManagementServiceImpl::new(
             Arc::new(MemorySessionRepo::new()),
             group_repo,
-        ));
+        ).with_collaboration_registry(registry.clone()));
         let notifications = Arc::new(RecordingSystemMessages::default());
         let mut services = Services::noop();
         services.registry = registry.clone();
@@ -147,7 +178,16 @@ impl Fixture {
             services.collaboration_runtime.clone(),
             notifications.clone(),
         ));
+        let runtime = services.collaboration_runtime.clone();
         let mut state = HttpAppState::new(services);
+        if scoped {
+            let chain = Arc::new(bcs_auth_api::AuthPluginChain::new(vec![Box::new(
+                bcs_auth_local::StaticAuthPlugin::with_principal(bcs_auth_api::AuthPrincipal {
+                    user_id: Some("bob".into()), ..Default::default()
+                })
+            )]));
+            state = state.with_user_identity(Arc::new(bcs_http::state::ChainUserIdentityPort::new(chain)));
+        }
         state.botchat_url = Some("https://example.com".to_string());
         Self {
             app: build_router(state),
@@ -156,6 +196,7 @@ impl Fixture {
             notifications,
             collaboration,
             delivery,
+            providers: scoped.then_some(providers), runtime,
             _temp: temp,
         }
     }
@@ -535,4 +576,65 @@ async fn sessionless_state_machine_still_validates_yaml_before_persistence() {
             .contains("invalid collaboration_definition_yaml")
     );
     assert!(fixture.groups.get("new-group").await.is_none());
+}
+
+#[tokio::test]
+async fn session_chat_denies_foreign_human_before_enrollment_and_runtime_consumption() {
+    use bcs_service_api::{ProviderRepoPort, StartStateMachineRunCommand, AuthenticatedHumanCaller,
+        HandleSessionHumanInputCommand, HumanResponseSource, CollaborationRuntimeError,
+        CreateOrReactivateCommand, NewSessionParams};
+    let fixture = Fixture::with_provider_scope(true).await;
+    let (status, created) = fixture.request("POST", "/groups", group_request("chat")).await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let yaml = r#"
+api_version: bcs.collaboration/v1
+id: scope_review
+version: 1
+name: Scope Review
+participants: {}
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      review:
+        kind: human_input
+        display_name: Review
+        instruction: Review this request.
+        node_timeout_ms: 60000
+"#;
+    let started = fixture.runtime.start_state_machine_run(StartStateMachineRunCommand {
+        group_id: "new-group".into(), session_id: None, definition_yaml: Some(yaml.into()), definition: None,
+        definition_ref: None, participant_bindings: None, opening_message_override: None, input: json!({}),
+        caller_id: Some("human_alice".into()), authenticated_human: Some(AuthenticatedHumanCaller {
+            actor_id: "human_alice".into(), display_name: None,
+        }),
+    }).await.unwrap();
+    let sid = started.view.run.session_id;
+    fixture.sessions.add_participant(&sid, Participant::human("human_bob", bcs_service_api::ParticipantRole::Observer)).await.unwrap();
+    fixture.providers.as_ref().unwrap().update_provider_metadata("local", None,
+        Some(r#"{"collaboration_scope":"same_owner"}"#), None, 2).await.unwrap();
+    let before = StateMachineRunRepoPort::get_run(&*fixture.collaboration, &started.view.run.run_id).await.unwrap().unwrap();
+    assert!(matches!(fixture.runtime.handle_session_human_input(HandleSessionHumanInputCommand {
+        group_id: "new-group".into(), session_id: Some(sid.clone()), caller_actor_id: "human_bob".into(),
+        content: "approve".into(), source: HumanResponseSource::Http,
+    }).await, Err(CollaborationRuntimeError::Forbidden(_))));
+    let response = fixture.app.clone().oneshot(Request::builder().method("POST").uri(format!("/sessions/{sid}/chat"))
+        .header("content-type", "application/json").body(Body::from(json!({"message":"approve"}).to_string())).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let after = StateMachineRunRepoPort::get_run(&*fixture.collaboration, &started.view.run.run_id).await.unwrap().unwrap();
+    assert_eq!(after.status, before.status);
+    let fresh = fixture.sessions.create_or_reactivate(CreateOrReactivateCommand {
+        group_id: "new-group".into(), session_id: None, params: NewSessionParams {
+            participants: fixture.groups.get("new-group").await.unwrap().participants,
+            caller_id: Some("human_alice".into()), ..Default::default()
+        },
+    }).await.unwrap().session;
+    let notifications_before = fixture.notifications.0.lock().await.len();
+    let response = fixture.app.clone().oneshot(Request::builder().method("POST").uri(format!("/sessions/{}/chat", fresh.id))
+        .header("content-type", "application/json").body(Body::from(json!({"message":"hello"}).to_string())).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(!fixture.sessions.get(&fresh.id).await.unwrap().unwrap().participants.iter().any(|p| p.bot_uuid == "human_bob"));
+    assert_eq!(fixture.notifications.0.lock().await.len(), notifications_before);
 }

@@ -30,8 +30,10 @@ pub type ProviderSqlFlavor = DbSqlFlavor;
 pub type MysqlProviderStore = DbProviderStore;
 pub type SqliteProviderStore = DbProviderStore;
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct MemoryProviderStore {
+    policy_gate: Arc<RwLock<()>>,
+    group_scope_source: std::sync::RwLock<Option<(Arc<dyn bcs_service_api::port::repo::GroupRepoPort>, std::sync::Weak<dyn bcs_service_api::port::repo::bot_provider::BotProviderRepoPort>)>>,
     providers: RwLock<BTreeMap<String, ProviderRecord>>,
     credentials_by_kind: RwLock<BTreeMap<(String, String), ProviderCredential>>,
     credential_secret_index: RwLock<HashMap<(String, String), (String, String)>>,
@@ -40,6 +42,10 @@ pub struct MemoryProviderStore {
 }
 
 impl MemoryProviderStore {
+    pub fn policy_gate(&self) -> Arc<RwLock<()>> { self.policy_gate.clone() }
+    pub fn bind_group_scope_source(&self, groups: Arc<dyn bcs_service_api::port::repo::GroupRepoPort>, bots: std::sync::Weak<dyn bcs_service_api::port::repo::bot_provider::BotProviderRepoPort>) {
+        *self.group_scope_source.write().expect("group scope source lock") = Some((groups, bots));
+    }
     pub fn new() -> Self {
         Self::default()
     }
@@ -103,6 +109,7 @@ impl ProviderRepoPort for MemoryProviderStore {
         slug: Option<&str>,
         updated_at: u64,
     ) -> ServiceResult<Option<ProviderRecord>> {
+        let _policy_write = self.policy_gate.write().await;
         let mut providers = self.providers.write().await;
         if !providers.contains_key(provider_id) { return Ok(None); }
         if let Some(slug) = slug {
@@ -114,7 +121,21 @@ impl ProviderRepoPort for MemoryProviderStore {
         let Some(provider) = providers.get_mut(provider_id) else {
             return Ok(None);
         };
-        if let Some(config) = config { reject_policy_relaxation(&provider.config, config)?; }
+        if let Some(config) = config {
+            reject_policy_relaxation(&provider.config, config)?;
+            if bcs_service_api::ProviderCollaborationScope::from_config(&provider.config)? == bcs_service_api::ProviderCollaborationScope::Standard
+                && bcs_service_api::ProviderCollaborationScope::from_config(config)? == bcs_service_api::ProviderCollaborationScope::SameOwner {
+                let source = self.group_scope_source.read().map_err(|_| ServiceError::InternalError("group scope source lock failed".into()))?.clone();
+                let (groups, metadata) = source.ok_or_else(|| ServiceError::InternalError("public group scope lookup is not configured".into()))?;
+                {
+                    let metadata = metadata.upgrade().ok_or_else(|| ServiceError::InternalError("Bot Provider metadata is unavailable".into()))?;
+                    let ids = metadata.list_provider_bot_metadata(Some(provider_id)).await?.into_iter().filter(|b| !b.is_deleted).map(|b| b.bot_uuid).collect::<Vec<_>>();
+                    if groups.has_public_group_with_members(&ids).await? {
+                        return Err(ServiceError::Conflict("Provider has public groups; change them to private before enabling same_owner".into()));
+                    }
+                }
+            }
+        }
         if let Some(name) = name {
             provider.name = name.to_string();
         }
@@ -641,9 +662,16 @@ impl ProviderRepoPort for DbProviderStore {
                 DbSqlFlavor::Sqlite => " AND COALESCE(json_extract(config, '$.collaboration_scope'), 'standard') <> 'same_owner'",
             }
         } else { "" };
+        let public_guard = if config.is_some_and(|config| bcs_service_api::ProviderCollaborationScope::from_config(config)
+            .is_ok_and(|scope| scope == bcs_service_api::ProviderCollaborationScope::SameOwner)) {
+            match self.flavor {
+                DbSqlFlavor::Mysql => " AND (JSON_UNQUOTE(JSON_EXTRACT(config, '$.collaboration_scope')) = 'same_owner' OR NOT EXISTS (SELECT 1 FROM bcs_bots b JOIN bcs_group_participants gp ON gp.bot_uuid = b.bot_uuid AND gp.env = b.env JOIN bcs_groups g ON g.group_id = gp.group_id AND g.env = gp.env WHERE b.provider_id = bcs_providers.provider_id AND b.env = bcs_providers.env AND COALESCE(b.is_deleted, 0) = 0 AND g.visibility = 'public' AND g.record_status <> 'deleted'))",
+                DbSqlFlavor::Sqlite => " AND (json_extract(config, '$.collaboration_scope') = 'same_owner' OR NOT EXISTS (SELECT 1 FROM bcs_bots b JOIN bcs_group_participants gp ON gp.bot_uuid = b.bot_uuid AND gp.env = b.env JOIN bcs_groups g ON g.group_id = gp.group_id AND g.env = gp.env WHERE b.provider_id = bcs_providers.provider_id AND b.env = bcs_providers.env AND COALESCE(b.is_deleted, 0) = 0 AND g.visibility = 'public' AND g.record_status <> 'deleted'))",
+            }
+        } else { "" };
         if let Some(config) = config { bcs_service_api::ProviderCollaborationScope::from_config(config)?; }
         let affected = self.execute("update_provider_metadata", DbStatement::with_params(format!(
-            "UPDATE bcs_providers SET {} WHERE provider_id = ? AND env = ?{guard}",
+            "UPDATE bcs_providers SET {} WHERE provider_id = ? AND env = ?{guard}{public_guard}",
             assignments.join(", "),
         ), params)).await?;
         self.providers.invalidate(&format!("{env}:{provider_id}"));
@@ -651,6 +679,10 @@ impl ProviderRepoPort for DbProviderStore {
         if affected == 0 {
             if let (Some(current), Some(config)) = (&updated, config) {
                 reject_policy_relaxation(&current.config, config)?;
+                if bcs_service_api::ProviderCollaborationScope::from_config(&current.config)? == bcs_service_api::ProviderCollaborationScope::Standard
+                    && bcs_service_api::ProviderCollaborationScope::from_config(config)? == bcs_service_api::ProviderCollaborationScope::SameOwner {
+                    return Err(ServiceError::Conflict("Provider has public groups; change them to private before enabling same_owner".into()));
+                }
             }
         }
         Ok(updated)
@@ -1831,4 +1863,8 @@ fn reject_policy_relaxation(current: &str, incoming: &str) -> ServiceResult<()> 
         return Err(ServiceError::Forbidden("same_owner Provider policy cannot be relaxed".into()));
     }
     Ok(())
+}
+
+impl std::fmt::Debug for MemoryProviderStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.debug_struct("MemoryProviderStore").finish_non_exhaustive() }
 }

@@ -15,7 +15,9 @@ async fn database() -> Arc<LocalSqliteDbPlugin> {
         slug TEXT, gmt_create TEXT DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (env, provider_id))",
         "CREATE TABLE bcs_bots (bot_uuid TEXT, env TEXT, created_by TEXT,
-        provider_id TEXT, is_deleted INTEGER DEFAULT 0, PRIMARY KEY (env, bot_uuid))"] {
+        provider_id TEXT, is_deleted INTEGER DEFAULT 0, PRIMARY KEY (env, bot_uuid))",
+        "CREATE TABLE bcs_groups (group_id TEXT, env TEXT, visibility TEXT, record_status TEXT, PRIMARY KEY (env, group_id))",
+        "CREATE TABLE bcs_group_participants (group_id TEXT, env TEXT, bot_uuid TEXT)"] {
         db.execute(DbStatement::new(sql)).await.unwrap();
     }
     db
@@ -93,4 +95,39 @@ async fn projection_is_one_fresh_bounded_environment_scoped_query() {
         "authorization must observe policy changes without stale caches");
     let failed = DbProviderStore::sqlite(Arc::new(ObservedDb { db, queries: AtomicUsize::new(0), fail: true }));
     assert!(matches!(failed.collaboration_actors(&["local-bot".into()]).await, Err(ServiceError::InternalError(_))));
+}
+
+#[tokio::test]
+async fn tightening_refuses_public_groups_without_partial_metadata_changes() {
+    let db = database().await;
+    let store = DbProviderStore::sqlite(db.clone());
+    let mut initial = provider(); initial.config = "{}".into();
+    store.insert_provider(initial).await.unwrap();
+    let env = bcs_config::resolve_env_str();
+    for sql in [
+        "INSERT INTO bcs_bots (bot_uuid, env, provider_id) VALUES ('local-bot', ?, 'local')",
+        "INSERT INTO bcs_groups VALUES ('public-group', ?, 'public', 'active')",
+        "INSERT INTO bcs_group_participants VALUES ('public-group', ?, 'local-bot')",
+    ] { db.execute(DbStatement::with_params(sql, vec![env.clone().into()])).await.unwrap(); }
+    let scope = r#"{"collaboration_scope":"same_owner"}"#;
+    assert!(matches!(store.update_provider_metadata("local", Some("Rejected"), Some(scope), None, 2).await,
+        Err(ServiceError::Conflict(_))));
+    let current = store.get_provider("local").await.unwrap().unwrap();
+    assert_eq!(current.name, "Local"); assert_eq!(current.config, "{}");
+    // Other environments, deleted groups and removed memberships cannot retain a restriction.
+    db.execute(DbStatement::with_params("UPDATE bcs_groups SET visibility = 'private' WHERE env = ?", vec![env.clone().into()])).await.unwrap();
+    db.execute(DbStatement::new("INSERT INTO bcs_groups VALUES ('public-group', 'other', 'public', 'active')")).await.unwrap();
+    db.execute(DbStatement::new("INSERT INTO bcs_group_participants VALUES ('public-group', 'other', 'local-bot')")).await.unwrap();
+    assert!(store.update_provider_metadata("local", None, Some(scope), None, 3).await.unwrap().unwrap().config.contains("same_owner"));
+    assert!(store.update_provider_metadata("missing", None, Some(scope), None, 3).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn memory_tightening_fails_closed_without_membership_source() {
+    let store = MemoryProviderStore::new();
+    let mut initial = provider(); initial.config = "{}".into();
+    store.insert_provider(initial).await.unwrap();
+    assert!(matches!(store.update_provider_metadata("local", None, Some(&provider().config), None, 2).await,
+        Err(ServiceError::InternalError(_))));
+    assert_eq!(store.get_provider("local").await.unwrap().unwrap().config, "{}");
 }

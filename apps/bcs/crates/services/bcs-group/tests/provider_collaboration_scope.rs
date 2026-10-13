@@ -55,16 +55,28 @@ async fn human_invitation_is_restricted_only_while_the_local_bot_participates() 
         Participant::bot(&local.bot_uuid, ParticipantRole::Consultant),
     ]);
     group.visibility = "private".into();
+    let mut invalid = group.clone();
+    invalid.id = "foreign-upsert".into();
+    invalid.participants.push(Participant::human("human_bob", ParticipantRole::Observer));
+    assert!(matches!(groups.upsert(invalid).await, Err(ServiceError::Forbidden(_))));
+    assert!(groups.get("foreign-upsert").await.is_none());
+    invalid = group.clone(); invalid.id = "public-upsert".into(); invalid.visibility = "public".into();
+    assert!(matches!(groups.upsert(invalid).await, Err(ServiceError::Forbidden(_))));
+    assert!(groups.get("public-upsert").await.is_none());
     groups.upsert(group).await.unwrap();
+    assert!(matches!(groups.update_visibility("scope-group", "public").await, Err(ServiceError::Forbidden(_))));
+    assert!(matches!(groups.patch_mutable_fields("scope-group", GroupMutableFieldsPatch {
+        visibility: Some("public".into()), ..Default::default()
+    }).await, Err(ServiceError::Forbidden(_))));
     let sessions: Arc<dyn SessionRepoPort> = Arc::new(MemorySessionRepo::new());
-    let session_management = Arc::new(SessionManagementServiceImpl::new(sessions.clone(), repo));
+    let session_management = Arc::new(SessionManagementServiceImpl::new(sessions.clone(), repo).with_collaboration_registry(registry.clone()));
     let workbench = GroupManagement::new(
         groups.clone(), registry.clone(), Arc::new(FriendCore::memory()), Arc::new(RelationCore::memory()),
         GroupConfig::default(), session_management.clone(), Arc::new(NoopSystemMessageService),
     );
     let invites = InviteServiceImpl {
         registry, group: groups.clone(),
-        session: session_management,
+        session: session_management.clone(),
         system_message: Arc::new(NoopSystemMessageService),
         token_secret: b"fixture-scope-invite-secret".to_vec(), default_ttl_seconds: 3600,
         base_url: None, group_link_url: None, session_link_url: None,
@@ -97,6 +109,23 @@ async fn human_invitation_is_restricted_only_while_the_local_bot_participates() 
         participants: groups.get("scope-group").await.unwrap().participants,
         ..Default::default()
     }).await.unwrap();
+    use bcs_service_api::{SessionManagementService, SessionUseCaseError, CreateOrReactivateCommand};
+    let outsider = Participant::human("human_bob", ParticipantRole::Observer);
+    assert!(matches!(session_management.add_participant(&session.id, outsider).await,
+        Err(SessionUseCaseError::Internal(ServiceError::Forbidden(_)))));
+    assert!(!sessions.get(&session.id).await.unwrap().participants.iter().any(|p| p.bot_uuid == "human_bob"));
+    assert!(session_management.authorize_collaboration(&session.id, "human_bob").await.is_err());
+    assert!(session_management.authorize_collaboration(&session.id, "human_alice").await.is_ok());
+    let status_before = sessions.get(&session.id).await.unwrap().status;
+    assert!(session_management.create_or_reactivate(CreateOrReactivateCommand {
+        group_id: "scope-group".into(), session_id: Some(session.id.clone()),
+        params: NewSessionParams { caller_id: Some("human_bob".into()), ..Default::default() },
+    }).await.is_err());
+    assert_eq!(sessions.get(&session.id).await.unwrap().status, status_before);
+    assert!(session_management.create_or_reactivate(CreateOrReactivateCommand {
+        group_id: "unrelated-group".into(), session_id: Some(session.id.clone()), params: Default::default(),
+    }).await.is_err());
+
     let connect = |owner: &str| WorkbenchConnectCommand {
         bound_actor_id: Some(format!("human_{owner}")), group_id: "scope-group".into(),
         session_id: Some(session.id.clone()), view_actor_id: None,
@@ -115,6 +144,7 @@ async fn human_invitation_is_restricted_only_while_the_local_bot_participates() 
     groups.mutate(mutation(GroupMutationKind::RemoveParticipant {
         actor_id: local.bot_uuid.clone(), reason: "owner removed local Bot".into(),
     })).await.unwrap();
+    assert!(session_management.authorize_collaboration(&session.id, "human_bob").await.is_ok());
     assert!(workbench.connect(connect("bob")).await.is_ok(),
         "the historical Session snapshot must not retain the removed group restriction");
     assert!(invites.join_group_by_invite(join("bob")).await.unwrap().joined,

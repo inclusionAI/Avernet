@@ -48,10 +48,17 @@ async fn corrupt_provider_config_is_an_error_at_both_boundaries() {
     let registered = core.register_provider_with_slug("Corrupt".into(), None,
         ProviderAuthMode::StaticBearer, "alice".into(), None, None,
         Some("contract-corrupt".into()), None).await.unwrap();
-    store.update_provider_metadata(&registered.provider.provider_id, None,
-        Some("not json"), None, 2).await.unwrap();
-    assert!(matches!(core.get_provider_by_slug("contract-corrupt").await,
+    assert!(store.update_provider_metadata(&registered.provider.provider_id, None,
+        Some("not json"), None, 2).await.is_err(), "writes reject invalid policy configuration");
+    // Historical corruption is seeded at the raw storage boundary, rather
+    // than asking the current metadata write API to create an invalid policy.
+    let mut historical = registered.provider.clone();
+    historical.provider_id = "historical-corrupt".into();
+    historical.slug = Some("historical-corrupt".into());
+    historical.config = "not json".into();
+    store.insert_provider(historical).await.unwrap();
+    assert!(matches!(core.get_provider_by_slug("historical-corrupt").await,
         Err(ServiceError::InternalError(_))));
-    assert!(matches!(service.get_provider_by_slug("contract-corrupt").await,
+    assert!(matches!(service.get_provider_by_slug("historical-corrupt").await,
         Err(ServiceError::InternalError(_))));
 }

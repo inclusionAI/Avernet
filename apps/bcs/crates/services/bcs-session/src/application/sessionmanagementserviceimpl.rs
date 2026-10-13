@@ -4,6 +4,7 @@ use super::*;
 
 pub struct SessionManagementServiceImpl {
     pub(super) repo: Arc<dyn SessionRepoPort>,
+    pub(super) collaboration_registry: Option<Arc<dyn bcs_service_api::BotRegistryCoreService>>,
     pub(super) group_repo: Arc<dyn GroupRepoPort>,
     pub(super) bot_runtime: Option<Arc<dyn BotRuntimeConnectionService>>,
     pub(super) event_record_factory: Option<Arc<dyn EventRecordFactoryPort>>,
@@ -36,6 +37,9 @@ pub fn new(
 
 #[async_trait]
 impl SessionManagementService for SessionManagementWithRuntimeCleanup {
+    async fn authorize_collaboration(&self, session_id: &str, actor_id: &str) -> Result<(), SessionUseCaseError> {
+        self.inner.authorize_collaboration(session_id, actor_id).await
+    }
     async fn validate_session_registry(&self) -> Result<(), SessionUseCaseError> { self.inner.validate_session_registry().await }
     async fn ensure_direct_session(&self, id: &str) -> Result<bcs_service_api::port::repo::session_registry::SessionRegistration, SessionUseCaseError> {
         self.inner.ensure_direct_session(id).await.map_err(Into::into)
@@ -332,11 +336,17 @@ pub fn new(repo: Arc<dyn SessionRepoPort>, group_repo: Arc<dyn GroupRepoPort>) -
         Self {
             repo,
             group_repo,
+            collaboration_registry: None,
             bot_runtime: None,
             event_record_factory: None,
             message_repo: None,
             frontend_delivery: None,
         }
+    }
+
+pub fn with_collaboration_registry(mut self, registry: Arc<dyn bcs_service_api::BotRegistryCoreService>) -> Self {
+        self.collaboration_registry = Some(registry);
+        self
     }
 
 pub fn with_bot_runtime(mut self, bot_runtime: Arc<dyn BotRuntimeConnectionService>) -> Self {

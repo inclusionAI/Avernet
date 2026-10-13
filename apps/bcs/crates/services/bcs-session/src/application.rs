@@ -57,3 +57,6 @@ mod sessionmanagementserviceimpl;
 pub use sessionmanagementserviceimpl::{SessionManagementServiceImpl, SessionManagementWithRuntimeCleanup};
 #[path = "application/sessionmanagementserviceimpl_2.rs"]
 mod sessionmanagementserviceimpl_2;
+
+#[path = "application/provider_scope.rs"]
+mod provider_scope;

@@ -440,6 +440,10 @@ impl ConnectService for DbConnectService {
                 ServiceError::FriendRequestNotFound(request_id.to_string())
             })?;
 
+        if let Some(registry) = &self.collaboration_registry {
+            registry.collaboration_owner(&[req.from_id.clone(), req.to_id.clone()]).await?;
+        }
+
         // Only pending requests can be approved.
         if req.status == RequestStatus::Approved {
             // Idempotent: return existing edge ids (if any).
