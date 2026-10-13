@@ -315,12 +315,13 @@ numbered skill fragments. Existing vectors and other payload fields are retained
 the transition does not re-embed existing profiles. Initial online publication
 still builds an index when no owned vectors exist. Repeating a transition repairs
 payload synchronization even when the Worker already has the requested state.
-The composed `/online` routes return after the Worker state is persisted and
-perform online vector updates after the HTTP response. Repeating `/online`
-retries that work. If the Worker has since gone offline or been disabled, the
-deferred online update is skipped. Background write failures are logged and
-do not change the response already sent. The `/offline` route still waits for
-its existing vector cleanup and propagates its write failures.
+The composed `/online` and `/offline` routes wait for their Worker state writes
+and vector synchronization before returning the existing response. Synchronous
+service work runs in a thread pool so it does not block the server event loop.
+Vector write failures retain the existing route error behavior. Slow callers
+should dispatch their lifecycle HTTP requests in the background rather than
+relying on BCSFuse to acknowledge incomplete work. Repeating a transition retries
+payload synchronization; initial online publication still builds missing vectors.
 
 Durable vector providers use `update_payload_by_worker(worker_id, updates)` when
 available: it must match exact payload ownership, enumerate the durable source
