@@ -127,6 +127,7 @@ from agentclaw.community.core.devices.errors import (
     DeviceLimitExceededError,
     ResourceInsufficientError,
     DeviceAllocateError,
+    DeviceServiceError,
 )
 from agentclaw.community.core.devices.models import AllocatedDevice, DeviceAllocationMode, DeviceBindingStatus, OperatorContext, SynlinkMappingInfo
 from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
@@ -1462,6 +1463,8 @@ class BotService(BotServiceProtocol):
                     "PENDING",
                     "PROVISIONING",
                 }:
+                    if provision and existing_bot.get("binding_id"):
+                        self._retry_creation_confirmation(existing_bot["binding_id"])
                     if existing_bot_type == "service":
                         self._backfill_service_publish_record(
                             bot_id=bot_id, user_id=user_id, bot=existing_bot
@@ -1782,6 +1785,7 @@ class BotService(BotServiceProtocol):
         if not record:
             raise BotServiceError(f"Bot {bot_id} not found for user {user_id}")
         if record.get("binding_id"):
+            self._retry_creation_confirmation(record["binding_id"])
             logger.info(
                 f"[bot_service.provision_bot] Bot {bot_id} already provisioned "
                 f"(binding_id={record.get('binding_id')})"
@@ -1837,6 +1841,13 @@ class BotService(BotServiceProtocol):
             logger.error(f"[bot_service.provision_bot] Failed to provision bot {bot_id}: {e}")
             self._release_provisioning_claim(bot_id, user_id)
             raise BotServiceError(f"Failed to provision bot: {e}")
+
+    def _retry_creation_confirmation(self, binding_id: int) -> None:
+        """Retry only the retained startup callback, not device provisioning."""
+        try:
+            self._device_service_provider().retry_creation_confirmation(binding_id=binding_id)
+        except DeviceServiceError as exc:
+            raise BotServiceError(f"Failed to confirm provisioned bot: {exc}") from exc
 
     def _release_provisioning_claim(self, bot_id: str, user_id: str) -> None:
         """Best effort: a record the failed step 2 left behind goes back to

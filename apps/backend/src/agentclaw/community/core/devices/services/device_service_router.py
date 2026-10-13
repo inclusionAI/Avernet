@@ -306,6 +306,11 @@ class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
         )
 
     @override
+    def retry_creation_confirmation(self, *, binding_id: int) -> None:
+        service = self._get_provider_for_binding(binding_id)
+        service.retry_creation_confirmation(binding_id=binding_id)
+
+    @override
     def get_device(self, *, binding_id: int):
         """获取设备信息 - 根据 binding_id 路由.
 

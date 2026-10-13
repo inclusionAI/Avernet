@@ -1,12 +1,17 @@
 """Recover ACTIVE BaaS creation without losing the Pool confirmation callback."""
 
 import json
+import inspect
 from unittest.mock import MagicMock
+from typing import get_type_hints
 
 import pytest
 
 from agentclaw.community.core.devices.errors import DeviceServiceError, InvalidDeviceStatusError
 from agentclaw.community.core.devices.models import AllocatedDevice
+from agentclaw.community.core.devices.device_service_protocol import DeviceServiceProtocol
+from agentclaw.community.core.devices.services.device_service import DeviceService
+from agentclaw.community.core.bot_management.services.bot_service import BotService, BotServiceError
 from agentclaw.community.core.devices.protocols import LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.core.repository.implementations.devices.device import DeviceRepository
@@ -19,6 +24,7 @@ from agentclaw.community.plugins.community.database import CommunityDatabase
 from tests.community.core.devices.services.test_baas_device_service import (
     _make_binding_record, _make_service, _operator,
 )
+from tests.community.core.devices.services.test_device_service_router import _make_router
 
 
 def _props():
@@ -56,6 +62,31 @@ def _retry(svc):
         apply_reason="retry retained create", entity_id="u001", entity_type="staff",
         operator=_operator(), bot_id="retained-bot", owner_id="u001",
     )
+
+
+def test_creation_confirmation_retry_routes_to_bound_provider():
+    router, repo, _query, _sync = _make_router(is_local=False)
+    repo.get_by_id.return_value = _make_binding_record(id=42)
+    router.retry_creation_confirmation(binding_id=42)
+    router._providers["baas"].retry_creation_confirmation.assert_called_once_with(binding_id=42)
+    router._providers["arca"].retry_creation_confirmation.assert_not_called()
+
+
+def test_non_baas_confirmation_retry_is_noop():
+    DeviceService.__new__(DeviceService).retry_creation_confirmation(binding_id=42)
+
+
+def test_confirmation_retry_implementations_match_service_contract():
+    router, _repo, _query, _sync = _make_router(is_local=False)
+    baas, _record = _retry_service(_props())
+    signature = inspect.signature(DeviceServiceProtocol.retry_creation_confirmation)
+    for implementation in (DeviceService, type(router), type(baas)):
+        method = implementation.retry_creation_confirmation
+        actual = inspect.signature(method)
+        assert tuple(actual.parameters) == tuple(signature.parameters)
+        assert actual.parameters["binding_id"].kind == inspect.Parameter.KEYWORD_ONLY
+        assert actual.parameters["binding_id"].default is inspect.Parameter.empty
+        assert get_type_hints(method) == get_type_hints(DeviceServiceProtocol.retry_creation_confirmation)
 
 
 def test_active_pool_creation_recovery_redispatches_only_current_watchdog():
@@ -148,7 +179,8 @@ def test_active_pool_recovery_uses_highest_priority_current_startup_identity():
     assert "--startup_identity 17" not in command
 
 
-def test_active_orphan_recovery_callback_commits_real_pool_layout(tmp_path):
+@pytest.mark.parametrize("entrypoint", ["create_bot", "provision_bot"])
+def test_active_orphan_recovery_callback_commits_real_pool_layout(tmp_path, entrypoint):
     """Replay the missing-link callback, retry linking, then confirm real DB state."""
     database = CommunityDatabase(f"sqlite:///{tmp_path / 'recovery.db'}", create_schema=False)
     for model in (EntityDeviceBinding, BotModel, BotSkillLayoutStateModel):
@@ -182,6 +214,7 @@ def test_active_orphan_recovery_callback_commits_real_pool_layout(tmp_path):
                 "bot_id": bot.bot_id, "owner_id": bot.owner_id,
                 "entity_id": bot.entity_id, "entity_type": bot.entity_type,
                 "active_engine": bot.active_engine, "status": bot.status, "ext": {},
+                "binding_id": bot.binding_id, "engine_types": ["openclaw"],
             }
 
     bot_query = MagicMock()
@@ -205,14 +238,45 @@ def test_active_orphan_recovery_callback_commits_real_pool_layout(tmp_path):
         svc.report_device_status(**callback)
     assert layouts.get(scope).phase is SkillLayoutPhase.POOL_INITIALIZING
 
-    recovered = _retry(svc)
-    assert recovered.id == binding_id
+    def current_bot(*_args):
+        with database.orm_session() as session:
+            bot = session.query(BotModel).filter_by(bot_id="retained-bot").one()
+            return {
+                "bot_id": bot.bot_id, "owner_id": bot.owner_id,
+                "entity_id": bot.entity_id, "entity_type": bot.entity_type,
+                "binding_id": bot.binding_id, "status": bot.status,
+                "active_engine": "openclaw", "engine_types": ["openclaw"],
+            }
+
+    bots = BotService.__new__(BotService)
+    bots._repository = MagicMock()
+    bots._repository.get_by_id_and_owner.side_effect = current_bot
+    bots._repository.claim_provisioning.return_value = True
+    bots._device_service_provider = lambda: svc
+    bots._prepare_creation_template = MagicMock()
+    bots._initialize_capability_installations = MagicMock()
+    bots._provision_created_bot = MagicMock(side_effect=lambda *_args, **_kwargs: _retry(svc))
+
+    def retry_creation():
+        return getattr(bots, entrypoint)(bot_id="retained-bot", user_id="u001", nick_name="owner")
+
+    svc._baas_service.exec_command_on_bot.side_effect = RuntimeError("transport failed")
+    with pytest.raises(BotServiceError, match="transport failed"):
+        retry_creation()
+    assert current_bot()["binding_id"] == binding_id
+    assert current_bot()["status"] == "ACTIVE"
+    with pytest.raises(BotServiceError, match="transport failed"):
+        retry_creation()
+    svc._baas_service.exec_command_on_bot.side_effect = None
+    assert retry_creation()["binding_id"] == binding_id
+    assert svc._baas_service.exec_command_on_bot.call_count == 3
     assert "starting_watchdog.sh" in svc._baas_service.exec_command_on_bot.call_args.kwargs["cmd"]
     svc.report_device_status(**callback)
     assert layouts.get(scope).phase is SkillLayoutPhase.POOL_ACTIVE
     assert repo.get_by_id(binding_id).device_props[LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY] == "17"
     command_count = svc._baas_service.exec_command_on_bot.call_count
-    _retry(svc)
+    retry_creation()
     assert svc._baas_service.exec_command_on_bot.call_count == command_count
+    bots._provision_created_bot.assert_called_once()
     assert layouts.get(scope).migration_generation is None
     database._engine.dispose()

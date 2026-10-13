@@ -339,6 +339,12 @@ class DeviceService:
     def _after_active_binding_recovered(self, *, record: DeviceBindingRecord) -> None:
         """Provider hook after an ACTIVE retained binding is linked to its Bot."""
 
+    def retry_creation_confirmation(self, *, binding_id: int) -> None:
+        """Resume pending startup confirmation on an idempotent create retry.
+
+        Providers without a separate creation confirmation need no action.
+        """
+
     def _query_device_info(
         self,
         *,

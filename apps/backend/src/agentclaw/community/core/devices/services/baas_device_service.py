@@ -301,6 +301,12 @@ class BaasDeviceService(DeviceService):
         if not ok:
             raise BaasDeviceServiceError(message)
 
+    @override
+    def retry_creation_confirmation(self, *, binding_id: int) -> None:
+        record = self.get_device(binding_id=binding_id)
+        if record.status == DeviceBindingStatus.ACTIVE.value:
+            self._after_active_binding_recovered(record=record)
+
     def _allocate_via_baas(
         self,
         *,

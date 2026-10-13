@@ -69,7 +69,11 @@ Owns the engine/device binding lifecycle. Schema changes (binding table, engine 
 
 An ACTIVE BaaS binding can outlive a failed Bot-link write. After the guarded
 repository recovery links it to its Bot, an unconfirmed `pool_initializing`
-startup re-dispatches only the existing instance-bound watchdog callback. It
+startup re-dispatches only the existing instance-bound watchdog callback. Both
+`create_bot` and `provision_bot` retries also delegate pending confirmation to
+the binding's provider before returning an already bound Bot, so a transport
+failure after committing the recovered link remains retryable. This does not
+allocate another device or repeat container initialization. It
 uses the retained callback token and current startup identity; it does not repeat
 bootstrap, container initialization, publish polling, or migration. Dispatch
 errors propagate so the same creation can be retried without failing the ACTIVE

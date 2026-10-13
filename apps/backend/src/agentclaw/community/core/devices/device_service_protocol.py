@@ -7,9 +7,18 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class DeviceServiceProtocol(Protocol):
-    """Service API for device management surface used by HTTP routes."""
+    """Service API for device management and lifecycle consumers."""
 
     def apply_device(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def retry_creation_confirmation(self, *, binding_id: int) -> None:
+        """Resume unconfirmed startup for the retained binding's provider.
+
+        Non-participating providers are a no-op. An ACTIVE, unconfirmed
+        Pool-native BaaS binding re-delivers its current callback only;
+        dispatch/persistence failures propagate to the creation caller.
+        """
+        ...
 
     def release_device(self, *args: Any, **kwargs: Any) -> Any: ...
 
