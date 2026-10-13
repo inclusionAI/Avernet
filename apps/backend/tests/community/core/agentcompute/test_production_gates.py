@@ -402,7 +402,10 @@ class TestMigrationCompat:
         import re
         sql_dir = pathlib.Path("src/agentclaw/community/core/agentcompute/sql")
         sql_files = sorted(sql_dir.glob("*.sql"))
-        assert len(sql_files) >= 2
+        # One merged schema file (the 2026_10_08 + 2026_10_09_audit merge)
+        # satisfies every invariant the test guards: dated, ordered,
+        # covers every ORM table, no DROP statements.
+        assert len(sql_files) >= 1
         dates = [f.name[:10] for f in sql_files]
         assert dates == sorted(dates)
         for model in om.ALL_MODELS:

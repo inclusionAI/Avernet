@@ -100,9 +100,8 @@ from agentclaw.community.api.bot_config_manifest_apply_service import (
 from agentclaw.community.core.task_queue.types import (
     Complete, DEFAULT_APP, Fail, Reschedule, TaskStatus,
 )
-from agentclaw.community.plugins.community.agentcompute_platform import (
-    AgentComputePlatformConfig, AvernetBotPlatform,
-)
+from agentclaw.community.core.agentcompute.config.settings import AgentComputePlatformConfig
+from agentclaw.community.plugins.community.agentcompute_platform import AvernetBotPlatform
 from agentclaw.community.utils.env_utils import get_current_env
 
 TENANT = "avernet-e2e-tenant"

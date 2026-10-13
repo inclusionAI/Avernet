@@ -7,6 +7,7 @@ from injector import Binder, Injector, Module, inject, provider, singleton
 from agentclaw.community.api.agentcompute_service import (
     AgentComputeServiceProtocol,
 )
+
 from agentclaw.community.core.agentcompute.config.settings import AgentComputeConfig
 from agentclaw.community.core.agentcompute.service import AgentComputeService
 from agentclaw.community.core.agentcompute.orchestration.orchestrator import Orchestrator
@@ -192,6 +193,43 @@ class AgentComputeModule(Module):
         config: AgentComputeConfig,
     ) -> Orchestrator:
         return Orchestrator(llm=llm, parser=parser, guards=guards, config=config)
+
+    @provider
+    @singleton
+    def bot_platform(self, injector) -> BotPlatform:
+        """In-process host adapter from config.platform. Heavy imports
+        are call-local: the bot_management chain is circular at module
+        import time (bot_service→aicoding→bot_service), deferring the
+        chain here preserves the module's clean import."""
+        from agentclaw.community.api.bot_config_manifest_apply_service import (
+            BotConfigManifestApplyServiceProtocol,
+        )
+        from agentclaw.community.api.bot_service import BotServiceProtocol
+        from agentclaw.community.core.bot_inventory.protocols import (
+            BusinessSpaceContextProtocol,
+        )
+        from agentclaw.community.core.bot_management.manifest_seam import ManifestCreationSeam
+        from agentclaw.community.core.repository.protocols.bot import BotRepository
+        from agentclaw.community.core.grt_chat.services import GrtChatService
+        from agentclaw.community.core.skill_center.skill_set_service_factory_protocol import SkillSetServiceFactoryProtocol
+        from agentclaw.community.plugin_api.passport import PassportPlugin
+        cfg = injector.get(AgentComputeConfig).platform
+        if not cfg.engine_type:
+            return None
+        from agentclaw.community.plugins.community.agentcompute_platform import (
+            AvernetBotPlatform,
+        )
+        return AvernetBotPlatform(
+            config=cfg,
+            manifest_seam=injector.get(ManifestCreationSeam),
+            bot_service=injector.get(BotServiceProtocol),
+            passport_plugin=injector.get(PassportPlugin),
+            skill_set_factory=injector.get(SkillSetServiceFactoryProtocol),
+            bot_repo=injector.get(BotRepository),
+            apply_service=injector.get(BotConfigManifestApplyServiceProtocol),
+            space_context=injector.get(BusinessSpaceContextProtocol),
+            grt_chat=injector.get(GrtChatService),
+        )
 
     @provider
     @singleton

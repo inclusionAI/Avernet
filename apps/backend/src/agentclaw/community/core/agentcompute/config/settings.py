@@ -216,6 +216,43 @@ class AgentComputeRetentionConfig:
         )
 
 
+
+
+@dataclass(frozen=True)
+class AgentComputePlatformConfig:
+    """Bot-provision placement — the create-with-manifest parameters the
+    host adapter supplies when the seam has no per-spec values.
+
+    Sourced from the ``agentcompute.platform`` sub-block. ``owner_work_no``
+    is the account swarm-created bots belong to (required — no
+    service-account fallback); ``engine_type``/``cluster_name`` are the
+    placement pair (teclaw↔ANDC, everything else↔ACRA); ``identity_file``
+    is the per-engine persona identity file type (engine-gated;
+    claude_code takes only CLAUDE.md).
+    """
+
+    engine_type: str = ""
+    cluster_name: str = ""
+    bot_type: str = "personal"
+    owner_work_no: str = ""
+    identity_file: str = "SOUL.md"
+
+    @classmethod
+    def from_block(cls, block: dict) -> "AgentComputePlatformConfig":
+        """Empty/missing sub-block returns the default (no error) — a
+        profile without a platform block simply has no binding. The
+        adapter validates placement at construction time (binding), not
+        at parse time."""
+        block = block or {}
+        return cls(
+            engine_type=_as_str(block, "engine_type"),
+            cluster_name=_as_str(block, "cluster_name"),
+            bot_type=_as_str(block, "bot_type", cls().bot_type),
+            owner_work_no=_as_str(block, "owner_work_no"),
+            identity_file=_as_str(block, "identity_file", "SOUL.md"),
+        )
+
+
 @dataclass(frozen=True)
 class AgentComputeConfig:
     llm: LlmConfig | None = None
@@ -244,6 +281,9 @@ class AgentComputeConfig:
     artifact_inline_threshold: int = 16384
     message_retention_tail: int = 50
     enabled: bool = True
+    platform: "AgentComputePlatformConfig" = field(
+        default_factory=AgentComputePlatformConfig
+    )
 
     @classmethod
     def from_block(cls, block: dict) -> "AgentComputeConfig":
@@ -279,5 +319,7 @@ class AgentComputeConfig:
                 block, "message_retention_tail",
                 cls().message_retention_tail, minimum=0),
             enabled=_as_bool(block, "enabled", True),
+            platform=AgentComputePlatformConfig.from_block(
+                block.get("platform") or {}),
         )
 

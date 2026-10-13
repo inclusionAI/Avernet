@@ -5,7 +5,7 @@
   fencing), task 12.3; retention wiring D13/D31 for the artifact columns.
 - **Migration files:** dated files in this directory, applied **ascending by
   file name**. Current:
-  - `agent_compute_schema.sql` — v1 tables: `run`, `agent`, `message`,
+  - `2026_10_08_agent_compute.sql` — v1 tables: `run`, `agent`, `message`,
     `result_shard`, `round`, `guard_event`, `job` (durable slice queue, D34).
   - Later files evolve these additively (see
     `tests/community/core/agentcompute/repository/test_agentcompute_schema_contract.py`

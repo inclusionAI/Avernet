@@ -34,7 +34,7 @@ suite runs on, which is the same reason they cannot be expressed in the ORM
 and live in the file at all.
 
 Wave-B coordination: the audit table ships in the same wave
-(`agent_compute_schema.sql`, another agent's file). This suite
+(`2026_10_08_agent_compute.sql`, another agent's file). This suite
 discovers `*.sql` generically and iterates `ALL_MODELS` dynamically, so the
 audit table joins parity checks the moment both its model and its DDL land.
 """

@@ -41,13 +41,15 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import hashlib
-from dataclasses import dataclass
 from typing import Any
 
 import yaml
 
 from agentclaw.community.core.agentcompute.domain.models import (
     BotCreateSpec, BotId, BotState, IdempotencyKey,
+)
+from agentclaw.community.core.agentcompute.config.settings import (
+    AgentComputePlatformConfig,
 )
 from agentclaw.community.core.agentcompute.spi.bot import BotPlatform
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
@@ -89,52 +91,6 @@ _BOT_DEAD = frozenset({"FAILED", "DELETED", "INACTIVE"})
 
 def _idem_digest(idempotency_key: str, length: int) -> str:
     return hashlib.sha1(idempotency_key.encode("utf-8")).hexdigest()[:length]
-
-
-@dataclass(frozen=True)
-class AgentComputePlatformConfig:
-    """Host binding for the agentcompute ``BotPlatform`` seam.
-
-    Sourced from the ``agentcompute_platform`` block of ``user_config``. This is
-    the placement contract of the host-side adapter (openspec change
-    bind-agentcompute-host-bot-platform):
-    ``engine`` / ``cluster`` name where swarm personas are provisioned; the
-    ownership principal the with-maniform creation runs as (the authorization
-    machinery's principal is the requesting user — there is no service-account
-    path, so swarm-created bots must belong to somebody); the identity file the
-    persona document declares (engine-gated: only CLAUDE.md is legal for the
-    claude_code engine); and the chat transport (the grt_chat engine WebSocket
-    path is the only implementation; a profile that cannot serve it fails
-    clear, never silent).
-
-    from_block asks *what is missing*, not what is present: an installed
-    binding without the block is a boot-time configuration error naming the
-    field, because a half-bound platform surfaces at first provision as a
-    mysterious swarm failure instead of here as a clear startup error.
-    """
-
-    engine_type: str = ""
-    cluster_name: str = ""
-    bot_type: str = "personal"
-    owner_work_no: str = ""
-    identity_file: str = "SOUL.md"
-
-    @classmethod
-    def from_block(cls, block: dict) -> "AgentComputePlatformConfig":
-        cfg_ = cls(
-            engine_type=str(block.get("engine_type", "") or ""),
-            cluster_name=str(block.get("cluster_name", "") or ""),
-            bot_type=str(block.get("bot_type", "personal") or "personal"),
-            owner_work_no=str(block.get("owner_work_no", "") or ""),
-            identity_file=str(block.get("identity_file", "SOUL.md") or "SOUL.md"),
-        )
-        missing = [f for f in ("engine_type", "cluster_name", "owner_work_no")
-                   if not getattr(cfg_, f)]
-        if missing:
-            raise ValueError(
-                f"agentcompute_platform config: missing required {', '.join(missing)}"
-            )
-        return cfg_
 
 
 class AvernetBotPlatform(BotPlatform):
