@@ -163,6 +163,20 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     # the shipped baas artifact now serves the sessions path under chat.
     assert "/openapi/v1/chat/sessions/{session_id}" in paths
     assert "/openapi/v1/collaboration/bots/mine" in paths
+    conversation_lookup = paths[
+        "/openapi/v1/collaboration/channels/conversations/by-session"
+    ]["get"]
+    assert conversation_lookup["x-avernet-security"] == collaboration_http_security
+    assert conversation_lookup["operationId"] == "list_channel_conversations_by_session"
+    assert {param["name"]: param["required"] for param in conversation_lookup["parameters"]} == {
+        "bcs_session_id": True,
+        "channel_type": False,
+    }
+    mapping = conversation_lookup["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ]["properties"]["data"]["properties"]["items"]["items"]
+    assert "conversation_id" in mapping["required"]
+    assert "im_user_id" not in mapping["properties"]
     assert not any(path.startswith("/api/v1/collaboration") for path in paths)
     assert "post" in paths["/openapi/v1/collaboration/sessions/{session_id}/token"]
     collection = paths["/openapi/v1/collaboration/sessions/{session_id}/collect"]

@@ -119,6 +119,8 @@ paths:
     $ref: ./openapi/channel-bindings.yaml#/ChannelsBindingsByTargetPath
   /openapi/v1/collaboration/channels/bindings/{id}:
     $ref: ./openapi/channel-bindings.yaml#/ChannelsBindingsIdPath
+  /openapi/v1/collaboration/channels/conversations/by-session:
+    $ref: ./openapi/channel-conversations.yaml#/ChannelConversationsBySessionPath
   /openapi/v1/collaboration/event-subscriptions:
     $ref: ./openapi/event-subscriptions.yaml#/EventSubscriptionsPath
   /openapi/v1/collaboration/event-subscriptions/{subscription_id}:

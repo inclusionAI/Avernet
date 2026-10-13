@@ -1,5 +1,6 @@
 use bcs_domain::{
-    BindingStatus, BindingTarget, ChannelBinding, ChannelType, GroupChatScope, Visibility,
+    BindingStatus, BindingTarget, ChannelBinding, ChannelType, ConversationSessionMap,
+    GroupChatScope, SessionScope, Visibility,
 };
 use bcs_service_api::application::channel::CreateBindingCommand;
 use serde::{Deserialize, Serialize};
@@ -76,6 +77,42 @@ impl From<ChannelBinding> for ChannelBindingDto {
 #[derive(Debug, Serialize)]
 pub struct ChannelBindingPage {
     pub items: Vec<ChannelBindingDto>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ListConversationsBySessionQuery {
+    pub bcs_session_id: String,
+    pub channel_type: Option<ChannelType>,
+}
+
+/// Public projection excludes IM user identities and provider configuration.
+#[derive(Debug, Serialize)]
+pub struct ChannelConversationDto {
+    pub binding_id: String,
+    pub conversation_id: String,
+    pub conversation_type: String,
+    pub session_scope: SessionScope,
+    pub bcs_session_id: String,
+    pub last_active_at: u64,
+}
+
+impl From<ConversationSessionMap> for ChannelConversationDto {
+    fn from(mapping: ConversationSessionMap) -> Self {
+        Self {
+            binding_id: mapping.binding_id,
+            conversation_id: mapping.im_conversation_id,
+            conversation_type: mapping.im_conversation_type,
+            session_scope: mapping.session_scope,
+            bcs_session_id: mapping.bcs_session_id,
+            last_active_at: mapping.last_active_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChannelConversationPage {
+    pub items: Vec<ChannelConversationDto>,
 }
 
 #[derive(Debug, Deserialize)]

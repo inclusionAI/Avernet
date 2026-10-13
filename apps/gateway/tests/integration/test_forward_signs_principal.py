@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
+from urllib.parse import parse_qs, urlsplit
 
 import jwt
 import pytest
@@ -251,3 +252,26 @@ async def test_an_unsigned_token_is_never_forwarded() -> None:
         await client.get("/openapi/v1/bots/x")
 
     assert forwarder.captured is None, "the request never reached the upstream"
+
+
+async def test_channel_conversation_lookup_preserves_query_and_signs_bcs_principal(
+    app_with_capture: tuple,
+) -> None:
+    app, forwarder = app_with_capture
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(
+            "/openapi/v1/collaboration/channels/conversations/by-session",
+            params={"bcs_session_id": "group:session/1", "channel_type": "dingtalk"},
+            headers={_PRINCIPAL_HEADER: "forged-by-caller"},
+        )
+    assert response.status_code == 200
+    forwarded = forwarder.captured
+    assert forwarded is not None
+    url = urlsplit(forwarded.url)
+    assert url.path == "/openapi/v1/collaboration/channels/conversations/by-session"
+    assert parse_qs(url.query) == {
+        "bcs_session_id": ["group:session/1"], "channel_type": ["dingtalk"],
+    }
+    token = forwarded.headers[_PRINCIPAL_HEADER]
+    assert token != "forged-by-caller"
+    assert jwt.decode(token, _TEST_KEY, algorithms=["HS256"], audience="bcs", issuer="gateway")["aud"] == "bcs"

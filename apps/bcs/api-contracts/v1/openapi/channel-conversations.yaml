@@ -1,0 +1,95 @@
+ChannelConversation:
+  type: object
+  additionalProperties: false
+  required: [binding_id, conversation_id, conversation_type, session_scope, bcs_session_id, last_active_at]
+  properties:
+    binding_id: { type: string }
+    conversation_id: { type: string }
+    conversation_type: { type: string }
+    session_scope: { type: string, enum: [conversation, per_sender] }
+    bcs_session_id: { type: string }
+    last_active_at: { type: integer, minimum: 0 }
+
+ChannelConversationPage:
+  type: object
+  additionalProperties: false
+  required: [items]
+  properties:
+    items:
+      type: array
+      items: { $ref: "#/ChannelConversation" }
+
+ChannelConversationPageEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code: { const: 20000 }
+    message: { type: string }
+    data: { $ref: "#/ChannelConversationPage" }
+    request_id: { type: string }
+
+ChannelConversationsBySessionPath:
+  get:
+    operationId: list_channel_conversations_by_session
+    tags: ["Collaboration / Channels"]
+    summary: Resolve external channel conversations for a BCS session.
+    description: >-
+      Requires a Human or Bot Principal authorized to read the Session, using
+      the same membership and ownership checks as Session detail. App-only
+      callers are forbidden. Returns all matching mappings, not a unique
+      conversation; an accessible session without mappings returns empty items.
+      Live mappings take precedence. When no live mappings exist, historical
+      Session channel metadata is used, including after /new rollover.
+      Provider configuration and IM user identities are never returned.
+    x-avernet-security:
+      user: optional
+      app: required
+      bot: optional
+    parameters:
+      - name: bcs_session_id
+        in: query
+        required: true
+        schema: { type: string, minLength: 1 }
+        description: Canonical BCS Session ID, not the BCS Group or engine session ID.
+      - name: channel_type
+        in: query
+        required: false
+        schema: { type: string, minLength: 1 }
+        description: Optional channel filter, for example dingtalk. Blank values are rejected.
+    responses:
+      "200":
+        description: All matching conversation mappings in the V1 envelope.
+        content:
+          application/json:
+            schema: { $ref: "#/ChannelConversationPageEnvelope" }
+      "400":
+        x-error-codes: [invalid_request, invalid_channel_params]
+        description: Missing, blank or malformed query parameters.
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "401":
+        x-error-codes: [unauthenticated]
+        description: Missing or invalid Gateway Principal.
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "403":
+        x-error-codes: [forbidden]
+        description: Caller is not authorized to read the Session.
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "404":
+        x-error-codes: [session_not_found, group_not_found, channel_binding_not_found]
+        description: Referenced Session or parent Group does not exist.
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "500":
+        x-error-codes: [internal_error]
+        description: Query failed or Channel service is unavailable.
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
