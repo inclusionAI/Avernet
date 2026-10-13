@@ -155,7 +155,7 @@ class WorkerRuntimeStateService:
         # 如果已经是 online，同步 worker.state 后返回
         if old_state == WorkerRuntimeState.ONLINE:
             if not defer_vector_sync:
-                self._sync_vector_runtime_state(worker_id, WorkerRuntimeState.ONLINE)
+                self._sync_online_vectors_if_current_or_raise(worker_id)
             # 确保 worker.state.runtime_state 同步
             if isinstance(worker, dict):
                 # OSS mode: dict worker
@@ -298,7 +298,7 @@ class WorkerRuntimeStateService:
         )
 
         if not defer_vector_sync:
-            self._sync_vector_runtime_state(worker_id, WorkerRuntimeState.ONLINE)
+            self._sync_online_vectors_if_current_or_raise(worker_id)
 
         logger.info(f"[RuntimeStateService] Worker {worker_id} set to ONLINE by {updated_by}")
 
@@ -318,9 +318,20 @@ class WorkerRuntimeStateService:
     def sync_online_vectors_if_current(self, worker_id: str) -> None:
         """Apply deferred online vector work only while the worker remains online."""
         started_at = perf_counter()
+        try:
+            self._sync_online_vectors_if_current_or_raise(worker_id)
+        except Exception:
+            logger.exception(
+                "[ONLINE-TIMING] phase=deferred_vector_sync_failed worker_id=%s total_ms=%.1f",
+                worker_id, (perf_counter() - started_at) * 1000,
+            )
+
+    def _sync_online_vectors_if_current_or_raise(self, worker_id: str) -> None:
+        """Recheck current state before publishing; propagate synchronous write failures."""
+        started_at = perf_counter()
         worker = self._registry_store.get_by_id(worker_id)
         logger.info(
-            "[ONLINE-TIMING] phase=deferred_registry_read worker_id=%s elapsed_ms=%.1f",
+            "[ONLINE-TIMING] phase=vector_precheck_registry_read worker_id=%s elapsed_ms=%.1f",
             worker_id, (perf_counter() - started_at) * 1000,
         )
         if worker is None:
@@ -340,7 +351,7 @@ class WorkerRuntimeStateService:
         phase_started_at = perf_counter()
         state = self._runtime_state_store.get_runtime_state(worker_id)
         logger.info(
-            "[ONLINE-TIMING] phase=deferred_runtime_read worker_id=%s elapsed_ms=%.1f",
+            "[ONLINE-TIMING] phase=vector_precheck_runtime_read worker_id=%s elapsed_ms=%.1f",
             worker_id, (perf_counter() - phase_started_at) * 1000,
         )
         if isinstance(state, dict):
@@ -352,19 +363,12 @@ class WorkerRuntimeStateService:
             )
             return
         logger.info(
-            "[ONLINE-TIMING] phase=deferred_vector_sync_start worker_id=%s precheck_ms=%.1f",
+            "[ONLINE-TIMING] phase=vector_sync_start worker_id=%s precheck_ms=%.1f",
             worker_id, (perf_counter() - started_at) * 1000,
         )
-        try:
-            self._sync_vector_runtime_state(worker_id, WorkerRuntimeState.ONLINE)
-        except Exception:
-            logger.exception(
-                "[ONLINE-TIMING] phase=deferred_vector_sync_failed worker_id=%s total_ms=%.1f",
-                worker_id, (perf_counter() - started_at) * 1000,
-            )
-            return
+        self._sync_vector_runtime_state(worker_id, WorkerRuntimeState.ONLINE)
         logger.info(
-            "[ONLINE-TIMING] phase=deferred_vector_sync_done worker_id=%s total_ms=%.1f",
+            "[ONLINE-TIMING] phase=vector_sync_done worker_id=%s total_ms=%.1f",
             worker_id, (perf_counter() - started_at) * 1000,
         )
 
