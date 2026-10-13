@@ -131,7 +131,7 @@ function renderSidebar(over: Partial<ConversationSidebarProps> = {}) {
 /** Bot 行内搜索入口的作用域查询:仅在该行的操作区内找搜索按钮。 */
 const searchEntryOf = (rowName: string) => {
   const row = screen.getByRole('button', { name: rowName }).closest('div');
-  return within(row as HTMLElement).getByRole('button', { name: '搜索会话' });
+  return within(row as HTMLElement).getByRole('button', { name: '会话ID检索' });
 };
 
 describe('sessionKey 搜索入口(三类目录装配)', () => {
@@ -149,8 +149,11 @@ describe('sessionKey 搜索入口(三类目录装配)', () => {
 
   it('行内提交写入该 Bot 的过滤条件并展开,不改动主选中', () => {
     const { syncStore } = renderSidebar({ friendBots: [friendBot] });
+    // 点 🔍 随 onToggle 展开该 Bot;mock toggleBot 不落 store,先预置展开态。
+    useConversationStore.getState().setExpandedBot(friendBot.bot.botId, true);
+    syncStore();
     fireEvent.click(searchEntryOf('朋友 Bot'));
-    const input = screen.getByPlaceholderText('输入 SessionId 精确搜索') as HTMLInputElement;
+    const input = screen.getByPlaceholderText('输入sessionID回车检索会话') as HTMLInputElement;
     fireEvent.change(input, { target: { value: ' agent:main:sn-1 ' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     const store = useConversationStore.getState();
@@ -161,9 +164,8 @@ describe('sessionKey 搜索入口(三类目录装配)', () => {
     expect(store.selectedSection).toBeNull();
     expect(store.selectedSessionId).toBeNull();
     syncStore();
-    // 生效后:高亮 + 数字 1 标签,且 Bot 展开可见。
-    expect(searchEntryOf('朋友 Bot')).toHaveClass('bg-primary/10');
-    expect(screen.getByText('1')).toBeInTheDocument();
+    // 生效后:🔍 按钮主色高亮(激活态圆点),且 Bot 展开可见。
+    expect(searchEntryOf('朋友 Bot')).toHaveClass('text-primary');
   });
 });
 
@@ -209,7 +211,7 @@ describe('好友 Bot 会话范围筛选(装配)', () => {
 
     // favorite 生效中:筛选按钮主色高亮,搜索入口隐藏。
     expect(screen.getByRole('button', { name: '会话范围' })).toHaveClass('text-primary');
-    expect(screen.queryByRole('button', { name: '搜索会话' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '会话ID检索' })).not.toBeInTheDocument();
 
     // 收藏列表存在 hasMore 时,加载更多回调用的是好友实际范围。
     useConversationStore.getState().setFriendBotSessions(botId, {
@@ -233,9 +235,11 @@ describe('好友 Bot 会话范围筛选(装配)', () => {
       directory: directoryModel({ friendBots: [friendBot] }),
     });
     // 先通过搜索 UI 生效条件(favorite 场景无需先展示列表)。
+    useConversationStore.getState().setExpandedBot(botId, true);
+    syncStore();
     fireEvent.click(searchEntryOf('朋友 Bot'));
-    fireEvent.change(screen.getByPlaceholderText('输入 SessionId 精确搜索'), { target: { value: 'agent:main:mark' } });
-    fireEvent.keyDown(screen.getByPlaceholderText('输入 SessionId 精确搜索'), { key: 'Enter' });
+    fireEvent.change(screen.getByPlaceholderText('输入sessionID回车检索会话'), { target: { value: 'agent:main:mark' } });
+    fireEvent.keyDown(screen.getByPlaceholderText('输入sessionID回车检索会话'), { key: 'Enter' });
     expect(useConversationStore.getState().sessionKeyByBotId[botId]).toBe('agent:main:mark');
     syncStore();
 
@@ -245,19 +249,17 @@ describe('好友 Bot 会话范围筛选(装配)', () => {
     expect(useConversationStore.getState().sessionKeyByBotId[botId]).toBeUndefined();
     syncStore();
     // favorite 下搜索入口隐藏。
-    expect(screen.queryByRole('button', { name: '搜索会话' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '会话ID检索' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '会话范围' }));
     fireEvent.click(screen.getByRole('button', { name: '全部' }));
     expect(useConversationStore.getState().scopeByFriendBotId[botId]).toBe('all');
     expect(useConversationStore.getState().sessionKeyByBotId[botId]).toBeUndefined();
     syncStore();
-    // 切回 all:搜索按钮回归默认态(无高亮、无数字标签),弹层草稿为空。
+    // 切回 all:搜索按钮回归默认态(无高亮),输入框恢复常驻且草稿回到已生效条件(空)。
     const entry = searchEntryOf('朋友 Bot');
-    expect(entry).not.toHaveClass('bg-primary/10');
-    expect(screen.queryByText('1')).not.toBeInTheDocument();
-    fireEvent.click(entry);
-    expect((screen.getByPlaceholderText('输入 SessionId 精确搜索') as HTMLInputElement).value).toBe('');
+    expect(entry).not.toHaveClass('text-primary');
+    expect((screen.getByRole('textbox', { name: '会话ID检索' }) as HTMLInputElement).value).toBe('');
   });
 });
 
@@ -272,7 +274,7 @@ describe('管理 Bot 搜索与既有筛选共用(装配)', () => {
     fireEvent.click(screen.getByRole('button', { name: '已收藏' }));
     expect(useConversationStore.getState().scopeByManagedBotId[botId]).toBe('favorite');
     syncStore();
-    expect(screen.queryByRole('button', { name: '搜索会话' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '会话ID检索' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '发起归属与会话范围' }));
     fireEvent.click(screen.getByRole('button', { name: '他人发起' }));
@@ -286,10 +288,12 @@ describe('管理 Bot 搜索与既有筛选共用(装配)', () => {
     const botId = managedBot.bot.botId;
     const store = useConversationStore.getState();
     store.selectConversation({ botId, section: 'managed', origin: 'mine', scope: 'all', friendUserId: null, sessionId: 's-0' });
-    renderSidebar({ managedBots: [managedBot], directory: directoryModel({ managedBots: [managedBot] }) });
+    store.setExpandedBot(botId, true);
+    const { syncStore } = renderSidebar({ managedBots: [managedBot], directory: directoryModel({ managedBots: [managedBot] }) });
+    syncStore();
     fireEvent.click(searchEntryOf('管理 Bot A'));
-    fireEvent.change(screen.getByPlaceholderText('输入 SessionId 精确搜索'), { target: { value: 'agent:main:managed-key' } });
-    fireEvent.keyDown(screen.getByPlaceholderText('输入 SessionId 精确搜索'), { key: 'Enter' });
+    fireEvent.change(screen.getByPlaceholderText('输入sessionID回车检索会话'), { target: { value: 'agent:main:managed-key' } });
+    fireEvent.keyDown(screen.getByPlaceholderText('输入sessionID回车检索会话'), { key: 'Enter' });
     const next = useConversationStore.getState();
     expect(next.sessionKeyByBotId[botId]).toBe('agent:main:managed-key');
     expect(next.expandedBotIds[botId]).toBe(true);

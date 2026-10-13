@@ -62,7 +62,7 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
                 className="h-8 rounded-lg border border-input bg-background pl-8 text-xs text-foreground placeholder:text-content-hint"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="请输入关键词"
+                placeholder="请输入Bot名称"
                 aria-label="搜索 Bot"
               />
             </div>

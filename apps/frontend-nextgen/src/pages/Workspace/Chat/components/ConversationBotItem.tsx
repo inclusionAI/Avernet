@@ -17,14 +17,14 @@ import { isManagedConversationSection } from '@/domain/conversation/types';
 import type { ConversationSessionListActions } from '../hooks/useConversationSessionActions';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { cn } from '@/utils/cn';
-import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Search } from 'lucide-react';
 import React from 'react';
 import { AvatarTile } from '../../components/AvatarTile';
 import { ListErrorState } from '../../components/ListErrorState';
 import { ConversationFriendGroup } from './ConversationFriendGroup';
 import { ConversationOriginFilter } from './ConversationOriginFilter';
 import { ConversationSessionList } from './ConversationSessionList';
-import { ConversationSessionSearch } from './ConversationSessionSearch';
+import { ConversationSessionIdSearchInput } from './ConversationSessionIdSearchInput';
 import { ConversationFriendRowsSkeleton } from './ConversationSkeletons';
 
 export interface ConversationBotItemOthers {
@@ -151,6 +151,13 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   // 搜索入口仅在有效范围 all 下展示:favorite 清空并隐藏(切回 all 不恢复),others 强制 all 保留。
   const searchVisible = scope === 'all';
   const showFilter = isManaged || canFavorite;
+  // 🔍 开关式输入框:显隐为组件本地态;过滤词已生效时强制可见,激活的入口不因开关丢失。
+  const [searchInputOpen, setSearchInputOpen] = React.useState(false);
+  const searchInputVisible = expanded && searchVisible && (searchInputOpen || searchActive);
+  const handleSearchToggle = () => {
+    if (!expanded) onToggle();
+    setSearchInputOpen((current) => !current);
+  };
   const handleToggle = () => {
     // AgentCoding Bot 是可点击入口,但不建普通 session:直接进专用 coding 对话页(与工坊「去使用」一致)。
     if (bot.isAgentCodingBot) {
@@ -196,16 +203,13 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           <div
             className={cn(
               'flex min-w-0 flex-1 items-center gap-2',
-              // 文字让位与操作区实际覆盖等宽:悬停/键盘聚焦弹出操作区,或任一筛选(归属/范围/搜索)钉住可见。
-              // 非搜索让位 96px(渐隐带20 + 筛选24 + 搜索24 + 加号24 + 间隙2×2);
-              // 搜索生效按钮加宽至40px(截图 2.png 含内联标签)→ 让位加深至 112px(pr-28),
-              // 且悬停/聚焦不可回缩;非钉住时仅悬停/键盘聚焦临时让位。
+              // 文字让位与操作区实际覆盖等宽:悬停/键盘聚焦弹出操作区,或任一筛选(归属/范围/检索)钉住可见。
+              // 筛选/检索/加号全在时让位 96px(pr-24)且悬停/聚焦不可回缩;
+              // 非钉住时仅悬停/键盘聚焦临时让位。
               hasSessionControls &&
-                (searchActive
-                  ? 'pr-28 group-hover:pr-28 group-focus-within:pr-28'
-                  : actionsPinned
-                    ? 'pr-24'
-                    : 'group-hover:pr-24 group-focus-within:pr-24'),
+                (actionsPinned
+                  ? 'pr-24'
+                  : 'group-hover:pr-24 group-focus-within:pr-24'),
             )}
           >
             <span className="min-w-0 truncate text-sm font-normal text-content-strong">
@@ -229,8 +233,8 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
               // 遮盖底撤除:按钮 hover 自带 muted 底,操作区不再叠一层与行底不一致的底色;
               // right-[34px] 使行尾箭头与「新建会话」之间保持与按钮间(gap-0.5)一致的 2px 等宽间隙。
               'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100',
-              // 展开或任一筛选(归属/范围/sessionKey 搜索)激活时钉住可见;
-              // 生效中的搜索在 Bot 收起时仍可见(截图 2.png 的常驻标签)。
+              // 展开或任一筛选(归属/范围/会话ID检索)激活时钉住可见;
+              // 生效中的检索在 Bot 收起时仍可见(🔍 按钮激活态圆点)。
               actionsPinned && 'opacity-100',
             )}
           >
@@ -247,7 +251,29 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
               />
             )}
             {searchVisible && (
-              <ConversationSessionSearch value={sessionKey} onSearch={onSearchSession} />
+              <IconButton
+                label="会话ID检索"
+                size="sm"
+                icon={
+                  <span className="relative flex items-center justify-center">
+                    <Search className="h-3.5 w-3.5" aria-hidden="true" />
+                    {searchActive && (
+                      <span
+                        className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-primary"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </span>
+                }
+                className={cn(
+                  'h-6 w-6 rounded-md hover:bg-muted',
+                  searchActive ? 'text-primary hover:text-primary' : 'text-muted-foreground hover:text-foreground',
+                )}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleSearchToggle();
+                }}
+              />
             )}
             {!isOthers && (
               <IconButton
@@ -286,6 +312,9 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
       {expanded && hasSessionControls && (
         // 展开区不再整体缩进:session 行(dmore 平齐化 1:1)自带全宽行槽,交互热区在行内部分级。
         <div aria-label={`会话列表：${bot.displayName}`}>
+          {searchInputVisible && (
+            <ConversationSessionIdSearchInput value={sessionKey} onSearch={onSearchSession} />
+          )}
           {isOthers ? (
             <OthersArea others={others} />
           ) : (
