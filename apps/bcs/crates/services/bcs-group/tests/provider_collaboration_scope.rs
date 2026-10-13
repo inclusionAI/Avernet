@@ -33,6 +33,7 @@ async fn human_invitation_is_restricted_only_while_the_local_bot_participates() 
     let registry = Arc::new(BotCore::with_provider_repos(
         bots.clone(), providers.clone(), providers.clone(), projection.clone(),
     ).with_bot_provider_repo(metadata.clone()));
+    let policy_gate = providers.policy_gate();
     let admin = ProviderCore::new(providers.clone(), providers, projection, registry.clone())
         .with_bot_provider_repo(metadata);
     let provider = admin.register_provider_with_policy(
@@ -49,7 +50,7 @@ async fn human_invitation_is_restricted_only_while_the_local_bot_participates() 
     ).await.unwrap();
     bots.register_with_owner_and_token("cloud".into(), BotCapabilities::default(), "alice", "fixture-cloud-token").await.unwrap();
     let repo: Arc<dyn GroupRepoPort> = Arc::new(MemoryGroupRepo::new());
-    let groups = Arc::new(GroupCore::with_repo(repo.clone()).with_collaboration_registry(registry.clone()));
+    let groups = Arc::new(GroupCore::with_repo(repo.clone()).with_collaboration_registry(registry.clone()).with_policy_gate(policy_gate));
     let mut group = Group::new("scope-group", "cloud", vec![
         Participant::bot("cloud", ParticipantRole::Driver),
         Participant::bot(&local.bot_uuid, ParticipantRole::Consultant),
@@ -68,6 +69,20 @@ async fn human_invitation_is_restricted_only_while_the_local_bot_participates() 
     assert!(matches!(groups.patch_mutable_fields("scope-group", GroupMutableFieldsPatch {
         visibility: Some("public".into()), ..Default::default()
     }).await, Err(ServiceError::Forbidden(_))));
+    for guarded in [false, true] {
+        let outsider = Participant::human("human_bob", ParticipantRole::Observer);
+        let error = if guarded { groups.add_participant_with_visibility_guard("scope-group", outsider, true).await }
+            else { groups.add_participant("scope-group", outsider).await };
+        assert!(matches!(error, Err(ServiceError::Forbidden(_))));
+        assert!(groups.get("scope-group").await.unwrap().get_participant("human_bob").is_none());
+    }
+    let mut public = Group::new("legacy-public", "cloud", vec![Participant::bot("cloud", ParticipantRole::Driver)]);
+    public.visibility = "public".into(); groups.upsert(public).await.unwrap();
+    assert!(matches!(groups.add_participant("legacy-public", Participant::bot(&local.bot_uuid, ParticipantRole::Consultant)).await,
+        Err(ServiceError::Forbidden(_))));
+    assert!(groups.get("legacy-public").await.unwrap().get_participant(&local.bot_uuid).is_none());
+    // The same legacy entry accepts an existing same-owner member in a private group.
+    groups.add_participant("scope-group", Participant::bot("cloud", ParticipantRole::Driver)).await.unwrap();
     let sessions: Arc<dyn SessionRepoPort> = Arc::new(MemorySessionRepo::new());
     let session_management = Arc::new(SessionManagementServiceImpl::new(sessions.clone(), repo).with_collaboration_registry(registry.clone()));
     let workbench = GroupManagement::new(
