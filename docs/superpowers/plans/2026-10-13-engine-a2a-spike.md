@@ -273,6 +273,32 @@ def test_slow_subscriber_kicked_with_termination_signal():  # R7-7/R8-7 后半
     assert run(drain(slow)) is True                     # 流有限时间内结束
 
 
+def test_completion_marker_survives_queue_boundary():  # R9-2 复现场景
+    """队列差一位满 → 终态 status 占满 → marker 投递撞 QueueFull：终止必达。"""
+    async def main():
+        k = Kernel(engine="mock")
+        rid, _ = await k.open_run("c", "kq2", "first", "d")
+        _b, q = await k.subscribe(rid, since_seq=0)    # task 事件已占 1
+        junk = {"seq": None, "type": "junk", "ev": {}}
+        for _ in range(SUBSCRIBER_QUEUE_SIZE - 2):     # 恰留 1 空位
+            q.put_nowait(junk)
+        await k.complete_run(rid)                      # 终态 status 添满 → marker 边界
+        return rid, q
+
+    async def consume(q):
+        """消费边界队列直到有限终止：final 标记或 None 关流信号。"""
+        while True:
+            ev = await asyncio.wait_for(q.get(), 5)
+            if ev is None:
+                return False
+            su = ev.get("ev", {}).get("statusUpdate", {})
+            if su.get("final"):
+                assert su["metadata"]["lastSeq"] >= 1   # R9-1：标记承载数
+                return True
+    rid, q = run(main())
+    assert run(consume(q)) is True                     # 有限时间耗尽且见终态
+
+
 def test_standard_subscribe_on_live_task():            # R8 P2-8：活任务标准订阅
     async def main():
         import engine_mock
@@ -368,6 +394,8 @@ def test_standard_subscribe_snapshot_then_terminal_marker():
     assert first["type"] == "task"                      # §3.1.6 快照
     assert first["ev"]["task"]["status"]["state"] == "TASK_STATE_COMPLETED"
     assert second["ev"]["statusUpdate"].get("final") is True
+    marker_seq = second["ev"]["statusUpdate"].get("metadata", {}).get("lastSeq")
+    assert marker_seq is not None and marker_seq >= 1   # 标记承接最终序号
 
 
 def test_f8_concurrent_first_single_execution():       # R7 F8：并发 + 执行级断言
@@ -439,9 +467,10 @@ def _task_obj(r) -> dict:
 
 def _terminal_marker(r) -> dict:
     return {"seq": None, "type": "statusUpdate",
-            "ev": {"statusUpdate": {"taskId": r.run_id, "contextId": r.context_id,
-                                    "status": {"state": r.state},
-                                    "final": True}}}
+            "ev": {"statusUpdate": {
+                "taskId": r.run_id, "contextId": r.context_id,
+                "status": {"state": r.state}, "final": True,
+                "metadata": {"lastSeq": r.last_seq}}}}   # 尾部完整性可判（R9-1）
 
 
 class UnknownOutcome:
@@ -547,9 +576,26 @@ class Kernel:
             "status": {"state": state}}})
         r.replay_expires_at = time.monotonic() + TERMINAL_TTL_SECONDS
         for q in list(r.subscribers):
-            self._try_put(q, _terminal_marker(r))
+            self._deliver_terminal(r, q, _terminal_marker(r))
         asyncio.get_running_loop().call_later(
             TERMINAL_TTL_SECONDS, self._evict, rid)
+
+    def _deliver_terminal(self, r, q, item):
+        """终止信号必达（R9-2）：满队列时踢除该订阅并腾位重投。
+        即便踢除失败（消费端死等），信号也不会静默丢失。"""
+        try:
+            q.put_nowait(item)
+        except asyncio.QueueFull:
+            if q in r.subscribers:
+                r.subscribers.remove(q)
+            try:
+                q.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                q.put_nowait(item)
+            except asyncio.QueueFull:
+                pass
 
     def _record_upstream(self, key):
         if self.calls_path:
@@ -562,10 +608,10 @@ class Kernel:
             self.total_bytes -= r.bytes_
             self.idem.pop((r.context_id, r.idempotency_key), None)
             for q in list(r.subscribers):
-                self._try_put(q, None)              # 流终止信号
+                self._deliver_terminal(r, q, None)  # 流终止信号（必达）
 
     def _try_put(self, q, item):
-        """满队列不抛错（R7-7）；踢除路径另发终止信号保证流有限结束。"""
+        """普通投递满队列不抛错（R7-7）；终止信号走 _deliver_terminal。"""
         try:
             q.put_nowait(item)
         except asyncio.QueueFull:
@@ -602,12 +648,7 @@ class Kernel:
                 try:
                     q.put_nowait(wrapped)
                 except asyncio.QueueFull:           # 不变量 2：踢除慢订阅者
-                    r.subscribers.remove(q)
-                    try:
-                        q.get_nowait()              # 腾位给终止信号
-                    except asyncio.QueueEmpty:
-                        pass
-                    self._try_put(q, None)          # 流有限时间内结束（R8-7）
+                    self._deliver_terminal(r, q, None)   # 有限结束（R8-7/R9-2）
 
     async def _forward(self, rid, kind, payload):
         r = self.runs[rid]
@@ -1977,6 +2018,11 @@ async def test_bridge_pumps_live_into_kernel():
         assert len(arts) >= 3                            # 实时泵入生效
         assert arts[0]["append"] is False                # §8.4 首块
         assert arts[-1]["append"] is False and arts[-1]["lastChunk"] is True
+        for e in arrivals:                               # R9-3：全流 context 对齐
+            for k in ("task", "statusUpdate", "artifactUpdate"):
+                if k in e:
+                    assert e[k]["contextId"] == "br-ctx", (k, e[k])
+                    assert e[k].get("taskId") in (None, rid), (k, e[k])
         final = [e for e in arrivals if "statusUpdate" in e][-1]["statusUpdate"]
         assert final.get("final") is True and final["status"]["state"] == \
             "TASK_STATE_COMPLETED"                      # R7-8：终态真到位
@@ -2037,10 +2083,11 @@ class BridgeV3:
                 continue                                # 跳过 res/握手帧
             inner = frame.get("payload", {})
             aid = f"text-{rid}"
+            ctx = self.kernel.runs[rid].context_id      # R9-3：事件流 context 对齐
             if "delta" in inner:
                 await self.kernel._publish(rid, "artifactUpdate", {
                     "artifactUpdate": {
-                        "taskId": rid, "contextId": rid,
+                        "taskId": rid, "contextId": ctx,
                         "artifact": {"artifactId": aid,
                                      "parts": [{"text": inner["delta"]}]},
                         "append": seen_delta, "lastChunk": False}})
@@ -2048,7 +2095,7 @@ class BridgeV3:
             elif inner.get("state") == "final" and "text" in inner:
                 await self.kernel._publish(rid, "artifactUpdate", {
                     "artifactUpdate": {
-                        "taskId": rid, "contextId": rid,
+                        "taskId": rid, "contextId": ctx,
                         "artifact": {"artifactId": aid,
                                      "parts": [{"text": inner["text"]}]},
                         "append": False, "lastChunk": True}})
@@ -2201,6 +2248,8 @@ grep -rn "LOCAL_\|@1:20003" apps/proxy/src/sandboxproxy/community/adapters/web/r
 """G1b 判定的纯函数（探针与负测共用；毫秒时基）。"""
 SLOW_GAP_MS = 100          # 判据预声明：慢引擎 250ms，≥SLOW_GAP_MS 的间隔计 1
 REQUIRED_SLOW_GAPS = 2
+TERMINAL = {"TASK_STATE_COMPLETED", "TASK_STATE_FAILED",
+            "TASK_STATE_CANCELED", "TASK_STATE_REJECTED"}
 
 
 def inter_gaps(arrivals: list[dict]) -> list[float]:
@@ -2214,6 +2263,8 @@ def g1b_checks(first: dict, resumed: dict, noauth, console_errors) \
              if a.get("seq") is not None]
             + [a["seq"] for a in (resumed or {}).get("arrivals", [])
                if a.get("seq") is not None])
+    last_event = (resumed or {}).get("lastEvent") or {}
+    final_last_seq = last_event.get("lastSeq")            # 终止标记承载数（R9-1）
     checks = {
         "unauth_rejected_401": noauth in (401, 403),
         "chunked_not_buffered": sum(1 for g in gaps
@@ -2222,8 +2273,11 @@ def g1b_checks(first: dict, resumed: dict, noauth, console_errors) \
         "resume_seq_contiguous": bool(seqs)
         and seqs == sorted(set(seqs))
         and seqs == list(range(seqs[0], seqs[-1] + 1)),
-        "resume_ends_terminal": bool(resumed)
-        and ((resumed).get("lastEvent") or {}).get("final") is True,
+        "resume_ends_terminal": last_event.get("kind") == "statusUpdate"
+        and last_event.get("final") is True
+        and last_event.get("state") in TERMINAL,
+        "resume_tail_complete": final_last_seq is not None
+        and bool(seqs) and max(seqs) == final_last_seq,   # 尾部无截断
         "no_console_errors": not console_errors,
     }
     return all(checks.values()), checks
@@ -2251,7 +2305,7 @@ GOOD_FIRST = {"arrivals": _arr([(1, 0.0), (2, 250.0), (3, 250.0)]),
 GOOD_RESUMED = {"arrivals": _arr([(4, 30.0), (5, 30.0)]),
                 "lastEvent": {"kind": "statusUpdate",
                               "state": "TASK_STATE_COMPLETED",
-                              "final": True}}
+                              "final": True, "lastSeq": 5}}
 
 
 def _run(first=GOOD_FIRST, resumed=GOOD_RESUMED, noauth=401, errors=()):
@@ -2261,6 +2315,27 @@ def _run(first=GOOD_FIRST, resumed=GOOD_RESUMED, noauth=401, errors=()):
 def test_good_case_all_pass():
     ok, checks = _run()
     assert ok and all(checks.values()), checks
+
+
+def test_tail_truncation_with_marker_rejected():       # R9-1 复现
+    """首段 2..5、恢复段 6、尾部 7/8 丢失：seq 连续但 lastSeq=8 揭穿截断。"""
+    first = {"arrivals": _arr([(2, 250.0), (3, 250.0), (4, 250.0), (5, 250.0)]),
+             "aborted": "AbortError"}
+    resumed = {"arrivals": _arr([(6, 30.0)]),
+               "lastEvent": {"kind": "statusUpdate",
+                             "state": "TASK_STATE_COMPLETED",
+                             "final": True, "lastSeq": 8}}
+    ok, checks = _run(first=first, resumed=resumed)
+    assert not ok and not checks["resume_tail_complete"]
+
+
+def test_terminal_without_completed_state_rejected():  # R9-1 state 不核放行
+    working = {**GOOD_RESUMED,
+               "lastEvent": {"kind": "statusUpdate",
+                             "state": "TASK_STATE_WORKING",
+                             "final": True, "lastSeq": 5}}
+    ok, checks = _run(resumed=working)
+    assert not ok and not checks["resume_ends_terminal"]
 
 
 def test_buffered_burst_rejected():           # 整体缓冲：间隔≈0
@@ -2344,7 +2419,8 @@ async function streamOnce(body, headers, abortAfterArtifacts) {
         r.arrivals.push({t: performance.now(), seq});
         if (au) r.artifacts += 1;
         r.lastEvent = {kind: kindOf(ev), state: su?.status?.state ?? null,
-                       final: su?.final ?? null};
+                       final: su?.final ?? null,
+                       lastSeq: su?.metadata?.lastSeq ?? su?.metadata?.seq ?? null};
         if (abortAfterArtifacts && r.artifacts >= abortAfterArtifacts) ac.abort();
       }
     }
@@ -2505,9 +2581,11 @@ async def bench_sse() -> dict:
             break
         except Exception:
             await asyncio.sleep(0.1)
+    incomplete = 0
     for i in range(N):
         t0 = time.monotonic()
         first_t = None
+        seen_terminal = False
         async with httpx.AsyncClient(timeout=10) as http:    # 每轮新连接（冷口径）
             async with http.stream("POST", "http://127.0.0.1:20043/rpc", json={
                     "jsonrpc": "2.0", "id": i,
@@ -2516,20 +2594,28 @@ async def bench_sse() -> dict:
                                            "parts": [{"text": "bench"}],
                                            "messageId": f"b-sse-{i}",
                                            "contextId": f"g5-sse-{i}"}}}) as resp:
-                async for line in resp.aiter_lines():        # 单循环：首事件+至终态
+                if resp.status_code != 200:
+                    incomplete += 1                      # 非成功轮不计入（R9-4）
+                    continue
+                async for line in resp.aiter_lines():    # 单循环：首事件+至终态
                     if not line.startswith("data: "):
                         continue
                     if first_t is None:
-                        first_t = time.monotonic() - t0      # 首业务事件（接收时）
+                        first_t = time.monotonic() - t0  # 首业务事件（接收时）
                     ev = json.loads(line[6:]).get("result", {})
                     if "statusUpdate" in ev and ev["statusUpdate"].get("final"):
+                        seen_terminal = True
                         break
+        if not seen_terminal:                            # 提前 EOF 不算成功样本
+            incomplete += 1
+            continue
         first.append(first_t)
         whole.append(time.monotonic() - t0)
     srv.should_exit = True
     await task
     return {"p50_first_ms": statistics.median(first) * 1000,
             "p50_whole_ms": statistics.median(whole) * 1000,
+            "incomplete_rounds": incomplete,
             "rss_kb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}
 
 
@@ -2546,9 +2632,10 @@ async def bench_ws() -> dict:
             break
         except OSError:
             await asyncio.sleep(0.1)
-    first, whole = [], []
+    first, whole, incomplete = [], [], 0
     for i in range(N):
         t0 = time.monotonic()
+        seen_terminal = False
         async with websockets.connect("ws://127.0.0.1:20044/ws") as ws:
             await ws.recv()                       # greeting（连接即发）
             await ws.send(json.dumps({
@@ -2564,20 +2651,30 @@ async def bench_ws() -> dict:
                         and res.get("id") == i:
                     first.append(time.monotonic() - t0)
                     break
-            while True:                           # 完整消费至终态
+            while True:                           # 完整消费至终态（R9-4）
                 frame = json.loads(await ws.recv())
                 payload = frame.get("payload", {})
                 if payload.get("ev", {}).get("statusUpdate", {}).get("final"):
+                    seen_terminal = True
                     break
+        if not seen_terminal:                     # 不完整轮不进统计
+            incomplete += 1
+            continue
         whole.append(time.monotonic() - t0)
     srv.should_exit = True
     await task
     return {"p50_first_ms": statistics.median(first) * 1000,
             "p50_whole_ms": statistics.median(whole) * 1000,
+            "incomplete_rounds": incomplete,
             "rss_kb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}
 
 
 def aggregate(sse: dict, ws: dict) -> dict:
+    if sse["incomplete_rounds"] > 0 or ws["incomplete_rounds"] > 0:
+        return {"gate": "G5", "verdict": "fail",    # R9-4：不完整样本即失败
+                "results": {"incomplete_sse": sse["incomplete_rounds"],
+                            "incomplete_ws": ws["incomplete_rounds"]},
+                "evidence_level": "protocol-perf-same-source"}
     p50_delta = sse["p50_first_ms"] - ws["p50_first_ms"]
     tput_ratio = ws["p50_whole_ms"] / max(sse["p50_whole_ms"], 1e-9)
     checks = {"p50_delta_ms": round(p50_delta, 1),
@@ -2645,7 +2742,6 @@ git commit -m "test(spike): G5 symmetric cold-channel benchmark, rss required"
 ---
 
 ### Task 12: 机器化汇总（证据分级 + F 用例分项）+ 附录回填
-
 **Files:** Create `probes/report.py`、`evidence/G4.json`、`evidence/REPORT.md`
 
 - [ ] **Step 1: report.py（聚合 G*.json；F 用例按分项映射多测试；NOT RUN 不放行）**
@@ -2746,7 +2842,7 @@ AVERNET_PRE_PUSH_MERGE_TARGET=origin/dev git push
 ## 自审记录（v3）
 
 1. **评审覆盖**：R6 8 项 + R7 6 P1 + 2 实现项 + 3 环境项 → R7-1 wire（T4 `_wire`/路由透传/标准断言）；R7-2 context（T2/T6/T7/T8 全链固定 + `context_required` + 客户端契约入不变量 3）；R7-3 跨进程控制（T7 `/_test/*` 端点 + forwarded 屏障 + 全时序）；R7-4 F6/F7/F8 实路径（T3 live-handoff、T7 legacy 真访问+能力发现、T3/T8 并发+执行级断言、T12 分项 F_MAP）；R7-5 G1b（T10 inter-arrival/AbortError/seq 并集连续性）；R7-6 G5（T11 同口径冷连接/同语义首事件/rss 必备）；R7-7 预算/慢订阅者/清理（T3 kernel + 测试）；R7-8 complete_run 统一收口（T3/T9 bridge/G3 终态断言）；环境项（T1 pytest-asyncio/G2.json/锁 grep）。
-2. **成稿方法修订**：v2 单次成稿三连出现同类缺陷后改为分段拼装；**R8 后升格"组装 harness 实际运行 mock 层测试"——第一层 py_compile（块级编译），第二层装配运行（本版 47 passed；真引擎/浏览器/性能 still out of scope per R8 边界）**；残留标记扫描（`if False`/`残迹`/`（最终版）`/占位 等零命中才提交）。
+2. **成稿方法修订**：v2 单次成稿三连出现同类缺陷后改为分段拼装；R8 后升格"组装 harness 实际运行 mock 层测试"——两层关卡：块级 py_compile（28 块）+ 装配运行 pytest（R8 版 47 passed；R9 修复后总数随新增用例增长，以实际运行输出为准；真引擎/浏览器/性能仍 out of scope）。残留标记扫描零命中才提交；R9 期间自查又捕一次 `if False else` 残迹，编辑即修。
 3. **类型一致性**：`kernel`（open_run/execute_message/send_message/complete_run/subscribe/replay/publish_status/inject/unsubscribe_context）；`server.HANDLED` handler 签名 `(kernel, rid, params)`；`client_t.send_once/retry_request/detect_retry_support`；`v3_server.make_v3_app(kernel, legacy)`；`fault_proxy.非代码块控制端点`（HTTP，无进程内 import）。
 4. **已知留白**：`g1a_sdk.py::normalize` 为显式探索适配层（NotImplementedError + 契约注释，依 G2-versions.md 实现——R6/R7 指示的处理方式）；singlebox 启动命令与 proxy target 格式为发现式步骤。
 
@@ -2754,7 +2850,7 @@ AVERNET_PRE_PUSH_MERGE_TARGET=origin/dev git push
 
 两层：
 
-**第一层：语法编译。（v3 交付时 26 块全绿）**
+**第一层：语法编译。（v3.1 实测 28 块全绿——R9 文案同步）**
 
 ```bash
 python3 - <<'EOF'
@@ -2773,13 +2869,22 @@ print(f"blocks={len(blocks)} failed={failed}")
 EOF
 ```
 
-**第二层：mock 实运行。（R8 升格——v3 交付时 **47 passed** in harness）**
+**第二层：mock 实运行。（R8 升格；R9 后 fresh checkout 可复现）**
 
 ```bash
+# 一次性（fresh checkout）：
+python3 -m venv spike/a2a/.harness/venv
+spike/a2a/.harness/venv/bin/pip install \
+  fastapi uvicorn httpx websockets pytest pytest-asyncio
+# 复跑关卡：
 python3 spike/a2a/.harness/assemble.py           # 计划 → src/ 装配 + py_compile
 spike/a2a/.harness/venv/bin/python -m pytest \
-  spike/a2a/.harness/src/tests -q --no-header    # 期望全 PASS
+  spike/a2a/.harness/src/tests -q --no-header    # 期望全 PASS（R9 后 55+）
 ```
+
+装配器 `spike/a2a/.harness/assemble.py` **随仓库跟踪**（ignore 只作用于
+`src/`、`venv/`、`__pycache__`）——R9-5 修正：上一轮"提交于（gitignored）"
+为矛盾陈述，实际未提交。
 
 要求：mock 层任何非零 → 修复后重跑并更新全书；真引擎/浏览器/性能实验不在
 此关卡（评审 R8 的边界划定）。缺口上报：`_start(kind,..)` 端口占用时换端口。

@@ -111,4 +111,5 @@ openspec
 
 scripts/undercover-game.sh
 scripts/.dependencies
-spike/a2a/.harness/
+spike/a2a/.harness/src/
+spike/a2a/.harness/venv/
