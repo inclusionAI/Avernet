@@ -1282,25 +1282,23 @@ async def test_legacy_fallback_replace_preserves_an_aliased_recorded_locator():
 
 
 @pytest.mark.asyncio
-async def test_replacement_recovers_a_stale_row_with_no_authoritative_package():
+async def test_replacement_rejects_a_stale_row_with_no_authoritative_package():
     filesystem = _Filesystem()
     skill = _existing_skill(active=False)
     repo = _ReplacementRepo([skill])
 
-    package = _skill_md(description="restored")
-    result = await _replacement_service(
-        filesystem, repo, _ReplacementRuntime([True])
-    ).upload_local_skill(
-        bot_id="bot",
-        owner_id="owner",
-        actor_id="owner",
-        package=_zip({"SKILL.md": package}),
-    )
+    with pytest.raises(LocalSkillStorageError):
+        await _replacement_service(
+            filesystem, repo, _ReplacementRuntime([True])
+        ).upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip({"SKILL.md": b"name: upload-skill\ndescription: restored\n"}),
+        )
 
     assert skill["git_path"] == "local:///private/skills-local/upload-skill"
-    assert result["operation"] == "updated"
-    assert result["skill"]["id"] == skill["id"]
-    assert filesystem.files == {"/private/skills-local/upload-skill/SKILL.md": package}
+    assert filesystem.files == {}
     assert not any(".replacement-" in path for path in filesystem.files)
 
 
@@ -1411,7 +1409,6 @@ async def test_restore_replacement_requires_backup_after_canonical_publish():
             canonical_published=True,
             switched=False,
             runtime_sync_attempted=False,
-            old_package_existed=True,
         )
 
 

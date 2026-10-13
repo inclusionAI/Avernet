@@ -62,14 +62,7 @@ class NoopSandboxClient(MockSeam, SandboxRuntimeClient):
     async def write_file(self, *, sandbox_id: str, path: str, content: bytes) -> None:
         return None
 
-    async def list_dir(
-        self,
-        *,
-        sandbox_id: str,
-        path: str,
-        recursive: bool = False,
-        preserve_read_errors: bool = False,
-    ) -> list | None:
+    async def list_dir(self, *, sandbox_id: str, path: str, recursive: bool = False) -> list | None:
         return []
 
     async def delete_file(self, *, sandbox_id: str, path: str) -> bool:

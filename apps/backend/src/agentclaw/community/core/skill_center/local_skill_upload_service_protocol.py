@@ -12,14 +12,7 @@ class LocalSkillUploadServiceProtocol(Protocol):
 
     async def upload_local_skill(
         self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
-    ) -> dict[str, Any]:
-        """Replace an existing identity even when its package is missing.
-
-        The validated upload restores the layout-owned package while retaining
-        the Skill ID, recorded locator and desired activation/references.
-        Storage read failures propagate; they do not authorize recovery.
-        """
-        ...
+    ) -> dict[str, Any]: ...
 
     async def upload_local_skill_files(
         self,

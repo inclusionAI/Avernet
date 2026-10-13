@@ -547,8 +547,10 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             raise LocalSkillStorageError() from exc
         has_old_package = await old_storage.exists()
         # Factory resolution proves that the recorded locator identifies this
-        # stable layout-owned package. A missing package can be restored from
-        # the validated upload without changing its identity or desired state.
+        # stable layout-owned package.  It may be a supported historical alias,
+        # but missing bytes still cannot be manufactured from metadata.
+        if not has_old_package:
+            raise LocalSkillStorageError()
         backup = None
         old_metadata = {
             "description": skill.get("description"),
@@ -561,20 +563,19 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         try:
             await staged.write(files)
             await staged.verify()
-            if has_old_package:
-                backup_dir = f".{name}.rollback-{uuid4().hex}"
-                _, backup = self._skill_service_factory.local_skill_package_storage(
-                    entity_id=str(bot["entity_id"]),
-                    owner_id=owner_id,
-                    bot_id=bot_id,
-                    engine_type=bot.get("active_engine"),
-                    entity_type=str(bot.get("entity_type") or "staff"),
-                    is_desktop=bot.get("bot_type") == "desktop",
-                    is_teclaw=is_teclaw,
-                    name=name,
-                    directory_name=backup_dir,
-                )
-                await old_storage.copy_to(backup)
+            backup_dir = f".{name}.rollback-{uuid4().hex}"
+            _, backup = self._skill_service_factory.local_skill_package_storage(
+                entity_id=str(bot["entity_id"]),
+                owner_id=owner_id,
+                bot_id=bot_id,
+                engine_type=bot.get("active_engine"),
+                entity_type=str(bot.get("entity_type") or "staff"),
+                is_desktop=bot.get("bot_type") == "desktop",
+                is_teclaw=is_teclaw,
+                name=name,
+                directory_name=backup_dir,
+            )
+            await old_storage.copy_to(backup)
             # ``copy_to(..., replace=True)`` can fail after clearing or partly
             # writing the canonical directory.  Mark the mutation before the
             # call so every such failure restores the old authority.
@@ -616,7 +617,6 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                     canonical_published=canonical_published,
                     switched=switched,
                     runtime_sync_attempted=runtime_sync_attempted,
-                    old_package_existed=has_old_package,
                 )
             else:
                 if backup is not None:
@@ -628,8 +628,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             # been removed.  If any cleanup fails, the operation still has the
             # bytes required to restore the old canonical package.
             await self._discard(staged)
-            if backup is not None:
-                await self._discard(backup)
+            await self._discard(backup)
         except Exception as exc:
             try:
                 await self._restore_replacement(
@@ -643,7 +642,6 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                     canonical_published=canonical_published,
                     switched=switched,
                     runtime_sync_attempted=runtime_sync_attempted,
-                    old_package_existed=has_old_package,
                 )
             except Exception as rollback_exc:
                 raise LocalSkillStorageError() from rollback_exc
@@ -673,19 +671,12 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         canonical_published: bool,
         switched: bool,
         runtime_sync_attempted: bool,
-        old_package_existed: bool,
     ) -> None:
         if canonical_published:
             try:
                 if backup is None:
-                    if old_package_existed:
-                        raise LocalSkillStorageError()
-                    # Restore the original missing-package state after a
-                    # failed recovery, including a partly published package.
-                    if await canonical.exists():
-                        await self._discard(canonical)
-                else:
-                    await backup.copy_to(canonical, replace=True)
+                    raise LocalSkillStorageError()
+                await backup.copy_to(canonical, replace=True)
             except Exception as exc:
                 raise LocalSkillStorageError() from exc
         if switched:

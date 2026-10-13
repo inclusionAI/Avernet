@@ -145,19 +145,9 @@ class SandboxRuntimeClient(Plugin, Protocol):
         ...
 
     async def list_dir(
-        self,
-        *,
-        sandbox_id: str,
-        path: str,
-        recursive: bool = False,
-        preserve_read_errors: bool = False,
+        self, *, sandbox_id: str, path: str, recursive: bool = False
     ) -> "list[dict[str, Any]] | None":
-        """List ``path`` in ``sandbox_id`` (entry dicts).
-
-        Compatibility callers receive ``None`` if unreadable. With
-        ``preserve_read_errors=True``, ``None`` means explicitly missing;
-        all other read failures must raise. An existing empty directory is [].
-        """
+        """List ``path`` in ``sandbox_id`` (entry dicts); ``None`` if unreadable."""
         ...
 
     async def delete_file(self, *, sandbox_id: str, path: str) -> bool:
