@@ -3,7 +3,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 import express from 'express';
 import Database from 'better-sqlite3';
 import type { Server } from 'node:http';
-import { SqliteDatabase } from '../../../../../../shared/server/db.js';
+import { SqliteDatabase } from '@avernet/clawweb-shared/server/db';
 import { FlowRunRepository } from '../../../repositories/flow-run-repository.js';
 import { createInternalRunsRouter } from '../runs.js';
 

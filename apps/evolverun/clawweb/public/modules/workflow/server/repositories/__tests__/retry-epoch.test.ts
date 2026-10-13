@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import Database from 'better-sqlite3';
-import { SqliteDatabase } from '../../../../../shared/server/db.js';
+import { SqliteDatabase } from '@avernet/clawweb-shared/server/db';
 import { FlowRunRepository } from '../flow-run-repository.js';
 
 it('rejects delayed completion and watchdog writes from the previous retry attempt', async () => {
