@@ -1,5 +1,7 @@
 //! QwenWork desktop adapter. BCN transport and run ownership remain in bridge core.
 mod lifecycle;
+mod questions;
+mod desktop_control;
 mod session;
 mod transport;
 mod turn;
@@ -26,6 +28,7 @@ struct Options {
     secret: String,
     hook_secret: String,
     database_path: PathBuf,
+    mcp_socket_path: Option<PathBuf>,
 }
 
 impl Options {
@@ -50,6 +53,9 @@ impl Options {
                 "qwenwork requires a bot_id without ':' and an existing absolute database_path"
                     .into(),
             );
+        }
+        if value.mcp_socket_path.as_ref().is_some_and(|p| !p.is_absolute()) {
+            return Err("qwenwork mcp_socket_path must be absolute".into());
         }
         Ok(value)
     }
@@ -125,6 +131,7 @@ struct Active {
 enum Input {
     Snapshot { text: String, finished: bool },
     Hook(serde_json::Value),
+    Question { hook: serde_json::Value, reply: tokio::sync::oneshot::Sender<serde_json::Value> },
 }
 
 struct Inner {

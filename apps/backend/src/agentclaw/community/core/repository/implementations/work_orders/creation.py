@@ -85,6 +85,7 @@ class _WorkOrderCreationRepository:
         recipients = (
             approver_user_ids
             if event_category is NotificationCategory.APPROVAL
+            and approval_mode is WorkOrderApprovalMode.MANUAL
             else recipient_user_ids
         )
         if not recipients:

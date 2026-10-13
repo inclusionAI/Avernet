@@ -10,17 +10,25 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import json
 import threading
+from contextlib import contextmanager
 from typing import Callable
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
+from agentclaw.community.core.base import Base
+from agentclaw.community.core.repository.implementations.task.task_trajectory_repository import (
+    TaskTrajectoryRepository,
+)
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     PlanResult,
     RuntimeInfo,
     Status,
@@ -30,18 +38,34 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     TaskSpec,
 )
-from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+from agentclaw.community.core.task.task_runner.execution_adapters import CentralizedExecutionAdapter
+from agentclaw.community.core.task.task_context.task_context_service import (
+    TaskContextService,
+)
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_trajectory.analyzer import (
+    TaskTrajectoryAnalyzer,
+)
+from agentclaw.community.core.task.task_context.task_trajectory.assembler import (
+    TaskTrajectoryAssembler,
+)
+from agentclaw.community.core.task.task_context.task_trajectory.trajectory_service import (
+    TaskTrajectoryService,
+)
 from agentclaw.community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
 from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
+from agentclaw.community.di.task_trajectory_config import TrajectoryAnalysisConfig
+
+# Side-effect import: registers the task ORM models on Base.metadata.
+import agentclaw.community.core.task.repository.models  # noqa: F401,E402
 
 
 # ===== domain helpers (mirrors test_engine.py minimal setup) =====
 def _task_info(task_id: str = "t1", max_depth: int = 3) -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="ac1", description="d")]),
         ),
         source_type="bot",
@@ -96,22 +120,23 @@ class StubDispatcher:
         return out
 
 
-class _CaseEngine(ExecutionEngine):
+class _CaseEngine(CentralizedExecutionAdapter):
     """测试子类:bot/bcs 留 None(不启 poller 线程),注入 stub planner/dispatcher/runner。"""
 
-    def __init__(self, graph, planner=None, dispatcher=None, runner=None):
+    def __init__(self, graph, planner=None, dispatcher=None, runner=None, tcs=None):
         self._case_planner = planner
         self._case_dispatcher = dispatcher
         self._case_runner = runner
-        super().__init__(graph)
+        super().__init__(graph, task_context_service=tcs)
 
 
-def _engine(svc, planner=None, dispatcher=None, runner=None):
+def _engine(svc, planner=None, dispatcher=None, runner=None, tcs=None):
     return _CaseEngine(
         svc,
         planner=planner or StubPlanner(),
         dispatcher=dispatcher or StubDispatcher(),
         runner=runner,
+        tcs=tcs,
     )
 
 
@@ -123,7 +148,7 @@ def svc() -> TaskGraphService:
 # ===== _schedule_bbs_notify 直测 =====
 def test_engine_schedule_bbs_notify_submits_to_durable_loop():
     """BBS submission is independent of the caller's short-lived Harness loop."""
-    engine = ExecutionEngine(graph=MagicMock(), api_base_url="http://x")
+    engine = CentralizedExecutionAdapter(graph=MagicMock(), api_base_url="http://x")
     engine._runner = MagicMock()
     engine._runner.start_run = AsyncMock(return_value=[True])
     engine._bot = MagicMock()
@@ -162,7 +187,7 @@ def test_engine_schedule_bbs_notify_submits_to_durable_loop():
 
 
 def test_engine_schedule_bbs_notify_skips_when_root_missing(caplog):
-    engine = ExecutionEngine(graph=MagicMock(), api_base_url="http://x")
+    engine = CentralizedExecutionAdapter(graph=MagicMock(), api_base_url="http://x")
     engine._runner = MagicMock()
     fake_g = MagicMock()
     fake_g.tasks = [_child("child", "t1")]
@@ -174,7 +199,7 @@ def test_engine_schedule_bbs_notify_skips_when_root_missing(caplog):
 
 
 def test_engine_background_false_result_is_visible(caplog):
-    engine = ExecutionEngine(graph=MagicMock(), api_base_url="http://x")
+    engine = CentralizedExecutionAdapter(graph=MagicMock(), api_base_url="http://x")
     future = concurrent.futures.Future()
     future._bbs_task_id = "t1"
     engine._bg_tasks.add(future)
@@ -189,7 +214,7 @@ def test_engine_background_false_result_is_visible(caplog):
 
 def test_engine_bbs_survives_caller_loop_shutdown():
     """A caller driven by asyncio.run cannot cancel the durable BBS coroutine."""
-    engine = ExecutionEngine(graph=MagicMock(), api_base_url="http://x")
+    engine = CentralizedExecutionAdapter(graph=MagicMock(), api_base_url="http://x")
     started = threading.Event()
     finished = threading.Event()
 
@@ -233,7 +258,7 @@ def test_engine_bbs_schedule_reaches_notify_through_start_run():
         formatter=None, context=None, sink=None, poller=None,
         graph=graph, api_base_url="http://x",
     )
-    engine = ExecutionEngine(graph=graph, api_base_url="http://x")
+    engine = CentralizedExecutionAdapter(graph=graph, api_base_url="http://x")
     engine._runner = TaskRunner(graph, execution_backend=executor)
     durable_future = concurrent.futures.Future()
     submitted = {}
@@ -258,7 +283,7 @@ def test_engine_bbs_schedule_reaches_notify_through_start_run():
 
 def test_engine_schedule_bbs_notify_skips_when_no_runner():
     """无 runner(端口缺失)→ 静默跳过,不抛、不建任务。"""
-    engine = ExecutionEngine(graph=MagicMock(), bot=None, bcs=None, api_base_url="")
+    engine = CentralizedExecutionAdapter(graph=MagicMock(), bot=None, bcs=None, api_base_url="")
     engine._runner = None
     # 不抛即可
     engine._schedule_bbs_notify("t1", MagicMock())
@@ -284,6 +309,27 @@ def test_engine_schedule_bbs_notify_fires_at_recoverable_intercept(svc):
     assert g.status != Status.HUNG  # graph.status 仍是进行态镜像，根 HUNG 是 BBS 可恢复入口
 
 
+def test_engine_harness_hung_relay_mode_does_not_propagate_to_parent(svc):
+    """Relay 模式当前棒 HUNG 不允许回写父级状态。"""
+    g = svc.initialize_graph(_task_info("t6", max_depth=2))
+    svc.add_task_nodes([_child("c1", "t6")], parent_node_id="t6")
+    g.extend_props["execution_config"] = {"orchestration_mode": "relay"}
+    g.extend_props["loop_round"] = 1
+    # Relay batons close through the event gateway. This legacy-parent test
+    # intentionally simulates an already-handed-off parent without reopening it.
+    svc._get_node(g, "t6").status = Status.DONE
+    svc.update_task_node_info(
+        _patch("t6", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="bot1")
+    )
+    eng = _engine(svc)
+
+    eng._hung_and_escalate("t6", "c1", "exec_stuck")
+
+    assert svc._get_node(g, "c1").status == Status.HUNG
+    assert svc._get_node(g, "t6").status == Status.DONE
+    assert svc._get_node(g, "t6").run_info.extend_props.get("hung_reason") is None
+
+
 def test_engine_harness_exhausted_schedules_bbs_recoverable(svc):
     """harness 耗尽(exec_stuck)→节点 HUNG 冒泡到根→根 HUNG 升 BBS 可恢复态。
 
@@ -302,3 +348,101 @@ def test_engine_harness_exhausted_schedules_bbs_recoverable(svc):
         mock_sched.assert_called_once()  # exec_stuck 可恢复 → 升 BBS
     # 节点仍 HUNG(exec_stuck 收口)
     assert svc._get_node(g, "c1").status == Status.HUNG
+
+
+# ===== BBS 任务产生即录轨迹(enter_bbs 同步发射) =====
+class _InMemorySqliteDB:
+    def __init__(self, engine) -> None:
+        self._factory = sessionmaker(bind=engine, autoflush=False)
+
+    @contextmanager
+    def orm_session(self):
+        db = self._factory()
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+
+def _make_traj_db():
+    eng = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(eng)
+    return _InMemorySqliteDB(eng)
+
+
+def _real_tcs(repo) -> TaskContextService:
+    """TaskContextService → TaskTrajectoryService(payloads) — production chain."""
+    ts = TaskTrajectoryService(
+        TaskTrajectoryAssembler(repo), repo, TaskTrajectoryAnalyzer(),
+        TrajectoryAnalysisConfig(analysis_bot_id="bot-analyst"),
+    )
+    return TaskContextService(ts)
+
+
+def _drive_harness_exhausted_to_bbs(svc, *, task_id: str, engine_kwargs: dict) -> None:
+    """harness 重试耗尽(exec_stuck)→ 节点 HUNG → 冒泡到根 → _enter_root_bbs。"""
+    g = svc.initialize_graph(_task_info(task_id, max_depth=1))
+    svc.add_task_nodes([_child("c1", task_id)], parent_node_id=task_id)
+    svc.update_task_node_info(
+        _patch(task_id, "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
+    svc.update_task_node_info(
+        _patch(task_id, "c1", extend_props_patch={"harness_retries": 3}))
+    eng = _engine(svc, planner=StubPlanner(lambda g: []), dispatcher=StubDispatcher(),
+                  **engine_kwargs)
+    with patch.object(eng, "_schedule_bbs_notify"):
+        _run(eng.on_harness(_patch(task_id, "c1", exec_error="exec_failed_retry")))
+    return eng
+
+
+def test_enter_root_bbs_emits_submit_enter_bbs_row_synchronously(svc):
+    """BBS 任务产生的瞬间(``_enter_root_bbs`` 置 bbs_mode+调度 notify)即同步发射
+    SUBMIT/enter_bbs 轨迹事件——不依赖后续 start_run→notify 执行期的 bbs_entered
+    (需求:BBS 任务产生之后立即录入轨迹,不等调度、执行)。"""
+    db = _make_traj_db()
+    repo = TaskTrajectoryRepository(db)
+    tcs = _real_tcs(repo)
+
+    _drive_harness_exhausted_to_bbs(svc, task_id="t7", engine_kwargs={"tcs": tcs})
+
+    rows = [
+        r for r in repo.list_events_by_task("t7")
+        if r.action_type == "submit" and r.action_result == "enter_bbs"
+    ]
+    assert rows, "enter_bbs submit row must be recorded SYNCHRONOUSLY at production time"
+    row = rows[0]
+    assert row.node_id == "t7"  # 根节点 = BBS 广场任务产生的主体
+    ext = json.loads(row.ext_info or "{}")
+    assert ext["execution_mode"] == "bbs"
+    assert ext["phase"] == "enter_root_bbs"
+    assert isinstance(ext["loop_round"], int) and ext["loop_round"] >= 1
+
+
+def test_enter_root_bbs_survives_trajectory_emission_failure(svc):
+    """发射失败(决策 #14 fire-and-forget:吞异常+WARNING)不阻断升级主流程:
+    enter_bbs 发射抛错时 _enter_root_bbs 仍返回、bbs_mode 仍置位。"""
+
+    class _ExplodingOnEnterBbs:
+        """仅 enter_bbs 发射时抛错——其余轨迹发射照常(隔离被测点)。"""
+
+        def emit_trajectory_event(self, task_id, node_id, action_type, *,
+                                  action_result=None, **kwargs):
+            if action_result == "enter_bbs":
+                raise RuntimeError("boom")
+            return None
+
+    _drive_harness_exhausted_to_bbs(svc, task_id="t8",
+                                    engine_kwargs={"tcs": _ExplodingOnEnterBbs()})
+
+    g = svc._graphs.get("t8")
+    assert g is not None
+    assert g.extend_props.get("bbs_mode") is True, (
+        "发射失败必须被吞:_enter_root_bbs 主流程照常完成(bbs_mode 已置位)"
+    )

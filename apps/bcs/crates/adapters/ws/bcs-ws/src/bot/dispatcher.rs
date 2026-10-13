@@ -75,6 +75,25 @@ fn legacy_default_session_id(group_id: &str) -> Option<String> {
     }
 }
 
+fn resolve_task_scope(
+    wire_group_id: &str,
+    explicit_session_id: Option<&str>,
+) -> Result<(String, Option<String>)> {
+    if explicit_session_id.is_some_and(|session_id| session_id.trim().is_empty()) {
+        return Err(BotWsDispatchError::InvalidFrameFormat(
+            "task Session ID must not be empty".to_string(),
+        ));
+    }
+    let (expected_group_id, _) = unwrap_outbound_group_id(wire_group_id, None);
+    let (group_id, session_id) = unwrap_outbound_group_id(wire_group_id, explicit_session_id);
+    if group_id != expected_group_id {
+        return Err(BotWsDispatchError::InvalidFrameFormat(
+            "task Session ID does not belong to the requested Group".to_string(),
+        ));
+    }
+    Ok((group_id, session_id))
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum BotWsDispatchError {
     #[error("Invalid frame format: {0}")]
@@ -1874,6 +1893,8 @@ async fn send_error(
 #[derive(Debug, Clone, Deserialize)]
 struct TaskDispatchParams {
     group_id: String,
+    #[serde(default, alias = "bcs_session_id", alias = "sessionId")]
+    session_id: Option<String>,
     target_bot: String,
     message: String,
 }
@@ -1887,12 +1908,16 @@ struct TaskDispatchResult {
 #[derive(Debug, Clone, Deserialize)]
 struct TaskMessageParams {
     group_id: String,
+    #[serde(default, alias = "bcs_session_id", alias = "sessionId")]
+    session_id: Option<String>,
     message: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 struct TaskCompleteParams {
     group_id: String,
+    #[serde(default, alias = "bcs_session_id", alias = "sessionId")]
+    session_id: Option<String>,
     summary: String,
     #[serde(default = "default_complete_status")]
     status: String,
@@ -2285,7 +2310,7 @@ async fn handle_task_dispatch(
     let params: TaskDispatchParams = serde_json::from_value(params).map_err(|e| {
         BotWsDispatchError::InvalidFrameFormat(format!("Invalid task.dispatch params: {}", e))
     })?;
-    let (real_group_id, manager_session_id) = unwrap_outbound_group_id(&params.group_id, None);
+    let (real_group_id, manager_session_id) = resolve_task_scope(&params.group_id, params.session_id.as_deref())?;
     let mut payload = serde_json::json!({
         "message": params.message,
     });
@@ -2357,7 +2382,7 @@ async fn handle_task_message(
     let params: TaskMessageParams = serde_json::from_value(params).map_err(|e| {
         BotWsDispatchError::InvalidFrameFormat(format!("Invalid task.message params: {}", e))
     })?;
-    let (real_group_id, manager_session_id) = unwrap_outbound_group_id(&params.group_id, None);
+    let (real_group_id, manager_session_id) = resolve_task_scope(&params.group_id, params.session_id.as_deref())?;
     let mut payload = serde_json::json!({
         "message": params.message,
     });
@@ -2419,7 +2444,7 @@ async fn handle_task_complete(
     let params: TaskCompleteParams = serde_json::from_value(params).map_err(|e| {
         BotWsDispatchError::InvalidFrameFormat(format!("Invalid task.complete params: {}", e))
     })?;
-    let (real_group_id, wire_session_id) = unwrap_outbound_group_id(&params.group_id, None);
+    let (real_group_id, wire_session_id) = resolve_task_scope(&params.group_id, params.session_id.as_deref())?;
     let mut payload = serde_json::json!({
         "group_id": real_group_id.clone(),
         "summary": params.summary,

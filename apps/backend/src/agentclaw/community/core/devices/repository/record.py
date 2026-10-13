@@ -42,3 +42,21 @@ class DeviceBindingRecord:
             if val is not None and hasattr(val, "isoformat"):
                 result[key] = val.isoformat()
         return result
+
+
+@dataclass(frozen=True, slots=True)
+class DataInitTriggerClaim:
+    """One fenced Pool data-init dispatch lease."""
+
+    claim_token: str
+    resume_stale_in_progress: bool
+
+
+@dataclass(frozen=True, slots=True)
+class DataInitExecutionClaim:
+    """Immutable identity used to fence one Pool data-init worker's writes."""
+
+    binding_id: int
+    device_id: str
+    startup_identity: str
+    claim_token: str

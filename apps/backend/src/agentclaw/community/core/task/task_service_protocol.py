@@ -17,7 +17,7 @@ from agentclaw.community.core.task.repository.types import TaskInfoRecord
 
 @runtime_checkable
 class TaskServiceProtocol(Protocol):
-    """系统唯一对外入口。facade 内部由 ExecutionEngine 编排核协调
+    """系统唯一对外入口。facade 内部由 CentralizedExecutionAdapter 编排核协调
     TaskGraphService/TaskPlanner/TaskDispatcher/TaskRunner。"""
 
     async def execute(self, request: TaskInfoRequest) -> TaskOpResult:
@@ -53,11 +53,27 @@ class TaskServiceProtocol(Protocol):
         """列持久化任务记录的一页(1-based),可选按状态(单值或逗号分隔多值)和 owner 过滤,返回 (items, total)。"""
         ...
 
-    def claim_bbs_task(self, task_id: str, bot_id: str) -> NodeOpResult:
+    def claim_bbs_task(
+        self, task_id: str, bot_id: str, node_id: str | None = None, *,
+        claim_id: str | None = None,
+    ) -> NodeOpResult:
         """BBS 接力步②:任务根级 CAS 占有(恰一赢;输者/非 bbs 任务 → TaskStateError)。
 
         供 bbs/claim 路由(FR-PICK-02)调用,委托 TaskGraphService.claim_bbs_owner。"""
         ...
+
+    async def report_task_event(
+        self, *, task_id: str, node_id: str, event_type: str, event_id: str,
+        holder_id: str, payload: dict, relay_turn: str | None = None,
+        progress_reason: str | None = None, failure_reason: str | None = None,
+    ) -> dict: ...
+
+    async def search_task_candidates(self, *, query: str) -> dict: ...
+
+    async def dispatch_task(
+        self, *, task_id: str, origin_node_id: str, target_node_id: str,
+        holder_id: str, relay_turn: str, dispatch_id: str,
+    ) -> dict: ...
 
     def attach_bbs_node(
         self, task_id: str, parent_node_id: str, task_spec: TaskSpec, bot_id: str
@@ -76,7 +92,7 @@ class TaskServiceProtocol(Protocol):
         """BBS 接力步⑤:回投 scoped 节点终态 + 释放 claim;收口由框架经 owner 复核根 gap 自行收口(非 bot 声明)。
 
         acceptance_result(PASS→SUCCESS / FAIL+gaps→DONE)/ output_patch(checkpoint fold)/
-        exec_error(执行报错 fold)。bot_id 须为当前 bbs_owner,否则 TaskStateError。委托 ExecutionEngine.on_bbs_report。
+        exec_error(执行报错 fold)。bot_id 须为当前 bbs_owner,否则 TaskStateError。委托 CentralizedExecutionAdapter.on_bbs_report。
         """
         ...
 
@@ -101,5 +117,5 @@ class TaskServiceProtocol(Protocol):
     async def redrive_task(self, task_id: str) -> None:
         """Recovery resume entrypoint: re-dispatch a hydrated non-terminal task
         after an instance restart / rolling deploy. Idempotent; non-terminal
-        runtime status only. Drives ``ExecutionEngine.redrive``."""
+        runtime status only. Drives ``CentralizedExecutionAdapter.redrive``."""
         ...

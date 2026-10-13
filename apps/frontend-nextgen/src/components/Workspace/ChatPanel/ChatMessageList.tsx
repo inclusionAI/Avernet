@@ -35,7 +35,8 @@ interface ChatMessageListProps {
   isLoadingMoreHistory?: boolean;
   onLoadMoreHistory?: () => void;
   readOnly?: boolean;
-  emptyPlaceholder?: string;
+  /** 空态占位（字符串或富化节点，真空会话确认后渲染）；缺省回退只读/交互两句灰字。 */
+  emptyPlaceholder?: ReactNode;
   /** 待定位高亮的消息 id（历史面板结果点击）：滚动至该消息并短暂高亮（chat-header-panels）。 */
   highlightMessageId?: string | null;
 }

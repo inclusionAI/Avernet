@@ -7,6 +7,11 @@ layer — the adapter tests use a fake *port* and never exercise this.
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import AsyncMock
+
+import pytest
+
+from engine.community.kernel.frames import ResponseFrame
 
 from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
 
@@ -14,12 +19,15 @@ from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 
 
 class _FakeClient:
-    def __init__(self, events: list[dict[str, Any]]) -> None:
+    def __init__(self, events: list[dict[str, Any]], ack: ResponseFrame | None = None) -> None:
         self._events = events
+        self._ack = ack
         self.calls: list[dict] = []
 
     async def chat_stream(self, **kwargs):  # noqa: ANN003
         self.calls.append(kwargs)
+        if self._ack is not None and "on_ack" in kwargs:
+            await kwargs["on_ack"](self._ack)
         for e in self._events:
             yield dict(e)  # copy — chat_stream mutates event_data in place
 
@@ -85,3 +93,55 @@ async def test_session_key_defaulted_into_event_payload():
     assert frames[0].payload["sessionKey"] == "my-key"
     # the client received the same session_key
     assert client.calls[0]["session_key"] == "my-key"
+
+
+@pytest.mark.parametrize("request_key", [None, "request-key"])
+async def test_cached_notice_fallback_identity(request_key):
+    client = _FakeClient([], ResponseFrame(
+        id="upstream", ok=True, payload={"status": "ok"},
+    ))
+    impl = OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), pool=_FakePool(client))
+    on_ack = AsyncMock()
+    frames = [f async for f in impl.chat_stream(
+        session_key="s", message="m", idempotency_key=request_key, on_ack=on_ack,
+    )]
+    on_ack.assert_awaited_once()
+    assert all(f.payload["runId"] == (request_key or "") for f in frames)
+    assert all(f.payload["sessionKey"] == "s" for f in frames)
+    assert [f.payload["state"] for f in frames] == ["delta", "final"]
+
+
+@pytest.mark.parametrize("status", ["error", "ok", None])
+async def test_failed_ack_without_error_details_emits_no_events(status):
+    client = _FakeClient([], ResponseFrame(id="upstream", ok=False, payload={"status": status}))
+    impl = OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), pool=_FakePool(client))
+    on_ack = AsyncMock()
+    assert [f async for f in impl.chat_stream(session_key="s", message="m", on_ack=on_ack)] == []
+    on_ack.assert_awaited_once()
+    assert on_ack.await_args.args[0].ok is False
+
+
+@pytest.mark.parametrize("status", ["started", "in_flight", "unknown", None])
+async def test_nonterminal_ack_never_synthesizes_completion(status):
+    client = _FakeClient([], ResponseFrame.ok_response("upstream", {"status": status}))
+    impl = OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), pool=_FakePool(client))
+    assert [f async for f in impl.chat_stream(session_key="s", message="m", on_ack=AsyncMock())] == []
+
+
+async def test_no_ack_callback_preserves_legacy_stream():
+    client = _FakeClient([], ResponseFrame.ok_response("upstream", {"status": "ok"}))
+    impl = OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), pool=_FakePool(client))
+    assert [f async for f in impl.chat_stream(session_key="s", message="m")] == []
+    assert "on_ack" not in client.calls[0]
+
+
+async def test_real_terminal_event_prevents_duplicate_notice():
+    client = _FakeClient(
+        [{"state": "final", "runId": "actual", "_source_event": "chat"}],
+        ResponseFrame.ok_response("upstream", {"status": "ok", "runId": "actual"}),
+    )
+    impl = OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), pool=_FakePool(client))
+    frames = [f async for f in impl.chat_stream(session_key="s", message="m", on_ack=AsyncMock())]
+    assert len(frames) == 1
+    assert frames[0].payload["state"] == "final"
+    assert "adapterNotice" not in frames[0].payload

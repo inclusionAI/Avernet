@@ -26,6 +26,11 @@ describe('routeMeta 路由归属契约', () => {
     expect(getRouteMeta('/workspace/chat/session-1')?.navKey).toBe('conversation');
     expect(getRouteMeta('/workspace/collaboration/detail')?.navKey).toBe('collaboration');
   });
+
+  it('Bot 编辑器为独立工作台，列表页仍保留全局导航', () => {
+    expect(getRouteMeta('/bot-workshop/detail')?.navigationVisibility).toBe('hidden');
+    expect(getRouteMeta('/bot-workshop')?.navigationVisibility).not.toBe('hidden');
+  });
 });
 
 describe('getMergedNavigationItems（Open Core 默认 capabilities）', () => {

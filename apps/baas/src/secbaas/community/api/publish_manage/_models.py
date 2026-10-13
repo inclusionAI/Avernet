@@ -46,6 +46,18 @@ class UpdateBotStatusResult:
     new_status: str
 
 
+@dataclass
+class RestoreBotResult:
+    """Result of an admin bot-record restore operation."""
+
+    bot_id: int
+    bot_uuid: str
+    previous_status: str
+    previous_is_deleted: int
+    new_status: str
+    retired_sibling_count: int
+
+
 from secbaas.community.api.device_manage import (  # noqa: E402 — cyclic import guard
     DeployConfig,
 )

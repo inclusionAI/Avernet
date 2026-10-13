@@ -1,90 +1,85 @@
 /** @jest-environment jsdom */
-import { CollabPanel } from '@/pages/Workspace/components/GroupChatPane/CollabPanel';
-import type { CollabPanelState } from '@/pages/Workspace/hooks/useCollabPanel';
+import { ComposerStatusBar } from '@/pages/Workspace/components/GroupChatPane/ComposerStatusBar';
 import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen } from '@testing-library/react';
 
-function makePanel(overrides: Partial<CollabPanelState> = {}): CollabPanelState {
+function makeProps(overrides: Record<string, unknown> = {}) {
   return {
-    visible: true,
-    humanAbsentOnly: false,
-    botActorId: null,
-    botMode: null,
-    botName: 'Alpha',
-    human: {
-      actorId: 'human_1',
-      kind: 'human',
-      name: '章梧',
-      role: 'member',
-      mode: 'present',
-      messageViewScope: 'full',
-    },
-    humanJoined: true,
+    connectionStatus: 'connected' as const,
     humanName: '章梧',
-    humanAvatarUrl: undefined,
-    canSwitchToHuman: true,
-    switchingBotMode: false,
-    joining: false,
-    humanViewScope: 'full',
+    viewScope: 'full' as const,
     switchingViewScope: false,
-    setBotMode: jest.fn<any>().mockResolvedValue(undefined),
-    joinSession: jest.fn<any>().mockResolvedValue(true),
-    leaveSession: jest.fn<any>().mockResolvedValue(true),
-    switchToHuman: jest.fn(),
-    setViewScope: jest.fn<any>().mockResolvedValue(true),
+    onViewScopeChange: jest.fn(),
+    onLeave: jest.fn().mockResolvedValue(undefined),
+    onReconnect: jest.fn(),
     ...overrides,
   };
 }
 
-describe('隐身条视角切换按钮', () => {
-  it('窄屏时隐身与视角按钮下移到状态信息下方', () => {
-    render(<CollabPanel panel={makePanel()} />);
-    const action = screen.getByRole('button', { name: '在会话中隐身' }).parentElement as HTMLElement;
-    const root = action.parentElement as HTMLElement;
-    expect(root).toHaveClass('flex-col');
-    expect(action).toHaveClass('w-full', 'justify-start', 'sm:justify-end');
+/** 视角切换钮随发言模式条迁入 ComposerStatusBar 帽条（design 决策 7/8；CollabPanel 不再渲染该行）。 */
+describe('帽条视角切换与退出（ComposerStatusBar）', () => {
+  it('连接正常渲染「用户发言模式」与「退出会话」，点击退出调用 leaveSession', () => {
+    const onLeave = jest.fn().mockResolvedValue(undefined);
+    render(<ComposerStatusBar {...makeProps({ onLeave })} />);
+    expect(screen.getByText('用户发言模式')).toBeInTheDocument();
+    expect(screen.getByText('当前将以用户身份发送到会话')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '退出会话' }));
+    expect(onLeave).toHaveBeenCalledTimes(1);
   });
 
-  it('human present 且回显 full：渲染「切换到参与者视角」按钮，点击切到 participant', () => {
-    const panel = makePanel();
-    render(<CollabPanel panel={panel} />);
-    expect(screen.getByText('在会话中隐身')).toBeInTheDocument();
+  it('回显 full：渲染「切换到参与者视角」钮，点击切到 participant', () => {
+    const onViewScopeChange = jest.fn();
+    render(<ComposerStatusBar {...makeProps({ onViewScopeChange })} />);
     const btn = screen.getByRole('button', { name: /切换到参与者视角/ });
     fireEvent.click(btn);
-    expect(panel.setViewScope).toHaveBeenCalledWith('participant');
+    expect(onViewScopeChange).toHaveBeenCalledWith('participant');
   });
 
-  it('回显 participant：渲染「切换到完整视角」按钮，点击切回 full；标题行出现「参与者视角」Badge', () => {
-    const panel = makePanel({ humanViewScope: 'participant' });
-    render(<CollabPanel panel={panel} />);
-    const btn = screen.getByRole('button', { name: /切换到完整视角/ });
-    fireEvent.click(btn);
-    expect(panel.setViewScope).toHaveBeenCalledWith('full');
-    expect(screen.getByText('参与者视角')).toBeInTheDocument();
-  });
-
-  it('回显 full：标题行出现「完整视角」Badge', () => {
-    render(<CollabPanel panel={makePanel()} />);
-    expect(screen.getByText('完整视角')).toBeInTheDocument();
+  it('回显 participant：渲染「切换到完整视角」钮，点击切回 full', () => {
+    const onViewScopeChange = jest.fn();
+    render(<ComposerStatusBar {...makeProps({ viewScope: 'participant', onViewScopeChange })} />);
+    fireEvent.click(screen.getByRole('button', { name: /切换到完整视角/ }));
+    expect(onViewScopeChange).toHaveBeenCalledWith('full');
   });
 
   it('switchingViewScope 进行中切换按钮禁用', () => {
-    render(<CollabPanel panel={makePanel({ switchingViewScope: true })} />);
+    render(<ComposerStatusBar {...makeProps({ switchingViewScope: true })} />);
     expect(screen.getByRole('button', { name: /切换到参与者视角/ })).toBeDisabled();
   });
 
-  it('scope 回显缺失（humanViewScope=null）不渲染切换按钮与视角 Badge', () => {
-    render(<CollabPanel panel={makePanel({ humanViewScope: null })} />);
-    expect(screen.getByText('在会话中隐身')).toBeInTheDocument();
+  it('scope 回显缺失（viewScope=null）不渲染切换按钮，退出会话保留', () => {
+    render(<ComposerStatusBar {...makeProps({ viewScope: null })} />);
+    expect(screen.getByRole('button', { name: '退出会话' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /切换到/ })).not.toBeInTheDocument();
-    expect(screen.queryByText('完整视角')).not.toBeInTheDocument();
-    expect(screen.queryByText('参与者视角')).not.toBeInTheDocument();
   });
 
-  it('bot 视角面板不渲染切换按钮', () => {
-    render(<CollabPanel panel={makePanel({ botActorId: 'b:1', botMode: 'auto' })} />);
-    expect(screen.queryByRole('button', { name: /切换到/ })).not.toBeInTheDocument();
+  it('连接失败：左侧变为状态名+说明，退出会话之左出现「重新连接」', () => {
+    const onReconnect = jest.fn();
+    render(<ComposerStatusBar {...makeProps({ connectionStatus: 'error', onReconnect })} />);
+    expect(screen.getByText('连接失败')).toBeInTheDocument();
+    expect(screen.getByText('暂时无法连接，点击「重新连接」重试')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /重新连接/ }));
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('断开态：状态文案呈现，右侧组顺序 重新连接 → 退出会话', () => {
+    render(<ComposerStatusBar {...makeProps({ connectionStatus: 'disconnected' })} />);
+    expect(screen.getByText('已断开')).toBeInTheDocument();
+    expect(screen.getByText('会话连接已断开，请重新连接后继续对话')).toBeInTheDocument();
+    const reconnect = screen.getByRole('button', { name: /重新连接/ });
+    const leave = screen.getByRole('button', { name: '退出会话' });
+    expect(reconnect.compareDocumentPosition(leave) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('连接中/重连中不出现「重新连接」按钮（不可人工干预）', () => {
+    const { rerender } = render(<ComposerStatusBar {...makeProps({ connectionStatus: 'connecting' })} />);
+    expect(screen.getByText('连接中')).toBeInTheDocument();
+    expect(screen.getByText('正在连接并加载会话与消息，请稍候…')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /重新连接/ })).not.toBeInTheDocument();
+    rerender(<ComposerStatusBar {...makeProps({ connectionStatus: 'reconnecting' })} />);
+    expect(screen.getByText('重连中')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /重新连接/ })).not.toBeInTheDocument();
   });
 });

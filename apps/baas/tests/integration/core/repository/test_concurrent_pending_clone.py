@@ -106,3 +106,38 @@ class TestConcurrentPendingCloneReservation:
         )
         assert pending is not None
         assert pending.is_deleted == 0
+
+    def test_clone_after_soft_deleted_leaves_candidate_soft_deleted(
+        self, bot_repository: BotRepository, db_transaction
+    ):
+        """A soft-deleted PENDING candidate stays soft-deleted; the next clone inserts a fresh live row."""
+        source_id, _ = _insert_active_source(bot_repository)
+
+        first_id = bot_repository.try_insert_pending_bot(
+            source_bot_id=source_id,
+            tenant=TEST_TENANT,
+            env=TEST_ENV,
+        )
+        bot_repository.soft_delete(
+            bot_id=first_id, tenant=TEST_TENANT, env=TEST_ENV, modifier="test_user"
+        )
+
+        second_id = bot_repository.try_insert_pending_bot(
+            source_bot_id=source_id,
+            tenant=TEST_TENANT,
+            env=TEST_ENV,
+        )
+
+        assert second_id != first_id
+
+        second = bot_repository.get_by_id(second_id, TEST_TENANT, TEST_ENV)
+        assert second is not None
+        assert second.status == "PENDING"
+        assert second.is_deleted == 0
+
+        first = bot_repository.get_by_id_including_deleted(
+            first_id, TEST_TENANT, TEST_ENV
+        )
+        assert first is not None
+        assert first.is_deleted == first_id
+        assert first.status == "PENDING"

@@ -9,11 +9,17 @@ from __future__ import annotations
 from secbaas.community.api.publish_manage import (
     ForceSuccessResult,
     PublishAdminService,
+    PublishConflictError,
     PublishNotFoundError,
+    RestoreBotResult,
     UpdateBotStatusResult,
     UpdateDeviceStatusResult,
 )
-from secbaas.community.core.repository.bot import BotRepository
+from secbaas.community.core.repository.bot import (
+    BotRecordConflictError,
+    BotRepository,
+)
+from secbaas.community.core.repository.bot_device_rel import BotDeviceRelRepository
 from secbaas.community.core.repository.device import DeviceRepository
 from secbaas.community.core.repository.publish import PublishRepository
 from secbaas.community.core.repository.publish_batch import PublishBatchRepository
@@ -38,12 +44,14 @@ class DefaultPublishAdminService(PublishAdminService):
         record_repo: PublishRecordRepository,
         device_repo: DeviceRepository,
         bot_repo: BotRepository,
+        rel_repo: BotDeviceRelRepository,
     ) -> None:
         self._publish_repo = publish_repo
         self._batch_repo = batch_repo
         self._record_repo = record_repo
         self._device_repo = device_repo
         self._bot_repo = bot_repo
+        self._rel_repo = rel_repo
 
     async def force_success(
         self,
@@ -184,6 +192,95 @@ class DefaultPublishAdminService(PublishAdminService):
             bot_uuid=bot.bot_uuid,
             previous_status=previous_status,
             new_status=status,
+        )
+
+    async def restore_bot(
+        self,
+        *,
+        bot_id: int | None = None,
+        bot_uuid: str | None = None,
+        operator: str,
+    ) -> RestoreBotResult:
+        """Restore a bot record to live ACTIVE, bypassing the state machine.
+
+        WARNING: Admin recovery tool (like update_bot_status, this bypasses
+        normal lifecycle transitions and intentionally deviates from
+        "RELEASED is terminal"). Exactly ONE of ``bot_id`` / ``bot_uuid``
+        must be provided (the router enforces this; direct callers that
+        violate it get a ValueError):
+
+        * ``bot_id`` — restores that record directly.
+        * ``bot_uuid`` — resolves the target first, then restores it the
+          same way: list every record id sharing the uuid (live AND
+          soft-deleted), then take ``MAX(bot_id)`` over the ids that still
+          hold a non-deleted device relation. The newest record holding
+          live rels is the mistake victim in both known recovery states
+          (wrong restore-by-id leaving the newer record's rels live, and a
+          failed DESTROY cleanup); a fully-destroyed bot has no live rels
+          and correctly maps to not-found.
+
+        The resolved/target record is revived and every OTHER live record
+        sharing its bot_uuid is retired in one atomic transaction.
+
+        Cross-env by requirement: the repository lookups are by primary
+        key / bot_uuid only and the resolution counts live rels in every
+        env — no env validation or filtering anywhere in this chain. The
+        repository sets ``modifier`` (the operator identity) on every
+        touched row.
+
+        Raises PublishNotFoundError with the selector-specific message when
+        the ``bot_uuid`` matches no records or no live device relation, or
+        when the target record id does not exist. Unique-key conflicts
+        (concurrent restore or publish race) surface as
+        :class:`PublishConflictError` after the repository transaction
+        has rolled back — no partial state.
+        """
+        if bot_id is None:
+            if bot_uuid is None:
+                raise ValueError("exactly one of bot_id or bot_uuid must be provided")
+            records = self._bot_repo.list_by_bot_uuid_only_including_deleted(bot_uuid)
+            if not records:
+                raise PublishNotFoundError(
+                    f"No bot records found for bot_uuid={bot_uuid}"
+                )
+            ids = [r.id for r in records]
+            resolved = self._rel_repo.max_live_bot_id_for_bot_ids(ids)
+            if resolved is None:
+                raise PublishNotFoundError(
+                    f"No non-deleted device relation found for bot_uuid={bot_uuid}"
+                )
+            bot_id = resolved
+        elif bot_uuid is not None:
+            raise ValueError("exactly one of bot_id or bot_uuid must be provided")
+
+        try:
+            snapshot = self._bot_repo.restore_bot_record_by_id(
+                bot_id, modifier=operator
+            )
+        except BotRecordConflictError as exc:
+            raise PublishConflictError(
+                f"Bot {bot_id} restore conflicts with a live unique-key "
+                f"slot; no changes applied"
+            ) from exc
+        if snapshot is None:
+            raise PublishNotFoundError(f"Bot {bot_id} not found")
+
+        logger.warning(
+            "ADMIN_RESTORE_BOT: operator=%s bot_id=%s bot_uuid=%s %s->ACTIVE, retired=%s",
+            operator,
+            bot_id,
+            snapshot.record.bot_uuid,
+            snapshot.previous_status,
+            snapshot.retired_sibling_count,
+        )
+
+        return RestoreBotResult(
+            bot_id=bot_id,
+            bot_uuid=snapshot.record.bot_uuid,
+            previous_status=snapshot.previous_status,
+            previous_is_deleted=snapshot.previous_is_deleted,
+            new_status=snapshot.record.status,
+            retired_sibling_count=snapshot.retired_sibling_count,
         )
 
     def _update_batches_and_records(

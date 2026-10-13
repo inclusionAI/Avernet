@@ -4,9 +4,8 @@ An openapi create-as-service is fulfilled by ``create_bot`` directly, so the
 service publish record — the thing the caller's publish orchestration advances
 after creation — is part of the create contract:
 
-* a persistence failure must surface (soft-delete + raise, the same contract
-  a workspace-hosting failure has), not return a 201 for a bot that can never
-  be published;
+* a persistence failure must surface while retaining the Bot/layout choice so
+  a retry can resume without re-evaluating rollout;
 * an auth-status replay of the same bot must converge the recoverable state:
   publish record missing → create it, publish record present → leave it.
 
@@ -31,13 +30,24 @@ from agentclaw.community.core.devices.repository.record import DeviceBindingReco
 def _make_service() -> tuple[BotService, MagicMock]:
     """Minimal BotService able to run create_bot to the publish-record step."""
     svc = BotService.__new__(BotService)
+    svc._skills_pool_native_creation_policy = MagicMock(
+        select=MagicMock(return_value=None)
+    )
+    svc._skill_layout_repository = MagicMock()
     svc._bot_storage_policy = None
     svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._repository.count_by_owner.return_value = 0
     svc._repository.get_by_id_and_owner.return_value = None
     svc._repository.exists_by_bot_name.return_value = False
-    svc._repository.insert.side_effect = lambda data: {"id": 1, **data}
+
+    def _insert_with_layout(data, *, layout):
+        record = {"id": 1, **data}
+        svc._repository.get_by_id_and_owner.return_value = record
+        return record
+
+    svc._repository.insert_with_initial_skill_layout.side_effect = _insert_with_layout
+    svc._repository.claim_provisioning.return_value = True
     svc._repository.update_by_owner.return_value = None
     svc._repository.soft_delete_by_owner.return_value = None
 
@@ -102,7 +112,7 @@ def _make_service() -> tuple[BotService, MagicMock]:
 
 @pytest.mark.unit
 class TestServiceCreatePublishRecordGuard:
-    def test_publish_persistence_failure_raises_and_soft_deletes(self):
+    def test_publish_persistence_failure_raises_and_preserves_bot(self):
         """The 201 must not stand for a service bot that can never publish."""
         svc, publish_service = _make_service()
         publish_service.create_publish.side_effect = RuntimeError("db down")
@@ -117,7 +127,8 @@ class TestServiceCreatePublishRecordGuard:
                 bot_type="service",
             )
 
-        svc._repository.soft_delete_by_owner.assert_called_once_with("svc-1", "u1")
+        svc._repository.soft_delete_by_owner.assert_not_called()
+        assert svc._repository.get_by_id_and_owner.return_value["bot_id"] == "svc-1"
 
     def test_replay_of_existing_service_bot_backfills_missing_publish(self):
         """The auth-status replay converges a missing publish record."""

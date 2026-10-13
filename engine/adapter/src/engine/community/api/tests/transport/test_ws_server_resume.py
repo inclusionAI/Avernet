@@ -13,6 +13,7 @@ from engine.community.core.engine.context import AuthContext
 from engine.community.kernel.frames import EventFrame, RequestFrame
 from engine.community.manager import EngineManager
 from engine.community.plugins.auth_gate.noop_impl import NoopAuthGateService
+from engine.community.plugin_api.openclaw.chat import OpenClawChatAck
 
 
 def _request(method: str, params: dict[str, object]) -> RequestFrame:
@@ -46,8 +47,9 @@ async def test_browser_disconnect_does_not_stop_resumable_openclaw_stream() -> N
     continue_stream = asyncio.Event()
     seen_auth: list[AuthContext] = []
 
-    async def stream(_request, *, auth: AuthContext):
+    async def stream(_request, *, auth: AuthContext, on_ack):
         seen_auth.append(auth)
+        await on_ack(OpenClawChatAck(True, {"runId": "run-1", "status": "started"}))
         yield EventFrame(
             event="agent",
             payload={"runId": "run-1", "state": "delta", "text": "first"},
@@ -85,10 +87,13 @@ async def test_browser_disconnect_does_not_stop_resumable_openclaw_stream() -> N
             params,
             auth_gate_service=NoopAuthGateService(),
         )
-        assert accepted.ok is True
-        assert accepted.payload["accepted"] is True
-        ticket = accepted.payload["resumeTicket"]
+        assert accepted is None
         await asyncio.wait_for(started.wait(), 2)
+        ack = json.loads(old_socket.send_text.await_args_list[0].args[0])
+        assert ack["ok"] is True
+        assert ack["payload"]["accepted"] is True
+        assert ack["payload"]["cached"] is False
+        ticket = ack["payload"]["resumeTicket"]
         await server._release_conn("conn-old")
         assert seen_auth == [AuthContext(token="pooled-token")]
         assert engine.on_connection_close.await_count == 1
@@ -139,7 +144,8 @@ async def test_resumable_stream_failure_is_terminal_and_redacted() -> None:
     EngineManager.reset_instance()
     manager = EngineManager("openclaw")
 
-    async def stream(_request, *, auth: AuthContext):
+    async def stream(_request, *, auth: AuthContext, on_ack):
+        await on_ack(OpenClawChatAck(True, {"runId": "run-1", "status": "started"}))
         raise RuntimeError("private upstream detail")
         yield  # pragma: no cover
 
@@ -169,8 +175,8 @@ async def test_resumable_stream_failure_is_terminal_and_redacted() -> None:
             params,
             auth_gate_service=NoopAuthGateService(),
         )
-        ticket = accepted.payload["resumeTicket"]
-        run = server._openclaw_resume.lookup(session_key="session:one", ticket=ticket)
+        assert accepted is None
+        run = next(iter(server._openclaw_resume._runs.values()))
         assert run is not None and run.task is not None
         await asyncio.wait_for(run.task, 2)
 

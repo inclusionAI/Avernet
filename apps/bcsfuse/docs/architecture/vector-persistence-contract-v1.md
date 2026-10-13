@@ -13,8 +13,54 @@ IncrementalVectorPersistenceBackend.load_changes_since(
 
 `IncrementalVectorPersistenceBackend` extends the baseline
 `VectorPersistenceBackend`. Providers that implement only the baseline
-contract remain compatible with full index rebuilds, but do not support
-incremental synchronization.
+contract do not support incremental synchronization.
+
+## Worker-scoped state updates
+
+`WorkerScopedVectorPersistenceBackend.load_by_worker(worker_id)` is an optional
+lookup used for runtime-state updates. It returns active points owned by the
+exact payload `worker_id`, including points missing from the local index.
+Providers that support it should constrain the database read before decoding
+vectors. The public SQL implementation uses the complete `worker_id + ':'` ID
+prefix on the primary key and escapes SQL `LIKE` wildcards. Providers without
+this capability retain the existing `load_all()` fallback.
+
+## Bounded rebuild reads
+
+`QdrantMySQLVectorStore.rebuild_from_backend()` requires the optional
+`BatchedVectorPersistenceBackend.iter_batches(batch_size)` contract. It yields
+non-empty pages of at most `batch_size` active `VectorPoint` values in ascending
+primary-key order. `batch_size` must be positive. Providers must bound the SQL
+result itself, not query the full table and split the result in Python.
+
+The consumer takes an incremental checkpoint before scanning pages, applies
+each page to the local dense and keyword indexes, removes stale local IDs, and
+replays changes since that checkpoint. Incremental providers used by this
+store must also implement
+`BatchedIncrementalVectorPersistenceBackend.iter_change_batches_since(checkpoint,
+batch_size)`, which yields at most `batch_size` mutations per page in
+`(gmt_modify, id)` order, including tombstones. Rebuild catch-up and periodic
+incremental sync use this bounded feed; the local checkpoint advances only
+after a page is applied. A failed page is retried from the last checkpoint,
+with timestamp overlap making replay idempotent. The existing `load_all()` method remains
+available for other callers, but the Qdrant rebuild no longer calls it. A
+provider without the required paging methods fails before the rebuild changes the index.
+Decode or storage failures must propagate rather than yield a partial page.
+Internal ZDAS and public MySQL providers exclude `is_deleted = 1` rows; SQLite
+has no soft-deletion column.
+
+Each rebuild scan captures the greatest active ID before its first page and
+stops at that ID. This prevents continuously inserted higher IDs from extending
+the scan. MySQL and ZDAS changes committed during the scan are picked up by
+the existing incremental replay. Local SQLite writes through the vector store
+update the local indexes after rebuild releases its index lock.
+
+Each change-feed pass captures the greatest durable `(gmt_modify, id)` key
+before reading its first page and stops at that key. Mutations committed later
+are left for the next pass, so sustained writes cannot keep one rebuild or sync
+open indefinitely. Providers that share a database connection between readers
+and writers must serialize each page read, including transaction cleanup, with
+all writes on that connection.
 
 ## Change-set semantics
 
@@ -66,7 +112,8 @@ tombstones need only their ID and timestamp and do not decode deleted content.
   `SparseRetriever` does not remove this current keyword capability or change
   dense search, durable persistence, or incremental replay semantics.
 - Existing providers may continue to implement only
-  `VectorPersistenceBackend`; callers must use a full rebuild for them.
+  `VectorPersistenceBackend`, but the Qdrant rebuild also requires the bounded
+  page contract.
 - Incremental providers must satisfy both protocols and return
   `VectorChangeSet` exactly as defined above.
 - Adding optional metadata to a `VectorPoint.payload` is compatible.

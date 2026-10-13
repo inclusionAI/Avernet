@@ -61,8 +61,10 @@ export function WorkspaceIdentitySelector({
   const sidebarLayout = layout === 'sidebar';
   const collapsedLayout = layout === 'collapsed';
   const collaborationLayout = layout === 'collaboration';
+  const sidebarChipLayout = layout === 'sidebarChip';
   const navigationLayout = sidebarLayout || collapsedLayout;
-  const popoverWidthClass = collaborationLayout ? 'w-[var(--radix-popover-trigger-width)]' : 'w-[320px]';
+  const popoverWidthClass =
+    collaborationLayout || sidebarChipLayout ? 'w-[var(--radix-popover-trigger-width)]' : 'w-[320px]';
   const showListLoading = identityListLoading || (identities.length === 0 && identityStatus === 'loading');
   const emptyIdentityLabel = identityStatus === 'error' ? '暂无可协作身份，请刷新重试' : '暂无可协作身份';
   const handlePopoverOpenChange = (nextOpen: boolean) => {
@@ -89,9 +91,10 @@ export function WorkspaceIdentitySelector({
     />
   ) : null;
   return (
-    <div className={collapsedLayout ? undefined : 'space-y-1'}>
+    // sidebarChip：身份 chip 需占满侧栏行宽（w-full），否则按钮按内容收缩、气泡也随之变窄。
+    <div className={collapsedLayout ? undefined : sidebarChipLayout ? 'w-full' : 'space-y-1'}>
       <Popover open={open} onOpenChange={handlePopoverOpenChange}>
-        {collapsedLayout ? null : (
+        {collapsedLayout || sidebarChipLayout ? null : (
           <IdentitySectionHeader
             layout={layout}
             headerLabel={headerLabel}
@@ -148,7 +151,7 @@ export function WorkspaceIdentitySelector({
                 openerRef.current?.focus();
               }}
             >
-              <div className="mb-2 flex items-center justify-between gap-2 border-b border-border px-2.5 pb-2">
+              <div className="mb-1.5 flex items-center justify-between gap-2 border-b border-border/70 px-1.5 pb-2">
                 <div className="flex min-w-0 items-center gap-1">
                   <p className="text-xs font-medium text-foreground">切换工作身份</p>
                   {!navigationLayout ? (
@@ -173,7 +176,7 @@ export function WorkspaceIdentitySelector({
                   ) : null}
                 </div>
               </div>
-              <div className="app-scrollbar max-h-80 space-y-3 overflow-y-auto">
+              <div className="app-scrollbar max-h-80 space-y-1.5 overflow-y-auto">
                 <IdentitySection
                   title="用户身份"
                   identities={userIdentities}
@@ -189,7 +192,7 @@ export function WorkspaceIdentitySelector({
                   userAvatarUrl={userAvatarUrl}
                 />
                 {identities.length === 0 ? (
-                  <p className="px-2.5 py-4 text-center text-xs text-muted-foreground">{emptyIdentityLabel}</p>
+                  <p className="px-2 py-3 text-center text-xs text-muted-foreground">{emptyIdentityLabel}</p>
                 ) : null}
               </div>
             </PopoverContent>
@@ -204,6 +207,8 @@ export function WorkspaceIdentitySelector({
             className={cn(
               collapsedLayout
                 ? 'h-8 w-8 shrink-0 rounded-full border border-border bg-muted/40 p-0'
+                : sidebarChipLayout
+                ? 'h-8 w-full justify-start gap-2 rounded-lg bg-muted/40 px-2 text-left text-xs text-foreground'
                 : collaborationLayout
                 ? 'h-auto min-h-10 w-full justify-between gap-2 rounded-lg border border-border bg-muted/40 px-4 py-2 text-left text-xs text-foreground'
                 : 'h-auto min-h-9 w-full justify-between gap-2 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-left text-foreground',

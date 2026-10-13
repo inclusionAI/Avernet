@@ -1,6 +1,5 @@
-import { FileIcon, RefreshCw } from 'lucide-react';
+import { FileIcon } from 'lucide-react';
 
-import { Badge } from '@/components/ui';
 import { MessageEditBar, MessageQuoteBar } from '@/components/Workspace/MessageInteractionToolbar';
 import { ComposerCapabilitiesMenu } from '@/components/Workspace/TaskComposerMenu';
 import type { SessionView } from '@/domain/collaboration';
@@ -8,24 +7,24 @@ import type { UseTaskExecutionResult } from '@/hooks/useTaskExecution';
 import { useGroupChatImageUpload } from '@/pages/Workspace/hooks/useGroupChatImageUpload';
 import { buildQuotePrompt, type MessageQuote } from '@/pages/Workspace/hooks/useMessageInteractions';
 import { useSessionFileUpload } from '@/pages/Workspace/hooks/useSessionFileUpload';
-import { buildTaskInstruction } from '@/services/tasks/taskMapper';
+import { buildTaskInstructions } from '@/services/tasks/taskMapper';
 import type { SessionMessageAttachment } from '@/services/workspace/groupChatAttachmentService';
 import type { ProviderConnectionStatus } from '@tc-chat/adapters';
 import type { MentionConfig, SubmitContext } from '@tc-chat/ui';
-import { Sender, ToolbarButton, type PendingFileChip, type SenderRef } from '@tc-chat/ui/es/Sender';
+import { Sender, type PendingFileChip, type SenderRef } from '@tc-chat/ui/es/Sender';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { toast } from 'sonner';
+import { cn } from '@/utils/cn';
 import { GroupImagePreview } from './GroupImagePreview';
 import { expandMentionIds } from './mentionHelpers';
 import { UploadFilesModal } from './UploadFilesModal';
 
 interface GroupChatComposerProps {
   session: SessionView | null;
+  /** 连接状态：断连四态输入卡灰底不可输入（附录 B；视觉依赖 Sender disabled 形态=灰底）。 */
   connectionStatus: ProviderConnectionStatus;
   mentionConfig: MentionConfig | undefined;
-  showReconnectToolbar: boolean;
   onSend: (text: string, mentions?: string[], attachments?: SessionMessageAttachment[]) => void;
-  onReconnect: () => void;
   /** 受控输入草稿（由 GroupChatPane 持有，便于副屏 onAction(fill_input) 回填）。 */
   draft: string;
   onDraftChange: (value: string) => void;
@@ -91,9 +90,7 @@ export function GroupChatComposer({
   session,
   connectionStatus,
   mentionConfig,
-  showReconnectToolbar,
   onSend,
-  onReconnect,
   draft,
   onDraftChange,
   inputRef,
@@ -159,13 +156,11 @@ export function GroupChatComposer({
       // 输出中不阻塞发送：消息进入后端投递队列依次消费（拥塞控制归属后端）。
       if ((!hasText && !hasImages) || images.isProcessing || images.isUploading) return;
       const quotedContent = quote ? `${buildQuotePrompt(quote.senderName, quote.text)}\n\n${content}` : content;
-      // 任务选中态：构造 /task 指令消息发到群聊，由 bot/skill 解析触发任务。
-      if (execution && (execution.selectedWorkflow || execution.pendingDynamic)) {
-        onSend(
-          buildTaskInstruction(quotedContent, execution.selectedWorkflow, execution.pendingDynamic),
-          [],
-          undefined,
-        );
+      // 任务胶囊选中态：逐胶囊构造 /task 指令消息发到群聊，由 bot/skill 解析触发（每胶囊各发起一个任务）。
+      if (execution && execution.selections.length > 0) {
+        for (const instruction of buildTaskInstructions(quotedContent, execution.selections)) {
+          onSend(instruction, [], undefined);
+        }
         execution.clearSelection();
         onDraftChange('');
         return;
@@ -192,12 +187,19 @@ export function GroupChatComposer({
   );
 
   return (
-    <div className="flex shrink-0 flex-col gap-2 bg-background px-3 py-1.5 sm:px-6 sm:py-2">
+    // 横向/纵向 padding 由 index 的 composer 容器统一持有（帽条需以卡片实际宽度为基准每侧窄
+    // 13px 并紧贴卡片顶，本根节点不得再自带 px/py 形成双重 inset / 顶缝）。
+    <div className="flex w-full shrink-0 flex-col gap-2 bg-background">
       {editingMessageId ? <MessageEditBar onCancel={onCancelEdit ?? (() => {})} /> : null}
       <MessageQuoteBar quote={quote ?? null} onClear={onClearQuote ?? (() => {})} />
       <Sender
         ref={inputRef}
-        className="w-full"
+        // 断连四态灰卡（附录 B #F8F8F8≈muted）：SDK InputWrapper 底色吃 --aix-color-bg，
+        // 在此 CSS 变量层注入实现灰化（disabled 仅灰化文字，不动 SDK 本体）。
+        className={cn(
+          'w-full',
+          session && connectionStatus !== 'connected' && '[--aix-color-bg:hsl(var(--muted))]',
+        )}
         value={draft}
         onChange={onDraftChange}
         onSubmit={(content, context) => {
@@ -206,11 +208,16 @@ export function GroupChatComposer({
         onKeyDown={submitImageOnlyOnEnter}
         onPasteFile={handlePasteFiles}
         loading={images.isProcessing || images.isUploading}
-        disabled={!session}
+        disabled={!session || connectionStatus !== 'connected'}
         submitType="enter"
         mention={mentionConfig}
         fileChip={fileChip}
-        placeholder={session ? `在 ${session.title} 中发送消息…` : '请选择一个会话'}
+        placeholder={
+          session
+            ? // dmore 附录 B：五态统一占位（不带会话名），断连灰底时同样呈现。
+              '可使用 /file 引用文件、/link 引用链接、/skill 调用能力'
+            : '请选择一个会话'
+        }
         slots={{
           header:
             images.images.length > 0 ? (
@@ -232,20 +239,6 @@ export function GroupChatComposer({
         toolbar={{
           left: (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              {showReconnectToolbar ? (
-                <>
-                  <Badge tone={connectionStatus === 'reconnecting' ? 'warning' : 'neutral'}>
-                    {connectionStatus === 'reconnecting' ? '重连中' : '已断开'}
-                  </Badge>
-                  <ToolbarButton
-                    label="点击重新连接"
-                    icon={<RefreshCw className="h-3.5 w-3.5" />}
-                    onClick={() => {
-                      void onReconnect();
-                    }}
-                  />
-                </>
-              ) : null}
               {execution ? (
                 <ComposerCapabilitiesMenu
                   execution={execution}
@@ -253,11 +246,10 @@ export function GroupChatComposer({
                   onAddImage={triggerImagePicker}
                   enableWorkflow={false}
                   disabled={!session}
-                  selectedWorkflow={execution.selectedWorkflow}
-                  pendingDynamic={execution.pendingDynamic}
+                  selections={execution.selections}
                   onWorkflowSelected={execution.selectWorkflow}
                   onDynamicSelected={execution.selectDynamic}
-                  onClearSelection={execution.clearSelection}
+                  onRemoveSelection={execution.removeSelection}
                 />
               ) : null}
             </span>

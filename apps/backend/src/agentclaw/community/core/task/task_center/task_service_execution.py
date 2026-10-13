@@ -8,19 +8,18 @@ from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.domain.models import (
     Context,
     Goal,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskNode,
     TaskNodePatch,
     TaskOpResult,
     TaskSpec,
+    task_spec_instruction,
 )
 from agentclaw.community.core.task.repository.types import (
     TaskNodeRecord,
     TaskNodeRunInfoRecord,
 )
-from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.core.task.task_center.task_service_support import (
     resolve_coop_collab_mode,
 )
@@ -39,7 +38,7 @@ class TaskServiceExecutionMixin:
 
         logger.error("[task][task_service] run_workflow, message=%s", message)
         try:
-            self._graph.update_task_node_info(
+            self._report_node_patch(
                 TaskNodePatch(
                     task_id=task_id,
                     node_id=task_id,
@@ -55,19 +54,8 @@ class TaskServiceExecutionMixin:
                 task_id=task_id,
                 status=Status.RUNNING,
                 task_spec=TaskSpec(
-                    metadata=Metadata(
-                        task_id=task_id,
-                        title=message,
-                        instruction=""
-                    ),
-                    context=Context(
-                        background="",
-                        extend_props={}
-                    ),
-                    goal=Goal(
-                        objective=message,
-                        acceptances=list()
-                    )
+                    context=Context(title=message, background="", extend_props={}),
+                    goal=Goal(objective=message, acceptances=[]),
                 ),
                 run_info=RuntimeInfo(
                     run_mode="single_bot",
@@ -80,7 +68,7 @@ class TaskServiceExecutionMixin:
             )
 
             logger.error("[task][task_service] run_workflow_begin, task_id=%s", task_id)
-            await self._engine._runner.start_run([task_node])
+            await self._runner.start_run([task_node])
             logger.error("[task][task_service] run_workflow_end, task_id=%s", task_id)
 
             return TaskOpResult(task_id=task_id, success=True, run_id=run_id)
@@ -104,7 +92,7 @@ class TaskServiceExecutionMixin:
         # 注入 <GroupContext> 的 `目标` 行(BCS resolve_session_topic:session input→group.context→label)。
         _ts = task_info.task_spec
         _task_context = (
-            (_ts.goal.objective or _ts.metadata.instruction or _ts.metadata.title) or ""
+            (_ts.goal.objective or task_spec_instruction(_ts) or _ts.context.title) or ""
         ).strip()
         # owner bot 寻址:_normalize 已在"归属≠执行用户"时保留 owner_bot_id 复合(真实归属),
         # 此处直接用 composite;bare(无内嵌归属)时才 compose 执行用户作归属。
@@ -134,7 +122,7 @@ class TaskServiceExecutionMixin:
                 # 任务描述(目标)→ BCS 建群 context → <GroupContext> `目标` 行。
                 "task_context": _task_context or None,
                 "task_objective": task_info.task_spec.goal.objective,
-                "task_instruction": task_info.task_spec.metadata.instruction,
+                "task_instruction": task_spec_instruction(task_info.task_spec),
                 "acceptances": [
                     {"id": a.id, "description": a.description}
                     for a in task_info.task_spec.goal.acceptances
@@ -142,7 +130,7 @@ class TaskServiceExecutionMixin:
             },
         )
         try:
-            start = await self._engine.start_coop_group(gf)
+            start = await self._centralized_adapter.start_coop_group(gf)
         except Exception as exc:
             return TaskOpResult(
                 task_id=task_id,
@@ -151,7 +139,7 @@ class TaskServiceExecutionMixin:
                 run_id=run_id,
             )
         run_extend = {"group_id": start.group_id, "session_id": start.session_id}
-        self._graph.update_task_node_info(
+        self._report_node_patch(
             TaskNodePatch(
                 task_id=task_id,
                 node_id=task_id,
@@ -177,7 +165,7 @@ class TaskServiceExecutionMixin:
     async def _run_bbs(self, task_id, request, task_info, run_id) -> TaskOpResult:
         logger.info("[task][bbs_mode], begin_run_bbs, task_id=%s", task_id)
 
-        self._engine._hung_and_escalate(task_id=task_id, node_id=task_id, hung_reason="创建BBS接力任务")
+        self._centralized_adapter._hung_and_escalate(task_id=task_id, node_id=task_id, hung_reason="创建BBS接力任务")
 
         logger.info("[task][bbs_mode], finish_run_bbs, task_id=%s", task_id)
         return TaskOpResult(

@@ -10,8 +10,8 @@ from agentclaw.community.core.errors import NotFound
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     InMemoryCallbackCorrelationRegistry,
 )
-from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
-    LocalBcsTokenProvider,
+from agentclaw.community.di.modules.infrastructure.community.task_runner_integration import (
+    BcsTokenProviderImpl,
 )
 from agentclaw.community.core.task.task_runner.client.callback_data_enricher import (
     CallbackDataEnricher,
@@ -21,7 +21,7 @@ from agentclaw.community.core.task.task_runner.client.callback_data_enricher imp
 def _claw_mind_graph(raw, disposition="result"):
     """translate_claw_mind + enrich_claw_mind → execution_graph(execution_graph 构建已移至 CallbackDataEnricher)。"""
     _tc = translate_claw_mind(raw, disposition)
-    CallbackDataEnricher(LocalBcsTokenProvider(base_url="http://bcs")).enrich_claw_mind(_tc.data, raw)
+    CallbackDataEnricher(BcsTokenProviderImpl(base_url="http://bcs")).enrich_claw_mind(_tc.data, raw)
     return _tc.data.data.get("execution_graph")
 
 
@@ -145,7 +145,7 @@ class TestClawMind:
 
     def test_translate_claw_mind_maps_fields(self):
         tc = translate_claw_mind(self._BODY, "result")
-        CallbackDataEnricher(LocalBcsTokenProvider(base_url="http://bcs")).enrich_claw_mind(tc.data, self._BODY)
+        CallbackDataEnricher(BcsTokenProviderImpl(base_url="http://bcs")).enrich_claw_mind(tc.data, self._BODY)
         assert tc.disposition == "result"
         d = tc.data.data
         assert d["loop_task_id"] == "flow-abc-123"  # loop_task_id = flow_id(run 实例,对齐 BCN);node_id 空
@@ -163,7 +163,7 @@ class TestClawMind:
         assert len(eg["tasks"]) == 1
         assert eg["tasks"][0]["node_id"] == "N1"
         assert eg["tasks"][0]["status"] == "DONE"
-        assert eg["tasks"][0]["task_spec"]["metadata"]["title"] == "N1"  # 无 node_title → 退 node_id
+        assert eg["tasks"][0]["task_spec"]["context"]["title"] == "N1"  # 无 node_title → 退 node_id
         assert eg["tasks"][0]["run_info"]["output"] == {"answer": 42}
         assert eg["relations"] == []                        # N1 无 nodeOutputKeys
         assert d["_raw_callback_body"] == self._BODY            # 原始 body → orig_callback_data
@@ -319,9 +319,8 @@ class TestClawMind:
         report = nodes["report"]
         assert report["task_id"] == ""
         assert report["status"] == "DONE"
-        assert report["task_spec"]["metadata"]["task_id"] == "report"
-        assert report["task_spec"]["metadata"]["title"] == "调研报告"
-        assert report["task_spec"]["metadata"]["instruction"] == ""
+        assert "metadata" not in report["task_spec"]
+        assert report["task_spec"]["context"]["title"] == "调研报告"
         assert report["task_spec"]["goal"]["acceptances"] == []
         assert report["run_info"]["start_time"] == 1787719266000   # 秒 → 毫秒
         assert report["run_info"]["end_time"] == 1787719384000
@@ -390,7 +389,7 @@ class TestClawMind:
         g = _claw_mind_graph(body, "result")
         assert g["status"] == "FAILED"
         assert g["tasks"][0]["status"] == "FAILED"
-        assert g["tasks"][0]["task_spec"]["metadata"]["title"] == "调研拆题"
+        assert g["tasks"][0]["task_spec"]["context"]["title"] == "调研拆题"
         assert g["tasks"][0]["run_info"]["extend_props"]["error_text"] == "boom"
 
     def test_execution_graph_filters_dangling_edges(self):

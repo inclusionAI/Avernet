@@ -240,23 +240,31 @@ def test_create_notice_event_returns_created_status(
     }
 
 
-def test_authenticated_user_cannot_submit_auto_approval(
+def test_authenticated_user_can_submit_auto_approval(
     client: TestClient, service: MagicMock
 ) -> None:
     payload = _approval_payload() | {
         "approval_mode": "AUTO",
-        "biz_type": "SKILL_COLLABORATOR",
-        "biz_id": "91",
-        "event_type": "SKILL_COLLABORATOR_APPLIED",
+        "biz_type": "SPACE_JOIN",
+        "biz_id": "7",
+        "event_type": "SPACE_JOIN_APPLIED",
         "approver_user_ids": [],
         "recipient_user_ids": [_USER_ID],
     }
 
+    service.create_work_order_event.return_value = _result().model_copy(
+        update={"status": WorkOrderEventStatus.APPROVED}
+    )
     response = client.post(_PATH, json=payload)
 
-    assert response.status_code == 403
-    assert response.json()["code"] == 403201
-    service.create_work_order_event.assert_not_called()
+    assert response.status_code == 201
+    assert response.json()["data"]["status"] == "APPROVED"
+    kwargs = service.create_work_order_event.call_args.kwargs
+    assert kwargs["approval_mode"].value == "AUTO"
+    assert kwargs["approver_user_ids"] == []
+    assert kwargs["recipient_user_ids"] == [_USER_ID]
+    assert kwargs["actor_id"] == _USER_ID
+    assert kwargs["callback_auth"].headers[PRINCIPAL_HEADER.lower()]
 
 
 @pytest.mark.parametrize(
@@ -269,15 +277,18 @@ def test_authenticated_user_cannot_submit_auto_approval(
         ("SPACE_JOIN", "\tSKILL_COLLABORATOR_APPLIED\n"),
     ],
 )
+@pytest.mark.parametrize("approval_mode", ["MANUAL", "AUTO"])
 def test_authenticated_user_cannot_create_skill_approval_via_generic_events(
     client: TestClient,
     service: MagicMock,
     biz_type: str,
     event_type: str,
+    approval_mode: str,
 ) -> None:
     payload = _approval_payload() | {
         "biz_type": biz_type,
         "event_type": event_type,
+        "approval_mode": approval_mode,
         "biz_id": "91",
         "biz_data": {"space_id": 7, "skill_id": 91},
         "approver_user_ids": ["real-skill-owner"],
@@ -384,13 +395,17 @@ def test_validation_errors_are_enveloped(
         _principal_headers(user=False, app=True),
     ],
 )
+@pytest.mark.parametrize("approval_mode", ["MANUAL", "AUTO"])
 def test_request_without_a_verified_user_is_enveloped(
     app: FastAPI,
     service: MagicMock,
     headers: dict[str, str],
+    approval_mode: str,
 ) -> None:
     response = TestClient(app, raise_server_exceptions=False).post(
-        _PATH, json=_approval_payload(), headers=headers
+        _PATH,
+        json=_approval_payload() | {"approval_mode": approval_mode},
+        headers=headers,
     )
 
     assert response.status_code == 401
@@ -444,3 +459,29 @@ def test_wrong_method_uses_envelope_and_preserves_allow_header(
     assert response.json()["code"] == 405000
     assert response.json()["message"] == "Method Not Allowed"
     assert response.json()["data"] is None
+
+
+def test_published_event_schema_matches_current_request_contract():
+    from pathlib import Path
+    import json
+    from agentclaw.community.adapters.http.openapi_v1.work_orders.schemas import (
+        CreateWorkOrderEventRequest,
+    )
+
+    roots = [
+        parent
+        for parent in Path(__file__).parents
+        if (parent / "apps/gateway").is_dir()
+    ]
+    if not roots:
+        pytest.skip("Gateway artifact is absent in a standalone backend checkout")
+    root = roots[0]
+    published = json.loads(
+        (root / "apps/gateway/configs/schemas/bots.openapi.json").read_text()
+    )
+    properties = published["components"]["schemas"]["CreateWorkOrderEventRequest"][
+        "properties"
+    ]
+    current = CreateWorkOrderEventRequest.model_json_schema()["properties"]
+    for field in ("approval_mode", "approver_user_ids", "recipient_user_ids"):
+        assert properties[field]["description"] == current[field]["description"]

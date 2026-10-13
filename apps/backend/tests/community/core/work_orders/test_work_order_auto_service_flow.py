@@ -29,8 +29,8 @@ def _auto_request(service, biz_type, event_type, biz_id):
         biz_id=biz_id,
         event_type=event_type,
         applicant_user_id="actor",
-        approver_user_ids=['notify-user'],
-        recipient_user_ids=[],
+        approver_user_ids=[],
+        recipient_user_ids=["notify-user"],
         title="AUTO request",
         content=None,
         apply_reason=None,
@@ -94,7 +94,10 @@ def test_auto_callback_exception_marks_failed_and_sends_failure_result():
 
     assert result.status is WorkOrderEventStatus.FAILED
     repo.fail_auto_approval.assert_called_once()
-    assert "WorkOrderCallbackError" in repo.fail_auto_approval.call_args.kwargs["review_remark"]
+    assert (
+        "WorkOrderCallbackError"
+        in repo.fail_auto_approval.call_args.kwargs["review_remark"]
+    )
     assert repo.fail_auto_approval.call_args.kwargs["recipient_user_ids"] == [
         "notify-user"
     ]

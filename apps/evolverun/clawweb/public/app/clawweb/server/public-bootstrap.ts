@@ -20,11 +20,16 @@ import { AdminUserRepository } from "@avernet/clawweb-shared/server/repositories
 import type { ClawWebBootstrap } from "./bootstrap.js";
 import { createAuthMeHandler, resolveAuthMeIdentity } from "./auth-me.js";
 import { createWorkflowRepairRuntime } from "./repair-workbench-runtime.js";
+import { AistudioService, resolveAistudioConfig } from "@avernet/clawinsight/server/services/aistudio-service";
+import { createRepairAisExecution, resolveRepairAisConfiguration } from "./repair-ais-execution.js";
 
 export function createClawWebBootstrap(): ClawWebBootstrap {
   return {
     async start(context) {
       const port = Number.parseInt(process.env.PORT ?? "3001", 10);
+      const aisConfig = resolveAistudioConfig();
+      const repairConfig = await resolveRepairAisConfiguration(aisConfig.token,
+        process.env.CLAWWEB_REPAIR_AIS_SNAPSHOT_ID, process.env.CLAWWEB_REPAIR_CLAWFLOWS_GIT_DIR);
       const { db } = await initDatabase();
       if (db.dbType === "noop") throw new Error("Public ClawWeb requires an available database");
       const insight = createInsightRuntime(db);
@@ -59,14 +64,28 @@ export function createClawWebBootstrap(): ClawWebBootstrap {
         });
       });
       app.use("/api/evolve", clawevolve.publicRouter);
-      app.use("/api/workflow-repairs", createWorkflowRepairRuntime(db, {
+      const repairExecution = repairConfig
+        ? createRepairAisExecution(db, new AistudioService(aisConfig), repairConfig.gitStore, repairConfig.snapshotId)
+        : undefined;
+      const repairRuntime = createWorkflowRepairRuntime(db, {
         principal: async request => {
           const identity = resolveAuthMeIdentity(request, { environment: context.environment });
           if (!identity) return null;
           return { actorId: identity.userId, isAdmin: identity.userId === "dev_local"
             || await adminUserRepo.hasRole([identity.userId, identity.userName], "admin") };
         },
-      }).router);
+        execution: repairExecution,
+      });
+      app.use("/api/workflow-repairs", repairRuntime.router);
+      let repairPollBusy = false;
+      const repairPoll = repairExecution ? setInterval(() => {
+        if (repairPollBusy) return;
+        repairPollBusy = true;
+        void repairRuntime.service.reconcile().catch(() => {
+          console.warn('[clawweb] Workflow Repair reconciliation failed; will retry');
+        }).finally(() => { repairPollBusy = false; });
+      }, 15_000) : null;
+      repairPoll?.unref();
       app.use("/api/bench", clawevolve.benchRouter);
       app.use("/api/insight/v1", createInsightRouter(insight.service));
       // Approval API: user-facing (GET/POST /api/approval/:id/...) and internal (POST /api/approval-cards/...)
@@ -93,6 +112,7 @@ export function createClawWebBootstrap(): ClawWebBootstrap {
       });
       return {
         stop: async () => {
+          if (repairPoll) clearInterval(repairPoll);
           await new Promise<void>((done) => server.close(() => done()));
           await clawevolve.stop();
           await closeDatabase();

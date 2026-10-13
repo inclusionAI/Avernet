@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 
 from agentclaw.community.core.devices.models import AllocatedDevice, SynlinkMappingInfo
 from agentclaw.community.log import get_logger
@@ -26,14 +27,22 @@ class BaasContainerInitializer:
         bot_id: str | None,
         owner_id: str | None,
         callback_token: str,
+        startup_identity: str,
         admins: list[str] | None,
         codefuse_token: str | None = None,
     ) -> None:
         """Execute the 6-step init sequence inside the BaaS container."""
         entity_id = device.device_props.get("entity_id")
         entity_type = device.device_props.get("entity_type")
-        client_id = device.device_props.get("client_id", "")
+        client_id = str(device.device_props.get("client_id") or device.device_id)
         symbol = device.device_props.get("symbol")
+        envs = device.device_props.get("envs")
+        effective_startup_identity = (
+            startup_identity
+            if isinstance(envs, dict)
+            and envs.get("AGENTCLAW_SKILLS_LAYOUT") == "pool"
+            else None
+        )
 
         self._run_baas_bootstrap(bot_uuid)
         self._run_baas_install_engine(bot_uuid)
@@ -49,6 +58,7 @@ class BaasContainerInitializer:
             bot_id=bot_id,
             owner_id=owner_id,
             token=callback_token,
+            startup_identity=effective_startup_identity,
             entity_id=entity_id,
             entity_type=entity_type,
             stage="draft",
@@ -141,22 +151,34 @@ class BaasContainerInitializer:
         entity_type: str | None = None,
         stage: str | None = None,
         admins: str | None = None,
+        startup_identity: str | None,
     ) -> None:
-        cmd = f"/home/admin/bin/start_service.sh --token {token} --client_id {client_id} --engine {engine}"
+        args = [
+            "/home/admin/bin/start_service.sh",
+            "--token",
+            token,
+            "--client_id",
+            client_id,
+            "--engine",
+            engine,
+        ]
+        if startup_identity:
+            args.extend(("--startup_identity", startup_identity))
         if bot_type:
-            cmd += f" --bot_type {bot_type}"
+            args.extend(("--bot_type", bot_type))
         if bot_id:
-            cmd += f" --bot_id {bot_id}"
+            args.extend(("--bot_id", bot_id))
         if owner_id:
-            cmd += f" --owner_id {owner_id}"
+            args.extend(("--owner_id", owner_id))
         if entity_id and entity_type:
-            cmd += f" --entity_id {entity_id} --entity_type {entity_type}"
+            args.extend(("--entity_id", entity_id, "--entity_type", entity_type))
         if stage:
-            cmd += f" --stage {stage}"
+            args.extend(("--stage", stage))
         if admins:
-            cmd += f" --admins {admins}"
+            args.extend(("--admins", admins))
 
-        start_cmd = f"nohup {cmd} >> /home/admin/start.log 2>&1 &"
+        cmd = shlex.join(str(value) for value in args)
+        start_cmd = _admin_background_command(cmd, "/home/admin/start.log")
         self._baas_service.exec_command_on_bot(
             bot_uuid=bot_uuid,
             cmd=start_cmd,
@@ -164,9 +186,33 @@ class BaasContainerInitializer:
         )
         logger.info("[_start_baas_sandbox_service] dispatched: bot_uuid=%s", bot_uuid)
 
-        watchdog_cmd = (
-            f"nohup /home/admin/bin/starting_watchdog.sh --token {token} --client_id {client_id} "
-            ">> /home/admin/logs/starting_watchdog.log 2>&1 &"
+        self.dispatch_watchdog(
+            bot_uuid=bot_uuid,
+            client_id=client_id,
+            token=token,
+            startup_identity=startup_identity,
+        )
+
+    def dispatch_watchdog(
+        self,
+        *,
+        bot_uuid: str,
+        client_id: str,
+        token: str,
+        startup_identity: str | None,
+    ) -> None:
+        watchdog_values = [
+            "/home/admin/bin/starting_watchdog.sh",
+            "--token",
+            token,
+            "--client_id",
+            client_id,
+        ]
+        if startup_identity:
+            watchdog_values.extend(("--startup_identity", startup_identity))
+        watchdog_args = shlex.join(watchdog_values)
+        watchdog_cmd = _admin_background_command(
+            watchdog_args, "/home/admin/logs/starting_watchdog.log"
         )
         self._baas_service.exec_command_on_bot(
             bot_uuid=bot_uuid,
@@ -174,6 +220,13 @@ class BaasContainerInitializer:
             timeout_seconds=30,
         )
         logger.info("[_start_baas_sandbox_service] watchdog dispatched: bot_uuid=%s", bot_uuid)
+
+
+def _admin_background_command(command: str, log_path: str) -> str:
+    """Preserve startup envs and support both root and admin exec transports."""
+    body = f"nohup {command} >> {shlex.quote(log_path)} 2>&1 &"
+    as_admin = shlex.join(["su", "admin", "-c", body])
+    return f'if [ "$(id -un)" = admin ]; then {body} else {as_admin}; fi'
 
 
 def _deserialize_symbol(symbol: str | None) -> list[SynlinkMappingInfo]:

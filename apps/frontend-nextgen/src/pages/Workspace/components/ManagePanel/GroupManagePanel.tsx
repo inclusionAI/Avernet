@@ -5,7 +5,7 @@ import type { DingTalkBindingState } from '@/services/workspace/channelBindingSe
 import type { PolicyResult } from '@/services/workspace/groupService';
 import type { DomainResult } from '@/services/workspace/identityService';
 import { Link as LinkIcon, LogOut, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import type { GroupDingTalkConfig } from './DingTalkConfigPanel';
 import { DingTalkConfigPanel } from './DingTalkConfigPanel';
@@ -13,7 +13,7 @@ import { EditableName } from './EditableName';
 import { ManagePanelHeader } from './ManagePanelHeader';
 import { ManagePanelTabs } from './ManagePanelTabs';
 import { MemberList } from './MemberList';
-import { ShareDialog } from './ShareDialog';
+import { SharePopover } from './SharePopover';
 
 export interface GroupManagePanelProps {
   group: GroupView;
@@ -31,7 +31,7 @@ export interface GroupManagePanelProps {
   onLeaveGroup: (actorId: string) => Promise<boolean>;
   onAddMember: (actorId: string) => Promise<boolean>;
   onRemoveMember: (actorId: string) => Promise<boolean>;
-  onShare: () => Promise<DomainResult<{ invitationUrl: string }>>;
+  onShare: (expiresInSeconds?: number) => Promise<DomainResult<{ invitationUrl: string }>>;
   onSaveDingTalk: (config: GroupDingTalkConfig) => Promise<boolean>;
   onToggleDingTalkActive: (active: boolean) => Promise<boolean>;
   onDeleteDingTalk: () => Promise<boolean>;
@@ -60,8 +60,7 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
   } = props;
   const [tab, setTab] = useState<'basic' | 'advanced'>('basic');
   const [shareOpen, setShareOpen] = useState(false);
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const [sharing, setSharing] = useState(false);
+  const shareAnchorRef = useRef<HTMLButtonElement | null>(null);
 
   const canManageGroup = canManage.allowed;
   // 当前身份是否为该群的直属成员（在 participants 名单中）。仅直属成员可「退出协作群」；
@@ -76,13 +75,8 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
     return success;
   };
 
-  const handleShare = async () => {
-    setShareOpen(true);
-    setSharing(true);
-    const res = await props.onShare();
-    setSharing(false);
-    if (res.ok) setShareUrl(res.data.invitationUrl);
-  };
+  // 打开即止：生成流程收敛在 SharePopover 气泡（有效期 → 生成链接），气泡锚在分享操作钮下。
+  const handleShare = () => setShareOpen(true);
 
   const handleVisibilityChange = (checked: boolean) => {
     if (!canManageGroup) return;
@@ -253,11 +247,12 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
         )}
       </div>
 
-      <ShareDialog
+      <SharePopover
         open={shareOpen}
+        anchorRef={shareAnchorRef}
+        align="start"
         title="协作群"
-        inviting={sharing}
-        invitationUrl={shareUrl}
+        onCreate={(expiresInSeconds) => props.onShare(expiresInSeconds)}
         onClose={() => setShareOpen(false)}
       />
     </aside>

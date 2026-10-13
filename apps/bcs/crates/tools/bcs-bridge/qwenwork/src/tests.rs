@@ -38,6 +38,8 @@ impl Fixture {
         let options: toml::Table = toml::from_str(&format!(
             "listen = '{address}'\nbot_id = 'test-bot'\nsecret = 'test-secret'\nhook_secret = 'test-hooks'\ndatabase_path = '{}'",
             dir.path().join("qwen.db").display())).unwrap();
+        let mut options = options;
+        options.insert("mcp_socket_path".into(), toml::Value::String(dir.path().join("qwen.sock").display().to_string()));
         let engine = QwenWorkFactory.build(PathBuf::new(), &options).unwrap();
         Self {
             dir,
@@ -680,3 +682,7 @@ async fn query_end_does_not_hide_missing_tool_results_or_failed_main_requests() 
     reply(&mut socket, stop["headers"]["req_id"].as_str().unwrap(), "ℹ stopped", true).await;
     assert!(task.await.unwrap().unwrap_err().to_string().contains("ended with error"));
 }
+
+#[cfg(unix)]
+#[path = "question_tests.rs"]
+mod question_tests;

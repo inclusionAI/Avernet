@@ -2,6 +2,7 @@ import { getCapabilities } from '@/capabilities';
 import { Empty } from '@/components/ui';
 import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
 import { ChatPanelHeader } from '@/components/Workspace/ChatPanel/ChatPanelHeader';
+import { SidePanelCollapseButton } from '@/components/Workspace/SidePanelCollapseButton';
 import { MessageEditBar, MessageQuoteBar } from '@/components/Workspace/MessageInteractionToolbar';
 import type { IdentityView } from '@/domain/collaboration';
 import { useMessageAreaSkeleton } from '@/pages/Workspace/hooks/useMessageAreaSkeleton';
@@ -18,7 +19,8 @@ import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import type { CommandConfig, FileChipConfig, SenderRef, SubmitContext } from '@tc-chat/ui/es/Sender';
 import { Sender, ToolbarButton } from '@tc-chat/ui/es/Sender';
 import { Headphones, RefreshCw, Sparkles } from 'lucide-react';
-import { useEffect, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, type ReactNode, type RefObject } from 'react';
+import { ChatEmptyState } from './ChatEmptyState';
 import { ChatMessageList } from './ChatMessageList';
 import { getMessageBlocks, getMessageTime, resolveSingleSender } from './chatPanelPresentation';
 export { resolveSingleSender } from './chatPanelPresentation';
@@ -74,6 +76,10 @@ interface Props {
   headerActions?: ReactNode;
   /** 待定位高亮的消息 id（历史面板结果点击）；由消息列表滚动至该消息并短暂高亮。 */
   highlightMessageId?: string | null;
+  /** 副屏镜像开合态（chat-header-panels）：与 Monitor 图标同源；开时渲染副屏右上「收起」悬浮钮。 */
+  sidePaneOpen?: boolean;
+  /** 副屏开合 toggle（chat-header-panels）：镜像开时悬浮钮点按 = 关闭并同步镜像。 */
+  onToggleSidePane?: () => void;
 }
 export function ChatPanel({
   target,
@@ -111,6 +117,8 @@ export function ChatPanel({
   onManageFiles,
   headerActions,
   highlightMessageId,
+  sidePaneOpen,
+  onToggleSidePane,
 }: Props) {
   const messageInteractions = useMessageInteractions({
     sessionId: target?.id,
@@ -167,6 +175,16 @@ export function ChatPanel({
   });
   // 空态欢迎文案的产品名经 capability 解析（Open=Avernet；internal=TeamClaw），不硬编码。
   const brand = getCapabilities().getProductBrand().value;
+  // 空态富化（真空会话）：Bot 头像标记 + 主副文案 + 开场指令的常规空态解剖
+  // （不借用消息几何，避免被误读为已有消息）；开场 chips 仅在可交互且命令面板装配时
+  // 提供——点击写入输入框并聚焦，Sender 命令面板随之唤起。
+  const insertDraft = useCallback(
+    (text: string) => {
+      senderRef?.current?.insert(text);
+      senderRef?.current?.focus();
+    },
+    [senderRef],
+  );
   if (!target) {
     return (
       <section className="flex min-w-0 flex-1 items-center justify-center bg-background">
@@ -209,7 +227,8 @@ export function ChatPanel({
   };
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+    // relative 供副屏右上「收起」悬浮钮绝对定位（SidePanelCollapseButton）。
+    <section className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-background">
       <ChatLayout className="min-h-0 flex-1">
         <ChatPanelHeader
           target={target}
@@ -245,6 +264,13 @@ export function ChatPanel({
             isLoadingMoreHistory={historyPagination?.isLoading}
             onLoadMoreHistory={historyPagination?.onLoadMore}
             highlightMessageId={highlightMessageId}
+            emptyPlaceholder={
+              <ChatEmptyState
+                target={target}
+                command={command}
+                onInsertDraft={isInteractive && target.status === 'available' ? insertDraft : undefined}
+              />
+            }
           />
         )}
 
@@ -292,6 +318,8 @@ export function ChatPanel({
 
         <ChatLayout.Panel ref={panelRef} onAction={onPanelAction} bridge={chatBridge} />
       </ChatLayout>
+      {/* 副屏右上「收起」钮：镜像态开时悬于副屏 TopBar 右侧，点按关闭并同步镜像。 */}
+      {sidePaneOpen && onToggleSidePane ? <SidePanelCollapseButton onClick={onToggleSidePane} /> : null}
     </section>
   );
 }

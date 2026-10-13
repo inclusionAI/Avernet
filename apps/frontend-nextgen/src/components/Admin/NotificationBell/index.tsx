@@ -15,7 +15,7 @@ function categoryFromItemType(itemType: NotificationSummary['itemType']): WorkOr
   return itemType === 'APPROVAL' ? 'APPROVAL' : itemType === 'NOTIFICATION' ? 'NOTIFICATION' : 'ALL';
 }
 
-export function NotificationBell() {
+export function NotificationBell({ size = 'md', className }: { size?: 'sm' | 'md'; className?: string }) {
   const navigate = useNavigate();
   const { unreadCount, recent, loadingRecent, loadRecent, markAllRead } = useNotifications();
   const [open, setOpen] = useState(false);
@@ -38,6 +38,9 @@ export function NotificationBell() {
         <span className="relative inline-flex">
           <IconButton
             label="通知中心"
+            // size/className 透传：折叠态工具簇经此收 28px + muted 色阶，bell-wiggle 等行为不受影响。
+            size={size}
+            className={className}
             icon={<Bell className={cn('h-4 w-4', unreadCount > 0 && 'bell-wiggle')} aria-hidden />}
           />
           {unreadCount > 0 && (

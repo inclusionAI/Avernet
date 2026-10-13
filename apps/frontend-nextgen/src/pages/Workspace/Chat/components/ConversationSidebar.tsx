@@ -12,6 +12,8 @@ import type { ConversationState } from '@/stores/conversationStoreState';
 import { Search } from 'lucide-react';
 import { useState } from 'react';
 import { ResizableWorkspaceSidebar } from '../../components/ResizableWorkspaceSidebar';
+import { ConversationCollapsedRail } from './ConversationCollapsedRail';
+import type { ConversationCollapsedRailSection } from './ConversationCollapsedRail';
 import { ConversationSidebarSection as SidebarSection } from './ConversationSidebarSection';
 import { FriendItem, ManagedItem } from './ConversationSidebarItems';
 
@@ -147,8 +149,39 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
 
 /** 桌面端(≥lg)可拖宽侧栏外壳;<lg 隐藏,由页面用 Drawer 包裹 Content 呈现。 */
 export function ConversationSidebar(props: ConversationSidebarProps) {
+  const { managedBots, teamBots, friendBots, store } = props;
+  // 收起竖轨的数据面:管理/好友两组常驻(与展开态空态/CTA 收口一致),
+  // 团队组仅在有成员时入轨(展开侧栏对空团队桶也不渲染死分组);加载中/失败态
+  // 不进竖轨——收起条只做「快速抵达」,真态留在展开侧栏。
+  const railSections: ConversationCollapsedRailSection[] = [
+    { id: 'managed', label: '我的 Bot', items: managedBots },
+    ...(teamBots.length > 0
+      ? [{ id: 'team' as const, label: '团队 Bot', items: teamBots }]
+      : []),
+    { id: 'friend', label: '好友 Bot', items: friendBots },
+  ];
   return (
-    <ResizableWorkspaceSidebar ariaLabel="会话侧栏">
+    <ResizableWorkspaceSidebar
+      ariaLabel="会话侧栏"
+      collapsedContent={(expandSidebar) => (
+        <ConversationCollapsedRail
+          sections={railSections}
+          selectedBotId={store.selectedBotId}
+          selectedSection={store.selectedSection}
+          onQuickOpen={(view) => {
+            // 与分组「泊位」onQuickOpen 同契约:恢复分组可见(下次展开即就位) +
+            // 未展开过的 Bot 补 toggleBot 懒加载;侧栏本身保持收起不打扰舞台。
+            if (view.section !== 'team') store.setBotGroupCollapsed(view.section, false);
+            if (!store.expandedBotIds[view.bot.botId]) {
+              props.sessions.toggleBot(view.bot.botId, view.section);
+            }
+          }}
+          onExpand={expandSidebar}
+          onOpenPublicBots={props.onOpenPublicBots}
+          onOpenAgentCodingBot={props.onOpenAgentCodingBot}
+        />
+      )}
+    >
       <ConversationSidebarContent {...props} />
     </ResizableWorkspaceSidebar>
   );

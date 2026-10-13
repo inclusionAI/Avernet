@@ -48,13 +48,13 @@
 再起 6 个 Bot：
 
 ```bash
-./singlebox/singlebox.sh start bots --profile-dir scripts/6bots_undercover_game_profile
+./singlebox/singlebox.sh start bots --profile-dir singlebox/agents/6bots_undercover_game_profile
 ```
 
 确认全部就绪：
 
 ```bash
-./singlebox/singlebox.sh status bots --profile-dir scripts/6bots_undercover_game_profile
+./singlebox/singlebox.sh status bots --profile-dir singlebox/agents/6bots_undercover_game_profile
 ```
 
 6 个 Bot 都应显示 `Running`。默认端口 30801 起、步长 10。
@@ -224,9 +224,9 @@ workspace 的 `.singlebox-profile-skills/` 记录同步归属，不应手动修�
 面板/事实层回归不需要起服务：
 
 ```bash
-bash scripts/test_singlebox_profile_skills.sh
-python3 -m unittest discover -s scripts/6bots_undercover_game_profile/referee/skills/undercover-game-referee/tests -v
-cd src/bcs/assets/panel && npm run verify
+bash singlebox/verity/test_singlebox_profile_skills.sh
+python3 -m unittest discover -s singlebox/agents/6bots_undercover_game_profile/referee/skills/undercover-game-referee/tests -v
+cd apps/bcs/assets/panel && npm run verify
 ```
 
 覆盖：公开投影与脱敏、稳定标签、Human 私有 UI context、结构化/兼容投票解析、Action Dock、紧凑布局、可访问性、恢复消息、UMD 契约和公开扫描。

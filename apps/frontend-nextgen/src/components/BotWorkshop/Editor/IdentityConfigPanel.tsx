@@ -27,10 +27,10 @@ export function IdentityConfigPanel({
   }, [getFile, type]);
   return (
     <div className="flex min-h-full flex-col bg-card">
-      <div className="flex items-center justify-between gap-4 border-b border-border px-5 py-4">
+      <div className="flex items-center justify-between gap-4 border-b border-border px-7 py-3">
         <div>
-          <h2 className="m-0 text-sm font-semibold">MD 身份文档</h2>
-          <p className="m-0 mt-1 text-xs text-muted-foreground">配置 Bot 的规则、人格、知识和输出约束。</p>
+          <h2 className="m-0 text-base font-semibold">MD 身份文档</h2>
+          <p className="m-0 mt-1 text-sm text-muted-foreground">配置 Bot 的规则、人格、知识和输出约束。</p>
         </div>
         <Button
           size="sm"
@@ -41,9 +41,9 @@ export function IdentityConfigPanel({
           保存
         </Button>
       </div>
-      <div className="space-y-4 px-5 py-4">
+      <div className="flex min-h-0 flex-1 gap-5 px-7 py-5">
         <Select value={type} onValueChange={setType}>
-          <SelectTrigger className="w-52" aria-label="文档类型">
+          <SelectTrigger className="h-10 w-44 self-start" aria-label="文档类型">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -55,13 +55,16 @@ export function IdentityConfigPanel({
             ))}
           </SelectContent>
         </Select>
-        <Textarea
-          value={content}
-          disabled={!editable || loading}
-          onChange={(event) => setContent(event.target.value)}
-          className="min-h-[430px] font-mono text-xs"
-          placeholder={`# ${type}`}
-        />
+        <div className="flex min-w-0 flex-1 flex-col gap-3">
+          <h3 className="m-0 text-base font-semibold">{type}.MD</h3>
+          <Textarea
+            value={content}
+            disabled={!editable || loading}
+            onChange={(event) => setContent(event.target.value)}
+            className="min-h-[430px] flex-1 resize-none font-mono text-xs leading-6"
+            placeholder={`# ${type}`}
+          />
+        </div>
       </div>
     </div>
   );

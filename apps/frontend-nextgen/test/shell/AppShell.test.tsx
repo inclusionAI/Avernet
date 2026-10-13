@@ -139,8 +139,13 @@ it('登录回归：/auth/user（checkAuth）晚于 mine 落位时，侧栏用户
   await waitFor(() => expect(view.getByTestId('app-sidebar')).toHaveTextContent('福惠'));
 });
 
-it.each(['/workspace/collaboration-only', '/workspace/collaboration/group', '/workspace/collaboration/session'])(
-  'hides desktop and mobile global navigation for %s without skipping boot',
+it.each([
+  '/workspace/collaboration-only',
+  '/workspace/collaboration/group',
+  '/workspace/collaboration/session',
+  '/bot-workshop/detail',
+])(
+  'hides desktop and mobile global navigation for standalone workspace %s without skipping boot',
   async (path) => {
     mockPathname = path;
     const view = render(<AppShell>精简协作区</AppShell>);

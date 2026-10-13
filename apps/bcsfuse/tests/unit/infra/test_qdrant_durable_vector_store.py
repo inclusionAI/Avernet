@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from threading import Event, Thread
 from uuid import uuid4
 
 from src.domain.models.vector_point import VectorPoint
@@ -29,8 +30,18 @@ class FakePersistenceBackend:
             raise RuntimeError("durable backend unavailable")
         return list(self.points.values())
 
+    def iter_batches(self, batch_size: int):
+        snapshot = sorted(self.load_all(), key=lambda point: point.id)
+        for offset in range(0, len(snapshot), batch_size):
+            yield snapshot[offset : offset + batch_size]
+
     def load_changes_since(self, checkpoint: float) -> VectorChangeSet:
         return self.changes
+
+    def iter_change_batches_since(self, checkpoint: float, batch_size: int):
+        changes = self.load_changes_since(checkpoint)
+        if changes.upserts or changes.deleted_ids:
+            yield changes
 
     def delete(self, point_id: str) -> bool:
         return self.points.pop(point_id, None) is not None
@@ -86,6 +97,31 @@ def _store(backend: FakePersistenceBackend, tmp_path) -> QdrantMySQLVectorStore:
         dimension=3,
         persistence_backend=backend,
     )
+
+
+def test_worker_payload_update_uses_scoped_durable_read(tmp_path) -> None:
+    class ScopedBackend(FakePersistenceBackend):
+        def load_by_worker(self, worker_id: str) -> list[VectorPoint]:
+            return [point for point in self.points.values()
+                    if point.id.startswith(f"{worker_id}:")]
+
+        def load_all(self) -> list[VectorPoint]:
+            raise AssertionError("worker update must not scan all vectors")
+
+    owner = "default:398718"
+    backend = ScopedBackend(points={
+        f"{owner}:default:full": _point(f"{owner}:default:full", "owner", worker_id=owner),
+        f"{owner}:nested:full": _point(
+            f"{owner}:nested:full", "other", worker_id=f"{owner}:nested",
+        ),
+    })
+    store = _store(backend, tmp_path)
+    try:
+        assert store.update_payload_by_worker(owner, {"runtime_state": "online"}) == 1
+        assert backend.points[f"{owner}:default:full"].payload["runtime_state"] == "online"
+        assert "runtime_state" not in backend.points[f"{owner}:nested:full"].payload
+    finally:
+        store.close()
 
 
 def test_text_queries_search_existing_payloads_before_and_after_rebuild(tmp_path, caplog):
@@ -183,6 +219,54 @@ def test_rebuild_restores_dense_index_from_durable_backend(tmp_path) -> None:
     store.close()
 
 
+def test_rebuild_consumes_bounded_batches_without_loading_all_vectors(tmp_path) -> None:
+    class BatchedOnlyBackend(FakePersistenceBackend):
+        def load_all(self) -> list[VectorPoint]:
+            raise AssertionError("rebuild must not load every vector at once")
+
+        def iter_batches(self, batch_size: int):
+            ordered = sorted(self.points.values(), key=lambda point: point.id)
+            for offset in range(0, len(ordered), batch_size):
+                yield ordered[offset : offset + batch_size]
+
+    backend = BatchedOnlyBackend(
+        points={key: _point(key, f"{key} profile") for key in ("a", "b", "c")}
+    )
+    store = _store(backend, tmp_path)
+    try:
+        store._qdrant.upsert([_point("stale", "stale profile")])
+
+        result = store.rebuild_from_backend(batch_size=2)
+
+        assert result["loaded_count"] == result["indexed_count"] == 3
+        assert set(store.get_vector_ids()) == {"a", "b", "c"}
+        assert store.text_search("c profile", 5)[0].id == "c"
+    finally:
+        store.close()
+
+
+def test_rebuild_replays_change_batches_without_full_change_load(tmp_path) -> None:
+    late = _point("late", "late profile")
+
+    class PagedChangesBackend(FakePersistenceBackend):
+        def load_changes_since(self, checkpoint: float) -> VectorChangeSet:
+            raise AssertionError("rebuild must not load every change at once")
+
+        def iter_change_batches_since(self, checkpoint: float, batch_size: int):
+            assert batch_size == 2
+            yield VectorChangeSet(upserts=[late], checkpoint=2.0)
+
+    backend = PagedChangesBackend(points={"original": _point("original", "original")})
+    store = _store(backend, tmp_path)
+    try:
+        store.rebuild_from_backend(batch_size=2)
+
+        assert set(store.get_vector_ids()) == {"original", "late"}
+        assert store._last_sync_time == 2.0
+    finally:
+        store.close()
+
+
 def test_rebuild_replays_mutation_committed_after_snapshot_checkpoint(tmp_path) -> None:
     original = _point("original", "original profile")
     late = _point("late", "late python profile")
@@ -201,6 +285,50 @@ def test_rebuild_replays_mutation_committed_after_snapshot_checkpoint(tmp_path) 
     assert {hit.id for hit in hits} == {late.id, original.id}
     assert [hit.id for hit in store.text_search("python", 5)] == [late.id]
     store.close()
+
+
+def test_incremental_sync_cannot_apply_stale_read_after_rebuild(tmp_path) -> None:
+    class RacingBackend(FakePersistenceBackend):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.read_started = Event()
+
+        def load_changes_since(self, checkpoint: float) -> VectorChangeSet:
+            self.read_started.set()
+            return super().load_changes_since(checkpoint)
+
+    old = _point("old", "old profile")
+    new = _point("new", "new profile")
+    backend = RacingBackend(points={old.id: old})
+    store = _store(backend, tmp_path)
+    errors = []
+    try:
+        store.rebuild_from_backend()
+        backend.read_started.clear()
+        backend.changes = VectorChangeSet(upserts=[old], checkpoint=1.0)
+
+        def sync():
+            try:
+                store.sync_incremental()
+            except Exception as error:
+                errors.append(error)
+
+        with store._index_lock:
+            worker = Thread(target=sync)
+            worker.start()
+            backend.read_started.wait(0.5)
+            backend.points = {new.id: new}
+            backend.changes = VectorChangeSet(
+                upserts=[new], deleted_ids=[old.id], checkpoint=2.0
+            )
+            store.rebuild_from_backend()
+        worker.join(timeout=5)
+
+        assert not worker.is_alive()
+        assert not errors
+        assert store.get_vector_ids() == [new.id]
+    finally:
+        store.close()
 
 
 def test_dense_search_preserves_preview_payload_when_full_content_is_missing(

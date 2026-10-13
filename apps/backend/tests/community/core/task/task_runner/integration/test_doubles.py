@@ -2,11 +2,11 @@ import asyncio
 
 from agentclaw.community.core.task.domain.models import TaskCallbackData
 from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import BcsCreateGroupRequest
-from agentclaw.community.core.task.task_runner.client.double.double_bcs_client import _DoubleBcsClient
-from agentclaw.community.core.task.task_runner.client.double.double_context_provider import (
+from tests.community.core.task.support.double.double_bcs_client import _DoubleBcsClient
+from tests.community.core.task.support.double.double_context_provider import (
     _DoubleApiKeyProvider, _DoubleSink,
 )
-from agentclaw.community.core.task.task_runner.client.double.double_open_api_bot import _DoubleOpenApiBot
+from tests.community.core.task.support.double.double_open_api_bot import _DoubleOpenApiBot
 
 
 def _run(coro): return asyncio.new_event_loop().run_until_complete(coro)

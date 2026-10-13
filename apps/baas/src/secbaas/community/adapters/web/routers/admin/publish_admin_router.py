@@ -7,19 +7,22 @@ Endpoints:
 - POST /api/v1/admin/force-success - Force a publish and all related entities to success states
 - POST /api/v1/admin/devices/{device_uuid}/status - Update a device's status directly
 - POST /api/v1/admin/bots/{bot_id}/status - Update a bot's status directly
+- POST /api/v1/admin/bots/restore - Restore a bot record to live ACTIVE (bot_id or bot_uuid in request body)
 """
 
 from typing import Annotated
 
 from dependency_injector.wiring import inject
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from secbaas.community.api import ApiResponse
 from secbaas.community.api.publish_manage import (
     ForceSuccessResult,
     PublishAdminService,
+    PublishConflictError,
     PublishNotFoundError,
+    RestoreBotResult,
     UpdateBotStatusResult,
     UpdateDeviceStatusResult,
 )
@@ -235,3 +238,124 @@ async def update_bot_status_endpoint(
             detail=f"Bot {bot_id} not found",
         )
     return ApiResponse(data=_to_update_bot_status_response(result))
+
+
+class RestoreBotRequest(BaseModel):
+    bot_id: int | None = Field(
+        None,
+        gt=0,
+        description="Bot ID (primary key) to restore",
+    )
+    bot_uuid: str | None = Field(
+        None,
+        min_length=1,
+        max_length=64,
+        description=(
+            "Bot UUID: restore the record that most recently held live device relations"
+        ),
+    )
+    operator: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description="User performing the restore operation",
+    )
+
+    @model_validator(mode="after")
+    def _require_exactly_one_selector(self) -> "RestoreBotRequest":
+        if (self.bot_id is None) == (self.bot_uuid is None):
+            raise ValueError("provide exactly one of 'bot_id' or 'bot_uuid'")
+        return self
+
+
+class RestoreBotResponse(BaseModel):
+    bot_id: int = Field(..., description="Bot ID that was restored")
+    bot_uuid: str = Field(..., description="Bot UUID shared by the version group")
+    previous_status: str = Field(..., description="Status of the bot before restore")
+    previous_is_deleted: int = Field(
+        ..., ge=0, description="Tombstone value of the bot before restore (0 = live)"
+    )
+    new_status: str = Field(..., description="Status after restore (ACTIVE)")
+    retired_sibling_count: int = Field(
+        ...,
+        ge=0,
+        description="Other live records sharing the bot_uuid retired by this call",
+    )
+
+
+def _to_restore_bot_response(result: RestoreBotResult) -> RestoreBotResponse:
+    return RestoreBotResponse(
+        bot_id=result.bot_id,
+        bot_uuid=result.bot_uuid,
+        previous_status=result.previous_status,
+        previous_is_deleted=result.previous_is_deleted,
+        new_status=result.new_status,
+        retired_sibling_count=result.retired_sibling_count,
+    )
+
+
+@router.post(
+    "/bots/restore",
+    response_model=ApiResponse[RestoreBotResponse],
+)
+@inject
+async def restore_bot_endpoint(
+    request: RestoreBotRequest,
+    admin_service: PublishAdminService = Depends(
+        Provide[ApplicationContainer.services.publish_admin_service]
+    ),
+) -> ApiResponse[RestoreBotResponse]:
+    """Restore a bot record to live ACTIVE, retiring its sibling records.
+
+    Selects the target with exactly one of the JSON-body fields ``bot_id``
+    (restore that record directly) or ``bot_uuid`` (restore the record
+    that most recently held live device relations — the service resolves
+    it via ``MAX(bot_id)`` over the uuid's ids). Passing both or neither
+    is a 422.
+
+    In one atomic transaction: sets the target to ``is_deleted=0`` and
+    ``status=ACTIVE`` and retires every OTHER live record sharing its
+    ``bot_uuid`` (``status=RELEASED``, soft-deleted with the tombstone
+    convention). Conflicting unique-key states (e.g. a concurrent restore
+    or publish race) roll the whole transaction back and surface as 409.
+
+    The ``operator`` travels in the JSON request body; the path carries no
+    record identifier.
+
+    **WARNING**: This is a state-machine-bypassing admin recovery tool —
+    it intentionally deviates from "RELEASED is terminal" and performs no
+    lifecycle validation. Cross-env by design: target lookup is by
+    primary key / bot_uuid and the uuid resolution counts live device
+    relations in every env; the request requires no tenant/env input and
+    no env filtering is applied anywhere in this chain.
+    """
+    try:
+        result = await admin_service.restore_bot(
+            bot_id=request.bot_id,
+            bot_uuid=request.bot_uuid,
+            operator=request.operator,
+        )
+    except PublishConflictError as exc:
+        selector = (
+            f"bot_id={request.bot_id}"
+            if request.bot_id is not None
+            else f"bot_uuid={request.bot_uuid}"
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Restore for {selector} conflicts with a live unique-key slot; "
+                f"no changes applied: {exc.message}"
+            ),
+        )
+    except PublishNotFoundError as exc:
+        if request.bot_id is not None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Bot {request.bot_id} not found",
+            )
+        raise HTTPException(
+            status_code=404,
+            detail=exc.message,
+        )
+    return ApiResponse(data=_to_restore_bot_response(result))

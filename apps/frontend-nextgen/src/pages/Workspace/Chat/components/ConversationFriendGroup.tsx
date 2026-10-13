@@ -63,11 +63,21 @@ export const ConversationFriendGroup = React.memo(function ConversationFriendGro
           />
           <span className="min-w-0 flex-1 truncate text-sm text-foreground">{group.friend.displayName}</span>
         </Button>
-        {expanded ? (
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-        )}
+        {/* 展开箭头:鼠标可点的折叠入口(点击转发同一 toggle);语义/键盘由主按钮承载,
+            不参与 Tab 序、对读屏隐藏。 */}
+        <button
+          type="button"
+          aria-hidden="true"
+          tabIndex={-1}
+          onClick={onToggle}
+          className="my-auto flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-muted/60"
+        >
+          {expanded ? (
+            <ChevronDown className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+          )}
+        </button>
       </div>
 
       {expanded && (

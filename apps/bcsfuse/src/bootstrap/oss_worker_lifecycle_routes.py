@@ -1,10 +1,12 @@
 """Authenticated worker lifecycle routes for OSS product integrations."""
 
 import logging
+from time import perf_counter
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from pydantic import BaseModel, Field, ValidationError
+from starlette.concurrency import run_in_threadpool
 
 from src.bootstrap.oss_business_routes import require_oss_auth
 from src.domain.exceptions import DuplicateWorkerException, WorkerNotFoundException
@@ -202,15 +204,41 @@ async def create_worker(payload: WorkerCreateRequest, request: Request) -> dict:
     }
 
 
-async def _set_runtime_state(worker_id: str, request: Request, online: bool) -> dict:
+async def _set_runtime_state(
+    worker_id: str, request: Request, online: bool, background_tasks: BackgroundTasks | None = None,
+) -> dict:
+    started_at = perf_counter() if online else None
     require_oss_auth(request)
-    service = _get_runtime_service(request)
-    try:
-        worker = (
-            service.set_online(worker_id, updated_by="oss_api")
-            if online
-            else service.set_offline(worker_id, updated_by="oss_api")
+    if online:
+        logger.info(
+            "[ONLINE-TIMING] phase=auth worker_id=%s elapsed_ms=%.1f",
+            worker_id, (perf_counter() - started_at) * 1000,
         )
+    phase_started_at = perf_counter()
+    service = _get_runtime_service(request)
+    if online:
+        logger.info(
+            "[ONLINE-TIMING] phase=service_resolve worker_id=%s elapsed_ms=%.1f",
+            worker_id, (perf_counter() - phase_started_at) * 1000,
+        )
+    try:
+        if online:
+            phase_started_at = perf_counter()
+            worker = await run_in_threadpool(
+                service.set_online, worker_id, updated_by="oss_api", defer_vector_sync=True,
+            )
+            logger.info(
+                "[ONLINE-TIMING] phase=state_write worker_id=%s elapsed_ms=%.1f",
+                worker_id, (perf_counter() - phase_started_at) * 1000,
+            )
+            response = _runtime_response(worker)
+            background_tasks.add_task(service.sync_online_vectors_if_current, worker_id)
+            logger.info(
+                "[ONLINE-TIMING] phase=route_ready worker_id=%s total_ms=%.1f vector_sync_scheduled=true",
+                worker_id, (perf_counter() - started_at) * 1000,
+            )
+            return response
+        worker = await run_in_threadpool(service.set_offline, worker_id, updated_by="oss_api")
         return _runtime_response(worker)
     except WorkerNotFoundException as error:
         raise HTTPException(
@@ -237,8 +265,8 @@ async def _set_runtime_state(worker_id: str, request: Request, online: bool) -> 
 
 
 @router.put("/workers/{worker_id}/online")
-async def set_worker_online(worker_id: str, request: Request) -> dict:
-    return await _set_runtime_state(worker_id, request, online=True)
+async def set_worker_online(worker_id: str, request: Request, background_tasks: BackgroundTasks) -> dict:
+    return await _set_runtime_state(worker_id, request, online=True, background_tasks=background_tasks)
 
 
 @router.put("/workers/{worker_id}/offline")
@@ -247,8 +275,8 @@ async def set_worker_offline(worker_id: str, request: Request) -> dict:
 
 
 @external_router.put("/workers/{worker_id}/online")
-async def set_worker_online_external(worker_id: str, request: Request) -> dict:
-    return await _set_runtime_state(worker_id, request, online=True)
+async def set_worker_online_external(worker_id: str, request: Request, background_tasks: BackgroundTasks) -> dict:
+    return await _set_runtime_state(worker_id, request, online=True, background_tasks=background_tasks)
 
 
 @external_router.put("/workers/{worker_id}/offline")

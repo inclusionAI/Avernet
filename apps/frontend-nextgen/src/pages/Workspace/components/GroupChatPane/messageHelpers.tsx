@@ -26,6 +26,30 @@ export function getMessageTime(message: ChatMessage): string | undefined {
   return formatChatTime(message.createdAt);
 }
 
+/** 系统事件行结构化结果（spec：collaboration-message-area 系统事件行）。 */
+export interface SystemEventParts {
+  /** 身份词（用户/Bot/成员）；后端文案可能省略。 */
+  identity?: string;
+  /** 事件主名字（半粗强调）。 */
+  name: string;
+  /** 动作文案（如「已加入会话」）。 */
+  action: string;
+}
+
+const SYSTEM_EVENT_RE =
+  /^(?:(用户|Bot|成员)\s+)?(.+?)\s*((?:已)?(?:加入|退出|移出|移除|解散)(?:了)?(?:当前)?会话(?:提示)?)$/;
+
+/**
+ * 解析系统消息 content 为「身份 + 名字 + 动作」结构（artboard-010「05-25 10:00 用户 风太
+ * 已加入会话」形态）。解析失败返回 null——调用方降级为「时间 + 原文」，绝不隐藏消息。
+ */
+export function parseSystemEvent(content: string): SystemEventParts | null {
+  const text = content.trim();
+  const match = text.match(SYSTEM_EVENT_RE);
+  if (!match) return null;
+  return { identity: match[1], name: match[2].trim(), action: match[3] };
+}
+
 /**
  * 判定气泡是否按流式渲染（…动画/光标）。
  *

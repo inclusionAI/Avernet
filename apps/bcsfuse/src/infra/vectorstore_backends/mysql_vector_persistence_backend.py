@@ -22,7 +22,9 @@ import logging
 import os
 import pickle
 import threading
+from time import perf_counter
 from datetime import datetime
+from functools import wraps
 from typing import Optional
 
 import mysql.connector
@@ -34,8 +36,8 @@ from src.domain.services.vector_persistence_backend import (
     VectorPersistenceBackend,
 )
 from src.infra.public.observability.storage_logging import (
-    log_storage_event,
     log_storage_error,
+    log_storage_event,
     mask_host,
     mask_user,
 )
@@ -43,6 +45,7 @@ from src.infra.public.observability.storage_logging import (
 logger = logging.getLogger(__name__)
 
 TABLE_NAME = "bcsfuse_vector_embeddings"
+_TIMING_LOG_THRESHOLD_MS = 100.0
 
 CREATE_TABLE_SQL = f"""
 CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
@@ -57,6 +60,37 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
     INDEX idx_is_deleted (is_deleted)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
+
+
+def _synchronized_connection(method):
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        wait_started_at = perf_counter()
+        with self._lock:
+            wait_ms = (perf_counter() - wait_started_at) * 1000
+            if method.__name__ in {"load_by_worker", "save_batch"} and wait_ms >= _TIMING_LOG_THRESHOLD_MS:
+                logger.info(
+                    "[VECTOR-TIMING] phase=persistence_lock method=%s wait_ms=%.1f",
+                    method.__name__, wait_ms,
+                )
+            return method(self, *args, **kwargs)
+
+    return wrapped
+
+
+def _synchronized_pages(method):
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        pages = method(self, *args, **kwargs)
+        while True:
+            with self._lock:
+                try:
+                    page = next(pages)
+                except StopIteration:
+                    return
+            yield page
+
+    return wrapped
 
 
 class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
@@ -84,8 +118,9 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
 
         self._conn: Optional[mysql.connector.MySQLConnection] = None
         self._schema_initialized = False
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
+    @_synchronized_connection
     def _ensure_connection(self) -> None:
         if self._conn is not None and self._conn.is_connected():
             return
@@ -168,22 +203,32 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
     def save(self, point: VectorPoint) -> None:
         self.save_batch([point])
 
+    @_synchronized_connection
     def save_batch(self, points: list[VectorPoint]) -> None:
         if not points:
             return
 
+        started_at = perf_counter()
         self._ensure_connection()
+        connection_ms = (perf_counter() - started_at) * 1000
         cursor = self._conn.cursor()
+        serialize_ms = existence_ms = write_ms = commit_ms = 0.0
+        outcome = "failed"
 
         try:
             for point in points:
+                phase_started_at = perf_counter()
                 vector_blob = self._serialize_vector(point.vector)
                 payload_json = json.dumps(point.payload if point.payload is not None else {})
+                serialize_ms += (perf_counter() - phase_started_at) * 1000
 
                 # Determine if row exists first (avoids ON DUPLICATE KEY UPDATE dialect differences)
+                phase_started_at = perf_counter()
                 cursor.execute(f"SELECT 1 FROM {TABLE_NAME} WHERE `id` = %s", (point.id,))
                 exists = cursor.fetchone() is not None
+                existence_ms += (perf_counter() - phase_started_at) * 1000
 
+                phase_started_at = perf_counter()
                 if exists:
                     cursor.execute(f"""
                         UPDATE {TABLE_NAME}
@@ -199,15 +244,36 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
                         INSERT INTO {TABLE_NAME} (`id`, `vector`, `payload`, `version`, `is_deleted`, `gmt_create`, `gmt_modify`)
                         VALUES (%s, %s, %s, 1, 0, NOW(), NOW())
                     """, (point.id, vector_blob, payload_json))
+                write_ms += (perf_counter() - phase_started_at) * 1000
 
-            self._conn.commit()
+            phase_started_at = perf_counter()
+            try:
+                self._conn.commit()
+            finally:
+                commit_ms = (perf_counter() - phase_started_at) * 1000
+            outcome = "ok"
             logger.debug("[MySQLVectorBackend] Saved %d vectors", len(points))
         except Error as e:
             self._conn.rollback()
             raise RuntimeError(f"Failed to save batch to MySQL: {e}") from e
         finally:
-            cursor.close()
+            try:
+                cursor.close()
+            except Exception:
+                outcome = "failed"
+                raise
+            finally:
+                total_ms = (perf_counter() - started_at) * 1000
+                if outcome != "ok" or total_ms >= _TIMING_LOG_THRESHOLD_MS:
+                    logger.info(
+                        "[VECTOR-TIMING] phase=persistence_save_batch status=%s points=%d "
+                        "connection_ms=%.1f serialize_ms=%.1f existence_ms=%.1f "
+                        "write_ms=%.1f commit_ms=%.1f total_ms=%.1f",
+                        outcome, len(points), connection_ms, serialize_ms, existence_ms,
+                        write_ms, commit_ms, total_ms,
+                    )
 
+    @_synchronized_connection
     def load_all(self) -> list[VectorPoint]:
         self._ensure_connection()
         cursor = self._conn.cursor()
@@ -235,6 +301,141 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
         finally:
             self._finish_read(cursor)
 
+    @_synchronized_connection
+    def load_by_worker(self, worker_id: str) -> list[VectorPoint]:
+        """Read one Worker's active vectors using the ID primary-key prefix."""
+        started_at = perf_counter()
+        self._ensure_connection()
+        connection_ms = (perf_counter() - started_at) * 1000
+        cursor = self._conn.cursor()
+        query_ms = fetch_ms = decode_ms = finish_ms = 0.0
+        rows_count = points_count = 0
+        outcome = "failed"
+        # LIKE wildcards can occur in Worker IDs; the colon separates the
+        # complete Worker ID from the profile and fragment suffix.
+        escaped_id = worker_id.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+        pattern = f"{escaped_id}:%"
+        try:
+            phase_started_at = perf_counter()
+            cursor.execute(f"""
+                SELECT `id`, `vector`, `payload`
+                FROM {TABLE_NAME}
+                WHERE `id` LIKE %s ESCAPE '!'
+                  AND `is_deleted` = 0
+            """, (pattern,))
+            query_ms = (perf_counter() - phase_started_at) * 1000
+            phase_started_at = perf_counter()
+            rows = cursor.fetchall()
+            fetch_ms = (perf_counter() - phase_started_at) * 1000
+            rows_count = len(rows)
+            phase_started_at = perf_counter()
+            points = []
+            for row in rows:
+                try:
+                    payload = json.loads(row[2]) if row[2] else {}
+                    if payload.get("worker_id") != worker_id:
+                        continue
+                    points.append(VectorPoint(
+                        id=row[0], vector=self._deserialize_vector(row[1]), payload=payload,
+                    ))
+                except Exception as e:
+                    raise RuntimeError(f"Failed to decode persisted vector {row[0]}") from e
+            decode_ms = (perf_counter() - phase_started_at) * 1000
+            points_count = len(points)
+            outcome = "ok"
+            return points
+        except Error as e:
+            raise RuntimeError(f"Failed to load Worker vectors from MySQL: {e}") from e
+        finally:
+            phase_started_at = perf_counter()
+            try:
+                self._finish_read(cursor)
+            except Exception:
+                outcome = "failed"
+                raise
+            finally:
+                finish_ms = (perf_counter() - phase_started_at) * 1000
+                total_ms = (perf_counter() - started_at) * 1000
+                if outcome != "ok" or total_ms >= _TIMING_LOG_THRESHOLD_MS:
+                    logger.info(
+                        "[VECTOR-TIMING] phase=persistence_load_by_worker worker_id=%s status=%s "
+                        "rows=%d points=%d connection_ms=%.1f query_ms=%.1f fetch_ms=%.1f "
+                        "decode_ms=%.1f finish_ms=%.1f total_ms=%.1f",
+                        worker_id, outcome, rows_count, points_count, connection_ms,
+                        query_ms, fetch_ms, decode_ms, finish_ms, total_ms,
+                    )
+
+    @_synchronized_connection
+    def _active_upper_id(self) -> str | None:
+        self._ensure_connection()
+        cursor = self._conn.cursor()
+        try:
+            cursor.execute(
+                f"SELECT MAX(`id`) FROM {TABLE_NAME} WHERE `is_deleted` = 0",
+                (),
+            )
+            row = cursor.fetchone()
+            return row[0] if row else None
+        except Error as e:
+            raise RuntimeError(f"Failed to read MySQL rebuild upper ID: {e}") from e
+        finally:
+            self._finish_read(cursor)
+
+    @_synchronized_pages
+    def iter_batches(self, batch_size: int):
+        """Page active rows by primary key so a rebuild never buffers all vectors."""
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+
+        upper_id = self._active_upper_id()
+        if upper_id is None:
+            return
+        last_id = None
+        while True:
+            self._ensure_connection()
+            cursor = self._conn.cursor()
+            try:
+                if last_id is None:
+                    cursor.execute(
+                        f"SELECT `id`, `vector`, `payload` FROM {TABLE_NAME} "
+                        "WHERE `is_deleted` = 0 AND `id` <= %s "
+                        "ORDER BY `id` LIMIT %s",
+                        (upper_id, batch_size),
+                    )
+                else:
+                    cursor.execute(
+                        f"SELECT `id`, `vector`, `payload` FROM {TABLE_NAME} "
+                        "WHERE `is_deleted` = 0 AND `id` > %s AND `id` <= %s "
+                        "ORDER BY `id` LIMIT %s",
+                        (last_id, upper_id, batch_size),
+                    )
+                rows = cursor.fetchall()
+                points = []
+                for row in rows:
+                    try:
+                        points.append(VectorPoint(
+                            id=row[0],
+                            vector=self._deserialize_vector(row[1]),
+                            payload=json.loads(row[2]) if row[2] else {},
+                        ))
+                    except Exception as e:
+                        raise RuntimeError(f"Failed to decode persisted vector {row[0]}") from e
+                page_length = len(rows)
+                if rows:
+                    last_id = rows[-1][0]
+                del rows
+            except Error as e:
+                raise RuntimeError(f"Failed to load vector page from MySQL: {e}") from e
+            finally:
+                self._finish_read(cursor)
+
+            if not points:
+                return
+            yield points
+            if page_length < batch_size:
+                return
+
+    @_synchronized_connection
     def load_changes_since(self, last_sync_time: float) -> VectorChangeSet:
         self._ensure_connection()
         cursor = self._conn.cursor()
@@ -273,6 +474,94 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
         finally:
             self._finish_read(cursor)
 
+    @_synchronized_connection
+    def _change_watermark(self) -> tuple[float, str] | None:
+        self._ensure_connection()
+        cursor = self._conn.cursor()
+        try:
+            cursor.execute(
+                f"SELECT UNIX_TIMESTAMP(`gmt_modify`), `id` FROM {TABLE_NAME} "
+                "ORDER BY `gmt_modify` DESC, `id` DESC LIMIT 1",
+                (),
+            )
+            row = cursor.fetchone()
+            return (float(row[0]), row[1]) if row else None
+        except Error as e:
+            raise RuntimeError(f"Failed to read MySQL change watermark: {e}") from e
+        finally:
+            self._finish_read(cursor)
+
+    @_synchronized_pages
+    def iter_change_batches_since(self, checkpoint: float, batch_size: int):
+        """Page durable changes by (modification time, ID) without buffering all."""
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+
+        floor = max(0.0, checkpoint - 1.0)
+        upper_key = self._change_watermark()
+        if upper_key is None:
+            return
+        last_key = None
+        while True:
+            self._ensure_connection()
+            cursor = self._conn.cursor()
+            try:
+                sql = (
+                    f"SELECT `id`, `vector`, `payload`, `is_deleted`, "
+                    f"UNIX_TIMESTAMP(`gmt_modify`) FROM {TABLE_NAME} "
+                    "WHERE `gmt_modify` >= FROM_UNIXTIME(%s) "
+                )
+                if last_key is None:
+                    params = (floor,)
+                else:
+                    sql += (
+                        "AND (`gmt_modify` > FROM_UNIXTIME(%s) OR "
+                        "(`gmt_modify` = FROM_UNIXTIME(%s) AND `id` > %s)) "
+                    )
+                    params = (floor, last_key[0], last_key[0], last_key[1])
+                sql += (
+                    "AND (`gmt_modify` < FROM_UNIXTIME(%s) OR "
+                    "(`gmt_modify` = FROM_UNIXTIME(%s) AND `id` <= %s)) "
+                )
+                params += (upper_key[0], upper_key[0], upper_key[1], batch_size)
+                cursor.execute(sql + "ORDER BY `gmt_modify`, `id` LIMIT %s", params)
+                rows = cursor.fetchall()
+                upserts = []
+                deleted_ids = []
+                next_checkpoint = checkpoint
+                for row in rows:
+                    next_checkpoint = max(next_checkpoint, float(row[4] or 0.0))
+                    if bool(row[3]):
+                        deleted_ids.append(row[0])
+                        continue
+                    try:
+                        upserts.append(VectorPoint(
+                            id=row[0],
+                            vector=self._deserialize_vector(row[1]),
+                            payload=json.loads(row[2]) if row[2] else {},
+                        ))
+                    except Exception as e:
+                        raise RuntimeError(f"Failed to decode persisted vector {row[0]}") from e
+                page_length = len(rows)
+                if rows:
+                    last_key = (float(rows[-1][4] or 0.0), rows[-1][0])
+                del rows
+            except Error as e:
+                raise RuntimeError(f"Failed to load vector changes from MySQL: {e}") from e
+            finally:
+                self._finish_read(cursor)
+
+            if page_length == 0:
+                return
+            yield VectorChangeSet(
+                upserts=upserts,
+                deleted_ids=deleted_ids,
+                checkpoint=next_checkpoint,
+            )
+            if page_length < batch_size:
+                return
+
+    @_synchronized_connection
     def delete(self, id: str) -> bool:
         self._ensure_connection()
         cursor = self._conn.cursor()
@@ -289,6 +578,7 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
         finally:
             cursor.close()
 
+    @_synchronized_connection
     def delete_batch(self, ids: list[str]) -> int:
         if not ids:
             return 0
@@ -309,6 +599,7 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
         finally:
             cursor.close()
 
+    @_synchronized_connection
     def exists(self, id: str) -> bool:
         self._ensure_connection()
         cursor = self._conn.cursor()
@@ -327,6 +618,7 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
         finally:
             self._finish_read(cursor)
 
+    @_synchronized_connection
     def count(self) -> int:
         self._ensure_connection()
         cursor = self._conn.cursor()
@@ -340,6 +632,7 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
         finally:
             self._finish_read(cursor)
 
+    @_synchronized_connection
     def get_last_modified_time(self) -> float:
         self._ensure_connection()
         cursor = self._conn.cursor()
@@ -353,6 +646,7 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
         finally:
             self._finish_read(cursor)
 
+    @_synchronized_connection
     def close(self) -> None:
         if self._conn is not None and self._conn.is_connected():
             self._conn.close()

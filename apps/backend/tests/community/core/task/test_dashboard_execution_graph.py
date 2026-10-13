@@ -20,7 +20,7 @@ from agentclaw.community.core.repository.protocols.task import (
     TaskCallbackRepositoryProtocol, TaskInfoRepositoryProtocol,
 )
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceCriteria, Context, Goal, Metadata, TaskNodePatch, TaskInfo, TaskSpec,
+    AcceptanceCriteria, Context, Goal, TaskNodePatch, TaskInfo, TaskSpec,
 )
 from agentclaw.community.core.task.repository.types import TaskCallbackRecord
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
@@ -87,9 +87,9 @@ class _StubModule(Module):
 
 def _seed_root(injector: Injector, task_id: str, session_id):
     gs = injector.get(TaskGraphService)
-    gs.initialize_graph(TaskInfo(
-        task_spec=TaskSpec(metadata=Metadata(task_id=task_id, title="t", instruction="i"),
-                           context=Context(background="", extend_props={}),
+    gs.initialize_graph(TaskInfo(task_id=task_id,
+        task_spec=TaskSpec(
+                           context=Context(background="", extend_props={}, title="t"),
                            goal=Goal(objective="o",
                                      acceptances=[AcceptanceCriteria(id="a1", description="d")])),
         source_type="bot", owner_bot_id="b1", execution_config={}))

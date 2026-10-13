@@ -1,6 +1,6 @@
 from typing import Any, Protocol, runtime_checkable
 
-from ._record import BotRecord
+from ._record import BotRecord, RestoredBotRecord
 
 
 @runtime_checkable
@@ -74,6 +74,19 @@ class BotRepository(Protocol):
         """
         ...
 
+    def list_by_bot_uuid_only_including_deleted(self, bot_uuid: str) -> list[BotRecord]:
+        """List ALL bot record ids sharing a bot_uuid (no tenant/env filter).
+
+        The ``_only`` naming convention (see ``get_by_id_only`` /
+        ``get_active_by_bot_uuid_only``) marks cross-tenant/env lookup —
+        deliberate cross-env semantics for admin recovery, not a data-leak
+        accident. Includes soft-deleted records as well as live ones (no
+        ``is_deleted`` predicate). Used by the admin bot-restore endpoint's
+        ``bot_uuid`` resolution, which deliberately performs no env validation
+        anywhere in its chain.
+        """
+        ...
+
     def get_active_by_bot_uuid(
         self, bot_uuid: str, tenant: str, env: str
     ) -> BotRecord | None:
@@ -140,9 +153,11 @@ class BotRepository(Protocol):
         """Clone an existing bot record with a new status.
 
         Copies all fields from the source bot record, overriding status
-        and optionally extra_config/name/template_uuid. Returns the new record ID.
+        and optionally extra_config/name/template_uuid. The clone is a
+        fresh INSERT; previously soft-deleted rows are left untouched.
         Does not guard against concurrent clones — use ``try_insert_pending_bot``
         when the clone must reserve a PENDING slot atomically.
+        Returns the new record ID.
         """
         ...
 
@@ -159,10 +174,15 @@ class BotRepository(Protocol):
     ) -> int:
         """Atomically clone the source bot into a PENDING record.
 
-        Conflict detection and insertion share one transaction. Raises the
-        repository's conflict error when a live PENDING record already exists
-        for the same ``bot_uuid``; the caller must abort rather than delete the
-        incumbent record. Returns the new record ID.
+        Atomicity comes from the unique key, not transaction scope: the
+        repository method session and the nested insert session are
+        separate transactions, and the unique key is the final arbiter.
+        Raises the repository's conflict error when a live PENDING record
+        already exists for the same ``bot_uuid``; the caller must abort
+        rather than delete the incumbent record. A soft-deleted PENDING
+        record occupies a distinct unique-key slot (``is_deleted = bot_id``),
+        so the live slot stays free and the clone is a fresh INSERT;
+        soft-deleted records are left untouched. Returns the new record ID.
         """
         ...
 
@@ -218,5 +238,37 @@ class BotRepository(Protocol):
         2. Create new relationships linking devices to new bot
         3. Set new bot to ACTIVE
         4. Set old bot to RELEASED and soft-delete
+        """
+        ...
+
+    def restore_bot_record_by_id(
+        self,
+        bot_id: int,
+        *,
+        modifier: str,
+    ) -> RestoredBotRecord | None:
+        """Atomically restore a bot record to live ACTIVE by primary key.
+
+        Deliberate, UK-ordered admin revival (``uk_tnt_bot_uuid_env_status_del``):
+        within ONE transaction, (1) select the target by PK with NO
+        is_deleted/tenant/env predicate, (2) retire every OTHER live row
+        sharing its ``bot_uuid`` (``status=RELEASED``, ``is_deleted=<own
+        row id>``), then (3) revive the target (``is_deleted=0``,
+        ``status=ACTIVE``). Retiring siblings FIRST frees the live UK
+        slot before the revive re-occupies it — the re-revival ordering
+        warned about by ``try_insert_pending_bot`` (the historical MySQL
+        1205 self-deadlock) must never be inverted. No SELECT ... FOR
+        UPDATE is used (gap-lock deadlock class); the unique key is the
+        final arbiter.
+
+        Cross-env by requirement: sibling matching is on ``bot_uuid`` and
+        ``id != bot_id`` only — no tenant/env filtering on the PK lookup
+        or the sibling retirement.
+
+        Returns None when no record exists for ``bot_id`` (live or
+        soft-deleted) — the service layer maps that to its not-found
+        error. Returns a :class:`RestoredBotRecord` on success. A unique
+        key violation raises :class:`BotRecordConflictError` after the
+        transaction has rolled back (no partial state).
         """
         ...

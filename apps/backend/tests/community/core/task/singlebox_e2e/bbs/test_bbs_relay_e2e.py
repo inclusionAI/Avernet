@@ -39,7 +39,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     Status,
     TaskGraphPatch,
     TaskInfo,
@@ -90,10 +89,10 @@ class _Clock:
 
 
 def _task_info(task_id: str, *, execution_config: dict | None = None) -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="t", instruction="i"),
-            context=Context(background="", extend_props={}),
+
+            context=Context(background="", extend_props={}, title="t"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
         source_type="bot",
@@ -155,7 +154,7 @@ def _result_body(
         "task_id": task_id,
         "node_id": node_id,
         "bot_id": bot_id,
-        "acceptance_result": {"verdict": verdict, "acceptances_metric": [], "gaps": gaps or []},
+        "acceptance_result": {"verdict": verdict, "done_items": [], "gap_items": gaps or []},
         "output_patch": output_patch,
     }
 
@@ -175,7 +174,7 @@ def _root_owner(nodes: dict[str, dict], task_id: str):
 def client():
     """独立 FastAPI app + test injector(TaskModule + stub discover)。返回 (TestClient, injector)。
 
-    经 TestClient 驱动 HTTP facade 真实 DI(TaskService → ExecutionEngine → TaskGraphService,
+    经 TestClient 驱动 HTTP facade 真实 DI(TaskService → CentralizedExecutionAdapter → TaskGraphService,
     bbs relay 全程 collector-free,不依赖 bot/bcs/discover 端口);经 injector 取 TaskGraphService
     做 SSOT 白盒播种。范本:test_bbs_{claim,attach,result}_route.py(同手法)。
     """
@@ -280,7 +279,7 @@ def test_d_crash_lease_relay(client):
     _, nodes = _dashboard_tasks(c, task_id)
     assert _root_owner(nodes, task_id) is None, "harness 到期应清根 bbs_owner 释放接力所有权"
     assert nodes[node_a]["status"] == "FAILED", "scoped 节点应标终态 FAILED(非 PENDING 重派)"
-    assert (nodes[node_a]["run_info"]["acceptance_result"] or {})["gaps"] == ["bbs_lease_expired"]
+    assert (nodes[node_a]["run_info"]["acceptance_result"] or {})["gap_items"] == ["bbs_lease_expired"]
     # harness 不经 on_harness_fn 重派 bbs 节点(recorder 不含 node_a 的 PENDING 复位)
     assert not any(getattr(p, "node_id", None) == node_a for p in recorder), (
         f"bbs 节点不应经 on_harness_fn 重派(标终态不重派): {recorder}")

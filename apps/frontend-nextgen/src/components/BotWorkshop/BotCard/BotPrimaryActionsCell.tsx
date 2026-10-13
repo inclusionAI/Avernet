@@ -130,10 +130,12 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
   const showChat = isAgentCodingBot
     ? Boolean(onConversation)
     : Boolean(inventoryActions.chat?.visible && onConversation);
-  const showView = !isAgentCodingBot && Boolean(inventoryActions.view?.visible);
-  const showEdit = !isAgentCodingBot && Boolean(inventoryActions.edit?.visible);
-  const showLog = !isAgentCodingBot && Boolean(logAction?.visible && onOpenLogs);
-  const showHealth = !isAgentCodingBot && Boolean(healthCheckAvailability?.visible && onHealthCheck);
+  // AI Coding 保留「去使用」作为对话主入口，但不应掩盖后端已声明的库存操作。
+  // 编辑、日志、健康检查与其它引擎一样，全部以 actions / disabled_actions 的可用性为准。
+  const showView = Boolean(inventoryActions.view?.visible);
+  const showEdit = Boolean(inventoryActions.edit?.visible);
+  const showLog = Boolean(logAction?.visible && onOpenLogs);
+  const showHealth = Boolean(healthCheckAvailability?.visible && onHealthCheck);
 
   return (
     <div
