@@ -57,7 +57,7 @@ export function BotChatFilters({ value, loading, onChange, onQuery, onReset }: P
             <Input
               className={field.className ? `${field.className} max-w-full flex-1` : 'min-w-0 flex-1'}
               value={value[field.key]}
-              placeholder={field.key === 'keyword' ? 'Input/Output' : '请输入'}
+              placeholder={field.key === 'keyword' ? 'input/output' : '请输入'}
               onChange={(event) => onChange(field.key, event.target.value)}
               onKeyDown={onKeyDown}
             />
