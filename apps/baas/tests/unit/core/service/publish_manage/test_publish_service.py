@@ -437,9 +437,9 @@ class TestPublishCreation:
         )
         _publish_service_instance._publish_repo = MagicMock()
         _publish_service_instance._publish_repo.now.return_value = datetime.now()
-        _publish_service_instance._publish_repo.get_active_by_bot_id.return_value = (
+        _publish_service_instance._publish_repo.list_active_by_bot_ids.return_value = [
             existing_publish
-        )
+        ]
 
         _publish_service_instance._publish_batch_repo = MagicMock()
         mock_batch = MagicMock()
@@ -516,12 +516,13 @@ class TestStalePublishAutoResolution:
         )
         _publish_service_instance._publish_repo = MagicMock()
         _publish_service_instance._publish_repo.now.return_value = datetime.now()
-        # First call to get_active_by_bot_id returns the stale publish
-        # Second call (for RESTART scope check) returns None since
-        # the stale publish has been resolved
-        _publish_service_instance._publish_repo.get_active_by_bot_id.side_effect = [
-            mock_existing,
-            None,
+        # First classifier query returns the stale publish; the re-query
+        # after auto-resolution and the RESTART scope check both return []
+        # since the stale publish has been resolved
+        _publish_service_instance._publish_repo.list_active_by_bot_ids.side_effect = [
+            [mock_existing],
+            [],
+            [],
         ]
         _publish_service_instance._publish_repo.insert_publish.return_value = 1
         _publish_service_instance._publish_repo.get_by_id.return_value = mock_publish
@@ -612,9 +613,13 @@ class TestStalePublishAutoResolution:
         )
         _publish_service_instance._publish_repo = MagicMock()
         _publish_service_instance._publish_repo.now.return_value = datetime.now()
-        _publish_service_instance._publish_repo.get_active_by_bot_id.side_effect = [
-            mock_existing,
-            None,
+        # Same ordering as the auto-resolve test: classifier query returns
+        # the stale publish, then the re-query and RESTART scope check
+        # return [] once it is resolved
+        _publish_service_instance._publish_repo.list_active_by_bot_ids.side_effect = [
+            [mock_existing],
+            [],
+            [],
         ]
         _publish_service_instance._publish_repo.insert_publish.return_value = 1
         _publish_service_instance._publish_repo.get_by_id.return_value = mock_publish
@@ -680,9 +685,9 @@ class TestStalePublishAutoResolution:
         )
         _publish_service_instance._publish_repo = MagicMock()
         _publish_service_instance._publish_repo.now.return_value = datetime.now()
-        _publish_service_instance._publish_repo.get_active_by_bot_id.return_value = (
+        _publish_service_instance._publish_repo.list_active_by_bot_ids.return_value = [
             mock_existing
-        )
+        ]
 
         _publish_service_instance._publish_batch_repo = MagicMock()
         _publish_service_instance._publish_batch_repo.list_by_publish_id.return_value = [
@@ -7711,9 +7716,9 @@ class TestCreatePublishOrphanCleanup:
         )
         _publish_service_instance._publish_repo = MagicMock()
         _publish_service_instance._publish_repo.now.return_value = datetime.now()
-        _publish_service_instance._publish_repo.get_active_by_bot_id.return_value = (
+        _publish_service_instance._publish_repo.list_active_by_bot_ids.return_value = [
             mock_orphan
-        )
+        ]
         _publish_service_instance._publish_repo.insert_publish.return_value = 1
         _publish_service_instance._publish_repo.get_by_id.return_value = mock_publish
 
@@ -7792,9 +7797,9 @@ class TestCreatePublishConcurrentTypeMismatch:
         )
         _publish_service_instance._publish_repo = MagicMock()
         _publish_service_instance._publish_repo.now.return_value = datetime.now()
-        _publish_service_instance._publish_repo.get_active_by_bot_id.return_value = (
+        _publish_service_instance._publish_repo.list_active_by_bot_ids.return_value = [
             mock_existing
-        )
+        ]
 
         _publish_service_instance._publish_batch_repo = MagicMock()
         _publish_service_instance._publish_batch_repo.list_by_publish_id.return_value = [
@@ -7838,9 +7843,9 @@ class TestCreatePublishConcurrentTypeMismatch:
         )
         _publish_service_instance._publish_repo = MagicMock()
         _publish_service_instance._publish_repo.now.return_value = datetime.now()
-        _publish_service_instance._publish_repo.get_active_by_bot_id.return_value = (
+        _publish_service_instance._publish_repo.list_active_by_bot_ids.return_value = [
             mock_existing
-        )
+        ]
 
         _publish_service_instance._publish_batch_repo = MagicMock()
         _publish_service_instance._publish_batch_repo.list_by_publish_id.return_value = [
@@ -8012,9 +8017,9 @@ class TestCreatePublishOrphanCleanupException:
         )
         _publish_service_instance._publish_repo = MagicMock()
         _publish_service_instance._publish_repo.now.return_value = datetime.now()
-        _publish_service_instance._publish_repo.get_active_by_bot_id.return_value = (
+        _publish_service_instance._publish_repo.list_active_by_bot_ids.return_value = [
             mock_orphan
-        )
+        ]
         _publish_service_instance._publish_repo.update_status.side_effect = (
             RuntimeError("DB connection error")
         )
@@ -8331,9 +8336,9 @@ class TestCreatePublishStaleTimeout:
         )
         _publish_service_instance._publish_repo = MagicMock()
         _publish_service_instance._publish_repo.now.return_value = datetime.now()
-        _publish_service_instance._publish_repo.get_active_by_bot_id.return_value = (
+        _publish_service_instance._publish_repo.list_active_by_bot_ids.return_value = [
             mock_existing
-        )
+        ]
         _publish_service_instance._publish_repo.insert_publish.return_value = 1
         _publish_service_instance._publish_repo.get_by_id.return_value = (
             mock_new_publish
@@ -8420,9 +8425,9 @@ class TestCreatePublishOrphanUpdate:
         )
         _publish_service_instance._publish_repo = MagicMock()
         _publish_service_instance._publish_repo.now.return_value = datetime.now()
-        _publish_service_instance._publish_repo.get_active_by_bot_id.return_value = (
+        _publish_service_instance._publish_repo.list_active_by_bot_ids.return_value = [
             mock_orphan
-        )
+        ]
         _publish_service_instance._publish_repo.insert_publish.return_value = 1
         _publish_service_instance._publish_repo.get_by_id.return_value = (
             mock_new_publish
