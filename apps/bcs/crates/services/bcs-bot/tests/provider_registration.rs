@@ -402,6 +402,7 @@ async fn issuance_and_upstream_do_not_read_downlink_credentials() {
 
 fn request(f: &Fixture, mode: ProviderRegistrationMode) -> RegisterProviderBot {
     RegisterProviderBot {
+        expected_auth_mode: None,
             bot_slug: None,
         provider_id: f.provider.clone(),
         provider_bot_ref: "stable-ref".into(),

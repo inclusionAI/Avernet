@@ -12,11 +12,15 @@ current environment and Provider; deleted registrations retain their reference.
 ## Register and run
 
 Create a new Provider with auth mode `agentpass-subbots`. Both scoped
-registration and Provider-admin registration accept `bot_slug`; scoped
-registration checks availability through
-`POST /openapi/v1/collaboration/register/check`.
-Provider-admin uses `POST /providers/{provider_id}/bots/registration-check`.
-The final registration still checks the unique reference atomically.
+registration and Provider-admin registration accept `bot_slug`. Both validate
+identity and reference occupancy during registration, including tombstones;
+duplicate subbot references return 409 and the existing unique constraint
+handles concurrent requests. There is no separate availability-check API.
+
+For scoped registration, bridge supplies the optional
+`expected_auth_mode=agentpass-subbots` precondition. The server checks it before
+any mutation and rejects a mismatched Provider mode with 409. This condition
+never overrides Provider configuration; existing callers may omit it.
 
 The bridge distribution must install an AgentPass identity resolver. The public
 bridge extension contract provides this hook; enterprise SDK verification and

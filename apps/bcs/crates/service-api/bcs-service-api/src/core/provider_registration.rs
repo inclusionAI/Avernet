@@ -7,6 +7,8 @@ use async_trait::async_trait;
 
 #[derive(Clone)]
 pub struct RegisterProviderBot {
+    /// Optional precondition, checked against the Provider before any mutation.
+    pub expected_auth_mode: Option<bcs_domain::ProviderAuthMode>,
     pub bot_slug: Option<String>,
     pub provider_id: String,
     /// Stable Provider identity. For AgentPass, the real agent code; persisted
@@ -26,22 +28,8 @@ pub struct ProviderRegistrationResult {
     pub auth_mode: bcs_domain::ProviderAuthMode,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ProviderRegistrationCheck {
-    pub provider_id: String,
-    pub auth_mode: bcs_domain::ProviderAuthMode,
-    #[serde(flatten)]
-    pub identity: bcs_domain::provider_identity::ProviderBotIdentity,
-    pub available: bool,
-    pub reason: Option<String>,
-    pub identity_version: u8,
-}
-
 #[async_trait]
 pub trait ProviderRegistrationCoreService: Send + Sync {
-    async fn check(&self, _command: RegisterProviderBot) -> ServiceResult<ProviderRegistrationCheck> {
-        Err(crate::ServiceError::InternalError("Provider registration check is not configured".into()))
-    }
     /// Checks current existence, enabled state and owner/self-service policy.
     /// Issuance deliberately does not require a delivery endpoint.
     async fn authorize(

@@ -249,9 +249,6 @@ pub struct ProviderBotTaskModesFilter {
 
 #[async_trait]
 pub trait ProviderManagementService: Send + Sync {
-    async fn check_provider_bot_registration(&self, _command: RegisterProviderBotCommand) -> ServiceResult<crate::core::provider_registration::ProviderRegistrationCheck> {
-        Err(crate::ServiceError::InternalError("Provider registration check is not configured".into()))
-    }
     /// Credential-free public discovery. Disabled Providers remain visible.
     async fn get_provider_by_slug(
         &self, slug: &str,

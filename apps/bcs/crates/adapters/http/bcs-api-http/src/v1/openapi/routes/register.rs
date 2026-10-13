@@ -20,7 +20,6 @@ pub fn router() -> Router<ApiState> {
 /// anonymous and the register token is its only credential.
 pub fn public_router() -> Router<ApiState> {
     Router::new().route("/openapi/v1/collaboration/register", post(register_bot))
-        .route("/openapi/v1/collaboration/register/check", post(check_bot))
 }
 
 #[derive(Debug, Deserialize)]
@@ -30,6 +29,7 @@ pub struct RegisterTokenQuery {
 
 #[derive(Debug, Deserialize)]
 pub struct RegisterQuery {
+    pub expected_auth_mode: Option<bcs_service_api::ProviderAuthMode>,
     pub token: Option<String>,
     #[serde(alias = "bot-name")]
     pub bot_name: Option<String>,
@@ -78,6 +78,7 @@ async fn register_bot(
     let result = state
         .register_service
         .register_bot(RegisterBot {
+            expected_auth_mode: query.expected_auth_mode,
             bot_slug: query.bot_slug,
             token,
             bot_name,
@@ -93,15 +94,4 @@ async fn register_bot(
         Json(Envelope::success(20_100, "Created", result, request_id.0)),
     )
         .into_response())
-}
-
-async fn check_bot(State(state): State<ApiState>, headers: HeaderMap, query: Result<Query<RegisterQuery>, QueryRejection>) -> Result<Response, ErrorResponse> {
-    let request_id = RequestId::from_headers(&headers);
-    let Query(query) = query.map_err(|_| invalid_request(&request_id, "invalid registration query"))?;
-    let token = query.token.filter(|token| !token.is_empty()).ok_or_else(|| invalid_request(&request_id, "missing token"))?;
-    let result = state.register_service.check_bot(RegisterBot {
-        token, bot_name: query.bot_name.ok_or_else(|| invalid_request(&request_id, "missing bot-name"))?,
-        mode: query.mode, provider_bot_ref: query.provider_bot_ref, webhook_url: query.webhook_url, bot_slug: query.bot_slug,
-    }).await.map_err(|error| application_error_response(&request_id, error))?;
-    Ok((StatusCode::OK, [(header::CACHE_CONTROL, "no-store")], Json(Envelope::success(20_000, "OK", result, request_id.0))).into_response())
 }

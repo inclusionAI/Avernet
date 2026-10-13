@@ -1159,13 +1159,3 @@ mod tests {
         }
     }
 }
-
-pub async fn check_provider_bot_registration(State(state): State<HttpAppState>, Path(provider_id): Path<String>, headers: HeaderMap, Json(req): Json<RegisterProviderBotRequest>) -> Result<Json<bcs_service_api::core::provider_registration::ProviderRegistrationCheck>, ProviderRouteError> {
-    let provider_admin_token = bearer_token(&headers)?;
-    let connection_mode = req.connection_mode.unwrap_or(ProviderBotConnectionModeDto::Gateway);
-    if connection_mode == ProviderBotConnectionModeDto::Plugin && !state.allowed_switch_provider_ids.contains(&provider_id) { return Err(ProviderRouteError::bad_request("plugin mode requires an allow-listed provider")); }
-    let result = state.services.provider_management.check_provider_bot_registration(RegisterProviderBotCommand {
-        bot_slug: req.bot_slug, webhook_url: req.webhook_url, provider_id, provider_admin_token, name: req.name, summary: req.summary, owners: req.owners, provider_bot_ref: req.provider_bot_ref, domains: req.domains, skills: req.skills.into_iter().map(to_core_skill).collect(), scopes: req.scopes, bot_uuid: None, reject_existing_bot_uuid: false, connection_mode,
-    }).await.map_err(provider_error)?;
-    Ok(Json(result))
-}

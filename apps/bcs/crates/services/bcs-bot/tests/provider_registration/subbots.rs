@@ -42,15 +42,41 @@ async fn subbot_authentication_requires_actor_for_parent_but_not_static_token() 
 }
 
 #[tokio::test]
-async fn precheck_reports_slug_occupancy_without_registering_a_bot() {
+async fn actual_registration_rejects_duplicate_and_deleted_slug_without_replacing_identity() {
     let f = fixture_with_auth(None, true, None, ProviderAuthMode::AgentPassSubbots).await;
     let mut command = request(&f, ProviderRegistrationMode::Plugin);
     command.bot_slug = Some("reviewer".into());
-    let first = f.core.check(command.clone()).await.unwrap();
-    assert!(first.available);
-    assert_eq!(first.identity.provider_bot_ref, "stable-ref:reviewer");
-    f.core.register(command.clone()).await.unwrap();
-    assert!(!f.core.check(command).await.unwrap().available);
+    let first = f.core.register(command.clone()).await.unwrap();
+    assert!(matches!(f.core.register(command.clone()).await, Err(ServiceError::Conflict(_))));
+    assert_eq!(f.membership.list_provider_bot_metadata(Some(&f.provider)).await.unwrap().len(), 1);
+    assert_eq!(f.registry.resolve_bot_token(&first.record.bot_token, None).await.unwrap().unwrap().bot.bot_id, first.record.bot_uuid);
+    f.registry.soft_delete(&first.record.bot_uuid).await;
+    assert!(matches!(f.core.register(command).await, Err(ServiceError::Conflict(_))));
+}
+
+#[tokio::test]
+async fn expected_subbot_mode_is_checked_by_registration_before_writes() {
+    let f = fixture_with_auth(None, true, None, ProviderAuthMode::AgentPass).await;
+    let mut command = request(&f, ProviderRegistrationMode::Plugin);
+    command.bot_slug = Some("reviewer".into());
+    command.expected_auth_mode = Some(ProviderAuthMode::AgentPassSubbots);
+    assert!(matches!(f.core.register(command.clone()).await, Err(ServiceError::Conflict(_))));
+    assert!(f.membership.list_provider_bot_metadata(Some(&f.provider)).await.unwrap().is_empty());
+    command.expected_auth_mode = None;
+    let ordinary = f.core.register(command).await.unwrap();
+    assert_eq!(ordinary.record.provider_bot_ref, "stable-ref");
+}
+
+#[tokio::test]
+async fn concurrent_subbot_registration_of_same_slug_has_one_winner() {
+    let f = fixture_with_auth(None, true, None, ProviderAuthMode::AgentPassSubbots).await;
+    let mut command = request(&f, ProviderRegistrationMode::Plugin);
+    command.bot_slug = Some("reviewer".into());
+    command.expected_auth_mode = Some(ProviderAuthMode::AgentPassSubbots);
+    let (a, b) = tokio::join!(f.core.register(command.clone()), f.core.register(command));
+    assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
+    assert!(matches!(a.err().or_else(|| b.err()), Some(ServiceError::Conflict(_))));
+    assert_eq!(f.membership.list_provider_bot_metadata(Some(&f.provider)).await.unwrap().len(), 1);
 }
 
 #[tokio::test]

@@ -14,7 +14,7 @@ Do not describe the branch as passing an independently enforced size gate.
 
 | File (relative to apps/bcs) | Base lines | Current lines |
 | --- | ---: | ---: |
-| crates/adapters/http/bcs-http/src/routes/providers.rs | 1149 | 1171 |
+| crates/adapters/http/bcs-http/src/routes/providers.rs | 1149 | 1161 |
 | crates/adapters/http/bcs-http/src/routes/sessions.rs | 2126 | 2126 |
 | crates/adapters/ws/bcs-ws/src/bot/dispatcher.rs | 2682 | 2688 |
 | crates/adapters/ws/bcs-ws/tests/frame_compat.rs | 3415 | 3434 |
@@ -23,7 +23,7 @@ Do not describe the branch as passing an independently enforced size gate.
 | crates/services/bcs-bot-store/src/memory.rs | 2859 | 2874 |
 | crates/services/bcs-bot/src/application/bot.rs | 1608 | 1628 |
 | crates/services/bcs-bot/src/application/onboarding.rs | 1605 | 1605 |
-| crates/services/bcs-bot/src/core/provider_core.rs | 1398 | 1439 |
+| crates/services/bcs-bot/src/core/provider_core.rs | 1398 | 1426 |
 | crates/services/bcs-bot/tests/bot_use_cases.rs | 2082 | 2097 |
 | crates/services/bcs-organization/tests/management.rs | 1293 | 1294 |
 | crates/tools/bcs-bridge/core/src/engine/claude_code.rs | 1391 | 1392 |

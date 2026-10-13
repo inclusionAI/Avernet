@@ -1107,19 +1107,6 @@ impl ProviderBotCoreService for ProviderCore {
         Ok(UpdateProviderBotCoreResult { binding: updated, capabilities: bot.capabilities })
     }
 
-    async fn check_provider_bot_registration(&self, provider_id: &str, token: &str, params: RegisterProviderBotParams) -> ServiceResult<bcs_service_api::core::provider_registration::ProviderRegistrationCheck> {
-        let provider = self.authenticated_provider(provider_id, token).await?;
-        let downlink = parse_downlink_config(&provider.config)?;
-        let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &params.provider_bot_ref, params.bot_slug.as_deref()).map_err(|message| ServiceError::InvalidOperation { message: message.into(), request_id: None })?;
-        if params.owners.len() != 1 || params.owners[0].trim().is_empty() { return Err(ServiceError::InvalidOperation { message: "owners must contain exactly one owner".into(), request_id: None }); }
-        if params.connection_mode == ProviderBotConnectionMode::Plugin && params.webhook_url.is_some() { return Err(ServiceError::InvalidOperation { message: "plugin bots cannot configure webhook_url".into(), request_id: None }); }
-        if let Some(url) = params.webhook_url.as_deref() { validate_outbound_url(&self.webhook_url_guard, "webhook_url", url)?; }
-        if params.connection_mode == ProviderBotConnectionMode::Gateway && params.webhook_url.is_none() && downlink.webhook_url.is_none() { return Err(ServiceError::InvalidOperation { message: "missing_delivery_endpoint".into(), request_id: None }); }
-        let occupied = if let Some(metadata) = &self.bot_providers { metadata.get_provider_bot_by_ref(provider_id, &identity.provider_bot_ref).await?.is_some() } else { false }
-            || self.bindings.get_binding_by_provider_ref(provider_id, &identity.provider_bot_ref).await?.is_some();
-        Ok(bcs_service_api::core::provider_registration::ProviderRegistrationCheck { provider_id: provider_id.into(), auth_mode: downlink.auth_mode, identity, available: !occupied, reason: occupied.then(|| "provider_bot_ref_taken".into()), identity_version: 1 })
-    }
-
     async fn register_provider_bot_with_bot_uuid(
         &self,
         provider_id: &str,

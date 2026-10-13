@@ -59,7 +59,10 @@ impl RegistrationClient {
             ("token", token), ("bot-name", name), ("provider_bot_ref", agent_code), ("mode", mode),
         ];
         if let Some(webhook) = webhook { pairs.push(("webhook_url", webhook)); }
-        if let Some(slug) = slug { pairs.push(("bot_slug", slug)); }
+        if let Some(slug) = slug {
+            pairs.push(("bot_slug", slug));
+            pairs.push(("expected_auth_mode", "agentpass-subbots"));
+        }
         url.query_pairs_mut().extend_pairs(pairs);
         let response = self.client.post(url).send().await
             .map_err(|_| anyhow::anyhow!("Registration request failed; its outcome may be unknown. Check registration status before retrying"))?;
@@ -82,29 +85,6 @@ impl RegistrationClient {
             bail!("Registration succeeded but returned invalid credentials or a mismatched binding");
         }
         Ok(registration)
-    }
-
-    pub(crate) async fn check(&self, token: &str, name: &str, parent: &str, slug: &str,
-        mode: &str, webhook: Option<&str>, provider: &str) -> anyhow::Result<()> {
-        let mut url = self.endpoint("openapi/v1/collaboration/register/check")?;
-        let mut pairs = vec![("token",token),("bot-name",name),("provider_bot_ref",parent),
-            ("bot_slug",slug),("mode",mode)];
-        if let Some(webhook) = webhook { pairs.push(("webhook_url",webhook)); }
-        url.query_pairs_mut().extend_pairs(pairs);
-        let response = self.client.post(url).send().await.map_err(|_| anyhow::anyhow!("Registration precheck request failed"))?;
-        let bytes = body(response,"Registration precheck").await?;
-        let envelope: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| anyhow::anyhow!("Invalid registration precheck response"))?;
-        let data = &envelope["data"];
-        if envelope["code"] != 20000 || data["provider_id"] != provider
-            || data["auth_mode"] != "agentpass-subbots" || data["agent_code"] != parent
-            || data["bot_slug"] != slug || data["provider_bot_ref"] != format!("{parent}:{slug}")
-            || data["identity_version"] != 1 {
-            bail!("Registration precheck returned a mismatched Provider mode or identity");
-        }
-        if data["available"] != true {
-            bail!("Bot slug is occupied; a previous registration may have completed. Review the saved pending registration before choosing another slug");
-        }
-        Ok(())
     }
 }
 

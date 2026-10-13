@@ -178,6 +178,7 @@ RegisterPath:
       these prerequisites before creation; plugin does not read or require
       a downlink credential. Credential-store failures return 500, not a readiness
       error. Provider/ref is unique across modes and retained after soft deletion.
+      Checks run inside registration; no separate availability-check API is provided.
       Any duplicate scoped ref returns 409, including an identical retry.
       A valid token can register multiple distinct refs. SQL Bot creation and
       gateway binding creation are atomic; owner-edge failures are returned but
@@ -218,6 +219,13 @@ RegisterPath:
           minLength: 1
           maxLength: 128
           pattern: '^[A-Za-z0-9_.:-]+$'
+      - name: expected_auth_mode
+        in: query
+        required: false
+        description: Optional Provider authentication-mode precondition for scoped registration. A mismatch returns 409 before any write; it never changes the Provider mode. Legacy v1 tokens reject it.
+        schema:
+          type: string
+          enum: [static_bearer, provider_admin, agentpass, agentpass-subbots]
       - name: bot_slug
         in: query
         required: false

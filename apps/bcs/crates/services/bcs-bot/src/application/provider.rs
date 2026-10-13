@@ -328,12 +328,6 @@ impl ProviderManagementService for ProviderManagement {
         })
     }
 
-    async fn check_provider_bot_registration(&self, command: RegisterProviderBotCommand) -> ServiceResult<bcs_service_api::core::provider_registration::ProviderRegistrationCheck> {
-        self.provider_bot_core.check_provider_bot_registration(&command.provider_id, &command.provider_admin_token, RegisterProviderBotParams {
-            bot_slug: command.bot_slug, webhook_url: command.webhook_url, bot_name: command.name, owners: command.owners, provider_bot_ref: command.provider_bot_ref, domains: command.domains, skills: command.skills, scopes: command.scopes, summary: command.summary, bot_uuid: command.bot_uuid, connection_mode: command.connection_mode,
-        }).await
-    }
-
     async fn list_provider_bots(
         &self,
         provider_id: &str,

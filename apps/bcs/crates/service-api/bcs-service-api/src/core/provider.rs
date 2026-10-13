@@ -174,9 +174,6 @@ pub struct ProviderBotDeletion {
 
 #[async_trait]
 pub trait ProviderBotCoreService: Send + Sync {
-    async fn check_provider_bot_registration(&self, _provider_id: &str, _token: &str, _params: RegisterProviderBotParams) -> ServiceResult<crate::core::provider_registration::ProviderRegistrationCheck> {
-        Err(ServiceError::InternalError("Provider registration check is not configured".into()))
-    }
     /// Delete a Bot-owned Provider identity (upstream or gateway), after Provider
     /// admin authorization. SQL gateway deletion also disables its projection.
     /// None means no Bot metadata identity is available; callers may use the

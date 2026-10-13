@@ -87,6 +87,7 @@ impl RegisterServiceImpl {
         let owner = payload.id.strip_prefix("human_")
             .ok_or(ApplicationError::Unauthenticated)?;
         let result = self.provider_registration()?.register(RegisterProviderBot {
+            expected_auth_mode: command.expected_auth_mode,
             bot_slug: command.bot_slug.clone(),
             provider_id: payload.provider_id,
             provider_bot_ref: provider_bot_ref.to_string(),
@@ -189,20 +190,6 @@ impl RegisterService for RegisterServiceImpl {
         })
     }
 
-    async fn check_bot(&self, command: RegisterBot) -> Result<bcs_service_api::core::provider_registration::ProviderRegistrationCheck, ApplicationError> {
-        let name = command.bot_name.trim();
-        if !(2..=64).contains(&name.chars().count()) { return Err(ApplicationError::invalid("invalid_request", "invalid bot-name")); }
-        let payload = provider_registration_token::decode_and_verify(&command.token, &self.token_secret).map_err(|_| ApplicationError::Unauthenticated)?;
-        let mode = command.mode.unwrap_or(ProviderRegistrationMode::Plugin);
-        if !payload.allowed_modes.contains(&mode) { return Err(ApplicationError::forbidden("registration mode is not authorized")); }
-        let reference = command.provider_bot_ref.as_deref().filter(|s| !s.trim().is_empty()).ok_or_else(|| ApplicationError::invalid("invalid_request", "provider_bot_ref is required"))?;
-        let owner = payload.id.strip_prefix("human_").ok_or(ApplicationError::Unauthenticated)?;
-        self.provider_registration()?.check(RegisterProviderBot {
-            provider_id: payload.provider_id, provider_bot_ref: reference.into(), owner: owner.into(),
-            mode, bot_name: name.into(), webhook_url: command.webhook_url, bot_slug: command.bot_slug,
-        }).await.map_err(provider_registration_error)
-    }
-
     async fn register_bot(
         &self,
         command: RegisterBot,
@@ -227,6 +214,7 @@ impl RegisterService for RegisterServiceImpl {
         if command.mode.unwrap_or(ProviderRegistrationMode::Plugin) != ProviderRegistrationMode::Plugin
             || command.provider_bot_ref.is_some()
             || command.webhook_url.is_some()
+            || command.expected_auth_mode.is_some()
         {
             return Err(ApplicationError::invalid(
                 "invalid_request", "legacy register tokens only support ordinary upstream registration",
@@ -496,6 +484,7 @@ mod tests {
             .expect("issue");
         let registration = svc
             .register_bot(RegisterBot {
+                expected_auth_mode: None,
             bot_slug: None,
                 mode: None,
                 provider_bot_ref: None,
@@ -537,6 +526,7 @@ mod tests {
         for bad in ["not-a-token"] {
             let error = svc
                 .register_bot(RegisterBot {
+                    expected_auth_mode: None,
             bot_slug: None,
                 mode: None,
                 provider_bot_ref: None,
@@ -559,6 +549,7 @@ mod tests {
         );
         let error = svc
             .register_bot(RegisterBot {
+                expected_auth_mode: None,
             bot_slug: None,
                 mode: None,
                 provider_bot_ref: None,
@@ -578,6 +569,7 @@ mod tests {
         for bad in ["a", too_long.as_str()] {
             let error = svc
                 .register_bot(RegisterBot {
+                    expected_auth_mode: None,
             bot_slug: None,
                 mode: None,
                 provider_bot_ref: None,
@@ -603,6 +595,7 @@ mod tests {
             .expect("issue");
         let error = svc
             .register_bot(RegisterBot {
+                expected_auth_mode: None,
             bot_slug: None,
                 mode: None,
                 provider_bot_ref: None,
@@ -627,6 +620,7 @@ mod tests {
             .expect("issue");
         let registration = svc
             .register_bot(RegisterBot {
+                expected_auth_mode: None,
             bot_slug: None,
                 mode: None,
                 provider_bot_ref: None,

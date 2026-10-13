@@ -136,10 +136,6 @@ fn build_api_routes() -> Router<HttpAppState> {
                 .post(routes::providers::register_provider_bot),
         )
         .route(
-            "/providers/{provider_id}/bots/registration-check",
-            post(routes::providers::check_provider_bot_registration),
-        )
-        .route(
             "/providers/{provider_id}/bots/by-task-modes",
             get(routes::providers::list_provider_bots_by_task_modes),
         )

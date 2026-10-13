@@ -126,21 +126,6 @@ impl ProviderRegistrationCore {
 
 #[async_trait]
 impl ProviderRegistrationCoreService for ProviderRegistrationCore {
-    async fn check(&self, command: RegisterProviderBot) -> ServiceResult<ProviderRegistrationCheck> {
-        let provider = self.authorized_provider(&command.provider_id, &command.owner).await?;
-        validate_id("provider_bot_ref", &command.provider_bot_ref)?;
-        if !(2..=64).contains(&command.bot_name.chars().count()) || command.bot_name != command.bot_name.trim() {
-            return Err(invalid("bot-name must be 2-64 characters without surrounding whitespace"));
-        }
-        let downlink = parse_downlink_config(&provider.config)?;
-        let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &command.provider_bot_ref, command.bot_slug.as_deref()).map_err(invalid)?;
-        self.endpoint(&provider, &downlink, &command).await?;
-        let occupied = self.registrations.get_provider_bot_by_ref(&command.provider_id, &identity.provider_bot_ref).await?.is_some()
-            || self.bindings.get_binding_by_provider_ref(&command.provider_id, &identity.provider_bot_ref).await?.is_some();
-        Ok(ProviderRegistrationCheck { provider_id: command.provider_id, auth_mode: downlink.auth_mode,
-            identity, available: !occupied, reason: occupied.then(|| "provider_bot_ref_taken".into()), identity_version: 1 })
-    }
-
     async fn authorize(
         &self,
         provider_id: &str,
@@ -170,6 +155,9 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
             ));
         }
         let downlink = parse_downlink_config(&provider.config)?;
+        if command.expected_auth_mode.is_some_and(|expected| expected != downlink.auth_mode) {
+            return Err(ServiceError::Conflict("provider authentication mode does not match".into()));
+        }
         let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &command.provider_bot_ref, command.bot_slug.as_deref()).map_err(invalid)?;
         command.provider_bot_ref = identity.provider_bot_ref.clone();
         let effective_webhook_url = self.endpoint(&provider, &downlink, &command).await?;

@@ -193,8 +193,6 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
         Some(pending::prepare(path, &request, args.bot_slug.as_deref())?)
     } else { None };
     if let Some(slug) = &slug {
-        client.check(&args.token, args.bot_name.trim(), &provider_bot_ref,
-            slug, args.mode.name(), webhook_url, &provider_id).await?;
         if existing_bots.iter().any(|item| item.get("provider_bot_ref").and_then(toml::Value::as_str) == Some(format!("{provider_bot_ref}:{slug}").as_str())) {
             bail!("This Bot is already present in the local bridge configuration");
         }
