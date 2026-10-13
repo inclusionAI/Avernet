@@ -42,6 +42,18 @@ use bcs_test_support::NoopSystemMessageService;
 
 use bcs_app_group::{GroupProvisioningReconciler, GroupServiceConfig, GroupServiceImpl};
 
+/// A live Human ACTOR row on the shared bots registry (the
+/// authority guards' Human existence source).
+async fn ensure_human_actor(fixture: &Fixture, user_id: &str) {
+    use bcs_service_api::port::repo::BotRepoPort;
+
+    fixture
+        .authority_repo
+        .ensure_human_actor(user_id, user_id)
+        .await
+        .expect("ensure fixture Human actor row");
+}
+
 struct Fixture {
     service: GroupServiceImpl,
     groups: Arc<GroupCore>,
@@ -1354,8 +1366,8 @@ async fn group_detail_propagates_authority_read_failure_as_internal() {
             })
             .expect("first owner edge");
         drop(existing);
+        ensure_human_actor(&fixture, "bob").await;
         let mut write = authority.try_write().expect("authority write lock");
-        write.humans.insert("bob".to_string());
         write.edges.insert(
             (
                 env,

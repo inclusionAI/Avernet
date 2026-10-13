@@ -41,6 +41,7 @@ use bcs_service_api::{ServiceError, ServiceResult};
 
 use bcs_config::resolve_env_str as resolve_env;
 use tokio::sync::RwLock;
+use tracing::warn;
 
 use super::MemoryBotRepo;
 
@@ -119,6 +120,11 @@ pub struct MemoryAuthorityAuditRow {
 /// conformance fixtures drive the SAME fields — the
 /// accessor is the fixture surface, not an application
 /// API.
+///
+/// Human existence lives on the shared bots registry
+/// (`MemoryBotRepo::bots` Human actor rows), not here:
+/// the guards read a registry snapshot before they enter
+/// this write-guard span.
 #[derive(Debug, Default, Clone)]
 pub struct MemoryAuthorityState {
     /// `ownership_version` per `(env, bot_id)`; absent = 0.
@@ -132,8 +138,6 @@ pub struct MemoryAuthorityState {
     /// `(env, bot_id, target_actor)` → transfer row.
     pub transfers:
         HashMap<(String, String, String), MemoryTransferRow>,
-    /// Backend-preset Human registry (user ids).
-    pub humans: HashSet<String>,
     /// Bots the Provider COMMANDS own (metadata or
     /// binding membership): the ordinary retirement
     /// refuses them (two commands, two contracts;
@@ -510,6 +514,66 @@ impl MemoryBotRepo {
     pub fn authority_state(&self) -> &RwLock<MemoryAuthorityState> {
         &self.authority
     }
+
+    /// Fixture surface (same role as [`Self::authority_state`]):
+    /// seed one live Human ACTOR row on the shared bots
+    /// registry, in the explicitly given env. The
+    /// human-existence guards read THIS registry (spec
+    /// §3.1: a Human exists iff its `human_<user_id>` actor
+    /// row is live in the bound env), so the fixtures seed
+    /// the same row shape the production
+    /// `ensure_human_actor` path creates.
+    pub async fn seed_human_actor_in(&self, env: &str, user_id: &str) {
+        use bcs_service_api::{ActorStatus, BotCapabilities};
+
+        let bot_id = human_actor_id(user_id);
+        let mut bots = self.bots.write().await;
+        if let Some(existing) = bots.get_mut(&bot_id) {
+            existing.env = Some(env.to_string());
+        } else {
+            bots.insert(
+                bot_id.clone(),
+                super::RegisteredBotInner {
+                    bot_id: bot_id.clone(),
+                    last_heartbeat: std::time::Instant::now(),
+                    capabilities: BotCapabilities {
+                        name: Some(user_id.to_string()),
+                        visibility: "protected".to_string(),
+                        ..Default::default()
+                    },
+                    ws_connection: None,
+                    // A persisted-session row so the registry's
+                    // expiry sweep never reaps a fixture Human.
+                    session_token: Some(format!(
+                        "fixture-token-{env}-{bot_id}",
+                    )),
+                    env: Some(env.to_string()),
+                    status: ActorStatus::Online,
+                    actor_kind: bcs_service_api::ActorKind::Human,
+                    created_by: Some(user_id.to_string()),
+                    protocol_version: 1,
+                    user_visibility: Default::default(),
+                    friend_ext: Default::default(),
+                    friend_check_in_strategy: Default::default(),
+                },
+            );
+        }
+        // A re-seed RESTORES a previously tombstoned row (a
+        // seeded Human is live, matching the insert-only
+        // seeding semantics the identity-set fixture had).
+        self.deleted_bot_ids.write().await.remove(&bot_id);
+    }
+
+    /// Fixture surface: mark one Human ACTOR row tombstoned
+    /// (the departed-Human scenario; env participates only
+    /// through the seeded row's env field, tombstones are
+    /// id-keyed like the memory repo's own soft delete).
+    pub async fn remove_human_actor_in(&self, user_id: &str) {
+        self.deleted_bot_ids
+            .write()
+            .await
+            .insert(human_actor_id(user_id));
+    }
 }
 
 pub(super) struct MemoryWriteContext {
@@ -535,6 +599,53 @@ pub(super) async fn memory_require_live_bot(
         env,
         bot_id: bot_id.to_string(),
     })
+}
+
+/// Soft live-bot classification for the lenient sync
+/// (spec §5.2 ruling): `Ok(None)` means missing/tombstoned
+/// and the caller returns success zeros with a warn log;
+/// the single-item edit and the transfer paths keep the
+/// strict erroring variant above.
+pub(super) async fn memory_bot_ctx_opt(
+    repo: &MemoryBotRepo,
+    bot_id: &str,
+) -> ServiceResult<Option<MemoryWriteContext>> {
+    let env = resolve_env();
+    if repo.deleted_bot_ids.read().await.contains(bot_id)
+        || !repo.bots.read().await.contains_key(bot_id)
+    {
+        return Ok(None);
+    }
+    Ok(Some(MemoryWriteContext {
+        env,
+        bot_id: bot_id.to_string(),
+    }))
+}
+
+/// Human ACTOR registry snapshot (user ids) read BEFORE
+/// the command's write-guard span: the guards need the
+/// shared bots map, and the documented lock order is
+/// authority → profiles → bots, so the bots read must
+/// COMPLETE before the authority guard is taken (it is
+/// never held across the span). TOCTOU: a tombstone racing
+/// the snapshot and the swap is accepted for the
+/// single-process dev/test backend (the next command
+/// re-reads and converges); SQL guards re-verify
+/// in-transaction.
+pub(super) async fn memory_live_humans(
+    repo: &MemoryBotRepo,
+) -> HashSet<String> {
+    let env = resolve_env();
+    let tombstoned = repo.deleted_bot_ids.read().await;
+    let bots = repo.bots.read().await;
+    bots.iter()
+        .filter(|(id, bot)| {
+            bot.actor_kind == bcs_service_api::ActorKind::Human
+                && bot.env.as_deref() == Some(env.as_str())
+                && !tombstoned.contains(*id)
+        })
+        .filter_map(|(id, _)| human_user_id_of_actor(id))
+        .collect()
 }
 
 /// Version + owner-completeness validation, run against
@@ -601,22 +712,30 @@ fn memory_approved_managers(
     members
 }
 
-/// Sorted, deduped owner-excluded manager set (the
-/// same exclusion predicate as the SQL store).
-fn memory_normalize_input(user_ids: &[String]) -> ServiceResult<Vec<String>> {
-    let mut deduped = BTreeSet::new();
-    for user_id in user_ids {
-        if human_user_id_of_actor(user_id).is_none() {
-            return Err(memory_human_unknown(format!(
-                "sync input member '{user_id}' is not a Human actor id"
-            )));
-        }
-        deduped.insert(user_id.clone());
-    }
+/// Validate + normalize the sync input (spec §5.2, the
+/// lenient-sync ruling; harness parity with the SQL
+/// store): dedup FIRST over the WHOLE raw input and count
+/// the 1,000 cap on that deduped original — including
+/// members the filter below will skip — then split into
+/// the valid (`human_*` actor shapes, sorted) and the
+/// skipped members (unknown shapes never fail the sync).
+fn memory_normalize_input(
+    user_ids: &[String],
+) -> ServiceResult<(Vec<String>, Vec<String>)> {
+    let deduped: BTreeSet<String> = user_ids.iter().cloned().collect();
     if deduped.len() > MANAGER_INPUT_CAP {
         return Err(memory_input_limit());
     }
-    Ok(deduped.into_iter().collect())
+    let mut valid = Vec::with_capacity(deduped.len());
+    let mut skipped = Vec::new();
+    for user_id in deduped {
+        if human_user_id_of_actor(&user_id).is_some() {
+            valid.push(user_id);
+        } else {
+            skipped.push(user_id);
+        }
+    }
+    Ok((valid, skipped))
 }
 
 async fn manager_edit_impl(
@@ -643,6 +762,9 @@ async fn manager_edit_impl(
             ))
         })?;
     let ctx = memory_require_live_bot(repo, &command.bot_id).await?;
+    // Human-registry snapshot read BEFORE the write-guard
+    // span (lock order authority → profiles → bots).
+    let live_humans = memory_live_humans(repo).await;
     // One write guard spans the whole command (staged
     // clone → validate → mutate → swap): a concurrent
     // command cannot interleave and lose an update. No
@@ -720,7 +842,9 @@ async fn manager_edit_impl(
         (ManagerEditAction::Grant, Some((MemoryAuthorityEdgeStatus::Revoked, _))) => {
             let target_user = human_user_id_of_actor(&target_actor)
                 .expect("validated actor shape");
-            if !staged.humans.contains(&target_user) {
+            // Strict edit target (spec §5.1): a live Human
+            // ACTOR row must exist in the registry snapshot.
+            if !live_humans.contains(&target_user) {
                 return Err(memory_human_unknown(format!(
                     "manager target '{target_user}' is not a valid Human"
                 )));
@@ -751,7 +875,9 @@ async fn manager_edit_impl(
         (ManagerEditAction::Grant, None) => {
             let target_user = human_user_id_of_actor(&target_actor)
                 .expect("validated actor shape");
-            if !staged.humans.contains(&target_user) {
+            // Strict edit target (spec §5.1): a live Human
+            // ACTOR row must exist in the registry snapshot.
+            if !live_humans.contains(&target_user) {
                 return Err(memory_human_unknown(format!(
                     "manager target '{target_user}' is not a valid Human"
                 )));
@@ -867,8 +993,38 @@ async fn manager_sync_impl(
              Human operators use the single-item manager commands",
         ));
     }
-    let mut input = memory_normalize_input(&command.user_ids)?;
-    let ctx = memory_require_live_bot(repo, &command.bot_id).await?;
+    let (typed_input, malformed) = memory_normalize_input(&command.user_ids)?;
+    let mutation_id = command.mutation.mutation_id.clone();
+    if !malformed.is_empty() {
+        warn!(
+            env = %resolve_env(),
+            bot_id = %command.bot_id,
+            mutation_id = %mutation_id,
+            skipped = ?malformed,
+            "manager sync skipped non-Human-actor input members"
+        );
+    }
+    // Lenient target classification (spec §5.2): a
+    // missing/tombstoned bot is a zeros no-op with a warn
+    // log; version 0 (inside the span below) still
+    // hard-rejects.
+    let Some(ctx) = memory_bot_ctx_opt(repo, &command.bot_id).await? else {
+        warn!(
+            env = %resolve_env(),
+            bot_id = %command.bot_id,
+            mutation_id = %mutation_id,
+            input_size = command.user_ids.len(),
+            "manager sync target bot is missing; returning zeros"
+        );
+        return Ok(ManagerSetChange {
+            added: 0,
+            removed: 0,
+            total: 0,
+        });
+    };
+    // Human-registry snapshot read BEFORE the write-guard
+    // span (lock order authority → profiles → bots).
+    let live_humans = memory_live_humans(repo).await;
     // One write guard spans the whole command (staged
     // clone → validate → mutate → swap); no other lock
     // or await inside the span.
@@ -876,17 +1032,36 @@ async fn manager_sync_impl(
     let mut staged = state_guard.clone();
     memory_require_initialized(&staged, &ctx)?;
     let current_owner = memory_state_owner(&staged, &ctx);
-    let input_owner_excluded: Vec<String> =
-        input.iter().filter(|actor| *actor != &current_owner).cloned().collect();
-    input = input_owner_excluded.clone();
-    for actor in &input {
+    let input_owner_excluded: Vec<String> = typed_input
+        .iter()
+        .filter(|actor| *actor != &current_owner)
+        .cloned()
+        .collect();
+    // Lenient partition (spec §5.2): members with no live
+    // Human ACTOR row are filtered out of the applied
+    // remainder with a warn log — the final set always
+    // equals the valid remainder, so an unknown-only input
+    // clears the set.
+    let mut skipped_users: Vec<String> = Vec::new();
+    let mut input: Vec<String> = Vec::new();
+    for actor in &input_owner_excluded {
         let user = human_user_id_of_actor(actor)
             .expect("normalized actor shape");
-        if !staged.humans.contains(&user) {
-            return Err(memory_human_unknown(format!(
-                "manager input member '{user}' is not a valid Human"
-            )));
+        if live_humans.contains(&user) {
+            input.push(actor.clone());
+        } else {
+            skipped_users.push(user);
         }
+    }
+    if !skipped_users.is_empty() {
+        warn!(
+            env = %resolve_env(),
+            bot_id = %command.bot_id,
+            mutation_id = %mutation_id,
+            skipped = ?skipped_users,
+            "manager sync skipped input members with no live \
+             Human actor row"
+        );
     }
     let current = memory_approved_managers(&staged, &ctx, &current_owner);
     if current.len() as u64 > MANAGER_STOCK_BOUND {
@@ -945,13 +1120,8 @@ async fn manager_sync_impl(
         sequence += 1;
     }
     for member in &added {
-        let user = human_user_id_of_actor(member)
-            .expect("normalized actor shape");
-        if !staged.humans.contains(&user) {
-            return Err(memory_human_unknown(format!(
-                "manager input member '{user}' is not a valid Human"
-            )));
-        }
+        // The adds are a subset of the valid (registry-filtered)
+        // remainder — no second existence pass here.
         let edge = (
             ctx.env.clone(),
             ctx.bot_id.clone(),
@@ -1214,6 +1384,9 @@ async fn transfer_change_impl(
     // Live-bot gate before the span (same shape as
     // the manager commands).
     let ctx = memory_require_live_bot(repo, &key.bot_id).await?;
+    // Human-registry snapshot read BEFORE the write-guard
+    // span (lock order authority → profiles → bots).
+    let live_humans = memory_live_humans(repo).await;
     let now = now_ms();
     // One write guard spans the whole command (staged
     // clone → validate → mutate → swap); no other lock
@@ -1223,11 +1396,12 @@ async fn transfer_change_impl(
     let version = memory_require_initialized(&staged, &ctx)?;
     let owner = memory_state_owner(&staged, &ctx);
     // The target must remain a valid surviving Human
-    // (spec §6.2/§6.3).
+    // (spec §6.2/§6.3): a live Human ACTOR row in the
+    // registry snapshot.
     let target_user =
         human_user_id_of_actor(&key.target_owner_actor_id)
             .expect("validated target shape");
-    if !staged.humans.contains(&target_user) {
+    if !live_humans.contains(&target_user) {
         return Err(memory_human_unknown(format!(
             "transfer target '{}' is not a valid Human",
             key.target_owner_actor_id

@@ -4,11 +4,12 @@
 //!
 //! `inspect` is the zero-write dry-run: it classifies
 //! each explicitly listed Bot from the SAME facts the
-//! `initialize_ownership` guard validates (live state,
-//! `created_by`, the Human identity registry, the
-//! current version, the approved owner edges — read
-//! through the SAME `BotRegistryCoreService` facade,
-//! never raw SQL in the CLI) into
+//! apply classification consumes (live state,
+//! `created_by`, whether the owner's Human ACTOR row is
+//! live in the instance env, the current version, the
+//! approved owner edges — read through the SAME
+//! `BotRegistryCoreService` facade, never raw SQL in the
+//! CLI) into
 //! backfillable / missing-Human / relation-conflict /
 //! already-initialized; the missing/conflict output is
 //! the manual-governance list.
@@ -178,12 +179,14 @@ fn mutation_for(_bot_id: &str) -> AuthorityMutation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BackfillState {
     /// Created record consistent with the historical
-    /// relations and pointing at a valid Human,
+    /// relations and pointing at a valid Human (a live
+    /// Human ACTOR row in the instance env),
     /// version 0 — `initialize` may backfill (spec
     /// §10.4).
     Backfillable,
-    /// The `created_by` owner has no Human identity
-    /// row (or no created record `created_by`).
+    /// The `created_by` owner has no live Human ACTOR
+    /// row in the instance env (or no created record
+    /// `created_by`).
     MissingHuman,
     /// The historical relations contradict the
     /// created record (created record mixed with
@@ -257,12 +260,12 @@ pub(crate) fn classify(
                 .to_string(),
         };
     };
-    if !governance.owner_identity_present {
+    if !governance.owner_actor_present {
         return Classification {
             state: BackfillState::MissingHuman,
             reason: format!(
-                "the created record '{created_by}' has no Human \
-                 identity row in the instance env"
+                "the created record '{created_by}' has no live Human \
+                 actor row in the instance env"
             ),
         };
     }

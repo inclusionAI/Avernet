@@ -310,7 +310,6 @@ mod tests {
     mod http;
     mod provider_registration;
     use super::*;
-    use std::collections::HashSet;
 
     use bcs_bot::BotCore;
     use bcs_bot_store::MemoryBotRepo;
@@ -366,15 +365,28 @@ mod tests {
     }
 
     async fn seed_human(repo: &MemoryBotRepo, user_id: &str) {
-        repo.authority_state()
-            .write()
+        // A live Human ACTOR row on the shared registry —
+        // the authority guards' Human existence source.
+        use bcs_service_api::port::repo::BotRepoPort;
+
+        repo.ensure_human_actor(user_id, user_id)
             .await
-            .humans
-            .insert(user_id.to_string());
+            .expect("ensure fixture Human actor row");
     }
 
-    async fn known_humans(repo: &MemoryBotRepo) -> HashSet<String> {
-        repo.authority_state().read().await.humans.clone()
+    /// Whether the user's Human ACTOR row exists and is a
+    /// live Human on the shared registry.
+    async fn known_human_actor_row(
+        repo: &MemoryBotRepo,
+        user_id: &str,
+    ) -> bool {
+        use bcs_service_api::ActorKind;
+        use bcs_service_api::port::repo::BotRepoPort;
+
+        repo.get(&format!("human_{user_id}"))
+            .await
+            .map(|row| row.actor_kind == ActorKind::Human)
+            .unwrap_or(false)
     }
 
     async fn owner_relation(
@@ -585,13 +597,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn registration_creates_the_owner_identity_entry() {
+    async fn registration_creates_the_owner_actor_row() {
         // Spec §10.2 literal (ruling T4-1): the trusted
-        // registration ensures the owner's Human identity
+        // registration ensures the owner's Human ACTOR row
         // in the SAME commit (memory mirror: the shared
-        // state's humans registry).
+        // bots registry — no OAuth identity row involved).
         let (svc, repo) = memory_chain();
-        assert!(known_humans(&repo).await.is_empty());
+        assert!(
+            !known_human_actor_row(&repo, "staff-1").await,
+            "no Human actor row before the registration"
+        );
         let token_view = svc
             .issue_register_token(IssueRegisterToken {
                 provider_id: None,
@@ -612,8 +627,10 @@ mod tests {
         assert!(
             repo.get(&registration.bot_uuid).await.is_some()
         );
-        let humans = known_humans(&repo).await;
-        assert!(humans.contains("staff-1"), "{humans:?}");
+        assert!(
+            known_human_actor_row(&repo, "staff-1").await,
+            "the registration must leave a live Human actor row"
+        );
     }
 
     #[tokio::test]

@@ -204,10 +204,11 @@ pub struct BotOwnershipGovernance {
     /// The row exists and is not tombstoned.
     pub live: bool,
     pub created_by: Option<String>,
-    /// `created_by`'s Human identity row exists in the identity
-    /// registry (`bcs_user_identities` on SQL; the same preset
-    /// registry on memory). `false` when `created_by` is absent.
-    pub owner_identity_present: bool,
+    /// `created_by`'s Human ACTOR row is live in the instance
+    /// env (`bcs_bots`, `actor_kind='human'`, `human_<user_id>`,
+    /// not tombstoned — the same registry the authority guards
+    /// read). `false` when `created_by` is absent.
+    pub owner_actor_present: bool,
     pub ownership_version: u64,
     /// Approved owner-edge subjects (Human actor ids,
     /// byte-exact, stable order).

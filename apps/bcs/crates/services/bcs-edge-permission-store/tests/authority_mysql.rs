@@ -215,26 +215,51 @@ impl BotAuthorityContractFixture for MysqlAuthorityFixture {
     }
 
     async fn seed_human(&self, env: &str, user_id: &str) {
-        let _ = env;
+        // The authority Human registry is the `bcs_bots`
+        // actor row (spec §3.1): env-bound, live, seeded in
+        // the same shape the production `ensure_human_actor`
+        // path creates. The session token must stay unique
+        // (`uk_bots_session_token`), so it carries the env.
+        // A re-seed RESTORES a previously tombstoned row
+        // (MySQL has no upsert-on-conflict here without
+        // touching the token column, so the restore is a
+        // plain follow-up UPDATE).
         execute(
             self.db.as_ref(),
-            "INSERT IGNORE INTO bcs_user_identities \
-             (user_id, auth_source, external_user_id, env) \
-             VALUES (?, 'fixture', ?, 'fixture')",
+            "INSERT IGNORE INTO bcs_bots \
+             (bot_uuid, actor_kind, name, session_token, created_by, \
+              visibility, status, env) \
+             VALUES (?, 'human', ?, ?, ?, 'protected', 'online', ?)",
             vec![
+                DbValue::from(format!("human_{user_id}")),
                 DbValue::from(user_id),
-                DbValue::from(format!("fixture-{user_id}")),
+                DbValue::from(format!("fixture-token-{env}-{user_id}")),
+                DbValue::from(user_id),
+                DbValue::from(env),
+            ],
+        )
+        .await;
+        execute(
+            self.db.as_ref(),
+            "UPDATE bcs_bots SET is_deleted = 0 \
+             WHERE bot_uuid = ? AND env = ?",
+            vec![
+                DbValue::from(format!("human_{user_id}")),
+                DbValue::from(env),
             ],
         )
         .await;
     }
 
     async fn remove_human(&self, env: &str, user_id: &str) {
-        let _ = env;
         execute(
             self.db.as_ref(),
-            "DELETE FROM bcs_user_identities WHERE user_id = ?",
-            vec![DbValue::from(user_id)],
+            "UPDATE bcs_bots SET is_deleted = 1 \
+             WHERE bot_uuid = ? AND env = ?",
+            vec![
+                DbValue::from(format!("human_{user_id}")),
+                DbValue::from(env),
+            ],
         )
         .await;
     }
@@ -430,7 +455,7 @@ async fn authority_mysql_conformance() {
     // Scenario inventory is reported for the CI gate: the
     // aggregate is not an empty shell — it ran the full
     // harness scenario list and must keep it complete.
-    assert_eq!(authority_scenarios, 24, "authority harness scenarios");
+    assert_eq!(authority_scenarios, 29, "authority harness scenarios");
     assert_eq!(
         scenarios.len() - authority_scenarios,
         23,

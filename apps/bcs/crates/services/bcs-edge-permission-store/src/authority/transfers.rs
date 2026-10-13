@@ -583,8 +583,10 @@ impl DbBotAuthorityStore {
         }
     }
 
-    /// The Human registry check (identical to the
-    /// manager paths' Human guard).
+    /// The Human ACTOR registry check (identical to the
+    /// manager paths' Human guard): the target's
+    /// `bcs_bots` row must be a live Human in the bound
+    /// env (`actor_kind = 'human'`, not tombstoned).
     async fn require_existing_human(&self, actor_id: &str) -> ServiceResult<()> {
         let user_id = human_user_id_of_actor(actor_id)
             .expect("target shape validated");
@@ -592,9 +594,19 @@ impl DbBotAuthorityStore {
             .query(
                 "authority_transfer_human_check",
                 DbStatement::with_params(
-                    "SELECT COUNT(*) AS c FROM bcs_user_identities \
-                     WHERE user_id = ?",
-                    vec![DbValue::from(user_id)],
+                    format!(
+                        "SELECT COUNT(*) AS c FROM bcs_bots \
+                         WHERE {} \
+                           AND actor_kind = 'human' \
+                           AND env = ? \
+                           AND COALESCE(is_deleted, 0) = 0",
+                        self.bot_id_eq()
+                    )
+                    .as_str(),
+                    vec![
+                        DbValue::from(human_actor_id(&user_id).as_str()),
+                        self.env_param(),
+                    ],
                 ),
             )
             .await?;
@@ -1419,15 +1431,29 @@ impl DbBotAuthorityStore {
             DbTransactionParam::value(DbValue::from(version)),
             builder.version_ref(),
         ]);
-        // Target must be a valid surviving Human.
+        // Target must be a valid surviving Human: its ACTOR
+        // row is live in `bcs_bots` under the row lock (the
+        // Bot row is locked first, spec §7 order).
         builder.push_count_guard(
-            "SELECT COUNT(*) AS c FROM bcs_user_identities \
-             WHERE user_id = ?"
-                .to_string(),
-            vec![DbTransactionParam::value(DbValue::from(
-                human_user_id_of_actor(target)
-                    .expect("target shape validated"),
-            ))],
+            format!(
+                "SELECT COUNT(*) AS c FROM bcs_bots \
+                 WHERE {} \
+                   AND actor_kind = 'human' \
+                   AND env = ? \
+                   AND COALESCE(is_deleted, 0) = 0{}",
+                self.bot_id_eq(),
+                lock_suffix(self),
+            ),
+            vec![
+                DbTransactionParam::value(DbValue::from(
+                    human_actor_id(
+                        &human_user_id_of_actor(target)
+                            .expect("target shape validated"),
+                    )
+                    .as_str(),
+                )),
+                DbTransactionParam::value(self.env_param()),
+            ],
             1,
         );
         // The target row carries EXACTLY the classified
@@ -2051,15 +2077,29 @@ impl DbBotAuthorityStore {
         let now = self.db_now_utc();
         let modified = gmt_modified_now(self);
         // Target Human survival at decision time
-        // (spec §6.3 check the Bot/Human survival).
+        // (spec §6.3 check the Bot/Human survival): the
+        // ACTOR row is re-verified live under the row lock
+        // (Bot row first, spec §7 order).
         builder.push_count_guard(
-            "SELECT COUNT(*) AS c FROM bcs_user_identities \
-             WHERE user_id = ?"
-                .to_string(),
-            vec![DbTransactionParam::value(DbValue::from(
-                human_user_id_of_actor(target)
-                    .expect("target shape validated"),
-            ))],
+            format!(
+                "SELECT COUNT(*) AS c FROM bcs_bots \
+                 WHERE {} \
+                   AND actor_kind = 'human' \
+                   AND env = ? \
+                   AND COALESCE(is_deleted, 0) = 0{}",
+                self.bot_id_eq(),
+                lock_suffix(self),
+            ),
+            vec![
+                DbTransactionParam::value(DbValue::from(
+                    human_actor_id(
+                        &human_user_id_of_actor(target)
+                            .expect("target shape validated"),
+                    )
+                    .as_str(),
+                )),
+                DbTransactionParam::value(self.env_param()),
+            ],
             1,
         );
         // Edge-state classification (parameter

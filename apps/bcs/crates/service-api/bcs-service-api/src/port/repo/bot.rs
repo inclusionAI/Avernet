@@ -44,9 +44,8 @@ pub trait BotRepoPort: Send + Sync {
     /// One store transaction commits: the Bot identity (created only
     /// when absent; existing active/deleted records are never
     /// updated, so a reused Bot ID never resets its owner), the
-    /// Human for `initialization.owner_user_id` — the identity row
-    /// (`bcs_user_identities`, insert-or-ignore) and the Human ACTOR
-    /// row (`bcs_bots`) are ensured in the SAME transaction so the
+    /// Human for `initialization.owner_user_id` — the Human ACTOR
+    /// row (`bcs_bots`) is ensured in the SAME transaction so the
     /// Task-2/3 human-existence guards accept the fresh owner —
     /// the approved owner edge, `ownership_version = 1`
     /// (never from a version-0 runtime path), the default runtime

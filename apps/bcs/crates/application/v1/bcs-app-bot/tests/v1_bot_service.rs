@@ -167,11 +167,9 @@ impl Fixture {
         status: ActorStatus,
     ) {
         self.repo
-            .authority_state()
-            .write()
+            .ensure_human_actor(owner, owner)
             .await
-            .humans
-            .insert(owner.to_string());
+            .expect("ensure fixture Human actor row");
         self.add_bot(bot_id, owner, visibility, status).await;
         self.repo
             .initialize_ownership(

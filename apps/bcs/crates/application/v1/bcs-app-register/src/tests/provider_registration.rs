@@ -35,13 +35,14 @@ pub(super) async fn seed_humans(
     repo: &Arc<MemoryBotRepo>,
     ids: &[&str],
 ) {
-    // One shared identity writer to keep the tests linear.
+    use bcs_service_api::port::repo::BotRepoPort;
+
+    // Live Human ACTOR rows on the shared registry — the
+    // authority guards' Human existence source.
     for id in ids {
-        repo.authority_state()
-            .write()
+        repo.ensure_human_actor(id, id)
             .await
-            .humans
-            .insert(id.to_string());
+            .expect("ensure fixture Human actor row");
     }
 }
 

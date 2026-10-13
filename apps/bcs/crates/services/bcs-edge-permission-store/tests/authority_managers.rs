@@ -4,10 +4,12 @@
 //! memory projection so results and errors cannot drift
 //! (spec §5.1/§5.2, feasibility doc §2 sketch).
 //!
-//! The fixture DB mirrors `migrations/sqlite/034_bot_authority.sql`
-//! plus the Human registry (`bcs_user_identities`) the Task-2
-//! write paths validate targets against. MySQL still runs the
-//! same store in CI (plan §6); locally there is no MySQL server.
+//! The fixture DB mirrors `migrations/sqlite/034_bot_authority.sql`;
+//! the Human registry the Task-2 write paths validate targets
+//! against is the `bcs_bots` actor rows (`actor_kind='human'`,
+//! env-bound), so a seeded Human IS a live actor row. MySQL
+//! still runs the same store in CI (plan §6); locally there is
+//! no MySQL server.
 //!
 //! The stock-bound (>10,000) rejection is beyond what the shared
 //! harness intentionally seeds; the SQLite bulk-seeding scenarios
@@ -178,26 +180,37 @@ impl BotAuthorityContractFixture for SqlAuthorityFixture {
     }
 
     async fn seed_human(&self, env: &str, user_id: &str) {
-        let _ = env; // humans are the Backend-preset global registry
+        // The authority Human registry is the `bcs_bots`
+        // actor row (spec §3.1): seed the same row the
+        // production `ensure_human_actor` path creates —
+        // env-bound, live, `human_<user_id>` keyed.
         execute(
             self.db.as_ref(),
-            "INSERT INTO bcs_user_identities (user_id, auth_source, external_user_id, env) \
-             VALUES (?, 'fixture', ?, 'fixture') \
-             ON CONFLICT(user_id) DO NOTHING",
+            "INSERT INTO bcs_bots \
+             (bot_uuid, actor_kind, name, session_token, created_by, \
+              visibility, status, env, is_deleted) \
+             VALUES (?, 'human', ?, ?, ?, 'protected', 'online', ?, 0) \
+             ON CONFLICT(bot_uuid, env) DO UPDATE SET is_deleted = 0",
             vec![
+                DbValue::from(format!("human_{user_id}")),
                 DbValue::from(user_id),
-                DbValue::from(format!("fixture-{user_id}")),
+                DbValue::from(format!("fixture-token-{env}-{user_id}")),
+                DbValue::from(user_id),
+                DbValue::from(env),
             ],
         )
         .await;
     }
 
     async fn remove_human(&self, env: &str, user_id: &str) {
-        let _ = env;
         execute(
             self.db.as_ref(),
-            "DELETE FROM bcs_user_identities WHERE user_id = ?",
-            vec![DbValue::from(user_id)],
+            "UPDATE bcs_bots SET is_deleted = 1 \
+             WHERE bot_uuid = ? AND env = ?",
+            vec![
+                DbValue::from(format!("human_{user_id}")),
+                DbValue::from(env),
+            ],
         )
         .await;
     }
@@ -252,15 +265,19 @@ fn grant_kind_str(kind: BotAccessRelation) -> &'static str {
     }
 }
 
-/// Post-migration SQLite schema for the authority store (plus
-/// `bcs_user_identities` for the Task-2 Human validation).
+/// Post-migration SQLite schema for the authority store (the
+/// Human registry is the `bcs_bots` actor rows).
 const SCHEMA_STATEMENTS: &[&str] = &[
     "CREATE TABLE bcs_bots (\
         id INTEGER PRIMARY KEY AUTOINCREMENT, \
         bot_uuid TEXT NOT NULL, \
         env TEXT NOT NULL, \
         name TEXT NOT NULL DEFAULT '', \
+        session_token TEXT, \
+        created_by TEXT, \
+        visibility TEXT NOT NULL DEFAULT 'protected', \
         status TEXT NOT NULL DEFAULT 'online', \
+        actor_kind TEXT NOT NULL DEFAULT 'bot', \
         is_deleted INTEGER NOT NULL DEFAULT 0, \
         ownership_version INTEGER NOT NULL DEFAULT 0, \
         gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
@@ -325,16 +342,6 @@ const SCHEMA_STATEMENTS: &[&str] = &[
         gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
         UNIQUE (env, mutation_id, sequence))",
     "CREATE INDEX idx_change_bot ON bot_authority_changes(env, bot_id, sequence)",
-    "CREATE TABLE bcs_user_identities (\
-        id INTEGER PRIMARY KEY AUTOINCREMENT, \
-        user_id TEXT NOT NULL, \
-        auth_source TEXT NOT NULL, \
-        external_user_id TEXT NOT NULL, \
-        user_name TEXT, \
-        env TEXT NOT NULL, \
-        gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
-        gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
-        UNIQUE (user_id))",
 ];
 
 #[tokio::test]
@@ -394,7 +401,7 @@ async fn sync_rejects_stock_over_10000() {
     let db = fixture.db.clone();
     fixture.seed_bot(ENV, "bot_huge", 1).await;
     fixture.seed_human(ENV, "own").await;
-    // Bulk humans.
+    // Bulk humans (live `bcs_bots` actor rows).
     for chunk in (0..10_110usize).collect::<Vec<_>>().chunks(100) {
         let mut values = String::new();
         let mut params = Vec::new();
@@ -402,16 +409,21 @@ async fn sync_rejects_stock_over_10000() {
             if index > 0 {
                 values.push_str(",");
             }
-            values.push_str("(?, 'fixture', ?, 'fixture')");
+            values.push_str("(?, 'human', ?, ?, ?, 'protected', 'online', ?, 0)");
+            params.push(DbValue::from(format!("human_stock{id:0>5}")));
             params.push(DbValue::from(format!("stock{id:0>5}")));
-            params.push(DbValue::from(format!("ext{index}")));
+            params.push(DbValue::from(format!("fixture-token-stock{id:0>5}")));
+            params.push(DbValue::from(format!("stock{id:0>5}")));
+            params.push(DbValue::from(ENV));
         }
         execute(
             db.as_ref(),
             &format!(
-                "INSERT INTO bcs_user_identities (user_id, auth_source, external_user_id, env) \
+                "INSERT INTO bcs_bots \
+                 (bot_uuid, actor_kind, name, session_token, created_by, \
+                  visibility, status, env, is_deleted) \
                  VALUES {values} \
-                 ON CONFLICT(user_id) DO NOTHING"
+                 ON CONFLICT(bot_uuid, env) DO NOTHING"
             ),
             params,
         )

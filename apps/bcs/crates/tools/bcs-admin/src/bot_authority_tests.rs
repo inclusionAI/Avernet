@@ -81,14 +81,22 @@ impl SqliteDb {
             .expect("seed registration");
     }
 
-    async fn seed_identity(&self, user_id: &str) {
+    /// Seed one live Human ACTOR row (the authority Human
+    /// registry, `bcs_bots`) in the instance env.
+    async fn seed_human_actor(&self, user_id: &str) {
         self.execute(
-            "INSERT OR IGNORE INTO bcs_user_identities \
-             (user_id, auth_source, external_user_id, env) \
-             VALUES (?, 'gateway', ?, ?)",
+            "INSERT OR IGNORE INTO bcs_bots \
+             (bot_uuid, actor_kind, name, bot_info, session_token, \
+              created_by, visibility, status, env, \
+              registered_at, updated_at) \
+             VALUES (?, 'human', ?, '{\"summary\":null}', ?, ?, \
+                     'protected', 'online', ?, \
+                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
             vec![
+                DbValue::from(format!("human_{user_id}")),
                 DbValue::from(user_id),
-                DbValue::from(format!("ext-{user_id}")),
+                DbValue::from(format!("fixture-token-{user_id}")),
+                DbValue::from(user_id),
                 DbValue::from(bcs_config::resolve_env_str()),
             ],
         )
@@ -212,19 +220,20 @@ async fn inspect_classifies_all_buckets_with_zero_writes() {
     let db = sqlite_db().await;
 
     // Backfillable: version 0, created record points
-    // at a valid Human, no contradicting owner edge.
-    db.seed_identity("creator-human").await;
+    // at a Human with a live actor row, no contradicting
+    // owner edge.
+    db.seed_human_actor("creator-human").await;
     db.seed_bot("bot-clean").await;
     db.seed_created_by("bot-clean", "creator-human").await;
 
-    // Missing Human: the created record has no
-    // identity row.
+    // Missing Human: the created record has no live
+    // Human actor row.
     db.seed_bot("bot-no-human").await;
     db.seed_created_by("bot-no-human", "nobody").await;
 
     // Relation conflict: created record contradicted
     // by an approved owner edge for ANOTHER actor.
-    db.seed_identity("creator-human").await;
+    db.seed_human_actor("creator-human").await;
     db.seed_bot("bot-conflict").await;
     db.seed_created_by("bot-conflict", "creator-human").await;
     db.seed_owner_edge("bot-conflict", "human_otherone")
@@ -232,7 +241,7 @@ async fn inspect_classifies_all_buckets_with_zero_writes() {
 
     // Already initialized: version > 0 with a
     // committed owner.
-    db.seed_identity("committed-owner").await;
+    db.seed_human_actor("committed-owner").await;
     db.seed_bot("bot-initialized").await;
     db.seed_created_by("bot-initialized", "creator-A")
         .await;
@@ -313,8 +322,8 @@ async fn count_rows(db: &SqliteDb) -> u64 {
 #[tokio::test]
 async fn apply_initializes_only_listed_and_repeats_echo_the_current_owner() {
     let db = sqlite_db().await;
-    db.seed_identity("creator-human").await;
-    db.seed_identity("creator-b").await;
+    db.seed_human_actor("creator-human").await;
+    db.seed_human_actor("creator-b").await;
     db.seed_bot("bot-target").await;
     db.seed_created_by("bot-target", "creator-human").await;
     // NOT listed stays untouched.
@@ -367,7 +376,7 @@ async fn apply_initializes_only_listed_and_repeats_echo_the_current_owner() {
 #[tokio::test]
 async fn apply_reports_missing_and_conflict_per_item_without_writes() {
     let db = sqlite_db().await;
-    db.seed_identity("creator-human").await;
+    db.seed_human_actor("creator-human").await;
     db.seed_bot("bot-missing").await;
     db.seed_created_by("bot-missing", "nobody").await;
     db.seed_bot("bot-conflict").await;
@@ -405,7 +414,7 @@ async fn apply_reports_missing_and_conflict_per_item_without_writes() {
 #[tokio::test]
 async fn apply_never_resets_a_transferred_owner() {
     let db = sqlite_db().await;
-    db.seed_identity("creator-b").await;
+    db.seed_human_actor("creator-b").await;
     db.seed_bot("bot-transferred").await;
     db.seed_created_by("bot-transferred", "creator-A")
         .await;

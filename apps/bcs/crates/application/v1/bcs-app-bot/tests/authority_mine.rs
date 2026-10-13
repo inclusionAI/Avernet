@@ -635,10 +635,12 @@ impl Fixture {
         owner: &str,
         status: ActorStatus,
     ) {
-        {
-            let mut state = self.repo.authority_state().write().await;
-            state.humans.insert(owner.to_string());
-        }
+        // A live Human ACTOR row on the shared registry (the
+        // authority guards' Human existence source).
+        self.repo
+            .ensure_human_actor(owner, owner)
+            .await
+            .expect("ensure fixture Human actor row");
         self.repo
             .register(
                 bot_id.to_string(),

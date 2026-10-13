@@ -4,21 +4,23 @@
 //!
 //! One `transaction_with_options` for the Bot row (with
 //! `ownership_version = 1` and the owner as first
-//! `created_by`), the Human identity row
-//! (`bcs_user_identities`, ruled as in-transaction 必要创建 —
-//! ruling T4-1), the Human ACTOR row, the approved owner
-//! edge, the default runtime profile and the `initialize`
-//! audit. Failure is
-//! all-or-nothing: nothing is hydrated into process memory,
-//! no token is mapped and no runtime activation happens. An
-//! existing or tombstoned identity is never overwritten, so
-//! a reused Bot ID can never reset a committed owner.
+//! `created_by`), the Human ACTOR row (`bcs_bots`, ruled as
+//! in-transaction 必要创建 — ruling T4-1; the actor row IS
+//! the authority Human registry), the approved owner edge,
+//! the default runtime profile and the `initialize` audit.
+//! Failure is all-or-nothing: nothing is hydrated into
+//! process memory, no token is mapped and no runtime
+//! activation happens. An existing or tombstoned identity is
+//! never overwritten, so a reused Bot ID can never reset a
+//! committed owner.
 //!
 //! The governance `initialize_ownership` backfill runs the
 //! same authority pieces on an existing live Bot without
 //! rewriting `created_by` and without resetting an owner
-//! whose registration already initialized. It VALIDATES the
-//! owner's identity (never creates rows).
+//! whose registration already initialized. The Human
+//! screening for the backfill lives in the governance FACTS
+//! read (`read_ownership_governance` — the bcs-admin dry-run
+//! classification, spec §10.4), never in the composite.
 
 use bcs_db_api::{
     DbError, DbSqlFlavor, DbStatement, DbTransactionParam,
@@ -27,7 +29,7 @@ use bcs_db_api::{
 use bcs_edge_permission_store::lifecycle;
 use bcs_service_api::types::bot_authority::{
     AuthorityMutation, BotOwnershipGovernance,
-    BotOwnershipView, OwnershipInitialization,
+    BotOwnershipView, OwnershipInitialization, human_actor_id,
 };
 use bcs_service_api::{ActorKind, BotCapabilities, ServiceError, ServiceResult};
 
@@ -322,32 +324,12 @@ impl PersistentBotRepo {
             ));
             let version_guard = steps.len() - 1;
 
-            // 2: the Human identity is valid (spec
-            // §10.4's "指向有效 Human"): governance
-            // initializes only bots whose owner Human
-            // EXISTS in the identity registry — the
-            // registration composite is the only creator.
-            steps.push(DbTransactionStep::Query(
-                DbStatement::with_transaction_params(
-                    format!(
-                        "SELECT t.c AS ok FROM \
-                         (SELECT COUNT(*) AS c FROM bcs_user_identities \
-                          WHERE {}) t WHERE t.c = 1",
-                        match self.flavor {
-                            DbSqlFlavor::Mysql => "CAST(user_id AS BINARY) = ?",
-                            DbSqlFlavor::Sqlite => "user_id = ?",
-                        }
-                    )
-                    .as_str(),
-                    vec![DbTransactionParam::value(Value::from(
-                        owner_user_id,
-                    ))],
-                ),
-            ));
-            let human_guard = steps.len() - 1;
-
-            // 3: owner edge (insert-or-ignore) and its exactly-one
-            // guard.
+            // 2: owner edge (insert-or-ignore) and its exactly-one
+            // guard. (The Human screening of the backfill lives
+            // in the governance facts read; this composite only
+            // re-verifies the Bot row and the version CAS — the
+            // identity-row guard was the removed T4-1
+            // workaround's persistent-layer echo.)
             steps.push(DbTransactionStep::Execute(
                 lifecycle::owner_edge_statement(
                     self.flavor,
@@ -379,7 +361,7 @@ impl PersistentBotRepo {
             ));
             let owner_guard = steps.len() - 1;
 
-            // 4: version CAS — exactly one row moves to
+            // 3: version CAS — exactly one row moves to
             // version 1.
             steps.push(DbTransactionStep::ExecuteChecked {
                 statement: DbStatement::with_params(
@@ -391,7 +373,7 @@ impl PersistentBotRepo {
                 expected_affected_rows: 1,
             });
 
-            // 5: audit row + its guard. The audit identity is
+            // 4: audit row + its guard. The audit identity is
             // the real initiating actor of the mutation; tokens
             // never enter audit rows.
             steps.push(DbTransactionStep::ExecuteChecked {
@@ -415,20 +397,17 @@ impl PersistentBotRepo {
             ));
             let audit_guard = steps.len() - 1;
 
-            // 6: final guard consumption — a failed guard has
+            // 5: final guard consumption — a failed guard has
             // no row to bind and the transaction rolls back.
             steps.push(DbTransactionStep::Query(
                 DbStatement::with_transaction_params(
-                    "SELECT ? AS t0, ? AS t1, ? AS t2, ? AS t3, ? AS t4",
+                    "SELECT ? AS t0, ? AS t1, ? AS t2, ? AS t3",
                     vec![
                         DbTransactionParam::query_result(
                             bot_guard, 0, "ok",
                         ),
                         DbTransactionParam::query_result(
                             version_guard, 0, "ok",
-                        ),
-                        DbTransactionParam::query_result(
-                            human_guard, 0, "ok",
                         ),
                         DbTransactionParam::query_result(
                             owner_guard, 0, "ok",
@@ -522,12 +501,12 @@ impl PersistentBotRepo {
 
 /// ONE governance-facts read for the bcs-admin
 /// ownership-backfill dry-run (spec §10.4): the SAME facts the
-/// `initialize_ownership` guard validates — live state,
-/// `created_by`, the Human identity registry, the current
-/// ownership version and the approved owner edges — so the
-/// dry-run classification and the apply write can never
-/// disagree about the world. A pure read; `None` for a
-/// Bot unknown in the bound env.
+/// apply classification consumes — live state, `created_by`,
+/// whether the owner's Human ACTOR row is live in the instance
+/// env, the current ownership version and the approved owner
+/// edges — so the dry-run classification and the apply write
+/// can never disagree about the world. A pure read; `None` for
+/// a Bot unknown in the bound env.
 impl PersistentBotRepo {
     pub(super) async fn read_ownership_governance(
         &self,
@@ -563,19 +542,32 @@ impl PersistentBotRepo {
             .unwrap_or_else(|_| 0);
         let owned = ownership_version.max(0) as u64;
 
-        let user_predicate = match self.flavor {
-            DbSqlFlavor::Mysql => "CAST(user_id AS BINARY) = ?",
-            DbSqlFlavor::Sqlite => "user_id = ?",
+        // The owner's Human ACTOR row must be live in the instance
+        // env (`actor_kind = 'human'`, `human_<user_id>`, not
+        // tombstoned) — the same registry the authority guards
+        // read, so the dry-run classification can never
+        // disagree with the guards.
+        let bot_predicate = match self.flavor {
+            DbSqlFlavor::Mysql => "CAST(bot_uuid AS BINARY) = ?",
+            DbSqlFlavor::Sqlite => "bot_uuid = ?",
         };
-        let owner_identity_present = match created_by.as_deref() {
+        let owner_actor_present = match created_by.as_deref() {
             Some(user) => {
                 let rows = self
                     .db_query(
                         &format!(
-                            "SELECT COUNT(*) AS c FROM bcs_user_identities \
-                             WHERE {user_predicate}"
+                            "SELECT COUNT(*) AS c FROM bcs_bots \
+                             WHERE {bot_predicate} \
+                               AND actor_kind = 'human' \
+                               AND env = ? \
+                               AND COALESCE(is_deleted, 0) = 0"
                         ),
-                        vec![Value::from(user)],
+                        vec![
+                            Value::from(
+                                human_actor_id(user).as_str(),
+                            ),
+                            Value::from(env.as_str()),
+                        ],
                     )
                     .await
                     .map_err(|_| registration_failed())?;
@@ -621,7 +613,7 @@ impl PersistentBotRepo {
             actor_kind,
             live: is_deleted == 0,
             created_by,
-            owner_identity_present,
+            owner_actor_present,
             ownership_version: owned,
             owner_edges,
         }))

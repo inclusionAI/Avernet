@@ -87,13 +87,15 @@ fn approved_owner_predicate() -> &'static str {
 /// Ensure the Human ACTOR row (`bcs_bots`, `actor_kind = 'human'`)
 /// for the registration owner. Idempotent: an existing row keeps
 /// its name and fields; only the explicitly passed values are
-/// inserted on first creation. This is the actor half of
-/// spec §10.2's "Human 校验/必要创建"; the identity half is
-/// [`ensure_human_identity_statement`] in the SAME transaction.
+/// inserted on first creation. This is the whole of
+/// spec §10.2's "Human 校验/必要创建" — the actor row IS the
+/// authority Human registry the Task-2/3 human-existence
+/// guards read, so no OAuth identity row is created or
+/// required any more.
 ///
 /// Human verification itself is the register token
-/// (issued only to Gateway-authenticated Humans); the rows
-/// are the in-transaction 必要创建 of spec §10.2 (ruling
+/// (issued only to Gateway-authenticated Humans); the row
+/// is the in-transaction 必要创建 of spec §10.2 (ruling
 /// T4-1) — never a fabricated external identity claim.
 #[allow(clippy::too_many_arguments)]
 pub fn ensure_human_actor_statement(
@@ -124,75 +126,7 @@ pub fn ensure_human_actor_statement(
     )
 }
 
-/// `auth_source` carried by the identity row the trusted
-/// registration creates in-transaction. It is deliberately a
-/// dedicated source label: the OAuth sync upserts by
-/// `(auth_source, external_user_id, env)` and inserts with a
-/// server-generated `user_id`, so this row either matches its
-/// user or leaves every unique key free for the real sync.
-pub const REGISTER_TOKEN_IDENTITY_SOURCE: &str = "register_token";
-
-/// Ensure the Human identity row (`bcs_user_identities`) of the
-/// verified registration owner EXISTS in the SAME registration
-/// transaction (spec §10.2 "Human 校验/必要创建" — the literal
-/// ruling T4-1). Without this row a registered owner is rejected
-/// by the Task-2/3 human-existence guards on manager edit /
-/// transfer paths, i.e. a registered owner could not manage their
-/// own bot.
-///
-/// Insert-or-ignore on `uk_user_id (user_id)`: a pre-existing row
-/// (a prior registration of the same Human, or a coincidental
-/// real sync) is kept byte-for-byte, and the OAuth sync either
-/// finds (user key match) or freely inserts (generated user id,
-/// other external key) — no unique key is blocked.
-pub fn ensure_human_identity_statement(
-    flavor: DbSqlFlavor,
-    env: &str,
-    owner_user_id: &str,
-) -> DbStatement {
-    match flavor {
-        DbSqlFlavor::Mysql => DbStatement::with_params(
-            "INSERT IGNORE INTO bcs_user_identities \
-             (user_id, auth_source, external_user_id, env) \
-             VALUES (?, ?, ?, ?)",
-            vec![
-                DbValue::from(owner_user_id),
-                DbValue::from(REGISTER_TOKEN_IDENTITY_SOURCE),
-                DbValue::from(owner_user_id),
-                DbValue::from(env),
-            ],
-        ),
-        DbSqlFlavor::Sqlite => DbStatement::with_params(
-            "INSERT INTO bcs_user_identities \
-             (user_id, auth_source, external_user_id, env) \
-             VALUES (?, ?, ?, ?) \
-             ON CONFLICT(user_id) DO NOTHING",
-            vec![
-                DbValue::from(owner_user_id),
-                DbValue::from(REGISTER_TOKEN_IDENTITY_SOURCE),
-                DbValue::from(owner_user_id),
-                DbValue::from(env),
-            ],
-        ),
-    }
-}
-
-/// Guard: the owner's Human identity row exists (after the
-/// ensure above this must count exactly one).
-pub fn human_identity_guard_statement(
-    flavor: DbSqlFlavor,
-    owner_user_id: &str,
-) -> DbStatement {
-    DbStatement::with_params(
-        &format!(
-            "SELECT COUNT(*) AS c FROM bcs_user_identities WHERE {}",
-            binary_eq(flavor, "user_id")
-        ),
-        vec![DbValue::from(owner_user_id)],
-    )
-}
-
-/// Insert the approved owner edge (`edge_grants`, unified
+/// Insert the approved owner edge
 /// `grant_ref_id = 0`, `rules = NULL` — Task-1 schema; the same
 /// spine the transfer-accept flow writes). Idempotent: a repeated
 /// identity insert is ignored; a DIFFERENT approved owner stays

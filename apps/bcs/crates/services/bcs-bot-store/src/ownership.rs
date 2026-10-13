@@ -18,11 +18,11 @@
 //!   registration token; the mutation must carry the same
 //!   Human as the real initiator (fail-closed, tokens never
 //!   reach audit rows);
-//! - the Human identity row (`bcs_user_identities`) is
-//!   ENSURED in the same transaction (insert-or-ignore on
-//!   `uk_user_id`; ruling T4-1 — a fresh-Human registration
-//!   leaves the owner manageable by the Task-2/3 guards), and
-//!   the Human ACTOR row (`bcs_bots`) is created when absent;
+//! - the Human ACTOR row (`bcs_bots`) is created when
+//!   absent (ruling T4-1) — the actor row IS the authority
+//!   Human registry the Task-2/3 guards read, so a
+//!   fresh-Human registration leaves the owner manageable
+//!   without touching the OAuth identity table;
 //! - the Human-actor/owner/version/profile writes reuse
 //!   existing chemistry (version 1 from creation; a reused
 //!   Bot ID never resets a committed owner);
@@ -217,44 +217,13 @@ pub(crate) fn ownership_authorization_steps(
         guard_indexes.push((steps.len() - 1, "ok"));
     };
 
-    // (0) Trusted Human creation, spec §10.2 literal
-    // (ruling T4-1): the register token verified the
-    // Gateway-authenticated Human; this transaction
-    // ENSURES that Human exists — identity row first
-    // (`bcs_user_identities`, insert-or-ignore so a
-    // pre-existing/synced row is never replaced and
-    // the OAuth sync's keys stay free), then the
-    // Human ACTOR row (bcs_bots). Without the
-    // identity row the owner would be rejected by
-    // the Task-2/3 manager/transfer guards.
-    steps.push(DbTransactionStep::Execute(
-        lifecycle::ensure_human_identity_statement(
-            flavor,
-            env,
-            &owner,
-        ),
-    ));
-    guard_caller(
-        &mut steps,
-        &mut guard_indexes,
-        count_guard(
-            flavor,
-            &format!(
-                "SELECT COUNT(*) AS c FROM bcs_user_identities WHERE {}",
-                match flavor {
-                    DbSqlFlavor::Mysql => "CAST(user_id AS BINARY) = ?",
-                    DbSqlFlavor::Sqlite => "user_id = ?",
-                }
-            ),
-            vec![DbValue::from(owner.as_str())],
-            1,
-            false,
-        ),
-    );
-
-    // (1) The Human ACTOR row (bcs_bots) — create when
+    // (0) The Human ACTOR row (bcs_bots) — create when
     // absent (spec §10.2's necessary Human creation,
-    // actor half).
+    // ruling T4-1). The actor row is the authority
+    // Human registry the Task-2/3 manager/transfer
+    // guards read, so it is registration's ONE
+    // necessary Human write; no OAuth identity row
+    // is created or required.
     steps.push(DbTransactionStep::Execute(
         lifecycle::ensure_human_actor_statement(
             flavor,
@@ -265,7 +234,7 @@ pub(crate) fn ownership_authorization_steps(
         ),
     ));
 
-    // (2) Approved owner edge (unified grant_ref_id = 0),
+    // (1) Approved owner edge (unified grant_ref_id = 0),
     // insert-or-ignore, then guard exactly one approved
     // owner.
     steps.push(DbTransactionStep::Execute(
@@ -292,7 +261,7 @@ pub(crate) fn ownership_authorization_steps(
         ),
     );
 
-    // (3) Default runtime profile (wildcard, revision 1),
+    // (2) Default runtime profile (wildcard, revision 1),
     // then guard the active default exists.
     steps.push(DbTransactionStep::Execute(
         lifecycle::default_profile_statement(flavor, bot_id, env),
@@ -317,7 +286,7 @@ pub(crate) fn ownership_authorization_steps(
         );
     }
 
-    // (4) The `initialize` audit row; a duplicate mutation id
+    // (3) The `initialize` audit row; a duplicate mutation id
     // (env, mutation, sequence) would violate the audit key
     // and fail the transaction deterministically.
     steps.push(DbTransactionStep::ExecuteChecked {

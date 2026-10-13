@@ -193,7 +193,6 @@ use bcs_bot_store::MemoryBotRepo;
 use bcs_bot_store::memory_authority::{
     MemoryAuthorityEdgeKind, MemoryAuthorityEdgeStatus,
 };
-use bcs_service_api::port::repo::BotRepoPort;
 use bcs_edge_permission::BotAuthorityCoreServiceImpl;
 use bcs_service_api::application::v1::InviteCodeService;
 use bcs_service_api::port::repo::BotAuthorityRepoPort;
@@ -333,13 +332,22 @@ pub async fn seed_bot(
     )
     .await
     .expect("register fixture bot");
+    // The authority Human registry is the shared bots map's
+    // Human actor rows: seed them through the production
+    // ensure path BEFORE the authority write-guard span.
+    let mut users = vec![owner_user.to_string()];
+    users.extend(manager_users.iter().map(|user| user.to_string()));
+    for user in &users {
+        repo.ensure_human_actor(user, user)
+            .await
+            .expect("ensure fixture Human actor row");
+    }
     let env = bcs_config::resolve_env_str();
     let mut authority = repo.authority_state().write().await;
     authority
         .ownership_versions
         .insert((env.clone(), bot_id.to_string()), 1);
     let mut seed_edge = |user: &str, kind: MemoryAuthorityEdgeKind| {
-        authority.humans.insert(user.to_string());
         authority.edges.insert(
             (
                 env.clone(),
@@ -356,13 +364,18 @@ pub async fn seed_bot(
     }
 }
 
-/// Pre-provision Human identity rows (spec §5.2: Backend
+/// Pre-provision live Human ACTOR rows (spec §5.2: Backend
 /// must run collaborators through the trusted Human
-/// provisioning flow BEFORE sync may add them).
+/// provisioning flow BEFORE sync may add them). The
+/// authority guards read the shared bots registry, so the
+/// fixture drives the same production ensure path.
 pub async fn seed_humans(repo: &MemoryBotRepo, users: &[&str]) {
-    let mut authority = repo.authority_state().write().await;
+    use bcs_service_api::port::repo::BotRepoPort;
+
     for user in users {
-        authority.humans.insert(user.to_string());
+        repo.ensure_human_actor(user, user)
+            .await
+            .expect("ensure fixture Human actor row");
     }
 }
 
@@ -457,6 +470,8 @@ async fn seed_edge(
     user: &str,
     kind: MemoryAuthorityEdgeKind,
 ) {
+    use bcs_service_api::port::repo::BotRepoPort;
+
     let env = bcs_config::resolve_env_str();
     repo.register(
         bot_id.to_string(),
@@ -464,13 +479,17 @@ async fn seed_edge(
     )
     .await
     .expect("register authority fixture bot");
+    // The Human registry is the shared bots map's actor rows
+    // — ensure BEFORE the authority write guard is taken.
+    repo.ensure_human_actor(user, user)
+        .await
+        .expect("ensure fixture Human actor row");
     {
         let mut authority = repo.authority_state().write().await;
         authority
             .ownership_versions
             .entry((env.clone(), bot_id.to_string()))
             .or_insert(1);
-        authority.humans.insert(user.to_string());
         // One Bot has exactly ONE current owner
         // (spec §3.2.1): a new owner edge REPLACES
         // the previous owner instead of corrupting
@@ -643,6 +662,8 @@ impl LazySeedAuthorityHook {
     }
 
     async fn flush(&self) {
+        use bcs_service_api::port::repo::BotRepoPort;
+
         let _guard = self.flush_lock.lock().await;
         let pending: Vec<(String, String, LazySeedOp)> =
             std::mem::take(&mut *self.pending_lock());
@@ -660,6 +681,18 @@ impl LazySeedAuthorityHook {
                 self.register_lock().insert(bot_id.clone());
             }
             let env = bcs_config::resolve_env_str();
+            // A seeded edge implies its Human: ensure the
+            // actor row (the registry the guards read)
+            // BEFORE the authority write guard is taken.
+            // Revocations never resurrect a Human.
+            if op != LazySeedOp::RevokeOwner
+                && op != LazySeedOp::RevokeManager
+            {
+                self.repo
+                    .ensure_human_actor(&user_id, &user_id)
+                    .await
+                    .expect("ensure lazy fixture Human actor row");
+            }
             {
                 let mut authority = self.repo.authority_state().write().await;
                 if op != LazySeedOp::RevokeOwner
@@ -670,7 +703,6 @@ impl LazySeedAuthorityHook {
                         .entry((env.clone(), bot_id.clone()))
                         .or_insert(1);
                 }
-                authority.humans.insert(user_id.clone());
                 let edge_kind = match op {
                     LazySeedOp::Owner => MemoryAuthorityEdgeKind::Owner,
                     LazySeedOp::Manager => {

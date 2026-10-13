@@ -45,15 +45,17 @@ async fn fixture_with_auth(
     let providers = Arc::new(MemoryProviderStore::new());
     let credentials = credentials.unwrap_or_else(|| providers.clone());
     let bots = Arc::new(MemoryBotRepo::with_base_dir(dir.path().into()));
-    // Trusted registration validates the owner against the
-    // Human registry; the fixture preseeds the identity
-    // like the production Backend-synced paths do.
-    // Trusted registration validates its owner; the
+    // Trusted registration needs the owners' live Human
+    // ACTOR rows (spec §10.2/§3.1); the fixture presets
+    // them through the same production ensure path. The
     // tests register as alice or bob.
     {
-        let mut authority = bots.authority_state().write().await;
-        authority.humans.insert("alice".to_string());
-        authority.humans.insert("bob".to_string());
+        use bcs_service_api::port::repo::BotRepoPort;
+        for staff in ["alice", "bob"] {
+            bots.ensure_human_actor(staff, staff)
+                .await
+                .expect("ensure fixture Human actor row");
+        }
     }
     let membership = Arc::new(MemoryBotProviderStore::new(bots.clone(), providers.clone()));
     let relations = Arc::new(RelationCore::new());

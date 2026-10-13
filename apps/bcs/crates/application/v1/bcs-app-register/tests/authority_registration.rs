@@ -147,11 +147,12 @@ async fn v1_retry_after_failure_commits_intended_state() {
 }
 
 #[tokio::test]
-async fn v1_registration_creates_the_owner_identity_row() {
+async fn v1_registration_creates_the_owner_actor_row() {
     // Spec §10.2 literal (ruling T4-1): the trusted
-    // registration ENSURES the owner's Human identity row in
+    // registration ENSURES the owner's Human ACTOR row in
     // the SAME transaction so the Task-2/3 human-existence
-    // guards accept a freshly registered owner.
+    // guards accept a freshly registered owner; the OAuth
+    // identity table is never written.
     let chain = registration_chain().await;
     let registration = chain
         .register_service
@@ -165,12 +166,15 @@ async fn v1_registration_creates_the_owner_identity_row() {
     let rows = chain
         .db
         .query(bcs_db_api::DbStatement::with_params(
-            "SELECT auth_source FROM bcs_user_identities WHERE user_id = ?",
-            vec![OWNER.into()],
+            "SELECT actor_kind FROM bcs_bots WHERE bot_uuid = ?",
+            vec![format!("human_{OWNER}").into()],
         ))
         .await
-        .expect("identity rows");
-    assert_eq!(rows.len(), 1, "exactly one identity row for the owner");
+        .expect("actor rows");
+    assert_eq!(rows.len(), 1, "exactly one Human actor row for the owner");
+    let actor_kind: String =
+        bcs_db_api::db_get_column(&rows[0], "actor_kind").unwrap();
+    assert_eq!(actor_kind, "human");
 }
 
 #[tokio::test]

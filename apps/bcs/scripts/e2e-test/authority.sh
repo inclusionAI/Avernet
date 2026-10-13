@@ -7,17 +7,33 @@
 # suite:
 #
 #   1. trusted registration seeds the owner human (A = the mock
-#      story user) and the target human (B) — the target's own
-#      trusted registration is what makes its `human_` actor row
-#      exist (spec §10.1);
+#      story user) and the target human (B) — B's `human_` actor
+#      row comes from that registration, while the extra
+#      mine-ensured human (C) is created ONLY by the public
+#      `bots/mine` read: the authority's Human registry is the
+#      live `bcs_bots` actor row (spec §3.1), never the OAuth
+#      identity table;
 #   2. the owner (A) reads ownership, exercises the manager
-#      single-item surface (add / list / idempotent remove), and
-#      hits the `owner_not_manager` polarity;
+#      single-item surface (add / list / idempotent remove),
+#      hits the `owner_not_manager` polarity, adds the
+#      mine-ensured human C (a strict-edit acceptance the old
+#      identity-table guard wrongly rejected), and hits the
+#      `bot_authority_human_unknown` polarity for a never-seen
+#      user;
 #   3. the transfer chain: initiate (201) → refresh (same window)
 #      → the target reads it → accept → A is the plain manager and
 #      B is the owner;
 #   4. both inboxes (`direction=received` / `sent`) list the
 #      accepted round.
+#
+# Lenient-sync note (spec §5.2): the trusted-App full-set sync
+# legs (unknown/malformed member skipped, missing target bot
+# zeros) are covered by the shared conformance suites and the
+# Rust e2e chain (`e2e_bot_authority.rs` configures a
+# trusted-app rule); THIS script's stack has no trusted-app
+# scope configured, so the sync surface cannot be driven here
+# without a mid-story server restart. The bash story pins the
+# human-registry fix through the mine-ensured edit leg instead.
 #
 # Auth: every `/api/v1/collaboration` call carries the Gateway
 # Principal JWT (`X-Avernet-Principal`, signed with
@@ -159,6 +175,48 @@ story_authority_user_journey() {
     _au_request PUT "${prefix}/bots/${owner_bot}/managers/${_AU_STAFF_B}" "$principal_a"
     require_status "manager is restored before the transfer" "200" || return
 
+    # 2b. A Human ensured ONLY through a collaboration entry (the
+    #     public `bots/mine` read; NO trusted registration) is a
+    #     valid strict-edit target: the authority Human registry is
+    #     the `bcs_bots` actor row that read creates (spec §3.1).
+    #     Before the registry fix this add was wrongly rejected as
+    #     `bot_authority_human_unknown`.
+    local mine_only_staff principal_mine public_prefix
+    public_prefix="/openapi/v1/collaboration"
+    mine_only_staff="${BCS_E2E_AUTHORITY_STAFF_MINE:-137}"
+    if ! principal_mine=$(python3 "$probe" principal \
+            --user-id "$mine_only_staff" \
+            --username "$mine_only_staff" \
+            --tenant "bcs-e2e" \
+            --signing-key "$signing_key"); then
+        fail "Gateway Principal generation failed for the mine-ensured human"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        return
+    fi
+    api_request_headers GET "${public_prefix}/bots/mine?limit=20" "" \
+        "X-Avernet-Principal: ${principal_mine}"
+    require_status "mine-ensured human reads its own mine" "200" || return
+
+    _au_request PUT "${prefix}/bots/${owner_bot}/managers/${mine_only_staff}" "$principal_a"
+    require_status "mine-ensured human is a valid manager add target" "200" || return
+    assert_json_eq "mine-ensured manager add reports one added" \
+        "$RESPONSE" "data.added" "1"
+
+    # Strict-edit polarity: a never-seen user stays unknown (the
+    # edit does NOT read leniency from the sync).
+    _au_request PUT "${prefix}/bots/${owner_bot}/managers/never-exists-$$" "$principal_a"
+    require_status "never-seen human is not a manager add target" "400" || return
+    assert_json_eq "unknown manager add uses the stable error code" \
+        "$RESPONSE" "data.error_code" "bot_authority_human_unknown"
+
+    # Restore the story set (the transfer chapter below owns the
+    # ledger from here).
+    _au_request DELETE "${prefix}/bots/${owner_bot}/managers/${mine_only_staff}" "$principal_a"
+    require_status "mine-ensured manager is removed before the transfer" "200" || return
+    assert_json_eq "mine-ensured manager removal reports one removed" \
+        "$RESPONSE" "data.removed" "1"
+
     # 3. Ownership transfer chain: initiate → refresh → accept.
     local transfer_path="${prefix}/bots/${owner_bot}/ownership-transfers/human_${_AU_STAFF_B}"
     _au_request PUT "$transfer_path" "$principal_a"
@@ -171,8 +229,20 @@ story_authority_user_journey() {
 
     _au_request PUT "$transfer_path" "$principal_a"
     require_status "transfer refresh reuses the pending round" "200" || return
-    assert_json_eq "transfer refresh keeps the window" \
-        "$RESPONSE" "data.expires_at" "$expires_at"
+    # spec §6.2: a same-target refresh RENEWS requested_at and the
+    # seven-day window (renewable transfers); idempotency only promises
+    # no second row and no transfer execution — the time fields need not
+    # repeat. Assert the renewed expiry never shrinks and only moves
+    # within the re-stamp gap; exact equality flakes at wall-second
+    # boundaries (the conformance harness pins the same semantics).
+    local refreshed_expires
+    refreshed_expires=$(printf '%s' "$RESPONSE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["expires_at"])' 2>/dev/null)
+    assert_ok "transfer refresh renews the window without shrinking it" \
+        python3 -c 'import sys
+new, old = int(sys.argv[1]), int(sys.argv[2])
+assert new >= old, "refreshed expiry must never shrink the window"
+assert new - old < 300_000, "renewal stays within the re-stamp gap"' \
+        "$refreshed_expires" "$expires_at"
 
     _au_request GET "$transfer_path" "$principal_b"
     require_status "target human reads the pending transfer" "200" || return

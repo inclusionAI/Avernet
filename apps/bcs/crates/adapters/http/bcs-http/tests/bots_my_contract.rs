@@ -4,8 +4,9 @@
 //! UNION from the control-plane controllable read
 //! over the SAME stored repo — a revoked owner
 //! stops seeing the Bot, a manager gains the
-//! entry, and the Human self entry stays out of
-//! the legacy Bot-only page shape.
+//! entry, and the caller's onboarded Human self
+//! entry rides along (ruling T6d-3: self
+//! semantics on this page).
 
 #![allow(
     clippy::expect_used,
@@ -157,7 +158,10 @@ async fn my_bots_route_uses_mock_user_identity_and_union_filter() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["total"], 1);
+    // The edge union (bot-owned) plus the caller's own
+    // onboarded Human actor row (T6d-3): the fixtures in
+    // this suite ensure their Humans the production way.
+    assert_eq!(json["total"], 2);
     assert_eq!(json["items"][0]["bot_uuid"], "bot-owned");
     assert_eq!(json["items"][0]["created_by"], "alice");
     assert_eq!(json["items"][0]["visibility"], "protected");
@@ -166,6 +170,14 @@ async fn my_bots_route_uses_mock_user_identity_and_union_filter() {
         serde_json::json!(["ops"])
     );
     assert_eq!(json["items"][0]["dynamic_status"]["status"], "active");
+    // The other user's Bot stays filtered out; the second
+    // entry is the caller's self, `alice`'s actor row.
+    assert_eq!(json["items"][1]["bot_uuid"], "human_alice");
+    assert!(!json["items"]
+        .as_array()
+        .expect("items array")
+        .iter()
+        .any(|item| item["bot_uuid"] == "bot-other"));
 }
 
 #[tokio::test]
@@ -234,12 +246,22 @@ async fn my_bots_route_lists_the_current_union_not_the_created_list() {
         (status, json)
     }
 
-    // A (owner) and M (manager) both see the Bot.
+    // A (owner) and M (manager) both see the Bot; each
+    // page also carries the caller's own Human self entry
+    // (the grant fixtures ensure the Human actor rows).
     for user in ["alice", "mallory"] {
         let (status, json) = page(services.clone(), user).await;
         assert_eq!(status, StatusCode::OK, "{user}");
-        assert_eq!(json["total"], 1, "{user} sees the union entry");
+        assert_eq!(
+            json["total"], 2,
+            "{user} sees the union entry and the self entry"
+        );
         assert_eq!(json["items"][0]["bot_uuid"], "bot-owned", "{user}");
+        assert_eq!(
+            json["items"][1]["bot_uuid"],
+            format!("human_{user}"),
+            "{user}"
+        );
     }
 
     // The A→B handover: A's ONLY leg falls away.
@@ -254,12 +276,18 @@ async fn my_bots_route_lists_the_current_union_not_the_created_list() {
         .await;
     let (status, json) = page(services.clone(), "alice").await;
     assert_eq!(status, StatusCode::OK);
+    // The Bot is gone from the revoked owner's page; only
+    // her own Human self entry remains (spec §8 first row).
     assert_eq!(
-        json["total"], 0,
+        json["total"], 1,
         "the revoked owner no longer sees the Bot: {json}"
     );
+    assert_eq!(json["items"][0]["bot_uuid"], "human_alice");
     let (_, json) = page(services.clone(), "bob").await;
-    assert_eq!(json["total"], 1, "B sees the handed-over Bot");
+    assert_eq!(json["total"], 2, "B sees the handed-over Bot and the self entry");
     let (_, json) = page(services.clone(), "mallory").await;
-    assert_eq!(json["total"], 1, "the manager still sees the Bot");
+    assert_eq!(
+        json["total"], 2,
+        "the manager still sees the Bot and the self entry"
+    );
 }

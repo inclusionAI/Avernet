@@ -17,11 +17,11 @@
 //! - the trusted Human creation is literal (ruling
 //!   T4-1): the register token verified the
 //!   Gateway-authenticated Human, and the SAME
-//!   registration ENSURES the Human's authority identity
-//!   (`state.humans`, insert-only) plus the Human ACTOR
-//!   record (created when absent), so the Task-2/3
-//!   human-existence guards can never reject a freshly
-//!   registered owner;
+//!   registration ENSURES the Human's ACTOR record
+//!   (created when absent) — the only Human creation the
+//!   Task-2/3 human-existence guards read, so a freshly
+//!   registered owner is never rejected by its own
+//!   authority surface;
 //! - the approved owner edge is written once, so a reused
 //!   Bot ID never resets a committed owner;
 //! - ownership version is set to 1 at creation only
@@ -113,12 +113,12 @@ impl MemoryBotRepo {
         let mut staged_authority = authority_guard.clone();
         let mut staged_profiles = profiles_guard.clone();
 
-        // Trusted Human creation (spec §10.2 literal,
-        // ruling T4-1): the verified owner's authority
-        // identity is ensured in the SAME staged state,
-        // so the Task-2/3 human-existence guards can
-        // never reject a freshly registered owner.
-        staged_authority.humans.insert(owner.clone());
+        // The owner's Human ACTOR record is created below
+        // from the SAME verified token (spec §10.2 literal,
+        // ruling T4-1): the actor row IS the authority Human
+        // registry, so the Task-2/3 human-existence guards
+        // can never reject a freshly registered owner. No
+        // separate authority-identity bookkeeping exists.
 
         // Stage the default profile on the CLONE (reuse an
         // existing default; corrupt index fails cleanly).
@@ -317,17 +317,12 @@ impl MemoryBotRepo {
             .get(&(ctx.env.clone(), ctx.bot_id.clone()))
             .copied()
             .unwrap_or(0);
-        // Governance backfill requires a valid Human
-        // target (spec §10.4 "指向有效 Human"): the
-        // owner's identity must exist — the
-        // registration composite (or the Backend
-        // registry) is the only creator.
-        if !staged.humans.contains(owner_user_id) {
-            return Err(registration_conflict(
-                "Bot's owner has no Human identity for \
-                 initialization governance",
-            ));
-        }
+        // Human-existence screening for the governance
+        // backfill lives in the governance FACTS read (the
+        // bcs-admin dry-run classification, spec §10.4):
+        // the SQL/memory composites themselves no longer
+        // re-verify the identity table here (that guard
+        // was the identity-row workaround's echo).
         if current_version > 0 {
             // Idempotent for the SAME owner; a different owner
             // can never reset a committed owner.
@@ -497,12 +492,12 @@ pub(super) fn mem_append_audit(
 }
 
 /// ONE governance-facts read on the SAME shared state
-/// (spec §10.4): the live state, `created_by`, the
-/// Human identity registry (`state.humans`), the
-/// current ownership version and the approved owner
-/// edges — mirroring the SQL read exactly so the
-/// bcs-admin dry-run classification and the
-/// `initialize_ownership` guard can never disagree.
+/// (spec §10.4): the live state, `created_by`, whether
+/// the owner's Human ACTOR row is live in the instance
+/// env, the current ownership version and the approved
+/// owner edges — mirroring the SQL read exactly so the
+/// bcs-admin dry-run classification and the apply
+/// decision can never disagree.
 /// A pure read; `None` for a Bot unknown in the
 /// resolved env.
 impl MemoryBotRepo {
@@ -525,7 +520,7 @@ impl MemoryBotRepo {
                 actor_kind: ActorKind::Bot,
                 live: false,
                 created_by: None,
-                owner_identity_present: false,
+                owner_actor_present: false,
                 ownership_version: 0,
                 owner_edges: Vec::new(),
             }));
@@ -544,7 +539,36 @@ impl MemoryBotRepo {
         if record_env != env {
             return Ok(None);
         }
-        let (ownership_version, owner_edges, owner_identity_present) = {
+        // The owner's Human ACTOR row must be live in the
+        // instance env: `actor_kind = 'human'`, env-bound,
+        // not tombstoned (the same registry the authority
+        // guards read — the classification facts the
+        // bcs-admin dry-run uses).
+        let owner_actor_present = match created_by.as_deref() {
+            Some(user) => {
+                let human_id =
+                    ownership_composition::owner_actor_id(user);
+                let tombstoned = self
+                    .deleted_bot_ids
+                    .read()
+                    .await
+                    .contains(&human_id);
+                !tombstoned
+                    && self
+                        .bots
+                        .read()
+                        .await
+                        .get(&human_id)
+                        .map(|row| {
+                            row.actor_kind == ActorKind::Human
+                                && row.env.as_deref()
+                                    == Some(env.as_str())
+                        })
+                        .unwrap_or(false)
+            }
+            None => false,
+        };
+        let (ownership_version, owner_edges) = {
             let authority = self.authority.read().await;
             let version = authority
                 .ownership_versions
@@ -565,21 +589,14 @@ impl MemoryBotRepo {
                 .collect::<Vec<String>>();
             // Stable report order for repeated dry-runs.
             edges.sort();
-            (
-                version,
-                edges,
-                created_by
-                    .as_deref()
-                    .map(|user| authority.humans.contains(user))
-                    .unwrap_or(false),
-            )
+            (version, edges)
         };
         Ok(Some(BotOwnershipGovernance {
             bot_id: bot_id.to_string(),
             actor_kind,
             live: true,
             created_by,
-            owner_identity_present,
+            owner_actor_present,
             ownership_version,
             owner_edges,
         }))

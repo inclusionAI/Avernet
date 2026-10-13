@@ -27,7 +27,8 @@ use bcs_service_api::port::repo::BotAuthorityRepoPort;
 use bcs_service_api::types::bot_authority::{
     AuthorityActor, AuthorityMutation, BotAccessRelation, BotRoleQuery,
     ManagerEdit, ManagerEditAction, ManagerListQuery, ManagerSetChange, ManagerSync,
-    TransferDirection, TransferKey, TransferListQuery, TransferStatus,
+    TransferAction, TransferCommand, TransferDirection, TransferKey,
+    TransferListQuery, TransferOutcome, TransferStatus,
     check_page_bounds, human_actor_id,
 };
 
@@ -68,12 +69,15 @@ pub trait BotAuthorityContractFixture: Send + Sync {
     /// must detect it.
     async fn seed_corrupt_duplicate_owner(&self, env: &str, bot_id: &str, actor_id: &str);
 
-    /// Register a verified Human (Backend preset equivalent,
-    /// spec §5.2). Idempotent.
+    /// Register a verified Human: one live `bcs_bots` actor
+    /// row (`actor_kind='human'`, `human_<user_id>`, env-bound,
+    /// not tombstoned) — the authority Human registry (spec
+    /// §3.1). Idempotent.
     async fn seed_human(&self, env: &str, user_id: &str);
 
-    /// Remove a previously seeded Human (deleted Human
-    /// scenario). Idempotent.
+    /// Remove a previously seeded Human (its actor row is
+    /// tombstoned — the deleted/departed Human scenario).
+    /// Idempotent.
     async fn remove_human(&self, env: &str, user_id: &str);
 
     /// Reserve an audit sequence so the next manager command
@@ -156,6 +160,16 @@ pub async fn run_bot_authority_contract_with_scenarios(
     manager_actor_kind_policy(fixture, env).await;
     report("manager_write_state_guards");
     manager_write_state_guards(fixture, env).await;
+    report("sync_skips_unknown_and_malformed_members");
+    sync_skips_unknown_and_malformed_members(fixture, env).await;
+    report("sync_empty_remainder_clears_set");
+    sync_empty_remainder_clears_set(fixture, env).await;
+    report("sync_cross_env_human_is_unknown");
+    sync_cross_env_human_is_unknown(fixture, env, other_env).await;
+    report("sync_deleted_human_is_skipped_and_revocable");
+    sync_deleted_human_is_skipped_and_revocable(fixture, env).await;
+    report("sync_ensure_actor_only_human_is_accepted");
+    sync_ensure_actor_only_human_is_accepted(fixture, env).await;
     report("manager_error_codes_are_stable");
     manager_error_codes_are_stable(fixture, env).await;
     report("sync_replaces_full_set_and_normalizes_owner");
@@ -836,8 +850,10 @@ async fn manager_owner_target_is_conflict(
     );
 }
 
-/// Unknown or removed Humans are rejected for adds (whole request,
-/// no partial coverage); deletes need no Human existence.
+/// Unknown or removed Humans are rejected for the STRICT
+/// single-item adds; the lenient sync skips unknown members
+/// and applies the valid remainder (spec §5.2). Revokes
+/// need no Human existence.
 async fn manager_unknown_human_is_rejected(
     fixture: &(impl BotAuthorityContractFixture + ?Sized),
     env: &str,
@@ -851,7 +867,7 @@ async fn manager_unknown_human_is_rejected(
     fixture.seed_human(env, "own").await;
     fixture.seed_human(env, "gone").await;
 
-    // Unknown target add.
+    // Unknown target add (edit stays strict).
     let audit_before = fixture.audit_rows(env).await.len();
     let err = repo
         .edit_manager(human_edit(bot, "ghost", ManagerEditAction::Grant, "own", next_mutation_id()))
@@ -860,28 +876,50 @@ async fn manager_unknown_human_is_rejected(
     assert!(mentions(&err, "bot_authority_human_unknown"), "got {err}");
     assert_eq!(fixture.audit_rows(env).await.len(), audit_before);
 
-    // sync with an unknown member fails the whole request, partial
-    // coverage must not happen.
+    // Lenient sync (spec §5.2): the unknown member is
+    // skipped, the valid remainder is applied — the
+    // resident edge survives, the skipped member never
+    // lands, and only the granted member audits.
     fixture.seed_human(env, "resident").await;
+    fixture.seed_human(env, "alice").await;
     fixture
         .grant_edge(env, bot, &human_actor_id("resident"), BotAccessRelation::Manager)
         .await;
-    let err = repo
+    let audit_before = fixture.audit_rows(env).await.len();
+    let change = repo
         .sync_managers(service_sync(
             bot,
-            vec!["resident", "stranger"],
+            vec!["resident", "stranger", "alice"],
             9,
             next_mutation_id(),
         ))
         .await
-        .expect_err("sync with unknown human must fail");
-    assert!(mentions(&err, "bot_authority_human_unknown"), "got {err}");
+        .expect("lenient sync skips unknown members");
+    assert_eq!(
+        change,
+        ManagerSetChange { added: 1, removed: 0, total: 2 },
+        "stranger is skipped; the valid remainder is applied"
+    );
     assert_eq!(
         repo.role(&human_actor_id("resident"), bot).await.expect("role"),
         Some(BotAccessRelation::Manager),
-        "failed sync must not revoke anything"
+        "a lenient sync must not revoke the kept member"
     );
-    assert_eq!(fixture.audit_rows(env).await.len(), audit_before);
+    assert_eq!(
+        repo.role(&human_actor_id("stranger"), bot).await.expect("role"),
+        None,
+        "the skipped member must not be added"
+    );
+    assert_eq!(
+        repo.role(&human_actor_id("alice"), bot).await.expect("role"),
+        Some(BotAccessRelation::Manager),
+        "the valid new member is added"
+    );
+    assert_eq!(
+        fixture.audit_rows(env).await.len() - audit_before,
+        1,
+        "only the granted member writes an audit row"
+    );
 
     // A Human that existed and was removed: re-add rejected.
     let granted = repo
@@ -900,7 +938,11 @@ async fn manager_unknown_human_is_rejected(
         .edit_manager(human_edit(bot, "gone", ManagerEditAction::Revoke, "own", next_mutation_id()))
         .await
         .expect("revoke needs no Human existence");
-    assert_eq!(revoked, ManagerSetChange { added: 0, removed: 1, total: 1 });
+    assert_eq!(
+        revoked,
+        ManagerSetChange { added: 0, removed: 1, total: 2 },
+        "resident and alice remain after the revoked departed member"
+    );
 }
 
 /// PUT/DELETE on an uninitialized or missing bot fails as state
@@ -942,12 +984,269 @@ async fn manager_write_state_guards(
         .await
         .expect_err("missing bot");
     assert!(matches!(err, bcs_service_api::ServiceError::BotNotFound(_)));
-    let err = repo
-        .sync_managers(service_sync("bot_missing", vec![], 9, next_mutation_id()))
+    // Lenient sync (spec §5.2): a missing target bot
+    // returns success zeros with a warn log — no audit row,
+    // no state change.
+    let change = repo
+        .sync_managers(service_sync("bot_missing", vec!["own"], 9, next_mutation_id()))
         .await
-        .expect_err("missing bot sync");
-    assert!(matches!(err, bcs_service_api::ServiceError::BotNotFound(_)));
+        .expect("lenient sync on a missing bot returns zeros");
+    assert_eq!(change, ManagerSetChange { added: 0, removed: 0, total: 0 });
     assert_eq!(fixture.audit_rows(env).await.len(), audit_before);
+}
+
+/// Lenient sync (spec §5.2): members that are NOT
+/// `human_*` actor shapes (e.g. a Bot id like `bot_x`) are
+/// treated exactly like unknown Humans — skipped with a
+/// warn log, never a whole-request failure; the valid
+/// remainder is the final set.
+async fn sync_skips_unknown_and_malformed_members(
+    fixture: &(impl BotAuthorityContractFixture + ?Sized),
+    env: &str,
+) {
+    let repo = fixture.authority_repo();
+    let bot = "bot_lenient";
+    fixture.seed_bot(env, bot, 1).await;
+    fixture
+        .grant_edge(env, bot, &human_actor_id("own"), BotAccessRelation::Owner)
+        .await;
+    fixture.seed_human(env, "own").await;
+    fixture.seed_human(env, "first").await;
+    fixture.seed_human(env, "second").await;
+
+    let change = repo
+        .sync_managers(ManagerSync {
+            bot_id: bot.to_string(),
+            user_ids: vec![
+                human_actor_id("first"),
+                // Well-shaped but no live actor row.
+                human_actor_id("never-exists"),
+                // NOT a Human actor shape — skipped alike.
+                "bot_mallory".to_string(),
+                human_actor_id("second"),
+            ],
+            mutation: AuthorityMutation {
+                mutation_id: next_mutation_id(),
+                actor: AuthorityActor::Service { app_id: 9 },
+            },
+        })
+        .await
+        .expect("lenient sync skips unknown and malformed members");
+    assert_eq!(
+        change,
+        ManagerSetChange { added: 2, removed: 0, total: 2 },
+        "only the two valid members become the final set"
+    );
+    for user in ["first", "second"] {
+        assert_eq!(
+            repo.role(&human_actor_id(user), bot).await.expect("role"),
+            Some(BotAccessRelation::Manager),
+            "{user} must be in the synced set"
+        );
+    }
+    for actor in ["human_never-exists", "bot_mallory"] {
+        assert_eq!(
+            repo.role(actor, bot).await.expect("role"),
+            None,
+            "'{actor}' must have been skipped"
+        );
+    }
+}
+
+/// Corner case A (spec §5.2 ruling): a non-empty input whose
+/// valid remainder is EMPTY still clears the manager set —
+/// the final set always equals the valid remainder.
+async fn sync_empty_remainder_clears_set(
+    fixture: &(impl BotAuthorityContractFixture + ?Sized),
+    env: &str,
+) {
+    let repo = fixture.authority_repo();
+    let bot = "bot_clear";
+    fixture.seed_bot(env, bot, 1).await;
+    fixture
+        .grant_edge(env, bot, &human_actor_id("own"), BotAccessRelation::Owner)
+        .await;
+    fixture.seed_human(env, "own").await;
+    fixture.seed_human(env, "alice").await;
+    fixture
+        .grant_edge(env, bot, &human_actor_id("alice"), BotAccessRelation::Manager)
+        .await;
+
+    let change = repo
+        .sync_managers(service_sync(bot, vec!["unknown"], 9, next_mutation_id()))
+        .await
+        .expect("the unknown-only remainder clears the set");
+    assert_eq!(
+        change,
+        ManagerSetChange { added: 0, removed: 1, total: 0 },
+        "the sole current member is revoked, nothing is added"
+    );
+    let page = repo
+        .managers(ManagerListQuery { bot_id: bot.to_string(), ..Default::default() })
+        .await
+        .expect("cleared page");
+    assert_eq!(page.total, 0);
+    assert!(page.items.is_empty());
+}
+
+/// Env binding (spec §3.1): a Human actor row in ANOTHER env
+/// is unknown to the bound env — lenient sync skips it, the
+/// strict edit still rejects it. (The user id is unique to
+/// this scenario so earlier in-run seeds cannot satisfy the
+/// bound-env registry on the same fixture.)
+async fn sync_cross_env_human_is_unknown(
+    fixture: &(impl BotAuthorityContractFixture + ?Sized),
+    env: &str,
+    other_env: &str,
+) {
+    let repo = fixture.authority_repo();
+    let bot = "bot_xenv";
+    let user = "xenv-only";
+    fixture.seed_bot(env, bot, 1).await;
+    fixture
+        .grant_edge(env, bot, &human_actor_id("own"), BotAccessRelation::Owner)
+        .await;
+    fixture.seed_human(env, "own").await;
+    // The Human exists ONLY in the other env.
+    fixture.seed_human(other_env, user).await;
+
+    let change = repo
+        .sync_managers(service_sync(bot, vec![user], 9, next_mutation_id()))
+        .await
+        .expect("lenient sync skips the cross-env Human");
+    assert_eq!(
+        change,
+        ManagerSetChange { added: 0, removed: 0, total: 0 },
+        "the cross-env Human is skipped, the remainder is empty"
+    );
+    assert_eq!(
+        repo.role(&human_actor_id(user), bot).await.expect("role"),
+        None,
+        "another env's Human actor row must not authorize here"
+    );
+    let err = repo
+        .edit_manager(human_edit(bot, user, ManagerEditAction::Grant, "own", next_mutation_id()))
+        .await
+        .expect_err("cross-env Human is a strict-edit unknown");
+    assert!(mentions(&err, "bot_authority_human_unknown"), "got {err}");
+}
+
+/// A departed Human (tombstoned actor row) is skipped by
+/// sync — its still-current edge reads as `current \ input`
+/// and is revoked normally; the strict edit rejects re-add.
+async fn sync_deleted_human_is_skipped_and_revocable(
+    fixture: &(impl BotAuthorityContractFixture + ?Sized),
+    env: &str,
+) {
+    let repo = fixture.authority_repo();
+    let bot = "bot_departed";
+    fixture.seed_bot(env, bot, 1).await;
+    fixture
+        .grant_edge(env, bot, &human_actor_id("own"), BotAccessRelation::Owner)
+        .await;
+    fixture.seed_human(env, "own").await;
+    fixture.seed_human(env, "departed").await;
+    fixture
+        .grant_edge(env, bot, &human_actor_id("departed"), BotAccessRelation::Manager)
+        .await;
+    fixture.remove_human(env, "departed").await;
+
+    let change = repo
+        .sync_managers(service_sync(bot, vec!["departed"], 9, next_mutation_id()))
+        .await
+        .expect("lenient sync skips the departed Human");
+    assert_eq!(
+        change,
+        ManagerSetChange { added: 0, removed: 1, total: 0 },
+        "the departed member is revoked as part of the (empty) remainder"
+    );
+    assert_eq!(
+        repo.role(&human_actor_id("departed"), bot).await.expect("role"),
+        None,
+        "the departed member's edge must be gone"
+    );
+    let err = repo
+        .edit_manager(human_edit(bot, "departed", ManagerEditAction::Grant, "own", next_mutation_id()))
+        .await
+        .expect_err("a departed Human is a strict-edit unknown");
+    assert!(mentions(&err, "bot_authority_human_unknown"), "got {err}");
+}
+
+/// A Human with ONLY an actor row (no OAuth identity row
+/// exists anywhere) is a first-class authority Human: sync,
+/// the strict edit and the transfer chain all accept it.
+/// This pins the registry fix — nothing may consult the
+/// OAuth identity table any more.
+async fn sync_ensure_actor_only_human_is_accepted(
+    fixture: &(impl BotAuthorityContractFixture + ?Sized),
+    env: &str,
+) {
+    let repo = fixture.authority_repo();
+    let bot = "bot_actor_only";
+    let (owner, target) = ("aown", "atarget");
+    fixture.seed_bot(env, bot, 1).await;
+    fixture
+        .grant_edge(env, bot, &human_actor_id(owner), BotAccessRelation::Owner)
+        .await;
+    // Both Humans exist ONLY as actor rows (spec §3.1: the
+    // registry is `bcs_bots`; `seed_human` creates no
+    // identity row).
+    fixture.seed_human(env, owner).await;
+    fixture.seed_human(env, target).await;
+
+    let change = repo
+        .sync_managers(service_sync(bot, vec![target], 9, next_mutation_id()))
+        .await
+        .expect("sync accepts the actor-only Human");
+    assert_eq!(change, ManagerSetChange { added: 1, removed: 0, total: 1 });
+    assert_eq!(
+        repo.role(&human_actor_id(target), bot).await.expect("role"),
+        Some(BotAccessRelation::Manager)
+    );
+
+    // The strict edit on a second actor-only Human.
+    fixture.seed_human(env, "second").await;
+    let granted = repo
+        .edit_manager(human_edit(bot, "second", ManagerEditAction::Grant, owner, next_mutation_id()))
+        .await
+        .expect("edit accepts the actor-only Human");
+    assert_eq!(granted.added, 1);
+
+    // The transfer chain: initiate → accept, both sides are
+    // actor-only Humans.
+    let transfer_key = TransferKey {
+        bot_id: bot.to_string(),
+        target_owner_actor_id: human_actor_id(target),
+    };
+    let requested = repo
+        .change_transfer(TransferCommand {
+            key: transfer_key.clone(),
+            action: TransferAction::RequestOrRefresh,
+            mutation: AuthorityMutation {
+                mutation_id: next_mutation_id(),
+                actor: AuthorityActor::Human { user_id: owner.to_string() },
+            },
+        })
+        .await
+        .expect("transfer initiation accepts the actor-only target");
+    assert!(matches!(requested, TransferOutcome::Applied { .. }));
+    let accepted = repo
+        .change_transfer(TransferCommand {
+            key: transfer_key,
+            action: TransferAction::Accept,
+            mutation: AuthorityMutation {
+                mutation_id: next_mutation_id(),
+                actor: AuthorityActor::Human { user_id: target.to_string() },
+            },
+        })
+        .await
+        .expect("accept accepts the actor-only owner");
+    assert!(matches!(accepted, TransferOutcome::Applied { .. }));
+    assert_eq!(
+        repo.ownership(bot).await.expect("ownership").owner_user_id,
+        target,
+        "the actor-only Human is the new owner"
+    );
 }
 
 /// edit is Human-only; sync is trusted-App only (spec §5.1/§5.2

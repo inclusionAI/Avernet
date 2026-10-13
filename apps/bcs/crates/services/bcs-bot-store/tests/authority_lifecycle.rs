@@ -81,14 +81,14 @@ async fn human_actor_write_failure_rolls_back_everything() {
 
 /// Ruling T4-1 acceptance (spec §10.2 literal): a
 /// fresh-Human registration creates the owner's Human
-/// identity row in the SAME transaction, and that owner
-/// can afterwards pass the Task-2 human-existence guards
-/// (a manager grant by that owner succeeds). A
-/// pre-existing identity row is never replaced.
+/// ACTOR row in the SAME transaction, and that owner can
+/// afterwards pass the Task-2 human-existence guards (a
+/// manager grant by that owner succeeds). The OAuth
+/// identity table is never touched.
 #[tokio::test]
-async fn registration_creates_the_owner_identity_and_the_owner_can_manage() {
+async fn registration_creates_the_owner_actor_row_and_the_owner_can_manage() {
     let fixture = lifecycle::new_sqlite_fixture().await;
-    lifecycle::registration_creates_the_owner_identity_and_the_owner_can_manage(&fixture).await;
+    lifecycle::registration_creates_the_owner_actor_row_and_the_owner_can_manage(&fixture).await;
 }
 
 #[tokio::test]

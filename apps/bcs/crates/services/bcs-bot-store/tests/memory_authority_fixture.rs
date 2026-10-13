@@ -50,14 +50,16 @@ impl MemoryAuthorityFixture {
     }
 
     pub async fn seed_human_in(&self, user_id: &str) {
-        self.state_write()
-            .await
-            .humans
-            .insert(user_id.to_string());
+        // The authority Human registry is the actor rows on
+        // the shared bots map — seed the same row the
+        // production `ensure_human_actor` path creates.
+        self.repo
+            .seed_human_actor_in(&target_env().await, user_id)
+            .await;
     }
 
     pub async fn remove_human_in(&self, user_id: &str) {
-        self.state_write().await.humans.remove(user_id);
+        self.repo.remove_human_actor_in(user_id).await;
     }
 }
 
@@ -138,12 +140,14 @@ impl BotAuthorityContractFixture for MemoryAuthorityFixture {
         );
     }
 
-    async fn seed_human(&self, _env: &str, user_id: &str) {
-        self.seed_human_in(user_id).await;
+    async fn seed_human(&self, env: &str, user_id: &str) {
+        // Env is real: another env's Human lives in its own
+        // actor row env, so the env-bound guards skip it.
+        self.repo.seed_human_actor_in(env, user_id).await;
     }
 
     async fn remove_human(&self, _env: &str, user_id: &str) {
-        self.remove_human_in(user_id).await;
+        self.repo.remove_human_actor_in(user_id).await;
     }
 
     async fn seed_audit_conflict(&self, env: &str, mutation_id: &str, sequence: u64) {
@@ -477,11 +481,12 @@ fn profile_port(repo: &Arc<MemoryBotRepo>) -> Arc<dyn PermissionProfileRepoPort>
 async fn memory_registration_profile_is_runtime_visible() {
     let repo = Arc::new(owned_repo());
     let env = target_env().await;
-    repo.authority_state()
-        .write()
+    // A preexisting Human ACTOR row (the registry the
+    // guards read) that the failed/staged composites must
+    // never touch.
+    repo.ensure_human_actor("staff-8", "staff-8")
         .await
-        .humans
-        .insert("staff-8".to_string());
+        .expect("preexisting fixture Human actor row");
     let runtime_profiles = profile_port(&repo);
 
     let created = repo
@@ -575,11 +580,12 @@ fn bump_revision(
 async fn memory_registration_profile_or_audit_failure_is_atomic() {
     let repo = Arc::new(owned_repo());
     let env = target_env().await;
-    repo.authority_state()
-        .write()
+    // A preexisting Human ACTOR row (the registry the
+    // guards read) that the failed/staged composites must
+    // never touch.
+    repo.ensure_human_actor("staff-8", "staff-8")
         .await
-        .humans
-        .insert("staff-8".to_string());
+        .expect("preexisting fixture Human actor row");
     let runtime_profiles = profile_port(&repo);
 
     // (a) Failure at the temporary (staged) profile creation:
@@ -726,16 +732,12 @@ async fn assert_unharmed(repo: &Arc<MemoryBotRepo>) {
 async fn memory_registration_reused_bot_id_never_resets_owner() {
     let repo = Arc::new(owned_repo());
     let env = target_env().await;
-    repo.authority_state()
-        .write()
+    repo.ensure_human_actor("staff-8", "staff-8")
         .await
-        .humans
-        .insert("staff-8".to_string());
-    repo.authority_state()
-        .write()
+        .expect("preexisting fixture Human actor row");
+    repo.ensure_human_actor("staff-9", "staff-9")
         .await
-        .humans
-        .insert("staff-9".to_string());
+        .expect("preexisting fixture Human actor row");
     let created = repo
         .create_registration_if_absent_with_ownership(
             "bot_mem_stable".to_string(),
@@ -897,13 +899,14 @@ async fn memory_provider_registration_failure_leaves_authority_unharmed() {
 }
 
 #[tokio::test]
-async fn memory_registration_creates_the_owner_identity_and_the_owner_can_manage() {
+async fn memory_registration_creates_the_owner_actor_row_and_the_owner_can_manage() {
     // Ruling T4-1 memory mirror: one fresh
-    // registration per owner ENSURES the authority
-    // identity (the shared state's humans registry)
-    // in the SAME registration, so the Task-2
+    // registration per owner ENSURES the Human ACTOR
+    // row (the authority registry on the shared bots
+    // map) in the SAME registration, so the Task-2
     // human-existence guard accepts that owner as a
-    // manager target immediately after.
+    // manager target immediately after. No OAuth
+    // identity row is required.
     let repo = owned_repo();
     let created = repo
         .create_registration_if_absent_with_ownership(
@@ -927,11 +930,17 @@ async fn memory_registration_creates_the_owner_identity_and_the_owner_can_manage
         .await
         .expect("second owner commits");
     assert!(created);
-    // Both identities are present in the shared state.
-    {
-        let state = repo.authority_state().read().await;
-        assert!(state.humans.contains("owner-a"));
-        assert!(state.humans.contains("owner-b"));
+    // Both Human ACTOR rows are present on the shared
+    // registry (and nothing else was needed).
+    for staff in ["owner-a", "owner-b"] {
+        let actor = repo
+            .get(&format!("human_{staff}"))
+            .await
+            .unwrap_or_else(|| panic!("human_{staff} actor row must exist"));
+        assert!(
+            matches!(actor.actor_kind, bcs_service_api::ActorKind::Human),
+            "human_{staff} must be a Human actor row"
+        );
     }
     // The FIRST owner (registered Human) grants the
     // second as a manager via the strict Task-2

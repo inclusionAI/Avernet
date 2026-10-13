@@ -341,24 +341,6 @@ fn mutation(owner: &str) -> OwnershipInitialization {
     }
 }
 
-pub async fn seed_human_identity(fixture: &Fixture, user_id: &str) {
-    let insert = match fixture.flavor {
-        DbSqlFlavor::Mysql => "INSERT IGNORE INTO bcs_user_identities",
-        DbSqlFlavor::Sqlite => "INSERT OR IGNORE INTO bcs_user_identities",
-    };
-    fixture
-        .db
-        .execute(DbStatement::with_params(
-            &format!(
-                "{insert} \
-             (user_id, auth_source, external_user_id, env) \
-             VALUES (?, 'fixture', ?, 'fixture')"
-            ),
-            vec![user_id.into(), user_id.into()],
-        ))
-        .await
-        .expect("seed human identity");
-}
 
 async fn seed_runtime_bot(fixture: &Fixture, bot_id: &str) -> bool {
     // The version-0 runtime entry keeps its own creation
@@ -399,26 +381,14 @@ async fn column(
         .map(|row| row.get(name).expect("column").clone())
 }
 
+/// Post-failure assertions: a registration that failed
+/// mid-composite wrote NO rows anywhere — and, pinned
+/// explicitly, never wrote an OAuth identity row (the
+/// identity-table workaround is gone; the Human ACTOR row
+/// is registration's only Human creation).
 async fn assert_no_half_registration(
     fixture: &Fixture,
     bot_id: &str,
-) {
-    assert_no_half_registration_with(
-        fixture,
-        bot_id,
-        0,
-    )
-    .await
-}
-
-/// `seeded_identities`: identity rows the test itself
-/// created BEFORE the failure (the identity ensure is
-/// insert-or-ignore; pre-existing rows are kept and the
-/// failed transaction adds none).
-async fn assert_no_half_registration_with(
-    fixture: &Fixture,
-    bot_id: &str,
-    seeded_identities: i64,
 ) {
     // No bot row, no token mapping, no runtime activation.
     assert!(fixture
@@ -466,8 +436,8 @@ async fn assert_no_half_registration_with(
             .expect("identities count");
         let count: i64 = bcs_db_api::db_get_column(&rows[0], "c").unwrap();
         assert_eq!(
-            count, seeded_identities,
-            "failed registration added no Human identity row"
+            count, 0,
+            "a failed registration must not write OAuth identity rows"
         );
     }
     for (table, olumn) in [
@@ -493,8 +463,6 @@ async fn assert_no_half_registration_with(
 // ---------------------------------------------------------------------------
 
 pub async fn trusted_v1_registration_commits_the_whole_state(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
-
     let created = fixture
         .bot_repo
         .create_registration_if_absent_with_ownership(
@@ -639,7 +607,6 @@ pub async fn trusted_v1_registration_commits_the_whole_state(fixture: &Fixture) 
 }
 
 pub async fn trusted_v1_reused_bot_id_never_resets_owner(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     // A version-0 runtime Bot pre-exists.
     assert!(seed_runtime_bot(&fixture, "bot_runtime1").await);
     // Trusted registration on the SAME id is refused (create-only).
@@ -683,7 +650,6 @@ pub async fn trusted_v1_reused_bot_id_never_resets_owner(fixture: &Fixture) {
 }
 
 pub async fn trusted_v1_tombstoned_bot_id_never_resurrects(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     assert!(seed_runtime_bot(&fixture, "bot_dead1").await);
     fixture
         .db
@@ -720,7 +686,6 @@ pub async fn trusted_v1_tombstoned_bot_id_never_resurrects(fixture: &Fixture) {
 // Injected failure points (4.1): owner write, profile write and
 // audit write abort the WHOLE transaction.
 pub async fn owner_edge_failure_rolls_back_everything(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     fixture.db.arm("INSERT");
     // The bot-row INSERT is the first statement; arming every
     // insert aborts at the same transaction boundary — scope the
@@ -742,11 +707,10 @@ pub async fn owner_edge_failure_rolls_back_everything(fixture: &Fixture) {
         error.to_string().contains("trusted bot registration failed"),
         "no SQL text leaks: {error}"
     );
-    assert_no_half_registration_with(&fixture, "bot_fail1", 1).await;
+    assert_no_half_registration(&fixture, "bot_fail1").await;
 }
 
 pub async fn profile_failure_rolls_back_everything(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     fixture.db.arm("permission_profiles");
     let error = fixture
         .bot_repo
@@ -760,11 +724,10 @@ pub async fn profile_failure_rolls_back_everything(fixture: &Fixture) {
         .await
         .expect_err("profile write failure surfaces");
     assert!(error.to_string().contains("trusted bot registration failed"));
-    assert_no_half_registration_with(&fixture, "bot_fail2", 1).await;
+    assert_no_half_registration(&fixture, "bot_fail2").await;
 }
 
 pub async fn audit_failure_rolls_back_everything(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     fixture.db.arm("bot_authority_changes");
     let error = fixture
         .bot_repo
@@ -778,11 +741,10 @@ pub async fn audit_failure_rolls_back_everything(fixture: &Fixture) {
         .await
         .expect_err("audit failure surfaces");
     assert!(error.to_string().contains("trusted bot registration failed"));
-    assert_no_half_registration_with(&fixture, "bot_fail3", 1).await;
+    assert_no_half_registration(&fixture, "bot_fail3").await;
 }
 
 pub async fn human_actor_write_failure_rolls_back_everything(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     // The Human ACTOR insert is identifiable by its column list.
     fixture.db.arm("actor_kind, name, bot_info, session_token");
     let error = fixture
@@ -797,19 +759,21 @@ pub async fn human_actor_write_failure_rolls_back_everything(fixture: &Fixture) 
         .await
         .expect_err("human create failure surfaces");
     assert!(error.to_string().contains("trusted bot registration failed"));
-    assert_no_half_registration_with(&fixture, "bot_fail4", 1).await;
+    assert_no_half_registration(&fixture, "bot_fail4").await;
 }
 
 /// Ruling T4-1 acceptance (spec §10.2 literal): a
 /// fresh-Human registration creates the owner's Human
-/// identity row in the SAME transaction, and that owner
-/// can afterwards pass the Task-2 human-existence guards
-/// (a manager grant by that owner succeeds). A
-/// pre-existing identity row is never replaced.
-pub async fn registration_creates_the_owner_identity_and_the_owner_can_manage(fixture: &Fixture) {
-    // A PRE-EXISTING identity row (e.g. a real OAuth
-    // sync) keeps its bytes: insert-or-ignore on
-    // uk_user_id.
+/// ACTOR row in the SAME transaction, and that owner can
+/// afterwards pass the Task-2 human-existence guards (a
+/// manager grant by that owner succeeds). The OAuth
+/// identity table is never touched: a pre-existing row
+/// (e.g. a real OAuth sync) keeps its bytes, and a Human
+/// without one needs no workaround.
+pub async fn registration_creates_the_owner_actor_row_and_the_owner_can_manage(fixture: &Fixture) {
+    // A PRE-EXISTING OAuth identity row keeps its bytes
+    // through the registration: the actor row — not this
+    // table — carries authority existence now.
     fixture
         .db
         .execute(DbStatement::with_params(
@@ -833,6 +797,21 @@ pub async fn registration_creates_the_owner_identity_and_the_owner_can_manage(fi
         .await
         .expect("vip-owner registration commits");
     assert!(registered);
+    // The registration ensured the owner's Human ACTOR row
+    // (authorities read THIS registry, spec §3.1)...
+    let row = fixture
+        .db
+        .query(DbStatement::with_params(
+            "SELECT actor_kind FROM bcs_bots WHERE bot_uuid = ?",
+            vec!["human_vip-owner".into()],
+        ))
+        .await
+        .expect("actor row");
+    assert_eq!(row.len(), 1, "exactly one Human actor row");
+    let actor_kind: String =
+        bcs_db_api::db_get_column(&row[0], "actor_kind").unwrap();
+    assert_eq!(actor_kind, "human");
+    // ...and never wrote or replaced an OAuth identity row.
     let row = fixture
         .db
         .query(DbStatement::with_params(
@@ -843,14 +822,13 @@ pub async fn registration_creates_the_owner_identity_and_the_owner_can_manage(fi
         .await
         .expect("identity row");
     assert_eq!(row.len(), 1, "no duplicate identity row");
-    // The pre-existing row survived byte-for-byte
-    // (insert-or-ignore on uk_user_id).
     let auth_source: String =
         bcs_db_api::db_get_column(&row[0], "auth_source").unwrap();
     assert_eq!(auth_source, "oauth-provider");
 
     // The second Human of the pairing: their own fresh
-    // registration creates their identity row too.
+    // registration creates their actor row too (and needs
+    // no OAuth identity row at all).
     let second = fixture
         .bot_repo
         .create_registration_if_absent_with_ownership(
@@ -885,7 +863,6 @@ pub async fn registration_creates_the_owner_identity_and_the_owner_can_manage(fi
 }
 
 pub async fn mutation_must_match_the_verified_initiator(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     let forged = OwnershipInitialization {
         owner_user_id: "11111111".to_string(),
         mutation: AuthorityMutation {
@@ -907,7 +884,7 @@ pub async fn mutation_must_match_the_verified_initiator(fixture: &Fixture) {
         .await
         .expect_err("diverged initiator is refused");
     assert!(matches!(error, bcs_service_api::ServiceError::InvalidOperation { .. }));
-    assert_no_half_registration_with(&fixture, "bot_fail6", 1).await;
+    assert_no_half_registration(&fixture, "bot_fail6").await;
 }
 
 // ---------------------------------------------------------------------------
@@ -915,7 +892,6 @@ pub async fn mutation_must_match_the_verified_initiator(fixture: &Fixture) {
 // ---------------------------------------------------------------------------
 
 pub async fn governance_initialize_backfills_once_and_is_idempotent(fixture: &Fixture) {
-    seed_human_identity(&fixture, "22222222").await;
     assert!(seed_runtime_bot(&fixture, "bot_gov1").await);
     let view = fixture
         .bot_repo
@@ -967,7 +943,6 @@ pub async fn governance_initialize_backfills_once_and_is_idempotent(fixture: &Fi
 }
 
 pub async fn governance_initialize_refuses_missing_and_deleted_bots(fixture: &Fixture) {
-    seed_human_identity(&fixture, "22222222").await;
     let error = fixture
         .bot_repo
         .initialize_ownership("bot_missing", "22222222", mutation("22222222").mutation)
@@ -1022,7 +997,6 @@ fn provider_record_ref(
 }
 
 pub async fn trusted_v2_registration_commits_binding_owner_and_authority(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     fixture
         .provider_repo
         .create_provider_bot_with_ownership(
@@ -1100,7 +1074,6 @@ pub async fn trusted_v2_registration_commits_binding_owner_and_authority(fixture
 }
 
 pub async fn trusted_v2_binding_failure_rolls_back_everything(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     fixture.db.arm("bcs_provider_bot_bindings");
     let error = fixture
         .provider_repo
@@ -1117,7 +1090,7 @@ pub async fn trusted_v2_binding_failure_rolls_back_everything(fixture: &Fixture)
         matches!(error, bcs_service_api::ServiceError::InternalError(_)),
         "persistence failures stay internal: {error}"
     );
-    assert_no_half_registration_with(&fixture, "bot_prov_fail", 1).await;
+    assert_no_half_registration(&fixture, "bot_prov_fail").await;
     // The Provider/ref stays free for the honest retry.
     fixture.db.armed.lock().unwrap().clear();
     fixture
@@ -1134,7 +1107,6 @@ pub async fn trusted_v2_binding_failure_rolls_back_everything(fixture: &Fixture)
 }
 
 pub async fn trusted_v2_owner_write_failure_rolls_back_everything(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     fixture.db.arm("edge_grants");
     let error = fixture
         .provider_repo
@@ -1151,7 +1123,7 @@ pub async fn trusted_v2_owner_write_failure_rolls_back_everything(fixture: &Fixt
         matches!(error, bcs_service_api::ServiceError::InternalError(_)),
         "persistence failures stay internal: {error}"
     );
-    assert_no_half_registration_with(&fixture, "bot_prov_fail2", 1).await;
+    assert_no_half_registration(&fixture, "bot_prov_fail2").await;
 }
 
 // ---------------------------------------------------------------------------
@@ -1159,7 +1131,6 @@ pub async fn trusted_v2_owner_write_failure_rolls_back_everything(fixture: &Fixt
 // ---------------------------------------------------------------------------
 
 pub async fn committed_registration_does_not_activate_runtime(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     fixture
         .bot_repo
         .create_registration_if_absent_with_ownership(
@@ -1311,7 +1282,6 @@ async fn audit_actor_pairs(
 }
 
 pub async fn provider_retire_metadata_branch_commits_the_whole_state(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     fixture
         .provider_repo
         .create_provider_bot_with_ownership(
@@ -1407,7 +1377,6 @@ pub async fn provider_retire_metadata_branch_commits_the_whole_state(fixture: &F
 }
 
 pub async fn provider_retire_failure_is_atomic(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     fixture
         .provider_repo
         .create_provider_bot_with_ownership(
@@ -1457,7 +1426,6 @@ pub async fn provider_retire_failure_is_atomic(fixture: &Fixture) {
 }
 
 pub async fn provider_retire_retry_is_idempotent_without_duplicate_audit(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     fixture
         .provider_repo
         .create_provider_bot_with_ownership(
@@ -1509,7 +1477,6 @@ pub async fn provider_retire_retry_is_idempotent_without_duplicate_audit(fixture
 pub async fn provider_retire_binding_fallback_branch_disables_binding(fixture: &Fixture) {
     // A legacy gateway Bot BEFORE metadata backfill: no
     // metadata record, only the compatibility binding.
-    seed_human_identity(&fixture, "11111111").await;
     fixture
         .bot_repo
         .create_registration_if_absent(
@@ -1589,7 +1556,6 @@ pub async fn provider_retire_binding_fallback_branch_disables_binding(fixture: &
 }
 
 pub async fn provider_retire_legacy_unbound_and_branch_mismatch(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     fixture
         .bot_repo
         .create_registration_if_absent(
@@ -1650,7 +1616,6 @@ pub async fn provider_retire_legacy_unbound_and_branch_mismatch(fixture: &Fixtur
 }
 
 pub async fn normal_retire_revokes_authority_and_never_chains_provider(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     fixture
         .bot_repo
         .create_registration_if_absent_with_ownership(
@@ -1729,7 +1694,6 @@ pub async fn normal_retire_revokes_authority_and_never_chains_provider(fixture: 
 /// this pins the same "no approved owner edge to a dying
 /// identity" store invariant on the Bot side.
 pub async fn retired_bot_id_never_resurrects_through_lifecycle_writes(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     fixture
         .bot_repo
         .create_registration_if_absent_with_ownership(
@@ -1793,8 +1757,6 @@ pub async fn retired_bot_id_never_resurrects_through_lifecycle_writes(fixture: &
 /// terminal state and refuses — one side wins, the other
 /// observes, no half-way resurrection of the pending.
 pub async fn retire_serializes_against_the_transfer_accept(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
-    seed_human_identity(&fixture, "22222222").await;
     fixture
         .bot_repo
         .create_registration_if_absent_with_ownership(
@@ -2002,7 +1964,6 @@ async fn closure_audit_subjects(
 /// read rolls attempt 1 back; the retry closes
 /// CAROL's row and the closure audit names CAROL.
 pub async fn retire_closes_the_pending_identity_seen_in_tx(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     fixture
         .bot_repo
         .create_registration_if_absent_with_ownership(
@@ -2063,7 +2024,6 @@ pub async fn retire_closes_the_pending_identity_seen_in_tx(fixture: &Fixture) {
 /// The same interleave through the Provider
 /// retirement composite (the shared closure helper).
 pub async fn provider_retire_closes_the_pending_identity_seen_in_tx(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     fixture
         .provider_repo
         .create_provider_bot_with_ownership(
@@ -2124,7 +2084,6 @@ pub async fn provider_retire_closes_the_pending_identity_seen_in_tx(fixture: &Fi
 /// empty pending set and commits WITHOUT writing
 /// any closure or closure audit.
 pub async fn retire_retries_when_the_pending_vanishes_between_preread_and_tx(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     fixture
         .bot_repo
         .create_registration_if_absent_with_ownership(
@@ -2191,7 +2150,6 @@ pub async fn retire_retries_when_the_pending_vanishes_between_preread_and_tx(fix
 /// audit ("no audit before actual change") and no
 /// transfer rows.
 pub async fn retire_with_no_pendings_writes_no_closure_audit(fixture: &Fixture) {
-    seed_human_identity(&fixture, "11111111").await;
     fixture
         .bot_repo
         .create_registration_if_absent_with_ownership(

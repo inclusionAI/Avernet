@@ -475,7 +475,16 @@ async fn retire_closes_pending_transfer_and_blocks_further_transfers() {
         .await
         .expect("registered");
     // Seed a valid pending transfer directly on the shared
-    // authority state (the fixture surface, spec §7).
+    // authority state (the fixture surface, spec §7). The
+    // transfer target's live Human ACTOR row is ensured on
+    // the shared registry first (the guards read it).
+    {
+        use bcs_service_api::port::repo::BotRepoPort;
+        ctx.bot_repo
+            .ensure_human_actor("22222222", "22222222")
+            .await
+            .expect("ensure fixture Human actor row");
+    }
     {
         let mut state = ctx.bot_repo.authority_state().write().await;
         let env = bcs_config::resolve_env_str();
@@ -485,7 +494,6 @@ async fn retire_closes_pending_transfer_and_blocks_further_transfers() {
              bcs_bot_store::memory_authority::MemoryAuthorityEdgeKind::Owner),
             (bcs_bot_store::memory_authority::MemoryAuthorityEdgeStatus::Approved, 0),
         );
-        state.humans.insert("22222222".into());
         state
             .transfers
             .entry((env.clone(), "runtime-v1".into(), "human_22222222".into()))

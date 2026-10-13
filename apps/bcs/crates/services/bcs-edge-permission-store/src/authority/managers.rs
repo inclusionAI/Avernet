@@ -26,7 +26,8 @@
 //! 4. one membership chunk guard per
 //!    ≤100-sorted-id chunk of the pre-read set;
 //! 5. one Human-existence guard per added-member
-//!    chunk (`bcs_user_identities`);
+//!    chunk (the `bcs_bots` Human ACTOR registry,
+//!    `actor_kind = 'human'`, env-bound, live);
 //! 6. diff writes, each `ExecuteChecked` against
 //!    its exact count: the revoke side writes
 //!    audit (`INSERT..SELECT`) then flips status;
@@ -60,10 +61,16 @@
 //!
 //! `edit_manager` runs the same guard set for one
 //! target: the owner target rejects with 409
-//! `owner_not_manager` (spec §5.1), adds
-//! require a valid existing Human, and the Human
-//! operator's current owner/manager edge is
-//! re-verified inside the transaction.
+//! `owner_not_manager` (spec §5.1), adds require a
+//! valid existing Human (a live `bcs_bots` actor row),
+//! and the Human operator's current owner/manager edge
+//! is re-verified inside the transaction.
+//!
+//! `sync_managers` is best-effort per the frozen ruling:
+//! unknown, deleted or non-Human-shaped members are
+//! filtered out with a warn log and the final set equals
+//! the valid remainder (spec §5.2); the strict
+//! single-item edit keeps whole-request rejection.
 
 use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
@@ -78,6 +85,7 @@ use bcs_service_api::types::bot_authority::{
     human_actor_id, human_user_id_of_actor,
 };
 use bcs_service_api::{ServiceError, ServiceResult};
+use tracing::warn;
 
 use super::audit::{
     ACTION_MANAGER_GRANT, ACTION_MANAGER_RESTORE, ACTION_MANAGER_REVOKE,
@@ -117,6 +125,18 @@ enum EdgeRowState {
     Approved,
     Revoked,
     Absent,
+}
+
+/// Write-state classification of the sync target bot
+/// (the lenient-sync pre-read; spec §5.2 ruling).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SyncBotState {
+    /// Absent or tombstoned: zeros with a warn log.
+    Missing,
+    /// Live but `ownership_version = 0`: hard error.
+    Uninitialized,
+    /// Live and initialized: the sync proceeds.
+    Ready,
 }
 
 /// The planned write for one `edit_manager` call,
@@ -221,22 +241,31 @@ fn is_retryable(err: &DbError) -> bool {
     ) || err.is_duplicate_key()
 }
 
-/// Validate + normalize the sync input: byte-exact
-/// Human actor shapes, dedup, 1,000 cap (spec §5.2).
-fn normalize_input(user_ids: &[String]) -> ServiceResult<Vec<String>> {
-    let mut deduped = BTreeSet::new();
-    for user_id in user_ids {
-        if human_user_id_of_actor(user_id).is_none() {
-            return Err(human_unknown_error(format!(
-                "sync input member '{user_id}' is not a Human actor id"
-            )));
-        }
-        deduped.insert(user_id.clone());
-    }
+/// Validate + normalize the sync input (spec §5.2, the
+/// lenient-sync ruling): dedup FIRST over the WHOLE raw
+/// input and count the 1,000 cap on that deduped original —
+/// including members the filter below will skip, so a
+/// garbage-filled request cannot wear the input boundary
+/// down; then split it into the valid (`human_*` actor
+/// shapes, sorted) and the skipped members (unknown shapes
+/// that never fail the request any more).
+fn normalize_input(
+    user_ids: &[String],
+) -> ServiceResult<(Vec<String>, Vec<String>)> {
+    let deduped: BTreeSet<String> = user_ids.iter().cloned().collect();
     if deduped.len() > MANAGER_INPUT_CAP {
         return Err(input_limit_error());
     }
-    Ok(deduped.into_iter().collect())
+    let mut valid = Vec::with_capacity(deduped.len());
+    let mut skipped = Vec::new();
+    for user_id in deduped {
+        if human_user_id_of_actor(&user_id).is_some() {
+            valid.push(user_id);
+        } else {
+            skipped.push(user_id);
+        }
+    }
+    Ok((valid, skipped))
 }
 
 impl DbBotAuthorityStore {
@@ -244,10 +273,12 @@ impl DbBotAuthorityStore {
 
     /// `FOR UPDATE` suffix for MySQL guard reads
     /// (current/locking reads must not trust the RR
-    /// snapshot; spec §7). Human-registry guard reads
-    /// stay plain: BCS never deletes Human rows, and
-    /// the lock order never holds a Bot and then
-    /// requests a Human lock.
+    /// snapshot; spec §7). The Human-registry guard reads
+    /// take the row lock too: the registry is now part of
+    /// `bcs_bots` (a soft-deleted Human must fail the
+    /// in-transaction guard, not ride a stale snapshot),
+    /// and the Bot row is always locked first — the spec
+    /// §7 Bot → Human order is preserved.
     fn lock_suffix(&self) -> &'static str {
         match self.flavor() {
             bcs_db_api::DbSqlFlavor::Mysql => " FOR UPDATE",
@@ -276,27 +307,6 @@ impl DbBotAuthorityStore {
         }
     }
 
-    /// Byte-exact predicate for the Human registry
-    /// (`bcs_user_identities.user_id`).
-    fn user_id_eq(&self) -> &'static str {
-        match self.flavor() {
-            bcs_db_api::DbSqlFlavor::Mysql => "CAST(user_id AS BINARY) = ?",
-            bcs_db_api::DbSqlFlavor::Sqlite => "user_id = ?",
-        }
-    }
-
-    fn user_id_in(&self, count: usize) -> String {
-        let placeholders = self.id_placeholders(count);
-        match self.flavor() {
-            bcs_db_api::DbSqlFlavor::Mysql => {
-                format!("CAST(user_id AS BINARY) IN ({placeholders})")
-            }
-            bcs_db_api::DbSqlFlavor::Sqlite => {
-                format!("user_id IN ({placeholders})")
-            }
-        }
-    }
-
     fn gmt_modified_now(&self) -> &'static str {
         self.flavor().now()
     }
@@ -304,7 +314,9 @@ impl DbBotAuthorityStore {
     // ============ preparation reads ============    // ============ preparation reads ============
 
     /// Live/initialized bot check (preparation read;
-    /// the transaction re-locks and re-verifies).
+    /// the transaction re-locks and re-verifies). Strict:
+    /// the single-item edit and the transfer paths keep
+    /// hard errors here.
     async fn require_write_bot(
         &self,
         bot_id: &str,
@@ -313,6 +325,22 @@ impl DbBotAuthorityStore {
             Some((_, version)) if version > 0 => Ok(()),
             Some(_) => Err(not_initialized_error(bot_id)),
             None => Err(ServiceError::BotNotFound(bot_id.to_string())),
+        }
+    }
+
+    /// Soft write-state classification for the lenient
+    /// sync (spec §5.2 ruling): a missing/tombstoned
+    /// target returns zeros with a warn log, while an
+    /// uninitialized live bot still carries the hard
+    /// `bot_ownership_not_initialized` error.
+    async fn sync_bot_state(
+        &self,
+        bot_id: &str,
+    ) -> ServiceResult<SyncBotState> {
+        match self.bot_ownership_state(bot_id).await? {
+            Some((_, version)) if version > 0 => Ok(SyncBotState::Ready),
+            Some(_) => Ok(SyncBotState::Uninitialized),
+            None => Ok(SyncBotState::Missing),
         }
     }
 
@@ -331,8 +359,11 @@ impl DbBotAuthorityStore {
         }
     }
 
-    /// Pre-read the Human registry; returns the
-    /// missing user ids (byte-exact).
+    /// Pre-read the Human ACTOR registry (`bcs_bots` rows
+    /// with `actor_kind = 'human'`, env-bound, live);
+    /// returns the missing user ids (byte-exact). Input
+    /// carries user ids; the registry is keyed by the
+    /// `human_<user_id>` bot_uuid.
     async fn pre_read_missing_humans(
         &self,
         user_ids: &[&str],
@@ -340,15 +371,24 @@ impl DbBotAuthorityStore {
         if user_ids.is_empty() {
             return Ok(Vec::new());
         }
-        let params: Vec<DbValue> =
-            user_ids.iter().map(|user| DbValue::from(*user)).collect();
+        let bot_uuids: Vec<String> =
+            user_ids.iter().map(|user| human_actor_id(user)).collect();
+        let mut params: Vec<DbValue> = bot_uuids
+            .iter()
+            .map(|uuid| DbValue::from(uuid.as_str()))
+            .collect();
+        params.push(self.env_param());
         let rows = self
             .query(
                 "authority_humans_check",
                 DbStatement::with_params(
                     format!(
-                        "SELECT user_id FROM bcs_user_identities WHERE {}",
-                        self.user_id_in(user_ids.len())
+                        "SELECT bot_uuid FROM bcs_bots \
+                         WHERE {} \
+                           AND actor_kind = 'human' \
+                           AND env = ? \
+                           AND COALESCE(is_deleted, 0) = 0",
+                        self.bot_id_in(user_ids.len())
                     )
                     .as_str(),
                     params,
@@ -357,7 +397,10 @@ impl DbBotAuthorityStore {
             .await?;
         let mut found = BTreeSet::new();
         for row in &rows {
-            found.insert(crate::required_string(row, "user_id")?);
+            let bot_uuid = crate::required_string(row, "bot_uuid")?;
+            if let Some(user_id) = human_user_id_of_actor(&bot_uuid) {
+                found.insert(user_id);
+            }
         }
         Ok(user_ids
             .iter()
@@ -366,37 +409,29 @@ impl DbBotAuthorityStore {
             .collect())
     }
 
-    /// Whole-input Human validation (spec §5.2:
-    /// unknown or deleted Humans fail the whole
-    /// request). Input carries Human actor ids; the
-    /// registry is keyed by user id.
-    async fn require_humans(
+    /// Members of one (already shape-normalized) input
+    /// that carry no live Human ACTOR row, chunked at the
+    /// statement bound (spec §5.2: ≤100 principals per
+    /// SQL statement). The lenient sync filters them out
+    /// of the applied remainder instead of failing.
+    async fn missing_input_humans(
         &self,
         actor_ids: &[String],
-    ) -> ServiceResult<()> {
+    ) -> ServiceResult<Vec<String>> {
+        let mut missing = Vec::new();
         for chunk in actor_ids.chunks(MANAGER_CHUNK) {
             let user_ids: Vec<String> = chunk
                 .iter()
                 .map(|actor| {
-                    human_user_id_of_actor(actor).ok_or_else(|| {
-                        human_unknown_error(format!(
-                            "manager input member '{actor}' is not a \
-                             Human actor id"
-                        ))
-                    })
+                    human_user_id_of_actor(actor)
+                        .expect("normalized actor shape")
                 })
-                .collect::<ServiceResult<Vec<_>>>()?;
+                .collect();
             let refs: Vec<&str> =
                 user_ids.iter().map(String::as_str).collect();
-            let missing = self.pre_read_missing_humans(&refs).await?;
-            if let Some(first) = missing.first() {
-                return Err(human_unknown_error(format!(
-                    "manager input member '{first}' is not a \
-                     valid Human"
-                )));
-            }
+            missing.extend(self.pre_read_missing_humans(&refs).await?);
         }
-        Ok(())
+        Ok(missing)
     }
 
     /// Owner-excluded current manager set, read with
@@ -658,15 +693,24 @@ impl DbBotAuthorityStore {
     }
 
     /// Human-existence guard for one added-member
-    /// chunk: every user must exist in the Human
-    /// registry (`bcs_user_identities`).
+    /// chunk: every member's Human ACTOR row must be
+    /// live in `bcs_bots` (`actor_kind = 'human'`,
+    /// env-bound, not tombstoned). The registry lives in
+    /// a real Bot row now, so the guard read takes the
+    /// row lock like every other Bot-table guard — a
+    /// raced soft delete fails the guard instead of
+    /// riding the RR snapshot (the Bot row is locked
+    /// first, spec §7 order).
     fn human_guard_step(&self, builder: &mut TxBuilder, users: &[String]) {
-        let mut params: Vec<DbTransactionParam> = users
+        let bot_uuids: Vec<String> =
+            users.iter().map(|user| human_actor_id(user)).collect();
+        let mut params: Vec<DbTransactionParam> = bot_uuids
             .iter()
-            .map(|user| {
-                DbTransactionParam::value(DbValue::from(user.as_str()))
+            .map(|uuid| {
+                DbTransactionParam::value(DbValue::from(uuid.as_str()))
             })
             .collect();
+        params.push(DbTransactionParam::value(self.env_param()));
         params.push(DbTransactionParam::value(DbValue::from(
             users.len() as u64,
         )));
@@ -674,9 +718,14 @@ impl DbBotAuthorityStore {
             DbStatement::with_transaction_params(
                 format!(
                     "SELECT t.c AS ok FROM \
-                       (SELECT COUNT(*) AS c FROM bcs_user_identities \
-                        WHERE {}) t WHERE t.c = ?",
-                    self.user_id_in(users.len())
+                       (SELECT COUNT(*) AS c FROM bcs_bots \
+                        WHERE {} \
+                          AND actor_kind = 'human' \
+                          AND env = ? \
+                          AND COALESCE(is_deleted, 0) = 0{}) t \
+                     WHERE t.c = ?",
+                    self.bot_id_in(users.len()),
+                    self.lock_suffix()
                 )
                 .as_str(),
                 params,
@@ -1258,21 +1307,31 @@ impl DbBotAuthorityStore {
                     0,
                     "ok",
                 ));
-            // Human-existence guard for adds.
+            // Human-existence guard for adds: the target's Human
+            // ACTOR row must be live in `bcs_bots` — a real
+            // Bot-table guard read under the row lock (the
+            // Bot row is already locked).
             if human_check {
                 builder.steps.push(DbTransactionStep::Query(
                     DbStatement::with_transaction_params(
                         format!(
                             "SELECT t.c AS ok FROM \
-                               (SELECT COUNT(*) AS c \
-                                FROM bcs_user_identities \
-                                WHERE {}) t WHERE t.c = 1",
-                            self.user_id_eq()
+                               (SELECT COUNT(*) AS c FROM bcs_bots \
+                                WHERE {} \
+                                  AND actor_kind = 'human' \
+                                  AND env = ? \
+                                  AND COALESCE(is_deleted, 0) = 0{}) t \
+                             WHERE t.c = 1",
+                            self.bot_id_eq(),
+                            self.lock_suffix()
                         )
                         .as_str(),
-                        vec![DbTransactionParam::value(DbValue::from(
-                            target_user_id.as_str(),
-                        ))],
+                        vec![
+                            DbTransactionParam::value(DbValue::from(
+                                human_actor_id(&target_user_id).as_str(),
+                            )),
+                            DbTransactionParam::value(self.env_param()),
+                        ],
                     ),
                 ));
                 let human_index = builder.steps.len() - 1;
@@ -1339,11 +1398,15 @@ impl DbBotAuthorityStore {
         ))
     }
 
-    /// Trusted full-set sync (spec §5.2): one transaction
-    /// makes the manager set equal the deduped,
-    /// owner-normalized input; the pre-read is parameter
-    /// preparation, all verification lives inside the
-    /// transaction, and failure is all-or-nothing.
+    /// Trusted full-set sync (spec §5.2, lenient ruling):
+    /// one transaction makes the manager set equal the
+    /// valid remainder of the deduped, owner-normalized
+    /// input — unknown, deleted or non-Human-shaped
+    /// members are filtered out with a warn log, never a
+    /// whole-request failure; the pre-read is parameter
+    /// preparation, the in-tx guards keep verifying, and
+    /// failure of the transaction itself is still
+    /// all-or-nothing.
     pub(super) async fn sync_managers_impl(
         &self,
         command: ManagerSync,
@@ -1357,25 +1420,85 @@ impl DbBotAuthorityStore {
                     .to_string(),
             ));
         }
-        let input = normalize_input(&command.user_ids)?;
+        let (typed_input, malformed) = normalize_input(&command.user_ids)?;
         let header = AuditHeader::from_mutation(&command.mutation);
         let op = "authority_sync_managers";
+        if !malformed.is_empty() {
+            warn!(
+                operation = op,
+                env = %self.env(),
+                bot_id = %command.bot_id,
+                mutation_id = %command.mutation.mutation_id,
+                skipped = ?malformed,
+                "manager sync skipped non-Human-actor input members"
+            );
+        }
+        // Lenient target classification (spec §5.2): a
+        // missing/tombstoned target bot is a zeros no-op
+        // with a warn log (no audit row, no state change);
+        // a version-0 live bot still hard-rejects.
+        match self.sync_bot_state(&command.bot_id).await? {
+            SyncBotState::Missing => {
+                warn!(
+                    operation = op,
+                    env = %self.env(),
+                    bot_id = %command.bot_id,
+                    mutation_id = %command.mutation.mutation_id,
+                    input_size = command.user_ids.len(),
+                    "manager sync target bot is missing; returning zeros"
+                );
+                return Ok(ManagerSetChange {
+                    added: 0,
+                    removed: 0,
+                    total: 0,
+                });
+            }
+            SyncBotState::Uninitialized => {
+                return Err(not_initialized_error(&command.bot_id));
+            }
+            SyncBotState::Ready => {}
+        }
         // Per-attempt diagnostics so the budget-exhausted
         // error names WHY each try conflicted (no secrets /
         // caller data; the underlying DbError only).
         let mut conflicts: Vec<String> = Vec::new();
         for attempt in 0..=MAX_RETRIES {
             // Preparation reads: parameters only.
-            self.require_write_bot(&command.bot_id).await?;
             let owner = self.pre_read_owner(&command.bot_id).await?;
             // Owner normalization (spec §5.2): the same
             // owner-exclusion predicate as the guards.
-            let input_owner_excluded: Vec<String> = input
+            let input_owner_excluded: Vec<String> = typed_input
                 .iter()
                 .filter(|actor| *actor != &owner)
                 .cloned()
                 .collect();
-            self.require_humans(&input_owner_excluded).await?;
+            // Lenient partition (spec §5.2): members with no
+            // live Human ACTOR row are filtered out of the
+            // applied remainder with a warn log — the final
+            // set always equals the valid remainder, so an
+            // unknown-only input clears the set.
+            let missing = self
+                .missing_input_humans(&input_owner_excluded)
+                .await?;
+            if !missing.is_empty() {
+                warn!(
+                    operation = op,
+                    env = %self.env(),
+                    bot_id = %command.bot_id,
+                    mutation_id = %command.mutation.mutation_id,
+                    skipped = ?missing,
+                    "manager sync skipped input members with no live \
+                     Human actor row"
+                );
+            }
+            let mut valid_input: Vec<String> = Vec::new();
+            for actor in &input_owner_excluded {
+                let user = human_user_id_of_actor(actor)
+                    .expect("normalized actor shape");
+                if !missing.contains(&user) {
+                    valid_input.push(actor.clone());
+                }
+            }
             let current =
                 self.pre_read_current_set(&command.bot_id, &owner)
                     .await?;
@@ -1385,7 +1508,7 @@ impl DbBotAuthorityStore {
             let current_set: BTreeSet<String> =
                 current.iter().cloned().collect();
             let input_set: BTreeSet<String> =
-                input_owner_excluded.iter().cloned().collect();
+                valid_input.iter().cloned().collect();
             let removed: Vec<String> = current
                 .iter()
                 .filter(|actor| !input_set.contains(*actor))
@@ -1394,16 +1517,16 @@ impl DbBotAuthorityStore {
             let mut added: Vec<String> = Vec::new();
             let mut restores: Vec<String> = Vec::new();
             let mut inserts: Vec<String> = Vec::new();
-            let pending_adds: Vec<String> = input_owner_excluded
+            let pending_adds: Vec<String> = valid_input
                 .iter()
                 .filter(|actor| !current_set.contains(*actor))
                 .cloned()
                 .collect();
-            // Adds must be existing Humans (spec §5.2) and
-            // classify into restores (revoked row) and
-            // fresh inserts.
+            // The pending adds are a subset of the valid
+            // remainder (already registry-filtered); they
+            // only classify into restores (revoked row)
+            // and fresh inserts.
             if !pending_adds.is_empty() {
-                self.require_humans(&pending_adds).await?;
                 let states = self
                     .pre_read_member_states(
                         &command.bot_id,
@@ -1423,7 +1546,7 @@ impl DbBotAuthorityStore {
             let change = ManagerSetChange {
                 added: added.len() as u64,
                 removed: removed.len() as u64,
-                total: input_owner_excluded.len() as u64,
+                total: valid_input.len() as u64,
             };
             let sequences = assign_sequences(&removed, &added);
 
@@ -1445,14 +1568,16 @@ impl DbBotAuthorityStore {
             for chunk in &chunks_of_current {
                 self.chunk_guard_step(&mut builder, chunk);
             }
-            // Human-existence guards per added chunk
-            // (the registry is keyed by user id).
+            // Human-existence guards per added chunk (the
+            // registry is keyed by the `human_<user_id>`
+            // bot_uuid; the adds were already filtered, the
+            // guard only re-verifies under the row lock).
             for chunk in added.chunks(MANAGER_CHUNK) {
                 let user_chunk: Vec<String> = chunk
                     .iter()
                     .map(|actor| {
                         human_user_id_of_actor(actor)
-                            .expect("validated actor shape")
+                            .expect("normalized actor shape")
                     })
                     .collect();
                 self.human_guard_step(&mut builder, &user_chunk);
@@ -1494,9 +1619,12 @@ impl DbBotAuthorityStore {
             }
             // Post-state re-verification (sketch's sink
             // role) + trailing consumption of every guard.
+            // The expected count is the VALID remainder —
+            // a lenient sync with skipped members replaces
+            // with exactly that set (possibly empty).
             self.post_state_guard_step(
                 &mut builder,
-                input_owner_excluded.len() as u64,
+                valid_input.len() as u64,
             );
             let steps = builder.finish();
 

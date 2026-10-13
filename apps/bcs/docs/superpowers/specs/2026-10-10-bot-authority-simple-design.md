@@ -42,7 +42,7 @@ BCS 对每个 Bot 只保存一份 manager 集合。手工添加、sync 添加、
 
 ### 3.1 身份
 
-- Human actor 是 BCS 中真实存在、未删除且环境匹配的 Human；`human_` 前缀本身不是身份凭据。
+- Human actor 是 BCS 中真实存在、未删除且环境匹配的 Human；`human_` 前缀本身不是身份凭据。Human 的权威存在性是 `bcs_bots` 中对应 env 的 `actor_kind='human'` 未删行（`human_<user_id>`）；OAuth 身份同步表不作为授权守卫依据。
 - manager API 的 `user_id` 使用已验证 User 的 ID，由服务统一映射到 Human actor；转交路径直接使用完整 Human actor ID。
 - Human 身份来自既有可信认证链。请求中的 operator、owner 或 Bot token 的 `owner_id` 声明不能证明当前管理权。
 - 服务身份复用现有 Gateway 签名认证后的 App identity；BCS 配置显式授予可信 app 的环境、tenant、Bot、action 和目标 Human 范围。不能仅凭普通 App 身份、请求体 app_id 或 App owners 字段得到权限。
@@ -148,19 +148,19 @@ GET 集合用于列表，PUT 集合用于覆盖，PUT/DELETE 单项用于手工�
 ```
 
 1. 验证 service 凭证、环境、目标 Bot 和 `managers:sync` 权限，读取当前 owner。
-2. 输入去重，验证全部 Human；当前 owner 若在数组中，从 manager 集合中归一化排除。
-3. 一次事务令 manager 集合等于输入集合：撤销未列出的全部 manager，添加/恢复列出的 manager；owner 不变。
-4. 返回最终 manager 数量及 added/removed 数量。相同集合再次提交返回零差异。
+2. 输入去重（1,000 上限对去重后的原始输入计，含被跳过成员），过滤未知、已删除或非法形状的 Human 成员并记日志，最终集合为有效余集；当前 owner 若在数组中，从 manager 集合中归一化排除。
+3. 一次事务令 manager 集合等于有效余集：撤销未列出的全部 manager，添加/恢复列出的 manager；owner 不变。输入非空但余集为空时同样清空集合（"最终集合 = 有效输入余集"一条不变量）。
+4. 返回有效余集数量及按余集 diff 计算的 added/removed 数量。相同集合再次提交返回零差异。目标 Bot 不存在时返回成功全零并记日志，不写审计、不改状态；version 0 的 Bot 仍拒绝。
 
-空数组是明确清空全部 manager。字段缺失、null、格式错误、未知/已删除 Human 或上游获取失败均不能解释成空数组；整个请求失败且不做部分覆盖。
+空数组是明确清空全部 manager。字段缺失、null 或请求格式错误仍使整个请求失败且不做部分覆盖；输入中的未知、已删除或非法形状成员被跳过并记日志，不使整个请求失败。
 
 每次最多 1,000 个去重后的用户，SQL 参数按最多 100 个主体分块，同一 Bot 的全部差异仍是一笔事务。读取现有大集合须计入总工作量，不能把输入上限误当成存量上限。
 
 **顺序语义：**可信应用为同一 Bot 提供串行、有序的快照；BCS 只保证数据库提交的串行结果。手工操作在 sync 之后仍可改变集合，下一次 sync 再覆盖。请求不带来源版本或幂等 key，也不提供历史响应重放。较早快照在较晚时重试会再次覆盖，因此应用须在进入下一次同步前处理上一请求的不确定结果。即使重试与手工操作相遇，sync 仍以自己的快照为准。
 
-**消费者接入责任：**Backend 使用稳定 User ID，由 BCS 映射为 `human_{user_id}`；新增协作者须先通过既有可信 Human 注册/预置流程落入 BCS，不能让 sync 自动创建身份。每个 Bot 只有一个逻辑同步 writer；多个 Backend 副本共享按 Bot 的队列/租约，失去租约的副本不能继续发送或重试。HTTP 超时不证明未提交：有不确定请求时暂停该 Bot 的新快照，确认旧请求已结束，再发送最新权威快照。不能靠换副本消除已经在网络中的旧请求。
+**消费者接入责任：**Backend 使用稳定 User ID，由 BCS 映射为 `human_{user_id}`；sync 从不自动创建身份，协作者须先通过既有可信 Human 流程（注册或任意协作入口的 ensure）获得 `bcs_bots` Human actor 行。快照内容由可信 App 负责：未知、已删除或非法形状的成员不使 sync 失败，而是被跳过并记 warn 日志，`total` 返回有效余集大小——快照与 BCS registry 的漂移靠日志与 total 核对，不靠 400 纠错。每个 Bot 只有一个逻辑同步 writer；多个 Backend 副本共享按 Bot 的队列/租约，失去租约的副本不能继续发送或重试。HTTP 超时不证明未提交：有不确定请求时暂停该 Bot 的新快照，确认旧请求已结束，再发送最新权威快照。不能靠换副本消除已经在网络中的旧请求。
 
-400 修正输入/预置 Human 后重试，401/403 修正认证或 scope，404 核对 Bot 生命周期，409 核对初始化/状态；500、超时或断连先按不确定结果处理，不提交空快照。Backend 只有收到成功并核对本次快照后才记录初次 sync 完成；发布清单须逐 Bot 核对，未完成则阻止该 Bot 的接入切换。消费者的具体负责人及串行机制写入接入 PR，不新增 BCS 来源账本。
+400 仅修正请求体格式后重试（sync 不再因未知成员 400），401/403 修正认证或 scope，404 核对 Bot 生命周期（sync 对缺失 Bot 返回成功全零并记日志），409 核对初始化/状态；500、超时或断连先按不确定结果处理，不提交空快照。Backend 只有收到成功并核对本次快照后才记录初次 sync 完成；发布清单须逐 Bot 核对，未完成则阻止该 Bot 的接入切换。消费者的具体负责人及串行机制写入接入 PR，不新增 BCS 来源账本。
 
 ## 6. owner 转交协议
 
@@ -354,8 +354,8 @@ MemoryBotRepo 使用同一 `MemoryBotState` 实现既有 `PermissionProfileRepoP
 | A01 | owner/manager 角色、精确身份与环境隔离；未初始化/损坏/DB 失败均不放行 |
 | A02 | mine 并集、self 展示、WS/Provider 动态过滤先于分页；前页全不可达及 >500 条正确，计入 runtime 查询成本 |
 | A03 | owner/manager 均可添加移除 manager；自撤权下一请求拒绝，owner 不能被 manager 接口修改 |
-| A04 | sync 覆盖全部来源的 manager、保留 owner；手工修改可被下次同步覆盖，空数组明确清空 |
-| A05 | sync 非法输入不部分写入；去重、1,000 上限、分块与所有差异同事务，重复集合零审计 |
+| A04 | sync 覆盖全部来源的 manager、保留 owner；手工修改可被下次同步覆盖，空数组/空余集明确清空 |
+| A05 | sync 请求格式错误不部分写入；未知/已删除/非法形状成员跳过并记日志、最终集合等于有效余集，去重、1,000 上限、分块与所有差异同事务，重复集合零审计，缺失 Bot 返回全零 |
 | A06 | 所有新增接口只有统一前缀；同路由按身份授权，service 的环境/tenant/Bot/action/目标范围生效；普通 Human、Bot token、sync-only 凭证不能代办转交 |
 | A07 | 同 Bot 最多一条 pending；同目标复用行并续期，不同目标冲突；终态可由当前 owner 重新发起 |
 | A08 | accept 原子切换 owner/version，原 owner 为普通 manager；之后可被 DELETE 或 sync 移除 |
