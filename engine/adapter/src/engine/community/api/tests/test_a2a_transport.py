@@ -615,9 +615,17 @@ def test_engine_inject_frame_isolation(app_client, monkeypatch):
     assert run.state == "TASK_STATE_COMPLETED", run.state
     assert run.latest_text == "回答开头回答继续（真实终稿）", \
         run.latest_text
-    # 两个 delta 都被消费（"回答开头" + "回答继续"）——如果 bridge 把
-    # inject final 当主终态，第二个 delta 就丢了
-    assert "回答继续" in run.latest_text
+    # R14 复审建议：第二个 delta 的事件级证明——final 文本本身也含
+    # "回答继续"，仅查终稿不足以证明增量帧被消费；直接断言 events 里
+    # 存在两个 artifact 增量块（若 inject final 提前终止，第二块缺失）。
+    deltas = [e for e in run.events
+              if e["type"] == "artifactUpdate"
+              and e["ev"]["artifactUpdate"].get("append") is True]
+    assert len(deltas) == 1, \
+        f"expected exactly one append chunk, got {len(deltas)}" \
+        "（首块 append=False；第二个 delta 是唯一的 append=True 块——" \
+        "它缺失即证明 bridge 在 inject final 处提前终止）"
+    assert deltas[0]["ev"]["artifactUpdate"]["artifact"]["parts"][0]["text"] == "回答继续"
 
 
 def test_kernel_publish_engine_inject_unit(app_client):
