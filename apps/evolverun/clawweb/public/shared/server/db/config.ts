@@ -188,14 +188,6 @@ type YamlBaasEnvironmentConfig = {
 };
 
 type YamlRepairConfig = {
-  ais?: {
-    /** Legacy fallback used when an environment-specific Snapshot is absent. */
-    snapshotId?: number;
-    snapshots?: {
-      pre?: number;
-      prod?: number;
-    };
-  };
   execution?: {
     decisionGraceSeconds?: number;
     contextWaitSeconds?: number;

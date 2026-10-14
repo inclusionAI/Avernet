@@ -55,14 +55,17 @@ export type RepairConfig = {
   requestTimeoutMs: number;
 };
 
-export function resolveRepairConfig(configPath?: string): RepairConfig {
+export function resolveRepairConfig(
+  aisSnapshotIds: Record<RepairControlPlaneEnvironment, number>,
+  configPath?: string,
+): RepairConfig {
   const repair = resolveRepairServiceConfig(configPath);
   const currentEnvironment = getCurrentEnv();
   const resolved: RepairConfig = {
     publicBaseUrl: resolveInsightHandoffConfig().publicBaseUrl,
-    ...(process.env.REPAIR_AIS_USE_BASE === "true" ? { packageId: "clawevolve-repair" } : {}),
+    packageId: "clawevolve-repair",
     controlPlaneEnvironment: currentEnvironment === "prod" ? "prod" : "pre",
-    aisSnapshotIds: repair.aisSnapshotIds,
+    aisSnapshotIds,
     decisionGraceSeconds: repair.decisionGraceSeconds,
     contextWaitSeconds: repair.contextWaitSeconds,
     executionLeaseSeconds: repair.executionLeaseSeconds,
