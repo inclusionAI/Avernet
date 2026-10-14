@@ -180,6 +180,7 @@ class AsyncChatClientPool:
                 session_key_timeout=self._session_key_timeout,
                 max_retries=self._max_retries,
                 retry_base_backoff=self._retry_base_backoff,
+                a2a_mode=self._read_a2a_mode(self._system_config_service),
                 ignore_case=self._read_ignore_case(self._system_config_service),
                 interaction_service=self._interaction_service
                 if self._enable_process_interaction(self._system_config_service)
@@ -225,6 +226,35 @@ class AsyncChatClientPool:
             )
 
     # ── 内部实现 ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _read_a2a_mode(
+        system_config_service: SystemConfigManageService | None,
+    ) -> str:
+        """从 system_config 读取 A2A 灰度模式（1b 迁移开关）。
+
+        与 _read_ignore_case 同构：config 服务缺席/异常/未配置都回退
+        "off"（生产零变化）；值合法域 off|grey|on，非法回退 off 并告警。
+        """
+        if system_config_service is None:
+            return "off"
+        try:
+            resp = system_config_service.get_config(
+                SystemConfigKey.A2A_CLIENT_MODE
+            )
+        except Exception:
+            logger.warning(
+                "failed to read a2a_client_mode config, defaulting to off",
+                exc_info=True,
+            )
+            return "off"
+        value = (resp.conf_value or "").strip().lower() if resp else ""
+        if value not in ("off", "grey", "on"):
+            if value:
+                logger.warning(
+                    "invalid a2a_client_mode %r, defaulting to off", value)
+            return "off"
+        return value
 
     @staticmethod
     def _read_ignore_case(

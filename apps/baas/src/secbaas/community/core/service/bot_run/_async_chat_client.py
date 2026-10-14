@@ -38,6 +38,20 @@ from ._session_state import SessionState
 logger = get_logger("core-bot-run")
 
 
+def _a2a_base_url_from_ws(uri: str) -> str | None:
+    """ws(s)://host:port/... → http(s)://host:port；非 ws scheme 返回 None。
+
+    A2A 端点与 v3 WS 端点同进程同端口（engine adapter :20003 单实例双面）。
+    """
+    if not isinstance(uri, str) or "://" not in uri:
+        return None
+    scheme, _, rest = uri.partition("://")
+    if scheme not in ("ws", "wss"):
+        return None
+    host_port = rest.split("/", 1)[0]
+    return ("https://" if scheme == "wss" else "http://") + host_port
+
+
 def _public_interaction_envelope(
     envelope: dict[str, object],
     *,
@@ -177,6 +191,7 @@ class AsyncChatClient:
         retry_base_backoff: float = 0.5,
         ignore_case: bool = False,
         interaction_service: BotInteractionService | None = None,
+        a2a_mode: str = "off",
     ):
         """初始化客户端
 
@@ -193,6 +208,11 @@ class AsyncChatClient:
             ignore_case: sessionKey 模糊匹配是否忽略大小写
         """
         self.uri = uri
+        # 1b 迁移灰度开关（R16-10：DI 注入，默认 off=生产零变化）。
+        if a2a_mode not in ("off", "grey", "on"):
+            raise ValueError(f"invalid a2a_mode: {a2a_mode!r}")
+        self._a2a_mode = a2a_mode
+        self._transport: str = "v3-ws"
         self.headers = headers or {}
         self.client_id = client_id or f"client-{uuid.uuid4().hex[:8]}"
         self.client_version = client_version
@@ -272,12 +292,34 @@ class AsyncChatClient:
 
         self._closed_intentionally = False
         self._disconnect_event.clear()
-        _client = BotWebSocketClient(
-            uri=self.uri,
-            client_id=self.client_id,
-            client_version=self.client_version,
-            headers=self.headers,
-        )
+
+        # ── 1b G1 灰度工厂（默认 off 时代码路径与迁移前逐字节一致）：
+        # off → 原 BotWebSocketClient 构造；grey/on → A2A 能力探测，失败
+        # 按模式分流（grey 回退 v3 / on 抛错）。handlers 注册与统一 connect
+        # 段保持原样——见下方 hello 分支。──
+        _client = None
+        if self._a2a_mode in ("grey", "on"):
+            a2a_base = _a2a_base_url_from_ws(self.uri)
+            if a2a_base:
+                from secbaas.community.core.service.bot_run._bot_a2a_client import (
+                    A2aUnavailableError, BotA2aClient,
+                )
+                try:
+                    candidate = BotA2aClient(base_url=a2a_base,
+                                             headers=self.headers)
+                    await candidate.connect()   # card GET 能力探测
+                    _client = candidate
+                except A2aUnavailableError as e:
+                    if self._a2a_mode == "on":
+                        raise
+                    logger.info("[a2a-gate] probing failed (%s) — v3", e)
+        if _client is None:
+            _client = BotWebSocketClient(
+                uri=self.uri,
+                client_id=self.client_id,
+                client_version=self.client_version,
+                headers=self.headers,
+            )
 
         _client.on_event("chat", self._on_chat)
         _client.on_event("agent", self._on_agent)
@@ -291,10 +333,18 @@ class AsyncChatClient:
         if self.verbose:
             logger.info("Connecting...")
 
-        # 直接 await 异步连接，不再需要 run_in_executor
+        # 直接 await 异步连接，不再需要 run_in_executor。
+        # A2A 候选客户端在能力探测时已完成 connect（R16-4：不再二次连接，
+        # hello 从 server_info 取）；v3 语义原样保留。
+        self._transport = ("a2a"
+                           if _client.__class__.__name__ == "BotA2aClient"
+                           else "v3-ws")
         hello: dict[str, Any] | None = None
         try:
-            hello = await _client.connect()
+            if self._transport == "a2a":
+                hello = _client.server_info
+            else:
+                hello = await _client.connect()
         except Exception as e:
             logger.error(f"Connect failed: {e}")
             raise e
