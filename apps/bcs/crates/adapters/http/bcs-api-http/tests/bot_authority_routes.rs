@@ -836,7 +836,9 @@ async fn owner_checks_and_unauthorized_humans_on_dual_read() {
         .expect("response");
     assert_eq!(response.status(), StatusCode::OK);
 
-    // A scoped app with an out-of-scope target is denied.
+    // No configured target set anymore: a scoped App reaches
+    // the handler for any pending row — only existence divides
+    // read access (missing pair = 404, spec §6.1/§6.4).
     let response = fixture
         .router
         .clone()
@@ -847,7 +849,7 @@ async fn owner_checks_and_unauthorized_humans_on_dual_read() {
         ))
         .await
         .expect("response");
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     // Unknown (bot, target) pairs are 404 with the pinned code.
     let response = fixture

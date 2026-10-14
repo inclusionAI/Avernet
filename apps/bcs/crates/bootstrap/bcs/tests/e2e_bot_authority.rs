@@ -16,8 +16,9 @@
 //!    RegisteredBot-5 route-test plumbing minted against
 //!    the REAL process verifier) — full-set replace
 //!    including removing the manual manager; the
-//!    configured trusted-app scope (`bot_ids`/env/tenant/
-//!    actions) denies everything outside the rule;
+//!    configured trusted-app scope (`app + tenant + actions`
+//!    — bound to the instance env at resolve) denies
+//!    everything outside the rule;
 //! 3. ownership transfer: initiate → 201/200 refresh →
 //!    accept by the target Human;
 //! 4. sync removing the ORIGINAL owner (now a plain
@@ -141,12 +142,16 @@ fn user_principal(id: &str, tenant: Option<&str>) -> Value {
 }
 
 fn app_principal(app_id: i64, tenant: Option<&str>) -> Value {
+    named_app_principal(app_id, "Authority App", tenant)
+}
+
+fn named_app_principal(app_id: i64, app_name: &str, tenant: Option<&str>) -> Value {
     json!({
         "type": "app",
         "tenant": tenant,
         "app": {
             "app_id": app_id,
-            "app_name": "Authority App",
+            "app_name": app_name,
             "owners": "owner",
             "tenant": tenant,
             "app_type": "THIRD_PARTY",
@@ -167,6 +172,13 @@ fn app_token(app_id: i64, tenant: Option<&str>) -> String {
     mint_with(
         TEST_GATEWAY_PRINCIPAL_SIGNING_KEY,
         claims_for(json!([app_principal(app_id, tenant)])),
+    )
+}
+
+fn named_app_token(app_id: i64, app_name: &str, tenant: Option<&str>) -> String {
+    mint_with(
+        TEST_GATEWAY_PRINCIPAL_SIGNING_KEY,
+        claims_for(json!([named_app_principal(app_id, app_name, tenant)])),
     )
 }
 
@@ -520,14 +532,11 @@ impl WorkbenchClient {
 // Process harness
 // ============================================================================
 
-fn trusted_apps_rule(bot_id: &str) -> Value {
+fn trusted_apps_rule() -> Value {
     json!({
-        "app_id": APP_ID,
-        "env": INSTANCE_ENV,
+        "app": "Authority App",
         "tenant": TENANT,
-        "bot_ids": [bot_id],
         "actions": ["managers:sync"],
-        "target_owner_actor_ids": [],
     })
 }
 
@@ -775,12 +784,13 @@ async fn e2e_bot_authority_full_chain_story() {
     println!("[3] manager business op authorized at the WS boundary");
     bob_socket.close().await;
 
-    // ── 4. Restart with the trusted-app scope rule naming
-    //    THIS bot id (a trusted App is configured before
-    //    rollout; bot ids are case-exact config keys), then
-    //    prove durability across the restart.
+    // ── 4. Restart with the trusted-app scope rule for the
+    //    App NAME (byte-exact match on the verified
+    //    principal's app name; the rule covers every bot on
+    //    the instance), then prove durability across the
+    //    restart.
     pm.kill_all();
-    let rule_bots = trusted_apps_rule(&bot_id);
+    let rule_bots = trusted_apps_rule();
     let port = {
         let extra = json!({
             "bot_authority": { "trusted_apps": [rule_bots] }
@@ -796,11 +806,10 @@ async fn e2e_bot_authority_full_chain_story() {
     assert_eq!(owner_user_of(&page), WALT, "owner edge survived restart");
 
     // ── 5. Trusted-App scope: rule enumeration ───────────────────────
-    // Wrong tenant → deny; wrong env would only match with
-    // a different rule spelling (same denial here via a
-    // second rule-less app identity); acting on a bot NOT
-    // in the rule's bot_ids (Bob's bot) → deny; an action
-    // outside `actions` (ownership:read not granted) → deny.
+    // Wrong tenant → deny; an unknown App NAME → deny (the
+    // scoping identity is the name now, not a numeric id);
+    // an action outside `actions` (ownership:read not
+    // granted) → deny.
     let (status, body) =
         read_managers(&client, &bcs_url, &app_token(APP_ID, Some("other")), &bot_id)
             .await;
@@ -811,13 +820,13 @@ async fn e2e_bot_authority_full_chain_story() {
     let (status, body) = read_managers(
         &client,
         &bcs_url,
-        &app_token(99, Some(TENANT)),
+        &named_app_token(99, "Other App", Some(TENANT)),
         &bot_id,
     )
     .await;
     assert_eq!(
         status, 403,
-        "an untrusted app id is denied: {body:?}"
+        "an untrusted app name is denied: {body:?}"
     );
     let (status, body) = read_managers(
         &client,

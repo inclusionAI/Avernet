@@ -17,7 +17,7 @@ pub use logs::capture_request_logs;
 
 pub use auth_noop::{NoopAuthPlugin, NoopUserIdentityPort};
 pub use bot_authority::{
-    AuthorityEdgeFixture, FailingAuthorityHook,
+    AUTHORITY_FIXTURE_APP_NAME, AuthorityEdgeFixture, FailingAuthorityHook,
     LazyAuthorityFixture, LazySeedAuthorityHook,
     NoopBotAuthorityHook, NoopBotAuthorityService, failing_authority_hook,
     authority_edge_fixture, authority_hook_for, grant_manager_edge,

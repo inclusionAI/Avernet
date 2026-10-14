@@ -19,8 +19,9 @@
 # Dual-admission routes process the Human FIRST; a Human
 # rejection never falls back to App escalation. Trusted Apps
 # must be configured in the server's trusted-app scope rules
-# (`app_id + env + tenant + bot_ids + actions +
-# target_owner_actor_ids`, byte-exact, no wildcards).
+# (`app + tenant + actions`, byte-exact, no wildcards;
+# rules bind to the instance env; audit keeps the numeric
+# app id).
 #
 # NOTE on the sync collection operationId: the plan records
 # `syncBotManagers`, but the repository OpenAPI conformance

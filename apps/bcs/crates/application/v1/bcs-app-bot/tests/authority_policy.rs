@@ -40,6 +40,10 @@ use bcs_service_api::types::bot_authority::{
 
 const ENV: &str = "local";
 
+/// The fixture App's shared wire name (spec §3.1: the rule
+/// matches the verified principal's `app_name`, byte-exact).
+const APP_NAME: &str = "sync-app";
+
 // ---------------------------------------------------------------------------
 // identity fixtures (verified-principal projections)
 // ---------------------------------------------------------------------------
@@ -60,13 +64,21 @@ fn human_caller(user_id: &str, tenant: Option<&str>) -> AuthenticatedCaller {
 }
 
 fn app_caller(app_id: i64, tenant: Option<&str>) -> AuthenticatedCaller {
+    named_app_caller(APP_NAME, app_id, tenant)
+}
+
+fn named_app_caller(
+    app_name: &str,
+    app_id: i64,
+    tenant: Option<&str>,
+) -> AuthenticatedCaller {
     AuthenticatedCaller {
         tenant: tenant.map(str::to_string),
         user: None,
         bot: None,
         app: Some(AuthenticatedAppIdentity {
             app_id,
-            app_name: "sync-app".to_string(),
+            app_name: app_name.to_string(),
             owners: "owner".to_string(),
             app_type: "THIRD_PARTY".to_string(),
         }),
@@ -80,7 +92,7 @@ fn user_plus_app_caller(user_id: &str, app_id: i64) -> AuthenticatedCaller {
     let mut caller = human_caller(user_id, Some("tenant-a"));
     caller.app = Some(AuthenticatedAppIdentity {
         app_id,
-        app_name: "sync-app".to_string(),
+        app_name: APP_NAME.to_string(),
         owners: "owner".to_string(),
         app_type: "THIRD_PARTY".to_string(),
     });
@@ -123,25 +135,16 @@ fn access_key_only_caller() -> AuthenticatedCaller {
 // ---------------------------------------------------------------------------
 
 fn rule(
-    app_id: i64,
-    env: &str,
+    app: &str,
     tenant: TenantScope,
-    bot_ids: &[&str],
     actions: &[AuthorityAction],
-    targets: &[&str],
 ) -> AuthorityAppScopeRule {
     AuthorityAppScopeRule::from_config_strings(
-        app_id,
-        env,
+        app,
         tenant_text(&tenant),
-        &bot_ids.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
         &actions
             .iter()
             .map(|action| action.as_str().to_string())
-            .collect::<Vec<_>>(),
-        &targets
-            .iter()
-            .map(|s| s.to_string())
             .collect::<Vec<_>>(),
     )
     .expect("valid rule fixture")
@@ -158,29 +161,26 @@ fn sync_policy(rules: Vec<AuthorityAppScopeRule>) -> AuthorityServicePolicy {
     AuthorityServicePolicy::new(ENV, rules).expect("valid policy fixture")
 }
 
-fn full_sync_rule(app_id: i64) -> AuthorityAppScopeRule {
+/// The numeric id stays only as the caller identity the case
+/// constructs; MATCHING is by app name (spec §3.1 simplified
+/// rule shape `app + tenant + actions`).
+fn full_sync_rule(_app_id: i64) -> AuthorityAppScopeRule {
     rule(
-        app_id,
-        ENV,
+        APP_NAME,
         TenantScope::Exact("tenant-a".to_string()),
-        &["bot-1"],
         &[AuthorityAction::ManagersSync],
-        &[],
     )
 }
 
-fn transfer_read_rule(app_id: i64) -> AuthorityAppScopeRule {
+fn transfer_read_rule(_app_id: i64) -> AuthorityAppScopeRule {
     rule(
-        app_id,
-        ENV,
+        APP_NAME,
         TenantScope::Exact("tenant-a".to_string()),
-        &["bot-1"],
         &[
             AuthorityAction::OwnershipRead,
             AuthorityAction::OwnershipAccept,
             AuthorityAction::OwnershipReject,
         ],
-        &["human_bob"],
     )
 }
 
@@ -523,12 +523,9 @@ async fn app_in_scope_is_authorized_as_service_actor() {
 #[tokio::test]
 async fn missing_tenant_matches_only_explicit_absent_rule() {
     let absent_rule = rule(
-        7,
-        ENV,
+        APP_NAME,
         TenantScope::Absent,
-        &["bot-1"],
         &[AuthorityAction::ManagersSync],
-        &[],
     );
     let policy = sync_policy(vec![absent_rule]);
 
@@ -554,32 +551,19 @@ async fn missing_tenant_matches_only_explicit_absent_rule() {
 }
 
 #[tokio::test]
-async fn rules_from_other_env_never_authorize() {
-    let policy = sync_policy(vec![rule(
-        7,
-        "prod",
-        TenantScope::Exact("tenant-a".to_string()),
-        &["bot-1"],
-        &[AuthorityAction::ManagersSync],
-        &[],
-    )]);
-    let caller = app_caller(7, Some("tenant-a"));
-
-    let error = policy
-        .authorize(&caller, AuthorityAction::ManagersSync, "bot-1", None)
-        .expect_err("rule bound to another env must stay inert");
-    assert!(operator_forbidden_code(&error));
-}
-
-#[tokio::test]
 async fn ids_are_case_exact() {
     let policy = sync_policy(vec![full_sync_rule(7)]);
-    let caller = app_caller(7, Some("tenant-a"));
 
-    // Bot id casing is exact: "Bot-1" is out of scope.
+    // App name casing is exact (spec §3.1: byte-exact match on
+    // the verified principal's `app_name`).
     let error = policy
-        .authorize(&caller, AuthorityAction::ManagersSync, "Bot-1", None)
-        .expect_err("bot id comparison is byte-exact");
+        .authorize(
+            &named_app_caller("SYNC-APP", 7, Some("tenant-a")),
+            AuthorityAction::ManagersSync,
+            "bot-1",
+            None,
+        )
+        .expect_err("app name comparison is byte-exact");
     assert!(operator_forbidden_code(&error));
 
     // Tenant casing is exact.
@@ -592,33 +576,23 @@ async fn ids_are_case_exact() {
         )
         .expect_err("tenant comparison is byte-exact");
     assert!(operator_forbidden_code(&error));
-
-    // Transfer target casing is exact.
-    let transfer_policy = sync_policy(vec![transfer_read_rule(7)]);
-    let error = transfer_policy
-        .authorize(
-            &caller,
-            AuthorityAction::OwnershipRead,
-            "bot-1",
-            Some("human_Bob"),
-        )
-        .expect_err("target comparison is byte-exact");
-    assert!(operator_forbidden_code(
-        &error,
-    ));
 }
 
 #[tokio::test]
-async fn out_of_scope_bot_action_and_target_deny() {
+async fn out_of_scope_app_and_action_deny() {
     let sync_scope = sync_policy(vec![full_sync_rule(7)]);
-    let transfer_scope = sync_policy(vec![transfer_read_rule(7)]);
     let caller = app_caller(7, Some("tenant-a"));
 
-    // Out-of-scope bot.
+    // An unconfigured app name never matches.
     assert!(operator_forbidden_code(
         &sync_scope
-            .authorize(&caller, AuthorityAction::ManagersSync, "bot-other", None)
-            .expect_err("bot outside the rule")
+            .authorize(
+                &named_app_caller("other-app", 7, Some("tenant-a")),
+                AuthorityAction::ManagersSync,
+                "bot-1",
+                None,
+            )
+            .expect_err("unknown app name")
     ));
     // sync rule cannot transfer: the action is not in the rule.
     assert!(operator_forbidden_code(
@@ -630,17 +604,6 @@ async fn out_of_scope_bot_action_and_target_deny() {
                 Some("human_bob")
             )
             .expect_err("sync-only rule lacks ownership:read")
-    ));
-    // Scoped app cannot accept a target outside its target set.
-    assert!(operator_forbidden_code(
-        &transfer_scope
-            .authorize(
-                &caller,
-                AuthorityAction::OwnershipAccept,
-                "bot-1",
-                Some("human_carol")
-            )
-            .expect_err("target outside the rule")
     ));
 }
 
@@ -655,30 +618,27 @@ async fn empty_rule_sets_deny_everything() {
             .expect_err("empty policy denies sync")
     ));
 
-    // A rule with an empty bot set denies everything.
-    let empty_bot_ids = rule(
-        7,
-        ENV,
+    // A rule with an empty action set denies everything.
+    let empty_actions = rule(
+        APP_NAME,
         TenantScope::Exact("tenant-a".to_string()),
         &[],
-        &[AuthorityAction::ManagersSync],
-        &[],
     );
-    let policy = sync_policy(vec![empty_bot_ids]);
+    let policy = sync_policy(vec![empty_actions]);
     assert!(operator_forbidden_code(
         &policy
             .authorize(&caller, AuthorityAction::ManagersSync, "bot-1", None)
-            .expect_err("empty bot set denies")
+            .expect_err("empty action set denies")
     ));
 }
 
 #[tokio::test]
 async fn ordinary_app_outside_the_configured_scope_is_rejected() {
     let policy = sync_policy(vec![full_sync_rule(7)]);
-    let caller = app_caller(8, Some("tenant-a"));
+    let caller = named_app_caller("other-app", 8, Some("tenant-a"));
     let error = policy
         .authorize(&caller, AuthorityAction::ManagersSync, "bot-1", None)
-        .expect_err("unconfigured app_id must not pass");
+        .expect_err("unconfigured app name must not pass");
     assert!(operator_forbidden_code(&error));
 }
 
@@ -701,12 +661,9 @@ async fn human_caller_cannot_use_the_app_scope() {
 async fn config_level_rejections_fail_startup_construction() {
     // Unknown action string.
     let error = AuthorityAppScopeRule::from_config_strings(
-        7,
-        ENV,
+        APP_NAME,
         "tenant-a",
-        &["bot-1".to_string()],
         &["managers:delete".to_string()],
-        &[],
     )
     .expect_err("unknown action must fail configuration loading");
     assert!(error.to_string().contains("unknown action"));
@@ -714,104 +671,68 @@ async fn config_level_rejections_fail_startup_construction() {
     // Case-exact action spelling is also rejected.
     assert!(
         AuthorityAppScopeRule::from_config_strings(
-            7,
-            ENV,
+            APP_NAME,
             "tenant-a",
-            &["bot-1".to_string()],
             &["managers:SYNC".to_string()],
-            &[],
         )
         .is_err(),
         "action spelling is case-exact"
     );
 
     // Wildcard strings anywhere are rejected.
-    for wildcard in [
-        "*.x".to_string(),
-        "bot-?".to_string(),
-        "100%".to_string(),
-    ] {
+    for wildcard in ["*.x".to_string(), "sync-?".to_string(), "100%".to_string()] {
         assert!(
             AuthorityAppScopeRule::from_config_strings(
-                7,
-                ENV,
+                &wildcard,
                 "tenant-a",
-                &[wildcard],
                 &["managers:sync".to_string()],
-                &[],
             )
             .is_err(),
-            "wildcard bot id must fail configuration loading"
+            "wildcard app name must fail configuration loading"
         );
     }
     assert!(
         AuthorityAppScopeRule::from_config_strings(
-            7,
-            ENV,
+            APP_NAME,
             "tenant-*",
-            &["bot-1".to_string()],
             &["managers:sync".to_string()],
-            &[],
         )
         .is_err(),
         "wildcard tenant must fail configuration loading"
     );
+
+    // A duplicate action spelling in one rule is a shape error.
     assert!(
         AuthorityAppScopeRule::from_config_strings(
-            7,
-            ENV,
+            APP_NAME,
             "tenant-a",
-            &["bot-1".to_string()],
-            &["ownership:read".to_string()],
-            &["human_*".to_string()],
+            &["managers:sync".to_string(), "managers:sync".to_string()],
         )
         .is_err(),
-        "wildcard target must fail configuration loading"
+        "duplicate action in one rule must fail configuration loading"
     );
 
-    // A transfer-capable rule requires a non-empty target set.
+    // An empty/whitespace app or tenant is a shape error.
     assert!(
         AuthorityAppScopeRule::from_config_strings(
-            7,
-            ENV,
-            "tenant-a",
-            &["bot-1".to_string()],
-            &["ownership:accept".to_string()],
-            &[],
-        )
-        .is_err(),
-        "transfer action without targets must fail configuration loading"
-    );
-
-    // A sync-only rule must keep the target set empty.
-    assert!(
-        AuthorityAppScopeRule::from_config_strings(
-            7,
-            ENV,
-            "tenant-a",
-            &["bot-1".to_string()],
-            &["managers:sync".to_string()],
-            &["human_bob".to_string()],
-        )
-        .is_err(),
-        "sync-only rule with targets must fail configuration loading"
-    );
-
-    // An empty/whitespace field is a shape error.
-    assert!(
-        AuthorityAppScopeRule::from_config_strings(
-            7,
             "",
             "tenant-a",
-            &["bot-1".to_string()],
             &["managers:sync".to_string()],
-            &[],
         )
         .is_err(),
-        "empty env must fail configuration loading"
+        "empty app name must fail configuration loading"
+    );
+    assert!(
+        AuthorityAppScopeRule::from_config_strings(
+            APP_NAME,
+            " padded ",
+            &["managers:sync".to_string()],
+        )
+        .is_err(),
+        "whitespace-padded tenant must fail configuration loading"
     );
 
-    // Duplicate rule keys (same app/env/tenant) fail the
+    // Duplicate rule keys (same app/tenant) fail the
     // policy construction: one rule per key, no
     // order-based merging (spec §3.1).
     let error = AuthorityServicePolicy::new(
@@ -973,20 +894,17 @@ async fn sync_only_credential_cannot_accept_or_reject() {
 #[tokio::test]
 async fn provider_style_credentials_gain_no_authority_actions() {
     let core = Arc::new(RecordingCore::default());
-    // One combined rule per app/env/tenant: sync + scoped
-    // transfer actions on the same bot/targets (spec §3.1).
+    // One combined rule per app/tenant: sync + all transfer
+    // actions (spec §3.1 simplified shape).
     let combined_rule = rule(
-        7,
-        ENV,
+        APP_NAME,
         TenantScope::Exact("tenant-a".to_string()),
-        &["bot-1"],
         &[
             AuthorityAction::ManagersSync,
             AuthorityAction::OwnershipRead,
             AuthorityAction::OwnershipAccept,
             AuthorityAction::OwnershipReject,
         ],
-        &["human_bob"],
     );
     let service = service(
         core.clone(),
@@ -1060,19 +978,6 @@ async fn authorized_app_reads_and_decides_transfers_through_the_service() {
         view.as_ref().map(|v| v.target_owner_actor_id.as_str()),
         Some("human_bob")
     );
-
-    // Out-of-scope target still denies.
-    let error = service
-        .transfer(
-            &caller,
-            &TransferKey {
-                bot_id: "bot-1".to_string(),
-                target_owner_actor_id: "human_carol".to_string(),
-            },
-        )
-        .await
-        .expect_err("target outside the rule");
-    assert!(operator_forbidden_code(&error));
 
     // Scoped accept/reject reach the Core as Service actors.
     for action in [TransferAction::Accept, TransferAction::Reject] {

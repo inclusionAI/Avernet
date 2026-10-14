@@ -15,6 +15,7 @@
 
 #![allow(clippy::expect_used, reason = "test harness — panic on failure is the contract")]
 
+use crate::bot_authority::AUTHORITY_FIXTURE_APP_NAME;
 use bcs_service_api::application::v1::bot_authority::{
     ManagerEdit, ManagerEditAction, ManagerListQuery,
     ManagerSync, TransferAction, TransferCommand, TransferKey,
@@ -54,7 +55,7 @@ fn app(app_id: i64) -> AuthenticatedCaller {
         bot: None,
         app: Some(AuthenticatedAppIdentity {
             app_id,
-            app_name: "scope app".into(),
+            app_name: AUTHORITY_FIXTURE_APP_NAME.into(),
             owners: "owner".into(),
             app_type: "THIRD_PARTY".into(),
         }),
@@ -143,7 +144,7 @@ pub async fn bot_authority_service_contract_tests() {
         let mut caller = human(OWNER);
         caller.app = Some(AuthenticatedAppIdentity {
             app_id: TRUSTED_APP_ID,
-            app_name: "scope app".into(),
+            app_name: AUTHORITY_FIXTURE_APP_NAME.into(),
             owners: "owner".into(),
             app_type: "THIRD_PARTY".into(),
         });

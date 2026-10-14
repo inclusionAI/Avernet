@@ -1667,20 +1667,14 @@ fn bot_authority_trusted_apps_parse_and_resolve() {
         bots_base_dir = "/bots"
 
         [[bot_authority.trusted_apps]]
-        app_id = 7
-        env = "local"
+        app = "backend"
         tenant = "tenant-a"
-        bot_ids = ["bot-1"]
         actions = ["managers:sync"]
-        target_owner_actor_ids = []
 
         [[bot_authority.trusted_apps]]
-        app_id = 8
-        env = "local"
+        app = "backend-b"
         tenant = "absent"
-        bot_ids = ["bot-2"]
         actions = ["ownership:read", "ownership:accept", "ownership:reject"]
-        target_owner_actor_ids = ["human_bob"]
     "#;
     let config: BcsConfig =
         toml::from_str(toml).expect("parse trusted-app authority scope");
@@ -1701,10 +1695,8 @@ fn bot_authority_unknown_action_fails_startup() {
         bots_base_dir = "/bots"
 
         [[bot_authority.trusted_apps]]
-        app_id = 7
-        env = "local"
+        app = "backend"
         tenant = "tenant-a"
-        bot_ids = ["bot-1"]
         actions = ["managers:delete"]
     "#,
     )
@@ -1719,8 +1711,7 @@ fn bot_authority_unknown_action_fails_startup() {
     std::fs::write(tmp.path().join("bcs-config.toml"), r#"
         bots_base_dir = "/bots"
         [[bot_authority.trusted_apps]]
-        app_id = 7
-        env = "local"
+        app = "backend"
         tenant = "tenant-a"
         actions = ["managers:whatever"]
         "#,
@@ -1742,10 +1733,8 @@ fn bot_authority_wildcards_and_duplicate_rule_keys_fail_startup() {
             bots_base_dir = "/bots"
 
             [[bot_authority.trusted_apps]]
-            app_id = 7
-            env = "local"
+            app = "{toml}"
             tenant = "tenant-a"
-            bot_ids = ["{toml}"]
             actions = ["managers:sync"]
         "#
         ))
@@ -1753,7 +1742,7 @@ fn bot_authority_wildcards_and_duplicate_rule_keys_fail_startup() {
         let error = config
             .bot_authority
             .validate()
-            .expect_err("wildcard/padded bot id fails loading");
+            .expect_err("wildcard/padded app name fails loading");
         assert!(error.contains(expected), "{error}");
     }
 
@@ -1762,17 +1751,13 @@ fn bot_authority_wildcards_and_duplicate_rule_keys_fail_startup() {
         bots_base_dir = "/bots"
 
         [[bot_authority.trusted_apps]]
-        app_id = 7
-        env = "local"
+        app = "backend"
         tenant = "tenant-a"
-        bot_ids = ["bot-1"]
         actions = ["managers:sync"]
 
         [[bot_authority.trusted_apps]]
-        app_id = 7
-        env = "local"
+        app = "backend"
         tenant = "tenant-a"
-        bot_ids = ["bot-1"]
         actions = ["managers:sync"]
     "#,
     )
@@ -1785,45 +1770,7 @@ fn bot_authority_wildcards_and_duplicate_rule_keys_fail_startup() {
 }
 
 #[test]
-fn bot_authority_target_and_tenant_shape_errors_fail_startup() {
-    let transfer_without_targets: BcsConfig = toml::from_str(
-        r#"
-        bots_base_dir = "/bots"
-
-        [[bot_authority.trusted_apps]]
-        app_id = 7
-        env = "local"
-        tenant = "tenant-a"
-        bot_ids = ["bot-1"]
-        actions = ["ownership:accept"]
-    "#,
-    )
-    .expect("parse");
-    assert!(transfer_without_targets
-        .bot_authority
-        .validate()
-        .expect_err("transfer rule without targets fails")
-        .contains("target_owner_actor_ids"));
-
-    let sync_with_targets: BcsConfig = toml::from_str(
-        r#"
-        bots_base_dir = "/bots"
-
-        [[bot_authority.trusted_apps]]
-        app_id = 7
-        env = "local"
-        tenant = "tenant-a"
-        bot_ids = ["bot-1"]
-        actions = ["managers:sync"]
-        target_owner_actor_ids = ["human_bob"]
-    "#,
-    )
-    .expect("parse");
-    assert!(sync_with_targets
-        .bot_authority
-        .validate()
-        .expect_err("sync-only rule with targets fails")
-        .contains("target_owner_actor_ids"));
+fn bot_authority_tenant_and_shape_errors_fail_startup() {
 
     // A missing tenant field is a load failure (the
     // reserved "absent" spelling is the only way to
@@ -1834,9 +1781,7 @@ fn bot_authority_target_and_tenant_shape_errors_fail_startup() {
         r#"
         bots_base_dir = "/bots"
         [[bot_authority.trusted_apps]]
-        app_id = 7
-        env = "local"
-        bot_ids = ["bot-1"]
+        app = "backend"
         actions = ["managers:sync"]
         "#,
     )
@@ -1857,10 +1802,8 @@ fn bot_authority_target_and_tenant_shape_errors_fail_startup() {
         r#"
         bots_base_dir = "/bots"
         [[bot_authority.trusted_apps]]
-        app_id = 7
-        env = "local"
+        app = "backend"
         tenant = "tenant-a"
-        bot_ids = ["bot-1"]
         actions = ["managers:sync"]
         future_field = true
         "#,
@@ -1871,6 +1814,31 @@ fn bot_authority_target_and_tenant_shape_errors_fail_startup() {
     assert!(
         err.contains("unknown field") || err.contains("future_field"),
         "{err}"
+    );
+
+    // The legacy schema fails LOUDLY, never half-applied
+    // (bot-authority simplification invariant).
+    let tmp = tempfile::TempDir::new().expect("temp config dir");
+    std::fs::write(
+        tmp.path().join("bcs-config.toml"),
+        r#"
+        bots_base_dir = "/bots"
+        [[bot_authority.trusted_apps]]
+        app_id = 7
+        env = "local"
+        tenant = "tenant-a"
+        bot_ids = ["bot-1"]
+        actions = ["managers:sync"]
+        "#,
+    )
+    .expect("write config");
+    let err = BcsConfig::try_load_with_env(Some(&tmp.path().to_path_buf()))
+        .expect_err("legacy rule schema must fail loading loudly");
+    assert!(
+        err.contains("unknown field")
+            || err.contains("app_id")
+            || err.contains("bot_ids"),
+        "legacy fields must surface as load errors: {err}"
     );
 }
 

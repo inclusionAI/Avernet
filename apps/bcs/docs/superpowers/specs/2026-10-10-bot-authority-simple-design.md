@@ -45,12 +45,12 @@ BCS 对每个 Bot 只保存一份 manager 集合。手工添加、sync 添加、
 - Human actor 是 BCS 中真实存在、未删除且环境匹配的 Human；`human_` 前缀本身不是身份凭据。Human 的权威存在性是 `bcs_bots` 中对应 env 的 `actor_kind='human'` 未删行（`human_<user_id>`）；OAuth 身份同步表不作为授权守卫依据。
 - manager API 的 `user_id` 使用已验证 User 的 ID，由服务统一映射到 Human actor；转交路径直接使用完整 Human actor ID。
 - Human 身份来自既有可信认证链。请求中的 operator、owner 或 Bot token 的 `owner_id` 声明不能证明当前管理权。
-- 服务身份复用现有 Gateway 签名认证后的 App identity；BCS 配置显式授予可信 app 的环境、tenant、Bot、action 和目标 Human 范围。不能仅凭普通 App 身份、请求体 app_id 或 App owners 字段得到权限。
+- 服务身份复用现有 Gateway 签名认证后的 App identity；BCS 配置显式授予可信 app 的 tenant 与 action；规则以实例 env 绑定。不能仅凭普通 App 身份、请求体 app_id 或 App owners 字段得到权限。
 - 同步与代办转交的权限分别授予，记录真实 service ID，不能伪造为 Human 操作；复用认证协议，不新增一套 service token 协议。
 - env/tenant 由已验证认证上下文及配置确定，不能由普通 body 字段提升访问范围。需要代办转交时，凭证授权范围包含目标 Human。
 - Provider 管理凭证是独立主体。验证成功的 Provider 退役记为 `Provider { provider_id }`，不冒充 Human、整数 App ID 或 system，也不记录 token；这种审计表达不授予 sync/代办转交权限。
 
-App scope 使用显式 allow 规则：`app_id + env + tenant + bot_ids + actions + target_owner_actor_ids`。env/tenant/ID 精确匹配，不做大小写折叠或通配；缺失 tenant 仅能匹配配置中显式的 `tenant = absent`，不能匹配任意 tenant。空规则集、空 Bot/action 集合拒绝全部；包含转交 read/accept/reject 时必须有非空目标集合，仅 sync 的规则目标集合为空。组合规则中的 sync 忽略目标集合，但转交必须匹配它。未知 action、重复规则键、通配字符串和字段组合错误使配置加载失败；同一 app/env/tenant 只允许一条规则，不依赖规则顺序合并权限。允许动作仅为 `managers:sync / ownership:read / ownership:accept / ownership:reject`。
+App scope 使用显式 allow 规则：`app + tenant + actions`。`app` 与已验证 App 主体的 `app_name` 按字节精确匹配（网关侧 `(app_name, env)` 有唯一约束，不能做大小写折叠或通配）；审计仍记录主体的数字 `app_id`。规则在解析时绑定到本实例 env——配置加载已按 `SERVER_ENV` 选择 `bcs-config-{env}.toml`，不再为每条规则重复声明 `env`。配置规则不再携带 `bot_ids` 与 `target_owner_actor_ids`：规则信任域是本实例上的全部 Bot（含后续注册），仍受 sync 快照上限与完整审计约束，tenant 是规则层唯一的安全分隔；转交 read/accept/reject 不预声明目标集合，由发起 Human 与转交状态机守卫。缺失 tenant 仅能匹配配置中显式的 `tenant = absent`，不能匹配任意 tenant。空规则集、空 action 集合拒绝全部；未知 action、重复规则键 `(app, tenant)`、通配字符串和字段形状错误使配置加载失败；同一 app/tenant 只允许一条规则，不依赖规则顺序合并权限。允许动作仅为 `managers:sync / ownership:read / ownership:accept / ownership:reject`。携带旧字段（`env`/`app_id`/`bot_ids`/`target_owner_actor_ids`）的配置属未知字段，加载即失败，不做兼容降级。配置中引用的 App 一经改名，规则静默回落为拒绝（fail-safe 类停机）；改名必须先与配置侧同步。
 
 ### 3.2 管理权
 
@@ -356,7 +356,7 @@ MemoryBotRepo 使用同一 `MemoryBotState` 实现既有 `PermissionProfileRepoP
 | A03 | owner/manager 均可添加移除 manager；自撤权下一请求拒绝，owner 不能被 manager 接口修改 |
 | A04 | sync 覆盖全部来源的 manager、保留 owner；手工修改可被下次同步覆盖，空数组/空余集明确清空 |
 | A05 | sync 请求格式错误不部分写入；未知/已删除/非法形状成员跳过并记日志、最终集合等于有效余集，去重、1,000 上限、分块与所有差异同事务，重复集合零审计，缺失 Bot 返回全零 |
-| A06 | 所有新增接口只有统一前缀；同路由按身份授权，service 的环境/tenant/Bot/action/目标范围生效；普通 Human、Bot token、sync-only 凭证不能代办转交 |
+| A06 | 所有新增接口只有统一前缀；同路由按身份授权，service 的 tenant/action 范围生效（规则以实例 env 绑定、App 按已验证名称匹配）；普通 Human、Bot token、sync-only 凭证不能代办转交 |
 | A07 | 同 Bot 最多一条 pending；同目标复用行并续期，不同目标冲突；终态可由当前 owner 重新发起 |
 | A08 | accept 原子切换 owner/version，原 owner 为普通 manager；之后可被 DELETE 或 sync 移除 |
 | A09 | accept/reject/cancel 竞争只有一方生效；同终态重试无副作用，重新发起后按当前请求处理 |

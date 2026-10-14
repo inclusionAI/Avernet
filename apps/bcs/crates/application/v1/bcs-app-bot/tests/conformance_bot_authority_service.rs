@@ -50,12 +50,9 @@ async fn bot_authority_facade_composes_here() {
     let repo = Arc::new(MemoryBotRepo::new());
     let env = bcs_config::resolve_env_str();
     let rule = bcs_app_bot::authority_policy::AuthorityAppScopeRule::from_config_strings(
-        7,
-        &env,
+        bcs_test_support::AUTHORITY_FIXTURE_APP_NAME,
         "tenant-a",
-        &["bot_facade".to_string()],
         &["managers:sync".to_string()],
-        &[],
     )
     .expect("valid scope rule");
     let service = BotAuthorityServiceImpl::new(

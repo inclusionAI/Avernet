@@ -259,6 +259,11 @@ impl InviteCodeService for InviteGateStub {
 /// One shared memory authority instance wired real
 /// Core → Hook → application service with a test
 /// trusted-app scope (app id 7, tenant `tenant-a`,
+/// The App name every authority fixture's caller principal
+/// carries — the fixture policy rule keys on exactly this name
+/// (name-based trusted-App matching, spec §3.1).
+pub const AUTHORITY_FIXTURE_APP_NAME: &str = "Authority App";
+
 /// bots `bot_sync` + `bot_transfer`, all four actions,
 /// transfer target `human_bob`).
 pub struct AuthorityRoutesFixture {
@@ -282,17 +287,14 @@ pub async fn authority_service_fixture(
         human_checks: std::sync::Mutex::new(Vec::new()),
     });
     let rule = AuthorityAppScopeRule::from_config_strings(
-        7,
-        &env,
+        AUTHORITY_FIXTURE_APP_NAME,
         "tenant-a",
-        &["bot_sync".to_string(), "bot_transfer".to_string()],
         &[
             "managers:sync".to_string(),
             "ownership:read".to_string(),
             "ownership:accept".to_string(),
             "ownership:reject".to_string(),
         ],
-        &["human_bob".to_string()],
     )
     .expect("valid fixture scope rule");
     let policy =

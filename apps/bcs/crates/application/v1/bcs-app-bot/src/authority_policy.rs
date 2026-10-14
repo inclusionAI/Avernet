@@ -1,26 +1,26 @@
 //! The trusted-App authority policy (spec §3.1 / §6.1).
 //!
-//! One bounded cell: an explicit allow-list of App scope
-//! rules (`app_id + env + tenant + bot_ids + actions +
-//! target_owner_actor_ids`) resolved from configuration at
-//! startup. The policy never reads raw configuration or
-//! environment; the composition root injects the resolved
-//! rules and the bound env.
+//! One bounded cell: an explicit allow-list of App scope rules
+//! (`app + tenant + actions`) resolved from configuration at
+//! startup. Rules bind to the BCS instance's own env at
+//! composition time (config loading is already env-partitioned
+//! via `bcs-config-{env}.toml`), so no rule carries a per-rule
+//! env, a numeric app id, an explicit bot list, or a transfer
+//! target set.
 //!
 //! Hard semantics (spec §3.1):
-//! - env/tenant/ids compare case-exactly; there are no
-//!   wildcards.
+//! - app/tenant compare case-exactly; there are no wildcards.
 //! - `TenantScope::Absent` matches ONLY a caller without a
-//!   tenant; a tenant-ful caller matches only the exact
-//!   tenant.
-//! - Empty rule sets, empty `bot_ids` and empty `actions`
-//!   deny everything.
-//! - Rules granting transfer read/accept/reject must carry a
-//!   non-empty target set; sync-only rules must keep it empty
-//!   (sync ignores the target collection).
-//! - Unknown actions, wildcard strings, duplicate rule keys
-//!   (same `app_id + env + tenant`) and field-shape errors
-//!   fail configuration resolution (a hard startup error).
+//!   tenant; a tenant-ful caller matches only the exact tenant.
+//! - Empty rule sets and empty `actions` deny everything.
+//! - Duplicate rule keys (same `app + tenant`), unknown action
+//!   spellings, wildcard strings, and field-shape errors fail
+//!   configuration resolution (a hard startup error).
+//! - A rule scopes to ALL bots on this BCS instance, including
+//!   bots registered later (still bounded by the sync snapshot
+//!   size cap and the full audit trail); transfer actions need
+//!   no pre-declared target set — initiation stays Human-only
+//!   and downstream state-machine guards apply.
 //! - The `absent` tenant spelling is reserved.
 
 use std::collections::BTreeSet;
@@ -42,13 +42,11 @@ pub const ABSENT_TENANT_TEXT: &str = "absent";
 pub enum AuthorityAction {
     /// `managers:sync` — full manager-set replace.
     ManagersSync,
-    /// `ownership:read` — transfer lookup for a scoped target.
+    /// `ownership:read` — transfer lookup.
     OwnershipRead,
-    /// `ownership:accept` — transfer acceptance for a scoped
-    /// target.
+    /// `ownership:accept` — transfer acceptance.
     OwnershipAccept,
-    /// `ownership:reject` — transfer rejection for a scoped
-    /// target.
+    /// `ownership:reject` — transfer rejection.
     OwnershipReject,
 }
 
@@ -77,17 +75,6 @@ impl AuthorityAction {
         AuthorityAction::ALL.iter().copied().find(|action| {
             action.as_str() == text
         })
-    }
-
-    /// Whether the action addresses one transfer target and
-    /// therefore requires the rule's target set.
-    pub fn requires_target(self) -> bool {
-        matches!(
-            self,
-            AuthorityAction::OwnershipRead
-                | AuthorityAction::OwnershipAccept
-                | AuthorityAction::OwnershipReject
-        )
     }
 }
 
@@ -119,33 +106,25 @@ impl TenantScope {
     }
 }
 
-/// One resolved allow rule. Sets are ordered for stable
-/// diagnostics; matching is membership only.
+/// One resolved allow rule (`app + tenant + actions`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthorityAppScopeRule {
-    pub app_id: i64,
-    pub env: String,
+    pub app: String,
     pub tenant: TenantScope,
-    pub bot_ids: BTreeSet<String>,
     pub actions: BTreeSet<AuthorityAction>,
-    pub target_owner_actor_ids: BTreeSet<String>,
 }
 
 impl AuthorityAppScopeRule {
     /// Strict rule construction from configuration strings.
-    /// Unknown action spellings, wildcard/blank strings,
-    /// duplicate entries, and the sync/target shape
-    /// combinations are field-shape errors: configuration
+    /// Unknown action spellings, wildcard/blank strings, and
+    /// duplicate actions are field-shape errors: configuration
     /// loading fails hard (spec §3.1).
     pub fn from_config_strings(
-        app_id: i64,
-        env: &str,
+        app: &str,
         tenant: &str,
-        bot_ids: &[String],
         actions: &[String],
-        target_owner_actor_ids: &[String],
     ) -> Result<Self, AuthorityScopeConfigError> {
-        check_plain_field("env", env)?;
+        check_plain_field("app", app)?;
         let tenant = TenantScope::from_config_text(tenant)?;
 
         let mut parsed_actions = BTreeSet::new();
@@ -169,39 +148,10 @@ impl AuthorityAppScopeRule {
             }
         }
 
-        let bot_ids = plain_string_set("bot_ids", bot_ids)?;
-        let target_owner_actor_ids =
-            plain_string_set("target_owner_actor_ids", target_owner_actor_ids)?;
-
-        // Target-shape combination (spec §3.1): rules containing
-        // transfer read/accept/reject require a non-empty target
-        // set; sync-only rules keep it empty (sync ignores the
-        // target collection).
-        let transfers = parsed_actions
-            .iter()
-            .any(|action| action.requires_target());
-        if transfers {
-            if target_owner_actor_ids.is_empty() {
-                return Err(AuthorityScopeConfigError::new(
-                    "bot_authority.trusted_apps: a rule granting \
-                     ownership:read/accept/reject needs a non-empty \
-                     target_owner_actor_ids set",
-                ));
-            }
-        } else if !target_owner_actor_ids.is_empty() {
-            return Err(AuthorityScopeConfigError::new(
-                "bot_authority.trusted_apps: a sync-only rule must keep \
-                 target_owner_actor_ids empty",
-            ));
-        }
-
         Ok(Self {
-            app_id,
-            env: env.to_string(),
+            app: app.to_string(),
             tenant,
-            bot_ids,
             actions: parsed_actions,
-            target_owner_actor_ids,
         })
     }
 }
@@ -233,41 +183,28 @@ impl std::error::Error for AuthorityScopeConfigError {}
 /// The resolved, immutable trusted-App scope policy.
 #[derive(Debug, Clone)]
 pub struct AuthorityServicePolicy {
-    /// The env this BCS instance serves. Rules granted for
-    /// other environments stay inert.
+    /// The env this BCS instance serves (diagnostics only).
     env: String,
     rules: Vec<AuthorityAppScopeRule>,
 }
 
 impl AuthorityServicePolicy {
     /// The shared rule-set checks (spec §3.1): one rule
-    /// per `app_id/env/tenant` key without order-based
-    /// merging; no blank ids. Env-independent, so
-    /// configuration loading can run it before the
-    /// composition root binds the instance env.
+    /// per `(app, tenant)` key without order-based merging.
+    /// Env-independent, so configuration loading can run it
+    /// before the composition root binds the instance env.
     pub fn validate_rules(
         rules: &[AuthorityAppScopeRule],
     ) -> Result<(), AuthorityScopeConfigError> {
-        let mut keys: BTreeSet<(i64, String, TenantScope)> =
-            BTreeSet::new();
+        let mut keys: BTreeSet<(&str, TenantScope)> = BTreeSet::new();
         for rule in rules {
-            if rule.bot_ids.iter().any(String::is_empty) {
-                return Err(AuthorityScopeConfigError::new(
-                    "bot_authority.trusted_apps: bot ids \
-                     must not be blank",
-                ));
-            }
-            let key = (
-                rule.app_id,
-                rule.env.clone(),
-                rule.tenant.clone(),
-            );
+            let key = (rule.app.as_str(), rule.tenant.clone());
             if !keys.insert(key) {
                 return Err(AuthorityScopeConfigError::new(format!(
                     "bot_authority.trusted_apps: duplicate rule \
-                     key for app {} env '{}' (at most one rule \
-                     per app/env/tenant)",
-                    rule.app_id, rule.env,
+                     key for app '{}' (at most one rule per \
+                     app/tenant)",
+                    rule.app,
                 )));
             }
         }
@@ -275,7 +212,7 @@ impl AuthorityServicePolicy {
     }
 
     /// Resolve a policy from validated rules; one rule per
-    /// `(app_id, env, tenant)` key without order-based
+    /// `(app, tenant)` key without order-based
     /// merging (spec §3.1). Duplicate keys and blank envs are
     /// configuration errors.
     pub fn new(
@@ -330,11 +267,10 @@ impl AuthorityServicePolicy {
                  credentials stay outside this surface",
             ));
         };
+        let _ = target_owner_actor_id; // target sets no longer scope rules
         let bound_env = self.env.as_str();
         if self.matched_rule(
-            app.app_id,
-            bot_id,
-            target_owner_actor_id,
+            &app.app_name,
             action,
             caller.tenant.as_deref(),
         ) {
@@ -346,7 +282,7 @@ impl AuthorityServicePolicy {
             "trusted app {} does not authorize the '{}' \
              action for bot '{bot_id}' on env '{bound_env}' \
              {tenant_clause}",
-            app.app_id,
+            app.app_name,
             action.as_str(),
             tenant_clause = match caller.tenant.as_deref() {
                 Some(tenant) => format!("and tenant '{tenant}'"),
@@ -357,27 +293,14 @@ impl AuthorityServicePolicy {
 
     fn matched_rule(
         &self,
-        app_id: i64,
-        bot_id: &str,
-        target_owner_actor_id: Option<&str>,
+        app_name: &str,
         action: AuthorityAction,
         caller_tenant: Option<&str>,
     ) -> bool {
         self.rules.iter().any(|rule| {
-            // A rule bound to another env stays inert.
-            rule.app_id == app_id
-                && rule.env == self.env
+            rule.app == app_name
                 && rule.tenant.matches(caller_tenant)
-                && rule.bot_ids.contains(bot_id)
                 && rule.actions.contains(&action)
-                && match target_owner_actor_id {
-                    // sync ignores the target collection;
-                    // transfer actions must match it.
-                    Some(target) if action.requires_target() => rule
-                        .target_owner_actor_ids
-                        .contains(target),
-                    _ => !action.requires_target(),
-                }
         })
     }
 }
@@ -406,21 +329,4 @@ fn check_plain_field(field: &str, value: &str) -> Result<(), AuthorityScopeConfi
         )));
     }
     Ok(())
-}
-
-fn plain_string_set(
-    field: &str,
-    values: &[String],
-) -> Result<BTreeSet<String>, AuthorityScopeConfigError> {
-    let mut set = BTreeSet::new();
-    for value in values {
-        check_plain_field(field, value)?;
-        if !set.insert(value.clone()) {
-            return Err(AuthorityScopeConfigError::new(format!(
-                "bot_authority.trusted_apps: duplicate entry '{value}' \
-                 in {field}"
-            )));
-        }
-    }
-    Ok(set)
 }

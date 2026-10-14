@@ -2,15 +2,18 @@
 //! (bot-authority spec §3.1, plan Task 5).
 //!
 //! Explicit allow rules per trusted app:
-//! `app_id + env + tenant + bot_ids + actions +
-//! target_owner_actor_ids`. env/tenant/ids are
-//! case-exact with NO wildcards; a missing tenant only
+//! `app + tenant + actions`. Rules bind to the BCS instance's
+//! own env at composition time — config loading is already
+//! env-partitioned (`SERVER_ENV` selects `bcs-config-{env}.toml`),
+//! so no rule carries a duplicate per-rule `env`. app/tenant
+//! compare case-exactly with NO wildcards; a missing tenant only
 //! matches a rule with the explicit `tenant = "absent"`.
-//! Configuration fails hard on unknown actions, wildcard
-//! strings, duplicate rule keys (same
-//! `app_id/env/tenant`), and field-shape errors. The
-//! default empty rule set denies every trusted app
-//! everything.
+//! Configuration fails hard on unknown actions, wildcard strings,
+//! duplicate rule keys (same `app + tenant`), and field-shape
+//! errors; `deny_unknown_fields` rejects any legacy field
+//! (`env`/`app_id`/`bot_ids`/`target_owner_actor_ids`) loudly
+//! instead of half-applying it. The default empty rule set
+//! denies every trusted app everything.
 
 use serde::{Deserialize, Serialize};
 
@@ -22,9 +25,9 @@ use bcs_app_bot::authority_policy::{
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct BotAuthorityConfig {
-    /// One allow rule per trusted app/env/tenant
-    /// key. Defaults to none: every trusted app is
-    /// denied (deny-everything default per spec §3.1).
+    /// One allow rule per trusted app/tenant key.
+    /// Defaults to none: every trusted app is denied
+    /// (deny-everything default per spec §3.1).
     #[serde(default)]
     pub trusted_apps: Vec<TrustedAppScopeRuleConfig>,
 }
@@ -35,20 +38,18 @@ pub struct BotAuthorityConfig {
 /// spelling, or the reserved value `"absent"` (which
 /// matches ONLY callers without a tenant). Missing the
 /// field is a load error, not a wildcard.
+///
+/// A rule scopes to ALL bots on this BCS instance,
+/// including bots registered later (still bounded by the
+/// sync snapshot size cap and the full audit trail).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrustedAppScopeRuleConfig {
-    /// The Gateway-verified App id.
-    pub app_id: i64,
-    /// Byte-exact environment this rule applies to; rules
-    /// for other environments stay inert here.
-    pub env: String,
+    /// Byte-exact match on the Gateway-verified App name
+    /// (the wire principal's `app_name`).
+    pub app: String,
     /// Byte-exact tenant, or the reserved `"absent"`.
     pub tenant: String,
-    /// Bot ids this rule covers (case-exact). An empty
-    /// set denies everything.
-    #[serde(default)]
-    pub bot_ids: Vec<String>,
     /// Allowed actions from exactly:
     /// `managers:sync | ownership:read |
     /// ownership:accept | ownership:reject`. An empty
@@ -56,13 +57,6 @@ pub struct TrustedAppScopeRuleConfig {
     /// configuration loading.
     #[serde(default)]
     pub actions: Vec<String>,
-    /// Human actor ids (`human_<user_id>`) the rule may
-    /// read/decide transfers for. REQUIRED non-empty
-    /// when the rule grants any
-    /// `ownership:read|accept|reject`; REQUIRED empty
-    /// for sync-only rules.
-    #[serde(default)]
-    pub target_owner_actor_ids: Vec<String>,
 }
 
 impl BotAuthorityConfig {
@@ -89,19 +83,14 @@ impl BotAuthorityConfig {
             .map_err(|error| error.to_string())
     }
 
-    fn rules(
-        &self,
-    ) -> Result<Vec<AuthorityAppScopeRule>, String> {
+    fn rules(&self) -> Result<Vec<AuthorityAppScopeRule>, String> {
         let mut rules =
             Vec::with_capacity(self.trusted_apps.len());
         for (index, rule) in self.trusted_apps.iter().enumerate() {
             let resolved = AuthorityAppScopeRule::from_config_strings(
-                rule.app_id,
-                &rule.env,
+                &rule.app,
                 &rule.tenant,
-                &rule.bot_ids,
                 &rule.actions,
-                &rule.target_owner_actor_ids,
             )
             .map_err(|error| {
                 format!("trusted_apps[{index}]: {error}")
