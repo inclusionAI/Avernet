@@ -45,6 +45,9 @@ from agentclaw.community.adapters.http.openapi_v1.response_envelope import (
     unmapped_error_response,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_payloads import error_data
+from agentclaw.community.core.bot_management.engine_version.errors import (
+    EngineVersionStageUnsupportedError, EngineVersionInstanceSelectionError,
+)
 from agentclaw.community.core.bot_management.errors import (
     BotCreationRetainedError,
     BotLookupAmbiguousError,
@@ -353,6 +356,8 @@ def deleted(request: Request) -> Envelope[Deleted]:
 # (b) the two 404-mapped errors are byte-for-byte identical — a caller cannot
 # tell "exists but not yours/other tenant" from "does not exist".
 ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
+    EngineVersionStageUnsupportedError: (409, "Engine version inspection supports draft only"),
+    EngineVersionInstanceSelectionError: (409, "Select an existing workspace instance"),
     IamTokenUnavailableError: (401, "IAM credential is unavailable"),
     CallerIdentityInvalidError: (400, "Invalid Caller identity request"),
     CallerIdentityForbiddenError: (403, "Forbidden"),
