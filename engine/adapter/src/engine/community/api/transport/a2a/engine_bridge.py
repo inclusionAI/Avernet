@@ -46,6 +46,9 @@ _STATE_WORKING = "TASK_STATE_WORKING"
 _STATE_FAILED = "TASK_STATE_FAILED"
 _STATE_CANCELED = "TASK_STATE_CANCELED"
 
+# echo fallback 的一次事件循环让位（把控制权交给 SSE 订阅者先注册）
+_ECHO_YIELD_SECONDS = 0.05
+
 # Terminal chat states from the ws_server relay vocabulary.
 _TERMINAL_CHAT_STATES = ("final", "error", "aborted")
 
@@ -208,7 +211,7 @@ async def _echo_fallback(kernel: A2aKernel, rid: str, text: str) -> None:
     as the no-engine behavior so unit-test and pre-initialize singlebox
     contexts still stream a well-formed run to completion.
     """
-    await asyncio.sleep(0.05)  # yield to the event loop once
+    await asyncio.sleep(_ECHO_YIELD_SECONDS)  # yield to the event loop once
     await kernel.publish_delta(rid, f"[echo] {text[:200]}")
     await kernel.publish_final(rid, f"[echo-final] {text[:500]}")
 

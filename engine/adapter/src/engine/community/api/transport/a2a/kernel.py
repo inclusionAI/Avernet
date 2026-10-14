@@ -27,6 +27,9 @@ MAX_BYTES_PER_RUN = 16 * 1024 * 1024
 TOTAL_BUDGET_BYTES = 64 * 1024 * 1024
 SUBSCRIBER_QUEUE_SIZE = 256
 TERMINAL_TTL_SECONDS = 180
+# inject 操作级去重表上限与 TTL（超过上限先按 TTL 清理过期项）
+_INJECT_DEDUP_MAX = 10_000
+_INJECT_DEDUP_TTL_SECONDS = 1_800
 
 
 def _digest(text: str) -> str:
@@ -90,7 +93,12 @@ class A2aKernel:
             if mode == "retry_only":
                 return self.UNKNOWN_OUTCOME
             if len(self.runs) >= MAX_RUNS:
+                # D7/v3 语义对齐（openclaw_resume 硬拒）：无可驱逐的终态
+                # run 时显式拒绝，不做无声突破上限。
                 self._evict_oldest_finished()
+                if len(self.runs) >= MAX_RUNS:
+                    raise RuntimeError(
+                        f"run capacity exhausted ({MAX_RUNS} active runs)")
             rid = uuid.uuid4().hex[:12]
             r = _Run(rid, context_id)
             r.idempotency_key = idempotency_key
@@ -258,9 +266,17 @@ class A2aKernel:
     async def inject(self, context_id: str, text: str,
                      inject_id: str) -> str:
         key = (context_id, inject_id)
+        now = time.monotonic()
+        # M1: TTL prune keeps the dedup table bounded on long-lived
+        # processes (records expire rather than accumulate forever).
+        if len(self._inject_dedup) > _INJECT_DEDUP_MAX:
+            expired = [k for k, ts in self._inject_dedup.items()
+                       if now - ts > _INJECT_DEDUP_TTL_SECONDS]
+            for k in expired:
+                self._inject_dedup.pop(k, None)
         if key in self._inject_dedup:
             return "duplicate"
-        self._inject_dedup[key] = time.time()
+        self._inject_dedup[key] = now
         ev = wire.wire_inject_message(context_id, text, inject_id)
         for q in list(self._context_subs.get(context_id, [])):
             try:
