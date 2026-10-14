@@ -270,6 +270,22 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             f"abandoned by UPDATE publish {publish_id} terminal resolution"
         )
 
+    def _owns_live_device_binding(self, bot_id: int, tenant: str, env: str) -> bool:
+        """True when the generation still holds device ownership nothing else does.
+
+        Device ownership is authoritative in ``baas_bot_device_rel`` (the
+        restore-resolution precedent, #2648: live rel rows identify the record
+        generation that actually served devices). A rel row is *ownership* only
+        while it is the device's live binding; a rel whose device is already
+        bound by another live generation is a stale duplicate left by a
+        corruption shape and may be tombstoned together with the swept row.
+        """
+        for rel in self._rel_repo.list_by_bot_id(bot_id, tenant, env):
+            binding = self._rel_repo.get_by_device_uuid(rel.device_uuid, tenant, env)
+            if binding is not None and binding.bot_id == bot_id:
+                return True
+        return False
+
     # ====================================================================
     # STATE MACHINE AND APPROVAL METHODS
     # ====================================================================
@@ -560,16 +576,41 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
 
         # Reconcile sweep for unclaimed clones (design D5, strictly BEFORE the
         # Step 4 insert so the publish this call creates can never sweep its
-        # own clone): with the classifier confirming zero non-terminal
-        # publishes for ANY generation of the uuid, every still-live PENDING
-        # row of the uuid is garbage from a past terminal-path leak or the
-        # creation crash window. The sweep runs in one repository session;
-        # the resolved source bot row is excluded (D5.6) so a never-published
-        # first-generation PENDING row that fronts this very CREATE publish
-        # is never touched. If a concurrent competitor claimed a clone in the
-        # race window, the unique keys arbitrate — never a delete.
+        # own clone): the classifier above proved there is no non-terminal
+        # publish for any LIVE generation, so a still-live PENDING row of the
+        # uuid is garbage from a past terminal-path leak or the creation crash
+        # window. The protection set (D5.6/D5.7) is computed independently
+        # over ALL generations including retired/soft-deleted ones: a uuid
+        # with ANY unfinished publish is in-flight, so every clone claimed by
+        # one of those publishes stays untouched — an admin-retired source
+        # mid-update must not lose its clone to this sweep. The resolved
+        # source row is always protected too (a never-published first
+        # generation PENDING row fronts this very CREATE publish). Device
+        # safety: a generation that still owns live
+        # ``baas_bot_device_rel`` rows is protected as well — sweeping it
+        # would tombstone its rels and detach live devices. If a concurrent
+        # competitor claimed a clone in the race window, the unique keys
+        # arbitrate — never a delete.
+        all_generations = self._bot_repo.list_by_bot_uuid_including_deleted(
+            bot.bot_uuid, tenant, env
+        )
+        all_generation_ids = [r.id for r in all_generations]
+        protected_bot_ids: set[int] = {bot_id}
+        for active in publish_repo.list_active_by_bot_ids(
+            all_generation_ids, tenant, env
+        ):
+            target_bot_id = (active.extra_config or {}).get("target_bot_id")
+            if isinstance(target_bot_id, int):
+                protected_bot_ids.add(target_bot_id)
+        for generation_id in all_generation_ids:
+            if self._owns_live_device_binding(generation_id, tenant, env):
+                protected_bot_ids.add(generation_id)
         reconciled = self._bot_repo.reconcile_unclaimed_pending_bots(
-            bot.bot_uuid, tenant, env, modifier=operator, exclude_bot_id=bot_id
+            bot.bot_uuid,
+            tenant,
+            env,
+            modifier=operator,
+            exclude_bot_ids=protected_bot_ids,
         )
         if reconciled:
             logger.warning(
