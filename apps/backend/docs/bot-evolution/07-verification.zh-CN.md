@@ -42,7 +42,7 @@
 - **所有者为每个绑定选择验证配置。** 验证配置可以比平台默认更严格，但绝不能
   更宽松。
 - **进化策略可以添加训练用例并使用训练划分评估**
-  （`evaluate.train@1`，[§5](#5-训练划分评估evaluatetrain1)），作为其自身搜索
+  （`evaluation.train@1`，[§5](#5-训练划分评估evaluationtrain1)），作为其自身搜索
   的反馈；训练结果绝不决定是否接受。
 
 **负责：**
@@ -54,7 +54,7 @@
 - **执行器与评分器插件**：评估期间修订版在哪里运行、单次 rollout 如何打分。
   它们由验证器拥有，绝不归进化策略所有。
 - **比较器**（配对统计）与**判定规则**。
-- **评估**与**判定**，包括支撑 `evaluate.train@1` 能力的训练划分评估。
+- **评估**与**判定**，包括支撑 `evaluation.train@1` 能力的训练划分评估。
 - 留出集审计以及在线验证中的度量部分（影子评分、金丝雀比较、复发检查）。
 - 治理议题*防奖励作弊*与*验证器完整性*。
 
@@ -64,7 +64,7 @@
 | --- | --- |
 | 基因组修订版、补丁、内容 blob、物化来源 | [01-genome.zh-CN.md](01-genome.zh-CN.md) |
 | 片段（episode）与反馈（验证会把评估轨迹写入那里） | [02-experience.zh-CN.md](02-experience.zh-CN.md) |
-| 进化策略端口、`StrategyContext`、作为契约的能力目录条目 `evaluate.train@1` | [03-strategy.zh-CN.md](03-strategy.zh-CN.md) |
+| 进化策略端口、`StrategyContext`、作为契约的能力目录条目 `evaluation.train@1` | [03-strategy.zh-CN.md](03-strategy.zh-CN.md) |
 | ClawEvolve/ClawBench 清单条目（ClawBench 运行器、ClawWeb Bench 存储、ClawEvolve 划分与门禁、诊断 → 计划）以及 ClawEvolve 自身的提交过滤器 | [04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md) |
 | 实验记录的模式，以及判定作为实验记录的存储 | [05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md) |
 | 运行、绑定、预算、紧急停止开关、沙箱规则、作业协议传输 | [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) |
@@ -202,7 +202,7 @@ class CaseCategory(StrEnum):
 class CaseOriginKind(StrEnum):
     AUTHORED = "authored"              # written by a person
     MINED = "mined"                    # mined from a real episode
-    STRATEGY = "strategy"              # added by a strategy run (ctx.evaluate.add_train_cases)
+    STRATEGY = "strategy"              # added by a strategy run (ctx.evaluation.add_train_cases)
 
 @dataclass(frozen=True)
 class CaseOrigin:
@@ -400,7 +400,7 @@ class VerificationProfile:
 ```python
 class EvaluationPurpose(StrEnum):
     VERIFICATION = "verification"      # verifying a submitted candidate against its parent
-    TRAIN = "train"                    # a strategy's train-split evaluation (evaluate.train@1)
+    TRAIN = "train"                    # a strategy's train-split evaluation (evaluation.train@1)
     HOLDOUT_AUDIT = "holdout_audit"    # scoring a revision on the sealed holdout
     AD_HOC = "ad_hoc"                  # an operator's evaluation; never feeds promotion
     SHADOW = "shadow"                  # online verification on replayed or mirrored traffic
@@ -629,8 +629,8 @@ class StrategyVerdictView:             # what ctx.candidates.verdict(id) returns
 
 **谁能动什么。** 执行器与评分器是验证器插件，而不是进化策略代码。绑定
 选择验证配置（所有者可以选择更严格的，绝不能选择更宽松的）。进化策略可以
-通过 `ctx.evaluate.add_train_cases()` *添加*训练用例
-（[§5](#5-训练划分评估evaluatetrain1)）。它不得修改评分器、
+通过 `ctx.evaluation.add_train_cases()` *添加*训练用例
+（[§5](#5-训练划分评估evaluationtrain1)）。它不得修改评分器、
 留出集、回归或安全划分。
 
 ## 4. Bot 验证协议（第 2 层）
@@ -731,13 +731,13 @@ def decide(floor: FloorRef, sanity: SanityResult, splits: dict[Split, SplitResul
 新的 rollout。在运行失败、被取消或预算耗尽之前做出的提交仍然会被验证
 （[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。
 
-## 5. 训练划分评估（`evaluate.train@1`）
+## 5. 训练划分评估（`evaluation.train@1`）
 
-`evaluate.train@1` 能力（在进化策略的 `needs` 中声明；契约见
+`evaluation.train@1` 能力（在进化策略的 `needs` 中声明；契约见
 [03-strategy.zh-CN.md](03-strategy.zh-CN.md)）为进化策略提供**仅限训练划分**的平台评估，
 包含分数和评语，并提供添加训练用例的方式。本服务实现该能力。
 
-- **`ctx.evaluate.start_train(workspace, idempotency_key=…, cases=None)`**
+- **`ctx.evaluation.start_train(workspace, idempotency_key=…, cases=None)`**
   在 Bot 的训练用例上评估进化策略的沙箱工作区，并立即返回一个**操作 id**。
   状态按 id 查询（`ctx.operations.get(op_id)`）；成功后，结果包含每个用例的
   分数、评分器评语以及聚合值。通过作业协议，它对应
@@ -748,7 +748,7 @@ def decide(floor: FloorRef, sanity: SanityResult, splits: dict[Split, SplitResul
   `run_7f3/round-2/train`，这样在重新派发后无需保存操作 id 即可重新挂接。
 - **计入运行的预算**（rollout、token、金额），并在运行结束时
   取消。
-- **`ctx.evaluate.add_train_cases(cases)`** 添加进化策略编写的用例
+- **`ctx.evaluation.add_train_cases(cases)`** 添加进化策略编写的用例
   （例如 ClawEvolve 的计划步骤把诊断出的失败转化为基准用例）。提议：进化
   策略编写的用例总是落入 `train`，因为进化策略已经看过它们，所以它们永远
   不能充当隐藏证据。用例会按用例格式进行校验，并像补丁一样进行内容扫描
@@ -931,7 +931,7 @@ class HoldoutAuditReason(StrEnum):
 
 class VerificationService(Protocol):
     """Platform-owned verifier. Read-only to strategies; they reach it only
-    through evaluate.train@1 and ctx.candidates.verdict."""
+    through evaluation.train@1 and ctx.candidates.verdict."""
 
     async def verify(self, candidate: CandidateRef, profile: str) -> Verdict:
         """Start verifying a submitted candidate against its parent under `profile`
@@ -949,12 +949,12 @@ class VerificationService(Protocol):
     async def start_train_evaluation(self, run_id: str, workspace_id: str, *,
                                      idempotency_key: str,
                                      cases: list[str] | None = None) -> str:
-        """Backs ctx.evaluate.start_train. Evaluates a run's sandbox workspace on the
+        """Backs ctx.evaluation.start_train. Evaluates a run's sandbox workspace on the
         bot's train split (all train cases when `cases` is None). Returns an
         operation id; idempotent per (run_id, idempotency_key). Charged to the run."""
 
     async def add_train_cases(self, run_id: str, cases: list[CaseDraft]) -> list[str]:
-        """Backs ctx.evaluate.add_train_cases. Validates, scans, and stores the cases
+        """Backs ctx.evaluation.add_train_cases. Validates, scans, and stores the cases
         in the bot's train split. Returns case ids."""
 
     async def start_evaluation(self, request: EvaluationRequest, *,
@@ -1179,12 +1179,12 @@ Backend 调用方（发布流程钩子和 Quality Task 插件）需要一种传�
 
 **本服务提供的作业协议端点。** 作业协议及其规则（`Evolution-Fencing-Token`
 请求头中的隔离令牌（fencing token）、未授予能力时返回 `403`、令牌过期时返回
-`409`）定义于 [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)；`evaluate.train@1`
+`409`）定义于 [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)；`evaluation.train@1`
 背后的两个端点在此实现。
 
 ### POST /evolution/v1/runs/{run}/evaluations:train
 
-`ctx.evaluate.start_train`。由被授予 `evaluate.train@1` 的作业工作者
+`ctx.evaluation.start_train`。由被授予 `evaluation.train@1` 的作业工作者
 （job-worker）进化策略调用。
 
 ```jsonc
@@ -1225,13 +1225,13 @@ Backend 调用方（发布流程钩子和 Quality Task 插件）需要一种传�
 }
 ```
 
-错误：`403` 未授予 `evaluate.train@1`；`404` 未知工作区；`409` 隔离令牌
+错误：`403` 未授予 `evaluation.train@1`；`404` 未知工作区；`409` 隔离令牌
 过期；预算耗尽会结束运行
 （[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。
 
 ### POST /evolution/v1/runs/{run}/evaluations/cases
 
-`ctx.evaluate.add_train_cases`。普通的请求与响应。
+`ctx.evaluation.add_train_cases`。普通的请求与响应。
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -1272,13 +1272,13 @@ async def on_candidate_submitted(run: Run, binding: Binding, candidate: Candidat
     await ledger.record_submission(run.run_id, candidate.candidate_id, verdict.status)
 ```
 
-**使用 `evaluate.train@1` 的进化策略。** 在 `run(ctx)` 内部，进化策略在训练
+**使用 `evaluation.train@1` 的进化策略。** 在 `run(ctx)` 内部，进化策略在训练
 划分上为其沙箱打分，只保留有帮助的改动，然后提交；
 接受与否由平台的判定决定。
 
 ```python
 async def tune_round(ctx: StrategyContext, ws: Workspace, key: str, best: float) -> str | None:
-    op = await ctx.evaluate.start_train(ws, idempotency_key=f"{key}/train")
+    op = await ctx.evaluation.start_train(ws, idempotency_key=f"{key}/train")
     train = (await ctx.operations.wait(op)).result        # short lookups by id
     failures = [c for c in train.cases if not c.passed]   # critiques are visible on train only
     ctx.log.info("train", score=train.score, failing=len(failures))
@@ -1336,7 +1336,7 @@ async def before_online_pub(publish: PublishRecord, client: VerificationClient) 
 | --- | --- | --- |
 | [01-genome.zh-CN.md](01-genome.zh-CN.md) | 基因组 → 验证 | 候选与父修订版、用于物化沙箱的内容 blob；修订版的 `evaluations` 链接回指评估 id |
 | [02-experience.zh-CN.md](02-experience.zh-CN.md) | 验证 → 经验；经验 → 验证 | 评估轨迹（每次 rollout，含评分和评语）作为经验记录写入；真实片段被重放用于影子评分，并被挖掘为提议用例 |
-| [03-strategy.zh-CN.md](03-strategy.zh-CN.md) | 进化策略 ↔ 验证（通过上下文） | `evaluate.train@1` 调用进入；训练结果和脱敏判定输出 |
+| [03-strategy.zh-CN.md](03-strategy.zh-CN.md) | 进化策略 ↔ 验证（通过上下文） | `evaluation.train@1` 调用进入；训练结果和脱敏判定输出 |
 | [04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md) | 默认进化策略 → 验证 | ClawBench 用例格式和评分器（作为 `platform/clawbench`）；ClawEvolve 的门禁阈值可作为更严格验证配置的起点；其计划步骤会添加训练用例 |
 | [05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md) | 验证 → 实验记录 | 每个实验的判定、评估、成本、验证器版本；在线结果；验证器变更建议只回流给人 |
 | [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) | 运行 ↔ 验证 | 提交时的 `verify(candidate, profile)`；训练端点的作业协议传输；预算扣费；沙箱规则 |

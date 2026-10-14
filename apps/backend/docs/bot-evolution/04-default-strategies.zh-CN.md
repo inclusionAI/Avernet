@@ -76,7 +76,7 @@ bot 通过其进化策略配置中各自的绑定来使用每个策略
 | `ManualPatchParams` | `platform/manual-patch` 的 params：要提交的基因组补丁 | 启动运行的调用方 | 运行开始时冻结 |
 | `ClawEvolveParams` | `clawevolve/bot-evolution` 的 params：时间窗口、轮数、轮询间隔 | Bot 所有者（绑定） | 运行开始时冻结 |
 | `Finding` | 从真实会话中诊断出的一个问题（好/坏案例、根因、关联片段） | ClawEvolve | 在运行的首次尝试中由诊断步骤创建；保存在 ClawEvolve 的状态中 |
-| `TrainCaseProposal` | ClawEvolve 的规划步骤通过 `ctx.evaluate.add_train_cases` 向平台提议的 ClawBench 用例 | 由 ClawEvolve 提议；由验证服务分配划分，并在此后拥有该用例 | 添加后在套件注册表中进行版本管理 |
+| `TrainCaseProposal` | ClawEvolve 的规划步骤通过 `ctx.evaluation.add_train_cases` 向平台提议的 ClawBench 用例 | 由 ClawEvolve 提议；由验证服务分配划分，并在此后拥有该用例 | 添加后在套件注册表中进行版本管理 |
 | `ClawEvolveState` | ClawEvolve 自身的每次运行进度：发现、当前基线、轮次号、待定候选、历史 | ClawEvolve，保存在**其自己的存储**中，以运行 id 为键（现有的 `ce_tasks` / `ce_steps` 可以承担） | 首次尝试时创建；每一步之后更新；重新派发时重新加载 |
 | `ConsolidateMemoryParams` | `platform/consolidate-memory` 的 params | Bot 所有者（绑定） | 运行开始时冻结 |
 | `LessonCluster` | 一组相关反馈条目，被归纳为一条候选经验教训 | consolidate-memory | 每次运行 |
@@ -369,7 +369,7 @@ ClawEvolve 的变化一览：
 2. 它编辑由 `ctx.workspace.materialise()` 得到的**沙箱**，从不编辑线上
    工作区，并将 `ws.to_patch()` 作为候选提交。
 3. 它通过 `ctx.agents.start()` 以长时操作的形式运行 tune 和 review 智能体，
-   并通过 `ctx.evaluate.start_train()` 运行训练 bench。
+   并通过 `ctx.evaluation.start_train()` 运行训练 bench。
 4. 其 `test > baseline` 接受规则变为对其提交内容的**内部过滤器**；
    真正的接受由平台判定决定。
 5. 它不再打包、恢复或部署：它从不更改线上 Bot。
@@ -390,7 +390,7 @@ ClawEvolve 的变化一览：
       "clawevolve-tune":   {"engine": "openclaw", "path": "agents/clawevolve-tune"},
       "clawevolve-review": {"engine": "openclaw", "path": "agents/clawevolve-review"}
     }},
-    "evaluate.train@1": {}
+    "evaluation.train@1": {}
   },
   "params_schema": {
     "type": "object",
@@ -426,9 +426,9 @@ ClawEvolve 的变化一览：
 | --- | --- | --- |
 | `acquisition/discovery.py`、`sessions.py`、`service_export.py` | OpenClaw 的 `experience.sessions` 提供方（平台侧，[02-experience.zh-CN.md](02-experience.zh-CN.md)） | 移到引擎会话导出契约之后；规范化为 `Episode`；标记基因组修订版 |
 | `clawevolve-diagnose` | 在策略内部 | 通过 `ctx.experience.sessions()` 读取片段，而不是读磁盘 |
-| `clawevolve-plan`（bench 用例） | 在策略内部 | 通过 `ctx.evaluate.add_train_cases()` 添加用例；由平台分配划分（去除其自身的 80/20 划分权） |
+| `clawevolve-plan`（bench 用例） | 在策略内部 | 通过 `ctx.evaluation.add_train_cases()` 添加用例；由平台分配划分（去除其自身的 80/20 划分权） |
 | `clawevolve-tune` + `clawevolve-review` | 在策略内部 | **编辑由 `ctx.workspace.materialise()` 得到的沙箱，而不是线上工作区**；通过 `ctx.agents.start()` 以按 id 查询的长时操作运行智能体；提交 `ws.to_patch()` |
-| 训练 bench 运行（`bench-full-opt`） | `ctx.evaluate.start_train()`（按 id 查询的操作） | ClawBench 评分以 `platform/clawbench` 的形式移入验证服务 |
+| 训练 bench 运行（`bench-full-opt`） | `ctx.evaluation.start_train()`（按 id 查询的操作） | ClawBench 评分以 `platform/clawbench` 的形式移入验证服务 |
 | `action_accept`（`test > baseline`）+ 建议性门禁 | 决定提交内容的内部过滤器 | 接受由绑定的验证配置下的平台判定决定；ClawEvolve 的门禁阈值可作为更严格配置的初始值 |
 | baseline-pack / restore / pack / deploy | —（移除） | 不再需要：策略从不更改线上 Bot |
 | `ce_tasks` / `ce_steps` / claim-report | —（被替换）作为编排；作为存储复用 | 平台运行编排 + 作业协议取代派发。这些表可以作为 ClawEvolve 以运行 id 为键的自有进度存储（§4.4） |
@@ -442,7 +442,7 @@ ClawEvolve 的变化一览：
 `clawevolve/bot-evolution` 的一次运行：
 
 1. **仅首次尝试——诊断与规划。** 读取父修订版在 `window_days` 内的片段；
-   挖掘发现；通过 `ctx.evaluate.add_train_cases` 提议训练用例（由平台分配划分；
+   挖掘发现；通过 `ctx.evaluation.add_train_cases` 提议训练用例（由平台分配划分；
    holdout、回归和安全划分保持隐藏）。保存状态。
 2. **每一轮**（最多 `max_rounds` 轮），使用键 `<run_id>/round-<n>`：
    1. 以该键从当前 `base` 物化一个沙箱；
@@ -472,7 +472,7 @@ ClawEvolve 的变化一览：
 `ctx.attempt + 1` 重新派发。ClawEvolve 从其存储中重新加载
 `ClawEvolveState`（现有的 `ce_tasks` / `ce_steps` 可以承担），
 并且由于每个工作区和操作的键都由运行 id 和轮次推导而来，重复调用
-`materialise`、`agents.start` 和 `evaluate.start_train` 会返回相同的沙箱
+`materialise`、`agents.start` 和 `evaluation.start_train` 会返回相同的沙箱
 和相同的操作——包括已经完成的智能体编辑——而无需再次付费。崩溃后重新提交的
 候选会得到相同的候选 id，因为该 id 是补丁的内容哈希。
 
@@ -484,7 +484,7 @@ ClawEvolve 的变化一览：
 | `workspace.materialise` | `run_7f3/round-2` |
 | `agents.start("clawevolve-tune")` | `run_7f3/round-2/tune` |
 | `agents.start("clawevolve-review")` | `run_7f3/round-2/review` |
-| `evaluate.start_train` | `run_7f3/round-2/train` |
+| `evaluation.start_train` | `run_7f3/round-2/train` |
 
 绝不使用发送时的时间戳：键在各次重试之间必须完全相同。
 
@@ -725,7 +725,7 @@ class ClawEvolveStrategy(EvolutionStrategy):
     """clawevolve/bot-evolution@2.0.0 — diagnose, plan, then tune/review/train rounds.
 
     Needs experience.sessions@1, agents@1 {clawevolve-tune, clawevolve-review},
-    evaluate.train@1. Keeps ClawEvolveState in `store`; all workspace and
+    evaluation.train@1. Keeps ClawEvolveState in `store`; all workspace and
     operation keys are derived from the run id and round, so a re-dispatch
     re-attaches instead of repeating paid work.
     """
@@ -768,10 +768,10 @@ class ConsolidateMemoryStrategy(EvolutionStrategy):
 | `ctx.parent` | 读取 id | 读取 id | 读取 id 和记忆条目 |
 | `ctx.experience.sessions` | — | 是 | 是（反馈引用的片段） |
 | `ctx.experience.feedback` | — | —（以后用于 ClawInsight 输入） | 是 |
-| `ctx.evaluate.add_train_cases` | — | 首次尝试 | — |
+| `ctx.evaluation.add_train_cases` | — | 首次尝试 | — |
 | `ctx.workspace.materialise` / `ws.to_patch` | — | 每轮 | — |
 | `ctx.agents.start`（操作） | — | tune、review | — |
-| `ctx.evaluate.start_train`（操作） | — | 每轮 | — |
+| `ctx.evaluation.start_train`（操作） | — | 每轮 | — |
 | `ctx.operations.get` / `wait` | — | 是 | — |
 | `ctx.models.complete` | — | 可选 | 是 |
 | `ctx.candidates.submit` | 一次 | 每轮，经过过滤 | 至多一次 |
@@ -814,7 +814,7 @@ manual-patch 的记录见下文）：
       "clawevolve-tune":   {"engine": "openclaw", "path": "agents/clawevolve-tune"},
       "clawevolve-review": {"engine": "openclaw", "path": "agents/clawevolve-review"}
     }},
-    "evaluate.train@1": {}
+    "evaluation.train@1": {}
   },
   "params_schema": {"type": "object", "additionalProperties": false, "properties": {"window_days": {"type": "integer", "minimum": 1, "maximum": 90, "default": 7}}}   // abridged; full schema in §4.2
 }
@@ -833,7 +833,7 @@ manual-patch 的记录见下文）：
       "clawevolve-tune":   {"engine": "openclaw", "digest": "sha256:5d1f…"},   // stored content-addressed
       "clawevolve-review": {"engine": "openclaw", "digest": "sha256:9e07…"}
     }},
-    "evaluate.train@1": {}
+    "evaluation.train@1": {}
   },
   "conformance": "pending"                        // must pass the kit before binding outside development
 }
@@ -1080,7 +1080,7 @@ ClawEvolve worker 为其策略 id 领取一个作业。
   "params": {"window_days": 7, "max_rounds": 3, "poll_s": 60, "max_sessions": 500},
   "parent": "sha256:a90b…",
   "budget": {"max_usd": 20, "max_wall_clock_s": 7200},
-  "granted": ["candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluate.train@1"],
+  "granted": ["candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluation.train@1"],
   "fencing_token": "ft_000231"
 }
 ```
@@ -1203,7 +1203,7 @@ SDK 将其转换为 `ctx.cancelled`）：
 
 ### `POST /evolution/v1/runs/{run}/evaluations/cases`
 
-`ctx.evaluate.add_train_cases`。ClawEvolve 的规划步骤提议用例；
+`ctx.evaluation.add_train_cases`。ClawEvolve 的规划步骤提议用例；
 平台分配划分。*提议的解读：*响应只揭示被分配到 `train` 的
 用例；平台放入隐藏划分的用例只计数，
 不标识。
@@ -1229,7 +1229,7 @@ SDK 将其转换为 `ctx.cancelled`）：
 ```
 
 主要错误：用例无法解析为 ClawBench 用例时返回 `422`；
-未授予 `evaluate.train@1` 时返回 `403`。
+未授予 `evaluation.train@1` 时返回 `403`。
 
 ### `POST /evolution/v1/runs/{run}/workspaces`
 
@@ -1283,7 +1283,7 @@ SDK 将其转换为 `ctx.cancelled`）：
 
 ### `POST /evolution/v1/runs/{run}/evaluations:train`
 
-`ctx.evaluate.start_train(workspace, idempotency_key)`。取代
+`ctx.evaluation.start_train(workspace, idempotency_key)`。取代
 ClawEvolve 自己的训练 bench（`bench-full-opt`）。仅限训练划分。
 
 请求：
@@ -1508,7 +1508,7 @@ class ClawEvolveStrategy(EvolutionStrategy):
         if state is None:                                             # first attempt
             episodes = await ctx.experience.sessions(days=p.window_days, limit=p.max_sessions)
             findings = diagnose(episodes)                             # clawevolve-diagnose, unchanged logic
-            await ctx.evaluate.add_train_cases(plan_bench(findings))  # platform assigns splits
+            await ctx.evaluation.add_train_cases(plan_bench(findings))  # platform assigns splits
             state = ClawEvolveState(run_id=ctx.run_id, findings=findings, base=ctx.parent.id,
                                     next_round=0, best_train_pct=0, pending=None, history=[])
             await self.store.save(ctx.run_id, state)
@@ -1523,7 +1523,7 @@ class ClawEvolveStrategy(EvolutionStrategy):
                                               prompt=build_tune_prompt(state.findings, state.history),
                                               idempotency_key=f"{key}/tune")
                 await ctx.operations.wait(tune)                       # short status lookups by id
-                train_op = await ctx.evaluate.start_train(ws, idempotency_key=f"{key}/train")
+                train_op = await ctx.evaluation.start_train(ws, idempotency_key=f"{key}/train")
                 train = (await ctx.operations.wait(train_op)).result  # replaces its own bench step
                 review = await ctx.agents.start("clawevolve-review", workspace=ws,
                                                 prompt=build_review_prompt(state.findings, train),
@@ -1626,7 +1626,7 @@ class ConsolidateMemoryStrategy(EvolutionStrategy):
    `run_7f3`；策略版本 `2.0.0`、params、预算（`max_usd: 20`）以及
    父修订版（`active` = `r41`，`sha256:a90b…`）被冻结。
 2. ClawEvolve worker 领取该作业（§11，作业协议），被授予的
-   能力为 `experience.sessions@1`、`agents@1`、`evaluate.train@1`。
+   能力为 `experience.sessions@1`、`agents@1`、`evaluation.train@1`。
 3. 诊断读取 `r41` 最近 7 天的片段，发现 `f_12`，并
    提议 12 个训练用例；平台将其中一部分保持隐藏。
 4. 第 0 轮：tune 智能体编辑沙箱 `ws_42`，训练得分 78%，

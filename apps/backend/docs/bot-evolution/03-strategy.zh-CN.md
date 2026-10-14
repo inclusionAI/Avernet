@@ -148,8 +148,10 @@ class RegisteredStrategy:                      # what the registry stores and re
 
 **两种运行时。** 策略自身的代码在两个地方之一运行。无论哪种，它都只通过 `ctx` 调用平台，并由平台为它启动智能体和评估（§7）：
 
-- **`in_process`**：策略是安装在 `apps/evolution` 中的一个 Python 包。平台 worker 导入它并直接调用 `run(ctx)`，`ctx` 调用就是普通的函数调用。无需启动容器，因此开销很小，但代码运行在平台内部。因此它只适用于可信的、平台拥有的策略，例如 `platform/consolidate-memory`。
-- **`job_worker`**：策略以容器镜像的形式发布，由其作者构建并推送到平台可拉取的镜像仓库。每次运行时，平台在沙箱中启动该镜像。其中的 SDK 通过作业协议（HTTP，[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）认领该运行的作业并调用 `run(ctx)`；每次 `ctx` 调用都成为一次 HTTP 调用。它适用于其他团队的策略，以及使用其他语言或自带依赖的代码，例如 ClawEvolve 2.0.0。平台只按记录中的摘要拉取镜像；允许从哪些镜像仓库拉取属于部署配置。
+- **`in_process`**：策略是安装在 `apps/evolution` 中的一个 Python 包。平台 worker 导入它并直接调用 `run(ctx)`，`ctx` 调用就是普通的函数调用。无需启动容器，因此开销很小，但代码运行在平台自己的进程中，没有任何隔离。因此它只适用于可信的、平台拥有的策略，例如 `platform/consolidate-memory`。
+- **`job_worker`**：策略以容器镜像的形式发布，由其作者构建并推送到平台可拉取的镜像仓库。每次运行时，平台在沙箱中启动该镜像。其中的 SDK 通过作业协议（HTTP，[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）认领该运行的作业并调用 `run(ctx)`；每次 `ctx` 调用都成为一次 HTTP 调用。它适用于其他团队的策略，以及使用其他语言或自带依赖的代码，例如 ClawEvolve 2.0.0。平台只按记录中的摘要拉取镜像；允许从哪些镜像仓库拉取属于部署配置。所有者不运行任何服务：平台为一次运行启动容器，运行结束后停止它。容器只会主动调用平台；平台从不调用进容器。
+
+由所有者托管一个长期运行、由平台来调用的服务，有意不作为一种运行时：平台无法对它做沙箱隔离、执行预算，也无法保证 `ctx` 是策略访问平台的唯一入口。
 
 **智能体是另一回事。** 运行时是 `run(ctx)` 运行的地方。`agents@1` 下的智能体定义是策略可以通过 `ctx.agents`（§4.2）*启动*的智能体；平台在工作区旁的沙箱中运行它们。并非每个策略都使用智能体：记忆整合只使用 `ctx.models`。
 
@@ -169,7 +171,7 @@ class RegisteredStrategy:                      # what the registry stores and re
       "clawevolve-tune":   {"engine": "openclaw", "path": "agents/clawevolve-tune"},
       "clawevolve-review": {"engine": "openclaw", "path": "agents/clawevolve-review"}
     }},
-    "evaluate.train@1": {}
+    "evaluation.train@1": {}
   },
   "params_schema": {                               // optional (proposed); full schema in 04-default-strategies.md
     "type": "object",
@@ -211,7 +213,7 @@ class ContextPart(StrEnum):
     MODELS = "models"                          # single model calls, routed and charged by the platform
     EXPERIENCE = "experience"                  # read the bot's recorded episodes and feedback (02-experience.md)
     AGENTS = "agents"                          # start the strategy's own agents in a sandbox
-    EVALUATE = "evaluate"                      # have the platform score a workspace on train cases
+    EVALUATION = "evaluation"                  # have the platform score a workspace on train cases
     LEDGER = "ledger"                          # read past experiments (later, level 3)
 
 class AnyEngine(StrEnum):
@@ -230,8 +232,8 @@ class CapabilityCall:
 
 @dataclass(frozen=True)
 class Capability:
-    name: str                                  # catalog name, e.g. "evaluate.train"
-    version: int                               # contract version: 1 -> "evaluate.train@1" (§4.1)
+    name: str                                  # catalog name, e.g. "evaluation.train"
+    version: int                               # contract version: 1 -> "evaluation.train@1" (§4.1)
     context_part: ContextPart                  # which field of StrategyContext it fills
     always_granted: bool                       # true: every strategy gets it without declaring it
     calls: list[CapabilityCall]
@@ -320,7 +322,7 @@ class StrategyContext(Protocol):
     # present only if declared in `needs`; otherwise access raises CapabilityNotGranted
     experience: ExperienceQuery                     # experience.sessions@1 / experience.feedback@1
     agents: AgentRunner                             # agents@1
-    evaluate: TrainEvaluator                        # evaluate.train@1: score a workspace on train cases
+    evaluation: TrainEvaluator                      # evaluation.train@1: score a workspace on train cases
 ```
 
 `ctx.candidates` 不是候选的列表。它是策略提交其产出的入口：`ctx.candidates.submit(candidate)` 返回一个候选 id，`ctx.candidates.verdict(id)` 查询其判定。`Candidate` 类型见 §2.6。
@@ -337,7 +339,7 @@ class StrategyContext(Protocol):
   "params": {"window_days": 7, "max_rounds": 3, "poll_s": 60},   // from the binding; checked against params_schema
   "parent": {"id": "sha256:a90b…", "seq": "r41"},
   "budget": {"max_usd": 20, "max_wall_clock_s": 7200, "spent_usd": 0},
-  "granted": ["candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluate.train@1"]
+  "granted": ["candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluation.train@1"]
 }
 ```
 
@@ -405,7 +407,7 @@ class Verdict:                                 # = StrategyVerdictView in 07-ver
 ```python
 class OperationKind(StrEnum):
     AGENT_SESSION = "agent_session"            # an agents@1 session
-    TRAIN_EVALUATION = "train_evaluation"      # an evaluate.train@1 evaluation
+    TRAIN_EVALUATION = "train_evaluation"      # an evaluation.train@1 evaluation
 
 class OperationStatus(StrEnum):
     QUEUED = "queued"
@@ -463,7 +465,7 @@ class Operation:
 操作是平台为策略执行的一件长时任务，分为两种：
 
 - **智能体会话**（`agent_session`）：平台在沙箱工作区中运行策略的某个智能体，例如 `clawevolve-tune` 编辑 `SKILL.md`。其结果是一个 `AgentResult`。
-- **训练评估**（`train_evaluation`）：平台*按工作区中的样子*针对**训练用例**运行 bot，并为每个回答评分，例如 20 个关于退款的用例。其结果是一个 `TrainResult`，包含每个用例的分数和评语。这里并没有机器学习意义上的训练。“训练”指的是策略可以查看并从中学习的那一划分的测试用例（参见 §4.2 中的 `evaluate.train@1` 部分）；平台自己用于决定判定的*验证*使用策略从未见过的其他用例。
+- **训练评估**（`train_evaluation`）：平台*按工作区中的样子*针对**训练用例**运行 bot，并为每个回答评分，例如 20 个关于退款的用例。其结果是一个 `TrainResult`，包含每个用例的分数和评语。这里并没有机器学习意义上的训练。“训练”指的是策略可以查看并从中学习的那一划分的测试用例（参见 §4.2 中的 `evaluation.train@1` 部分）；平台自己用于决定判定的*验证*使用策略从未见过的其他用例。
 
 `AgentResult` 和 `TrainResult` 的具体字段是此处提议的；源材料只说明智能体结果包含“transcript 和退出状态”，训练评估返回“分数和评语”。
 
@@ -520,7 +522,7 @@ class Operation:
 | `experience.sessions@1` | `ctx.experience.sessions()` | bot 过去的会话，作为经过筛选的规范化片段 | 读取会话历史；会向所有者展示 |
 | `experience.feedback@1` | `ctx.experience.feedback()` | 作为反馈记录的评分、纠正、结果和发现 | 关于被测 bot 的观察随 bot 调用方一起推迟（DR-3） |
 | `agents@1` `{definitions}` | `ctx.agents.start(definition, …)` → 操作 id | 在沙箱工作区中运行策略自有的某个智能体定义，作为长时操作（§6） | 每个定义指明其引擎；bot 的引擎必须在其中（§4.4） |
-| `evaluate.train@1` | `ctx.evaluate.start_train(…)` → 操作 id，`ctx.evaluate.add_train_cases(…)` | **仅在训练划分上**进行的平台评估，带分数和评语，作为长时操作（§6）；添加训练用例 | 验证、留出、回归和安全用例保持隐藏 |
+| `evaluation.train@1` | `ctx.evaluation.start_train(…)` → 操作 id，`ctx.evaluation.add_train_cases(…)` | **仅在训练划分上**进行的平台评估，带分数和评语，作为长时操作（§6）；添加训练用例 | 验证、留出、回归和安全用例保持隐藏 |
 | `ledger.read@1` *（后续，第 3 级）* | `ctx.ledger.export(…)` | 可见实验记录历史的文件系统导出，定义见 [10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md) | 第一个迭代中不授予 |
 
 ### 4.1 `@1` 的含义
@@ -661,7 +663,7 @@ class AgentRunner(Protocol):
 
 例如，ClawEvolve 的调优步骤会调用 `ctx.agents.start("clawevolve-tune", workspace=ws, prompt=…, idempotency_key=…)`。平台在沙箱 `ws` 中（而不是在线上 bot 上）启动该智能体，并立即返回一个操作 id。智能体会话可能运行很多分钟，因此策略通过该 id 查询其状态（§6）；成功时，结果包含 transcript 和退出状态。它修改的文件会留在 `ws` 中，直到策略将其转为补丁。若调用指定了策略未注册的定义，则会被拒绝。
 
-**`evaluate.train@1`。**
+**`evaluation.train@1`。**
 
 ```python
 class TrainEvaluator(Protocol):
@@ -671,7 +673,7 @@ class TrainEvaluator(Protocol):
     # when the operation succeeds, ctx.operations.get(op_id).result is a TrainResult
 ```
 
-**训练与验证。** 平台将每个 bot 的测试用例保存在不同的*划分*中（[07-verification.zh-CN.md](07-verification.zh-CN.md)）。**训练**划分是策略的练习集。策略可以向其中添加用例，在预算允许的范围内尽可能多次地让其工作区针对它运行，并读取每个分数和评语。**验证**划分（以及留出、回归、安全划分）是考试：平台在每个提交的候选上运行它以得出判定，而策略只能看到汇总数字。例如：ClawEvolve 编辑 `skills/refund-policy/SKILL.md`，然后调用 `ctx.evaluate.start_train(ws, …)`，得到 20 个训练用例中 14 个通过，每个失败都附有评语。它再次编辑，达到 17/20，然后提交。平台随后在 ClawEvolve 从未见过的验证用例上作出决定。
+**训练与验证。** 平台将每个 bot 的测试用例保存在不同的*划分*中（[07-verification.zh-CN.md](07-verification.zh-CN.md)）。**训练**划分是策略的练习集。策略可以向其中添加用例，在预算允许的范围内尽可能多次地让其工作区针对它运行，并读取每个分数和评语。**验证**划分（以及留出、回归、安全划分）是考试：平台在每个提交的候选上运行它以得出判定，而策略只能看到汇总数字。例如：ClawEvolve 编辑 `skills/refund-policy/SKILL.md`，然后调用 `ctx.evaluation.start_train(ws, …)`，得到 20 个训练用例中 14 个通过，每个失败都附有评语。它再次编辑，达到 17/20，然后提交。平台随后在 ClawEvolve 从未见过的验证用例上作出决定。
 
 策略可以*添加*用例；添加的用例进入**训练**划分。划分由平台分配，绝不由策略分配；策略不能修改评分器，也看不到验证划分的逐用例结果，以及留出、回归或安全用例。用例格式定义于 [07-verification.zh-CN.md](07-verification.zh-CN.md)。训练结果是给策略的反馈；它们绝不用于接受判定。
 
@@ -710,7 +712,7 @@ class TrainEvaluator(Protocol):
 
 ## 6. 长时调用即操作
 
-有些能力调用所做的工作需要数分钟或更久：智能体会话（`agents.start`）或涉及大量 rollout 的训练评估（`evaluate.start_train`）。这些调用在工作进行期间绝不保持请求打开。从策略视角看：
+有些能力调用所做的工作需要数分钟或更久：智能体会话（`agents.start`）或涉及大量 rollout 的训练评估（`evaluation.start_train`）。这些调用在工作进行期间绝不保持请求打开。从策略视角看：
 
 - **启动立即返回 id。** 启动调用记录一个**操作**，将工作交给平台，并返回其**操作 id**（通过作业协议时：`202` 并附带 id）。
 - **按 id 查询状态。** `ctx.operations.get(op_id)` 返回状态（`queued`、`running`、`succeeded`、`failed` 或 `cancelled`），成功后还返回结果。每次查询都是一次短请求。`ctx.operations.wait(op_id)` 是一个 SDK 辅助函数，它重复进行短查询直到操作结束；它从不保持某个请求打开。
@@ -731,7 +733,7 @@ class TrainEvaluator(Protocol):
 | **诊断逻辑**：对失败聚类、指出根因、决定改什么 | **带预算的模型调用**：`ctx.models.complete` 将每次调用经由平台模型列表路由，计入该运行，并记录所用模型 |
 | **它的提示词和智能体定义**：随策略版本发布，并按摘要注册 | **沙箱中的智能体会话**：`ctx.agents.start` 按摘要加载已注册的定义，并以操作的形式在沙箱工作区上运行它 |
 | **它的搜索算法**：轮次、种群、变异算子、在哪个父版本上构建下一轮 | **只编辑副本**：`ctx.workspace.materialise` 提供修订版的沙箱副本；`to_patch` 将编辑转为逐项列出的基因组补丁。不会触碰线上 bot |
-| **提交什么**：它自己用来判断哪些候选值得提出的过滤器 | **仅训练集评估**：`ctx.evaluate` 添加训练用例，并在训练划分上为工作区打分；验证、留出、回归和安全用例保持隐藏 |
+| **提交什么**：它自己用来判断哪些候选值得提出的过滤器 | **仅训练集评估**：`ctx.evaluation` 添加训练用例，并在训练划分上为工作区打分；验证、留出、回归和安全用例保持隐藏 |
 | **它自己的进度持久化**：轮次编号、搜索状态、历史，保存在它自己的存储中，以运行 id 为键 | **验证、门禁与晋升**：`ctx.candidates.submit` 记录候选；平台对其进行验证、应用门禁和风险等级并执行晋升；策略只按 id 读取判定 |
 
 **进度持久化。** 运行的每次尝试都是一个带租约的作业。如果策略进程崩溃，运行会以相同的运行 id 和 `ctx.attempt + 1` 再次派发（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。平台保存运行记录、冻结的输入、已花费的预算、候选和操作。其他任何所需内容由策略持久化在**它自己的存储**中，以运行 id 为键；重新派发时重新加载并继续。平台没有检查点 API，也从不读取这些状态；其结构因策略而异。策略在自己的存储中持久化自己的进度（已达成一致）。待定：沙箱化的作业 worker 如何访问该存储——例如在注册记录中为策略自有存储声明一条出口白名单条目，或由平台提供一个按运行划分、平台从不解读的不透明 blob（待定决策 S-8）。结合幂等提交、幂等的操作启动以及按键区分的工作区，这使得策略可以恢复执行，而不会重复产生候选、操作或花费。
@@ -782,10 +784,10 @@ class TrainEvaluator(Protocol):
 
 | 策略 | 形态 | 如何契合端口 |
 | --- | --- | --- |
-| ClawEvolve（`apps/evolverun`） | 多轮 调优 → 基准评测 → 评审 | 黑盒；`agents`、`experience.sessions`、`evaluate.train`；在轮次之间按候选 id 查询判定（[04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md)） |
+| ClawEvolve（`apps/evolverun`） | 多轮 调优 → 基准评测 → 评审 | 黑盒；`agents`、`experience.sessions`、`evaluation.train`；在轮次之间按候选 id 查询判定（[04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md)） |
 | `platform/consolidate-memory`（[04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md)） | 定时将反馈和片段整合为记忆条目 | 黑盒；`experience.feedback` 和 `experience.sessions`；每次运行提交一次 |
-| `acme/correction-fixer`（§11） | 单趟：诊断纠正 → 智能体修复 → 训练集对比 | 黑盒；`experience.sessions`、`agents`、`evaluate.train` |
-| GEPA / OPRO 风格的优化器 | 带反思式变异的种群搜索 | 黑盒；用 `evaluate.train` 计算适应度；用 `models` 做变异；提交最佳候选 |
+| `acme/correction-fixer`（§11） | 单趟：诊断纠正 → 智能体修复 → 训练集对比 | 黑盒；`experience.sessions`、`agents`、`evaluation.train` |
+| GEPA / OPRO 风格的优化器 | 带反思式变异的种群搜索 | 黑盒；用 `evaluation.train` 计算适应度；用 `models` 做变异；提交最佳候选 |
 | 编码智能体策略（Meta-Harness 风格） | 智能体基于完整历史编辑文件 | 黑盒；`workspace` + `agents` |
 
 ## 9. 服务接口
@@ -889,7 +891,7 @@ GET /openapi/v1/evolution/strategies?engine=openclaw&conformance=passed
       "id": "clawevolve/bot-evolution",
       "version": "2.0.0",
       "runtime": {"kind": "job_worker", "image": "registry.example/clawevolve@sha256:…"},
-      "needs": ["experience.sessions@1", "agents@1", "evaluate.train@1"],
+      "needs": ["experience.sessions@1", "agents@1", "evaluation.train@1"],
       "engines": ["openclaw"],                       // derived from the agents@1 definitions
       "conformance": {"status": "passed", "kit_version": "1.0.0"},
       "enabled": true
@@ -898,7 +900,7 @@ GET /openapi/v1/evolution/strategies?engine=openclaw&conformance=passed
       "id": "acme/correction-fixer",
       "version": "1.0.0",
       "runtime": {"kind": "job_worker", "image": "registry.example/acme/correction-fixer@sha256:…"},
-      "needs": ["experience.sessions@1", "agents@1", "evaluate.train@1"],
+      "needs": ["experience.sessions@1", "agents@1", "evaluation.train@1"],
       "engines": ["openclaw"],
       "conformance": {"status": "passed", "kit_version": "1.0.0"},
       "enabled": true
@@ -924,7 +926,7 @@ GET /openapi/v1/evolution/strategies?engine=openclaw&conformance=passed
   "needs": {
     "experience.sessions@1": {},
     "agents@1": {"definitions": {"acme-fixer": {"engine": "openclaw", "path": "agents/acme-fixer"}}},
-    "evaluate.train@1": {}
+    "evaluation.train@1": {}
   }
 }
 ```
@@ -944,7 +946,7 @@ GET /openapi/v1/evolution/strategies?engine=openclaw&conformance=passed
       "experience.sessions@1": {},
       "agents@1": {"definitions": {"acme-fixer": {"engine": "openclaw", "path": "agents/acme-fixer",
                                                   "digest": "sha256:9b3f…"}}},   // filled in by the registry
-      "evaluate.train@1": {}
+      "evaluation.train@1": {}
     }
   },
   "engines": ["openclaw"],
@@ -1001,7 +1003,7 @@ GET /openapi/v1/evolution/strategies/acme%2Fcorrection-fixer/versions/1.0.0
       "experience.sessions@1": {},
       "agents@1": {"definitions": {"acme-fixer": {"engine": "openclaw", "path": "agents/acme-fixer",
                                                   "digest": "sha256:9b3f…"}}},
-      "evaluate.train@1": {}
+      "evaluation.train@1": {}
     }
   },
   "engines": ["openclaw"],
@@ -1045,14 +1047,14 @@ GET /openapi/v1/evolution/capabilities
     {"name": "agents", "version": 1, "context_part": "agents", "always_granted": false,
      "calls": [{"name": "start", "operation": true}],
      "engines": ["openclaw"], "status": "active"},
-    {"name": "evaluate.train", "version": 1, "context_part": "evaluate", "always_granted": false,
+    {"name": "evaluation.train", "version": 1, "context_part": "evaluation", "always_granted": false,
      "calls": [{"name": "start_train", "operation": true}, {"name": "add_train_cases", "operation": false}],
      "engines": ["*"], "status": "active"}
   ]
 }
 ```
 
-初期哪些引擎拥有 provider 仅为示意：OpenClaw 是 `experience.sessions` 和 `agents` 的首个引擎；`experience.feedback` 和 `evaluate.train` 显示为与引擎无关，因为反馈由 Experience Store 为所有引擎提供，而训练评估在 Verification Service 中运行。
+初期哪些引擎拥有 provider 仅为示意：OpenClaw 是 `experience.sessions` 和 `agents` 的首个引擎；`experience.feedback` 和 `evaluation.train` 显示为与引擎无关，因为反馈由 Experience Store 为所有引擎提供，而训练评估在 Verification Service 中运行。
 
 ## 11. 示例
 
@@ -1106,7 +1108,7 @@ class CorrectionFixer(EvolutionStrategy):
 
             # 3. The corrected episodes become train cases; the user's correction is the
             #    expected behaviour. The platform records them in the train split.
-            await ctx.evaluate.add_train_cases([episode_to_case(e) for e in corrected])
+            await ctx.evaluation.add_train_cases([episode_to_case(e) for e in corrected])
             state.episode_ids = [e.episode_id for e in corrected]
             await self.store.save(ctx.run_id, state)
 
@@ -1144,7 +1146,7 @@ class CorrectionFixer(EvolutionStrategy):
         return await self.finish(ctx, state, f"submitted {candidate_id}")
 
     async def train_score(self, ctx: StrategyContext, ws: Workspace, key: str) -> float:
-        op = await ctx.operations.wait(await ctx.evaluate.start_train(ws, idempotency_key=key))
+        op = await ctx.operations.wait(await ctx.evaluation.start_train(ws, idempotency_key=key))
         if op.status != "succeeded":
             raise RuntimeError(f"train evaluation {op.id} ended {op.status}: {op.error}")
         return op.result.score
@@ -1170,7 +1172,7 @@ class CorrectionFixer(EvolutionStrategy):
     "agents@1": {"definitions": {                  // step 5; also makes it OpenClaw-only
       "acme-fixer": {"engine": "openclaw", "path": "agents/acme-fixer"}
     }},
-    "evaluate.train@1": {}                         // steps 3, 4, 6
+    "evaluation.train@1": {}                         // steps 3, 4, 6
   }
 }
 ```
@@ -1220,7 +1222,7 @@ async def test_redispatch_does_not_duplicate(fake_platform):
 
 ### 11.3 多轮黑盒
 
-完整的 ClawEvolve 代码草图（多轮 调优 → 训练评估 → 提交 → 查询判定 → 在被接受的修订版之上构建下一轮，并带有自己的进度持久化）见 [04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md)。一个以 `runtime.kind: "job_worker"` 和 `needs: {"evaluate.train@1": {}, "experience.feedback@1": {}}` 注册的 TypeScript GEPA 风格提示词优化器，通过作业协议使用同一个端口；它永远不需要知道修订版如何存储、验证如何进行，或服务 bot 如何发布。
+完整的 ClawEvolve 代码草图（多轮 调优 → 训练评估 → 提交 → 查询判定 → 在被接受的修订版之上构建下一轮，并带有自己的进度持久化）见 [04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md)。一个以 `runtime.kind: "job_worker"` 和 `needs: {"evaluation.train@1": {}, "experience.feedback@1": {}}` 注册的 TypeScript GEPA 风格提示词优化器，通过作业协议使用同一个端口；它永远不需要知道修订版如何存储、验证如何进行，或服务 bot 如何发布。
 
 ## 12. 交互
 
@@ -1232,7 +1234,7 @@ async def test_redispatch_does_not_duplicate(fake_platform):
 | [01-genome.zh-CN.md](01-genome.zh-CN.md) | 基因组 → 策略 | `ctx.parent`（只读修订版）；来自 `ctx.workspace.materialise` 的沙箱副本 |
 | [01-genome.zh-CN.md](01-genome.zh-CN.md) | 策略 → 基因组 | 来自 `ws.to_patch()` 的 `GenomePatch`，包含在候选中；绝不直接写入 |
 | [02-experience.zh-CN.md](02-experience.zh-CN.md) | 经验 → 策略 | 通过 `experience.sessions@1` 和 `experience.feedback@1` provider 提供的已脱敏 `Episode` 和 `Feedback` |
-| [07-verification.zh-CN.md](07-verification.zh-CN.md) | 双向 | 通过 `evaluate.train@1` 添加的训练用例和训练结果；通过 `candidates@1` 提供的带验证聚合数据的判定 |
+| [07-verification.zh-CN.md](07-verification.zh-CN.md) | 双向 | 通过 `evaluation.train@1` 添加的训练用例和训练结果；通过 `candidates@1` 提供的带验证聚合数据的判定 |
 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) | 策略 → 晋升（间接） | 候选只有在验证之后才会到达门禁；策略从不调用晋升 |
 | [05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md) | 策略 → 实验记录（经由平台） | 每次运行的策略版本、所用模型、智能体定义摘要、候选和费用 |
 | [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) | 客户端 → Registry | §10 中的 registry 端点；`avn strategy` 与 `avn evolve strategies` 命令 |
@@ -1246,7 +1248,7 @@ async def test_redispatch_does_not_duplicate(fake_platform):
 | --- | --- | --- |
 | S-1 | 注册时如何上传智能体定义 | 一个 `multipart/form-data` 请求（§10）。备选方案：先将每个归档上传到内容端点，再按摘要注册 |
 | S-2 | 注册记录是否应携带 `params` 的 JSON Schema？ | 已解决（提议字段）：注册记录中可选的 `params_schema`（§2.2）；绑定检查在写入进化策略配置时用它校验绑定的 `params`（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)） |
-| S-3 | `evaluate.add_train_cases` 是否幂等？ | 源材料未说明。提议：用例 id = 用例的内容哈希，这样重新派发的运行再次添加相同用例时不会产生重复 |
+| S-3 | `evaluation.add_train_cases` 是否幂等？ | 源材料未说明。提议：用例 id = 用例的内容哈希，这样重新派发的运行再次添加相同用例时不会产生重复 |
 | S-4 | 组合式层级的步骤类型 | 推迟到第二个团队需要替换某个部件时（R19） |
 | S-5 | 是否应将实验记录的导出（原始历史）作为一项能力提供给策略？ | 上一版设计建议如此（Meta-Harness 发现原始历史优于摘要）。计划作为第 3 级的 `ledger.read@1`（[10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md)）；第一个迭代中不授予 |
 | S-6 | 一致性测试通过之前，“在开发环境之外绑定”是什么意思 | 提议：一致性状态为 `pending` 或 `failed` 的版本只能在本地测试环境和开发用 bot 上运行 |

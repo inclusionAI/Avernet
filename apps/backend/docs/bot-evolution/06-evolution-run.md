@@ -351,7 +351,7 @@ class Run:
   "params": {"window_days": 7, "max_rounds": 3, "poll_s": 60},
   "budget": {"max_usd": 20, "max_wall_clock_s": 7200},
   "granted": ["parent", "workspace", "operations", "budget", "log", "artifacts", "cancelled",
-              "candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluate.train@1"],
+              "candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluation.train@1"],
   "agent_definitions": {"clawevolve-tune": "sha256:5d0e…", "clawevolve-review": "sha256:8b17…"},
   "status": "running",
   "attempt": 2,                                       // re-dispatched once after a worker crash
@@ -411,7 +411,7 @@ class Job:
 
 An **operation** is a capability call whose work can outlast a short
 request: an agent session (`agents.start`) or a train evaluation
-(`evaluate.start_train`). Starting it returns an operation id at once; its
+(`evaluation.start_train`). Starting it returns an operation id at once; its
 status is looked up by id.
 
 ```python
@@ -802,7 +802,7 @@ a crash loop cannot extend a run beyond `max_wall_clock_s`.
 
 Some capability calls do work that takes minutes or longer: an agent
 session (`agents.start`) or a train evaluation over many rollouts
-(`evaluate.start_train`). They never hold a request open while the work
+(`evaluation.start_train`). They never hold a request open while the work
 runs. How a strategy uses them is in [03-strategy.md](03-strategy.md); this
 section is what the platform guarantees.
 
@@ -843,7 +843,7 @@ files the agent changed stay in the workspace until the strategy turns them
 into a patch. Where definitions come from and how they are validated is in
 [03-strategy.md](03-strategy.md).
 
-**Train-evaluation operations.** `evaluate.start_train(workspace,
+**Train-evaluation operations.** `evaluation.start_train(workspace,
 idempotency_key=…)` runs the Verification Service on the **train split
 only**, with scores and critiques ([07-verification.md](07-verification.md)).
 Validation, holdout, regression, and safety stay hidden.
@@ -883,8 +883,8 @@ example in [§14.2](#142-internal-api-job-protocol).
 | `POST /evolution/v1/runs/{run}/log` | `ctx.log`: structured log lines |
 | `PUT /evolution/v1/runs/{run}/artifacts/{name}` | `ctx.artifacts`: upload an artifact (bytes) |
 | `POST /evolution/v1/runs/{run}/agents:start` | `ctx.agents.start → 202 {operation_id}` (if granted; idempotent) |
-| `POST /evolution/v1/runs/{run}/evaluations:train` | `ctx.evaluate.start_train → 202 {operation_id}` (if granted; idempotent) |
-| `POST /evolution/v1/runs/{run}/evaluations/cases` | `ctx.evaluate.add_train_cases` (if granted) |
+| `POST /evolution/v1/runs/{run}/evaluations:train` | `ctx.evaluation.start_train → 202 {operation_id}` (if granted; idempotent) |
+| `POST /evolution/v1/runs/{run}/evaluations/cases` | `ctx.evaluation.add_train_cases` (if granted) |
 | `GET /evolution/v1/runs/{run}/operations/{id}` | `ctx.operations.get → {status, result?}` |
 | `POST /evolution/v1/runs/{run}/operations/{id}:cancel` | `ctx.operations.cancel` |
 | `POST /evolution/v1/runs/{run}/models:complete` | `ctx.models.complete → completion` |
@@ -1144,7 +1144,7 @@ Ports this service depends on (defined by the owning docs):
 | Experience queries | Serving `experience.sessions` / `experience.feedback` | [02-experience.md](02-experience.md) |
 | Strategy Registry (registration record, conformance status, agent definition digests, capability providers per engine) | Binding checks; building the context; loading agent definitions | [03-strategy.md](03-strategy.md) |
 | Ledger append | Recording runs, submissions, verdicts, costs, models used | [05-experiment-ledger.md](05-experiment-ledger.md) |
-| `verify(candidate, profile)`, train evaluation | Verdicts; `evaluate.train` operations | [07-verification.md](07-verification.md) |
+| `verify(candidate, profile)`, train evaluation | Verdicts; `evaluation.train` operations | [07-verification.md](07-verification.md) |
 | Static floor (`FloorCheck`, via `PromotionService.check_floor`) | Rejecting a candidate at submission, before verification | [08-promotion.md](08-promotion.md) |
 | Gate intake | Handing verdicts to the gate and review queue | [08-promotion.md](08-promotion.md) |
 
@@ -1370,7 +1370,7 @@ Response `200`:
   "params": {"window_days": 7, "max_rounds": 3, "poll_s": 60},
   "budget": {"max_usd": 20, "max_wall_clock_s": 7200},
   "granted": ["parent", "workspace", "operations", "budget", "log", "artifacts", "cancelled",
-              "candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluate.train@1"],
+              "candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluation.train@1"],
   "agent_definitions": {"clawevolve-tune": "sha256:5d0e…", "clawevolve-review": "sha256:8b17…"},
   "status": "completed",
   "attempt": 2,
@@ -1486,7 +1486,7 @@ Response `200`:
   "budget": {"max_usd": 20, "max_wall_clock_s": 7200},
   "budget_used": {"usd": 3.10, "wall_clock_s": 912, "rollouts": 48, "tokens": 201000},
   "granted": ["parent", "workspace", "operations", "budget", "log", "artifacts", "cancelled",
-              "candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluate.train@1"],
+              "candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluation.train@1"],
   "fencing_token": "ft_7f3_2_b81c",
   "lease_expires_at": "2026-10-08T02:16:10Z"
 }
@@ -1835,7 +1835,7 @@ registered with this strategy version) or unknown workspace; `402`
 
 ### POST /evolution/v1/runs/{run}/evaluations:train
 
-`ctx.evaluate.start_train` (only if `evaluate.train@1` is granted): evaluate
+`ctx.evaluation.start_train` (only if `evaluation.train@1` is granted): evaluate
 a workspace on the **train split only**, with scores and critiques, as an
 operation. Idempotent per `idempotency_key`.
 
@@ -1858,7 +1858,7 @@ Errors: `403` `capability_not_granted`; `422` unknown workspace; `402`
 
 ### POST /evolution/v1/runs/{run}/evaluations/cases
 
-`ctx.evaluate.add_train_cases` (only if `evaluate.train@1` is granted): add
+`ctx.evaluation.add_train_cases` (only if `evaluation.train@1` is granted): add
 replayable cases the strategy derived from experience. The platform assigns
 splits; the strategy cannot choose them. The case format is defined in
 [07-verification.md](07-verification.md).
@@ -2238,7 +2238,7 @@ schedule. ClawEvolve's own code is shown in
 | Time | Event | Run state |
 | --- | --- | --- |
 | 02:00:00 | Schedule fires; key `bind_01/2026-10-08T02:00:00Z`; inputs frozen: parent `active` = `r41` (`sha256:a90b…`), `max_rounds: 3`, `max_usd: 20` | `run_7f3` `queued`, attempt 1 |
-| 02:00:09 | Worker A claims `job_7f3_1`, token `ft_7f3_1_…`; context grants `experience.sessions@1`, `agents@1`, `evaluate.train@1` plus the always-granted parts | `running` |
+| 02:00:09 | Worker A claims `job_7f3_1`, token `ft_7f3_1_…`; context grants `experience.sessions@1`, `agents@1`, `evaluation.train@1` plus the always-granted parts | `running` |
 | 02:01 | Strategy reads 7 days of episodes, adds train cases, saves its state in its own store | `running` |
 | 02:12 | `workspaces` with key `run_7f3/round-1`; `agents:start` with key `run_7f3/round-1/tune` → `op_19a` | `running` |
 | 02:15 | Worker A's host reboots; heartbeats stop | `running` |

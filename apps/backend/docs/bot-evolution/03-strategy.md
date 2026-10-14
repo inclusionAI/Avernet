@@ -194,9 +194,9 @@ starts agents and evaluations for it (§7):
 - **`in_process`**: the strategy is a Python package installed in
   `apps/evolution`. A platform worker imports it and calls `run(ctx)`
   directly, and `ctx` calls are plain function calls. There is no container
-  to start, so it is cheap, but the code runs inside the platform. It is
-  therefore only for trusted, platform-owned strategies, for example
-  `platform/consolidate-memory`.
+  to start, so it is cheap, but the code runs inside the platform's own
+  process with no isolation. It is therefore only for trusted,
+  platform-owned strategies, for example `platform/consolidate-memory`.
 - **`job_worker`**: the strategy ships as a container image that its author
   builds and pushes to an image registry the platform can pull from. For a
   run, the platform starts that image in a sandbox. The SDK inside claims
@@ -206,7 +206,13 @@ starts agents and evaluations for it (§7):
   and for code in other languages or with its own dependencies, for
   example ClawEvolve 2.0.0. The platform only pulls images by the digest
   in the record; which image registries it may pull from is deployment
-  configuration.
+  configuration. The owner runs nothing: the platform starts the container
+  for one run and stops it afterwards. The container only calls out to the
+  platform; the platform never calls into it.
+
+The owner hosting a long-lived service that the platform calls is
+deliberately not a runtime: the platform could not sandbox it, enforce the
+budget, or guarantee that `ctx` is the strategy's only way in.
 
 **Agents are a separate thing.** The runtime is where `run(ctx)` runs. The
 agent definitions under `agents@1` are agents the strategy may *start*
@@ -235,7 +241,7 @@ strategy fills in the same fields:
       "clawevolve-tune":   {"engine": "openclaw", "path": "agents/clawevolve-tune"},
       "clawevolve-review": {"engine": "openclaw", "path": "agents/clawevolve-review"}
     }},
-    "evaluate.train@1": {}
+    "evaluation.train@1": {}
   },
   "params_schema": {                               // optional (proposed); full schema in 04-default-strategies.md
     "type": "object",
@@ -288,7 +294,7 @@ class ContextPart(StrEnum):
     MODELS = "models"                          # single model calls, routed and charged by the platform
     EXPERIENCE = "experience"                  # read the bot's recorded episodes and feedback (02-experience.md)
     AGENTS = "agents"                          # start the strategy's own agents in a sandbox
-    EVALUATE = "evaluate"                      # have the platform score a workspace on train cases
+    EVALUATION = "evaluation"                  # have the platform score a workspace on train cases
     LEDGER = "ledger"                          # read past experiments (later, level 3)
 
 class AnyEngine(StrEnum):
@@ -307,8 +313,8 @@ class CapabilityCall:
 
 @dataclass(frozen=True)
 class Capability:
-    name: str                                  # catalog name, e.g. "evaluate.train"
-    version: int                               # contract version: 1 -> "evaluate.train@1" (§4.1)
+    name: str                                  # catalog name, e.g. "evaluation.train"
+    version: int                               # contract version: 1 -> "evaluation.train@1" (§4.1)
     context_part: ContextPart                  # which field of StrategyContext it fills
     always_granted: bool                       # true: every strategy gets it without declaring it
     calls: list[CapabilityCall]
@@ -414,7 +420,7 @@ class StrategyContext(Protocol):
     # present only if declared in `needs`; otherwise access raises CapabilityNotGranted
     experience: ExperienceQuery                     # experience.sessions@1 / experience.feedback@1
     agents: AgentRunner                             # agents@1
-    evaluate: TrainEvaluator                        # evaluate.train@1: score a workspace on train cases
+    evaluation: TrainEvaluator                      # evaluation.train@1: score a workspace on train cases
 ```
 
 `ctx.candidates` is not a list of candidates. It is the door through which
@@ -440,7 +446,7 @@ response carries the same values):
   "params": {"window_days": 7, "max_rounds": 3, "poll_s": 60},   // from the binding; checked against params_schema
   "parent": {"id": "sha256:a90b…", "seq": "r41"},
   "budget": {"max_usd": 20, "max_wall_clock_s": 7200, "spent_usd": 0},
-  "granted": ["candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluate.train@1"]
+  "granted": ["candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluation.train@1"]
 }
 ```
 
@@ -521,7 +527,7 @@ decision recorded in [01-genome.md](01-genome.md).
 ```python
 class OperationKind(StrEnum):
     AGENT_SESSION = "agent_session"            # an agents@1 session
-    TRAIN_EVALUATION = "train_evaluation"      # an evaluate.train@1 evaluation
+    TRAIN_EVALUATION = "train_evaluation"      # an evaluation.train@1 evaluation
 
 class OperationStatus(StrEnum):
     QUEUED = "queued"
@@ -587,7 +593,7 @@ of one of two kinds:
   for example 20 cases about refunds. Its result is a `TrainResult` with a
   score and critique per case. Nothing is trained here in the ML sense.
   "Train" names the split of test cases the strategy may see and learn from
-  (see the `evaluate.train@1` section in §4.2); the platform's own
+  (see the `evaluation.train@1` section in §4.2); the platform's own
   *validation*, which decides the verdict, uses other cases the strategy
   never sees.
 
@@ -712,7 +718,7 @@ what a bot can supply.
 | `experience.sessions@1` | `ctx.experience.sessions()` | The bot's past conversations as normalized episodes, filtered | Reads conversation history; shown to owners |
 | `experience.feedback@1` | `ctx.experience.feedback()` | Ratings, corrections, outcomes, and findings recorded as feedback | Subject-bot observations are postponed with bot callers (DR-3) |
 | `agents@1` `{definitions}` | `ctx.agents.start(definition, …)` → operation id | Run one of the strategy's own agent definitions inside a sandbox workspace, as a long-running operation (§6) | Each definition names its engine; the bot's engine must be among them (§4.4) |
-| `evaluate.train@1` | `ctx.evaluate.start_train(…)` → operation id, `ctx.evaluate.add_train_cases(…)` | Platform evaluation on the **train split only**, with scores and critiques, as a long-running operation (§6); adding train cases | Validation, holdout, regression, and safety stay hidden |
+| `evaluation.train@1` | `ctx.evaluation.start_train(…)` → operation id, `ctx.evaluation.add_train_cases(…)` | Platform evaluation on the **train split only**, with scores and critiques, as a long-running operation (§6); adding train cases | Validation, holdout, regression, and safety stay hidden |
 | `ledger.read@1` *(later, level 3)* | `ctx.ledger.export(…)` | A filesystem export of visible ledger history, defined in [10-meta-evolution.md](10-meta-evolution.md) | Not granted in the first iteration |
 
 ### 4.1 What `@1` means
@@ -883,7 +889,7 @@ succeeds, the result holds the transcript and exit status. Files it changed
 stay in `ws` until the strategy turns them into a patch. A call naming a
 definition the strategy did not register is refused.
 
-**`evaluate.train@1`.**
+**`evaluation.train@1`.**
 
 ```python
 class TrainEvaluator(Protocol):
@@ -901,7 +907,7 @@ and critique. The **validation** split (and holdout, regression, safety) is
 the exam: the platform runs it on each submitted candidate to reach the
 verdict, and the strategy sees only aggregate numbers. Example: ClawEvolve
 edits `skills/refund-policy/SKILL.md`, then calls
-`ctx.evaluate.start_train(ws, …)` and gets 14/20 train cases passing with a
+`ctx.evaluation.start_train(ws, …)` and gets 14/20 train cases passing with a
 critique for each failure. It edits again, reaches 17/20, and submits. The
 platform then decides on validation cases ClawEvolve has never seen.
 
@@ -987,7 +993,7 @@ so there is no separate engine list.
 
 Some capability calls do work that takes minutes or longer: an agent
 session (`agents.start`) or a train evaluation over many rollouts
-(`evaluate.start_train`). These never hold a request open while the work
+(`evaluation.start_train`). These never hold a request open while the work
 runs. From the strategy's side:
 
 - **Start returns an id at once.** The start call records an
@@ -1031,7 +1037,7 @@ under the run's isolation and budget.
 | **Diagnosis logic**: clustering failures, naming root causes, deciding what to change | **Model calls with budget**: `ctx.models.complete` routes every call through the platform's model list, charges it to the run, and records the model used |
 | **Its prompts and agent definitions**: shipped with the strategy version and registered by digest | **Agent sessions in a sandbox**: `ctx.agents.start` loads the registered definition by digest and runs it against a sandbox workspace, as an operation |
 | **Its search algorithm**: rounds, populations, mutation operators, which parent to build the next round on | **Edits only to copies**: `ctx.workspace.materialise` gives a sandbox copy of a revision; `to_patch` turns edits into an itemized Genome Patch. Nothing touches the live bot |
-| **What to submit**: its own filter on which candidates are worth proposing | **Train-only evaluation**: `ctx.evaluate` adds train cases and scores a workspace on the train split; validation, holdout, regression, and safety stay hidden |
+| **What to submit**: its own filter on which candidates are worth proposing | **Train-only evaluation**: `ctx.evaluation` adds train cases and scores a workspace on the train split; validation, holdout, regression, and safety stay hidden |
 | **Its own progress persistence**: round number, search state, history, saved in its own storage keyed by run id | **Verification, gate, and promotion**: `ctx.candidates.submit` records the candidate; the platform verifies it, applies the gate and risk tier, and promotes; the strategy only reads the verdict by id |
 
 **Progress persistence.** Every attempt of a run is a leased job. If the strategy's
@@ -1119,10 +1125,10 @@ Conformance runs on both sides of the port.
 
 | Strategy | Shape | Fits the port by |
 | --- | --- | --- |
-| ClawEvolve (`apps/evolverun`) | Multi-round tune → bench → review | Black box; `agents`, `experience.sessions`, `evaluate.train`; looks up verdicts by candidate id between rounds ([04-default-strategies.md](04-default-strategies.md)) |
+| ClawEvolve (`apps/evolverun`) | Multi-round tune → bench → review | Black box; `agents`, `experience.sessions`, `evaluation.train`; looks up verdicts by candidate id between rounds ([04-default-strategies.md](04-default-strategies.md)) |
 | `platform/consolidate-memory` ([04-default-strategies.md](04-default-strategies.md)) | Scheduled consolidation of feedback and episodes into memory items | Black box; `experience.feedback` and `experience.sessions`; one submission per run |
-| `acme/correction-fixer` (§11) | Single pass: diagnose corrections → agent fix → train comparison | Black box; `experience.sessions`, `agents`, `evaluate.train` |
-| GEPA / OPRO-style optimizers | Population search with reflective mutation | Black box; `evaluate.train` for fitness; `models` for mutation; submits the best candidates |
+| `acme/correction-fixer` (§11) | Single pass: diagnose corrections → agent fix → train comparison | Black box; `experience.sessions`, `agents`, `evaluation.train` |
+| GEPA / OPRO-style optimizers | Population search with reflective mutation | Black box; `evaluation.train` for fitness; `models` for mutation; submits the best candidates |
 | Coding-agent strategy (Meta-Harness style) | Agent edits files with full history | Black box; `workspace` + `agents` |
 
 ## 9. Service interface
@@ -1243,7 +1249,7 @@ Example response (`200`):
       "id": "clawevolve/bot-evolution",
       "version": "2.0.0",
       "runtime": {"kind": "job_worker", "image": "registry.example/clawevolve@sha256:…"},
-      "needs": ["experience.sessions@1", "agents@1", "evaluate.train@1"],
+      "needs": ["experience.sessions@1", "agents@1", "evaluation.train@1"],
       "engines": ["openclaw"],                       // derived from the agents@1 definitions
       "conformance": {"status": "passed", "kit_version": "1.0.0"},
       "enabled": true
@@ -1252,7 +1258,7 @@ Example response (`200`):
       "id": "acme/correction-fixer",
       "version": "1.0.0",
       "runtime": {"kind": "job_worker", "image": "registry.example/acme/correction-fixer@sha256:…"},
-      "needs": ["experience.sessions@1", "agents@1", "evaluate.train@1"],
+      "needs": ["experience.sessions@1", "agents@1", "evaluation.train@1"],
       "engines": ["openclaw"],
       "conformance": {"status": "passed", "kit_version": "1.0.0"},
       "enabled": true
@@ -1283,7 +1289,7 @@ its directory. Example `registration` part:
   "needs": {
     "experience.sessions@1": {},
     "agents@1": {"definitions": {"acme-fixer": {"engine": "openclaw", "path": "agents/acme-fixer"}}},
-    "evaluate.train@1": {}
+    "evaluation.train@1": {}
   }
 }
 ```
@@ -1305,7 +1311,7 @@ its status is looked up with `GET /evolution/strategies/{id}/versions/{version}`
       "experience.sessions@1": {},
       "agents@1": {"definitions": {"acme-fixer": {"engine": "openclaw", "path": "agents/acme-fixer",
                                                   "digest": "sha256:9b3f…"}}},   // filled in by the registry
-      "evaluate.train@1": {}
+      "evaluation.train@1": {}
     }
   },
   "engines": ["openclaw"],
@@ -1367,7 +1373,7 @@ Example response (`200`):
       "experience.sessions@1": {},
       "agents@1": {"definitions": {"acme-fixer": {"engine": "openclaw", "path": "agents/acme-fixer",
                                                   "digest": "sha256:9b3f…"}}},
-      "evaluate.train@1": {}
+      "evaluation.train@1": {}
     }
   },
   "engines": ["openclaw"],
@@ -1414,7 +1420,7 @@ Example response (`200`):
     {"name": "agents", "version": 1, "context_part": "agents", "always_granted": false,
      "calls": [{"name": "start", "operation": true}],
      "engines": ["openclaw"], "status": "active"},
-    {"name": "evaluate.train", "version": 1, "context_part": "evaluate", "always_granted": false,
+    {"name": "evaluation.train", "version": 1, "context_part": "evaluation", "always_granted": false,
      "calls": [{"name": "start_train", "operation": true}, {"name": "add_train_cases", "operation": false}],
      "engines": ["*"], "status": "active"}
   ]
@@ -1423,7 +1429,7 @@ Example response (`200`):
 
 Which engines have providers at first is illustrative: OpenClaw is the
 first engine for `experience.sessions` and `agents`; `experience.feedback`
-and `evaluate.train` are shown as engine-neutral because feedback is served
+and `evaluation.train` are shown as engine-neutral because feedback is served
 by the Experience Store for every engine and train evaluation runs in the
 Verification Service.
 
@@ -1485,7 +1491,7 @@ class CorrectionFixer(EvolutionStrategy):
 
             # 3. The corrected episodes become train cases; the user's correction is the
             #    expected behaviour. The platform records them in the train split.
-            await ctx.evaluate.add_train_cases([episode_to_case(e) for e in corrected])
+            await ctx.evaluation.add_train_cases([episode_to_case(e) for e in corrected])
             state.episode_ids = [e.episode_id for e in corrected]
             await self.store.save(ctx.run_id, state)
 
@@ -1523,7 +1529,7 @@ class CorrectionFixer(EvolutionStrategy):
         return await self.finish(ctx, state, f"submitted {candidate_id}")
 
     async def train_score(self, ctx: StrategyContext, ws: Workspace, key: str) -> float:
-        op = await ctx.operations.wait(await ctx.evaluate.start_train(ws, idempotency_key=key))
+        op = await ctx.operations.wait(await ctx.evaluation.start_train(ws, idempotency_key=key))
         if op.status != "succeeded":
             raise RuntimeError(f"train evaluation {op.id} ended {op.status}: {op.error}")
         return op.result.score
@@ -1555,7 +1561,7 @@ Its registration record, in the strategy's source next to `agents/acme-fixer/`:
     "agents@1": {"definitions": {                  // step 5; also makes it OpenClaw-only
       "acme-fixer": {"engine": "openclaw", "path": "agents/acme-fixer"}
     }},
-    "evaluate.train@1": {}                         // steps 3, 4, 6
+    "evaluation.train@1": {}                         // steps 3, 4, 6
   }
 }
 ```
@@ -1614,7 +1620,7 @@ submit → look up verdict → build the next round on the accepted revision,
 with its own progress persistence) is in
 [04-default-strategies.md](04-default-strategies.md). A TypeScript,
 GEPA-style prompt optimizer registered with `runtime.kind: "job_worker"`
-and `needs: {"evaluate.train@1": {}, "experience.feedback@1": {}}` uses the
+and `needs: {"evaluation.train@1": {}, "experience.feedback@1": {}}` uses the
 same port over the Job Protocol; it never learns how revisions are stored,
 how verification works, or how service bots are published.
 
@@ -1628,7 +1634,7 @@ how verification works, or how service bots are published.
 | [01-genome.md](01-genome.md) | Genome → Strategy | `ctx.parent` (read-only revision); sandbox copies from `ctx.workspace.materialise` |
 | [01-genome.md](01-genome.md) | Strategy → Genome | `GenomePatch` from `ws.to_patch()`, inside a candidate; never a direct write |
 | [02-experience.md](02-experience.md) | Experience → Strategy | Redacted `Episode` and `Feedback` through `experience.sessions@1` and `experience.feedback@1` providers |
-| [07-verification.md](07-verification.md) | Both ways | Train cases added and train results through `evaluate.train@1`; verdicts with validation aggregates through `candidates@1` |
+| [07-verification.md](07-verification.md) | Both ways | Train cases added and train results through `evaluation.train@1`; verdicts with validation aggregates through `candidates@1` |
 | [08-promotion.md](08-promotion.md) | Strategy → Promotion (indirect) | Candidates reach the gate only after verification; a strategy never calls promotion |
 | [05-experiment-ledger.md](05-experiment-ledger.md) | Strategy → Ledger (via platform) | Strategy version, models used, agent definition digests, candidates, and costs per run |
 | [09-evolution-api.md](09-evolution-api.md) | Clients → Registry | The registry endpoints of §10; `avn strategy` and `avn evolve strategies` commands |
@@ -1642,7 +1648,7 @@ how verification works, or how service bots are published.
 | --- | --- | --- |
 | S-1 | How agent definitions are uploaded at registration | One `multipart/form-data` request (§10). Alternative: upload each archive to a content endpoint first and register by digest |
 | S-2 | Should the registration record carry a JSON Schema for `params`? | Resolved (proposed field): an optional `params_schema` in the registration record (§2.2); the binding check validates a binding's `params` against it when the policy is written ([06-evolution-run.md](06-evolution-run.md)) |
-| S-3 | Is `evaluate.add_train_cases` idempotent? | The sources do not say. Proposed: case id = content hash of the case, so a re-dispatched run that adds the same cases again creates no duplicates |
+| S-3 | Is `evaluation.add_train_cases` idempotent? | The sources do not say. Proposed: case id = content hash of the case, so a re-dispatched run that adds the same cases again creates no duplicates |
 | S-4 | Step types for the composed tier | Deferred until a second team needs to swap a piece (R19) |
 | S-5 | Should strategies get an export of the ledger (raw history) as a capability? | The previous design suggests it (Meta-Harness found raw history beats summaries). Planned as `ledger.read@1` for level 3 ([10-meta-evolution.md](10-meta-evolution.md)); not granted in the first iteration |
 | S-6 | What "bound outside development" means before conformance passes | Proposed: versions with `pending` or `failed` conformance can run only in the local harness and on development bots |

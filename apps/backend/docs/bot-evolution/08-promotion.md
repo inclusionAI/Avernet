@@ -473,7 +473,7 @@ What each row means in practice:
   strategies or owners. Regression and safety suites are platform- and
   owner-owned, never visible to strategies.
 - **Run evaluations.** Strategies may run train evaluations through
-  `evaluate.train@1` for their own feedback, but the evaluations the gate
+  `evaluation.train@1` for their own feedback, but the evaluations the gate
   uses are run only by Verification.
 - **Change the verifier.** Suites, graders, profiles, protocols, and
   thresholds change only through human-authored, reviewed changes. The

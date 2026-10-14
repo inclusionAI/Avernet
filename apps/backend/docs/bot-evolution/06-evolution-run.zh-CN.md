@@ -333,7 +333,7 @@ class Run:
   "params": {"window_days": 7, "max_rounds": 3, "poll_s": 60},
   "budget": {"max_usd": 20, "max_wall_clock_s": 7200},
   "granted": ["parent", "workspace", "operations", "budget", "log", "artifacts", "cancelled",
-              "candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluate.train@1"],
+              "candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluation.train@1"],
   "agent_definitions": {"clawevolve-tune": "sha256:5d0e…", "clawevolve-review": "sha256:8b17…"},
   "status": "running",
   "attempt": 2,                                       // re-dispatched once after a worker crash
@@ -389,7 +389,7 @@ class Job:
 ### 2.6 Operation
 
 **操作**（operation）是一种其工作可能比一次短请求持续更久的能力调用：智能体会话
-（`agents.start`）或训练评估（`evaluate.start_train`）。启动它会立即返回一个
+（`agents.start`）或训练评估（`evaluation.start_train`）。启动它会立即返回一个
 操作 id；其状态按 id 查询。
 
 ```python
@@ -730,7 +730,7 @@ queued → running → completed | failed | cancelled | budget_exhausted
 ## 8. 长时操作（平台侧）
 
 有些能力调用所做的工作需要数分钟甚至更久：智能体会话（`agents.start`）或跨越
-多次 rollout 的训练评估（`evaluate.start_train`）。在工作进行期间，它们从不保持
+多次 rollout 的训练评估（`evaluation.start_train`）。在工作进行期间，它们从不保持
 请求打开。策略如何使用它们见 [03-strategy.zh-CN.md](03-strategy.zh-CN.md)；本节说明平台
 保证什么。
 
@@ -762,7 +762,7 @@ idempotency_key=…, timeout_s=…)` 让引擎的 `agents@1` 提供方按摘要�
 的文件留在工作区中，直到策略把它们转成补丁。定义从何而来以及如何校验见
 [03-strategy.zh-CN.md](03-strategy.zh-CN.md)。
 
-**训练评估操作。** `evaluate.start_train(workspace,
+**训练评估操作。** `evaluation.start_train(workspace,
 idempotency_key=…)` 在**仅训练划分**上运行 Verification Service，给出分数和点评
 （[07-verification.zh-CN.md](07-verification.zh-CN.md)）。验证、holdout、回归和安全划分保持
 隐藏。
@@ -800,8 +800,8 @@ SDK 中提供的两种 `StrategyContext` 实现（进程内和作业协议）运
 | `POST /evolution/v1/runs/{run}/log` | `ctx.log`：结构化日志行 |
 | `PUT /evolution/v1/runs/{run}/artifacts/{name}` | `ctx.artifacts`：上传一个制品（字节） |
 | `POST /evolution/v1/runs/{run}/agents:start` | `ctx.agents.start → 202 {operation_id}`（若已授予；幂等） |
-| `POST /evolution/v1/runs/{run}/evaluations:train` | `ctx.evaluate.start_train → 202 {operation_id}`（若已授予；幂等） |
-| `POST /evolution/v1/runs/{run}/evaluations/cases` | `ctx.evaluate.add_train_cases`（若已授予） |
+| `POST /evolution/v1/runs/{run}/evaluations:train` | `ctx.evaluation.start_train → 202 {operation_id}`（若已授予；幂等） |
+| `POST /evolution/v1/runs/{run}/evaluations/cases` | `ctx.evaluation.add_train_cases`（若已授予） |
 | `GET /evolution/v1/runs/{run}/operations/{id}` | `ctx.operations.get → {status, result?}` |
 | `POST /evolution/v1/runs/{run}/operations/{id}:cancel` | `ctx.operations.cancel` |
 | `POST /evolution/v1/runs/{run}/models:complete` | `ctx.models.complete → completion` |
@@ -1033,7 +1033,7 @@ class KillSwitches(Protocol):
 | 经验查询 | 提供 `experience.sessions` / `experience.feedback` | [02-experience.zh-CN.md](02-experience.zh-CN.md) |
 | Strategy Registry（注册记录、一致性状态、智能体定义摘要、各引擎的能力提供方） | 绑定检查；构建上下文；加载智能体定义 | [03-strategy.zh-CN.md](03-strategy.zh-CN.md) |
 | 实验记录追加 | 记录运行、提交、判定、成本、所用模型 | [05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md) |
-| `verify(candidate, profile)`、训练评估 | 判定；`evaluate.train` 操作 | [07-verification.zh-CN.md](07-verification.zh-CN.md) |
+| `verify(candidate, profile)`、训练评估 | 判定；`evaluation.train` 操作 | [07-verification.zh-CN.md](07-verification.zh-CN.md) |
 | 静态底线（`FloorCheck`，经由 `PromotionService.check_floor`） | 在提交时、验证之前拒绝候选 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) |
 | 门禁接入 | 把判定交给门禁和评审队列 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) |
 
@@ -1251,7 +1251,7 @@ GET /openapi/v1/bots/bot_123/evolution/runs/run_7f3
   "params": {"window_days": 7, "max_rounds": 3, "poll_s": 60},
   "budget": {"max_usd": 20, "max_wall_clock_s": 7200},
   "granted": ["parent", "workspace", "operations", "budget", "log", "artifacts", "cancelled",
-              "candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluate.train@1"],
+              "candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluation.train@1"],
   "agent_definitions": {"clawevolve-tune": "sha256:5d0e…", "clawevolve-review": "sha256:8b17…"},
   "status": "completed",
   "attempt": 2,
@@ -1362,7 +1362,7 @@ fencing token 过期；计费调用上的 `402` `budget_exhausted`（提议）�
   "budget": {"max_usd": 20, "max_wall_clock_s": 7200},
   "budget_used": {"usd": 3.10, "wall_clock_s": 912, "rollouts": 48, "tokens": 201000},
   "granted": ["parent", "workspace", "operations", "budget", "log", "artifacts", "cancelled",
-              "candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluate.train@1"],
+              "candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluation.train@1"],
   "fencing_token": "ft_7f3_2_b81c",
   "lease_expires_at": "2026-10-08T02:16:10Z"
 }
@@ -1696,7 +1696,7 @@ Train 0.82 vs parent 0.61 …
 
 ### POST /evolution/v1/runs/{run}/evaluations:train
 
-`ctx.evaluate.start_train`（仅当授予了 `evaluate.train@1` 时）：以操作的形式在
+`ctx.evaluation.start_train`（仅当授予了 `evaluation.train@1` 时）：以操作的形式在
 **仅训练划分**上评估一个工作区，给出分数和点评。按 `idempotency_key` 幂等。
 
 请求：
@@ -1718,7 +1718,7 @@ Train 0.82 vs parent 0.61 …
 
 ### POST /evolution/v1/runs/{run}/evaluations/cases
 
-`ctx.evaluate.add_train_cases`（仅当授予了 `evaluate.train@1` 时）：添加策略从
+`ctx.evaluation.add_train_cases`（仅当授予了 `evaluation.train@1` 时）：添加策略从
 经验中派生的可回放用例。划分由平台分配；策略无法选择。用例格式定义于
 [07-verification.zh-CN.md](07-verification.zh-CN.md)。
 
@@ -2085,7 +2085,7 @@ ClawEvolve 自身的代码见 [04-default-strategies.zh-CN.md](04-default-strate
 | 时间 | 事件 | 运行状态 |
 | --- | --- | --- |
 | 02:00:00 | 定时触发；键 `bind_01/2026-10-08T02:00:00Z`；输入被冻结：父版本 `active` = `r41`（`sha256:a90b…`）、`max_rounds: 3`、`max_usd: 20` | `run_7f3` `queued`，尝试 1 |
-| 02:00:09 | Worker A 认领 `job_7f3_1`，token `ft_7f3_1_…`；上下文授予 `experience.sessions@1`、`agents@1`、`evaluate.train@1` 以及始终授予的部分 | `running` |
+| 02:00:09 | Worker A 认领 `job_7f3_1`，token `ft_7f3_1_…`；上下文授予 `experience.sessions@1`、`agents@1`、`evaluation.train@1` 以及始终授予的部分 | `running` |
 | 02:01 | 策略读取 7 天的片段，添加训练用例，把状态保存到自己的存储中 | `running` |
 | 02:12 | 以键 `run_7f3/round-1` 调用 `workspaces`；以键 `run_7f3/round-1/tune` 调用 `agents:start` → `op_19a` | `running` |
 | 02:15 | Worker A 的宿主机重启；心跳停止 | `running` |

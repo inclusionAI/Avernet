@@ -133,7 +133,7 @@ Dreams、Hermes Curator，以及 ClawEvolve 本身）都可以归结为在一个
    （`max_rounds: 3`）、预算（`max_usd: 20`）和父版本（`active` = 修订版
    `r41`，来自**基因组**），并把这次运行作为带租约的作业派发出去。
 2. 它构建**进化策略**上下文，恰好包含该策略声明的能力（`experience.sessions@1`、
-   带 OpenClaw 智能体定义的 `agents@1`、`evaluate.train@1`，以及始终授予的
+   带 OpenClaw 智能体定义的 `agents@1`、`evaluation.train@1`，以及始终授予的
    部分），然后调用 `run(ctx)`。
 3. 在进化策略内部，ClawEvolve 的 diagnose 逻辑通过**经验**读取 `r41` 最近
    7 天的片段，对根因进行聚类，并添加可重放的训练用例（**验证**负责分配划分；

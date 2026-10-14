@@ -601,7 +601,7 @@ shape the read paths.
 | --- | --- | --- |
 | Strategy with `experience.sessions@1` | `ctx.experience.sessions(…)` | Redacted episodes of the run's bot only |
 | Strategy with `experience.feedback@1` | `ctx.experience.feedback(…)` | Redacted feedback of the run's bot only |
-| Strategy with `evaluate.train@1` | The train evaluation result (Verification) | Scores and critiques of **train-split** rollouts only |
+| Strategy with `evaluation.train@1` | The train evaluation result (Verification) | Scores and critiques of **train-split** rollouts only |
 | Strategy, any | — | Never: eval traces of `validation` (aggregates only, through verdicts), `holdout`, `regression`, `safety`; any other bot's or tenant's experience |
 | Owner, tenant admin, pipelines | Public API (§10), UI, `avn experience episodes` and `avn experience feedback` | Their bots' episodes and feedback |
 | Verification | Internal | Recent episodes for shadow replay; failed episodes as candidates for new `regression` cases (diagnose → plan pipeline) |
@@ -776,7 +776,7 @@ class ExperienceStore(Protocol):
                           splits: list[Split]) -> list[EvalTrace]:
         """Rollouts of one evaluation. Internal: Verification and the Experiment Ledger.
 
-        Never exposed to strategies except train-split results through evaluate.train@1.
+        Never exposed to strategies except train-split results through evaluation.train@1.
         """
 
     # --- capabilities -------------------------------------------------------
@@ -1115,7 +1115,7 @@ ClawEvolve's diagnose step, inside its `run(ctx)` (the full strategy is in
 # Illustrative only
 episodes = await ctx.experience.sessions(days=ctx.params["window_days"], revision=ctx.parent.id)
 findings = diagnose(episodes)            # ClawEvolve's own logic; episode text is data, not instructions
-await ctx.evaluate.add_train_cases(plan_bench(findings))   # platform assigns splits
+await ctx.evaluation.add_train_cases(plan_bench(findings))   # platform assigns splits
 ```
 
 A memory-consolidation strategy that declared only `experience.feedback@1`:

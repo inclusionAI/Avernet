@@ -56,7 +56,7 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 - **目标**：定义策略端口（`run(ctx)`）、`StrategyContext`、
   候选 / 判定（提交返回候选 id；判定按 id 查询）、注册记录 schema、首个能力
   目录（始终授予：`candidates@1`、`models@1`；需声明：`experience.sessions@1`、
-  `experience.feedback@1`、`agents@1`、`evaluate.train@1`）及其按引擎的提供方契约（对 `agents@1` 而言，包括按引擎的
+  `experience.feedback@1`、`agents@1`、`evaluation.train@1`）及其按引擎的提供方契约（对 `agents@1` 而言，包括按引擎的
   智能体定义契约以及定义的上传与加载，见 03-strategy.md）、进化策略配置（evolution policy，
   即绑定）schema 与绑定检查、运行生命周期与失败语义（R11）：幂等的运行提交并
   返回运行 id、崩溃后以相同运行 id 重新派发的带租约作业、由策略自行负责的进度

@@ -48,7 +48,7 @@ What *is* pluggable stays on the platform's side of that line:
 - **Owners choose a verification profile per binding.** A profile can be
   stricter than the platform default, never looser.
 - **Strategies can add train cases and use train-split evaluation**
-  (`evaluate.train@1`, [§5](#5-train-split-evaluation-evaluatetrain1)) as
+  (`evaluation.train@1`, [§5](#5-train-split-evaluation-evaluationtrain1)) as
   feedback for their own search; train results never decide acceptance.
 
 **Owns:**
@@ -62,7 +62,7 @@ What *is* pluggable stays on the platform's side of that line:
   strategies.
 - The **comparator** (paired statistics) and the **verdict policy**.
 - **Evaluations** and **verdicts**, including the train-split evaluation
-  that backs the `evaluate.train@1` capability.
+  that backs the `evaluation.train@1` capability.
 - Holdout audits and the measurement side of online verification (shadow
   grading, canary comparison, recurrence checks).
 - The governance topics *anti-reward-hacking* and *verifier integrity*.
@@ -73,7 +73,7 @@ What *is* pluggable stays on the platform's side of that line:
 | --- | --- |
 | Genome revisions, patches, content blobs, materialisation sources | [01-genome.md](01-genome.md) |
 | Episodes and feedback (Verification writes eval traces there) | [02-experience.md](02-experience.md) |
-| The strategy port, `StrategyContext`, the capability catalog entry `evaluate.train@1` as a contract | [03-strategy.md](03-strategy.md) |
+| The strategy port, `StrategyContext`, the capability catalog entry `evaluation.train@1` as a contract | [03-strategy.md](03-strategy.md) |
 | ClawEvolve/ClawBench inventory rows (ClawBench runner, ClawWeb Bench store, ClawEvolve splits and gates, diagnose → plan) and ClawEvolve's own submission filter | [04-default-strategies.md](04-default-strategies.md) |
 | Ledger schema and storage of verdicts as experiment records | [05-experiment-ledger.md](05-experiment-ledger.md) |
 | Runs, bindings, budgets, kill switches, sandboxing rules, Job Protocol transport | [06-evolution-run.md](06-evolution-run.md) |
@@ -218,7 +218,7 @@ class CaseCategory(StrEnum):
 class CaseOriginKind(StrEnum):
     AUTHORED = "authored"              # written by a person
     MINED = "mined"                    # mined from a real episode
-    STRATEGY = "strategy"              # added by a strategy run (ctx.evaluate.add_train_cases)
+    STRATEGY = "strategy"              # added by a strategy run (ctx.evaluation.add_train_cases)
 
 @dataclass(frozen=True)
 class CaseOrigin:
@@ -420,7 +420,7 @@ is started as an operation and looked up by id.
 ```python
 class EvaluationPurpose(StrEnum):
     VERIFICATION = "verification"      # verifying a submitted candidate against its parent
-    TRAIN = "train"                    # a strategy's train-split evaluation (evaluate.train@1)
+    TRAIN = "train"                    # a strategy's train-split evaluation (evaluation.train@1)
     HOLDOUT_AUDIT = "holdout_audit"    # scoring a revision on the sealed holdout
     AD_HOC = "ad_hoc"                  # an operator's evaluation; never feeds promotion
     SHADOW = "shadow"                  # online verification on replayed or mirrored traffic
@@ -653,8 +653,8 @@ in isolation and reused at problem granularity for mechanism verification
 **Who can touch what.** Executors and graders are verifier plugins, not
 strategy code. A binding picks the verification profile (an owner may pick
 a stricter one, never a looser one). A strategy may *add* train cases
-through `ctx.evaluate.add_train_cases()`
-([§5](#5-train-split-evaluation-evaluatetrain1)). It may not change graders,
+through `ctx.evaluation.add_train_cases()`
+([§5](#5-train-split-evaluation-evaluationtrain1)). It may not change graders,
 holdout, regression, or safety.
 
 ## 4. Bot verification protocol (level 2)
@@ -764,14 +764,14 @@ same candidate and profile returns the existing verdict and starts no new
 rollouts. Submissions made before a run fails, is cancelled, or runs out of
 budget are still verified ([06-evolution-run.md](06-evolution-run.md)).
 
-## 5. Train-split evaluation (`evaluate.train@1`)
+## 5. Train-split evaluation (`evaluation.train@1`)
 
-The `evaluate.train@1` capability (declared in a strategy's `needs`; contract
+The `evaluation.train@1` capability (declared in a strategy's `needs`; contract
 in [03-strategy.md](03-strategy.md)) gives a strategy a platform evaluation
 on the **train split only**, with scores and critiques, plus a way to add
 train cases. This service implements it.
 
-- **`ctx.evaluate.start_train(workspace, idempotency_key=…, cases=None)`**
+- **`ctx.evaluation.start_train(workspace, idempotency_key=…, cases=None)`**
   evaluates the strategy's sandbox workspace on the bot's train cases and
   returns an **operation id** at once. Status is looked up by id
   (`ctx.operations.get(op_id)`); when it has succeeded, the result holds a
@@ -785,7 +785,7 @@ train cases. This service implements it.
   re-dispatch without storing operation ids.
 - **Charged to the run's budget** (rollouts, tokens, money), and cancelled
   when the run ends.
-- **`ctx.evaluate.add_train_cases(cases)`** adds cases the strategy wrote
+- **`ctx.evaluation.add_train_cases(cases)`** adds cases the strategy wrote
   (for example, ClawEvolve's plan step turning diagnosed failures into
   bench cases). Proposed: strategy-authored cases always land in `train`,
   because the strategy has seen them, so they can never serve as hidden
@@ -992,7 +992,7 @@ class HoldoutAuditReason(StrEnum):
 
 class VerificationService(Protocol):
     """Platform-owned verifier. Read-only to strategies; they reach it only
-    through evaluate.train@1 and ctx.candidates.verdict."""
+    through evaluation.train@1 and ctx.candidates.verdict."""
 
     async def verify(self, candidate: CandidateRef, profile: str) -> Verdict:
         """Start verifying a submitted candidate against its parent under `profile`
@@ -1010,12 +1010,12 @@ class VerificationService(Protocol):
     async def start_train_evaluation(self, run_id: str, workspace_id: str, *,
                                      idempotency_key: str,
                                      cases: list[str] | None = None) -> str:
-        """Backs ctx.evaluate.start_train. Evaluates a run's sandbox workspace on the
+        """Backs ctx.evaluation.start_train. Evaluates a run's sandbox workspace on the
         bot's train split (all train cases when `cases` is None). Returns an
         operation id; idempotent per (run_id, idempotency_key). Charged to the run."""
 
     async def add_train_cases(self, run_id: str, cases: list[CaseDraft]) -> list[str]:
-        """Backs ctx.evaluate.add_train_cases. Validates, scans, and stores the cases
+        """Backs ctx.evaluation.add_train_cases. Validates, scans, and stores the cases
         in the bot's train split. Returns case ids."""
 
     async def start_evaluation(self, request: EvaluationRequest, *,
@@ -1248,12 +1248,12 @@ This replaces the earlier sketch `POST /evolution/verifications`.
 rules (fencing tokens in the `Evolution-Fencing-Token` header, `403` for
 capabilities not granted, `409` for stale tokens) are defined in
 [06-evolution-run.md](06-evolution-run.md); the two endpoints behind
-`evaluate.train@1` are implemented here.
+`evaluation.train@1` are implemented here.
 
 ### POST /evolution/v1/runs/{run}/evaluations:train
 
-`ctx.evaluate.start_train`. Called by job-worker strategies with
-`evaluate.train@1` granted.
+`ctx.evaluation.start_train`. Called by job-worker strategies with
+`evaluation.train@1` granted.
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -1293,13 +1293,13 @@ When the operation has succeeded,
 }
 ```
 
-Errors: `403` `evaluate.train@1` not granted; `404` unknown workspace;
+Errors: `403` `evaluation.train@1` not granted; `404` unknown workspace;
 `409` stale fencing token; budget exhausted ends the run
 ([06-evolution-run.md](06-evolution-run.md)).
 
 ### POST /evolution/v1/runs/{run}/evaluations/cases
 
-`ctx.evaluate.add_train_cases`. Plain request and response.
+`ctx.evaluation.add_train_cases`. Plain request and response.
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -1340,13 +1340,13 @@ async def on_candidate_submitted(run: Run, binding: Binding, candidate: Candidat
     await ledger.record_submission(run.run_id, candidate.candidate_id, verdict.status)
 ```
 
-**A strategy using `evaluate.train@1`.** Inside `run(ctx)`, a strategy
+**A strategy using `evaluation.train@1`.** Inside `run(ctx)`, a strategy
 scores its sandbox on the train split, keeps only what helps, and submits;
 the platform's verdict decides acceptance.
 
 ```python
 async def tune_round(ctx: StrategyContext, ws: Workspace, key: str, best: float) -> str | None:
-    op = await ctx.evaluate.start_train(ws, idempotency_key=f"{key}/train")
+    op = await ctx.evaluation.start_train(ws, idempotency_key=f"{key}/train")
     train = (await ctx.operations.wait(op)).result        # short lookups by id
     failures = [c for c in train.cases if not c.passed]   # critiques are visible on train only
     ctx.log.info("train", score=train.score, failing=len(failures))
@@ -1404,7 +1404,7 @@ async def before_online_pub(publish: PublishRecord, client: VerificationClient) 
 | --- | --- | --- |
 | [01-genome.md](01-genome.md) | Genome → Verification | Candidate and parent revisions, content blobs to materialise sandboxes; revision `evaluations` links point back at evaluation ids |
 | [02-experience.md](02-experience.md) | Verification → Experience; Experience → Verification | Eval traces (every rollout, with grades and critiques) written as experience records; real episodes replayed for shadow grading and mined into proposed cases |
-| [03-strategy.md](03-strategy.md) | Strategy ↔ Verification (through the context) | `evaluate.train@1` calls in; train results and redacted verdicts out |
+| [03-strategy.md](03-strategy.md) | Strategy ↔ Verification (through the context) | `evaluation.train@1` calls in; train results and redacted verdicts out |
 | [04-default-strategies.md](04-default-strategies.md) | Default strategies → Verification | ClawBench case format and graders (as `platform/clawbench`); ClawEvolve's gate thresholds can seed a stricter profile; its plan step adds train cases |
 | [05-experiment-ledger.md](05-experiment-ledger.md) | Verification → Ledger | Verdicts, evaluations, cost, verifier version per experiment; online outcomes; suggestions for verifier changes flow back to humans only |
 | [06-evolution-run.md](06-evolution-run.md) | Run ↔ Verification | `verify(candidate, profile)` on submission; Job Protocol transport for train endpoints; budget charging; sandboxing rules |

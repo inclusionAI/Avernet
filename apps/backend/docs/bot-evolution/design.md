@@ -155,7 +155,7 @@ the part that owns it.
    run as a leased job.
 2. It builds the **Strategy** context with exactly the capabilities the
    strategy declared (`experience.sessions@1`, `agents@1` with OpenClaw
-   agent definitions, `evaluate.train@1`, plus the always-granted parts) and
+   agent definitions, `evaluation.train@1`, plus the always-granted parts) and
    calls `run(ctx)`.
 3. Inside the strategy, ClawEvolve's diagnose logic reads episodes of `r41`
    from the last 7 days through **Experience**, clusters root causes, and

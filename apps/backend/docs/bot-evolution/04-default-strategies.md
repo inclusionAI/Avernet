@@ -82,7 +82,7 @@ extra access.
 | `ManualPatchParams` | Params of `platform/manual-patch`: the Genome Patch to submit | Caller who starts the run | Frozen at run start |
 | `ClawEvolveParams` | Params of `clawevolve/bot-evolution`: window, rounds, polling interval | Bot owner (binding) | Frozen at run start |
 | `Finding` | One diagnosed problem from real sessions (good/bad case, root cause, linked episodes) | ClawEvolve | Created by diagnose on a run's first attempt; kept in ClawEvolve's state |
-| `TrainCaseProposal` | A ClawBench case that ClawEvolve's plan step proposes to the platform via `ctx.evaluate.add_train_cases` | ClawEvolve proposes; the Verification Service assigns the split and owns the case afterwards | Once added, versioned in the suite registry |
+| `TrainCaseProposal` | A ClawBench case that ClawEvolve's plan step proposes to the platform via `ctx.evaluation.add_train_cases` | ClawEvolve proposes; the Verification Service assigns the split and owns the case afterwards | Once added, versioned in the suite registry |
 | `ClawEvolveState` | ClawEvolve's own per-run progress: findings, current base, round number, pending candidate, history | ClawEvolve, in **its own store** keyed by run id (today's `ce_tasks` / `ce_steps` can serve) | Created on first attempt; updated after every step; reloaded on re-dispatch |
 | `ConsolidateMemoryParams` | Params of `platform/consolidate-memory` | Bot owner (binding) | Frozen at run start |
 | `LessonCluster` | A group of related feedback items summarized into one candidate lesson | consolidate-memory | Per run |
@@ -379,7 +379,7 @@ What changes for ClawEvolve, in one list:
    workspace, and submits `ws.to_patch()` as a candidate.
 3. It runs its tune and review agents through `ctx.agents.start()` as
    long-running operations, and its train bench through
-   `ctx.evaluate.start_train()`.
+   `ctx.evaluation.start_train()`.
 4. Its `test > baseline` acceptance becomes an **internal filter** on what it
    submits; acceptance itself is the platform verdict.
 5. It no longer packs, restores, or deploys: it never changes the live bot.
@@ -400,7 +400,7 @@ What changes for ClawEvolve, in one list:
       "clawevolve-tune":   {"engine": "openclaw", "path": "agents/clawevolve-tune"},
       "clawevolve-review": {"engine": "openclaw", "path": "agents/clawevolve-review"}
     }},
-    "evaluate.train@1": {}
+    "evaluation.train@1": {}
   },
   "params_schema": {
     "type": "object",
@@ -437,9 +437,9 @@ What changes for ClawEvolve, in one list:
 | --- | --- | --- |
 | `acquisition/discovery.py`, `sessions.py`, `service_export.py` | Provider of `experience.sessions` for OpenClaw (platform side, [02-experience.md](02-experience.md)) | Move behind the engine session-export contract; normalize to `Episode`; tag with genome revision |
 | `clawevolve-diagnose` | Inside the strategy | Read episodes via `ctx.experience.sessions()` instead of disk |
-| `clawevolve-plan` (bench cases) | Inside the strategy | Add cases via `ctx.evaluate.add_train_cases()`; the platform assigns splits (removes its own 80/20 split authority) |
+| `clawevolve-plan` (bench cases) | Inside the strategy | Add cases via `ctx.evaluation.add_train_cases()`; the platform assigns splits (removes its own 80/20 split authority) |
 | `clawevolve-tune` + `clawevolve-review` | Inside the strategy | **Edit a sandbox from `ctx.workspace.materialise()`, not the live workspace**; run agents via `ctx.agents.start()` as long-running operations looked up by id; submit `ws.to_patch()` |
-| Train bench runs (`bench-full-opt`) | `ctx.evaluate.start_train()` (an operation looked up by id) | ClawBench grading moves into the Verification Service as `platform/clawbench` |
+| Train bench runs (`bench-full-opt`) | `ctx.evaluation.start_train()` (an operation looked up by id) | ClawBench grading moves into the Verification Service as `platform/clawbench` |
 | `action_accept` (`test > baseline`) + advisory gates | Internal filter on what to submit | Acceptance becomes the platform verdict under the binding's verification profile; ClawEvolve's gate thresholds can seed a stricter profile |
 | baseline-pack / restore / pack / deploy | — (removed) | Not needed: the strategy never changes the live bot |
 | `ce_tasks` / `ce_steps` / claim-report | — (replaced) as orchestration; reused as storage | Platform run orchestration + Job Protocol replace dispatch. The tables can serve as ClawEvolve's own progress store keyed by run id (§4.4) |
@@ -454,7 +454,7 @@ One run of `clawevolve/bot-evolution`:
 
 1. **First attempt only — diagnose and plan.** Read episodes of the parent
    revision for `window_days`; mine findings; propose train cases with
-   `ctx.evaluate.add_train_cases` (the platform assigns splits; holdout,
+   `ctx.evaluation.add_train_cases` (the platform assigns splits; holdout,
    regression, and safety stay hidden). Save state.
 2. **Each round** (up to `max_rounds`), with key `<run_id>/round-<n>`:
    1. materialise a sandbox from the current `base` with that key;
@@ -487,7 +487,7 @@ expired with the same run id and `ctx.attempt + 1`. ClawEvolve reloads
 `ClawEvolveState` from its store (today's `ce_tasks` / `ce_steps` can serve),
 and because every workspace and operation key is derived from the run id
 and the round, repeating `materialise`, `agents.start`, and
-`evaluate.start_train` returns the same sandbox and the same operations —
+`evaluation.start_train` returns the same sandbox and the same operations —
 including agent edits already made — instead of paying again. A candidate
 resubmitted after a crash gets the same candidate id, because the id is the
 content hash of the patch.
@@ -500,7 +500,7 @@ content hash of the patch.
 | `workspace.materialise` | `run_7f3/round-2` |
 | `agents.start("clawevolve-tune")` | `run_7f3/round-2/tune` |
 | `agents.start("clawevolve-review")` | `run_7f3/round-2/review` |
-| `evaluate.start_train` | `run_7f3/round-2/train` |
+| `evaluation.start_train` | `run_7f3/round-2/train` |
 
 Never a send-time timestamp: a key must be identical across retries.
 
@@ -751,7 +751,7 @@ class ClawEvolveStrategy(EvolutionStrategy):
     """clawevolve/bot-evolution@2.0.0 — diagnose, plan, then tune/review/train rounds.
 
     Needs experience.sessions@1, agents@1 {clawevolve-tune, clawevolve-review},
-    evaluate.train@1. Keeps ClawEvolveState in `store`; all workspace and
+    evaluation.train@1. Keeps ClawEvolveState in `store`; all workspace and
     operation keys are derived from the run id and round, so a re-dispatch
     re-attaches instead of repeating paid work.
     """
@@ -794,10 +794,10 @@ default strategy fills:
 | `ctx.parent` | read id | read id | read id and memory items |
 | `ctx.experience.sessions` | — | yes | yes (episodes cited by feedback) |
 | `ctx.experience.feedback` | — | — (later, for ClawInsight input) | yes |
-| `ctx.evaluate.add_train_cases` | — | first attempt | — |
+| `ctx.evaluation.add_train_cases` | — | first attempt | — |
 | `ctx.workspace.materialise` / `ws.to_patch` | — | each round | — |
 | `ctx.agents.start` (operation) | — | tune, review | — |
-| `ctx.evaluate.start_train` (operation) | — | each round | — |
+| `ctx.evaluation.start_train` (operation) | — | each round | — |
 | `ctx.operations.get` / `wait` | — | yes | — |
 | `ctx.models.complete` | — | optional | yes |
 | `ctx.candidates.submit` | once | per round, filtered | at most once |
@@ -841,7 +841,7 @@ and manual-patch's is below):
       "clawevolve-tune":   {"engine": "openclaw", "path": "agents/clawevolve-tune"},
       "clawevolve-review": {"engine": "openclaw", "path": "agents/clawevolve-review"}
     }},
-    "evaluate.train@1": {}
+    "evaluation.train@1": {}
   },
   "params_schema": {"type": "object", "additionalProperties": false, "properties": {"window_days": {"type": "integer", "minimum": 1, "maximum": 90, "default": 7}}}   // abridged; full schema in §4.2
 }
@@ -860,7 +860,7 @@ Response:
       "clawevolve-tune":   {"engine": "openclaw", "digest": "sha256:5d1f…"},   // stored content-addressed
       "clawevolve-review": {"engine": "openclaw", "digest": "sha256:9e07…"}
     }},
-    "evaluate.train@1": {}
+    "evaluation.train@1": {}
   },
   "conformance": "pending"                        // must pass the kit before binding outside development
 }
@@ -1107,7 +1107,7 @@ Response:
   "params": {"window_days": 7, "max_rounds": 3, "poll_s": 60, "max_sessions": 500},
   "parent": "sha256:a90b…",
   "budget": {"max_usd": 20, "max_wall_clock_s": 7200},
-  "granted": ["candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluate.train@1"],
+  "granted": ["candidates@1", "models@1", "experience.sessions@1", "agents@1", "evaluation.train@1"],
   "fencing_token": "ft_000231"
 }
 ```
@@ -1230,7 +1230,7 @@ for ClawEvolve 2.0.0).
 
 ### `POST /evolution/v1/runs/{run}/evaluations/cases`
 
-`ctx.evaluate.add_train_cases`. ClawEvolve's plan step proposes cases; the
+`ctx.evaluation.add_train_cases`. ClawEvolve's plan step proposes cases; the
 platform assigns splits. *Proposed reading:* the response reveals only the
 cases assigned to `train`; cases the platform put into hidden splits are
 counted but not identified.
@@ -1256,7 +1256,7 @@ Response:
 ```
 
 Notable errors: `422` for a case that does not parse as a ClawBench case;
-`403` if `evaluate.train@1` was not granted.
+`403` if `evaluation.train@1` was not granted.
 
 ### `POST /evolution/v1/runs/{run}/workspaces`
 
@@ -1310,7 +1310,7 @@ the same `operation_id`.
 
 ### `POST /evolution/v1/runs/{run}/evaluations:train`
 
-`ctx.evaluate.start_train(workspace, idempotency_key)`. Replaces
+`ctx.evaluation.start_train(workspace, idempotency_key)`. Replaces
 ClawEvolve's own train bench (`bench-full-opt`). Train split only.
 
 Request:
@@ -1535,7 +1535,7 @@ class ClawEvolveStrategy(EvolutionStrategy):
         if state is None:                                             # first attempt
             episodes = await ctx.experience.sessions(days=p.window_days, limit=p.max_sessions)
             findings = diagnose(episodes)                             # clawevolve-diagnose, unchanged logic
-            await ctx.evaluate.add_train_cases(plan_bench(findings))  # platform assigns splits
+            await ctx.evaluation.add_train_cases(plan_bench(findings))  # platform assigns splits
             state = ClawEvolveState(run_id=ctx.run_id, findings=findings, base=ctx.parent.id,
                                     next_round=0, best_train_pct=0, pending=None, history=[])
             await self.store.save(ctx.run_id, state)
@@ -1550,7 +1550,7 @@ class ClawEvolveStrategy(EvolutionStrategy):
                                               prompt=build_tune_prompt(state.findings, state.history),
                                               idempotency_key=f"{key}/tune")
                 await ctx.operations.wait(tune)                       # short status lookups by id
-                train_op = await ctx.evaluate.start_train(ws, idempotency_key=f"{key}/train")
+                train_op = await ctx.evaluation.start_train(ws, idempotency_key=f"{key}/train")
                 train = (await ctx.operations.wait(train_op)).result  # replaces its own bench step
                 review = await ctx.agents.start("clawevolve-review", workspace=ws,
                                                 prompt=build_review_prompt(state.findings, train),
@@ -1654,7 +1654,7 @@ class ConsolidateMemoryStrategy(EvolutionStrategy):
    `run_7f3`; strategy version `2.0.0`, params, budget (`max_usd: 20`), and
    parent (`active` = `r41`, `sha256:a90b…`) are frozen.
 2. The ClawEvolve worker claims the job (§11, Job Protocol) with the granted
-   capabilities `experience.sessions@1`, `agents@1`, `evaluate.train@1`.
+   capabilities `experience.sessions@1`, `agents@1`, `evaluation.train@1`.
 3. Diagnose reads the last 7 days of episodes of `r41`, finds `f_12`, and
    proposes 12 train cases; the platform keeps some of them hidden.
 4. Round 0: the tune agent edits sandbox `ws_42`, train scores 78%, the

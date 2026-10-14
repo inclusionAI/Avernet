@@ -61,7 +61,7 @@ the rest.
   looked up by id), the registration record schema, the
   first capability catalog (always granted: `candidates@1`, `models@1`;
   declared: `experience.sessions@1`, `experience.feedback@1`, `agents@1`,
-  `evaluate.train@1`) with per-engine
+  `evaluation.train@1`) with per-engine
   provider contracts (for `agents@1`, the per-engine agent definition
   contract and the upload and loading of definitions, see 03-strategy.md), the evolution policy (binding) schema and binding
   checks, run lifecycle and failure semantics (R11): idempotent run

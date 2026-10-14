@@ -559,7 +559,7 @@ class SessionExportProvider(Protocol):
 | --- | --- | --- |
 | 具有 `experience.sessions@1` 的进化策略 | `ctx.experience.sessions(…)` | 仅限本次运行所属 bot 的、已脱敏的片段 |
 | 具有 `experience.feedback@1` 的进化策略 | `ctx.experience.feedback(…)` | 仅限本次运行所属 bot 的、已脱敏的反馈 |
-| 具有 `evaluate.train@1` 的进化策略 | 训练评估结果（验证） | 仅限**训练划分**推演的分数和评语 |
+| 具有 `evaluation.train@1` 的进化策略 | 训练评估结果（验证） | 仅限**训练划分**推演的分数和评语 |
 | 任何进化策略 | — | 永远不能获得：`validation`（只能通过判定看到聚合结果）、`holdout`、`regression`、`safety` 的评估轨迹；任何其他 bot 或租户的经验 |
 | 所有者、租户管理员、管线 | 公开 API（§10）、UI、`avn experience episodes` 和 `avn experience feedback` | 他们自己 bot 的片段和反馈 |
 | 验证 | 内部 | 用于影子回放的近期片段；作为新 `regression` 用例候选的失败片段（诊断 → 规划管线） |
@@ -720,7 +720,7 @@ class ExperienceStore(Protocol):
                           splits: list[Split]) -> list[EvalTrace]:
         """Rollouts of one evaluation. Internal: Verification and the Experiment Ledger.
 
-        Never exposed to strategies except train-split results through evaluate.train@1.
+        Never exposed to strategies except train-split results through evaluation.train@1.
         """
 
     # --- capabilities -------------------------------------------------------
@@ -1050,7 +1050,7 @@ ClawEvolve 的诊断步骤，位于其 `run(ctx)` 内部（完整的进化策略
 # Illustrative only
 episodes = await ctx.experience.sessions(days=ctx.params["window_days"], revision=ctx.parent.id)
 findings = diagnose(episodes)            # ClawEvolve's own logic; episode text is data, not instructions
-await ctx.evaluate.add_train_cases(plan_bench(findings))   # platform assigns splits
+await ctx.evaluation.add_train_cases(plan_bench(findings))   # platform assigns splits
 ```
 
 一个只声明了 `experience.feedback@1` 的记忆整合进化策略：

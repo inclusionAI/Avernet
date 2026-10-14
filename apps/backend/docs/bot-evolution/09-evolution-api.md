@@ -1076,7 +1076,7 @@ Idempotency-Key: publish-clawevolve-bot-evolution-2.0.0
   "id": "clawevolve/bot-evolution",
   "version": "2.0.0",
   "runtime": {"kind": "job_worker", "image": "registry.example/clawevolve@sha256:…"},
-  "needs": {"experience.sessions@1": {}, "evaluate.train@1": {}}
+  "needs": {"experience.sessions@1": {}, "evaluation.train@1": {}}
 }
 ```
 
