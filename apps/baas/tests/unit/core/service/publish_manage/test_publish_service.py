@@ -952,6 +952,100 @@ class TestPublishApproval:
             modifier="admin",
         )
 
+    def _set_up_update_publish_for_terminal_action(
+        self, publish_status: str
+    ) -> MagicMock:
+        mock_bot = MagicMock()
+        mock_bot.id = 1
+
+        mock_record = MagicMock()
+        mock_record.id = 1
+        mock_record.status = publish_status
+        mock_record.bot_id = 1
+        mock_record.publish_type = "UPDATE"
+        mock_record.extra_config = {}
+        mock_record.creator = "user1"
+        mock_record.modifier = "user1"
+        mock_record.gmt_create = "2024-01-01T00:00:00"
+        mock_record.gmt_modified = "2024-01-01T00:00:00"
+
+        mock_repo = MagicMock()
+        mock_repo.get_by_id.return_value = mock_record
+        _publish_service_instance._publish_repo = mock_repo
+
+        _publish_service_instance._bot_repo = MagicMock()
+        _publish_service_instance._bot_repo.get_by_id_including_deleted.return_value = (
+            mock_bot
+        )
+
+        _publish_service_instance._publish_batch_repo = MagicMock()
+        _publish_service_instance._publish_batch_repo.list_by_publish_id.return_value = []
+        return mock_repo
+
+    @pytest.mark.asyncio
+    async def test_reject_update_publish_cleans_clone_before_rejected(self):
+        """Rejecting a PENDING UPDATE publish retires its clone BEFORE the REJECTED write."""
+        mock_repo = self._set_up_update_publish_for_terminal_action("PENDING")
+
+        with patch.object(
+            DefaultPublishService, "_cleanup_pending_clone_on_update_failure"
+        ) as mock_cleanup:
+            ordering = MagicMock()
+            ordering.attach_mock(mock_cleanup, "cleanup_clone")
+            ordering.attach_mock(mock_repo.update_status, "update_status")
+
+            await _publish_service_instance.reject_publish(
+                tenant="test_tenant",
+                publish_id=1,
+                operator="admin",
+                reason="Configuration error",
+            )
+
+        mock_cleanup.assert_called_once_with(
+            tenant="test_tenant", publish_id=1, operator="admin"
+        )
+        mock_repo.update_status.assert_called_once_with(
+            publish_id=1,
+            tenant="test_tenant",
+            env="dev",
+            status="REJECTED",
+            modifier="admin",
+        )
+        call_names = [name for name, _, _ in ordering.mock_calls]
+        assert call_names.index("cleanup_clone") < call_names.index("update_status")
+
+    @pytest.mark.asyncio
+    async def test_revoke_update_publish_cleans_clone_before_revoked(self):
+        """Revoking an APPROVING UPDATE publish retires its clone BEFORE the REVOKED write."""
+        mock_repo = self._set_up_update_publish_for_terminal_action("APPROVING")
+
+        with patch.object(
+            DefaultPublishService, "_cleanup_pending_clone_on_update_failure"
+        ) as mock_cleanup:
+            ordering = MagicMock()
+            ordering.attach_mock(mock_cleanup, "cleanup_clone")
+            ordering.attach_mock(mock_repo.update_status, "update_status")
+
+            await _publish_service_instance.revoke_publish(
+                tenant="test_tenant",
+                publish_id=1,
+                operator="admin",
+                reason="Change of plans",
+            )
+
+        mock_cleanup.assert_called_once_with(
+            tenant="test_tenant", publish_id=1, operator="admin"
+        )
+        mock_repo.update_status.assert_called_once_with(
+            publish_id=1,
+            tenant="test_tenant",
+            env="dev",
+            status="REVOKED",
+            modifier="admin",
+        )
+        call_names = [name for name, _, _ in ordering.mock_calls]
+        assert call_names.index("cleanup_clone") < call_names.index("update_status")
+
 
 class TestStateTransitions:
     """State machine transition tests"""
@@ -8391,6 +8485,121 @@ class TestCreatePublishStaleTimeout:
 
                 assert result.status == "PENDING"
                 mock_timeout.assert_called_once_with(mock_existing, "test_tenant")
+
+
+class TestCreatePublishStaleUpdateCleanup:
+    """Stale UPDATE publish in create_publish retires its clone before FAILED write."""
+
+    @pytest.mark.asyncio
+    async def test_create_publish_stale_update_calls_cleanup_clone(self):
+        from datetime import timedelta
+
+        from secbaas.community.api.publish_manage import (
+            DEFAULT_PUBLISH_LEVEL_TIMEOUT_SECONDS,
+        )
+
+        mock_bot = MagicMock()
+        mock_bot.id = 1
+
+        mock_existing = MagicMock()
+        mock_existing.id = 99
+        mock_existing.publish_type = "UPDATE"
+        mock_existing.status = "PENDING"
+        mock_existing.extra_config = {}
+        mock_existing.gmt_modified = datetime.now() - timedelta(
+            seconds=DEFAULT_PUBLISH_LEVEL_TIMEOUT_SECONDS + 60
+        )
+
+        mock_new_publish = MagicMock()
+        mock_new_publish.id = 1
+        mock_new_publish.bot_id = 1
+        mock_new_publish.publish_type = "CREATE"
+        mock_new_publish.status = "PENDING"
+        mock_new_publish.extra_config = {}
+        mock_new_publish.creator = "user1"
+        mock_new_publish.modifier = "user1"
+        mock_new_publish.gmt_create = datetime.now()
+        mock_new_publish.gmt_modified = datetime.now()
+
+        mock_env = MagicMock()
+
+        _publish_service_instance._bot_service.get_bot = AsyncMock(
+            return_value=mock_bot
+        )
+        _publish_service_instance._publish_repo = MagicMock()
+        _publish_service_instance._publish_repo.now.return_value = datetime.now()
+        # First classifier query returns the stale UPDATE publish; the
+        # re-query after auto-resolution returns none left.
+        _publish_service_instance._publish_repo.list_active_by_bot_ids.side_effect = [
+            [mock_existing],
+            [],
+        ]
+        _publish_service_instance._publish_repo.insert_publish.return_value = 1
+        _publish_service_instance._publish_repo.get_by_id.return_value = (
+            mock_new_publish
+        )
+
+        mock_batch_record = MagicMock()
+        mock_batch_record.batch_index = 0
+        mock_batch_record.id = 1
+        mock_batch_record.batch_capacity = 5
+        _publish_service_instance._publish_batch_repo = MagicMock()
+        mock_existing_batch = MagicMock()
+        mock_existing_batch.stage = "PREPUB"
+        mock_existing_batch.status = BatchStatus.PENDING.value
+        _publish_service_instance._publish_batch_repo.list_by_publish_id.side_effect = [
+            [mock_existing_batch],
+            [],
+        ]
+        _publish_service_instance._publish_batch_repo.insert_batch.return_value = 1
+        _publish_service_instance._publish_batch_repo.get_by_id.return_value = (
+            mock_batch_record
+        )
+
+        mock_pending_device = MagicMock()
+        mock_pending_device.id = 10
+        mock_pending_device.status = "PENDING"
+        _publish_service_instance._device_repo = MagicMock()
+        _publish_service_instance._device_repo.list_by_bot_id.return_value = [
+            mock_pending_device
+        ]
+        _publish_service_instance._publish_record_repo = MagicMock()
+
+        with patch.object(
+            DefaultPublishService, "_check_and_handle_timeout", new_callable=AsyncMock
+        ):
+            with patch.object(
+                DefaultPublishService, "_cleanup_pending_clone_on_update_failure"
+            ) as mock_cleanup:
+                ordering = MagicMock()
+                ordering.attach_mock(mock_cleanup, "cleanup_clone")
+                ordering.attach_mock(
+                    _publish_service_instance._publish_repo.update_status,
+                    "update_status",
+                )
+                with patch(
+                    "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+                    return_value=mock_env,
+                ):
+                    result = await _publish_service_instance.create_publish(
+                        tenant="test_tenant",
+                        bot_id=1,
+                        publish_type=PublishType.CREATE,
+                        operator="user1",
+                        request_id="test-request-id-12345678901234567890",
+                    )
+
+        assert result.status == "PENDING"
+        mock_cleanup.assert_called_once_with(
+            tenant="test_tenant", publish_id=99, operator="user1"
+        )
+        call_names = [name for name, _, _ in ordering.mock_calls]
+        failed_writes = [
+            i
+            for i, (name, _, kwargs) in enumerate(ordering.mock_calls)
+            if name == "update_status" and kwargs.get("status") == "FAILED"
+        ]
+        assert call_names.index("cleanup_clone") < failed_writes[0]
 
 
 class TestCreatePublishOrphanUpdate:
