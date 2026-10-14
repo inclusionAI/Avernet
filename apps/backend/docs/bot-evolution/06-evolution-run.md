@@ -3,7 +3,7 @@
 > 中文版：[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)
 
 > Status: DRAFT. Service in the [bot evolution architecture](design.md).
-> How a bot's evolution policy turns into runs, and how the platform executes
+> How a bot's bindings turn into runs, and how the platform executes
 > a run: triggers, idempotent submission, leased jobs and re-dispatch,
 > long-running operations, runtimes and the Job Protocol, sandboxing, and
 > budgets and kill switches.
@@ -24,7 +24,7 @@ It owns:
 
 | Owns | Summary | Section |
 | --- | --- | --- |
-| Evolution policy and bindings | Per bot: which strategies run, when, from which parent, what they may change, how strictly they are verified, with what budget and params | [§3](#3-evolution-policy-and-bindings) |
+| Bindings | Per bot: which strategies run, when, from which parent, what they may change, how strictly they are verified, with what budget and params | [§3](#3-bindings) |
 | Triggers | Schedule, manual, and event triggers that create runs | [§4](#4-triggers) |
 | Run lifecycle | `queued → running → completed \| failed \| cancelled \| budget_exhausted`; start, during, end, cancellation | [§5](#5-run-lifecycle) |
 | Idempotent run submission | A submission returns a run id; a repeat with the same idempotency key returns the same id | [§6](#6-idempotent-submission-and-status-by-id) |
@@ -74,8 +74,8 @@ in [work-items.md](work-items.md)).
 
 | Type | What it is | Owned by | Lifecycle |
 | --- | --- | --- | --- |
-| `EvolutionPolicy` | A bot's list of bindings | Bot owner / tenant admin (stored here) | Replaced as a whole by `PUT …/policy`, versioned by ETag |
-| `Binding` | One entry in the policy: strategy version, trigger, parent, allowed genes, verification profile, budget, params, and (proposed) auto-promote ceiling and rollout | Bot owner / tenant admin | Created, changed, or removed with the policy; checked against the bot on every change |
+| `BotBindings` | A bot's list of bindings | Bot owner / tenant admin (stored here) | Replaced as a whole by `PUT …/bindings`, versioned by ETag |
+| `Binding` | One entry in the bot's bindings: strategy version, trigger, parent, allowed genes, verification profile, budget, params, and (proposed) auto-promote ceiling and rollout | Bot owner / tenant admin | Created, changed, or removed with the bindings; checked against the bot on every change |
 | `Trigger` | What makes a binding create a run: a schedule, manual only, or a platform event | Part of a binding | As the binding |
 | `Budget` | Per-run spending limits: USD, wall clock, rollouts, tokens | Part of a binding; frozen on the run | Frozen at run start; spent amounts never reset |
 | `Run` | One execution of a binding, with strategy version, params, parent, and budget frozen at start; the run id is its only handle | Platform (this service) | `queued → running → completed \| failed \| cancelled \| budget_exhausted`; never deleted |
@@ -198,9 +198,9 @@ class Binding:
 }
 ```
 
-### 2.3 EvolutionPolicy
+### 2.3 BotBindings
 
-Each bot has exactly **one** evolution policy, and the policy is a list of
+Each bot has exactly **one** `BotBindings` document: the list of its
 bindings. Each binding attaches one strategy to the bot with its own
 trigger, allowed genes, verification profile, budget, and params. Several
 bindings mean several strategies (or the same strategy with different
@@ -217,8 +217,8 @@ reviewer explicitly overrides
 
 ```python
 @dataclass(frozen=True)
-class EvolutionPolicy:
-    bot: BotRef                         # the bot this policy belongs to (owner + bot id, 09-evolution-api.md §2.7)
+class BotBindings:
+    bot: BotRef                         # the bot these bindings belong to (owner + bot id, 09-evolution-api.md §2.7)
     bindings: list[Binding]             # one entry per strategy attached to the bot
     etag: str                           # changes on every successful PUT; used with If-Match
     updated_at: datetime
@@ -227,7 +227,7 @@ class EvolutionPolicy:
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// Evolution policy of bot_123 (OpenClaw support bot)
+// Bindings of bot_123 (OpenClaw support bot)
 {
   "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "bindings": [
@@ -252,7 +252,7 @@ class EvolutionPolicy:
       "params": {}
     }
   ],
-  "etag": "\"pol-v12\"",
+  "etag": "\"bind-v12\"",
   "updated_at": "2026-10-06T08:00:00Z",
   "updated_by": "user_owner_5"
 }
@@ -497,9 +497,9 @@ class RunSummary:
 {"rounds": 3, "notes": "two candidates submitted; round 2 accepted", "extra": {"findings": 5}}
 ```
 
-## 3. Evolution policy and bindings
+## 3. Bindings
 
-A bot's **evolution policy** is a list of **bindings**. Different bots use
+A bot's **bindings** are the list of strategies attached to it. Different bots use
 different strategies, and one bot may use several (for example ClawEvolve
 nightly on persona and skills, and memory consolidation weekly on memory);
 what several bindings mean is explained in §2.3.
@@ -535,7 +535,7 @@ binding fields owned by the bot owner. They are not strategy code.
 
 ### 3.2 Binding checks
 
-When the policy is written, every new or changed binding is checked against
+When the bindings are written, every new or changed binding is checked against
 the bot. A mismatch is rejected at configuration time, not partway through a
 paid run:
 
@@ -558,7 +558,7 @@ paid run:
 
 The same checks run again when a run is submitted, because the bot (its
 engine, its genome `policy`) or the strategy (a kill switch) may have
-changed since the policy was written. ClawEvolve's
+changed since the bindings were written. ClawEvolve's
 `active_engine='openclaw'` and `bot_type='personal'` filters in
 `singlebox/bot-runtime.ts` become check 2.
 
@@ -992,7 +992,7 @@ Budgets are enforced by the service, not by the strategy.
   `cancelled` with `end_reason: "consecutive_rejections"` (proposed).
 
 Where the ceilings are configured is open ([§17](#17-open-decisions)); the
-proposal is a `limits` field on the evolution policy for per-bot ceilings
+proposal is a `limits` field on the bot's bindings document for per-bot ceilings
 and tenant settings for per-tenant ones.
 
 ### 11.3 Kill switches
@@ -1014,7 +1014,7 @@ server database elsewhere):
 
 | Table | Key | Holds |
 | --- | --- | --- |
-| `evolution_policy` | `(owner_id, bot_id)` | The bindings document and its ETag |
+| `evolution_bindings` | `(owner_id, bot_id)` | The bindings document and its ETag |
 | `evolution_run` | `run_id` | The `Run` record: frozen inputs, status, attempt, usage |
 | `evolution_run_key` | `(owner_id, bot_id, idempotency_key)` | `run_id`; makes submission idempotent |
 | `evolution_job` | `job_id` | Lease holder, expiry, fencing token, attempt |
@@ -1038,12 +1038,12 @@ transport-agnostic: the HTTP endpoints in §14 are delivery adapters over
 them.
 
 ```python
-class EvolutionPolicyService(Protocol):
-    async def get_policy(self, bot: BotRef) -> EvolutionPolicy:
-        """Return the bot's policy; an empty bindings list if none was written."""
+class BindingsService(Protocol):
+    async def get_bindings(self, bot: BotRef) -> BotBindings:
+        """Return the bot's bindings; an empty bindings list if none was written."""
 
-    async def put_policy(self, bot: BotRef, bindings: list[Binding], *,
-                         expected_etag: str | None, actor: str) -> EvolutionPolicy:
+    async def put_bindings(self, bot: BotRef, bindings: list[Binding], *,
+                           expected_etag: str | None, actor: str) -> BotBindings:
         """Replace the bindings after running the binding checks (§3.2) on every
         new or changed binding. expected_etag None means "create; fail if one exists".
         Raises BindingCheckFailed (all violations listed) or PreconditionFailed."""
@@ -1162,18 +1162,18 @@ postponed (DR-3). Responses below show the `data` payload of the standard
 envelope; see [09-evolution-api.md](09-evolution-api.md) for the envelope,
 errors, pagination, and idempotency.
 
-### GET /bots/{bot_id}/evolution/policy
+### GET /bots/{bot_id}/evolution/bindings
 
-Read the bot's evolution policy (its bindings). Called by the UI backend,
-`avn evolve policy get`, and pipelines.
+Read the bot's bindings. Called by the UI backend,
+`avn evolve bindings get`, and pipelines.
 
 Request:
 
 ```http
-GET /openapi/v1/bots/bot_123/evolution/policy
+GET /openapi/v1/bots/bot_123/evolution/bindings
 ```
 
-Response `200` (header `ETag: "pol-v12"`):
+Response `200` (header `ETag: "bind-v12"`):
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -1191,7 +1191,7 @@ Response `200` (header `ETag: "pol-v12"`):
       "params": {"window_days": 7, "max_rounds": 3, "poll_s": 60}
     }
   ],
-  "etag": "\"pol-v12\"",
+  "etag": "\"bind-v12\"",
   "updated_at": "2026-10-06T08:00:00Z",
   "updated_by": "user_owner_5"
 }
@@ -1199,13 +1199,13 @@ Response `200` (header `ETag: "pol-v12"`):
 
 Errors: `404` unknown bot.
 
-### PUT /bots/{bot_id}/evolution/policy
+### PUT /bots/{bot_id}/evolution/bindings
 
 Replace the bot's bindings. Runs the binding checks (§3.2) on every new or
 changed binding and rejects the whole document if any fails. Called by the
-bot owner or tenant admin through the UI or `avn evolve policy set`.
+bot owner or tenant admin through the UI or `avn evolve bindings set`.
 
-Request (header `If-Match: "pol-v12"`):
+Request (header `If-Match: "bind-v12"`):
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -1235,7 +1235,7 @@ Request (header `If-Match: "pol-v12"`):
 }
 ```
 
-Response `200` (header `ETag: "pol-v13"`):
+Response `200` (header `ETag: "bind-v13"`):
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -1249,7 +1249,7 @@ Response `200` (header `ETag: "pol-v13"`):
      "parent": "active", "allowed_genes": ["memory"], "verification_profile": "default@1",
      "budget": {"max_usd": 5, "max_wall_clock_s": 1800}, "params": {}}
   ],
-  "etag": "\"pol-v13\"",
+  "etag": "\"bind-v13\"",
   "updated_at": "2026-10-08T09:30:00Z",
   "updated_by": "user_owner_5"
 }
@@ -1271,7 +1271,7 @@ Error example `422` (binding check failed):
 }
 ```
 
-Other errors: `412` ETag mismatch (someone else changed the policy); `404`
+Other errors: `412` ETag mismatch (someone else changed the bindings); `404`
 unknown bot or unknown strategy version.
 
 ### POST /bots/{bot_id}/evolution/runs
@@ -1305,7 +1305,7 @@ Errors: `404` unknown binding; `409` with `error.code` one of
 `evolution_frozen`, `strategy_disabled`, `binding_busy` (a run of this
 binding is still active), `ceiling_exceeded`, `idempotency_key_reused` (same
 key, different body); `422` `binding_check_failed` (the bot or strategy
-changed since the policy was written), or `budget` above the binding's
+changed since the bindings were written), or `budget` above the binding's
 budget.
 
 ### GET /bots/{bot_id}/evolution/runs
@@ -2139,14 +2139,14 @@ avn evolve run status --bot bot_123 run_7f3 --wait --output json
 ### 15.2 An owner adds a binding
 
 ```python
-policy = c.policy.get(bot_id="bot_123")
-bindings = policy.bindings + [Binding(
+current = c.bindings.get(bot_id="bot_123")
+bindings = current.bindings + [Binding(
     id="bind_02", strategy="platform/consolidate-memory@1.0.0",
     trigger={"schedule": "0 4 * * 0"}, parent="active", allowed_genes=["memory"],
     verification_profile="default@1",
     budget={"max_usd": 5, "max_wall_clock_s": 1800}, params={})]
 try:
-    c.policy.put(bot_id="bot_123", bindings=bindings, if_match=policy.etag)
+    c.bindings.put(bot_id="bot_123", bindings=bindings, if_match=current.etag)
 except BindingCheckFailed as e:                          # 422: fix the binding, nothing was written
     for d in e.details:
         print(d.binding, d.check, d.detail)
@@ -2268,7 +2268,7 @@ queue ([08-promotion.md](08-promotion.md)); the run itself never moves
 | [07-verification.md](07-verification.md) | Verification → Run | Verdicts (aggregates only to the strategy); train scores and critiques |
 | [08-promotion.md](08-promotion.md) Promotion | Run → Promotion | Static floor check (`FloorCheck`) at submission; verified candidates for the gate and review queue |
 | [08-promotion.md](08-promotion.md) | Promotion → Run | Nothing a run waits on; promotion of a run's candidates happens after or independently of the run |
-| [09-evolution-api.md](09-evolution-api.md) Evolution API and clients | Clients → Run | Policy reads and writes, run submission, status, cancellation, candidate lists via SDK, CLI, and UI backend |
+| [09-evolution-api.md](09-evolution-api.md) Evolution API and clients | Clients → Run | Bindings reads and writes, run submission, status, cancellation, candidate lists via SDK, CLI, and UI backend |
 | [10-meta-evolution.md](10-meta-evolution.md) Meta-evolution (later) | Meta → Run | Runs of candidate mechanisms on improvement problems, with equal budgets |
 
 ## 17. Open decisions
@@ -2277,14 +2277,14 @@ queue ([08-promotion.md](08-promotion.md)); the run itself never moves
 | --- | --- | --- |
 | D-1 | Module placement of the control plane | A. new `apps/evolution` (**recommended**); B. Backend `core/evolution/`; C. ClawWeb's TS control plane. See [design.md](design.md) |
 | ER-1 | Where the auto-promote ceiling lives | Resolved (proposed fields): `auto_promote_ceiling` and `rollout` are binding fields (§2.2, §3.1), read by Promotion ([08-promotion.md](08-promotion.md)) |
-| ER-2 | Where per-bot ceilings and the per-bot freeze are configured | Proposal: `limits` (daily/monthly USD) and `frozen` fields on the evolution policy; per-tenant ceilings in tenant settings |
+| ER-2 | Where per-bot ceilings and the per-bot freeze are configured | Proposal: `limits` (daily/monthly USD) and `frozen` fields on the bot's bindings document; per-tenant ceilings in tenant settings |
 | ER-3 | Iteration limits | Governance lists "iterations" among per-run limits, but the platform cannot see a strategy's rounds. Proposal: count candidate submissions (`max_candidates`) or drop the dimension |
 | ER-4 | Job Protocol gap: workspace contents | Resolved: `GET …/workspaces/{workspace}/files`, `PUT …/workspaces/{workspace}/files/{path}`, and `POST …/workspaces/{workspace}:patch` (§9.1, §14.2); `ctx.log` and `ctx.artifacts` are `POST …/log` and `PUT …/artifacts/{name}` |
 | ER-5 | Fencing token transport and cancellation over the wire | Proposal: header `Evolution-Fencing-Token`; `cancelled` flag in the heartbeat response |
 | ER-6 | Lease timings and `max_attempts` | Proposal: 60 s lease, 20 s heartbeat, 3 attempts; per-strategy override in registration |
 | ER-7 | Concurrency per binding and missed firings | Proposal: one active run per binding; missed slots skipped, not backfilled |
 | ER-8 | Run submission body | Resolved: `{binding, params?, budget?}`, because allowed genes and the verification profile come from a binding. Still open: whether an operator may run an unbound strategy version (for example for testing) |
-| ER-9 | Params validation at configuration time | Resolved: an optional `params_schema` in the registration record (proposed, [03-strategy.md](03-strategy.md)), checked as binding check 8 when the policy is written (§3.2) |
+| ER-9 | Params validation at configuration time | Resolved: an optional `params_schema` in the registration record (proposed, [03-strategy.md](03-strategy.md)), checked as binding check 8 when the bindings are written (§3.2) |
 | ER-10 | The strategy's own progress store | Strategies persist their own progress in their own storage (agreed). Open: how a sandboxed job worker reaches that storage — e.g. an egress allowlist entry declared in the registration record for the strategy's own store, or a platform-provided opaque per-run blob that the platform never interprets. Same decision as S-8 in [03-strategy.md](03-strategy.md) |
 | ER-11 | Escalation outcome | N consecutive rejections: end as `cancelled` with `end_reason: "consecutive_rejections"` (proposed) or as `failed`; value of N |
 | ER-12 | `budget:charge` semantics | What a strategy may charge explicitly, given that platform calls are metered automatically |

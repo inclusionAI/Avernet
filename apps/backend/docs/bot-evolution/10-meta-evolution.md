@@ -465,7 +465,7 @@ is open decision O-1.
 **Mechanism refs.** Refs are scoped per strategy family.
 `clawevolve/bot-evolution` has `active`, `previous`, `canary` and
 `candidate/*` refs, which bots and tenants follow or pin through their
-evolution policy:
+bindings:
 
 | Ref | Meaning | Who moves it |
 | --- | --- | --- |
@@ -1374,7 +1374,7 @@ if screen.candidate["precision_pct"] > screen.baseline["precision_pct"]:
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// One binding in bot_123's evolution policy (06-evolution-run.md); open decision O-2
+// One of bot_123's bindings (06-evolution-run.md); open decision O-2
 {
   "strategy": "clawevolve/bot-evolution@active",   // follow the family's active mechanism; "@2.0.0" pins
   "trigger": {"schedule": "0 2 * * *"},

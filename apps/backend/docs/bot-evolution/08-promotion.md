@@ -89,7 +89,7 @@ Types used here but defined elsewhere: `GenomeRevision`, `GenomeRef`,
 `GenomePatch`, `GenomePolicy` ([01-genome.md](01-genome.md)); `Candidate`
 ([03-strategy.md](03-strategy.md)); `Verdict`, `VerificationProfile`,
 `Evaluation` ([07-verification.md](07-verification.md)); `Binding`,
-`EvolutionPolicy`, `Run` ([06-evolution-run.md](06-evolution-run.md));
+`BotBindings`, `Run` ([06-evolution-run.md](06-evolution-run.md));
 `LedgerEntry` ([05-experiment-ledger.md](05-experiment-ledger.md)).
 
 A short reminder of the terms this doc leans on:
@@ -523,7 +523,7 @@ Consequences recorded in DR-2:
   ([04-default-strategies.md](04-default-strategies.md)).
 - Any third-party strategy can be enabled without trusting it with
   production write access.
-- Bot owners get a review queue and per-bot policy (enabled strategies,
+- Bot owners get a review queue and per-bot bindings (enabled strategies,
   auto-promote ceiling, budgets).
 - Every promotion and going back is audited with evidence and evaluation
   links.
@@ -725,7 +725,7 @@ binding field `rollout`; both are proposed fields of the binding defined in
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// The Promotion-related fields of one binding in bot_123's evolution policy (other fields elided).
+// The Promotion-related fields of one of bot_123's bindings (other fields elided).
 {
   "id": "bind_01",
   "strategy": "clawevolve/bot-evolution@2.0.0",

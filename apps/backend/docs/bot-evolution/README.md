@@ -81,7 +81,7 @@ ADR number:
 | **Experience** | Normalized episodes (sessions or trajectories) and feedback collected from running bots, each tagged with the revision that produced it. |
 | **Strategy** | Versioned code with one method, `run(ctx)`, that proposes candidates for a bot; registered with the catalog capabilities it `needs`. |
 | **Capability** | A platform-owned, versioned field of the strategy context (for example `experience.sessions@1`), with providers per engine. |
-| **Binding** | One entry in a bot's evolution policy: which strategy, trigger, parent, allowed genes, verification profile, budget, params. |
+| **Bindings** | A bot's list of bindings, the strategies attached to it. Each binding says which strategy, trigger, parent, allowed genes, verification profile, budget, params. |
 | **Evolution Run** | One execution of a binding against one bot, with its inputs frozen at start and identified by a run id; it submits candidates and looks up their verdicts by id. |
 | **Job** | One dispatch attempt of a run on a worker, under a lease. A run has one job per attempt (a re-dispatch after a crash creates a new job for the same run). Callers only see runs; workers only see jobs. |
 | **Rollout** (evaluation) | One execution of one evaluation case against one bot version; repeated seeds count separately. Run budgets can limit them. |

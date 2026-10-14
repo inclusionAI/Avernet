@@ -24,7 +24,7 @@
 | 不在此处定义 | 归属 |
 | --- | --- |
 | 具体的默认进化策略（ClawEvolve、记忆整合）以及完整的 ClawEvolve 代码草图 | [04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md) |
-| 绑定与进化策略配置、运行生命周期、租约与重新派发、预算与紧急停止开关、运行时与作业协议线上格式、操作的平台侧、沙箱 | [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) |
+| 绑定、运行生命周期、租约与重新派发、预算与紧急停止开关、运行时与作业协议线上格式、操作的平台侧、沙箱 | [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) |
 | 基因组补丁能表达什么、修订版、锁定基因 | [01-genome.zh-CN.md](01-genome.zh-CN.md) |
 | `Episode` 与 `Feedback` 的 schema、脱敏、保留期限 | [02-experience.zh-CN.md](02-experience.zh-CN.md) |
 | 套件、划分、评分器、验证配置，以及判定如何得出 | [07-verification.zh-CN.md](07-verification.zh-CN.md) |
@@ -51,7 +51,7 @@
 | **`Operation`** | 一次长时能力调用（智能体会话、训练评估），按 id 查询 | 平台（属于该运行） | `queued` → `running` → `succeeded` \| `failed` \| `cancelled` |
 | **`RunSummary`** | 策略结束时 `run(ctx)` 返回的内容 | 策略 | 存储在运行上 |
 
-另有两个相关类型在别处定义，此处仅作引用：`Binding`（bot 进化策略配置中的一个条目：使用哪个策略、触发器、父版本、允许修改的基因、验证配置、预算、参数；参见 [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）和 `GenomePatch`（参见 [01-genome.zh-CN.md](01-genome.zh-CN.md)）。
+另有两个相关类型在别处定义，此处仅作引用：`Binding`（bot 的绑定中的一个条目：使用哪个策略、触发器、父版本、允许修改的基因、验证配置、预算、参数；参见 [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）和 `GenomePatch`（参见 [01-genome.zh-CN.md](01-genome.zh-CN.md)）。
 
 ### 2.1 进化策略
 
@@ -156,7 +156,7 @@ class RegisteredStrategy:                      # what the registry stores and re
 
 **智能体是另一回事。** 运行时是 `run(ctx)` 运行的地方。`agents@1` 下的智能体定义是策略可以通过 `ctx.agents`（§4.2）*启动*的智能体；平台在工作区旁的沙箱中运行它们。并非每个策略都使用智能体：记忆整合只使用 `ctx.models`。
 
-**`params_schema` 示例。** `params` 用来让同一个策略在不同 Bot 上有不同配置：每个 Bot 的绑定都带有自己的取值。ClawEvolve 在 `bot_123` 上的绑定设置了 `{"window_days": 7, "max_rounds": 3}`，而另一个 Bot 的绑定可能设置 `"window_days": 30`。所有者在保存该 Bot 的进化策略配置（其中包含它的各个绑定）时写入这些值（`PUT /bots/{bot_id}/evolution/policy`，或 `avn evolve policy set`；[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。schema 在这一刻就能发现错误：如果所有者在编辑 `bot_123` 的绑定时把 `"window_days": 40` 误写成 `"window_days": 400`（超过 schema 规定的最大值 90），保存会当场被拒绝，而不是数小时后夜间运行开始时才由 ClawEvolve 报错。
+**`params_schema` 示例。** `params` 用来让同一个策略在不同 Bot 上有不同配置：每个 Bot 的绑定都带有自己的取值。ClawEvolve 在 `bot_123` 上的绑定设置了 `{"window_days": 7, "max_rounds": 3}`，而另一个 Bot 的绑定可能设置 `"window_days": 30`。所有者在保存该 Bot 的绑定时写入这些值（`PUT /bots/{bot_id}/evolution/bindings`，或 `avn evolve bindings set`；[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。schema 在这一刻就能发现错误：如果所有者在编辑 `bot_123` 的绑定时把 `"window_days": 40` 误写成 `"window_days": 400`（超过 schema 规定的最大值 90），保存会当场被拒绝，而不是数小时后夜间运行开始时才由 ClawEvolve 报错。
 
 **策略的项目。** “策略源码”指作者为该策略维护的项目，通常是一个 git 仓库，作者在其中运行 `avn strategy publish`。它包含策略的代码、注册记录，以及每个智能体定义各自的一个目录。`path` 相对于项目根目录。以 ClawEvolve 的项目为例：
 
@@ -200,7 +200,7 @@ clawevolve-strategy/                 # the strategy's project root
 }
 ```
 
-`params_schema` 是可选的，属于提议字段。若存在，则绑定检查会在写入进化策略配置时用它校验绑定的 `params`（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)），从而在配置阶段而不是运行开始时拒绝错误的参数。
+`params_schema` 是可选的，属于提议字段。若存在，则绑定检查会在写入绑定时用它校验绑定的 `params`（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)），从而在配置阶段而不是运行开始时拒绝错误的参数。
 
 经过上传和一致性测试套件之后，Strategy Registry 为该版本存储并返回的内容（`RegisteredStrategy`）：
 
@@ -1279,7 +1279,7 @@ async def test_redispatch_does_not_duplicate(fake_platform):
 | ID | 问题 | 当前提议 |
 | --- | --- | --- |
 | S-1 | 注册时如何上传智能体定义 | 一个 `multipart/form-data` 请求（§10）。备选方案：先将每个归档上传到内容端点，再按摘要注册 |
-| S-2 | 注册记录是否应携带 `params` 的 JSON Schema？ | 已解决（提议字段）：注册记录中可选的 `params_schema`（§2.2）；绑定检查在写入进化策略配置时用它校验绑定的 `params`（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)） |
+| S-2 | 注册记录是否应携带 `params` 的 JSON Schema？ | 已解决（提议字段）：注册记录中可选的 `params_schema`（§2.2）；绑定检查在写入绑定时用它校验绑定的 `params`（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)） |
 | S-3 | `evaluation.add_train_cases` 是否幂等？ | 源材料未说明。提议：用例 id = 用例的内容哈希，这样重新派发的运行再次添加相同用例时不会产生重复 |
 | S-4 | 组合式层级的步骤类型 | 推迟到第二个团队需要替换某个部件时（R19） |
 | S-5 | 是否应将实验记录的导出（原始历史）作为一项能力提供给策略？ | 上一版设计建议如此（Meta-Harness 发现原始历史优于摘要）。计划作为第 3 级的 `ledger.read@1`（[10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md)）；第一个迭代中不授予 |

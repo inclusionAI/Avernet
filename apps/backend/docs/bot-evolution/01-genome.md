@@ -363,7 +363,7 @@ How the policy is used:
 - **At binding configuration time**: a **binding** attaches one evolution
   strategy to the bot: which strategy, when it runs, which genes it may
   change (`allowed_genes`), and its budget. A bot has a list of them (its
-  evolution policy), e.g. ClawEvolve nightly on persona and skills. A
+  bindings), e.g. ClawEvolve nightly on persona and skills. A
   binding's `allowed_genes` must stay within the bot's policy (locked genes
   stay locked); a mismatch is rejected before any paid run starts. Bindings
   are defined in [06-evolution-run.md](06-evolution-run.md).

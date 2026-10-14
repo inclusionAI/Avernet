@@ -77,7 +77,7 @@ LLM 编写的技能在没有评测引导修订时往往毫无增益；harness �
 `GenomePatch`、`GenomePolicy`（[01-genome.zh-CN.md](01-genome.zh-CN.md)）；`Candidate`
 （[03-strategy.zh-CN.md](03-strategy.zh-CN.md)）；`Verdict`、`VerificationProfile`、
 `Evaluation`（[07-verification.zh-CN.md](07-verification.zh-CN.md)）；`Binding`、
-`EvolutionPolicy`、`Run`（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）；
+`BotBindings`、`Run`（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）；
 `LedgerEntry`（[05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md)）。
 
 简要回顾本文依赖的术语：
@@ -498,7 +498,7 @@ DR-2 中记录的后果：
   （[04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md)）。
 - 任何第三方策略都可以被启用，而无需信任它拥有生产环境
   写权限。
-- Bot 所有者获得评审队列和按 bot 的策略配置（启用的策略、
+- Bot 所有者获得评审队列和按 bot 的绑定（启用的策略、
   自动晋升上限、预算）。
 - 每一次晋升和回到旧版本都会被审计，并附带证据和评测
   链接。
@@ -695,7 +695,7 @@ def decide(c: CandidateFacts, b: BindingView, bot: BotState) -> GateDecision:
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// The Promotion-related fields of one binding in bot_123's evolution policy (other fields elided).
+// The Promotion-related fields of one of bot_123's bindings (other fields elided).
 {
   "id": "bind_01",
   "strategy": "clawevolve/bot-evolution@2.0.0",

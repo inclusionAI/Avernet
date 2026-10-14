@@ -345,7 +345,7 @@ class GenomePolicy:
   以及针对固定条目的操作都会被拒绝。
 - **在配置绑定时**：一个**绑定**把一个进化策略挂接到该 Bot 上：用哪个策略、何时
   运行、可以修改哪些基因（`allowed_genes`）以及它的预算。一个 Bot 有一组绑定（即它的
-  进化策略配置），例如每晚针对人设和技能运行的 ClawEvolve。绑定的 `allowed_genes`
+  绑定列表），例如每晚针对人设和技能运行的 ClawEvolve。绑定的 `allowed_genes`
   必须保持在该 Bot 的策略配置范围内（锁定基因保持锁定）；不匹配会在任何付费运行
   开始前被拒绝。绑定的定义见 [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)。
 - **在提交候选时**：晋升的静态底线检查（`FloorCheck`）会在花费任何验证成本之前

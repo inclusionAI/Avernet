@@ -627,7 +627,7 @@ How the ledger meets the rule:
   content-addressing of grader code and case content on the verifier side.
 
 Proposed additions to the audited set, beyond the governance rule as
-written: changes to a bot's evolution policy (bindings) and use of kill
+written: changes to a bot's bindings and use of kill
 switches. Both are owner decisions with the same accountability need. See
 [§15](#15-open-decisions).
 
@@ -1188,7 +1188,7 @@ records the promotion of r41 with its reason. False-acceptance rate for
 | --- | --- | --- |
 | L-1 | Ledger model: explicit stored records vs pure read model | Earlier text described H both as "a read model over Genome + Verification" and as an explicit, queryable record. Proposed: append-only events are stored (audit requires it); entries are their fold; archive views are read models over entries and genome revisions |
 | L-2 | Cost attribution per candidate | Proposed: spend since the previous submission plus own verification cost; residual run spend only in mechanism metrics. Alternative: attribute all run spend evenly to its candidates |
-| L-3 | Policy changes and kill switches in the audit trail | Proposed: record both as governance entries. The governance audit rule names revisions, gate decisions, approvals, promotions, and going back only |
+| L-3 | Bindings changes and kill switches in the audit trail | Proposed: record both as governance entries. The governance audit rule names revisions, gate decisions, approvals, promotions, and going back only |
 | L-4 | Tamper evidence | Proposed: per-entry hash chain over canonical JSON. Alternative: rely on insert-only grants |
 | L-5 | How strategies receive the filesystem export inside a run | The level-3 capability `ledger.read@1` ([10-meta-evolution.md](10-meta-evolution.md)) vs an operator-produced export passed as params; its contract is not fixed |
 | L-6 | Export operation status lookup path | Resolved: `GET /bots/{bot_id}/evolution/operations/{operation}` ([09-evolution-api.md](09-evolution-api.md)); the export's `202` returns `{operation_id}` |

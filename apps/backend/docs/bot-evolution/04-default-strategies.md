@@ -26,8 +26,8 @@ registration record, and the strategy SDK are defined in
 
 These are **three separate strategies**, not three modes of one: each has
 its own id, its own code, its own params schema, and its own registered
-versions, and a bot uses each one through its own binding in its evolution
-policy ([06-evolution-run.md](06-evolution-run.md)). What each is for:
+versions, and a bot uses each one through its own entry in the bot's
+bindings ([06-evolution-run.md](06-evolution-run.md)). What each is for:
 
 - `platform/manual-patch`: apply one patch a person or pipeline already
   wrote, through the full verify-gate-promote loop.
@@ -418,7 +418,7 @@ What changes for ClawEvolve, in one list:
 - `candidates@1` and `models@1` are always granted and are not declared.
 - `params_schema` (a proposed, optional field of the registration record,
   [03-strategy.md](03-strategy.md)) lets the binding check reject bad params
-  when the policy is written (§11, Params schemas).
+  when the bindings are written (§11, Params schemas).
 - The agent definitions are today's `clawevolve-tune` and
   `clawevolve-review` skills (`SKILL.md`, `agents/`, `references/`). Today
   they are installed into the OpenClaw runtime ClawEvolve drives, so naming
@@ -813,7 +813,7 @@ below show the `data` payload of the standard envelope; see
 pagination, and idempotency. This document defines no new
 endpoints: it shows how the default strategies use the endpoints defined in
 [03-strategy.md](03-strategy.md) (registration),
-[06-evolution-run.md](06-evolution-run.md) (policy, runs, Job Protocol), and
+[06-evolution-run.md](06-evolution-run.md) (bindings, runs, Job Protocol), and
 [09-evolution-api.md](09-evolution-api.md) (conventions, idempotency keys).
 
 **Registration (public).**
@@ -917,7 +917,7 @@ the strategy). Each default strategy also declares the schema below as
 `params_schema` in its registration record (§4.2, §7.2, and the
 manual-patch record above; a proposed, optional field defined in
 [03-strategy.md](03-strategy.md)), so the binding check rejects bad params
-when the policy is written ([06-evolution-run.md](06-evolution-run.md)).
+when the bindings are written ([06-evolution-run.md](06-evolution-run.md)).
 
 `platform/manual-patch`:
 
@@ -973,10 +973,10 @@ proposed.
 
 **Binding and starting the defaults (public).**
 
-### `PUT /bots/{bot_id}/evolution/policy`
+### `PUT /bots/{bot_id}/evolution/bindings`
 
 Sets the bot's list of bindings. Called by the bot owner or tenant admin
-(UI, `avn evolve policy set`). Defined in
+(UI, `avn evolve bindings set`). Defined in
 [06-evolution-run.md](06-evolution-run.md); shown here with the recommended
 bindings for the defaults.
 
@@ -1024,7 +1024,7 @@ Response:
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-{"bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"}, "bindings": ["bind_01", "bind_02", "bind_03"], "etag": "W/\"policy-7\""}
+{"bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"}, "bindings": ["bind_01", "bind_02", "bind_03"], "etag": "W/\"bind-7\""}
 ```
 
 Notable errors (binding check, at configuration time rather than partway

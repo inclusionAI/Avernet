@@ -121,7 +121,7 @@ class ErrorEnvelope:
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// An error envelope: the policy changed since the caller read it
+// An error envelope: the bindings changed since the caller read them
 {
   "code": 412000,
   "message": "Precondition failed: the resource changed since it was read",
@@ -219,14 +219,14 @@ other writer's change.
 ```python
 @dataclass(frozen=True)
 class Precondition:
-    etag: str              # opaque, strong, quoted on the wire: "\"pol-7\""
+    etag: str              # opaque, strong, quoted on the wire: "\"bind-7\""
     resource: str          # the path it belongs to
 ```
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// What the SDK keeps after GET /bots/bot_123/evolution/policy
-{"etag": "\"pol-7\"", "resource": "/openapi/v1/bots/bot_123/evolution/policy"}
+// What the SDK keeps after GET /bots/bot_123/evolution/bindings
+{"etag": "\"bind-7\"", "resource": "/openapi/v1/bots/bot_123/evolution/bindings"}
 ```
 
 ### 2.5 Operation (public view)
@@ -294,7 +294,7 @@ class ExitCode(IntEnum):
     USAGE = 2             # bad arguments, or a 400 validation error from the API
     NOT_FOUND = 3         # 404
     CONFLICT = 4          # 409 (incl. compare-and-swap, idempotency key reuse) and 412 / 428
-    POLICY_DENIED = 5     # the request violates the bot's evolution policy or a platform rule
+    POLICY_DENIED = 5     # the request violates the bot's bindings, its genome policy, or a platform rule
     BUDGET_EXCEEDED = 6   # a budget ceiling refuses the request
     TRANSIENT = 7         # network failure, 429, 502, 503, 504, or --wait timed out; safe to retry
 
@@ -319,7 +319,7 @@ class CommandSchema:
   "arguments": [],
   "flags": [
     {"name": "--bot", "type": "string", "required": true, "description": "Bot id"},
-    {"name": "--binding", "type": "string", "required": true, "description": "Binding of the bot's evolution policy to run"},
+    {"name": "--binding", "type": "string", "required": true, "description": "Which of the bot's bindings to run"},
     {"name": "--idempotency-key", "type": "string", "required": false, "description": "Reuse on retries; generated and printed when omitted"},
     {"name": "--wait", "type": "bool", "default": false, "description": "Repeat the status lookup until the run is terminal"},
     {"name": "--timeout", "type": "duration", "default": "2h", "description": "Give up waiting (the run continues) and exit 7"}
@@ -368,7 +368,7 @@ separate API per caller.
 | Caller | Example | Surface | Typical calls |
 | --- | --- | --- | --- |
 | **Deterministic pipeline / CI** | Nightly job, CI after a skill change, a product backend | Client SDK or `avn` in a script | Start a run, look up its status, read candidate reports, approve within the owner's auto-promote policy |
-| **UI backend** | The evolution pages of the workbench (AgentEvolve UI in the interim) | Client SDK (TypeScript) | Everything a human does in the UI: policy editing, review queue, reports, promotions, ledger browsing |
+| **UI backend** | The evolution pages of the workbench (AgentEvolve UI in the interim) | Client SDK (TypeScript) | Everything a human does in the UI: bindings editing, review queue, reports, promotions, ledger browsing |
 | **Human operator** | Bot owner, tenant admin, researcher | UI, `avn` | Everything, including review, promotion, and going back to an earlier revision |
 
 Strategy job workers are platform services and use the internal Job
@@ -558,8 +558,8 @@ afterwards as drift ([01-genome.md](01-genome.md) §5.5).
   server answers `412` (`412000`). If `If-Match` is missing, it answers
   `428 Precondition Required` (`428000`), so a client cannot skip the check
   by accident.
-- The first mutable resource on the public surface is the bot's evolution
-  policy (`GET|PUT /bots/{bot_id}/evolution/policy`).
+- The first mutable resource on the public surface is the bot's bindings
+  (`GET|PUT /bots/{bot_id}/evolution/bindings`).
 
 **Compare-and-swap in the body** for ref moves. Ref updates carry
 `expected_revision`: the revision the client believes the ref points to
@@ -604,7 +604,7 @@ types and exit codes:
 | `409020` | Action conflicts with the resource's state (e.g. approving a rejected candidate, cancelling a finished run) | No | 4 |
 | `412000` | `If-Match` does not match the current `ETag` | After re-reading | 4 |
 | `428000` | `If-Match` required but missing | After adding it | 4 |
-| `403xxx` / `422xxx` (policy family) | The request violates the bot's evolution policy or a platform rule: locked gene, gene outside a binding's `allowed_genes`, binding check failed, evolution frozen by a kill switch, strategy disabled, candidate not promotable under the gate | No | 5 |
+| `403xxx` / `422xxx` (policy family) | The request violates the bot's bindings, its genome policy, or a platform rule: locked gene, gene outside a binding's `allowed_genes`, binding check failed, evolution frozen by a kill switch, strategy disabled, candidate not promotable under the gate | No | 5 |
 | `403100`-range (budget family) | A budget ceiling refuses the request (per-bot or per-tenant daily or monthly ceiling, max promotions per day) | Not until the ceiling resets | 6 |
 | `429000` | Rate limited | Yes, after `Retry-After` | 7 |
 | `502000`, `503000`, `504000` | Upstream or service unavailable | Yes, same key | 7 |
@@ -741,7 +741,7 @@ exists today; `bcs-cli` is BCS-scoped.
 - **Non-interactive.** No prompts unless `--interactive` is given.
   Commands that change what a bot runs or discard work are **destructive**
   and require `--yes`: `genome promote`, `evolve review approve`,
-  `evolve review reject`, `evolve run cancel`, `evolve policy set`. Without
+  `evolve review reject`, `evolve run cancel`, `evolve bindings set`. Without
   `--yes` they exit with code 2 and change nothing.
 - **`--dry-run` where the API supports it.** A dry run must be answered by
   the API (a validate-only request), not simulated by the CLI;
@@ -779,8 +779,8 @@ Paths are relative to `/openapi/v1`.
 | `avn experience feedback add --bot B FILE` / `feedback list --bot B` | `POST` / `GET /bots/{bot_id}/experience/feedback` | |
 | `avn evolve strategies list` / `strategies show ID --version V` | `GET /evolution/strategies` / `GET /evolution/strategies/{id}/versions/{version}` | |
 | `avn evolve capabilities` | `GET /evolution/capabilities` | |
-| `avn evolve policy get --bot B` | `GET /bots/{bot_id}/evolution/policy` | Prints the `ETag` as `etag` |
-| `avn evolve policy set --bot B FILE --if-match ETAG --yes` | `PUT /bots/{bot_id}/evolution/policy` | `--if-match` is required |
+| `avn evolve bindings get --bot B` | `GET /bots/{bot_id}/evolution/bindings` | Prints the `ETag` as `etag` |
+| `avn evolve bindings set --bot B FILE --if-match ETAG --yes` | `PUT /bots/{bot_id}/evolution/bindings` | `--if-match` is required |
 | `avn evolve run start --bot B --binding ID [--idempotency-key K] [--wait]` | `POST /bots/{bot_id}/evolution/runs` (+ `GET .../runs/{run}` with `--wait`) | |
 | `avn evolve run list --bot B [--status S]` | `GET /bots/{bot_id}/evolution/runs` | |
 | `avn evolve run status --bot B RUN` | `GET /bots/{bot_id}/evolution/runs/{run}` | |
@@ -849,7 +849,7 @@ from typing import AsyncIterator, Protocol
 #   OutcomeStatus, Episode, Feedback: 02-experience.md
 #   Engine, ConformanceState, StrategyRegistration, Capability, Candidate: 03-strategy.md
 #   LedgerEntry: 05-experiment-ledger.md
-#   EvolutionPolicy, Run, RunStatus: 06-evolution-run.md
+#   BotBindings, Run, RunStatus: 06-evolution-run.md
 #   Suite, Evaluation: 07-verification.md
 #   Promotion, ReviewItem: 08-promotion.md
 # Page, PageParams, and Operation are this doc's (§2.2, §2.5).
@@ -883,11 +883,11 @@ class StrategiesClient(Protocol):
     async def get_version(self, strategy: str, version: str) -> StrategyRegistration: ...
     async def capabilities(self) -> list[Capability]: ...
 
-class PolicyClient(Protocol):
-    async def get(self, bot_id: str) -> tuple[EvolutionPolicy, str]:
-        """Returns the policy and its ETag."""
-    async def put(self, bot_id: str, policy: EvolutionPolicy, *, if_match: str) -> tuple[EvolutionPolicy, str]:
-        """Raises PreconditionFailed (412000) if the policy changed since it was read."""
+class BindingsClient(Protocol):
+    async def get(self, bot_id: str) -> tuple[BotBindings, str]:
+        """Returns the bindings and their ETag."""
+    async def put(self, bot_id: str, bindings: BotBindings, *, if_match: str) -> tuple[BotBindings, str]:
+        """Raises PreconditionFailed (412000) if the bindings changed since they were read."""
 
 class RunsClient(Protocol):
     async def start(self, bot_id: str, *, binding: str, params: dict | None = None,
@@ -932,7 +932,7 @@ class EvolutionClient(Protocol):
     genome: GenomeClient
     experience: ExperienceClient
     strategies: StrategiesClient
-    policy: PolicyClient
+    bindings: BindingsClient
     runs: RunsClient
     verification: VerificationClient
     review: ReviewClient
@@ -1127,8 +1127,8 @@ Idempotency-Key: ledger-export-bot_123-2026-10-08
 
 | Method and path | Purpose | Conventions |
 | --- | --- | --- |
-| `GET /bots/{bot_id}/evolution/policy` | The bot's evolution policy (list of bindings) | Returns ETag |
-| `PUT /bots/{bot_id}/evolution/policy` | Replace the policy (binding checks run here) | ETag (`If-Match` required) |
+| `GET /bots/{bot_id}/evolution/bindings` | The bot's bindings (list of bindings) | Returns ETag |
+| `PUT /bots/{bot_id}/evolution/bindings` | Replace the bindings (binding checks run here) | ETag (`If-Match` required) |
 | `POST /bots/{bot_id}/evolution/runs` | Start a run of one binding | key; 202 + run id |
 | `GET /bots/{bot_id}/evolution/runs` | List runs (`status=`) | Page |
 | `GET /bots/{bot_id}/evolution/runs/{run}` | Run status, rounds, budget used | |
@@ -1176,12 +1176,12 @@ Idempotency-Key: nightly-bot_123-2026-10-08
 }
 ```
 
-Shared-convention example 2: `If-Match` on the policy.
+Shared-convention example 2: `If-Match` on the bindings.
 
 ```http
-PUT /openapi/v1/bots/bot_123/evolution/policy
+PUT /openapi/v1/bots/bot_123/evolution/bindings
 Content-Type: application/json
-If-Match: "pol-7"
+If-Match: "bind-7"
 ```
 
 ```jsonc
@@ -1197,7 +1197,7 @@ If-Match: "pol-7"
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// 200 with the new ETag header: ETag: "pol-8"
+// 200 with the new ETag header: ETag: "bind-8"
 {
   "code": 200000,
   "message": "OK",
@@ -1208,7 +1208,7 @@ If-Match: "pol-7"
 
 A stale tag gets `412000` ([§2.1](#21-envelope-and-errorenvelope)); a
 missing `If-Match` gets `428000`. (The response `data` above is shortened
-for the example; the owning doc defines the full policy shape.)
+for the example; the owning doc defines the full bindings shape.)
 
 **Internal (not part of the public API or the client SDKs).** The Job
 Protocol under `/evolution/v1/...`, which job-worker strategies use to
@@ -1380,7 +1380,7 @@ Errors: `404000` unknown operation; `409020` the operation already finished.
 ### 14.1 Nightly pipeline (Python SDK)
 
 A scheduled job starts tonight's run on a bot owned by `user_owner_5`,
-waits for it, and approves candidates that the owner's policy lets the
+waits for it, and approves candidates that the owner's bindings let the
 pipeline approve. Because the pipeline is not the owner, every call passes
 `entity_id`. The key is
 deterministic, so if the job itself crashes and is rerun, it re-attaches to
@@ -1410,7 +1410,7 @@ async def nightly(owner_id: str, bot_id: str, binding: str, day: str) -> None:
         try:
             await c.review.approve(bot_id, cand.candidate_id, entity_id=owner_id, reason="nightly auto-policy",
                                    idempotency_key=f"nightly-{owner_id}-{bot_id}-{day}/approve/{cand.candidate_id}")
-        except PolicyDenied as e:                           # the owner's policy does not let pipelines approve this tier
+        except PolicyDenied as e:                           # the owner's bindings do not let pipelines approve this tier
             print("left for human review:", cand.candidate_id, e.code, e.request_id)
 
 asyncio.run(nightly("user_owner_5", "bot_123", "bind_01", "2026-10-08"))
@@ -1450,7 +1450,7 @@ The JSON printed on success:
 }
 ```
 
-### 14.3 Editing the policy safely (Python SDK)
+### 14.3 Editing the bindings safely (Python SDK)
 
 Read-modify-write with `If-Match`; on `412` re-read and reapply.
 
@@ -1459,16 +1459,16 @@ from avernet_evolution import Client, PreconditionFailed
 
 async def raise_budget(c: Client, bot_id: str, binding_id: str, max_usd: int) -> None:
     for _ in range(3):
-        policy, etag = await c.policy.get(bot_id)        # caller is the owner: no entity_id
-        for b in policy.bindings:
+        current, etag = await c.bindings.get(bot_id)     # caller is the owner: no entity_id
+        for b in current.bindings:
             if b.id == binding_id:
                 b.budget.max_usd = max_usd
         try:
-            await c.policy.put(bot_id, policy, if_match=etag)
+            await c.bindings.put(bot_id, current, if_match=etag)
             return
         except PreconditionFailed:
             continue                                         # someone else changed it; read again
-    raise RuntimeError("policy kept changing; giving up")
+    raise RuntimeError("bindings kept changing; giving up")
 ```
 
 ### 14.4 Review queue in the UI backend (TypeScript SDK)
@@ -1525,11 +1525,11 @@ published as the next version through the existing publish flow
 | [02-experience.md](02-experience.md) | API → Experience | Episode queries, feedback records |
 | [03-strategy.md](03-strategy.md) (Strategy Registry) | API → Registry | Strategy registration (`avn strategy publish`), listing, capability catalog; the Strategy SDK is a separate package |
 | [05-experiment-ledger.md](05-experiment-ledger.md) | API → Ledger | Entry queries, exports as operations |
-| [06-evolution-run.md](06-evolution-run.md) | API → Run | Policy (ETag), run submission (idempotency key → run id), status by id, cancellation; budgets, kill switches, and binding checks produce the policy and budget error families; the internal Job Protocol uses the same conventions |
+| [06-evolution-run.md](06-evolution-run.md) | API → Run | Bindings (ETag), run submission (idempotency key → run id), status by id, cancellation; budgets, kill switches, and binding checks produce the policy and budget error families; the internal Job Protocol uses the same conventions |
 | [07-verification.md](07-verification.md) | API → Verification | Suites, ad-hoc evaluations as operations |
 | [08-promotion.md](08-promotion.md) | API → Promotion | Candidate reports, review queue, approve/reject, promotions (including going back) |
 | Pipelines and CI | Caller → API | Client SDK or `avn`; deterministic idempotency keys; exit codes |
-| UI backend | Caller → API | TypeScript SDK; ETags on policy edits; one key per user action |
+| UI backend | Caller → API | TypeScript SDK; ETags on bindings edits; one key per user action |
 | Human operators | Caller → API | `avn` and UI |
 | Backend OpenAPI v1 adapter | Reused by this layer | `Envelope`, `ErrorEnvelope`, `Page`, `PageParams`, envelope builders and error mapping |
 

@@ -25,7 +25,7 @@
 
 这些是**三个独立的策略**，而不是同一个策略的三种模式：每个策略都有
 自己的 id、自己的代码、自己的 params schema 以及自己的已注册版本，
-bot 通过其进化策略配置中各自的绑定来使用每个策略
+bot 通过其绑定列表中各自的条目来使用每个策略
 （[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。各自的用途：
 
 - `platform/manual-patch`：将某人或某条流水线已经写好的一个补丁，
@@ -407,7 +407,7 @@ ClawEvolve 的变化一览：
 
 - `candidates@1` 和 `models@1` 始终被授予，无需声明。
 - `params_schema`（注册记录中一个提议的可选字段，
-  [03-strategy.zh-CN.md](03-strategy.zh-CN.md)）使绑定检查能够在写入策略配置时
+  [03-strategy.zh-CN.md](03-strategy.zh-CN.md)）使绑定检查能够在写入绑定时
   拒绝错误的 params（§11，参数 schema）。
 - 智能体定义即现有的 `clawevolve-tune` 和
   `clawevolve-review` skill（`SKILL.md`、`agents/`、`references/`）。目前
@@ -786,7 +786,7 @@ class ConsolidateMemoryStrategy(EvolutionStrategy):
 分页和幂等性见 [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)。本文不定义新的
 端点：它展示默认进化策略如何使用以下文档中定义的端点：
 [03-strategy.zh-CN.md](03-strategy.zh-CN.md)（注册）、
-[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)（策略配置、运行、作业协议）以及
+[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)（绑定、运行、作业协议）以及
 [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)（约定、幂等键）。
 
 **注册（公开）。**
@@ -890,7 +890,7 @@ manual-patch 的记录见下文）：
 `params_schema`（§4.2、§7.2 以及上文的
 manual-patch 记录；这是一个提议的可选字段，定义于
 [03-strategy.zh-CN.md](03-strategy.zh-CN.md)），因此绑定检查会在
-写入策略配置时拒绝错误的 params（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。
+写入绑定时拒绝错误的 params（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。
 
 `platform/manual-patch`：
 
@@ -946,10 +946,10 @@ schema 使用 JSON Schema draft 2020-12。各项限制（minimum、maximum）为
 
 **绑定并启动默认进化策略（公开）。**
 
-### `PUT /bots/{bot_id}/evolution/policy`
+### `PUT /bots/{bot_id}/evolution/bindings`
 
 设置 Bot 的绑定列表。由 Bot 所有者或租户管理员调用
-（UI、`avn evolve policy set`）。定义于
+（UI、`avn evolve bindings set`）。定义于
 [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)；此处展示为默认进化策略推荐的
 绑定。
 
@@ -997,7 +997,7 @@ schema 使用 JSON Schema draft 2020-12。各项限制（minimum、maximum）为
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-{"bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"}, "bindings": ["bind_01", "bind_02", "bind_03"], "etag": "W/\"policy-7\""}
+{"bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"}, "bindings": ["bind_01", "bind_02", "bind_03"], "etag": "W/\"bind-7\""}
 ```
 
 主要错误（绑定检查，发生在配置时，而不是在付费运行

@@ -114,7 +114,7 @@ Dreams、Hermes Curator，以及 ClawEvolve 本身）都可以归结为在一个
 
 | 文档 | 服务 | 它做什么 | 所在位置 |
 | --- | --- | --- | --- |
-| [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) | **进化运行** | 保存每个 bot 的进化策略配置（绑定）；触发 trigger；以带租约、输入冻结的作业方式运行进化策略；在进程内或通过作业协议提供策略上下文；运行长时操作；强制执行沙箱和预算。 | `apps/evolution` |
+| [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) | **进化运行** | 保存每个 bot 的绑定；触发 trigger；以带租约、输入冻结的作业方式运行进化策略；在进程内或通过作业协议提供策略上下文；运行长时操作；强制执行沙箱和预算。 | `apps/evolution` |
 | [07-verification.zh-CN.md](07-verification.zh-CN.md) | **验证** | 衡量候选是否优于其父版本：带强制划分的套件、评分器、在评测 bot 中的配对运行、验证配置、判定。也为进化策略提供训练划分上的评估。 | `apps/evolution`，通过 Backend 评测环境执行 |
 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) | **晋升** | 决定并应用：门禁、风险等级、评审队列、审批、将修订版晋升为 `active`、发布，以及回到旧版本。唯一可以移动 `active` 的服务。 | Backend |
 | [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) | **进化 API 与客户端** | 公共访问层：共享的 API 约定（幂等键、ETag、错误、分页、按 id 查询的长时工作）、端点索引、生成的 SDK，以及 `avn` CLI。 | Gateway/Backend 路由；SDK 与 CLI 包 |
@@ -212,7 +212,7 @@ Dreams、Hermes Curator，以及 ClawEvolve 本身）都可以归结为在一个
 | 引擎记忆投影契约 | Plugin API | Backend 应用 → 引擎 | [01-genome.zh-CN.md](01-genome.zh-CN.md) |
 | 片段 / 反馈 schema；引擎会话导出（`session-export/v1` → v2） | 数据契约；Plugin API | 引擎 → 经验 → 进化策略 | [02-experience.zh-CN.md](02-experience.zh-CN.md) |
 | 策略端口（`run(ctx)`）、`StrategyContext`、注册记录、带按引擎提供方的能力目录 | Plugin API | 进化运行 ↔ 进化策略 | [03-strategy.zh-CN.md](03-strategy.zh-CN.md) |
-| 进化策略配置（绑定）、Run API、作业协议 | 数据契约；Service API；Plugin API（线协议） | 负责人、UI、CLI、作业 worker → 进化运行 | [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) |
+| 绑定、Run API、作业协议 | 数据契约；Service API；Plugin API（线协议） | 负责人、UI、CLI、作业 worker → 进化运行 | [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) |
 | Verification API；执行器与评分器插件协议 | Service API；Plugin API | 进化运行、晋升、发布流程、Quality Task → 验证 | [07-verification.zh-CN.md](07-verification.zh-CN.md) |
 | 门禁、评审与晋升 API | Service API | UI、CLI、进化运行 → 晋升 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) |
 | 实验记录 schema | 数据契约 | 所有服务 → 实验记录 → 选择器、UI、第 3 层 | [05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md) |

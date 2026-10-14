@@ -43,7 +43,7 @@ It does not own:
 | Not owned here | Owned by |
 | --- | --- |
 | The concrete default strategies (ClawEvolve, memory consolidation) and the full ClawEvolve code sketch | [04-default-strategies.md](04-default-strategies.md) |
-| Bindings and the evolution policy, run lifecycle, leases and re-dispatch, budgets and kill switches, the runtimes and the Job Protocol wire format, the platform side of operations, sandboxing | [06-evolution-run.md](06-evolution-run.md) |
+| Bindings, run lifecycle, leases and re-dispatch, budgets and kill switches, the runtimes and the Job Protocol wire format, the platform side of operations, sandboxing | [06-evolution-run.md](06-evolution-run.md) |
 | What a Genome Patch can express, revisions, locked genes | [01-genome.md](01-genome.md) |
 | The `Episode` and `Feedback` schemas, redaction, retention | [02-experience.md](02-experience.md) |
 | Suites, splits, graders, verification profiles, how a verdict is reached | [07-verification.md](07-verification.md) |
@@ -79,7 +79,7 @@ code (for example, the engine's session export provides
 | **`RunSummary`** | What `run(ctx)` returns when the strategy finishes | Strategy | Stored on the run |
 
 Two related types are defined elsewhere and only referenced here:
-`Binding` (one entry of a bot's evolution policy: which strategy, trigger,
+`Binding` (one entry of a bot's bindings: which strategy, trigger,
 parent, allowed genes, verification profile, budget, params; see
 [06-evolution-run.md](06-evolution-run.md)) and `GenomePatch` (see
 [01-genome.md](01-genome.md)).
@@ -225,8 +225,8 @@ workspace. Not every strategy uses agents: memory consolidation uses only
 differently per bot: each bot's binding carries its own values. ClawEvolve's
 binding on `bot_123` sets `{"window_days": 7, "max_rounds": 3}`, while
 another bot's binding might set `"window_days": 30`. The owner writes these
-values when saving the bot's evolution policy, which holds its bindings
-(`PUT /bots/{bot_id}/evolution/policy`, or `avn evolve policy set`;
+values when saving the bot's bindings
+(`PUT /bots/{bot_id}/evolution/bindings`, or `avn evolve bindings set`;
 [06-evolution-run.md](06-evolution-run.md)). The schema catches mistakes
 at that moment: if the owner, editing `bot_123`'s binding, mistypes
 `"window_days": 40` as `"window_days": 400` (above the schema's maximum of
@@ -290,7 +290,7 @@ strategy fills in the same fields:
 ```
 
 `params_schema` is optional and proposed. When present, the binding check
-validates a binding's `params` against it when the policy is written
+validates a binding's `params` against it when the bindings are written
 ([06-evolution-run.md](06-evolution-run.md)), so bad params are rejected at
 configuration time instead of at run start.
 
@@ -1709,7 +1709,7 @@ how verification works, or how service bots are published.
 | ID | Question | Current proposal |
 | --- | --- | --- |
 | S-1 | How agent definitions are uploaded at registration | One `multipart/form-data` request (§10). Alternative: upload each archive to a content endpoint first and register by digest |
-| S-2 | Should the registration record carry a JSON Schema for `params`? | Resolved (proposed field): an optional `params_schema` in the registration record (§2.2); the binding check validates a binding's `params` against it when the policy is written ([06-evolution-run.md](06-evolution-run.md)) |
+| S-2 | Should the registration record carry a JSON Schema for `params`? | Resolved (proposed field): an optional `params_schema` in the registration record (§2.2); the binding check validates a binding's `params` against it when the bindings are written ([06-evolution-run.md](06-evolution-run.md)) |
 | S-3 | Is `evaluation.add_train_cases` idempotent? | The sources do not say. Proposed: case id = content hash of the case, so a re-dispatched run that adds the same cases again creates no duplicates |
 | S-4 | Step types for the composed tier | Deferred until a second team needs to swap a piece (R19) |
 | S-5 | Should strategies get an export of the ledger (raw history) as a capability? | The previous design suggests it (Meta-Harness found raw history beats summaries). Planned as `ledger.read@1` for level 3 ([10-meta-evolution.md](10-meta-evolution.md)); not granted in the first iteration |

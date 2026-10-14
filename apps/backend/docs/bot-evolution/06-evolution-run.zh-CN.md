@@ -3,7 +3,7 @@
 > English version: [06-evolution-run.md](06-evolution-run.md)
 
 > 状态：草案（DRAFT）。[Bot 进化架构](design.zh-CN.md)中的一个服务。
-> 说明 Bot 的进化策略配置如何转化为运行，以及平台如何执行一次运行：
+> 说明 Bot 的绑定如何转化为运行，以及平台如何执行一次运行：
 > 触发器、幂等提交、租约作业与重新派发、长时操作、运行时与作业协议、
 > 沙箱，以及预算与紧急停止开关。
 
@@ -21,7 +21,7 @@
 
 | 负责 | 概要 | 章节 |
 | --- | --- | --- |
-| 进化策略配置与绑定 | 按 Bot 配置：运行哪些策略、何时运行、从哪个父版本开始、可以改变什么、验证有多严格、预算与参数是什么 | [§3](#3-进化策略配置与绑定) |
+| 绑定 | 按 Bot 配置：运行哪些策略、何时运行、从哪个父版本开始、可以改变什么、验证有多严格、预算与参数是什么 | [§3](#3-绑定) |
 | 触发器 | 创建运行的定时、手动和事件触发器 | [§4](#4-触发器) |
 | 运行生命周期 | `queued → running → completed \| failed \| cancelled \| budget_exhausted`；启动、运行期间、结束、取消 | [§5](#5-运行生命周期) |
 | 幂等的运行提交 | 提交返回运行 id；使用相同幂等键的重复提交返回相同的 id | [§6](#6-幂等提交与按-id-查询状态) |
@@ -67,8 +67,8 @@ RSI-08）。
 
 | 类型 | 含义 | 归属 | 生命周期 |
 | --- | --- | --- | --- |
-| `EvolutionPolicy` | 一个 Bot 的绑定列表 | Bot 所有者 / 租户管理员（存储在此） | 通过 `PUT …/policy` 整体替换，以 ETag 标识版本 |
-| `Binding` | 策略配置中的一项：策略版本、触发器、父版本、允许的基因、验证配置、预算、参数，以及（提议）自动晋升上限和发布 | Bot 所有者 / 租户管理员 | 随策略配置创建、修改或删除；每次变更都会针对 Bot 进行检查 |
+| `BotBindings` | 一个 Bot 的绑定列表 | Bot 所有者 / 租户管理员（存储在此） | 通过 `PUT …/bindings` 整体替换，以 ETag 标识版本 |
+| `Binding` | Bot 的绑定中的一项：策略版本、触发器、父版本、允许的基因、验证配置、预算、参数，以及（提议）自动晋升上限和发布 | Bot 所有者 / 租户管理员 | 随绑定列表创建、修改或删除；每次变更都会针对 Bot 进行检查 |
 | `Trigger` | 使绑定创建运行的原因：定时、仅手动，或平台事件 | 绑定的一部分 | 同绑定 |
 | `Budget` | 单次运行的花费上限：美元、挂钟时间、rollout 次数、token | 绑定的一部分；在运行上冻结 | 运行开始时冻结；已花费的数额永不重置 |
 | `Run` | 绑定的一次执行，策略版本、参数、父版本和预算在开始时冻结；运行 id 是它唯一的句柄 | 平台（本服务） | `queued → running → completed \| failed \| cancelled \| budget_exhausted`；永不删除 |
@@ -187,9 +187,9 @@ class Binding:
 }
 ```
 
-### 2.3 EvolutionPolicy
+### 2.3 BotBindings
 
-每个 Bot 恰好有**一个**进化策略配置，该配置是一个绑定列表。每个绑定把一个策略挂接到
+每个 Bot 恰好有**一个** `BotBindings` 文档，即它的绑定列表。每个绑定把一个策略挂接到
 Bot 上，并带有自己的触发器、允许的基因、验证配置、预算和参数。多个绑定意味着多个策略
 （或以不同设置运行的同一策略）按不同的时间表改进 Bot 的不同方面：例如，`bind_01` 每晚
 对 `persona` 和 `skills` 运行 ClawEvolve，`bind_02` 每周对 `memory` 运行
@@ -201,8 +201,8 @@ Bot 上，并带有自己的触发器、允许的基因、验证配置、预算�
 
 ```python
 @dataclass(frozen=True)
-class EvolutionPolicy:
-    bot: BotRef                         # the bot this policy belongs to (owner + bot id, 09-evolution-api.md §2.7)
+class BotBindings:
+    bot: BotRef                         # the bot these bindings belong to (owner + bot id, 09-evolution-api.md §2.7)
     bindings: list[Binding]             # one entry per strategy attached to the bot
     etag: str                           # changes on every successful PUT; used with If-Match
     updated_at: datetime
@@ -211,7 +211,7 @@ class EvolutionPolicy:
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// Evolution policy of bot_123 (OpenClaw support bot)
+// Bindings of bot_123 (OpenClaw support bot)
 {
   "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "bindings": [
@@ -236,7 +236,7 @@ class EvolutionPolicy:
       "params": {}
     }
   ],
-  "etag": "\"pol-v12\"",
+  "etag": "\"bind-v12\"",
   "updated_at": "2026-10-06T08:00:00Z",
   "updated_by": "user_owner_5"
 }
@@ -474,9 +474,9 @@ class RunSummary:
 {"rounds": 3, "notes": "two candidates submitted; round 2 accepted", "extra": {"findings": 5}}
 ```
 
-## 3. 进化策略配置与绑定
+## 3. 绑定
 
-Bot 的**进化策略配置**（evolution policy）是一个**绑定**（binding）列表。不同的
+Bot 的**绑定**（bindings）是挂接到它上的策略列表。不同的
 Bot 使用不同的策略，一个 Bot 也可以使用多个策略（例如每晚对 persona 和 skills
 运行 ClawEvolve，每周对 memory 运行记忆整合）；多个绑定的含义见 §2.3。
 
@@ -509,7 +509,7 @@ Bot 使用不同的策略，一个 Bot 也可以使用多个策略（例如每�
 
 ### 3.2 绑定检查
 
-写入策略配置时，每个新增或修改的绑定都会针对 Bot 进行检查。不匹配会在配置时
+写入绑定时，每个新增或修改的绑定都会针对 Bot 进行检查。不匹配会在配置时
 被拒绝，而不是在一次付费运行的中途：
 
 1. 策略版本已注册、符合一致性要求且未被禁用。
@@ -526,7 +526,7 @@ Bot 使用不同的策略，一个 Bot 也可以使用多个策略（例如每�
 8. 如果策略的注册记录中有 `params_schema`（提议，
    [03-strategy.zh-CN.md](03-strategy.zh-CN.md)），则 `params` 需通过其校验。
 
-提交运行时会再次执行相同的检查，因为自写入策略配置以来，Bot（其引擎、其基因组
+提交运行时会再次执行相同的检查，因为自写入绑定以来，Bot（其引擎、其基因组
 `policy`）或策略（紧急停止开关）可能已经变化。ClawEvolve 在
 `singlebox/bot-runtime.ts` 中的 `active_engine='openclaw'` 和
 `bot_type='personal'` 过滤条件变为检查 2。
@@ -886,7 +886,7 @@ worker 是平台运行的容器。作为 worker 的 Bot（“runner bot”）随
 - **升级：** 一次运行中连续 N 个候选被拒绝（提议默认 N = 5）会停止该运行并通知
   所有者。运行以 `cancelled` 结束，`end_reason: "consecutive_rejections"`（提议）。
 
-上限在哪里配置尚未确定（[§17](#17-待定决策)）；提议在进化策略配置上增加 `limits`
+上限在哪里配置尚未确定（[§17](#17-待定决策)）；提议在 Bot 的绑定文档上增加 `limits`
 字段用于 Bot 级上限，在租户设置中配置租户级上限。
 
 ### 11.3 紧急停止开关
@@ -907,7 +907,7 @@ worker 是平台运行的容器。作为 worker 的 Bot（“runner bot”）随
 
 | 表 | 键 | 内容 |
 | --- | --- | --- |
-| `evolution_policy` | `(owner_id, bot_id)` | 绑定文档及其 ETag |
+| `evolution_bindings` | `(owner_id, bot_id)` | 绑定文档及其 ETag |
 | `evolution_run` | `run_id` | `Run` 记录：冻结输入、状态、尝试次数、用量 |
 | `evolution_run_key` | `(owner_id, bot_id, idempotency_key)` | `run_id`；使提交幂等 |
 | `evolution_job` | `job_id` | 租约持有者、到期时间、fencing token、尝试次数 |
@@ -927,12 +927,12 @@ worker 是平台运行的容器。作为 worker 的 Bot（“runner bot”）随
 无关：§14 中的 HTTP 端点是基于它们的交付适配器。
 
 ```python
-class EvolutionPolicyService(Protocol):
-    async def get_policy(self, bot: BotRef) -> EvolutionPolicy:
-        """Return the bot's policy; an empty bindings list if none was written."""
+class BindingsService(Protocol):
+    async def get_bindings(self, bot: BotRef) -> BotBindings:
+        """Return the bot's bindings; an empty bindings list if none was written."""
 
-    async def put_policy(self, bot: BotRef, bindings: list[Binding], *,
-                         expected_etag: str | None, actor: str) -> EvolutionPolicy:
+    async def put_bindings(self, bot: BotRef, bindings: list[Binding], *,
+                           expected_etag: str | None, actor: str) -> BotBindings:
         """Replace the bindings after running the binding checks (§3.2) on every
         new or changed binding. expected_etag None means "create; fail if one exists".
         Raises BindingCheckFailed (all violations listed) or PreconditionFailed."""
@@ -1048,18 +1048,18 @@ ETag、创建类 POST 上的 `Idempotency-Key` 请求头）。调用方是流水
 Bot 调用方被推迟（DR-3）。下文响应展示的是标准信封中的 `data` 载荷；信封、错误、
 分页和幂等性见 [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)。
 
-### GET /bots/{bot_id}/evolution/policy
+### GET /bots/{bot_id}/evolution/bindings
 
-读取 Bot 的进化策略配置（其绑定）。由 UI 后端、`avn evolve policy get` 和流水线
+读取 Bot 的绑定。由 UI 后端、`avn evolve bindings get` 和流水线
 调用。
 
 请求：
 
 ```http
-GET /openapi/v1/bots/bot_123/evolution/policy
+GET /openapi/v1/bots/bot_123/evolution/bindings
 ```
 
-响应 `200`（请求头 `ETag: "pol-v12"`）：
+响应 `200`（请求头 `ETag: "bind-v12"`）：
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -1077,7 +1077,7 @@ GET /openapi/v1/bots/bot_123/evolution/policy
       "params": {"window_days": 7, "max_rounds": 3, "poll_s": 60}
     }
   ],
-  "etag": "\"pol-v12\"",
+  "etag": "\"bind-v12\"",
   "updated_at": "2026-10-06T08:00:00Z",
   "updated_by": "user_owner_5"
 }
@@ -1085,12 +1085,12 @@ GET /openapi/v1/bots/bot_123/evolution/policy
 
 错误：`404` 未知 Bot。
 
-### PUT /bots/{bot_id}/evolution/policy
+### PUT /bots/{bot_id}/evolution/bindings
 
 替换 Bot 的绑定。对每个新增或修改的绑定执行绑定检查（§3.2），任一检查失败则拒绝
-整个文档。由 Bot 所有者或租户管理员通过 UI 或 `avn evolve policy set` 调用。
+整个文档。由 Bot 所有者或租户管理员通过 UI 或 `avn evolve bindings set` 调用。
 
-请求（请求头 `If-Match: "pol-v12"`）：
+请求（请求头 `If-Match: "bind-v12"`）：
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -1120,7 +1120,7 @@ GET /openapi/v1/bots/bot_123/evolution/policy
 }
 ```
 
-响应 `200`（请求头 `ETag: "pol-v13"`）：
+响应 `200`（请求头 `ETag: "bind-v13"`）：
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -1134,7 +1134,7 @@ GET /openapi/v1/bots/bot_123/evolution/policy
      "parent": "active", "allowed_genes": ["memory"], "verification_profile": "default@1",
      "budget": {"max_usd": 5, "max_wall_clock_s": 1800}, "params": {}}
   ],
-  "etag": "\"pol-v13\"",
+  "etag": "\"bind-v13\"",
   "updated_at": "2026-10-08T09:30:00Z",
   "updated_by": "user_owner_5"
 }
@@ -1156,7 +1156,7 @@ GET /openapi/v1/bots/bot_123/evolution/policy
 }
 ```
 
-其他错误：`412` ETag 不匹配（其他人修改了策略配置）；`404` 未知 Bot 或未知策略
+其他错误：`412` ETag 不匹配（其他人修改了绑定）；`404` 未知 Bot 或未知策略
 版本。
 
 ### POST /bots/{bot_id}/evolution/runs
@@ -1187,7 +1187,7 @@ GET /openapi/v1/bots/bot_123/evolution/policy
 错误：`404` 未知绑定；`409`，`error.code` 为以下之一：`evolution_frozen`、
 `strategy_disabled`、`binding_busy`（该绑定的某次运行仍处于活跃状态）、
 `ceiling_exceeded`、`idempotency_key_reused`（相同的键，不同的请求体）；`422`
-`binding_check_failed`（自写入策略配置以来 Bot 或策略已变化），或 `budget` 超出
+`binding_check_failed`（自写入绑定以来 Bot 或策略已变化），或 `budget` 超出
 绑定的预算。
 
 ### GET /bots/{bot_id}/evolution/runs
@@ -1989,14 +1989,14 @@ avn evolve run status --bot bot_123 run_7f3 --wait --output json
 ### 15.2 所有者添加一个绑定
 
 ```python
-policy = c.policy.get(bot_id="bot_123")
-bindings = policy.bindings + [Binding(
+current = c.bindings.get(bot_id="bot_123")
+bindings = current.bindings + [Binding(
     id="bind_02", strategy="platform/consolidate-memory@1.0.0",
     trigger={"schedule": "0 4 * * 0"}, parent="active", allowed_genes=["memory"],
     verification_profile="default@1",
     budget={"max_usd": 5, "max_wall_clock_s": 1800}, params={})]
 try:
-    c.policy.put(bot_id="bot_123", bindings=bindings, if_match=policy.etag)
+    c.bindings.put(bot_id="bot_123", bindings=bindings, if_match=current.etag)
 except BindingCheckFailed as e:                          # 422: fix the binding, nothing was written
     for d in e.details:
         print(d.binding, d.check, d.detail)
@@ -2114,7 +2114,7 @@ ClawEvolve 自身的代码见 [04-default-strategies.zh-CN.md](04-default-strate
 | [07-verification.zh-CN.md](07-verification.zh-CN.md) | 验证 → 运行 | 判定（对策略只提供聚合结果）；训练分数和点评 |
 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 晋升 | 运行 → 晋升 | 提交时的静态底线检查（`FloorCheck`）；供门禁和评审队列使用的已验证候选 |
 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) | 晋升 → 运行 | 没有运行需要等待的内容；运行候选的晋升在运行之后或独立于运行进行 |
-| [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) 进化 API 与客户端 | 客户端 → 运行 | 通过 SDK、CLI 和 UI 后端进行策略配置读写、运行提交、状态查询、取消、候选列表 |
+| [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) 进化 API 与客户端 | 客户端 → 运行 | 通过 SDK、CLI 和 UI 后端进行绑定读写、运行提交、状态查询、取消、候选列表 |
 | [10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md) 元进化（以后） | 元进化 → 运行 | 在改进问题上以相等预算运行候选机制 |
 
 ## 17. 待定决策
@@ -2123,14 +2123,14 @@ ClawEvolve 自身的代码见 [04-default-strategies.zh-CN.md](04-default-strate
 | --- | --- | --- |
 | D-1 | 控制面的模块位置 | A. 新建 `apps/evolution`（**推荐**）；B. Backend `core/evolution/`；C. ClawWeb 的 TS 控制面。见 [design.zh-CN.md](design.zh-CN.md) |
 | ER-1 | 自动晋升上限放在哪里 | 已解决（提议字段）：`auto_promote_ceiling` 和 `rollout` 是绑定字段（§2.2、§3.1），由晋升读取（[08-promotion.zh-CN.md](08-promotion.zh-CN.md)） |
-| ER-2 | Bot 级上限和 Bot 级冻结在哪里配置 | 提议：在进化策略配置上增加 `limits`（每日/每月美元）和 `frozen` 字段；租户级上限放在租户设置中 |
+| ER-2 | Bot 级上限和 Bot 级冻结在哪里配置 | 提议：在 Bot 的绑定文档上增加 `limits`（每日/每月美元）和 `frozen` 字段；租户级上限放在租户设置中 |
 | ER-3 | 迭代次数限制 | 治理要求把“迭代次数”列为单次运行限制之一，但平台看不到策略的轮次。提议：统计候选提交次数（`max_candidates`），或去掉该维度 |
 | ER-4 | 作业协议缺口：工作区内容 | 已解决：`GET …/workspaces/{workspace}/files`、`PUT …/workspaces/{workspace}/files/{path}` 和 `POST …/workspaces/{workspace}:patch`（§9.1、§14.2）；`ctx.log` 和 `ctx.artifacts` 分别是 `POST …/log` 和 `PUT …/artifacts/{name}` |
 | ER-5 | fencing token 的传递方式以及线上的取消 | 提议：请求头 `Evolution-Fencing-Token`；心跳响应中的 `cancelled` 标志 |
 | ER-6 | 租约时长与 `max_attempts` | 提议：60 秒租约、20 秒心跳、3 次尝试；可在注册中按策略覆盖 |
 | ER-7 | 每个绑定的并发与错过的触发 | 提议：每个绑定一个活跃运行；错过的时段跳过，不补跑 |
 | ER-8 | 运行提交请求体 | 已解决：`{binding, params?, budget?}`，因为允许的基因和验证配置来自绑定。仍待定：运维人员是否可以运行未绑定的策略版本（例如用于测试） |
-| ER-9 | 配置时的参数校验 | 已解决：注册记录中可选的 `params_schema`（提议，[03-strategy.zh-CN.md](03-strategy.zh-CN.md)），在写入策略配置时作为绑定检查 8 执行（§3.2） |
+| ER-9 | 配置时的参数校验 | 已解决：注册记录中可选的 `params_schema`（提议，[03-strategy.zh-CN.md](03-strategy.zh-CN.md)），在写入绑定时作为绑定检查 8 执行（§3.2） |
 | ER-10 | 策略自身的进度存储 | 策略把自身进度持久化到自己的存储中（已达成一致）。待定：处于沙箱中的 job worker 如何访问该存储——例如在注册记录中为策略自身存储声明一条出网白名单，或由平台提供一个平台从不解读的、按运行划分的不透明 blob。与 [03-strategy.zh-CN.md](03-strategy.zh-CN.md) 中的 S-8 是同一决策 |
 | ER-11 | 升级的结果 | 连续 N 次拒绝：以 `cancelled` 结束并带 `end_reason: "consecutive_rejections"`（提议），或以 `failed` 结束；N 的取值 |
 | ER-12 | `budget:charge` 的语义 | 鉴于平台调用会被自动计量，策略可以显式计入哪些费用 |

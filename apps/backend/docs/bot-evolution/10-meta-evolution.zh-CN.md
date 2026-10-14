@@ -440,7 +440,7 @@ ClawEvolve 已经在第 3 级上手工改进其机制：`scripts/calibrate_evolu
 机制验证（§8）。这一边界是待定决策 O-1。
 
 **机制引用。** 引用按进化策略家族划定作用域。`clawevolve/bot-evolution` 拥有
-`active`、`previous`、`canary` 和 `candidate/*` 引用，Bot 和租户通过其进化策略配置
+`active`、`previous`、`canary` 和 `candidate/*` 引用，Bot 和租户通过其绑定
 跟随或固定这些引用：
 
 | 引用 | 含义 | 由谁移动 |
@@ -1283,7 +1283,7 @@ if screen.candidate["precision_pct"] > screen.baseline["precision_pct"]:
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// One binding in bot_123's evolution policy (06-evolution-run.md); open decision O-2
+// One of bot_123's bindings (06-evolution-run.md); open decision O-2
 {
   "strategy": "clawevolve/bot-evolution@active",   // follow the family's active mechanism; "@2.0.0" pins
   "trigger": {"schedule": "0 2 * * *"},

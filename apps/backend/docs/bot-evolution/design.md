@@ -133,7 +133,7 @@ interactions, and open decisions.
 
 | Doc | Service | What it does | Lives in |
 | --- | --- | --- | --- |
-| [06-evolution-run.md](06-evolution-run.md) | **Evolution Run** | Keeps each bot's evolution policy (bindings); fires triggers; runs strategies as leased jobs with frozen inputs; serves the strategy context in process or over the Job Protocol; runs long-running operations; enforces sandboxing and budgets. | `apps/evolution` |
+| [06-evolution-run.md](06-evolution-run.md) | **Evolution Run** | Keeps each bot's bindings; fires triggers; runs strategies as leased jobs with frozen inputs; serves the strategy context in process or over the Job Protocol; runs long-running operations; enforces sandboxing and budgets. | `apps/evolution` |
 | [07-verification.md](07-verification.md) | **Verification** | Measures whether a candidate is better than its parent: suites with mandatory splits, graders, paired runs in eval bots, verification profiles, verdicts. Also serves train-split evaluation to strategies. | `apps/evolution`, executing through Backend eval env |
 | [08-promotion.md](08-promotion.md) | **Promotion** | Decides and applies: the gate, risk tiers, review queue, approvals, promotion of a revision to `active`, rollout, and going back. The only service that moves `active`. | Backend |
 | [09-evolution-api.md](09-evolution-api.md) | **Evolution API and clients** | The public access layer: shared API conventions (idempotency keys, ETags, errors, pagination, long-running work by id), the endpoint index, generated SDKs, and the `avn` CLI. | Gateway/Backend routes; SDK and CLI packages |
@@ -245,7 +245,7 @@ Each contract needs docs and conformance tests in the same change (R1, R25).
 | Engine memory projection contract | Plugin API | Backend apply → engine | [01-genome.md](01-genome.md) |
 | Episode / Feedback schema; engine session export (`session-export/v1` → v2) | Data contract; Plugin API | Engine → Experience → strategies | [02-experience.md](02-experience.md) |
 | Strategy port (`run(ctx)`), `StrategyContext`, registration record, capability catalog with per-engine providers | Plugin API | Evolution Run ↔ strategies | [03-strategy.md](03-strategy.md) |
-| Evolution policy (bindings), Run API, Job Protocol | Data contract; Service API; Plugin API (wire) | Owners, UI, CLI, job workers → Evolution Run | [06-evolution-run.md](06-evolution-run.md) |
+| Bindings, Run API, Job Protocol | Data contract; Service API; Plugin API (wire) | Owners, UI, CLI, job workers → Evolution Run | [06-evolution-run.md](06-evolution-run.md) |
 | Verification API; executor and grader plugin protocols | Service API; Plugin API | Evolution Run, Promotion, publish flow, Quality Task → Verification | [07-verification.md](07-verification.md) |
 | Gate, review, and promotion API | Service API | UI, CLI, Evolution Run → Promotion | [08-promotion.md](08-promotion.md) |
 | Experiment Ledger schema | Data contract | All services → Ledger → selectors, UI, level 3 | [05-experiment-ledger.md](05-experiment-ledger.md) |

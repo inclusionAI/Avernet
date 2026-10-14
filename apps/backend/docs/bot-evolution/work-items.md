@@ -63,7 +63,7 @@ the rest.
   declared: `experience.sessions@1`, `experience.feedback@1`, `agents@1`,
   `evaluation.train@1`) with per-engine
   provider contracts (for `agents@1`, the per-engine agent definition
-  contract and the upload and loading of definitions, see 03-strategy.md), the evolution policy (binding) schema and binding
+  contract and the upload and loading of definitions, see 03-strategy.md), the bindings schema and binding
   checks, run lifecycle and failure semantics (R11): idempotent run
   submission returning a run id, leased jobs re-dispatched after a crash
   with the same run id, strategy-owned progress persistence (no platform
@@ -144,7 +144,7 @@ the rest.
 - **Goal**: Service scaffold following Backend DI/plugin conventions; Run
   Orchestrator state machine with budgets, idempotent run submission
   (idempotency key → run id), and job leases with re-dispatch on expiry; Strategy Registry; Job Protocol
-  endpoints; evolution policy (bindings) with binding checks and triggers;
+  endpoints; bindings with binding checks and triggers;
   local profile (SQLite, in-process strategies) for singlebox; a reference
   strategy `platform/manual-patch` (submits a supplied patch; verified with
   deterministic checks) to exercise the loop end-to-end.
@@ -202,9 +202,9 @@ the rest.
 - **Module**: backend (gate floor, promotion), evolution (bindings)
 - **Goal**: Platform floor checks, risk-tier assignment, gate on the
   verification verdict under the binding's profile, review queue with diff +
-  verification report, approvals, owner policy (bindings, auto-promote
+  verification report, approvals, the bot's bindings (including the auto-promote
   ceiling), audit events, kill switches.
-- **Done when**: T1 auto-promotes under policy; T2 waits for approval; T3
+- **Done when**: T1 auto-promotes under the auto-promote ceiling; T2 waits for approval; T3
   rejected while locked; all decisions audited.
 
 ### RSI-13 Onboard ClawEvolve as default strategy

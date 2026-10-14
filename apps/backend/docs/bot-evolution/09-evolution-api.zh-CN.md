@@ -115,7 +115,7 @@ class ErrorEnvelope:
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// An error envelope: the policy changed since the caller read it
+// An error envelope: the bindings changed since the caller read them
 {
   "code": 412000,
   "message": "Precondition failed: the resource changed since it was read",
@@ -209,14 +209,14 @@ class IdempotencyRecord:
 ```python
 @dataclass(frozen=True)
 class Precondition:
-    etag: str              # opaque, strong, quoted on the wire: "\"pol-7\""
+    etag: str              # opaque, strong, quoted on the wire: "\"bind-7\""
     resource: str          # the path it belongs to
 ```
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// What the SDK keeps after GET /bots/bot_123/evolution/policy
-{"etag": "\"pol-7\"", "resource": "/openapi/v1/bots/bot_123/evolution/policy"}
+// What the SDK keeps after GET /bots/bot_123/evolution/bindings
+{"etag": "\"bind-7\"", "resource": "/openapi/v1/bots/bot_123/evolution/bindings"}
 ```
 
 ### 2.5 Operation（公开视图）
@@ -284,7 +284,7 @@ class ExitCode(IntEnum):
     USAGE = 2             # bad arguments, or a 400 validation error from the API
     NOT_FOUND = 3         # 404
     CONFLICT = 4          # 409 (incl. compare-and-swap, idempotency key reuse) and 412 / 428
-    POLICY_DENIED = 5     # the request violates the bot's evolution policy or a platform rule
+    POLICY_DENIED = 5     # the request violates the bot's bindings, its genome policy, or a platform rule
     BUDGET_EXCEEDED = 6   # a budget ceiling refuses the request
     TRANSIENT = 7         # network failure, 429, 502, 503, 504, or --wait timed out; safe to retry
 
@@ -309,7 +309,7 @@ class CommandSchema:
   "arguments": [],
   "flags": [
     {"name": "--bot", "type": "string", "required": true, "description": "Bot id"},
-    {"name": "--binding", "type": "string", "required": true, "description": "Binding of the bot's evolution policy to run"},
+    {"name": "--binding", "type": "string", "required": true, "description": "Which of the bot's bindings to run"},
     {"name": "--idempotency-key", "type": "string", "required": false, "description": "Reuse on retries; generated and printed when omitted"},
     {"name": "--wait", "type": "bool", "default": false, "description": "Repeat the status lookup until the run is terminal"},
     {"name": "--timeout", "type": "duration", "default": "2h", "description": "Give up waiting (the run continues) and exit 7"}
@@ -355,7 +355,7 @@ class BotRef:
 | 调用方 | 示例 | 接入面 | 典型调用 |
 | --- | --- | --- | --- |
 | **确定性流水线 / CI** | 夜间作业、技能变更后的 CI、产品后端 | 客户端 SDK，或在脚本中使用 `avn` | 启动运行、查询其状态、读取候选报告、在所有者的自动晋升策略允许范围内批准 |
-| **UI 后端** | 工作台的进化页面（过渡期为 AgentEvolve UI） | 客户端 SDK（TypeScript） | 人类在 UI 中所做的一切：编辑进化策略配置、评审队列、报告、晋升、浏览实验记录 |
+| **UI 后端** | 工作台的进化页面（过渡期为 AgentEvolve UI） | 客户端 SDK（TypeScript） | 人类在 UI 中所做的一切：编辑绑定、评审队列、报告、晋升、浏览实验记录 |
 | **人类操作员** | Bot 所有者、租户管理员、研究人员 | UI、`avn` | 一切操作，包括评审、晋升以及回到旧版本 |
 
 进化策略作业工作器是平台服务，通过进化策略 SDK 使用内部作业协议，而不是
@@ -527,8 +527,8 @@ SDK 在每个响应和每个错误上都暴露请求 id；`avn` 在失败时打�
   应答 `412`（`412000`）。如果缺少 `If-Match`，则应答
   `428 Precondition Required`（`428000`），因此客户端不会意外跳过这项
   检查。
-- 公开接口面上的第一个可变资源是 bot 的进化策略配置
-  （`GET|PUT /bots/{bot_id}/evolution/policy`）。
+- 公开接口面上的第一个可变资源是 bot 的绑定
+  （`GET|PUT /bots/{bot_id}/evolution/bindings`）。
 
 **请求体中的比较并交换**（compare-and-swap）用于引用（ref）移动。引用更新携带
 `expected_revision`：客户端认为该引用当前指向的修订版。不匹配时返回 `409`
@@ -569,7 +569,7 @@ SDK 在每个响应和每个错误上都暴露请求 id；`avn` 在失败时打�
 | `409020` | 动作与资源状态冲突（例如批准已被拒绝的候选、取消已结束的运行） | 否 | 4 |
 | `412000` | `If-Match` 与当前 `ETag` 不匹配 | 重新读取后 | 4 |
 | `428000` | 需要 `If-Match` 但缺失 | 添加后 | 4 |
-| `403xxx` / `422xxx`（策略系列） | 请求违反了 bot 的进化策略配置或平台规则：锁定基因、基因不在绑定的 `allowed_genes` 中、绑定检查失败、进化被紧急停止开关冻结、进化策略已禁用、候选在门禁下不可晋升 | 否 | 5 |
+| `403xxx` / `422xxx`（策略系列） | 请求违反了 Bot 的绑定、其基因组 policy 或平台规则：锁定基因、基因不在绑定的 `allowed_genes` 中、绑定检查失败、进化被紧急停止开关冻结、进化策略已禁用、候选在门禁下不可晋升 | 否 | 5 |
 | `403100` 区段（预算系列） | 预算上限拒绝了请求（每 bot 或每租户的日或月上限、每日最大晋升次数） | 在上限重置之前不可 | 6 |
 | `429000` | 被限流 | 是，在 `Retry-After` 之后 | 7 |
 | `502000`、`503000`、`504000` | 上游或服务不可用 | 是，使用相同的键 | 7 |
@@ -695,7 +695,7 @@ SDK 在每个响应和每个错误上都暴露请求 id；`avn` 在失败时打�
 - **非交互。** 除非给出 `--interactive`，否则不进行提示。
   改变 bot 所运行内容或丢弃工作的命令属于**破坏性**命令，需要 `--yes`：
   `genome promote`、`evolve review approve`、
-  `evolve review reject`、`evolve run cancel`、`evolve policy set`。没有
+  `evolve review reject`、`evolve run cancel`、`evolve bindings set`。没有
   `--yes` 时，它们以代码 2 退出，且不做任何更改。
 - **在 API 支持时提供 `--dry-run`。** 试运行必须由 API 应答（一个仅校验的
   请求），而不是由 CLI 模拟；
@@ -732,8 +732,8 @@ SDK 在每个响应和每个错误上都暴露请求 id；`avn` 在失败时打�
 | `avn experience feedback add --bot B FILE` / `feedback list --bot B` | `POST` / `GET /bots/{bot_id}/experience/feedback` | |
 | `avn evolve strategies list` / `strategies show ID --version V` | `GET /evolution/strategies` / `GET /evolution/strategies/{id}/versions/{version}` | |
 | `avn evolve capabilities` | `GET /evolution/capabilities` | |
-| `avn evolve policy get --bot B` | `GET /bots/{bot_id}/evolution/policy` | 将 `ETag` 打印为 `etag` |
-| `avn evolve policy set --bot B FILE --if-match ETAG --yes` | `PUT /bots/{bot_id}/evolution/policy` | `--if-match` 为必填 |
+| `avn evolve bindings get --bot B` | `GET /bots/{bot_id}/evolution/bindings` | 将 `ETag` 打印为 `etag` |
+| `avn evolve bindings set --bot B FILE --if-match ETAG --yes` | `PUT /bots/{bot_id}/evolution/bindings` | `--if-match` 为必填 |
 | `avn evolve run start --bot B --binding ID [--idempotency-key K] [--wait]` | `POST /bots/{bot_id}/evolution/runs`（使用 `--wait` 时另加 `GET .../runs/{run}`） | |
 | `avn evolve run list --bot B [--status S]` | `GET /bots/{bot_id}/evolution/runs` | |
 | `avn evolve run status --bot B RUN` | `GET /bots/{bot_id}/evolution/runs/{run}` | |
@@ -798,7 +798,7 @@ from typing import AsyncIterator, Protocol
 #   OutcomeStatus, Episode, Feedback: 02-experience.md
 #   Engine, ConformanceState, StrategyRegistration, Capability, Candidate: 03-strategy.md
 #   LedgerEntry: 05-experiment-ledger.md
-#   EvolutionPolicy, Run, RunStatus: 06-evolution-run.md
+#   BotBindings, Run, RunStatus: 06-evolution-run.md
 #   Suite, Evaluation: 07-verification.md
 #   Promotion, ReviewItem: 08-promotion.md
 # Page, PageParams, and Operation are this doc's (§2.2, §2.5).
@@ -832,11 +832,11 @@ class StrategiesClient(Protocol):
     async def get_version(self, strategy: str, version: str) -> StrategyRegistration: ...
     async def capabilities(self) -> list[Capability]: ...
 
-class PolicyClient(Protocol):
-    async def get(self, bot_id: str) -> tuple[EvolutionPolicy, str]:
-        """Returns the policy and its ETag."""
-    async def put(self, bot_id: str, policy: EvolutionPolicy, *, if_match: str) -> tuple[EvolutionPolicy, str]:
-        """Raises PreconditionFailed (412000) if the policy changed since it was read."""
+class BindingsClient(Protocol):
+    async def get(self, bot_id: str) -> tuple[BotBindings, str]:
+        """Returns the bindings and their ETag."""
+    async def put(self, bot_id: str, bindings: BotBindings, *, if_match: str) -> tuple[BotBindings, str]:
+        """Raises PreconditionFailed (412000) if the bindings changed since they were read."""
 
 class RunsClient(Protocol):
     async def start(self, bot_id: str, *, binding: str, params: dict | None = None,
@@ -881,7 +881,7 @@ class EvolutionClient(Protocol):
     genome: GenomeClient
     experience: ExperienceClient
     strategies: StrategiesClient
-    policy: PolicyClient
+    bindings: BindingsClient
     runs: RunsClient
     verification: VerificationClient
     review: ReviewClient
@@ -1075,8 +1075,8 @@ Idempotency-Key: ledger-export-bot_123-2026-10-08
 
 | 方法与路径 | 用途 | 约定 |
 | --- | --- | --- |
-| `GET /bots/{bot_id}/evolution/policy` | bot 的进化策略配置（绑定列表） | 返回 ETag |
-| `PUT /bots/{bot_id}/evolution/policy` | 替换进化策略配置（在此执行绑定检查） | ETag（必须携带 `If-Match`） |
+| `GET /bots/{bot_id}/evolution/bindings` | bot 的绑定（绑定列表） | 返回 ETag |
+| `PUT /bots/{bot_id}/evolution/bindings` | 替换绑定（在此执行绑定检查） | ETag（必须携带 `If-Match`） |
 | `POST /bots/{bot_id}/evolution/runs` | 启动某个绑定的一次运行 | key；202 + 运行 id |
 | `GET /bots/{bot_id}/evolution/runs` | 列出运行（`status=`） | Page |
 | `GET /bots/{bot_id}/evolution/runs/{run}` | 运行状态、轮次、已用预算 | |
@@ -1123,12 +1123,12 @@ Idempotency-Key: nightly-bot_123-2026-10-08
 }
 ```
 
-共享约定示例 2：进化策略配置上的 `If-Match`。
+共享约定示例 2：绑定上的 `If-Match`。
 
 ```http
-PUT /openapi/v1/bots/bot_123/evolution/policy
+PUT /openapi/v1/bots/bot_123/evolution/bindings
 Content-Type: application/json
-If-Match: "pol-7"
+If-Match: "bind-7"
 ```
 
 ```jsonc
@@ -1144,7 +1144,7 @@ If-Match: "pol-7"
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// 200 with the new ETag header: ETag: "pol-8"
+// 200 with the new ETag header: ETag: "bind-8"
 {
   "code": 200000,
   "message": "OK",
@@ -1155,7 +1155,7 @@ If-Match: "pol-7"
 
 过时的标签得到 `412000`（[§2.1](#21-envelope-与-errorenvelope)）；缺少
 `If-Match` 得到 `428000`。（上面响应中的 `data` 为示例而做了缩减；完整的
-进化策略配置形态由负责文档定义。）
+绑定形态由负责文档定义。）
 
 **内部（不属于公开 API 或客户端 SDK）。** 位于 `/evolution/v1/...` 下的作业
 协议供作业工作器类进化策略认领运行并调用其上下文，由
@@ -1323,7 +1323,7 @@ Idempotency-Key: cancel-op_19a
 ### 14.1 夜间流水线（Python SDK）
 
 一个定时作业在 `user_owner_5` 拥有的 bot 上启动今晚的运行、等待其完成，
-并批准所有者的进化策略配置允许流水线批准的候选。由于流水线不是所有者，
+并批准所有者为 Bot 设置的绑定允许流水线批准的候选。由于流水线不是所有者，
 每次调用都传入 `entity_id`。键是确定性的，因此即使作业本身崩溃并重新运行，它也会
 重新关联到同一次运行，而不是启动第二次运行。
 
@@ -1351,7 +1351,7 @@ async def nightly(owner_id: str, bot_id: str, binding: str, day: str) -> None:
         try:
             await c.review.approve(bot_id, cand.candidate_id, entity_id=owner_id, reason="nightly auto-policy",
                                    idempotency_key=f"nightly-{owner_id}-{bot_id}-{day}/approve/{cand.candidate_id}")
-        except PolicyDenied as e:                           # the owner's policy does not let pipelines approve this tier
+        except PolicyDenied as e:                           # the owner's bindings do not let pipelines approve this tier
             print("left for human review:", cand.candidate_id, e.code, e.request_id)
 
 asyncio.run(nightly("user_owner_5", "bot_123", "bind_01", "2026-10-08"))
@@ -1391,7 +1391,7 @@ esac
 }
 ```
 
-### 14.3 安全地编辑进化策略配置（Python SDK）
+### 14.3 安全地编辑绑定（Python SDK）
 
 使用 `If-Match` 进行读-改-写；遇到 `412` 时重新读取并重新应用。
 
@@ -1400,16 +1400,16 @@ from avernet_evolution import Client, PreconditionFailed
 
 async def raise_budget(c: Client, bot_id: str, binding_id: str, max_usd: int) -> None:
     for _ in range(3):
-        policy, etag = await c.policy.get(bot_id)        # caller is the owner: no entity_id
-        for b in policy.bindings:
+        current, etag = await c.bindings.get(bot_id)     # caller is the owner: no entity_id
+        for b in current.bindings:
             if b.id == binding_id:
                 b.budget.max_usd = max_usd
         try:
-            await c.policy.put(bot_id, policy, if_match=etag)
+            await c.bindings.put(bot_id, current, if_match=etag)
             return
         except PreconditionFailed:
             continue                                         # someone else changed it; read again
-    raise RuntimeError("policy kept changing; giving up")
+    raise RuntimeError("bindings kept changing; giving up")
 ```
 
 ### 14.4 UI 后端中的评审队列（TypeScript SDK）
@@ -1464,11 +1464,11 @@ avn genome promote --bot bot_123 --revision r41 \
 | [02-experience.zh-CN.md](02-experience.zh-CN.md) | API → 经验 | 片段查询、反馈记录 |
 | [03-strategy.zh-CN.md](03-strategy.zh-CN.md)（进化策略注册表） | API → 注册表 | 进化策略注册（`avn strategy publish`）、列表、能力目录；进化策略 SDK 是一个独立的包 |
 | [05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md) | API → 实验记录 | 条目查询、以操作形式进行的导出 |
-| [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) | API → 运行 | 进化策略配置（ETag）、运行提交（幂等键 → 运行 id）、按 id 查询状态、取消；预算、紧急停止开关和绑定检查产生策略和预算错误系列；内部作业协议使用相同的约定 |
+| [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) | API → 运行 | 绑定（ETag）、运行提交（幂等键 → 运行 id）、按 id 查询状态、取消；预算、紧急停止开关和绑定检查产生策略和预算错误系列；内部作业协议使用相同的约定 |
 | [07-verification.zh-CN.md](07-verification.zh-CN.md) | API → 验证 | 套件、以操作形式进行的临时评估 |
 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) | API → 晋升 | 候选报告、评审队列、批准/拒绝、晋升（包括回到旧版本） |
 | 流水线与 CI | 调用方 → API | 客户端 SDK 或 `avn`；确定性的幂等键；退出码 |
-| UI 后端 | 调用方 → API | TypeScript SDK；编辑进化策略配置时使用 ETag；每个用户操作一个键 |
+| UI 后端 | 调用方 → API | TypeScript SDK；编辑绑定时使用 ETag；每个用户操作一个键 |
 | 人类操作员 | 调用方 → API | `avn` 和 UI |
 | Backend OpenAPI v1 适配器 | 被本层复用 | `Envelope`、`ErrorEnvelope`、`Page`、`PageParams`、envelope 构造器与错误映射 |
 
