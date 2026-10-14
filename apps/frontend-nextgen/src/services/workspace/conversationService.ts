@@ -69,30 +69,37 @@ export const conversationService = {
     };
   },
 
-  /** 管理 Bot(origin=mine)会话分页;scope=favorite 走收藏会话接口。 */
+  /** 管理 Bot(origin=mine)会话分页;scope=favorite 走收藏会话接口(不携带 session_key)。 */
   async listManagedSessions(
     bot: ChatBotView,
     userId: string,
     scope: ConversationSessionScope,
     page: number = 1,
     pageSize: number = BOT_SESSION_PAGE_SIZE,
+    sessionKey: string = '',
   ): Promise<DomainResult<BotSessionPageView>> {
     if (scope === 'favorite' && supportsBotSessionFavorites(bot.engine)) {
       return botSessionService.listFavoriteSessionsPage(bot, userId, page, pageSize);
     }
-    const result = await botSessionService.listSessionsPage(bot, userId, page, pageSize);
+    const result = await botSessionService.listSessionsPage(bot, userId, page, pageSize, sessionKey);
     return result.ok ? { ok: true, data: await conversationFavoriteService.hydrate(bot, userId, result.data) } : result;
   },
 
-  /** Human→Bot 好友 Bot 会话分页:鉴权 Human 既作 user_id 也作 f_user_id。 */
+  /** Human→Bot 好友 Bot 会话分页:鉴权 Human 既作 user_id 也作 f_user_id;
+   *  scope=favorite 走收藏接口,supportsBotSessionFavorites 保留引擎能力边界(TEClaw 回退普通列表)。 */
   async listFriendBotSessions(
     bot: ChatBotView,
     userId: string,
     page: number = 1,
     pageSize: number = BOT_SESSION_PAGE_SIZE,
+    scope: ConversationSessionScope = 'all',
+    sessionKey: string = '',
   ): Promise<DomainResult<BotSessionPageView>> {
     const friendBot = { ...bot, isFriendBot: true };
-    const result = await botSessionService.listSessionsPage(friendBot, userId, page, pageSize);
+    if (scope === 'favorite' && supportsBotSessionFavorites(bot.engine)) {
+      return botSessionService.listFavoriteSessionsPage(friendBot, userId, page, pageSize);
+    }
+    const result = await botSessionService.listSessionsPage(friendBot, userId, page, pageSize, sessionKey);
     return result.ok
       ? { ok: true, data: await conversationFavoriteService.hydrate(friendBot, userId, result.data) }
       : result;

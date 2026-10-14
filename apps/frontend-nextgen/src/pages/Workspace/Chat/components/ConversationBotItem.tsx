@@ -24,6 +24,7 @@ import { ListErrorState } from '../../components/ListErrorState';
 import { ConversationFriendGroup } from './ConversationFriendGroup';
 import { ConversationOriginFilter } from './ConversationOriginFilter';
 import { ConversationSessionList } from './ConversationSessionList';
+import { ConversationSessionSearch } from './ConversationSessionSearch';
 import { ConversationFriendRowsSkeleton } from './ConversationSkeletons';
 
 export interface ConversationBotItemOthers {
@@ -50,8 +51,10 @@ export interface ConversationBotItemProps {
   /** 当前 Bot 下选中的 Session(跨 origin 高亮)。 */
   selectedSessionId: string | null;
   origin: ConversationOrigin;
-  /** 生效读取范围(managed mine 用;friend 恒 all)。 */
+  /** 生效读取范围(managed mine 用;friend 读 scopeByFriendBotId)。 */
   scope: ConversationSessionScope;
+  /** 该 Bot 已生效的 sessionKey 条件(空串 = 未生效);仅 all 范围下允许提交新条件。 */
+  sessionKey: string;
   /** mine / friend 交互会话列表;undefined 视为未加载(不判空)。 */
   sessions?: ConversationSessionListState;
   /** 仅 managed 传入:others 好友分组区数据。 */
@@ -59,6 +62,8 @@ export interface ConversationBotItemProps {
   onToggle(): void;
   onOriginChange(origin: ConversationOrigin): void;
   onScopeChange(scope: ConversationSessionScope): void;
+  /** 提交 sessionKey 搜索(组件内已 trim;空串清除条件);装配层写 Store 并展开该 Bot。 */
+  onSearchSession(sessionKey: string): void;
   onCreateSession(): void;
   onSelectSession(sessionId: string): void;
   onLoadMore(): void;
@@ -115,11 +120,13 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   selectedSessionId,
   origin,
   scope,
+  sessionKey,
   sessions,
   others,
   onToggle,
   onOriginChange,
   onScopeChange,
+  onSearchSession,
   onCreateSession,
   onSelectSession,
   onLoadMore,
@@ -136,7 +143,14 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   // AgentCoding 行徽标展示模板名(区分多个 AgentCoding Bot);普通 Bot 展示引擎名,dmore「至多一枚」不变。
   const runtimeLabel = bot.isAgentCodingBot ? bot.templateName || 'AgentCoding' : getBotEngineLabel(bot.engine);
   const canFavorite = supportsBotSessionFavorites(bot.engine);
-  const filterActive = isManaged && (origin === 'others' || (canFavorite && scope === 'favorite'));
+  // 筛选/搜索的激活与可见:归属 others 或 favorite 范围点亮筛选;归属+范围筛选对管理 Bot 开放,
+  // 好友 Bot 仅在有收藏能力时暴露「会话」范围(TEClaw 无收藏接口,不发收藏请求)。
+  const filterActive = (isManaged && origin === 'others') || (canFavorite && scope === 'favorite');
+  const searchActive = sessionKey !== '';
+  const actionsPinned = expanded || filterActive || searchActive;
+  // 搜索入口仅在有效范围 all 下展示:favorite 清空并隐藏(切回 all 不恢复),others 强制 all 保留。
+  const searchVisible = scope === 'all';
+  const showFilter = isManaged || canFavorite;
   const handleToggle = () => {
     // AgentCoding Bot 是可点击入口,但不建普通 session:直接进专用 coding 对话页(与工坊「去使用」一致)。
     if (bot.isAgentCodingBot) {
@@ -182,9 +196,16 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           <div
             className={cn(
               'flex min-w-0 flex-1 items-center gap-2',
-              // 筛选/加号被钉住可见时(展开或筛选激活),文字同样让位。
-              hasSessionControls && 'group-hover:pr-24',
-              hasSessionControls && (expanded || filterActive) && 'pr-24',
+              // 文字让位与操作区实际覆盖等宽:悬停/键盘聚焦弹出操作区,或任一筛选(归属/范围/搜索)钉住可见。
+              // 非搜索让位 96px(渐隐带20 + 筛选24 + 搜索24 + 加号24 + 间隙2×2);
+              // 搜索生效按钮加宽至40px(截图 2.png 含内联标签)→ 让位加深至 112px(pr-28),
+              // 且悬停/聚焦不可回缩;非钉住时仅悬停/键盘聚焦临时让位。
+              hasSessionControls &&
+                (searchActive
+                  ? 'pr-28 group-hover:pr-28 group-focus-within:pr-28'
+                  : actionsPinned
+                    ? 'pr-24'
+                    : 'group-hover:pr-24 group-focus-within:pr-24'),
             )}
           >
             <span className="min-w-0 truncate text-sm font-normal text-content-strong">
@@ -208,19 +229,25 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
               // 遮盖底撤除:按钮 hover 自带 muted 底,操作区不再叠一层与行底不一致的底色;
               // right-[34px] 使行尾箭头与「新建会话」之间保持与按钮间(gap-0.5)一致的 2px 等宽间隙。
               'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100',
-              (expanded || filterActive) && 'opacity-100',
+              // 展开或任一筛选(归属/范围/sessionKey 搜索)激活时钉住可见;
+              // 生效中的搜索在 Bot 收起时仍可见(截图 2.png 的常驻标签)。
+              actionsPinned && 'opacity-100',
             )}
           >
-            {isManaged && (
+            {showFilter && (
               <ConversationOriginFilter
                 botId={bot.botId}
                 origin={origin}
                 scope={scope}
+                supportsOrigin={isManaged}
                 supportsFavorites={canFavorite}
                 othersDisabled={section === 'team'}
                 onOriginChange={onOriginChange}
                 onScopeChange={onScopeChange}
               />
+            )}
+            {searchVisible && (
+              <ConversationSessionSearch value={sessionKey} onSearch={onSearchSession} />
             )}
             {!isOthers && (
               <IconButton

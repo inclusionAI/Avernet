@@ -322,3 +322,64 @@ describe('conversationStore', () => {
     expect(s.friendBotSessionsByBotId).toEqual({});
   });
 });
+
+describe('conversationStore selectedSessionSnapshot', () => {
+  const sessionOf = (sessionId: string) => ({
+    sessionId,
+    botId: 'bot-a:1',
+    title: sessionId,
+    messageCount: 0,
+    gmtCreate: '',
+    gmtModified: '',
+  });
+  const identity = {
+    botId: 'bot-a:1',
+    section: 'managed' as const,
+    origin: 'mine' as const,
+    scope: 'all' as const,
+    friendUserId: null,
+    sessionId: 's1',
+  };
+  const snapshotOf = () => ({
+    section: 'managed' as const,
+    botId: 'bot-a:1',
+    origin: 'mine' as const,
+    scope: 'all' as const,
+    friendUserId: null,
+    session: sessionOf('s1'),
+    friend: null,
+  });
+
+  it('写入快照后按同一选中身份保留,身份变化即卸下', () => {
+    const store = useConversationStore.getState();
+    store.setSelectedSessionSnapshot(snapshotOf());
+    expect(useConversationStore.getState().selectedSessionSnapshot?.session.sessionId).toBe('s1');
+
+    // 同一身份的重复 selectConversation(URL 回声/重复选择)不清除快照。
+    store.selectConversation(identity);
+    expect(useConversationStore.getState().selectedSessionSnapshot).not.toBeNull();
+
+    // 换会话/换范围/换归属/清空选中,任一身份变化即清空。
+    store.selectConversation({ ...identity, sessionId: 's2' });
+    expect(useConversationStore.getState().selectedSessionSnapshot).toBeNull();
+
+    store.setSelectedSessionSnapshot(snapshotOf());
+    store.selectConversation({ ...identity, scope: 'favorite' });
+    expect(useConversationStore.getState().selectedSessionSnapshot).toBeNull();
+
+    store.setSelectedSessionSnapshot(snapshotOf());
+    store.selectConversation({ ...identity, origin: 'others', friendUserId: 'f9' });
+    expect(useConversationStore.getState().selectedSessionSnapshot).toBeNull();
+
+    store.setSelectedSessionSnapshot(snapshotOf());
+    store.selectConversation({ ...identity, botId: null, section: null, sessionId: null });
+    expect(useConversationStore.getState().selectedSessionSnapshot).toBeNull();
+  });
+
+  it('reset 清空快照', () => {
+    const store = useConversationStore.getState();
+    store.setSelectedSessionSnapshot(snapshotOf());
+    store.reset();
+    expect(useConversationStore.getState().selectedSessionSnapshot).toBeNull();
+  });
+});

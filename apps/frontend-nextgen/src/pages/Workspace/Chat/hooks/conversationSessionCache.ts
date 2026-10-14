@@ -4,6 +4,7 @@ import type {
   ConversationBotSection,
   ConversationFriendDirectoryState,
   ConversationFriendGroupView,
+  ConversationOrigin,
   ConversationSessionListState,
   ConversationSessionScope,
   ManagedBotConversationView,
@@ -13,7 +14,7 @@ import type { BotSessionPageView } from '@/services/workspace/botSessionService'
 import { BOT_SESSION_PAGE_SIZE } from '@/services/workspace/botSessionService';
 import type { DomainResult } from '@/services/workspace/identityService';
 import type { managedBotConversationService } from '@/services/workspace/managedBotConversationService';
-import { useConversationStore } from '@/stores/conversationStore';
+import { useConversationStore, type ConversationState } from '@/stores/conversationStore';
 
 const EMPTY_FIELDS = {
   page: 1,
@@ -84,12 +85,27 @@ export const writeSessionState = (
   else store.setFriendBotSessions(botId, state);
 };
 
+/** 会话列表过滤上下文读取(缺省值契约:无记录读 '' / 'all' / 0);store 传 getState() 快照。 */
+export const sessionKeyOf = (botId: string, store: ConversationState): string => store.sessionKeyByBotId[botId] ?? '';
+
+/** 好友 Bot 生效范围:仅好友目录使用,不参与 URL 投影。 */
+export const friendScopeOf = (botId: string, store: ConversationState): ConversationSessionScope =>
+  store.scopeByFriendBotId[botId] ?? 'all';
+
+/** 每 Bot 过滤代次:实际过滤变化 +1,响应写回前必须仍相等(含 A→B→A 场景)。 */
+export const filterRevisionOf = (botId: string, store: ConversationState): number =>
+  store.sessionFilterRevisionByBotId[botId] ?? 0;
+
+/** 请求身份:JSON 元组(含归属/范围/key/代次);改代次不重名,旧请求既不阻塞也不清洗新请求。 */
 export const requestKeyOf = (
   botId: string,
   section: ConversationBotSection,
+  origin: ConversationOrigin,
   scope: ConversationSessionScope,
+  sessionKey: string,
+  revision: number,
   more: boolean,
-): string => `${section}:${botId}:${scope}:${more ? 'more' : 'page'}`;
+): string => JSON.stringify([section, botId, origin, scope, sessionKey, revision, more ? 'more' : 'page']);
 
 // —— 管理 Bot others(origin=others)视角的缓存切片助手 ——
 
