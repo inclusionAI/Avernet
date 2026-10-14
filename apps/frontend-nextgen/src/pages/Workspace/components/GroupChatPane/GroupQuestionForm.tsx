@@ -19,7 +19,12 @@ import {
   buildGroupQuestionAnswers,
   GroupQuestionValidationError,
 } from '@/domain/collaboration/groupQuestions';
+import {
+  DEFAULT_DRAFT,
+  withDraftOverride,
+} from '@/domain/collaboration/groupQuestionFormDrafts';
 import { Button, ConfirmDialog, Textarea } from '@/components/ui';
+import { GroupQuestionNav } from './GroupQuestionNav';
 import { cn } from '@/utils/cn';
 import { useEffect, useRef, useState } from 'react';
 
@@ -35,20 +40,6 @@ export interface GroupQuestionFormProps {
   submitting: boolean;
   /** 连接是否可用；断线时禁用全部作答操作。 */
   connected: boolean;
-}
-
-const DEFAULT_DRAFT: QuestionDraft = { values: [], other: '', skipped: false };
-
-/** 末题跳过自动提交时，本帧 props 尚未携带最新草稿 → 本地覆盖后再构造 answers。 */
-function withDraftOverride(
-  drafts: QuestionDrafts,
-  questionId: string,
-  draft: QuestionDraft,
-): QuestionDrafts {
-  const next: QuestionDrafts = Object.create(null);
-  for (const [existingId, existing] of Object.entries(drafts)) next[existingId] = existing;
-  next[questionId] = draft;
-  return next;
 }
 
 export function GroupQuestionForm({
@@ -180,28 +171,15 @@ export function GroupQuestionForm({
   return (
     <div className="space-y-2 rounded-lg bg-muted/30 p-3">
       {questions.length > 1 ? (
-        <div role="group" aria-label="问题切换" className="flex flex-wrap items-center gap-1">
-          {questions.map((question, index) => (
-            <button
-              key={question.questionId}
-              type="button"
-              aria-current={index === activeIndexSafe ? 'step' : undefined}
-              disabled={disabled}
-              onClick={() => {
-                setActiveIndex(index);
-                setValidation(null);
-              }}
-              className={cn(
-                'rounded-t-md border-b-2 px-3 py-1.5 text-xs transition-colors disabled:opacity-50',
-                index === activeIndexSafe
-                  ? 'border-primary bg-primary/10 font-medium text-primary'
-                  : 'border-transparent bg-muted text-muted-foreground hover:bg-muted/70',
-              )}
-            >
-              {question.header || `问题 ${index + 1}`}
-            </button>
-          ))}
-        </div>
+        <GroupQuestionNav
+          questions={questions}
+          activeIndex={activeIndexSafe}
+          disabled={disabled}
+          onSelect={(index) => {
+            setActiveIndex(index);
+            setValidation(null);
+          }}
+        />
       ) : null}
 
       <div className="rounded-md border border-input bg-background p-3">

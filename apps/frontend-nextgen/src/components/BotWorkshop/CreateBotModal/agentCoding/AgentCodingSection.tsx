@@ -12,7 +12,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CodeRepositoryTenant } from '@/services/botWorkshop/agentCodingLegacyService';
 import { AgentCodingTemplateGrid } from './AgentCodingTemplateGrid';
 import { ApplicationCodingConfigForm } from './ApplicationCodingConfigForm';
-import { DynamicTemplateFields, validateDynamicTemplateFieldBindingsDetailed } from './DynamicTemplateFields';
+import { DynamicTemplateFields } from './DynamicTemplateFields';
+import { validateDynamicTemplateFieldBindingsDetailed } from './DynamicTemplateFieldLogic';
 import type { AppCodingConfigFormRef } from './legacy/appcoding/AppCodingConfigForm';
 
 interface Props {
