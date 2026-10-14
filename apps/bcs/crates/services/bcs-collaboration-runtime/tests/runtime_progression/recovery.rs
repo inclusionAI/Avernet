@@ -27,6 +27,9 @@ mod publication_recovery_tests;
 #[path = "terminal_im_recovery.rs"]
 mod terminal_im_tests;
 
+#[path = "branch_skip.rs"]
+mod branch_skip_tests;
+
 pub(super) struct FaultyRuns {
     fail_im_save: AtomicBool,
     fail_im_claim: AtomicBool,
@@ -56,12 +59,17 @@ pub(super) struct FaultyRuns {
     pause_opening_barrier: AtomicBool,
     startup_paused: Notify,
     fail_skip_after: AtomicUsize,
+    race_skip_node: StdMutex<Option<String>>,
+    cancel_before_skip: AtomicBool,
+    skip_conflicts: AtomicUsize,
     cancel_before_dispatch: AtomicBool,
     cancel_after_activation: AtomicBool,
     pub(super) node_reads: StdMutex<Vec<String>>,
     pub(super) get_run_calls: AtomicUsize,
     pub(super) list_node_runs_calls: AtomicUsize,
     pub(super) skip_calls: AtomicUsize,
+    pub(super) skip_batch_calls: AtomicUsize,
+    pub(super) status_batch_calls: AtomicUsize,
 }
 
 impl FaultyRuns {
@@ -78,9 +86,10 @@ impl FaultyRuns {
             hide_opening: AtomicBool::new(false), pause_start: AtomicBool::new(false),
             pause_opening_barrier: AtomicBool::new(false), startup_paused: Notify::new(),
             fail_skip_after: AtomicUsize::new(0), cancel_before_dispatch: AtomicBool::new(false),
+            race_skip_node: StdMutex::new(None), cancel_before_skip: AtomicBool::new(false), skip_conflicts: AtomicUsize::new(0),
             cancel_after_activation: AtomicBool::new(false), node_reads: StdMutex::new(Vec::new()),
             get_run_calls: AtomicUsize::new(0), list_node_runs_calls: AtomicUsize::new(0),
-            skip_calls: AtomicUsize::new(0) }
+            skip_calls: AtomicUsize::new(0), skip_batch_calls: AtomicUsize::new(0), status_batch_calls: AtomicUsize::new(0) }
     }
 
     async fn before_dispatch(&self, run_id: &str) -> ServiceResult<()> {
@@ -259,10 +268,28 @@ impl StateMachineRunRepoPort for FaultyRuns {
     }
     async fn skip_node(&self, run: &str, node: &str, at: u64) -> ServiceResult<bool> {
         self.skip_calls.fetch_add(1, Ordering::SeqCst);
+        self.inner.skip_node(run, node, at).await
+    }
+    async fn get_node_statuses(&self, run: &str, nodes: &[String]) -> ServiceResult<BTreeMap<String, StateMachineNodeStatus>> {
+        self.status_batch_calls.fetch_add(1, Ordering::SeqCst);
+        self.inner.get_node_statuses(run, nodes).await
+    }
+    async fn skip_nodes(&self, run: &str, nodes: &[String], at: u64) -> ServiceResult<bool> {
+        self.skip_batch_calls.fetch_add(1, Ordering::SeqCst);
+        let race_node = self.race_skip_node.lock().unwrap().take();
+        if let Some(node) = race_node {
+            self.inner.mark_node_running(run, &node, 1, "raced-dispatch".into(), at).await?;
+        }
+        if self.cancel_before_skip.swap(false, Ordering::SeqCst) {
+            self.inner.update_run_status(run, StateMachineRunStatus::Aborted, None, None, at, Some(at)).await?;
+        }
+        if self.skip_conflicts.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1)).is_ok() {
+            return Ok(false);
+        }
         if self.fail_skip_after.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1)) == Ok(1) {
             return Err(injected());
         }
-        self.inner.skip_node(run, node, at).await
+        self.inner.skip_nodes(run, nodes, at).await
     }
     async fn update_run_status(&self, run: &str, status: StateMachineRunStatus, output: Option<String>, error: Option<String>, at: u64, completed: Option<u64>) -> ServiceResult<bool> {
         if status == StateMachineRunStatus::Running && self.pause_start.swap(false, Ordering::SeqCst) {
@@ -342,7 +369,9 @@ async fn partial_future_skip_is_repaired_through_already_skipped_nodes() {
     let (h, runs) = harness(&["done"]).await;
     let started = h.start(loop_yaml(4, true, false, 1), false).await;
     let run = &started.view.run;
-    runs.fail_skip_after.store(2, Ordering::SeqCst);
+    let plan = h.plan(&run.run_id).await;
+    h.store.skip_node(&run.run_id, &iteration_id(&plan, 2), 100).await.unwrap();
+    runs.fail_skip_after.store(1, Ordering::SeqCst);
     assert!(terminal(&h, 0, run, "break-result").await.is_err());
     let before = h.store.list_node_runs(&run.run_id).await.unwrap();
     assert_eq!(before.iter().filter(|node| node.status == StateMachineNodeStatus::Skipped).count(), 1);
@@ -361,7 +390,11 @@ async fn nested_inner_exit_repairs_only_its_future_subtree_with_admission_disabl
     let run = &started.view.run;
     h.finish(0, run, "prepared").await;
     h.finish(1, run, "drafted").await;
-    runs.fail_skip_after.store(2, Ordering::SeqCst);
+    let plan = h.plan(&run.run_id).await;
+    let first = plan.node_metadata.values().find(|meta| meta.definition_node_id == "draft"
+        && meta.loop_path.as_ref().is_some_and(|path| path[0].iteration == 1 && path[1].iteration == 2)).unwrap();
+    h.store.skip_node(&run.run_id, &first.execution_node_id, 100).await.unwrap();
+    runs.fail_skip_after.store(1, Ordering::SeqCst);
     assert!(terminal(&h, 2, run, "approved-inner").await.is_err());
     let before = h.store.list_node_runs(&run.run_id).await.unwrap();
     assert_eq!(before.iter().filter(|node| node.status == StateMachineNodeStatus::Skipped).count(), 1);
@@ -436,7 +469,7 @@ async fn ordinary_dag_recovers_partial_skip_and_parallel_join_with_loop_disabled
     let (mut h, runs) = harness(&["approved"]).await;
     h.runtime = h.runtime.with_loop_execution_enabled(false);
     let started = h.start(judge_branch_yaml(), false).await;
-    runs.fail_skip_after.store(2, Ordering::SeqCst);
+    runs.fail_skip_after.store(1, Ordering::SeqCst);
     assert!(terminal(&h, 0, &started.view.run, "approved-result").await.is_err());
     recover(&h).await;
     assert!(h.prompt(1).await.contains("Publish final answer."));

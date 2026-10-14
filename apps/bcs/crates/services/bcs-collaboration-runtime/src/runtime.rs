@@ -1676,20 +1676,10 @@ impl CollaborationRuntime {
             .unwrap_or(&[]);
         let mut protected_targets = HashSet::new();
         collect_reachable_targets(state_machine, selected_targets, &mut protected_targets);
-        for (outcome, transition) in &node.transitions {
-            if outcome == selected_outcome {
-                continue;
-            }
-            self.skip_branch_targets(
-                state_machine,
-                run,
-                transition.targets.as_slice(),
-                skipped_at,
-                &protected_targets,
-            )
-            .await?;
-        }
-        Ok(())
+        let unselected_targets = node.transitions.iter()
+            .filter(|(outcome, _)| outcome.as_str() != selected_outcome)
+            .flat_map(|(_, transition)| transition.targets.iter().cloned()).collect::<Vec<_>>();
+        self.skip_branch_targets(state_machine, run, &unselected_targets, skipped_at, &protected_targets).await
     }
 
     async fn skip_branch_targets(
@@ -1700,41 +1690,51 @@ impl CollaborationRuntime {
         skipped_at: u64,
         protected_targets: &HashSet<String>,
     ) -> Result<(), CollaborationRuntimeError> {
-        let mut visited = HashSet::new();
-        let mut stack = initial_targets.to_vec();
-        while let Some(node_id) = stack.pop() {
-            if !visited.insert(node_id.clone()) || protected_targets.contains(&node_id) {
-                continue;
+        use bcs_service_api::port::repo::collaboration::STATE_MACHINE_NODE_BATCH_LIMIT;
+        let mut reachable = HashSet::new();
+        collect_reachable_targets(state_machine, initial_targets, &mut reachable);
+        let mut candidates: Vec<_> = reachable.difference(protected_targets).cloned().collect();
+        candidates.sort();
+        // A raced ancestor invalidates its entire write batch. Refresh scalar
+        // statuses and recalculate traversal, with bounded contention retries.
+        for _ in 0..3 {
+            let mut statuses = BTreeMap::new();
+            for ids in candidates.chunks(STATE_MACHINE_NODE_BATCH_LIMIT) {
+                statuses.extend(self.runs.get_node_statuses(&run.run_id, ids).await?);
             }
-            let Some(node_run) = self.runs.get_node_run(&run.run_id, &node_id).await? else {
-                continue;
-            };
-            if node_run.status != StateMachineNodeStatus::Skipped
-                && !crate::progression::is_unstarted(node_run.status)
-            {
-                continue;
-            }
-            if node_run.status != StateMachineNodeStatus::Skipped {
-                let skipped = self.runs.skip_node(&run.run_id, &node_id, skipped_at).await?;
-                if !skipped {
-                    let current = self.runs.get_node_run(&run.run_id, &node_id).await?;
-                    if !current.is_some_and(|node| node.status == StateMachineNodeStatus::Skipped) {
-                        continue;
-                    }
-                } else {
-                    log_state_machine_transition(run, &node_id, "skipped", &[], MessageLogStatus::Skipped);
+            let mut visited = HashSet::new();
+            let mut stack = initial_targets.to_vec();
+            let mut pending = Vec::new();
+            while let Some(node_id) = stack.pop() {
+                if !visited.insert(node_id.clone()) || protected_targets.contains(&node_id) { continue; }
+                match statuses.get(&node_id) {
+                    Some(StateMachineNodeStatus::Skipped) => {},
+                    Some(status) if crate::progression::is_unstarted(*status) => pending.push(node_id.clone()),
+                    _ => continue, // missing, Running or terminal nodes fence their descendants
+                }
+                if let Some(node) = state_machine.nodes.get(&node_id) {
+                    stack.extend(node.transitions.values().flat_map(|transition| transition.targets.iter().cloned()));
                 }
             }
-            let Some(node) = state_machine.nodes.get(&node_id) else {
-                continue;
-            };
-            for transition in node.transitions.values() {
-                for target in &transition.targets {
-                    stack.push(target.clone());
+            let mut raced = false;
+            // DFS pre-order places each traversed ancestor before descendants.
+            // Earlier batches are permanently Skipped; within a batch, CAS is
+            // all-or-nothing so a dispatch race cannot skip past a Running node.
+            for ids in pending.chunks(STATE_MACHINE_NODE_BATCH_LIMIT) {
+                if !self.runs.skip_nodes(&run.run_id, ids, skipped_at).await? {
+                    raced = true;
+                    break;
                 }
+                for node_id in ids {
+                    log_state_machine_transition(run, node_id, "skipped", &[], MessageLogStatus::Skipped);
+                }
+            }
+            if !raced { return Ok(()); }
+            if !self.runs.get_run(&run.run_id).await?.is_some_and(|run| run.status == StateMachineRunStatus::Running) {
+                return Ok(());
             }
         }
-        Ok(())
+        Err(ServiceError::Conflict("branch skip raced with node progression; retry recovery".into()).into())
     }
 
     async fn all_upstreams_completed(
@@ -2443,11 +2443,13 @@ impl CollaborationRuntime {
             self.persist_node_output(&compiled, &group, &run, node).await?;
         }
         let progression = crate::progression::derive(&compiled, run_id, &nodes)?;
-        for node_id in &progression.skip {
+        for node_ids in progression.skip.chunks(bcs_service_api::port::repo::collaboration::STATE_MACHINE_NODE_BATCH_LIMIT) {
             if !self.progression_run_is_active(run_id).await? { return Ok(()); }
-            self.runs.skip_node(run_id, node_id, bcs_protocol::now_ms()).await?;
+            if !self.runs.skip_nodes(run_id, node_ids, bcs_protocol::now_ms()).await? {
+                return Err(ServiceError::Conflict("recovery skip raced with node progression; retry next scan".into()).into());
+            }
         }
-        // Reload after independent skip commits so joins can observe the
+        // Reload after bounded atomic skip commits so joins can observe the
         // completed barrier in this sweep, including after a partial skip.
         let progression = if progression.skip.is_empty() {
             progression

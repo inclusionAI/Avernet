@@ -125,6 +125,7 @@ fn compile_definition(
         compiler_version,
         nodes: BTreeMap::new(),
         metadata: BTreeMap::new(),
+        authoring_paths: BTreeMap::new(),
         edges: Vec::new(),
         budget: LimitedWriter {
         written: 0,
@@ -139,7 +140,7 @@ fn compile_definition(
                 &format!("{MACHINE_PATH}.nodes.{id}"))?;
         }
     }
-    let Expansion { nodes, metadata, mut edges, .. } = expansion;
+    let Expansion { nodes, metadata, authoring_paths, mut edges, .. } = expansion;
     let mut executable_definition = definition.clone();
     let mut executable_machine = machine.clone();
     executable_machine.version = 1;
@@ -155,10 +156,8 @@ fn compile_definition(
         // Preserve the authoring location for errors emitted by the reused DAG validator.
         let message = error.to_string();
         let path = metadata.values().find(|meta| meta.loop_id.is_some() && message.contains(&meta.execution_node_id))
-            .map(|meta| match &meta.loop_id {
-                Some(id) => format!("{MACHINE_PATH}.nodes.{id}.loop.nodes.{}", meta.definition_node_id),
-                None => format!("{MACHINE_PATH}.nodes.{}", meta.definition_node_id),
-            }).unwrap_or_else(|| format!("{MACHINE_PATH}.nodes"));
+            .and_then(|meta| authoring_paths.get(&meta.execution_node_id).cloned())
+            .unwrap_or_else(|| format!("{MACHINE_PATH}.nodes"));
         invalid(path, message)
     })?;
     let mut requires = execution.definition.requires.clone().unwrap_or_default();
@@ -205,6 +204,8 @@ struct Expansion<'a> {
     compiler_version: &'static str,
     nodes: BTreeMap<String, StateMachineNodeDefinition>,
     metadata: BTreeMap<String, CompiledNodeMetadata>,
+    // Compiler-only provenance; never changes persisted plan bytes or hashes.
+    authoring_paths: BTreeMap<String, String>,
     edges: Vec<CompiledEdgeMetadata>,
     budget: LimitedWriter,
 }
@@ -369,6 +370,7 @@ impl Expansion<'_> {
         }
         check_expansion_budget(&mut self.budget, &compiled_node, &metadata, &self.edges[edge_start..])?;
         self.metadata.insert(execution_id.clone(), metadata);
+        self.authoring_paths.insert(execution_id.clone(), path.into());
         self.nodes.insert(execution_id, compiled_node);
         Ok(())
     }

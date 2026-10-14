@@ -100,6 +100,12 @@ async fn exercise(db: Arc<MysqlDbPlugin>, snapshot: StateMachineRunSnapshot) -> 
     snapshot_write_failure_is_visible(&store, db.as_ref(), &snapshot).await?;
     rerun_snapshot_failure_rolls_back_activation(&store, db.as_ref(), &snapshot).await?;
     batched_nodes::contract(db.as_ref(), &store).await?;
+    branch_skip::contract(&store).await;
+    branch_skip::capacity(&store).await;
+    assert!(MySqlCollaborationStore::new(db.clone(), "other".into())
+        .get_node_statuses("skip-contract", &["pending".into()]).await?.is_empty());
+    assert!(!MySqlCollaborationStore::new(db.clone(), "other".into())
+        .skip_nodes("skip-contract", &["pending".into()], 50).await?);
     Ok(())
 }
 

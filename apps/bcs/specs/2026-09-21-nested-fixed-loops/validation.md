@@ -383,3 +383,28 @@ bash apps/bcs/scripts/ci_test.sh --fast-fail
 保留原布局，仅做需求所需的局部修改。
 提交前另确认 `apps/bcs/crates/bootstrap/bcs/tests/provider_downlink_integration.rs`
 为 1366 行（当前 `origin/dev` 基线为 1365 行）；同样保留既有布局，未为行数检查拆分。
+
+## 2026-10-14：PR #2678 两项评审修复与数据库压力审查
+
+- DAG validator 的叶子错误保留完整 authoring path，覆盖两层缺失/未知 assignee 与三层
+  HumanInput 校验响应。路径仅留在编译器内存中，不改变 compiler v1/v2 plan 字节或 hash。
+- 前台 early break 和后台恢复均使用最多 200 节点的批操作。状态读取只投影 ID/status；
+  批写以 affected-row 数量为条件，任一节点不匹配即整批回滚；单节点不额外开事务。
+  内存/SQLite/真实 MySQL 共用状态、回滚、环境隔离与错误传播契约。
+- runtime 验证共享 join、已 Skipped 节点穿透、读后 Running 竞争、Run 取消、最多 3 次
+  前台重算，以及首批 200 节点已提交后重启/恢复。2047 节点故事不再接受 1980 次单条 skip；
+  现在断言 10 次 scalar 读取、10 次批写、0 次单节点 skip。
+- `cargo nextest run -p bcs-collaboration-runtime -p bcs-collaboration-store
+  -p bcs-service-api --retries 0 --no-fail-fast`：最终 **666/666 通过**，1 个真实 MySQL 用例
+  默认 ignored，另行执行通过。日志：`target/validation-2026-10-13/review-fixes-nextest-final.log`。
+- 一次性 MySQL 8.4.11：DB plugin conformance 通过；固定 Loop store 契约在 compiler v1/v2 ×
+  Text/Prepared 四组均通过，包含批 skip 回滚与 1980 行成本测试。最终单 Run 批跳过约
+  117–160 ms。日志：`target/validation-2026-10-13/review-fixes-real-mysql-final.log`。
+  测试容器与卷已删除，未停止原开发服务。
+- 早期直接并发 `cargo test runtime_progression` 曾遇到日志捕获测试少一条记录；串行定向
+  157/157 与上述进程隔离 nextest（零失败重试）均通过，没有修改该无关日志测试。
+- `git diff --check` 通过。新增源文件不超过 1000 行；已有 `runtime.rs` 6761 行、store
+  `lib.rs` 5025 行、`mysql_store.rs` 1938 行保持原布局，未扩大为拆分重构。
+- 本轮没有重跑全仓 coverage、Singlebox 或架构门禁；上文这些门禁的历史限制仍有效。
+  全 PR 数据库压力分析及上线前所需的多 Run 恢复容量验证见 `capacity.md`；不能把
+  单 Run MySQL 批 skip 成功等同于满容量并发上线验证完成。

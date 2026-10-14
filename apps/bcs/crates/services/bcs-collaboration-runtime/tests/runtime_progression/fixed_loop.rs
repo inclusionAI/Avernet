@@ -303,7 +303,7 @@ async fn near_capacity_outer_break_scans_and_skips_the_materialized_future_graph
     h.finish(2, run, "approved-inner").await;
     costs.get_run_calls.store(0, Ordering::SeqCst);
     costs.list_node_runs_calls.store(0, Ordering::SeqCst);
-    costs.skip_calls.store(0, Ordering::SeqCst);
+    costs.skip_calls.store(0, Ordering::SeqCst); costs.skip_batch_calls.store(0, Ordering::SeqCst); costs.status_batch_calls.store(0, Ordering::SeqCst);
     costs.node_reads.lock().unwrap().clear();
     let skip_started_at = std::time::Instant::now();
     h.finish(3, run, "done-outer").await;
@@ -313,10 +313,10 @@ async fn near_capacity_outer_break_scans_and_skips_the_materialized_future_graph
     assert_eq!(before_publish.nodes.iter().filter(|node| node.status == StateMachineNodeStatus::Skipped).count(), 2042);
     assert_eq!(before_publish.nodes.iter().filter(|node| node.status == StateMachineNodeStatus::Running).count(), 1);
     assert_eq!(h.finish(4, run, "published").await.view.unwrap().run.status, StateMachineRunStatus::Completed);
-    assert_eq!(costs.skip_calls.load(Ordering::SeqCst), 1980);
+    assert_eq!((costs.skip_calls.load(Ordering::SeqCst), costs.skip_batch_calls.load(Ordering::SeqCst), costs.status_batch_calls.load(Ordering::SeqCst)), (0, 10, 10));
     assert!(costs.get_run_calls.load(Ordering::SeqCst) <= 12);
     assert!(costs.list_node_runs_calls.load(Ordering::SeqCst) <= 8);
-    assert!(costs.node_reads.lock().unwrap().len() <= 2100);
+    assert!(costs.node_reads.lock().unwrap().len() <= 120, "remaining full-row reads: {}", costs.node_reads.lock().unwrap().len());
     eprintln!("nested capacity: nodes=2047 early_break_skipped=2042 skip={skip_elapsed:?} total={:?} repo_get_run={} repo_list_nodes={} repo_get_node={} repo_skip={}", started_at.elapsed(),
         costs.get_run_calls.load(Ordering::SeqCst), costs.list_node_runs_calls.load(Ordering::SeqCst), costs.node_reads.lock().unwrap().len(), costs.skip_calls.load(Ordering::SeqCst));
 }

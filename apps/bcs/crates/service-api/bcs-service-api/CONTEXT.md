@@ -178,6 +178,16 @@ dispatcher-to-Send boundary without native inject.
   Already committed RetryScheduled attempts use
   their saved identity; no extra attempt is created by progression itself.
 
+- Branch skipping uses scalar node-ID/status reads and atomic `skip_nodes` CAS
+  batches of at most 200 distinct IDs. Every requested node must still be
+  Pending/Ready/RetryScheduled in the active environment/Running Run; otherwise
+  the entire batch rolls back and returns false. Runtime preserves shared joins,
+  traverses already-Skipped ancestors, refreshes after a foreground race at most
+  three times, and surfaces persistent contention/errors for scanner backoff.
+  Recovery also batches skips rather than reading Run status per node. A
+  single-row guarded UPDATE needs no explicit transaction. Memory, SQLite and
+  real MySQL Text/Prepared use the same contract; no schema/Plugin API changes.
+
 - Failed-attempt recovery uses a repo-only `StateMachineFailureAction` saved
   alongside Failed/error/completed_at by one Running-attempt CAS. Retry scheduling
   clears this action; a saved FailRun cannot be retried. Missing/unknown legacy

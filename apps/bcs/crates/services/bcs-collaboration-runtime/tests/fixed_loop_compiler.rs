@@ -53,6 +53,33 @@ fn nested_fixture() -> Value {
 }
 
 #[test]
+fn nested_leaf_dag_errors_preserve_the_complete_authoring_path() {
+    for assignee in [None, Some(json!({"type": "bot_binding", "binding": "missing"}))] {
+        let mut value = nested_fixture();
+        let leaf = value["runtime"]["state_machine"]["nodes"]["outer"]["loop"]["nodes"]
+            ["inner"]["loop"]["nodes"]["review"].as_object_mut().unwrap();
+        match assignee {
+            Some(assignee) => { leaf.insert("assignee".into(), assignee); }
+            None => { leaf.remove("assignee"); }
+        }
+        let definition = serde_json::from_value(value).unwrap();
+        let error = compile_authoring_definition(definition, &FixedLoopLimits::default()).err().unwrap();
+        assert_eq!(error.path, "$.runtime.state_machine.nodes.outer.loop.nodes.inner.loop.nodes.review");
+        assert!(error.message.contains("assignee"), "{error:?}");
+    }
+    let mut value: Value = serde_yaml::from_str(THREE_LEVEL_HUMAN_YAML).unwrap();
+    value["runtime"]["state_machine"]["nodes"]["outer"]["loop"]["nodes"]["middle"]
+        ["loop"]["nodes"]["inner"]["loop"]["nodes"]["inner_review"]
+        .as_object_mut().unwrap().remove("assignee");
+    let result = validate_authoring_definition_yaml(ValidateCollaborationDefinitionYamlCommand {
+        definition_yaml: serde_yaml::to_string(&value).unwrap(), judge_available: true,
+    });
+    assert!(!result.valid);
+    assert!(result.errors.iter().any(|error| error.path ==
+        "$.runtime.state_machine.nodes.outer.loop.nodes.middle.loop.nodes.inner.loop.nodes.inner_review"), "{:?}", result.errors);
+}
+
+#[test]
 fn nested_example_expands_to_v2_with_complete_instance_paths() {
     let definition: CollaborationDefinition = serde_json::from_value(nested_fixture()).unwrap();
     let compiled = compile_authoring_definition(definition, &FixedLoopLimits::default()).unwrap();
