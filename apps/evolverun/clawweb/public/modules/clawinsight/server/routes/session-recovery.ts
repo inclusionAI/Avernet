@@ -6,6 +6,7 @@ import type { RecoveryActor } from "../services/repair/session-recovery/contract
 import { Router, json, type Request } from "express";
 import { SessionRecoveryError } from "../services/repair/session-recovery/errors.js";
 import { BotRuntimeError } from "@avernet/clawweb-shared/server/services/bot-runtime";
+import { redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
 import type { SessionRecoveryRuntime } from "../services/repair/session-recovery/contracts.js";
 export type SessionRecoveryRouterOptions = SessionRecoveryRuntime & {
   resolveActor?: (req: Request) => Promise<RecoveryActor | null>;
@@ -96,6 +97,10 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
       : (error as { type?: string })?.type === "entity.too.large" ? new SessionRecoveryError(413, "invalid_session_recovery", "请求过大")
       : (error as { type?: string })?.type === "entity.parse.failed" ? new SessionRecoveryError(422, "invalid_session_recovery", "JSON 格式无效")
       : new SessionRecoveryError(503, "recovery_unavailable", "自愈发送服务暂不可用；发送结果可能未知");
+    if (failure.status >= 500) console.error("[session-recovery] request failed", JSON.stringify({
+      method: req.method, path: redactPersistableText(req.path, 1024),
+      error: redactPersistableText(error instanceof Error ? error.stack ?? error.message : String(error), 4096),
+    }));
     res.status(failure.status).json({ error: failure.code, message: failure.message });
   });
   return router;
