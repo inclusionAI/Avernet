@@ -284,6 +284,7 @@ async fn build_session_files_service(
 /// when the calling thread already runs a tokio runtime (e.g. tests).
 /// The production path (`new_with_infrastructure`) is already async and
 /// calls [`build_session_files_service`] directly, without this overhead.
+#[cfg(any(test, feature = "test-utils"))]
 fn build_session_files_service_blocking(
     config: &BcsConfig,
     env: String,
@@ -309,6 +310,7 @@ fn build_session_files_service_blocking(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(any(test, feature = "test-utils"))]
 fn build_eventing_runtime_blocking(
     config: &BcsConfig,
     repo: Arc<dyn bcs_service_api::port::repo::EventRepoPort>,
@@ -894,12 +896,14 @@ fn build_configured_channel_providers(
     Ok(providers)
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 fn build_file_collaboration_template_service(
     config: &BcsConfig,
 ) -> Arc<dyn CollaborationTemplateService> {
     build_file_collaboration_template_service_with_judge_templates(config, config.llm.is_enabled())
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 fn build_standalone_collaboration_template_service(
     config: &BcsConfig,
 ) -> Arc<dyn CollaborationTemplateService> {
@@ -1219,6 +1223,7 @@ struct ProviderRepoBundle {
     organization_candidates: Arc<dyn bcs_service_api::OrganizationCandidateReadPort>,
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 fn memory_provider_repos(bots: Arc<dyn bcs_service_api::BotRepoPort>, source: bcs_domain::bot_provider::DownlinkDetectionSource) -> ProviderRepoBundle {
     let store = Arc::new(MemoryProviderStore::new());
     let bot_providers = Arc::new(bcs_bot_store::provider::MemoryBotProviderStore::new(bots, store.clone()));
@@ -1270,6 +1275,7 @@ fn db_provider_repos(
     }
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 fn memory_organization_services(
     provider_repos: &ProviderRepoBundle,
     provider_core: Arc<dyn ProviderCoreService>,
@@ -1482,6 +1488,7 @@ async fn build_gateway_principal_verifier_from_secret_access(
 
 const GROUP_SESSION_WS_TEST_SIGNING_KEY: &str = "test-only-group-session-key-at-least-32-bytes";
 
+#[cfg(any(test, feature = "test-utils"))]
 fn group_session_test_secret_access(config: &BcsConfig) -> Arc<dyn SecretAccessPort> {
     Arc::new(InMemorySecretAccess::with_entries([(
         config
@@ -1494,6 +1501,7 @@ fn group_session_test_secret_access(config: &BcsConfig) -> Arc<dyn SecretAccessP
     )]))
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 fn build_secret_access_blocking(config: &BcsConfig) -> crate::Result<Arc<dyn SecretAccessPort>> {
     std::thread::scope(|scope| {
         scope
@@ -1822,6 +1830,7 @@ fn build_openapi_v1_state(
     )
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 pub(crate) fn gateway_principal_verifier_for_tests() -> Arc<dyn PrincipalVerifier> {
     build_gateway_principal_verifier(
         &GatewayPrincipalConfig::default(),
@@ -2158,6 +2167,7 @@ mod candidate_search_wiring_tests {
     }
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 impl Default for BcsServerState {
     fn default() -> Self {
         let config = BcsConfig::default();
@@ -3258,6 +3268,7 @@ fn create_message_flow_builder(
     message_flow
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 fn finalize_message_flow(
     message_flow: BcsMessageFlow,
     system_message: Arc<dyn bcs_service_api::SystemMessageService>,
@@ -3746,6 +3757,7 @@ impl GroupHistoryBotRequestPort for BootstrapGroupHistoryBotRequestPort {
 
 impl BcsServer {
     /// Create a new BCS server.
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn new(config: BcsConfig) -> Self {
         let outbound_url_guard = outbound_url_guard_from_config(&config);
         let group_session_secret_access = build_secret_access_blocking(&config)
@@ -3775,6 +3787,7 @@ impl BcsServer {
         )
     }
 
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn new_allowing_private_outbound_for_tests(config: BcsConfig) -> Self {
         let group_session_secret_access = group_session_test_secret_access(&config);
         Self::new_with_outbound_url_guards(
@@ -3788,6 +3801,7 @@ impl BcsServer {
         )
     }
 
+    #[cfg(any(test, feature = "test-utils"))]
     fn new_with_outbound_url_guards(
         config: BcsConfig,
         provider_webhook_url_guard: OutboundUrlGuard,
