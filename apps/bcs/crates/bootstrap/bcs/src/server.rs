@@ -5519,6 +5519,10 @@ impl BcsServer {
 
     /// Run the server with graceful shutdown support.
     pub async fn run(self) -> Result<()> {
+        self.run_with_listener(None).await
+    }
+
+    pub(crate) async fn run_with_listener(self, listener: Option<tokio::net::TcpListener>) -> Result<()> {
         // Also stop durable workers if address parsing, lifecycle setup or bind
         // fails before the normal graceful-shutdown path is installed.
         let _delivery_shutdown_guard = crate::message_delivery_wiring::StartupGuard(
@@ -5591,9 +5595,17 @@ impl BcsServer {
             "Bot Coordination Service starting"
         );
 
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .map_err(crate::BcsError::IoError)?;
+        let listener = match listener {
+            Some(listener) => listener,
+            None => tokio::net::TcpListener::bind(addr)
+                .await
+                .map_err(crate::BcsError::IoError)?,
+        };
+        // The external-process test fixture consumes this record from its own
+        // child's stdout; a successful health check alone cannot identify it.
+        info!("BCS_LISTENING {}", serde_json::json!({
+            "address": listener.local_addr().map_err(crate::BcsError::IoError)?.to_string(),
+        }));
 
         let shutdown_lifecycle = self.state.lifecycle.clone();
         let final_lifecycle = self.state.lifecycle.clone();

@@ -61,7 +61,10 @@ impl ProcessManager {
     /// The process is tracked immediately after spawning to ensure cleanup
     /// even if health check fails.
     pub async fn start_bcs(&mut self, data_dir: &PathBuf) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
-        let port = next_port();
+        self.start_bcs_with_port(data_dir, 0).await
+    }
+
+    pub(crate) async fn start_bcs_with_port(&mut self, data_dir: &PathBuf, port: u16) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
 
         // Build BCS binary path
         let bcs_bin = std::env::current_exe()?
@@ -110,6 +113,8 @@ impl ProcessManager {
             .env_remove("BCS_MOCK_USER_ID")
             .env_remove("BCS_MOCK_USER_NICK_NAME")
             .env_remove("BCS_MOCK_USER_CHANNEL")
+            .env("RUST_LOG", "info")
+            .env("NO_COLOR", "1")
             // Run from the data dir
             .current_dir(data_dir)
             .stdout(Stdio::piped())
@@ -117,6 +122,7 @@ impl ProcessManager {
 
         // Spawn and track immediately - ensures cleanup on failure
         let mut child = cmd.spawn()?;
+        let (address_tx, address_rx) = std::sync::mpsc::channel();
 
         // Capture and print stdout/stderr in background
         if let Some(stdout) = child.stdout.take() {
@@ -124,6 +130,14 @@ impl ProcessManager {
                 use std::io::{BufRead, BufReader};
                 let reader = BufReader::new(stdout);
                 for line in reader.lines().flatten() {
+                    if let Some((_, record)) = line.split_once("BCS_LISTENING ") {
+                        if let Ok(record) = serde_json::from_str::<serde_json::Value>(record) {
+                            if let Some(address) = record["address"].as_str()
+                                .and_then(|address| address.parse::<std::net::SocketAddr>().ok()) {
+                                let _ = address_tx.send(address);
+                            }
+                        }
+                    }
                     println!("[BCS] {}", line);
                 }
             });
@@ -139,27 +153,32 @@ impl ProcessManager {
         }
 
         self.processes.push(child);
+        let child = self.processes.last_mut().expect("BCS child was tracked");
 
-        // Wait for server to be ready
+        // Only use the address reported after our child successfully binds.
         let client = reqwest::Client::new();
-        let url = format!("http://127.0.0.1:{}/health", port);
-        for _ in 0..30 {
-            match client
-                .get(&url)
-                .timeout(Duration::from_secs(1))
-                .send()
-                .await
-            {
-                Ok(response) if response.status().is_success() => {
-                    println!("[BCS] Server ready on port {}", port);
-                    return Ok(port);
-                }
-                Ok(_) => tokio::time::sleep(Duration::from_millis(100)).await,
-                Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+        let mut address = None;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while tokio::time::Instant::now() < deadline {
+            if let Some(status) = child.try_wait()? {
+                return Err(format!("BCS process exited before readiness: {}", status).into());
             }
+            if address.is_none() {
+                address = address_rx.try_recv().ok();
+            }
+            if let Some(address) = address {
+                if let Ok(response) = client.get(format!("http://{}/health", address))
+                    .timeout(Duration::from_secs(1)).send().await {
+                    if response.status().is_success() && child.try_wait()?.is_none() {
+                        println!("[BCS] Server ready on port {}", address.port());
+                        return Ok(address.port());
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
 
-        Err(format!("BCS server did not start on port {}", port).into())
+        Err("BCS process did not become ready".into())
     }
 
     /// Start a Moltis gateway process with skill setup (for E2E tests only)
