@@ -6,6 +6,7 @@
 //! registration request.
 mod client;
 mod token;
+mod replacement;
 
 use std::{net::SocketAddr, path::{Path, PathBuf}};
 
@@ -28,6 +29,9 @@ pub struct RegisterArgs {
     /// Back up and replace existing runtime configuration after stopping the bridge
     #[arg(long)]
     replace_existing: bool,
+    /// Provider administrator credential, required only to change an existing gateway webhook
+    #[arg(long, env = "BRIDGE_PROVIDER_ADMIN_TOKEN", hide_env_values = true)]
+    provider_admin_token: Option<String>,
     /// Display name for the registered Bot
     #[arg(long)]
     bot_name: String,
@@ -151,10 +155,15 @@ fn valid_provider_bot_ref(value: &str) -> bool {
 pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyhow::Result<()> {
     let identity = app.identity(&args.provider_auth)?;
     identity.preflight()?;
+    let bootstrap = if args.replace_existing { config::read_registration_source(path, true)? } else { config::read_bootstrap(path)? };
+    let saved_bin = bootstrap.previous.as_ref().and_then(|previous| previous.get("bot"))
+        .and_then(toml::Value::as_array).filter(|bots| bots.len() == 1)
+        .filter(|bots| bots[0].get("engine").and_then(toml::Value::as_str) == Some(args.engine.as_str()))
+        .and_then(|bots| bots[0].get("engine_bin")).and_then(toml::Value::as_str).map(Path::new);
     let factory = app.engines().get(&args.engine).with_context(|| format!(
         "Unknown engine '{}'; available engines: {}", args.engine, app.engines().ids().collect::<Vec<_>>().join(", ")))?;
     let engine_bin = if factory.requires_bin() {
-        Some(utils::resolve_engine_bin(args.engine_bin.as_deref(), factory.default_bin())?)
+        Some(utils::resolve_engine_bin(args.engine_bin.as_deref().or(saved_bin), factory.default_bin())?)
     } else {
         if args.engine_bin.is_some() { bail!("--engine-bin does not apply to engine '{}'", args.engine); }
         None
@@ -190,7 +199,6 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
         }
     }.canonicalize().context("Cannot resolve engine working directory")?;
     if !cwd.is_dir() { bail!("Engine working directory must be a directory"); }
-    let bootstrap = if args.replace_existing { config::read_registration_source(path, true)? } else { config::read_bootstrap(path)? };
     #[cfg(unix)]
     let _runtime_reservation = if bootstrap.previous.is_some() {
         let directory = dirs::home_dir().context("Cannot locate home directory")?.join(".bcn-bridge");
@@ -204,11 +212,12 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
         Mode::Gateway => Some(app.credentials().webhook_token(&provider_id)?),
         Mode::Plugin => None,
     };
-    let api_url = match args.api_url.clone().or_else(|| if bootstrap.previous.is_none() { bootstrap.settings.api_url.clone() } else { None }) {
+    let api_url = match args.api_url.clone().or(bootstrap.settings.api_url.clone()) {
         Some(url) => url,
         None => app.profile().default_api_url()?,
     };
     let client = RegistrationClient::new(&api_url).context("Invalid registration.api_url or HTTP client configuration")?;
+    if replacement::update(&args, path, &bootstrap, &provider_id, &api_url, &client, webhook_token.as_deref(), engine_bin.as_deref()).await? { return Ok(()); }
     let mut bot = toml::Table::new();
     bot.insert("provider_bot_ref".into(), "pending-identity".into());
     bot.insert("engine".into(), args.engine.clone().into());

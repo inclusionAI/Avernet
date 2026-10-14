@@ -210,9 +210,20 @@ active profile; this is not a remote connectivity claim.
 
 For intentional replacement, stop the bridge and use `register --replace-existing`.
 The CLI fences concurrent startup, retains a private rollback configuration
-beside the original and leaves the old state database untouched. Only successful
-registration installs the new config and selects a fresh state database. Failed
-registration leaves the original config intact.
+beside the original. For the same Provider, API endpoint, mode, engine and Bot
+reference (omitted reference keeps the saved one), local settings are updated
+without registration; Bot ID, credentials, engine options and state are retained.
+Changing the Provider, API endpoint or explicit Bot reference performs new
+registration and selects fresh state. Changing mode or engine for the same Bot
+is rejected. Failures leave the original local config intact.
+
+Gateway webhook changes use the existing authenticated Provider PATCH API.
+Supply `BRIDGE_PROVIDER_ADMIN_TOKEN` or `--provider-admin-token`; a registration
+token or Bot token cannot authorize that change. This credential is never saved
+in the configuration. Legacy gateway configurations without webhook metadata
+also require this authenticated update to verify the endpoint. If a network or
+response error leaves the remote update uncertain, verify its endpoint before
+restarting; the original local configuration remains available.
 
 Profile reuse also verifies an explicitly supplied `--provider-bot-ref`. Omit it
 to retain the saved identity (plugin mode generates a reference on first registration).

@@ -59,6 +59,25 @@ impl RegistrationClient {
         body(response, operation).await
     }
 
+    pub(super) async fn update_webhook(&self, provider: &str, reference: &str, bot_id: &str, webhook: &str, admin: &str) -> anyhow::Result<()> {
+        let mut url = self.endpoint("providers")?;
+        url.path_segments_mut().map_err(|_| anyhow::anyhow!("Invalid Provider API URL"))?
+            .push(provider).push("bots").push(reference);
+        let response = self.client.patch(url).headers(self.headers.clone()).bearer_auth(admin)
+            .json(&serde_json::json!({"webhook_url": webhook})).send().await
+            .map_err(|_| anyhow::anyhow!("Webhook update outcome is unknown; original local config retained. Verify the remote endpoint before restarting"))?;
+        let bytes = body(response, "Webhook update").await?;
+        let result: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|_| anyhow::anyhow!("Invalid webhook update response; verify the remote endpoint before restarting"))?;
+        if result.get("provider_id").and_then(|v| v.as_str()) != Some(provider)
+            || result.get("provider_bot_ref").and_then(|v| v.as_str()) != Some(reference)
+            || result.get("bot_uuid").and_then(|v| v.as_str()) != Some(bot_id)
+            || result.get("webhook_url").and_then(|v| v.as_str()) != Some(webhook) {
+            bail!("Webhook update returned a mismatched binding; original local config retained. Verify the remote endpoint before restarting");
+        }
+        Ok(())
+    }
+
     pub(crate) async fn register(&self, token: &str, name: &str, agent_code: &str, mode: &str, webhook: Option<&str>, provider_id: &str) -> anyhow::Result<BotRegistration> {
         let mut url = self.endpoint("openapi/v1/collaboration/register")?;
         let mut pairs = vec![
