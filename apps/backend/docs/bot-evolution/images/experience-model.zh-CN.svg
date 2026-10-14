@@ -45,11 +45,10 @@
 <text x="500.0" y="449.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">transcript: list[Turn]（与 episode 的 turns 形状相同）</text>
 <text x="500.0" y="466.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">grades: list[GraderResult {grader, score, critique}] · cost</text>
 <rect x="790" y="40" width="180" height="130" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
-<text x="880.0" y="71.0" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Feedback fb_204</text>
-<text x="880.0" y="88.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">kind · source</text>
-<text x="880.0" y="105.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">score · text · data</text>
-<text x="880.0" y="122.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">episode_id（可选）</text>
-<text x="880.0" y="139.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">idempotency_key</text>
+<text x="880.0" y="79.5" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Feedback fb_204</text>
+<text x="880.0" y="96.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">kind · source</text>
+<text x="880.0" y="113.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">score · text · data</text>
+<text x="880.0" y="130.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">episode_id（可选）</text>
 <rect x="790" y="250" width="180" height="64" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
 <text x="880.0" y="273.5" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">GenomeRevision r41</text>
 <text x="880.0" y="290.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">01-genome.zh-CN.md</text>

@@ -135,6 +135,16 @@ class Engine(StrEnum):
     HERMES = "hermes"
     TECLAW = "teclaw"
 
+class ExportContract(StrEnum):
+    """Versions of the engine session-export contract (§5). The provider of that
+    version turned the engine's raw session into this episode."""
+    V2 = "session-export/v2"
+
+class SessionStage(StrEnum):
+    """Which deployment of the bot served the session."""
+    SERVICE = "service"   # real traffic: the published version of a service bot, or any session of a personal bot
+    DRAFT = "draft"       # the owner testing a service bot's unpublished draft; never real users
+
 class PiiCategory(StrEnum):
     """Personal-data categories the redactor knows. New values are added by a reviewed
     change to the redactor, together with their rules (defaults: open decision X-4)."""
@@ -174,7 +184,8 @@ class Outcome:
 @dataclass(frozen=True)
 class SourceRef:
     engine: Engine                 # which engine ran the session
-    export_api: str                # contract version that produced it, e.g. "session-export/v2"
+    export_contract: ExportContract  # which contract version normalized it, e.g. "session-export/v2";
+                                     # re-normalizing the raw session later uses that version's rules
     session_id: str                # the engine's own session id
     content_digest: str            # hash of the raw exported session, for re-normalization
 
@@ -183,6 +194,7 @@ class Episode:
     episode_id: str                # "ep_91"
     bot: BotRef                    # the bot that ran the session (owner + bot id)
     revision_id: str | None        # None = unattributed (ran before revisions existed, or while drifted, §3)
+    stage: SessionStage            # "draft" sessions are kept but left out of per-revision comparisons (§3)
     started_at: datetime
     ended_at: datetime
     turns: list[Turn]
@@ -199,6 +211,7 @@ class Episode:
   "episode_id": "ep_91",
   "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "revision_id": "sha256:a90b…",                 // the genome revision the bot was running (r41)
+  "stage": "service",                            // a real user, not the owner testing a draft
   "started_at": "2026-10-07T09:12:00Z",
   "ended_at": "2026-10-07T09:14:31Z",
   "turns": [
@@ -213,7 +226,7 @@ class Episode:
   "cost": {"usd": 0.012, "input_tokens": 5210, "output_tokens": 388},
   "outcome": {"status": "user_corrected", "feedback": "partial refunds are allowed", "feedback_ids": ["fb_204"]},
   "redactions": ["email", "phone"],              // personal data removed before any strategy sees it
-  "source": {"engine": "openclaw", "export_api": "session-export/v2", "session_id": "s-20261007-0912",
+  "source": {"engine": "openclaw", "export_contract": "session-export/v2", "session_id": "s-20261007-0912",
              "content_digest": "sha256:7d1e…"}
 }
 ```
@@ -237,8 +250,8 @@ class FeedbackSource(StrEnum):
     USER = "user"                     # a person, through a product UI
     PIPELINE = "pipeline"             # a deterministic pipeline or product backend
     BCS = "bcs"                       # BCS coordination outcomes
-    TASKGUARD = "taskguard"           # TaskGuard run evidence
-    CLAWINSIGHT = "clawinsight"       # ClawInsight findings
+    TASKGUARD = "taskguard"           # TaskGuard, the workflow engine that runs a bot's multi-step tasks
+    CLAWINSIGHT = "clawinsight"       # ClawInsight, the ClawWeb module that monitors bots and files findings
 
 @dataclass(frozen=True)
 class Feedback:
@@ -252,7 +265,6 @@ class Feedback:
     score: float | None               # ratings / outcomes on [0, 1]; None for text-only kinds
     text: str | None                  # correction text, finding summary; redacted at ingest
     data: dict                        # kind-specific structured payload, schema per kind
-    idempotency_key: str              # the producer's key; (owner_id, bot_id, key) is unique (§10)
 ```
 
 ```jsonc
@@ -267,10 +279,35 @@ class Feedback:
   "episode_id": "ep_91",
   "score": null,
   "text": "partial refunds are allowed",
-  "data": {"turn_index": 4},
-  "idempotency_key": "support-ui/ep_91/turn-4/correction"
+  "data": {"turn_index": 4}
 }
 ```
+
+**谁产生反馈。** 每个 `FeedbackSource` 是一个生产方：
+
+- `user`：在产品 UI 中给回答打分或纠正回答的人，由该产品的后端发送（即上面的
+  示例）。
+- `pipeline`：报告任务结果的产品后端或管线，例如“订单已退款”。
+- `bcs`：BCS（Bot 协作服务）报告一次多 Bot 交互的结束方式，例如“转交给账单
+  Bot 时超时”。
+- `taskguard`：TaskGuard（`apps/evolverun/taskguard`）是运行 Bot 多步骤任务的
+  YAML 工作流引擎，并守护每一步：某一步失败时，它会重试、修复或上报。它的
+  **运行证据**（哪一步失败、如何修复、重试了几次）是关于该 Bot 的有用反馈，
+  由一个摄取适配器记录为 `run_evidence`。TaskGuard 本身仍是运行时工具，不会学习。
+- `clawinsight`：ClawInsight 是 ClawWeb 中的监控模块
+  （`apps/evolverun/clawweb/public/modules/clawinsight`）。它观察 Bot 的会话，
+  并以其 `plan-source/v2` 格式提交**改进项**，例如“部分订单的退款请求被不必要地
+  上报”。一个摄取适配器把每个改进项记录为 `finding`。
+
+这些是**数据的生产方，而不是策略**。它们的输出像其他反馈一样进入存储，因此每个
+声明了 `experience.feedback@1` 的策略都能读取，而不只是过去消费它的那个策略
+（如今是 ClawEvolve 读取 ClawInsight 的改进项）。新增一个生产方需要经过评审的
+变更，增加一个 `FeedbackSource` 值及其摄取路径。
+
+生产方在发送每条反馈时都带上 `Idempotency-Key`，因此重试发送只会记录一条反馈
+（§10）。该键保存在平台的幂等记录中（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)
+§2.3），而不在反馈记录上；生产方自己为该条目分配的 id 保留在 `data` 中（下文的
+`item_id: "imp_88"`）。
 
 来自 ClawInsight 的 `finding` 在 `data` 中携带其 `plan-source/v2` 条目，这样，
 当前已有的、与生产方无关的发现交接机制就能通过 `experience.feedback@1` 到达
@@ -288,8 +325,7 @@ class Feedback:
   "episode_id": null,
   "score": null,
   "text": "Refund requests for partial orders are escalated unnecessarily",
-  "data": {"contract": "plan-source/v2", "item_id": "imp_88", "affected_episodes": ["ep_91", "ep_97"]},
-  "idempotency_key": "clawinsight/imp_88"
+  "data": {"contract": "plan-source/v2", "item_id": "imp_88", "affected_episodes": ["ep_91", "ep_97"]}
 }
 ```
 
@@ -301,15 +337,22 @@ class Feedback:
 
 ```python
 class Split(StrEnum):             # same set as 07-verification.md §2
-    TRAIN = "train"
-    VALIDATION = "validation"
-    HOLDOUT = "holdout"
-    REGRESSION = "regression"
-    SAFETY = "safety"
+    """The role a test case plays. The platform assigns it, never a strategy."""
+    TRAIN = "train"            # practice cases: the strategy sees each result and critique,
+                               # e.g. ClawEvolve scores its edited workspace on them while it iterates
+    VALIDATION = "validation"  # the exam that decides improvement: run on each candidate and its parent;
+                               # the strategy sees only aggregate scores, never the cases
+    HOLDOUT = "holdout"        # sealed cases nobody sees: run on a run's final candidate before promotion,
+                               # and periodically on `active`, to catch overfitting to validation
+    REGRESSION = "regression"  # must-pass: past production failures and fixed bugs, e.g. the partial-refund
+                               # case added after ep_91; a candidate that newly fails one is rejected
+    SAFETY = "safety"          # must-pass with zero tolerance, e.g. "never reveals another customer's order"
+
+# GraderRef {id, version}: a grader plugin and its version; defined in 07-verification.md §2.3.
 
 @dataclass(frozen=True)
 class GraderResult:
-    grader: str               # id of the grader that scored the rollout, e.g. "platform/clawbench"
+    grader: GraderRef         # the grader plugin and its version, e.g. {"id": "platform/clawbench", "version": "1.0.0"}
     score: float              # 0 = complete failure, 1 = perfect, by that grader's rubric
     critique: str             # textual critique; reflective strategies need it
 
@@ -322,7 +365,7 @@ class EvalTrace:
     suite: str                # suite id, e.g. "bot_123/support"
     case_id: str              # the case that was run
     split: Split
-    seed: int                 # which repetition of the case this is (each seed is one rollout)
+    seed: int                 # which run of the same case this is: 0, 1, 2, … (each seed is one rollout)
     transcript: list[Turn]    # the rollout's conversation, same shape as Episode.turns
     grades: list[GraderResult]
     cost: Cost
@@ -345,13 +388,21 @@ class EvalTrace:
     {"role": "user", "text": "I want half my money back for order A17."},
     {"role": "assistant", "text": "Partial refunds are allowed within 30 days. I can start one for you."}
   ],
-  "grades": [{"grader": "platform/clawbench", "score": 0.9,
+  "grades": [{"grader": {"id": "platform/clawbench", "version": "1.0.0"}, "score": 0.9,
               "critique": "Correct policy; did not confirm the refund amount."}],
   "cost": {"usd": 0.004, "input_tokens": 1900, "output_tokens": 120},
   "started_at": "2026-10-08T02:31:10Z",
   "ended_at": "2026-10-08T02:31:22Z"
 }
 ```
+
+**种子（seed）。** Bot 对同一个问题的回答每次运行都会不同，因为模型对输出进行
+采样。所以一个用例只运行一次是很弱的证据，Verification 会把每个用例运行多次并
+对分数取平均。每次运行是一个 **rollout**，`seed` 为它编号：0、1、2，依此类推。
+运行多少次由验证配置决定（07-verification.zh-CN.md §2.4 中的 `SeedPolicy`：
+起初 3 次，结果接近时最多 9 次）。上面的 `et_5521` 是修订版 r42 上
+`case_partial_refund_03` 的第三次运行（`seed: 2`）。如果引擎允许调用方固定
+模型的采样种子，Verification 会传入这个数字，以便能够精确重现某次 rollout。
 
 ### 2.4 会话导出与保留策略
 
@@ -415,11 +466,12 @@ class RetentionPolicy:
 应用到 bot 上**的基因组修订版。
 
 - 基因组注册表就位后，每份应用报告都会记录它所应用的 Manifest 文档的摘要
-  （[01-genome.zh-CN.md](01-genome.zh-CN.md) §8；目前应用报告记录的是解析后的
-  git SHA，而不是所应用的文档——
-  `services/config_manifest_apply_service.py:846-875`）。Manifest 对修订版
+  （[01-genome.zh-CN.md](01-genome.zh-CN.md) §8）。这个摘要**不是 git SHA**：
+  它是应用时所用的那份 Manifest 文档本身的 sha256，例如 `sha256:f27a…`。目前
+  应用报告只记录它所解析的各个来源的 git SHA，而不记录所应用的文档
+  （`services/config_manifest_apply_service.py:846-875`）。Manifest 对修订版
   一无所知；基因组注册表把每个摘要映射到编译出该摘要的修订版（01-genome.zh-CN.md
-  §5.5）。存储在片段的 `started_at` 时刻，对 bot 的应用历史应用这一映射，从而
+  §5.5），例如 `sha256:f27a…` → r41。存储在片段的 `started_at` 时刻，对 bot 的应用历史应用这一映射，从而
   解析出片段的修订版。这是**提议**；另一种方案是由
   引擎把修订版写入每个导出的会话（§5，待定决策 X-2）。
 - 在 bot 还没有任何修订版之前记录的片段、在 bot 处于漂移状态期间记录的片段
@@ -430,6 +482,13 @@ class RetentionPolicy:
 - **服务型 bot。** 服务型 bot 提供的是已发布版本，而不是草稿。每条发布记录都
   存储它所发布文档的摘要（[01-genome.zh-CN.md](01-genome.zh-CN.md) §8，
   RSI-04），注册表再把该摘要映射到其修订版，因此存储会把片段开始时正在提供服务的已发布版本映射到其修订版。
+- **草稿会话。** 服务型 bot 的所有者也可以与其草稿对话来测试它。这些会话不是
+  真实流量：所有者不是典型用户，对话也是测试。引擎导出会说明每个会话由哪个
+  部署提供服务（session-export 已有 `stage`），存储将其保存为 `Episode.stage`。
+  草稿会话仍按摘要归因，因此与已发布版本完全相同的草稿会映射到同一个修订版，
+  但它会被标记为 `draft`。按修订版的比较、在线验证以及策略读取
+  （`experience.sessions@1`）只使用 `service` 会话。草稿会话仍可通过 API 用于
+  诊断（`GET …/episodes?stage=draft`，§10）。
 - 反馈继承其片段的修订版。没有片段的反馈采用生产方提供的修订版，或者 bot 在
   `created_at` 时刻的 `active` 修订版（如果 bot 当时处于漂移状态，则为 `null`）。
 - 评估轨迹总是带有修订版，因为验证评估的是一个特定的修订版。
@@ -477,7 +536,7 @@ engine provider ──export──▶ normalize ──▶ redact ──▶ attri
 1. **导出。** 存储向 bot 的引擎提供方请求某个时间窗口内的会话（§5）。导出
    是一个操作：启动时返回一个 id，再按 id 查询状态。
 2. **规范化。** 提供方的包被转换为 `Episode` 记录。规范化是确定性的且带有
-   版本：`source.export_api` 和 `source.content_digest` 使得在片段 schema
+   版本：`source.export_contract` 和 `source.content_digest` 使得在片段 schema
    变化后，存储可以对同一原始会话重新规范化。
 3. **脱敏。** 在存储任何内容之前，按照租户的 `RetentionPolicy` 移除密钥并
    处理 PII（§7）。被移除的类别列在 `redactions` 中。
@@ -614,7 +673,7 @@ class ExperienceQuery(Protocol):
     # experience.sessions@1
     async def sessions(self, *, days: int, limit: int = 500,
                        revision: str | None = None) -> list[Episode]:
-        """Episodes of the run's bot from the last `days` days, newest first.
+        """Episodes of the run's bot from the last `days` days, newest first; `service` sessions only (§3).
 
         revision=None returns episodes of every revision, including unattributed ones;
         a revision id restricts the result to episodes that ran that revision.
@@ -714,8 +773,8 @@ class ExperienceStore(Protocol):
                               *, idempotency_key: str) -> Feedback:
         """Store one feedback record after redaction and attribution.
 
-        The same (owner_id, bot_id, idempotency_key) returns the stored record; a different body
-        under a reused key raises IdempotencyConflict.
+        The key follows 09-evolution-api.md §5: the same (owner_id, bot_id, key) returns the
+        stored record; a different body under a reused key raises IdempotencyConflict.
         """
 
     async def record_eval_trace(self, trace: EvalTrace) -> None:
@@ -767,8 +826,9 @@ class ExperienceStore(Protocol):
 按从新到旧列出某个 bot 的片段摘要。由 UI 以及
 关注某个修订版表现的管线调用。
 
-查询参数：`revision`（修订版 id 或 `unattributed`）、`since`、`until`、
-`outcome`、`page`（从 1 开始）、`page_size`（1 到 100，默认 20）。
+查询参数：`revision`（修订版 id 或 `unattributed`）、`stage`（`service`，
+默认值，或 `draft`；§3）、`since`、`until`、`outcome`、`page`（从 1 开始）、
+`page_size`（1 到 100，默认 20）。
 
 请求示例：
 
@@ -836,6 +896,7 @@ GET /openapi/v1/bots/bot_123/experience/episodes/ep_91
   "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "revision_id": "sha256:a90b…",
   "revision_seq": "r41",
+  "stage": "service",
   "started_at": "2026-10-07T09:12:00Z",
   "ended_at": "2026-10-07T09:14:31Z",
   "turns": [
@@ -850,7 +911,7 @@ GET /openapi/v1/bots/bot_123/experience/episodes/ep_91
   "cost": {"usd": 0.012, "input_tokens": 5210, "output_tokens": 388},
   "outcome": {"status": "user_corrected", "feedback": "partial refunds are allowed", "feedback_ids": ["fb_204"]},
   "redactions": ["email", "phone"],
-  "source": {"engine": "openclaw", "export_api": "session-export/v2", "session_id": "s-20261007-0912",
+  "source": {"engine": "openclaw", "export_contract": "session-export/v2", "session_id": "s-20261007-0912",
              "content_digest": "sha256:7d1e…"}
 }
 ```
@@ -886,7 +947,8 @@ Idempotency-Key: support-ui/ep_91/turn-4/correction
 }
 ```
 
-响应示例（`201`；如果该键已被同一请求使用过，则返回 `200` 及相同的响应体）：
+响应示例（`201`；以相同的键和请求体重试时，返回 `201`、相同的记录以及
+`Idempotent-Replayed: true`，[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) §5.2）：
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -900,8 +962,7 @@ Idempotency-Key: support-ui/ep_91/turn-4/correction
   "episode_id": "ep_91",
   "score": null,
   "text": "partial refunds are allowed",
-  "data": {"turn_index": 4},
-  "idempotency_key": "support-ui/ep_91/turn-4/correction"
+  "data": {"turn_index": 4}
 }
 ```
 
@@ -939,8 +1000,7 @@ GET /openapi/v1/bots/bot_123/experience/feedback?kind=correction&kind=rating&sin
       "episode_id": "ep_97",
       "score": 0.0,
       "text": null,
-      "data": {"scale": "thumbs"},
-      "idempotency_key": "support-ui/ep_97/rating"
+      "data": {"scale": "thumbs"}
     },
     {
       "feedback_id": "fb_204",
@@ -952,8 +1012,7 @@ GET /openapi/v1/bots/bot_123/experience/feedback?kind=correction&kind=rating&sin
       "episode_id": "ep_91",
       "score": null,
       "text": "partial refunds are allowed",
-      "data": {"turn_index": 4},
-      "idempotency_key": "support-ui/ep_91/turn-4/correction"
+      "data": {"turn_index": 4}
     }
   ]
 }

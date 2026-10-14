@@ -158,6 +158,16 @@ class Engine(StrEnum):
     HERMES = "hermes"
     TECLAW = "teclaw"
 
+class ExportContract(StrEnum):
+    """Versions of the engine session-export contract (§5). The provider of that
+    version turned the engine's raw session into this episode."""
+    V2 = "session-export/v2"
+
+class SessionStage(StrEnum):
+    """Which deployment of the bot served the session."""
+    SERVICE = "service"   # real traffic: the published version of a service bot, or any session of a personal bot
+    DRAFT = "draft"       # the owner testing a service bot's unpublished draft; never real users
+
 class PiiCategory(StrEnum):
     """Personal-data categories the redactor knows. New values are added by a reviewed
     change to the redactor, together with their rules (defaults: open decision X-4)."""
@@ -197,7 +207,8 @@ class Outcome:
 @dataclass(frozen=True)
 class SourceRef:
     engine: Engine                 # which engine ran the session
-    export_api: str                # contract version that produced it, e.g. "session-export/v2"
+    export_contract: ExportContract  # which contract version normalized it, e.g. "session-export/v2";
+                                     # re-normalizing the raw session later uses that version's rules
     session_id: str                # the engine's own session id
     content_digest: str            # hash of the raw exported session, for re-normalization
 
@@ -206,6 +217,7 @@ class Episode:
     episode_id: str                # "ep_91"
     bot: BotRef                    # the bot that ran the session (owner + bot id)
     revision_id: str | None        # None = unattributed (ran before revisions existed, or while drifted, §3)
+    stage: SessionStage            # "draft" sessions are kept but left out of per-revision comparisons (§3)
     started_at: datetime
     ended_at: datetime
     turns: list[Turn]
@@ -222,6 +234,7 @@ class Episode:
   "episode_id": "ep_91",
   "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "revision_id": "sha256:a90b…",                 // the genome revision the bot was running (r41)
+  "stage": "service",                            // a real user, not the owner testing a draft
   "started_at": "2026-10-07T09:12:00Z",
   "ended_at": "2026-10-07T09:14:31Z",
   "turns": [
@@ -236,7 +249,7 @@ class Episode:
   "cost": {"usd": 0.012, "input_tokens": 5210, "output_tokens": 388},
   "outcome": {"status": "user_corrected", "feedback": "partial refunds are allowed", "feedback_ids": ["fb_204"]},
   "redactions": ["email", "phone"],              // personal data removed before any strategy sees it
-  "source": {"engine": "openclaw", "export_api": "session-export/v2", "session_id": "s-20261007-0912",
+  "source": {"engine": "openclaw", "export_contract": "session-export/v2", "session_id": "s-20261007-0912",
              "content_digest": "sha256:7d1e…"}
 }
 ```
@@ -260,8 +273,8 @@ class FeedbackSource(StrEnum):
     USER = "user"                     # a person, through a product UI
     PIPELINE = "pipeline"             # a deterministic pipeline or product backend
     BCS = "bcs"                       # BCS coordination outcomes
-    TASKGUARD = "taskguard"           # TaskGuard run evidence
-    CLAWINSIGHT = "clawinsight"       # ClawInsight findings
+    TASKGUARD = "taskguard"           # TaskGuard, the workflow engine that runs a bot's multi-step tasks
+    CLAWINSIGHT = "clawinsight"       # ClawInsight, the ClawWeb module that monitors bots and files findings
 
 @dataclass(frozen=True)
 class Feedback:
@@ -275,7 +288,6 @@ class Feedback:
     score: float | None               # ratings / outcomes on [0, 1]; None for text-only kinds
     text: str | None                  # correction text, finding summary; redacted at ingest
     data: dict                        # kind-specific structured payload, schema per kind
-    idempotency_key: str              # the producer's key; (owner_id, bot_id, key) is unique (§10)
 ```
 
 ```jsonc
@@ -290,10 +302,41 @@ class Feedback:
   "episode_id": "ep_91",
   "score": null,
   "text": "partial refunds are allowed",
-  "data": {"turn_index": 4},
-  "idempotency_key": "support-ui/ep_91/turn-4/correction"
+  "data": {"turn_index": 4}
 }
 ```
+
+**Who produces feedback.** Each `FeedbackSource` is one producer:
+
+- `user`: a person rating or correcting an answer in a product UI, sent by
+  that product's backend (the example above).
+- `pipeline`: a product backend or pipeline reporting a task outcome, for
+  example "the order was refunded".
+- `bcs`: BCS (the bot coordination service) reporting how a multi-bot
+  exchange ended, for example "the hand-off to the billing bot timed out".
+- `taskguard`: TaskGuard (`apps/evolverun/taskguard`) is the YAML workflow
+  engine that runs a bot's multi-step tasks and guards each step: it
+  retries, repairs, or escalates a step that fails. Its **run evidence**
+  (which step failed, how it was repaired, how many retries it took) is
+  useful feedback about the bot, and an ingest adapter records it as
+  `run_evidence`. TaskGuard itself stays a runtime tool; it does not learn.
+- `clawinsight`: ClawInsight is the monitoring module in ClawWeb
+  (`apps/evolverun/clawweb/public/modules/clawinsight`). It watches bots'
+  sessions and files **improvement items**, such as "refund requests for
+  partial orders are escalated unnecessarily", in its `plan-source/v2`
+  format. An ingest adapter records each item as a `finding`.
+
+These are **producers of data, not strategies**. Their output lands in the
+store like any other feedback, so every strategy that declares
+`experience.feedback@1` can read it, not only the strategy that used to
+consume it (ClawEvolve reads ClawInsight's items today). Adding a producer
+is a reviewed change that adds a `FeedbackSource` value and its ingest path.
+
+Producers send an `Idempotency-Key` with each item, so a retried send
+records one feedback item (§10). The key is kept in the platform's
+idempotency records ([09-evolution-api.md](09-evolution-api.md) §2.3), not
+on the feedback record; the producer's own id for the item stays in `data`
+(`item_id: "imp_88"` below).
 
 A `finding` from ClawInsight carries its `plan-source/v2` item in `data`, so
 that the producer-agnostic findings handoff that exists today reaches
@@ -312,8 +355,7 @@ strategies through `experience.feedback@1` (see
   "episode_id": null,
   "score": null,
   "text": "Refund requests for partial orders are escalated unnecessarily",
-  "data": {"contract": "plan-source/v2", "item_id": "imp_88", "affected_episodes": ["ep_91", "ep_97"]},
-  "idempotency_key": "clawinsight/imp_88"
+  "data": {"contract": "plan-source/v2", "item_id": "imp_88", "affected_episodes": ["ep_91", "ep_97"]}
 }
 ```
 
@@ -326,15 +368,22 @@ export. Which split a trace came from decides who may ever see it (§6).
 
 ```python
 class Split(StrEnum):             # same set as 07-verification.md §2
-    TRAIN = "train"
-    VALIDATION = "validation"
-    HOLDOUT = "holdout"
-    REGRESSION = "regression"
-    SAFETY = "safety"
+    """The role a test case plays. The platform assigns it, never a strategy."""
+    TRAIN = "train"            # practice cases: the strategy sees each result and critique,
+                               # e.g. ClawEvolve scores its edited workspace on them while it iterates
+    VALIDATION = "validation"  # the exam that decides improvement: run on each candidate and its parent;
+                               # the strategy sees only aggregate scores, never the cases
+    HOLDOUT = "holdout"        # sealed cases nobody sees: run on a run's final candidate before promotion,
+                               # and periodically on `active`, to catch overfitting to validation
+    REGRESSION = "regression"  # must-pass: past production failures and fixed bugs, e.g. the partial-refund
+                               # case added after ep_91; a candidate that newly fails one is rejected
+    SAFETY = "safety"          # must-pass with zero tolerance, e.g. "never reveals another customer's order"
+
+# GraderRef {id, version}: a grader plugin and its version; defined in 07-verification.md §2.3.
 
 @dataclass(frozen=True)
 class GraderResult:
-    grader: str               # id of the grader that scored the rollout, e.g. "platform/clawbench"
+    grader: GraderRef         # the grader plugin and its version, e.g. {"id": "platform/clawbench", "version": "1.0.0"}
     score: float              # 0 = complete failure, 1 = perfect, by that grader's rubric
     critique: str             # textual critique; reflective strategies need it
 
@@ -347,7 +396,7 @@ class EvalTrace:
     suite: str                # suite id, e.g. "bot_123/support"
     case_id: str              # the case that was run
     split: Split
-    seed: int                 # which repetition of the case this is (each seed is one rollout)
+    seed: int                 # which run of the same case this is: 0, 1, 2, … (each seed is one rollout)
     transcript: list[Turn]    # the rollout's conversation, same shape as Episode.turns
     grades: list[GraderResult]
     cost: Cost
@@ -370,13 +419,23 @@ class EvalTrace:
     {"role": "user", "text": "I want half my money back for order A17."},
     {"role": "assistant", "text": "Partial refunds are allowed within 30 days. I can start one for you."}
   ],
-  "grades": [{"grader": "platform/clawbench", "score": 0.9,
+  "grades": [{"grader": {"id": "platform/clawbench", "version": "1.0.0"}, "score": 0.9,
               "critique": "Correct policy; did not confirm the refund amount."}],
   "cost": {"usd": 0.004, "input_tokens": 1900, "output_tokens": 120},
   "started_at": "2026-10-08T02:31:10Z",
   "ended_at": "2026-10-08T02:31:22Z"
 }
 ```
+
+**Seeds.** A bot's answer to the same question varies from run to run,
+because the model samples its output. One run of a case is therefore weak
+evidence, so Verification runs each case several times and averages the
+scores. Each run is one **rollout**, and `seed` numbers it: 0, 1, 2, and so
+on. The verification profile sets how many (`SeedPolicy` in
+07-verification.md §2.4: 3 at first, up to 9 when a result is close). `et_5521` above is the third run
+(`seed: 2`) of `case_partial_refund_03` for revision r42. Where the engine
+lets the caller fix the model's sampling seed, Verification passes this
+number, so a rollout can be repeated exactly.
 
 ### 2.4 Session export and retention policy
 
@@ -442,12 +501,15 @@ when the episode started**.
 
 - Once the Genome Registry is in place, every apply report records the
   digest of the Manifest document it applied ([01-genome.md](01-genome.md)
-  §8; today apply reports record resolved git SHAs, not the document
-  applied — `services/config_manifest_apply_service.py:846-875`). The
-  Manifest knows nothing about revisions; the Genome Registry maps each
-  digest to the revision that compiled to it (01-genome.md §5.5). The store
-  resolves an episode's revision by applying that mapping to the bot's apply
-  history at the episode's `started_at`.
+  §8). This digest is **not a git SHA**: it is the sha256 of the exact
+  Manifest document apply used, for example `sha256:f27a…`. Today apply
+  reports record only the git SHAs of the sources they resolved, not the
+  document applied (`services/config_manifest_apply_service.py:846-875`).
+  The Manifest knows nothing about revisions; the Genome Registry maps each
+  digest to the revision that compiled to it (01-genome.md §5.5), for
+  example `sha256:f27a…` → r41. The store resolves an episode's revision by
+  applying that mapping to the bot's apply history at the episode's
+  `started_at`.
   This is **proposed**; the alternative is that the engine stamps the
   revision into each exported session (§5, open decision X-2).
 - Episodes recorded before the bot had any revision, while the bot was
@@ -462,6 +524,16 @@ when the episode started**.
   published ([01-genome.md](01-genome.md) §8, RSI-04), and the Registry maps
   that digest to its revision, so the store maps the published version that
   was serving when the episode started to its revision.
+- **Draft sessions.** A service bot's owner can also chat with its draft to
+  test it. Those sessions are not real traffic: the owner is not a typical
+  user, and the conversations are tests. The engine export says which
+  deployment served each session (session-export already has a `stage`), and
+  the store keeps it as `Episode.stage`. A draft session is still attributed
+  by digest, so a draft identical to the published version maps to the same
+  revision, but it is marked `draft`. Per-revision comparisons, online
+  verification, and strategy reads (`experience.sessions@1`) use only
+  `service` sessions. Draft sessions stay available for diagnosis through
+  the API (`GET …/episodes?stage=draft`, §10).
 - Feedback inherits the revision of its episode. Feedback without an episode
   takes the revision the producer supplies, or the bot's `active` revision at
   `created_at` (`null` if the bot was drifted then).
@@ -514,7 +586,7 @@ engine provider ──export──▶ normalize ──▶ redact ──▶ attri
    time window (§5). The export is an operation: start returns an id, status
    is looked up by id.
 2. **Normalize.** The provider's package is converted into `Episode`
-   records. Normalization is deterministic and versioned: `source.export_api`
+   records. Normalization is deterministic and versioned: `source.export_contract`
    and `source.content_digest` let the store re-normalize the same raw
    session later if the episode schema changes.
 3. **Redact.** Secrets are removed and PII is handled per the tenant's
@@ -663,7 +735,7 @@ class ExperienceQuery(Protocol):
     # experience.sessions@1
     async def sessions(self, *, days: int, limit: int = 500,
                        revision: str | None = None) -> list[Episode]:
-        """Episodes of the run's bot from the last `days` days, newest first.
+        """Episodes of the run's bot from the last `days` days, newest first; `service` sessions only (§3).
 
         revision=None returns episodes of every revision, including unattributed ones;
         a revision id restricts the result to episodes that ran that revision.
@@ -774,8 +846,8 @@ class ExperienceStore(Protocol):
                               *, idempotency_key: str) -> Feedback:
         """Store one feedback record after redaction and attribution.
 
-        The same (owner_id, bot_id, idempotency_key) returns the stored record; a different body
-        under a reused key raises IdempotencyConflict.
+        The key follows 09-evolution-api.md §5: the same (owner_id, bot_id, key) returns the
+        stored record; a different body under a reused key raises IdempotencyConflict.
         """
 
     async def record_eval_trace(self, trace: EvalTrace) -> None:
@@ -830,8 +902,9 @@ errors, pagination, and idempotency.
 Lists episode summaries of a bot, newest first. Called by the UI and by
 pipelines that look at how a revision is doing.
 
-Query parameters: `revision` (revision id or `unattributed`), `since`,
-`until`, `outcome`, `page` (1-based), `page_size` (1 to 100, default 20).
+Query parameters: `revision` (revision id or `unattributed`), `stage`
+(`service`, the default, or `draft`; §3), `since`, `until`, `outcome`,
+`page` (1-based), `page_size` (1 to 100, default 20).
 
 Example request:
 
@@ -899,6 +972,7 @@ Example response (`200`): the full `Episode` from §2.1.
   "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "revision_id": "sha256:a90b…",
   "revision_seq": "r41",
+  "stage": "service",
   "started_at": "2026-10-07T09:12:00Z",
   "ended_at": "2026-10-07T09:14:31Z",
   "turns": [
@@ -913,7 +987,7 @@ Example response (`200`): the full `Episode` from §2.1.
   "cost": {"usd": 0.012, "input_tokens": 5210, "output_tokens": 388},
   "outcome": {"status": "user_corrected", "feedback": "partial refunds are allowed", "feedback_ids": ["fb_204"]},
   "redactions": ["email", "phone"],
-  "source": {"engine": "openclaw", "export_api": "session-export/v2", "session_id": "s-20261007-0912",
+  "source": {"engine": "openclaw", "export_contract": "session-export/v2", "session_id": "s-20261007-0912",
              "content_digest": "sha256:7d1e…"}
 }
 ```
@@ -952,8 +1026,9 @@ Idempotency-Key: support-ui/ep_91/turn-4/correction
 }
 ```
 
-Example response (`201`; `200` with the same body when the key was already
-used for the same request):
+Example response (`201`; a retry with the same key and body returns `201`
+with the same record and `Idempotent-Replayed: true`,
+[09-evolution-api.md](09-evolution-api.md) §5.2):
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -967,8 +1042,7 @@ used for the same request):
   "episode_id": "ep_91",
   "score": null,
   "text": "partial refunds are allowed",
-  "data": {"turn_index": 4},
-  "idempotency_key": "support-ui/ep_91/turn-4/correction"
+  "data": {"turn_index": 4}
 }
 ```
 
@@ -1006,8 +1080,7 @@ Example response (`200`):
       "episode_id": "ep_97",
       "score": 0.0,
       "text": null,
-      "data": {"scale": "thumbs"},
-      "idempotency_key": "support-ui/ep_97/rating"
+      "data": {"scale": "thumbs"}
     },
     {
       "feedback_id": "fb_204",
@@ -1019,8 +1092,7 @@ Example response (`200`):
       "episode_id": "ep_91",
       "score": null,
       "text": "partial refunds are allowed",
-      "data": {"turn_index": 4},
-      "idempotency_key": "support-ui/ep_91/turn-4/correction"
+      "data": {"turn_index": 4}
     }
   ]
 }
