@@ -364,7 +364,7 @@ describe('GroupChatPane', () => {
     expect(screen.getByTestId('sender')).toHaveAttribute('data-mention-ids', 'ALL-Bots,human_2,bot-a');
   });
 
-  it('把活动 Bot 终止入口固定在消息列表外、输入框上方', () => {
+  it('把活动 Bot 停止入口固定在消息列表外、输入框上方', () => {
     const humanIdentity = { id: 'human_1', kind: 'user' as const, displayName: '章梧', online: true };
     const activeSession: SessionView = {
       ...session,
@@ -390,14 +390,14 @@ describe('GroupChatPane', () => {
       }),
     });
 
-    const strip = screen.getByLabelText('正在输出的 Bot');
+    const strip = screen.getByLabelText('群聊处理状态');
     const messageList = screen.getByTestId('bubble-list');
     const collabPanel = screen.getByTestId('collab-panel');
     const sender = screen.getByTestId('sender');
     expect(messageList).not.toContainElement(strip);
     expect(collabPanel).toContainElement(strip);
     expect(strip.compareDocumentPosition(sender) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole('button', { name: '终止 甲 的输出' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '选择要停止回复的 Bot' })).toBeInTheDocument();
     unmount();
   });
 
