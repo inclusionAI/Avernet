@@ -337,12 +337,34 @@ if [[ "$no_stop" -eq 0 ]]; then
   # With a base ref, also measure changed-line coverage from cobertura.xml.
   # It gates only when changed_line_min > 0 (e2e_cov_gate.py fails closed
   # then, including when no base ref was given).
-  # Memory store backends are compiled into bcs but never selected: the E2E
-  # stack runs on SQLite, so every store call goes to the SQLite backend.
-  # They are excluded from the changed-line metric only (their conformance
-  # tests run in the unit-test gate); the overall line denominator above is
-  # unchanged so the overall threshold keeps its meaning.
-  changed_skip_regex='/src/(.*/)?memory(_[A-Za-z0-9_]+)?(\.rs$|/)'
+  # Memory store backends verified to be unreachable in the SQLite E2E stack
+  # (selected only without a database, or only by tests). They are excluded
+  # from the changed-line metric only; the overall denominator is unchanged.
+  # NOT listed because the SQLite stack runs them by default:
+  #   bcs-chat-run-store/src/memory.rs   (async_chat_run_store = "memory")
+  #   bcs-interaction/src/memory_store.rs (always used by the interaction service)
+  #   bcs-channel-store/src/memory.rs    (fallback while channels.enabled = false)
+  # A listed file that shows any E2E hit is counted again with a warning.
+  e2e_unreachable_memory_backends=(
+    bcs-bot-store/src/memory.rs
+    bcs-bot-store/src/memory_bot_provider_storage.rs
+    bcs-bot-store/src/memory_registration_create.rs
+    bcs-event-store/src/memory.rs
+    bcs-friend-store/src/memory.rs
+    bcs-group-store/src/memory.rs
+    bcs-group-store/src/memory_builder.rs
+    bcs-group-store/src/memory_mutation.rs
+    bcs-invite-code-store/src/memory.rs
+    bcs-message-store/src/memory.rs
+    bcs-message-store/src/memory_delivery_work.rs
+    bcs-organization-store/src/memory.rs
+    bcs-relation-store/src/memory.rs
+    bcs-session-file-store/src/memory.rs
+    bcs-session-store/src/memory.rs
+    bcs-session-store/src/memory_operations/
+    bcs-user-identity/src/memory.rs
+  )
+  changed_skip_regex="^crates/services/($(IFS='|'; printf '%s' "${e2e_unreachable_memory_backends[*]}" | sed 's/\./\\./g'))"
   changed_args=(--changed-line-min "$changed_line_min"
     --changed-line-min-lines "$changed_line_min_lines"
     --changed-skip-regex "$changed_skip_regex")
