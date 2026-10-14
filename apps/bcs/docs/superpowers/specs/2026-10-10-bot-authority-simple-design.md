@@ -42,7 +42,7 @@ BCS 对每个 Bot 只保存一份 manager 集合。手工添加、sync 添加、
 
 ### 3.1 身份
 
-- Human actor 是 BCS 中真实存在、未删除且环境匹配的 Human；`human_` 前缀本身不是身份凭据。Human 的权威存在性是 `bcs_bots` 中对应 env 的 `actor_kind='human'` 未删行（`human_<user_id>`）；OAuth 身份同步表不作为授权守卫依据。
+- Human actor 是 BCS 中真实存在、未删除且环境匹配的 Human；`human_` 前缀本身不是身份凭据。Human 的权威存在性是 `bcs_bots` 中对应 env 的 `actor_kind='human'` 未删行（`human_<user_id>`）；OAuth 身份同步表不作为授权守卫依据。写入侧同样：所有 Human 驱动的权威写入（单项 manager PUT/DELETE、转交发起/取消/决议）在写事务（或内存原子写区间）内同时校验操作者 Human 行仍存续，仅残余 owner/manager 边加有效凭证不授予写入，目标与操作者为同一已删 Human 时错误码保持 `bot_authority_human_unknown`。
 - manager API 的 `user_id` 使用已验证 User 的 ID，由服务统一映射到 Human actor；转交路径直接使用完整 Human actor ID。
 - Human 身份来自既有可信认证链。请求中的 operator、owner 或 Bot token 的 `owner_id` 声明不能证明当前管理权。
 - 服务身份复用现有 Gateway 签名认证后的 App identity；BCS 配置显式授予可信 app 的 tenant 与 action；规则以实例 env 绑定。不能仅凭普通 App 身份、请求体 app_id 或 App owners 字段得到权限。
@@ -70,7 +70,7 @@ App scope 使用显式 allow 规则：`app + tenant + actions`。`app` 与已验
 | 请求所依赖的授权事实 | 撤掉 Human A → Bot X 后 |
 | --- | --- |
 | A 代表 X 操作、订阅 X 视角；无其他独立权利 | 拒绝，所有仅依赖该边的 HTTP/WS 入口失效 |
-| A 自身是 Group/Session 的 Human creator、participant 或管理角色 | 按该资源规则继续授权；Session 的 created_by 不是 Bot 的历史 created_by |
+| A 自身是 Group/Session 的 Human creator、participant 或管理角色 | 按该资源规则继续授权；Group originator/driver 为当前 Human 自己时以自身身份直接准入（Hook 不承载 Human→Human 管理边），driver 转交或旧管理边撤销后该独立资源权限保留；Session 的 created_by 不是 Bot 的历史 created_by |
 | 新 owner B 代表 X | 只取得 X 的资源角色，不继承 A 的 Human 私有视角或个人资产 |
 | 仅持 X 的有效 Bot 凭证，没有 Human-bound 身份 | 保留既有 Bot-only 契约；管理边撤销不会轮换已发出的 Bot token |
 | Provider 凭证、Gateway App scope | 分别按独立的 Provider/App 授权，不由 Human 管理边派生 |
@@ -219,7 +219,7 @@ GET 集合用于列表，PUT 集合用于覆盖，PUT/DELETE 单项用于手工�
 
 重复取消终态只核验本行发起 Human，不要求其此时仍为 owner；操作 pending 的取消仍必须核验当前 owner。历史成功重放不依赖当下 owner，不会再次执行转交。
 
-GET 按数据库时间投影有效状态，到期即呈现 expired，不写库；过滤、计数、分页必须使用同一有效状态口径。写操作惰性落盘过期/失效状态，无后台到期任务。返回 owner_changed 时，invalidated 与审计须先成功提交；数据库错误仍应整笔回滚。
+GET 按数据库时间投影有效状态，到期即呈现 expired，不写库；过滤、计数、分页必须使用同一有效状态口径。写操作惰性落盘过期/失效状态，无后台到期任务。返回 owner_changed 时，invalidated 与审计须先成功提交；数据库错误仍应整笔回滚。Applied/重复决议的响应携带本命令在同一事务内读到并提交的自身状态快照（写事务末尾的同一事务 SELECT，复用同一有效状态透镜），不在提交后重新读取可复用行——同一目标新一轮抢先落库时，原操作响应仍反映其自身提交的终态，客户端不会误把新一轮 pending 当作本次决议结果而重试。
 
 **当前请求语义：**同目标重新发起会覆盖该行终态。因此，一个没有轮次的迟到 accept/reject 会作用于该目标现在的 pending，请求无法证明自己属于上一轮。本协议不承诺跨轮次防重放；调用方在重新发起前须终止旧轮决议重试，并按 Bot 串行处理流程。内部 version 防止未重新发起的旧快照误转交，不能区分同一地址的新旧调用。
 

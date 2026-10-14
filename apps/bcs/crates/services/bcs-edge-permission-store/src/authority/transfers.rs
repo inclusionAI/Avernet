@@ -77,7 +77,7 @@ use std::time::Duration;
 
 use bcs_db_api::{
     DbStatement, DbTransactionOptions, DbTransactionParam, DbTransactionStep,
-    DbValue,
+    DbTransactionStepResult, DbValue,
 };
 use bcs_service_api::types::bot_authority::{
     AuthorityActor, AuthorityActorKind, AuthorityConflictCode,
@@ -209,9 +209,20 @@ impl DbBotAuthorityStore {
         // The target must be a valid surviving Human for
         // any transfer command (spec §6.2/§6.3 存续
         // Human; the SQL target-registry guard re-checks
-        // inside transactions that write).
+        // inside transactions that write). This check runs
+        // FIRST: when operator and target are the same
+        // departed Human the pinned code stays input-level
+        // `bot_authority_human_unknown`.
         self.require_existing_human(&key.target_owner_actor_id)
             .await?;
+        // A HUMAN operator must be a live Human as well: the
+        // residual edge of a tombstoned operator grants no
+        // initiation/cancellation/decision (spec §3.1, the
+        // same survival gate the read paths apply; the write
+        // transactions re-verify it under the row lock).
+        if operator.kind == AuthorityActorKind::Human {
+            self.require_operator_human(&operator.actor_id).await?;
+        }
         match action {
             TransferAction::RequestOrRefresh => {
                 self.request_or_refresh_transfer(&key, &operator, &mutation)
@@ -226,13 +237,13 @@ impl DbBotAuthorityStore {
         }
     }
 
-    /// The Human ACTOR registry check (identical to the
-    /// manager paths' Human guard): the target's
-    /// `bcs_bots` row must be a live Human in the bound
-    /// env (`actor_kind = 'human'`, not tombstoned).
-    async fn require_existing_human(&self, actor_id: &str) -> ServiceResult<()> {
+    /// COUNT of the actor's live Human rows (0 or 1) in the
+    /// Human ACTOR registry (identical to the manager paths'
+    /// Human guard): the `bcs_bots` row must be a live Human in
+    /// the bound env (`actor_kind = 'human'`, not tombstoned).
+    async fn live_human_count(&self, actor_id: &str) -> ServiceResult<u64> {
         let user_id = human_user_id_of_actor(actor_id)
-            .expect("target shape validated");
+            .expect("human actor shape validated upstream");
         let rows = self
             .query(
                 "authority_transfer_human_check",
@@ -253,14 +264,34 @@ impl DbBotAuthorityStore {
                 ),
             )
             .await?;
-        let count = rows
-            .first()
+        rows.first()
             .map(|row| crate::required_u64(row, "c"))
-            .transpose()?
-            .unwrap_or(0);
-        if count != 1 {
+            .transpose()
+            .map(|count| count.unwrap_or(0))
+    }
+
+    /// The target's Human ACTOR registry check (spec §6.2/§6.3
+    /// 存续 Human — an input-level error: the named target is
+    /// unknown/gone).
+    async fn require_existing_human(&self, actor_id: &str) -> ServiceResult<()> {
+        if self.live_human_count(actor_id).await? != 1 {
             return Err(human_unknown_error(format!(
                 "transfer target '{actor_id}' is not a valid Human"
+            )));
+        }
+        Ok(())
+    }
+
+    /// The HUMAN operator's survival gate (spec §3.1): the
+    /// operator's own actor row must be live as well — a
+    /// tombstoned operator holding a residual ownership edge
+    /// and a valid credential drives no transfer command
+    /// (Forbidden — the caller's identity lapsed, the command
+    /// input itself is well-formed).
+    async fn require_operator_human(&self, actor_id: &str) -> ServiceResult<()> {
+        if self.live_human_count(actor_id).await? != 1 {
+            return Err(operator_forbidden_error(format!(
+                "transfer operator '{actor_id}' is not a live Human actor"
             )));
         }
         Ok(())
@@ -429,14 +460,67 @@ impl DbBotAuthorityStore {
     async fn run_tx(
         &self,
         steps: Vec<DbTransactionStep>,
-    ) -> Result<(), bcs_db_api::DbError> {
+    ) -> Result<Vec<DbTransactionStepResult>, bcs_db_api::DbError> {
         self.db
             .transaction_with_options(
                 steps,
                 DbTransactionOptions::with_deadline(TX_DEADLINE),
             )
             .await
-            .map(|_| ())
+    }
+
+    /// Read-after-write snapshot INSIDE the write transaction,
+    /// appended as the LAST step so it surfaces as the last
+    /// result: the response to an Applied command must carry
+    /// the state THIS command committed. A record keyed by
+    /// (bot, target) is reused by later rounds, so a
+    /// post-commit re-read could pick up the NEXT round's
+    /// pending state that landed between commit and response
+    /// assembly (review finding P2-3).
+    fn transfer_snapshot_step(
+        &self,
+        bot_id: &str,
+        target: &str,
+    ) -> DbTransactionStep {
+        DbTransactionStep::Query(DbStatement::with_transaction_params(
+            format!(
+                "SELECT {columns} FROM bot_ownership_transfers \
+                 WHERE env = ? AND bot_id = ? AND target_owner_actor_id = ? LIMIT 1",
+                columns = super::reads::TRANSFER_COLUMNS,
+            )
+            .as_str(),
+            vec![
+                DbTransactionParam::value(self.env_param()),
+                DbTransactionParam::value(DbValue::from(bot_id)),
+                DbTransactionParam::value(DbValue::from(target)),
+            ],
+        ))
+    }
+
+    /// Project the in-transaction snapshot (the last step
+    /// result) with the SAME effective-status lens as the
+    /// strict read — one DB-time captured for the response
+    /// projection (Task-1 lens shape).
+    async fn transfer_snapshot_view(
+        &self,
+        results: &[DbTransactionStepResult],
+    ) -> ServiceResult<TransferView> {
+        let rows = match results.last() {
+            Some(DbTransactionStepResult::Rows(rows)) => rows,
+            other => {
+                return Err(ServiceError::InternalError(format!(
+                    "transfer snapshot step returned {other:?}"
+                )));
+            }
+        };
+        let row = rows.first().ok_or_else(|| {
+            ServiceError::InternalError(
+                "transfer row vanished within its own write transaction"
+                    .to_string(),
+            )
+        })?;
+        let now = self.db_now_ms().await?;
+        self.transfer_view_from_row(row, now).await
     }
 
     /// Fresh post-commit view (the Task-1 lens).
@@ -453,6 +537,41 @@ impl DbBotAuthorityStore {
 
     fn now_plus_7d(&self) -> &'static str {
         expires_now_plus_seven_days(self)
+    }
+
+    /// In-transaction operator-survival guard (HUMAN
+    /// operators only — a trusted-Service decision carries no
+    /// Human row): the operator's live Human actor row must
+    /// still exist under the row lock (spec §3.1, mirroring
+    /// the manager-edit guard). Its failure is retryable; the
+    /// pre-transaction gate then maps the deletion to
+    /// Forbidden deterministically.
+    fn push_operator_alive_guard(
+        &self,
+        builder: &mut TransferTxBuilder,
+        operator: &Operator,
+    ) {
+        if operator.kind != AuthorityActorKind::Human {
+            return;
+        }
+        builder.push_count_guard(
+            format!(
+                "SELECT COUNT(*) AS c FROM bcs_bots \
+                 WHERE {} \
+                   AND actor_kind = 'human' \
+                   AND env = ? \
+                   AND COALESCE(is_deleted, 0) = 0{}",
+                self.bot_id_eq(),
+                lock_suffix(self)
+            ),
+            vec![
+                DbTransactionParam::value(DbValue::from(
+                    operator.actor_id.as_str(),
+                )),
+                DbTransactionParam::value(self.env_param()),
+            ],
+            1,
+        );
     }
 
     /// One transfer audit write of this mutation
@@ -540,7 +659,7 @@ impl DbBotAuthorityStore {
             let row = self.pre_read_row(&bot_id, &target, now).await?;
             match classify_request(owner.as_str(), version, row.as_ref()) {
                 RequestExecution::Refresh => {
-                    let tx = self.build_refresh_tx(
+                    let mut tx = self.build_refresh_tx(
                         &bot_id,
                         &target,
                         operator,
@@ -548,10 +667,16 @@ impl DbBotAuthorityStore {
                         version,
                         mutation,
                     );
+                    // In-transaction snapshot LAST: the response
+                    // carries THIS refresh's renewed state, not
+                    // a record a racing round already reused.
+                    tx.push(self.transfer_snapshot_step(&bot_id, &target));
                     match self.run_tx(tx).await {
-                        Ok(_) => {
+                        Ok(results) => {
                             return Ok(TransferOutcome::Applied {
-                                transfer: self.trade_view(key).await?,
+                                transfer: self
+                                    .transfer_snapshot_view(&results)
+                                    .await?,
                                 change: TransferChange::Updated,
                             });
                         }
@@ -686,7 +811,7 @@ impl DbBotAuthorityStore {
                             Err(err) => return Err(map_tx_error(op, err)),
                         }
                     }
-                    let tx = self.build_create_tx(
+                    let mut tx = self.build_create_tx(
                         &bot_id,
                         &target,
                         operator,
@@ -698,10 +823,15 @@ impl DbBotAuthorityStore {
                         &other_closures,
                         mutation,
                     )?;
+                    // In-transaction snapshot LAST: the response
+                    // carries THIS initiation's pending row.
+                    tx.push(self.transfer_snapshot_step(&bot_id, &target));
                     match self.run_tx(tx).await {
-                        Ok(_) => {
+                        Ok(results) => {
                             return Ok(TransferOutcome::Applied {
-                                transfer: self.trade_view(key).await?,
+                                transfer: self
+                                    .transfer_snapshot_view(&results)
+                                    .await?,
                                 change: TransferChange::Created,
                             });
                         }
@@ -765,7 +895,7 @@ impl DbBotAuthorityStore {
             ],
             1,
         );
-        self.run_tx(builder.finish()).await
+        self.run_tx(builder.finish()).await.map(|_| ())
     }
 
     /// Refresh of a valid same-snapshot pending
@@ -794,6 +924,7 @@ impl DbBotAuthorityStore {
             DbTransactionParam::value(DbValue::from(version)),
             builder.version_ref(),
         ]);
+        self.push_operator_alive_guard(&mut builder, operator);
         // The pending row must still exist, still be
         // pending, fresh, and still carry THIS round's
         // owner/version (ref-bound to the in-tx values).
@@ -1074,6 +1205,7 @@ impl DbBotAuthorityStore {
             DbTransactionParam::value(DbValue::from(version)),
             builder.version_ref(),
         ]);
+        self.push_operator_alive_guard(&mut builder, operator);
         // Target must be a valid surviving Human: its ACTOR
         // row is live in `bcs_bots` under the row lock (the
         // Bot row is locked first, spec §7 order).
@@ -1312,9 +1444,11 @@ impl DbBotAuthorityStore {
                         )
                         .await
                     {
-                        Ok(()) => {
+                        Ok(results) => {
                             return Ok(TransferOutcome::Applied {
-                                transfer: self.trade_view(key).await?,
+                                transfer: self
+                                    .transfer_snapshot_view(&results)
+                                    .await?,
                                 change: TransferChange::Unchanged,
                             });
                         }
@@ -1341,7 +1475,7 @@ impl DbBotAuthorityStore {
                         )
                         .await
                     {
-                        Ok(()) => {
+                        Ok(_) => {
                             return Ok(TransferOutcome::Conflict {
                                 transfer: view,
                                 code,
@@ -1386,7 +1520,7 @@ impl DbBotAuthorityStore {
                 }
                 DecisionPlan::Apply => {
                     let row = row.as_ref().expect("apply plan");
-                    let tx = self
+                    let mut tx = self
                         .build_decision_tx(
                             &bot_id,
                             &target,
@@ -1399,10 +1533,18 @@ impl DbBotAuthorityStore {
                             row.expected_version,
                         )
                         .await?;
+                    // In-transaction snapshot LAST: an Approved
+                    // decision's response carries THIS round's
+                    // terminal state, even when a same-target
+                    // next round commits before the response is
+                    // assembled (review finding P2-3).
+                    tx.push(self.transfer_snapshot_step(&bot_id, &target));
                     match self.run_tx(tx).await {
-                        Ok(_) => {
+                        Ok(results) => {
                             return Ok(TransferOutcome::Applied {
-                                transfer: self.trade_view(key).await?,
+                                transfer: self
+                                    .transfer_snapshot_view(&results)
+                                    .await?,
                                 change: TransferChange::Updated,
                             });
                         }
@@ -1448,7 +1590,7 @@ impl DbBotAuthorityStore {
             ],
             0,
         );
-        self.run_tx(builder.finish()).await
+        self.run_tx(builder.finish()).await.map(|_| ())
     }
 
     /// Stored-terminal guard transaction: the row must
@@ -1458,7 +1600,7 @@ impl DbBotAuthorityStore {
         bot_id: &str,
         target: &str,
         stored_status: &str,
-    ) -> Result<(), bcs_db_api::DbError> {
+    ) -> Result<Vec<DbTransactionStepResult>, bcs_db_api::DbError> {
         let mut builder = TransferTxBuilder::new(self, bot_id, false);
         builder.push_count_guard(
             format!(
@@ -1474,7 +1616,13 @@ impl DbBotAuthorityStore {
             ],
             1,
         );
-        self.run_tx(builder.finish()).await
+        // In-transaction snapshot as the LAST step (after the
+        // guard-binding step): a terminal-repeat response must
+        // carry the state the guard just re-verified, not a
+        // record a racing next round already reclaimed.
+        let mut steps = builder.finish();
+        steps.push(self.transfer_snapshot_step(bot_id, target));
+        self.run_tx(steps).await
     }
 
     /// Lazy-closure transaction: audit + state commit
@@ -1567,7 +1715,7 @@ impl DbBotAuthorityStore {
                 )),
             },
         );
-        self.run_tx(builder.finish()).await
+        self.run_tx(builder.finish()).await.map(|_| ())
     }
 
     /// The decision transaction: accept applies the
@@ -1602,6 +1750,7 @@ impl DbBotAuthorityStore {
             DbTransactionParam::value(DbValue::from(version)),
             builder.version_ref(),
         ]);
+        self.push_operator_alive_guard(&mut builder, operator);
         // The pending row must still be fresh and carry
         // THIS round (ref-bound to the in-tx values).
         builder.push_count_guard(

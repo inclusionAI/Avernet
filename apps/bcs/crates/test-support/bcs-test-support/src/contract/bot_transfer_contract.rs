@@ -444,6 +444,8 @@ pub async fn run_bot_transfer_contract_with_scenarios(
     transfer_audit_failure_is_atomic(fixture, env).await;
     report("transfer_deleted_bot_or_target_fail_clean");
     transfer_deleted_bot_or_target_fail_clean(fixture, env).await;
+    report("transfer_deleted_operator_cannot_drive_commands");
+    transfer_deleted_operator_cannot_drive_commands(fixture, env).await;
     report("transfer_actor_kind_policy");
     transfer_actor_kind_policy(fixture, env).await;
     report("transfer_error_codes_are_pinned");
@@ -2204,6 +2206,89 @@ async fn transfer_deleted_bot_or_target_fail_clean(
         .await
         .expect_err("request toward a removed Human fails");
     assert!(mentions(&err, "bot_authority_human_unknown"), "got {err}");
+}
+
+/// P1 review-finding extension (PR #2625): the same survival
+/// gate covers the OPERATOR side of transfer commands. A
+/// tombstoned owner holding a residual ownership edge and a
+/// valid credential can neither initiate a new round nor
+/// cancel their own pending one; rejection is Forbidden and
+/// produces no row/audit changes. Re-ensuring the actor
+/// restores command authority.
+async fn transfer_deleted_operator_cannot_drive_commands(
+    fixture: &(impl BotTransferContractFixture + ?Sized),
+    env: &str,
+) {
+    let repo = fixture.authority_repo();
+    let bot = "bt_gone_operator";
+    seeded_bot(fixture, env, bot, "gone_owner", 1).await;
+    fixture.seed_human(env, "t_keep").await;
+
+    // Initiation by a tombstoned owner: Forbidden.
+    fixture.remove_human(env, "gone_owner").await;
+    let audit_before = fixture.audit_rows(env).await.len();
+    let err = repo
+        .change_transfer(transfer_cmd(
+            bot,
+            "t_keep",
+            TransferAction::RequestOrRefresh,
+            human_mutation(next_mutation_id(), "gone_owner"),
+        ))
+        .await
+        .expect_err("a deleted owner must not initiate a transfer");
+    assert!(
+        mentions(&err, "bot_authority_operator_forbidden"),
+        "operator-survival initiation denial: {err}"
+    );
+    row_absent(fixture, bot, "t_keep").await;
+
+    // Re-ensure, open a pending round, then tombstone the
+    // owner again mid-flight: CANCEL by the deleted operator
+    // is Forbidden as well, while the target (alive) still
+    // decides the same round normally.
+    fixture.seed_human(env, "gone_owner").await;
+    open_pending(fixture, env, bot, "gone_owner", "t_keep").await;
+    fixture.remove_human(env, "gone_owner").await;
+    let audit_mid = fixture.audit_rows(env).await.len();
+    let err = repo
+        .change_transfer(transfer_cmd(
+            bot,
+            "t_keep",
+            TransferAction::Cancel,
+            human_mutation(next_mutation_id(), "gone_owner"),
+        ))
+        .await
+        .expect_err("a deleted initiator must not cancel");
+    assert!(
+        mentions(&err, "bot_authority_operator_forbidden"),
+        "operator-survival cancel denial: {err}"
+    );
+    assert_eq!(
+        fixture.audit_rows(env).await.len(),
+        audit_mid,
+        "a rejected operator produces no audit rows"
+    );
+    // The pending row survived the rejected cancel: a live
+    // target's reject still lands on THIS round.
+    let outcome = repo
+        .change_transfer(transfer_cmd(
+            bot,
+            "t_keep",
+            TransferAction::Reject,
+            human_mutation(next_mutation_id(), "t_keep"),
+        ))
+        .await
+        .expect("the live target still decides the round");
+    match outcome {
+        TransferOutcome::Applied { transfer, .. } => {
+            assert_eq!(transfer.status, TransferStatus::Rejected)
+        }
+        other => panic!("expected the round to remain decidable, got {other:?}"),
+    }
+    assert!(
+        fixture.audit_rows(env).await.len() > audit_before,
+        "only the legitimate writes audited"
+    );
 }
 
 /// 发起 = 仅当前 owner Human；accept/reject = 目标 Human 或

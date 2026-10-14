@@ -148,6 +148,8 @@ pub async fn run_bot_authority_contract_with_scenarios(
     roles_for_batches_exactly(fixture, env).await;
     report("deleted_human_loses_all_authority");
     deleted_human_loses_all_authority(fixture, env).await;
+    report("deleted_operator_cannot_edit_managers");
+    deleted_operator_cannot_edit_managers(fixture, env).await;
     // Manager write paths (Task 2): the same legal results and
     // errors for every store that implements the port.
     report("manager_edit_grant_revoke_and_self_revoke");
@@ -693,6 +695,110 @@ async fn deleted_human_loses_all_authority(
             .expect("role after re-ensure"),
         Some(BotAccessRelation::Manager),
         "a re-ensured Human resolves their edge again"
+    );
+}
+
+/// P1 review finding (PR #2625): write-side symmetry of the
+/// scenario above. A tombstoned Human whose manager edge
+/// remains must also lose the ability to DRIVE manager
+/// writes — the write paths re-verify the operator's
+/// survival (pre-check + in-transaction/atomic-span guard),
+/// never just the presence of the residual edge. After
+/// deletion, both PUT/DELETE-style edits are Forbidden, no
+/// permission changes and no audit rows are produced, and
+/// re-ensuring the actor restores write authority.
+async fn deleted_operator_cannot_edit_managers(
+    fixture: &(impl BotAuthorityContractFixture + ?Sized),
+    env: &str,
+) {
+    let repo = fixture.authority_repo();
+    let bot = "bot_gone_operator";
+    fixture.seed_bot(env, bot, 1).await;
+    fixture
+        .grant_edge(env, bot, &human_actor_id("stay_owner"), BotAccessRelation::Owner)
+        .await;
+    fixture
+        .grant_edge(env, bot, &human_actor_id("gone_operator"), BotAccessRelation::Manager)
+        .await;
+    fixture
+        .grant_edge(env, bot, &human_actor_id("third_manager"), BotAccessRelation::Manager)
+        .await;
+
+    fixture.remove_human(env, "gone_operator").await;
+    let audit_before = fixture.audit_rows(env).await.len();
+
+    // Grant by the tombstoned operator: Forbidden.
+    let err = repo
+        .edit_manager(human_edit(
+            bot,
+            "new_target",
+            ManagerEditAction::Grant,
+            "gone_operator",
+            next_mutation_id(),
+        ))
+        .await
+        .expect_err("grant by a tombstoned operator must be rejected");
+    assert!(
+        mentions(&err, "bot_authority_operator_forbidden"),
+        "operator-survival grant denial: {err}"
+    );
+
+    // Revoke by the tombstoned operator: same rejection class;
+    // the victim's edge must survive untouched.
+    let err = repo
+        .edit_manager(human_edit(
+            bot,
+            "third_manager",
+            ManagerEditAction::Revoke,
+            "gone_operator",
+            next_mutation_id(),
+        ))
+        .await
+        .expect_err("revoke by a tombstoned operator must be rejected");
+    assert!(
+        mentions(&err, "bot_authority_operator_forbidden"),
+        "operator-survival revoke denial: {err}"
+    );
+
+    assert_eq!(
+        fixture.audit_rows(env).await.len(),
+        audit_before,
+        "a rejected operator produces no audit rows"
+    );
+    assert_eq!(
+        repo.role(&human_actor_id("third_manager"), bot)
+            .await
+            .expect("victim role read"),
+        Some(BotAccessRelation::Manager),
+        "no permission change: the victim keeps the edge"
+    );
+    assert_eq!(
+        repo.role(&human_actor_id("new_target"), bot)
+            .await
+            .expect("non-grant role read"),
+        None,
+        "no permission change: nothing was granted"
+    );
+
+    // Re-ensure is a fresh actor lifecycle: write authority
+    // returns with the live row (the grant target is a live
+    // Human for this leg).
+    fixture.seed_human(env, "gone_operator").await;
+    fixture.seed_human(env, "new_target").await;
+    let change = repo
+        .edit_manager(human_edit(
+            bot,
+            "new_target",
+            ManagerEditAction::Grant,
+            "gone_operator",
+            next_mutation_id(),
+        ))
+        .await
+        .expect("re-ensured operator edits again");
+    assert_eq!(
+        (change.added, change.removed),
+        (1, 0),
+        "the re-ensured operator's grant applies"
     );
 }
 

@@ -244,6 +244,17 @@ pub(crate) async fn resolve_group_member_caller(
         }
     }
     for bot_id in candidates {
+        // A candidate that IS the current Human's own actor id
+        // (the Human is the group's originator or driver
+        // themself) needs no authority edge: the hook by design
+        // carries no Human→Human manage edge, and this
+        // self-identity admission survives driver handover and
+        // manager-edge revocation (the spec §3.3 revocation
+        // boundary). The downstream coordinator check decides
+        // what the Human may do with the group.
+        if bot_id == human_id {
+            return Ok(bot_id);
+        }
         match state
             .services
             .bot_authority_hook

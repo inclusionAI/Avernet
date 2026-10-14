@@ -843,6 +843,21 @@ async fn manager_edit_impl(
             "operator '{operator_actor_id}' holds no current owner/manager edge"
         )));
     }
+    // Operator-survival gate (spec §3.1): the edge alone
+    // authorizes nothing once the operator's Human ACTOR
+    // row is gone — a tombstoned operator holding a
+    // residual edge and a valid credential must not
+    // grant or revoke manager rights. The snapshot is
+    // read INSIDE this write span (the SQL store's
+    // in-transaction guard shape), so a deletion racing
+    // the command can never leak an edge.
+    let operator_user =
+        human_user_id_of_actor(&operator_actor_id).expect("operator shape");
+    if !live_humans.contains(&operator_user) {
+        return Err(memory_operator_forbidden(&format!(
+            "operator '{operator_actor_id}' is not a live Human actor"
+        )));
+    }
 
     let target_current =
         staged
@@ -1450,6 +1465,19 @@ async fn transfer_change_impl(
             "transfer target '{}' is not a valid Human",
             key.target_owner_actor_id
         )));
+    }
+    // A HUMAN operator must be a live Human as well (spec
+    // §3.1, read against the SAME in-span snapshot): the
+    // residual edge of a tombstoned operator grants no
+    // initiation, cancellation, or decision.
+    if let Some(operator) = operator_actor.as_deref() {
+        if let Some(operator_user) = human_user_id_of_actor(operator) {
+            if !live_humans.contains(&operator_user) {
+                return Err(memory_operator_forbidden(&format!(
+                    "transfer operator '{operator}' is not a live Human actor"
+                )));
+            }
+        }
     }
     let mutation_id = mutation.mutation_id.clone();
     let actor_kind = operator_kind.as_str();

@@ -790,6 +790,7 @@ impl UserIdentityPort for StaticMembersIdentity {
 async fn members_app(
     authority: Arc<LazySeedAuthorityHook>,
     staff_no: &str,
+    originator: Option<&str>,
 ) -> axum::Router {
     let temp_dir = TempDir::new().unwrap();
     let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
@@ -816,16 +817,22 @@ async fn members_app(
         )
         .await
         .unwrap();
+    // A live Human actor row for the calling staff: the
+    // app layer resolves a Human caller through the
+    // registry (their own actor kind admits as self).
+    registry
+        .ensure_human_actor(staff_no, staff_no)
+        .await
+        .expect("human actor row for the caller");
     drop(temp_dir);
     let group_store = Arc::new(GroupStore::new());
-    group_store
-        .upsert(Group::new(
-            "group-matrix",
-            "driver-bot",
-            vec![bot_participant("driver-bot", ParticipantRole::Driver)],
-        ))
-        .await
-        .expect("group fixture");
+    let mut group = Group::new(
+        "group-matrix",
+        "driver-bot",
+        vec![bot_participant("driver-bot", ParticipantRole::Driver)],
+    );
+    group.originator = originator.map(str::to_string);
+    group_store.upsert(group).await.expect("group fixture");
     let group_query = Arc::new(
         bcs_group::GroupManagement::with_defaults(
             group_store.clone(),
@@ -873,7 +880,7 @@ async fn group_member_caller_follows_the_current_control_matrix() {
 
     // A(owner): the CURRENT owner of the driver acts as
     // the coordinator Bot.
-    let app = members_app(authority.clone(), "100").await;
+    let app = members_app(authority.clone(), "100", None).await;
     let resp = add_member(&app).await;
     let status = resp.status();
     let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
@@ -887,13 +894,13 @@ async fn group_member_caller_follows_the_current_control_matrix() {
     // M(manager): the same judgment through the manager
     // edge.
     authority.seed_manager("driver-bot", "200");
-    let app = members_app(authority.clone(), "200").await;
+    let app = members_app(authority.clone(), "200", None).await;
     let resp = add_member(&app).await;
     assert_eq!(resp.status(), StatusCode::OK);
 
     // X(manager withdrawal): fallback-free deny.
     authority.revoke_manager("driver-bot", "200");
-    let app = members_app(authority.clone(), "200").await;
+    let app = members_app(authority.clone(), "200", None).await;
     let resp = add_member(&app).await;
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 
@@ -901,12 +908,48 @@ async fn group_member_caller_follows_the_current_control_matrix() {
     // whose legacy `created_by` row remains, is
     // fallback-free denied.
     authority.seed_owner("driver-bot", "400");
-    let app_new = members_app(authority.clone(), "400").await;
+    let app_new = members_app(authority.clone(), "400", None).await;
     let resp = add_member(&app_new).await;
     assert_eq!(resp.status(), StatusCode::OK);
-    let app_old = members_app(authority.clone(), "100").await;
+    let app_old = members_app(authority.clone(), "100", None).await;
     let resp = add_member(&app_old).await;
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn group_member_caller_admits_the_humans_own_originator_role() {
+    // Review finding (PR #2625): the group's originator can be
+    // the calling Human themself; the authority hook carries no
+    // Human→Human manage edge by design, so the fallback must
+    // recognize the Human's own actor id instead of 403-ing.
+    // The driver Bot is controlled by ANOTHER user; the Human
+    // holds no edge on any coordinator Bot at all.
+    let authority = trusted_chain(&[("driver-bot", "400")]);
+    let staff_originator = members_app(authority.clone(), "100", Some("human_100")).await;
+    let resp = add_member(&staff_originator).await;
+    let status = resp.status();
+    let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "self-originator member add must be admitted: {}",
+        String::from_utf8_lossy(&body)
+    );
+
+    // An unrelated Human (neither originator nor holder of any
+    // manage edge on the driver) is still denied.
+    let staff_other = members_app(authority.clone(), "200", Some("human_100")).await;
+    let resp = add_member(&staff_other).await;
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+    // After the driver changes hands again, the Human's own
+    // originator admission is unchanged (spec §3.3: the
+    // independent resource fact survives driver handover and
+    // manager-edge revocation).
+    authority.seed_owner("driver-bot", "300");
+    let staff_after_handover = members_app(authority.clone(), "100", Some("human_100")).await;
+    let resp = add_member(&staff_after_handover).await;
+    assert_eq!(resp.status(), StatusCode::OK);
 }
 
 // ---------------------------------------------------------------------------

@@ -994,3 +994,170 @@ async fn version_stays_at_zero_growth_without_accept() {
         "the transfer audit subject is the target"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Review P2-3 regression (PR #2625): an Applied transfer response
+// must carry the state its own transaction committed. The
+// (bot, target) record is reused by later rounds, so before the
+// fix the post-commit re-read could assemble the response from a
+// racing NEXT round's pending row. This wrapper interleaves a
+// same-target next round deterministically — after the reject's
+// decision commit, before its response assembly.
+// ---------------------------------------------------------------------------
+
+/// DbPlugin wrapper that, exactly once, opens a competing
+/// same-target transfer round after the first successful
+/// transaction it observes (the decision commit) and before
+/// the original caller resumes.
+struct InterleaveAfterFirstCommit {
+    inner: StdArc<dyn DbPlugin>,
+    fired: AtomicUsize,
+}
+
+#[async_trait]
+impl DbPlugin for InterleaveAfterFirstCommit {
+    async fn query(
+        &self,
+        statement: DbStatement,
+    ) -> bcs_db_api::DbResult<Vec<DbRow>> {
+        self.inner.query(statement).await
+    }
+
+    async fn execute(
+        &self,
+        statement: DbStatement,
+    ) -> bcs_db_api::DbResult<DbExecuteResult> {
+        self.inner.execute(statement).await
+    }
+
+    async fn transaction(
+        &self,
+        steps: Vec<DbTransactionStep>,
+    ) -> bcs_db_api::DbResult<Vec<bcs_db_api::DbTransactionStepResult>> {
+        self.inner.transaction(steps).await
+    }
+
+    async fn transaction_with_options(
+        &self,
+        steps: Vec<DbTransactionStep>,
+        options: DbTransactionOptions,
+    ) -> bcs_db_api::DbResult<Vec<bcs_db_api::DbTransactionStepResult>> {
+        let result = self
+            .inner
+            .transaction_with_options(steps, options)
+            .await?;
+        if result.iter().all(|_| true)
+            && self.fired.swap(1, Ordering::SeqCst) == 0
+        {
+            // The rejection has COMMITTED. An independent owner
+            // request starts the next round for the same
+            // (bot, target) — only then does the rejected
+            // caller resume assembling its response.
+            let concurrent = DbBotAuthorityStore::new(
+                self.inner.clone(),
+                bcs_db_api::DbSqlFlavor::Sqlite,
+                ENV.to_string(),
+            );
+            concurrent
+                .change_transfer(bcs_test_support::contract::bot_transfer_contract::transfer_cmd(
+                    "bt_response_race",
+                    "t1",
+                    bcs_service_api::types::bot_authority::TransferAction::RequestOrRefresh,
+                    bcs_test_support::contract::bot_transfer_contract::human_mutation(
+                        bcs_test_support::contract::bot_transfer_contract::next_mutation_id(),
+                        "own",
+                    ),
+                ))
+                .await
+                .expect("the competing next-round request commits");
+        }
+        Ok(result)
+    }
+
+    async fn health_check(&self) -> bcs_db_api::DbResult<DbHealth> {
+        self.inner.health_check().await
+    }
+}
+
+#[tokio::test]
+async fn decision_response_carries_its_own_committed_state() {
+    use bcs_test_support::contract::bot_transfer_contract::{
+        human_mutation, next_mutation_id, transfer_cmd,
+    };
+    use bcs_service_api::types::bot_authority::{
+        TransferAction, TransferChange, TransferKey, TransferOutcome,
+        TransferStatus, human_actor_id,
+    };
+
+    let fixture = new_fixture().await;
+    fixture.seed_bot(ENV, "bt_response_race", 1).await;
+    fixture
+        .grant_edge(ENV, "bt_response_race", "human_own", BotAccessRelation::Owner)
+        .await;
+    fixture.seed_human(ENV, "t1").await;
+    // Round 1 opens through the plain store, BEFORE the plugin
+    // is wrapped (the wrapper must observe the decision as its
+    // first transaction).
+    fixture
+        .store
+        .change_transfer(transfer_cmd(
+            "bt_response_race",
+            "t1",
+            TransferAction::RequestOrRefresh,
+            human_mutation(next_mutation_id(), "own"),
+        ))
+        .await
+        .expect("round 1 opens");
+
+    let wrapped: StdArc<dyn DbPlugin> = StdArc::new(InterleaveAfterFirstCommit {
+        inner: fixture.db.clone(),
+        fired: AtomicUsize::new(0),
+    });
+    let store = DbBotAuthorityStore::new(
+        wrapped,
+        bcs_db_api::DbSqlFlavor::Sqlite,
+        ENV.to_string(),
+    );
+    let outcome = store
+        .change_transfer(transfer_cmd(
+            "bt_response_race",
+            "t1",
+            TransferAction::Reject,
+            human_mutation(next_mutation_id(), "t1"),
+        ))
+        .await
+        .expect("the target rejects round 1");
+    match outcome {
+        TransferOutcome::Applied { transfer, change } => {
+            assert_eq!(
+                transfer.status,
+                TransferStatus::Rejected,
+                "the reject response must carry its OWN committed terminal \
+                 state, not the interleaved next round's pending"
+            );
+            assert!(
+                transfer.decided_at.is_some(),
+                "a decided response keeps its decision timestamp"
+            );
+            assert_eq!(change, TransferChange::Updated);
+        }
+        other => panic!("expected an applied rejection, got {other:?}"),
+    }
+
+    // The interleave really did land: a fresh pending round now
+    // holds the record — the fix is not vacuous.
+    let row = fixture
+        .store
+        .transfer(&TransferKey {
+            bot_id: "bt_response_race".to_string(),
+            target_owner_actor_id: human_actor_id("t1"),
+        })
+        .await
+        .expect("row read")
+        .expect("the reused record exists");
+    assert_eq!(
+        row.status,
+        TransferStatus::Pending,
+        "the competing request reused the same-target record"
+    );
+}

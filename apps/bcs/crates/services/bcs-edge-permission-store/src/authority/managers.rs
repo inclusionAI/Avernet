@@ -1096,8 +1096,10 @@ impl DbBotAuthorityStore {
     ) -> ServiceResult<ManagerSetChange> {
         // 单项管理 by Humans only; the trusted service
         // path must use sync (spec §5.1/§5.2 split).
-        let operator_actor_id = match &command.mutation.actor {
-            AuthorityActor::Human { user_id } => human_actor_id(user_id),
+        let (operator_actor_id, operator_user_id) = match &command.mutation.actor {
+            AuthorityActor::Human { user_id } => {
+                (human_actor_id(user_id), user_id.clone())
+            }
             _ => {
                 return Err(operator_forbidden_error(
                     "single-item manager edit requires a Human actor; \
@@ -1138,6 +1140,21 @@ impl DbBotAuthorityStore {
                 return Err(operator_forbidden_error(format!(
                     "operator '{operator_actor_id}' holds no current \
                      owner/manager edge"
+                )));
+            }
+            // Operator-survival gate (spec §3.1): the edge alone
+            // authorizes nothing once the operator's Human ACTOR
+            // row is gone — a tombstoned operator holding a
+            // residual edge and a valid credential must not
+            // grant or revoke manager rights. The transaction
+            // re-verifies this under the row lock below.
+            let operator_missing = self
+                .pre_read_missing_humans(&[operator_user_id.as_str()])
+                .await?;
+            if !operator_missing.is_empty() {
+                return Err(operator_forbidden_error(format!(
+                    "operator '{operator_actor_id}' is not a live \
+                     Human actor"
                 )));
             }
             let target_state = self
@@ -1241,6 +1258,40 @@ impl DbBotAuthorityStore {
                 .guard_tokens
                 .push(DbTransactionParam::query_result(
                     operator_index,
+                    0,
+                    "ok",
+                ));
+            // Operator-survival guard under the lock (same
+            // bcs_bots Human-row shape as the add-target guard):
+            // a deletion racing the write cannot slip a
+            // permission change through on a residual edge.
+            builder.steps.push(DbTransactionStep::Query(
+                DbStatement::with_transaction_params(
+                    format!(
+                        "SELECT t.c AS ok FROM \
+                           (SELECT COUNT(*) AS c FROM bcs_bots \
+                            WHERE {} \
+                              AND actor_kind = 'human' \
+                              AND env = ? \
+                              AND COALESCE(is_deleted, 0) = 0{}) t \
+                         WHERE t.c = 1",
+                        self.bot_id_eq(),
+                        self.lock_suffix()
+                    )
+                    .as_str(),
+                    vec![
+                        DbTransactionParam::value(DbValue::from(
+                            operator_actor_id.as_str(),
+                        )),
+                        DbTransactionParam::value(self.env_param()),
+                    ],
+                ),
+            ));
+            let operator_alive_index = builder.steps.len() - 1;
+            builder
+                .guard_tokens
+                .push(DbTransactionParam::query_result(
+                    operator_alive_index,
                     0,
                     "ok",
                 ));

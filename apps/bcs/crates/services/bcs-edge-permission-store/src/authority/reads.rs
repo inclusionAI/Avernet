@@ -30,7 +30,7 @@ use bcs_service_api::types::bot_authority::{
 use super::{CHUNK, DbBotAuthorityStore, not_initialized_error, owner_integrity_error};
 
 /// Transfer projection columns (spec §4.3).
-const TRANSFER_COLUMNS: &str = "bot_id, target_owner_actor_id, from_owner_actor_id, \
+pub(super) const TRANSFER_COLUMNS: &str = "bot_id, target_owner_actor_id, from_owner_actor_id, \
      status, requested_at, expires_at, updated_at, decided_at, decided_by_kind, \
      decided_by_id, reason, result_ownership_version, bot_name_snapshot";
 
