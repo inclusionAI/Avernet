@@ -31,7 +31,7 @@
 <rect x="721" y="234" width="96" height="30" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
 <text x="769.0" y="249.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">agents@1</text>
 <rect x="825" y="234" width="126" height="30" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
-<text x="888.0" y="249.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">evaluate.train@1</text>
+<text x="888.0" y="249.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">evaluation.train@1</text>
 <path d="M 190 82 L 190 123" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
 <text x="198" y="103" font-size="11.5" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">run(ctx)</text>
 <path d="M 340 200 L 388 200" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
