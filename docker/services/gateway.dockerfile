@@ -76,5 +76,5 @@ HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=6 \
     CMD curl -fsS "http://127.0.0.1:${GATEWAY_PORT:-8888}/health" >/dev/null || exit 1
 
 # Entry point selects the runner via installed entry points (bare = community).
-ENTRYPOINT ["python", "/app/apps/gateway/community/main.py"]
+ENTRYPOINT ["python", "/app/src/gateway/community/main.py"]
 CMD ["--config", "/app/configs", "--mode", "bare"]
