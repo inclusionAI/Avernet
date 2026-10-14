@@ -415,6 +415,7 @@ mod tests {
             session_id: "session-1".to_string(),
             run_id: "run-1".to_string(),
             node_id: "review".to_string(),
+            execution: None,
             display_name: "Review".to_string(),
             instruction: "Review the draft".to_string(),
             assignee_actor_id: "human-1".to_string(),
