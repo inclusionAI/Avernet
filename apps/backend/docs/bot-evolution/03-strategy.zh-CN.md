@@ -685,6 +685,17 @@ class AgentRunner(Protocol):
 
 **`evaluation.train@1`。**
 
+**这里“评估”是什么意思。** 验证（[07-verification.zh-CN.md](07-verification.zh-CN.md)）为每个 Bot 保存一组**测试用例**。测试用例是一段脚本化的对话，带有期望的行为，以及一个给 Bot 的回答打分的**评分器**。例如：
+
+```text
+id: refund_partial_01                  # one test case (ClawBench Markdown format, 07-verification.md)
+prompt:   "Can I get a refund for half of my order A17?"
+expected: offers a partial refund, as the refund policy allows; does not escalate
+grader:   hybrid (a rule check plus an LLM judge), returns a score 0..1 and a critique
+```
+
+**评估**一个 Bot 版本，就是让它跑一组用例，并给每个回答打分。用例被分成可见性不同的**划分**。**训练**划分是策略的练习集：策略可以向其中添加用例，并看到每个分数和点评。其他划分（验证、留出、回归、安全）对它不可见。`evaluation.train@1` 只给策略一件事：“让我工作区里这个样子的 Bot 跑一遍训练用例，并告诉我结果”。`TrainEvaluator` 就是完成这件事的 `ctx.evaluation` 的类型。这里没有任何机器学习意义上的训练：“训练”只是这个划分的名字。
+
 ```python
 class TrainEvaluator(Protocol):
     """Platform scoring of a workspace on the train cases, for the strategy's own feedback."""

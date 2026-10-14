@@ -928,6 +928,28 @@ definition the strategy did not register is refused.
 
 **`evaluation.train@1`.**
 
+**What "evaluation" means here.** Verification
+([07-verification.md](07-verification.md)) keeps a set of **test cases** for
+each bot. A test case is a scripted conversation with an expected behaviour
+and a **grader** that scores the bot's answer. For example:
+
+```text
+id: refund_partial_01                  # one test case (ClawBench Markdown format, 07-verification.md)
+prompt:   "Can I get a refund for half of my order A17?"
+expected: offers a partial refund, as the refund policy allows; does not escalate
+grader:   hybrid (a rule check plus an LLM judge), returns a score 0..1 and a critique
+```
+
+**Evaluating** a bot version means running it on a set of cases and grading
+every answer. The cases are divided into **splits** with different
+visibility. The **train** split is the strategy's practice set: the
+strategy may add cases to it and see every score and critique. The other
+splits (validation, holdout, regression, safety) are hidden from it.
+`evaluation.train@1` gives a strategy one thing: "run the bot as it is in
+my workspace on the train cases, and tell me how it did". `TrainEvaluator`
+is the type of `ctx.evaluation` that does this. Nothing is trained in the
+ML sense: "train" only names the split.
+
 ```python
 class TrainEvaluator(Protocol):
     """Platform scoring of a workspace on the train cases, for the strategy's own feedback."""
