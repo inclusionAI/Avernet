@@ -1,3 +1,4 @@
+import { sanitizeMarkdownHtml } from '@/assets/TaskPanel/sanitizeHtml';
 import { Button } from '@/components/ui/Button';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/Drawer';
 import { Empty } from '@/components/ui/Empty';
@@ -65,7 +66,8 @@ export function CapabilityDetailDrawer({
     const name = meta?.name || detail.name || '';
     const description = meta?.description || detail.description || '暂无描述';
     const table = `| Name | Description |\n| --- | --- |\n| \`${cell(name)}\` | ${cell(description)} |`;
-    return markdown.render(`${table}\n\n${body}`);
+    // html:false 之外再过 sanitizeMarkdownHtml 白名单（DOMPurify），满足安全扫描误报条件 3。
+    return sanitizeMarkdownHtml(markdown.render(`${table}\n\n${body}`));
   }, [detail?.content, detail?.name, detail?.description]);
   return (
     <Drawer
