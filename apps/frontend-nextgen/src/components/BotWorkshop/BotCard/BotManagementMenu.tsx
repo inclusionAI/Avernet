@@ -44,15 +44,16 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
   // 重启词表（Avernet PR #1911）：动作名即路由键。服务卡由后端词表决定三个
   // 重启动词各自落在哪张卡（draft→restart，predeploy/online→restart_publish）；词表与
   // disabled_actions 均未声明时不渲染（对齐 bot-workshop-page.md §10.3 卡片操作口径）。
-  // Coding Bot 暂在此前端预开启：engine_restart 预设转发 refetch 语义，等后端 action
-  // 契约回传 refetch_engine 后可移除该覆盖。
+  // Coding Bot 先隐藏「重启引擎」：OpenAPI refetch 契约尚未接入，等后端动作回传后再放开。
   const restartDeclared = bot.actions.includes('restart') || Boolean(bot.disabledActions.restart);
   const restartPublishDeclared =
     bot.actions.includes('restart_publish') || Boolean(bot.disabledActions.restart_publish);
   const restartPublishDisabledReason = bot.disabledActions.restart_publish;
   const restartDisabledReason = bot.disabledActions.restart;
   const engineRestartDeclared = bot.actions.includes('engine_restart') || Boolean(bot.disabledActions.engine_restart);
-  const engineRestartEnabled = isAgentCodingBot || bot.actions.includes('engine_restart');
+  const showEngineRestart =
+    !isAgentCodingBot && (restartUnsupported || !isServiceBot || engineRestartDeclared);
+  const engineRestartEnabled = bot.actions.includes('engine_restart');
   const engineRestartDisabledReason = bot.disabledActions.engine_restart;
   const restartPublishStage = confirmAction === 'restart_publish' ? restartPublishStageOf(bot.lifecycle) : undefined;
   return (
@@ -119,7 +120,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
           </MenuSection>
           {/* 日常操作（协作与查看） */}
           <MenuSection divider>
-            {!isAgentCodingBot && collaborationMode && onAuthorize ? (
+            {collaborationMode && onAuthorize ? (
               <Button
                 variant="ghost"
                 size="sm"
@@ -214,7 +215,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
                 </ActionHelp>
               </Button>
             ) : null}
-            {restartUnsupported || !isServiceBot || engineRestartDeclared || isAgentCodingBot ? (
+            {showEngineRestart ? (
               <Button
                 variant="ghost"
                 size="sm"
@@ -230,8 +231,6 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
                   description={
                     restartUnsupported
                       ? 'TeClaw 暂不支持重启引擎'
-                      : isAgentCodingBot
-                      ? '重新拉取 Coding 引擎二进制并重启运行时，进行中的会话可能中断。'
                       : engineRestartDisabledReason && !engineRestartEnabled
                       ? engineRestartDisabledReason
                       : '指重新启动 Bot 所依赖的底层运行引擎（如 OpenClaw、ClaudeCode 等）。'
@@ -270,9 +269,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
             : confirmAction === 'upgrade'
             ? '开启后不可逆，确认将此 Bot 转换为服务 Bot？'
             : confirmAction === 'engine_restart'
-            ? isAgentCodingBot
-              ? '将重新拉取 Coding 引擎二进制并重启运行时，进行中的会话可能中断。'
-              : '仅重启引擎进程，不重建容器。'
+            ? '仅重启引擎进程，不重建容器。'
             : confirmAction === 'restart_publish'
             ? restartPublishStage
               ? `将重启该服务在${restartPublishStageLabel[restartPublishStage]}环境发布的运行时，进行中的服务会话可能短暂中断；草稿机器与草稿数据不受影响。`

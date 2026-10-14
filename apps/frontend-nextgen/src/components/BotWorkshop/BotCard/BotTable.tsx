@@ -166,18 +166,17 @@ const BotTable: React.FC<BotTableProps> = ({
         align: 'end',
         cell: (bot) => {
           if (!onAction) return null;
-          const isAgentCodingBot = bot.runtime.isAgentCodingBot;
           const generalConfigAvailability = getGeneralConfigAvailability?.(bot);
           return (
             <div className="flex justify-end" onClick={(event) => event.stopPropagation()}>
               <BotManagementMenu
                 bot={bot}
-                collaborationMode={isAgentCodingBot ? undefined : getCollaborationMode?.(bot)}
+                collaborationMode={getCollaborationMode?.(bot)}
                 lockedByOther={bot.lock?.status === 'other'}
                 onAction={onAction}
                 onManagePublication={onManagePublication}
                 onChangeSpace={onChangeSpace}
-                onAuthorize={isAgentCodingBot ? undefined : onAuthorize}
+                onAuthorize={onAuthorize}
                 canGeneralConfig={generalConfigAvailability?.enabled}
                 generalConfigDisabledReason={generalConfigAvailability?.disabledReason}
                 onGeneralConfig={onGeneralConfig}
