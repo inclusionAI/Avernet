@@ -188,7 +188,7 @@ jobs:
           # build under target/cov-e2e/llvm-cov-target is force-rebuilt every
           # run (BCS_COVERAGE_FORCE_REBUILD=1) so coverage always reflects
           # the pushed source; caching those artifacts would risk stale
-          # coverage across commits (same reasoning as e2e-tests.yml).
+          # coverage across commits.
           path: |
             ~/.cargo/registry
             ~/.cargo/git
