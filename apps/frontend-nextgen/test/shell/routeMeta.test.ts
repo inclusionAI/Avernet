@@ -4,11 +4,8 @@ import { getMergedRouteMetas, getRouteMeta, routeMetaList } from '@/shell/routeM
 import { describe, expect, it } from '@jest/globals';
 import { Compass, Sparkles } from 'lucide-react';
 
-// getMergedNavigationItems 分组模型（section: collab|bot|legacy）断言。
-// split-admin-space-ticket-pages：【管理后台】基线项退役（管理域拆分至 /space-admin、/ticket-center
-// 独立路由，入口不再占导航位）；collab-permission-entry-migration：【协作权限】入口随旧页面退役，
-// legacy 过渡组仅剩 任务列表；adminEntry 形态开关随项退役
-// （getShellVisibility 剩 spaceSwitcher/notificationBell 两字段）。
+// getMergedNavigationItems 只承载产品侧栏的 collab / bot 两个分组。
+// 无导航位页面继续保留 route meta 与直接 URL 访问能力。
 // 注意：extendCapabilities 合并后无法恢复，故越靠后的用例携带越多的 capability override，
 // 默认形态用例一律置前，internal 注入 override 用例按依赖顺序排列。
 
@@ -25,6 +22,14 @@ describe('routeMeta 路由归属契约', () => {
     expect(getRouteMeta('/workspace')?.navKey).toBeUndefined();
     expect(getRouteMeta('/workspace/chat/session-1')?.navKey).toBe('conversation');
     expect(getRouteMeta('/workspace/collaboration/detail')?.navKey).toBe('collaboration');
+  });
+
+  it('任务列表保留路由元信息，但不再占产品导航位', () => {
+    expect(getRouteMeta('/work/my-task')).toEqual(
+      expect.objectContaining({ path: '/work/my-task', title: '任务列表', section: 'legacy' }),
+    );
+    expect(getRouteMeta('/work/my-task')?.navKey).toBeUndefined();
+    expect(getMergedNavigationItems().some((item) => item.id === 'my-task')).toBe(false);
   });
 
   it('Bot 编辑器为独立工作台，列表页仍保留全局导航', () => {
@@ -45,7 +50,7 @@ describe('getMergedNavigationItems（Open Core 默认 capabilities）', () => {
     );
   });
 
-  it('双固定分组 + legacy 过渡组：flat 序 = collab → bot → legacy，组内基线项原序', () => {
+  it('双固定分组：flat 序 = collab → bot，组内基线项原序', () => {
     const merged = getMergedNavigationItems();
     expect(merged.filter((item) => item.section === 'collab').map((item) => item.id)).toEqual([
       'conversation',
@@ -54,28 +59,22 @@ describe('getMergedNavigationItems（Open Core 默认 capabilities）', () => {
       'lab',
     ]);
     expect(merged.filter((item) => item.section === 'bot').map((item) => item.id)).toEqual(['bot-workshop']);
-    expect(merged.filter((item) => item.section === 'legacy').map((item) => item.id)).toEqual(['my-task']);
+    expect(merged.some((item) => item.id === 'my-task')).toBe(false);
   });
 
-  it('同路由就地改名项归组正确且不打 deprecated（Bot管理 / 发现）', () => {
+  it('同路由就地改名项归组正确（Bot管理 / 发现）', () => {
     const merged = getMergedNavigationItems();
     const bot = merged.find((item) => item.id === 'bot-workshop');
     expect(bot?.label).toBe('Bot管理');
     expect(bot?.section).toBe('bot');
-    expect(bot?.deprecated).toBeUndefined();
 
     const found = merged.find((item) => item.id === 'collaboration-square');
     expect(found?.label).toBe('发现');
     expect(found?.section).toBe('collab');
-    expect(found?.deprecated).toBeUndefined();
   });
 
-  it('在新 IA 中无继任位的项沉淀 legacy 过渡组并带 deprecated 标记（管理后台/协作权限入口均已退役）', () => {
-    for (const id of ['my-task']) {
-      const item = getMergedNavigationItems().find((entry) => entry.id === id);
-      expect(item?.section).toBe('legacy');
-      expect(item?.deprecated).toBe(true);
-    }
+  it('无产品导航位的存量入口均不出现在侧栏', () => {
+    expect(getMergedNavigationItems().some((item) => item.id === 'my-task')).toBe(false);
     expect(getMergedNavigationItems().some((item) => item.id === 'admin')).toBe(false);
     expect(getMergedNavigationItems().some((item) => item.id === 'collaboration-privacy')).toBe(false);
   });
@@ -87,7 +86,7 @@ describe('getMergedNavigationItems（Open Core 默认 capabilities）', () => {
 });
 
 describe('getMergedNavigationItems（internal overlay 注入语义）', () => {
-  it('内部项按自身 section 追加到同名分组末尾，deprecated 标记透传', () => {
+  it('内部项按自身 section 追加到同名产品分组末尾', () => {
     extendCapabilities({
       getInternalNavigationItems: () => ({
         status: 'available',
@@ -108,15 +107,6 @@ describe('getMergedNavigationItems（internal overlay 注入语义）', () => {
             section: 'bot',
             description: '发现和添加通用能力',
           },
-          {
-            id: 'legacy-portal',
-            label: '旧门户',
-            path: '/legacy-portal',
-            icon: Compass,
-            section: 'legacy',
-            deprecated: true,
-            description: 'deprecated 透传用例',
-          },
         ],
       }),
       getShellVisibility: () => ({
@@ -134,10 +124,7 @@ describe('getMergedNavigationItems（internal overlay 注入语义）', () => {
       'bot-workshop',
       'capability-workshop',
       'market',
-      'my-task',
-      'legacy-portal',
     ]);
     expect(merged.find((item) => item.id === 'capability-workshop')?.label).toBe('能力管理');
-    expect(merged.find((item) => item.id === 'legacy-portal')?.deprecated).toBe(true);
   });
 });

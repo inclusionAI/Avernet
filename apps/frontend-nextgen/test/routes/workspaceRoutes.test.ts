@@ -47,4 +47,11 @@ describe('workspace route registration(Tasks 8 拆分页)', () => {
     });
     expect(appLayoutRoutes.some((route) => route.component === '@/pages/Workspace')).toBe(false);
   });
+
+  it('任务列表不占产品导航位后，直接访问路由仍保留', () => {
+    expect(findRoute('/work/my-task')).toEqual({
+      path: '/work/my-task',
+      component: '@/pages/MyTask',
+    });
+  });
 });
