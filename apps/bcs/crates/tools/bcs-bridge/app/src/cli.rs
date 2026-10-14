@@ -11,6 +11,9 @@ pub struct Cli {
     /// Configuration file (default: ~/.bcn-bridge/bridge.toml)
     #[arg(long, global = true, env = "BRIDGE_CONFIG")]
     config: Option<PathBuf>,
+    /// Named configuration for register/init/start; status/stop refer to the active instance
+    #[arg(long, global = true, conflicts_with = "config")]
+    profile: Option<String>,
     #[command(subcommand)]
     command: Commands,
 }
@@ -72,6 +75,10 @@ fn from_matches(app: &BridgeApp, command: &mut clap::Command, matches: &clap::Ar
             && registration.value_source("model") == Some(clap::parser::ValueSource::DefaultValue)
     });
     let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.format(command).exit());
+    if let Commands::Register(args) = &mut cli.command {
+        args.model_is_explicit = matches.subcommand().is_some_and(|(_, registration)|
+            registration.value_source("model") == Some(clap::parser::ValueSource::CommandLine));
+    }
     if omit_model_default {
         if let Commands::Register(args) = &mut cli.command { args.model = None; }
     }
@@ -99,13 +106,20 @@ pub async fn run(cli: Cli, app: &BridgeApp) -> anyhow::Result<()> {
         Commands::Status | Commands::Stop => bail!("Instance management requires Unix"),
         _ => {}
     }
-    let config_path = match cli.config {
-        Some(path) => path,
-        None => dirs::home_dir().context("Cannot locate home directory; pass --config")?
+    let named_profile = cli.profile.is_some();
+    let config_path = match (cli.profile, cli.config) {
+        (Some(name), None) => crate::profiles::configuration(
+            &dirs::home_dir().context("Cannot locate home directory")?, &name)?,
+        (None, Some(path)) => path,
+        (None, None) => dirs::home_dir().context("Cannot locate home directory; pass --config")?
             .join(".bcn-bridge/bridge.toml"),
+        _ => bail!("Use either --profile or --config"),
     };
     match cli.command {
-        Commands::Register(args) => registration::register(*args, &config_path, app).await,
+        Commands::Register(args) => {
+            if named_profile && args.reuse_profile(&config_path, app)? { return Ok(()); }
+            registration::register(*args, &config_path, app).await
+        }
         command @ (Commands::Init(_) | Commands::Deinit(_)) => {
             let cleanup = matches!(command, Commands::Deinit(_));
             let args = match command { Commands::Init(args) | Commands::Deinit(args) => args, _ => unreachable!() };

@@ -188,3 +188,28 @@ headers to both requests, with redirects disabled. Credentials stay in the
 short-lived client and are not added to saved bridge configuration. Identity
 verification remains the resolver's responsibility; discovery alone is not proof
 of identity. Company-specific SDK implementations belong in their distribution.
+
+
+## Named connection profiles
+
+Use `--profile <name>` consistently with `register`, `init`, `deinit` and `start`.
+Profiles keep configurations and relative state databases in separate
+`~/.bcn-bridge/profiles/<name>/` directories. A profile name selects local
+configuration, not an implicit service URL; supply the intended registration
+API and upstream endpoints when registering. Names accept 1-64 ASCII letters,
+digits, hyphens or underscores. `--config` remains supported but cannot be
+combined with `--profile`.
+
+Repeated registration of an existing profile verifies provider, engine and
+endpoints and reuses the stored Bot without a network registration request.
+Explicitly conflicting workspace/model options are rejected. New profiles may
+reuse local engine options from a verified active instance of the same engine,
+without sharing its BCN identity or durable state. One user still runs one bridge:
+stop the current instance before starting another profile. Status prints the
+active profile; this is not a remote connectivity claim.
+
+For intentional replacement, stop the bridge and use `register --replace-existing`.
+The CLI fences concurrent startup, retains a private rollback configuration
+beside the original and leaves the old state database untouched. Only successful
+registration installs the new config and selects a fresh state database. Failed
+registration leaves the original config intact.

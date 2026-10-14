@@ -25,6 +25,9 @@ pub struct RegisterArgs {
     /// Previously obtained Provider-scoped registration token
     #[arg(long, env = "BRIDGE_REGISTER_TOKEN", hide_env_values = true)]
     token: String,
+    /// Back up and replace existing runtime configuration after stopping the bridge
+    #[arg(long)]
+    replace_existing: bool,
     /// Display name for the registered Bot
     #[arg(long)]
     bot_name: String,
@@ -59,9 +62,52 @@ pub struct RegisterArgs {
     /// Model passed to the engine
     #[arg(long)]
     pub(crate) model: Option<String>,
+    #[arg(skip)]
+    pub(crate) model_is_explicit: bool,
     /// Override the engine executable (default: the engine's executable on PATH)
     #[arg(long)]
     engine_bin: Option<PathBuf>,
+}
+
+impl RegisterArgs {
+    /// A repeated profile command keeps the existing identity and never contacts registration.
+    pub(crate) fn reuse_profile(&self, path: &Path, app: &BridgeApp) -> anyhow::Result<bool> {
+        if self.replace_existing || !path.try_exists().context("Cannot inspect profile configuration")? { return Ok(false); }
+        let source = config::read_registration_source(path, true)?;
+        let Some(previous) = source.previous else { return Ok(false); };
+        let provider_id = registration_provider(&self.token, self.mode)?;
+        let bots = previous.get("bot").and_then(toml::Value::as_array).context("Profile has no Bots")?;
+        let matches = previous.get("provider_id").and_then(toml::Value::as_str) == Some(provider_id.as_str())
+            && previous.get("mode").and_then(toml::Value::as_str) == Some(self.mode.name())
+            && bots.len() == 1 && bots[0].get("engine").and_then(toml::Value::as_str) == Some(self.engine.as_str());
+        if !matches { bail!("Profile belongs to another provider, mode or engine; choose another --profile or stop and use --replace-existing"); }
+        let api = match self.api_url.clone().or(source.settings.api_url.clone()) {
+            Some(api) => api, None => app.profile().default_api_url()?,
+        };
+        let same_api = source.settings.api_url.as_deref().is_some_and(|old| old.trim_end_matches('/') == api.trim_end_matches('/'));
+        let same_upstream = match self.mode {
+            Mode::Plugin => {
+                let desired = match self.upstream_url.clone() { Some(url) => url, None => app.profile().default_upstream_url()? };
+                previous.get("plugin").and_then(|p| p.get("url")).and_then(toml::Value::as_str)
+                    .is_some_and(|old| old.trim_end_matches('/') == desired.trim_end_matches('/'))
+            }
+            Mode::Gateway => true,
+        };
+        if !same_api || !same_upstream { bail!("Profile targets a different BCS endpoint; choose another --profile or stop and use --replace-existing"); }
+        if let Some(cwd) = &self.cwd {
+            let desired = cwd.canonicalize().context("Cannot resolve requested working directory")?;
+            let original = bots[0].get("cwd").and_then(toml::Value::as_str).context("Profile has no working directory")?;
+            if desired != Path::new(original).canonicalize().context("Cannot resolve profile working directory")? {
+                bail!("Profile has a different working directory; choose another --profile or use --replace-existing");
+            }
+        }
+        if self.model_is_explicit && self.model.as_deref().is_some_and(|model| bots[0].get("model").and_then(toml::Value::as_str) != Some(model)) {
+            bail!("Profile has a different model; use --replace-existing to change its settings");
+        }
+        config::load_runtime(path, app.credentials())?;
+        println!("Profile is already registered. Existing Bot identity, engine settings and state are retained; no registration request was sent. Use init/start with the same --profile.");
+        Ok(true)
+    }
 }
 
 /// Registration API rule for `provider_bot_ref` values.
@@ -112,14 +158,21 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
         }
     }.canonicalize().context("Cannot resolve engine working directory")?;
     if !cwd.is_dir() { bail!("Engine working directory must be a directory"); }
-    let bootstrap = config::read_bootstrap(path)?;
+    let bootstrap = if args.replace_existing { config::read_registration_source(path, true)? } else { config::read_bootstrap(path)? };
+    #[cfg(unix)]
+    let _runtime_reservation = if bootstrap.previous.is_some() {
+        let directory = dirs::home_dir().context("Cannot locate home directory")?.join(".bcn-bridge");
+        Some(crate::instance::reserve_registration(&directory)?)
+    } else { None };
+    #[cfg(not(unix))]
+    if bootstrap.previous.is_some() { bail!("Replacement registration requires Unix runtime locking"); }
     let provider_id = registration_provider(&args.token, args.mode)?;
     // Plugin mode has no webhook listener, so it needs no webhook credential.
     let webhook_token = match args.mode {
         Mode::Gateway => Some(app.credentials().webhook_token(&provider_id)?),
         Mode::Plugin => None,
     };
-    let api_url = match args.api_url.clone().or_else(|| bootstrap.settings.api_url.clone()) {
+    let api_url = match args.api_url.clone().or_else(|| if bootstrap.previous.is_none() { bootstrap.settings.api_url.clone() } else { None }) {
         Some(url) => url,
         None => app.profile().default_api_url()?,
     };
@@ -135,10 +188,35 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     if let Some(engine_bin) = engine_bin {
         bot.insert("engine_bin".into(), engine_bin.to_str().context("Engine executable path must be UTF-8")?.into());
     }
+    // Desktop/channel settings are independent of BCN identity and survive replacement.
+    if let Some(previous) = &bootstrap.previous {
+        if let Some(bots) = previous.get("bot").and_then(toml::Value::as_array) {
+            if bots.len() == 1 && bots[0].get("engine").and_then(toml::Value::as_str) == Some(args.engine.as_str()) {
+                if let Some(options) = bots[0].get("engine_options") { bot.insert("engine_options".into(), options.clone()); }
+            }
+        }
+    }
+    #[cfg(unix)]
+    if bootstrap.previous.is_none() && !bot.contains_key("engine_options") {
+        let runtime_dir = dirs::home_dir().context("Cannot locate home directory")?.join(".bcn-bridge");
+        if let Some(active) = crate::instance::current_configuration(&runtime_dir).await? {
+            let source = config::read_registration_source(&active, true)?;
+            if let Some(previous) = source.previous {
+                if let Some(bots) = previous.get("bot").and_then(toml::Value::as_array) {
+                    if bots.len() == 1 && bots[0].get("engine").and_then(toml::Value::as_str) == Some(args.engine.as_str()) {
+                        if let Some(options) = bots[0].get("engine_options") { bot.insert("engine_options".into(), options.clone()); }
+                    }
+                }
+            }
+        }
+    }
     let mut document = toml::Table::new();
     document.insert("provider_id".into(), provider_id.clone().into());
     document.insert("mode".into(), args.mode.name().into());
-    document.insert("state_path".into(), "bridge-state.sqlite3".into());
+    let state_path = if bootstrap.previous.is_some() {
+        format!("bridge-state-{}.sqlite3", uuid::Uuid::new_v4())
+    } else { "bridge-state.sqlite3".into() };
+    document.insert("state_path".into(), state_path.into());
     match args.mode {
         Mode::Gateway => { document.insert("listen".into(), args.listen.to_string().into()); }
         // Timer defaults come from the runtime configuration schema.
@@ -153,7 +231,12 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     // The plugin document cannot fully validate until the Bot identity is known
     // (plugin bots require bot_id); its URL was validated above.
     if webhook_token.is_some() { config::runtime(&document, path, webhook_token.as_deref())?; }
+    let replacing = bootstrap.previous.is_some();
     let prepared = PreparedConfig::new(path, bootstrap.original)?;
+    if replacing {
+        let backup = prepared.backup_original()?;
+        println!("Existing runtime configuration backed up to {}. Original state is retained.", backup.display());
+    }
     let resolved_ref = identity.registration_ref(args.provider_bot_ref.as_deref(), &args.engine, &cwd).await?;
     if resolved_ref.as_deref().is_some_and(|reference| !valid_provider_bot_ref(reference)) {
         bail!("The Provider identity is not a valid provider_bot_ref");

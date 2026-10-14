@@ -166,3 +166,67 @@ async fn desktop_engine_registration_needs_no_executable_and_rejects_engine_bin(
     assert!(diagnostic(&output).contains("--engine-bin does not apply"));
     assert_eq!(api.calls().len(), 1);
 }
+
+
+#[tokio::test]
+async fn named_profiles_keep_separate_configs_and_reuse_existing_registration() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    for profile in ["local", "pre", "prod"] {
+        let args = ["--profile", profile, "--mode", "plugin", "--engine", "qwenwork",
+            "--api-url", &api.base, "--upstream-url", "ws://127.0.0.1:21000/ws/bot"];
+        let output = register(home.path(), &args).output().await.unwrap();
+        assert!(output.status.success(), "{}", diagnostic(&output));
+        let path = home.path().join(format!(".bcn-bridge/profiles/{profile}/bridge.toml"));
+        let original = std::fs::read(&path).unwrap();
+        let calls = api.calls().len();
+        let repeated = register(home.path(), &args).output().await.unwrap();
+        assert!(repeated.status.success(), "{}", diagnostic(&repeated));
+        assert!(diagnostic(&repeated).contains("already registered"));
+        assert_eq!(api.calls().len(), calls);
+        assert_eq!(std::fs::read(path).unwrap(), original);
+    }
+    assert!(!config_path(home.path()).exists());
+}
+
+#[tokio::test]
+async fn named_profile_refuses_changed_endpoint_without_registration_or_overwrite() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let args = ["--profile", "pre", "--mode", "plugin", "--engine", "qwenwork", "--api-url", &api.base];
+    let output = register(home.path(), &args).args(["--upstream-url", "ws://127.0.0.1:21000/ws/bot"])
+        .output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let path = home.path().join(".bcn-bridge/profiles/pre/bridge.toml");
+    let original = std::fs::read(&path).unwrap();
+    let output = register(home.path(), &args).args(["--upstream-url", "ws://127.0.0.1:22000/ws/bot"])
+        .output().await.unwrap();
+    assert!(!output.status.success());
+    assert_eq!(api.calls().len(), 1);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[tokio::test]
+async fn replacement_retains_a_private_backup_and_uses_fresh_state() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let args = ["--mode", "plugin", "--engine", "qwenwork", "--api-url", &api.base,
+        "--upstream-url", "ws://127.0.0.1:21000/ws/bot"];
+    let output = register(home.path(), &args).output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let original = std::fs::read(config_path(home.path())).unwrap();
+    let original_state = saved(home.path())["state_path"].as_str().unwrap().to_owned();
+    std::fs::write(config_path(home.path()).parent().unwrap().join(&original_state), "existing state").unwrap();
+    let output = register(home.path(), &args).arg("--replace-existing").output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    assert_ne!(saved(home.path())["state_path"].as_str().unwrap(), original_state);
+    let parent = config_path(home.path()).parent().unwrap().to_owned();
+    assert_eq!(std::fs::read_to_string(parent.join(&original_state)).unwrap(), "existing state");
+    let backup = std::fs::read_dir(parent).unwrap().map(|entry| entry.unwrap().path())
+        .find(|path| path.file_name().unwrap().to_string_lossy().starts_with(".bridge-backup-")).unwrap();
+    assert_eq!(std::fs::read(&backup).unwrap(), original);
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(backup).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+}
