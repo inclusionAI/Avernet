@@ -156,8 +156,9 @@ class Runtime:
 @dataclass(frozen=True)
 class AgentDefinitionRef:
     engine: Engine                             # the engine this agent runs on, e.g. Engine.OPENCLAW
-    path: str                                  # where the definition is in the strategy's source, relative to its
-                                               # root, e.g. "agents/clawevolve-tune" (a directory with SKILL.md, …)
+    path: str                                  # the definition's directory inside the strategy's project (the
+                                               # author's repository, layout in §2.2), relative to its root,
+                                               # e.g. "agents/clawevolve-tune" (a directory with SKILL.md, …)
     digest: str | None = None                  # None in the record the author writes; at upload the registry packs
                                                # the directory, stores it by content hash, and fills in "sha256:5d0e…"
 
@@ -224,6 +225,29 @@ workspace. Not every strategy uses agents: memory consolidation uses only
 `{"window_days": 7, "max_rounds": 3}`. With the schema below, an owner who
 writes `"window_days": 400` is refused when saving the binding, rather than
 by ClawEvolve hours later at run start.
+
+**The strategy's project.** "The strategy's source" means the author's own
+project for the strategy, usually a git repository, from which they run
+`avn strategy publish`. It holds the strategy's code, its registration
+record, and one directory per agent definition. `path` is relative to its
+root. ClawEvolve's project, for example:
+
+```text
+clawevolve-strategy/                 # the strategy's project root
+├── strategy.json                    # the registration record below
+├── Dockerfile                       # builds the job_worker image
+├── src/clawevolve/strategy.py       # the code that implements run(ctx)
+└── agents/
+    ├── clawevolve-tune/             # agent definition: path "agents/clawevolve-tune"
+    │   ├── SKILL.md
+    │   └── config.json
+    └── clawevolve-review/           # agent definition: path "agents/clawevolve-review"
+        └── SKILL.md
+```
+
+`avn strategy publish` reads `strategy.json`, uploads the two `agents/…`
+directories, and registers the version. The image is built from the same
+project and pushed by the author.
 
 The record as the author writes it (in the strategy's source). This one is
 ClawEvolve's ([04-default-strategies.md](04-default-strategies.md)); every

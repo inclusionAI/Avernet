@@ -115,8 +115,9 @@ class Runtime:
 @dataclass(frozen=True)
 class AgentDefinitionRef:
     engine: Engine                             # the engine this agent runs on, e.g. Engine.OPENCLAW
-    path: str                                  # where the definition is in the strategy's source, relative to its
-                                               # root, e.g. "agents/clawevolve-tune" (a directory with SKILL.md, …)
+    path: str                                  # the definition's directory inside the strategy's project (the
+                                               # author's repository, layout in §2.2), relative to its root,
+                                               # e.g. "agents/clawevolve-tune" (a directory with SKILL.md, …)
     digest: str | None = None                  # None in the record the author writes; at upload the registry packs
                                                # the directory, stores it by content hash, and fills in "sha256:5d0e…"
 
@@ -156,6 +157,23 @@ class RegisteredStrategy:                      # what the registry stores and re
 **智能体是另一回事。** 运行时是 `run(ctx)` 运行的地方。`agents@1` 下的智能体定义是策略可以通过 `ctx.agents`（§4.2）*启动*的智能体；平台在工作区旁的沙箱中运行它们。并非每个策略都使用智能体：记忆整合只使用 `ctx.models`。
 
 **`params_schema` 示例。** ClawEvolve 在 `bot_123` 上的绑定设置了 `{"window_days": 7, "max_rounds": 3}`。有了下面的 schema，所有者若写入 `"window_days": 400`，会在保存绑定时被拒绝，而不是在数小时后运行开始时才被 ClawEvolve 拒绝。
+
+**策略的项目。** “策略源码”指作者为该策略维护的项目，通常是一个 git 仓库，作者在其中运行 `avn strategy publish`。它包含策略的代码、注册记录，以及每个智能体定义各自的一个目录。`path` 相对于项目根目录。以 ClawEvolve 的项目为例：
+
+```text
+clawevolve-strategy/                 # the strategy's project root
+├── strategy.json                    # the registration record below
+├── Dockerfile                       # builds the job_worker image
+├── src/clawevolve/strategy.py       # the code that implements run(ctx)
+└── agents/
+    ├── clawevolve-tune/             # agent definition: path "agents/clawevolve-tune"
+    │   ├── SKILL.md
+    │   └── config.json
+    └── clawevolve-review/           # agent definition: path "agents/clawevolve-review"
+        └── SKILL.md
+```
+
+`avn strategy publish` 读取 `strategy.json`，上传两个 `agents/…` 目录，并注册该版本。镜像由作者从同一个项目构建并推送。
 
 作者在策略源码中编写的记录如下。这里是 ClawEvolve 的记录（[04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md)）；每个策略都填写相同的字段：
 
