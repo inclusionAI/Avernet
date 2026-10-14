@@ -353,23 +353,13 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   }
   private async recordToolEvidence(taskId: string, callId: string, name: string, body: Record<string, unknown>, status: string, result: unknown) {
     const current = await this.required(taskId), evidenceId = `evidence-${callId}`;
-    if (current.evidence.some(item => item.evidence_id === evidenceId)) return evidenceId;
-    const evidence = { evidence_id: evidenceId, tool_call_id: callId, source: name,
-      location: typeof (result as Record<string, unknown>)?.source === "string" ? String((result as Record<string, unknown>).source) : `tool-call:${callId}`,
-      excerpt: JSON.stringify(result).slice(0, 2000) };
     const receipt = result as Record<string, unknown>;
     const initialDelivery = name === "retry_message" && receipt.initial_message === true && receipt.dry_run !== true
       ? recoveryResult(current.request, receipt as unknown as Parameters<typeof recoveryResult>[1], Number(receipt.started_at_ms), Number(receipt.finished_at_ms)) : undefined;
-    await this.save(current, value => value.evidence.some(item => item.evidence_id === evidenceId) ? value : ({ ...value, evidence: [...value.evidence, evidence],
-      ...(initialDelivery ? { delivery: initialDelivery, observationDeadlineAt: initialDelivery.delivery.finished_at_ms + this.deps.observationMs } : {}),
-      timeline: [...value.timeline, this.event("operation", body.purpose as string, { tool_call_id: callId, request: recoveryToolRequest(body), result: {
-        delivery_confirmed: (result as Record<string, unknown>)?.delivery_confirmed,
-        session_id: (result as Record<string, unknown>)?.session_id,
-        delivery_key: (result as Record<string, unknown>)?.delivery_key,
-        message: (result as Record<string, unknown>)?.message,
-        initial_message: (result as Record<string, unknown>)?.initial_message,
-        dry_run: (result as Record<string, unknown>)?.dry_run,
-      }, status, evidence_id: evidenceId, raw_tool_call_id: callId })] }));
+    // Tool requests, results and evidence are projected from the existing audit ledger.
+    const latestInitial = [...current.timeline].reverse().find(event => event.kind === "operation" && (event.payload.result as Record<string, unknown>)?.initial_message === true);
+    if (initialDelivery && latestInitial?.payload.tool_call_id === callId && JSON.stringify(initialDelivery) !== JSON.stringify(current.delivery)) await this.save(current, value => ({ ...value,
+      delivery: initialDelivery, observationDeadlineAt: initialDelivery.delivery.finished_at_ms + this.deps.observationMs }));
     return evidenceId;
   }
   private context(task: RecoveryStoredTask): AgentToolContext {

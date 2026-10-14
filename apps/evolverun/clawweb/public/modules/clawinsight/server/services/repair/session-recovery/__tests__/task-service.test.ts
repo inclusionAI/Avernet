@@ -11,6 +11,7 @@ function setup(callbackFails = false) {
     create: async value => { if (records.has(value.taskId)) throw new Error("duplicate"); records.set(value.taskId, structuredClone(value)); },
     find: async id => records.has(id) ? structuredClone(records.get(id)!) : null,
     listForEvent: async (eventId, ownerId) => [...records.values()].filter(value => value.request.event_id === eventId && value.request.target.entity_id === ownerId),
+    listForReporting: async (limit, afterTaskId = "") => [...records.values()].filter(value => value.taskId > afterTaskId && value.pending_results.length > 0).sort((a, b) => a.taskId.localeCompare(b.taskId)).slice(0, limit),
     listForMaintenance: async (limit, afterTaskId = "") => [...records.values()].filter(value => value.taskId > afterTaskId).slice(0, limit),
     update: async (id, version, change) => {
       const value = records.get(id); if (!value || value.version !== version) return null;
@@ -65,10 +66,15 @@ describe("self-healing task orchestration", () => {
     const ack = await service.create(request, actor); await flush();
     await service.recordDelivery(ack.task_id, { event_id: "evt", delivery: { delivery_key: "send1", status: "accepted",
       result_text: "通道接受", started_at_ms: 1, finished_at_ms: 2, error: null } });
+    await service.reportResults();
+    expect(reporter.report).not.toHaveBeenCalled();
+    await service.executionFailure(ack.task_id, "执行失败，任务结束");
+    await service.reportResults();
     const saved = records.get(ack.task_id)!.pending_results[0];
-    expect(saved.result_version).toBe(2);
+    expect(saved.result_version).toBe(3);
     reporter.report.mockResolvedValueOnce(undefined);
     await service.create(request, actor);
+    await service.reportResults();
     expect(reporter.report).toHaveBeenLastCalledWith(saved);
     expect(records.get(ack.task_id)!.pending_results).toEqual([]);
     expect(delivery.create).not.toHaveBeenCalled();
@@ -77,4 +83,35 @@ describe("self-healing task orchestration", () => {
     const { service } = setup(); const ack = await service.create(request, actor);
     await expect(service.detail(ack.task_id, { userId: "stranger", isAdmin: false })).rejects.toMatchObject({ status: 403 });
   });
+});
+
+it("slow callbacks cannot block state changes or Owner timeout handling", async () => {
+  const { service, records, reporter, agent } = setup();
+  const ack = await service.create(request, actor); await flush();
+  await service.executionFailure(ack.task_id, "执行失败，任务结束");
+  const waiting = await service.create({ ...request, event_id: "owner-wait" }, actor); await flush();
+  const value = records.get(waiting.task_id)!;
+  value.status = "waiting_owner"; value.ownerDeadlineAt = 1;
+  value.execution = { state: "running" } as any;
+  agent.release.mockClear();
+  let unblock!: () => void;
+  reporter.report.mockImplementation(() => new Promise<void>(resolve => { unblock = resolve; }));
+  const reporting = service.reportResults(); await flush();
+  await service.maintenance(); expect(agent.release).toHaveBeenCalledOnce();
+  expect(records.get(ack.task_id)!.pending_results).toHaveLength(1);
+  unblock(); await reporting;
+  expect(records.get(ack.task_id)!.pending_results).toEqual([]);
+});
+
+
+it("terminal annotations and repeated failure reports do not enqueue another result", async () => {
+  const { service, records, reporter } = setup();
+  const ack = await service.create(request, actor); await flush();
+  await service.executionFailure(ack.task_id, "执行失败");
+  await service.reportResults();
+  await service.annotate(ack.task_id, actor, { layer: "effect", correct: null, reason: "人工复核", evidence_ids: [] });
+  await service.executionFailure(ack.task_id, "重复上报");
+  await service.reportResults();
+  expect(reporter.report).toHaveBeenCalledOnce();
+  expect(records.get(ack.task_id)!.pending_results).toEqual([]);
 });

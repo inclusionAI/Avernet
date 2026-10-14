@@ -4,17 +4,13 @@ import { parseAgentExecutionTicket } from "../services/repair/common/agent-execu
 import { AgentToolError } from "../services/repair/common/agent-tools/errors.js";
 import type { RecoveryActor } from "../services/repair/session-recovery/contracts.js";
 import { Router, json, type Request } from "express";
-import type { SessionRecoveryApi, SessionRecoveryTaskApi, SessionRecoveryAgentApi } from "../services/repair/session-recovery/contracts.js";
 import { SessionRecoveryError } from "../services/repair/session-recovery/errors.js";
 import { BotRuntimeError } from "@avernet/clawweb-shared/server/services/bot-runtime";
-export type SessionRecoveryRuntime = {
-  service: SessionRecoveryApi;
-  tasks?: SessionRecoveryTaskApi;
-  agent?: SessionRecoveryAgentApi;
-  maintenance?: () => Promise<void>;
+import type { SessionRecoveryRuntime } from "../services/repair/session-recovery/contracts.js";
+export type SessionRecoveryRouterOptions = SessionRecoveryRuntime & {
   resolveActor?: (req: Request) => Promise<RecoveryActor | null>;
 };
-export function createSessionRecoveryRouter(supplied?: SessionRecoveryRuntime): Router {
+export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOptions): Router {
   const router = Router();
   const runtime = () => {
     const value = supplied;

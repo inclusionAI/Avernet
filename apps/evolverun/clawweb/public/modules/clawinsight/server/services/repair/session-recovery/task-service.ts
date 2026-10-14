@@ -40,7 +40,6 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     const existing = await this.deps.tasks.find(taskId);
     if (existing) {
       if (JSON.stringify(existing.request) !== JSON.stringify(request)) this.fail(409, "同一投递标识的请求内容不一致");
-      await this.reportPending(existing);
       return { event_id: request.event_id, delivery_key: request.delivery_key, status: "accepted", task_id: taskId };
     }
     const runtimeTarget = await this.deps.resolveTarget?.(request);
@@ -204,7 +203,6 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       for (const task of batch) {
       cursor = task.taskId;
       try {
-        await this.reportPending(task);
         if (task.status === "running" && ((!task.execution || task.execution.state === "ended")
          )) await this.start(task);
         if (task.status === "waiting_owner" && task.ownerDeadlineAt !== null && task.ownerDeadlineAt <= this.now()) {
@@ -233,12 +231,26 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     for (let attempt = 0; attempt < 5; attempt++) {
       const updated = await this.deps.tasks.update(taskId, version, value => {
         const changed = change(value);
-        return { ...changed, pending_results: [...value.pending_results, recoveryTaskResult(changed)] };
+        const reportable = changed.status !== value.status
+          && ["waiting_effect", "completed", "failed"].includes(changed.status);
+        return { ...changed, pending_results: reportable
+          ? [...value.pending_results, recoveryTaskResult(changed)] : value.pending_results };
       });
-      if (updated) { await this.reportPending(updated); return updated; }
+      if (updated) return updated;
       version = (await this.required(taskId)).version;
     }
     this.fail(409, "任务已变化，请读取当前版本");
+  }
+
+  /** Independently scheduled delivery; never holds up state transitions or expiry handling. */
+  async reportResults(): Promise<void> {
+    let cursor = "";
+    for (;;) {
+      const batch = await this.deps.tasks.listForReporting?.(20, cursor) ?? [];
+      if (!batch.length) return;
+      await Promise.all(batch.map(task => this.reportPending(task)));
+      cursor = batch[batch.length - 1].taskId;
+    }
   }
 
   async reportPending(task: RecoveryStoredTask): Promise<void> {
@@ -247,6 +259,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         await this.deps.reporter.report(result);
         await this.deps.tasks.acknowledgeResult(task.taskId, result.result_version);
       } catch {
+        await this.deps.tasks.failResult?.(task.taskId, result.result_version);
         console.error("[session-recovery] result callback remains pending", task.taskId, result.result_version);
         return;
       }

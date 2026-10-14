@@ -48,18 +48,18 @@ HTTP `202`：
 
 ## 异步任务结果
 
-自愈服务向诊断服务的 `POST /api/insight/v1/internal/monitoring/session-recovery-results` 发送：
+仅在**效果等待超时**或**自愈任务结束（成功、失败或 Debug 结束）**时，自愈服务向诊断服务的 `POST /api/insight/v1/internal/monitoring/session-recovery-results` 发送：
 
 ```json
 {
   "event_id": "evt-20261010-001",
   "task_id": "SR-…",
   "result_version": 7,
-  "status": "waiting_owner",
-  "phase": "apply",
-  "waiting_reason": "owner_cooperation",
-  "effect": "not_recovered",
-  "result_text": "请确认工具权限已开放，再执行完整方案。",
+  "status": "waiting_effect",
+  "phase": "observe",
+  "waiting_reason": "effect",
+  "effect": "unknown",
+  "result_text": "观察期限已到，尚未确认恢复，保存进度等待上游继续。",
   "evidence_ids": ["evidence-tc-example"],
   "evidence": [{ "evidence_id": "evidence-tc-example", "tool_call_id": "tc-example", "source": "session_read", "location": "原会话文件及消息位置", "excerpt": "原失败及重试回执的脱敏摘要" }],
   "delivery": {
@@ -78,11 +78,11 @@ HTTP `202`：
 | --- | --- |
 | `event_id`、`task_id` | 关联原诊断事件与自愈任务。 |
 | `result_version` | 已保存的结果版本。接收方按 `task_id + result_version` 幂等处理，旧版本不覆盖新版本。 |
-| `status` | `running` 执行中；`waiting_owner` 等待方案确认或配合；`waiting_effect` 等待效果；`completed` 结束；`failed` 执行或方案失败。 |
+| `status` | `waiting_effect` 效果等待超时、任务可继续；`completed` 任务结束；`failed` 执行或方案失败、任务结束。 |
 | `phase` | `assess` Agent 判断初始干预方式；`observe` 观察消息或已有进展；`plan` 分析并形成方案；`apply` 执行完整方案；`verify` 验证原任务恢复。 |
-| `waiting_reason` | `owner_approval`、`owner_cooperation`、`effect`；不在等待时为 `null`。 |
+| `waiting_reason` | 效果等待超时为 `effect`；任务结束为 `null`。 |
 | `effect` | `recovered` 原故障已解除；`not_recovered` 有证据表明未解除；`unknown` 无法判断；`not_intervened` Debug 未实际干预。 |
-| `result_text` | 当前判断、完整方案概要或执行中断原因，供展示。 |
+| `result_text` | 本次等待结论、最终效果或执行中断原因，供展示。 |
 | `evidence_ids` | 当前结论引用的已留存证据。 |
 | `evidence` | 上述证据的来源、原文位置及脱敏摘要；完整原文由任务页面按审计引用读取。 |
 | `delivery` | Agent 决定、经受控服务发送的初始消息投递明细，取得结果后才提供；其状态不代表效果。 |
@@ -93,7 +93,9 @@ HTTP `202`：
 | `delivery.started_at_ms / finished_at_ms` | 处理开始和结束的 Unix 毫秒。 |
 | `delivery.error` | `accepted` 为 `null`；其他状态为脱敏原因。 |
 
-服务先保存事实与结果，再异步回报。回报失败重送原版本，不重发建议、不重做操作。`completed + not_intervened` 是 Debug 演练结束；执行异常可以是 `failed + unknown`。
+Owner 等待（包括到期释放容器）、阶段变化、审批、通知和人工标注只记录在任务内，不触发回传。
+
+服务先保存事实与结果，再异步回报。回报失败重送原版本，不重发建议、不重做操作。同一任务可多次效果等待超时，每次生成独立结果版本；恢复和最终完成不会覆盖尚未送达的旧结果，按版本顺序回传。`completed + not_intervened` 是 Debug 演练结束；执行异常可以是 `failed + unknown`。
 
 结果回传使用 ClawWeb 已有服务地址和上述固定接口路径。接收接口尚未就绪或回传失败时，任务仍可创建、执行并在任务页面查看；结果保留为待回传。接收接口成功响应后才记录为已回传。
 
@@ -101,7 +103,7 @@ HTTP `202`：
 
 `POST /api/insight/v1/internal/monitoring/session-recoveries/:taskId/continue`
 
-返回 `202 { "status": "accepted", "task_id": "SR-…" }`。仅用于 `waiting_effect`，恢复暂停阶段，先读新现场，不重发初始建议。Owner 等待由任务页面确认完整方案后继续；等待到期释放执行，之后确认会为同一任务启动新容器。
+返回 `202 { "status": "accepted", "task_id": "SR-…" }`。仅用于 `waiting_effect`，恢复同一个 Task 的暂停阶段；可创建新的 execution 和容器，但保留已有方案、操作、判断、证据及待回传结果，先读新现场，不重发初始建议。再次调用创建接口不会代替此继续接口。Owner 等待由任务页面确认完整方案后继续；等待到期释放执行，之后确认会为同一任务启动新容器。
 
 ## 任务页面与决策
 

@@ -81,11 +81,13 @@ export function resumeRecoveryObservation(state: RecoveryTaskState): RecoveryTas
 }
 
 export function recoveryTaskResult(state: RecoveryTaskState): RecoveryTaskResult {
+  if (state.status !== "waiting_effect" && state.status !== "completed" && state.status !== "failed") {
+    conflict("只有效果等待超时或任务结束才回传上游");
+  }
   return { event_id: state.request.event_id, task_id: state.taskId, result_version: state.version,
     status: state.status, phase: state.phase,
-    waiting_reason: state.status === "waiting_effect" ? "effect" : state.status === "waiting_owner"
-      ? state.plan?.owner_cooperation.length ? "owner_cooperation" : "owner_approval" : null,
-    effect: state.judgment?.effect ?? "unknown", result_text: state.status === "waiting_owner" ? state.plan?.summary ?? "" : state.judgment?.summary ?? "",
+    waiting_reason: state.status === "waiting_effect" ? "effect" : null,
+    effect: state.judgment?.effect ?? "unknown", result_text: state.judgment?.summary ?? "",
     evidence_ids: state.judgment?.evidence_ids ?? [], evidence: state.evidence.filter(item => state.judgment?.evidence_ids.includes(item.evidence_id)),
     ...(state.delivery ? { delivery: state.delivery.delivery } : {}) };
 }

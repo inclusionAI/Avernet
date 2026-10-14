@@ -1,6 +1,6 @@
 # ClawInsight session recovery
 
-Self-healing is a ClawInsight business workflow. Every task starts an independent Agent to assess the diagnosis and current evidence, choose a targeted message, observe ongoing progress, or form an environment repair plan. If advice does not resolve the original problem, the Agent submits one complete environment repair plan. Owner cooperation belongs to that plan. The service controls authorization, stores the execution record and reports task progress to monitoring.
+Self-healing is a ClawInsight business workflow. Every task starts an independent Agent to assess the diagnosis and current evidence, choose a targeted message, observe ongoing progress, or form an environment repair plan. If advice does not resolve the original problem, the Agent submits one complete environment repair plan. Owner cooperation belongs to that plan. The service controls authorization, stores the execution record and reports effect-wait expiry and terminal results to monitoring.
 
 ## Existing architecture
 
@@ -11,7 +11,7 @@ Self-healing is a ClawInsight business workflow. Every task starts an independen
 
 ## State and evidence
 
-Tasks use existing `ce_tasks` and `ce_steps`. Self-healing fields, immutable timeline events, judgment, Owner decisions and manual annotations live in task extension JSON. Full bounded source reads and operation receipts live in the existing tool audit; the timeline and judgments refer to their IDs. The Owner page loads full evidence on demand. Evidence redaction retains diagnostic message text while removing credentials and PII.
+Tasks use existing `ce_tasks` and `ce_steps`. Task extension JSON retains current execution identity and bounded state. Business phases use `ce_steps`; phase reports, complete plans, judgments and Owner decisions use the existing object store with immutable digest references. The timeline combines phase reports, tool audit and result-delivery acknowledgments. Full bounded source reads and operation receipts live in the existing tool audit; the timeline and judgments refer to their IDs. The Owner page loads full evidence on demand. Evidence redaction retains diagnostic message text while removing credentials and PII.
 
 Task status and recovery effect are separate. A channel accepting a message is not delivery evidence. Only a marked user message in the original session proves delivery. Agent response and recovery require semantic judgment with stored evidence; environmental write success does not prove recovery.
 
@@ -41,17 +41,21 @@ Engine writes include declared file/configuration, MCP, Skill package and Cron o
 
 ## Runtime packages
 
-Repair and self-healing use separate Skills and business adapters. Shared container code has one source under OCB `clawweb-skills/runtime/agent_runtime`; the existing packager includes it in each independent package. Professional references have one Repair source and are included in the self-healing package during packaging. Session reads and engine boundaries follow the shared investigation contract above.
+Repair and self-healing use separate Skills and business adapters. Shared container code has one source under OCB `clawweb-skills/clawevolve-skills/clawevolve-repair/scripts/repair_runtime`; the existing packager includes it in each independent package. Professional references have one Repair source and are included in the self-healing package during packaging. Session reads and engine boundaries follow the shared investigation contract above.
 
 Base owns package startup, the outer hard timeout and its three archives. Business wrappers keep their heartbeat, waiting and reporting protocol. Heartbeat and decision polling use 20 seconds. Credentials are removed from Base's archived task input and passed via a private file outside archive roots; business packages must not echo them into outputs.
 
 ## Persistence and delivery contracts
 
-Creation stores the exact event/delivery identity and request fingerprint in the existing task. Same-key changed requests return 409. Initial and subsequent sends use the existing tool audit claims; an unknown outcome cannot authorize blind replay. No separate delivery table is created.
+Creation stores the exact event/delivery identity and request fingerprint in the existing task. Same-key changed requests return 409. Initial and subsequent sends use the existing tool audit claims; an unknown outcome cannot authorize blind replay. Bot message idempotency remains in the tool ledger. Task result delivery uses compact pending references in the existing Task configuration.
 
-Task result snapshots are saved before callbacks in the existing task extension. Callback failure retains the exact version for retry; successful acceptance adds a timeline event. Callbacks never repeat the initial message or plan actions. Monitoring deduplicates by task ID and result version.
+Only transitions into `waiting_effect`, `completed` or `failed` create an immutable result snapshot. Owner waiting (including expiry), approvals, notifications, annotations and other phase changes do not generate callbacks. Repeated annotations after task completion do not create another final result.
 
-Database definitions use the existing shared migration registry: v141 enlarging the existing task JSON column on managed databases. Managed deployment details are in `apps/evolverun/docs/clawweb/evolve-schema-v141/README.md`. SQLite runs canonical migrations; MySQL/ZDAS provisioning follows the existing external migration process. Requests perform no DDL. The API contract is `session-recovery-api.md` in this directory.
+`ce_tasks.config_json.resultDelivery` stores each pending snapshot's result version, object key, digest, attempt count and retry time, without its full payload. These references are saved in the same database transaction as the business state and Step report references. Phase reports retain snapshot references and successful delivery events. No record or result-delivery table is added.
+
+A separate 20-second reporting loop retries saved versions in order without blocking state transitions or deadline handling. A failed first result delays only that task's later results. Success removes the corresponding pending reference and appends an acknowledgment to the phase report atomically. Resuming a task and generating later results cannot replace unacknowledged snapshots; restarting the service uses the same persisted references. Monitoring deduplicates by task ID and result version. Callbacks never repeat the initial message or plan actions.
+
+Database definitions use the existing shared migration registry. Version 141 is reserved without altering shared columns; the unshipped v142 result-table migration is removed. This change requires no new table or column expansion. Existing widened columns are not shrunk. Legacy task JSON is converted on subsequent updates, including pending result delivery; legacy progress-only snapshots are excluded from callbacks. SQLite runs canonical migrations; MySQL/ZDAS provisioning follows the existing external migration process. Requests perform no DDL. The API contract is `session-recovery-api.md` in this directory.
 
 ## Validation boundary
 
@@ -77,6 +81,12 @@ server/services/notifications/dingtalk-sender.ts      # 治理与修复共用的
 
 公共工具不决定修复流程或批准方案；具体业务校验阶段、冻结目标和已批准操作后，调用同一工具实现。业务记录在各自任务内，操作回执进入共用审计账本。通知的鉴权、Token 缓存和投递只有一份实现；治理与自愈分别生成业务内容。内部 Host 只装配具体 Provider、轨迹读取器和运行配置。
 
-容器端公共执行代码由 OCB 的 `clawweb-skills/runtime/agent_runtime/` 维护，打包时放入两种 Skill 包；Repair 与自愈分别保留自己的 Skill 和业务主流程。专业 references 在 Repair 源目录维护，打包时交付给自愈包。没有安装到目标 Bot 的自愈手册，也没有后端直接发送的默认重试分支。
+容器端公共执行代码由 OCB 的 `clawweb-skills/clawevolve-skills/clawevolve-repair/scripts/repair_runtime/` 维护，打包时放入两种 Skill 包；Repair 与自愈分别保留自己的 Skill 和业务主流程。专业 references 在 Repair 源目录维护，打包时交付给自愈包。没有安装到目标 Bot 的自愈手册，也没有后端直接发送的默认重试分支。
 
 Execution-scoped updates validate the execution identity inside each retried atomic change. Audit requests retain redacted business text and a canonical request digest, so a stable request ID cannot hide different advice or uploaded content. Debug follows assessment too: it records proposed advice and the decision, or a proposed environment plan, without sending messages or changing the environment.
+
+## Execution boundaries
+
+Engine actions bind the business operation and resource, derived from a reference request or `operationScope: { operation, target? }`. For example, `cron.delete` with a cron ID cannot change to `mcp.update` or another cron. Request content and auxiliary parameters may change. An action without a reference Engine request must declare this scope before approval if it will use Engine APIs. Arbitrary Shell remains governed by the approved plan and audited execution; the service does not claim to infer its business semantics from command text.
+
+Pre-dispatch failures are `failed` with `dispatched: false`, and do not block a later attempt. After a possible dispatch, an uncertain outcome stays `unknown`. `reconcile_write` requires the original call ID, an `applied` or `not_applied` conclusion, and successful subsequent read calls from the current execution. It appends an audit record, preserves the original unknown record, permits continuation after verification, and never automatically replays an operation. Contradictory reconciliation is rejected.

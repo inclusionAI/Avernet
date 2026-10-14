@@ -58,3 +58,9 @@ it("approves primary adjustments without requiring technical execution details",
   expect(value.status).toBe("waiting_owner");
   expect(value.plan!.actions).toEqual(abstract.actions);
 });
+
+
+it("does not expose running or Owner-waiting states as upstream results", () => {
+  expect(() => recoveryTaskResult(state())).toThrow();
+  expect(() => recoveryTaskResult({ ...state(), status: "waiting_owner" })).toThrow();
+});
