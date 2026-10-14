@@ -8,6 +8,6 @@ describe('botAvatarGenerator', () => {
   });
 
   it('generates eight distinct variants in each batch', () => {
-    expect(new Set(generateBotAvatarBatch('bot-1', 0))).toHaveSize(8);
+    expect([...new Set(generateBotAvatarBatch('bot-1', 0))]).toHaveLength(8);
   });
 });
