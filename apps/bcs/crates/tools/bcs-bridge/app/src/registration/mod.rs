@@ -50,6 +50,8 @@ pub struct RegisterArgs {
     /// Local gateway listener (gateway mode only)
     #[arg(long, default_value = "0.0.0.0:8322")]
     listen: SocketAddr,
+    #[arg(skip)]
+    pub(crate) listen_is_explicit: bool,
     /// BCS Bot WebSocket endpoint dialed by plugin mode (default: from the deploy profile)
     #[arg(long)]
     upstream_url: Option<String>,
@@ -115,6 +117,24 @@ impl RegisterArgs {
         }
         if self.model_is_explicit && self.model.as_deref().is_some_and(|model| bots[0].get("model").and_then(toml::Value::as_str) != Some(model)) {
             bail!("Profile has a different model; use --replace-existing to change its settings");
+        }
+        if let Some(engine_bin) = self.engine_bin.as_deref() {
+            let factory = app.engines().get(&self.engine).context("Unknown profile engine")?;
+            if !factory.requires_bin() { bail!("--engine-bin does not apply to engine '{}'", self.engine); }
+            let desired = utils::resolve_engine_bin(Some(engine_bin), factory.default_bin())?;
+            let original = bots[0].get("engine_bin").and_then(toml::Value::as_str)
+                .context("Profile has no saved engine executable; use --replace-existing")?;
+            // Keep executable path identity: symlink names can select wrapper behavior.
+            if desired != Path::new(original) {
+                bail!("Profile has a different engine executable; choose another --profile or use --replace-existing");
+            }
+        }
+        if self.mode == Mode::Gateway && self.listen_is_explicit {
+            let original: SocketAddr = previous.get("listen").and_then(toml::Value::as_str)
+                .context("Profile has no gateway listener")?.parse().context("Invalid profile gateway listener")?;
+            if self.listen != original {
+                bail!("Profile has a different gateway listener; choose another --profile or use --replace-existing");
+            }
         }
         config::load_runtime(path, app.credentials())?;
         println!("Profile is already registered. Existing Bot identity, engine settings and state are retained; no registration request was sent. Use init/start with the same --profile.");

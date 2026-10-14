@@ -219,3 +219,9 @@ to retain the saved identity (plugin mode generates a reference on first registr
 Gateway registration saves `registration.webhook_url`; reuse rejects a changed
 delivery URL, including its path or query. Legacy gateway configurations without
 this metadata cannot be verified and require stopped, explicit replacement.
+
+Explicit `--engine-bin` and gateway `--listen` values must also match the saved
+profile. Omitting these options preserves the saved runtime settings, even when
+they differ from CLI defaults. Executable paths retain symlink identity because
+wrapper behavior can depend on the invoked name. Use explicit replacement to
+change an executable or bind address.

@@ -296,3 +296,58 @@ async fn legacy_gateway_profile_without_webhook_metadata_requires_replacement() 
     assert_eq!(api.calls().len(), 1);
     assert_eq!(std::fs::read(path).unwrap(), original);
 }
+
+
+#[tokio::test]
+async fn profile_reuse_checks_explicit_executable_paths_without_resolving_symlink_identity() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    install_engine(home.path(), "codex-next");
+    let old_bin = home.path().join("bin/codex");
+    let next_bin = home.path().join("bin/codex-next");
+    let args = ["--profile", "pre", "--mode", "plugin", "--engine", "codex", "--api-url", &api.base,
+        "--upstream-url", "ws://127.0.0.1:21000/ws/bot"];
+    let output = register(home.path(), &args).args(["--engine-bin", old_bin.to_str().unwrap()]).output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let path = home.path().join(".bcn-bridge/profiles/pre/bridge.toml");
+    let original = std::fs::read(&path).unwrap();
+    let repeated = register(home.path(), &args).args(["--engine-bin", "bin/codex"]).output().await.unwrap();
+    assert!(repeated.status.success(), "{}", diagnostic(&repeated));
+    let omitted = register(home.path(), &args).output().await.unwrap();
+    assert!(omitted.status.success(), "{}", diagnostic(&omitted));
+    let changed = register(home.path(), &args).args(["--engine-bin", next_bin.to_str().unwrap()]).output().await.unwrap();
+    assert!(!changed.status.success());
+    assert!(diagnostic(&changed).contains("different engine executable"));
+    #[cfg(unix)] {
+        let alias = home.path().join("bin/codex-alias");
+        std::os::unix::fs::symlink(&old_bin, &alias).unwrap();
+        let changed = register(home.path(), &args).args(["--engine-bin", alias.to_str().unwrap()]).output().await.unwrap();
+        assert!(!changed.status.success());
+        assert!(diagnostic(&changed).contains("different engine executable"));
+    }
+    assert_eq!(api.calls().len(), 1);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[tokio::test]
+async fn gateway_profile_reuse_checks_only_explicit_listener_changes_including_default_value() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let args = ["--profile", "pre", "--mode", "gateway", "--engine", "qwenwork", "--api-url", &api.base,
+        "--provider-bot-ref", "worker-a", "--webhook-url", "https://hook.example/webhook"];
+    let output = register(home.path(), &args).args(["--listen", "127.0.0.1:18001"]).output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let path = home.path().join(".bcn-bridge/profiles/pre/bridge.toml");
+    let original = std::fs::read(&path).unwrap();
+    let same = register(home.path(), &args).args(["--listen", "127.0.0.1:18001"]).output().await.unwrap();
+    assert!(same.status.success(), "{}", diagnostic(&same));
+    let omitted = register(home.path(), &args).output().await.unwrap();
+    assert!(omitted.status.success(), "{}", diagnostic(&omitted));
+    for address in ["127.0.0.1:18002", "0.0.0.0:8322"] {
+        let changed = register(home.path(), &args).args(["--listen", address]).output().await.unwrap();
+        assert!(!changed.status.success());
+        assert!(diagnostic(&changed).contains("different gateway listener"));
+    }
+    assert_eq!(api.calls().len(), 1);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}

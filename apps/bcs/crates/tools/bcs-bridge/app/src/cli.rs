@@ -78,6 +78,8 @@ fn from_matches(app: &BridgeApp, command: &mut clap::Command, matches: &clap::Ar
     if let Commands::Register(args) = &mut cli.command {
         args.model_is_explicit = matches.subcommand().is_some_and(|(_, registration)|
             registration.value_source("model") == Some(clap::parser::ValueSource::CommandLine));
+        args.listen_is_explicit = matches.subcommand().is_some_and(|(_, registration)|
+            registration.value_source("listen") == Some(clap::parser::ValueSource::CommandLine));
     }
     if omit_model_default {
         if let Commands::Register(args) = &mut cli.command { args.model = None; }
