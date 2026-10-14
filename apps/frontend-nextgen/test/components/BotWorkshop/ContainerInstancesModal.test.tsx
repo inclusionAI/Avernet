@@ -45,7 +45,7 @@ describe('ContainerInstancesModal', () => {
     expect(getSummaryText('1 活跃')).toBeInTheDocument();
     expect(getSummaryText('1 异常')).toBeInTheDocument();
     expect(screen.getByText('node-a')).toBeInTheDocument();
-    expect(screen.getAllByText('—')).toHaveLength(2);
+    expect(screen.getAllByText('—')).toHaveLength(3);
     expect(screen.getByRole('button', { name: '重启' })).toBeDisabled();
   });
 });
