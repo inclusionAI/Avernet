@@ -41,6 +41,8 @@ class NodeTaskContextDTO(BaseModel):
     node_id: str
     root_task_spec: TaskSpecDTO
     current_task_spec: TaskSpecDTO
+    actual_goal: GoalDTO | None = None
+    capability_failure_reason: str | None = None
     all_done_output: list[DoneOutputDTO] = Field(default_factory=list)
     accepted_execution_patch: AcceptedExecutionPatchDTO | None = None
     accepted_plan_report: AcceptedPlanReportDTO | None = None
@@ -68,7 +70,14 @@ def _spec_to_dto(spec: TaskSpec) -> TaskSpecDTO:
 
 
 def node_context_to_dto(context: TaskContext) -> NodeTaskContextDTO:
-    if not all((context.task_id, context.node_id, context.root_task_spec, context.current_task_spec)):
+    if not all(
+        (
+            context.task_id,
+            context.node_id,
+            context.root_task_spec,
+            context.current_task_spec,
+        )
+    ):
         raise ValueError("node-scoped TaskContext is incomplete")
     patch = context.accepted_execution_patch
     patch_dto = None
@@ -86,7 +95,8 @@ def node_context_to_dto(context: TaskContext) -> NodeTaskContextDTO:
                     done_items=list(acceptance.done_items),
                     gap_items=list(acceptance.gap_items),
                 )
-                if acceptance else None
+                if acceptance
+                else None
             ),
             failure_reason=patch.failure_reason,
         )
@@ -95,6 +105,8 @@ def node_context_to_dto(context: TaskContext) -> NodeTaskContextDTO:
         node_id=context.node_id,
         root_task_spec=_spec_to_dto(context.root_task_spec),
         current_task_spec=_spec_to_dto(context.current_task_spec),
+        actual_goal=_goal_to_dto(context.actual_goal) if context.actual_goal else None,
+        capability_failure_reason=context.capability_failure_reason,
         all_done_output=task_context_to_dto(context).all_done_output,
         accepted_execution_patch=patch_dto,
         accepted_plan_report=(
@@ -105,6 +117,7 @@ def node_context_to_dto(context: TaskContext) -> NodeTaskContextDTO:
                 task_hung=context.accepted_plan_report.task_hung,
                 bbs_publish_pending=context.accepted_plan_report.bbs_publish_pending,
             )
-            if context.accepted_plan_report else None
+            if context.accepted_plan_report
+            else None
         ),
     )

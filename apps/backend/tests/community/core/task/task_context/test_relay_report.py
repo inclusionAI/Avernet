@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
@@ -15,25 +17,36 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     TaskReportCommand,
     TaskReportEventType,
+    TaskReportStatus,
+    TaskReportTrace,
+    TaskReportTraceStep,
     TaskSpec,
     NodeAction,
 )
-from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import (
+    TaskGraphService,
+)
 
 
 def _graph_service() -> TaskGraphService:
     graph = TaskExecutionGraph(
-        task_id="task-1", run_id=1, loop_round=0, status=Status.RUNNING,
+        task_id="task-1",
+        run_id=1,
+        loop_round=0,
+        status=Status.RUNNING,
         extend_props={
             "execution_config": {"orchestration_mode": "relay", "MAX_LOOP": 3},
             "runtime_profile": {"allowed_run_modes": ["single_bot", "bbs"]},
         },
     )
     root = TaskNode(
-        node_id="task-1", task_id="task-1", status=Status.RUNNING,
+        node_id="task-1",
+        task_id="task-1",
+        status=Status.RUNNING,
         task_spec=TaskSpec(Context("background", title="root"), Goal("finish", [])),
         run_info=RuntimeInfo(
-            run_mode="single_bot", assignee="bot-1",
+            run_mode="single_bot",
+            assignee="bot-1",
             extend_props={"relay_token": "attempt-1"},
         ),
         node_run_graph=graph,
@@ -46,13 +59,34 @@ def _graph_service() -> TaskGraphService:
 
 def _execution() -> TaskReportCommand:
     return TaskReportCommand(
-        task_id="task-1", node_id="task-1",
-        event_id="execution-1", relay_token="attempt-1",
+        task_id="task-1",
+        node_id="task-1",
+        event_id="execution-1",
+        relay_token="attempt-1",
         event_type=TaskReportEventType.EXECUTION_RESULT,
         event=TaskNodePatch(
-            task_id="task-1", node_id="task-1", execution_decision="ACCEPTED",
-            actual_goal=Goal("cover part", []), output_patch={"result": "evidence"},
+            task_id="task-1",
+            node_id="task-1",
+            execution_decision="ACCEPTED",
+            actual_goal=Goal("cover part", []),
+            output_patch={"result": "evidence"},
             local_acceptance_result=AcceptanceResult(AcceptanceVerdict.DONE),
+        ),
+    )
+
+
+def _declined_execution() -> TaskReportCommand:
+    return TaskReportCommand(
+        task_id="task-1",
+        node_id="task-1",
+        event_id="execution-declined",
+        relay_token="attempt-1",
+        event_type=TaskReportEventType.EXECUTION_RESULT,
+        event=TaskNodePatch(
+            task_id="task-1",
+            node_id="task-1",
+            execution_decision="DECLINED",
+            failure_reason="capability_mismatch",
         ),
     )
 
@@ -60,17 +94,31 @@ def _execution() -> TaskReportCommand:
 def test_report_creates_one_successor_and_projects_replay_receipt() -> None:
     service = _graph_service()
     execution = _execution()
-    assert service.apply_relay_report(execution) == service.apply_relay_report(execution)
+    assert service.get_node_context("task-1", "task-1").actual_goal is None
+    assert service.apply_relay_report(execution) == service.apply_relay_report(
+        execution
+    )
+    assert service.get_node_context("task-1", "task-1").actual_goal == Goal(
+        "cover part", []
+    )
+    assert (
+        service.get_node_context("task-1", "task-1").capability_failure_reason is None
+    )
     planned = TaskNode(
-        node_id=None, task_id="task-1", status=None,
+        node_id=None,
+        task_id="task-1",
+        status=None,
         task_spec=TaskSpec(Context("next", title="next"), Goal("finish remainder", [])),
         run_info=RuntimeInfo(run_mode="single_bot", assignee="bot-2"),
         node_run_graph=None,
     )
     command = TaskReportCommand(
-        task_id="task-1", node_id="task-1",
-        event_id="plan-1", relay_token="attempt-1",
-        event_type=TaskReportEventType.PLAN_RESULT, event=planned,
+        task_id="task-1",
+        node_id="task-1",
+        event_id="plan-1",
+        relay_token="attempt-1",
+        event_type=TaskReportEventType.PLAN_RESULT,
+        event=planned,
     )
     result = service.apply_relay_report(command)
     assert result.target_node_id is not None
@@ -98,21 +146,144 @@ def test_report_rejects_conflicting_replay_and_invalid_plan_branch() -> None:
     with pytest.raises(TaskStateError, match="conflicts"):
         service.apply_relay_report(changed)
     with pytest.raises(TaskStateError, match="exactly one"):
-        service.apply_relay_report(TaskReportCommand(
-            task_id="task-1", node_id="task-1",
-            event_id="plan-invalid", relay_token="attempt-1",
-            event_type=TaskReportEventType.PLAN_RESULT, event=None,
-        ))
+        service.apply_relay_report(
+            TaskReportCommand(
+                task_id="task-1",
+                node_id="task-1",
+                event_id="plan-invalid",
+                relay_token="attempt-1",
+                event_type=TaskReportEventType.PLAN_RESULT,
+                event=None,
+            )
+        )
     assert service.query_task_dashboard("task-1").tasks[0].status == Status.RUNNING
+
+
+def test_report_trace_is_recorded_once_and_is_part_of_event_fingerprint() -> None:
+    service = _graph_service()
+    trace = TaskReportTrace(
+        steps=[
+            TaskReportTraceStep(
+                step="S1_CONTEXT",
+                status="completed",
+                detail={"node_id": "task-1"},
+            ),
+            TaskReportTraceStep(
+                step="S2_GAPS", status="completed", detail={"gaps": ["g1"]}
+            ),
+            TaskReportTraceStep(step="S4A_EXECUTION", status="completed", detail={}),
+        ]
+    )
+    execution = replace(_execution(), trace=trace)
+
+    assert service.apply_relay_report(execution).status == TaskReportStatus.APPLIED
+
+    actions = service.query_task_dashboard("task-1").tasks[0].run_info.action_log
+    assert actions[0].payload["trace"] == {
+        "steps": [
+            {
+                "step": "S1_CONTEXT",
+                "status": "completed",
+                "detail": {"node_id": "task-1"},
+            },
+            {"step": "S2_GAPS", "status": "completed", "detail": {"gaps": ["g1"]}},
+            {"step": "S4A_EXECUTION", "status": "completed", "detail": {}},
+        ],
+    }
+    assert "trace" not in actions[1].payload
+
+    changed_trace = TaskReportTrace(
+        steps=[
+            TaskReportTraceStep(step="S1_CONTEXT", status="completed", detail={}),
+        ]
+    )
+    with pytest.raises(TaskStateError, match="conflicts"):
+        service.apply_relay_report(replace(execution, trace=changed_trace))
+
+
+def test_plan_report_trace_is_recorded_once() -> None:
+    service = _graph_service()
+    service.apply_relay_report(_execution())
+    planned = TaskNode(
+        node_id=None,
+        task_id="task-1",
+        status=None,
+        task_spec=TaskSpec(Context("next", title="next"), Goal("finish remainder", [])),
+        run_info=RuntimeInfo(run_mode="single_bot", assignee="bot-2"),
+        node_run_graph=None,
+    )
+    command = TaskReportCommand(
+        task_id="task-1",
+        node_id="task-1",
+        event_id="plan-trace",
+        relay_token="attempt-1",
+        event_type=TaskReportEventType.PLAN_RESULT,
+        event=planned,
+        trace=TaskReportTrace(
+            steps=[
+                TaskReportTraceStep(
+                    step="S5A_REFRESH_GAPS",
+                    status="completed",
+                    detail={"gaps": ["g1"]},
+                ),
+            ]
+        ),
+    )
+
+    result = service.apply_relay_report(command)
+
+    actions = service.query_task_dashboard("task-1").tasks[0].run_info.action_log
+    assert result.status == TaskReportStatus.APPLIED
+    assert actions[-2].payload["trace"] == {
+        "steps": [
+            {
+                "step": "S5A_REFRESH_GAPS",
+                "status": "completed",
+                "detail": {"gaps": ["g1"]},
+            }
+        ],
+    }
+    assert "trace" not in actions[-1].payload
+
+
+def test_accepted_empty_output_is_still_a_recoverable_execution_fact() -> None:
+    service = _graph_service()
+    execution = _execution()
+    execution = replace(
+        execution,
+        event=replace(execution.event, output_patch={}),
+    )
+
+    assert service.apply_relay_report(execution).status == TaskReportStatus.APPLIED
+
+    context = service.get_node_context("task-1", "task-1")
+    assert context.accepted_execution_patch is not None
+    assert context.accepted_execution_patch.output_patch == {}
+    assert context.actual_goal == Goal("cover part", [])
+
+
+def test_declined_execution_recovery_projects_capability_failure_reason() -> None:
+    service = _graph_service()
+    assert service.apply_relay_report(_declined_execution()).status.value == "APPLIED"
+
+    context = service.get_node_context("task-1", "task-1")
+
+    assert context.actual_goal is None
+    assert context.capability_failure_reason == "capability_mismatch"
+    assert context.accepted_execution_patch is not None
+    assert context.accepted_execution_patch.execution_decision == "DECLINED"
 
 
 def test_report_completion_is_idempotent_and_does_not_create_node() -> None:
     service = _graph_service()
     service.apply_relay_report(_execution())
     complete = TaskReportCommand(
-        task_id="task-1", node_id="task-1",
-        event_id="plan-complete", relay_token="attempt-1",
-        event_type=TaskReportEventType.PLAN_RESULT, event=None,
+        task_id="task-1",
+        node_id="task-1",
+        event_id="plan-complete",
+        relay_token="attempt-1",
+        event_type=TaskReportEventType.PLAN_RESULT,
+        event=None,
         task_acceptance_result=AcceptanceResult(AcceptanceVerdict.DONE),
     )
     result = service.apply_relay_report(complete)
@@ -132,10 +303,13 @@ def test_report_completion_is_idempotent_and_does_not_create_node() -> None:
 def test_retry_fences_old_execution_without_changing_node_id() -> None:
     service = _graph_service()
     stale = _execution()
-    service.update_task_node_info(TaskNodePatch(
-        task_id="task-1", node_id="task-1",
-        extend_props_patch={"harness_retries": 1},
-    ))
+    service.update_task_node_info(
+        TaskNodePatch(
+            task_id="task-1",
+            node_id="task-1",
+            extend_props_patch={"harness_retries": 1},
+        )
+    )
     current = service.query_task_dashboard("task-1").tasks[0]
     new_token = current.run_info.extend_props["relay_token"]
     assert current.node_id == "task-1"

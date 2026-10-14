@@ -4,19 +4,39 @@ import pytest
 from pydantic import ValidationError
 
 from agentclaw.community.adapters.http.task.schemas import (
-    TaskCallbackRequest, TaskNodeCallbackRequest, _normalize_execution_config,
-    execution_graph_to_product_status, op_result_to_dto,
-    runtime_status_to_product_status, TaskSettingRequestDTO, TaskSettingStateDTO,
+    TaskCallbackRequest,
+    TaskNodeCallbackRequest,
+    _normalize_execution_config,
+    execution_graph_to_product_status,
+    op_result_to_dto,
+    runtime_status_to_product_status,
+    TaskSettingRequestDTO,
+    TaskSettingStateDTO,
 )
 from agentclaw.community.core.task.domain.models import TaskOpResult
-from agentclaw.community.adapters.http.task.schemas_node_context import node_context_to_dto
-from agentclaw.community.adapters.http.task.schemas_relay_report import TaskReportCommandDTO
-from agentclaw.community.core.task.domain.models import Context, Goal, TaskContext, TaskSpec
+from agentclaw.community.adapters.http.task.schemas_node_context import (
+    node_context_to_dto,
+)
+from agentclaw.community.adapters.http.task.schemas_relay_report import (
+    TaskReportCommandDTO,
+)
+from agentclaw.community.core.task.domain.models import (
+    Context,
+    Goal,
+    TaskContext,
+    TaskSpec,
+)
 
 
 def _base(**kw):
-    d = dict(task_id="t1", workflow_source="bcn", workflow_id="w1",
-             workflow_instance_id="i1", status="COMPLETED", is_success=True)
+    d = dict(
+        task_id="t1",
+        workflow_source="bcn",
+        workflow_id="w1",
+        workflow_instance_id="i1",
+        status="COMPLETED",
+        is_success=True,
+    )
     d.update(kw)
     return d
 
@@ -45,68 +65,146 @@ def test_required_fields_enforced():
 
 
 def test_op_result_to_dto_returns_extend_props():
-    dto = op_result_to_dto(TaskOpResult(
-        task_id="t1",
-        success=True,
-        node_id="t1",
-        run_id=1,
-        extend_props={"group_id": "bcs_grp_1"},
-    ))
+    dto = op_result_to_dto(
+        TaskOpResult(
+            task_id="t1",
+            success=True,
+            node_id="t1",
+            run_id=1,
+            extend_props={"group_id": "bcs_grp_1"},
+        )
+    )
 
     assert dto.extend_props == {"group_id": "bcs_grp_1"}
     assert dto.node_id == "t1"
 
 
 def test_node_context_dto_does_not_expose_task_level_gaps() -> None:
-    spec = TaskSpec(context=Context(title="目标"), goal=Goal(objective="完成", acceptances=[]))
-    dto = node_context_to_dto(TaskContext(
-        spec=spec, all_done_output=[], gaps=["legacy graph gap"],
-        task_id="t1", node_id="n1", root_task_spec=spec, current_task_spec=spec,
-    ))
+    spec = TaskSpec(
+        context=Context(title="目标"), goal=Goal(objective="完成", acceptances=[])
+    )
+    dto = node_context_to_dto(
+        TaskContext(
+            spec=spec,
+            all_done_output=[],
+            gaps=["legacy graph gap"],
+            task_id="t1",
+            node_id="n1",
+            root_task_spec=spec,
+            current_task_spec=spec,
+        )
+    )
     assert dto.task_id == "t1" and dto.node_id == "n1"
     assert "gaps" not in dto.model_dump()
 
 
+def test_node_context_dto_projects_runtime_actual_goal() -> None:
+    spec = TaskSpec(
+        context=Context(title="目标"), goal=Goal(objective="完成", acceptances=[])
+    )
+    actual_goal = Goal(objective="可承接目标", acceptances=[])
+    dto = node_context_to_dto(
+        TaskContext(
+            spec=spec,
+            all_done_output=[],
+            gaps=[],
+            task_id="t1",
+            node_id="n1",
+            root_task_spec=spec,
+            current_task_spec=spec,
+            actual_goal=actual_goal,
+        )
+    )
+    assert dto.actual_goal is not None
+    assert dto.actual_goal.objective == actual_goal.objective
+    assert dto.capability_failure_reason is None
+
+
 def test_plan_report_dto_builds_one_unpersisted_node() -> None:
-    command = TaskReportCommandDTO.model_validate({
-        "task_id": "t1", "node_id": "n1", "event_id": "e1", "relay_token": "generation-1",
-        "event_type": "PLAN_RESULT",
-        "event": {
-            "task_spec": {
-                "context": {"title": "下一棒", "background": ""},
-                "goal": {"objective": "补齐验收", "acceptances": []},
+    command = TaskReportCommandDTO.model_validate(
+        {
+            "task_id": "t1",
+            "node_id": "n1",
+            "event_id": "e1",
+            "relay_token": "generation-1",
+            "event_type": "PLAN_RESULT",
+            "event": {
+                "task_spec": {
+                    "context": {"title": "下一棒", "background": ""},
+                    "goal": {"objective": "补齐验收", "acceptances": []},
+                },
+                "run_info": {"run_mode": "single_bot", "assignee": "bot-2"},
             },
-            "run_info": {"run_mode": "single_bot", "assignee": "bot-2"},
-        },
-    }).to_domain()
+        }
+    ).to_domain()
     assert command.event_id == "e1" and command.relay_token == "generation-1"
     assert command.event.node_id is None
     assert command.event.task_spec.goal.objective == "补齐验收"
     assert command.event.run_info.assignee == "bot-2"
 
 
+def test_report_dto_parses_optional_trace() -> None:
+    command = TaskReportCommandDTO.model_validate(
+        {
+            "task_id": "t1",
+            "node_id": "n1",
+            "event_id": "e1",
+            "relay_token": "generation-1",
+            "event_type": "PLAN_RESULT",
+            "event": None,
+            "task_acceptance_result": {
+                "verdict": "DONE",
+                "done_items": ["acceptance-1"],
+                "gap_items": [],
+            },
+            "trace": {
+                "steps": [
+                    {
+                        "step": "S5A_REFRESH_GAPS",
+                        "status": "completed",
+                        "detail": {"gaps": []},
+                    },
+                ],
+            },
+        }
+    ).to_domain()
+
+    assert command.trace is not None
+    assert command.trace.steps[0].step == "S5A_REFRESH_GAPS"
+    assert command.trace.steps[0].status == "completed"
+    assert command.trace.steps[0].detail == {"gaps": []}
+
+
 def test_plan_report_dto_rejects_client_generated_node_id() -> None:
     with pytest.raises(ValidationError):
-        TaskReportCommandDTO.model_validate({
-            "task_id": "t1", "node_id": "n1", "event_id": "e1", "relay_token": "generation-1",
-            "event_type": "PLAN_RESULT",
-            "event": {
-                "node_id": "client-node",
-                "task_spec": {
-                    "context": {"title": "下一棒"},
-                    "goal": {"objective": "补齐验收"},
+        TaskReportCommandDTO.model_validate(
+            {
+                "task_id": "t1",
+                "node_id": "n1",
+                "event_id": "e1",
+                "relay_token": "generation-1",
+                "event_type": "PLAN_RESULT",
+                "event": {
+                    "node_id": "client-node",
+                    "task_spec": {
+                        "context": {"title": "下一棒"},
+                        "goal": {"objective": "补齐验收"},
+                    },
+                    "run_info": {"run_mode": "single_bot", "assignee": "bot-2"},
                 },
-                "run_info": {"run_mode": "single_bot", "assignee": "bot-2"},
-            },
-        }).to_domain()
+            }
+        ).to_domain()
 
 
 def test_task_settings_dtos_accept_relay_execution() -> None:
     request = TaskSettingRequestDTO(
-        setting_type="relay_execution", enabled=True,
+        setting_type="relay_execution",
+        enabled=True,
     )
     state = TaskSettingStateDTO(
-        setting_type="relay_execution", enabled=True, env="dev",
+        setting_type="relay_execution",
+        enabled=True,
+        env="dev",
     )
 
     assert request.setting_type == "relay_execution"
@@ -155,9 +253,19 @@ def test_normalize_execution_config_backfills_historical_teamclaw_context():
     """历史记录:execution_config 缺 4 字段,根节点 teamclaw_context 有 → 只读回填(不改存储)。"""
     g = _graph(
         "T1",
-        [_node("T1", tc={"main_session_id": "agent:main:session:x:user:1",
-                        "main_session_name": "n1", "parent_task_id": None})],
-        extend_props={"execution_config": {"task_type": "dynamic", "workflow_id": None}},
+        [
+            _node(
+                "T1",
+                tc={
+                    "main_session_id": "agent:main:session:x:user:1",
+                    "main_session_name": "n1",
+                    "parent_task_id": None,
+                },
+            )
+        ],
+        extend_props={
+            "execution_config": {"task_type": "dynamic", "workflow_id": None}
+        },
     )
     ec = _normalize_execution_config(g)
     assert ec["main_session_id"] == "agent:main:session:x:user:1"
@@ -165,17 +273,27 @@ def test_normalize_execution_config_backfills_historical_teamclaw_context():
     assert ec["parent_task_id"] is None  # 显式 None 同样回填,繁键一致
     assert "source_group_id" not in ec  # tc 未持有该键则不注入
     # 输入 graph 域未被改写(只读归一)
-    assert g.extend_props["execution_config"] == {"task_type": "dynamic", "workflow_id": None}
+    assert g.extend_props["execution_config"] == {
+        "task_type": "dynamic",
+        "workflow_id": None,
+    }
 
 
 def test_normalize_execution_config_keeps_new_schema_passthrough():
     """新规范:execution_config 已扁平含 4 字段、无 teamclaw_context → 直接透出,不覆盖。"""
     g = _graph(
-        "T2", [_node("T2", tc=None)],
-        extend_props={"execution_config": {
-            "task_type": "workflow", "workflow_id": "wf-1",
-            "main_session_id": "s2", "main_session_name": "n2",
-            "source_group_id": "g2", "parent_task_id": "P2"}},
+        "T2",
+        [_node("T2", tc=None)],
+        extend_props={
+            "execution_config": {
+                "task_type": "workflow",
+                "workflow_id": "wf-1",
+                "main_session_id": "s2",
+                "main_session_name": "n2",
+                "source_group_id": "g2",
+                "parent_task_id": "P2",
+            }
+        },
     )
     ec = _normalize_execution_config(g)
     assert ec["main_session_id"] == "s2"
@@ -185,11 +303,20 @@ def test_normalize_execution_config_keeps_new_schema_passthrough():
 
 def test_normalize_execution_config_missing_ec_defaults_empty_and_backfills():
     """execution_config 缺失 → 默认 {} + 从 tc 回填;枚举 task_type 转 value。"""
+
     class FakeEnum:
         value = "yaml"
-    g = _graph("T3", [_node("T3", tc={"main_session_id": "z", "main_session_name": "nz"})], {})
-    assert _normalize_execution_config(g) == {"main_session_id": "z", "main_session_name": "nz"}
-    g4 = _graph("T4", [_node("T4", tc=None)], {"execution_config": {"task_type": FakeEnum()}})
+
+    g = _graph(
+        "T3", [_node("T3", tc={"main_session_id": "z", "main_session_name": "nz"})], {}
+    )
+    assert _normalize_execution_config(g) == {
+        "main_session_id": "z",
+        "main_session_name": "nz",
+    }
+    g4 = _graph(
+        "T4", [_node("T4", tc=None)], {"execution_config": {"task_type": FakeEnum()}}
+    )
     assert _normalize_execution_config(g4)["task_type"] == "yaml"
 
 
@@ -201,7 +328,11 @@ def test_execution_graph_statuses_are_mapped_at_product_boundary():
                 "node_id": "n1",
                 "status": "RUNNING",
                 "task_spec": {
-                    "metadata": {"task_id": "n1", "title": "旧标题", "instruction": "旧目标"},
+                    "metadata": {
+                        "task_id": "n1",
+                        "title": "旧标题",
+                        "instruction": "旧目标",
+                    },
                     "context": {"background": "背景", "extend_props": {}},
                     "goal": {"objective": "", "acceptances": []},
                 },
@@ -246,6 +377,7 @@ def test_acceptance_verdict_backward_compat_pass_fail():
 def test_acceptance_result_dto_accepts_object_arrays():
     """新协议 done_items/gap_items 为对象数组,DTO(list[Any]) 应接受,不再 500。"""
     from agentclaw.community.adapters.http.task.schemas import AcceptanceResultDTO
+
     dto = AcceptanceResultDTO(
         verdict="DONE",
         done_items=[{"ac_1": "exec_ok"}],
@@ -254,6 +386,7 @@ def test_acceptance_result_dto_accepts_object_arrays():
     assert dto.verdict == "DONE"
     assert dto.done_items == [{"ac_1": "exec_ok"}]
     assert dto.gap_items == [{"sddss": "xxsdd"}]
+
 
 def test_acceptance_result_dto_rejects_legacy_verdict():
     """新外部协议只接受 verdict=DONE/FAILED;历史 PASS/FAIL 仅由领域反序列化兼容。"""
@@ -299,7 +432,10 @@ def test_unwrap_node_output_collapses_single_output_key():
     assert _unwrap_node_output({}) == {}
     # 非 output 的单键/多键分支(static/bbs/notify)原样保留 dict
     assert _unwrap_node_output({"architects": [1, 2]}) == {"architects": [1, 2]}
-    assert _unwrap_node_output({"result": "x", "extra": "y"}) == {"result": "x", "extra": "y"}
+    assert _unwrap_node_output({"result": "x", "extra": "y"}) == {
+        "result": "x",
+        "extra": "y",
+    }
     assert _unwrap_node_output({"skipped": True}) == {"skipped": True}
     # None 直通
     assert _unwrap_node_output(None) is None

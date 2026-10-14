@@ -77,7 +77,9 @@ class RequestGoalDTO(BaseModel):
     """请求侧目标 DTO：目标描述加若干验收标准。"""
 
     objective: str = Field("", description="任务目标描述")
-    acceptances: list[RequestAcceptanceDTO] = Field(default_factory=list, description="验收标准列表")
+    acceptances: list[RequestAcceptanceDTO] = Field(
+        default_factory=list, description="验收标准列表"
+    )
 
 
 class RequestTaskSpecDTO(BaseModel):
@@ -85,7 +87,9 @@ class RequestTaskSpecDTO(BaseModel):
 
     context: ContextDTO = Field(default_factory=ContextDTO, description="任务上下文")
     goal: RequestGoalDTO = Field(default_factory=RequestGoalDTO, description="任务目标")
-    metadata: RequestMetadataDTO | None = Field(None, exclude=True, description="旧客户端兼容字段，不进入领域 TaskSpec")
+    metadata: RequestMetadataDTO | None = Field(
+        None, exclude=True, description="旧客户端兼容字段，不进入领域 TaskSpec"
+    )
 
 
 class ExecutionConfigDTO(BaseModel):
@@ -139,7 +143,9 @@ class BbsClaimDTO(BaseModel):
 
     task_id: str = Field(..., description="任务ID(BBS 接力根级 CAS 占有目标)")
     bot_id: str = Field(..., description="发起占有的 bot id")
-    node_id: str | None = Field(None, description="分布式接力 BBS 节点ID；中心化模式不传")
+    node_id: str | None = Field(
+        None, description="分布式接力 BBS 节点ID；中心化模式不传"
+    )
     claim_id: str | None = Field(None, description="Relay BBS 节点认领幂等键")
 
 
@@ -182,14 +188,20 @@ class TaskNodeUpdateDTO(BaseModel):
 
     task_id: str = Field(..., description="任务ID")
     node_id: str = Field(..., description="节点ID")
-    status: str | None = Field(None, description="框架直驱状态(HUNG/DONE/SUCCESS/PENDING/RUNNING 等)")
+    status: str | None = Field(
+        None, description="框架直驱状态(HUNG/DONE/SUCCESS/PENDING/RUNNING 等)"
+    )
     run_mode: str | None = Field(None, description="执行模态(single_bot / bbs 等)")
     assignee: str | None = Field(None, description="承接者(bot_id 或 group_id)")
-    output_patch: dict[str, Any] | None = Field(None, description="增量输出(fold 进 run_info.output)")
+    output_patch: dict[str, Any] | None = Field(
+        None, description="增量输出(fold 进 run_info.output)"
+    )
     acceptance_result: AcceptanceResultDTO | None = Field(
         None, description="验收结论(PASS→DONE / FAIL+gaps→FAILED)"
     )
-    exec_error: str | None = Field(None, description="执行报错信号(非验收;→ on_harness 重投)")
+    exec_error: str | None = Field(
+        None, description="执行报错信号(非验收;→ on_harness 重投)"
+    )
     progress_reason: str | None = Field(None, description="推进原因")
     failure_reason: str | None = Field(None, description="失败原因")
     extend_props_patch: dict[str, Any] | None = Field(
@@ -210,15 +222,6 @@ class TaskCallbackDataDTO(BaseModel):
         default_factory=dict,
         description="回投结果 {success: bool, data?: any, fail_detail?: str}",
     )
-
-
-class TaskSearchRequestDTO(BaseModel):
-    """Search candidates for the current network-admitted Relay baton."""
-
-    query: str = Field(..., min_length=1)
-    task_id: str = Field(..., min_length=1)
-    node_id: str = Field(..., min_length=1)
-    relay_token: str = Field(..., min_length=1)
 
 
 class TaskDispatchRequestDTO(BaseModel):
@@ -253,10 +256,12 @@ class AcceptanceResultDTO(BaseModel):
 
     verdict: Literal["DONE", "FAILED"] = Field(..., description="DONE / FAILED")
     done_items: list[Any] = Field(
-        default_factory=list, description="已完成验收项明细列表(对象数组=[{id,passed,summary}])"
+        default_factory=list,
+        description="已完成验收项明细列表(对象数组=[{id,passed,summary}])",
     )
     gap_items: list[Any] = Field(
-        default_factory=list, description="未通过的验收项明细/差距(对象数组 [{项:原因}] 或字符串数组)"
+        default_factory=list,
+        description="未通过的验收项明细/差距(对象数组 [{项:原因}] 或字符串数组)",
     )
 
 
@@ -284,7 +289,9 @@ class RuntimeInfoDTO(BaseModel):
     assignee: str | None = Field(None, description="当前承接节点执行的 bot id")
     start_time: int | None = Field(None, description="执行开始时间戳(毫秒)")
     end_time: int | None = Field(None, description="执行结束时间戳(毫秒)")
-    actual_goal: GoalDTO | None = Field(None, description="Bot 能力匹配后的实际执行目标")
+    actual_goal: GoalDTO | None = Field(
+        None, description="Bot 能力匹配后的实际执行目标"
+    )
     execution_decision: str | None = Field(None, description="ACCEPTED / DECLINED")
     output: Any = Field(
         default_factory=dict,
@@ -347,21 +354,44 @@ class BbsTaskItemDTO(BaseModel):
     node_id: str = Field(..., description="节点ID(r.node_id)")
     run_mode: str | None = Field(None, description="执行模态(r.run_mode;bbs)")
     retry: int = Field(0, description="重试序号(r.retry;当前恒 0)")
-    assignee_id: str | None = Field(None, description="承接者ID(r.assignee → assignee_id)")
-    status: str | None = Field(None, description="节点运行态(n.status 原值,如 RUNNING/DONE/SUCCESS/…)")
-    acceptance_result: dict[str, Any] | None = Field(None, description="验收结论(r.acceptance_result)")
-    extend_props: dict[str, Any] | None = Field(None, description="运行扩展属性(r.extend_props)")
-    relay_create_time: datetime | None = Field(None, description="节点建表时间(n.gmt_create)")
-    relay_begin_time: datetime | None = Field(None, description="run 建表时间(r.gmt_create)")
-    relay_end_time: datetime | None = Field(None, description="run 改表时间(r.gmt_modified)")
-    task_spec: dict[str, Any] = Field(..., description="节点任务规格(n.task_spec 原始 dict)")
+    assignee_id: str | None = Field(
+        None, description="承接者ID(r.assignee → assignee_id)"
+    )
+    status: str | None = Field(
+        None, description="节点运行态(n.status 原值,如 RUNNING/DONE/SUCCESS/…)"
+    )
+    acceptance_result: dict[str, Any] | None = Field(
+        None, description="验收结论(r.acceptance_result)"
+    )
+    extend_props: dict[str, Any] | None = Field(
+        None, description="运行扩展属性(r.extend_props)"
+    )
+    relay_create_time: datetime | None = Field(
+        None, description="节点建表时间(n.gmt_create)"
+    )
+    relay_begin_time: datetime | None = Field(
+        None, description="run 建表时间(r.gmt_create)"
+    )
+    relay_end_time: datetime | None = Field(
+        None, description="run 改表时间(r.gmt_modified)"
+    )
+    task_spec: dict[str, Any] = Field(
+        ..., description="节点任务规格(n.task_spec 原始 dict)"
+    )
     title: str | None = Field(None, description="解析自 task_spec.context.title")
     goal: str | None = Field(None, description="解析自 task_spec.goal.objective")
-    acceptances: list[Any] | None = Field(None, description="解析自 task_spec.goal.acceptances")
-    assignee_name: str | None = Field(None, description="解析自 extend_props.assignee_name")
-    publisher: str | None = Field(None, description="发布方 botId(task_info.owner_bot_id)")
+    acceptances: list[Any] | None = Field(
+        None, description="解析自 task_spec.goal.acceptances"
+    )
+    assignee_name: str | None = Field(
+        None, description="解析自 extend_props.assignee_name"
+    )
+    publisher: str | None = Field(
+        None, description="发布方 botId(task_info.owner_bot_id)"
+    )
     publisher_name: str | None = Field(
-        None, description="发布方 bot 名称(由 publisher bot_id 批量查 BotService;缺失/降级 → None)"
+        None,
+        description="发布方 bot 名称(由 publisher bot_id 批量查 BotService;缺失/降级 → None)",
     )
 
 
@@ -398,7 +428,6 @@ class TaskExecutionGraphDTO(BaseModel):
         default_factory=dict,
         description="执行配置投影(task_type/yaml/workflow_id + 会话/群/父任务上下文扁平,扩展上下文兼容归一)",
     )
-
 
 
 class DoneOutputDTO(BaseModel):
@@ -452,6 +481,7 @@ def task_context_to_dto(context) -> LatestTaskContextDTO:
         gaps=list(context.gaps),
     )
 
+
 def runtime_status_to_product_status(status: Any) -> str:
     """Map runtime task states to product-facing dashboard states.
 
@@ -491,10 +521,19 @@ def execution_graph_to_product_status(execution_graph: Any) -> Any:
         normalized["tasks"] = [
             {
                 **task,
-                **({"status": runtime_status_to_product_status(task["status"])} if "status" in task else {}),
-                **({"task_spec": task_spec_from_dict(task["task_spec"]).to_dict()} if isinstance(task.get("task_spec"), dict) else {}),
+                **(
+                    {"status": runtime_status_to_product_status(task["status"])}
+                    if "status" in task
+                    else {}
+                ),
+                **(
+                    {"task_spec": task_spec_from_dict(task["task_spec"]).to_dict()}
+                    if isinstance(task.get("task_spec"), dict)
+                    else {}
+                ),
             }
-            if isinstance(task, dict) else task
+            if isinstance(task, dict)
+            else task
             for task in raw_tasks
         ]
     return normalized
@@ -504,7 +543,12 @@ def execution_graph_to_product_status(execution_graph: Any) -> Any:
 
 
 def task_spec_from_dto(dto: TaskSpecDTO):
-    from agentclaw.community.core.task.domain.models import AcceptanceCriteria, Context, Goal, TaskSpec
+    from agentclaw.community.core.task.domain.models import (
+        AcceptanceCriteria,
+        Context,
+        Goal,
+        TaskSpec,
+    )
 
     return TaskSpec(
         context=Context(
@@ -615,7 +659,12 @@ def _normalize_execution_config(graph) -> dict[str, Any]:
     if root is not None:
         tc = (root.task_spec.context.extend_props or {}).get("teamclaw_context") or {}
         if isinstance(tc, dict):
-            for key in ("main_session_id", "main_session_name", "source_group_id", "parent_task_id"):
+            for key in (
+                "main_session_id",
+                "main_session_name",
+                "source_group_id",
+                "parent_task_id",
+            ):
                 # key in tc 而非 value 非空:历史 tc.parent_task_id 显式 None 同样回填,确保归一后繁键一致。
                 if key not in ec and key in tc:
                     ec[key] = tc[key]
@@ -685,13 +734,18 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
                         GoalDTO(
                             objective=n.run_info.actual_goal.objective,
                             acceptances=[
-                                AcceptanceCriteriaDTO(id=a.id, description=a.description)
+                                AcceptanceCriteriaDTO(
+                                    id=a.id, description=a.description
+                                )
                                 for a in n.run_info.actual_goal.acceptances
                             ],
                         )
-                        if n.run_info.actual_goal else None
+                        if n.run_info.actual_goal
+                        else None
                     ),
-                    execution_decision=n.run_info.extend_props.get("execution_decision"),
+                    execution_decision=n.run_info.extend_props.get(
+                        "execution_decision"
+                    ),
                     output=_unwrap_node_output(n.run_info.output),
                     acceptance_result=ar_dto,
                     progress_reason=n.run_info.progress_reason,
@@ -772,7 +826,9 @@ def task_info_record_to_dto(record) -> TaskInfoRecordDTO:
     )
 
 
-def _canonical_bbs_acceptance_result(raw: dict[str, Any] | None) -> dict[str, Any] | None:
+def _canonical_bbs_acceptance_result(
+    raw: dict[str, Any] | None,
+) -> dict[str, Any] | None:
     """Normalize stored acceptance JSON to the current external contract."""
     if raw is None:
         return None
@@ -925,17 +981,13 @@ class TaskSettingRequestDTO(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    setting_type: TaskSettingType = Field(
-        ..., description="任务开关类型"
-    )
+    setting_type: TaskSettingType = Field(..., description="任务开关类型")
     enabled: bool = Field(..., description="是否启用")
 
 
 class TaskSettingStateDTO(BaseModel):
     """任务开关当前状态。"""
 
-    setting_type: TaskSettingType = Field(
-        ..., description="任务开关类型"
-    )
+    setting_type: TaskSettingType = Field(..., description="任务开关类型")
     enabled: bool = Field(..., description="当前开关状态")
     env: str = Field(..., description="生效环境(prod/pre/dev)")

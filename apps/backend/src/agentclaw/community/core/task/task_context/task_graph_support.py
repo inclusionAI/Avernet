@@ -134,9 +134,9 @@ def _build_initial_graph(self, task_info: TaskInfo) -> TaskExecutionGraph:
     )
     root.node_run_graph = graph
     graph.extend_props["execution_config"] = dict(task_info.execution_config)
-    graph.extend_props["runtime_profile"] = (
-        TaskRuntimeProfile.from_execution_config(task_info.execution_config).to_dict()
-    )
+    graph.extend_props["runtime_profile"] = TaskRuntimeProfile.from_execution_config(
+        task_info.execution_config
+    ).to_dict()
     graph.extend_props["source_type"] = task_info.source_type
     graph.extend_props["owner_bot_id"] = task_info.owner_bot_id
     graph.extend_props["owner_user_id"] = task_info.owner_user_id
@@ -144,14 +144,18 @@ def _build_initial_graph(self, task_info: TaskInfo) -> TaskExecutionGraph:
     return graph
 
 
-def initialize_intake_graph(self, task_info: TaskInfo, session_id: str) -> TaskExecutionGraph:
+def initialize_intake_graph(
+    self, task_info: TaskInfo, session_id: str
+) -> TaskExecutionGraph:
     """Atomically create TaskInfo and root graph for either orchestration mode."""
     task_id = task_info.task_id
     with self._lock_for(task_id):
         if task_id in self._graphs:
             raise GraphAlreadyInitializedError(f"task_id={task_id} 图已存在")
         if self._graph_repo is None:
-            raise TaskStateError("intake task creation requires a durable graph repository")
+            raise TaskStateError(
+                "intake task creation requires a durable graph repository"
+            )
         graph = _build_initial_graph(self, task_info)
         target = task_info.execution_config.get("initial_target") or {}
         root = graph.tasks[0]
@@ -159,8 +163,8 @@ def initialize_intake_graph(self, task_info: TaskInfo, session_id: str) -> TaskE
             root.run_info.run_mode = (
                 "coop_group" if target.get("target_type") == "GROUP" else "single_bot"
             )
-            root.run_info.assignee = (
-                str(target.get("target_id") or task_info.owner_bot_id)
+            root.run_info.assignee = str(
+                target.get("target_id") or task_info.owner_bot_id
             )
         version = self._graph_repo.create_intake_graph(task_info, graph, session_id)
         self._graph_versions[task_id] = version
@@ -664,7 +668,8 @@ def get_node_context(self, task_id: str, node_id: str) -> TaskContext:
         root = self._require_node(graph, graph.task_id)
         current = self._require_node(graph, node_id)
         parent_by_child = {
-            relation.dst_id: relation.src_id for relation in graph.relations
+            relation.dst_id: relation.src_id
+            for relation in graph.relations
             if relation.type == RelationType.DEPENDENCY
         }
         lineage: list[TaskNode] = []
@@ -693,14 +698,20 @@ def get_node_context(self, task_id: str, node_id: str) -> TaskContext:
                 acceptance_result=runtime.acceptance_result,
             )
 
-        outputs = [fact for node in lineage if (fact := accepted_output(node)) is not None]
+        outputs = [
+            fact for node in lineage if (fact := accepted_output(node)) is not None
+        ]
         runtime = current.run_info
         decision = str(runtime.extend_props.get("execution_decision") or "").upper()
         receipts = graph.extend_props.get("_relay_report_receipts") or {}
-        if receipts and (
-            f"{node_id}:EXECUTION_RESULT:"
-            f"{int(runtime.extend_props.get('harness_retries', 0) or 0)}"
-        ) not in receipts:
+        if (
+            receipts
+            and (
+                f"{node_id}:EXECUTION_RESULT:"
+                f"{int(runtime.extend_props.get('harness_retries', 0) or 0)}"
+            )
+            not in receipts
+        ):
             decision = ""
         accepted_patch = None
         if decision in {"ACCEPTED", "DECLINED"}:
@@ -723,12 +734,18 @@ def get_node_context(self, task_id: str, node_id: str) -> TaskContext:
             node_id=node_id,
             root_task_spec=root.task_spec,
             current_task_spec=current.task_spec,
+            actual_goal=runtime.actual_goal if decision == "ACCEPTED" else None,
+            capability_failure_reason=runtime.failure_reason
+            if decision == "DECLINED"
+            else None,
             accepted_execution_patch=accepted_patch,
             accepted_plan_report=_accepted_plan_report(graph, node_id),
         )
 
 
 def _accepted_plan_report(graph: TaskExecutionGraph, node_id: str):
-    from agentclaw.community.core.task.task_context.relay_report import accepted_plan_report
+    from agentclaw.community.core.task.task_context.relay_report import (
+        accepted_plan_report,
+    )
 
     return accepted_plan_report(graph, node_id)

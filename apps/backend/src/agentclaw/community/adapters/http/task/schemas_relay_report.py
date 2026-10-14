@@ -21,6 +21,8 @@ from agentclaw.community.core.task.domain.models import (
     TaskNode,
     TaskNodePatch,
     TaskReportCommand,
+    TaskReportTrace,
+    TaskReportTraceStep,
     TaskReportEventType,
     TaskReportResult,
 )
@@ -56,6 +58,20 @@ class PlannedNodeDTO(BaseModel):
     node_run_graph: None = None
 
 
+class TaskReportTraceStepDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step: str = Field(min_length=1)
+    status: str = Field(min_length=1)
+    detail: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskReportTraceDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    steps: list[TaskReportTraceStepDTO] = Field(default_factory=list)
+
+
 class TaskReportCommandDTO(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -68,6 +84,7 @@ class TaskReportCommandDTO(BaseModel):
     progress_reason: str = ""
     failure_reason: str | None = None
     task_acceptance_result: AcceptanceResultDTO | None = None
+    trace: TaskReportTraceDTO | None = None
 
     def to_domain(self) -> TaskReportCommand:
         if self.event_type == TaskReportEventType.EXECUTION_RESULT:
@@ -86,14 +103,19 @@ class TaskReportCommandDTO(BaseModel):
                 actual_goal=(
                     Goal(
                         goal.objective,
-                        [AcceptanceCriteria(item.id, item.description) for item in goal.acceptances],
+                        [
+                            AcceptanceCriteria(item.id, item.description)
+                            for item in goal.acceptances
+                        ],
                     )
-                    if goal else None
+                    if goal
+                    else None
                 ),
                 output_patch=dict(parsed.output_patch),
                 local_acceptance_result=(
                     acceptance_result_from_dto(parsed.local_acceptance_result)
-                    if parsed.local_acceptance_result else None
+                    if parsed.local_acceptance_result
+                    else None
                 ),
                 failure_reason=parsed.failure_reason,
             )
@@ -125,8 +147,21 @@ class TaskReportCommandDTO(BaseModel):
             failure_reason=self.failure_reason,
             task_acceptance_result=(
                 acceptance_result_from_dto(self.task_acceptance_result)
-                if self.task_acceptance_result else None
+                if self.task_acceptance_result
+                else None
             ),
+            trace=TaskReportTrace(
+                steps=[
+                    TaskReportTraceStep(
+                        step=item.step,
+                        status=item.status,
+                        detail=dict(item.detail),
+                    )
+                    for item in self.trace.steps
+                ],
+            )
+            if self.trace is not None
+            else None,
         )
 
 

@@ -2,22 +2,28 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from typing import Any
 
 from fastapi import APIRouter, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
-from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
+from agentclaw.community.adapters.http.openapi_v1.responses import (
+    envelope,
+    envelope_errors,
+)
 from agentclaw.community.adapters.http.task.relay_guard import require_relay_attempt
 from agentclaw.community.adapters.http.task.schemas_node_context import (
     NodeTaskContextDTO,
     node_context_to_dto,
 )
+from agentclaw.community.adapters.http.task.schemas_relay_search import (
+    BotCandidateDTO,
+    TaskSearchRequestDTO,
+    TaskSearchResultDTO,
+)
 from agentclaw.community.adapters.http.task.schemas import (
     BbsClaimDTO,
     TaskDispatchRequestDTO,
-    TaskSearchRequestDTO,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.domain.errors import TaskStateError
@@ -38,7 +44,9 @@ def _require_relay_graph(graph) -> None:
         raise TaskStateError("task is not in relay mode")
 
 
-@router.get("/{task_id}/nodes/{node_id}/context", response_model=Envelope[NodeTaskContextDTO])
+@router.get(
+    "/{task_id}/nodes/{node_id}/context", response_model=Envelope[NodeTaskContextDTO]
+)
 @envelope_errors
 async def get_relay_node_context(
     task_id: str,
@@ -50,16 +58,18 @@ async def get_relay_node_context(
     _require_relay_graph(graph)
     node = _require_graph_node(graph, node_id)
     require_relay_attempt(node, request.headers.get("X-Relay-Token", ""))
-    return envelope(node_context_to_dto(service.get_node_context(task_id, node_id)), request)
+    return envelope(
+        node_context_to_dto(service.get_node_context(task_id, node_id)), request
+    )
 
 
-@router.post("/search", response_model=Envelope[dict[str, Any]])
+@router.post("/search", response_model=Envelope[TaskSearchResultDTO])
 @envelope_errors
 async def search_bots(
     body: TaskSearchRequestDTO,
     request: Request,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-) -> Envelope[dict[str, Any]]:
+) -> Envelope[TaskSearchResultDTO]:
     if not body.task_id or not body.node_id or not body.relay_token:
         raise TaskStateError("relay search requires task_id, node_id and relay_token")
     graph = service.get_task_dashboard(body.task_id)
@@ -67,9 +77,24 @@ async def search_bots(
     node = _require_graph_node(graph, body.node_id)
     require_relay_attempt(node, body.relay_token)
     candidates = await service.search_bots(
-        query=body.query, task_id=body.task_id, node_id=body.node_id,
+        query=body.query,
+        task_id=body.task_id,
+        node_id=body.node_id,
     )
-    return envelope({"candidates": [asdict(item) for item in candidates]}, request)
+    return envelope(
+        TaskSearchResultDTO(
+            candidates=[
+                BotCandidateDTO(
+                    bot_id=item.bot_id,
+                    name=item.name,
+                    description=item.description,
+                    score=item.score,
+                )
+                for item in candidates
+            ]
+        ),
+        request,
+    )
 
 
 @router.post("/dispatch", response_model=Envelope[dict[str, Any]])
@@ -104,17 +129,30 @@ async def bbs_claim(
         # route prefix but is not a distributed Relay handoff and therefore
         # does not accept Relay tokens or invoke the Relay Skill protocol.
         result = service.claim_bbs_task(
-            body.task_id, body.bot_id, None, claim_id=body.claim_id,
+            body.task_id,
+            body.bot_id,
+            None,
+            claim_id=body.claim_id,
         )
-        return envelope({"root_node_id": result.node_id, "task_id": body.task_id}, request)
+        return envelope(
+            {"root_node_id": result.node_id, "task_id": body.task_id}, request
+        )
     graph = service.get_task_dashboard(body.task_id)
     _require_relay_graph(graph)
     result = service.claim_bbs_task(
-        body.task_id, body.bot_id, body.node_id, claim_id=body.claim_id,
+        body.task_id,
+        body.bot_id,
+        body.node_id,
+        claim_id=body.claim_id,
     )
-    claimed = _require_graph_node(service.get_task_dashboard(body.task_id), result.node_id)
-    return envelope({
-        "root_node_id": result.node_id,
-        "task_id": body.task_id,
-        "relay_token": claimed.run_info.extend_props.get("relay_token"),
-    }, request)
+    claimed = _require_graph_node(
+        service.get_task_dashboard(body.task_id), result.node_id
+    )
+    return envelope(
+        {
+            "root_node_id": result.node_id,
+            "task_id": body.task_id,
+            "relay_token": claimed.run_info.extend_props.get("relay_token"),
+        },
+        request,
+    )

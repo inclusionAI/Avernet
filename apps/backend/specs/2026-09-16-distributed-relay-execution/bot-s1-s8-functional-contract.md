@@ -497,10 +497,10 @@ S2
 S3
   TaskSpec + task_gaps + BotCapability
     -> match_bot_capability
-    -> CapabilityMatchResult
+    -> TaskContext.actual_goal（原地补全运行期目标；不新增结果对象）
 
 S4
-  TaskContext + CapabilityMatchResult
+  TaskContext.actual_goal
     -> TaskNodePatch
     -> TaskReportCommand(EXECUTION_RESULT, event=TaskNodePatch)
     -> TaskReportResult（execution_report）
@@ -543,7 +543,7 @@ S6
 
 ## 4. 公共领域对象
 
-以下定义复用现有 `TaskSpec`、`Goal`、`AcceptanceCriteria`、`AcceptanceResult`、`DoneOutput`、`SearchResult` 和 `SearchOutcome`。
+以下定义复用现有 `TaskSpec`、`Goal`、`AcceptanceCriteria`、`AcceptanceResult`、`DoneOutput` 和 `SearchOutcome`；不新增 Relay 专用包装对象。
 
 ### 4.1 TaskContext
 
@@ -561,6 +561,12 @@ class TaskContext:
     # 当前这一棒的执行规格。
     current_task_spec: TaskSpec
 
+    # S3 在本棒运行上下文中补全；S1 对新尝试投影为空，恢复已接纳执行时投影节点值。
+    actual_goal: Goal | None = None
+
+    # S3 判定当前 Bot 无法承接时的能力缺口说明。
+    capability_failure_reason: str | None = None
+
     # 严格早于本棒的、已被 Backend 接纳的前序节点事实；排除本棒及后继。
     all_done_output: list[DoneOutput]
 
@@ -569,7 +575,7 @@ class TaskContext:
     accepted_plan_report: TaskReportResult | None = None
 ```
 
-`TaskContext` 是只读投影，不另行持久化，也不包含任务级 `gaps`。`all_done_output` 的范围以当前 `node_id` 为界，沿唯一 Relay 前驱链选择已接纳的前序执行事实；本棒的执行结果即使已经上报，也只出现在 `accepted_execution_patch`，绝不回填进 `all_done_output`。空 `output_patch={}` 仍可表示已接纳执行，不能靠输出是否非空判断。`accepted_plan_report` 仅在本棒 `PLAN_RESULT` 已接纳时非空，用于恢复原 `target_node_id` 或完成/HUNG 结果；两字段均由已有领域对象承载，不新增包装对象。同一节点发生 harness 重试时，Backend 只投影当前有效执行尝试的接纳阶段；先前失败尝试留作节点审计事实，不得作为当前尝试的 `accepted_execution_patch` 阻断重试。
+`TaskContext` 是只读投影，不另行持久化，也不包含任务级 `gaps`。`actual_goal` 是唯一的运行期补全字段：服务端 S1 对新的执行代次投影为 `None`，S3 在 Bot 本地填写；当本棒执行结果已被服务端接纳，恢复读取时从当前节点 `run_info.actual_goal` 投影，避免重新执行 LLM 能力匹配。`all_done_output` 的范围以当前 `node_id` 为界，沿唯一 Relay 前驱链选择已接纳的前序执行事实；本棒的执行结果即使已经上报，也只出现在 `accepted_execution_patch`，绝不回填进 `all_done_output`。空 `output_patch={}` 仍可表示已接纳执行，不能靠输出是否非空判断。`accepted_plan_report` 仅在本棒 `PLAN_RESULT` 已接纳时非空，用于恢复原 `target_node_id` 或完成/HUNG 结果；两字段均由已有领域对象承载，不新增包装对象。同一节点发生 harness 重试时，Backend 只投影当前有效执行尝试的接纳阶段；先前失败尝试留作节点审计事实，不得作为当前尝试的 `accepted_execution_patch` 阻断重试。
 
 ### 4.2 BotCapability
 
@@ -607,6 +613,18 @@ class TaskReportEventType(StrEnum):
 
 
 @dataclass(frozen=True)
+class TaskReportTraceStep:
+    step: str
+    status: str
+    detail: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class TaskReportTrace:
+    steps: list[TaskReportTraceStep] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class TaskReportCommand:
     task_id: str
     node_id: str
@@ -623,11 +641,12 @@ class TaskReportCommand:
     failure_reason: str | None = None
     # 仅 PLAN_RESULT 收口时填写；针对根任务，不是当前节点的局部验收。
     task_acceptance_result: AcceptanceResult | None = None
+    # Bot 侧执行轨迹；同一 event_id 重试必须原样复用。
+    trace: TaskReportTrace | None = None
 
 
 class TaskReportStatus(StrEnum):
     APPLIED = "APPLIED"
-    PROCESSING = "PROCESSING"
 
 
 @dataclass(frozen=True)
@@ -647,7 +666,7 @@ class TaskReportResult:
 
 ```text
 TaskReportCommand.event 必须与 event_type 对应
-PROCESSING -> Bot 使用相同业务事件重试，或由服务端恢复处理；不进入下一步骤
+TaskReportCommand.trace 参与 event_id 内容指纹
 EXECUTION_RESULT + APPLIED + 非终态 -> 可以进入规划步骤
 PLAN_RESULT(event=None, task_acceptance_result 非空, failure_reason=None) + APPLIED -> task_completed == True
 PLAN_RESULT(event=None, task_acceptance_result=None, failure_reason 非空) + APPLIED -> task_hung == True
@@ -657,6 +676,8 @@ PLAN_RESULT(event=TaskNode, run_mode=single_bot/coop_group) + APPLIED -> target_
 ```
 
 `report` 是节点状态迁移，不是可任意追加的事件流：每次有效执行尝试的 `EXECUTION_RESULT` 和每个节点最终的 `PLAN_RESULT` 各只能接纳一次。Backend 在首派前生成 `relay_token`，同一 `node_id` 的 Harness 重试在图谱事务中轮换该值；Bot 使用派发指令中的代次值调用节点级 context/report/dispatch，旧执行持旧值的迟到请求被拒绝。Relay Skill 只调用生产内网白名单保护的 `/api/v1/collaboration/tasks/**`，不携带用户或 Bot 认证凭证；`relay_token` 仅是节点执行代次栅栏，不是通用身份凭证。`event_id` 由 Bot 调用层为每个上报事件生成，同一 HTTP 请求重试必须复用；Backend 将事件 ID、规范化内容指纹和原 `TaskReportResult` 与图谱迁移同事务保存。相同事件重试返回原结果（包括 `target_node_id`），相同 ID 不同内容或同一阶段不同内容返回冲突；并发由图谱版本和唯一后继关系兜底。Bot 不生成 `relay_token`，也不传 graph_version、attempt 或自报身份；不修改 BaaS/OpenClaw 插件。
+
+`trace` 是使 Bot 本地推理过程在后端可观测的唯一补充载荷，不参与状态机分支。`EXECUTION_RESULT.trace` 必须按顺序覆盖 S1、S2、S3、S4a、S4b 的执行检查点；`PLAN_RESULT.trace` 必须按顺序覆盖 S5.1～S5.5 的检查点。每个 `TaskReportTraceStep` 只包含该步骤的完成事实和必要摘要，不包含 `relay_token`、原始凭证或可被请求方伪造的图谱版本。Backend 将 `trace` 保存到该报告事件接纳时产生的第一条节点 action log 中；后续同事件的幂等重试不重复追加。trace 变化视作同一 `event_id` 的内容变化，服务端返回冲突。S6 由 dispatch API 的服务端动作日志记录，不要求 Bot 事后补一条第三个 report 事件。
 
 响应丢失后 Runtime 先经 S1 查询接纳阶段：已接纳则使用投影的原 patch/结果续跑，不重新调用 LLM 生成第二份可能不同的请求；未接纳才重试当前事件。
 
@@ -684,7 +705,7 @@ class BotCandidate:
     score: float | None = None
 ```
 
-目标 `TaskService.search_bots(*, query, task_id=None, node_id=None) -> list[BotCandidate]` 复用现有 `POST /api/v1/collaboration/tasks/search` 路径。HTTP Adapter 将当前候选字典的 `bot_uuid/bot_name/bot_desc/recommend.score` 归一化为领域字段；既有 HTTP 调用方若依赖原始字典与诊断字段，迁移期须保留兼容响应。当前代码方法仍叫 `search_task_candidates` 且返回 `dict[str, Any]`，`TaskServiceProtocol` 仅声明 `query`，需与目标 Service 合同一起同步。`task_id/node_id` 只用于搜索轨迹归属当前棒，不影响候选检索；下一棒此时尚无节点 ID。
+`TaskService.search_bots(*, query: str, task_id: str, node_id: str) -> list[BotCandidate]` 是 Service 合同。HTTP Adapter 在 `POST /api/v1/collaboration/tasks/search` 中将领域候选投影为类型化 `TaskSearchResultDTO {candidates: list[BotCandidateDTO]}`，不再返回 `dict[str, Any]`；检索分词、失败关键词等诊断信息仅进入服务端轨迹，不进入 Bot 业务输入。`task_id/node_id` 只用于搜索轨迹归属当前棒，不影响候选检索；下一棒此时尚无节点 ID。
 
 目标 Service 方法为 `TaskService.report(TaskReportCommand) -> TaskReportResult`。当前实现链路仍为 `RelayTaskEventDTO -> report_task_event(散列参数及 payload dict) -> dict`，需要在 Service、HTTP adapter 和测试中一起迁移，不能只修改 Bot 文档。
 
@@ -830,32 +851,23 @@ task_gaps: list[str]
 ### 7.1 输入参数
 
 ```python
-current_task_spec: TaskSpec
+task_context: TaskContext
 task_gaps: list[str]
 bot_capability: BotCapability
-```
-
-调用方负责从 S1 输出中提取当前节点规格：
-
-```python
-capability_match_result = match_bot_capability(
-    current_task_spec=task_context.current_task_spec,
-    task_gaps=task_gaps,
-    bot_capability=bot_capability,
-)
 ```
 
 ### 7.2 处理函数
 
 ```python
 def match_bot_capability(
-    current_task_spec: TaskSpec,
+    task_context: TaskContext,
     task_gaps: list[str],
     bot_capability: BotCapability,
-) -> CapabilityMatchResult:
+) -> TaskContext:
     if not task_gaps:
         raise ValueError("pending node has no task gaps")
 
+    current_task_spec = task_context.current_task_spec
     # Skill 只能从当前节点的目标和验收项中裁出可执行范围；
     # 不能用根任务目标或 Bot 自己的偏好扩张范围。
     executable_acceptances = [
@@ -865,56 +877,46 @@ def match_bot_capability(
         and bot_capability.supports(item, current_task_spec.context)
     ]
     if not executable_acceptances:
-        return CapabilityMatchResult(
-            execution_decision=ExecutionDecision.DECLINED,
-            failure_reason=explain_capability_gap(
-                current_task_spec=current_task_spec,
-                task_gaps=task_gaps,
-                bot_capability=bot_capability,
-            ),
+        task_context.actual_goal = None
+        task_context.capability_failure_reason = explain_capability_gap(
+            current_task_spec=current_task_spec,
+            task_gaps=task_gaps,
+            bot_capability=bot_capability,
         )
+        return task_context
 
-    return CapabilityMatchResult(
-        execution_decision=ExecutionDecision.ACCEPTED,
-        actual_goal=Goal(
-            objective=derive_actual_objective(
-                current_task_spec.goal,
-                executable_acceptances,
-            ),
-            acceptances=executable_acceptances,
+    task_context.actual_goal = Goal(
+        objective=derive_actual_objective(
+            current_task_spec.goal,
+            executable_acceptances,
         ),
+        acceptances=executable_acceptances,
     )
-```
-
-匹配范围：
-
-```text
-actual_goal
-    subset of current_task_spec.goal
-    intersect task_gaps
-    intersect BotCapability
+    task_context.capability_failure_reason = None
+    return task_context
 ```
 
 ### 7.3 输出对象
 
 ```python
-@dataclass(frozen=True)
-class CapabilityMatchResult:
-    execution_decision: ExecutionDecision
-    actual_goal: Goal | None = None
-    failure_reason: str | None = None
+task_context: TaskContext
+```
+
+S3 不新增 `CapabilityMatchResult`。能力决策直接由 `TaskContext` 的运行期字段表达：
+
+```python
+actual_goal: Goal | None
+capability_failure_reason: str | None
 ```
 
 约束：
 
 ```text
-ACCEPTED:
-  actual_goal != None
-  failure_reason == None
+actual_goal != None:
+  capability_failure_reason == None
 
-DECLINED:
-  actual_goal == None
-  failure_reason != None
+actual_goal == None:
+  capability_failure_reason != None
 ```
 
 `actual_goal` 不得扩大 `current_task_spec.goal`，其中的验收项必须来自当前节点验收范围。
@@ -922,19 +924,21 @@ DECLINED:
 ### 7.4 输入到输出转换
 
 ```text
-current_task_spec.goal.acceptances
+TaskContext.current_task_spec.goal.acceptances
   + task_gaps
   + bot_capability.activated_skills / available_tools
     -> 过滤出“仍需要且当前 Bot 能完成”的 AcceptanceCriteria[]
 
 过滤结果非空
-  -> Goal(objective=当前目标的受限表述, acceptances=过滤结果)
-  -> CapabilityMatchResult(ACCEPTED, actual_goal=Goal, failure_reason=None)
+  -> TaskContext.actual_goal = Goal(...)
+  -> TaskContext.capability_failure_reason = None
 
 过滤结果为空
-  -> CapabilityMatchResult(DECLINED, actual_goal=None,
-                           failure_reason=能力缺口说明)
+  -> TaskContext.actual_goal = None
+  -> TaskContext.capability_failure_reason = 能力缺口说明
 ```
+
+S1 新执行读取时 `actual_goal=None`。若本棒执行结果已被接纳并进入恢复路径，S1 从当前节点 `run_info.actual_goal` 投影该值，同时以 `accepted_execution_patch` 表明 S4 已完成，不重新运行 S3。
 
 S3 的前置条件是 `task_gaps` 非空。一个处于待执行状态的当前节点必须对应至少一个尚未完成的任务范围；如果 S2 在执行前得到空列表，视为上下文或状态不一致，进入恢复处理，不得将其解释为 `capability_mismatch`。正常的 COMPLETE 决策只使用 S5 在合并本棒执行事实后得到的空 gaps。
 
@@ -944,7 +948,6 @@ S3 的前置条件是 `task_gaps` 非空。一个处于待执行状态的当前�
 
 ```python
 task_context: TaskContext
-capability_match_result: CapabilityMatchResult
 ```
 
 `assignee` 不属于 S4 的业务输入：
@@ -955,33 +958,28 @@ capability_match_result: CapabilityMatchResult
 
 ### 8.2 节点执行结果
 
-复用现有 `TaskNodePatch`，不新增 `TaskExecutionResult`。S4 的 Relay 执行字段为：`actual_goal`、`output_patch`、`actual_goal_acceptance_result`、`execution_decision`、`exec_error`、`failure_reason`。
-
-当前实现中的字段名仍为 `local_acceptance_result`；按本协议落地时应重命名为 `actual_goal_acceptance_result`，并同步迁移 `TaskNodePatch`、统一上报转换和测试。
+复用现有 `TaskNodePatch`，不新增 `TaskExecutionResult` 或 `CapabilityMatchResult`。S4 从同一个 `TaskContext` 读取 S3 结果：`actual_goal != None` 表示 ACCEPT，`actual_goal == None` 且 `capability_failure_reason != None` 表示 DECLINE。S4 的 Relay 执行字段为：`actual_goal`、`output_patch`、`local_acceptance_result`、`execution_decision`、`exec_error`、`failure_reason`。
 
 约束：
 
 ```text
 ACCEPTED:
-  execution_decision == capability_match_result.execution_decision
-  actual_goal == capability_match_result.actual_goal
   actual_goal 必填
   output_patch 必填，允许为空字典
-  actual_goal_acceptance_result 必填
+  local_acceptance_result 必填
   failure_reason 为空
 
 DECLINED:
-  execution_decision == capability_match_result.execution_decision
   actual_goal 为空
   output_patch 为空
-  actual_goal_acceptance_result 为空
-  failure_reason 必填
+  local_acceptance_result 为空
+  failure_reason == capability_failure_reason 且必填
 
 EXECUTION_ERROR:
   execution_decision == ACCEPTED
-  actual_goal == capability_match_result.actual_goal
+  actual_goal == TaskContext.actual_goal
   exec_error 必填
-  actual_goal_acceptance_result 为空
+  local_acceptance_result 为空
   failure_reason 必填
 ```
 
@@ -994,7 +992,7 @@ EXECUTION_ERROR:
 | `execution_decision` | `extend_props["execution_decision"]` |
 | `actual_goal` | `actual_goal` |
 | `output_patch` | `output` |
-| `actual_goal_acceptance_result` | `acceptance_result` |
+| `local_acceptance_result` | `acceptance_result` |
 | `failure_reason` | `failure_reason` |
 
 ### 8.3 执行函数
@@ -1002,47 +1000,39 @@ EXECUTION_ERROR:
 ```python
 async def execute_current_task(
     task_context: TaskContext,
-    capability_match_result: CapabilityMatchResult,
 ) -> TaskNodePatch:
-    match capability_match_result.execution_decision:
-        case ExecutionDecision.ACCEPTED:
-            actual_goal = require(capability_match_result.actual_goal)
-            try:
-                output_patch, actual_goal_acceptance_result = await execute_actual_goal(
-                    task_context=task_context,
-                    actual_goal=actual_goal,
-                )
-            except Exception as error:
-                node_patch = TaskNodePatch(
-                    task_id=task_context.task_id,
-                    node_id=task_context.node_id,
-                    actual_goal=actual_goal,
-                    execution_decision=ExecutionDecision.ACCEPTED,
-                    exec_error=normalize_execution_error(error),
-                    failure_reason="current bot execution failed",
-                )
-            else:
-                node_patch = TaskNodePatch(
-                    task_id=task_context.task_id,
-                    node_id=task_context.node_id,
-                    actual_goal=actual_goal,
-                    output_patch=output_patch,
-                    actual_goal_acceptance_result=actual_goal_acceptance_result,
-                    execution_decision=ExecutionDecision.ACCEPTED,
-                )
+    actual_goal = task_context.actual_goal
+    if actual_goal is None:
+        return TaskNodePatch(
+            task_id=task_context.task_id,
+            node_id=task_context.node_id,
+            execution_decision=ExecutionDecision.DECLINED,
+            failure_reason=require(task_context.capability_failure_reason),
+        )
 
-        case ExecutionDecision.DECLINED:
-            node_patch = TaskNodePatch(
-                task_id=task_context.task_id,
-                node_id=task_context.node_id,
-                execution_decision=ExecutionDecision.DECLINED,
-                failure_reason=require(capability_match_result.failure_reason),
-            )
+    try:
+        output_patch, local_acceptance_result = await execute_actual_goal(
+            task_context=task_context,
+            actual_goal=actual_goal,
+        )
+    except Exception as error:
+        return TaskNodePatch(
+            task_id=task_context.task_id,
+            node_id=task_context.node_id,
+            actual_goal=actual_goal,
+            execution_decision=ExecutionDecision.ACCEPTED,
+            exec_error=normalize_execution_error(error),
+            failure_reason="current bot execution failed",
+        )
 
-        case _:
-            raise ValueError("unsupported execution decision")
-
-    return node_patch
+    return TaskNodePatch(
+        task_id=task_context.task_id,
+        node_id=task_context.node_id,
+        actual_goal=actual_goal,
+        output_patch=output_patch,
+        local_acceptance_result=local_acceptance_result,
+        execution_decision=ExecutionDecision.ACCEPTED,
+    )
 ```
 
 `execute_actual_goal()` 表示 Bot 使用已经获准的 Skill 与工具完成业务任务；它不是新的 Task 领域对象或 Task Module 接口。`execute_current_task()` 只返回业务执行事实，尚未写入任务图谱。
@@ -1072,8 +1062,8 @@ async def report_execution_result(
 处理顺序：
 
 ```text
-CapabilityMatchResult
-    -> execute_current_task(...)
+TaskContext.actual_goal
+    -> execute_current_task(task_context)
     -> TaskNodePatch
     -> report_execution_result(TaskNodePatch)
     -> TaskReportCommand(event_type=EXECUTION_RESULT)
@@ -1097,14 +1087,15 @@ execution_report: TaskReportResult
 TaskContext.task_id / node_id
   -> TaskNodePatch.task_id / node_id
 
-CapabilityMatchResult(ACCEPTED, actual_goal)
+TaskContext.actual_goal
   + Bot 对 actual_goal 的工具执行结果
   -> TaskNodePatch(
-       actual_goal, output_patch, actual_goal_acceptance_result,
+       actual_goal, output_patch, local_acceptance_result,
        execution_decision=ACCEPTED
      )
 
-CapabilityMatchResult(DECLINED, failure_reason)
+TaskContext.actual_goal == None
+  + TaskContext.capability_failure_reason
   -> TaskNodePatch(
        execution_decision=DECLINED, failure_reason
      )
@@ -1168,7 +1159,7 @@ def refresh_task_gaps(
             node_id=task_context.node_id,
             actual_goal=node_patch.actual_goal,
             output=node_patch.output_patch,
-            acceptance_result=node_patch.actual_goal_acceptance_result,
+            acceptance_result=node_patch.local_acceptance_result,
         ))
     gaps = unique_non_empty_strings(
         infer_gaps(root_spec=task_context.root_task_spec, done_outputs=facts)
@@ -1180,7 +1171,7 @@ def refresh_task_gaps(
     return gaps, task_acceptance_result
 ```
 
-`task_acceptance_result` 验收根任务目标，区别于当前节点的 `actual_goal_acceptance_result`。S4 执行异常时，本棒在 S4b 停止，不调用 S5。
+`task_acceptance_result` 验收根任务目标，区别于当前节点的 `local_acceptance_result`。S4 执行异常时，本棒在 S4b 停止，不调用 S5。
 
 ### 9.2 S5.2：规划下一棒
 
@@ -1280,7 +1271,7 @@ def select_executor(
     next_node: TaskNode,
     candidates: list[BotCandidate],
 ) -> TaskNode:
-    decision: SearchResult = select_from_candidates(
+    decision = select_from_candidates(
         next_spec=next_node.task_spec,
         candidates=candidates,
     )
@@ -1304,7 +1295,7 @@ def select_executor(
     return next_node
 ```
 
-复用现有 `SearchResult` 作本地决策值，随即映射到未落图 `TaskNode`，不单独上报。S5.2 已将 `task_gaps` 编入下一棒规格，S5.4 不重复接收缺口列表。Relay 首版的候选接口只返回 Bot，故 S5.4 **不支持 `HIT_GROUP`**；若本地决策意外产生该枚举，显式拒绝并重新决策，不把未经检索的 Group ID 写入图谱。`HIT_MULTI_BOTS` 仅允许可确定唯一 manager/master Bot 的 `manager_worker` 组群，Backend 创建成功后填写最终 Group ID；不满足条件的 chat/state_machine 组群不进入首版 Relay。`MISS` 必须显式为 `run_mode=bbs` 并带原因，不能仅凭 `assignee=None` 推断。用户在发起时显式选择已有 Group 属于首棒目标解析，不受 S5.4 限制。
+S5.4 不新增或复用 `SearchResult` 作为协议对象；Skill 的本地决策直接填充同一个未落图 `TaskNode.run_info`，随后随 `PLAN_RESULT` 一次上报。S5.2 已将 `task_gaps` 编入下一棒规格，S5.4 不重复接收缺口列表。Relay 首版的候选接口只返回 Bot，故 S5.4 **不支持 `HIT_GROUP`**；若本地决策意外产生该枚举，显式拒绝并重新决策，不把未经检索的 Group ID 写入图谱。`HIT_MULTI_BOTS` 仅允许可确定唯一 manager/master Bot 的 `manager_worker` 组群，Backend 创建成功后填写最终 Group ID；不满足条件的 chat/state_machine 组群不进入首版 Relay。`MISS` 必须显式为 `run_mode=bbs` 并带原因，不能仅凭 `assignee=None` 推断。用户在发起时显式选择已有 Group 属于首棒目标解析，不受 S5.4 限制。
 
 ### 9.5 S5.5：统一上报规划节点
 
@@ -1395,12 +1386,12 @@ Skill 通过生产内网白名单保护的 `POST /api/v1/collaboration/tasks/dis
 | --- | --- | --- | --- | --- | --- |
 | S1 | S1：获取上下文 | `task_id: str`、`node_id: str`。首棒取自 Backend 创建响应的当前会话指令；后续棒取自 Runner 派发消息 | Bot Runtime 调节点级 context API；不由 Skill 推理补全上下文 | `TaskContext` | `GET /tasks/{task_id}/nodes/{node_id}/context` |
 | S2 | S2：计算缺口 | `task_context: TaskContext` | Bot Skill 本地推理根任务验收项与 `all_done_output` 的覆盖情况 | `task_gaps: list[str]` | 无 |
-| S3 | S3：能力匹配 | `current_task_spec: TaskSpec`、`task_gaps: list[str]`、`bot_capability: BotCapability` | Bot Skill 本地能力推理；读取当前 Bot 已激活的 Skill/工具事实 | `CapabilityMatchResult` | 无 |
-| S4a：执行 | S4a：执行任务 | `task_context: TaskContext`、`capability_match_result: CapabilityMatchResult` | `ACCEPTED` 时 Bot 仅对 `actual_goal` 调用获准工具，形成业务产出和节点级验收事实；`DECLINED` 时不执行业务任务。本步不写任务图谱 | `node_patch: TaskNodePatch`，其中关键字段：`output_patch: dict[str, Any]`、`actual_goal_acceptance_result: AcceptanceResult` | 无 |
-| S4b：上报 | S4b：上报结果 | `node_patch: TaskNodePatch` | Runtime 将 `output_patch` 映射为 payload 的 `output`，将 `actual_goal_acceptance_result` 映射为 payload 的 `acceptance_result`，以 `EXECUTION_RESULT` 上报；服务端接纳后写入当前节点运行事实 | `execution_report: TaskReportResult`；`PROCESSING` 时不进入下一步，可重试相同业务事件 | `POST /callback/report`，事件为 `EXECUTION_RESULT` |
+| S3 | S3：能力匹配 | `task_context: TaskContext`、`task_gaps: list[str]`、`bot_capability: BotCapability` | Bot Skill 本地能力推理；读取当前 Bot 已激活的 Skill/工具事实，并将结果补全到 `TaskContext.actual_goal/capability_failure_reason` | `task_context: TaskContext` | 无 |
+| S4a：执行 | S4a：执行任务 | `task_context: TaskContext` | `actual_goal` 非空时 Bot 仅执行该目标，形成业务产出和节点级验收事实；`capability_failure_reason` 非空时不执行业务任务。本步不写任务图谱 | `node_patch: TaskNodePatch`，其中关键字段：`output_patch: dict[str, Any]`、`local_acceptance_result: AcceptanceResult` | 无 |
+| S4b：上报 | S4b：上报结果 | `node_patch: TaskNodePatch` | Runtime 将 `TaskNodePatch` 原样放入 `TaskReportCommand(EXECUTION_RESULT)`；服务端接纳后写入当前节点运行事实 | `execution_report: TaskReportResult`，成功状态为 `APPLIED` | `POST /callback/report`，事件为 `EXECUTION_RESULT` |
 | S5.1 | 更新缺口 | `task_context: TaskContext`、`node_patch: TaskNodePatch` | 根任务规格 + 历史产出 + 本棒事实重算缺口，缺口为空时生成根任务验收 | `task_gaps: list[str]`、`task_acceptance_result: AcceptanceResult \| None` | 无 |
 | S5.2 | 规划下一棒 | `task_context: TaskContext`、`task_gaps: list[str]`、`node_patch: TaskNodePatch` | 有缺口时生成 `TaskSpec`，初始化未落图 `TaskNode`；无缺口返回 `None` | `next_node: TaskNode \| None` | 无 |
-| S5.3 | 搜索候选 | `task_context: TaskContext`、`next_node: TaskNode`；调用依赖 `task_service: TaskService` | 直接以 `next_node.task_spec.goal.objective` 调用 `search_bots`；`task_context.node_id` 只用于当前棒轨迹归属 | `candidates: list[BotCandidate]` | `POST /search` |
+| S5.3 | 搜索候选 | `task_context: TaskContext`、`next_node: TaskNode`；调用依赖 `task_service: TaskService` | 以 `next_node.task_spec.goal.objective.strip()` 生成字符串查询并调用 `search_bots`；`task_context.node_id` 只用于当前棒轨迹归属 | `candidates: list[BotCandidate]` | `POST /search` |
 | S5.4 | 决定执行者 | `next_node: TaskNode`、`candidates: list[BotCandidate]` | Skill 本地决策，向同一个未落图节点填入执行模式、执行者；MISS 显式标记 BBS | 已填执行者的 `next_node: TaskNode` | 无 |
 | S5.5 | 上报规划节点 | `command: TaskReportCommand`；由 S5.1 根任务验收、S5.4 `next_node` 或 S5.2 规划异常三选一构造；前置条件为执行上报 `APPLIED` | Runtime 调 `TaskService.report(command)`，只上报一次 `PLAN_RESULT`；Backend 原子收口或创建唯一后继并写入选人决策 | `planning_report: TaskReportResult` | `POST /callback/report`，`PLAN_RESULT` |
 | S6 | 实际交接 | 后继棒：`task_id`、`planning_report.target_node_id`；Backend 据此读取权威 `next_node: TaskNode` | Skill 调 HTTP；Adapter 校验身份并读取节点，调用 `TaskDispatcher.dispatch(next_node)`。接力策略内部调用 Runner 投递；后台消费者恢复未投递后继意图 | `dispatched_node: TaskNode`；成功表示通道接纳，下一棒进入 S1 | `POST /api/v1/collaboration/tasks/dispatch` → `TaskDispatcher.dispatch(next_node)` |
@@ -1414,7 +1405,7 @@ output_patch: dict[str, Any] = {
 }
 
 # Bot 对 actual_goal.acceptances 的逐项验收结论。
-actual_goal_acceptance_result: AcceptanceResult = AcceptanceResult(
+local_acceptance_result: AcceptanceResult = AcceptanceResult(
     verdict=AcceptanceVerdict.DONE,  # 或 AcceptanceVerdict.FAILED
     done_items=[
         {"id": "acceptance-id", "passed": True, "summary": "已满足的证据"}

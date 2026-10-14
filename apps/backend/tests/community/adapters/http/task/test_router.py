@@ -9,25 +9,44 @@ from fastapi.testclient import TestClient
 from injector import Injector, Module, provider, singleton
 
 from agentclaw.community.adapters.http.task.auth import (
-    CallbackAuthenticator, NoopCallbackAuthenticator,
+    CallbackAuthenticator,
+    NoopCallbackAuthenticator,
 )
 from agentclaw.community.adapters.http.task.router import router, task_callback_router
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.errors import NotFound
-from agentclaw.community.core.task.domain.errors import NodeNotFoundError, TaskStateError
+from agentclaw.community.core.task.domain.errors import (
+    NodeNotFoundError,
+    TaskStateError,
+)
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceCriteria, Context, Goal, RuntimeInfo, Status,
-    TaskContext, TaskExecutionGraph, TaskNode, TaskSpec, TaskSourceType, TaskOpResult,
-    TaskReportResult, TaskReportStatus,
+    AcceptanceCriteria,
+    Context,
+    Goal,
+    RuntimeInfo,
+    Status,
+    TaskContext,
+    TaskExecutionGraph,
+    TaskNode,
+    TaskSpec,
+    TaskSourceType,
+    TaskOpResult,
+    BotCandidate,
+    TaskReportResult,
+    TaskReportStatus,
 )
 from agentclaw.community.core.task.domain.intake import (
-    IntakeTarget, IntakeTargetType, TaskExecutionMode, TaskIntakeResult,
+    IntakeTarget,
+    IntakeTargetType,
+    TaskExecutionMode,
+    TaskIntakeResult,
     TaskIntakeStatus,
 )
 from agentclaw.community.core.task.task_runner.callback_correlation import (
-    CallbackCorrelationRegistry, InMemoryCallbackCorrelationRegistry,
+    CallbackCorrelationRegistry,
+    InMemoryCallbackCorrelationRegistry,
 )
 from agentclaw.community.di.modules.infrastructure.community.task_runner_integration import (
     BcsTokenProviderImpl,
@@ -54,14 +73,21 @@ class _StubCallback:
 def _raise(exc):
     async def _f(data):
         raise exc
+
     return _f
 
 
 def _make_node(task_id, node_id, status) -> TaskNode:
     return TaskNode(
-        node_id=node_id, task_id=task_id, status=status,
-        task_spec=TaskSpec(context=Context("bg", title="T"), goal=Goal("O", [AcceptanceCriteria("a1", "d")])),
-        run_info=RuntimeInfo(), node_run_graph=None,  # type: ignore[arg-type]
+        node_id=node_id,
+        task_id=task_id,
+        status=status,
+        task_spec=TaskSpec(
+            context=Context("bg", title="T"),
+            goal=Goal("O", [AcceptanceCriteria("a1", "d")]),
+        ),
+        run_info=RuntimeInfo(),
+        node_run_graph=None,  # type: ignore[arg-type]
     )
 
 
@@ -118,7 +144,14 @@ class _StubService:
 
     async def search_bots(self, *, query, task_id, node_id):
         self.callback.calls.append(("search_bots", (query, task_id, node_id)))
-        return []
+        return [
+            BotCandidate(
+                bot_id="bot-1",
+                name="Risk Bot",
+                description="risk analysis",
+                score=0.91,
+            ),
+        ]
 
     async def report(self, command):
         self.callback.calls.append(("new_relay_report", command))
@@ -137,7 +170,9 @@ class _StubService:
         return self.intake_result or self._confirmed_intake()
 
     def get_confirmed_intake(self, session_id, owner_user_id):
-        self.callback.calls.append(("get_confirmed_intake", (session_id, owner_user_id)))
+        self.callback.calls.append(
+            ("get_confirmed_intake", (session_id, owner_user_id))
+        )
         if session_id != "tis-1" or owner_user_id != "owner-1":
             raise TaskStateError("intake owner mismatch")
         return self._confirmed_intake()
@@ -145,16 +180,24 @@ class _StubService:
     @staticmethod
     def _confirmed_intake():
         return TaskIntakeResult(
-            session_id="tis-1", owner_user_id="owner-1", source_type=TaskSourceType.API,
+            session_id="tis-1",
+            owner_user_id="owner-1",
+            source_type=TaskSourceType.API,
             status=TaskIntakeStatus.CONFIRMED,
             target=IntakeTarget(IntakeTargetType.BOT, "bot-1"),
             task_spec=TaskSpec(
-                context=Context("", title="上线", extend_props={
-                    "deliverables": ["上线记录"], "constraints": [],
-                }),
+                context=Context(
+                    "",
+                    title="上线",
+                    extend_props={
+                        "deliverables": ["上线记录"],
+                        "constraints": [],
+                    },
+                ),
                 goal=Goal("上线模型", [AcceptanceCriteria("ac1", "完成灰度")]),
             ),
-            create_time_ms=1, update_time_ms=2,
+            create_time_ms=1,
+            update_time_ms=2,
         )
 
     async def execute(self, request):
@@ -189,7 +232,9 @@ class _StubTaskModule(Module):
     def enricher(self) -> CallbackDataEnricher:
         # callback router 注入 CallbackDataEnricher 构 execution_graph;纯单测不真连 BCS,
         # 传 localhost base_url + 短连,fetch 失败由 enrich_bcn 兜底回退事件体建图(不抛)。
-        return CallbackDataEnricher(BcsTokenProviderImpl(base_url="http://bcs"), http_client=None)
+        return CallbackDataEnricher(
+            BcsTokenProviderImpl(base_url="http://bcs"), http_client=None
+        )
 
 
 @pytest.fixture
@@ -219,15 +264,23 @@ def human_task_client():
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
-        id="id-1", staffId="owner-1", operatorName="owner",
+        id="id-1",
+        staffId="owner-1",
+        operatorName="owner",
     )
     attach_injector(app, injector)
     return TestClient(app), svc
 
 
 def _body(node=False, **kw):
-    d = dict(task_id="t1", workflow_source="bcn", workflow_id="w7",
-             workflow_instance_id="i1", status="COMPLETED", is_success=True)
+    d = dict(
+        task_id="t1",
+        workflow_source="bcn",
+        workflow_id="w7",
+        workflow_instance_id="i1",
+        status="COMPLETED",
+        is_success=True,
+    )
     d.update(kw)
     if node:
         d.setdefault("node_id", "c1")
@@ -237,7 +290,9 @@ def _body(node=False, **kw):
 class TestRouter:
     def test_new_relay_rejects_legacy_node_write(self, task_client):
         client, svc = task_client
-        svc.set_execution_config({"orchestration_mode": "relay", "intake_session_id": "tis-1"})
+        svc.set_execution_config(
+            {"orchestration_mode": "relay", "intake_session_id": "tis-1"}
+        )
         svc.set_node_status("t1", "t1", Status.RUNNING)
         response = client.post(
             "/api/v1/collaboration/tasks/nodes/update",
@@ -246,9 +301,13 @@ class TestRouter:
         assert response.status_code != 200
         assert svc.callback.calls == []
 
-    def test_relay_context_uses_network_admission_and_execution_generation(self, task_client):
+    def test_relay_context_uses_network_admission_and_execution_generation(
+        self, task_client
+    ):
         client, svc = task_client
-        svc.set_execution_config({"orchestration_mode": "relay", "intake_session_id": "tis-1"})
+        svc.set_execution_config(
+            {"orchestration_mode": "relay", "intake_session_id": "tis-1"}
+        )
         svc.set_node_status("t1", "t1", Status.RUNNING)
 
         response = client.get(
@@ -261,7 +320,9 @@ class TestRouter:
 
     def test_relay_bbs_claim_trusts_internal_declared_bot_id(self, task_client):
         client, svc = task_client
-        svc.set_execution_config({"orchestration_mode": "relay", "intake_session_id": "tis-1"})
+        svc.set_execution_config(
+            {"orchestration_mode": "relay", "intake_session_id": "tis-1"}
+        )
         svc.set_node_status("t1", "bbs-step", Status.PENDING)
         response = client.post(
             "/api/v1/collaboration/tasks/bbs/claim",
@@ -269,12 +330,15 @@ class TestRouter:
         )
         assert response.status_code == 200, response.text
         assert svc.callback.calls[-1] == (
-            "bbs_claim", ("t1", "another-bot", "bbs-step", None),
+            "bbs_claim",
+            ("t1", "another-bot", "bbs-step", None),
         )
 
     def test_relay_search_uses_internal_network_and_generation(self, task_client):
         client, svc = task_client
-        svc.set_execution_config({"orchestration_mode": "relay", "intake_session_id": "tis-1"})
+        svc.set_execution_config(
+            {"orchestration_mode": "relay", "intake_session_id": "tis-1"}
+        )
         svc.set_node_status("t1", "t1", Status.RUNNING)
 
         response = client.post(
@@ -288,14 +352,28 @@ class TestRouter:
         )
 
         assert response.status_code == 200, response.text
-        assert response.json()["data"] == {"candidates": []}
+        assert response.json()["data"] == {
+            "candidates": [
+                {
+                    "bot_id": "bot-1",
+                    "name": "Risk Bot",
+                    "description": "risk analysis",
+                    "score": 0.91,
+                },
+            ],
+        }
         assert svc.callback.calls[-1] == (
-            "search_bots", ("需要测试能力", "t1", "t1"),
+            "search_bots",
+            ("需要测试能力", "t1", "t1"),
         )
 
-    def test_relay_dispatch_uses_internal_network_and_origin_generation(self, task_client):
+    def test_relay_dispatch_uses_internal_network_and_origin_generation(
+        self, task_client
+    ):
         client, svc = task_client
-        svc.set_execution_config({"orchestration_mode": "relay", "intake_session_id": "tis-1"})
+        svc.set_execution_config(
+            {"orchestration_mode": "relay", "intake_session_id": "tis-1"}
+        )
         svc.set_node_status("t1", "origin", Status.RUNNING)
         svc.set_node_status("t1", "target", Status.PENDING)
         svc.set_node_planned_by("t1", "target", "origin")
@@ -315,14 +393,20 @@ class TestRouter:
         assert svc.callback.calls[-1] == ("dispatch_node", ("t1", "target"))
 
     def test_new_relay_report_requires_current_execution_generation(
-        self, task_client,
+        self,
+        task_client,
     ):
         client, svc = task_client
-        svc.set_execution_config({"orchestration_mode": "relay", "intake_session_id": "tis-1"})
+        svc.set_execution_config(
+            {"orchestration_mode": "relay", "intake_session_id": "tis-1"}
+        )
         svc.set_node_status("t1", "t1", Status.RUNNING)
         body = {
-            "task_id": "t1", "node_id": "t1", "event_type": "EXECUTION_RESULT",
-            "event_id": "event-1", "relay_token": "run-1",
+            "task_id": "t1",
+            "node_id": "t1",
+            "event_type": "EXECUTION_RESULT",
+            "event_id": "event-1",
+            "relay_token": "run-1",
             "event": {"execution_decision": "DECLINED"},
         }
         response = client.post("/api/v1/collaboration/tasks/callback/report", json=body)
@@ -335,9 +419,14 @@ class TestRouter:
             json={**body, "event_id": "event-2", "relay_token": "old-run"},
         )
         assert rejected.status_code != 200
-        assert len([item for item in svc.callback.calls if item[0] == "new_relay_report"]) == 1
+        assert (
+            len([item for item in svc.callback.calls if item[0] == "new_relay_report"])
+            == 1
+        )
 
-    def test_intake_uses_authenticated_owner_and_server_session_header(self, human_task_client):
+    def test_intake_uses_authenticated_owner_and_server_session_header(
+        self, human_task_client
+    ):
         client, svc = human_task_client
         response = client.post(
             "/api/v1/collaboration/tasks/intake",
@@ -386,10 +475,13 @@ class TestRouter:
         assert data["processing"] is True
         assert "a2a_run_id" not in data
 
-    def test_start_uses_only_confirmed_session_to_build_request(self, human_task_client):
+    def test_start_uses_only_confirmed_session_to_build_request(
+        self, human_task_client
+    ):
         client, svc = human_task_client
         response = client.post(
-            "/api/v1/collaboration/tasks/start", json={"session_id": "tis-1"},
+            "/api/v1/collaboration/tasks/start",
+            json={"session_id": "tis-1"},
         )
         assert response.status_code == 200, response.text
         assert response.json()["data"]["task_id"] == "task-1"
@@ -427,7 +519,11 @@ class TestRouter:
                 "node_id": "c1",
                 "status": "SUCCESS",
                 "output": "误用旧协议直接完成",
-                "acceptance_result": {"verdict": "DONE", "done_items": [], "gap_items": []},
+                "acceptance_result": {
+                    "verdict": "DONE",
+                    "done_items": [],
+                    "gap_items": [],
+                },
                 "extend_props": {},
             },
         )
@@ -441,28 +537,39 @@ class TestRouter:
             json=_body(task_id="t1", status="COMPLETED", is_success=True),
         )
         assert response.status_code == 409, response.text
+
     def test_workflow_result_success(self, client):
         c, svc = client
-        r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
+        r = c.post(
+            "/api/v1/collaboration/tasks/callback/workflow_result",
+            json=_body(loop_task_id="t1::root1"),
+        )
         assert r.status_code == 200, r.text
         assert svc.callback.calls[0][0] == "result"
 
     def test_node_result_success(self, client):
         c, svc = client
-        r = c.post("/api/v1/collaboration/tasks/callback/node_result", json=_body(node=True))
+        r = c.post(
+            "/api/v1/collaboration/tasks/callback/node_result", json=_body(node=True)
+        )
         assert r.status_code == 200, r.text
         assert svc.callback.calls[0][1].data["loop_task_id"] == "t1::c1"
 
     def test_workflow_start_success(self, client):
         c, svc = client
-        r = c.post("/api/v1/collaboration/tasks/callback/workflow_start",
-                   json=_body(loop_task_id="t1::root1", status="RUNNING"))
+        r = c.post(
+            "/api/v1/collaboration/tasks/callback/workflow_start",
+            json=_body(loop_task_id="t1::root1", status="RUNNING"),
+        )
         assert r.status_code == 200, r.text
         assert svc.callback.calls[0][0] == "start"
 
     def test_node_start_success(self, client):
         c, svc = client
-        r = c.post("/api/v1/collaboration/tasks/callback/node_start", json=_body(node=True, status="RUNNING"))
+        r = c.post(
+            "/api/v1/collaboration/tasks/callback/node_start",
+            json=_body(node=True, status="RUNNING"),
+        )
         assert r.status_code == 200, r.text
         assert svc.callback.calls[0][0] == "start"
 
@@ -470,7 +577,10 @@ class TestRouter:
         c, svc = client
         svc.callback.report_result = _raise(TaskStateError("DONE->DONE"))
         svc.set_node_status("t1", "root1", Status.DONE)
-        r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
+        r = c.post(
+            "/api/v1/collaboration/tasks/callback/workflow_result",
+            json=_body(loop_task_id="t1::root1"),
+        )
         assert r.status_code == 200, r.text  # 幂等 ack
 
     def test_result_409_when_illegal(self, client):
@@ -480,7 +590,10 @@ class TestRouter:
         c, svc = client
         svc.callback.report_result = _raise(TaskStateError("PENDING->DONE"))
         svc.set_node_status("t1", "root1", Status.PENDING)  # 非终态
-        r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
+        r = c.post(
+            "/api/v1/collaboration/tasks/callback/workflow_result",
+            json=_body(loop_task_id="t1::root1"),
+        )
         assert r.status_code == 409, r.text
         assert r.json()["code"] == 409000
 
@@ -488,7 +601,10 @@ class TestRouter:
         # start 抛 TaskStateError;disposition!=result 不进幂等分支 → 409 ErrorEnvelope。
         c, svc = client
         svc.callback.start_run = _raise(TaskStateError("stale"))
-        r = c.post("/api/v1/collaboration/tasks/callback/node_start", json=_body(node=True, status="RUNNING"))
+        r = c.post(
+            "/api/v1/collaboration/tasks/callback/node_start",
+            json=_body(node=True, status="RUNNING"),
+        )
         assert r.status_code == 409, r.text
         assert r.json()["code"] == 409000
 
@@ -496,7 +612,10 @@ class TestRouter:
         # report_result 抛 NodeNotFoundError → ``ENVELOPE_ERRORS`` 映射为 404 ErrorEnvelope。
         c, svc = client
         svc.callback.report_result = _raise(NodeNotFoundError("x"))
-        r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
+        r = c.post(
+            "/api/v1/collaboration/tasks/callback/workflow_result",
+            json=_body(loop_task_id="t1::root1"),
+        )
         assert r.status_code == 404, r.text
         assert r.json()["code"] == 404000
 
@@ -506,19 +625,29 @@ class TestRouter:
         # → 断言领域错误上抛。
         c, _ = client
         with pytest.raises(NotFound):
-            c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=_body())  # 无 loop_task_id,registry 空
+            c.post(
+                "/api/v1/collaboration/tasks/callback/workflow_result", json=_body()
+            )  # 无 loop_task_id,registry 空
 
     def test_validation_422(self, client):
         c, _ = client
-        r = c.post("/api/v1/collaboration/tasks/callback/node_result", json={"task_id": "t1"})  # 缺必填
+        r = c.post(
+            "/api/v1/collaboration/tasks/callback/node_result", json={"task_id": "t1"}
+        )  # 缺必填
         assert r.status_code == 422, r.text
 
     def test_claw_mind_callback_ingests_only(self, client):
         # ClawMind HttpCallbackPayload → 只落库(ingest),不推进引擎(不走 start/result)
         c, svc = client
-        body = {"workflow_id": "wf-1", "flow_id": "fl-1", "status": "succeeded",
-                "ext_info": {"flow_runs": {"status": "succeeded", "origin_session_id": "S-9"},
-                             "node_executions": []}}
+        body = {
+            "workflow_id": "wf-1",
+            "flow_id": "fl-1",
+            "status": "succeeded",
+            "ext_info": {
+                "flow_runs": {"status": "succeeded", "origin_session_id": "S-9"},
+                "node_executions": [],
+            },
+        }
         r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=body)
         assert r.status_code == 200, r.text
         assert svc.callback.calls and svc.callback.calls[0][0] == "ingest"
@@ -527,11 +656,21 @@ class TestRouter:
     def test_bcn_callback_ingests_only(self, client):
         # BCN CloudEvent(已处理事件)→ 只落库(ingest),不推进引擎
         c, svc = client
-        evt = {"spec_version": "1.0", "event_id": "e1",
-               "event_type": "state_machine.node.completed", "source": "bcs",
-               "scope": {"group_id": "g1", "session_id": "s1", "run_id": "r1"},
-               "stream": {"key": "k", "sequence": 1}, "actor": {"type": "bot", "id": "b"},
-               "data": {"run_id": "r1", "node_id": "n1", "outcome": "success", "output": {"x": 1}}}
+        evt = {
+            "spec_version": "1.0",
+            "event_id": "e1",
+            "event_type": "state_machine.node.completed",
+            "source": "bcs",
+            "scope": {"group_id": "g1", "session_id": "s1", "run_id": "r1"},
+            "stream": {"key": "k", "sequence": 1},
+            "actor": {"type": "bot", "id": "b"},
+            "data": {
+                "run_id": "r1",
+                "node_id": "n1",
+                "outcome": "success",
+                "output": {"x": 1},
+            },
+        }
         r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=evt)
         assert r.status_code == 200, r.text
         assert svc.callback.calls and svc.callback.calls[0][0] == "ingest"
@@ -539,9 +678,16 @@ class TestRouter:
 
     def test_bcn_unhandled_event_acks_without_ingest(self, client):
         c, svc = client
-        evt = {"spec_version": "1.0", "event_id": "e2", "event_type": "message.created",
-               "source": "bcs", "scope": {"group_id": "g1", "session_id": "s1"},
-               "stream": {"key": "k", "sequence": 1}, "actor": {}, "data": {}}
+        evt = {
+            "spec_version": "1.0",
+            "event_id": "e2",
+            "event_type": "message.created",
+            "source": "bcs",
+            "scope": {"group_id": "g1", "session_id": "s1"},
+            "stream": {"key": "k", "sequence": 1},
+            "actor": {},
+            "data": {},
+        }
         r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=evt)
         assert r.status_code == 200, r.text
         assert svc.callback.calls == []  # 非处理事件:不落库、不推进
