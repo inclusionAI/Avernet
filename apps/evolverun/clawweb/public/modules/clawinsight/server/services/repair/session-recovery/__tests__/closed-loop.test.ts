@@ -270,13 +270,18 @@ it("retains full operation evidence outside the bounded task excerpt", async () 
   const replay = await agent.sessionRead(saved, body); expect(replay.evidenceId).toBe(read.evidenceId);
   expect((await current(task.taskId)).evidence).toHaveLength(1);
 });
-it("HTTP execution tickets and Owner identity guard reports, plan decisions and full evidence", async () => {
-  const app = express(); app.use(createSessionRecoveryRouter({ service, tasks: service, agent, triggerToken: "fixture-service-key",
+it("accepts internal requests without independent tokens while execution tickets and Owner identity guard Agent and page operations", async () => {
+  const app = express(); app.use(createSessionRecoveryRouter({ service, tasks: service, agent,
     resolveActor: async req => req.get("x-fixture-owner") ? { userId: req.get("x-fixture-owner")!, isAdmin: false } : null }));
   const server = await new Promise<ReturnType<typeof app.listen>>(resolve => { const opened = app.listen(0, "127.0.0.1", () => resolve(opened)); });
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   try {
-    const task = await toObserve(await create()), input = submissions[0].input, worker = `${origin}/internal/monitoring/session-recoveries/${task.taskId}/executions/${task.execution!.executionId}`;
+    const created = await fetch(`${origin}/internal/monitoring/session-recoveries`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) });
+    expect(created.status).toBe(202);
+    const ack = await created.json();
+    await vi.waitFor(async () => expect((await current(ack.task_id)).execution?.jobId).toBeTruthy());
+    const task = await toObserve(await current(ack.task_id)), input = submissions[0].input, worker = `${origin}/internal/monitoring/session-recoveries/${task.taskId}/executions/${task.execution!.executionId}`;
+    expect((await fetch(`${origin}/internal/monitoring/session-recoveries/${task.taskId}/continue`, { method: "POST" })).status).toBe(409);
     const headers = { "Content-Type": "application/json", Authorization: `Bearer ${input.credentials.executionTicket}` };
     expect((await fetch(`${worker}/bootstrap`)).status).toBe(401);
     const bootstrap = await fetch(`${worker}/bootstrap`, { headers }); expect(bootstrap.status).toBe(200);

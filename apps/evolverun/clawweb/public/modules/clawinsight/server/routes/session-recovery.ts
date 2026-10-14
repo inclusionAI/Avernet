@@ -3,13 +3,12 @@ import { resolveRepairRequestActor } from "../services/repair/common/request-act
 import { parseAgentExecutionTicket } from "../services/repair/common/agent-execution.js";
 import { AgentToolError } from "../services/repair/common/agent-tools/errors.js";
 import type { RecoveryActor } from "../services/repair/session-recovery/contracts.js";
-import { timingSafeEqual } from "node:crypto";
 import { Router, json, type Request } from "express";
 import type { SessionRecoveryApi, SessionRecoveryTaskApi, SessionRecoveryAgentApi } from "../services/repair/session-recovery/contracts.js";
 import { SessionRecoveryError } from "../services/repair/session-recovery/errors.js";
 import { BotRuntimeError } from "@avernet/clawweb-shared/server/services/bot-runtime";
 export type SessionRecoveryRuntime = {
-  service: SessionRecoveryApi; triggerToken: string;
+  service: SessionRecoveryApi;
   tasks?: SessionRecoveryTaskApi;
   agent?: SessionRecoveryAgentApi;
   maintenance?: () => Promise<void>;
@@ -24,10 +23,7 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRuntime): 
   };
   router.post("/internal/monitoring/session-recoveries", json({ limit: "64kb", inflate: false }), async (req, res, next) => {
     try {
-      const deps = runtime(), expected = Buffer.from(deps.triggerToken);
-      const actual = Buffer.from(req.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "");
-      if (!expected.length) throw new SessionRecoveryError(503, "recovery_not_ready", "自愈调用凭据未配置");
-      if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw new SessionRecoveryError(401, "recovery_unauthorized", "自愈调用凭据无效");
+      const deps = runtime();
       res.set("Cache-Control", "no-store");
       res.status(202).json(await deps.service.create(req.body, { userId: "session-recovery-service", isAdmin: true }));
     } catch (error) { next(error); }
@@ -72,11 +68,6 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRuntime): 
   });
   router.post("/internal/monitoring/session-recoveries/:taskId/continue", async (req, res, next) => {
     try {
-      const expected = Buffer.from(runtime().triggerToken);
-      const actual = Buffer.from(req.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "");
-      if (!expected.length || actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
-        throw new SessionRecoveryError(401, "recovery_unauthorized", "自愈调用凭据无效");
-      }
       await tasks().resume(String(req.params.taskId)); res.status(202).json({ status: "accepted", task_id: String(req.params.taskId) });
     } catch (error) { next(error); }
   });
