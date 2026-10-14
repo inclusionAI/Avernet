@@ -53,6 +53,12 @@ pub struct TurnRequest {
     pub permission_mode: Option<String>,
     pub interactions: InteractionRegistry,
     pub trace: Option<trace::TraceContext>,
+    /// Sliding idle window for the engine's stdout stream: every received
+    /// line pushes the turn's "still making progress" deadline this far out.
+    /// `None` lets each engine pick its default. When the window expires the
+    /// turn fails with an explicitly named error instead of wedging until
+    /// the outer run deadline with no signal to BCS.
+    pub idle_timeout: Option<std::time::Duration>,
 }
 
 impl TurnRequest {
@@ -73,6 +79,7 @@ impl TurnRequest {
             permission_mode: None,
             interactions: InteractionRegistry::new(),
             trace: None,
+            idle_timeout: None,
         }
     }
 }

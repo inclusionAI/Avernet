@@ -24,7 +24,7 @@
 //! | `{"type":"result","subtype":_}` 非成功 | `CcMap::Failed(note)` → `TurnError::EngineExited` |
 //! | `{"type":"control_request","request":{"subtype":"can_use_tool",…}}` | `CcMap::ControlRequest { request_id, tool_name, input }` → 驱动接线 HITL 交互（register→requested→await resolution→control_response→resolved） |
 
-use std::{collections::{HashMap, HashSet}, path::PathBuf, sync::Arc};
+use std::{collections::{HashMap, HashSet, VecDeque}, path::PathBuf, sync::Arc};
 
 use bcs_protocol::stream::{AgentData, InteractionKind, InteractionPhase, StreamEvent, ToolData, ToolPhase};
 use serde_json::{json, Value};
@@ -111,6 +111,11 @@ pub(crate) enum CcMap {
     /// tool call that launched it; `task_id` (when present) lets a later
     /// notification that omits `tool_use_id` still resolve this call.
     BackgroundStarted { task_id: Option<String>, tool_use_id: String },
+    /// A terminal `system/task_notification` — enqueue time, NOT delivery:
+    /// the task stopped, and the CLI has queued the notification it will
+    /// hand the model later. Recorded so the wake that delivers it can
+    /// release exactly one wait; see `CcTurnMapper::enqueued`.
+    BackgroundEnqueued { task_id: Option<String>, tool_use_id: Option<String>, status: String },
     /// A background-task completion **delivered to the model** — a user-type
     /// line whose plain-string content is the `<task-notification>` payload
     /// the CLI injects when it wakes the agent. Only a delivered notification
@@ -145,6 +150,26 @@ struct CcTurnMapper<'a> {
     /// `task_notification` that omits `tool_use_id` (recorded in some CLI
     /// versions) still release the right wait.
     task_ids: HashMap<String, String>,
+    /// Terminal notifications queued inside the CLI, awaiting their
+    /// auto-wake. Engines differ in how a completion reaches the model:
+    /// some surface the delivery itself as a user `<task-notification>`
+    /// line (handled by [`CcMap::BackgroundDelivered`]); others stay
+    /// silent on stdout and instead begin each auto-wake round with a
+    /// `system/init` line — and hand the model exactly ONE queued
+    /// notification per wake. This queue mirrors the CLI's, so each wake
+    /// releases exactly one wait whoever fronts it: the release gate is
+    /// the pending COUNT, and an identity swap between popped and
+    /// actually-delivered entries is invisible to it. A delivered user
+    /// line cancels its alias here so the two signals can never
+    /// double-release one wait.
+    enqueued: VecDeque<CcQueuedNotice>,
+}
+
+/// One queued terminal notification awaiting delivery, as recorded from
+/// the enqueue-time `system/task_notification` line.
+struct CcQueuedNotice {
+    task_id: Option<String>,
+    tool_use_id: Option<String>,
 }
 
 impl<'a> CcTurnMapper<'a> {
@@ -154,12 +179,45 @@ impl<'a> CcTurnMapper<'a> {
             pending_tools: HashMap::new(),
             background: HashSet::new(),
             task_ids: HashMap::new(),
+            enqueued: VecDeque::new(),
         }
     }
 
     /// Number of background tasks still pending completion.
     fn background_pending(&self) -> usize {
         self.background.len()
+    }
+
+    /// An auto-wake round opened (`system/init`): the CLI hands the model
+    /// exactly ONE queued notification per wake. Pop the queue front and
+    /// release the wait it resolves. The gate is the pending COUNT — if the
+    /// popped entry and the actually-delivered notification trade places
+    /// (queue order is an arrival-time assumption), the swap is invisible:
+    /// one wake, one release, however the names line up. An empty queue
+    /// (startup round, a wake for nothing queued yet) releases nothing; a
+    /// popped entry this run can't attribute (unknown ids) is consumed
+    /// anyway — the CLI spent this wake, and its slot must not survive to
+    /// steal a later release.
+    fn consume_wake(&mut self) {
+        let Some(notice) = self.enqueued.pop_front() else { return };
+        let _ = self.finish_background(
+            notice.task_id.as_deref(),
+            notice.tool_use_id.as_deref(),
+            "completed",
+        );
+    }
+
+    /// Remove the first queue entry matching a delivered notification (by
+    /// either key): the delivery already released its wait directly, and the
+    /// wake that ends up carrying its alias must not empty-pop a second
+    /// consumer out of a pending set that has already drained.
+    fn cancel_enqueued_alias(&mut self, task_id: Option<&str>, tool_use_id: Option<&str>) {
+        if let Some(i) = self.enqueued.iter().position(|notice| {
+            notice.tool_use_id.as_deref() == tool_use_id
+                || notice.task_id.as_deref() == task_id
+        }) {
+            self.enqueued.remove(i);
+        }
     }
 
     /// Track a background launch. Only called on evidence the work actually
@@ -183,7 +241,7 @@ impl<'a> CcTurnMapper<'a> {
     /// Returns true when a pending wait was found and released; false for
     /// unknown ids (a stale delivery the caller should mark downstream).
     fn finish_background(&mut self, task_id: Option<&str>, tool_use_id: Option<&str>, status: &str) -> bool {
-        if !matches!(status, "completed" | "failed" | "stopped" | "killed") {
+        if !terminal_task_status(status) {
             return false;
         }
         let released = tool_use_id
@@ -204,8 +262,16 @@ impl<'a> CcTurnMapper<'a> {
                 self.register_background(&tool_use_id, task_id.as_deref());
                 CcMap::Ignore
             }
+            CcMap::BackgroundEnqueued { task_id, tool_use_id, .. } => {
+                self.enqueued.push_back(CcQueuedNotice { task_id, tool_use_id });
+                CcMap::Ignore
+            }
             CcMap::BackgroundDelivered { task_id, tool_use_id, status } => {
                 let consumed = self.finish_background(task_id.as_deref(), tool_use_id.as_deref(), &status);
+                // Either signal drains the same delivery: cancel the queued
+                // alias so a later wake cannot pop the spent slot and strand
+                // the notification that wake actually delivered.
+                self.cancel_enqueued_alias(task_id.as_deref(), tool_use_id.as_deref());
                 if !consumed {
                     // This delivery targets a task this run never launched:
                     // the CLI is replaying a notification undelivered by a
@@ -220,6 +286,12 @@ impl<'a> CcTurnMapper<'a> {
                     return CcMap::Events(vec![sse::chat_delta(self.run_id, &text)]);
                 }
                 CcMap::Ignore
+            }
+            // A wake round opens with system/init: release one queued wait before
+            // the id passes through for session persistence.
+            CcMap::SessionId(s) => {
+                self.consume_wake();
+                CcMap::SessionId(s)
             }
             CcMap::Events(mut events) => {
                 // Belt-and-braces launch coverage for engines that omit the
@@ -338,18 +410,41 @@ fn map_system(v: &Value) -> CcMap {
             }
         }
         // `task_notification` fires when the task finishes — enqueue time,
-        // NOT delivery time. The CLI queues the notification while the model
-        // is mid-round and only injects it (as the user-type
-        // `<task-notification>` line `map_user` parses) when the round ends,
-        // so clearing the wait here would let a result between enqueue and
-        // delivery finish the turn with results the model never saw.
-        "task_notification" => CcMap::Ignore,
+        // NOT delivery time. The CLI queues the notification and delivers it
+        // to the model later: some CLI versions surface that delivery as a
+        // user `<task-notification>` line (map_user parses it); others hand
+        // the model exactly one queued notification per auto-wake round,
+        // opened by a new `system/init` line. Both signals gate the same
+        // release, so the enqueue is recorded — never a release on its own
+        // (deliveries can land while the model is mid-round; a result then
+        // must stay intermediate or completed-but-undelivered work dies
+        // with the turn).
+        "task_notification" => {
+            let status = v.get("status").and_then(|x| x.as_str()).unwrap_or("");
+            if !terminal_task_status(status) {
+                return CcMap::Ignore;
+            }
+            // Queue entries mirror the CLI's own queue membership — unknown
+            // ids included: the slot still occupies a wake that must not pop
+            // a legitimate wait.
+            CcMap::BackgroundEnqueued {
+                task_id: non_empty(v.get("task_id").and_then(|x| x.as_str())).map(str::to_string),
+                tool_use_id: non_empty(v.get("tool_use_id").and_then(|x| x.as_str())).map(str::to_string),
+                status: status.to_string(),
+            }
+        }
         _ => CcMap::Ignore,
     }
 }
 
 fn non_empty(s: Option<&str>) -> Option<&str> {
     s.filter(|s| !s.trim().is_empty())
+}
+
+/// Whether a task status is terminal: only terminal statuses release a
+/// background wait. `running`/`pending` progress reports must keep it.
+fn terminal_task_status(status: &str) -> bool {
+    matches!(status, "completed" | "failed" | "stopped" | "killed")
 }
 
 fn map_stream_event(v: &Value, run_id: &str) -> CcMap {
@@ -935,6 +1030,17 @@ async fn handle_control_request(
     Ok(())
 }
 
+/// Default sliding idle window for the engine stream. Every received line
+/// pushes the turn's "still making progress" deadline this far out; only a
+/// stream that stays silent for the whole window fails the turn — with a
+/// named error that reports the stalled background count. Ten minutes
+/// clears every legitimate silence observed in production captures (model
+/// TTFT spikes, quiet waits between background-task rounds) by an order of
+/// magnitude, while a wedged stream (2026-10-14: quiet with pending work
+/// while BCS waited on a final that never came) surfaces in minutes instead
+/// of only at the outer run deadline.
+const IDLE_WINDOW: std::time::Duration = std::time::Duration::from_secs(600);
+
 #[async_trait::async_trait]
 impl Engine for ClaudeCode {
     async fn run_turn(
@@ -985,13 +1091,28 @@ impl Engine for ClaudeCode {
 
         let mut engine_session_id = req.engine_session_id.clone();
         let mut mapper = CcTurnMapper::new(&req.run_id);
+        // Sliding idle watchdog: every received line pushes this deadline out.
+        // A stream that goes quiet forever — the CLI wedged on something the
+        // bridge can't observe — must fail the turn explicitly instead of
+        // wedging until the outer run deadline with BCS waiting on a final.
+        let idle_window = req.idle_timeout.unwrap_or(IDLE_WINDOW);
+        let mut idle_deadline = tokio::time::Instant::now() + idle_window;
         loop {
+            let idle_timer = tokio::time::sleep_until(idle_deadline);
             tokio::select! {
                 _ = abort.cancelled() => {
                     cli.kill().await;
                     return Err(TurnError::Aborted);
                 }
+                _ = idle_timer => {
+                    let pending = mapper.background_pending();
+                    cli.kill().await;
+                    return Err(TurnError::EngineExited(format!(
+                        "stream idle for {idle_window:?} ({pending} pending background task(s))"
+                    )));
+                }
                 line = cli.next_line() => {
+                    idle_deadline = tokio::time::Instant::now() + idle_window;
                     let Some(line) = line.map_err(TurnError::Io)? else {
                         let pending = mapper.background_pending();
                         let note = if pending > 0 {
@@ -1028,7 +1149,9 @@ impl Engine for ClaudeCode {
                             }
                             return Ok(TurnOutcome { engine_session_id, final_text: Some(text) });
                         }
-                        CcMap::BackgroundStarted { .. } | CcMap::BackgroundDelivered { .. } => {
+                        CcMap::BackgroundStarted { .. }
+                        | CcMap::BackgroundEnqueued { .. }
+                        | CcMap::BackgroundDelivered { .. } => {
                             // Consumed into mapper tracking inside map_line.
                         }
                         CcMap::Failed(note) => {
@@ -1145,7 +1268,9 @@ mod tests {
                 CcMap::Final(text) => final_text = Some(text),
                 CcMap::Failed(_) => {}
                 CcMap::ControlRequest { .. } => {}
-                CcMap::BackgroundStarted { .. } | CcMap::BackgroundDelivered { .. } => {}
+                CcMap::BackgroundStarted { .. }
+                | CcMap::BackgroundEnqueued { .. }
+                | CcMap::BackgroundDelivered { .. } => {}
                 CcMap::Ignore | CcMap::Malformed => {}
             }
         }
@@ -1654,15 +1779,32 @@ mod tests {
             }
             other => panic!("expected BackgroundStarted, got {other:?}"),
         }
-        // Enqueue-time system lines must not release the wait, whatever ids
-        // and status they carry: the CLI defers delivery while the model is
-        // mid-round (production incident 2026-10-14: results cut the turn
-        // with two enqueued-but-undelivered finders).
+        // Enqueue-time terminal lines record the queued notification — a slot
+        // in the wake queue, never a release on their own (the CLI defers
+        // delivery while the model is mid-round; production 2026-10-14:
+        // results cut the turn with two enqueued-but-undelivered finders).
+        let enq = r#"{"type":"system","subtype":"task_notification","task_id":"t1","tool_use_id":"toolu_1","status":"completed","summary":"done"}"#;
+        match map_cc_line(enq, "r-1") {
+            CcMap::BackgroundEnqueued { task_id, tool_use_id, status } => {
+                assert_eq!(task_id.as_deref(), Some("t1"));
+                assert_eq!(tool_use_id.as_deref(), Some("toolu_1"));
+                assert_eq!(status, "completed");
+            }
+            other => panic!("expected BackgroundEnqueued, got {other:?}"),
+        }
+        // A terminal notice without ids still occupies a future wake, so it
+        // enqueues too; wake-side resolution handles the missing ids.
+        let anonymous = r#"{"type":"system","subtype":"task_notification","status":"completed"}"#;
+        match map_cc_line(anonymous, "r-1") {
+            CcMap::BackgroundEnqueued { task_id, tool_use_id, .. } => {
+                assert_eq!(task_id, None);
+                assert_eq!(tool_use_id, None);
+            }
+            other => panic!("expected anonymous BackgroundEnqueued, got {other:?}"),
+        }
+        // Non-terminal statuses and id-less task_started stay inert.
         for inert in [
-            r#"{"type":"system","subtype":"task_notification","task_id":"t1","tool_use_id":"toolu_1","status":"completed","summary":"done"}"#,
-            r#"{"type":"system","subtype":"task_notification","task_id":"t1","status":"completed"}"#,
             r#"{"type":"system","subtype":"task_notification","task_id":"t1","tool_use_id":"toolu_1","status":"running"}"#,
-            r#"{"type":"system","subtype":"task_notification","status":"completed"}"#,
             r#"{"type":"system","subtype":"task_started","task_id":"t2"}"#,
         ] {
             assert!(matches!(map_cc_line(inert, "r-1"), CcMap::Ignore), "must be inert: {inert}");
@@ -1806,6 +1948,88 @@ mod tests {
     }
 
     #[test]
+    fn wake_inits_release_one_enqueued_notification_each() {
+        // Real-capture protocol (2026-10-14 production + lab): this CLI
+        // never surfaces the delivered <task-notification> on stdout —
+        // completions arrive as enqueue-time system lines, and each
+        // auto-wake round (a new system/init) hands the model exactly ONE
+        // queued notification. Draining one wait per wake is the ONLY way
+        // this pending set can ever empty, so it is the only way the turn
+        // can ever finalize.
+        let mut mapper = CcTurnMapper::new("r-1");
+        for (t, u) in [("t-a", "toolu_a"), ("t-b", "toolu_b"), ("t-c", "toolu_c")] {
+            let started = format!(
+                r#"{{"type":"system","subtype":"task_started","task_id":"{t}","tool_use_id":"{u}","task_type":"local_agent"}}"#
+            );
+            assert!(matches!(mapper.map_line(&started), CcMap::Ignore));
+        }
+        assert_eq!(mapper.background_pending(), 3);
+        for (t, u) in [("t-a", "toolu_a"), ("t-b", "toolu_b"), ("t-c", "toolu_c")] {
+            let noticed = format!(
+                r#"{{"type":"system","subtype":"task_notification","task_id":"{t}","tool_use_id":"{u}","status":"completed"}}"#
+            );
+            assert!(matches!(mapper.map_line(&noticed), CcMap::Ignore));
+            assert_eq!(mapper.background_pending(), 3, "enqueue must keep the wait");
+        }
+        // Three wakes deliver the three queued notifications — one each. C
+        // was enqueued before B's wake yet delivered a round later, so the
+        // pops must not race ahead of arrivals: one release per wake, no
+        // more, whoever fronts the queue.
+        for expected in [2, 1, 0] {
+            let wake = r#"{"type":"system","subtype":"init","session_id":"cc-sess-wake"}"#;
+            assert!(matches!(mapper.map_line(wake), CcMap::SessionId(_)));
+            assert_eq!(mapper.background_pending(), expected, "one wake releases exactly one");
+        }
+        // A fourth wake (round running with nothing left queued) must be a
+        // no-op — it can neither release a wait that does not exist nor
+        // fabricate a stale-marker event.
+        let wake = r#"{"type":"system","subtype":"init","session_id":"cc-sess-wake"}"#;
+        assert!(matches!(mapper.map_line(wake), CcMap::SessionId(_)));
+        assert_eq!(mapper.background_pending(), 0);
+    }
+
+    #[test]
+    fn delivered_user_line_cancels_its_alias_in_the_wake_queue() {
+        // Engines that DO surface deliveries (user <task-notification> lines)
+        // resolve their wait directly — and must cancel the queued alias from
+        // the enqueue-time system line, or the following wake pops the spent
+        // alias instead, and the notification that wake actually delivered is
+        // left owning a wait that stays pending forever.
+        let mut mapper = CcTurnMapper::new("r-1");
+        for (t, u) in [("t-x", "toolu_x"), ("t-y", "toolu_y")] {
+            let started = format!(
+                r#"{{"type":"system","subtype":"task_started","task_id":"{t}","tool_use_id":"{u}","task_type":"local_agent"}}"#
+            );
+            assert!(matches!(mapper.map_line(&started), CcMap::Ignore));
+        }
+        assert_eq!(mapper.background_pending(), 2);
+        for (t, u) in [("t-x", "toolu_x"), ("t-y", "toolu_y")] {
+            let noticed = format!(
+                r#"{{"type":"system","subtype":"task_notification","task_id":"{t}","tool_use_id":"{u}","status":"completed"}}"#
+            );
+            assert!(matches!(mapper.map_line(&noticed), CcMap::Ignore));
+            assert_eq!(mapper.background_pending(), 2, "enqueue must keep the wait");
+        }
+        // x is delivered as a user line (CLI versions that surface the
+        // delivery on stdout): releases x directly, cancels its alias.
+        let delivered = json!({
+            "type": "user",
+            "message": {"role": "user", "content":
+                "<task-notification>\n<task-id>t-x</task-id>\n<tool-use-id>toolu_x</tool-use-id>\n<status>completed</status>\n</task-notification>"}
+        }).to_string();
+        assert!(matches!(mapper.map_line(&delivered), CcMap::Ignore));
+        assert_eq!(mapper.background_pending(), 1, "user line releases its own wait");
+        // The wake that delivers y must release y — impossible while x's
+        // spent alias still fronts the queue.
+        let wake = r#"{"type":"system","subtype":"init","session_id":"cc-sess-wake"}"#;
+        assert!(matches!(mapper.map_line(wake), CcMap::SessionId(_)));
+        assert_eq!(
+            mapper.background_pending(), 0,
+            "wake must release y, not pop x's spent alias"
+        );
+    }
+
+    #[test]
     fn stale_delivery_for_unknown_task_emits_marked_event() {
         // A notification whose tool call id was never registered this run
         // (a replay from a previous killed turn) must not be silent: forward
@@ -1899,5 +2123,57 @@ mod tests {
             .await
             .expect("turn must run until the queued deliveries landed");
         assert_eq!(outcome.final_text.as_deref(), Some("summary table for all three finders"));
+    }
+
+    #[tokio::test]
+    async fn enqueue_only_protocol_finalizes_through_wake_rounds() {
+        // Second production incident 2026-10-14 (session e6f0d46d): every
+        // event crossed to BCS — launches, progress, all four results'
+        // streamed texts — yet the turn never sent a final: the engine
+        // never emits the user <task-notification> lines the release logic
+        // was waiting on, so the pending set could never drain and every
+        // result stayed swallowed. With wake-driven release the same
+        // protocol must run to the real final result.
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/mock_cc_bg_enqueue_wakes.sh"
+        );
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            run_mock_cc(script),
+        )
+        .await
+        .expect("turn must not wedge on an un-drainable pending set")
+        .expect("turn must finalize on the last round's result");
+        assert_eq!(outcome.final_text.as_deref(), Some("summary table for all three finders"));
+    }
+
+    #[tokio::test]
+    async fn idle_stream_with_pending_background_fails_explicitly() {
+        // The hang shape the same incident left behind: the engine goes
+        // permanently silent with a pending background task and neither a
+        // result nor a notification will ever come. The sliding idle
+        // watchdog must end the turn with a named error that reports the
+        // stalled background count — not wedge until the run deadline with
+        // BCS waiting on a final that never arrives.
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/mock_cc_bg_idle_forever.sh"
+        );
+        let mut req = TurnRequest::new("r-idle", "hi", ".", Arc::new(NullObserver));
+        req.idle_timeout = Some(std::time::Duration::from_millis(300));
+        let engine = ClaudeCode::new(PathBuf::from("bash"), vec![script.to_string()]);
+        let (tx, _rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
+        let turn = engine.run_turn(req, tx, tokio_util::sync::CancellationToken::new());
+        let error = tokio::time::timeout(std::time::Duration::from_secs(5), turn)
+            .await
+            .expect("watchdog must fire, not wedge")
+            .expect_err("a quiet stream must fail the turn");
+        let text = error.to_string();
+        assert!(text.contains("idle"), "must name the idle watchdog: {text}");
+        assert!(
+            text.contains("1 pending background task"),
+            "must report the stalled background count: {text}"
+        );
     }
 }
