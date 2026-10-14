@@ -27,6 +27,9 @@ async fn human_invitation_is_restricted_only_while_the_local_bot_participates() 
     let bots = Arc::new(MemoryBotRepo::with_base_dir(dir.path().into()));
     let providers = Arc::new(MemoryProviderStore::new());
     let metadata = Arc::new(MemoryBotProviderStore::new(bots.clone(), providers.clone()));
+    let repo: Arc<dyn GroupRepoPort> = Arc::new(MemoryGroupRepo::new());
+    let metadata_port: Arc<dyn bcs_service_api::port::repo::bot_provider::BotProviderRepoPort> = metadata.clone();
+    providers.bind_group_scope_source(repo.clone(), Arc::downgrade(&metadata_port));
     let projection = Arc::new(ProviderBindingProjection::new(
         providers.clone(), metadata.clone(), DownlinkDetectionSource::BotConnectionMode,
     ));
@@ -49,7 +52,6 @@ async fn human_invitation_is_restricted_only_while_the_local_bot_participates() 
         },
     ).await.unwrap();
     bots.register_with_owner_and_token("cloud".into(), BotCapabilities::default(), "alice", "fixture-cloud-token").await.unwrap();
-    let repo: Arc<dyn GroupRepoPort> = Arc::new(MemoryGroupRepo::new());
     let groups = Arc::new(GroupCore::with_repo(repo.clone()).with_collaboration_registry(registry.clone()).with_policy_gate(policy_gate));
     let mut group = Group::new("scope-group", "cloud", vec![
         Participant::bot("cloud", ParticipantRole::Driver),

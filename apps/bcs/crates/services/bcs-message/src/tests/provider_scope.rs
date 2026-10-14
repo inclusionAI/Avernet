@@ -14,6 +14,10 @@ async fn same_owner_history_cannot_be_read_by_public_or_foreign_viewers() {
     let bots = Arc::new(MemoryBotRepo::with_base_dir(dir.path().into()));
     let providers = Arc::new(MemoryProviderStore::new());
     let metadata = Arc::new(MemoryBotProviderStore::new(bots.clone(), providers.clone()));
+    let (mut service, messages, sessions, fallback, session_id) = service_fixture(GroupStrategy::Chat, 0, 0, vec![]).await;
+    let metadata_port: Arc<dyn bcs_service_api::port::repo::bot_provider::BotProviderRepoPort> = metadata.clone();
+    let group_repo = Arc::new(bcs_group::MemoryGroupRepo::new());
+    providers.bind_group_scope_source(group_repo.clone(), Arc::downgrade(&metadata_port));
     let projection = Arc::new(ProviderBindingProjection::new(
         providers.clone(), metadata.clone(), DownlinkDetectionSource::BotConnectionMode,
     ));
@@ -33,8 +37,8 @@ async fn same_owner_history_cannot_be_read_by_public_or_foreign_viewers() {
             ..Default::default() },
     ).await.unwrap();
     bots.register_with_owner_and_token("cloud-alice".into(), BotCapabilities::default(), "alice", "fixture-cloud-token").await.unwrap();
-    let (mut service, messages, sessions, fallback, session_id) = service_fixture(GroupStrategy::Chat, 0, 0, vec![]).await;
     service.registry = registry;
+    service.group = Arc::new(GroupCore::with_repo(group_repo));
     let members = vec![Participant::bot("cloud-alice", ParticipantRole::Driver),
         Participant::bot(&local.bot_uuid, ParticipantRole::Consultant)];
     service.group.upsert(Group::new("group-1", "cloud-alice", members.clone())).await.unwrap();
