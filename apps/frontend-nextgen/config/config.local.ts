@@ -27,8 +27,11 @@ export default defineConfig({
     '/openapi/v1/bots/work-order-notifications': proxy(admin),
     '/openapi/v1/bots/work-orders': proxy(admin),
     '/openapi/v1/bots/spaces': proxy(admin),
-    // 任务执行/进度/授权（openapi /openapi/v1/collaboration/tasks/**）：Open Core 统一走 openapi 前缀，
-    // 窄匹配须置于 /openapi 通用 catch-all 之前（umi proxy 按对象键插入顺序匹配）。
+    // BBS 已登记到 Gateway；两个更窄的匹配必须位于通用 task engine 路由之前。
+    // 预发时 gateway 由 TEAMCLAW_GW_BASE 注入为 teamclawgw-pre，公开仓库不硬编码部署域名。
+    '/openapi/v1/collaboration/tasks/bbs': proxy(gateway, true),
+    '/openapi/v1/collaboration/tasks/bots/*/bbs/**': proxy(gateway, true),
+    // 其余任务执行/进度/授权仍可走独立 Task Engine。
     '/openapi/v1/collaboration/tasks': proxy(taskEngine, true),
     '/openapi': proxy(gateway, true),
     '/api/v1/collaboration': proxy(gateway, true),
