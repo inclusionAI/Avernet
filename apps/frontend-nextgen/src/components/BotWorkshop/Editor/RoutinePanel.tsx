@@ -99,8 +99,8 @@ export function RoutinePanel({
     }
   };
   return (
-    <div className="flex min-h-full flex-col bg-card">
-      <div className="flex items-center justify-between gap-4 border-b border-border px-7 py-4">
+    <div className="flex min-h-full flex-col bg-background">
+      <div className="flex items-center justify-between gap-4 border-b border-border bg-card px-8 py-5 lg:px-10">
         <div>
           <h2 className="m-0 text-base font-semibold">定时任务</h2>
           <p className="m-0 mt-1 text-sm text-muted-foreground">
@@ -111,10 +111,10 @@ export function RoutinePanel({
           新建任务
         </Button>
       </div>
-      <div className="space-y-3 px-7 py-5">
+      <div className="mx-auto w-full max-w-5xl space-y-3 px-6 py-6 lg:px-10">
         {routines.length ? (
           routines.map((item) => (
-            <section key={item.id} className="rounded-lg border border-border bg-card p-4 shadow-sm">
+            <section key={item.id} className="rounded-xl border border-border bg-card p-5 shadow-sm transition-shadow hover:shadow-md">
               <div className="flex items-start gap-3">
                 <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                   <Clock3 className="size-4" />
@@ -166,7 +166,9 @@ export function RoutinePanel({
             </section>
           ))
         ) : (
-          <Empty title="暂无定时任务" description="创建一个定时任务，让 Bot 自动执行周期性工作。" />
+          <div className="rounded-xl border border-dashed border-border bg-card py-12">
+            <Empty title="暂无定时任务" description="创建一个定时任务，让 Bot 自动执行周期性工作。" />
+          </div>
         )}
       </div>
       <Modal open={open} onOpenChange={(next) => !saving && setOpen(next)}>

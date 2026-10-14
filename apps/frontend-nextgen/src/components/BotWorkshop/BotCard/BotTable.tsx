@@ -2,6 +2,7 @@ import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { getBotEntryAvailability, type BotActionAvailability, type BotDomain } from '@/services/botWorkshop';
 import React from 'react';
 import BotDescriptionCell from './BotDescriptionCell';
+import { BotContainerInfo } from './BotContainerInfo';
 import BotInfoCell from './BotInfoCell';
 import { BotManagementMenu } from './BotManagementMenu';
 import BotPrimaryActionsCell from './BotPrimaryActionsCell';
@@ -120,8 +121,14 @@ const BotTable: React.FC<BotTableProps> = ({
       {
         id: 'tags',
         header: 'bot 标签',
-        width: 'w-[260px]',
-        cell: (bot) => <BotTagsCell bot={bot} onOpenContainers={onOpenContainers} />,
+        width: 'w-[210px]',
+        cell: (bot) => <BotTagsCell bot={bot} />,
+      },
+      {
+        id: 'containers',
+        header: '容器信息',
+        width: 'w-[148px]',
+        cell: (bot) => (onOpenContainers ? <BotContainerInfo bot={bot} onOpen={onOpenContainers} /> : <span>—</span>),
       },
       ...(showOwner
         ? [

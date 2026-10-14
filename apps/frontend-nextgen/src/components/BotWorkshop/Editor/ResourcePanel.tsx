@@ -83,8 +83,8 @@ export function ResourcePanel({
     }
   };
   return (
-    <div className="flex min-h-full flex-col bg-card">
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border px-7 py-5">
+    <div className="flex min-h-full flex-col bg-background">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border bg-card px-8 py-5 lg:px-10">
         <div>
           <h2 className="m-0 text-lg font-semibold tracking-tight">资源目录</h2>
           <p className="m-0 mt-1 text-sm text-muted-foreground">
@@ -134,19 +134,20 @@ export function ResourcePanel({
           </Button>
         </div>
       </div>
-      <div className="px-7 py-4">
-        <div className="mb-2 text-xs text-muted-foreground">
-          当前上传位置：/{directory || '根目录'}（点击目录可切换）
+      <div className="mx-auto w-full max-w-5xl px-6 py-6 lg:px-10">
+        <div className="mb-3 flex min-h-10 items-center rounded-lg border border-border bg-card px-3 text-xs text-muted-foreground">
+          当前路径：/<span className="ml-1 font-medium text-foreground">{directory || '根目录'}</span>
+          <span className="ml-1">（点击文件夹可切换上传位置）</span>
         </div>
         {resources.length ? (
-          <div className="space-y-0.5">
+          <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
             {visibleResources.map(({ item, depth }) => {
               const selected = directory === item.path || preview?.path === item.path;
               return (
                 <div
                   key={item.path}
                   className={`group flex min-h-10 items-center gap-1 rounded-lg px-3 py-1 transition-colors ${
-                    selected ? 'bg-muted' : 'hover:bg-muted/60'
+                    selected ? 'bg-primary/5' : 'hover:bg-muted/60'
                   }`}
                   style={{ paddingLeft: `${12 + depth * 24}px` }}
                 >
@@ -251,7 +252,9 @@ export function ResourcePanel({
             })}
           </div>
         ) : (
-          <Empty compact title="工作区为空" description="当前目录没有文件或文件夹。" />
+          <div className="rounded-xl border border-dashed border-border bg-card py-12">
+            <Empty compact title="工作区为空" description="当前目录没有文件或文件夹。" />
+          </div>
         )}
       </div>
       <ResourcePreviewDrawer preview={preview} onClose={() => setPreview(undefined)} />

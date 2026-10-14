@@ -56,10 +56,14 @@ function tagsCell() {
   return cellAt(4);
 }
 
+function containersCell() {
+  return cellAt(5);
+}
+
 describe('BotTable 表格结构', () => {
   const bot = mapBotDto({ bot_id: 'b1', bot_name: 'Openclaw Bot', engine: 'openclaw', status: 'ACTIVE' }).item;
 
-  test('按 7 列顺序渲染表头', () => {
+  test('按 8 列顺序渲染表头，容器信息独立于 Bot 标签', () => {
     renderTable(bot);
 
     expect(screen.getAllByRole('columnheader').map((header) => header.textContent)).toEqual([
@@ -68,6 +72,7 @@ describe('BotTable 表格结构', () => {
       '状态',
       '版本',
       'bot 标签',
+      '容器信息',
       '主要操作',
       '更多操作',
     ]);
@@ -147,7 +152,7 @@ describe('BotTable 表格结构', () => {
   test('没有数据时只渲染表头,空态由页面承担', () => {
     render(<BotTable bots={[]} onView={noop} />);
 
-    expect(screen.getAllByRole('columnheader')).toHaveLength(7);
+    expect(screen.getAllByRole('columnheader')).toHaveLength(8);
     expect(screen.getAllByRole('row')).toHaveLength(1);
     expect(screen.queryByText('暂无 Bot')).not.toBeInTheDocument();
   });
@@ -530,9 +535,11 @@ describe('BotTable bot 标签列', () => {
     renderTable(bot);
 
     expect(screen.queryByText('服务化')).not.toBeInTheDocument();
-    // 整行只剩版本列一个 `—`:标签列不再贡献第二个占位符
-    expect(screen.getAllByText('—')).toHaveLength(1);
+    // 标签列不再贡献占位符；第二个 `—` 来自独立的容器信息列。
+    expect(screen.getAllByText('—')).toHaveLength(2);
     expect(within(versionCell()).getByText('—')).toBeInTheDocument();
+    expect(within(tagsCell()).queryByText('—')).not.toBeInTheDocument();
+    expect(within(containersCell()).getByText('—')).toBeInTheDocument();
   });
 
   test('标签列三个 chip 统一 outline 描边,不占用蓝/绿/灰填充', () => {

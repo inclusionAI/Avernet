@@ -19,7 +19,7 @@ describe('ContainerInstancesModal', () => {
     list.mockReset();
   });
 
-  it('renders the live instance summary and does not invent absent metrics', async () => {
+  it('renders the legacy-style instance fields and does not invent absent resource metrics', async () => {
     list.mockResolvedValue({
       botId: 'service-1',
       summary: { total: 2, healthy: 1, abnormal: 1, restarting: 0, unknown: 0 },
@@ -44,8 +44,13 @@ describe('ContainerInstancesModal', () => {
     expect(screen.getByText('2')).toBeInTheDocument();
     expect(getSummaryText('1 活跃')).toBeInTheDocument();
     expect(getSummaryText('1 异常')).toBeInTheDocument();
-    expect(screen.getByText('node-a')).toBeInTheDocument();
-    expect(screen.getAllByText('—')).toHaveLength(3);
-    expect(screen.getByRole('button', { name: '重启' })).toBeDisabled();
+    expect(screen.getByText('实例名称')).toBeInTheDocument();
+    expect(screen.getByText('device-2')).toBeInTheDocument();
+    expect(screen.queryByText('node-a')).not.toBeInTheDocument();
+    expect(screen.queryByText('CPU')).not.toBeInTheDocument();
+    expect(screen.queryByText('内存')).not.toBeInTheDocument();
+    const restartButtons = screen.getAllByRole('button', { name: '重启' });
+    expect(restartButtons).toHaveLength(2);
+    restartButtons.forEach((button) => expect(button).toBeDisabled());
   });
 });

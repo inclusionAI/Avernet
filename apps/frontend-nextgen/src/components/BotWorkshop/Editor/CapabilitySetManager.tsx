@@ -99,8 +99,8 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
     setCreateOpen(false);
   };
   return (
-    <div className="flex min-h-full flex-col bg-card">
-      <div className="flex items-center justify-between border-b border-border px-7 py-4">
+    <div className="flex min-h-full flex-col bg-background">
+      <div className="flex items-center justify-between border-b border-border bg-card px-8 py-5 lg:px-10">
         <div>
           <h2 className="m-0 text-base font-semibold">能力集管理</h2>
           <p className="m-0 mt-1 text-sm text-muted-foreground">按能力集组织 Bot 引用的 Skill、MCP 与 CLI。</p>
@@ -114,109 +114,111 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
           新建
         </Button>
       </div>
-      <div className="app-scrollbar flex-1 overflow-y-auto py-3">
+      <div className="app-scrollbar flex-1 overflow-y-auto">
         {sets.length ? (
-          sets.map((set) => {
-            const open = expanded.includes(set.id);
-            const displayName = set.isDefault ? '默认能力集' : set.name;
-            return (
-              <section key={set.id} className="border-b border-border px-7 py-2">
-                <div className="group flex min-h-14 items-center gap-2 py-2">
-                  <Button
-                    variant="ghost"
-                    className="h-auto min-w-0 flex-1 justify-start px-1 py-1 text-left"
-                    leftIcon={open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-                    onClick={() =>
-                      setExpanded((current) => (open ? current.filter((id) => id !== set.id) : [...current, set.id]))
-                    }
-                  >
-                    <span className="min-w-0">
-                      <span className="flex items-center gap-2">
-                        <span className="truncate text-sm font-semibold">{displayName}</span>
-                        {!set.active ? <Badge>已禁用</Badge> : null}
-                        {set.isDefault ? <Badge tone="primary">系统默认</Badge> : null}
-                      </span>
-                      <span className="mt-1 block text-xs font-normal text-muted-foreground">
-                        {set.skills.length} Skill · {set.mcps.length} MCP · {set.clis.length} CLI
-                      </span>
-                    </span>
-                  </Button>
-                  {set.isDefault ? (
-                    <TooltipProvider delayDuration={0}>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span data-testid="default-capability-set-switch" className="inline-flex" tabIndex={0}>
-                            <Switch checked disabled aria-label="默认能力集不可禁用" />
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>默认能力集不可禁用</TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      {props.pendingSkillSetToggle?.id === set.id ? (
-                        <span role="status" className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                          <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                          {props.pendingSkillSetToggle.slow
-                            ? `${props.pendingSkillSetToggle.active ? '启用' : '停用'}耗时较长，仍在等待结果…`
-                            : `正在${props.pendingSkillSetToggle.active ? '启用' : '停用'}…`}
-                        </span>
-                      ) : null}
-                      <Switch
-                        checked={set.active}
-                        loading={Boolean(props.pendingSkillSetToggle)}
-                        disabled={!editable}
-                        aria-label={`${set.active ? '停用' : '启用'}${displayName}`}
-                        onCheckedChange={(value) => void onActive(set, value)}
-                      />
-                    </div>
-                  )}
-                  {!set.isDefault ? (
-                    <ConfirmDialog
-                      title="确认删除该能力集？"
-                      description={`删除「${displayName}」会移除其中 Skill 与 MCP 的引用，且无法恢复。`}
-                      confirmVariant="destructive"
-                      disabled={!editable || set.active}
-                      onConfirm={() => onDelete(set.id)}
+          <div className="mx-auto w-full max-w-5xl space-y-3 px-6 py-6 lg:px-10">
+            {sets.map((set) => {
+              const open = expanded.includes(set.id);
+              const displayName = set.isDefault ? '默认能力集' : set.name;
+              return (
+                <section key={set.id} className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+                  <div className="group flex min-h-16 items-center gap-2 px-5 py-2">
+                    <Button
+                      variant="ghost"
+                      className="h-auto min-w-0 flex-1 justify-start px-1 py-1 text-left"
+                      leftIcon={open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                      onClick={() =>
+                        setExpanded((current) => (open ? current.filter((id) => id !== set.id) : [...current, set.id]))
+                      }
                     >
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`删除${displayName}`}
-                        leftIcon={<Trash2 className="size-4" />}
-                      />
-                    </ConfirmDialog>
-                  ) : null}
-                </div>
-                {open ? (
-                  <div className="space-y-5 pb-5 pl-0">
-                    <CapabilityMembers
-                      kind="skill"
-                      items={set.skills}
-                      onDetail={props.botId ? (id, name) => setDetailTarget({ kind: 'skill', id, name }) : undefined}
-                      editable={editable}
-                      onAdd={set.isDefault ? undefined : () => openPicker(set, 'skill')}
-                      onRemove={(id) => onSkill(set.id, id, false)}
-                    />
-                    <CapabilityMembers
-                      kind="mcp"
-                      items={set.mcps}
-                      onDetail={props.botId ? (id, name) => setDetailTarget({ kind: 'mcp', id, name }) : undefined}
-                      editable={editable}
-                      identities={props.mcpCallTypes}
-                      identityEditable={props.callerContextEditable}
-                      identityDisabledReason={props.mcpIdentityDisabledReason}
-                      updatingIdentityId={props.updatingCallType}
-                      onIdentity={props.onMcpCallType}
-                      onAdd={set.isDefault || !canAddMcp ? undefined : () => openPicker(set, 'mcp')}
-                      onRemove={(id) => onMcp(set.id, id, false)}
-                    />
-                    {set.clis.length ? <CapabilityMembers kind="cli" items={set.clis} editable={false} /> : null}
+                      <span className="min-w-0">
+                        <span className="flex items-center gap-2">
+                          <span className="truncate text-sm font-semibold">{displayName}</span>
+                          {!set.active ? <Badge>已禁用</Badge> : null}
+                          {set.isDefault ? <Badge tone="primary">系统默认</Badge> : null}
+                        </span>
+                        <span className="mt-1 block text-xs font-normal text-muted-foreground">
+                          {set.skills.length} Skill · {set.mcps.length} MCP · {set.clis.length} CLI
+                        </span>
+                      </span>
+                    </Button>
+                    {set.isDefault ? (
+                      <TooltipProvider delayDuration={0}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span data-testid="default-capability-set-switch" className="inline-flex" tabIndex={0}>
+                              <Switch checked disabled aria-label="默认能力集不可禁用" />
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>默认能力集不可禁用</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        {props.pendingSkillSetToggle?.id === set.id ? (
+                          <span role="status" className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                            <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                            {props.pendingSkillSetToggle.slow
+                              ? `${props.pendingSkillSetToggle.active ? '启用' : '停用'}耗时较长，仍在等待结果…`
+                              : `正在${props.pendingSkillSetToggle.active ? '启用' : '停用'}…`}
+                          </span>
+                        ) : null}
+                        <Switch
+                          checked={set.active}
+                          loading={Boolean(props.pendingSkillSetToggle)}
+                          disabled={!editable}
+                          aria-label={`${set.active ? '停用' : '启用'}${displayName}`}
+                          onCheckedChange={(value) => void onActive(set, value)}
+                        />
+                      </div>
+                    )}
+                    {!set.isDefault ? (
+                      <ConfirmDialog
+                        title="确认删除该能力集？"
+                        description={`删除「${displayName}」会移除其中 Skill 与 MCP 的引用，且无法恢复。`}
+                        confirmVariant="destructive"
+                        disabled={!editable || set.active}
+                        onConfirm={() => onDelete(set.id)}
+                      >
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`删除${displayName}`}
+                          leftIcon={<Trash2 className="size-4" />}
+                        />
+                      </ConfirmDialog>
+                    ) : null}
                   </div>
-                ) : null}
-              </section>
-            );
-          })
+                  {open ? (
+                    <div className="space-y-5 border-t border-border bg-muted/20 px-5 py-5">
+                      <CapabilityMembers
+                        kind="skill"
+                        items={set.skills}
+                        onDetail={props.botId ? (id, name) => setDetailTarget({ kind: 'skill', id, name }) : undefined}
+                        editable={editable}
+                        onAdd={set.isDefault ? undefined : () => openPicker(set, 'skill')}
+                        onRemove={(id) => onSkill(set.id, id, false)}
+                      />
+                      <CapabilityMembers
+                        kind="mcp"
+                        items={set.mcps}
+                        onDetail={props.botId ? (id, name) => setDetailTarget({ kind: 'mcp', id, name }) : undefined}
+                        editable={editable}
+                        identities={props.mcpCallTypes}
+                        identityEditable={props.callerContextEditable}
+                        identityDisabledReason={props.mcpIdentityDisabledReason}
+                        updatingIdentityId={props.updatingCallType}
+                        onIdentity={props.onMcpCallType}
+                        onAdd={set.isDefault || !canAddMcp ? undefined : () => openPicker(set, 'mcp')}
+                        onRemove={(id) => onMcp(set.id, id, false)}
+                      />
+                      {set.clis.length ? <CapabilityMembers kind="cli" items={set.clis} editable={false} /> : null}
+                    </div>
+                  ) : null}
+                </section>
+              );
+            })}
+          </div>
         ) : (
           <Empty title="暂无能力集" description="新建能力集后，可从市场或能力工坊引用 Skill 与 MCP。" />
         )}
