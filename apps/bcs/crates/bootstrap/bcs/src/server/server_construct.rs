@@ -3,6 +3,7 @@ use super::*;
 
 impl BcsServer {
     /// Create a new BCS server.
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn new(config: BcsConfig) -> Self {
         let outbound_url_guard = outbound_url_guard_from_config(&config);
         let group_session_secret_access = build_secret_access_blocking(&config)
@@ -32,6 +33,7 @@ impl BcsServer {
         )
     }
 
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn new_allowing_private_outbound_for_tests(config: BcsConfig) -> Self {
         let group_session_secret_access = group_session_test_secret_access(&config);
         Self::new_with_outbound_url_guards(
