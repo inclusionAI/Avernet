@@ -62,6 +62,18 @@ impl MySqlGroupStore {
         )))
     }
 
+    /// Lock even unbound Bots: affiliation must not race a public Group write.
+    pub(crate) fn public_bot_lock(&self, group: &Group) -> DbStatement {
+        let mut ids = group.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+        ids.sort(); ids.dedup();
+        if ids.is_empty() { ids.push(String::new()); }
+        let placeholders = vec!["?"; ids.len()].join(",");
+        let locking = if self.flavor == DbSqlFlavor::Mysql { " FOR UPDATE" } else { "" };
+        let mut params = vec![Value::from(self.env.as_str())];
+        params.extend(ids.into_iter().map(Value::from));
+        DbStatement::with_params(format!("SELECT bot_uuid FROM bcs_bots WHERE env = ? AND bot_uuid IN ({placeholders}) ORDER BY bot_uuid{locking}"), params)
+    }
+
     pub(crate) fn public_scope_assertion(
         &self,
         group: &Group,
@@ -80,7 +92,7 @@ impl MySqlGroupStore {
         let placeholders = vec!["?"; ids.len()].join(",");
         let policy_denied = match self.flavor {
             DbSqlFlavor::Mysql => {
-                "p.provider_id IS NULL OR JSON_TYPE(p.config) <> 'OBJECT' OR COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.config, '$.collaboration_scope')), 'standard') <> 'standard'"
+                "p.provider_id IS NULL OR JSON_TYPE(p.config) <> 'OBJECT' OR BINARY COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.config, '$.collaboration_scope')), 'standard') <> 'standard'"
             }
             DbSqlFlavor::Sqlite => {
                 "p.provider_id IS NULL OR json_type(p.config) <> 'object' OR json_type(p.config, '$.collaboration_scope') = 'null' OR COALESCE(json_extract(p.config, '$.collaboration_scope'), 'standard') <> 'standard'"

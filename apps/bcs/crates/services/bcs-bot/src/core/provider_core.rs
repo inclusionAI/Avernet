@@ -241,6 +241,9 @@ impl ProviderCore {
             None => new_bot_uuid(),
         };
 
+        if let Some(metadata) = &self.bot_providers {
+            metadata.validate_provider_affiliation(&provider.provider_id, &bot_uuid).await?;
+        }
         match connection_mode {
             ProviderBotConnectionMode::Gateway => {
                 let session_token = new_session_token();

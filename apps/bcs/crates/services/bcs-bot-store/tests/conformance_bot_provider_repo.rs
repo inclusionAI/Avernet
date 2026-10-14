@@ -23,6 +23,7 @@ async fn conformance_memory_bot_provider_metadata_and_projection() {
     let dir = tempfile::tempdir().unwrap();
     let bots = Arc::new(MemoryBotRepo::with_base_dir(dir.path().into()));
     let legacy = Arc::new(MemoryProviderStore::new());
+    database::seed_memory_provider(legacy.as_ref()).await;
     let metadata = Arc::new(MemoryBotProviderStore::new(bots, legacy.clone()));
     let projection = ProviderBindingProjection::new(legacy, metadata.clone(), source);
     bot_provider_repo_port_contract_tests(metadata.as_ref(), &projection).await;

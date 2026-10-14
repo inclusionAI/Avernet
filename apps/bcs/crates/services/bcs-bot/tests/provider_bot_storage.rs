@@ -20,6 +20,10 @@ async fn deleting_unmigrated_gateway_also_disables_legacy_binding() {
     let bots = Arc::new(MemoryBotRepo::with_base_dir(dir.path().into()));
     bots.register_with_owner_and_token("legacy".into(), BotCapabilities::default(), "alice", "test-legacy-runtime").await.unwrap();
     let providers = Arc::new(MemoryProviderStore::new());
+    use bcs_service_api::{ProviderRecord, ProviderRepoPort};
+    providers.insert_provider(ProviderRecord { provider_id: "provider-a".into(), slug: None,
+        name: "Legacy".into(), config: "{}".into(), created_by: "alice".into(), owners: "[]".into(),
+        disabled: false, created_at: 1, updated_at: 1 }).await.unwrap();
     providers.insert_binding(ProviderBotBinding {
         bot_uuid: "legacy".into(), provider_id: "provider-a".into(), provider_bot_ref: "legacy-ref".into(),
         webhook_url: None, disabled: false, created_at: 1, updated_at: 1,

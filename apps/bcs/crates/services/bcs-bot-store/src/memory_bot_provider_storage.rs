@@ -26,6 +26,9 @@ fn binding_now_ms() -> ServiceResult<u64> {
 
 #[async_trait]
 impl BotProviderRepoPort for MemoryBotProviderStore {
+    async fn validate_provider_affiliation(&self, provider_id: &str, bot_uuid: &str) -> ServiceResult<()> {
+        self.bindings.check_affiliation_scope(provider_id, bot_uuid).await
+    }
     async fn collaboration_actors(&self, ids: &[String]) -> ServiceResult<Vec<bcs_service_api::port::repo::collaboration_actor::CollaborationActor>> {
         use bcs_service_api::port::repo::collaboration_actor::CollaborationActor;
         if ids.len() > 256 { return Err(ServiceError::InvalidOperation { message: "collaboration actor batch exceeds 256".into(), request_id: None }); }
@@ -60,6 +63,8 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
 
     async fn attach_provider_bot(&self, record: BotProviderRecord) -> ServiceResult<()> {
         bot_storage::validate_record(&record)?;
+        let _policy_write = self.bindings.policy_gate.write().await;
+        self.validate_provider_affiliation(&record.provider_id, &record.bot_uuid).await?;
         let mut records = self.records.write().await;
         let mut bindings = self.bindings.bindings_by_bot.write().await;
         let mut refs = self.bindings.binding_ref_index.write().await;
