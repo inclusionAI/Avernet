@@ -67,8 +67,8 @@ resources themselves (those are defined in their owning docs).
 | `ErrorEnvelope` | The same wrapper on failure, with `data` always `null` | This doc (reuses OpenAPI v1) | Per response |
 | `Page[T]` / `PageParams` | A page of a list result (`total`, `items`) and the controls (`page`, `page_size`) | This doc (reuses OpenAPI v1) | Per request |
 | `BotRef` | The full identity of one bot: `owner_id` plus `bot_id`, because a `bot_id` alone is not unique across users ([§2.6](#26-botref-bot-identity)) | This doc; used by every evolution record | Fixed for the bot's life |
-| `IdempotencyRecord` | The platform's memory of one idempotency key: `(owner_id, bot_id, key) → resource id` plus a fingerprint of the request | This doc; stored by each service | Created on the first request with a key; kept for the retention window |
-| `Precondition` | An `ETag` returned on a read of a mutable resource, and the `If-Match` header that sends it back on a write | This doc | Per resource version |
+| `IdempotencyRecord` | The platform's memory of one idempotency key. The **key** is the value of the client's `Idempotency-Key` header, e.g. `nightly-bot_123-2026-10-08`; the record maps it to the **result id**, the id of what the first request with that key created or started, e.g. the run `run_7f3`, plus a fingerprint of the request. A retry with the same key gets `run_7f3` back instead of starting a second run ([§2.3](#23-idempotencyrecord)) | This doc; stored by each service | Created on the first request with a key; kept for the retention window |
+| `Precondition` | A version check on writes. A `GET` of a resource that clients replace (today only the bot's bindings) returns an `ETag` header, a version tag such as `"bind-v12"`; the client sends it back in an `If-Match` header on its `PUT`, and the server refuses the write with `412` if the resource changed since that read ([§2.4](#24-precondition-etag-and-if-match)) | This doc | Per resource version |
 | `Operation` | A long-running unit of work started by a request and looked up by id (`queued`, `running`, `succeeded`, `failed`, `cancelled`) | Concept defined in [03-strategy.md](03-strategy.md); the public resource and its lookup endpoint are owned here ([§10.8](#108-operations--this-doc)) | Created by a `202` response; terminal once finished |
 
 ### 2.1 Envelope and ErrorEnvelope
@@ -168,7 +168,7 @@ rules are in [§5](#5-idempotency-keys).
 from datetime import datetime
 from enum import StrEnum
 
-class IdempotentResourceKind(StrEnum):
+class IdempotentResultKind(StrEnum):
     """What a key can create or start (one value per row of the §5.3 table)."""
     RUN = "run"
     OPERATION = "operation"
@@ -182,9 +182,8 @@ class IdempotencyRecord:
     bot: BotRef            # scope: the bot addressed by the request (owner + bot id, §2.6)
     key: str               # the client's Idempotency-Key header value
     fingerprint: str       # sha256 of the RFC 8785 canonical form of {method, path, body}
-    resource_kind: IdempotentResourceKind
-    resource_id: str       # id of what the first request created or started, e.g. "run_7f3"
-    first_status: int      # HTTP status of the first response (201 or 202)
+    result_kind: IdempotentResultKind
+    result_id: str         # id of what the first request created or started, e.g. "run_7f3"
     created_at: datetime
     expires_at: datetime   # end of the retention window (open decision A-2, §15)
 ```
@@ -195,9 +194,8 @@ class IdempotencyRecord:
   "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "key": "nightly-bot_123-2026-10-08",
   "fingerprint": "sha256:5d1e…",
-  "resource_kind": "run",
-  "resource_id": "run_7f3",
-  "first_status": 202,
+  "result_kind": "run",
+  "result_id": "run_7f3",
   "created_at": "2026-10-08T02:00:03Z",
   "expires_at": "2026-11-07T02:00:03Z"
 }
@@ -210,6 +208,16 @@ that wants to change the resource sends the tag back in an **`If-Match`**
 header; if the resource changed in the meantime, the server refuses the
 write with `412 Precondition Failed` instead of silently overwriting the
 other writer's change.
+
+It prevents a **lost update**, a race between two writers of the same
+resource. Example: the owner opens bot_123's bindings in the UI and a
+pipeline reads them too; both get `ETag: "bind-v12"`. The pipeline raises
+`bind_01`'s budget and saves first (`If-Match: "bind-v12"` matches; the
+bindings become `bind-v13`). The owner then saves a new trigger for
+`bind_02` with `If-Match: "bind-v12"`. Without the check, the owner's
+save would replace the whole list with their stale copy and silently undo
+the budget change. With it, the owner gets `412`, re-reads `bind-v13`,
+and reapplies the trigger change on top (the loop in [§6](#6-concurrency-etags-if-match-and-compare-and-swap)).
 
 ```python
 @dataclass(frozen=True)
@@ -459,7 +467,7 @@ twice still produces one run.
 
 ### 5.2 Rules for the platform
 
-- The platform stores **`(owner_id, bot_id, key) → resource id`**, together
+- The platform stores **`(owner_id, bot_id, key) → result id`**, together
   with a fingerprint of the request (`sha256` of the canonical `{method,
   path, body}`). For bot-scoped paths the scope is the addressed bot: the
   `bot_id` in the path and its owner (`entity_id`, or the caller when it is
@@ -468,8 +476,8 @@ twice still produces one run.
   points to, so a crash can never leave a created run without its key, or a
   key without its run.
 - **Same key, same request** (matching fingerprint): the platform returns
-  the original result: the same status code (`201` or `202`) and the same
-  resource id, with the resource's **current** state in `data` (a run that
+  the original result: the endpoint's success status (each endpoint has
+  one, e.g. `202` for a run, so it is not stored) and the same result id, with the resource's **current** state in `data` (a run that
   started an hour ago comes back as `running`, not `queued`). The response
   carries the header `Idempotent-Replayed: true` (proposed). Nothing is
   created, started, or charged again.
@@ -1203,7 +1211,7 @@ class IdempotencyStore(Protocol):
         """The record for (owner_id, bot_id, key), or None if the key is new or expired."""
 
     async def record(self, record: IdempotencyRecord) -> None:
-        """Stores (owner_id, bot_id, key) -> resource id in the same transaction that creates the resource.
+        """Stores (owner_id, bot_id, key) -> result id in the same transaction that creates the resource.
         Raises KeyInProgress if another request holds the key and has not committed."""
 
 class IdempotentHandler(Protocol):

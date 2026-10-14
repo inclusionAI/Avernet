@@ -62,8 +62,8 @@ Backend 现有的 OpenAPI v1 适配器已经提供了本文档复用的 envelope
 | `ErrorEnvelope` | 失败时的同一包装，`data` 始终为 `null` | 本文档（复用 OpenAPI v1） | 每个响应 |
 | `Page[T]` / `PageParams` | 列表结果的一页（`total`、`items`）及其控制参数（`page`、`page_size`） | 本文档（复用 OpenAPI v1） | 每个请求 |
 | `BotRef` | 一个 bot 的完整标识：`owner_id` 加 `bot_id`，因为单独的 `bot_id` 在不同用户之间并不唯一（[§2.6](#26-botrefbot-标识)） | 本文档；所有进化记录都使用它 | 在 bot 的整个生命周期内固定 |
-| `IdempotencyRecord` | 平台对一个幂等键的记忆：`(owner_id, bot_id, key) → resource id`，外加请求的指纹 | 本文档；由各服务存储 | 在首个携带该键的请求时创建；在保留期内保留 |
-| `Precondition` | 读取可变资源时返回的 `ETag`，以及在写入时将其回传的 `If-Match` 请求头 | 本文档 | 每个资源版本 |
+| `IdempotencyRecord` | 平台对一个幂等键的记忆。**键**是客户端 `Idempotency-Key` 请求头的值，例如 `nightly-bot_123-2026-10-08`；记录把它映射到**结果 id**，即携带该键的首个请求所创建或启动之物的 id，例如运行 `run_7f3`，外加请求的指纹。用同一个键重试会拿回 `run_7f3`，而不是再启动一个运行（[§2.3](#23-idempotencyrecord)） | 本文档；由各服务存储 | 在首个携带该键的请求时创建；在保留期内保留 |
+| `Precondition` | 写入时的版本检查。对客户端整体替换的资源（目前只有 Bot 的绑定）发起 `GET` 时返回 `ETag` 响应头，即一个版本标签，例如 `"bind-v12"`；客户端在 `PUT` 时通过 `If-Match` 请求头回传它，如果资源在那次读取之后已变化，服务器以 `412` 拒绝这次写入（[§2.4](#24-preconditionetag-与-if-match)） | 本文档 | 每个资源版本 |
 | `Operation` | 由请求启动、按 id 查询的长时工作单元（`queued`、`running`、`succeeded`、`failed`、`cancelled`） | 概念在 [03-strategy.zh-CN.md](03-strategy.zh-CN.md) 中定义；公开资源及其查询端点由本文档负责（[§10.8](#108-操作--本文档)） | 由 `202` 响应创建；完成后即为终态 |
 
 ### 2.1 Envelope 与 ErrorEnvelope
@@ -158,7 +158,7 @@ class Page(Generic[T]):
 from datetime import datetime
 from enum import StrEnum
 
-class IdempotentResourceKind(StrEnum):
+class IdempotentResultKind(StrEnum):
     """What a key can create or start (one value per row of the §5.3 table)."""
     RUN = "run"
     OPERATION = "operation"
@@ -172,9 +172,8 @@ class IdempotencyRecord:
     bot: BotRef            # scope: the bot addressed by the request (owner + bot id, §2.6)
     key: str               # the client's Idempotency-Key header value
     fingerprint: str       # sha256 of the RFC 8785 canonical form of {method, path, body}
-    resource_kind: IdempotentResourceKind
-    resource_id: str       # id of what the first request created or started, e.g. "run_7f3"
-    first_status: int      # HTTP status of the first response (201 or 202)
+    result_kind: IdempotentResultKind
+    result_id: str         # id of what the first request created or started, e.g. "run_7f3"
     created_at: datetime
     expires_at: datetime   # end of the retention window (open decision A-2, §15)
 ```
@@ -185,9 +184,8 @@ class IdempotencyRecord:
   "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "key": "nightly-bot_123-2026-10-08",
   "fingerprint": "sha256:5d1e…",
-  "resource_kind": "run",
-  "resource_id": "run_7f3",
-  "first_status": 202,
+  "result_kind": "run",
+  "result_id": "run_7f3",
   "created_at": "2026-10-08T02:00:03Z",
   "expires_at": "2026-11-07T02:00:03Z"
 }
@@ -199,6 +197,8 @@ class IdempotencyRecord:
 **`If-Match`** 请求头中回传该标签；如果资源在此期间已发生变化，服务器以
 `412 Precondition Failed` 拒绝这次写入，而不是悄无声息地覆盖另一位写入者
 的修改。
+
+它防止的是**丢失更新**，即同一资源的两个写入者之间的竞态。例如：所有者在 UI 中打开 bot_123 的绑定，同时一条流水线也读取了它们；两者都拿到 `ETag: "bind-v12"`。流水线提高了 `bind_01` 的预算并先保存（`If-Match: "bind-v12"` 匹配；绑定变为 `bind-v13`）。随后所有者为 `bind_02` 保存新的触发器，带的是 `If-Match: "bind-v12"`。没有这项检查，所有者的保存会用其过时的副本替换整个列表，悄无声息地撤销预算修改。有了它，所有者收到 `412`，重新读取 `bind-v13`，并在其上重新应用触发器修改（即 [§6](#6-并发etagif-match-与比较并交换) 中的循环）。
 
 ```python
 @dataclass(frozen=True)
@@ -426,15 +426,15 @@ Bot 调用方（驱动自身进化的 bot，或作为作业运行器的 bot，�
 
 ### 5.2 平台规则
 
-- 平台存储 **`(owner_id, bot_id, key) → resource id`**，以及请求的指纹
+- 平台存储 **`(owner_id, bot_id, key) → result id`**，以及请求的指纹
   （对规范化 `{method,
   path, body}` 的 `sha256`）。对于 bot 范围的路径，作用域是被寻址的 bot：
   路径中的 `bot_id` 及其所有者（`entity_id`，省略时为调用方），因此两个
   所有者下 `bot_id` 相同的 bot 永远不会共享键。
 - 该记录与其指向的资源**在同一事务中**写入，因此崩溃永远不会留下一个
   没有键的已创建运行，或一个没有运行的键。
-- **相同键、相同请求**（指纹匹配）：平台返回原始结果：相同的状态码
-  （`201` 或 `202`）和相同的资源 id，`data` 中为资源的**当前**状态（一个
+- **相同键、相同请求**（指纹匹配）：平台返回原始结果：该端点的成功状态码
+  （每个端点只有一个，例如运行是 `202`，因此无需存储）和相同的结果 id，`data` 中为资源的**当前**状态（一个
   一小时前启动的运行会以 `running` 而非 `queued` 返回）。响应
   带有请求头 `Idempotent-Replayed: true`（提议）。不会再次创建、启动或
   计费任何东西。
@@ -1125,7 +1125,7 @@ class IdempotencyStore(Protocol):
         """The record for (owner_id, bot_id, key), or None if the key is new or expired."""
 
     async def record(self, record: IdempotencyRecord) -> None:
-        """Stores (owner_id, bot_id, key) -> resource id in the same transaction that creates the resource.
+        """Stores (owner_id, bot_id, key) -> result id in the same transaction that creates the resource.
         Raises KeyInProgress if another request holds the key and has not committed."""
 
 class IdempotentHandler(Protocol):
