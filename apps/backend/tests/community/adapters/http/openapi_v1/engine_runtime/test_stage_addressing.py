@@ -71,6 +71,9 @@ def _is_engine_runtime(path: str) -> bool:
 #: frozen, so they must not have grown the parameter — which the exclusivity
 #: assertion below is what proves.
 _STAGE_ADDRESSED_ELSEWHERE = {
+    # Release inspection explicitly rejects published stages, never falls back
+    # to a draft. Its stage parameter is an intentional additive contract.
+    ("get", "/openapi/v1/bots/{bot_id}/engine-version"),
     ("get", "/openapi/v1/bots/{bot_id}/resources"),
     ("get", "/openapi/v1/bots/{bot_id}/resources/stat"),
     ("post", "/openapi/v1/bots/{bot_id}/resources/upload"),
@@ -95,6 +98,7 @@ _STAGE_ADDRESSED_ELSEWHERE = {
 #: **not** take ``stage``: there is no runtime in question when you are
 #: recording who may reach a bot, or listing a bot's stored skills.
 _OWNER_ADDRESSED_ELSEWHERE = {
+    ("get", "/openapi/v1/bots/{bot_id}/engine-version"),
     ("get", "/openapi/v1/bots/{bot_id}/status"),
     ("post", "/openapi/v1/bots/{bot_id}/activate"),
     ("post", "/openapi/v1/bots/{bot_id}/recycle"),
