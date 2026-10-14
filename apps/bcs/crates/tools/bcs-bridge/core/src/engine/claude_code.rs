@@ -108,11 +108,13 @@ pub(crate) enum CcMap {
         input: Value,
     },
     /// A background task was launched (`system/task_started`), keyed by the
-    /// tool call that launched it.
-    BackgroundStarted { tool_use_id: String },
+    /// tool call that launched it; `task_id` (when present) lets a later
+    /// notification that omits `tool_use_id` still resolve this call.
+    BackgroundStarted { task_id: Option<String>, tool_use_id: String },
     /// A background task status report (`system/task_notification`); only
-    /// terminal statuses release the wait in `run_turn`.
-    BackgroundFinished { tool_use_id: String, status: String },
+    /// terminal statuses release the wait in `run_turn`. `tool_use_id` is
+    /// absent in some CLI versions — `task_id` correlation covers them.
+    BackgroundFinished { task_id: Option<String>, tool_use_id: Option<String>, status: String },
 }
 
 /// Claude tool results carry only an ID. Keep their complete start names within
@@ -126,11 +128,20 @@ struct CcTurnMapper<'a> {
     /// auto-wakes the agent on each task_notification, and ends with another
     /// `result` when the background work is actually done.
     background: HashSet<String>,
+    /// `task_id -> tool_use_id` from `task_started` lines; lets a
+    /// `task_notification` that omits `tool_use_id` (recorded in some CLI
+    /// versions) still release the right wait.
+    task_ids: HashMap<String, String>,
 }
 
 impl<'a> CcTurnMapper<'a> {
     fn new(run_id: &'a str) -> Self {
-        Self { run_id, pending_tools: HashMap::new(), background: HashSet::new() }
+        Self {
+            run_id,
+            pending_tools: HashMap::new(),
+            background: HashSet::new(),
+            task_ids: HashMap::new(),
+        }
     }
 
     /// Number of background tasks still pending completion.
@@ -138,71 +149,90 @@ impl<'a> CcTurnMapper<'a> {
         self.background.len()
     }
 
-    fn register_background(&mut self, tool_use_id: &str) {
+    /// Track a background launch. Only called on evidence the work actually
+    /// started (`task_started`, or the async-launch receipt): a
+    /// `run_in_background: true` request that is denied or fails validation
+    /// never emits either, and eagerly registering it would wedge the turn
+    /// on work that will never notify.
+    fn register_background(&mut self, tool_use_id: &str, task_id: Option<&str>) {
         if !tool_use_id.trim().is_empty() {
             self.background.insert(tool_use_id.to_owned());
+            if let Some(task_id) = non_empty(task_id) {
+                self.task_ids.insert(task_id.to_owned(), tool_use_id.to_owned());
+            }
         }
     }
 
     /// Release a background wait on a terminal `task_notification` status;
-    /// `running`/`pending` progress reports must keep the wait.
-    fn finish_background(&mut self, tool_use_id: &str, status: &str) {
-        if matches!(status, "completed" | "failed" | "stopped" | "killed") {
-            self.background.remove(tool_use_id);
+    /// `running`/`pending` progress reports must keep the wait. Resolves the
+    /// waiting call by `tool_use_id`, falling back to the `task_id`
+    /// correlation for notifications that omit it.
+    fn finish_background(&mut self, task_id: Option<&str>, tool_use_id: Option<&str>, status: &str) {
+        if !matches!(status, "completed" | "failed" | "stopped" | "killed") {
+            return;
+        }
+        let released = tool_use_id
+            .map(str::to_owned)
+            .or_else(|| task_id.and_then(|id| self.task_ids.get(id).cloned()));
+        if let Some(released) = released.filter(|id| !id.trim().is_empty()) {
+            self.background.remove(&released);
         }
     }
 
     fn map_line(&mut self, line: &str) -> CcMap {
-        let mut mapped = map_cc_line(line, self.run_id);
-        // Track async background launches that surface as ordinary tool start/
-        // result events: a `run_in_background: true` call, or the async-launch
-        // receipt text instead of a completed tool result. task_started lines
-        // (handled by the driver via CcMap) are the authoritative signal; this
-        // is the belt-and-braces coverage for engines that omit them.
-        if let CcMap::Events(events) = &mut mapped {
-            let mut extra_registrations: Vec<String> = Vec::new();
-            for event in events {
-                let StreamEvent::Agent(agent) = event else { continue; };
-                let AgentData::Tool(tool) = &mut agent.data else { continue; };
-                let Some(id) = tool.tool_call_id.as_deref().filter(|id| !id.trim().is_empty()).map(str::to_owned) else {
-                    continue;
-                };
-                match tool.phase {
-                    ToolPhase::Start => {
-                        let background_launch = tool
-                            .args
-                            .as_ref()
-                            .and_then(|args| args.get("run_in_background"))
-                            .and_then(Value::as_bool)
-                            .unwrap_or(false);
-                        if background_launch {
-                            extra_registrations.push(id.clone());
+        let mapped = map_cc_line(line, self.run_id);
+        match mapped {
+            // Background lifecycle lines are consumed into tracking state here;
+            // run_turn only reads background_pending() to gate the wait.
+            CcMap::BackgroundStarted { task_id, tool_use_id } => {
+                self.register_background(&tool_use_id, task_id.as_deref());
+                CcMap::Ignore
+            }
+            CcMap::BackgroundFinished { task_id, tool_use_id, status } => {
+                self.finish_background(task_id.as_deref(), tool_use_id.as_deref(), &status);
+                CcMap::Ignore
+            }
+            CcMap::Events(mut events) => {
+                // Belt-and-braces launch coverage for engines that omit the
+                // task lifecycle lines: the async-launch receipt is a
+                // whole-result prefix from a launch-capable tool (matching it
+                // in arbitrary tool output — e.g. reading this source — would
+                // phantom-register a wait that never notifies).
+                for event in &mut events {
+                    let StreamEvent::Agent(agent) = event else { continue; };
+                    let AgentData::Tool(tool) = &mut agent.data else { continue; };
+                    let Some(id) = tool.tool_call_id.as_deref().filter(|id| !id.trim().is_empty()).map(str::to_owned) else {
+                        continue;
+                    };
+                    match tool.phase {
+                        ToolPhase::Start => {
+                            let name = tool.name.clone().filter(|name| !name.trim().is_empty());
+                            self.pending_tools.entry(id)
+                                .and_modify(|existing| {
+                                    if existing != &name {
+                                        *existing = None;
+                                    }
+                                })
+                                .or_insert(name);
                         }
-                        let name = tool.name.clone().filter(|name| !name.trim().is_empty());
-                        self.pending_tools.entry(id)
-                            .and_modify(|existing| {
-                                if existing != &name {
-                                    *existing = None;
-                                }
-                            })
-                            .or_insert(name);
-                    }
-                    ToolPhase::Result => {
-                        if async_launch_receipt(&tool.result) {
-                            extra_registrations.push(id.clone());
+                        ToolPhase::Result => {
+                            let name = self.pending_tools.remove(&id).flatten();
+                            if matches!(name.as_deref(), Some("Bash") | Some("Task") | Some("Agent"))
+                                && async_launch_receipt(&tool.result)
+                            {
+                                self.register_background(&id, None);
+                            }
+                            // Consume once: an orphan/repeated result must not inherit
+                            // a different call's name or derive it from result content.
+                            tool.name = name;
                         }
-                        // Consume once: an orphan/repeated result must not inherit
-                        // a different call's name or derive it from result content.
-                        tool.name = self.pending_tools.remove(&id).flatten();
+                        _ => {}
                     }
-                    _ => {}
                 }
+                CcMap::Events(events)
             }
-            for id in extra_registrations {
-                self.register_background(&id);
-            }
+            other => other,
         }
-        mapped
     }
 }
 
@@ -222,7 +252,11 @@ fn async_launch_receipt(result: &Option<Value>) -> bool {
 }
 
 fn receipt_text(text: &str) -> bool {
-    text.contains("Async agent launched successfully") || text.contains("Command running in background")
+    // Receipts ARE the whole result text; a mere mention inside other output
+    // (this source, a log line) must not read as a launch.
+    let text = text.trim();
+    text.starts_with("Async agent launched successfully")
+        || text.starts_with("Command running in background with ID:")
 }
 
 /// 把一行 claude `stream-json` NDJSON 映射为引擎中立的 [`CcMap`]。
@@ -255,19 +289,27 @@ fn map_system(v: &Value) -> CcMap {
             Some(s) if !s.is_empty() => CcMap::SessionId(s.to_string()),
             _ => CcMap::Ignore,
         },
-        // Background-task lifecycle (recorded from a live capture): both carry
-        // the tool_use_id that launched the work; notifications also carry the
-        // status the driver gates the pending-wait on.
-        "task_started" => match non_empty(v.get("tool_use_id").and_then(|x| x.as_str())) {
-            Some(id) => CcMap::BackgroundStarted { tool_use_id: id.to_string() },
-            None => CcMap::Ignore,
-        },
-        "task_notification" => {
+        // Background-task lifecycle (recorded from a live capture).
+        "task_started" => {
             let tool_use_id = non_empty(v.get("tool_use_id").and_then(|x| x.as_str()));
-            let status = non_empty(v.get("status").and_then(|x| x.as_str()));
-            match (tool_use_id, status) {
-                (Some(id), Some(status)) => CcMap::BackgroundFinished {
+            match tool_use_id {
+                Some(id) => CcMap::BackgroundStarted {
+                    task_id: non_empty(v.get("task_id").and_then(|x| x.as_str())).map(str::to_string),
                     tool_use_id: id.to_string(),
+                },
+                None => CcMap::Ignore,
+            }
+        }
+        "task_notification" => {
+            // tool_use_id is optional in some CLI versions; task_id + status
+            // still carry the release decision via the mapper's correlation.
+            let tool_use_id = non_empty(v.get("tool_use_id").and_then(|x| x.as_str()));
+            let task_id = non_empty(v.get("task_id").and_then(|x| x.as_str()));
+            let status = non_empty(v.get("status").and_then(|x| x.as_str()));
+            match (task_id.or(tool_use_id), status) {
+                (Some(_), Some(status)) => CcMap::BackgroundFinished {
+                    task_id: task_id.map(str::to_string),
+                    tool_use_id: tool_use_id.map(str::to_string),
                     status: status.to_string(),
                 },
                 _ => CcMap::Ignore,
@@ -913,11 +955,8 @@ impl Engine for ClaudeCode {
                             }
                             return Ok(TurnOutcome { engine_session_id, final_text: Some(text) });
                         }
-                        CcMap::BackgroundStarted { tool_use_id } => {
-                            mapper.register_background(&tool_use_id);
-                        }
-                        CcMap::BackgroundFinished { tool_use_id, status } => {
-                            mapper.finish_background(&tool_use_id, &status);
+                        CcMap::BackgroundStarted { .. } | CcMap::BackgroundFinished { .. } => {
+                            // Consumed into mapper tracking inside map_line.
                         }
                         CcMap::Failed(note) => {
                             cli.kill().await;
@@ -1530,32 +1569,103 @@ mod tests {
     #[test]
     fn task_lifecycle_system_lines_map_to_tracking_variants() {
         // Shapes recorded from a live CLI capture: task lifecycle lines carry
-        // the tool_use_id that launched the work (and, for notifications, the
-        // status the driver gates the wait on).
+        // the tool_use_id that launched the work, its task_id, and (for
+        // notifications) the status the mapper gates the wait on.
         let started = r#"{"type":"system","subtype":"task_started","task_id":"t1","tool_use_id":"toolu_1","task_type":"local_agent"}"#;
         match map_cc_line(started, "r-1") {
-            CcMap::BackgroundStarted { tool_use_id } => assert_eq!(tool_use_id, "toolu_1"),
+            CcMap::BackgroundStarted { task_id, tool_use_id } => {
+                assert_eq!(task_id.as_deref(), Some("t1"));
+                assert_eq!(tool_use_id, "toolu_1");
+            }
             other => panic!("expected BackgroundStarted, got {other:?}"),
         }
         let finished = r#"{"type":"system","subtype":"task_notification","task_id":"t1","tool_use_id":"toolu_1","status":"completed","summary":"done"}"#;
         match map_cc_line(finished, "r-1") {
-            CcMap::BackgroundFinished { tool_use_id, status } => {
-                assert_eq!(tool_use_id, "toolu_1");
+            CcMap::BackgroundFinished { task_id, tool_use_id, status } => {
+                assert_eq!(task_id.as_deref(), Some("t1"));
+                assert_eq!(tool_use_id.as_deref(), Some("toolu_1"));
                 assert_eq!(status, "completed");
             }
             other => panic!("expected BackgroundFinished, got {other:?}"),
         }
-        // Non-terminal statuses ride along unchanged; the driver decides release.
+        // Recorded in some CLI versions: the notification omits tool_use_id;
+        // the task_id must ride along so the mapper can correlate.
+        let legacy = r#"{"type":"system","subtype":"task_notification","task_id":"t1","status":"completed","summary":"done"}"#;
+        match map_cc_line(legacy, "r-1") {
+            CcMap::BackgroundFinished { task_id, tool_use_id, status } => {
+                assert_eq!(task_id.as_deref(), Some("t1"));
+                assert_eq!(tool_use_id, None);
+                assert_eq!(status, "completed");
+            }
+            other => panic!("expected BackgroundFinished, got {other:?}"),
+        }
+        // Non-terminal statuses ride along unchanged; the mapper decides release.
         let running = r#"{"type":"system","subtype":"task_notification","task_id":"t1","tool_use_id":"toolu_1","status":"running"}"#;
         match map_cc_line(running, "r-1") {
             CcMap::BackgroundFinished { status, .. } => assert_eq!(status, "running"),
             other => panic!("expected BackgroundFinished, got {other:?}"),
         }
-        // A task line without a usable tool_use_id stays inert.
+        // A task line without any usable identity stays inert.
         assert!(matches!(
             map_cc_line(r#"{"type":"system","subtype":"task_started","task_id":"t2"}"#, "r-1"),
             CcMap::Ignore,
         ));
+        assert!(matches!(
+            map_cc_line(r#"{"type":"system","subtype":"task_notification","status":"completed"}"#, "r-1"),
+            CcMap::Ignore,
+        ));
+    }
+
+    #[test]
+    fn background_launch_requires_evidence_not_just_the_request() {
+        // A `run_in_background: true` request alone is not a launch: a denied or
+        // invalid call never emits task_started or a receipt, and registering
+        // it would wedge the turn on work that will never notify.
+        let mut mapper = CcTurnMapper::new("r-1");
+        let start = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_d","name":"Bash","input":{"command":"sleep 1","run_in_background":true}}]}}"#;
+        assert!(matches!(mapper.map_line(start), CcMap::Events(_)));
+        assert_eq!(mapper.background_pending(), 0, "request alone must not register");
+        // The authoritative launch evidence does.
+        let launched = r#"{"type":"system","subtype":"task_started","task_id":"t1","tool_use_id":"toolu_d","task_type":"local_bash"}"#;
+        assert!(matches!(mapper.map_line(launched), CcMap::Ignore));
+        assert_eq!(mapper.background_pending(), 1);
+    }
+
+    #[test]
+    fn receipt_registration_requires_initiating_tool_and_whole_text_prefix() {
+        // Receipt markers seen inside other tools' output — CRs reading this
+        // very source, grep over logs — must not read as background launches.
+        let mut mapper = CcTurnMapper::new("r-1");
+        let read_start = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_r","name":"Read","input":{"path":"claude_code.rs"}}]}}"#;
+        assert!(matches!(mapper.map_line(read_start), CcMap::Events(_)));
+        let read_result = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_r","content":"core/src/engine/claude_code.rs: text.contains(\"Async agent launched successfully\")"}]}}"#;
+        assert!(matches!(mapper.map_line(read_result), CcMap::Events(_)));
+        assert_eq!(mapper.background_pending(), 0, "substring in a Read result must not register");
+        // A Bash result that merely mentions the sentence mid-text: excluded.
+        let bash_start = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_g","name":"Bash","input":{"command":"grep receipt src"}}]}}"#;
+        assert!(matches!(mapper.map_line(bash_start), CcMap::Events(_)));
+        let grep_result = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_g","content":"logs: text.contains(\"Command running in background\")"}]}}"#;
+        assert!(matches!(mapper.map_line(grep_result), CcMap::Events(_)));
+        assert_eq!(mapper.background_pending(), 0, "mid-text mention must not register");
+        // The recorded receipt shape — the whole result, from an initiating
+        // tool — registers.
+        let bg_start = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_b","name":"Bash","input":{"command":"sleep 1","run_in_background":true}}]}}"#;
+        assert!(matches!(mapper.map_line(bg_start), CcMap::Events(_)));
+        let receipt = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_b","content":"Command running in background with ID: bp1. Output is being written to: /tmp/x. You will be notified when it completes.","is_error":false}]}}"#;
+        assert!(matches!(mapper.map_line(receipt), CcMap::Events(_)));
+        assert_eq!(mapper.background_pending(), 1);
+    }
+
+    #[test]
+    fn task_id_correlation_releases_waits_from_notifications_without_tool_id() {
+        let mut mapper = CcTurnMapper::new("r-1");
+        let started = r#"{"type":"system","subtype":"task_started","task_id":"t-legacy","tool_use_id":"toolu_leg","task_type":"local_agent"}"#;
+        assert!(matches!(mapper.map_line(started), CcMap::Ignore));
+        assert_eq!(mapper.background_pending(), 1);
+        // Recorded pre-0.3.269 shape: notification has task_id + status only.
+        let legacy_note = r#"{"type":"system","subtype":"task_notification","task_id":"t-legacy","status":"completed","summary":"done"}"#;
+        assert!(matches!(mapper.map_line(legacy_note), CcMap::Ignore));
+        assert_eq!(mapper.background_pending(), 0, "task_id must release the correlated wait");
     }
 
     #[tokio::test]
@@ -1585,5 +1695,30 @@ mod tests {
             .expect_err("EOF with a pending background task must not read as success");
         let text = error.to_string();
         assert!(text.contains("pending background task"), "unexpected error: {text}");
+    }
+
+    #[tokio::test]
+    async fn denied_background_launch_does_not_wedge_the_turn() {
+        // A run_in_background request refused before launch emits no
+        // task_started and no receipt; the turn must finalize on its single
+        // result instead of swallowing it until the deadline.
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/mock_cc_bg_denied_launch.sh"
+        );
+        let outcome = run_mock_cc(script).await.expect("denied launch must not wedge");
+        assert_eq!(outcome.final_text.as_deref(), Some("not launched"));
+    }
+
+    #[tokio::test]
+    async fn notification_without_tool_id_still_releases_the_wait() {
+        // Pre-0.3.269 CLI recordings omit tool_use_id from task_notification;
+        // the task_id correlation from task_started must release the wait.
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/mock_cc_bg_taskid_notification.sh"
+        );
+        let outcome = run_mock_cc(script).await.expect("legacy notification must release");
+        assert_eq!(outcome.final_text.as_deref(), Some("released via task_id"));
     }
 }
