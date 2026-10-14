@@ -5,6 +5,7 @@ No state (kernel module owns it all).
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from typing import Any
@@ -14,12 +15,18 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from engine.community.api.transport.a2a import wire
 from engine.community.api.transport.a2a.card import make_agent_card
+from engine.community.api.transport.a2a.engine_bridge import execute_and_stream
 from engine.community.api.transport.a2a.kernel import A2aKernel, KeyConflictError
 
 router = APIRouter()
 
 # Module-level kernel singleton (one per FastAPI process).
 _kernel = A2aKernel()
+
+# Strong references to in-flight engine_bridge tasks: asyncio only weakly
+# tracks tasks, so an unreferenced fire-and-forget task can be garbage
+# collected mid-run and silently kill the event stream.
+_BRIDGE_TASKS: set[asyncio.Task] = set()
 
 _HANDLERS: dict[str, Any] = {}
 
@@ -122,16 +129,13 @@ async def _send_streaming(params: dict[str, Any]) -> Response:
                                     wire.wire_unknown_outcome())
     rid, _created = out
 
-    # engine_bridge is created in Task 6; guard the import for now
-    try:
-        from engine.community.api.transport.a2a.engine_bridge import (
-            execute_and_stream,
-        )
-        import asyncio
-        asyncio.get_event_loop().create_task(
-            execute_and_stream(_kernel, rid, ctx, _message_text(msg)))
-    except ImportError:
-        pass  # engine_bridge not yet available — Task 6 will add it
+    # Dispatch through the engine bridge in the background; the SSE
+    # generator below subscribes to the kernel and relays whatever the
+    # bridge publishes (delta/final/status events + terminal marker).
+    task = asyncio.create_task(execute_and_stream(
+        _kernel, rid, ctx, _message_text(msg)))
+    _BRIDGE_TASKS.add(task)
+    task.add_done_callback(_BRIDGE_TASKS.discard)
 
     backlog, q = await _kernel.subscribe(rid, since_seq=0)
     return _stream_response(rid, backlog, q)
