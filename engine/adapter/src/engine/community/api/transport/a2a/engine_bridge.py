@@ -156,6 +156,41 @@ async def _dispatch_to_engine(kernel: A2aKernel, rid: str, context_id: str,
                                                  run_id)
                 continue
 
+            # ── R17-2/16-6: non-chat engine frames — lossless routing with
+            # original event names. The chat branch below stays untouched. ──
+            if event != "chat" and state not in _TERMINAL_CHAT_STATES:
+                if state == "interaction.requested" or \
+                        event == "interaction.requested":
+                    iid = payload.get("interactionId") or payload.get("id")
+                    if not isinstance(iid, str) or not iid:
+                        iid = f"int-{uuid.uuid4().hex[:8]}"
+                    await kernel.publish_interaction_requested(
+                        rid, iid, payload)
+                    continue
+                if state == "interaction.resolved" or \
+                        event == "interaction.resolved":
+                    await kernel.publish_interaction_resolved(rid, payload)
+                    continue
+                if state in ("approval_requested", "approval_resolved"):
+                    iid = payload.get("approvalId") or payload.get("id")
+                    if not isinstance(iid, str) or not iid:
+                        iid = f"apr-{uuid.uuid4().hex[:8]}"
+                    if state == "approval_requested":
+                        await kernel.publish_interaction_requested(
+                            rid, iid, payload)
+                    else:
+                        await kernel.publish_interaction_resolved(rid, payload)
+                    continue
+                if payload:
+                    # agent & mode_transition.resolved 共走 lossless 通道，
+                    # original_event 决定 BaaS 消费者回调路由（R17-2）。
+                    await kernel.publish_agent_progress(
+                        rid, payload, event_name=event)
+                    continue
+                log.debug("bridge: dropping empty frame event=%s state=%s",
+                          event, state)
+                continue
+
             if event == "chat" or state in _TERMINAL_CHAT_STATES:
                 if state == "delta":
                     chunk = _payload_text(payload, state)

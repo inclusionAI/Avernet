@@ -143,14 +143,17 @@ def wire_interaction_resolved(run_id: str, context_id: str, seq: int,
 
 
 def wire_agent_progress(run_id: str, context_id: str, seq: int,
-                        payload: dict[str, Any]) -> dict[str, Any]:
-    """agent 事件（openclaw tool 进度等）→ statusUpdate（state 不变；metadata
-    保 tool/phase/data 摘要——BaaS 客户端反向归一回 v3 `agent` 事件 payload）。"""
-    meta: dict[str, Any] = {"seq": seq, "kind": "agent"}
-    for key in ("tool", "phase", "type", "name"):
-        v = payload.get(key)
-        if isinstance(v, (str, int, float, bool)):
-            meta[key] = v
+                        payload: dict[str, Any],
+                        event_name: str = "agent") -> dict[str, Any]:
+    """agent/mode_transition 事件 → statusUpdate(WORKING)。
+
+    R17-2/16-6: 原始事件名经 ``metadata.original_event`` 保留——
+    mode_transition.resolved 的 BaaS 消费者回调按它路由,不能被 "agent" 吞掉。
+    完整原始载荷在 ``metadata.engine_frame`` (v2-E1' 无损通道)。
+    """
+    meta: dict[str, Any] = {"seq": seq, "kind": "agent",
+                            "original_event": event_name,
+                            "engine_frame": dict(payload)}
     return {"seq": seq, "type": "statusUpdate", "ev": {
         "statusUpdate": {"taskId": run_id, "contextId": context_id,
                           "status": {"state": "TASK_STATE_WORKING"},

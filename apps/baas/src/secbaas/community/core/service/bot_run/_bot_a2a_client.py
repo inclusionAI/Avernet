@@ -1,0 +1,505 @@
+"""BotA2aClient — BotWebSocketClient 的 A2A v1.0 传输实现（1b 灰度）。
+
+R17 契约对齐基准（全部 cat 自真实代码）：
+  - chat_send/chat_inject 签名：_bot_websocket_client.py:240-248/:281-288
+  - ok 契约：_send_chat_request(:725-775) 统一判断 {ok, error{code,message,retryable}}
+  - interaction_resolve 返回 EngineInteractionResolveExchange（真实
+    dataclass——消费者 :1210-1218 属性访问 exchange.request/.response/.accepted/
+    .error_message）；入参 InteractionResolution 完整 schema
+    （api/bot_interaction/_models.py:12-31）
+  - 事件七类 + StreamChunk.metadata.engine_frame 逃生舱（_async_chat_client.py:282-289）
+R17 修正（本文件就是计划 B1 的落地实现——不再"计划代码 vs 实现代码"两张皮）：
+  - L1 生命周期：chat_send 两段式（ack 立即返回 + per-request body task）
+  - T1 终态单次；E1 错误二分；M1 无损（engine_frame + original_event 路由）
+  - R17-7：metadata 与 WS 同构平铺；timeout_ms 经 metadata.timeoutMs
+    上行 + HTTP 超时下行
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import time
+import uuid
+from typing import Any, Callable, Optional
+
+import httpx
+
+from secbaas.community.api.bot_interaction._models import InteractionResolution
+from secbaas.community.core.service.bot_run._interaction_protocol import (
+    EngineInteractionResolveExchange,
+)
+
+logger = logging.getLogger(__name__)
+
+EventHandler = Callable[..., Any]
+
+_TERMINAL_WIRE_STATES = ("TASK_STATE_FAILED", "TASK_STATE_CANCELED",
+                         "TASK_STATE_REJECTED")
+
+
+class A2aUnavailableError(RuntimeError):
+    """目标不可用/非 JSONRPC 1.x——工厂回退 v3 的灰度门信号。"""
+
+
+class _RunCtx:
+    __slots__ = ("rid", "session_key", "final_text", "terminal_emitted",
+                 "task")
+
+    def __init__(self, rid: str, session_key: str):
+        self.rid = rid
+        self.session_key = session_key
+        self.final_text: str | None = None
+        self.terminal_emitted = False
+        self.task: asyncio.Task | None = None
+
+
+def _message_to_text(message: Any) -> str:
+    if isinstance(message, str):
+        return message
+    if isinstance(message, dict):
+        content = message.get("content")
+        if isinstance(content, list):
+            return "".join(p.get("text", "") for p in content
+                           if isinstance(p, dict))
+    return str(message)
+
+
+def _flatten_metadata(chat_metadata: dict[str, str] | None,
+                      app_id: str | None,
+                      timeout_ms: int | None) -> dict[str, Any]:
+    """R17-7: 与 WS 同构——chat_metadata 平铺键原样进 metadata（不嵌套）。"""
+    meta: dict[str, Any] = {}
+    if chat_metadata:
+        meta.update(chat_metadata)
+    if app_id:
+        meta["appId"] = app_id
+    if timeout_ms:
+        meta["timeoutMs"] = str(timeout_ms)
+    return meta
+
+
+class BotA2aClient:
+    """传输兄弟——方法面与 _bot_websocket_client.py 的对应成员 duck 等义。"""
+
+    def __init__(self, *, base_url: str, headers: Optional[dict] = None,
+                 connect_timeout: float = 10.0,
+                 http_transport_factory: Callable[
+                     [], httpx.AsyncClient] | None = None):
+        self.base_url = base_url.rstrip("/")
+        self.rpc_url = f"{self.base_url}/rpc"
+        self.card_url = f"{self.base_url}/.well-known/agent-card.json"
+        self.headers = dict(headers or {})
+        self._connect_timeout = connect_timeout
+        self._http_factory = http_transport_factory
+        self._event_handlers: dict[str, EventHandler] = {}
+        self._disconnect_callback: EventHandler | None = None
+        self._connected = False
+        self._server_info: dict[str, Any] | None = None
+        self._runs: dict[str, _RunCtx] = {}
+        self._session_runs: dict[str, str] = {}
+
+    # ── 可测性：全方法唯一的 httpx 现场化出口 ──
+    def _http(self, *, timeout: float | None) -> httpx.AsyncClient:
+        if self._http_factory is not None:
+            return self._http_factory()
+        return httpx.AsyncClient(timeout=timeout, proxy=None)
+
+    # ── 生命周期 ──
+    @property
+    def connected(self) -> bool:
+        return self._connected
+
+    @property
+    def server_info(self) -> dict[str, Any] | None:
+        return self._server_info
+
+    @property
+    def features(self) -> dict[str, Any] | None:
+        return (self._server_info or {}).get("features")
+
+    async def connect(self) -> dict[str, Any]:
+        """能力探测：card GET → JSONRPC + 1.x 才可用（灰度门）。"""
+        if self._connected:
+            raise RuntimeError("Already connected")
+        try:
+            async with self._http(timeout=self._connect_timeout) as http:
+                resp = await http.get(self.card_url, headers=self.headers)
+                resp.raise_for_status()
+                card = resp.json()
+        except Exception as e:
+            raise A2aUnavailableError(
+                f"A2A capability probe failed: {e}") from e
+        matched = any(
+            (i.get("protocolBinding") == "JSONRPC"
+             and str(i.get("protocolVersion", "")).startswith("1."))
+            for i in card.get("supportedInterfaces", []))
+        if not matched:
+            raise A2aUnavailableError("no JSONRPC 1.x interface on card")
+        self._server_info = {"type": "hello-ok", "protocol": 1,
+                             "server": {"version": card.get("version", ""),
+                                        "card": card},
+                             "a2a": True}
+        self._connected = True
+        return dict(self._server_info)
+
+    def on_event(self, event_name: str, handler: EventHandler) -> None:
+        self._event_handlers[event_name] = handler
+
+    def on_disconnect(self, handler: EventHandler) -> None:
+        self._disconnect_callback = handler
+
+    async def _notify_disconnect(self) -> None:
+        if self._disconnect_callback:
+            try:
+                self._disconnect_callback("disconnect", {})
+            except Exception:
+                logger.exception("BotA2aClient disconnect handler error")
+
+    async def close(self) -> None:
+        """L1：取消在途 body task（真实流持有者），再断连通知。"""
+        self._connected = False
+        for ctx in list(self._runs.values()):
+            if ctx.task and not ctx.task.done():
+                ctx.task.cancel()
+        self._runs.clear()
+        self._session_runs.clear()
+        await self._notify_disconnect()
+
+    # ── chat_send：两段式 ack + per-request body task（R17-L1）──
+    async def chat_send(
+        self, session_key: str, message: str, timeout_ms: int | None = None,
+        auth_token: str | None = None, app_id: str | None = None,
+        chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
+    ) -> dict[str, Any]:
+        """对位 _bot_websocket_client.py:240-248——纯数据边界 ok 契约。"""
+        if not self._connected:
+            return {"ok": False, "error": {"code": "NOT_CONNECTED",
+                                           "message": "not connected"}}
+        if attachments:
+            # B3 的请求级 v3 重路由在编排层分流；到达这里属编排缺口——
+            # 显式错误，绝不静默丢参。
+            return {"ok": False,
+                    "error": {"code": "ATTACHMENTS_UNSUPPORTED",
+                              "message": "A2A path cannot carry attachments; "
+                                         "orchestration should route to v3"}}
+        rid = f"{session_key}:{time.time_ns()}"
+        wire_message = {
+            "messageId": rid, "contextId": session_key,
+            "role": "ROLE_USER",
+            "parts": [{"text": _message_to_text(message)}],
+        }
+        metadata = _flatten_metadata(chat_metadata, app_id, timeout_ms)
+        metadata.setdefault("traceId", rid)
+        body = {"jsonrpc": "2.0", "id": rid,
+                "method": "SendStreamingMessage",
+                "params": {"message": wire_message,
+                           "metadata": metadata}}
+        headers = {**self.headers,
+                   "X-IAM-Token": auth_token or "OPEN_API:NOT_PROVIDED",
+                   "Accept": "text/event-stream"}
+        http_timeout = (timeout_ms / 1000) if timeout_ms else None
+        client = self._http(timeout=http_timeout)
+        try:
+            resp = await client.send(
+                client.build_request("POST", self.rpc_url, json=body,
+                                     headers=headers), stream=True)
+        except Exception as e:
+            await client.aclose()
+            return {"ok": False,
+                    "error": {"code": "TRANSPORT_ERROR",
+                              "message": str(e)[:200]}}
+        # E1 错误二分：非 SSE 响应 = JSON-RPC 错误体（先不会有流）
+        ctype = resp.headers.get("content-type", "")
+        if resp.status_code != 200 or "text/event-stream" not in ctype:
+            data: dict[str, Any] = {}
+            try:
+                data = json.loads((await resp.aread()).decode(
+                    errors="replace")) or {}
+            except Exception:
+                pass
+            await resp.aclose()
+            await client.aclose()
+            err = ((data.get("error") or {}).get("data") or {})
+            return {"ok": False,
+                    "error": {"code": err.get("reason",
+                                              f"HTTP_{resp.status_code}"),
+                              "message": ((data.get("error") or {})
+                                          .get("message", ""))[:200],
+                              "retryable": False}}
+        ctx = _RunCtx(rid, session_key)
+        self._runs[rid] = ctx
+        self._session_runs[session_key] = rid
+        ctx.task = asyncio.create_task(self._consume_stream(ctx, resp, client))
+        return {"ok": True, "runId": rid, "a2a": True}
+
+    # ── T1/E1/M1：流消费（终态单次 + 错误面 + 无损路由）──
+    async def _consume_stream(self, ctx: _RunCtx, resp: httpx.Response,
+                              client: httpx.AsyncClient) -> None:
+        try:
+            async for line in resp.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                body = json.loads(line[6:])
+                if "error" in body:
+                    err_data = (body["error"].get("data") or {})
+                    self._emit_terminal_error(
+                        ctx, err_data.get("reason", "a2a_error"),
+                        body["error"].get("message", ""))
+                    return
+                self._handle_wire_result(ctx, body.get("result") or {})
+            else:
+                # E1：EOF 无终态不得视为成功
+                if not ctx.terminal_emitted:
+                    self._emit_terminal_error(
+                        ctx, "STREAM_CLOSED_WITHOUT_TERMINAL",
+                        "stream ended before terminal status")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.exception("BotA2aClient SSE consume failed rid=%s",
+                            ctx.rid)
+            if not ctx.terminal_emitted:
+                self._emit_terminal_error(ctx, "STREAM_ERROR", str(e)[:200])
+        finally:
+            await resp.aclose()
+            await client.aclose()
+            self._runs.pop(ctx.rid, None)
+
+    def _handle_wire_result(self, ctx: _RunCtx,
+                            result: dict[str, Any]) -> None:
+        for member in ("statusUpdate", "artifactUpdate", "task", "message"):
+            if member in result:
+                getattr(self, f"_on_{member}")(ctx, result[member])
+                return
+
+    def _on_task(self, ctx: _RunCtx, task: dict[str, Any]) -> None:
+        logger.debug("[a2a] task opened rid=%s state=%s", ctx.rid,
+                     (task.get("status") or {}).get("state"))
+
+    def _on_artifactUpdate(self, ctx: _RunCtx, au: dict[str, Any]) -> None:
+        parts = (au.get("artifact") or {}).get("parts") or []
+        text = "".join(p.get("text", "") for p in parts
+                       if isinstance(p, dict))
+        if au.get("lastChunk") and not au.get("append"):
+            # T1：artifact 终稿只更新内容快照——不发 chat final、不置完成
+            ctx.final_text = text
+            return
+        self._dispatch("chat", {
+            "state": "delta", "deltaText": text,
+            "runId": au.get("taskId"), "sessionKey": ctx.session_key,
+            "message": {"role": "assistant",
+                        "content": [{"type": "text", "text": text}]},
+            "seq": (au.get("metadata") or {}).get("seq"),
+        })
+
+    def _on_statusUpdate(self, ctx: _RunCtx, su: dict[str, Any]) -> None:
+        meta = su.get("metadata") or {}
+        state = (su.get("status") or {}).get("state", "")
+        base = {"runId": su.get("taskId"), "sessionKey": ctx.session_key,
+                "seq": meta.get("seq")}
+        frame = meta.get("engine_frame")
+
+        if state == "TASK_STATE_INPUT_REQUIRED":
+            payload = dict(frame) if isinstance(frame, dict) else {}
+            payload.setdefault("interactionId", meta.get("interactionId"))
+            payload.setdefault("state", "interaction.requested")
+            payload["sessionKey"] = ctx.session_key
+            self._dispatch("interaction.requested", payload)
+            return
+        if meta.get("interactionId") and state == "TASK_STATE_WORKING" \
+                and meta.get("kind") != "agent":
+            payload = dict(frame) if isinstance(frame, dict) else {}
+            payload.setdefault("interactionId", meta.get("interactionId"))
+            payload["state"] = "interaction.resolved"
+            payload["sessionKey"] = ctx.session_key
+            self._dispatch("interaction.resolved", payload)
+            return
+        if meta.get("kind") == "agent":
+            payload = dict(frame) if isinstance(frame, dict) else {}
+            payload.setdefault("stream", payload.get("stream", ""))
+            payload.setdefault("state", payload.get("state", ""))
+            payload["sessionKey"] = ctx.session_key
+            # R17-2：original_event 决定消费者回调路由
+            v3_event = meta.get("original_event", "agent")
+            self._dispatch(v3_event, payload)
+            return
+
+        if meta.get("final") in ("true", True):
+            if ctx.terminal_emitted:
+                return
+            ctx.terminal_emitted = True
+            if state == "TASK_STATE_COMPLETED":
+                text = ctx.final_text or ""
+                self._dispatch("chat", {
+                    **base, "state": "final",
+                    "message": {"role": "assistant",
+                                "content": [{"type": "text", "text": text}]},
+                })
+            else:
+                # FAILED/CANCELED/REJECTED → error 终态（_on_chat.error 分支）
+                err_meta = (frame or {}) if isinstance(frame, dict) else {}
+                self._dispatch("chat", {
+                    **base, "state": "error",
+                    "errorMessage": meta.get("errorMessage")
+                    or err_meta.get("errorMessage")
+                    or f"engine terminal {state}",
+                    "errorCode": state,
+                })
+            return
+        self._dispatch("chat", {**base, "state": state})
+
+    def _on_message(self, ctx: _RunCtx, msg: dict[str, Any]) -> None:
+        parts = msg.get("parts") or []
+        text = "".join(p.get("text", "") for p in parts
+                       if isinstance(p, dict))
+        self._dispatch("chat", {
+            "state": "message", "sessionKey": ctx.session_key,
+            "runId": ctx.rid,
+            "message": {"role": "user",
+                         "content": [{"type": "text", "text": text}]},
+        })
+
+    def _emit_terminal_error(self, ctx: _RunCtx, code: str,
+                             message: str) -> None:
+        ctx.terminal_emitted = True
+        self._dispatch("chat", {
+            "state": "error", "sessionKey": ctx.session_key,
+            "runId": ctx.rid, "errorMessage": message, "errorCode": code,
+        })
+
+    def _dispatch(self, event_name: str, payload: dict[str, Any]) -> None:
+        handler = self._event_handlers.get(event_name) \
+            or self._event_handlers.get("*")
+        if handler:
+            try:
+                handler(event_name, payload)
+            except Exception:
+                logger.exception("[a2a] handler %s failed", event_name)
+
+    # ── abort（CancelTask 为 1c 缺口——诚实 ok=False）──
+    async def chat_abort(self, session_key: str,
+                        run_id: str | None = None) -> dict[str, Any]:
+        rid = run_id or self._session_runs.get(session_key)
+        out: dict[str, Any] = {"ok": False, "a2a": True,
+                               "reason": "cancel_task_not_on_card_1c"}
+        ctx = self._runs.get(rid or "")
+        if ctx and ctx.task and not ctx.task.done():
+            ctx.task.cancel()
+            out["ok"] = True   # 本地流取消生效；engine 侧 CancelTask 1c 补
+            out["reason"] = "local_stream_cancelled"
+        return out
+
+    # ── chat_inject（R16-1 签名；R17-7 metadata 平铺+timeout）──
+    async def chat_inject(
+            self, session_key: str, message: str,
+            timeout_ms: int | None = None,
+            auth_token: str | None = None,
+            chat_metadata: dict[str, str] | None = None,
+            attachments: list[Any] | None = None) -> dict[str, Any]:
+        """对位 _bot_websocket_client.py:281-314——纯数据边界。"""
+        if attachments:
+            return {"ok": False, "raise_": False,
+                    "error": {"code": "ATTACHMENTS_UNSUPPORTED",
+                              "message": "A2A path cannot carry attachments; "
+                                         "orchestration should route to v3"}}
+        mid = f"inj-{uuid.uuid4().hex[:12]}"
+        metadata = _flatten_metadata(chat_metadata, None, timeout_ms)
+        metadata.setdefault("traceId", mid)
+        payload = {
+            "jsonrpc": "2.0",
+            "id": mid,
+            "method": "InjectContext",
+            "params": {
+                "contextId": session_key,
+                "message": {
+                    "role": "ROLE_USER",
+                    "messageId": mid,
+                    "parts": [{"text": _message_to_text(message)}],
+                },
+                "metadata": metadata,
+            },
+        }
+        headers = {**self.headers,
+                   "X-IAM-Token": auth_token or "OPEN_API:NOT_PROVIDED"}
+        timeout = (timeout_ms / 1000) if timeout_ms else 30.0
+        async with self._http(timeout=timeout) as http:
+            resp = await http.post(self.rpc_url, json=payload,
+                                   headers=headers)
+            if resp.status_code != 200:
+                return {"ok": False,
+                        "error": {"code": f"HTTP_{resp.status_code}",
+                                  "message": resp.text[:200]}}
+            body = resp.json()
+        if "error" in body:
+            return {"ok": False,
+                    "error": {"code":
+                              (body["error"].get("data") or {}).get(
+                                  "reason", "a2a_error"),
+                              "message": body["error"].get("message",
+                                                           "")[:200]}}
+        result = body.get("result") or {}
+        status = result.get("inject", "unknown")
+        return {"ok": status in ("accepted", "duplicate_accepted",
+                                 "duplicate_in_progress"),
+                "status": status, "a2a": True}
+
+    # ── interaction_resolve：真实 InteractionResolution → exchange ──
+    async def interaction_resolve(
+            self, *, interaction_id: str,
+            resolution: InteractionResolution,
+    ) -> EngineInteractionResolveExchange:
+        """R17-6：返回真实 dataclass；按 from_frames 等价校验响应
+        （id 一致性 + result/error 结构）——不合规响应 accepted=False。"""
+        resolution_payload: dict[str, Any] = {
+            "decision": resolution.decision,
+            "kind": resolution.kind,
+            "answer": resolution.answer,
+            "message": resolution.message,
+            "values": resolution.values,
+            "answers": resolution.answers,
+            "selected_options": [list(o) for o in resolution.selected_options]
+            if resolution.selected_options else None,
+        }
+        request = {
+            "jsonrpc": "2.0",
+            "id": f"res-{interaction_id}",
+            "method": "ResolveInteraction",
+            "params": {
+                "interactionId": interaction_id,
+                "resolution": {k: v for k, v in resolution_payload.items()
+                               if v is not None},
+            },
+        }
+        async with self._http(timeout=30.0) as http:
+            resp = await http.post(self.rpc_url, json=request,
+                                   headers=self.headers)
+        try:
+            response_body = resp.json()
+        except Exception:
+            response_body = {"error": {"message":
+                                        f"malformed_response_http_"
+                                        f"{resp.status_code}"}}
+        # 等价于 from_frames 的验证：id 匹配 + 结构之一
+        valid = (
+            isinstance(response_body, dict)
+            and response_body.get("id") == request["id"]
+            and ("result" in response_body or "error" in response_body)
+        )
+        err = response_body.get("error")
+        if err or not valid:
+            return EngineInteractionResolveExchange(
+                request=request,
+                response=response_body,
+                accepted=False,
+                error_message=(err.get("message")
+                               or (err.get("data") or {}).get("reason", "")
+                               if err else "malformed or mismatched response"),
+            )
+        return EngineInteractionResolveExchange(
+            request=request,
+            response=response_body,
+            accepted=True,
+            error_message=None,
+        )

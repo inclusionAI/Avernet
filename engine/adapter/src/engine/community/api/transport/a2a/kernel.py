@@ -281,11 +281,13 @@ class A2aKernel:
             rid, r.context_id, 0, payload))
 
     async def publish_agent_progress(self, rid: str,
-                                     payload: dict[str, Any]) -> None:
-        """agent/tool 进度事件不上收 run 状态，仅作为 statusUpdate 流出。"""
+                                     payload: dict[str, Any],
+                                     event_name: str = "agent") -> None:
+        """agent/tool/mode_transition 事件不上收 run 状态，仅作为
+        statusUpdate 流出（R17-2：事件名保留，本方法签名带 event_name）。"""
         r = self.runs[rid]
         await self._publish(rid, wire.wire_agent_progress(
-            rid, r.context_id, 0, payload))
+            rid, r.context_id, 0, payload, event_name=event_name))
 
     # ── subscribe / replay ──
     async def subscribe(self, rid: str, since_seq: int | None = None
