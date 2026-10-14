@@ -424,6 +424,37 @@ class TestRouter:
             == 1
         )
 
+    def test_new_relay_report_validation_failure_answers_422(self, task_client):
+        client, svc = task_client
+        svc.set_execution_config(
+            {"orchestration_mode": "relay", "intake_session_id": "tis-1"}
+        )
+        response = client.post(
+            "/api/v1/collaboration/tasks/callback/report",
+            json={
+                "task_id": "t1",
+                "node_id": "t1",
+                "event_type": "PLAN_RESULT",
+                "event_id": "event-1",
+                "relay_token": "run-1",
+                "event": None,
+                "task_acceptance_result": {
+                    "verdict": "PASS",
+                    "done_items": [],
+                    "gap_items": [],
+                },
+            },
+        )
+
+        assert response.status_code == 422, response.text
+        assert response.json() == {
+            "code": 422000,
+            "message": "Invalid relay report request",
+            "data": None,
+            "request_id": "",
+        }
+        assert svc.callback.calls == []
+
     def test_intake_uses_authenticated_owner_and_server_session_header(
         self, human_task_client
     ):

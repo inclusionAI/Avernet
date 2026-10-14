@@ -7,9 +7,14 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import HTMLResponse
+from pydantic import ValidationError
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
-from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
+from agentclaw.community.adapters.http.openapi_v1.responses import (
+    envelope,
+    envelope_errors,
+    error_response,
+)
 from agentclaw.community.adapters.http.task.auth import CallbackAuthenticator
 from agentclaw.community.adapters.http.task.relay_guard import require_relay_attempt
 from agentclaw.community.adapters.http.task.schemas_relay_report import (
@@ -376,7 +381,25 @@ async def report_callback(
         _preview,
     )
     if isinstance(raw_event, dict) and "relay_token" in raw_event:
-        command = TaskReportCommandDTO.model_validate(raw_event).to_domain()
+        try:
+            command = TaskReportCommandDTO.model_validate(raw_event).to_domain()
+        except ValidationError as exc:
+            # Manual parsing bypasses FastAPI's request validation, so surface
+            # the caller's error as the endpoint's normal enveloped 422 instead
+            # of letting Pydantic's exception become a 500. Loc/type/msg only:
+            # Pydantic also carries the raw input, which must not enter logs.
+            logger.warning(
+                "[task_relay_report] validation failed: %s",
+                [
+                    {
+                        "loc": error.get("loc"),
+                        "type": error.get("type"),
+                        "msg": error.get("msg"),
+                    }
+                    for error in exc.errors()
+                ],
+            )
+            return error_response(422, "Invalid relay report request", request)
         graph = svc.get_task_dashboard(command.task_id)
         if not graph.is_relay:
             raise TaskStateError("relay report requires a relay task")

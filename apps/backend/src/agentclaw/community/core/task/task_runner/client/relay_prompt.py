@@ -31,19 +31,27 @@ def format_relay_execution_instruction(
         "S3 根据 current_task_spec、task_gaps 和本 Bot 实际能力决定 actual_goal；"
         "不能覆盖时选择 DECLINED，不伪造执行事实。",
         "S4a 只执行 actual_goal，生成 TaskNodePatch 所需的 output_patch 与"
-        " local_acceptance_result（verdict、done_items、gap_items）。",
+        " local_acceptance_result；verdict 只能是 DONE 或 FAILED，禁止 PASS/FAIL，"
+        "done_items/gap_items 对象必须为 {id,passed,summary}，"
+        "二者 id 并集必须逐项且仅一次覆盖 actual_goal.acceptances。",
         f"S4b POST {report_path}：event_type=EXECUTION_RESULT，"
         "event 为 {execution_decision, actual_goal, output_patch, local_acceptance_result, failure_reason}。"
         "顶层带 task_id、node_id、relay_token、event_id；event_id 为本事件新 UUID，"
         "同一 HTTP 请求超时后原样重试时必须复用。收到成功回执才进入 S5。",
         "S5.1 结合 S1 快照与本棒已接纳执行事实重算 task_gaps；"
+        "task_acceptance_result 只验收 root task，"
+        "只有 refresh_task_gaps=[] 时才允许非空；"
+        "done_items 必须为 {id,passed,summary} 并逐项覆盖 root_task_spec.goal.acceptances，"
+        "收口必须 verdict=DONE 且 gap_items=[]；不得复制节点级 local_acceptance_result。"
         "S5.2 有 gaps 时构造唯一下一棒 TaskSpec，不能自行生成 node_id；"
         "S5.3 根据 gaps 与下一棒 TaskSpec 搜索候选；"
         "S5.4 本地选择单 Bot 或 BBS，并填充一个未落图 TaskNode 的 task_spec、"
         "run_info.run_mode 与 run_info.assignee；首版不选择协作群；"
         "S5.5 仅上报一次 PLAN_RESULT。若无 gaps，event=null 且提供通过的"
         " task_acceptance_result；有 gaps 则 event 为已选执行者的未落图 TaskNode"
-        " {task_spec, run_info:{run_mode,assignee}}。上报仍带本次 relay_token 与新的 event_id；"
+        " {task_spec, run_info:{run_mode,assignee}}；规划失败时 event=null 并把"
+        "原因写入顶层 failure_reason，禁止新增 planning_failure_reason 字段。"
+        "上报仍带本次 relay_token 与新的 event_id；"
         "同一请求重试必须复用 event_id。保存回执中的 target_node_id。",
         "S6 若回执含 target_node_id，则 POST /api/v1/collaboration/tasks/dispatch，"
         "携带 task_id、origin_node_id、target_node_id、relay_token；"
