@@ -1,4 +1,4 @@
-import { IconButton } from '@/components/ui';
+import { Button, IconButton } from '@/components/ui';
 import type { ConversationTarget } from '@/services/workspace/workspaceModel';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import { ChevronRight, Copy, FolderOpen } from 'lucide-react';
@@ -81,16 +81,16 @@ export function ChatPanelHeader({ target, sessionTitle, sessionCode, connectionL
             {sessionTitle ?? target.name}
           </h2>
           {sessionCode ? (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
               onClick={() => void copySessionId()}
               aria-label={`复制会话 ID ${sessionCode}`}
               title={sessionCode}
-              className="flex h-6 min-w-0 max-w-[180px] shrink-[2] items-center gap-1 rounded-full bg-secondary px-2 text-[11px] text-foreground/75 transition-colors hover:bg-foreground/10 hover:text-foreground"
+              className="h-6 min-w-0 max-w-[180px] shrink-[2] gap-1 rounded-full bg-secondary px-2 text-[11px] font-normal text-foreground/75 transition-colors hover:bg-foreground/10 hover:text-foreground"
             >
               <span className="min-w-0 truncate">{sessionCode}</span>
               <Copy className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
-            </button>
+            </Button>
           ) : null}
           {/* 连接状态为运行时数据；弱呈现 = 色点（tone 语义）+ 弱灰文字，不与标题抢视觉。 */}
           {connectionLabel ? (

@@ -2,6 +2,7 @@
  *
  * 数据链复用 BotWorkshop 同源只读接口（design D2）：listSkillSetResources 一次取全量
  * 集 + 内嵌 mcps，明细 skills 按需逐集拉取（失败以 failed 标记，不阻塞其他集）。
+ * 接口调用与 DTO 映射经 botCapabilitySetService 下沉（分层：Hook → Service → API Controller）；
  * 团队 Bot 实体 owner 必须显式传 bot.ownerId。好友 Bot / 不可会话 Bot 不装配
  * （返回 null），好友/团队判定留在装配层，组件零业务分类判断（design D4）。 */
 import type {
@@ -9,7 +10,7 @@ import type {
   CapabilitySetView,
   ComposerCapabilitySetsState,
 } from '@/components/Workspace/CapabilitySetViewer/types';
-import { botEditorController } from '@/services/backendApi/bots/botEditorController';
+import { listActiveCapabilitySets, listCapabilitySetSkills } from '@/services/workspace/botCapabilitySetService';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -38,24 +39,8 @@ export function useBotCapabilitySets(
     if (!bot || !isCapabilitySetBot(bot) || !userId || inFlightRef.current) return;
     inFlightRef.current = true;
     setIsLoading(true);
-    void botEditorController
-      .listSkillSetResources(bot.realBotId, bot.ownerId)
-      .then((res) => {
-        const activeSets = (res.data ?? [])
-          .filter((set) => set.is_active)
-          .map((set) => ({
-            id: set.id,
-            name: set.is_default ? '默认能力集' : set.name,
-            description: set.description,
-            isDefault: set.is_default,
-            mcps: (set.mcps ?? []).map((mcp) => ({
-              serverCode: mcp.server_code,
-              name: mcp.name || mcp.server_code,
-              description: mcp.description,
-            })),
-          }));
-        // 默认能力集置顶（botEditorService 同语义展示顺序）。
-        activeSets.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+    void listActiveCapabilitySets(bot.realBotId, bot.ownerId)
+      .then((activeSets) => {
         setSets(activeSets);
       })
       .catch((err: unknown) => {
@@ -72,15 +57,8 @@ export function useBotCapabilitySets(
     async (setId: string): Promise<CapabilitySetDetailResult> => {
       if (!bot) return { skills: [], failed: true };
       try {
-        const res = await botEditorController.listSkillSetSkills(bot.realBotId, setId, bot.ownerId);
-        return {
-          skills: (res.data ?? []).map((skill) => ({
-            skillId: skill.skill_id,
-            name: skill.name || skill.skill_id,
-            description: skill.description,
-          })),
-          failed: false,
-        };
+        const skills = await listCapabilitySetSkills(bot.realBotId, setId, bot.ownerId);
+        return { skills, failed: false };
       } catch {
         return { skills: [], failed: true };
       }

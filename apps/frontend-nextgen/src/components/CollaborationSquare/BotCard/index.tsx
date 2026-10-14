@@ -1,5 +1,5 @@
 import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
+import { IconButton } from '@/components/ui/IconButton';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import {
@@ -120,29 +120,25 @@ export default function SquareBotCard({ bot, activeActor, busy, onShare, onPrima
         )}
       </CardContent>
         <div className="mt-auto flex shrink-0 items-center justify-end gap-2 px-5 pb-5 pt-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={`分享 ${bot.name}`}
-            title={`分享 ${bot.name}`}
+          <IconButton
+            label={`分享 ${bot.name}`}
+            icon={<Share2 aria-hidden className="h-4 w-4" />}
             onClick={() => onShare(bot)}
             className="h-10 w-10 rounded-xl bg-background text-foreground"
-            leftIcon={<Share2 aria-hidden className="h-4 w-4" />}
           />
           {!primaryDisabled && (
-            <Button
-              variant="ghost"
-              size="icon"
+            <IconButton
+              label={primaryLabel}
               loading={busy}
-              aria-label={primaryLabel}
-              title={primaryLabel}
+              icon={
+                canStartConversation ? (
+                  <MessageCircleMore aria-hidden className="h-5 w-5" />
+                ) : (
+                  <Plus aria-hidden className="h-6 w-6" />
+                )
+              }
               onClick={() => onPrimaryAction(bot)}
               className="h-10 w-10 rounded-xl bg-background text-foreground"
-              leftIcon={canStartConversation ? (
-                <MessageCircleMore aria-hidden className="h-5 w-5" />
-              ) : (
-                <Plus aria-hidden className="h-6 w-6" />
-              )}
             />
           )}
         </div>

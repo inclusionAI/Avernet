@@ -6,10 +6,13 @@ import type {
   ConversationOrigin,
   ConversationSessionListState,
   ConversationSessionScope,
-  ConversationUserView,
   ManagedBotConversationView,
 } from '@/domain/conversation';
-import type { BotChatSessionView } from '@/services/workspace/botSessionService';
+import type { SelectedSessionSnapshot } from './conversationStoreSnapshot';
+
+// 快照类型与判据拆至 ./conversationStoreSnapshot(文件大小阈值);此处再导出保持既有
+// 消费方(@/stores/conversationStoreState 与 @/stores/conversationStore)import 路径不变。
+export { selectedSnapshotMatches, type SelectedSessionSnapshot } from './conversationStoreSnapshot';
 
 // 缓存结构类型从 Domain 收口再导出,消费方(页面/组件/Hook)统一从 Store 取面向 UI 的类型。
 export type {
@@ -78,43 +81,6 @@ export interface ConversationState {
   setFriendBotSessions(botId: string, value: ConversationSessionListState): void;
   setSelectedSessionSnapshot(value: SelectedSessionSnapshot): void;
   reset(): void;
-}
-
-/** 选中会话的保留快照载荷:身份字段与 selectConversation 的选中输入一致。
- *  session.sessionId 即被选中的会话;others 分组好友资料供只读舞台使用。 */
-export interface SelectedSessionSnapshot {
-  section: ConversationBotSection;
-  botId: string;
-  origin: ConversationOrigin;
-  scope: ConversationSessionScope;
-  friendUserId: string | null;
-  session: BotChatSessionView;
-  /** origin=others 时快照所在分组的好友资料;mine 恒 null。 */
-  friend: ConversationUserView | null;
-}
-
-/** 快照是否仍归属于当前选中身份;身份变化(换 Bot/归属/范围/会话/清空选中)
- *  即失效。是占位遮挡与主会话解析的唯一保留判据。 */
-export function selectedSnapshotMatches(
-  snapshot: SelectedSessionSnapshot | null,
-  selection: {
-    botId: string | null;
-    section: ConversationBotSection | null;
-    origin: ConversationOrigin;
-    scope: ConversationSessionScope;
-    friendUserId: string | null;
-    sessionId: string | null;
-  },
-): snapshot is SelectedSessionSnapshot {
-  if (!snapshot || !selection.botId || !selection.section || !selection.sessionId) return false;
-  return (
-    snapshot.section === selection.section &&
-    snapshot.botId === selection.botId &&
-    snapshot.origin === selection.origin &&
-    snapshot.scope === selection.scope &&
-    snapshot.friendUserId === selection.friendUserId &&
-    snapshot.session.sessionId === selection.sessionId
-  );
 }
 
 /** ConversationState 的纯数据字段(动作由 conversationStore.ts 实现)。 */

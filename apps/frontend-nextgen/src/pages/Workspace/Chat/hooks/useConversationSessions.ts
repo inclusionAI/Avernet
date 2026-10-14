@@ -1,26 +1,20 @@
 // 会话列表 Hook:管理/团队 Bot(origin=mine)与好友 Bot 会话；managedBots 参数包含管理和团队目录。
 // origin=others 由 useManagedBotOthers 负责；列表首拉/分页与写操作互斥。
-// 缓存态拼装/写复用 ./conversationSessionCache。
+// 缓存态拼装/写复用 ./conversationSessionCache;分页请求生命周期(代次/去重/写回校验)
+// 拆至 ./conversationSessionPageRequest(文件大小阈值,行为不变)。
 import type {
   ConversationBotSection,
   ConversationBotView,
   ConversationSessionScope,
 } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
-import { BOT_SESSION_PAGE_SIZE } from '@/services/workspace/botSessionService';
-import { conversationService } from '@/services/workspace/conversationService';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
-  filterRevisionOf,
-  firstPageOf,
-  friendScopeOf,
-  nextPageOf,
-  requestKeyOf,
-  sessionKeyOf,
-  sessionRequestPage,
-  writeSessionState,
-} from './conversationSessionCache';
+  createSessionRequestContext,
+  loadSessionPage,
+  type ConversationSessionRequestContext,
+} from './conversationSessionPageRequest';
 import { useConversationBotExpansion } from './useConversationBotExpansion';
 import { useConversationFavorites } from './useConversationFavorites';
 import { useConversationFavoriteScope } from './useConversationFavoriteScope';
@@ -52,97 +46,24 @@ export function useConversationSessions(options: {
   }, [managedBots, friendBots]);
   const expandBot = useConversationBotExpansion(userId);
   const createSession = useConversationSessionCreation(userId, botByBotId);
-  const generationRef = useRef(0);
-  const userIdRef = useRef(userId);
-  userIdRef.current = userId;
-  const inFlightRef = useRef(new Set<string>());
+  // 请求上下文(代次/在途去重)挂载一份;分页请求主体拆见 ./conversationSessionPageRequest。
+  const requestCtxRef = useRef<ConversationSessionRequestContext | null>(null);
+  if (!requestCtxRef.current) requestCtxRef.current = createSessionRequestContext(userId);
+  const requestCtx = requestCtxRef.current;
+  requestCtx.userId.current = userId;
   useEffect(() => {
-    generationRef.current += 1; // 用户切换:在途旧响应整体作废。
-    inFlightRef.current.clear();
-  }, [userId]);
+    requestCtx.generation.current += 1; // 用户切换:在途旧响应整体作废。
+    requestCtx.inFlight.clear();
+  }, [requestCtx, userId]);
   useEffect(
     () => () => {
-      generationRef.current += 1;
+      requestCtx.generation.current += 1;
     },
-    [],
+    [requestCtx],
   );
-  const generationOf = (): number => generationRef.current;
-  /** 管理会话写回时读取上下文(origin/scope)须仍一致,不一致即丢弃。 */
-  const stillMine = (botId: string, scope: ConversationSessionScope): boolean => {
-    const store = useConversationStore.getState();
-    return (
-      (store.originByManagedBotId[botId] ?? 'mine') === 'mine' &&
-      (store.effectiveScopeByManagedBotId[botId] ?? 'all') === scope
-    );
-  };
-  const loadPage = useRef((view: ConversationBotView, more: boolean): void => {
-    const botId = view.bot.botId;
-    const sectionOf: ConversationBotSection = view.section;
-    const userIdNow = userIdRef.current;
-    if (!userIdNow || !view.bot.chatable || view.bot.isAgentCodingBot || actions.isPending(botId, sectionOf)) return;
-    // 请求快照:从最新 Store 读取生效过滤(mine 范围/好友范围/sessionKey/代次)。
-    const store = useConversationStore.getState();
-    const scope = isManagedConversationSection(sectionOf)
-      ? store.effectiveScopeByManagedBotId[botId] ?? 'all'
-      : friendScopeOf(botId, store);
-    const sessionKey = sessionKeyOf(botId, store);
-    const revision = filterRevisionOf(botId, store);
-    const managedCache = isManagedConversationSection(sectionOf) ? store.sessionsByBotId[botId] : undefined;
-    const state = isManagedConversationSection(sectionOf)
-      ? managedCache?.sessions
-      : store.friendBotSessionsByBotId[botId];
-    const requestKey = requestKeyOf(botId, sectionOf, 'mine', scope, sessionKey, revision, more);
-    if (inFlightRef.current.has(requestKey)) return;
-    if (more && (!state || !state.hasMore || state.loading || state.isLoadingMore)) return;
-    const cachedHit = isManagedConversationSection(sectionOf)
-      ? managedCache?.origin === 'mine' && managedCache?.scope === scope && !managedCache?.sessions.error
-      : Boolean(state && !state.error);
-    if (!more && cachedHit && !(state?.hasMore && state.items.length === 0)) return;
-    if (!more && isManagedConversationSection(sectionOf) && (store.originByManagedBotId[botId] ?? 'mine') !== 'mine')
-      return;
-    inFlightRef.current.add(requestKey);
-    const generation = generationOf();
-    const page = sessionRequestPage(state, scope, more);
-    // 首拉与缓存条件不一致(如 managed 范围切换)时不保留旧 items,以免把旧条件
-    // 结果当成新列表展示;搜索/好友范围变化已由 Store 删除缓存(条件天然一致)。
-    const criteriaMatch =
-      more ||
-      (isManagedConversationSection(sectionOf)
-        ? managedCache?.origin === 'mine' && managedCache?.scope === scope
-        : true);
-    writeSessionState(botId, sectionOf, scope, {
-      ...(criteriaMatch ? state ?? firstPageOf([], 0) : firstPageOf([], 0)),
-      ...(more ? { isLoadingMore: true, loadMoreError: null } : { loading: true, error: null }),
-    });
-    void (
-      isManagedConversationSection(sectionOf)
-        ? conversationService.listManagedSessions(view.bot, userIdNow, scope, page, BOT_SESSION_PAGE_SIZE, sessionKey)
-        : conversationService.listFriendBotSessions(view.bot, userIdNow, page, BOT_SESSION_PAGE_SIZE, scope, sessionKey)
-    ).then((result) => {
-      inFlightRef.current.delete(requestKey);
-      if (generationOf() !== generation) return;
-      const latestStore = useConversationStore.getState();
-      // 过滤代次变化(范围/归属/搜索,含 A→B→A)即丢弃:旧响应不得写回或复原已清除的过滤。
-      if (filterRevisionOf(botId, latestStore) !== revision) return;
-      if (isManagedConversationSection(sectionOf) && !stillMine(botId, scope)) return;
-      const latest = isManagedConversationSection(sectionOf)
-        ? latestStore.sessionsByBotId[botId]?.sessions
-        : latestStore.friendBotSessionsByBotId[botId];
-      if (!result.ok) {
-        if (!more) {
-          writeSessionState(botId, sectionOf, scope, { ...firstPageOf([], 0), error: result.error.friendlyMessage });
-        } else if (latest) {
-          writeSessionState(botId, sectionOf, scope, nextPageOf(latest, result, page));
-        }
-        return;
-      }
-      if (!more) {
-        writeSessionState(botId, sectionOf, scope, firstPageOf(result.data.items, result.data.total));
-        return;
-      }
-      if (latest) writeSessionState(botId, sectionOf, scope, nextPageOf(latest, result, page));
-    });
-  }).current;
+  const loadPage = useRef(
+    (view: ConversationBotView, more: boolean): void => loadSessionPage(requestCtx, actions.isPending, view, more),
+  ).current;
   const ensureViewLoaded = useRef((view: ConversationBotView): void => {
     const botId = view.bot.botId;
     // origin=others 的管理 Bot 会话由 useManagedBotOthers 接管,这里不加载。

@@ -2,6 +2,7 @@
 // 从 IdentitySelectorParts 拆出为独立文件（工程红线：Component 单文件 ≤300 行），
 // 渲染语义与拆分前一一对应，无行为变化。
 import { Button, type ButtonProps } from '@/components/ui';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { getBotEngineLabel } from '@/domain/botEngine';
 import { resolveOpenApiUserId } from '@/domain/userIdentity';
 import type { Identity } from '@/services/workspace/workspaceModel';
@@ -99,16 +100,25 @@ export const IdentityTriggerButton = forwardRef<HTMLButtonElement, IdentityTrigg
             />
             {inlineLayout ? (
               <>
-                <span className="min-w-0 flex-1 truncate" title={identity.name}>
-                  {identity.name}
-                </span>
+                <TooltipProvider delayDuration={200}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="min-w-0 flex-1 truncate">{identity.name}</span>
+                    </TooltipTrigger>
+                    <TooltipContent>{identity.name}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
                 {identity.kind === 'bot' ? (
-                  <span
-                    className="max-w-[40%] shrink-0 truncate rounded-md bg-muted px-2 py-0.5 text-xs font-normal text-foreground"
-                    title={getBotEngineLabel(identity.engine) || '引擎类型暂无'}
-                  >
-                    {getBotEngineLabel(identity.engine) || '引擎类型暂无'}
-                  </span>
+                  <TooltipProvider delayDuration={200}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="max-w-[40%] shrink-0 truncate rounded-md bg-muted px-2 py-0.5 text-xs font-normal text-foreground">
+                          {getBotEngineLabel(identity.engine) || '引擎类型暂无'}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>{getBotEngineLabel(identity.engine) || '引擎类型暂无'}</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 ) : (
                   <span className="shrink-0 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-normal text-primary">
                     用户

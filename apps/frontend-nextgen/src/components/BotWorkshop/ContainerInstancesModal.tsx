@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Modal, ModalContent, ModalDescription, ModalHeader, ModalTitle } from '@/components/ui/Modal';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { Spin } from '@/components/ui/Spin';
 import type { BotDomain } from '@/services/botWorkshop';
 import { botContainerService, type ContainerInstance, type ContainerSnapshot } from '@/services/botWorkshop/botContainerService';
@@ -114,17 +115,28 @@ export function ContainerInstancesModal({ bot, canRestart = false, onClose }: Co
                         {statusLabel[instance.status]}
                       </span>
                       {instance.status === 'abnormal' ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          title={canRestart ? undefined : '仅 Bot Owner 可以重启异常实例'}
-                          disabled={!canRestart || restartingId === instance.id}
-                          loading={restartingId === instance.id}
-                          leftIcon={<RefreshCw aria-hidden className="size-3.5" />}
-                          onClick={() => void restart(instance)}
-                        >
-                          重启
-                        </Button>
+                        <TooltipProvider delayDuration={200}>
+                          <Tooltip>
+                            {/* span 承接 hover:按钮 disabled 后原生 title/内联 trigger 均不再响应。 */}
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={!canRestart || restartingId === instance.id}
+                                  loading={restartingId === instance.id}
+                                  leftIcon={<RefreshCw aria-hidden className="size-3.5" />}
+                                  onClick={() => void restart(instance)}
+                                >
+                                  重启
+                                </Button>
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {canRestart ? '重启该异常实例' : '仅 Bot Owner 可以重启异常实例'}
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       ) : null}
                     </div>
                   ))}

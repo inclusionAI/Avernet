@@ -1,5 +1,6 @@
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { IconButton } from '@/components/ui/IconButton';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { PublicGroup } from '@/domain/collaborationSquare/types';
@@ -33,19 +34,6 @@ export default function GroupCard({ group, busy, onOpenMembers, onShare, onCreat
   const typeTone = group.typeLabel === '任务协作' ? 'primary'
     : group.typeLabel === '自定义协作' ? 'purple'
     : group.typeLabel === '自由聊天' ? 'success' : 'neutral';
-  const createSessionButton = (
-    <Button
-      variant="ghost"
-      size="icon"
-      aria-label="创建新会话"
-      title="创建新会话"
-      loading={busy}
-      disabled={!group.canCreateSession}
-      onClick={() => onCreateSession(group)}
-      className="h-10 w-10 rounded-xl bg-background text-foreground"
-      leftIcon={<MessageCircleMore aria-hidden className="h-5 w-5" />}
-    />
-  );
   return (
     <TooltipProvider delayDuration={200}>
       <Card className="flex h-full min-h-[210px] min-w-0 flex-col rounded-[22px] border-0 bg-muted/70 shadow-none transition-shadow hover:shadow-sm">
@@ -92,18 +80,33 @@ export default function GroupCard({ group, busy, onOpenMembers, onShare, onCreat
             成员 <span className="text-muted-foreground">·</span> {group.memberCount}
           </Button>
           <div className="flex shrink-0 items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={`分享 ${group.name}`}
-              title={`分享 ${group.name}`}
+            <IconButton
+              label={`分享 ${group.name}`}
+              icon={<Share2 aria-hidden className="h-4 w-4" />}
               onClick={() => onShare(group)}
               className="h-10 w-10 rounded-xl bg-background text-foreground"
-              leftIcon={<Share2 aria-hidden className="h-4 w-4" />}
             />
-            {group.canCreateSession ? createSessionButton : (
+            {group.canCreateSession ? (
+              <IconButton
+                label="创建新会话"
+                loading={busy}
+                icon={<MessageCircleMore aria-hidden className="h-5 w-5" />}
+                onClick={() => onCreateSession(group)}
+                className="h-10 w-10 rounded-xl bg-background text-foreground"
+              />
+            ) : (
               <GroupTextTooltip text="当前群暂不允许创建新会话">
-                <span tabIndex={0} className="inline-flex">{createSessionButton}</span>
+                <span tabIndex={0} className="inline-flex">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="创建新会话"
+                    disabled
+                    onClick={() => onCreateSession(group)}
+                    className="h-10 w-10 rounded-xl bg-background text-foreground"
+                    leftIcon={<MessageCircleMore aria-hidden className="h-5 w-5" />}
+                  />
+                </span>
               </GroupTextTooltip>
             )}
           </div>

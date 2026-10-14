@@ -22,7 +22,7 @@ export function GroupIdentityDisplay() {
               userAvatarUrl={identity?.avatarUrl}
               size="xs"
             />
-            <span className="min-w-0 flex-1 truncate" title={name}>{name}</span>
+            <span className="min-w-0 flex-1 truncate">{name}</span>
             <span className="shrink-0 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-normal text-primary">用户</span>
           </div>
         </TooltipTrigger>
