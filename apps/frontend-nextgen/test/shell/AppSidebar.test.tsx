@@ -1,11 +1,9 @@
 /** @jest-environment jsdom */
-// 搜索弹窗（GlobalSearchDialog）的模块图引入 @umijs/max：@jest/globals 须最先 import，
-// 且 @umijs/max factory 不引用外部 const（AppSidebar 的 import 求值早于 const 初始化）。
-import { afterEach, expect, it, jest } from '@jest/globals';
+// 搜索弹窗（GlobalSearchDialog）的模块图引入 @umijs/max：mock factory 不引用外部 const。
 import { extendCapabilities } from '@/capabilities';
-import { AppSidebar } from '@/shell/AppSidebar';
 import { getMergedNavigationItems } from '@/shell/navigation';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { afterEach, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen } from '@testing-library/react';
@@ -63,6 +61,9 @@ jest.mock('@/shell/HelpMenu', () => ({
   ),
 }));
 
+// 先注册所有 mock，再加载会间接导入 @umijs/max 的侧栏模块。
+const { AppSidebar } = require('@/shell/AppSidebar') as typeof import('@/shell/AppSidebar');
+
 const renderSidebar = (props: Partial<Parameters<typeof AppSidebar>[0]> = {}) =>
   render(
     <AppSidebar
@@ -104,14 +105,14 @@ it.each(['/ticket-center', '/work/my-task', '/bot-workshop'])(
   },
 );
 
-it('协作 / Bot 双分组 + 老功能过渡组常驻（不随路由整体换组）', () => {
+it('产品侧栏只展示协作 / Bot 双分组（不随路由整体换组）', () => {
   const view = renderSidebar({ activePath: '/admin' });
   expect(view.getByRole('region', { name: '协作' })).toBeInTheDocument();
   expect(view.getByRole('region', { name: 'Bot' })).toBeInTheDocument();
-  expect(view.getByRole('region', { name: '老功能' })).toBeInTheDocument();
+  expect(view.queryByRole('region', { name: '老功能' })).not.toBeInTheDocument();
 });
 
-it('同路由改名项归组：协作组含「对话」「协作群」「发现」，Bot 组含「Bot管理」，二者无 deprecated 徽标', () => {
+it('同路由改名项归组：协作组含「对话」「协作群」「发现」，Bot 组含「Bot管理」', () => {
   const view = renderSidebar();
   const collab = view.getByRole('region', { name: '协作' });
   const bot = view.getByRole('region', { name: 'Bot' });
@@ -125,22 +126,21 @@ it('同路由改名项归组：协作组含「对话」「协作群」「发现�
   expect(bot.textContent).toContain('Bot管理');
 });
 
-it('legacy 过渡组：任务列表 带「待移除」徽标，协作权限与管理后台入口均不再占导航位', () => {
+it('任务列表、协作权限与管理后台入口均不占产品导航位', () => {
   const view = renderSidebar();
-  const legacy = view.getByRole('region', { name: '老功能' });
-  expect(view.getAllByText('待移除')).toHaveLength(1);
-  expect(legacy.textContent).toContain('任务列表');
-  expect(legacy.textContent).not.toContain('协作权限');
+  expect(view.queryByRole('region', { name: '老功能' })).not.toBeInTheDocument();
+  expect(view.queryByRole('button', { name: /任务列表/ })).not.toBeInTheDocument();
+  expect(view.queryByRole('button', { name: /协作权限/ })).not.toBeInTheDocument();
   expect(view.queryByRole('button', { name: /管理后台/ })).toBeNull();
 });
 
-it('折叠态：不展示身份切换入口，账号行仍可见，deprecated 项语义入 aria-label', () => {
+it('折叠态：不展示身份切换入口，账号行仍可见，任务列表入口保持隐藏', () => {
   renderSidebar({ collapsed: true });
   expect(screen.queryByTestId('identity-switcher-collapsed')).not.toBeInTheDocument();
   expect(screen.getByTestId('account-badge-collapsed')).toBeInTheDocument();
   expect(screen.getByTestId('notification-bell')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Bot管理' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '任务列表（待移除）' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /任务列表/ })).not.toBeInTheDocument();
 });
 
 it('顶部功能图标排布（设计稿 artboard-016）：搜索入口位于通知中心左侧，点击打开全局搜索弹窗', () => {

@@ -1,11 +1,11 @@
 // 版本发布说明 Modal（Open Core 纯 UI）。展示雨燕配置拉取的用户须知（红主题）+ 新版本发布（蓝主题）。
-// 富文本 HTML 来自受信内部运营平台（雨燕配置），注入前经 DOMPurify 消毒（纵深防御，
-// 满足安全扫描 XssRiskJsFunctionUsing 误报条件 3：渲染内容做安全防护）；dompurify 为
-// TaskPanel 渲染链（MarkdownCell）已有依赖。数据由 useReleaseNotes 提供（Open Core
+// 富文本 HTML 来自受信内部运营平台（雨燕配置）。先经 DOMPurify 白名单净化，再由受约束的
+// React 元素树渲染，不将原始 HTML 字符串直接写入 DOM。数据由 useReleaseNotes 提供（Open Core
 // capability=null → 此 Modal 不被渲染）。禁 antd/裸 button，用项目 <Modal>/<Button>。≤150 行。
+import { SafeHtml } from '@/assets/TaskPanel/SafeHtml';
+import { sanitizeRichHtml } from '@/assets/TaskPanel/sanitizeHtml';
 import type { ReleaseNotesData } from '@/capabilities';
 import { Button, Modal, ModalContent } from '@/components/ui';
-import DOMPurify from 'dompurify';
 import { X } from 'lucide-react';
 import { Fragment } from 'react';
 
@@ -19,19 +19,13 @@ function EmptyContent() {
   return <p className="italic text-sm text-muted-foreground">暂无内容</p>;
 }
 
-/** 富文本注入前统一 DOMPurify 消毒：剥 script / on* 事件 / javascript: 等注入向量。 */
-function sanitizeRichHtml(html?: string): string {
-  return html ? DOMPurify.sanitize(html) : '';
-}
-
-/** 内嵌富文本（受信源 + 注入前消毒 + 基础 prose 样式）。 */
+/** 内嵌富文本：先白名单净化，再由 SafeHtml 输出受约束的 React 元素树。 */
 function RichText({ html }: { html?: string }) {
   if (!html) return <EmptyContent />;
   return (
-    <div
+    <SafeHtml
       className="prose prose-sm max-w-none break-words text-foreground [&_ol]:pl-4 [&_ul]:pl-4"
-      // eslint-disable-next-line react/no-danger -- 注入串必经 sanitizeRichHtml 消毒
-      dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(html) }}
+      html={sanitizeRichHtml(html)}
     />
   );
 }

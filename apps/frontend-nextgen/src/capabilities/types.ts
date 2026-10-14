@@ -57,7 +57,7 @@ export interface HelpLink {
 /**
  * 版本发布说明数据（用户须知 + 新版本内容）。由 ReleaseNotesCapability.load 异步拉取，
  * 数据源为内部雨燕配置（teamclaw-release-note_*）。富文本 HTML 来自受信运营平台，UI 用
- * dangerouslySetInnerHTML 渲染。Open Core 无此数据源 → capability 返回 null（菜单不展示该项）。
+ * 受约束的富文本渲染器展示。Open Core 无此数据源 → capability 返回 null（菜单不展示该项）。
  */
 export interface ReleaseNotesData {
   version?: string;
@@ -377,8 +377,9 @@ export interface AppCapabilities {
   getTaskClaimGrantStrategy: () => CapabilityResult<TaskClaimGrantStrategy>;
   /**
    * 内部专属侧栏一级导航项（Open Core 不应展示的内部入口）。
-   * 返回项 MUST 携带 `section`（'collab' | 'bot' | 'legacy'），合并点按同名分组末尾追加
-   * （`getMergedNavigationItems`，refactor-global-nav-shell）。
+   * 返回项 MUST 携带 `section`（'collab' | 'bot'），合并点按同名产品分组末尾追加
+   * （`getMergedNavigationItems`，refactor-global-nav-shell）。存量页面只保留直接 URL 访问，
+   * 不得借由该 capability 重新进入产品侧栏。
    * Open Core 默认 `[]`（不渲染任何内部导航项，符合 open-core-export-plan §5.2
    * 「导航中的内部入口」必须按开源模式分隔的强约束）；
    * internal overlay 经 `src/extensions/internal.ts` 注入「能力管理」「能力市场」两项（section: 'bot'），

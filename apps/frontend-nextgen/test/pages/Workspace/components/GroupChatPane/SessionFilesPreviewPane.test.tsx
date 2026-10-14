@@ -36,6 +36,21 @@ describe('SessionFilesPreviewPane（预览体渲染）', () => {
     expect(screen.queryByText('# 部署手册')).not.toBeInTheDocument();
   });
 
+  it('md 文本的原始 HTML 只显示为文本，事件属性不能进入 DOM', () => {
+    const { container } = render(
+      <PreviewPane
+        file={{ name: '不可信说明.md', size: 1024 }}
+        filesStateEmpty={false}
+        preview={textPreview({ text: '<script>alert(1)</script><img src=x onerror="alert(2)">' })}
+        onDownload={jest.fn()}
+        onBack={jest.fn()}
+      />,
+    );
+
+    expect(container.querySelector('script')).toBeNull();
+    expect(container.querySelector('img[onerror]')).toBeNull();
+  });
+
   it('非 md 文本走等宽 pre 原文展示（txt/log/json 等）', () => {
     render(
       <PreviewPane

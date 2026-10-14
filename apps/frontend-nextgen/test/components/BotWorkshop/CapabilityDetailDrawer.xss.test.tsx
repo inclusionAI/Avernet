@@ -23,9 +23,8 @@ jest.mock('@/hooks/useBotCapabilityDetail', () => ({
   useBotCapabilityDetail: () => ({ detail: mockDetail, loading: false, error: null, retry: jest.fn() }),
 }));
 
-const { CapabilityDetailDrawer } = require('@/components/BotWorkshop/Editor/CapabilityDetailDrawer') as typeof import(
-  '@/components/BotWorkshop/Editor/CapabilityDetailDrawer'
-);
+const { CapabilityDetailDrawer } =
+  require('@/components/BotWorkshop/Editor/CapabilityDetailDrawer') as typeof import('@/components/BotWorkshop/Editor/CapabilityDetailDrawer');
 
 describe('CapabilityDetailDrawer XSS 消毒', () => {
   it('SKILL.md 内联 HTML 不产生可执行元素', () => {

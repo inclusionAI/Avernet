@@ -1,5 +1,5 @@
 import { getCapabilities } from '@/capabilities';
-import { Badge, Button, IconButton } from '@/components/ui';
+import { Button, IconButton } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import { navSectionLabels, type NavigationItem, type NavigationSection } from './navigation';
 import { SpaceSwitcher } from './SpaceSwitcher';
@@ -12,15 +12,10 @@ interface SidebarNavListProps {
   collapsed?: boolean;
 }
 
-const SECTION_ORDER: NavigationSection[] = ['collab', 'bot', 'legacy'];
-
-/** deprecated 项的可读名称（IconButton 内建 tooltip 同步携带「待移除」语义）。 */
-function navAriaLabel(item: NavigationItem) {
-  return item.deprecated ? `${item.label}（待移除）` : item.label;
-}
+const SECTION_ORDER: NavigationSection[] = ['collab', 'bot'];
 
 /**
- * 一级导航内容本体（不含 `<aside>` 外壳）：协作 / Bot 双固定分组 + 老功能过渡组常驻，
+ * 一级导航内容本体（不含 `<aside>` 外壳）：协作 / Bot 双固定分组，
  * 不随路由整体换组（refactor-global-nav-shell）。由 AppSidebar 的内流外壳与 <lg 抽屉复用，保证两处一致。
  */
 export function SidebarNavList({ activePath, items, onNavigate, collapsed = false }: SidebarNavListProps) {
@@ -45,8 +40,8 @@ export function SidebarNavList({ activePath, items, onNavigate, collapsed = fals
                 return (
                   <IconButton
                     key={item.id}
-                    ariaLabel={navAriaLabel(item)}
-                    label={navAriaLabel(item)}
+                    ariaLabel={item.label}
+                    label={item.label}
                     className={cn(active && 'bg-selected text-foreground')}
                     icon={<Icon className="h-4 w-4" />}
                     onClick={() => onNavigate(item.path)}
@@ -90,13 +85,6 @@ export function SidebarNavList({ activePath, items, onNavigate, collapsed = fals
                       active && 'bg-selected text-foreground hover:bg-selected [&_svg]:text-foreground',
                     )}
                     leftIcon={<Icon className="h-4 w-4" />}
-                    rightIcon={
-                      item.deprecated ? (
-                        <Badge tone="neutral" className="ml-auto shrink-0">
-                          待移除
-                        </Badge>
-                      ) : undefined
-                    }
                     onClick={() => onNavigate(item.path)}
                   >
                     {item.label}

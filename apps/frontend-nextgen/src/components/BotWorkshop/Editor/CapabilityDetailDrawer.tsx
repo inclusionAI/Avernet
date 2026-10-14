@@ -1,5 +1,6 @@
+import { SafeHtml } from '@/assets/TaskPanel/SafeHtml';
 import { sanitizeMarkdownHtml } from '@/assets/TaskPanel/sanitizeHtml';
-import { Button } from '@/components/ui/Button';
+import { Button } from '@/components/ui';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/Drawer';
 import { Empty } from '@/components/ui/Empty';
 import { Spin } from '@/components/ui/Spin';
@@ -66,7 +67,7 @@ export function CapabilityDetailDrawer({
     const name = meta?.name || detail.name || '';
     const description = meta?.description || detail.description || '暂无描述';
     const table = `| Name | Description |\n| --- | --- |\n| \`${cell(name)}\` | ${cell(description)} |`;
-    // html:false 之外再过 sanitizeMarkdownHtml 白名单（DOMPurify），满足安全扫描误报条件 3。
+    // markdown-it 禁用内联 HTML；输出再经 DOMPurify 白名单净化。
     return sanitizeMarkdownHtml(markdown.render(`${table}\n\n${body}`));
   }, [detail?.content, detail?.name, detail?.description]);
   return (
@@ -112,9 +113,9 @@ export function CapabilityDetailDrawer({
             <section className="space-y-3">
               <h3 className="m-0 text-sm text-muted-foreground">{target?.kind === 'mcp' ? 'MCP 文档' : '技能文档'}</h3>
               {detail.content ? (
-                <div
+                <SafeHtml
                   className="markdown-body skill-doc break-words text-sm leading-6 [&_pre]:overflow-x-auto"
-                  dangerouslySetInnerHTML={{ __html: docHtml }}
+                  html={docHtml}
                 />
               ) : (
                 <Empty compact title="暂无说明文档" />
