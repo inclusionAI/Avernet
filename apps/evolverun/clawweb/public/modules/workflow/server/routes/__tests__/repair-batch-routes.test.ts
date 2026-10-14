@@ -155,4 +155,28 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     expect(await f.request(`/${created.taskId}/retry-dispatch`, { expectedRevision: 2 })).toEqual({ status: 202, body: { ok: true } });
     expect((await f.request(`/${created.taskId}/retry-dispatch`, { expectedRevision: 1 })).status).toBe(409);
   });
+  it('returns a recovery action and rechecks failed results without dispatching before an optional-text revision', async () => {
+    const f = await setup();
+    const inbox = (await f.request('/candidates?workflowId=wf-1')).body;
+    const input = { workflowId: 'wf-1', inputDigest: inbox.inputDigest, itemIds: ['item-0'], instructions: '', requestId: 'first' };
+    const created = (await f.request('/', input)).body;
+    f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: 'failed' });
+    await f.service.reconcile();
+    const originalRead = f.executionPort.readResult;
+    f.executionPort.readResult = async () => { throw new Error('Git transport unavailable'); };
+    const revised = { ...input, requestId: 'revision-two', expectedAttemptRevision: 1, parentCandidateCommit: null, feedback: '' };
+    expect(await f.request(`/${created.taskId}/revisions`, revised)).toMatchObject({ status: 409,
+      body: { code: 'STATE_CONFLICT', recoveryAction: 'retry-result', reasonCode: 'RESULT_READ_UNKNOWN' } });
+    expect(f.calls).toHaveLength(1);
+    expect(await f.request(`/${created.taskId}/retry-result`, { expectedRevision: 1 })).toMatchObject({ status: 409,
+      body: { recoveryAction: 'retry-result' } });
+    f.executionPort.readResult = originalRead;
+    expect(await f.request(`/${created.taskId}/retry-result`, { expectedRevision: 1 })).toEqual({ status: 202, body: { ok: true } });
+    expect(f.calls).toHaveLength(1);
+    expect((await f.service.task(created.taskId)).latestAttempt.phase).toBe('failed');
+    expect(await f.request(`/${created.taskId}/revisions`, revised)).toMatchObject({ status: 202,
+      body: { revision: 2, input: { instructions: '', feedback: '' } } });
+    expect(f.calls).toHaveLength(2);
+  });
+
 });

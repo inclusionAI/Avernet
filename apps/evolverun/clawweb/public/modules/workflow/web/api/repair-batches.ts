@@ -21,7 +21,7 @@ export const repairBatches = {
     return readOnlyJson<RepairCandidatesResponse>(`${base}/candidates?${params}`)
   },
   item: (workflowId: string, itemId: string) => readOnlyJson<RepairInboxItem>(`${base}/items/${segment(itemId)}?workflowId=${segment(workflowId)}`),
-  task: (taskId: string) => fetchJson<RepairTaskDetail>(`${base}/${segment(taskId)}`),
+  task: (taskId: string) => readOnlyJson<RepairTaskDetail>(`${base}/${segment(taskId)}`),
   create: (request: RepairSelectionRequest) => post<RepairRevision>(base, request),
   revise: (taskId: string, request: RepairFeedbackRequest) => post<RepairRevision>(`${base}/${segment(taskId)}/revisions`, request),
   disposition: (itemId: string, request: { workflowId: string; inputDigest: string; expectedStateVersion: number; contentRevision: number; action: 'no_action' | 'restore'; reason: string; requestId: string; includeHistorical?: boolean }) =>
@@ -31,5 +31,5 @@ export const repairBatches = {
   retryGeneration: (taskId: string, request: { expectedRevision: number; requestId: string }) => post<RepairRevision>(`${base}/${segment(taskId)}/retry-generation`, request),
   retryDispatch: (taskId: string, expectedRevision: number) => post<{ ok: true }>(`${base}/${segment(taskId)}/retry-dispatch`, { expectedRevision }),
   diff: (taskId: string, revision: number, comparison: 'baseline' | 'parent') =>
-    fetchJson<RepairDiff>(`${base}/${segment(taskId)}/revisions/${revision}/diff?base=${comparison}`),
+    readOnlyJson<RepairDiff>(`${base}/${segment(taskId)}/revisions/${revision}/diff?base=${comparison}`),
 }

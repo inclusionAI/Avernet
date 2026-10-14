@@ -1,17 +1,19 @@
 import { useEffect, useState } from 'react'
 import { repairBatches } from '../../../api/repair-batches'
+import { repairReadError } from '../../../api/repair-read-error'
 import type { RepairCandidatesResponse, RepairInboxItem } from '../../../../server/contracts/repair-workbench'
 import RepairWorkspace from './RepairWorkspace'
 import { changeSummary, sourceRunCount } from './RepairItemDetail'
-import { exclusion, itemTitle, primary, states } from './repair-view'
+import { button, exclusion, itemTitle, primary, states } from './repair-view'
 import { selectionConflicts } from './repair-selection'
 
 export default function RepairSelectionWorkspace({ workflowId, includeHistorical, refreshToken, selected, selectedItems, instructions, busy, reason, error,
-  onInstructions, onToggle, onResult, onDetail, onGenerate, onBack }: {
+  onInstructions, onToggle, onResult, onDetail, onGenerate, onBack, onRecover }: {
   workflowId: string; includeHistorical: boolean; refreshToken: number; selected: string[]; selectedItems: RepairInboxItem[];
   instructions: string; busy: boolean; reason: string; error: string;
   onInstructions: (value: string) => void; onToggle: (id: string) => void; onResult: (result: RepairCandidatesResponse) => void;
   onDetail: (item: RepairInboxItem) => void; onGenerate: () => void; onBack: () => void
+  onRecover?: () => void
 }) {
   const [page, setPage] = useState(1)
   const [data, setData] = useState<RepairCandidatesResponse | null>(null)
@@ -26,7 +28,7 @@ export default function RepairSelectionWorkspace({ workflowId, includeHistorical
     setLoading(true); setReadError('')
     repairBatches.candidates(workflowId, { state: 'all', page, pageSize: 20, includeHistorical, ...(node ? { nodeId: node } : {}), ...(failureMode ? { failureMode } : {}) })
       .then(result => { if (current) { setData(result); onResult(result) } })
-      .catch(e => { if (current) { setReadError(e instanceof Error ? e.message : String(e)); setData(null) } })
+      .catch(e => { if (current) { setReadError(repairReadError(e)); setData(null) } })
       .finally(() => { if (current) setLoading(false) })
     return () => { current = false }
   }, [workflowId, includeHistorical, refreshToken, page, node, failureMode, reload])
@@ -36,8 +38,8 @@ export default function RepairSelectionWorkspace({ workflowId, includeHistorical
   const nodes = data?.facets?.nodes ?? []
   const modes = data?.facets?.failureModes ?? []
   const conflicts = selectionConflicts(selectedItems)
-  const blocker = reason || (readError ? '建议读取失败，请重试后生成。' : loading ? '正在核对建议来源…' : !data?.canEdit ? '当前只有查看权限。' : '')
-  return <RepairWorkspace stage={1} title="把多条建议，变成一次修复" subtitle={`${workflowId} · 选择独立建议，生成完整 Pack 候选`} onBack={onBack}>
+  const blocker = reason || (readError ? '建议读取失败，请重试后生成。' : loading ? '正在核对建议来源…' : !data?.canEdit ? '当前只有查看权限。' : !selected.length ? '请至少选择一条建议；修复要求可以留空。' : '')
+  return <RepairWorkspace stage={1} title="把多条建议，变成一次修复" subtitle={`${workflowId} · 选择独立建议，生成完整 Pack 候选`} onBack={onBack} busy={busy}>
     <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]">
       <section className="overflow-hidden rounded-lg border border-input bg-card">
         <div className="border-b border-input px-5 py-4"><h3 className="text-base font-semibold text-foreground">本次准备解决哪些问题？</h3>
@@ -66,10 +68,10 @@ export default function RepairSelectionWorkspace({ workflowId, includeHistorical
           <details className="mt-4 text-xs"><summary className="cursor-pointer text-primary">查看全部已选（{selected.length}）</summary><ul className="mt-2 max-h-64 space-y-2 overflow-auto">{selectedItems.map(item => <li key={item.itemId} className="flex gap-2"><span className="flex-1 leading-5">{itemTitle(item)}</span><button disabled={busy} onClick={() => onToggle(item.itemId)} className="shrink-0 text-primary">移除</button></li>)}</ul></details>
           <p className="mt-4 border-l-2 border-warning bg-warning/10 p-3 text-xs leading-5 text-warning-foreground">重复修改保留每条来源；冲突不会自动替你选择。</p>
         </section>
-        <label className="block rounded-lg border border-input bg-card p-5 text-sm font-semibold text-foreground">本次修复要求<textarea aria-label="本次修复要求" rows={5} maxLength={20_000} value={instructions} disabled={busy} onChange={e => onInstructions(e.target.value)} placeholder="例如：保持原业务分支，不放宽高风险规则。" className="mt-3 w-full rounded border border-input bg-background text-foreground p-3 text-xs font-normal leading-5" /></label>
+        <label className="block rounded-lg border border-input bg-card p-5 text-sm font-semibold text-foreground">本次修复要求（选填）<textarea aria-label="本次修复要求" rows={5} maxLength={20_000} value={instructions} disabled={busy} onChange={e => onInstructions(e.target.value)} placeholder="例如：保持原业务分支，不放宽高风险规则。" className="mt-3 w-full rounded border border-input bg-background text-foreground p-3 text-xs font-normal leading-5" /></label>
       </aside>
     </div>
     {conflicts.length > 0 && <p role="alert" className="rounded border border-warning/30 bg-warning/10 p-4 text-xs text-warning-foreground">所选方案存在 {conflicts.length} 处结构冲突。候选将保留逐项结论；冲突未解决不能发布。</p>}
-    <footer className="sticky bottom-4 z-20 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-input bg-card px-5 py-4 shadow-sm"><div><p className="text-sm font-semibold">先改成草稿，不直接部署</p><p role={error ? 'alert' : 'status'} className={`mt-1 text-xs ${error ? 'text-destructive' : 'text-muted-foreground'}`}>{error || blocker || '来源、修改和检查结果一起进入任务详情。'}</p></div><button className={primary} disabled={busy || !!blocker || !selected.length} onClick={onGenerate}>{busy ? '提交中…' : '生成 Pack 草稿'}</button></footer>
+    <footer className="sticky bottom-4 z-20 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-input bg-card px-5 py-4 shadow-sm"><div><p className="text-sm font-semibold">先改成草稿，不直接部署</p><p role={error ? 'alert' : 'status'} className={`mt-1 text-xs ${error ? 'text-destructive' : 'text-muted-foreground'}`}>{error || blocker || '来源、修改和检查结果一起进入任务详情。'}</p></div><div className="flex gap-2">{onRecover && <button type="button" className={button} disabled={busy} onClick={onRecover}>核对任务状态</button>}<button className={primary} disabled={busy || !!blocker || !selected.length} onClick={onGenerate}>{busy ? '提交中…' : '生成 Pack 草稿'}</button></div></footer>
   </RepairWorkspace>
 }
