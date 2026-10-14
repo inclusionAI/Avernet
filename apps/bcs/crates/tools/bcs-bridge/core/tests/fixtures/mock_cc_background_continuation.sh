@@ -10,6 +10,6 @@ echo '{"type":"system","subtype":"task_started","task_id":"t-bg","tool_use_id":"
 echo '{"type":"user","message":{"content":[{"type":"tool_use_id":"toolu_bg","type":"tool_result","content":"Async agent launched successfully. agentId: t-bg","is_error":false}]}}'
 echo '{"type":"result","subtype":"success","result":"LAUNCHED"}'
 sleep 0.3
-echo '{"type":"system","subtype":"task_notification","task_id":"t-bg","tool_use_id":"toolu_bg","status":"completed","summary":"done"}'
+echo '{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>t-bg</task-id>\n<tool-use-id>toolu_bg</tool-use-id>\n<status>completed</status>\n<summary>done</summary>\n</task-notification>"}}'
 echo '{"type":"result","subtype":"success","result":"final answer after background agent"}'
 sleep 30

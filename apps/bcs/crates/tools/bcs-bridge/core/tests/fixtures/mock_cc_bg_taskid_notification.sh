@@ -9,6 +9,6 @@ echo '{"type":"system","subtype":"task_started","task_id":"t-legacy","tool_use_i
 echo '{"type":"user","message":{"content":[{"type":"tool_use_id":"toolu_leg","type":"tool_result","content":"Command running in background with ID: t-legacy. You will be notified when it completes.","is_error":false}]}}'
 echo '{"type":"result","subtype":"success","result":"PARTIAL"}'
 sleep 0.2
-echo '{"type":"system","subtype":"task_notification","task_id":"t-legacy","status":"completed","summary":"done"}'
+echo '{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>t-legacy</task-id>\n<status>completed</status>\n</task-notification>"}}'
 echo '{"type":"result","subtype":"success","result":"released via task_id"}'
 sleep 8
