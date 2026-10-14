@@ -156,7 +156,15 @@ class NestedStory(Story):
             "owners": [self.args.human], "provider_bot_ref": "nested-loop-e2e-" + uuid.uuid4().hex,
             "domains": ["release"], "skills": ["review"], "scopes": ["local"],
         }, headers={"Authorization": "Bearer " + self.provider["provider_admin_token"]})
-        self.request(f"/bots/{segment(self.bot['bot_uuid'])}/visibility", {"visibility": "public"}, method="PUT")
+        # Legacy Provider-admin publication does not mint a Human
+        # authority edge (only the trusted register surface does), so the
+        # fixture bot makes itself discoverable with its own runtime
+        # credential instead of the human owner's headers.
+        self.request(
+            f"/bots/{segment(self.bot['bot_uuid'])}/visibility",
+            {"visibility": "public"}, method="PUT",
+            headers={"X-BCS-Bot-Token": self.bot["bot_runtime_token"]},
+        )
         self.args.driver = self.bot["bot_uuid"]
         self.token = self.bot["bot_runtime_token"]
 
