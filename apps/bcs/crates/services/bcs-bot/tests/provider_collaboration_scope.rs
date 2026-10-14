@@ -113,9 +113,13 @@ async fn current_membership_controls_scope_without_retaining_group_history() {
         bot_uuid: Some("imported".into()), bot_name: "Changed name".into(), provider_bot_ref: "imported:alice".into(),
         owners: vec!["alice".into()], connection_mode: ProviderBotConnectionMode::Plugin, ..Default::default()
     };
-    assert!(matches!(admin.register_provider_bot_with_bot_uuid(
-        &provider.provider.provider_id, &provider.provider_admin_token, params(),
-    ).await, Err(ServiceError::Conflict(_))));
+    for mode in [ProviderBotConnectionMode::Plugin, ProviderBotConnectionMode::Gateway] {
+        let mut request = params(); request.connection_mode = mode;
+        if mode == ProviderBotConnectionMode::Gateway { request.webhook_url = Some("https://example.org/bot".into()); }
+        assert!(matches!(admin.register_provider_bot_with_bot_uuid(
+            &provider.provider.provider_id, &provider.provider_admin_token, request,
+        ).await, Err(ServiceError::Conflict(_))));
+    }
     assert!(metadata_port.get_provider_bot("imported").await.unwrap().is_none());
     assert_eq!(bots.get("imported").await.unwrap().capabilities.name.as_deref(), Some("Original name"));
     assert_eq!(bots.load_token("imported").await.as_deref(), Some("fixture-imported-token"));
