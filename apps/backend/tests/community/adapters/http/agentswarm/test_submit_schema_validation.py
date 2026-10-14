@@ -1,0 +1,200 @@
+"""Submit-boundary schema validation for the agentswarm HTTP DTOs.
+
+Wire contract enforced at the Pydantic boundary (D18 closed-set + input
+caps):
+
+* every inbound free-text field is length-capped — caps align with the
+  durable columns they land in (``name`` String(128), ``role`` String(256),
+  ``idempotency_key`` String(190) unique keys; ``goal``/``instructions``
+  are generous Text caps);
+* request DTOs are ``extra="forbid"`` — an unknown key (a typo'd
+  ``idempotency_key``) must fail loudly with 422 instead of silently
+  disabling dedup;
+* ``provider`` is closed-set vocabulary typed by ``ProviderKind`` — the
+  boundary rejects unknown values (422) instead of the router's fail-safe
+  ``ProviderKind.coerce`` default (coerce stays for DB-row decode).
+
+Unit-level: FastAPI translates a ``pydantic.ValidationError`` on a body
+model to 422 automatically, so asserting ``ValidationError`` here is the
+same contract as the wire.
+"""
+from __future__ import annotations
+
+import pytest
+from pydantic import ValidationError
+
+from agentclaw.community.adapters.http.agentswarm.schemas import (
+    AgentSpecDTO, SubmitRunDTO,
+)
+from agentclaw.community.core.agentswarm.domain.models import ProviderKind
+
+GOAL_MAX = 8000
+NAME_MAX = 128
+ROLE_MAX = 256
+INSTRUCTIONS_MAX = 20000
+IDEMPOTENCY_KEY_MAX = 190
+AGENTS_MAX = 64
+METADATA_MAX_ENTRIES = 32
+METADATA_KEY_MAX = 200
+METADATA_VALUE_MAX = 2000
+
+
+def _body(**overrides) -> dict:
+    body = {
+        "goal": "summarize the incident timeline",
+        "agents": [{"name": "scout", "role": "research"}],
+    }
+    body.update(overrides)
+    return body
+
+
+def _agent(**overrides) -> dict:
+    spec = {"name": "scout", "role": "research"}
+    spec.update(overrides)
+    return spec
+
+
+def _error_types(exc: ValidationError) -> set[str]:
+    return {err["type"] for err in exc.value.errors()}
+
+
+class TestGoalCap:
+
+    def test_over_length_goal_rejected(self):
+        with pytest.raises(ValidationError) as exc:
+            SubmitRunDTO(**_body(goal="x" * (GOAL_MAX + 1)))
+        assert "string_too_long" in _error_types(exc)
+
+    def test_goal_at_limit_accepted(self):
+        dto = SubmitRunDTO(**_body(goal="x" * GOAL_MAX))
+        assert len(dto.goal) == GOAL_MAX
+
+
+class TestExtraForbidden:
+
+    def test_unknown_top_level_field_rejected(self):
+        # the motivating typo: `idempotency_keyy` used to be silently
+        # ignored, disabling dedup without any signal to the caller
+        body = _body()
+        body["idempotency_keyy"] = "typo-disables-dedup"
+        with pytest.raises(ValidationError) as exc:
+            SubmitRunDTO(**body)
+        assert "extra_forbidden" in _error_types(exc)
+        assert ("idempotency_keyy",) in [e["loc"] for e in exc.value.errors()]
+
+    def test_unknown_agent_spec_field_rejected(self):
+        with pytest.raises(ValidationError) as exc:
+            SubmitRunDTO(**_body(agents=[_agent(power=9001)]))
+        assert "extra_forbidden" in _error_types(exc)
+        assert ("agents", 0, "power") in [e["loc"] for e in exc.value.errors()]
+
+
+class TestProviderClosedSet:
+
+    @pytest.mark.parametrize("value", ["bogus", "openclaw"])
+    def test_unknown_provider_rejected(self, value):
+        with pytest.raises(ValidationError) as exc:
+            SubmitRunDTO(**_body(provider=value))
+        assert ("provider",) in [e["loc"] for e in exc.value.errors()]
+
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            ("default", ProviderKind.DEFAULT),
+            ("stub", ProviderKind.STUB),
+            ("avernet", ProviderKind.AVENET),
+        ],
+    )
+    def test_closed_set_provider_accepted(self, value, expected):
+        dto = SubmitRunDTO(**_body(provider=value))
+        assert dto.provider is expected
+
+    def test_provider_omitted_is_none(self):
+        dto = SubmitRunDTO(**_body())
+        assert dto.provider is None
+
+
+class TestAgentsHeadcountCap:
+
+    def test_sixty_five_agents_rejected(self):
+        agents = [_agent(name=f"a{i}", role="research") for i in range(AGENTS_MAX + 1)]
+        with pytest.raises(ValidationError) as exc:
+            SubmitRunDTO(**_body(agents=agents))
+        assert ("agents",) in [e["loc"] for e in exc.value.errors()]
+
+    def test_at_limit_agents_accepted_and_empty_rejected(self):
+        agents = [_agent(name=f"a{i}", role="research") for i in range(AGENTS_MAX)]
+        dto = SubmitRunDTO(**_body(agents=agents))
+        assert len(dto.agents) == AGENTS_MAX
+        with pytest.raises(ValidationError):
+            SubmitRunDTO(**_body(agents=[]))
+
+
+class TestIdempotencyKeyCap:
+
+    def test_over_length_key_rejected(self):
+        with pytest.raises(ValidationError) as exc:
+            SubmitRunDTO(**_body(idempotency_key="k" * (IDEMPOTENCY_KEY_MAX + 1)))
+        assert "string_too_long" in {
+            err["type"] for err in exc.value.errors()
+        }
+
+    def test_at_length_key_accepted(self):
+        dto = SubmitRunDTO(**_body(idempotency_key="k" * IDEMPOTENCY_KEY_MAX))
+        assert dto.idempotency_key == "k" * IDEMPOTENCY_KEY_MAX
+
+
+class TestAgentSpecCaps:
+
+    def test_over_length_name_rejected(self):
+        with pytest.raises(ValidationError):
+            AgentSpecDTO(name="n" * (NAME_MAX + 1), role="research")
+
+    def test_over_length_role_rejected(self):
+        with pytest.raises(ValidationError):
+            AgentSpecDTO(name="scout", role="r" * (ROLE_MAX + 1))
+
+    def test_over_length_instructions_rejected(self):
+        with pytest.raises(ValidationError):
+            AgentSpecDTO(
+                name="scout", role="research",
+                instructions="i" * (INSTRUCTIONS_MAX + 1),
+            )
+
+    def test_at_length_spec_accepted(self):
+        dto = AgentSpecDTO(
+            name="n" * NAME_MAX, role="r" * ROLE_MAX,
+            instructions="i" * INSTRUCTIONS_MAX,
+        )
+        assert len(dto.name) == NAME_MAX
+        assert len(dto.role) == ROLE_MAX
+        assert len(dto.instructions) == INSTRUCTIONS_MAX
+
+
+class TestMetadataCaps:
+
+    def test_entry_count_over_cap_rejected(self):
+        metadata = {f"k{i}": "v" for i in range(METADATA_MAX_ENTRIES + 1)}
+        with pytest.raises(ValidationError) as exc:
+            AgentSpecDTO(name="scout", role="research", metadata=metadata)
+        assert ("metadata",) in [e["loc"] for e in exc.value.errors()]
+
+    def test_value_over_cap_rejected(self):
+        with pytest.raises(ValidationError):
+            AgentSpecDTO(
+                name="scout", role="research",
+                metadata={"k": "v" * (METADATA_VALUE_MAX + 1)},
+            )
+
+    def test_key_over_cap_rejected(self):
+        with pytest.raises(ValidationError):
+            AgentSpecDTO(
+                name="scout", role="research",
+                metadata={"k" * (METADATA_KEY_MAX + 1): "v"},
+            )
+
+    def test_at_cap_metadata_accepted(self):
+        metadata = {f"k{i}": "v" for i in range(METADATA_MAX_ENTRIES - 1)}
+        metadata["k" * METADATA_KEY_MAX] = "v" * METADATA_VALUE_MAX
+        dto = AgentSpecDTO(name="scout", role="research", metadata=metadata)
+        assert len(dto.metadata) == METADATA_MAX_ENTRIES

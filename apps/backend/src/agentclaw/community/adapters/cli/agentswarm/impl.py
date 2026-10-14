@@ -4,12 +4,14 @@ Drives the same Service API contract the FastAPI router exposes, over
 HTTP. Base URL honors ``AGENTSWARM_BASE_URL`` (AvernetConfig-style env
 override, default http://127.0.0.1:8000).
 
-Tenant (Stage B, D25): the request body no longer carries a tenant — the
-server resolves it from the authenticated principal. For dev usage the CLI
-passes the tenant through the server's explicit fallback header instead:
-``--tenant`` flag or ``AGENTSWARM_TENANT`` env override, sent as
-``X-Tenant-Id``. When the authenticated principal already has a tenant the
-server ignores the header, so sending it is always safe.
+Tenant (Stage B, D25): the request body carries no tenant; the tenant is
+resolved server-side from the authenticated principal only, and the server
+never reads the client ``X-Tenant-Id`` header. The CLI still sends
+``--tenant`` / ``AGENTSWARM_TENANT`` as ``X-Tenant-Id`` for
+dev/forward-compat, but the server ignores it: ``--tenant`` cannot
+resolve a tenant on its own, and a principal without a tenant fails with
+HTTP 400 ``{"detail": "tenant unresolvable"}``. Operators must ensure the
+authenticated principal carries the tenant.
 """
 from __future__ import annotations
 
@@ -42,8 +44,9 @@ def build_parser() -> argparse.ArgumentParser:
     submit.add_argument("--spec", required=True,
                         help="JSON file: goal, agents[, provider, model, idempotency_key]")
     submit.add_argument("--tenant", default=None,
-                        help=f"tenant for the X-Tenant-Id fallback header "
-                             f"(default: ${TENANT_ENV_VAR})")
+                        help=f"sent as X-Tenant-Id but ignored by the "
+                             f"server; only the authenticated principal's "
+                             f"tenant is honoured (default: ${TENANT_ENV_VAR})")
     submit.add_argument("--wait", dest="wait", action="store_true", default=False,
                         help="Poll to a terminal state and print the report")
     submit.add_argument("--interval", type=float, default=1.0)
@@ -52,14 +55,16 @@ def build_parser() -> argparse.ArgumentParser:
     get_cmd = sub.add_parser("get", help="Print a run summary as JSON")
     get_cmd.add_argument("--run-id", required=True)
     get_cmd.add_argument("--tenant", default=None,
-                         help=f"tenant for the X-Tenant-Id fallback header "
-                              f"(default: ${TENANT_ENV_VAR})")
+                         help=f"sent as X-Tenant-Id but ignored by the "
+                              f"server; only the authenticated principal's "
+                              f"tenant is honoured (default: ${TENANT_ENV_VAR})")
 
     report_cmd = sub.add_parser("report", help="Print the run's report page")
     report_cmd.add_argument("--run-id", required=True)
     report_cmd.add_argument("--tenant", default=None,
-                            help=f"tenant for the X-Tenant-Id fallback header "
-                                 f"(default: ${TENANT_ENV_VAR})")
+                            help=f"sent as X-Tenant-Id but ignored by the "
+                                 f"server; only the authenticated principal's "
+                                 f"tenant is honoured (default: ${TENANT_ENV_VAR})")
     return parser
 
 

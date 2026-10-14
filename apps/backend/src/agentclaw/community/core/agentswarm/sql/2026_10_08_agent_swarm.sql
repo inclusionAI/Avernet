@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS `ac_agent_swarm_message` (
     `message_id`    varchar(128)  NOT NULL               COMMENT 'message uuid',
     `run_id`        varchar(128)  NOT NULL,
     `agent_id`      varchar(128)  NOT NULL,
-    `seq`           int           NOT NULL               COMMENT 'per-agent monotonic sequence',
+    `seq`           bigint(20)    NOT NULL               COMMENT 'per-agent monotonic sequence (epoch ms; overflows int32)',
     `role`          varchar(16)   NOT NULL               COMMENT 'system|user|assistant|tool|decision',
     `content`       text          DEFAULT NULL,
     `decision`      text          DEFAULT NULL           COMMENT ' Decision JSON when role=decision',

@@ -5,10 +5,15 @@ chat one objective, delete it) is platform work this backend cannot do
 itself — the binding lives host-side, not here: the community host
 adapter (``plugins/community/agentswarm/host.py`` — the
 create-with-manifest flow for provisioning, the grt_chat engine
-transport for the chat leg) is bound by ``CommunityAgentSwarmPlatformModule``
-in the community column and the singlebox branch of the profile
-composition. Profiles whose column does not install the binding keep the
-designed failure — avernet-kind spawns fail clear at the factory — and
+transport for the chat leg) is bound by the ``AgentSwarmModule.bot_platform``
+DI provider (``di/modules/agentswarm``) in the composition root's base
+module list. Constructing the adapter requires the configured host owner
+(``agentswarm.host.owner_id`` — the account swarm-created bots belong to,
+no service-account fallback); the provider refuses construction with a
+precise ``AgentSwarmConfigError`` when it is blank, and profiles whose
+platform-side dependencies that provider cannot resolve keep the designed
+failure — avernet-kind spawns fail
+clear at the factory — and
 the swarm defines the seam and the
 composition root binds the host's in-process BotPlatform adapter; nothing
 in agentswarm opens a socket, and a missing BotPlatform binding means
@@ -78,5 +83,9 @@ class BotPlatform(Protocol):
 
     def chat(self, bot_id: BotId, message: str) -> str:
         """Send one objective and return the bot's raw reply text; the
-        caller owns parsing. Non-2xx-equivalent failures raise."""
+        caller owns parsing. Non-2xx-equivalent failures raise. The wait
+        is finite: a hung engine transport surfaces as a raised error
+        (RuntimeError-family, e.g. the community adapter's ChatTimeoutError)
+        rather than an unbounded block — the caller offloads this call to
+        a thread, which must not be held hostage forever."""
         ...

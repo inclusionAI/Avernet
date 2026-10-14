@@ -10,10 +10,16 @@ from agentclaw.community.api.agentswarm_service import (
 
 from agentclaw.community.core.agentswarm.config.settings import AgentSwarmConfig
 from agentclaw.community.core.agentswarm.service import AgentSwarmService
+from agentclaw.community.core.agentswarm.service.protocols import (
+    AgentSwarmConfigError,
+)
 from agentclaw.community.core.agentswarm.orchestration.orchestrator import Orchestrator
 from agentclaw.community.core.agentswarm.orchestration.guards import GuardService
 from agentclaw.community.core.agentswarm.orchestration.decision_parser import (
     DecisionParser,
+)
+from agentclaw.community.core.agentswarm.runtime.breaker import (
+    UpstreamBreaker,
 )
 from agentclaw.community.plugins.local.agentswarm.llm_stub import StubLLMProvider
 from agentclaw.community.plugins.local.agentswarm.llm_openai import OpenAICompatibleClient
@@ -42,15 +48,49 @@ from agentclaw.community.core.agentswarm.runtime.worker import AgentSwarmWorker
 from agentclaw.community.plugin_api.agentswarm.bot import BotPlatform
 from agentclaw.community.plugin_api.agentswarm.llm import LLMProvider
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_llm_api_key(secret_name: str, resolver: SecretResolver) -> str:
+    """Resolve the llm block's secret NAME to its credential value.
+
+    The yaml ``llm.secret_name`` (carried on ``LlmConfig.api_key``) is a
+    registry key, never the token itself — resolution goes through the
+    injected ``SecretResolver`` exactly like the harness LLM
+    (``core/harness/services/llm.py``): lookup by name, read
+    ``.secret_value``. An empty name, a missing secret, or a failing
+    backend fails clear with ``AgentSwarmConfigError`` (nothing is sent
+    as a Bearer, and no value is stored on any config object).
+    """
+    if not secret_name:
+        raise AgentSwarmConfigError(
+            "agentswarm llm: base_url is set but secret_name is empty — "
+            "no credential to resolve; set llm.secret_name and provision "
+            "the secret"
+        )
+    try:
+        secret = resolver.get_secret(secret_name)
+    except Exception as exc:
+        raise AgentSwarmConfigError(
+            f"agentswarm llm: secret lookup for {secret_name!r} failed "
+            f"({type(exc).__name__}: {exc}) — provision the secret or fix "
+            "the secret backend"
+        ) from exc
+    value = getattr(secret, "secret_value", None)
+    if value is None or not str(value).strip():
+        raise AgentSwarmConfigError(
+            f"agentswarm llm: secret {secret_name!r} resolved to no value "
+            "— the swarm refuses to send an unauthenticated request"
+        )
+    return str(value)
 
 
 class AgentSwarmModule(Module):
 
     def configure(self, binder: Binder) -> None:
         binder.bind(DecisionParser, scope=singleton)
-        binder.bind(GuardService, scope=singleton)
 
     @singleton
     @provider
@@ -100,14 +140,32 @@ class AgentSwarmModule(Module):
     @provider
     @singleton
     @inject
+    def provide_guards(self, config: AgentSwarmConfig) -> GuardService:
+        # One config-built singleton: the orchestrator and the handler
+        # share this instance, so yaml guard limits are enforced
+        # identically on both decision paths (P1-9 — a second
+        # default-constructed GuardService let the orchestrator police
+        # default limits the handler never used).
+        return GuardService(
+            max_width=config.orchestration.max_width,
+            max_depth=config.orchestration.max_depth,
+            respawn_max=config.orchestration.respawn_max,
+            no_progress_threshold=config.orchestration.no_progress_threshold,
+        )
+
+    @provider
+    @singleton
+    @inject
     def provide_llm(
         self,
         config: AgentSwarmConfig,
+        secret_resolver: SecretResolver,
     ) -> LLMProvider:
         if config.llm is not None and config.llm.base_url:
+            resolved = _resolve_llm_api_key(config.llm.api_key, secret_resolver)
             return OpenAICompatibleClient(
                 base_url=config.llm.base_url,
-                api_key=config.llm.api_key,
+                api_key=resolved,
                 default_model=config.llm.default_model,
                 orchestrator_model=config.llm.orchestrator_model,
                 timeout_seconds=config.llm.timeout_seconds,
@@ -180,11 +238,28 @@ class AgentSwarmModule(Module):
     @provider
     @singleton
     @inject
-    def bot_platform(self, injector: Injector) -> BotPlatform:
+    def bot_platform(
+        self,
+        injector: Injector,
+        config: AgentSwarmConfig,
+    ) -> BotPlatform:
         """In-process host adapter from config.platform. Heavy imports
         are call-local: the bot_management chain is circular at module
         import time (bot_service→aicoding→bot_service), deferring the
         chain here preserves the module's clean import."""
+        # P0-9: the platform identity is required, with no service-account
+        # fallback — bots created under an empty owner have no owner. The
+        # refusal is precise (AgentSwarmConfigError naming the knob);
+        # provide_runtime logs it before degrading to the none-platform
+        # mode, so it is never mistaken for an unbound wiring bug.
+        owner_id = config.host.owner_id.strip()
+        if not owner_id:
+            raise AgentSwarmConfigError(
+                "agentswarm.host.owner_id is not configured: the host "
+                "BotPlatform binding requires the account swarm-created "
+                "bots belong to (no service-account fallback) — set "
+                "host.owner_id in the agentswarm block"
+            )
         from agentclaw.community.api.bot_config_manifest_apply_service import (
             BotConfigManifestApplyServiceProtocol,
         )
@@ -201,6 +276,7 @@ class AgentSwarmModule(Module):
             AvernetBotPlatform,
         )
         return AvernetBotPlatform(
+            owner_id=owner_id,
             manifest_seam=injector.get(ManifestCreationSeam),
             bot_service=injector.get(BotServiceProtocol),
             passport_plugin=injector.get(PassportPlugin),
@@ -226,7 +302,24 @@ class AgentSwarmModule(Module):
         # spawns fail clear at the factory.
         try:
             platform: BotPlatform | None = injector.get(BotPlatform)
+        except AgentSwarmConfigError as exc:
+            # The designed refusal (e.g. agentswarm.host.owner_id not
+            # configured): precise, logged, never mistaken for a wiring
+            # bug, and the swarm keeps its none-platform fail-clear mode.
+            logger.warning(
+                "[agentswarm] BotPlatform refused construction: %s "
+                "(avernet-kind spawns will fail clear at the factory)", exc,
+            )
+            platform = None
         except Exception:
+            # Anything else IS a wiring bug (unbound/misbound dependency in
+            # the platform chain): logged with the traceback so the
+            # degrade is observable, then the same fail-clear mode.
+            logger.exception(
+                "[agentswarm] BotPlatform resolution failed — degrading to "
+                "none-platform mode; avernet-kind spawns fail clear at the "
+                "factory"
+            )
             platform = None
         factory = DefaultSubagentFactory(llm, platform)
         store = FilesystemArtifactStore(config.artifact_store_root)
@@ -237,6 +330,10 @@ class AgentSwarmModule(Module):
             max_attempts=config.orchestration.subagent_max_attempts,
             per_task_timeout=config.orchestration.per_subagent_timeout,
             artifact_inline_threshold=config.artifact_inline_threshold,
+            upstream_breaker=UpstreamBreaker(
+                failure_threshold=config.upstream_breaker.failure_threshold,
+                open_seconds=config.upstream_breaker.open_seconds,
+            ),
         )
 
     @provider
@@ -247,6 +344,7 @@ class AgentSwarmModule(Module):
         config: AgentSwarmConfig,
         orchestrator: Orchestrator,
         runtime: SubagentRuntime,
+        guards: GuardService,
         run_repo: RunRepository,
         agent_repo: AgentRepository,
         message_repo: MessageRepository,
@@ -261,6 +359,8 @@ class AgentSwarmModule(Module):
         termination = TerminationEvaluator(
             max_turns=config.orchestration.max_turns,
             max_total_agents=config.orchestration.max_total_agents,
+            wall_clock_seconds=config.orchestration.wall_clock_seconds,
+            no_progress_threshold=config.orchestration.no_progress_threshold,
         )
         return SwarmRunHandler(
             config=config,
@@ -274,10 +374,7 @@ class AgentSwarmModule(Module):
             guard_repo=guard_repo,
             job_repo=job_repo,
             termination=termination,
-            guards=GuardService(
-                max_width=config.orchestration.max_width,
-                max_depth=config.orchestration.max_depth,
-            ),
+            guards=guards,
         )
 
     @provider

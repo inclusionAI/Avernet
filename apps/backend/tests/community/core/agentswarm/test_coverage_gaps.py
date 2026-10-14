@@ -77,7 +77,9 @@ from agentclaw.community.core.agentswarm.runtime.pool import (
 from agentclaw.community.core.agentswarm.runtime.handler import SwarmRunHandler
 from agentclaw.community.core.agentswarm.runtime.worker import AgentSwarmWorker
 from agentclaw.community.core.agentswarm.service import AgentSwarmService
-from agentclaw.community.core.agentswarm.service.protocols import SubmitRunRequest
+from agentclaw.community.core.agentswarm.service.protocols import (
+    AgentSwarmSyncTimeoutError, SubmitRunRequest,
+)
 
 TENANT = dm.TenantId("tenant-a")
 WORKER = "worker-gap"
@@ -150,7 +152,7 @@ class TestDefaultSubagentFactory:
         factory = DefaultSubagentFactory(StubLLMProvider())
         run = _mk_run()
         spec = dm.AgentSpec(name="s1", role="research", kind=dm.AgentKind.LLM)
-        sub = factory.create(spec, run)
+        sub = factory.create(spec, run, dm.AgentId("agent-s1"))
         assert isinstance(sub, LLMBackedSubagent)
         await sub.teardown()
 
@@ -160,6 +162,7 @@ class TestDefaultSubagentFactory:
         sub = factory.create(
             dm.AgentSpec(name="b1", role="worker", kind=dm.AgentKind.AVENET),
             _mk_run(),
+            dm.AgentId("agent-b1"),
         )
         assert isinstance(sub, AvernetSubagent)
 
@@ -173,6 +176,7 @@ class TestDefaultSubagentFactory:
             factory.create(
                 dm.AgentSpec(name="b1", role="worker", kind=dm.AgentKind.AVENET),
                 _mk_run(),
+                dm.AgentId("agent-b1"),
             )
 
 
@@ -225,6 +229,7 @@ class TestAvernetSubagentTeardown:
         sub = AvernetSubagent(
             dm.AgentSpec(name="b", role="worker"), _mk_run(),
             _BoomPlatform(),
+            dm.AgentId("agent-b"),
         )
         sub._bot_id = "bot-1"
         await sub.teardown()
@@ -242,6 +247,7 @@ class TestAvernetSubagentTeardown:
             factory.create(
                 dm.AgentSpec(name="b", role="worker", kind=dm.AgentKind.AVENET),
                 _mk_run(),
+                dm.AgentId("agent-b"),
             )
 
     def test_factory_builds_bot_subagent_with_platform(self):
@@ -253,6 +259,7 @@ class TestAvernetSubagentTeardown:
         sub = factory.create(
             dm.AgentSpec(name="b", role="worker", kind=dm.AgentKind.AVENET),
             _mk_run(),
+            dm.AgentId("agent-b"),
         )
         assert isinstance(sub, bot_pkg.AvernetSubagent)
 
@@ -361,6 +368,18 @@ class TestSliceStoreGaps:
         return run
 
     @staticmethod
+    def _claim_job(db, run: dm.Run) -> int:
+        # persist_completion is claim-epoch fenced (D28): its agent-status
+        # write only lands on the CURRENT job epoch, so the test must stand
+        # up the durable job row a real slice would hold.
+        job_repo = JobRepository(db)
+        job_repo.enqueue(run_id=run.run_id, tenant=run.tenant,
+                         deadline_seconds=3600)
+        return job_repo.claim_batch(
+            WORKER, [run.tenant], 1, 60,
+        )[0]["claim_epoch"]
+
+    @staticmethod
     def _completion(run: dm.Run, agent_id: dm.AgentId, status: dm.AgentStatus,
                     result=None, artifact_key=None, error=None) -> dict:
         return {
@@ -403,7 +422,7 @@ class TestSliceStoreGaps:
         AgentRepository(db).create(agent)
         store.persist_completion(
             self._completion(run, agent.agent_id, dm.AgentStatus.COMPLETED),
-            claim_epoch=0,
+            claim_epoch=self._claim_job(db, run),
         )
         shard = ResultShardRepository(db).get_by_run_agent(
             run.run_id, agent.agent_id, TENANT,
@@ -418,7 +437,7 @@ class TestSliceStoreGaps:
         store.persist_completion(
             self._completion(run, agent.agent_id, dm.AgentStatus.FAILED,
                              error="boom"),
-            claim_epoch=0,
+            claim_epoch=self._claim_job(db, run),
         )
         messages = MessageRepository(db).list_by_agent(
             run.run_id, agent.agent_id, TENANT,
@@ -434,7 +453,7 @@ class TestSliceStoreGaps:
         store.persist_completion(
             self._completion(run, agent.agent_id, dm.AgentStatus.COMPLETED,
                              artifact_key="run/artifact"),
-            claim_epoch=0,
+            claim_epoch=self._claim_job(db, run),
         )
         shard = ResultShardRepository(db).get_by_run_agent(
             run.run_id, agent.agent_id, TENANT,
@@ -503,7 +522,7 @@ class TestSubmitSync:
         assert synced.run_id == run_id
 
     @pytest.mark.asyncio
-    async def test_submit_sync_deadline_falls_back_for_deleted_run(self, db):
+    async def test_submit_sync_deadline_of_deleted_run_raises_typed_error(self, db):
         from sqlalchemy import update as _update
         config = AgentSwarmConfig(
             llm=LlmConfig(base_url="stub"),
@@ -523,10 +542,14 @@ class TestSubmitSync:
                 )
 
         deleter = asyncio.create_task(delete_mid_poll())
-        synced = await service.submit_sync(req)
+        # A run deleted mid-wait is truly gone at expiry: submit_sync must
+        # refuse to fabricate a TIMED_OUT Run and raise the typed error.
+        with pytest.raises(AgentSwarmSyncTimeoutError) as caught:
+            await service.submit_sync(req)
         await deleter
-        assert synced.status is dm.RunStatus.TIMED_OUT
-        assert synced.final_answer is None
+        assert caught.value.run_id == run_id
+        assert caught.value.deadline == 1.0
+        assert service.get_run(run_id, TENANT) is None
 
     def _repos(self, db) -> dict:
         return {
@@ -999,7 +1022,15 @@ class TestOrchestratorEdges:
         outcome = await orchestrator.run_slice(run, state, None)
         assert outcome["terminate"] is dm.TerminationReason.NO_DECISION
         assert outcome["guard_events"], "unresolvable handoff must record a guard"
-        assert outcome["guard_events"][0].kind is dm.GuardKind.DEDUPE_REJECT
+        # Closed-set note: GuardKind has no invalid-decision member, so the
+        # event reuses the decision-reject slot; details["reason"] is the
+        # authoritative discriminator (adding a dedicated kind requires
+        # coordinating domain/models/enums.py).
+        ge = outcome["guard_events"][0]
+        assert ge.kind is dm.GuardKind.DEDUPE_REJECT
+        assert ge.details["reason"] == "unresolvable_handoff"
+        assert ge.details["target"] == "nobody"
+        assert ge.details["attempt"] == 1
         assert state.active_persona is None
 
 

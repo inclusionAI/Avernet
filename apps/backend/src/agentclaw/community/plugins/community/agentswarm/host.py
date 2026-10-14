@@ -24,17 +24,21 @@ bind-agentswarm-host-bot-platform):
   runtime binding, open the engine WebSocket, ``chat.send`` the objective,
   return the final reply text. Its async is bridged onto one thread with its
   own event loop because the seam's methods are synchronous by contract and
-  are called from inside the swarm's already-running loop.
+  are called from inside the swarm's already-running loop, and the wait is
+  bounded (``_CHAT_TIMEOUT_SECONDS``): a hung engine WebSocket surfaces as
+  ``ChatTimeoutError`` rather than blocking the swarm thread forever.
 
 The adapter is a pure function of its three inputs — (spec, idempotency_key,
 host profile) — and owns no state of its own. ``model`` and ``metadata`` on the
 spec have no manifest/create slot today (engine_config is refused at creation);
 the host profile documents them as not honored rather than inventing one.
 
-Bound by ``CommunityAgentSwarmPlatformModule`` in the community column and
-the singlebox branch of the profile composition — never in the base list: an
-unbound ``BotPlatform`` is agentswarm's designed fail-clear mode for profiles
-without a platform side.
+Bound by the ``AgentSwarmModule.bot_platform`` DI provider
+(``di/modules/agentswarm``), which sits in the composition root's base module
+list. Profiles whose platform-side dependencies that provider cannot resolve
+get no ``BotPlatform`` at all (``provide_runtime`` resolves ``None`` there) —
+an unbound ``BotPlatform`` is agentswarm's designed fail-clear mode for
+profiles without a platform side.
 """
 from __future__ import annotations
 
@@ -85,13 +89,53 @@ _CREATION_TRIGGERS = frozenset({CREATE_PRE_CONTAINER_TRIGGER, CREATE_ON_CONTAINE
 _BOT_UP = frozenset({"ACTIVE"})
 _BOT_DEAD = frozenset({"FAILED", "DELETED", "INACTIVE"})
 
+# Upper bound on one engine chat round trip. It matches the swarm's own
+# slice budget (``orchestration.slice_max_seconds``/the ready-poll
+# deadline, 300s): a chat that has not answered by then cannot still
+# count. Keeps the blocked thread from waiting forever on a hung engine
+# WebSocket.
+_CHAT_TIMEOUT_SECONDS = 300.0
+
+
+class ChatTimeoutError(RuntimeError):
+    """The engine chat leg did not answer within ``_CHAT_TIMEOUT_SECONDS``.
+
+    Raised by ``AvernetBotPlatform.chat`` when the offloaded bridge thread
+    exceeds the bounded wait. The caller's thread is freed with this
+    error; the bridge thread itself cannot be interrupted (``asyncio.run``
+    owns its loop and no cancel handle crosses the sync seam), so it is
+    abandoned and dies with the process's atexit join.
+    """
+
 
 def _idem_digest(idempotency_key: str, length: int) -> str:
     return hashlib.sha1(idempotency_key.encode("utf-8")).hexdigest()[:length]
 
 
 class AvernetBotPlatform(BotPlatform):
-    """Host-side BotPlatform over the backend's own creation and chat flows."""
+    """Host-side BotPlatform over the backend's own creation and chat flows.
+
+    The seam's methods are synchronous by contract. The async caller
+    (avernet_subagent.AvernetSubagent) already offloads ``chat`` — the one
+    leg whose latency is measured in minutes — via ``asyncio.to_thread``;
+
+    TODO(offload-platform-calls, owned with avernet_subagent.py — host.py
+    cannot fix its own call sites): the subagent still makes three inline
+    synchronous platform calls from its event loop, each blocking the loop
+    for the duration of the call (and the lease heartbeat with it):
+    - avernet_subagent.py AvernetSubagent.setup() →
+      ``self._platform.create_bot(...)`` (runs the whole manifest chain);
+    - avernet_subagent.py AvernetSubagent._poll_ready() →
+      ``self._platform.bot_status(bot_id)`` (once per poll second);
+    - avernet_subagent.py AvernetSubagent.teardown() →
+      ``self._platform.delete_bot(self._bot_id)``.
+    The fix is to wrap each in ``await asyncio.to_thread(...)``, the same
+    pattern run_task already uses for chat. Host.py-side, no method here
+    can block unboundedly while it does block: create submits the durable
+    creation job (validate + persist + Passport application — no
+    polling), status is two reads, delete is one write, and chat's wait
+    is bounded by ``_CHAT_TIMEOUT_SECONDS``.
+    """
 
     def __init__(
         self,
@@ -234,7 +278,14 @@ class AvernetBotPlatform(BotPlatform):
             # failure — "CREATE_FAILED" would send the caller to create a
             # duplicate of a running, billable bot.
             return BotState.APPLY_FAILED.value
-        return BotState.PROVISIONING.value
+        # Terminal job, bot parked in a middle state (PENDING/STOPPED —
+        # neither up nor dead): the creation job is what drives the bot
+        # toward READY, and it has finished, so the bot will never come
+        # up on its own. Report the terminal creation failure (the same
+        # state as the other terminal-without-a-working-bot cases)
+        # instead of PROVISIONING, which would only burn the poller's
+        # whole deadline into a generic timeout.
+        return BotState.CREATE_FAILED.value
 
     # ── delete ────────────────────────────────────────────────────────────
 
@@ -261,9 +312,27 @@ class AvernetBotPlatform(BotPlatform):
         # The seam is synchronous by contract and is called from inside the
         # swarm's running event loop; grt_chat is async. Bridge on one thread
         # with its own loop — one chat per slice, so a fresh executor per call
-        # is both simple and bounded.
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(asyncio.run, self._chat_once(bot_id, message)).result()
+        # is both simple and bounded. The wait is finite: a hung engine
+        # WebSocket frees this thread (and the asyncio.to_thread caller in
+        # the subagent) with ChatTimeoutError instead of blocking forever.
+        #
+        # No context manager: its __exit__ joins the worker, which would
+        # re-block for the same hang the timeout just cut short. On overrun
+        # the executor is shut down without waiting and the bridge thread
+        # runs on, abandoned — it owns the hung loop, nothing here can
+        # cancel it across the sync seam.
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = pool.submit(asyncio.run, self._chat_once(bot_id, message))
+        try:
+            reply = future.result(timeout=_CHAT_TIMEOUT_SECONDS)
+        except concurrent.futures.TimeoutError as exc:
+            pool.shutdown(wait=False)
+            raise ChatTimeoutError(
+                f"engine chat for bot {bot_id} did not finish within "
+                f"{_CHAT_TIMEOUT_SECONDS:.0f}s"
+            ) from exc
+        pool.shutdown(wait=False)
+        return reply
 
     async def _chat_once(self, bot_id: BotId, message: str) -> str:
         sandbox_id = self._grt_chat.get_sandbox_id(bot_id, self._default_owner)

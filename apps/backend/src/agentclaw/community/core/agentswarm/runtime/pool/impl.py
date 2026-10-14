@@ -26,6 +26,16 @@ class EnvelopeSchemaInvalid(Exception):
     """Raised when a spawn envelope's output_schema is itself malformed (D42)."""
 
 
+# Hard cap on a result the runtime keeps inline in a completion (and so in
+# the persisted shard ``payload`` column). Since round-4 capped artifacts at
+# 8 MiB, an oversize output can no longer spill; the inline fallback that
+# catches the spill failure used to write the raw output — of unbounded
+# size — into the DB, converting the bounded-disk vector into an
+# unbounded-DB-write vector. 1,000,000 chars ≈ 1 MB: far above any sane
+# routed result, far below the artifact cap, bounded in serialized form.
+_MAX_INLINE_RESULT_CHARS = 1_000_000
+
+
 @dataclass
 class _WorkItem:
     run: Run
@@ -252,9 +262,13 @@ class SubagentRuntime:
                             item.agent_id, attempt, schema_error,
                         )
                         continue
+                result = self._mk_result(item, AgentStatus.COMPLETED, raw, None, attempt, raw)
                 if self._upstream_breaker is not None:
+                    # 12.5: success only counts once the completed result is
+                    # materialized — a spill failure must not pair a recorded
+                    # success with the attempt's recorded failure.
                     self._upstream_breaker.record_success()
-                return self._mk_result(item, AgentStatus.COMPLETED, raw, None, attempt, raw)
+                return result
             except asyncio.TimeoutError:
                 last_error = "timeout"
                 self._record_upstream_failure()
@@ -270,7 +284,12 @@ class SubagentRuntime:
                     try:
                         await subagent.teardown()
                     except Exception:
-                        pass
+                        # Best-effort stays best-effort, but never silent: a
+                        # leaked host-platform bot must be diagnosable.
+                        logger.exception(
+                            "[agentswarm][runtime] agent=%s subagent teardown failed",
+                            item.agent_id,
+                        )
 
         return self._mk_result(item, AgentStatus.FAILED, None, last_error, self._max_attempts)
 
@@ -285,6 +304,36 @@ class SubagentRuntime:
                 return spec
         return None
 
+    def _inline_fallback(self, item: _WorkItem, output: Any,
+                         output_str: str) -> Any:
+        """Carrier for a completed result that could not spill (round-5).
+
+        Under ``_MAX_INLINE_RESULT_CHARS`` the raw output is kept inline
+        exactly as before. Above it, the raw output would be written
+        verbatim into the persisted shard ``payload`` column — an
+        unbounded-DB-write vector once the round-4 8 MiB artifact cap made
+        oversize results unspillable. The alternative — hard-fail the agent
+        so the orchestrator can react — was rejected: it discards a
+        completed, schema-valid result and re-runs the task, doubling its
+        side effects, against the campaign's stated principle. Instead a
+        bounded placeholder keeps the D31 XOR invariant (payload set,
+        artifact_key None), records the true serialized size, and carries
+        a short preview so the run converges on a present-but-truncated
+        result rather than persisting arbitrary bytes.
+        """
+        if len(output_str) <= _MAX_INLINE_RESULT_CHARS:
+            return output
+        logger.warning(
+            "[agentswarm][runtime] agent=%s result of %d chars exceeds inline cap %d and could not be spilled; "
+            "persisting bounded truncated result placeholder",
+            item.agent_id, len(output_str), _MAX_INLINE_RESULT_CHARS,
+        )
+        return {
+            "truncated": True,
+            "size": len(output_str),
+            "preview": output_str[:_MAX_INLINE_RESULT_CHARS // 10],
+        }
+
     def _mk_result(self, item: _WorkItem, status: AgentStatus,
                    raw: SubagentResult | None, error: str | None,
                    attempts: int, _raw: SubagentResult | None = None) -> dict[str, Any]:
@@ -296,12 +345,23 @@ class SubagentRuntime:
                 result_payload = _raw.output
             elif self._artifact_store is not None:
                 key = f"{item.run.run_id}/{item.agent_id}/result"
-                self._artifact_store.put(key, output_str)
-                artifact_key = key
+                try:
+                    self._artifact_store.put(key, output_str)
+                    artifact_key = key
+                except Exception:
+                    # Spilling is best-effort: never discard a completed
+                    # (schema-valid) result — that would re-run the task and
+                    # double its side effects. Keep the result inline; the
+                    # shard XOR contract (D31) still has exactly one carrier.
+                    logger.exception(
+                        "[agentswarm][runtime] agent=%s artifact put failed for key=%s; keeping result inline",
+                        item.agent_id, key,
+                    )
+                    result_payload = self._inline_fallback(item, _raw.output, output_str)
             else:
                 # No artifact store configured: keep the result inline so the
                 # shard XOR contract (D31) still has exactly one carrier.
-                result_payload = _raw.output
+                result_payload = self._inline_fallback(item, _raw.output, output_str)
 
         return {
             "agent_id": item.agent_id,

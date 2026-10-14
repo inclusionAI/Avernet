@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.agentswarm.domain import models as dm
 from agentclaw.community.core.agentswarm.repository.run import model as om
@@ -19,6 +20,7 @@ from agentclaw.community.core.agentswarm.repository.types import (
     _dumps, _loads, _now_ms,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.utils.env_utils import get_current_env
 
 
 def _dumps_valid_json(value: Any) -> str | None:
@@ -27,47 +29,49 @@ def _dumps_valid_json(value: Any) -> str | None:
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
-def _decode_run_status(val: str) -> dm.RunStatus:
-    try:
-        return dm.RunStatus(val)
-    except ValueError:
-        return dm.RunStatus.FAILED
-
-
-def _decode_termination_reason(val: str | None) -> dm.TerminationReason | None:
-    if val is None:
-        return None
-    try:
-        return dm.TerminationReason(val)
-    except ValueError:
-        return dm.TerminationReason.ERROR
-
-
 class RunRepository(RunRepositoryProtocol):
 
     def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
 
     def create(self, run: dm.Run) -> dm.Run:
-        with self._db.orm_session() as session:
-            row = om.AcAgentSwarmRunModel(
-                run_id=run.run_id,
-                env=run.provider.value,
-                tenant=run.tenant,
-                goal=run.goal,
-                agent_catalog=_dumps([a.__dict__ for a in run.agent_catalog]),
-                provider=run.provider,
-                request_metadata=_dumps(run.request_metadata.__dict__ if run.request_metadata else None),
-                status=run.status.value,
-                termination_reason=run.termination_reason.value if run.termination_reason else None,
-                root_agent_id=run.root_agent_id,
-                final_answer=_dumps(run.final_answer) if run.final_answer is not None else None,
-                error=run.error,
-                active_idempotency_key=run.active_idempotency_key,
-                started_at=run.started_at,
-                ended_at=run.ended_at,
+        try:
+            with self._db.orm_session() as session:
+                row = om.AcAgentSwarmRunModel(
+                    run_id=run.run_id,
+                    env=get_current_env(),
+                    tenant=run.tenant,
+                    goal=run.goal,
+                    agent_catalog=_dumps([a.__dict__ for a in run.agent_catalog]),
+                    provider=run.provider,
+                    request_metadata=_dumps(run.request_metadata.__dict__ if run.request_metadata else None),
+                    status=run.status.value,
+                    termination_reason=run.termination_reason.value if run.termination_reason else None,
+                    root_agent_id=run.root_agent_id,
+                    final_answer=_dumps(run.final_answer) if run.final_answer is not None else None,
+                    error=run.error,
+                    active_idempotency_key=run.active_idempotency_key,
+                    started_at=run.started_at,
+                    ended_at=run.ended_at,
+                )
+                session.add(row)
+        except IntegrityError:
+            # uk_run_idem: the (env, tenant, active_idempotency_key) slot
+            # already landed — a duplicate submit lost the race inside the
+            # get_by_idempotency → create TOCTOU window in submit_async.
+            # Idempotency means converge to the surviving run, not surface
+            # the collision; the submit plane skips its enqueue by comparing
+            # the returned run_id. Only this key collision converges: with
+            # no active key (e.g. a uk_run_id PK collision) there is nothing
+            # sound to join, and the IntegrityError re-raises.
+            if run.active_idempotency_key is None:
+                raise
+            existing = self.get_by_idempotency(
+                run.active_idempotency_key, run.tenant,
             )
-            session.add(row)
+            if existing is not None:
+                return existing
+            raise
         return run
 
     def get(self, run_id: dm.RunId, tenant: dm.TenantId) -> dm.Run | None:
@@ -82,6 +86,10 @@ class RunRepository(RunRepositoryProtocol):
             return self._to_domain(row) if row else None
 
     def get_by_idempotency(self, idempotency_key: str, tenant: dm.TenantId) -> dm.Run | None:
+        # uk_run_idem is (env, tenant, active_idempotency_key): in a
+        # multi-env single-DB deployment the join must stay inside the
+        # current env or the create() convergence path can return
+        # another env's run.
         with self._db.orm_session() as session:
             row = session.execute(
                 select(om.AcAgentSwarmRunModel).where(
@@ -89,6 +97,7 @@ class RunRepository(RunRepositoryProtocol):
                     om.AcAgentSwarmRunModel.tenant == tenant,
                     om.AcAgentSwarmRunModel.is_deleted.is_(False),
                     om.AcAgentSwarmRunModel.status == dm.RunStatus.RUNNING.value,
+                    om.AcAgentSwarmRunModel.env == get_current_env(),
                 )
             ).scalar_one_or_none()
             return self._to_domain(row) if row else None
@@ -136,6 +145,39 @@ class RunRepository(RunRepositoryProtocol):
                 ).values(**values)
             )
         return result.rowcount > 0
+
+    def fail_unclaimed(self, run_id: dm.RunId, tenant: dm.TenantId,
+                       error: str) -> bool:
+        """Submit-plane compensation for a failed enqueue.
+
+        Deliberately NOT behind the D28 job-epoch fence: that fence
+        guards worker-owned writes against stale claimers, but this
+        method exists precisely for the case where `enqueue` raised
+        BEFORE the job row committed — no job row exists at any epoch,
+        so a fenced UPDATE would match zero rows and strand the run
+        RUNNING forever (holding the tenant admission slot and the
+        active idempotency key). The caller is the submit plane
+        reclaiming a run it just created and never handed to a worker;
+        the status==RUNNING predicate alone prevents clobbering a
+        racing terminal write.
+        """
+        with self._db.orm_session() as session:
+            result = session.execute(
+                update(om.AcAgentSwarmRunModel).where(
+                    om.AcAgentSwarmRunModel.run_id == run_id,
+                    om.AcAgentSwarmRunModel.tenant == tenant,
+                    om.AcAgentSwarmRunModel.is_deleted.is_(False),
+                    om.AcAgentSwarmRunModel.status
+                    == dm.RunStatus.RUNNING.value,
+                ).values(
+                    status=dm.RunStatus.FAILED.value,
+                    error=error,
+                    termination_reason=None,
+                    active_idempotency_key=None,
+                    ended_at=_now_ms(),
+                )
+            )
+        return result.rowcount == 1
 
     def list_page(self, tenant: dm.TenantId, status: dm.RunStatus | None = None,
                   page: int = 1, page_size: int = 20) -> dm.RunPage:

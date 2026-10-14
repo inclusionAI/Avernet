@@ -31,6 +31,9 @@ def _now_ms():
     return int(time.time() * 1000)
 
 
+_AGENT_ID = dm.AgentId("agent-1")
+
+
 def _mk_run(run_id="run-42") -> Run:
     return Run(
         run_id=RunId(run_id),
@@ -103,7 +106,7 @@ class TestLifecycle:
     def test_setup_creates_bot_and_polls_to_ready(self):
         async def main():
             gw = FakePlatform(statuses=["PROVISIONING", "PROVISIONING", "READY"])
-            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw)
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID)
             await sub.setup()
 
             assert sub._bot_id == "bot-42"
@@ -113,7 +116,7 @@ class TestLifecycle:
             assert spec.description == "worker"
             assert spec.instructions == ""
             assert spec.model is None
-            assert idem == "run-42:scout"
+            assert idem == "run-42:agent-1"
             assert gw.status_queries == ["bot-42", "bot-42", "bot-42"]
 
         asyncio.run(main())
@@ -123,7 +126,7 @@ class TestLifecycle:
             gw = FakePlatform()
             spec = AgentSpec(name="clerk", role="worker",
                                 instructions="File the reports weekly.")
-            sub = AvernetSubagent(spec, _mk_run(), gw)
+            sub = AvernetSubagent(spec, _mk_run(), gw, _AGENT_ID)
             await sub.setup()
             spec, _ = gw.created[0]
             assert spec.instructions == "File the reports weekly."
@@ -133,7 +136,7 @@ class TestLifecycle:
     def test_setup_create_failure_propagates_without_bot_id(self):
         async def main():
             gw = FakePlatform(fail_create=True)
-            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw)
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID)
             with pytest.raises(RuntimeError, match="platform refused"):
                 await sub.setup()
             assert sub._bot_id is None
@@ -146,7 +149,7 @@ class TestLifecycle:
             spec = AgentSpec(name="clerk", role="filing clerk",
                              instructions="File weekly.",
                              model="clerk-7b", metadata={"tier": "1"})
-            sub = AvernetSubagent(spec, _mk_run(), gw)
+            sub = AvernetSubagent(spec, _mk_run(), gw, _AGENT_ID)
             await sub.setup()
             create_spec, idem = gw.created[0]
             assert create_spec.name == "clerk"
@@ -154,14 +157,14 @@ class TestLifecycle:
             assert create_spec.instructions == "File weekly."
             assert create_spec.model == "clerk-7b"
             assert create_spec.metadata == {"tier": "1"}
-            assert idem == "run-42:clerk"
+            assert idem == "run-42:agent-1"
 
         asyncio.run(main())
 
     def test_empty_bot_id_fails_fast_without_polling(self):
         async def main():
             gw = FakePlatform(statuses=["PROVISIONING"], bot_id="")
-            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw)
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID)
             with pytest.raises(RuntimeError, match="invalid bot_id"):
                 await sub.setup()
             assert gw.status_queries == []   # never polled a None id
@@ -171,7 +174,7 @@ class TestLifecycle:
     def test_blank_bot_id_fails_fast_without_polling(self):
         async def main():
             gw = FakePlatform(bot_id="   ")
-            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw)
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID)
             with pytest.raises(RuntimeError, match="invalid bot_id"):
                 await sub.setup()
             assert gw.status_queries == []
@@ -192,7 +195,7 @@ class TestLifecycle:
             await first.setup()
             await second.setup()
             idems = [idem for _, idem in gw.created]
-            assert len(idems) == 2 and len(set(idems)) == 2
+            assert idems == ["run-42:agent-one", "run-42:agent-two"]
 
         asyncio.run(main())
 
@@ -215,19 +218,19 @@ class TestLifecycle:
     def test_retried_setup_rebinds_the_same_persona(self):
         async def main():
             gw = FakePlatform()
-            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw)
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID)
             await sub.setup()
             await sub.teardown()
             await sub.setup()
             assert [idem for _, idem in gw.created] == [
-                "run-42:scout", "run-42:scout"]
+                "run-42:agent-1", "run-42:agent-1"]
 
         asyncio.run(main())
 
     def test_setup_terminal_failure_state_raises(self):
         async def main():
             gw = FakePlatform(statuses=["AUTHORIZATION_REJECTED"])
-            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw)
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID)
             with pytest.raises(RuntimeError, match="creation failed.*AUTHORIZATION_REJECTED"):
                 await sub.setup()
 
@@ -236,7 +239,7 @@ class TestLifecycle:
     def test_poll_deadline_expires_to_timeout(self):
         async def main():
             gw = FakePlatform(statuses=["PROVISIONING"])
-            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw)
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID)
             sub._bot_id = "bot-42"
             state = await sub._poll_ready("bot-42", timeout=0.0, interval=0.01)
             assert state == "TIMEOUT"
@@ -250,7 +253,7 @@ class TestRunTask:
     def test_run_task_parses_json_reply(self):
         async def main():
             gw = FakePlatform(chat_reply='{"result": 42}')
-            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw)
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID)
             await sub.setup()
             result = await sub.run_task(_mk_envelope())
             assert result.output == {"result": 42}
@@ -264,7 +267,7 @@ class TestRunTask:
     def test_run_task_wraps_non_json_reply_as_text(self):
         async def main():
             gw = FakePlatform(chat_reply="plain-text-not-json")
-            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw)
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID)
             await sub.setup()
             result = await sub.run_task(_mk_envelope())
             assert result.output == {"text": "plain-text-not-json"}
@@ -273,7 +276,7 @@ class TestRunTask:
 
     def test_run_task_requires_setup(self):
         async def main():
-            sub = AvernetSubagent(_mk_spec(), _mk_run(), FakePlatform())
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), FakePlatform(), _AGENT_ID)
             with pytest.raises(RuntimeError, match="setup not completed"):
                 await sub.run_task(_mk_envelope())
 
@@ -282,7 +285,7 @@ class TestRunTask:
     def test_run_task_chat_failure_counts_exhausted_and_raises(self):
         async def main():
             gw = FakePlatform(fail_chat=True)
-            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw)
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID)
             await sub.setup()
             with pytest.raises(RuntimeError, match="bot unreachable"):
                 await sub.run_task(_mk_envelope())
@@ -296,7 +299,7 @@ class TestTeardown:
     def test_teardown_deletes_bot_and_clears_id(self):
         async def main():
             gw = FakePlatform()
-            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw)
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID)
             await sub.setup()
             await sub.teardown()
             assert gw.deletes == ["bot-42"]
@@ -309,7 +312,7 @@ class TestTeardown:
     def test_teardown_swallows_delete_failure(self):
         async def main():
             gw = FakePlatform(fail_delete=True)
-            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw)
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID)
             sub._bot_id = "bot-1"
             await sub.teardown()
             assert sub._bot_id is None
@@ -319,7 +322,7 @@ class TestTeardown:
     def test_halt_alias_delegates_to_teardown(self):
         async def main():
             gw = FakePlatform()
-            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw)
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID)
             await sub.setup()
             await sub.halt()
             assert gw.deletes == ["bot-42"]
@@ -345,7 +348,7 @@ class TestChatOffloadsLongCalls:
 
         async def main():
             gw = _SlowChatPlatform()
-            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw)
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID)
             await sub.setup()
             ticks = 0
 

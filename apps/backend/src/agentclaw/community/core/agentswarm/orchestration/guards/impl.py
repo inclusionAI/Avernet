@@ -55,6 +55,13 @@ class GuardService:
         return None
 
     def check_depth(self, state: RunState, depth: int) -> GuardEvent | None:
+        """Depth guards lineage: ``depth`` is the spawn's lineage level
+        (``ac_agent_swarm_agent.depth`` + ``parent_agent_id``). The swarm is
+        flat — every orchestrator spawn is a root→child edge, so it always
+        arrives at depth 1 and this guard stays dormant unless recursive
+        spawning is ever added. In-flight concurrency is owned by max_width
+        (``check_width``), and the total-spawn census by max_total_agents in
+        the termination evaluator."""
         if depth > self._max_depth:
             return GuardEvent(
                 id=EventId(_gen_id()),
@@ -82,13 +89,22 @@ class GuardService:
 
     def check_premature_finish(self, state: RunState) -> GuardEvent | None:
         if state.routed_shard_count == 0 and state.total_agents_spawned == 0 and state.turn_count > 0:
+            # The closed GuardKind set has no dedicated premature-finish
+            # member: SERIAL_COLLAPSE is the accurate family (the
+            # orchestrator ends the run alone with zero spawn activity),
+            # and details["reason"] carries the exact event.
             return GuardEvent(
                 id=EventId(_gen_id()),
                 run_id=state.run.run_id,
                 tenant=state.run.tenant,
                 agent_id=None,
                 kind=GuardKind.SERIAL_COLLAPSE,
-                details={"reason": "premature_finish", "turns": state.turn_count},
+                details={
+                    "reason": "premature_finish",
+                    "turns": state.turn_count,
+                    "spawns": state.total_agents_spawned,
+                    "routed_shards": state.routed_shard_count,
+                },
                 created_at=EpochMillis(_now_ms()),
             )
         return None

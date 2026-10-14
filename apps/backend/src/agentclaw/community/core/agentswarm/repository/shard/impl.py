@@ -61,12 +61,13 @@ class ResultShardRepository(ResultShardRepositoryProtocol):
 
     def list_by_run(self, run_id: dm.RunId, tenant: dm.TenantId) -> list[dm.ResultShard]:
         with self._db.orm_session() as session:
+            # oldest→newest (id asc): the orchestrator prompt keeps the tail
             rows = session.execute(
                 select(om.AcAgentSwarmResultShardModel).where(
                     om.AcAgentSwarmResultShardModel.run_id == run_id,
                     om.AcAgentSwarmResultShardModel.tenant == tenant,
                     om.AcAgentSwarmResultShardModel.is_deleted.is_(False),
-                )
+                ).order_by(om.AcAgentSwarmResultShardModel.id)
             ).scalars().all()
             return [self._to_domain(r) for r in rows]
 

@@ -3,10 +3,15 @@ tests/test_e2e_api.py battery).
 
 Boots the REAL app under uvicorn on a local port with a fresh profile
 injector whose agentswarm binding carries a kind-scripted stub LLM
-(orchestrator decisions wired, subagent answers canned), then drives the
-public surface exactly the way an operator would: submit over HTTP,
-advance the durable job with the real worker, poll status, stream SSE to
-the terminal event, and re-check persistence through the repositories.
+(orchestrator decisions wired, subagent answers canned) and whose auth
+stub resolves principals with a fixed ``tntInstId`` — the hardened
+tenant contract (P0-3) resolves the tenant from the authenticated
+principal only and never reads a client-supplied ``X-Tenant-Id``, so
+the battery's auth seam must carry one the way a tenant-aware OIDC
+profile would. It then drives the public surface exactly the way an
+operator would: submit over HTTP, advance the durable job with the real
+worker, poll status, stream SSE to the terminal event, and re-check
+persistence through the repositories.
 
 The fixture's config sets AgentSwarmConfig(enabled=False): the worker
 component DOES auto-attach in the app lifecycle, and without this switch a
@@ -37,14 +42,30 @@ from agentclaw.community.core.agentswarm.runtime.worker import (
 )
 from agentclaw.community.core.agentswarm.service import AgentSwarmService
 from agentclaw.community.plugin_api.agentswarm.llm import LLMProvider
+from agentclaw.community.plugin_api.auth import AuthPlugin
+from agentclaw.community.plugins.local.auth import LocalAuth
 from agentclaw.community.di import DeployProfile, build_injector
 
 HOST = "127.0.0.1"
 # The fixture binds an ephemeral port (0) and rewrites BASE once uvicorn
 # reports the bound socket, so parallel runs never collide on a fixed port.
 BASE = ""
-AUTH = {"x-user-id": "wireshark", "X-Tenant-Id": "tenant-wire"}
+AUTH = {"x-user-id": "wireshark"}
 TENANT = "tenant-wire"
+
+
+class _TenantCarryingAuth(LocalAuth):
+    """LocalAuth, but the resolved principal always carries ``tntInstId``.
+
+    The router resolves the tenant from the principal only (P0-3), so the
+    battery wires its auth stub with the fixed tenant exactly the way a
+    tenant-aware community profile would; identity still comes from the
+    ``x-user-id`` header, and anonymous requests still 401.
+    """
+
+    async def resolve_user_from_request(self, ctx):
+        identity = await super().resolve_user_from_request(ctx)
+        return identity.model_copy(update={"tntInstId": TENANT})
 
 _ORCHESTRATOR_SCRIPT = [
     '{"kind": "spawn_agent", "agents": [{"name": "a1", "objective": "work"}]}',
@@ -145,6 +166,7 @@ def wire():
         ),
     )
     injector.binder.bind(LLMProvider, to=_KindScriptLLM())
+    injector.binder.bind(AuthPlugin, to=_TenantCarryingAuth())
 
     previous = app.state.injector
     app.state.injector = injector
@@ -230,6 +252,30 @@ class TestOverTheWire:
                               headers=AUTH)
         assert status == 404
         assert body["detail"] == "run not found"
+
+    def test_tenant_header_does_not_override_principal(self, wire):
+        # P0-3 hardening: the tenant comes from the principal (tenant-wire);
+        # a caller-supplied X-Tenant-Id claiming a foreign tenant is inert.
+        status, submit = _post("/agentswarm/v1/runs",
+                               _submit_body(goal="tenant header inert"))
+        assert status == 200
+        run_id = submit["run_id"]
+        status, body, _ = _get(
+            f"/agentswarm/v1/runs/{run_id}",
+            headers={**AUTH, "X-Tenant-Id": "tenant-b"},
+        )
+        assert status == 200
+        assert body["run_id"] == run_id
+
+        # drain to terminal so the in-flight run cannot burn the next
+        # test's orchestrator script across the per-test reset
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            status, body, _ = _get(f"/agentswarm/v1/runs/{run_id}",
+                                   headers=AUTH)
+            if status != 200 or body["status"] != "RUNNING":
+                break
+            time.sleep(0.1)
 
     def test_submit_without_agents_is_422(self, wire):
         status, body = _post("/agentswarm/v1/runs", {"goal": "no agents"})

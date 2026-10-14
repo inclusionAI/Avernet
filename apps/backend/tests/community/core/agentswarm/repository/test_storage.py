@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import time
 import uuid
+from datetime import datetime
 
 import pytest
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.base import Base
@@ -21,6 +23,7 @@ from agentclaw.community.core.agentswarm.repository.message import MessageReposi
 from agentclaw.community.core.agentswarm.repository.shard import ResultShardRepository
 from agentclaw.community.core.agentswarm.repository.round import RoundRepository
 from agentclaw.community.core.agentswarm.repository.run import RunRepository
+from agentclaw.community.utils.env_utils import get_current_env
 
 
 class _TestDB:
@@ -153,6 +156,22 @@ def _mk_shard(run: dm.Run, agent: dm.Agent) -> dm.ResultShard:
     )
 
 
+def _insert_foreign_env_job(job_repo, status="PENDING", lease_expires_at=None):
+    """Raw job row in a foreign env — enqueue's ORM default stamps the current
+    env, so only a direct insert can make a row claim_batch must never see."""
+    with db_session(job_repo) as session:
+        session.add(om.AcAgentSwarmJobModel(
+            job_id=uuid.uuid4().hex,
+            run_id=uuid.uuid4().hex,
+            status=status,
+            run_at=datetime(2020, 1, 1),
+            deadline_at=datetime(2030, 1, 1),
+            lease_expires_at=lease_expires_at,
+            tenant=str(TENANT_A),
+            env="another-env",
+        ))
+
+
 class TestRunRepository:
     def test_create_and_get(self, run_repo):
         run = _mk_run()
@@ -162,6 +181,24 @@ class TestRunRepository:
         assert fetched.run_id == run.run_id
         assert fetched.tenant == TENANT_A
         assert fetched.goal == "test goal"
+
+    def test_create_stamps_deployment_env_not_provider_label(self, run_repo, monkeypatch):
+        # `env` is the deployment env (dev/pre/prod) — the same convention
+        # every other swarm table stamps via `_AgentSwarmBase.env`'s
+        # default — never the run's provider label ("stub"), which belongs
+        # to the `provider` column alone (D25 env/tenant dedup scope).
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        run = _mk_run()  # provider == "stub"
+        run_repo.create(run)
+        with db_session(run_repo) as session:
+            row = session.execute(
+                select(om.AcAgentSwarmRunModel).where(
+                    om.AcAgentSwarmRunModel.run_id == run.run_id,
+                )
+            ).scalar_one()
+            assert row.env == get_current_env()
+            assert row.env == "pre"
+            assert row.env != run.provider.value
 
     def test_catalog_kind_round_trips_as_enum(self, run_repo):
         run = _mk_run()
@@ -216,6 +253,92 @@ class TestRunRepository:
         run.active_idempotency_key = dm.IdempotencyKey("idem-2")
         run_repo.create(run)
         assert run_repo.get_by_idempotency("idem-2", TENANT_B) is None
+
+    def test_get_by_idempotency_scopes_to_current_env(self, run_repo, monkeypatch):
+        # uk_run_idem is (env, tenant, active_idempotency_key): in a
+        # multi-env single-DB deployment the lookup must never return
+        # another env's run — the create() convergence path (and the
+        # submit-plane dedupe join) relies on it staying None for
+        # foreign-env rows instead of converging across envs.
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        run = _mk_run()
+        run.active_idempotency_key = dm.IdempotencyKey("idem-env-1")
+        run_repo.create(run)
+        assert run_repo.get_by_idempotency("idem-env-1", TENANT_A) is not None
+
+        monkeypatch.setenv("SERVER_ENV", "prod")
+        assert run_repo.get_by_idempotency("idem-env-1", TENANT_A) is None
+
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        fetched = run_repo.get_by_idempotency("idem-env-1", TENANT_A)
+        assert fetched is not None and fetched.run_id == run.run_id
+
+    def test_idempotency_double_create_converges_to_survivor(self, run_repo):
+        # uk_run_idem is the duplicate-submit join invariant; a racing
+        # submit that loses the double-INSERT inside the
+        # get_by_idempotency → create TOCTOU window must converge to
+        # the surviving row, not surface the IntegrityError as a 500.
+        first = _mk_run()
+        first.active_idempotency_key = dm.IdempotencyKey("idem-race-1")
+        assert run_repo.create(first).run_id == first.run_id
+        racer = _mk_run()
+        racer.active_idempotency_key = dm.IdempotencyKey("idem-race-1")
+        converged = run_repo.create(racer)  # no raise — join the winner
+        assert converged.run_id == first.run_id
+        assert converged.active_idempotency_key == dm.IdempotencyKey("idem-race-1")
+        # Exactly one row: the loser's run_id never landed.
+        assert run_repo.get(racer.run_id, TENANT_A) is None
+        assert run_repo.count_active_runs(TENANT_A) == 1
+
+    def test_idempotency_convergence_is_tenant_scoped(self, run_repo):
+        # uk_run_idem includes tenant, so the same key in two tenants
+        # is two independent slots; neither create may converge onto
+        # the other tenant's run.
+        run_a = _mk_run(tenant=TENANT_A)
+        run_a.active_idempotency_key = dm.IdempotencyKey("idem-shared")
+        run_b = _mk_run(tenant=TENANT_B)
+        run_b.active_idempotency_key = dm.IdempotencyKey("idem-shared")
+        run_repo.create(run_a)
+        created_b = run_repo.create(run_b)
+        assert created_b.run_id == run_b.run_id
+        assert run_repo.count_active_runs(TENANT_A) == 1
+        assert run_repo.count_active_runs(TENANT_B) == 1
+
+    def test_pk_collision_without_idempotency_key_still_raises(self, run_repo):
+        # uk_run_id (env, tenant, run_id): a genuine duplicate run_id is
+        # caller corruption, not a race to converge — with no active
+        # idempotency key the IntegrityError must surface, never get
+        # swallowed into a false converge.
+        first = _mk_run()
+        first.run_id = dm.RunId("dup-run-id")
+        run_repo.create(first)
+        twin = _mk_run()
+        twin.run_id = dm.RunId("dup-run-id")
+        with pytest.raises(IntegrityError):
+            run_repo.create(twin)
+
+    def test_pk_collision_with_active_key_resolving_to_no_run_still_raises(self, run_repo):
+        # create()'s convergence handler has a second, final raise-leg:
+        # the colliding run DOES carry an active idempotency key, but that
+        # key resolves to no RUNNING row (here: a genuine uk_run_id PK
+        # collision — the key itself is fresh). Nothing sound to join, so
+        # the IntegrityError must surface, never get swallowed into a
+        # fabricated or half-converged run.
+        first = _mk_run()
+        first.run_id = dm.RunId("dup-run-id-keyed")
+        run_repo.create(first)
+
+        twin = _mk_run()
+        twin.run_id = dm.RunId("dup-run-id-keyed")  # uk_run_id PK collision
+        twin.active_idempotency_key = dm.IdempotencyKey("idem-resolves-to-nothing")
+        with pytest.raises(IntegrityError):
+            run_repo.create(twin)
+
+        # The twin never landed and the ghost key still resolves to nothing.
+        assert run_repo.get_by_idempotency("idem-resolves-to-nothing", TENANT_A) is None
+        stored = run_repo.get(dm.RunId("dup-run-id-keyed"), TENANT_A)
+        assert stored.run_id == first.run_id
+        assert run_repo.count_active_runs(TENANT_A) == 1
 
     def test_get_nonexistent(self, run_repo):
         assert run_repo.get("nope", TENANT_A) is None
@@ -494,6 +617,33 @@ class TestResultShardXOR:
         shard_repo.create(shard)
         assert shard_repo.get_by_run_agent(run.run_id, agent.agent_id, TENANT_B) is None
 
+    def test_list_by_run_orders_oldest_to_newest(
+            self, run_repo, agent_repo, shard_repo):
+        # list_by_run must pin ascending-insertion order: the orchestrator
+        # prompt keeps the tail as "most recent" — reordering would embed
+        # stale shards and drop fresh ones.
+        run = _mk_run()
+        run_repo.create(run)
+        other_run = _mk_run()
+        run_repo.create(other_run)
+        agents = [_mk_agent(run, f"a{i}") for i in range(4)]
+        for agent in agents:
+            agent_repo.create(agent)
+        # Persist out of agent-creation order, interleaved with a foreign
+        # run's shard: land order is a2, a0, <foreign>, a1, a3.
+        inserted = [agents[2], agents[0], agents[1], agents[3]]
+        shard_repo.create(_mk_shard(run, inserted[0]))
+        shard_repo.create(_mk_shard(run, inserted[1]))
+        shard_repo.create(_mk_shard(other_run, _mk_agent(other_run, "x")))
+        shard_repo.create(_mk_shard(run, inserted[2]))
+        shard_repo.create(_mk_shard(run, inserted[3]))
+
+        shards = shard_repo.list_by_run(run.run_id, TENANT_A)
+        assert len(shards) == 4  # foreign-run interleave excluded
+        assert [s.source_agent_id for s in shards] == [
+            a.agent_id for a in inserted
+        ]
+
 
 class TestMessageRepository:
     def test_list_by_agent(self, run_repo, agent_repo, msg_repo):
@@ -612,6 +762,37 @@ class TestGuardEventRepository:
 
 
 class TestJobRepository:
+    def test_enqueue_returns_none(self, run_repo, job_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        assert job_repo.enqueue(
+            run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600,
+        ) is None
+        (claim,) = job_repo.claim_batch("w1", None, 10, 60)
+        assert claim["run_id"] == run.run_id
+
+    def test_claim_batch_and_count_scope_to_current_env(self, run_repo, job_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        _insert_foreign_env_job(job_repo, status="PENDING")
+        assert job_repo.count_pending_jobs() == 1
+        claimed = job_repo.claim_batch("w1", None, 10, 60)
+        assert [c["run_id"] for c in claimed] == [run.run_id]
+        assert job_repo.count_pending_jobs() == 0
+
+    def test_reclaim_batch_scopes_to_current_env(self, run_repo, job_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        (claim,) = job_repo.claim_batch("w1", None, 1, 60)
+        job_repo.renew_lease(run.run_id, TENANT_A, "w1", -1, claim["claim_epoch"])
+        _insert_foreign_env_job(
+            job_repo, status="RUNNING", lease_expires_at=datetime(2020, 1, 1),
+        )
+        reclaimed = job_repo.reclaim_batch("w2", 10, 60)
+        assert [c["run_id"] for c in reclaimed] == [run.run_id]
+
     def test_enqueue_and_claim(self, run_repo, job_repo):
         run = _mk_run()
         run_repo.create(run)

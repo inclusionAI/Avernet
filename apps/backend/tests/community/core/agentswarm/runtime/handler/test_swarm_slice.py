@@ -228,7 +228,8 @@ def _build_env(db, script: list[str], factory: FakeFactory, *,
                config: AgentSwarmConfig | None = None,
                artifact_store: FakeArtifactStore | None = None,
                inline_threshold: int = 16384,
-               llm=None) -> SimpleNamespace:
+               llm=None,
+               termination: TerminationEvaluator | None = None) -> SimpleNamespace:
     cfg = config or _config()
     run_repo = RunRepository(db)
     agent_repo = AgentRepository(db)
@@ -245,7 +246,7 @@ def _build_env(db, script: list[str], factory: FakeFactory, *,
                             max_depth=cfg.orchestration.max_depth),
         config=cfg,
     )
-    termination = TerminationEvaluator()
+    termination = termination or TerminationEvaluator()
     runtime = SubagentRuntime(
         factory=factory,
         artifact_store=artifact_store,
@@ -387,6 +388,39 @@ def _wait_decision_shorthand_any(*refs) -> str:
     return json.dumps({"kind": "wait", "refs": list(refs), "mode": "any"})
 
 
+class TestCongestedBatchNoProgress:
+    def test_rejected_batches_continue_until_evaluator_declares_no_progress(self, db):
+        # P0-8 contract: a fully guard-rejected batch (here: dedupe, the
+        # spawned objective already exists) never terminalizes the run at
+        # the first rejection; the slice keeps deciding and only the
+        # turn-based no-progress evaluator (flat routed-shard streak)
+        # ends the run.
+        factory = FakeFactory()
+        llm = RepeatingLLMProvider(_spawn_decision("a1", "goal-cong"))
+        env = _build_env(db, [], factory, llm=llm)
+        run = _mk_run()
+        claim = _enqueue_and_claim(env, run)
+
+        outcome = asyncio.run(env.handler.handle_slice(
+            run.run_id, TENANT, claim["claim_epoch"], worker_id=WORKER,
+        ))
+
+        assert outcome == "complete"
+        stored = env.run_repo.get(run.run_id, TENANT)
+        assert stored.status is dm.RunStatus.FAILED
+        assert stored.termination_reason is dm.TerminationReason.NO_PROGRESS
+        dedupes = [
+            g for g in env.guard_repo.list_by_run(run.run_id, TENANT)
+            if g.kind is dm.GuardKind.DEDUPE_REJECT
+        ]
+        assert len(dedupes) >= 3
+        # the first accepted spawn completed and routed its shard
+        agents = env.agent_repo.list_by_run(run.run_id, TENANT)
+        assert len(agents) == 1
+        assert agents[0].status is dm.AgentStatus.COMPLETED
+        assert env.shard_repo.list_by_run(run.run_id, TENANT)
+
+
 class TestSliceLostMidFlight:
     def test_no_shard_no_terminate_job_pending_resume_ok(self, db):
         script = [_spawn_decision("sl1", "goal-sl1"), _wait_decision("sl1")]
@@ -491,8 +525,11 @@ class TestOutputSchemaValidation:
         assert env.run_repo.get(run.run_id, TENANT).status is dm.RunStatus.RUNNING
 
     def test_malformed_schema_is_non_retryable(self, db):
+        # A string schema is rejected at the parse boundary (repair-able);
+        # this pins the runtime's own D42 layer via a dict schema that is
+        # still invalid jsonschema — it parses, then fails check_schema.
         script = [
-            _spawn_decision("a1", "goal-malformed", "not-a-schema"),
+            _spawn_decision("a1", "goal-malformed", {"type": 123}),
             _wait_decision("a1"),
         ]
         factory = FakeFactory(scripts={"a1": [{"anything": 1}]})

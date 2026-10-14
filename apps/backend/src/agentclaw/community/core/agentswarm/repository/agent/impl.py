@@ -11,26 +11,11 @@ from agentclaw.community.core.agentswarm.repository.job import model as om_job
 from agentclaw.community.core.agentswarm.repository.agent.protocol import (
     AgentRepositoryProtocol,
 )
+from agentclaw.community.core.agentswarm.repository.decode import (
+    _decode_agent_status, _decode_bot_state,
+)
 from agentclaw.community.core.agentswarm.repository.types import _dumps, _loads, _now_ms
 from agentclaw.community.plugin_api.database import DatabasePlugin
-
-AgentStatus = dm.AgentStatus
-
-
-def _decode_agent_status(val: str) -> dm.AgentStatus:
-    try:
-        return AgentStatus(val)
-    except ValueError:
-        return AgentStatus.FAILED
-
-
-def _decode_bot_state(val: str | None) -> dm.BotState | None:
-    if val is None:
-        return None
-    try:
-        return dm.BotState(val)
-    except ValueError:
-        return None
 
 
 class AgentRepository(AgentRepositoryProtocol):

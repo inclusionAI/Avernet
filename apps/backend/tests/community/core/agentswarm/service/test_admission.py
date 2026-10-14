@@ -108,6 +108,48 @@ def _service(db, *, tenant_limit: int = 8, global_limit: int = 64,
     )
 
 
+class TestSubmitIdempotencyRace:
+
+    def test_racing_duplicate_submits_join_without_second_job_row(
+            self, db, monkeypatch):
+        # The TOCTOU window itself: both submits miss get_by_idempotency
+        # (delete the early join), both reach run create(); uk_run_idem
+        # makes the loser converge onto the winner's run, and the loser
+        # must NOT enqueue a second job row for the same run.
+        svc = _service(db)
+        real_lookup = svc._run_repo.get_by_idempotency
+        checks = {"misses": 0}
+
+        def racey_lookup(key, tenant):
+            # Calls 1-2 are the two early-join checks inside
+            # submit_async — they miss, forcing both creates. Call 3
+            # is create()'s convergence lookup after the failed INSERT:
+            # by then the winner's row is committed and must be visible,
+            # exactly as in the real cross-session race.
+            checks["misses"] += 1
+            if checks["misses"] <= 2:
+                return None
+            return real_lookup(key, tenant)
+
+        monkeypatch.setattr(svc._run_repo, "get_by_idempotency", racey_lookup)
+        first = asyncio.run(svc.submit_async(_mk_req("t1", idem="race-42")))
+        second = asyncio.run(svc.submit_async(_mk_req("t1", idem="race-42")))
+        assert second == first
+        assert svc._run_repo.count_active_runs(dm.TenantId("t1")) == 1
+        assert svc._job_repo.count_pending_jobs() == 1
+
+    def test_early_join_still_skips_enqueue(self, db):
+        # Un-patched join path: a duplicate submit found by
+        # get_by_idempotency returns the same run_id and adds no job
+        # row (no IntegrityError window is even reached).
+        svc = _service(db)
+        first = asyncio.run(svc.submit_async(_mk_req("t1", idem="join-42")))
+        second = asyncio.run(svc.submit_async(_mk_req("t1", idem="join-42")))
+        assert second == first
+        assert svc._run_repo.count_active_runs(dm.TenantId("t1")) == 1
+        assert svc._job_repo.count_pending_jobs() == 1
+
+
 class TestAdmissionControl:
 
     def test_tenant_reject_preserved_and_creates_no_rows(self, db):

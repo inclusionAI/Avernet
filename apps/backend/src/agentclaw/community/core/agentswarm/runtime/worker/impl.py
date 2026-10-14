@@ -182,10 +182,15 @@ class AgentSwarmWorker(LifecycleBase):
     async def _heartbeat_loop(self) -> None:
         # Drains keep their leases: renew while running OR while in-flight
         # slices are still unwinding (12.2), so grace-period work does not
-        # get reclaimed from under a healthy drain.
+        # get reclaimed from under a healthy drain. The poll task's liveness
+        # keeps this loop alive too: during a drain _inflight is momentarily
+        # empty between batch jobs while claimed work still waits in the
+        # poll loop — an early exit there would let those leases expire and
+        # the jobs execute twice.
         lease = self._config.orchestration.lease_seconds
         interval = lease / 3.0
-        while self._running or self._inflight:
+        while (self._running or self._inflight
+               or (self._task is not None and not self._task.done())):
             await asyncio.sleep(interval)
             lost = []
             for run_id, job in list(self._inflight.items()):

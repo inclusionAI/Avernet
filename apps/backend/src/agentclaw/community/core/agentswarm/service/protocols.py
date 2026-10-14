@@ -121,6 +121,42 @@ class QueueDepthExceeded(Exception):
         )
 
 
+class AgentSwarmSyncTimeoutError(Exception):
+    """submit_sync's bounded wait expired without an observable run.
+
+    The run row is no longer visible to the tenant (deleted or purged
+    mid-wait), so no real Run exists to return. submit_sync never
+    fabricates a synthetic TIMED_OUT Run on expiry — the typed error
+    keeps its result set to rows that were actually persisted.
+    """
+
+    def __init__(self, run_id: str, deadline: float) -> None:
+        self.run_id = run_id
+        self.deadline = deadline
+        super().__init__(
+            f"submit_sync deadline ({deadline}s) expired; "
+            f"run {run_id} is no longer visible"
+        )
+
+
+class AgentSwarmRunNotPurgeableError(Exception):
+    """purge_run refusal (task 12.9): the run is still active.
+
+    The hard erasure is a non-transactional delete across the run's seven
+    tables, so deleting a RUNNING run races an in-flight claimed
+    slice's fenced writes. Only terminal runs erase; cancel or
+    force-fail the run first.
+    """
+
+    def __init__(self, run_id: str, status: RunStatus) -> None:
+        self.run_id = run_id
+        self.status = status
+        super().__init__(
+            f"run {run_id} is {status.value}: "
+            f"only terminal runs can be purged"
+        )
+
+
 @runtime_checkable
 class AgentSwarmServiceProtocol(Protocol):
     """Submit/run lifecycle over the agentswarm repositories."""

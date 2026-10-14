@@ -10,10 +10,11 @@ mean "no LLM configured", the same 400 the missing block always meant.
 """
 from __future__ import annotations
 
-
+import pytest
 
 from agentclaw.community.core.agentswarm.config.settings import (
-    AgentSwarmConfig, AgentSwarmEgressConfig, LlmConfig,
+    AgentSwarmConfig, AgentSwarmEgressConfig, AgentSwarmOrchestrationConfig,
+    LlmConfig,
 )
 
 from pathlib import Path
@@ -139,6 +140,66 @@ class TestDefensiveParsing:
         egress = AgentSwarmEgressConfig.from_block({"allowed_hosts": "api.test"})
         assert egress.allowed_hosts == AgentSwarmEgressConfig().allowed_hosts
 
+    def test_zero_budget_knobs_take_defaults(self):
+        # a zero poll interval is a hot loop, a zero slice/timeout/sweep/
+        # grace budget wedges the worker: 0 downgrades like any junk value
+        cfg = AgentSwarmConfig.from_block({
+            "orchestration": {"poll_interval": 0, "slice_max_seconds": 0,
+                              "slice_interval": 0},
+            "drain": {"grace_seconds": 0},
+            "retention": {"sweep_interval_seconds": 0},
+            "llm": {"base_url": "https://api", "model": "gpt",
+                    "timeout_ms": 0},
+        })
+        bare = AgentSwarmConfig()
+        assert cfg.orchestration.poll_interval == bare.orchestration.poll_interval
+        assert cfg.orchestration.slice_max_seconds == bare.orchestration.slice_max_seconds
+        assert cfg.orchestration.slice_interval == bare.orchestration.slice_interval
+        assert cfg.drain.grace_seconds == bare.drain.grace_seconds
+        assert cfg.retention.sweep_interval_seconds == bare.retention.sweep_interval_seconds
+        assert cfg.llm is not None
+        assert cfg.llm.timeout_seconds == LlmConfig().timeout_seconds
+
+    def test_negative_budget_knobs_take_defaults(self):
+        cfg = AgentSwarmConfig.from_block({
+            "orchestration": {"poll_interval": -2, "slice_max_seconds": -1,
+                              "slice_interval": -0.5},
+            "drain": {"grace_seconds": -1},
+            "retention": {"sweep_interval_seconds": -1},
+            "admission": {"max_pending_jobs": 0},
+        })
+        bare = AgentSwarmConfig()
+        assert cfg.orchestration.poll_interval == bare.orchestration.poll_interval
+        assert cfg.orchestration.slice_max_seconds == bare.orchestration.slice_max_seconds
+        assert cfg.orchestration.slice_interval == bare.orchestration.slice_interval
+        assert cfg.drain.grace_seconds == bare.drain.grace_seconds
+        assert cfg.retention.sweep_interval_seconds == bare.retention.sweep_interval_seconds
+        assert cfg.admission.max_pending_jobs == bare.admission.max_pending_jobs
+
+    def test_small_positive_budget_knobs_still_parse(self):
+        # strict positivity must not clamp legitimate sub-second cadences
+        cfg = AgentSwarmConfig.from_block({
+            "orchestration": {"poll_interval": 0.25, "slice_interval": 0.1,
+                              "slice_max_seconds": 1},
+            "drain": {"grace_seconds": 0.5},
+            "retention": {"sweep_interval_seconds": 1},
+            "admission": {"max_pending_jobs": 1},
+        })
+        assert cfg.orchestration.poll_interval == 0.25
+        assert cfg.orchestration.slice_interval == 0.1
+        assert cfg.orchestration.slice_max_seconds == 1
+        assert cfg.drain.grace_seconds == 0.5
+        assert cfg.retention.sweep_interval_seconds == 1
+        assert cfg.admission.max_pending_jobs == 1
+
+    def test_blank_artifact_store_root_takes_default(self):
+        # an env-expanded ${AGENTSWARM_ARTIFACT_ROOT:-} that comes up blank
+        # must not blank the artifact root
+        for root in ("", "   ", None, 7):
+            cfg = AgentSwarmConfig.from_block({"artifact_store_root": root})
+            assert cfg.artifact_store_root == \
+                AgentSwarmConfig().artifact_store_root, root
+
 
 class TestDiProviderWiring:
 
@@ -170,3 +231,94 @@ class TestDiProviderWiring:
             text = (OVERLAY_DIR / name).read_text()
             assert "agentswarm:" in text, name
             assert "AGENTSWARM_ARTIFACT_ROOT" in text, name
+
+
+class TestHostOwnerRequired:
+    """``agentswarm.host.owner_id`` — required when the host block ships
+    (P0-9): the account swarm-created bots belong to has no
+    service-account fallback, so a present-but-blank owner is a config
+    error, not a downgrade. An absent block keeps the bare-defaults
+    contract (no platform side opted in), and the refusal for an
+    unconfigured owner happens at the bot_platform provider."""
+
+    def test_host_block_with_blank_owner_raises_config_error(self):
+        from agentclaw.community.core.agentswarm.service.protocols import (
+            AgentSwarmConfigError,
+        )
+        for owner in ("", "   "):
+            with pytest.raises(AgentSwarmConfigError):
+                AgentSwarmConfig.from_block({"host": {"owner_id": owner}})
+
+    def test_host_owner_error_names_the_knob_and_the_reason(self):
+        from agentclaw.community.core.agentswarm.service.protocols import (
+            AgentSwarmConfigError,
+        )
+        with pytest.raises(AgentSwarmConfigError) as excinfo:
+            AgentSwarmConfig.from_block({"host": {"owner_id": ""}})
+        message = str(excinfo.value)
+        assert "host.owner_id" in message
+        assert "no service-account fallback" in message
+
+    def test_host_block_with_set_owner_parses(self):
+        cfg = AgentSwarmConfig.from_block({"host": {"owner_id": "owner-1"}})
+        assert cfg.host.owner_id == "owner-1"
+
+    def test_host_owner_strips_surrounding_blanks(self):
+        cfg = AgentSwarmConfig.from_block({"host": {"owner_id": " owner-1 "}})
+        assert cfg.host.owner_id == "owner-1"
+
+    def test_absent_host_block_keeps_bare_default_owner(self):
+        # no host block: no platform opt-in, owner stays empty and the
+        # bot_platform provider refuses construction (logged by
+        # provide_runtime) — the bare-defaults contract is unchanged.
+        assert AgentSwarmConfig.from_block({}).host.owner_id == ""
+        assert AgentSwarmConfig.from_block({}) == AgentSwarmConfig()
+        assert AgentSwarmConfig.from_block(None) == AgentSwarmConfig()
+
+    def test_non_string_owner_downgrades_to_refusal(self):
+        from agentclaw.community.core.agentswarm.service.protocols import (
+            AgentSwarmConfigError,
+        )
+        # a present host block with a non-string owner cannot parse to a
+        # usable identity — same precise refusal as a blank one.
+        with pytest.raises(AgentSwarmConfigError):
+            AgentSwarmConfig.from_block({"host": {"owner_id": 7}})
+
+
+class TestTerminationKnobs:
+    """``wall_clock_seconds`` / ``no_progress_threshold`` orchestration
+    knobs (P1-9): the TerminationEvaluator's hardcoded defaults become
+    config-driven. Both zero values wedge every run (instant WALL_CLOCK /
+    NO_PROGRESS at the first evaluate), so they downgrade to the tested
+    default like other budget knobs."""
+
+    def test_wall_clock_and_no_progress_parse(self):
+        orch = AgentSwarmOrchestrationConfig.from_block(
+            {"wall_clock_seconds": 7200.0, "no_progress_threshold": 7})
+        assert orch.wall_clock_seconds == 7200.0
+        assert orch.no_progress_threshold == 7
+
+    def test_zero_termination_knobs_take_defaults(self):
+        d = AgentSwarmOrchestrationConfig()
+        orch = AgentSwarmOrchestrationConfig.from_block(
+            {"wall_clock_seconds": 0, "no_progress_threshold": 0})
+        assert orch.wall_clock_seconds == d.wall_clock_seconds
+        assert orch.no_progress_threshold == d.no_progress_threshold
+
+    def test_malformed_termination_knobs_take_defaults(self):
+        d = AgentSwarmOrchestrationConfig()
+        orch = AgentSwarmOrchestrationConfig.from_block(
+            {"wall_clock_seconds": "day", "no_progress_threshold": "none"})
+        assert orch.wall_clock_seconds == d.wall_clock_seconds
+        assert orch.no_progress_threshold == d.no_progress_threshold
+
+    def test_bare_termination_knobs_match_evaluator_defaults(self):
+        # the dataclass defaults ARE the evaluator's historical
+        # hardcoded values, so a profile with no block keeps behavior.
+        from agentclaw.community.core.agentswarm.orchestration.termination import (
+            TerminationEvaluator,
+        )
+        orch = AgentSwarmOrchestrationConfig()
+        evaluator = TerminationEvaluator()
+        assert orch.wall_clock_seconds == evaluator._wall_clock_seconds
+        assert orch.no_progress_threshold == evaluator._no_progress_threshold

@@ -18,6 +18,9 @@ from agentclaw.community.core.agentswarm.config.settings import (
     AgentSwarmConfig, AgentSwarmOrchestrationConfig,
 )
 from agentclaw.community.core.agentswarm.runtime.worker import AgentSwarmWorker
+from agentclaw.community.core.agentswarm.orchestration.termination import (
+    TerminationEvaluator,
+)
 from tests.community.core.agentswarm.runtime.handler.test_swarm_slice import (
     TENANT, WORKER, _TestDB, FakeFactory, RepeatingLLMProvider, _build_env,
     _enqueue_and_claim, _finish_decision, _mk_run, _spawn_decision,
@@ -142,11 +145,14 @@ class TestReclaimCircuitBreaker:
     def test_no_progress_reclaims_trip_to_terminal_stuck(self, db):
         # A wait decision on a name that never resolves keeps the slice
         # non-terminal for its whole budget: the run can only progress via
-        # reclaim, which the D40 breaker eventually terminates.
+        # reclaim, which the D40 breaker eventually terminates. The
+        # turn-based no-progress evaluator is neutralized so it cannot
+        # terminate the run before the breaker under test does.
         factory = FakeFactory()
         env = _build_env(
             db, [], factory, config=_tight_config(),
             llm=RepeatingLLMProvider(_wait_decision("ghost")),
+            termination=TerminationEvaluator(no_progress_threshold=999),
         )
         run = _mk_run()
         first = _enqueue_and_claim(env, run)
@@ -350,3 +356,80 @@ class TestTerminationOnDedupKnownObjective:
         # Already-terminal runs no-op: the job is completed, nothing re-runs.
         assert outcome == "complete"
         assert _job_state(db, run.run_id)["status"] == "SUCCEEDED"
+
+
+class _FencedFailingHandler:
+    """Stub SwarmRunHandler: handle_slice always raises and force_fail is
+    fenced (returns False, as after a D28 claim-loss), so the worker's
+    job_repo.fail fallback leg is the behavior on trial."""
+
+    def __init__(self, error: Exception) -> None:
+        self.slice_error = error
+        self.calls: list = []
+
+    def set_slice_lost(self, lost, run_id=None):
+        self.calls.append(("set-slice-lost", lost, run_id))
+
+    async def handle_slice(self, run_id, tenant, claim_epoch,
+                           cancel_requested=False, *, worker_id=None):
+        self.calls.append(("handle-slice", run_id, claim_epoch))
+        raise self.slice_error
+
+    def force_stuck(self, run_id, tenant, epoch, error, worker_id=None):
+        self.calls.append(("force-stuck", run_id, epoch, error, worker_id))
+        return True
+
+    def force_fail(self, run_id, tenant, epoch, error, worker_id=None):
+        self.calls.append(("force-fail", run_id, epoch, error, worker_id))
+        return False  # fenced: a newer claim rejected this worker's run write
+
+
+class _RecordingJobRepo:
+    """Minimal JobRepository spy — only the fallback `fail` can land."""
+
+    def __init__(self) -> None:
+        self.fails: list = []
+
+    def reclaim_batch(self, worker_id, limit, lease_seconds):
+        return []
+
+    def claim_batch(self, worker_id, tenant_filter, limit, lease_seconds):
+        return []
+
+    def renew_lease(self, run_id, tenant, worker_id, lease_seconds, claim_epoch):
+        return True
+
+    def fail(self, run_id, tenant, error, worker_id, claim_epoch):
+        self.fails.append((dm.RunId(run_id), tenant, error, worker_id, claim_epoch))
+        return True
+
+
+class TestWorkerFencedFailureFallsBackToJobFail:
+
+    def test_fenced_force_fail_fails_durable_job_with_expected_args(self):
+        error = RuntimeError("storage exploded mid-slice")
+        handler = _FencedFailingHandler(error)
+        repo = _RecordingJobRepo()
+        worker = AgentSwarmWorker(
+            config=_tight_config(), handler=handler, job_repo=repo,
+        )
+        worker._worker_id = "w-fenced"
+        job = {
+            "run_id": dm.RunId("fenced-run"), "tenant": TENANT,
+            "claim_epoch": 7, "reclaims": 0, "cancel_requested": False,
+        }
+
+        asyncio.run(worker._run_job(job, reclaimed=False))
+
+        # force_fail was attempted first, carrying the slice error and this
+        # worker's identity...
+        assert ("force-fail", dm.RunId("fenced-run"), 7,
+                "storage exploded mid-slice", "w-fenced") in handler.calls
+        # ...and came back fenced, so the fallback must mark the durable
+        # job failed with exactly (run_id, tenant, error, worker_id, epoch).
+        assert repo.fails == [
+            (dm.RunId("fenced-run"), TENANT, "storage exploded mid-slice",
+             "w-fenced", 7),
+        ]
+        # The in-flight ledger is cleared either way.
+        assert "fenced-run" not in worker._inflight

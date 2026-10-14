@@ -3,12 +3,15 @@
 Drives the router through fastapi.testclient.TestClient with a stub
 service injected on ``app.state`` — no database, no network.
 
-Stage B wiring: every route authenticates through a stub ``AuthPlugin``
-bound on the test injector, so the tenant comes from the principal's
-``tenantId``; ``X-Tenant-Id`` is only the fallback tested explicitly.
+Stage B wiring, hardened tenant contract (P0-3): every route
+authenticates through a stub ``AuthPlugin`` bound on the test injector,
+so the tenant comes from the principal's ``tenantId`` ONLY. A client
+supplied ``X-Tenant-Id`` is never read — a tenantless principal fails
+closed with 400 even when the header is present.
 """
 from __future__ import annotations
 
+import html
 import injector
 import json
 import pytest
@@ -26,7 +29,8 @@ from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.plugin_api.auth import AuthPlugin, AuthenticatedIdentity
 from agentclaw.community.core.agentswarm.domain import models as dm
 from agentclaw.community.core.agentswarm.service.protocols import (
-    AgentSwarmConfigError, AgentEvent, GuardEventSummary, RoundEvent,
+    AgentSwarmConfigError, AgentEvent, GlobalRunLimitExceeded,
+    GuardEventSummary, QueueDepthExceeded, RoundEvent,
     RunEvents, SubmitRunRequest, TenantRunLimitExceeded,
 )
 from agentclaw.community.api.agentswarm_service import (
@@ -87,6 +91,7 @@ class StubAgentSwarmService:
             raise self.submit_error
         self.submitted.append(req)
         self.calls.append("submit_async")
+        self.run.goal = req.goal
         return self.run.run_id
 
     async def submit_sync(self, req: SubmitRunRequest) -> dm.Run:
@@ -94,6 +99,7 @@ class StubAgentSwarmService:
             raise self.submit_error
         self.submitted.append(req)
         self.calls.append("submit_sync")
+        self.run.goal = req.goal
         return self.run
 
     def get_run(self, run_id: str, tenant: str) -> dm.Run | None:
@@ -237,22 +243,23 @@ class TestTenantResolution:
         (req,) = stub.submitted
         assert req.tenant == TENANT
 
-    def test_header_fallback_used_when_principal_has_no_tenant(self, client, stub, auth):
+    def test_tenantless_principal_is_400_even_with_tenant_header(
+            self, client, stub, auth):
+        # P0-3: the header is never consulted — a principal that carries
+        # no tenant fails closed; the caller cannot claim one.
         auth.tenant_id = None
         resp = client.post(
             "/agentswarm/v1/runs", json=_spec_body(), headers={"X-Tenant-Id": TENANT}
         )
-        assert resp.status_code == 200
-        (req,) = stub.submitted
-        assert req.tenant == TENANT
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == "tenant unresolvable"
+        assert stub.submitted == []
 
-    def test_no_tenant_in_principal_or_header_is_precise_400(self, client, auth):
+    def test_tenantless_principal_is_400_on_every_route(self, client, auth):
         auth.tenant_id = None
         resp = client.post("/agentswarm/v1/runs", json=_spec_body())
         assert resp.status_code == 400
-        assert resp.json()["detail"] == (
-            "tenant unresolvable: authenticate or set X-Tenant-Id"
-        )
+        assert resp.json()["detail"] == "tenant unresolvable"
         # same for the per-run routes
         assert client.get("/agentswarm/v1/runs/run-1").status_code == 400
         assert client.get("/agentswarm/v1/runs").status_code == 400
@@ -269,12 +276,14 @@ class TestTenantResolution:
         assert resp.status_code == 200
         assert stub.submitted[0].tenant == TENANT
 
-    def test_legacy_body_tenant_key_is_ignored(self, client, stub):
+    def test_legacy_body_tenant_key_is_rejected_422(self, client, stub):
+        # Wave-1 schemas are extra="forbid": a body-supplied tenant is a
+        # validation error, not a silently-ignored extra.
         resp = client.post(
             "/agentswarm/v1/runs", json={**_spec_body(), "tenant": "tenant-b"}
         )
-        assert resp.status_code == 200
-        assert stub.submitted[0].tenant == TENANT
+        assert resp.status_code == 422
+        assert stub.submitted == []
 
     def test_reads_use_principal_tenant_without_header(self, client, stub):
         assert client.get("/agentswarm/v1/runs/run-1").status_code == 200
@@ -481,6 +490,31 @@ class TestSmokeRoutes:
         assert stub.run_events_calls[0]["tenant"] == TENANT
 
 
+class TestReportEscaping:
+
+    def test_submitted_script_goal_is_escaped_in_report(self, client, stub):
+        # P0-5 (stored XSS): the goal is user text stored on the run; the
+        # HTML report must interpolate it escaped, never raw.
+        goal = '<script>alert("pwn")</script>'
+        resp = client.post(
+            "/agentswarm/v1/runs", json={**_spec_body(), "goal": goal}
+        )
+        assert resp.status_code == 200
+        report = client.get("/agentswarm/v1/runs/run-1/report")
+        assert report.status_code == 200
+        assert report.headers["cache-control"] == "no-store"
+        assert "<script>" not in report.text
+        assert f"Goal: {html.escape(goal)}" in report.text
+
+    def test_attribute_breakout_goal_is_escaped_in_report(self, client, stub):
+        goal = '" onmouseover="alert(1)'
+        client.post("/agentswarm/v1/runs", json={**_spec_body(), "goal": goal})
+        report = client.get("/agentswarm/v1/runs/run-1/report")
+        assert report.status_code == 200
+        assert '" onmouseover=' not in report.text
+        assert html.escape(goal) in report.text
+
+
 class TestErrorMapping:
 
     def test_tenant_limit_exceeded_maps_to_429(self, client, stub):
@@ -490,6 +524,40 @@ class TestErrorMapping:
         assert resp.json()["error"] == "tenant_run_limit_exceeded"
         assert resp.json()["tenant"] == TENANT
         assert resp.json()["limit"] == 8
+
+    def test_global_limit_exceeded_maps_to_429(self, client, stub):
+        stub.submit_error = GlobalRunLimitExceeded(limit=64)
+        resp = client.post("/agentswarm/v1/runs", json=_spec_body())
+        assert resp.status_code == 429
+        assert resp.json() == {"error": "global_run_limit_exceeded", "limit": 64}
+
+    def test_queue_depth_exceeded_maps_to_429(self, client, stub):
+        stub.submit_error = QueueDepthExceeded(limit=5)
+        resp = client.post("/agentswarm/v1/runs", json=_spec_body())
+        assert resp.status_code == 429
+        assert resp.json() == {"error": "queue_depth_exceeded", "limit": 5}
+
+    def test_global_limit_rejection_records_audit_row(self, client, stub, audit):
+        stub.submit_error = GlobalRunLimitExceeded(limit=64)
+        resp = client.post("/agentswarm/v1/runs", json=_spec_body())
+        assert resp.status_code == 429
+        (row,) = audit.rows
+        assert row == {
+            "tenant": TENANT, "actor": STAFF_ID,
+            "action": "submit_rejected", "reason": "global_limit",
+            "run_id": None, "source": "http",
+        }
+
+    def test_queue_depth_rejection_records_audit_row(self, client, stub, audit):
+        stub.submit_error = QueueDepthExceeded(limit=5)
+        resp = client.post("/agentswarm/v1/runs", json=_spec_body())
+        assert resp.status_code == 429
+        (row,) = audit.rows
+        assert row == {
+            "tenant": TENANT, "actor": STAFF_ID,
+            "action": "submit_rejected", "reason": "queue_depth",
+            "run_id": None, "source": "http",
+        }
 
     def test_config_error_maps_to_400(self, client, stub):
         stub.submit_error = AgentSwarmConfigError(

@@ -333,6 +333,46 @@ class TestResponseParsing:
 
         asyncio.run(main())
 
+    @pytest.mark.parametrize("bad_body", [{}, {"choices": []}],
+                             ids=["missing-choices", "empty-choices"])
+    def test_parse_response_without_choices_raises_clear_error(self, bad_body):
+        with pytest.raises(ValueError, match="no choices"):
+            OpenAICompatibleClient._parse_response(bad_body, "default-model-x")
+
+    def test_parse_response_none_content_coerces_to_empty_text(self):
+        body = {"choices": [{"message": {"content": None},
+                             "finish_reason": "stop"}]}
+        resp = OpenAICompatibleClient._parse_response(body, "default-model-x")
+
+        assert resp.text == ""
+        assert resp.finish_reason == FinishReason.STOP
+        assert resp.token_usage == TokenUsage(0, 0, 0)
+
+    def test_parse_response_null_usage_fields_default_to_zero_tokens(self):
+        body = {"choices": [{"message": {"content": None},
+                             "finish_reason": "stop"}],
+                "usage": None}
+        resp = OpenAICompatibleClient._parse_response(body, "default-model-x")
+
+        assert resp.text == ""
+        assert resp.token_usage == TokenUsage(0, 0, 0)
+
+    def test_complete_with_empty_choices_body_fails_fast_without_retry(self):
+        async def main():
+            server = FakeOpenAIServer([
+                httpx.Response(200, json={"choices": []}),
+                httpx.Response(200, json=_ok_body("never parsed")),
+            ])
+            client = _make_client(server, max_retries=3)
+            with pytest.raises(ValueError, match="no choices"):
+                await client.complete(_req())
+            await client._client.aclose()
+
+            assert len(server.requests) == 1, \
+                "a 200 body without choices is malformed, not transient"
+
+        asyncio.run(main())
+
 
 class TestTimeoutBehavior:
     def test_transport_timeout_raises_typed_error(self):
@@ -483,6 +523,90 @@ class TestStreamingPath:
             await client._client.aclose()
             sent = json.loads(server.requests[0].read())
             assert sent["model"] == "scout-commander"
+
+        asyncio.run(main())
+
+    def test_openai_stream_truncated_without_done_raises_not_fake_stop(self):
+        # Clean EOF without [DONE] and without any finish_reason means the
+        # server truncated the stream — it must surface as an error, never
+        # as a synthesized successful STOP.
+        async def main():
+            payload = _sse([
+                {"choices": [{"delta": {"content": "partial"}}]},
+            ], done=False)
+            server = FakeOpenAIServer([httpx.Response(200, content=payload)])
+            client = _make_client(server)
+            seen = []
+            with pytest.raises(RuntimeError, match="ended without completion"):
+                async for chunk in client.stream_complete(_req()):
+                    seen.append(chunk)
+            await client._client.aclose()
+
+            assert [c.text for c in seen] == ["partial"], \
+                "deltas before truncation stay the caller's to discard"
+
+        asyncio.run(main())
+
+    def test_openai_stream_empty_body_without_done_raises_truncation(self):
+        async def main():
+            server = FakeOpenAIServer([httpx.Response(200, content=b"")])
+            client = _make_client(server)
+            with pytest.raises(RuntimeError, match="ended without completion"):
+                async for _ in client.stream_complete(_req()):
+                    pass
+            await client._client.aclose()
+
+        asyncio.run(main())
+
+    def test_openai_stream_usage_without_done_or_finish_raises_truncation(self):
+        # A final usage event alone is not a completion signal; truncation
+        # after usage must still raise.
+        async def main():
+            payload = _sse([
+                {"choices": [{"delta": {"content": "x"}}]},
+                {"choices": [], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+            ], done=False)
+            server = FakeOpenAIServer([httpx.Response(200, content=payload)])
+            client = _make_client(server)
+            with pytest.raises(RuntimeError, match="ended without completion"):
+                async for _ in client.stream_complete(_req()):
+                    pass
+            await client._client.aclose()
+
+        asyncio.run(main())
+
+    def test_openai_stream_done_without_finish_reason_synthesizes_stop(self):
+        async def main():
+            payload = _sse([
+                {"choices": [{"delta": {"content": "hi"}}]},
+            ])
+            server = FakeOpenAIServer([httpx.Response(200, content=payload)])
+            client = _make_client(server)
+            chunks = [chunk async for chunk in client.stream_complete(_req())]
+            await client._client.aclose()
+
+            final = chunks[-1]
+            assert final.text == ""
+            assert final.finish_reason == FinishReason.STOP
+            assert final.token_usage == TokenUsage(0, 0, 0)
+
+        asyncio.run(main())
+
+    def test_openai_stream_finish_reason_without_done_still_completes(self):
+        # A received finish_reason is a valid completion signal on its own;
+        # a missing [DONE] after it does not turn the stream into an error.
+        async def main():
+            payload = _sse([
+                {"choices": [{"delta": {"content": "ok"}, "finish_reason": "stop"}]},
+            ], done=False)
+            server = FakeOpenAIServer([httpx.Response(200, content=payload)])
+            client = _make_client(server)
+            chunks = [chunk async for chunk in client.stream_complete(_req())]
+            await client._client.aclose()
+
+            final = chunks[-1]
+            assert final.finish_reason == FinishReason.STOP
+            assert final.token_usage == TokenUsage(0, 0, 0)
 
         asyncio.run(main())
 

@@ -10,10 +10,13 @@ in the adapter's own thread).
 """
 from __future__ import annotations
 
+import asyncio
+import time
 import types
 
 import pytest
 
+import agentclaw.community.plugins.community.agentswarm.host as host_module
 from agentclaw.community.core.agentswarm.domain.models import (
     BotCreateSpec, BotState,
 )
@@ -273,6 +276,18 @@ class TestStatusNarrowTable:
         repo = _Repo(bot={"status": "ACTIVE"})
         assert _mk(seam=seam, repo=repo).bot_status("b1") == BotState.APPLY_FAILED.value
 
+    def test_terminal_job_bot_in_middle_state_is_terminal_not_provisioning(self):
+        # PENDING/STOPPED are neither up nor dead; with the job terminal
+        # nothing can drive them to READY, so PROVISIONING would only burn
+        # the poller's whole 300s deadline into a generic timeout.
+        for job_status in (TaskStatus.FAILED, TaskStatus.TIMED_OUT):
+            for state in ("PENDING", "STOPPED"):
+                seam = _Seam()
+                seam.jobs["b1"] = _job(job_status, "gave up")
+                repo = _Repo(bot={"status": state})
+                assert _mk(seam=seam, repo=repo).bot_status(
+                    "b1") == BotState.CREATE_FAILED.value, (job_status, state)
+
 
 # ── delete ────────────────────────────────────────────────────────────────
 
@@ -318,3 +333,26 @@ class TestChat:
         platform = _mk(grt=grt)
         assert platform.chat("b1", "objective='y'") == "the answer is 42"
         assert grt.sent == ["objective='y'"]
+
+    def test_stalled_engine_leg_raises_within_the_bound(self, monkeypatch):
+        # A hung engine WebSocket must free the swarm's thread with the
+        # typed error at the (patched-to-tiny) bound, not after the stall.
+        async def _stalled(bot_id, message):
+            await asyncio.sleep(1.0)  # simulates the engine ws hang
+            return "never"
+
+        monkeypatch.setattr(host_module, "_CHAT_TIMEOUT_SECONDS", 0.05)
+        platform = _mk()
+        monkeypatch.setattr(platform, "_chat_once", _stalled)
+        started = time.monotonic()
+        with pytest.raises(host_module.ChatTimeoutError,
+                           match="did not finish within"):
+            platform.chat("b1", "objective='x'")
+        # freed at the bound, long before the 1.0s stall elapses
+        assert time.monotonic() - started < 0.9
+
+    def test_chat_timeout_is_a_runtime_error(self):
+        # The subagent treats every chat failure through the common
+        # Exception path; the typed error must stay in that family so a
+        # timed-out chat reads as an attempt failure, not a wedge.
+        assert issubclass(host_module.ChatTimeoutError, RuntimeError)

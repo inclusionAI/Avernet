@@ -18,7 +18,10 @@ class DefaultSubagentFactory:
         self._platform = platform
 
     def create(self, spec: AgentSpec, run: Run,
-               agent_id: AgentId | None = None) -> Subagent:
+               agent_id: AgentId) -> Subagent:
+        # No default for ``agent_id``: the avernet kind derives the
+        # platform idempotency key from it, and a name fallback would let
+        # one same-named spawn's teardown delete the other's bot.
         if spec.kind.value == "avernet":
             # Fail clear at spawn time: an avernet-kind agent needs the
             # host's in-process BotPlatform binding; silently skipping to

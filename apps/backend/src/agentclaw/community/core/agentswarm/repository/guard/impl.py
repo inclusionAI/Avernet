@@ -8,15 +8,9 @@ from agentclaw.community.core.agentswarm.repository.guard import model as om
 from agentclaw.community.core.agentswarm.repository.guard.protocol import (
     GuardEventRepositoryProtocol,
 )
+from agentclaw.community.core.agentswarm.repository.decode import _decode_guard_kind
 from agentclaw.community.core.agentswarm.repository.types import _dumps, _loads
 from agentclaw.community.plugin_api.database import DatabasePlugin
-
-
-def _decode_guard_kind(val: str) -> dm.GuardKind:
-    try:
-        return dm.GuardKind(val)
-    except ValueError:
-        return dm.GuardKind.KILL
 
 
 class GuardEventRepository(GuardEventRepositoryProtocol):

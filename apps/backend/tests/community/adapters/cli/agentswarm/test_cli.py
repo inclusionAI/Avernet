@@ -2,8 +2,12 @@
 
 The CLI's ``main`` takes an injected httpx client, so the tests pass a
 fastapi.testclient.TestClient wired to the router with a stub service and
-a stub.AuthPlugin carrying no tenant — exercising the CLI's ``--tenant`` /
-``AGENTSWARM_TENANT`` → ``X-Tenant-Id`` fallback path.
+a stub.AuthPlugin carrying TENANT on its principal — per the hardened
+contract (P0-3/D25) the server resolves the tenant from the authenticated
+principal ONLY; the CLI's ``--tenant`` / ``AGENTSWARM_TENANT`` →
+``X-Tenant-Id`` header is still sent but the server ignores it. A
+principal without a tenant fails closed with 400 (``TenantlessAuth``,
+exercised by the unresolved-tenant test).
 """
 from __future__ import annotations
 
@@ -78,8 +82,29 @@ class StubService:
         return "not_found"
 
 
+class TenantCarryingAuth:
+    """Principal carrying TENANT — the principal is the ONLY tenant source
+    (the server never reads the client-supplied ``X-Tenant-Id`` header)."""
+
+    async def resolve_user_from_request(self, ctx) -> AuthenticatedIdentity:
+        return AuthenticatedIdentity(
+            id="cli-user", operatorName="cli-user", outUserNo="cli-staff",
+            tntInstId=TENANT,
+        )
+
+    async def get_login_user(self, cookie: str, referer: str | None = None):
+        raise NotImplementedError
+
+    def is_operator_allowed(self, staff_id: str) -> bool:
+        return True
+
+    async def authorize_entity_access(self, ctx, requested_entity_id,
+                                       requested_entity_type):
+        return requested_entity_id, requested_entity_type
+
+
 class TenantlessAuth:
-    """Principal without a tenant — forces the header fallback path."""
+    """Principal without a tenant — the server must fail closed with 400."""
 
     async def resolve_user_from_request(self, ctx) -> AuthenticatedIdentity:
         return AuthenticatedIdentity(
@@ -112,17 +137,31 @@ def stub() -> StubService:
     return StubService()
 
 
-@pytest.fixture()
-def client(stub) -> TestClient:
+def _build_client(stub: StubService, auth: AuthPlugin) -> TestClient:
     app = FastAPI()
     app.include_router(router)
     register_exception_handlers(app)
     inj = injector.Injector()
     inj.binder.bind(AgentSwarmServiceProtocol, to=stub)
-    inj.binder.bind(AuthPlugin, to=TenantlessAuth())
+    inj.binder.bind(AuthPlugin, to=auth)
     inj.binder.bind(AgentSwarmAuditWriter, to=RecordingAuditWriter())
     app.state.injector = inj
     return TestClient(app)
+
+
+@pytest.fixture()
+def client(stub) -> TestClient:
+    """Happy-path client: the principal carries TENANT, so the server
+    resolves the tenant from the principal (the CLI's ``X-Tenant-Id``
+    header is sent but ignored)."""
+    return _build_client(stub, TenantCarryingAuth())
+
+
+@pytest.fixture()
+def tenantless_client(stub) -> TestClient:
+    """Fail-closed client: the principal carries no tenant, so every
+    router endpoint answers 400 ``tenant unresolvable``."""
+    return _build_client(stub, TenantlessAuth())
 
 
 def test_help_exits_zero(capsys):
@@ -156,6 +195,9 @@ def test_submit_waits_and_prints_report(client, stub, tmp_path, capsys, monkeypa
 
 
 def test_submit_tenant_flag_beats_env(client, stub, tmp_path, capsys, monkeypatch):
+    """The CLI still accepts ``--tenant`` (and picks its header value over
+    ``AGENTSWARM_TENANT``), but the server ignores that header: the
+    submitted request's tenant is the principal's TENANT."""
     monkeypatch.setenv(agentswarm.TENANT_ENV_VAR, "tenant-env")
     spec_path = tmp_path / "spec.json"
     spec_path.write_text(json.dumps({
@@ -200,13 +242,18 @@ def test_submit_missing_spec_fields_exits_with_message(tmp_path):
 
 
 def test_submit_unresolved_tenant_maps_server_400_to_rc1(
-        client, stub, tmp_path, capsys):
+        tenantless_client, stub, tmp_path, capsys, monkeypatch):
+    """No tenant on the principal: the fail-closed path. The client-side
+    tenant (env → ``X-Tenant-Id`` header) must NOT rescue it — the server
+    ignores the header and answers 400, which the CLI maps to rc 1."""
+    monkeypatch.setenv(agentswarm.TENANT_ENV_VAR, TENANT)
     spec_path = tmp_path / "spec.json"
     spec_path.write_text(json.dumps({
         "goal": "ship it",
         "agents": [{"name": "a1", "role": "worker"}],
     }), encoding="utf-8")
-    rc = agentswarm.main(["submit", "--spec", str(spec_path)], client=client)
+    rc = agentswarm.main(["submit", "--spec", str(spec_path)],
+                         client=tenantless_client)
     assert rc == 1
     assert stub.submitted == []
     assert "400" in capsys.readouterr().err

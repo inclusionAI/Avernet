@@ -3,6 +3,10 @@
     "admin": {
       "cron_admin": []
     },
+    "agentswarm": {
+      "artifact_store_root": "${AGENTSWARM_ARTIFACT_ROOT:-/tmp/agentswarm/artifacts}",
+      "enabled": true
+    },
     "app": {
       "description": "Custom SOFAPy application",
       "local_debug": true,

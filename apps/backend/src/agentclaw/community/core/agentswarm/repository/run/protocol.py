@@ -19,6 +19,13 @@ class RunRepositoryProtocol(Protocol):
                       final_answer: Any = None, error: str | None = None,
                       claim_epoch: int = 0) -> bool: ...
 
+    # Unfenced submit-plane compensation (D28 carve-out): flips a still
+    # RUNNING run to FAILED without the job-epoch EXISTS fence — the
+    # caller owns a run whose job may never have committed. The
+    # status==RUNNING predicate is the only clobber guard.
+    def fail_unclaimed(self, run_id: RunId, tenant: TenantId,
+                       error: str) -> bool: ...
+
     def list_page(self, tenant: TenantId, status: RunStatus | None = None,
                   page: int = 1, page_size: int = 20) -> RunPage: ...
 

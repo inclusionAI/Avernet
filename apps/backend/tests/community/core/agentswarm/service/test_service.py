@@ -12,7 +12,7 @@ from contextlib import contextmanager
 
 
 import pytest
-from sqlalchemy import create_engine, select, func
+from sqlalchemy import create_engine, select, func, update
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.base import Base
@@ -120,6 +120,21 @@ def _db_count(db, model, tenant: str) -> int:
         return session.execute(
             select(func.count()).select_from(model).where(model.tenant == tenant)
         ).scalar_one()
+
+
+def _mk_run(status: dm.RunStatus = dm.RunStatus.RUNNING,
+            ended_at: dm.EpochMillis | None = None) -> dm.Run:
+    return dm.Run(
+        run_id=dm.RunId(uuid.uuid4().hex),
+        tenant=dm.TenantId("tenant-a"),
+        goal="test goal",
+        agent_catalog=(dm.AgentSpec(name="r1", role="research"),),
+        provider=dm.ProviderKind("stub"),
+        request_metadata=dm.RequestMetadata(),
+        status=status,
+        started_at=dm.EpochMillis(int(time.time() * 1000)),
+        ended_at=ended_at,
+    )
 
 
 def _claim_one_job(job_repo: JobRepository, tenant: dm.TenantId, run_id: dm.RunId) -> int:
@@ -359,6 +374,160 @@ def _mk_guard_event(run_id: dm.RunId, kind: dm.GuardKind) -> dm.GuardEvent:
         details={},
         created_at=dm.EpochMillis(0),
     )
+
+
+class TestEnqueueFailureCompensation:
+    """Orphan-run prevention: when enqueue raises AFTER this call created
+    the run row, the RUNNING row would hold the tenant admission slot and
+    the active idempotency key forever with no job for a worker to claim.
+    The service must compensate (terminal FAILED frees both) and re-raise
+    the original error — never swallow it."""
+
+    @pytest.mark.asyncio
+    async def test_enqueue_raise_marks_run_failed_frees_key_and_reraises(
+            self, service, job_repo, monkeypatch):
+        real_enqueue = job_repo.enqueue
+
+        def enqueue_then_glitch(**kwargs):
+            # DB glitch with an ambiguous commit: the job INSERT lands,
+            # but the call surfaces an error to the submit plane anyway.
+            real_enqueue(**kwargs)
+            raise RuntimeError("db glitch during enqueue")
+
+        monkeypatch.setattr(service._job_repo, "enqueue", enqueue_then_glitch)
+        with pytest.raises(RuntimeError, match="db glitch"):
+            await service.submit_async(
+                _req("tenant-a", idempotency_key="idem-enq")
+            )
+
+        (run,) = service.list_runs("tenant-a").items
+        assert run.status is dm.RunStatus.FAILED
+        assert run.error is not None and "enqueue" in run.error
+        assert run.ended_at is not None
+        # Idempotency slot freed: the duplicate-submit join finds nothing.
+        assert service._run_repo.get_by_idempotency(
+            "idem-enq", dm.TenantId("tenant-a"),
+        ) is None
+        # Admission freed: the orphan no longer occupies a tenant slot.
+        assert service._run_repo.count_active_runs(dm.TenantId("tenant-a")) == 0
+        # Functional proof both: the same key opens a fresh run once the
+        # job plane recovers.
+        monkeypatch.setattr(service._job_repo, "enqueue", real_enqueue)
+        retry = await service.submit_async(
+            _req("tenant-a", idempotency_key="idem-enq")
+        )
+        assert retry != run.run_id
+        assert service._run_repo.count_active_runs(dm.TenantId("tenant-a")) == 1
+
+    @pytest.mark.asyncio
+    async def test_enqueue_raise_without_job_row_fails_run_frees_slots_and_reraises(
+            self, service, db, monkeypatch):
+        # The common failure shape: enqueue raised BEFORE the job row
+        # committed (DB down / disk full / deadlock → rollback), so NO
+        # job row exists and the D28-fenced update_status(claim_epoch=0)
+        # would match zero rows. The submit plane must still reclaim the
+        # run it just created through the unfenced fail_unclaimed seam:
+        # run FAILED, key freed, admission freed — and the original
+        # error propagates.
+        def enqueue_glitch(**kwargs):
+            raise RuntimeError("db down before insert")
+
+        monkeypatch.setattr(service._job_repo, "enqueue", enqueue_glitch)
+        with pytest.raises(RuntimeError, match="db down"):
+            await service.submit_async(
+                _req("tenant-a", idempotency_key="idem-orphan")
+            )
+        assert _db_count(db, om.AcAgentSwarmJobModel, "tenant-a") == 0
+        (run,) = service.list_runs("tenant-a").items
+        assert run.status is dm.RunStatus.FAILED
+        assert run.ended_at is not None
+        assert run.error is not None and "enqueue" in run.error
+        # Idempotency slot freed: the duplicate-submit join finds nothing.
+        assert service._run_repo.get_by_idempotency(
+            "idem-orphan", dm.TenantId("tenant-a"),
+        ) is None
+        # Admission freed: the orphan no longer occupies a tenant slot.
+        assert service._run_repo.count_active_runs(
+            dm.TenantId("tenant-a"),
+        ) == 0
+
+    @pytest.mark.asyncio
+    async def test_failed_compensation_write_does_not_mask_original_error(
+            self, service, job_repo, monkeypatch):
+        # The compensation write can fail on the same broken DB; it must
+        # not replace or hide the original enqueue exception.
+        real_enqueue = job_repo.enqueue
+
+        def enqueue_then_glitch(**kwargs):
+            real_enqueue(**kwargs)
+            raise RuntimeError("original enqueue error")
+
+        def broken_fail_unclaimed(*args, **kwargs):
+            raise ValueError("compensation path also broken")
+
+        monkeypatch.setattr(service._job_repo, "enqueue", enqueue_then_glitch)
+        monkeypatch.setattr(
+            service._run_repo, "fail_unclaimed", broken_fail_unclaimed,
+        )
+        with pytest.raises(RuntimeError, match="original enqueue error"):
+            await service.submit_async(_req("tenant-a"))
+
+
+class TestFailUnclaimedSeam:
+    """Repository-level contract of fail_unclaimed — the unfenced
+    submit-plane seam the service's enqueue-failure compensation uses.
+    Unlike the D28-fenced update_status (which requires a job row at the
+    caller's claim_epoch), fail_unclaimed reclaims a RUNNING run with NO
+    job row at all: the job INSERT may never have committed. The
+    status==RUNNING predicate is the only clobber guard — an already
+    terminal or deleted run refuses the write."""
+
+    def test_fails_running_run_without_job_row_clearing_key_and_slots(
+            self, run_repo):
+        run = _mk_run()
+        run.active_idempotency_key = dm.IdempotencyKey("key-seam")
+        run_repo.create(run)
+        assert run_repo.fail_unclaimed(
+            run.run_id, dm.TenantId("tenant-a"), "boom",
+        ) is True
+        got = run_repo.get(run.run_id, dm.TenantId("tenant-a"))
+        assert got.status is dm.RunStatus.FAILED
+        assert got.error == "boom"
+        assert got.ended_at is not None
+        assert got.active_idempotency_key is None
+        # The idempotency slot is freed for a fresh submit with that key.
+        assert run_repo.get_by_idempotency(
+            "key-seam", dm.TenantId("tenant-a"),
+        ) is None
+        assert run_repo.count_active_runs(dm.TenantId("tenant-a")) == 0
+
+    def test_already_terminal_run_returns_false_and_preserves_status(
+            self, run_repo):
+        run = _mk_run(
+            status=dm.RunStatus.COMPLETED, ended_at=dm.EpochMillis(123),
+        )
+        run_repo.create(run)
+        assert run_repo.fail_unclaimed(
+            run.run_id, dm.TenantId("tenant-a"), "late compensation",
+        ) is False
+        got = run_repo.get(run.run_id, dm.TenantId("tenant-a"))
+        assert got.status is dm.RunStatus.COMPLETED
+        assert got.error is None
+        assert got.ended_at == dm.EpochMillis(123)
+
+    def test_deleted_run_returns_false(self, run_repo, db):
+        run = _mk_run()
+        run_repo.create(run)
+        with db.orm_session() as session:
+            session.execute(
+                update(om.AcAgentSwarmRunModel).where(
+                    om.AcAgentSwarmRunModel.run_id == run.run_id,
+                ).values(is_deleted=True)
+            )
+        assert run_repo.fail_unclaimed(
+            run.run_id, dm.TenantId("tenant-a"), "gone",
+        ) is False
+        assert run_repo.get(run.run_id, dm.TenantId("tenant-a")) is None
 
 
 class TestRunEvents:

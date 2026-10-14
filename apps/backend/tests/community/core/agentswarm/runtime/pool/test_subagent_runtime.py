@@ -11,6 +11,7 @@ through asyncio.run, hand-written fakes (no MagicMock).
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import uuid
 from collections import deque
@@ -23,8 +24,14 @@ from agentclaw.community.core.agentswarm.domain.models import (
     Run, RunId, RunStatus, SubagentResult, TaskEnvelope, TenantId,
     TokenUsage,
 )
+from agentclaw.community.core.agentswarm.runtime.breaker import (
+    BreakerState, UpstreamBreaker,
+)
 from agentclaw.community.core.agentswarm.runtime.pool import (
     SubagentRuntime,
+)
+from agentclaw.community.core.agentswarm.runtime.pool.impl import (
+    _MAX_INLINE_RESULT_CHARS,
 )
 
 
@@ -820,3 +827,340 @@ class TestOutputSchemaValidation:
             assert factory.tracker["setup"] == 0
 
         asyncio.run(main())
+
+class TestTeardownFailureLogging:
+    """teardown() is best-effort, but a failed host-platform teardown must
+    be logged, not silently swallowed — and must never fail the attempt.
+    """
+
+    def test_teardown_raise_is_logged_and_attempt_still_completes(self, caplog):
+        class TeardownBoomSubagent:
+            def __init__(self, spec: AgentSpec, tracker: dict) -> None:
+                self.name = spec.name
+                self.tracker = tracker
+
+            async def setup(self) -> None:
+                self.tracker["setup"] += 1
+
+            async def run_task(self, envelope: TaskEnvelope) -> SubagentResult:
+                self.tracker["run_task"] += 1
+                return _ok_result({"answer": "survived"})
+
+            async def teardown(self) -> None:
+                self.tracker["teardown"] += 1
+                raise RuntimeError("platform bot leak")
+
+            async def halt(self) -> None:
+                self.tracker["halt"] += 1
+
+        class TeardownBoomFactory:
+            def __init__(self) -> None:
+                self.creates = 0
+                self.tracker = {
+                    "setup": 0, "run_task": 0, "teardown": 0, "halt": 0,
+                }
+
+            def create(self, spec: AgentSpec, run: Run,
+                       agent_id: AgentId | None = None) -> TeardownBoomSubagent:
+                self.creates += 1
+                return TeardownBoomSubagent(spec, self.tracker)
+
+        async def main():
+            factory = TeardownBoomFactory()
+            rt = SubagentRuntime(factory=factory)
+            await rt.start()
+            try:
+                await rt.spawn(_mk_run(), _mk_envelope())
+                results = await rt.wait_for_completions()
+            finally:
+                await rt.stop()
+            return results, factory
+
+        with caplog.at_level(
+            logging.ERROR,
+            logger="agentclaw.community.core.agentswarm.runtime.pool.impl",
+        ):
+            results, factory = asyncio.run(main())
+
+        (r,) = results
+        assert r["status"] is AgentStatus.COMPLETED
+        assert r["attempts"] == 1
+        assert r["result"] == {"answer": "survived"}
+        assert factory.creates == 1          # no retry of a completed run
+        assert factory.tracker["teardown"] == 1
+        teardown_records = [
+            rec for rec in caplog.records
+            if "subagent teardown failed" in rec.message
+        ]
+        assert teardown_records, [rec.message for rec in caplog.records]
+        assert teardown_records[0].exc_info is not None
+        assert "platform bot leak" in teardown_records[0].exc_text
+
+
+class TestArtifactSpillFailure:
+    """An artifact put failure must not discard a completed (schema-valid)
+    result: falling back inline keeps the shard XOR carrier intact and the
+    finished subagent is never re-run. No false upstream-breaker failure.
+    """
+
+    def test_put_failure_keeps_result_inline_without_retry(self, caplog):
+        class ExplodingArtifactStore:
+            def __init__(self) -> None:
+                self.puts = 0
+
+            def put(self, key: str, content) -> bool:
+                self.puts += 1
+                raise RuntimeError("artifact store down")
+
+            def put_file(self, key: str, local_path: str) -> bool:
+                return True
+
+            def delete(self, key: str) -> bool:
+                return True
+
+            def get(self, key: str):
+                return None
+
+        async def main():
+            big_output = {"pad": "z" * 100}
+            factory = FakeFactory(
+                scripts={"researcher": [("ok", _ok_result(big_output))]}
+            )
+            store = ExplodingArtifactStore()
+            breaker = UpstreamBreaker(failure_threshold=1, open_seconds=60.0)
+            rt = SubagentRuntime(
+                factory=factory, artifact_store=store,
+                artifact_inline_threshold=10,
+                upstream_breaker=breaker,
+            )
+            await rt.start()
+            try:
+                env = _mk_envelope()
+                agent_id = await rt.spawn(_mk_run(), env)
+                results = await rt.wait_for_completions()
+            finally:
+                await rt.stop()
+            return results, factory, store, breaker, big_output, agent_id
+
+        with caplog.at_level(
+            logging.ERROR,
+            logger="agentclaw.community.core.agentswarm.runtime.pool.impl",
+        ):
+            results, factory, store, breaker, big_output, agent_id = (
+                asyncio.run(main())
+            )
+
+        (r,) = results
+        assert r["status"] is AgentStatus.COMPLETED
+        assert r["attempts"] == 1
+        assert r["result"] == big_output      # inline fallback preserves payload
+        assert r["artifact_key"] is None       # D31 XOR: exactly one carrier
+        assert agent_id is not None
+        assert factory.tracker["run_task"] == 1  # completed subagent never re-ran
+        assert factory.creates == 1
+        assert store.puts == 1
+        assert breaker.state is BreakerState.CLOSED
+        assert breaker.consecutive_failures == 0
+        spill_records = [
+            rec for rec in caplog.records
+            if "artifact put failed" in rec.message
+        ]
+        assert spill_records, [rec.message for rec in caplog.records]
+        assert "artifact store down" in spill_records[0].exc_text
+
+
+class TestBoundedInlineFallback:
+    """Round-5: the inline fallback (no store / spill failure) is bounded.
+
+    Round-4 capped artifacts at 8 MiB (_MAX_ARTIFACT_BYTES), so an oversize
+    output can no longer spill — and the unconditional inline fallback would
+    write an unbounded payload into the persisted shard ``payload`` column,
+    turning the bounded-disk vector into an unbounded-DB-write vector.
+    Above ``_MAX_INLINE_RESULT_CHARS`` the payload becomes a bounded
+    truncated marker; the D31 XOR invariant stays intact (payload set,
+    artifact_key None) and the run converges instead of re-running a
+    completed subagent.
+    """
+
+    def _oversize_output(self) -> dict:
+        # str() > _MAX_INLINE_RESULT_CHARS: 1M pad chars plus dict delimiters.
+        return {"pad": "x" * (_MAX_INLINE_RESULT_CHARS + 50)}
+
+    class _ExplodingStore:
+        """Fake ArtifactStore whose put rejects oversize like the round-4 cap."""
+
+        def __init__(self) -> None:
+            self.puts = 0
+
+        def put(self, key: str, content) -> bool:
+            self.puts += 1
+            raise ValueError(
+                f"artifact exceeds 8388608 bytes: {len(content)}"
+            )
+
+        def put_file(self, key: str, local_path: str) -> bool:
+            return True
+
+        def delete(self, key: str) -> bool:
+            return True
+
+        def get(self, key: str):
+            return None
+
+    def test_over_cap_no_store_persists_bounded_marker(self, caplog):
+        # (a) inline fallback over the cap with NO store: bounded marker,
+        # never the raw huge object; the completion still flows to the
+        # shard handler so the shard persists (D31 XOR: payload set,
+        # artifact_key None); size records the true serialized length.
+        async def main():
+            big = self._oversize_output()
+            factory = FakeFactory(
+                scripts={"researcher": [("ok", _ok_result(big))]}
+            )
+            rt = SubagentRuntime(
+                factory=factory, artifact_store=None,
+                artifact_inline_threshold=10,
+            )
+            shards = []
+            rt.set_shard_handler(shards.append)
+            await rt.start()
+            try:
+                await rt.spawn(_mk_run(), _mk_envelope())
+                results = await rt.wait_for_completions()
+            finally:
+                await rt.stop()
+            return results, big, shards
+
+        with caplog.at_level(
+            logging.WARNING,
+            logger="agentclaw.community.core.agentswarm.runtime.pool.impl",
+        ):
+            results, big, shards = asyncio.run(main())
+
+        (r,) = results
+        assert shards == [r]                       # the completion reached the shard path
+        assert r["status"] is AgentStatus.COMPLETED
+        payload = r["result"]
+        assert payload is not big                   # never the raw huge object
+        assert not isinstance(payload, str)
+        assert payload["truncated"] is True
+        assert payload["size"] == len(str(big))
+        assert payload["preview"] == str(big)[:_MAX_INLINE_RESULT_CHARS // 10]
+        assert len(payload["preview"]) == _MAX_INLINE_RESULT_CHARS // 10
+        assert r["artifact_key"] is None            # D31 XOR: exactly one carrier
+        truncation_records = [
+            rec for rec in caplog.records
+            if "truncated" in rec.message and rec.levelno == logging.WARNING
+        ]
+        assert truncation_records, [rec.message for rec in caplog.records]
+
+    def test_over_threshold_under_cap_no_store_stays_raw_inline(self):
+        # (b) under the cap: unchanged behavior — the raw output object is
+        # kept inline (same object, no marker, no copy).
+        async def main():
+            medium = {"pad": "y" * 50_000}          # > threshold 10, < cap
+            factory = FakeFactory(
+                scripts={"researcher": [("ok", _ok_result(medium))]}
+            )
+            rt = SubagentRuntime(
+                factory=factory, artifact_store=None,
+                artifact_inline_threshold=10,
+            )
+            await rt.start()
+            try:
+                await rt.spawn(_mk_run(), _mk_envelope())
+                results = await rt.wait_for_completions()
+            finally:
+                await rt.stop()
+            return results, medium
+
+        results, medium = asyncio.run(main())
+
+        (r,) = results
+        assert r["status"] is AgentStatus.COMPLETED
+        assert r["result"] is medium                 # raw object, untouched
+        assert r["artifact_key"] is None
+
+    def test_spill_failure_over_cap_persists_bounded_marker(self, caplog):
+        # (c) artifact spill failure (store raises, e.g. the round-4 8 MiB
+        # cap) with an oversize output: bounded marker, no unbounded
+        # payload, shard XOR intact.
+        async def main():
+            big = self._oversize_output()
+            factory = FakeFactory(
+                scripts={"researcher": [("ok", _ok_result(big))]}
+            )
+            store = self._ExplodingStore()
+            rt = SubagentRuntime(
+                factory=factory, artifact_store=store,
+                artifact_inline_threshold=10,
+            )
+            shards = []
+            rt.set_shard_handler(shards.append)
+            await rt.start()
+            try:
+                await rt.spawn(_mk_run(), _mk_envelope())
+                results = await rt.wait_for_completions()
+            finally:
+                await rt.stop()
+            return results, big, shards, store
+
+        with caplog.at_level(
+            logging.WARNING,
+            logger="agentclaw.community.core.agentswarm.runtime.pool.impl",
+        ):
+            results, big, shards, store = asyncio.run(main())
+
+        (r,) = results
+        assert shards == [r]
+        assert r["status"] is AgentStatus.COMPLETED
+        assert store.puts == 1                        # the spill was attempted
+        payload = r["result"]
+        assert payload is not big                     # no unbounded payload
+        assert payload["truncated"] is True
+        assert payload["size"] == len(str(big))
+        assert payload["preview"] == str(big)[:_MAX_INLINE_RESULT_CHARS // 10]
+        assert r["artifact_key"] is None              # D31 XOR: exactly one carrier
+        truncation_records = [
+            rec for rec in caplog.records
+            if "truncated" in rec.message and rec.levelno == logging.WARNING
+        ]
+        assert truncation_records, [rec.message for rec in caplog.records]
+        spill_records = [
+            rec for rec in caplog.records
+            if "artifact put failed" in rec.message
+        ]
+        assert spill_records, [rec.message for rec in caplog.records]
+
+    def test_spill_success_over_cap_output_unchanged_artifact_key(self):
+        # (d) artifact spill success (store healthy): unchanged — even an
+        # output over the inline cap is routed to the store; artifact_key
+        # set, payload None. The marker only guards the FALLBACK branches.
+        async def main():
+            big = self._oversize_output()
+            factory = FakeFactory(
+                scripts={"researcher": [("ok", _ok_result(big))]}
+            )
+            store = FakeArtifactStore()
+            rt = SubagentRuntime(
+                factory=factory, artifact_store=store,
+                artifact_inline_threshold=10,
+            )
+            await rt.start()
+            try:
+                run = _mk_run()
+                agent_id = await rt.spawn(run, _mk_envelope())
+                results = await rt.wait_for_completions()
+            finally:
+                await rt.stop()
+            return results, big, store, run, agent_id
+
+        results, big, store, run, agent_id = asyncio.run(main())
+
+        (r,) = results
+        assert r["status"] is AgentStatus.COMPLETED
+        key = f"{run.run_id}/{agent_id}/result"
+        assert r["artifact_key"] == key
+        assert r["result"] is None
+        assert store.puts == [key]
+        assert store.contents[key] == str(big)

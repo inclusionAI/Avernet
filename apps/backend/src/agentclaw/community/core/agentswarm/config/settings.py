@@ -6,27 +6,42 @@ from dataclasses import dataclass, field
 # ── yaml-block parsing (the `agentswarm` user_config block) ─────────────
 #
 # Defensive parsing in the BotCreateWithManifestConfig.from_block tradition:
-# a missing key, an unreadable value and a non-positive one all take the
+# a missing key, an unreadable value and a below-minimum one all take the
 # default rather than breaking boot — a half-misconfigured knob downgrades
-# to its tested default, it never wedges the worker. The a-bare-default
+# to its tested default, it never wedges the worker. Budget/cadence knobs
+# (poll/lease/slice/timeout/sweep/grace, pending capacity) carry strict
+# minimums: a zero poll interval is a hot loop, a zero slice/timeout/sweep
+# budget or pending capacity wedges the worker. ``open_seconds`` alone
+# still accepts 0 — an immediate-retry breaker is a valid setting, pinned
+# at the runtime level by the drain-breaker tests. ``host.owner_id`` is
+# the one refusal: a shipped host block with a blank owner raises
+# ``AgentSwarmConfigError`` (P0-9 — an ownerless bot has no provisioning
+# identity; there is no service-account fallback to downgrade to). The
+# bare-default
 # contract matters as much: an absent block parses to exactly what
 # ``AgentSwarmConfig()`` constructs, so profiles that ship no block keep
 # their current behavior (missing LLM stays fail-clear at submit, /tmp
 # artifact root, every limit at its default).
 
 
-def _as_int(block: dict, key: str, default: int, minimum: int = 0) -> int:
+def _as_int(block: dict, key: str, default: int, minimum: int = 0,
+            exclusive: bool = False) -> int:
     try:
         value = int(block.get(key, default))
     except (TypeError, ValueError):
         return default
+    if exclusive and value <= minimum:
+        return default
     return value if value >= minimum else default
 
 
-def _as_float(block: dict, key: str, default: float, minimum: float = 0.0) -> float:
+def _as_float(block: dict, key: str, default: float, minimum: float = 0.0,
+              exclusive: bool = False) -> float:
     try:
         value = float(block.get(key, default))
     except (TypeError, ValueError):
+        return default
+    if exclusive and value <= minimum:
         return default
     return value if value >= minimum else default
 
@@ -43,6 +58,11 @@ def _as_bool(block: dict, key: str, default: bool) -> bool:
 def _as_str(block: dict, key: str, default: str = "") -> str:
     value = block.get(key, default)
     return value if isinstance(value, str) else default
+
+
+def _as_path(block: dict, key: str, default: str) -> str:
+    value = block.get(key, default)
+    return value if isinstance(value, str) and value.strip() else default
 
 
 @dataclass(frozen=True)
@@ -76,7 +96,7 @@ class LlmConfig:
             api_key=secret_name,
             default_model=model,
             orchestrator_model=_as_str(block, "orchestrator_model").strip() or None,
-            timeout_seconds=_as_float(block, "timeout_ms", cls().timeout_seconds * 1000.0) / 1000.0,
+            timeout_seconds=_as_float(block, "timeout_ms", cls().timeout_seconds * 1000.0, exclusive=True) / 1000.0,
             max_tokens=_as_int(block, "max_tokens", cls().max_tokens, minimum=1),
             max_retries=_as_int(block, "max_retries", cls().max_retries, minimum=0),
         )
@@ -100,6 +120,8 @@ class AgentSwarmOrchestrationConfig:
     poll_interval: float = 2.0
     poll_jitter: float = 0.5
     batch_size: int = 10
+    wall_clock_seconds: float = 3600.0
+    no_progress_threshold: int = 3
 
     @classmethod
     def from_block(cls, block: dict) -> "AgentSwarmOrchestrationConfig":
@@ -114,14 +136,21 @@ class AgentSwarmOrchestrationConfig:
             subagent_max_attempts=_as_int(block, "subagent_max_attempts", d.subagent_max_attempts, minimum=1),
             per_subagent_timeout=_as_float(block, "per_subagent_timeout", d.per_subagent_timeout),
             orchestrator_turn_interval=_as_float(block, "orchestrator_turn_interval", d.orchestrator_turn_interval),
-            slice_max_seconds=_as_float(block, "slice_max_seconds", d.slice_max_seconds),
-            slice_interval=_as_float(block, "slice_interval", d.slice_interval),
+            slice_max_seconds=_as_float(block, "slice_max_seconds", d.slice_max_seconds, exclusive=True),
+            slice_interval=_as_float(block, "slice_interval", d.slice_interval, exclusive=True),
             respawn_max=_as_int(block, "respawn_max", d.respawn_max, minimum=0),
             reclaim_max=_as_int(block, "reclaim_max", d.reclaim_max, minimum=0),
             lease_seconds=_as_int(block, "lease_seconds", d.lease_seconds, minimum=1),
-            poll_interval=_as_float(block, "poll_interval", d.poll_interval),
+            poll_interval=_as_float(block, "poll_interval", d.poll_interval, exclusive=True),
             poll_jitter=_as_float(block, "poll_jitter", d.poll_jitter),
             batch_size=_as_int(block, "batch_size", d.batch_size, minimum=1),
+            # Termination knobs (the TerminationEvaluator's budget): zero
+            # wedges every run — an instant WALL_CLOCK / NO_PROGRESS at the
+            # first evaluate — so both downgrade like other budget knobs.
+            wall_clock_seconds=_as_float(
+                block, "wall_clock_seconds", d.wall_clock_seconds, exclusive=True),
+            no_progress_threshold=_as_int(
+                block, "no_progress_threshold", d.no_progress_threshold, minimum=1),
         )
 
 
@@ -149,7 +178,7 @@ class AgentSwarmAdmissionConfig:
         block = block or {}
         return cls(
             max_global_concurrent_runs=_as_int(block, "max_global_concurrent_runs", d.max_global_concurrent_runs, minimum=1),
-            max_pending_jobs=_as_int(block, "max_pending_jobs", d.max_pending_jobs, minimum=0),
+            max_pending_jobs=_as_int(block, "max_pending_jobs", d.max_pending_jobs, minimum=1),
         )
 
 
@@ -163,7 +192,7 @@ class AgentSwarmDrainConfig:
         d = cls()
         block = block or {}
         return cls(
-            grace_seconds=_as_float(block, "grace_seconds", d.grace_seconds),
+            grace_seconds=_as_float(block, "grace_seconds", d.grace_seconds, exclusive=True),
             stop_claiming_signal=_as_str(block, "stop_claiming_signal", d.stop_claiming_signal),
         )
 
@@ -211,7 +240,7 @@ class AgentSwarmRetentionConfig:
         block = block or {}
         return cls(
             artifact_ttl_days=_as_int(block, "artifact_ttl_days", d.artifact_ttl_days, minimum=1),
-            sweep_interval_seconds=_as_float(block, "sweep_interval_seconds", d.sweep_interval_seconds),
+            sweep_interval_seconds=_as_float(block, "sweep_interval_seconds", d.sweep_interval_seconds, exclusive=True),
         )
 
 
@@ -219,10 +248,51 @@ class AgentSwarmRetentionConfig:
 
 
 @dataclass(frozen=True)
+class AgentSwarmHostConfig:
+    """The ``agentswarm.host`` block — the host platform side's identity.
+
+    ``owner_id`` is the account swarm-created bots belong to (P0-9): the
+    one config knob defensive parsing REFUSES instead of downgrading —
+    a host block with a blank owner raises, because an ownerless bot has
+    no provisioning identity and no service-account fallback exists. An
+    absent block keeps ``owner_id=""`` (no platform opt-in); the refusal
+    for that state lives in the ``AgentSwarmModule.bot_platform``
+    provider.
+    """
+
+    owner_id: str = ""
+
+    @classmethod
+    def from_block(cls, block: dict) -> "AgentSwarmHostConfig":
+        if block is None:
+            return cls()
+        if not isinstance(block, dict):
+            block = {}
+        owner_id = _as_str(block, "owner_id").strip()
+        if not owner_id:
+            # Call-local on purpose: service/impl.py imports this module at
+            # top level, so a module-level import of service.protocols here
+            # closes a config -> service -> config import cycle.
+            from agentclaw.community.core.agentswarm.service.protocols import (
+                AgentSwarmConfigError,
+            )
+            raise AgentSwarmConfigError(
+                "agentswarm.host.owner_id is required but blank: it is the "
+                "account the swarm's transient bots belong to (no "
+                "service-account fallback) — set host.owner_id in the "
+                "agentswarm block"
+            )
+        return cls(owner_id=owner_id)
+
+
+@dataclass(frozen=True)
 class AgentSwarmConfig:
     llm: LlmConfig | None = None
     orchestration: AgentSwarmOrchestrationConfig = field(
         default_factory=AgentSwarmOrchestrationConfig
+    )
+    host: AgentSwarmHostConfig = field(
+        default_factory=AgentSwarmHostConfig
     )
     tenant_limits: AgentSwarmTenantLimits = field(
         default_factory=AgentSwarmTenantLimits
@@ -262,6 +332,7 @@ class AgentSwarmConfig:
             llm=LlmConfig.from_block(block.get("llm")),
             orchestration=AgentSwarmOrchestrationConfig.from_block(
                 block.get("orchestration")),
+            host=AgentSwarmHostConfig.from_block(block.get("host")),
             tenant_limits=AgentSwarmTenantLimits.from_block(
                 block.get("tenant_limits")),
             admission=AgentSwarmAdmissionConfig.from_block(
@@ -272,7 +343,7 @@ class AgentSwarmConfig:
             retention=AgentSwarmRetentionConfig.from_block(
                 block.get("retention")),
             egress=AgentSwarmEgressConfig.from_block(block.get("egress")),
-            artifact_store_root=_as_str(
+            artifact_store_root=_as_path(
                 block, "artifact_store_root", cls().artifact_store_root),
             artifact_inline_threshold=_as_int(
                 block, "artifact_inline_threshold",

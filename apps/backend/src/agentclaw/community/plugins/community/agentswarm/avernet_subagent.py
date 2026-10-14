@@ -33,7 +33,7 @@ class AvernetSubagent:
 
     def __init__(self, spec: AgentSpec, run: Run,
                  platform: BotPlatform,
-                 agent_id: AgentId | None = None) -> None:
+                 agent_id: AgentId) -> None:
         self._spec = spec
         self._run = run
         self._platform = platform
@@ -60,12 +60,10 @@ class AvernetSubagent:
                 # agent_id is stable across attempts AND across D16
                 # respawns (rebind, not duplicate), and unique between two
                 # same-named spawns (each spawns its own bot; one's
-                # teardown can never delete the other's). The name remains
-                # only as the fallback for hand construction with no agent
-                # row behind it.
+                # teardown can never delete the other's). spec.name would
+                # collide same-named spawns, so there is no name fallback.
                 idempotency_key=IdempotencyKey(
-                    f"{self._run.run_id}:"
-                    f"{self._agent_id or self._spec.name}"),
+                    f"{self._run.run_id}:{self._agent_id}"),
             )
         except Exception:
             raise

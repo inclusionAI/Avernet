@@ -597,3 +597,49 @@ class TestRealHandlerDrain:
         assert stored_run.final_answer == "drained"
         assert state["status"] == "SUCCEEDED"
         assert state["last_error"] is None
+
+class TestHeartbeatDuringDrain:
+    """Drain edge (12.2): between batch jobs the in-flight map is
+    momentarily empty while the poll loop still holds claimed, un-started
+    jobs. The heartbeat must stay alive for those gaps — exiting would let
+    their leases expire in a reclaim and execute the jobs twice.
+    """
+
+    def test_heartbeat_survives_empty_inflight_gap_and_renews_pending_batch(self):
+        async def main():
+            repo = DrainJobRepo()
+            handler = DrainHandler()
+            worker = AgentSwarmWorker(
+                config=_drain_config(grace=30.0, lease=0.06),
+                handler=handler, job_repo=repo,
+            )
+            # Drain under way: claiming stopped, no slice in flight this
+            # instant, but the poll task is alive with claimed jobs queued.
+            worker._running = False
+            worker._task = asyncio.create_task(asyncio.sleep(0.2))
+            heartbeat = asyncio.create_task(worker._heartbeat_loop())
+            try:
+                await asyncio.sleep(0.08)   # several heartbeat intervals
+                # Old condition (running or inflight) exits here; the
+                # drained batch would then never be renewed again.
+                assert not heartbeat.done()
+
+                # the next claimed batch job becomes in-flight: renew it
+                worker._inflight["drain-run-2"] = {
+                    "tenant": TENANT, "claim_epoch": 1,
+                }
+                leases_before = len(repo.leases)
+                await asyncio.sleep(0.08)
+                renewals = repo.leases[leases_before:]
+                assert any(run_id == "drain-run-2"
+                           for run_id, _ in renewals)
+
+                # poll loop finished and nothing is in flight: clean exit
+                worker._inflight.pop("drain-run-2", None)
+                await asyncio.wait_for(heartbeat, timeout=1.0)
+                assert heartbeat.done() and not heartbeat.cancelled()
+            finally:
+                heartbeat.cancel()
+                await asyncio.gather(heartbeat, return_exceptions=True)
+
+        asyncio.run(main())

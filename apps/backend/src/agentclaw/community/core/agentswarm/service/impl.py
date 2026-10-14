@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 import uuid
 
@@ -19,10 +20,13 @@ from agentclaw.community.core.agentswarm.repository.run import RunRepository
 from agentclaw.community.core.agentswarm.repository.shard import ResultShardRepository
 from agentclaw.community.core.agentswarm.service.protocols import (
     AgentSwarmConfigError, AgentSwarmRunNotFoundError,
-    AgentSwarmServiceProtocol, AgentEvent, GlobalRunLimitExceeded,
+    AgentSwarmRunNotPurgeableError, AgentSwarmServiceProtocol,
+    AgentSwarmSyncTimeoutError, AgentEvent, GlobalRunLimitExceeded,
     GuardEventSummary, QueueDepthExceeded, RoundEvent, RunEvents,
     SubmitRunRequest, TenantRunLimitExceeded,
 )
+
+logger = logging.getLogger(__name__)
 
 class AgentSwarmService(AgentSwarmServiceProtocol):
 
@@ -41,7 +45,11 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
         self._shard_repo = shard_repo
         self._config = config
         slice_max = config.orchestration.slice_max_seconds
-        self._deadline = int(slice_max) if slice_max else 3600
+        # Float deadline with a one-poll-cycle floor: int() truncated a
+        # sub-second budget (0.5 -> 0) into an instant submit_sync
+        # return, and a zero/absent config must default — never wedge
+        # the wait to zero.
+        self._deadline: float = max(float(slice_max or 3600.0), 1.0)
 
     async def submit_async(self, req: SubmitRunRequest) -> str:
         self._require_llm_config()
@@ -55,6 +63,12 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
                 # new capacity, so saturation must never refuse it.
                 return existing.run_id
         limit = self._config.tenant_limits.max_concurrent_runs
+        # Known bounded race: count-then-create is not atomic, so
+        # concurrent submits can both pass this check and briefly
+        # overshoot the cap. A fully atomic admission needs schema work
+        # (no new constraint is added here); the run.create()
+        # idempotency convergence below keeps duplicate submits from
+        # compounding the overshoot into extra rows.
         if self._run_repo.count_active_runs(TenantId(req.tenant)) >= limit:
             raise TenantRunLimitExceeded(tenant=req.tenant, limit=limit)
         global_limit = self._config.admission.max_global_concurrent_runs
@@ -75,28 +89,71 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
             started_at=EpochMillis(int(time.time() * 1000)),
         )
         run.active_idempotency_key = req.idempotency_key
-        self._run_repo.create(run)
-        self._job_repo.enqueue(
-            run_id=RunId(run_id),
-            tenant=TenantId(req.tenant),
-            deadline_seconds=self._deadline,
-        )
+        created = self._run_repo.create(run)
+        if created.run_id != RunId(run_id):
+            # Lost the submit race: create() converged onto the winner's
+            # existing run (uk_run_idem collision). Join it — returning
+            # this run_id WITHOUT enqueueing a second job for the same
+            # run, exactly like the early get_by_idempotency join above.
+            return created.run_id
+        try:
+            self._job_repo.enqueue(
+                run_id=RunId(run_id),
+                tenant=TenantId(req.tenant),
+                deadline_seconds=self._deadline,
+            )
+        except Exception as exc:
+            # Orphan-run compensation: the run row THIS call just created
+            # is already committed RUNNING and holds the tenant admission
+            # slot plus the active idempotency key. If enqueue raised, no
+            # worker ever owned this run. The common case is that the job
+            # row never committed either (DB down / disk full / deadlock
+            # rollback), so the D28-fenced update_status would match zero
+            # rows and strand the run RUNNING forever; fail_unclaimed is
+            # the unfenced submit-plane seam for exactly this reclaim —
+            # it never touched a worker-owned run, and refuses to clobber
+            # a racing terminal write. The original enqueue error is
+            # never swallowed.
+            try:
+                freed = self._run_repo.fail_unclaimed(
+                    RunId(run_id), TenantId(req.tenant),
+                    error=f"job enqueue failed: {type(exc).__name__}: "
+                          f"{str(exc)[:160]}",
+                )
+            except Exception:
+                logger.warning(
+                    "[agentswarm][service] enqueue-failure compensation "
+                    "write raised for run=%s tenant=%s",
+                    run_id, req.tenant, exc_info=True,
+                )
+            else:
+                if not freed:
+                    logger.warning(
+                        "[agentswarm][service] enqueue-failure compensation "
+                        "matched no RUNNING run for run=%s tenant=%s",
+                        run_id, req.tenant,
+                    )
+            raise
         return run_id
 
     async def submit_sync(self, req: SubmitRunRequest) -> Run:
         run_id = await self.submit_async(req)
         deadline = time.monotonic() + self._deadline
-        while time.monotonic() < deadline:
-            run = self.get_run(run_id, req.tenant)
-            if run is not None and run.status is not RunStatus.RUNNING:
-                return run
+        run = self.get_run(run_id, req.tenant)
+        while time.monotonic() < deadline and (
+            run is None or run.status is RunStatus.RUNNING
+        ):
             await asyncio.sleep(1.0)
-        return self.get_run(run_id, req.tenant) or Run(
-            run_id=RunId(run_id), tenant=TenantId(req.tenant), goal=req.goal,
-            agent_catalog=req.agents, provider=req.provider,
-            request_metadata=req.request_metadata, status=RunStatus.TIMED_OUT,
-            started_at=EpochMillis(0),
-        )
+            run = self.get_run(run_id, req.tenant)
+        if run is None:
+            # The wait expired without a terminal state and the run row
+            # is gone (deleted/purged mid-wait): never fabricate a Run —
+            # raise so callers fail clear instead of persisting a
+            # synthetic TIMED_OUT run that was never written.
+            raise AgentSwarmSyncTimeoutError(
+                run_id=run_id, deadline=self._deadline,
+            )
+        return run
 
     def get_run(self, run_id: str, tenant: str) -> Run | None:
         return self._run_repo.get(RunId(run_id), TenantId(tenant))
@@ -158,8 +215,16 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
 
     def purge_run(self, run_id: str, tenant: str) -> dict[str, int] | None:
         rid, tid = RunId(run_id), TenantId(tenant)
-        if self._run_repo.get(rid, tid) is None:
+        run = self._run_repo.get(rid, tid)
+        if run is None:
             return None
+        if run.status is RunStatus.RUNNING:
+            # Refuse while active: the erasure below is not transactional,
+            # so deleting a RUNNING run races an in-flight claimed
+            # slice's writes. Cancel or force-fail the run first.
+            raise AgentSwarmRunNotPurgeableError(
+                run_id=run_id, status=run.status,
+            )
         # Hard erasure (12.9): physical deletes across the run's rows.
         # Audit rows are append-only governance records and are kept.
         counts = {

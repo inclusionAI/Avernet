@@ -12,6 +12,7 @@ from agentclaw.community.core.agentswarm.repository.job.protocol import (
     JobRepositoryProtocol,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.utils.env_utils import get_current_env
 
 TaskQueueStatus = dm.TaskQueueStatus
 
@@ -34,7 +35,10 @@ class JobRepository(JobRepositoryProtocol):
         self._db = db
 
     def enqueue(self, run_id: dm.RunId, tenant: dm.TenantId,
-                deadline_seconds: int, run_at: datetime | None = None) -> om.AcAgentSwarmJobModel:
+                deadline_seconds: int, run_at: datetime | None = None) -> None:
+        # No return (D19): orm_session commits with expire_on_commit=True, so
+        # a returned instance would be detached+expired (DetachedInstanceError
+        # on attribute access); claim_batch is the read path.
         with self._db.orm_session() as session:
             row = om.AcAgentSwarmJobModel(
                 job_id=_new_id(),
@@ -45,7 +49,6 @@ class JobRepository(JobRepositoryProtocol):
                 tenant=tenant,
             )
             session.add(row)
-        return row
 
     def purge_run(self, run_id: dm.RunId, tenant: dm.TenantId) -> int:
         with self._db.orm_session() as session:
@@ -64,6 +67,8 @@ class JobRepository(JobRepositoryProtocol):
         with self._db.orm_session() as session:
             stmt = (
                 select(om.AcAgentSwarmJobModel.id).where(
+                    # env first: binds the env-leading indexes (idx_job_scope_*)
+                    om.AcAgentSwarmJobModel.env == get_current_env(),
                     om.AcAgentSwarmJobModel.status == TaskQueueStatus.PENDING.value,
                     om.AcAgentSwarmJobModel.run_at <= now,
                     om.AcAgentSwarmJobModel.is_deleted.is_(False),
@@ -85,6 +90,7 @@ class JobRepository(JobRepositoryProtocol):
                 result = session.execute(
                     update(om.AcAgentSwarmJobModel).where(
                         om.AcAgentSwarmJobModel.id == id_,
+                        om.AcAgentSwarmJobModel.env == get_current_env(),
                         om.AcAgentSwarmJobModel.status == TaskQueueStatus.PENDING.value,
                         om.AcAgentSwarmJobModel.is_deleted.is_(False),
                     ).values(
@@ -125,6 +131,7 @@ class JobRepository(JobRepositoryProtocol):
         with self._db.orm_session() as session:
             rows = session.execute(
                 select(om.AcAgentSwarmJobModel.id).where(
+                    om.AcAgentSwarmJobModel.env == get_current_env(),
                     om.AcAgentSwarmJobModel.status == TaskQueueStatus.RUNNING.value,
                     om.AcAgentSwarmJobModel.lease_expires_at < now,
                     om.AcAgentSwarmJobModel.is_deleted.is_(False),
@@ -135,6 +142,7 @@ class JobRepository(JobRepositoryProtocol):
                 result = session.execute(
                     update(om.AcAgentSwarmJobModel).where(
                         om.AcAgentSwarmJobModel.id == id_,
+                        om.AcAgentSwarmJobModel.env == get_current_env(),
                         om.AcAgentSwarmJobModel.status == TaskQueueStatus.RUNNING.value,
                         om.AcAgentSwarmJobModel.lease_expires_at < now,
                         om.AcAgentSwarmJobModel.is_deleted.is_(False),
@@ -238,6 +246,7 @@ class JobRepository(JobRepositoryProtocol):
         with self._db.orm_session() as session:
             return session.execute(
                 select(func.count()).select_from(om.AcAgentSwarmJobModel).where(
+                    om.AcAgentSwarmJobModel.env == get_current_env(),
                     om.AcAgentSwarmJobModel.status == TaskQueueStatus.PENDING.value,
                     om.AcAgentSwarmJobModel.is_deleted.is_(False),
                 )

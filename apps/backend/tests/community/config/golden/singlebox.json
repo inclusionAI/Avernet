@@ -31,6 +31,10 @@
     "agentclawproxy": {
       "base_url": "http://127.0.0.1:9999"
     },
+    "agentswarm": {
+      "artifact_store_root": "${AGENTSWARM_ARTIFACT_ROOT:-/tmp/agentswarm/artifacts}",
+      "enabled": true
+    },
     "aidesktop_root": "~/.aidesktop",
     "antcode": {
       "base_url": "https://code.teamclaw.com",

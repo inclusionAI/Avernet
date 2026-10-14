@@ -97,13 +97,24 @@ class SliceStore:
         payload = completion["result"]
         artifact_key = completion["artifact_key"]
 
-        self._agent_repo.update_status(
+        # D28: update_status is claim-epoch fenced — False means the claim
+        # was lost and the reclaimer owns this agent's outcome.
+        updated = self._agent_repo.update_status(
             run_id, agent_id, tenant, status.value,
             attempts=completion["attempts"],
             output=agent_output(payload, artifact_key),
             error=completion["error"],
             claim_epoch=claim_epoch,
         )
+        if not updated:
+            # Handler imports this module at load time: resolve the signal
+            # lazily to keep the module cycle broken.
+            from agentclaw.community.core.agentswarm.runtime.handler.impl import _SliceLost
+            logger.info(
+                "[agentswarm][swarm] claim fence rejected completion agent=%s "
+                "claim_epoch=%d", agent_id, claim_epoch,
+            )
+            raise _SliceLost()
         if status is AgentStatus.COMPLETED:
             self._record_injection(run_id, tenant, agent_id, payload)
             self._create_shard(run_id, tenant, agent_id, payload,

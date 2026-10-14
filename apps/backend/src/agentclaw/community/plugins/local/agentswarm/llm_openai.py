@@ -97,7 +97,10 @@ class OpenAICompatibleClient:
         # the send a final usage-carrying data event before [DONE], so a
         # consumer can record tokens without a second call. No retry here —
         # a stream that dies mid-flight surfaces to the caller as terminal;
-        # partial text already yielded stays the caller's to discard.
+        # partial text already yielded stays the caller's to discard. A
+        # stream that ends without the [DONE] marker and without any
+        # finish_reason is server truncation, and raises instead of
+        # synthesizing a fake successful STOP.
         return self._stream_chunks(request)
 
     async def _stream_chunks(self, request: CompletionRequest):
@@ -120,11 +123,13 @@ class OpenAICompatibleClient:
                 )
             usage: TokenUsage | None = None
             finish_reason: FinishReason | None = None
+            completed = False
             async for line in response.aiter_lines():
                 if not line.startswith("data:"):
                     continue
                 data = line[len("data:"):].strip()
                 if data == "[DONE]":
+                    completed = True
                     break
                 event = json.loads(data)
                 if event.get("usage"):
@@ -147,6 +152,12 @@ class OpenAICompatibleClient:
                         finish_reason = FinishReason.ERROR
                 if delta_text:
                     yield CompletionChunk(text=delta_text)
+            if not completed and finish_reason is None:
+                raise RuntimeError(
+                    "chat completion stream ended without completion: "
+                    "no [DONE] marker and no finish_reason received "
+                    "(stream truncated by server)"
+                )
             yield CompletionChunk(
                 finish_reason=finish_reason or FinishReason.STOP,
                 model=ModelId(model),
@@ -161,16 +172,21 @@ class OpenAICompatibleClient:
 
     @staticmethod
     def _parse_response(data: dict[str, Any], model: str) -> CompletionResponse:
-        choice = data["choices"][0]
+        choices = data.get("choices") or []
+        if not choices:
+            raise ValueError(
+                f"chat completion response has no choices (model={model!r})"
+            )
+        choice = choices[0]
         raw_finish = choice.get("finish_reason", "stop")
         finish = FinishReason.ERROR
         try:
             finish = FinishReason(raw_finish)
         except ValueError:
             pass
-        usage_raw = data.get("usage", {})
+        usage_raw = data.get("usage") or {}
         return CompletionResponse(
-            text=choice["message"]["content"],
+            text=(choice.get("message") or {}).get("content") or "",
             model=ModelId(model),
             token_usage=TokenUsage(
                 prompt_tokens=usage_raw.get("prompt_tokens", 0),
