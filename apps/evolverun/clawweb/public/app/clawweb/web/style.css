@@ -1,27 +1,8 @@
 @import "tailwindcss";
+@import "@avernet/clawweb-shared/theme.css";
 @source "../../../modules/workflow/web";
 @source "../../../modules/clawinsight/web";
 @source "../../../modules/clawevolve/web";
-
-/* Host bindings for shared semantic UI. Embedding hosts can supply the same
- * shadcn variables as the workbench; public defaults remain self-contained. */
-@theme inline {
-  --color-background: hsl(var(--background, 0 0% 100%));
-  --color-foreground: hsl(var(--foreground, 222.2 47.4% 11.2%));
-  --color-card: hsl(var(--card, 0 0% 100%));
-  --color-card-foreground: hsl(var(--card-foreground, 222.2 47.4% 11.2%));
-  --color-primary: hsl(var(--primary, var(--brand, 221.2 83.2% 53.3%)));
-  --color-primary-foreground: hsl(var(--primary-foreground, 0 0% 100%));
-  --color-muted: hsl(var(--muted, 210 40% 96.1%));
-  --color-muted-foreground: hsl(var(--muted-foreground, 215.4 16.3% 46.9%));
-  --color-border: hsl(var(--border, 214.3 31.8% 91.4%));
-  --color-input: hsl(var(--input, 214.3 31.8% 91.4%));
-  --color-ring: hsl(var(--ring, var(--primary, 221.2 83.2% 53.3%)));
-  --color-destructive: hsl(var(--destructive, 0 72.2% 50.6%));
-  --color-success: hsl(var(--success, 142.1 76.2% 36.3%));
-  --color-warning: hsl(var(--warning, 38 92% 50%));
-  --color-warning-foreground: hsl(var(--warning-foreground, 26 90% 30%));
-}
 
 body {
   margin: 0;

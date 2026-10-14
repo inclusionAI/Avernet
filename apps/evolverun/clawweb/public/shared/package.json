@@ -23,14 +23,15 @@
       "types": "./dist/server/services/bot-runtime/legacy.d.ts",
       "import": "./dist/server/services/bot-runtime/legacy.js"
     },
-    "./server/services/bot-runtime/*": null
+    "./server/services/bot-runtime/*": null,
+    "./theme.css": "./dist/web/theme.css"
   },
   "files": [
     "dist/"
   ],
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
-    "build": "tsc -p tsconfig.json && mkdir -p dist/server/services/mist && cp -R server/services/mist/proto dist/server/services/mist/",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/server/services/mist && cp -R server/services/mist/proto dist/server/services/mist/ && cp web/theme.css dist/web/theme.css",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
