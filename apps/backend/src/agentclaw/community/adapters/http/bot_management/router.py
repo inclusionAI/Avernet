@@ -23,6 +23,7 @@ from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.core.access.admin_scopes import super_admin
 from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.bot_space_service import BotSpaceServiceProtocol
 from agentclaw.community.api.execution_identity_service import (
     ExecutionIdentityServiceProtocol,
 )
@@ -69,6 +70,8 @@ from agentclaw.community.core.bot_management.errors import (
     CreateBotForOthersError,
     DefaultBotPassportRepairError,
 )
+from agentclaw.community.core.bot_management.bot_quota import BotQuotaError
+from agentclaw.community.core.spaces.errors import SpaceError
 from agentclaw.community.core.bot_management.utils import (
     clear_baas_publish_failure_ext as _clear_baas_publish_failure_ext,
     is_baas_publish_failure_message as _utils_is_baas_publish_failure_message,
@@ -103,6 +106,11 @@ from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.passport import PassportError
 
 logger = get_logger()
+
+# Single-call cap for the batch Space-change admin route. A missing cap would
+# let one request fan out an unbounded quota-guarded write loop — fail fast at
+# the boundary instead of letting the batch classification degrade silently.
+_BATCH_SPACE_CHANGE_MAX_ITEMS = 100
 
 
 def _is_baas_publish_failure_message(message: object) -> bool:
@@ -928,6 +936,165 @@ async def update_bot_ext_for_others(
         return ApiResponse(
             success=False,
             message=f"更新Bot ext失败: {str(e)}",
+            error_code=500,
+            data=None,
+        )
+
+
+@router.post("/change-space-for-others", response_model=ApiResponse)
+async def change_space_for_others(
+    request: Request,
+    ctx: RequestContext = Depends(get_request_context),
+    space_service: BotSpaceServiceProtocol = Injected(BotSpaceServiceProtocol),
+) -> ApiResponse:
+    """
+    Batch change the owning Space of Bots (admin only).
+
+    POST /api/bots/change-space-for-others
+    Body: {
+        "space_id": 123,
+        "bot_list": [
+            {"owner_id": "240841", "bot_id": "20261014_xxxx"},
+            ...
+        ]
+    }
+
+    Only specific staff IDs can call this interface. Every Bot in
+    ``bot_list`` is moved into the ONE Space named by ``space_id``, each
+    through the same per-Bot policy as the user-facing route: the target
+    Bot must exist under ``owner_id``, and that owner must currently be a
+    member of the target Space. Items are evaluated independently — one
+    failure never blocks the rest, and the per-item outcome (including
+    unchanged-but-valid) is reported in ``data.results``.
+    """
+    try:
+        data = await request.json()
+        space_id = data.get("space_id")
+        bot_list = data.get("bot_list")
+
+        caller_user_id = ctx.user_id
+        caller_nick_name = ctx.nick_name or caller_user_id
+
+        if caller_user_id not in super_admin():
+            logger.warning(
+                f"[bot_router.change_space_for_others] Permission denied for user: {caller_user_id}"
+            )
+            return ApiResponse(
+                success=False,
+                message="权限不足：您没有权限调用此接口",
+                error_code=403,
+                data=None,
+            )
+
+        if space_id is None or not isinstance(space_id, int):
+            return ApiResponse(
+                success=False,
+                message="缺少必填参数: space_id (整数)",
+                error_code=400,
+                data=None,
+            )
+        if not isinstance(bot_list, list) or not bot_list:
+            return ApiResponse(
+                success=False,
+                message="缺少必填参数: bot_list (非空数组)",
+                error_code=400,
+                data=None,
+            )
+        if len(bot_list) > _BATCH_SPACE_CHANGE_MAX_ITEMS:
+            return ApiResponse(
+                success=False,
+                message=f"bot_list 超出单次上限: {len(bot_list)}/{_BATCH_SPACE_CHANGE_MAX_ITEMS}",
+                error_code=400,
+                data=None,
+            )
+
+        results = []
+        succeeded = 0
+        for item in bot_list:
+            owner_id = (item.get("owner_id") or "").strip() if isinstance(item, dict) else ""
+            bot_id = (item.get("bot_id") or "").strip() if isinstance(item, dict) else ""
+
+            if not owner_id or not bot_id:
+                results.append(
+                    {
+                        "owner_id": owner_id,
+                        "bot_id": bot_id,
+                        "success": False,
+                        "message": "owner_id 与 bot_id 必填",
+                    }
+                )
+                continue
+
+            try:
+                assignment = space_service.change_space(
+                    bot_id=bot_id, owner_id=owner_id, space_id=space_id
+                )
+                succeeded += 1
+                results.append(
+                    {
+                        "owner_id": owner_id,
+                        "bot_id": bot_id,
+                        "success": True,
+                        "changed": assignment.changed,
+                        "space_id": assignment.space.id,
+                        "message": "" if assignment.changed else "已在目标空间，未变更",
+                    }
+                )
+            except BotNotFoundError:
+                results.append(
+                    {
+                        "owner_id": owner_id,
+                        "bot_id": bot_id,
+                        "success": False,
+                        "message": f"Bot不存在: {bot_id}",
+                    }
+                )
+            except (BotOperationNotAllowedError, SpaceError, BotQuotaError) as e:
+                results.append(
+                    {
+                        "owner_id": owner_id,
+                        "bot_id": bot_id,
+                        "success": False,
+                        "message": str(e),
+                    }
+                )
+            except Exception as e:
+                logger.error(
+                    "[bot_router.change_space_for_others] Unhandled item failure "
+                    f"error_type={type(e).__name__}"
+                )
+                results.append(
+                    {
+                        "owner_id": owner_id,
+                        "bot_id": bot_id,
+                        "success": False,
+                        "message": f"变更失败: {type(e).__name__}",
+                    }
+                )
+
+        failed = len(results) - succeeded
+        logger.info(
+            f"[bot_router.change_space_for_others] space_id={space_id} "
+            f"caller={caller_user_id}({caller_nick_name}) "
+            f"total={len(results)} succeeded={succeeded} failed={failed}"
+        )
+        return ApiResponse(
+            success=True,
+            message=f"批量变更完成: 成功 {succeeded} 个, 失败 {failed} 个",
+            data={
+                "space_id": space_id,
+                "total": len(results),
+                "succeeded": succeeded,
+                "failed": failed,
+                "results": results,
+            },
+        )
+
+    except Exception as e:
+        logger.error(f"[bot_router.change_space_for_others] Unexpected error: {e}")
+        return ApiResponse(
+            success=False,
+            message=f"批量变更Bot空间失败: {str(e)}",
             error_code=500,
             data=None,
         )
