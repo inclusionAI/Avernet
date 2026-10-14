@@ -2,9 +2,11 @@ import { Badge } from '@/components/ui/Badge';
 import type { BotDomain } from '@/services/botWorkshop';
 import { Cloud, Laptop } from 'lucide-react';
 import React from 'react';
+import { BotContainerInfo } from './BotContainerInfo';
 
 /**
  * 「标签」列 cell —— engine / deployment chip 恒显,serviceMode chip 仅服务 Bot 显示。
+ * 运行态服务 Bot 在引擎标签之后追加可点击的容器实例概览。
  *
  * 非服务 Bot 不补 `—` 占位:前两个 chip 无条件渲染,本列不存在「零标签」状态,
  * 补占位符只会与版本列的 `—` 在同一行重复出现。
@@ -15,9 +17,10 @@ import React from 'react';
  */
 export interface BotTagsCellProps {
   bot: BotDomain;
+  onOpenContainers?: (bot: BotDomain) => void;
 }
 
-const BotTagsCell: React.FC<BotTagsCellProps> = ({ bot }) => {
+const BotTagsCell: React.FC<BotTagsCellProps> = ({ bot, onOpenContainers }) => {
   const isAgentCodingBot = bot.runtime.isAgentCodingBot;
   const engineLabel = isAgentCodingBot
     ? bot.runtime.templateName ?? bot.runtime.templateType ?? 'AgentCoding'
@@ -26,6 +29,7 @@ const BotTagsCell: React.FC<BotTagsCellProps> = ({ bot }) => {
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       <Badge tone="outline">{engineLabel}</Badge>
+      {onOpenContainers ? <BotContainerInfo bot={bot} onOpen={onOpenContainers} /> : null}
       <Badge tone="outline">
         {bot.deployment === 'local' ? (
           <Laptop aria-hidden className="mr-1 size-3" />

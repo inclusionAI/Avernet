@@ -29,6 +29,7 @@ export interface BotTableProps {
   onOpenLogs?: (bot: BotDomain) => void;
   onOpenTaskInstances?: (bot: BotDomain) => void;
   canOpenTaskInstances?: (bot: BotDomain) => boolean;
+  onOpenContainers?: (bot: BotDomain) => void;
   onHealthCheck?: (bot: BotDomain) => void;
   onChangeSpace?: (bot: BotDomain) => void;
   onAuthorize?: (bot: BotDomain) => void;
@@ -59,6 +60,7 @@ const BotTable: React.FC<BotTableProps> = ({
   onOpenLogs,
   onOpenTaskInstances,
   canOpenTaskInstances,
+  onOpenContainers,
   onHealthCheck,
   onChangeSpace,
   onAuthorize,
@@ -118,8 +120,8 @@ const BotTable: React.FC<BotTableProps> = ({
       {
         id: 'tags',
         header: 'bot 标签',
-        width: 'w-[220px]',
-        cell: (bot) => <BotTagsCell bot={bot} />,
+        width: 'w-[260px]',
+        cell: (bot) => <BotTagsCell bot={bot} onOpenContainers={onOpenContainers} />,
       },
       ...(showOwner
         ? [
@@ -196,6 +198,7 @@ const BotTable: React.FC<BotTableProps> = ({
       onOpenLogs,
       onOpenTaskInstances,
       canOpenTaskInstances,
+      onOpenContainers,
       onHealthCheck,
       onChangeSpace,
       onAuthorize,

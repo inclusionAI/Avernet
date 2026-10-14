@@ -134,11 +134,11 @@ describe('BotTable 表格结构', () => {
     expect(screen.queryByText('桌面环境初始化')).not.toBeInTheDocument();
   });
 
-  test('机器人信息列渲染 20px 圆形首字符头像、名称与 entityKey', () => {
+  test('机器人信息列渲染 20px DiceBear 头像、名称与 entityKey', () => {
     renderTable(bot);
 
-    const avatar = screen.getByText('O');
-    expect(avatar).toBeInTheDocument();
+    const avatar = dataRow().querySelector('img');
+    expect(avatar).toHaveAttribute('src', expect.stringMatching(/^data:image\/svg\+xml/));
     expect(avatar).toHaveClass('h-5', 'w-5', 'rounded-full');
     expect(screen.getByText('Openclaw Bot')).toBeInTheDocument();
     expect(screen.getByText(bot.entityKey)).toBeInTheDocument();
