@@ -233,35 +233,40 @@ def _fresh_llm_script(wire):
 class TestOverTheWire:
 
     def test_health_reports_ok_with_version(self, wire):
-        status, body, _ = _get("/agentswarm/v1/health")
+        status, body, _ = _get("/openapi/v1/agentswarm/health")
         assert status == 200
         assert body["status"] == "ok"
         assert body["version"] == "v1"
 
     def test_ready(self, wire):
-        status, body, _ = _get("/agentswarm/v1/ready")
+        status, body, _ = _get("/openapi/v1/agentswarm/ready")
         assert status == 200
         assert body == {"ready": True}
 
     def test_anonymous_request_is_401(self, wire):
-        status, _, _ = _get("/agentswarm/v1/runs")
+        status, _, _ = _get("/openapi/v1/agentswarm/runs")
         assert status == 401
 
     def test_unknown_run_is_404(self, wire):
-        status, body, _ = _get("/agentswarm/v1/runs/does-not-exist",
+        status, body, _ = _get("/openapi/v1/agentswarm/runs/does-not-exist",
                               headers=AUTH)
         assert status == 404
-        assert body["detail"] == "run not found"
+        # Under /openapi/v1 the app-level handler wraps routing and
+        # handler-raised HTTPExceptions in the standard ErrorEnvelope
+        # ({code, message, data, request_id}); the raised detail survives
+        # only in the log. The public contract is the reason phrase.
+        assert body["code"] == 404000
+        assert body["message"] == "Not Found"
 
     def test_tenant_header_does_not_override_principal(self, wire):
         # P0-3 hardening: the tenant comes from the principal (tenant-wire);
         # a caller-supplied X-Tenant-Id claiming a foreign tenant is inert.
-        status, submit = _post("/agentswarm/v1/runs",
+        status, submit = _post("/openapi/v1/agentswarm/runs",
                                _submit_body(goal="tenant header inert"))
         assert status == 200
         run_id = submit["run_id"]
         status, body, _ = _get(
-            f"/agentswarm/v1/runs/{run_id}",
+            f"/openapi/v1/agentswarm/runs/{run_id}",
             headers={**AUTH, "X-Tenant-Id": "tenant-b"},
         )
         assert status == 200
@@ -271,28 +276,28 @@ class TestOverTheWire:
         # test's orchestrator script across the per-test reset
         deadline = time.time() + 30
         while time.time() < deadline:
-            status, body, _ = _get(f"/agentswarm/v1/runs/{run_id}",
+            status, body, _ = _get(f"/openapi/v1/agentswarm/runs/{run_id}",
                                    headers=AUTH)
             if status != 200 or body["status"] != "RUNNING":
                 break
             time.sleep(0.1)
 
     def test_submit_without_agents_is_422(self, wire):
-        status, body = _post("/agentswarm/v1/runs", {"goal": "no agents"})
+        status, body = _post("/openapi/v1/agentswarm/runs", {"goal": "no agents"})
         assert status == 422
 
     def test_async_job_full_cycle_over_wire(self, wire):
         from agentclaw.community.core.agentswarm.repository.job import JobRepository
         svc = wire.get(AgentSwarmService)
         jobs = wire.get(JobRepository)
-        status, submit = _post("/agentswarm/v1/runs",
+        status, submit = _post("/openapi/v1/agentswarm/runs",
                                _submit_body(goal="async cycle"))
         assert status == 200
         run_id = submit["run_id"]
 
         deadline = time.time() + 30
         while time.time() < deadline:
-            status, body, _ = _get(f"/agentswarm/v1/runs/{run_id}",
+            status, body, _ = _get(f"/openapi/v1/agentswarm/runs/{run_id}",
                                    headers=AUTH)
             if status != 200:
                 break
@@ -325,7 +330,7 @@ class TestOverTheWire:
 
     def test_sync_run_over_wire(self, wire):
         status, body = _post(
-            "/agentswarm/v1/runs?wait=true",
+            "/openapi/v1/agentswarm/runs?wait=true",
             _submit_body(goal="sync cycle", idem="wire-sync"),
         )
         assert status == 200
@@ -340,7 +345,7 @@ class TestOverTheWire:
         # Two orchestrated lifecycles in one test need double script capacity.
         wire.get(LLMProvider)._orchestrator.set_script(list(_ORCHESTRATOR_SCRIPT) * 2)
         status, first = _post(
-            "/agentswarm/v1/runs?wait=true",
+            "/openapi/v1/agentswarm/runs?wait=true",
             _submit_body(goal="retry cycle", idem="wire-sync-retry"),
         )
         assert status == 200
@@ -349,7 +354,7 @@ class TestOverTheWire:
         assert first["final_answer"] == "done over the wire"
 
         status, second = _post(
-            "/agentswarm/v1/runs?wait=true",
+            "/openapi/v1/agentswarm/runs?wait=true",
             _submit_body(goal="retry cycle", idem="wire-sync-retry"),
         )
         assert status == 200
@@ -359,9 +364,9 @@ class TestOverTheWire:
 
     def test_idempotency_join_over_wire(self, wire):
         body = _submit_body(goal="dedup", idem="wire-dedup")
-        status, first = _post("/agentswarm/v1/runs", body)
+        status, first = _post("/openapi/v1/agentswarm/runs", body)
         assert status == 200
-        status, second = _post("/agentswarm/v1/runs", body)
+        status, second = _post("/openapi/v1/agentswarm/runs", body)
         assert status == 200
         assert first["run_id"] == second["run_id"]
         # Join the run to its terminal state before handing control to the
@@ -370,7 +375,7 @@ class TestOverTheWire:
         run_id = first["run_id"]
         deadline = time.time() + 30
         while time.time() < deadline:
-            status, body, _ = _get(f"/agentswarm/v1/runs/{run_id}",
+            status, body, _ = _get(f"/openapi/v1/agentswarm/runs/{run_id}",
                                    headers=AUTH)
             if status != 200:
                 break
@@ -380,13 +385,13 @@ class TestOverTheWire:
             time.sleep(0.1)
 
     def test_sse_stream_emits_status_and_terminal_events(self, wire):
-        status, submit = _post("/agentswarm/v1/runs",
+        status, submit = _post("/openapi/v1/agentswarm/runs",
                                _submit_body(goal="streamed"))
         assert status == 200
         run_id = submit["run_id"]
 
         req = urllib.request.Request(
-            f"{BASE}/agentswarm/v1/runs/{run_id}/events",
+            f"{BASE}/openapi/v1/agentswarm/runs/{run_id}/events",
             headers={"Accept": "text/event-stream", **AUTH},
         )
         events: list[tuple[str, dict]] = []
@@ -413,7 +418,7 @@ class TestOverTheWire:
         assert terminal["data"]["status"] == "COMPLETED"
 
     def test_report_renders_html_over_wire(self, wire):
-        status, submit = _post("/agentswarm/v1/runs",
+        status, submit = _post("/openapi/v1/agentswarm/runs",
                                _submit_body(goal="reported"))
         assert status == 200
         run_id = submit["run_id"]
@@ -421,7 +426,7 @@ class TestOverTheWire:
         deadline = time.time() + 30
         status = 200
         while time.time() < deadline:
-            status, body, _ = _get(f"/agentswarm/v1/runs/{run_id}",
+            status, body, _ = _get(f"/openapi/v1/agentswarm/runs/{run_id}",
                                    headers=AUTH)
             if status != 200:
                 break
@@ -430,7 +435,7 @@ class TestOverTheWire:
             time.sleep(0.1)
 
         req = urllib.request.Request(
-            f"{BASE}/agentswarm/v1/runs/{run_id}/report",
+            f"{BASE}/openapi/v1/agentswarm/runs/{run_id}/report",
             headers=AUTH,
         )
         with urllib.request.urlopen(req, timeout=10) as resp:

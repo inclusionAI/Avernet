@@ -238,7 +238,7 @@ def _read_sse(resp) -> list[tuple[str, dict]]:
 class TestTenantResolution:
 
     def test_principal_tenant_used_without_header_or_body_tenant(self, client, stub):
-        resp = client.post("/agentswarm/v1/runs", json=_spec_body())
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
         assert resp.status_code == 200
         (req,) = stub.submitted
         assert req.tenant == TENANT
@@ -249,7 +249,7 @@ class TestTenantResolution:
         # no tenant fails closed; the caller cannot claim one.
         auth.tenant_id = None
         resp = client.post(
-            "/agentswarm/v1/runs", json=_spec_body(), headers={"X-Tenant-Id": TENANT}
+            "/openapi/v1/agentswarm/runs", json=_spec_body(), headers={"X-Tenant-Id": TENANT}
         )
         assert resp.status_code == 400
         assert resp.json()["detail"] == "tenant unresolvable"
@@ -257,19 +257,19 @@ class TestTenantResolution:
 
     def test_tenantless_principal_is_400_on_every_route(self, client, auth):
         auth.tenant_id = None
-        resp = client.post("/agentswarm/v1/runs", json=_spec_body())
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
         assert resp.status_code == 400
         assert resp.json()["detail"] == "tenant unresolvable"
         # same for the per-run routes
-        assert client.get("/agentswarm/v1/runs/run-1").status_code == 400
-        assert client.get("/agentswarm/v1/runs").status_code == 400
-        assert client.post("/agentswarm/v1/runs/run-1/cancel").status_code == 400
-        assert client.get("/agentswarm/v1/runs/run-1/events").status_code == 400
-        assert client.get("/agentswarm/v1/runs/run-1/report").status_code == 400
+        assert client.get("/openapi/v1/agentswarm/runs/run-1").status_code == 400
+        assert client.get("/openapi/v1/agentswarm/runs").status_code == 400
+        assert client.post("/openapi/v1/agentswarm/runs/run-1/cancel").status_code == 400
+        assert client.get("/openapi/v1/agentswarm/runs/run-1/events").status_code == 400
+        assert client.get("/openapi/v1/agentswarm/runs/run-1/report").status_code == 400
 
     def test_header_cannot_override_principal_tenant(self, client, stub, auth):
         resp = client.post(
-            "/agentswarm/v1/runs",
+            "/openapi/v1/agentswarm/runs",
             json=_spec_body(),
             headers={"X-Tenant-Id": "tenant-b"},
         )
@@ -280,14 +280,14 @@ class TestTenantResolution:
         # Wave-1 schemas are extra="forbid": a body-supplied tenant is a
         # validation error, not a silently-ignored extra.
         resp = client.post(
-            "/agentswarm/v1/runs", json={**_spec_body(), "tenant": "tenant-b"}
+            "/openapi/v1/agentswarm/runs", json={**_spec_body(), "tenant": "tenant-b"}
         )
         assert resp.status_code == 422
         assert stub.submitted == []
 
     def test_reads_use_principal_tenant_without_header(self, client, stub):
-        assert client.get("/agentswarm/v1/runs/run-1").status_code == 200
-        assert client.get("/agentswarm/v1/runs").status_code == 200
+        assert client.get("/openapi/v1/agentswarm/runs/run-1").status_code == 200
+        assert client.get("/openapi/v1/agentswarm/runs").status_code == 200
         assert stub.list_calls[0]["tenant"] == TENANT
 
 
@@ -298,16 +298,16 @@ class TestCrossTenantIsolation:
         # tenant — header ignored, data layer scopes to tenant-b → 404
         auth.tenant_id = "tenant-b"
         spoofs_cross = client.get(
-            "/agentswarm/v1/runs/run-1", headers={"X-Tenant-Id": TENANT}
+            "/openapi/v1/agentswarm/runs/run-1", headers={"X-Tenant-Id": TENANT}
         )
 
         # same run, genuinely other tenant, no spoofing
         auth.tenant_id = "tenant-b"
-        cross = client.get("/agentswarm/v1/runs/run-1", headers={})
+        cross = client.get("/openapi/v1/agentswarm/runs/run-1", headers={})
 
         # a run that exists for the caller's tenant, but wrong id
         auth.tenant_id = TENANT
-        unknown = client.get("/agentswarm/v1/runs/nope")
+        unknown = client.get("/openapi/v1/agentswarm/runs/nope")
 
         assert spoofs_cross.status_code == 404
         assert cross.status_code == 404
@@ -322,7 +322,7 @@ class TestCrossTenantIsolation:
                 if tenant == TENANT
                 else None
             )
-            return client.post("/agentswarm/v1/runs", json=_spec_body()).status_code
+            return client.post("/openapi/v1/agentswarm/runs", json=_spec_body()).status_code
 
         assert submit_for(TENANT) == 429
         assert submit_for("tenant-b") == 200
@@ -332,7 +332,7 @@ class TestCrossTenantIsolation:
 class TestSyncRunRoundTrip:
 
     def test_submit_sync_converts_dto_to_typed_request(self, client, stub):
-        resp = client.post("/agentswarm/v1/runs", json=_spec_body())
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
         assert resp.status_code == 200
         (req,) = stub.submitted
         assert req.tenant == TENANT
@@ -353,7 +353,7 @@ class TestSyncRunRoundTrip:
 
     def test_wait_true_uses_sync_path_and_returns_summary(self, client, stub):
         resp = client.post(
-            "/agentswarm/v1/runs", params={"wait": "true"}, json=_spec_body()
+            "/openapi/v1/agentswarm/runs", params={"wait": "true"}, json=_spec_body()
         )
         assert resp.status_code == 200
         assert stub.calls == ["submit_sync"]
@@ -364,7 +364,7 @@ class TestSyncRunRoundTrip:
 
     def test_wait_false_defaults_to_async(self, client, stub):
         resp = client.post(
-            "/agentswarm/v1/runs", params={"wait": "false"}, json=_spec_body()
+            "/openapi/v1/agentswarm/runs", params={"wait": "false"}, json=_spec_body()
         )
         assert resp.status_code == 200
         assert stub.calls == ["submit_async"]
@@ -375,7 +375,7 @@ class TestListRuns:
 
     def test_pagination_and_status_filter_passthrough(self, client, stub):
         resp = client.get(
-            "/agentswarm/v1/runs",
+            "/openapi/v1/agentswarm/runs",
             params={"page": 2, "page_size": 50, "status": "COMPLETED"},
         )
         assert resp.status_code == 200
@@ -395,7 +395,7 @@ class TestListRuns:
 
     def test_invalid_status_is_422(self, client, stub):
         resp = client.get(
-            "/agentswarm/v1/runs",
+            "/openapi/v1/agentswarm/runs",
             headers={"X-Tenant-Id": TENANT},
             params={"status": "WARPED"},
         )
@@ -403,27 +403,27 @@ class TestListRuns:
         assert stub.list_calls == []
 
     def test_page_zero_and_oversized_page_size_are_422(self, client, stub):
-        assert client.get("/agentswarm/v1/runs", params={"page": 0}).status_code == 422
+        assert client.get("/openapi/v1/agentswarm/runs", params={"page": 0}).status_code == 422
         assert client.get(
-            "/agentswarm/v1/runs", params={"page_size": 200}
+            "/openapi/v1/agentswarm/runs", params={"page_size": 200}
         ).status_code == 422
 
 
 class TestCancel:
 
     def test_known_run_returns_status(self, client, stub):
-        resp = client.post("/agentswarm/v1/runs/run-1/cancel")
+        resp = client.post("/openapi/v1/agentswarm/runs/run-1/cancel")
         assert resp.status_code == 200
         assert resp.json() == {"run_id": "run-1", "status": "COMPLETED"}
 
     def test_unknown_run_is_404(self, client, stub):
-        resp = client.post("/agentswarm/v1/runs/nope/cancel")
+        resp = client.post("/openapi/v1/agentswarm/runs/nope/cancel")
         assert resp.status_code == 404
 
     def test_cross_tenant_cancel_is_404(self, client, stub, auth):
         auth.tenant_id = "tenant-b"
         resp = client.post(
-            "/agentswarm/v1/runs/run-1/cancel", headers={"X-Tenant-Id": TENANT}
+            "/openapi/v1/agentswarm/runs/run-1/cancel", headers={"X-Tenant-Id": TENANT}
         )
         assert resp.status_code == 404
         assert stub.cancelled == [("run-1", "tenant-b")]
@@ -432,35 +432,35 @@ class TestCancel:
 class TestSmokeRoutes:
 
     def test_health_reports_version(self, client):
-        assert client.get("/agentswarm/v1/health").json() == {
+        assert client.get("/openapi/v1/agentswarm/health").json() == {
             "status": "ok", "version": "v1",
         }
-        assert client.get("/agentswarm/v1/ready").json() == {"ready": True}
+        assert client.get("/openapi/v1/agentswarm/ready").json() == {"ready": True}
 
     def test_report_renders_html(self, client):
-        resp = client.get("/agentswarm/v1/runs/run-1/report")
+        resp = client.get("/openapi/v1/agentswarm/runs/run-1/report")
         assert resp.status_code == 200
         assert "run-1" in resp.text
         assert "COMPLETED" in resp.text
 
     def test_unknown_run_report_is_404(self, client):
-        assert client.get("/agentswarm/v1/runs/nope/report").status_code == 404
+        assert client.get("/openapi/v1/agentswarm/runs/nope/report").status_code == 404
 
     def test_stream_emits_event_stream(self, client):
-        with client.stream("GET", "/agentswarm/v1/runs/run-1/events") as resp:
+        with client.stream("GET", "/openapi/v1/agentswarm/runs/run-1/events") as resp:
             assert resp.headers["content-type"].startswith("text/event-stream")
             first = next(resp.iter_lines())
         assert first.startswith("event:")
 
     def test_stream_unknown_run_emits_error_event(self, client):
-        with client.stream("GET", "/agentswarm/v1/runs/nope/events") as resp:
+        with client.stream("GET", "/openapi/v1/agentswarm/runs/nope/events") as resp:
             events = _read_sse(resp)
         assert events == [("error", {"error": "not found"})]
 
     def test_stream_emits_durable_agent_round_guard_events(self, client, stub):
         stub.events = _mk_events(status=dm.RunStatus.COMPLETED)
         stub.run = _mk_run(status=dm.RunStatus.COMPLETED)
-        with client.stream("GET", "/agentswarm/v1/runs/run-1/events") as resp:
+        with client.stream("GET", "/openapi/v1/agentswarm/runs/run-1/events") as resp:
             events = _read_sse(resp)
         assert events[0][0] == "status"
         assert events[0][1]["data"] == {"status": "COMPLETED"}
@@ -482,7 +482,7 @@ class TestSmokeRoutes:
         assert stub.run_events_calls[0]["after_event"] == 0
 
     def test_stream_terminal_immediately_when_run_already_done(self, client, stub):
-        with client.stream("GET", "/agentswarm/v1/runs/run-1/events") as resp:
+        with client.stream("GET", "/openapi/v1/agentswarm/runs/run-1/events") as resp:
             events = _read_sse(resp)
         assert [name for name, _ in events] == ["status", "terminal"]
         assert events[-1][1]["data"] == {"status": "COMPLETED"}
@@ -497,10 +497,10 @@ class TestReportEscaping:
         # HTML report must interpolate it escaped, never raw.
         goal = '<script>alert("pwn")</script>'
         resp = client.post(
-            "/agentswarm/v1/runs", json={**_spec_body(), "goal": goal}
+            "/openapi/v1/agentswarm/runs", json={**_spec_body(), "goal": goal}
         )
         assert resp.status_code == 200
-        report = client.get("/agentswarm/v1/runs/run-1/report")
+        report = client.get("/openapi/v1/agentswarm/runs/run-1/report")
         assert report.status_code == 200
         assert report.headers["cache-control"] == "no-store"
         assert "<script>" not in report.text
@@ -508,8 +508,8 @@ class TestReportEscaping:
 
     def test_attribute_breakout_goal_is_escaped_in_report(self, client, stub):
         goal = '" onmouseover="alert(1)'
-        client.post("/agentswarm/v1/runs", json={**_spec_body(), "goal": goal})
-        report = client.get("/agentswarm/v1/runs/run-1/report")
+        client.post("/openapi/v1/agentswarm/runs", json={**_spec_body(), "goal": goal})
+        report = client.get("/openapi/v1/agentswarm/runs/run-1/report")
         assert report.status_code == 200
         assert '" onmouseover=' not in report.text
         assert html.escape(goal) in report.text
@@ -519,7 +519,7 @@ class TestErrorMapping:
 
     def test_tenant_limit_exceeded_maps_to_429(self, client, stub):
         stub.submit_error = TenantRunLimitExceeded(tenant=TENANT, limit=8)
-        resp = client.post("/agentswarm/v1/runs", json=_spec_body())
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
         assert resp.status_code == 429
         assert resp.json()["error"] == "tenant_run_limit_exceeded"
         assert resp.json()["tenant"] == TENANT
@@ -527,19 +527,19 @@ class TestErrorMapping:
 
     def test_global_limit_exceeded_maps_to_429(self, client, stub):
         stub.submit_error = GlobalRunLimitExceeded(limit=64)
-        resp = client.post("/agentswarm/v1/runs", json=_spec_body())
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
         assert resp.status_code == 429
         assert resp.json() == {"error": "global_run_limit_exceeded", "limit": 64}
 
     def test_queue_depth_exceeded_maps_to_429(self, client, stub):
         stub.submit_error = QueueDepthExceeded(limit=5)
-        resp = client.post("/agentswarm/v1/runs", json=_spec_body())
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
         assert resp.status_code == 429
         assert resp.json() == {"error": "queue_depth_exceeded", "limit": 5}
 
     def test_global_limit_rejection_records_audit_row(self, client, stub, audit):
         stub.submit_error = GlobalRunLimitExceeded(limit=64)
-        resp = client.post("/agentswarm/v1/runs", json=_spec_body())
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
         assert resp.status_code == 429
         (row,) = audit.rows
         assert row == {
@@ -550,7 +550,7 @@ class TestErrorMapping:
 
     def test_queue_depth_rejection_records_audit_row(self, client, stub, audit):
         stub.submit_error = QueueDepthExceeded(limit=5)
-        resp = client.post("/agentswarm/v1/runs", json=_spec_body())
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
         assert resp.status_code == 429
         (row,) = audit.rows
         assert row == {
@@ -563,7 +563,7 @@ class TestErrorMapping:
         stub.submit_error = AgentSwarmConfigError(
             "agentswarm llm config missing: base_url/api_key required"
         )
-        resp = client.post("/agentswarm/v1/runs", json=_spec_body())
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
         assert resp.status_code == 400
         assert "llm config missing" in resp.json()["error"]
 
@@ -596,7 +596,7 @@ class TestAuthWiring:
         app.state.injector = inj
         client = TestClient(app, raise_server_exceptions=False)
 
-        resp = client.post("/agentswarm/v1/runs", json=_spec_body())
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
         assert resp.status_code == 401
         assert stub.submitted == []
 

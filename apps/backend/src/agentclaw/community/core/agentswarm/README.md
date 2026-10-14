@@ -256,32 +256,32 @@ multi-pod deployments).
 Service Protocol (`service/protocols.py`): `submit_async`, `submit_sync`,
 `get_run`, `list_runs`, `run_events`, `cancel`, `purge_run`,
 `content_classification` (the last two are service-plane only — data
-protection; no route, no CLI). Router prefix `/agentswarm/v1`; the tenant
+protection; no route, no CLI). Router prefix `/openapi/v1/agentswarm`; the tenant
 on every route comes from the authenticated principal (the `X-Tenant-Id`
 request header is no longer read), and a principal without a tenant fails
 closed with HTTP 400 `{"detail": "tenant unresolvable"}`.
 
 ```bash
 # async submit -> {"run_id": "..."}
-curl -sS -X POST http://127.0.0.1:8000/agentswarm/v1/runs -H 'Content-Type: application/json' -d '{
+curl -sS -X POST http://127.0.0.1:8000/openapi/v1/agentswarm/runs -H 'Content-Type: application/json' -d '{
   "goal": "map the incident to owning services",
   "agents": [{"name": "scout", "role": "research"}],
   "idempotency_key": "inc-42"}'
 
 # sync submit (blocks until terminal or deadline)
-curl -sS -X POST 'http://127.0.0.1:8000/agentswarm/v1/runs?wait=true' -H 'Content-Type: application/json' -d '{"goal": "summarize logs", "agents": [{"name": "s1", "role": "research"}]}'
+curl -sS -X POST 'http://127.0.0.1:8000/openapi/v1/agentswarm/runs?wait=true' -H 'Content-Type: application/json' -d '{"goal": "summarize logs", "agents": [{"name": "s1", "role": "research"}]}'
 
 # get / list / cancel (tenant comes from the authenticated principal)
-curl -sS http://127.0.0.1:8000/agentswarm/v1/runs/<run_id>
-curl -sS 'http://127.0.0.1:8000/agentswarm/v1/runs?page=1&page_size=20&status=COMPLETED'
-curl -sS -X POST http://127.0.0.1:8000/agentswarm/v1/runs/<run_id>/cancel
+curl -sS http://127.0.0.1:8000/openapi/v1/agentswarm/runs/<run_id>
+curl -sS 'http://127.0.0.1:8000/openapi/v1/agentswarm/runs?page=1&page_size=20&status=COMPLETED'
+curl -sS -X POST http://127.0.0.1:8000/openapi/v1/agentswarm/runs/<run_id>/cancel
 
 # SSE stream: status, agent/round/guard deltas, heartbeats, terminal
-curl -sS -N http://127.0.0.1:8000/agentswarm/v1/runs/<run_id>/events
+curl -sS -N http://127.0.0.1:8000/openapi/v1/agentswarm/runs/<run_id>/events
 
 # report (HTML) + health
-curl -sS http://127.0.0.1:8000/agentswarm/v1/runs/<run_id>/report
-curl -sS http://127.0.0.1:8000/agentswarm/v1/health
+curl -sS http://127.0.0.1:8000/openapi/v1/agentswarm/runs/<run_id>/report
+curl -sS http://127.0.0.1:8000/openapi/v1/agentswarm/health
 ```
 
 Error mapping: tenant limit exceeded → 429 `tenant_run_limit_exceeded`;

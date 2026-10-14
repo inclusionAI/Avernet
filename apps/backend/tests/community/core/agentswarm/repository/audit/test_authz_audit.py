@@ -337,7 +337,7 @@ class TestRouterAuditTrail:
     def test_submit_accepted_records_row(self, app_deps):
         client = self._client(app_deps)
         stub, _, audit = app_deps
-        resp = client.post("/agentswarm/v1/runs", json=_spec_body())
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
         assert resp.status_code == 200
         (row,) = audit.rows
         assert row == {
@@ -349,7 +349,7 @@ class TestRouterAuditTrail:
     def test_submit_sync_accepted_records_row(self, app_deps):
         client = self._client(app_deps)
         _, _, audit = app_deps
-        resp = client.post("/agentswarm/v1/runs", json=_spec_body(),
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body(),
                            params={"wait": "true"})
         assert resp.status_code == 200
         (row,) = audit.rows
@@ -360,7 +360,7 @@ class TestRouterAuditTrail:
         client = self._client(app_deps)
         stub, _, audit = app_deps
         stub.submit_error = TenantRunLimitExceeded(tenant=TENANT, limit=8)
-        resp = client.post("/agentswarm/v1/runs", json=_spec_body())
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
         assert resp.status_code == 429
         (row,) = audit.rows
         assert row["action"] == "submit_rejected"
@@ -371,7 +371,7 @@ class TestRouterAuditTrail:
         client = self._client(app_deps)
         stub, _, audit = app_deps
         stub.submit_error = AgentSwarmConfigError("llm config missing")
-        resp = client.post("/agentswarm/v1/runs", json=_spec_body())
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
         assert resp.status_code == 400
         (row,) = audit.rows
         assert row["action"] == "submit_rejected"
@@ -380,7 +380,7 @@ class TestRouterAuditTrail:
     def test_cancel_known_run_records_row(self, app_deps):
         client = self._client(app_deps)
         _, _, audit = app_deps
-        resp = client.post("/agentswarm/v1/runs/run-1/cancel")
+        resp = client.post("/openapi/v1/agentswarm/runs/run-1/cancel")
         assert resp.status_code == 200
         (row,) = audit.rows
         assert row["action"] == "cancel_requested"
@@ -390,7 +390,7 @@ class TestRouterAuditTrail:
     def test_cancel_unknown_run_records_not_found_reason(self, app_deps):
         client = self._client(app_deps)
         _, _, audit = app_deps
-        resp = client.post("/agentswarm/v1/runs/nope/cancel")
+        resp = client.post("/openapi/v1/agentswarm/runs/nope/cancel")
         assert resp.status_code == 404
         (row,) = audit.rows
         assert row["action"] == "cancel_requested"
@@ -400,7 +400,7 @@ class TestRouterAuditTrail:
         client = self._client(app_deps)
         stub, _, audit = app_deps
         stub.submit_error = TenantRunLimitExceeded(tenant=TENANT, limit=8)
-        client.post("/agentswarm/v1/runs", json=_spec_body())
+        client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
         assert all(
             row["reason"] is None or row["reason"] in REASONS
             for row in audit.rows
@@ -408,8 +408,8 @@ class TestRouterAuditTrail:
 
     def test_health_and_ready_do_not_record_rows(self, app_deps):
         client = self._client(app_deps)
-        client.get("/agentswarm/v1/health")
-        client.get("/agentswarm/v1/ready")
+        client.get("/openapi/v1/agentswarm/health")
+        client.get("/openapi/v1/agentswarm/ready")
         _, _, audit = app_deps
         assert audit.rows == []
 
@@ -430,7 +430,7 @@ class TestAuditNeverBreaksRequests:
     def test_raising_writer_does_not_change_submit_response(self):
         stub = StubService()
         client = self._client(stub, RaisingAuditWriter())
-        resp = client.post("/agentswarm/v1/runs", json=_spec_body())
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
         assert resp.status_code == 200
         assert resp.json() == {"run_id": "run-1"}
 
@@ -438,5 +438,5 @@ class TestAuditNeverBreaksRequests:
         stub = StubService()
         stub.submit_error = TenantRunLimitExceeded(tenant=TENANT, limit=8)
         client = self._client(stub, RaisingAuditWriter())
-        resp = client.post("/agentswarm/v1/runs", json=_spec_body())
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
         assert resp.status_code == 429

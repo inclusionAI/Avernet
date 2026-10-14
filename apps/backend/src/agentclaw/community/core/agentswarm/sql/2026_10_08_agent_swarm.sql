@@ -163,7 +163,7 @@ CREATE TABLE IF NOT EXISTS `ac_agent_swarm_job` (
 ) DEFAULT CHARSET = utf8mb4 COMMENT='agentswarm resumable-slice queue (D34)';
 
 -- agentswarm append-only audit table `ac_agent_swarm_audit` (design §17.5, D25).
--- One row per boundary outcome on /agentswarm/v1: submit_accepted,
+-- One row per boundary outcome on /openapi/v1/agentswarm: submit_accepted,
 -- submit_rejected (reason: tenant_limit/global_limit/queue_depth/config_missing),
 -- cancel_requested (reason: not_found when the tenant sees no such run).
 -- Append-only: no UPDATE/DELETE path exists (writer has no mutation API).

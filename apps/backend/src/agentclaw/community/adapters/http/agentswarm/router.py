@@ -21,9 +21,9 @@ outcomes. Route handlers run after the audit seam, so audit failures
 can never change a response — :func:`_audit` swallows, and the writer
 swallows again.
 
-Versioning (12.8): this surface is ``/agentswarm/v1`` — additive-only
+Versioning (12.8): this surface is ``/openapi/v1/agentswarm`` — additive-only
 compatibility within ``v1``; agent/field renames or removals require a new
-URL prefix (``/agentswarm/v2``) — see the version policy in the module
+URL prefix (``/openapi/v2/agentswarm``) — see the version policy in the module
 README. ``API_VERSION`` below is the machine-read keyword: it surfaces in
 the health payload so operators can pin a fleet against drift.
 """
@@ -71,7 +71,7 @@ AgentSwarmAuditWriterDep = Annotated[
 ]
 CurrentUserDep = Annotated[AuthenticatedUser, Depends(get_current_user)]
 
-router = APIRouter(prefix="/agentswarm/v1", tags=["agentswarm"])
+router = APIRouter(prefix="/openapi/v1/agentswarm", tags=["agentswarm"])
 
 
 def _resolve_tenant(
