@@ -588,7 +588,7 @@ ClawEvolve 不同：不同的基因（`memory`，而非 persona 和 skills）、
 {
   "id": "platform/consolidate-memory",
   "version": "1.0.0",
-  "runtime": {"kind": "in_process", "entrypoint": "avernet_evolution.strategies.consolidate_memory:ConsolidateMemoryStrategy"},
+  "runtime": {"kind": "in_process", "entrypoint": "evolution.strategies.consolidate_memory:ConsolidateMemoryStrategy"},
   "needs": {
     "experience.feedback@1": {},                 // ratings, corrections, outcomes, findings
     "experience.sessions@1": {}                  // episodes cited by feedback (RSI-15); models@1 is always granted
@@ -794,7 +794,7 @@ class ConsolidateMemoryStrategy(EvolutionStrategy):
 ### `POST /evolution/strategies`
 
 注册一个默认进化策略的版本。由策略的
-发布方调用（`avn strategy publish`；对于平台提供的策略，则由
+发布方调用（作者的 CI；对于平台提供的策略，则由
 平台的发布流水线调用）。智能体定义随
 请求一起上传，并由引擎的 `agents@1` 提供方校验。规范性
 定义见 [03-strategy.zh-CN.md](03-strategy.zh-CN.md)。
@@ -846,7 +846,7 @@ manual-patch 的记录见下文）：
 {
   "id": "platform/manual-patch",
   "version": "1.0.0",
-  "runtime": {"kind": "in_process", "entrypoint": "avernet_evolution.strategies.manual_patch:ManualPatchStrategy"},
+  "runtime": {"kind": "in_process", "entrypoint": "evolution.strategies.manual_patch:ManualPatchStrategy"},
   "needs": {},
   "params_schema": {
     "type": "object",
@@ -875,7 +875,7 @@ manual-patch 的记录见下文）：
 {
   "id": "platform/consolidate-memory",
   "version": "1.0.0",
-  "runtime": {"kind": "in_process", "entrypoint": "avernet_evolution.strategies.consolidate_memory:ConsolidateMemoryStrategy"},
+  "runtime": {"kind": "in_process", "entrypoint": "evolution.strategies.consolidate_memory:ConsolidateMemoryStrategy"},
   "needs": {"experience.feedback@1": {}, "experience.sessions@1": {}},
   "conformance": "passed"
 }
@@ -949,7 +949,7 @@ schema 使用 JSON Schema draft 2020-12。各项限制（minimum、maximum）为
 ### `PUT /bots/{bot_id}/evolution/bindings`
 
 设置 Bot 的绑定列表。由 Bot 所有者或租户管理员调用
-（UI、`avn evolve bindings set`）。定义于
+（通过 UI 或 API，带 `If-Match`）。定义于
 [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)；此处展示为默认进化策略推荐的
 绑定。
 
@@ -1096,7 +1096,7 @@ ClawEvolve worker 为其策略 id 领取一个作业。
 `Evolution-Fencing-Token: ft_000231`，请求体 `{}`。
 
 响应（`cancelled: true` 是取消到达 worker 的方式；
-SDK 将其转换为 `ctx.cancelled`）：
+策略 SDK 将其转换为 `ctx.cancelled`）：
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -1302,7 +1302,7 @@ ClawEvolve 自己的训练 bench（`bench-full-opt`）。仅限训练划分。
 
 ### `GET /evolution/v1/runs/{run}/operations/{id}`
 
-`ctx.operations.get(op_id)`；SDK 的 `operations.wait` 会重复这个简短的
+`ctx.operations.get(op_id)`；策略 SDK 的 `operations.wait` 会重复这个简短的
 查询。状态值：`queued | running | succeeded | failed | cancelled`。
 
 请求：`GET /evolution/v1/runs/run_7f3/operations/op_19b`
@@ -1363,7 +1363,7 @@ ClawEvolve 自己的训练 bench（`bench-full-opt`）。仅限训练划分。
 ```
 
 主要错误：运行预算耗尽时调用被拒绝，
-SDK 抛出 `BudgetExhausted`（状态码定义于
+策略 SDK 抛出 `BudgetExhausted`（状态码定义于
 [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。
 
 ### `POST /evolution/v1/runs/{run}/candidates`
@@ -1478,18 +1478,20 @@ class ManualPatchStrategy(EvolutionStrategy):
         return RunSummary(candidates=[candidate_id])
 ```
 
-端到端使用它的流水线（客户端 SDK，[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)）：
+通过 HTTP 端到端使用它的流水线
+（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)）：
 
-```python
-from avernet_evolution import Client
-
-c = Client.from_env()
-run_id = c.runs.start(bot_id="bot_123", binding="bind_03",            # binding runs platform/manual-patch@1.0.0
-                      params={"patch": patch}, idempotency_key="fix-refund-trigger-2026-10-09")
-run = c.runs.get(run_id)                       # repeat until terminal
-cand = run.candidates()[0]
-report = cand.report()                         # diff + verification + gate decision (08-promotion.md)
-```
+1. `POST /openapi/v1/bots/bot_123/evolution/runs`，带
+   `Idempotency-Key: fix-refund-trigger-2026-10-09` 和
+   `{"binding": "bind_03", "params": {"patch": {…}}}`（`bind_03` 运行
+   `platform/manual-patch@1.0.0`），返回运行 id。
+2. `GET /openapi/v1/bots/bot_123/evolution/runs/{run}`，重复调用直到
+   状态为终态。
+3. `GET /openapi/v1/bots/bot_123/evolution/runs/{run}/candidates` 列出
+   这一个候选。
+4. `GET /openapi/v1/bots/bot_123/evolution/candidates/{candidate}` 返回
+   它的报告：差异、验证和门禁决定
+   （[08-promotion.zh-CN.md](08-promotion.zh-CN.md)）。
 
 ### 12.2 `clawevolve/bot-evolution`（原生策略）
 
@@ -1580,7 +1582,7 @@ class ClawEvolveAdapter(EvolutionStrategy):
 ```
 
 `checkout`、`sync_from` 和 `export_sessions_for_legacy` 是适配器的
-辅助函数，不是 SDK 契约；在这一步中，旧脚本仍会在 worker 内调用 `openclaw agent
+辅助函数，不是策略 SDK 契约；在这一步中，旧脚本仍会在 worker 内调用 `openclaw agent
 --local`，这正是第 3 步用 `ctx.agents.start` 替换它们的原因。
 
 ### 12.4 `platform/consolidate-memory`
@@ -1657,7 +1659,7 @@ class ConsolidateMemoryStrategy(EvolutionStrategy):
 | 基因组（[01-genome.zh-CN.md](01-genome.zh-CN.md)） | 双向 | 父修订版和按摘要获取的内容（输入）；基因组补丁（输出）；迁移第 1 步中影子记录的修订版 |
 | 实验记录（[05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md)） | 运行 → 实验记录 | 每次提交，附带策略版本、智能体定义摘要、所用模型、成本 |
 | 元进化（[10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md)） | 以后 | ClawEvolve 的提示词、算子库和提交过滤器阈值是第一个要进化的机制；门禁校准/回放工具为机制验证提供初始基础 |
-| 进化 API（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)） | 调用方 → 默认策略 | 启动 manual-patch 运行；绑定默认进化策略；为 ClawEvolve 执行 `avn strategy publish` |
+| 进化 API（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)） | 调用方 → 默认策略 | 启动 manual-patch 运行；绑定默认进化策略；注册 ClawEvolve（`POST /evolution/strategies`） |
 | 引擎适配器（OpenClaw） | 为默认策略提供提供方 | `experience.sessions` 提供方（会话导出）、`agents@1` 提供方（在沙箱中运行 ClawEvolve 的智能体）、供 consolidate-memory 使用的记忆投影（RSI-05） |
 | ClawWeb / AgentEvolve UI | 过渡期 | 迁移期间（第 2 步）将平台运行与旧任务并列展示；在 DS-1 决定之前可能承载默认策略运行器 |
 | ClawInsight | → ClawEvolve 绑定 | 事件触发器；`plan-source/v2` 发现作为反馈输入（以后的版本） |

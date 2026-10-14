@@ -610,7 +610,7 @@ It is modelled on background consolidators in industry practice (see
 {
   "id": "platform/consolidate-memory",
   "version": "1.0.0",
-  "runtime": {"kind": "in_process", "entrypoint": "avernet_evolution.strategies.consolidate_memory:ConsolidateMemoryStrategy"},
+  "runtime": {"kind": "in_process", "entrypoint": "evolution.strategies.consolidate_memory:ConsolidateMemoryStrategy"},
   "needs": {
     "experience.feedback@1": {},                 // ratings, corrections, outcomes, findings
     "experience.sessions@1": {}                  // episodes cited by feedback (RSI-15); models@1 is always granted
@@ -821,7 +821,7 @@ endpoints: it shows how the default strategies use the endpoints defined in
 ### `POST /evolution/strategies`
 
 Registers a version of a default strategy. Called by the strategy's
-publisher (`avn strategy publish`; for platform-shipped strategies, the
+publisher (the author's CI; for platform-shipped strategies, the
 platform's release pipeline). Agent definitions are uploaded with the
 request and validated by the engine's `agents@1` provider. Normative
 definition in [03-strategy.md](03-strategy.md).
@@ -873,7 +873,7 @@ Request (manual-patch):
 {
   "id": "platform/manual-patch",
   "version": "1.0.0",
-  "runtime": {"kind": "in_process", "entrypoint": "avernet_evolution.strategies.manual_patch:ManualPatchStrategy"},
+  "runtime": {"kind": "in_process", "entrypoint": "evolution.strategies.manual_patch:ManualPatchStrategy"},
   "needs": {},
   "params_schema": {
     "type": "object",
@@ -902,7 +902,7 @@ Response:
 {
   "id": "platform/consolidate-memory",
   "version": "1.0.0",
-  "runtime": {"kind": "in_process", "entrypoint": "avernet_evolution.strategies.consolidate_memory:ConsolidateMemoryStrategy"},
+  "runtime": {"kind": "in_process", "entrypoint": "evolution.strategies.consolidate_memory:ConsolidateMemoryStrategy"},
   "needs": {"experience.feedback@1": {}, "experience.sessions@1": {}},
   "conformance": "passed"
 }
@@ -976,7 +976,7 @@ proposed.
 ### `PUT /bots/{bot_id}/evolution/bindings`
 
 Sets the bot's list of bindings. Called by the bot owner or tenant admin
-(UI, `avn evolve bindings set`). Defined in
+(through the UI or the API, with `If-Match`). Defined in
 [06-evolution-run.md](06-evolution-run.md); shown here with the recommended
 bindings for the defaults.
 
@@ -1123,7 +1123,7 @@ Request: `POST /evolution/v1/jobs/job_7f3_1/heartbeat` with header
 `Evolution-Fencing-Token: ft_000231`, body `{}`.
 
 Response (`cancelled: true` is how a cancellation reaches the worker; the
-SDK turns it into `ctx.cancelled`):
+Strategy SDK turns it into `ctx.cancelled`):
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -1329,7 +1329,7 @@ Response (`202`):
 
 ### `GET /evolution/v1/runs/{run}/operations/{id}`
 
-`ctx.operations.get(op_id)`; the SDK's `operations.wait` repeats this short
+`ctx.operations.get(op_id)`; the Strategy SDK's `operations.wait` repeats this short
 lookup. Status values: `queued | running | succeeded | failed | cancelled`.
 
 Request: `GET /evolution/v1/runs/run_7f3/operations/op_19b`
@@ -1390,7 +1390,7 @@ Response:
 ```
 
 Notable errors: when the run's budget is exhausted the call is refused and
-the SDK raises `BudgetExhausted` (the status code is defined in
+the Strategy SDK raises `BudgetExhausted` (the status code is defined in
 [06-evolution-run.md](06-evolution-run.md)).
 
 ### `POST /evolution/v1/runs/{run}/candidates`
@@ -1505,18 +1505,20 @@ class ManualPatchStrategy(EvolutionStrategy):
         return RunSummary(candidates=[candidate_id])
 ```
 
-A pipeline using it end to end (client SDK, [09-evolution-api.md](09-evolution-api.md)):
+A pipeline using it end to end, over HTTP
+([09-evolution-api.md](09-evolution-api.md)):
 
-```python
-from avernet_evolution import Client
-
-c = Client.from_env()
-run_id = c.runs.start(bot_id="bot_123", binding="bind_03",            # binding runs platform/manual-patch@1.0.0
-                      params={"patch": patch}, idempotency_key="fix-refund-trigger-2026-10-09")
-run = c.runs.get(run_id)                       # repeat until terminal
-cand = run.candidates()[0]
-report = cand.report()                         # diff + verification + gate decision (08-promotion.md)
-```
+1. `POST /openapi/v1/bots/bot_123/evolution/runs` with
+   `Idempotency-Key: fix-refund-trigger-2026-10-09` and
+   `{"binding": "bind_03", "params": {"patch": {…}}}` (`bind_03` runs
+   `platform/manual-patch@1.0.0`) returns the run id.
+2. `GET /openapi/v1/bots/bot_123/evolution/runs/{run}`, repeated until the
+   status is terminal.
+3. `GET /openapi/v1/bots/bot_123/evolution/runs/{run}/candidates` lists the
+   one candidate.
+4. `GET /openapi/v1/bots/bot_123/evolution/candidates/{candidate}` returns
+   its report: diff, verification, and gate decision
+   ([08-promotion.md](08-promotion.md)).
 
 ### 12.2 `clawevolve/bot-evolution` (native strategy)
 
@@ -1607,7 +1609,7 @@ class ClawEvolveAdapter(EvolutionStrategy):
 ```
 
 `checkout`, `sync_from`, and `export_sessions_for_legacy` are adapter
-helpers, not SDK contracts; the legacy scripts still invoke `openclaw agent
+helpers, not Strategy SDK contracts; the legacy scripts still invoke `openclaw agent
 --local` inside the worker during this step, which is why step 3 replaces
 them with `ctx.agents.start`.
 
@@ -1685,7 +1687,7 @@ class ConsolidateMemoryStrategy(EvolutionStrategy):
 | Genome ([01-genome.md](01-genome.md)) | both | Parent revision and content by digest (in); Genome Patches (out); shadow-recorded revisions in migration step 1 |
 | Experiment Ledger ([05-experiment-ledger.md](05-experiment-ledger.md)) | run → ledger | Each submission with strategy version, agent definition digests, models used, cost |
 | Meta-evolution ([10-meta-evolution.md](10-meta-evolution.md)) | later | ClawEvolve's prompts, operator library, and submission-filter thresholds are the first mechanism to evolve; gate calibration/replay tools seed mechanism verification |
-| Evolution API ([09-evolution-api.md](09-evolution-api.md)) | callers → defaults | Starting manual-patch runs; binding the defaults; `avn strategy publish` for ClawEvolve |
+| Evolution API ([09-evolution-api.md](09-evolution-api.md)) | callers → defaults | Starting manual-patch runs; binding the defaults; registering ClawEvolve (`POST /evolution/strategies`) |
 | Engine adapter (OpenClaw) | providers for defaults | `experience.sessions` provider (session export), `agents@1` provider (runs ClawEvolve's agents in a sandbox), memory projection (RSI-05) for consolidate-memory |
 | ClawWeb / AgentEvolve UI | interim | Shows platform runs alongside legacy tasks during migration (step 2); may host the default strategy runner until DS-1 is decided |
 | ClawInsight | → ClawEvolve bindings | Event triggers; `plan-source/v2` findings as feedback input (later version) |

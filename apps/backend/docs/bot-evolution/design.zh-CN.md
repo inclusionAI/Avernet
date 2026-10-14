@@ -44,7 +44,7 @@
 | --- | --- |
 | G1 | 对“这个 bot 是什么”有一个不可变、有版本的统一表示（Bot 基因组），每个进化策略都读写它，平台也能把它应用到任意引擎上。 |
 | G2 | 进化方法是一个插件：其他团队可以编写、测试、版本化并注册进化策略，而无需修改平台代码。 |
-| G3 | 一份契约，三个接入面：REST API、SDK（客户端与进化策略编写），以及面向人和 CI 的 CLI。bot 作为调用方的场景已推迟（[DR-3](decisions/0003-bot-principal-for-evolution-surface.zh-CN.md)）。 |
+| G3 | 一份契约：由 OpenAPI 文档描述的 REST API；面向进化策略作者的策略 SDK。客户端 SDK 和 CLI 在出现用例之前不在范围内。bot 作为调用方的场景已推迟（[DR-3](decisions/0003-bot-principal-for-evolution-surface.zh-CN.md)）。 |
 | G4 | 现有管线（首先是 ClawEvolve）成为平台上的进化策略，而不是并行的系统。 |
 | G5 | 构造即安全：归平台所有的验证与门禁、按风险等级审批、谱系、可以回到任意更早的修订版、沙箱化执行、预算。 |
 | G6 | 引擎中立：同一个进化策略可以进化不同引擎上的 bot，受限于各引擎提供的能力。 |
@@ -106,7 +106,7 @@ Dreams、Hermes Curator，以及 ClawEvolve 本身）都可以归结为在一个
 | --- | --- | --- | --- |
 | [01-genome.zh-CN.md](01-genome.zh-CN.md) | **基因组** | 一个可进化的 bot *是*什么：一个完整、已固定版本的 Bot Config Manifest 加上整理过的记忆、谱系和锁定策略所构成的不可变、内容寻址的修订版；通过比较并交换（compare-and-swap）移动的具名引用（`active`、`previous`……）；基因组补丁是改变它的唯一方式。包含 Genome Registry API。 | Backend（`core/bot_genome/`） |
 | [02-experience.zh-CN.md](02-experience.zh-CN.md) | **经验** | 进化策略从什么中学习：规范化、已脱敏的片段和反馈，每条都标注了产生它的基因组修订版；引擎会话导出提供方。 | `apps/evolution`；原始会话保留在引擎中 |
-| [03-strategy.zh-CN.md](03-strategy.zh-CN.md) | **进化策略** | 可插拔的改进机制：唯一的 `run(ctx)` 端口、注册记录、归平台所有的能力目录、`StrategyContext`、智能体定义、策略 SDK，以及一致性测试。 | `apps/evolution` 中的 Strategy Registry；策略代码归其作者所有 |
+| [03-strategy.zh-CN.md](03-strategy.zh-CN.md) | **进化策略** | 可插拔的改进机制：唯一的 `run(ctx)` 端口、注册记录、归平台所有的能力目录、`StrategyContext`、智能体定义、面向进化策略作者的策略 SDK，以及一致性测试。 | `apps/evolution` 中的 Strategy Registry；策略代码归其作者所有 |
 | [04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md) | **默认进化策略** | 首批进化策略实现：作为黑盒策略接入的 ClawEvolve、记忆整合，以及简单的参考策略；外加它们复用的现有 evolve 与 bench 代码清单。 | `apps/evolverun`（ClawEvolve）、`apps/evolution`（平台策略） |
 | [05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md) | **实验记录 H** | 每次运行、候选、判定、审批和晋升（包括被拒绝的）的只追加记录；父版本选择、审计和第 3 层所读取的归档。 | `apps/evolution` |
 
@@ -117,7 +117,7 @@ Dreams、Hermes Curator，以及 ClawEvolve 本身）都可以归结为在一个
 | [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) | **进化运行** | 保存每个 bot 的绑定；触发 trigger；以带租约、输入冻结的作业方式运行进化策略；在进程内或通过作业协议提供策略上下文；运行长时操作；强制执行沙箱和预算。 | `apps/evolution` |
 | [07-verification.zh-CN.md](07-verification.zh-CN.md) | **验证** | 衡量候选是否优于其父版本：带强制划分的套件、评分器、在评测 bot 中的配对运行、验证配置、判定。也为进化策略提供训练划分上的评估。 | `apps/evolution`，通过 Backend 评测环境执行 |
 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) | **晋升** | 决定并应用：门禁、风险等级、评审队列、审批、将修订版晋升为 `active`、发布，以及回到旧版本。唯一可以移动 `active` 的服务。 | Backend |
-| [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) | **进化 API 与客户端** | 公共访问层：共享的 API 约定（幂等键、ETag、错误、分页、按 id 查询的长时工作）、端点索引、生成的 SDK，以及 `avn` CLI。 | Gateway/Backend 路由；SDK 与 CLI 包 |
+| [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) | **进化 API** | 公共访问层：共享的 API 约定（幂等键、ETag、错误、分页、按 id 查询的长时工作）、端点索引，以及发布这些端点的 OpenAPI 文档。 | Gateway 路由；由 Backend 和 `apps/evolution` 发布的 OpenAPI 文档 |
 | [10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md) | **元进化** *（之后）* | 第 3 层：基于实验记录改进改进机制，带机制验证和硬性边界。 | `apps/evolution` |
 
 附录：[research.zh-CN.md](research.zh-CN.md)（业界调研与代码库证据）、
@@ -151,7 +151,7 @@ Dreams、Hermes Curator，以及 ClawEvolve 本身）都可以归结为在一个
 7. **晋升**应用门禁：判定为 `accept`，平台底线通过；该补丁的风险等级是 T2
    （人设 + skill），因此候选进入评审队列。
 8. 进化策略按候选 id 查询到判定后，可以从被接受的修订版开始下一轮。
-9. 负责人评审 diff 和验证报告（UI 或 `avn evolve review`）并批准。
+9. 负责人评审 diff 和验证报告（在 UI 中或通过 API）并批准。
 10. **晋升**在**基因组**中移动 `active → r42` 和 `previous → r41`，并通过
     Manifest 应用路径应用 `r42`；对于服务型 bot，它会经由 draft → verify →
     publish 作为下一个版本发布。
@@ -208,13 +208,13 @@ Dreams、Hermes Curator，以及 ClawEvolve 本身）都可以归结为在一个
 | 契约 | 类型（R3） | 生产者 → 消费者 | 定义于 |
 | --- | --- | --- | --- |
 | 基因组 schema 与基因组补丁格式 | 数据契约，有版本 | 所有方 | [01-genome.zh-CN.md](01-genome.zh-CN.md) |
-| Genome Registry API | Service API | 进化、UI、CLI → Backend | [01-genome.zh-CN.md](01-genome.zh-CN.md) |
+| Genome Registry API | Service API | 进化、UI、流水线 → Backend | [01-genome.zh-CN.md](01-genome.zh-CN.md) |
 | 引擎记忆投影契约 | Plugin API | Backend 应用 → 引擎 | [01-genome.zh-CN.md](01-genome.zh-CN.md) |
 | 片段 / 反馈 schema；引擎会话导出（`session-export/v1` → v2） | 数据契约；Plugin API | 引擎 → 经验 → 进化策略 | [02-experience.zh-CN.md](02-experience.zh-CN.md) |
 | 策略端口（`run(ctx)`）、`StrategyContext`、注册记录、带按引擎提供方的能力目录 | Plugin API | 进化运行 ↔ 进化策略 | [03-strategy.zh-CN.md](03-strategy.zh-CN.md) |
-| 绑定、Run API、作业协议 | 数据契约；Service API；Plugin API（线协议） | 负责人、UI、CLI、作业 worker → 进化运行 | [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) |
+| 绑定、Run API、作业协议 | 数据契约；Service API；Plugin API（线协议） | 负责人、UI、流水线、作业 worker → 进化运行 | [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) |
 | Verification API；执行器与评分器插件协议 | Service API；Plugin API | 进化运行、晋升、发布流程、Quality Task → 验证 | [07-verification.zh-CN.md](07-verification.zh-CN.md) |
-| 门禁、评审与晋升 API | Service API | UI、CLI、进化运行 → 晋升 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) |
+| 门禁、评审与晋升 API | Service API | UI、流水线、进化运行 → 晋升 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) |
 | 实验记录 schema | 数据契约 | 所有服务 → 实验记录 → 选择器、UI、第 3 层 | [05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md) |
 | 共享 API 约定 | Service API 约定 | 所有公共端点 | [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) |
 
@@ -224,7 +224,7 @@ Dreams、Hermes Curator，以及 ClawEvolve 本身）都可以归结为在一个
 | --- | --- | --- |
 | P0 契约 | DR-1 和 DR-2 被接受（DR-3 推迟）；基因组 schema、策略端口与能力目录、作业协议、API 约定完成评审 | — |
 | P1 基因组 | 构建在 Manifest 之上的基因组注册表提供修订版、引用、比较并交换、固定版本解析，以及回到任意更早修订版的能力；Manifest 获得内容存储来源，并记录所应用文档的摘要，由注册表将其映射到修订版；直接的 Manifest 编辑会作为漂移被检测到 | **能**：有版本的 bot，独立于进化 |
-| P2 进化核心 | `apps/evolution` 骨架、进化运行、作业协议、Strategy Registry、API + SDK + CLI 骨架，一个通过一致性测试的简单参考策略（手动补丁 + 确定性检查） | 能，用于脚本化改进 |
+| P2 进化核心 | `apps/evolution` 骨架、进化运行、作业协议、Strategy Registry、公共 API 及其 OpenAPI 文档，一个通过一致性测试的简单参考策略（手动补丁 + 确定性检查） | 能，用于脚本化改进 |
 | P3 默认进化策略 | ClawEvolve 作为黑盒策略接入：会话导出提供方、输出补丁的沙箱化 tune、验证中的 ClawBench 评分器 | 能：通过平台在任意 OpenClaw bot 上使用今天的 AgentEvolve |
 | P4 验证与晋升 | 验证（配对统计、封存的留出集、必须通过的套件、评审模型集成）、发布流程的验证门禁、评审队列、风险等级、影子与金丝雀、基于实验记录的离线重放 | 加固；验证门禁本身就对服务型 bot 有用 |
 | P5 更多默认项 | 记忆投影契约、记忆整合策略、用于验证改进机制变更的改进问题基准。由 bot 驱动的部分随 DR-3 一并推迟 | 进化策略的回归测试 |

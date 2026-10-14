@@ -78,7 +78,7 @@ What *is* pluggable stays on the platform's side of that line:
 | Ledger schema and storage of verdicts as experiment records | [05-experiment-ledger.md](05-experiment-ledger.md) |
 | Runs, bindings, budgets, kill switches, sandboxing rules, Job Protocol transport | [06-evolution-run.md](06-evolution-run.md) |
 | Static floor rules, gate decision, risk tiers, review queue, separation-of-powers table, rollout, going back | [08-promotion.md](08-promotion.md) |
-| Public API conventions, SDKs, `avn` CLI | [09-evolution-api.md](09-evolution-api.md) |
+| Public API conventions and the public endpoint index | [09-evolution-api.md](09-evolution-api.md) |
 | Mechanism verification (level 3), including offline replay of verification profiles and submission filters | [10-meta-evolution.md](10-meta-evolution.md) |
 
 **Where it runs.** The Verification Service (C5) lives in the proposed new
@@ -119,7 +119,7 @@ created.
 ```python
 # RiskTier (T0 < T1 < T2 < T3) is defined once in 08-promotion.md §5, with the meaning of each tier.
 # BotRef {owner_id, bot_id}: a bot's full identity (a bot_id alone is not unique
-# across users); defined once in 09-evolution-api.md §2.7.
+# across users); defined once in 09-evolution-api.md §2.6.
 
 class ExecutorKind(StrEnum):           # the executor plugins of §2.3
     LOCAL_SANDBOX = "local_sandbox"
@@ -1364,21 +1364,18 @@ if v.status == "accept":
     base = v.revision          # next round builds on the accepted revision
 ```
 
-**An operator checking a hand-written revision** with the generated client
-SDK ([09-evolution-api.md](09-evolution-api.md)):
+**An operator checking a hand-written revision** over HTTP
+([09-evolution-api.md](09-evolution-api.md)):
 
-```python
-from avernet_evolution import Client
-
-c = Client.from_env()
-started = c.evaluations.start(
-    bot_id="bot_123", revision="sha256:7c1e…", baseline="sha256:a90b…",
-    suites=["support-core"], splits=["validation", "regression"],
-    idempotency_key="adhoc-bot_123-r42-2026-10-08")       # same key on every retry
-op = c.operations.wait(bot_id="bot_123", operation=started.operation_id)   # short lookups by id
-ev = c.evaluations.get(bot_id="bot_123", evaluation=op.result["evaluation_id"])
-print(ev.splits["validation"].ci, ev.splits["regression"].newly_failing)
-```
+1. `POST /openapi/v1/bots/bot_123/evolution/evaluations` with
+   `Idempotency-Key: adhoc-bot_123-r42-2026-10-08` and the body shown in
+   §10 returns `{"operation_id": "op_19a"}`. A retry sends the same key.
+2. `GET /openapi/v1/bots/bot_123/evolution/operations/op_19a`, repeated
+   until the status is terminal; once it has succeeded, its `result`
+   carries the `evaluation_id`.
+3. `GET /openapi/v1/bots/bot_123/evolution/evaluations/{evaluation}` returns
+   the per-split results; the operator reads the validation interval and the
+   regression cases that newly fail.
 
 **Service-bot publish-flow gate** (Backend, proposed for RSI-22): on the
 `VALIDATING → ONLINE_PUB` transition the hook asks for a verdict and blocks
@@ -1409,7 +1406,7 @@ async def before_online_pub(publish: PublishRecord, client: VerificationClient) 
 | [05-experiment-ledger.md](05-experiment-ledger.md) | Verification → Ledger | Verdicts, evaluations, cost, verifier version per experiment; online outcomes; suggestions for verifier changes flow back to humans only |
 | [06-evolution-run.md](06-evolution-run.md) | Run ↔ Verification | `verify(candidate, profile)` on submission; Job Protocol transport for train endpoints; budget charging; sandboxing rules |
 | [08-promotion.md](08-promotion.md) | Verification ↔ Promotion | Verdicts into the gate and candidate report; the static floor result (from submission) and risk tier into verification; holdout audit requests and holdout drops; canary/shadow comparisons |
-| [09-evolution-api.md](09-evolution-api.md) | API → Verification | Public suite and evaluation endpoints; shared conventions; SDK and CLI clients |
+| [09-evolution-api.md](09-evolution-api.md) | API → Verification | Public suite and evaluation endpoints; shared conventions |
 | [10-meta-evolution.md](10-meta-evolution.md) | Meta-evolution → Verification | Reuses the comparator at problem granularity; replays stored candidates through new profiles for screening |
 | Backend publish flow and Quality Task | Backend ↔ Verification | Deployed-sandbox executor (`eval_publish`, `eval_env`); optional VERIFY-stage gate; in-repo grader for the Quality Task |
 | ClawInsight | Insight → Verification | Recurrence-check results as an online signal |

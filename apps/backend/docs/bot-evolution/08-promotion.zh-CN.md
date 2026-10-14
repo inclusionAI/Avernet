@@ -45,7 +45,7 @@ LLM 编写的技能在没有评测引导修订时往往毫无增益；harness �
 | 绑定（哪个策略在 bot 上运行、触发器、允许的基因、验证配置、预算）、运行、沙箱、预算与紧急停止开关 | 进化运行，[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)。晋升读取它需要的绑定字段并遵守紧急停止开关 |
 | 记录实验与审计轨迹 | 实验记录 H，[05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md)。晋升将其门禁决定、批准、拒绝和晋升写入其中 |
 | 采用新的改进机制（第 3 层） | 元进化，[10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md)。它复用门禁，但使用独立的机制采用配置（默认 T3） |
-| 共享 API 约定、`avn` CLI、生成的 SDK | 进化 API，[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) |
+| 共享 API 约定与公共端点索引 | 进化 API，[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) |
 
 **运行位置。** 晋升运行在 **Backend** 中，与基因组注册表相邻
 （提议路径 `core/bot_genome/`，紧挨 `core/bot_config_manifest/`）。
@@ -56,11 +56,11 @@ LLM 编写的技能在没有评测引导修订时往往毫无增益；harness �
 `/openapi/v1` 前缀下（§10）：基因组与晋升端点，包括 `/bots/{bot_id}/evolution/` 下的
 候选报告、评审队列和 approve/reject 路径，由 Backend 提供；其他进化端点由
 `apps/evolution` 提供；[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) 将它们
-呈现为一个统一的公开接口面（这遵循 [design.zh-CN.md](design.zh-CN.md) 中 D-1 的
+索引为一个统一的公开接口面，并把每条路径路由到提供它的服务（这遵循 [design.zh-CN.md](design.zh-CN.md) 中 D-1 的
 推荐选项）。
 
 **第一次迭代中的调用方**是确定性流水线（夜间作业、CI、产品后端）和人（bot 所有者、
-租户管理员、评审者），通过 API、SDK、CLI 和 UI 调用。Bot 调用方随 DR-3 推迟；
+租户管理员、评审者），通过 API 和工作台 UI 调用。Bot 调用方随 DR-3 推迟；
 无论如何它们都不会持有晋升权力（§3）。
 
 ## 2. 领域模型
@@ -196,7 +196,7 @@ class GateCheck:
 @dataclass(frozen=True)
 class GateDecision:
     id: str                         # "gd_204"
-    bot: BotRef                     # the bot (owner + bot id, 09-evolution-api.md §2.7)
+    bot: BotRef                     # the bot (owner + bot id, 09-evolution-api.md §2.6)
     candidate_id: str               # content hash of the patch
     revision_id: str                # candidate revision
     parent_revision_id: str         # base the patch was made against
@@ -889,8 +889,11 @@ open ──approve──▶ approved   (Promotion created; revision status → p
 较早的修订版（例如 `r41`），`previous` 变为被离开的那个修订版，
 引用日志以参与者和原因记录这次移动。
 
-```text
-avn genome promote --revision r41 --reason "r42 mis-routes VIP refunds"
+```http
+POST /openapi/v1/bots/bot_123/genome/promotions
+Idempotency-Key: goback-bot_123-r42-to-r41
+
+{"revision": "r41", "expected_revision": "r42", "reason": "r42 mis-routes VIP refunds"}
 ```
 
 对平台的其余部分而言，这只是“应用这个修订版”，与
@@ -1029,7 +1032,8 @@ class RiskClassifier(Protocol):
 新操作。下文的响应展示的是标准信封中的 `data` 负载；
 信封、错误、分页和幂等性见 [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)。
 
-调用方：人（UI、`avn` CLI）和确定性流水线（客户端 SDK）。
+调用方：通过工作台 UI 操作的人，以及通过 HTTP 调用的确定性流水线
+和 CI。
 Bot 调用方随 DR-3 推迟。
 
 ### 10.1 公开端点
@@ -1037,7 +1041,7 @@ Bot 调用方随 DR-3 推迟。
 #### GET /bots/{bot_id}/evolution/candidates/{candidate}
 
 候选报告：diff、验证摘要、门禁决定和评审
-状态。由 UI 评审界面、`avn evolve review show` 以及
+状态。由 UI 评审界面以及
 决定是否批准的流水线调用。
 
 请求示例：
@@ -1093,7 +1097,7 @@ GET /openapi/v1/bots/bot_123/evolution/candidates/sha256:c41e…
 
 #### GET /bots/{bot_id}/evolution/review-queue
 
-列出评审条目。由 UI、`avn evolve review list` 以及
+列出评审条目。由 UI 以及
 流水线调用。查询参数：`status`（默认 `open`，可选 `approved`、
 `rejected`、`superseded` 或 `all`）、`min_tier`、`page`（从 1 开始）、
 `page_size`（1 到 100，默认 20）。
@@ -1142,7 +1146,7 @@ GET /openapi/v1/bots/bot_123/evolution/review-queue?status=open
 #### POST /bots/{bot_id}/evolution/candidates/{candidate}:approve
 
 批准一个开放的评审条目并晋升其修订版。由所有者和
-评审者（UI、`avn evolve review approve`）调用，也可由流水线在所有者
+评审者（通过 UI）调用，也可由流水线在所有者
 策略范围内调用。
 
 请求示例：
@@ -1244,8 +1248,8 @@ Idempotency-Key: review-bot_123-sha256:c41e-reject
 将 `active`（或 `canary`）移动到某个修订版并应用它。用于回到旧版本、
 晋升所有者编写的修订版、canary → active，
 并在内部被门禁和批准使用（它们调用服务接口，而不是
-此端点）。由所有者和租户管理员调用（UI、
-`avn genome promote`）。
+此端点）。由所有者和租户管理员调用（通过 UI
+或 API）。
 
 请求示例（从 `r42` 回到 `r41`）：
 
@@ -1323,57 +1327,62 @@ Idempotency-Key: 4b0f6c1e-9a7d-4f53-8d1e-2c6a9e1b7f02
 
 ### 11.1 在策略范围内批准的夜间流水线
 
-```python
-# Illustrative only
-from avernet_evolution import Client, RiskTier
+1. `POST /openapi/v1/bots/bot_123/evolution/runs`，带上
+   `Idempotency-Key: nightly-bot_123-2026-10-08`（每次重试都使用相同的键）
+   和 `{"binding": "bind_01", "budget": {"max_usd": 10}}`；
+   `bind_01` 运行 `clawevolve/bot-evolution@2.0.0`。响应携带
+   `run_7f3`。
+2. 重复 `GET /openapi/v1/bots/bot_123/evolution/runs/run_7f3`，作为
+   短查询，直到状态为终态。
+3. `GET /openapi/v1/bots/bot_123/evolution/runs/run_7f3/candidates` 列出
+   候选。
+4. 对每个候选，`GET /openapi/v1/bots/bot_123/evolution/candidates/{candidate}`
+   返回报告。除非 `gate.outcome` 为 `needs_review`，流水线会跳过它（它已被自动
+   晋升、不可晋升，或仍处于待定状态）。
+5. 如果 `gate.risk.tier` 至多为 `T1` 且 `flags` 为空，流水线发送
+   `POST /openapi/v1/bots/bot_123/evolution/candidates/{candidate}:approve`，
+   带上 `Idempotency-Key: approve-bot_123-{candidate}` 和
+   `{"reason": "nightly auto-policy"}`。只有当所有者关闭了门禁自动晋升、但允许
+   这条流水线批准 T1 时，才会走到这一步。更高等级的都留给人处理；
+   `403 policy_denied` 表示同样的情况。
 
-c = Client.from_env()
-run_id = c.runs.start(bot_id="bot_123", binding="bind_01",      # bind_01 runs clawevolve/bot-evolution@2.0.0
-                      budget={"max_usd": 10},
-                      idempotency_key="nightly-bot_123-2026-10-08")   # same key on every retry
-run = c.runs.wait(run_id)                     # repeated short status lookups by id
+UI 后端发出同样的调用。
 
-for cand in run.candidates():
-    report = c.candidates.get(bot_id="bot_123", candidate=cand.id)
-    if report.gate is None or report.gate.outcome != "needs_review":
-        continue                              # auto-promoted, not promotable, or still pending
-    if report.gate.risk.tier <= RiskTier.T1 and not report.flags:
-        # Only reached when the owner turned gate auto-promotion off but allowed
-        # this pipeline to approve T1; anything higher is left for a human.
-        c.review.approve(bot_id="bot_123", candidate=cand.id,
-                         reason="nightly auto-policy",
-                         idempotency_key=f"approve-bot_123-{cand.id}")
-```
+### 11.2 人工评审
 
-同样的调用也支撑着 CLI 和 UI 后端。
+评审者在工作台 UI 中工作；UI 后端发送：
 
-### 11.2 通过 CLI 进行人工评审
+1. `GET /openapi/v1/bots/bot_123/evolution/review-queue` 列出一个开放
+   条目：候选 `sha256:c41e…`、修订版 `r42`、等级 `T2`、策略
+   `clawevolve/bot-evolution@2.0.0`、判定 `accept`。
+2. `GET /openapi/v1/bots/bot_123/evolution/candidates/sha256:c41e…` 返回
+   报告：diff、各划分结果、标记和门禁决定。
+3. `GET /openapi/v1/bots/bot_123/genome/revisions/r42/diff?against=r41`
+   展示完整 diff（[01-genome.zh-CN.md](01-genome.zh-CN.md)）。
+4. `POST /openapi/v1/bots/bot_123/evolution/candidates/sha256:c41e…:approve`，
+   带上一个 `Idempotency-Key` 和
+   `{"reason": "escalation fix is correct"}`。
 
-```text
-$ avn evolve review list --bot bot_123
-CANDIDATE        REV  TIER  STRATEGY                         VERDICT  CREATED
-sha256:c41e…     r42  T2    clawevolve/bot-evolution@2.0.0   accept   2026-10-08T03:41Z
-
-$ avn evolve review show sha256:c41e… --bot bot_123      # report: diff, splits, flags, gate
-$ avn genome diff r42 --against r41 --bot bot_123
-$ avn evolve review approve sha256:c41e… --bot bot_123 --reason "escalation fix is correct" --yes
-```
-
-退出码遵循共享的 CLI 约定
-（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)）：例如 `4` 表示
-`stale_parent` 之类的冲突，`5` 表示 `policy_denied`。
+错误使用共享的错误信封
+（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)）：例如
+`409 stale_parent` 表示自验证以来 `active` 已移动，
+`403 policy_denied` 表示评审者无权批准该等级。
 
 ### 11.3 回到旧版本
 
-```python
-# Illustrative only
-refs = c.genome.refs(bot_id="bot_123")        # active = r42, previous = r41
-promo = c.genome.promote(bot_id="bot_123",
-                         revision=refs.previous,
-                         expected_revision=refs.active,
-                         reason="r42 mis-routes VIP refunds",
-                         idempotency_key="goback-bot_123-r42-to-r41")
-assert promo.going_back
+1. `GET /openapi/v1/bots/bot_123/genome/refs` 显示 `active` = `r42`，
+   `previous` = `r41`。
+2. `POST /openapi/v1/bots/bot_123/genome/promotions`，带上
+   `Idempotency-Key: goback-bot_123-r42-to-r41` 和下面的请求体。
+   响应包含 `"going_back": true`。
+
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+{
+  "revision": "sha256:a90b…",          // r41, the `previous` ref
+  "expected_revision": "sha256:7c1e…", // r42, what `active` points at now
+  "reason": "r42 mis-routes VIP refunds"
+}
 ```
 
 对于服务 bot，同样的调用会将 `r41` 作为下一个发布
@@ -1404,7 +1413,7 @@ assert promo.going_back
 | 进化运行（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)） | 运行 → 晋升 | 提交时的 `check_floor`；判定最终确定时的 `decide`；绑定字段（允许的基因、配置、自动晋升上限、发布）；预算、每日晋升上限、紧急停止开关 |
 | 验证（[07-verification.zh-CN.md](07-verification.zh-CN.md)） | 验证 → 晋升 | 判定、按划分的证据、holdout 与基线结果、在线（影子/金丝雀）结果、holdout 事件 |
 | 验证（[07-verification.zh-CN.md](07-verification.zh-CN.md)） | 晋升 → 验证 | 缺少 holdout 或基线结果时调用 `verify(candidate, profile)` |
-| 进化 API（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)） | API → 晋升 | §10 的公开端点；SDK 和 `avn` 命令 |
+| 进化 API（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)） | API → 晋升 | §10 的公开端点 |
 | 元进化（[10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md)） | 元进化 → 晋升 | 通过独立的门禁配置进行机制采用（默认 T3，需要比较报告） |
 | 现有的 Manifest apply 与服务 bot 发布流程（Backend） | 晋升 → 现有服务 | 应用已晋升修订版编译出的文档；apply 报告和发布记录携带所应用文档的摘要，从不携带修订版 id |
 
@@ -1445,6 +1454,6 @@ assert promo.going_back
   `/bots/{bot_id}/evolution/review-queue` 路径）由 Backend 提供；
   经验、策略注册表、进化运行、验证、实验记录和
   元进化端点由 `apps/evolution` 提供；
-  [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) 将它们呈现在统一的公开
-  `/openapi/v1` 接口面下。这遵循 D-1 的推荐选项
+  [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) 将它们索引在统一的公开
+  `/openapi/v1` 接口面下，并把每条路径路由到提供它的服务。这遵循 D-1 的推荐选项
   （[design.zh-CN.md](design.zh-CN.md)）。

@@ -71,7 +71,7 @@ today, and it is what turns logs into attributable fitness signal ("revision
 | Serving capability calls to job workers (Job Protocol) | Evolution Run | [06-evolution-run.md](06-evolution-run.md) |
 | Running evaluations, graders, suites, and splits | Verification | [07-verification.md](07-verification.md) |
 | Secret/PII/URL scanning of patches derived from experience | Promotion (gate floor) | [08-promotion.md](08-promotion.md) |
-| Shared API conventions, SDKs, and the `avn` CLI | Evolution API | [09-evolution-api.md](09-evolution-api.md) |
+| Shared API conventions and the public endpoint index | Evolution API | [09-evolution-api.md](09-evolution-api.md) |
 | Frozen experience snapshots for improvement problems (level 3, later) | Meta-evolution | [10-meta-evolution.md](10-meta-evolution.md) |
 
 **Where it runs.** The store is part of the evolution control plane, in the
@@ -144,7 +144,7 @@ class PiiCategory(StrEnum):
     ADDRESS = "address"
 
 # BotRef {owner_id, bot_id}: a bot's full identity (a bot_id alone is not unique
-# across users); defined once in 09-evolution-api.md §2.7.
+# across users); defined once in 09-evolution-api.md §2.6.
 
 @dataclass(frozen=True)
 class ToolCall:
@@ -339,7 +339,7 @@ class EvalTrace:
   "trace_id": "et_5521",
   "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "evaluation_id": "train_77",
-  "revision_id": "sha256:c41e…",
+  "revision_id": "sha256:7c1e…",
   "suite": "bot_123/support",
   "case_id": "case_partial_refund_03",
   "split": "train",
@@ -603,7 +603,7 @@ shape the read paths.
 | Strategy with `experience.feedback@1` | `ctx.experience.feedback(…)` | Redacted feedback of the run's bot only |
 | Strategy with `evaluation.train@1` | The train evaluation result (Verification) | Scores and critiques of **train-split** rollouts only |
 | Strategy, any | — | Never: eval traces of `validation` (aggregates only, through verdicts), `holdout`, `regression`, `safety`; any other bot's or tenant's experience |
-| Owner, tenant admin, pipelines | Public API (§10), UI, `avn experience episodes` and `avn experience feedback` | Their bots' episodes and feedback |
+| Owner, tenant admin, pipelines | Public API (§10), directly or through the UI | Their bots' episodes and feedback |
 | Verification | Internal | Recent episodes for shadow replay; failed episodes as candidates for new `regression` cases (diagnose → plan pipeline) |
 | Experiment Ledger | Internal | Evidence ids and eval traces, for audit and training-data export |
 
@@ -616,8 +616,8 @@ Rules:
   served through any capability, matching the anti-reward-hacking rules in
   [07-verification.md](07-verification.md).
 - **Reading conversation history is shown to owners.** When an owner binds
-  a strategy whose registration `needs` `experience.sessions@1`, the UI and
-  CLI show that the strategy reads conversation history.
+  a strategy whose registration `needs` `experience.sessions@1`, the UI
+  shows that the strategy reads conversation history.
 - **Experience is untrusted input.** Strategies must treat episode and
   feedback text as data, never as instructions. Patches derived from it get
   secret/PII/URL scanning at the gate ([08-promotion.md](08-promotion.md)).
@@ -717,7 +717,7 @@ P6 item, not a P1 dependency.
 ## 9. Service interface
 
 The store's interface for other components. Public callers use the API (§10)
-through the generated SDK; strategies use the capabilities (§6.1).
+over HTTP; strategies use the capabilities (§6.1).
 
 ```python
 from typing import Protocol
@@ -798,16 +798,15 @@ class ExperienceStore(Protocol):
 All paths are relative to the public API prefix `/openapi/v1`. Shared
 conventions (pagination, error format, idempotency keys, ETags) are defined
 in [09-evolution-api.md](09-evolution-api.md). Callers are bot owners and
-tenant admins (UI, `avn experience`), and pipelines and product backends
-(client SDK). Responses below show the `data` payload of the standard
+tenant admins (through the workbench UI), and pipelines and product backends
+(over HTTP). Responses below show the `data` payload of the standard
 envelope; see [09-evolution-api.md](09-evolution-api.md) for the envelope,
 errors, pagination, and idempotency.
 
 ### `GET /bots/{bot_id}/experience/episodes`
 
-Lists episode summaries of a bot, newest first. Called by the UI, the CLI
-(`avn experience episodes`), and pipelines that look at how a revision is
-doing.
+Lists episode summaries of a bot, newest first. Called by the UI and by
+pipelines that look at how a revision is doing.
 
 Query parameters: `revision` (revision id or `unattributed`), `since`,
 `until`, `outcome`, `page` (1-based), `page_size` (1 to 100, default 20).
@@ -860,7 +859,7 @@ Errors: `404` unknown bot; `400` invalid filter (for example `since` after
 
 ### `GET /bots/{bot_id}/experience/episodes/{episode}`
 
-Returns one episode with its turns. Called by the UI's episode view, the CLI,
+Returns one episode with its turns. Called by the UI's episode view, pipelines,
 and reviewers following a candidate's evidence ids.
 
 Example request:
@@ -957,8 +956,7 @@ body; `428` missing `Idempotency-Key`.
 
 ### `GET /bots/{bot_id}/experience/feedback`
 
-Lists feedback of a bot, newest first. Called by the UI, the CLI
-(`avn experience feedback`), and pipelines.
+Lists feedback of a bot, newest first. Called by the UI and by pipelines.
 
 Query parameters: `kind` (repeatable), `episode`, `revision`, `since`,
 `page` (1-based), `page_size` (1 to 100, default 20).
@@ -1064,47 +1062,28 @@ in-process call inside `apps/evolution`; it has no public endpoint.
 
 ### 11.1 A product backend records user feedback
 
-```python
-# Illustrative only
-from avernet_evolution import Client
-
-c = Client.from_env()
-
-def on_user_correction(bot_id: str, episode_id: str, turn_index: int, text: str) -> None:
-    # The key names the thing being reported, so every retry sends the same key.
-    c.experience.feedback.create(
-        bot_id=bot_id,                     # caller owns the bot; otherwise also pass entity_id=<owner>
-        kind="correction",
-        source="user",
-        episode_id=episode_id,
-        text=text,
-        data={"turn_index": turn_index},
-        idempotency_key=f"support-ui/{episode_id}/turn-{turn_index}/correction",
-    )
-```
+On each user correction, the product backend sends one
+`POST /openapi/v1/bots/{bot_id}/experience/feedback`, as in the example in
+§10. The `Idempotency-Key` names the thing being reported, for example
+`support-ui/ep_91/turn-4/correction`, so every retry sends the same key and
+the platform records the correction once. A key built from the send time
+would change between retries and record duplicates.
 
 ### 11.2 An owner compares two revisions
 
-```python
-# Illustrative only
-from collections import Counter
+The owner's pipeline lists the episodes of each revision since a date and
+counts `outcome.status`:
 
-def outcome_rates(c, bot_id: str, revision: str) -> dict[str, float]:
-    counts: Counter[str] = Counter()
-    for ep in c.experience.episodes.list(bot_id=bot_id, revision=revision, since="2026-10-01T00:00:00Z"):
-        counts[ep.outcome.status] += 1     # the SDK walks all pages
-    total = sum(counts.values()) or 1
-    return {status: n / total for status, n in counts.items()}
-
-before = outcome_rates(c, "bot_123", "sha256:a90b…")   # r41
-after = outcome_rates(c, "bot_123", "sha256:c41e…")    # r42, after promotion
+```http
+GET /openapi/v1/bots/bot_123/experience/episodes?revision=sha256:a90b…&since=2026-10-01T00:00:00Z&page=1&page_size=100
+GET /openapi/v1/bots/bot_123/experience/episodes?revision=sha256:7c1e…&since=2026-10-01T00:00:00Z&page=1&page_size=100
 ```
 
-The same comparison from the CLI:
-
-```text
-avn experience episodes --bot bot_123 --revision r41 --outcome user_corrected --output json
-```
+The first request is `r41`, the second `r42` after its promotion. For each
+revision the caller increases `page` until it has read `total` items
+(pagination in [09-evolution-api.md](09-evolution-api.md) §8), then divides
+each outcome count by the total. Adding `outcome=user_corrected` returns
+only the corrected episodes.
 
 ### 11.3 A strategy reads experience
 
@@ -1160,7 +1139,7 @@ class OpenClawSessionExport(SessionExportProvider):
 | [06-evolution-run.md](06-evolution-run.md) Evolution Run | Run → Experience | Builds `ctx.experience` per run with the granted parts; serves the Job Protocol experience endpoints |
 | [07-verification.md](07-verification.md) Verification | Both | Verification writes eval traces; reads recent episodes for shadow replay and failed episodes as candidates for `regression` cases |
 | [08-promotion.md](08-promotion.md) Promotion | — (indirect) | Promotion moves `active`; later episodes carry the new revision. The gate scans patches derived from experience |
-| [09-evolution-api.md](09-evolution-api.md) Evolution API | Clients → Experience | Public experience endpoints, SDK, and `avn experience` commands |
+| [09-evolution-api.md](09-evolution-api.md) Evolution API | Callers → Experience | Public experience endpoints |
 | [10-meta-evolution.md](10-meta-evolution.md) Meta-evolution (later) | Experience → Meta | Frozen experience snapshots for improvement problems |
 | ClawInsight, TaskGuard, BCS | Producers → Experience | Findings (`plan-source/v2`), run evidence, coordination outcomes as feedback |
 | Product backends and UIs | Producers → Experience | Ratings, corrections, task outcomes |

@@ -130,7 +130,7 @@ Digest = str       # address of stored bytes: "sha256:" + 64 hex chars of the by
                    # resource, MCP config, CLI tool, script); the field that holds a digest says what the bytes are.
 # RiskTier (T0 < T1 < T2 < T3) is defined once in 08-promotion.md §5.
 # BotRef {owner_id, bot_id}: the bot's full identity (a bot_id alone is not unique
-# across users); defined once in 09-evolution-api.md §2.7.
+# across users); defined once in 09-evolution-api.md §2.6.
 ```
 
 Persona files and skills:
@@ -380,7 +380,7 @@ Changing the policy is an owner action that records a new revision (§4.4).
 
 ```python
 class ProvenanceKind(StrEnum):
-    USER = "user"                    # a person edited the bot through the genome API (UI, API, or CLI);
+    USER = "user"                    # a person edited the bot through the genome API (UI or API);
                                      # a direct PUT /config-manifest records no revision (§5.5)
     STRATEGY_RUN = "strategy_run"    # a strategy submitted it as a candidate during an Evolution Run
     BOT = "bot"                      # postponed with DR-3
@@ -409,7 +409,7 @@ class RevisionStatus(StrEnum):
 class RevisionMetadata:
     id: RevisionId                   # the revision's identity: hash of {spec, policy} (§4.4)
     seq: int                         # per-bot counter for people: the bot's 1st recorded revision is 1 ("r1"), the
-                                     # 42nd is 42 ("r42"). UIs and the CLI show it, and paths accept it
+                                     # 42nd is 42 ("r42"). UIs show it, and paths accept it
                                      # (GET …/revisions/r42), but it is not an identity: other records store `id`
     bot: BotRef                      # the bot this revision belongs to (owner + bot id)
     parent: RevisionId | None        # the revision this one was made from: the patch's `base`, or the `base` given
@@ -814,7 +814,7 @@ two applies of the same revision always produce the same bot.
 
 | Status | Meaning (proposed) | Set by |
 | --- | --- | --- |
-| `draft` | Recorded from an owner's manual edit through the genome API (UI, API, CLI) | Genome Registry |
+| `draft` | Recorded from an owner's manual edit through the genome API (UI or API) | Genome Registry |
 | `candidate` | Recorded from a patch submitted during a run, not yet decided | Genome Registry |
 | `accepted` | The gate accepted it (it may wait for review or rollout) | [Promotion](08-promotion.md) |
 | `rejected` | Verification or the gate rejected it; kept in the archive | [Promotion](08-promotion.md) |
@@ -886,7 +886,7 @@ the canary instances run `active` again ([08-promotion.md](08-promotion.md)).
 moves to `r42`.
 
 **`draft`: the owner's work in progress.** Each manual edit through the
-genome API (UI, API, CLI) records a revision and moves `draft` to it. Nothing runs `draft` until the
+genome API (UI or API) records a revision and moves `draft` to it. Nothing runs `draft` until the
 owner promotes it, so an owner can save half-done work. *Example:* the owner
 edits `SOUL.md` twice; that records `r43` and `r44`, `draft` = `r44`, and
 `active` stays `r42` until the owner promotes `r44`.
@@ -896,9 +896,9 @@ candidate (counting from 1, in submission order) that the Evolution Run
 `run_id` submitted. Evolution Run creates it when the strategy submits a
 candidate ([06-evolution-run.md](06-evolution-run.md)). It is never moved
 afterwards, so the name keeps working after the gate decides and can be used
-in the UI, CLI, and ledger links. *Example:* `run_7f3` submits two patches;
+in the UI, API paths, and ledger links. *Example:* `run_7f3` submits two patches;
 they are recorded as `r42` and `r45`, and named `candidate/run_7f3/1` and
-`candidate/run_7f3/2`. `avn genome show candidate/run_7f3/2` shows `r45`. A
+`candidate/run_7f3/2`. `GET …/genome/revisions/candidate/run_7f3/2` returns `r45`. A
 revision made by an owner's manual edit gets no candidate ref.
 
 ### 5.3 Compare-and-swap
@@ -1000,7 +1000,7 @@ A Genome Patch is the only thing a strategy may submit. It is itemized and
 typed, following ACE's finding that delta updates avoid context collapse
 (whole rewrites gradually erase accumulated detail). Whole-document
 replacement by automated actors is not supported. Humans can submit a patch
-too (for example `avn genome patch apply`), or record a whole document.
+too (through `POST …/genome/revisions`, §12), or record a whole document.
 
 Ops shown in the sources (the full op set is fixed by RSI-02):
 
@@ -1192,7 +1192,7 @@ How content is fetched from a digest:
 
 - **Inside Backend,** `ManifestContentService.read(digest)` returns the bytes
   and re-verifies the hash on read.
-- **Outside Backend** (UI, CLI, strategies, evaluators), the Registry API
+- **Outside Backend** (UI, pipelines, strategies, evaluators), the Registry API
   serves `GET /bots/{bot_id}/genome/content/{digest}`. It is access-checked
   against the bot, so a digest is not a capability by itself. New content is
   uploaded with `PUT /bots/{bot_id}/genome/content`, which returns its digest.
@@ -1224,8 +1224,8 @@ Three extensions are needed:
 | **DB revisions + existing content-addressed store** (recommended) | Tenancy, ACL, queries over lineage and status, reuses the manifest content store, fits Backend patterns | Need our own diff/merge tooling |
 | Git repository per bot | Free history, diff, blame; coding agents already speak git | Multi-tenant hosting, ACL, querying across bots, GC: a new infrastructure dependency |
 
-Recommendation: DB-native, plus a **git export** (`avn genome export
---format git`) so humans and coding-agent strategies can work on a familiar
+Recommendation: DB-native, plus a **git export** of the revision history (proposed; not
+yet an endpoint in §12) so humans and coding-agent strategies can work on a familiar
 filesystem history (the Meta-Harness lesson) without git being the source
 of truth.
 
@@ -1381,12 +1381,13 @@ request and response bodies are JSON except content bytes. POSTs accept an
 Responses below show the `data` payload of the standard envelope; see
 [09-evolution-api.md](09-evolution-api.md) for the envelope, errors,
 pagination, and idempotency.
-Callers in the first iteration are humans (UI, `avn` CLI), pipelines, and
-platform services; bot callers are postponed to a later, separate design.
+Callers in the first iteration are humans through the workbench UI,
+pipelines and CI over HTTP, and platform services; bot callers are
+postponed to a later, separate design.
 
 ### GET /bots/{bot_id}/genome/revisions
 
-List revision metadata, filtered. Called by UI, CLI (`avn genome log`),
+List revision metadata, filtered. Called by UI,
 pipelines, the Ledger read model.
 
 ```http
@@ -1412,7 +1413,7 @@ Errors: 404 unknown bot; 400 invalid filter.
 Record a revision from a patch (`{base, patch}`) or from a Manifest document
 (`{manifest}`). Called by Evolution Run (when a strategy calls
 `ctx.candidates.submit`; strategies never call this directly), and by owners
-through UI/CLI (`avn genome patch apply`). Returns the revision; recording
+through the UI or the API. Returns the revision; recording
 content that already exists returns the existing one with `200`.
 
 ```jsonc
@@ -1466,7 +1467,7 @@ apply cleanly); 422 `patch_rejected` with reasons (`locked_gene`,
 ### GET /bots/{bot_id}/genome/revisions/{rev}
 
 Full revision (metadata, `spec`, `policy`). `{rev}` is an id, `r<seq>`, or a
-ref name. Called by UI, CLI (`avn genome show`), Evolution Run (to build
+ref name. Called by UI, pipelines, Evolution Run (to build
 `ctx.parent`), Verification.
 
 ```http
@@ -1494,7 +1495,7 @@ Errors: 404.
 ### GET /bots/{bot_id}/genome/revisions/{rev}/diff?against=
 
 Diff two revisions. Called by the review UI and the candidate report in
-[08-promotion.md](08-promotion.md), CLI (`avn genome diff`).
+[08-promotion.md](08-promotion.md), and pipelines.
 
 ```http
 GET /openapi/v1/bots/bot_123/genome/revisions/r42/diff?against=r41
@@ -1519,7 +1520,7 @@ Errors: 404 either revision; 422 revisions of different bots.
 
 ### GET /bots/{bot_id}/genome/refs
 
-List refs. Called by UI, CLI (`avn genome refs`), Evolution Run (resolving a
+List refs. Called by UI, pipelines, Evolution Run (resolving a
 binding's `parent`), Promotion.
 
 ```http
@@ -1543,7 +1544,7 @@ GET /openapi/v1/bots/bot_123/genome/refs
 ### PUT /bots/{bot_id}/genome/refs/draft
 
 Move the owner's `draft` ref, with compare-and-swap. Called by the owner via
-UI/CLI. (`active`, `previous`, `canary` are not movable here; they move only
+the UI or the API. (`active`, `previous`, `canary` are not movable here; they move only
 through `POST /bots/{bot_id}/genome/promotions` in
 [08-promotion.md](08-promotion.md).)
 
@@ -1560,8 +1561,7 @@ through `POST /bots/{bot_id}/genome/promotions` in
  "moved_by": {"kind": "user", "actor": "user_owner_1"}, "reason": null}
 ```
 
-Errors: 409 `ref_conflict` with the current revision in the body (CLI exit
-code 4); 404 unknown revision.
+Errors: 409 `ref_conflict` with the current revision in the body; 404 unknown revision.
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -1571,8 +1571,8 @@ code 4); 404 unknown revision.
 
 ### GET /bots/{bot_id}/genome/content/{digest}
 
-Fetch bytes by digest. Access-checked against the bot. Called by UI, CLI
-(`avn genome content get`), strategies' workspace materialisation (through
+Fetch bytes by digest. Access-checked against the bot. Called by UI,
+pipelines, strategies' workspace materialisation (through
 Evolution Run), Verification.
 
 ```http
@@ -1594,7 +1594,7 @@ Errors: 404 unknown digest or digest not reachable from this bot.
 
 Upload produced content; returns its digest. Used before submitting a patch
 that references a large file by digest. Called by Evolution Run (on behalf of
-strategies), CLI (`avn genome content put`).
+strategies) and by owners through the UI or the API.
 
 ```http
 PUT /openapi/v1/bots/bot_123/genome/content
@@ -1628,42 +1628,41 @@ an earlier revision). It lives under the genome path but is specified in
 
 ### 13.1 An owner edits a bot and goes back
 
-```python
-# Illustrative only: generated client SDK (see 09-evolution-api.md)
-from avernet_evolution import Client, RefConflict
+The owner (or a pipeline acting for the owner) uses the public endpoints of
+§12, in this order:
 
-c = Client.from_env()
-active = c.genome.get(bot_id="bot_123", rev="active")         # r41; the caller owns the bot, so no entity_id
+1. `GET /openapi/v1/bots/bot_123/genome/revisions/active` returns `r41`
+   (`sha256:a90b…`).
+2. `POST /openapi/v1/bots/bot_123/genome/revisions` with
+   `Idempotency-Key: owner-edit-2026-10-08-01` and the body below records the
+   edit as a `draft` revision and returns its id.
+3. `PUT /openapi/v1/bots/bot_123/genome/refs/draft` with
+   `{"revision": "<the new id>", "expected_revision": "sha256:a90b…"}` moves
+   `draft`. A `409 ref_conflict` means someone else moved `draft` first; its
+   body names the current revision, and the owner re-reads and decides.
+4. `GET /openapi/v1/bots/bot_123/genome/revisions/<the new id>/diff?against=r41`
+   shows the change.
+5. Going back later is promoting the earlier revision:
+   `POST /openapi/v1/bots/bot_123/genome/promotions` with an `Idempotency-Key`
+   and `{"revision": "r41", "expected_revision": "<what active points at now>", "reason": "r42 increased escalations"}`
+   (specified in [08-promotion.md](08-promotion.md)).
 
-patch = {
-    "patch_schema": 1, "base": active.revision.id,
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+// Request body of step 2
+{
+  "base": "sha256:a90b…",
+  "status": "draft",
+  "patch": {
+    "patch_schema": 1,
+    "base": "sha256:a90b…",
     "ops": [{"op": "file.edit", "target": "persona/SOUL.md",
              "edits": [{"kind": "insert_after", "anchor": "## Tone",
                         "content": "Confirm the order id before quoting amounts."}]}],
-    "rationale": "Owner edit after a customer complaint.", "evidence": [],
+    "rationale": "Owner edit after a customer complaint.",
+    "evidence": []
+  }
 }
-rev = c.genome.record(bot_id="bot_123", base=active.revision.id, patch=patch, status="draft",
-                      idempotency_key="owner-edit-2026-10-08-01")
-try:
-    c.genome.refs.set_draft(bot_id="bot_123", revision=rev.id, expected_revision=active.revision.id)
-except RefConflict as e:
-    print("someone else moved draft to", e.current_revision)   # re-read and decide
-
-print(c.genome.diff(bot_id="bot_123", rev=rev.id, against=active.revision.id).changes)
-
-# Going back later is just promoting the earlier revision (endpoint in 08-promotion.md)
-c.genome.promote(bot_id="bot_123", revision="r41", reason="r42 increased escalations")
-```
-
-The same through the CLI:
-
-```text
-avn genome show bot_123 --rev active --output json
-avn genome patch apply bot_123 --base r41 --file edit.json --dry-run
-avn genome diff bot_123 r42 --against r41
-avn genome refs bot_123
-avn genome promote bot_123 --revision r41 --reason "r42 increased escalations"
-avn genome export bot_123 --format git ./bot_123-history
 ```
 
 ### 13.2 Evolution Run records a candidate (platform side)
@@ -1718,7 +1717,7 @@ The ordering, failure handling, and service-bot publish path are owned by
 | [Evolution Run](06-evolution-run.md) | Run → Genome | Drift check at run start (§5.5); resolve binding `parent`; record candidates with `allowed_genes`; upload produced content; binding checks against `policy` |
 | [Verification](07-verification.md) | Verification → Genome | Compile/materialise parent and candidate into eval bots; link evaluations to revisions |
 | [Promotion](08-promotion.md) | Promotion → Genome | Move `active`/`previous`/`canary` by CAS; set status; compile and apply; record which document digest the applied revision compiled to; refuse on drift (§5.5) |
-| [Evolution API](09-evolution-api.md) | clients → Genome | Public genome endpoints, SDK, `avn genome` |
+| [Evolution API](09-evolution-api.md) | callers → Genome | Public genome endpoints |
 | [Meta-evolution](10-meta-evolution.md) | later | Same revision/ref/patch machinery for mechanism revisions |
 | Engine adapter | Genome → Engine | Memory projection (`project_memory`, `export_memory`); physical layout |
 | BCS | future | A team genome would reference member revisions |

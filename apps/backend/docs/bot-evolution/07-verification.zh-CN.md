@@ -69,7 +69,7 @@
 | 实验记录的模式，以及判定作为实验记录的存储 | [05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md) |
 | 运行、绑定、预算、紧急停止开关、沙箱规则、作业协议传输 | [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) |
 | 静态底线规则、门禁决定、风险等级、评审队列、分权表、发布、回到旧版本 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) |
-| 公共 API 约定、SDK、`avn` CLI | [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) |
+| 公共 API 约定与公共端点索引 | [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) |
 | 改进机制验证（第 3 层），包括验证配置与提交过滤器的离线重放 | [10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md) |
 
 **运行位置。** 验证服务（C5）位于提议新建的模块 `apps/evolution` 中，与
@@ -106,7 +106,7 @@ Backend 钩子（[§8](#8-部署位置复用与迁移)）。
 ```python
 # RiskTier (T0 < T1 < T2 < T3) is defined once in 08-promotion.md §5, with the meaning of each tier.
 # BotRef {owner_id, bot_id}: a bot's full identity (a bot_id alone is not unique
-# across users); defined once in 09-evolution-api.md §2.7.
+# across users); defined once in 09-evolution-api.md §2.6.
 
 class ExecutorKind(StrEnum):           # the executor plugins of §2.3
     LOCAL_SANDBOX = "local_sandbox"
@@ -1296,21 +1296,16 @@ if v.status == "accept":
     base = v.revision          # next round builds on the accepted revision
 ```
 
-**运维人员检查一个手写修订版**，使用生成的客户端
-SDK（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)）：
+**运维人员检查一个手写修订版**，通过 HTTP
+（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)）：
 
-```python
-from avernet_evolution import Client
-
-c = Client.from_env()
-started = c.evaluations.start(
-    bot_id="bot_123", revision="sha256:7c1e…", baseline="sha256:a90b…",
-    suites=["support-core"], splits=["validation", "regression"],
-    idempotency_key="adhoc-bot_123-r42-2026-10-08")       # same key on every retry
-op = c.operations.wait(bot_id="bot_123", operation=started.operation_id)   # short lookups by id
-ev = c.evaluations.get(bot_id="bot_123", evaluation=op.result["evaluation_id"])
-print(ev.splits["validation"].ci, ev.splits["regression"].newly_failing)
-```
+1. `POST /openapi/v1/bots/bot_123/evolution/evaluations`，带上
+   `Idempotency-Key: adhoc-bot_123-r42-2026-10-08` 和 §10 中所示的请求体，
+   返回 `{"operation_id": "op_19a"}`。重试时发送相同的键。
+2. 重复 `GET /openapi/v1/bots/bot_123/evolution/operations/op_19a`，直到
+   状态为终态；成功后，其 `result` 携带 `evaluation_id`。
+3. `GET /openapi/v1/bots/bot_123/evolution/evaluations/{evaluation}` 返回
+   各划分的结果；运维人员读取验证划分的区间以及新失败的回归用例。
 
 **服务型 Bot 发布流程门禁**（Backend，为 RSI-22 提议）：在
 `VALIDATING → ONLINE_PUB` 转换时，钩子请求一个判定，若出现必过失败且没有经
@@ -1341,7 +1336,7 @@ async def before_online_pub(publish: PublishRecord, client: VerificationClient) 
 | [05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md) | 验证 → 实验记录 | 每个实验的判定、评估、成本、验证器版本；在线结果；验证器变更建议只回流给人 |
 | [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) | 运行 ↔ 验证 | 提交时的 `verify(candidate, profile)`；训练端点的作业协议传输；预算扣费；沙箱规则 |
 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) | 验证 ↔ 晋升 | 判定进入门禁和候选报告；静态底线结果（来自提交时）和风险等级进入验证；留出集审计请求与留出集得分下降；金丝雀/影子比较 |
-| [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) | API → 验证 | 公共套件与评估端点；共享约定；SDK 与 CLI 客户端 |
+| [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) | API → 验证 | 公共套件与评估端点；共享约定 |
 | [10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md) | 元进化 → 验证 | 在问题粒度上复用比较器；通过新的验证配置重放已存储的候选以进行筛选 |
 | Backend 发布流程与 Quality Task | Backend ↔ 验证 | 已部署沙箱执行器（`eval_publish`、`eval_env`）；可选的 VERIFY 阶段门禁；为 Quality Task 提供仓库内评分器 |
 | ClawInsight | Insight → 验证 | 复发检查结果作为在线信号 |

@@ -23,8 +23,9 @@ OpenAPI v1 目前拒绝 `bot` 主体，并且 bot→owner 的回退机制是被�
 Passport/AgentPass 签发；网关以类型 `bot` 及其作用域签署主体；各服务通过授权
 钩子检查作用域。
 
-bot 通过 `avn` CLI 和一个随附的 skill 访问该接口面，二者由 Manifest
-`cli_tools` 交付，沿用 `bcs-cli` 的先例。
+bot 通过公共进化 API（`/openapi/v1`）访问该接口面，使用一个随附的 skill 和一个
+封装这些调用的面向 bot 的工具，二者由 Manifest `cli_tools` 交付，沿用 `bcs-cli`
+的先例。
 
 设计：本提议已推迟；原先放在接口文档中的权限范围草案已删除，将与 bot 如何与平台通信一起重新设计。
 
@@ -32,7 +33,7 @@ bot 通过 `avn` CLI 和一个随附的 skill 访问该接口面，二者由 Man
 
 - OpenAPI v1 对 bot 调用方的普遍拒绝规则对其他所有端点继续有效。
 - 准入测试必须证明 bot 主体在进化作用域之外被拒绝，并且无法跨越 bot 边界。
-- 新的公开 CLI（`avn`）需要一个与 `bcs-cli` 相当的覆盖率门禁。
+- 封装该 API 的面向 bot 的工具需要一个与 `bcs-cli` 相当的覆盖率门禁。
 
 ## 备选方案
 

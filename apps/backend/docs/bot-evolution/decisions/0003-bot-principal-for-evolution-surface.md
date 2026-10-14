@@ -27,8 +27,9 @@ enablement, or access to another bot's genome. Credentials come from existing
 Passport/AgentPass issuance; the gateway signs the principal with kind `bot`
 and its scopes; services check scopes through the authorization hook.
 
-Bots reach the surface through the `avn` CLI and a shipped skill, delivered by
-Manifest `cli_tools`, following the `bcs-cli` precedent.
+Bots reach the surface through the public evolution API (`/openapi/v1`),
+using a shipped skill and a bot-facing tool that wraps those calls, delivered
+by Manifest `cli_tools`, following the `bcs-cli` precedent.
 
 Design: this proposal is postponed; the scope sketch that used to live in the interfaces doc was dropped and will be redesigned together with how bots talk to the platform.
 
@@ -38,7 +39,8 @@ Design: this proposal is postponed; the scope sketch that used to live in the in
   other endpoint.
 - Admission tests must prove bot principals are refused outside the
   evolution scopes and cannot cross bot boundaries.
-- A new public CLI (`avn`) needs a coverage gate comparable to `bcs-cli`.
+- The bot-facing tool that wraps the API needs a coverage gate comparable to
+  `bcs-cli`.
 
 ## Alternatives
 

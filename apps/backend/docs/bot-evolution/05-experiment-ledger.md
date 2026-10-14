@@ -27,7 +27,7 @@ The ledger serves four readers:
 
 | Reader | What it uses the ledger for |
 | --- | --- |
-| Humans (owners, reviewers, researchers) | Browsing lineage, candidate reports, and the audit trail in the UI or `avn` |
+| Humans (owners, reviewers, researchers) | Browsing lineage, candidate reports, and the audit trail in the UI or through the API |
 | Level 2 (parent choice) | Selecting a parent beyond `active`: latest-best, Pareto front per case, MAP-Elites niches, clade scores ([§7](#7-archive-selectors-parent-choice)) |
 | Strategies | A filesystem export of raw history, because raw history beats summaries for proposers (Meta-Harness) ([§9](#9-exports)) |
 | Level 3 (later) | The evidence base for improving the mechanism itself: derived mechanism metrics and frozen improvement problems ([§8](#8-mechanism-metrics-and-verifier-versions)) |
@@ -147,7 +147,7 @@ class Split(StrEnum):                            # same set as 07-verification.m
 
 # RiskTier (T0 < T1 < T2 < T3) is defined once in 08-promotion.md §5.
 # BotRef {owner_id, bot_id}: a bot's full identity (a bot_id alone is not unique
-# across users); defined once in 09-evolution-api.md §2.7.
+# across users); defined once in 09-evolution-api.md §2.6.
 # EvidenceRef "<kind>:<id>": 01-genome.md §2.2.
 
 
@@ -584,7 +584,7 @@ is enforced by the platform's views, not by prompts.
 
 | Reader | Sees |
 | --- | --- |
-| Owner, tenant admin, reviewer (UI, `avn`, API) | Everything for their bots, including per-split results and evidence |
+| Owner, tenant admin, reviewer (UI or API) | Everything for their bots, including per-split results and evidence |
 | Pipelines (API) | Same as the human whose credentials they use |
 | Strategies (filesystem export, future capability) | Their own and permitted bots' entries with verdict **aggregates only**: status, validation mean and interval, cost, adoption, online outcome. No per-case validation detail; no holdout, regression, or safety cases or case ids; train results as reported to the strategy at run time |
 | Meta-strategies (level 3, later) | The same strategy view, plus derived mechanism metrics; never mechanism-holdout problems |
@@ -750,7 +750,7 @@ through the Genome API like any other content. How a strategy receives the
 export inside a run (the level-3 capability `ledger.read@1`, defined in
 [10-meta-evolution.md](10-meta-evolution.md)) is decided with level 3; until then, an operator can export and hand the directory to a
 strategy run as params. This is proposed; the git export of genome history
-(`avn genome export --format git`) is a separate, Genome-owned export.
+([01-genome.md](01-genome.md)) is a separate, Genome-owned export.
 
 ### 9.2 Training-data export
 
@@ -899,7 +899,7 @@ are written only by platform services.
 ### GET /bots/{bot_id}/evolution/ledger
 
 List ledger entries of a bot, newest first, with filters. Called by the UI
-backend (lineage, history, audit views), the `avn` CLI, and pipelines.
+backend (lineage, history, audit views) and pipelines.
 
 Query parameters are the fields of `LedgerFilter`: `kind`, `run`,
 `strategy`, `strategy_version`, `parent`, `candidate_revision`, `verdict`,
@@ -949,8 +949,7 @@ of range); `404 bot_not_found`.
 ### GET /bots/{bot_id}/evolution/ledger/{entry}
 
 Return one entry with all fields and its full event history. Called by the
-UI backend (candidate history, audit detail) and the CLI
-(`avn evolve ledger show`).
+UI backend (candidate history, audit detail) and pipelines.
 
 Example request:
 
@@ -1089,41 +1088,22 @@ write to the ledger directly: their submissions reach it through
 
 ## 13. Examples
 
-**A pipeline reviews last week's accepted candidates of one strategy.**
+**A pipeline reviews last week's accepted candidates of one strategy.** It
+lists the entries, then reads each one by its `entry_id` for the verdict,
+cost, and adoption:
 
-```python
-from avernet_evolution import Client
-
-c = Client.from_env()
-page = c.ledger.list(bot_id="bot_123", strategy="clawevolve/bot-evolution",
-                     verdict="accept", since="2026-10-02T00:00:00Z")
-for item in page.items:
-    entry = c.ledger.get(bot_id="bot_123", entry=item.entry_id)
-    print(item.candidate_revision.seq, entry.verdict.status,
-          entry.cost.usd, entry.adoption.promoted)
+```http
+GET /openapi/v1/bots/bot_123/evolution/ledger?strategy=clawevolve/bot-evolution&verdict=accept&since=2026-10-02T00:00:00Z&page=1&page_size=100
+GET /openapi/v1/bots/bot_123/evolution/ledger/led_5c2
 ```
 
 **The UI backend draws the lineage tree.** Revisions come from the Genome
-API; the ledger adds what happened to each candidate.
-
-```python
-def lineage_tree(c, bot_id: str) -> dict[str, dict]:
-    nodes: dict[str, dict] = {}
-    page_no = 1
-    while True:
-        page = c.ledger.list(bot_id=bot_id, kind="experiment", page=page_no, page_size=100)
-        for e in page.items:
-            nodes[e.candidate_revision.id] = {
-                "seq": e.candidate_revision.seq,
-                "parent": e.parent_revision.id,
-                "verdict": e.verdict,
-                "promoted": e.promoted,
-                "gone_back": e.gone_back,
-            }
-        if page_no * 100 >= page.total:
-            return nodes
-        page_no += 1
-```
+API; the ledger adds what happened to each candidate. The UI backend sends
+`GET /openapi/v1/bots/bot_123/evolution/ledger?kind=experiment&page=1&page_size=100`
+and increases `page` until it has read `total` entries (pagination in
+[09-evolution-api.md](09-evolution-api.md) §8). Each entry becomes one node,
+keyed by `candidate_revision.id`, with `candidate_revision.seq`, its parent
+`parent_revision.id`, `verdict`, `promoted`, and `gone_back`.
 
 **The Evolution Run service records a submission** (platform code, inside
 `ctx.candidates.submit`).
@@ -1145,17 +1125,13 @@ async def submit(self, run: Run, cand: Candidate) -> str:
     return candidate_id   # same id on a retried or re-dispatched submission
 ```
 
-**An operator starts a filesystem export and waits for it** (CLI, proposed
-command names).
-
-```text
-avn evolve ledger export --bot bot_123 --format filesystem \
-    --strategy clawevolve/bot-evolution --since 2026-07-01 \
-    --idempotency-key ledger-export-bot_123-2026-10-09 --wait --output json
-```
-
-`--wait` only repeats the status lookup by operation id; it never holds a
-request open.
+**An operator starts a filesystem export and waits for it.** The operator
+sends the export request shown in §12 (`POST …/ledger:export` with
+`Idempotency-Key: ledger-export-bot_123-2026-10-09`) and gets
+`{"operation_id": "op_19a"}`. It then repeats
+`GET /openapi/v1/bots/bot_123/evolution/operations/op_19a` until the status
+is terminal; the result holds the download location of the archive. Each
+lookup is a short request; none is held open.
 
 **Going back is visible in the ledger.** After the owner promotes r41 again,
 entry `led_5c2` (r42) gains a `gone_back` event, and a governance entry

@@ -120,7 +120,7 @@ Digest = str       # address of stored bytes: "sha256:" + 64 hex chars of the by
                    # resource, MCP config, CLI tool, script); the field that holds a digest says what the bytes are.
 # RiskTier (T0 < T1 < T2 < T3) is defined once in 08-promotion.md §5.
 # BotRef {owner_id, bot_id}: the bot's full identity (a bot_id alone is not unique
-# across users); defined once in 09-evolution-api.md §2.7.
+# across users); defined once in 09-evolution-api.md §2.6.
 ```
 
 人设文件与技能：
@@ -359,7 +359,7 @@ class GenomePolicy:
 
 ```python
 class ProvenanceKind(StrEnum):
-    USER = "user"                    # a person edited the bot through the genome API (UI, API, or CLI);
+    USER = "user"                    # a person edited the bot through the genome API (UI or API);
                                      # a direct PUT /config-manifest records no revision (§5.5)
     STRATEGY_RUN = "strategy_run"    # a strategy submitted it as a candidate during an Evolution Run
     BOT = "bot"                      # postponed with DR-3
@@ -388,7 +388,7 @@ class RevisionStatus(StrEnum):
 class RevisionMetadata:
     id: RevisionId                   # the revision's identity: hash of {spec, policy} (§4.4)
     seq: int                         # per-bot counter for people: the bot's 1st recorded revision is 1 ("r1"), the
-                                     # 42nd is 42 ("r42"). UIs and the CLI show it, and paths accept it
+                                     # 42nd is 42 ("r42"). UIs show it, and paths accept it
                                      # (GET …/revisions/r42), but it is not an identity: other records store `id`
     bot: BotRef                      # the bot this revision belongs to (owner + bot id)
     parent: RevisionId | None        # the revision this one was made from: the patch's `base`, or the `base` given
@@ -764,7 +764,7 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 
 | 状态 | 含义（提议） | 设置者 |
 | --- | --- | --- |
-| `draft` | 由所有者通过基因组 API 进行的手动编辑记录（UI、API、CLI） | 基因组注册表 |
+| `draft` | 由所有者通过基因组 API 进行的手动编辑记录（UI 或 API） | 基因组注册表 |
 | `candidate` | 由运行期间提交的补丁记录，尚未决定 | 基因组注册表 |
 | `accepted` | 门禁已接受它（它可能还在等待评审或发布） | [晋升](08-promotion.zh-CN.md) |
 | `rejected` | 验证或门禁拒绝了它；保留在归档中 | [晋升](08-promotion.zh-CN.md) |
@@ -827,18 +827,18 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 金丝雀实例重新运行 `active`（[08-promotion.zh-CN.md](08-promotion.zh-CN.md)）。
 *示例：* `canary` = `r42`，在 10% 的实例上运行一天，然后 `active` 移到 `r42`。
 
-**`draft`：所有者正在进行的工作。** 每次通过基因组 API 进行的手动编辑（UI、API、
-CLI）都会记录一个修订版，并将 `draft` 移到它。在所有者晋升之前，没有任何东西运行 `draft`，因此所有者可以
+**`draft`：所有者正在进行的工作。** 每次通过基因组 API 进行的手动编辑（UI 或 API）
+都会记录一个修订版，并将 `draft` 移到它。在所有者晋升之前，没有任何东西运行 `draft`，因此所有者可以
 保存未完成的工作。*示例：* 所有者两次编辑 `SOUL.md`；这会记录 `r43` 和 `r44`，
 `draft` = `r44`，而 `active` 保持为 `r42`，直到所有者晋升 `r44`。
 
 **`candidate/<run_id>/<n>`：某次运行的一个候选。** 进化运行 `run_id` 提交的第 `n`
 个候选（从 1 开始，按提交顺序计数）。当进化策略提交候选时，由进化运行创建它
 （[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。它之后从不移动，因此在
-门禁做出决定后这个名字仍然有效，可以用在 UI、CLI 和实验记录链接中。*示例：*
+门禁做出决定后这个名字仍然有效，可以用在 UI、API 路径和实验记录链接中。*示例：*
 `run_7f3` 提交了两个补丁；它们被记录为 `r42` 和 `r45`，并分别命名为
-`candidate/run_7f3/1` 和 `candidate/run_7f3/2`。`avn genome show candidate/run_7f3/2`
-显示 `r45`。所有者手动编辑得到的修订版不会有 candidate 引用。
+`candidate/run_7f3/1` 和 `candidate/run_7f3/2`。`GET …/genome/revisions/candidate/run_7f3/2`
+返回 `r45`。所有者手动编辑得到的修订版不会有 candidate 引用。
 
 ### 5.3 比较并交换
 
@@ -918,7 +918,7 @@ Bot）都会记录它所应用的 Manifest 文档的摘要（§8 第 5 项）。
 
 基因组补丁是进化策略唯一可以提交的东西。它是逐项且带类型的，这遵循了 ACE 的发现：
 增量更新可以避免上下文坍缩（整体重写会逐渐抹去累积的细节）。不支持自动化参与者进行
-整份文档替换。人也可以提交补丁（例如 `avn genome patch apply`），或记录一份完整文档。
+整份文档替换。人也可以提交补丁（通过 `POST …/genome/revisions`，§12），或记录一份完整文档。
 
 来源中展示的操作（完整操作集由 RSI-02 确定）：
 
@@ -1082,7 +1082,7 @@ manifest 应用流水线已经为其获取的所有内容保留了平台自己�
 
 - **在 Backend 内部，** `ManifestContentService.read(digest)` 返回字节，并在读取时
   重新校验哈希。
-- **在 Backend 外部**（UI、CLI、进化策略、评估器），注册表 API 提供
+- **在 Backend 外部**（UI、流水线、进化策略、评估器），注册表 API 提供
   `GET /bots/{bot_id}/genome/content/{digest}`。它会针对 Bot 进行访问检查，因此摘要
   本身并不是一种访问凭证。新内容通过 `PUT /bots/{bot_id}/genome/content` 上传，该接口
   返回其摘要。
@@ -1109,8 +1109,7 @@ manifest 应用流水线已经为其获取的所有内容保留了平台自己�
 | **数据库修订版 + 现有的内容寻址存储**（推荐） | 租户隔离、ACL、可对谱系和状态进行查询、复用 manifest 内容存储、符合 Backend 的模式 | 需要自己的 diff/merge 工具 |
 | 每个 Bot 一个 Git 仓库 | 免费获得历史、diff、blame；编码智能体本就熟悉 git | 多租户托管、ACL、跨 Bot 查询、GC：一项新的基础设施依赖 |
 
-建议：原生数据库方案，外加 **git 导出**（`avn genome export
---format git`），使人和编码智能体类进化策略可以在熟悉的文件系统历史上工作
+建议：原生数据库方案，外加 **修订版历史的 git 导出**（提议；§12 中尚无对应端点），使人和编码智能体类进化策略可以在熟悉的文件系统历史上工作
 （Meta-Harness 的经验），而无需让 git 成为事实来源。
 
 提议的表（名称仅为示意，由 RSI-03 确定）：`ac_genome_revision`
@@ -1253,12 +1252,12 @@ class GenomeRegistry(Protocol):
 [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)）。以下响应展示的是标准信封中的
 `data` 负载；信封、错误、分页和幂等性见
 [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)。
-第一轮迭代中的调用方是人（UI、`avn` CLI）、流水线和平台服务；Bot 调用方推迟到之后
-单独的设计中。
+第一轮迭代中的调用方是通过工作台 UI 操作的人、通过 HTTP 调用的流水线和 CI，以及平台服务；
+Bot 调用方推迟到之后单独的设计中。
 
 ### GET /bots/{bot_id}/genome/revisions
 
-列出经过筛选的修订版元数据。调用方：UI、CLI（`avn genome log`）、流水线、
+列出经过筛选的修订版元数据。调用方：UI、流水线、
 实验记录读模型。
 
 ```http
@@ -1283,7 +1282,7 @@ GET /openapi/v1/bots/bot_123/genome/revisions?status=candidate&parent=sha256:a90
 
 从补丁（`{base, patch}`）或 Manifest 文档（`{manifest}`）记录修订版。调用方：
 进化运行（当进化策略调用 `ctx.candidates.submit` 时；进化策略从不直接调用此接口），
-以及通过 UI/CLI（`avn genome patch apply`）操作的所有者。返回该修订版；记录已存在的
+以及通过 UI 或 API 操作的所有者。返回该修订版；记录已存在的
 内容时，以 `200` 返回已有修订版。
 
 ```jsonc
@@ -1336,7 +1335,7 @@ GET /openapi/v1/bots/bot_123/genome/revisions?status=candidate&parent=sha256:a90
 ### GET /bots/{bot_id}/genome/revisions/{rev}
 
 完整修订版（元数据、`spec`、`policy`）。`{rev}` 可以是 id、`r<seq>` 或引用名。
-调用方：UI、CLI（`avn genome show`）、进化运行（用于构建 `ctx.parent`）、验证。
+调用方：UI、流水线、进化运行（用于构建 `ctx.parent`）、验证。
 
 ```http
 GET /openapi/v1/bots/bot_123/genome/revisions/r41
@@ -1363,7 +1362,7 @@ GET /openapi/v1/bots/bot_123/genome/revisions/r41
 ### GET /bots/{bot_id}/genome/revisions/{rev}/diff?against=
 
 比较两个修订版的差异。调用方：评审 UI 和 [08-promotion.zh-CN.md](08-promotion.zh-CN.md)
-中的候选报告、CLI（`avn genome diff`）。
+中的候选报告，以及流水线。
 
 ```http
 GET /openapi/v1/bots/bot_123/genome/revisions/r42/diff?against=r41
@@ -1388,7 +1387,7 @@ GET /openapi/v1/bots/bot_123/genome/revisions/r42/diff?against=r41
 
 ### GET /bots/{bot_id}/genome/refs
 
-列出引用。调用方：UI、CLI（`avn genome refs`）、进化运行（解析绑定的 `parent`）、
+列出引用。调用方：UI、流水线、进化运行（解析绑定的 `parent`）、
 晋升。
 
 ```http
@@ -1411,7 +1410,7 @@ GET /openapi/v1/bots/bot_123/genome/refs
 
 ### PUT /bots/{bot_id}/genome/refs/draft
 
-以比较并交换方式移动所有者的 `draft` 引用。由所有者通过 UI/CLI 调用。
+以比较并交换方式移动所有者的 `draft` 引用。由所有者通过 UI 或 API 调用。
 （`active`、`previous`、`canary` 不能在此移动；它们只能通过
 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 中的 `POST /bots/{bot_id}/genome/promotions`
 移动。）
@@ -1429,8 +1428,7 @@ GET /openapi/v1/bots/bot_123/genome/refs
  "moved_by": {"kind": "user", "actor": "user_owner_1"}, "reason": null}
 ```
 
-错误：409 `ref_conflict`，响应体中包含当前修订版（CLI 退出码 4）；
-404 未知修订版。
+错误：409 `ref_conflict`，响应体中包含当前修订版；404 未知修订版。
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -1440,8 +1438,8 @@ GET /openapi/v1/bots/bot_123/genome/refs
 
 ### GET /bots/{bot_id}/genome/content/{digest}
 
-按摘要获取字节。针对 Bot 进行访问检查。调用方：UI、CLI
-（`avn genome content get`）、进化策略的工作区物化（通过进化运行）、验证。
+按摘要获取字节。针对 Bot 进行访问检查。调用方：UI、
+流水线、进化策略的工作区物化（通过进化运行）、验证。
 
 ```http
 GET /openapi/v1/bots/bot_123/genome/content/sha256:3f9a…
@@ -1461,7 +1459,7 @@ You are the support agent for …
 ### PUT /bots/{bot_id}/genome/content
 
 上传产出型内容；返回其摘要。在提交按摘要引用大文件的补丁之前使用。调用方：
-进化运行（代表进化策略）、CLI（`avn genome content put`）。
+进化运行（代表进化策略），以及通过 UI 或 API 操作的所有者。
 
 ```http
 PUT /openapi/v1/bots/bot_123/genome/content
@@ -1493,42 +1491,40 @@ def lookup(order_id): ...
 
 ### 13.1 所有者编辑 Bot 并回到旧版本
 
-```python
-# Illustrative only: generated client SDK (see 09-evolution-api.md)
-from avernet_evolution import Client, RefConflict
+所有者（或代表所有者的流水线）按以下顺序使用 §12 的公共端点：
 
-c = Client.from_env()
-active = c.genome.get(bot_id="bot_123", rev="active")         # r41; the caller owns the bot, so no entity_id
+1. `GET /openapi/v1/bots/bot_123/genome/revisions/active` 返回 `r41`
+   （`sha256:a90b…`）。
+2. `POST /openapi/v1/bots/bot_123/genome/revisions`，带
+   `Idempotency-Key: owner-edit-2026-10-08-01` 和下面的请求体，将这次编辑记录为
+   `draft` 修订版并返回其 id。
+3. `PUT /openapi/v1/bots/bot_123/genome/refs/draft`，带
+   `{"revision": "<the new id>", "expected_revision": "sha256:a90b…"}`，移动
+   `draft`。`409 ref_conflict` 表示别人先移动了 `draft`；其响应体给出当前修订版，
+   所有者重新读取后再做决定。
+4. `GET /openapi/v1/bots/bot_123/genome/revisions/<the new id>/diff?against=r41`
+   显示这次改动。
+5. 之后回到旧版本就是晋升较早的修订版：
+   `POST /openapi/v1/bots/bot_123/genome/promotions`，带 `Idempotency-Key`
+   和 `{"revision": "r41", "expected_revision": "<what active points at now>", "reason": "r42 increased escalations"}`
+   （定义见 [08-promotion.zh-CN.md](08-promotion.zh-CN.md)）。
 
-patch = {
-    "patch_schema": 1, "base": active.revision.id,
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+// Request body of step 2
+{
+  "base": "sha256:a90b…",
+  "status": "draft",
+  "patch": {
+    "patch_schema": 1,
+    "base": "sha256:a90b…",
     "ops": [{"op": "file.edit", "target": "persona/SOUL.md",
              "edits": [{"kind": "insert_after", "anchor": "## Tone",
                         "content": "Confirm the order id before quoting amounts."}]}],
-    "rationale": "Owner edit after a customer complaint.", "evidence": [],
+    "rationale": "Owner edit after a customer complaint.",
+    "evidence": []
+  }
 }
-rev = c.genome.record(bot_id="bot_123", base=active.revision.id, patch=patch, status="draft",
-                      idempotency_key="owner-edit-2026-10-08-01")
-try:
-    c.genome.refs.set_draft(bot_id="bot_123", revision=rev.id, expected_revision=active.revision.id)
-except RefConflict as e:
-    print("someone else moved draft to", e.current_revision)   # re-read and decide
-
-print(c.genome.diff(bot_id="bot_123", rev=rev.id, against=active.revision.id).changes)
-
-# Going back later is just promoting the earlier revision (endpoint in 08-promotion.md)
-c.genome.promote(bot_id="bot_123", revision="r41", reason="r42 increased escalations")
-```
-
-通过 CLI 完成同样的操作：
-
-```text
-avn genome show bot_123 --rev active --output json
-avn genome patch apply bot_123 --base r41 --file edit.json --dry-run
-avn genome diff bot_123 r42 --against r41
-avn genome refs bot_123
-avn genome promote bot_123 --revision r41 --reason "r42 increased escalations"
-avn genome export bot_123 --format git ./bot_123-history
 ```
 
 ### 13.2 进化运行记录一个候选（平台侧）
@@ -1582,7 +1578,7 @@ apply_service.apply(bot=bot, document=compiled.document)
 | [进化运行](06-evolution-run.zh-CN.md) | 运行 → 基因组 | 运行开始时的漂移检查（§5.5）；解析绑定的 `parent`；以 `allowed_genes` 记录候选；上传产出型内容；针对 `policy` 检查绑定 |
 | [验证](07-verification.zh-CN.md) | 验证 → 基因组 | 将父代和候选编译/物化为评估 Bot；将评估链接到修订版 |
 | [晋升](08-promotion.zh-CN.md) | 晋升 → 基因组 | 通过 CAS 移动 `active`/`previous`/`canary`；设置状态；编译并应用；记录已应用的修订版编译出了哪个文档摘要；发生漂移时拒绝（§5.5） |
-| [进化 API](09-evolution-api.zh-CN.md) | 客户端 → 基因组 | 公共基因组端点、SDK、`avn genome` |
+| [进化 API](09-evolution-api.zh-CN.md) | 调用方 → 基因组 | 公共基因组端点 |
 | [元进化](10-meta-evolution.zh-CN.md) | 之后 | 用于机制修订版的同一套修订版/引用/补丁机制 |
 | 引擎适配器 | 基因组 → 引擎 | 记忆投影（`project_memory`、`export_memory`）；物理布局 |
 | BCS | 未来 | 团队基因组将引用成员修订版 |

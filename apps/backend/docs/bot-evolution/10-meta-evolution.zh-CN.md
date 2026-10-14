@@ -45,7 +45,7 @@
 | 执行一次运行：绑定、租约、预算、紧急停止开关、沙箱、作业协议 | [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) |
 | Bot 验证（S′ 与 S1 对比）：套件、划分、评分器、比较器、判定、验证器完整性 | [07-verification.zh-CN.md](07-verification.zh-CN.md) |
 | 权力分立、门禁、风险等级、Bot 基因组的晋升 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) |
-| 共享 API 约定、幂等键、SDK、`avn` CLI | [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) |
+| 共享 API 约定、幂等键、公共端点索引 | [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) |
 | 基因组修订版，以及第 3 级复用的修订版/引用/补丁机制 | [01-genome.zh-CN.md](01-genome.zh-CN.md) |
 
 **运行位置。** 在新模块 `apps/evolution` 中，与 Strategy Registry、进化运行、
@@ -768,12 +768,12 @@ class LedgerRead(Protocol):
 （`clawevolve%2Fbot-evolution`），与 [03-strategy.zh-CN.md](03-strategy.zh-CN.md) 中
 Strategy Registry 端点的做法相同。
 
-调用方：人工操作员和研究人员（UI、`avn`），以及在进化策略变更时运行改进问题基准的
-流水线/CI。Bot 调用方随 DR-3 推迟，不是此接口面的调用方。
+调用方：人工操作员和研究人员（通过工作台 UI），以及在进化策略变更时通过 HTTP
+运行改进问题基准的流水线/CI。Bot 调用方随 DR-3 推迟，不是此接口面的调用方。
 
 ### GET /evolution/strategies/{id}/mechanism/revisions
 
-列出某个家族的机制修订版及其谱系和状态。由 UI 和 `avn` 调用。
+列出某个家族的机制修订版及其谱系和状态。由 UI 和流水线调用。
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -873,7 +873,7 @@ Strategy Registry 端点的做法相同。
 ### GET /evolution/mechanism-candidates/{candidate}
 
 机制候选的采纳报告：补丁、静态检查、机制验证比较结果和门禁决定。由评审者调用
-（UI、`avn evolve mechanism review show`）。
+（通过 UI）。
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -1218,26 +1218,25 @@ POST /evolution/v1/runs/{run}/ledger:export    ctx.ledger.export → {workspace_
 第一个有用的第 3 级步骤不需要元策略：ClawEvolve 维护者修改 tune 提示词，注册
 `2.0.1`，然后让机制验证来决定。
 
-```python
-from avernet_evolution import Client
+`2.0.1` 通过 `POST /evolution/strategies` 注册
+（[03-strategy.zh-CN.md](03-strategy.zh-CN.md)）；其修订版为 `sha256:5b0e…`，带有
+新的 tune 提示词摘要。随后维护者的 CI 调用：
 
-c = Client.from_env()
-family = "clawevolve/bot-evolution"
-
-# 2.0.1 was registered with `avn strategy publish` (03-strategy.md); new tune-prompt digest.
-v = c.mechanism_verifications.start(
-    family=family, candidate="2.0.1", baseline="active",
-    profile="mechanism-default@1",
-    idempotency_key="mv-clawevolve-2.0.1-vs-2.0.0",   # same key on every retry
-)
-result = c.mechanism_verifications.wait(v.verification_id)   # short lookups by id
-print(result.verdict, result.comparison["yield_gain_pct"])
-
-if result.verdict == "accept":
-    # T3: a human approves from the report; approval promotes `active` (or `canary` first).
-    report = c.mechanism_candidates.get(result.candidate)   # human-registered: candidate id = revision id
-    c.mechanism_candidates.approve(report.candidate, reason="Benchmark accept; reviewed diff")
-```
+1. `POST /openapi/v1/evolution/mechanism-verifications`，带上
+   `Idempotency-Key: mv-clawevolve-2.0.1-vs-2.0.0`（每次重试都使用相同的键）
+   和 §13 中所示的请求体（`candidate` 为 `sha256:5b0e…`，`baseline` 为
+   `active`，`profile` 为 `mechanism-default@1`）。响应携带
+   `verification_id` `mv_31`。
+2. 重复 `GET /openapi/v1/evolution/mechanism-verifications/mv_31`，作为
+   短查询，直到 `operation.status` 为终态。流水线读取
+   `verdict` 和 `comparison.yield_gain_pct`。
+3. 如果判定为 `accept`，该变更属于 T3，因此由人根据报告批准：
+   `GET /openapi/v1/evolution/mechanism-candidates/sha256:5b0e…`
+   （对于人工注册的版本，候选 id 就是修订版 id），
+   然后 `POST /openapi/v1/evolution/mechanism-candidates/sha256:5b0e…:approve`，
+   带上一个 `Idempotency-Key` 和
+   `{"reason": "Benchmark accept; reviewed diff"}`。批准会晋升
+   `active`，或先晋升 `canary`。
 
 ### 14.2 元策略（草图）
 
@@ -1267,17 +1266,17 @@ class MetaEvolve(EvolutionStrategy):
 
 ### 14.3 低成本筛选提交过滤器变更
 
-```python
-rp = c.replays.start(family=family, candidate="2.0.2",
-                     corpus={"since": "2026-07-01T00:00:00Z", "labelled_only": True},
-                     idempotency_key="replay-filter-min-gain-2")
-screen = c.replays.wait(rp.replay_id)
-if screen.candidate["precision_pct"] > screen.baseline["precision_pct"]:
-    # Worth paying for a real comparison; screening alone never adopts.
-    c.mechanism_verifications.start(family=family, candidate="2.0.2", baseline="active",
-                                    profile="mechanism-default@1",
-                                    idempotency_key="mv-clawevolve-2.0.2-vs-active")
-```
+1. `POST /openapi/v1/evolution/replays`，带上
+   `Idempotency-Key: replay-filter-min-gain-2`、作为 `candidate` 的 `2.0.2`
+   修订版，以及语料
+   `{"since": "2026-07-01T00:00:00Z", "labelled_only": true}`（请求体形状见
+   §13）。响应携带 `replay_id`。
+2. 重复 `GET /openapi/v1/evolution/replays/{replay}`，直到状态
+   为终态。
+3. 只有当候选的 `precision_pct` 高于基线的 `precision_pct` 时，才值得为一次
+   真正的比较付费：`POST /openapi/v1/evolution/mechanism-verifications`，
+   带上 `Idempotency-Key: mv-clawevolve-2.0.2-vs-active` 和 `baseline`
+   `active`。仅靠筛选永远不会采纳。
 
 ### 14.4 跟随或固定家族的机制（提议的绑定形式）
 
@@ -1297,10 +1296,15 @@ if screen.candidate["precision_pct"] > screen.baseline["precision_pct"]:
 
 ### 14.5 回到旧版本
 
-```bash
-avn evolve mechanism promote clawevolve/bot-evolution --revision 2.0.0 \
-  --reason "False-acceptance rate rose after 2.0.1" --yes
+```http
+POST /openapi/v1/evolution/strategies/clawevolve%2Fbot-evolution/mechanism/promotions
+Idempotency-Key: goback-clawevolve-2.0.1-to-2.0.0
+
+{"revision": "sha256:3f12…", "expected_active": "sha256:5b0e…", "reason": "False-acceptance rate rose after 2.0.1"}
 ```
+
+`sha256:3f12…` 是 `2.0.0`，`sha256:5b0e…` 是 `2.0.1`。回到旧版本不需要
+新的验证；响应见 §13。
 
 ## 15. 交互
 
@@ -1315,7 +1319,7 @@ avn evolve mechanism promote clawevolve/bot-evolution --revision 2.0.0 \
 | 晋升（[08-promotion.zh-CN.md](08-promotion.zh-CN.md)） | 双向 | 机制门禁配置、默认 T3、评审队列条目、权力分立 |
 | 经验（[02-experience.zh-CN.md](02-experience.zh-CN.md)） | 经验 → 元进化 | 用于改进问题的冻结经验快照 |
 | 基因组（[01-genome.zh-CN.md](01-genome.zh-CN.md)） | 基因组 → 元进化 | 共享的修订版/引用/补丁机制；问题的起始基因组 |
-| 进化 API（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)） | 元进化 → API | 在共享约定下的 §13 端点；`avn evolve mechanism …` 命令 |
+| 进化 API（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)） | 元进化 → API | 在共享约定下的 §13 端点 |
 
 ## 16. 待定决策
 

@@ -72,16 +72,17 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
   （用 04-default-strategies.md 中的 ClawEvolve 草图核对），并且一个非 ClawEvolve 的进化策略（记忆整合）能以
   一组不同的能力适配。
 
-### RSI-07 进化 API 与 CLI 契约
+### RSI-07 进化 API 契约
 - **模块**：evolution、backend、gateway
-- **目标**：Genome 与 Evolution 资源的 OpenAPI（异步模式、幂等性、ETag、与
-  OpenAPI v1 一致的错误信封），以及带 JSON 输出 schema 与退出码的 `avn` 命令树。
+- **目标**：Genome 与 Evolution 资源的 OpenAPI 文档（异步模式、幂等性、ETag、与
+  OpenAPI v1 一致的错误信封）、gateway 路由，以及针对这些约定的共享一致性测试。
 - **先读**：[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)；
-  `apps/backend/docs/openapi-v1/README.md`；`apps/bcs/crates/tools/bcs-cli/CONTEXT.md`。
-- **交付物**：OpenAPI 草案 + CLI 参考文档；对 Q1（新的 `avn` 二进制或其他方案）
-  做出决定。
-- **完成标准**：09-evolution-api.md 中的每个调用方流程都能在纸面上用所列端点与
-  scope 走通。
+  `apps/backend/docs/openapi-v1/README.md`；
+  `apps/gateway/configs/schemas/README.md`。
+- **交付物**：OpenAPI 草案（`bots.openapi.json` 的新增内容、
+  `evolution.openapi.json`）以及 gateway 域条目。
+- **完成标准**：09-evolution-api.md §13 中的每个调用方流程都能在纸面上用所列
+  端点走通。
 
 ## P1 — 版本化 Bot（独立于 RSI 也有价值）
 
@@ -138,10 +139,10 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 - **目标**：Python 策略 SDK：`EvolutionStrategy` 基类、类型化模型、进程内与
   作业协议两种 `StrategyContext` 实现、`WorkspaceFactory`（物化 / `to_patch`）、
   带 OpenClaw 提供方的 `AgentRunner`、带模拟平台的本地 harness（能够杀掉并
-  重新派发一次运行，以测试策略自身的恢复）、策略一致性测试
-  套件、`avn strategy dev|test|publish`。
+  重新派发一次运行，以测试策略自身的恢复）、作为测试辅助的策略一致性测试
+  套件。注册通过 `POST /evolution/strategies` 端点完成，不属于该包。
 - **依赖**：RSI-06、RSI-08。
-- **完成标准**：由平台团队之外的人仅凭 SDK 文档编写一个示例第三方进化策略
+- **完成标准**：由平台团队之外的人仅凭策略 SDK 文档编写一个示例第三方进化策略
   （例如 OPRO 风格的人设优化器），并通过一致性测试。
 
 ### RSI-10 经验库与会话导出 v2
@@ -240,14 +241,14 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 
 ## P5 — Bot 驱动的进化
 
-### RSI-14 Bot 主体 scope 与 `avn` Bot skill *（已推迟）*
+### RSI-14 Bot 主体 scope 与 Bot skill *（已推迟）*
 - **状态**：随 DR-3 已推迟，直到 Bot 与平台的通信方式确定为止。不要领取。
 - **模块**：gateway、backend、evolution（遵循 bcs-cli 约定）
 - **目标**：实现 DR-3：Bot 主体仅能访问进化端点，scope 单独设计（早先的 scope
   草图已放弃），并通过授权 hook 强制执行；
-  `avn` 二进制通过 Manifest `cli_tools` 交付；被改进 Bot 与执行者 Bot 的
-  `SKILL.md`；带速率限制的收件箱与观察端点。
-- **完成标准**：singlebox 中的 Bot 通过 CLI 记录一条观察并提交一个收件箱补丁；
+  基于公共 API 的面向 Bot 的工具，通过 Manifest `cli_tools` 交付；被改进 Bot 与
+  执行者 Bot 的 `SKILL.md`；带速率限制的收件箱与观察端点。
+- **完成标准**：singlebox 中的 Bot 通过该工具记录一条观察并提交一个收件箱补丁；
   试图晋升或触碰其他 Bot 的操作被拒绝并审计；像 `bcs-cli` 一样设置叶子命令覆盖率
   门禁。
 
@@ -296,4 +297,4 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 | DS-3（原 D-4） | Workflow YAML 作为基因还是独立 artifact | 04-default-strategies.md |
 | DS-4（原 D-5） | ClawMind 分析器契约；休眠的分析器要么接入要么移除 | 04-default-strategies.md |
 | D-6 | 基因组存储：DB + 内容存储（推荐）还是每个 Bot 一个 git 仓库 | 01-genome.md；RSI-03 |
-| A-n | 进化 API 与 CLI 的待定决策（CLI 二进制、事件投递；Bot 运行请求已推迟） | 09-evolution-api.md |
+| A-n | 进化 API 的待定决策（事件投递；Bot 运行请求已推迟） | 09-evolution-api.md |

@@ -53,7 +53,7 @@ Promotion explicitly does **not** own:
 | Bindings (which strategy runs on a bot, trigger, allowed genes, verification profile, budget), runs, sandboxing, budgets and kill switches | Evolution Run, [06-evolution-run.md](06-evolution-run.md). Promotion reads the binding fields it needs and honours the kill switches |
 | Recording experiments and the audit trail | Experiment Ledger, [05-experiment-ledger.md](05-experiment-ledger.md). Promotion writes its gate decisions, approvals, rejections, and promotions there |
 | Adopting a new improvement mechanism (level 3) | Meta-evolution, [10-meta-evolution.md](10-meta-evolution.md). It reuses the gate with a separate mechanism-adoption profile (T3 by default) |
-| Shared API conventions, the `avn` CLI, generated SDKs | Evolution API, [09-evolution-api.md](09-evolution-api.md) |
+| Shared API conventions and the public endpoint index | Evolution API, [09-evolution-api.md](09-evolution-api.md) |
 
 **Where it runs.** Promotion runs in **Backend**, beside the Genome Registry
 (proposed `core/bot_genome/`, next to `core/bot_config_manifest/`).
@@ -66,13 +66,13 @@ interface (§9). The public endpoints are under the shared `/openapi/v1`
 prefix (§10): Genome and Promotion endpoints, including the candidate
 report, review-queue, and approve/reject paths under `/bots/{bot_id}/evolution/`,
 are served by Backend; the other evolution endpoints are served by
-`apps/evolution`; [09-evolution-api.md](09-evolution-api.md) presents them
-as one public surface (this follows the recommended option of D-1 in
-[design.md](design.md)).
+`apps/evolution`; [09-evolution-api.md](09-evolution-api.md) indexes them
+as one public surface and routes each path to its serving service (this
+follows the recommended option of D-1 in [design.md](design.md)).
 
 **Callers in the first iteration** are deterministic pipelines (nightly jobs,
 CI, product backends) and humans (bot owners, tenant admins, reviewers),
-through the API, SDKs, CLI, and UI. Bot callers are postponed with DR-3; they
+through the API and the workbench UI. Bot callers are postponed with DR-3; they
 would never hold a promotion power in any case (§3).
 
 ## 2. Domain model
@@ -210,7 +210,7 @@ class GateCheck:
 @dataclass(frozen=True)
 class GateDecision:
     id: str                         # "gd_204"
-    bot: BotRef                     # the bot (owner + bot id, 09-evolution-api.md §2.7)
+    bot: BotRef                     # the bot (owner + bot id, 09-evolution-api.md §2.6)
     candidate_id: str               # content hash of the patch
     revision_id: str                # candidate revision
     parent_revision_id: str         # base the patch was made against
@@ -921,8 +921,11 @@ are content hashes, no new revision is created: `active` moves back to the
 earlier revision (for example `r41`), `previous` becomes the revision being
 left, and the ref log records the move with actor and reason.
 
-```text
-avn genome promote --revision r41 --reason "r42 mis-routes VIP refunds"
+```http
+POST /openapi/v1/bots/bot_123/genome/promotions
+Idempotency-Key: goback-bot_123-r42-to-r41
+
+{"revision": "r41", "expected_revision": "r42", "reason": "r42 mis-routes VIP refunds"}
 ```
 
 To the rest of the platform this is just "apply this revision", exactly like
@@ -1062,7 +1065,8 @@ nothing new. Responses below show the `data` payload of the standard
 envelope; see [09-evolution-api.md](09-evolution-api.md) for the envelope,
 errors, pagination, and idempotency.
 
-Callers: humans (UI, `avn` CLI) and deterministic pipelines (client SDK).
+Callers: humans through the workbench UI, and deterministic pipelines and
+CI over HTTP.
 Bot callers are postponed with DR-3.
 
 ### 10.1 Public endpoints
@@ -1070,7 +1074,7 @@ Bot callers are postponed with DR-3.
 #### GET /bots/{bot_id}/evolution/candidates/{candidate}
 
 The candidate report: diff, verification summary, gate decision, and review
-state. Called by the UI review screen, `avn evolve review show`, and
+state. Called by the UI review screen and
 pipelines deciding whether to approve.
 
 Example request:
@@ -1126,7 +1130,7 @@ error: the report is returned with `"verdict": "pending"` and `"gate": null`.
 
 #### GET /bots/{bot_id}/evolution/review-queue
 
-List review items. Called by the UI, `avn evolve review list`, and
+List review items. Called by the UI and
 pipelines. Query parameters: `status` (`open` default, `approved`,
 `rejected`, `superseded`, or `all`), `min_tier`, `page` (1-based),
 `page_size` (1 to 100, default 20).
@@ -1175,7 +1179,7 @@ Notable errors: `404 not_found`; `400 invalid_argument` for an unknown
 #### POST /bots/{bot_id}/evolution/candidates/{candidate}:approve
 
 Approve an open review item and promote its revision. Called by owners and
-reviewers (UI, `avn evolve review approve`), and by pipelines within owner
+reviewers (through the UI), and by pipelines within owner
 policy.
 
 Example request:
@@ -1277,8 +1281,8 @@ Notable errors: `404 not_found`; `409 not_reviewable`; `409 already_decided`;
 Move `active` (or `canary`) to a revision and apply it. Used for going back,
 for promoting an owner-authored revision, for canary → active, and
 internally by the gate and approvals (which call the service interface, not
-this endpoint). Called by owners and tenant admins (UI,
-`avn genome promote`).
+this endpoint). Called by owners and tenant admins (through the UI
+or the API).
 
 Example request (going back from `r42` to `r41`):
 
@@ -1357,57 +1361,64 @@ look up by candidate id ([03-strategy.md](03-strategy.md)).
 
 ### 11.1 A nightly pipeline that approves within policy
 
-```python
-# Illustrative only
-from avernet_evolution import Client, RiskTier
+1. `POST /openapi/v1/bots/bot_123/evolution/runs` with
+   `Idempotency-Key: nightly-bot_123-2026-10-08` (the same key on every
+   retry) and `{"binding": "bind_01", "budget": {"max_usd": 10}}`;
+   `bind_01` runs `clawevolve/bot-evolution@2.0.0`. The response carries
+   `run_7f3`.
+2. `GET /openapi/v1/bots/bot_123/evolution/runs/run_7f3`, repeated as
+   short lookups until the status is terminal.
+3. `GET /openapi/v1/bots/bot_123/evolution/runs/run_7f3/candidates` lists
+   the candidates.
+4. For each candidate, `GET /openapi/v1/bots/bot_123/evolution/candidates/{candidate}`
+   returns the report. The pipeline skips it unless `gate.outcome` is
+   `needs_review` (it was auto-promoted, is not promotable, or is still
+   pending).
+5. If `gate.risk.tier` is at most `T1` and `flags` is empty, the pipeline
+   sends `POST /openapi/v1/bots/bot_123/evolution/candidates/{candidate}:approve`
+   with `Idempotency-Key: approve-bot_123-{candidate}` and
+   `{"reason": "nightly auto-policy"}`. This is only reached when the owner
+   turned gate auto-promotion off but allowed this pipeline to approve T1.
+   Anything higher is left for a human; a `403 policy_denied` means the
+   same.
 
-c = Client.from_env()
-run_id = c.runs.start(bot_id="bot_123", binding="bind_01",      # bind_01 runs clawevolve/bot-evolution@2.0.0
-                      budget={"max_usd": 10},
-                      idempotency_key="nightly-bot_123-2026-10-08")   # same key on every retry
-run = c.runs.wait(run_id)                     # repeated short status lookups by id
+The UI backend makes the same calls.
 
-for cand in run.candidates():
-    report = c.candidates.get(bot_id="bot_123", candidate=cand.id)
-    if report.gate is None or report.gate.outcome != "needs_review":
-        continue                              # auto-promoted, not promotable, or still pending
-    if report.gate.risk.tier <= RiskTier.T1 and not report.flags:
-        # Only reached when the owner turned gate auto-promotion off but allowed
-        # this pipeline to approve T1; anything higher is left for a human.
-        c.review.approve(bot_id="bot_123", candidate=cand.id,
-                         reason="nightly auto-policy",
-                         idempotency_key=f"approve-bot_123-{cand.id}")
-```
+### 11.2 A human review
 
-The same calls back the CLI and the UI backend.
+The reviewer works in the workbench UI; the UI backend sends:
 
-### 11.2 A human review from the CLI
+1. `GET /openapi/v1/bots/bot_123/evolution/review-queue` lists one open
+   item: candidate `sha256:c41e…`, revision `r42`, tier `T2`, strategy
+   `clawevolve/bot-evolution@2.0.0`, verdict `accept`.
+2. `GET /openapi/v1/bots/bot_123/evolution/candidates/sha256:c41e…` returns
+   the report: diff, splits, flags, and gate decision.
+3. `GET /openapi/v1/bots/bot_123/genome/revisions/r42/diff?against=r41`
+   shows the full diff ([01-genome.md](01-genome.md)).
+4. `POST /openapi/v1/bots/bot_123/evolution/candidates/sha256:c41e…:approve`
+   with an `Idempotency-Key` and
+   `{"reason": "escalation fix is correct"}`.
 
-```text
-$ avn evolve review list --bot bot_123
-CANDIDATE        REV  TIER  STRATEGY                         VERDICT  CREATED
-sha256:c41e…     r42  T2    clawevolve/bot-evolution@2.0.0   accept   2026-10-08T03:41Z
-
-$ avn evolve review show sha256:c41e… --bot bot_123      # report: diff, splits, flags, gate
-$ avn genome diff r42 --against r41 --bot bot_123
-$ avn evolve review approve sha256:c41e… --bot bot_123 --reason "escalation fix is correct" --yes
-```
-
-Exit codes follow the shared CLI conventions
-([09-evolution-api.md](09-evolution-api.md)): for example `4` for a
-conflict such as `stale_parent`, `5` for `policy_denied`.
+Errors use the shared error envelope
+([09-evolution-api.md](09-evolution-api.md)): for example
+`409 stale_parent` when `active` moved since verification, and
+`403 policy_denied` when the reviewer may not approve this tier.
 
 ### 11.3 Going back
 
-```python
-# Illustrative only
-refs = c.genome.refs(bot_id="bot_123")        # active = r42, previous = r41
-promo = c.genome.promote(bot_id="bot_123",
-                         revision=refs.previous,
-                         expected_revision=refs.active,
-                         reason="r42 mis-routes VIP refunds",
-                         idempotency_key="goback-bot_123-r42-to-r41")
-assert promo.going_back
+1. `GET /openapi/v1/bots/bot_123/genome/refs` shows `active` = `r42` and
+   `previous` = `r41`.
+2. `POST /openapi/v1/bots/bot_123/genome/promotions` with
+   `Idempotency-Key: goback-bot_123-r42-to-r41` and the body below. The
+   response has `"going_back": true`.
+
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+{
+  "revision": "sha256:a90b…",          // r41, the `previous` ref
+  "expected_revision": "sha256:7c1e…", // r42, what `active` points at now
+  "reason": "r42 mis-routes VIP refunds"
+}
 ```
 
 For a service bot the same call publishes `r41` as the next published
@@ -1438,7 +1449,7 @@ wait in the review queue.
 | Evolution Run ([06-evolution-run.md](06-evolution-run.md)) | Run → Promotion | `check_floor` at submission; `decide` when a verdict is final; binding fields (allowed genes, profile, auto-promote ceiling, rollout); budgets, daily promotion limits, kill switches |
 | Verification ([07-verification.md](07-verification.md)) | Verification → Promotion | Verdicts, per-split evidence, holdout and baseline results, online (shadow/canary) results, holdout incidents |
 | Verification ([07-verification.md](07-verification.md)) | Promotion → Verification | `verify(candidate, profile)` when a holdout or baseline result is missing |
-| Evolution API ([09-evolution-api.md](09-evolution-api.md)) | API → Promotion | Public endpoints of §10; SDK and `avn` commands |
+| Evolution API ([09-evolution-api.md](09-evolution-api.md)) | API → Promotion | Public endpoints of §10 |
 | Meta-evolution ([10-meta-evolution.md](10-meta-evolution.md)) | Meta → Promotion | Mechanism adoption through a separate gate profile (T3 default, comparison report required) |
 | Existing Manifest apply and service-bot publish flow (Backend) | Promotion → existing | Apply of the promoted revision's compiled document; apply reports and publish records carry the applied document digest, never a revision id |
 
@@ -1479,6 +1490,6 @@ Resolved:
   `/bots/{bot_id}/evolution/review-queue` paths) are served by Backend;
   Experience, Strategy registry, Evolution Run, Verification, Ledger, and
   Meta-evolution endpoints by `apps/evolution`;
-  [09-evolution-api.md](09-evolution-api.md) presents them under one public
-  `/openapi/v1` surface. This follows the recommended option of D-1
+  [09-evolution-api.md](09-evolution-api.md) indexes them under one public
+  `/openapi/v1` surface and routes each path to its serving service. This follows the recommended option of D-1
   ([design.md](design.md)).

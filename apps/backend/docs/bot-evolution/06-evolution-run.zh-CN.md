@@ -42,7 +42,7 @@
 | 实验记录 H，记录运行、候选、成本与所用模型 | [05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md) |
 | 套件、评分器、验证配置、判定（`verify(candidate, profile)`） | [07-verification.zh-CN.md](07-verification.zh-CN.md) |
 | 门禁、风险等级、评审队列、晋升与回到旧版本、补丁扫描 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) |
-| 共享 API 约定（错误信封、ETag、幂等键规则）、SDK、`avn` CLI | [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) |
+| 共享 API 约定（错误信封、ETag、幂等键规则）与公共端点索引 | [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) |
 | Level 3（改进机制本身） | [10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md) |
 
 策略设计中的两条原则塑造了本服务：
@@ -202,7 +202,7 @@ Bot 上，并带有自己的触发器、允许的基因、验证配置、预算�
 ```python
 @dataclass(frozen=True)
 class BotBindings:
-    bot: BotRef                         # the bot these bindings belong to (owner + bot id, 09-evolution-api.md §2.7)
+    bot: BotRef                         # the bot these bindings belong to (owner + bot id, 09-evolution-api.md §2.6)
     bindings: list[Binding]             # one entry per strategy attached to the bot
     etag: str                           # changes on every successful PUT; used with If-Match
     updated_at: datetime
@@ -361,7 +361,7 @@ worker 崩溃且其租约到期时，平台把该运行作为一个新作业（�
 | 代表什么 | 为一个 Bot 执行一个绑定的一次执行：业务记录（冻结输入、花费、候选、结果） | 在 worker 上、在租约下执行该运行的一次尝试 |
 | 生命周期 | 从提交到终止状态；永久保留 | 从派发到该尝试完成、失败或租约到期 |
 | 数量 | 每次提交（每个幂等键）一个 | 运行的每次尝试一个：1 个，崩溃后更多 |
-| 谁能看到 | 调用方（API、SDK、CLI、UI）通过运行 id；策略通过 `ctx.run_id` | 仅 worker 和作业协议，通过作业 id |
+| 谁能看到 | 调用方（API、UI）通过运行 id；策略通过 `ctx.run_id` | 仅 worker 和作业协议，通过作业 id |
 
 ```python
 @dataclass
@@ -667,7 +667,7 @@ queued → running → completed | failed | cancelled | budget_exhausted
 - 平台存储 `(owner_id, bot_id, key) → run id`。使用相同键的重复提交返回相同的运行 id，不启动
   任何新内容，无论第一次运行现在处于什么状态。
 - 此后运行 id 是唯一的句柄。调用方通过它查询状态、候选和判定。不需要回调通道；
-  CLI 的 `--wait` 只是重复查询。
+  等待的调用方只是重复查询。
 
 键的来源：
 
@@ -738,7 +738,7 @@ queued → running → completed | failed | cancelled | budget_exhausted
   通过作业协议时为带 id 的 `202`。
 - **状态按 id 查询。** `ctx.operations.get(op_id)` 返回状态（`queued`、
   `running`、`succeeded`、`failed` 或 `cancelled`），成功后还返回结果。每次查询
-  都是一个短请求。SDK 辅助函数 `ctx.operations.wait(op_id)` 重复进行短查询；它
+  都是一个短请求。策略 SDK 辅助函数 `ctx.operations.wait(op_id)` 重复进行短查询；它
   从不保持某个请求打开。
 - **启动是幂等的。** 它接受一个幂等键。平台存储 `(run, key) → operation id`；
   以相同键重复启动会返回同一个操作（无论是否已完成），而不是重新启动并再次为该
@@ -823,7 +823,7 @@ SDK 中提供的两种 `StrategyContext` 实现（进程内和作业协议）运
 - **`409`**：携带过期 fencing token 的调用。
 - **fencing token 的传递方式**（提议）：认领之后的每次调用都发送请求头
   `Evolution-Fencing-Token: <token>`。
-- **取消通过心跳到达 worker**（提议）：心跳响应携带 `cancelled: true`，SDK 将其
+- **取消通过心跳到达 worker**（提议）：心跳响应携带 `cancelled: true`，策略 SDK 将其
   转换为 `ctx.cancelled`。
 
 worker 是平台运行的容器。作为 worker 的 Bot（“runner bot”）随 Bot 调用方一起
@@ -1043,14 +1043,14 @@ class KillSwitches(Protocol):
 
 公共端点位于前缀 `/openapi/v1` 下；下文路径相对于该前缀。它们遵循
 [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) 中的共享约定（错误信封、可变资源上的
-ETag、创建类 POST 上的 `Idempotency-Key` 请求头）。调用方是流水线和 CI、UI
-后端，以及通过 `avn` CLI 操作的人。调用方的认证与授权不在本设计文档集中规定；
+ETag、创建类 POST 上的 `Idempotency-Key` 请求头）。调用方是通过 HTTP 调用的流水线和 CI，
+以及为使用工作台 UI 的人服务的 UI 后端。调用方的认证与授权不在本设计文档集中规定；
 Bot 调用方被推迟（DR-3）。下文响应展示的是标准信封中的 `data` 载荷；信封、错误、
 分页和幂等性见 [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)。
 
 ### GET /bots/{bot_id}/evolution/bindings
 
-读取 Bot 的绑定。由 UI 后端、`avn evolve bindings get` 和流水线
+读取 Bot 的绑定。由 UI 后端和流水线
 调用。
 
 请求：
@@ -1088,7 +1088,7 @@ GET /openapi/v1/bots/bot_123/evolution/bindings
 ### PUT /bots/{bot_id}/evolution/bindings
 
 替换 Bot 的绑定。对每个新增或修改的绑定执行绑定检查（§3.2），任一检查失败则拒绝
-整个文档。由 Bot 所有者或租户管理员通过 UI 或 `avn evolve bindings set` 调用。
+整个文档。由 Bot 所有者或租户管理员通过 UI 或 API 调用。
 
 请求（请求头 `If-Match: "bind-v12"`）：
 
@@ -1163,7 +1163,7 @@ GET /openapi/v1/bots/bot_123/evolution/bindings
 
 提交 Bot 某个绑定的一次运行。请求体为 `{binding, params?, budget?}`。幂等：
 `Idempotency-Key` 请求头为必填；以相同键重复提交返回相同的运行 id，且不启动任何
-东西。由流水线和 CI、UI 后端以及 `avn evolve run start` 调用。触发器在内部使用
+东西。由流水线和 CI，以及 UI 后端调用。触发器在内部使用
 同一个服务操作（§4）。
 
 请求（请求头 `Idempotency-Key: nightly-bot_123-2026-10-08`）：
@@ -1193,7 +1193,7 @@ GET /openapi/v1/bots/bot_123/evolution/bindings
 ### GET /bots/{bot_id}/evolution/runs
 
 列出 Bot 的运行，最新的在前。过滤条件：`status`、`binding`、`since`；以及
-`page` 和 `page_size`。由 UI 后端和 `avn evolve run status` 调用。
+`page` 和 `page_size`。由 UI 后端和流水线调用。
 
 请求：
 
@@ -1223,8 +1223,7 @@ GET /openapi/v1/bots/bot_123/evolution/runs?status=running,queued&binding=bind_0
 ### GET /bots/{bot_id}/evolution/runs/{run}
 
 按 id 读取一次运行：状态、冻结输入、尝试次数、已用预算、摘要。这就是每个调用方
-反复执行直到状态为终态的状态查询。由流水线、UI 后端和 `avn evolve run status
---wait` 调用。
+反复执行直到状态为终态的状态查询。由流水线和 UI 后端调用。
 
 请求：
 
@@ -1271,8 +1270,8 @@ GET /openapi/v1/bots/bot_123/evolution/runs/run_7f3
 ### POST /bots/{bot_id}/evolution/runs/{run}:cancel
 
 取消一次运行。置位运行的取消令牌，取消其未完成的操作，并以 `cancelled` 结束运行。
-已提交的候选会被保留并且仍会验证。对已取消的运行是幂等的。由 Bot 所有者（UI、
-`avn evolve run cancel`）和流水线调用。
+已提交的候选会被保留并且仍会验证。对已取消的运行是幂等的。由 Bot 所有者（通过 UI 或 API）
+和流水线调用。
 
 请求：
 
@@ -1296,8 +1295,7 @@ GET /openapi/v1/bots/bot_123/evolution/runs/run_7f3
 
 按提交顺序列出一次运行提交的候选及其判定状态。单个候选的完整报告（diff、验证、
 门禁决定）是 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 中的
-`GET /bots/{bot_id}/evolution/candidates/{candidate}`。由 UI 后端、流水线和
-`avn evolve run report` 调用。
+`GET /bots/{bot_id}/evolution/candidates/{candidate}`。由 UI 后端和流水线调用。
 
 请求：
 
@@ -1958,49 +1956,37 @@ Evolution-Fencing-Token: ft_7f3_2_b81c
 
 ### 15.1 流水线启动一次运行并跟踪它
 
-使用生成的客户端 SDK（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)）：
+通过 HTTP（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)）：
 
-```python
-import time
-from avernet_evolution import Client
+```http
+POST /openapi/v1/bots/bot_123/evolution/runs
+Idempotency-Key: nightly-bot_123-2026-10-08
 
-c = Client.from_env()
-key = "nightly-bot_123-2026-10-08"                     # deterministic: same key on every retry
-run_id = c.runs.start(bot_id="bot_123", binding="bind_01",   # caller owns the bot: no entity_id
-                      budget={"max_usd": 10, "max_wall_clock_s": 3600},
-                      idempotency_key=key)              # safe to repeat: returns the same run_id
-
-while (run := c.runs.get(bot_id="bot_123", run_id=run_id)).status in ("queued", "running"):
-    time.sleep(30)                                      # short lookups by id; no request held open
-
-print(run.status, run.budget_used.usd)
-for cand in c.runs.candidates(bot_id="bot_123", run_id=run_id):
-    print(cand.candidate_id, cand.verdict.status)       # approval is Promotion's job (08-promotion.md)
+{"binding": "bind_01", "budget": {"max_usd": 10, "max_wall_clock_s": 3600}}
 ```
 
-使用 CLI 实现同样的操作：
-
-```bash
-avn evolve run start --bot bot_123 --binding bind_01 \
-  --idempotency-key nightly-bot_123-2026-10-08 --max-usd 10 --output json
-avn evolve run status --bot bot_123 run_7f3 --wait --output json
-```
+1. 响应为 `202`，内容为 `{"run_id": "run_7f3", "status": "queued"}`。
+   键是确定性的，因此超时后的重试会发送相同的键并得到相同的运行 id；
+   不会启动任何新内容。
+2. 当 `status` 为 `queued` 或 `running` 时，流水线每 30 秒重复一次
+   `GET /openapi/v1/bots/bot_123/evolution/runs/run_7f3`。每次查询都很短；
+   不会保持任何请求打开。
+3. 运行到达终态后，读取 `status` 和 `budget_used.usd`，然后通过
+   `GET /openapi/v1/bots/bot_123/evolution/runs/run_7f3/candidates` 获取每个
+   候选的判定。批准是晋升的职责
+   （[08-promotion.zh-CN.md](08-promotion.zh-CN.md)）。
 
 ### 15.2 所有者添加一个绑定
 
-```python
-current = c.bindings.get(bot_id="bot_123")
-bindings = current.bindings + [Binding(
-    id="bind_02", strategy="platform/consolidate-memory@1.0.0",
-    trigger={"schedule": "0 4 * * 0"}, parent="active", allowed_genes=["memory"],
-    verification_profile="default@1",
-    budget={"max_usd": 5, "max_wall_clock_s": 1800}, params={})]
-try:
-    c.bindings.put(bot_id="bot_123", bindings=bindings, if_match=current.etag)
-except BindingCheckFailed as e:                          # 422: fix the binding, nothing was written
-    for d in e.details:
-        print(d.binding, d.check, d.detail)
-```
+1. `GET /openapi/v1/bots/bot_123/evolution/bindings` 返回绑定以及
+   `ETag: "bind-v12"`。
+2. 所有者追加 `bind_02`（`platform/consolidate-memory@1.0.0`），并通过
+   `PUT /openapi/v1/bots/bot_123/evolution/bindings` 加上
+   `If-Match: "bind-v12"` 发送整个列表，如 §14.1 中的示例所示。
+3. `422 binding_check_failed` 在 `error.details` 中列出每个失败的检查
+   （`binding`、`check`、`detail`）；没有写入任何内容，因此所有者修正绑定后
+   再次发送。`412` 表示自第 1 步以来有其他人修改了绑定：所有者重新读取绑定并
+   重新应用修改。
 
 ### 15.3 触发器调度器触发一个绑定
 
@@ -2023,7 +2009,7 @@ async def fire_schedule(binding: Binding, bot: BotRef, slot: datetime) -> None:
 
 ### 15.4 基于作业协议的最小 job worker
 
-任何语言编写的 job worker 都只需要 HTTP。下面的示意代码使用不带 SDK 的 Python，
+任何语言编写的 job worker 都只需要 HTTP。下面的示意代码使用不带策略 SDK 的 Python，
 以展示线上协议；策略 SDK 的作业协议版 `StrategyContext` 封装的正是这些调用。
 
 ```python
@@ -2114,7 +2100,7 @@ ClawEvolve 自身的代码见 [04-default-strategies.zh-CN.md](04-default-strate
 | [07-verification.zh-CN.md](07-verification.zh-CN.md) | 验证 → 运行 | 判定（对策略只提供聚合结果）；训练分数和点评 |
 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 晋升 | 运行 → 晋升 | 提交时的静态底线检查（`FloorCheck`）；供门禁和评审队列使用的已验证候选 |
 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) | 晋升 → 运行 | 没有运行需要等待的内容；运行候选的晋升在运行之后或独立于运行进行 |
-| [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) 进化 API 与客户端 | 客户端 → 运行 | 通过 SDK、CLI 和 UI 后端进行绑定读写、运行提交、状态查询、取消、候选列表 |
+| [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) 进化 API | 调用方 → 运行 | 通过公共端点进行绑定读写、运行提交、状态查询、取消和候选列表 |
 | [10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md) 元进化（以后） | 元进化 → 运行 | 在改进问题上以相等预算运行候选机制 |
 
 ## 17. 待定决策

@@ -56,7 +56,7 @@ bot 上的文档摘要，对服务型 bot 而言则是当时正在提供服务�
 | 向作业 worker 提供能力调用（作业协议） | 进化运行 | [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) |
 | 运行评估、评分器、套件和划分 | 验证 | [07-verification.zh-CN.md](07-verification.zh-CN.md) |
 | 对源自经验的补丁做密钥/PII/URL 扫描 | 晋升（门禁底线） | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) |
-| 共享的 API 约定、SDK 和 `avn` CLI | 进化 API | [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) |
+| 共享的 API 约定和公开端点索引 | 进化 API | [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) |
 | 用于改进问题的冻结经验快照（第 3 层级，后续） | 元进化 | [10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md) |
 
 **运行位置。** 该存储是进化控制面的一部分，位于提议的新模块 `apps/evolution`
@@ -125,7 +125,7 @@ class PiiCategory(StrEnum):
     ADDRESS = "address"
 
 # BotRef {owner_id, bot_id}: a bot's full identity (a bot_id alone is not unique
-# across users); defined once in 09-evolution-api.md §2.7.
+# across users); defined once in 09-evolution-api.md §2.6.
 
 @dataclass(frozen=True)
 class ToolCall:
@@ -318,7 +318,7 @@ class EvalTrace:
   "trace_id": "et_5521",
   "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "evaluation_id": "train_77",
-  "revision_id": "sha256:c41e…",
+  "revision_id": "sha256:7c1e…",
   "suite": "bot_123/support",
   "case_id": "case_partial_refund_03",
   "split": "train",
@@ -561,7 +561,7 @@ class SessionExportProvider(Protocol):
 | 具有 `experience.feedback@1` 的进化策略 | `ctx.experience.feedback(…)` | 仅限本次运行所属 bot 的、已脱敏的反馈 |
 | 具有 `evaluation.train@1` 的进化策略 | 训练评估结果（验证） | 仅限**训练划分**推演的分数和评语 |
 | 任何进化策略 | — | 永远不能获得：`validation`（只能通过判定看到聚合结果）、`holdout`、`regression`、`safety` 的评估轨迹；任何其他 bot 或租户的经验 |
-| 所有者、租户管理员、管线 | 公开 API（§10）、UI、`avn experience episodes` 和 `avn experience feedback` | 他们自己 bot 的片段和反馈 |
+| 所有者、租户管理员、管线 | 公开 API（§10），直接调用或通过 UI | 他们自己 bot 的片段和反馈 |
 | 验证 | 内部 | 用于影子回放的近期片段；作为新 `regression` 用例候选的失败片段（诊断 → 规划管线） |
 | 实验记录 H | 内部 | 证据 id 和评估轨迹，用于审计和训练数据导出 |
 
@@ -573,7 +573,7 @@ class SessionExportProvider(Protocol):
   这与 [07-verification.zh-CN.md](07-verification.zh-CN.md) 中的反奖励作弊
   规则一致。
 - **读取对话历史会向所有者展示。** 当所有者绑定一个其注册记录在 `needs` 中
-  声明了 `experience.sessions@1` 的进化策略时，UI 和 CLI 会显示该策略会读取
+  声明了 `experience.sessions@1` 的进化策略时，UI 会显示该策略会读取
   对话历史。
 - **经验是不可信输入。** 进化策略必须把片段和反馈文本当作数据，绝不能当作
   指令。源自经验的补丁会在门禁处接受密钥/PII/URL 扫描
@@ -660,7 +660,7 @@ SFT、RL 和 DPO 管线所需的元组：
 
 ## 9. 服务接口
 
-存储面向其他组件的接口。公开调用方通过生成的 SDK 使用 API（§10）；进化策略
+存储面向其他组件的接口。公开调用方通过 HTTP 使用 API（§10）；进化策略
 使用能力（§6.1）。
 
 ```python
@@ -740,13 +740,13 @@ class ExperienceStore(Protocol):
 
 所有路径都相对于公开 API 前缀 `/openapi/v1`。共享约定（分页、错误格式、幂等
 键、ETag）定义在 [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) 中。
-调用方是 bot 所有者和租户管理员（UI、`avn experience`），以及管线和产品后端
-（客户端 SDK）。下文的响应展示的是标准信封中的 `data` 负载；信封、错误、分页
+调用方是 bot 所有者和租户管理员（通过工作台 UI），以及管线和产品后端
+（通过 HTTP）。下文的响应展示的是标准信封中的 `data` 负载；信封、错误、分页
 和幂等性见 [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)。
 
 ### `GET /bots/{bot_id}/experience/episodes`
 
-按从新到旧列出某个 bot 的片段摘要。由 UI、CLI（`avn experience episodes`）以及
+按从新到旧列出某个 bot 的片段摘要。由 UI 以及
 关注某个修订版表现的管线调用。
 
 查询参数：`revision`（修订版 id 或 `unattributed`）、`since`、`until`、
@@ -800,7 +800,7 @@ GET /openapi/v1/bots/bot_123/experience/episodes?revision=sha256:a90b…&outcome
 
 ### `GET /bots/{bot_id}/experience/episodes/{episode}`
 
-返回一个带轮次的片段。由 UI 的片段视图、CLI，以及沿着候选证据 id 查看的评审者
+返回一个带轮次的片段。由 UI 的片段视图、管线，以及沿着候选证据 id 查看的评审者
 调用。
 
 请求示例：
@@ -893,8 +893,7 @@ Idempotency-Key: support-ui/ep_91/turn-4/correction
 
 ### `GET /bots/{bot_id}/experience/feedback`
 
-按从新到旧列出某个 bot 的反馈。由 UI、CLI（`avn experience feedback`）和管线
-调用。
+按从新到旧列出某个 bot 的反馈。由 UI 和管线调用。
 
 查询参数：`kind`（可重复）、`episode`、`revision`、`since`、`page`（从 1
 开始）、`page_size`（1 到 100，默认 20）。
@@ -999,47 +998,25 @@ GET /evolution/v1/runs/run_7f3/experience/sessions?days=7&limit=200
 
 ### 11.1 产品后端记录用户反馈
 
-```python
-# Illustrative only
-from avernet_evolution import Client
-
-c = Client.from_env()
-
-def on_user_correction(bot_id: str, episode_id: str, turn_index: int, text: str) -> None:
-    # The key names the thing being reported, so every retry sends the same key.
-    c.experience.feedback.create(
-        bot_id=bot_id,                     # caller owns the bot; otherwise also pass entity_id=<owner>
-        kind="correction",
-        source="user",
-        episode_id=episode_id,
-        text=text,
-        data={"turn_index": turn_index},
-        idempotency_key=f"support-ui/{episode_id}/turn-{turn_index}/correction",
-    )
-```
+每当用户做出一次纠正，产品后端就发送一次
+`POST /openapi/v1/bots/{bot_id}/experience/feedback`，如 §10 中的示例。
+`Idempotency-Key` 指明被报告的对象，例如
+`support-ui/ep_91/turn-4/correction`，因此每次重试都发送同一个键，平台只记录这次
+纠正一次。由发送时间构造的键在重试之间会变化，从而记录重复的反馈。
 
 ### 11.2 所有者比较两个修订版
 
-```python
-# Illustrative only
-from collections import Counter
+所有者的管线列出每个修订版自某个日期以来的片段，并统计 `outcome.status`：
 
-def outcome_rates(c, bot_id: str, revision: str) -> dict[str, float]:
-    counts: Counter[str] = Counter()
-    for ep in c.experience.episodes.list(bot_id=bot_id, revision=revision, since="2026-10-01T00:00:00Z"):
-        counts[ep.outcome.status] += 1     # the SDK walks all pages
-    total = sum(counts.values()) or 1
-    return {status: n / total for status, n in counts.items()}
-
-before = outcome_rates(c, "bot_123", "sha256:a90b…")   # r41
-after = outcome_rates(c, "bot_123", "sha256:c41e…")    # r42, after promotion
+```http
+GET /openapi/v1/bots/bot_123/experience/episodes?revision=sha256:a90b…&since=2026-10-01T00:00:00Z&page=1&page_size=100
+GET /openapi/v1/bots/bot_123/experience/episodes?revision=sha256:7c1e…&since=2026-10-01T00:00:00Z&page=1&page_size=100
 ```
 
-通过 CLI 进行同样的比较：
-
-```text
-avn experience episodes --bot bot_123 --revision r41 --outcome user_corrected --output json
-```
+第一个请求对应 `r41`，第二个对应晋升之后的 `r42`。对每个修订版，调用方递增
+`page`，直到读完 `total` 条（分页见 [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)
+§8），然后用每种结果的计数除以总数。加上 `outcome=user_corrected` 只返回被纠正的
+片段。
 
 ### 11.3 进化策略读取经验
 
@@ -1095,7 +1072,7 @@ class OpenClawSessionExport(SessionExportProvider):
 | [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) 进化运行 | 运行 → 经验 | 为每次运行构建只包含已授予部分的 `ctx.experience`；提供作业协议的经验端点 |
 | [07-verification.zh-CN.md](07-verification.zh-CN.md) 验证 | 双向 | 验证写入评估轨迹；读取近期片段用于影子回放，读取失败片段作为 `regression` 用例的候选 |
 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 晋升 | —（间接） | 晋升移动 `active`；之后的片段携带新的修订版。门禁扫描源自经验的补丁 |
-| [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) 进化 API | 客户端 → 经验 | 公开的经验端点、SDK 和 `avn experience` 命令 |
+| [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) 进化 API | 调用方 → 经验 | 公开的经验端点 |
 | [10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md) 元进化（后续） | 经验 → 元进化 | 用于改进问题的冻结经验快照 |
 | ClawInsight、TaskGuard、BCS | 生产方 → 经验 | 作为反馈的发现（`plan-source/v2`）、运行证据、协同结果 |
 | 产品后端和 UI | 生产方 → 经验 | 评分、纠正、任务结果 |

@@ -35,8 +35,8 @@ This document owns:
   strategy may use, and what each one looks like to a strategy;
 - `StrategyContext`, `Candidate`, `Verdict`, and `Operation` **as the
   strategy sees them**;
-- the strategy SDK, the conformance kit, and the two tiers (black box,
-  composed).
+- the Strategy SDK for strategy authors, the conformance kit, and the two
+  tiers (black box, composed).
 
 It does not own:
 
@@ -49,7 +49,7 @@ It does not own:
 | Suites, splits, graders, verification profiles, how a verdict is reached | [07-verification.md](07-verification.md) |
 | The gate, risk tiers, review, promotion | [08-promotion.md](08-promotion.md) |
 | Recording experiments (strategy version, model used, agent definition digests) | [05-experiment-ledger.md](05-experiment-ledger.md) |
-| Shared API conventions, client SDKs, the `avn` CLI as a whole | [09-evolution-api.md](09-evolution-api.md) |
+| Shared API conventions and the public endpoint index | [09-evolution-api.md](09-evolution-api.md) |
 | Improving a strategy itself (mechanisms versioned like genomes, level 3) | [10-meta-evolution.md](10-meta-evolution.md) |
 
 **Placement.** The Strategy Registry lives in the proposed new module
@@ -200,8 +200,8 @@ starts agents and evaluations for it (§7):
   platform-owned strategies, for example `platform/consolidate-memory`.
 - **`job_worker`**: the strategy ships as a container image that its author
   builds and pushes to an image registry the platform can pull from. For a
-  run, the platform starts that image in a sandbox. The SDK inside claims
-  the run's job over the Job Protocol (HTTP,
+  run, the platform starts that image in a sandbox. The Strategy SDK
+  inside the container claims the run's job over the Job Protocol (HTTP,
   [06-evolution-run.md](06-evolution-run.md)) and calls `run(ctx)`; every
   `ctx` call becomes an HTTP call. This is for strategies from other teams
   and for code in other languages or with its own dependencies, for
@@ -226,7 +226,7 @@ differently per bot: each bot's binding carries its own values. ClawEvolve's
 binding on `bot_123` sets `{"window_days": 7, "max_rounds": 3}`, while
 another bot's binding might set `"window_days": 30`. The owner writes these
 values when saving the bot's bindings
-(`PUT /bots/{bot_id}/evolution/bindings`, or `avn evolve bindings set`;
+(`PUT /bots/{bot_id}/evolution/bindings` with `If-Match`;
 [06-evolution-run.md](06-evolution-run.md)). The schema catches mistakes
 at that moment: if the owner, editing `bot_123`'s binding, mistypes
 `"window_days": 40` as `"window_days": 400` (above the schema's maximum of
@@ -234,8 +234,8 @@ at that moment: if the owner, editing `bot_123`'s binding, mistypes
 later when the nightly run starts.
 
 **The strategy's project.** "The strategy's source" means the author's own
-project for the strategy, usually a git repository, from which they run
-`avn strategy publish`. It holds the strategy's code, its registration
+project for the strategy, usually a git repository, from which they (or
+their CI) register it. It holds the strategy's code, its registration
 record, and one directory per agent definition. `path` is relative to its
 root. ClawEvolve's project, for example:
 
@@ -252,17 +252,18 @@ clawevolve-strategy/                 # the strategy's project root
         └── SKILL.md
 ```
 
-`avn strategy publish` reads `strategy.json`, uploads the two `agents/…`
-directories, and registers the version. The image is built from the same
+Registration is one `POST /evolution/strategies` call (§10): its
+`registration` part is `strategy.json`, and each `agents/…` directory is
+sent as its own `definition:<name>` part. The image is built from the same
 project and pushed by the author.
 
 One project is one strategy (one `strategy.json`, one strategy id, many
 versions over time). A repository may hold several projects, for example
-`apps/evolverun` holding ClawEvolve's project next to others;
-`avn strategy publish [DIR]` registers the project in `DIR` (default: the
-current directory). The Strategy Registry never reads a git repository: it
-only receives what `avn strategy publish` uploads (the record and the agent
-definition directories) and the image digest named in the record.
+`apps/evolverun` holding ClawEvolve's project next to others; a CI job
+calls `POST /evolution/strategies` once per strategy project, from that
+project's directory. The Strategy Registry never reads a git repository: it
+only receives what the registration request uploads (the record and the
+agent definition directories) and the image digest named in the record.
 
 The record as the author writes it (in the strategy's source). This one is
 ClawEvolve's ([04-default-strategies.md](04-default-strategies.md)); every
@@ -452,7 +453,7 @@ class StrategyContext(Protocol):
     log: RunLog                                     # structured log lines, shown on the run
     artifacts: ArtifactSink                         # files the run keeps (reports, transcripts), by artifact id
     cancelled: CancellationToken                    # set when the run is cancelled; the strategy must stop
-    operations: Operations                          # get(op_id), cancel(op_id); SDK helper wait(op_id) (§6)
+    operations: Operations                          # get(op_id), cancel(op_id); Strategy SDK helper wait(op_id) (§6)
     candidates: Candidates                          # candidates@1: where the strategy hands in what it produced
     models: Models                                  # models@1: single model calls
 
@@ -679,8 +680,8 @@ status" and that train evaluation returns "scores and critiques".
 
 ### 3.2 Registering a version
 
-Registration is done by the author with `avn strategy publish`, which
-calls `POST /evolution/strategies` (§10):
+Registration is done by the author (or their CI) with one
+`POST /evolution/strategies` call (§10):
 
 1. **Validate the record.** Every name in `needs` must be in the catalog at
    the stated version; arguments must match the entry's argument schema.
@@ -799,7 +800,7 @@ class WorkspaceFactory(Protocol):
 class Operations(Protocol):
     async def get(self, op_id: str) -> Operation: ...               # one short status lookup
     async def cancel(self, op_id: str) -> None: ...
-    # SDK helper, not a platform call: repeats get() until the operation finishes
+    # Strategy SDK helper, not a platform call: repeats get() until the operation finishes
     async def wait(self, op_id: str, *, poll_s: float = 5) -> Operation: ...
 
 class BudgetMeter(Protocol):
@@ -986,7 +987,7 @@ the strategy; they are never used for acceptance.
 | --- | --- |
 | `CapabilityNotGranted` | Accessing a context part that was not declared in `needs` (over the Job Protocol: `403`) |
 | `BudgetExhausted` | A charge would exceed the run's budget; the strategy must stop |
-| `Cancelled` (via `ctx.cancelled`) | The run was cancelled; the strategy must stop. Over the Job Protocol the cancellation arrives in the heartbeat response, which the SDK turns into `ctx.cancelled` |
+| `Cancelled` (via `ctx.cancelled`) | The run was cancelled; the strategy must stop. Over the Job Protocol the cancellation arrives in the heartbeat response, which the Strategy SDK turns into `ctx.cancelled` |
 | `UnknownAgentDefinition` | `agents.start` names a definition not in the registration |
 | `StaleAttempt` | A call from an older attempt after the run was re-dispatched (fencing token; over the Job Protocol: `409`) |
 
@@ -1006,8 +1007,8 @@ platform's sandboxed runner has never seen its agents. The mechanism:
    the strategy's source, in the format of its engine (for OpenClaw: the
    agent's skill and configuration layout). The registration record lists
    each one under `agents@1.definitions` with its `engine` and `path`.
-2. **Uploaded at registration.** `avn strategy publish` uploads each
-   definition directory to the Strategy Registry, which stores it
+2. **Uploaded at registration.** The `POST /evolution/strategies` request
+   carries each definition directory to the Strategy Registry, which stores it
    content-addressed and records the digest in the registration record.
 3. **Validated at registration.** The `agents@1` provider for each named
    engine validates the definition against that engine's definition
@@ -1064,8 +1065,8 @@ runs. From the strategy's side:
 - **Status is looked up by id.** `ctx.operations.get(op_id)` returns the
   status (`queued`, `running`, `succeeded`, `failed`, or `cancelled`) and,
   once it has succeeded, the result. Every lookup is a short request.
-  `ctx.operations.wait(op_id)` is an SDK helper that repeats short lookups
-  until the operation finishes; it never holds one request open.
+  `ctx.operations.wait(op_id)` is a Strategy SDK helper that repeats short
+  lookups until the operation finishes; it never holds one request open.
 - **Start is idempotent.** It takes an `idempotency_key`. Repeating a start
   with the same key returns the same operation, finished or not, instead of
   starting and paying for the work again. Build keys as
@@ -1117,7 +1118,7 @@ the platform never interprets (open decision S-8). Together with idempotent subm
 idempotent operation starts, and keyed workspaces, this lets a strategy
 resume without duplicating candidates, operations, or spend.
 
-## 8. Tiers, runtimes, SDK, and conformance
+## 8. Tiers, runtimes, Strategy SDK, and conformance
 
 ### 8.1 Two tiers on the same port
 
@@ -1147,8 +1148,8 @@ Until then, ClawEvolve and other strategies plug in as black boxes.
 | `in_process` | Python package loaded by the `apps/evolution` composition root, selected by configuration (R5/R14) | Direct Python objects |
 | `job_worker` | Container image (any language) | The Job Protocol: each `ctx` call maps to one HTTP endpoint |
 
-The strategy code is the same either way; the SDK provides both context
-implementations. The Job Protocol (claim, heartbeat, one endpoint per `ctx`
+The strategy code is the same either way; the Strategy SDK provides both
+context implementations. The Job Protocol (claim, heartbeat, one endpoint per `ctx`
 call including workspace file listing, reads, writes, and `:patch` for
 `ws.to_patch()`, run log and artifact uploads, `202` + operation id for
 operations, `403` for capabilities not granted, `409` for a stale fencing
@@ -1157,20 +1158,20 @@ delivered in the heartbeat response) is specified in
 [06-evolution-run.md](06-evolution-run.md). Workers are platform-run
 containers; bots acting as workers are postponed together with bot callers.
 
-### 8.3 SDK
+### 8.3 Strategy SDK
 
 | Package | For | Contents |
 | --- | --- | --- |
-| `avernet-evolution-strategy` (Python first, TS second) | Strategy authors | `EvolutionStrategy` base, typed models, an in-process and a Job-Protocol `StrategyContext`, `WorkspaceFactory` (materialise / `to_patch`), `AgentRunner` (OpenClaw first), an `operations.wait` helper that polls by id, a local harness with a fake platform (`avn strategy dev`; it can kill and re-dispatch a run, to test the strategy's own recovery), `avn strategy test` (the conformance kit), and `avn strategy publish` (registers a version and uploads its agent definitions) |
+| `avernet-evolution-strategy` (Python first, TS second) | Strategy authors | `EvolutionStrategy` base, typed models, an in-process and a Job-Protocol `StrategyContext`, `WorkspaceFactory` (materialise / `to_patch`), `AgentRunner` (OpenClaw first), an `operations.wait` helper that polls by id, a local harness with a fake platform that the author's tests use (it can kill and re-dispatch a run, to test the strategy's own recovery), and the conformance kit as test helpers. Registration is not part of the package: it is one `POST /evolution/strategies` call (§10) |
 
-The client SDKs for callers (`avernet-evolution`, `@avernet/evolution`) are
-described in [09-evolution-api.md](09-evolution-api.md).
+Callers other than strategies use the HTTP API
+([09-evolution-api.md](09-evolution-api.md)).
 
 ### 8.4 Conformance
 
 Conformance runs on both sides of the port.
 
-- **Strategy kit** (run by authors with `avn strategy test`, and by the
+- **Strategy kit** (run by authors in their own tests, and by the
   Strategy Registry before a version can be bound outside development):
   - candidates validate against the patch schema and the run's
     `allowed_genes`;
@@ -1289,8 +1290,8 @@ strategies receive the same context as Python objects.
 
 ### GET /evolution/strategies
 
-Lists registered strategy versions. Called by the UI backend, the `avn`
-CLI (`avn evolve strategies list`), and owners choosing a strategy for a
+Lists registered strategy versions. Called by the UI backend, pipelines,
+and owners choosing a strategy for a
 binding. Query parameters: `engine` (only versions usable on that engine)
 and `conformance` (`pending`, `passed`, `failed`).
 
@@ -1335,7 +1336,7 @@ Notable errors: `400` for an unknown `conformance` value.
 
 Registers a new strategy version: validates the record, uploads and
 validates its agent definitions, and starts the conformance kit. Called by
-`avn strategy publish` (strategy authors, CI of a strategy repository).
+strategy authors and the CI of a strategy project.
 
 The request is proposed as `multipart/form-data`: one part named
 `registration` holding the record as written by the author, and one part
@@ -1413,7 +1414,7 @@ Notable errors:
 
 Reads one registered version, including agent definition digests and
 conformance status. Called by owners and the UI backend before binding a
-strategy, by `avn strategy publish --wait` to look up conformance, and by
+strategy, by a registering CI job to look up conformance, and by
 reviewers who want to see what a run used.
 
 Example request:
@@ -1451,8 +1452,8 @@ Notable errors: `404` for an unknown id or version.
 
 Returns the capability catalog: every entry and version, its context part,
 which calls are operations, and the engines that have a provider. Called
-by strategy authors and the SDK (to show what can be declared), and by the
-UI backend (to explain why a strategy cannot run on a bot).
+by strategy authors and the Strategy SDK (to show what can be declared),
+and by the UI backend (to explain why a strategy cannot run on a bot).
 
 Example request:
 
@@ -1647,16 +1648,23 @@ patch that touches anything else fails the floor:
 }
 ```
 
-### 11.2 Author workflow with the SDK and `avn`
+### 11.2 Author workflow
 
-```text
-avn strategy dev                       # run the strategy against the local fake platform
-avn strategy test                      # conformance kit, incl. kill and re-dispatch of a run
-avn strategy publish                   # POST /evolution/strategies with the record and agents/acme-fixer
-avn evolve strategies show acme/correction-fixer@1.0.0   # conformance status, definition digests
-```
+1. **Test locally.** The author's own test suite uses the Strategy SDK
+   harness: the fake platform runs the strategy in process, and the
+   conformance kit (§8.4), including killing and re-dispatching a run, runs
+   in the same suite. Two such tests are below.
+2. **Register.** The project's CI, once per strategy project and version,
+   builds and pushes the image, then sends
+   `POST /openapi/v1/evolution/strategies` with the `registration` part
+   (`strategy.json`) and one `definition:acme-fixer` part (the
+   `agents/acme-fixer` directory as a tar archive), as defined in §10.
+3. **Check conformance.** The CI repeats
+   `GET /openapi/v1/evolution/strategies/acme%2Fcorrection-fixer/versions/1.0.0`
+   until `conformance.status` is `passed` or `failed`. The response also
+   shows the stored definition digests.
 
-A unit test with the fake platform from the SDK harness (proposed API):
+Unit tests with the fake platform from the Strategy SDK harness (proposed API):
 
 ```python
 async def test_submits_only_on_train_gain(fake_platform):
@@ -1699,7 +1707,7 @@ how verification works, or how service bots are published.
 | [07-verification.md](07-verification.md) | Both ways | Train cases added and train results through `evaluation.train@1`; verdicts with validation aggregates through `candidates@1` |
 | [08-promotion.md](08-promotion.md) | Strategy → Promotion (indirect) | Candidates reach the gate only after verification; a strategy never calls promotion |
 | [05-experiment-ledger.md](05-experiment-ledger.md) | Strategy → Ledger (via platform) | Strategy version, models used, agent definition digests, candidates, and costs per run |
-| [09-evolution-api.md](09-evolution-api.md) | Clients → Registry | The registry endpoints of §10; `avn strategy` and `avn evolve strategies` commands |
+| [09-evolution-api.md](09-evolution-api.md) | Callers → Registry | The registry endpoints of §10 |
 | [04-default-strategies.md](04-default-strategies.md) | Implements this port | ClawEvolve and `platform/consolidate-memory` as registered strategies |
 | [10-meta-evolution.md](10-meta-evolution.md) | Meta-evolution → Registry (later) | Mechanisms are strategy versions; candidate mechanisms are registered as new versions |
 | Engine adapters | Provide capabilities | Per-engine providers (session export, agent runner) and the per-engine agent definition contract |

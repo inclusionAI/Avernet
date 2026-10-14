@@ -17,11 +17,12 @@ loops over any Avernet bot, where
 1. the **unit of evolution** is a versioned, immutable bot artifact, the
    *Bot Genome*, built on the existing Bot Config Manifest;
 2. **how** a bot evolves is a **pluggable strategy**: one `run(ctx)` port
-   that other teams implement with an SDK and register without changing the
-   platform. Each bot chooses its strategies through bindings; ClawEvolve
+   that other teams implement with the Strategy SDK and register without
+   changing the platform. Each bot chooses its strategies through bindings; ClawEvolve
    becomes the first default strategy;
-3. the loop is driven through **one contract** with three surfaces: REST
-   API, SDKs, and a CLI for humans and CI (bots as callers are postponed);
+3. the loop is driven through **one contract**: the REST API, described by
+   OpenAPI documents, for humans (through the UI) and for pipelines and CI
+   (bots as callers are postponed);
 4. **verification is platform-owned**: no strategy can write to a live bot.
    Everything goes candidate → verify → gate → promote, with lineage, and
    going back is promoting an earlier revision;
@@ -50,13 +51,13 @@ which names the documents to read first.
 | [design.md](design.md) | Overview | Problem, goals, three levels, architecture, guarantees (governance summary), placement, phasing, risks |
 | [01-genome.md](01-genome.md) | Component | What an evolvable bot *is*: revisions, refs, patches, memory, storage, Genome Registry API |
 | [02-experience.md](02-experience.md) | Component | What strategies learn from: episodes, feedback, session export, data handling |
-| [03-strategy.md](03-strategy.md) | Component | How evolution is pluggable: the strategy port, capability catalog, context, agent definitions, SDK, conformance |
+| [03-strategy.md](03-strategy.md) | Component | How evolution is pluggable: the strategy port, capability catalog, context, agent definitions, Strategy SDK, conformance |
 | [04-default-strategies.md](04-default-strategies.md) | Component | ClawEvolve and the other first strategies, and the existing code they reuse |
 | [05-experiment-ledger.md](05-experiment-ledger.md) | Component | The record of every experiment: lineage, archive, audit |
 | [06-evolution-run.md](06-evolution-run.md) | Service | Bindings, runs, leases, long-running operations, Job Protocol, sandboxing, budgets |
 | [07-verification.md](07-verification.md) | Service | How we know a change is good: suites, graders, paired runs, profiles, verdicts |
 | [08-promotion.md](08-promotion.md) | Service | Who decides: separation of powers, gate, risk tiers, review, promotion, rollout, going back |
-| [09-evolution-api.md](09-evolution-api.md) | Service | The public access layer: API conventions, endpoint index, SDKs, `avn` CLI |
+| [09-evolution-api.md](09-evolution-api.md) | Service | The public access layer: API conventions, endpoint index, OpenAPI documents |
 | [10-meta-evolution.md](10-meta-evolution.md) | Service (later) | Level 3: improving the mechanism, mechanism verification, bounds |
 | [research.md](research.md) | Appendix | Industry survey and codebase evidence |
 | [work-items.md](work-items.md) | Appendix | Work items for follow-up sessions, with dependencies |

@@ -81,17 +81,18 @@ the rest.
   04-default-strategies.md), and a non-ClawEvolve strategy (memory consolidation) fits
   with a different capability set.
 
-### RSI-07 Evolution API and CLI contract
+### RSI-07 Evolution API contract
 - **Module**: evolution, backend, gateway
-- **Goal**: OpenAPI for Genome and Evolution resources (async pattern,
-  idempotency, ETags, error envelope consistent with OpenAPI v1), and the
-  `avn` command tree with JSON output schema and exit codes.
+- **Goal**: OpenAPI documents for the Genome and Evolution resources (async
+  pattern, idempotency, ETags, error envelope consistent with OpenAPI v1),
+  the gateway routing, and shared conformance tests for the conventions.
 - **Read first**: [09-evolution-api.md](09-evolution-api.md);
-  `apps/backend/docs/openapi-v1/README.md`; `apps/bcs/crates/tools/bcs-cli/CONTEXT.md`.
-- **Deliverable**: OpenAPI draft + CLI reference doc; decision on Q1 (new
-  `avn` binary vs other).
-- **Done when**: every caller flow in 09-evolution-api.md is executable on paper with
-  the listed endpoints and scopes.
+  `apps/backend/docs/openapi-v1/README.md`;
+  `apps/gateway/configs/schemas/README.md`.
+- **Deliverable**: OpenAPI drafts (`bots.openapi.json` additions,
+  `evolution.openapi.json`) and the gateway domain entries.
+- **Done when**: every caller flow in 09-evolution-api.md §13 is executable
+  on paper with the listed endpoints.
 
 ## P1 — Versioned bots (useful independently of RSI)
 
@@ -163,11 +164,12 @@ the rest.
   `WorkspaceFactory` (materialise / `to_patch`), `AgentRunner` with an
   OpenClaw provider, local harness with a fake platform (able to kill and
   re-dispatch a run, to test a strategy's own recovery), strategy
-  conformance kit, `avn strategy dev|test|publish`.
+  conformance kit as test helpers. Registration is the
+  `POST /evolution/strategies` endpoint, not part of the package.
 - **Depends on**: RSI-06, RSI-08.
 - **Done when**: an example third-party strategy (e.g. OPRO-style persona
   optimizer) is written by someone outside the platform team using only the
-  SDK docs, and passes conformance.
+  Strategy SDK docs, and passes conformance.
 
 ### RSI-10 Experience Store and session export v2
 - **Module**: evolution + engine adapter
@@ -278,17 +280,17 @@ the rest.
 
 ## P5 — Bot-driven evolution
 
-### RSI-14 Bot principal scopes and `avn` bot skill *(postponed)*
+### RSI-14 Bot principal scopes and bot skill *(postponed)*
 - **Status**: postponed with DR-3 until the way bots talk to the platform
   is decided. Do not pick up.
 - **Module**: gateway, backend, evolution, (bcs-cli conventions)
 - **Goal**: Implement DR-3: bot principal admission for evolution
   endpoints only, scopes designed separately (the earlier scope sketch was
-  dropped) and enforced via the authorization hook;
-  `avn` binary delivered via Manifest `cli_tools`; subject-bot and runner-bot
-  `SKILL.md`; inbox and observation endpoints with rate limits.
+  dropped) and enforced via the authorization hook; a bot-facing tool over
+  the public API, delivered via Manifest `cli_tools`; subject-bot and
+  runner-bot `SKILL.md`; inbox and observation endpoints with rate limits.
 - **Done when**: a singlebox bot records an observation and submits an inbox
-  patch through the CLI; attempts to promote or touch another bot are denied
+  patch through that tool; attempts to promote or touch another bot are denied
   and audited; leaf-command coverage gate like `bcs-cli`.
 
 ### RSI-05 Engine memory projection contract
@@ -338,4 +340,4 @@ evolution run, `V-` verification, `P-` promotion, `A-` API, `O-` meta-evolution.
 | DS-3 (was D-4) | Workflow YAML as gene or separate artifact | 04-default-strategies.md |
 | DS-4 (was D-5) | ClawMind analyzer contract; dormant analyzers wire-or-remove | 04-default-strategies.md |
 | D-6 | Genome storage: DB + content store (recommended) vs git repo per bot | 01-genome.md; RSI-03 |
-| A-n | Evolution API and CLI open decisions (CLI binary, event delivery; bot run requests postponed) | 09-evolution-api.md |
+| A-n | Evolution API open decisions (event delivery; bot run requests postponed) | 09-evolution-api.md |

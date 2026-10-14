@@ -1,34 +1,30 @@
-# Evolution API and clients
+# Evolution API
 
 > 中文版：[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)
 
 > Status: DRAFT. Service in the [bot evolution architecture](design.md).
 > The public access layer: the conventions every evolution endpoint shares,
-> the index of all public endpoints, the generated SDKs, and the `avn` CLI.
+> the index of all public endpoints, and the OpenAPI documents that publish
+> them.
 
 ## 1. Purpose and scope
 
-The bot evolution platform is reached through **one resource API**: an
-OpenAPI document under the public prefix `/openapi/v1`, covering the Genome
-endpoints and the evolution endpoints. Everything else a caller uses is
-derived from that one API:
+The bot evolution platform is reached through **one resource API** under
+the public prefix `/openapi/v1`, covering the Genome endpoints and the
+evolution endpoints, and described by OpenAPI documents. That API is the
+whole public surface: the UI backend, pipelines, and CI call it over HTTP.
 
-- **Generated client SDKs** (Python and TypeScript) for deterministic code:
-  pipelines, CI, and the UI backend.
-- **A thin `avn` CLI** over the client SDK for humans and CI scripts.
-
-The previous design text phrased this as "derive everything else from one
-API": if a capability is not in the API, no SDK or CLI has it, so callers
-cannot drift apart.
+Client SDKs and a CLI are out of scope until a use case appears. If one is
+added later, it is generated from the OpenAPI documents and adds no
+capability the API lacks, so callers cannot drift apart.
 
 **This doc owns:**
 
 | Owned here | What it means |
 | --- | --- |
 | Shared API conventions | Envelope, request ids, JSON rules, path ids and custom methods, idempotency keys, ETags and `If-Match`, error codes, pagination, long-running work by id |
-| The endpoint index | Which public endpoints exist and which doc owns each one ([§13](#13-api)) |
-| Generated SDKs | Packages, generation, the hand-written convenience layer (retries, waiting, pagination, error types) |
-| The `avn` CLI | Command tree mapped to API calls, machine output, stable exit codes, non-interactive rules, self-description |
+| The endpoint index | Which public endpoints exist and which doc owns each one ([§10](#10-endpoint-index)) |
+| The OpenAPI documents and their gateway routing | Which document each serving service publishes, how the gateway routes each path to its service, the compatibility gate, and the contract tests ([§11](#11-openapi-documents-and-gateway-routing)) |
 
 **This doc does not own:**
 
@@ -56,8 +52,9 @@ pagination types this doc reuses
 `Envelope`, `ErrorEnvelope`, `Page`, `PageParams`;
 `responses.py`: `envelope`, `page`, `created`, `accepted`, `deleted`, and the
 `@envelope_errors` decorator; documented in
-`apps/backend/docs/openapi-v1/README.md`). The SDK packages and the `avn`
-binary are new deliverables (work item RSI-07 in [work-items.md](work-items.md)).
+`apps/backend/docs/openapi-v1/README.md`). The deliverable of work item
+RSI-07 in [work-items.md](work-items.md) is the OpenAPI documents for these
+endpoints, with their gateway routing and shared conformance tests.
 
 ## 2. Domain model
 
@@ -69,21 +66,19 @@ resources themselves (those are defined in their owning docs).
 | `Envelope[T]` | The uniform response wrapper: `code`, `message`, `data`, `request_id` | This doc (reuses OpenAPI v1) | Per response |
 | `ErrorEnvelope` | The same wrapper on failure, with `data` always `null` | This doc (reuses OpenAPI v1) | Per response |
 | `Page[T]` / `PageParams` | A page of a list result (`total`, `items`) and the controls (`page`, `page_size`) | This doc (reuses OpenAPI v1) | Per request |
-| `BotRef` | The full identity of one bot: `owner_id` plus `bot_id`, because a `bot_id` alone is not unique across users ([§2.7](#27-botref-bot-identity)) | This doc; used by every evolution record | Fixed for the bot's life |
+| `BotRef` | The full identity of one bot: `owner_id` plus `bot_id`, because a `bot_id` alone is not unique across users ([§2.6](#26-botref-bot-identity)) | This doc; used by every evolution record | Fixed for the bot's life |
 | `IdempotencyRecord` | The platform's memory of one idempotency key: `(owner_id, bot_id, key) → resource id` plus a fingerprint of the request | This doc; stored by each service | Created on the first request with a key; kept for the retention window |
 | `Precondition` | An `ETag` returned on a read of a mutable resource, and the `If-Match` header that sends it back on a write | This doc | Per resource version |
-| `Operation` | A long-running unit of work started by a request and looked up by id (`queued`, `running`, `succeeded`, `failed`, `cancelled`) | Concept defined in [03-strategy.md](03-strategy.md); the public resource and its lookup endpoint are owned here ([§13.8](#138-operations--this-doc)) | Created by a `202` response; terminal once finished |
-| `ExitCode` | The `avn` CLI's stable process exit codes | This doc | Fixed per major CLI version |
-| `CommandSchema` | Machine-readable description of one `avn` command (`--help --output json`) | This doc | Per CLI release |
+| `Operation` | A long-running unit of work started by a request and looked up by id (`queued`, `running`, `succeeded`, `failed`, `cancelled`) | Concept defined in [03-strategy.md](03-strategy.md); the public resource and its lookup endpoint are owned here ([§10.8](#108-operations--this-doc)) | Created by a `202` response; terminal once finished |
 
 ### 2.1 Envelope and ErrorEnvelope
 
 Every JSON response, success or failure, is an envelope. This is the
 existing OpenAPI v1 shape; the evolution endpoints adopt it unchanged so
-that one client library handles both the Genome endpoints and the
-evolution endpoints. `code` is six digits: the HTTP status (three) followed
-by a business subcode (three), for example `200000` (OK), `202000`
-(Accepted), `404000` (not found). Binary content (for example
+that a caller handles the Genome endpoints and the evolution endpoints the
+same way. `code` is six digits: the HTTP status (three) followed by a
+business subcode (three), for example `200000` (OK), `202000` (Accepted),
+`404000` (not found). Binary content (for example
 `GET /bots/{bot_id}/genome/content/{digest}`) bypasses the envelope; that is
 the one exception, as in OpenAPI v1 today.
 
@@ -184,14 +179,14 @@ class IdempotentResourceKind(StrEnum):
 
 @dataclass(frozen=True)
 class IdempotencyRecord:
-    bot: BotRef            # scope: the bot addressed by the request (owner + bot id, §2.7)
+    bot: BotRef            # scope: the bot addressed by the request (owner + bot id, §2.6)
     key: str               # the client's Idempotency-Key header value
     fingerprint: str       # sha256 of the RFC 8785 canonical form of {method, path, body}
     resource_kind: IdempotentResourceKind
     resource_id: str       # id of what the first request created or started, e.g. "run_7f3"
     first_status: int      # HTTP status of the first response (201 or 202)
     created_at: datetime
-    expires_at: datetime   # end of the retention window (open decision, §16)
+    expires_at: datetime   # end of the retention window (open decision A-2, §15)
 ```
 
 ```jsonc
@@ -219,14 +214,14 @@ other writer's change.
 ```python
 @dataclass(frozen=True)
 class Precondition:
-    etag: str              # opaque, strong, quoted on the wire: "\"bind-7\""
+    etag: str              # opaque, strong, quoted on the wire: "\"bind-v12\""
     resource: str          # the path it belongs to
 ```
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// What the SDK keeps after GET /bots/bot_123/evolution/bindings
-{"etag": "\"bind-7\"", "resource": "/openapi/v1/bots/bot_123/evolution/bindings"}
+// What a caller keeps after GET /bots/bot_123/evolution/bindings, to send back as If-Match
+{"etag": "\"bind-v12\"", "resource": "/openapi/v1/bots/bot_123/evolution/bindings"}
 ```
 
 ### 2.5 Operation (public view)
@@ -235,7 +230,7 @@ An **operation** is work that can outlast a short HTTP request: an
 evaluation, a ledger export. Starting it returns `202 Accepted` with
 `{operation_id}` at once; the caller then looks up its status by id with
 `GET /bots/{bot_id}/evolution/operations/{operation}`, the single public
-operation resource ([§13.8](#138-operations--this-doc)). The same concept is
+operation resource ([§10.8](#108-operations--this-doc)). The same concept is
 used inside strategies (agent sessions, train evaluations); see
 [03-strategy.md](03-strategy.md). Runs follow the same pattern with their
 own status values ([06-evolution-run.md](06-evolution-run.md)).
@@ -278,58 +273,12 @@ class Operation:
   "status": "succeeded",
   "created_at": "2026-10-08T09:30:00Z",
   "updated_at": "2026-10-08T09:31:12Z",
-  "result": {"digest": "sha256:e7a2…", "format": "jsonl", "entries": 412},
+  "result": {"digest": "sha256:e7a2…", "format": "filesystem", "entries": 412},
   "error": null
 }
 ```
 
-### 2.6 ExitCode and CommandSchema
-
-```python
-from enum import IntEnum
-
-class ExitCode(IntEnum):
-    OK = 0
-    ERROR = 1             # proposed: any failure not listed below (unmapped 5xx, internal CLI error)
-    USAGE = 2             # bad arguments, or a 400 validation error from the API
-    NOT_FOUND = 3         # 404
-    CONFLICT = 4          # 409 (incl. compare-and-swap, idempotency key reuse) and 412 / 428
-    POLICY_DENIED = 5     # the request violates the bot's bindings, its genome policy, or a platform rule
-    BUDGET_EXCEEDED = 6   # a budget ceiling refuses the request
-    TRANSIENT = 7         # network failure, 429, 502, 503, 504, or --wait timed out; safe to retry
-
-@dataclass(frozen=True)
-class CommandSchema:
-    command: list[str]              # e.g. ["evolve", "run", "start"]
-    summary: str
-    api: list[str]                  # the API calls it makes, e.g. ["POST /bots/{bot_id}/evolution/runs"]
-    arguments: list[dict]           # name, type, required, repeated, description
-    flags: list[dict]               # name, type, default, description
-    destructive: bool               # True if --yes is required
-    output_schema: str              # JSON Schema id of the data it prints
-```
-
-```jsonc
-// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// avn evolve run start --help --output json
-{
-  "command": ["evolve", "run", "start"],
-  "summary": "Start an evolution run for a bot (idempotent)",
-  "api": ["POST /bots/{bot_id}/evolution/runs", "GET /bots/{bot_id}/evolution/runs/{run}"],
-  "arguments": [],
-  "flags": [
-    {"name": "--bot", "type": "string", "required": true, "description": "Bot id"},
-    {"name": "--binding", "type": "string", "required": true, "description": "Which of the bot's bindings to run"},
-    {"name": "--idempotency-key", "type": "string", "required": false, "description": "Reuse on retries; generated and printed when omitted"},
-    {"name": "--wait", "type": "bool", "default": false, "description": "Repeat the status lookup until the run is terminal"},
-    {"name": "--timeout", "type": "duration", "default": "2h", "description": "Give up waiting (the run continues) and exit 7"}
-  ],
-  "destructive": false,
-  "output_schema": "avn/run@1"
-}
-```
-
-### 2.7 BotRef (bot identity)
+### 2.6 BotRef (bot identity)
 
 A `bot_id` is unique only within one owner: two users can each have a bot
 called `bot_123`. OpenAPI v1 already handles this today: it addresses a bot
@@ -361,22 +310,22 @@ path and the owner as `entity_id` ([§4.1](#41-paths-resources-and-custom-method
 ## 3. Callers
 
 In the first iteration the API has three kinds of callers. They use the
-same endpoints; what each may do is decided by the owning docs (for
-promotion and approval, [08-promotion.md](08-promotion.md)), not by a
+same endpoints over HTTP; what each may do is decided by the owning docs
+(for promotion and approval, [08-promotion.md](08-promotion.md)), not by a
 separate API per caller.
 
 | Caller | Example | Surface | Typical calls |
 | --- | --- | --- | --- |
-| **Deterministic pipeline / CI** | Nightly job, CI after a skill change, a product backend | Client SDK or `avn` in a script | Start a run, look up its status, read candidate reports, approve within the owner's auto-promote policy |
-| **UI backend** | The evolution pages of the workbench (AgentEvolve UI in the interim) | Client SDK (TypeScript) | Everything a human does in the UI: bindings editing, review queue, reports, promotions, ledger browsing |
-| **Human operator** | Bot owner, tenant admin, researcher | UI, `avn` | Everything, including review, promotion, and going back to an earlier revision |
+| **Deterministic pipeline / CI** | Nightly job, CI after a skill change, a product backend | HTTP requests to `/openapi/v1` | Start a run, look up its status, read candidate reports, approve within the owner's auto-promote policy |
+| **UI backend** | The evolution pages of the workbench (AgentEvolve UI in the interim) | HTTP requests to `/openapi/v1` | Everything a human does in the UI: bindings editing, review queue, reports, promotions, ledger browsing |
+| **Human operator** | Bot owner, tenant admin, researcher | The workbench UI, which calls the API through the UI backend | Everything, including review, promotion, and going back to an earlier revision |
 
 Strategy job workers are platform services and use the internal Job
 Protocol through the Strategy SDK, not this public API
 ([06-evolution-run.md](06-evolution-run.md), [03-strategy.md](03-strategy.md)).
 
 Bot callers (a bot driving its own evolution, or a bot acting as a job
-runner, and the CLI skill or MCP adapter they would use) are postponed with
+runner, and the skill or MCP adapter they would use) are postponed with
 DR-3 ([decisions/0003-bot-principal-for-evolution-surface.md](decisions/0003-bot-principal-for-evolution-surface.md)).
 
 ## 4. Request and response conventions
@@ -392,7 +341,7 @@ DR-3 ([decisions/0003-bot-principal-for-evolution-surface.md](decisions/0003-bot
 - **Bot addressing.** Bot-scoped paths carry the bot id in the path
   (`/bots/{bot_id}/…`) and the bot's owner in the **`entity_id` query
   parameter**, which defaults to the caller, exactly as OpenAPI v1 does
-  today ([§2.7](#27-botref-bot-identity)). A `bot_id` is not unique across
+  today ([§2.6](#26-botref-bot-identity)). A `bot_id` is not unique across
   users, so the server always resolves the pair `(entity_id or caller,
   bot_id)` before doing anything else. Most examples in this design set omit
   `entity_id` because the caller is the owner; a collaborator or a pipeline
@@ -408,12 +357,15 @@ DR-3 ([decisions/0003-bot-principal-for-evolution-surface.md](decisions/0003-bot
   (`acme/correction-fixer`). Inside a path segment clients percent-encode
   the colon (`sha256%3Ac41e…`) and the slash (`acme%2Fcorrection-fixer`).
   The server splits a custom method on the **last** colon of the final
-  segment, so `/candidates/sha256%3Ac41e…:approve` is unambiguous. The SDKs
-  and `avn` do the encoding; callers pass ids as they appear in responses.
+  segment, so `/candidates/sha256%3Ac41e…:approve` is unambiguous. Callers
+  take ids as they appear in responses and encode them when they build a
+  path.
 - **Per-bot sequence numbers.** A revision's `seq` (shown to humans as
   `r41`) is not an identity ([01-genome.md](01-genome.md)). The API takes
-  revision ids; `avn` additionally accepts the `r41` form and resolves it
-  through the Genome endpoints before calling.
+  revision ids; an endpoint accepts the `r41` form only where its owning
+  doc says so (for example `POST /bots/{bot_id}/genome/promotions` in
+  [08-promotion.md](08-promotion.md)). Elsewhere a caller resolves `r41`
+  through `GET /bots/{bot_id}/genome/revisions` first.
 
 ### 4.2 Request ids
 
@@ -429,14 +381,16 @@ an idempotency key:
 | Same on retry? | No, each attempt has its own | Yes, by definition |
 | Used for | Tracing, logs, support | Not creating or starting the same thing twice |
 
-The SDKs expose the request id on every response and every error; `avn`
-prints it on failure (stderr) and includes it in JSON output.
+A caller logs the request id of every failed request; it is what support
+needs to find that request.
 
 ### 4.3 JSON
 
 - Request and response bodies are JSON (`application/json`), UTF-8.
   Everything new in this design is JSON; the Bot Config Manifest stays YAML
-  as today ([01-genome.md](01-genome.md)).
+  as today ([01-genome.md](01-genome.md)). The one exception is strategy
+  registration, which uploads agent-definition directories as
+  `multipart/form-data` ([03-strategy.md](03-strategy.md)).
 - Field names are `snake_case` and stable within `/openapi/v1`.
 - Timestamps are RFC 3339 strings in UTC (`2026-10-08T02:00:03Z`);
   durations are integer seconds with an `_s` suffix (`max_wall_clock_s`).
@@ -451,8 +405,7 @@ prints it on failure (stderr) and includes it in JSON output.
 
 - Changes inside `/openapi/v1` are additive: new endpoints, new optional
   request fields, new response fields.
-- Clients ignore response fields they do not know. The generated SDKs keep
-  unknown fields available rather than failing.
+- Callers ignore response fields they do not know.
 - Status enums documented as closed (run status, operation status, verdict
   status) do not gain values within v1; a new value would be a breaking
   change. Other enums are open, and clients treat unknown values as opaque.
@@ -465,17 +418,30 @@ Any `POST` that creates something or starts work accepts an
 **`Idempotency-Key`** request header. The run submission is idempotent and
 the platform guarantees it: a repeated `POST` with the same key returns the
 same run id and starts nothing new. The same holds for every endpoint marked
-"key" in the index ([§13](#13-api)).
+"key" in the endpoint index ([§10](#10-endpoint-index)).
 
 ### 5.1 Rules for the client
 
 - The key is a **client-chosen string**, 1 to 255 printable ASCII
-  characters; the recommended alphabet is `[A-Za-z0-9._:/-]`.
+  characters; the recommended alphabet is `[A-Za-z0-9._:/-]`. It travels in
+  a header and is sent as is; only ids inside a path are percent-encoded
+  ([§4.1](#41-paths-resources-and-custom-methods)).
 - It is **identical for every retry of one logical request** and
-  **different for different requests**.
+  **different for different requests**. Generate it once per logical
+  action, before the first attempt, and reuse it on every retry.
 - It must **not** be something that changes between retries. A timestamp
   taken at send time, or a random value generated per attempt, makes every
   retry look like a new request and defeats the purpose.
+- If the process may restart before it has the answer, **persist the key**
+  with the job's state, or derive it deterministically from what makes the
+  request unique. A key held only in memory cannot protect a retry made by
+  a new process.
+- Retry automatically only `GET`, `PUT` with `If-Match`, and `POST` with a
+  key. Never retry a `POST` sent without a key: the first attempt may have
+  succeeded.
+- On a transient failure, back off exponentially with jitter, and honour
+  `Retry-After` when the response carries it. Which codes are transient is
+  listed in [§7.2](#72-retry-guidance).
 
 Good keys by caller:
 
@@ -483,6 +449,7 @@ Good keys by caller:
 | --- | --- | --- |
 | Pipeline (one-off logical request) | A UUID created **once, before the first attempt**, and stored with the job's state | `0b6f7c52-3d0e-4c1b-9a63-8f2a7d0e5c11` |
 | Pipeline (scheduled, one per period) | Deterministic from what makes the request unique | `nightly-bot_123-2026-10-08` |
+| UI backend (one user action) | A UUID created when the user opens the action (for example the approve dialog), so a double click or a network retry records one decision | `4b0f6c1e-9a7d-4f53-8d1e-2c6a9e1b7f02` |
 | Platform trigger (a binding firing on schedule) | `<binding_id>/<scheduled_fire_time>` | `bind_01/2026-10-08T02:00:00Z` |
 | Strategy (internal, Job Protocol) | `<run_id>/<own step>` | `run_7f3/round-2/tune` |
 
@@ -515,7 +482,7 @@ twice still produces one run.
   ("request with this key in progress") if the first has not committed
   within a short bound. `409002` is retryable with the same key.
 - **Retention.** A record is kept at least as long as callers might
-  retry. The window is an open decision ([§16](#16-open-decisions)); after
+  retry. The window is an open decision ([§15](#15-open-decisions)); after
   it expires, the key may be reused.
 - **Naturally idempotent creates.** Some creates are idempotent by content
   and need no key: a candidate id is the content hash of its patch, a
@@ -561,6 +528,13 @@ afterwards as drift ([01-genome.md](01-genome.md) §5.5).
 - The first mutable resource on the public surface is the bot's bindings
   (`GET|PUT /bots/{bot_id}/evolution/bindings`).
 
+A caller changes such a resource with a **read-modify-write loop**:
+`GET` the resource and keep its `ETag`; apply the change to that copy;
+`PUT` it with `If-Match` set to the kept tag. On `412`, someone else wrote
+in between: `GET` again (new body, new `ETag`), reapply the change to the
+fresh copy, and `PUT` again. After a few rounds without success the caller
+stops and reports the conflict rather than looping forever.
+
 **Compare-and-swap in the body** for ref moves. Ref updates carry
 `expected_revision`: the revision the client believes the ref points to
 now. A mismatch is `409` (`409010`). This is the mechanism defined by the
@@ -590,25 +564,24 @@ for OpenAPI v1), so they are safe to show and stable to match on, but
 clients branch on `code`, never on `message`.
 
 Each owning doc defines the subcodes for its own failures. This doc fixes
-the shared ones and the **families** the SDKs and the CLI map onto error
-types and exit codes:
+the shared ones and the **families** callers branch on:
 
-| Code | Meaning | Retry? | `avn` exit code |
-| --- | --- | --- | --- |
-| `400000` | Request body or query fails validation (schema, enum, range) | No: fix the request | 2 |
-| `404000` | Resource not found (bot, run, revision, candidate, strategy, suite, entry) | No | 3 |
-| `409001` | Idempotency key reused with a different request | No: client bug | 4 |
-| `409002` | A request with this idempotency key is still in progress | Yes, same key | 7 |
-| `409010` | Ref compare-and-swap failed: `expected_revision` is stale | After re-reading | 4 |
-| `409011` | Strategy version already registered with different content | No | 4 |
-| `409020` | Action conflicts with the resource's state (e.g. approving a rejected candidate, cancelling a finished run) | No | 4 |
-| `412000` | `If-Match` does not match the current `ETag` | After re-reading | 4 |
-| `428000` | `If-Match` required but missing | After adding it | 4 |
-| `403xxx` / `422xxx` (policy family) | The request violates the bot's bindings, its genome policy, or a platform rule: locked gene, gene outside a binding's `allowed_genes`, binding check failed, evolution frozen by a kill switch, strategy disabled, candidate not promotable under the gate | No | 5 |
-| `403100`-range (budget family) | A budget ceiling refuses the request (per-bot or per-tenant daily or monthly ceiling, max promotions per day) | Not until the ceiling resets | 6 |
-| `429000` | Rate limited | Yes, after `Retry-After` | 7 |
-| `502000`, `503000`, `504000` | Upstream or service unavailable | Yes, same key | 7 |
-| `500000` | Unexpected server error | Only with an idempotency key | 1 |
+| Code | Meaning | Retry? |
+| --- | --- | --- |
+| `400000` | Request body or query fails validation (schema, enum, range) | No: fix the request |
+| `404000` | Resource not found (bot, run, revision, candidate, strategy, suite, entry) | No |
+| `409001` | Idempotency key reused with a different request | No: client bug |
+| `409002` | A request with this idempotency key is still in progress | Yes, same key |
+| `409010` | Ref compare-and-swap failed: `expected_revision` is stale | After re-reading |
+| `409011` | Strategy version already registered with different content | No |
+| `409020` | Action conflicts with the resource's state (e.g. approving a rejected candidate, cancelling a finished run) | No |
+| `412000` | `If-Match` does not match the current `ETag` | After re-reading |
+| `428000` | `If-Match` required but missing | After adding it |
+| `403xxx` / `422xxx` (policy family) | The request violates the bot's bindings, its genome policy, or a platform rule: locked gene, gene outside a binding's `allowed_genes`, binding check failed, evolution frozen by a kill switch, strategy disabled, candidate not promotable under the gate | No |
+| `403100`-range (budget family) | A budget ceiling refuses the request (per-bot or per-tenant daily or monthly ceiling, max promotions per day) | Not until the ceiling resets |
+| `429000` | Rate limited | Yes, after `Retry-After` |
+| `502000`, `503000`, `504000` | Upstream or service unavailable | Yes, same key |
+| `500000` | Unexpected server error | Only with an idempotency key |
 
 The precise subcodes inside the policy and budget families are set by the
 owning docs ([06-evolution-run.md](06-evolution-run.md) for budgets, kill
@@ -625,11 +598,12 @@ reported in the resource's status, with `200`.
 - `POST` with an idempotency key is safe to retry with **the same key**
   after a transient failure (`409002`, `429`, `5xx`, network error, or no
   response at all).
-- `POST` without a key is never retried automatically by the SDKs.
+- `POST` without a key is never retried automatically.
 - `PUT` with `If-Match` is safe to retry; a `412` after a retry means
   someone else wrote in between (or the first attempt succeeded): re-read
-  and decide.
-- Back off exponentially with jitter, honouring `Retry-After`.
+  and decide ([§6](#6-concurrency-etags-if-match-and-compare-and-swap)).
+- Back off exponentially with jitter, honouring `Retry-After`
+  ([§5.1](#51-rules-for-the-client)).
 
 ## 8. Pagination and filtering
 
@@ -641,12 +615,12 @@ reported in the resource's status, with `200`.
   use `since=` and `until=` (RFC 3339). Each owning doc lists its filters.
 - Default ordering is newest first by creation time unless the owning doc
   says otherwise; ordering is stable for equal timestamps (by id).
-- The SDKs offer iterators that walk all pages; `avn` offers `--page`,
-  `--page-size`, and `--all`.
+- To read a whole collection, a caller requests `page=1, 2, …` with the
+  same filters until it has `total` items or receives an empty page.
 - Large, append-only collections (episodes, ledger entries) may need cursor
   pagination instead of page numbers, because `total` is expensive and pages
   shift as entries are added. That is an open decision
-  ([§16](#16-open-decisions)); until it is decided, the existing convention
+  ([§15](#15-open-decisions)); until it is decided, the existing convention
   applies.
 
 ## 9. Long-running work by id
@@ -664,8 +638,10 @@ request follows one pattern:
    response may carry `Retry-After` as a hint for the next lookup.
 3. **Start is idempotent.** With the same idempotency key, a repeated start
    returns the same id ([§5](#5-idempotency-keys)).
-4. **The id is the only handle.** There is no callback or webhook channel;
-   the SDK's `wait` helper and `avn ... --wait` only repeat the lookup.
+4. **The id is the only handle.** There is no callback or webhook channel.
+   Waiting means repeating the lookup; a caller that gives up after its own
+   timeout leaves the work running, and a later lookup by the same id (or a
+   repeated start with the same key) finds it again.
 5. **The work survives crashes.** A run survives worker crashes and
    restarts under the same run id ([06-evolution-run.md](06-evolution-run.md));
    operations are persisted by the platform independently of the caller.
@@ -681,309 +657,18 @@ candidate's report is looked up by candidate id
 (`GET /bots/{bot_id}/evolution/candidates/{candidate}`), and there is no
 blocking call that waits for a verdict.
 
-## 10. Generated SDKs
-
-| Package | Language | For | Contents |
-| --- | --- | --- | --- |
-| `avernet-evolution` | Python | Pipelines, CI, Python backends | Generated client for the whole public evolution and Genome surface, plus the convenience layer below |
-| `@avernet/evolution` | TypeScript | The UI backend, Node pipelines | The same, generated from the same OpenAPI document |
-
-The Strategy SDK (`avernet-evolution-strategy`) is a different package for
-strategy authors and is owned by [03-strategy.md](03-strategy.md).
-
-### 10.1 Generation
-
-- The OpenAPI document is the source of truth. The SDK models and raw
-  endpoint methods are **generated** from it; no hand-written request code.
-- Proposed: each service (Backend, `apps/evolution`) publishes its part of
-  the document, and a build step merges them into one public document under
-  `/openapi/v1`, from which both SDKs and the `avn` command schemas are
-  generated (open decision, [§16](#16-open-decisions)).
-- SDK versions follow the API: a minor SDK release for additive API
-  changes, a major one only with a new API version.
-
-### 10.2 The hand-written convenience layer
-
-A small layer on top of the generated code implements the conventions in
-this doc once, so every caller gets them the same way. It adds no
-behaviour that the API lacks.
-
-| Concern | Behaviour |
-| --- | --- |
-| Envelope | Unwraps `data`; keeps `request_id` on the result and on errors |
-| Errors | Raises typed errors by code family: `ValidationError`, `NotFound`, `Conflict` (with `IdempotencyKeyReused`, `RefConflict`, `PreconditionFailed` subclasses), `PolicyDenied`, `BudgetExceeded`, `Transient`, `ServerError` |
-| Idempotency | Every key-taking method has an `idempotency_key` parameter. If omitted, the SDK generates a UUID **once per method call** and reuses it for its own retries; it is exposed on the result so the caller can store it. A key generated inside one call cannot protect a retry from a *new* process, so pipelines that may restart pass their own key |
-| Retries | Automatic retry with backoff for transient failures, only for `GET`, `PUT` with `If-Match`, and `POST` with a key |
-| ETags | Read methods return the `ETag` with the resource; write methods take `if_match`, and a helper does read-modify-write with retry on `412` |
-| Waiting | `wait(...)` repeats short status lookups until a terminal status or a timeout; never a long-held request |
-| Pagination | `iter_*` methods walk all pages |
-| Ids | Percent-encodes colon-containing ids in paths |
-
-## 11. The `avn` CLI
-
-`avn` is the command-line client for humans and CI. Proposed: a new binary
-written in Rust, following the conventions of `bcs-cli`
-(`apps/bcs/crates/tools/bcs-cli/`), with room for other platform commands
-later (open decision A-1, [§16](#16-open-decisions)). No general Avernet CLI
-exists today; `bcs-cli` is BCS-scoped.
-
-### 11.1 Design rules
-
-- **Thin.** Every command is one or two SDK calls. The CLI contains no
-  logic the API lacks, so scripts, pipelines, and the UI cannot diverge.
-- **Machine-first output.** `--output json` is the default when stdout is
-  not a TTY; `--output table` is the default on a TTY. JSON output is the
-  API envelope unchanged (`code`, `message`, `data`, `request_id`), one
-  JSON document per command on stdout, including on failure. A one-line
-  human summary of a failure goes to stderr. Field names are the API's and
-  are stable.
-- **Stable exit codes** ([§11.3](#113-exit-codes)).
-- **Non-interactive.** No prompts unless `--interactive` is given.
-  Commands that change what a bot runs or discard work are **destructive**
-  and require `--yes`: `genome promote`, `evolve review approve`,
-  `evolve review reject`, `evolve run cancel`, `evolve bindings set`. Without
-  `--yes` they exit with code 2 and change nothing.
-- **`--dry-run` where the API supports it.** A dry run must be answered by
-  the API (a validate-only request), not simulated by the CLI;
-  `genome patch apply --dry-run` is the first such command. Which other
-  endpoints get a validate-only mode is decided by their owning docs.
-- **Self-describing.** `avn <cmd> --help --output json` prints the
-  command's `CommandSchema` ([§2.6](#26-exitcode-and-commandschema)), so a
-  script or tool can discover arguments without reading docs.
-- **Idempotent by default.** Commands that start or create something take
-  `--idempotency-key`; when it is omitted, `avn` generates one, uses it for
-  its own retries, and prints it (in JSON output as a top-level
-  `idempotency_key` field next to the envelope fields; see
-  [§14.2](#142-ci-script-with-avn)), so a script can rerun the command with
-  the same key.
-- **Coverage gate.** Like `bcs-cli` in singlebox, every leaf command is
-  covered by an end-to-end test against a real stack.
-
-### 11.2 Command tree mapped to API calls
-
-Paths are relative to `/openapi/v1`.
-
-| Command | API call(s) | Notes |
-| --- | --- | --- |
-| `avn genome log --bot B [--status S] [--parent R]` | `GET /bots/{bot_id}/genome/revisions` | |
-| `avn genome show --bot B [--revision R \| --ref active]` | `GET /bots/{bot_id}/genome/refs` (to resolve a ref or `r41`), `GET /bots/{bot_id}/genome/revisions/{rev}` | |
-| `avn genome diff --bot B R1 --against R2` | `GET /bots/{bot_id}/genome/revisions/{rev}/diff?against=` | |
-| `avn genome refs --bot B` | `GET /bots/{bot_id}/genome/refs` | |
-| `avn genome draft set --bot B R --expected R0` | `PUT /bots/{bot_id}/genome/refs/draft` | Compare-and-swap on `expected_revision` |
-| `avn genome patch apply --bot B patch.json [--dry-run]` | `POST /bots/{bot_id}/genome/revisions` | Records a revision from `{base, patch}` |
-| `avn genome content get --bot B DIGEST` / `content put --bot B FILE` | `GET /bots/{bot_id}/genome/content/{digest}` / `PUT /bots/{bot_id}/genome/content` | Binary, no envelope on get |
-| `avn genome promote --bot B --revision R --reason TEXT --yes` | `POST /bots/{bot_id}/genome/promotions` | Also how to go back: promote an earlier revision |
-| `avn genome export --bot B --format git DIR` | `GET /bots/{bot_id}/genome/revisions`, `GET /bots/{bot_id}/genome/content/{digest}` | Writes a local git history; read-only on the platform ([01-genome.md](01-genome.md)) |
-| `avn experience episodes --bot B [--revision R] [--since T] [--outcome O]` | `GET /bots/{bot_id}/experience/episodes` | |
-| `avn experience episode show --bot B EPISODE` | `GET /bots/{bot_id}/experience/episodes/{episode}` | |
-| `avn experience feedback add --bot B FILE` / `feedback list --bot B` | `POST` / `GET /bots/{bot_id}/experience/feedback` | |
-| `avn evolve strategies list` / `strategies show ID --version V` | `GET /evolution/strategies` / `GET /evolution/strategies/{id}/versions/{version}` | |
-| `avn evolve capabilities` | `GET /evolution/capabilities` | |
-| `avn evolve bindings get --bot B` | `GET /bots/{bot_id}/evolution/bindings` | Prints the `ETag` as `etag` |
-| `avn evolve bindings set --bot B FILE --if-match ETAG --yes` | `PUT /bots/{bot_id}/evolution/bindings` | `--if-match` is required |
-| `avn evolve run start --bot B --binding ID [--idempotency-key K] [--wait]` | `POST /bots/{bot_id}/evolution/runs` (+ `GET .../runs/{run}` with `--wait`) | |
-| `avn evolve run list --bot B [--status S]` | `GET /bots/{bot_id}/evolution/runs` | |
-| `avn evolve run status --bot B RUN` | `GET /bots/{bot_id}/evolution/runs/{run}` | |
-| `avn evolve run candidates --bot B RUN` | `GET /bots/{bot_id}/evolution/runs/{run}/candidates` | |
-| `avn evolve run cancel --bot B RUN --yes` | `POST /bots/{bot_id}/evolution/runs/{run}:cancel` | |
-| `avn evolve review list --bot B` | `GET /bots/{bot_id}/evolution/review-queue` | |
-| `avn evolve review show --bot B CANDIDATE` | `GET /bots/{bot_id}/evolution/candidates/{candidate}` | Diff, verification, gate decision |
-| `avn evolve review approve\|reject --bot B CANDIDATE --reason TEXT --yes` | `POST /bots/{bot_id}/evolution/candidates/{candidate}:approve` / `:reject` | |
-| `avn evolve suites list` / `suites show SUITE` | `GET /evolution/suites` / `GET /evolution/suites/{suite}` | |
-| `avn evolve evaluate start --bot B --revision R --suite S [--wait]` / `evaluate status --bot B ID` | `POST /bots/{bot_id}/evolution/evaluations` / `GET /bots/{bot_id}/evolution/evaluations/{evaluation}` | Operator-only ad-hoc evaluation |
-| `avn evolve ledger list --bot B [filters]` / `ledger show --bot B ENTRY` | `GET /bots/{bot_id}/evolution/ledger` / `GET /bots/{bot_id}/evolution/ledger/{entry}` | |
-| `avn evolve ledger export --bot B [--wait]` | `POST /bots/{bot_id}/evolution/ledger:export` (+ status lookup) | |
-| `avn strategy dev\|test\|publish` | Strategy SDK harness; `publish` calls `POST /evolution/strategies` | Owned by [03-strategy.md](03-strategy.md) |
-| `avn job claim\|heartbeat\|input\|upload\|complete\|fail` | Internal Job Protocol `/evolution/v1/...` | For debugging platform job workers; owned by [06-evolution-run.md](06-evolution-run.md) |
-
-`--bot B` takes the bot id. Every bot-scoped command also accepts
-`--entity-id OWNER`, sent as the `entity_id` query parameter; omitted, the
-owner is the caller ([§4.1](#41-paths-resources-and-custom-methods)).
-
-The previous design's `avn evolve inbox` and `avn evolve observe` commands
-belonged to bot callers and are postponed with them ([§3](#3-callers)).
-
-### 11.3 Exit codes
-
-Exit codes are part of the CLI contract and do not change within a major
-version. They reflect **the API call**, not the outcome of the work: a run
-that ends `failed` or a candidate that is rejected is a successful lookup
-(exit 0); scripts read `.data.status`.
-
-| Code | Meaning | Typical cause |
-| --- | --- | --- |
-| 0 | OK | |
-| 1 | Other failure *(proposed)* | `500`, an unmapped error, an internal CLI error |
-| 2 | Usage | Bad flags or arguments, missing `--yes`, `400` validation error |
-| 3 | Not found | `404` |
-| 4 | Conflict | `409` (except `409002`), `412`, `428`: idempotency key reused, stale `expected_revision`, stale `ETag`, action conflicts with state |
-| 5 | Policy denied | Policy family: locked gene, binding check failed, evolution frozen, strategy disabled, not promotable |
-| 6 | Budget exceeded | Budget family: a ceiling refuses the request |
-| 7 | Transient | Network error, `409002`, `429`, `502`/`503`/`504`, or `--wait` timed out (the work continues; rerun the lookup) |
-
-## 12. Service interface
-
-Two interfaces are used by other parts: the **client interface** that the
-SDKs implement (and the CLI and UI backend call), and the **conventions
-interface** that each serving module (Backend, `apps/evolution`) uses in its
-HTTP adapter so that every endpoint behaves the same way.
-
-### 12.1 Client interface (what the SDKs provide)
-
-Every bot-scoped method takes the bot id as `bot_id` and also accepts a
-keyword-only `entity_id: str | None = None`: the bot's owner, sent as the
-`entity_id` query parameter; `None` means the caller is the owner, the
-OpenAPI v1 default ([§4.1](#41-paths-resources-and-custom-methods)). It is
-left out of the signatures below to keep them short. Filter parameters use
-the closed value sets of the owning docs (`RevisionStatus` in
-[01-genome.md](01-genome.md), `OutcomeStatus` in
-[02-experience.md](02-experience.md), `Engine` and `ConformanceState` in
-[03-strategy.md](03-strategy.md), `RunStatus` in
-[06-evolution-run.md](06-evolution-run.md)); `None` means "no filter".
-
-```python
-from typing import AsyncIterator, Protocol
-
-# Types owned by other docs, used here by name (each defined in that doc's §2):
-#   RevisionStatus, GenomeRevision, GenomeRef, GenomePatch: 01-genome.md
-#   OutcomeStatus, Episode, Feedback: 02-experience.md
-#   Engine, ConformanceState, StrategyRegistration, Capability, Candidate: 03-strategy.md
-#   LedgerEntry: 05-experiment-ledger.md
-#   BotBindings, Run, RunStatus: 06-evolution-run.md
-#   Suite, Evaluation: 07-verification.md
-#   Promotion, ReviewItem: 08-promotion.md
-# Page, PageParams, and Operation are this doc's (§2.2, §2.5).
-
-class GenomeClient(Protocol):
-    async def list_revisions(self, bot_id: str, *, status: RevisionStatus | None = None,
-                             parent: str | None = None, page: PageParams = PageParams()) -> Page[GenomeRevision]: ...
-    async def get_revision(self, bot_id: str, revision: str) -> GenomeRevision: ...
-    async def diff(self, bot_id: str, revision: str, *, against: str) -> dict: ...
-    async def refs(self, bot_id: str) -> list[GenomeRef]: ...
-    async def set_draft(self, bot_id: str, revision: str, *, expected_revision: str) -> GenomeRef:
-        """Compare-and-swap; raises RefConflict (409010) if the draft moved."""
-    async def record_revision(self, bot_id: str, *, base: str, patch: GenomePatch,
-                              idempotency_key: str | None = None) -> GenomeRevision: ...
-    async def promote(self, bot_id: str, revision: str, *, reason: str,
-                      idempotency_key: str | None = None) -> Promotion:
-        """Moves `active` (also used to go back to an earlier revision). Owned by 08-promotion."""
-    async def get_content(self, bot_id: str, digest: str) -> bytes: ...
-    async def put_content(self, bot_id: str, data: bytes) -> str: ...  # digest
-
-class ExperienceClient(Protocol):
-    def iter_episodes(self, bot_id: str, *, revision: str | None = None, since: str | None = None,
-                      outcome: OutcomeStatus | None = None) -> AsyncIterator[Episode]: ...
-    async def get_episode(self, bot_id: str, episode: str) -> Episode: ...
-    async def add_feedback(self, bot_id: str, feedback: Feedback, *,
-                           idempotency_key: str | None = None) -> Feedback: ...
-
-class StrategiesClient(Protocol):
-    async def list(self, *, engine: Engine | None = None,
-                   conformance: ConformanceState | None = None) -> Page[StrategyRegistration]: ...
-    async def get_version(self, strategy: str, version: str) -> StrategyRegistration: ...
-    async def capabilities(self) -> list[Capability]: ...
-
-class BindingsClient(Protocol):
-    async def get(self, bot_id: str) -> tuple[BotBindings, str]:
-        """Returns the bindings and their ETag."""
-    async def put(self, bot_id: str, bindings: BotBindings, *, if_match: str) -> tuple[BotBindings, str]:
-        """Raises PreconditionFailed (412000) if the bindings changed since they were read."""
-
-class RunsClient(Protocol):
-    async def start(self, bot_id: str, *, binding: str, params: dict | None = None,
-                    budget: dict | None = None, idempotency_key: str | None = None) -> Run:
-        """202: returns the run as it is now (status queued, or its current status on a replay)."""
-    async def get(self, bot_id: str, run: str) -> Run: ...
-    def iter(self, bot_id: str, *, status: RunStatus | None = None) -> AsyncIterator[Run]: ...
-    async def candidates(self, bot_id: str, run: str) -> list[Candidate]: ...
-    async def cancel(self, bot_id: str, run: str, *, idempotency_key: str | None = None) -> Run: ...
-    async def wait(self, bot_id: str, run: str, *, timeout_s: int, poll_s: int = 15) -> Run:
-        """Repeats get() until the status is terminal; raises Transient on timeout."""
-
-class VerificationClient(Protocol):
-    async def list_suites(self) -> Page[Suite]: ...
-    async def get_suite(self, suite: str) -> Suite: ...
-    async def start_evaluation(self, bot_id: str, *, revision: str, suite: str,
-                               idempotency_key: str | None = None) -> Operation: ...
-    async def get_evaluation(self, bot_id: str, evaluation: str) -> Evaluation: ...
-
-class ReviewClient(Protocol):
-    async def queue(self, bot_id: str) -> Page[ReviewItem]: ...
-    async def report(self, bot_id: str, candidate: str) -> dict:
-        """Diff + verification + gate decision for one candidate (08-promotion)."""
-    async def approve(self, bot_id: str, candidate: str, *, reason: str,
-                      idempotency_key: str | None = None) -> ReviewItem: ...
-    async def reject(self, bot_id: str, candidate: str, *, reason: str,
-                     idempotency_key: str | None = None) -> ReviewItem: ...
-
-class OperationsClient(Protocol):
-    async def get(self, bot_id: str, operation: str) -> Operation: ...
-    async def cancel(self, bot_id: str, operation: str, *, idempotency_key: str | None = None) -> Operation: ...
-    async def wait(self, bot_id: str, operation: str, *, timeout_s: int = 3600, poll_s: int = 15) -> Operation:
-        """Repeats get() until the status is terminal; raises Transient on timeout."""
-
-class LedgerClient(Protocol):
-    def iter_entries(self, bot_id: str, **filters: str) -> AsyncIterator[LedgerEntry]: ...
-    async def get_entry(self, bot_id: str, entry: str) -> LedgerEntry: ...
-    async def start_export(self, bot_id: str, *, idempotency_key: str | None = None) -> Operation: ...
-
-class EvolutionClient(Protocol):
-    """Entry point of the generated SDK (`avernet_evolution.Client`)."""
-    genome: GenomeClient
-    experience: ExperienceClient
-    strategies: StrategiesClient
-    bindings: BindingsClient
-    runs: RunsClient
-    verification: VerificationClient
-    review: ReviewClient
-    ledger: LedgerClient
-    operations: OperationsClient
-```
-
-### 12.2 Conventions interface (what each serving module implements)
-
-```python
-from collections.abc import Awaitable, Callable
-
-class IdempotencyStore(Protocol):
-    """Implements §5. Writes happen in the caller's transaction."""
-
-    async def lookup(self, bot: BotRef, key: str) -> IdempotencyRecord | None:
-        """The record for (owner_id, bot_id, key), or None if the key is new or expired."""
-
-    async def record(self, record: IdempotencyRecord) -> None:
-        """Stores (owner_id, bot_id, key) -> resource id in the same transaction that creates the resource.
-        Raises KeyInProgress if another request holds the key and has not committed."""
-
-class IdempotentHandler(Protocol):
-    async def handle(self, *, bot: BotRef, key: str | None, fingerprint: str,
-                     create: Callable[[], Awaitable[tuple[str, int]]],
-                     current: Callable[[str], Awaitable[dict]]) -> tuple[int, dict, bool]:
-        """Replays (same fingerprint), refuses (409001, different fingerprint),
-        or runs `create` and records the key. Returns (status, data, replayed)."""
-
-class Preconditions(Protocol):
-    """Implements §6 for PUT on mutable resources."""
-
-    def etag_of(self, resource_version: str) -> str: ...
-
-    def check(self, *, if_match: str | None, current_etag: str) -> None:
-        """Raises PreconditionRequired (428000) if missing, PreconditionFailed (412000) on mismatch."""
-```
-
-Both are proposed shared helpers in each service's HTTP adapter layer;
-the resource services behind them stay transport-agnostic.
-
-## 13. API
+## 10. Endpoint index
 
 All public paths are under the prefix **`/openapi/v1`** and are written
 relative to it. Each endpoint's full schema, examples, and errors are in
-its owning doc; this section indexes them and shows the shared conventions
-once per group. Legend: **key** = takes `Idempotency-Key`; **202** = starts
-long-running work looked up by id; **ETag** = `If-Match` required on write;
-**CAS** = compare-and-swap in the body.
+its owning doc; this section lists every public endpoint, names its owning
+doc, and shows the shared conventions once per group. Which service serves
+each group follows "Where it runs" in [§1](#1-purpose-and-scope). Legend:
+**key** = takes `Idempotency-Key`; **202** = starts long-running work
+looked up by id; **ETag** = `If-Match` required on write; **CAS** =
+compare-and-swap in the body.
 
-### 13.1 Genome — [01-genome.md](01-genome.md)
+### 10.1 Genome — [01-genome.md](01-genome.md)
 
 | Method and path | Purpose | Conventions |
 | --- | --- | --- |
@@ -1005,7 +690,7 @@ Content-Type: application/json
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-{"revision": "sha256:b73d…", "expected_revision": "sha256:a90b…"}   // r42 replaces r41, only if draft is still r41
+{"revision": "sha256:7c1e…", "expected_revision": "sha256:a90b…"}   // r42 replaces r41, only if draft is still r41
 ```
 
 ```jsonc
@@ -1019,7 +704,7 @@ Content-Type: application/json
 }
 ```
 
-### 13.2 Experience — [02-experience.md](02-experience.md)
+### 10.2 Experience — [02-experience.md](02-experience.md)
 
 | Method and path | Purpose | Conventions |
 | --- | --- | --- |
@@ -1052,7 +737,7 @@ GET /openapi/v1/bots/bot_123/experience/episodes?revision=sha256%3Aa90b…&outco
 }
 ```
 
-### 13.3 Strategy registry — [03-strategy.md](03-strategy.md)
+### 10.3 Strategy registry — [03-strategy.md](03-strategy.md)
 
 | Method and path | Purpose | Conventions |
 | --- | --- | --- |
@@ -1062,16 +747,20 @@ GET /openapi/v1/bots/bot_123/experience/episodes?revision=sha256%3Aa90b…&outco
 | `GET /evolution/capabilities` | The capability catalog | |
 
 Shared-convention example: re-registering an existing version with
-different content is a conflict, not a silent overwrite.
+different content is a conflict, not a silent overwrite. The request is
+`multipart/form-data` with a `registration` part and one
+`definition:<name>` part per agent definition, as
+[03-strategy.md](03-strategy.md) defines; only the `registration` part is
+shown, shortened.
 
 ```http
 POST /openapi/v1/evolution/strategies
-Content-Type: application/json
-Idempotency-Key: publish-clawevolve-bot-evolution-2.0.0
+Content-Type: multipart/form-data; boundary=…
 ```
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+// Part "registration" (other needs and the definition parts omitted)
 {
   "id": "clawevolve/bot-evolution",
   "version": "2.0.0",
@@ -1082,7 +771,7 @@ Idempotency-Key: publish-clawevolve-bot-evolution-2.0.0
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// 409: version 2.0.0 already exists with a different record; publish 2.0.1 instead
+// 409: version 2.0.0 already exists with a different record; register 2.0.1 instead
 {
   "code": 409011,
   "message": "Strategy version already registered with different content",
@@ -1091,7 +780,7 @@ Idempotency-Key: publish-clawevolve-bot-evolution-2.0.0
 }
 ```
 
-### 13.4 Experiment ledger — [05-experiment-ledger.md](05-experiment-ledger.md)
+### 10.4 Experiment ledger — [05-experiment-ledger.md](05-experiment-ledger.md)
 
 | Method and path | Purpose | Conventions |
 | --- | --- | --- |
@@ -1123,7 +812,7 @@ Idempotency-Key: ledger-export-bot_123-2026-10-08
 }
 ```
 
-### 13.5 Evolution Run — [06-evolution-run.md](06-evolution-run.md)
+### 10.5 Evolution Run — [06-evolution-run.md](06-evolution-run.md)
 
 | Method and path | Purpose | Conventions |
 | --- | --- | --- |
@@ -1157,8 +846,7 @@ Idempotency-Key: nightly-bot_123-2026-10-08
 {
   "code": 202000,
   "message": "Accepted",
-  "data": {"run_id": "run_7f3", "binding": "bind_01", "strategy": "clawevolve/bot-evolution@2.0.0",
-           "status": "queued", "created_at": "2026-10-08T02:00:03Z"},
+  "data": {"run_id": "run_7f3", "status": "queued"},
   "request_id": "4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e"
 }
 ```
@@ -1170,8 +858,7 @@ Idempotency-Key: nightly-bot_123-2026-10-08
 {
   "code": 202000,
   "message": "Accepted",
-  "data": {"run_id": "run_7f3", "binding": "bind_01", "strategy": "clawevolve/bot-evolution@2.0.0",
-           "status": "running", "created_at": "2026-10-08T02:00:03Z"},
+  "data": {"run_id": "run_7f3", "status": "running"},
   "request_id": "5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f"
 }
 ```
@@ -1181,7 +868,7 @@ Shared-convention example 2: `If-Match` on the bindings.
 ```http
 PUT /openapi/v1/bots/bot_123/evolution/bindings
 Content-Type: application/json
-If-Match: "bind-7"
+If-Match: "bind-v12"
 ```
 
 ```jsonc
@@ -1197,7 +884,7 @@ If-Match: "bind-7"
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// 200 with the new ETag header: ETag: "bind-8"
+// 200 with the new ETag header: ETag: "bind-v13"
 {
   "code": 200000,
   "message": "OK",
@@ -1210,20 +897,21 @@ A stale tag gets `412000` ([§2.1](#21-envelope-and-errorenvelope)); a
 missing `If-Match` gets `428000`. (The response `data` above is shortened
 for the example; the owning doc defines the full bindings shape.)
 
-**Internal (not part of the public API or the client SDKs).** The Job
-Protocol under `/evolution/v1/...`, which job-worker strategies use to
-claim runs and call their context, is owned by
-[06-evolution-run.md](06-evolution-run.md). It follows the same conventions:
-JSON, idempotent starts with keys of the form `<run_id>/<step>`, and
-long-running calls answered with `202` and an operation id.
+**Internal (not part of the public API).** The Job Protocol under
+`/evolution/v1/...`, which job-worker strategies use to claim runs and call
+their context, is owned by [06-evolution-run.md](06-evolution-run.md). It
+is not exposed through the gateway and is not in the published OpenAPI
+documents. It follows the same conventions: JSON, idempotent starts with
+keys of the form `<run_id>/<step>`, and long-running calls answered with
+`202` and an operation id.
 
-### 13.6 Verification — [07-verification.md](07-verification.md)
+### 10.6 Verification — [07-verification.md](07-verification.md)
 
 | Method and path | Purpose | Conventions |
 | --- | --- | --- |
 | `GET /evolution/suites` | List suites | Page |
 | `GET /evolution/suites/{suite}` | One suite; case contents subject to split visibility | |
-| `POST /bots/{bot_id}/evolution/evaluations` | Operator-only ad-hoc evaluation of a revision on a suite | key; 202 + operation id |
+| `POST /bots/{bot_id}/evolution/evaluations` | Operator-only ad-hoc evaluation of a revision on chosen suites | key; 202 + operation id |
 | `GET /bots/{bot_id}/evolution/evaluations/{evaluation}` | Evaluation result (the id comes from the operation's `result`) | |
 
 Shared-convention example: start, then look up the operation by id.
@@ -1231,12 +919,12 @@ Shared-convention example: start, then look up the operation by id.
 ```http
 POST /openapi/v1/bots/bot_123/evolution/evaluations
 Content-Type: application/json
-Idempotency-Key: 0b6f7c52-3d0e-4c1b-9a63-8f2a7d0e5c11
+Idempotency-Key: adhoc-bot_123-r42-2026-10-08
 ```
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-{"revision": "sha256:b73d…", "suite": "support-refunds@3"}
+{"revision": "sha256:7c1e…", "suites": ["support-core"], "splits": ["validation", "regression"]}   // shortened; full body in 07-verification.md
 ```
 
 ```jsonc
@@ -1270,7 +958,7 @@ GET /openapi/v1/bots/bot_123/evolution/operations/op_19a
 Once `status` is `succeeded`, `result` is `{"evaluation_id": "ev_310"}`, and
 the evaluation is read with `GET /bots/{bot_id}/evolution/evaluations/ev_310`.
 
-### 13.7 Promotion — [08-promotion.md](08-promotion.md)
+### 10.7 Promotion — [08-promotion.md](08-promotion.md)
 
 | Method and path | Purpose | Conventions |
 | --- | --- | --- |
@@ -1285,31 +973,34 @@ Shared-convention example: a custom method on a colon-containing id.
 ```http
 POST /openapi/v1/bots/bot_123/evolution/candidates/sha256%3Ac41e…:approve
 Content-Type: application/json
-Idempotency-Key: review-bot_123-sha256:c41e…-approve
+Idempotency-Key: review-bot_123-sha256:c41e-approve
 ```
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-{"reason": "Fixes partial-refund misses; reviewed diff and validation report"}
+{"reason": "Reviewed diff and verification report; escalation fix is correct."}
 ```
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// 200; approving again with the same key replays this answer
+// 200; approving again with the same key replays this answer (data shortened; full shape in 08-promotion.md)
 {
   "code": 200000,
   "message": "OK",
-  "data": {"candidate_id": "sha256:c41e…", "run_id": "run_7f3", "decision": "approved",
-           "risk_tier": "T2", "decided_at": "2026-10-08T11:20:00Z"},
+  "data": {
+    "review": {"candidate_id": "sha256:c41e…", "status": "approved", "promotion_id": "prm_5d2"},
+    "promotion": {"id": "prm_5d2", "ref": "active", "revision_id": "sha256:7c1e…", "status": "applying"}
+  },
   "request_id": "9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d"
 }
 ```
 
 Approving a candidate that was already rejected is `409020`; approving one
-the gate does not allow is in the policy family (exit code 5). Who may
-approve which risk tier is defined in [08-promotion.md](08-promotion.md).
+the caller may not approve, or one the gate does not allow, is in the
+policy family. Who may approve which risk tier is defined in
+[08-promotion.md](08-promotion.md).
 
-### 13.8 Operations — this doc
+### 10.8 Operations — this doc
 
 The single public operation resource, shared by every endpoint that answers
 `202` with `{operation_id}` (ad-hoc evaluations in
@@ -1325,9 +1016,9 @@ The single public operation resource, shared by every endpoint that answers
 #### GET /bots/{bot_id}/evolution/operations/{operation}
 
 Look up an operation by id: `Operation{id, kind, status, result?, error?,
-created_at, updated_at}` (§2.5). Called by pipelines, the UI backend, the
-SDKs' `wait` helpers, and `avn … --wait`. Every lookup returns promptly; the
-response may carry `Retry-After`.
+created_at, updated_at}` (§2.5). Called by pipelines and the UI backend,
+repeatedly while they wait for the operation to finish (§9). Every lookup
+returns promptly; the response may carry `Retry-After`.
 
 ```http
 GET /openapi/v1/bots/bot_123/evolution/operations/op_19a
@@ -1375,176 +1066,403 @@ Idempotency-Key: cancel-op_19a
 
 Errors: `404000` unknown operation; `409020` the operation already finished.
 
-## 14. Examples
+## 11. OpenAPI documents and gateway routing
 
-### 14.1 Nightly pipeline (Python SDK)
+The public API is published as OpenAPI documents and reached through the
+gateway (`apps/gateway`), which forwards each `/openapi/v1` path to the
+service that serves it. This section describes the existing practice and
+what the evolution endpoints add to it. Items marked *(proposed)* do not
+exist yet.
 
-A scheduled job starts tonight's run on a bot owned by `user_owner_5`,
-waits for it, and approves candidates that the owner's bindings let the
-pipeline approve. Because the pipeline is not the owner, every call passes
-`entity_id`. The key is
-deterministic, so if the job itself crashes and is rerun, it re-attaches to
-the same run instead of starting a second one.
+### 11.1 Existing practice
+
+- **Documents are build outputs.** The documents in
+  `apps/gateway/configs/schemas/*.openapi.json` are checked in but not
+  hand-written: each is produced by its upstream's `scripts/dump_openapi.py`
+  (Backend, BaaS, and BCS each have one) and published by the gateway's
+  `scripts/gate_and_publish_openapi.py`, which refuses a
+  backward-incompatible change unless `--allow-breaking` is passed for a
+  coordinated one (`apps/gateway/configs/schemas/README.md`;
+  `apps/gateway/scripts/dump_and_publish.sh` runs both ends for every
+  upstream).
+- **Backend publishes `bots.openapi.json`**: its public surface under
+  `/openapi/v1/bots`, `/openapi/v1/org`, and the other prefixes listed in
+  that README. Backend's `dump_openapi.py` narrows the document to public
+  paths and the components they reference.
+- **Gateway domains.** `apps/gateway/configs/application.yaml` declares
+  `upstreams.domains`. A domain without `match:` claims
+  `/openapi/v1/<name>/**`; a domain with a `match:` pattern claims that
+  pattern, and the more specific pattern wins (more literal segments
+  outrank fewer). That is how carve-outs work today: `collaboration-publish`
+  (`/openapi/v1/collaboration/bots/{bot_uuid}/public/**`) sends one subtree
+  of the BCS-served `collaboration` namespace to Backend. A domain pattern
+  is literal and `{param}` segments ending in `**`. Who may call a path is
+  set separately in `route_security` in the same file.
+- **Namespace test.**
+  `apps/backend/tests/community/contracts/gateway/test_public_namespace.py`
+  fails if Backend serves an `/openapi/v1` route outside the declared
+  prefixes; extending those prefixes must land together with the matching
+  gateway domain and `route_security` entries.
+
+### 11.2 One document per serving service
+
+*(Proposed.)* Each serving service publishes its own document; there is no
+merged document. This follows the existing practice above and resolves open
+decision A-6 ([§15](#15-open-decisions)).
+
+| Document | Published by | Contains |
+| --- | --- | --- |
+| `bots.openapi.json` (existing, extended) | Backend, with its existing `dump_openapi.py` | The Genome endpoints (§10.1) and the Promotion endpoints: candidate report, review queue, approve/reject, promotions (§10.7) |
+| `evolution.openapi.json` (new) | `apps/evolution`, with its own `scripts/dump_openapi.py` | Experience, Strategy registry, Experiment ledger, Evolution Run, Verification, Operations (§10.2 to §10.6, [§10.8](#108-operations--this-doc)), and the level-3 Meta-evolution endpoints of [10-meta-evolution.md](10-meta-evolution.md) when they are built |
+
+`evolution.openapi.json` is gated and published the same way as the
+existing documents, through `gate_and_publish_openapi.py` and an entry in
+`dump_and_publish.sh`. The internal Job Protocol (`/evolution/v1/...`) is
+in neither document.
+
+### 11.3 Gateway routing
+
+*(Proposed.)* Paths are full gateway paths.
+
+| Path pattern | Served by | Gateway entry |
+| --- | --- | --- |
+| `/openapi/v1/bots/{bot_id}/genome/**` | Backend | Existing `bots` domain (`/openapi/v1/bots/**`); no new entry |
+| `/openapi/v1/bots/{bot_id}/evolution/**` | `apps/evolution` | New domain with this `match:`, server `evolution` |
+| `/openapi/v1/bots/{bot_id}/evolution/candidates/**` | Backend | New carve-out domain, server `backend`; outranks the line above |
+| `/openapi/v1/bots/{bot_id}/evolution/review-queue/**` | Backend | New carve-out domain, server `backend`; `**` also matches the bare `…/review-queue` |
+| `/openapi/v1/bots/{bot_id}/experience/**` | `apps/evolution` | New domain with this `match:`, server `evolution` |
+| `/openapi/v1/evolution/**` | `apps/evolution` | New domain `evolution` (no `match:` needed) and a new `route_security` entry |
+
+Checked against the index: the candidate report and `:approve`/`:reject`
+(`…/evolution/candidates/{candidate}` and
+`…/evolution/candidates/{candidate}:approve`) fall under the `candidates`
+carve-out and reach Backend, with the promotions under `genome`. A run's
+candidate list (`…/evolution/runs/{run}/candidates`) stays under `runs` and
+reaches `apps/evolution`, which owns runs. Bindings, runs, evaluations,
+ledger, and operations reach `apps/evolution`; strategies, capabilities,
+suites, and the meta-evolution paths are under `/openapi/v1/evolution/**`.
+
+The bot-scoped paths are under `/openapi/v1/bots/**` and keep its existing
+`route_security` rule. Only `/openapi/v1/evolution` is a new public prefix:
+its gateway domain, its `route_security` entry, and a `servers.evolution`
+base URL land in one change. Backend serves nothing under it, so Backend's
+namespace test is unchanged; `apps/evolution` gets the same namespace test
+with its own declared prefixes (`/openapi/v1/bots` for its bot-scoped
+paths, `/openapi/v1/evolution`).
+
+```yaml
+# Illustrative excerpt of upstreams.domains in apps/gateway/configs/application.yaml (proposed)
+evolution:
+  server: evolution
+  schema:
+    source: file
+    path: schemas/evolution.openapi.json
+    refresh_seconds: 300
+evolution-bots:
+  match: /openapi/v1/bots/{bot_id}/evolution/**
+  server: evolution
+  protocols: [http]
+evolution-promotion:
+  match: /openapi/v1/bots/{bot_id}/evolution/candidates/**
+  server: backend
+  protocols: [http]
+```
+
+### 11.4 Compatibility gate
+
+The publish gate enforces [§4.4](#44-compatibility-within-v1) mechanically:
+a release whose document removes or renames a path or field, or tightens a
+request, fails `gate_and_publish_openapi.py`. `--allow-breaking` is for a
+coordinated change that moves to a new endpoint version, with the reason
+recorded in the PR.
+
+### 11.5 Contract tests
+
+- Each service tests that the routes it serves match the document it
+  publishes, so the document never describes a surface the service does
+  not serve.
+- The conventions (envelope, `Idempotency-Key` replay, `409001` on key
+  reuse, `If-Match` and `412000`/`428000`, the error codes of
+  [§7.1](#71-shape-and-code-space)) are checked by shared conformance tests
+  that run against both services (work item RSI-07).
+
+## 12. Service interface
+
+The conventions interface is what each serving module (Backend,
+`apps/evolution`) uses in its HTTP adapter so that every endpoint behaves
+the same way.
 
 ```python
-import asyncio
-from avernet_evolution import Client, PolicyDenied, Transient
+from collections.abc import Awaitable, Callable
+from typing import Protocol
 
-async def nightly(owner_id: str, bot_id: str, binding: str, day: str) -> None:
-    c = Client.from_env()                                   # base URL and client settings from configuration
-    # The pipeline acts on another user's bot, so every call names the owner (entity_id).
-    run = await c.runs.start(bot_id, entity_id=owner_id, binding=binding,
-                             idempotency_key=f"nightly-{owner_id}-{bot_id}-{day}")  # same key on every rerun of this job
-    try:
-        run = await c.runs.wait(bot_id, run.run_id, entity_id=owner_id, timeout_s=3 * 3600)  # short lookups by id
-    except Transient:
-        return                                              # still running; the next invocation re-attaches
-    print(run.run_id, run.status, f"request_id={run.request_id}")
-    if run.status != "completed":
-        return                                              # failed / cancelled / budget_exhausted: nothing to approve
+class IdempotencyStore(Protocol):
+    """Implements §5. Writes happen in the caller's transaction."""
 
-    for cand in await c.runs.candidates(bot_id, run.run_id, entity_id=owner_id):
-        report = await c.review.report(bot_id, cand.candidate_id, entity_id=owner_id)
-        if report["gate"]["decision"] != "needs_review":
-            continue
-        try:
-            await c.review.approve(bot_id, cand.candidate_id, entity_id=owner_id, reason="nightly auto-policy",
-                                   idempotency_key=f"nightly-{owner_id}-{bot_id}-{day}/approve/{cand.candidate_id}")
-        except PolicyDenied as e:                           # the owner's bindings do not let pipelines approve this tier
-            print("left for human review:", cand.candidate_id, e.code, e.request_id)
+    async def lookup(self, bot: BotRef, key: str) -> IdempotencyRecord | None:
+        """The record for (owner_id, bot_id, key), or None if the key is new or expired."""
 
-asyncio.run(nightly("user_owner_5", "bot_123", "bind_01", "2026-10-08"))
+    async def record(self, record: IdempotencyRecord) -> None:
+        """Stores (owner_id, bot_id, key) -> resource id in the same transaction that creates the resource.
+        Raises KeyInProgress if another request holds the key and has not committed."""
+
+class IdempotentHandler(Protocol):
+    async def handle(self, *, bot: BotRef, key: str | None, fingerprint: str,
+                     create: Callable[[], Awaitable[tuple[str, int]]],
+                     current: Callable[[str], Awaitable[dict]]) -> tuple[int, dict, bool]:
+        """Replays (same fingerprint), refuses (409001, different fingerprint),
+        or runs `create` and records the key. Returns (status, data, replayed)."""
+
+class Preconditions(Protocol):
+    """Implements §6 for PUT on mutable resources."""
+
+    def etag_of(self, resource_version: str) -> str: ...
+
+    def check(self, *, if_match: str | None, current_etag: str) -> None:
+        """Raises PreconditionRequired (428000) if missing, PreconditionFailed (412000) on mismatch."""
 ```
 
-### 14.2 CI script with `avn`
+Both are proposed shared helpers in each service's HTTP adapter layer;
+the resource services behind them stay transport-agnostic.
 
-A CI job runs after a skill change. It uses exit codes rather than parsing
-text, and stores the idempotency key so a retried CI step reuses it.
+## 13. Examples
 
-```bash
-set -u
-KEY="ci-${CI_PIPELINE_ID}-bot_123"            # stable across retries of this pipeline
-out=$(avn evolve run start --bot bot_123 --binding bind_01 \
-        --idempotency-key "$KEY" --wait --timeout 2h --output json)
-rc=$?
-case $rc in
-  0) status=$(echo "$out" | jq -r '.data.status')
-     echo "run $(echo "$out" | jq -r '.data.run_id') ended: $status" ;;
-  5) echo "policy refused the run (evolution frozen or binding invalid)"; exit 1 ;;
-  6) echo "budget ceiling reached; skipping"; exit 0 ;;
-  7) echo "transient; rerun this step (same key re-attaches)"; exit 1 ;;
-  *) echo "$out" | jq -r '.request_id' >&2; exit 1 ;;
-esac
-```
+Each example is a sequence of raw HTTP requests. Response bodies are
+shortened to the fields the example uses; the owning docs have the full
+shapes.
 
-The JSON printed on success:
+### 13.1 Nightly pipeline
 
-```jsonc
-// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-{
-  "code": 200000,
-  "message": "OK",
-  "data": {"run_id": "run_7f3", "status": "completed", "binding": "bind_01"},
-  "request_id": "a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5",
-  "idempotency_key": "ci-48211-bot_123"    // added by avn for commands that take a key
-}
-```
+A scheduled job starts tonight's run on `bot_123`, owned by
+`user_owner_5`, waits for it, and approves what the owner's policy lets the
+pipeline approve. Because the pipeline is not the owner, every request
+carries `entity_id=user_owner_5`. The key is deterministic, so if the job
+itself crashes and is rerun, step 1 re-attaches to the same run instead of
+starting a second one.
 
-### 14.3 Editing the bindings safely (Python SDK)
+1. Start the run.
 
-Read-modify-write with `If-Match`; on `412` re-read and reapply.
+   ```http
+   POST /openapi/v1/bots/bot_123/evolution/runs?entity_id=user_owner_5
+   Content-Type: application/json
+   Idempotency-Key: nightly-bot_123-2026-10-08
+   ```
 
-```python
-from avernet_evolution import Client, PreconditionFailed
+   ```jsonc
+   // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+   {"binding": "bind_01"}
+   ```
 
-async def raise_budget(c: Client, bot_id: str, binding_id: str, max_usd: int) -> None:
-    for _ in range(3):
-        current, etag = await c.bindings.get(bot_id)     # caller is the owner: no entity_id
-        for b in current.bindings:
-            if b.id == binding_id:
-                b.budget.max_usd = max_usd
-        try:
-            await c.bindings.put(bot_id, current, if_match=etag)
-            return
-        except PreconditionFailed:
-            continue                                         # someone else changed it; read again
-    raise RuntimeError("bindings kept changing; giving up")
-```
+   ```jsonc
+   // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+   // 202; Location: /openapi/v1/bots/bot_123/evolution/runs/run_7f3?entity_id=user_owner_5
+   {"code": 202000, "message": "Accepted", "data": {"run_id": "run_7f3", "status": "queued"},
+    "request_id": "4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e"}
+   ```
 
-### 14.4 Review queue in the UI backend (TypeScript SDK)
+2. Poll the status by id, every few minutes or as `Retry-After` suggests,
+   until it is terminal. If the job's own time limit passes first, it
+   stops; the run continues, and a rerun of the job repeats step 1 with the
+   same key and finds it.
 
-```typescript
-import { Client, PolicyDenied } from "@avernet/evolution";
+   ```http
+   GET /openapi/v1/bots/bot_123/evolution/runs/run_7f3?entity_id=user_owner_5
+   ```
 
-const client = Client.fromEnv();
+   ```jsonc
+   // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+   // 200; failed, cancelled, or budget_exhausted would end the job here with nothing to approve
+   {"code": 200000, "message": "OK", "data": {"id": "run_7f3", "status": "completed", "candidate_count": 1},
+    "request_id": "a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5"}
+   ```
 
-// entityId: the bot's owner, passed when it is not the signed-in user (omitted = caller)
-export async function reviewQueue(botId: string, entityId?: string) {
-  const items = [];
-  for await (const item of client.review.iterQueue(botId, { entityId })) {        // walks all pages
-    const report = await client.review.report(botId, item.candidateId, { entityId });
-    items.push({ candidate: item.candidateId, tier: report.riskTier, gate: report.gate, diff: report.diff });
-  }
-  return items;
-}
+3. List the run's candidates, then read each report.
 
-export async function approve(botId: string, candidateId: string, reason: string, key: string, entityId?: string) {
-  try {
-    return await client.review.approve(botId, candidateId, { reason, idempotencyKey: key, entityId });
-  } catch (e) {
-    if (e instanceof PolicyDenied) return { refused: true, code: e.code, requestId: e.requestId };
-    throw e;
-  }
-}
-```
+   ```http
+   GET /openapi/v1/bots/bot_123/evolution/runs/run_7f3/candidates?entity_id=user_owner_5
+   GET /openapi/v1/bots/bot_123/evolution/candidates/sha256%3Ac41e…?entity_id=user_owner_5
+   ```
 
-The UI generates the approval key once when the reviewer opens the
-approve dialog, so a double click or a network retry records one decision.
+   ```jsonc
+   // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+   // data of the report: the gate wants a human for T2, above the auto-promote ceiling T1
+   {"candidate_id": "sha256:c41e…", "verdict": "accept",
+    "gate": {"id": "gd_204", "outcome": "needs_review", "risk": {"tier": "T2", "raised_by": []},
+             "auto_promote_ceiling": "T1"}}
+   ```
 
-### 14.5 Going back to an earlier revision
+4. For a candidate whose gate outcome is `needs_review`, try to approve it
+   within the policy the owner gave the pipeline. The approval key is
+   derived from the run key and the candidate id, so a rerun replays it.
+
+   ```http
+   POST /openapi/v1/bots/bot_123/evolution/candidates/sha256%3Ac41e…:approve?entity_id=user_owner_5
+   Content-Type: application/json
+   Idempotency-Key: nightly-bot_123-2026-10-08/approve/sha256:c41e
+   ```
+
+   ```jsonc
+   // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+   {"reason": "nightly auto-policy"}
+   ```
+
+   ```jsonc
+   // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+   // 403, policy family: the owner lets this pipeline approve up to T1 only.
+   // 403000 stands in for the policy_denied subcode, which 08-promotion.md sets.
+   {"code": 403000, "message": "Policy denied", "data": null,
+    "request_id": "d3e4f5a6b7c8d9e0f1a2b3c4d5e6f708"}
+   ```
+
+   The pipeline does not retry a policy-family error. It logs the
+   candidate id and the `request_id` and leaves the candidate in the review
+   queue for a human (§13.3).
+
+### 13.2 Editing the bindings safely
+
+The owner's UI backend raises the budget of `bind_01`, while another writer
+changes the bindings at the same time (§6).
+
+1. Read the bindings and keep the `ETag`.
+
+   ```http
+   GET /openapi/v1/bots/bot_123/evolution/bindings
+   ```
+
+   Response `200` with header `ETag: "bind-v12"`.
+
+2. Send the changed document with `If-Match`.
+
+   ```http
+   PUT /openapi/v1/bots/bot_123/evolution/bindings
+   Content-Type: application/json
+   If-Match: "bind-v12"
+   ```
+
+   ```jsonc
+   // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+   // 412: someone else wrote first; nothing was changed
+   {"code": 412000, "message": "Precondition failed: the resource changed since it was read",
+    "data": null, "request_id": "e4f5a6b7c8d9e0f1a2b3c4d5e6f70819"}
+   ```
+
+3. Read again (`ETag: "bind-v13"`), reapply the budget change to the fresh
+   copy, and send it with `If-Match: "bind-v13"`. The answer is `200` with
+   `ETag: "bind-v14"`. After a few `412`s in a row the UI stops and shows the
+   conflict to the user instead of retrying.
+
+### 13.3 Review queue in the UI backend
+
+1. List open review items, one page at a time (§8).
+
+   ```http
+   GET /openapi/v1/bots/bot_123/evolution/review-queue?status=open&page=1&page_size=20
+   ```
+
+   ```jsonc
+   // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+   // data
+   {"total": 1, "items": [{"candidate_id": "sha256:c41e…", "revision_seq": 42, "risk_tier": "T2",
+                           "run_id": "run_7f3", "status": "open"}]}
+   ```
+
+2. Open one report (diff, verification, gate decision) when the reviewer
+   selects it.
+
+   ```http
+   GET /openapi/v1/bots/bot_123/evolution/candidates/sha256%3Ac41e…
+   ```
+
+3. Approve. The UI backend creates the key when the reviewer opens the
+   approve dialog and reuses it on every retry, so a double click or a
+   network retry records one decision.
+
+   ```http
+   POST /openapi/v1/bots/bot_123/evolution/candidates/sha256%3Ac41e…:approve
+   Content-Type: application/json
+   Idempotency-Key: 4b0f6c1e-9a7d-4f53-8d1e-2c6a9e1b7f02
+   ```
+
+   ```jsonc
+   // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+   {"reason": "Reviewed diff and verification report; escalation fix is correct."}
+   ```
+
+   The answer is the `200` shown in §10.7:
+   the review item `approved` and a promotion of `r42` in status `applying`.
+   A `409020` means another reviewer decided first; the UI re-reads the
+   report and shows that decision.
+
+### 13.4 Going back to an earlier revision
 
 Going back is promoting an earlier revision; there is no separate rollback
 call.
 
-```bash
-avn genome promote --bot bot_123 --revision r41 \
-  --reason "r42 raised refund escalations" --yes --output json
-```
+1. Read the refs to find the revision to go back to and the one `active`
+   points at now.
 
-`avn` resolves `r41` to its revision id through `GET /bots/{bot_id}/genome/refs`
-and `GET /bots/{bot_id}/genome/revisions`, then calls
-`POST /bots/{bot_id}/genome/promotions`. For a service bot the revision is
-published as the next version through the existing publish flow
-([08-promotion.md](08-promotion.md)).
+   ```http
+   GET /openapi/v1/bots/bot_123/genome/refs
+   ```
 
-## 15. Interactions
+   ```jsonc
+   // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+   // data, shortened: active is r42, previous is r41
+   {"refs": [{"name": "active", "revision": "sha256:7c1e…"}, {"name": "previous", "revision": "sha256:a90b…"}]}
+   ```
+
+2. Promote `r41`, with compare-and-swap on `active`.
+
+   ```http
+   POST /openapi/v1/bots/bot_123/genome/promotions
+   Content-Type: application/json
+   Idempotency-Key: goback-bot_123-r42-to-r41
+   ```
+
+   ```jsonc
+   // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+   {"revision": "sha256:a90b…", "ref": "active", "expected_revision": "sha256:7c1e…",
+    "reason": "r42 raised refund escalations"}
+   ```
+
+   ```jsonc
+   // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+   // 201, data shortened
+   {"id": "prm_6a0", "ref": "active", "revision_id": "sha256:a90b…", "revision_seq": 41,
+    "from_revision_id": "sha256:7c1e…", "going_back": true, "status": "applying"}
+   ```
+
+   A `409010` means `active` moved since step 1: read the refs again and
+   decide. For a service bot the revision is published as the next version
+   through the existing publish flow ([08-promotion.md](08-promotion.md)).
+
+## 14. Interactions
 
 | Other part | Direction | What flows |
 | --- | --- | --- |
 | [01-genome.md](01-genome.md) (Genome Registry, Backend) | API → Genome | Revision, ref, diff, and content calls; CAS on refs; content-idempotent revision creates |
 | [02-experience.md](02-experience.md) | API → Experience | Episode queries, feedback records |
-| [03-strategy.md](03-strategy.md) (Strategy Registry) | API → Registry | Strategy registration (`avn strategy publish`), listing, capability catalog; the Strategy SDK is a separate package |
+| [03-strategy.md](03-strategy.md) (Strategy Registry) | API → Registry | Strategy registration (`POST /evolution/strategies`), listing, capability catalog; the Strategy SDK for strategy authors is owned there |
 | [05-experiment-ledger.md](05-experiment-ledger.md) | API → Ledger | Entry queries, exports as operations |
 | [06-evolution-run.md](06-evolution-run.md) | API → Run | Bindings (ETag), run submission (idempotency key → run id), status by id, cancellation; budgets, kill switches, and binding checks produce the policy and budget error families; the internal Job Protocol uses the same conventions |
 | [07-verification.md](07-verification.md) | API → Verification | Suites, ad-hoc evaluations as operations |
 | [08-promotion.md](08-promotion.md) | API → Promotion | Candidate reports, review queue, approve/reject, promotions (including going back) |
-| Pipelines and CI | Caller → API | Client SDK or `avn`; deterministic idempotency keys; exit codes |
-| UI backend | Caller → API | TypeScript SDK; ETags on bindings edits; one key per user action |
-| Human operators | Caller → API | `avn` and UI |
+| Pipelines and CI | Caller → API | HTTP; deterministic idempotency keys; error codes |
+| UI backend | Caller → API | HTTP; ETags on bindings edits; one key per user action |
+| Human operators | Caller → API | The workbench UI, through the UI backend |
+| Gateway (`apps/gateway`) | Routes API → Backend, `apps/evolution` | Domain routing per path, the published OpenAPI documents, the compatibility gate ([§11](#11-openapi-documents-and-gateway-routing)) |
 | Backend OpenAPI v1 adapter | Reused by this layer | `Envelope`, `ErrorEnvelope`, `Page`, `PageParams`, envelope builders and error mapping |
 
-## 16. Open decisions
+## 15. Open decisions
 
 | ID | Question | Current position |
 | --- | --- | --- |
-| A-1 | Is `avn` a new binary, or a subcommand group of an existing CLI? | Recommended: a new `avn` binary in Rust following `bcs-cli` conventions, with room for other platform commands later. No general Avernet CLI exists today |
 | A-2 | How long are idempotency records kept? | Proposed: at least 30 days, longer than any caller's retry horizon (a nightly job retried the next day must still re-attach). Decide with RSI-07 |
 | A-3 | Cursor pagination for large append-only collections (episodes, ledger entries)? | Proposed: keep page numbers for v1 consistency; add an opaque `cursor` for these two collections if `total` or shifting pages become a problem |
 | A-4 | Structured error details (for example which capability has no provider in a binding check)? | OpenAPI v1 pins `data` to `null` on errors and uses fixed messages. Options: keep that and encode the detail in the subcode; or allow a `data.details` object for evolution errors only. Undecided |
-| A-5 | A uniform validate-only mode (`dry_run`) for writes? | `genome patch apply --dry-run` needs one; whether other endpoints get it is up to their owning docs |
-| A-6 | One merged OpenAPI document or one per service? | Proposed: each service publishes its part; a build step merges them into the one public document the SDKs and CLI are generated from |
-| A-7 | Should `--wait` map terminal run statuses to exit codes? | Proposed: no; exit codes reflect the API call and scripts read `.data.status`. Revisit if CI users ask for it |
-| A-8 | Event delivery (listed in [work-items.md](work-items.md) as Q1 to Q3: "CLI binary, default bot run requests, event delivery"; A-1 is Q1, A-8 is Q3) | Current design has no callback or webhook channel: status by id is the only mechanism. A push channel would be an addition, not a replacement |
+| A-5 | A uniform validate-only mode (`dry_run`) for writes? | A dry run of `POST /bots/{bot_id}/genome/revisions` (check a patch against its base without recording a revision, [01-genome.md](01-genome.md)) needs one; whether other endpoints get it is up to their owning docs |
+| A-6 | One merged OpenAPI document or one per service? | Resolved: one document per serving service, no merged document ([§11.2](#112-one-document-per-serving-service)) |
+| A-8 | Event delivery (Q3 in [work-items.md](work-items.md); Q1 there, the CLI binary, is moot now that the CLI is out of scope) | Current design has no callback or webhook channel: status by id is the only mechanism. A push channel would be an addition, not a replacement |
 
-Q2 (whether subject bots may request runs by default) belongs to the
-postponed bot callers ([§3](#3-callers)).
+Q2 in [work-items.md](work-items.md) (whether subject bots may request runs
+by default) belongs to the postponed bot callers ([§3](#3-callers)).

@@ -16,10 +16,10 @@ AgentEvolve / ClawEvolve 管线改进。本设计文档集把这些能力变成�
 1. **进化的单元**是一个有版本、不可变的 bot 制品——*Bot 基因组*（Bot
    Genome），构建在现有的 Bot Config Manifest 之上；
 2. bot **如何**进化是一个**可插拔的进化策略**：一个 `run(ctx)` 端口，其他团队
-   用 SDK 实现并注册，而无需修改平台。每个 bot 通过绑定（Binding）选择自己的
+   用 Strategy SDK 实现并注册，而无需修改平台。每个 bot 通过绑定（Binding）选择自己的
    进化策略；ClawEvolve 成为第一个默认进化策略；
-3. 循环通过**同一份契约**驱动，契约有三个接入面：REST API、SDK，以及面向人和
-   CI 的 CLI（bot 作为调用方的场景已推迟）；
+3. 循环通过**同一份契约**驱动：由 OpenAPI 文档描述的 REST API，面向人（通过 UI）
+   以及流水线和 CI（bot 作为调用方的场景已推迟）；
 4. **验证归平台所有**：任何进化策略都不能写入线上 bot。一切都经过
    候选 → 验证 → 门禁 → 晋升，并带有谱系；回到旧版本就是晋升一个更早的
    修订版；
@@ -46,13 +46,13 @@ API，以及代码示例。
 | [design.zh-CN.md](design.zh-CN.md) | 概览 | 问题、目标、三个层级、架构、保障（治理摘要）、放置、分阶段、风险 |
 | [01-genome.zh-CN.md](01-genome.zh-CN.md) | 组件 | 一个可进化的 bot *是*什么：修订版、引用（ref）、补丁、记忆、存储、Genome Registry API |
 | [02-experience.zh-CN.md](02-experience.zh-CN.md) | 组件 | 进化策略从什么中学习：片段（episode）、反馈、会话导出、数据处理 |
-| [03-strategy.zh-CN.md](03-strategy.zh-CN.md) | 组件 | 进化如何做到可插拔：策略端口、能力目录、上下文、智能体定义、SDK、一致性 |
+| [03-strategy.zh-CN.md](03-strategy.zh-CN.md) | 组件 | 进化如何做到可插拔：策略端口、能力目录、上下文、智能体定义、Strategy SDK、一致性 |
 | [04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md) | 组件 | ClawEvolve 及其他首批进化策略，以及它们复用的现有代码 |
 | [05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md) | 组件 | 每次实验的记录：谱系、归档、审计 |
 | [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) | 服务 | 绑定、运行、租约、长时操作、作业协议、沙箱、预算 |
 | [07-verification.zh-CN.md](07-verification.zh-CN.md) | 服务 | 如何判断一次变更是好的：套件、评分器、配对运行、验证配置、判定 |
 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) | 服务 | 由谁决定：权力分立、门禁、风险等级、评审、晋升、发布、回到旧版本 |
-| [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) | 服务 | 公共访问层：API 约定、端点索引、SDK、`avn` CLI |
+| [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) | 服务 | 公共访问层：API 约定、端点索引、OpenAPI 文档 |
 | [10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md) | 服务（之后） | 第 3 层：改进改进机制、机制验证、边界 |
 | [research.zh-CN.md](research.zh-CN.md) | 附录 | 业界调研与代码库证据 |
 | [work-items.zh-CN.md](work-items.zh-CN.md) | 附录 | 供后续会话使用的工作项及其依赖关系 |

@@ -50,7 +50,7 @@ design has to respect from day one:
 | --- | --- |
 | G1 | One immutable, versioned representation of "what this bot is" (the Bot Genome) that every strategy reads and writes, and that the platform can apply to any engine. |
 | G2 | The evolution approach is a plug-in: other teams can author, test, version, and register strategies without changing platform code. |
-| G3 | One contract, three surfaces: REST API, SDKs (client and strategy authoring), and a CLI for humans and CI. Bots as callers are postponed ([DR-3](decisions/0003-bot-principal-for-evolution-surface.md)). |
+| G3 | One contract: the REST API described by OpenAPI documents; the Strategy SDK for strategy authors. Client SDKs and a CLI are out of scope until a use case appears. Bots as callers are postponed ([DR-3](decisions/0003-bot-principal-for-evolution-surface.md)). |
 | G4 | Existing pipelines (ClawEvolve first) become strategies on the platform, not parallel systems. |
 | G5 | Safe by construction: platform-owned verification and gate, risk-tiered approvals, lineage, going back to any earlier revision, sandboxed execution, budgets. |
 | G6 | Engine-neutral: the same strategy can evolve bots on different engines, subject to the capabilities each engine provides. |
@@ -125,7 +125,7 @@ interactions, and open decisions.
 | --- | --- | --- | --- |
 | [01-genome.md](01-genome.md) | **Genome** | What an evolvable bot *is*: an immutable, content-addressed revision of a complete, pinned Bot Config Manifest plus curated memory, lineage, and a locked policy; named refs (`active`, `previous`, …) moved by compare-and-swap; Genome Patches as the only way to change it. Includes the Genome Registry API. | Backend (`core/bot_genome/`) |
 | [02-experience.md](02-experience.md) | **Experience** | What strategies learn from: normalized, redacted episodes and feedback, each tagged with the genome revision that produced it; engine session-export providers. | `apps/evolution`; raw sessions stay in the engine |
-| [03-strategy.md](03-strategy.md) | **Strategy** | The pluggable improvement mechanism: the single `run(ctx)` port, registration records, the platform-owned capability catalog, `StrategyContext`, agent definitions, the strategy SDK, and conformance. | Strategy Registry in `apps/evolution`; strategy code owned by its authors |
+| [03-strategy.md](03-strategy.md) | **Strategy** | The pluggable improvement mechanism: the single `run(ctx)` port, registration records, the platform-owned capability catalog, `StrategyContext`, agent definitions, the Strategy SDK for strategy authors, and conformance. | Strategy Registry in `apps/evolution`; strategy code owned by its authors |
 | [04-default-strategies.md](04-default-strategies.md) | **Default strategies** | The first Strategy implementations: ClawEvolve onboarded as a black-box strategy, memory consolidation, and the trivial reference strategy; plus the inventory of existing evolve and bench code they reuse. | `apps/evolverun` (ClawEvolve), `apps/evolution` (platform strategies) |
 | [05-experiment-ledger.md](05-experiment-ledger.md) | **Experiment Ledger (H)** | The append-only record of every run, candidate, verdict, approval, and promotion, including rejected ones; the archive that parent selection, audit, and level 3 read. | `apps/evolution` |
 
@@ -136,7 +136,7 @@ interactions, and open decisions.
 | [06-evolution-run.md](06-evolution-run.md) | **Evolution Run** | Keeps each bot's bindings; fires triggers; runs strategies as leased jobs with frozen inputs; serves the strategy context in process or over the Job Protocol; runs long-running operations; enforces sandboxing and budgets. | `apps/evolution` |
 | [07-verification.md](07-verification.md) | **Verification** | Measures whether a candidate is better than its parent: suites with mandatory splits, graders, paired runs in eval bots, verification profiles, verdicts. Also serves train-split evaluation to strategies. | `apps/evolution`, executing through Backend eval env |
 | [08-promotion.md](08-promotion.md) | **Promotion** | Decides and applies: the gate, risk tiers, review queue, approvals, promotion of a revision to `active`, rollout, and going back. The only service that moves `active`. | Backend |
-| [09-evolution-api.md](09-evolution-api.md) | **Evolution API and clients** | The public access layer: shared API conventions (idempotency keys, ETags, errors, pagination, long-running work by id), the endpoint index, generated SDKs, and the `avn` CLI. | Gateway/Backend routes; SDK and CLI packages |
+| [09-evolution-api.md](09-evolution-api.md) | **Evolution API** | The public access layer: shared API conventions (idempotency keys, ETags, errors, pagination, long-running work by id), the endpoint index, and the OpenAPI documents that publish the endpoints. | Gateway routes; OpenAPI documents published by Backend and `apps/evolution` |
 | [10-meta-evolution.md](10-meta-evolution.md) | **Meta-evolution** *(later)* | Level 3: improves the mechanism from the Experiment Ledger, with mechanism verification and hard bounds. | `apps/evolution` |
 
 Appendices: [research.md](research.md) (industry survey and codebase
@@ -180,8 +180,8 @@ the part that owns it.
    candidate goes to the review queue.
 8. The strategy, having looked the verdict up by candidate id, may start
    its next round from the accepted revision.
-9. The owner reviews the diff and verification report (UI or
-   `avn evolve review`) and approves.
+9. The owner reviews the diff and verification report (in the UI or
+   through the API) and approves.
 10. **Promotion** moves `active → r42` and `previous → r41` in **Genome** and
     applies `r42` through the Manifest apply path; for a service bot it is
     published as the next version through draft → verify → publish.
@@ -241,13 +241,13 @@ Each contract needs docs and conformance tests in the same change (R1, R25).
 | Contract | Kind (R3) | Producer → consumer | Defined in |
 | --- | --- | --- | --- |
 | Genome schema and Genome Patch format | Data contract, versioned | Everyone | [01-genome.md](01-genome.md) |
-| Genome Registry API | Service API | Evolution, UI, CLI → Backend | [01-genome.md](01-genome.md) |
+| Genome Registry API | Service API | Evolution, UI, pipelines → Backend | [01-genome.md](01-genome.md) |
 | Engine memory projection contract | Plugin API | Backend apply → engine | [01-genome.md](01-genome.md) |
 | Episode / Feedback schema; engine session export (`session-export/v1` → v2) | Data contract; Plugin API | Engine → Experience → strategies | [02-experience.md](02-experience.md) |
 | Strategy port (`run(ctx)`), `StrategyContext`, registration record, capability catalog with per-engine providers | Plugin API | Evolution Run ↔ strategies | [03-strategy.md](03-strategy.md) |
-| Bindings, Run API, Job Protocol | Data contract; Service API; Plugin API (wire) | Owners, UI, CLI, job workers → Evolution Run | [06-evolution-run.md](06-evolution-run.md) |
+| Bindings, Run API, Job Protocol | Data contract; Service API; Plugin API (wire) | Owners, UI, pipelines, job workers → Evolution Run | [06-evolution-run.md](06-evolution-run.md) |
 | Verification API; executor and grader plugin protocols | Service API; Plugin API | Evolution Run, Promotion, publish flow, Quality Task → Verification | [07-verification.md](07-verification.md) |
-| Gate, review, and promotion API | Service API | UI, CLI, Evolution Run → Promotion | [08-promotion.md](08-promotion.md) |
+| Gate, review, and promotion API | Service API | UI, pipelines, Evolution Run → Promotion | [08-promotion.md](08-promotion.md) |
 | Experiment Ledger schema | Data contract | All services → Ledger → selectors, UI, level 3 | [05-experiment-ledger.md](05-experiment-ledger.md) |
 | Shared API conventions | Service API conventions | All public endpoints | [09-evolution-api.md](09-evolution-api.md) |
 
@@ -257,7 +257,7 @@ Each contract needs docs and conformance tests in the same change (R1, R25).
 | --- | --- | --- |
 | P0 Contracts | DR-1 and DR-2 accepted (DR-3 postponed); genome schema, strategy port and capability catalog, Job Protocol, API conventions reviewed | — |
 | P1 Genome | The Genome Registry, on top of the Manifest, adds revisions, refs, compare-and-swap, pinned resolution, and going back to any earlier revision; the Manifest gains a content-store source and records the applied document digest, which the Registry maps to a revision; direct Manifest edits are detected as drift | **Yes**: versioned bots, independent of evolution |
-| P2 Evolution core | `apps/evolution` skeleton, Evolution Run, Job Protocol, Strategy Registry, API + SDK + CLI skeleton, a trivial reference strategy (manual patch + deterministic checks) passing conformance | Yes, for scripted improvement |
+| P2 Evolution core | `apps/evolution` skeleton, Evolution Run, Job Protocol, Strategy Registry, the public API and its OpenAPI documents, a trivial reference strategy (manual patch + deterministic checks) passing conformance | Yes, for scripted improvement |
 | P3 Default strategy | ClawEvolve onboarded as a black-box strategy: session-export provider, sandboxed tune emitting patches, ClawBench graders in Verification | Yes: today's AgentEvolve on any OpenClaw bot through the platform |
 | P4 Verification and promotion | Verification (paired statistics, sealed holdout, must-pass suites, judge ensembles), publish-flow verify gate, review queue, risk tiers, shadow and canary, offline replay over the ledger | Hardening; the verify gate is useful for service bots on its own |
 | P5 More defaults | Memory projection contract, memory consolidation strategy, improvement-problem benchmark for verifying mechanism changes. Bot-driven parts are postponed with DR-3 | Regression tests for strategies |

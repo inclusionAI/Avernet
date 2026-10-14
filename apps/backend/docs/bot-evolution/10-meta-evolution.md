@@ -53,7 +53,7 @@ level-2 rounds.
 | Running a run: bindings, leases, budgets, kill switches, sandboxing, the Job Protocol | [06-evolution-run.md](06-evolution-run.md) |
 | Bot verification (S′ vs S1): suites, splits, graders, comparator, verdicts, verifier integrity | [07-verification.md](07-verification.md) |
 | Separation of powers, the gate, risk tiers, promotion of bot genomes | [08-promotion.md](08-promotion.md) |
-| Shared API conventions, idempotency keys, SDKs, the `avn` CLI | [09-evolution-api.md](09-evolution-api.md) |
+| Shared API conventions, idempotency keys, the public endpoint index | [09-evolution-api.md](09-evolution-api.md) |
 | Genome revisions and the revision/ref/patch machinery level 3 reuses | [01-genome.md](01-genome.md) |
 
 **Where it runs.** In the new module `apps/evolution`, next to the Strategy
@@ -846,14 +846,14 @@ pagination, and idempotency.
 percent-encoded in the path segment (`clawevolve%2Fbot-evolution`), as for
 the Strategy Registry endpoints in [03-strategy.md](03-strategy.md).
 
-Callers: human operators and researchers (UI, `avn`), and pipelines/CI that
-run the improvement-problem benchmark on a strategy change. Bot callers are
-postponed with DR-3 and are not callers of this surface.
+Callers: human operators and researchers (through the workbench UI), and
+pipelines/CI over HTTP that run the improvement-problem benchmark on a
+strategy change. Bot callers are postponed with DR-3 and are not callers of this surface.
 
 ### GET /evolution/strategies/{id}/mechanism/revisions
 
 Lists mechanism revisions of a family with lineage and status. Called by the
-UI and `avn`.
+UI and pipelines.
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -956,7 +956,7 @@ new verification).
 
 The adoption report for a mechanism candidate: the patch, the static checks,
 the mechanism verification comparison, and the gate decision. Called by
-reviewers (UI, `avn evolve mechanism review show`).
+reviewers (through the UI).
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -1309,26 +1309,25 @@ The first useful level-3 step needs no meta-strategy: a ClawEvolve maintainer
 changes the tune prompt, registers `2.0.1`, and lets mechanism verification
 decide.
 
-```python
-from avernet_evolution import Client
+`2.0.1` was registered with `POST /evolution/strategies`
+([03-strategy.md](03-strategy.md)); its revision is `sha256:5b0e…`, with a
+new tune-prompt digest. The maintainer's CI then calls:
 
-c = Client.from_env()
-family = "clawevolve/bot-evolution"
-
-# 2.0.1 was registered with `avn strategy publish` (03-strategy.md); new tune-prompt digest.
-v = c.mechanism_verifications.start(
-    family=family, candidate="2.0.1", baseline="active",
-    profile="mechanism-default@1",
-    idempotency_key="mv-clawevolve-2.0.1-vs-2.0.0",   # same key on every retry
-)
-result = c.mechanism_verifications.wait(v.verification_id)   # short lookups by id
-print(result.verdict, result.comparison["yield_gain_pct"])
-
-if result.verdict == "accept":
-    # T3: a human approves from the report; approval promotes `active` (or `canary` first).
-    report = c.mechanism_candidates.get(result.candidate)   # human-registered: candidate id = revision id
-    c.mechanism_candidates.approve(report.candidate, reason="Benchmark accept; reviewed diff")
-```
+1. `POST /openapi/v1/evolution/mechanism-verifications` with
+   `Idempotency-Key: mv-clawevolve-2.0.1-vs-2.0.0` (the same key on every
+   retry) and the body shown in §13 (`candidate` `sha256:5b0e…`, `baseline`
+   `active`, `profile` `mechanism-default@1`). The response carries
+   `verification_id` `mv_31`.
+2. `GET /openapi/v1/evolution/mechanism-verifications/mv_31`, repeated as
+   short lookups until `operation.status` is terminal. The pipeline reads
+   `verdict` and `comparison.yield_gain_pct`.
+3. If the verdict is `accept`, the change is T3, so a human approves it
+   from the report: `GET /openapi/v1/evolution/mechanism-candidates/sha256:5b0e…`
+   (for a human-registered version the candidate id is the revision id),
+   then `POST /openapi/v1/evolution/mechanism-candidates/sha256:5b0e…:approve`
+   with an `Idempotency-Key` and
+   `{"reason": "Benchmark accept; reviewed diff"}`. Approval promotes
+   `active`, or `canary` first.
 
 ### 14.2 A meta-strategy (sketch)
 
@@ -1358,17 +1357,17 @@ class MetaEvolve(EvolutionStrategy):
 
 ### 14.3 Screening a submission-filter change cheaply
 
-```python
-rp = c.replays.start(family=family, candidate="2.0.2",
-                     corpus={"since": "2026-07-01T00:00:00Z", "labelled_only": True},
-                     idempotency_key="replay-filter-min-gain-2")
-screen = c.replays.wait(rp.replay_id)
-if screen.candidate["precision_pct"] > screen.baseline["precision_pct"]:
-    # Worth paying for a real comparison; screening alone never adopts.
-    c.mechanism_verifications.start(family=family, candidate="2.0.2", baseline="active",
-                                    profile="mechanism-default@1",
-                                    idempotency_key="mv-clawevolve-2.0.2-vs-active")
-```
+1. `POST /openapi/v1/evolution/replays` with
+   `Idempotency-Key: replay-filter-min-gain-2`, the `2.0.2` revision as
+   `candidate`, and the corpus
+   `{"since": "2026-07-01T00:00:00Z", "labelled_only": true}` (body shape in
+   §13). The response carries `replay_id`.
+2. `GET /openapi/v1/evolution/replays/{replay}`, repeated until the status
+   is terminal.
+3. Only if the candidate's `precision_pct` is higher than the baseline's is
+   a real comparison worth paying for: `POST /openapi/v1/evolution/mechanism-verifications`
+   with `Idempotency-Key: mv-clawevolve-2.0.2-vs-active` and `baseline`
+   `active`. Screening alone never adopts.
 
 ### 14.4 Following or pinning a family's mechanism (proposed binding form)
 
@@ -1388,10 +1387,15 @@ if screen.candidate["precision_pct"] > screen.baseline["precision_pct"]:
 
 ### 14.5 Going back
 
-```bash
-avn evolve mechanism promote clawevolve/bot-evolution --revision 2.0.0 \
-  --reason "False-acceptance rate rose after 2.0.1" --yes
+```http
+POST /openapi/v1/evolution/strategies/clawevolve%2Fbot-evolution/mechanism/promotions
+Idempotency-Key: goback-clawevolve-2.0.1-to-2.0.0
+
+{"revision": "sha256:3f12…", "expected_active": "sha256:5b0e…", "reason": "False-acceptance rate rose after 2.0.1"}
 ```
+
+`sha256:3f12…` is `2.0.0` and `sha256:5b0e…` is `2.0.1`. Going back needs
+no new verification; the response is shown in §13.
 
 ## 15. Interactions
 
@@ -1406,7 +1410,7 @@ avn evolve mechanism promote clawevolve/bot-evolution --revision 2.0.0 \
 | Promotion ([08-promotion.md](08-promotion.md)) | Both | Mechanism gate profile, T3 default, review queue items, separation of powers |
 | Experience ([02-experience.md](02-experience.md)) | Experience → meta-evolution | Frozen experience snapshots for improvement problems |
 | Genome ([01-genome.md](01-genome.md)) | Genome → meta-evolution | Shared revision/ref/patch machinery; starting genomes of problems |
-| Evolution API ([09-evolution-api.md](09-evolution-api.md)) | Meta-evolution → API | Endpoints of §13 under the shared conventions; `avn evolve mechanism …` commands |
+| Evolution API ([09-evolution-api.md](09-evolution-api.md)) | Meta-evolution → API | Endpoints of §13 under the shared conventions |
 
 ## 16. Open decisions
 

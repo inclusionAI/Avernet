@@ -17,7 +17,7 @@
 - **Strategy Registry**（上一版设计中的组件 C3）：存储注册记录和上传的智能体定义的组件，它会补充平台对每个版本所了解的信息（其**一致性状态**：是否通过了一致性测试套件，§8.4；以及是否已启用），并提供能力目录和注册 API。记录是作者编写的数据；Registry 是保存它的服务。两者针对的是同一个对象，即一个策略版本；
 - **能力目录**（capability catalog）：策略可使用的上下文部件所组成的封闭、带版本的列表，以及每一项在策略看来是什么样子；
 - **从策略视角看**的 `StrategyContext`、`Candidate`、`Verdict` 和 `Operation`；
-- 策略 SDK、一致性测试套件，以及两个层级（黑盒、组合式）。
+- 面向策略作者的策略 SDK、一致性测试套件，以及两个层级（黑盒、组合式）。
 
 本文档不负责：
 
@@ -30,7 +30,7 @@
 | 套件、划分、评分器、验证配置，以及判定如何得出 | [07-verification.zh-CN.md](07-verification.zh-CN.md) |
 | 门禁、风险等级、评审、晋升 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) |
 | 记录实验（策略版本、所用模型、智能体定义摘要） | [05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md) |
-| 通用 API 约定、客户端 SDK、整个 `avn` CLI | [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) |
+| 通用 API 约定和公开端点索引 | [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) |
 | 改进策略本身（像基因组一样带版本的改进机制，第 3 级） | [10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md) |
 
 **归属位置。** Strategy Registry 位于提议的新模块 `apps/evolution` 中（待定决策 D-1，推荐方案 A：遵循 Backend DI/插件模式的 Python 服务；参见 [design.zh-CN.md](design.zh-CN.md)）。它是 ClawEvolve 的 `official-stage-catalog.json` 与 `ce_stage_skill_implementations` 的泛化。策略实现归其作者所有（包括默认进化策略所在的 `apps/evolverun`）。能力的**提供方**（provider）是平台代码（位于 `apps/evolution`）或引擎适配器代码（例如，引擎的会话导出提供 `experience.sessions`）。
@@ -150,15 +150,15 @@ class RegisteredStrategy:                      # what the registry stores and re
 **两种运行时。** 策略自身的代码在两个地方之一运行。无论哪种，它都只通过 `ctx` 调用平台，并由平台为它启动智能体和评估（§7）：
 
 - **`in_process`**：策略是安装在 `apps/evolution` 中的一个 Python 包。平台 worker 导入它并直接调用 `run(ctx)`，`ctx` 调用就是普通的函数调用。无需启动容器，因此开销很小，但代码运行在平台自己的进程中，没有任何隔离。因此它只适用于可信的、平台拥有的策略，例如 `platform/consolidate-memory`。
-- **`job_worker`**：策略以容器镜像的形式发布，由其作者构建并推送到平台可拉取的镜像仓库。每次运行时，平台在沙箱中启动该镜像。其中的 SDK 通过作业协议（HTTP，[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）认领该运行的作业并调用 `run(ctx)`；每次 `ctx` 调用都成为一次 HTTP 调用。它适用于其他团队的策略，以及使用其他语言或自带依赖的代码，例如 ClawEvolve 2.0.0。平台只按记录中的摘要拉取镜像；允许从哪些镜像仓库拉取属于部署配置。所有者不运行任何服务：平台为一次运行启动容器，运行结束后停止它。容器只会主动调用平台；平台从不调用进容器。
+- **`job_worker`**：策略以容器镜像的形式发布，由其作者构建并推送到平台可拉取的镜像仓库。每次运行时，平台在沙箱中启动该镜像。容器内的策略 SDK 通过作业协议（HTTP，[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）认领该运行的作业并调用 `run(ctx)`；每次 `ctx` 调用都成为一次 HTTP 调用。它适用于其他团队的策略，以及使用其他语言或自带依赖的代码，例如 ClawEvolve 2.0.0。平台只按记录中的摘要拉取镜像；允许从哪些镜像仓库拉取属于部署配置。所有者不运行任何服务：平台为一次运行启动容器，运行结束后停止它。容器只会主动调用平台；平台从不调用进容器。
 
 由所有者托管一个长期运行、由平台来调用的服务，有意不作为一种运行时：平台无法对它做沙箱隔离、执行预算，也无法保证 `ctx` 是策略访问平台的唯一入口。
 
 **智能体是另一回事。** 运行时是 `run(ctx)` 运行的地方。`agents@1` 下的智能体定义是策略可以通过 `ctx.agents`（§4.2）*启动*的智能体；平台在工作区旁的沙箱中运行它们。并非每个策略都使用智能体：记忆整合只使用 `ctx.models`。
 
-**`params_schema` 示例。** `params` 用来让同一个策略在不同 Bot 上有不同配置：每个 Bot 的绑定都带有自己的取值。ClawEvolve 在 `bot_123` 上的绑定设置了 `{"window_days": 7, "max_rounds": 3}`，而另一个 Bot 的绑定可能设置 `"window_days": 30`。所有者在保存该 Bot 的绑定时写入这些值（`PUT /bots/{bot_id}/evolution/bindings`，或 `avn evolve bindings set`；[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。schema 在这一刻就能发现错误：如果所有者在编辑 `bot_123` 的绑定时把 `"window_days": 40` 误写成 `"window_days": 400`（超过 schema 规定的最大值 90），保存会当场被拒绝，而不是数小时后夜间运行开始时才由 ClawEvolve 报错。
+**`params_schema` 示例。** `params` 用来让同一个策略在不同 Bot 上有不同配置：每个 Bot 的绑定都带有自己的取值。ClawEvolve 在 `bot_123` 上的绑定设置了 `{"window_days": 7, "max_rounds": 3}`，而另一个 Bot 的绑定可能设置 `"window_days": 30`。所有者在保存该 Bot 的绑定时写入这些值（带 `If-Match` 的 `PUT /bots/{bot_id}/evolution/bindings`；[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。schema 在这一刻就能发现错误：如果所有者在编辑 `bot_123` 的绑定时把 `"window_days": 40` 误写成 `"window_days": 400`（超过 schema 规定的最大值 90），保存会当场被拒绝，而不是数小时后夜间运行开始时才由 ClawEvolve 报错。
 
-**策略的项目。** “策略源码”指作者为该策略维护的项目，通常是一个 git 仓库，作者在其中运行 `avn strategy publish`。它包含策略的代码、注册记录，以及每个智能体定义各自的一个目录。`path` 相对于项目根目录。以 ClawEvolve 的项目为例：
+**策略的项目。** “策略源码”指作者为该策略维护的项目，通常是一个 git 仓库，作者（或其 CI）从这里注册该策略。它包含策略的代码、注册记录，以及每个智能体定义各自的一个目录。`path` 相对于项目根目录。以 ClawEvolve 的项目为例：
 
 ```text
 clawevolve-strategy/                 # the strategy's project root
@@ -173,9 +173,9 @@ clawevolve-strategy/                 # the strategy's project root
         └── SKILL.md
 ```
 
-`avn strategy publish` 读取 `strategy.json`，上传两个 `agents/…` 目录，并注册该版本。镜像由作者从同一个项目构建并推送。
+注册是一次 `POST /evolution/strategies` 调用（§10）：其 `registration` 部件是 `strategy.json`，每个 `agents/…` 目录作为各自的 `definition:<name>` 部件发送。镜像由作者从同一个项目构建并推送。
 
-一个项目就是一个策略（一个 `strategy.json`、一个策略 id，随时间推移有多个版本）。一个仓库可以包含多个项目，例如 `apps/evolverun` 中 ClawEvolve 的项目与其他项目并列；`avn strategy publish [DIR]` 注册 `DIR` 中的项目（默认为当前目录）。Strategy Registry 从不读取 git 仓库：它只接收 `avn strategy publish` 上传的内容（记录和智能体定义目录），以及记录中指定的镜像摘要。
+一个项目就是一个策略（一个 `strategy.json`、一个策略 id，随时间推移有多个版本）。一个仓库可以包含多个项目，例如 `apps/evolverun` 中 ClawEvolve 的项目与其他项目并列；CI 作业对每个策略项目调用一次 `POST /evolution/strategies`，从该项目的目录发出。Strategy Registry 从不读取 git 仓库：它只接收注册请求上传的内容（记录和智能体定义目录），以及记录中指定的镜像摘要。
 
 作者在策略源码中编写的记录如下。这里是 ClawEvolve 的记录（[04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md)）；每个策略都填写相同的字段：
 
@@ -335,7 +335,7 @@ class StrategyContext(Protocol):
     log: RunLog                                     # structured log lines, shown on the run
     artifacts: ArtifactSink                         # files the run keeps (reports, transcripts), by artifact id
     cancelled: CancellationToken                    # set when the run is cancelled; the strategy must stop
-    operations: Operations                          # get(op_id), cancel(op_id); SDK helper wait(op_id) (§6)
+    operations: Operations                          # get(op_id), cancel(op_id); Strategy SDK helper wait(op_id) (§6)
     candidates: Candidates                          # candidates@1: where the strategy hands in what it produced
     models: Models                                  # models@1: single model calls
 
@@ -501,7 +501,7 @@ class Operation:
 
 ### 3.2 注册一个版本
 
-注册由作者通过 `avn strategy publish` 完成，它会调用 `POST /evolution/strategies`（§10）：
+注册由作者（或其 CI）通过一次 `POST /evolution/strategies` 调用完成（§10）：
 
 1. **校验记录。** `needs` 中的每个名称都必须以所声明的版本存在于目录中；参数必须符合该条目的参数 schema。
 2. **上传智能体定义。** `agents@1.definitions` 下列出的每个目录都会被上传，并按内容寻址存储（与 manifest 内容存储相同的摘要方案；参见 [01-genome.zh-CN.md](01-genome.zh-CN.md)）。其摘要会写入存储的记录。平台永远不需要读取策略的容器镜像或 Python 包来查找它们，因此两种运行时的工作方式相同。
@@ -578,7 +578,7 @@ class WorkspaceFactory(Protocol):
 class Operations(Protocol):
     async def get(self, op_id: str) -> Operation: ...               # one short status lookup
     async def cancel(self, op_id: str) -> None: ...
-    # SDK helper, not a platform call: repeats get() until the operation finishes
+    # Strategy SDK helper, not a platform call: repeats get() until the operation finishes
     async def wait(self, op_id: str, *, poll_s: float = 5) -> Operation: ...
 
 class BudgetMeter(Protocol):
@@ -715,7 +715,7 @@ class TrainEvaluator(Protocol):
 | --- | --- |
 | `CapabilityNotGranted` | 访问了未在 `needs` 中声明的上下文部件（通过作业协议时：`403`） |
 | `BudgetExhausted` | 一次计费将超出运行的预算；策略必须停止 |
-| `Cancelled`（通过 `ctx.cancelled`） | 运行已被取消；策略必须停止。通过作业协议时，取消信号随心跳响应到达，SDK 将其转为 `ctx.cancelled` |
+| `Cancelled`（通过 `ctx.cancelled`） | 运行已被取消；策略必须停止。通过作业协议时，取消信号随心跳响应到达，策略 SDK 将其转为 `ctx.cancelled` |
 | `UnknownAgentDefinition` | `agents.start` 指定了注册记录中没有的定义 |
 | `StaleAttempt` | 运行被重新派发后，来自旧尝试的调用（fencing token；通过作业协议时：`409`） |
 
@@ -726,7 +726,7 @@ class TrainEvaluator(Protocol):
 `ctx.agents.start` 指定了一个智能体，但平台还需要该智能体的**定义**。目前，ClawEvolve 的调优智能体是 `clawevolve-skills` 中的 `clawevolve-tune` 技能（`SKILL.md` 及参考资料），安装在 ClawEvolve 自身驱动的 OpenClaw 运行时中，因此只需指定名称即可。其他团队的黑盒策略没有这样的共享安装：平台的沙箱运行器从未见过它的智能体。机制如下：
 
 1. **随策略发布。** 每个智能体定义都是策略源码中的一个目录，采用其引擎的格式（对 OpenClaw 而言：智能体的技能与配置布局）。注册记录在 `agents@1.definitions` 下列出每个定义及其 `engine` 和 `path`。
-2. **在注册时上传。** `avn strategy publish` 将每个定义目录上传到 Strategy Registry，后者按内容寻址存储，并在注册记录中记下摘要。
+2. **在注册时上传。** `POST /evolution/strategies` 请求将每个定义目录带到 Strategy Registry，后者按内容寻址存储，并在注册记录中记下摘要。
 3. **在注册时校验。** 每个所列引擎的 `agents@1` provider 根据该引擎的定义契约校验定义。
 4. **按调用加载。** `ctx.agents.start("clawevolve-tune", …)` 会让 provider 按摘要将该定义加载到沙箱中，放在工作区 `ws` 旁边。定义对智能体是只读的；只有 `ws` 可写。
 5. **随策略版本化。** 定义属于某个策略版本：修改调优提示词意味着注册一个新的策略版本。实验记录 H 会随每次运行记录定义摘要，因此结果可以归因到所使用的确切提示词。
@@ -747,7 +747,7 @@ class TrainEvaluator(Protocol):
 有些能力调用所做的工作需要数分钟或更久：智能体会话（`agents.start`）或涉及大量 rollout 的训练评估（`evaluation.start_train`）。这些调用在工作进行期间绝不保持请求打开。从策略视角看：
 
 - **启动立即返回 id。** 启动调用记录一个**操作**，将工作交给平台，并返回其**操作 id**（通过作业协议时：`202` 并附带 id）。
-- **按 id 查询状态。** `ctx.operations.get(op_id)` 返回状态（`queued`、`running`、`succeeded`、`failed` 或 `cancelled`），成功后还返回结果。每次查询都是一次短请求。`ctx.operations.wait(op_id)` 是一个 SDK 辅助函数，它重复进行短查询直到操作结束；它从不保持某个请求打开。
+- **按 id 查询状态。** `ctx.operations.get(op_id)` 返回状态（`queued`、`running`、`succeeded`、`failed` 或 `cancelled`），成功后还返回结果。每次查询都是一次短请求。`ctx.operations.wait(op_id)` 是一个策略 SDK 辅助函数，它重复进行短查询直到操作结束；它从不保持某个请求打开。
 - **启动是幂等的。** 它接受一个 `idempotency_key`（幂等键）。使用相同的键重复启动，会返回同一个操作（无论是否已完成），而不是再次启动并为工作重复付费。键应构造为 `<run_id>/<own step>`，例如 `run_7f3/round-2/tune`。切勿使用在重试之间会变化的东西，例如发送时的时间戳。按此方式构造键的策略在重新派发后无需保存操作 id，即可重新挂接到其操作上。
 - **工作区遵循同一规则。** `ctx.workspace.materialise(revision,
   key=…)` 对每个键是幂等的，因此重新派发的运行会拿回同一个沙箱，包括智能体操作已经做出的编辑。
@@ -770,7 +770,7 @@ class TrainEvaluator(Protocol):
 
 **进度持久化。** 运行的每次尝试都是一个带租约的作业。如果策略进程崩溃，运行会以相同的运行 id 和 `ctx.attempt + 1` 再次派发（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。平台保存运行记录、冻结的输入、已花费的预算、候选和操作。其他任何所需内容由策略持久化在**它自己的存储**中，以运行 id 为键；重新派发时重新加载并继续。平台没有检查点 API，也从不读取这些状态；其结构因策略而异。策略在自己的存储中持久化自己的进度（已达成一致）。待定：沙箱化的作业 worker 如何访问该存储——例如在注册记录中为策略自有存储声明一条出口白名单条目，或由平台提供一个按运行划分、平台从不解读的不透明 blob（待定决策 S-8）。结合幂等提交、幂等的操作启动以及按键区分的工作区，这使得策略可以恢复执行，而不会重复产生候选、操作或花费。
 
-## 8. 层级、运行时、SDK 与一致性
+## 8. 层级、运行时、策略 SDK 与一致性
 
 ### 8.1 同一端口上的两个层级
 
@@ -790,21 +790,21 @@ class TrainEvaluator(Protocol):
 | `in_process` | 由 `apps/evolution` 组合根加载的 Python 包，通过配置选择（R5/R14） | 直接的 Python 对象 |
 | `job_worker` | 容器镜像（任意语言） | 作业协议：每个 `ctx` 调用映射到一个 HTTP 端点 |
 
-无论哪种方式，策略代码都相同；SDK 提供两种上下文实现。作业协议（claim、心跳；每个 `ctx` 调用一个端点，包括工作区文件列表、读取、写入以及用于 `ws.to_patch()` 的 `:patch`；运行日志与制品上传；操作返回 `202` + 操作 id；未授予的能力返回 `403`；在 `Evolution-Fencing-Token` 头中发送的过期 fencing token 返回 `409`；取消信号通过心跳响应传递）定义于 [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)。worker 是由平台运行的容器；由 bot 充当 worker 的方式随 bot 调用方一起推迟。
+无论哪种方式，策略代码都相同；策略 SDK 提供两种上下文实现。作业协议（claim、心跳；每个 `ctx` 调用一个端点，包括工作区文件列表、读取、写入以及用于 `ws.to_patch()` 的 `:patch`；运行日志与制品上传；操作返回 `202` + 操作 id；未授予的能力返回 `403`；在 `Evolution-Fencing-Token` 头中发送的过期 fencing token 返回 `409`；取消信号通过心跳响应传递）定义于 [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)。worker 是由平台运行的容器；由 bot 充当 worker 的方式随 bot 调用方一起推迟。
 
-### 8.3 SDK
+### 8.3 策略 SDK
 
 | 包 | 面向 | 内容 |
 | --- | --- | --- |
-| `avernet-evolution-strategy`（先 Python，后 TS） | 策略作者 | `EvolutionStrategy` 基类、带类型的模型、进程内和作业协议两种 `StrategyContext`、`WorkspaceFactory`（materialise / `to_patch`）、`AgentRunner`（先支持 OpenClaw）、按 id 轮询的 `operations.wait` 辅助函数、带模拟平台的本地测试环境（`avn strategy dev`；它可以杀掉并重新派发一次运行，以测试策略自身的恢复能力）、`avn strategy test`（一致性测试套件），以及 `avn strategy publish`（注册一个版本并上传其智能体定义） |
+| `avernet-evolution-strategy`（先 Python，后 TS） | 策略作者 | `EvolutionStrategy` 基类、带类型的模型、进程内和作业协议两种 `StrategyContext`、`WorkspaceFactory`（materialise / `to_patch`）、`AgentRunner`（先支持 OpenClaw）、按 id 轮询的 `operations.wait` 辅助函数、供作者测试使用的、带模拟平台的本地测试环境（它可以杀掉并重新派发一次运行，以测试策略自身的恢复能力），以及作为测试辅助工具的一致性测试套件。注册不属于该包：它是一次 `POST /evolution/strategies` 调用（§10） |
 
-面向调用方的客户端 SDK（`avernet-evolution`、`@avernet/evolution`）在 [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) 中描述。
+策略之外的调用方使用 HTTP API（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)）。
 
 ### 8.4 一致性
 
 一致性测试在端口的两侧都会运行。
 
-- **策略测试套件**（由作者通过 `avn strategy test` 运行，并由 Strategy Registry 在某个版本可在开发环境之外绑定之前运行）：
+- **策略测试套件**（由作者在自己的测试中运行，并由 Strategy Registry 在某个版本可在开发环境之外绑定之前运行）：
   - 候选能通过补丁 schema 和该运行 `allowed_genes` 的校验；
   - 策略只使用已授予的能力；
   - 它在取消和 `BudgetExhausted` 时停止；
@@ -904,7 +904,7 @@ class CapabilityCatalog(Protocol):
 
 ### GET /evolution/strategies
 
-列出已注册的策略版本。由 UI 后端、`avn` CLI（`avn evolve strategies list`）以及为绑定选择策略的所有者调用。查询参数：`engine`（仅返回可在该引擎上使用的版本）和 `conformance`（`pending`、`passed`、`failed`）。
+列出已注册的策略版本。由 UI 后端、流水线以及为绑定选择策略的所有者调用。查询参数：`engine`（仅返回可在该引擎上使用的版本）和 `conformance`（`pending`、`passed`、`failed`）。
 
 请求示例：
 
@@ -945,7 +945,7 @@ GET /openapi/v1/evolution/strategies?engine=openclaw&conformance=passed
 
 ### POST /evolution/strategies
 
-注册一个新的策略版本：校验记录，上传并校验其智能体定义，然后启动一致性测试套件。由 `avn strategy publish`（策略作者、策略仓库的 CI）调用。
+注册一个新的策略版本：校验记录，上传并校验其智能体定义，然后启动一致性测试套件。由策略作者和策略项目的 CI 调用。
 
 请求提议采用 `multipart/form-data`：一个名为 `registration` 的部分，包含作者编写的记录；每个智能体定义一个部分，命名为 `definition:<name>`，包含其目录的 tar 归档。`registration` 部分示例：
 
@@ -1014,7 +1014,7 @@ GET /openapi/v1/evolution/strategies?engine=openclaw&conformance=passed
 
 ### GET /evolution/strategies/{id}/versions/{version}
 
-读取一个已注册版本，包括智能体定义摘要和一致性状态。由所有者和 UI 后端在绑定策略之前调用，由 `avn strategy publish --wait` 用于查询一致性状态，也由想了解某次运行使用了什么的评审者调用。
+读取一个已注册版本，包括智能体定义摘要和一致性状态。由所有者和 UI 后端在绑定策略之前调用，由执行注册的 CI 作业用于查询一致性状态，也由想了解某次运行使用了什么的评审者调用。
 
 请求示例：
 
@@ -1049,7 +1049,7 @@ GET /openapi/v1/evolution/strategies/acme%2Fcorrection-fixer/versions/1.0.0
 
 ### GET /evolution/capabilities
 
-返回能力目录：每个条目及其版本、上下文部件、哪些调用是操作，以及拥有 provider 的引擎。由策略作者和 SDK 调用（用于展示可以声明什么），也由 UI 后端调用（用于解释某个策略为何不能在某个 bot 上运行）。
+返回能力目录：每个条目及其版本、上下文部件、哪些调用是操作，以及拥有 provider 的引擎。由策略作者和策略 SDK 调用（用于展示可以声明什么），也由 UI 后端调用（用于解释某个策略为何不能在某个 bot 上运行）。
 
 请求示例：
 
@@ -1224,16 +1224,13 @@ class CorrectionFixer(EvolutionStrategy):
 }
 ```
 
-### 11.2 使用 SDK 与 `avn` 的作者工作流
+### 11.2 作者工作流
 
-```text
-avn strategy dev                       # run the strategy against the local fake platform
-avn strategy test                      # conformance kit, incl. kill and re-dispatch of a run
-avn strategy publish                   # POST /evolution/strategies with the record and agents/acme-fixer
-avn evolve strategies show acme/correction-fixer@1.0.0   # conformance status, definition digests
-```
+1. **在本地测试。** 作者自己的测试套件使用策略 SDK 的测试环境：模拟平台在进程内运行策略，一致性测试套件（§8.4），包括杀掉并重新派发一次运行，也在同一个测试套件中运行。下面是两个这样的测试。
+2. **注册。** 项目的 CI 对每个策略项目和版本执行一次：构建并推送镜像，然后发送 `POST /openapi/v1/evolution/strategies`，带 `registration` 部件（`strategy.json`）和一个 `definition:acme-fixer` 部件（打包为 tar 归档的 `agents/acme-fixer` 目录），定义见 §10。
+3. **检查一致性。** CI 重复调用 `GET /openapi/v1/evolution/strategies/acme%2Fcorrection-fixer/versions/1.0.0`，直到 `conformance.status` 为 `passed` 或 `failed`。响应中也包含已存储的定义摘要。
 
-使用 SDK 测试环境中模拟平台的单元测试（提议的 API）：
+使用策略 SDK 测试环境中模拟平台的单元测试（提议的 API）：
 
 ```python
 async def test_submits_only_on_train_gain(fake_platform):
@@ -1269,7 +1266,7 @@ async def test_redispatch_does_not_duplicate(fake_platform):
 | [07-verification.zh-CN.md](07-verification.zh-CN.md) | 双向 | 通过 `evaluation.train@1` 添加的训练用例和训练结果；通过 `candidates@1` 提供的带验证聚合数据的判定 |
 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) | 策略 → 晋升（间接） | 候选只有在验证之后才会到达门禁；策略从不调用晋升 |
 | [05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md) | 策略 → 实验记录（经由平台） | 每次运行的策略版本、所用模型、智能体定义摘要、候选和费用 |
-| [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) | 客户端 → Registry | §10 中的 registry 端点；`avn strategy` 与 `avn evolve strategies` 命令 |
+| [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) | 调用方 → Registry | §10 中的 registry 端点 |
 | [04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md) | 实现本端口 | 作为已注册策略的 ClawEvolve 和 `platform/consolidate-memory` |
 | [10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md) | 元进化 → Registry（后续） | 改进机制即策略版本；候选改进机制作为新版本注册 |
 | 引擎适配器 | 提供能力 | 按引擎划分的 provider（会话导出、智能体运行器）以及按引擎划分的智能体定义契约 |

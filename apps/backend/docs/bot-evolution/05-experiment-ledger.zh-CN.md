@@ -23,7 +23,7 @@ S′，平台对其进行验证并决定如何处理它。实验记录为每次�
 
 | 读者 | 用实验记录做什么 |
 | --- | --- |
-| 人类（所有者、评审者、研究者） | 在 UI 或 `avn` 中浏览谱系、候选报告和审计轨迹 |
+| 人类（所有者、评审者、研究者） | 在 UI 中或通过 API 浏览谱系、候选报告和审计轨迹 |
 | 第 2 层（父版本选择） | 选择 `active` 之外的父版本：latest-best、按用例的 Pareto 前沿、MAP-Elites 生态位、分支（clade）得分（[§7](#7-归档选择器父版本选择)） |
 | 进化策略 | 原始历史的文件系统导出，因为对提议者而言原始历史胜过摘要（Meta-Harness）（[§9](#9-导出)） |
 | 第 3 层（后续） | 改进机制自身的证据基础：派生的改进机制指标和冻结的改进问题（[§8](#8-改进机制指标与验证器版本)） |
@@ -133,7 +133,7 @@ class Split(StrEnum):                            # same set as 07-verification.m
 
 # RiskTier (T0 < T1 < T2 < T3) is defined once in 08-promotion.md §5.
 # BotRef {owner_id, bot_id}: a bot's full identity (a bot_id alone is not unique
-# across users); defined once in 09-evolution-api.md §2.7.
+# across users); defined once in 09-evolution-api.md §2.6.
 # EvidenceRef "<kind>:<id>": 01-genome.md §2.2.
 
 
@@ -543,7 +543,7 @@ class MechanismMetrics:                        # same fields as in 10-meta-evolu
 
 | 读者 | 能看到 |
 | --- | --- |
-| 所有者、租户管理员、评审者（UI、`avn`、API） | 其 Bot 的全部内容，包括每个划分的结果和证据 |
+| 所有者、租户管理员、评审者（UI 或 API） | 其 Bot 的全部内容，包括每个划分的结果和证据 |
 | 流水线（API） | 与其所使用凭据对应的人类相同 |
 | 进化策略（文件系统导出，未来的能力） | 自己的以及被允许的 Bot 的条目，判定**仅含聚合信息**：状态、验证集均值和区间、成本、采纳情况、线上结果。不含逐用例的验证集细节；不含留出集、回归或安全用例及用例 id；训练集结果与运行时报告给进化策略的一致 |
 | 元策略（第 3 层，后续） | 与进化策略相同的视图，外加派生的改进机制指标；永远看不到改进机制留出问题 |
@@ -684,7 +684,7 @@ ledger-export/
 （第 3 层能力 `ledger.read@1`，定义于
 [10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md)）随第 3 层一起决定；在此之前，操作员可以导出后把该目录作为参数交给
 进化策略运行。这是提议；基因组历史的 git 导出
-（`avn genome export --format git`）是另一个由基因组负责的独立导出。
+（[01-genome.zh-CN.md](01-genome.zh-CN.md)）是另一个由基因组负责的独立导出。
 
 ### 9.2 训练数据导出
 
@@ -825,7 +825,7 @@ class ExperimentLedger(Protocol):
 ### GET /bots/{bot_id}/evolution/ledger
 
 列出一个 Bot 的实验记录条目，最新的在前，支持过滤。由 UI 后端（谱系、历史、
-审计视图）、`avn` CLI 和流水线调用。
+审计视图）和流水线调用。
 
 查询参数即 `LedgerFilter` 的字段：`kind`、`run`、
 `strategy`、`strategy_version`、`parent`、`candidate_revision`、`verdict`、
@@ -874,8 +874,8 @@ GET /openapi/v1/bots/bot_123/evolution/ledger?strategy=clawevolve/bot-evolution&
 
 ### GET /bots/{bot_id}/evolution/ledger/{entry}
 
-返回一个条目的全部字段及其完整事件历史。由 UI 后端（候选历史、审计详情）和 CLI
-（`avn evolve ledger show`）调用。
+返回一个条目的全部字段及其完整事件历史。由 UI 后端（候选历史、审计详情）和流水线
+调用。
 
 示例请求：
 
@@ -1010,40 +1010,20 @@ Content-Type: application/json
 
 ## 13. 示例
 
-**流水线评审某个进化策略上周被接受的候选。**
+**流水线评审某个进化策略上周被接受的候选。** 它先列出条目，再按每个条目的
+`entry_id` 逐一读取判定、成本和采纳情况：
 
-```python
-from avernet_evolution import Client
-
-c = Client.from_env()
-page = c.ledger.list(bot_id="bot_123", strategy="clawevolve/bot-evolution",
-                     verdict="accept", since="2026-10-02T00:00:00Z")
-for item in page.items:
-    entry = c.ledger.get(bot_id="bot_123", entry=item.entry_id)
-    print(item.candidate_revision.seq, entry.verdict.status,
-          entry.cost.usd, entry.adoption.promoted)
+```http
+GET /openapi/v1/bots/bot_123/evolution/ledger?strategy=clawevolve/bot-evolution&verdict=accept&since=2026-10-02T00:00:00Z&page=1&page_size=100
+GET /openapi/v1/bots/bot_123/evolution/ledger/led_5c2
 ```
 
-**UI 后端绘制谱系树。** 修订版来自基因组 API；实验记录补充每个候选经历了什么。
-
-```python
-def lineage_tree(c, bot_id: str) -> dict[str, dict]:
-    nodes: dict[str, dict] = {}
-    page_no = 1
-    while True:
-        page = c.ledger.list(bot_id=bot_id, kind="experiment", page=page_no, page_size=100)
-        for e in page.items:
-            nodes[e.candidate_revision.id] = {
-                "seq": e.candidate_revision.seq,
-                "parent": e.parent_revision.id,
-                "verdict": e.verdict,
-                "promoted": e.promoted,
-                "gone_back": e.gone_back,
-            }
-        if page_no * 100 >= page.total:
-            return nodes
-        page_no += 1
-```
+**UI 后端绘制谱系树。** 修订版来自基因组 API；实验记录补充每个候选经历了什么。UI 后端发送
+`GET /openapi/v1/bots/bot_123/evolution/ledger?kind=experiment&page=1&page_size=100`
+并递增 `page`，直到读完 `total` 个条目（分页见
+[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) §8）。每个条目成为一个节点，
+以 `candidate_revision.id` 为键，带有 `candidate_revision.seq`、其父代
+`parent_revision.id`、`verdict`、`promoted` 和 `gone_back`。
 
 **进化运行服务记录一次提交**（平台代码，位于 `ctx.candidates.submit` 内部）。
 
@@ -1064,15 +1044,11 @@ async def submit(self, run: Run, cand: Candidate) -> str:
     return candidate_id   # same id on a retried or re-dispatched submission
 ```
 
-**操作员启动文件系统导出并等待其完成**（CLI，提议的命令名）。
-
-```text
-avn evolve ledger export --bot bot_123 --format filesystem \
-    --strategy clawevolve/bot-evolution --since 2026-07-01 \
-    --idempotency-key ledger-export-bot_123-2026-10-09 --wait --output json
-```
-
-`--wait` 只是按操作 id 重复查询状态；它从不保持请求处于打开状态。
+**操作员启动文件系统导出并等待其完成。** 操作员发送 §12 中所示的导出请求
+（带 `Idempotency-Key: ledger-export-bot_123-2026-10-09` 的 `POST …/ledger:export`），
+得到 `{"operation_id": "op_19a"}`。然后它重复调用
+`GET /openapi/v1/bots/bot_123/evolution/operations/op_19a`，直到状态为终态；结果中
+包含归档的下载位置。每次查询都是一个短请求；不会有请求保持打开。
 
 **回到旧版本在实验记录中可见。** 所有者再次晋升 r41 之后，条目 `led_5c2`（r42）
 会获得一个 `gone_back` 事件，并且一个治理条目会记录 r41 的晋升及其原因。从那时起，

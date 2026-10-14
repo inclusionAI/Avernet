@@ -45,7 +45,7 @@ It does **not** own:
 | The Experiment Ledger H, where runs, candidates, costs, and models used are recorded | [05-experiment-ledger.md](05-experiment-ledger.md) |
 | Suites, graders, verification profiles, verdicts (`verify(candidate, profile)`) | [07-verification.md](07-verification.md) |
 | The gate, risk tiers, review queue, promotion and going back, patch scanning | [08-promotion.md](08-promotion.md) |
-| Shared API conventions (error envelope, ETags, idempotency-key rules), SDKs, the `avn` CLI | [09-evolution-api.md](09-evolution-api.md) |
+| Shared API conventions (error envelope, ETags, idempotency-key rules) and the public endpoint index | [09-evolution-api.md](09-evolution-api.md) |
 | Level 3 (improving the mechanism itself) | [10-meta-evolution.md](10-meta-evolution.md) |
 
 Two principles from the strategy design shape this service:
@@ -218,7 +218,7 @@ reviewer explicitly overrides
 ```python
 @dataclass(frozen=True)
 class BotBindings:
-    bot: BotRef                         # the bot these bindings belong to (owner + bot id, 09-evolution-api.md §2.7)
+    bot: BotRef                         # the bot these bindings belong to (owner + bot id, 09-evolution-api.md §2.6)
     bindings: list[Binding]             # one entry per strategy attached to the bot
     etag: str                           # changes on every successful PUT; used with If-Match
     updated_at: datetime
@@ -382,7 +382,7 @@ jobs; workers only see jobs.
 | What it represents | One execution of a binding for one bot: the business record (frozen inputs, spend, candidates, outcome) | One attempt to execute that run on a worker, under a lease |
 | Lifetime | From submission to a terminal status; kept forever | From dispatch until the attempt completes, fails, or its lease expires |
 | How many | One per submission (per idempotency key) | One per attempt of the run: 1, or more after crashes |
-| Who sees it | Callers (API, SDK, CLI, UI) by run id; the strategy as `ctx.run_id` | Workers and the Job Protocol only, by job id |
+| Who sees it | Callers (API, UI) by run id; the strategy as `ctx.run_id` | Workers and the Job Protocol only, by job id |
 
 ```python
 @dataclass
@@ -728,8 +728,8 @@ Starting a run (a trigger firing, or a caller through the API) returns a
   same key returns the same run id and starts nothing new, whatever the
   first run's status is now.
 - From then on the run id is the only handle. Callers look up status,
-  candidates, and verdicts by it. No callback channel is needed; the CLI's
-  `--wait` only repeats the lookup.
+  candidates, and verdicts by it. No callback channel is needed; a caller
+  that waits only repeats the lookup.
 
 Where keys come from:
 
@@ -812,8 +812,8 @@ section is what the platform guarantees.
 - **Status is looked up by id.** `ctx.operations.get(op_id)` returns the
   status (`queued`, `running`, `succeeded`, `failed`, or `cancelled`) and,
   once it has succeeded, the result. Every lookup is a short request. The
-  SDK helper `ctx.operations.wait(op_id)` repeats short lookups; it never
-  holds one request open.
+  Strategy SDK helper `ctx.operations.wait(op_id)` repeats short lookups;
+  it never holds one request open.
 - **Start is idempotent.** It takes an idempotency key. The platform stores
   `(run, key) → operation id`; repeating a start with the same key returns
   the same operation, finished or not, instead of starting and paying for
@@ -908,7 +908,7 @@ Rules for every endpoint:
 - **Fencing token transport** (proposed): every call after the claim sends
   the header `Evolution-Fencing-Token: <token>`.
 - **Cancellation reaches the worker through the heartbeat** (proposed): the
-  heartbeat response carries `cancelled: true`, which the SDK turns into
+  heartbeat response carries `cancelled: true`, which the Strategy SDK turns into
   `ctx.cancelled`.
 
 Workers are platform-run containers. Bots acting as workers ("runner bots")
@@ -1155,8 +1155,8 @@ Ports this service depends on (defined by the owning docs):
 Public endpoints are under the prefix `/openapi/v1`; paths below are
 relative to it. They follow the shared conventions (error envelope, ETags
 on mutable resources, `Idempotency-Key` header on creating POSTs) in
-[09-evolution-api.md](09-evolution-api.md). Callers are pipelines and CI,
-the UI backend, and humans through the `avn` CLI. Caller authentication and
+[09-evolution-api.md](09-evolution-api.md). Callers are pipelines and CI
+over HTTP, and the UI backend for humans using the workbench UI. Caller authentication and
 authorization are not specified in this design set; bot callers are
 postponed (DR-3). Responses below show the `data` payload of the standard
 envelope; see [09-evolution-api.md](09-evolution-api.md) for the envelope,
@@ -1164,8 +1164,8 @@ errors, pagination, and idempotency.
 
 ### GET /bots/{bot_id}/evolution/bindings
 
-Read the bot's bindings. Called by the UI backend,
-`avn evolve bindings get`, and pipelines.
+Read the bot's bindings. Called by the UI backend and
+pipelines.
 
 Request:
 
@@ -1203,7 +1203,7 @@ Errors: `404` unknown bot.
 
 Replace the bot's bindings. Runs the binding checks (§3.2) on every new or
 changed binding and rejects the whole document if any fails. Called by the
-bot owner or tenant admin through the UI or `avn evolve bindings set`.
+bot owner or tenant admin through the UI or the API.
 
 Request (header `If-Match: "bind-v12"`):
 
@@ -1279,8 +1279,8 @@ unknown bot or unknown strategy version.
 Submit a run of one of the bot's bindings. The body is
 `{binding, params?, budget?}`. Idempotent: the
 `Idempotency-Key` header is required; a repeat with the same key returns
-the same run id and starts nothing. Called by pipelines and CI, the UI
-backend, and `avn evolve run start`. Triggers use the same service
+the same run id and starts nothing. Called by pipelines and CI, and the UI
+backend. Triggers use the same service
 operation internally (§4).
 
 Request (header `Idempotency-Key: nightly-bot_123-2026-10-08`):
@@ -1311,7 +1311,7 @@ budget.
 ### GET /bots/{bot_id}/evolution/runs
 
 List the bot's runs, newest first. Filters: `status`, `binding`, `since`;
-`page` and `page_size`. Called by the UI backend and `avn evolve run status`.
+`page` and `page_size`. Called by the UI backend and pipelines.
 
 Request:
 
@@ -1342,8 +1342,7 @@ Errors: `404` unknown bot; `422` unknown filter value.
 
 Read one run by id: status, frozen inputs, attempt, budget used, summary.
 This is the status lookup every caller repeats until the status is
-terminal. Called by pipelines, the UI backend, and `avn evolve run status
---wait`.
+terminal. Called by pipelines and the UI backend.
 
 Request:
 
@@ -1392,7 +1391,7 @@ Errors: `404` unknown run, or a run of another bot.
 Cancel a run. Sets the run's cancellation token, cancels its unfinished
 operations, and ends it as `cancelled`. Candidates already submitted are
 kept and still verified. Idempotent on an already cancelled run. Called by
-the bot owner (UI, `avn evolve run cancel`) and pipelines.
+the bot owner (through the UI or the API) and pipelines.
 
 Request:
 
@@ -1417,8 +1416,7 @@ Errors: `404` unknown run; `409` `run_already_ended` for a run that is
 List the candidates a run submitted, in submission order, with their verdict
 status. The full report of one candidate (diff, verification, gate
 decision) is `GET /bots/{bot_id}/evolution/candidates/{candidate}` in
-[08-promotion.md](08-promotion.md). Called by the UI backend, pipelines, and
-`avn evolve run report`.
+[08-promotion.md](08-promotion.md). Called by the UI backend and pipelines.
 
 Request:
 
@@ -2108,49 +2106,39 @@ Errors: `409` stale fencing token or run already ended.
 
 ### 15.1 A pipeline starts a run and follows it
 
-Using the generated client SDK ([09-evolution-api.md](09-evolution-api.md)):
+Over HTTP ([09-evolution-api.md](09-evolution-api.md)):
 
-```python
-import time
-from avernet_evolution import Client
+```http
+POST /openapi/v1/bots/bot_123/evolution/runs
+Idempotency-Key: nightly-bot_123-2026-10-08
 
-c = Client.from_env()
-key = "nightly-bot_123-2026-10-08"                     # deterministic: same key on every retry
-run_id = c.runs.start(bot_id="bot_123", binding="bind_01",   # caller owns the bot: no entity_id
-                      budget={"max_usd": 10, "max_wall_clock_s": 3600},
-                      idempotency_key=key)              # safe to repeat: returns the same run_id
-
-while (run := c.runs.get(bot_id="bot_123", run_id=run_id)).status in ("queued", "running"):
-    time.sleep(30)                                      # short lookups by id; no request held open
-
-print(run.status, run.budget_used.usd)
-for cand in c.runs.candidates(bot_id="bot_123", run_id=run_id):
-    print(cand.candidate_id, cand.verdict.status)       # approval is Promotion's job (08-promotion.md)
+{"binding": "bind_01", "budget": {"max_usd": 10, "max_wall_clock_s": 3600}}
 ```
 
-The same with the CLI:
-
-```bash
-avn evolve run start --bot bot_123 --binding bind_01 \
-  --idempotency-key nightly-bot_123-2026-10-08 --max-usd 10 --output json
-avn evolve run status --bot bot_123 run_7f3 --wait --output json
-```
+1. The response is `202` with `{"run_id": "run_7f3", "status": "queued"}`.
+   The key is deterministic, so a retry after a timeout sends the same key
+   and gets the same run id; nothing new starts.
+2. The pipeline repeats `GET /openapi/v1/bots/bot_123/evolution/runs/run_7f3`
+   every 30 seconds while `status` is `queued` or `running`. Each lookup is
+   short; no request is held open.
+3. When the run is terminal, it reads `status` and `budget_used.usd`, then
+   `GET /openapi/v1/bots/bot_123/evolution/runs/run_7f3/candidates` for each
+   candidate's verdict. Approval is Promotion's job
+   ([08-promotion.md](08-promotion.md)).
 
 ### 15.2 An owner adds a binding
 
-```python
-current = c.bindings.get(bot_id="bot_123")
-bindings = current.bindings + [Binding(
-    id="bind_02", strategy="platform/consolidate-memory@1.0.0",
-    trigger={"schedule": "0 4 * * 0"}, parent="active", allowed_genes=["memory"],
-    verification_profile="default@1",
-    budget={"max_usd": 5, "max_wall_clock_s": 1800}, params={})]
-try:
-    c.bindings.put(bot_id="bot_123", bindings=bindings, if_match=current.etag)
-except BindingCheckFailed as e:                          # 422: fix the binding, nothing was written
-    for d in e.details:
-        print(d.binding, d.check, d.detail)
-```
+1. `GET /openapi/v1/bots/bot_123/evolution/bindings` returns the bindings
+   and `ETag: "bind-v12"`.
+2. The owner appends `bind_02` (`platform/consolidate-memory@1.0.0`) and
+   sends the whole list with
+   `PUT /openapi/v1/bots/bot_123/evolution/bindings` and
+   `If-Match: "bind-v12"`, as in the example in §14.1.
+3. A `422 binding_check_failed` lists each failing check in
+   `error.details` (`binding`, `check`, `detail`); nothing was written, so
+   the owner fixes the binding and sends it again. A `412` means someone
+   else changed the bindings since step 1: the owner reads them again and
+   reapplies the change.
 
 ### 15.3 The trigger scheduler fires a binding
 
@@ -2174,8 +2162,8 @@ async def fire_schedule(binding: Binding, bot: BotRef, slot: datetime) -> None:
 ### 15.4 A minimal job worker over the Job Protocol
 
 A job worker in any language only needs HTTP. This sketch uses Python
-without the SDK, to show the wire protocol; the strategy SDK's Job-Protocol
-`StrategyContext` wraps exactly these calls.
+without the Strategy SDK, to show the wire protocol; the Strategy SDK's
+Job-Protocol `StrategyContext` wraps exactly these calls.
 
 ```python
 import os, threading, time
@@ -2268,7 +2256,7 @@ queue ([08-promotion.md](08-promotion.md)); the run itself never moves
 | [07-verification.md](07-verification.md) | Verification → Run | Verdicts (aggregates only to the strategy); train scores and critiques |
 | [08-promotion.md](08-promotion.md) Promotion | Run → Promotion | Static floor check (`FloorCheck`) at submission; verified candidates for the gate and review queue |
 | [08-promotion.md](08-promotion.md) | Promotion → Run | Nothing a run waits on; promotion of a run's candidates happens after or independently of the run |
-| [09-evolution-api.md](09-evolution-api.md) Evolution API and clients | Clients → Run | Bindings reads and writes, run submission, status, cancellation, candidate lists via SDK, CLI, and UI backend |
+| [09-evolution-api.md](09-evolution-api.md) Evolution API | Callers → Run | Bindings reads and writes, run submission, status, cancellation, and candidate lists through the public endpoints |
 | [10-meta-evolution.md](10-meta-evolution.md) Meta-evolution (later) | Meta → Run | Runs of candidate mechanisms on improvement problems, with equal budgets |
 
 ## 17. Open decisions
