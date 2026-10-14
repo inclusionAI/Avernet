@@ -217,6 +217,7 @@ export const defaultCapabilities: AppCapabilities = {
       value: { providerSlug, apiUrl: bcsEndpoint },
     };
   },
+  getQwenWorkBridgeInstallation: () => ({ status: 'available', value: null }),
   // Open Core（外部部署）暂不提供群高级配置与内部渠道绑定能力，避免展示不可用配置并发起无效请求。
   getGroupAdvancedConfigEnabled: (): CapabilityResult<boolean> => ({
     status: 'available',
