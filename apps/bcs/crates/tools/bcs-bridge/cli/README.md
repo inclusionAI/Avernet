@@ -203,7 +203,12 @@ combined with `--profile`.
 Repeated registration of an existing profile verifies provider, engine and
 endpoints and reuses the stored Bot without a network registration request.
 Explicitly conflicting workspace/model options are rejected. New profiles may
-reuse local engine options from a verified active instance of the same engine,
+reuse local engine options from a verified active instance of the same engine.
+When QwenWork is stopped, saved regular TOML configs directly in ~/.bcn-bridge
+and named profiles are searched (bounded to 128 entries per directory, excluding
+backups and symlinks). Identical desktop settings are reused; conflicting
+settings block registration and require starting the intended existing profile.
+Only desktop settings cross environments,
 without sharing its BCN identity or durable state. One user still runs one bridge:
 stop the current instance before starting another profile. Status prints the
 active profile; this is not a remote connectivity claim.
@@ -236,3 +241,8 @@ profile. Omitting these options preserves the saved runtime settings, even when
 they differ from CLI defaults. Executable paths retain symlink identity because
 wrapper behavior can depend on the invoked name. Use explicit replacement to
 change an executable or bind address.
+
+Gateway replacement may omit `--webhook-url` when saved metadata belongs to the
+same Provider, API endpoint, reference, engine and gateway mode. Local listener
+updates retain that endpoint without administrator authentication or network calls.
+New bindings still require an explicit webhook URL.

@@ -7,6 +7,7 @@
 mod client;
 mod token;
 mod replacement;
+mod desktop;
 
 use std::{net::SocketAddr, path::{Path, PathBuf}};
 
@@ -156,6 +157,11 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     let identity = app.identity(&args.provider_auth)?;
     identity.preflight()?;
     let bootstrap = if args.replace_existing { config::read_registration_source(path, true)? } else { config::read_bootstrap(path)? };
+    let provider_id = registration_provider(&args.token, args.mode)?;
+    let api_url = match args.api_url.clone().or(bootstrap.settings.api_url.clone()) {
+        Some(url) => url,
+        None => app.profile().default_api_url()?,
+    };
     let saved_bin = bootstrap.previous.as_ref().and_then(|previous| previous.get("bot"))
         .and_then(toml::Value::as_array).filter(|bots| bots.len() == 1)
         .filter(|bots| bots[0].get("engine").and_then(toml::Value::as_str) == Some(args.engine.as_str()))
@@ -175,7 +181,8 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     let (webhook_url, upstream_url) = match args.mode {
         Mode::Gateway => {
             if args.upstream_url.is_some() { bail!("--upstream-url applies to plugin mode; gateway Bots receive work through webhook delivery"); }
-            let webhook = args.webhook_url.as_deref().context("--webhook-url is required in gateway mode")?;
+            let webhook = args.webhook_url.as_deref().or_else(|| replacement::saved_webhook(&args, &bootstrap, &provider_id, &api_url))
+                .context("--webhook-url is required in gateway mode")?;
             client::http_url(webhook, true).context("Invalid --webhook-url")?;
             if args.listen.port() == 0 { bail!("--listen must specify a nonzero port for the configured webhook"); }
             (Some(webhook), None)
@@ -206,15 +213,10 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     } else { None };
     #[cfg(not(unix))]
     if bootstrap.previous.is_some() { bail!("Replacement registration requires Unix runtime locking"); }
-    let provider_id = registration_provider(&args.token, args.mode)?;
     // Plugin mode has no webhook listener, so it needs no webhook credential.
     let webhook_token = match args.mode {
         Mode::Gateway => Some(app.credentials().webhook_token(&provider_id)?),
         Mode::Plugin => None,
-    };
-    let api_url = match args.api_url.clone().or(bootstrap.settings.api_url.clone()) {
-        Some(url) => url,
-        None => app.profile().default_api_url()?,
     };
     let client = RegistrationClient::new(&api_url).context("Invalid registration.api_url or HTTP client configuration")?;
     if replacement::update(&args, path, &bootstrap, &provider_id, &api_url, &client, webhook_token.as_deref(), engine_bin.as_deref()).await? { return Ok(()); }
@@ -237,18 +239,10 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
             }
         }
     }
-    #[cfg(unix)]
     if bootstrap.previous.is_none() && !bot.contains_key("engine_options") {
         let runtime_dir = dirs::home_dir().context("Cannot locate home directory")?.join(".bcn-bridge");
-        if let Some(active) = crate::instance::current_configuration(&runtime_dir).await? {
-            let source = config::read_registration_source(&active, true)?;
-            if let Some(previous) = source.previous {
-                if let Some(bots) = previous.get("bot").and_then(toml::Value::as_array) {
-                    if bots.len() == 1 && bots[0].get("engine").and_then(toml::Value::as_str) == Some(args.engine.as_str()) {
-                        if let Some(options) = bots[0].get("engine_options") { bot.insert("engine_options".into(), options.clone()); }
-                    }
-                }
-            }
+        if let Some(options) = desktop::existing_options(&runtime_dir, path, &args.engine).await? {
+            bot.insert("engine_options".into(), options.into());
         }
     }
     let mut document = toml::Table::new();
@@ -273,7 +267,7 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     // (plugin bots require bot_id); its URL was validated above.
     if webhook_token.is_some() { config::runtime(&document, path, webhook_token.as_deref())?; }
     let replacing = bootstrap.previous.is_some();
-    let prepared = PreparedConfig::new(path, bootstrap.original)?;
+    let prepared = PreparedConfig::new(path, bootstrap.original.clone())?;
     if replacing {
         let backup = prepared.backup_original()?;
         println!("Existing runtime configuration backed up to {}. Original state is retained.", backup.display());

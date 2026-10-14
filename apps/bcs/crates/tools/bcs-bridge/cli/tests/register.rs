@@ -444,3 +444,74 @@ async fn replacement_with_new_reference_creates_new_identity_and_fresh_state() {
     assert_ne!(after["state_path"], before["state_path"]);
     assert_eq!(api.calls().len(), 2);
 }
+
+#[tokio::test]
+async fn gateway_local_replacement_retains_omitted_webhook_without_admin_or_registration() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let args = ["--profile", "pre", "--mode", "gateway", "--engine", "qwenwork", "--api-url", &api.base,
+        "--provider-bot-ref", "worker-a"];
+    assert!(register(home.path(), &args).args(["--webhook-url", "https://hook.example/old"]).output().await.unwrap().status.success());
+    let path = home.path().join(".bcn-bridge/profiles/pre/bridge.toml");
+    let output = register(home.path(), &args).args(["--replace-existing", "--listen", "127.0.0.1:18003"]).output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let after: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(after["listen"].as_str(), Some("127.0.0.1:18003"));
+    assert_eq!(after["registration"]["webhook_url"].as_str(), Some("https://hook.example/old"));
+    assert_eq!(api.calls().len(), 1);
+    assert!(api.patches.lock().unwrap().is_empty());
+    let bytes = std::fs::read(&path).unwrap();
+    let changed = register(home.path(), &args).args(["--replace-existing", "--provider-bot-ref", "worker-b"]).output().await.unwrap();
+    assert!(!changed.status.success());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert_eq!(api.calls().len(), 1);
+}
+
+#[tokio::test]
+async fn stopped_qwen_profiles_keep_desktop_hooks_and_conflicting_settings_block_registration() {
+    let home = tempfile::tempdir().unwrap();
+    let old_api = Api::new().await;
+    let args = ["--mode", "plugin", "--engine", "qwenwork", "--upstream-url", "ws://127.0.0.1:21000/ws/bot"];
+    assert!(register(home.path(), &args).args(["--profile", "local", "--api-url", &old_api.base]).output().await.unwrap().status.success());
+    let db_path = home.path().join("agents.db");
+    let settings = home.path().join("settings.json");
+    let db = rusqlite::Connection::open(&db_path).unwrap();
+    db.execute_batch("CREATE TABLE chats(id TEXT, ext TEXT, deleted_at INTEGER); CREATE TABLE sub_chats(session_id TEXT, chat_id TEXT);").unwrap();
+    let initialized = Command::new(env!("CARGO_BIN_EXE_bcs-bridge")).env("HOME", home.path())
+        .args(["--profile", "local", "init", "--engine", "qwenwork", "--option"])
+        .arg(format!("database_path={}", db_path.display())).arg("--option")
+        .arg(format!("settings_path={}", settings.display())).output().await.unwrap();
+    assert!(initialized.status.success(), "{}", diagnostic(&initialized));
+    let directory = home.path().join(".bcn-bridge");
+    let old_path = directory.join("profiles/local/bridge.toml");
+    let original = std::fs::read_to_string(&old_path).unwrap();
+    let old: toml::Value = toml::from_str(&original).unwrap();
+    let hooks = std::fs::read(&settings).unwrap();
+    // No runtime record or process exists; only saved configuration remains.
+    assert!(!directory.join("bridge.pid.json").exists());
+    let api = Api::new().await;
+    let registered = register(home.path(), &args).args(["--profile", "pre", "--api-url", &api.base]).output().await.unwrap();
+    assert!(registered.status.success(), "{}", diagnostic(&registered));
+    let pre_path = directory.join("profiles/pre/bridge.toml");
+    let pre: toml::Value = toml::from_str(&std::fs::read_to_string(&pre_path).unwrap()).unwrap();
+    assert_eq!(pre["bot"][0]["engine_options"], old["bot"][0]["engine_options"]);
+    assert_ne!(pre["bot"][0]["provider_bot_ref"], old["bot"][0]["provider_bot_ref"]);
+    let initialized = Command::new(env!("CARGO_BIN_EXE_bcs-bridge")).env("HOME", home.path())
+        .args(["--profile", "pre", "init", "--engine", "qwenwork"]).output().await.unwrap();
+    assert!(initialized.status.success(), "{}", diagnostic(&initialized));
+    assert_eq!(std::fs::read(&settings).unwrap(), hooks);
+    assert_eq!(std::fs::read_to_string(&old_path).unwrap(), original);
+    // The legacy --config location is also discoverable; differing credentials must not be guessed.
+    std::fs::write(directory.join("qwenwork.toml"), &original).unwrap();
+    let prod_api = Api::new().await;
+    assert!(register(home.path(), &args).args(["--profile", "prod", "--api-url", &prod_api.base]).output().await.unwrap().status.success());
+    let mut conflict = old.clone();
+    conflict["bot"][0]["engine_options"]["hook_secret"] = "different-hook-secret".into();
+    std::fs::write(directory.join("qwenwork.toml"), toml::to_string(&conflict).unwrap()).unwrap();
+    let rejected = register(home.path(), &args).args(["--profile", "other", "--api-url", &prod_api.base]).output().await.unwrap();
+    assert!(!rejected.status.success());
+    assert!(diagnostic(&rejected).contains("conflicting desktop settings"));
+    assert_eq!(prod_api.calls().len(), 1);
+    assert!(!directory.join("profiles/other/bridge.toml").exists());
+    assert_eq!(std::fs::read(&settings).unwrap(), hooks);
+}

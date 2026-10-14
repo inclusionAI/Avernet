@@ -5,6 +5,21 @@ use anyhow::{Context, bail};
 use super::{RegisterArgs, RegistrationClient, Mode, client};
 use crate::config::{self, Bootstrap, PreparedConfig};
 
+/// Saved webhook defaults apply only to the same gateway Bot, never a new binding.
+pub(super) fn saved_webhook<'a>(args: &RegisterArgs, source: &'a Bootstrap, provider: &str, api: &str) -> Option<&'a str> {
+    let previous = source.previous.as_ref()?;
+    let bots = previous.get("bot")?.as_array()?;
+    if previous.get("provider_id")?.as_str()? != provider
+        || source.settings.api_url.as_deref()?.trim_end_matches('/') != api.trim_end_matches('/')
+        || previous.get("mode")?.as_str()? != "gateway" || bots.len() != 1
+        || bots[0].get("engine")?.as_str()? != args.engine
+        || args.provider_bot_ref.as_deref().is_some_and(|reference|
+            bots[0].get("provider_bot_ref").and_then(toml::Value::as_str) != Some(reference)) {
+        return None;
+    }
+    source.settings.webhook_url.as_deref()
+}
+
 /// Retain credentials and durable state when replacing settings for the same binding.
 pub(super) async fn update(
     args: &RegisterArgs, path: &Path, source: &Bootstrap, provider: &str, api: &str,
