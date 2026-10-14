@@ -11,6 +11,8 @@ jest.mock('@/services/botWorkshop/botContainerService', () => ({
 }));
 
 const list = botContainerService.list as jest.Mock;
+const getSummaryText = (value: string) =>
+  screen.getByText((_, element) => element?.textContent === value);
 
 describe('ContainerInstancesModal', () => {
   beforeEach(() => {
@@ -37,11 +39,11 @@ describe('ContainerInstancesModal', () => {
     render(<ContainerInstancesModal bot={bot} canRestart={false} onClose={jest.fn()} />);
 
     await waitFor(() =>
-      expect(screen.getByText((_, element) => element?.textContent === '共 2 个实例')).toBeInTheDocument(),
+      expect(getSummaryText('共 2 个实例')).toBeInTheDocument(),
     );
     expect(screen.getByText('2')).toBeInTheDocument();
-    expect(screen.getByText('1 活跃')).toBeInTheDocument();
-    expect(screen.getByText('1 异常')).toBeInTheDocument();
+    expect(getSummaryText('1 活跃')).toBeInTheDocument();
+    expect(getSummaryText('1 异常')).toBeInTheDocument();
     expect(screen.getByText('node-a')).toBeInTheDocument();
     expect(screen.getAllByText('—')).toHaveLength(2);
     expect(screen.getByRole('button', { name: '重启' })).toBeDisabled();
