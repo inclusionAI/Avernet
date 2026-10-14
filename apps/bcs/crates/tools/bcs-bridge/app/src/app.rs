@@ -4,7 +4,7 @@
 //! adds engines and identity resolvers, or replaces the deploy profile,
 //! credential source and CLI defaults, then calls [`BridgeApp::main`].
 
-use std::{collections::BTreeMap, process::ExitCode, sync::Arc};
+use std::{collections::{BTreeMap, BTreeSet}, process::ExitCode, sync::Arc};
 
 use anyhow::Context;
 use bcs_bridge_core::engine::{EngineFactory, EngineRegistry};
@@ -47,6 +47,7 @@ pub struct BridgeApp {
     identities: BTreeMap<String, Arc<dyn IdentityResolver>>,
     defaults: CliDefaults,
     registration_permission_modes: BTreeMap<String, String>,
+    engines_without_model_default: BTreeSet<String>,
     initializers: BTreeMap<String, EngineInitializer>,
     deinitializers: BTreeMap<String, EngineInitializer>,
 }
@@ -64,6 +65,7 @@ impl BridgeApp {
             identities,
             defaults: CliDefaults::default(),
             registration_permission_modes: BTreeMap::new(),
+            engines_without_model_default: BTreeSet::new(),
             initializers: BTreeMap::new(),
             deinitializers: BTreeMap::new(),
         })
@@ -73,6 +75,11 @@ impl BridgeApp {
     pub fn profile(&self) -> &dyn DeployProfile { self.profile.as_ref() }
     pub fn credentials(&self) -> &dyn CredentialSource { self.credentials.as_ref() }
     pub fn defaults(&self) -> CliDefaults { self.defaults }
+
+    /// Whether this engine uses the distribution's CLI model default.
+    pub fn uses_registration_model_default(&self, engine: &str) -> bool {
+        !self.engines_without_model_default.contains(engine)
+    }
 
     /// Permission mode written for a newly registered Bot using this engine.
     /// None leaves the permission mode to the engine's own defaults.
@@ -162,6 +169,13 @@ impl BridgeAppBuilder {
     /// Existing runtime configurations are unaffected.
     pub fn registration_permission_mode(mut self, engine: impl Into<String>, mode: impl Into<String>) -> Self {
         self.0.registration_permission_modes.insert(engine.into(), mode.into());
+        self
+    }
+
+    /// Leave model selection to this engine instead of the distribution default.
+    /// An explicit --model remains available. Existing configurations are unaffected.
+    pub fn without_registration_model_default(mut self, engine: impl Into<String>) -> Self {
+        self.0.engines_without_model_default.insert(engine.into());
         self
     }
 

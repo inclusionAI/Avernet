@@ -58,7 +58,7 @@ pub struct RegisterArgs {
     cwd: Option<PathBuf>,
     /// Model passed to the engine
     #[arg(long)]
-    model: Option<String>,
+    pub(crate) model: Option<String>,
     /// Override the engine executable (default: the engine's executable on PATH)
     #[arg(long)]
     engine_bin: Option<PathBuf>,
