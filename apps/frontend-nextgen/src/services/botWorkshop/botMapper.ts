@@ -1,6 +1,6 @@
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import type { BackendApiPage, BackendUnknownRecord } from '@/services/backendApi/types';
-import { getServiceBotCapability } from './agentCodingTemplateService';
+import { getBcnCapability, getServiceBotCapability } from './agentCodingTemplateService';
 import type { BotDomain, BotLifecycle, BotRuntimeDomain } from './types';
 
 const PUBLIC_ENGINES = new Set(['openclaw', 'hermes', 'teclaw']);
@@ -74,10 +74,23 @@ function templateNameFrom(dto: BackendUnknownRecord, templateType?: string) {
 function runtimeFrom(dto: BackendUnknownRecord, warnings: string[]): BotRuntimeDomain {
   const rawEngine = asString(dto.active_engine) ?? asString(dto.engine_type) ?? asString(dto.engine);
   const templateType = templateTypeFrom(dto);
+  const bcnEnabled = getBcnCapability({ config: dto, raw: dto });
+  const config = templateConfigFrom(dto);
+  const ext = asRecord(dto.ext);
+  const engineForm =
+    asString(dto.engine_form) ??
+    asString(config.engineProperties.engine_form) ??
+    asString(config.engineTemplateConfig.engine_form) ??
+    asString(config.directTemplateConfig.engine_form) ??
+    asString(config.botTemplateConfig.engine_form) ??
+    asString(config.directBotTemplateConfig.engine_form) ??
+    asString(config.engineBotTemplateConfig.engine_form) ??
+    asString(ext.engine_form);
   const runtime = resolveBotRuntime({
     engine: rawEngine,
     templateType,
     templateName: templateNameFrom(dto, templateType),
+    engineForm,
     botType: asString(dto.bot_type),
     botId: asString(dto.bot_id),
   });
@@ -89,6 +102,7 @@ function runtimeFrom(dto: BackendUnknownRecord, warnings: string[]): BotRuntimeD
   }
   return {
     ...runtime,
+    bcnEnabled: runtime.isAgentCodingBot ? bcnEnabled === true : undefined,
     engine,
     capabilityProfile: {
       canPublish: PUBLIC_ENGINES.has(engine),

@@ -130,7 +130,9 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
 }: ConversationBotItemProps) {
   const isManaged = isManagedConversationSection(section);
   const isOthers = isManaged && origin === 'others';
-  const interactive = !bot.isAgentCodingBot && bot.chatable;
+  const isAgentCodingBot = Boolean(bot.isAgentCodingBot);
+  const hasSessionControls = !isAgentCodingBot && bot.chatable;
+  const interactive = isAgentCodingBot || bot.chatable;
   // AgentCoding 行徽标展示模板名(区分多个 AgentCoding Bot);普通 Bot 展示引擎名,dmore「至多一枚」不变。
   const runtimeLabel = bot.isAgentCodingBot ? bot.templateName || 'AgentCoding' : getBotEngineLabel(bot.engine);
   const canFavorite = supportsBotSessionFavorites(bot.engine);
@@ -179,9 +181,10 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           />
           <div
             className={cn(
-              'flex min-w-0 flex-1 items-center gap-2 group-hover:pr-24',
-              // 筛选/加号被钉住可见时(展开或筛选激活),文字同样让位,避免撤掉遮盖底后文字透出图标背后。
-              (expanded || filterActive) && 'pr-24',
+              'flex min-w-0 flex-1 items-center gap-2',
+              // 筛选/加号被钉住可见时(展开或筛选激活),文字同样让位。
+              hasSessionControls && 'group-hover:pr-24',
+              hasSessionControls && (expanded || filterActive) && 'pr-24',
             )}
           >
             <span className="min-w-0 truncate text-sm font-normal text-content-strong">
@@ -197,7 +200,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             )}
           </div>
         </Button>
-        {interactive && (
+        {hasSessionControls && (
           <div
             className={cn(
               'absolute inset-y-0 right-[34px] z-10 flex items-center gap-0.5 pl-5',
@@ -235,23 +238,25 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
         )}
         {/* 展开箭头:鼠标可点的折叠入口(点击转发同一 toggle)。语义与键盘仍由
             主按钮承载,故不参与 Tab 序、对读屏隐藏,避免一行两个等价控件。 */}
-        {interactive && (
-          <button
+        {hasSessionControls && (
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             aria-hidden="true"
             tabIndex={-1}
             onClick={handleToggle}
-            className="my-auto flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-muted"
+            className="my-auto h-6 w-6 shrink-0 rounded-md hover:bg-muted"
           >
             {expanded ? (
               <ChevronDown className="h-3.5 w-3.5 text-content-icon" aria-hidden="true" />
             ) : (
               <ChevronRight className="h-3.5 w-3.5 text-content-icon" aria-hidden="true" />
             )}
-          </button>
+          </Button>
         )}
       </div>
-      {expanded && interactive && (
+      {expanded && hasSessionControls && (
         // 展开区不再整体缩进:session 行(dmore 平齐化 1:1)自带全宽行槽,交互热区在行内部分级。
         <div aria-label={`会话列表：${bot.displayName}`}>
           {isOthers ? (

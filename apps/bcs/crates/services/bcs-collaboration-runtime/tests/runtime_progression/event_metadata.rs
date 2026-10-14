@@ -76,6 +76,70 @@ async fn events_and_persisted_history_share_execution_through_retry_and_next_ite
 }
 
 #[tokio::test]
+async fn nested_api_events_and_history_share_the_complete_loop_path() {
+    let mut h = Harness::new(&["approved", "done"]).await;
+    let factory = Arc::new(PersistingEventFactory::default());
+    let messages = Arc::new(MemoryMessageRepo::new());
+    h.runtime = h.runtime.with_event_record_factory(factory.clone()).with_message_repo(messages.clone());
+    let started = h.start(nested_loop_yaml(), false).await;
+    let run = &started.view.run;
+    let metadata = started.view.node_execution_metadata.as_ref().unwrap();
+    assert!(metadata.values().all(|execution| execution.loop_path.is_some()));
+    let graph = h.runtime.get_state_machine_run_graph(&run.run_id).await.unwrap().unwrap();
+    assert_eq!(graph.loops.keys().cloned().collect::<Vec<_>>(), vec!["outer", "outer/inner"]);
+
+    h.finish(0, run, "prepared").await;
+    h.finish(1, run, "drafted").await;
+    let inner_id = metadata.iter().find(|(_, execution)| execution.definition_node_id == "draft"
+        && execution.loop_path.as_ref().is_some_and(|path| path[0].iteration == 1 && path[1].iteration == 1))
+        .map(|(id, _)| id.clone()).unwrap();
+    let execution = &metadata[&inner_id];
+    let path = execution.loop_path.as_ref().unwrap();
+    assert_eq!(path.iter().map(|frame| frame.loop_id.as_str()).collect::<Vec<_>>(), vec!["outer", "inner"]);
+    let stored = persisted_output(messages.as_ref(), run, &inner_id, 0).await;
+    assert_eq!(stored.content["metadata"]["state_machine"]["execution"], json!(execution));
+    let event = factory.events.lock().unwrap().iter().find(|event|
+        event.event_type == "state_machine.node.completed" && event.data["node_id"] == inner_id).cloned().unwrap();
+    assert_eq!(event.data["execution"], json!(execution));
+}
+
+#[tokio::test]
+async fn nested_human_pending_event_and_frozen_prompt_share_the_complete_path() {
+    let mut definition: Value = serde_yaml::from_str(&nested_loop_yaml()).unwrap();
+    let draft = &mut definition["runtime"]["state_machine"]["nodes"]["outer"]["loop"]
+        ["nodes"]["inner"]["loop"]["nodes"]["draft"];
+    *draft = json!({
+        "kind": "human_input", "display_name": "Human draft",
+        "assignee": {"type": "runtime_actor", "actor": "human_1001"},
+        "notification": {"mode": "direct_assignee"},
+        "instruction": "Review the nested draft.", "node_timeout_ms": 60000,
+        "transitions": {"complete": {"targets": ["review"]}}
+    });
+    definition["runtime"]["state_machine"]["human_input_channel"] = json!({"channel_type": "dingtalk"});
+    let mut h = Harness::new(&["approved", "done"]).await;
+    let messages = Arc::new(MemoryMessageRepo::new());
+    h.runtime = h.runtime.with_history_persistence(true)
+        .with_history_cutoff_timestamp(u64::MAX).with_message_repo(messages.clone());
+    let started = h.start(serde_yaml::to_string(&definition).unwrap(), true).await;
+    h.finish(0, &started.view.run, "prepared").await;
+    let pending = h.runtime.list_pending_human_nodes(ListPendingHumanNodesCommand {
+        run_id: started.view.run.run_id.clone(), caller_actor_id: "human_1001".into(),
+    }).await.unwrap().remove(0);
+    let execution = pending.execution.as_ref().unwrap();
+    assert_eq!(execution.loop_path.as_ref().unwrap().len(), 2);
+    assert_eq!(pending.loop_context.as_ref().unwrap().loop_path.as_ref(), execution.loop_path.as_ref());
+    let ready = h.channel.events.lock().await.iter().find(|event| event.node_id == pending.node_id)
+        .cloned().unwrap();
+    assert_eq!(ready.execution.as_ref(), Some(execution));
+    assert_eq!(ready.loop_context.as_ref().unwrap().loop_path.as_ref(), execution.loop_path.as_ref());
+    let prompt = h.store.get_history_message(&bcs_service_api::port::repo::StateMachineHistoryIdentity {
+        session_id: started.view.run.session_id.clone(), run_id: started.view.run.run_id.clone(),
+        node_id: pending.node_id.clone(), attempt: 0, event: "human_input_prompt".into(),
+    }).await.unwrap().unwrap();
+    assert_eq!(prompt.payload.message.content["metadata"]["state_machine"]["execution"], json!(execution));
+}
+
+#[tokio::test]
 async fn human_output_history_preserves_audience_and_first_later_execution() {
     let mut h = Harness::new(&[]).await;
     let messages = Arc::new(MemoryMessageRepo::new());

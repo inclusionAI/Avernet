@@ -89,7 +89,7 @@ describe("EvolveRepository collaborative Bot access", () => {
       if (sql.includes("SELECT b.active_engine") && params[1] === "collaborator-1") return [];
       if (sql.includes("SELECT c.owner_id")) return [{ owner_id: "owner-2" }];
       if (sql.includes("SELECT b.active_engine") && params[1] === "owner-2") return [{
-        active_engine: "openclaw", bot_type: "service", bot_status: "active", binding_id: 7,
+        entity_id: "owner-2", entity_type: "staff", active_engine: "openclaw", bot_type: "service", bot_status: "active", binding_id: 7,
         device_provider: "BAAS", device_id: "device-1", binding_status: "active", env: "prod",
       }];
       if (sql.includes("COUNT(*) AS published_count")) return [{ published_count: 1 }];
@@ -101,7 +101,7 @@ describe("EvolveRepository collaborative Bot access", () => {
 
     expect(resolved).toEqual(expect.objectContaining({
       ownerId: "owner-2", accessType: "collaborator",
-      runtime: expect.objectContaining({ botType: "service", hasServiceBot: true }),
+      runtime: expect.objectContaining({ entityId: "owner-2", entityType: "staff", botType: "service", hasServiceBot: true }),
     }));
     expect(db.calls.some((call) => call.params[1] === "owner-2")).toBe(true);
   });
@@ -111,7 +111,7 @@ describe("EvolveRepository collaborative Bot access", () => {
       if (sql.includes("SELECT b.active_engine") && params[1] === "collaborator-1") return [];
       if (sql.includes("SELECT c.owner_id")) return [{ owner_id: "owner-2" }];
       if (sql.includes("SELECT b.active_engine") && params[1] === "owner-2") return [{
-        active_engine: "openclaw", bot_type: "service", bot_status: "active", binding_id: 7,
+        entity_id: "owner-2", entity_type: "staff", active_engine: "openclaw", bot_type: "service", bot_status: "active", binding_id: 7,
         device_provider: "BAAS", device_id: "device-1", binding_status: "active", env: "prod",
       }];
       if (sql.includes("COUNT(*) AS published_count")) return [{ published_count: 1 }];
@@ -122,7 +122,7 @@ describe("EvolveRepository collaborative Bot access", () => {
       .resolveEvolveBotRuntime("collaborator-1", "service-bot");
 
     expect(runtime).toEqual(expect.objectContaining({
-      ownerId: "owner-2", accessType: "collaborator", botType: "service",
+      ownerId: "owner-2", accessType: "collaborator", entityId: "owner-2", entityType: "staff", botType: "service",
     }));
   });
 });

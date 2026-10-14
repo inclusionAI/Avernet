@@ -194,6 +194,8 @@ def _seed_delete(world, *, active: bool) -> None:
             lambda: SimpleNamespace(
                 resolve_for_bot=lambda *_args: SimpleNamespace(provider="local")
             ),
+            lambda: SimpleNamespace(record_deletion=lambda **_kwargs: None),
+            False,
         ),
         scope=None,
     )

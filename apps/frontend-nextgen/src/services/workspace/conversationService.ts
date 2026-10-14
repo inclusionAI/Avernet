@@ -1,6 +1,7 @@
 // 对话工作台目录与会话 Service(设计依据:docs/specs/2026-09-24-workspace-conversation-navigation-refactor.md)。
 // 组合 botSessionService / collaborationCandidateService 的既有映射,不重复协议转换。
 // 由调用方(Hook)传入已鉴权的 Human ID,本 Service 不读取任何 Store / 路由。
+import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import { supportsBotSessionFavorites } from '@/domain/botEngine';
 import type { ConversationSessionScope } from '@/domain/conversation/types';
 import {
@@ -23,6 +24,13 @@ export interface ConversationDirectoryResult {
 
 function toConversationFriendBotView(view: CollaborationBotView): ChatBotView {
   const { realBotId, ownerId } = splitBotId(view.id);
+  const runtime = resolveBotRuntime({
+    botId: realBotId,
+    engine: view.engine,
+    botType: view.botType,
+    templateType: view.templateType,
+    templateName: view.templateName,
+  });
   return {
     botId: view.id,
     realBotId,
@@ -35,6 +43,7 @@ function toConversationFriendBotView(view: CollaborationBotView): ChatBotView {
     engine: view.engine,
     botType: view.botType,
     isFriendBot: true,
+    isAgentCodingBot: runtime.isAgentCodingBot,
   };
 }
 

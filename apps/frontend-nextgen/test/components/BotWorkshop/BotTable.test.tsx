@@ -175,6 +175,32 @@ describe('BotTable health check action', () => {
   });
 });
 
+describe('BotTable task instances action', () => {
+  test('renders after logs for the owner or an explicit collaborator and opens the scoped list', () => {
+    const bot = mapBotDto({ bot_id: 'task-bot', bot_name: 'Task Bot', engine: 'openclaw', status: 'ACTIVE' }).item;
+    const onOpenTaskInstances = jest.fn();
+    renderTable(bot, {
+      onOpenTaskInstances,
+      canOpenTaskInstances: () => true,
+      onOpenLogs: noop,
+      getLogAction: () => ({ action: 'logs', visible: true, enabled: true }),
+    });
+
+    const logButton = screen.getByRole('button', { name: '查看 Task Bot 日志' });
+    const taskButton = screen.getByRole('button', { name: '查看 Task Bot 任务实例' });
+    expect(logButton.compareDocumentPosition(taskButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(taskButton);
+    expect(onOpenTaskInstances).toHaveBeenCalledWith(bot);
+  });
+
+  test('hides task instances from an unrelated space member', () => {
+    const bot = mapBotDto({ bot_id: 'other-bot', bot_name: 'Other Bot', engine: 'openclaw', status: 'ACTIVE' }).item;
+    renderTable(bot, { onOpenTaskInstances: jest.fn(), canOpenTaskInstances: () => false });
+
+    expect(screen.queryByRole('button', { name: '查看 Other Bot 任务实例' })).not.toBeInTheDocument();
+  });
+});
+
 describe('BotTable conversation action', () => {
   test('renders the conversation entry and delegates navigation', () => {
     const bot = mapBotDto({
@@ -577,7 +603,63 @@ describe('Agent Coding Bot row actions', () => {
     expect(screen.getByText('发布与阶段推进')).toBeInTheDocument();
   });
 
-  test('Coding Bot 保留去使用，同时展示后端声明的库存操作', () => {
+  test('Bot 成员点击 Coding Bot 去使用时进入 Coding Chat', () => {
+    const bot = mapBotDto({
+      bot_id: 'collaborator-coding-bot',
+      bot_name: '协作者 Coding Bot',
+      owner_id: 'owner-1',
+      active_engine: 'claude_code',
+      template_type: 'myTemplate',
+      bot_type: 'personal',
+      display_state: 'running',
+      actions: ['view', 'chat', 'edit'],
+    }).item;
+    const onConversation = jest.fn();
+
+    renderTable(bot, {
+      onConversation,
+      onAction: jest.fn().mockResolvedValue(undefined),
+      canOpenConversation: (item) => item.actions.includes('edit'),
+    });
+
+    const useButton = screen.getByRole('button', { name: '去使用 协作者 Coding Bot' });
+    expect(useButton).toBeEnabled();
+    fireEvent.click(useButton);
+    expect(onConversation).toHaveBeenCalledWith(bot);
+  });
+
+  test('普通空间成员点击 Coding Bot 去使用时回退基础信息', () => {
+    const bot = mapBotDto({
+      bot_id: 'space-member-coding-bot',
+      bot_name: '空间成员 Coding Bot',
+      owner_id: 'owner-1',
+      active_engine: 'claude_code',
+      template_type: 'myTemplate',
+      bot_type: 'personal',
+      display_state: 'running',
+      actions: ['view', 'chat'],
+    }).item;
+    const onConversation = jest.fn();
+    const onView = jest.fn();
+
+    renderTable(bot, {
+      onConversation,
+      onView,
+      onAction: jest.fn().mockResolvedValue(undefined),
+      canOpenConversation: (item) => item.actions.includes('edit'),
+    });
+
+    const useButton = screen.getByRole('button', { name: '去使用 空间成员 Coding Bot' });
+    expect(useButton).toBeEnabled();
+    fireEvent.click(useButton);
+    fireEvent.click(dataRow());
+
+    expect(onView).toHaveBeenCalledTimes(2);
+    expect(onView).toHaveBeenNthCalledWith(1, bot);
+    expect(onConversation).not.toHaveBeenCalled();
+  });
+
+  test('Coding Bot 主要操作固定展示去使用与任务实例，更多操作保留', () => {
     const bot = mapBotDto({
       bot_id: 'agent-template',
       bot_name: 'Agent Coding 模版 Bot',
@@ -586,8 +668,11 @@ describe('Agent Coding Bot row actions', () => {
       engine_properties: { template_config: { capabilities: { upgrade_service_bot: true } } },
       bot_type: 'personal',
       display_state: 'running',
-      actions: ['chat', 'view', 'edit', 'restart', 'engine_restart', 'delete'],
+      actions: ['chat', 'view', 'edit', 'restart', 'delete'],
     }).item;
+
+    const onAuthorize = jest.fn();
+    const onOpenTaskInstances = jest.fn();
 
     renderTable(bot, {
       onConversation: noop,
@@ -596,8 +681,10 @@ describe('Agent Coding Bot row actions', () => {
       getHealthCheckAvailability: () => ({ action: 'health-check', visible: true, enabled: true }),
       getLogAction: () => ({ action: 'logs', visible: true, enabled: true }),
       onOpenLogs: noop,
+      onOpenTaskInstances,
+      canOpenTaskInstances: () => false,
       onChangeSpace: noop,
-      onAuthorize: noop,
+      onAuthorize,
       getCollaborationMode: () => 'authorize',
       onAction: jest.fn().mockResolvedValue(undefined),
       getInventoryActions: () => ({
@@ -608,20 +695,52 @@ describe('Agent Coding Bot row actions', () => {
     });
 
     expect(screen.getByRole('button', { name: '去使用 Agent Coding 模版 Bot' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '查看 Agent Coding 模版 Bot 详情' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '编辑 Agent Coding 模版 Bot' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Agent Coding 模版 Bot 健康检查' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '查看 Agent Coding 模版 Bot 日志' })).toBeInTheDocument();
+    const primaryActions = within(screen.getByRole('group', { name: 'Agent Coding 模版 Bot 主要操作' }));
+    expect(primaryActions.getAllByRole('button')).toHaveLength(2);
+    const taskInstancesButton = screen.getByRole('button', {
+      name: '查看 Agent Coding 模版 Bot 任务实例',
+    });
+    expect(taskInstancesButton).toBeInTheDocument();
+    fireEvent.click(taskInstancesButton);
+    expect(onOpenTaskInstances).toHaveBeenCalledWith(bot);
+    expect(screen.queryByRole('button', { name: '查看 Agent Coding 模版 Bot 详情' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '编辑 Agent Coding 模版 Bot' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Agent Coding 模版 Bot 健康检查' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '查看 Agent Coding 模版 Bot 日志' })).not.toBeInTheDocument();
 
+    expect(screen.getByRole('button', { name: '管理 Agent Coding 模版 Bot' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '管理 Agent Coding 模版 Bot' }));
     expect(screen.getByText('开启服务化')).toBeInTheDocument();
     expect(screen.getByText('重启 Bot')).toBeInTheDocument();
     expect(screen.getByLabelText('重启 Bot说明')).toBeInTheDocument();
     expect(screen.getByText('变更归属空间')).toBeInTheDocument();
     expect(screen.getByText('删除')).toBeInTheDocument();
-    expect(screen.queryByText('重启引擎')).not.toBeInTheDocument();
-    expect(screen.queryByText('发布与阶段推进')).not.toBeInTheDocument();
-    expect(screen.queryByText('授权')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /重启引擎/ })).not.toBeInTheDocument();
+    const authorizeButton = screen.getByRole('button', { name: '授权' });
+    expect(authorizeButton).toBeInTheDocument();
+    fireEvent.click(authorizeButton);
+    expect(onAuthorize).toHaveBeenCalledWith(bot);
+  });
+
+  test('服务化 Coding Bot 暂不展示重启引擎入口', () => {
+    const bot = mapBotDto({
+      bot_id: 'coding-service-engine-restart',
+      bot_name: '服务化 Coding Bot',
+      engine: 'claude_code',
+      template_type: 'generalCC',
+      bot_type: 'service',
+      kind: 'service',
+      display_state: 'service_draft',
+      actions: ['chat', 'delete'],
+    }).item;
+
+    renderTable(bot, {
+      onAction: jest.fn().mockResolvedValue(undefined),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '管理 服务化 Coding Bot' }));
+
+    expect(screen.queryByRole('button', { name: /重启引擎/ })).not.toBeInTheDocument();
   });
 
   test('Coding Bot 点击整行进入对话而非详情', () => {

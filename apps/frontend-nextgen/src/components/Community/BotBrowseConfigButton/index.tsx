@@ -14,7 +14,7 @@ export function BotBrowseConfigButton() {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="Bot 访问社区配置">
+      <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="设置 Bot 访问社区">
         <Settings className="size-4" aria-hidden />
       </Button>
       <Drawer open={open} onOpenChange={setOpen}>

@@ -9,6 +9,7 @@ import {
 } from '@/services/botWorkshop/agentCodingTemplateService';
 import { ArrowRight } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CodeRepositoryTenant } from '@/services/botWorkshop/agentCodingLegacyService';
 import { AgentCodingTemplateGrid } from './AgentCodingTemplateGrid';
 import { ApplicationCodingConfigForm } from './ApplicationCodingConfigForm';
 import { DynamicTemplateFields, validateDynamicTemplateFieldBindingsDetailed } from './DynamicTemplateFields';
@@ -39,6 +40,7 @@ export function AgentCodingSection({
 }: Props) {
   const [source, setSource] = useState<'official' | 'market'>('official');
   const [fieldErrors, setFieldErrors] = useState<Record<string, Record<number, string>>>({});
+  const [codeRepoTenants, setCodeRepoTenants] = useState<Record<string, CodeRepositoryTenant>>({});
   const applicationFormRef = useRef<AppCodingConfigFormRef | null>(null);
   const visibleTemplates = useMemo(
     () => templates.filter((template) => template.source === source),
@@ -65,6 +67,7 @@ export function AgentCodingSection({
 
   const selectTemplate = (template: AgentCodingTemplate) => {
     setFieldErrors({});
+    setCodeRepoTenants({});
     onChange({
       kind: template.templateType === 'applicationCoding' ? 'applicationCoding' : 'template',
       template,
@@ -84,6 +87,10 @@ export function AgentCodingSection({
     if (!selectedRef.current || !currentValue) return;
     onChangeRef.current({ ...currentValue, values });
   }, []);
+  const handleCodeRepoTenantChange = useCallback((fieldKey: string, tenant: CodeRepositoryTenant) => {
+    setCodeRepoTenants((current) => ({ ...current, [fieldKey]: tenant }));
+  }, []);
+
   const clearFieldError = (fieldKey: string) => {
     setFieldErrors((current) => {
       if (!current[fieldKey]) return current;
@@ -177,6 +184,8 @@ export function AgentCodingSection({
               disabled={disabled}
               fieldErrors={fieldErrors}
               onFieldChange={clearFieldError}
+              codeRepoTenants={codeRepoTenants}
+              onCodeRepoTenantChange={handleCodeRepoTenantChange}
               onChange={updateValues}
               onValidationChange={onValidationChange}
             />

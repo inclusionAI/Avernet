@@ -90,6 +90,10 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
               }
               dockSelectedBotId={props.store.selectedSection === 'managed' ? props.store.selectedBotId : null}
               onQuickOpen={(view) => {
+                if (view.bot.isAgentCodingBot) {
+                  props.onOpenAgentCodingBot(view.bot);
+                  return;
+                }
                 props.store.setBotGroupCollapsed('managed', false);
                 // 未展开过才补 toggleBot(带会话懒加载);已展开的只恢复分组可见,不回弹成收起。
                 if (!props.store.expandedBotIds[view.bot.botId]) {
@@ -134,6 +138,10 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
               }
               dockSelectedBotId={props.store.selectedSection === 'friend' ? props.store.selectedBotId : null}
               onQuickOpen={(view) => {
+                if (view.bot.isAgentCodingBot) {
+                  props.onOpenAgentCodingBot(view.bot);
+                  return;
+                }
                 props.store.setBotGroupCollapsed('friend', false);
                 if (!props.store.expandedBotIds[view.bot.botId]) {
                   props.sessions.toggleBot(view.bot.botId, 'friend');
@@ -169,6 +177,10 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
           selectedBotId={store.selectedBotId}
           selectedSection={store.selectedSection}
           onQuickOpen={(view) => {
+            if (view.bot.isAgentCodingBot) {
+              props.onOpenAgentCodingBot(view.bot);
+              return;
+            }
             // 与分组「泊位」onQuickOpen 同契约:恢复分组可见(下次展开即就位) +
             // 未展开过的 Bot 补 toggleBot 懒加载;侧栏本身保持收起不打扰舞台。
             if (view.section !== 'team') store.setBotGroupCollapsed(view.section, false);

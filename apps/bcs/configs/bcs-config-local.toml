@@ -132,8 +132,9 @@ max_filters_per_subscription = 64
 
 [collaboration]
 # Local testing: enable Loop v2 execution and recovery.
-# Other deployments default to false; full product FO/release validation is pending.
+# Other deployments default to false; this local profile exercises nested stories and seeds.
 loop_execution_enabled = true
+nested_loop_execution_enabled = true
 
 [collaboration.templates]
 storage_type = "file"

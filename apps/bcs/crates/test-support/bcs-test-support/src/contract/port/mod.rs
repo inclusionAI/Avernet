@@ -273,6 +273,7 @@ pub async fn session_channel_outbound_port_contract_tests<
             session_id: "contract-group:00000001".to_string(),
             run_id: "contract-run".to_string(),
             node_id: "human-review".to_string(),
+            execution: None,
             display_name: "Human review".to_string(),
             instruction: "Review the upstream result".to_string(),
             assignee_actor_id: "contract-human".to_string(),

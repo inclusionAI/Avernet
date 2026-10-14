@@ -27,6 +27,8 @@ export interface BotTableProps {
   /** 无详情权限时，整行及查看按钮仅打开基础信息，不进入编辑页。 */
   canEnterDetail?: (bot: BotDomain) => boolean;
   onOpenLogs?: (bot: BotDomain) => void;
+  onOpenTaskInstances?: (bot: BotDomain) => void;
+  canOpenTaskInstances?: (bot: BotDomain) => boolean;
   onHealthCheck?: (bot: BotDomain) => void;
   onChangeSpace?: (bot: BotDomain) => void;
   onAuthorize?: (bot: BotDomain) => void;
@@ -55,6 +57,8 @@ const BotTable: React.FC<BotTableProps> = ({
   canOpenConversation,
   canEnterDetail,
   onOpenLogs,
+  onOpenTaskInstances,
+  canOpenTaskInstances,
   onHealthCheck,
   onChangeSpace,
   onAuthorize,
@@ -145,6 +149,8 @@ const BotTable: React.FC<BotTableProps> = ({
               conversationAllowed={(canOpenConversation?.(bot) ?? true) && entry.enabled}
               conversationDisabledReason={entry.enabled ? undefined : entry.disabledReason}
               onOpenLogs={onOpenLogs}
+              onOpenTaskInstances={onOpenTaskInstances}
+              canOpenTaskInstances={canOpenTaskInstances}
               onHealthCheck={onHealthCheck}
               inventoryActions={getInventoryActions?.(bot)}
               healthCheckAvailability={getHealthCheckAvailability?.(bot)}
@@ -160,18 +166,17 @@ const BotTable: React.FC<BotTableProps> = ({
         align: 'end',
         cell: (bot) => {
           if (!onAction) return null;
-          const isAgentCodingBot = bot.runtime.isAgentCodingBot;
           const generalConfigAvailability = getGeneralConfigAvailability?.(bot);
           return (
             <div className="flex justify-end" onClick={(event) => event.stopPropagation()}>
               <BotManagementMenu
                 bot={bot}
-                collaborationMode={isAgentCodingBot ? undefined : getCollaborationMode?.(bot)}
+                collaborationMode={getCollaborationMode?.(bot)}
                 lockedByOther={bot.lock?.status === 'other'}
                 onAction={onAction}
                 onManagePublication={onManagePublication}
                 onChangeSpace={onChangeSpace}
-                onAuthorize={isAgentCodingBot ? undefined : onAuthorize}
+                onAuthorize={onAuthorize}
                 canGeneralConfig={generalConfigAvailability?.enabled}
                 generalConfigDisabledReason={generalConfigAvailability?.disabledReason}
                 onGeneralConfig={onGeneralConfig}
@@ -188,6 +193,8 @@ const BotTable: React.FC<BotTableProps> = ({
       onConversation,
       canOpenConversation,
       onOpenLogs,
+      onOpenTaskInstances,
+      canOpenTaskInstances,
       onHealthCheck,
       onChangeSpace,
       onAuthorize,

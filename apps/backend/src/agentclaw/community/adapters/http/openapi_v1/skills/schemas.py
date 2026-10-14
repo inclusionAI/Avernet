@@ -17,6 +17,109 @@ from agentclaw.community.adapters.http.openapi_v1.schemas_runtime_projection imp
     DesiredStateResult,
     RuntimeProjectionResult,
 )
+from agentclaw.community.adapters.http.openapi_v1.contracts import Page
+
+
+class SkillSecurityObservation(BaseModel):
+    """Recorded security check for one successful Local Skill upload."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "observation_id": "upload-20261012-1",
+                "sha256": "sha256:" + "a" * 64,
+                "check_id": "check-123",
+                "processing_status": "COMPLETED",
+                "risk_status": "PASS",
+                "report": {"riskStatus": "PASS"},
+                "detail_url": None,
+                "error_code": None,
+                "error_message": None,
+                "scan_started_at": "2026-10-12T09:00:00",
+                "scan_completed_at": "2026-10-12T09:01:00",
+                "created_at": "2026-10-12T08:59:00",
+            }
+        }
+    )
+
+    observation_id: str = Field(description="Identifier of this upload's scan record.")
+    sha256: str = Field(description="SHA-256 digest of the immutable uploaded package.")
+    check_id: str | None = Field(
+        default=None, description="Provider check identifier, when submitted."
+    )
+    processing_status: str = Field(
+        description="Local scan-processing state, separate from risk status."
+    )
+    risk_status: str | None = Field(
+        default=None, description="Provider risk finding; null until reported."
+    )
+    report: dict[str, Any] | None = Field(
+        default=None, description="Saved provider report, when available."
+    )
+    detail_url: str | None = Field(
+        default=None, description="Provider report detail link, when available."
+    )
+    error_code: str | None = Field(
+        default=None, description="Last local processing error code, if any."
+    )
+    error_message: str | None = Field(
+        default=None, description="Last local processing error detail, if any."
+    )
+    scan_started_at: datetime | None = Field(
+        default=None, description="Time the scan began, when known."
+    )
+    scan_completed_at: datetime | None = Field(
+        default=None, description="Time the scan report was saved, when known."
+    )
+    created_at: datetime = Field(
+        description="Time the upload observation was recorded."
+    )
+
+
+class SkillSecurityHandoffFailure(BaseModel):
+    """A successful upload whose security handoff could not be completed."""
+
+    observation_id: str = Field(description="Identifier of this failed upload handoff.")
+    sha256: str = Field(description="Digest of the exact submitted package.")
+    stage: str = Field(description="Technical stage where observation failed.")
+    snapshot_verified: bool = Field(
+        description="Whether the immutable exact package was read back successfully."
+    )
+
+
+class SkillSecurityObservations(BaseModel):
+    """Current Local Skill upload and a page of its security history."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "provider_skill_id": "tc:123e4567-e89b-12d3-a456-426614174000",
+                "current": None,
+                "current_status": "UNKNOWN",
+                "current_failure": None,
+                "history": {"total": 0, "items": []},
+            }
+        }
+    )
+
+    provider_skill_id: str | None = Field(
+        default=None,
+        description="Stable security identity; null until observation enrollment succeeds.",
+    )
+    current: SkillSecurityObservation | None = Field(
+        default=None,
+        description="Latest observed upload, null if the latest handoff failed or is unknown.",
+    )
+    current_status: str = Field(
+        description="Current upload's observation/scan state; OBSERVATION_FAILED hides an older report."
+    )
+    current_failure: SkillSecurityHandoffFailure | None = Field(
+        default=None,
+        description="Known failed handoff for the latest upload; never an older scan verdict.",
+    )
+    history: Page[SkillSecurityObservation] = Field(
+        description="Bounded, newest-first page of successful upload observations."
+    )
 
 
 class Skill(BaseModel):

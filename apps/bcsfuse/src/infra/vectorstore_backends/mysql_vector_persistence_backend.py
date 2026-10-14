@@ -302,6 +302,31 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
             self._finish_read(cursor)
 
     @_synchronized_connection
+    def load_by_id(self, id: str) -> VectorPoint | None:
+        """Read one active point through its exact primary key."""
+        self._ensure_connection()
+        cursor = self._conn.cursor()
+        try:
+            cursor.execute(f"""
+                SELECT `id`, `vector`, `payload` FROM {TABLE_NAME}
+                WHERE `id` = %s AND `is_deleted` = 0
+            """, (id,))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            try:
+                return VectorPoint(
+                    id=row[0], vector=self._deserialize_vector(row[1]),
+                    payload=json.loads(row[2]) if row[2] else {},
+                )
+            except Exception as e:
+                raise RuntimeError(f"Failed to decode persisted vector {row[0]}") from e
+        except Error as e:
+            raise RuntimeError(f"Failed to load vectors from MySQL: {e}") from e
+        finally:
+            self._finish_read(cursor)
+
+    @_synchronized_connection
     def load_by_worker(self, worker_id: str) -> list[VectorPoint]:
         """Read one Worker's active vectors using the ID primary-key prefix."""
         started_at = perf_counter()

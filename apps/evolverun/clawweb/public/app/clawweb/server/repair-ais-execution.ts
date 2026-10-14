@@ -9,6 +9,7 @@ import { WorkflowDeployHistoryRepository } from '@avernet/workflow/server/reposi
 import type { RepairBaseline } from '@avernet/workflow/server/contracts/repair-batch';
 import { canonicalRepairJson } from '@avernet/workflow/server/contracts/repair-batch';
 import type { RepairExecutionPort, RepairExecutionReadRequest, RepairGeneratedResult } from '@avernet/workflow/server/contracts/repair-workbench';
+import { RepairResultAbsentError } from '@avernet/workflow/server/contracts/repair-workbench';
 import type { AistudioService } from '@avernet/clawinsight/server/services/aistudio-service';
 
 const runFile = promisify(execFile);
@@ -93,6 +94,8 @@ export class RepairGitStore {
   async result(request: RepairExecutionReadRequest): Promise<RepairGeneratedResult> {
     const branch = request.input.taskBranch;
     if (!safeBranch.test(branch)) throw new Error('Invalid repair task branch');
+    const advertised = (await this.git(['ls-remote', 'origin', `refs/heads/${branch}`], 64 * 1024)).trim();
+    if (!advertised && !request.input.parentCandidateCommit) throw new RepairResultAbsentError('Repair execution has not published a result');
     const head = await this.fetch(`refs/heads/${branch}`);
     const message = await this.git(['log', '-1', '--format=%B', head], 1024 * 1024);
     const prefix = 'ClawMind workflow-repair-result/v1\n';
@@ -100,6 +103,16 @@ export class RepairGitStore {
     const result = JSON.parse(message.slice(prefix.length)) as Record<string, unknown>;
     const draft = result.draft as Record<string, unknown> | undefined;
     const checks = result.checks as Record<string, unknown> | undefined;
+    if (request.input.parentCandidateCommit && request.input.previousReportRef
+      && result.schemaVersion === 'workflow-repair-result/v1' && result.taskId === request.input.taskId
+      && request.input.previousReportRef === `${result.taskId}/revisions/${result.revision}`
+      && Number.isSafeInteger(result.revision) && Number(result.revision) < request.input.revision
+      && ['succeeded', 'blocked', 'no_change'].includes(String(result.status))
+      && draft?.candidateCommit === request.input.parentCandidateCommit && draft.repoId === 'clawflows' && draft.branch === branch
+      && (await this.git(['rev-parse', `${head}^1`])).trim() === draft.candidateCommit
+      && (await this.git(['rev-parse', `${head}^{tree}`])).trim() === (await this.git(['rev-parse', `${draft.candidateCommit}^{tree}`])).trim()) {
+      throw new RepairResultAbsentError('Repair branch still contains the previous successful result');
+    }
     if (result.schemaVersion !== 'workflow-repair-result/v1' || result.taskId !== request.input.taskId
       || result.stepId !== request.identity.stepId || result.revision !== request.input.revision
       || result.attempt !== request.identity.attempt || result.executionId !== request.identity.executionId
@@ -119,7 +132,7 @@ export class RepairGitStore {
       throw new Error('Repair result metadata does not bind the candidate Pack tree');
     }
     const candidateParent = (await this.git(['rev-parse', `${candidate}^1`])).trim();
-    if (request.input.revision === 1) {
+    if (!request.input.parentCandidateCommit) {
       if (candidateParent !== request.input.baseline.packCommit) throw new Error('Repair candidate does not descend from the frozen baseline');
     } else {
       const priorCandidate = request.input.parentCandidateCommit;
@@ -131,7 +144,8 @@ export class RepairGitStore {
       const priorMessage = await this.git(['log', '-1', '--format=%B', candidateParent], 1024 * 1024);
       if (!priorMessage.startsWith(prefix)) throw new Error('Previous repair result metadata is missing');
       const prior = JSON.parse(priorMessage.slice(prefix.length)) as Record<string, unknown>;
-      if (prior.taskId !== request.input.taskId || prior.revision !== request.input.revision - 1
+      if (prior.taskId !== request.input.taskId || !Number.isSafeInteger(prior.revision) || Number(prior.revision) >= request.input.revision
+        || (request.input.previousReportRef != null && request.input.previousReportRef !== `${request.input.taskId}/revisions/${prior.revision}`)
         || (prior.draft as Record<string, unknown> | undefined)?.candidateCommit !== priorCandidate) {
         throw new Error('Previous repair result does not match this revision');
       }

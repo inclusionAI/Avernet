@@ -23,6 +23,7 @@ export default defineConfig({
   favicons: ['/avernet-favicon.svg'],
   title: 'Avernet',
   define: {
+    QWENWORK_PROVIDER_SLUG: process.env.QWENWORK_PROVIDER_SLUG || '',
     BCS_ENDPOINT_PRE: bcsEndpointPre,
     BCS_ENDPOINT_PROD: bcsEndpointProd,
   },

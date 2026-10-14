@@ -1,4 +1,5 @@
 import { IconButton } from '@/components/ui';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { GroupView, SessionView } from '@/domain/collaboration';
 import type { GroupChatFavoritesModel } from '@/pages/Workspace/hooks/useGroupChatHeaderPanels';
 import type { DomainResult } from '@/services/workspace/identityService';
@@ -134,19 +135,26 @@ export function GroupHeader({
               <GroupAvatarStack participants={participants} totalCount={totalCount} />
               <span className="truncate text-[13px] leading-[18px] text-zinc-600">{selectedGroup.name}</span>
               {selectedSession ? (
-                <span className="flex h-5 max-w-[180px] shrink-0 items-center gap-1 rounded-full bg-secondary px-2">
-                  <span className="truncate text-[11px] leading-[16.5px] text-foreground/85" title={selectedSession.sessionId}>
-                    {selectedSession.sessionId}
+                <TooltipProvider>
+                  <span className="flex h-5 max-w-[180px] shrink-0 items-center gap-1 rounded-full bg-secondary px-2">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="truncate text-[11px] leading-[16.5px] text-foreground/85">
+                          {selectedSession.sessionId}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>{selectedSession.sessionId}</TooltipContent>
+                    </Tooltip>
+                    <IconButton
+                      label="复制会话 Key"
+                      icon={<Copy className="h-3 w-3" aria-hidden />}
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void copySessionKey()}
+                      className="h-5 w-5 rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                    />
                   </span>
-                  <button
-                    type="button"
-                    aria-label="复制会话 Key"
-                    onClick={() => void copySessionKey()}
-                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
-                  >
-                    <Copy className="h-3 w-3" aria-hidden />
-                  </button>
-                </span>
+                </TooltipProvider>
               ) : null}
               {participants.length > 0 || totalCount > 0 ? (
                 <>

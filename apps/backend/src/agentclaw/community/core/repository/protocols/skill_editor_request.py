@@ -26,7 +26,9 @@ class SkillEditorRequestRepositoryProtocol(Protocol):
     @abstractmethod
     def get_editor_approval_policy(
         self, *, space_id: int, skill_id: int, actor_id: str, env: str
-    ) -> bool: ...
+    ) -> bool:
+        """Read the policy for an active member of a live Team Space Skill."""
+        ...
 
     @abstractmethod
     def update_editor_approval_policy(
@@ -37,7 +39,9 @@ class SkillEditorRequestRepositoryProtocol(Protocol):
         actor_id: str,
         auto_approve_editor_requests: bool,
         env: str,
-    ) -> bool: ...
+    ) -> bool:
+        """Update the policy only for the active Skill Owner."""
+        ...
 
     @abstractmethod
     def inspect_editor_request(

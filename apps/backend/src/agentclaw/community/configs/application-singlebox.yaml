@@ -50,6 +50,8 @@ user_config:
   # Real employee ids never ship in community source. Acceptance tests authorize
   # with "100000" (the doc-example placeholder).
   admin:
+    cron_admin:
+      - "100000"
     super_admin:
       - "100000"
     disk_usage_admin:

@@ -714,6 +714,34 @@ describe('ChatPanel interactive', () => {
     expect(mockPanelRenders.some((p) => p.bridge === bridge)).toBe(true);
   });
 
+  it('onSidePaneIsOpenChange 经 ChatLayoutPanelSlot 收进副屏 onIsOpenChange 组合链（真实开合态接线）', () => {
+    mockPanelRenders.length = 0;
+    const onSidePaneIsOpenChange = jest.fn();
+    render(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        onSidePaneIsOpenChange={onSidePaneIsOpenChange}
+        {...baseProps}
+      />,
+    );
+    // 副屏插槽包装组件把 App 观察口组合进真实 onIsOpenChange（渲染器默认展开经此点亮收起钮）。
+    const panelProps = mockPanelRenders.at(-1) as { onIsOpenChange?: (open: boolean) => void };
+    expect(typeof panelProps?.onIsOpenChange).toBe('function');
+    panelProps?.onIsOpenChange?.(true);
+    expect(onSidePaneIsOpenChange).toHaveBeenCalledWith(true);
+  });
+
   it('真空会话确认后渲染富化空态：Bot头像标记+主副文案+开场 chips，chip 一键写入输入框', async () => {
     const insert = jest.fn();
     const focus = jest.fn();

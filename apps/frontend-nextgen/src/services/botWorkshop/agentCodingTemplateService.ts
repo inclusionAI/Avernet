@@ -123,6 +123,33 @@ export function getServiceBotCapability(template?: AgentCodingTemplate): boolean
   return capabilityEntries.some((capabilities) => capabilities.upgrade_service_bot === true);
 }
 
+/**
+ * 判断 AgentCoding 模板是否声明了 BCN 能力。
+ * 支持显式 `true`、结构化 `{ enabled: true }`，以及历史 `capability_tags` 中的 `BCN` 标签。
+ * 缺失、字符串或其他 truthy 值不视为支持。
+ */
+export function getBcnCapability(template?: Partial<Pick<AgentCodingTemplate, 'config' | 'raw'>>): boolean | undefined {
+  if (!template) return undefined;
+  const configSources = [
+    record(template.config),
+    record(record(template.config).bot_template_config),
+    record(template.raw),
+    record(record(template.raw).template_config),
+    record(record(template.raw).bot_template_config),
+    record(record(template.raw).engine_properties),
+    record(record(record(template.raw).engine_properties).template_config),
+  ];
+  const capabilities = configSources.map((source) => record(source.capabilities));
+  const isBcnEnabled = (item: Record<string, unknown>) =>
+    item.enable_bcn_network === true || item.bcn === true || record(item.bcn).enabled === true;
+  if (capabilities.some(isBcnEnabled)) return true;
+
+  const tagSources = configSources.flatMap((source) => list(source.capability_tags));
+  if (tagSources.some((tag) => tag.toLowerCase() === 'bcn')) return true;
+  if (capabilities.some((item) => 'enable_bcn_network' in item || 'bcn' in item)) return false;
+  return undefined;
+}
+
 export function supportsServiceBot(template?: AgentCodingTemplate): boolean {
   return getServiceBotCapability(template) === true;
 }

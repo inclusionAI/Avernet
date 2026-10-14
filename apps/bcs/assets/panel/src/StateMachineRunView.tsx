@@ -76,6 +76,13 @@ export interface StateMachineNodeExecutionMetadata {
   loop_id: string;
   iteration: number;
   max_iterations: number;
+  loop_path?: StateMachineLoopFrame[];
+}
+
+export interface StateMachineLoopFrame {
+  loop_id: string;
+  iteration: number;
+  max_iterations: number;
 }
 
 export interface StateMachineLoopRoute {
@@ -96,6 +103,7 @@ export interface LoopContext {
   loop_id: string;
   iteration: number;
   max_iterations: number;
+  loop_path?: StateMachineLoopFrame[];
   previous_result: PreviousLoopResult | null;
 }
 
@@ -193,6 +201,7 @@ export interface PendingHumanNodeArtifact {
 
 export interface PendingHumanNode {
   node_id: string;
+  execution?: StateMachineNodeExecutionMetadata;
   display_name: string;
   instruction: string;
   response_ref: string;
@@ -3293,6 +3302,10 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
           <HumanArtifactLabel title={`max_iterations: ${pendingHumanNode.loop_context.max_iterations}`}>
             Loop {pendingHumanNode.loop_context.loop_id} · #{pendingHumanNode.loop_context.iteration}
           </HumanArtifactLabel>
+          {pendingHumanNode.loop_context.loop_path ? (
+            <HumanInputMeta>Path: {pendingHumanNode.loop_context.loop_path.map((frame) =>
+              `${frame.loop_id} ${frame.iteration}/${frame.max_iterations}`).join(' → ')}</HumanInputMeta>
+          ) : null}
           {pendingHumanNode.loop_context.previous_result ? (
             <div>
               <HumanInputMeta>
@@ -3480,6 +3493,8 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
           {selectedNode.execution ? (
             <div aria-label="Loop execution details">
               <HumanInputMeta title={`max_iterations: ${selectedNode.execution.max_iterations}`}>Loop: {selectedNode.execution.loop_id} · #{selectedNode.execution.iteration}</HumanInputMeta>
+              {selectedNode.execution.loop_path ? <HumanInputMeta>Path: {selectedNode.execution.loop_path.map((frame) =>
+                `${frame.loop_id} ${frame.iteration}/${frame.max_iterations}`).join(' → ')}</HumanInputMeta> : null}
               <HumanInputMeta>Logical node: {selectedNode.execution.definition_node_id}</HumanInputMeta>
               <HumanInputMeta>Execution ID: {selectedNode.node_id}</HumanInputMeta>
               <HumanInputMeta>Retry attempt: {selectedRuntimeNode?.attempt ?? selectedNode.attempt ?? 0} (从 0 开始)</HumanInputMeta>

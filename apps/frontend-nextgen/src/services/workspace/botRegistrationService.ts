@@ -1,4 +1,7 @@
-import { getBotRegistrationToken } from '@/services/backendApi/collaboration/collaborationRegistrationController';
+import {
+  getBotRegistrationToken,
+  getRegistrationProvider,
+} from '@/services/backendApi/collaboration/collaborationRegistrationController';
 import type { DomainError, DomainResult } from './identityService';
 
 export interface BotRegistrationTokenView {
@@ -58,11 +61,23 @@ function isAborted(error: unknown): boolean {
     : (error as { name?: string })?.name === 'AbortError';
 }
 
-function mapToken(data: unknown): BotRegistrationTokenView | null {
+function mapToken(data: unknown, providerId?: string): BotRegistrationTokenView | null {
   const record = typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : null;
   const token = typeof record?.token === 'string' ? record.token.trim() : '';
   const expiresAt = typeof record?.expires_at === 'number' ? record.expires_at : undefined;
-  if (!token || expiresAt === undefined) return null;
+  if (!token || expiresAt === undefined || !Number.isFinite(expiresAt)) return null;
+  const registration =
+    typeof record?.registration === 'object' && record.registration !== null
+      ? (record.registration as Record<string, unknown>)
+      : null;
+  if (
+    providerId &&
+    (registration?.token_version !== 2 ||
+      registration.provider_id !== providerId ||
+      !Array.isArray(registration.allowed_modes) ||
+      !registration.allowed_modes.includes('plugin'))
+  )
+    return null;
   return {
     token,
     expiresAt,
@@ -71,13 +86,24 @@ function mapToken(data: unknown): BotRegistrationTokenView | null {
 }
 
 export const botRegistrationService = {
-  async getRegistrationToken(signal?: AbortSignal): Promise<DomainResult<BotRegistrationTokenView>> {
+  async getRegistrationToken(
+    signal?: AbortSignal,
+    providerSlug?: string,
+  ): Promise<DomainResult<BotRegistrationTokenView>> {
     try {
-      const response = await getBotRegistrationToken(signal);
+      let providerId: string | undefined;
+      if (providerSlug) {
+        const provider = await getRegistrationProvider(providerSlug, signal);
+        if (!provider.enabled || provider.slug !== providerSlug || !provider.provider_id?.trim()) {
+          return { ok: false, error: toDomainError('本地 Bot 接入方尚未启用，请联系管理员。') };
+        }
+        providerId = provider.provider_id;
+      }
+      const response = await getBotRegistrationToken(signal, providerId);
       if (response.code !== 20000) {
         return { ok: false, error: toDomainError(response.message || '获取接入 Token 失败，请稍后重试。') };
       }
-      const token = mapToken(response.data);
+      const token = mapToken(response.data, providerId);
       if (!token) return { ok: false, error: toDomainError('接入 Token 返回格式不正确，请稍后重试。') };
       return { ok: true, data: token };
     } catch (error) {

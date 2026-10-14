@@ -45,7 +45,10 @@ from agentclaw.community.adapters.http.openapi_v1.response_envelope import (
     unmapped_error_response,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_payloads import error_data
-from agentclaw.community.core.bot_management.errors import BotCreationRetainedError
+from agentclaw.community.core.bot_management.errors import (
+    BotCreationRetainedError,
+    BotLookupAmbiguousError,
+)
 from agentclaw.community.api.bot_startup_script_service import (
     MAX_SCRIPT_BYTES,
     StartupScriptNotEncodableError,
@@ -411,6 +414,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     InvalidBotLogQueryError: (400, "Invalid log query"),
     SessionNotFoundError: (404, "Not found"),
     BotNotFoundError: (404, "Not found"),
+    BotLookupAmbiguousError: (409, "Bot ID is ambiguous; provide entity_id"),
     ChannelNotFoundError: (404, "Not found"),
     ChannelSyncError: (502, "Channel synchronization failed"),
     ChannelModeViolationError: (422, "Channel mode violation"),
@@ -704,11 +708,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     EngineUpstreamError: (502, "Engine service error"),
     # Base of the Engine* errors above — LAST of its group.
     EngineRuntimeError: (502, "Engine service error"),
-    # Cron relay category (routines) — a backstop for engine adapter failures
-    # that escape the handler. The delete/other handlers already wrap the explicit
-    # error_code-bearing CronRelayError into HTTPException themselves; these
-    # entries catch anything the handler does not, so it does not fall through to
-    # the app-level 500 with a vague message. Subclass listed before its base.
+    # Cron upstream fallback; mapped_error_response preserves the relay's
+    # explicit business statuses. The timeout subclass keeps its own mapping.
     CronApiTimeoutError: (504, "Cron relay timed out"),
     CronRelayError: (502, "Cron relay service error"),
     # Transport errors that reach a handler without the relay translating them
@@ -895,6 +896,10 @@ def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | No
             str(exc), (409000, "SkillSet state conflicts with this operation")
         )
         return error_response_for(409, message, request, code=code)
+    if isinstance(exc, CronRelayError) and exc.error_code in (400, 403, 409):
+        # These are domain rejections (including a non-ACTIVE device), not
+        # engine outages. Use the fixed HTTP phrase, never internal error text.
+        return unmapped_error_response(exc.error_code, request)
     for error_type, (http_status, message) in ENVELOPE_ERRORS.items():
         if isinstance(exc, error_type):
             return error_response_for(

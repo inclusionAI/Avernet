@@ -18,6 +18,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function parseAisArtifactContract(value: unknown): AisArtifactContract | null {
+  // A business task may own multiple stages inside one fixed AIS execution.
+  if (isRecord(value) && isRecord(value.aisExecution)) value = value.aisExecution;
   if (!isRecord(value) || !isRecord(value.aisBase) || typeof value.stepId !== "string"
     || !isRecord(value.artifacts)) return null;
   const artifacts: AisArtifactContract["artifacts"] = {};
@@ -87,4 +89,12 @@ export function validateAisOutput(
       || typeof raw.sha256 !== "string" || !/^[0-9a-f]{64}$/u.test(raw.sha256)
       || raw.contentType !== spec.contentType) throw new Error(`AIS ${name} 产物元数据无效`);
   }
+}
+
+/** A fixed execution Step retains its own contract after the business advances. */
+export function aisContractForStep(config: unknown, ext: unknown, stepId: string): AisArtifactContract | null {
+  const fixed = parseAisArtifactContract(ext);
+  if (fixed?.stepId === stepId) return fixed;
+  const current = parseAisArtifactContract(config);
+  return current?.stepId === stepId ? current : null;
 }

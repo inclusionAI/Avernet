@@ -1,7 +1,7 @@
 import type { BotConfigGateway } from '@/services/lab';
 import { BROWSE_NOTE_MAX_LENGTH, BotConfigService } from '@/services/lab';
 
-// Unified 面 §3：触发模式由后端固定 openclaw（B 方案），前端不再发送 mode；input 仅 {botId, ownerUserId, note}。
+// OpenAPI task 域：当前后端固定 openclaw，前端不再发送 mode；input 仅 {botId, ownerUserId, note}。
 
 function makeGateway(): jest.Mocked<BotConfigGateway> {
   return {

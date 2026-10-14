@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 
 from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.bot_config_manifest.apply.materialisers.skills import (
@@ -58,7 +59,7 @@ def _digest_of(body: bytes) -> str:
 
 
 class FakeSkillRepository:
-    """The four ``SkillRepository`` calls the port makes, over a dict."""
+    """The ``SkillRepository`` calls the port makes, over a dict."""
 
     def __init__(self) -> None:
         self.rows: dict[int, dict[str, Any]] = {}
@@ -76,6 +77,10 @@ class FakeSkillRepository:
             and r["name"] == name
             and str(r["git_path"]).startswith("local://")
         ]
+
+    def get_by_id(self, skill_id: str) -> dict | None:
+        row = self.rows.get(int(skill_id))
+        return dict(row) if row is not None else None
 
     def create(self, skill_data: dict) -> dict:
         self._next += 1
@@ -148,6 +153,7 @@ def _rig(packages: dict[str, bytes]):
         store,
         validator=real_validator(),
         skill_repository=skills,
+        security_hook=Mock(),
     )
     objects = seeded_object_store(packages)
     pipeline = DeclaredSourceResolver(FakeManifestContent(), FakeObjectCredentials(), objects)
@@ -253,7 +259,8 @@ def test_a_changed_package_is_replaced_in_place() -> None:
 def test_a_stale_member_of_a_replaced_package_is_dropped_from_the_store() -> None:
     _, store, oss, skills, _, _ = _rig({})
     port = PlatformSkillPackageUpload(
-        store, validator=real_validator(), skill_repository=skills
+        store, validator=real_validator(), skill_repository=skills,
+        security_hook=Mock(),
     )
     with_extra = build_skill_zip("quality-check", extra=[("old/gone.txt", b"x")])
     _run(port.upload_local_skill(bot_id="b_1", owner_id="u_owner", actor_id="u_actor", package=with_extra))
@@ -286,7 +293,8 @@ def test_removal_checks_references_before_deleting_store_objects() -> None:
 
     _, store, _oss, skills, _, _ = _rig({})
     port = PlatformSkillPackageUpload(
-        store, validator=real_validator(), skill_repository=skills
+        store, validator=real_validator(), skill_repository=skills,
+        security_hook=Mock(),
     )
     uploaded = _run(
         port.upload_local_skill(
@@ -313,13 +321,40 @@ def test_removal_checks_references_before_deleting_store_objects() -> None:
     assert int(skill_id) in skills.rows
 
 
+def test_platform_delete_records_offline_sync_after_asset_delete() -> None:
+    _, store, _oss, skills, _, _ = _rig({})
+    hook = Mock()
+    port = PlatformSkillPackageUpload(
+        store, validator=real_validator(), skill_repository=skills,
+        security_hook=hook,
+    )
+    uploaded = _run(port.upload_local_skill(
+        bot_id="b_1", owner_id="u_owner", actor_id="u_actor", package=QZ,
+    ))
+    skill_id = str(uploaded["skill"]["id"])
+    skills.rows[int(skill_id)]["skill_uuid"] = "security-uuid-101"
+    hook.record_deletion.side_effect = RuntimeError("observer unavailable")
+
+    _run(port.delete_local_skill(
+        skill_id=skill_id, name="quality-check", bot_id="b_1",
+        owner_id="u_owner", actor_id="u_actor",
+    ))
+
+    assert int(skill_id) not in skills.rows
+    hook.record_deletion.assert_called_once_with(
+        bot_id="b_1", owner_id="u_owner", actor_id="u_actor",
+        skill_id=int(skill_id), incarnation_id="security-uuid-101",
+    )
+
+
 # ── the port's own answers ─────────────────────────────────────────────────
 
 
 def test_manifest_upload_port_has_no_installed_digest_probe() -> None:
     _, store, oss, skills, _, _ = _rig({})
     port = PlatformSkillPackageUpload(
-        store, validator=real_validator(), skill_repository=skills
+        store, validator=real_validator(), skill_repository=skills,
+        security_hook=Mock(),
     )
 
     assert not hasattr(port, "installed_package_digest")
@@ -332,7 +367,8 @@ def test_a_same_name_row_owned_by_someone_else_is_never_replaced() -> None:
     # A collaborator's row, and a legacy row with no owner at all.
     skills.create({"name": "quality-check", "git_path": "local://skills-local/quality-check", "user_id": "u_other", "bolt_id": "b_1"})
     port = PlatformSkillPackageUpload(
-        store, validator=real_validator(), skill_repository=skills
+        store, validator=real_validator(), skill_repository=skills,
+        security_hook=Mock(),
     )
     with pytest.raises(ManagedSkillOwnerConflict):
         _run(port.upload_local_skill(bot_id="b_1", owner_id="u_owner", actor_id="u_actor", package=QZ))

@@ -173,14 +173,21 @@ jobs:
         #   SIGTERM bcs                 -> flush profraw
         #   singlebox stop bcs_bots     -> tear down
         #   cargo llvm-cov report + endpoint coverage report
-        #     -> aggregate + enforce line >=40%, method >=36%, HTTP endpoints=100%,
+        #     -> aggregate + enforce line >=41%, method >=36%, HTTP endpoints=100%,
         #        and bcs-cli leaf commands=100%
         # --force-rebuild (mirroring pre_push): always rebuild the instrumented
         # binary from the pushed source instead of reusing a cached one, so the
         # measured coverage is correct. Exits non-zero on ANY e2e failure OR
-        # e2e line-coverage <40%, method coverage <36%, HTTP endpoint coverage
+        # e2e line-coverage <41%, method coverage <36%, HTTP endpoint coverage
         # below 100%, or CLI command coverage below 100%.
-        run: bash apps/bcs/scripts/e2e_coverage.sh --bcs-line-min 40 --bcs-method-min 36 --force-rebuild
+        # --changed-base-ref measures E2E changed-line coverage and
+        # --changed-line-min 50 gates it (> 50% once a change has >= 20
+        # instrumentable lines in the e2e scope). PRs diff against the merge
+        # commit's base parent (same as the unit-test gate) so commits that
+        # land on the base branch mid-run are not attributed to the PR.
+        env:
+          E2E_CHANGED_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
+        run: bash apps/bcs/scripts/e2e_coverage.sh --bcs-line-min 41 --bcs-method-min 36 --force-rebuild --changed-base-ref "$E2E_CHANGED_BASE_REF" --changed-line-min 50
 
       - name: Stop stack (best-effort cleanup)
         if: always() && steps.changes.outputs.skip-bcs != 'true'
@@ -201,6 +208,7 @@ jobs:
             apps/bcs/target/cov-e2e/cobertura.xml
             apps/bcs/target/cov-e2e/coverage.txt
             apps/bcs/target/cov-e2e/summary.json
+            apps/bcs/target/cov-e2e/changed_line_coverage.json
             apps/bcs/target/cov-e2e/endpoint_coverage.txt
             apps/bcs/target/cov-e2e/endpoint_coverage.xml
             apps/bcs/target/cov-e2e/cli_command_coverage.txt

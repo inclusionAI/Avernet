@@ -1,0 +1,19 @@
+# Only the public desktop bridge is distributed; other Avernet binaries are excluded.
+[workspace]
+members = ["cargo:apps/bcs"]
+
+[dist]
+cargo-dist-version = "0.33.0"
+packages = ["bcs-bridge"]
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+installers = ["shell"]
+install-path = "~/.local/bin"
+install-updater = false
+checksum = "sha256"
+unix-archive = ".tar.gz"
+source-tarball = false
+precise-builds = true
+tag-namespace = "bcs-bridge"
+# Monorepo release gates and channel publication are owned by our workflow.
+ci = []
+hosting = ["github"]

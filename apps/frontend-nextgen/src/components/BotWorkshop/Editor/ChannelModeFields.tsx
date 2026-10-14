@@ -38,7 +38,7 @@ export function PluginChannelFields({
         私聊策略
         <Select
           value={form.dmPolicy}
-          onValueChange={(dmPolicy: 'open' | 'disabled') => onChange({ ...form, dmPolicy })}
+          onValueChange={(value) => onChange({ ...form, dmPolicy: value as BotChannelInput['dmPolicy'] })}
         >
           <SelectTrigger>
             <SelectValue />
@@ -102,9 +102,7 @@ export function BcnChannelFields({
         群聊会话模式
         <Select
           value={form.groupChatScope}
-          onValueChange={(groupChatScope: 'per_sender' | 'conversation_shared') =>
-            onChange({ ...form, groupChatScope })
-          }
+          onValueChange={(value) => onChange({ ...form, groupChatScope: value as BotChannelInput['groupChatScope'] })}
         >
           <SelectTrigger>
             <SelectValue />
@@ -119,9 +117,7 @@ export function BcnChannelFields({
         主动消息可见范围
         <Select
           value={form.outboundVisibility}
-          onValueChange={(outboundVisibility: 'full_transcript' | 'lead_only') =>
-            onChange({ ...form, outboundVisibility })
-          }
+          onValueChange={(value) => onChange({ ...form, outboundVisibility: value as BotChannelInput['outboundVisibility'] })}
         >
           <SelectTrigger>
             <SelectValue />

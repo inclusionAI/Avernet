@@ -18,9 +18,10 @@ import RepairItemDetail from './repair-batch/RepairItemDetail'
 import IssueRepairSuggestions from './repair-batch/IssueRepairSuggestions'
 import IssueRepairPreview, { IssueRepairPreviewLoading } from './repair-batch/IssueRepairPreview'
 import RepairSelectionBar from './repair-batch/RepairSelectionBar'
-import { selectionConflicts } from './repair-batch/repair-selection'
 import DetailDrawer from './DetailDrawer'
 import RepairTaskDialog from './repair-batch/RepairTaskDialog'
+import { repairActionFailure } from '../../api/repair-action-error'
+import RepairSelectionWorkspace from './repair-batch/RepairSelectionWorkspace'
 import { exclusion, itemTitle, phases, primary, RepairDialog } from './repair-batch/repair-view'
 import Pagination from '../Pagination'
 import ApplySuggestionModal from './ApplySuggestionModal'
@@ -125,6 +126,7 @@ function DiagnosisPanel({
   const [instructions, setInstructions] = useState('')
   const [repairBusy, setRepairBusy] = useState(false)
   const [repairActionError, setRepairActionError] = useState('')
+  const [draftNeedsCheck, setDraftNeedsCheck] = useState(false)
   const [repairNotice, setRepairNotice] = useState('')
   const [selectedTaskId, setSelectedTaskId] = useState(initialRepairView.selectedTaskId)
   const [disposition, setDisposition] = useState<{ item: RepairInboxItem; action: 'no_action' | 'restore' } | null>(null)
@@ -194,7 +196,6 @@ function DiagnosisPanel({
         setSelectionNotice('默认不选择建议。请明确勾选本次修复范围；翻页不会自动增选。')
       } else if (changed) {
         setSelectedRepairIds([])
-        setDraftOpen(false)
         detailEpoch.current += 1
         detailRequests.current.clear()
         setRepairDetails({})
@@ -259,14 +260,14 @@ function DiagnosisPanel({
   const activeRepairTask = repairData?.tasks.find(task => ['drafting', 'review', 'blocked', 'publishing', 'failed'].includes(task.phase))
   const selectedItems = selectedRepairIds.flatMap(id => selectionItems[id] ? [selectionItems[id]] : [])
   const selectedIssueCount = new Set(selectedItems.map(item => item.context?.signature ?? item.groupKey)).size
-  const generationReason = repairError ? '修复数据读取失败，请重试后再生成。'
+  const generationReason = draftNeedsCheck ? '提交结果尚未确认，请先核对任务状态。'
+    : repairError ? '修复数据读取失败，请重试后再生成。'
     : repairLoading || !repairData ? '正在读取修复权限与任务状态…'
     : !canEdit || !repairData.canEdit ? '你只有查看权限，不能生成修复草稿。'
-    : activeRepairTask ? '已有修复任务，请先审阅、反馈或取消现有任务。'
+    : activeRepairTask ? '已有修复任务，请继续审阅；生成失败可在任务内重试，无需取消。'
     : !repairData.capabilities.generation ? '生成服务尚未接入，暂不能生成草稿；仍可查看和选择建议。'
     : repairBusy ? '正在提交，请稍候。'
     : !selectedRepairIds.length ? '在问题下勾选要采用的建议，可跨问题、跨页多选。' : ''
-  const conflicts = selectionConflicts(selectedItems)
   const selectedGroup = useSelectedIssueGroup(workflowId, selectedSignature, data?.groups.find(group => group.signature === selectedSignature))
   const externalCluster = selectedGroup.group ? aggregateDiagnoses(groupDiagnoses(selectedGroup.group))[0] : undefined
   if (externalCluster) externalCluster.aggregation = selectedGroup.group
@@ -303,6 +304,7 @@ function DiagnosisPanel({
     setDraftOpen(false)
     setDisposition(null)
     setRepairActionError('')
+    setDraftNeedsCheck(false)
     setRepairPage(1)
     setIncludeHistorical(next)
   }
@@ -334,7 +336,7 @@ function DiagnosisPanel({
     }
   }
   const submitDraft = async () => {
-    if (!repairData || !selectedRepairIds.length || repairBusy || conflicts.length || activeRepairTask
+    if (!repairData || !selectedRepairIds.length || repairBusy || activeRepairTask || draftNeedsCheck
       || !canEdit || !repairData.canEdit || !repairData.capabilities.generation || repairLoading || repairError) return
     const input = { workflowId, itemIds: selectedRepairIds, inputDigest: repairData.inputDigest,
       instructions, includeHistorical: repairData.includeHistorical }
@@ -350,8 +352,31 @@ function DiagnosisPanel({
       setDraftOpen(false); setSelectedTaskId(result.taskId); setRepairNotice(`已创建 ${result.taskId}，AIS 将生成可审阅 Pack 草稿，不会自动部署。`)
       resetRequestId(); setRepairRefresh(value => value + 1)
     } catch (error) {
-      setRepairActionError(`生成请求状态未确认，请刷新任务记录后再决定是否重试：${error instanceof Error ? error.message : String(error)}`)
+      const failure = repairActionFailure(error)
+      if (failure.action === 'refresh-sources') {
+        setSelectedRepairIds([]); setSelectionItems({}); closeDetail(); resetRequestId()
+        setRepairActionError('建议来源已变化，原选择已清空；重新读取后请确认本次范围。')
+        setRepairRefresh(value => value + 1)
+      } else {
+        setRepairActionError(failure.message)
+        if (failure.action === 'refresh-task') setDraftNeedsCheck(true)
+      }
     } finally { setRepairBusy(false) }
+  }
+  const recoverDraft = async () => {
+    if (repairBusy) return
+    setRepairBusy(true); setRepairActionError('')
+    try {
+      const result = await repairBatches.candidates(workflowId, { state: 'all', page: 1, pageSize: 1, includeHistorical })
+      if (result.workflowId !== workflowId) throw new Error('Workflow identity mismatch')
+      const task = result.tasks.find(task => ['drafting', 'review', 'blocked', 'publishing', 'failed'].includes(task.phase))
+      if (task) {
+        setSelectedTaskId(task.taskId); setDraftOpen(false)
+        setRepairNotice('已找到现有修复任务，进入审核并继续跟踪进度。')
+      } else setRepairActionError('任务状态已核对，可以再次提交当前范围；相同内容沿用原请求编号。')
+      setDraftNeedsCheck(false); setRepairRefresh(value => value + 1)
+    } catch (error) { setRepairActionError(repairReadError(error)) }
+    finally { setRepairBusy(false) }
   }
   const submitDisposition = async () => {
     if (!repairData || !disposition || !dispositionReason.trim() || repairBusy) return
@@ -379,7 +404,7 @@ function DiagnosisPanel({
 
   const acceptRepairPage = (result: RepairCandidatesResponse) => {
         if (initializedDigest.current && initializedDigest.current !== result.inputDigest) {
-          setSelectedRepairIds([]); setDraftOpen(false)
+          setSelectedRepairIds([])
           initializedDigest.current = result.inputDigest
           detailEpoch.current += 1; detailRequests.current.clear()
           setSelectionItems({}); setRepairDetails({}); setRepairDetailLoading({}); setRepairDetailErrors({})
@@ -420,6 +445,31 @@ function DiagnosisPanel({
       renderItem={renderRepairItem} />
     : <p className="text-sm text-slate-600">请选择问题查看修复建议。</p>
 
+  const dispositionDialog = disposition && <RepairDialog title={disposition.action === 'restore' ? '恢复待处理' : '暂不处理'} busy={repairBusy} onClose={() => setDisposition(null)}>
+        <p className="text-xs leading-5 text-muted-foreground">只处置当前建议内容版本，原始问题、证据和历史任务都会保留。</p>
+        <label className="mt-4 block text-xs font-medium text-foreground">原因
+          <textarea aria-label="处置原因" rows={4} maxLength={2000} value={dispositionReason} disabled={repairBusy}
+            onChange={event => setDispositionReason(event.target.value)} className="mt-2 w-full rounded-lg border border-input bg-background p-3 font-normal leading-5 text-foreground" />
+        </label>
+        {repairActionError && <p role="alert" className="mt-3 text-xs text-destructive">{repairActionError}</p>}
+        <button type="button" className={`${primary} mt-4`} disabled={repairBusy || !dispositionReason.trim()} onClick={() => void submitDisposition()}>
+          {repairBusy ? '提交中…' : '确认'}
+        </button>
+      </RepairDialog>
+
+  if (selectedTaskId) return <RepairTaskDialog workflowId={workflowId} taskId={selectedTaskId} includeHistorical={includeHistorical}
+    canEdit={canEdit && repairData?.canEdit === true} onClose={() => setSelectedTaskId('')} onChanged={() => setRepairRefresh(value => value + 1)} />
+  if (draftOpen) return <>
+    <RepairSelectionWorkspace workflowId={workflowId} includeHistorical={includeHistorical} refreshToken={repairRefresh} selected={selectedRepairIds}
+      selectedItems={selectedItems} instructions={instructions} busy={repairBusy} reason={generationReason} error={repairActionError}
+      onRecover={draftNeedsCheck ? () => void recoverDraft() : undefined}
+      onInstructions={setInstructions} onToggle={toggleRepairItem} onResult={acceptRepairPage} onDetail={item => {
+        setSelectionItems(current => ({ ...current, [item.itemId]: item })); setSelectedRepairItemId(item.itemId)
+      }} onGenerate={() => void submitDraft()} onBack={() => { if (!repairBusy) { setDraftOpen(false); closeDetail() } }} />
+    {selectedRepairItem && <RepairDialog title="问题、建议与证据" onClose={() => setSelectedRepairItemId(null)}>{renderRepairItem(selectedRepairItem)}</RepairDialog>}
+    {dispositionDialog}
+  </>
+
   return (
     <div className="space-y-3 pb-36">
       <div>
@@ -438,6 +488,7 @@ function DiagnosisPanel({
       {repairOpen && repairError && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{repairError}<button type="button" className="ml-2 underline" onClick={() => setRepairRefresh(value => value + 1)}>重试</button></p>}
       {suggestionsLoading && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">历史建议仍在加载，不影响查看问题与修复任务。</p>}
       {repairNotice && <p role="status" className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">{repairNotice}</p>}
+      {draftNeedsCheck && <p role="alert" className="text-xs text-destructive">{repairActionError || '提交结果尚未确认。'} <button type="button" disabled={repairBusy} className="underline" onClick={() => void recoverDraft()}>核对任务状态</button></p>}
       {selectionNotice && !selectionNotice.startsWith('默认不选择') && <p role="status" className="text-xs text-amber-800">{selectionNotice}</p>}
 
 
@@ -622,48 +673,8 @@ function DiagnosisPanel({
         </li>)}</ul>
       </RepairDialog>}
 
-      {draftOpen && repairData && <RepairDialog title="生成修复草稿" busy={repairBusy} onClose={() => setDraftOpen(false)}>
-        <p className="text-xs leading-5 text-slate-500">已选择 {selectedRepairIds.length} 个待处理项。只生成可审阅候选，不会应用或部署。</p>
-        <ul aria-label="本次修复范围" className="mt-3 divide-y divide-slate-100">
-          {selectedItems.map(item => <li key={item.itemId} className="flex items-start justify-between gap-3 py-3 text-sm">
-            <span>{itemTitle(item)}</span>
-            <button type="button" aria-label={`移除 ${itemTitle(item)}`} disabled={repairBusy} className="shrink-0 text-xs text-blue-700"
-              onClick={() => setSelectedRepairIds(ids => ids.filter(id => id !== item.itemId))}>移除</button>
-          </li>)}
-        </ul>
-        {conflicts.length > 0 && <div role="alert" className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-          <p>所选建议修改了同一配置，且方案不同。请移除不采用的方案后生成，系统不会替你选择。</p>
-          <ul className="mt-2 space-y-2">{conflicts.map(conflict => <li key={conflict.itemIds.join(':')}>
-            {conflict.nodeId} · {conflict.path}：{conflict.itemIds.map(id => itemTitle(selectionItems[id])).join(' / ')}
-          </li>)}</ul>
-        </div>}
-        <label className="mt-4 block text-xs font-medium text-slate-700">补充修复要求（选填）
-          <textarea aria-label="本次修复要求" placeholder="例如：保持现有重试策略不变。没有补充要求可留空。" rows={3} maxLength={20_000} value={instructions} disabled={repairBusy}
-            onChange={event => setInstructions(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-200 p-3 font-normal leading-5" />
-        </label>
-        {repairActionError && <p role="alert" className="mt-3 text-xs text-red-600">{repairActionError}</p>}
-        {generationReason && <p role="status" className="mt-3 text-xs text-amber-800">{generationReason}</p>}
-        <button type="button" className={`${primary} mt-4`} disabled={repairBusy || !selectedRepairIds.length || conflicts.length > 0 || !!activeRepairTask
-          || !canEdit || !repairData.canEdit || !repairData.capabilities.generation || repairLoading || !!repairError} onClick={() => void submitDraft()}>
-          {repairBusy ? '提交中…' : '确认生成草稿'}
-        </button>
-      </RepairDialog>}
+      {dispositionDialog}
 
-      {disposition && <RepairDialog title={disposition.action === 'restore' ? '恢复待处理' : '暂不处理'} busy={repairBusy} onClose={() => setDisposition(null)}>
-        <p className="text-xs leading-5 text-slate-500">只处置当前建议内容版本，原始问题、证据和历史任务都会保留。</p>
-        <label className="mt-4 block text-xs font-medium text-slate-700">原因
-          <textarea aria-label="处置原因" rows={4} maxLength={2000} value={dispositionReason} disabled={repairBusy}
-            onChange={event => setDispositionReason(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-200 p-3 font-normal leading-5" />
-        </label>
-        {repairActionError && <p role="alert" className="mt-3 text-xs text-red-600">{repairActionError}</p>}
-        <button type="button" className={`${primary} mt-4`} disabled={repairBusy || !dispositionReason.trim()} onClick={() => void submitDisposition()}>
-          {repairBusy ? '提交中…' : '确认'}
-        </button>
-      </RepairDialog>}
-
-      {selectedTaskId && repairData && <RepairTaskDialog workflowId={workflowId} taskId={selectedTaskId}
-        includeHistorical={repairData.includeHistorical} canEdit={canEdit && repairData.canEdit} onClose={() => setSelectedTaskId('')}
-        onChanged={() => setRepairRefresh(value => value + 1)} />}
     </div>
   )
 }

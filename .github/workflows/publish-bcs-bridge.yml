@@ -1,0 +1,194 @@
+name: BCS bridge distribution
+
+on:
+  push:
+    tags: ['bcs-bridge-v*']
+  pull_request:
+    paths:
+      - 'dist-workspace.toml'
+      - 'apps/bcs/**'
+      - 'devops/release/**'
+      - '.github/workflows/publish-bcs-bridge.yml'
+      - 'LICENSE'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bcs-bridge-dist-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.metadata.outputs.tag }}
+      prerelease: ${{ steps.metadata.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@1.93.0
+      - name: Validate metadata and release tag
+        id: metadata
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          tag=""
+          if [[ "$EVENT_NAME" == push ]]; then
+            tag="$REF_NAME"
+            python3 devops/release/bcs_bridge_release.py source --tag "$tag"
+          fi
+          python3 devops/release/bcs_bridge_release.py metadata --tag "$tag" > release-metadata.json
+          echo "tag=$(jq -r .tag release-metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$(jq -r .prerelease release-metadata.json)" >> "$GITHUB_OUTPUT"
+      - name: Test release gates
+        run: python3 -m unittest discover -s devops/release/tests -v
+      - name: Install pinned dist
+        env:
+          DIST_TOOL_DIR: ${{ runner.temp }}/dist-tool
+        run: bash devops/release/install_dist.sh
+      - name: Validate bridge-only plan
+        env:
+          RELEASE_TAG: ${{ steps.metadata.outputs.tag }}
+        run: |
+          dist plan --tag "$RELEASE_TAG" --output-format json > plan-dist-manifest.json
+          python3 devops/release/bcs_bridge_release.py plan --tag "$RELEASE_TAG" --manifest plan-dist-manifest.json
+          git diff --exit-code -- apps/bcs/Cargo.lock
+
+  build:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-15
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@1.93.0
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/bcs
+          key: bridge-dist-${{ matrix.target }}
+      - name: Install pinned dist
+        env:
+          DIST_TOOL_DIR: ${{ runner.temp }}/dist-tool
+        run: bash devops/release/install_dist.sh
+      - name: Test bridge crates
+        working-directory: apps/bcs
+        run: cargo test --locked -p bcs-bridge-cli -p bcs-bridge-app -p bcs-bridge-core -p bcs-bridge-qwenwork
+      - name: Build and check native archive
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          dist build --artifacts local --target "$TARGET" --tag "$RELEASE_TAG" --output-format json > local-dist-manifest.json
+          git diff --exit-code -- apps/bcs/Cargo.lock
+          python3 devops/release/bcs_bridge_release.py native --tag "$RELEASE_TAG" --targets "$TARGET"
+          cp local-dist-manifest.json "target/distrib/$TARGET-dist-manifest.json"
+          dist build --artifacts global --tag "$RELEASE_TAG" --output-format json > global-dist-manifest.json
+          python3 devops/release/bcs_bridge_release.py prepare --tag "$RELEASE_TAG" --targets "$TARGET"
+          python3 devops/release/smoke_bcs_bridge.py --directory target/distrib --lifecycle
+      - name: Upload validated platform archive and build metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-${{ matrix.target }}
+          if-no-files-found: error
+          path: |
+            target/distrib/bcs-bridge-${{ matrix.target }}.tar.gz
+            target/distrib/bcs-bridge-${{ matrix.target }}.tar.gz.sha256
+            target/distrib/${{ matrix.target }}-dist-manifest.json
+
+  assemble:
+    needs: [plan, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@1.93.0
+      - name: Install pinned dist
+        env:
+          DIST_TOOL_DIR: ${{ runner.temp }}/dist-tool
+        run: bash devops/release/install_dist.sh
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bridge-*
+          path: target/distrib
+          merge-multiple: true
+      - name: Build installer with both platform checksums
+        run: |
+          dist build --artifacts global --tag "$RELEASE_TAG" --output-format json > global-dist-manifest.json
+          python3 devops/release/bcs_bridge_release.py prepare --tag "$RELEASE_TAG"
+          git diff --exit-code -- apps/bcs/Cargo.lock
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bcs-bridge-release
+          if-no-files-found: error
+          path: |
+            target/distrib/bcs-bridge-*.tar.gz
+            target/distrib/bcs-bridge-*.tar.gz.sha256
+            target/distrib/bcs-bridge-installer.sh
+            target/distrib/sha256.sum
+
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/bcs-bridge-v')
+    needs: [plan, assemble]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+      PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: bcs-bridge-release
+          path: release
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Publish selected channel only after all gates pass
+        run: |
+          python3 devops/release/bcs_bridge_release.py source --tag "$RELEASE_TAG"
+          printf '%s\n' 'BCS bridge macOS distribution. Includes only bcs-bridge; Rust is not required.' '' 'Download the installer from this version to install or roll back. See QUICKSTART.md in the archives for QwenWork setup and current AskUserQuestion/subagent limitations.' > release-notes.md
+          if gh release view "$RELEASE_TAG" --json isDraft > existing-release.json 2>/dev/null; then
+            [[ "$(jq -r .isDraft existing-release.json)" == true ]] || { echo 'Refusing to overwrite a published release'; exit 1; }
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft --prerelease="$PRERELEASE" --latest=false --title "BCS bridge ${RELEASE_TAG#bcs-bridge-v}" --notes-file release-notes.md
+          fi
+          gh release upload "$RELEASE_TAG" release/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease="$PRERELEASE" --latest=false

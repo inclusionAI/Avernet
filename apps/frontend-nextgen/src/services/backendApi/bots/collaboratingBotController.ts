@@ -9,9 +9,13 @@ export interface CollaboratingBotDto {
   entity_id: string;
   owner_id: string;
   engine: string;
+  template_name?: string;
   cluster_name: string;
   bot_type: string;
   status: string;
+  template_type?: string | null;
+  template_config?: Record<string, unknown> | null;
+  space?: { space_id: string; name: string; kind: string } | null;
   collaboration: { id: number; role: 'admin' | 'member'; joined_at: string };
 }
 

@@ -11,7 +11,7 @@
 //   单聊空态插 '/file' 唤起命令面板为同一机制（mentionConfig 仅 user 视角装配，
 //   未装配即不渲染）；Bot 视角无输入框，不渲染行动区，主文案也改述现状——
 //   「发送一条消息」对 Bot 是误导，Bot 发言由协作面板按发言模式控制。
-import { Avatar } from '@/components/ui';
+import { Avatar, Button } from '@/components/ui';
 import type { GroupView, SessionView } from '@/domain/collaboration';
 import { AtSign } from 'lucide-react';
 
@@ -86,10 +86,10 @@ export function GroupChatEmptyState({ group, session, viewerKind, canMention, on
       {showMentionOpener && onInsertDraft ? (
         <div className="mt-6 flex w-full max-w-sm flex-col gap-2">
           <p className="m-0 text-xs text-muted-foreground">试试这样开场</p>
-          <button
-            type="button"
+          <Button
+            variant="outline"
             onClick={() => onInsertDraft('@')}
-            className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 hover:border-primary/40 hover:bg-selected"
+            className="flex h-auto w-full items-center justify-start gap-3 rounded-xl border-border bg-background px-4 py-3 font-normal text-left hover:border-primary/40 hover:bg-selected"
           >
             <span
               className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
@@ -102,7 +102,7 @@ export function GroupChatEmptyState({ group, session, viewerKind, canMention, on
               <span className="text-xs text-muted-foreground">指定参与的成员，或用 ALL-Bots 点名全部 Bot</span>
             </span>
             <code className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">@</code>
-          </button>
+          </Button>
           <p className="m-0 mt-1 text-xs text-muted-foreground">
             也可以直接发送；工具栏「文件」可上传会话文件，图片支持粘贴
           </p>

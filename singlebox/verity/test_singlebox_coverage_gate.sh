@@ -250,7 +250,7 @@ test_default_mode_runs_real_singlebox() {
     fail "default coverage mode should run every manifest acceptance target"
   [ "$(grep -Fc -- '--standalone --with-bcs-coverage start all' "$log")" -eq 1 ] || \
     fail "all modules should share one singlebox startup"
-  grep -Fx -- "--skip-start --bcs-line-min 40 --bcs-method-min 36" "$bcs_log" >/dev/null || \
+  grep -Fx -- "--skip-start --bcs-line-min 41 --bcs-method-min 36" "$bcs_log" >/dev/null || \
     fail "default coverage mode should run BCS E2E against the shared stack"
   grep -F "run coverage combine" "$uv_log" >/dev/null || \
     fail "default coverage mode should combine coverage"

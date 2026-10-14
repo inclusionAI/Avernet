@@ -585,6 +585,7 @@ async fn start_state_machine_channel(harness: &TestHarness) -> TestResult {
 fn pending_human_node(node_id: &str) -> PendingHumanNodeView {
     PendingHumanNodeView {
         node_id: node_id.to_string(),
+        execution: None,
         display_name: node_id.to_string(),
         instruction: "Review the draft".to_string(),
         response_ref: format!("state_run_1:{node_id}"),
@@ -605,6 +606,7 @@ fn human_input_ready_event(
         session_id: format!("session-{event_id}"),
         run_id: format!("run-{event_id}"),
         node_id: "human_review".to_string(),
+        execution: None,
         display_name: "Human review".to_string(),
         instruction: "请审核上游结果".to_string(),
         assignee_actor_id: "human_u1".to_string(),

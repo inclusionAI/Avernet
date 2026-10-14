@@ -12,6 +12,15 @@ export interface WorkflowItem {
   desc?: string;
   tags?: string[];
 }
+export type CodeRepositoryTenant = 'ant' | 'xiaojin';
+
+export interface CodeRepositorySearchOptions {
+  /** AbortSignal，用于取消请求 */
+  signal?: AbortSignal;
+  /** 仓库租户：ant = 主站 AntCode，xiaojin = 消金代码平台；缺省按主站处理 */
+  tenant?: CodeRepositoryTenant;
+}
+
 export interface AntCodeProject {
   name: string;
   web_url: string;
@@ -44,13 +53,20 @@ export async function getWorkflows(): Promise<WorkflowItem[]> {
 }
 
 /** 旧版实际使用 AntCode webapi；TeamClaw 通过 backendRequest 保留同一协议，不引入旧仓库请求层。 */
-export async function searchAntCodeProjects(query: string, signal?: AbortSignal): Promise<AntCodeProject[]> {
+export async function searchAntCodeProjects(
+  query: string,
+  options?: CodeRepositorySearchOptions,
+): Promise<AntCodeProject[]> {
   const resources = getCapabilities().getAgentCodingInternalResources().value;
-  if (!resources.antCodeProjectsApiUrl || !resources.antCodeProjectBaseUrl) return [];
-  const response = await backendRequest<AntCodeResponse>(resources.antCodeProjectsApiUrl, {
+  const tenant: CodeRepositoryTenant = options?.tenant === 'xiaojin' ? 'xiaojin' : 'ant';
+  const projectsApiUrl = tenant === 'xiaojin' ? resources.xiaojinCodeProjectsApiUrl : resources.antCodeProjectsApiUrl;
+  const projectBaseUrl = tenant === 'xiaojin' ? resources.xiaojinCodeProjectBaseUrl : resources.antCodeProjectBaseUrl;
+  if (!projectsApiUrl || !projectBaseUrl) return [];
+
+  const response = await backendRequest<AntCodeResponse>(projectsApiUrl, {
     method: 'GET',
     params: { search: query, page: 1, per_page: 20 },
-    signal,
+    signal: options?.signal,
     injectUserId: false,
     operation: 'search-antcode-projects',
   });
@@ -58,7 +74,7 @@ export async function searchAntCodeProjects(query: string, signal?: AbortSignal)
     .filter((item) => item.path_with_namespace && item.name)
     .map((item) => ({
       name: item.name!,
-      web_url: `${resources.antCodeProjectBaseUrl}/${item.path_with_namespace}`,
+      web_url: `${projectBaseUrl}/${item.path_with_namespace}`,
       description: item.description ?? undefined,
       accessLevel: typeof item.access_level === 'number' ? item.access_level : Number(item.access_level),
     }));

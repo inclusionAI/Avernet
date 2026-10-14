@@ -1,0 +1,118 @@
+# 外层交付循环中嵌套稿件评审循环。创建群时将逻辑角色绑定到实际 Bot。
+# 创建与执行需服务端同时开启 Loop、嵌套 Loop，并配置 LLM Judge。
+name: 嵌套交付评审循环
+
+metadata:
+  description: 每次交付迭代内最多进行三轮稿件评审；内层通过或用尽次数后进入整体验收，验收未通过时再启动下一次外层交付迭代。
+
+participants:
+  author:
+    display_name: 方案作者
+    description: 根据用户需求、上一轮交付验收和稿件评审意见准备完整方案。
+    required: true
+  reviewer:
+    display_name: 内容评审
+    description: 在每次交付迭代内评审稿件，明确给出通过或返修结论。
+    required: true
+  owner:
+    display_name: 交付负责人
+    description: 综合稿件评审状态和交付目标进行整体验收，决定交付或再次迭代。
+    required: true
+
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 2
+    graph_mode: hierarchical
+    defaults:
+      node_timeout_ms: 120000
+      max_attempts: 2
+    nodes:
+      delivery_cycles:
+        kind: loop
+        display_name: 交付迭代
+        loop:
+          mode: fixed
+          max_iterations: 2
+          entry_node: prepare
+          result_node: acceptance
+          continue_outcomes: [retry_cycle]
+          continue_display_name: 开始下一次交付迭代
+          break_outcomes: [ready]
+          exhausted_outcome: delivery_exhausted
+          nodes:
+            prepare:
+              kind: bot_task
+              display_name: 准备本次交付方案
+              assignee: {type: bot_binding, binding: author}
+              instruction: |
+                围绕用户目标准备本次交付的完整方案，包含结论、依据、风险和下一步。
+                首次执行从用户需求开始；外层后续执行读取上一轮整体验收结果，逐项处理未通过原因。
+                始终返回可独立阅读的完整方案，并说明本次交付迭代解决了哪些问题。
+              transitions:
+                complete: {display_name: 进入稿件评审, targets: [review_rounds]}
+            review_rounds:
+              kind: loop
+              display_name: 稿件评审
+              loop:
+                mode: fixed
+                max_iterations: 3
+                entry_node: draft
+                result_node: editorial_review
+                continue_outcomes: [revise]
+                continue_display_name: 继续修改稿件
+                break_outcomes: [approved]
+                exhausted_outcome: review_exhausted
+                nodes:
+                  draft:
+                    kind: bot_task
+                    display_name: 编写或修改完整稿件
+                    assignee: {type: bot_binding, binding: author}
+                    instruction: |
+                      根据本次交付方案编写完整稿件。内层首轮使用上游方案；后续轮次读取本稿件评审循环的上一结果。
+                      逐项处理评审意见，保留事实依据、限制和风险，返回完整稿件而不是差异。
+                    transitions:
+                      complete: {display_name: 提交内容评审, targets: [editorial_review]}
+                  editorial_review:
+                    kind: bot_task
+                    display_name: 评审本轮稿件
+                    assignee: {type: bot_binding, binding: reviewer}
+                    instruction: |
+                      检查稿件是否完整回应需求、依据可靠、风险清楚且建议可执行。
+                      返回完整稿件、明确的通过或返修结论，以及按优先级排列的必改问题。
+                      达到标准即通过，不为凑满次数要求返修；不能只返回结论而省略完整稿件。
+                    judge:
+                      type: llm
+                      criteria:
+                        - 内容评审明确通过、保留完整稿件且没有未解决的必改问题时选择 approved。
+                        - 内容评审要求返修、仍有必改问题或没有明确通过结论时选择 revise。
+                      outcomes: [approved, revise]
+              transitions:
+                approved: {display_name: 稿件通过, targets: [acceptance]}
+                review_exhausted: {display_name: 带未决问题验收, targets: [acceptance]}
+            acceptance:
+              kind: bot_task
+              display_name: 整体验收本次交付
+              assignee: {type: bot_binding, binding: owner}
+              instruction: |
+                综合用户目标、完整稿件和内容评审状态进行整体验收。
+                返回完整交付内容、明确的可交付或需再次迭代结论，以及仍未解决的问题。
+                只有稿件已通过内容评审且交付目标全部满足时才能判定可交付；内层次数用尽不等于通过。
+              judge:
+                type: llm
+                criteria:
+                  - 负责人明确判定可交付、稿件已通过内容评审且没有阻断问题时选择 ready。
+                  - 负责人要求再次迭代、内容评审未通过或仍有阻断问题时选择 retry_cycle。
+                outcomes: [ready, retry_cycle]
+        transitions:
+          ready: {display_name: 交付验收通过, targets: [finalize]}
+          delivery_exhausted: {display_name: 达到交付迭代上限, targets: [finalize]}
+      finalize:
+        kind: bot_task
+        display_name: 汇总最终交付
+        assignee: {type: bot_binding, binding: author}
+        instruction: |
+          根据实际执行的最后一次整体验收输出完整最终结果，并保留验收状态。
+          验收通过时交付已确认的完整内容；达到外层次数上限时明确列出未解决问题和建议的后续动作。
+          不把内层或外层 exhausted 解释为评审通过，不虚构未执行的后续迭代。
+        final_output: true

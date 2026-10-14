@@ -357,6 +357,22 @@ class SQLiteWorkerProfileContentStore:
 
         return [self._row_to_content(row) for row in rows]
 
+    def get_active_by_workers(self, worker_ids: list[str]) -> list[WorkerProfileContent]:
+        """Restrict active Profile reads to the requested Worker IDs."""
+        if not worker_ids:
+            return []
+        cursor = self._conn.cursor()
+        try:
+            placeholders = ", ".join(["?"] * len(worker_ids))
+            cursor.execute(
+                "SELECT * FROM bcsfuse_worker_profile_contents "
+                f"WHERE is_active = 1 AND worker_id IN ({placeholders})",
+                tuple(worker_ids),
+            )
+            return [self._row_to_content(row) for row in cursor.fetchall()]
+        finally:
+            cursor.close()
+
     def close(self) -> None:
         """关闭数据库连接"""
         self._conn.close()

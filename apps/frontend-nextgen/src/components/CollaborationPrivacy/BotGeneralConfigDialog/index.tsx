@@ -44,6 +44,10 @@ function DialogLoadingState() {
 export function BotGeneralConfigDialog({ bot, onClose }: BotGeneralConfigDialogProps) {
   const privacy = useCollaborationPrivacy({ fixedBotId: bot.id });
   const targetBot = privacy.visibleBots[0];
+  // Coding Bot 按 AgentCoding 模板能力裁剪协作能力；未声明 BCN 时整个分组不渲染。
+  const isAgentCodingBot = bot.runtime.isAgentCodingBot;
+  const showCollaborationAbilitySettings = !isAgentCodingBot || bot.runtime.bcnEnabled === true;
+  const visibleAbilitySettings = isAgentCodingBot ? ['collaborationStatus' as const] : undefined;
   // 显示与复制均以协作域 Bot UUID 为准（含 :port 后缀，与协作权限页一致）；
   // 加载中/未命中时回退行数据 Bot ID（collab-permission-entry-migration 验收修正）。
   const displayId = targetBot?.id ?? bot.id;
@@ -137,12 +141,15 @@ export function BotGeneralConfigDialog({ bot, onClose }: BotGeneralConfigDialogP
               onEditFriendApproval={privacy.openFriendEditor}
               onViewFriendApprovalScope={privacy.openFriendScopeViewer}
             />
-            <BotAbilitySettings
-              bot={targetBot}
-              busyAction={privacy.busyAction}
-              onToggleDirect={privacy.toggleDirect}
-              grid
-            />
+            {showCollaborationAbilitySettings ? (
+              <BotAbilitySettings
+                bot={targetBot}
+                busyAction={privacy.busyAction}
+                onToggleDirect={privacy.toggleDirect}
+                grid
+                visibleSettings={visibleAbilitySettings}
+              />
+            ) : null}
           </div>
         )}
         <ConfirmDialog

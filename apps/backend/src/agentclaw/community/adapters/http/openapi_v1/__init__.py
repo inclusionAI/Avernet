@@ -177,6 +177,7 @@ from .authorized_apps import app_view_router as authorized_bots_router
 from .authorized_apps import router as authorized_apps_router
 from .authorized_apps import user_router as user_authorized_apps_router
 from .bots import router as bots_router
+from .bots.classification import router as classification_router
 from .collaboration_bots import public_router as collaboration_public_router
 from .collaborating_bots import router as collaborating_bots_router
 from .task import task_router
@@ -301,6 +302,7 @@ _MIXED_GROUPS = [
 # about which *response table* each gets; it does not change that they all
 # precede `bots`.
 _OPEN_SUBGROUPS = [
+    classification_router,
     # BBS Topics are tenant-wide content, not scoped to one addressed bot.
     bbs_read_router,
     # BBS Browse-Loop per-Bot reads + manual triggers: same /bots/{bot_id}/bbs
