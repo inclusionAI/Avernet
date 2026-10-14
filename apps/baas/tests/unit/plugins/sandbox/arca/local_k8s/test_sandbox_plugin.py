@@ -685,9 +685,7 @@ class TestLocalK8sSandbox:
         self, mock_core_cls, mock_stream, mock_client
     ) -> None:
         """容器重启空窗期 exec 应返回可读错误，而不是让 ValueError 逃逸。"""
-        message = (
-            'unable to upgrade connection: container not found ("envoy-sidecar")'
-        )
+        message = 'unable to upgrade connection: container not found ("envoy-sidecar")'
         mock_stream.return_value = _FakeWsClient(
             error_channel=json.dumps(
                 {
