@@ -131,3 +131,74 @@ it('团队他人来源显示开发中且原生禁用，鼠标/键盘不触发选
   fireEvent.click(screen.getByRole('button', { name: '我发起' }));
   expect(handlers.onOriginChange).toHaveBeenCalledWith('mine');
 });
+
+describe('好友 Bot 会话范围筛选(supportsOrigin=false)', () => {
+  it('只显示「会话」分组,不渲染「发起人」', () => {
+    const handlers = callbacks();
+    render(
+      <ConversationOriginFilter
+        botId="fb-1:327325"
+        origin="mine"
+        scope="all"
+        supportsOrigin={false}
+        onOriginChange={handlers.onOriginChange}
+        onScopeChange={handlers.onScopeChange}
+      />,
+    );
+    expect(screen.getByText('会话')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '全部' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '已收藏' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByText('发起人')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '我发起' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '他人发起' })).not.toBeInTheDocument();
+  });
+
+  it('选择即回写范围并关闭弹层,不触发归属变化', () => {
+    const handlers = callbacks();
+    render(
+      <ConversationOriginFilter
+        botId="fb-1:327325"
+        origin="mine"
+        scope="all"
+        supportsOrigin={false}
+        onOriginChange={handlers.onOriginChange}
+        onScopeChange={handlers.onScopeChange}
+      />,
+    );
+    const trigger = screen.getByRole('button', { name: '会话范围' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('button', { name: '已收藏' }));
+    expect(handlers.onScopeChange).toHaveBeenCalledWith('favorite');
+    expect(handlers.onOriginChange).not.toHaveBeenCalled();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('favorite 生效时触发按钮主色高亮并带激活圆点,回 all 恢复默认', () => {
+    const handlers = callbacks();
+    const { rerender } = render(
+      <ConversationOriginFilter
+        botId="fb-1:327325"
+        origin="mine"
+        scope="favorite"
+        supportsOrigin={false}
+        onOriginChange={handlers.onOriginChange}
+        onScopeChange={handlers.onScopeChange}
+      />,
+    );
+    const trigger = screen.getByRole('button', { name: '会话范围' });
+    expect(trigger).toHaveClass('text-primary');
+    expect(screen.getByText('已收藏')).toBeInTheDocument();
+    rerender(
+      <ConversationOriginFilter
+        botId="fb-1:327325"
+        origin="mine"
+        scope="all"
+        supportsOrigin={false}
+        onOriginChange={handlers.onOriginChange}
+        onScopeChange={handlers.onScopeChange}
+      />,
+    );
+    expect(trigger).not.toHaveClass('text-primary');
+  });
+});

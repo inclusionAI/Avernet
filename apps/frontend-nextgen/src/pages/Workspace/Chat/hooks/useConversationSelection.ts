@@ -7,6 +7,7 @@ import type { ConversationBotView, ConversationRouteState, ConversationUserView 
 import { isManagedConversationSection } from '@/domain/conversation/types';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import { useConversationStore, type ConversationState } from '@/stores/conversationStore';
+import { selectedSnapshotMatches } from '@/stores/conversationStoreState';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 export interface UseConversationSelectionResult {
@@ -76,7 +77,8 @@ export function useConversationSelection(options: {
     store.selectedSessionId,
   ]);
 
-  const mineSession = useMemo<BotChatSessionView | null>(() => {
+  // 生活跃解析:只查当前列表缓存,不含保留快照(认领/回退判据不得互相引用,避免渲染期写回循环)。
+  const liveMine = useMemo<BotChatSessionView | null>(() => {
     const botId = store.selectedBotId;
     const sessionId = store.selectedSessionId;
     if (!botId || !sessionId || store.selectedOrigin !== 'mine') return null;
@@ -100,10 +102,44 @@ export function useConversationSelection(options: {
     store.friendBotSessionsByBotId,
   ]);
 
+  const mineSession = useMemo<BotChatSessionView | null>(() => {
+    if (liveMine) return liveMine;
+    if (!store.selectedBotId || !store.selectedSessionId) return null;
+    // 列表因过滤条件重建(搜索加载/空/失败/未命中)而失去该会话时,保留快照仍
+    // 驱动已打开的主会话;身份与快照不符(已完成切换/清空等)不允许复活旧会话。
+    return selectedSnapshotMatches(store.selectedSessionSnapshot, {
+      botId: store.selectedBotId,
+      section: store.selectedSection,
+      origin: store.selectedOrigin,
+      scope: store.selectedScope,
+      friendUserId: store.selectedFriendUserId,
+      sessionId: store.selectedSessionId,
+    })
+      ? store.selectedSessionSnapshot.session
+      : null;
+  }, [
+    liveMine,
+    store.selectedBotId,
+    store.selectedSection,
+    store.selectedSessionId,
+    store.selectedOrigin,
+    store.selectedScope,
+    store.selectedFriendUserId,
+    store.selectedSessionSnapshot,
+  ]);
+
   const interactive = useMemo(() => {
     const bot = mineSession && selectedInDirectory ? botById.get(mineSession.botId) ?? null : null;
     return { bot, session: bot ? mineSession : null };
   }, [botById, mineSession, selectedInDirectory]);
+
+  const liveReadonly = useMemo(() => {
+    const botId = store.selectedBotId;
+    if (!botId || origin !== 'others') return null;
+    const group = store.sessionsByBotId[botId]?.friendGroups[store.selectedFriendUserId ?? ''];
+    const session = group?.sessions.items.find((item) => item.sessionId === store.selectedSessionId) ?? null;
+    return session && group ? { friend: group.friend, session } : null;
+  }, [origin, store.selectedBotId, store.selectedFriendUserId, store.selectedSessionId, store.sessionsByBotId]);
 
   const readonly = useMemo(() => {
     const botId = store.selectedBotId;
@@ -111,21 +147,76 @@ export function useConversationSelection(options: {
     if (!botId || origin !== 'others') {
       return { bot: null, friend: null, session: null };
     }
-    const group = store.sessionsByBotId[botId]?.friendGroups[friendUserId ?? ''];
-    const session = group?.sessions.items.find((item) => item.sessionId === store.selectedSessionId) ?? null;
+    const snapshot = store.selectedSessionSnapshot;
+    const snapshotActive = selectedSnapshotMatches(snapshot, {
+      botId,
+      section: store.selectedSection,
+      origin: store.selectedOrigin,
+      scope: store.selectedScope,
+      friendUserId,
+      sessionId: store.selectedSessionId,
+    });
+    // 过滤变化删除 others 分组缓存时,快照同时兜底只读舞台的好友资料。
     return {
       bot: botById.get(botId) ?? null,
-      friend: group?.friend ?? null,
-      session,
+      friend: liveReadonly?.friend ?? (snapshotActive ? snapshot.friend : null),
+      session: liveReadonly?.session ?? (snapshotActive ? snapshot.session : null),
     };
   }, [
     botById,
+    liveReadonly,
     origin,
     store.selectedBotId,
+    store.selectedSection,
+    store.selectedOrigin,
+    store.selectedScope,
     store.selectedFriendUserId,
     store.selectedSessionId,
-    store.sessionsByBotId,
+    store.selectedSessionSnapshot,
   ]);
+
+  // 中央认领:无显式写点的选中(URL 深链/删除回退)在解析出生活的当前选中会话后
+  // 由这里补写/刷新快照;live 对象被重拉替换时同步更新元数据。
+  // 写入前按提交时最新 Store 复核选中身份,不做过期捕获;快照已持有同一对象则跳过,
+  // 避免任何渲染期写回循环。
+  useEffect(() => {
+    const storeNow = useConversationStore.getState();
+    const identity = {
+      botId: storeNow.selectedBotId,
+      section: storeNow.selectedSection,
+      origin: storeNow.selectedOrigin,
+      scope: storeNow.selectedScope,
+      friendUserId: storeNow.selectedFriendUserId,
+      sessionId: storeNow.selectedSessionId,
+    };
+    if (!identity.botId || !identity.section || !identity.sessionId) return;
+    const live =
+      identity.origin === 'mine'
+        ? liveMine && liveMine.sessionId === identity.sessionId
+          ? { session: liveMine, friend: null as ConversationUserView | null }
+          : null
+        : liveReadonly && liveReadonly.session.sessionId === identity.sessionId
+        ? liveReadonly
+        : null;
+    if (!live) return;
+    const snapshot = storeNow.selectedSessionSnapshot;
+    if (
+      selectedSnapshotMatches(snapshot, identity) &&
+      snapshot.session === live.session &&
+      snapshot.friend === live.friend
+    )
+      return;
+    storeNow.setSelectedSessionSnapshot({
+      section: identity.section,
+      botId: identity.botId,
+      origin: identity.origin,
+      scope: identity.scope,
+      friendUserId: identity.friendUserId,
+      session: live.session,
+      friend: live.friend,
+    });
+    // live 单独来自列表缓存与选中身份,不依赖快照字段,认领写回不会再次触发本 effect。
+  }, [liveMine, liveReadonly]);
 
   // 入向:URL → Store。section 缺失且目录可匹配时补齐;目录无匹配保持 null,
   // 待 hydration 完成后由下方 effect 重解析(旧/外部链接原样透传)。
@@ -214,9 +305,24 @@ export function useConversationSelection(options: {
       const storeNow = useConversationStore.getState();
       storeNow.setExpandedBot(botId, true);
       storeNow.setExpandedFriend(botId, friendUserId, true);
+      const section: 'team' | 'managed' = managedBotIdKey.split('|').includes(`team=${botId}`) ? 'team' : 'managed';
+      // 行来源于当前分组缓存,写选中前保留会话与好友资料快照(过滤重建缓存后仍可解析)。
+      const group = storeNow.sessionsByBotId[botId]?.friendGroups[friendUserId];
+      const session = group?.sessions.items.find((item) => item.sessionId === sessionId);
+      if (group && session) {
+        storeNow.setSelectedSessionSnapshot({
+          section,
+          botId,
+          origin: 'others',
+          scope: 'all',
+          friendUserId,
+          session,
+          friend: group.friend,
+        });
+      }
       storeNow.selectConversation({
         botId,
-        section: managedBotIdKey.split('|').includes(`team=${botId}`) ? 'team' : 'managed',
+        section,
         origin: 'others',
         scope: 'all',
         friendUserId,

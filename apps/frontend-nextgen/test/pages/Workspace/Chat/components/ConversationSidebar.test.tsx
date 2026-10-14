@@ -262,16 +262,19 @@ describe('ConversationSidebar', () => {
 
     rerender(<ConversationSidebar {...sidebarProps()} />);
     fireEvent.click(screen.getByRole('button', { name: '发起归属与会话范围' }));
-    fireEvent.click(screen.getByRole('button', { name: '已收藏' }));
+    // 管理/好友两行弹层常驻挂载同名「已收藏」按钮:按 DOM 序取管理行(先渲染)。
+    fireEvent.click(screen.getAllByRole('button', { name: '已收藏' })[0]);
     expect(useConversationStore.getState().scopeByManagedBotId['bot-a:2088']).toBe('favorite');
   });
 
-  it('shows scope filter only on managed rows and keeps friend rows plain', () => {
+  it('renders the origin filter on managed rows and the scope-only filter on friend rows', () => {
     render(<ConversationSidebar {...sidebarProps()} />);
-    expect(screen.getByRole('button', { name: '发起归属与会话范围' })).toBeInTheDocument();
-    expect(screen.getByText('已收藏')).toBeInTheDocument();
-    // 仅一个管理 Bot 行有筛选入口；好友 Bot 行没有。
+    // 管理 Bot 行:「发起归属与会话范围」(发起人 + 会话);好友 Bot 行:仅「会话」范围(无发起人)。
     expect(screen.getAllByRole('button', { name: '发起归属与会话范围' })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: '会话范围' })).toBeInTheDocument();
+    expect(screen.getByText('发起人')).toBeInTheDocument();
+    // 管理/好友两行弹层常驻挂载,各带一份「已收藏」选项。
+    expect(screen.getAllByRole('button', { name: '已收藏' })).toHaveLength(2);
   });
 
   it('selects mine sessions through the sessions model with create actions', () => {

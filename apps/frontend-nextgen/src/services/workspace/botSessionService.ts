@@ -277,13 +277,16 @@ export const botSessionService = {
     userId: string,
     page = 1,
     pageSize = BOT_SESSION_PAGE_SIZE,
+    sessionKey = '',
   ): Promise<DomainResult<BotSessionPageView>> {
     try {
+      // session_key 原样透传(空条件省略),由 backendRequest 负责查询串编码。
       const params = withFriendBotRequestParams(bot, userId, {
         user_id: resolveUserId(userId),
         owner_id: bot.ownerId,
         page,
         page_size: pageSize,
+        ...(sessionKey ? { session_key: sessionKey } : {}),
       });
       const resp = await listBotSessions(bot.realBotId, params);
       const items = (resp.data?.items ?? []).map((s) => toSessionView(s, bot.botId));

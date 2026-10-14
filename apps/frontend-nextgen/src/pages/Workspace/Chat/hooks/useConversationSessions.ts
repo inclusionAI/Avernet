@@ -7,13 +7,17 @@ import type {
   ConversationSessionScope,
 } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
+import { BOT_SESSION_PAGE_SIZE } from '@/services/workspace/botSessionService';
 import { conversationService } from '@/services/workspace/conversationService';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
+  filterRevisionOf,
   firstPageOf,
+  friendScopeOf,
   nextPageOf,
   requestKeyOf,
+  sessionKeyOf,
   sessionRequestPage,
   writeSessionState,
 } from './conversationSessionCache';
@@ -32,12 +36,15 @@ export function useConversationSessions(options: {
   friendBots: ConversationBotView[];
 }): ConversationSessionsModel {
   const { userId, managedBots, friendBots } = options;
-  useConversationFavoriteScope(managedBots);
+  useConversationFavoriteScope(managedBots, friendBots);
   const favorites = useConversationFavorites(options);
   const actions = useConversationSessionActions(options);
   const expandedBotIds = useConversationStore((s) => s.expandedBotIds);
   const originByManagedBotId = useConversationStore((s) => s.originByManagedBotId);
   const effectiveScopeByManagedBotId = useConversationStore((s) => s.effectiveScopeByManagedBotId);
+  const scopeByFriendBotId = useConversationStore((s) => s.scopeByFriendBotId);
+  const sessionKeyByBotId = useConversationStore((s) => s.sessionKeyByBotId);
+  const sessionFilterRevisionByBotId = useConversationStore((s) => s.sessionFilterRevisionByBotId);
   const botByBotId = useMemo(() => {
     const map = new Map<string, ConversationBotView>();
     for (const view of [...managedBots, ...friendBots]) map.set(view.bot.botId, view);
@@ -60,8 +67,6 @@ export function useConversationSessions(options: {
     [],
   );
   const generationOf = (): number => generationRef.current;
-  const effectiveScopeOf = (botId: string): ConversationSessionScope =>
-    useConversationStore.getState().effectiveScopeByManagedBotId[botId] ?? 'all';
   /** 管理会话写回时读取上下文(origin/scope)须仍一致,不一致即丢弃。 */
   const stillMine = (botId: string, scope: ConversationSessionScope): boolean => {
     const store = useConversationStore.getState();
@@ -70,17 +75,23 @@ export function useConversationSessions(options: {
       (store.effectiveScopeByManagedBotId[botId] ?? 'all') === scope
     );
   };
-  const loadPage = useRef((view: ConversationBotView, scope: ConversationSessionScope, more: boolean): void => {
+  const loadPage = useRef((view: ConversationBotView, more: boolean): void => {
     const botId = view.bot.botId;
     const sectionOf: ConversationBotSection = view.section;
     const userIdNow = userIdRef.current;
     if (!userIdNow || !view.bot.chatable || view.bot.isAgentCodingBot || actions.isPending(botId, sectionOf)) return;
+    // 请求快照:从最新 Store 读取生效过滤(mine 范围/好友范围/sessionKey/代次)。
     const store = useConversationStore.getState();
+    const scope = isManagedConversationSection(sectionOf)
+      ? store.effectiveScopeByManagedBotId[botId] ?? 'all'
+      : friendScopeOf(botId, store);
+    const sessionKey = sessionKeyOf(botId, store);
+    const revision = filterRevisionOf(botId, store);
     const managedCache = isManagedConversationSection(sectionOf) ? store.sessionsByBotId[botId] : undefined;
     const state = isManagedConversationSection(sectionOf)
       ? managedCache?.sessions
       : store.friendBotSessionsByBotId[botId];
-    const requestKey = requestKeyOf(botId, sectionOf, scope, more);
+    const requestKey = requestKeyOf(botId, sectionOf, 'mine', scope, sessionKey, revision, more);
     if (inFlightRef.current.has(requestKey)) return;
     if (more && (!state || !state.hasMore || state.loading || state.isLoadingMore)) return;
     const cachedHit = isManagedConversationSection(sectionOf)
@@ -92,21 +103,31 @@ export function useConversationSessions(options: {
     inFlightRef.current.add(requestKey);
     const generation = generationOf();
     const page = sessionRequestPage(state, scope, more);
+    // 首拉与缓存条件不一致(如 managed 范围切换)时不保留旧 items,以免把旧条件
+    // 结果当成新列表展示;搜索/好友范围变化已由 Store 删除缓存(条件天然一致)。
+    const criteriaMatch =
+      more ||
+      (isManagedConversationSection(sectionOf)
+        ? managedCache?.origin === 'mine' && managedCache?.scope === scope
+        : true);
     writeSessionState(botId, sectionOf, scope, {
-      ...(state ?? firstPageOf([], 0)),
+      ...(criteriaMatch ? state ?? firstPageOf([], 0) : firstPageOf([], 0)),
       ...(more ? { isLoadingMore: true, loadMoreError: null } : { loading: true, error: null }),
     });
     void (
       isManagedConversationSection(sectionOf)
-        ? conversationService.listManagedSessions(view.bot, userIdNow, scope, page)
-        : conversationService.listFriendBotSessions(view.bot, userIdNow, page)
+        ? conversationService.listManagedSessions(view.bot, userIdNow, scope, page, BOT_SESSION_PAGE_SIZE, sessionKey)
+        : conversationService.listFriendBotSessions(view.bot, userIdNow, page, BOT_SESSION_PAGE_SIZE, scope, sessionKey)
     ).then((result) => {
       inFlightRef.current.delete(requestKey);
       if (generationOf() !== generation) return;
+      const latestStore = useConversationStore.getState();
+      // 过滤代次变化(范围/归属/搜索,含 A→B→A)即丢弃:旧响应不得写回或复原已清除的过滤。
+      if (filterRevisionOf(botId, latestStore) !== revision) return;
       if (isManagedConversationSection(sectionOf) && !stillMine(botId, scope)) return;
       const latest = isManagedConversationSection(sectionOf)
-        ? useConversationStore.getState().sessionsByBotId[botId]?.sessions
-        : useConversationStore.getState().friendBotSessionsByBotId[botId];
+        ? latestStore.sessionsByBotId[botId]?.sessions
+        : latestStore.friendBotSessionsByBotId[botId];
       if (!result.ok) {
         if (!more) {
           writeSessionState(botId, sectionOf, scope, { ...firstPageOf([], 0), error: result.error.friendlyMessage });
@@ -131,18 +152,32 @@ export function useConversationSessions(options: {
     ) {
       return;
     }
-    loadPage(view, isManagedConversationSection(view.section) ? effectiveScopeOf(botId) : 'all', false);
+    loadPage(view, false);
   }).current;
   const scopeSignature = useMemo(
     () =>
-      Object.keys({ ...originByManagedBotId, ...effectiveScopeByManagedBotId })
+      Object.keys({
+        ...originByManagedBotId,
+        ...effectiveScopeByManagedBotId,
+        ...scopeByFriendBotId,
+        ...sessionKeyByBotId,
+        ...sessionFilterRevisionByBotId,
+      })
         .sort()
         .map(
           (botId) =>
-            `${botId}:${originByManagedBotId[botId] ?? 'mine'}:${effectiveScopeByManagedBotId[botId] ?? 'all'}`,
+            `${botId}:${originByManagedBotId[botId] ?? 'mine'}:${effectiveScopeByManagedBotId[botId] ?? 'all'}:${
+              scopeByFriendBotId[botId] ?? 'all'
+            }:${sessionKeyByBotId[botId] ?? ''}:${sessionFilterRevisionByBotId[botId] ?? 0}`,
         )
         .join('|'),
-    [effectiveScopeByManagedBotId, originByManagedBotId],
+    [
+      effectiveScopeByManagedBotId,
+      originByManagedBotId,
+      scopeByFriendBotId,
+      sessionFilterRevisionByBotId,
+      sessionKeyByBotId,
+    ],
   );
   const pendingActions = [...managedBots, ...friendBots]
     .map((view) => (actions.isPending(view.bot.botId, view.section) ? view.bot.botId : ''))
@@ -170,11 +205,30 @@ export function useConversationSessions(options: {
   const selectSession = useCallback((section: ConversationBotSection, botId: string, sessionId: string): void => {
     const store = useConversationStore.getState();
     if (!store.expandedBotIds[botId]) store.setExpandedBot(botId, true);
+    const scope = isManagedConversationSection(section) ? store.effectiveScopeByManagedBotId[botId] ?? 'all' : 'all';
+    // 行来源于当前列表缓存;写选中前保留会话快照,过滤重建列表后主会话仍可解析。
+    const managedCache = isManagedConversationSection(section) ? store.sessionsByBotId[botId] : undefined;
+    const session = isManagedConversationSection(section)
+      ? managedCache?.origin === 'mine' && managedCache?.scope === scope
+        ? managedCache.sessions.items.find((item) => item.sessionId === sessionId)
+        : undefined
+      : store.friendBotSessionsByBotId[botId]?.items.find((item) => item.sessionId === sessionId);
+    if (session) {
+      store.setSelectedSessionSnapshot({
+        section,
+        botId,
+        origin: 'mine',
+        scope,
+        friendUserId: null,
+        session,
+        friend: null,
+      });
+    }
     store.selectConversation({
       botId,
       section,
       origin: 'mine',
-      scope: isManagedConversationSection(section) ? effectiveScopeOf(botId) : 'all',
+      scope,
       friendUserId: null,
       sessionId,
     });
@@ -183,11 +237,12 @@ export function useConversationSessions(options: {
     async (botId: string, section: ConversationBotSection, scope: ConversationSessionScope): Promise<void> => {
       const view = botByBotId.get(botId);
       if (!view || view.section !== section) return;
+      // friend 范围由 Store 快照在 loadPage 内读取,入参 scope 仅用于 managed 缓存一致性校验。
       if (isManagedConversationSection(section)) {
         const cached = useConversationStore.getState().sessionsByBotId[botId];
         if (!cached || cached.origin !== 'mine' || cached.scope !== scope) return;
       }
-      loadPage(view, scope, true);
+      loadPage(view, true);
     },
     [botByBotId, loadPage],
   );
