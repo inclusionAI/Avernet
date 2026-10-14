@@ -134,7 +134,13 @@ export function ExternalBotPanel({ active }: { active: boolean }) {
           action={keyword ? undefined : <Button onClick={() => setRegistrationOpen(true)}>接入外部 Bot</Button>}
         />
       )}
-      <BotRegistrationDialog open={registrationOpen} onClose={() => setRegistrationOpen(false)} />
+      <BotRegistrationDialog
+        open={registrationOpen}
+        onClose={() => {
+          setRegistrationOpen(false);
+          void externalBots.retry();
+        }}
+      />
       {configBot ? (
         <BotGeneralConfigDialog bot={externalBotToGeneralConfig(configBot)} onClose={() => setConfigBot(undefined)} />
       ) : null}

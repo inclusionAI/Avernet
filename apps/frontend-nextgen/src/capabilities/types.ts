@@ -391,6 +391,8 @@ export interface AppCapabilities {
    */
   getBotRegistrationEnabled: () => CapabilityResult<boolean>;
   getQwenWorkBotRegistrationConfig: (bcsEndpoint: string) => CapabilityResult<{ providerSlug: string; apiUrl: string }>;
+  /** Optional deployment-managed installer and executable; null uses the public release installer. */
+  getQwenWorkBridgeInstallation: () => CapabilityResult<{ installCommand: string; binary: string; profiles?: boolean; guideUrl?: string; personalizeBotName?: boolean } | null>;
 
   /**
    * 协作群高级配置（当前为钉钉绑定）。Open Core 默认关闭；internal overlay 覆盖为 true。

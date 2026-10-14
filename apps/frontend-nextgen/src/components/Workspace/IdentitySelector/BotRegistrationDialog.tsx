@@ -12,7 +12,7 @@ import {
   Skeleton,
 } from '@/components/ui';
 import { useBotRegistrationToken } from '@/pages/Workspace/hooks/useBotRegistrationToken';
-import { Check, Copy, RefreshCw } from 'lucide-react';
+import { Check, Copy, MessageSquare, RefreshCw, Terminal } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { QwenWorkRegistrationPanel } from './QwenWorkRegistrationPanel';
@@ -73,10 +73,11 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
       <ModalContent size="lg" className="max-h-[85vh] min-w-0 overflow-y-auto p-5">
         <ModalHeader>
           <ModalTitle className="text-lg">接入外部 Bot</ModalTitle>
-          <ModalDescription className="leading-5">选择接入方式，复制命令后在对应环境中执行，即可完成外部 Bot 的初始化接入。</ModalDescription>
+          <ModalDescription className="leading-5">选择 Bot 类型，按对应指南完成接入。</ModalDescription>
         </ModalHeader>
 
         <Segmented
+          aria-label="Bot 类型"
           value={engine}
           onChange={setEngine}
           className="w-full"
@@ -89,18 +90,33 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
           <QwenWorkRegistrationPanel open={open} />
         ) : (
           <>
-            <Segmented
-              value={mode}
-              onChange={(next) => {
-                setMode(next);
-                setCopied(false);
-              }}
-              className="w-full"
-              options={[
-                { value: 'self', label: '用户自助接入' },
-                { value: 'auto', label: 'Bot 自动接入' },
-              ]}
-            />
+            <section className="space-y-2" aria-label="OpenClaw 接入方式">
+              <p className="text-xs font-medium text-muted-foreground">如何接入 OpenClaw？</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {([
+                  { value: 'self', label: '在终端执行', description: '复制安装命令，在 Bot 所在设备执行', icon: Terminal },
+                  { value: 'auto', label: '让 Bot 执行', description: '复制接入指引，发送给 OpenClaw Bot', icon: MessageSquare },
+                ] as const).map((option) => (
+                  <Button
+                    key={option.value}
+                    variant="outline"
+                    aria-pressed={mode === option.value}
+                    className={`h-auto min-w-0 justify-start gap-3 whitespace-normal p-3 text-left ${mode === option.value ? 'border-primary bg-primary/5' : ''}`}
+                    onClick={() => {
+                      setMode(option.value);
+                      setCopied(false);
+                    }}
+                  >
+                    <option.icon aria-hidden className="size-4 shrink-0 text-primary" />
+                    <span className="min-w-0 space-y-1">
+                      <span className="block text-sm">{option.label}</span>
+                      <span className="block text-xs font-normal text-muted-foreground">{option.description}</span>
+                    </span>
+                    {mode === option.value && <Check aria-hidden className="ml-auto size-4 shrink-0 text-primary" />}
+                  </Button>
+                ))}
+              </div>
+            </section>
 
             {isLoading ? (
               <div className="space-y-3 rounded-lg border border-border bg-muted/40 p-4">
@@ -125,7 +141,7 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
                 <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-foreground">
-                      {mode === 'self' ? '方式一：用户自助接入' : '方式二：Bot 自动接入'}
+                      {mode === 'self' ? '终端安装命令' : '发送给 Bot 的接入指引'}
                     </p>
                     <p className="mt-0.5 truncate text-xs text-muted-foreground">
                       {mode === 'self' ? '在 Bot 运行环境中执行以下命令。' : '将以下指引发送给目标 Bot 执行。'}
@@ -133,7 +149,7 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
                   </div>
                   <Button variant="secondary" size="sm" className="shrink-0 gap-1.5" onClick={copyCommand}>
                     {copied ? <Check aria-hidden className="size-3.5" /> : <Copy aria-hidden className="size-3.5" />}
-                    {copied ? '已复制' : '复制'}
+                    {copied ? '已复制' : mode === 'self' ? '复制命令' : '复制指引'}
                   </Button>
                 </div>
                 <pre className="min-w-0 whitespace-pre-wrap break-all px-3 py-3 font-mono text-xs leading-5 text-foreground">
