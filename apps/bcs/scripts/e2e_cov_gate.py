@@ -36,7 +36,7 @@ Usage:
       [--line-min 20] [--method-min 20] [--region-min 0] \
       [--cobertura <cobertura.xml> --base-ref <git_ref> \
        [--ignore-filename-regex <regex>] [--changed-json <out.json>] \
-       [--changed-line-min 60] [--changed-line-min-lines 20]]
+       [--changed-line-min 50] [--changed-line-min-lines 20]]
 """
 
 import argparse
