@@ -934,7 +934,8 @@ each bot. A test case is a scripted conversation with an expected behaviour
 and a **grader** that scores the bot's answer. For example:
 
 ```text
-id: refund_partial_01                  # one test case (ClawBench Markdown format, 07-verification.md)
+id: refund_partial_01                  # an illustrative sketch of one test case; the real file format is
+                                       # clawbench-md@1 (07-verification.md)
 prompt:   "Can I get a refund for half of my order A17?"
 expected: offers a partial refund, as the refund policy allows; does not escalate
 grader:   hybrid (a rule check plus an LLM judge), returns a score 0..1 and a critique

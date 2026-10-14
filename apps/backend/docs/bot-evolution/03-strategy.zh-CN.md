@@ -688,7 +688,8 @@ class AgentRunner(Protocol):
 **这里“评估”是什么意思。** 验证（[07-verification.zh-CN.md](07-verification.zh-CN.md)）为每个 Bot 保存一组**测试用例**。测试用例是一段脚本化的对话，带有期望的行为，以及一个给 Bot 的回答打分的**评分器**。例如：
 
 ```text
-id: refund_partial_01                  # one test case (ClawBench Markdown format, 07-verification.md)
+id: refund_partial_01                  # an illustrative sketch of one test case; the real file format is
+                                       # clawbench-md@1 (07-verification.md)
 prompt:   "Can I get a refund for half of my order A17?"
 expected: offers a partial refund, as the refund policy allows; does not escalate
 grader:   hybrid (a rule check plus an LLM judge), returns a score 0..1 and a critique
