@@ -1,23 +1,43 @@
-# Engine A2A 阶段 1b v2：BaaS 客户端灰度（R15 修订版）
+# Engine A2A 阶段 1b v3：BaaS 客户端灰度（R15+R16 修订版）
 
-日期：2026-10-14（v2，吸收 1b 计划评审 R15 八项——上一版核心前提"客户端保形+编排零改动"与真实调用代码不符，全面重写）
-状态：**任务级代码分段撰写中**——本文件的 §1-§4（裁决/契约清单/架构决策/映射规则）为已定稿部分；§5+ 任务序列按分段工序逐步补齐，每段补齐后机器校验
-分支：`feat/engine-a2a-protocol-replacement`（base=7d817ee6a；E1/E2 首发件 `04176aa6f` 按 §5.E1' 返工）
+日期：2026-10-14（v3。R16 将 v2 的 B1/T1' 代码直接在 BaaS venv 执行：
+8 测 6 过 2 挂——语法校验绿不能替代行为验证。两轮同类错误的根因是预写实现
+代码前省略对下一个真实定义的完整 cat。v3 契约改动全部附可 cat 事实源，
+复核标准升级为"消费者级测试先行（先红→后绿）"）
+分支：`feat/engine-a2a-protocol-replacement`（base=7d817ee6a；E1/E2 的
+`04176aa6f` 按 §5.E1' 返工）
 
 ---
 
-## §0 R15 八条裁决（全部实证成立）
+## §0 R15 + R16 裁决（全部实证成立）
 
-| # | 裁决 | 修订落点 |
+### R15（v2 修复对象）
+
+| # | 裁决 | v3 落点 |
 |---|------|---------|
-| 1 签名臆造 | 成立（真实面见 §1 契约清单） | §5.B1 |
-| 2 chat_send 阻塞至 SSE 完 | 成立（ack 后台分发的流式退化） | §3.L1 生命周期 |
-| 3 终态归一把失败变成功/清空终稿 | 成立（`state.content=text` 覆盖） | §3.T1 终态单次规则 |
-| 4 JSON-RPC 错误/断流被吞 | 成立 | §3.E1 错误面 |
-| 5 HITL 无决策回传 + 载荷截断 | 成立（且 engine 侧缺同 task 续消息面） | §3.H1 + 新任务 E4 |
-| 6 agent 映射丢 stream/data | 成立（engine_frame 逃生舱存在） | §3.M1 无损映射 |
-| 7 能力探测≠全量切换，无回退开关 | 成立 | §3.G1 灰度门 |
-| 8 测试缺陷与 T2 残缺 | 成立 | §5.T1'/T2' |
+| 15-1 签名臆造 | §5.B1 |
+| 15-2 chat_send 阻塞 | §3.L1 |
+| 15-3 终态归一 | §3.T1 |
+| 15-4 错误吞没 | §3.E1 |
+| 15-5/6 HITL+agent 载荷 | E4/M1 |
+| 15-7 全量切换无回退 | §3.G1 |
+| 15-8 测试残缺 | T1'/T2' |
+
+### R16（v3 新裁决——每条附事实源，实现者必须 cat 核对）
+
+| # | 裁决 | 事实源 | v3 落点 |
+|---|------|--------|---------|
+| 16-1 chat_inject 签名仍错 | v2 写 `label=None`；真实 = `session_key, message, timeout_ms, auth_token, chat_metadata, attachments` | `_bot_websocket_client.py:281-288` | B1 |
+| 16-2 resolve 返回必须是 `EngineInteractionResolveExchange` | 消费者访问 `exchange.request/.response/.accepted/.error_message`；dataclass 含 `from_frames` | `_async_chat_client.py:1210-1218`、`_interaction_protocol.py:84-99` | B1 |
+| 16-3 决策非单字符串 | `InteractionResolution = decision/kind{None,ask_user,exec,mode_switch}/answer/message/values/answers/selected_options`；engine 三方法 `resolve_exec_approval(session_key,run_id,decision,message)` / `resolve_interaction(session_key,run_id,response)` / `resolve_mode_transition(session_key,run_id,decision)` | `api/bot_interaction/_models.py:12-31`、`claude_code/chat.py:279/297/316` | E4 |
+| 16-3b 原生 run identity 缺映射 | bridge 构造 `ChatRequest` 无 idempotency 字段；原生 runId 只在事件 `payload["runId"]` 出现；kernel rid 与它无映射 | `engine_bridge.py:123-130` | E4 |
+| 16-4 B2 会双连接 | `connect()` :292-300 构造后仍有 `hello = await _client.connect()`——v2 替换块自带 connect() 必致 A2A 路径 `RuntimeError("Already connected")` | `_async_chat_client.py:264-300` | B2' 完整流程 |
+| 16-5 附件特性门未兑现 | `_has_attachments_bound` 未定义；池化连接上收到附件请求仅返回硬错无 v3 重路由 | v2 §5.B2 自审 | B3 |
+| 16-6 mode_transition 事件名丢失 | E3' 合流 `kind="agent"`→B1 dispatch `"agent"`；原生消费者 `_on_mode_transition_resolved` 不会被调用 | v2 E3' 路径 | E3'+B1 |
+| 16-7 resolve 接 gate 上下文错误 | `_canonical_context` 无 ResolveInteraction 分支（无 message 字段）→ gate ctx=None，破坏 R13-3"鉴权=执行"约束 | `router.py:89+` | E4 |
+| 16-8 metadata 无引擎侧接线 | bridge `ChatRequest(extraParams=None)`；WS 将 chat_metadata **平铺 params** 非嵌套 chatMetadata；timeout_ms 双侧未用 | `engine_bridge.py:123-130`、`_bot_websocket_client.py:296-300` | E3'/B1 |
+| 16-9 T1' 两测挂+一测伪绿 | ASGITransport 非真流式（响应生成器先完成）；FAILED 追加于 COMPLETED 后被**正确**的终态去重拒绝；首 delta 测试未断言 final 不在场 | BaaS venv 实测 | T1'（真流式 fixture） |
+| 16-10 配置入库违反边界 | 业务代码禁直接 `os.environ`（AST 毒化检查——实测该文件现无此 import，v2 的新增会踩线）；三态行为表自相矛盾 | `avernet-backend-yaml-config-facts`（仓库事实） | B2' |
 
 ---
 
@@ -46,8 +66,12 @@ async def interaction_resolve(self, *, interaction_id: str,
                               resolution: InteractionResolution,
 ) -> EngineInteractionResolveExchange: ...
 
-# :281 起同名方法（A2A 版须等义）
-async def chat_inject(self, session_key: str, message: Any, label: Any = None) -> ...: ...
+# :281-288 —— A2A 版须等义（R16-1）
+async def chat_inject(
+    self, session_key: str, message: str, timeout_ms: int | None = None,
+    auth_token: str | None = None, chat_metadata: dict[str, str] | None = None,
+    attachments: list[Any] | None = None,
+) -> dict[str, Any]: ...
 ```
 
 ### 1.2 生命周期与事件面（`_async_chat_client.py`）
@@ -283,9 +307,11 @@ wire 无损版自动生效）。另追加 E4 依赖的注册表与状态查询�
                     await kernel.publish_agent_progress(rid, payload)
                     continue
                 if event == "mode_transition.resolved":
-                    # mode_transition 按同一 lossless 通道广播——v3 消费面对位
-                    # 事件名经 engine_frame 重建。
-                    await kernel.publish_agent_progress(rid, payload)
+                    # 16-6：同 lossless 通道但保留原事件名——
+                    # publish_agent_progress(event_name=...) 不吞名为 agent。
+                    await kernel.publish_agent_progress(
+                        rid, payload,
+                        event_name="mode_transition.resolved")
                     continue
                 log.debug("bridge: dropping unhandled frame event=%s state=%s",
                           event, state)
@@ -294,86 +320,173 @@ wire 无损版自动生效）。另追加 E4 依赖的注册表与状态查询�
 
 **验证**：既有回归 + R14 bridge 帧序测试扩展（见 T1'-engine 侧单测矩阵）。
 
+**16-8 接线补充**（E3' 的同时性变更）：
+- bridge `_dispatch_to_engine` 增加可选参数 `chat_context: dict[str, Any] |
+  None`（由 router 的 chat_send 调用点传入——metadata 里的 chatMetadata/
+  appId/timeoutMs）；组装进 `ChatRequest` 的 `extraParams`：
+
+```text
+    request = ChatRequest(
+        userId="", agentId="", query=text, sessionId=context_id,
+        aliveTime=alive_time_ms,          # 16-8: timeout_ms→aliveTime（ChatRequest
+                                          # 语义见 models.py:56——int 毫秒）
+        extraParams=chat_context or None, # 16-8: chat_metadata 平铺 key 原样
+    )
+```
+- router 侧 `_send_streaming`/`_send_message` 的 params 组装追加：
+  `metadata` 的 `chatMetadata` 子键展开为**平铺键**（对齐 WS `params.update(
+  chat_metadata)` 的语义——不嵌套）；`appId`/`traceId` 同层平铺。
+- B1 客户端的组装已带 `chatMetadata` 嵌套——**改为与 WS 同构的平铺**
+  （`metadata` dict 直接 `update(chat_metadata)`）。
+- B1 使用 `timeout_ms`：HTTP 客户端 `timeout=(timeout_ms/1000) or None`，
+  并在 §2 所称 idle-ping 语义下由 engine 侧保活（1a 已有 ping；本段把
+  "空闲断连走 error 终态"的语义链接到 §3.E1）。
+
 **Commit**: `feat(a2a): bridge routes agent/interaction/approval/mode_transition frames losslessly`
 
-### E4 HITL resolve 闭环（engine 侧新 extension）
+### E4 HITL resolve 闭环 v3（16-2/3/7 全面修正）
 
-**Step 0 发现（实现者必执行）**：`chat = _chat_plugin()` 后 MRO 检查
-`resolve_interaction`（我们对 claude_code 已核：`core/adapters/claude_code/chat.py:297
-resolve_interaction(session_key, run_id, response, auth)`）；openclaw 侧无直接
-resolve 方法——其 resolve 转发路径 **在 Step 0 里 grep 确认**
-（入口提示：openclaw adapter 的 stream 段 :194-214 有 run_id 相关响应处理；
-`sessions.send` 是候选 relay 方法）。发现结果写进实现 commit message 与
-`SECOND_STAGE_EVIDENCE` 侧注，不静默选择。
+**Step 0 发现（实现者必执行并记录）**：
+1. cat `apps/baas/src/secbaas/community/api/bot_interaction/_models.py:12-31`
+   ——InteractionResolution 完整 schema（decision/kind/answer/message/values/
+   answers/selected_options）。
+2. cat `engine identity`：bridge `engine_bridge.py:123-130` 构造 ChatRequest
+   的现状（无 idempotency 字段）——16-3b 映射必须建立。
+3. MRO 检查三类 resolve：`claude_code/chat.py:279 resolve_exec_approval(
+   session_key, run_id, decision, message)` / `:297 resolve_interaction(
+   session_key, run_id, response)` / `:316 resolve_mode_transition(
+   session_key, run_id, decision)`。openclaw 侧重查（无 resolve → relay 路径
+   的发现记录）。
 
-**wire/kernel/router 实现**：
+**16-3b 原生 run identity 映射**：kernel `_Run` 增 `native_run_id: str |
+None`；bridge `_dispatch_to_engine` 处理每个 event 帧时
+`payload.get("runId")` 若为字符串则 `r.native_run_id = payload["runId"]`
+（一次性写入，先到先得——engine 原生 runId 即回帧携带者）。E4 的 resolve
+转发改传 `native_run_id`——**不是** kernel 自生成 rid（那是未挂到 engine
+名义的孤立值）。
+
+**wire**: E1' 的三个构造不变；新增 `wire_resolve_conflict`（v2 原样保留）。
+
+**kernel (E1' 注册表已含 + 新增)**：
 
 ```python
-# wire.py 追加
-def wire_resolve_conflict(run_id: str | None, context_id: str, seq: int,
-                          reason: str) -> dict[str, Any]:
-    """E4/H1：重复提交或 run 已不在 INPUT_REQUIRED 的标准 conflict 错误。"""
-    return {"seq": seq, "type": "statusUpdate", "ev": {
-        "statusUpdate": {"taskId": run_id or "", "contextId": context_id,
-                          "status": {"state": "TASK_STATE_FAILED"},
-                          "metadata": {"kind": "resolve_conflict",
-                                       "reason": reason}}}}
+# _Run __slots__ 追加 "native_run_id"；__init__ 置 None
+# bridge 处理帧时（E3' 分支前）追加：
+                if isinstance(payload.get("runId"), str) and \
+                        r.native_run_id is None:
+                    r.native_run_id = payload["runId"]
+# 类内查询：
+    def native_run_of(self, interaction_id: str) -> tuple[str, str] | None:
+        """E4: (rid, native_run_id)——native 缺席返回 (rid, None) 由调用方
+        决定转发面（不盲传 None 给 engine——返回 None 拒绝）。"""
+        rid = self._interactions.get(interaction_id)
+        if rid is None or rid not in self.runs:
+            return None
+        r = self.runs[rid]
+        return rid, r.native_run_id
 ```
 
+**router ResolveInteraction v3（16-2/3/7 修正版）**：
+
 ```python
-# router.py —— HANDLERS 追加（gated method 也要进 _GATED_METHODS）
 async def _resolve_interaction(params: dict[str, Any], req_id: Any,
                                gated_key: str | None) -> dict[str, Any]:
-    """H1/H4：同 run 决策提交——§8.6 契约（重复提交 conflict / run 不存在
-    not_found / 成功恢复 WORKING）。"""
+    """16-3：完整 InteractionResolution schema 分发三类 resolve；16-7：
+    canonical session 从 interaction 所属 run 定位（gate 与执行同源）；
+    16-3b：engine 转发传原生 run_id。"""
     interaction_id = params.get("interactionId")
     if not isinstance(interaction_id, str) or not interaction_id:
         raise _ParamError("interactionId is required (string)")
-    response = params.get("response")
-    if response is not None and not isinstance(response, str):
-        raise _ParamError("response must be a string when present")
-    rid = _kernel.interaction_run(interaction_id)
-    if rid is None or rid not in _kernel.runs:
+    resolution = params.get("resolution")
+    if not isinstance(resolution, dict) or not resolution.get("decision"):
+        raise _ParamError("resolution.decision is required")
+    kind = resolution.get("kind")
+
+    located = _kernel.native_run_of(interaction_id)
+    if located is None:
         return {"error": {"code": -32000, "message": "interaction not found",
                           "data": {"reason": "not_found"}}}
-    state = _kernel.interaction_state(interaction_id)
+    rid, native_run_id = located
+    run = _kernel.runs[rid]
+    state = run.state
     if state != "TASK_STATE_INPUT_REQUIRED":
         return {"error": {"code": -32003,
                           "message": f"run not awaiting input (state={state})",
                           "data": {"reason": "resolve_conflict"}}}
-    run = _kernel.runs[rid]
-    # 引擎转发（Step 0 发现的路径）——claude_code:
-    #   await chat.resolve_interaction(session_key=run.context_id,
-    #                                run_id=rid, response=response, auth=None)
-    # openclaw: 见 Step 0。失败 → not_found_or_engine 错误返回。
-    ok, err = await _forward_resolve(run.context_id, rid, response)
+
+    ok, err = await _forward_resolve(
+        session_key=run.context_id,
+        native_run_id=native_run_id,
+        kind=kind, resolution=resolution)
     if not ok:
         return {"error": {"code": -32000,
                           "message": err or "resolve forward failed",
                           "data": {"reason": "resolve_forward_failed"}}}
     await _kernel.publish_interaction_resolved(
-        rid, {"interactionId": interaction_id, "resolution": response})
+        rid, {"interactionId": interaction_id,
+              "kind": kind, "decision": resolution.get("decision")})
     return {"interaction": {"resolved": True, "runId": rid}}
-
-
-_HANDLERS["ResolveInteraction"] = _resolve_interaction
-# _GATED_METHODS 追加 "ResolveInteraction"（gate 同强度——决策提交可触发执行恢复）
 ```
 
-`_forward_resolve` 的模式与 R13 `_forward_engine_inject` 同构（`_chat_plugin`
-解析/await 调用/INTERNAL_ERROR 结构化上抛）——claude_code 走上面的 resolve_interaction
-调用；openclaw 的具体调用由 Step 0 落定后按同构骨架填入。
+**16-7 gate 上下文**：`_canonical_context` 新增分支（在其他分支前）：
 
-kernel 侧 requires：E1' 的 `_interactions` 注册表（已含）。注册表随 run 驱逐
-自然失效（rid 不在 runs → resolve 返回 not_found 即可——不必主动清理）。
+```python
+    if method == "ResolveInteraction":
+        # 16-7：session 从 interaction 定位——gate 与执行同源（R13-3 约束）
+        iid = params.get("interactionId")
+        if not isinstance(iid, str) or not iid:
+            raise _ParamError("interactionId is required (string)")
+        located = _kernel.native_run_of(iid)
+        if located is None:
+            raise _ParamError("interaction not found")   # gate 前 → 404面
+        rid, _native = located
+        run = _kernel.runs.get(rid)
+        return ((run.context_id if run else None),
+                str(params.get("resolution", {}).get("decision", "")))
+```
 
-**交互事件 payload 双形态提示**（对 B1 归一层同样适用）：
-`event=="interaction.requested"` 或 `state=="interaction.requested"` 任一即中。
+`_GATED_METHODS` 追加 `"ResolveInteraction"`（16-7：跨 session resolve
+被 gate 以 run 的真实 session 校验）。
 
-**验证（T1'-engine 矩阵里落测）**：requested → resolve 成功（WORKING 恢复）/
-重复 resolve → conflict / 未知 id → not_found / 双（T1'-engine 矩阵）。
+**`_forward_resolve`（16-3 三类分发 + 16-3b native run）**：
 
-**Commit**: `feat(a2a): ResolveInteraction extension — HITL same-run resolve closed loop`
+```python
+async def _forward_resolve(*, session_key: str, native_run_id: str | None,
+                           kind: str | None,
+                           resolution: dict[str, Any]) -> tuple[bool, str | None]:
+    """16-3：三类决策分发到 engine adapter 三方法——完整 schema 传参，
+    不压缩成单字符串；16-3b：native_run_id 缺席时拒绝（不盲传孤值）。"""
+    from engine.community.api.transport.a2a.engine_bridge import _chat_plugin
+
+    if native_run_id is None:
+        return False, "native run id unavailable (run has no engine frames)"
+    chat = _chat_plugin()
+    decision = resolution.get("decision")
+
+    if kind == "exec":
+        result = await chat.resolve_exec_approval(
+            session_key=session_key, run_id=native_run_id,
+            decision=decision, message=resolution.get("message"))
+    elif kind == "ask_user":
+        result = await chat.resolve_interaction(
+            session_key=session_key, run_id=native_run_id,
+            response=resolution.get("answer") or resolution.get("message"))
+    elif kind == "mode_switch":
+        result = await chat.resolve_mode_transition(
+            session_key=session_key, run_id=native_run_id,
+            decision=decision)
+    else:
+        raise _ParamError(f"unsupported resolution kind: {kind!r}")
+
+    if not result.get("ok"):
+        err = result.get("error") or {}
+        return False, str(err.get("message", "engine resolve rejected"))
+    return True, None
+```
+
+（openclaw 无 resolve 方法的 relay 等价路径——Step 0 发现记录后同构追加；
+当前 openclaw 引擎的 HITL 走 claude_code 形态的 adapter 面，MRO 首个匹配
+者胜。Step 0 的发现必须写进实现 commit message。）
 
 ### B1 `BotA2aClient` v2（契约对齐完整客户端）
 
@@ -402,6 +515,11 @@ from typing import Any, Callable, Generator, Optional
 import httpx
 
 logger = logging.getLogger(__name__)
+
+from secbaas.community.api.bot_interaction._models import InteractionResolution  # noqa: E402
+from secbaas.community.core.service.bot_run._interaction_protocol import (  # noqa: E402
+    EngineInteractionResolveExchange,
+)
 
 EventHandler = Callable[..., Any]
 # 每 run 的归一状态：内容快照 + 终态去重（T1 单次终态规则）
@@ -773,10 +891,27 @@ class BotA2aClient:
             ctx.task.cancel()
         return out
 
-    async def chat_inject(self, session_key: str, message: Any,
-                          label: Any = None) -> dict[str, Any]:
-        """对位 _bot_websocket_client.py:281（v3 是 relay 转发返回 ok/壳）。"""
+    async def chat_inject(
+            self, session_key: str, message: str,
+            timeout_ms: int | None = None,
+            auth_token: str | None = None,
+            chat_metadata: dict[str, str] | None = None,
+            attachments: list[Any] | None = None) -> dict[str, Any]:
+        """R16-1：签名与参数语义复制 _bot_websocket_client.py:281-314。
+
+        A2A 路径对 chat_metadata/attachments 的处理是**显式拒绝**（B3 提供
+        v3 重路由后不再到达此处）——返回 ok=False + code，绝不静默丢参。
+        timeout_ms 承载为 HTTP 请求超时上限（R16-8）。
+        """
+        if attachments:
+            return {"ok": False,
+                    "error": {"code": "ATTACHMENTS_UNSUPPORTED",
+                              "message": "A2A path cannot carry attachments"}}
         mid = f"inj-{uuid.uuid4().hex[:12]}"
+        metadata: dict[str, Any] = {"traceId": mid}
+        # R16-8：与 WS 平铺 params 字段同构——metadata 承载 key 原样
+        if chat_metadata:
+            metadata["chatMetadata"] = chat_metadata
         payload = {
             "jsonrpc": "2.0",
             "id": mid,
@@ -784,53 +919,92 @@ class BotA2aClient:
             "params": {
                 "contextId": session_key,
                 "message": {
+                    "roleId": mid,
                     "role": "ROLE_USER",
                     "messageId": mid,
                     "parts": [{"text": _message_to_text(message)}],
                 },
+                "metadata": metadata,
             },
         }
-        async with self._http(timeout=30.0) as http:
+        headers = {**self.headers,
+                   "X-IAM-Token": auth_token or "OPEN_API:NOT_PROVIDED"}
+        timeout = (timeout_ms / 1000) if timeout_ms else 30.0
+        async with self._http(timeout=timeout) as http:
             resp = await http.post(self.rpc_url, json=payload,
-                                   headers=self.headers)
+                                   headers=headers)
             if resp.status_code != 200:
-                return {"ok": False, "a2a": True,
-                        "error": {"message": f"HTTP {resp.status_code}"}}
+                return {"ok": False,
+                        "error": {"code": f"HTTP_{resp.status_code}",
+                                  "message": resp.text[:200]}}
             body = resp.json()
+        if "error" in body:
+            return {"ok": False,
+                    "error": {"code":
+                              (body["error"].get("data") or {}).get("reason",
+                                                                    "a2a_error"),
+                              "message": body["error"].get("message", "")[:200]}}
         result = body.get("result") or {}
         status = result.get("inject", "unknown")
         return {"ok": status in ("accepted", "duplicate_accepted"),
                 "status": status, "a2a": True}
 
-    async def interaction_resolve(self, *, interaction_id: str,
-                                  resolution: Any) -> dict[str, Any]:
-        """对位 _bot_websocket_client.py:316-334 的 exchange 契约。
+    async def interaction_resolve(
+            self, *, interaction_id: str,
+            resolution: InteractionResolution,
+    ) -> EngineInteractionResolveExchange:
+        """R16-2/16-3：返回真实 exchange 类型（消费者 :1210-1218 访问
+        exchange.request/.response/.accepted/.error_message——属性访问在
+        调用方的 try 块之外，dict 必炸 AttributeError）。
 
-        resolution（InteractionResolution 现结构——实现前 cat 它的定义对齐
-        decision/message 字段名）；A2A 面是 ResolveInteraction extension。"""
-        response = getattr(resolution, "response", None) or \
-            getattr(resolution, "message", None) or \
-            (resolution.get("response") if isinstance(resolution, dict)
-             else None)
-        payload = {
+        决策序列化：InteractionResolution 完整 schema（decision/kind/answer/
+        message/values/answers/selected_options——_models.py:12-31）整体经
+        params.resolution 传递（E4 的 engine 侧 extension 按完整 schema
+        分发到三方法）；不再压缩为单字符串。
+        request dict 的构造对齐 build_interaction_resolve_request 的形状
+        （实现者 cat `_interaction_protocol.py:from_frames` 使 request.id 被
+        提取——JSON-RPC 的 id 字段即 request_id）。
+        """
+        resolution_payload = {
+            "decision": resolution.decision,
+            "kind": resolution.kind,
+            "answer": resolution.answer,
+            "message": resolution.message,
+            "values": resolution.values,
+            "answers": resolution.answers,
+            "selected_options": [list(o) for o in resolution.selected_options]
+            if resolution.selected_options else None,
+        }
+        request = {
             "jsonrpc": "2.0",
             "id": f"res-{interaction_id}",
             "method": "ResolveInteraction",
             "params": {
                 "interactionId": interaction_id,
-                "response": response,
+                "resolution": {k: v for k, v in resolution_payload.items()
+                              if v is not None},
             },
         }
         async with self._http(timeout=30.0) as http:
-            resp = await http.post(self.rpc_url, json=payload,
+            resp = await http.post(self.rpc_url, json=request,
                                    headers=self.headers)
-            body = (resp.json() if resp.status_code == 200 else
-                    {"error": {"message": f"HTTP {resp.status_code}"}})
-        if "error" in body:
-            return {"ok": False, "exchange": body,
-                    "error": body["error"]}
-        return {"ok": True, "exchange": body,
-                "result": body.get("result") or {}}
+        response_body = (resp.json() if resp.status_code == 200 else
+                         {"error": {"message": f"HTTP_{resp.status_code}"}})
+        err = response_body.get("error")
+        if err:
+            return EngineInteractionResolveExchange(
+                request=request,
+                response=response_body,
+                accepted=False,
+                error_message=(err.get("message")
+                               or (err.get("data") or {}).get("reason", "")),
+            )
+        return EngineInteractionResolveExchange(
+            request=request,
+            response=response_body,
+            accepted=True,
+            error_message=None,
+        )
 ```
 
 **实现校验点**（执行者逐条过）：
@@ -846,58 +1020,50 @@ class BotA2aClient:
 
 **Commit**: `feat(a2a): BotA2aClient v2 — contract-aligned ack/stream lifecycle`
 
-### B2 `AsyncChatClient` 双客户端工厂 + 灰度门（G1）
+### B2（16-4/16-10 修正版）AsyncChatClient 工厂 —— 完整 connect 生命周期
 
 **Files:** Modify `apps/baas/src/secbaas/community/core/service/bot_run/_async_chat_client.py`
 
+**关键修正**：原方法（:264-300）的真序是"构造 → 注册 handlers → 统一 `hello
+= await _client.connect()`"——v2 在替换块里提前 connect 导致二次连接触发
+`RuntimeError("Already connected")`。v3 的工厂只做"构造+能力探测 card GET"
+（探测独立于客户端 _connected 状态、且 card GET 幂等）——真正 connect 仍走原
+方法的统一 hello 流程一次。
+
+`__init__` 增补（R16-10 DI 配置——业务文件**不直接**读 env）：
+
 ```python
-# 顶部 import 增补
-from secbaas.community.core.service.bot_run._bot_a2a_client import (
-    A2aUnavailableError, BotA2aClient,
-)
-import os as _os
-
-# 模块级 helper
-def _a2a_client_mode() -> str:
-    """G1 组件级灰度开关。出处顺序：env A2A_CLIENT_MODE > "off"。
-    off=整组件回退 v3（§10.3）；grey=能力探测通过即用；on=探测失败仍试建。"""
-    return (_os.environ.get("A2A_CLIENT_MODE", "off")
-            or "off").strip().lower()
-
-def _a2a_base_url_from_ws(uri: str) -> str | None:
-    """ws(s)://host:port/... → http(s)://host:port；非法输入返回 None。"""
-    if not isinstance(uri, str) or "://" not in uri:
-        return None
-    scheme, _, rest = uri.partition("://")
-    if scheme not in ("ws", "wss"):
-        return None
-    host_port = rest.split("/", 1)[0]
-    return ("https://" if scheme == "wss" else "http://") + host_port
+    def __init__(self, ...原有参数...,
+                 a2a_mode: str = "off"     # 末尾追加——pool/selector 透传
+                 ) -> None:
+        ...
+        if a2a_mode not in ("off", "grey", "on"):
+            raise ValueError(f"invalid a2a_mode: {a2a_mode!r}")
+        self._a2a_mode = a2a_mode
+        self._transport: str = "v3-ws"
 ```
 
-`connect()` 的唯一构造点（本文件 ：264 起原 BotWebSocketClient(...) 块）整体替换：
+`connect()` 方法体（从 264 行 `self._closed_intentionally = False` 之后到
+`hello = await _client.connect()` 替换为下段；原 handlers 注册到 :280 以及
+后续统一 connect 保留）**只替换"构造点"**：
 
 ```text
-        # ── v2 §3.G1 灰度门：配置→能力→特性，逐级判定 ──
-        mode = _a2a_client_mode()
+        # ── v3 G1 工厂：只做能力探测与构造，不在此 connect——
+        # A2A 能力探测定为独立 card GET（voluntary/idempotent），
+        # 真正 lifecycle 提统一由原方法 hello 段处理。
+        mode = self._a2a_mode
         a2a_base = _a2a_base_url_from_ws(self.uri)
         _client = None
-        transport = "v3-ws"
-        if mode != "off" and a2a_base and not self._has_attachments_bound():
-            # 特性门（连接级）：attachments 由上层会话决定进 v3——本类目前
-            # 不持会话附件，故以工厂统一："带附件连接" 划入 v3 的判据放在
-            # _bot_service_selector（调用侧），此处提供 opt-out 属性。
+        if a2a_base and mode in ("grey", "on"):
+            candidate = BotA2aClient(base_url=a2a_base, headers=self.headers)
             try:
-                _client = BotA2aClient(base_url=a2a_base,
-                                        headers=self.headers)
-                await _client.connect()
-                transport = "a2a"
+                await candidate.connect()      # card GET——满载后 hello 从 server_info 读
+                _client = candidate
+                self._transport = "a2a"
             except A2aUnavailableError as e:
-                logger.info("[a2a-gate] probing failed (%s) — v3 path", e)
-                _client = None
-                if mode == "on":
-                    raise RuntimeError(
-                        f"A2A_CLIENT_MODE=on but capability unavailable: {e}")
+                if mode == "on":               # 16-10 行为表：fail-fast
+                    raise
+                logger.info("[a2a-gate] capability unavailable (%s) — v3", e)
         if _client is None:
             from secbaas.community.core.service.bot_run._bot_websocket_client import (
                 BotWebSocketClient,
@@ -905,24 +1071,58 @@ def _a2a_base_url_from_ws(uri: str) -> str | None:
             _client = BotWebSocketClient(
                 uri=self.uri, client_id=self.client_id,
                 client_version=self.client_version, headers=self.headers)
-            await _client.connect()
-        self._client = _client
-        self._transport = transport
-        logger.info("AsyncChatClient connected via %s", transport)
+            self._transport = "v3-ws"
 ```
 
-`__init__` 增补成员：`self._transport: str = "v3-ws"`。
-特性门 `_has_attachments_bound()` 是简化门——真实附件按附件请求存在时由
-`_send_chat_request` 走 v3 客户端的单连判断不可行（一连接一条 transport）。
-**本计划的取舍**：文件级 `chat_send` attachments 参数在 A2A 客户端返回
-`ATTACHMENTS_UNSUPPORTED` 硬错（B1 已落），不做静默；**调用层**（`_claude_service`
-之类的会话级）的连接选择按服务类型在 B3（后补任务）决定——1b 灰度范围的
-连接全部为纯对话（无附件）服务，已有的附件服务连接则继续 v3。
-`_GATED_METHODS` 语义对应不变。
+原方法.handlers 注册段（:271-280 on_event×7 + on_disconnect）**固定不动**，
+两个 duck 面等义。原方法末端的统一 connect 修改为分支一——A2A 已由探测
+connect，取 server_info；v3 照旧：
 
-**实现校验点**：رده核对 `_async_chat_client` 里 `self._client.server_info`、
-`is_connected` 的消费点（BaaS 侧其他文件的 pool 健康检查逻辑）不受传输差异
-影响——`connected`/`server_info` 面已对齐。
+```text
+        if self._transport == "a2a":
+            hello = _client.server_info                # 探测期已建立
+        else:
+            hello = await _client.connect()
+        self._client = _client
+```
+
+模块级 helper 保留 `_a2a_base_url_from_ws`；**删除** `_a2a_client_mode()`
+的 os.environ 读法（R16-10 违规）——`a2a_mode` 由 composition root 注入：
+`_runner.py` 构造 AsyncChatClient 时从 user_config 的 `a2a_client_mode`
+读（schema 登记、默认 "off"）——实现者 cat `_runner.py` 现有注入面对齐
+（发现式；_DI 注入点在仓库 config 边界惯例里）。
+
+### B3（16-5）附件请求级特性门——v3 重路由
+
+**设计**：连接池复用使"连接时预判附件"不可行（评审 16-5 成立）。1b 落
+**请求级路由**：`AsyncChatClient._send_chat_request`（:738-741
+`await self._client.chat_send(...)` 前置）插入特性门：
+
+```text
+        # 16-5：A2A 连接上的附件请求 → 经 v3 专用连接重路由（不静默丢参，
+        # 不硬错给调用方）。v3 连接由此类懒加载持有（复用 self.uri/鉴权；
+        # 附件是 1b 灰度面里的边缘路径——专用单连接即够，无需池化）。
+        if attachments and isinstance(self._client, BotA2aClient):
+            if self._v3fallback_client is None:
+                self._v3fallback_client = BotWebSocketClient(
+                    uri=self.uri, client_id=self.client_id,
+                    client_version=self.client_version,
+                    headers=self.headers)
+                await self._v3fallback_client.connect()
+                # 事件双登记（编排层回调对 A2A/v3 两个传输一致收流）
+                for name, cb in self._event_handlers_to_rebind():
+                    self._v3fallback_client.on_event(name, cb)
+                self._v3fallback_client.on_disconnect(self._on_disconnect)
+            send_result = await self._v3fallback_client.chat_send(...)
+        else:
+            send_result = await self._client.chat_send(...)
+```
+
+`_event_handlers_to_rebind()` 是新私有方法：返回 `self._client._event_handlers`
+的七项快照 + disconnect callback——用于给 fallback 连接重挂回调（消费者
+收流不因传输切换丢事件）。close() 时 fallback 连接一并关闭。
+**测试**：A2A 连接成功后发带附件请求——路由走 v3 且附件参数原样出现在
+WS 帧断言中（fake ws server 端 frame pin）；无附件请求不受影响。
 
 **Commit**: `feat(a2a): BaaS dual-transport factory with gated grey-release (G1)`
 
