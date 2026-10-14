@@ -660,7 +660,7 @@ export default function Approval() {
 
   const approverList = data.approverIds.map((id, i) => ({
     id,
-    name: data.approverNames[i] || id,
+    name: data.approverNames[i]?.trim() || id,
     approved: data.approvedBy.includes(id),
     rejected: data.rejectedBy.includes(id),
     isCurrent: false,
@@ -790,7 +790,7 @@ export default function Approval() {
         </div>
 
         {/* ── Detail Card ────────────────────────────────────────────── */}
-        {!['SUPPLEMENT_COMPLETE', 'HUMAN_CONFIRM'].includes(data.approvalType ?? '') && (
+        {(approverList.length > 0 || !['SUPPLEMENT_COMPLETE', 'HUMAN_CONFIRM'].includes(data.approvalType ?? '')) && (
           <div style={{
             background: COLOR.card,
             borderRadius: 16,
@@ -801,7 +801,7 @@ export default function Approval() {
           }}>
             {/* Approver section */}
             <div style={{ padding: '16px', borderBottom: `1px solid ${COLOR.borderLight}` }}>
-              <div style={{ fontSize: 12, color: COLOR.textTertiary, marginBottom: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.5 }}>审批人</div>
+              <div style={{ fontSize: 12, color: COLOR.textTertiary, marginBottom: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.5 }}>可处理人员</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {approverList.map((a) => {
                   const avatar = getAvatarColor(a.name)
@@ -837,6 +837,7 @@ export default function Approval() {
                       {a.approved && '✓ '}
                       {a.rejected && '✗ '}
                       {a.name}
+                      {a.name !== a.id && <span style={{ fontSize: 12, color: COLOR.textSecondary }}>{a.id}</span>}
                       {a.isCurrent && <span style={{ fontSize: 11, color: COLOR.primary, fontWeight: 500 }}>(我)</span>}
                     </div>
                   )
@@ -844,6 +845,7 @@ export default function Approval() {
               </div>
             </div>
 
+            {!['SUPPLEMENT_COMPLETE', 'HUMAN_CONFIRM'].includes(data.approvalType ?? '') && <>
             {/* Policy */}
             <div style={{ padding: '12px 16px', borderBottom: `1px solid ${COLOR.borderLight}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: 13, color: COLOR.textSecondary }}>审批策略</span>
@@ -864,6 +866,7 @@ export default function Approval() {
                 <span style={{ fontSize: 13, color: COLOR.text }}>{formatTime(data.resolvedAt)}</span>
               </div>
             )}
+            </>}
           </div>
         )}
 
