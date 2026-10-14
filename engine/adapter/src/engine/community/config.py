@@ -568,3 +568,16 @@ def load_file_count_roots(engine: str) -> tuple[Path, tuple[Path, ...]]:
         root = workspace_root().parent
         return root, (root, root.parent / "openclawExt")
     raise FileCountError("unsupported")
+
+
+def get_local_base_url() -> str:
+    """Local base URL for A2A Agent Card generation (interface URL field).
+
+    Composed from the same host/port the adapter is actually serving on —
+    never hardcoded per-environment (single deployment codepath constraint).
+    """
+    import os
+
+    host = os.environ.get("ENGINE_HOST", "127.0.0.1")
+    port = os.environ.get("ENGINE_PORT", "20003")
+    return f"http://{host}:{port}"
