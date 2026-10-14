@@ -75,7 +75,7 @@ def definition(approved: bool) -> dict:
 class Story:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
-        self.token = os.environ["BCS_E2E_DRIVER_TOKEN"]
+        self.token = os.getenv("BCS_E2E_DRIVER_TOKEN", "")
         self.http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         self.groups: list[str] = []
         self.bot: dict = {}
@@ -178,7 +178,7 @@ class Story:
         assert len(pending) == 1, pending
         return pending[0]
 
-    def finish_bot(self, content: str, previous: str) -> None:
+    def finish_bot(self, content: str, previous: str) -> str:
         captured = self.wait("Provider chat.send", lambda: self.request("/control/provider/requests", mock=True)["requests"],
                              lambda items: any(item["body"].get("method") == "chat.send" for item in items))
         requests = [item for item in captured if item["body"].get("method") == "chat.send"]
@@ -197,6 +197,7 @@ class Story:
             headers={"X-BCN-Provider-Id": self.provider["provider_id"], "Authorization": "Bearer " + self.bot["bot_runtime_token"]},
             status=(200, 409)), lambda body: body.get("error") != "transport_conflict")
         assert not response.get("error"), response
+        return request["body"]["id"]
 
     def exercise(self, approved: bool, directory: Path) -> None:
         self.start(approved, directory)

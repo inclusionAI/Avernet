@@ -6,8 +6,8 @@
   `native_mcp`/`mcporter_mcp` profiles. Only explicit V3 negotiation may select
   them; it contains no per-Bot persistence or runtime tool mappings.
 
-- `FixedLoopLimits` defines positive compiler limits for iterations, body nodes,
-  expanded nodes and plan bytes. Bootstrap validates and injects the limits;
+- `FixedLoopLimits` defines positive compiler limits for nesting depth, iterations,
+  body nodes, expanded nodes and plan bytes. Bootstrap validates and injects the limits;
   configuring them does not enable v2 Run execution.
 
 `queued_provider_headers` defines the explicit non-sensitive routing allowlist,
@@ -76,8 +76,8 @@ The crate owns configuration contract types and their semantics. It does not own
 
 ## Tests
 
-- `cargo test --package bcs-config-api --manifest-path src/bcs/Cargo.toml`
-- `cargo check --package bcs-config-api --all-targets --manifest-path src/bcs/Cargo.toml`
+- `cargo test --package bcs-config-api --manifest-path apps/bcs/Cargo.toml`
+- `cargo check --package bcs-config-api --all-targets --manifest-path apps/bcs/Cargo.toml`
 
 ## Eventing polling configuration
 

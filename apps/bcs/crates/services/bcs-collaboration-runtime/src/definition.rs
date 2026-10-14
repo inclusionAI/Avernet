@@ -7,6 +7,8 @@ use bcs_domain::{
 };
 use bcs_service_api::CollaborationRuntimeError;
 
+use crate::fixed_loop::{FIXED_LOOP_COMPILER_VERSION, NESTED_FIXED_LOOP_COMPILER_VERSION};
+
 #[derive(Debug, Clone)]
 pub struct CompiledStateMachine {
     pub definition: CollaborationDefinition,
@@ -22,7 +24,54 @@ pub(crate) fn node_execution_metadata(
     Some(bcs_domain::StateMachineNodeExecutionMetadata {
         definition_node_id: meta.definition_node_id.clone(),
         loop_id: meta.loop_id.clone()?, iteration: meta.iteration?, max_iterations: meta.max_iterations?,
+        loop_path: meta.loop_path.clone(),
     })
+}
+
+/// Return the validated outer-to-inner Loop path without rewriting the plan.
+/// Snapshot readers must validate the plan envelope and content hash first.
+pub fn node_loop_path(
+    plan: &bcs_domain::StateMachineExecutionPlan,
+    meta: &bcs_domain::CompiledNodeMetadata,
+) -> Result<Vec<bcs_domain::StateMachineLoopFrame>, CollaborationRuntimeError> {
+    let legacy = match (&meta.loop_id, meta.iteration, meta.max_iterations) {
+        (None, None, None) => None,
+        (Some(loop_id), Some(iteration), Some(max_iterations)) => {
+            Some(bcs_domain::StateMachineLoopFrame {
+                loop_id: loop_id.clone(), iteration, max_iterations,
+            })
+        }
+        _ => return invalid("incomplete Loop execution metadata"),
+    };
+    if legacy.as_ref().is_some_and(|frame| {
+        frame.loop_id.is_empty() || frame.iteration == 0 || frame.iteration > frame.max_iterations
+    }) {
+        return invalid("invalid Loop execution metadata");
+    }
+    match plan.compiler_version.as_str() {
+        FIXED_LOOP_COMPILER_VERSION => {
+            if meta.loop_path.is_some() {
+                return invalid("compiler v1 metadata must omit loop_path");
+            }
+            Ok(legacy.into_iter().collect())
+        }
+        NESTED_FIXED_LOOP_COMPILER_VERSION => match (legacy, meta.loop_path.as_ref()) {
+            (None, None) => Ok(Vec::new()),
+            (None, Some(_)) => invalid("ordinary compiler v2 metadata must omit loop_path"),
+            (Some(_), None) => invalid("compiler v2 Loop metadata requires loop_path"),
+            (Some(legacy), Some(path)) => {
+                if path.is_empty() || path.iter().any(|frame| {
+                    frame.loop_id.is_empty()
+                        || frame.iteration == 0
+                        || frame.iteration > frame.max_iterations
+                }) || path.last() != Some(&legacy) {
+                    return invalid("compiler v2 loop_path is invalid or contradicts the nearest Loop fields");
+                }
+                Ok(path.clone())
+            }
+        },
+        _ => invalid("unsupported execution plan compiler version"),
+    }
 }
 
 /// A loaded v2 plan must map every executable node, including ordinary outer nodes.

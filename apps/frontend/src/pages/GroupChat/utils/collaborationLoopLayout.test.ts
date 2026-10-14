@@ -9,6 +9,47 @@ function fixture(): CollaborationDefinitionGraphPreview {
     nodes: graph.nodes.map((node: object) => ({ ...node, judge: 'execution' in node && (node as { execution?: { definition_node_id: string } }).execution?.definition_node_id === 'review' })) };
 }
 
+function nestedFixture(): CollaborationDefinitionGraphPreview {
+  const graph: CollaborationDefinitionGraphPreview = {
+    graph_mode: 'hierarchical', execution_graph_mode: 'acyclic',
+    loops: {
+      outer: { display_name: 'Outer', max_iterations: 2, entry_node_id: 'prepare', result_node_id: 'assess',
+        body_node_ids: ['prepare', 'inner', 'assess'], continue_outcomes: ['repeat'], break_outcomes: ['done'], exhausted_outcome: 'capped' },
+      'outer/inner': { display_name: 'Inner', max_iterations: 2, entry_node_id: 'draft', result_node_id: 'review',
+        body_node_ids: ['draft', 'review'], continue_outcomes: ['revise'], break_outcomes: ['approved'], exhausted_outcome: 'exhausted' },
+    },
+    nodes: [], edges: [],
+  };
+  const add = (node_id: string, definition_node_id: string, path?: Array<[string, number, number]>, final_output = false) => {
+    graph.nodes.push({ node_id, display_name: definition_node_id, kind: 'bot_task',
+      final_output, judge: ['review', 'assess'].includes(definition_node_id),
+      ...(path ? { execution: { definition_node_id, loop_id: path.at(-1)![0], iteration: path.at(-1)![1],
+        max_iterations: path.at(-1)![2], loop_path: path.map(([loop_id, iteration, max_iterations]) => ({ loop_id, iteration, max_iterations })) } } : {}) });
+  };
+  for (let outer = 1; outer <= 2; outer++) {
+    const outerPath: Array<[string, number, number]> = [['outer', outer, 2]];
+    add(`prepare-${outer}`, 'prepare', outerPath);
+    add(`assess-${outer}`, 'assess', outerPath);
+    graph.edges.push({ source: `prepare-${outer}`, target: `draft-${outer}-1`, outcome: 'complete' });
+    for (let inner = 1; inner <= 2; inner++) {
+      const path: Array<[string, number, number]> = [...outerPath, ['inner', inner, 2]];
+      add(`draft-${outer}-${inner}`, 'draft', path);
+      add(`review-${outer}-${inner}`, 'review', path);
+      graph.edges.push({ source: `draft-${outer}-${inner}`, target: `review-${outer}-${inner}`, outcome: 'complete' });
+      graph.edges.push(inner < 2
+        ? { source: `review-${outer}-${inner}`, target: `draft-${outer}-${inner + 1}`, outcome: 'revise', loop_route: { kind: 'continue', logical_outcome: 'revise' } }
+        : { source: `review-${outer}-${inner}`, target: `assess-${outer}`, outcome: 'revise', loop_route: { kind: 'exhausted', logical_outcome: 'exhausted' } });
+      graph.edges.push({ source: `review-${outer}-${inner}`, target: `assess-${outer}`, outcome: 'approved', loop_route: { kind: 'break', logical_outcome: 'approved' } });
+    }
+  }
+  add('publish', 'publish', undefined, true);
+  graph.edges.push({ source: 'assess-1', target: 'prepare-2', outcome: 'repeat', loop_route: { kind: 'continue', logical_outcome: 'repeat' } },
+    { source: 'assess-1', target: 'publish', outcome: 'done', loop_route: { kind: 'break', logical_outcome: 'done' } },
+    { source: 'assess-2', target: 'publish', outcome: 'repeat', loop_route: { kind: 'exhausted', logical_outcome: 'capped' } },
+    { source: 'assess-2', target: 'publish', outcome: 'done', loop_route: { kind: 'break', logical_outcome: 'done' } });
+  return graph;
+}
+
 describe('Logical Loop layout', () => {
   it('shows one two-node body, one back edge, an approval exit and a fallback exit without editing execution facts', () => {
     const graph = fixture(), before = JSON.stringify(graph);
@@ -112,5 +153,116 @@ describe('Logical Loop layout', () => {
     expect(Math.abs(a.position.x - b.position.x)).toBeGreaterThan(210);
     expect(layout.nodes.find((node) => node.id === 'review-1')!.position.y).toBeGreaterThan(a.position.y);
     expect(layout.edges.filter((edge) => edge.target === 'review-1')).toHaveLength(2);
+  });
+
+  it('builds recursive containers from full paths without merging the child into its parent', () => {
+    const graph = nestedFixture();
+    expect(hasLogicalLoopDescriptors(graph)).toBe(true);
+    const layout = buildCollaborationLoopLayout(graph, ['prepare-1'], {});
+    expect(layout.groups.map((group) => group.loopId)).toEqual(['outer', 'outer/inner']);
+    const outer = layout.groups[0], inner = layout.groups[1];
+    expect(inner.parentId).toBe(outer.id);
+    expect(inner.position.x).toBeGreaterThan(0);
+    expect(inner.position.x + inner.width).toBeLessThan(outer.width);
+    expect(layout.nodes.map((node) => node.id).sort()).toEqual([
+      'assess-1', 'draft-1-1', 'prepare-1', 'publish', 'review-1-1',
+    ]);
+    expect(layout.nodes.find((node) => node.id === 'draft-1-1')!.parentId).toBe(inner.id);
+    expect(layout.nodes.find((node) => node.id === 'prepare-1')!.parentId).toBe(outer.id);
+    expect(layout.edges.filter((edge) => edge.data?.returnEdge)).toHaveLength(2);
+    expect(layout.edges.some((edge) => edge.source === 'review-1-1' && edge.target === 'assess-1'
+      && edge.data?.loopRoute.kind === 'exhausted')).toBe(true);
+  });
+
+  it('keeps identical parent and child Loop IDs distinct by their full descriptor paths', () => {
+    const graph = nestedFixture();
+    graph.loops!['outer/outer'] = graph.loops!['outer/inner'];
+    delete graph.loops!['outer/inner'];
+    graph.loops!.outer.body_node_ids = graph.loops!.outer.body_node_ids
+      .map((id) => id === 'inner' ? 'outer' : id);
+    graph.nodes.forEach((node) => {
+      if (node.execution?.loop_path?.length === 2) {
+        node.execution.loop_id = 'outer';
+        node.execution.loop_path[1].loop_id = 'outer';
+      }
+    });
+    const layout = buildCollaborationLoopLayout(graph, ['prepare-1'], {});
+    expect(layout.groups.map((group) => group.loopId)).toEqual(['outer', 'outer/outer']);
+    expect(layout.groups[1].parentId).toBe(layout.groups[0].id);
+    expect(layout.nodes.find((node) => node.id === 'draft-1-1')!.parentId).toBe(layout.groups[1].id);
+  });
+
+  it('lays out a third-level HumanInput Loop inside the selected parent instances', () => {
+    const graph = nestedFixture();
+    graph.loops!['outer/inner'].body_node_ids = ['draft', 'approval', 'review'];
+    graph.loops!['outer/inner/approval'] = {
+      display_name: 'Human approval', max_iterations: 2,
+      entry_node_id: 'human', result_node_id: 'human', body_node_ids: ['human'],
+      continue_outcomes: ['again'], break_outcomes: ['done'], exhausted_outcome: 'timed_out',
+    };
+    for (let outer = 1; outer <= 2; outer++) {
+      for (let inner = 1; inner <= 2; inner++) {
+        const draft = `draft-${outer}-${inner}`, review = `review-${outer}-${inner}`;
+        graph.edges = graph.edges.filter((edge) => !(edge.source === draft && edge.target === review));
+        for (let human = 1; human <= 2; human++) {
+          graph.nodes.push({
+            node_id: `human-${outer}-${inner}-${human}`, display_name: 'Human approval',
+            kind: 'human_input', final_output: false,
+            execution: {
+              definition_node_id: 'human', loop_id: 'approval', iteration: human, max_iterations: 2,
+              loop_path: [
+                { loop_id: 'outer', iteration: outer, max_iterations: 2 },
+                { loop_id: 'inner', iteration: inner, max_iterations: 2 },
+                { loop_id: 'approval', iteration: human, max_iterations: 2 },
+              ],
+            },
+          });
+        }
+        graph.edges.push(
+          { source: draft, target: `human-${outer}-${inner}-1`, outcome: 'complete' },
+          { source: `human-${outer}-${inner}-1`, target: `human-${outer}-${inner}-2`, outcome: 'again',
+            loop_route: { kind: 'continue', logical_outcome: 'again' } },
+          { source: `human-${outer}-${inner}-1`, target: review, outcome: 'done',
+            loop_route: { kind: 'break', logical_outcome: 'done' } },
+          { source: `human-${outer}-${inner}-2`, target: review, outcome: 'again',
+            loop_route: { kind: 'exhausted', logical_outcome: 'timed_out' } },
+          { source: `human-${outer}-${inner}-2`, target: review, outcome: 'done',
+            loop_route: { kind: 'break', logical_outcome: 'done' } },
+        );
+      }
+    }
+    const layout = buildCollaborationLoopLayout(graph, ['prepare-1'], {});
+    expect(layout.groups.map((group) => group.loopId)).toEqual([
+      'outer', 'outer/inner', 'outer/inner/approval',
+    ]);
+    expect(layout.groups[2].parentId).toBe(layout.groups[1].id);
+    const human = layout.nodes.find((node) => node.id === 'human-1-1-1')!;
+    expect(human.parentId).toBe(layout.groups[2].id);
+    expect(human.data.definition.kind).toBe('human_input');
+    expect(layout.edges.filter((edge) => edge.data?.returnEdge)).toHaveLength(3);
+  });
+
+  it('keeps sibling child Loops separate inside one parent container', () => {
+    const graph = nestedFixture();
+    graph.loops!['outer/inner_b'] = { ...graph.loops!['outer/inner'], display_name: 'Inner B' };
+    graph.loops!.outer.body_node_ids = ['prepare', 'inner', 'inner_b', 'assess'];
+    const childIds = new Set(graph.nodes.filter((node) => node.execution?.loop_path?.length === 2)
+      .map((node) => node.node_id));
+    const siblingId = (id: string) => childIds.has(id) ? `sibling-${id}` : id;
+    graph.nodes.push(...graph.nodes.filter((node) => childIds.has(node.node_id)).map((node) => ({
+      ...node, node_id: siblingId(node.node_id),
+      execution: { ...node.execution!, loop_id: 'inner_b', loop_path: node.execution!.loop_path!
+        .map((frame, index) => index === 1 ? { ...frame, loop_id: 'inner_b' } : { ...frame }) },
+    })));
+    graph.edges.push(...graph.edges.filter((edge) => childIds.has(edge.source) || childIds.has(edge.target))
+      .map((edge) => ({ ...edge, source: siblingId(edge.source), target: siblingId(edge.target) })));
+    const layout = buildCollaborationLoopLayout(graph, ['prepare-1'], {});
+    const outer = layout.groups.find((group) => group.loopId === 'outer')!;
+    const siblings = ['outer/inner', 'outer/inner_b']
+      .map((path) => layout.groups.find((group) => group.loopId === path)!);
+    expect(siblings.every((group) => group.parentId === outer.id)).toBe(true);
+    expect(siblings[0].position.y).toBe(siblings[1].position.y);
+    const [left, right] = siblings.slice().sort((a, b) => a.position.x - b.position.x);
+    expect(left.position.x + left.width).toBeLessThan(right.position.x);
   });
 });

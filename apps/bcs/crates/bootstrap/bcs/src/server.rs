@@ -2487,6 +2487,7 @@ impl Default for BcsServerState {
             .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
             .with_fixed_loop_limits(config.collaboration.fixed_loop_limits)
             .with_loop_execution_enabled(config.collaboration.loop_execution_enabled)
+            .with_nested_loop_execution_enabled(config.collaboration.nested_loop_execution_enabled)
             .with_history_persistence(config.state_machine_history.persistence_enabled)
             .with_history_cutoff_timestamp(config.message_history.state_machine_cutoff_timestamp)
             .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
@@ -4106,6 +4107,7 @@ impl BcsServer {
             .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
             .with_fixed_loop_limits(config.collaboration.fixed_loop_limits)
             .with_loop_execution_enabled(config.collaboration.loop_execution_enabled)
+            .with_nested_loop_execution_enabled(config.collaboration.nested_loop_execution_enabled)
             .with_history_persistence(config.state_machine_history.persistence_enabled)
             .with_history_cutoff_timestamp(config.message_history.state_machine_cutoff_timestamp)
             .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
@@ -4986,6 +4988,7 @@ impl BcsServer {
                 .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
                 .with_fixed_loop_limits(config.collaboration.fixed_loop_limits)
                 .with_loop_execution_enabled(config.collaboration.loop_execution_enabled)
+                .with_nested_loop_execution_enabled(config.collaboration.nested_loop_execution_enabled)
             .with_history_persistence(config.state_machine_history.persistence_enabled)
             .with_history_cutoff_timestamp(config.message_history.state_machine_cutoff_timestamp)
                 .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
@@ -5495,6 +5498,7 @@ impl BcsServer {
 
     fn spawn_state_machine_progression_scanner(&self) -> crate::state_machine_progression_scanner::ProgressionRecoveryTask {
         tracing::info!(loop_execution_enabled = self.config.collaboration.loop_execution_enabled,
+            nested_loop_execution_enabled = self.config.collaboration.nested_loop_execution_enabled,
             "State Machine progression recovery started");
         crate::state_machine_progression_scanner::spawn(
             self.state.leader_election.clone(),
@@ -6140,6 +6144,7 @@ mod tests {
             session_id: "session-1".to_string(),
             run_id: "run-1".to_string(),
             node_id: "review".to_string(),
+            execution: None,
             display_name: "Review".to_string(),
             instruction: "Review the draft".to_string(),
             assignee_actor_id: "human-1".to_string(),

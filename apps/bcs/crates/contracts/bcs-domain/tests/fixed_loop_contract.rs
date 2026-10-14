@@ -1,4 +1,7 @@
-use bcs_domain::{CollaborationDefinition, LoopContext, StateMachineNodeDefinition};
+use bcs_domain::{
+    CollaborationDefinition, LoopContext, StateMachineLoopFrame,
+    StateMachineNodeDefinition, StateMachineNodeExecutionMetadata,
+};
 use serde_json::json;
 
 #[test]
@@ -38,6 +41,29 @@ fn loop_context_distinguishes_explicit_null_from_missing_previous_result() {
         "output": "Persisted result", "completed_at": 123
     }});
     assert_eq!(serde_json::to_value(serde_json::from_value::<LoopContext>(second.clone()).unwrap()).unwrap(), second);
+}
+
+#[test]
+fn loop_path_is_additive_and_legacy_payload_bytes_stay_stable() {
+    let execution = StateMachineNodeExecutionMetadata {
+        definition_node_id: "review".into(), loop_id: "rounds".into(),
+        iteration: 1, max_iterations: 3, loop_path: None,
+    };
+    assert_eq!(
+        serde_json::to_string(&execution).unwrap(),
+        r#"{"definition_node_id":"review","loop_id":"rounds","iteration":1,"max_iterations":3}"#,
+    );
+    let path = vec![
+        StateMachineLoopFrame { loop_id: "outer".into(), iteration: 2, max_iterations: 2 },
+        StateMachineLoopFrame { loop_id: "inner".into(), iteration: 1, max_iterations: 3 },
+    ];
+    let context = LoopContext {
+        loop_id: "inner".into(), iteration: 1, max_iterations: 3,
+        loop_path: Some(path.clone()), previous_result: None,
+    };
+    let value = serde_json::to_value(&context).unwrap();
+    assert_eq!(value["loop_path"], serde_json::to_value(path).unwrap());
+    assert_eq!(serde_json::from_value::<LoopContext>(value).unwrap(), context);
 }
 
 #[test]

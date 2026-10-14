@@ -38,6 +38,7 @@ mod publication;
 mod terminal_im;
 mod recovery_gap;
 mod terminal_cleanup;
+mod branch_skip;
 
 const CURRENT_GROUP_VERSION_SENTINEL: i32 = 2_147_483_647;
 const RUN_OPENING_MESSAGE_OVERRIDE_PARAM_INDEX: usize = 13;
@@ -367,6 +368,12 @@ impl GroupRuntimeBindingRepoPort for MemoryCollaborationStore {
 
 #[async_trait]
 impl StateMachineRunRepoPort for MemoryCollaborationStore {
+    async fn get_node_statuses(&self, run: &str, nodes: &[String]) -> ServiceResult<BTreeMap<String, StateMachineNodeStatus>> {
+        self.branch_node_statuses(run, nodes).await
+    }
+    async fn skip_nodes(&self, run: &str, nodes: &[String], at: u64) -> ServiceResult<bool> {
+        self.skip_branch_nodes(run, nodes, at).await
+    }
     async fn accept_history_message(&self, command: AcceptStateMachineHistory) -> ServiceResult<Option<StateMachineHistoryCheckpoint>> {
         let checkpoint = history::checkpoint("memory", command.payload.clone())?;
         Ok(self.commit_eventful_transition(StateMachineEventfulTransition::AcceptHistory(command)).await?.then_some(checkpoint))
@@ -1994,6 +2001,12 @@ impl GroupRuntimeBindingRepoPort for MySqlCollaborationStore {
 
 #[async_trait]
 impl StateMachineRunRepoPort for MySqlCollaborationStore {
+    async fn get_node_statuses(&self, run: &str, nodes: &[String]) -> ServiceResult<BTreeMap<String, StateMachineNodeStatus>> {
+        self.branch_node_statuses(run, nodes).await
+    }
+    async fn skip_nodes(&self, run: &str, nodes: &[String], at: u64) -> ServiceResult<bool> {
+        self.skip_branch_nodes(run, nodes, at).await
+    }
     async fn accept_history_message(&self, command: AcceptStateMachineHistory) -> ServiceResult<Option<StateMachineHistoryCheckpoint>> {
         let checkpoint = history::checkpoint(&self.env, command.payload.clone())?;
         Ok(self.commit_eventful_transition(StateMachineEventfulTransition::AcceptHistory(command)).await?.then_some(checkpoint))

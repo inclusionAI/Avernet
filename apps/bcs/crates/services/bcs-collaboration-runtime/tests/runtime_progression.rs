@@ -41,6 +41,7 @@ use bcs_service_api::{
     StartSessionStateMachineRunCommand, StartStateMachineRunCommand,
     StateMachineDefinitionRepoPort, StateMachineNodeSubStatus, StateMachineResultPublishCommand,
     StateMachineResultPublisherPort, StateMachineRunAccessCommand, StateMachineRunRepoPort,
+    ValidateCollaborationDefinitionYamlCommand,
 };
 use bcs_service_api::{CreateOrReactivateCommand, NewSessionParams, SessionKind};
 use bcs_session::{SessionManagementServiceImpl, SessionManagementWithRuntimeCleanup};
@@ -3347,7 +3348,7 @@ async fn fixed_loop_preview_honors_server_limits_and_cannot_start_or_configure_v
         ..Default::default()
     });
     let yaml = include_str!("fixtures/fixed_loop.yaml");
-    let command = || bcs_service_api::ValidateCollaborationDefinitionYamlCommand {
+    let command = || ValidateCollaborationDefinitionYamlCommand {
         definition_yaml: yaml.into(), judge_available: true,
     };
     assert!(!runtime.validate_definition_yaml(command()).await.unwrap().valid);

@@ -145,6 +145,7 @@ pub struct CollaborationRuntime {
     loop_instrumentation: Option<Arc<dyn bcs_service_api::StateMachineLoopInstrumentationHook>>,
     fixed_loop_limits: bcs_config_api::FixedLoopLimits,
     loop_execution_enabled: bool,
+    nested_loop_execution_enabled: bool,
     definitions: Arc<dyn StateMachineDefinitionRepoPort>,
     bindings: Arc<dyn GroupRuntimeBindingRepoPort>,
     runs: Arc<dyn StateMachineRunRepoPort>,
@@ -199,6 +200,7 @@ impl CollaborationRuntime {
             loop_instrumentation: None,
             fixed_loop_limits: bcs_config_api::FixedLoopLimits::default(),
             loop_execution_enabled: false,
+            nested_loop_execution_enabled: false,
             definitions,
             bindings,
             runs,
@@ -247,6 +249,12 @@ impl CollaborationRuntime {
         self
     }
 
+    /// Controls admission of new nested Loop Runs; recovery never consults this switch.
+    pub fn with_nested_loop_execution_enabled(mut self, enabled: bool) -> Self {
+        self.nested_loop_execution_enabled = enabled;
+        self
+    }
+
     fn compile_for_execution(
         &self,
         definition: CollaborationDefinition,
@@ -264,10 +272,20 @@ impl CollaborationRuntime {
                 "v2 execution is disabled until runtime and recovery support is enabled".into(),
             ));
         }
-        crate::fixed_loop::compile_authoring_definition_with_instrumentation(definition, &self.fixed_loop_limits, self.loop_instrumentation.as_deref())
-            .map_err(|error| CollaborationRuntimeError::InvalidDefinition(format!(
+        let compiled = crate::fixed_loop::compile_authoring_definition_with_instrumentation(
+            definition, &self.fixed_loop_limits, self.loop_instrumentation.as_deref(),
+        ).map_err(|error| CollaborationRuntimeError::InvalidDefinition(format!(
                 "{} {}: {}", error.code, error.path, error.message
-            )))
+            )))?;
+        if compiled.plan.as_ref().is_some_and(|plan|
+            plan.compiler_version == crate::fixed_loop::NESTED_FIXED_LOOP_COMPILER_VERSION)
+            && !self.nested_loop_execution_enabled
+        {
+            return Err(CollaborationRuntimeError::InvalidDefinition(
+                "state_machine.loop.nesting execution is not enabled for new Runs".into(),
+            ));
+        }
+        Ok(compiled)
     }
 
     pub fn with_bot_run_context(mut self, bot_run_context: Arc<dyn BotRunContextPort>) -> Self {
@@ -590,6 +608,7 @@ impl CollaborationRuntime {
         upstream_artifacts.sort_by(|left, right| left.node_id.cmp(&right.node_id));
         Ok(PendingHumanNodeView {
             node_id: node_run.node_id.clone(),
+            execution: crate::definition::execution_metadata_for_node(compiled, &node_run.node_id)?,
             display_name: node.display_name.clone(),
             instruction: node.instruction.clone().unwrap_or_default(),
             response_ref: format!("{}/{}", run.run_id, node_run.node_id),
@@ -759,6 +778,7 @@ impl CollaborationRuntime {
             session_id: run.session_id.clone(),
             run_id: run.run_id.clone(),
             node_id: node_id.to_string(),
+            execution: pending.execution.clone(),
             display_name: pending.display_name,
             instruction: pending.instruction,
             assignee_actor_id,
@@ -1656,20 +1676,10 @@ impl CollaborationRuntime {
             .unwrap_or(&[]);
         let mut protected_targets = HashSet::new();
         collect_reachable_targets(state_machine, selected_targets, &mut protected_targets);
-        for (outcome, transition) in &node.transitions {
-            if outcome == selected_outcome {
-                continue;
-            }
-            self.skip_branch_targets(
-                state_machine,
-                run,
-                transition.targets.as_slice(),
-                skipped_at,
-                &protected_targets,
-            )
-            .await?;
-        }
-        Ok(())
+        let unselected_targets = node.transitions.iter()
+            .filter(|(outcome, _)| outcome.as_str() != selected_outcome)
+            .flat_map(|(_, transition)| transition.targets.iter().cloned()).collect::<Vec<_>>();
+        self.skip_branch_targets(state_machine, run, &unselected_targets, skipped_at, &protected_targets).await
     }
 
     async fn skip_branch_targets(
@@ -1680,41 +1690,51 @@ impl CollaborationRuntime {
         skipped_at: u64,
         protected_targets: &HashSet<String>,
     ) -> Result<(), CollaborationRuntimeError> {
-        let mut visited = HashSet::new();
-        let mut stack = initial_targets.to_vec();
-        while let Some(node_id) = stack.pop() {
-            if !visited.insert(node_id.clone()) || protected_targets.contains(&node_id) {
-                continue;
+        use bcs_service_api::port::repo::collaboration::STATE_MACHINE_NODE_BATCH_LIMIT;
+        let mut reachable = HashSet::new();
+        collect_reachable_targets(state_machine, initial_targets, &mut reachable);
+        let mut candidates: Vec<_> = reachable.difference(protected_targets).cloned().collect();
+        candidates.sort();
+        // A raced ancestor invalidates its entire write batch. Refresh scalar
+        // statuses and recalculate traversal, with bounded contention retries.
+        for _ in 0..3 {
+            let mut statuses = BTreeMap::new();
+            for ids in candidates.chunks(STATE_MACHINE_NODE_BATCH_LIMIT) {
+                statuses.extend(self.runs.get_node_statuses(&run.run_id, ids).await?);
             }
-            let Some(node_run) = self.runs.get_node_run(&run.run_id, &node_id).await? else {
-                continue;
-            };
-            if node_run.status != StateMachineNodeStatus::Skipped
-                && !crate::progression::is_unstarted(node_run.status)
-            {
-                continue;
-            }
-            if node_run.status != StateMachineNodeStatus::Skipped {
-                let skipped = self.runs.skip_node(&run.run_id, &node_id, skipped_at).await?;
-                if !skipped {
-                    let current = self.runs.get_node_run(&run.run_id, &node_id).await?;
-                    if !current.is_some_and(|node| node.status == StateMachineNodeStatus::Skipped) {
-                        continue;
-                    }
-                } else {
-                    log_state_machine_transition(run, &node_id, "skipped", &[], MessageLogStatus::Skipped);
+            let mut visited = HashSet::new();
+            let mut stack = initial_targets.to_vec();
+            let mut pending = Vec::new();
+            while let Some(node_id) = stack.pop() {
+                if !visited.insert(node_id.clone()) || protected_targets.contains(&node_id) { continue; }
+                match statuses.get(&node_id) {
+                    Some(StateMachineNodeStatus::Skipped) => {},
+                    Some(status) if crate::progression::is_unstarted(*status) => pending.push(node_id.clone()),
+                    _ => continue, // missing, Running or terminal nodes fence their descendants
+                }
+                if let Some(node) = state_machine.nodes.get(&node_id) {
+                    stack.extend(node.transitions.values().flat_map(|transition| transition.targets.iter().cloned()));
                 }
             }
-            let Some(node) = state_machine.nodes.get(&node_id) else {
-                continue;
-            };
-            for transition in node.transitions.values() {
-                for target in &transition.targets {
-                    stack.push(target.clone());
+            let mut raced = false;
+            // DFS pre-order places each traversed ancestor before descendants.
+            // Earlier batches are permanently Skipped; within a batch, CAS is
+            // all-or-nothing so a dispatch race cannot skip past a Running node.
+            for ids in pending.chunks(STATE_MACHINE_NODE_BATCH_LIMIT) {
+                if !self.runs.skip_nodes(&run.run_id, ids, skipped_at).await? {
+                    raced = true;
+                    break;
                 }
+                for node_id in ids {
+                    log_state_machine_transition(run, node_id, "skipped", &[], MessageLogStatus::Skipped);
+                }
+            }
+            if !raced { return Ok(()); }
+            if !self.runs.get_run(&run.run_id).await?.is_some_and(|run| run.status == StateMachineRunStatus::Running) {
+                return Ok(());
             }
         }
-        Ok(())
+        Err(ServiceError::Conflict("branch skip raced with node progression; retry recovery".into()).into())
     }
 
     async fn all_upstreams_completed(
@@ -2423,11 +2443,13 @@ impl CollaborationRuntime {
             self.persist_node_output(&compiled, &group, &run, node).await?;
         }
         let progression = crate::progression::derive(&compiled, run_id, &nodes)?;
-        for node_id in &progression.skip {
+        for node_ids in progression.skip.chunks(bcs_service_api::port::repo::collaboration::STATE_MACHINE_NODE_BATCH_LIMIT) {
             if !self.progression_run_is_active(run_id).await? { return Ok(()); }
-            self.runs.skip_node(run_id, node_id, bcs_protocol::now_ms()).await?;
+            if !self.runs.skip_nodes(run_id, node_ids, bcs_protocol::now_ms()).await? {
+                return Err(ServiceError::Conflict("recovery skip raced with node progression; retry next scan".into()).into());
+            }
         }
-        // Reload after independent skip commits so joins can observe the
+        // Reload after bounded atomic skip commits so joins can observe the
         // completed barrier in this sweep, including after a partial skip.
         let progression = if progression.skip.is_empty() {
             progression
@@ -2633,7 +2655,10 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         &self,
         cmd: ValidateCollaborationDefinitionYamlCommand,
     ) -> Result<CollaborationDefinitionValidationOutcome, CollaborationRuntimeError> {
-        Ok(validate_authoring_definition_yaml_with_instrumentation(cmd, &self.fixed_loop_limits, self.loop_instrumentation.as_deref(), self.loop_execution_enabled))
+        Ok(validate_authoring_definition_yaml_with_instrumentation(
+            cmd, &self.fixed_loop_limits, self.loop_instrumentation.as_deref(),
+            self.loop_execution_enabled, self.nested_loop_execution_enabled,
+        ))
     }
 
     async fn get_session_state_machine_permission(
@@ -2768,7 +2793,8 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             validate_authoring_definition_yaml_with_instrumentation(ValidateCollaborationDefinitionYamlCommand {
                 definition_yaml: cmd.definition_yaml.clone(),
                 judge_available: cmd.judge_available,
-            }, &self.fixed_loop_limits, self.loop_instrumentation.as_deref(), self.loop_execution_enabled);
+            }, &self.fixed_loop_limits, self.loop_instrumentation.as_deref(),
+                self.loop_execution_enabled, self.nested_loop_execution_enabled);
         if !validation.valid {
             let details = validation
                 .errors
@@ -3261,6 +3287,14 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         if loaded.plan.is_some() && !self.loop_execution_enabled {
             return Err(CollaborationRuntimeError::InvalidDefinition(
                 "v2 rerun execution is disabled until runtime and recovery support is enabled".into(),
+            ));
+        }
+        if loaded.plan.as_ref().is_some_and(|plan|
+            plan.compiler_version == crate::fixed_loop::NESTED_FIXED_LOOP_COMPILER_VERSION)
+            && !self.nested_loop_execution_enabled
+        {
+            return Err(CollaborationRuntimeError::InvalidDefinition(
+                "state_machine.loop.nesting rerun admission is not enabled".into(),
             ));
         }
         let compiled = loaded.execution;
@@ -6284,7 +6318,7 @@ fn state_machine_human_input_prompt_metadata(
     pending: &PendingHumanNodeView,
     assignee_actor_ids: &[String],
 ) -> Value {
-    serde_json::json!({
+    let mut value = serde_json::json!({
         "state_machine": {
             "run_id": run.run_id.clone(),
             "definition_id": run.definition_id.clone(),
@@ -6297,7 +6331,11 @@ fn state_machine_human_input_prompt_metadata(
             "response_ref": pending.response_ref,
             "timeout_deadline_ms": pending.timeout_deadline_ms,
         }
-    })
+    });
+    if let Some(execution) = &pending.execution {
+        value["state_machine"]["execution"] = serde_json::json!(execution);
+    }
+    value
 }
 
 fn state_machine_panel_metadata(run: &StateMachineRun, component: Option<&str>) -> Value {

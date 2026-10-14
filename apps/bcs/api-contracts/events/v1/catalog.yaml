@@ -108,7 +108,8 @@ events:
     content_fields: [input]
     data_schema: "#/$defs/StateMachineRunStartedData"
   # Node events carry optional execution metadata from the immutable Run plan.
-  # iteration is 1-based and independent of the 0-based retry attempt.
+  # Nested compiler v2 plans add the complete outer-to-inner loop_path; the
+  # nearest iteration is 1-based and independent of the 0-based retry attempt.
   - event_type: state_machine.node.started
     family: state_machine.node.*
     schema_version: "1.0"

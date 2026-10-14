@@ -266,6 +266,8 @@ pub struct ListPendingHumanNodesCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingHumanNodeView {
     pub node_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<bcs_domain::StateMachineNodeExecutionMetadata>,
     pub display_name: String,
     pub instruction: String,
     pub response_ref: String,

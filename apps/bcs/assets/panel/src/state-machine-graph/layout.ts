@@ -26,6 +26,7 @@ export interface GraphLayout {
 
 export interface LoopGroupLayout {
   loopId: string;
+  instanceKey?: string;
   title: string;
   maxIterations: number;
   iteration: number;

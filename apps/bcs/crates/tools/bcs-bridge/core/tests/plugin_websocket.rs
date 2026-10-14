@@ -209,9 +209,13 @@ async fn missing_heartbeat_response_forces_an_authenticated_reconnect() {
 
 #[tokio::test]
 async fn two_bots_keep_same_group_sessions_and_events_isolated() {
+    init_tracing();
     let dir = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let config = config_for(&dir, listener.local_addr().unwrap(), &["worker-1", "worker-2"]);
+    let mut config = config_for(&dir, listener.local_addr().unwrap(), &["worker-1", "worker-2"]);
+    let plugin = config.plugin.as_mut().unwrap();
+    plugin.heartbeat_interval_ms = 20;
+    let held_run_duration = Duration::from_millis(plugin.connect_timeout_ms * 2);
     let peer = BridgePeer { dir, listener, config, version: 3 };
     let (_, shutdown, task) = peer.start().await;
     let (first_id, first) = peer.accept_any(None).await;
@@ -225,14 +229,32 @@ async fn two_bots_keep_same_group_sessions_and_events_isolated() {
         (second, first)
     };
 
-    send_json(&mut bot_a, chat_send("a-send", "run-a", "shared-group", "alpha-only")).await;
-    send_json(&mut bot_b, chat_send("b-send", "run-b", "shared-group", "beta-only")).await;
-    let a_ack = recv_response_without_events(&mut bot_a, "a-send").await;
-    let b_ack = recv_response_without_events(&mut bot_b, "b-send").await;
+    send_json(&mut bot_a, chat_send("a-send", "run-a", "shared-group", "WAIT_OFFLINE alpha-only")).await;
+    send_json(&mut bot_b, chat_send("b-send", "run-b", "shared-group", "WAIT_OFFLINE beta-only")).await;
+    // Service both sockets throughout their runs: waiting for A's final before
+    // reading B can leave B's bot.status unanswered and trigger a reconnect.
+    let ((a_ack, a_final), (b_ack, b_final), ()) = tokio::join!(
+        async {
+            let ack = recv_response_without_events(&mut bot_a, "a-send").await;
+            (ack, recv_application(&mut bot_a, is_final).await)
+        },
+        async {
+            let ack = recv_response_without_events(&mut bot_b, "b-send").await;
+            (ack, recv_application(&mut bot_b, is_final).await)
+        },
+        async {
+            let engine_dir = peer.dir.path();
+            wait_for_file(&engine_dir.join("worker-1/initial-delta")).await;
+            wait_for_file(&engine_dir.join("worker-2/initial-delta")).await;
+            // Keep both runs alive beyond the heartbeat deadline so a fast
+            // engine cannot hide a peer that stops servicing either socket.
+            tokio::time::sleep(held_run_duration).await;
+            std::fs::write(engine_dir.join("worker-1/release-engine"), "release").unwrap();
+            std::fs::write(engine_dir.join("worker-2/release-engine"), "release").unwrap();
+        },
+    );
     assert_eq!(a_ack["payload"]["run_id"], "run-a");
     assert_eq!(b_ack["payload"]["run_id"], "run-b");
-    let a_final = recv_application(&mut bot_a, is_final).await;
-    let b_final = recv_application(&mut bot_b, is_final).await;
     assert!(a_final.to_string().contains("alpha-only"));
     assert!(!a_final.to_string().contains("beta-only"));
     assert!(b_final.to_string().contains("beta-only"));

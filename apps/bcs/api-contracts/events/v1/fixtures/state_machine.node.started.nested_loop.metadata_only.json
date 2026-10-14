@@ -1,0 +1,46 @@
+{
+  "spec_version": "1.0",
+  "event_id": "evt-node-nested-start-1",
+  "event_type": "state_machine.node.started",
+  "schema_version": "1.0",
+  "source": "bcs",
+  "occurred_at": "2026-09-22T10:03:00.000Z",
+  "recorded_at": "2026-09-22T10:03:00.003Z",
+  "subject": {
+    "type": "state_machine.node",
+    "id": "ln-0123456789abcdef0123456789abcdef"
+  },
+  "scope": {
+    "group_id": "group-1",
+    "session_id": "session-1",
+    "run_id": "run-1"
+  },
+  "stream": {
+    "key": "state-machine-run:run-1",
+    "sequence": 8
+  },
+  "actor": {
+    "type": "system",
+    "id": "bcs-eventing"
+  },
+  "correlation_id": "run-1",
+  "data": {
+    "run_id": "run-1",
+    "node_id": "ln-0123456789abcdef0123456789abcdef",
+    "attempt": 0,
+    "execution": {
+      "definition_node_id": "review",
+      "loop_id": "inner",
+      "iteration": 2,
+      "max_iterations": 3,
+      "loop_path": [
+        {"loop_id": "outer", "iteration": 1, "max_iterations": 2},
+        {"loop_id": "inner", "iteration": 2, "max_iterations": 3}
+      ]
+    },
+    "started_at": "2026-09-22T10:03:00.000Z",
+    "predecessor_node_ids": [
+      "ln-fedcba9876543210fedcba9876543210"
+    ]
+  }
+}
