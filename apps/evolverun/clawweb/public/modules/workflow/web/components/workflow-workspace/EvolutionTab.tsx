@@ -195,7 +195,6 @@ function DiagnosisPanel({
         setSelectionNotice('默认不选择建议。请明确勾选本次修复范围；翻页不会自动增选。')
       } else if (changed) {
         setSelectedRepairIds([])
-        setDraftOpen(false)
         detailEpoch.current += 1
         detailRequests.current.clear()
         setRepairDetails({})
@@ -350,7 +349,12 @@ function DiagnosisPanel({
       setDraftOpen(false); setSelectedTaskId(result.taskId); setRepairNotice(`已创建 ${result.taskId}，AIS 将生成可审阅 Pack 草稿，不会自动部署。`)
       resetRequestId(); setRepairRefresh(value => value + 1)
     } catch (error) {
-      setRepairActionError(repairActionFailure(error).message)
+      const failure = repairActionFailure(error)
+      if (failure.action === 'refresh-sources') {
+        setSelectedRepairIds([]); setSelectionItems({}); closeDetail(); resetRequestId()
+        setRepairActionError('建议来源已变化，原选择已清空；重新读取后请确认本次范围。')
+        setRepairRefresh(value => value + 1)
+      } else setRepairActionError(failure.message)
     } finally { setRepairBusy(false) }
   }
   const submitDisposition = async () => {
@@ -379,7 +383,7 @@ function DiagnosisPanel({
 
   const acceptRepairPage = (result: RepairCandidatesResponse) => {
         if (initializedDigest.current && initializedDigest.current !== result.inputDigest) {
-          setSelectedRepairIds([]); setDraftOpen(false)
+          setSelectedRepairIds([])
           initializedDigest.current = result.inputDigest
           detailEpoch.current += 1; detailRequests.current.clear()
           setSelectionItems({}); setRepairDetails({}); setRepairDetailLoading({}); setRepairDetailErrors({})

@@ -6,6 +6,33 @@ import { render, repairApi, repairItem, repairPage, openIssueRepairs, closeIssue
 import EvolutionTab from '../EvolutionTab'
 
 describe('repair selection workspace', () => {
+  it('reloads changed sources and requires a new selection without losing requirements', async () => {
+    let changed = false
+    repairApi.candidates.mockImplementation(() => Promise.resolve({ ...repairPage(), inputDigest: (changed ? 'f' : 'c').repeat(64) }))
+    repairApi.create.mockImplementationOnce(() => {
+      changed = true
+      return Promise.reject({ status: 409, body: JSON.stringify({ code: 'SOURCE_CHANGED' }) })
+    })
+    render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await openIssueRepairs(false)
+    await userEvent.click(await screen.findByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' }))
+    await closeIssue()
+    await userEvent.click(screen.getByRole('button', { name: '生成修复草稿（1）' }))
+    await userEvent.type(screen.getByRole('textbox', { name: '本次修复要求' }), '保留原分支')
+    await userEvent.click(screen.getByRole('button', { name: '生成 Pack 草稿' }))
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' })).not.toBeChecked())
+    expect(screen.getByRole('button', { name: '生成 Pack 草稿' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: '本次修复要求' })).toHaveValue('保留原分支')
+    expect(repairApi.create).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' })).toBeEnabled())
+    await userEvent.click(screen.getByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '生成 Pack 草稿' })).toBeEnabled())
+    await userEvent.click(screen.getByRole('button', { name: '生成 Pack 草稿' }))
+    await waitFor(() => expect(repairApi.create).toHaveBeenCalledTimes(2))
+    expect(repairApi.create.mock.calls[1][0]).toMatchObject({ inputDigest: 'f'.repeat(64), instructions: '保留原分支' })
+    expect(repairApi.create.mock.calls[1][0].requestId).not.toBe(repairApi.create.mock.calls[0][0].requestId)
+  })
+
   it('creates a Pack draft when no active repair task exists', async () => {
     repairApi.candidates.mockResolvedValue(repairPage())
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
