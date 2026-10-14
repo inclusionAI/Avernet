@@ -12,7 +12,7 @@ jest.mock('@/components/CollaborationPrivacy/BotGeneralConfigDialog', () => ({
 }));
 jest.mock('@/components/Workspace/IdentitySelector/BotRegistrationDialog', () => ({
   BotRegistrationDialog: ({ open, onClose }: { open: boolean; onClose: () => void }) =>
-    open ? <button onClick={onClose}>关闭接入指南</button> : null,
+    open ? <button type="button" onClick={onClose}>关闭接入指南</button> : null,
 }));
 
 afterEach(() => jest.resetAllMocks());
