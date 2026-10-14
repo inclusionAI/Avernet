@@ -12,7 +12,9 @@ from agentclaw.community.core.bot_management.engine_version.models import (
 from agentclaw.community.core.bot_management.engine_version.service import (
     EngineVersionService,
 )
-from tests.community.core.engine_version.test_engine_version_service import dependencies
+from tests.community.core.engine_version.test_engine_version_service import (
+    dependencies as dependencies,
+)
 
 
 @pytest.mark.asyncio
@@ -29,6 +31,8 @@ from tests.community.core.engine_version.test_engine_version_service import depe
         ("", "REL20261014", "legacy", "recommended"),
         ("0.1.153", "REL20261014", "legacy", "recommended"),
         ("REL20261009", "", "unknown", "unknown"),
+        ("", "", "unknown", "unknown"),
+        ("0.1.153", "", "unknown", "unknown"),
         ("REL20261009", "0.1.153", "unknown", "unknown"),
         ("REL20261009", "a\nb", "unknown", "unknown"),
     ],
@@ -36,11 +40,10 @@ from tests.community.core.engine_version.test_engine_version_service import depe
 async def test_release_identity_is_the_complete_branch(
     dependencies, current, target, comparison, hint
 ):
-    bots, templates, bindings, resolver, transport = dependencies
+    bots, bindings, resolver, transport = dependencies
     transport.invoke.return_value["data"]["stdout"] = current + "\n"
     service = EngineVersionService(
         bots=bots,
-        templates=templates,
         bindings=bindings,
         resolver=resolver,
         probe=partial(probe_engine_release, transport),
@@ -73,11 +76,10 @@ async def test_release_identity_is_the_complete_branch(
     ],
 )
 async def test_failed_probe_is_never_a_legacy_bot(dependencies, response):
-    bots, templates, bindings, resolver, transport = dependencies
+    bots, bindings, resolver, transport = dependencies
     transport.invoke.return_value = response
     service = EngineVersionService(
         bots=bots,
-        templates=templates,
         bindings=bindings,
         resolver=resolver,
         probe=partial(probe_engine_release, transport),
@@ -91,101 +93,44 @@ async def test_failed_probe_is_never_a_legacy_bot(dependencies, response):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("engine", ["openclaw", "hermes"])
+@pytest.mark.parametrize("provider", ["arca", "baas", "local"])
+@pytest.mark.parametrize("bot_type", ["personal", "service"])
 @pytest.mark.parametrize(
-    ("bot_type", "ext", "template", "expected", "reason"),
+    ("current", "exit_code", "comparison", "hint"),
     [
-        (
-            "personal",
-            {"sbot_pin_image": True, "sbot_docker_image": "private:old"},
-            {},
-            "restricted",
-            "image_pinned",
-        ),
-        (
-            "service",
-            {"sbot_pin_image": True, "sbot_docker_image": "private:old"},
-            {},
-            "restricted",
-            "image_pinned",
-        ),
-        (
-            "service",
-            {"sbot_use_default_image": True},
-            {"image": "private:old"},
-            "restricted",
-            "explicit_image_unverified",
-        ),
-        (
-            "personal",
-            {},
-            {"image_config": {"name": "private:old"}},
-            "restricted",
-            "explicit_image_unverified",
-        ),
-        (
-            "personal",
-            {},
-            {"realtime_pull": True, "image": "private:old"},
-            "restricted",
-            "explicit_image_unverified",
-        ),
+        ("REL20261009\n", 0, "older", "recommended"),
+        ("", 1, "legacy", "recommended"),
+        ("", 0, "legacy", "recommended"),
+        ("0.1.153\n", 0, "legacy", "recommended"),
+        ("REL20261014\n", 0, "same", "none"),
+        ("REL20261015\n", 0, "newer", "none"),
+        ("dev\n", 0, "unknown", "unknown"),
+        ("", 127, "unknown", "unknown"),
     ],
 )
-async def test_effective_restart_image_limits_do_not_hide_version_difference(
-    dependencies, bot_type, ext, template, expected, reason
+async def test_hints_depend_on_release_facts_not_provider_or_image_pin(
+    dependencies, engine, provider, bot_type, current, exit_code, comparison, hint
 ):
-    bots, templates, bindings, resolver, transport = dependencies
-    bots.get_by_id_and_owner.return_value.update(bot_type=bot_type, ext=ext)
-    templates.get_by_bot_id.return_value = {"ext": template}
+    bots, bindings, resolver, transport = dependencies
+    ext = {"sbot_pin_image": True, "sbot_docker_image": "fixture:old"}
+    bots.get_by_id_and_owner.return_value.update(
+        active_engine=engine, bot_type=bot_type, ext=ext
+    )
+    bindings.get_active_by_bot_and_owner.return_value.device_provider = provider
+    transport.invoke.return_value["data"].update(stdout=current, exit_code=exit_code)
     service = EngineVersionService(
         bots=bots,
-        templates=templates,
         bindings=bindings,
         resolver=resolver,
         probe=partial(probe_engine_release, transport),
         collaborators=MagicMock(),
-        list_devices=MagicMock(),
+        list_devices=MagicMock(return_value=[{"device_uuid": "one"}]),
         config=EngineVersionConfig("REL20261014"),
     )
     result = await service.inspect(bot_id="bot-1", owner_id="owner", caller_id="owner")
-    assert result["comparison"] == "older"
-    assert result["restart_hint"] == expected
-    assert result.get("restart_reason") == reason
+    assert result["comparison"] == comparison
+    assert result["restart_hint"] == hint
+    assert "restart_reason" not in result
     assert bots.get_by_id_and_owner.return_value["ext"] == ext
-    assert templates.get_by_bot_id.return_value == {"ext": template}
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("bot_type", "ext", "template", "expected", "reason"),
-    [
-        ("personal", {"sbot_pin_image": True}, {}, "unknown", "policy_unknown"),
-        (
-            "personal",
-            {"sbot_pin_image": True, "sbot_docker_image": "private:old"},
-            {"image": "other:old"},
-            "restricted",
-            "image_pinned",
-        ),
-    ],
-)
-async def test_personal_pin_is_effective_and_malformed_policy_is_unknown(
-    dependencies, bot_type, ext, template, expected, reason
-):
-    bots, templates, bindings, resolver, transport = dependencies
-    bots.get_by_id_and_owner.return_value.update(bot_type=bot_type, ext=ext)
-    templates.get_by_bot_id.return_value = {"ext": template}
-    service = EngineVersionService(
-        bots=bots,
-        templates=templates,
-        bindings=bindings,
-        resolver=resolver,
-        probe=partial(probe_engine_release, transport),
-        collaborators=MagicMock(),
-        list_devices=MagicMock(),
-        config=EngineVersionConfig("REL20261014"),
-    )
-    result = await service.inspect(bot_id="bot-1", owner_id="owner", caller_id="owner")
-    assert result["comparison"] == "older"
-    assert result["restart_hint"] == expected
-    assert result["restart_reason"] == reason
+    transport.invoke.assert_awaited_once()

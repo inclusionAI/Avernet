@@ -8,7 +8,7 @@ class VersionDetection(BaseModel):
     """Whether the current runtime release was identified."""
 
     status: Literal["known", "legacy", "read_failed", "not_applicable"] = Field(
-        description="Known identifies a release; legacy lacks release metadata; read_failed could not inspect it; not_applicable has no managed component."
+        description="Known identifies a release; legacy lacks release metadata; read_failed could not inspect it; not_applicable skips engines outside OpenClaw/Hermes."
     )
     reason: str | None = Field(
         default=None, description="Controlled detection reason, when present."
@@ -79,7 +79,7 @@ class EngineVersionObservation(BaseModel):
         description="Older/same/newer compares complete branch identities and strict REL calendar dates; legacy lacks identity; unknown cannot order them."
     )
     restart_hint: Literal["recommended", "restricted", "none", "unknown"] = Field(
-        description="Recommended suggests a workspace restart; restricted requires image-policy action; none needs no update; unknown cannot advise. Advisory only."
+        description="Recommended suggests a workspace restart for older/legacy releases regardless of provider or image policy; none needs no update or is not applicable; unknown cannot advise. Restricted is retained for compatibility but not emitted. Advisory only."
     )
     restart_reason: str | None = Field(
         default=None,

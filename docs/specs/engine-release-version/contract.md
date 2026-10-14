@@ -38,8 +38,8 @@ Exit 1 with empty stdout/stderr means variable absent. Exit 0 with an empty
 value, or historical marker `0.1.153`, is legacy. Other failures, malformed or
 multiline output, stderr, timeout, HTTP 404/501 and unavailable capabilities are
 read_failed. Errors return controlled reasons, never upstream addresses,
-credentials or stderr. A known independent template override of the marker
-returns read_failed/source_unverified.
+credentials or stderr. The marker is trusted as a release artifact; deployment
+must not independently override it. This advisory does not read template or image policy.
 
 An empty/invalid target or `0.1.153` makes target unavailable. No guessed latest
 version or development fallback is used. Full branch equality is same, including
@@ -50,8 +50,9 @@ branches are unknown. A newer current release is never advised to downgrade.
 ## Result (existing Envelope.data)
 
 - `detection`: status known/legacy/read_failed/not_applicable, optional controlled
-  reason. This implementation has no deployment declaration proving absence of
-  the managed component, so it does not guess not_applicable from engine names.
+  reason. Only active_engine=openclaw/hermes is in scope. All other engines
+  return not_applicable/engine_not_supported before any binding, device-list,
+  connection-resolution or probe call. Authorization and draft checks still run.
 - `current`: known `release_id` or historical `raw_version`, source engine_env;
   omitted when unidentified. Missing metadata does not invent a release number.
 - `release_target`: status available/unavailable; available includes release_id
@@ -60,27 +61,27 @@ branches are unknown. A newer current release is never advised to downgrade.
 - `restart_hint`: recommended/restricted/none/unknown; optional restart_reason.
 - `context`: bot_id, draft stage, checked_at UTC, selected instance_id when known.
 
-Older/legacy plus a valid paired target recommends restart only on the ordinary
-configured path. A personal ext Pin is image_pinned/restricted. Service draft
-restart can clear ext Pin, but ARCA clearing depends on an existing policy
-switch: without proving that switch, an ARCA draft Pin remains restricted.
-Restart never clears an explicit template image. Template
-image or nested image_config therefore remains explicit_image_unverified and
-restricted. `realtime_pull` does not imply a Backend image upgrade. Teclaw's
-current restart path is unsupported and returns restart_not_supported/restricted
-when behind. Failed/malformed policy reads leave version comparison intact but
-return policy_unknown/unknown. Same/newer gives no upgrade advice. No published
-stage is inspected or changed by this API.
+Older/legacy plus a valid paired target returns restart_hint=recommended.
+Same/newer returns none. Failed reads, an unavailable target, or incomparable
+branches return unknown. Provider, Bot ext Pin, explicit template images and
+BaaS stored image configuration do not restrict this advisory and are not read
+as policy inputs. Restricted and restart_reason remain in the response schema
+for compatibility, but this implementation does not emit them. No lifecycle,
+image-policy, or publication behavior is changed by the query.
+
+For engines outside OpenClaw/Hermes (including Teclaw), detection is
+not_applicable/engine_not_supported, restart_hint is none, current and
+context.instance_id are omitted. Comparison is unknown solely because no
+comparison was attempted; clients must interpret detection and restart_hint.
+This outcome also applies when the paired target is unavailable.
 
 ## Deployment and compatibility
 
-Only the verified ARCA image path produces recommended guidance. A local or
-BaaS binding alone does not prove image adoption: BaaS may select local_proc
-instead of an image sandbox, and its current public device contract does not
-identify that implementation. Those paths preserve version comparison and
-return unknown/restart_path_unverified unless a stronger explicit restriction
-already applies. No new remote control-plane query or runtime-prefix guessing
-is introduced.
+The supported deployment model uses the paired Engine images independently of
+the binding provider. There is no provider allowlist or remote image-adoption
+attestation in the inspection path. Provider still selects the existing
+transport and instance-selection mechanism; it does not alter restart advice.
+This endpoint grants no restart authority or guarantee of an actual upgrade.
 
 The target is the release paired with this serving Backend image; it is not a
 registry lookup or a promise that every external template was updated. Release
