@@ -236,12 +236,12 @@ def test_inject_concurrent_same_key_single_write(app_client, monkeypatch):
 
 
 def test_inject_timeout_unknown_state(app_client, monkeypatch):
+    """Outer-timeout path: the forward hangs past the patched timeout."""
     class _HangingFake:
         async def inject(self, session_key, message, label=None, auth=None):
             await asyncio.sleep(10)   # longer than the patched timeout below
             return {"ok": True}
 
-    # shorten the forward timeout so the hang resolves as TimeoutError
     monkeypatch.setattr(R, "_INJECT_FORWARD_TIMEOUT_SECONDS", 0.05)
     _install_fake_chat(monkeypatch, _HangingFake())
     k = R._kernel
@@ -255,6 +255,87 @@ def test_inject_timeout_unknown_state(app_client, monkeypatch):
     assert k._inject_dedup[("ctx-e", "inj-5")][0] == "unknown"
     out2 = asyncio.run(scenario())
     assert out2["inject"] == "duplicate_unknown"
+
+
+def test_inject_port_swallows_timeout_as_internal_error(app_client,
+                                                         monkeypatch):
+    """R14-1: real ports convert transport timeouts into ok=False with
+    code=INTERNAL_ERROR (claude_code/_chat.py:145-149, openclaw the same).
+    The router must classify that as UNKNOWN — never roll back to a state
+    that would re-write. Regression for the reproduced double-write:
+    downstream_writes must stay 1 across the same-key retry."""
+    class _PortTimeoutFake:
+        def __init__(self):
+            self.writes = 0
+
+        async def inject(self, session_key, message, label=None, auth=None):
+            self.writes += 1
+            # the port's exact shape for a swallowed RPC timeout:
+            return {"ok": False, "error": {"code": "INTERNAL_ERROR",
+                                            "message": "timeout"}}
+
+    fake = _PortTimeoutFake()
+    _install_fake_chat(monkeypatch, fake)
+    k = R._kernel
+
+    async def scenario():
+        return await R._inject_context(
+            _inject_params("ctx-h", "吞包超时", "inj-10"), 1, None)
+
+    out = asyncio.run(scenario())
+    assert out["error"]["data"]["reason"] == "unknown_outcome"
+    assert k._inject_dedup[("ctx-h", "inj-10")][0] == "unknown"
+    out2 = asyncio.run(scenario())
+    assert out2["inject"] == "duplicate_unknown"
+    assert fake.writes == 1, "same-key retry must NOT re-write (R14-1)"
+
+
+def test_inject_engine_level_rejection_still_rolls_back(app_client,
+                                                         monkeypatch):
+    """Non-transport error codes (engine looked at the request and refused
+    写入) remain retriable — the rollback path stays intact."""
+    fake = _FakeChat(reject_times=999)
+    _install_fake_chat(monkeypatch, fake)
+
+    async def call():
+        return await R._inject_context(
+            _inject_params("ctx-i", "策略拒绝", "inj-11"), 1, None)
+
+    out = asyncio.run(call())
+    assert out["error"]["data"]["reason"] == "inject_forward_failed"
+    out2 = asyncio.run(call())   # same-key retry re-attempts (rollback held)
+    assert out2["error"]["data"]["reason"] == "inject_forward_failed"
+    assert len(fake.calls) == 2
+
+
+def test_inject_cancelled_marks_unknown_and_propagates(app_client,
+                                                       monkeypatch):
+    """R14-2: cancelling the dispatch mid-write leaves no fake in_progress
+    residue — the key transitions to unknown and the cancellation
+    propagates."""
+    class _CancellableFake:
+        async def inject(self, session_key, message, label=None, auth=None):
+            await asyncio.sleep(30)
+
+    monkeypatch.setattr(R, "_INJECT_FORWARD_TIMEOUT_SECONDS", 60)
+    _install_fake_chat(monkeypatch, _CancellableFake())
+    k = R._kernel
+
+    async def scenario():
+        task = asyncio.create_task(R._inject_context(
+            _inject_params("ctx-j", "取消样本", "inj-12"), 1, None))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            return "cancelled"
+        return "not-cancelled"
+
+    result = asyncio.run(scenario())
+    assert result == "cancelled", "CancelledError must propagate"
+    assert k._inject_dedup[("ctx-j", "inj-12")][0] == "unknown", \
+        "cancelled reservation must NOT stay in_progress"
 
 
 # ── R13-3: gate context vs execution context ───────────────────────────────
@@ -462,16 +543,93 @@ def test_payload_delta_vs_snapshot_split():
     assert bridge._payload_text(no_inc, "delta") == ""
 
 
-def test_engine_inject_frame_isolation(app_client):
-    """inject-* frames fan out to the context channel only: the run completes
-    with the real final, never polluted nor terminated early."""
+class _Frame:
+    """Minimal EventFrame stand-in at the exact boundary bridge consumes."""
+
+    def __init__(self, event, payload):
+        self.event = event
+        self.payload = payload
+
+
+def test_engine_inject_frame_isolation(app_client, monkeypatch):
+    """R12-F3/R14-3: real-bridge regression — a fake ChatService.stream
+    yields the exact confessing frame order (main delta → inject-*
+    final → main delta → real final). The bridge must route the inject
+    frame to the context channel, keep the main run alive past it, consume
+    the subsequent delta, and finish with the uncontaminated real final."""
+    k = R._kernel
+
+    async def make_stream():
+        rid_holder = {}
+
+        class _FakeStreamChat:
+            async def stream(self, request, auth=None):
+                rid = rid_holder["rid"]
+
+                async def gen():
+                    yield _Frame("chat", {"state": "delta",
+                                          "runId": rid,
+                                          "deltaText": "回答开头"})
+                    # 旁观注入终帧：runId=inject-*,state=final——正是原缺陷
+                    # 提前终止主 run 的那类帧
+                    yield _Frame("chat", {"state": "final",
+                                          "runId": "inject-x",
+                                          "message": {"role": "assistant",
+                                                      "content": [{"type": "text",
+                                                                   "text": "旁观内容"}]}})
+                    yield _Frame("chat", {"state": "delta",
+                                          "runId": rid,
+                                          "deltaText": "回答继续"})
+                    yield _Frame("chat", {"state": "final",
+                                          "runId": rid,
+                                          "message": {"role": "assistant",
+                                                      "content": [{"type": "text",
+                                                                   "text": "回答开头回答继续（真实终稿）"}]}})
+
+                return gen()
+
+        chat = _FakeStreamChat()
+
+        def fake_plugin():
+            return chat
+
+        monkeypatch.setattr(bridge, "_chat_plugin", fake_plugin)
+
+        rid, _ = await k.open_run("iso", "ik", "first", None)
+        rid_holder["rid"] = rid
+        q = k.subscribe_context("iso")
+        # execute_and_stream is the router's real dispatch entry (it also
+        # performs the WORKING transition + final completion).
+        await bridge.execute_and_stream(k, rid, "iso", "查询文本")
+        return rid, q
+
+    rid, q = asyncio.run(make_stream())
+
+    injected = asyncio.run(asyncio.wait_for(q.get(), 2))
+    assert injected["type"] == "message"
+    assert injected["ev"]["message"]["parts"][0]["text"] == "旁观内容"
+
+    run = k.get_run(rid)
+    # inject final 不得提前终止主 run 也不得污染终稿；真实分发入口把
+    # 流远端 run 收在 COMPLETED（inject 帧被跳过后 final 才终止流）
+    assert run.state == "TASK_STATE_COMPLETED", run.state
+    assert run.latest_text == "回答开头回答继续（真实终稿）", \
+        run.latest_text
+    # 两个 delta 都被消费（"回答开头" + "回答继续"）——如果 bridge 把
+    # inject final 当主终态，第二个 delta 就丢了
+    assert "回答继续" in run.latest_text
+
+
+def test_kernel_publish_engine_inject_unit(app_client):
+    """Kernel-level channel separation (kept from the original F3 test):
+    publish_engine_inject fans out to the context channel only."""
     k = R._kernel
 
     async def scenario():
-        rid, _ = await k.open_run("iso", "ik", "first", None)
-        q = k.subscribe_context("iso")
+        rid, _ = await k.open_run("iso2", "ik2", "first", None)
+        q = k.subscribe_context("iso2")
         await k.publish_delta(rid, "回答开头")
-        k.publish_engine_inject("iso", "旁观内容", "inject-x")
+        k.publish_engine_inject("iso2", "旁观内容", "inject-y")
         await k.publish_delta(rid, "回答继续")
         await k.publish_final(rid, "真实终稿")
         await k.complete_run(rid)

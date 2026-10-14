@@ -451,7 +451,8 @@ async def _forward_engine_inject(ctx: str, text: str) -> None:
         if not result.get("ok"):
             err = result.get("error") or {}
             raise InjectForwardRejected(
-                str(err.get("message", "engine inject rejected")))
+                str(err.get("message", "engine inject rejected"))[:200],
+                code=str(err.get("code", "UNKNOWN")))
         return
 
     relay = EngineManager.get_instance().relay
@@ -467,11 +468,38 @@ async def _forward_engine_inject(ctx: str, text: str) -> None:
         ),
         timeout=_INJECT_FORWARD_TIMEOUT_SECONDS)
     if not bool(getattr(response, "ok", False)):
-        raise InjectForwardRejected("engine inject rejected (relay)")
+        error = getattr(response, "error", None)
+        raise InjectForwardRejected(
+            str(getattr(error, "message", "rejected"))[:200],
+            code=str(getattr(error, "code", "UNKNOWN")))
 
 
 class InjectForwardRejected(Exception):
-    """Engine explicitly refused the inject write — retriable (rollback)."""
+    """Engine returned a structured refusal for the inject write.
+
+    ``code`` carries the engine error code (never parsed from the message —
+    structural classification per R14-1). INTERNAL_ERROR is the transport
+    marker both ports emit for connect/timeout/serialization failures:
+    the write state is UNKNOWN, so the caller must retain the key. Any other
+    code is an explicit engine-level refusal (INVALID_REQUEST, session
+    policies, …) where the engine never wrote — safe to roll back.
+    """
+
+    def __init__(self, message: str, *, code: str = "UNKNOWN"):
+        super().__init__(message)
+        self.code = code
+
+    @property
+    def outcome_unknown(self) -> bool:
+        return self.code in _INJECT_TRANSPORT_UNKNOWN_CODES
+
+
+# Both claude_code and openclaw ports convert every transport-layer
+# exception (connect failure, RPC timeout, …) into success/ok=False with
+# code "INTERNAL_ERROR" (claude_code/_chat.py:145-149, openclaw/_chat.py:
+# 190-278). That marker means "outcome unknowable, the write may have
+# landed" — everything else is a deliberate engine refusal.
+_INJECT_TRANSPORT_UNKNOWN_CODES = frozenset({"INTERNAL_ERROR"})
 
 
 async def _inject_context(params: dict[str, Any], rid: Any,
@@ -490,7 +518,22 @@ async def _inject_context(params: dict[str, Any], rid: Any,
     text = _message_text(msg)
     try:
         await _forward_engine_inject(ctx, text)
+    except asyncio.CancelledError:
+        # R14-2: the in-flight operation was cancelled — the engine may
+        # have written (result unknowable). Mark unknown, then preserve
+        # the cancellation propagation semantics.
+        _kernel.inject_unknown(ctx, msg["messageId"])
+        raise
     except InjectForwardRejected as e:
+        if e.outcome_unknown:
+            # R14-1: transport-layer marker (INTERNAL_ERROR) — the port
+            # swallowed a connect/timeout failure; the write MAY have
+            # landed. Retain the key as unknown; same-key retry must not
+            # blindly re-write.
+            _kernel.inject_unknown(ctx, msg["messageId"])
+            return {"error": {"code": -32000,
+                              "message": "inject outcome unknown",
+                              "data": {"reason": "unknown_outcome"}}}
         _kernel.inject_rollback(ctx, msg["messageId"])   # retry allowed
         return {"error": {"code": -32000,
                           "message": str(e)[:200],
