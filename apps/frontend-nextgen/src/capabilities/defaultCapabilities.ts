@@ -9,6 +9,7 @@ import type {
   AppCapabilities,
   BotEngineOption,
   CapabilityResult,
+  ConversationInstanceScopeCapability,
   HumanIdentity,
   InviteCodeGatePolicy,
   LegacyVersionSwitchSpec,
@@ -259,5 +260,10 @@ export const defaultCapabilities: AppCapabilities = {
   getAdminSections: (): CapabilityResult<AdminSections> => ({
     status: 'available',
     value: { spaces: false, workOrders: true },
+  }),
+  // Open Core 无多实例范围概念:对话菜单不渲染实例行,会话取数不限定实例(行为不变)。
+  getConversationInstanceScope: (): CapabilityResult<ConversationInstanceScopeCapability | null> => ({
+    status: 'available',
+    value: null,
   }),
 };

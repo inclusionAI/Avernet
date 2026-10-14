@@ -12,6 +12,7 @@ import type {
   ConversationSessionScope,
 } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
+import { useConversationInstanceRow } from '../hooks/useConversationInstanceScope';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { cn } from '@/utils/cn';
 import { ChevronDown, ChevronRight, Plus, Search } from 'lucide-react';
@@ -97,6 +98,9 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   // 🔍 开关式输入框:显隐为组件本地态;过滤词已生效时强制可见,激活的入口不因开关丢失。
   const [searchInputOpen, setSearchInputOpen] = React.useState(false);
   const searchInputVisible = expanded && searchVisible && (searchInputOpen || searchActive);
+  // 多实例服务 Bot 实例范围聚合视图(能力缺省 null → 零渲染零激活):实例行判定/检索输入禁用/圆点口径。
+  const { scope: instanceScope, row: instanceRow, inputDisabled: instanceInputDisabled, marked: searchMarked } =
+    useConversationInstanceRow(bot, searchActive);
   const handleSearchToggle = () => {
     if (!expanded) onToggle();
     setSearchInputOpen((current) => !current);
@@ -197,7 +201,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
                 icon={
                   <span className="relative flex items-center justify-center">
                     <Search className="h-3.5 w-3.5" aria-hidden="true" />
-                    {searchActive && (
+                    {searchMarked && (
                       <span
                         className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-primary"
                         aria-hidden="true"
@@ -207,7 +211,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
                 }
                 className={cn(
                   'h-6 w-6 rounded-md hover:bg-muted',
-                  searchActive ? 'text-primary hover:text-primary' : 'text-muted-foreground hover:text-foreground',
+                  searchMarked ? 'text-primary hover:text-primary' : 'text-muted-foreground hover:text-foreground',
                 )}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -252,7 +256,17 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
       {expanded && hasSessionControls && (
         // 展开区不再整体缩进:session 行(dmore 平齐化 1:1)自带全宽行槽,交互热区在行内部分级。
         <div aria-label={`会话列表：${bot.displayName}`}>
-          {searchInputVisible && <ConversationSessionIdSearchInput value={sessionKey} onSearch={onSearchSession} />}
+          {searchInputVisible && (
+            <>
+              {instanceRow && <instanceRow.capability.InstancePicker botId={bot.botId} />}
+              <ConversationSessionIdSearchInput
+                value={sessionKey}
+                onSearch={onSearchSession}
+                disabled={instanceInputDisabled}
+                preserveDraftOnExternalClear={Boolean(instanceScope?.state.multiInstance)}
+              />
+            </>
+          )}
           {isOthers ? (
             <OthersArea others={others} />
           ) : (

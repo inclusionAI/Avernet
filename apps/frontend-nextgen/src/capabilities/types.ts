@@ -1,5 +1,6 @@
 import type { BotEditorSkill } from '@/domain/botEditor';
 import type { BotHealthCapability } from '@/domain/botHealthCheck';
+import type { ConversationSessionRequestRange } from '@/domain/conversation';
 import type { NavigationItem } from '@/shell/navigation';
 import type { RouteMeta } from '@/shell/routeMeta';
 import type { ComponentType } from 'react';
@@ -285,6 +286,54 @@ export interface LegacyVersionSwitchSpec {
   saveLegacyVersionPreference(version: 'old' | 'new'): Promise<boolean>;
 }
 
+/**
+ * 实例范围 Bot 入参:capability 依赖的最小 Bot 结构(ChatBotView 结构满足,类型不跨层引用 Service)。
+ */
+export interface ConversationInstanceScopeBot {
+  /** 会话键(复合形态,Store 域键)。 */
+  botId: string;
+  /** 容器接口调用的真实 Bot ID(复合形态头段)。 */
+  realBotId: string;
+  /** Bot 类型('service' 触发实例范围链路)。 */
+  botType?: string;
+  /** 好友 Bot 不支持实例选择(后端既有约束,f_user_id 场景不限定实例)。 */
+  isFriendBot?: boolean;
+}
+
+/**
+ * 对话菜单多实例服务 Bot 的实例范围状态快照(见 `getConversationInstanceScope`)。
+ */
+export interface ConversationInstanceScopeState {
+  /** 服务 Bot(botType=service 且非好友 Bot)。 */
+  service: boolean;
+  /** 多实例(实例清单数 ≥2,已确认)。 */
+  multiInstance: boolean;
+  /** 实例范围已就绪:清单已解析(单实例/无实例无需选择)或多实例已有选中实例;
+   *  未就绪(清单加载中/失败)时检索输入禁用。 */
+  ready: boolean;
+}
+
+/**
+ * 会话实例范围能力:对话菜单多实例服务 Bot 的实例选择与按实例取数。
+ * Open Core 默认 null(对话菜单无实例概念,会话查看与检索行为不变);
+ * internal overlay 注入实现(实例清单拉取/自动选中/实例下拉组件/请求范围推导)。
+ * 选中实例值经 conversationStore.setBotInstanceSelection 写入(复用过滤代次与列表缓存失效机制),
+ * 本能力实现只读 Store 选择值与自管的实例清单状态;多实例解析经代次变化驱动重拉,
+ * 单实例/无实例服务 Bot 与好友 Bot 维持现状行为。
+ */
+export interface ConversationInstanceScopeCapability {
+  /** 实例选择行组件:渲染于检索输入行上方;内部承载加载/失败态与实例下拉(按 botId 从实现侧 Store 取数)。 */
+  InstancePicker: ComponentType<{ botId: string }>;
+  /** 同步读取该 Bot 的实例范围状态。 */
+  getState(bot: ConversationInstanceScopeBot): ConversationInstanceScopeState;
+  /** 订阅实例范围状态变化(返回取消函数)。 */
+  subscribe(botId: string, listener: () => void): () => void;
+  /** 幂等触发实例清单加载(服务 Bot 专用,其余 no-op);失败后不自动重试(由实例行的显式重试发起)。 */
+  ensureInstancesLoaded(bot: ConversationInstanceScopeBot): void;
+  /** 会话请求范围(device_uuid 与 stage);无选中实例时返回 null。 */
+  getSessionRange(bot: ConversationInstanceScopeBot): ConversationSessionRequestRange | null;
+}
+
 export interface AppCapabilities {
   /** Open Core 返回版本化提示配置；Internal 返回 null，且不得访问知悉状态。 */
   getOpenSourceExperienceNotice: () => CapabilityResult<OpenSourceExperienceNoticeSpec | null>;
@@ -474,4 +523,10 @@ export interface AppCapabilities {
    * 消费方（`src/pages/Admin/index.tsx`）按本结果过滤 Tab、选择默认 Tab 并对隐藏/非法 `?tab=` 深链回落首项。
    */
   getAdminSections: () => CapabilityResult<AdminSections>;
+  /**
+   * 对话菜单多实例服务 Bot 的实例范围能力。Open Core 默认 null(无实例选择,
+   * 会话取数与检索行为不变);internal overlay 注入实例清单/下拉与按实例取数实现,
+   * 选中实例经 conversationStore.setBotInstanceSelection 写入(代次/缓存失效走 Store 既有机制)。
+   */
+  getConversationInstanceScope: () => CapabilityResult<ConversationInstanceScopeCapability | null>;
 }

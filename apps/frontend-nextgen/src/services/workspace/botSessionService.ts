@@ -1,5 +1,6 @@
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import type { IdentityView } from '@/domain/collaboration';
+import type { ConversationSessionRequestRange } from '@/domain/conversation/types';
 import { resolveOpenApiUserId } from '@/domain/userIdentity';
 import { listBots as listOwnedBotsApi, type OwnedBotDto } from '@/services/backendApi/bots/botController';
 import {
@@ -278,6 +279,7 @@ export const botSessionService = {
     page = 1,
     pageSize = BOT_SESSION_PAGE_SIZE,
     sessionKey = '',
+    range?: ConversationSessionRequestRange,
   ): Promise<DomainResult<BotSessionPageView>> {
     try {
       // session_key 原样透传(空条件省略),由 backendRequest 负责查询串编码。
@@ -287,6 +289,7 @@ export const botSessionService = {
         page,
         page_size: pageSize,
         ...(sessionKey ? { session_key: sessionKey } : {}),
+        ...(range ? { device_uuid: range.deviceUuid, ...(range.stage ? { stage: range.stage } : {}) } : {}),
       });
       const resp = await listBotSessions(bot.realBotId, params);
       const items = (resp.data?.items ?? []).map((s) => toSessionView(s, bot.botId));
@@ -409,6 +412,7 @@ export const botSessionService = {
     userId: string,
     page = 1,
     pageSize = BOT_SESSION_PAGE_SIZE,
+    range?: ConversationSessionRequestRange,
   ): Promise<DomainResult<BotSessionPageView>> {
     try {
       const params = withFriendBotRequestParams(bot, userId, {
@@ -416,6 +420,7 @@ export const botSessionService = {
         owner_id: bot.ownerId,
         page,
         page_size: pageSize,
+        ...(range ? { device_uuid: range.deviceUuid, ...(range.stage ? { stage: range.stage } : {}) } : {}),
       });
       const resp = await listFavoriteSessions(bot.realBotId, params);
       const items = (resp.data?.items ?? []).map((s) => toSessionView(s, bot.botId, true));

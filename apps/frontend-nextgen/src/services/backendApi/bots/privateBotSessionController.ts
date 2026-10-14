@@ -65,7 +65,13 @@ export interface BotRequestParams {
 /** GET /openapi/v1/bots/{bot_id}/sessions — 分页查询会话;session_key 为原始字符串,由 HTTP 层统一编码。 */
 export function listBotSessions(
   botId: string,
-  params: BotRequestParams & { page?: number; page_size?: number; session_key?: string },
+  params: BotRequestParams & {
+    page?: number;
+    page_size?: number;
+    session_key?: string;
+    device_uuid?: string;
+    stage?: 'draft' | 'verify' | 'online';
+  },
 ) {
   return backendRequest<BackendApiEnvelope<BotSessionPageDto>>(`/openapi/v1/bots/${botId}/sessions`, {
     method: 'GET',
@@ -186,7 +192,15 @@ export interface FavoriteSessionPageDto {
   total: number;
 }
 
-export function listFavoriteSessions(botId: string, params: BotRequestParams & { page?: number; page_size?: number }) {
+export function listFavoriteSessions(
+  botId: string,
+  params: BotRequestParams & {
+    page?: number;
+    page_size?: number;
+    device_uuid?: string;
+    stage?: 'draft' | 'verify' | 'online';
+  },
+) {
   return backendRequest<BackendApiEnvelope<FavoriteSessionPageDto>>(`/openapi/v1/bots/${botId}/sessions/favorites`, {
     method: 'GET',
     params: params as unknown as Record<string, unknown>,

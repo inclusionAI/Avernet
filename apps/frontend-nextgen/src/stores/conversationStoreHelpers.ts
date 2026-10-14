@@ -36,6 +36,15 @@ export function sessionKeyPatch(state: ConversationState, botId: string, nextKey
     : clearSessionKeyPatch(state, botId);
 }
 
+/** 实例范围选择写入切片:非空落记录,空串删除记录(空记录=未限定实例)。 */
+export function instanceSelectionPatch(state: ConversationState, botId: string, instanceUuid: string) {
+  return instanceUuid
+    ? { instanceSelectionByBotId: { ...state.instanceSelectionByBotId, [botId]: instanceUuid } }
+    : state.instanceSelectionByBotId[botId] !== undefined
+    ? { instanceSelectionByBotId: withoutKey(state.instanceSelectionByBotId, botId) }
+    : {};
+}
+
 /** 列表缓存失效切片:删除该 Bot 的管理/好友列表缓存,由 Hook 按当前条件重新拉取;
  *  展开意图(expandedFriendUserIds)与主会话选中不属于缓存,保持不动。 */
 export function invalidateListCaches(state: ConversationState, botId: string) {
@@ -54,4 +63,15 @@ export function invalidateFriendBotList(state: ConversationState, botId: string)
   return state.friendBotSessionsByBotId[botId] !== undefined
     ? { friendBotSessionsByBotId: withoutKey(state.friendBotSessionsByBotId, botId) }
     : {};
+}
+
+/** 实例选择提交切片:等值提交为 no-op;实际变化与 sessionKey 条件同语义——
+ *  列表缓存失效 + 过滤代次递增(在途旧实例响应不可写回,由 Hook 按新范围重拉)。 */
+export function instanceSelectionSet(state: ConversationState, botId: string, next: string) {
+  if ((state.instanceSelectionByBotId[botId] ?? '') === next) return state;
+  return {
+    ...instanceSelectionPatch(state, botId, next),
+    ...invalidateListCaches(state, botId),
+    ...revisionPatch(state, botId),
+  };
 }
