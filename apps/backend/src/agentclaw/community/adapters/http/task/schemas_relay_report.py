@@ -45,6 +45,8 @@ class PlannedNodeRunInfoDTO(BaseModel):
 
     run_mode: str
     assignee: str | None = None
+    failure_reason: str | None = None
+    extend_props: dict[str, Any] = Field(default_factory=dict)
 
 
 class PlannedNodeDTO(BaseModel):
@@ -131,6 +133,8 @@ class TaskReportCommandDTO(BaseModel):
                 run_info=RuntimeInfo(
                     run_mode=planned.run_info.run_mode,
                     assignee=planned.run_info.assignee,
+                    failure_reason=planned.run_info.failure_reason,
+                    extend_props=dict(planned.run_info.extend_props),
                 ),
                 node_run_graph=None,
             )

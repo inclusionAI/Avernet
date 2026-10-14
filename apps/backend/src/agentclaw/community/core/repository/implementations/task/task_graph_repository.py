@@ -287,7 +287,14 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
                 # sends the winner its instruction inside the existing publish
                 # operation. It must not reopen the auction intent.
                 continue
-            if node.run_info.run_mode != "bbs" and not node.run_info.assignee:
+            if (
+                node.run_info.run_mode != "bbs"
+                and not node.run_info.assignee
+                and not (
+                    node.run_info.run_mode == "coop_group"
+                    and node.run_info.extend_props.get("pending_group_formation")
+                )
+            ):
                 continue
             relay_token = node.run_info.extend_props.get("relay_token")
             if not relay_token:

@@ -675,10 +675,21 @@ class TaskGraphService:
                     node.run_info.extend_props["relay_token"] = uuid.uuid4().hex
                 node.run_info.run_mode = requested_mode
             if patch.assignee is not None:
+                dynamic_group_assignment = (
+                    relay_mode
+                    and node.run_info.assignee is None
+                    and node.run_info.extend_props.get(
+                        "pending_group_formation"
+                    ) is not None
+                    and patch.run_mode == "coop_group"
+                    and patch.extend_props_patch is not None
+                    and patch.extend_props_patch.get("group_id") == patch.assignee
+                )
                 if (
                     relay_mode
                     and node.run_info.extend_props.get("relay_token")
                     and (patch.assignee or None) != node.run_info.assignee
+                    and not dynamic_group_assignment
                 ):
                     node.run_info.extend_props["relay_token"] = uuid.uuid4().hex
                 node.run_info.assignee = patch.assignee or None

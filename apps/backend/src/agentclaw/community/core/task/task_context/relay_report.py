@@ -29,6 +29,53 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.task.task_context.task_graph_support import (
     _relay_graph_output,
 )
+from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
+
+
+def _planned_relay_group_formation(value: Any) -> dict[str, Any]:
+    """Validate the reviewed HIT_MULTI_BOTS plan without accepting a group ID."""
+    if not isinstance(value, dict):
+        raise TaskStateError("planned coop_group requires pending_group_formation")
+    try:
+        formation = GroupFormation.from_dict(value)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise TaskStateError("invalid pending_group_formation") from exc
+
+    bot_ids = [str(item).strip() for item in formation.bot_ids]
+    if len(bot_ids) < 2 or len(set(bot_ids)) != len(bot_ids):
+        raise TaskStateError("planned coop_group requires at least two distinct bots")
+
+    if formation.collab_mode != "manager_worker":
+        raise TaskStateError(
+            "Relay coop_group plans require manager_worker collaboration"
+        )
+
+    manager_bot_id = str(formation.extend_props.get("manager_bot_id") or "").strip()
+    if not manager_bot_id or manager_bot_id not in bot_ids:
+        raise TaskStateError("planned coop_group requires a manager bot in bot_ids")
+    if set(formation.extend_props) != {"manager_bot_id"}:
+        raise TaskStateError(
+            "pending_group_formation extend_props supports only manager_bot_id"
+        )
+
+    members = formation.members_info if formation.members_info is not None else []
+    member_managers: list[str] = []
+    if not isinstance(members, list):
+        raise TaskStateError("pending_group_formation members_info must be a list")
+    for member in members:
+        if not isinstance(member, dict):
+            raise TaskStateError(
+                "pending_group_formation members_info entries must be objects"
+            )
+        role = str(member.get("role") or "").strip().lower()
+        if role in {"manager", "master"}:
+            member_managers.append(str(member.get("bot_id") or ""))
+    if member_managers != [manager_bot_id]:
+        raise TaskStateError(
+            "planned coop_group requires exactly one manager/master member"
+        )
+
+    return formation.to_dict()
 
 
 def _json_value(value: Any) -> Any:
@@ -329,10 +376,33 @@ def apply_relay_report(
                     raise TaskStateError(
                         "Group relay handoff is not supported in the first release"
                     )
-                if mode in {"single_bot", "coop_group"} and not assignee:
-                    raise TaskStateError("planned executor is required")
-                if mode == "bbs" and assignee:
-                    raise TaskStateError("BBS plan cannot preselect an assignee")
+                planned_group_formation: dict[str, Any] | None = None
+                if mode == "single_bot":
+                    if not assignee:
+                        raise TaskStateError("single_bot plan requires a bot assignee")
+                    if (
+                        next_node.run_info.extend_props.get("pending_group_formation")
+                        is not None
+                    ):
+                        raise TaskStateError(
+                            "single_bot plan cannot carry a group formation"
+                        )
+                elif mode == "coop_group":
+                    if assignee:
+                        raise TaskStateError(
+                            "Relay coop_group plan cannot preselect an existing group"
+                        )
+                    planned_group_formation = _planned_relay_group_formation(
+                        next_node.run_info.extend_props.get("pending_group_formation")
+                    )
+                elif mode == "bbs":
+                    if assignee:
+                        raise TaskStateError("BBS plan cannot preselect an assignee")
+                    if (
+                        next_node.run_info.extend_props.get("pending_group_formation")
+                        is not None
+                    ):
+                        raise TaskStateError("BBS plan cannot carry a group formation")
                 max_rounds = int(config.get("MAX_LOOP", 3))
                 node.run_info.progress_reason = command.progress_reason or None
                 node.run_info.end_time = now
@@ -373,8 +443,14 @@ def apply_relay_report(
                             run_mode=mode,
                             assignee=assignee,
                             progress_reason=command.progress_reason or None,
+                            failure_reason=next_node.run_info.failure_reason,
                             extend_props={
                                 **next_node.run_info.extend_props,
+                                **(
+                                    {"pending_group_formation": planned_group_formation}
+                                    if planned_group_formation is not None
+                                    else {}
+                                ),
                                 "relay_token": uuid.uuid4().hex,
                             },
                         ),
@@ -397,6 +473,7 @@ def apply_relay_report(
                             "next_task_spec": next_node.task_spec.to_dict(),
                             "run_mode": mode,
                             "assignee": assignee,
+                            "pending_group_formation": planned_group_formation,
                             "progress_reason": command.progress_reason,
                         },
                         status_from=Status.RUNNING,

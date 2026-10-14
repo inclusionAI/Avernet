@@ -2,7 +2,8 @@
 
 对齐 plan.md §3.3 + §3.4。构造期注入策略池(``pool=``),内置默认
 [DirectDispatchStrategy, SearchBasedDispatchStrategy];``set_strategies`` 仅供测试覆写。
-不持 runner(HIT_MULTI_BOTS 拉群归编排核+runner);不写图、不起 run。
+模式策略负责完成单个节点的执行者就绪与 Runner 投递；Relay 的待建群在策略内
+以稳定节点代次拉群并写回最终 Group ID。
 """
 
 from __future__ import annotations
@@ -76,15 +77,15 @@ def _is_exec_retry_replay(node: TaskNode) -> bool:
 class TaskDispatcher:
     """派发编排壳:对每节点 first-match-wins 选策略(graph 级 config 匹配)→ apply 填 run_info 后返回。
 
-    不写图、不起 run(编排核落库+起 run)。BBS 节点的有效执行模态为 "bbs" 时退化为直接维持(不走策略)。
-    HIT_MULTI_BOTS 时填 run_mode="coop_group"+extend_props["pending_group_formation"],assignee 留空
-    (拉群归编排核调 runner.form_coop_group 后填 assignee)。
+    中心化策略完成搜推填充后调用 Runner；Relay 策略不重新搜推或改派。
+    BBS 节点的有效执行模态为 "bbs" 时直接维持。Relay HIT_MULTI_BOTS 落图时保留
+    pending_group_formation 且 assignee 为空；本策略在 S6 动态建群并写回最终 assignee。
     """
 
     def __init__(self, graph, *, pool: list[DispatchStrategy] | None = None,
                  runner=None,
                  mode_strategies: dict[str, DispatchModeStrategy] | None = None) -> None:
-        """graph: TaskGraphService(读图级 execution_config 匹配策略用,不写);
+        """graph: TaskGraphService(策略读取冻结 profile，Relay 动态群写回 assignee);
         pool: 策略池(构造期注入;省略=内置默认 [DirectDispatch, SearchBased])。"""
         self._graph = graph
         self._runner = runner
@@ -145,9 +146,78 @@ class TaskDispatcher:
             raise DispatchError("centralized delivery was not accepted")
         return selected_node
 
+    def _relay_group_formation(self, node: TaskNode, value: object) -> GroupFormation:
+        """Validate and enrich a Bot-selected dynamic group at dispatch time."""
+        if isinstance(value, GroupFormation):
+            formation = value
+        elif isinstance(value, dict):
+            try:
+                formation = GroupFormation.from_dict(value)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise DispatchError("invalid pending_group_formation") from exc
+        else:
+            raise DispatchError("relay coop_group requires pending_group_formation")
+
+        if formation.collab_mode != "manager_worker":
+            raise DispatchError("relay dynamic groups require manager_worker")
+        bot_ids = [str(item).strip() for item in formation.bot_ids]
+        manager_bot_id = str(formation.extend_props.get("manager_bot_id") or "").strip()
+        if len(bot_ids) < 2 or len(set(bot_ids)) != len(bot_ids):
+            raise DispatchError("relay dynamic groups require two distinct bots")
+        if manager_bot_id not in bot_ids:
+            raise DispatchError("relay dynamic groups require a manager in bot_ids")
+
+        acceptances = [
+            {"id": item.id, "description": item.description}
+            for item in node.task_spec.goal.acceptances
+        ]
+        formation.extend_props.update(
+            {
+                "dynamic_task_node_protocol": True,
+                "relay_execution": True,
+                "relay_token": node.run_info.extend_props.get("relay_token"),
+                "loop_task_id": f"{node.task_id}::{node.node_id}",
+                "task_id": node.task_id,
+                "node_id": node.node_id,
+                "task_objective": node.task_spec.goal.objective,
+                "task_instruction": task_spec_instruction(node.task_spec),
+                "acceptances": acceptances,
+                "manager_bot_id": manager_bot_id,
+            }
+        )
+        if not formation.extend_props["relay_token"]:
+            raise DispatchError("relay dynamic group has no run generation")
+        return formation
+
     async def _dispatch_relay_node(self, node: TaskNode) -> TaskNode:
-        if node.run_info.run_mode != "bbs" and not node.run_info.assignee:
+        mode = node.run_info.run_mode
+        if mode not in {"single_bot", "coop_group", "bbs"}:
+            raise DispatchError(f"unsupported relay run_mode={mode}")
+        if mode == "single_bot" and not node.run_info.assignee:
             raise DispatchError("relay target has no selected assignee")
+
+        if mode == "coop_group" and not node.run_info.assignee:
+            if self._runner is None:
+                raise DispatchError("relay runner is not configured")
+            formation = self._relay_group_formation(
+                node,
+                node.run_info.extend_props.get("pending_group_formation"),
+            )
+            group_id = await self._runner.form_coop_group(formation)
+            if not group_id:
+                raise DispatchError("relay dynamic group creation returned no group_id")
+            node.run_info.assignee = group_id
+            node.run_info.extend_props["group_id"] = group_id
+            self._graph.update_task_node_info(
+                TaskNodePatch(
+                    task_id=node.task_id,
+                    node_id=node.node_id,
+                    run_mode="coop_group",
+                    assignee=group_id,
+                    extend_props_patch={"group_id": group_id},
+                )
+            )
+
         if self._runner is None or not await self._runner.start_run(node):
             raise DispatchError("relay delivery was not accepted by a real backend")
         return node
