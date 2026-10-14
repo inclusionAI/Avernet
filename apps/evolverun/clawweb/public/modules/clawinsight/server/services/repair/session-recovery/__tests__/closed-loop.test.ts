@@ -306,6 +306,18 @@ it("accepts internal requests without independent tokens while execution tickets
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });
 
+it("creates recovery tasks using the existing evolution-scoped artifact credentials", async () => {
+  const put = artifactStore.putObject;
+  artifactStore.putObject = async (key, content, contentType) => {
+    if (!key.startsWith("evolution/")) throw new Error("AccessDenied: object is outside the credential scope");
+    return put(key, content, contentType);
+  };
+  const task = await create();
+  expect(task.status).toBe("running");
+  expect(task.execution?.jobId).toBeTruthy();
+  expect(task.timeline.some(event => event.kind === "created")).toBe(true);
+});
+
 it("logs a redacted creation failure while keeping the HTTP response generic", async () => {
   const fixtureValue = ["recovery", "fixture", "private", "credential", "123456"].join("-");
   const log = vi.spyOn(console, "error").mockImplementation(() => undefined);

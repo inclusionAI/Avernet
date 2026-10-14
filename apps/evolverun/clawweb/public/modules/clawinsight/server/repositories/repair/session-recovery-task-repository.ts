@@ -200,7 +200,8 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     if (content.length > 1024 * 1024 || containsSecret(content.toString())) throw new Error("Invalid recovery artifact: capacity or credential constraint");
     const sha256 = createHash("sha256").update(content).digest("hex");
     if (previous?.sha256 === sha256) return previous;
-    const objectKey = `clawweb/session-recovery/${taskId}/${sha256}.json`;
+    // The shared Evolve artifact credentials grant access under evolution/.
+    const objectKey = `evolution/session-recovery/${taskId}/${sha256}.json`;
     await this.artifacts.putObject(objectKey, content, "application/json");
     return { objectKey, sha256 };
   }
