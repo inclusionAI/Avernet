@@ -45,9 +45,9 @@ export function AppSidebar({
   const shell = (
     <>
       {/* 品牌区（SVG 稿 artboard-016 单行 52px）：mark 锚 (12,14) 由 px-3+居中给出，图标组三钮紧贴右锚（右缘 12px）。
-          单行 176px 预算 = 图标组 96px + compact 锁版 ≤80px：锁版宽度由各形态自管（Open Core 爪形 mark 24px；
-          internal 蓝 + AppWindow + 11px 字标锁版自缩至 ~75px），行结构不感知形态差异。
-          前科：锁版超预算同排曾致文字被压盖，各形态改 compact 锁版时必须按此预算自检。 */}
+          单行 200px 预算（rail 宽 224 - px-3 双侧 24，品牌锁版换新版后由 176 加宽）= 图标组 96px + compact 锁版
+          ≤104px：锁版宽度由各形态自管（Open Core 方版 mark 24px；internal mark 图 + 14px 字标锁版自缩至 ~94px），
+          行结构不感知形态差异。前科：锁版超预算同排曾致文字被压盖，各形态改 compact 锁版时必须按此预算自检。 */}
       {/* 折叠态工具簇（搜索/通知/展开）与下方导航项同列易混淆，按「主次层级」做区分而非加分隔线
           （延续 SidebarNavList 纯留白过渡的设计语言）：工具图标收 28px（sm）+ 静态 muted 色阶
           （hover 由 ghost 自带 hover:text-foreground 恢复），导航项保持 32px 全对比度；工具簇底距
