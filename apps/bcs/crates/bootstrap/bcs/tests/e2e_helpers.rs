@@ -43,12 +43,17 @@ pub fn next_port() -> u16 {
 // Process Manager
 // ============================================================================
 
+struct ManagedProcess {
+    child: Child,
+    is_bcs: bool,
+}
+
 /// Manage external processes with automatic cleanup
 ///
 /// IMPORTANT: All spawned processes are tracked internally and will be killed
 /// when this struct is dropped, regardless of test success or failure.
 pub struct ProcessManager {
-    processes: Vec<Child>,
+    processes: Vec<ManagedProcess>,
 }
 
 impl ProcessManager {
@@ -152,8 +157,8 @@ impl ProcessManager {
             });
         }
 
-        self.processes.push(child);
-        let child = self.processes.last_mut().expect("BCS child was tracked");
+        self.processes.push(ManagedProcess { child, is_bcs: true });
+        let child = &mut self.processes.last_mut().expect("BCS child was tracked").child;
 
         // Only use the address reported after our child successfully binds.
         let client = reqwest::Client::new();
@@ -339,7 +344,7 @@ connection_timeout_secs = 30
             });
         }
 
-        self.processes.push(child);
+        self.processes.push(ManagedProcess { child, is_bcs: false });
 
         // Wait for gateway to be ready and BCN to connect
         let client = reqwest::Client::new();
@@ -381,7 +386,26 @@ connection_timeout_secs = 30
 
     /// Kill all managed processes
     pub fn kill_all(&mut self) {
-        for child in &mut self.processes {
+        'processes: for process in &mut self.processes {
+            let child = &mut process.child;
+            if matches!(child.try_wait(), Ok(Some(_))) {
+                continue;
+            }
+            // Let BCS finish shutdown and flush LLVM profiles before falling
+            // back to a hard kill. Other runtimes retain their old cleanup.
+            #[cfg(unix)]
+            if process.is_bcs && Command::new("kill")
+                .args(["-TERM", &child.id().to_string()])
+                .stdout(Stdio::null()).stderr(Stdio::null())
+                .status().is_ok_and(|status| status.success()) {
+                let deadline = std::time::Instant::now() + Duration::from_secs(2);
+                while std::time::Instant::now() < deadline {
+                    if matches!(child.try_wait(), Ok(Some(_))) {
+                        continue 'processes;
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
             let _ = child.kill();
             let _ = child.wait();
         }
@@ -390,9 +414,9 @@ connection_timeout_secs = 30
 
     /// Kill and remove the last process (for reconnection tests)
     pub fn kill_last(&mut self) {
-        if let Some(mut child) = self.processes.pop() {
-            let _ = child.kill();
-            let _ = child.wait();
+        if let Some(mut process) = self.processes.pop() {
+            let _ = process.child.kill();
+            let _ = process.child.wait();
         }
     }
 }
