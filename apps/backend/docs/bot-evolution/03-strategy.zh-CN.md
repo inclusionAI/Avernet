@@ -156,7 +156,7 @@ class RegisteredStrategy:                      # what the registry stores and re
 
 **智能体是另一回事。** 运行时是 `run(ctx)` 运行的地方。`agents@1` 下的智能体定义是策略可以通过 `ctx.agents`（§4.2）*启动*的智能体；平台在工作区旁的沙箱中运行它们。并非每个策略都使用智能体：记忆整合只使用 `ctx.models`。
 
-**`params_schema` 示例。** ClawEvolve 在 `bot_123` 上的绑定设置了 `{"window_days": 7, "max_rounds": 3}`。有了下面的 schema，所有者若写入 `"window_days": 400`，会在保存绑定时被拒绝，而不是在数小时后运行开始时才被 ClawEvolve 拒绝。
+**`params_schema` 示例。** `params` 用来让同一个策略在不同 Bot 上有不同配置：每个 Bot 的绑定都带有自己的取值。ClawEvolve 在 `bot_123` 上的绑定设置了 `{"window_days": 7, "max_rounds": 3}`，而另一个 Bot 的绑定可能设置 `"window_days": 30`。所有者在保存该 Bot 的进化策略配置（其中包含它的各个绑定）时写入这些值（`PUT /bots/{bot_id}/evolution/policy`，或 `avn evolve policy set`；[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。有了下面的 schema，若保存的策略配置中某个绑定写了 `"window_days": 400`，会当场被拒绝，而不是数小时后夜间运行开始时才被 ClawEvolve 拒绝。
 
 **策略的项目。** “策略源码”指作者为该策略维护的项目，通常是一个 git 仓库，作者在其中运行 `avn strategy publish`。它包含策略的代码、注册记录，以及每个智能体定义各自的一个目录。`path` 相对于项目根目录。以 ClawEvolve 的项目为例：
 

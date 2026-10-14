@@ -221,10 +221,15 @@ through `ctx.agents` (§4.2); the platform runs them in a sandbox next to the
 workspace. Not every strategy uses agents: memory consolidation uses only
 `ctx.models`.
 
-**`params_schema` example.** ClawEvolve's binding on `bot_123` sets
-`{"window_days": 7, "max_rounds": 3}`. With the schema below, an owner who
-writes `"window_days": 400` is refused when saving the binding, rather than
-by ClawEvolve hours later at run start.
+**`params_schema` example.** `params` are how one strategy is configured
+differently per bot: each bot's binding carries its own values. ClawEvolve's
+binding on `bot_123` sets `{"window_days": 7, "max_rounds": 3}`, while
+another bot's binding might set `"window_days": 30`. The owner writes these
+values when saving the bot's evolution policy, which holds its bindings
+(`PUT /bots/{bot_id}/evolution/policy`, or `avn evolve policy set`;
+[06-evolution-run.md](06-evolution-run.md)). With the schema below, saving
+a policy whose binding has `"window_days": 400` is refused right then,
+rather than ClawEvolve failing hours later when the nightly run starts.
 
 **The strategy's project.** "The strategy's source" means the author's own
 project for the strategy, usually a git repository, from which they run
