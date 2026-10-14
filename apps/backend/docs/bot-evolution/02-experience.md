@@ -87,6 +87,28 @@ the first iteration; this doc does not mention bot callers again.
 
 ## 2. Domain model
 
+![Experience domain model: episodes, their parts, feedback, eval traces, session exports, and the revision every record is attributed to](images/experience-model.svg)
+
+How the types relate:
+
+- An **engine** holds the raw sessions. The store asks the engine's provider
+  for a **session export** (an operation with a status), and normalizes the
+  exported package into **episodes** at ingest.
+- An **episode** is one session of one bot, immutable once stored. It holds
+  its **turns** (each assistant turn may carry **tool calls**), an
+  **outcome**, its **cost**, and a **source reference** back to the raw
+  session.
+- **Feedback** is a separate record. It may be about one episode
+  (`episode_id`) or only about the bot; an episode's outcome lists the
+  feedback that decided it (`feedback_ids`).
+- An **eval trace** is one evaluation rollout written by Verification. Its
+  transcript has the same shape as an episode's turns.
+- Each episode, feedback record, and eval trace carries the **revision** it
+  is attributed to (`revision_id`, §3). For an eval trace it is always set;
+  for the others it is `null` when unattributed.
+- A tenant's **retention policy** decides how long every record is kept and
+  which personal data is redacted at ingest (§7).
+
 | Type | What it is | Owned by | Lifecycle |
 | --- | --- | --- | --- |
 | `Episode` | One normalized session or task trajectory of one bot, tagged with the revision it ran | Experience Store (normalized copy); engine (raw source) | Created at ingest; immutable afterwards except redaction; deleted when retention expires |
