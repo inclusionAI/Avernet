@@ -136,7 +136,7 @@ export function ResourcePanel({
       </div>
       <div className="mx-auto w-full max-w-5xl px-6 py-6 lg:px-10">
         <div className="mb-3 flex min-h-10 items-center rounded-lg border border-border bg-card px-3 text-xs text-muted-foreground">
-          当前路径：/<span className="ml-1 font-medium text-foreground">{directory || '根目录'}</span>
+          <span className="font-medium text-foreground">当前路径：/{directory || '根目录'}</span>
           <span className="ml-1">（点击文件夹可切换上传位置）</span>
         </div>
         {resources.length ? (
