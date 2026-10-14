@@ -175,6 +175,8 @@ clawevolve-strategy/                 # the strategy's project root
 
 `avn strategy publish` 读取 `strategy.json`，上传两个 `agents/…` 目录，并注册该版本。镜像由作者从同一个项目构建并推送。
 
+一个项目就是一个策略（一个 `strategy.json`、一个策略 id，随时间推移有多个版本）。一个仓库可以包含多个项目，例如 `apps/evolverun` 中 ClawEvolve 的项目与其他项目并列；`avn strategy publish [DIR]` 注册 `DIR` 中的项目（默认为当前目录）。Strategy Registry 从不读取 git 仓库：它只接收 `avn strategy publish` 上传的内容（记录和智能体定义目录），以及记录中指定的镜像摘要。
+
 作者在策略源码中编写的记录如下。这里是 ClawEvolve 的记录（[04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md)）；每个策略都填写相同的字段：
 
 ```jsonc

@@ -254,6 +254,14 @@ clawevolve-strategy/                 # the strategy's project root
 directories, and registers the version. The image is built from the same
 project and pushed by the author.
 
+One project is one strategy (one `strategy.json`, one strategy id, many
+versions over time). A repository may hold several projects, for example
+`apps/evolverun` holding ClawEvolve's project next to others;
+`avn strategy publish [DIR]` registers the project in `DIR` (default: the
+current directory). The Strategy Registry never reads a git repository: it
+only receives what `avn strategy publish` uploads (the record and the agent
+definition directories) and the image digest named in the record.
+
 The record as the author writes it (in the strategy's source). This one is
 ClawEvolve's ([04-default-strategies.md](04-default-strategies.md)); every
 strategy fills in the same fields:
