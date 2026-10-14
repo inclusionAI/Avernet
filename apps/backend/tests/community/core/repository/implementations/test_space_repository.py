@@ -360,7 +360,10 @@ def test_space_repository_accessible_scope_filters_by_active_membership_and_pagi
     joined = _team(spaces, name="Joined", creator="owner-1")
     pending = _team(spaces, name="Pending", creator="owner-2")
     inactive = _team(spaces, name="Inactive", creator="owner-3")
-    other_env = _team(spaces, name="Other Env", creator="owner-4")
+    with spaces.create_team_transaction(
+        name="Other Env", creator_id="owner-4", creator_user_name=None, env="pre"
+    ) as other_env:
+        pass
     spaces.add_member(
         space_id=joined.id, user_id="user-1", role=SpaceRole.MEMBER,
         creator_id="owner-1", env="dev"
@@ -546,3 +549,27 @@ def test_space_repository_backfills_only_live_unbound_team_in_same_env(db) -> No
     )
     assert repository.get_space(space_id=ids["personal"], env="dev").sc_team_id is None
     assert repository.get_space(space_id=ids["deleted"], env="dev") is None
+
+
+@pytest.mark.parametrize("parent_state", ["missing", "foreign_env", "deleted"])
+def test_add_member_rechecks_parent_before_insert(db, parent_state):
+    """The old writer must not insert an orphan alongside maintenance deletion."""
+    spaces = SpaceRepository(db)
+    space = _team(spaces)
+    space_id = space.id
+    if parent_state == "missing":
+        space_id += 99999
+    else:
+        with db.transactional_orm_session() as session:
+            row = session.query(SpaceModel).filter_by(id=space_id).one()
+            if parent_state == "foreign_env":
+                row.env = "prod"
+            else:
+                row.deleted_at = datetime.now()
+    with pytest.raises(SpaceNotFoundError):
+        spaces.add_member(
+            space_id=space_id, user_id="new-user", role=SpaceRole.MEMBER,
+            creator_id="owner-1", env="dev",
+        )
+    with db.orm_session() as session:
+        assert session.query(SpaceMemberModel).filter_by(user_id="new-user").count() == 0
