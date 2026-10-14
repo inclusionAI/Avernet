@@ -259,6 +259,7 @@ export type DingTalkEventOptions = {
   title?: string
   includeRunLink?: boolean
   includeNodeOutput?: boolean
+  includeFinalOutput?: boolean
   maxOutputFields?: number
   maxOutputValueLen?: number
 }
