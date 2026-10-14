@@ -360,7 +360,10 @@ class TestLocalK8sPluginCreate:
 
         # 模拟 PVC 不存在，触发创建。
         from kubernetes.client.rest import ApiException
-        mock_core.read_namespaced_persistent_volume_claim.side_effect = ApiException(status=404)
+
+        mock_core.read_namespaced_persistent_volume_claim.side_effect = ApiException(
+            status=404
+        )
 
         bot_id = "test-bot-123"
         expected_pvc_name = "bot-shared-data"
@@ -424,7 +427,10 @@ class TestLocalK8sPluginCreate:
 
         # 模拟 PVC 不存在，触发创建。
         from kubernetes.client.rest import ApiException
-        mock_core.read_namespaced_persistent_volume_claim.side_effect = ApiException(status=404)
+
+        mock_core.read_namespaced_persistent_volume_claim.side_effect = ApiException(
+            status=404
+        )
 
         storage_id = "backend-bot-456"
         sandbox = plugin.create_sync_sandbox(
@@ -483,7 +489,9 @@ class TestLocalK8sPluginCreate:
         assert deployment.metadata.annotations is None
         assert sandbox.get_info().storage is None
 
-    @patch.dict(os.environ, {"LOCAL_K8S_SHARED_PVC_HOST_MOUNT_PATH": "/tmp/bot-shared-data"})
+    @patch.dict(
+        os.environ, {"LOCAL_K8S_SHARED_PVC_HOST_MOUNT_PATH": "/tmp/bot-shared-data"}
+    )
     def test_delete_storage_removes_subpath(self, plugin, mock_client) -> None:
         """delete_storage 应删除共享 PVC 中该 storage_id 对应的 subPath 目录。"""
         import tempfile
@@ -633,9 +641,7 @@ class TestLocalK8sPluginCreate:
             assert _shared_pvc_name() == "my-shared-data"
 
         # 默认值
-        with patch.dict(
-            os.environ, {"LOCAL_K8S_SHARED_PVC_NAME": ""}, clear=False
-        ):
+        with patch.dict(os.environ, {"LOCAL_K8S_SHARED_PVC_NAME": ""}, clear=False):
             assert _shared_pvc_name() == "bot-shared-data"
 
 

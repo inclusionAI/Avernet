@@ -628,9 +628,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
                 replicas=1,
                 selector=V1LabelSelector(match_labels={"app": deployment_name}),
                 template=V1PodTemplateSpec(
-                    metadata=V1ObjectMeta(
-                        labels=labels, annotations=annotations
-                    ),
+                    metadata=V1ObjectMeta(labels=labels, annotations=annotations),
                     spec=V1PodSpec(containers=[container, sidecar], volumes=volumes),
                 ),
             ),
@@ -785,10 +783,10 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         effective_rule = outbound_operation_rule or _resolve_outbound_rule()
 
         # 如果携带 storage_id，则在共享 PVC 中按 storage_id 分 subPath。
-        mount_path = (
-            storage.path if storage and storage.path else _BOT_DATA_MOUNT_PATH
+        mount_path = storage.path if storage and storage.path else _BOT_DATA_MOUNT_PATH
+        quota = (
+            storage.quota if storage and storage.quota else _SHARED_BOT_DATA_PVC_SIZE
         )
-        quota = storage.quota if storage and storage.quota else _SHARED_BOT_DATA_PVC_SIZE
         pvc_name = self._create_shared_bot_data_pvc() if storage_id else None
         effective_storage = (
             Storage(
@@ -836,9 +834,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             storage=effective_storage,
         )
 
-    def _resolve_storage_id_from_deployment(
-        self, deployment_name: str
-    ) -> str | None:
+    def _resolve_storage_id_from_deployment(self, deployment_name: str) -> str | None:
         """读取 Deployment 注解，恢复 storage id。"""
         from kubernetes.client import ApiException, AppsV1Api
 
@@ -1004,9 +1000,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
                 )
                 return False
         else:
-            logger.info(
-                "local_k8s: storage subPath already gone: %s", real_target
-            )
+            logger.info("local_k8s: storage subPath already gone: %s", real_target)
         return True
 
 

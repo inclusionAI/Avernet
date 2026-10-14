@@ -507,15 +507,6 @@ class TestCreationTimeReconcile:
             env=TEST_ENV,
         )
         created_bot_ids.append(leaked_clone)
-        from .conftest import create_test_bot_device_rel
-
-        planted_rel_id = create_test_bot_device_rel(
-            rel_repository,
-            bot_id=leaked_clone,
-            device_uuid=device_uuid,
-            tenant=tenant_name,
-            created_rel_ids=created_rel_ids,
-        )
         leaked_publish_id = _insert_publish_row(
             tenant_name,
             source_id,
@@ -536,10 +527,6 @@ class TestCreationTimeReconcile:
         created_bot_ids.append(fresh_clone)
 
         _assert_tombstoned_clone(bot_repository, tenant_name, leaked_clone)
-        assert (
-            _rel_tombstones(db_manager, tenant_name, leaked_clone).get(planted_rel_id)
-            == planted_rel_id
-        ), "swept clone rel rows must be tombstoned with it"
         assert fresh.status == PublishStatus.PENDING.value
         assert fresh_clone != leaked_clone
         _assert_live_pending(bot_repository, tenant_name, fresh_clone)
@@ -576,15 +563,6 @@ class TestCreationTimeReconcile:
             env=TEST_ENV,
         )
         created_bot_ids.append(orphan_clone)
-        from .conftest import create_test_bot_device_rel
-
-        planted_rel_id = create_test_bot_device_rel(
-            rel_repository,
-            bot_id=orphan_clone,
-            device_uuid=device_uuid,
-            tenant=tenant_name,
-            created_rel_ids=created_rel_ids,
-        )
         orphan_publish_id = _insert_publish_row(tenant_name, source_id)
         created_publish_ids.append(orphan_publish_id)
 
@@ -604,10 +582,6 @@ class TestCreationTimeReconcile:
         )
         assert orphan_after.status == PublishStatus.FAILED.value
         _assert_tombstoned_clone(bot_repository, tenant_name, orphan_clone)
-        assert (
-            _rel_tombstones(db_manager, tenant_name, orphan_clone).get(planted_rel_id)
-            == planted_rel_id
-        ), "swept crash-window clone rel rows must be tombstoned with it"
         assert fresh.status == PublishStatus.PENDING.value
         assert fresh_clone != orphan_clone
         _assert_live_pending(bot_repository, tenant_name, fresh_clone)
@@ -671,6 +645,71 @@ class TestCreationTimeReconcile:
         assert source_row is not None
         assert source_row.status == BotStatus.ACTIVE.value
         assert source_row.is_deleted == 0
+
+    @pytest.mark.asyncio
+    async def test_pending_generation_owning_devices_is_never_reconciled(
+        self,
+        bot_repository,
+        device_repository,
+        rel_repository,
+        created_bot_ids,
+        created_device_ids,
+        created_rel_ids,
+        created_publish_ids,
+        created_tenant_ids,
+        created_template_ids,
+    ):
+        """D5.8 — a live PENDING generation whose rel is its device's ONLY live
+        binding holds real ownership (baas_bot_device_rel is the authoritative
+        record, #2648) and is never swept, even with no publish claiming it."""
+        from .conftest import create_test_bot_device_rel
+
+        tenant_name, source_id, device_uuid = _seed_active_update_source(
+            bot_repository,
+            device_repository,
+            rel_repository,
+            created_bot_ids,
+            created_device_ids,
+            created_rel_ids,
+            created_tenant_ids,
+            created_template_ids,
+        )
+        source_rel = rel_repository.get_by_device_uuid(
+            device_uuid, tenant_name, TEST_ENV
+        )
+        assert source_rel is not None
+        rel_repository.soft_delete(
+            rel_id=source_rel.id, tenant=tenant_name, env=TEST_ENV, modifier="test_user"
+        )
+        owner_id = bot_repository.try_insert_pending_bot(
+            source_bot_id=source_id,
+            tenant=tenant_name,
+            env=TEST_ENV,
+        )
+        created_bot_ids.append(owner_id)
+        create_test_bot_device_rel(
+            rel_repository,
+            bot_id=owner_id,
+            device_uuid=device_uuid,
+            tenant=tenant_name,
+            created_rel_ids=created_rel_ids,
+        )
+
+        with pytest.raises(PublishConflictError):
+            await _ps().create_publish(
+                tenant=tenant_name,
+                bot_id=source_id,
+                publish_type=PublishType.UPDATE,
+                operator="test_user",
+                request_id=uuid4().hex,
+            )
+
+        _assert_live_pending(bot_repository, tenant_name, owner_id)
+        owner_rel = rel_repository.get_by_device_uuid(
+            device_uuid, tenant_name, TEST_ENV
+        )
+        assert owner_rel is not None and owner_rel.bot_id == owner_id
+        assert owner_rel.is_deleted == 0
 
 
 @pytest.mark.integration
@@ -867,3 +906,95 @@ class TestCrossGenerationCoverage:
         assert [r.id for r in live_pending] == [fresh_clone]
         phantom = _publish_repo().get_by_id(phantom_publish_id, tenant_name, TEST_ENV)
         assert phantom.status == PublishStatus.PENDING.value
+
+    async def test_unfinished_publish_on_retired_source_keeps_its_claimed_clone(
+        self,
+        bot_repository,
+        device_repository,
+        rel_repository,
+        created_bot_ids,
+        created_device_ids,
+        created_rel_ids,
+        created_publish_ids,
+        created_tenant_ids,
+        created_template_ids,
+    ):
+        """6.10d — a non-terminal publish on a RETIRED source that CLAIMS a live
+        PENDING clone keeps that clone: the uuid has no finished publish, so it
+        is in-flight and the reconciliation sweep must not delete the claimed
+        row. The creation then aborts on the occupied PENDING slot."""
+        from .conftest import (
+            create_test_bot_record,
+            create_test_devices_for_bot,
+            create_test_tenant,
+            generate_unique_bot_uuid,
+        )
+
+        tenant_name, _ = create_test_tenant(created_tenant_ids, created_template_ids)
+        bot_uuid = generate_unique_bot_uuid()
+        retired_id = bot_repository.insert_bot(
+            bot_uuid=bot_uuid,
+            tenant=tenant_name,
+            env=TEST_ENV,
+            domain="test_domain",
+            creator="test_user",
+            modifier="test_user",
+            status=BotStatus.RELEASED.value,
+            name=f"Retired Gen {bot_uuid[:8]}",
+        )
+        created_bot_ids.append(retired_id)
+        bot_repository.soft_delete(
+            bot_id=retired_id, tenant=tenant_name, env=TEST_ENV, modifier="test_user"
+        )
+        current_id = bot_repository.insert_bot(
+            bot_uuid=bot_uuid,
+            tenant=tenant_name,
+            env=TEST_ENV,
+            domain="test_domain",
+            creator="test_user",
+            modifier="test_user",
+            status=BotStatus.ACTIVE.value,
+            name=f"Current Gen {bot_uuid[:8]}",
+        )
+        created_bot_ids.append(current_id)
+        create_test_devices_for_bot(
+            device_repository=device_repository,
+            rel_repository=rel_repository,
+            tenant=tenant_name,
+            bot_id=current_id,
+            device_status="ACTIVE",
+            num_devices=1,
+            created_device_ids=created_device_ids,
+            created_rel_ids=created_rel_ids,
+        )
+        claimed_clone_id = bot_repository.insert_bot(
+            bot_uuid=bot_uuid,
+            tenant=tenant_name,
+            env=TEST_ENV,
+            domain="test_domain",
+            creator="test_user",
+            modifier="test_user",
+            status=BotStatus.PENDING.value,
+            name=f"In-flight Clone {bot_uuid[:8]}",
+        )
+        created_bot_ids.append(claimed_clone_id)
+        inflight_publish_id = _insert_publish_row(
+            tenant_name,
+            retired_id,
+            with_batch=True,
+            extra_config={"target_bot_id": claimed_clone_id},
+        )
+        created_publish_ids.append(inflight_publish_id)
+
+        with pytest.raises(PublishConflictError):
+            await _ps().create_publish(
+                tenant=tenant_name,
+                bot_id=current_id,
+                publish_type=PublishType.UPDATE,
+                operator="test_user",
+                request_id=uuid4().hex,
+            )
+
+        _assert_live_pending(bot_repository, tenant_name, claimed_clone_id)
+        inflight = _publish_repo().get_by_id(inflight_publish_id, tenant_name, TEST_ENV)
+        assert inflight.status == PublishStatus.PENDING.value

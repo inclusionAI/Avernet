@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 from datetime import datetime
+from types import SimpleNamespace
 from typing import cast
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
@@ -517,10 +518,12 @@ class TestStalePublishAutoResolution:
         _publish_service_instance._publish_repo = MagicMock()
         _publish_service_instance._publish_repo.now.return_value = datetime.now()
         # First classifier query returns the stale publish; the re-query
-        # after auto-resolution and the RESTART scope check both return []
-        # since the stale publish has been resolved
+        # after auto-resolution, the pre-insert protection-set query, and
+        # the RESTART scope check all return [] since the stale publish
+        # has been resolved
         _publish_service_instance._publish_repo.list_active_by_bot_ids.side_effect = [
             [mock_existing],
+            [],
             [],
             [],
         ]
@@ -614,10 +617,11 @@ class TestStalePublishAutoResolution:
         _publish_service_instance._publish_repo = MagicMock()
         _publish_service_instance._publish_repo.now.return_value = datetime.now()
         # Same ordering as the auto-resolve test: classifier query returns
-        # the stale publish, then the re-query and RESTART scope check
-        # return [] once it is resolved
+        # the stale publish, then the re-query, protection-set query, and
+        # RESTART scope check return [] once it is resolved
         _publish_service_instance._publish_repo.list_active_by_bot_ids.side_effect = [
             [mock_existing],
+            [],
             [],
             [],
         ]
@@ -8529,9 +8533,11 @@ class TestCreatePublishStaleUpdateCleanup:
         _publish_service_instance._publish_repo = MagicMock()
         _publish_service_instance._publish_repo.now.return_value = datetime.now()
         # First classifier query returns the stale UPDATE publish; the
-        # re-query after auto-resolution returns none left.
+        # re-query after auto-resolution and the pre-insert protection-set
+        # query return none left.
         _publish_service_instance._publish_repo.list_active_by_bot_ids.side_effect = [
             [mock_existing],
+            [],
             [],
         ]
         _publish_service_instance._publish_repo.insert_publish.return_value = 1
@@ -8600,6 +8606,129 @@ class TestCreatePublishStaleUpdateCleanup:
             if name == "update_status" and kwargs.get("status") == "FAILED"
         ]
         assert call_names.index("cleanup_clone") < failed_writes[0]
+
+
+class TestClaimSetProtection:
+    """Sweep protection set: published clone claims + device-owning generations."""
+
+    def test_owns_live_device_binding_true_when_rel_is_live_binding(self):
+        rel = SimpleNamespace(device_uuid="dev-1")
+        binding = SimpleNamespace(bot_id=7)
+        _publish_service_instance._rel_repo = MagicMock()
+        _publish_service_instance._rel_repo.list_by_bot_id.return_value = [rel]
+        _publish_service_instance._rel_repo.get_by_device_uuid.return_value = binding
+
+        assert _publish_service_instance._owns_live_device_binding(7, "t", "e") is True
+
+    def test_owns_live_device_binding_false_when_device_bound_elsewhere(self):
+        rel = SimpleNamespace(device_uuid="dev-1")
+        binding = SimpleNamespace(bot_id=8)
+        _publish_service_instance._rel_repo = MagicMock()
+        _publish_service_instance._rel_repo.list_by_bot_id.return_value = [rel]
+        _publish_service_instance._rel_repo.get_by_device_uuid.return_value = binding
+
+        assert _publish_service_instance._owns_live_device_binding(7, "t", "e") is False
+
+    def test_owns_live_device_binding_false_when_binding_missing(self):
+        rel = SimpleNamespace(device_uuid="dev-1")
+        _publish_service_instance._rel_repo = MagicMock()
+        _publish_service_instance._rel_repo.list_by_bot_id.return_value = [rel]
+        _publish_service_instance._rel_repo.get_by_device_uuid.return_value = None
+
+        assert _publish_service_instance._owns_live_device_binding(7, "t", "e") is False
+
+    def test_owns_live_device_binding_false_without_rels(self):
+        _publish_service_instance._rel_repo = MagicMock()
+        _publish_service_instance._rel_repo.list_by_bot_id.return_value = []
+
+        assert _publish_service_instance._owns_live_device_binding(7, "t", "e") is False
+
+    @pytest.mark.asyncio
+    async def test_claim_set_collects_pointer_and_device_owning_generations(self):
+        mock_bot = MagicMock()
+        mock_bot.id = 1
+
+        claimer = MagicMock()
+        claimer.id = 77
+        claimer.extra_config = {"target_bot_id": 555}
+
+        mock_new_publish = MagicMock()
+        mock_new_publish.id = 1
+        mock_new_publish.bot_id = 1
+        mock_new_publish.publish_type = "CREATE"
+        mock_new_publish.status = "PENDING"
+        mock_new_publish.extra_config = {}
+        mock_new_publish.creator = "user1"
+        mock_new_publish.modifier = "user1"
+        mock_new_publish.gmt_create = datetime.now()
+        mock_new_publish.gmt_modified = datetime.now()
+
+        generation = SimpleNamespace(id=42)
+
+        _publish_service_instance._bot_service.get_bot = AsyncMock(
+            return_value=mock_bot
+        )
+        _publish_service_instance._bot_repo.list_by_bot_uuid.return_value = []
+        _publish_service_instance._bot_repo.list_by_bot_uuid_including_deleted.return_value = [
+            generation
+        ]
+        _publish_service_instance._publish_repo = MagicMock()
+        _publish_service_instance._publish_repo.now.return_value = datetime.now()
+        # Classifier query: none active; protection-set query: one claimer.
+        _publish_service_instance._publish_repo.list_active_by_bot_ids.side_effect = [
+            [],
+            [claimer],
+        ]
+        _publish_service_instance._publish_repo.insert_publish.return_value = 1
+        _publish_service_instance._publish_repo.get_by_id.return_value = (
+            mock_new_publish
+        )
+
+        mock_batch_record = MagicMock()
+        mock_batch_record.batch_index = 0
+        mock_batch_record.id = 1
+        mock_batch_record.batch_capacity = 5
+        _publish_service_instance._publish_batch_repo = MagicMock()
+        _publish_service_instance._publish_batch_repo.list_by_publish_id.return_value = []
+        _publish_service_instance._publish_batch_repo.insert_batch.return_value = 1
+        _publish_service_instance._publish_batch_repo.get_by_id.return_value = (
+            mock_batch_record
+        )
+
+        mock_pending_device = MagicMock()
+        mock_pending_device.id = 10
+        mock_pending_device.status = "PENDING"
+        _publish_service_instance._device_repo = MagicMock()
+        _publish_service_instance._device_repo.list_by_bot_id.return_value = [
+            mock_pending_device
+        ]
+        _publish_service_instance._publish_record_repo = MagicMock()
+
+        _publish_service_instance._rel_repo = MagicMock()
+        _publish_service_instance._rel_repo.list_by_bot_id.return_value = [
+            SimpleNamespace(device_uuid="dev-42")
+        ]
+        _publish_service_instance._rel_repo.get_by_device_uuid.return_value = (
+            SimpleNamespace(bot_id=42)
+        )
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="dev",
+        ):
+            await _publish_service_instance.create_publish(
+                tenant="test_tenant",
+                bot_id=1,
+                publish_type=PublishType.CREATE,
+                operator="user1",
+                request_id="test-request-id-12345678901234567890",
+            )
+
+        sweep_kwargs = _publish_service_instance._bot_repo.reconcile_unclaimed_pending_bots.call_args.kwargs
+        excluded = sweep_kwargs["exclude_bot_ids"]
+        assert 555 in excluded  # target_bot_id claimed by a non-finished publish
+        assert 42 in excluded  # generation owning its device's only live binding
+        assert 1 in excluded  # the resolved source row
 
 
 class TestCreatePublishOrphanUpdate:
