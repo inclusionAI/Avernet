@@ -600,9 +600,7 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
                 },
                 synchronize_session=False,
             )
-        log.info(
-            "[bot:reconcile_unclaimed_pending_bots] reconciled=%s rows", len(rows)
-        )
+        log.info("[bot:reconcile_unclaimed_pending_bots] reconciled=%s rows", len(rows))
         return len(rows)
 
     @with_orm_session
