@@ -244,15 +244,15 @@ class BotA2aClient:
                 body = json.loads(line[6:])
                 if "error" in body:
                     err_data = (body["error"].get("data") or {})
-                    self._emit_terminal_error(
+                    await self._emit_terminal_error(
                         ctx, err_data.get("reason", "a2a_error"),
                         body["error"].get("message", ""))
                     return
-                self._handle_wire_result(ctx, body.get("result") or {})
+                await self._handle_wire_result(ctx, body.get("result") or {})
             else:
                 # E1：EOF 无终态不得视为成功
                 if not ctx.terminal_emitted:
-                    self._emit_terminal_error(
+                    await self._emit_terminal_error(
                         ctx, "STREAM_CLOSED_WITHOUT_TERMINAL",
                         "stream ended before terminal status")
         except asyncio.CancelledError:
@@ -261,24 +261,25 @@ class BotA2aClient:
             logger.exception("BotA2aClient SSE consume failed rid=%s",
                             ctx.rid)
             if not ctx.terminal_emitted:
-                self._emit_terminal_error(ctx, "STREAM_ERROR", str(e)[:200])
+                await self._emit_terminal_error(ctx, "STREAM_ERROR", str(e)[:200])
         finally:
             await resp.aclose()
             await client.aclose()
             self._runs.pop(ctx.rid, None)
 
-    def _handle_wire_result(self, ctx: _RunCtx,
-                            result: dict[str, Any]) -> None:
+    async def _handle_wire_result(self, ctx: _RunCtx,
+                                   result: dict[str, Any]) -> None:
         for member in ("statusUpdate", "artifactUpdate", "task", "message"):
             if member in result:
-                getattr(self, f"_on_{member}")(ctx, result[member])
+                await getattr(self, f"_on_{member}")(ctx, result[member])
                 return
 
-    def _on_task(self, ctx: _RunCtx, task: dict[str, Any]) -> None:
+    async def _on_task(self, ctx: _RunCtx, task: dict[str, Any]) -> None:
         logger.debug("[a2a] task opened rid=%s state=%s", ctx.rid,
                      (task.get("status") or {}).get("state"))
 
-    def _on_artifactUpdate(self, ctx: _RunCtx, au: dict[str, Any]) -> None:
+    async def _on_artifactUpdate(self, ctx: _RunCtx,
+                                  au: dict[str, Any]) -> None:
         parts = (au.get("artifact") or {}).get("parts") or []
         text = "".join(p.get("text", "") for p in parts
                        if isinstance(p, dict))
@@ -286,7 +287,7 @@ class BotA2aClient:
             # T1：artifact 终稿只更新内容快照——不发 chat final、不置完成
             ctx.final_text = text
             return
-        self._dispatch("chat", {
+        await self._dispatch("chat", {
             "state": "delta", "deltaText": text,
             "runId": au.get("taskId"), "sessionKey": ctx.session_key,
             "message": {"role": "assistant",
@@ -294,7 +295,8 @@ class BotA2aClient:
             "seq": (au.get("metadata") or {}).get("seq"),
         })
 
-    def _on_statusUpdate(self, ctx: _RunCtx, su: dict[str, Any]) -> None:
+    async def _on_statusUpdate(self, ctx: _RunCtx,
+                                su: dict[str, Any]) -> None:
         meta = su.get("metadata") or {}
         state = (su.get("status") or {}).get("state", "")
         base = {"runId": su.get("taskId"), "sessionKey": ctx.session_key,
@@ -306,7 +308,7 @@ class BotA2aClient:
             payload.setdefault("interactionId", meta.get("interactionId"))
             payload.setdefault("state", "interaction.requested")
             payload["sessionKey"] = ctx.session_key
-            self._dispatch("interaction.requested", payload)
+            await self._dispatch("interaction.requested", payload)
             return
         if meta.get("interactionId") and state == "TASK_STATE_WORKING" \
                 and meta.get("kind") not in ("agent", "resolve_conflict"):
@@ -316,7 +318,7 @@ class BotA2aClient:
             payload.setdefault("interactionId", meta.get("interactionId"))
             payload["state"] = "interaction.resolved"
             payload["sessionKey"] = ctx.session_key
-            self._dispatch("interaction.resolved", payload)
+            await self._dispatch("interaction.resolved", payload)
             return
         if meta.get("kind") == "agent":
             payload = dict(frame) if isinstance(frame, dict) else {}
@@ -325,7 +327,7 @@ class BotA2aClient:
             payload["sessionKey"] = ctx.session_key
             # R17-2：original_event 决定消费者回调路由
             v3_event = meta.get("original_event", "agent")
-            self._dispatch(v3_event, payload)
+            await self._dispatch(v3_event, payload)
             return
 
         if meta.get("final") in ("true", True):
@@ -334,7 +336,7 @@ class BotA2aClient:
             ctx.terminal_emitted = True
             if state == "TASK_STATE_COMPLETED":
                 text = ctx.final_text or ""
-                self._dispatch("chat", {
+                await self._dispatch("chat", {
                     **base, "state": "final",
                     "message": {"role": "assistant",
                                 "content": [{"type": "text", "text": text}]},
@@ -342,7 +344,7 @@ class BotA2aClient:
             else:
                 # FAILED/CANCELED/REJECTED → error 终态（_on_chat.error 分支）
                 err_meta = (frame or {}) if isinstance(frame, dict) else {}
-                self._dispatch("chat", {
+                await self._dispatch("chat", {
                     **base, "state": "error",
                     "errorMessage": meta.get("errorMessage")
                     or err_meta.get("errorMessage")
@@ -350,35 +352,49 @@ class BotA2aClient:
                     "errorCode": state,
                 })
             return
-        self._dispatch("chat", {**base, "state": state})
+        await self._dispatch("chat", {**base, "state": state})
 
-    def _on_message(self, ctx: _RunCtx, msg: dict[str, Any]) -> None:
+    async def _on_message(self, ctx: _RunCtx,
+                           msg: dict[str, Any]) -> None:
         parts = msg.get("parts") or []
         text = "".join(p.get("text", "") for p in parts
                        if isinstance(p, dict))
-        self._dispatch("chat", {
+        await self._dispatch("chat", {
             "state": "message", "sessionKey": ctx.session_key,
             "runId": ctx.rid,
             "message": {"role": "user",
                          "content": [{"type": "text", "text": text}]},
         })
 
-    def _emit_terminal_error(self, ctx: _RunCtx, code: str,
-                             message: str) -> None:
+    async def _emit_terminal_error(self, ctx: _RunCtx, code: str,
+                                   message: str) -> None:
         ctx.terminal_emitted = True
         self._dispatch("chat", {
             "state": "error", "sessionKey": ctx.session_key,
             "runId": ctx.rid, "errorMessage": message, "errorCode": code,
         })
 
-    def _dispatch(self, event_name: str, payload: dict[str, Any]) -> None:
-        handler = self._event_handlers.get(event_name) \
-            or self._event_handlers.get("*")
+    async def _dispatch(self, event_name: str, payload: dict[str, Any]) -> None:
+        """R18-E2E 签名修齐：与 BotWebSocketClient 的真实分发契约一致——
+        精确 handler 单参 ``handler(payload)`` 被调后协程视情况 await（recv
+        循环 :448-453）；通配 "*" 以 ``(event_name, payload)`` 调（:458-463）。
+        （原实现把两参传给精确 handler——E2E 连接编排时当场暴露。）"""
+        handler = self._event_handlers.get(event_name)
         if handler:
             try:
-                handler(event_name, payload)
+                coro = handler(payload)
+                if asyncio.iscoroutine(coro):
+                    await coro
             except Exception:
                 logger.exception("[a2a] handler %s failed", event_name)
+        wildcard = self._event_handlers.get("*")
+        if wildcard:
+            try:
+                coro = wildcard(event_name, payload)
+                if asyncio.iscoroutine(coro):
+                    await coro
+            except Exception:
+                logger.exception("[a2a] wildcard handler failed")
 
     # ── abort（CancelTask 为 1c 缺口——诚实 ok=False）──
     async def chat_abort(self, session_key: str,

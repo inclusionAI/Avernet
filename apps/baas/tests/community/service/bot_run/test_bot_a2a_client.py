@@ -246,11 +246,14 @@ def test_first_delta_before_final_with_barrier(stream_server):
 
     async def scenario():
         client = await _connect_async(stream_server.base)
-        client.on_event("chat", lambda n, p: received.append((n, p)))
-        client.on_event("agent", lambda n, p: received.append((n, p)))
+        client.on_event(
+            "chat", lambda p, _n="chat": received.append((_n, p)))
+        client.on_event(
+            "agent", lambda p, _n="agent": received.append((_n, p)))
         client.on_event(
             "mode_transition.resolved",
-            lambda n, p: received.append((n, p)))   # R17-2 路由验证
+            lambda p, _n="mode_transition.resolved":
+                received.append((_n, p)))   # R17-2 路由验证
         await client.chat_send(session_key="s", message="hi")
         await asyncio.sleep(0.25)    # final_delay=0.5s 之内
         states = {p.get("state") for _, p in received}
@@ -266,9 +269,8 @@ def test_mode_transition_dispatches_to_original_event_name(stream_server):
 
     async def scenario():
         client = await _connect_async(stream_server.base)
-        client.on_event("mode_transition.resolved",
-                        lambda n, p: mt.append(p))
-        client.on_event("agent", lambda n, p: mt.append({"__agent__": p}))
+        client.on_event("mode_transition.resolved", lambda p: mt.append(p))
+        client.on_event("agent", lambda p: mt.append({"__agent__": p}))
         await client.chat_send(session_key="s", message="hi")
         await asyncio.sleep(1.0)
         await client.close()
@@ -285,7 +287,7 @@ def test_double_final_dedup_and_content_survived(stream_server):
 
     async def scenario():
         client = await _connect_async(stream_server.base)
-        client.on_event("chat", lambda n, p: finals.append(p)
+        client.on_event("chat", lambda p: finals.append(p)
                         if p.get("state") == "final" else None)
         await client.chat_send(session_key="s", message="hi")
         await asyncio.sleep(1.0)
@@ -302,7 +304,7 @@ def test_failed_is_error_not_final(failed_server):
 
     async def scenario():
         client = await _connect_async(failed_server.base)
-        client.on_event("chat", lambda n, p: seen.append((n, p)))
+        client.on_event("chat", lambda p: seen.append(("chat", p)))
         await client.chat_send(session_key="s", message="hi")
         await asyncio.sleep(1.0)
         await client.close()
@@ -478,11 +480,17 @@ def _real_wire_stream(kernel_events: list[dict]) -> list[dict]:
     return [kernel_event_to_wire(e) for e in kernel_events]
 
 
-def _consume_wire_events(client, wire_events: list[dict],
-                         rid: str = "rid") -> None:
+async def _consume_wire_events_(client, wire_events: list[dict],
+                                rid: str = "rid") -> None:
     import secbaas.community.core.service.bot_run._bot_a2a_client as m
     for wire_event in wire_events:
-        client._handle_wire_result(m._RunCtx(rid, "s"), wire_event)
+        await client._handle_wire_result(m._RunCtx(rid, "s"), wire_event)
+
+
+def _consume_wire_events(client, wire_events: list[dict],
+                         rid: str = "rid") -> None:
+    import asyncio
+    asyncio.run(_consume_wire_events_(client, wire_events, rid))
 
 
 def test_interaction_requested_roundtrip_lossless():
@@ -510,7 +518,8 @@ def test_interaction_requested_roundtrip_lossless():
     client = BotA2aClient(base_url="http://unused")
     client._connected = True
     client.on_event("interaction.requested",
-                    lambda n, p: received.append((n, p)))
+                    lambda p, _n="interaction.requested":
+                        received.append((_n, p)))
     _consume_wire_events(client, _real_wire_stream(kernel_events))
 
     assert received, "interaction.requested 未派发（R18-1 需先红）"
@@ -542,8 +551,10 @@ def test_approval_resolved_keeps_interaction_identity():
     client = BotA2aClient(base_url="http://unused")
     client._connected = True
     client.on_event("interaction.resolved",
-                    lambda n, p: received.append(("interaction.resolved", p)))
-    client.on_event("chat", lambda n, p: received.append(("chat", p)))
+                    lambda p: received.append(
+                        ("interaction.resolved", p)))
+    client.on_event("chat",
+                    lambda p: received.append(("chat", p)))
     _consume_wire_events(client, _real_wire_stream(kernel_events))
 
     ir = [p for n, p in received if n == "interaction.resolved"]
