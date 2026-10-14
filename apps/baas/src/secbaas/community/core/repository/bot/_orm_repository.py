@@ -546,7 +546,7 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
         tenant: str,
         env: str,
         modifier: str = "system",
-        exclude_bot_id: int | None = None,
+        exclude_bot_ids: set[int] | None = None,
     ) -> int:
         """Soft-delete live PENDING clones for the uuid (see Protocol docstring)."""
         log.info(
@@ -570,8 +570,8 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
             )
             .order_by(BotModel.id.desc())
         )
-        if exclude_bot_id is not None:
-            query = query.filter(BotModel.id != exclude_bot_id)
+        if exclude_bot_ids:
+            query = query.filter(BotModel.id.notin_(exclude_bot_ids))
         rows = query.all()
         for row in rows:
             self._session.query(BotDeviceRelModel).filter(

@@ -192,7 +192,7 @@ class BotRepository(Protocol):
         tenant: str,
         env: str,
         modifier: str = "system",
-        exclude_bot_id: int | None = None,
+        exclude_bot_ids: set[int] | None = None,
     ) -> int:
         """Soft-delete every live PENDING bot row for the uuid in ONE transaction.
 
@@ -208,13 +208,19 @@ class BotRepository(Protocol):
         non-PENDING rows are never touched. Returns the number of bot
         rows soft-deleted.
 
-        ``exclude_bot_id`` (design D5.6 "Source-row exclusion") is the
-        resolved source bot row the new publish targets and is NEVER
-        selected for soft-deletion: a never-published first-generation
-        PENDING row is the SOURCE of a CREATE publish, not an unclaimed
-        clone, and sweeping it would destroy the bot itself. ``None``
-        means no exclusion — sweep every live PENDING row (callers that
-        cannot identify a source row pass ``None`` deliberately).
+        ``exclude_bot_ids`` (design D5.6/D5.7 "claim-set protection") is
+        the set of bot row ids that are NEVER selected for soft-deletion.
+        It must contain (a) the resolved source bot row the new publish
+        targets — a never-published first-generation PENDING row is the
+        SOURCE of a CREATE publish, not an unclaimed clone, and sweeping
+        it would destroy the bot itself — and (b) every ``target_bot_id``
+        claimed by a non-finished publish across ALL generations of the
+        uuid, including retired/soft-deleted ones: a uuid with any
+        unfinished publish is in-flight, so its claimed clones must never
+        be reconciled (the caller computes this via the include-deleted
+        generation scan). ``None`` or an empty set means no exclusion —
+        sweep every live PENDING row (callers unable to identify any
+        protected id pass ``None`` deliberately).
         """
         ...
 
