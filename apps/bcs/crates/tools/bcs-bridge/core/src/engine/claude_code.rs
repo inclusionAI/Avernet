@@ -180,15 +180,18 @@ impl<'a> CcTurnMapper<'a> {
     /// `running`/`pending` progress reports must keep the wait. Resolves the
     /// waiting call by `tool_use_id`, falling back to the `task_id`
     /// correlation for notifications that omit it.
-    fn finish_background(&mut self, task_id: Option<&str>, tool_use_id: Option<&str>, status: &str) {
+    /// Returns true when a pending wait was found and released; false for
+    /// unknown ids (a stale delivery the caller should mark downstream).
+    fn finish_background(&mut self, task_id: Option<&str>, tool_use_id: Option<&str>, status: &str) -> bool {
         if !matches!(status, "completed" | "failed" | "stopped" | "killed") {
-            return;
+            return false;
         }
         let released = tool_use_id
             .map(str::to_owned)
             .or_else(|| task_id.and_then(|id| self.task_ids.get(id).cloned()));
-        if let Some(released) = released.filter(|id| !id.trim().is_empty()) {
-            self.background.remove(&released);
+        match released.filter(|id| !id.trim().is_empty()) {
+            Some(released) => self.background.remove(&released),
+            None => false,
         }
     }
 
@@ -202,7 +205,20 @@ impl<'a> CcTurnMapper<'a> {
                 CcMap::Ignore
             }
             CcMap::BackgroundDelivered { task_id, tool_use_id, status } => {
-                self.finish_background(task_id.as_deref(), tool_use_id.as_deref(), &status);
+                let consumed = self.finish_background(task_id.as_deref(), tool_use_id.as_deref(), &status);
+                if !consumed {
+                    // This delivery targets a task this run never launched:
+                    // the CLI is replaying a notification undelivered by a
+                    // previous (killed) turn. Forward it downstream with a
+                    // visible marker so BCS consumers can tell a recycled
+                    // result from a fresh one.
+                    let text = format!(
+                        "<task-notification>{}{}",
+                        task_id.map(|t| format!(" task_id={t}")).unwrap_or_default(),
+                        STALE_DELIVERY_MARKER,
+                    );
+                    return CcMap::Events(vec![sse::chat_delta(self.run_id, &text)]);
+                }
                 CcMap::Ignore
             }
             CcMap::Events(mut events) => {
@@ -248,6 +264,14 @@ impl<'a> CcTurnMapper<'a> {
         }
     }
 }
+
+/// Marker appended to a delivered `<task-notification>` when its tool call id
+/// does not belong to this run — i.e. the CLI is replaying a notification
+/// that a previous (killed) run left undelivered in the session queue. The
+/// marker makes the replay visible to BCS consumers and downstream viewers
+/// so a recycled result doesn't read as a fresh response.
+const STALE_DELIVERY_MARKER: &str =
+    "\n--------- replayed from a previous run (background task completed before this turn started) -------";
 
 /// Whether a tool result is the async-launch receipt of a background task
 /// (Agent/Task: "Async agent launched successfully"; background Bash:
@@ -1779,6 +1803,29 @@ mod tests {
         }).to_string();
         assert!(matches!(mapper.map_line(&legacy_delivered), CcMap::Ignore));
         assert_eq!(mapper.background_pending(), 0, "task_id must release the correlated wait");
+    }
+
+    #[test]
+    fn stale_delivery_for_unknown_task_emits_marked_event() {
+        // A notification whose tool call id was never registered this run
+        // (a replay from a previous killed turn) must not be silent: forward
+        // it downstream with a visible marker.
+        let mut mapper = CcTurnMapper::new("r-1");
+        let stale = json!({
+            "type": "user",
+            "message": {"role": "user", "content":
+                "<task-notification>\n<task-id>t-stale</task-id>\n<tool-use-id>toolu_old</tool-use-id>\n<status>completed</status>\n<summary>old finder result</summary>\n</task-notification>"}
+        }).to_string();
+        match mapper.map_line(&stale) {
+            CcMap::Events(events) => {
+                let StreamEvent::Chat(chat) = &events[0] else { panic!("expected chat delta") };
+                let text = chat.delta_text.as_deref().unwrap_or("");
+                assert!(text.contains(STALE_DELIVERY_MARKER), "must carry the marker: {text}");
+                assert!(text.contains("t-stale"), "must surface the task id: {text}");
+            }
+            other => panic!("expected marked event, got {other:?}"),
+        }
+        assert_eq!(mapper.background_pending(), 0, "stale delivery must not register");
     }
 
     #[tokio::test]
