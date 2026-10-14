@@ -1,7 +1,7 @@
 """A2A v1.0 JSON-RPC binding — FastAPI router.
 
-Thin shell: request parse → kernel call → wire convert → Response.
-No state (kernel module owns it all).
+Thin shell: request parse → validate → auth-gate → kernel call → wire →
+Response. No state (kernel module owns it all).
 
 Envelope discipline (JSON-RPC 2.0):
   - every response/error carries the request's own `id` (never messageId),
@@ -9,21 +9,34 @@ Envelope discipline (JSON-RPC 2.0):
   - SSE generators close over the request id for stream event envelopes,
   - boundary validation: malformed JSON → -32700, non-object body → -32600,
     missing message/messageId → -32602 (never a naked 500).
+
+Security parity with the WS surface (R12-4): message-sending methods run the
+same AuthGate check ws_server applies at :1172-1201 — get_switch → x-iam-token
+→ verify_chat_send — before any kernel registration or engine dispatch. An
+A2A caller can never succeed where the WS caller would be rejected.
+
+Extension negotiation (R12-5, design §8.5.2): a request declaring the retry
+extension via the A2A-Extensions header must carry a boolean
+metadata.avernet.retryOnly — missing or mistyped is rejected (-32602), it is
+never silently treated as FIRST.
 """
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import json
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Request
+from fastapi_injector import Injected
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from engine.community.api.transport.a2a import wire
-from engine.community.api.transport.a2a.card import make_agent_card
+from engine.community.api.transport.a2a.card import EXTENSION_URIS, make_agent_card
 from engine.community.api.transport.a2a.engine_bridge import execute_and_stream
 from engine.community.api.transport.a2a.kernel import A2aKernel, KeyConflictError
+from engine.community.plugin_api.auth_gate.protocol import AuthGateService
 
 router = APIRouter()
 
@@ -35,7 +48,16 @@ _kernel = A2aKernel()
 # collected mid-run and silently kill the event stream.
 _BRIDGE_TASKS: set[asyncio.Task] = set()
 
+# Methods that can trigger engine execution — gated exactly like ws_server's
+# handling of chat.send / chat.inject.
+_GATED_METHODS = frozenset({"SendMessage", "SendStreamingMessage",
+                            "InjectContext"})
+
 _HANDLERS: dict[str, Any] = {}
+
+# HTTP header the WS surface reads the same principal from (frame param
+# x-iam-token); A2A HTTP callers pass it as a request header.
+_IAM_TOKEN_HEADER = "x-iam-token"
 
 
 def _sse(data: Any) -> str:
@@ -50,15 +72,69 @@ def _rpc_error_response(rid: Any, error: dict[str, Any]) -> JSONResponse:
     return JSONResponse({"jsonrpc": "2.0", "id": rid, "error": error})
 
 
+def _invalid_params(rid: Any, message: str) -> JSONResponse:
+    return _rpc_error_response(rid, {"code": -32602, "message": message})
+
+
+class _ParamError(ValueError):
+    """Boundary type/shape violation → JSON-RPC -32602 (never a naked 500)."""
+
+
 @router.get("/.well-known/agent-card.json")
 async def agent_card() -> dict[str, Any]:
     from engine.community.config import get_local_base_url
     return make_agent_card(get_local_base_url())
 
 
+async def _auth_gate_guard(request: Request, rid: Any, method: str,
+                            session_key: str, message_text: str,
+                            auth_gate_service: AuthGateService) -> str | None:
+    """ws_server:1172-1201 parity.
+
+    Returns the IAM-derived idempotency key override on success (caller
+    substitutes it for the client messageId, exactly as ws_server rewrites
+    params.idempotencyKey), or None when the caller may proceed with its own
+    key. On rejection a JSONResponse is returned instead (truthy).
+    """
+    auth_gate_enabled = await auth_gate_service.get_switch()
+    if not auth_gate_enabled:
+        return None
+
+    iam_token = request.headers.get(_IAM_TOKEN_HEADER, "")
+    if not iam_token:
+        return _rpc_error_response(  # type: ignore[return-value]
+            rid, {"code": -32000, "message": "Missing x-iam-token",
+                  "data": {"reason": "auth_required"}})
+
+    from engine.community.api.transport.auth_gate import verify_chat_send
+    try:
+        gate_result = await verify_chat_send(
+            auth_gate_service=auth_gate_service,
+            session_key=session_key,
+            message=message_text,
+            iam_token=iam_token,
+        )
+    except Exception as e:
+        # ws_server logs and allows on gate exceptions; keep the parity.
+        import logging
+        logging.getLogger("engine-a2a").warning(
+            "auth_gate exception, allowing %s: %s", method, e)
+        return None
+
+    if gate_result and not gate_result.allowed:
+        return _rpc_error_response(  # type: ignore[return-value]
+            rid, {"code": -32000,
+                  "message": gate_result.error_message or "zero_check failed",
+                  "data": {"reason": "ZERO_CHECK_FAILED"}})
+
+    return gate_result.idempotency_key or None
+
+
 @router.post("/rpc")
-async def rpc(request: Request) -> Response:
-    # ── boundary validation (H2): malformed input never becomes a naked 500 ──
+async def rpc(request: Request,
+              auth_gate_service: AuthGateService = Injected(AuthGateService)
+              ) -> Response:
+    # ── boundary validation (R12-8): malformed input never becomes a 500 ──
     try:
         body = await request.json()
     except Exception:
@@ -69,29 +145,60 @@ async def rpc(request: Request) -> Response:
                                            "message": "Invalid Request"})
     rid = body.get("id")
     method = body.get("method", "")
+    if not isinstance(method, str):
+        return _rpc_error_response(rid, {"code": -32600,
+                                          "message": "method must be a string"})
     params = body.get("params")
     if params is None:
         params = {}
     if not isinstance(params, dict):
-        return _rpc_error_response(rid, {"code": -32602,
-                                          "message": "Invalid params"})
+        return _invalid_params(rid, "params must be an object")
 
     handler = _HANDLERS.get(method)
     if handler is None:
         return _rpc_error_response(rid, {"code": -32601,
                                           "message": f"Method not found: {method}"})
+
+    # ── R12-5: extension negotiation before the handlers see params ──
+    declared = _declared_extensions(request)
+    if EXTENSION_URIS["retry"] in declared:
+        retry_val = (params.get("metadata") or {}).get("avernet.retryOnly") \
+            if isinstance(params.get("metadata"), dict) else None
+        if retry_val is None:
+            return _invalid_params(
+                rid, "avernet.retryOnly required when retry extension declared")
+
     try:
-        outcome = await handler(params, rid)
+        # ── R12-4: same AuthGate the WS surface enforces, before any
+        # registration or dispatch. Gate replacement of the idempotency key
+        # mirrors ws_server's params.idempotencyKey rewrite.
+        gated_key = None
+        if method in _GATED_METHODS:
+            ctx, text = _session_and_text(params)
+            guard = await _auth_gate_guard(request, rid, method, ctx, text,
+                                           auth_gate_service)
+            if isinstance(guard, JSONResponse):
+                return guard
+            gated_key = guard
+
+        outcome = await handler(params, rid, gated_key)
     except KeyConflictError:
         return _rpc_error_response(rid, {"code": -32003,
                                           "data": {"reason": "key_conflict"}})
+    except _ParamError as e:
+        return _invalid_params(rid, str(e))
     except ValueError as e:
         msg = str(e)
         if "contextId" in msg:
             return _rpc_error_response(rid, wire.wire_context_id_required())
-        return _rpc_error_response(rid, {"code": -32602, "message": msg})
+        return _invalid_params(rid, msg)
     except LookupError:
         return _rpc_error_response(rid, wire.wire_replay_refused("not_found"))
+    except RuntimeError as e:
+        # R12-M3: capacity hard-refusal — the v3 openclaw_resume parity.
+        return _rpc_error_response(rid, {"code": -32000,
+                                          "message": str(e)[:200],
+                                          "data": {"reason": "capacity"}})
 
     if isinstance(outcome, Response):
         return outcome
@@ -100,12 +207,26 @@ async def rpc(request: Request) -> Response:
     return _rpc_response(rid, outcome)
 
 
-# ── Retry flag (D14 §8.5.2: explicit rejection on malformed flag — H3) ──
+def _declared_extensions(request: Request) -> list[str]:
+    header = request.headers.get("A2A-Extensions", "")
+    return [part.strip() for part in header.split(",") if part.strip()]
 
-class _RetryFlagError(ValueError):
-    """avernet.retryOnly is present but not a boolean — reject, never
-    silently coerce (string "false" truthy would route FIRST→retry_only)."""
 
+def _session_and_text(params: dict[str, Any]) -> tuple[str, str]:
+    """Best-effort session/message extraction for the auth gate."""
+    msg = params.get("message") if isinstance(params.get("message"), dict) \
+        else params
+    ctx = msg.get("contextId") if isinstance(msg, dict) else None
+    session = ctx if isinstance(ctx, str) and ctx else \
+        params.get("contextId", "") or ""
+    if isinstance(params.get("message"), dict):
+        text = _message_text(params["message"])
+    else:
+        text = ""
+    return session, text
+
+
+# ── Retry flag (D14 §8.5.2) ──
 
 def _retry_flag(params: dict[str, Any]) -> str:
     meta = params.get("metadata")
@@ -113,12 +234,19 @@ def _retry_flag(params: dict[str, Any]) -> str:
         return "first"
     val = meta["avernet.retryOnly"]
     if not isinstance(val, bool):
-        raise _RetryFlagError("avernet.retryOnly must be boolean")
+        raise _ParamError("avernet.retryOnly must be boolean")
     return "retry_only" if val else "first"
 
 
 def _message_text(msg: dict[str, Any]) -> str:
-    return "".join(p.get("text", "") for p in msg.get("parts", []))
+    parts = msg.get("parts")
+    if not isinstance(parts, list):
+        return ""
+    out = []
+    for p in parts:
+        if isinstance(p, dict) and isinstance(p.get("text"), str):
+            out.append(p["text"])
+    return "".join(out)
 
 
 def _digest(text: str) -> str:
@@ -126,27 +254,47 @@ def _digest(text: str) -> str:
 
 
 def _get_message(params: dict[str, Any]) -> dict[str, Any]:
-    """Extract + validate the `message` member (H2: messageId is required)."""
+    """Extract + validate the `message` member (messageId required, str)."""
     msg = params.get("message")
     if not isinstance(msg, dict):
-        raise _RetryFlagError("params.message is required and must be an object")
-    if not msg.get("messageId"):
-        raise _RetryFlagError("message.messageId is required")
+        raise _ParamError("params.message is required and must be an object")
+    mid = msg.get("messageId")
+    if not isinstance(mid, str) or not mid:
+        raise _ParamError("message.messageId is required (string)")
     return msg
+
+
+# ── Shared execution-once dispatch (R12-1: both entries start the engine) ──
+
+def _ensure_dispatched(rid: str, ctx: str, text: str, created: bool) -> None:
+    """Exactly-once engine dispatch across both send entries: D14 "FIRST |
+    absent | register and begin execution". A dedup hit (created=False)
+    attaches to the existing stream instead of dispatching again."""
+    if not created:
+        return
+    task = asyncio.create_task(execute_and_stream(_kernel, rid, ctx, text))
+    _BRIDGE_TASKS.add(task)
+    task.add_done_callback(_BRIDGE_TASKS.discard)
 
 
 # ── SendMessage ──
 
-async def _send_message(params: dict[str, Any], _rid: Any) -> dict[str, Any]:
+async def _send_message(params: dict[str, Any], rid: Any,
+                        gated_key: str | None) -> dict[str, Any]:
     msg = _get_message(params)
     ctx = msg.get("contextId")
-    if not ctx:
+    if not isinstance(ctx, str) or not ctx:
         raise ValueError("contextId is required")
     out = await _kernel.send_message(ctx, _message_text(msg),
-                                     msg["messageId"],
+                                     gated_key or msg["messageId"],
                                      _retry_flag(params))
     if out is A2aKernel.UNKNOWN_OUTCOME:
         return {"error": wire.wire_unknown_outcome()}
+    run_rid = out["task"]["id"]
+    created = out["task"]["metadata"]["created"]
+    # R12-1: non-streaming FIRST must start execution too — the run cannot
+    # be left dangling at SUBMITTED. Dedup hits dispatch nothing (C1).
+    _ensure_dispatched(run_rid, ctx, _message_text(msg), created)
     return out
 
 _HANDLERS["SendMessage"] = _send_message
@@ -154,31 +302,20 @@ _HANDLERS["SendMessage"] = _send_message
 
 # ── SendStreamingMessage ──
 
-async def _send_streaming(params: dict[str, Any], req_id: Any) -> Response:
+async def _send_streaming(params: dict[str, Any], req_id: Any,
+                          gated_key: str | None) -> Response:
     msg = _get_message(params)
     ctx = msg.get("contextId")
-    if not ctx:
+    if not isinstance(ctx, str) or not ctx:
         raise ValueError("contextId is required")
-    out = await _kernel.open_run(ctx, msg["messageId"],
+    out = await _kernel.open_run(ctx, gated_key or msg["messageId"],
                                  _retry_flag(params),
                                  _digest(_message_text(msg)))
     if out is A2aKernel.UNKNOWN_OUTCOME:
-        # H1: error envelope must carry the request id so D14 clients can
-        # correlate the unknown-outcome signal with the in-flight request.
         return _rpc_error_response(req_id, wire.wire_unknown_outcome())
     rid, created = out
 
-    # C1 (D14 "FIRST|exists|dedup" row): only a newly-created run dispatches
-    # the engine. A same-key re-submit (e.g. response lost, client retries)
-    # attaches to the existing stream — the engine executes exactly once.
-    if created:
-        # Dispatch through the engine bridge in the background; the SSE
-        # generator below subscribes to the kernel and relays whatever the
-        # bridge publishes (delta/final/status events + terminal marker).
-        task = asyncio.create_task(execute_and_stream(
-            _kernel, rid, ctx, _message_text(msg)))
-        _BRIDGE_TASKS.add(task)
-        task.add_done_callback(_BRIDGE_TASKS.discard)
+    _ensure_dispatched(rid, ctx, _message_text(msg), created)
 
     backlog, q = await _kernel.subscribe(rid, since_seq=0)
     return _stream_response(req_id, rid, backlog, q)
@@ -188,23 +325,37 @@ _HANDLERS["SendStreamingMessage"] = _send_streaming
 
 # ── GetTask (design §8.1 third-route fallback after replay refusal) ──
 
-async def _get_task(params: dict[str, Any], req_id: Any) -> dict[str, Any]:
-    tid = params.get("taskId", "")
+async def _get_task(params: dict[str, Any], req_id: Any,
+                    _gated_key: str | None) -> dict[str, Any]:
+    tid = params.get("taskId")
+    if not isinstance(tid, str) or not tid:
+        raise _ParamError("taskId is required (string)")
     r = _kernel.get_run(tid)
     if r is None:
         return {"error": {"code": -32000,
                           "message": "task not found or expired",
                           "data": {"reason": "not_found_or_expired"}}}
+    # R12-7: content snapshot survives cache_limit — the fallback answers
+    # with the generated text, not just the status.
+    artifacts: list[dict[str, Any]] = []
+    if r.latest_text:
+        artifacts.append({"artifactId": f"text-{tid}",
+                          "parts": [{"text": r.latest_text}],
+                          "metadata": {}})
     return {"task": {"id": r.run_id, "contextId": r.context_id,
-                      "status": {"state": r.state}, "metadata": {}}}
+                      "status": {"state": r.state}, "artifacts": artifacts,
+                      "metadata": {}}}
 
 _HANDLERS["GetTask"] = _get_task
 
 
 # ── SubscribeToTask ──
 
-async def _subscribe_task(params: dict[str, Any], req_id: Any) -> Response:
-    tid = params.get("taskId", "")
+async def _subscribe_task(params: dict[str, Any], req_id: Any,
+                          _gated_key: str | None) -> Response:
+    tid = params.get("taskId")
+    if not isinstance(tid, str) or not tid:
+        raise _ParamError("taskId is required (string)")
     r = _kernel.get_run(tid)
     if r is None:
         return _rpc_error_response(req_id,
@@ -221,9 +372,15 @@ _HANDLERS["SubscribeToTask"] = _subscribe_task
 
 # ── ReplayEvents ──
 
-async def _replay_events(params: dict[str, Any], req_id: Any) -> Response:
-    tid = params.get("taskId", "")
-    out = await _kernel.replay(tid, params.get("sinceSeq", 0))
+async def _replay_events(params: dict[str, Any], req_id: Any,
+                         _gated_key: str | None) -> Response:
+    tid = params.get("taskId")
+    if not isinstance(tid, str) or not tid:
+        raise _ParamError("taskId is required (string)")
+    since_seq = params.get("sinceSeq", 0)
+    if not isinstance(since_seq, int) or isinstance(since_seq, bool):
+        raise _ParamError("sinceSeq must be an integer")
+    out = await _kernel.replay(tid, since_seq)
     if out is None:
         r = _kernel.get_run(tid)
         reason = ("cache_limit" if r is not None and r.cache_limit
@@ -235,19 +392,68 @@ async def _replay_events(params: dict[str, Any], req_id: Any) -> Response:
 _HANDLERS["ReplayEvents"] = _replay_events
 
 
-# ── Extensions ──
+# ── Extensions: InjectContext / SubscribeToContext ──
 
-async def _inject_context(params: dict[str, Any], _rid: Any) -> dict[str, Any]:
-    ctx = params.get("contextId", "")
+async def _forward_engine_inject(ctx: str, text: str,
+                                 inject_id: str) -> bool:
+    """R12-6: fan out is not enough — write the message into the engine's
+    real session the same way ws_server forwards chat.inject (EngineManager
+    relay). Returns True when the engine accepted the write (or no relay is
+    mounted, in which case ws_server would also drop to a degraded mode)."""
+    from engine.community.manager import EngineManager
+    from engine.community.api.transport.a2a.engine_bridge import _chat_plugin
+
+    try:
+        _chat_plugin()  # engine surface must resolve
+    except Exception:
+        return True  # pre-initialize contexts: in-process fanout only
+
+    try:
+        relay = EngineManager.get_instance().relay
+    except Exception:
+        return True
+
+    if relay is None:
+        return True  # no relay plugin: degraded parity with ws raw frames
+
+    response = await relay.forward_request(
+        request_id=f"a2a-inject-{uuid.uuid4().hex}",
+        method="chat.inject",
+        params={"sessionKey": ctx,
+                "message": {"role": "user",
+                            "content": [{"type": "text", "text": text}]}},
+        auth=None,
+        timeout=30.0,
+    )
+    return bool(getattr(response, "ok", False))
+
+
+async def _inject_context(params: dict[str, Any], rid: Any,
+                          _gated_key: str | None) -> dict[str, Any]:
     msg = _get_message(params)
-    status = await _kernel.inject(ctx, _message_text(msg), msg["messageId"])
+    ctx = params.get("contextId")
+    if not isinstance(ctx, str) or not ctx:
+        raise _ParamError("contextId is required (string)")
+    text = _message_text(msg)
+    status = await _kernel.inject(ctx, text, msg["messageId"])
+    if status == "duplicate":
+        return {"inject": status}
+    # R12-6: the engine transcript write is part of the success criteria —
+    # a rejected engine write must not report accepted.
+    if not await _forward_engine_inject(ctx, text, msg["messageId"]):
+        return {"error": {"code": -32000,
+                          "message": "engine inject rejected",
+                          "data": {"reason": "inject_forward_failed"}}}
     return {"inject": status}
 
 _HANDLERS["InjectContext"] = _inject_context
 
 
-async def _subscribe_context(params: dict[str, Any], req_id: Any) -> Response:
-    ctx = params.get("contextId", "")
+async def _subscribe_context(params: dict[str, Any], req_id: Any,
+                             _gated_key: str | None) -> Response:
+    ctx = params.get("contextId")
+    if not isinstance(ctx, str) or not ctx:
+        raise _ParamError("contextId is required (string)")
     q = _kernel.subscribe_context(ctx)
 
     async def gen():

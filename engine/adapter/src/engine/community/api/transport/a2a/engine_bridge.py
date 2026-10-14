@@ -62,12 +62,15 @@ class _EngineRunAborted(Exception):
 
 
 async def execute_and_stream(kernel: A2aKernel, rid: str, context_id: str,
-                             text: str) -> None:
+                             text: str,
+                             auth: Any = None) -> None:
     """Dispatch through EngineManager and pump events into kernel.
 
     Guarantees exactly one terminal `complete_run` (SUCCESS unless the engine
     stream signals error/aborted), so SSE subscribers always see the terminal
-    marker.
+    marker. `auth` carries the principal extracted at the transport boundary
+    (R12-4) — plugins that pool upstream connections per-tenant use it to
+    pick the right client.
     """
     log.info("bridge: run=%s context=%s text_len=%d", rid, context_id,
              len(text))
@@ -78,7 +81,8 @@ async def execute_and_stream(kernel: A2aKernel, rid: str, context_id: str,
         return
 
     try:
-        dispatched = await _dispatch_to_engine(kernel, rid, context_id, text)
+        dispatched = await _dispatch_to_engine(kernel, rid, context_id, text,
+                                               auth)
         if not dispatched:
             await _echo_fallback(kernel, rid, text)
         await kernel.complete_run(rid, _STATE_COMPLETED)
@@ -101,7 +105,7 @@ async def _safe_complete(kernel: A2aKernel, rid: str, state: str) -> None:
 
 
 async def _dispatch_to_engine(kernel: A2aKernel, rid: str, context_id: str,
-                              text: str) -> bool:
+                              text: str, auth: Any = None) -> bool:
     """Drive the real ChatService.stream and translate frames.
 
     Returns True when an engine stream was actually consumed (whatever its
@@ -126,7 +130,7 @@ async def _dispatch_to_engine(kernel: A2aKernel, rid: str, context_id: str,
     )
 
     accumulated: list[str] = []
-    stream = chat.stream(request, auth=None)
+    stream = chat.stream(request, auth=auth)
     # ChatService Protocol allows both shapes: async-generator functions
     # (calling yields an async iterator directly — the bundled engines) and
     # coroutines returning an AsyncIterator. Normalize before iterating.
@@ -140,14 +144,27 @@ async def _dispatch_to_engine(kernel: A2aKernel, rid: str, context_id: str,
             payload = frame.payload if isinstance(frame.payload, dict) else {}
             event = getattr(frame, "event", "")
             state = payload.get("state", "")
+            run_id = payload.get("runId")
+
+            # R12-3: engine-callback inject frames (runId=inject-*) are
+            # session-level fanout, never this run's stream or terminal —
+            # ws_server keeps the same exception at :1746-1763.
+            if isinstance(run_id, str) and run_id.startswith("inject-"):
+                inject_text = _payload_text(payload, state)
+                if inject_text:
+                    kernel.publish_engine_inject(context_id, inject_text,
+                                                 run_id)
+                continue
 
             if event == "chat" or state in _TERMINAL_CHAT_STATES:
-                chunk = _payload_text(payload)
-                if state == "delta" and chunk:
-                    accumulated.append(chunk)
-                    await kernel.publish_delta(rid, chunk)
+                if state == "delta":
+                    chunk = _payload_text(payload, state)
+                    if chunk:
+                        accumulated.append(chunk)
+                        await kernel.publish_delta(rid, chunk)
                 elif state == "final":
-                    final_text = chunk or "".join(accumulated)
+                    final_text = _payload_text(payload, state) \
+                        or "".join(accumulated)
                     if final_text:
                         await kernel.publish_final(rid, final_text)
                     # Terminal: let the outer handler complete the run.
@@ -177,18 +194,23 @@ def _chat_plugin() -> Any:
     return EngineManager.get_instance().chat
 
 
-def _payload_text(payload: dict[str, Any]) -> str:
+def _payload_text(payload: dict[str, Any], state: str = "final") -> str:
     """Extract text from a chat EventFrame payload.
 
-    Delta frames carry the increment in ``deltaText``; final frames carry the
-    full message in ``message.content`` text blocks (the openclaw canonical
-    shape). ``deltaText`` wins when both are present so deltas never repeat
-    the cumulative message; singlebox verification owns the final call on
-    passthrough shapes where the two are ambiguous.
+    R12-2: delta frames carry the increment in ``deltaText`` (openclaw) or
+    ``delta`` (claude_code gateway) while ``message.content`` holds the
+    cumulative snapshot (orchestrator-bridge.ts:198-210: delta=event.delta,
+    content=event.fullText). Reading message.content on a delta frame would
+    double-append ("你", "你好" → "你你好"). On delta frames the increment
+    fields win and the snapshot is never consulted; on final frames the
+    snapshot is the authoritative full text.
     """
-    delta = payload.get("deltaText")
-    if isinstance(delta, str) and delta:
-        return delta
+    if state == "delta":
+        for field in ("deltaText", "delta"):
+            inc = payload.get(field)
+            if isinstance(inc, str) and inc:
+                return inc
+        return ""  # 缺增量字段：宁可跳过该帧，不误读累计快照
 
     message = payload.get("message")
     if isinstance(message, dict):
@@ -201,6 +223,11 @@ def _payload_text(payload: dict[str, Any]) -> str:
                 for block in content
                 if isinstance(block, dict) and block.get("type") == "text"
             )
+    # fallback：非 delta 终态若没有 message，尝试增量字段兜底
+    for field in ("deltaText", "delta"):
+        inc = payload.get(field)
+        if isinstance(inc, str) and inc:
+            return inc
     return ""
 
 

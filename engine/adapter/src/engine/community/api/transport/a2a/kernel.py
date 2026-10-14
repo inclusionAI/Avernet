@@ -45,10 +45,15 @@ class KeyConflictError(Exception):
     pass
 
 
+class _InvalidParamError(ValueError):
+    """Boundary type violation — maps to JSON-RPC -32602."""
+
+
 class _Run:
     __slots__ = ("run_id", "context_id", "state", "events", "bytes", "last_seq",
                  "saw_delta", "cache_limit", "subscribers", "lock",
-                 "replay_expires_at", "idempotency_key", "request_digest")
+                 "replay_expires_at", "idempotency_key", "request_digest",
+                 "latest_text")
 
     def __init__(self, run_id: str, context_id: str):
         self.run_id = run_id
@@ -64,6 +69,10 @@ class _Run:
         self.replay_expires_at: float | None = None
         self.idempotency_key: str | None = None
         self.request_digest: str | None = None
+        # R12-7: content snapshot maintained independently of the replay
+        # buffer — cache_limit clears events but GetTask still answers with
+        # the latest generated text.
+        self.latest_text: str = ""
 
 
 class A2aKernel:
@@ -81,7 +90,14 @@ class A2aKernel:
     async def open_run(self, context_id: str | None, idempotency_key: str,
                        mode: str, request_digest: str | None = None
                        ) -> tuple[str, bool] | UnknownOutcomeSentinel:
-        if not context_id:
+        # R12-8: unhashable wire values (list/dict messageId or contextId)
+        # would blow up as TypeError deep inside the idem dict — reject at
+        # the boundary with the protocol error instead.
+        if not isinstance(context_id, str):
+            raise ValueError("contextId is required")
+        if not isinstance(idempotency_key, str):
+            raise _InvalidParamError("messageId must be a string")
+        if not context_id or not idempotency_key:
             raise ValueError("contextId is required")
         async with self._global_lock:
             existing = self._idem.get((context_id, idempotency_key))
@@ -117,12 +133,13 @@ class A2aKernel:
         out = await self.open_run(context_id, idempotency_key, mode, digest)
         if out is self.UNKNOWN_OUTCOME:
             return out
-        rid, _created = out
+        rid, created = out
         r = self.runs.get(rid)
         if r is None:
             return self.UNKNOWN_OUTCOME
         return {"task": {"id": r.run_id, "contextId": r.context_id,
-                         "status": {"state": r.state}, "metadata": {}}}
+                         "status": {"state": r.state},
+                         "metadata": {"created": created}}}
 
     # ── completion ──
     async def complete_run(self, rid: str,
@@ -210,6 +227,7 @@ class A2aKernel:
         r = self.runs[rid]
         first = not r.saw_delta
         r.saw_delta = True
+        r.latest_text += text          # 增量累积进内容快照（R12-7）
         artifact_id = f"text-{rid}"
         await self._publish(rid, wire.wire_artifact_update(
             rid, r.context_id, 0, artifact_id, text,
@@ -217,9 +235,22 @@ class A2aKernel:
 
     async def publish_final(self, rid: str, text: str) -> None:
         r = self.runs[rid]
+        r.latest_text = text           # 终稿全量替换快照（R12-7）
         await self._publish(rid, wire.wire_artifact_update(
             rid, r.context_id, 0, f"text-{rid}", text,
             append=False, last_chunk=True))
+
+    def publish_engine_inject(self, context_id: str, text: str,
+                              inject_id: str) -> None:
+        """R12-3: engine-callback inject frames (runId=inject-*) fan out to
+        context subscribers only — they never touch the current run's
+        artifact stream or lifecycle (ws_server keeps the same exception)."""
+        ev = wire.wire_inject_message(context_id, text, inject_id)
+        for q in list(self._context_subs.get(context_id, [])):
+            try:
+                q.put_nowait(ev)
+            except asyncio.QueueFull:
+                pass
 
     async def publish_status(self, rid: str, state: str) -> None:
         r = self.runs[rid]

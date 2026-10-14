@@ -573,11 +573,23 @@ def load_file_count_roots(engine: str) -> tuple[Path, tuple[Path, ...]]:
 def get_local_base_url() -> str:
     """Local base URL for A2A Agent Card generation (interface URL field).
 
-    Composed from the same host/port the adapter is actually serving on —
-    never hardcoded per-environment (single deployment codepath constraint).
+    Resolution order (design §6.5 "url base 由部署侧注入"):
+      1. A2A_PUBLIC_BASE_URL — deployment-injected externally reachable
+         base URL (behind a gateway/proxy the loopback address would point
+         clients at themselves — the public URL is the only correct value).
+      2. SERVER_HOST/SERVER_PORT — the variables scripts/run.sh actually
+         exports (:133-134). A wildcard listen address (0.0.0.0) is not
+         publishable; substitute loopback.
+      3. Defaults mirroring start.py.
     """
     import os
 
-    host = os.environ.get("ENGINE_HOST", "127.0.0.1")
-    port = os.environ.get("ENGINE_PORT", "20003")
+    public = os.environ.get("A2A_PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if public:
+        return public
+
+    host = os.environ.get("SERVER_HOST", "127.0.0.1")
+    if host in ("0.0.0.0", "::", ""):
+        host = "127.0.0.1"
+    port = os.environ.get("SERVER_PORT", "20003")
     return f"http://{host}:{port}"
