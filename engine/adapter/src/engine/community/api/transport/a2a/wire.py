@@ -108,3 +108,50 @@ def wire_unknown_outcome() -> dict[str, Any]:
 def wire_replay_refused(reason: str) -> dict[str, Any]:
     return {"code": -32000, "message": f"replay refused: {reason}",
             "data": {"reason": reason}}
+
+
+def wire_interaction_requested(run_id: str, context_id: str, seq: int,
+                               interaction_id: str,
+                               payload: dict[str, Any]) -> dict[str, Any]:
+    """HITL 请求（§8.6）：Task 转 INPUT_REQUIRED；元数据承载 interactionId
+    与原始 payload 摘要（kind/prompt/text 降采样）。"""
+    meta: dict[str, Any] = {"seq": seq, "interactionId": interaction_id}
+    for key in ("kind", "phase", "toolCallId"):
+        v = payload.get(key)
+        if isinstance(v, (str, int, float, bool)):
+            meta[key] = v
+    prompt = payload.get("prompt") or payload.get("text")
+    if isinstance(prompt, str) and prompt:
+        meta["prompt"] = prompt[:200]
+    return {"seq": seq, "type": "statusUpdate", "ev": {
+        "statusUpdate": {"taskId": run_id, "contextId": context_id,
+                          "status": {"state": "TASK_STATE_INPUT_REQUIRED"},
+                          "metadata": meta}}}
+
+
+def wire_interaction_resolved(run_id: str, context_id: str, seq: int,
+                              payload: dict[str, Any]) -> dict[str, Any]:
+    """HITL 决议（§8.6）：Task 回 WORKING；metadata.interactionId 保留对应关系。"""
+    meta: dict[str, Any] = {"seq": seq}
+    iid = payload.get("interactionId") or payload.get("id")
+    if isinstance(iid, (str, int)):
+        meta["interactionId"] = iid
+    return {"seq": seq, "type": "statusUpdate", "ev": {
+        "statusUpdate": {"taskId": run_id, "contextId": context_id,
+                          "status": {"state": "TASK_STATE_WORKING"},
+                          "metadata": meta}}}
+
+
+def wire_agent_progress(run_id: str, context_id: str, seq: int,
+                        payload: dict[str, Any]) -> dict[str, Any]:
+    """agent 事件（openclaw tool 进度等）→ statusUpdate（state 不变；metadata
+    保 tool/phase/data 摘要——BaaS 客户端反向归一回 v3 `agent` 事件 payload）。"""
+    meta: dict[str, Any] = {"seq": seq, "kind": "agent"}
+    for key in ("tool", "phase", "type", "name"):
+        v = payload.get(key)
+        if isinstance(v, (str, int, float, bool)):
+            meta[key] = v
+    return {"seq": seq, "type": "statusUpdate", "ev": {
+        "statusUpdate": {"taskId": run_id, "contextId": context_id,
+                          "status": {"state": "TASK_STATE_WORKING"},
+                          "metadata": meta}}}

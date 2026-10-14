@@ -262,6 +262,31 @@ class A2aKernel:
         await self._publish(rid, wire.wire_status_update(
             rid, r.context_id, state, seq=0))
 
+    async def publish_interaction_requested(self, rid: str,
+                                            interaction_id: str,
+                                            payload: dict[str, Any]) -> None:
+        """HITL 请求：state 转 INPUT_REQUIRED（终态之外的专用状态，
+        complete_run 语义不变）。"""
+        r = self.runs[rid]
+        r.state = "TASK_STATE_INPUT_REQUIRED"
+        await self._publish(rid, wire.wire_interaction_requested(
+            rid, r.context_id, 0, interaction_id, payload))
+
+    async def publish_interaction_resolved(self, rid: str,
+                                           payload: dict[str, Any]) -> None:
+        """HITL 决议：state 回 WORKING。"""
+        r = self.runs[rid]
+        r.state = "TASK_STATE_WORKING"
+        await self._publish(rid, wire.wire_interaction_resolved(
+            rid, r.context_id, 0, payload))
+
+    async def publish_agent_progress(self, rid: str,
+                                     payload: dict[str, Any]) -> None:
+        """agent/tool 进度事件不上收 run 状态，仅作为 statusUpdate 流出。"""
+        r = self.runs[rid]
+        await self._publish(rid, wire.wire_agent_progress(
+            rid, r.context_id, 0, payload))
+
     # ── subscribe / replay ──
     async def subscribe(self, rid: str, since_seq: int | None = None
                         ) -> tuple[list[dict[str, Any]], asyncio.Queue]:
