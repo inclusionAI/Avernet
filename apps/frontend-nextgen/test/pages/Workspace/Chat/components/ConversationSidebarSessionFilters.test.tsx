@@ -150,7 +150,7 @@ describe('sessionKey 搜索入口(三类目录装配)', () => {
   it('行内提交写入该 Bot 的过滤条件并展开,不改动主选中', () => {
     const { syncStore } = renderSidebar({ friendBots: [friendBot] });
     fireEvent.click(searchEntryOf('朋友 Bot'));
-    const input = screen.getByPlaceholderText('sessionKey') as HTMLInputElement;
+    const input = screen.getByPlaceholderText('输入 SessionId 精确搜索') as HTMLInputElement;
     fireEvent.change(input, { target: { value: ' agent:main:sn-1 ' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     const store = useConversationStore.getState();
@@ -234,8 +234,8 @@ describe('好友 Bot 会话范围筛选(装配)', () => {
     });
     // 先通过搜索 UI 生效条件(favorite 场景无需先展示列表)。
     fireEvent.click(searchEntryOf('朋友 Bot'));
-    fireEvent.change(screen.getByPlaceholderText('sessionKey'), { target: { value: 'agent:main:mark' } });
-    fireEvent.keyDown(screen.getByPlaceholderText('sessionKey'), { key: 'Enter' });
+    fireEvent.change(screen.getByPlaceholderText('输入 SessionId 精确搜索'), { target: { value: 'agent:main:mark' } });
+    fireEvent.keyDown(screen.getByPlaceholderText('输入 SessionId 精确搜索'), { key: 'Enter' });
     expect(useConversationStore.getState().sessionKeyByBotId[botId]).toBe('agent:main:mark');
     syncStore();
 
@@ -257,7 +257,7 @@ describe('好友 Bot 会话范围筛选(装配)', () => {
     expect(entry).not.toHaveClass('bg-primary/10');
     expect(screen.queryByText('1')).not.toBeInTheDocument();
     fireEvent.click(entry);
-    expect((screen.getByPlaceholderText('sessionKey') as HTMLInputElement).value).toBe('');
+    expect((screen.getByPlaceholderText('输入 SessionId 精确搜索') as HTMLInputElement).value).toBe('');
   });
 });
 
@@ -288,8 +288,8 @@ describe('管理 Bot 搜索与既有筛选共用(装配)', () => {
     store.selectConversation({ botId, section: 'managed', origin: 'mine', scope: 'all', friendUserId: null, sessionId: 's-0' });
     renderSidebar({ managedBots: [managedBot], directory: directoryModel({ managedBots: [managedBot] }) });
     fireEvent.click(searchEntryOf('管理 Bot A'));
-    fireEvent.change(screen.getByPlaceholderText('sessionKey'), { target: { value: 'agent:main:managed-key' } });
-    fireEvent.keyDown(screen.getByPlaceholderText('sessionKey'), { key: 'Enter' });
+    fireEvent.change(screen.getByPlaceholderText('输入 SessionId 精确搜索'), { target: { value: 'agent:main:managed-key' } });
+    fireEvent.keyDown(screen.getByPlaceholderText('输入 SessionId 精确搜索'), { key: 'Enter' });
     const next = useConversationStore.getState();
     expect(next.sessionKeyByBotId[botId]).toBe('agent:main:managed-key');
     expect(next.expandedBotIds[botId]).toBe(true);

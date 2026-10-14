@@ -23,7 +23,7 @@ function getTrigger() {
 
 function openSearch(): HTMLInputElement {
   fireEvent.click(getTrigger());
-  return screen.getByPlaceholderText('sessionKey') as HTMLInputElement;
+  return screen.getByRole('textbox', { name: 'sessionKey' }) as HTMLInputElement;
 }
 
 describe('ConversationSessionSearch', () => {
@@ -32,7 +32,7 @@ describe('ConversationSessionSearch', () => {
     const trigger = getTrigger();
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(trigger);
-    expect(screen.getByPlaceholderText('sessionKey')).toHaveFocus();
+    expect(screen.getByPlaceholderText('输入 SessionId 精确搜索')).toHaveFocus();
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('button', { name: '搜索' })).toBeInTheDocument();
   });
@@ -41,7 +41,7 @@ describe('ConversationSessionSearch', () => {
     const onSearch = jest.fn();
     render(<ConversationSessionSearch value="" onSearch={onSearch} />);
     fireEvent.click(getTrigger());
-    fireEvent.change(screen.getByPlaceholderText('sessionKey'), {
+    fireEvent.change(screen.getByPlaceholderText('输入 SessionId 精确搜索'), {
       target: { value: 'agent:main:draft' },
     });
     expect(onSearch).not.toHaveBeenCalled();
@@ -52,7 +52,7 @@ describe('ConversationSessionSearch', () => {
     render(<ConversationSessionSearch value="" onSearch={onSearch} />);
     const trigger = getTrigger();
     fireEvent.click(trigger);
-    const input = screen.getByPlaceholderText('sessionKey');
+    const input = screen.getByPlaceholderText('输入 SessionId 精确搜索');
     fireEvent.change(input, { target: { value: ' agent:main:sn-1 ' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(onSearch).toHaveBeenCalledTimes(1);
@@ -65,7 +65,7 @@ describe('ConversationSessionSearch', () => {
     render(<ConversationSessionSearch value="" onSearch={onSearch} />);
     const trigger = getTrigger();
     fireEvent.click(trigger);
-    fireEvent.change(screen.getByPlaceholderText('sessionKey'), {
+    fireEvent.change(screen.getByPlaceholderText('输入 SessionId 精确搜索'), {
       target: { value: 'agent:main:k2' },
     });
     fireEvent.click(screen.getByRole('button', { name: '搜索' }));
@@ -88,7 +88,7 @@ describe('ConversationSessionSearch', () => {
     const ui = render(<ConversationSessionSearch value="" onSearch={onSearch} />);
     const trigger = getTrigger();
     fireEvent.click(trigger);
-    let input = screen.getByPlaceholderText('sessionKey') as HTMLInputElement;
+    let input = screen.getByPlaceholderText('输入 SessionId 精确搜索') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'agent:main:discard-me' } });
     fireEvent.keyDown(input, { key: 'Escape' });
     expect(onSearch).not.toHaveBeenCalled();
@@ -96,7 +96,7 @@ describe('ConversationSessionSearch', () => {
 
     // 重开:弹层回到已生效条件(空),被丢弃的草稿不复现。
     fireEvent.click(trigger);
-    input = screen.getByPlaceholderText('sessionKey') as HTMLInputElement;
+    input = screen.getByPlaceholderText('输入 SessionId 精确搜索') as HTMLInputElement;
     expect(input.value).toBe('');
 
     // 提交生效后由父级受控回写,重开同样回到最新已生效条件。
@@ -105,7 +105,7 @@ describe('ConversationSessionSearch', () => {
     expect(onSearch).toHaveBeenCalledWith('agent:main:applied');
     ui.rerender(<ConversationSessionSearch value="agent:main:applied" onSearch={onSearch} />);
     fireEvent.click(trigger);
-    expect((screen.getByPlaceholderText('sessionKey') as HTMLInputElement).value).toBe('agent:main:applied');
+    expect((screen.getByPlaceholderText('输入 SessionId 精确搜索') as HTMLInputElement).value).toBe('agent:main:applied');
   });
 
   it('生效条件高亮触发按钮并展示数字 1 标签;未生效不出现标签', () => {
@@ -123,14 +123,24 @@ describe('ConversationSessionSearch', () => {
     expect(screen.queryByText('1')).not.toBeInTheDocument();
   });
 
-  it('受控流:清空提交传播空串,父级回写后按钮恢复默认态', () => {
-    render(<Harness initial="agent:main:h1" />);
+  it('受控流:仅已生效条件展示清除,编辑草稿不隐藏清除,点击后移除条件和标签', () => {
+    render(<Harness />);
     const input = openSearch();
-    expect(input.value).toBe('agent:main:h1');
+    expect(screen.queryByRole('button', { name: '清除' })).not.toBeInTheDocument();
+    fireEvent.change(input, { target: { value: 'agent:main:h1' } });
+    expect(screen.queryByRole('button', { name: '清除' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '搜索' }));
+    const reopened = openSearch();
+    expect(reopened.value).toBe('agent:main:h1');
+    expect(screen.getByRole('button', { name: '清除' })).toBeInTheDocument();
+    // 清除入口由已应用的条件决定,而不是当前草稿是否为空。
     fireEvent.change(input, { target: { value: '' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
-    // Harness 将空提交写回 value,按钮不再高亮、标签消失。
+    expect(screen.getByRole('button', { name: '清除' })).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: 'agent:main:unsubmitted' } });
+    fireEvent.click(screen.getByRole('button', { name: '清除' }));
     expect(getTrigger()).not.toHaveClass('bg-primary/10');
     expect(screen.queryByText('1')).not.toBeInTheDocument();
+    expect(openSearch().value).toBe('');
+    expect(screen.queryByRole('button', { name: '清除' })).not.toBeInTheDocument();
   });
 });

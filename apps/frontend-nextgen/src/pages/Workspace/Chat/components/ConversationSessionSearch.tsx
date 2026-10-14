@@ -98,13 +98,29 @@ export function ConversationSessionSearch({ value, onSearch }: ConversationSessi
               event.preventDefault();
               submit();
             }}
-            placeholder="sessionKey"
+            placeholder="输入 SessionId 精确搜索"
             aria-label="sessionKey"
             autoComplete="off"
           />
-          <Button type="submit" variant="link" className="h-7 self-end px-2 text-sm no-underline">
-            搜索
-          </Button>
+          <div className="flex justify-end gap-1">
+            {active && (
+              <Button
+                type="button"
+                variant="ghost"
+                className="h-7 px-2 text-sm text-muted-foreground"
+                onClick={() => {
+                  setDraft('');
+                  onSearch('');
+                  setOpen(false);
+                }}
+              >
+                清除
+              </Button>
+            )}
+            <Button type="submit" variant="link" className="h-7 px-2 text-sm no-underline">
+              搜索
+            </Button>
+          </div>
         </form>
       </PopoverContent>
     </Popover>

@@ -236,12 +236,12 @@ describe('ConversationBotItem sessionKey 搜索入口', () => {
   it('提交搜索透传 onSearchSession(已 trim),清空提交传播空串', () => {
     const { onSearchSession } = renderRow();
     fireEvent.click(screen.getByRole('button', { name: '搜索会话' }));
-    const input = screen.getByPlaceholderText('sessionKey') as HTMLInputElement;
+    const input = screen.getByPlaceholderText('输入 SessionId 精确搜索') as HTMLInputElement;
     fireEvent.change(input, { target: { value: ' agent:main:k1 ' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(onSearchSession).toHaveBeenCalledWith('agent:main:k1');
     fireEvent.click(screen.getByRole('button', { name: '搜索会话' }));
-    const reopened = screen.getByPlaceholderText('sessionKey') as HTMLInputElement;
+    const reopened = screen.getByPlaceholderText('输入 SessionId 精确搜索') as HTMLInputElement;
     fireEvent.change(reopened, { target: { value: '' } });
     fireEvent.keyDown(reopened, { key: 'Enter' });
     expect(onSearchSession).toHaveBeenCalledWith('');
