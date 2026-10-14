@@ -13,15 +13,18 @@ pub struct RegistrationSettings {
     /// Registration API prefix; `--api-url` or the deploy profile default when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_url: Option<String>,
+    /// Persisted gateway delivery endpoint, used to verify profile reuse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_url: Option<String>,
 }
 impl Default for RegistrationSettings {
-    fn default() -> Self { Self { api_url: None } }
+    fn default() -> Self { Self { api_url: None, webhook_url: None } }
 }
 
 fn parse(text: &str) -> anyhow::Result<(RegistrationSettings, toml::Table)> {
     let mut table: toml::Table = toml::from_str(text).map_err(|_| anyhow::anyhow!("Invalid bridge TOML configuration"))?;
     let settings = match table.remove("registration") {
-        Some(value) => value.try_into().map_err(|_| anyhow::anyhow!("Invalid [registration] configuration; expected api_url"))?,
+        Some(value) => value.try_into().map_err(|_| anyhow::anyhow!("Invalid [registration] configuration; expected api_url and optional webhook_url"))?,
         None => RegistrationSettings::default(),
     };
     Ok((settings, table))

@@ -230,3 +230,69 @@ async fn replacement_retains_a_private_backup_and_uses_fresh_state() {
         assert_eq!(std::fs::metadata(backup).unwrap().permissions().mode() & 0o777, 0o600);
     }
 }
+
+
+#[tokio::test]
+async fn profile_reuse_rejects_a_changed_explicit_provider_bot_reference() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let args = ["--profile", "pre", "--mode", "plugin", "--engine", "qwenwork", "--api-url", &api.base,
+        "--upstream-url", "ws://127.0.0.1:21000/ws/bot"];
+    let output = register(home.path(), &args).args(["--provider-bot-ref", "worker-a"]).output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let path = home.path().join(".bcn-bridge/profiles/pre/bridge.toml");
+    let original = std::fs::read(&path).unwrap();
+    let same = register(home.path(), &args).args(["--provider-bot-ref", "worker-a"]).output().await.unwrap();
+    assert!(same.status.success(), "{}", diagnostic(&same));
+    let changed = register(home.path(), &args).args(["--provider-bot-ref", "worker-b"]).output().await.unwrap();
+    assert!(!changed.status.success());
+    assert!(diagnostic(&changed).contains("different provider Bot reference"));
+    assert_eq!(api.calls().len(), 1);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[tokio::test]
+async fn gateway_profile_reuse_verifies_the_saved_webhook_endpoint() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let args = ["--profile", "pre", "--mode", "gateway", "--engine", "qwenwork", "--api-url", &api.base,
+        "--provider-bot-ref", "worker-a"];
+    let output = register(home.path(), &args).args(["--webhook-url", "https://hook.example/webhook"]).output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let path = home.path().join(".bcn-bridge/profiles/pre/bridge.toml");
+    let original = std::fs::read(&path).unwrap();
+    let document: toml::Value = toml::from_str(std::str::from_utf8(&original).unwrap()).unwrap();
+    assert_eq!(document["registration"]["webhook_url"].as_str(), Some("https://hook.example/webhook"));
+    let repeated = register(home.path(), &args).args(["--webhook-url", "https://hook.example/webhook"]).output().await.unwrap();
+    assert!(repeated.status.success(), "{}", diagnostic(&repeated));
+    let omitted = register(home.path(), &args).output().await.unwrap();
+    assert!(omitted.status.success(), "{}", diagnostic(&omitted));
+    for webhook in ["https://hook.example/new", "https://hook.example/webhook/", "https://hook.example/webhook?key=changed"] {
+        let changed = register(home.path(), &args).args(["--webhook-url", webhook]).output().await.unwrap();
+        assert!(!changed.status.success());
+        assert!(diagnostic(&changed).contains("different BCS endpoint or gateway webhook"));
+    }
+    assert_eq!(api.calls().len(), 1);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[tokio::test]
+async fn legacy_gateway_profile_without_webhook_metadata_requires_replacement() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let args = ["--profile", "pre", "--mode", "gateway", "--engine", "qwenwork", "--api-url", &api.base,
+        "--provider-bot-ref", "worker-a", "--webhook-url", "https://hook.example/webhook"];
+    let output = register(home.path(), &args).output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let path = home.path().join(".bcn-bridge/profiles/pre/bridge.toml");
+    let mut document: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    document["registration"].as_table_mut().unwrap().remove("webhook_url");
+    std::fs::write(&path, toml::to_string(&document).unwrap()).unwrap();
+    let original = std::fs::read(&path).unwrap();
+    let repeated = register(home.path(), &args).output().await.unwrap();
+    assert!(!repeated.status.success());
+    assert!(diagnostic(&repeated).contains("Cannot verify this profile's gateway webhook"));
+    assert!(diagnostic(&repeated).contains("--replace-existing"));
+    assert_eq!(api.calls().len(), 1);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}

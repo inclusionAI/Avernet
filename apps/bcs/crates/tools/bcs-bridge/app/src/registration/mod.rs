@@ -81,6 +81,12 @@ impl RegisterArgs {
             && previous.get("mode").and_then(toml::Value::as_str) == Some(self.mode.name())
             && bots.len() == 1 && bots[0].get("engine").and_then(toml::Value::as_str) == Some(self.engine.as_str());
         if !matches { bail!("Profile belongs to another provider, mode or engine; choose another --profile or stop and use --replace-existing"); }
+        if let Some(reference) = self.provider_bot_ref.as_deref() {
+            if !valid_provider_bot_ref(reference) { bail!("Invalid --provider-bot-ref"); }
+            if bots[0].get("provider_bot_ref").and_then(toml::Value::as_str) != Some(reference) {
+                bail!("Profile has a different provider Bot reference; choose another --profile or stop and use --replace-existing");
+            }
+        }
         let api = match self.api_url.clone().or(source.settings.api_url.clone()) {
             Some(api) => api, None => app.profile().default_api_url()?,
         };
@@ -91,9 +97,15 @@ impl RegisterArgs {
                 previous.get("plugin").and_then(|p| p.get("url")).and_then(toml::Value::as_str)
                     .is_some_and(|old| old.trim_end_matches('/') == desired.trim_end_matches('/'))
             }
-            Mode::Gateway => true,
+            Mode::Gateway => {
+                let original = source.settings.webhook_url.as_deref()
+                    .context("Cannot verify this profile's gateway webhook; stop and register with --replace-existing")?;
+                let desired = self.webhook_url.as_deref().unwrap_or(original);
+                client::http_url(original, true).context("Invalid saved gateway webhook")?
+                    == client::http_url(desired, true).context("Invalid --webhook-url")?
+            }
         };
-        if !same_api || !same_upstream { bail!("Profile targets a different BCS endpoint; choose another --profile or stop and use --replace-existing"); }
+        if !same_api || !same_upstream { bail!("Profile targets a different BCS endpoint or gateway webhook; choose another --profile or stop and use --replace-existing"); }
         if let Some(cwd) = &self.cwd {
             let desired = cwd.canonicalize().context("Cannot resolve requested working directory")?;
             let original = bots[0].get("cwd").and_then(toml::Value::as_str).context("Profile has no working directory")?;
@@ -253,7 +265,7 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     document.insert("bot".into(), toml::Value::Array(vec![toml::Value::Table(bot)]));
     config::runtime(&document, path, webhook_token.as_deref())?;
     // Persist the resolved api_url so the saved configuration is self-contained.
-    let resolved = config::RegistrationSettings { api_url: Some(api_url) };
+    let resolved = config::RegistrationSettings { api_url: Some(api_url), webhook_url: webhook_url.map(str::to_owned) };
     document.insert("registration".into(), toml::Value::try_from(resolved).context("Cannot encode API settings")?);
     let text = toml::to_string_pretty(&document).context("Cannot encode registered bridge configuration")?;
     prepared.save(&text)?;

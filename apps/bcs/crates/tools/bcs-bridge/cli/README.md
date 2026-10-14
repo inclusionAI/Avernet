@@ -213,3 +213,9 @@ The CLI fences concurrent startup, retains a private rollback configuration
 beside the original and leaves the old state database untouched. Only successful
 registration installs the new config and selects a fresh state database. Failed
 registration leaves the original config intact.
+
+Profile reuse also verifies an explicitly supplied `--provider-bot-ref`. Omit it
+to retain the saved identity (plugin mode generates a reference on first registration).
+Gateway registration saves `registration.webhook_url`; reuse rejects a changed
+delivery URL, including its path or query. Legacy gateway configurations without
+this metadata cannot be verified and require stopped, explicit replacement.
