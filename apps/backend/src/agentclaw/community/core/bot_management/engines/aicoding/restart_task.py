@@ -162,6 +162,10 @@ class AicodingDurableRestartMixin:
             "nick_name": kwargs.get("nick_name"),
             "started_at": time.time(),
         }
+        if binding.get("device_provider") == "arca":
+            # Physical identity is already on the binding, exactly as release
+            # resolves it. No BaaS inventory or sandbox-list request is needed.
+            payload["sandbox_id"] = (binding.get("device_props") or {}).get("sandbox_id")
         if bot["status"] != "PENDING":
             if services.repository.update_by_owner(
                 bot_id, owner_id, {"status": "PENDING"}
@@ -273,6 +277,10 @@ class AicodingRestartHandler:
                 or bot.get("active_engine") != payload["engine"]
                 or binding.get("device_id") != payload["device_id"]
                 or binding.get("device_provider") != payload["provider"]
+                or (
+                    payload["provider"] == "arca" and "sandbox_id" in payload
+                    and (binding.get("device_props") or {}).get("sandbox_id") != payload["sandbox_id"]
+                )
             ):
                 state.fail("重启目标已变化，本次重启已终止，旧容器未销毁")
                 return Fail("target changed")

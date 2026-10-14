@@ -64,3 +64,7 @@ class DeviceAlreadyExistsError(DeviceDomainError):
 class DeviceLimitExceededError(DeviceDomainError):
     """超过设备数量上限"""
     pass
+
+
+class RestartBackupTargetChanged(DeviceServiceError):
+    """Restart target/DB check failed; must not become a best-effort warning."""

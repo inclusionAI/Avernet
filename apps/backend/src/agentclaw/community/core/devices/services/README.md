@@ -117,3 +117,22 @@ caller 必须走 `resolver.resolve_for_bot + dispatcher.dispatch(ctx)`
 - Plan: [`docs/superpowers/plans/2026-06-15-device-context-resolver.md`](../../../../../../docs/superpowers/plans/2026-06-15-device-context-resolver.md)
 - 上游 spec（六边形）: [`docs/superpowers/specs/2026-06-14-baas-hexagonal-container-access-design.md`](../../../../../../docs/superpowers/specs/2026-06-14-baas-hexagonal-container-access-design.md)
 - Handoff（for_bot 38 caller 治理）: [`docs/superpowers/handoffs/2026-06-15-device-sync-supplier-for-bot-cleanup-handoff.md`](../../../../../../docs/superpowers/handoffs/2026-06-15-device-sync-supplier-for-bot-cleanup-handoff.md)
+
+
+## Internal coding restart execution
+
+`DeviceServiceRouter.prepare_arca_restart_executor(binding_id, device_id,
+sandbox_id)` returns a `BoundArcaRestartExecutor` for an already-authorized
+restart of that exact old binding. This is not a general command endpoint:
+only coding restart helper commands are supplied by the lifecycle strategy.
+The executor allows ACTIVE/PENDING/FAILED/STOPPED bindings, verifies the captured
+physical target before every exec and before replacement, and delegates to the
+registered Arca provider's existing execution hook for release-compatible tenant
+resolution. Missing bindings, target changes, database read failures and missing
+providers raise `RestartBackupTargetChanged`, never a fallback to another
+provider. Runtime command failures propagate to the coding best-effort policy.
+Normal `exec_shell_new` permissions and lifecycle state remain unchanged.
+
+Consumers: coding restart preparation in `core.bot_management.engines.aicoding`.
+Implementations: the DeviceService router plus the existing corp Arca provider;
+community tests use an isolated provider hook. No public HTTP/Plugin API change.

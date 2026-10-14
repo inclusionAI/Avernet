@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from agentclaw.community.core.devices.errors import DeviceServiceError
+from agentclaw.community.core.devices.errors import DeviceServiceError, RestartBackupTargetChanged
 from agentclaw.community.core.devices.services.arca_bot_create_baas_rollout_policy import (
     ArcaBotCreateBaasRolloutPolicy,
 )
 from agentclaw.community.core.devices.services.device_service import DeviceService
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.core.devices.services.restart_backup_executor import (
+    BoundArcaRestartExecutor,
+)
 from agentclaw.community.log import get_logger
 
 
@@ -99,3 +102,22 @@ class DeviceProviderRouterMixin:
             binding_id=binding_id,
             require_pool_confirmation=require_pool_confirmation,
         )
+
+    def prepare_arca_restart_executor(
+        self: _ProviderRouter, *, binding_id: int, device_id: str, sandbox_id: str,
+    ) -> BoundArcaRestartExecutor:
+        """Internal restart-only execution; no default-provider fallback.
+
+        Unlike normal exec, a FAILED/STOPPED binding can still identify a live
+        old sandbox. The executor verifies the captured target on every command
+        and before release. It never changes the binding's lifecycle status.
+        """
+        provider = self._providers.get("arca")
+        if provider is None:
+            raise RestartBackupTargetChanged("Arca restart provider unavailable")
+        executor = BoundArcaRestartExecutor(
+            repository=self._repo, provider=provider, binding_id=binding_id,
+            device_id=device_id, sandbox_id=sandbox_id,
+        )
+        executor.verify()
+        return executor

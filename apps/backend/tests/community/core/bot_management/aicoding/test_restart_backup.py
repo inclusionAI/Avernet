@@ -262,7 +262,8 @@ def test_backup_failure_continues_original_restart_and_lock_ownership(phase, pro
     bot = _make_bot(active_engine='aicoding', binding_id=42)
     repository, state = _stateful_bot_repository(bot)
     device = Mock()
-    device.get_device.return_value = {'device_id': 'old-container', 'device_provider': provider, 'status': 'ACTIVE'}
+    device.get_device.return_value = {'device_id': 'old-container', 'device_provider': provider, 'status': 'ACTIVE',
+                                     'device_props': {'sandbox_id': 'old-sandbox'}}
     runtime = Mock()
     runtime.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical', 'status': 'ACTIVE'}]
     svc = _make_service(locks, bot_repository=repository, device_provider=device,
@@ -431,22 +432,28 @@ def test_old_coding_bot_without_new_script_completes_original_restart(engine, pr
     device_repo.get_by_id.return_value = device_repo.get_by_device_id.return_value = record
     device = make_device_service(repo=device_repo)
     device._exec_shell_new = Mock(side_effect=lambda **kw: _run_absent_helper_probe(kw['shell_cmd']))
+    from agentclaw.community.core.devices.services.device_service_router import DeviceServiceRouter
+    routed_device = DeviceServiceRouter(
+        repository=device_repo, bot_query=Mock(), providers={provider: device},
+        default_provider_key=provider,
+    )
     runtime = Mock()
     runtime.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical-legacy', 'status': 'ACTIVE'}]
     runtime.post_bots_api.side_effect = lambda **kw: vars(_run_absent_helper_probe(kw['payload']['cmd']))
-    svc = _make_service(locks, bot_repository=repository, device_provider=device,
+    svc = _make_service(locks, bot_repository=repository, device_provider=routed_device,
                         baas_service_provider=lambda: runtime)
     with patch.object(svc, 'stop_bot', return_value=True) as stop, \
          patch.object(svc, 'start_bot', return_value=bot) as start, \
          patch.object(svc, '_restart_bot_baas', return_value=bot) as update:
         assert svc.restart_bot(bot_id='bot001', user_id='user001') == bot
-    device._exec_shell_new.assert_not_called()
     if provider == 'baas':
+        device._exec_shell_new.assert_not_called()
         assert runtime.post_bots_api.call_count == 2
         assert 'status=legacy' in caplog.text and 'reason=helper_absent' in caplog.text
     else:
+        assert device._exec_shell_new.call_count == 2
         runtime.post_bots_api.assert_not_called()
-        assert 'reason=arca_provider' in caplog.text
+        assert 'reason=helper_absent' in caplog.text
     if provider == 'arca':
         stop.assert_called_once()
         start.assert_called_once()
@@ -665,12 +672,12 @@ def test_ordinary_backup_budget_includes_time_already_spent_in_queue():
 @pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
 @pytest.mark.parametrize('status', ['ACTIVE', 'PENDING', 'FAILED', 'STOPPED'])
 @pytest.mark.parametrize('record_type', [dict, SimpleNamespace])
-def test_arca_skips_all_backup_io_but_still_verifies_binding(engine, status, record_type):
+def test_arca_missing_sandbox_skips_io_but_still_verifies_binding(engine, status, record_type):
     ctx = BotProvisioningContext(
         bot_id='bot', owner_id='owner', bot_type='personal', active_engine=engine,
     )
     device = Mock()
-    # No sandbox_id is needed: even an already destroyed sandbox can be replaced.
+    # Legacy bindings without sandbox_id still allow recovery, without claiming backup.
     device.get_device.return_value = record_type(
         device_id='destroyed-container', device_provider='arca', status=status,
         device_props={},

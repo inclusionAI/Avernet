@@ -897,3 +897,32 @@ async def test_lost_enqueue_response_does_not_undo_completed_task_status(setup, 
     with pytest.raises(ConnectionError):
         await submit(s)
     assert s.repo.bot["status"] == "FAILED"
+
+
+@pytest.mark.asyncio
+async def test_arca_admission_pins_physical_sandbox_and_duplicate_keeps_operation(setup):
+    s = setup
+    s.binding.update(device_provider="arca", device_props={"sandbox_id": "old-sandbox@8"})
+    await submit(s)
+    first = deepcopy(task(s).payload)
+    await submit(s)
+    assert task(s).payload == first
+    assert first["sandbox_id"] == "old-sandbox@8"
+    s.service.restart_bot.assert_not_called()
+
+    # Even with the same logical binding/device, a different physical sandbox
+    # must not receive the old operation's backup or stop/start.
+    s.binding["device_props"]["sandbox_id"] = "replacement@1"
+    assert isinstance(s.handler.handle(task(s).payload), Fail)
+    s.service.restart_bot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_arca_pre_rollout_task_without_sandbox_snapshot_can_recover(setup):
+    s = setup
+    s.binding.update(device_provider="arca", device_props={"sandbox_id": "old-sandbox@8"})
+    await submit(s)
+    task(s).payload.pop("sandbox_id")
+    mock_lifecycle(s)
+    assert isinstance(s.handler.handle(task(s).payload), Reschedule)
+    s.service.restart_bot.assert_called_once()

@@ -3,8 +3,8 @@
 ## Best-effort policy (2026-10-12)
 
 Backup is attempted, but backup-only failures log sanitized warnings and do not
-block restart. This includes inventory, command, timeout, receipt and physical
-identity failures. Warnings carry `action=continue_restart` and
+block restart. This includes inventory, command, timeout, receipt and runtime boot-identity
+failures. Changes to the captured Arca binding/sandbox target remain blocking. Warnings carry `action=continue_restart` and
 `data_loss_risk=true`; they are not successful backup receipts. Binding/engine
 checks, database failures and durable operation fences remain blocking.
 Restart can lose data newer than the last durable backup; a timeout does not
@@ -52,8 +52,27 @@ The registry adapter is shared dispatch, not an independent lifecycle pipeline.
 
 ## Existing transports only
 
-- Direct ARCA bindings skip backup and retain their original stop/start flow.
-  Other non-BaaS providers retain their existing `exec_shell_new` backup attempts;
+- Direct ARCA bindings now attempt the same asynchronous helper protocol before
+  their original stop/start flow. Their physical target comes directly from the
+  old binding's `device_props.sandbox_id`, exactly as destruction does; no BaaS
+  inventory or sandbox-list query is involved. The existing provider execution
+  hook retains ownership of sandbox suffix/tenant translation.
+- `DeviceServiceRouter.prepare_arca_restart_executor` is an internal restart-only
+  interface returning a pinned `execute(command)` / `verify()` executor. It has
+  no HTTP exposure or default-provider fallback. ACTIVE/PENDING/FAILED/STOPPED
+  bindings may still identify a live old sandbox and are eligible for backup.
+  Normal `exec_shell_new` keeps its existing ACTIVE/PENDING restriction. The
+  executor never modifies binding status and never re-resolves a new target by
+  logical device ID. Database failures, changed physical binding targets, and
+  released bindings remain blocking, even after a failed backup attempt.
+- Missing sandbox identity and unreachable/destroyed runtimes produce sanitized
+  best-effort warnings and continue recovery; neither is a successful backup.
+  New durable tasks capture `sandbox_id` (including its tenant suffix), in
+  addition to the existing binding/device/provider identity. Pre-rollout tasks
+  without this field capture the target at preparation and retain the existing
+  binding/device/provider checks. Repeated helper calls use the same operation
+  ID; backup waits outside the restart lock and verification runs under it.
+- Other non-BaaS providers retain their existing `exec_shell_new` backup attempts;
   unavailable FAILED/STOPPED containers warn and continue without execution.
 - Coding restart calls the existing `list_devices_by_bot_uuid` client and
   `GET /bots/{uuid}/devices` for both prepare and verification. The endpoint
@@ -84,7 +103,7 @@ The registry adapter is shared dispatch, not an independent lifecycle pipeline.
   lookup failures degrade backup without blocking restart. Non-empty inventories always retain the
   physical-target backup checks, even for FAILED Bots. This coding-only policy
   also applies to published/caller instance preconditions; shared BaaS APIs,
-  direct ARCA restarts and other engine policies are unchanged by this change.
+  the direct ARCA stop/start lifecycle and other engine policies are unchanged.
 
 ## Runtime contract
 
@@ -149,3 +168,21 @@ The current polling interval is 2 seconds and the observation deadline is 1500
 seconds. This is not a hard transport timeout: an in-flight exec uses its existing
 transport timeout. These constants remain unchanged in this boundary-only patch;
 configuration and executor-capacity tuning are separate unresolved review items.
+
+## Direct ARCA rollout and propagation
+
+The coding strategy consumes the internal pinned executor supplied by the
+DeviceService router; the registered Arca provider implements execution via its
+existing `_exec_shell_new` hook and SandboxRuntimeClient. No new SDK dependency,
+public HTTP contract, generic exec permission, queue type or database schema is
+introduced. OCB must update its Avernet gitlink to deploy the strategy and router
+together. Corp contract tests assert that exec and destruction select the same
+raw sandbox ID and tenant, including configured Coding suffixes.
+
+The helper must already be installed in direct-ARCA images. `start` must return
+promptly while container-side work continues; platform exec retains its existing
+transport timeout. Pre-rollout images use the existing strict legacy probe.
+Before rollout, verify helper ownership/sudo, committed receipts, durable storage
+and restore into a replacement sandbox in staging. Unit mocks do not prove
+those runtime/storage properties. This change does not install runtime scripts
+or introduce a new restore format.

@@ -203,42 +203,67 @@ async def test_real_lost_baas_response_uses_existing_recovery_intent(lifecycle):
 
 
 @pytest.mark.parametrize("engine", ["aicoding", "claude_code"])
+@pytest.mark.parametrize("backup_fails", [False, True])
 @pytest.mark.asyncio
-async def test_real_arca_stop_start_skips_backup_and_records_handoff(lifecycle, engine):
+async def test_real_arca_async_backup_precedes_stop_start(lifecycle, engine, backup_fails):
+    import json
+    from agentclaw.community.core.devices.services.device_service_router import DeviceServiceRouter
+    from agentclaw.community.core.bot_management.engines.aicoding import restart_backup
+
     s = lifecycle
     s.repo.bot["active_engine"] = engine
-    s.binding["device_provider"] = "arca"
+    s.binding.update(device_provider="arca", device_props={"sandbox_id": "old-sandbox@8"})
     events = []
     s.service._resolve_restart_target_provider = Mock(return_value="arca")
-    device = s.service._device_service_provider()
-    device.release_device.side_effect = lambda **_: events.append("release")
+    provider = s.service._device_service_provider()
+    binding_repo = Mock()
+    binding_repo.get_by_id.side_effect = lambda _: SimpleNamespace(**deepcopy(s.binding))
+    router = DeviceServiceRouter(
+        repository=binding_repo, bot_query=Mock(), providers={"arca": provider},
+        default_provider_key="arca",
+    )
+    s.service._device_service_provider = lambda: router
+    provider.release_device.side_effect = lambda **_: events.append("release")
 
     def start(**kwargs):
         assert journal(s.repo.bot)["phase"] == "RESTARTING"
         assert s.repo.bot["binding_id"] is None
         events.append("allocate")
         s.repo.bot.update(binding_id=8, status="PENDING")
-        s.binding.update(id=8, device_id="new")
+        s.binding.update(id=8, device_id="new", device_props={"sandbox_id": "new-sandbox"})
         return deepcopy(s.repo.bot)
 
     s.service.start_bot = Mock(side_effect=start)
-
-    device.exec_shell_new.side_effect = RuntimeError("sandbox destroyed")
-
     await s.service.restart_bot_async(bot_id="b", user_id="o")
     task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key("b", "o"))
-    with patch(
-        "agentclaw.community.core.bot_management.engines.aicoding.restart_backup.prepare_backup",
-        side_effect=AssertionError("ARCA must not probe or back up"),
-    ) as backup:
+    assert task.payload["sandbox_id"] == "old-sandbox@8"
+    assert events == []  # HTTP admission never waits for backup or releases.
+    provider._exec_shell_new.assert_not_called()
+    operation = task.payload["operation_id"]
+
+    def execute(*, device, shell_cmd):
+        assert device.device_props == {"sandbox_id": "old-sandbox@8"}
+        assert "release" not in events
+        assert operation in shell_cmd
+        events.append("backup")
+        if backup_fails:
+            raise ConnectionError("old sandbox unavailable")
+        running = len(events) == 1
+        return SimpleNamespace(exit_code=0, stdout=json.dumps({
+            "version": 1, "operation_id": operation, "boot_id": "old-boot",
+            "status": "running" if running else "committed",
+            "backup": {"status": "success", "generation_id": "g1", "operation_id": operation},
+        }))
+
+    provider._exec_shell_new.side_effect = execute
+    with patch.object(restart_backup.time, "sleep"):
         assert isinstance(s.handler.handle(task.payload), Reschedule)
-    backup.assert_not_called()
-    device.exec_shell_new.assert_not_called()
-    assert events == ["release", "allocate"]
+    assert events == (["backup"] if backup_fails else ["backup"] * 3) + ["release", "allocate"]
     assert isinstance(s.handler.handle(task.payload), Reschedule)
     s.repo.bot["status"] = "ACTIVE"
     assert isinstance(s.handler.handle(task.payload), Complete)
     s.platform.post_bots_api.assert_not_called()
+    provider.exec_shell_new.assert_not_called()  # ordinary exec guards unchanged
     s.service.start_bot.assert_called_once()
 
 
