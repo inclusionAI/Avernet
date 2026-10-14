@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from contextlib import aclosing, nullcontext
 from typing import Any
 

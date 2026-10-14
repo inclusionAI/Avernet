@@ -309,7 +309,9 @@ class BotA2aClient:
             self._dispatch("interaction.requested", payload)
             return
         if meta.get("interactionId") and state == "TASK_STATE_WORKING" \
-                and meta.get("kind") != "agent":
+                and meta.get("kind") not in ("agent", "resolve_conflict"):
+            # R18-1b：approval_resolved（interactionId 从 approvalId 提取）
+            # 与 interaction.resolved 同一事件身份出站。
             payload = dict(frame) if isinstance(frame, dict) else {}
             payload.setdefault("interactionId", meta.get("interactionId"))
             payload["state"] = "interaction.resolved"
@@ -381,15 +383,21 @@ class BotA2aClient:
     # ── abort（CancelTask 为 1c 缺口——诚实 ok=False）──
     async def chat_abort(self, session_key: str,
                         run_id: str | None = None) -> dict[str, Any]:
+        """R18-2：Engine 侧 CancelTask 是已声明的 1c 缺口——诚实返回不
+        支持；本地 body-task 取消是**订阅断流**（不同语义），绝不作为
+        abort 成功上报（ok 判断点在 _send_chat_request 一侧，ok=False
+        会如实抛 ChatRequestError）。"""
         rid = run_id or self._session_runs.get(session_key)
-        out: dict[str, Any] = {"ok": False, "a2a": True,
-                               "reason": "cancel_task_not_on_card_1c"}
         ctx = self._runs.get(rid or "")
         if ctx and ctx.task and not ctx.task.done():
+            # 订阅断流：让消费方收 terminal error 而不是悬挂——但 abort
+            # 面本身不成功。
             ctx.task.cancel()
-            out["ok"] = True   # 本地流取消生效；engine 侧 CancelTask 1c 补
-            out["reason"] = "local_stream_cancelled"
-        return out
+        return {"ok": False, "a2a": True,
+                "error": {"code": "CANCEL_UNSUPPORTED",
+                          "message": "engine CancelTask lands in stage 1c; "
+                                     "engine-side abort unavailable",
+                          "retryable": False}}
 
     # ── chat_inject（R16-1 签名；R17-7 metadata 平铺+timeout）──
     async def chat_inject(
@@ -478,24 +486,45 @@ class BotA2aClient:
         try:
             response_body = resp.json()
         except Exception:
-            response_body = {"error": {"message":
-                                        f"malformed_response_http_"
-                                        f"{resp.status_code}"}}
-        # 等价于 from_frames 的验证：id 匹配 + 结构之一
-        valid = (
-            isinstance(response_body, dict)
-            and response_body.get("id") == request["id"]
-            and ("result" in response_body or "error" in response_body)
-        )
-        err = response_body.get("error")
-        if err or not valid:
+            response_body = {"__malformed__": f"unparseable http_"
+                                           f"{resp.status_code}"}
+        # R18-3: 类型/关联/互斥三段验证（from_frames 等价强度）——
+        # 任何一段不过都是 accepted=False，成功不从 error 真值推导。
+        fail_reason: str | None = "malformed or mismatched response"
+        # 0) 类型必须是 dict（括号内的([]/标量在此直接拒）——这一步在
+        # resp.json() 可能返回 list 的情况下是唯一安全面。
+        if not isinstance(response_body, dict):
+            response_body = {"__malformed__": f"non-object body"}
+        # 1) 关联 + 互斥（正文为 dict 才进入）
+        if not response_body.get("__malformed__"):
+            # 2) 关联：id 必须回显请求 id
+            if response_body.get("id") != request["id"]:
+                pass
+            else:
+                has_result = "result" in response_body \
+                    and isinstance(response_body["result"], dict)
+                # R18-3: error 键在场且其值可判读（dict 或 null 之外的真值）。
+                # '{}' 是可判读错误对象（键存在本身已构成互斥冲突）——
+                # bool(get(...)) 不作为互斥判据judge（评审三例里 {} 被当无错）。
+                has_error = "error" in response_body \
+                    and isinstance(response_body["error"], dict)
+                # 3) 互斥：result/error 各自结构合法且不同时存在
+                if has_result and not has_error:
+                    fail_reason = None
+                elif has_error and not has_result:
+                    err = response_body["error"]
+                    fail_reason = (err.get("message")
+                                   or (err.get("data") or {}).get("reason", "")
+                                   or "engine resolve error")
+                # 双有/双无 → 维持 fail_reason
+        if response_body.get("__malformed__"):
+            fail_reason = str(response_body["__malformed__"])
+        if fail_reason is not None:
             return EngineInteractionResolveExchange(
                 request=request,
                 response=response_body,
                 accepted=False,
-                error_message=(err.get("message")
-                               or (err.get("data") or {}).get("reason", "")
-                               if err else "malformed or mismatched response"),
+                error_message=fail_reason,
             )
         return EngineInteractionResolveExchange(
             request=request,

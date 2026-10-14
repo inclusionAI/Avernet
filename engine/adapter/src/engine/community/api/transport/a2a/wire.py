@@ -113,16 +113,11 @@ def wire_replay_refused(reason: str) -> dict[str, Any]:
 def wire_interaction_requested(run_id: str, context_id: str, seq: int,
                                interaction_id: str,
                                payload: dict[str, Any]) -> dict[str, Any]:
-    """HITL 请求（§8.6）：Task 转 INPUT_REQUIRED；元数据承载 interactionId
-    与原始 payload 摘要（kind/prompt/text 降采样）。"""
-    meta: dict[str, Any] = {"seq": seq, "interactionId": interaction_id}
-    for key in ("kind", "phase", "toolCallId"):
-        v = payload.get(key)
-        if isinstance(v, (str, int, float, bool)):
-            meta[key] = v
-    prompt = payload.get("prompt") or payload.get("text")
-    if isinstance(prompt, str) and prompt:
-        meta["prompt"] = prompt[:200]
+    """HITL 请求（§8.6/R18-1）：INPUT_REQUIRED + **完整 engine_frame**
+    （questions/kind/allowedDecisions 等结构化字段全量——BaaS 消费者按
+    engine_frame 重建 payload，不摘要降采样）。"""
+    meta: dict[str, Any] = {"seq": seq, "interactionId": interaction_id,
+                            "engine_frame": dict(payload)}
     return {"seq": seq, "type": "statusUpdate", "ev": {
         "statusUpdate": {"taskId": run_id, "contextId": context_id,
                           "status": {"state": "TASK_STATE_INPUT_REQUIRED"},
@@ -131,9 +126,15 @@ def wire_interaction_requested(run_id: str, context_id: str, seq: int,
 
 def wire_interaction_resolved(run_id: str, context_id: str, seq: int,
                               payload: dict[str, Any]) -> dict[str, Any]:
-    """HITL 决议（§8.6）：Task 回 WORKING；metadata.interactionId 保留对应关系。"""
-    meta: dict[str, Any] = {"seq": seq}
-    iid = payload.get("interactionId") or payload.get("id")
+    """HITL 决议（§8.6/R18-1b）：WORKING + 完整 engine_frame。
+
+    R18-1b：approval_resolved 只带 approvalId 的帧也要保住**交互身份**事件
+    ——meta.interactionId 从 interactionId / id / approvalId 三键提取，
+    BaaS 消费端按 interactionId 出现与否派发 interaction.resolved。
+    """
+    meta: dict[str, Any] = {"seq": seq, "engine_frame": dict(payload)}
+    iid = (payload.get("interactionId") or payload.get("id")
+           or payload.get("approvalId"))
     if isinstance(iid, (str, int)):
         meta["interactionId"] = iid
     return {"seq": seq, "type": "statusUpdate", "ev": {
