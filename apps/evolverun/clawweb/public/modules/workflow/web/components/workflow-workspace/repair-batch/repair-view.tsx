@@ -1,7 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import type { RepairInboxItem } from '../../../../server/contracts/repair-workbench'
 
-const buttonBase = 'inline-flex items-center justify-center rounded-lg border px-3 py-2 text-xs font-medium disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring'
+const buttonBase = 'inline-flex items-center justify-center rounded-lg border px-3 py-2 text-xs font-medium enabled:cursor-pointer disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring'
 export const button = `${buttonBase} border-input bg-card text-foreground enabled:hover:bg-muted/50 disabled:bg-muted disabled:text-muted-foreground`
 export const primary = `${buttonBase} border-primary bg-primary text-primary-foreground enabled:hover:bg-primary/90 disabled:border-input disabled:bg-muted disabled:text-muted-foreground`
 export const states: Record<RepairInboxItem['state'], string> = {

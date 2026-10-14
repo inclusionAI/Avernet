@@ -26,7 +26,7 @@ function serial<T>(db: IDatabase, fn: () => Promise<T>): Promise<T> {
   sqliteQueues.set(db, result.then(() => undefined, () => undefined));
   return result;
 }
-function fail(code: ConstructorParameters<typeof RepairBatchError>[0], message: string): never { throw new RepairBatchError(code, message); }
+function fail(code: ConstructorParameters<typeof RepairBatchError>[0], message: string, details: Record<string, unknown> = {}): never { throw new RepairBatchError(code, message, details); }
 function requiredText(value: unknown, max: number, empty = false): value is string { return typeof value === 'string' && value.length <= max && (empty || value.trim().length > 0); }
 function identity(value: unknown, max: number): value is string { return requiredText(value, max) && /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(value); }
 function safeInteger(value: unknown, min = 0): value is number { return Number.isSafeInteger(value) && Number(value) >= min; }
@@ -273,7 +273,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     if (!identity(taskId, 64) || !safeInteger(raw.expectedAttemptRevision, 1)
       || !requiredText(raw.feedback, MAX_INSTRUCTIONS_CHARS, true)
       || !(raw.parentCandidateCommit === null || /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(raw.parentCandidateCommit))) fail('INVALID_INPUT', 'Invalid feedback request');
-    if (this.execution && await this.requireStoppedAttempt(await this.task(taskId), actorId)) fail('STATE_CONFLICT', 'The original candidate was recovered; refresh it before submitting feedback');
+    if (this.execution && await this.requireStoppedAttempt(await this.task(taskId), actorId)) fail('STATE_CONFLICT', 'The original candidate was recovered; refresh it before submitting feedback', { recoveryAction: 'refresh-task', reasonCode: 'RESULT_RECOVERED' });
     return this.generate(actorId, taskId, { ...base, expectedAttemptRevision: raw.expectedAttemptRevision, parentCandidateCommit: raw.parentCandidateCommit, feedback: raw.feedback });
   }
   private async generate(actorId: string, taskId: string | null, request: RepairSelectionRequest | RepairFeedbackRequest): Promise<RepairRevision> {
@@ -357,6 +357,12 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     if (!safeInteger(expectedRevision, 1) || task.latestAttempt.revision !== expectedRevision) fail('STATE_CONFLICT', 'Result is no longer current');
     if (task.latestAttempt.draft) return;
     const run = task.execution;
+    if (task.latestAttempt.phase === 'failed' && ['AIS_FAILED', 'AIS_STOPPED', 'AIS_TIMEOUT'].includes(String(task.latestAttempt.error?.code)) && run?.jobId && run.executionId) {
+      // Result-only recovery: a trusted absence permits a later explicit revision,
+      // but this action itself must never create a revision or dispatch a Job.
+      await this.requireStoppedAttempt(task, actorId);
+      return;
+    }
     if (task.latestAttempt.phase !== 'failed' || task.latestAttempt.error?.code !== 'GIT_RESULT_UNAVAILABLE'
       || !run?.jobId || !run.executionId) fail('STATE_CONFLICT', 'Only an unavailable Git result can be reread');
     const result = await this.execution.readResult({ input: task.latestAttempt.input, actorId, jobId: run.jobId,
@@ -367,15 +373,15 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
   }
   private async requireStoppedAttempt(task: RepairTaskDetail, actorId: string): Promise<RepairRevision | null> {
     const run = task.execution;
-    if (task.latestAttempt.phase === 'failed' && task.latestAttempt.error?.code === 'GIT_RESULT_UNAVAILABLE') fail('STATE_CONFLICT', 'Reread the original Git result before generating again');
+    if (task.latestAttempt.phase === 'failed' && task.latestAttempt.error?.code === 'GIT_RESULT_UNAVAILABLE') fail('STATE_CONFLICT', 'Reread the original Git result before generating again', { recoveryAction: 'retry-result', reasonCode: 'RESULT_READ_UNKNOWN' });
     if (task.latestAttempt.phase !== 'failed' || !run?.jobId || !run.executionId) return null;
     let remote: Awaited<ReturnType<RepairExecutionPort['status']>>;
     try {
       remote = await this.execution!.status({ input: task.latestAttempt.input, actorId, jobId: run.jobId,
         identity: { stepId: new RepairTaskRepository(this.db).stepId(task.taskId, task.latestAttempt.revision),
           attempt: run.attempt, executionId: run.executionId } });
-    } catch { fail('STATE_CONFLICT', 'Remote execution state is unknown; reconcile before generating again'); }
-    if (remote.status === 'running') fail('STATE_CONFLICT', 'Previous AIS execution is still running; stop or reconcile it first');
+    } catch { fail('STATE_CONFLICT', 'Remote execution state is unknown; reconcile before generating again', { recoveryAction: 'retry-result', reasonCode: 'EXECUTION_UNKNOWN' }); }
+    if (remote.status === 'running') fail('STATE_CONFLICT', 'Previous AIS execution is still running; stop or reconcile it first', { recoveryAction: 'retry-result', reasonCode: 'EXECUTION_RUNNING' });
     if (!['AIS_FAILED', 'AIS_STOPPED', 'AIS_TIMEOUT'].includes(String(task.latestAttempt.error?.code))) return null;
     // A Job can fail after its result has already been pushed. Recover the exact
     // execution before deciding its branch is safe for another generation.
@@ -386,7 +392,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
           attempt: run.attempt, executionId: run.executionId } });
     } catch (error) {
       if (remote.status !== 'success' && error instanceof RepairResultAbsentError) return null;
-      fail('STATE_CONFLICT', 'Original Git result could not be confirmed; retry its read before generating again');
+      fail('STATE_CONFLICT', 'Original Git result could not be confirmed; retry its read before generating again', { recoveryAction: 'retry-result', reasonCode: 'RESULT_READ_UNKNOWN' });
     }
     if (result.status === 'failed') return null;
     return this.report({ workflowId: task.workflowId, taskId: task.taskId, revision: task.latestAttempt.revision,

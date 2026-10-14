@@ -20,6 +20,7 @@ import IssueRepairPreview, { IssueRepairPreviewLoading } from './repair-batch/Is
 import RepairSelectionBar from './repair-batch/RepairSelectionBar'
 import DetailDrawer from './DetailDrawer'
 import RepairTaskDialog from './repair-batch/RepairTaskDialog'
+import { repairActionFailure } from '../../api/repair-action-error'
 import RepairSelectionWorkspace from './repair-batch/RepairSelectionWorkspace'
 import { exclusion, itemTitle, phases, primary, RepairDialog } from './repair-batch/repair-view'
 import Pagination from '../Pagination'
@@ -349,7 +350,7 @@ function DiagnosisPanel({
       setDraftOpen(false); setSelectedTaskId(result.taskId); setRepairNotice(`已创建 ${result.taskId}，AIS 将生成可审阅 Pack 草稿，不会自动部署。`)
       resetRequestId(); setRepairRefresh(value => value + 1)
     } catch (error) {
-      setRepairActionError(`生成请求状态未确认，请刷新任务记录后再决定是否重试：${error instanceof Error ? error.message : String(error)}`)
+      setRepairActionError(repairActionFailure(error).message)
     } finally { setRepairBusy(false) }
   }
   const submitDisposition = async () => {
