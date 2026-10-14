@@ -129,7 +129,7 @@ impl RegisterArgs {
             let original = bots[0].get("engine_bin").and_then(toml::Value::as_str)
                 .context("Profile has no saved engine executable; use --replace-existing")?;
             // Keep executable path identity: symlink names can select wrapper behavior.
-            if desired != Path::new(original) {
+            if desired != utils::resolve_engine_bin(Some(Path::new(original)), factory.default_bin())? {
                 bail!("Profile has a different engine executable; choose another --profile or use --replace-existing");
             }
         }

@@ -326,6 +326,10 @@ async fn profile_reuse_checks_explicit_executable_paths_without_resolving_symlin
     let output = register(home.path(), &args).args(["--engine-bin", old_bin.to_str().unwrap()]).output().await.unwrap();
     assert!(output.status.success(), "{}", diagnostic(&output));
     let path = home.path().join(".bcn-bridge/profiles/pre/bridge.toml");
+    // Legacy configs may retain a directory alias instead of the normalized parent.
+    let mut legacy: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    legacy["bot"][0]["engine_bin"] = old_bin.to_str().unwrap().into();
+    std::fs::write(&path, toml::to_string(&legacy).unwrap()).unwrap();
     let original = std::fs::read(&path).unwrap();
     let repeated = register(home.path(), &args).args(["--engine-bin", "bin/codex"]).output().await.unwrap();
     assert!(repeated.status.success(), "{}", diagnostic(&repeated));
