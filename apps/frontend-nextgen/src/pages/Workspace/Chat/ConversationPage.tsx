@@ -190,6 +190,8 @@ export default function ConversationPage(): JSX.Element {
     others,
     onOpenSession: handleOpenSession,
     onOpenPublicBots: () => history.push('/collaboration-square/bots'),
+    // 分组标题行「+」添加入口:跳 Bot 管理页创建 Bot。
+    onOpenBotWorkshop: () => history.push('/bot-workshop'),
     onOpenAgentCodingBot: openAgentCodingBot,
   };
 

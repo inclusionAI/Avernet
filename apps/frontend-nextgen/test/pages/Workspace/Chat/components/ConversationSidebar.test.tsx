@@ -129,6 +129,7 @@ function sidebarProps(over: Partial<ConversationSidebarProps> = {}): Conversatio
     others: othersModel(),
     onOpenSession: jest.fn(),
     onOpenPublicBots: jest.fn(),
+    onOpenBotWorkshop: jest.fn(),
     onOpenAgentCodingBot: jest.fn(),
     ...over,
   };
@@ -370,6 +371,34 @@ describe('ConversationSidebar', () => {
     expect(screen.getByText('暂无好友 Bot')).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('button', { name: '前往公开 Bot' })[0]);
     expect(onOpenPublicBots).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes the 我的/好友 Bot group add buttons to the Bot workshop page', () => {
+    const onOpenBotWorkshop = jest.fn();
+    render(<ConversationSidebar {...sidebarProps({ onOpenBotWorkshop })} />);
+    // 「+」添加入口统一跳 Bot 管理页,不再落到公开发现页。
+    const addButtons = screen.getAllByRole('button', { name: '添加 Bot' });
+    expect(addButtons).toHaveLength(2);
+    addButtons.forEach((button) => fireEvent.click(button));
+    expect(onOpenBotWorkshop).toHaveBeenCalledTimes(2);
+  });
+
+  it('routes the 团队 Bot group add button to the Bot workshop page too', () => {
+    const onOpenBotWorkshop = jest.fn();
+    render(
+      <ConversationSidebar
+        {...sidebarProps({
+          teamBots: [teamBot],
+          directory: directoryModel({ teamBots: [teamBot] }),
+          onOpenBotWorkshop,
+        })}
+      />,
+    );
+    // 团队分组此前未接跳转回调(「+」无响应);现在同样跳 Bot 管理页。
+    const addButtons = screen.getAllByRole('button', { name: '添加 Bot' });
+    expect(addButtons).toHaveLength(3);
+    fireEvent.click(addButtons[1]);
+    expect(onOpenBotWorkshop).toHaveBeenCalledTimes(1);
   });
 
   it('renders read-only others sessions without interactive actions and opens via onOpenSession', () => {

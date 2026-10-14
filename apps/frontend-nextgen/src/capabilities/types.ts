@@ -252,9 +252,45 @@ export interface OpenSourceExperienceNoticeSpec {
   acknowledgeLabel: string;
 }
 
+/**
+ * 「返回旧版」入口的灰度决策数据（OpenSpec add-gray-release-nextgen-switch 跨版本切流）。
+ * 由 capability 实现方（internal overlay）拉取并附带打点副作用；Open Core 无旧版形态不提供。
+ */
+export interface LegacyVersionDecision {
+  /** 旧版入口 URL；空串表示当前不可切回（不渲染入口）。 */
+  oldUrl: string;
+  /** 命中的灰度规则类型（preference / user_whitelist / dept_whitelist / percent / default / fail_open），供启动打点。 */
+  hitRule: string;
+}
+
+/**
+ * 版本切换（逃生舱）能力。「体验新版 / 返回旧版」跨版本切流的数据源与写口收口：
+ * - Open Core 默认 null（无旧版可切回，壳层不渲染入口、启动不发请求不打点）；
+ * - internal overlay 经 `src/extensions/internal.ts` 注入灰度判定实现（agentclaw
+ *   `/api/v1/gray/**` 判定接口；内部域名/信封细节只存在 overlay，不进 Open Core 产物）。
+ * UI（shell/LegacyVersionSwitch）只知道「拉取决策 + 写偏好 + 成功才跳转」，零后端知识。
+ */
+export interface LegacyVersionSwitchSpec {
+  /**
+   * 启动只读拉取灰度判定（含打点副作用：记录 hitRule；任何失败静默返回 null——
+   * 不弹错误提示、不影响任何渲染）。同会话内幂等缓存，避免重复请求。
+   */
+  loadLegacyVersionDecision(): Promise<LegacyVersionDecision | null>;
+  /**
+   * 写逃生舱偏好（幂等）；返回是否成功。协议层默认失败提示已由实现方静默取消，
+   * 失败文案与是否阻断跳转由调用方决定。
+   */
+  saveLegacyVersionPreference(version: 'old' | 'new'): Promise<boolean>;
+}
+
 export interface AppCapabilities {
   /** Open Core 返回版本化提示配置；Internal 返回 null，且不得访问知悉状态。 */
   getOpenSourceExperienceNotice: () => CapabilityResult<OpenSourceExperienceNoticeSpec | null>;
+  /**
+   * 版本切换（逃生舱）能力。Open Core 默认 null（无旧版可切回，壳层入口不渲染）；
+   * internal overlay 注入灰度判定实现（agentclaw /api/v1/gray/**）。
+   */
+  getLegacyVersionSwitch: () => CapabilityResult<LegacyVersionSwitchSpec | null>;
   getHelpLinks: () => CapabilityResult<HelpLink[]>;
   openExternal: (href: string) => CapabilityResult<null>;
   getRuntimeRouteRedirect: (context: RuntimeRouteContext) => CapabilityResult<string | null>;

@@ -20,6 +20,8 @@ export interface ConversationSidebarSectionProps {
   isSearching: boolean;
   /** 空态「前往公开 Bot」入口;团队分组等不引导跳转时缺省不渲染。 */
   onOpenPublicBots?(): void;
+  /** 标题行「+」添加入口:跳 Bot 管理页(/bot-workshop)创建 Bot。 */
+  onOpenBotWorkshop(): void;
   renderItem(view: ConversationBotView): ReactNode;
   /** 可收起分组(我的/好友 Bot):缺省展开,标题行点击切换;搜索时强制展开以保证可检索。 */
   collapsible?: boolean;
@@ -33,7 +35,7 @@ export interface ConversationSidebarSectionProps {
 
 export function ConversationSidebarSection(props: ConversationSidebarSectionProps) {
   const { title, loading, error, onRetry, items } = props;
-  const { emptyTitle, emptyHint, isSearching, onOpenPublicBots, renderItem, collapsible } = props;
+  const { emptyTitle, emptyHint, isSearching, onOpenPublicBots, onOpenBotWorkshop, renderItem, collapsible } = props;
   const { collapsed, onToggleCollapsed, onQuickOpen, dockSelectedBotId } = props;
   const bodyHidden = collapsible === true && collapsed;
   return (
@@ -65,7 +67,7 @@ export function ConversationSidebarSection(props: ConversationSidebarSectionProp
           variant="ghost"
           icon={<Plus className="h-3.5 w-3.5" />}
           className="h-5 w-5 rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover/title:opacity-100 group-focus-within/title:opacity-100 [@media(hover:none)]:opacity-100"
-          onClick={onOpenPublicBots}
+          onClick={onOpenBotWorkshop}
         />
       </div>
       {bodyHidden ? (

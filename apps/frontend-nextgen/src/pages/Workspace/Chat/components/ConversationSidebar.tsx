@@ -28,6 +28,8 @@ export interface ConversationSidebarProps {
   others: ManagedBotOthersModel;
   onOpenSession(botId: string, section: ConversationBotSection, sessionId: string, friendUserId?: string): void;
   onOpenPublicBots(): void;
+  /** 各分组标题行「+」添加入口:跳 Bot 管理页(/bot-workshop)创建 Bot。 */
+  onOpenBotWorkshop(): void;
   /** AgentCoding Bot 使用专用 coding-chat;与 Bot 工坊「去使用」保持一致。 */
   onOpenAgentCodingBot(bot: ConversationBotView['bot']): void;
 }
@@ -38,7 +40,7 @@ function filterBots(bots: ConversationBotView[], keyword: string): ConversationB
 }
 
 export function ConversationSidebarContent(props: ConversationSidebarProps) {
-  const { managedBots, teamBots, friendBots, directory, onOpenPublicBots } = props;
+  const { managedBots, teamBots, friendBots, directory, onOpenPublicBots, onOpenBotWorkshop } = props;
   const [search, setSearch] = useState('');
   const keyword = search.trim().toLowerCase();
   const isSearching = keyword.length > 0;
@@ -82,6 +84,7 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
               emptyHint="可前往「公开 Bot」发现并添加 Bot。"
               isSearching={isSearching}
               onOpenPublicBots={onOpenPublicBots}
+              onOpenBotWorkshop={onOpenBotWorkshop}
               renderItem={(view) => <ManagedItem key={view.bot.botId} view={view} props={props} />}
               collapsible
               collapsed={!isSearching && props.store.collapsedBotGroups.managed === true}
@@ -111,6 +114,7 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
                 emptyHint="加入 Bot 协作团队后将在此展示。"
                 isSearching={isSearching}
                 onOpenPublicBots={undefined}
+                onOpenBotWorkshop={onOpenBotWorkshop}
                 renderItem={(view) => <ManagedItem key={view.bot.botId} view={view} props={props} />}
                 collapsed={false}
                 onToggleCollapsed={() => undefined}
@@ -126,6 +130,7 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
               emptyHint="可前往「公开 Bot」发现并添加好友 Bot。"
               isSearching={isSearching}
               onOpenPublicBots={onOpenPublicBots}
+              onOpenBotWorkshop={onOpenBotWorkshop}
               renderItem={(view) => <FriendItem key={view.bot.botId} view={view} props={props} />}
               collapsible
               collapsed={!isSearching && props.store.collapsedBotGroups.friend === true}

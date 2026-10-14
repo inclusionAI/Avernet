@@ -101,6 +101,8 @@ export function ConversationInteractiveStage(props: {
               onWorkflowSelected={taskExecution.selectWorkflow}
               onDynamicSelected={taskExecution.selectDynamic}
               onRemoveSelection={taskExecution.removeSelection}
+              /* 能力集只读查看：我的/团队 Bot 装配（好友 Bot 为 null 不渲染文案区）。 */
+              capabilitySets={fileFeature.capabilitySets}
             />
           }
           fileChip={model.desktopFileFeaturesHidden ? undefined : fileFeature.fileChip}

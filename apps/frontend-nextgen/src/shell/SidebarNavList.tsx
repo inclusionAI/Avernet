@@ -66,9 +66,11 @@ export function SidebarNavList({ activePath, items, onNavigate, collapsed = fals
         const sectionItems = items.filter((item) => item.section === section);
         return (
           <section key={section} aria-label={navSectionLabels[section]} className={index > 0 ? 'mt-4' : 'mb-1'}>
-            {/* 分组标题（SVG + dmore DOM 实测：行 h=32、与项行同为 32px 高）：x=16 与图标列对齐、
-                #868686 12px 常规字重；分组间无分隔线（SVG 稿纯留白过渡，B1 的 border-t 分隔线已按稿撤除）。 */}
-            <div className="flex min-h-8 items-center justify-between gap-2 px-4 pb-0.5 pt-0.5">
+            {/* 分组标题（SVG + dmore DOM 实测：行 h=32、与项行同为 32px 高）：
+                文字 x=16 与导航项图标列对齐（含图标的行起点），#868686 12px 常规字重；
+                Bot 分组右侧空间切换图标右缘 x=-16 与导航项内容右缘对齐；
+                分组间无分隔线（SVG 稿纯留白过渡，B1 的 border-t 分隔线已按稿撤除）。 */}
+            <div className="flex min-h-8 items-center justify-between gap-2 px-2 pb-0.5 pt-0.5">
               <p className="text-xs font-normal text-content-soft">{navSectionLabels[section]}</p>
               {section === 'bot' && showSpaceSwitcher && <SpaceSwitcher compact />}
             </div>
