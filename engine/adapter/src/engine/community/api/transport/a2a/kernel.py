@@ -30,6 +30,10 @@ TERMINAL_TTL_SECONDS = 180
 # inject 操作级去重表上限与 TTL（超过上限先按 TTL 清理过期项）
 _INJECT_DEDUP_MAX = 10_000
 _INJECT_DEDUP_TTL_SECONDS = 1_800
+# R13-2 inject 生命周期状态
+_INJECT_IN_PROGRESS = "in_progress"
+_INJECT_ACCEPTED = "accepted"
+_INJECT_UNKNOWN = "unknown"
 
 
 def _digest(text: str) -> str:
@@ -81,7 +85,7 @@ class A2aKernel:
     def __init__(self) -> None:
         self.runs: dict[str, _Run] = {}
         self._idem: dict[tuple[str, str], str] = {}
-        self._inject_dedup: dict[tuple[str, str], float] = {}
+        self._inject_dedup: dict[tuple[str, str], tuple[str, float]] = {}
         self._context_subs: dict[str, list[asyncio.Queue]] = {}
         self._total_bytes = 0
         self._global_lock = asyncio.Lock()
@@ -293,28 +297,68 @@ class A2aKernel:
         if r and q in r.subscribers:
             r.subscribers.remove(q)
 
-    # ── inject ──
-    async def inject(self, context_id: str, text: str,
-                     inject_id: str) -> str:
+    # ── inject lifecycle (R13-2: dedup state and engine write are coupled) ──
+    #
+    # States per (context, inject_id) key:
+    #   in_progress — reserved, engine write in flight
+    #   accepted    — engine write confirmed; event broadcast happened
+    #   unknown     — timeout/ambiguous outcome; key retained (engine may
+    #                 have written — never blindly delete and retry)
+    #
+    # Broadcast happens exactly at commit (after engine confirmation).
+    # Explicit engine rejection rolls the key back — retry is allowed.
+
+    async def inject_reserve(self, context_id: str, inject_id: str) -> str:
+        """Returns 'in_progress' for a fresh reservation, or the
+        'duplicate_<state>' status of an existing key."""
         key = (context_id, inject_id)
         now = time.monotonic()
         # M1: TTL prune keeps the dedup table bounded on long-lived
         # processes (records expire rather than accumulate forever).
         if len(self._inject_dedup) > _INJECT_DEDUP_MAX:
-            expired = [k for k, ts in self._inject_dedup.items()
+            expired = [k for k, (_, ts) in self._inject_dedup.items()
                        if now - ts > _INJECT_DEDUP_TTL_SECONDS]
             for k in expired:
                 self._inject_dedup.pop(k, None)
-        if key in self._inject_dedup:
-            return "duplicate"
-        self._inject_dedup[key] = now
+        existing = self._inject_dedup.get(key)
+        if existing is not None:
+            return f"duplicate_{existing[0]}"
+        self._inject_dedup[key] = (_INJECT_IN_PROGRESS, now)
+        return "in_progress"
+
+    def inject_commit(self, context_id: str, text: str,
+                      inject_id: str) -> bool:
+        """Mark accepted and broadcast to context subscribers — only after
+        the engine write confirmed. Returns False when the key is gone."""
+        key = (context_id, inject_id)
+        existing = self._inject_dedup.get(key)
+        if existing is None:
+            return False
+        self._inject_dedup[key] = (_INJECT_ACCEPTED, existing[1])
         ev = wire.wire_inject_message(context_id, text, inject_id)
         for q in list(self._context_subs.get(context_id, [])):
             try:
                 q.put_nowait(ev)
             except asyncio.QueueFull:
                 pass
-        return "accepted"
+        return True
+
+    def inject_rollback(self, context_id: str,
+                        inject_id: str) -> bool:
+        """Explicit engine rejection: drop the key so a same-key retry
+        re-attempts the write. Never broadcast."""
+        key = (context_id, inject_id)
+        existing = self._inject_dedup.pop(key, None)
+        return existing is not None
+
+    def inject_unknown(self, context_id: str, inject_id: str) -> None:
+        """Ambiguous outcome (timeout): retain the key as unknown — the
+        engine may already have written; a same-key retry must not
+        blindly re-execute. A new operation uses a new messageId."""
+        key = (context_id, inject_id)
+        existing = self._inject_dedup.get(key)
+        if existing is not None:
+            self._inject_dedup[key] = (_INJECT_UNKNOWN, existing[1])
 
     def subscribe_context(self, context_id: str) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=SUBSCRIBER_QUEUE_SIZE)

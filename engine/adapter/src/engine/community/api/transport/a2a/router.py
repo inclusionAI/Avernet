@@ -86,6 +86,39 @@ async def agent_card() -> dict[str, Any]:
     return make_agent_card(get_local_base_url())
 
 
+def _canonical_context(method: str, params: dict[str, Any], rid: Any
+                        ) -> tuple[str | None, str]:
+    """R13-3: the single context both the auth gate and execution use.
+
+    Extracted per-method BEFORE the gate runs — the gate can never check one
+    session while execution writes another. For InjectContext the executed
+    context is params.contextId; when the message object carries a different
+    contextId the request is rejected outright (zero dispatch, zero
+    broadcast). Send methods execute against message.contextId.
+    Returns (canonical_ctx_or_None, message_text) — ctx None means the
+    handler's own validation rejects later (kept out of the gate path).
+    """
+    msg = params.get("message")
+    if method == "InjectContext":
+        ctx = params.get("contextId")
+        if isinstance(msg, dict):
+            msg_ctx = msg.get("contextId")
+            if msg_ctx is not None and msg_ctx != ctx:
+                raise _ParamError(
+                    "contextId conflict: message.contextId must match "
+                    "params.contextId")
+        text = _message_text(msg) if isinstance(msg, dict) else ""
+        if not isinstance(ctx, str):
+            raise _ParamError("contextId is required (string)")
+        return ctx, text
+    if isinstance(msg, dict):
+        ctx = msg.get("contextId")
+        if ctx is not None and not isinstance(ctx, str):
+            raise _ParamError("message.contextId must be a string")
+        return (ctx if isinstance(ctx, str) else None), _message_text(msg)
+    return None, ""
+
+
 async def _auth_gate_guard(request: Request, rid: Any, method: str,
                             session_key: str, message_text: str,
                             auth_gate_service: AuthGateService) -> str | None:
@@ -169,14 +202,17 @@ async def rpc(request: Request,
                 rid, "avernet.retryOnly required when retry extension declared")
 
     try:
+        # ── R13-3: canonical context BEFORE the gate — the gate and
+        # execution share one value by construction; a context mismatch
+        # between message and params is rejected here, pre-gate.
         # ── R12-4: same AuthGate the WS surface enforces, before any
         # registration or dispatch. Gate replacement of the idempotency key
         # mirrors ws_server's params.idempotencyKey rewrite.
         gated_key = None
         if method in _GATED_METHODS:
-            ctx, text = _session_and_text(params)
-            guard = await _auth_gate_guard(request, rid, method, ctx, text,
-                                           auth_gate_service)
+            gate_ctx, gate_text = _canonical_context(method, params, rid)
+            guard = await _auth_gate_guard(request, rid, method, gate_ctx,
+                                           gate_text, auth_gate_service)
             if isinstance(guard, JSONResponse):
                 return guard
             gated_key = guard
@@ -210,20 +246,6 @@ async def rpc(request: Request,
 def _declared_extensions(request: Request) -> list[str]:
     header = request.headers.get("A2A-Extensions", "")
     return [part.strip() for part in header.split(",") if part.strip()]
-
-
-def _session_and_text(params: dict[str, Any]) -> tuple[str, str]:
-    """Best-effort session/message extraction for the auth gate."""
-    msg = params.get("message") if isinstance(params.get("message"), dict) \
-        else params
-    ctx = msg.get("contextId") if isinstance(msg, dict) else None
-    session = ctx if isinstance(ctx, str) and ctx else \
-        params.get("contextId", "") or ""
-    if isinstance(params.get("message"), dict):
-        text = _message_text(params["message"])
-    else:
-        text = ""
-    return session, text
 
 
 # ── Retry flag (D14 §8.5.2) ──
@@ -394,57 +416,99 @@ _HANDLERS["ReplayEvents"] = _replay_events
 
 # ── Extensions: InjectContext / SubscribeToContext ──
 
-async def _forward_engine_inject(ctx: str, text: str,
-                                 inject_id: str) -> bool:
-    """R12-6: fan out is not enough — write the message into the engine's
-    real session the same way ws_server forwards chat.inject (EngineManager
-    relay). Returns True when the engine accepted the write (or no relay is
-    mounted, in which case ws_server would also drop to a degraded mode)."""
+_INJECT_FORWARD_TIMEOUT_SECONDS = 30.0
+
+
+async def _forward_engine_inject(ctx: str, text: str) -> None:
+    """R12-6/R13-1/R13-4: write the message into the engine's real session.
+
+    Preferred path is the ChatService plugin ``inject`` — the exact call
+    ws_server's _handle_chat_inject makes (``chat.inject(session_key=...,
+    message=<str>, label=..., auth=...)``; both engine adapters take the
+    message as a plain string — claude_code_gateway does
+    ``String(params.message)``, a structured object would corrupt the
+    transcript). Engines without ``inject`` (openclaw legacy) are forwarded
+    through the relay with the same string shape.
+
+    Raises:
+      InjectForwardRejected — the engine explicitly rejected the write.
+      asyncio.TimeoutError    — outcome unknown (engine may have written).
+      RuntimeError            — engine/manager/relay surface unavailable.
+    """
     from engine.community.manager import EngineManager
     from engine.community.api.transport.a2a.engine_bridge import _chat_plugin
 
-    try:
-        _chat_plugin()  # engine surface must resolve
-    except Exception:
-        return True  # pre-initialize contexts: in-process fanout only
+    chat = _chat_plugin()  # unavailable → RuntimeError, callers fail honestly
 
-    try:
-        relay = EngineManager.get_instance().relay
-    except Exception:
-        return True
+    # ws_server._chat_plugin_supports_inject parity (MRO __dict__ check).
+    supports_inject = any(
+        "inject" in ancestor.__dict__ for ancestor in type(chat).__mro__)
+    if supports_inject:
+        result = await asyncio.wait_for(
+            chat.inject(session_key=ctx, message=text, label=None,
+                        auth=None),
+            timeout=_INJECT_FORWARD_TIMEOUT_SECONDS)
+        if not result.get("ok"):
+            err = result.get("error") or {}
+            raise InjectForwardRejected(
+                str(err.get("message", "engine inject rejected")))
+        return
 
+    relay = EngineManager.get_instance().relay
     if relay is None:
-        return True  # no relay plugin: degraded parity with ws raw frames
+        raise RuntimeError("no relay plugin on active engine")
+    response = await asyncio.wait_for(
+        relay.forward_request(
+            request_id=f"a2a-inject-{uuid.uuid4().hex}",
+            method="chat.inject",
+            params={"sessionKey": ctx, "message": text},
+            auth=None,
+            timeout=_INJECT_FORWARD_TIMEOUT_SECONDS,
+        ),
+        timeout=_INJECT_FORWARD_TIMEOUT_SECONDS)
+    if not bool(getattr(response, "ok", False)):
+        raise InjectForwardRejected("engine inject rejected (relay)")
 
-    response = await relay.forward_request(
-        request_id=f"a2a-inject-{uuid.uuid4().hex}",
-        method="chat.inject",
-        params={"sessionKey": ctx,
-                "message": {"role": "user",
-                            "content": [{"type": "text", "text": text}]}},
-        auth=None,
-        timeout=30.0,
-    )
-    return bool(getattr(response, "ok", False))
+
+class InjectForwardRejected(Exception):
+    """Engine explicitly refused the inject write — retriable (rollback)."""
 
 
 async def _inject_context(params: dict[str, Any], rid: Any,
-                          _gated_key: str | None) -> dict[str, Any]:
+                          gated_key: str | None) -> dict[str, Any]:
     msg = _get_message(params)
-    ctx = params.get("contextId")
-    if not isinstance(ctx, str) or not ctx:
+    # R13-3: canonical context validated pre-gate; guarded double-check.
+    ctx, _ = _canonical_context("InjectContext", params, rid)
+    try:
+        reserve = await _kernel.inject_reserve(ctx, msg["messageId"])
+    except ValueError:
         raise _ParamError("contextId is required (string)")
+    if reserve != "in_progress":
+        # duplicate_in_progress / duplicate_accepted / duplicate_unknown
+        return {"inject": reserve}
+
     text = _message_text(msg)
-    status = await _kernel.inject(ctx, text, msg["messageId"])
-    if status == "duplicate":
-        return {"inject": status}
-    # R12-6: the engine transcript write is part of the success criteria —
-    # a rejected engine write must not report accepted.
-    if not await _forward_engine_inject(ctx, text, msg["messageId"]):
+    try:
+        await _forward_engine_inject(ctx, text)
+    except InjectForwardRejected as e:
+        _kernel.inject_rollback(ctx, msg["messageId"])   # retry allowed
         return {"error": {"code": -32000,
-                          "message": "engine inject rejected",
+                          "message": str(e)[:200],
                           "data": {"reason": "inject_forward_failed"}}}
-    return {"inject": status}
+    except asyncio.TimeoutError:
+        # Ambiguous: engine may have written — key retained as unknown;
+        # same-key retries get duplicate_unknown; a new operation uses a
+        # new messageId.
+        _kernel.inject_unknown(ctx, msg["messageId"])
+        return {"error": {"code": -32000, "message": "inject outcome unknown",
+                          "data": {"reason": "unknown_outcome"}}}
+    except RuntimeError as e:
+        _kernel.inject_rollback(ctx, msg["messageId"])   # R13-4: honest fail
+        return {"error": {"code": -32000, "message": str(e)[:200],
+                          "data": {"reason": "inject_target_unavailable"}}}
+
+    _kernel.inject_commit(ctx, text, msg["messageId"])   # broadcast AFTER ok
+    return {"inject": "accepted"}
 
 _HANDLERS["InjectContext"] = _inject_context
 
