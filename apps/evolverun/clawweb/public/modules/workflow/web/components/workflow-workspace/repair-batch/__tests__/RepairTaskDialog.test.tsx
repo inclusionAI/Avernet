@@ -62,6 +62,21 @@ beforeEach(() => { Object.values(repairApi).forEach(mock => mock.mockReset()); r
 afterEach(() => vi.useRealTimers())
 
 describe('RepairTaskDialog', () => {
+  it('refreshes a read-only failed task without invoking result recovery mutations', async () => {
+    const failed = taskDetail('drafting', undefined, ['item-1'])
+    failed.latestAttempt.phase = 'failed'; failed.latestAttempt.error = { code: 'GIT_RESULT_UNAVAILABLE' }
+    repairApi.task.mockResolvedValue(failed); repairApi.candidates.mockResolvedValue(candidates())
+    render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit={false} onClose={() => {}} onChanged={() => {}} />)
+    await userEvent.click(await screen.findByRole('button', { name: '选择建议', exact: true }))
+    await screen.findByRole('checkbox', { name: '选择修订项 新出现的修复建议' })
+    expect(screen.queryByRole('button', { name: '核对原结果', exact: true })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '核对任务状态', exact: true }))
+    expect(repairApi.task).toHaveBeenCalledTimes(2)
+    expect(repairApi.retryResult).not.toHaveBeenCalled()
+    expect(repairApi.revise).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '确认生成下一版' })).toBeDisabled()
+  })
+
   it('resumes polling after a lost revision response recovers a drafting attempt', async () => {
     let current = taskDetail('review', '旧候选', ['item-1'])
     repairApi.task.mockImplementation(async () => current)

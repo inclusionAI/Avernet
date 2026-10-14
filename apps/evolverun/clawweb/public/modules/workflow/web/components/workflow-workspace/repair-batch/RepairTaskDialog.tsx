@@ -103,7 +103,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     }
     setBusy(true); setError(''); setNotice(''); setDispatchError('')
     try {
-      if (effectiveRecoveryAction === 'retry-result') await repairBatches.retryResult(taskId, detail.latestAttempt.revision)
+      if (effectiveRecoveryAction === 'retry-result' && canEdit) await repairBatches.retryResult(taskId, detail.latestAttempt.revision)
       const result = acceptTask(await repairBatches.task(taskId))
       if (['drafting', 'publishing'].includes(result.latestAttempt.phase)) setRefresh(value => value + 1)
       setRecoveryAction(null)
@@ -116,7 +116,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     } finally { setBusy(false) }
   }
   const recoveryButton = (effectiveRecoveryAction || taskError) && <button type="button" className={button} disabled={busy} onClick={() => void recover()}>
-    {effectiveRecoveryAction === 'retry-result' ? '核对原结果' : effectiveRecoveryAction === 'refresh-sources' ? '重新读取建议' : '核对任务状态'}
+    {effectiveRecoveryAction === 'retry-result' && canEdit ? '核对原结果' : effectiveRecoveryAction === 'refresh-sources' ? '重新读取建议' : '核对任务状态'}
   </button>
   const retryDispatch = async () => {
     if (!detail || busy) return
