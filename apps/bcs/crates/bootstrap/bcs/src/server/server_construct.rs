@@ -45,6 +45,7 @@ impl BcsServer {
         )
     }
 
+    #[cfg(any(test, feature = "test-utils"))]
     fn new_with_outbound_url_guards(
         config: BcsConfig,
         provider_webhook_url_guard: OutboundUrlGuard,

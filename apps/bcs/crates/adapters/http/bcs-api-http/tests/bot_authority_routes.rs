@@ -93,7 +93,7 @@ fn app_principal(app_id: i64, tenant: Option<&str>) -> Value {
         "tenant": tenant,
         "app": {
             "app_id": app_id,
-            "app_name": "Authority App",
+            "app_name": bcs_test_support::AUTHORITY_FIXTURE_APP_NAME,
             "owners": "owner",
             "tenant": tenant,
             "app_type": "THIRD_PARTY",

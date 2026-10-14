@@ -159,12 +159,7 @@ impl BotAuthorityServiceImpl {
             self.authorized_human(caller).await?;
         } else {
             self.policy
-                .authorize(
-                    caller,
-                    AuthorityAction::OwnershipRead,
-                    &key.bot_id,
-                    Some(&key.target_owner_actor_id),
-                )
+                .authorize(caller, AuthorityAction::OwnershipRead, &key.bot_id)
                 .map(|_| ())?;
         }
         match self.core.transfer(key).await.map_err(map_core_error)? {
@@ -225,12 +220,7 @@ impl BotAuthorityServiceImpl {
                         ));
                     }
                 };
-                let actor = self.policy.authorize(
-                    caller,
-                    app_action,
-                    &key.bot_id,
-                    Some(&key.target_owner_actor_id),
-                )?;
+                let actor = self.policy.authorize(caller, app_action, &key.bot_id)?;
                 Self::mutation_of(&actor)
             }
         };
@@ -348,7 +338,7 @@ impl BotAuthorityService for BotAuthorityServiceImpl {
         // bypass.
         let actor =
             self.policy
-                .authorize(caller, AuthorityAction::ManagersSync, &command.bot_id, None)?;
+                .authorize(caller, AuthorityAction::ManagersSync, &command.bot_id)?;
         self.core
             .sync_managers(ManagerSync {
                 mutation: Self::mutation_of(&actor),

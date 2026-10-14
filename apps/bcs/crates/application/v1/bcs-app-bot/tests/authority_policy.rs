@@ -161,10 +161,7 @@ fn sync_policy(rules: Vec<AuthorityAppScopeRule>) -> AuthorityServicePolicy {
     AuthorityServicePolicy::new(ENV, rules).expect("valid policy fixture")
 }
 
-/// The numeric id stays only as the caller identity the case
-/// constructs; MATCHING is by app name (spec §3.1 simplified
-/// rule shape `app + tenant + actions`).
-fn full_sync_rule(_app_id: i64) -> AuthorityAppScopeRule {
+fn full_sync_rule() -> AuthorityAppScopeRule {
     rule(
         APP_NAME,
         TenantScope::Exact("tenant-a".to_string()),
@@ -172,7 +169,7 @@ fn full_sync_rule(_app_id: i64) -> AuthorityAppScopeRule {
     )
 }
 
-fn transfer_read_rule(_app_id: i64) -> AuthorityAppScopeRule {
+fn transfer_read_rule() -> AuthorityAppScopeRule {
     rule(
         APP_NAME,
         TenantScope::Exact("tenant-a".to_string()),
@@ -501,16 +498,14 @@ fn operator_forbidden_code(error: &ApplicationError) -> bool {
 
 #[tokio::test]
 async fn app_in_scope_is_authorized_as_service_actor() {
-    let policy = sync_policy(vec![full_sync_rule(7)]);
+    let policy = sync_policy(vec![full_sync_rule()]);
     let caller = app_caller(7, Some("tenant-a"));
 
     let actor = policy
         .authorize(
             &caller,
             AuthorityAction::ManagersSync,
-            "bot-1",
-            None,
-        )
+            "bot-1")
         .expect("in-scope app");
 
     assert_eq!(
@@ -532,27 +527,27 @@ async fn missing_tenant_matches_only_explicit_absent_rule() {
     // A tenantless caller matches ONLY the explicit `absent` rule.
     let caller = app_caller(7, None);
     policy
-        .authorize(&caller, AuthorityAction::ManagersSync, "bot-1", None)
+        .authorize(&caller, AuthorityAction::ManagersSync, "bot-1")
         .expect("explicit absent rule covers the tenantless caller");
 
     // A tenant-bearing caller must NOT match the absent rule.
     let tenant_caller = app_caller(7, Some("tenant-a"));
     let error = policy
-        .authorize(&tenant_caller, AuthorityAction::ManagersSync, "bot-1", None)
+        .authorize(&tenant_caller, AuthorityAction::ManagersSync, "bot-1")
         .expect_err("absent rule must not cover a tenant");
     assert!(operator_forbidden_code(&error));
 
     // An exact-tenant rule never matches a tenantless caller.
-    let exact_policy = sync_policy(vec![full_sync_rule(7)]);
+    let exact_policy = sync_policy(vec![full_sync_rule()]);
     let error = exact_policy
-        .authorize(&caller, AuthorityAction::ManagersSync, "bot-1", None)
+        .authorize(&caller, AuthorityAction::ManagersSync, "bot-1")
         .expect_err("exact-tenant rule excludes the tenantless caller");
     assert!(operator_forbidden_code(&error));
 }
 
 #[tokio::test]
 async fn ids_are_case_exact() {
-    let policy = sync_policy(vec![full_sync_rule(7)]);
+    let policy = sync_policy(vec![full_sync_rule()]);
 
     // App name casing is exact (spec §3.1: byte-exact match on
     // the verified principal's `app_name`).
@@ -560,9 +555,7 @@ async fn ids_are_case_exact() {
         .authorize(
             &named_app_caller("SYNC-APP", 7, Some("tenant-a")),
             AuthorityAction::ManagersSync,
-            "bot-1",
-            None,
-        )
+            "bot-1")
         .expect_err("app name comparison is byte-exact");
     assert!(operator_forbidden_code(&error));
 
@@ -571,16 +564,14 @@ async fn ids_are_case_exact() {
         .authorize(
             &app_caller(7, Some("TENANT-A")),
             AuthorityAction::ManagersSync,
-            "bot-1",
-            None,
-        )
+            "bot-1")
         .expect_err("tenant comparison is byte-exact");
     assert!(operator_forbidden_code(&error));
 }
 
 #[tokio::test]
 async fn out_of_scope_app_and_action_deny() {
-    let sync_scope = sync_policy(vec![full_sync_rule(7)]);
+    let sync_scope = sync_policy(vec![full_sync_rule()]);
     let caller = app_caller(7, Some("tenant-a"));
 
     // An unconfigured app name never matches.
@@ -589,9 +580,7 @@ async fn out_of_scope_app_and_action_deny() {
             .authorize(
                 &named_app_caller("other-app", 7, Some("tenant-a")),
                 AuthorityAction::ManagersSync,
-                "bot-1",
-                None,
-            )
+                "bot-1")
             .expect_err("unknown app name")
     ));
     // sync rule cannot transfer: the action is not in the rule.
@@ -600,9 +589,7 @@ async fn out_of_scope_app_and_action_deny() {
             .authorize(
                 &caller,
                 AuthorityAction::OwnershipRead,
-                "bot-1",
-                Some("human_bob")
-            )
+                "bot-1")
             .expect_err("sync-only rule lacks ownership:read")
     ));
 }
@@ -614,7 +601,7 @@ async fn empty_rule_sets_deny_everything() {
     let caller = app_caller(7, Some("tenant-a"));
     assert!(operator_forbidden_code(
         &empty_policy
-            .authorize(&caller, AuthorityAction::ManagersSync, "bot-1", None)
+            .authorize(&caller, AuthorityAction::ManagersSync, "bot-1")
             .expect_err("empty policy denies sync")
     ));
 
@@ -627,32 +614,30 @@ async fn empty_rule_sets_deny_everything() {
     let policy = sync_policy(vec![empty_actions]);
     assert!(operator_forbidden_code(
         &policy
-            .authorize(&caller, AuthorityAction::ManagersSync, "bot-1", None)
+            .authorize(&caller, AuthorityAction::ManagersSync, "bot-1")
             .expect_err("empty action set denies")
     ));
 }
 
 #[tokio::test]
 async fn ordinary_app_outside_the_configured_scope_is_rejected() {
-    let policy = sync_policy(vec![full_sync_rule(7)]);
+    let policy = sync_policy(vec![full_sync_rule()]);
     let caller = named_app_caller("other-app", 8, Some("tenant-a"));
     let error = policy
-        .authorize(&caller, AuthorityAction::ManagersSync, "bot-1", None)
+        .authorize(&caller, AuthorityAction::ManagersSync, "bot-1")
         .expect_err("unconfigured app name must not pass");
     assert!(operator_forbidden_code(&error));
 }
 
 #[tokio::test]
 async fn human_caller_cannot_use_the_app_scope() {
-    let policy = sync_policy(vec![full_sync_rule(7)]);
+    let policy = sync_policy(vec![full_sync_rule()]);
     // A plain Human caller is not App identity.
     let error = policy
         .authorize(
             &human_caller("alice", Some("tenant-a")),
             AuthorityAction::ManagersSync,
-            "bot-1",
-            None,
-        )
+            "bot-1")
         .expect_err("Human identity must not consume the App scope");
     assert!(operator_forbidden_code(&error));
 }
@@ -737,7 +722,7 @@ async fn config_level_rejections_fail_startup_construction() {
     // order-based merging (spec §3.1).
     let error = AuthorityServicePolicy::new(
         ENV,
-        vec![full_sync_rule(7), full_sync_rule(7)],
+        vec![full_sync_rule(), full_sync_rule()],
     )
     .expect_err("duplicate rule keys must fail construction");
     assert!(error.to_string().contains("duplicate rule key"));
@@ -766,7 +751,7 @@ async fn sync_rejects_a_plain_human_and_selects_the_app_for_dual_credentials() {
     let core = Arc::new(RecordingCore::default());
     let service = service(
         core.clone(),
-        sync_policy(vec![full_sync_rule(7)]),
+        sync_policy(vec![full_sync_rule()]),
         Arc::new(AllowInviteCode),
     );
 
@@ -834,7 +819,7 @@ async fn in_scope_app_sync_submits_service_actor() {
     let core = Arc::new(RecordingCore::default());
     let service = service(
         core.clone(),
-        sync_policy(vec![full_sync_rule(7)]),
+        sync_policy(vec![full_sync_rule()]),
         Arc::new(AllowInviteCode),
     );
 
@@ -863,7 +848,7 @@ async fn sync_only_credential_cannot_accept_or_reject() {
     let core = Arc::new(RecordingCore::default());
     let service = service(
         core.clone(),
-        sync_policy(vec![full_sync_rule(7)]),
+        sync_policy(vec![full_sync_rule()]),
         Arc::new(AllowInviteCode),
     );
     let caller = app_caller(7, Some("tenant-a"));
@@ -960,7 +945,7 @@ async fn authorized_app_reads_and_decides_transfers_through_the_service() {
     *core.transfer_row.lock().expect("lock") = Some(canned_transfer_view());
     let service = service(
         core.clone(),
-        sync_policy(vec![transfer_read_rule(7)]),
+        sync_policy(vec![transfer_read_rule()]),
         Arc::new(AllowInviteCode),
     );
     let caller = app_caller(7, Some("tenant-a"));
@@ -1009,7 +994,7 @@ async fn dual_route_transfer_get_serves_human_parties_and_denies_others() {
     *core.transfer_row.lock().expect("lock") = Some(canned_transfer_view());
     let service = service(
         core.clone(),
-        sync_policy(vec![transfer_read_rule(7)]),
+        sync_policy(vec![transfer_read_rule()]),
         Arc::new(AllowInviteCode),
     );
     let key = TransferKey {
@@ -1050,7 +1035,7 @@ async fn human_only_routes_reject_app_and_non_human_identities() {
     let core = Arc::new(RecordingCore::default());
     let service = service(
         core.clone(),
-        sync_policy(vec![transfer_read_rule(7)]),
+        sync_policy(vec![transfer_read_rule()]),
         Arc::new(AllowInviteCode),
     );
 
@@ -1109,7 +1094,7 @@ async fn human_invite_gate_applies_to_human_path_only() {
     });
     let service = service(
         core.clone(),
-        sync_policy(vec![transfer_read_rule(7)]),
+        sync_policy(vec![transfer_read_rule()]),
         gate.clone() as Arc<dyn InviteCodeService>,
     );
 
@@ -1142,7 +1127,7 @@ async fn disabled_invite_gate_keeps_human_paths_open_without_binding() {
     *core.transfer_row.lock().expect("lock") = Some(canned_transfer_view());
     let service = service_with_gate_disabled(
         core.clone(),
-        sync_policy(vec![transfer_read_rule(7)]),
+        sync_policy(vec![transfer_read_rule()]),
     );
     let key = TransferKey {
         bot_id: "bot-1".to_string(),
@@ -1170,7 +1155,7 @@ async fn human_accept_and_reject_keep_the_invite_gate() {
     // path is unaffected (the gate ignores non-Humans).
     let service = service(
         core.clone(),
-        sync_policy(vec![transfer_read_rule(7)]),
+        sync_policy(vec![transfer_read_rule()]),
         gate.clone() as Arc<dyn InviteCodeService>,
     );
     let key = TransferKey {

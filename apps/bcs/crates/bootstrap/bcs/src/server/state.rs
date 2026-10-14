@@ -166,6 +166,7 @@ pub struct BcsServerExtensions {
     pub leader_election: Option<LeaderElectionRegistration>,
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 impl Default for BcsServerState {
     fn default() -> Self {
         let config = BcsConfig::default();

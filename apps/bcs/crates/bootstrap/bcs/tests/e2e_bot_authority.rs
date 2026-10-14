@@ -142,7 +142,7 @@ fn user_principal(id: &str, tenant: Option<&str>) -> Value {
 }
 
 fn app_principal(app_id: i64, tenant: Option<&str>) -> Value {
-    named_app_principal(app_id, "Authority App", tenant)
+    named_app_principal(app_id, bcs_test_support::AUTHORITY_FIXTURE_APP_NAME, tenant)
 }
 
 fn named_app_principal(app_id: i64, app_name: &str, tenant: Option<&str>) -> Value {
@@ -534,7 +534,7 @@ impl WorkbenchClient {
 
 fn trusted_apps_rule() -> Value {
     json!({
-        "app": "Authority App",
+        "app": bcs_test_support::AUTHORITY_FIXTURE_APP_NAME,
         "tenant": TENANT,
         "actions": ["managers:sync"],
     })

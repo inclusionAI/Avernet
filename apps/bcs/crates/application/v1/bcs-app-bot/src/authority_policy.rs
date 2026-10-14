@@ -240,8 +240,10 @@ impl AuthorityServicePolicy {
     }
 
     /// Decide whether the verified caller is a trusted App with
-    /// the scope for `action` on `bot_id` — and, for transfer
-    /// actions, on `target_owner_actor_id`.
+    /// the scope for `action` on `bot_id`. Transfer actions no
+    /// longer match a pre-declared target set (review ruling:
+    /// target sets were deleted with the fields); bot_id stays
+    /// for diagnostics only.
     ///
     /// This resolves the APP identity when the facade selects
     /// it: for `managers:sync` (spec §6.1 — sync 始终显式选择
@@ -258,7 +260,6 @@ impl AuthorityServicePolicy {
         caller: &AuthenticatedCaller,
         action: AuthorityAction,
         bot_id: &str,
-        target_owner_actor_id: Option<&str>,
     ) -> Result<AuthorityActor, ApplicationError> {
         let Some(app) = caller.app.as_ref() else {
             return Err(operator_forbidden(
@@ -267,7 +268,6 @@ impl AuthorityServicePolicy {
                  credentials stay outside this surface",
             ));
         };
-        let _ = target_owner_actor_id; // target sets no longer scope rules
         let bound_env = self.env.as_str();
         if self.matched_rule(
             &app.app_name,
