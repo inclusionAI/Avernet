@@ -24,14 +24,14 @@
 //! | `{"type":"result","subtype":_}` 非成功 | `CcMap::Failed(note)` → `TurnError::EngineExited` |
 //! | `{"type":"control_request","request":{"subtype":"can_use_tool",…}}` | `CcMap::ControlRequest { request_id, tool_name, input }` → 驱动接线 HITL 交互（register→requested→await resolution→control_response→resolved） |
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::{HashMap, HashSet}, path::PathBuf, sync::Arc};
 
 use bcs_protocol::stream::{AgentData, InteractionKind, InteractionPhase, StreamEvent, ToolData, ToolPhase};
 use serde_json::{json, Value};
 
 use crate::engine::cli::CliSession;
 use crate::engine::{
-    is_valid_engine_session_id, Engine, TurnError, TurnOutcome, TurnRequest,
+    is_valid_engine_session_id, Engine, SessionObserver, TurnError, TurnOutcome, TurnRequest,
 };
 use crate::sse;
 
@@ -85,7 +85,12 @@ impl crate::engine::EngineFactory for ClaudeCodeFactory {
 /// `TurnError::EngineExited`）；`Events` 是该行产出的 [`StreamEvent`]；
 /// `Ignore` 标记“JSON 合法但未识别”；`Malformed` 标记“非法 JSON”；
 /// `ControlRequest` 携带 `can_use_tool` 的 request_id/tool_name/input，由
-/// `run_turn` 接线为 HITL 交互（Task 12）。
+/// `run_turn` 接线为 HITL 交互（Task 12）；
+/// `BackgroundStarted`/`BackgroundFinished` 携带后台任务生命周期行
+/// （`system/task_started` / `system/task_notification`）的工具调用 id
+/// （及通知的 status），由 `run_turn` 维护 pending 后台任务集合——
+/// `result` 仅在该集合为空时才算 turn 终态：CLI 会在每个后台任务完成后
+/// 自动唤醒主 agent 并再发一个 `result`。
 #[derive(Debug)]
 pub(crate) enum CcMap {
     Events(Vec<StreamEvent>),
@@ -102,6 +107,12 @@ pub(crate) enum CcMap {
         tool_name: String,
         input: Value,
     },
+    /// A background task was launched (`system/task_started`), keyed by the
+    /// tool call that launched it.
+    BackgroundStarted { tool_use_id: String },
+    /// A background task status report (`system/task_notification`); only
+    /// terminal statuses release the wait in `run_turn`.
+    BackgroundFinished { tool_use_id: String, status: String },
 }
 
 /// Claude tool results carry only an ID. Keep their complete start names within
@@ -110,26 +121,65 @@ struct CcTurnMapper<'a> {
     run_id: &'a str,
     // None marks an ambiguous or missing name; don't guess a coordination tool.
     pending_tools: HashMap<String, Option<String>>,
+    /// Tool call ids that launched async background work this turn. A `result`
+    /// line only finalizes the turn once this is empty: the CLI stays alive,
+    /// auto-wakes the agent on each task_notification, and ends with another
+    /// `result` when the background work is actually done.
+    background: HashSet<String>,
 }
 
 impl<'a> CcTurnMapper<'a> {
     fn new(run_id: &'a str) -> Self {
-        Self { run_id, pending_tools: HashMap::new() }
+        Self { run_id, pending_tools: HashMap::new(), background: HashSet::new() }
+    }
+
+    /// Number of background tasks still pending completion.
+    fn background_pending(&self) -> usize {
+        self.background.len()
+    }
+
+    fn register_background(&mut self, tool_use_id: &str) {
+        if !tool_use_id.trim().is_empty() {
+            self.background.insert(tool_use_id.to_owned());
+        }
+    }
+
+    /// Release a background wait on a terminal `task_notification` status;
+    /// `running`/`pending` progress reports must keep the wait.
+    fn finish_background(&mut self, tool_use_id: &str, status: &str) {
+        if matches!(status, "completed" | "failed" | "stopped" | "killed") {
+            self.background.remove(tool_use_id);
+        }
     }
 
     fn map_line(&mut self, line: &str) -> CcMap {
         let mut mapped = map_cc_line(line, self.run_id);
+        // Track async background launches that surface as ordinary tool start/
+        // result events: a `run_in_background: true` call, or the async-launch
+        // receipt text instead of a completed tool result. task_started lines
+        // (handled by the driver via CcMap) are the authoritative signal; this
+        // is the belt-and-braces coverage for engines that omit them.
         if let CcMap::Events(events) = &mut mapped {
+            let mut extra_registrations: Vec<String> = Vec::new();
             for event in events {
                 let StreamEvent::Agent(agent) = event else { continue; };
                 let AgentData::Tool(tool) = &mut agent.data else { continue; };
-                let Some(id) = tool.tool_call_id.as_deref().filter(|id| !id.trim().is_empty()) else {
+                let Some(id) = tool.tool_call_id.as_deref().filter(|id| !id.trim().is_empty()).map(str::to_owned) else {
                     continue;
                 };
                 match tool.phase {
                     ToolPhase::Start => {
+                        let background_launch = tool
+                            .args
+                            .as_ref()
+                            .and_then(|args| args.get("run_in_background"))
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        if background_launch {
+                            extra_registrations.push(id.clone());
+                        }
                         let name = tool.name.clone().filter(|name| !name.trim().is_empty());
-                        self.pending_tools.entry(id.to_owned())
+                        self.pending_tools.entry(id)
                             .and_modify(|existing| {
                                 if existing != &name {
                                     *existing = None;
@@ -138,16 +188,41 @@ impl<'a> CcTurnMapper<'a> {
                             .or_insert(name);
                     }
                     ToolPhase::Result => {
+                        if async_launch_receipt(&tool.result) {
+                            extra_registrations.push(id.clone());
+                        }
                         // Consume once: an orphan/repeated result must not inherit
                         // a different call's name or derive it from result content.
-                        tool.name = self.pending_tools.remove(id).flatten();
+                        tool.name = self.pending_tools.remove(&id).flatten();
                     }
                     _ => {}
                 }
             }
+            for id in extra_registrations {
+                self.register_background(&id);
+            }
         }
         mapped
     }
+}
+
+/// Whether a tool result is the async-launch receipt of a background task
+/// (Agent/Task: "Async agent launched successfully"; background Bash:
+/// "Command running in background") rather than a completed tool call.
+fn async_launch_receipt(result: &Option<Value>) -> bool {
+    let Some(result) = result else { return false };
+    match result {
+        Value::String(text) => receipt_text(text),
+        // Block-array content carries receipts as single text blocks.
+        Value::Array(blocks) => blocks.iter().any(|b| {
+            b.get("text").and_then(Value::as_str).map(receipt_text).unwrap_or(false)
+        }),
+        _ => false,
+    }
+}
+
+fn receipt_text(text: &str) -> bool {
+    text.contains("Async agent launched successfully") || text.contains("Command running in background")
 }
 
 /// 把一行 claude `stream-json` NDJSON 映射为引擎中立的 [`CcMap`]。
@@ -175,13 +250,35 @@ pub(crate) fn map_cc_line(line: &str, run_id: &str) -> CcMap {
 
 fn map_system(v: &Value) -> CcMap {
     let subtype = v.get("subtype").and_then(|x| x.as_str()).unwrap_or("");
-    if subtype != "init" {
-        return CcMap::Ignore;
-    }
-    match v.get("session_id").and_then(|x| x.as_str()) {
-        Some(s) if !s.is_empty() => CcMap::SessionId(s.to_string()),
+    match subtype {
+        "init" => match v.get("session_id").and_then(|x| x.as_str()) {
+            Some(s) if !s.is_empty() => CcMap::SessionId(s.to_string()),
+            _ => CcMap::Ignore,
+        },
+        // Background-task lifecycle (recorded from a live capture): both carry
+        // the tool_use_id that launched the work; notifications also carry the
+        // status the driver gates the pending-wait on.
+        "task_started" => match non_empty(v.get("tool_use_id").and_then(|x| x.as_str())) {
+            Some(id) => CcMap::BackgroundStarted { tool_use_id: id.to_string() },
+            None => CcMap::Ignore,
+        },
+        "task_notification" => {
+            let tool_use_id = non_empty(v.get("tool_use_id").and_then(|x| x.as_str()));
+            let status = non_empty(v.get("status").and_then(|x| x.as_str()));
+            match (tool_use_id, status) {
+                (Some(id), Some(status)) => CcMap::BackgroundFinished {
+                    tool_use_id: id.to_string(),
+                    status: status.to_string(),
+                },
+                _ => CcMap::Ignore,
+            }
+        }
         _ => CcMap::Ignore,
     }
+}
+
+fn non_empty(s: Option<&str>) -> Option<&str> {
+    s.filter(|s| !s.trim().is_empty())
 }
 
 fn map_stream_event(v: &Value, run_id: &str) -> CcMap {
@@ -781,7 +878,13 @@ impl Engine for ClaudeCode {
                 }
                 line = cli.next_line() => {
                     let Some(line) = line.map_err(TurnError::Io)? else {
-                        return Err(TurnError::EngineExited("stdout EOF before result".into()));
+                        let pending = mapper.background_pending();
+                        let note = if pending > 0 {
+                            format!(" with {pending} pending background task(s)")
+                        } else {
+                            String::new()
+                        };
+                        return Err(TurnError::EngineExited(format!("stdout EOF before result{note}")));
                     };
                     match mapper.map_line(&line) {
                         CcMap::SessionId(s) => {
@@ -798,7 +901,23 @@ impl Engine for ClaudeCode {
                             }
                         },
                         CcMap::Final(text) => {
+                            if mapper.background_pending() > 0 {
+                                // Intermediate result: background work launched this
+                                // turn is still pending, so the CLI keeps the turn
+                                // alive — it auto-wakes the agent on each
+                                // task_notification and emits another result once
+                                // the work is done. Its text already reached BCS
+                                // through the streamed deltas; swallow this result
+                                // and keep reading. The run deadline bounds the wait.
+                                continue;
+                            }
                             return Ok(TurnOutcome { engine_session_id, final_text: Some(text) });
+                        }
+                        CcMap::BackgroundStarted { tool_use_id } => {
+                            mapper.register_background(&tool_use_id);
+                        }
+                        CcMap::BackgroundFinished { tool_use_id, status } => {
+                            mapper.finish_background(&tool_use_id, &status);
                         }
                         CcMap::Failed(note) => {
                             cli.kill().await;
@@ -914,6 +1033,7 @@ mod tests {
                 CcMap::Final(text) => final_text = Some(text),
                 CcMap::Failed(_) => {}
                 CcMap::ControlRequest { .. } => {}
+                CcMap::BackgroundStarted { .. } | CcMap::BackgroundFinished { .. } => {}
                 CcMap::Ignore | CcMap::Malformed => {}
             }
         }
@@ -1387,5 +1507,83 @@ mod tests {
             },
             other => panic!("expected Events, got {other:?}"),
         }
+    }
+
+    // -- 后台任务（async subagent / background bash）的 turn 续接 ------------
+
+    struct NullObserver;
+    #[async_trait::async_trait]
+    impl SessionObserver for NullObserver {
+        async fn established(&self, _: &str) -> Result<(), String> { Ok(()) }
+    }
+
+    /// Drive a full `run_turn` against a mock Claude Code script.
+    async fn run_mock_cc(script: &str) -> Result<TurnOutcome, TurnError> {
+        let engine = ClaudeCode::new(PathBuf::from("bash"), vec![script.to_string()]);
+        let req = TurnRequest::new("r-bg", "hi", ".", Arc::new(NullObserver));
+        let (tx, _rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
+        engine
+            .run_turn(req, tx, tokio_util::sync::CancellationToken::new())
+            .await
+    }
+
+    #[test]
+    fn task_lifecycle_system_lines_map_to_tracking_variants() {
+        // Shapes recorded from a live CLI capture: task lifecycle lines carry
+        // the tool_use_id that launched the work (and, for notifications, the
+        // status the driver gates the wait on).
+        let started = r#"{"type":"system","subtype":"task_started","task_id":"t1","tool_use_id":"toolu_1","task_type":"local_agent"}"#;
+        match map_cc_line(started, "r-1") {
+            CcMap::BackgroundStarted { tool_use_id } => assert_eq!(tool_use_id, "toolu_1"),
+            other => panic!("expected BackgroundStarted, got {other:?}"),
+        }
+        let finished = r#"{"type":"system","subtype":"task_notification","task_id":"t1","tool_use_id":"toolu_1","status":"completed","summary":"done"}"#;
+        match map_cc_line(finished, "r-1") {
+            CcMap::BackgroundFinished { tool_use_id, status } => {
+                assert_eq!(tool_use_id, "toolu_1");
+                assert_eq!(status, "completed");
+            }
+            other => panic!("expected BackgroundFinished, got {other:?}"),
+        }
+        // Non-terminal statuses ride along unchanged; the driver decides release.
+        let running = r#"{"type":"system","subtype":"task_notification","task_id":"t1","tool_use_id":"toolu_1","status":"running"}"#;
+        match map_cc_line(running, "r-1") {
+            CcMap::BackgroundFinished { status, .. } => assert_eq!(status, "running"),
+            other => panic!("expected BackgroundFinished, got {other:?}"),
+        }
+        // A task line without a usable tool_use_id stays inert.
+        assert!(matches!(
+            map_cc_line(r#"{"type":"system","subtype":"task_started","task_id":"t2"}"#, "r-1"),
+            CcMap::Ignore,
+        ));
+    }
+
+    #[tokio::test]
+    async fn turn_waits_for_pending_background_tasks_before_finalizing() {
+        // A `result` that lands while a background task is still pending is
+        // intermediate: the CLI stays alive, auto-wakes on the
+        // task_notification, and ends the turn again with the real final text.
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/mock_cc_background_continuation.sh"
+        );
+        let outcome = run_mock_cc(script).await.expect("turn must end on the second result");
+        assert_eq!(outcome.final_text.as_deref(), Some("final answer after background agent"));
+        assert_eq!(outcome.engine_session_id.as_deref(), Some("cc-sess-bg"));
+    }
+
+    #[tokio::test]
+    async fn engine_eof_with_pending_background_tasks_reads_as_explicit_error() {
+        // Stdout EOF while background work is pending must not read as a
+        // successful turn with the intermediate result as its final text.
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/mock_cc_bg_pending_eof.sh"
+        );
+        let error = run_mock_cc(script)
+            .await
+            .expect_err("EOF with a pending background task must not read as success");
+        let text = error.to_string();
+        assert!(text.contains("pending background task"), "unexpected error: {text}");
     }
 }
