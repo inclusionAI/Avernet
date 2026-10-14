@@ -27,7 +27,7 @@ use bcs_edge_permission_store::DbBotAuthorityStore;
 use bcs_service_api::port::repo::BotAuthorityRepoPort;
 use bcs_service_api::types::bot_authority::{
     AuthorityActor, AuthorityMutation, BotAccessRelation, ManagerEdit, ManagerEditAction,
-    ManagerSync,
+    ManagerSync, human_user_id_of_actor,
 };
 use bcs_test_support::contract::bot_authority_contract::{
     BotAuthorityContractFixture, HarnessAuditRow, run_bot_authority_contract,
@@ -93,6 +93,12 @@ impl BotAuthorityContractFixture for SqlAuthorityFixture {
     }
 
     async fn grant_edge(&self, env: &str, bot_id: &str, actor_id: &str, kind: BotAccessRelation) {
+        // Production-faithful: a granted edge implies its
+        // Human actor row (spec §3.1) — the registry the
+        // live read paths authorize against.
+        if let Some(user) = human_user_id_of_actor(actor_id) {
+            self.seed_human(env, &user).await;
+        }
         let kind = grant_kind_str(kind);
         let updated = execute(
             self.db.as_ref(),

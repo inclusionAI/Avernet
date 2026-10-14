@@ -13,7 +13,7 @@
 //! feed runtime permission decisions, and runtime grant edges
 //! never satisfy these reads (spec §3.2.5 / A16).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use async_trait::async_trait;
 use bcs_db_api::{DbRow, DbStatement, DbValue};
@@ -61,6 +61,14 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
         // strict read, not as a silent deny for uninvolved
         // principals (spec §3.2.2).
         self.resolve_owner(bot_id).await?;
+        // spec §3.1: only a LIVE Human actor (env-bound,
+        // not tombstoned) may authorize through an edge — a
+        // residual edge owned by a deleted or never-ensured
+        // Human grants nothing. Lifecycle facts are an
+        // ordinary deny, not an integrity error.
+        if !self.live_human_actors(&[user_id]).await?.contains(user_id) {
+            return Ok(None);
+        }
         let edges = self.management_edges_for(bot_id, user_id).await?;
         if edges.is_empty() {
             return Ok(None);
@@ -135,6 +143,13 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
             }
         }
 
+        // spec §3.1: only LIVE Human actors resolve any relation —
+        // one chunked registry read for the whole batch (never a
+        // per-user query), tombstoned or never-ensured operators
+        // deny per query without erroring the batch.
+        let user_refs: Vec<&str> = user_order.to_vec();
+        let live_humans = self.live_human_actors(&user_refs).await?;
+
         let mut results = Vec::with_capacity(queries.len());
         for query in queries {
             let Some(version) = states.get(query.bot_id.as_str()).copied() else {
@@ -145,8 +160,11 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
                 .get(&(query.user_id.as_str(), query.bot_id.clone()))
                 .cloned()
                 .unwrap_or_default();
-            if version == 0 || edges.is_empty() {
-                results.push(None); // uninitialized / no edge denies
+            if version == 0
+                || edges.is_empty()
+                || !live_humans.contains(query.user_id.as_str())
+            {
+                results.push(None); // uninitialized / no edge / no live Human denies
                 continue;
             }
             results.push(Some(if edges.contains(&BotAccessRelation::Owner) {
@@ -257,14 +275,30 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
 
     async fn transfers(&self, query: TransferListQuery) -> ServiceResult<TransferPage> {
         check_page_bounds(query.offset, query.limit)?;
-        // Effective-status lens: pending past its expiry projects
-        // to `expired` at DB time; filter/count/page share the
-        // expression (spec §6.4, no write).
-        let effective = format!(
-            "(CASE WHEN status = 'pending' AND expires_at <= {} \
-             THEN 'expired' ELSE status END)",
-            self.db_now_utc()
-        );
+        // ONE captured DB time per list call: the effective-status
+        // lens in count and page AND every projected item share it
+        // (spec §6.4 同一有效状态口径) — a pending row expiring
+        // mid-read can never count as pending yet page as expired.
+        let now_rows = self
+            .query(
+                "authority_transfers_now",
+                DbStatement::new(
+                    format!("SELECT {} AS now_txt", self.db_now_utc()).as_str(),
+                ),
+            )
+            .await?;
+        let now_txt = now_rows
+            .first()
+            .map(|row| crate::required_string(row, "now_txt"))
+            .transpose()?
+            .ok_or_else(|| {
+                ServiceError::InternalError(
+                    "bot authority: db time read returned no row".into(),
+                )
+            })?;
+        let effective = "(CASE WHEN status = 'pending' AND expires_at <= ? \
+             THEN 'expired' ELSE status END)"
+            .to_string();
         let status_filter = if query.statuses.is_empty() {
             "1 = 1".to_string()
         } else {
@@ -295,8 +329,11 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
             "WHERE env = ? AND {actor_eq} AND {status_filter}"
         );
         let mut params = vec![self.env_param(), DbValue::from(query.user_id.clone())];
-        for status in &query.statuses {
-            params.push(DbValue::from(status.as_str()));
+        if !query.statuses.is_empty() {
+            params.push(DbValue::from(now_txt.as_str()));
+            for status in &query.statuses {
+                params.push(DbValue::from(status.as_str()));
+            }
         }
         let total = self
             .query_u64(
@@ -325,10 +362,9 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
                 ),
             )
             .await?;
-        // One DB-time read for the whole page: count and every
-        // projected item share the same effective-status lens
-        // (spec §6.4).
-        let now = self.db_now_ms().await?;
+        // The projection shares the SAME captured DB time as the
+        // count/page lens above — never a third clock.
+        let now = parse_required_epoch(&now_txt, "now")?;
         let mut items = Vec::with_capacity(rows.len());
         for row in &rows {
             items.push(self.transfer_view_from_row(row, now).await?);
@@ -614,6 +650,46 @@ impl DbBotAuthorityStore {
             result_ownership_version: crate::optional_u64(row, "result_ownership_version")?,
             bot_name_snapshot: crate::optional_string(row, "bot_name_snapshot")?,
         })
+    }
+
+    /// The LIVE Human actor ids out of `actor_ids` (spec §3.1:
+    /// the Human registry is the `bcs_bots` actor registry —
+    /// `actor_kind='human'`, env-bound, not tombstoned; ids are
+    /// actor ids byte-exact). Chunked to the collection-query
+    /// bound so batch readers never degrade to per-user queries.
+    async fn live_human_actors(
+        &self,
+        actor_ids: &[&str],
+    ) -> ServiceResult<HashSet<String>> {
+        let mut live = HashSet::with_capacity(actor_ids.len());
+        for ids in actor_ids.chunks(CHUNK) {
+            let params: Vec<DbValue> = ids
+                .iter()
+                .map(|actor| DbValue::from(*actor))
+                .chain(std::iter::once(self.env_param()))
+                .collect();
+            let rows = self
+                .query(
+                    "authority_humans_alive",
+                    DbStatement::with_params(
+                        format!(
+                            "SELECT bot_uuid FROM bcs_bots \
+                             WHERE {} \
+                               AND actor_kind = 'human' \
+                               AND env = ? \
+                               AND COALESCE(is_deleted, 0) = 0",
+                            self.bot_id_in(ids.len())
+                        )
+                        .as_str(),
+                        params,
+                    ),
+                )
+                .await?;
+            for row in &rows {
+                live.insert(crate::required_string(row, "bot_uuid")?);
+            }
+        }
+        Ok(live)
     }
 
     /// DB-time epoch-ms for the read-time expiry projection

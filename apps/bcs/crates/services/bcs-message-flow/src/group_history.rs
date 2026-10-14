@@ -13,6 +13,9 @@ use bcs_service_api::{
     SessionHistoryCommand, SessionHistoryResult,
     backfill_bot_names,
 };
+use bcs_service_api::types::authorization_snapshot::{
+    GroupAuthorizationSnapshot, ParticipantAuthorizationSnapshot,
+};
 use serde_json::Value;
 
 const HISTORY_TIMEOUT_MS: u64 = 30_000;
@@ -86,31 +89,30 @@ impl BcsGroupMessageHistory {
         }
     }
 
-    /// Live group access for a Human caller: self-participation
-    /// counts directly; a controlled participant Bot counts
-    /// through the authority hook. The legacy `created_by` /
-    /// owner-suffix probes are gone.
+    /// Live group access for a Human caller over the STRICT
+    /// authorization snapshot's participants (never the display
+    /// cache): self-participation counts directly; a controlled
+    /// participant Bot counts through the authority hook. The
+    /// legacy `created_by` / owner-suffix probes are gone.
     async fn human_has_group_access(
         &self,
-        group: &Group,
+        participants: &[ParticipantAuthorizationSnapshot],
         actor_id: &str,
         staff_no: &str,
     ) -> Result<bool, GroupUseCaseError> {
-        if group
-            .participants
+        if participants
             .iter()
-            .any(|participant| participant.bot_uuid == actor_id)
+            .any(|participant| participant.actor_id == actor_id)
         {
             return Ok(true);
         }
 
-        for participant in group
-            .participants
+        for participant in participants
             .iter()
-            .filter(|participant| participant.is_bot())
+            .filter(|participant| participant.actor_kind == ActorKind::Bot)
         {
             if self
-                .human_controls_bot(staff_no, &participant.bot_uuid)
+                .human_controls_bot(staff_no, &participant.actor_id)
                 .await?
             {
                 return Ok(true);
@@ -137,9 +139,21 @@ impl GroupMessageHistoryService for BcsGroupMessageHistory {
             .await
             .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
 
+        // Access decisions read the STRICT authorization
+        // snapshot — master-source, cache-poison-proof (spec
+        // §8.3). The display `group` above feeds content
+        // assembly only; its cached participant set must
+        // never decide access, or a member already removed
+        // from the master data would keep reading history.
+        let snapshot = self
+            .group
+            .read_authorization_snapshot(&cmd.group_id)
+            .await?
+            .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
+
         let viewer_human_uuid = match &cmd.caller {
             CallerContext::Human(human) => {
-                self.verify_human_group_access(&group, human).await?;
+                self.verify_human_group_access(&snapshot, human).await?;
                 if let Some(view_bot_id) = cmd.view_bot_id.as_deref() {
                     self.verify_view_actor_ownership(view_bot_id, human)
                         .await?;
@@ -147,7 +161,11 @@ impl GroupMessageHistoryService for BcsGroupMessageHistory {
                 Some(human.actor_id.as_str())
             }
             CallerContext::Bot(bot_actor) => {
-                if !group.participants.iter().any(|p| p.bot_uuid == bot_actor.bot_uuid) {
+                if !snapshot
+                    .participants
+                    .iter()
+                    .any(|p| p.actor_id == bot_actor.bot_uuid)
+                {
                     return Err(GroupUseCaseError::Forbidden(format!(
                         "bot '{}' is not a participant in group '{}'",
                         bot_actor.bot_uuid, group.id
@@ -352,11 +370,11 @@ impl GroupMessageHistoryService for BcsGroupMessageHistory {
 impl BcsGroupMessageHistory {
     async fn verify_human_group_access(
         &self,
-        group: &Group,
+        snapshot: &GroupAuthorizationSnapshot,
         caller: &HumanActor,
     ) -> Result<(), GroupUseCaseError> {
         if self
-            .human_has_group_access(group, &caller.actor_id, &caller.staff_no)
+            .human_has_group_access(&snapshot.participants, &caller.actor_id, &caller.staff_no)
             .await?
         {
             return Ok(());
@@ -364,7 +382,7 @@ impl BcsGroupMessageHistory {
 
         Err(GroupUseCaseError::Forbidden(format!(
             "current Human '{}' is not a participant and owns no Bot in group '{}'",
-            caller.actor_id, group.id
+            caller.actor_id, snapshot.id
         )))
     }
 

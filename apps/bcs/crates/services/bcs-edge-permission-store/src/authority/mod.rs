@@ -32,6 +32,7 @@ pub mod lifecycle;
 mod managers;
 mod reads;
 mod transfers;
+mod transfers_support;
 
 use std::sync::Arc;
 

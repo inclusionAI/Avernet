@@ -16,6 +16,7 @@ use bcs_service_api::port::repo::{BotAuthorityRepoPort, BotRepoPort};
 use bcs_service_api::types::bot_authority::{
     AuthorityActor, AuthorityActorKind, AuthorityMutation, BotAccessRelation,
     ManagerEdit, ManagerEditAction, ManagerSync, TransferStatus,
+    human_user_id_of_actor,
 };
 use bcs_test_support::contract::bot_authority_contract::{
     BotAuthorityContractFixture, HarnessAuditRow,
@@ -103,6 +104,12 @@ impl BotAuthorityContractFixture for MemoryAuthorityFixture {
     }
 
     async fn grant_edge(&self, env: &str, bot_id: &str, actor_id: &str, kind: BotAccessRelation) {
+        // Production-faithful: a granted edge implies its
+        // Human actor row (spec §3.1), ensured BEFORE the
+        // authority write guard per the lock order.
+        if let Some(user) = human_user_id_of_actor(actor_id) {
+            self.seed_human(env, &user).await;
+        }
         self.state_write().await.edges.insert(
             (env.to_string(), bot_id.to_string(), actor_id.to_string(), grant_kind(kind)),
             (bcs_bot_store::memory_authority::MemoryAuthorityEdgeStatus::Approved, 0),

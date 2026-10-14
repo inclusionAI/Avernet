@@ -475,7 +475,11 @@ impl BotQueryService for Bot {
                 String,
                 String,
             > = std::collections::HashMap::new();
-            let mut bots = Vec::new();
+            // Hydrate the Bot-kind candidates with ONE strict
+            // batch read (legacy-mine ruling): a store failure
+            // is an Err to the caller — never a page quietly
+            // missing entries.
+            let mut hydrate_ids: Vec<String> = Vec::new();
             for candidate in &candidates {
                 if candidate.kind != ActorKind::Bot {
                     continue;
@@ -492,10 +496,13 @@ impl BotQueryService for Bot {
                     }
                     .to_string(),
                 );
-                if let Some(bot) = self.registry.get(&candidate.id).await {
-                    bots.push(bot);
-                }
+                hydrate_ids.push(candidate.id.clone());
             }
+            let mut bots = self
+                .registry
+                .try_get_many(&hydrate_ids)
+                .await
+                .map_err(BotUseCaseError::Service)?;
             // Human SELF entry (spec §8 first row):
             // the trusted onboarded Human actor row
             // lives in the SAME registry; the legacy

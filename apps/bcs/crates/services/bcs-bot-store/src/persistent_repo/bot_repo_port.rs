@@ -368,6 +368,56 @@ impl BotRepoPort for PersistentBotRepo {
         }))
     }
 
+    /// Batched strict registry read (legacy-mine ruling): the
+    /// warm-cache answers come from the process map; every cold
+    /// id resolves through ONE chunked SQL load whose failures
+    /// propagate — never a silently omitted candidate.
+    async fn try_get_many(&self, bot_ids: &[String]) -> ServiceResult<Vec<RegisteredBot>> {
+        let mut found: std::collections::HashMap<String, RegisteredBot> =
+            std::collections::HashMap::new();
+        let mut missing: Vec<String> = Vec::new();
+        {
+            let bots = self.bots.read().await;
+            for bot_id in bot_ids {
+                match bots.get(bot_id) {
+                    Some(bot) if !bot.is_expired() => {
+                        found.insert(bot_id.clone(), bot.to_registered_bot());
+                    }
+                    _ => missing.push(bot_id.clone()),
+                }
+            }
+        }
+
+        for (bot_uuid, (mut capabilities, env, _hidden, created_by, actor_kind, status)) in
+            self.try_load_many_from_db(&missing, false).await?
+        {
+            capabilities.agent_token = None;
+            found.insert(
+                bot_uuid.clone(),
+                RegisteredBot {
+                    bot_uuid,
+                    capabilities,
+                    env,
+                    created_by,
+                    actor_kind,
+                    status,
+                },
+            );
+        }
+
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for bot_id in bot_ids {
+            if !seen.insert(bot_id.as_str()) {
+                continue;
+            }
+            if let Some(bot) = found.get(bot_id).cloned() {
+                out.push(bot);
+            }
+        }
+        Ok(out)
+    }
+
     /// Like [`get`](Self::get) but also returns soft-deleted bots (rows with
     /// `is_deleted = 1`). Used for display-only enrichment where the bot's
     /// `name` snapshot is still needed after removal (e.g. group participant

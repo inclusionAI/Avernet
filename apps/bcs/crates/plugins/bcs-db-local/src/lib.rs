@@ -296,9 +296,9 @@ impl DbPlugin for LocalSqliteDbPlugin {
                     let stop = statement.stops_transaction_on_no_rows() && result.affected_rows == 0;
                     results.push(DbTransactionStepResult::Executed(result));
                     if stop {
-                        // Early success is a commit path, not a next
-                        // step; the between-step deadline does not
-                        // gate it.
+                        // Early success skips the REMAINING steps
+                        // only; the pre-commit deadline check below
+                        // still gates this commit path like any other.
                         break;
                     }
                 }
@@ -322,6 +322,16 @@ impl DbPlugin for LocalSqliteDbPlugin {
                 if deadline_started.elapsed() > deadline {
                     return Err(DbError::Timeout);
                 }
+            }
+        }
+        // Pre-commit deadline check (plugin contract: "between
+        // two steps and before commit"): every success path —
+        // including a stop-on-no-rows early exit — commits only
+        // inside the deadline, otherwise the whole transaction
+        // rolls back through the Err path.
+        if let Some(deadline) = deadline {
+            if deadline_started.elapsed() > deadline {
+                return Err(DbError::Timeout);
             }
         }
 

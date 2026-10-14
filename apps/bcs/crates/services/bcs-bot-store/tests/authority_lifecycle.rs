@@ -388,6 +388,20 @@ async fn mysql_ordinary_retire_steps_carry_the_for_update_lock_order() {
         ))
         .await
         .expect("seed bot");
+    // The ordinary retirement 事务内复验s the Human operator's
+    // current owner/manager edge (spec §7): seed one so the
+    // composite reaches its statement sequence.
+    inner
+        .execute(DbStatement::with_params(
+            "INSERT INTO edge_grants \
+             (env, from_id, to_id, grant_kind, grant_ref_id, rules, status, \
+              originator_policy_type, originator_policy_data) \
+             VALUES (?, 'human_11111111', 'bot_lock2', 'owner', 0, NULL, \
+                     'approved', 'same_as_from', NULL)",
+            vec![resolve_env().as_str().into()],
+        ))
+        .await
+        .expect("seed operator edge");
     let db = Arc::new(RecordingTransactionsDb {
         inner,
         recorded: Mutex::new(Vec::new()),
@@ -425,10 +439,123 @@ async fn mysql_ordinary_retire_steps_carry_the_for_update_lock_order() {
         "the membership guard must take the Bot row locks: {}",
         sqls[1]
     );
+    // Step 2: the operator-authority guard (spec §7
+    // 事务内复验) locks under the same row guards.
+    assert!(
+        sqls[2].contains("edge_grants") && sqls[2].contains("FOR UPDATE"),
+        "the operator-authority guard must lock with the row guards: {}",
+        sqls[2]
+    );
     assert!(
         sqls.iter()
             .any(|sql| sql.contains("bot_ownership_transfers")
                 && sql.contains("FOR UPDATE")),
         "the pending transfers must be locked after the Bot row"
+    );
+}
+
+/// The operator's owner/manager edge is re-verified INSIDE the
+/// retirement transaction (spec §7 事务内复验): a Human whose
+/// edge was revoked after any application-time check can
+/// neither tombstone the Bot nor write the retire audit, while
+/// a still-authorized owner retires, and the already-tombstoned
+/// retry keeps its idempotent no-op outcome.
+#[tokio::test]
+async fn sqlite_retirement_rechecks_the_operator_edge_in_transaction() {
+    let db =
+        Arc::new(bcs_db_local::LocalSqliteDbPlugin::new().expect("sqlite"));
+    for statement in SCHEMA {
+        db.execute(DbStatement::new(*statement))
+            .await
+            .expect("fixture schema");
+    }
+    let env = resolve_env();
+    db.execute(DbStatement::with_params(
+        "INSERT INTO bcs_bots (bot_uuid, env, name, is_deleted, ownership_version) \
+         VALUES ('bot_r1', ?, 'x', 0, 1)",
+        vec![env.as_str().into()],
+    ))
+    .await
+    .expect("seed bot");
+    for (from, kind) in [("human_own", "owner"), ("human_alice", "manager")] {
+        db.execute(DbStatement::with_params(
+            "INSERT INTO edge_grants \
+             (env, from_id, to_id, grant_kind, grant_ref_id, rules, status, \
+              originator_policy_type, originator_policy_data) \
+             VALUES (?, ?, 'bot_r1', ?, 0, NULL, 'approved', 'same_as_from', NULL)",
+            vec![env.as_str().into(), from.into(), kind.into()],
+        ))
+        .await
+        .expect("seed edge");
+    }
+    let bot_repo =
+        PersistentBotRepo::with_sql_flavor(db.clone(), bcs_db_api::DbSqlFlavor::Sqlite);
+
+    // The manager lost their edge AFTER any pre-check could
+    // have run: the transaction must refuse the tombstone.
+    db.execute(DbStatement::new(
+        "UPDATE edge_grants SET status = 'revoked' \
+         WHERE from_id = 'human_alice' AND to_id = 'bot_r1'",
+    ))
+    .await
+    .expect("revoke the manager edge");
+    let outcome = bot_repo
+        .retire_with_authority("bot_r1", retire_mutation_human("alice"))
+        .await;
+    assert!(
+        matches!(
+            outcome,
+            Err(bcs_service_api::ServiceError::Forbidden(_))
+        ),
+        "a revoked operator gets 403, got {outcome:?}"
+    );
+    let rows = db
+        .query(DbStatement::new(
+            "SELECT is_deleted FROM bcs_bots WHERE bot_uuid = 'bot_r1'",
+        ))
+        .await
+        .expect("read bot after forbidden retirement");
+    assert_eq!(
+        rows[0].get_i64("is_deleted").expect("flag"),
+        Some(0),
+        "a revoked operator must never commit the tombstone"
+    );
+
+    // The still-authorized owner retires: changed = true, and
+    // the retry is the idempotent no-op (never a second audit).
+    let changed = bot_repo
+        .retire_with_authority("bot_r1", retire_mutation_human("own"))
+        .await
+        .expect("owner retirement");
+    assert!(changed, "owner transition reports changed");
+    let rows = db
+        .query(DbStatement::new(
+            "SELECT is_deleted FROM bcs_bots WHERE bot_uuid = 'bot_r1'",
+        ))
+        .await
+        .expect("read bot after owner retirement");
+    assert_eq!(
+        rows[0].get_i64("is_deleted").expect("flag"),
+        Some(1)
+    );
+    let again = bot_repo
+        .retire_with_authority("bot_r1", retire_mutation_human("stranger"))
+        .await
+        .expect("idempotent retry");
+    assert!(
+        !again,
+        "already-tombstoned retry reports no change even for a stranger"
+    );
+    let audits = db
+        .query(DbStatement::new(
+            "SELECT COUNT(*) AS c FROM bot_authority_changes \
+             WHERE bot_id = 'bot_r1' AND action = 'retire'",
+        ))
+        .await
+        .expect("count retire audits");
+    assert_eq!(
+        audits[0].get_i64("c").expect("count"),
+        Some(1),
+        "exactly one retire audit row"
     );
 }

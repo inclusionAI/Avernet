@@ -146,6 +146,8 @@ pub async fn run_bot_authority_contract_with_scenarios(
     transfer_reads_are_strict(fixture, env).await;
     report("roles_for_batches_exactly");
     roles_for_batches_exactly(fixture, env).await;
+    report("deleted_human_loses_all_authority");
+    deleted_human_loses_all_authority(fixture, env).await;
     // Manager write paths (Task 2): the same legal results and
     // errors for every store that implements the port.
     report("manager_edit_grant_revoke_and_self_revoke");
@@ -624,6 +626,73 @@ async fn roles_for_batches_exactly(
     assert!(
         repo.roles_for(&queries).await.is_err(),
         "batch must propagate the corrupt-owner error"
+    );
+}
+
+/// spec §3.1: only a LIVE Human actor authorizes through an
+/// edge — tombstoning the manager's actor row turns every
+/// strict role read into a deny, single and batch, while a
+/// still-alive owner keeps its role (and the corrupt-owner
+/// integrity error still outranks the per-user deny).
+async fn deleted_human_loses_all_authority(
+    fixture: &(impl BotAuthorityContractFixture + ?Sized),
+    env: &str,
+) {
+    let repo = fixture.authority_repo();
+    let bot = "bot_gone_human";
+    fixture.seed_bot(env, bot, 1).await;
+    fixture
+        .grant_edge(env, bot, &human_actor_id("gone_owner"), BotAccessRelation::Owner)
+        .await;
+    fixture
+        .grant_edge(env, bot, &human_actor_id("gone_manager"), BotAccessRelation::Manager)
+        .await;
+    assert_eq!(
+        repo.role(&human_actor_id("gone_manager"), bot)
+            .await
+            .expect("live manager role"),
+        Some(BotAccessRelation::Manager),
+        "a live Human resolves their edge"
+    );
+
+    fixture.remove_human(env, "gone_manager").await;
+
+    assert_eq!(
+        repo.role(&human_actor_id("gone_manager"), bot)
+            .await
+            .expect("role after tombstone"),
+        None,
+        "a tombstoned Human keeps no authority"
+    );
+    let roles = repo
+        .roles_for(&[
+            BotRoleQuery {
+                user_id: human_actor_id("gone_manager"),
+                bot_id: bot.to_string(),
+            },
+            BotRoleQuery {
+                user_id: human_actor_id("gone_owner"),
+                bot_id: bot.to_string(),
+            },
+        ])
+        .await
+        .expect("batch roles after tombstone");
+    assert_eq!(
+        roles,
+        vec![None, Some(BotAccessRelation::Owner)],
+        "the affected user denies; the live owner keeps resolving"
+    );
+
+    // 复活 is a different actor lifecycle: ensuring the Human
+    // again restores the edge-based role (ids never silently
+    // authorize only BECAUSE an edge row exists).
+    fixture.seed_human(env, "gone_manager").await;
+    assert_eq!(
+        repo.role(&human_actor_id("gone_manager"), bot)
+            .await
+            .expect("role after re-ensure"),
+        Some(BotAccessRelation::Manager),
+        "a re-ensured Human resolves their edge again"
     );
 }
 

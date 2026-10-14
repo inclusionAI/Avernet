@@ -196,6 +196,13 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
                 "owner edge subject '{owner}' is not a Human actor id"
             )));
         }
+        // spec §3.1: only a LIVE Human actor authorizes
+        // through an edge — a deleted or never-ensured
+        // operator denies; lifecycle is an ordinary deny,
+        // not an integrity error.
+        if !memory_human_alive(self, user_id).await {
+            return Ok(None);
+        }
         Ok(match approved_edge_kind(&state, &env, bot_id, user_id) {
             Some(MemoryAuthorityEdgeKind::Owner) => Some(BotAccessRelation::Owner),
             Some(MemoryAuthorityEdgeKind::Manager) => Some(BotAccessRelation::Manager),
@@ -228,13 +235,10 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
                 continue;
             }
             let owner_count = approved_owner_count(&state, &env, &query.bot_id);
-            let edges = approved_edges(&state, &env, &query.bot_id, &query.user_id);
+            // Integrity first (spec §3.2.2): a corrupt owner
+            // state errors the batch for every principal.
             match owner_count {
-                1 => results.push(match edges.first().copied() {
-                    Some(MemoryAuthorityEdgeKind::Owner) => Some(BotAccessRelation::Owner),
-                    Some(MemoryAuthorityEdgeKind::Manager) => Some(BotAccessRelation::Manager),
-                    _ => None,
-                }),
+                1 => {}
                 0 => {
                     return Err(owner_integrity_error(&query.bot_id, 0));
                 }
@@ -242,6 +246,19 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
                     return Err(owner_integrity_error(&query.bot_id, count));
                 }
             }
+            // spec §3.1: only live Human actors resolve any
+            // relation; a tombstoned or never-ensured
+            // operator denies per query.
+            if !memory_human_alive(self, &query.user_id).await {
+                results.push(None);
+                continue;
+            }
+            let edges = approved_edges(&state, &env, &query.bot_id, &query.user_id);
+            results.push(match edges.first().copied() {
+                Some(MemoryAuthorityEdgeKind::Owner) => Some(BotAccessRelation::Owner),
+                Some(MemoryAuthorityEdgeKind::Manager) => Some(BotAccessRelation::Manager),
+                _ => None,
+            });
         }
         Ok(results)
     }
@@ -625,13 +642,16 @@ pub(super) async fn memory_bot_ctx_opt(
 /// Human ACTOR registry snapshot (user ids) read BEFORE
 /// the command's write-guard span: the guards need the
 /// shared bots map, and the documented lock order is
-/// authority → profiles → bots, so the bots read must
-/// COMPLETE before the authority guard is taken (it is
-/// never held across the span). TOCTOU: a tombstone racing
-/// the snapshot and the swap is accepted for the
-/// single-process dev/test backend (the next command
-/// re-reads and converges); SQL guards re-verify
-/// in-transaction.
+/// The LIVE Human registry projection (spec §3.1): the
+/// shared bots map is the Human ACTOR registry —
+/// `actor_kind == Human`, env-bound, not tombstoned.
+///
+/// Callers read it INSIDE their authority write-guard
+/// span (lock order authority → bots → deleted IDs; no
+/// writer ever takes authority while holding bots, so
+/// awaiting the reads here cannot deadlock). Read-side
+/// authorization (`role`/`roles_for`) uses the same
+/// registry per principal through `memory_human_alive`.
 pub(super) async fn memory_live_humans(
     repo: &MemoryBotRepo,
 ) -> HashSet<String> {
@@ -646,6 +666,27 @@ pub(super) async fn memory_live_humans(
         })
         .filter_map(|(id, _)| human_user_id_of_actor(id))
         .collect()
+}
+
+/// One principal's live-Human fact from the actor
+/// registry (same registry as [`memory_live_humans`]):
+/// the actor id is Human-shaped, a live actor row exists
+/// — Human kind, env-bound — and no tombstone covers it.
+async fn memory_human_alive(repo: &MemoryBotRepo, actor_id: &str) -> bool {
+    if human_user_id_of_actor(actor_id).is_none() {
+        return false;
+    }
+    let env = resolve_env();
+    if repo.deleted_bot_ids.read().await.contains(actor_id) {
+        return false;
+    }
+    match repo.bots.read().await.get(actor_id) {
+        Some(bot) => {
+            bot.actor_kind == bcs_service_api::ActorKind::Human
+                && bot.env.as_deref() == Some(env.as_str())
+        }
+        None => false,
+    }
 }
 
 /// Version + owner-completeness validation, run against
@@ -762,15 +803,16 @@ async fn manager_edit_impl(
             ))
         })?;
     let ctx = memory_require_live_bot(repo, &command.bot_id).await?;
-    // Human-registry snapshot read BEFORE the write-guard
-    // span (lock order authority → profiles → bots).
-    let live_humans = memory_live_humans(repo).await;
     // One write guard spans the whole command (staged
     // clone → validate → mutate → swap): a concurrent
-    // command cannot interleave and lose an update. No
-    // other lock or await is taken inside this span —
-    // everything below is pure in-memory computation.
+    // command cannot interleave and lose an update.
     let mut state_guard = repo.authority.write().await;
+    // The Human registry is read INSIDE the span (lock
+    // order authority → bots → deleted IDs, mirrors the
+    // SQL store's in-transaction guards): a tombstone
+    // racing the guard can never leak an edge to a
+    // deleted Human.
+    let live_humans = memory_live_humans(repo).await;
     let mut staged = state_guard.clone();
     memory_require_initialized(&staged, &ctx)?;
     let current_owner = memory_state_owner(&staged, &ctx);
@@ -1022,13 +1064,15 @@ async fn manager_sync_impl(
             total: 0,
         });
     };
-    // Human-registry snapshot read BEFORE the write-guard
-    // span (lock order authority → profiles → bots).
-    let live_humans = memory_live_humans(repo).await;
     // One write guard spans the whole command (staged
-    // clone → validate → mutate → swap); no other lock
-    // or await inside the span.
+    // clone → validate → mutate → swap).
     let mut state_guard = repo.authority.write().await;
+    // Live-Human partition facts read INSIDE the span
+    // (lock order authority → bots → deleted IDs, the
+    // memory twin of the SQL in-transaction guards): a
+    // tombstone racing the guard can never leak an edge
+    // to a deleted Human.
+    let live_humans = memory_live_humans(repo).await;
     let mut staged = state_guard.clone();
     memory_require_initialized(&staged, &ctx)?;
     let current_owner = memory_state_owner(&staged, &ctx);
@@ -1384,14 +1428,14 @@ async fn transfer_change_impl(
     // Live-bot gate before the span (same shape as
     // the manager commands).
     let ctx = memory_require_live_bot(repo, &key.bot_id).await?;
-    // Human-registry snapshot read BEFORE the write-guard
-    // span (lock order authority → profiles → bots).
+    // One write guard spans the whole command (staged
+    // clone → validate → mutate → swap).
+    let mut state_guard = repo.authority.write().await;
+    // The target-survival registry read lives INSIDE the
+    // span (lock order authority → bots → deleted IDs),
+    // matching the SQL in-transaction survival guards.
     let live_humans = memory_live_humans(repo).await;
     let now = now_ms();
-    // One write guard spans the whole command (staged
-    // clone → validate → mutate → swap); no other lock
-    // or await inside the span.
-    let mut state_guard = repo.authority.write().await;
     let mut staged = state_guard.clone();
     let version = memory_require_initialized(&staged, &ctx)?;
     let owner = memory_state_owner(&staged, &ctx);

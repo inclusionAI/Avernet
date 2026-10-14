@@ -250,6 +250,51 @@ async fn group_history_access_and_view_follow_the_current_edges() {
 }
 
 #[tokio::test]
+async fn group_history_authorizes_against_the_snapshot_not_the_display_cache() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer()
+        .await;
+    // alice is NOT a group participant herself; her only way in
+    // is controlling the participant Bot through a live edge.
+    let authority = staff_authority(&[("bot-observer", "alice")]);
+
+    // Positive control: a Human controlling a participant Bot
+    // reads history through the live edge.
+    let allowed = history(&support, authority.clone())
+        .get_history(GroupHistoryCommand {
+            caller: human("alice"),
+            group_id: "group-1".to_string(),
+            view_bot_id: None,
+            limit: 10,
+            before: None,
+        })
+        .await;
+    assert!(
+        allowed.is_ok(),
+        "member Bot control reads history: {allowed:?}"
+    );
+
+    // The Bot is removed from the MASTER data (a second store
+    // instance committed it); the display cache still lists it.
+    // The access decision must follow the strict snapshot
+    // (spec §8.3) — a master-removed Bot admits nobody.
+    support
+        .group
+        .remove_participant_from_master("group-1", "bot-observer")
+        .await;
+    let denied = history(&support, authority)
+        .get_history(GroupHistoryCommand {
+            caller: human("alice"),
+            group_id: "group-1".to_string(),
+            view_bot_id: None,
+            limit: 10,
+            before: None,
+        })
+        .await
+        .expect_err("a master-removed participant Bot must not keep admitting");
+    assert!(matches!(denied, GroupUseCaseError::Forbidden(_)));
+}
+
+#[tokio::test]
 async fn history_handover_revocation_and_failing_read() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer()
         .await;

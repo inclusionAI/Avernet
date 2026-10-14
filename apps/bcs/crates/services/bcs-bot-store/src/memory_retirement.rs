@@ -91,19 +91,27 @@ impl MemoryBotRepo {
         ownership::validate_mutation(mutation)?;
         let env = resolve_env();
         let now = super::unix_millis();
-        let pre_tombstoned =
-            self.deleted_bot_ids.read().await.contains(bot_id);
-        let live = self.bots.read().await.contains_key(bot_id);
-        if !live && !pre_tombstoned {
+        // Pre-read: an early NotFound fast-path (parameter
+        // preparation only, spec §7). Every fact that
+        // races concurrency — Bot liveness and the Human
+        // operator's authority — is re-verified INSIDE
+        // the write span below.
+        if !self.bots.read().await.contains_key(bot_id)
+            && !self.deleted_bot_ids.read().await.contains(bot_id)
+        {
             return Err(ServiceError::BotNotFound(bot_id.into()));
         }
-        let changed = live;
 
         // Lock order (this module's documented order):
-        // authority → bots → tokens → deleted IDs. No
-        // await inside the staged span below.
+        // authority → bots → tokens → deleted IDs.
         let mut state_guard = self.authority.write().await;
         let mut staged = state_guard.clone();
+
+        // 事务内复验 Bot liveness: two racing retirements
+        // serialize on THIS guard; the loser re-reads the
+        // tombstoned state and reports changed = false
+        // without a second retire audit.
+        let changed = self.bots.read().await.contains_key(bot_id);
 
         // Two distinct retirement commands: an
         // ordinary retire NEVER drains a
@@ -119,6 +127,51 @@ impl MemoryBotRepo {
                  through the Provider retirement command"
                     .to_string(),
             ));
+        }
+
+        // 事务内复验 the operator's authority — only for a
+        // REAL transition: the already-tombstoned retry keeps
+        // its idempotent no-op outcome. An ordinary
+        // retirement by a Human whose owner/manager edge is
+        // already gone must not tombstone anything (a stale
+        // application-time check proves nothing). The
+        // Provider retirement is verified on its own branch.
+        if changed && command == RetireCommand::Ordinary {
+            let operator_user = match &mutation.actor {
+                bcs_service_api::types::bot_authority::AuthorityActor::Human {
+                    user_id,
+                } => user_id,
+                _ => {
+                    return Err(ServiceError::Forbidden(
+                        "ordinary retirement requires a Human operator"
+                            .to_string(),
+                    ));
+                }
+            };
+            let operator_actor =
+                bcs_service_api::types::bot_authority::human_actor_id(
+                    operator_user,
+                );
+            let operator_current = staged.edges.iter().any(
+                |(key, (status, ref_id))| {
+                    key.0 == env
+                        && key.1 == bot_id
+                        && key.2 == operator_actor
+                        && matches!(
+                            key.3,
+                            MemoryAuthorityEdgeKind::Owner
+                                | MemoryAuthorityEdgeKind::Manager
+                        )
+                        && *status == MemoryAuthorityEdgeStatus::Approved
+                        && *ref_id == 0
+                },
+            );
+            if !operator_current {
+                return Err(ServiceError::Forbidden(format!(
+                    "operator '{operator_user}' holds no current \
+                     owner/manager edge on '{bot_id}'"
+                )));
+            }
         }
 
         // Owner/manager revocation (spec §3.2.7). Idempotent.

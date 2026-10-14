@@ -28,6 +28,9 @@ use bcs_service_api::Skill;
 #[cfg(test)]
 use super::BOT_EXPIRY;
 
+/// SQL parameter chunk bound for batched registry loads.
+const REGISTRY_LOAD_CHUNK: usize = 100;
+
 use super::{BotInfo, RegisteredBotInner, bot_info_json_set};
 
 mod agent_registration;
@@ -293,77 +296,96 @@ impl PersistentBotRepo {
                 ))
             })?;
 
-        if let Some(row) = rows.first() {
-            let name: Option<String> = db_get_column_opt(row, "name").ok().flatten();
-            let env: Option<String> = db_get_column_opt(row, "env").ok().flatten();
-            let visibility: String = db_get_column_opt(row, "visibility")
-                .ok()
-                .flatten()
-                .filter(|v: &String| !v.is_empty())
-                .unwrap_or_else(|| "private".to_string());
-            // H.2: derive hidden from bcs_bots.status, not bot_info.hidden.
-            // Status column may be absent on un-migrated rows → default to "online".
-            let status_str: String = db_get_column_opt(row, "status")
-                .ok()
-                .flatten()
-                .filter(|v: &String| !v.is_empty())
-                .unwrap_or_else(|| "online".to_string());
-            // Code-Review fix #1: read actor_kind from the database; default to bot for
-            // un-migrated rows (legacy data has no actor_kind column populated).
-            let actor_kind_str: String = db_get_column_opt(row, "actor_kind")
-                .ok()
-                .flatten()
-                .filter(|v: &String| !v.is_empty())
-                .unwrap_or_else(|| "bot".to_string());
-            let created_by: Option<String> = db_get_column_opt(row, "created_by").ok().flatten();
-            let bot_info: BotInfo = db_get_column_opt::<String>(row, "bot_info")
-                .ok()
-                .flatten()
-                .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or_default();
+        match rows.first() {
+            Some(row) => Ok(Some(Self::decode_registry_row(row, bot_uuid)?)),
+            None => Ok(None),
+        }
+    }
 
-            let hidden = status_str == "hidden";
-            let actor_status = match status_str.as_str() {
-                "hidden" => bcs_service_api::ActorStatus::Hidden,
-                _ => bcs_service_api::ActorStatus::Online,
-            };
-            let actor_kind = match actor_kind_str.as_str() {
-                "human" => bcs_service_api::ActorKind::Human,
-                _ => bcs_service_api::ActorKind::Bot,
-            };
+    /// Shared row decode for the registry loads (single-row and
+    /// batched): one column list and one set of derivations — a
+    /// batched read must never drift from the single-row one.
+    fn decode_registry_row(
+        row: &DbRow,
+        bot_uuid: &str,
+    ) -> ServiceResult<(
+        BotCapabilities,
+        Option<String>,
+        bool,
+        Option<String>,
+        bcs_service_api::ActorKind,
+        bcs_service_api::ActorStatus,
+    )> {
+        let name: Option<String> = db_get_column_opt(row, "name").ok().flatten();
+        let env: Option<String> = db_get_column_opt(row, "env").ok().flatten();
+        let visibility: String = db_get_column_opt(row, "visibility")
+            .ok()
+            .flatten()
+            .filter(|v: &String| !v.is_empty())
+            .unwrap_or_else(|| "private".to_string());
+        // H.2: derive hidden from bcs_bots.status, not bot_info.hidden.
+        // Status column may be absent on un-migrated rows → default to "online".
+        let status_str: String = db_get_column_opt(row, "status")
+            .ok()
+            .flatten()
+            .filter(|v: &String| !v.is_empty())
+            .unwrap_or_else(|| "online".to_string());
+        // Code-Review fix #1: read actor_kind from the database; default to bot for
+        // un-migrated rows (legacy data has no actor_kind column populated).
+        let actor_kind_str: String = db_get_column_opt(row, "actor_kind")
+            .ok()
+            .flatten()
+            .filter(|v: &String| !v.is_empty())
+            .unwrap_or_else(|| "bot".to_string());
+        let created_by: Option<String> = db_get_column_opt(row, "created_by").ok().flatten();
+        let bot_info: BotInfo = db_get_column_opt::<String>(row, "bot_info")
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
 
-            // agent_code transition: prefer the dedicated `agent_code` column;
-            // fall back to the legacy `bot_info.agent_code` JSON for rows written
-            // before the column existed (historical data not yet backfilled).
-            let col_agent_code: Option<String> = db_get_column_opt(row, "agent_code").ok().flatten();
-            let agent_code = match (col_agent_code, bot_info.agent_code) {
-                (Some(code), _) => {
-                    info!(
-                        bot_uuid = %bot_uuid,
-                        source = "column",
-                        "load_from_mysql: agent_code resolved from dedicated column"
-                    );
-                    Some(code)
-                }
-                (None, Some(code)) => {
-                    warn!(
-                        request_id = %bcs_observability::CurrentRequestId,
-                        bot_uuid = %bot_uuid,
-                        source = "bot_info_fallback",
-                        "load_from_mysql: agent_code missing in column, fell back to bot_info JSON"
-                    );
-                    Some(code)
-                }
-                (None, None) => {
-                    info!(
-                        bot_uuid = %bot_uuid,
-                        "load_from_mysql: agent_code absent in both column and bot_info"
-                    );
-                    None
-                }
-            };
+        let hidden = status_str == "hidden";
+        let actor_status = match status_str.as_str() {
+            "hidden" => bcs_service_api::ActorStatus::Hidden,
+            _ => bcs_service_api::ActorStatus::Online,
+        };
+        let actor_kind = match actor_kind_str.as_str() {
+            "human" => bcs_service_api::ActorKind::Human,
+            _ => bcs_service_api::ActorKind::Bot,
+        };
 
-            return Ok(Some((
+        // agent_code transition: prefer the dedicated `agent_code` column;
+        // fall back to the legacy `bot_info.agent_code` JSON for rows written
+        // before the column existed (historical data not yet backfilled).
+        let col_agent_code: Option<String> = db_get_column_opt(row, "agent_code").ok().flatten();
+        let agent_code = match (col_agent_code, bot_info.agent_code) {
+            (Some(code), _) => {
+                info!(
+                    bot_uuid = %bot_uuid,
+                    source = "column",
+                    "load_from_mysql: agent_code resolved from dedicated column"
+                );
+                Some(code)
+            }
+            (None, Some(code)) => {
+                warn!(
+                    request_id = %bcs_observability::CurrentRequestId,
+                    bot_uuid = %bot_uuid,
+                    source = "bot_info_fallback",
+                    "load_from_mysql: agent_code missing in column, fell back to bot_info JSON"
+                );
+                Some(code)
+            }
+            (None, None) => {
+                info!(
+                    bot_uuid = %bot_uuid,
+                    "load_from_mysql: agent_code absent in both column and bot_info"
+                );
+                None
+            }
+        };
+
+            return Ok((
                 BotCapabilities {
                     name,
                     summary: bot_info.summary,
@@ -381,10 +403,69 @@ impl PersistentBotRepo {
                 created_by,
                 actor_kind,
                 actor_status,
-            )));
-        }
+            ));
+    }
 
-        Ok(None)
+    /// Batched strict registry load (legacy-mine ruling: ONE
+    /// chunked statement set instead of a per-id round trip).
+    /// The row decode is shared with the single-row path so a
+    /// batched read can never drift from it.
+    async fn try_load_many_from_db(
+        &self,
+        bot_uuids: &[String],
+        include_deleted: bool,
+    ) -> ServiceResult<
+        Vec<(
+            String,
+            (
+                BotCapabilities,
+                Option<String>,
+                bool,
+                Option<String>,
+                bcs_service_api::ActorKind,
+                bcs_service_api::ActorStatus,
+            ),
+        )>,
+    > {
+        let env = resolve_env();
+        let mut loaded = Vec::new();
+        for chunk in bot_uuids.chunks(REGISTRY_LOAD_CHUNK) {
+            let placeholders = std::iter::repeat("?")
+                .take(chunk.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let filter = if include_deleted {
+                ""
+            } else {
+                " AND COALESCE(is_deleted, 0) = 0"
+            };
+            let sql = format!(
+                "SELECT bot_uuid, name, bot_info, visibility, status, actor_kind, \
+                 env, created_by, agent_code FROM bcs_bots \
+                 WHERE bot_uuid IN ({placeholders}) AND env = ?{filter}"
+            );
+            let params: Vec<Value> = chunk
+                .iter()
+                .map(|id| Value::from(id.as_str()))
+                .chain(std::iter::once(Value::from(env.as_str())))
+                .collect();
+            let rows = self.db_query(&sql, params).await.map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "batch load Bots from registry database: {error}"
+                ))
+            })?;
+            for row in &rows {
+                let bot_uuid: String = db_get_column(row, "bot_uuid")
+                    .map_err(|error| {
+                        ServiceError::InternalError(format!(
+                            "batch load Bots bot_uuid column: {error}"
+                        ))
+                    })?;
+                let decoded = Self::decode_registry_row(row, &bot_uuid)?;
+                loaded.push((bot_uuid, decoded));
+            }
+        }
+        Ok(loaded)
     }
 
     async fn load_from_db(

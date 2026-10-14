@@ -893,6 +893,15 @@ pub async fn mutation_must_match_the_verified_initiator(fixture: &Fixture) {
 
 pub async fn governance_initialize_backfills_once_and_is_idempotent(fixture: &Fixture) {
     assert!(seed_runtime_bot(&fixture, "bot_gov1").await);
+    // Production shape: the governance backfill only applies
+    // while the recorded Human actor is live (bcs-admin's
+    // classify gate); the strict `role` read authorizes only
+    // live Humans (spec §3.1).
+    fixture
+        .bot_repo
+        .ensure_human_actor("22222222", "22222222")
+        .await
+        .expect("ensure backfill owner actor");
     let view = fixture
         .bot_repo
         .initialize_ownership("bot_gov1", "22222222", mutation("22222222").mutation)

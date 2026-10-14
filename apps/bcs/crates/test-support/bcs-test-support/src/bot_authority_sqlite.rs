@@ -15,7 +15,9 @@ use bcs_db_api::{DbExecuteResult, DbPlugin, DbStatement, DbValue};
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_edge_permission_store::DbBotAuthorityStore;
 use bcs_service_api::port::repo::BotAuthorityRepoPort;
-use bcs_service_api::types::bot_authority::BotAccessRelation;
+use bcs_service_api::types::bot_authority::{
+    BotAccessRelation, human_user_id_of_actor,
+};
 use crate::contract::bot_authority_contract::{
     BotAuthorityContractFixture, HarnessAuditRow,
 };
@@ -77,6 +79,11 @@ impl BotAuthorityContractFixture for SqlAuthorityFixture {
     }
 
     async fn grant_edge(&self, env: &str, bot_id: &str, actor_id: &str, kind: BotAccessRelation) {
+        // Production-faithful: a granted edge implies its
+        // Human actor row (spec §3.1).
+        if let Some(user) = human_user_id_of_actor(actor_id) {
+            self.seed_human(env, &user).await;
+        }
         let kind = grant_kind_str(kind);
         let updated = execute(
             self.db.as_ref(),

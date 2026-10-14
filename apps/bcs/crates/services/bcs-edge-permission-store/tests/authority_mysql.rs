@@ -29,7 +29,9 @@ use async_trait::async_trait;
 use bcs_db_api::{DbExecuteResult, DbPlugin, DbRow, DbStatement, DbValue};
 use bcs_edge_permission_store::DbBotAuthorityStore;
 use bcs_service_api::port::repo::BotAuthorityRepoPort;
-use bcs_service_api::types::bot_authority::BotAccessRelation;
+use bcs_service_api::types::bot_authority::{
+    BotAccessRelation, human_user_id_of_actor,
+};
 use bcs_test_support::contract::bot_authority_contract::{
     BotAuthorityContractFixture, HarnessAuditRow,
     run_bot_authority_contract_with_scenarios,
@@ -88,6 +90,11 @@ impl BotAuthorityContractFixture for MysqlAuthorityFixture {
     }
 
     async fn grant_edge(&self, env: &str, bot_id: &str, actor_id: &str, kind: BotAccessRelation) {
+        // Production-faithful: a granted edge implies its
+        // Human actor row (spec §3.1).
+        if let Some(user) = human_user_id_of_actor(actor_id) {
+            self.seed_human(env, &user).await;
+        }
         let kind = grant_kind_str(kind);
         let keys = vec![
             DbValue::from(actor_id),
@@ -455,7 +462,7 @@ async fn authority_mysql_conformance() {
     // Scenario inventory is reported for the CI gate: the
     // aggregate is not an empty shell — it ran the full
     // harness scenario list and must keep it complete.
-    assert_eq!(authority_scenarios, 29, "authority harness scenarios");
+    assert_eq!(authority_scenarios, 30, "authority harness scenarios");
     assert_eq!(
         scenarios.len() - authority_scenarios,
         23,

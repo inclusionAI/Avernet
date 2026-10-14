@@ -348,6 +348,10 @@ impl BotRegistryCoreService for BotCore {
         self.repo.try_get(bot_id).await
     }
 
+    async fn try_get_many(&self, bot_ids: &[String]) -> ServiceResult<Vec<RegisteredBot>> {
+        self.repo.try_get_many(bot_ids).await
+    }
+
     async fn get_including_deleted(&self, bot_id: &str) -> Option<RegisteredBot> {
         self.repo.get_including_deleted(bot_id).await
     }

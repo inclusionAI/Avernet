@@ -165,6 +165,25 @@ pub trait BotRepoPort: Send + Sync {
         Ok(self.get(bot_id).await)
     }
 
+    /// Strict batch read (input order, deduplicated by bot_uuid,
+    /// absent ids skipped): every persistence failure is an `Err`
+    /// — never a silently omitted candidate. SQL stores SHOULD
+    /// override with a real batched query instead of the strict
+    /// per-id fallback below.
+    async fn try_get_many(&self, bot_ids: &[String]) -> ServiceResult<Vec<RegisteredBot>> {
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for bot_id in bot_ids {
+            if !seen.insert(bot_id.as_str()) {
+                continue;
+            }
+            if let Some(bot) = self.try_get(bot_id).await? {
+                out.push(bot);
+            }
+        }
+        Ok(out)
+    }
+
     /// Like [`get`](Self::get) but also returns soft-deleted bots.
     ///
     /// Default implementation delegates to `get` (which excludes deleted bots),
