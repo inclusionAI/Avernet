@@ -11,6 +11,7 @@ from secbaas.community.api.device_manage import (
     OutBoundOperationRule,
     OutBoundOperationRuleUpdatedMode,
     ResourceSpecification,
+    Storage,
 )
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.sandbox.arca import ArcaSandbox, ArcaSandboxInfo
@@ -121,6 +122,8 @@ class LocalK8sArcaSandbox(ArcaSandbox):
         ttl_in_minutes: int | None = None,
         resources: ResourceSpecification | None = None,
         sidecar_container_name: str | None = None,
+        pvc_name: str | None = None,
+        storage: Storage | None = None,
     ) -> None:
         self._sandbox_id = sandbox_id
         self._pod_name = pod_name
@@ -132,6 +135,8 @@ class LocalK8sArcaSandbox(ArcaSandbox):
         self._ttl_in_minutes = ttl_in_minutes
         self._resources = resources
         self._sidecar_container_name = sidecar_container_name
+        self._pvc_name = pvc_name
+        self._storage = storage
 
     @property
     def sandbox_id(self) -> str:
@@ -181,6 +186,7 @@ class LocalK8sArcaSandbox(ArcaSandbox):
             ttl_in_minutes=self._ttl_in_minutes,
             metadata=metadata,
             resources=resources,
+            storage=self._storage,
             is_ready=self.is_ready,
         )
 
