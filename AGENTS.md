@@ -235,7 +235,7 @@ runtime line coverage of at least 41%, method coverage of at least 36%,
 100% HTTP endpoint and bcs-cli leaf-command coverage, and E2E changed-line
 coverage above 60% for changes with at least 20 instrumentable changed lines in
 the BCS E2E scope (no exemption; smaller or out-of-scope changes are reported
-only; memory store backends listed in `apps/bcs/scripts/e2e_coverage.sh` as
+only; in-memory repo implementations (`Memory*Repo`/`Memory*Store`) listed in `apps/bcs/scripts/e2e_coverage.sh` as
 unreachable in the SQLite E2E stack are not counted, and a listed file that
 shows any E2E hit is counted again). Its canonical artifacts
 are copied to `singlebox/.dependencies/coverage/singlebox/reports/bcs/` and are

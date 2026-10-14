@@ -141,7 +141,7 @@ class MeasureTest(unittest.TestCase):
         self.assertEqual(result.test_code, ["crates/a/src/setup_tests.rs", "crates/a/tests/it.rs"])
         self.assertEqual(result.unmapped, ["crates/z/src/lib.rs"])
 
-    def test_skip_regex_excludes_memory_backends_listed_in_report(self):
+    def test_skip_regex_excludes_memory_repos_listed_in_report(self):
         skip = r"/src/(.*/)?memory(_[A-Za-z0-9_]+)?(\.rs$|/)"
         changed = {
             "crates/services/s/src/sqlite.rs": {1, 2},
@@ -149,7 +149,7 @@ class MeasureTest(unittest.TestCase):
             "crates/services/s/src/memory_store.rs": {1},
             "crates/services/s/src/memory_operations/op_1.rs": {1},
             "crates/services/s/src/memory_tests.rs": {1},             # test module, not skipped
-            "crates/services/s/src/memoryless.rs": {1},               # not a memory backend
+            "crates/services/s/src/memoryless.rs": {1},               # not an in-memory repo
         }
         coverage = {
             "crates/services/s/src/sqlite.rs": {1: 1, 2: 1},
@@ -177,9 +177,9 @@ class MeasureTest(unittest.TestCase):
         self.assertEqual((result.covered, result.instrumentable), (1, 2))
 
     def test_e2e_memory_skip_list_is_valid(self):
-        """The list in e2e_coverage.sh must exist and must not hide reachable backends."""
+        """The list in e2e_coverage.sh must exist and must not hide reachable in-memory repos."""
         script = (SCRIPTS / "e2e_coverage.sh").read_text()
-        body = script.split("e2e_unreachable_memory_backends=(", 1)[1].split(")", 1)[0]
+        body = script.split("e2e_unreachable_memory_repos=(", 1)[1].split(")", 1)[0]
         listed = [line.strip() for line in body.splitlines() if line.strip()]
         self.assertEqual(len(listed), 17)
         services = SCRIPTS.parent / "crates" / "services"

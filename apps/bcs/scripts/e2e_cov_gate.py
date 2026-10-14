@@ -81,7 +81,7 @@ def parse_args():
                    help="regex the report excluded from its scope (labels excluded files)")
     p.add_argument("--changed-skip-regex",
                    help="changed files matching this regex are not counted even when the "
-                        "report lists them (e.g. memory backends the e2e stack never selects)")
+                        "report lists them (e.g. in-memory repo implementations the e2e stack never selects)")
     p.add_argument("--changed-json",
                    help="write per-file changed-line coverage details to this path")
     p.add_argument("--changed-line-min", type=float, default=0.0,
@@ -203,10 +203,10 @@ def report_changed_lines(args):
         gh("    %d changed file(s) outside the e2e report scope (not counted)"
            % len(result.excluded))
     if result.skipped:
-        gh("    %d changed memory-backend file(s) unreachable in the SQLite e2e stack "
+        gh("    %d changed in-memory repo file(s) unreachable in the SQLite e2e stack "
            "(not counted): %s" % (len(result.skipped), ", ".join(result.skipped[:10])))
     if result.skip_overridden:
-        gh("::warning::%d listed memory-backend file(s) were executed by e2e and are counted; "
+        gh("::warning::%d listed in-memory repo file(s) were executed by e2e and are counted; "
            "update the list in e2e_coverage.sh: %s"
            % (len(result.skip_overridden), ", ".join(result.skip_overridden[:10])))
     if result.test_code:

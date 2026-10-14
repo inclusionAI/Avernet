@@ -12,8 +12,8 @@ than silently dropped, so a reader can tell "not applicable" from "not run":
 
   excluded  - matches the report's --ignore-filename-regex (outside the scope
               the report measures, e.g. tool crates the E2E stack never runs)
-  skipped   - matches an extra changed-line-only exclusion (memory store
-              backends verified to be unreachable in the SQLite E2E stack);
+  skipped   - matches an extra changed-line-only exclusion (in-memory repo
+              implementations verified to be unreachable in the SQLite E2E stack);
               applied even when the report lists the file, but only while the
               report shows no hits in it: any hit proves the file is reachable,
               so it is counted again and listed under skip_overridden

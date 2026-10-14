@@ -337,7 +337,8 @@ if [[ "$no_stop" -eq 0 ]]; then
   # With a base ref, also measure changed-line coverage from cobertura.xml.
   # It gates only when changed_line_min > 0 (e2e_cov_gate.py fails closed
   # then, including when no base ref was given).
-  # Memory store backends verified to be unreachable in the SQLite E2E stack
+  # In-memory repo implementations (Memory*Repo / Memory*Store in the store
+  # crates) verified to be unreachable in the SQLite E2E stack
   # (selected only without a database, or only by tests). They are excluded
   # from the changed-line metric only; the overall denominator is unchanged.
   # NOT listed because the SQLite stack runs them by default:
@@ -345,7 +346,7 @@ if [[ "$no_stop" -eq 0 ]]; then
   #   bcs-interaction/src/memory_store.rs (always used by the interaction service)
   #   bcs-channel-store/src/memory.rs    (fallback while channels.enabled = false)
   # A listed file that shows any E2E hit is counted again with a warning.
-  e2e_unreachable_memory_backends=(
+  e2e_unreachable_memory_repos=(
     bcs-bot-store/src/memory.rs
     bcs-bot-store/src/memory_bot_provider_storage.rs
     bcs-bot-store/src/memory_registration_create.rs
@@ -364,7 +365,7 @@ if [[ "$no_stop" -eq 0 ]]; then
     bcs-session-store/src/memory_operations/
     bcs-user-identity/src/memory.rs
   )
-  changed_skip_regex="^crates/services/($(IFS='|'; printf '%s' "${e2e_unreachable_memory_backends[*]}" | sed 's/\./\\./g'))"
+  changed_skip_regex="^crates/services/($(IFS='|'; printf '%s' "${e2e_unreachable_memory_repos[*]}" | sed 's/\./\\./g'))"
   changed_args=(--changed-line-min "$changed_line_min"
     --changed-line-min-lines "$changed_line_min_lines"
     --changed-skip-regex "$changed_skip_regex")
