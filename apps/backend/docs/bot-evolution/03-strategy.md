@@ -227,9 +227,11 @@ binding on `bot_123` sets `{"window_days": 7, "max_rounds": 3}`, while
 another bot's binding might set `"window_days": 30`. The owner writes these
 values when saving the bot's evolution policy, which holds its bindings
 (`PUT /bots/{bot_id}/evolution/policy`, or `avn evolve policy set`;
-[06-evolution-run.md](06-evolution-run.md)). With the schema below, saving
-a policy whose binding has `"window_days": 400` is refused right then,
-rather than ClawEvolve failing hours later when the nightly run starts.
+[06-evolution-run.md](06-evolution-run.md)). The schema catches mistakes
+at that moment: if the owner, editing `bot_123`'s binding, mistypes
+`"window_days": 40` as `"window_days": 400` (above the schema's maximum of
+90), the save is refused right then, rather than ClawEvolve failing hours
+later when the nightly run starts.
 
 **The strategy's project.** "The strategy's source" means the author's own
 project for the strategy, usually a git repository, from which they run
