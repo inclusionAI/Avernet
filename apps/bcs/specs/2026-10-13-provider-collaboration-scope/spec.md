@@ -26,6 +26,11 @@ that would otherwise overwrite a concurrent tightening. Tightening `standard` to
 current member bound to this Provider in the same environment. First change all
 such groups to private. The operation never automatically rewrites those groups
 and never partially changes the Provider's name, slug or configuration.
+Affiliating an existing Bot with an already restricted Provider activates the
+same boundary: reject while that Bot belongs to any current public group in the
+same environment. First make those groups private, then retry. Registration
+preflights before capability/token merging; the affiliation write revalidates
+within its persistence boundary, including gateway projection changes.
 
 ## Runtime authorization
 
@@ -72,8 +77,13 @@ scan their process-local membership and share a read/write gate with GroupCore.
 Public SQL Group writes take Provider shared row locks in stable Provider order,
 then check current config in the same transaction before persisting Group and
 membership. Eventful writes preserve the Group version/CAS dependency. This
-adds two bounded queries (up to 256 actor IDs) to public Group transactions;
-private remediation does not acquire these locks. No lock spans delivery.
+adds three bounded queries (up to 256 actor IDs) to public Group transactions;
+private remediation does not acquire these locks. Public writes lock Bot rows
+as well as Provider rows, including unbound Bots, to serialize against affiliation.
+Affiliation preflight adds one fresh Provider-config query and, for same_owner,
+one indexed public-membership existence query (LIMIT 1). Its write transaction
+adds three bounded queries: Provider lock, single Bot lock, and membership
+assertion. Locks cover persistence only; memory uses the shared policy gate. No lock spans delivery.
 Session authorization reads the current Session and Group, followed by one
 bounded actor projection; an active boundary adds a second batch including
 Session members. State-machine Human access uses this same Session contract.
@@ -114,3 +124,10 @@ real MySQL execution and sustained-load testing remain CI/deployment validation.
   state-machine input reject foreign Humans before enrollment/consumption.
 - Bot/group/message-flow/edge-permission/message/HTTP suites preserve standard
   Provider and unbound legacy behavior.
+
+- `bcs-bot-store/tests/affiliation_scope.rs`: plugin/gateway attachment rollback,
+  remediation, standard/deleted/other-environment compatibility, missing/corrupt
+  policy and storage errors, memory fencing, and independent SQLite-connection
+  races between public creation and affiliation.
+- Core registration regression also verifies a rejected import preserves the
+  original Bot name, owner and runtime token before private-group remediation.

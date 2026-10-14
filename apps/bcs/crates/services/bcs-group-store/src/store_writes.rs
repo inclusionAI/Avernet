@@ -134,6 +134,7 @@ impl MySqlGroupStore {
         let mut steps = Vec::with_capacity(2 + g_participants.len());
         let guard_step = if let Some(lock) = self.public_provider_lock(&group)? {
             steps.push(DbTransactionStep::Query(lock));
+            steps.push(DbTransactionStep::Query(self.public_bot_lock(&group)));
             let guard = steps.len();
             steps.push(DbTransactionStep::Query(self.public_scope_assertion(&group, None)));
             Some(guard)

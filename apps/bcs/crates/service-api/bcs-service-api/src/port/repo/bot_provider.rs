@@ -21,6 +21,12 @@ pub trait BotProviderRepoPort: Send + Sync {
     /// None means missing Bot. An existing, unmigrated Bot is an error.
     async fn get_connection_mode(&self, bot_uuid: &str) -> ServiceResult<Option<BotConnectionMode>>;
 
+    /// Preflight before merging an existing Bot's capabilities. The attachment
+    /// write must revalidate atomically; this read alone is not a concurrency fence.
+    async fn validate_provider_affiliation(&self, _provider_id: &str, _bot_uuid: &str) -> ServiceResult<()> {
+        Err(crate::ServiceError::InternalError("Provider affiliation validation is not configured".into()))
+    }
+
     /// Attach an existing active Bot without replacing its credential or owner.
     /// Allows the existing upstream-to-gateway transition, never Provider transfer
     /// or gateway-to-upstream. Maintains gateway projection atomically in SQL.

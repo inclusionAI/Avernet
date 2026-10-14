@@ -59,6 +59,9 @@ impl DbProviderStore {
 
 #[async_trait]
 impl BotProviderRepoPort for DbProviderStore {
+    async fn validate_provider_affiliation(&self, provider_id: &str, bot_uuid: &str) -> ServiceResult<()> {
+        self.check_affiliation_scope(provider_id, bot_uuid).await
+    }
     async fn collaboration_actors(&self, ids: &[String]) -> ServiceResult<Vec<bcs_service_api::port::repo::collaboration_actor::CollaborationActor>> {
         self.collaboration_actor_rows(ids).await
     }
@@ -107,6 +110,7 @@ impl BotProviderRepoPort for DbProviderStore {
         // Reattachment is not a webhook update. In particular, never write a
         // previously read callback over a concurrent explicit webhook change.
         if previous.as_ref() == Some(&record) {
+            self.validate_provider_affiliation(&record.provider_id, &record.bot_uuid).await?;
             if record.connection_mode == BotConnectionMode::Gateway && binding.is_none() {
                 return Err(ServiceError::Conflict("gateway projection is missing".into()));
             }
@@ -117,22 +121,30 @@ impl BotProviderRepoPort for DbProviderStore {
         // Only a first affiliation or plugin-to-gateway transition writes.
         // Both necessarily change a value, including on MySQL. Recheck the
         // business constraints in the UPDATE, without a timestamp/version CAS.
-        let mut steps = vec![DbTransactionStep::ExecuteChecked {
-            statement: DbStatement::with_params(
+        let mut steps = self.affiliation_scope_steps(&record, &env);
+        let guard_step = steps.len() - 1;
+        let mut statement = DbStatement::with_params(
                 "UPDATE bcs_bots SET provider_id = ?, provider_bot_ref = ?, connection_mode = ?, webhook_url = ?, updated_at = CURRENT_TIMESTAMP \
                  WHERE bot_uuid = ? AND env = ? AND is_deleted = 0 \
                  AND (provider_id IS NULL OR (provider_id = ? AND provider_bot_ref = ? AND connection_mode = 'plugin' AND ? = 'gateway')) \
                  AND NOT EXISTS (SELECT 1 FROM bcs_provider_bot_bindings WHERE env = ? AND provider_id = ? AND provider_bot_ref = ? AND bot_uuid <> ?)",
                 vec![record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into(), mode.into(), record.webhook_url.clone().into(),
                     record.bot_uuid.as_str().into(), env.as_str().into(), record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into(), mode.into(),
-                    env.as_str().into(), record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into(), record.bot_uuid.as_str().into()]),
-            expected_affected_rows: 1,
-        }];
+                    env.as_str().into(), record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into(), record.bot_uuid.as_str().into()]);
+        let mut params = statement.params().iter().cloned().map(DbTransactionParam::Value).collect::<Vec<_>>();
+        params[0] = DbTransactionParam::query_result(guard_step, 0, "provider_id");
+        statement = DbStatement::with_transaction_params(statement.sql(), params);
+        steps.push(DbTransactionStep::ExecuteChecked { statement, expected_affected_rows: 1 });
         if record.connection_mode == BotConnectionMode::Gateway && binding.is_none() {
             steps.push(DbTransactionStep::Execute(DbStatement::with_params(Self::insert_binding_sql(),
                 vec![record.bot_uuid.as_str().into(), record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into(), env.as_str().into(), false.into(), record.webhook_url.clone().into()])));
         }
-        self.db.transaction(steps).await.map_err(storage_error)?;
+        self.db.transaction(steps).await.map_err(|error| {
+            if matches!(&error, DbError::InvalidInput(message) if message.contains(&format!("references missing row 0 from step {guard_step}"))) {
+                return affiliation_scope::public_group_conflict();
+            }
+            storage_error(error)
+        })?;
         self.bindings.invalidate(&format!("{env}:{}", record.bot_uuid));
         Ok(())
     }

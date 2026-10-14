@@ -140,7 +140,10 @@ impl MySqlGroupStore {
         }
         let mut steps = Vec::new();
         let public_guard = if !deleting { self.public_provider_lock(&terminal)? } else { None };
-        if let Some(lock) = &public_guard { steps.push(DbTransactionStep::Query(lock.clone())); }
+        if let Some(lock) = &public_guard {
+            steps.push(DbTransactionStep::Query(lock.clone()));
+            steps.push(DbTransactionStep::Query(self.public_bot_lock(&terminal)));
+        }
         let cas_step = steps.len();
         steps.push(DbTransactionStep::Query(DbStatement::with_params(lock_sql, lock_params)));
         let guard_step = if public_guard.is_some() {

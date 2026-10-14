@@ -258,6 +258,9 @@ impl ProviderCore {
                 provider_bot_ref, webhook_url, disabled: false, created_at: now, updated_at: now }, Some(session_token)));
         }
 
+        if let Some(metadata) = &self.bot_providers {
+            metadata.validate_provider_affiliation(&provider.provider_id, &bot_uuid).await?;
+        }
         match connection_mode {
             ProviderBotConnectionMode::Gateway => {
                 let session_token = new_session_token();

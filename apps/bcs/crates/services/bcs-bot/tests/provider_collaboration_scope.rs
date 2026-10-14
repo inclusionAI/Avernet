@@ -103,4 +103,25 @@ async fn current_membership_controls_scope_without_retaining_group_history() {
     assert!(registry.collaboration_owner(&foreign).await.is_err(),
         "tightening Provider policy must affect already registered Bots immediately");
 
+    // Reject an existing Bot before the legacy registration path merges its capabilities.
+    bots.register_with_owner_and_token("imported".into(), BotCapabilities {
+        name: Some("Original name".into()), ..Default::default()
+    }, "alice", "fixture-imported-token").await.unwrap();
+    let mut public = Group::new("import-public", "imported", vec![Participant::bot("imported", ParticipantRole::Driver)]);
+    public.visibility = "public".into(); groups.upsert(public).await.unwrap();
+    let params = || RegisterProviderBotParams {
+        bot_uuid: Some("imported".into()), bot_name: "Changed name".into(), provider_bot_ref: "imported:alice".into(),
+        owners: vec!["alice".into()], connection_mode: ProviderBotConnectionMode::Plugin, ..Default::default()
+    };
+    assert!(matches!(admin.register_provider_bot_with_bot_uuid(
+        &provider.provider.provider_id, &provider.provider_admin_token, params(),
+    ).await, Err(ServiceError::Conflict(_))));
+    assert!(metadata_port.get_provider_bot("imported").await.unwrap().is_none());
+    assert_eq!(bots.get("imported").await.unwrap().capabilities.name.as_deref(), Some("Original name"));
+    assert_eq!(bots.load_token("imported").await.as_deref(), Some("fixture-imported-token"));
+    groups.update_visibility("import-public", "private").await.unwrap();
+    admin.register_provider_bot_with_bot_uuid(&provider.provider.provider_id, &provider.provider_admin_token, params()).await.unwrap();
+    assert_eq!(metadata_port.get_provider_bot("imported").await.unwrap().unwrap().provider_id, provider.provider.provider_id);
+    assert_eq!(bots.load_token("imported").await.as_deref(), Some("fixture-imported-token"));
+
 }

@@ -5,6 +5,8 @@ use std::sync::Arc;
 mod bot_storage;
 #[path = "collaboration_actor_storage.rs"]
 mod collaboration_actor_storage;
+#[path = "affiliation_scope.rs"]
+mod affiliation_scope;
 #[path = "memory_bot_provider_storage.rs"]
 mod memory_bot_storage;
 pub use memory_bot_storage::MemoryBotProviderStore;

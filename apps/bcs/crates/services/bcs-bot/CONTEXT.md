@@ -111,3 +111,5 @@ identity before mutation. See `docs/agentpass-subbots.md` for the full contract.
 ## Provider collaboration scope
 
 Provider collaboration scope is resolved from live Provider metadata by BotRegistryCoreService.collaboration_owner. Same-owner authorization uses persisted created_by; missing affiliated Providers and malformed policies fail closed. Provider admin commands expose optional scope, and cannot relax same_owner. See specs/2026-10-13-provider-collaboration-scope/spec.md.
+
+Legacy Provider registration preflights affiliation before merging Bot capabilities or credentials, for both plugin and gateway modes. This catches existing public memberships without modifying the Bot; storage independently revalidates under its policy/row locks.
