@@ -97,7 +97,6 @@ _ALLOWLIST: dict[str, str] = {
     "core/repository/implementations/skill_center/skill.py": "~1722 lines — unified ORM skill repository (covers all skill CRUD).",
     "core/bot_public/services/bot_public_service.py": "~1166 lines — bot-public / friend-bot discovery + approval service.",
     # ── bbs/task relocation + a2a/trajectory (merged via task_iteration; new paths) ─
-    "adapters/http/app.py": "~1002 lines — FastAPI app mounting all routers (bbs/task adds mounts).",
     "core/task/task_runner/modal_executor/task_executor.py": "~1026 lines — task modal executor (bbs browse-loop dispatch).",
     "core/task/task_context/task_trajectory/analyzer.py": "~1105 lines — trajectory analyzer (accept/verify gates, gap_items).",
     "core/task/task_context/task_trajectory/trajectory_service.py": "~1499 lines — trajectory service (a2a send-message in benchmark execute).",

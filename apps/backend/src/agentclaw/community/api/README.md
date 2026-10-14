@@ -107,6 +107,7 @@ provides:
   - BotRuntimeProjectorProtocol
   - SkillVersionMaterializerProtocol
   - SpaceSkillPublicationServiceProtocol
+  - SpaceManagementServiceProtocol
   - SkillCenterPublicationGatewayProtocol
   - SkillCenterReferenceServiceProtocol
   - SkillCenterSyncServiceProtocol
@@ -276,6 +277,7 @@ internal_dependencies:
   - agentclaw.community.core.skills_pool.skills_pool_recovery_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.skills_pool.skills_pool_rollback_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.skills_pool.skills_pool_rollout_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.spaces.space_management_service_protocol
   - agentclaw.community.core.spaces.space_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.system_config.device_config_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.system_config.system_config_service_protocol  # Protocol defined in its owning core module, re-exported here
