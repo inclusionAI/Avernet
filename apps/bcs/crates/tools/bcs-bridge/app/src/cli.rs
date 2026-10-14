@@ -62,7 +62,20 @@ pub fn parse(app: &BridgeApp) -> Cli {
         }
     });
     let matches = command.get_matches_mut();
-    Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.format(&mut command).exit())
+    from_matches(app, &mut command, &matches)
+}
+
+fn from_matches(app: &BridgeApp, command: &mut clap::Command, matches: &clap::ArgMatches) -> Cli {
+    let omit_model_default = matches.subcommand().is_some_and(|(name, registration)| {
+        name == "register"
+            && registration.get_one::<String>("engine").is_some_and(|engine| !app.uses_registration_model_default(engine))
+            && registration.value_source("model") == Some(clap::parser::ValueSource::DefaultValue)
+    });
+    let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.format(command).exit());
+    if omit_model_default {
+        if let Commands::Register(args) = &mut cli.command { args.model = None; }
+    }
+    cli
 }
 
 /// Detach a newly executed child before initializing the multithreaded Tokio runtime.
@@ -143,6 +156,28 @@ fn runtime_dir() -> anyhow::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn engine_model_default_policy_preserves_explicit_models_and_other_engines() {
+        let app = BridgeApp::builder().without_registration_model_default("codex").build();
+        for (engine, explicit, expected) in [
+            ("codex", None, None),
+            ("codex", Some("deployment-model"), Some("deployment-model")),
+            ("codex", Some("explicit-model"), Some("explicit-model")),
+            ("claude-code", None, Some("deployment-model")),
+        ] {
+            let mut command = Cli::command().mut_subcommand("register", |register| {
+                register.mut_arg("model", |arg| arg.default_value("deployment-model"))
+            });
+            let mut args = vec!["bcs-bridge", "register", "--token", "test-token", "--bot-name", "Test",
+                "--engine", engine, "--provider-auth", "static-bearer"];
+            if let Some(model) = explicit { args.extend(["--model", model]); }
+            let matches = command.clone().try_get_matches_from(args).unwrap();
+            let cli = from_matches(&app, &mut command, &matches);
+            let Commands::Register(args) = cli.command else { panic!("expected registration"); };
+            assert_eq!(args.model.as_deref(), expected);
+        }
+    }
 
     #[test]
     fn start_rejects_misspelled_daemon_flag() {
