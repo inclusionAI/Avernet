@@ -1,3 +1,4 @@
+import { validateActionScope, assertActionScope } from "./action-scope.js";
 import { createHash } from "node:crypto";
 import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
 import { SessionRecoveryError } from "./errors.js";
@@ -47,6 +48,8 @@ export function submitRecoveryPlan(state: RecoveryTaskState, plan: RecoveryPlan,
       || action.engineOperation !== undefined && (!action.engineOperation || typeof action.engineOperation.path !== "string" || !["GET", "POST", "PUT", "PATCH", "DELETE"].includes(action.engineOperation.method))
       || action.operation !== undefined && (!action.operation || typeof action.operation.type !== "string")
       || [action.command, action.engineOperation, action.operation].filter(value => value !== undefined).length > 1) invalid("方案操作格式无效");
+    if (action.operationScope) validateActionScope(action.operationScope);
+    if (action.engineOperation) assertActionScope(action, action.engineOperation);
   }
   if (!plan.summary.trim() || !plan.basis.trim() || !plan.scope.trim() || !plan.verification.trim()) invalid("方案必须说明依据、范围与验证方法");
   if (containsSecret(JSON.stringify(plan))) invalid("方案不得包含凭据");

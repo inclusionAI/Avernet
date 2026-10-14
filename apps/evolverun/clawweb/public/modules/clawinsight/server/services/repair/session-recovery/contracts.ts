@@ -43,6 +43,7 @@ export interface SessionRecoveryAgentApi {
   logs(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
   apply(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
   retryMessage(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
+  reconcileWrite(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
   conclusion(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
   report(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
   toolGet(task: RecoveryStoredTask, id: string): Promise<AgentToolCall & { toolCallId: string }>;

@@ -442,3 +442,39 @@ it("Debug records a targeted message and its decision without delivering it", as
   expect(task.timeline.some(event => (event.payload.result as any)?.message === body.message)).toBe(true);
   expect(task.delivery).toBeUndefined(); expect(runtime.sendMessage).not.toHaveBeenCalled(); expect(notifier.notify).not.toHaveBeenCalled();
 });
+
+it("a failed pre-send session read does not poison later writes", async () => {
+  let task = await create(); await inspect(task, "establish-session"); task = await current(task.taskId);
+  vi.mocked(runtime.executeShell).mockRejectedValueOnce(new Error("read unavailable"));
+  const failed = await agent.retryMessage(task, { clientRequestId: "preflight-failed", purpose: "发送继续建议", message: "继续" });
+  expect(failed.status).toBe("failed"); expect(failed.result).toMatchObject({ dispatched: false }); expect(runtime.sendMessage).not.toHaveBeenCalled();
+  const retried = await agent.retryMessage(await current(task.taskId), { clientRequestId: "preflight-retried", purpose: "读取恢复后发送", message: "继续" });
+  expect(retried.status).toBe("succeeded"); expect(runtime.sendMessage).toHaveBeenCalledOnce();
+});
+
+it("unknown writes require fresh evidence and can then continue without rewriting audit", async () => {
+  let task = await toPlan(await create("automatic")); await agent.report(task, { kind: "plan", phase: "plan", plan });
+  task = await current(task.taskId);
+  vi.mocked(runtime.executeShell).mockRejectedValueOnce(new Error("response lost"));
+  const body = { actionId: "fix", clientRequestId: "lost-write", purpose: "执行获批动作" };
+  const lost = await agent.apply(task, body); expect(lost.status).toBe("unknown");
+  await expect(agent.apply(await current(task.taskId), { ...body, clientRequestId: "blind-retry" })).rejects.toMatchObject({ status: 409 });
+  vi.mocked(runtime.request).mockResolvedValue({ status: 200, body: { success: true } });
+  const evidence = await agent.inspect(await current(task.taskId), { operation: "engine_read", request: { method: "GET", path: "/api/engine/status" }, clientRequestId: "verify-lost-write", purpose: "核实写入是否生效" });
+  await agent.reconcileWrite(await current(task.taskId), { clientRequestId: "resolve-lost", purpose: "依据现场核实结果", sourceToolCallId: lost.toolCallId, outcome: "not_applied", summary: "现场仍是原值", evidenceToolCallIds: [evidence.toolCallId] });
+  const next = await agent.apply(await current(task.taskId), { ...body, clientRequestId: "verified-retry", command: "printf corrected" });
+  expect(next.status).toBe("succeeded"); expect((await agent.toolGet(await current(task.taskId), lost.toolCallId)).status).toBe("unknown");
+  await expect(agent.reconcileWrite(await current(task.taskId), { clientRequestId: "opposite", purpose: "不能覆盖核实结果", sourceToolCallId: lost.toolCallId, outcome: "applied", summary: "相反结论", evidenceToolCallIds: [evidence.toolCallId] })).rejects.toMatchObject({ status: 409 });
+});
+
+it("approved cron deletion cannot become an MCP change or delete another cron", async () => {
+  let task = await toPlan(await create("automatic"));
+  const operation = { method: "DELETE" as const, path: "/api/cron/duplicate-daily" };
+  await agent.report(task, { kind: "plan", phase: "plan", plan: { ...plan, actions: [{ ...plan.actions[0], type: "engine_operation", operationScope: undefined, command: undefined, engineOperation: operation }] } });
+  task = await current(task.taskId); vi.mocked(runtime.request).mockResolvedValue({ status: 200, body: { success: true } });
+  const body = { actionId: "fix", clientRequestId: "delete-scoped", purpose: "删除指定重复任务" };
+  await expect(agent.apply(task, { ...body, engineOperation: { method: "PUT", path: "/api/mcp/server" } })).rejects.toMatchObject({ status: 403 });
+  await expect(agent.apply(task, { ...body, engineOperation: { method: "DELETE", path: "/api/cron/other" } })).rejects.toMatchObject({ status: 403 });
+  await agent.apply(task, { ...body, engineOperation: { ...operation, body: { confirmed: true } } });
+  expect(runtime.request).toHaveBeenCalledOnce();
+});

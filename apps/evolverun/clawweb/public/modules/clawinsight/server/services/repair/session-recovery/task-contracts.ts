@@ -24,7 +24,7 @@ export type RecoveryJudgment = {
   evidence_ids: string[];
 };
 /** Approved business action; concrete transport details are optional execution references. */
-export type RecoveryPlanAction = Omit<AgentPlanAction, "type"> & { type?: AgentPlanAction["type"] };
+export type RecoveryPlanAction = Omit<AgentPlanAction, "type"> & { type?: AgentPlanAction["type"]; operationScope?: import("./action-scope.js").RecoveryActionScope };
 export type RecoveryPlan = {
   summary: string;
   basis: string;

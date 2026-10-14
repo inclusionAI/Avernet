@@ -82,7 +82,7 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRuntime): 
   });
   const toolRoutes = {
     "/tools/session/read": "sessionRead", "/tools/session/trajectories": "trajectoryRead", "/tools/runtime/inspect": "inspect", "/tools/logs/search": "logs",
-    "/tools/apply-action": "apply", "/tools/retry-message": "retryMessage", "/tools/record-conclusion": "conclusion", "/report": "report",
+    "/tools/apply-action": "apply", "/tools/retry-message": "retryMessage", "/tools/record-conclusion": "conclusion", "/tools/reconcile-write": "reconcileWrite", "/report": "report",
   } as const;
   for (const [path, method] of Object.entries(toolRoutes)) router.post(`${workerPath}${path}`, json({ limit: "128kb", inflate: false }), async (req, res, next) => {
     try {
