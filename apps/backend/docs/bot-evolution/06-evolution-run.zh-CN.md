@@ -1847,7 +1847,7 @@ Evolution-Fencing-Token: ft_7f3_2_b81c
             "ops": [{"op": "file.edit", "target": "skills/refund-policy/SKILL.md",
                      "edits": [{"kind": "replace_section", "heading": "## When to use", "content": "…"}]}]},
   "rationale": "Best on 14/20 train cases; fixes trigger misses on partial refunds",
-  "evidence": ["episode:ep_91", "eval:train_77"],
+  "evidence": ["episode:ep_91", "eval:et_5521"],
   "self_metrics": {"train_score_pct": 82}
 }
 ```

@@ -499,7 +499,7 @@ class Candidate:
     patch: GenomePatch                         # see 01-genome.md; base = the revision the workspace came from
     rationale: str
     evidence: list[EvidenceRef]                # EvidenceRef "<kind>:<id>": 01-genome.md §2.2;
-                                               # e.g. "episode:ep_91", "eval:train_77"
+                                               # e.g. "episode:ep_91", "eval:et_5521"
     self_metrics: dict[str, float] = field(default_factory=dict)   # informational only
 ```
 
@@ -510,7 +510,7 @@ class Candidate:
             "ops": [{"op": "file.edit", "target": "skills/refund-policy/SKILL.md",
                      "edits": [{"kind": "replace_section", "heading": "## When to use", "content": "…"}]}]},
   "rationale": "Best on 14/20 train cases; fixes trigger misses on partial refunds",
-  "evidence": ["episode:ep_91", "eval:train_77"],
+  "evidence": ["episode:ep_91", "eval:et_5521"],
   "self_metrics": {"train_score_pct": 82}
 }
 ```

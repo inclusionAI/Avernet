@@ -188,7 +188,7 @@ over the JSON API a case travels as a string inside a JSON envelope.
 
 ```python
 class CaseFormat(StrEnum):        # proposed; new formats need a reviewed verifier change
-    CLAWBENCH_MD_1 = "clawbench-md/1"   # the ClawBench Markdown case format
+    CLAWBENCH_MD_1 = "clawbench-md@1"   # the ClawBench Markdown case format
 
 @dataclass(frozen=True)
 class TrainCaseProposal:
@@ -203,7 +203,7 @@ class TrainCaseProposal:
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "case_key": "run_7f3/f_12/1",
-  "format": "clawbench-md/1",
+  "format": "clawbench-md@1",
   "content": "---\nid: partial_refund_01\ngrading_type: hybrid\n---\n## Prompt\nCan I get a refund for half of my order A17?\n## Expected\n…",
   "derived_from": ["episode:ep_91", "episode:ep_97"]
 }
@@ -1241,7 +1241,7 @@ Request:
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "cases": [
-    {"case_key": "run_7f3/f_12/1", "format": "clawbench-md/1",
+    {"case_key": "run_7f3/f_12/1", "format": "clawbench-md@1",
      "content": "---\nid: partial_refund_01\ngrading_type: hybrid\n---\n## Prompt\nCan I get a refund for half of my order A17?\n",
      "derived_from": ["episode:ep_91", "episode:ep_97"]}
   ]

@@ -317,7 +317,7 @@ class EvalTrace:
 {
   "trace_id": "et_5521",
   "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
-  "evaluation_id": "eval_train_77",
+  "evaluation_id": "train_77",
   "revision_id": "sha256:c41e…",
   "suite": "bot_123/support",
   "case_id": "case_partial_refund_03",
