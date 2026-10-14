@@ -41,7 +41,7 @@ Engine writes include declared file/configuration, MCP, Skill package and Cron o
 
 ## Runtime packages
 
-Repair and self-healing use separate Skills and business adapters. Shared container code has one source under OCB `clawweb-skills/runtime/agent_runtime`; the existing packager includes it in each independent package. Professional references have one Repair source and are included in the self-healing package during packaging. Session reads and engine boundaries follow the shared investigation contract above.
+Repair and self-healing use separate Skills and business adapters. Shared container code has one source under OCB `clawweb-skills/clawevolve-skills/clawevolve-repair/scripts/repair_runtime`; Repair carries its own scripts and the existing packager includes the same code in the independent self-healing package. Professional references have one Repair source and are included in the self-healing package during packaging. Session reads and engine boundaries follow the shared investigation contract above.
 
 Base owns package startup, the outer hard timeout and its three archives. Business wrappers keep their heartbeat, waiting and reporting protocol. Heartbeat and decision polling use 20 seconds. Credentials are removed from Base's archived task input and passed via a private file outside archive roots; business packages must not echo them into outputs.
 
@@ -77,6 +77,6 @@ server/services/notifications/dingtalk-sender.ts      # 治理与修复共用的
 
 公共工具不决定修复流程或批准方案；具体业务校验阶段、冻结目标和已批准操作后，调用同一工具实现。业务记录在各自任务内，操作回执进入共用审计账本。通知的鉴权、Token 缓存和投递只有一份实现；治理与自愈分别生成业务内容。内部 Host 只装配具体 Provider、轨迹读取器和运行配置。
 
-容器端公共执行代码由 OCB 的 `clawweb-skills/runtime/agent_runtime/` 维护，打包时放入两种 Skill 包；Repair 与自愈分别保留自己的 Skill 和业务主流程。专业 references 在 Repair 源目录维护，打包时交付给自愈包。没有安装到目标 Bot 的自愈手册，也没有后端直接发送的默认重试分支。
+容器端共用执行代码由 OCB 的 `clawevolve-repair/scripts/repair_runtime/` 维护；Repair 随自身脚本携带，自愈在打包时纳入同一份代码，运行时无需安装 Repair Skill。Repair 与自愈分别保留自己的 Skill 和业务主流程。专业 references 在 Repair 源目录维护，打包时交付给自愈包。没有安装到目标 Bot 的自愈手册，也没有后端直接发送的默认重试分支。
 
 Execution-scoped updates validate the execution identity inside each retried atomic change. Audit requests retain redacted business text and a canonical request digest, so a stable request ID cannot hide different advice or uploaded content. Debug follows assessment too: it records proposed advice and the decision, or a proposed environment plan, without sending messages or changing the environment.
