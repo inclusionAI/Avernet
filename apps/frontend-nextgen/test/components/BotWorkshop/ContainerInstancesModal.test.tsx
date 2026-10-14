@@ -36,7 +36,9 @@ describe('ContainerInstancesModal', () => {
 
     render(<ContainerInstancesModal bot={bot} canRestart={false} onClose={jest.fn()} />);
 
-    await waitFor(() => expect(screen.getByText('共')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText((_, element) => element?.textContent === '共 2 个实例')).toBeInTheDocument(),
+    );
     expect(screen.getByText('2')).toBeInTheDocument();
     expect(screen.getByText('1 活跃')).toBeInTheDocument();
     expect(screen.getByText('1 异常')).toBeInTheDocument();

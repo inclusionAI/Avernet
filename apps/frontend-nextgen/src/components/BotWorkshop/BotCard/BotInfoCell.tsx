@@ -18,7 +18,7 @@ const BotInfoCell: React.FC<BotInfoCellProps> = ({ bot, onClaimLock, onReleaseLo
         aria-hidden
         className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold leading-none text-primary"
       >
-        <img src={avatarUrl} alt="" className="size-full rounded-full object-cover" />
+        <img src={avatarUrl} alt="" className="h-5 w-5 rounded-full object-cover" />
       </span>
       <div className="flex min-w-0 flex-col">
         <div className="flex min-w-0 items-center gap-1.5">
