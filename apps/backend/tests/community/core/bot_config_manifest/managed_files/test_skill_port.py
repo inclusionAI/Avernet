@@ -332,7 +332,6 @@ def test_platform_delete_records_offline_sync_after_asset_delete() -> None:
         bot_id="b_1", owner_id="u_owner", actor_id="u_actor", package=QZ,
     ))
     skill_id = str(uploaded["skill"]["id"])
-    skills.rows[int(skill_id)]["skill_uuid"] = "security-uuid-101"
     hook.record_deletion.side_effect = RuntimeError("observer unavailable")
 
     _run(port.delete_local_skill(
@@ -343,7 +342,7 @@ def test_platform_delete_records_offline_sync_after_asset_delete() -> None:
     assert int(skill_id) not in skills.rows
     hook.record_deletion.assert_called_once_with(
         bot_id="b_1", owner_id="u_owner", actor_id="u_actor",
-        skill_id=int(skill_id), incarnation_id="security-uuid-101",
+        skill_id=int(skill_id),
     )
 
 

@@ -27,7 +27,7 @@ class LocalSkillSecurityObservationRepositoryProtocol(Protocol):
     @abstractmethod
     def record_asset_deleted(
         self, *, env: str, bot_id: str, owner_id: str,
-        skill_id: int, actor_id: str, incarnation_id: str,
+        skill_id: int, actor_id: str,
     ) -> LocalSkillSecurityIdentity | None:
         """Persist a tombstone after formal deletion for independent sync."""
         ...
@@ -120,18 +120,10 @@ class LocalSkillSecurityObservationRepositoryProtocol(Protocol):
     ) -> LocalSkillSecurityIdentity | None: ...
 
     @abstractmethod
-    def get_formal_incarnation_id(
+    def get_observed_incarnation_id(
         self, *, env: str, bot_id: str, owner_id: str, skill_id: int
     ) -> str | None:
-        """Read the formal Local asset's non-reusable UUID, if bound."""
-        ...
-
-    @abstractmethod
-    def bind_formal_incarnation_id(
-        self, *, env: str, bot_id: str, owner_id: str, skill_id: int,
-        incarnation_id: str,
-    ) -> None:
-        """Bind the existing formal UUID column after a successful upload."""
+        """Read the current security identity from the observation table."""
         ...
 
     @abstractmethod

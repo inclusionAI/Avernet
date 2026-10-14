@@ -450,7 +450,7 @@ async def get_skill_security_observations(
             ),
             request,
         )
-    incarnation_id = repository.get_formal_incarnation_id(
+    incarnation_id = repository.get_observed_incarnation_id(
         env=get_current_env(), bot_id=bot_id, owner_id=owner_id,
         skill_id=int(skill_id),
     )

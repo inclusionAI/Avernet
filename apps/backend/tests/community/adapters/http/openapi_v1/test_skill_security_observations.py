@@ -69,7 +69,7 @@ class _Repository:
         self.incarnation_id = "incarnation-current"
         self.calls = []
 
-    def get_formal_incarnation_id(self, **kwargs):
+    def get_observed_incarnation_id(self, **kwargs):
         self.calls.append(("formal", kwargs))
         return self.incarnation_id
 

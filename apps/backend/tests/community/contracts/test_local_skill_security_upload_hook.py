@@ -41,19 +41,11 @@ def test_public_noop_hook_accepts_exact_upload_and_timeout_facts(world):
     )
     hook.record_deletion(
         bot_id="bot", owner_id="owner", actor_id="uploader", skill_id=9,
-        incarnation_id="local-incarnation-9",
     )
 
 
-def test_disabled_observation_still_reuses_formal_upload_identity():
-    class _IdentityReader:
-        def get_formal_incarnation_id(self, **kwargs):
-            assert (kwargs["bot_id"], kwargs["owner_id"], kwargs["skill_id"]) == (
-                "bot", "owner", 9,
-            )
-            return "stable-uuid"
-
-    hook = NoopLocalSkillSecurityUploadHook(_IdentityReader())
+def test_disabled_observation_does_not_read_security_identity():
+    hook = NoopLocalSkillSecurityUploadHook()
     assert hook.current_incarnation_id(
         bot_id="bot", owner_id="owner", skill_id=9
-    ) == "stable-uuid"
+    ) is None

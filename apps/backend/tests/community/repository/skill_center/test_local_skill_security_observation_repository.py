@@ -34,7 +34,6 @@ class _Database:
             session.add(Skill(
                 id=42, name="sample", git_path="local://bot-a/sample",
                 user_id="owner-a", bolt_id="bot-a", env="pre",
-                skill_uuid=INCARNATION,
                 avernet_tenant="teamclaw",
             ))
 
@@ -77,7 +76,7 @@ def _record(repo: LocalSkillSecurityObservationRepository, observation_id: str,
 
 
 def test_replacement_preserves_identity_and_current_follows_upload_order(state):
-    _, repo = state
+    db, repo = state
     with avernet_tenant_scope("teamclaw"):
         first = _record(repo, "upload-a")
         repo.save_report(
@@ -103,6 +102,21 @@ def test_replacement_preserves_identity_and_current_follows_upload_order(state):
     assert current is not None and current.observation_id == "upload-b"
     assert [item.observation_id for item in history] == ["upload-b", "upload-a"]
     assert history[1].risk_status == "PASS"
+    with db.sessions() as session:
+        assert session.query(Skill.skill_uuid).filter_by(id=42).scalar() is None
+
+
+def test_observation_preserves_unrelated_formal_skill_uuid(state):
+    db, repo = state
+    with db.sessions.begin() as session:
+        session.query(Skill).filter_by(id=42).update({Skill.skill_uuid: "workshop-owned"})
+    with avernet_tenant_scope("teamclaw"):
+        _record(repo, "upload-a")
+        assert repo.get_observed_incarnation_id(
+            env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
+        ) == INCARNATION
+    with db.sessions() as session:
+        assert session.query(Skill.skill_uuid).filter_by(id=42).scalar() == "workshop-owned"
 
 
 def test_reserved_failure_clears_old_current_without_erasing_history(state):
@@ -218,7 +232,7 @@ def test_delete_without_verified_snapshot_records_syncable_tombstone(state):
     with avernet_tenant_scope("teamclaw"):
         identity = repo.record_asset_deleted(
             env="pre", bot_id="bot-a", owner_id="owner-a",
-            skill_id=42, actor_id="deleter-b", incarnation_id=INCARNATION,
+            skill_id=42, actor_id="deleter-b",
         )
         pending = repo.list_pending_sync_identities(
             env="pre", after_provider_skill_id=None, limit=10,
@@ -268,7 +282,7 @@ def test_upload_order_conflict_retries_reservation_and_deletion(state, monkeypat
     with avernet_tenant_scope("teamclaw"):
         identity = repo.record_asset_deleted(
             env="pre", bot_id="bot-a", owner_id="owner-a",
-            skill_id=42, actor_id="deleter-b", incarnation_id=INCARNATION,
+            skill_id=42, actor_id="deleter-b",
         )
     assert identity is not None
     assert identity.sync_target_observation_id is not None
@@ -364,7 +378,7 @@ def test_sqlite_reused_numeric_id_starts_a_new_formal_incarnation(state):
             session.query(Skill).filter_by(id=42).delete()
         old_identity = repo.record_asset_deleted(
             env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
-            actor_id="deleter", incarnation_id=INCARNATION,
+            actor_id="deleter",
         )
         with db.transactional_orm_session() as session:
             replacement = Skill(
@@ -375,18 +389,11 @@ def test_sqlite_reused_numeric_id_starts_a_new_formal_incarnation(state):
             session.add(replacement)
             session.flush()
             assert replacement.id == 42
-        assert repo.get_formal_incarnation_id(
+        assert repo.get_observed_incarnation_id(
             env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
         ) is None
-        repo.bind_formal_incarnation_id(
-            env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
-            incarnation_id="new-incarnation",
-        )
         with pytest.raises(AssetIncarnationMismatchError):
-            repo.bind_formal_incarnation_id(
-                env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
-                incarnation_id=INCARNATION,
-            )
+            _record(repo, "upload-stale", incarnation=INCARNATION)
         new = _record(repo, "upload-new", incarnation="new-incarnation")
         current = repo.get_current_for_asset(
             env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
@@ -422,7 +429,7 @@ def test_asset_and_tenant_scope(state):
     _, repo = state
     with avernet_tenant_scope("teamclaw"):
         _record(repo, "upload-a")
-        assert repo.get_formal_incarnation_id(
+        assert repo.get_observed_incarnation_id(
             env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42
         ) == INCARNATION
         with pytest.raises(AssetIncarnationMismatchError):
