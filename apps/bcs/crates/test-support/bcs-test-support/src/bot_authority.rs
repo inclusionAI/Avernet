@@ -850,8 +850,30 @@ pub struct LazyAuthorityFixture {
     pub hook: std::sync::Arc<LazySeedAuthorityHook>,
 }
 
+impl LazyAuthorityFixture {
+    /// The shared store the hook's seeds flush onto: fixtures
+    /// whose application/BotCore side must read the SAME
+    /// authority facts (retirement is a store-level command
+    /// — its in-span operator re-verification only consults
+    /// the store the edges actually live in) build their
+    /// application registry over this repo.
+    pub fn shared_repo(&self) -> std::sync::Arc<MemoryBotRepo> {
+        self.hook.repo.clone()
+    }
+}
+
 pub fn lazy_authority_chain() -> LazyAuthorityFixture {
-    let repo = std::sync::Arc::new(MemoryBotRepo::new());
+    lazy_authority_chain_with_repo(std::sync::Arc::new(MemoryBotRepo::new()))
+}
+
+/// Same lazy seeding chain but over a CALLER-OWNED shared
+/// store: fixtures whose application/BotCore side must read
+/// the SAME authority facts the hook seeds (retirement is a
+/// store-level command — its in-span operator re-verification
+/// can only see edges when hook and store share one repo).
+pub fn lazy_authority_chain_with_repo(
+    repo: std::sync::Arc<MemoryBotRepo>,
+) -> LazyAuthorityFixture {
     let env = bcs_config::resolve_env_str();
     let core: std::sync::Arc<BotAuthorityCoreServiceImpl> =
         std::sync::Arc::new(BotAuthorityCoreServiceImpl::new(

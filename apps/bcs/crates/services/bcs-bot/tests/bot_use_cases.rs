@@ -32,10 +32,20 @@ struct RegistryFixture {
 impl RegistryFixture {
     fn new() -> Self {
         let data_dir = tempfile::tempdir().expect("temp data dir");
-        let registry = Arc::new(BotCore::with_base_dir(data_dir.path().to_path_buf()));
+        // ONE shared memory store: the authority hook sees the
+        // edges it seeds AND the registry's store-level
+        // retirement re-verifies the same operator edge in its
+        // atomic span (store 事务内复验 cannot consult a
+        // second store).
+        let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(
+            data_dir.path().to_path_buf(),
+        ));
+        let chain =
+            bcs_test_support::lazy_authority_chain_with_repo(bot_repo.clone());
+        let registry = Arc::new(BotCore::with_repo(bot_repo));
         Self {
             registry,
-            authority: bcs_test_support::lazy_authority_chain().hook,
+            authority: chain.hook,
             _data_dir: data_dir,
         }
     }

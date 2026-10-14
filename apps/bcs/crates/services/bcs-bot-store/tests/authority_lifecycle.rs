@@ -382,15 +382,16 @@ async fn mysql_ordinary_retire_steps_carry_the_for_update_lock_order() {
     }
     inner
         .execute(DbStatement::with_params(
-            "INSERT INTO bcs_bots (bot_uuid, env, name, is_deleted) \
-             VALUES ('bot_lock2', ?, 'x', 0)",
+            "INSERT INTO bcs_bots (bot_uuid, env, name, is_deleted, ownership_version) \
+             VALUES ('bot_lock2', ?, 'x', 0, 1)",
             vec![resolve_env().as_str().into()],
         ))
         .await
         .expect("seed bot");
     // The ordinary retirement 事务内复验s the Human operator's
-    // current owner/manager edge (spec §7): seed one so the
-    // composite reaches its statement sequence.
+    // current owner/manager edge on an authority-INITIALIZED
+    // Bot (spec §7): seed one so the composite reaches its
+    // statement sequence.
     inner
         .execute(DbStatement::with_params(
             "INSERT INTO edge_grants \
@@ -557,5 +558,47 @@ async fn sqlite_retirement_rechecks_the_operator_edge_in_transaction() {
         audits[0].get_i64("c").expect("count"),
         Some(1),
         "exactly one retire audit row"
+    );
+}
+
+/// A runtime version-0 Bot carries no owner/manager register:
+/// the ordinary lifecycle delete keeps its legacy contract,
+/// audit included, and no operator edge is demanded.
+#[tokio::test]
+async fn sqlite_retirement_of_version0_runtime_keeps_working() {
+    let db =
+        Arc::new(bcs_db_local::LocalSqliteDbPlugin::new().expect("sqlite"));
+    for statement in SCHEMA {
+        db.execute(DbStatement::new(*statement))
+            .await
+            .expect("fixture schema");
+    }
+    let env = resolve_env();
+    db.execute(DbStatement::with_params(
+        "INSERT INTO bcs_bots (bot_uuid, env, name, is_deleted, ownership_version) \
+         VALUES ('bot_v0', ?, 'x', 0, 0)",
+        vec![env.as_str().into()],
+    ))
+    .await
+    .expect("seed runtime bot");
+    let bot_repo =
+        PersistentBotRepo::with_sql_flavor(db.clone(), bcs_db_api::DbSqlFlavor::Sqlite);
+
+    let changed = bot_repo
+        .retire_with_authority("bot_v0", retire_mutation_human("11111111"))
+        .await
+        .expect("version-0 runtime retire");
+    assert!(changed);
+    let audits = db
+        .query(DbStatement::new(
+            "SELECT COUNT(*) AS c FROM bot_authority_changes \
+             WHERE bot_id = 'bot_v0' AND action = 'retire'",
+        ))
+        .await
+        .expect("count retire audits");
+    assert_eq!(
+        audits[0].get_i64("c").expect("count"),
+        Some(1),
+        "the version-0 transition audits its real Human initiator"
     );
 }

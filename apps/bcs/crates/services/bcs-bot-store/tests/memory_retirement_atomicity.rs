@@ -252,3 +252,31 @@ async fn memory_sync_filters_humans_tombstoned_before_the_write_span() {
         "no approved edge may leak to a tombstoned Human"
     );
 }
+
+/// A runtime version-0 Bot carries no owner/manager register:
+/// the ordinary lifecycle delete keeps its legacy contract.
+#[tokio::test]
+async fn memory_retirement_of_version0_runtime_keeps_working() {
+    let repo = Arc::new(MemoryBotRepo::new());
+    repo.register("bot_mem_v0".to_string(), BotCapabilities::default())
+        .await
+        .expect("register runtime bot");
+
+    let changed = repo
+        .retire_with_authority(
+            "bot_mem_v0",
+            mutation("retire_v0", human_operator("11111111")),
+        )
+        .await
+        .expect("version-0 runtime retire");
+    assert!(changed);
+    let audits = repo
+        .authority_state()
+        .read()
+        .await
+        .audit
+        .iter()
+        .filter(|row| row.action == "retire")
+        .count();
+    assert_eq!(audits, 1, "exactly one retire audit row");
+}

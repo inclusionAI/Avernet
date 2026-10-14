@@ -50,13 +50,13 @@ impl PersistentBotRepo {
             // Pre-read is parameter preparation only (spec §7).
             let rows = self
                 .db_query(
-                    "SELECT is_deleted, provider_id FROM bcs_bots \
-                     WHERE bot_uuid = ? AND env = ?",
+                    "SELECT is_deleted, provider_id, ownership_version \
+                     FROM bcs_bots WHERE bot_uuid = ? AND env = ?",
                     vec![Value::from(bot_id), Value::from(env.as_str())],
                 )
                 .await
                 .map_err(|_| compose::retire_failed())?;
-            let (pre_tombstoned, provider_managed) =
+            let (pre_tombstoned, provider_managed, authority_initialized) =
                 match rows.as_slice() {
                     [row] => {
                         let is_deleted: i64 =
@@ -68,7 +68,17 @@ impl PersistentBotRepo {
                         let provider_id: Option<String> = row
                             .get_string("provider_id")
                             .map_err(|_| compose::retire_failed())?;
-                        (is_deleted != 0, provider_id.is_some())
+                        let ownership_version: i64 =
+                            bcs_db_api::db_get_column(
+                                row,
+                                "ownership_version",
+                            )
+                            .map_err(|_| compose::retire_failed())?;
+                        (
+                            is_deleted != 0,
+                            provider_id.is_some(),
+                            ownership_version > 0,
+                        )
                     }
                     [] => {
                         return Err(ServiceError::BotNotFound(
@@ -96,13 +106,16 @@ impl PersistentBotRepo {
             .map_err(compose::map_retire_tx_error)?;
 
             let changed = !pre_tombstoned;
-            // 事务内复验 the operator's authority; this
-            // PRE-READ only short-circuits an already-lost
-            // edge to a stable 403 instead of burning the
-            // retry budget on the in-transaction guard
-            // below. The already-tombstoned retry keeps its
+            // 事务内复验 the operator's authority — only for an
+            // AUTHORITY-INITIALIZED Bot (version > 0): a runtime
+            // version-0 Bot carries no owner/manager register, so
+            // the ordinary lifecycle delete keeps its legacy
+            // contract. This PRE-READ only short-circuits an
+            // already-lost edge to a stable 403 instead of
+            // burning the retry budget on the in-transaction
+            // guard below; the already-tombstoned retry keeps its
             // idempotent no-op outcome (no operator demand).
-            if changed {
+            if changed && authority_initialized {
                 match mutation.actor.kind() {
                     AuthorityActorKind::Human => {
                         if !self
@@ -187,13 +200,15 @@ impl PersistentBotRepo {
             guard_indexes
                 .push((steps.len() - 1, compose::GUARD_COLUMN));
 
-            // 2 (transition only): the operator STILL holds a
-            // live owner/manager edge — the in-transaction
-            // twin of the pre-read above (spec §7: 事务前读取
-            // 只准备参数，权限必须在事务内再次验证). A lost
-            // edge rolls the whole attempt back through the
-            // final binding statement, never a tombstone.
-            if changed {
+            // 2 (transition only, and only on an
+            // authority-initialized Bot): the operator STILL
+            // holds a live owner/manager edge — the
+            // in-transaction twin of the pre-read above
+            // (spec §7: 事务前读取只准备参数，权限必须在事务
+            // 内再次验证). A lost edge rolls the whole attempt
+            // back through the final binding statement, never
+            // a tombstone.
+            if changed && authority_initialized {
                 steps.push(DbTransactionStep::Query(
                     DbStatement::with_transaction_params(
                         self.operator_edge_guard_sql(&lock_suffix)

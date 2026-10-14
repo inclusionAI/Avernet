@@ -704,7 +704,14 @@ async fn leave_bot_route_rejects_bot_token_without_human_identity() {
 #[tokio::test]
 async fn leave_bot_route_soft_deletes_owner_bot() {
     let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    // ONE shared authority store: the hook's seeded edges are
+    // the same rows the store-level retirement re-verifies
+    // inside its atomic span (store 事务内复验).
+    let bot_repo = Arc::new(bcs_bot_store::MemoryBotRepo::with_base_dir(
+        temp_dir.path().to_path_buf(),
+    ));
+    let authority = bcs_test_support::lazy_authority_chain_with_repo(bot_repo.clone());
+    let registry = Arc::new(BotCore::with_repo(bot_repo));
     registry
         .register("bot-leave".to_string(), BotCapabilities::default())
         .await
@@ -713,8 +720,24 @@ async fn leave_bot_route_soft_deletes_owner_bot() {
         .save_created_by("bot-leave", "alice", true)
         .await
         .unwrap();
-    shared_route_authority().seed_owner("bot-leave", "alice");
-    let services = services_builder_with_bot_use_cases(registry.clone()).build_for_test();
+    authority.hook.seed_owner("bot-leave", "alice");
+    // Same use-case wiring as the builder but against THIS
+    // test's shared authority store.
+    let registry_service: Arc<dyn BotRegistryCoreService> = registry.clone();
+    let bot_use_cases = Arc::new(
+        Bot::new_with_friend(
+            registry_service.clone(),
+            Arc::new(NoopFriendCoreService),
+        )
+        .with_bot_authority(authority.hook.clone()),
+    );
+    let services = Services::builder()
+        .registry(registry_service)
+        .friend(Arc::new(NoopFriendCoreService))
+        .bot_query(bot_use_cases.clone())
+        .bot_management(bot_use_cases.clone())
+        .bot_discovery(bot_use_cases)
+        .build_for_test();
     let chain = static_auth_chain("alice", "Alice");
     let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
         ChainUserIdentityPort::new(chain),

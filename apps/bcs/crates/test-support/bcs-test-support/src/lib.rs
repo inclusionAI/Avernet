@@ -22,7 +22,7 @@ pub use bot_authority::{
     NoopBotAuthorityHook, NoopBotAuthorityService, failing_authority_hook,
     authority_edge_fixture, authority_hook_for, grant_manager_edge,
     grant_owner_edge, grant_owner_edge_sync, lazy_authority_chain,
-    revoke_authority_edge,
+    lazy_authority_chain_with_repo, revoke_authority_edge,
 };
 pub use auth_oauth_mock::{
     run_oauth_provider_offline_contract, run_oauth_provider_roundtrip_contract, MockFailure,

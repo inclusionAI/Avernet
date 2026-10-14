@@ -130,13 +130,23 @@ impl MemoryBotRepo {
         }
 
         // 事务内复验 the operator's authority — only for a
-        // REAL transition: the already-tombstoned retry keeps
-        // its idempotent no-op outcome. An ordinary
-        // retirement by a Human whose owner/manager edge is
-        // already gone must not tombstone anything (a stale
-        // application-time check proves nothing). The
-        // Provider retirement is verified on its own branch.
-        if changed && command == RetireCommand::Ordinary {
+        // REAL transition on an AUTHORITY-INITIALIZED Bot
+        // (version > 0): a runtime version-0 Bot has no
+        // owner/manager register to consult and the ordinary
+        // lifecycle delete keeps its legacy contract; the
+        // already-tombstoned retry keeps its idempotent no-op
+        // outcome. An ordinary retirement by a Human whose
+        // owner/manager edge is already gone must not
+        // tombstone anything (a stale application-time check
+        // proves nothing). The Provider retirement is
+        // verified on its own branch.
+        let authority_initialized = staged
+            .ownership_versions
+            .get(&(env.clone(), bot_id.to_string()))
+            .copied()
+            .unwrap_or(0)
+            > 0;
+        if changed && authority_initialized && command == RetireCommand::Ordinary {
             let operator_user = match &mutation.actor {
                 bcs_service_api::types::bot_authority::AuthorityActor::Human {
                     user_id,
