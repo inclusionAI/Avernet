@@ -56,6 +56,25 @@ async fn desktop_reuses_shared_server_streams_resumes_and_interrupts_only_its_tu
                     let unrelated = json!({"method":"item/agentMessage/delta","params":{
                         "threadId":"other-thread","turnId":"other-turn","delta":"unrelated desktop work"}});
                     socket.send(unrelated.to_string().into()).await.unwrap();
+                    // Shared broadcasts without ownership must neither leak
+                    // output nor finish/fail the BCS run. Nested completion
+                    // ownership must be checked even without a flat turnId.
+                    for unrelated in [
+                        json!({"method":"agent/output_chunk","params":{"text":"unrelated anonymous output"}}),
+                        json!({"method":"agent/turn_completed","params":{"text":"unrelated anonymous completion"}}),
+                        json!({"method":"agent/turn_failed","params":{"message":"unrelated failure"}}),
+                        json!({"method":"item/agentMessage/delta","params":{
+                            "threadId":"desktop-thread","delta":"unrelated missing turn"}}),
+                        json!({"method":"agent/output_chunk","params":{
+                            "turnId":"owned-turn","text":"unrelated missing thread"}}),
+                        json!({"method":"turn/completed","params":{
+                            "threadId":"desktop-thread","turn":{"id":"other-turn","status":"completed"}}}),
+                        json!({"method":"turn/completed","params":{
+                            "threadId":"desktop-thread","turnId":"owned-turn",
+                            "turn":{"id":"other-turn","status":"completed"}}}),
+                    ] {
+                        socket.send(unrelated.to_string().into()).await.unwrap();
+                    }
                     socket.send(delta.to_string().into()).await.unwrap();
                     if !matches!(prompt, "cancel" | "drop") {
                         let completed = json!({"method":"turn/completed","params":{

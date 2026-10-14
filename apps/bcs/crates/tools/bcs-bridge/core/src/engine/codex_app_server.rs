@@ -216,7 +216,7 @@ impl Engine for CodexAppServer {
                 respond_server_request(&mut cli, &value).await?;
                 continue;
             }
-            if !matches_turn(&value, &thread_id, &turn_id) {
+            if !matches_turn(&value, &thread_id, &turn_id, self.desktop) {
                 continue;
             }
 
@@ -646,10 +646,24 @@ fn extract_turn_id(value: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-fn matches_turn(value: &Value, thread_id: &str, turn_id: &str) -> bool {
+fn matches_turn(value: &Value, thread_id: &str, turn_id: &str, shared: bool) -> bool {
     let Some(params) = value.get("params") else {
         return false;
     };
+    if shared {
+        // A shared host can broadcast other tasks' notifications. Missing or
+        // malformed ownership is never evidence that an event belongs to us.
+        if params.get("threadId").and_then(Value::as_str) != Some(thread_id) {
+            return false;
+        }
+        let flat = params.get("turnId");
+        let nested = match value.get("method").and_then(Value::as_str) {
+            Some("turn/completed" | "agent/turn_completed") => params.pointer("/turn/id"),
+            _ => None,
+        };
+        return (flat.is_some() || nested.is_some())
+            && flat.into_iter().chain(nested).all(|id| id.as_str() == Some(turn_id));
+    }
     let thread_matches = params
         .get("threadId")
         .and_then(Value::as_str)
@@ -756,8 +770,42 @@ mod tests {
         let value = json!({
             "params": {"threadId": "t-1", "turnId": "turn-1"}
         });
-        assert!(matches_turn(&value, "t-1", "turn-1"));
-        assert!(!matches_turn(&value, "t-2", "turn-1"));
-        assert!(!matches_turn(&value, "t-1", "turn-2"));
+        for shared in [false, true] {
+            assert!(matches_turn(&value, "t-1", "turn-1", shared));
+            assert!(!matches_turn(&value, "t-2", "turn-1", shared));
+            assert!(!matches_turn(&value, "t-1", "turn-2", shared));
+        }
+    }
+
+    #[test]
+    fn shared_events_require_positive_ownership_but_cli_keeps_legacy_shapes() {
+        for method in ["agent/output_chunk", "agent/turn_completed", "agent/turn_failed"] {
+            let value = json!({"method":method,"params":{"text":"foreign"}});
+            assert!(!matches_turn(&value, "t-1", "turn-1", true));
+            assert!(matches_turn(&value, "t-1", "turn-1", false));
+        }
+        for params in [
+            json!({"threadId":"t-1"}),
+            json!({"turnId":"turn-1"}),
+            json!({"threadId":"t-1","turnId":null}),
+            json!({"threadId":null,"turnId":"turn-1"}),
+        ] {
+            assert!(!matches_turn(&json!({"params":params}), "t-1", "turn-1", true));
+        }
+    }
+
+    #[test]
+    fn shared_completion_checks_nested_turn_id_and_rejects_conflicts() {
+        for method in ["turn/completed", "agent/turn_completed"] {
+            let mut value = json!({"method":method,"params":{
+                "threadId":"t-1","turn":{"id":"turn-1"}}});
+            assert!(matches_turn(&value, "t-1", "turn-1", true));
+            assert!(!matches_turn(&value, "t-1", "turn-2", true));
+            value["params"]["turnId"] = json!("other-turn");
+            assert!(!matches_turn(&value, "t-1", "turn-1", true));
+            assert!(!matches_turn(&value, "t-1", "other-turn", true));
+            value["params"]["turnId"] = Value::Null;
+            assert!(!matches_turn(&value, "t-1", "turn-1", true));
+        }
     }
 }

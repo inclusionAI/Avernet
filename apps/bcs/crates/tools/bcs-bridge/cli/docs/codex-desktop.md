@@ -35,7 +35,11 @@ engine_options = { socket = "/absolute/path/to/desktop-app-server.sock" }
 
 Each BCS session gets its own Codex thread. Its id is persisted before starting
 the first turn and resumed for later turns. Only events for that thread and turn
-are forwarded. Cancellation sends `turn/interrupt` with those exact ids, waits
+are forwarded. Shared notifications without both ownership identifiers are
+ignored; completion events may carry the turn id in `params.turn.id`. If both
+flat and nested turn ids are present, both must match. The owned CLI process
+retains its legacy identifier-free notification compatibility.
+Cancellation sends `turn/interrupt` with those exact ids, waits
 up to five seconds for acknowledgement, then disconnects this client. Failure
 to acknowledge interruption is reported; the shared server is never terminated.
 If cancellation arrives during `turn/start`, Bridge waits for its response to
