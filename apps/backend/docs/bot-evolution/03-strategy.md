@@ -19,11 +19,18 @@ This document owns:
 
 - the strategy port (`EvolutionStrategy.run(ctx)`) and its return value;
 - the **registration record**: the facts about a strategy version that the
-  platform needs without running its code (runtime, needed capabilities,
-  agent definitions);
-- the **Strategy Registry** (component C3 in the previous design): storage
-  of registration records, uploaded agent definitions, conformance status,
-  and the capability catalog, plus its registration API;
+  platform needs without running its code: where its code runs (runtime),
+  which capabilities it needs, and its **agent definitions** (the
+  instructions, skills, and tool configuration of each agent the strategy
+  starts, for example ClawEvolve's `clawevolve-tune`; §2.4);
+- the **Strategy Registry** (component C3 in the previous design): the
+  component that stores registration records and the uploaded agent
+  definitions, adds what the platform learns about each version (its
+  **conformance status**: whether it passed the conformance kit, §8.4; and
+  whether it is enabled), and serves the capability catalog and the
+  registration API. The record is the data the author writes; the Registry
+  is the service that keeps it. Both are about the same thing, one
+  strategy version;
 - the **capability catalog**: the closed, versioned list of context parts a
   strategy may use, and what each one looks like to a strategy;
 - `StrategyContext`, `Candidate`, `Verdict`, and `Operation` **as the
@@ -61,8 +68,8 @@ code (for example, the engine's session export provides
 
 | Type | What it is | Owned by | Lifecycle |
 | --- | --- | --- | --- |
-| **Strategy** (`EvolutionStrategy`) | Code implementing `run(ctx)` | Strategy author | A new version for every change, including a prompt change in an agent definition |
-| **`StrategyRegistration`** | The registration record of one strategy version: id, version, runtime, `needs` | Strategy author writes it; Strategy Registry stores it | Immutable once registered; conformance status changes from `pending` to `passed` or `failed`; can be disabled (kill switch, [06-evolution-run.md](06-evolution-run.md)) |
+| **Strategy** (`EvolutionStrategy`) | Code implementing `run(ctx)` | Strategy author | A new version for every change, including a prompt change in an agent definition; old versions keep running for the bots pinned to them (§3.4) |
+| **`StrategyRegistration`** | The registration record of one strategy version: id, version, runtime (where its code runs: inside the platform process or in its own container, §2.2), `needs` | Strategy author writes it; Strategy Registry stores it | Immutable once registered; conformance status changes from `pending` to `passed` or `failed`; can be disabled (kill switch, [06-evolution-run.md](06-evolution-run.md)) |
 | **`Capability`** | A named, versioned part of the context, from the platform-owned catalog, with providers per engine | Platform | A new contract version (`@2`) on an incompatible change; old versions keep being served |
 | **`AgentDefinition`** | Instructions, skills, and tool configuration of one agent the strategy drives, shipped with the strategy and stored by digest | Strategy author; stored by the Strategy Registry | Uploaded and validated at registration; versioned with the strategy version |
 | **`StrategyContext`** | The run's only door to the platform: always-granted parts plus the declared capabilities | Platform (built per run) | Built at each dispatch of a run; values frozen at run start |
@@ -101,6 +108,14 @@ class EvolutionStrategy(Protocol):
 }
 ```
 
+`RunSummary` is only a closing note for the run record. It is not where
+the improved bot ends up. A run's real output is its **candidates**: each
+one is submitted during the run with `ctx.candidates.submit(...)` (§5),
+recorded by the platform as a genome revision (for example `r42`, named
+`candidate/run_7f3/1`, [01-genome.md](01-genome.md)), verified, and listed
+on the run. So `RunSummary` needs nothing more than a summary line and a
+few numbers for people reading the run.
+
 `RunSummary` fields beyond a free-form summary are proposed here; the
 sources only show `RunSummary(rounds=…)`.
 
@@ -126,20 +141,25 @@ class ConformanceState(StrEnum):
     FAILED = "failed"
 
 class RuntimeKind(StrEnum):
-    IN_PROCESS = "in_process"                  # loaded into the platform's process from a Python package
-    JOB_WORKER = "job_worker"                  # runs in its own container and claims work from the platform
+    """Where the strategy's own code (its run(ctx)) executes. Details and examples below."""
+    IN_PROCESS = "in_process"                  # imported and called inside an apps/evolution worker process
+    JOB_WORKER = "job_worker"                  # runs in its own container; talks to the platform over HTTP
 
 @dataclass(frozen=True)
 class Runtime:
     kind: RuntimeKind
-    image: str | None = None                   # job_worker: container image pinned by digest
-    package: str | None = None                 # in_process: Python package selected by configuration
+    image: str | None = None                   # JOB_WORKER only: the container image the author built and pushed,
+                                               # pinned by digest, e.g. "registry.example/clawevolve@sha256:9b1f…"
+    package: str | None = None                 # IN_PROCESS only: the Python package installed in apps/evolution,
+                                               # e.g. "avernet_strategies.consolidate_memory"
 
 @dataclass(frozen=True)
 class AgentDefinitionRef:
-    engine: Engine                             # the engine this agent runs on
-    path: str                                  # directory in the strategy's source (as written by the author)
-    digest: str | None = None                  # filled in by the registry after upload
+    engine: Engine                             # the engine this agent runs on, e.g. Engine.OPENCLAW
+    path: str                                  # where the definition is in the strategy's source, relative to its
+                                               # root, e.g. "agents/clawevolve-tune" (a directory with SKILL.md, …)
+    digest: str | None = None                  # None in the record the author writes; at upload the registry packs
+                                               # the directory, stores it by content hash, and fills in "sha256:5d0e…"
 
 @dataclass(frozen=True)
 class StrategyRegistration:
@@ -148,7 +168,8 @@ class StrategyRegistration:
     runtime: Runtime
     needs: dict[str, dict]                     # catalog name@version -> arguments
                                                # e.g. {"agents@1": {"definitions": {name: AgentDefinitionRef}}}
-    params_schema: dict | None = None          # proposed: JSON Schema (draft 2020-12) of the binding's params;
+    params_schema: dict | None = None          # proposed: JSON Schema (draft 2020-12) of the binding's params,
+                                               # the per-bot settings an owner gives this strategy (example below);
                                                # None = params are validated only by the strategy at run start
 
 @dataclass(frozen=True)
@@ -166,7 +187,41 @@ class RegisteredStrategy:                      # what the registry stores and re
     registered_at: datetime
 ```
 
-The record as the author writes it (in the strategy's source):
+**The two runtimes.** A strategy's own code runs in one of two places.
+Either way it calls the platform only through `ctx`, and the platform
+starts agents and evaluations for it (§7):
+
+- **`in_process`**: the strategy is a Python package installed in
+  `apps/evolution`. A platform worker imports it and calls `run(ctx)`
+  directly, and `ctx` calls are plain function calls. There is no container
+  to start, so it is cheap, but the code runs inside the platform. It is
+  therefore only for trusted, platform-owned strategies, for example
+  `platform/consolidate-memory`.
+- **`job_worker`**: the strategy ships as a container image that its author
+  builds and pushes to an image registry the platform can pull from. For a
+  run, the platform starts that image in a sandbox. The SDK inside claims
+  the run's job over the Job Protocol (HTTP,
+  [06-evolution-run.md](06-evolution-run.md)) and calls `run(ctx)`; every
+  `ctx` call becomes an HTTP call. This is for strategies from other teams
+  and for code in other languages or with its own dependencies, for
+  example ClawEvolve 2.0.0. The platform only pulls images by the digest
+  in the record; which image registries it may pull from is deployment
+  configuration.
+
+**Agents are a separate thing.** The runtime is where `run(ctx)` runs. The
+agent definitions under `agents@1` are agents the strategy may *start*
+through `ctx.agents` (§4.2); the platform runs them in a sandbox next to the
+workspace. Not every strategy uses agents: memory consolidation uses only
+`ctx.models`.
+
+**`params_schema` example.** ClawEvolve's binding on `bot_123` sets
+`{"window_days": 7, "max_rounds": 3}`. With the schema below, an owner who
+writes `"window_days": 400` is refused when saving the binding, rather than
+by ClawEvolve hours later at run start.
+
+The record as the author writes it (in the strategy's source). This one is
+ClawEvolve's ([04-default-strategies.md](04-default-strategies.md)); every
+strategy fills in the same fields:
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -194,6 +249,24 @@ validates a binding's `params` against it when the policy is written
 ([06-evolution-run.md](06-evolution-run.md)), so bad params are rejected at
 configuration time instead of at run start.
 
+What the Strategy Registry stores and returns for that version, after
+upload and the conformance kit (`RegisteredStrategy`):
+
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+{
+  "registration": {"id": "clawevolve/bot-evolution", "version": "2.0.0", "…": "the record above, with digests filled in"},
+  "engines": ["openclaw"],                        // derived from the agents@1 definitions
+  "conformance": {
+    "status": "passed",                           // pending until the kit has run
+    "kit_version": "1.0.0",                       // which version of the conformance kit checked it
+    "report_artifact": "art_c19"                  // the kit's full report, downloadable as an artifact
+  },
+  "enabled": true,                                // false after a per-strategy kill switch
+  "registered_at": "2026-10-06T08:00:00Z"
+}
+```
+
 There is no separate `supports_engines` field and no separate engine list:
 the engines a strategy drives are the `engine` values of its agent
 definitions, and engine compatibility of a bot is derived from `needs`
@@ -209,13 +282,14 @@ conformance test per engine provider.
 
 ```python
 class ContextPart(StrEnum):
-    """The StrategyContext fields a catalog entry can fill (§2.5)."""
-    CANDIDATES = "candidates"
-    MODELS = "models"
-    EXPERIENCE = "experience"
-    AGENTS = "agents"
-    EVALUATE = "evaluate"
-    LEDGER = "ledger"
+    """The StrategyContext fields a catalog entry can fill (§2.5). Each field is the strategy's door to
+    one platform service; the strategy calls methods on it. It is a service, not data the strategy owns."""
+    CANDIDATES = "candidates"                  # hand in candidates and look up their verdicts (§5)
+    MODELS = "models"                          # single model calls, routed and charged by the platform
+    EXPERIENCE = "experience"                  # read the bot's recorded episodes and feedback (02-experience.md)
+    AGENTS = "agents"                          # start the strategy's own agents in a sandbox
+    EVALUATE = "evaluate"                      # have the platform score a workspace on train cases
+    LEDGER = "ledger"                          # read past experiments (later, level 3)
 
 class AnyEngine(StrEnum):
     ANY = "*"                                  # one provider serves every engine
@@ -257,12 +331,37 @@ class Capability:
 }
 ```
 
+**How a strategy uses a capability.** The catalog entry is the platform's
+description; the strategy sees only the field it fills. The entry above
+has `context_part: "experience"` and one call, `sessions`, so a strategy
+that declared `experience.sessions@1` in `needs` calls:
+
+```python
+episodes = await ctx.experience.sessions(days=7, limit=200)   # list[Episode], see §4.2
+corrected = [e for e in episodes if e.outcome.status == "user_corrected"]
+```
+
+A strategy that did not declare it gets `CapabilityNotGranted` on the first
+access to `ctx.experience` (§4.3). The platform picks the provider for the
+bot's engine (here the OpenClaw session export); the strategy never names
+one.
+
 ### 2.4 AgentDefinition
 
 An **agent** here is a multi-step, tool-using agent session (an LLM that
 reads and edits files over many steps), as opposed to a single model call.
 Its **definition** is its instructions, skills, and tool configuration, in
-the format of its engine.
+the format of its engine. Example: ClawEvolve's `clawevolve-tune` is an
+OpenClaw agent whose `SKILL.md` tells it how to edit a bot's persona and
+skills to fix the failures it is given.
+
+An agent definition is **not a capability**. It is an asset the strategy
+ships, like a prompt file. The capability is `agents@1`: the platform
+service that runs such a definition (`ctx.agents.start`, §4.2). A
+definition belongs to exactly one strategy version, which is why it records
+`strategy` and `strategy_version`. Two strategies can each have an agent
+called `tune`, and ClawEvolve 2.0.0 and 2.1.0 can have different
+`clawevolve-tune` prompts.
 
 ```python
 @dataclass(frozen=True)
@@ -271,8 +370,10 @@ class AgentDefinition:
     strategy_version: str                      # e.g. "2.0.0"
     name: str                                  # the definition's name in `needs`, e.g. "clawevolve-tune"
     engine: Engine                             # the engine the agent runs on
-    digest: str                                # content digest of the uploaded definition directory
-    validated_by: str                          # agents@1 provider that validated it
+    digest: str                                # content hash of the uploaded directory, e.g. "sha256:5d0e…"; the
+                                               # provider loads exactly these bytes at ctx.agents.start (§4.4)
+    validated_by: str                          # the agents@1 provider that checked, at registration, that this
+                                               # engine can load it (required files present, config parses)
 ```
 
 ```jsonc
@@ -290,23 +391,36 @@ class AgentDefinition:
 ### 2.5 StrategyContext
 
 ```python
-# The context parts (GenomeRevisionView, WorkspaceFactory, Operations, Candidates, …) are in §4.2.
+# Every context part type (GenomeRevisionView, RunLog, ArtifactSink, CancellationToken, Candidates,
+# TrainEvaluator, …) is defined in §4.2.
 class StrategyContext(Protocol):
-    run_id: str; params: dict                       # frozen at run start
+    # values, frozen at run start
+    run_id: str                                     # e.g. "run_7f3"
+    params: dict                                    # the binding's params, e.g. {"window_days": 7}
+    attempt: int                                    # 1 on first dispatch, +1 on each re-dispatch
+    granted: list[str]                              # capabilities this run may use, e.g. ["candidates@1", "agents@1"]
+
+    # always granted
     parent: GenomeRevisionView                      # read-only: spec, files by digest, lineage
     workspace: WorkspaceFactory                     # materialise(revision, key) → sandbox; ws.to_patch()
     budget: BudgetMeter                             # remaining(); charge(); raises BudgetExhausted
-    log: RunLog; artifacts: ArtifactSink; cancelled: CancellationToken
-    attempt: int                                    # 1 on first dispatch, +1 on each re-dispatch
+    log: RunLog                                     # structured log lines, shown on the run
+    artifacts: ArtifactSink                         # files the run keeps (reports, transcripts), by artifact id
+    cancelled: CancellationToken                    # set when the run is cancelled; the strategy must stop
     operations: Operations                          # get(op_id), cancel(op_id); SDK helper wait(op_id) (§6)
-    candidates: Candidates                          # candidates@1: submit(c) → candidate id; verdict(id)
-    models: Models                                  # models@1: complete(messages, model, max_tokens)
+    candidates: Candidates                          # candidates@1: where the strategy hands in what it produced
+    models: Models                                  # models@1: single model calls
 
     # present only if declared in `needs`; otherwise access raises CapabilityNotGranted
     experience: ExperienceQuery                     # experience.sessions@1 / experience.feedback@1
     agents: AgentRunner                             # agents@1
-    evaluate: TrainEvaluator                        # evaluate.train@1
+    evaluate: TrainEvaluator                        # evaluate.train@1: score a workspace on train cases
 ```
+
+`ctx.candidates` is not a list of candidates. It is the door through which
+the strategy hands in what it produces: `ctx.candidates.submit(candidate)`
+returns a candidate id, and `ctx.candidates.verdict(id)` looks up its
+verdict. The `Candidate` type is in §2.6.
 
 **The context holds only fields.** Each field is either a value (`run_id`,
 `params`, `attempt`) or a context part or capability whose methods the
@@ -371,7 +485,9 @@ class Verdict:                                 # = StrategyVerdictView in 07-ver
     candidate: str                             # candidate id: content hash of the patch
     status: VerdictStatus
     revision: str | None                       # the candidate revision recorded for this patch, once recorded
-    aggregates: dict                           # {"validation": ...}: validation aggregates only; never per-case hidden data
+    aggregates: dict[str, AggregateScores]     # summary scores per split, only "validation"; empty while pending.
+                                               # AggregateScores (07-verification.md §2.6): cases, seeds,
+                                               # mean_delta (candidate minus parent), ci (95% interval)
     reasons: list[VerdictReasonCategory]       # no case ids
 ```
 
@@ -385,6 +501,12 @@ class Verdict:                                 # = StrategyVerdictView in 07-ver
   "reasons": ["validation_improved"]
 }
 ```
+
+In the example, the platform ran the 30 hidden validation cases 3 times
+each on the parent and on the candidate. The candidate scored 0.061 higher
+on average, with a 95% confidence interval of 0.028 to 0.094. The strategy
+sees these totals but not which cases they were, so it cannot tune
+itself to the hidden test set.
 
 `accept` means the candidate passed verification under the binding's
 profile. Whether it is then promoted to the live bot is decided by the gate
@@ -453,6 +575,21 @@ class Operation:
   "cost_usd": 1.4
 }
 ```
+
+An operation is one long-running thing the platform does for the strategy,
+of one of two kinds:
+
+- **Agent session** (`agent_session`): the platform runs one of the
+  strategy's agents in a sandbox workspace, for example `clawevolve-tune`
+  editing `SKILL.md`. Its result is an `AgentResult`.
+- **Train evaluation** (`train_evaluation`): the platform runs the bot *as
+  it is in a workspace* against the **train cases** and grades each answer,
+  for example 20 cases about refunds. Its result is a `TrainResult` with a
+  score and critique per case. Nothing is trained here in the ML sense.
+  "Train" names the split of test cases the strategy may see and learn from
+  (see the `evaluate.train@1` section in §4.2); the platform's own
+  *validation*, which decides the verdict, uses other cases the strategy
+  never sees.
 
 The exact `AgentResult` and `TrainResult` fields are proposed here; the
 sources state only that an agent result holds "the transcript and exit
@@ -535,6 +672,28 @@ configuration time, not partway through a paid run:
 The Strategy Registry answers the first two (§9, `check_engine`); the
 binding check as a whole belongs to [06-evolution-run.md](06-evolution-run.md).
 
+### 3.4 Old versions keep running
+
+A binding pins one exact version, for example
+`clawevolve/bot-evolution@2.0.0` ([06-evolution-run.md](06-evolution-run.md)).
+Shipping new strategy code registers a new version. It never replaces an
+old one, so a bot pinned to 2.0.0 keeps running 2.0.0 until its owner
+moves the binding to a newer version.
+
+- **`job_worker`**: the version *is* its image, pinned by digest in the
+  record. A run of 2.0.0 pulls the 2.0.0 image even after 2.1.0 exists.
+  The image registry must keep every image that a registered, still-bound
+  version names.
+- **`in_process`**: the code is a package installed in `apps/evolution`,
+  so only versions installed in the running deployment can run. Only
+  platform-owned strategies use this runtime, and each platform release
+  must still ship every in-process version that a binding pins. The
+  binding check rejects a version the deployment cannot load (proposed).
+
+A version is retired by disabling it (the per-strategy kill switch,
+[06-evolution-run.md](06-evolution-run.md)); bindings pinned to it then stop
+starting runs until their owners move them.
+
 ## 4. Capability catalog
 
 The platform owns a small, closed, versioned catalog. Each entry names a
@@ -599,9 +758,27 @@ class Operations(Protocol):
     async def wait(self, op_id: str, *, poll_s: float = 5) -> Operation: ...
 
 class BudgetMeter(Protocol):
-    def remaining(self) -> Budget: ...
+    def remaining(self) -> Budget: ...                               # Budget: 06-evolution-run.md
     async def charge(self, usd: float, reason: str) -> None: ...    # raises BudgetExhausted
+
+class RunLog(Protocol):
+    """Structured log lines for the run, shown on the run page and kept with it."""
+    async def info(self, message: str, **fields: object) -> None: ...   # e.g. info("round done", round=2, best=0.82)
+    async def warn(self, message: str, **fields: object) -> None: ...
+
+class ArtifactSink(Protocol):
+    """Files the run keeps beyond its log, e.g. a diagnosis report or an agent transcript."""
+    async def put(self, name: str, content: bytes) -> str: ...      # artifact id, e.g. "art_88"
+
+class CancellationToken(Protocol):
+    """Tells a long-running strategy that its run was cancelled (by the owner or a kill switch)."""
+    def is_set(self) -> bool: ...                                   # check between steps; stop when True
 ```
+
+For example, a strategy writes `await ctx.log.info("diagnosed", findings=3)`
+after a step, saves `await ctx.artifacts.put("diagnosis.md", report)` so a
+reviewer can read it later, and checks `ctx.cancelled.is_set()` before
+starting the next round.
 
 `Workspace.read`/`write` are proposed method names; the sources define
 only `materialise` and `to_patch`.
@@ -617,8 +794,25 @@ class Candidates(Protocol):
 **`models@1` (always granted).**
 
 ```python
-async def complete(self, *, messages: list[Message], model: str | None = None,
-                   max_tokens: int = 4096) -> Completion: ...
+class MessageRole(StrEnum):
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
+
+@dataclass(frozen=True)
+class Message:
+    role: MessageRole
+    content: str
+
+@dataclass(frozen=True)
+class Completion:
+    text: str                                  # the model's answer
+    model: str                                 # the model that answered, e.g. "provider/model-x"
+    cost_usd: float                            # charged to the run's budget
+
+class Models(Protocol):
+    async def complete(self, *, messages: list[Message], model: str | None = None,
+                       max_tokens: int = 4096) -> Completion: ...
 ```
 
 `models` is for plain model calls: one request, one response, no tools and
@@ -631,7 +825,10 @@ in the Experiment Ledger ([05-experiment-ledger.md](05-experiment-ledger.md)).
 platform default is used. A call is bounded by `max_tokens`, so it stays a
 short request rather than an operation (§6).
 
-**`experience.sessions@1`.**
+**`experience.sessions@1`** and **`experience.feedback@1`** both fill
+`ctx.experience`, an `ExperienceQuery` (defined in
+[02-experience.md](02-experience.md)); each capability grants one of its
+methods.
 
 ```python
 async def sessions(self, *, days: int, limit: int = 500,
@@ -671,9 +868,10 @@ the exact filter arguments here are proposed.
 **`agents@1`** (registered with `{"agents@1": {"definitions": {...}}}`).
 
 ```python
-async def start(self, definition: str, *, workspace: Workspace, prompt: str,
-                idempotency_key: str, timeout_s: int = 1800) -> str: ...  # operation id
-# when the operation succeeds, ctx.operations.get(op_id).result is an AgentResult
+class AgentRunner(Protocol):
+    async def start(self, definition: str, *, workspace: Workspace, prompt: str,
+                    idempotency_key: str, timeout_s: int = 1800) -> str: ...  # operation id
+    # when the operation succeeds, ctx.operations.get(op_id).result is an AgentResult
 ```
 
 For example, ClawEvolve's tune step calls
@@ -688,10 +886,24 @@ definition the strategy did not register is refused.
 **`evaluate.train@1`.**
 
 ```python
-async def add_train_cases(self, cases: list[dict]) -> list[str]: ...     # case ids
-async def start_train(self, workspace: Workspace, *, idempotency_key: str) -> str: ...  # operation id
-# when the operation succeeds, ctx.operations.get(op_id).result is a TrainResult
+class TrainEvaluator(Protocol):
+    """Platform scoring of a workspace on the train cases, for the strategy's own feedback."""
+    async def add_train_cases(self, cases: list[dict]) -> list[str]: ...     # case ids
+    async def start_train(self, workspace: Workspace, *, idempotency_key: str) -> str: ...  # operation id
+    # when the operation succeeds, ctx.operations.get(op_id).result is a TrainResult
 ```
+
+**Train vs validation.** The platform keeps each bot's test cases in
+separate *splits* ([07-verification.md](07-verification.md)). The **train**
+split is the strategy's practice set. It may add cases to it, run its
+workspace against it as often as its budget allows, and read every score
+and critique. The **validation** split (and holdout, regression, safety) is
+the exam: the platform runs it on each submitted candidate to reach the
+verdict, and the strategy sees only aggregate numbers. Example: ClawEvolve
+edits `skills/refund-policy/SKILL.md`, then calls
+`ctx.evaluate.start_train(ws, …)` and gets 14/20 train cases passing with a
+critique for each failure. It edits again, reaches 17/20, and submits. The
+platform then decides on validation cases ClawEvolve has never seen.
 
 A strategy may *add* cases; added cases land in the **train** split. Splits
 are assigned by the platform, never by a strategy, and a strategy cannot

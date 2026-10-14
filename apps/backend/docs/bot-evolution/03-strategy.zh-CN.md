@@ -13,8 +13,8 @@
 本文档负责：
 
 - 策略端口（`EvolutionStrategy.run(ctx)`）及其返回值；
-- **注册记录**（registration record）：平台无需运行策略代码即可获知的、关于某个策略版本的事实（运行时、所需能力、智能体定义）；
-- **Strategy Registry**（上一版设计中的组件 C3）：存储注册记录、上传的智能体定义、一致性状态和能力目录，并提供其注册 API；
+- **注册记录**（registration record）：平台无需运行策略代码即可获知的、关于某个策略版本的事实：其代码在哪里运行（运行时）、需要哪些能力，以及其**智能体定义**（策略启动的每个智能体的指令、技能和工具配置，例如 ClawEvolve 的 `clawevolve-tune`；§2.4）；
+- **Strategy Registry**（上一版设计中的组件 C3）：存储注册记录和上传的智能体定义的组件，它会补充平台对每个版本所了解的信息（其**一致性状态**：是否通过了一致性测试套件，§8.4；以及是否已启用），并提供能力目录和注册 API。记录是作者编写的数据；Registry 是保存它的服务。两者针对的是同一个对象，即一个策略版本；
 - **能力目录**（capability catalog）：策略可使用的上下文部件所组成的封闭、带版本的列表，以及每一项在策略看来是什么样子；
 - **从策略视角看**的 `StrategyContext`、`Candidate`、`Verdict` 和 `Operation`；
 - 策略 SDK、一致性测试套件，以及两个层级（黑盒、组合式）。
@@ -41,8 +41,8 @@
 
 | 类型 | 是什么 | 归属 | 生命周期 |
 | --- | --- | --- | --- |
-| **进化策略**（`EvolutionStrategy`） | 实现 `run(ctx)` 的代码 | 策略作者 | 每次变更都产生新版本，包括智能体定义中的提示词变更 |
-| **`StrategyRegistration`** | 一个策略版本的注册记录：id、版本、运行时、`needs` | 由策略作者编写；由 Strategy Registry 存储 | 注册后不可变；一致性状态从 `pending` 变为 `passed` 或 `failed`；可被禁用（紧急停止开关，[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)） |
+| **进化策略**（`EvolutionStrategy`） | 实现 `run(ctx)` 的代码 | 策略作者 | 每次变更都产生新版本，包括智能体定义中的提示词变更；旧版本继续为固定到它们的 bot 运行（§3.4） |
+| **`StrategyRegistration`** | 一个策略版本的注册记录：id、版本、运行时（其代码在哪里运行：在平台进程内或在它自己的容器中，§2.2）、`needs` | 由策略作者编写；由 Strategy Registry 存储 | 注册后不可变；一致性状态从 `pending` 变为 `passed` 或 `failed`；可被禁用（紧急停止开关，[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)） |
 | **`Capability`** | 上下文中一个具名、带版本的部件，来自平台拥有的目录，按引擎提供 provider | 平台 | 不兼容变更时发布新的契约版本（`@2`）；旧版本继续提供服务 |
 | **`AgentDefinition`** | 策略所驱动的某个智能体的指令、技能和工具配置，随策略一起发布并按摘要存储 | 策略作者；由 Strategy Registry 存储 | 在注册时上传并校验；随策略版本一起版本化 |
 | **`StrategyContext`** | 运行访问平台的唯一入口：始终授予的部件加上已声明的能力 | 平台（每次运行构建） | 在运行的每次派发时构建；其值在运行开始时冻结 |
@@ -77,6 +77,8 @@ class EvolutionStrategy(Protocol):
 }
 ```
 
+`RunSummary` 只是运行记录的一条结尾说明，并不是改进后的 bot 的去处。运行的真正产出是它的**候选**：每个候选都在运行期间通过 `ctx.candidates.submit(...)` 提交（§5），由平台记录为一个基因组修订版（例如 `r42`，名为 `candidate/run_7f3/1`，[01-genome.zh-CN.md](01-genome.zh-CN.md)），经过验证，并列在该运行上。因此 `RunSummary` 只需要一行摘要和几个供人查看运行的数字。
+
 除自由格式的摘要外，`RunSummary` 的其他字段是此处提议的；源材料中只出现过 `RunSummary(rounds=…)`。
 
 ### 2.2 StrategyRegistration
@@ -98,20 +100,25 @@ class ConformanceState(StrEnum):
     FAILED = "failed"
 
 class RuntimeKind(StrEnum):
-    IN_PROCESS = "in_process"                  # loaded into the platform's process from a Python package
-    JOB_WORKER = "job_worker"                  # runs in its own container and claims work from the platform
+    """Where the strategy's own code (its run(ctx)) executes. Details and examples below."""
+    IN_PROCESS = "in_process"                  # imported and called inside an apps/evolution worker process
+    JOB_WORKER = "job_worker"                  # runs in its own container; talks to the platform over HTTP
 
 @dataclass(frozen=True)
 class Runtime:
     kind: RuntimeKind
-    image: str | None = None                   # job_worker: container image pinned by digest
-    package: str | None = None                 # in_process: Python package selected by configuration
+    image: str | None = None                   # JOB_WORKER only: the container image the author built and pushed,
+                                               # pinned by digest, e.g. "registry.example/clawevolve@sha256:9b1f…"
+    package: str | None = None                 # IN_PROCESS only: the Python package installed in apps/evolution,
+                                               # e.g. "avernet_strategies.consolidate_memory"
 
 @dataclass(frozen=True)
 class AgentDefinitionRef:
-    engine: Engine                             # the engine this agent runs on
-    path: str                                  # directory in the strategy's source (as written by the author)
-    digest: str | None = None                  # filled in by the registry after upload
+    engine: Engine                             # the engine this agent runs on, e.g. Engine.OPENCLAW
+    path: str                                  # where the definition is in the strategy's source, relative to its
+                                               # root, e.g. "agents/clawevolve-tune" (a directory with SKILL.md, …)
+    digest: str | None = None                  # None in the record the author writes; at upload the registry packs
+                                               # the directory, stores it by content hash, and fills in "sha256:5d0e…"
 
 @dataclass(frozen=True)
 class StrategyRegistration:
@@ -120,7 +127,8 @@ class StrategyRegistration:
     runtime: Runtime
     needs: dict[str, dict]                     # catalog name@version -> arguments
                                                # e.g. {"agents@1": {"definitions": {name: AgentDefinitionRef}}}
-    params_schema: dict | None = None          # proposed: JSON Schema (draft 2020-12) of the binding's params;
+    params_schema: dict | None = None          # proposed: JSON Schema (draft 2020-12) of the binding's params,
+                                               # the per-bot settings an owner gives this strategy (example below);
                                                # None = params are validated only by the strategy at run start
 
 @dataclass(frozen=True)
@@ -138,7 +146,16 @@ class RegisteredStrategy:                      # what the registry stores and re
     registered_at: datetime
 ```
 
-作者在策略源码中编写的记录如下：
+**两种运行时。** 策略自身的代码在两个地方之一运行。无论哪种，它都只通过 `ctx` 调用平台，并由平台为它启动智能体和评估（§7）：
+
+- **`in_process`**：策略是安装在 `apps/evolution` 中的一个 Python 包。平台 worker 导入它并直接调用 `run(ctx)`，`ctx` 调用就是普通的函数调用。无需启动容器，因此开销很小，但代码运行在平台内部。因此它只适用于可信的、平台拥有的策略，例如 `platform/consolidate-memory`。
+- **`job_worker`**：策略以容器镜像的形式发布，由其作者构建并推送到平台可拉取的镜像仓库。每次运行时，平台在沙箱中启动该镜像。其中的 SDK 通过作业协议（HTTP，[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）认领该运行的作业并调用 `run(ctx)`；每次 `ctx` 调用都成为一次 HTTP 调用。它适用于其他团队的策略，以及使用其他语言或自带依赖的代码，例如 ClawEvolve 2.0.0。平台只按记录中的摘要拉取镜像；允许从哪些镜像仓库拉取属于部署配置。
+
+**智能体是另一回事。** 运行时是 `run(ctx)` 运行的地方。`agents@1` 下的智能体定义是策略可以通过 `ctx.agents`（§4.2）*启动*的智能体；平台在工作区旁的沙箱中运行它们。并非每个策略都使用智能体：记忆整合只使用 `ctx.models`。
+
+**`params_schema` 示例。** ClawEvolve 在 `bot_123` 上的绑定设置了 `{"window_days": 7, "max_rounds": 3}`。有了下面的 schema，所有者若写入 `"window_days": 400`，会在保存绑定时被拒绝，而不是在数小时后运行开始时才被 ClawEvolve 拒绝。
+
+作者在策略源码中编写的记录如下。这里是 ClawEvolve 的记录（[04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md)）；每个策略都填写相同的字段：
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -163,6 +180,23 @@ class RegisteredStrategy:                      # what the registry stores and re
 
 `params_schema` 是可选的，属于提议字段。若存在，则绑定检查会在写入进化策略配置时用它校验绑定的 `params`（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)），从而在配置阶段而不是运行开始时拒绝错误的参数。
 
+经过上传和一致性测试套件之后，Strategy Registry 为该版本存储并返回的内容（`RegisteredStrategy`）：
+
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+{
+  "registration": {"id": "clawevolve/bot-evolution", "version": "2.0.0", "…": "the record above, with digests filled in"},
+  "engines": ["openclaw"],                        // derived from the agents@1 definitions
+  "conformance": {
+    "status": "passed",                           // pending until the kit has run
+    "kit_version": "1.0.0",                       // which version of the conformance kit checked it
+    "report_artifact": "art_c19"                  // the kit's full report, downloadable as an artifact
+  },
+  "enabled": true,                                // false after a per-strategy kill switch
+  "registered_at": "2026-10-06T08:00:00Z"
+}
+```
+
 不存在单独的 `supports_engines` 字段，也没有单独的引擎列表：策略驱动的引擎就是其智能体定义中的 `engine` 值，而 bot 的引擎兼容性由 `needs` 推导得出（§3.3）。`candidates@1` 和 `models@1` 始终授予，因此无需声明。
 
 ### 2.3 能力
@@ -171,13 +205,14 @@ class RegisteredStrategy:                      # what the registry stores and re
 
 ```python
 class ContextPart(StrEnum):
-    """The StrategyContext fields a catalog entry can fill (§2.5)."""
-    CANDIDATES = "candidates"
-    MODELS = "models"
-    EXPERIENCE = "experience"
-    AGENTS = "agents"
-    EVALUATE = "evaluate"
-    LEDGER = "ledger"
+    """The StrategyContext fields a catalog entry can fill (§2.5). Each field is the strategy's door to
+    one platform service; the strategy calls methods on it. It is a service, not data the strategy owns."""
+    CANDIDATES = "candidates"                  # hand in candidates and look up their verdicts (§5)
+    MODELS = "models"                          # single model calls, routed and charged by the platform
+    EXPERIENCE = "experience"                  # read the bot's recorded episodes and feedback (02-experience.md)
+    AGENTS = "agents"                          # start the strategy's own agents in a sandbox
+    EVALUATE = "evaluate"                      # have the platform score a workspace on train cases
+    LEDGER = "ledger"                          # read past experiments (later, level 3)
 
 class AnyEngine(StrEnum):
     ANY = "*"                                  # one provider serves every engine
@@ -219,9 +254,20 @@ class Capability:
 }
 ```
 
+**策略如何使用能力。** 目录条目是平台的描述；策略只看到它所填充的字段。上面的条目具有 `context_part: "experience"` 和一个调用 `sessions`，因此在 `needs` 中声明了 `experience.sessions@1` 的策略会这样调用：
+
+```python
+episodes = await ctx.experience.sessions(days=7, limit=200)   # list[Episode], see §4.2
+corrected = [e for e in episodes if e.outcome.status == "user_corrected"]
+```
+
+未声明它的策略在首次访问 `ctx.experience` 时会得到 `CapabilityNotGranted`（§4.3）。平台为 bot 的引擎选择 provider（这里是 OpenClaw 会话导出）；策略从不指定 provider。
+
 ### 2.4 AgentDefinition
 
-这里的**智能体**（agent）是指多步骤、使用工具的智能体会话（一个在多个步骤中读取和编辑文件的 LLM），而不是单次模型调用。它的**定义**是其指令、技能和工具配置，采用其引擎的格式。
+这里的**智能体**（agent）是指多步骤、使用工具的智能体会话（一个在多个步骤中读取和编辑文件的 LLM），而不是单次模型调用。它的**定义**是其指令、技能和工具配置，采用其引擎的格式。例如：ClawEvolve 的 `clawevolve-tune` 是一个 OpenClaw 智能体，其 `SKILL.md` 告诉它如何编辑 bot 的 persona 和 skills，以修复交给它的失败。
+
+智能体定义**不是能力**。它是策略随附发布的资产，就像一个提示词文件。能力是 `agents@1`：运行此类定义的平台服务（`ctx.agents.start`，§4.2）。一个定义恰好属于一个策略版本，因此它记录了 `strategy` 和 `strategy_version`。两个策略可以各有一个名为 `tune` 的智能体，ClawEvolve 2.0.0 和 2.1.0 也可以有不同的 `clawevolve-tune` 提示词。
 
 ```python
 @dataclass(frozen=True)
@@ -230,8 +276,10 @@ class AgentDefinition:
     strategy_version: str                      # e.g. "2.0.0"
     name: str                                  # the definition's name in `needs`, e.g. "clawevolve-tune"
     engine: Engine                             # the engine the agent runs on
-    digest: str                                # content digest of the uploaded definition directory
-    validated_by: str                          # agents@1 provider that validated it
+    digest: str                                # content hash of the uploaded directory, e.g. "sha256:5d0e…"; the
+                                               # provider loads exactly these bytes at ctx.agents.start (§4.4)
+    validated_by: str                          # the agents@1 provider that checked, at registration, that this
+                                               # engine can load it (required files present, config parses)
 ```
 
 ```jsonc
@@ -249,23 +297,33 @@ class AgentDefinition:
 ### 2.5 StrategyContext
 
 ```python
-# The context parts (GenomeRevisionView, WorkspaceFactory, Operations, Candidates, …) are in §4.2.
+# Every context part type (GenomeRevisionView, RunLog, ArtifactSink, CancellationToken, Candidates,
+# TrainEvaluator, …) is defined in §4.2.
 class StrategyContext(Protocol):
-    run_id: str; params: dict                       # frozen at run start
+    # values, frozen at run start
+    run_id: str                                     # e.g. "run_7f3"
+    params: dict                                    # the binding's params, e.g. {"window_days": 7}
+    attempt: int                                    # 1 on first dispatch, +1 on each re-dispatch
+    granted: list[str]                              # capabilities this run may use, e.g. ["candidates@1", "agents@1"]
+
+    # always granted
     parent: GenomeRevisionView                      # read-only: spec, files by digest, lineage
     workspace: WorkspaceFactory                     # materialise(revision, key) → sandbox; ws.to_patch()
     budget: BudgetMeter                             # remaining(); charge(); raises BudgetExhausted
-    log: RunLog; artifacts: ArtifactSink; cancelled: CancellationToken
-    attempt: int                                    # 1 on first dispatch, +1 on each re-dispatch
+    log: RunLog                                     # structured log lines, shown on the run
+    artifacts: ArtifactSink                         # files the run keeps (reports, transcripts), by artifact id
+    cancelled: CancellationToken                    # set when the run is cancelled; the strategy must stop
     operations: Operations                          # get(op_id), cancel(op_id); SDK helper wait(op_id) (§6)
-    candidates: Candidates                          # candidates@1: submit(c) → candidate id; verdict(id)
-    models: Models                                  # models@1: complete(messages, model, max_tokens)
+    candidates: Candidates                          # candidates@1: where the strategy hands in what it produced
+    models: Models                                  # models@1: single model calls
 
     # present only if declared in `needs`; otherwise access raises CapabilityNotGranted
     experience: ExperienceQuery                     # experience.sessions@1 / experience.feedback@1
     agents: AgentRunner                             # agents@1
-    evaluate: TrainEvaluator                        # evaluate.train@1
+    evaluate: TrainEvaluator                        # evaluate.train@1: score a workspace on train cases
 ```
+
+`ctx.candidates` 不是候选的列表。它是策略提交其产出的入口：`ctx.candidates.submit(candidate)` 返回一个候选 id，`ctx.candidates.verdict(id)` 查询其判定。`Candidate` 类型见 §2.6。
 
 **上下文只包含字段。** 每个字段要么是一个值（`run_id`、`params`、`attempt`），要么是一个上下文部件或能力，策略调用其方法；上下文本身没有方法。策略不会自行构造上下文：平台在每次派发时构建它，所含能力恰好是注册记录所声明且绑定所允许的那些（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。
 
@@ -321,7 +379,9 @@ class Verdict:                                 # = StrategyVerdictView in 07-ver
     candidate: str                             # candidate id: content hash of the patch
     status: VerdictStatus
     revision: str | None                       # the candidate revision recorded for this patch, once recorded
-    aggregates: dict                           # {"validation": ...}: validation aggregates only; never per-case hidden data
+    aggregates: dict[str, AggregateScores]     # summary scores per split, only "validation"; empty while pending.
+                                               # AggregateScores (07-verification.md §2.6): cases, seeds,
+                                               # mean_delta (candidate minus parent), ci (95% interval)
     reasons: list[VerdictReasonCategory]       # no case ids
 ```
 
@@ -335,6 +395,8 @@ class Verdict:                                 # = StrategyVerdictView in 07-ver
   "reasons": ["validation_improved"]
 }
 ```
+
+在该示例中，平台在父版本和候选上各将 30 个隐藏验证用例运行了 3 次。候选的平均得分高出 0.061，95% 置信区间为 0.028 到 0.094。策略能看到这些汇总值，但看不到是哪些用例，因此无法针对隐藏的测试集调优自身。
 
 `accept` 表示候选在绑定的验证配置下通过了验证。它随后是否晋升到线上 bot，由门禁和风险等级决定（[08-promotion.zh-CN.md](08-promotion.zh-CN.md)）。判定类型及其聚合字段由 [07-verification.zh-CN.md](07-verification.zh-CN.md) 负责。候选 id 与候选修订版 id 是两个不同的哈希（分别针对补丁和生成的 `{spec, policy}`）；是否同时保留两者是记录在 [01-genome.zh-CN.md](01-genome.zh-CN.md) 中的一项待定决策。
 
@@ -398,6 +460,11 @@ class Operation:
 }
 ```
 
+操作是平台为策略执行的一件长时任务，分为两种：
+
+- **智能体会话**（`agent_session`）：平台在沙箱工作区中运行策略的某个智能体，例如 `clawevolve-tune` 编辑 `SKILL.md`。其结果是一个 `AgentResult`。
+- **训练评估**（`train_evaluation`）：平台*按工作区中的样子*针对**训练用例**运行 bot，并为每个回答评分，例如 20 个关于退款的用例。其结果是一个 `TrainResult`，包含每个用例的分数和评语。这里并没有机器学习意义上的训练。“训练”指的是策略可以查看并从中学习的那一划分的测试用例（参见 §4.2 中的 `evaluate.train@1` 部分）；平台自己用于决定判定的*验证*使用策略从未见过的其他用例。
+
 `AgentResult` 和 `TrainResult` 的具体字段是此处提议的；源材料只说明智能体结果包含“transcript 和退出状态”，训练评估返回“分数和评语”。
 
 ## 3. 原则与注册
@@ -431,6 +498,15 @@ class Operation:
 - 如果注册记录带有 `params_schema`，则绑定的 `params` 必须能通过它的校验。
 
 前两项由 Strategy Registry 回答（§9，`check_engine`）；整个绑定检查归 [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) 负责。
+
+### 3.4 旧版本继续运行
+
+绑定固定一个确切版本，例如 `clawevolve/bot-evolution@2.0.0`（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。发布新的策略代码会注册一个新版本。它绝不会替换旧版本，因此固定到 2.0.0 的 bot 会继续运行 2.0.0，直到其所有者将绑定移到更新的版本。
+
+- **`job_worker`**：版本*就是*它的镜像，在记录中按摘要固定。即使 2.1.0 已经存在，2.0.0 的运行仍会拉取 2.0.0 的镜像。镜像仓库必须保留每个已注册且仍被绑定的版本所指定的镜像。
+- **`in_process`**：代码是安装在 `apps/evolution` 中的包，因此只有安装在当前运行部署中的版本才能运行。只有平台拥有的策略使用这种运行时，并且每个平台发布版都必须继续包含绑定所固定的每个进程内版本。绑定检查会拒绝部署无法加载的版本（提议）。
+
+版本通过禁用来退役（按策略的紧急停止开关，[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）；固定到它的绑定随后将不再启动运行，直到其所有者移动它们。
 
 ## 4. 能力目录
 
@@ -484,9 +560,24 @@ class Operations(Protocol):
     async def wait(self, op_id: str, *, poll_s: float = 5) -> Operation: ...
 
 class BudgetMeter(Protocol):
-    def remaining(self) -> Budget: ...
+    def remaining(self) -> Budget: ...                               # Budget: 06-evolution-run.md
     async def charge(self, usd: float, reason: str) -> None: ...    # raises BudgetExhausted
+
+class RunLog(Protocol):
+    """Structured log lines for the run, shown on the run page and kept with it."""
+    async def info(self, message: str, **fields: object) -> None: ...   # e.g. info("round done", round=2, best=0.82)
+    async def warn(self, message: str, **fields: object) -> None: ...
+
+class ArtifactSink(Protocol):
+    """Files the run keeps beyond its log, e.g. a diagnosis report or an agent transcript."""
+    async def put(self, name: str, content: bytes) -> str: ...      # artifact id, e.g. "art_88"
+
+class CancellationToken(Protocol):
+    """Tells a long-running strategy that its run was cancelled (by the owner or a kill switch)."""
+    def is_set(self) -> bool: ...                                   # check between steps; stop when True
 ```
+
+例如，策略在某一步之后写入 `await ctx.log.info("diagnosed", findings=3)`，保存 `await ctx.artifacts.put("diagnosis.md", report)` 以便评审者稍后阅读，并在开始下一轮之前检查 `ctx.cancelled.is_set()`。
 
 `Workspace.read`/`write` 是提议的方法名；源材料只定义了 `materialise` 和 `to_patch`。
 
@@ -501,13 +592,30 @@ class Candidates(Protocol):
 **`models@1`（始终授予）。**
 
 ```python
-async def complete(self, *, messages: list[Message], model: str | None = None,
-                   max_tokens: int = 4096) -> Completion: ...
+class MessageRole(StrEnum):
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
+
+@dataclass(frozen=True)
+class Message:
+    role: MessageRole
+    content: str
+
+@dataclass(frozen=True)
+class Completion:
+    text: str                                  # the model's answer
+    model: str                                 # the model that answered, e.g. "provider/model-x"
+    cost_usd: float                            # charged to the run's budget
+
+class Models(Protocol):
+    async def complete(self, *, messages: list[Message], model: str | None = None,
+                       max_tokens: int = 4096) -> Completion: ...
 ```
 
 `models` 用于普通的模型调用：一次请求、一次响应，没有工具也没有多步骤。GEPA 风格的优化器改写提示词，或者记忆整合汇总反馈，都会使用它。策略没有自己的模型密钥或网络出口，因此每次模型调用都要经过它。平台会将调用计入预算，并在实验记录 H 中记录所用的模型（[05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md)）。`model` 是平台模型列表中的一个名称；省略时使用平台默认值。调用受 `max_tokens` 约束，因此它始终是一次短请求而不是操作（§6）。
 
-**`experience.sessions@1`。**
+**`experience.sessions@1`** 和 **`experience.feedback@1`** 都填充 `ctx.experience`，即一个 `ExperienceQuery`（定义于 [02-experience.zh-CN.md](02-experience.zh-CN.md)）；每个能力授予其中一个方法。
 
 ```python
 async def sessions(self, *, days: int, limit: int = 500,
@@ -545,9 +653,10 @@ async def feedback(self, *, days: int, kinds: list[FeedbackKind] | None = None,
 **`agents@1`**（以 `{"agents@1": {"definitions": {...}}}` 注册）。
 
 ```python
-async def start(self, definition: str, *, workspace: Workspace, prompt: str,
-                idempotency_key: str, timeout_s: int = 1800) -> str: ...  # operation id
-# when the operation succeeds, ctx.operations.get(op_id).result is an AgentResult
+class AgentRunner(Protocol):
+    async def start(self, definition: str, *, workspace: Workspace, prompt: str,
+                    idempotency_key: str, timeout_s: int = 1800) -> str: ...  # operation id
+    # when the operation succeeds, ctx.operations.get(op_id).result is an AgentResult
 ```
 
 例如，ClawEvolve 的调优步骤会调用 `ctx.agents.start("clawevolve-tune", workspace=ws, prompt=…, idempotency_key=…)`。平台在沙箱 `ws` 中（而不是在线上 bot 上）启动该智能体，并立即返回一个操作 id。智能体会话可能运行很多分钟，因此策略通过该 id 查询其状态（§6）；成功时，结果包含 transcript 和退出状态。它修改的文件会留在 `ws` 中，直到策略将其转为补丁。若调用指定了策略未注册的定义，则会被拒绝。
@@ -555,10 +664,14 @@ async def start(self, definition: str, *, workspace: Workspace, prompt: str,
 **`evaluate.train@1`。**
 
 ```python
-async def add_train_cases(self, cases: list[dict]) -> list[str]: ...     # case ids
-async def start_train(self, workspace: Workspace, *, idempotency_key: str) -> str: ...  # operation id
-# when the operation succeeds, ctx.operations.get(op_id).result is a TrainResult
+class TrainEvaluator(Protocol):
+    """Platform scoring of a workspace on the train cases, for the strategy's own feedback."""
+    async def add_train_cases(self, cases: list[dict]) -> list[str]: ...     # case ids
+    async def start_train(self, workspace: Workspace, *, idempotency_key: str) -> str: ...  # operation id
+    # when the operation succeeds, ctx.operations.get(op_id).result is a TrainResult
 ```
+
+**训练与验证。** 平台将每个 bot 的测试用例保存在不同的*划分*中（[07-verification.zh-CN.md](07-verification.zh-CN.md)）。**训练**划分是策略的练习集。策略可以向其中添加用例，在预算允许的范围内尽可能多次地让其工作区针对它运行，并读取每个分数和评语。**验证**划分（以及留出、回归、安全划分）是考试：平台在每个提交的候选上运行它以得出判定，而策略只能看到汇总数字。例如：ClawEvolve 编辑 `skills/refund-policy/SKILL.md`，然后调用 `ctx.evaluate.start_train(ws, …)`，得到 20 个训练用例中 14 个通过，每个失败都附有评语。它再次编辑，达到 17/20，然后提交。平台随后在 ClawEvolve 从未见过的验证用例上作出决定。
 
 策略可以*添加*用例；添加的用例进入**训练**划分。划分由平台分配，绝不由策略分配；策略不能修改评分器，也看不到验证划分的逐用例结果，以及留出、回归或安全用例。用例格式定义于 [07-verification.zh-CN.md](07-verification.zh-CN.md)。训练结果是给策略的反馈；它们绝不用于接受判定。
 
