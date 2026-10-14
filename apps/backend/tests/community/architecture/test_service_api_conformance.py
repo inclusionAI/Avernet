@@ -94,6 +94,8 @@ from agentclaw.community.api.source_credential_service import (
     SourceCredentialServiceProtocol,
 )
 from agentclaw.community.api.bot_space_service import BotSpaceServiceProtocol
+from agentclaw.community.api.engine_version_service import EngineVersionServiceProtocol
+from agentclaw.community.core.bot_management.engine_version.service import EngineVersionService
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.api.engine_connection_service import (
     EngineConnectionServiceProtocol,
@@ -342,6 +344,7 @@ _PAIRS = [
     (BotInventoryBotPort, BotService),
     (DesktopBotInventoryPort, DesktopBotService),
     (EngineConfigServiceProtocol, EngineConfigService),
+    (EngineVersionServiceProtocol, EngineVersionService),
     (EngineRuntimeRelayProtocol, EngineRuntimeRelay),
     (EngineConnectionServiceProtocol, EngineConnectionService),
     (HealthDiagnosisServiceProtocol, HealthDiagnosisService),

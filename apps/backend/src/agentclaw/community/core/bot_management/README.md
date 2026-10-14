@@ -39,6 +39,8 @@ consumes:
   - "CachePlugin quota lock"
   - "CapabilityDesiredStateRepositoryProtocol"
 internal_dependencies:
+  - agentclaw.community.plugin_api.device_adapter_transport
+  - agentclaw.community.core.engine_runtime
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.identity    # MCP execution identity carried into the restart Passport refresh
@@ -137,3 +139,10 @@ and receipt verification. An empty or unqueryable BaaS inventory and backup
 failures still block replacement. This change adds no API, schema, configuration,
 or frontend migration; it only removes the backup dependency from direct ARCA
 restart. Normal stop/start failures continue to propagate.
+
+## Engine release inspection
+
+`engine_version/` exposes an authorized, read-only Service API for personal and
+service draft Bot release checks. It consumes existing repositories, the
+DeviceContextResolver and DeviceAdapterTransport and never invokes lifecycle or
+publish-policy writes. See its README for the contract and deployment boundary.
