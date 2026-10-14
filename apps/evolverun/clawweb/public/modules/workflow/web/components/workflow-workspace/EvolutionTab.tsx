@@ -126,6 +126,7 @@ function DiagnosisPanel({
   const [instructions, setInstructions] = useState('')
   const [repairBusy, setRepairBusy] = useState(false)
   const [repairActionError, setRepairActionError] = useState('')
+  const [draftNeedsCheck, setDraftNeedsCheck] = useState(false)
   const [repairNotice, setRepairNotice] = useState('')
   const [selectedTaskId, setSelectedTaskId] = useState(initialRepairView.selectedTaskId)
   const [disposition, setDisposition] = useState<{ item: RepairInboxItem; action: 'no_action' | 'restore' } | null>(null)
@@ -259,7 +260,8 @@ function DiagnosisPanel({
   const activeRepairTask = repairData?.tasks.find(task => ['drafting', 'review', 'blocked', 'publishing', 'failed'].includes(task.phase))
   const selectedItems = selectedRepairIds.flatMap(id => selectionItems[id] ? [selectionItems[id]] : [])
   const selectedIssueCount = new Set(selectedItems.map(item => item.context?.signature ?? item.groupKey)).size
-  const generationReason = repairError ? '修复数据读取失败，请重试后再生成。'
+  const generationReason = draftNeedsCheck ? '提交结果尚未确认，请先核对任务状态。'
+    : repairError ? '修复数据读取失败，请重试后再生成。'
     : repairLoading || !repairData ? '正在读取修复权限与任务状态…'
     : !canEdit || !repairData.canEdit ? '你只有查看权限，不能生成修复草稿。'
     : activeRepairTask ? '已有修复任务，请继续审阅；生成失败可在任务内重试，无需取消。'
@@ -302,6 +304,7 @@ function DiagnosisPanel({
     setDraftOpen(false)
     setDisposition(null)
     setRepairActionError('')
+    setDraftNeedsCheck(false)
     setRepairPage(1)
     setIncludeHistorical(next)
   }
@@ -333,7 +336,7 @@ function DiagnosisPanel({
     }
   }
   const submitDraft = async () => {
-    if (!repairData || !selectedRepairIds.length || repairBusy || activeRepairTask
+    if (!repairData || !selectedRepairIds.length || repairBusy || activeRepairTask || draftNeedsCheck
       || !canEdit || !repairData.canEdit || !repairData.capabilities.generation || repairLoading || repairError) return
     const input = { workflowId, itemIds: selectedRepairIds, inputDigest: repairData.inputDigest,
       instructions, includeHistorical: repairData.includeHistorical }
@@ -354,8 +357,26 @@ function DiagnosisPanel({
         setSelectedRepairIds([]); setSelectionItems({}); closeDetail(); resetRequestId()
         setRepairActionError('建议来源已变化，原选择已清空；重新读取后请确认本次范围。')
         setRepairRefresh(value => value + 1)
-      } else setRepairActionError(failure.message)
+      } else {
+        setRepairActionError(failure.message)
+        if (failure.action === 'refresh-task') setDraftNeedsCheck(true)
+      }
     } finally { setRepairBusy(false) }
+  }
+  const recoverDraft = async () => {
+    if (repairBusy) return
+    setRepairBusy(true); setRepairActionError('')
+    try {
+      const result = await repairBatches.candidates(workflowId, { state: 'all', page: 1, pageSize: 1, includeHistorical })
+      if (result.workflowId !== workflowId) throw new Error('Workflow identity mismatch')
+      const task = result.tasks.find(task => ['drafting', 'review', 'blocked', 'publishing', 'failed'].includes(task.phase))
+      if (task) {
+        setSelectedTaskId(task.taskId); setDraftOpen(false)
+        setRepairNotice('已找到现有修复任务，进入审核并继续跟踪进度。')
+      } else setRepairActionError('任务状态已核对，可以再次提交当前范围；相同内容沿用原请求编号。')
+      setDraftNeedsCheck(false); setRepairRefresh(value => value + 1)
+    } catch (error) { setRepairActionError(repairReadError(error)) }
+    finally { setRepairBusy(false) }
   }
   const submitDisposition = async () => {
     if (!repairData || !disposition || !dispositionReason.trim() || repairBusy) return
@@ -441,6 +462,7 @@ function DiagnosisPanel({
   if (draftOpen) return <>
     <RepairSelectionWorkspace workflowId={workflowId} includeHistorical={includeHistorical} refreshToken={repairRefresh} selected={selectedRepairIds}
       selectedItems={selectedItems} instructions={instructions} busy={repairBusy} reason={generationReason} error={repairActionError}
+      onRecover={draftNeedsCheck ? () => void recoverDraft() : undefined}
       onInstructions={setInstructions} onToggle={toggleRepairItem} onResult={acceptRepairPage} onDetail={item => {
         setSelectionItems(current => ({ ...current, [item.itemId]: item })); setSelectedRepairItemId(item.itemId)
       }} onGenerate={() => void submitDraft()} onBack={() => { if (!repairBusy) { setDraftOpen(false); closeDetail() } }} />
@@ -466,6 +488,7 @@ function DiagnosisPanel({
       {repairOpen && repairError && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{repairError}<button type="button" className="ml-2 underline" onClick={() => setRepairRefresh(value => value + 1)}>重试</button></p>}
       {suggestionsLoading && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">历史建议仍在加载，不影响查看问题与修复任务。</p>}
       {repairNotice && <p role="status" className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">{repairNotice}</p>}
+      {draftNeedsCheck && <p role="alert" className="text-xs text-destructive">{repairActionError || '提交结果尚未确认。'} <button type="button" disabled={repairBusy} className="underline" onClick={() => void recoverDraft()}>核对任务状态</button></p>}
       {selectionNotice && !selectionNotice.startsWith('默认不选择') && <p role="status" className="text-xs text-amber-800">{selectionNotice}</p>}
 
 

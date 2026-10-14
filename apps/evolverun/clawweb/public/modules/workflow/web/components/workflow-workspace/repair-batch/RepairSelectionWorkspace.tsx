@@ -4,15 +4,16 @@ import { repairReadError } from '../../../api/repair-read-error'
 import type { RepairCandidatesResponse, RepairInboxItem } from '../../../../server/contracts/repair-workbench'
 import RepairWorkspace from './RepairWorkspace'
 import { changeSummary, sourceRunCount } from './RepairItemDetail'
-import { exclusion, itemTitle, primary, states } from './repair-view'
+import { button, exclusion, itemTitle, primary, states } from './repair-view'
 import { selectionConflicts } from './repair-selection'
 
 export default function RepairSelectionWorkspace({ workflowId, includeHistorical, refreshToken, selected, selectedItems, instructions, busy, reason, error,
-  onInstructions, onToggle, onResult, onDetail, onGenerate, onBack }: {
+  onInstructions, onToggle, onResult, onDetail, onGenerate, onBack, onRecover }: {
   workflowId: string; includeHistorical: boolean; refreshToken: number; selected: string[]; selectedItems: RepairInboxItem[];
   instructions: string; busy: boolean; reason: string; error: string;
   onInstructions: (value: string) => void; onToggle: (id: string) => void; onResult: (result: RepairCandidatesResponse) => void;
   onDetail: (item: RepairInboxItem) => void; onGenerate: () => void; onBack: () => void
+  onRecover?: () => void
 }) {
   const [page, setPage] = useState(1)
   const [data, setData] = useState<RepairCandidatesResponse | null>(null)
@@ -71,6 +72,6 @@ export default function RepairSelectionWorkspace({ workflowId, includeHistorical
       </aside>
     </div>
     {conflicts.length > 0 && <p role="alert" className="rounded border border-warning/30 bg-warning/10 p-4 text-xs text-warning-foreground">所选方案存在 {conflicts.length} 处结构冲突。候选将保留逐项结论；冲突未解决不能发布。</p>}
-    <footer className="sticky bottom-4 z-20 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-input bg-card px-5 py-4 shadow-sm"><div><p className="text-sm font-semibold">先改成草稿，不直接部署</p><p role={error ? 'alert' : 'status'} className={`mt-1 text-xs ${error ? 'text-destructive' : 'text-muted-foreground'}`}>{error || blocker || '来源、修改和检查结果一起进入任务详情。'}</p></div><button className={primary} disabled={busy || !!blocker || !selected.length} onClick={onGenerate}>{busy ? '提交中…' : '生成 Pack 草稿'}</button></footer>
+    <footer className="sticky bottom-4 z-20 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-input bg-card px-5 py-4 shadow-sm"><div><p className="text-sm font-semibold">先改成草稿，不直接部署</p><p role={error ? 'alert' : 'status'} className={`mt-1 text-xs ${error ? 'text-destructive' : 'text-muted-foreground'}`}>{error || blocker || '来源、修改和检查结果一起进入任务详情。'}</p></div><div className="flex gap-2">{onRecover && <button type="button" className={button} disabled={busy} onClick={onRecover}>核对任务状态</button>}<button className={primary} disabled={busy || !!blocker || !selected.length} onClick={onGenerate}>{busy ? '提交中…' : '生成 Pack 草稿'}</button></div></footer>
   </RepairWorkspace>
 }
