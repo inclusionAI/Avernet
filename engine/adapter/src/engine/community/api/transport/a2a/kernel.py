@@ -57,7 +57,7 @@ class _Run:
     __slots__ = ("run_id", "context_id", "state", "events", "bytes", "last_seq",
                  "saw_delta", "cache_limit", "subscribers", "lock",
                  "replay_expires_at", "idempotency_key", "request_digest",
-                 "latest_text")
+                 "latest_text", "native_run_id")
 
     def __init__(self, run_id: str, context_id: str):
         self.run_id = run_id
@@ -73,6 +73,8 @@ class _Run:
         self.replay_expires_at: float | None = None
         self.idempotency_key: str | None = None
         self.request_digest: str | None = None
+        self.native_run_id: str | None = None   # engine 的原生 runId (bridge 首帧写入)
+
         # R12-7: content snapshot maintained independently of the replay
         # buffer — cache_limit clears events but GetTask still answers with
         # the latest generated text.
@@ -86,6 +88,8 @@ class A2aKernel:
         self.runs: dict[str, _Run] = {}
         self._idem: dict[tuple[str, str], str] = {}
         self._inject_dedup: dict[tuple[str, str], tuple[str, float]] = {}
+        # E4/H1: interactionId → rid 注册表（HITL resolve 定位 run）
+        self._interactions: dict[str, str] = {}
         self._context_subs: dict[str, list[asyncio.Queue]] = {}
         self._total_bytes = 0
         self._global_lock = asyncio.Lock()
@@ -265,6 +269,7 @@ class A2aKernel:
     async def publish_interaction_requested(self, rid: str,
                                             interaction_id: str,
                                             payload: dict[str, Any]) -> None:
+        self._interactions[interaction_id] = rid
         """HITL 请求：state 转 INPUT_REQUIRED（终态之外的专用状态，
         complete_run 语义不变）。"""
         r = self.runs[rid]
@@ -400,3 +405,17 @@ class A2aKernel:
 
     def get_run(self, rid: str) -> _Run | None:
         return self.runs.get(rid)
+
+    def interaction_run(self, interaction_id: str) -> tuple[str, Run] | None:
+        """E4/H1: (rid, run)——不存在/已驱逐返回 None。"""
+        rid = self._interactions.get(interaction_id)
+        if rid is None:
+            return None
+        r = self.runs.get(rid)
+        return (rid, r) if r else None
+
+    def note_native_run_id(self, rid: str, native_run_id: str) -> None:
+        """E4: engine 原生 runId 一次性写入（先到先得）。"""
+        r = self.runs.get(rid)
+        if r is not None and r.native_run_id is None:
+            r.native_run_id = native_run_id

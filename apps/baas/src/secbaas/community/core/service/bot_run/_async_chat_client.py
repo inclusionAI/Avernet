@@ -213,6 +213,7 @@ class AsyncChatClient:
             raise ValueError(f"invalid a2a_mode: {a2a_mode!r}")
         self._a2a_mode = a2a_mode
         self._transport: str = "v3-ws"
+        self._v3_fallback = None          # B3: A2A 传输上附件请求的 v3 重路由
         self.headers = headers or {}
         self.client_id = client_id or f"client-{uuid.uuid4().hex[:8]}"
         self.client_version = client_version
@@ -664,7 +665,12 @@ class AsyncChatClient:
             # 发送消息（不等待响应）
             logger.info("[inject] Injecting message: session_key=%s", session_key)
             assert self._client is not None
-            inject_result = await self._client.chat_inject(
+            # B3（16-5）双入口：附件经 v3 fallback 重路由（与发送入口同语义）
+            if attachments and self._transport == "a2a":
+                target = await self._ensure_v3_fallback()
+            else:
+                target = self._client
+            inject_result = await target.chat_inject(
                 session_key=session_key,
                 message=message,
                 auth_token=auth_token,
@@ -698,6 +704,34 @@ class AsyncChatClient:
             if self._concurrency_sem is not None:
                 self._concurrency_sem.release()
 
+    async def _ensure_v3_fallback(self):
+        """B3（16-5）：A2A 连接上的附件请求→懒建 v3 专用客户端。
+
+        handlers 从当前传输桥面复刻双注册（两个客户端 duck 面等义——同一套
+        编排回调，会话收流一致性由 payload 形状契约保证）；on_disconnect
+        刻意不挂（R17-5 的会话归属隔离裁决）。单连接、不池化、close 收口。
+        """
+        if self._v3_fallback is not None:
+            return self._v3_fallback
+        from secbaas.community.core.service.bot_run._bot_websocket_client import (
+            BotWebSocketClient,
+        )
+        client = BotWebSocketClient(
+            uri=self.uri, client_id=self.client_id,
+            client_version=self.client_version, headers=self.headers)
+        await client.connect()
+        for event_name, handler in self._event_bridge_snapshot().items():
+            client.on_event(event_name, handler)
+        self._v3_fallback = client
+        return client
+
+    def _event_bridge_snapshot(self) -> dict:
+        """当前传输的已注册 handlers 快照（B3 双注册用）。"""
+        source = self._client
+        if source is None:
+            return {}
+        return dict(getattr(source, "_event_handlers", None) or {})
+
     async def close(self) -> None:
         """关闭连接并清理所有 session state。"""
         self._closed_intentionally = True
@@ -714,6 +748,12 @@ class AsyncChatClient:
         if self._client:
             await self._client.close()
             self._client = None
+        if self._v3_fallback is not None:
+            try:
+                await self._v3_fallback.close()
+            except Exception:
+                logger.exception("v3 fallback close failed")
+            self._v3_fallback = None
 
         interaction_tasks = list(self._interaction_tasks.values())
         for task in interaction_tasks:
@@ -790,7 +830,16 @@ class AsyncChatClient:
             session_key,
             timeout,
         )
-        send_result = await self._client.chat_send(
+        # ── B3（16-5）请求级特性门：A2A 传输上的附件请求重路由到 v3 专用
+        # 连接——不静默丢参、不硬错。v3 fallback 懒创建一次；事件 handlers
+        # 双注册（同一套编排回调）；on_disconnect 刻意**不**注册（R17-5：
+        # 全局断连回调会误杀 A2A 侧正常运行中的请求——断连由 fallback 自身
+        # recv 循环的断流路径上报）。close() 一并收口。
+        if attachments and self._transport == "a2a":
+            target = await self._ensure_v3_fallback()
+        else:
+            target = self._client
+        send_result = await target.chat_send(
             session_key=session_key,
             message=message,
             auth_token=auth_token,

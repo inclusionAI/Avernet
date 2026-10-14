@@ -147,6 +147,12 @@ async def _dispatch_to_engine(kernel: A2aKernel, rid: str, context_id: str,
             state = payload.get("state", "")
             run_id = payload.get("runId")
 
+            # E4-3b: engine 原生 runId 首见即登记（resolve 转发用它——
+            # kernel rid 是传输层 id，engine 不认识）。
+            if isinstance(run_id, str) and run_id and \
+                    not run_id.startswith("inject-"):
+                kernel.note_native_run_id(rid, run_id)
+
             # R12-3: engine-callback inject frames (runId=inject-*) are
             # session-level fanout, never this run's stream or terminal —
             # ws_server keeps the same exception at :1746-1763.

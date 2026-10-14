@@ -660,3 +660,150 @@ def test_base_url_resolution(monkeypatch):
     assert get_local_base_url() == "http://127.0.0.1:20004"
     monkeypatch.setenv("A2A_PUBLIC_BASE_URL", "https://gw.example.com/x/")
     assert get_local_base_url() == "https://gw.example.com/x"
+
+# ══════════ E4: ResolveInteraction 全闭环（HITL 三行判定）══════════
+
+class _FakeResolveChat:
+    """三 resolve 方法 +.success 契约（R17-3 形状）。"""
+
+    mro_marker = "resolve_capability"
+
+    def __init__(self, *, fail_once=False, fail_code="REJECTED"):
+        self.calls: list[tuple[str, dict]] = []
+        self.fail_once = fail_once
+        self.fail_code = fail_code
+
+    async def resolve_exec_approval(self, session_key, run_id, decision,
+                                    message=None):
+        return self._record("exec", session_key=session_key,
+                            run_id=run_id, decision=decision,
+                            message=message)
+
+    async def resolve_interaction(self, session_key, run_id, response):
+        return self._record("ask_user", session_key=session_key,
+                            run_id=run_id, response=response)
+
+    async def resolve_mode_transition(self, session_key, run_id, decision):
+        return self._record("mode_switch", session_key=session_key,
+                            run_id=run_id, decision=decision)
+
+    def _record(self, kind, **params):
+        self.calls.append((kind, params))
+        if self.fail_once:
+            self.fail_once = False
+            return {"success": False, "error": {"code": self.fail_code,
+                                                "message": "denied"}}
+        return {"success": True, "payload": {}}
+
+
+def _install_resolve_bridge(monkeypatch, fake):
+    import engine.community.api.transport.a2a.router as R
+    import engine.community.api.transport.a2a.engine_bridge as B
+
+    def fake_plugin():
+        return fake
+    monkeypatch.setattr(B, "_chat_plugin", fake_plugin)
+    return R
+
+
+@pytest.mark.asyncio
+async def test_resolve_interaction_full_loop(monkeypatch):
+    fake = _FakeResolveChat()
+    R = _install_resolve_bridge(monkeypatch, fake)
+    R._kernel = kernel_mod.A2aKernel()
+    k = R._kernel
+
+    rid, _ = await k.open_run("hitl-ctx", "k", "first", "d")
+    k.runs[rid].native_run_id = "native-42"
+    await k.publish_interaction_requested(
+        rid, "i-1", {"kind": "exec", "prompt": "rm test?"})
+
+    out = await R._resolve_interaction(
+        {"interactionId": "i-1",
+         "resolution": {"decision": "approve", "kind": "exec",
+                        "message": "ok go"}}, 1, None)
+    assert out["interaction"]["resolved"] is True, out
+    # 引擎收到正确方法 + native id（16-3b）+ 完整决策字段
+    kind, params = fake.calls[0]
+    assert kind == "exec"
+    assert params["run_id"] == "native-42"       # 不是 kernel rid
+    assert params["decision"] == "approve"
+    assert params["message"] == "ok go"          # message 不丢
+    # run 恢复 WORKING + resolved 事件广播
+    assert k.runs[rid].state == "TASK_STATE_WORKING"
+    backlog, _ = await k.subscribe(rid, since_seq=0)
+    resolved_events = [e for e in backlog if e["type"] == "statusUpdate"]
+    assert any(e["ev"]["statusUpdate"].get("metadata", {}).get(
+        "engine_frame", {}).get("interactionId") == "i-1"
+        for e in resolved_events)
+
+
+@pytest.mark.asyncio
+async def test_resolve_interaction_conflict_and_not_found(monkeypatch):
+    fake = _FakeResolveChat()
+    R = _install_resolve_bridge(monkeypatch, fake)
+    R._kernel = kernel_mod.A2aKernel()
+    k = R._kernel
+
+    # not found
+    out = await R._resolve_interaction(
+        {"interactionId": "ghost",
+         "resolution": {"decision": "approve"}}, 1, None)
+    assert out["error"]["data"]["reason"] == "not_found"
+
+    # conflict：已 resolve 后重复提交（run 已回 WORKING）
+    rid, _ = await k.open_run("hitl-ctx2", "k2", "first", "d")
+    k.runs[rid].native_run_id = "n"
+    await k.publish_interaction_requested(rid, "i-2", {})
+    await k.publish_interaction_resolved(rid, {})   # 决策已有
+    out2 = await R._resolve_interaction(
+        {"interactionId": "i-2",
+         "resolution": {"decision": "approve"}}, 2, None)
+    assert out2["error"]["data"]["reason"] == "resolve_conflict"
+    assert fake.calls == []                        # 引擎收到 0 次二次执行
+
+
+@pytest.mark.asyncio
+async def test_resolve_engine_rejection_and_internal_error(monkeypatch):
+    fake = _FakeResolveChat(fail_once=True, fail_code="INTERNAL_ERROR")
+    R = _install_resolve_bridge(monkeypatch, fake)
+    R._kernel = kernel_mod.A2aKernel()
+    k = R._kernel
+    rid, _ = await k.open_run("hitl-ctx3", "k3", "first", "d")
+    k.runs[rid].native_run_id = "n"
+    await k.publish_interaction_requested(rid, "i-3", {})
+
+    out = await R._resolve_interaction(
+        {"interactionId": "i-3",
+         "resolution": {"decision": "approve", "kind": "exec"}}, 1, None)
+    # INTERNAL_ERROR → unknown_outcome（结果不可知——engine 可能已接决策）
+    assert out["error"]["data"]["reason"] == "unknown_outcome"
+    assert k.runs[rid].state == "TASK_STATE_INPUT_REQUIRED"  # 状态不回写
+
+
+@pytest.mark.asyncio
+async def test_resolve_validate_response_contract(monkeypatch):
+    """_forward_resolve 判定必须用 R17-3 的真实 {success} 契约——
+    一个返回 {ok: True} 的引擎 adapter 会被误判失败。"""
+    class _OldContractChat:
+        async def resolve_interaction(self, session_key, run_id, response):
+            return {"success": False,
+                    "error": {"code": "OLD",
+                               "message": "engine returned legacy shape"}}
+
+        async def resolve_exec_approval(self, **kwargs):
+            raise AssertionError("exec expected for kind=exec only when asked")
+
+        async def resolve_mode_transition(self, **kwargs):
+            raise AssertionError("mode switch expected for kind=mode_switch only")
+
+    fake = _OldContractChat()
+    R = _install_resolve_bridge(monkeypatch, fake)
+    k = R._kernel = kernel_mod.A2aKernel()
+    rid, _ = await k.open_run("hitl-ctx4", "k4", "first", "d")
+    k.runs[rid].native_run_id = "n"
+    await k.publish_interaction_requested(rid, "i-4", {})
+    out = await R._resolve_interaction(
+        {"interactionId": "i-4",
+         "resolution": {"decision": "approve"}}, 1, None)
+    assert out["error"]["data"]["reason"] == "resolve_forward_failed"

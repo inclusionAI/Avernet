@@ -51,7 +51,7 @@ _BRIDGE_TASKS: set[asyncio.Task] = set()
 # Methods that can trigger engine execution — gated exactly like ws_server's
 # handling of chat.send / chat.inject.
 _GATED_METHODS = frozenset({"SendMessage", "SendStreamingMessage",
-                            "InjectContext"})
+                            "InjectContext", "ResolveInteraction"})
 
 _HANDLERS: dict[str, Any] = {}
 
@@ -98,6 +98,22 @@ def _canonical_context(method: str, params: dict[str, Any], rid: Any
     Returns (canonical_ctx_or_None, message_text) — ctx None means the
     handler's own validation rejects later (kept out of the gate path).
     """
+    if method == "ResolveInteraction":
+        # E4/16-7: canonical session 从 interaction 所属 run 定位（gate
+        # 与执行同源，R13-3 约束）；text=gate 判定用的 decision。
+        iid = params.get("interactionId")
+        if not isinstance(iid, str) or not iid:
+            raise _ParamError("interactionId is required (string)")
+        located = _kernel.interaction_run(iid)
+        if located is None or located[1].state in wire.TERMINAL_STATES:
+            # gate 前即不存在——留给 handler 出结构化 not_found
+            return None, ""
+        run = located[1]
+        resolution = params.get("resolution")
+        decision = (resolution.get("decision", "") if isinstance(
+            resolution, dict) else "")
+        return run.context_id, str(decision)
+
     msg = params.get("message")
     if method == "InjectContext":
         ctx = params.get("contextId")
@@ -554,6 +570,117 @@ async def _inject_context(params: dict[str, Any], rid: Any,
     return {"inject": "accepted"}
 
 _HANDLERS["InjectContext"] = _inject_context
+
+
+# ── E4: ResolveInteraction — HITL same-run resolve closed loop ──────────────
+
+class _ResolveRejected(Exception):
+    """Engine deliberately refused the resolve decision.
+
+    ``code`` carries the engine error code (structural classification —
+    R17-3: real port contract is ``{success, payload|error}``; ``success``
+    is the判定 field, not ``ok``); INTERNAL_ERROR 保持 R14 的"结果不可知"。
+    """
+
+    def __init__(self, message: str, *, code: str = "UNKNOWN"):
+        super().__init__(message)
+        self.code = code
+
+
+async def _forward_resolve(*, session_key: str, run: Any,
+                           resolution: dict[str, Any]) -> None:
+    """E4/16-3: 三类决策分发到 engine adapter 三方法（16-3b：native_run_id）。
+
+    Raises _ResolveRejected（结构化 code）——Internal ids检查先行。"""
+    from engine.community.api.transport.a2a.engine_bridge import _chat_plugin
+
+    native = run.native_run_id
+    if not isinstance(native, str) or not native:
+        raise RuntimeError(
+            "native run id unavailable (run has no engine frames yet)")
+    chat = _chat_plugin()
+    kind = resolution.get("kind")
+    decision = resolution.get("decision")
+
+    if kind == "exec":
+        coro = chat.resolve_exec_approval(
+            session_key=session_key, run_id=native, decision=decision,
+            message=resolution.get("message"))
+    elif kind in ("ask_user", None):
+        coro = chat.resolve_interaction(
+            session_key=session_key, run_id=native,
+            response=resolution.get("answer") or resolution.get("message"))
+    elif kind == "mode_switch":
+        coro = chat.resolve_mode_transition(
+            session_key=session_key, run_id=native, decision=decision)
+    else:
+        raise _ParamError(f"unsupported resolution kind: {kind!r}")
+
+    result = await asyncio.wait_for(coro, _RESOLVE_FORWARD_TIMEOUT_SECONDS)
+    # R17-3: engine/port 的真实契约是 {success, payload|error}——不是 {ok}。
+    if not result.get("success"):
+        err = result.get("error") or {}
+        raise _ResolveRejected(
+            str(err.get("message", "engine resolve rejected")),
+            code=str(err.get("code", "UNKNOWN")))
+
+
+_RESOLVE_FORWARD_TIMEOUT_SECONDS = 30.0
+
+
+async def _resolve_interaction(params: dict[str, Any], req_id: Any,
+                               _gated_key: str | None) -> dict[str, Any]:
+    """H1/E4: 同 run 决策提交——§8.6 契约三行判定。
+
+    not_found / resolve_conflict / 成功恢复 WORKING（+resolved 事件）。
+    """
+    interaction_id = params.get("interactionId")
+    if not isinstance(interaction_id, str) or not interaction_id:
+        raise _ParamError("interactionId is required (string)")
+    resolution = params.get("resolution")
+    if not isinstance(resolution, dict) or not resolution.get("decision"):
+        raise _ParamError("resolution.decision is required")
+
+    located = _kernel.interaction_run(interaction_id)
+    if located is None or located[1].state in wire.TERMINAL_STATES:
+        return {"error": {"code": -32000, "message": "interaction not found",
+                          "data": {"reason": "not_found"}}}
+    rid, run = located
+    if run.state != "TASK_STATE_INPUT_REQUIRED":
+        return {"error": {"code": -32003,
+                          "message": f"run not awaiting input "
+                                     f"(state={run.state})",
+                          "data": {"reason": "resolve_conflict"}}}
+
+    try:
+        await _forward_resolve(session_key=run.context_id, run=run,
+                               resolution=resolution)
+    except _ResolveRejected as e:
+        if e.code == "INTERNAL_ERROR":
+            # R14 对位：engine 结果不可知——run 状态不回写为 WORKING，
+            # 保持 INPUT_REQUIRED（决策未确认；同键重复 resolve 仍 conflict
+            # 分支语义——交互仍悬而未决）。
+            return {"error": {"code": -32000,
+                              "message": "resolve outcome unknown",
+                              "data": {"reason": "unknown_outcome"}}}
+        return {"error": {"code": -32000, "message": str(e)[:200],
+                          "data": {"reason": "resolve_forward_failed"}}}
+    except asyncio.TimeoutError:
+        return {"error": {"code": -32000,
+                          "message": "resolve outcome unknown (timeout)",
+                          "data": {"reason": "unknown_outcome"}}}
+    except RuntimeError as e:
+        return {"error": {"code": -32000, "message": str(e)[:200],
+                          "data": {"reason": "resolve_target_unavailable"}}}
+
+    await _kernel.publish_interaction_resolved(
+        rid, {"interactionId": interaction_id,
+              "kind": resolution.get("kind"),
+              "decision": resolution.get("decision")})
+    return {"interaction": {"resolved": True, "runId": rid}}
+
+
+_HANDLERS["ResolveInteraction"] = _resolve_interaction
 
 
 async def _subscribe_context(params: dict[str, Any], req_id: Any,
