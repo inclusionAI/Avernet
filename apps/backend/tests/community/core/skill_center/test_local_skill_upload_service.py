@@ -441,12 +441,9 @@ class _CapturedSecurityObserver:
             raise self.error
 
 
-class _FormalIdentityBinding:
-    def get_formal_incarnation_id(self, **_kwargs):
-        return getattr(self, "_formal_incarnation_id", None)
-
-    def bind_formal_incarnation_id(self, **kwargs):
-        self._formal_incarnation_id = kwargs["incarnation_id"]
+class _ObservedIdentityReader:
+    def get_observed_incarnation_id(self, **_kwargs):
+        return getattr(self, "_observed_incarnation_id", None)
 
 
 class _Cleanup:
@@ -833,7 +830,7 @@ async def test_upload_saves_exact_snapshot_and_schedules_independent_security_wo
         def read_object(self, key):
             return ObjectReadResult(ObjectReadStatus.FOUND, self.values[key])
 
-    class _SecurityRepository(_FormalIdentityBinding):
+    class _SecurityRepository(_ObservedIdentityReader):
         def __init__(self):
             self.identity_calls = []
             self.observations = []
@@ -944,7 +941,7 @@ async def test_scan_enqueue_failure_is_recorded_and_does_not_cancel_sync():
         def read_object(self, key):
             return ObjectReadResult(ObjectReadStatus.FOUND, self.saved[key])
 
-    class _Repository(_FormalIdentityBinding):
+    class _Repository(_ObservedIdentityReader):
         def __init__(self):
             self.errors = []
 
@@ -1006,7 +1003,7 @@ def test_first_observed_replacement_uses_only_recorded_security_identity(
         def read_object(self, key):
             return ObjectReadResult(ObjectReadStatus.FOUND, self.values[key])
 
-    class _Repository(_FormalIdentityBinding):
+    class _Repository(_ObservedIdentityReader):
         def __init__(self):
             self.creator_id = None
 
@@ -1132,7 +1129,7 @@ async def test_timed_out_snapshot_cannot_make_older_replacement_current(
         def read_object(self, key):
             return ObjectReadResult(ObjectReadStatus.FOUND, self.values[key])
 
-    class _SecurityRepository(_FormalIdentityBinding):
+    class _SecurityRepository(_ObservedIdentityReader):
         def __init__(self):
             self.current = None
             self.failures = []
@@ -1214,7 +1211,7 @@ async def test_ambiguous_snapshot_write_retains_reconcilable_failure_fact():
         def read_object(self, *_args):
             raise AssertionError("must not read")
 
-    class _FailureRepository(_FormalIdentityBinding):
+    class _FailureRepository(_ObservedIdentityReader):
         def __init__(self):
             self.failures = []
 
@@ -1260,7 +1257,7 @@ async def test_identity_failure_keeps_verified_exact_snapshot_for_repair():
         def read_object(self, key):
             return ObjectReadResult(ObjectReadStatus.FOUND, self.values[key])
 
-    class _Repository(_FormalIdentityBinding):
+    class _Repository(_ObservedIdentityReader):
         def __init__(self):
             self.failures = []
 
@@ -1305,7 +1302,7 @@ async def test_reservation_finishing_after_timeout_cannot_observe_older_upload(
 ):
     monkeypatch.setattr(upload_module, "SECURITY_HANDOFF_TIMEOUT_SECONDS", 0.05)
 
-    class _OrderingRepository(_FormalIdentityBinding):
+    class _OrderingRepository(_ObservedIdentityReader):
         def __init__(self):
             self.entered = threading.Event()
             self.release = threading.Event()

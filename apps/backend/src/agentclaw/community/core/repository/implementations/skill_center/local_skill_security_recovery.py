@@ -107,7 +107,6 @@ def _live_local_asset_match(row: ObservationRow):
         skill.bolt_id == row.bot_id,
         skill.user_id == row.owner_id,
         skill.git_path.like("local://%"),
-        skill.skill_uuid == row.incarnation_id,
     )
 
 
@@ -148,7 +147,7 @@ class LocalSkillSecurityRecoveryQueries:
             )
             cursor = after_observation_id
             result: list[LocalSkillSecurityObservation] = []
-            latest_identity: dict[tuple[str, str, int, str], ObservationRow | None] = {}
+            latest_identity: dict[tuple[str, str, int], ObservationRow | None] = {}
             while len(result) < limit:
                 page = query
                 if cursor is not None:
@@ -157,21 +156,22 @@ class LocalSkillSecurityRecoveryQueries:
                 if not rows:
                     break
                 for row, live_skill_id in rows:
-                    key = (row.bot_id, row.owner_id, int(row.skill_id), row.incarnation_id)
+                    key = (row.bot_id, row.owner_id, int(row.skill_id))
                     if key not in latest_identity:
                         latest_identity[key] = self._latest_row(
                             session, tenant, env, row.bot_id, row.owner_id,
-                            int(row.skill_id), row.incarnation_id,
+                            int(row.skill_id),
                         )
                     latest = latest_identity[key]
+                    deleted_scan = row.check_id is not None and self._latest_row(
+                        session, tenant, env, row.bot_id, row.owner_id,
+                        int(row.skill_id), row.incarnation_id,
+                    ).handoff_stage == "DELETED"
                     if (
-                        latest is not None
-                        and latest.incarnation_id == row.incarnation_id
-                        and latest.provider_skill_id == row.provider_skill_id
-                        and (
-                            live_skill_id is not None
-                            or (row.check_id is not None and latest.handoff_stage == "DELETED")
-                        )
+                        (latest is not None and latest.incarnation_id == row.incarnation_id
+                         and latest.provider_skill_id == row.provider_skill_id
+                         and live_skill_id is not None)
+                        or deleted_scan
                     ):
                         result.append(_observation(row))
                         if len(result) == limit:
@@ -230,7 +230,7 @@ class LocalSkillSecurityRecoveryQueries:
                         continue
                     latest = self._latest_row(
                         session, tenant, env, row.bot_id, row.owner_id,
-                        int(row.skill_id), row.incarnation_id,
+                        int(row.skill_id), row.incarnation_id if row.handoff_stage == "DELETED" else None,
                     )
                     if latest is not None and latest.observation_id == row.observation_id:
                         result.append(_identity(row))

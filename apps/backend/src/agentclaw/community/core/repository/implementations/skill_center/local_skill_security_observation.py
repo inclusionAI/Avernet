@@ -73,8 +73,7 @@ class LocalSkillSecurityObservationRepository(
 
     @staticmethod
     def _formal_matches(session: Session, tenant: str, env: str, bot_id: str,
-                        owner_id: str, skill_id: int,
-                        incarnation_id: str | None = None) -> bool:
+                        owner_id: str, skill_id: int) -> bool:
         query = session.query(Skill.id).filter(
             Skill.id == skill_id,
             Skill.avernet_tenant == tenant,
@@ -83,67 +82,45 @@ class LocalSkillSecurityObservationRepository(
             Skill.user_id == owner_id,
             Skill.git_path.like("local://%"),
         )
-        if incarnation_id is not None:
-            query = query.filter(Skill.skill_uuid == incarnation_id)
         return query.first() is not None
 
     def _assert_incarnation(self, session: Session, *, tenant: str, env: str,
                             bot_id: str, owner_id: str, skill_id: int,
-                            incarnation_id: str) -> None:
+                            incarnation_id: str, allow_new: bool = False) -> None:
         if not self._formal_matches(
-            session, tenant, env, bot_id, owner_id, skill_id, incarnation_id
+            session, tenant, env, bot_id, owner_id, skill_id
         ):
             raise AssetIncarnationMismatchError(
                 "formal Local Skill no longer matches the security identity"
             )
+        latest = self._latest_row(session, tenant, env, bot_id, owner_id, skill_id)
+        if latest is None and allow_new:
+            return
+        if (latest is not None and latest.handoff_stage == "DELETED"
+                and latest.incarnation_id != incarnation_id and allow_new):
+            return
+        if latest is None or latest.handoff_stage == "DELETED" or latest.incarnation_id != incarnation_id:
+            raise AssetIncarnationMismatchError("security identity is no longer current")
 
-    def get_formal_incarnation_id(
+    def get_observed_incarnation_id(
         self, *, env: str, bot_id: str, owner_id: str, skill_id: int
     ) -> str | None:
         tenant = get_current_avernet_tenant()
         with self._db.transactional_orm_session() as session:
-            return session.query(Skill.skill_uuid).filter(
-                Skill.id == skill_id,
-                Skill.avernet_tenant == tenant,
-                Skill.env == env,
-                Skill.bolt_id == bot_id,
-                Skill.user_id == owner_id,
-                Skill.git_path.like("local://%"),
-            ).scalar()
-
-    def bind_formal_incarnation_id(
-        self, *, env: str, bot_id: str, owner_id: str, skill_id: int,
-        incarnation_id: str,
-    ) -> None:
-        """Bind the existing formal UUID column after the upload succeeds."""
-        tenant = get_current_avernet_tenant()
-        with self._db.transactional_orm_session() as session:
-            session.query(Skill).filter(
-                Skill.id == skill_id,
-                Skill.avernet_tenant == tenant,
-                Skill.env == env,
-                Skill.bolt_id == bot_id,
-                Skill.user_id == owner_id,
-                Skill.git_path.like("local://%"),
-                Skill.skill_uuid.is_(None),
-            ).update({Skill.skill_uuid: incarnation_id}, synchronize_session=False)
-            if not self._formal_matches(
-                session, tenant, env, bot_id, owner_id, skill_id, incarnation_id
-            ):
-                raise AssetIncarnationMismatchError(
-                    "formal Local Skill no longer matches the security identity"
-                )
+            if not self._formal_matches(session, tenant, env, bot_id, owner_id, skill_id):
+                return None
+            latest = self._latest_row(session, tenant, env, bot_id, owner_id, skill_id)
+            return latest.incarnation_id if latest is not None and latest.handoff_stage != "DELETED" else None
 
     def record_asset_deleted(
         self, *, env: str, bot_id: str, owner_id: str,
-        skill_id: int, actor_id: str, incarnation_id: str,
+        skill_id: int, actor_id: str,
     ) -> LocalSkillSecurityIdentity | None:
         for attempt in range(3):
             try:
                 return self._record_asset_deleted_once(
                     env=env, bot_id=bot_id, owner_id=owner_id,
                     skill_id=skill_id, actor_id=actor_id,
-                    incarnation_id=incarnation_id,
                 )
             except IntegrityError as exc:
                 if attempt == 2 or not _upload_order_conflict(exc):
@@ -152,13 +129,11 @@ class LocalSkillSecurityObservationRepository(
 
     def _record_asset_deleted_once(
         self, *, env: str, bot_id: str, owner_id: str,
-        skill_id: int, actor_id: str, incarnation_id: str,
+        skill_id: int, actor_id: str,
     ) -> LocalSkillSecurityIdentity | None:
         tenant = get_current_avernet_tenant()
         with self._db.transactional_orm_session() as session:
-            latest = self._latest_row(
-                session, tenant, env, bot_id, owner_id, skill_id, incarnation_id
-            )
+            latest = self._latest_row(session, tenant, env, bot_id, owner_id, skill_id)
             if latest is None:
                 return None
             if latest.handoff_stage == "DELETED":
@@ -212,10 +187,12 @@ class LocalSkillSecurityObservationRepository(
             )
             if row is None:
                 return None
-            if row.handoff_stage != "DELETED" and not self._formal_matches(
-                session, tenant, env, bot_id, owner_id, skill_id, incarnation_id
-            ):
-                return None
+            if row.handoff_stage != "DELETED":
+                current = self._latest_row(session, tenant, env, bot_id, owner_id, skill_id)
+                if current is None or current.id != row.id or not self._formal_matches(
+                    session, tenant, env, bot_id, owner_id, skill_id
+                ):
+                    return None
             return _identity(row)
 
     def reserve_handoff(
@@ -252,7 +229,7 @@ class LocalSkillSecurityObservationRepository(
             self._assert_incarnation(
                 session, tenant=tenant, env=env, bot_id=bot_id,
                 owner_id=owner_id, skill_id=skill_id,
-                incarnation_id=incarnation_id,
+                incarnation_id=incarnation_id, allow_new=True,
             )
             # Device uploads use the Bot edit guard. Manifest deletion may
             # interleave, so the caller retries this table's unique-order race.
@@ -295,12 +272,12 @@ class LocalSkillSecurityObservationRepository(
         tenant = get_current_avernet_tenant()
         with self._db.transactional_orm_session() as session:
             if not self._formal_matches(
-                session, tenant, env, bot_id, owner_id, skill_id, incarnation_id
+                session, tenant, env, bot_id, owner_id, skill_id
             ):
                 return None
-            row = self._latest_row(
-                session, tenant, env, bot_id, owner_id, skill_id, incarnation_id
-            )
+            row = self._latest_row(session, tenant, env, bot_id, owner_id, skill_id)
+            if row is None or row.incarnation_id != incarnation_id or row.handoff_stage == "DELETED":
+                return None
             return _handoff(row) if row is not None else None
 
     def get_handoff_failure(
@@ -414,14 +391,13 @@ class LocalSkillSecurityObservationRepository(
         tenant = get_current_avernet_tenant()
         with self._db.transactional_orm_session() as session:
             if not self._formal_matches(
-                session, tenant, env, bot_id, owner_id, skill_id, incarnation_id
+                session, tenant, env, bot_id, owner_id, skill_id
             ):
                 return None
-            row = self._latest_row(
-                session, tenant, env, bot_id, owner_id, skill_id, incarnation_id
-            )
+            row = self._latest_row(session, tenant, env, bot_id, owner_id, skill_id)
             if (
                 row is None
+                or row.incarnation_id != incarnation_id
                 or row.handoff_stage != "OBSERVED" or not row.observation_committed
             ):
                 return None
@@ -494,6 +470,16 @@ class LocalSkillSecurityObservationRepository(
     def claim_scan_submission(self, *, env: str, observation_id: str) -> bool:
         tenant = get_current_avernet_tenant()
         with self._db.transactional_orm_session() as session:
+            row = session.query(ObservationRow).filter_by(
+                avernet_tenant=tenant, env=env, observation_id=observation_id,
+            ).one_or_none()
+            if row is None or row.skill_id is None:
+                return False
+            latest = self._latest_row(
+                session, tenant, env, row.bot_id, row.owner_id, int(row.skill_id),
+            )
+            if latest is None or latest.id != row.id:
+                return False
             updated = session.query(ObservationRow).filter_by(
                 avernet_tenant=tenant, env=env, observation_id=observation_id,
                 handoff_stage="OBSERVED", check_id=None,
@@ -505,7 +491,6 @@ class LocalSkillSecurityObservationRepository(
                 Skill.env == ObservationRow.env,
                 Skill.bolt_id == ObservationRow.bot_id,
                 Skill.user_id == ObservationRow.owner_id,
-                Skill.skill_uuid == ObservationRow.incarnation_id,
                 Skill.git_path.like("local://%"),
             ).exists()).update({
                 ObservationRow.processing_status: "SUBMITTING",
@@ -574,6 +559,10 @@ class LocalSkillSecurityObservationRepository(
             )
             if latest is None or latest.observation_id != observation_id:
                 return False
+            if latest.handoff_stage != "DELETED":
+                current = self._latest_row(session, tenant, env, bot_id, owner_id, skill_id)
+                if current is None or current.id != latest.id:
+                    return False
             query = session.query(ObservationRow).filter_by(
                 avernet_tenant=tenant, env=env, bot_id=bot_id,
                 owner_id=owner_id, skill_id=skill_id,
