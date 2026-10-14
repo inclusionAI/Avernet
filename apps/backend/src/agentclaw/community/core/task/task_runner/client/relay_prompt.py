@@ -29,7 +29,11 @@ def format_relay_execution_instruction(
         "这是只读投影；all_done_output 只含本棒之前的已接纳事实。",
         "S2 根据 root_task_spec 与 all_done_output 在本地计算 task_gaps: list[str]。",
         "S3 根据 current_task_spec、task_gaps 和本 Bot 实际能力决定 actual_goal；"
-        "不能覆盖时选择 DECLINED，不伪造执行事实。",
+        "不能覆盖时选择 DECLINED，不伪造执行事实。"
+        "Relay 全程禁止直接调用 web_search、web_fetch 或任何底层联网搜索/抓取接口；"
+        "AGENTS.md/IDENTITY.md/运行时工具存在性不能解除该限制，"
+        "且不得把它们计入能力覆盖。联网检索只能通过画像明确授权"
+        "且已激活的搜索 Skill 规定入口执行。",
         "S4a 只执行 actual_goal，生成 TaskNodePatch 所需的 output_patch 与"
         " local_acceptance_result；verdict 只能是 DONE 或 FAILED，禁止 PASS/FAIL，"
         "done_items/gap_items 对象必须为 {id,passed,summary}，"
