@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Spin } from '@/components/ui/Spin';
 import type { BotDomain, BotRuntimeStage } from '@/domain/botWorkshop';
 import { useBotChat } from '@/pages/Workspace/hooks/useBotChat';
+import { useBotCapabilitySets } from '@/pages/Workspace/hooks/useBotCapabilitySets';
 import { useBotModels } from '@/pages/Workspace/hooks/useBotModels';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
@@ -102,6 +103,7 @@ export function DebugChatPanel({
     setSession((current) => (current?.sessionId === sessionId ? { ...current, model } : current));
   }, []);
   const botModels = useBotModels(chatBot, session, identityId, handleSessionModelChange);
+  const capabilitySets = useBotCapabilitySets(chatBot, identityId);
   const loadSessions = useCallback(async () => {
     if (!identityId) {
       setLoading(false);
@@ -158,13 +160,6 @@ export function DebugChatPanel({
             {chatBot.runtimeStage === 'online' ? '线上' : chatBot.runtimeStage === 'verify' ? '预发' : '草稿'}环境
           </p>
         </div>
-        <BotModelSelector
-          models={botModels.models}
-          activeModelId={botModels.activeModelId}
-          loading={botModels.isLoadingModels}
-          disabled={!session}
-          onSelect={(modelId) => void botModels.selectModel(modelId)}
-        />
         <Button
           variant="ghost"
           size="icon"
@@ -255,6 +250,16 @@ export function DebugChatPanel({
         userId={identityId}
         ownerId={chatBot.ownerId}
         isRequesting={debug.chat.isRequesting}
+        capabilitySets={capabilitySets}
+        modelSelector={
+          <BotModelSelector
+            models={botModels.models}
+            activeModelId={botModels.activeModelId}
+            loading={botModels.isLoadingModels}
+            disabled={!session}
+            onSelect={(modelId) => void botModels.selectModel(modelId)}
+          />
+        }
         onSend={debug.send}
         onStop={debug.stop}
       />

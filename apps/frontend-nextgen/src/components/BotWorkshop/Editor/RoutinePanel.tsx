@@ -1,4 +1,3 @@
-import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
@@ -14,7 +13,7 @@ import {
   isRoutineSchedulePreset,
   ROUTINE_SCHEDULE_PRESETS,
 } from '@/services/botWorkshop/routineSchedule';
-import { Clock3, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { RoutineExecutionEnvironment } from './RoutineExecutionEnvironment';
 
@@ -27,6 +26,12 @@ const empty: BotEditorRoutineInput = {
   model: undefined,
   timeoutSecs: 1800,
 };
+
+function formatRoutineDate(value?: string) {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false });
+}
 
 export function RoutinePanel({
   routines,
@@ -104,49 +109,52 @@ export function RoutinePanel({
         <div>
           <h2 className="m-0 text-base font-semibold">定时任务</h2>
           <p className="m-0 mt-1 text-sm text-muted-foreground">
-            配置执行计划；启停开关位于任务列表，编辑框只修改配置。
+            在当前 Bot 下维护自动触发规则；执行产生的任务实例统一到「我的任务/定时任务」查看。
           </p>
         </div>
-        <Button size="sm" disabled={!editable} leftIcon={<Plus className="size-4" />} onClick={() => edit()}>
+        <Button variant="outline" size="sm" disabled={!editable} leftIcon={<Plus className="size-4" />} onClick={() => edit()}>
           新建任务
         </Button>
       </div>
-      <div className="mx-auto w-full max-w-5xl space-y-3 px-6 py-6 lg:px-10">
+      <div className="w-full px-6 py-6 lg:px-8">
         {routines.length ? (
-          routines.map((item) => (
-            <section key={item.id} className="rounded-xl border border-border bg-card p-5 shadow-sm transition-shadow hover:shadow-md">
-              <div className="flex items-start gap-3">
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <Clock3 className="size-4" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="truncate text-sm font-semibold">{item.name}</span>
-                    <Badge tone={item.enabled ? 'success' : 'neutral'}>{item.enabled ? '已启用' : '已停用'}</Badge>
-                  </div>
-                  <p className="m-0 mt-2 line-clamp-2 text-xs leading-5 text-foreground">{item.command}</p>
-                  <p className="m-0 mt-2 text-xs text-muted-foreground">
-                    {getRoutineScheduleLabel(item.cron)} · {item.timezone || 'Asia/Shanghai'}
-                  </p>
-                  <p className="m-0 mt-1 text-xs text-muted-foreground">
-                    模型：{item.model || '跟随 Bot 默认模型'} · 超时：{item.timeoutSecs ?? 86400} 秒
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
+          <div className="grid gap-5 xl:grid-cols-2">
+            {routines.map((item) => (
+              <section key={item.id} className="overflow-hidden rounded-2xl border border-border bg-card">
+                <div className="p-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <h3 className="m-0 truncate text-lg font-semibold tracking-tight">{item.name}</h3>
+                      <p className="m-0 mt-2 text-sm text-muted-foreground">更新时间：{formatRoutineDate(item.modifiedAt)}</p>
+                    </div>
                   <Switch
                     checked={item.enabled}
                     disabled={!editable}
                     aria-label={`${item.enabled ? '停用' : '启用'}${item.name}`}
                     onCheckedChange={() => void onToggle(item)}
                   />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    disabled={!editable}
-                    aria-label={`编辑${item.name}`}
-                    leftIcon={<Pencil className="size-4" />}
-                    onClick={() => edit(item)}
-                  />
+                  </div>
+                  <dl className={`mt-8 grid gap-5 ${item.nextRunAt ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+                    <div>
+                      <dt className="text-sm text-muted-foreground">执行频率</dt>
+                      <dd className="m-0 mt-2 text-base">{getRoutineScheduleLabel(item.cron)}</dd>
+                    </div>
+                    {item.nextRunAt ? (
+                      <div>
+                        <dt className="text-sm text-muted-foreground">下次执行</dt>
+                        <dd className="m-0 mt-2 text-base">{formatRoutineDate(item.nextRunAt)}</dd>
+                      </div>
+                    ) : null}
+                    <div>
+                      <dt className="text-sm text-muted-foreground">执行配置</dt>
+                      <dd className="m-0 mt-2 truncate text-base">模型：{item.model || '跟随 Bot 默认模型'}</dd>
+                    </div>
+                  </dl>
+                </div>
+                <footer className="flex justify-end gap-3 border-t border-border bg-muted/30 px-6 py-3">
+                  <Button variant="outline" size="sm" disabled={!editable} aria-label={`编辑${item.name}`} onClick={() => edit(item)}>
+                    编辑
+                  </Button>
                   <ConfirmDialog
                     title="删除定时任务"
                     description={`确认删除「${item.name}」？删除后无法恢复。`}
@@ -154,17 +162,14 @@ export function RoutinePanel({
                     onConfirm={() => onDelete(item.id)}
                     disabled={!editable}
                   >
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`删除${item.name}`}
-                      leftIcon={<Trash2 className="size-4" />}
-                    />
+                    <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" aria-label={`删除${item.name}`}>
+                      删除
+                    </Button>
                   </ConfirmDialog>
-                </div>
-              </div>
-            </section>
-          ))
+                </footer>
+              </section>
+            ))}
+          </div>
         ) : (
           <div className="rounded-xl border border-dashed border-border bg-card py-12">
             <Empty title="暂无定时任务" description="创建一个定时任务，让 Bot 自动执行周期性工作。" />

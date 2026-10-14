@@ -1,13 +1,16 @@
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
+import { Textarea } from '@/components/ui/Textarea';
+import { ComposerCapabilitiesMenu } from '@/components/Workspace/TaskComposerMenu';
+import type { ComposerCapabilitySetsState } from '@/components/Workspace/CapabilitySetViewer/types';
 import type { SendFileRefs } from '@/pages/Workspace/hooks/useBotChat';
 import { useBotSessionFileUpload } from '@/pages/Workspace/hooks/useBotSessionFileUpload';
 import { buildDebugChatFileRequest } from '@/services/botWorkshop/debugChatFiles';
 import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
 import { SESSION_FILE_ALLOWED_EXT } from '@/services/workspace/sessionFileUtils';
 import { FileUp, Loader2, Paperclip, Send, Square, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 interface DebugChatComposerProps {
   botId: string;
@@ -15,6 +18,9 @@ interface DebugChatComposerProps {
   userId: string | null;
   ownerId?: string;
   isRequesting: boolean;
+  /** 会话模型选择器放在发送按钮左侧，保持调试输入区操作聚合。 */
+  modelSelector?: ReactNode;
+  capabilitySets?: ComposerCapabilitySetsState | null;
   onSend: (content: string, options?: SendFileRefs) => void;
   onStop: () => void;
 }
@@ -25,6 +31,8 @@ export function DebugChatComposer({
   userId,
   ownerId,
   isRequesting,
+  modelSelector,
+  capabilitySets,
   onSend,
   onStop,
 }: DebugChatComposerProps) {
@@ -98,7 +106,7 @@ export function DebugChatComposer({
           ))}
         </div>
       ) : null}
-      <Card className="flex min-h-24 items-end gap-2 rounded-2xl p-3 shadow-none">
+      <Card className="rounded-2xl p-3 shadow-none">
         <Input
           ref={fileInputRef}
           type="file"
@@ -111,19 +119,12 @@ export function DebugChatComposer({
             event.target.value = '';
           }}
         />
-        <Button
-          variant="ghost"
-          size="icon"
-          disabled={!sessionId || !userId || upload.isUploading || isRequesting}
-          aria-label="上传文件"
-          leftIcon={upload.isUploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
-          onClick={() => fileInputRef.current?.click()}
-        />
-        <Input
+        <Textarea
           value={draft}
           disabled={!sessionId}
+          rows={2}
           placeholder="输入调试消息，Enter 发送"
-          className="border-0 shadow-none focus-visible:ring-0"
+          className="min-h-16 max-h-40 resize-none border-0 px-1 py-2 shadow-none focus-visible:ring-0"
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
@@ -132,13 +133,25 @@ export function DebugChatComposer({
             }
           }}
         />
-        <Button
-          size="icon"
-          disabled={!sessionId || upload.isUploading || (!isRequesting && !draft.trim() && files.length === 0)}
-          aria-label={isRequesting ? '停止生成' : '发送'}
-          leftIcon={isRequesting ? <Square className="size-4" /> : <Send className="size-4" />}
-          onClick={isRequesting ? onStop : send}
-        />
+        <div className="mt-2 flex items-center gap-2">
+          <ComposerCapabilitiesMenu
+            onUpload={() => fileInputRef.current?.click()}
+            disabled={!sessionId || !userId || upload.isUploading || isRequesting}
+            selections={[]}
+            capabilitySets={capabilitySets}
+            showTaskEntries={false}
+          />
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            {modelSelector}
+            <Button
+              size="icon"
+              disabled={!sessionId || upload.isUploading || (!isRequesting && !draft.trim() && files.length === 0)}
+              aria-label={isRequesting ? '停止生成' : '发送'}
+              leftIcon={isRequesting ? <Square className="size-4" /> : <Send className="size-4" />}
+              onClick={isRequesting ? onStop : send}
+            />
+          </div>
+        </div>
       </Card>
     </div>
   );

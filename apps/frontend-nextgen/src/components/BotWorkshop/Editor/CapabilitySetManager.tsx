@@ -104,6 +104,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
           <p className="m-0 mt-1 text-sm text-muted-foreground">按能力集组织 Bot 引用的 Skill、MCP 与 CLI。</p>
         </div>
         <Button
+          variant="outline"
           size="sm"
           disabled={!editable}
           leftIcon={<Plus className="size-4" />}
@@ -114,12 +115,12 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
       </div>
       <div className="app-scrollbar flex-1 overflow-y-auto">
         {sets.length ? (
-          <div className="mx-auto w-full max-w-5xl space-y-3 px-6 py-6 lg:px-10">
+          <div className="w-full space-y-3 px-5 py-4 lg:px-6">
             {sets.map((set) => {
               const open = expanded.includes(set.id);
               const displayName = set.isDefault ? '默认能力集' : set.name;
               return (
-                <section key={set.id} className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+                <section key={set.id} className="overflow-hidden rounded-lg border border-border bg-card">
                   <div className="group flex min-h-16 items-center gap-2 px-5 py-2">
                     <Button
                       variant="ghost"
@@ -188,7 +189,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                     ) : null}
                   </div>
                   {open ? (
-                    <div className="space-y-5 border-t border-border bg-muted/20 px-5 py-5">
+                    <div className="space-y-5 border-t border-border bg-background px-5 py-5">
                       <CapabilityMembers
                         kind="skill"
                         items={set.skills}

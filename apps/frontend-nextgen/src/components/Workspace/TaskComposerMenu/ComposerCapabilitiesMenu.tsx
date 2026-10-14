@@ -43,7 +43,7 @@ import { useEffect, useRef, useState } from 'react';
 const WORKFLOW_TASK_ENABLED = true;
 
 export interface ComposerCapabilitiesMenuProps {
-  execution: UseTaskExecutionResult;
+  execution?: UseTaskExecutionResult;
   onUpload?: () => void;
   /** 添加图片回调（打开文件选择器）。单聊设计稿未含此项；群域传入时仍保留「添加图片」行。 */
   onAddImage?: () => void;
@@ -53,7 +53,7 @@ export interface ComposerCapabilitiesMenuProps {
   disabled?: boolean;
   disabledReason?: string | null;
   /** 可叠加选中项（胶囊 chips）：workflow 按 workflowId 去重、动态任务至多一个。 */
-  selections: ComposerSelection[];
+  selections?: ComposerSelection[];
   onWorkflowSelected?: (w: WorkflowSelection) => void;
   onDynamicSelected?: () => void;
   /** 清除指定胶囊（key 见 composerSelectionKey：'dynamic' | workflowId）。 */
@@ -61,6 +61,8 @@ export interface ComposerCapabilitiesMenuProps {
   /** 能力集只读查看装配（useBotCapabilitySets；单聊 我的/团队 Bot 传入）。
    * 不传时「通用协作能力」文案区不渲染——好友 Bot 会话与协作群即此形态，＋ 区独立保留。 */
   capabilitySets?: ComposerCapabilitySetsState | null;
+  /** 调试会话仅复用附件与能力集入口，不暴露任务创建菜单。 */
+  showTaskEntries?: boolean;
   className?: string;
 }
 
@@ -76,6 +78,7 @@ function MenuBody({
   workflows,
   workflowsLoading,
   onWorkflowHover,
+  showTaskEntries = true,
 }: {
   onUpload?: () => void;
   /** 添加图片回调（打开文件选择器）。单聊设计稿未含此项；群域传入时仍保留「添加图片」行。 */
@@ -89,6 +92,7 @@ function MenuBody({
   workflows: WorkflowPanelItem[];
   workflowsLoading: boolean;
   onWorkflowHover?: () => void;
+  showTaskEntries?: boolean;
 }) {
   const [wfOpen, setWfOpen] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -139,39 +143,42 @@ function MenuBody({
           disabled={disabled}
         />
       )}
-      <MenuRow icon={<Sparkles className="size-3.5" />} label="动态任务" onClick={onDynamic} disabled={disabled} />
-      <Popover open={workflowDisabled ? false : wfOpen} onOpenChange={setWfOpen}>
-        <PopoverTrigger asChild>
-          <MenuRow
-            icon={<Workflow className="size-3.5" />}
-            label="工作流任务"
-            disabled={workflowDisabled}
-            onMouseEnter={enter}
-            onMouseLeave={leave}
-          />
-        </PopoverTrigger>
-        <PopoverContent
-          side="right"
-          align="start"
-          sideOffset={2}
-          className="w-[240px] rounded-xl p-[10px]"
-          onMouseEnter={enter}
-          onMouseLeave={leave}
-        >
-          <WorkflowSubPanel
-            workflows={workflows}
-            loading={workflowsLoading}
-            onPick={(w) => {
-              setWfOpen(false);
-              onPickWorkflow?.(w);
-            }}
-          />
-        </PopoverContent>
-      </Popover>
+      {showTaskEntries ? (
+        <>
+          <MenuRow icon={<Sparkles className="size-3.5" />} label="动态任务" onClick={onDynamic} disabled={disabled} />
+          <Popover open={workflowDisabled ? false : wfOpen} onOpenChange={setWfOpen}>
+            <PopoverTrigger asChild>
+              <MenuRow
+                icon={<Workflow className="size-3.5" />}
+                label="工作流任务"
+                disabled={workflowDisabled}
+                onMouseEnter={enter}
+                onMouseLeave={leave}
+              />
+            </PopoverTrigger>
+            <PopoverContent
+              side="right"
+              align="start"
+              sideOffset={2}
+              className="w-[240px] rounded-xl p-[10px]"
+              onMouseEnter={enter}
+              onMouseLeave={leave}
+            >
+              <WorkflowSubPanel
+                workflows={workflows}
+                loading={workflowsLoading}
+                onPick={(w) => {
+                  setWfOpen(false);
+                  onPickWorkflow?.(w);
+                }}
+              />
+            </PopoverContent>
+          </Popover>
+        </>
+      ) : null}
     </div>
   );
 }
-
 export function ComposerCapabilitiesMenu({
   execution,
   onUpload,
@@ -185,6 +192,7 @@ export function ComposerCapabilitiesMenu({
   onDynamicSelected,
   onRemoveSelection,
   capabilitySets,
+  showTaskEntries = true,
   className,
 }: ComposerCapabilitiesMenuProps) {
   const [open, setOpen] = useState(false);
@@ -225,16 +233,17 @@ export function ComposerCapabilitiesMenu({
               onUpload={withClose(onUpload)}
               onAddImage={withClose(onAddImage)}
               onManageFiles={withClose(onManageFiles)}
-              onDynamic={() => {
+              onDynamic={execution ? () => {
                 onDynamicSelected?.();
                 close();
-              }}
-              onPickWorkflow={enableWorkflow && WORKFLOW_TASK_ENABLED ? pickWorkflow : undefined}
+              } : undefined}
+              onPickWorkflow={execution && enableWorkflow && WORKFLOW_TASK_ENABLED ? pickWorkflow : undefined}
               workflowEnabled={enableWorkflow && WORKFLOW_TASK_ENABLED}
               disabled={disabled}
-              workflows={execution.workflows}
-              workflowsLoading={execution.workflowsLoading}
-              onWorkflowHover={() => void execution.loadWorkflows()}
+              workflows={execution?.workflows ?? []}
+              workflowsLoading={execution?.workflowsLoading ?? false}
+              onWorkflowHover={execution ? () => void execution.loadWorkflows() : undefined}
+              showTaskEntries={showTaskEntries}
             />
             {disabled && disabledReason && <p className="mt-1 px-2 text-xs text-destructive">{disabledReason}</p>}
           </PopoverContent>
@@ -276,7 +285,7 @@ export function ComposerCapabilitiesMenu({
           </>
         ) : null}
       </div>
-      {selections.map((selection) => {
+      {(selections ?? []).map((selection) => {
         const key = composerSelectionKey(selection);
         return (
           <SelectionChip

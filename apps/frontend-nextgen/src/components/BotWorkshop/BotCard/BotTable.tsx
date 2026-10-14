@@ -91,19 +91,19 @@ const BotTable: React.FC<BotTableProps> = ({
       {
         id: 'info',
         header: '机器人信息',
-        width: 'w-[280px]',
+        width: 'w-[clamp(192px,16vw,240px)]',
         cell: (bot) => <BotInfoCell bot={bot} onClaimLock={onClaimLock} onReleaseLock={onReleaseLock} />,
       },
       {
-        // 不写死宽度:table-fixed 下由该列吸收剩余空间
         id: 'description',
         header: '描述',
+        // 描述列吸收可用空间；窄屏优先保留主要操作，完整描述仍可通过 Tooltip 查看。
         cell: (bot) => <BotDescriptionCell bot={bot} />,
       },
       {
         id: 'status',
         header: '状态',
-        width: 'w-[144px]',
+        width: 'w-[clamp(96px,8vw,112px)]',
         cell: (bot) => (
           <BotStatusCell
             bot={bot}
@@ -115,19 +115,19 @@ const BotTable: React.FC<BotTableProps> = ({
       {
         id: 'version',
         header: '版本',
-        width: 'w-[80px]',
+        width: 'w-[clamp(60px,5vw,72px)]',
         cell: (bot) => <BotVersionCell bot={bot} />,
       },
       {
         id: 'tags',
         header: 'bot 标签',
-        width: 'w-[210px]',
+        width: 'w-[clamp(120px,10vw,160px)]',
         cell: (bot) => <BotTagsCell bot={bot} />,
       },
       {
         id: 'containers',
         header: '容器信息',
-        width: 'w-[148px]',
+        width: 'w-[clamp(108px,9vw,128px)]',
         cell: (bot) => (onOpenContainers ? <BotContainerInfo bot={bot} onOpen={onOpenContainers} /> : <span>—</span>),
       },
       ...(showOwner
@@ -135,7 +135,7 @@ const BotTable: React.FC<BotTableProps> = ({
             {
               id: 'owner',
               header: 'Owner',
-              width: 'w-[140px]',
+              width: 'w-[clamp(96px,8vw,120px)]',
               cell: (bot: BotDomain) => (
                 <span className="truncate text-xs text-foreground">{bot.ownerName || bot.ownerId || '—'}</span>
               ),
@@ -145,8 +145,9 @@ const BotTable: React.FC<BotTableProps> = ({
       {
         id: 'primary-actions',
         header: '主要操作',
-        width: 'w-[360px]',
+        width: 'w-[224px]',
         align: 'end',
+        className: 'sticky right-12 z-10 bg-card group-hover:bg-muted/40',
         cell: (bot) => {
           const entry = getBotEntryAvailability(bot);
           return (
@@ -171,8 +172,9 @@ const BotTable: React.FC<BotTableProps> = ({
       {
         id: 'more-actions',
         header: <span className="sr-only">更多操作</span>,
-        width: 'w-[72px]',
+        width: 'w-[48px]',
         align: 'end',
+        className: 'sticky right-0 z-10 bg-card group-hover:bg-muted/40',
         cell: (bot) => {
           if (!onAction) return null;
           const generalConfigAvailability = getGeneralConfigAvailability?.(bot);
@@ -259,6 +261,7 @@ const BotTable: React.FC<BotTableProps> = ({
         ) : null
       }
       ariaLabel={ariaLabel}
+      minWidth={showOwner ? 'min-w-[1260px]' : 'min-w-[1180px]'}
     />
   );
 };

@@ -110,21 +110,27 @@ export function MoreConfigPanel({
         </div>
       </div>
       <div className="px-7 py-5">
-        <Textarea
-          className="min-h-[440px] font-mono text-xs"
-          value={text}
-          disabled={!editable}
-          onChange={(e) => {
-            setText(e.target.value);
-            try {
-              const value = JSON.parse(e.target.value) as BotEngineConfig;
-              setError('');
-              onConfigChange(value);
-            } catch {
-              setError('请输入合法 JSON');
-            }
-          }}
-        />
+        <div className="relative min-h-[440px] overflow-hidden rounded-xl border border-border bg-foreground">
+          <pre aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-12 overflow-hidden border-r border-background/10 py-4 text-right font-mono text-xs leading-5 text-background/60">
+            {text.split('\n').map((_, index) => `${index + 1}\n`)}
+          </pre>
+          <Textarea
+            aria-label="引擎 JSON 配置"
+            className="relative min-h-[440px] resize-y border-0 bg-transparent py-4 pl-16 font-mono text-xs leading-5 text-background placeholder:text-background/50 focus-visible:ring-0"
+            value={text}
+            disabled={!editable}
+            onChange={(e) => {
+              setText(e.target.value);
+              try {
+                const value = JSON.parse(e.target.value) as BotEngineConfig;
+                setError('');
+                onConfigChange(value);
+              } catch {
+                setError('请输入合法 JSON');
+              }
+            }}
+          />
+        </div>
         {error ? <p className="mt-2 text-xs text-[var(--color-danger)]">{error}</p> : null}
       </div>
     </div>

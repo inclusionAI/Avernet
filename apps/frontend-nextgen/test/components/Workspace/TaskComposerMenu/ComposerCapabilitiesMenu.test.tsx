@@ -42,6 +42,23 @@ function capabilitySets(overrides: Partial<ComposerCapabilitySetsState> = {}): C
 }
 
 describe('ComposerCapabilitiesMenu（胶囊双区拆分）', () => {
+  it('可供调试会话仅复用附件和能力集入口，不显示任务创建项', async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerCapabilitiesMenu
+        selections={[]}
+        onUpload={jest.fn()}
+        capabilitySets={capabilitySets()}
+        showTaskEntries={false}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '添加附件' }));
+    expect(screen.getByRole('button', { name: '上传文件' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '动态任务' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '工作流任务' })).not.toBeInTheDocument();
+  });
+
   it('未装配 capabilitySets（好友Bot/协作群形态）：仅渲染 ＋ 区，「通用协作能力」不渲染', () => {
     render(<ComposerCapabilitiesMenu execution={execution()} selections={[]} enableWorkflow />);
     expect(screen.getByRole('button', { name: '添加附件' })).toHaveAttribute('aria-haspopup', 'menu');

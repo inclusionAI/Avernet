@@ -77,6 +77,7 @@ export const mapRoutine = (item: RoutineDto): BotEditorRoutine => ({
   model: item.model ?? undefined,
   timeoutSecs: item.timeout_secs ?? undefined,
   modifiedAt: item.gmt_modified,
+  nextRunAt: item.next_run_at,
 });
 
 export const toRoutineWrite = (input: BotEditorRoutineInput) => ({

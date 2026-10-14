@@ -76,6 +76,8 @@ describe('BotTable 表格结构', () => {
       '主要操作',
       '更多操作',
     ]);
+    expect(screen.getByRole('table', { name: 'Bot 列表' })).toHaveClass('min-w-[1180px]');
+    expect(screen.getByRole('columnheader', { name: '主要操作' })).toHaveClass('sticky', 'right-12');
   });
 
   test('数据行固定 h-16 行高并带 hover 反馈', () => {

@@ -25,6 +25,8 @@ export interface DataTableProps<Row> {
   empty?: ReactNode;
   ariaLabel?: string;
   rowHeight?: 'h-14' | 'h-16' | 'h-20';
+  /** 宽表在窄容器中横向滚动，避免固定列挤压内容列。 */
+  minWidth?: string;
 }
 
 export function DataTable<Row>({
@@ -37,11 +39,12 @@ export function DataTable<Row>({
   empty,
   ariaLabel = 'DataTable',
   rowHeight = 'h-16',
+  minWidth,
 }: DataTableProps<Row>) {
   if (rows.length === 0 && empty !== undefined) {
     return (
       <div className="w-full overflow-x-auto">
-        <table aria-label={ariaLabel} className="w-full table-fixed border-collapse text-sm">
+        <table aria-label={ariaLabel} className={`w-full table-fixed border-collapse text-sm ${minWidth ?? ''}`}>
           <DataTableHeader columns={columns} />
           <tbody>
             <DataTableEmpty colSpan={columns.length}>{empty}</DataTableEmpty>
@@ -53,7 +56,7 @@ export function DataTable<Row>({
 
   return (
     <div className="w-full overflow-x-auto">
-      <table aria-label={ariaLabel} className="w-full table-fixed border-collapse text-sm">
+      <table aria-label={ariaLabel} className={`w-full table-fixed border-collapse text-sm ${minWidth ?? ''}`}>
         <DataTableHeader columns={columns} />
         <tbody>
           {rows.map((row, rowIndex) => {

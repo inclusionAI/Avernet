@@ -11,6 +11,8 @@ const routine = {
   command: '整理昨日进展',
   enabled: true,
   timezone: 'Asia/Shanghai',
+  modifiedAt: '2026-08-18T11:20:00+08:00',
+  nextRunAt: '2026-08-19T09:00:00+08:00',
 };
 
 const loadModels = jest.fn().mockResolvedValue([{ id: 'qwen-max', name: 'Qwen Max', provider: 'qwen' }]);
@@ -32,6 +34,43 @@ test('编辑页仅保留配置、启停和删除，不展示立即执行与执�
   expect(screen.getByRole('switch')).toBeInTheDocument();
   expect(screen.queryByText('立即执行')).not.toBeInTheDocument();
   expect(screen.queryByText('执行记录')).not.toBeInTheDocument();
+});
+
+test('任务卡片按摘要布局展示更新时间、频率、下次执行和执行配置，不展示 Prompt', () => {
+  render(
+    <RoutinePanel
+      routines={[routine]}
+      editable
+      onLoadModels={loadModels}
+      onSave={jest.fn()}
+      onToggle={jest.fn()}
+      onDelete={jest.fn()}
+    />,
+  );
+
+  expect(screen.getByText(/更新时间：/)).toBeInTheDocument();
+  expect(screen.getByText('执行频率')).toBeInTheDocument();
+  expect(screen.getByText('下次执行')).toBeInTheDocument();
+  expect(screen.getByText('执行配置')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '编辑晨报' })).toHaveTextContent('编辑');
+  expect(screen.getByRole('button', { name: '删除晨报' })).toHaveTextContent('删除');
+  expect(screen.queryByText('整理昨日进展')).not.toBeInTheDocument();
+});
+
+test('后端未返回下次执行时间时不渲染该字段', () => {
+  const { nextRunAt: _nextRunAt, ...routineWithoutNextRun } = routine;
+  render(
+    <RoutinePanel
+      routines={[routineWithoutNextRun]}
+      editable
+      onLoadModels={loadModels}
+      onSave={jest.fn()}
+      onToggle={jest.fn()}
+      onDelete={jest.fn()}
+    />,
+  );
+
+  expect(screen.queryByText('下次执行')).not.toBeInTheDocument();
 });
 
 test('保存进行中阻止重复创建', async () => {
