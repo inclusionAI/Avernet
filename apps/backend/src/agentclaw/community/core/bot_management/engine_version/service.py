@@ -24,16 +24,9 @@ from agentclaw.community.core.repository.protocols.bot import (
 from agentclaw.community.core.repository.protocols.devices import (
     DeviceBindingRepository,
 )
-from agentclaw.community.plugin_api.device_adapter_transport import (
-    DeviceAdapterTransport,
-)
 
 from agentclaw.community.core.engine_runtime.errors import (
     EngineBotTypeNotSupportedError,
-)
-from agentclaw.community.plugin_api.device_adapter_transport import (
-    DeviceAdapterEndpointNotFoundError,
-    DeviceAdapterHTTPStatusError,
 )
 from .errors import (
     EngineVersionInstanceSelectionError,
@@ -45,8 +38,9 @@ from .models import (
     EngineVersionConfig,
     EngineVersionResult,
     VersionContext,
+    EngineReleaseProbe,
 )
-from .release import compare, detect, release_target
+from .release import compare, release_target
 from .policy import has_version_override, restart_restriction
 
 
@@ -61,7 +55,7 @@ class EngineVersionService(EngineVersionServiceProtocol):
         templates: TemplateRepository,
         bindings: DeviceBindingRepository,
         resolver: DeviceContextResolver,
-        transport: DeviceAdapterTransport,
+        probe: EngineReleaseProbe,
         collaborators: CollaboratorServiceProtocol,
         list_devices: Callable[[str], list[dict[str, Any]]],
         config: EngineVersionConfig,
@@ -70,7 +64,7 @@ class EngineVersionService(EngineVersionServiceProtocol):
         self._templates = templates
         self._bindings = bindings
         self._resolver = resolver
-        self._transport = transport
+        self._probe = probe
         self._collaborators = collaborators
         self._list_devices = list_devices
         self._config = config
@@ -106,6 +100,7 @@ class EngineVersionService(EngineVersionServiceProtocol):
         }
         detection: Detection = {"status": "read_failed", "reason": "probe_unavailable"}
         current: CurrentVersion = {}
+        provider = ""
         try:
             binding = await asyncio.to_thread(
                 self._bindings.get_active_by_bot_and_owner,
@@ -115,6 +110,7 @@ class EngineVersionService(EngineVersionServiceProtocol):
             if binding is None:
                 detection = {"status": "read_failed", "reason": "device_not_bound"}
             else:
+                provider = binding.device_provider
                 selected = await self._select_instance(binding, device_uuid)
                 if selected:
                     context["instance_id"] = selected
@@ -130,36 +126,11 @@ class EngineVersionService(EngineVersionServiceProtocol):
                     ),
                     timeout=10.0,
                 )
-                response = await self._transport.invoke(
-                    ctx.conn_info,
-                    "POST",
-                    "/api/bash/exec",
-                    body={
-                        "cmd": "printenv AGENTCLAW_IMAGE_VERSION",
-                        "cwd": "/home/admin/",
-                        "timeout": 5,
-                    },
-                    timeout=10.0,
-                )
-                detection, current = detect(response)
+                detection, current = await self._probe(ctx.conn_info)
         except EngineVersionInstanceSelectionError:
             raise
         except TimeoutError:
             detection = {"status": "read_failed", "reason": "probe_timeout"}
-        except DeviceAdapterEndpointNotFoundError:
-            detection = {
-                "status": "read_failed",
-                "reason": "probe_endpoint_unavailable",
-            }
-        except DeviceAdapterHTTPStatusError as exc:
-            detection = {
-                "status": "read_failed",
-                "reason": (
-                    "probe_endpoint_unavailable"
-                    if exc.status_code == 501
-                    else "probe_http_error"
-                ),
-            }
         except Exception:
             # External errors can contain credentials/addresses. Publish controlled reasons.
             detection = {"status": "read_failed", "reason": "probe_unavailable"}
@@ -192,9 +163,13 @@ class EngineVersionService(EngineVersionServiceProtocol):
                 result["comparison"] = "unknown"
                 result["restart_hint"] = "unknown"
             else:
-                reason = restart_restriction(bot, template)
+                reason = restart_restriction(bot, template, provider=provider)
                 if reason and comparison in {"older", "legacy"}:
-                    result["restart_hint"] = "restricted"
+                    result["restart_hint"] = (
+                        "unknown"
+                        if reason == "restart_path_unverified"
+                        else "restricted"
+                    )
                     result["restart_reason"] = reason
         except Exception:
             # Preserve completed version facts when image-policy reads fail.

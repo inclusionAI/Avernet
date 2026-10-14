@@ -39,7 +39,6 @@ consumes:
   - "CachePlugin quota lock"
   - "CapabilityDesiredStateRepositoryProtocol"
 internal_dependencies:
-  - agentclaw.community.plugin_api.device_adapter_transport
   - agentclaw.community.core.engine_runtime
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module

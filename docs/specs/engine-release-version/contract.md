@@ -62,7 +62,9 @@ branches are unknown. A newer current release is never advised to downgrade.
 
 Older/legacy plus a valid paired target recommends restart only on the ordinary
 configured path. A personal ext Pin is image_pinned/restricted. Service draft
-restart clears ext Pin, but never clears an explicit template image. Template
+restart can clear ext Pin, but ARCA clearing depends on an existing policy
+switch: without proving that switch, an ARCA draft Pin remains restricted.
+Restart never clears an explicit template image. Template
 image or nested image_config therefore remains explicit_image_unverified and
 restricted. `realtime_pull` does not imply a Backend image upgrade. Teclaw's
 current restart path is unsupported and returns restart_not_supported/restricted
@@ -71,6 +73,14 @@ return policy_unknown/unknown. Same/newer gives no upgrade advice. No published
 stage is inspected or changed by this API.
 
 ## Deployment and compatibility
+
+Only the verified ARCA image path produces recommended guidance. A local or
+BaaS binding alone does not prove image adoption: BaaS may select local_proc
+instead of an image sandbox, and its current public device contract does not
+identify that implementation. Those paths preserve version comparison and
+return unknown/restart_path_unverified unless a stronger explicit restriction
+already applies. No new remote control-plane query or runtime-prefix guessing
+is introduced.
 
 The target is the release paired with this serving Backend image; it is not a
 registry lookup or a promise that every external template was updated. Release

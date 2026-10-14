@@ -1,5 +1,9 @@
 """Transport-independent release version result and deployment configuration."""
 
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+
 from dataclasses import dataclass
 from typing import Literal, NotRequired, TypedDict
 
@@ -45,3 +49,8 @@ class EngineVersionResult(TypedDict):
     restart_hint: Literal["recommended", "restricted", "none", "unknown"]
     restart_reason: NotRequired[str]
     context: VersionContext
+
+
+EngineReleaseProbe = Callable[
+    [dict[str, Any]], Awaitable[tuple[Detection, CurrentVersion]]
+]

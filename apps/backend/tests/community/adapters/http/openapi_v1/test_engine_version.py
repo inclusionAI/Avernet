@@ -1,5 +1,7 @@
 """Signed principal -> Bot authorization -> real release service -> transport."""
 
+from functools import partial
+from agentclaw.community.adapters.engine_release_probe import probe_engine_release
 from unittest.mock import MagicMock
 
 import pytest
@@ -54,7 +56,7 @@ def version_client(dependencies):
         templates=templates,
         bindings=bindings,
         resolver=resolver,
-        transport=transport,
+        probe=partial(probe_engine_release, transport),
         collaborators=collaborators,
         list_devices=MagicMock(),
         config=EngineVersionConfig("REL20261014"),

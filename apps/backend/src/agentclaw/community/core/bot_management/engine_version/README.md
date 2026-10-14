@@ -15,7 +15,7 @@ consumes:
   - DeviceBindingRepository
   - CollaboratorServiceProtocol
   - DeviceContextResolver
-  - DeviceAdapterTransport
+  - EngineReleaseProbe
 internal_dependencies:
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.bot_management.services.bot_service
@@ -32,7 +32,8 @@ HTTP delivery calls the version Service API. DI injects a frozen deployment
 release and the existing BaaS device-list callable (five-second deadline).
 Repositories and the device transport are existing external seams. The query
 performs no publish-policy resolution, cache mutation, or lifecycle operation.
-The fixed bash call reads only AGENTCLAW_IMAGE_VERSION. Current release and
+The injected fixed-probe adapter reads only AGENTCLAW_IMAGE_VERSION and translates
+HTTP failures into Detection/CurrentVersion, leaving no HTTP status types in core. Current release and
 restart eligibility are independent facts. Missing metadata is legacy;
 capability/transport/command errors are never legacy. Multiple instances need
 explicit selection. The comparison identity is the complete release branch;
@@ -42,7 +43,9 @@ a downgrade hint. A configured template version override invalidates identity.
 The target is a paired platform release, not an online image-registry lookup.
 Deployment acceptance must keep default templates aligned with that release
 and prevent independent environment overrides. Explicit image overrides are
-restricted; personal ext Pins persist while service-draft restarts clear them.
+restricted; personal ext Pins persist; ARCA service-draft Pins are conservatively restricted
+when clearing depends on an unproven protection switch. BaaS/local paths return
+unknown/restart_path_unverified because binding type cannot attest image adoption.
 Teclaw's existing restart path is unsupported, so a version difference is
 returned with a restricted hint. Runtime variants without the probe endpoint
 return read_failed; this does not claim cross-provider deployment acceptance.

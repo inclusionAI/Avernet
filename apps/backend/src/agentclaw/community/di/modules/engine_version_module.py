@@ -2,6 +2,7 @@
 
 import os
 from functools import partial
+from agentclaw.community.adapters.engine_release_probe import probe_engine_release
 
 from injector import Module, provider, singleton
 from agentclaw.community.api.baas_service import BaasServiceProtocol
@@ -57,7 +58,7 @@ class EngineVersionModule(Module):
             templates=templates,
             bindings=bindings,
             resolver=resolver,
-            transport=transport,
+            probe=partial(probe_engine_release, transport),
             collaborators=collaborators,
             list_devices=partial(baas.list_devices_by_bot_uuid, timeout=5.0),
             config=config,

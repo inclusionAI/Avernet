@@ -1,5 +1,7 @@
 """Release branch identity, missing metadata and command failures are distinct."""
 
+from functools import partial
+from agentclaw.community.adapters.engine_release_probe import probe_engine_release
 from unittest.mock import MagicMock
 
 import pytest
@@ -41,7 +43,7 @@ async def test_release_identity_is_the_complete_branch(
         templates=templates,
         bindings=bindings,
         resolver=resolver,
-        transport=transport,
+        probe=partial(probe_engine_release, transport),
         collaborators=MagicMock(),
         list_devices=MagicMock(),
         config=EngineVersionConfig(target),
@@ -78,7 +80,7 @@ async def test_failed_probe_is_never_a_legacy_bot(dependencies, response):
         templates=templates,
         bindings=bindings,
         resolver=resolver,
-        transport=transport,
+        probe=partial(probe_engine_release, transport),
         collaborators=MagicMock(),
         list_devices=MagicMock(),
         config=EngineVersionConfig("REL20261014"),
@@ -103,8 +105,8 @@ async def test_failed_probe_is_never_a_legacy_bot(dependencies, response):
             "service",
             {"sbot_pin_image": True, "sbot_docker_image": "private:old"},
             {},
-            "recommended",
-            None,
+            "restricted",
+            "image_pinned",
         ),
         (
             "service",
@@ -140,7 +142,7 @@ async def test_effective_restart_image_limits_do_not_hide_version_difference(
         templates=templates,
         bindings=bindings,
         resolver=resolver,
-        transport=transport,
+        probe=partial(probe_engine_release, transport),
         collaborators=MagicMock(),
         list_devices=MagicMock(),
         config=EngineVersionConfig("REL20261014"),
@@ -154,17 +156,33 @@ async def test_effective_restart_image_limits_do_not_hide_version_difference(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("bot_type", "ext", "template", "expected", "reason"), [
-    ("personal", {"sbot_pin_image": True}, {}, "unknown", "policy_unknown"),
-    ("personal", {"sbot_pin_image": True, "sbot_docker_image": "private:old"}, {"image": "other:old"}, "restricted", "image_pinned"),
-])
-async def test_personal_pin_is_effective_and_malformed_policy_is_unknown(dependencies, bot_type, ext, template, expected, reason):
+@pytest.mark.parametrize(
+    ("bot_type", "ext", "template", "expected", "reason"),
+    [
+        ("personal", {"sbot_pin_image": True}, {}, "unknown", "policy_unknown"),
+        (
+            "personal",
+            {"sbot_pin_image": True, "sbot_docker_image": "private:old"},
+            {"image": "other:old"},
+            "restricted",
+            "image_pinned",
+        ),
+    ],
+)
+async def test_personal_pin_is_effective_and_malformed_policy_is_unknown(
+    dependencies, bot_type, ext, template, expected, reason
+):
     bots, templates, bindings, resolver, transport = dependencies
     bots.get_by_id_and_owner.return_value.update(bot_type=bot_type, ext=ext)
     templates.get_by_bot_id.return_value = {"ext": template}
     service = EngineVersionService(
-        bots=bots, templates=templates, bindings=bindings, resolver=resolver,
-        transport=transport, collaborators=MagicMock(), list_devices=MagicMock(),
+        bots=bots,
+        templates=templates,
+        bindings=bindings,
+        resolver=resolver,
+        probe=partial(probe_engine_release, transport),
+        collaborators=MagicMock(),
+        list_devices=MagicMock(),
         config=EngineVersionConfig("REL20261014"),
     )
     result = await service.inspect(bot_id="bot-1", owner_id="owner", caller_id="owner")
