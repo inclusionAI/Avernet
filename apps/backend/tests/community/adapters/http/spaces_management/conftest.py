@@ -62,8 +62,10 @@ def harness(monkeypatch):
         id="operator", staffId="operator", operatorName="Operator"
     )
     app.dependency_overrides[get_current_user] = lambda: caller
-    monkeypatch.setattr(
-        sofa_config, "user_config", {"admin": {"super_admin": ["operator"]}}
+    # Patch only the proxy instance dictionary: teardown must remove the key,
+    # not restore a resolved value that would shadow future config providers.
+    monkeypatch.setitem(
+        vars(sofa_config), "user_config", {"admin": {"super_admin": ["operator"]}}
     )
     injector = Injector()
     injector.binder.bind(SpaceManagementServiceProtocol, to=service)

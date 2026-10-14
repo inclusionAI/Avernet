@@ -130,7 +130,7 @@ def test_unconfigured_or_malformed_whitelist_denies(
     application, harness, monkeypatch, config
 ):
     client, auth = application
-    monkeypatch.setattr(sofa_config, "user_config", config)
+    monkeypatch.setitem(vars(sofa_config), "user_config", config)
     response = client.post(
         "/api/spaces",
         headers=auth,
@@ -146,7 +146,7 @@ def test_unconfigured_or_malformed_whitelist_denies(
 
 def test_whitelist_uses_staff_id_not_identity_id(application, monkeypatch):
     client, auth = application
-    monkeypatch.setattr(
-        sofa_config, "user_config", {"admin": {"super_admin": ["session-user"]}}
+    monkeypatch.setitem(
+        vars(sofa_config), "user_config", {"admin": {"super_admin": ["session-user"]}}
     )
     assert client.get("/api/spaces", headers=auth).status_code == 403
