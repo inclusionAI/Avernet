@@ -141,6 +141,55 @@ class MeasureTest(unittest.TestCase):
         self.assertEqual(result.test_code, ["crates/a/src/setup_tests.rs", "crates/a/tests/it.rs"])
         self.assertEqual(result.unmapped, ["crates/z/src/lib.rs"])
 
+    def test_skip_regex_excludes_memory_repos_listed_in_report(self):
+        skip = r"/src/(.*/)?memory(_[A-Za-z0-9_]+)?(\.rs$|/)"
+        changed = {
+            "crates/services/s/src/sqlite.rs": {1, 2},
+            "crates/services/s/src/memory.rs": {1, 2, 3},             # in report, 0 hits
+            "crates/services/s/src/memory_store.rs": {1},
+            "crates/services/s/src/memory_operations/op_1.rs": {1},
+            "crates/services/s/src/memory_tests.rs": {1},             # test module, not skipped
+            "crates/services/s/src/memoryless.rs": {1},               # not an in-memory repo
+        }
+        coverage = {
+            "crates/services/s/src/sqlite.rs": {1: 1, 2: 1},
+            "crates/services/s/src/memory.rs": {1: 0, 2: 0, 3: 0},
+            "crates/services/s/src/memory_store.rs": {1: 0},
+            "crates/services/s/src/memory_operations/op_1.rs": {1: 0},
+            "crates/services/s/src/memoryless.rs": {1: 0},
+        }
+        result = changed_line_cov.measure(changed, coverage, IGNORE, skip)
+        self.assertEqual(result.skipped, [
+            "crates/services/s/src/memory.rs",
+            "crates/services/s/src/memory_operations/op_1.rs",
+            "crates/services/s/src/memory_store.rs",
+        ])
+        self.assertEqual(result.test_code, ["crates/services/s/src/memory_tests.rs"])
+        self.assertEqual((result.covered, result.instrumentable), (2, 3))  # sqlite 2/2 + memoryless 0/1
+
+    def test_listed_file_with_e2e_hits_is_counted_again(self):
+        skip = r"^crates/services/(s/src/memory\.rs)"
+        changed = {"crates/services/s/src/memory.rs": {1, 2}}
+        coverage = {"crates/services/s/src/memory.rs": {1: 3, 2: 0}}
+        result = changed_line_cov.measure(changed, coverage, IGNORE, skip)
+        self.assertEqual(result.skipped, [])
+        self.assertEqual(result.skip_overridden, ["crates/services/s/src/memory.rs"])
+        self.assertEqual((result.covered, result.instrumentable), (1, 2))
+
+    def test_e2e_memory_skip_list_is_valid(self):
+        """The list in e2e_coverage.sh must exist and must not hide reachable in-memory repos."""
+        script = (SCRIPTS / "e2e_coverage.sh").read_text()
+        body = script.split("e2e_unreachable_memory_repos=(", 1)[1].split(")", 1)[0]
+        listed = [line.strip() for line in body.splitlines() if line.strip()]
+        self.assertEqual(len(listed), 17)
+        services = SCRIPTS.parent / "crates" / "services"
+        for entry in listed:
+            self.assertTrue((services / entry).exists(), entry)
+        for reachable in ("bcs-chat-run-store/src/memory.rs",
+                          "bcs-interaction/src/memory_store.rs",
+                          "bcs-channel-store/src/memory.rs"):
+            self.assertNotIn(reachable, listed)
+
     def test_rate_is_none_without_instrumentable_lines(self):
         result = changed_line_cov.measure({"crates/tools/bcs-bridge/src/x.rs": {1}}, {}, IGNORE)
         self.assertIsNone(result.rate)

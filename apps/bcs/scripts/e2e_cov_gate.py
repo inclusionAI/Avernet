@@ -18,7 +18,8 @@ A threshold of 0 means "report only, never fail on this metric".
 With --cobertura and --base-ref it also reports E2E changed-line coverage: the
 share of instrumentable lines added under apps/bcs since the base ref that the
 e2e run executed. Scope: Rust files in the e2e report (files matching
---ignore-filename-regex, test-only files and non-Rust files are not counted).
+--ignore-filename-regex or --changed-skip-regex, test-only files and non-Rust
+files are not counted).
 
 --changed-line-min N gates it: coverage must be strictly greater than N%, but
 only when the change has at least --changed-line-min-lines (default 20)
@@ -35,7 +36,7 @@ Usage:
       [--line-min 20] [--method-min 20] [--region-min 0] \
       [--cobertura <cobertura.xml> --base-ref <git_ref> \
        [--ignore-filename-regex <regex>] [--changed-json <out.json>] \
-       [--changed-line-min 60] [--changed-line-min-lines 20]]
+       [--changed-line-min 50] [--changed-line-min-lines 20]]
 """
 
 import argparse
@@ -78,6 +79,9 @@ def parse_args():
                    help="git ref the change is diffed against for changed-line coverage")
     p.add_argument("--ignore-filename-regex",
                    help="regex the report excluded from its scope (labels excluded files)")
+    p.add_argument("--changed-skip-regex",
+                   help="changed files matching this regex are not counted even when the "
+                        "report lists them (e.g. in-memory repo implementations the e2e stack never selects)")
     p.add_argument("--changed-json",
                    help="write per-file changed-line coverage details to this path")
     p.add_argument("--changed-line-min", type=float, default=0.0,
@@ -163,7 +167,8 @@ def report_changed_lines(args):
         write_changed_json(args.changed_json, {
             "status": "unavailable", "reason": str(e), "base_ref": args.base_ref})
         return not gated
-    result = changed_line_cov.measure(changed, coverage, args.ignore_filename_regex)
+    result = changed_line_cov.measure(changed, coverage, args.ignore_filename_regex,
+                                      args.changed_skip_regex)
 
     rate = result.rate
     ok = True
@@ -197,6 +202,13 @@ def report_changed_lines(args):
     if result.excluded:
         gh("    %d changed file(s) outside the e2e report scope (not counted)"
            % len(result.excluded))
+    if result.skipped:
+        gh("    %d changed in-memory repo file(s) unreachable in the SQLite e2e stack "
+           "(not counted): %s" % (len(result.skipped), ", ".join(result.skipped[:10])))
+    if result.skip_overridden:
+        gh("::warning::%d listed in-memory repo file(s) were executed by e2e and are counted; "
+           "update the list in e2e_coverage.sh: %s"
+           % (len(result.skip_overridden), ", ".join(result.skip_overridden[:10])))
     if result.test_code:
         gh("    %d changed test-only file(s) (not counted)" % len(result.test_code))
     if result.unmapped:

@@ -12,6 +12,11 @@ than silently dropped, so a reader can tell "not applicable" from "not run":
 
   excluded  - matches the report's --ignore-filename-regex (outside the scope
               the report measures, e.g. tool crates the E2E stack never runs)
+  skipped   - matches an extra changed-line-only exclusion (in-memory repo
+              implementations verified to be unreachable in the SQLite E2E stack);
+              applied even when the report lists the file, but only while the
+              report shows no hits in it: any hit proves the file is reachable,
+              so it is counted again and listed under skip_overridden
   test_code - test-only sources (tests/, benches/, examples/, *_tests.rs)
   unmapped  - any other Rust source missing from the report
 """
@@ -60,6 +65,8 @@ class FileResult:
 class ChangedLineResult:
     files: list = field(default_factory=list)  # FileResult, measured files only
     excluded: list = field(default_factory=list)
+    skipped: list = field(default_factory=list)
+    skip_overridden: list = field(default_factory=list)
     test_code: list = field(default_factory=list)
     unmapped: list = field(default_factory=list)
 
@@ -91,6 +98,8 @@ class ChangedLineResult:
                 for f in sorted(self.files, key=lambda f: f.path)
             ],
             "excluded_files": sorted(self.excluded),
+            "skipped_files": sorted(self.skipped),
+            "skip_overridden_files": sorted(self.skip_overridden),
             "test_files": sorted(self.test_code),
             "unmapped_files": sorted(self.unmapped),
         }
@@ -166,11 +175,17 @@ def load_cobertura(path, bcs_dir=None):
     return coverage
 
 
-def measure(changed, coverage, ignore_regex=None):
+def measure(changed, coverage, ignore_regex=None, skip_regex=None):
     ignore = re.compile(ignore_regex) if ignore_regex else None
+    skip = re.compile(skip_regex) if skip_regex else None
     result = ChangedLineResult()
     for path, lines in sorted(changed.items()):
         hits = coverage.get(path)
+        if skip and path.endswith(".rs") and skip.search(path) and not _TEST_PATH.search(path):
+            if not any(h > 0 for h in (hits or {}).values()):
+                result.skipped.append(path)  # in the report, but never executed
+                continue
+            result.skip_overridden.append(path)  # executed after all: count it
         if hits is None:
             if not path.endswith(".rs"):
                 continue  # configs, docs, scripts: not part of a Rust report
