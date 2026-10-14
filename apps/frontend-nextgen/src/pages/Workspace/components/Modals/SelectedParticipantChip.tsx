@@ -1,4 +1,5 @@
 import { Avatar, Button } from '@/components/ui';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { SERVICE_BOT_STAGE_OPTIONS } from '@/domain/collaboration/serviceBotRouting';
 import { X } from 'lucide-react';
 import type { useServiceBotRouting } from '../../hooks/useServiceBotRouting';
@@ -27,10 +28,17 @@ export function SelectedParticipantChip({
       <span aria-hidden>
         <Avatar name={bot.name} src={bot.avatarUrl} size={16} />
       </span>
-      <span className="max-w-30 truncate text-xs font-semibold text-primary" title={bot.name}>
-        {bot.name}
-        {stageLabel ? `（${stageLabel}）` : ''}
-      </span>
+      <TooltipProvider delayDuration={300}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span tabIndex={0} className="max-w-30 truncate text-xs font-semibold text-primary">
+              {bot.name}
+              {stageLabel ? `（${stageLabel}）` : ''}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{bot.name}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
       {routing && <ServiceBotRoutingControl actorId={bot.id} botName={bot.name} routing={routing} />}
       {onRemove && (
         <Button

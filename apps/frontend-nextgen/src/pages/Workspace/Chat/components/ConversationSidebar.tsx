@@ -3,7 +3,7 @@
 // 本体(ConversationSidebarContent)与外壳分离:桌面端用 ResizableWorkspaceSidebar,
 // <lg 由页面(任务 8)以 Drawer 包裹同一 Content,保证两端一致。
 // 组件只消费 Store 状态与同步 setter / Hook 模型回调,不触达 Service。
-import { Empty, Input } from '@/components/ui';
+import { Button, Empty, Input } from '@/components/ui';
 import type { ConversationBotSection, ConversationBotView } from '@/domain/conversation/types';
 import type { ConversationDirectoryModel } from '@/pages/Workspace/Chat/hooks/useConversationDirectory';
 import type { ConversationSessionsModel } from '@/pages/Workspace/Chat/hooks/useConversationSessions';
@@ -38,9 +38,14 @@ export interface ConversationSidebarProps {
 /** 空态文案内跳转链接:文案即入口,点击直达对应菜单路由(2026-10-14 体验修复)。 */
 function EmptyHintLink({ label, onClick }: { label: string; onClick(): void }) {
   return (
-    <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={onClick}>
+    <Button
+      variant="link"
+      size="sm"
+      className="h-auto min-w-0 rounded-none p-0 text-xs font-normal text-primary no-underline underline-offset-2 hover:underline"
+      onClick={onClick}
+    >
       {label}
-    </button>
+    </Button>
   );
 }
 

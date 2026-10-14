@@ -18,7 +18,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "max lint",
     "test": "jest",
-    "ci": "npm run typecheck && npm run lint && npm test -- --runInBand && npm run build",
+    "ci:guardrails": "node scripts/ci-guardrails.mjs",
+    "ci": "npm run ci:guardrails && npm run typecheck && npm run lint && npm test -- --runInBand && npm run build",
     "check:open-core": "node scripts/check-open-core.cjs ."
   },
   "dependencies": {

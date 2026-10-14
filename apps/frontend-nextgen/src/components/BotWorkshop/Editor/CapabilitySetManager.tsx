@@ -15,7 +15,6 @@ import { useEffect, useState } from 'react';
 import { CapabilityDetailDrawer } from './CapabilityDetailDrawer';
 import { CapabilityMembers } from './CapabilityMembers';
 import { CapabilityPickerModal } from './CapabilityPickerModal';
-
 export interface CapabilitySetManagerProps {
   botId?: string;
   ownerId?: string;
@@ -48,7 +47,6 @@ export interface CapabilitySetManagerProps {
   updatingCallType?: string;
   onMcpCallType?: (serverCode: string, callType: 'caller' | 'owner') => Promise<void>;
 }
-
 type Picker = { set: BotCapabilitySet; kind: 'skill' | 'mcp' };
 
 export function CapabilitySetManager(props: CapabilitySetManagerProps) {
