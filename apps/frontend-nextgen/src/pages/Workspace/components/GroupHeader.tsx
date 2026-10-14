@@ -32,7 +32,7 @@ export interface GroupHeaderProps {
 }
 
 /**
- * header chip（dmore artboard-003 群对话标题栏，48px 顶栏）：群身份 chip（头像堆/群名/会话 Key
+ * header chip（dmore artboard-003 群对话标题栏，48px 顶栏）：群身份 chip（头像堆/群名/会话 ID
  * 胶囊/用户与 Bot 计数）+ 右侧 28px 图标钮列。六槽位按设计稿 x=0/32/64/96/128/160 全量落地：
  * 收藏会话 / 分享 / 会话管理 / 历史消息 / 资源管理 / 副屏——其中五枚与 chat 页 ChatHeaderActions
  * 同构（Star/SlidersHorizontal/History/FolderOpen/Monitor），分享为协作群特有（SharePopover 气泡）。
@@ -105,7 +105,7 @@ export function GroupHeader({
     if (!selectedSession?.sessionId) return;
     try {
       await navigator.clipboard.writeText(selectedSession.sessionId);
-      toast.success('会话 Key 已复制');
+      toast.success('会话 ID 已复制');
     } catch {
       toast.error('复制失败，请手动复制。');
     }
@@ -146,7 +146,7 @@ export function GroupHeader({
                       <TooltipContent>{selectedSession.sessionId}</TooltipContent>
                     </Tooltip>
                     <IconButton
-                      label="复制会话 Key"
+                      label="复制会话 ID"
                       icon={<Copy className="h-3 w-3" aria-hidden />}
                       size="sm"
                       variant="ghost"

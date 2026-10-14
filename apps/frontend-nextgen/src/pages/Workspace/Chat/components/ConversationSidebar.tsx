@@ -27,11 +27,21 @@ export interface ConversationSidebarProps {
   sessions: ConversationSessionsModel;
   others: ManagedBotOthersModel;
   onOpenSession(botId: string, section: ConversationBotSection, sessionId: string, friendUserId?: string): void;
+  /** 好友 Bot 空态文案内「公开 Bot」链接:跳公开 Bot 发现页(/collaboration-square/bots)。 */
   onOpenPublicBots(): void;
-  /** 各分组标题行「+」添加入口:跳 Bot 管理页(/bot-workshop)创建 Bot。 */
+  /** 我的 Bot 空态文案内「Bot 管理」链接:跳 Bot 管理页(/bot-workshop)创建 Bot。 */
   onOpenBotWorkshop(): void;
   /** AgentCoding Bot 使用专用 coding-chat;与 Bot 工坊「去使用」保持一致。 */
   onOpenAgentCodingBot(bot: ConversationBotView['bot']): void;
+}
+
+/** 空态文案内跳转链接:文案即入口,点击直达对应菜单路由(2026-10-14 体验修复)。 */
+function EmptyHintLink({ label, onClick }: { label: string; onClick(): void }) {
+  return (
+    <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={onClick}>
+      {label}
+    </button>
+  );
 }
 
 function filterBots(bots: ConversationBotView[], keyword: string): ConversationBotView[] {
@@ -51,6 +61,22 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
   const managedTitle = '我的 Bot';
   const teamTitle = '团队 Bot';
   const friendTitle = '好友 Bot';
+  // 空态提示(文案即入口):我的 Bot 均为用户创建并管理,引导去 Bot 管理创建
+  // (2026-10-14 体验修复,不再误导去公开 Bot 添加);好友 Bot 引导去公开 Bot 发现添加。
+  const managedEmptyHint = (
+    <>
+      可前往
+      <EmptyHintLink label="「Bot 管理」" onClick={onOpenBotWorkshop} />
+      创建新 Bot。
+    </>
+  );
+  const friendEmptyHint = (
+    <>
+      可前往
+      <EmptyHintLink label="「公开 Bot」" onClick={onOpenPublicBots} />
+      发现并添加好友 Bot。
+    </>
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -81,10 +107,8 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
               onRetry={directory.retryManaged}
               items={filteredManaged}
               emptyTitle="暂无管理的 Bot"
-              emptyHint="可前往「公开 Bot」发现并添加 Bot。"
+              emptyHint={managedEmptyHint}
               isSearching={isSearching}
-              onOpenPublicBots={onOpenPublicBots}
-              onOpenBotWorkshop={onOpenBotWorkshop}
               renderItem={(view) => <ManagedItem key={view.bot.botId} view={view} props={props} />}
               collapsible
               collapsed={!isSearching && props.store.collapsedBotGroups.managed === true}
@@ -104,21 +128,18 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
                 }
               }}
             />
-            {/* 团队 Bot 第三分组:桶非空/搜索中/独立加载中/独立加载失败时渲染
+            {/* 团队 Bot 第三分组:桶非空/独立加载中/独立加载失败时渲染
                 (collaborations 目录 loading/error/retry 须可见,2026-10-10 spec);
-                settle 后空目录不渲染,避免空「团队 Bot」死分组(B2/B3 复原裁决)。 */}
-            {(filteredTeam.length > 0 || isSearching || directory.teamLoading || directory.teamError) && (
+                空桶(含搜索中无匹配)一律不渲染,不给空分组留死标题与缺省内容
+                (B2/B3 复原裁决 + 2026-10-14 体验修复)。 */}
+            {(filteredTeam.length > 0 || directory.teamLoading || directory.teamError) && (
               <SidebarSection
                 title={teamTitle}
                 loading={directory.teamLoading && teamBots.length === 0}
                 error={directory.teamError}
                 onRetry={directory.retryTeam}
                 items={filteredTeam}
-                emptyTitle="暂无团队 Bot"
-                emptyHint="加入 Bot 协作团队后将在此展示。"
                 isSearching={isSearching}
-                onOpenPublicBots={undefined}
-                onOpenBotWorkshop={onOpenBotWorkshop}
                 renderItem={(view) => <ManagedItem key={view.bot.botId} view={view} props={props} />}
                 collapsed={false}
                 onToggleCollapsed={() => undefined}
@@ -131,10 +152,8 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
               onRetry={directory.retryFriend}
               items={filteredFriend}
               emptyTitle="暂无好友 Bot"
-              emptyHint="可前往「公开 Bot」发现并添加好友 Bot。"
+              emptyHint={friendEmptyHint}
               isSearching={isSearching}
-              onOpenPublicBots={onOpenPublicBots}
-              onOpenBotWorkshop={onOpenBotWorkshop}
               renderItem={(view) => <FriendItem key={view.bot.botId} view={view} props={props} />}
               collapsible
               collapsed={!isSearching && props.store.collapsedBotGroups.friend === true}
@@ -163,7 +182,7 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
 /** 桌面端(≥lg)可拖宽侧栏外壳;<lg 隐藏,由页面用 Drawer 包裹 Content 呈现。 */
 export function ConversationSidebar(props: ConversationSidebarProps) {
   const { managedBots, teamBots, friendBots, store } = props;
-  // 收起竖轨的数据面:管理/好友两组常驻(与展开态空态/CTA 收口一致),
+  // 收起竖轨的数据面:管理/好友两组常驻(与展开态空态引导一致),
   // 团队组仅在有成员时入轨(展开侧栏对空团队桶也不渲染死分组);加载中/失败态
   // 不进竖轨——收起条只做「快速抵达」,真态留在展开侧栏。
   const railSections: ConversationCollapsedRailSection[] = [
@@ -194,7 +213,6 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
             }
           }}
           onExpand={expandSidebar}
-          onOpenPublicBots={props.onOpenPublicBots}
           onOpenAgentCodingBot={props.onOpenAgentCodingBot}
         />
       )}

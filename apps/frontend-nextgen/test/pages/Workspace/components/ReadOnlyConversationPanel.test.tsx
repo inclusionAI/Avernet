@@ -101,6 +101,13 @@ describe('ReadOnlyConversationPanel', () => {
     expect(screen.queryByRole('button', { name: /编辑消息|追问选文本|解释选中文本/ })).not.toBeInTheDocument();
   });
 
+  it('shows the session ID pill in the header for read-only others sessions', () => {
+    render(<ReadOnlyConversationPanel {...baseProps} />);
+    // 他人发起(origin=others)只读会话与交互式面板同口径:顶栏展示会话 ID 胶囊,点按复制
+    // (2026-10-14 修复:装配 ChatPanelHeader 此前漏传 sessionCode,胶囊不渲染)。
+    expect(screen.getByRole('button', { name: '复制会话 ID session-1' })).toBeInTheDocument();
+  });
+
   it('shows an empty selection state before a Session is selected', () => {
     render(<ReadOnlyConversationPanel {...baseProps} friend={null} session={null} messages={[]} />);
     expect(screen.getByText('请选择一个好友用户会话')).toBeInTheDocument();

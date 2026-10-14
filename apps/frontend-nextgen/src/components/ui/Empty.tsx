@@ -4,7 +4,7 @@ import React from 'react';
 
 interface EmptyProps {
   title?: string;
-  description?: string;
+  description?: React.ReactNode;
   icon?: React.ReactNode;
   action?: React.ReactNode;
   compact?: boolean;

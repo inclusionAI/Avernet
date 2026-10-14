@@ -63,7 +63,7 @@ it('窄屏会话列表入口位于 chip 左侧并使用右箭头图标', () => {
   expect(button.querySelector('svg')).toHaveClass('lucide-chevron-right');
 });
 
-it('chip 呈现群名、会话 Key 与用户/Bot 两级计数（artboard-010 形态）', () => {
+it('chip 呈现群名、会话 ID 与用户/Bot 两级计数（artboard-010 形态）', () => {
   render(<GroupHeader {...buildProps()} />);
 
   expect(screen.getByRole('group', { name: '协作群 主站群' })).toBeInTheDocument();
@@ -73,22 +73,22 @@ it('chip 呈现群名、会话 Key 与用户/Bot 两级计数（artboard-010 形
   expect(screen.getByLabelText('1 Bot')).toBeInTheDocument();
 });
 
-it('点击 Key 胶囊复制按钮写入剪贴板并 toast', async () => {
+it('点击会话 ID 胶囊复制按钮写入剪贴板并 toast', async () => {
   const writeText = jest.fn().mockResolvedValue(undefined);
   Object.assign(navigator, { clipboard: { writeText } });
   render(<GroupHeader {...buildProps()} />);
 
-  fireEvent.click(screen.getByRole('button', { name: '复制会话 Key' }));
+  fireEvent.click(screen.getByRole('button', { name: '复制会话 ID' }));
   await Promise.resolve();
   expect(writeText).toHaveBeenCalledWith('sess-key-x1');
 });
 
-it('未选会话时 Key 胶囊与会话级图标钮隐藏，群名/计数保留', () => {
+it('未选会话时会话 ID 胶囊与会话级图标钮隐藏，群名/计数保留', () => {
   render(<GroupHeader {...buildProps({ selectedSession: null })} />);
 
   expect(screen.getByLabelText('协作群 主站群')).toBeInTheDocument();
   expect(screen.queryByText('sess-key-x1')).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: '复制会话 Key' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '复制会话 ID' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '管理会话' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '历史消息' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '资源管理' })).not.toBeInTheDocument();

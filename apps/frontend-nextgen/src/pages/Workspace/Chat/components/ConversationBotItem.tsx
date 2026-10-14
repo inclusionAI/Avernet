@@ -147,7 +147,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             className={cn(
               'flex min-w-0 flex-1 items-center gap-2',
               // 文字让位与操作区实际覆盖等宽:悬停/键盘聚焦弹出操作区,或任一筛选(归属/范围/检索)钉住可见。
-              // 筛选/检索/加号全在时让位 96px(pr-24)且悬停/聚焦不可回缩;
+              // 新建/检索/筛选全在时让位 96px(pr-24)且悬停/聚焦不可回缩(2026-10-14 对齐设计稿顺序:新建、检索、筛选);
               // 非钉住时仅悬停/键盘聚焦临时让位。
               hasSessionControls &&
                 (actionsPinned
@@ -174,23 +174,24 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
               'absolute inset-y-0 right-[34px] z-10 flex items-center gap-0.5 pl-5',
               'mask-[linear-gradient(to_right,transparent,black_20px)]',
               // 遮盖底撤除:按钮 hover 自带 muted 底,操作区不再叠一层与行底不一致的底色;
-              // right-[34px] 使行尾箭头与「新建会话」之间保持与按钮间(gap-0.5)一致的 2px 等宽间隙。
+              // right-[34px] 使行尾箭头与操作区最右按钮(设计稿顺序 新建/检索/筛选,最右为筛选)之间
+              // 保持与按钮间(gap-0.5)一致的 2px 等宽间隙。
               'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100',
               // 展开或任一筛选(归属/范围/会话ID检索)激活时钉住可见;
               // 生效中的检索在 Bot 收起时仍可见(🔍 按钮激活态圆点)。
               actionsPinned && 'opacity-100',
             )}
           >
-            {showFilter && (
-              <ConversationOriginFilter
-                botId={bot.botId}
-                origin={origin}
-                scope={scope}
-                supportsOrigin={isManaged}
-                supportsFavorites={canFavorite}
-                othersDisabled={section === 'team'}
-                onOriginChange={onOriginChange}
-                onScopeChange={onScopeChange}
+            {!isOthers && (
+              <IconButton
+                label="新建会话"
+                size="sm"
+                icon={<Plus className="h-3.5 w-3.5" />}
+                className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCreateSession();
+                }}
               />
             )}
             {searchVisible && (
@@ -218,16 +219,16 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
                 }}
               />
             )}
-            {!isOthers && (
-              <IconButton
-                label="新建会话"
-                size="sm"
-                icon={<Plus className="h-3.5 w-3.5" />}
-                className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onCreateSession();
-                }}
+            {showFilter && (
+              <ConversationOriginFilter
+                botId={bot.botId}
+                origin={origin}
+                scope={scope}
+                supportsOrigin={isManaged}
+                supportsFavorites={canFavorite}
+                othersDisabled={section === 'team'}
+                onOriginChange={onOriginChange}
+                onScopeChange={onScopeChange}
               />
             )}
           </div>
