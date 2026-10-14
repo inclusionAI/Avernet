@@ -12,6 +12,9 @@ than silently dropped, so a reader can tell "not applicable" from "not run":
 
   excluded  - matches the report's --ignore-filename-regex (outside the scope
               the report measures, e.g. tool crates the E2E stack never runs)
+  skipped   - matches an extra changed-line-only exclusion (e.g. memory store
+              backends, compiled in but never selected by the SQLite E2E
+              stack); applied even when the report lists the file
   test_code - test-only sources (tests/, benches/, examples/, *_tests.rs)
   unmapped  - any other Rust source missing from the report
 """
@@ -60,6 +63,7 @@ class FileResult:
 class ChangedLineResult:
     files: list = field(default_factory=list)  # FileResult, measured files only
     excluded: list = field(default_factory=list)
+    skipped: list = field(default_factory=list)
     test_code: list = field(default_factory=list)
     unmapped: list = field(default_factory=list)
 
@@ -91,6 +95,7 @@ class ChangedLineResult:
                 for f in sorted(self.files, key=lambda f: f.path)
             ],
             "excluded_files": sorted(self.excluded),
+            "skipped_files": sorted(self.skipped),
             "test_files": sorted(self.test_code),
             "unmapped_files": sorted(self.unmapped),
         }
@@ -166,10 +171,14 @@ def load_cobertura(path, bcs_dir=None):
     return coverage
 
 
-def measure(changed, coverage, ignore_regex=None):
+def measure(changed, coverage, ignore_regex=None, skip_regex=None):
     ignore = re.compile(ignore_regex) if ignore_regex else None
+    skip = re.compile(skip_regex) if skip_regex else None
     result = ChangedLineResult()
     for path, lines in sorted(changed.items()):
+        if skip and path.endswith(".rs") and skip.search(path) and not _TEST_PATH.search(path):
+            result.skipped.append(path)  # checked first: these files are in the report
+            continue
         hits = coverage.get(path)
         if hits is None:
             if not path.endswith(".rs"):

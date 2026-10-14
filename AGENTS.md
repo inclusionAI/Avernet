@@ -235,7 +235,8 @@ runtime line coverage of at least 41%, method coverage of at least 36%,
 100% HTTP endpoint and bcs-cli leaf-command coverage, and E2E changed-line
 coverage above 60% for changes with at least 20 instrumentable changed lines in
 the BCS E2E scope (no exemption; smaller or out-of-scope changes are reported
-only). Its canonical artifacts
+only; memory store backends are not counted because the SQLite E2E stack never
+selects them). Its canonical artifacts
 are copied to `singlebox/.dependencies/coverage/singlebox/reports/bcs/` and are
 included in `summary.json`, `summary.md`, and `dashboard.html`. Keep pre-push
 and `.github/workflows/singlebox-coverage.yml` pointed at this same entrypoint,

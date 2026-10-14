@@ -337,8 +337,15 @@ if [[ "$no_stop" -eq 0 ]]; then
   # With a base ref, also measure changed-line coverage from cobertura.xml.
   # It gates only when changed_line_min > 0 (e2e_cov_gate.py fails closed
   # then, including when no base ref was given).
+  # Memory store backends are compiled into bcs but never selected: the E2E
+  # stack runs on SQLite, so every store call goes to the SQLite backend.
+  # They are excluded from the changed-line metric only (their conformance
+  # tests run in the unit-test gate); the overall line denominator above is
+  # unchanged so the overall threshold keeps its meaning.
+  changed_skip_regex='/src/(.*/)?memory(_[A-Za-z0-9_]+)?(\.rs$|/)'
   changed_args=(--changed-line-min "$changed_line_min"
-    --changed-line-min-lines "$changed_line_min_lines")
+    --changed-line-min-lines "$changed_line_min_lines"
+    --changed-skip-regex "$changed_skip_regex")
   # Never ship a previous run's changed-line report as this run's result.
   rm -f "$cov_dir/changed_line_coverage.json"
   if [[ -n "$changed_base_ref" ]]; then

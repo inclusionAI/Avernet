@@ -141,6 +141,32 @@ class MeasureTest(unittest.TestCase):
         self.assertEqual(result.test_code, ["crates/a/src/setup_tests.rs", "crates/a/tests/it.rs"])
         self.assertEqual(result.unmapped, ["crates/z/src/lib.rs"])
 
+    def test_skip_regex_excludes_memory_backends_listed_in_report(self):
+        skip = r"/src/(.*/)?memory(_[A-Za-z0-9_]+)?(\.rs$|/)"
+        changed = {
+            "crates/services/s/src/sqlite.rs": {1, 2},
+            "crates/services/s/src/memory.rs": {1, 2, 3},             # in report, 0 hits
+            "crates/services/s/src/memory_store.rs": {1},
+            "crates/services/s/src/memory_operations/op_1.rs": {1},
+            "crates/services/s/src/memory_tests.rs": {1},             # test module, not skipped
+            "crates/services/s/src/memoryless.rs": {1},               # not a memory backend
+        }
+        coverage = {
+            "crates/services/s/src/sqlite.rs": {1: 1, 2: 1},
+            "crates/services/s/src/memory.rs": {1: 0, 2: 0, 3: 0},
+            "crates/services/s/src/memory_store.rs": {1: 0},
+            "crates/services/s/src/memory_operations/op_1.rs": {1: 0},
+            "crates/services/s/src/memoryless.rs": {1: 0},
+        }
+        result = changed_line_cov.measure(changed, coverage, IGNORE, skip)
+        self.assertEqual(result.skipped, [
+            "crates/services/s/src/memory.rs",
+            "crates/services/s/src/memory_operations/op_1.rs",
+            "crates/services/s/src/memory_store.rs",
+        ])
+        self.assertEqual(result.test_code, ["crates/services/s/src/memory_tests.rs"])
+        self.assertEqual((result.covered, result.instrumentable), (2, 3))  # sqlite 2/2 + memoryless 0/1
+
     def test_rate_is_none_without_instrumentable_lines(self):
         result = changed_line_cov.measure({"crates/tools/bcs-bridge/src/x.rs": {1}}, {}, IGNORE)
         self.assertIsNone(result.rate)
