@@ -62,6 +62,51 @@ beforeEach(() => { Object.values(repairApi).forEach(mock => mock.mockReset()); r
 afterEach(() => vi.useRealTimers())
 
 describe('RepairTaskDialog', () => {
+  it('resumes polling after a lost revision response recovers a drafting attempt', async () => {
+    let current = taskDetail('review', '旧候选', ['item-1'])
+    repairApi.task.mockImplementation(async () => current)
+    repairApi.candidates.mockResolvedValue(candidates())
+    repairApi.revise.mockImplementation(async () => {
+      const next = { ...taskDetail('drafting', undefined, ['item-1']).latestAttempt, revision: 2 }
+      current = { ...current, latestAttempt: next, revisions: [...current.revisions, next] }
+      throw new Error('response lost')
+    })
+    render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit onClose={() => {}} onChanged={() => {}} />)
+    await userEvent.click(await screen.findByRole('button', { name: '选择建议', exact: true }))
+    await screen.findByRole('checkbox', { name: '选择修订项 新出现的修复建议' })
+    await userEvent.click(screen.getByRole('button', { name: '确认生成下一版' }))
+    const recovery = await screen.findByRole('button', { name: '核对任务状态', exact: true })
+    vi.useFakeTimers()
+    await act(async () => { recovery.click() })
+    expect(screen.getByText(/最近尝试：v2 · 生成中/)).toBeVisible()
+    const completed = { ...taskDetail('review', '新候选').latestAttempt, revision: 2 }
+    current = { ...current, latestAttempt: completed, latestSuccessful: completed, revisions: [current.revisions[0], completed] }
+    await act(async () => { await vi.runOnlyPendingTimersAsync() })
+    expect(screen.getByText('新候选')).toBeVisible()
+    expect(repairApi.revise).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears stale revision selections after rereading sources while retaining text', async () => {
+    repairApi.task.mockResolvedValue(taskDetail('review', '候选', ['item-1']))
+    repairApi.candidates.mockResolvedValue(candidates())
+    repairApi.revise.mockRejectedValueOnce({ status: 409, body: JSON.stringify({ code: 'SOURCE_CHANGED' }) }).mockResolvedValue({})
+    render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit onClose={() => {}} onChanged={() => {}} />)
+    await userEvent.click(await screen.findByRole('button', { name: '选择建议', exact: true }))
+    await screen.findByRole('checkbox', { name: '选择修订项 新出现的修复建议' })
+    await userEvent.type(screen.getByRole('textbox', { name: '修复要求' }), '保留原分支')
+    await userEvent.type(screen.getByRole('textbox', { name: '修改反馈' }), '补充边界')
+    await userEvent.click(screen.getByRole('button', { name: '确认生成下一版' }))
+    repairApi.candidates.mockResolvedValue({ ...candidates(), inputDigest: 'f'.repeat(64) })
+    await userEvent.click(await screen.findByRole('button', { name: '重新读取建议', exact: true }))
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: '选择修订项 修复建议 1' })).not.toBeChecked())
+    expect(screen.getByRole('button', { name: '确认生成下一版' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: '修复要求' })).toHaveValue('保留原分支')
+    expect(screen.getByRole('textbox', { name: '修改反馈' })).toHaveValue('补充边界')
+    await userEvent.click(screen.getByRole('checkbox', { name: '选择修订项 新出现的修复建议' }))
+    await userEvent.click(screen.getByRole('button', { name: '确认生成下一版' }))
+    expect(repairApi.revise.mock.calls[1][1]).toMatchObject({ itemIds: ['item-3'], inputDigest: 'f'.repeat(64) })
+  })
+
   it('regenerates a first failure without requiring feedback or reading current candidates', async () => {
     const failed = taskDetail('drafting', undefined, ['item-1']);
     failed.latestAttempt.phase = 'failed'; failed.latestAttempt.error = { code: 'AIS_FAILED' };

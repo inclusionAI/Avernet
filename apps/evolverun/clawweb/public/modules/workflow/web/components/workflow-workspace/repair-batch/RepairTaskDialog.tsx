@@ -97,12 +97,15 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
   const recover = async () => {
     if (!detail || busy) return
     if (effectiveRecoveryAction === 'refresh-sources') {
-      setSourceRefresh(value => value + 1); setRecoveryAction(null); setError(''); return
+      setFeedbackItemIds([]); requestId.current = ''; requestPayloadKey.current = ''
+      setSourceRefresh(value => value + 1); setRecoveryAction(null); setError('')
+      setNotice('建议来源已更新，原选择已清空，请重新确认本轮范围。'); return
     }
     setBusy(true); setError(''); setNotice(''); setDispatchError('')
     try {
       if (effectiveRecoveryAction === 'retry-result') await repairBatches.retryResult(taskId, detail.latestAttempt.revision)
       const result = acceptTask(await repairBatches.task(taskId))
+      if (['drafting', 'publishing'].includes(result.latestAttempt.phase)) setRefresh(value => value + 1)
       setRecoveryAction(null)
       if (result.latestAttempt.draft || result.latestAttempt.requestId === requestId.current || result.latestAttempt.revision !== detail.latestAttempt.revision) {
         setMode('detail'); setNotice('任务状态已核对，当前结果已保留；未提交的范围调整也仍保留。')
