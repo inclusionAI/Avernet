@@ -23,9 +23,8 @@ def format_relay_execution_instruction(
         f"本节点指令：{instruction}",
         f"本节点验收：{json.dumps(acceptances, ensure_ascii=False)}",
         "所有任务 HTTP 请求必须通过 task-loop Skill 的 scripts/relay_http.py 调用。"
-        "该工具从 Bot 自己的 BCS 会话文件读取凭证，并使用本指令中由服务端配置注入的"
-        " backend_url；每次调用必须传 --backend-url；"
-        "不得把 BCS 凭证写入指令、请求 JSON、日志或聊天消息。",
+        "该工具使用本指令中由服务端配置注入的 backend_url 访问生产内网白名单保护的"
+        " /api/v1 接口；每次调用必须传 --backend-url；不读取或发送 BCS session token。",
         f"S1 读取上下文：GET {context_path}，请求头 X-Relay-Token 使用本次 relay_token。"
         "这是只读投影；all_done_output 只含本棒之前的已接纳事实。",
         "S2 根据 root_task_spec 与 all_done_output 在本地计算 task_gaps: list[str]。",
@@ -50,6 +49,6 @@ def format_relay_execution_instruction(
         "携带 task_id、origin_node_id、target_node_id、relay_token；"
         "Backend 调用 TaskDispatcher.dispatch(target_node) 真正投递。"
         "若任务已收口或挂起，则不调用 dispatch。",
-        "出现 401、过期代次、状态冲突或投递失败时停止；不得换 Bot 身份、"
-        "自行更新 token、猜测节点 ID 或将失败宣称成功。",
+        "出现内网访问失败、过期代次、状态冲突或投递失败时停止；"
+        "不得自行更新 token、猜测节点 ID 或将失败宣称成功。",
     ])

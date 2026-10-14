@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-import importlib
 
 import pytest
 from fastapi import FastAPI
@@ -20,7 +19,7 @@ from agentclaw.community.core.errors import NotFound
 from agentclaw.community.core.task.domain.errors import NodeNotFoundError, TaskStateError
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, RuntimeInfo, Status,
-    TaskExecutionGraph, TaskNode, TaskSpec, TaskSourceType, TaskOpResult,
+    TaskContext, TaskExecutionGraph, TaskNode, TaskSpec, TaskSourceType, TaskOpResult,
     TaskReportResult, TaskReportStatus,
 )
 from agentclaw.community.core.task.domain.intake import (
@@ -72,6 +71,7 @@ class _StubService:
     def __init__(self) -> None:
         self.callback = _StubCallback()
         self._node_status: dict[tuple[str, str], Status] = {}
+        self._node_planned_by: dict[tuple[str, str], str] = {}
         self._execution_config: dict = {}
         self.intake_result: TaskIntakeResult | None = None
 
@@ -80,6 +80,9 @@ class _StubService:
 
     def set_execution_config(self, execution_config: dict) -> None:
         self._execution_config = execution_config
+
+    def set_node_planned_by(self, task_id, node_id, origin_node_id) -> None:
+        self._node_planned_by[(task_id, node_id)] = origin_node_id
 
     def get_task_dashboard(self, task_id, node_id=None) -> TaskExecutionGraph:
         g = TaskExecutionGraph(
@@ -94,8 +97,28 @@ class _StubService:
                 if self._execution_config.get("intake_session_id"):
                     node.run_info.assignee = "bot-1"
                     node.run_info.extend_props["relay_token"] = "run-1"
+                planned_by = self._node_planned_by.get((tid, nid))
+                if planned_by:
+                    node.run_info.extend_props["relay_planned_by"] = planned_by
                 g.tasks.append(node)
         return g
+
+    def get_node_context(self, task_id, node_id):
+        graph = self.get_task_dashboard(task_id)
+        node = next(item for item in graph.tasks if item.node_id == node_id)
+        return TaskContext(
+            spec=node.task_spec,
+            all_done_output=[],
+            gaps=[],
+            task_id=task_id,
+            node_id=node_id,
+            root_task_spec=node.task_spec,
+            current_task_spec=node.task_spec,
+        )
+
+    async def search_bots(self, *, query, task_id, node_id):
+        self.callback.calls.append(("search_bots", (query, task_id, node_id)))
+        return []
 
     async def report(self, command):
         self.callback.calls.append(("new_relay_report", command))
@@ -140,7 +163,7 @@ class _StubService:
 
     def claim_bbs_task(self, task_id, bot_id, node_id=None, claim_id=None):
         self.callback.calls.append(("bbs_claim", (task_id, bot_id, node_id, claim_id)))
-        return SimpleNamespace(node_id=task_id)
+        return SimpleNamespace(node_id=node_id or task_id)
 
 
 class _StubTaskModule(Module):
@@ -223,38 +246,80 @@ class TestRouter:
         assert response.status_code != 200
         assert svc.callback.calls == []
 
-    def test_new_relay_bbs_claim_cannot_spoof_bot_id(self, task_client, monkeypatch):
+    def test_relay_context_uses_network_admission_and_execution_generation(self, task_client):
+        client, svc = task_client
+        svc.set_execution_config({"orchestration_mode": "relay", "intake_session_id": "tis-1"})
+        svc.set_node_status("t1", "t1", Status.RUNNING)
+
+        response = client.get(
+            "/api/v1/collaboration/tasks/t1/nodes/t1/context",
+            headers={"X-Relay-Token": "run-1"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["data"]["node_id"] == "t1"
+
+    def test_relay_bbs_claim_trusts_internal_declared_bot_id(self, task_client):
         client, svc = task_client
         svc.set_execution_config({"orchestration_mode": "relay", "intake_session_id": "tis-1"})
         svc.set_node_status("t1", "bbs-step", Status.PENDING)
-        routes = importlib.import_module("agentclaw.community.adapters.http.task.relay_routes")
-
-        async def verified_bot(_request):
-            return SimpleNamespace(bot=SimpleNamespace(bot_uuid="bot-1:owner-1"))
-
-        monkeypatch.setattr(routes, "require_task_bot", verified_bot)
         response = client.post(
             "/api/v1/collaboration/tasks/bbs/claim",
             json={"task_id": "t1", "node_id": "bbs-step", "bot_id": "another-bot"},
         )
-        assert response.status_code != 200
-        assert svc.callback.calls == []
+        assert response.status_code == 200, response.text
+        assert svc.callback.calls[-1] == (
+            "bbs_claim", ("t1", "another-bot", "bbs-step", None),
+        )
+
+    def test_relay_search_uses_internal_network_and_generation(self, task_client):
+        client, svc = task_client
+        svc.set_execution_config({"orchestration_mode": "relay", "intake_session_id": "tis-1"})
+        svc.set_node_status("t1", "t1", Status.RUNNING)
+
+        response = client.post(
+            "/api/v1/collaboration/tasks/search",
+            json={
+                "query": "需要测试能力",
+                "task_id": "t1",
+                "node_id": "t1",
+                "relay_token": "run-1",
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["data"] == {"candidates": []}
+        assert svc.callback.calls[-1] == (
+            "search_bots", ("需要测试能力", "t1", "t1"),
+        )
+
+    def test_relay_dispatch_uses_internal_network_and_origin_generation(self, task_client):
+        client, svc = task_client
+        svc.set_execution_config({"orchestration_mode": "relay", "intake_session_id": "tis-1"})
+        svc.set_node_status("t1", "origin", Status.RUNNING)
+        svc.set_node_status("t1", "target", Status.PENDING)
+        svc.set_node_planned_by("t1", "target", "origin")
+
+        response = client.post(
+            "/api/v1/collaboration/tasks/dispatch",
+            json={
+                "task_id": "t1",
+                "origin_node_id": "origin",
+                "target_node_id": "target",
+                "relay_token": "run-1",
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["data"] == {"ok": True, "node_id": "target"}
+        assert svc.callback.calls[-1] == ("dispatch_node", ("t1", "target"))
 
     def test_new_relay_report_requires_current_execution_generation(
-        self, task_client, monkeypatch,
+        self, task_client,
     ):
         client, svc = task_client
         svc.set_execution_config({"orchestration_mode": "relay", "intake_session_id": "tis-1"})
         svc.set_node_status("t1", "t1", Status.RUNNING)
-        router_module = importlib.import_module(
-            "agentclaw.community.adapters.http.task.router"
-        )
-
-        async def verified_bot(_request):
-            return SimpleNamespace(bot=SimpleNamespace(bot_uuid="bot-1:owner-1"))
-
-        monkeypatch.setattr(router_module, "require_task_bot", verified_bot)
-        monkeypatch.setattr(router_module, "require_node_assignee", lambda *_: None)
         body = {
             "task_id": "t1", "node_id": "t1", "event_type": "EXECUTION_RESULT",
             "event_id": "event-1", "relay_token": "run-1",

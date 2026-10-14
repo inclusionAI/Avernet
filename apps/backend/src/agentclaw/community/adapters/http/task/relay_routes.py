@@ -9,11 +9,7 @@ from fastapi import APIRouter, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
-from agentclaw.community.adapters.http.task.bot_auth import (
-    require_node_assignee,
-    require_relay_attempt,
-    require_task_bot,
-)
+from agentclaw.community.adapters.http.task.relay_guard import require_relay_attempt
 from agentclaw.community.adapters.http.task.schemas_node_context import (
     NodeTaskContextDTO,
     node_context_to_dto,
@@ -52,9 +48,7 @@ async def get_relay_node_context(
 ) -> Envelope[NodeTaskContextDTO]:
     graph = service.get_task_dashboard(task_id)
     _require_relay_graph(graph)
-    bot = await require_task_bot(request)
     node = _require_graph_node(graph, node_id)
-    require_node_assignee(node, bot, request, graph)
     require_relay_attempt(node, request.headers.get("X-Relay-Token", ""))
     return envelope(node_context_to_dto(service.get_node_context(task_id, node_id)), request)
 
@@ -70,9 +64,7 @@ async def search_bots(
         raise TaskStateError("relay search requires task_id, node_id and relay_token")
     graph = service.get_task_dashboard(body.task_id)
     _require_relay_graph(graph)
-    bot = await require_task_bot(request)
     node = _require_graph_node(graph, body.node_id)
-    require_node_assignee(node, bot, request, graph)
     require_relay_attempt(node, body.relay_token)
     candidates = await service.search_bots(
         query=body.query, task_id=body.task_id, node_id=body.node_id,
@@ -91,10 +83,8 @@ async def dispatch_relay_node(
         raise TaskStateError("relay dispatch requires origin_node_id and relay_token")
     graph = service.get_task_dashboard(body.task_id)
     _require_relay_graph(graph)
-    bot = await require_task_bot(request)
     origin = _require_graph_node(graph, body.origin_node_id)
     target = _require_graph_node(graph, body.target_node_id)
-    require_node_assignee(origin, bot, request, graph)
     require_relay_attempt(origin, body.relay_token)
     if target.run_info.extend_props.get("relay_planned_by") != origin.node_id:
         raise TaskStateError("relay dispatch target was not planned by this origin")
@@ -119,11 +109,8 @@ async def bbs_claim(
         return envelope({"root_node_id": result.node_id, "task_id": body.task_id}, request)
     graph = service.get_task_dashboard(body.task_id)
     _require_relay_graph(graph)
-    bot = await require_task_bot(request)
-    if body.bot_id != bot.bot.bot_uuid:
-        raise TaskStateError("BBS claimant does not match authenticated Bot")
     result = service.claim_bbs_task(
-        body.task_id, bot.bot.bot_uuid, body.node_id, claim_id=body.claim_id,
+        body.task_id, body.bot_id, body.node_id, claim_id=body.claim_id,
     )
     claimed = _require_graph_node(service.get_task_dashboard(body.task_id), result.node_id)
     return envelope({

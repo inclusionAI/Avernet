@@ -11,9 +11,7 @@ from fastapi.responses import HTMLResponse
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
 from agentclaw.community.adapters.http.task.auth import CallbackAuthenticator
-from agentclaw.community.adapters.http.task.bot_auth import (
-    require_node_assignee, require_relay_attempt, require_task_bot,
-)
+from agentclaw.community.adapters.http.task.relay_guard import require_relay_attempt
 from agentclaw.community.adapters.http.task.schemas_relay_report import (
     TaskReportCommandDTO, report_result_to_dto,
 )
@@ -378,7 +376,6 @@ async def report_callback(
         _preview,
     )
     if isinstance(raw_event, dict) and "relay_token" in raw_event:
-        bot = await require_task_bot(request)
         command = TaskReportCommandDTO.model_validate(raw_event).to_domain()
         graph = svc.get_task_dashboard(command.task_id)
         if not graph.is_relay:
@@ -386,7 +383,6 @@ async def report_callback(
         node = next((item for item in graph.tasks if item.node_id == command.node_id), None)
         if node is None:
             raise TaskStateError("relay report node does not exist")
-        require_node_assignee(node, bot, request, graph)
         require_relay_attempt(node, command.relay_token)
         result = await svc.report(command)
         return envelope(report_result_to_dto(result).model_dump(), request)

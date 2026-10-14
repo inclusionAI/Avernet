@@ -656,7 +656,7 @@ PLAN_RESULT(event=TaskNode, run_mode=bbs) + APPLIED -> target_node_id 非空且 
 PLAN_RESULT(event=TaskNode, run_mode=single_bot/coop_group) + APPLIED -> target_node_id 非空，可进入 S6
 ```
 
-`report` 是节点状态迁移，不是可任意追加的事件流：每次有效执行尝试的 `EXECUTION_RESULT` 和每个节点最终的 `PLAN_RESULT` 各只能接纳一次。Backend 在首派前生成 `relay_token`，同一 `node_id` 的 Harness 重试在图谱事务中轮换该值；Bot 使用派发指令中的代次值调用节点级 context/report/dispatch，旧执行持旧值的迟到请求被拒绝。`relay_token` 仅是执行代次栅栏，不承担身份认证；Bot 身份由既有 BCS 会话凭证经 Backend Bot 认证链验证。`event_id` 由 Bot 调用层为每个上报事件生成，同一 HTTP 请求重试必须复用；Backend 将事件 ID、规范化内容指纹和原 `TaskReportResult` 与图谱迁移同事务保存。相同事件重试返回原结果（包括 `target_node_id`），相同 ID 不同内容或同一阶段不同内容返回冲突；并发由图谱版本和唯一后继关系兜底。Bot 不生成 `relay_token`，也不传 graph_version、attempt 或自报身份；不修改 BaaS/OpenClaw 插件。
+`report` 是节点状态迁移，不是可任意追加的事件流：每次有效执行尝试的 `EXECUTION_RESULT` 和每个节点最终的 `PLAN_RESULT` 各只能接纳一次。Backend 在首派前生成 `relay_token`，同一 `node_id` 的 Harness 重试在图谱事务中轮换该值；Bot 使用派发指令中的代次值调用节点级 context/report/dispatch，旧执行持旧值的迟到请求被拒绝。Relay Skill 只调用生产内网白名单保护的 `/api/v1/collaboration/tasks/**`，不携带用户或 Bot 认证凭证；`relay_token` 仅是节点执行代次栅栏，不是通用身份凭证。`event_id` 由 Bot 调用层为每个上报事件生成，同一 HTTP 请求重试必须复用；Backend 将事件 ID、规范化内容指纹和原 `TaskReportResult` 与图谱迁移同事务保存。相同事件重试返回原结果（包括 `target_node_id`），相同 ID 不同内容或同一阶段不同内容返回冲突；并发由图谱版本和唯一后继关系兜底。Bot 不生成 `relay_token`，也不传 graph_version、attempt 或自报身份；不修改 BaaS/OpenClaw 插件。
 
 响应丢失后 Runtime 先经 S1 查询接纳阶段：已接纳则使用投影的原 patch/结果续跑，不重新调用 LLM 生成第二份可能不同的请求；未接纳才重试当前事件。
 
@@ -949,7 +949,7 @@ capability_match_result: CapabilityMatchResult
 
 `assignee` 不属于 S4 的业务输入：
 
-- 当前节点唯一的目标执行者是 `TaskNode.run_info.assignee`。单 Bot 模式为 Bot ID，Group 模式为 Group ID；HTTP adapter 必须校验认证 principal：单 Bot 需为该 Bot，Group 需为该群当前唯一 manager/master Bot 且具有代表该 Group 执行的授权。不能将 Group ID 与 Bot principal 作字符串相等比较，也不能用 `owner_bot_id` 覆盖已冻结的 Group 目标。
+- 当前节点唯一的目标执行者是 `TaskNode.run_info.assignee`。单 Bot 模式为 Bot ID，Group 模式为 Group ID；执行者由规划与派发链路写入权威节点，Relay HTTP Adapter 不接受请求体覆盖。Skill 请求通过生产内网白名单进入，并以当前节点的 `relay_token` 约束执行代次；不能用 `owner_bot_id` 覆盖已冻结的执行目标。
 
 执行者身份属于认证与上报控制面，不写入 `TaskContext`，也不要求 Skill 临时生成。现有实现中的 `relay_holder_id` 与 `RelayTurn.holder_id` 是旧接力租约技术字段；新协议不把它们作为独立业务身份传递。旧单 Bot 节点可与 `run_info.assignee` 相等；Group 节点必须按授权关系校验协调 Bot，而非要求 Bot principal 等于 Group ID。
 
@@ -1055,7 +1055,7 @@ async def report_execution_result(
     relay_token: str,
     event_id: str,
 ) -> TaskReportResult:
-    # Bot 身份由 Backend Bot 认证链认证；relay_token 仅区分本节点执行代次。
+    # 请求由生产内网白名单准入；relay_token 区分本节点执行代次。
     # event_id 为本事件新 UUID；同一 HTTP 请求重试时原样复用。
     return await task_service.report(
         TaskReportCommand(
@@ -1133,7 +1133,7 @@ EXECUTION_RESULT
 
 同一次逻辑事件重试复用相同 `event_id`、`relay_token` 和请求内容；Backend 按 `(task_id, node_id, 当前执行代次, event_type)` 接纳唯一迁移，并保存 `event_id` 对应的原结果。
 
-新上报合同只包含 `event_id` 和 `relay_token`，不包含 `holder_id` 或 `relay_turn`；执行者身份由 Backend Bot 认证链解析 BCS 凭证并与当前节点校验。`relay_token` 不是身份凭证，不能由 Bot 自行生成。
+新上报合同只包含 `event_id` 和 `relay_token`，不包含 `holder_id` 或 `relay_turn`。Relay HTTP 由生产内网白名单准入，不再解析 BCS 凭证；`relay_token` 是 Backend 签发并轮换的节点执行代次，不能由 Bot 自行生成，也不能用于其它接口的身份认证。
 
 ## 9. S5：本地规划并一次上报
 
@@ -1368,7 +1368,7 @@ Skill: planning_report(APPLIED, target_node_id) -> POST /dispatch(task_id, targe
 或 Backend 后继棒恢复消费者: 待投递意图(task_id, target_node_id)
   -> HTTP Adapter 解析认证身份；Backend 读取权威 next_node: TaskNode（已落图）
   -> TaskDispatcher.dispatch(next_node) -> dispatched_node: TaskNode
-     -> Dispatcher 校验可信调用身份与节点状态，原子认领唯一投递意图
+     -> Dispatcher 校验节点状态与前后继关系，原子认领唯一投递意图
      -> Relay 派发策略校验预选执行者
      -> 内部 TaskRunner.start_run(next_node)，发送含 task_id + node_id 的指令
   -> dispatch 成功时记录投递接纳；失败时保留可恢复状态
@@ -1387,7 +1387,7 @@ Bot 在 S5.5 获得 `TaskReportResult(APPLIED, target_node_id)` 且命中执行�
 
 ### 12.4 API 映射
 
-Skill 通过 `POST /api/v1/collaboration/tasks/dispatch` 触发 S6，请求仅携带 `task_id` 和 `target_node_id`。HTTP Adapter 从认证上下文取得可信调用身份、读取已落图 `next_node`，再调用 `TaskDispatcher.dispatch(next_node)`；不能信任请求体提供的完整节点或执行者。身份授权、节点状态及待投递意图认领由 Dispatcher 所在的核心链路校验，不放进 HTTP Adapter 的业务判断。HTTP 成功响应序列化已有 `TaskNode` 的可传输节点字段，不传图谱反向引用；投递中返回可重试的处理中响应。`TaskRunner.start_run(next_node)` 是接力派发策略内部实现，不作为第二个 HTTP 接口。Backend 后继棒恢复消费者复用同一 Dispatcher，不额外定义 `TaskService.dispatch_task` 包装方法。
+Skill 通过生产内网白名单保护的 `POST /api/v1/collaboration/tasks/dispatch` 触发 S6，请求携带 `task_id`、`origin_node_id`、`target_node_id` 与当前棒 `relay_token`。HTTP Adapter 校验当前执行代次并读取已落图 `next_node`，再调用 `TaskDispatcher.dispatch(next_node)`；不能信任请求体提供的完整节点或执行者。节点状态、前后继关系及待投递意图认领由 Dispatcher 所在的核心链路校验，不放进 HTTP Adapter 的业务判断。HTTP 成功响应序列化已有 `TaskNode` 的可传输节点字段，不传图谱反向引用；投递中返回可重试的处理中响应。`TaskRunner.start_run(next_node)` 是接力派发策略内部实现，不作为第二个 HTTP 接口。Backend 后继棒恢复消费者复用同一 Dispatcher，不额外定义 `TaskService.dispatch_task` 包装方法。
 
 ## 13. 步骤总表
 

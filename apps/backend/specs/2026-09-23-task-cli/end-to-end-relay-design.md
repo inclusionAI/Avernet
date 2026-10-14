@@ -149,7 +149,7 @@ def build_task_info_request(result: TaskIntakeResult) -> TaskInfoRequest:
 | --- | --- | --- | --- | --- | --- |
 | 发起/澄清/确认 | CLI Adapter → Task Module | `TaskService.intake(command, context)`；`POST /api/v1/collaboration/tasks/intake` | `TaskIntakeCommand` 请求体；`session_id` 与认证事实形成 `TaskIntakeContext` | `TaskIntakeResult`；`CONFIRM` 也只返回它 | 目标设计；需实现 |
 | 创建正式任务 | CLI → Backend 创建链路 → Task Module | `POST /api/v1/collaboration/tasks/start` → 内部既有 `TaskService.execute(TaskInfoRequest)` | HTTP 只传 `session_id`；Backend 读取已确认 `TaskIntakeResult` 并构造 `TaskInfoRequest` | `TaskOpResult(task_id,node_id,success,run_id,root_execution_instruction)`；根节点 `node_id == task_id` | 已实现；不新增 Service `start` |
-| 获取本棒上下文 | Bot Runtime → Task Module | `GET /api/v1/collaboration/tasks/{task_id}/nodes/{node_id}/context` | 路径中的 `task_id,node_id` 与认证调用方 | `TaskContext`；根规格、当前节点规格、仅前序已接纳执行事实 | 已实现 |
+| 获取本棒上下文 | Bot Runtime → Task Module | `GET /api/v1/collaboration/tasks/{task_id}/nodes/{node_id}/context` | 路径中的 `task_id,node_id` 与 Header 中的当前 `relay_token`；生产内网白名单准入 | `TaskContext`；根规格、当前节点规格、仅前序已接纳执行事实 | 已实现 |
 | 候选检索 | Bot Runtime → Task Module 搜索能力 | `TaskService.search_bots`；`POST /api/v1/collaboration/tasks/search` | `query=next_node.task_spec.goal.objective.strip()`；`task_id/node_id` 为当前棒轨迹标识 | `list[BotCandidate]`；Skill 在下一子步骤形成执行者决策 | 已实现 |
 | 统一事件上报 | Bot Runtime → Task Module | `POST /api/v1/collaboration/tasks/callback/report` | `TaskReportCommand`，先执行结果，再上报一次包含规划与选人决策的 `PLAN_RESULT` | `TaskReportResult`；返回接纳状态与可能的目标节点 ID | 已实现 |
 | 实际交接 | 当前棒 Skill → HTTP Adapter → `TaskDispatcher`；Backend 消费者只恢复后继节点 | `POST /api/v1/collaboration/tasks/dispatch` → `TaskDispatcher.dispatch(next_node)` | HTTP 仅传 `task_id,target_node_id`；Backend 读取已落图的权威 `next_node: TaskNode` | `dispatched_node: TaskNode`；成功表示内部 Runner 已将指令交给投递通道，不代表任务完成 | 已实现 |
@@ -217,7 +217,7 @@ POST /api/v1/collaboration/tasks/dispatch
   data: dispatched_node: TaskNode  # 投递通道已接纳；不表示执行完成
 ```
 
-`TaskReportCommand.event` 是领域判别联合；认证执行者由服务端可信调用上下文取得，租约、并发与重试状态仅由服务端内部处理。`/dispatch` 不要求 Skill 传 `dispatch_id` 或完整 `TaskNode`；Adapter 按标识读取权威节点并调用 Dispatcher。
+`TaskReportCommand.event` 是领域判别联合；Relay HTTP 由生产内网白名单准入，节点执行代次由服务端签发的 `relay_token` 校验，租约、并发与重试状态仅由服务端内部处理。`/dispatch` 不要求 Skill 传 `dispatch_id` 或完整 `TaskNode`；Adapter 按标识读取权威节点并调用 Dispatcher。
 
 ## 5. 从用户操作到根节点：逐步输入 → 处理 → 输出
 
@@ -353,8 +353,8 @@ if planning_report.target_node_id is not None and not planning_report.bbs_publis
 
 - **单一上下文来源**：首棒、后续棒、harness 恢复都调用同一节点级 context API。Bot 不消费派发消息中的完整业务快照；消息只负责执行唤起和节点定位。
 - **先写事实后做决定**：`EXECUTION_RESULT` 接纳后才更新 gaps；Bot 完成本地规划、搜索和选人后才一次上报 `PLAN_RESULT`；上报同事务登记意图，Skill 随后调 S6 HTTP 派发；Backend 扫描意图负责失败恢复。
-- **地址、身份与重试**：Backend 自身地址由当前部署的 `configs/*.yaml` 加载为 `TaskDispatchConfig.backend_url`，Task Runtime 不读取环境变量、不识别部署类型；Runner 将该非敏感地址写入受控执行指令，Skill 调用 Backend HTTP 时显式使用。Backend 首派前生成 `relay_token`，同一 `node_id` 重试时在图谱事务中轮换；Bot 只原样携带本次代次值，旧执行迟到请求被拒绝。Bot 调用层生成 `event_id`，同一上报事件的 HTTP 重试复用该值。两者都不是身份凭证；身份由 Bot 现有 BCS 会话凭证经 Backend Bot 认证链验证。Bot 不传 `dispatch_id`、attempt、图谱版本或自报身份；持久化投递意图和图谱迁移负责服务端并发与重试。
-- **身份和权限**：Intake owner 来自认证上下文；目标 Bot/Group 可见性必须校验。S4 单 Bot 上报者须等于 `run_info.assignee`；Group 上报者须为该 Group 授权的当前 manager/master Bot，节点 `assignee` 保持 Group ID。不能把传来的 holder 当成第二套身份来源。
+- **地址、准入与重试**：Backend 自身地址由当前部署的 `configs/*.yaml` 加载为 `TaskDispatchConfig.backend_url`，Task Runtime 不读取环境变量、不识别部署类型；Runner 将该非敏感地址写入受控执行指令，Skill 调用生产内网白名单保护的 Backend `/api/v1` HTTP 时显式使用，不调用 Gateway OpenAPI，也不读取或发送 BCS session token。Backend 首派前生成 `relay_token`，同一 `node_id` 重试时在图谱事务中轮换；Bot 只原样携带本次代次值，旧执行迟到请求被拒绝。Bot 调用层生成 `event_id`，同一上报事件的 HTTP 重试复用该值。Bot 不传 `dispatch_id`、attempt、图谱版本或自报身份；持久化投递意图和图谱迁移负责服务端并发与重试。
+- **身份和权限**：Intake owner、目标 Bot/Group 可见性在用户/API 发起链路中校验。Relay 执行面依赖生产网络白名单准入；节点 `assignee` 由规划和派发写入权威图谱，Skill 不得通过请求体覆盖。
 - **完成条件**：任务完成以已接纳的显式 `PLAN_RESULT` 决策为准，不以持久化的 `graph.extend_props["gaps"] == []` 为准。`PLAN_RESULT` 的节点完成、目标节点创建与 Graph 状态迁移须原子完成。
 - **恢复**：harness 使用原 `task_id/node_id` 重新读取图谱投影；`all_done_output` 仍只含前序事实，另以 `accepted_execution_patch/accepted_plan_report` 判断本棒已接纳阶段，避免重执行业务或重做规划。上报前已经发生、但尚未持久化的外部工具副作用仍须由 Bot 工具自身的幂等/检查点机制处理；图谱无法凭空恢复未上报的工具结果。Bot 不需要消费 Graph 内部乐观锁版本。
 
@@ -412,7 +412,7 @@ class TaskService:
     ) -> TaskExecutionGraph: ...
 ```
 
-对外方法不定义 `user_id/caller_id` 参数，也不允许请求体自报执行者身份。删掉参数不等于跳过鉴权：服务端仍须使用可信的认证调用上下文校验节点 `assignee`、起点关系与当前状态；具体认证上下文获取方式不属于上述领域方法签名。
+对外领域方法不定义 `user_id/caller_id` 参数，也不允许请求体覆盖权威节点执行者。Relay HTTP Adapter 依赖生产内网白名单准入，并校验服务端签发的当前 `relay_token`、节点关系与状态；用户侧 Intake/OpenAPI 鉴权保持不变。
 
 旧 `TaskGraphService.report(TaskCallbackData) -> TaskOpResult` 不进入目标合同：`TaskCallbackData` 的 `report_type/graph_version/payload` 是旧回调形态，不能代替按 `event_type` 判别的 `TaskReportCommand`。图谱版本属于 Backend 并发控制，不由 Bot 传入；`TaskOpResult` 只表示任务创建，事件接纳一律返回 `TaskReportResult`。`TaskGraphService` 负责具体图谱事实操作，不再对外提供第二套 `report` 入口。
 
@@ -420,10 +420,10 @@ class TaskService:
 
   完整分支与字段转换伪代码见 [task-cli 设计第 8 节](design.md#8-taskserviceintake-处理伪代码)：`START` 解析 target 并从用户消息生成 `TaskSpec`；`CONTINUE` 合并新回复、保留既有验收项 ID 并重算缺项；`RESUME` 只读取；`CONFIRM/CANCEL` 只变更 intake 状态。Backend 通过会话版本条件更新防止并发覆盖；不承诺 `START/CONTINUE` 的动作级严格去重。
 - HTTP `/start`：只收 `session_id`；Backend 应用层校验会话 owner 与 `CONFIRMED` 状态，读取已保存 Result 并构造内部 `TaskInfoRequest`，再调用唯一创建方法 `TaskService.execute(request)`。TaskInfo、根图、唯一 session 关联和根投递意图必须同提交；返回成功的 `TaskOpResult(task_id=node_id)`，重试同一 session 返回原结果。它不返回 `TaskContext`，也不等候 Runner 投递。现有 `execute` 将 TaskInfo 与图谱分步写入，实施前需增强其可靠提交能力，或提供经过故障注入验证的可恢复提交协议；HTTP Adapter 只映射协议，不承担会话业务校验或事务编排。
-- `get_node_context`：在已认证调用的前提下校验当前节点，委托 `TaskGraphService` 从已持久化图谱投影严格前序 `all_done_output` 与本棒已接纳的执行 patch/规划结果；首棒、后续棒、harness 恢复均调用此同一接口。现有 `get_task_context(task_id)` 只能做兼容入口，不得猜测多节点任务的当前节点。
+- `get_node_context`：在生产内网白名单准入并通过当前节点 `relay_token` 代次校验后，委托 `TaskGraphService` 从已持久化图谱投影严格前序 `all_done_output` 与本棒已接纳的执行 patch/规划结果；首棒、后续棒、harness 恢复均调用此同一接口。现有 `get_task_context(task_id)` 只能做兼容入口，不得猜测多节点任务的当前节点。
 - `report`：统一接纳 `EXECUTION_RESULT` 与合并后的 `PLAN_RESULT`。后者一次接纳未落图节点及执行者决策，原子完成当前棒、创建下一棒并写入执行者，或收口/HUNG/BBS。图谱同事务保存当前代次、`event_id`、规范化内容指纹与原结果；同一事件重试返回原迁移结果，不重复建节点或发布 BBS。方法只收 `TaskReportCommand`，其中 `relay_token` 由 Backend 签发、`event_id` 由 Bot 调用层生成；不显式传认证调用方。
 - `search_bots`：只读检索，直接以 S5.2 生成的下一棒 `TaskSpec.goal.objective` 为 `query`，返回 `list[BotCandidate]` 供 S5.4 Skill 决策；不另设 Bot 本地搜索包装函数，也不重复拼接 `task_gaps`。`task_id/node_id` 可选，只将轨迹归属当前棒，不要求下一棒先落图。当前实现名为 `search_task_candidates` 且返回字典；HTTP Adapter 需把候选归一化，已有 HTTP 调用方依赖的响应字段需兼容迁移。
-- S6 不增加 `TaskService.dispatch_task` 包装方法：Skill 调现有 `/dispatch` HTTP 路径，Adapter 从认证中取得可信调用身份，以 `task_id,target_node_id` 读取权威 `next_node` 并调用 `TaskDispatcher.dispatch(next_node)`；Dispatcher 核心链路校验当前棒执行者、前后节点关系和投递意图。接力派发策略内部调用 `TaskRunner.start_run(next_node)`。根节点与失败恢复由 Backend 消费者以服务身份调用同一 Dispatcher；Skill 不传 `dispatch_id`。
+- S6 不增加 `TaskService.dispatch_task` 包装方法：Skill 调生产内网白名单保护的 `/dispatch` HTTP 路径，Adapter 校验起点节点的当前 `relay_token`，以 `task_id,target_node_id` 读取权威 `next_node` 并调用 `TaskDispatcher.dispatch(next_node)`；Dispatcher 核心链路校验前后节点关系、节点状态和投递意图。接力派发策略内部调用 `TaskRunner.start_run(next_node)`。根节点不走该派发分支；失败恢复消费者复用同一 Dispatcher；Skill 不传 `dispatch_id`。
 - `get_task_dashboard`：服务 `task-cli get`，只读图与节点状态；不作为 Bot S1 的业务上下文来源。
 
 ### 10.2 `TaskGraphService`：图谱事实与投影
@@ -473,7 +473,7 @@ class TaskDispatcher:
     async def dispatch(self, node: TaskNode) -> TaskNode: ...  # 成功表示指令被投递通道接纳
 ```
 
-`dispatch(node)` 根据节点所属任务创建时冻结的 `orchestration_mode + runtime_profile.dispatcher_strategy` 从启动时注册的策略表选择实现，不在入口中写中心化/Relay 的 `if/else`。该入口只由后继棒 Skill HTTP 请求和后继棒恢复消费者共用；Dispatcher 核心链路校验可信调用身份、节点状态，并以 `(task_id,node_id)` 原子认领唯一投递意图。已投递重试返回权威节点，投递中返回可重试的处理中状态，不重复调用 Runner。统一成功语义是：对应策略完成该模式所需的执行者处理，内部调用 `TaskRunner.start_run(node)`；只有指令被投递通道接纳才返回 `TaskNode`，Runner 返回 `False` 或抛错则派发失败。中心化 `default` 策略保留现有搜索、选人和更新节点逻辑，但要将原先外置的 Runner 调用移入策略以满足相同返回语义；Relay `relay_handoff` 策略只校验已持久化的 `assignee`、`run_mode`、节点状态，不搜索、不改派、不重复落图，然后调用 Runner。批量操作若仍需要，只能在外层逐个调用该原子接口。`run_info.run_mode` 是单 Bot/协作群/BBS 的投递模态，不能代替任务级 `orchestration_mode`。
+`dispatch(node)` 根据节点所属任务创建时冻结的 `orchestration_mode + runtime_profile.dispatcher_strategy` 从启动时注册的策略表选择实现，不在入口中写中心化/Relay 的 `if/else`。该入口只由后继棒 Skill HTTP 请求和后继棒恢复消费者共用；Dispatcher 核心链路校验权威节点状态与前后继关系，并以 `(task_id,node_id)` 原子认领唯一投递意图。已投递重试返回权威节点，投递中返回可重试的处理中状态，不重复调用 Runner。统一成功语义是：对应策略完成该模式所需的执行者处理，内部调用 `TaskRunner.start_run(node)`；只有指令被投递通道接纳才返回 `TaskNode`，Runner 返回 `False` 或抛错则派发失败。中心化 `default` 策略保留现有搜索、选人和更新节点逻辑，但要将原先外置的 Runner 调用移入策略以满足相同返回语义；Relay `relay_handoff` 策略只校验已持久化的 `assignee`、`run_mode`、节点状态，不搜索、不改派、不重复落图，然后调用 Runner。批量操作若仍需要，只能在外层逐个调用该原子接口。`run_info.run_mode` 是单 Bot/协作群/BBS 的投递模态，不能代替任务级 `orchestration_mode`。
 
 接力策略的关键处理逻辑如下；`next_node` 已由 Backend 从图谱读取，不能传 S5.2 的临时节点：
 

@@ -213,7 +213,7 @@ class TaskCallbackDataDTO(BaseModel):
 
 
 class TaskSearchRequestDTO(BaseModel):
-    """Search candidates for the current authenticated Relay baton."""
+    """Search candidates for the current network-admitted Relay baton."""
 
     query: str = Field(..., min_length=1)
     task_id: str = Field(..., min_length=1)
@@ -222,7 +222,7 @@ class TaskSearchRequestDTO(BaseModel):
 
 
 class TaskDispatchRequestDTO(BaseModel):
-    """Dispatch a persisted Relay successor from its authorized origin."""
+    """Dispatch a persisted Relay successor from its current origin generation."""
 
     task_id: str
     target_node_id: str
