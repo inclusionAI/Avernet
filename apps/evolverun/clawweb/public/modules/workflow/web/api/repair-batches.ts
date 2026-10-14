@@ -27,6 +27,8 @@ export const repairBatches = {
   disposition: (itemId: string, request: { workflowId: string; inputDigest: string; expectedStateVersion: number; contentRevision: number; action: 'no_action' | 'restore'; reason: string; requestId: string; includeHistorical?: boolean }) =>
     post<StoredRepairItem>(`${base}/items/${segment(itemId)}/disposition`, request),
   cancel: (taskId: string, expectedRevision: number) => post<unknown>(`${base}/${segment(taskId)}/cancel`, { expectedRevision }),
+  retryResult: (taskId: string, expectedRevision: number) => post<{ ok: true }>(`${base}/${segment(taskId)}/retry-result`, { expectedRevision }),
+  retryGeneration: (taskId: string, request: { expectedRevision: number; requestId: string }) => post<RepairRevision>(`${base}/${segment(taskId)}/retry-generation`, request),
   retryDispatch: (taskId: string, expectedRevision: number) => post<{ ok: true }>(`${base}/${segment(taskId)}/retry-dispatch`, { expectedRevision }),
   diff: (taskId: string, revision: number, comparison: 'baseline' | 'parent') =>
     fetchJson<RepairDiff>(`${base}/${segment(taskId)}/revisions/${revision}/diff?base=${comparison}`),

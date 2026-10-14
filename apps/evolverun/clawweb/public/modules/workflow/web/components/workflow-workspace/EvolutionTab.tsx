@@ -18,9 +18,9 @@ import RepairItemDetail from './repair-batch/RepairItemDetail'
 import IssueRepairSuggestions from './repair-batch/IssueRepairSuggestions'
 import IssueRepairPreview, { IssueRepairPreviewLoading } from './repair-batch/IssueRepairPreview'
 import RepairSelectionBar from './repair-batch/RepairSelectionBar'
-import { selectionConflicts } from './repair-batch/repair-selection'
 import DetailDrawer from './DetailDrawer'
 import RepairTaskDialog from './repair-batch/RepairTaskDialog'
+import RepairSelectionWorkspace from './repair-batch/RepairSelectionWorkspace'
 import { exclusion, itemTitle, phases, primary, RepairDialog } from './repair-batch/repair-view'
 import Pagination from '../Pagination'
 import ApplySuggestionModal from './ApplySuggestionModal'
@@ -262,11 +262,10 @@ function DiagnosisPanel({
   const generationReason = repairError ? '修复数据读取失败，请重试后再生成。'
     : repairLoading || !repairData ? '正在读取修复权限与任务状态…'
     : !canEdit || !repairData.canEdit ? '你只有查看权限，不能生成修复草稿。'
-    : activeRepairTask ? '已有修复任务，请先审阅、反馈或取消现有任务。'
+    : activeRepairTask ? '已有修复任务，请继续审阅；生成失败可在任务内重试，无需取消。'
     : !repairData.capabilities.generation ? '生成服务尚未接入，暂不能生成草稿；仍可查看和选择建议。'
     : repairBusy ? '正在提交，请稍候。'
     : !selectedRepairIds.length ? '在问题下勾选要采用的建议，可跨问题、跨页多选。' : ''
-  const conflicts = selectionConflicts(selectedItems)
   const selectedGroup = useSelectedIssueGroup(workflowId, selectedSignature, data?.groups.find(group => group.signature === selectedSignature))
   const externalCluster = selectedGroup.group ? aggregateDiagnoses(groupDiagnoses(selectedGroup.group))[0] : undefined
   if (externalCluster) externalCluster.aggregation = selectedGroup.group
@@ -334,7 +333,7 @@ function DiagnosisPanel({
     }
   }
   const submitDraft = async () => {
-    if (!repairData || !selectedRepairIds.length || repairBusy || conflicts.length || activeRepairTask
+    if (!repairData || !selectedRepairIds.length || repairBusy || activeRepairTask
       || !canEdit || !repairData.canEdit || !repairData.capabilities.generation || repairLoading || repairError) return
     const input = { workflowId, itemIds: selectedRepairIds, inputDigest: repairData.inputDigest,
       instructions, includeHistorical: repairData.includeHistorical }
@@ -419,6 +418,30 @@ function DiagnosisPanel({
       onResult={acceptRepairPage}
       renderItem={renderRepairItem} />
     : <p className="text-sm text-slate-600">请选择问题查看修复建议。</p>
+
+  const dispositionDialog = disposition && <RepairDialog title={disposition.action === 'restore' ? '恢复待处理' : '暂不处理'} busy={repairBusy} onClose={() => setDisposition(null)}>
+        <p className="text-xs leading-5 text-muted-foreground">只处置当前建议内容版本，原始问题、证据和历史任务都会保留。</p>
+        <label className="mt-4 block text-xs font-medium text-foreground">原因
+          <textarea aria-label="处置原因" rows={4} maxLength={2000} value={dispositionReason} disabled={repairBusy}
+            onChange={event => setDispositionReason(event.target.value)} className="mt-2 w-full rounded-lg border border-input bg-background p-3 font-normal leading-5 text-foreground" />
+        </label>
+        {repairActionError && <p role="alert" className="mt-3 text-xs text-destructive">{repairActionError}</p>}
+        <button type="button" className={`${primary} mt-4`} disabled={repairBusy || !dispositionReason.trim()} onClick={() => void submitDisposition()}>
+          {repairBusy ? '提交中…' : '确认'}
+        </button>
+      </RepairDialog>
+
+  if (selectedTaskId) return <RepairTaskDialog workflowId={workflowId} taskId={selectedTaskId} includeHistorical={includeHistorical}
+    canEdit={canEdit && repairData?.canEdit === true} onClose={() => setSelectedTaskId('')} onChanged={() => setRepairRefresh(value => value + 1)} />
+  if (draftOpen) return <>
+    <RepairSelectionWorkspace workflowId={workflowId} includeHistorical={includeHistorical} refreshToken={repairRefresh} selected={selectedRepairIds}
+      selectedItems={selectedItems} instructions={instructions} busy={repairBusy} reason={generationReason} error={repairActionError}
+      onInstructions={setInstructions} onToggle={toggleRepairItem} onResult={acceptRepairPage} onDetail={item => {
+        setSelectionItems(current => ({ ...current, [item.itemId]: item })); setSelectedRepairItemId(item.itemId)
+      }} onGenerate={() => void submitDraft()} onBack={() => { if (!repairBusy) { setDraftOpen(false); closeDetail() } }} />
+    {selectedRepairItem && <RepairDialog title="问题、建议与证据" onClose={() => setSelectedRepairItemId(null)}>{renderRepairItem(selectedRepairItem)}</RepairDialog>}
+    {dispositionDialog}
+  </>
 
   return (
     <div className="space-y-3 pb-36">
@@ -622,48 +645,8 @@ function DiagnosisPanel({
         </li>)}</ul>
       </RepairDialog>}
 
-      {draftOpen && repairData && <RepairDialog title="生成修复草稿" busy={repairBusy} onClose={() => setDraftOpen(false)}>
-        <p className="text-xs leading-5 text-slate-500">已选择 {selectedRepairIds.length} 个待处理项。只生成可审阅候选，不会应用或部署。</p>
-        <ul aria-label="本次修复范围" className="mt-3 divide-y divide-slate-100">
-          {selectedItems.map(item => <li key={item.itemId} className="flex items-start justify-between gap-3 py-3 text-sm">
-            <span>{itemTitle(item)}</span>
-            <button type="button" aria-label={`移除 ${itemTitle(item)}`} disabled={repairBusy} className="shrink-0 text-xs text-blue-700"
-              onClick={() => setSelectedRepairIds(ids => ids.filter(id => id !== item.itemId))}>移除</button>
-          </li>)}
-        </ul>
-        {conflicts.length > 0 && <div role="alert" className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-          <p>所选建议修改了同一配置，且方案不同。请移除不采用的方案后生成，系统不会替你选择。</p>
-          <ul className="mt-2 space-y-2">{conflicts.map(conflict => <li key={conflict.itemIds.join(':')}>
-            {conflict.nodeId} · {conflict.path}：{conflict.itemIds.map(id => itemTitle(selectionItems[id])).join(' / ')}
-          </li>)}</ul>
-        </div>}
-        <label className="mt-4 block text-xs font-medium text-slate-700">补充修复要求（选填）
-          <textarea aria-label="本次修复要求" placeholder="例如：保持现有重试策略不变。没有补充要求可留空。" rows={3} maxLength={20_000} value={instructions} disabled={repairBusy}
-            onChange={event => setInstructions(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-200 p-3 font-normal leading-5" />
-        </label>
-        {repairActionError && <p role="alert" className="mt-3 text-xs text-red-600">{repairActionError}</p>}
-        {generationReason && <p role="status" className="mt-3 text-xs text-amber-800">{generationReason}</p>}
-        <button type="button" className={`${primary} mt-4`} disabled={repairBusy || !selectedRepairIds.length || conflicts.length > 0 || !!activeRepairTask
-          || !canEdit || !repairData.canEdit || !repairData.capabilities.generation || repairLoading || !!repairError} onClick={() => void submitDraft()}>
-          {repairBusy ? '提交中…' : '确认生成草稿'}
-        </button>
-      </RepairDialog>}
+      {dispositionDialog}
 
-      {disposition && <RepairDialog title={disposition.action === 'restore' ? '恢复待处理' : '暂不处理'} busy={repairBusy} onClose={() => setDisposition(null)}>
-        <p className="text-xs leading-5 text-slate-500">只处置当前建议内容版本，原始问题、证据和历史任务都会保留。</p>
-        <label className="mt-4 block text-xs font-medium text-slate-700">原因
-          <textarea aria-label="处置原因" rows={4} maxLength={2000} value={dispositionReason} disabled={repairBusy}
-            onChange={event => setDispositionReason(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-200 p-3 font-normal leading-5" />
-        </label>
-        {repairActionError && <p role="alert" className="mt-3 text-xs text-red-600">{repairActionError}</p>}
-        <button type="button" className={`${primary} mt-4`} disabled={repairBusy || !dispositionReason.trim()} onClick={() => void submitDisposition()}>
-          {repairBusy ? '提交中…' : '确认'}
-        </button>
-      </RepairDialog>}
-
-      {selectedTaskId && repairData && <RepairTaskDialog workflowId={workflowId} taskId={selectedTaskId}
-        includeHistorical={repairData.includeHistorical} canEdit={canEdit && repairData.canEdit} onClose={() => setSelectedTaskId('')}
-        onChanged={() => setRepairRefresh(value => value + 1)} />}
     </div>
   )
 }

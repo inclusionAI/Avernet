@@ -8,6 +8,7 @@ import { RepairGitStore, createRepairAisExecution, resolveRepairAisConfiguration
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import type { AistudioService } from '@avernet/clawinsight/server/services/aistudio-service';
 import { digestRepairJson } from '@avernet/workflow/server/contracts/repair-batch';
+import { RepairResultAbsentError } from '@avernet/workflow/server/contracts/repair-workbench';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -78,13 +79,13 @@ describe('Workflow Repair Git-backed AIS execution', () => {
     const draft = { repoId: 'clawflows', branch, candidateCommit: candidate,
       parentCandidateCommit: f.baseline, packDigest: tree, summary: 'fixed', itemResults: [] };
     const checks = { candidateCommit: candidate, packDigest: tree };
-    const result = { schemaVersion: 'workflow-repair-result/v1', taskId: 'WR-1', stepId: 'WR-1-draft-1',
-      revision: 1, attempt: 1, executionId: 'WRX-1', status: 'succeeded', draft, checks };
+    const result = { schemaVersion: 'workflow-repair-result/v1', taskId: 'WR-1', stepId: 'WR-1-draft-2',
+      revision: 2, attempt: 1, executionId: 'WRX-1', status: 'succeeded', draft, checks };
     const message = `ClawMind workflow-repair-result/v1\n${JSON.stringify(result)}`;
     f.git(f.source, 'commit', '--allow-empty', '-qm', message);
     f.git(f.source, 'push', '-q', 'origin', `HEAD:refs/heads/${branch}`);
-    const request = { actorId: '123', identity: { stepId: 'WR-1-draft-1', attempt: 1, executionId: 'WRX-1' },
-      input: { taskId: 'WR-1', revision: 1, taskBranch: branch, baseline } } as Parameters<typeof store.result>[0];
+    const request = { actorId: '123', identity: { stepId: 'WR-1-draft-2', attempt: 1, executionId: 'WRX-1' },
+      input: { taskId: 'WR-1', revision: 2, parentCandidateCommit: null, taskBranch: branch, baseline } } as Parameters<typeof store.result>[0];
     expect(await store.result(request)).toMatchObject({ status: 'succeeded', draft });
     expect(await store.diff({ workflowId: 'wf', taskId: 'WR-1', revision: 1,
       baseCommit: f.baseline, candidateCommit: candidate })).toMatchObject({
@@ -93,6 +94,9 @@ describe('Workflow Repair Git-backed AIS execution', () => {
     });
     await expect(store.result({ ...request, identity: { ...request.identity, executionId: 'other' } }))
       .rejects.toThrow('does not match');
+    await expect(store.result({ ...request, input: { ...request.input, revision: 4,
+      parentCandidateCommit: candidate, previousReportRef: 'WR-1/revisions/2' } }))
+      .rejects.toBeInstanceOf(RepairResultAbsentError);
 
     writeFileSync(join(f.source, 'workflows/wf.yaml'), 'id: wf\nnodes: [second]\n');
     f.git(f.source, 'commit', '-qam', 'candidate revision two');
@@ -100,12 +104,12 @@ describe('Workflow Repair Git-backed AIS execution', () => {
     const secondTree = f.git(f.source, 'rev-parse', 'HEAD^{tree}');
     const secondDraft = { ...draft, candidateCommit: secondCandidate,
       parentCandidateCommit: candidate, packDigest: secondTree };
-    const secondResult = { ...result, stepId: 'WR-1-draft-2', revision: 2,
+    const secondResult = { ...result, stepId: 'WR-1-draft-4', revision: 4,
       executionId: 'WRX-2', draft: secondDraft, checks: { candidateCommit: secondCandidate, packDigest: secondTree } };
     f.git(f.source, 'commit', '--allow-empty', '-qm', `ClawMind workflow-repair-result/v1\n${JSON.stringify(secondResult)}`);
     f.git(f.source, 'push', '-q', 'origin', `HEAD:refs/heads/${branch}`);
-    expect(await store.result({ ...request, identity: { stepId: 'WR-1-draft-2', attempt: 1,
-      executionId: 'WRX-2' }, input: { ...request.input, revision: 2, parentCandidateCommit: candidate } }))
+    expect(await store.result({ ...request, identity: { stepId: 'WR-1-draft-4', attempt: 1,
+      executionId: 'WRX-2' }, input: { ...request.input, revision: 4, parentCandidateCommit: candidate, previousReportRef: 'WR-1/revisions/2' } }))
       .toMatchObject({ status: 'succeeded', draft: secondDraft });
     f.git(f.reader, 'gc', '--prune=now');
     expect(await store.diff({ workflowId: 'wf', taskId: 'WR-1', revision: 1,
@@ -137,7 +141,7 @@ describe('Workflow Repair Git-backed AIS execution', () => {
     const adapter = createRepairAisExecution({} as IDatabase, { execute } as unknown as AistudioService,
       {} as RepairGitStore, 28720256);
     const input = { taskId: 'WR-1', revision: 1, excludedSources: { count: 3, digest: 'a'.repeat(64) } };
-    expect(await adapter.dispatch({ actorId: '123', identity: { stepId: 'WR-1-draft-1', attempt: 1,
+    expect(await adapter.dispatch({ actorId: '123', identity: { stepId: 'WR-1-draft-2', attempt: 1,
       executionId: 'WRX-1' }, input } as Parameters<typeof adapter.dispatch>[0])).toEqual({ jobId: 'job-1' });
     const [actor, globals, snapshot] = execute.mock.calls[0];
     expect(actor).toBe('123');

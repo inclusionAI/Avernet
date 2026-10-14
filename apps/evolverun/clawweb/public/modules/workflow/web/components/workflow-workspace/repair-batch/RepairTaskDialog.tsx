@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { repairBatches } from '../../../api/repair-batches'
 import type { RepairCandidatesResponse, RepairTaskDetail } from '../../../../server/contracts/repair-workbench'
 import RepairTaskPanel from './RepairTaskPanel'
+import RepairWorkspace from './RepairWorkspace'
 import { primary, RepairDialog } from './repair-view'
 
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -74,6 +75,21 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     catch (reason) { setDispatchError(message(reason)) }
     finally { setBusy(false) }
   }
+  const retryGeneration = async () => {
+    if (!detail || busy) return
+    const key = `retry:${detail.latestAttempt.revision}`
+    if (!requestId.current || requestPayloadKey.current !== key) {
+      requestId.current = globalThis.crypto.randomUUID(); requestPayloadKey.current = key
+    }
+    setBusy(true); setDispatchError('')
+    try {
+      if (detail.latestAttempt.error?.code === 'GIT_RESULT_UNAVAILABLE') await repairBatches.retryResult(taskId, detail.latestAttempt.revision)
+      else await repairBatches.retryGeneration(taskId, { expectedRevision: detail.latestAttempt.revision, requestId: requestId.current })
+      requestId.current = ''; reload()
+    } catch (reason) {
+      setDispatchError(`重新生成未确认，将核对任务状态：${message(reason)}`); reload()
+    } finally { setBusy(false) }
+  }
   const cancel = async () => {
     if (!detail || busy) return
     setBusy(true); setError('')
@@ -114,58 +130,59 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     const frozenIds = new Set(frozenItems.map(item => item.itemId))
     const selectableItems = [...frozenItems, ...(feedbackCandidates?.items ?? []).filter(item => !frozenIds.has(item.itemId))]
     const maxItems = feedbackCandidates?.limits.maxItems ?? 100
-    return <RepairDialog title="反馈并生成下一版" busy={busy} onClose={() => setMode('detail')}>
-    <p className="text-xs leading-5 text-slate-500">重新确认本轮处理项后生成新的可审阅 Pack 候选，不会应用或部署。</p>
-    <fieldset className="mt-4 rounded-lg border border-slate-200 p-3">
-      <legend className="px-1 text-xs font-medium text-slate-700">确认本轮处理项</legend>
-      {feedbackCandidatesLoading && <p role="status" className="mt-1 text-xs text-slate-500">加载最新待处理项…</p>}
-      {feedbackCandidatesError && <p role="alert" className="mt-1 text-xs text-red-600">待处理项加载失败：{feedbackCandidatesError}</p>}
+    return <RepairWorkspace stage={1} title="调整范围与要求，生成下一轮候选" subtitle={`${workflowId} · 沿用冻结基线，保留原始问题与证据`} onBack={() => { if (!busy) setMode('detail') }}>
+    <p className="text-xs leading-5 text-muted-foreground">重新确认本轮处理项后生成新的可审阅 Pack 候选，不会应用或部署。</p>
+    <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]"><fieldset className="rounded-lg border border-input bg-card p-5">
+      <legend className="px-1 text-xs font-medium text-foreground">确认本轮处理项</legend>
+      {feedbackCandidatesLoading && <p role="status" className="mt-1 text-xs text-muted-foreground">加载最新待处理项…</p>}
+      {feedbackCandidatesError && <p role="alert" className="mt-1 text-xs text-destructive">待处理项加载失败：{feedbackCandidatesError}</p>}
       <div className="mt-1 space-y-2">{selectableItems.map(item => {
         const title = frozenItemTitle(item)
-        return <label key={item.itemId} className="flex items-start gap-2 text-xs text-slate-600">
+        return <label key={item.itemId} className="flex items-start gap-2 text-xs text-muted-foreground">
           <input type="checkbox" aria-label={`选择修订项 ${title}`} checked={feedbackItemIds.includes(item.itemId)}
             disabled={busy || (!feedbackItemIds.includes(item.itemId) && feedbackItemIds.length >= maxItems)}
             onChange={() => setFeedbackItemIds(current => current.includes(item.itemId)
               ? current.filter(id => id !== item.itemId) : [...current, item.itemId])}
-            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600" />
-          <span>{title}{!frozenIds.has(item.itemId) && <span className="ml-1 text-blue-600">新待处理</span>}</span>
+            className="mt-0.5 h-4 w-4 rounded border-input accent-primary" />
+          <span>{title}{!frozenIds.has(item.itemId) && <span className="ml-1 text-primary">新待处理</span>}</span>
         </label>
       })}</div>
-      {feedbackCandidates && feedbackCandidates.page.totalPages > 1 && <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+      {feedbackCandidates && feedbackCandidates.page.totalPages > 1 && <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
         <button type="button" disabled={feedbackPage <= 1 || feedbackCandidatesLoading} onClick={() => setFeedbackPage(page => page - 1)} className="underline disabled:no-underline disabled:opacity-50">上一页</button>
         <span>待处理项第 {feedbackCandidates.page.page}/{feedbackCandidates.page.totalPages} 页</span>
         <button type="button" disabled={feedbackPage >= feedbackCandidates.page.totalPages || feedbackCandidatesLoading} onClick={() => setFeedbackPage(page => page + 1)} className="underline disabled:no-underline disabled:opacity-50">下一页</button>
       </div>}
     </fieldset>
-    <label className="mt-4 block text-xs font-medium text-slate-700">修复要求
+    <aside className="space-y-4 xl:sticky xl:top-4"><p className="rounded-lg border border-input bg-card p-5 text-sm font-semibold">本轮已选 {feedbackItemIds.length} 条建议</p><label className="block rounded-lg border border-input bg-card p-5 text-xs font-medium text-foreground">修复要求
       <textarea aria-label="修复要求" rows={4} maxLength={20_000} value={instructions} disabled={busy}
-        onChange={event => setInstructions(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-200 p-3 font-normal leading-5" />
+        onChange={event => setInstructions(event.target.value)} className="mt-2 w-full rounded-lg border border-input p-3 font-normal leading-5" />
     </label>
-    <label className="mt-4 block text-xs font-medium text-slate-700">修改反馈
+    <label className="block rounded-lg border border-input bg-card p-5 text-xs font-medium text-foreground">修改反馈
       <textarea aria-label="修改反馈" rows={5} maxLength={20_000} value={feedback} disabled={busy}
-        onChange={event => setFeedback(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-200 p-3 font-normal leading-5" />
+        onChange={event => setFeedback(event.target.value)} className="mt-2 w-full rounded-lg border border-input p-3 font-normal leading-5" />
     </label>
-    {error && <p role="alert" className="mt-3 text-xs text-red-600">{error}</p>}
-    {!feedbackItemIds.length && <p role="alert" className="mt-3 text-xs text-amber-700">请至少保留一个处理项。</p>}
+    </aside></div>{error && <p role="alert" className="mt-3 text-xs text-destructive">{error}</p>}
+    {!feedbackItemIds.length && <p role="alert" className="mt-3 text-xs text-warning-foreground">请至少保留一个处理项。</p>}
     <button type="button" className={`${primary} mt-4`} disabled={busy || feedbackCandidatesLoading || !!feedbackCandidatesError || !feedbackCandidates || !feedback.trim() || !feedbackItemIds.length} onClick={() => void revise()}>{busy ? '提交中…' : '确认生成下一版'}</button>
-  </RepairDialog>
+  </RepairWorkspace>
   }
 
   if (mode === 'cancel' && detail) return <RepairDialog title="取消修复任务" busy={busy} onClose={() => setMode('detail')}>
-    <p className="text-xs leading-5 text-slate-500">取消任务会保留候选稿与历史记录，并释放处理项供后续重新选择。</p>
-    {error && <p role="alert" className="mt-3 text-xs text-red-600">{error}</p>}
+    <p className="text-xs leading-5 text-muted-foreground">取消任务会保留候选稿与历史记录，并释放处理项供后续重新选择。远端停止需另行核对；迟到结果不会重新激活本任务。</p>
+    {error && <p role="alert" className="mt-3 text-xs text-destructive">{error}</p>}
     <button type="button" className={`${primary} mt-4`} disabled={busy} onClick={() => void cancel()}>{busy ? '取消中…' : '确认取消任务'}</button>
   </RepairDialog>
 
-  return <RepairDialog title="修复任务详情" busy={busy} onClose={onClose}>
-    {loading && <p role="status" className="text-xs text-slate-500">加载修复任务…</p>}
-    {error && <p role="alert" className="text-xs text-red-600">任务读取失败：{error}</p>}
+  return <RepairWorkspace stage={2} title="审核 Pack，不满意就继续优化" subtitle={`${workflowId} · 同一任务，多轮候选 · 当前仅生成与审阅`} onBack={() => { if (!busy) onClose() }}>
+    {loading && <p role="status" className="text-xs text-muted-foreground">加载修复任务…</p>}
+    {error && <p role="alert" className="text-xs text-destructive">任务读取失败：{error}</p>}
     {detail && <RepairTaskPanel key={`${detail.taskId}:${detail.latestSuccessful?.revision ?? detail.latestAttempt.revision}`}
-      detail={detail} canEdit={canEdit} busy={busy} dispatchError={dispatchError}
+      detail={detail} canEdit={canEdit && !error && !loading} busy={busy} dispatchError={dispatchError}
       onFeedback={() => {
         requestId.current = ''
         requestPayloadKey.current = ''
         setInstructions(detail.latestAttempt.input.instructions)
+        setFeedback(detail.latestAttempt.phase === 'failed' ? detail.latestAttempt.input.feedback : '')
         setFeedbackItemIds(detail.latestAttempt.input.items.map(item => item.itemId))
         setFeedbackCandidates(null)
         setFeedbackCandidatesError('')
@@ -173,6 +190,6 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
         setError('')
         setMode('feedback')
       }}
-      onCancel={() => { setError(''); setMode('cancel') }} onRetryDispatch={() => void retryDispatch()} />}
-  </RepairDialog>
+      onCancel={() => { setError(''); setMode('cancel') }} onRetryDispatch={() => void retryDispatch()} onRetryGeneration={() => void retryGeneration()} onRefresh={reload} />}
+  </RepairWorkspace>
 }
