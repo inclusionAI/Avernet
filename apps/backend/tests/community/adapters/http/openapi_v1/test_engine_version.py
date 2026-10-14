@@ -32,9 +32,11 @@ from tests.community.adapters.http.openapi_v1.conftest import (
 )
 from tests.community.adapters.http.openapi_v1.test_principal_seam import (
     mint,
-    signing_key,
+    signing_key as signing_key,
 )
-from tests.community.core.engine_version.test_engine_version_service import dependencies
+from tests.community.core.engine_version.test_engine_version_service import (
+    dependencies as dependencies,
+)
 
 
 class Collaborators:
@@ -49,11 +51,10 @@ _PATH = "/openapi/v1/bots/bot-1/engine-version"
 
 @pytest.fixture
 def version_client(dependencies):
-    bots, templates, bindings, resolver, transport = dependencies
+    bots, bindings, resolver, transport = dependencies
     collaborators = Collaborators()
     service = EngineVersionService(
         bots=bots,
-        templates=templates,
         bindings=bindings,
         resolver=resolver,
         probe=partial(probe_engine_release, transport),
@@ -125,4 +126,41 @@ def test_http_stranger_cannot_probe_owner_runtime(version_client, signing_key):
 def test_http_anonymous_cannot_probe(version_client, signing_key):
     client, transport, _ = version_client
     assert client.get(_PATH).status_code == 401
+    transport.invoke.assert_not_called()
+
+
+@pytest.mark.parametrize("engine", ["teclaw", "aicoding", "claude_code"])
+def test_http_other_engines_are_not_applicable_without_probe(
+    version_client, dependencies, signing_key, engine
+):
+    bots, bindings, resolver, transport = dependencies
+    bots.get_by_id_and_owner.return_value["active_engine"] = engine
+    client, _, _ = version_client
+    response = get(client)
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["detection"] == {
+        "status": "not_applicable",
+        "reason": "engine_not_supported",
+    }
+    assert data["restart_hint"] == "none"
+    assert data["comparison"] == "unknown"
+    assert "current" not in data
+    assert "restart_reason" not in data
+    bindings.get_active_by_bot_and_owner.assert_not_called()
+    transport.invoke.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "caller,stage,status", [("stranger", "draft", 404), ("owner", "online", 409)]
+)
+def test_http_teclaw_still_requires_authorization_and_draft_scope(
+    version_client, dependencies, signing_key, caller, stage, status
+):
+    bots, bindings, resolver, transport = dependencies
+    bots.get_by_id_and_owner.return_value["active_engine"] = "teclaw"
+    client, _, _ = version_client
+    response = get(client, caller=caller, stage=stage)
+    assert response.status_code == status, response.text
+    bindings.get_active_by_bot_and_owner.assert_not_called()
     transport.invoke.assert_not_called()

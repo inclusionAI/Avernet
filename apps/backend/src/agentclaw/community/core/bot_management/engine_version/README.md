@@ -11,7 +11,6 @@ provides:
   - EngineVersionResult
 consumes:
   - BotRepository
-  - TemplateRepository
   - DeviceBindingRepository
   - CollaboratorServiceProtocol
   - DeviceContextResolver
@@ -22,8 +21,6 @@ internal_dependencies:
   - agentclaw.community.core.devices.services
   - agentclaw.community.core.engine_runtime
   - agentclaw.community.core.repository.protocols
-  - agentclaw.community.core.service_bot.services.arca_image_pin
-  - agentclaw.community.plugin_api.device_adapter_transport
 ```
 
 ### Change impact
@@ -38,17 +35,21 @@ restart eligibility are independent facts. Missing metadata is legacy;
 capability/transport/command errors are never legacy. Multiple instances need
 explicit selection. The comparison identity is the complete release branch;
 only strict valid RELYYYYMMDD branches are ordered. A newer Bot never receives
-a downgrade hint. A configured template version override invalidates identity.
+a downgrade hint.
 
 The target is a paired platform release, not an online image-registry lookup.
-Deployment acceptance must keep default templates aligned with that release
-and prevent independent environment overrides. Explicit image overrides are
-restricted; personal ext Pins persist; ARCA service-draft Pins are conservatively restricted
-when clearing depends on an unproven protection switch. BaaS/local paths return
-unknown/restart_path_unverified because binding type cannot attest image adoption.
-Teclaw's existing restart path is unsupported, so a version difference is
-returned with a restricted hint. Runtime variants without the probe endpoint
-return read_failed; this does not claim cross-provider deployment acceptance.
+Only OpenClaw and Hermes are inspected. Other engines return not_applicable /
+engine_not_supported and restart_hint=none after authorization and draft checks,
+before binding lookup, inventory, connection resolution or the fixed probe.
+Their comparison remains unknown because no comparison was attempted.
+
+Hints depend only on release facts: older/legacy recommends restart, same/newer
+needs none, and failed reads, missing targets or incomparable branches remain
+unknown. Provider and image Pin/template policy do not gate this advisory.
+The service does not read template policy or change existing restart behavior.
+Restricted remains in the response type for compatibility but is not emitted.
+Deployment acceptance must keep default images aligned with the paired release
+and prevent independent version-marker overrides.
 
 Conformance is exercised at the Service API and signed HTTP seam in
 `tests/community/core/engine_version/` and

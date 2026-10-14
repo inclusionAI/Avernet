@@ -21,7 +21,6 @@ from agentclaw.community.core.bot_management.engine_version.service import (
 )
 from agentclaw.community.core.repository.protocols.bot import (
     BotRepository,
-    TemplateRepository,
 )
 from agentclaw.community.core.repository.protocols.devices import (
     DeviceBindingRepository,
@@ -45,7 +44,6 @@ class EngineVersionModule(Module):
     def service(
         self,
         bots: BotRepository,
-        templates: TemplateRepository,
         bindings: DeviceBindingRepository,
         resolver: DeviceContextResolver,
         transport: DeviceAdapterTransport,
@@ -55,7 +53,6 @@ class EngineVersionModule(Module):
     ) -> EngineVersionServiceProtocol:
         return EngineVersionService(
             bots=bots,
-            templates=templates,
             bindings=bindings,
             resolver=resolver,
             probe=partial(probe_engine_release, transport),

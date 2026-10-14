@@ -15,7 +15,6 @@ from agentclaw.community.core.bot_management.engine_version.models import (
 )
 from agentclaw.community.core.repository.protocols.bot import (
     BotRepository,
-    TemplateRepository,
 )
 from agentclaw.community.core.repository.protocols.devices import (
     DeviceBindingRepository,
@@ -33,10 +32,9 @@ def dependencies():
         "bot_id": "bot-1",
         "owner_id": "owner",
         "bot_type": "personal",
+        "active_engine": "openclaw",
         "ext": {},
     }
-    templates = MagicMock(spec=TemplateRepository)
-    templates.get_by_bot_id.return_value = {"ext": {}}
     bindings = MagicMock(spec=DeviceBindingRepository)
     bindings.get_active_by_bot_and_owner.return_value = SimpleNamespace(
         id=7,
@@ -55,15 +53,14 @@ def dependencies():
         provider="arca",
         binding_id=7,
     )
-    return bots, templates, bindings, resolver, transport
+    return bots, bindings, resolver, transport
 
 
 @pytest.mark.asyncio
 async def test_owner_can_compare_current_engine_to_paired_backend_release(dependencies):
-    bots, templates, bindings, resolver, transport = dependencies
+    bots, bindings, resolver, transport = dependencies
     service = EngineVersionService(
         bots=bots,
-        templates=templates,
         bindings=bindings,
         resolver=resolver,
         probe=partial(probe_engine_release, transport),
@@ -95,11 +92,10 @@ async def test_owner_can_compare_current_engine_to_paired_backend_release(depend
     "failure", [TimeoutError("secret"), ValueError("secret"), RuntimeError("secret")]
 )
 async def test_probe_failure_is_a_sanitized_detection_result(dependencies, failure):
-    bots, templates, bindings, resolver, transport = dependencies
+    bots, bindings, resolver, transport = dependencies
     transport.invoke.side_effect = failure
     service = EngineVersionService(
         bots=bots,
-        templates=templates,
         bindings=bindings,
         resolver=resolver,
         probe=partial(probe_engine_release, transport),
@@ -120,10 +116,9 @@ async def test_published_stages_never_fall_back_to_draft(dependencies, stage):
         EngineVersionStageUnsupportedError,
     )
 
-    bots, templates, bindings, resolver, transport = dependencies
+    bots, bindings, resolver, transport = dependencies
     service = EngineVersionService(
         bots=bots,
-        templates=templates,
         bindings=bindings,
         resolver=resolver,
         probe=partial(probe_engine_release, transport),
@@ -141,11 +136,10 @@ async def test_published_stages_never_fall_back_to_draft(dependencies, stage):
 
 @pytest.mark.asyncio
 async def test_missing_binding_does_not_mean_legacy(dependencies):
-    bots, templates, bindings, resolver, transport = dependencies
+    bots, bindings, resolver, transport = dependencies
     bindings.get_active_by_bot_and_owner.return_value = None
     service = EngineVersionService(
         bots=bots,
-        templates=templates,
         bindings=bindings,
         resolver=resolver,
         probe=partial(probe_engine_release, transport),
@@ -178,12 +172,11 @@ async def test_multi_instance_probe_is_frozen_to_selected_device(
         EngineVersionInstanceSelectionError,
     )
 
-    bots, templates, bindings, resolver, transport = dependencies
+    bots, bindings, resolver, transport = dependencies
     bindings.get_active_by_bot_and_owner.return_value.device_provider = "baas"
     inventory = MagicMock(return_value=[{"device_uuid": value} for value in ids])
     service = EngineVersionService(
         bots=bots,
-        templates=templates,
         bindings=bindings,
         resolver=resolver,
         probe=partial(probe_engine_release, transport),
@@ -210,54 +203,6 @@ async def test_multi_instance_probe_is_frozen_to_selected_device(
         )
 
 
-@pytest.mark.asyncio
-async def test_failed_template_read_preserves_completed_comparison(dependencies):
-    bots, templates, bindings, resolver, transport = dependencies
-    templates.get_by_bot_id.side_effect = RuntimeError("private detail")
-    service = EngineVersionService(
-        bots=bots,
-        templates=templates,
-        bindings=bindings,
-        resolver=resolver,
-        probe=partial(probe_engine_release, transport),
-        collaborators=MagicMock(),
-        list_devices=MagicMock(),
-        config=EngineVersionConfig("REL20261014"),
-    )
-    result = await service.inspect(bot_id="bot-1", owner_id="owner", caller_id="owner")
-    assert result["comparison"] == "older"
-    assert result["restart_hint"] == "unknown"
-    assert result["restart_reason"] == "policy_unknown"
-    assert "private detail" not in str(result)
-
-
-@pytest.mark.asyncio
-async def test_independent_template_environment_override_cannot_attest_image(
-    dependencies,
-):
-    bots, templates, bindings, resolver, transport = dependencies
-    templates.get_by_bot_id.return_value = {
-        "ext": {"envs": {"AGENTCLAW_IMAGE_VERSION": "REL20261009"}}
-    }
-    service = EngineVersionService(
-        bots=bots,
-        templates=templates,
-        bindings=bindings,
-        resolver=resolver,
-        probe=partial(probe_engine_release, transport),
-        collaborators=MagicMock(),
-        list_devices=MagicMock(),
-        config=EngineVersionConfig("REL20261014"),
-    )
-    result = await service.inspect(bot_id="bot-1", owner_id="owner", caller_id="owner")
-    assert result["detection"] == {
-        "status": "read_failed",
-        "reason": "source_unverified",
-    }
-    assert "current" not in result
-    assert result["restart_hint"] == "unknown"
-
-
 def test_target_is_loaded_once_from_the_backend_environment(monkeypatch):
     from injector import Injector
     from agentclaw.community.di.modules.engine_version_module import EngineVersionModule
@@ -274,44 +219,35 @@ def test_target_is_loaded_once_from_the_backend_environment(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_local_process_deployment_has_no_image_upgrade_promise(dependencies):
-    bots, templates, bindings, resolver, transport = dependencies
-    bindings.get_active_by_bot_and_owner.return_value.device_provider = "local"
+@pytest.mark.parametrize(
+    "engine", ["teclaw", "aicoding", "claude_code", "mystery", "", None]
+)
+async def test_other_engines_return_not_applicable_without_device_access(
+    dependencies, engine
+):
+    bots, bindings, resolver, transport = dependencies
+    bots.get_by_id_and_owner.return_value["active_engine"] = engine
+    inventory = MagicMock(side_effect=AssertionError("must not list devices"))
     service = EngineVersionService(
         bots=bots,
-        templates=templates,
         bindings=bindings,
         resolver=resolver,
         probe=partial(probe_engine_release, transport),
         collaborators=MagicMock(),
-        list_devices=MagicMock(),
-        config=EngineVersionConfig("REL20261014"),
+        list_devices=inventory,
+        config=EngineVersionConfig(""),
     )
     result = await service.inspect(bot_id="bot-1", owner_id="owner", caller_id="owner")
-    assert result["comparison"] == "older"
-    assert result["restart_hint"] == "unknown"
-    assert result["restart_reason"] == "restart_path_unverified"
-
-
-@pytest.mark.asyncio
-async def test_baas_default_image_adoption_is_not_proven_by_binding_type(dependencies):
-    bots, templates, bindings, resolver, transport = dependencies
-    bots.get_by_id_and_owner.return_value.update(
-        bot_type="service",
-        ext={"sbot_pin_image": True, "sbot_docker_image": "private:old"},
-    )
-    bindings.get_active_by_bot_and_owner.return_value.device_provider = "baas"
-    service = EngineVersionService(
-        bots=bots,
-        templates=templates,
-        bindings=bindings,
-        resolver=resolver,
-        probe=partial(probe_engine_release, transport),
-        collaborators=MagicMock(),
-        list_devices=MagicMock(return_value=[{"device_uuid": "one"}]),
-        config=EngineVersionConfig("REL20261014"),
-    )
-    result = await service.inspect(bot_id="bot-1", owner_id="owner", caller_id="owner")
-    assert result["comparison"] == "older"
-    assert result["restart_hint"] == "unknown"
-    assert result["restart_reason"] == "restart_path_unverified"
+    assert result["detection"] == {
+        "status": "not_applicable",
+        "reason": "engine_not_supported",
+    }
+    assert result["comparison"] == "unknown"
+    assert result["restart_hint"] == "none"
+    assert "current" not in result
+    assert "instance_id" not in result["context"]
+    assert "restart_reason" not in result
+    bindings.get_active_by_bot_and_owner.assert_not_called()
+    resolver.resolve_for_binding_invoke.assert_not_called()
+    inventory.assert_not_called()
+    transport.invoke.assert_not_called()
