@@ -276,7 +276,9 @@ async def test_update_preserves_null_secret_clears_nullable_fields_and_syncs_act
                 "client_secret": None,
                 "card_template_id": None,
                 "card_template_key": None,
-                "enable_streaming_cards": True,
+                # 显式关掉流式：模板清空后流式必须为关，
+                # 否则是 streaming-card 校验要拒绝的非法组合。
+                "enable_streaming_cards": False,
             }
         }
     )
@@ -299,7 +301,7 @@ async def test_update_preserves_null_secret_clears_nullable_fields_and_syncs_act
     assert update_args["config"]["client_secret"] == "secret-1"
     assert update_args["config"]["card_template_id"] is None
     assert update_args["config"]["card_template_key"] is None
-    assert update_args["config"]["enable_streaming_cards"] is True
+    assert update_args["config"]["enable_streaming_cards"] is False
     assert ("sync", 1) in service.calls
     assert result.data.status == "active"
 
@@ -772,6 +774,158 @@ async def test_update_explicit_null_bcn_fields_keep_stored_values():
     assert update_args["config"]["outbound_visibility"] == "full_transcript"
     assert update_args["config"]["client_id"] == "client-2"
     assert result.data.config.group_chat_scope == "per_sender"
+
+
+# ── 流式卡片模板联动校验（create/update 双侧 422）─────────────────────
+
+
+def test_create_rejects_streaming_without_card_template():
+    with pytest.raises(ValidationError) as exc:
+        ChannelCreate(
+            type="dingding",
+            config={
+                "client_id": "client-1",
+                "client_secret": "secret-1",
+                "enable_streaming_cards": True,
+            },
+        )
+    assert "card_template_id" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_create_accepts_streaming_with_card_template():
+    service = _Channels()
+
+    await create_channel(
+        bot_id="bot-1",
+        body=ChannelCreate(
+            type="dingding",
+            config={
+                "client_id": "client-new",
+                "client_secret": "secret-new",
+                "enable_streaming_cards": True,
+                "card_template_id": "tpl-1",
+            },
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+
+    create_kwargs = next(c for name, c in service.calls if name == "create")
+    assert create_kwargs["config"]["enable_streaming_cards"] is True
+    assert create_kwargs["config"]["card_template_id"] == "tpl-1"
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_enabling_streaming_without_template():
+    """开启流式但不给模板 —— 合并存量后仍缺模板，422。"""
+    service = _Channels(
+        [
+            _record(
+                status="0",
+                config={
+                    **_record().config,
+                    "card_template_id": None,
+                },
+            )
+        ]
+    )
+
+    response = await update_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelUpdate(config={"enable_streaming_cards": True}),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+    assert response.status_code == 422
+    assert json.loads(response.body)["message"] == "Channel mode violation"
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_clearing_template_while_streaming_stays_on():
+    """存量已是"流式开+有模板"的合法行，清掉模板后 422。"""
+    service = _Channels(
+        [
+            _record(
+                status="0",
+                config={
+                    **_record().config,
+                    "enable_streaming_cards": True,
+                    "card_template_id": "tpl-1",
+                },
+            )
+        ]
+    )
+
+    response = await update_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelUpdate(
+            config={
+                "client_id": "client-2",
+                "client_secret": "secret-2",
+                "card_template_id": None,
+            }
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+    assert response.status_code == 422
+    assert json.loads(response.body)["message"] == "Channel mode violation"
+
+
+@pytest.mark.asyncio
+async def test_update_accepts_streaming_when_template_kept():
+    """改其他字段但保留有效模板 → 合法通过。"""
+    service = _Channels(
+        [
+            _record(
+                status="0",
+                config={
+                    **_record().config,
+                    "enable_streaming_cards": True,
+                    "card_template_id": "tpl-1",
+                },
+            )
+        ]
+    )
+
+    result = await update_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelUpdate(
+            config={
+                "client_id": "client-2",
+                "client_secret": "secret-2",
+            }
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+    update_args = next(value for name, value in service.calls if name == "update")
+    assert update_args["config"]["card_template_id"] == "tpl-1"
+    assert result.data.config.card_template_id == "tpl-1"
 
 
 # ── forward_sender_identity（BCN 专属：钉钉发送人身份透传开关）─────────

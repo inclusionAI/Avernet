@@ -66,6 +66,25 @@ def validate_mode_matrix(
             )
 
 
+def validate_streaming_card_template(
+    *,
+    enable_streaming_cards: bool | None,
+    card_template_id: str | None,
+) -> None:
+    """Streaming cards need a template id — surface the gap at validation time.
+
+    Without this check a ``card_template_id``-less streaming config rows
+    through both surfaces: the plugin write path stores it and the BCS
+    payload (``send_mode: streaming_card`` with an empty template) is
+    structurally accepted. The card then fails only at message time, where
+    the user cannot tell which configuration is at fault.
+    """
+    if enable_streaming_cards and not (card_template_id or "").strip():
+        raise ValueError(
+            "card_template_id is required when enable_streaming_cards is true"
+        )
+
+
 class DingTalkChannelConfigCreate(BaseModel):
     """DingTalk credentials and behavior for a new Channel."""
 
@@ -255,6 +274,10 @@ class ChannelCreate(BaseModel):
             self.binding_mode,
             robot_code=self.config.robot_code,
             fields_set=self.config.model_fields_set,
+        )
+        validate_streaming_card_template(
+            enable_streaming_cards=self.config.enable_streaming_cards,
+            card_template_id=self.config.card_template_id,
         )
         return self
 

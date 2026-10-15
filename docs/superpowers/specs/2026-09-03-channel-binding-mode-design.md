@@ -44,6 +44,7 @@
   - `group_chat_scope: Literal["per_sender", "conversation_shared"]`，默认 `per_sender`（session 隔离）
   - `outbound_visibility: Literal["full_transcript", "lead_only"]`，默认 `full_transcript`
   - `forward_sender_identity: bool | None`，缺省 `false`——BCS 侧"外部人类归因披露"开关（仅 bot 绑定可开启，`bcs-channel` COSEC 门）；显式传 null 等同于未提供
+- 联动校验（两模式一致）：`enable_streaming_cards=true` 时 `card_template_id` 必须非空（无模板的流式卡片过去要到消息时刻才静默坏；现在 create 侧 422、update 侧按"合并存量后的终态"422）。
 
 ### 3.2 模式校验矩阵（服务端 422 拒绝）
 

@@ -74,6 +74,7 @@ from .schemas import (
     ChannelUpdate,
     DingTalkChannelConfig,
     validate_mode_matrix,
+    validate_streaming_card_template,
 )
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
@@ -446,6 +447,10 @@ async def update_channel(
             stored_mode,
             robot_code=config.get("robot_code"),
             fields_set=set(patch),
+        )
+        validate_streaming_card_template(
+            enable_streaming_cards=config.get("enable_streaming_cards", False),
+            card_template_id=config.get("card_template_id"),
         )
     except ValueError as exc:
         raise ChannelModeViolationError(str(exc)) from exc
