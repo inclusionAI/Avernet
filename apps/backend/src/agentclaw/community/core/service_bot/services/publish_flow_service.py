@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from datetime import datetime
+from typing import TYPE_CHECKING, Optional
 
 from injector import inject
+from agentclaw.community.plugin_api.evaluation_gate import (
+    GATE_ERROR,
+    EvaluationGatePlugin,
+    GatePublishDecision,
+    PLATFORM_TEAMCLAW,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.release_phase_mixin import ReleasePhaseMixin
 from agentclaw.community.core.digital_employee.contracts import DigitalEmployeePublicationProtocol
 
@@ -194,6 +201,7 @@ class PublishFlowService(
         runtime_projector: BotRuntimeProjectorProtocol,
         runtime_layout_probe: RuntimeLayoutProbeServiceProtocol,
         employee_publication_provider: Callable[[], DigitalEmployeePublicationProtocol] | None = None,
+        evaluation_gate: Optional[EvaluationGatePlugin] = None,
     ):
         """Initialize the flow processing service.
 
@@ -208,6 +216,9 @@ class PublishFlowService(
                 ConfigComposer collector's DI lands (Group C/D follow-up).
         """
         self._employee_publication_provider = employee_publication_provider
+        # 评测门禁 seam（PRD 工作台-评测）：Optional 注入——未绑定的部署
+        # （baas/secbaas、engine 等其它消费者）完全不触发门禁，发布行为不变。
+        self._evaluation_gate = evaluation_gate
         self._publish_service = bot_publish_service
         self._build_service = bot_build_service
         self._baas_service = baas_service
@@ -320,6 +331,85 @@ class PublishFlowService(
         after its bot was retired. Delegates to ``DeviceBindingMixin``."""
         self._release_binding(binding_id, destroy_publish_id=destroy_publish_id)
 
+    async def _check_evaluation_gate(
+        self, publish_record: "BotPublishRecord", operator: str
+    ) -> Optional[PublishFlowResult]:
+        """草稿态→预发发布推进前的评测门禁决策（PRD §8.2 命中名单流程）。
+
+        - gate seam 未绑定（None）或决策 allowed → 返回 None，不拦截。
+        - 决策 blocked → 把门禁摘要写入发布单 ``ext.gate``（供前端摘要与
+          运维阻断原因查询），并返回草稿态结果；不做任何状态推进。
+        - 决策接口异常 → fail-closed（PRD §14：不建议默认放行），阻断并提示。
+        """
+        gate = self._evaluation_gate
+        if gate is None:
+            return None
+
+        space_id = ""
+        try:
+            bot = self._bot_service.get_bot(
+                bot_id=publish_record.source_bot_id,
+                user_id=publish_record.owner_id,
+            )
+            if isinstance(bot, dict):
+                space_id = bot.get("space_id") or ""
+        except Exception as exc:  # noqa: BLE001 — space 解析失败不阻断门禁判定
+            logger.warning(
+                "[PublishFlowService] gate space resolve failed for bot=%s: %s",
+                publish_record.source_bot_id,
+                exc,
+            )
+
+        try:
+            decision = await gate.check_publish_gate(
+                platform=PLATFORM_TEAMCLAW,
+                space_id=space_id,
+                bot_id=publish_record.source_bot_id,
+                owner_id=publish_record.owner_id,
+                operator=operator,
+            )
+        except Exception as exc:  # noqa: BLE001 — seam 实现异常 fail-closed
+            logger.error(
+                "[PublishFlowService] evaluation gate check crashed: %s", exc
+            )
+            decision = GatePublishDecision(
+                allowed=False,
+                status=GATE_ERROR,
+                reason="Evaluation gate policy query failed, please retry later",
+            )
+
+        if decision.allowed:
+            return None
+
+        gate_summary = {
+            "status": decision.status,
+            "checked_at": datetime.now().isoformat(),
+            "hit_type": decision.hit_type,
+            "mode": decision.mode,
+            "policy_name": decision.policy_name,
+            "reason": decision.reason,
+            "failure_summary": decision.failure_summary,
+            "report_url": decision.report_url,
+            "operator": operator,
+        }
+        try:
+            self._publish_service.mutate_publish_ext(
+                publish_record.id,
+                lambda ext: ext.update({"gate": gate_summary}),
+            )
+        except Exception as exc:  # noqa: BLE001 — 摘要落库失败不改变阻断语义
+            logger.warning(
+                "[PublishFlowService] gate ext record failed: %s", exc
+            )
+
+        return PublishFlowResult(
+            publish_id=publish_record.id,
+            status=publish_record.status,
+            message=decision.reason or "Pre-release publish blocked by evaluation gate",
+            action="process",
+            data={"gate": gate_summary},
+        )
+
     async def process(
         self,
         publish_id: int,
@@ -368,6 +458,12 @@ class PublishFlowService(
         # release within ONLINE_PUB and the poll drives ONLINE_PUB -> SUCCESS.
         # Every other status is a side-effect-free status query.
         if current_status == PublishStatus.DRAFT:
+            # 评测门禁拦截（v5.3 方案 B2）：DRAFT→BUILDING 推进（CAS）之前先决策，
+            # 避免状态已推进而门禁拒绝时留下半启动状态。未绑定 gate seam 的部署
+            # 该步零开销跳过（跨消费者隔离，D7）。
+            gate_block = await self._check_evaluation_gate(publish_record, operator)
+            if gate_block is not None:
+                return gate_block
             if not self._advance_status(
                 publish_id, PublishStatus.BUILDING, PublishStatus.DRAFT
             ):
