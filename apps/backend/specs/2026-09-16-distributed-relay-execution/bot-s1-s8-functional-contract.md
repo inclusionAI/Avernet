@@ -1079,7 +1079,7 @@ node_patch: TaskNodePatch
 execution_report: TaskReportResult
 ```
 
-`execution_report` 仅表示服务端是否接纳该次状态迁移；不向 Bot 暴露租约令牌。`task_id`、`node_id` 已在 `TaskContext` 中，节点执行者由 `run_info.assignee` 和可信认证身份确定。并发与重试由 Backend 的持久化状态及条件更新处理。
+`execution_report` 仅表示服务端是否接纳该次状态迁移；不向 Bot 暴露租约令牌。`task_id`、`node_id` 已在 `TaskContext` 中，Relay HTTP 由生产内网白名单准入，`relay_token` 只校验当前执行代次；节点执行者以 `run_info.assignee` 为权威事实。并发与重试由 Backend 的持久化状态及条件更新处理。
 
 ### 8.6 输入到输出转换
 
@@ -1357,7 +1357,7 @@ class TaskRunner:
 ```text
 Skill: planning_report(APPLIED, target_node_id) -> POST /dispatch(task_id, target_node_id)
 或 Backend 后继棒恢复消费者: 待投递意图(task_id, target_node_id)
-  -> HTTP Adapter 解析认证身份；Backend 读取权威 next_node: TaskNode（已落图）
+  -> HTTP Adapter 校验当前 relay_token 执行代次；Backend 读取权威 next_node: TaskNode（已落图）
   -> TaskDispatcher.dispatch(next_node) -> dispatched_node: TaskNode
      -> Dispatcher 校验节点状态与前后继关系，原子认领唯一投递意图
      -> Relay 派发策略校验预选执行者
@@ -1394,7 +1394,7 @@ Skill 通过生产内网白名单保护的 `POST /api/v1/collaboration/tasks/dis
 | S5.3 | 搜索候选 | `task_context: TaskContext`、`next_node: TaskNode`；调用依赖 `task_service: TaskService` | 以 `next_node.task_spec.goal.objective.strip()` 生成字符串查询并调用 `search_bots`；`task_context.node_id` 只用于当前棒轨迹归属 | `candidates: list[BotCandidate]` | `POST /search` |
 | S5.4 | 决定执行者 | `next_node: TaskNode`、`candidates: list[BotCandidate]` | Skill 本地决策，向同一个未落图节点填入执行模式、执行者；MISS 显式标记 BBS | 已填执行者的 `next_node: TaskNode` | 无 |
 | S5.5 | 上报规划节点 | `command: TaskReportCommand`；由 S5.1 根任务验收、S5.4 `next_node` 或 S5.2 规划异常三选一构造；前置条件为执行上报 `APPLIED` | Runtime 调 `TaskService.report(command)`，只上报一次 `PLAN_RESULT`；Backend 原子收口或创建唯一后继并写入选人决策 | `planning_report: TaskReportResult` | `POST /callback/report`，`PLAN_RESULT` |
-| S6 | 实际交接 | 后继棒：`task_id`、`planning_report.target_node_id`；Backend 据此读取权威 `next_node: TaskNode` | Skill 调 HTTP；Adapter 校验身份并读取节点，调用 `TaskDispatcher.dispatch(next_node)`。接力策略内部调用 Runner 投递；后台消费者恢复未投递后继意图 | `dispatched_node: TaskNode`；成功表示通道接纳，下一棒进入 S1 | `POST /api/v1/collaboration/tasks/dispatch` → `TaskDispatcher.dispatch(next_node)` |
+| S6 | 实际交接 | 后继棒：`task_id`、`planning_report.target_node_id`；Backend 据此读取权威 `next_node: TaskNode` | Skill 调 HTTP；Adapter 校验 relay_token 执行代次并读取节点，调用 `TaskDispatcher.dispatch(next_node)`。接力策略内部调用 Runner 投递；后台消费者恢复未投递后继意图 | `dispatched_node: TaskNode`；成功表示通道接纳，下一棒进入 S1 | `POST /api/v1/collaboration/tasks/dispatch` → `TaskDispatcher.dispatch(next_node)` |
 
 S4a 的两个关键业务字段定义：
 
@@ -1482,6 +1482,6 @@ PLAN_RESULT(event=<已确定执行者的未落图 TaskNode>)
 - 上述输入输出对象属于 Task Relay 执行协议；不应使用 HTTP DTO 作为 Core 领域模型。
 - HTTP adapter 负责领域对象与 JSON 请求响应之间的转换。
 - Skill 是 S2、S3、S5.1、S5.2、S5.4 推理函数的实现者，但不拥有 TaskGraph 写权限。
-- Backend 负责身份校验、状态校验、幂等、持久化、节点创建和真实派发。
+- Backend 负责 relay_token 执行代次校验、状态校验、幂等、持久化、节点创建和真实派发；Relay HTTP 依赖生产内网白名单准入。
 - `BotCapability` 是能力匹配输入，不是全局 Bot 能力注册表。
 - 本设计不新增持久化的任务级 gaps，也不新增第二套任务图。

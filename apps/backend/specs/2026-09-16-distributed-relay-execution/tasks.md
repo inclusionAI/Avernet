@@ -33,7 +33,7 @@
 ## 5. 回归与门禁
 
 - [x] 5.1 完整 task core tests。
-- [x] 5.2 HTTP、repository、gateway principal tests。
+- [x] 5.2 HTTP、repository、relay generation guard tests。
 - [x] 5.3 architecture tests，已修复本变更引入的问题；全量仍有当前分支既存的 feedback、HTTP helper 与 oversized allowlist 门禁失败。
 - [x] 5.4 task-loop Skill tests。
 - [x] 5.5 `compileall`、`git diff --check`、修改文件行数检查。

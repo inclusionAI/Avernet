@@ -246,7 +246,7 @@ POST /api/v1/collaboration/tasks/dispatch
 | S5.3 搜索候选 | `task_context: TaskContext`、`next_node: TaskNode`；调用依赖 `task_service: TaskService` | 以 `next_node.task_spec.goal.objective` 搜索；`task_context.node_id` 只标记当前棒搜索轨迹，不选人、不创建节点 | `candidates: list[BotCandidate]` | `POST /search` |
 | S5.4 决定执行者 | `next_node: TaskNode`、`candidates: list[BotCandidate]` | Skill 本地选择单 Bot/协作群或 MISS，并填充同一未落图节点的 `run_info` | 已填执行者的 `next_node: TaskNode` | 无 |
 | S5.5 统一上报 | `command: TaskReportCommand`；由 S5.1 根任务验收、S5.4 `next_node` 或 S5.2 规划异常三选一构造；前置条件为执行上报 `APPLIED` | 直接调用 `TaskService.report(command)`，一次 `PLAN_RESULT`；Backend 原子收口或创建唯一后继并写执行者决策 | `planning_report: TaskReportResult` | `POST /callback/report` |
-| S6 真正交接 | 后继棒的 `task_id`、`planning_report.target_node_id`；Backend 读取权威 `next_node: TaskNode` | Skill 调 HTTP；Adapter 校验身份并调用 `TaskDispatcher.dispatch(next_node)`；接力策略内部调用 Runner。后台消费者恢复未投递后继意图 | `dispatched_node: TaskNode`；成功表示通道接纳，下一棒进入 S1 | `POST /api/v1/collaboration/tasks/dispatch` → `TaskDispatcher.dispatch(next_node)` |
+| S6 真正交接 | 后继棒的 `task_id`、`planning_report.target_node_id`；Backend 读取权威 `next_node: TaskNode` | Skill 调 HTTP；Adapter 校验 relay_token 执行代次并调用 `TaskDispatcher.dispatch(next_node)`；接力策略内部调用 Runner。后台消费者恢复未投递后继意图 | `dispatched_node: TaskNode`；成功表示通道接纳，下一棒进入 S1 | `POST /api/v1/collaboration/tasks/dispatch` → `TaskDispatcher.dispatch(next_node)` |
 
 S6 的返回值**不是**下一棒 `TaskContext`。指令通知下一棒“现在执行该节点”，下一棒的 S1 再拉取权威上下文。Bot 不直接调用另一个 Bot，也不靠复制上一棒的 `TaskContext` 完成交接。
 
@@ -546,9 +546,9 @@ S5.4 Bot Skill.select_executor                        # 本地选人，不调用
 S5.5 TaskService.report(PLAN_RESULT)
        → TaskGraphService.apply_relay_plan_result      # 一次落图、写选人决策和待投递意图
 S6   Skill POST /dispatch(task_id, target_node_id)
-       → HTTP Adapter 取得可信身份、读取权威 next_node
+       → HTTP Adapter 校验 relay_token 执行代次、读取权威 next_node
        → TaskDispatcher.dispatch(next_node)           # S6 唯一直接派发接口
-          → 校验身份与节点状态、认领意图
+          → 校验节点状态、认领投递意图；入口代次由 relay_token 保证
           → relay_handoff 内部 TaskRunner.start_run(next_node)
        → 下一棒 S1
 ```
