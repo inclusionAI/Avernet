@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 from contextlib import contextmanager
 import asyncio
+import logging
+import time
 
 import pytest
 from sqlalchemy import create_engine
@@ -12,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.repository.implementations.task.task_graph_repository import TaskGraphRepository
 from agentclaw.community.core.repository.implementations.task.task_info_repository import TaskInfoRepository
+from agentclaw.community.core.task.domain.errors import DispatchInProgress
 from agentclaw.community.core.task.domain.intake import TaskIntakeStatus
 from agentclaw.community.core.task.domain.intake import TaskExecutionMode
 from agentclaw.community.core.task.domain.models import (
@@ -315,6 +318,77 @@ def test_dispatch_node_acknowledges_only_after_real_dispatch() -> None:
     assert actions[-1].payload["action_result"] == "delivered"
     with db.orm_session() as session:
         assert session.query(TaskDeliveryIntentModel).one().state == "DELIVERED"
+
+
+def test_concurrent_dispatch_is_retryable_and_redrive_is_quiet(monkeypatch, caplog) -> None:
+    db, graph_service, repo, task_info, result = _setup()
+    graph_service.initialize_intake_graph(task_info, result.session_id)
+    node_id, _ = _plan_successor(graph_service)
+    service = TaskService(graph_service, delivery_intents=repo)
+
+    class Dispatcher:
+        started = False
+
+        async def dispatch(self, node):
+            self.started = True
+            await asyncio.sleep(0.02)
+            return node
+
+    dispatcher = Dispatcher()
+    service._relay_adapter._dispatcher = dispatcher
+    monkeypatch.setattr(
+        repo,
+        "list_pending_delivery_intents",
+        lambda **_: [("task-1", node_id)],
+    )
+
+    async def dispatch_concurrently_and_redrive():
+        first = asyncio.create_task(service.dispatch_node("task-1", node_id))
+        while not dispatcher.started:
+            await asyncio.sleep(0)
+        with pytest.raises(DispatchInProgress):
+            await service.dispatch_node("task-1", node_id)
+        redriven = await service.dispatch_pending_intents()
+        return await first, redriven
+
+    with caplog.at_level(logging.INFO, logger="task.delivery"):
+        _, redriven = asyncio.run(dispatch_concurrently_and_redrive())
+
+    assert dispatcher.started and redriven == 0
+    assert any("already in progress" in record.message for record in caplog.records)
+
+
+def test_bbs_dispatch_holds_a_long_delivery_lease() -> None:
+    db, graph_service, repo, task_info, result = _setup()
+    graph_service.initialize_intake_graph(task_info, result.session_id)
+    node_id, _ = _plan_successor(graph_service)
+    graph_service.update_task_node_info(TaskNodePatch(
+        task_id="task-1", node_id=node_id, run_mode="bbs",
+    ))
+    service = TaskService(graph_service, delivery_intents=repo)
+
+    class Dispatcher:
+        started = False
+
+        async def dispatch(self, node):
+            self.started = True
+            await asyncio.sleep(0.02)
+            return node
+
+    dispatcher = Dispatcher()
+    service._relay_adapter._dispatcher = dispatcher
+
+    async def claim_bbs_and_inspect_lease():
+        first = asyncio.create_task(service.dispatch_node("task-1", node_id))
+        while not dispatcher.started:
+            await asyncio.sleep(0)
+        with db.orm_session() as session:
+            intent = session.query(TaskDeliveryIntentModel).one()
+            lease_ms = intent.lease_until_ms - int(time.time() * 1000)
+        return await first, lease_ms
+
+    _, lease_ms = asyncio.run(claim_bbs_and_inspect_lease())
+    assert 590_000 <= lease_ms <= 600_000
 
 
 def test_report_and_successor_delivery_intent_commit_together() -> None:

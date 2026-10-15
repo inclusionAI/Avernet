@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from agentclaw.community.core.task.domain.errors import TaskStateError
+from agentclaw.community.core.task.domain.errors import DispatchInProgress, TaskStateError
 from agentclaw.community.core.task.domain.models import (
     NodeAction,
     Status,
@@ -13,6 +13,14 @@ from agentclaw.community.core.task.domain.models import (
 )
 
 logger = logging.getLogger("task.delivery")
+
+_DEFAULT_DELIVERY_LEASE_MS = 60_000
+# BBS currently resolves the roster, collects bids, and awaits the winning Bot's
+# reply before the single dispatch operation can acknowledge delivery. Keep the
+# delivery claim alive long enough for that modal handoff instead of teaching the
+# redriver about Bot execution time. Ten minutes bounds crash recovery without
+# returning to the duplicate-dispatch behavior produced by the 60-second lease.
+_BBS_DELIVERY_LEASE_MS = 600_000
 
 
 class TaskServiceDeliveryMixin:
@@ -31,10 +39,20 @@ class TaskServiceDeliveryMixin:
         relay_token = node.run_info.extend_props.get("relay_token")
         if not relay_token:
             raise TaskStateError("relay delivery target has no run generation")
-        state, lease_token = intents.claim_delivery_intent(task_id, node_id, relay_token)
+        lease_ms = (
+            _BBS_DELIVERY_LEASE_MS
+            if node.run_info.run_mode == "bbs"
+            else _DEFAULT_DELIVERY_LEASE_MS
+        )
+        claimed_delivery = intents.claim_delivery_intent(
+            task_id, node_id, relay_token, lease_ms=lease_ms
+        )
+        state = claimed_delivery[0]
         if state == "DELIVERED":
             return node
-        if state != "CLAIMED" or lease_token is None:
+        if state == "DELIVERING":
+            raise DispatchInProgress()
+        if state != "CLAIMED" or claimed_delivery[1] is None:
             raise TaskStateError(f"relay delivery is not claimable: {state}")
         if node.run_info.extend_props.get("relay_root"):
             # Compatibility cleanup for roots created by the old protocol.
@@ -42,7 +60,7 @@ class TaskServiceDeliveryMixin:
             # conversation, so retrying this legacy intent through Runner would
             # create a duplicate session or permission-solving group forever.
             intents.mark_delivery_intent(
-                task_id, node_id, lease_token, delivered=True
+                task_id, node_id, claimed_delivery[1], delivered=True
             )
             self._graph.append_action_event(
                 task_id,
@@ -78,7 +96,9 @@ class TaskServiceDeliveryMixin:
             delivered = await dispatcher.dispatch(node)
             if not isinstance(delivered, TaskNode):
                 raise TaskStateError("relay dispatcher did not return one TaskNode")
-            intents.mark_delivery_intent(task_id, node_id, lease_token, delivered=True)
+            intents.mark_delivery_intent(
+                task_id, node_id, claimed_delivery[1], delivered=True
+            )
             self._graph.append_action_event(
                 task_id,
                 node_id,
@@ -95,7 +115,8 @@ class TaskServiceDeliveryMixin:
             return delivered
         except Exception as exc:
             intents.mark_delivery_intent(
-                task_id, node_id, lease_token, delivered=False, error=str(exc),
+                task_id, node_id, claimed_delivery[1], delivered=False,
+                error=str(exc),
             )
             self._graph.append_action_event(
                 task_id,
@@ -122,6 +143,15 @@ class TaskServiceDeliveryMixin:
             try:
                 await self.dispatch_node(task_id, node_id)
                 delivered += 1
+            except DispatchInProgress:
+                # A list snapshot can race another caller's atomic claim. The
+                # claim contract is doing exactly its job: one delivery at a
+                # time; the redriver will see the same intent on a later pass.
+                logger.info(
+                    "relay delivery already in progress task=%s node=%s",
+                    task_id,
+                    node_id,
+                )
             except Exception:
                 logger.exception("relay delivery retry failed task=%s node=%s", task_id, node_id)
         return delivered

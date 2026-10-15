@@ -271,6 +271,7 @@ from agentclaw.community.core.errors import (
     CallbackCorrelationError,
 )
 from agentclaw.community.core.task.domain.errors import (
+    DispatchInProgress,
     GraphAlreadyInitializedError,
     GraphIntegrityError,
     NodeNotFoundError,
@@ -761,6 +762,9 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     GraphAlreadyInitializedError: (409, "Task graph already exists"),
     GraphIntegrityError: (409, "Graph integrity violated"),
     TaskStateError: (409, "Illegal state transition"),
+    # S6 concurrent dispatch contract: mapped before ``TaskError`` and given a
+    # Retry-After hint by mapped_error_response.
+    DispatchInProgress: (409, "Dispatch in progress"),
     CallbackAuthError: (401, "Unauthorized"),
     CallbackCorrelationError: (400, "Bad request"),
     # Trajectory analysis (REQ-8 / 决策 #10/#14). Two distinct statuses, two
@@ -891,6 +895,13 @@ def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | No
     Returns on the first ``isinstance`` match in insertion order, so a specific
     leaf listed before its base class still wins.
     """
+    if isinstance(exc, DispatchInProgress):
+        return error_response_for(
+            409,
+            "Dispatch in progress",
+            request,
+            headers={"Retry-After": "10"},
+        )
     if isinstance(exc, SkillSetControlPlaneConflictError):
         code, message = _SKILL_SET_CONFLICT_CODES.get(
             str(exc), (409000, "SkillSet state conflicts with this operation")

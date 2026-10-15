@@ -10,6 +10,10 @@ class TaskStateError(TaskError):
     """非法状态流转(如 DONE→RUNNING、缺失 acceptance_result 翻态、违反 6 态机)。"""
 
 
+class DispatchInProgress(TaskError):
+    """S6 唯一投递意图已被其他执行者持有，可按 Retry-After 重试。"""
+
+
 class TaskA2AStatusUnknownError(TaskError):
     """A2A Intake was accepted, but its durable Chat Run is still in progress."""
 
