@@ -5316,3 +5316,61 @@ it('uses the registered environment before dispatch and rejects an explicitly di
   expect(JSON.parse(task!.config_json!)).toMatchObject({ botEnv: 'prod', targetSkill: { botEnv: 'prod' } });
   expect(hostLocalSkills.exportLocalSkill).toHaveBeenCalledWith(expect.objectContaining({ botId: 'default', botEnv: 'prod' }));
 });
+
+
+describe("optional task list filters", () => {
+  const filters = "taskTypes=diagnose,bench,bench_optimize,optimize,full&targetType=bot";
+  async function seed(id: string, type = "diagnose", config = "{}", creator = "owner-1") {
+    await repo.createTask({ taskId: id, taskType: type, userId: "bot-owner", botId: "bot-1",
+      taskName: id, configJson: config, createdBy: creator });
+  }
+  async function list(query = "") {
+    const response = await fetch(`${baseUrl}/api/evolve/tasks?${query}`, { headers: { "X-User-Id": "owner-1" } });
+    return { status: response.status, body: await response.json() as {
+      tasks: Array<{ task_id: string }>; total: number; totalPages: number;
+    } };
+  }
+  it("filters before pagination and count, while preserving legacy calls and creator scope", async () => {
+    for (const type of ["diagnose", "bench", "bench_optimize", "optimize", "full", "session_analysis", "pack"]) {
+      await seed(`EV-${type}`, type);
+    }
+    await seed("EV-skill", "full", JSON.stringify({ targetSkillAssetId: "asset-1" }));
+    await seed("EV-other-creator", "diagnose", "{}", "someone-else");
+    expect((await list()).body.total).toBe(8);
+    const pages = await Promise.all([1, 2, 3].map((page) => list(`${filters}&pageSize=2&page=${page}`)));
+    expect(pages.map((page) => page.body.total)).toEqual([5, 5, 5]);
+    expect(pages.map((page) => page.body.totalPages)).toEqual([3, 3, 3]);
+    expect(pages.flatMap((page) => page.body.tasks.map((task) => task.task_id)).sort()).toEqual(
+      ["diagnose", "bench", "bench_optimize", "optimize", "full"].map((type) => `EV-${type}`).sort(),
+    );
+    expect((await list(`${filters}&category=diagnosis`)).body.total).toBe(2);
+    expect((await list(`${filters}&category=repair`)).body).toMatchObject({ tasks: [], total: 0, totalPages: 1 });
+    expect((await list(`${filters}&query=EV-full`)).body.total).toBe(1);
+    expect((await list(`${filters}&status=success`)).body.total).toBe(0);
+    expect((await list(`${filters}&scope=all`)).status).toBe(403);
+  });
+  it("does not produce an empty filtered first page when the newest raw page consists of Skill tasks", async () => {
+    await seed("EV-bot");
+    for (let i = 0; i < 21; i++) await seed(`EV-skill-${i}`, "diagnose", '{"targetSkillAssetId":"asset"}');
+    await db.exec("UPDATE ce_tasks SET gmt_create = 9999999999 WHERE task_id LIKE 'EV-skill-%'");
+    const result = await list(`${filters}&pageSize=20`);
+    expect(result.body).toMatchObject({ tasks: [{ task_id: "EV-bot" }], total: 1, totalPages: 1 });
+  });
+  it("keeps legacy Bot configs with missing, null, empty or malformed JSON fields", async () => {
+    for (const [index, config] of ["{}", '{"targetSkillAssetId":null}', '{"targetSkillAssetId":""}', "", "invalid", "null"].entries()) {
+      await seed(`EV-legacy-${index}`, "diagnose", config);
+    }
+    expect((await list(filters)).body.total).toBe(6);
+  });
+  it("deduplicates task types and supports target-only filtering", async () => {
+    await seed("EV-bot");
+    await seed("EV-skill", "diagnose", '{"targetSkillAssetId":"asset"}');
+    expect((await list("taskTypes=diagnose,diagnose")).body.total).toBe(2);
+    expect((await list("targetType=bot")).body.total).toBe(1);
+  });
+  it.each(["taskTypes=", "taskTypes=unknown", "taskTypes=diagnose,", "taskTypes=pack", "taskTypes=diagnose&taskTypes=bench", "targetType=", "targetType=skill", "targetType=bot&targetType=bot"])(
+    "rejects invalid explicit filters: %s", async (query) => {
+      expect((await list(query)).status).toBe(400);
+    },
+  );
+});

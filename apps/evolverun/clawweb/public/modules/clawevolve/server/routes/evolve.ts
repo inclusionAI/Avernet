@@ -3600,13 +3600,27 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
     const actor = resolveRequestUserId(req);
     if (!actor) { res.status(401).json({ error: "Unauthorized" }); return; }
+    let taskTypes = categories[category];
+    if (req.query.taskTypes !== undefined) {
+      const allowed = new Set(["diagnose", "bench", "bench_optimize", "optimize", "full"]);
+      const raw = req.query.taskTypes;
+      const requested = typeof raw === "string" ? raw.split(",").map((type) => type.trim()) : [];
+      if (!requested.length || requested.some((type) => !allowed.has(type))) {
+        res.status(400).json({ error: "taskTypes 参数不合法" }); return;
+      }
+      taskTypes = [...new Set(requested)].filter((type) => !taskTypes || taskTypes.includes(type));
+    }
+    if (req.query.targetType !== undefined && req.query.targetType !== "bot") {
+      res.status(400).json({ error: "targetType 参数不合法" }); return;
+    }
     const status = String(req.query.status ?? "all");
     const result = await repo.listTasksPage({
       createdBy: scope === "all" ? null : actor,
       ownerUserId: scope === "all" ? String(req.query.ownerUserId ?? "").trim() || null : null,
       page,
       pageSize,
-      taskTypes: categories[category],
+      taskTypes,
+      targetType: req.query.targetType === "bot" ? "bot" : undefined,
       excludedTaskTypes: ['workflow_repair'],
       statuses: statusGroups[status],
       query: String(req.query.query ?? ""),
