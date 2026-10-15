@@ -299,10 +299,13 @@ multi-pod deployments).
 Service Protocol (`service/protocols.py`): `submit_async`, `submit_sync`,
 `get_run`, `list_runs`, `run_events`, `cancel`, `purge_run`,
 `content_classification` (the last two are service-plane only — data
-protection; no route, no CLI). Router prefix `/openapi/v1/agentswarm`; the tenant
-on every route comes from the authenticated principal (the `X-Tenant-Id`
-request header is no longer read), and a principal without a tenant fails
-closed with HTTP 400 `{"detail": "tenant unresolvable"}`.
+protection; no route, no CLI). Router prefix `/openapi/v1/agentswarm`; every public
+route resolves an authenticated end-user (anonymous → 401; `/health` and `/ready`
+stay probe-open), while the tenant scope is an explicit per-request parameter
+(body field on submit, query parameter elsewhere) — no shipped profile provides a
+tenant through the principal, a blank tenant is rejected at validation, and
+cross-tenant access is refused at the data layer as the same 404 as an unknown
+run.
 
 ```bash
 # async submit -> {"run_id": "..."}

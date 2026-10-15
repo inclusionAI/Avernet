@@ -189,6 +189,9 @@ class SwarmRunHandler:
                     termination_reason=TerminationReason.CANCELLED,
                     claim_epoch=claim_epoch,
                 ):
+                    await run_blocking(
+                        self._destroy_run_avernet_bots, run_id, tenant,
+                    )
                     await self.store.apply_run_retention(run_id, tenant)
             await run_blocking(
                 self._job_repo.complete, run_id, tenant, self._worker_id,

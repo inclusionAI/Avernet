@@ -154,7 +154,7 @@ class JobRepository(JobRepositoryProtocol):
                 ).scalar_one()
                 claimed.append({
                     "run_id": dm.RunId(row.run_id),
-                    "tenant": dm.RunId(row.tenant) if False else dm.TenantId(row.tenant),
+                    "tenant": dm.TenantId(row.tenant),
                     "claim_epoch": row.claim_epoch,
                     "attempts": row.attempts,
                     "cancel_requested": bool(row.cancel_requested),

@@ -96,11 +96,15 @@ class BotPlatform(Protocol):
         a thread, which must not be held hostage forever.
 
         ``session_key`` (async-run-and-resume D-I) names the engine-side
-        conversation this turn belongs to. The caller derives it per
-        attempt (``agent:{agent_id}:attempt:{attempt}``) so a re-executed
+        conversation this turn belongs to. Callers SHOULD pass ``None``:
+        each leg then starts a fresh conversation on the engine-served
+        session (the platform resets it before the chat), so a re-executed
         turn — plain retry or post-crash respawn — never inherits the
-        orphaned turn's history. ``None`` keeps the platform's default
-        conversation addressing for outside callers.
+        orphaned turn's history. An explicit key is only for a caller
+        that owns a known-good engine session by name; novel keys are
+        NOT auto-created by the engine (live-cluster evidence: a
+        chat.send on an unknown key is refused ``accepted:false`` and
+        then produces no events at all).
 
         ``cancel_event`` is the cooperative-cancel handle for the
         cancellable platform bridge (async-run-and-resume D-B): the

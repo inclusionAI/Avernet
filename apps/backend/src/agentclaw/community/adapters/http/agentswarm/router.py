@@ -1,18 +1,21 @@
 """agentswarm HTTP adapter — thin FastAPI router + DTO conversion.
 
-Stage B (tasks 12.7/12.8), hardened (P0-3): tenant identity resolves
-from the authenticated principal ONLY
-(:class:`AuthenticatedUser.tenantId`, D25 — the caller proves who they
-are; the request body and headers never supply a tenant). The former
-``X-Tenant-Id`` header fallback is removed: no shipped profile
-(``OidcAuthPlugin``, local auth) ever populated ``tntInstId``, so the
-header was the effective tenant for every authenticated user — a
-client-controlled tenant means cross-tenant read/stream/report/cancel/
-submit. A principal that carries no tenant now fails closed with 400
-``{"detail": "tenant unresolvable"}``; the client-supplied header is
-never read. Cross-tenant access is refused at the data layer (repo
-scoping), so it is indistinguishable from an unknown run: the same 404
-both ways, no "forbidden" oracle.
+Authentication (D25): every public route resolves an authenticated
+end-user through ``CurrentUserDep`` — an anonymous caller is refused
+401 before any route logic (the read/stream/report routes enforce it
+explicitly; unauthenticated reads were the regression this contract
+now pins, since the explicit-tenant swap removed the transitive
+principal dependency that used to carry the guard). ``/health`` and
+``/ready`` stay auth-free (liveness probes).
+
+Tenant scope: an explicit, per-request API parameter (``SubmitRunDTO.tenant``
+on submit, ``TenantQuery`` everywhere else) — the authenticated caller
+names the tenant the run belongs to; no shipped auth profile provides a
+tenant through the principal (BCS: user_id only), so the parameter is
+the single source of tenancy here. A blank tenant is 422-closed at
+validation; no fallback resolves one. Cross-tenant access is refused
+at the data layer (repo scoping), so it is indistinguishable from an
+unknown run: the same 404 both ways, no "forbidden" oracle.
 
 Auditing (``ac_agent_swarm_audit``, append-only, best-effort): accepted
 and rejected submits with admission reasons (``tenant_limit`` /

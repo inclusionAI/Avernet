@@ -147,6 +147,12 @@ class AvernetSubagent:
             raise
         finally:
             self._register_active_chat(None)
+        if not text and cancel.is_set():
+            # The cancelled unwrap returns the empty sentinel with no
+            # exception to carry; decoding it here would publish an
+            # aborted turn as a successful empty result (a D-I/D23
+            # corruption shape), so unwind as an error instead.
+            raise RuntimeError("engine chat leg unwound after cancellation")
         try:
             output = json.loads(text)
         except Exception:
