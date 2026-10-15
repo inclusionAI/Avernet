@@ -4,194 +4,187 @@ Spec: [spec.md](spec.md)
 
 ## Approach
 
-Three layers, each extending something that already exists rather than adding
-a parallel mechanism:
+Three layers, each extending something that already exists:
 
 1. **Grant** — AgentPass, through the existing `CliPassportScopeReconciler`
-   (`core/mcp/services/cli_passport_scope.py`). `updatePassport` overwrites the
-   bot's whole MCP + CLI scope, so the reconciler stays the only writer; it
-   gains `add_cli` / `remove_cli`, both built on the existing `_build_snapshot`
-   and `build_passport_resource_scope(additional_cli_items=…, removed_cli_codes=…)`.
-2. **Install** — the bot's running engine adapter, over the same
-   `DeviceAdapterTransport` channel `ArcaCliToolPort` already uses for the
-   manifest `cli-tools` push. Two new engine endpoints run `acli install` /
-   remove the executable.
-3. **API** — a new public router under `/openapi/v1/bots/{bot_id}/clis` plus a
-   catalog read, registered in the same inventories every public route is.
+   (`core/mcp/services/cli_passport_scope.py`). `updatePassport` overwrites a
+   bot's whole MCP + CLI scope, so the reconciler stays its only writer; it
+   gains `add_cli` / `remove_cli`.
+2. **Install** — the bot's running engine adapter runs `acli`, reached over
+   the `DeviceAdapterTransport` channel that `ArcaCliToolPort` already uses.
+3. **API** — a public router under `/openapi/v1/bots/{bot_id}/clis`.
 
-Restart reinstall is untouched: it stays with the external boot installer,
-which reads the same AgentPass grant (spec, Out of Scope).
+There is no platform-side catalog: the acli market is the catalog, and
+AgentPass is the only record of what a bot has. Installed programs persist on
+`/home/admin` (shared storage), so there is no reinstall-on-boot work.
+
+## acli facts this plan relies on
+
+Verified by hand against acli 2.0.7 in a production sandbox (2026-10-15):
+
+| Fact | Evidence |
+| --- | --- |
+| `acli install <name> --install-dir <dir> --yes --json` installs by market name and returns `name`, `command`, `cli.description`, `version`, `installPath`, `success` | `deepinsight-cli` → `/tmp/acli-t/di` |
+| A binary product lands in `<dir>/<command>`; an npm product given a `<dir>` ending in `bin` lands in `<dir>/<command>` with its package in `<dir>/../lib` | `yuntu-cli` → `/tmp/acli-npm2/bin/yuntu-cli` |
+| acli records installs in `$HOME/.acli/tools`; overriding `HOME` moves that record and its `~/.profile` `PATH` edit | `HOME=/tmp/acli-home` |
+| `acli tool uninstall <name> --yes --json` removes the program; without `--yes` it refuses | file gone from `/tmp/acli-t` |
+| `acli tool list --json` lists installed tools by `name` | — |
+| `acli list --keyword k --page-no n --page-size s --json` pages the market: `list[{name, command, description, version}]`, `total`, `hasMore` | — |
+| No login is needed for any of the above | — |
+| `/home/admin` is shared storage (`virtiofs`); `/root` is not | `findmnt` |
 
 ## Components
 
-### Backend — manifest resolver (`core/mcp/services/cli_capabilities.py`, 239 lines)
+### Engine adapter (`engine/adapter/src/engine/community/`)
 
-Add read-only accessors; no new parsing rules:
+New `core/acli/runner.py` — `AcliRunner`, the only code that executes acli:
 
-- `catalog_items() -> list[CliItem]` — code, name, description, default identity.
-- `install_spec(code) -> CliInstallSpec | None` — frozen dataclass:
-  `package` (the acli identifier, i.e. the `install.argv` tail after `install`),
-  `executable`, `install_dir` (manifest `managed_bin_dir`). The loader keeps
-  these today only long enough to validate them; it now stores them.
-- `default_cli_codes(engine_type, template_type) -> frozenset[str]` — what
-  `required_cli_items` already computes, as codes.
+- Every call is `asyncio.create_subprocess_exec` with a fixed argv (never a
+  shell), `--json`, a timeout (300 s install/uninstall, 30 s market/list), and
+  `HOME=<acli_home>` added to the inherited environment.
+- `install(name, install_dir)` → `acli install <name> --install-dir <dir> --yes --json`;
+  returns `{name, command, description, version}` from the JSON.
+- `uninstall(name, acli_home)` → first `acli tool list --json`; if `name` is
+  absent, success with `uninstalled: false` (nothing of ours to delete);
+  otherwise `acli tool uninstall <name> --yes --json`.
+- `market(keyword, page_no, page_size)` → `acli list …`; returns the page.
+- `acli_home` is `<parent of install_dir>/acli-home`, so acli's record sits
+  beside the programs on persisted storage.
+- Inputs validated before any process starts: `name` and `keyword` against
+  `^[A-Za-z0-9@][A-Za-z0-9._@/-]{0,255}$` (`keyword` may be empty);
+  `install_dir` absolute, no `..`, last component `bin`; page bounds 1–100.
+- Failure → `AcliError(code, message)` with `code ∈ {acli_unavailable,
+  not_found, install_failed, uninstall_failed, timeout, bad_output}`.
+  `message` is acli's `error` field, credential-masked, at most 512 chars.
+  Raw stdout/stderr are logged truncated (4 KiB) and masked, never returned.
 
-`managed_bin_dir` is also validated as absolute with no `..` (the external
-installer already enforces this; the backend currently ignores the field).
+`api/cli/router.py` (205 lines) gains, with that router's conventions
+(refusal = `200` + `success:false` + `error`; `404` only for "endpoint absent"):
+
+| Endpoint | Body / query |
+| --- | --- |
+| `POST /api/cli/acli/install` | `{name, install_dir}` |
+| `POST /api/cli/acli/uninstall` | `{name, install_dir}` |
+| `GET /api/cli/acli/market` | `?keyword=&page_no=&page_size=` |
+
+New capabilities `CLI_ACLI_INSTALL`, `CLI_ACLI_UNINSTALL`, `CLI_ACLI_MARKET`,
+declared supported by the openclaw and claude_code engines.
+
+### Backend — install directory
+
+`install_dir` is the manifest's `managed_bin_dir`
+(`/home/admin/.agentclaw/bin`), read by `CliCapabilityManifestResolver` and
+sent on every engine call. It is the directory the production start-up script
+already puts on the engine's `PATH`, so a tool installed there is runnable
+without a restart. The resolver validates it (absolute, no `..`, ends in `bin`).
+No other part of the YAML is used by this feature.
 
 ### Backend — reconciler (`core/mcp/services/cli_passport_scope.py`, 333 lines)
 
-- `add_cli(*, bot, cli_code) -> CliScopeReconcileResult` — snapshot + the
-  catalog item as an addition. History-first merge keeps an existing entry's
-  identity, so re-adding is a no-op on the grant.
-- `remove_cli(*, bot, cli_code) -> CliScopeReconcileResult` — snapshot with
-  `removed_cli_codes={cli_code}`.
-- Both reuse the existing update + structured logging path in `reconcile`; the
-  shared body is factored into a private `_write(snapshot, …)` so the three
-  public methods log identically.
+- `add_cli(*, bot, item)` — snapshot + `item` as an addition, then write.
+- `remove_cli(*, bot, cli_code)` — snapshot with `removed_cli_codes`, then write.
+- The update + logging body of `reconcile` moves into a private `_write` shared
+  by all three; `reconcile`'s behaviour and log lines are unchanged.
 
-The internal `DELETE /skill-sets/{id}/clis/{code}` keeps its own code path; it
-is not migrated in this change.
+### Backend — install port (`core/acli_clis/port.py`, `arca_port.py`)
 
-### Backend — application service (new `core/acli_clis/`)
+`AcliPort` protocol: `install`, `uninstall`, `market`, each raising
+`AcliPortError(code, message)` on failure. `ArcaAcliPort` follows
+`ArcaCliToolPort`: resolve the bot's device, call the engine.
 
-`AcliCliService` orchestrates; it holds no policy the pieces below already own.
+- no device for the bot → `not_running`
+- `404` → `engine_unsupported`
+- `success:false` → the engine's `error` code and message
+- non-2xx / timeout → `engine_unreachable`
 
-| Method | Steps |
-| --- | --- |
-| `list_catalog()` | resolver `catalog_items()` |
-| `list_bot_clis(bot_id, owner_id, actor_id)` | load bot → reconciler `current_passport_cli_items` → annotate `default` (profile codes), `managed` (in catalog) |
-| `add(bot_id, owner_id, actor_id, cli_code, lock_epoch)` | guard → catalog check → `add_cli` → port `install` → result with `install_status` |
-| `remove(bot_id, owner_id, actor_id, cli_code, lock_epoch)` | guard → held? → not default? → `remove_cli` → port `uninstall` (only for catalog tools) → result with `uninstall_status` |
+### Backend — application service (`core/acli_clis/service.py`)
 
-Guard = exactly the checks `CallerIdentityService.update_cli_call_type` applies
-today: actor is the owner; bot is `service` + `ACTIVE`; the reconciler supports
-the bot's profile. The collaborator lock epoch is resolved by the router the
-same way the call-type route does. The check is lifted into a small shared
-helper in `core/caller_identity/` rather than copied (that service is 789
-lines and must not grow).
+Guard, shared by every write: the actor owns the bot; the bot is an `ACTIVE`
+`service` bot; its engine is openclaw or claude_code. This is the check
+`CallerIdentityService.update_cli_call_type` performs today, extracted into
+`core/caller_identity/guard.py` and used by both (that service is 789 lines).
+The collaborator lock epoch is resolved by the router exactly as the call-type
+route does.
 
-Order of operations and failure handling:
+**Add** (install first, so an unknown name fails before AgentPass is touched):
 
-- **Add:** grant first, then install. Grant failure → error, nothing installed.
-  Install failure → `200` with `install_status: failed` and a safe reason; the
-  grant stays (spec). No running container → `install_status: not_running`.
-- **Remove:** revoke first, then uninstall. Revoke failure → error, nothing
-  touched. Uninstall failure → `200` with `uninstall_status: failed`.
+1. guard; refuse `409 cli_already_granted` if the code is in AgentPass.
+2. port `install(name)`. Failure → error, nothing to undo.
+3. If acli's returned `name` ≠ requested → port `uninstall`; refuse
+   `422 cli_name_mismatch` naming the market name.
+4. `add_cli` with `{cli_code: name, cli_name: name, cli_desc: description,
+   identity_mode: owner}`.
+5. If 4 fails → port `uninstall`; return the AgentPass error. If that
+   uninstall also fails → `500 cli_rollback_failed` with state
+   `installed_not_granted`, logged as `acli_cli_rollback_failed`.
 
-Domain errors (new, `core/acli_clis/errors.py`): `CliNotInCatalogError`,
-`CliNotHeldError`, `DefaultCliRemovalError`; permission/read-only/sync errors
-reuse the caller-identity ones so the shared HTTP status map already covers
-them.
+**Remove:**
 
-### Backend — install port
+1. guard; `404` if not in AgentPass; `409 default_cli` if in the bot's default
+   profile.
+2. Remember the tool's current identity mode; `remove_cli`.
+3. port `uninstall`. Failure → `add_cli` with the remembered identity; return
+   the uninstall error. If that re-grant fails → `500 cli_rollback_failed`
+   with state `revoked_still_installed`.
+4. On success, clear the tool's caller override row (the existing
+   `replace_draft_cli_call_type(... owner)` path), so a later re-add starts
+   at `owner`.
 
-- Protocol `AcliInstallPort` in `core/acli_clis/port.py`:
-  `install(bot_id, owner_id, spec) -> InstallOutcome`,
-  `uninstall(bot_id, owner_id, spec) -> InstallOutcome`.
-  `InstallOutcome.status ∈ {installed, uninstalled, failed, not_running}` +
-  optional `reason`. The port never raises for an engine refusal; the service
-  needs the outcome, not an exception, because the grant has already changed.
-- `ArcaAcliInstallPort` — structured like `ArcaCliToolPort`: resolve the bot's
-  device, POST the engine endpoint, map responses:
-  - resolver reports no device → `not_running`
-  - `404` (engine build without the endpoint) → `failed`, reason
-    `engine_unsupported`
-  - non-2xx / `success:false` / timeout → `failed`, engine message (already
-    masked engine-side)
-- Wired in the four DI device modules next to `CliPassportScopeReconciler`.
+**List:** `current_passport_cli_items` + `default` from the profile
+(`required_cli_items`). **Search:** port `market`.
 
-### Backend — public router (new `adapters/http/openapi_v1/bots/acli_clis.py` + `schemas_acli_clis.py`)
+### Backend — public router (`adapters/http/openapi_v1/bots/acli_clis.py` + `schemas_acli_clis.py`)
 
-| Method | Path | Body / result |
+| Method | Path | Result |
 | --- | --- | --- |
-| GET | `/openapi/v1/bots/clis/catalog` | `[{cli_code, cli_name, cli_desc}]` |
-| GET | `/openapi/v1/bots/{bot_id}/clis` | `[{cli_code, cli_name, cli_desc, identity_mode, default, managed}]` |
-| POST | `/openapi/v1/bots/{bot_id}/clis` | `{cli_code}` → `{cli_code, granted: true, install_status, install_reason?}` |
-| DELETE | `/openapi/v1/bots/{bot_id}/clis/{cli_code}` | → `{cli_code, revoked: true, uninstall_status, uninstall_reason?}` |
+| GET | `/openapi/v1/bots/{bot_id}/clis` | `[{cli_code, cli_name, cli_desc, identity_mode, default}]` |
+| GET | `/openapi/v1/bots/{bot_id}/clis/market?keyword=&page_no=&page_size=` | `{items:[{name, command, description, version}], total, has_more}` |
+| POST | `/openapi/v1/bots/{bot_id}/clis` | body `{cli_code}` → `{cli_code, command, version}` |
+| DELETE | `/openapi/v1/bots/{bot_id}/clis/{cli_code}` | `{cli_code}` |
 | PATCH | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type` | unchanged |
 
-The catalog route is mounted before the `{bot_id}` wildcard, following the
-`/openapi/v1/bots/mcp` precedent. Bot-scoped routes use
-`require_granted_addressed_bot` like `bot_mcp_router`.
-
-Error mapping: not in catalog → `422`; not held → `404`; default removal →
-`409`; permission → `403`; read-only/unsupported profile → existing caller
-identity status; AgentPass failure → existing `CallerCliSyncError` status.
-
-Registration — every place the call-type route already appears:
-`openapi_v1/__init__.py`, `authorization_rules.py` (MEMBER read, owner-only
-write), `admission_routes.py`, route/endpoint inventories, the shared HTTP
-status map, and the response-schema snapshots.
-
-### Engine adapter (`engine/adapter/src/engine/community/`)
-
-- New `core/acli/installer.py` — `AcliInstaller`:
-  - `install(package, executable, install_dir)`: validate all three (same code
-    regex as the backend; `install_dir` absolute, no `..`); run
-    `["acli", "install", package, "--install-dir", install_dir, "--yes"]` with
-    `asyncio.create_subprocess_exec` (argv only, no shell), 300 s timeout; then
-    probe `[install_dir/executable, "--version"]`. Both flags were verified
-    against acli 2.0.7 in a production container.
-  - `uninstall(executable, install_dir)`: unlink `install_dir/executable`;
-    absent counts as success, matching `LocalCliToolsService.delete`.
-  - acli missing from `PATH` → failure with reason `acli_unavailable` (the
-    case in this repo's own image, which does not ship acli).
-  - stdout/stderr captured, truncated to 4 KiB, credential-masked, logged; the
-    response carries only a short reason.
-- `api/cli/router.py` (205 lines) gains `POST /api/cli/acli/install` and
-  `POST /api/cli/acli/uninstall`, keeping that router's response conventions
-  (refusal is `200` + `success:false`; `404` stays "endpoint absent").
-- `Capability.CLI_ACLI_INSTALL` / `CLI_ACLI_UNINSTALL`, declared supported by
-  the openclaw and claude_code engines.
-
-**Install directory comes from the backend, not the engine.** This departs from
-the manifest `cli-tools` rule ("the engine owns placement") on purpose: the
-directory must be the one the external boot installer uses and has put on
-supervisor's `PATH`, and the manifest is that single source. A second copy in
-engine config would drift exactly as the device YAML did.
+`/clis/market` is declared before `/clis/{cli_code}` so it is not captured.
+Status mapping: `not_running` → `409`; `engine_unsupported` → `501`;
+`not_found`, `cli_name_mismatch` → `422`; `install_failed`,
+`uninstall_failed`, `engine_unreachable`, `timeout` → `502`; guard errors reuse
+the caller-identity statuses. Registration everywhere the call-type route
+appears: `openapi_v1/__init__.py`, `authorization_rules.py` (MEMBER read,
+owner write), `admission_routes.py`, inventories, the shared status map,
+schema snapshots; DI wiring beside `CliPassportScopeReconciler` in the four
+device modules.
 
 ### Docs
 
-- `apps/backend/docs/bot-config-manifest/engine-requirements.zh-CN.md` §4: add
-  the two acli endpoints and the install-directory exception.
-- `apps/backend/docs/openapi-v1/README.md` (+ `.zh-CN`): add the CLI routes.
+- `apps/backend/docs/bot-config-manifest/engine-requirements.zh-CN.md` §4: the
+  three acli endpoints, and why the platform sends the install directory.
+- `apps/backend/docs/openapi-v1/README.md` (+ `.zh-CN`): the CLI routes.
 
 ## Testing
 
-- **Resolver:** accessors, `managed_bin_dir` validation.
-- **Reconciler:** add keeps MCP items and existing CLI identities; re-add is a
-  no-op; remove drops only the target; AgentPass failure propagates.
-- **Service (fake reconciler + fake port):** every acceptance criterion in the
-  spec, including install `failed` / `not_running`, default-removal refusal,
-  non-catalog refusal, owner-only guard.
-- **Port:** fake transport — each response class maps to the right outcome.
-- **Engine:** installer with a fake `acli` script on a temp `PATH`
-  (install/probe success, install failure, probe failure, acli missing, bad
-  names, absent file on uninstall); router contract tests in the style of
-  `test_cli_router.py`.
-- **Public API:** endpoint tests in `tests/community/adapters/http/openapi_v1/`;
-  the existing authorization/admission inventory and endpoint-coverage gates
-  must pass with the new routes registered.
+- **Engine runner:** a fake `acli` script on a temp `PATH` emitting the JSON
+  shapes above; covers success, each error code, timeout, missing acli, bad
+  input, `HOME` override, and uninstall of a tool acli does not know.
+- **Engine router:** contract tests in the style of `test_cli_router.py`.
+- **Resolver / reconciler:** `install_dir` validation; `add_cli` keeps MCP
+  items and other CLI identities; `remove_cli` drops only the target;
+  `reconcile` unchanged.
+- **Port:** fake transport, one test per response class.
+- **Service:** fake reconciler + fake port; every spec acceptance criterion,
+  including both rollback paths and both rollback-failure states.
+- **Public API:** endpoint tests plus the existing authorization, admission,
+  inventory and endpoint-coverage gates.
 
-Runs: backend focused suites for the touched packages plus
-`tests/community/adapters/http/openapi_v1/` and the architecture tests; engine
-`core/acli` + `api` tests. Singlebox E2E cannot exercise a real install (no
-acli in the open-source image); stated in the PR.
+The open-source image has no acli, so Singlebox E2E cannot run a real install;
+the PR states that, and a manual run in a production sandbox is listed as a
+release check.
 
 ## Risks
 
-- **Lost update on AgentPass.** Read-modify-write of the whole scope; two
-  concurrent mutations for one bot can drop one. Mitigated by the collaborator
-  lock epoch the call-type route already uses; not fully closed.
-- **`~/.profile` side effect.** acli appends a `PATH` line to the running
-  user's `~/.profile` on every install. Harmless for the engine (it uses its
-  own `PATH`) but accumulates. Left as is; see open question.
-- **Restart gap in production** until the external installer's manifest is
-  redeployed (spec, Out of Scope).
-
-## Open Questions
-
-- Should the engine suppress acli's `~/.profile` write (e.g. run it with a
-  scratch `HOME`)? Not done by default because acli's own state/config
-  location under `HOME` is unverified.
+- **Lost update on AgentPass.** Whole-scope read-modify-write; two concurrent
+  mutations on one bot can drop one. Reduced by the lock epoch the call-type
+  route already uses; not fully closed.
+- **Rollback failure** leaves one of two named states, reported and logged;
+  AgentPass has no transactions to rule it out.
+- **Tools installed outside this API** (boot defaults with `HOME=/root`) are
+  unknown to the API's acli record; remove only revokes them. Defaults cannot
+  be removed anyway.

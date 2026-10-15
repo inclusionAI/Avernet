@@ -49,8 +49,9 @@ without waiting for a release each time a new tool is published.
 ## Acceptance Criteria
 
 **Search the market**
-- [ ] Searching returns matching acli market tools with their identifier,
-      display name, description and command name, as reported by acli.
+- [ ] Searching by keyword returns a page of acli market tools, each with its
+      market name, command name, description and latest version, as reported
+      by acli; the caller can request further pages.
 - [ ] Search requires a running bot container, because acli runs there.
 
 **List a bot's tools**
@@ -67,8 +68,12 @@ without waiting for a release each time a new tool is published.
       error saying why. The bot ends up as it was before the request.
 - [ ] Adding to a bot with no running container is refused, and nothing
       changes.
-- [ ] Adding an identifier the acli market does not know is refused, and
-      nothing changes.
+- [ ] Tools are identified by their acli market name (for example
+      `deepinsight-cli`), which is also the code stored in AgentPass. Passing
+      another alias, such as the command name `di`, is refused with an error
+      naming the market name, and nothing changes.
+- [ ] Adding a name the acli market does not know is refused, and nothing
+      changes.
 - [ ] Adding a tool the bot already has is refused as a conflict, and nothing
       changes.
 - [ ] Adding a tool never changes the bot's other tools, its MCP servers, or
@@ -87,6 +92,11 @@ without waiting for a release each time a new tool is published.
 - [ ] Removing a default tool is refused with an error that says it is a
       default, and nothing changes.
 - [ ] Removing a tool the bot does not have is refused as not found.
+- [ ] Removing a granted tool that was never installed through this API (for
+      example, one granted at bot creation) revokes the grant and succeeds;
+      there is no program of ours to delete.
+- [ ] After a successful remove, re-adding the same tool starts again at
+      identity `owner`.
 - [ ] Removing a tool never changes the bot's other tools or MCP servers.
 
 **Rollback failures**
