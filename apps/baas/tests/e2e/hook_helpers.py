@@ -168,8 +168,14 @@ async def send_callbacks_for_hook_devices(
     stderr: str = "",
     timeout_seconds: float = 0.5,
     poll_interval: float = 0.05,
+    min_publish_retry_count: int | None = None,
 ) -> list[dict]:
-    """Find CREATED devices in the current running batch and send callback for each."""
+    """Find CREATED devices in the current running batch and send callback for each.
+
+    ``min_publish_retry_count`` waits for a retry attempt instead of firing against
+    the initial attempt. This is required for failure-retry tests whose background
+    hook callback races with the manual success callback.
+    """
     t0 = time.monotonic()
     elapsed = 0.0
     created_devices = []
@@ -179,7 +185,12 @@ async def send_callbacks_for_hook_devices(
         created_devices = [
             d
             for d in devices
-            if d.get("device_uuid") and d.get("result_status") == "PROCESSING"
+            if d.get("device_uuid")
+            and d.get("result_status") == "PROCESSING"
+            and (
+                min_publish_retry_count is None
+                or d.get("publish_retry_count", 0) >= min_publish_retry_count
+            )
         ]
         poll_count += 1
         if created_devices:
@@ -210,7 +221,8 @@ async def send_callbacks_for_hook_devices(
 
     assert created_devices, (
         f"No CREATED devices with device_uuid found for publish_id={publish_id} "
-        f"after {timeout_seconds}s — callback was never invoked"
+        f"after {timeout_seconds}s with min_publish_retry_count="
+        f"{min_publish_retry_count} — callback was never invoked"
     )
 
     log.info(
