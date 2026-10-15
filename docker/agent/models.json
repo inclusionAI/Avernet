@@ -15,6 +15,12 @@
         "name": "qwen3.8-max",
         "display_name": "qwen3.8-max",
         "env": { "ANTHROPIC_MODEL": "qwen3.8-max", "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000" }
+      },
+      {
+        "id": "kimi-k3",
+        "name": "kimi-k3",
+        "display_name": "kimi-k3",
+        "env": { "ANTHROPIC_MODEL": "kimi-k3", "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000" }
       }
     ]
   }
