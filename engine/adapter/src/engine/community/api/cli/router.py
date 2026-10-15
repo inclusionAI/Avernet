@@ -25,6 +25,7 @@ from __future__ import annotations
 import base64
 import binascii
 import logging
+import os
 
 from engine.community.api.caps import check_capability
 from engine.community.api.cli.schemas import (
@@ -210,7 +211,8 @@ async def download_cli_tool(name: str = Query(...)) -> ApiResponse:
 # 200 with ``success: false`` and ``error`` set to the runner's code, and 404
 # stays reserved for "this engine build has no such endpoint".
 
-_ACLI_RUNNER = AcliRunner()
+# This module wires the runner, so it hands acli the process environment.
+_ACLI_RUNNER = AcliRunner(environ=os.environ)
 
 
 def _acli() -> AcliRunner:

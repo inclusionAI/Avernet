@@ -227,7 +227,17 @@ class AcliCliService(AcliCliServiceProtocol):
             await self._undo_install(bot_id, owner_id, cli_code, reason="grant_failed")
             raise AcliGrantSyncError from error
 
-        if self._grant_state(bot, cli_code) is False:
+        granted = self._grant_state(bot, cli_code)
+        if granted is None:
+            # The write was accepted but cannot be confirmed. Uninstalling
+            # could strand a granted tool, so keep the program and say so.
+            logger.error(
+                "acli_cli_rollback_failed bot_id=%s cli_code=%s "
+                "state=grant_unknown_installed phase=grant_readback",
+                bot_id, cli_code,
+            )
+            raise AcliRollbackFailedError(cli_code, "grant_unknown_installed")
+        if not granted:
             # The write was accepted but Passport does not hold the grant —
             # a Passport that stores no scope (the community self-issued one)
             # or a concurrent whole-scope write that overwrote it. Undo the

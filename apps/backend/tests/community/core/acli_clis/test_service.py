@@ -324,8 +324,8 @@ async def test_grant_passport_does_not_keep_with_failed_uninstall_reports_the_st
     assert caught.value.state == "installed_not_granted"
 
 
-async def test_unreadable_passport_after_an_accepted_grant_is_a_success() -> None:
-    """The write was acknowledged; an unreadable re-check does not undo it."""
+async def test_unreadable_read_back_keeps_the_program_and_says_so() -> None:
+    """An accepted write that cannot be confirmed is reported, not called a success."""
     service, agentpass, container, _ = _service()
     real_read = agentpass.current_passport_cli_items
     reads = {"n": 0}
@@ -338,11 +338,12 @@ async def test_unreadable_passport_after_an_accepted_grant_is_a_success() -> Non
 
     agentpass.current_passport_cli_items = read_once  # type: ignore[method-assign]
 
-    tool = await _add(service)
+    with pytest.raises(AcliRollbackFailedError) as caught:
+        await _add(service)
 
-    assert tool.name == "yuque-cli"
-    assert "yuque-cli" in agentpass.codes
+    assert caught.value.state == "grant_unknown_installed"
     assert "yuque-cli" in container.installed
+    assert [c[0] for c in container.calls] == ["install"]
 
 
 async def test_failed_grant_and_failed_uninstall_reports_the_state() -> None:

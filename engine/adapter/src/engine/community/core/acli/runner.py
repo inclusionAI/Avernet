@@ -196,7 +196,10 @@ def _tool_from(payload: Mapping[str, Any]) -> AcliTool:
 class AcliRunner:
     """Run acli. Stateless; safe to share."""
 
-    def __init__(self, executable: str = "acli") -> None:
+    def __init__(self, *, environ: Mapping[str, str], executable: str = "acli") -> None:
+        # The process environment acli inherits, supplied by the composition
+        # root so this core module never reads runtime configuration itself.
+        self._environ = environ
         self._executable = executable
 
     async def install(self, name: str, install_dir: str) -> AcliTool:
@@ -257,7 +260,7 @@ class AcliRunner:
             argv += ["--keyword", keyword]
         payload = await self._run(
             argv,
-            env=dict(os.environ),
+            env=dict(self._environ),
             timeout=QUERY_TIMEOUT_SECONDS,
             failure_code="market_failed",
         )
@@ -275,15 +278,14 @@ class AcliRunner:
 
     # ── execution ────────────────────────────────────────────────────────
 
-    @staticmethod
-    def _env_for(install_dir: Path, *, failure_code: str) -> dict[str, str]:
+    def _env_for(self, install_dir: Path, *, failure_code: str) -> dict[str, str]:
         home = acli_home_for(install_dir)
         try:
             home.mkdir(parents=True, exist_ok=True)
         except OSError as error:
             log.warning("[acli] cannot prepare HOME=%s: %s", home, error)
             raise AcliError(failure_code, f"cannot prepare acli home under {install_dir.parent}") from error
-        return {**os.environ, "HOME": str(home)}
+        return {**self._environ, "HOME": str(home)}
 
     @staticmethod
     async def _kill_group(proc: asyncio.subprocess.Process) -> None:

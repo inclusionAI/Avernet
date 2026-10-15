@@ -7,6 +7,8 @@ with ``200`` + ``success: false``.
 """
 from __future__ import annotations
 
+import asyncio
+
 from typing import Any, Mapping, Protocol, runtime_checkable
 
 from agentclaw.community.core.acli_clis.port import (
@@ -108,7 +110,9 @@ class ArcaAcliPort(AcliPort):
         params: dict[str, Any] | None = None,
     ) -> Mapping[str, Any]:
         try:
-            context = self._resolver.resolve_for_bot(bot_id, owner_id)
+            # Resolution can block on network I/O (BaaS connection info), so it
+            # runs off the event loop, as the engine relay's does.
+            context = await asyncio.to_thread(self._resolver.resolve_for_bot, bot_id, owner_id)
         except Exception as error:
             # No binding, an offline device, or no connection info: in every
             # case there is no container to run acli in.

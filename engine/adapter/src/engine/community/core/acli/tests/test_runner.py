@@ -90,7 +90,7 @@ def fake_acli(tmp_path, monkeypatch):
             return []
         return [json.loads(line) for line in log.read_text().splitlines()]
 
-    return AcliRunner(executable=str(script)), calls
+    return AcliRunner(environ=os.environ, executable=str(script)), calls
 
 
 @pytest.fixture
@@ -165,7 +165,7 @@ async def test_install_without_name_or_command_is_bad_output(tmp_path, install_d
     script.chmod(0o755)
 
     with pytest.raises(AcliError) as caught:
-        await AcliRunner(executable=str(script)).install("dataphin", install_dir)
+        await AcliRunner(environ=os.environ, executable=str(script)).install("dataphin", install_dir)
 
     assert caught.value.code == "bad_output"
 
@@ -232,7 +232,7 @@ async def test_unwritable_install_dir_is_a_refusal_not_a_crash(fake_acli, tmp_pa
 
 
 async def test_missing_acli_is_unavailable(tmp_path, install_dir):
-    runner = AcliRunner(executable=str(tmp_path / "no-such-acli"))
+    runner = AcliRunner(environ=os.environ, executable=str(tmp_path / "no-such-acli"))
 
     with pytest.raises(AcliError) as caught:
         await runner.install("dataphin", install_dir)
