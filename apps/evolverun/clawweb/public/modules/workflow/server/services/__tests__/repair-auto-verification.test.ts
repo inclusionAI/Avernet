@@ -71,6 +71,7 @@ it('automatically records effective/recurring phases in a real DB and creates a 
     await auto.observe(deployment);
     expect(await records.list(revision.taskId, 'verification')).toHaveLength(0);
     for (let i = 0; i < 5; i++) await analyze(`new-${i}`, 8, [], 'n', i % 2 ? Date.now() : Math.floor(Date.now() / 1000));
+    for (let i = 0; i < 2001; i++) await analyze(`traffic-${i}`, 8, [], 'other');
     await auto.reconcile(); await auto.reconcile();
     expect(await records.list(revision.taskId, 'verification')).toHaveLength(1);
     expect((await service.candidates('wf-1')).items.find(item => item.itemId === 'item-0')?.state).toBe('verified');
@@ -87,6 +88,7 @@ it('automatically records effective/recurring phases in a real DB and creates a 
     expect((await service.candidates('wf-1')).items.find(item => item.previousItemId === 'item-0')).toMatchObject({ state: 'pending', proposal: null });
     await f.db.exec('UPDATE workflow_deploy_history SET deploy_number = 8');
     await analyze('recurring', 8, recurring('recurring'));
+    for (let i = 0; i < 2001; i++) await analyze(`later-traffic-${i}`, 8, [], 'other');
     await auto.observe(deployment); await auto.observe(deployment);
     expect(await records.list(revision.taskId, 'verification')).toHaveLength(3);
     const next = (await service.candidates('wf-1')).items.find(item => item.previousItemId === 'item-0');

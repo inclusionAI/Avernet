@@ -16,10 +16,10 @@ it('uses durable deployment and approval status rather than the old review phase
 
 it('creates Git links only from a safe server-provided repository URL', () => {
   const base = 'a'.repeat(40), candidate = 'b'.repeat(40)
-  expect(repairGitLinks('https://code.alipay.com/ClawMind/clawflows.git', base, candidate)).toEqual({
-    baseline: `https://code.alipay.com/ClawMind/clawflows/commit/${base}`,
-    candidate: `https://code.alipay.com/ClawMind/clawflows/commit/${candidate}`,
-    compare: `https://code.alipay.com/ClawMind/clawflows/compare/${base}...${candidate}`,
+  expect(repairGitLinks('https://example.com/workflows/packs.git', base, candidate)).toEqual({
+    baseline: `https://example.com/workflows/packs/commit/${base}`,
+    candidate: `https://example.com/workflows/packs/commit/${candidate}`,
+    compare: `https://example.com/workflows/packs/compare/${base}...${candidate}`,
   })
   for (const url of ['javascript:alert(1)', 'https://user:secret@host/repo', undefined]) {
     expect(repairGitLinks(url, base, candidate)).toBeNull()

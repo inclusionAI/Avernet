@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
-import { validateWorkflowEvolutionAnalysisResult } from '@avernet/clawevolve/server/services/evolution/contracts';
+import { fillRepairSampleAnalyses } from './repair-sample-analyses.js';
 import type { RepairItem } from '../contracts/repair-batch.js';
 import { digestRepairJson } from '../contracts/repair-batch.js';
 import type { RepairDeployment, RepairPublicationPort } from '../contracts/repair-release.js';
@@ -55,27 +55,7 @@ export function createRepairAutoVerification(db: IDatabase, publication?: Repair
       const samples = new Map<string, EffectSample>();
       for (const row of rows) if (!samples.has(row.flow_id)) samples.set(row.flow_id, { flowId: row.flow_id,
         deployNumber: observedDeployNumber, completed: row.completed_at != null, nodeStatus: row.node_status, analysisComplete: false, signatures: [] });
-      // Only the latest completed, validated analysis of a run can prove absence.
-      const analyses = await db.query<{ flow_id: string | null; scope_json: string; result_json: string }>(
-        `SELECT flow_id, scope_json, result_json FROM workflow_evolution_analysis_runs WHERE workflow_id = ?
-         AND status = 'completed' AND scope_type <> 'issue_aggregate' ORDER BY completed_at_ms DESC, id DESC LIMIT 2000`, [d.workflowId]);
-      const visited = new Set<string>();
-      for (const row of analyses) {
-        let declared: string[] = row.flow_id ? [row.flow_id] : [];
-        try {
-          const frozenScope = JSON.parse(row.scope_json);
-          if (Array.isArray(frozenScope.flowIds)) declared.push(...frozenScope.flowIds.filter((id: unknown): id is string => typeof id === 'string'));
-          const analysis = validateWorkflowEvolutionAnalysisResult(JSON.parse(row.result_json));
-          const scope = JSON.parse(row.scope_json);
-          if (scope.nodeId && scope.nodeId !== rule.nodeId || scope.nodeIds?.length && !scope.nodeIds.includes(rule.nodeId)) continue;
-          for (const id of [...(row.flow_id ? [row.flow_id] : []), ...(Array.isArray(scope.flowIds) ? scope.flowIds : []), ...analysis.diagnoses.flatMap(value => value.flowIds)]) {
-            if (visited.has(id)) continue;
-            visited.add(id); const sample = samples.get(id); if (!sample) continue;
-            sample.analysisComplete = analysis.unknowns.length === 0;
-            sample.signatures = analysis.diagnoses.filter(value => value.flowIds.includes(id) && value.nodeId === rule.nodeId).map(value => value.failureSignature);
-          }
-        } catch { for (const id of declared.length ? declared : samples.keys()) visited.add(id); /* Invalid latest analysis cannot establish absence. */ }
-      }
+      await fillRepairSampleAnalyses(db, d.workflowId, rule.nodeId, samples);
       result.push({ itemId: item.itemId, observedDeployNumber, ...decideRepairEffect(rule, observedDeployNumber, [...samples.values()]) });
     }
     return result;

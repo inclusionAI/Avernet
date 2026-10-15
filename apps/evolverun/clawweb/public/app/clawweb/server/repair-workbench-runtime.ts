@@ -67,9 +67,12 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
   const monitor = { async reconcile() {
     const count = await service.reconcile();
     let after = '';
+    const status = db.dialect.driver === 'better-sqlite3' ? "JSON_EXTRACT(body_json, '$.status')"
+      : "JSON_UNQUOTE(JSON_EXTRACT(body_json, '$.status'))";
     for (;;) {
       const pending = await db.query<{ record_id: string; body_json: string }>(`SELECT record_id, body_json FROM workflow_repair_release_records
-        WHERE record_kind = 'deployment' AND record_id > ? ORDER BY record_id LIMIT 100`, [after]);
+        WHERE record_kind = 'deployment' AND ${status} IN ('dispatching', 'running', 'uncertain')
+        AND record_id > ? ORDER BY record_id LIMIT 100`, [after]);
       if (!pending.length) break;
       for (const row of pending) {
         const deployment = JSON.parse(row.body_json);
