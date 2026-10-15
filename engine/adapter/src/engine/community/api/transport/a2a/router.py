@@ -884,6 +884,11 @@ async def _resolve_interaction(params: dict[str, Any], req_id: Any,
                                      "(already resolved or never requested)",
                           "data": {"reason": "resolve_conflict"}}}
 
+    # R6-2：捕获当前 pending 轮次——RPC 回补的 resolved 只能清这一轮。
+    # 等待期间若引擎把旧轮次决议掉且同一 iid 又挂起新轮次,旧回复不
+    # 得把新 pending 洗掉。
+    generation = _kernel.interaction_generation(interaction_id)
+
     try:
         await _forward_resolve(session_key=run.context_id,
                                interaction_id=interaction_id,
@@ -909,7 +914,8 @@ async def _resolve_interaction(params: dict[str, Any], req_id: Any,
     await _kernel.publish_interaction_resolved(
         rid, {"interactionId": interaction_id,
               "kind": resolution.get("kind"),
-              "decision": resolution.get("decision")})
+              "decision": resolution.get("decision")},
+        expected_generation=generation)
     return {"interaction": {"resolved": True, "runId": rid}}
 
 

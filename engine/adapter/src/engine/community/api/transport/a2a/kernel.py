@@ -95,6 +95,10 @@ class A2aKernel:
         # R4-2: interaction-level pending ledger — registered but not yet resolved (the registry values in _interactions are
         # never audited; repeat submissions/decisions are judged by this set)
         self._resolved_interactions: set[str] = set()
+        # R6-2: per-iid pending generation — the number of times the same iid has been re-pended (after resolved).
+        # The router captures the generation before forwarding; when the RPC comes back, only the corresponding
+        # generation is cleared, preventing old replies from wiping out the new round's pending
+        self._interaction_generation: dict[str, int] = {}
         self._context_subs: dict[str, list[asyncio.Queue]] = {}
         self._total_bytes = 0
         self._global_lock = asyncio.Lock()
@@ -289,15 +293,30 @@ class A2aKernel:
         if r.state in wire.TERMINAL_STATES:
             return                     # T1：终态后不再注册新 interaction
         self._interactions[interaction_id] = rid
+        # R6-2: the numeric-pending generation of the same iid increments on each request — old RPC replies
+        # are only allowed to clear the generation that was in effect when they set out
+        self._interaction_generation[interaction_id] = \
+            self._interaction_generation.get(interaction_id, 0) + 1
         # R4-2: in-flight re-request (suspending the same tool again) → remove it from the resolved set, the iid returns to pending
         self._resolved_interactions.discard(interaction_id)
         r.state = "TASK_STATE_INPUT_REQUIRED"
         await self._publish(rid, wire.wire_interaction_requested(
             rid, r.context_id, 0, interaction_id, payload))
 
-    async def publish_interaction_resolved(self, rid: str,
-                                           payload: dict[str, Any]) -> None:
+    def interaction_generation(self, interaction_id: str) -> int:
+        """该 iid 当前的 pending 轮次（未请求过 = 0）——R6-2 router 捕获用。"""
+        return self._interaction_generation.get(interaction_id, 0)
+
+    async def publish_interaction_resolved(
+            self, rid: str, payload: dict[str, Any],
+            expected_generation: int | None = None) -> None:
         """HITL 决议：按 iid 记账 + 全清后才回 WORKING（R4-2）。
+
+        expected_generation（R6-2）：调用方在 resolve RPC 出发前捕获的轮次。
+        只清对应轮次——RPC 等待期间该 iid 已经"engine 决议 + 再挂起"时,
+        旧回复不再入账、不再上行（旧轮次的 resolved 事实已由引擎回
+        显路径如实发布),新 pending 不被旧回复洗掉。None = 无轮次约束
+        （引擎回显/legacy 路径,事件本身就是真实态）。
 
         gateway 注册表支持同一 run 多个 pending（SDK 并发 canUseTool），
         决议只清自己——run 是否回 WORKING 取决于还有没有未决项，绝不用
@@ -316,6 +335,13 @@ class A2aKernel:
                or payload.get("approvalId"))
         if isinstance(iid, str) and iid:
             if self._interactions.get(iid) == rid:
+                if expected_generation is not None and \
+                        self._interaction_generation.get(iid, 0) \
+                        != expected_generation:
+                    # R6-2 轮次不匹配：RPC 出发的是旧轮次,现在同 iid 上
+                    # pending 的是新轮次——直接丢弃本次补发,不改账不动态
+                    # 不上行(旧轮次 resolved 已由引擎回显如实发布)。
+                    return
                 self._resolved_interactions.add(iid)
                 unresolved = [i for i, owner in self._interactions.items()
                               if owner == rid

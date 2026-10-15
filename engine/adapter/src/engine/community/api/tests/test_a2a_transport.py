@@ -1117,6 +1117,67 @@ async def test_legacy_resolution_without_iid_clears_all_pending(monkeypatch):
     assert fake.calls == [], "引擎已 resume 的 run 不得再上行决策"
 
 
+# ══════════ R6: 旧 RPC 回复不洗同 iid 新轮次 pending ══════════
+
+@pytest.mark.asyncio
+async def test_stale_rpc_reply_cannot_clear_repending(monkeypatch):
+    """R6-2 回归钉（reviewer 时序）：resolve RPC 等待期间引擎已把同
+    iid 决议掉并再挂起新轮次——旧回复必须按出发时轮次丢弃，不得把新
+    pending 洗掉；新轮次照常可决（不是 conflict）。"""
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class _GatedResolveChat:
+        async def resolve_interaction(self, session_key, interaction_id,
+                                      **kw):
+            entered.set()
+            await release.wait()
+            return {"success": True, "payload": {}}
+
+    R2 = _install_resolve_bridge(monkeypatch, _GatedResolveChat())
+    K = kernel_mod.A2aKernel()
+    monkeypatch.setattr(R2, "_kernel", K)
+    rid, _ = await K.open_run("hitl-r6", "kr", "first", "d")
+    await K.publish_interaction_requested(rid, "i-r", {})
+
+    task = asyncio.create_task(R2._resolve_interaction(
+        {"interactionId": "i-r",
+         "resolution": {"decision": "submit", "kind": "ask_user"}},
+        1, None))
+    await entered.wait()
+
+    # RPC 在途：引擎将旧轮次 resolved，随后同 iid 再挂起（新轮次）
+    await K.publish_interaction_resolved(rid, {"interactionId": "i-r"})
+    await K.publish_interaction_requested(rid, "i-r", {})
+    assert K.interaction_pending(rid, "i-r") is True, "前置:新轮次已建"
+
+    release.set()
+    out = await asyncio.wait_for(task, 2)
+    assert out["interaction"]["resolved"] is True, out
+    assert K.interaction_pending(rid, "i-r") is True, \
+        "旧 RPC 回复把同 iid 新轮次的 pending 洗掉了"
+    assert K.runs[rid].state == "TASK_STATE_INPUT_REQUIRED"
+
+    # 新轮次照常可决
+    gate2_in = asyncio.Event()
+    gate2_out = asyncio.Event()
+
+    class _FastChat:
+        async def resolve_interaction(self, session_key, interaction_id,
+                                      **kw):
+            return {"success": True, "payload": {}}
+
+    monkeypatch.setattr("engine.community.api.transport.a2a.engine_bridge."
+                        "_chat_plugin", lambda: _FastChat())
+    out2 = await R2._resolve_interaction(
+        {"interactionId": "i-r",
+         "resolution": {"decision": "submit", "kind": "ask_user"}},
+        2, None)
+    assert out2["interaction"]["resolved"] is True, \
+        f"新轮次被误判 conflict: {out2}"
+    assert K.runs[rid].state == "TASK_STATE_WORKING"
+
+
 # ══════════ R5: approvalId 身份提取 + wire 帧状态与 run 一致 ══════════
 
 @pytest.mark.asyncio
