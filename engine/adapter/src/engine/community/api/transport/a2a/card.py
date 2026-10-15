@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
-# Extension URIs (G2 locked — spike/a2a/settings.py EXT_URIS same origin)
+# Extension URIs —— 词汇表由 spike G2 定版、本文件为权威定义（spike 已随 PR 清理）
 # 1c：spec v1.0 AgentCapabilities 无标准 cancellation 字段（capabilities 仅
 # streaming/pushNotifications/extensions；CancelTask 本身是核心方法），服务
 # 侧取消能力以 extension URI 锁定声明——BaaS 端读卡判读（灰度期老引擎
