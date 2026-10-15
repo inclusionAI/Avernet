@@ -2,6 +2,8 @@
 
 from collections.abc import Callable
 from pathlib import Path
+import os
+import stat
 import tempfile
 import time
 from typing import Any
@@ -14,11 +16,7 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-# CodeFuse creates and upgrades these launchers in the runtime home. Their
-# symlinks can be absolute while the draft home is mounted under a merge-NAS
-# path, so materializing them during a host-side build can reference the
-# build host rather than the published bot. Excluding only these fixed
-# runtime-managed names lets unrelated broken symlinks still fail loudly.
+# These launchers are managed by the runtime rather than the CLI snapshot.
 _RUNTIME_MANAGED_LOCAL_BIN_NAMES = (
     "cfuse",
     "cfuse-claude",
@@ -34,6 +32,33 @@ def _validate_home_dirs(home: Path) -> None:
             raise ValueError(f"home artifact directory is a symlink: {directory}")
         if directory.exists() and not directory.is_dir():
             raise NotADirectoryError(f"home artifact path is not a directory: {directory}")
+
+
+def _symlink_excludes(source_bin: Path, rules: tuple[str, ...]) -> list[str]:
+    """Exclude link entries literally so retry deletion also removes old files."""
+    excludes = []
+
+    def scan(directory: Path) -> None:
+        # COSEC: scandir does not follow links; inspect each entry before descent.
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                path = Path(entry.path)
+                relative = path.relative_to(source_bin).as_posix()
+                if is_excluded(f".local/bin/{relative}", rules) or relative in _RUNTIME_MANAGED_LOCAL_BIN_NAMES:
+                    continue
+                if entry.is_symlink():
+                    # rsync treats backslashes as escapes only in wildcard
+                    # patterns. Preserve literal backslashes in plain names.
+                    pattern = relative
+                    if any(char in pattern for char in "*?["):
+                        pattern = "".join("\\" + char if char in "\\*?[]" else char for char in pattern)
+                    excludes.append(pattern)
+                    logger.info("service_bot.local_bin.symlink.skip source=%s relative=%s symlink_policy=skip", path, relative)
+                elif entry.is_dir(follow_symlinks=False):
+                    scan(path)
+
+    scan(source_bin)
+    return excludes
 
 
 def sync_local_bin_artifact(
@@ -57,7 +82,7 @@ def sync_local_bin_artifact(
     fields = "device_id=%s version=%s source=%s target=%s"
     context = (device_id, version, source_bin, target_bin)
     logger.info(
-        "service_bot.local_bin.request " + fields + " ignore_paths=%s",
+        "service_bot.local_bin.request " + fields + " ignore_paths=%s symlink_policy=skip",
         *context, build_ignore_paths,
     )
     try:
@@ -70,8 +95,21 @@ def sync_local_bin_artifact(
         reason = ""
         if is_excluded(".local/bin", build_ignore_paths):
             reason = "excluded"
-        elif not source_bin.exists() and not source_bin.is_symlink():
-            reason = "source_missing"
+        else:
+            # COSEC: validate every source entry before accessing its child;
+            # a linked Home/.local/bin must never redirect the source scan.
+            for directory in (source_home, source_home / ".local", source_bin):
+                try:
+                    mode = directory.lstat().st_mode
+                except FileNotFoundError:
+                    reason = "source_missing"
+                    break
+                if stat.S_ISLNK(mode):
+                    reason = "source_symlink"
+                    logger.info("service_bot.local_bin.symlink.skip source=%s symlink_policy=skip", directory)
+                    break
+                if not stat.S_ISDIR(mode):
+                    raise NotADirectoryError(f"draft CLI path is not a directory: {directory}")
         if reason:
             if target_bin.exists():
                 # Only the validated bin snapshot is synchronized against an
@@ -108,12 +146,14 @@ def sync_local_bin_artifact(
         exclude_paths = (
             *extra_root_rules(build_ignore_paths, ".local/bin"),
             *_RUNTIME_MANAGED_LOCAL_BIN_NAMES,
+            *_symlink_excludes(source_bin, build_ignore_paths),
         )
-        # CLI installers commonly link into sibling tool directories. Match
-        # the existing runtime copy's -L policy to publish standalone files.
+        # Skip links and exclude their exact names so --delete-excluded also
+        # removes regular files published under those names by an earlier retry.
         run_command(
             cmd=[
-                "sudo", "rsync", "-avL", "--delete", "--delete-excluded",
+                "sudo", "rsync", "-av", "--no-links", "--no-devices", "--no-specials",
+                "--delete", "--delete-excluded",
                 *(f"--exclude=/{path}" for path in exclude_paths),
                 f"{source_bin}/", f"{target_bin}/",
             ],
