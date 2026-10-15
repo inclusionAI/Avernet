@@ -373,7 +373,13 @@ class AgentSwarmModule(Module):
         config: AgentSwarmConfig,
         handler: SwarmRunHandler,
         job_repo: JobRepository,
+        run_repo: RunRepository,
+        guard_repo: GuardEventRepository,
     ) -> AgentSwarmWorker:
+        # run_repo/guard_repo host the maintenance reaper (async-run-and-
+        # resume 4.1): the DI root always passes both, so production
+        # workers sweep; constructor defaults keep embedded uses opt-out.
         return AgentSwarmWorker(
             config=config, handler=handler, job_repo=job_repo,
+            run_repo=run_repo, guard_repo=guard_repo,
         )

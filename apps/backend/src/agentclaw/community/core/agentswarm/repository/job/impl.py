@@ -4,17 +4,49 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import and_, case, delete, func, select, update
+from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.agentswarm.domain import models as dm
 from agentclaw.community.core.agentswarm.repository.job import model as om
 from agentclaw.community.core.agentswarm.repository.job.protocol import (
     JobRepositoryProtocol,
 )
+from agentclaw.community.core.agentswarm.repository.shard import model as om_shard
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
 
 TaskQueueStatus = dm.TaskQueueStatus
+
+# Job statuses the claim/reclaim predicates can never match again: no
+# worker will act on the run through the queue. Anything else (PENDING,
+# RUNNING — live lease or expired) is reachable and owned by the queue.
+_DEAD_JOB_STATUSES = (
+    TaskQueueStatus.SUCCEEDED.value,
+    TaskQueueStatus.FAILED.value,
+    TaskQueueStatus.TIMED_OUT.value,
+)
+
+
+def _routed_shard_count():
+    """Correlated scalar subquery: the run's live routed-shard count.
+
+    4.5 (progress-aware breaker): the count is evaluated per updated job
+    row, DB-side, so the marker write keeps the same UPDATE-is-the-claim
+    CAS discipline as the epoch/reclaim increments — no read-then-write
+    window for racing pods to interleave in. Correlation on run_id only:
+    run_id is globally unique, so no env/tenant join is needed.
+    """
+    return (
+        select(func.count())
+        .select_from(om_shard.AcAgentSwarmResultShardModel)
+        .where(
+            om_shard.AcAgentSwarmResultShardModel.run_id
+            == om.AcAgentSwarmJobModel.run_id,
+            om_shard.AcAgentSwarmResultShardModel.is_deleted.is_(False),
+        )
+        .scalar_subquery()
+    )
 
 
 def _utcnow() -> datetime:
@@ -62,6 +94,14 @@ class JobRepository(JobRepositoryProtocol):
 
     def claim_batch(self, worker_id: str, tenant_filter: list[dm.TenantId] | None,
                     limit: int, lease_seconds: int) -> list[dict]:
+        """claim predicate: env + PENDING + run_at due.
+
+        Deadline-blind on purpose (4.4): `deadline_at` mirrors the
+        submit-sync wait budget, not the run's wall clock, and a
+        past-deadline PENDING job must stay claimable so the
+        rehydrated slice's TerminationEvaluator fires the fenced
+        TIMED_OUT through the normal path — never filtered here.
+        """
         now = _utcnow()
         lease_until = now + timedelta(seconds=lease_seconds)
         with self._db.orm_session() as session:
@@ -99,6 +139,11 @@ class JobRepository(JobRepositoryProtocol):
                         claim_epoch=om.AcAgentSwarmJobModel.claim_epoch + 1,
                         lease_expires_at=lease_until,
                         attempts=om.AcAgentSwarmJobModel.attempts + 1,
+                        # 4.5 baseline: a claim observes the run's current
+                        # routed-shard count into progress_marker, replacing
+                        # the -1 sentinel. Fresh baseline per claim start —
+                        # D40 comparisons only make sense BETWEEN attempts.
+                        progress_marker=_routed_shard_count(),
                     )
                 )
                 if result.rowcount != 1:
@@ -114,6 +159,7 @@ class JobRepository(JobRepositoryProtocol):
                     "attempts": row.attempts,
                     "cancel_requested": bool(row.cancel_requested),
                     "deadline_at": row.deadline_at,
+                    "progress_marker": row.progress_marker,
                 })
             return claimed
 
@@ -125,6 +171,20 @@ class JobRepository(JobRepositoryProtocol):
         The claim is the UPDATE — DB-side increments behind the still-expired
         predicate — so two reclaimers racing on the same dead pod converge on
         one owner instead of minting twin epochs.
+
+        Deadline-blind on purpose (4.4): a past-deadline row must stay
+        reclaimable so the rehydrated slice's wall-clock fires the fenced
+        TIMED_OUT itself.
+
+        4.5 (progress-aware breaker): the same UPDATE compares the run's
+        current routed-shard count against the stored `progress_marker` —
+        growth resets `reclaims` (rolling restarts no longer trip D40), a
+        flat count increments exactly as before (genuine crash-idle loops
+        still STUCK). The -1 sentinel (mixed version / never claimed by a
+        new replica) is the *first observation* case: it becomes the
+        baseline and is never classified as progress. All SET expressions
+        evaluate against the pre-update row, so the compare-and-branch
+        stays one atomic DB-side CAS.
         """
         now = _utcnow()
         lease_until = now + timedelta(seconds=lease_seconds)
@@ -150,8 +210,19 @@ class JobRepository(JobRepositoryProtocol):
                         claimed_by=worker_id,
                         claim_epoch=om.AcAgentSwarmJobModel.claim_epoch + 1,
                         lease_expires_at=lease_until,
-                        reclaims=om.AcAgentSwarmJobModel.reclaims + 1,
+                        reclaims=case(
+                            (
+                                and_(
+                                    om.AcAgentSwarmJobModel.progress_marker != -1,
+                                    _routed_shard_count()
+                                    > om.AcAgentSwarmJobModel.progress_marker,
+                                ),
+                                0,
+                            ),
+                            else_=om.AcAgentSwarmJobModel.reclaims + 1,
+                        ),
                         attempts=om.AcAgentSwarmJobModel.attempts + 1,
+                        progress_marker=_routed_shard_count(),
                     )
                 )
                 if result.rowcount != 1:
@@ -169,6 +240,7 @@ class JobRepository(JobRepositoryProtocol):
                     "reclaims": row.reclaims,
                     "cancel_requested": bool(row.cancel_requested),
                     "deadline_at": row.deadline_at,
+                    "progress_marker": row.progress_marker,
                 })
             return reclaimed
 
@@ -251,6 +323,88 @@ class JobRepository(JobRepositoryProtocol):
                     om.AcAgentSwarmJobModel.is_deleted.is_(False),
                 )
             ).scalar_one()
+
+    def get_run_job(self, run_id: dm.RunId, tenant: dm.TenantId) -> dict | None:
+        """Reaper probe (4.1): the run's single job row, or None.
+
+        Interpretation is the caller's (the maintenance loop) and follows
+        the claim predicates for consistency: a PENDING row is claimable
+        once run_at falls due, a RUNNING row is reachable whether its
+        lease lives (an owner holds it) or expired (reclaim_batch owns
+        it, and the D40 breaker turns dead loops terminal) — only the
+        _DEAD_JOB_STATUSES values leave the run unreachable from the
+        queue, which is exactly the reaper's orphan definition.
+        """
+        with self._db.orm_session() as session:
+            row = session.execute(
+                select(om.AcAgentSwarmJobModel).where(
+                    om.AcAgentSwarmJobModel.run_id == run_id,
+                    om.AcAgentSwarmJobModel.tenant == tenant,
+                    om.AcAgentSwarmJobModel.env == get_current_env(),
+                    om.AcAgentSwarmJobModel.is_deleted.is_(False),
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return {
+                "status": row.status,
+                "claim_epoch": row.claim_epoch,
+                "deadline_at": row.deadline_at,
+                "lease_expires_at": row.lease_expires_at,
+                "reclaims": row.reclaims,
+                "progress_marker": row.progress_marker,
+            }
+
+    def requeue_orphan(self, run_id: dm.RunId, tenant: dm.TenantId,
+                       deadline_seconds: float) -> bool:
+        """Reaper re-enqueue (4.1): ensure a claimable PENDING row exists
+        for a RUNNING run whose job row is dead or missing.
+
+        uk_job_run is the convergence point for concurrent reapers and
+        for the submitter's own enqueue: this INSERT either wins (fresh
+        row, returns True) or collides. On collision the surviving row is
+        revived ONLY when it is terminal — a live PENDING/RUNNING row is
+        owned by claim/reclaim and never touched here (returns False).
+        Revival bumps claim_epoch, so terminal-era writes fenced at the
+        dead row's epoch can never land against the revived row, and
+        resets the counters so the revival behaves like a fresh submit:
+        progress_marker back to the -1 unobserved sentinel.
+        """
+        now = _utcnow()
+        try:
+            with self._db.orm_session() as session:
+                session.add(om.AcAgentSwarmJobModel(
+                    job_id=_new_id(),
+                    run_id=run_id,
+                    tenant=tenant,
+                    status=TaskQueueStatus.PENDING.value,
+                    run_at=now,
+                    deadline_at=now + timedelta(seconds=deadline_seconds),
+                ))
+            return True
+        except IntegrityError:
+            with self._db.orm_session() as session:
+                result = session.execute(
+                    update(om.AcAgentSwarmJobModel).where(
+                        om.AcAgentSwarmJobModel.run_id == run_id,
+                        om.AcAgentSwarmJobModel.tenant == tenant,
+                        om.AcAgentSwarmJobModel.env == get_current_env(),
+                        om.AcAgentSwarmJobModel.status.in_(_DEAD_JOB_STATUSES),
+                        om.AcAgentSwarmJobModel.is_deleted.is_(False),
+                    ).values(
+                        status=TaskQueueStatus.PENDING.value,
+                        run_at=now,
+                        deadline_at=now + timedelta(seconds=deadline_seconds),
+                        claimed_by=None,
+                        lease_expires_at=None,
+                        attempts=0,
+                        reclaims=0,
+                        progress_marker=-1,
+                        last_error=None,
+                        claim_epoch=om.AcAgentSwarmJobModel.claim_epoch + 1,
+                    )
+                )
+            return result.rowcount == 1
 
     def is_cancel_requested(self, run_id: dm.RunId, tenant: dm.TenantId) -> bool:
         with self._db.orm_session() as session:

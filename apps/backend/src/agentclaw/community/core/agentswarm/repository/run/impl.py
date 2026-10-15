@@ -204,6 +204,35 @@ class RunRepository(RunRepositoryProtocol):
                 total=total, page=page, page_size=page_size,
             )
 
+    def list_status_page(self, status: dm.RunStatus, page: int = 1,
+                         page_size: int = 100) -> dm.RunPage:
+        """Fleet-wide status page for the maintenance reaper (no tenant).
+
+        Mirrors list_page's shape but always status-filtered and env-bound:
+        a multi-env single-DB deployment must not cross-sweep another
+        env's runs — the job-repo claim surfaces the reaper pairs with
+        bind the same way.
+        """
+        offset = max(0, (page - 1)) * page_size
+        with self._db.orm_session() as session:
+            conditions = [
+                om.AcAgentSwarmRunModel.env == get_current_env(),
+                om.AcAgentSwarmRunModel.status == status.value,
+                om.AcAgentSwarmRunModel.is_deleted.is_(False),
+            ]
+            total = session.execute(
+                select(func.count()).select_from(om.AcAgentSwarmRunModel).where(*conditions)
+            ).scalar_one()
+            rows = session.execute(
+                select(om.AcAgentSwarmRunModel).where(*conditions)
+                .order_by(om.AcAgentSwarmRunModel.id.desc())
+                .offset(offset).limit(page_size)
+            ).scalars().all()
+            return dm.RunPage(
+                items=tuple(self._to_domain(r) for r in rows),
+                total=total, page=page, page_size=page_size,
+            )
+
     def count_active_runs(self, tenant: dm.TenantId) -> int:
         with self._db.orm_session() as session:
             return session.execute(

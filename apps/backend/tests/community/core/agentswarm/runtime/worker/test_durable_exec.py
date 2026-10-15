@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
+from datetime import datetime
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -59,8 +61,17 @@ def _job_state(db, run_id):
             "claim_epoch": row.claim_epoch,
             "attempts": row.attempts,
             "reclaims": row.reclaims,
+            "progress_marker": row.progress_marker,
             "last_error": row.last_error,
         }
+
+
+def _routed_shard(env, run: dm.Run, index: int) -> None:
+    # One routed result shard via the existing agent+shard helper: each
+    # call grows the run's routed-shard count by one — the progress
+    # signal the 4.5 breaker compares.
+    _agent_with(env, run, f"a{index}", f"goal-a{index}",
+                dm.AgentStatus.COMPLETED)
 
 
 def _tight_config(**orch_overrides) -> AgentSwarmConfig:
@@ -183,6 +194,198 @@ class TestReclaimCircuitBreaker:
         assert job["reclaims"] == 3
         assert job["status"] == "SUCCEEDED"
         assert stored.ended_at is not None
+        # 4.5 mixed-version pin: the flat shard count stayed the claim
+        # baseline throughout — the breaker never saw growth and the
+        # marker never reset anything.
+        assert job["progress_marker"] == 0
+
+
+class TestProgressAwareReclaimBreaker:
+    """4.5 on the repository surface: the claim/reclaim UPDATE persists
+    the run's routed-shard count into progress_marker; growth across a
+    crash window resets reclaims, a flat count increments exactly as
+    before, and the -1 sentinel (a row from a pre-marker version) is a
+    never-progress baseline."""
+
+    def test_claim_persists_routed_shard_count_as_baseline(self, db):
+        factory = FakeFactory()
+        env = _build_env(db, [], factory, config=_tight_config())
+        run = _mk_run()
+        env.run_repo.create(run)
+        _routed_shard(env, run, 1)
+        _routed_shard(env, run, 2)
+        env.job_repo.enqueue(run_id=run.run_id, tenant=TENANT,
+                             deadline_seconds=3600)
+
+        claim = env.job_repo.claim_batch(WORKER, [TENANT], 1, 60)[0]
+
+        assert claim["progress_marker"] == 2
+        assert _job_state(db, run.run_id)["progress_marker"] == 2
+
+    def test_reclaim_with_shard_growth_resets_reclaims(self, db):
+        factory = FakeFactory()
+        env = _build_env(db, [], factory, config=_tight_config())
+        run = _mk_run()
+        claim = _enqueue_and_claim(env, run)
+        assert _job_state(db, run.run_id)["progress_marker"] == 0
+
+        _routed_shard(env, run, 1)
+        env.job_repo.renew_lease(
+            run.run_id, TENANT, WORKER, -1, claim["claim_epoch"],
+        )
+        first = env.job_repo.reclaim_batch("worker-2", 1, 60)[0]
+        assert first["reclaims"] == 0
+        assert first["progress_marker"] == 1
+
+        # No further growth: the next reclaim increments again.
+        env.job_repo.renew_lease(
+            run.run_id, TENANT, "worker-2", -1, first["claim_epoch"],
+        )
+        second = env.job_repo.reclaim_batch("worker-3", 1, 60)[0]
+        assert second["reclaims"] == 1
+
+    def test_reclaim_without_growth_increments_as_before(self, db):
+        factory = FakeFactory()
+        env = _build_env(db, [], factory, config=_tight_config())
+        run = _mk_run()
+        claim = _enqueue_and_claim(env, run)
+
+        env.job_repo.renew_lease(
+            run.run_id, TENANT, WORKER, -1, claim["claim_epoch"],
+        )
+        first = env.job_repo.reclaim_batch("worker-2", 1, 60)[0]
+        assert first["reclaims"] == 1
+
+        env.job_repo.renew_lease(
+            run.run_id, TENANT, "worker-2", -1, first["claim_epoch"],
+        )
+        second = env.job_repo.reclaim_batch("worker-3", 1, 60)[0]
+        assert second["reclaims"] == 2
+
+    def test_minus_one_marker_row_is_baseline_never_progress(self, db):
+        factory = FakeFactory()
+        env = _build_env(db, [], factory, config=_tight_config())
+        run = _mk_run()
+        env.run_repo.create(run)
+        _routed_shard(env, run, 1)
+        env.job_repo.enqueue(run_id=run.run_id, tenant=TENANT,
+                             deadline_seconds=3600)
+        # Simulate a claim by a pre-marker version: RUNNING with an
+        # expired lease, progress_marker still at its -1 default.
+        with db.orm_session() as session:
+            session.execute(
+                om.AcAgentSwarmJobModel.__table__.update().where(
+                    om.AcAgentSwarmJobModel.run_id == run.run_id,
+                ).values(
+                    status=dm.TaskQueueStatus.RUNNING.value,
+                    claim_epoch=1,
+                    lease_expires_at=datetime(2020, 1, 1),
+                )
+            )
+
+        reclaimed = env.job_repo.reclaim_batch("worker-2", 1, 60)[0]
+
+        # First observation = baseline: growth vs -1 is NOT progress.
+        assert reclaimed["reclaims"] == 1
+        assert reclaimed["progress_marker"] == 1
+        assert reclaimed["claim_epoch"] == 2
+
+
+class TestRollingRestartWithProgressSurvivesBreaker:
+    """4.6 (i): a crash-looping run whose routed-shard count grows
+    between reclaims survives past reclaim_max — the exact rolling
+    restart of a long bot run D40 used to kill."""
+
+    def test_shard_growth_between_reclaims_survives_past_reclaim_max(self, db):
+        factory = FakeFactory()
+        env = _build_env(
+            db, [], factory, config=_tight_config(),
+            llm=RepeatingLLMProvider(_wait_decision("ghost")),
+            termination=TerminationEvaluator(no_progress_threshold=999),
+        )
+        run = _mk_run()
+        claim = _enqueue_and_claim(env, run)
+        env.job_repo.renew_lease(
+            run.run_id, TENANT, WORKER, -1, claim["claim_epoch"],
+        )
+        worker = AgentSwarmWorker(
+            config=env.cfg, handler=env.handler, job_repo=env.job_repo,
+        )
+
+        # reclaim_max is 2 in _tight_config: three growth cycles plus a
+        # flat one all stay under the breaker (0 or 1 <= 2).
+        for cycle in range(3):
+            job = _job_state(db, run.run_id)
+            if job["status"] == "PENDING":
+                victim = env.job_repo.claim_batch("victim", [TENANT], 1, 60)
+                assert victim
+                env.job_repo.renew_lease(
+                    run.run_id, TENANT, "victim", -1, victim[0]["claim_epoch"],
+                )
+            # Growth lands BETWEEN claim and reclaim (mid-flight crash
+            # after routing) — the reclaimer-visible window.
+            _routed_shard(env, run, cycle)
+            asyncio.run(worker.run_once())
+            assert env.run_repo.get(run.run_id, TENANT).status \
+                is dm.RunStatus.RUNNING
+        assert _job_state(db, run.run_id)["reclaims"] == 0
+
+        # One no-growth reclaims cycle does not trip it either.
+        job = _job_state(db, run.run_id)
+        if job["status"] == "PENDING":
+            victim = env.job_repo.claim_batch("victim", [TENANT], 1, 60)
+            assert victim
+            env.job_repo.renew_lease(
+                run.run_id, TENANT, "victim", -1, victim[0]["claim_epoch"],
+            )
+        asyncio.run(worker.run_once())
+        stored = env.run_repo.get(run.run_id, TENANT)
+        stored_job = _job_state(db, run.run_id)
+        assert stored.status is dm.RunStatus.RUNNING
+        assert stored_job["reclaims"] == 1
+        assert stored_job["progress_marker"] == 3
+
+
+class TestClaimPastDeadline:
+    """4.4/4.6 (vi): `deadline_at` never joins the claim predicate — a
+    past-deadline job still claims, and the rehydrated slice's
+    TerminationEvaluator fires the fenced TIMED_OUT through the normal
+    path."""
+
+    def test_past_deadline_job_claims_and_slice_fences_timed_out(self, db):
+        factory = FakeFactory()
+        env = _build_env(
+            db, [], factory, config=_tight_config(),
+            llm=RepeatingLLMProvider(_wait_decision("ghost")),
+            termination=TerminationEvaluator(
+                wall_clock_seconds=0.05, no_progress_threshold=999),
+        )
+        run = _mk_run()
+        run.started_at = dm.EpochMillis(int(time.time() * 1000) - 1_000)
+        env.run_repo.create(run)
+        env.job_repo.enqueue(run_id=run.run_id, tenant=TENANT,
+                             deadline_seconds=3600)
+        # Push the row's deadline_at into the past: a claim must ignore it.
+        with db.orm_session() as session:
+            session.execute(
+                om.AcAgentSwarmJobModel.__table__.update().where(
+                    om.AcAgentSwarmJobModel.run_id == run.run_id,
+                ).values(deadline_at=datetime(2020, 1, 1))
+            )
+
+        claimed = env.job_repo.claim_batch(WORKER, [TENANT], 1, 60)
+
+        # 4.4: past-deadline rows REMAIN claimable.
+        assert len(claimed) == 1
+        outcome = asyncio.run(env.handler.handle_slice(
+            run.run_id, TENANT, claimed[0]["claim_epoch"], worker_id=WORKER,
+        ))
+
+        assert outcome == "complete"
+        stored = env.run_repo.get(run.run_id, TENANT)
+        assert stored.status is dm.RunStatus.TIMED_OUT
+        assert stored.termination_reason is dm.TerminationReason.WALL_CLOCK
+        assert _job_state(db, run.run_id)["status"] == "SUCCEEDED"
 
 
 def _agent_with(env, run: dm.Run, name: str, objective: str, status: dm.AgentStatus,
