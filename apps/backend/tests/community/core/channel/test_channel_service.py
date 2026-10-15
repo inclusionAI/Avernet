@@ -1435,3 +1435,69 @@ class TestUpdateChannelPreservesBcnManagedKeys:
 
         saved = mock_repository.update_by_id.call_args.kwargs["config"]
         assert saved["group_chat_scope"] == "conversation_shared"
+
+
+class TestBcnBindingStageGate:
+    """verify/online 行是发布流输入，不同步 BCS（与 openclaw 路径 stage 跳过对齐）。"""
+
+    @staticmethod
+    def _bcn_record(stage: str) -> ChannelRecord:
+        return _make_channel_record(
+            channel_id=9,
+            stage=stage,
+            config={
+                "client_id": "client-1",
+                "binding_mode": "bcn_gateway",
+                "bcs_binding_id": "bcs-9",
+            },
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("stage", ["verify", "online"])
+    async def test_sync_bcn_binding_skips_publish_stages(
+        self, channel_service, mock_bcs_client, stage
+    ):
+        channel = self._bcn_record(stage)
+
+        await channel_service._sync_bcn_binding(channel, action="apply")
+
+        mock_bcs_client.ensure_active.assert_not_called()
+        mock_bcs_client.push_config.assert_not_called()
+        mock_bcs_client.set_active.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("stage", ["verify", "online"])
+    async def test_sync_bcn_binding_skips_remove_on_publish_stages(
+        self, channel_service, mock_bcs_client, stage
+    ):
+        channel = self._bcn_record(stage)
+
+        await channel_service._sync_bcn_binding(channel, action="remove")
+
+        mock_bcs_client.set_active.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_sync_bcn_binding_proceeds_for_draft(
+        self, channel_service, mock_bcs_client
+    ):
+        channel = self._bcn_record("draft")
+
+        await channel_service._sync_bcn_binding(channel, action="apply")
+
+        mock_bcs_client.ensure_active.assert_awaited_once_with(channel)
+        mock_bcs_client.push_config.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_set_channel_status_skips_bcs_for_verify_row(
+        self, channel_service, mock_repository, mock_bcs_client
+    ):
+        """经 set_channel_status 的完整路径：verify 的 bcn 行只落状态，不触 BCS。"""
+        mock_repository.get_by_id.return_value = self._bcn_record("verify")
+
+        await channel_service.set_channel_status(9, "1")
+
+        mock_bcs_client.ensure_active.assert_not_awaited()
+        mock_bcs_client.push_config.assert_not_awaited()
+        mock_repository.update_status_by_id.assert_called_once_with(
+            channel_id=9, status="1"
+        )
