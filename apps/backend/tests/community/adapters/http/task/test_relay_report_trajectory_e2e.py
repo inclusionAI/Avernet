@@ -19,6 +19,7 @@ step 字段映射(旧 ``{step,status,detail}`` → 新七字段,映射约定注�
 """
 from __future__ import annotations
 
+import json
 from dataclasses import replace as dataclasses_replace
 from types import SimpleNamespace
 
@@ -57,6 +58,7 @@ from agentclaw.community.core.task.domain.models import (
     Status,
     TaskExecutionGraph,
     TaskNode,
+    TaskNodePatch,
     TaskSpec,
     Context as SpecContext,
     Goal,
@@ -446,3 +448,215 @@ async def test_two_relay_reports_project_step_timeline(monkeypatch) -> None:
         assert payload["_raw_callback_body"]["relay_token"] == "***"
     audit_ids = [ing.data["loop_task_id"].split("::")[0] for ing in service.callback.ingested]
     assert set(audit_ids) == {EXECUTION_EVENT_ID, PLAN_EVENT_ID}
+
+
+# ---------------------------------------------------------------------------
+# 多子任务接力链:每棒一对上报(EXECUTION→PLAN),PLAN 分「带下一棒」与「收敛」两种
+# ---------------------------------------------------------------------------
+
+
+def _execution_body(node_id: str, event_id: str, token: str) -> dict:
+    body = json.loads(json.dumps(EXECUTION_BODY, ensure_ascii=False))
+    body.update(node_id=node_id, event_id=event_id, relay_token=token)
+    return body
+
+
+def _plan_next_body(node_id: str, event_id: str, token: str, assignee: str) -> dict:
+    """PLAN_RESULT 的「规划下一棒」分支:event 带未落图节点规格,无 task_acceptance。"""
+    return {
+        "task_id": TASK_ID,
+        "node_id": node_id,
+        "event_id": event_id,
+        "relay_token": token,
+        "event_type": "PLAN_RESULT",
+        "trace": {"steps": PLAN_STEPS},
+        "event": {
+            "task_spec": {
+                "context": {"title": "下一棒", "background": "承接上一棒继续推进"},
+                "goal": {
+                    "objective": "承接上一棒剩余缺口并完成收尾",
+                    "acceptances": [{"id": "ac1", "description": "补齐剩余缺口"}],
+                },
+            },
+            "run_info": {"run_mode": "single_bot", "assignee": assignee},
+        },
+    }
+
+
+def _closure_body(node_id: str, event_id: str, token: str) -> dict:
+    """PLAN_RESULT 的「任务收敛」分支:event=None + task_acceptance_result(DONE)。"""
+    body = json.loads(json.dumps(PLAN_BODY, ensure_ascii=False))
+    body.update(node_id=node_id, event_id=event_id, relay_token=token)
+    return body
+
+
+def _chain_expected(node_ids: list[str]) -> list[tuple[str, dict]]:
+    """期望 timeline:每棒按上报顺序贡献 EXECUTION_STEPS(5) + PLAN_STEPS(5)。"""
+    expected: list[tuple[str, dict]] = []
+    for node_id in node_ids:
+        expected.extend((node_id, step) for step in EXECUTION_STEPS)
+        expected.extend((node_id, step) for step in PLAN_STEPS)
+    return expected
+
+
+def _assert_step_timeline(timeline: list[dict], expected: list[tuple[str, dict]]) -> None:
+    """timeline 与期望逐条对齐:数量、(node_id, step) 顺序、七字段一致性、时间单调。"""
+    assert len(timeline) == len(expected), (
+        f"timeline 数量应为 {len(expected)}(各棒 step 之和),"
+        f"实际 {len(timeline)}"
+    )
+    for i, (ev, (node_id, step)) in enumerate(zip(timeline, expected)):
+        assert ev["node_id"] == node_id, f"第 {i} 条 node_id 错误"
+        assert ev["action_type"] == step["action_type"], f"第 {i} 条 action_type 不符"
+        assert ev["action_result"] == step["action_result"], f"第 {i} 条 action_result 不符"
+        assert ev["action_input"] == step["action_input"], f"第 {i} 条 action_input 不符"
+        assert ev["status_from"] == step["status_from"], f"第 {i} 条 status_from 不符"
+        assert ev["status_to"] == step["status_to"], f"第 {i} 条 status_to 不符"
+        assert ev["boost_reason"] == step["boost_reason"], f"第 {i} 条 boost_reason 不符"
+        assert ev["error_msg"] is None, f"第 {i} 条 error_msg 应为 null"
+    stamps = [ev["gmt_create"] for ev in timeline]
+    assert stamps == sorted(stamps), "timeline 必须按 gmt_create 升序"
+
+
+def _report_cycle(
+    client: TestClient,
+    clock: _Clock,
+    graph: TaskGraphService,
+    node_id: str,
+    token: str,
+    *,
+    event_prefix: str,
+    next_assignee: str | None,
+) -> tuple[str, str] | None:
+    """一棒的完整上报闭环:EXECUTION → PLAN(带下一棒或收敛)。
+
+    ``next_assignee=None`` 走收敛分支(任务完成);否则规划下一棒并交付接管
+    (直接图翻 RUNNING 模拟 dispatch 投递,免去 delivery intent 基建),返回
+    新棒 node_id。每次上报间推进假时钟,保证时间线顺序确定。"""
+    clock.advance_ms(10)
+    resp = client.post(
+        "/api/v1/collaboration/tasks/callback/report",
+        json=_execution_body(node_id, f"{event_prefix}-exec", token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["status"] == "APPLIED"
+
+    clock.advance_ms(10)
+    if next_assignee is None:
+        resp = client.post(
+            "/api/v1/collaboration/tasks/callback/report",
+            json=_closure_body(node_id, f"{event_prefix}-plan", token),
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"]["task_completed"] is True
+        return None
+
+    resp = client.post(
+        "/api/v1/collaboration/tasks/callback/report",
+        json=_plan_next_body(
+            node_id, f"{event_prefix}-plan", token, next_assignee,
+        ),
+    )
+    assert resp.status_code == 200, resp.text
+    child_id = resp.json()["data"]["target_node_id"]
+    assert child_id
+    # 交付接管(模拟 dispatch_node 的 PENDING→RUNNING 翻转 + 取新棒 token)
+    graph.update_task_node_info(TaskNodePatch(
+        task_id=TASK_ID, node_id=child_id, status=Status.RUNNING,
+    ))
+    child = next(
+        n for n in graph.query_task_dashboard(TASK_ID).tasks
+        if n.node_id == child_id
+    )
+    return child_id, child.run_info.extend_props["relay_token"]
+
+
+def _wire_chain(graph: TaskGraphService, clock: _Clock, monkeypatch):
+    """装配链路测试的整套 DI(内存轨迹表 + 真实 service/门面 + 假时钟)。"""
+    from agentclaw.community.core.task.task_center import task_service_relay as tsr_mod
+    repo = _InMemoryTrajectoryRepo()
+    trajectory = TaskTrajectoryService(
+        TaskTrajectoryAssembler(repo), repo, _Analyzer(), None, graph=graph,
+    )
+    tcs = TaskContextService(trajectory)
+    service = _RelayService(graph, tcs, _CallbackStub())
+    monkeypatch.setattr(relay_report_mod, "time", SimpleNamespace(time=clock.time))
+    monkeypatch.setattr(tsr_mod, "time", SimpleNamespace(time=clock.time))
+    client = _build_client(service, tcs)
+    return repo, tcs, service, client
+
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+async def test_two_subtask_relay_chain_projects_step_timeline(monkeypatch) -> None:
+    """两个子任务(两棒接力):棒1 执行+规划下一棒 → 棒2 执行+收敛。
+    timeline 应恰为 2×10 条,棒序内 EXECUTION 5 步 + PLAN 5 步,棒间按上报先后。"""
+    graph = _relay_graph()
+    clock = _Clock()
+    _, _, service, client = _wire_chain(graph, clock, monkeypatch)
+
+    # ── 棒1(relay-ee785eb1):执行 → 规划下一棒 ──
+    dispatched = _report_cycle(
+        client, clock, graph, NODE_ID, GENERATION,
+        event_prefix="r1", next_assignee="bot-second",
+    )
+    child_id, child_token = dispatched
+
+    # ── 棒2:执行 → 收敛(任务完成)──
+    _report_cycle(
+        client, clock, graph, child_id, child_token,
+        event_prefix="r2", next_assignee=None,
+    )
+
+    resp = client.get(
+        "/api/v1/collaboration/tasks/trajectory", params={"task_id": TASK_ID},
+    )
+    assert resp.status_code == 200, resp.text
+    timeline = resp.json()["data"]["timeline"]
+    _assert_step_timeline(timeline, _chain_expected([NODE_ID, child_id]))
+
+    # 棒间归属核验:1 号棒 10 条、2 号棒 10 条
+    per_node = {}
+    for ev in timeline:
+        per_node[ev["node_id"]] = per_node.get(ev["node_id"], 0) + 1
+    assert per_node == {NODE_ID: 10, child_id: 10}
+
+    # W1:4 次上报各一条审计行
+    assert len(service.callback.ingested) == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+async def test_three_subtask_relay_chain_projects_step_timeline(monkeypatch) -> None:
+    """三个子任务(三棒接力):棒1→棒2 均规划下一棒,棒3 执行+收敛。timeline=3×10。"""
+    graph = _relay_graph()
+    clock = _Clock()
+    _, _, service, client = _wire_chain(graph, clock, monkeypatch)
+
+    chain_nodes: list[str] = []
+    node_id, token, seq = NODE_ID, GENERATION, 1
+    while True:
+        is_last = len(chain_nodes) == 2  # 棒1、棒2 之后,棒3 走收敛
+        result = _report_cycle(
+            client, clock, graph, node_id, token,
+            event_prefix=f"n{seq}", next_assignee=None if is_last else f"bot-{seq + 1}",
+        )
+        chain_nodes.append(node_id)
+        if is_last:
+            break
+        node_id, token = result
+        seq += 1
+
+    assert len(chain_nodes) == 3
+    resp = client.get(
+        "/api/v1/collaboration/tasks/trajectory", params={"task_id": TASK_ID},
+    )
+    assert resp.status_code == 200, resp.text
+    timeline = resp.json()["data"]["timeline"]
+    assert len(timeline) == 30, f"三棒 30 条 step,实际 {len(timeline)}"
+    _assert_step_timeline(timeline, _chain_expected(chain_nodes))
+
+    # 最后一棒收敛:图终态 DONE、根任务完成
+    topology = graph.query_task_dashboard(TASK_ID)
+    assert topology.status == Status.DONE
+    assert len(service.callback.ingested) == 6
