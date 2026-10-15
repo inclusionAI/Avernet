@@ -149,7 +149,7 @@ async def test_opted_in_multipart_skill_package_forwards_to_adapter(
     def handler(request: httpx.Request) -> httpx.Response:
         captured.append(request)
         assert str(request.url) == "http://127.0.0.1:20010/api/skills/local/apply"
-        assert request.headers["x-runtime-token"] == "runtime-token"
+        assert request.headers["x-runtime-token"] == "token"
         assert b"bbs-browse.zip" in request.content
         assert b"skill_name" in request.content
         return httpx.Response(

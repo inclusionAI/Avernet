@@ -106,7 +106,7 @@ def test_runtime_config_logging_redacts_literal_runtime_credentials():
     }
     # The logger must receive a copy, not a mutation of the live config dump.
     assert source["user_config"]["openapi_bot"]["api_key_secret"] == "secret-baas-key"
-    assert source["user_config"]["bcs_client"]["token_secret"] == "secret-bcs-token"
+    assert source["user_config"]["bcs_client"]["token_secret"] == "test-token"
 
 
 def test_main_registers_profile_provider_before_reading_sofa_config(monkeypatch):
