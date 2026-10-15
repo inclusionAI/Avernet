@@ -6,6 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { request } from "node:http";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
+import { runMigrations } from "@avernet/clawweb-shared/server/db";
+import { AppConfigRepository } from "@avernet/clawevolve/server/repositories/app-config-repository";
+import { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
+import { SessionRecoveryTaskRepository } from "../../repositories/repair/session-recovery-task-repository.js";
+import { SessionRecoveryTaskService } from "../../services/repair/session-recovery/task-service.js";
+import { createMonitoringRecoveryTrigger, SESSION_RECOVERY_ALLOWLIST_KEY } from "../../services/monitoring/session-recovery-trigger.js";
+import type { MonitoringRecoveryTrigger } from "../../services/monitoring/contracts.js";
 import { database } from "../../services/monitoring/__tests__/test-database.js";
 import { fixtureIntegration } from "../../services/monitoring/__tests__/identity-fixtures.js";
 import { createMonitoringRuntime } from "../../services/monitoring/monitoring-runtime.js";
@@ -28,12 +35,14 @@ let clock: number;
 let principal = { staffId: '001234', isAuthenticated: true, isClawInsightAdmin: true, tenant: 'test', allowedTargetEnvs: ['test'] };
 let env: Record<string, string | undefined>;
 let clawInsightAdmin: boolean | undefined = true;
+let recovery: MonitoringRecoveryTrigger | undefined;
 async function start(parent = true, defaultFactory = false, getDb = () => db, unassembled = false) {
   const app = express();
   app.use((req, _res, next) => { req.isClawInsightAdmin = clawInsightAdmin; next(); });
   if (parent) app.use(express.json({ limit: "10mb" }));
   for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
-  const runtime = unassembled ? { service: null } : createMonitoringRuntime(getDb, () => clock, { ...fixtureIntegration, principal: async () => principal });
+  const runtime = unassembled ? { service: null } : createMonitoringRuntime(getDb, () => clock, { ...fixtureIntegration,
+    ...(recovery ? { recovery, scope: { ...fixtureIntegration.scope, allowedTargetEnvs: ["test", "prod"] } } : {}), principal: async () => principal });
   app.use("/api/insight/v1", defaultFactory ? createInsightRouter(null) : createInsightRouter(null, { monitoring: runtime }));
   server = await new Promise<ReturnType<express.Application["listen"]>>((resolve, reject) => {
     const s = app.listen(0, "127.0.0.1", (error?: Error) => error ? reject(error) : resolve(s));
@@ -59,6 +68,7 @@ beforeEach(async () => {
   clock = now;
   principal = { staffId: '001234', isAuthenticated: true, isClawInsightAdmin: true, tenant: 'test', allowedTargetEnvs: ['test'] };
   clawInsightAdmin = true;
+  recovery = undefined;
   env = {};
   dir = mkdtempSync(join(tmpdir(), "monitoring-contract-"));
   db = database(join(dir, "runtime.sqlite3"));
@@ -360,5 +370,71 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
     principal.staffId = 'other';
     for (const suffix of ['/status', '/diagnoses']) expect((await call(path + suffix)).status).toBe(404);
     expect((await enroll()).status).toBe(404);
+  });
+});
+
+describe("diagnosis report -> allowlist -> durable recovery task", () => {
+  async function automaticRecovery() {
+    await stop();
+    await runMigrations(db, "sqlite");
+    const config = new AppConfigRepository(db);
+    await config.create({ config_key: SESSION_RECOVERY_ALLOWLIST_KEY, config_json: JSON.stringify({
+      allowed_bots: [{ bot_id: "mock-bot-te", entity_id: "001234", env: "prod" }],
+    }) });
+    const objects = new Map<string, Buffer>();
+    const artifacts = {
+      putObject: async (key: string, content: Buffer) => { objects.set(key, Buffer.from(content)); return { etag: null }; },
+      getObject: async (key: string) => ({ content: objects.get(key)!, etag: null, contentType: "application/json" }),
+    };
+    const tasks = new SessionRecoveryTaskRepository(db, new EvolveRepository(db), artifacts);
+    const agent = { start: vi.fn().mockResolvedValue(undefined), release: vi.fn().mockResolvedValue(undefined) };
+    const service = new SessionRecoveryTaskService({ tasks, agent,
+      notifier: { notify: vi.fn() }, reporter: { report: vi.fn() }, observationMs: 3600000, ownerWaitMs: 3600000 });
+    recovery = createMonitoringRecoveryTrigger({ config, service });
+    await start();
+    return { config, tasks, service, agent, artifacts,
+      input: { ...alert, env: "prod", handlerName: "NOT_COMPLETED", sessionKey: "agent:main:session:original:user:001234" } };
+  }
+
+  it("keeps the diagnosis on task storage failure, then creates exactly one task on duplicate retry", async () => {
+    const { input, artifacts, tasks, agent } = await automaticRecovery();
+    const upload = vi.spyOn(artifacts, "putObject").mockRejectedValueOnce(new Error("object store unavailable"));
+    expect(await post(input)).toMatchObject({ status: 503, body: { error: { code: "MONITORING_NOT_READY" } } });
+    expect(await db.query("SELECT event_id FROM insight_monitoring_diagnose")).toHaveLength(1);
+    expect(await db.query("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'")).toHaveLength(0);
+    expect(await post(input)).toMatchObject({ status: 200, body: { stored: true, duplicate: true } });
+    expect(await post(input)).toMatchObject({ status: 200, body: { duplicate: true } });
+    const rows = await db.query<{ task_id: string }>("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'");
+    expect(rows).toHaveLength(1);
+    expect(await tasks.find(rows[0].task_id)).toMatchObject({ level: "approval", phase: "assess",
+      request: { event_id: input.eventId, target: { bot_id: input.botId, entity_id: input.entityId, env: "prod", engine: "TE" } } });
+    await vi.waitFor(() => expect(agent.start).toHaveBeenCalledTimes(1));
+    expect(upload).toHaveBeenCalled();
+    expect((await post({ ...input, businessDiagnosis: "changed" })).status).toBe(409);
+    expect(await db.query("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'")).toHaveLength(1);
+  });
+
+  it("deduplicates concurrent reports and retries after an acknowledgment is lost", async () => {
+    const { input, agent } = await automaticRecovery();
+    const responses = await Promise.all(Array.from({ length: 10 }, () => post(input)));
+    expect(responses.every(response => response.status === 200 || response.status === 201)).toBe(true);
+    expect(responses.filter(response => response.status === 201)).toHaveLength(1);
+    expect((await post(input)).body.duplicate).toBe(true);
+    expect(await db.query("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'")).toHaveLength(1);
+    await vi.waitFor(() => expect(agent.start).toHaveBeenCalledTimes(1));
+  });
+
+  it("acknowledges nonmembers normally and retries enabled configuration failures without losing diagnostics", async () => {
+    const { input, config, agent } = await automaticRecovery();
+    expect((await post({ ...input, entityId: "another-owner" })).status).toBe(201);
+    expect(agent.start).not.toHaveBeenCalled();
+    await config.update(SESSION_RECOVERY_ALLOWLIST_KEY, { config_json: "null" });
+    expect((await post(input)).status).toBe(409);
+    const next = { ...input, eventId: "another-event", diagnosisId: "another-event" };
+    expect((await post(next)).status).toBe(503);
+    await config.update(SESSION_RECOVERY_ALLOWLIST_KEY, { enabled: 0 });
+    expect(await post(next)).toMatchObject({ status: 200, body: { duplicate: true } });
+    expect(await db.query("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'")).toHaveLength(0);
+    expect(agent.start).not.toHaveBeenCalled();
   });
 });

@@ -60,6 +60,12 @@ export type BotStatus = {
 export type DiagnosisAck = MonitoringTarget & { accepted: true; stored: true; eventId: string; duplicate: boolean };
 export type CheckAck = MonitoringTarget & { accepted: true; applied: boolean };
 export type MonitoringTarget = { botId: string; entityId: string; env: string };
+export interface MonitoringRecoveryTrigger {
+  trigger(event: DiagnosisEvent): Promise<void>;
+}
+export interface MonitoringRecoveryConfigStore {
+  findByKey(key: string): Promise<{ enabled: number; config_json: string } | null>;
+}
 export type ResolvedReport<T> = { wire: T; target: MonitoringTarget };
 export type MonitoringWindow = { startMs: number | null; endMs: number | null };
 export type MonitoringSummary = {
