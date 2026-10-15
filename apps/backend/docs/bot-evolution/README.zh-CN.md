@@ -56,6 +56,7 @@ API，以及代码示例。
 | [10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md) | 服务（之后） | 第 3 层：改进改进机制、机制验证、边界 |
 | [research.zh-CN.md](research.zh-CN.md) | 附录 | 业界调研与代码库证据 |
 | [work-items.zh-CN.md](work-items.zh-CN.md) | 附录 | 供后续会话使用的工作项及其依赖关系 |
+| [integration-guide.zh-CN.md](integration-guide.zh-CN.md) | 指南 | 调用方和进化策略如何使用平台：两层 API、编排归属于哪里、一套 API 而不是两套、完整示例、谁负责什么 |
 
 决策记录草案（状态为 `proposed`）。讨论期间它们存放在这里；一旦被接受，每一份
 都会以下一个可用的 ADR 编号晋升到 `docs/adr/`：

@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="600" viewBox="0 0 1120 600" font-family="system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" role="img" aria-label="编排在进化策略内部；平台只拥有一条固定的流水线">
+<title>编排在进化策略内部；平台只拥有一条固定的流水线</title>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#475569"/></marker><marker id="ahl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/></marker><marker id="ahp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#7c3aed"/></marker></defs>
+<rect width="1120" height="600" fill="#ffffff"/>
+<rect x="20" y="16" width="1080" height="340" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="36" y="36" font-size="13" font-weight="600" fill="#334155" text-anchor="start" dominant-baseline="middle">策略侧 —— ClawEvolve 在 run(ctx) 内部编写自己的编排。平台不知道这些 stage 的存在。</text>
+<text x="1084" y="36" font-size="11" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle" font-style="italic">每一行：run(ctx) 的一种写法</text>
+<text x="30" y="77.5" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start" dominant-baseline="middle">bot_evolution</text>
+<text x="30" y="90.5" font-size="11" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">先诊断（有会话）</text>
+<rect x="215" y="66" width="140" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="285.0" y="84.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">experience.sessions()</text>
+<path d="M 355 84 L 369 84" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="369" y="66" width="160" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="449.0" y="84.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">models.complete() · 诊断</text>
+<path d="M 529 84 L 543 84" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="543" y="66" width="150" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="618.0" y="84.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">add_train_cases() · 规划</text>
+<path d="M 693 84 L 700 84" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<text x="30" y="137.5" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start" dominant-baseline="middle">bot_evolution</text>
+<text x="30" y="150.5" font-size="11" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">直接目标（无会话）</text>
+<rect x="215" y="126" width="100" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="265.0" y="144.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">params.goal</text>
+<path d="M 315 144 L 329 144" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="329" y="126" width="150" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="404.0" y="144.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">add_train_cases() · 规划</text>
+<path d="M 479 144 L 700 144" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<text x="30" y="197.5" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start" dominant-baseline="middle">skill_evolution</text>
+<text x="30" y="210.5" font-size="11" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">allowed_genes: [skills]</text>
+<rect x="215" y="186" width="470" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="450.0" y="204.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">同先诊断流程，但限定在 params 指定的 skill；补丁只触及 skills/&lt;name&gt;</text>
+<path d="M 685 204 L 700 204" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<text x="30" y="257.5" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start" dominant-baseline="middle">skill_hardening</text>
+<text x="30" y="270.5" font-size="11" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">一轮，不做训练集评估</text>
+<rect x="215" y="246" width="150" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="290.0" y="264.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">workspace.materialise()</text>
+<path d="M 365 264 L 379 264" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="379" y="246" width="150" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="454.0" y="264.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">agents.start(hardening)</text>
+<path d="M 529 264 L 543 264" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="543" y="246" width="100" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="593.0" y="264.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">ws.to_patch()</text>
+<path d="M 643 264 L 657 264" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="657" y="246" width="130" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="722.0" y="264.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">candidates.submit()</text>
+<path d="M 787 264 L 801 264" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="801" y="246" width="140" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="871.0" y="264.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">candidates.verdict(id)</text>
+<rect x="700" y="56" width="392" height="176" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="896" y="74" font-size="12" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">第 n 轮（n ≤ max_rounds）· 键 &lt;run_id&gt;/round-n/…</text>
+<text x="712" y="96" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">workspace.materialise(base, key)  → 沙箱副本</text>
+<text x="712" y="117" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">agents.start(&quot;clawevolve-tune&quot;)  → 操作 id · 等待</text>
+<text x="712" y="138" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">agents.start(&quot;clawevolve-review&quot;)  → 操作 id · 等待</text>
+<text x="712" y="159" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">evaluation.start_train(ws)  → 分数 + 点评（仅训练集）</text>
+<text x="712" y="180" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">自己的过滤器（action_accept 的后继）→ candidates.submit(ws.to_patch())</text>
+<text x="712" y="201" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">每 poll_s 查一次 candidates.verdict(id) → accept 则下一轮基于它</text>
+<rect x="215" y="296" width="877" height="44" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="30" y="318" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start" dominant-baseline="middle">未来的流程</text>
+<text x="30" y="331" font-size="11" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">BCN、模型……</text>
+<text x="653" y="311" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">新流程 = 新的进化策略版本：不需要改平台。只有当目录里缺少某种资源时才需要改平台，</text>
+<text x="653" y="327" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">而且改的是目录条目（B 层），在第二个策略也需要它时提出（03 §4，R19）。</text>
+<path d="M 520 356 L 520 384" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="508" y="370" font-size="11.5" font-weight="400" fill="#475569" text-anchor="end" dominant-baseline="middle">candidates.submit(补丁、理由、证据)</text>
+<path d="M 600 384 L 600 356" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="612" y="370" font-size="11.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">candidates.verdict(id)：只有状态 + 验证集的汇总</text>
+<rect x="20" y="386" width="1080" height="198" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="36" y="406" font-size="13" font-weight="600" fill="#334155" text-anchor="start" dominant-baseline="middle">平台侧 —— 一条固定的流水线，对所有进化策略都相同。进化策略不能更改、跳过或执行它。</text>
+<rect x="36" y="426" width="122" height="74" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="97.0" y="448.82" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">记录</text>
+<text x="97.0" y="464.04" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">候选修订版</text>
+<text x="97.0" y="478.21" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">candidate/&lt;run&gt;/&lt;n&gt;</text>
+<path d="M 158 463 L 170 463" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="170" y="426" width="122" height="74" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="231.0" y="448.82" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">底线</text>
+<text x="231.0" y="464.04" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">schema · 锁定基因</text>
+<text x="231.0" y="478.21" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">密钥 / 个人数据扫描</text>
+<path d="M 292 463 L 304 463" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="304" y="426" width="122" height="74" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="365.0" y="448.82" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">验证</text>
+<text x="365.0" y="464.04" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">隐藏划分 · 配对</text>
+<text x="365.0" y="478.21" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">绑定的验证配置</text>
+<path d="M 426 463 L 438 463" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="438" y="426" width="122" height="74" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="499.0" y="448.82" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">门禁</text>
+<text x="499.0" y="464.04" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">判定 + 底线</text>
+<text x="499.0" y="478.21" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">风险等级 T0–T3</text>
+<path d="M 560 463 L 572 463" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="572" y="426" width="122" height="74" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="633.0" y="448.82" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">评审</text>
+<text x="633.0" y="464.04" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">≤ 上限则自动，否则</text>
+<text x="633.0" y="478.21" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">评审队列 · 审批</text>
+<path d="M 694 463 L 706 463" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="706" y="426" width="122" height="74" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="767.0" y="448.82" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">晋升</text>
+<text x="767.0" y="464.04" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">active → r42</text>
+<text x="767.0" y="478.21" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">previous → r41（CAS）</text>
+<path d="M 828 463 L 840 463" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="840" y="426" width="122" height="74" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+<text x="901.0" y="448.82" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">应用</text>
+<text x="901.0" y="464.04" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">Manifest apply</text>
+<text x="901.0" y="478.21" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">→ 引擎 · 运行中的 bot</text>
+<path d="M 962 463 L 974 463" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="974" y="426" width="122" height="74" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="1035.0" y="448.82" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">记录 H</text>
+<text x="1035.0" y="464.04" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">每一步，接受或</text>
+<text x="1035.0" y="478.21" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">拒绝都被保留</text>
+<text x="560" y="528" font-size="11" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle">类比：平台是 CI 执行器、制品库和发布门禁；进化策略是团队放在自己仓库里的流水线脚本。</text>
+<text x="560" y="548" font-size="11" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle">平台自带的默认流水线：platform/manual-patch（参考）和 clawevolve/bot-evolution（主默认），都是普通的进化策略（04）。</text>
+<text x="560" y="568" font-size="11" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle">所有者在绑定里按 bot 选择：用哪个策略、触发条件、允许的基因、验证配置、预算、参数（06 §3）。</text>
+</svg>

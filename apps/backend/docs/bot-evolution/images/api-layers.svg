@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="770" viewBox="0 0 1120 770" font-family="system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" role="img" aria-label="Two API layers: the public Evolution API for callers and the strategy port for strategies">
+<title>Two API layers: the public Evolution API for callers and the strategy port for strategies</title>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#475569"/></marker><marker id="ahl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/></marker><marker id="ahp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#7c3aed"/></marker></defs>
+<rect width="1120" height="770" fill="#ffffff"/>
+<rect x="140" y="16" width="840" height="46" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+<text x="560.0" y="39.0" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Callers: business-line pipelines and CI · product backends · the UI backend · humans through the UI</text>
+<path d="M 560 62 L 560 90" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="574" y="76" font-size="11.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">HTTPS · JSON · published OpenAPI documents · prefix /openapi/v1</text>
+<rect x="40" y="92" width="1040" height="150" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="56" y="112" font-size="13" font-weight="600" fill="#334155" text-anchor="start" dominant-baseline="middle">Layer A — Evolution API (public). What a caller does: configure, start, watch, review, promote.</text>
+<text x="1064" y="112" font-size="11" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle" font-style="italic">knows nothing about stages, rounds, or flows</text>
+<rect x="50" y="134" width="196" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="148.0" y="147.7" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">/bots/{id}/evolution/bindings</text>
+<text x="148.0" y="160.3" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">bindings</text>
+<rect x="256" y="134" width="196" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="354.0" y="147.7" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">…/evolution/runs</text>
+<text x="354.0" y="160.3" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">runs: start, status, cancel</text>
+<rect x="462" y="134" width="196" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="560.0" y="147.7" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">…/evolution/candidates</text>
+<text x="560.0" y="160.3" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">report · review-queue · approve</text>
+<rect x="668" y="134" width="196" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="766.0" y="147.7" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">…/genome/revisions · refs</text>
+<text x="766.0" y="160.3" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">revisions · diff · promotions</text>
+<rect x="874" y="134" width="196" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="972.0" y="147.7" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">…/experience/episodes</text>
+<text x="972.0" y="160.3" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">episodes · feedback</text>
+<rect x="51" y="184" width="247" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="174.5" y="197.7" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">/evolution/suites · …/evaluations</text>
+<text x="174.5" y="210.3" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">suites · ad-hoc evaluation</text>
+<rect x="308" y="184" width="247" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="431.5" y="197.7" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">…/evolution/ledger</text>
+<text x="431.5" y="210.3" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">every run, verdict, promotion</text>
+<rect x="565" y="184" width="247" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="688.5" y="197.7" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">/evolution/strategies · capabilities</text>
+<text x="688.5" y="210.3" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">register a version · the catalog</text>
+<rect x="822" y="184" width="247" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="945.5" y="197.7" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">…/evolution/operations/{id}</text>
+<text x="945.5" y="210.3" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">long-running work by id</text>
+<text x="560" y="236" font-size="10.5" font-weight="400" fill="#64748b" text-anchor="middle" dominant-baseline="middle">conventions: envelope · Idempotency-Key · ETag / If-Match · pagination · 202 + operation id (09)</text>
+<path d="M 560 242 L 560 270" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="40" y="272" width="1040" height="176" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="56" y="292" font-size="13" font-weight="600" fill="#334155" text-anchor="start" dominant-baseline="middle">Platform — the services behind both layers</text>
+<text x="1064" y="292" font-size="11" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle" font-style="italic">Backend serves Genome and Promotion; apps/evolution serves the rest</text>
+<rect x="46" y="308" width="140" height="72" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="116.0" y="329.82" font-size="12.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Evolution Run</text>
+<text x="116.0" y="344.72" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">bindings · triggers</text>
+<text x="116.0" y="358.9" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">runs · leases · budgets</text>
+<rect x="194" y="308" width="140" height="72" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="264.0" y="329.82" font-size="12.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Verification</text>
+<text x="264.0" y="344.72" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">suites · graders</text>
+<text x="264.0" y="358.9" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">paired runs · verdicts</text>
+<rect x="342" y="308" width="140" height="72" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="412.0" y="329.82" font-size="12.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Promotion</text>
+<text x="412.0" y="344.72" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">floor · gate · review</text>
+<text x="412.0" y="358.9" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">moves active</text>
+<rect x="490" y="308" width="140" height="72" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="560.0" y="329.82" font-size="12.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Genome Registry</text>
+<text x="560.0" y="344.72" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">revisions · refs</text>
+<text x="560.0" y="358.9" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">patches · content</text>
+<rect x="638" y="308" width="140" height="72" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="708.0" y="329.82" font-size="12.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Experience Store</text>
+<text x="708.0" y="344.72" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">episodes · feedback</text>
+<text x="708.0" y="358.9" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">redacted, tagged</text>
+<rect x="786" y="308" width="140" height="72" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="856.0" y="329.82" font-size="12.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Experiment Ledger</text>
+<text x="856.0" y="344.72" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">append-only record</text>
+<text x="856.0" y="358.9" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">lineage · audit</text>
+<rect x="934" y="308" width="140" height="72" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="1004.0" y="329.82" font-size="12.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Strategy Registry</text>
+<text x="1004.0" y="344.72" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">registrations</text>
+<text x="1004.0" y="358.9" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">catalog · conformance</text>
+<text x="560" y="400" font-size="10.5" font-weight="400" fill="#64748b" text-anchor="middle" dominant-baseline="middle">One public prefix, two OpenAPI documents (bots.openapi.json, evolution.openapi.json), routed by the gateway (09 §11).</text>
+<text x="560" y="418" font-size="10.5" font-weight="400" fill="#64748b" text-anchor="middle" dominant-baseline="middle">Strategies never call Layer A, and callers never call Layer B.</text>
+<path d="M 560 448 L 560 476" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="574" y="462" font-size="11.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">builds ctx per run with exactly the granted capabilities</text>
+<rect x="40" y="478" width="1040" height="176" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="56" y="498" font-size="13" font-weight="600" fill="#334155" text-anchor="start" dominant-baseline="middle">Layer B — Strategy port (plugin). What a strategy may use: run(ctx) in process, or the Job Protocol over HTTP (/evolution/v1, internal).</text>
+<text x="1064" y="516" font-size="11" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle" font-style="italic">cannot promote, touch the live bot, or see hidden splits</text>
+<text x="56" y="538" font-size="11" font-weight="700" fill="#64748b" text-anchor="start" dominant-baseline="middle">Always granted</text>
+<rect x="56" y="548" width="72" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="92.0" y="563.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">parent</text>
+<rect x="136" y="548" width="86" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="179.0" y="563.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">workspace</text>
+<rect x="230" y="548" width="88" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="274.0" y="563.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">operations</text>
+<rect x="326" y="548" width="66" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="359.0" y="563.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">budget</text>
+<rect x="400" y="548" width="160" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="480.0" y="563.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">log · artifacts · cancelled</text>
+<rect x="568" y="548" width="100" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="618.0" y="563.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">candidates@1</text>
+<rect x="676" y="548" width="82" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="717.0" y="563.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">models@1</text>
+<text x="56" y="596" font-size="11" font-weight="700" fill="#64748b" text-anchor="start" dominant-baseline="middle">Granted only if declared in needs</text>
+<rect x="56" y="606" width="150" height="30" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="131.0" y="621.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">experience.sessions@1</text>
+<rect x="214" y="606" width="150" height="30" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="289.0" y="621.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">experience.feedback@1</text>
+<rect x="372" y="606" width="150" height="30" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="447.0" y="621.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">agents@1  {definitions}</text>
+<rect x="530" y="606" width="130" height="30" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="595.0" y="621.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">evaluation.train@1</text>
+<text x="690" y="621" font-size="10.5" font-weight="400" fill="#64748b" text-anchor="start" dominant-baseline="middle">new need → new catalog entry, a reviewed platform change (03 §4)</text>
+<path d="M 560 654 L 560 682" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="574" y="668" font-size="11.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">run(ctx) in process · or claim a leased job over HTTP, any language</text>
+<rect x="40" y="684" width="330" height="66" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="205.0" y="709.91" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">clawevolve/bot-evolution</text>
+<text x="205.0" y="725.12" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">job_worker container (TS + Python) · owns its own flows</text>
+<rect x="395" y="684" width="330" height="66" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="560.0" y="709.91" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">platform/consolidate-memory</text>
+<text x="560.0" y="725.12" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">in_process · memory gene only · one patch per run</text>
+<rect x="750" y="684" width="330" height="66" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="915.0" y="709.91" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">team-x/… (any team)</text>
+<text x="915.0" y="725.12" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">any language over HTTP · same port, same rules</text>
+</svg>
