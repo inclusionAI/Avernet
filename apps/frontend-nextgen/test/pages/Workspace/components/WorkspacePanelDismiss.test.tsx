@@ -62,6 +62,7 @@ describe('聊天右侧面板的外部点击', () => {
           : kind === '群历史'
           ? screen.getByRole('textbox')
           : screen.getByLabelText('面板输入');
+      expect(inside.closest('aside')).toHaveStyle({ width: '380px' });
       fireEvent.pointerDown(inside);
       expect(close).not.toHaveBeenCalled();
       fireEvent.pointerDown(screen.getByText('消息区'));

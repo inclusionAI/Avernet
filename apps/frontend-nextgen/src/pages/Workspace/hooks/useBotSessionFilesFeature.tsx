@@ -1,6 +1,7 @@
 /** useBotSessionFilesFeature — 装配单聊会话文件的上传/管理/引用 + /clear /skill 命令,
  *  返回 ChatPanel 所需的 fileChip / command / fileToolbar / senderRef / 副屏面板节点。 */
 import type { ComposerCapabilitySetsState } from '@/components/Workspace/CapabilitySetViewer/types';
+import { WORKSPACE_RIGHT_PANEL_LAYOUT } from '@/components/Workspace/workspacePanelLayout';
 import { BotSessionFilesPanel } from '@/pages/Workspace/components/BotSessionFiles/BotSessionFilesPanel';
 import { BotUploadFilesModal } from '@/pages/Workspace/components/BotSessionFiles/UploadFilesModal';
 import { ResizableWorkspaceSidebar } from '@/pages/Workspace/components/ResizableWorkspaceSidebar';
@@ -194,10 +195,7 @@ export function useBotSessionFilesFeature(
           ariaLabel="资源管理面板"
           side="right"
           onDismiss={closeFileDrawer}
-          minWidth={320}
-          maxWidth={600}
-          defaultWidth={387}
-          storageKey="teamclaw:bot-files-panel-width"
+          {...WORKSPACE_RIGHT_PANEL_LAYOUT}
           className="z-30 bg-background"
         >
           <BotSessionFilesPanel

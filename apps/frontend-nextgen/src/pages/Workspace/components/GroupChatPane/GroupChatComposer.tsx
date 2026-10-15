@@ -9,12 +9,12 @@ import { buildQuotePrompt, type MessageQuote } from '@/pages/Workspace/hooks/use
 import { useSessionFileUpload } from '@/pages/Workspace/hooks/useSessionFileUpload';
 import { buildTaskInstructions } from '@/services/tasks/taskMapper';
 import type { SessionMessageAttachment } from '@/services/workspace/groupChatAttachmentService';
+import { cn } from '@/utils/cn';
 import type { ProviderConnectionStatus } from '@tc-chat/adapters';
 import type { MentionConfig, SubmitContext } from '@tc-chat/ui';
 import { Sender, type PendingFileChip, type SenderRef } from '@tc-chat/ui/es/Sender';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { toast } from 'sonner';
-import { cn } from '@/utils/cn';
 import { GroupImagePreview } from './GroupImagePreview';
 import { expandMentionIds } from './mentionHelpers';
 import { UploadFilesModal } from './UploadFilesModal';
@@ -196,10 +196,7 @@ export function GroupChatComposer({
         ref={inputRef}
         // 断连四态灰卡（附录 B #F8F8F8≈muted）：SDK InputWrapper 底色吃 --aix-color-bg，
         // 在此 CSS 变量层注入实现灰化（disabled 仅灰化文字，不动 SDK 本体）。
-        className={cn(
-          'w-full',
-          session && connectionStatus !== 'connected' && '[--aix-color-bg:hsl(var(--muted))]',
-        )}
+        className={cn('w-full', session && connectionStatus !== 'connected' && '[--aix-color-bg:hsl(var(--muted))]')}
         value={draft}
         onChange={onDraftChange}
         onSubmit={(content, context) => {
@@ -212,12 +209,7 @@ export function GroupChatComposer({
         submitType="enter"
         mention={mentionConfig}
         fileChip={fileChip}
-        placeholder={
-          session
-            ? // dmore 附录 B：五态统一占位（不带会话名），断连灰底时同样呈现。
-              '可使用 /file 引用文件、/link 引用链接、/skill 调用能力'
-            : '请选择一个会话'
-        }
+        placeholder={session ? '' : '请选择一个会话'}
         slots={{
           header:
             images.images.length > 0 ? (

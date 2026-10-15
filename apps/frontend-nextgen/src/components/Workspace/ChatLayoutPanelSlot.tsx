@@ -18,6 +18,7 @@ import type { PanelHandle } from '@tc-chat/core';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import type { ChatLayoutPanelProps } from '@tc-chat/ui/es/ChatLayout/types';
 import { forwardRef, useCallback, useId, useRef, useState } from 'react';
+import { WORKSPACE_RIGHT_PANEL_LAYOUT } from './workspacePanelLayout';
 
 /** Root cloneElement 注入的内部 props（公开类型未声明，运行时存在）。 */
 type ChatLayoutPanelInjectedProps = {
@@ -76,6 +77,7 @@ export const ChatLayoutPanelSlot = forwardRef<PanelHandle, ChatLayoutPanelSlotPr
   return (
     <ChatLayoutPanelWithInjectedProps
       {...injected}
+      panelWidth={injected.panelWidth ?? WORKSPACE_RIGHT_PANEL_LAYOUT.defaultWidth}
       ref={setHandle}
       className={[injected.className, 'workspace-sdk-panel', panelClass].filter(Boolean).join(' ')}
       onIsOpenChange={handleIsOpenChange}

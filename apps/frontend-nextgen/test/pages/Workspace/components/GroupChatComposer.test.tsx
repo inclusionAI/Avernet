@@ -289,7 +289,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     expect(screen.getByTestId('sender')).not.toHaveClass('[--aix-color-bg:hsl(var(--muted))]');
   });
 
-  it('placeholder 按稿换为通用能力占位（不带会话名，附录 B）', () => {
+  it('群会话输入框不再展示命令引用提示', () => {
     render(
       <GroupChatComposer
         session={session}
@@ -300,9 +300,6 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
         onDraftChange={() => {}}
       />,
     );
-    expect(screen.getByTestId('sender')).toHaveAttribute(
-      'data-placeholder',
-      '可使用 /file 引用文件、/link 引用链接、/skill 调用能力',
-    );
+    expect(screen.getByTestId('sender')).toHaveAttribute('data-placeholder', '');
   });
 });

@@ -24,7 +24,7 @@ export function ConversationBotRowsSkeleton({ rows = 3 }: { rows?: number }) {
           <div key={index}>
             <div className="flex min-h-13 items-center gap-2 pr-4 pl-[17px]">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center">
-                <Skeleton.Block className="h-5 w-5 rounded-full" />
+                <Skeleton.Block className="h-6 w-6 rounded-full" />
               </span>
               <div className="flex min-w-0 flex-1 flex-col gap-1">
                 <Skeleton.Block className={cn('h-4 rounded-full', layout.name)} />

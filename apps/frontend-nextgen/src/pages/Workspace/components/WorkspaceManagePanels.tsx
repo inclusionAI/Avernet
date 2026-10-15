@@ -1,3 +1,4 @@
+import { WORKSPACE_RIGHT_PANEL_LAYOUT } from '@/components/Workspace/workspacePanelLayout';
 import type { DeliveryPolicy, GroupView, IdentityView, SessionView } from '@/domain/collaboration';
 import type { DingTalkBindingState } from '@/services/workspace/channelBindingService';
 import type { PolicyResult } from '@/services/workspace/groupService';
@@ -67,10 +68,7 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
           data-manage-panel="true"
           onDismiss={onClose}
           side="right"
-          minWidth={320}
-          maxWidth={600}
-          defaultWidth={380}
-          storageKey="teamclaw:manage-panel-width"
+          {...WORKSPACE_RIGHT_PANEL_LAYOUT}
           className="z-30 bg-background"
         >
           <GroupManagePanel
@@ -104,10 +102,7 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
           data-manage-panel="true"
           onDismiss={onClose}
           side="right"
-          minWidth={320}
-          maxWidth={600}
-          defaultWidth={380}
-          storageKey="teamclaw:manage-panel-width"
+          {...WORKSPACE_RIGHT_PANEL_LAYOUT}
           className="z-30 bg-background"
         >
           <SessionManagePanel
