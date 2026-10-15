@@ -306,6 +306,36 @@ def _message_text(msg: dict[str, Any]) -> str:
     return "".join(out)
 
 
+def _alive_time_ms(params: dict[str, Any]) -> int | None:
+    """R4-3：把客户端超时贯穿到引擎（ChatRequest.aliveTime 的对位）。
+
+    BaaS 侧 R17-7 把 timeout_ms 平铺进 metadata.timeoutMs（int 或数字
+    串）；缺失 → None（引擎默认语义不变）。v3 的对照行为是
+    ws_server 把 wire timeoutMs 传给 ChatRequest.aliveTime——灰度切换
+    不得丢这一参（丢即引擎按自身默认 idle 超时判
+    STREAM_TERMINATED_WITHOUT_FINAL）。非法值 → -32602 边界错误，不
+    带病下行。
+    """
+    meta = params.get("metadata")
+    if not isinstance(meta, dict):
+        return None
+    raw = meta.get("timeoutMs")
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        raise _ParamError("metadata.timeoutMs must be a positive integer "
+                          "(milliseconds)")
+    if isinstance(raw, str):
+        if not raw.isdigit():
+            raise _ParamError("metadata.timeoutMs must be a positive "
+                              "integer (milliseconds)")
+        raw = int(raw)
+    if not isinstance(raw, int) or isinstance(raw, bool) or raw <= 0:
+        raise _ParamError("metadata.timeoutMs must be a positive integer "
+                          "(milliseconds)")
+    return raw
+
+
 def _digest(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
@@ -323,13 +353,18 @@ def _get_message(params: dict[str, Any]) -> dict[str, Any]:
 
 # ── Shared execution-once dispatch (R12-1: both entries start the engine) ──
 
-def _ensure_dispatched(rid: str, ctx: str, text: str, created: bool) -> None:
+def _ensure_dispatched(rid: str, ctx: str, text: str, created: bool,
+                       alive_ms: int | None = None) -> None:
     """Exactly-once engine dispatch across both send entries: D14 "FIRST |
     absent | register and begin execution". A dedup hit (created=False)
-    attaches to the existing stream instead of dispatching again."""
+    attaches to the existing stream instead of dispatching again.
+
+    alive_ms：R4-3 客户端超时（metadata.timeoutMs）透传引擎
+    ChatRequest.aliveTime——v3 对位参,灰度不得丢。"""
     if not created:
         return
-    task = asyncio.create_task(execute_and_stream(_kernel, rid, ctx, text))
+    task = asyncio.create_task(
+        execute_and_stream(_kernel, rid, ctx, text, alive_ms=alive_ms))
     _BRIDGE_TASKS.add(task)
     task.add_done_callback(_BRIDGE_TASKS.discard)
 
@@ -342,6 +377,9 @@ async def _send_message(params: dict[str, Any], rid: Any,
     ctx = msg.get("contextId")
     if not isinstance(ctx, str) or not ctx:
         raise ValueError("contextId is required")
+    # 边界校验先行（R4-3/与 retryOnly 同口径）：非法 timeoutMs 在开 run
+    # 前拒绝——不留"注册成功但参数病"的孤儿 run。
+    alive_ms = _alive_time_ms(params)
     out = await _kernel.send_message(ctx, _message_text(msg),
                                      gated_key or msg["messageId"],
                                      _retry_flag(params))
@@ -351,7 +389,7 @@ async def _send_message(params: dict[str, Any], rid: Any,
     created = out["task"]["metadata"]["created"]
     # R12-1: non-streaming FIRST must start execution too — the run cannot
     # be left dangling at SUBMITTED. Dedup hits dispatch nothing (C1).
-    _ensure_dispatched(run_rid, ctx, _message_text(msg), created)
+    _ensure_dispatched(run_rid, ctx, _message_text(msg), created, alive_ms)
     return out
 
 _HANDLERS["SendMessage"] = _send_message
@@ -365,6 +403,9 @@ async def _send_streaming(params: dict[str, Any], req_id: Any,
     ctx = msg.get("contextId")
     if not isinstance(ctx, str) or not ctx:
         raise ValueError("contextId is required")
+    # 边界校验先行（R4-3/与 retryOnly 同口径）：非法 timeoutMs 在开 run
+    # 前拒绝——不留"注册成功但参数病"的孤儿 run。
+    alive_ms = _alive_time_ms(params)
     out = await _kernel.open_run(ctx, gated_key or msg["messageId"],
                                  _retry_flag(params),
                                  _digest(_message_text(msg)))
@@ -372,7 +413,7 @@ async def _send_streaming(params: dict[str, Any], req_id: Any,
         return _rpc_error_response(req_id, wire.wire_unknown_outcome())
     rid, created = out
 
-    _ensure_dispatched(rid, ctx, _message_text(msg), created)
+    _ensure_dispatched(rid, ctx, _message_text(msg), created, alive_ms)
 
     backlog, q = await _kernel.subscribe(rid, since_seq=0)
     return _stream_response(req_id, rid, backlog, q)
@@ -834,10 +875,13 @@ async def _resolve_interaction(params: dict[str, Any], req_id: Any,
         return {"error": {"code": -32000, "message": "interaction not found",
                           "data": {"reason": "not_found"}}}
     rid, run = located
-    if run.state != "TASK_STATE_INPUT_REQUIRED":
+    # R4-2: resolvability is judged per-iid (the same run can carry multiple pending items simultaneously — gateway support for concurrent SDK canUseTool);
+    # run.state is no longer a proxy gate. The idempotency anchor is preserved: repeat submission of an already-resolved iid → conflict;
+    # legacy "resolved → WORKING → repeat submission" also falls into conflict here (missing iid = clear-all outstanding).
+    if not _kernel.interaction_pending(rid, interaction_id):
         return {"error": {"code": -32003,
-                          "message": f"run not awaiting input "
-                                     f"(state={run.state})",
+                          "message": "interaction is not pending "
+                                     "(already resolved or never requested)",
                           "data": {"reason": "resolve_conflict"}}}
 
     try:

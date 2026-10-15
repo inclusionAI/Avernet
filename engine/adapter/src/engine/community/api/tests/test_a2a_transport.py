@@ -402,7 +402,7 @@ def test_send_message_executes_once_with_streaming_dedup(app_client,
                                                          monkeypatch):
     calls: list[str] = []
 
-    async def counting(kernel, rid, ctx, text, auth=None):
+    async def counting(kernel, rid, ctx, text, auth=None, alive_ms=None):
         calls.append(rid)
         # Minimal lifecycle so the SSE subscriber stream can terminate
         # (the real bridge publishes delta + complete; without terminal the
@@ -1040,6 +1040,138 @@ def test_agent_card_declares_cancel_extension(app_client):
     uris = [e["url"] for e in card["capabilities"]["extensions"]]
     from engine.community.api.transport.a2a.card import EXTENSION_URIS
     assert EXTENSION_URIS["cancel"] in uris, uris
+
+
+# ══════════ R4-2: 多 pending 交互逐个可决（gateway 并发 canUseTool）══════════
+
+@pytest.mark.asyncio
+async def test_resolve_concurrent_pendings_resolve_independently(monkeypatch):
+    """R4-2 回归钉：publish_interaction_resolved 曾无条件把整个 run 置
+    WORKING，而 resolve 只认 INPUT_REQUIRED——同 run 第二个 pending 从此
+    只能等过期。现在按 iid 记账：第一个决议后 run 仍 INPUT_REQUIRED、
+    第二个照常可决；全清才回 WORKING；已决 iid 重复提交 → conflict；
+    在途再挂起（同 iid 再 requested）→ 复活 pending 可再决。"""
+    fake = _FakeResolveChat()
+    R2 = _install_resolve_bridge(monkeypatch, fake)
+    K = kernel_mod.A2aKernel()
+    monkeypatch.setattr(R2, "_kernel", K)
+
+    rid, _ = await K.open_run("hitl-multi", "km", "first", "d")
+    await K.publish_interaction_requested(rid, "i-m1", {})
+    await K.publish_interaction_requested(rid, "i-m2", {})
+    assert K.runs[rid].state == "TASK_STATE_INPUT_REQUIRED"
+
+    out1 = await R2._resolve_interaction(
+        {"interactionId": "i-m1",
+         "resolution": {"decision": "submit", "kind": "ask_user"}}, 1, None)
+    assert out1["interaction"]["resolved"] is True, out1
+    # 只决一个：run 保持 INPUT_REQUIRED，第二个不被拦
+    assert K.runs[rid].state == "TASK_STATE_INPUT_REQUIRED", \
+        "决一个就把 run 拍回 WORKING 会锁死其余 pending"
+
+    out2 = await R2._resolve_interaction(
+        {"interactionId": "i-m2",
+         "resolution": {"decision": "submit", "kind": "ask_user"}}, 2, None)
+    assert out2["interaction"]["resolved"] is True, out2
+    assert K.runs[rid].state == "TASK_STATE_WORKING"
+
+    out3 = await R2._resolve_interaction(
+        {"interactionId": "i-m1",
+         "resolution": {"decision": "submit", "kind": "ask_user"}}, 3, None)
+    assert out3["error"]["data"]["reason"] == "resolve_conflict", \
+        "已决 iid 重复提交必须是冲突（per-iid 幂等锚不丢）"
+    assert len(fake.calls) == 2, "重复提交不得再度上行引擎"
+
+    # 在途再挂起同 iid：复活 pending，可再决
+    await K.publish_interaction_requested(rid, "i-m1", {})
+    out4 = await R2._resolve_interaction(
+        {"interactionId": "i-m1",
+         "resolution": {"decision": "submit", "kind": "ask_user"}}, 4, None)
+    assert out4["interaction"]["resolved"] is True, out4
+    assert K.runs[rid].state == "TASK_STATE_WORKING"
+
+
+@pytest.mark.asyncio
+async def test_legacy_resolution_without_iid_clears_all_pending(monkeypatch):
+    """无 iid 决议帧（旧引擎回显/强恢复）= 清空该 run 全部未决——既有
+    语义锚：已决后重复提交 → conflict 仍然成立。"""
+    fake = _FakeResolveChat()
+    R2 = _install_resolve_bridge(monkeypatch, fake)
+    K = kernel_mod.A2aKernel()
+    monkeypatch.setattr(R2, "_kernel", K)
+
+    rid, _ = await K.open_run("hitl-legacy", "kl", "first", "d")
+    await K.publish_interaction_requested(rid, "i-l1", {})
+    await K.publish_interaction_requested(rid, "i-l2", {})
+    await K.publish_interaction_resolved(rid, {})   # legacy：无 iid
+
+    assert K.runs[rid].state == "TASK_STATE_WORKING"
+    out1 = await R2._resolve_interaction(
+        {"interactionId": "i-l2",
+         "resolution": {"decision": "submit", "kind": "ask_user"}}, 1, None)
+    assert out1["error"]["data"]["reason"] == "resolve_conflict"
+    out2 = await R2._resolve_interaction(
+        {"interactionId": "i-l1",
+         "resolution": {"decision": "submit", "kind": "ask_user"}}, 2, None)
+    assert out2["error"]["data"]["reason"] == "resolve_conflict"
+    assert fake.calls == [], "引擎已 resume 的 run 不得再上行决策"
+
+
+# ══════════ R4-3: 客户端超时贯穿到 ChatRequest.aliveTime ══════════
+
+def test_timeout_ms_reaches_chat_request(app_client, monkeypatch):
+    """R4-3 Review 验收：断言打在真实 ChatService.stream 边界——引擎收到的
+    ChatRequest.aliveTime 必须等于客户端 metadata.timeoutMs，而非只检查
+    request JSON 有这个字段。"""
+    import time as _time
+    captured: list = []
+
+    class _CaptureChat:
+        def stream(self, request, auth=None):
+            captured.append(request)
+
+            async def gen():
+                yield _Frame("chat", {"state": "delta", "runId": "nat-tm",
+                                      "deltaText": "片段"})
+                yield _Frame("chat", {"state": "final", "runId": "nat-tm",
+                                      "message": {"content": "终稿"}})
+
+            return gen()
+
+    _install_fake_chat(monkeypatch, _CaptureChat())
+    r = _rpc(app_client, 1, "SendMessage", {
+        "message": {"role": "ROLE_USER", "parts": [{"text": "长任务"}],
+                    "messageId": "tm-ok", "contextId": "ctx-tm"},
+        "metadata": {"timeoutMs": "600000"}})
+    assert "error" not in r.json(), r.json()
+    for _ in range(200):
+        _time.sleep(0.02)
+        if captured:
+            break
+    assert captured, "bridge 未分发到引擎"
+    assert captured[0].aliveTime == 600000, captured[0].aliveTime
+    assert captured[0].sessionId == "ctx-tm"
+
+
+def test_timeout_ms_validation_is_boundary_strict(app_client):
+    """非法 timeoutMs 在开 run 前拒绝（-32602）：digit 串之外的形式、
+    非正数、布尔——都不带病下行、不留孤儿 run。"""
+    def _body(metadata_value):
+        return _rpc(app_client, 1, "SendMessage", {
+            "message": {"role": "ROLE_USER", "parts": [{"text": "x"}],
+                        "messageId": "tm-bad", "contextId": "ctx-bad"},
+            "metadata": {"timeoutMs": metadata_value}})
+
+    for bad in ("600x", -1, 0, True, 1.5):
+        r = _body(bad)
+        err = r.json()["error"]
+        assert err["code"] == -32602, (bad, err)
+    # 合法 int 原生形态照收
+    ok = _rpc(app_client, 2, "SendMessage", {
+        "message": {"role": "ROLE_USER", "parts": [{"text": "x"}],
+                    "messageId": "tm-int", "contextId": "ctx-int"},
+        "metadata": {"timeoutMs": 30000}})
+    assert "error" not in ok.json()
 
 
 # ══════════ 1c+: CancelTask 引擎 abort 上行（best-effort，TC-CANCEL 闭环）══════════
@@ -1914,7 +2046,7 @@ def test_get_task_and_replay_taskid_validation(app_client):
 
 def test_kernel_exceptions_map_to_protocol_errors(app_client, monkeypatch):
     # 同键异文 → -32003 结构化冲突
-    async def counting(kernel, rid, ctx, text, auth=None):
+    async def counting(kernel, rid, ctx, text, auth=None, alive_ms=None):
         await kernel.publish_delta(rid, "回")
         await kernel.complete_run(rid)
 
@@ -1941,7 +2073,8 @@ def test_kernel_exceptions_map_to_protocol_errors(app_client, monkeypatch):
             break
     assert R._kernel.get_run(rid_first).state == "TASK_STATE_COMPLETED"
 
-    async def noop_dispatch(kernel, rid, ctx, text, auth=None):
+    async def noop_dispatch(kernel, rid, ctx, text, auth=None,
+                            alive_ms=None):
         pass                                          # 不收口：保持占位
 
     # 作用域 monkeypatch：容量补丁不外溢到后续 LookupError/ValueError 段
@@ -2379,7 +2512,7 @@ def test_auth_gate_key_substitution_dedups(app_client_gated, monkeypatch):
     from engine.community.api.transport.auth_gate import AuthGateResult
     intercepted: list[str] = []
 
-    async def counting(kernel, rid, ctx, text, auth=None):
+    async def counting(kernel, rid, ctx, text, auth=None, alive_ms=None):
         intercepted.append(rid)
         await kernel.publish_delta(rid, "回")
         await kernel.complete_run(rid)

@@ -79,7 +79,8 @@ class _EngineRunAborted(Exception):
 
 async def execute_and_stream(kernel: A2aKernel, rid: str, context_id: str,
                              text: str,
-                             auth: Any = None) -> None:
+                             auth: Any = None,
+                             alive_ms: int | None = None) -> None:
     """Dispatch through EngineManager and pump events into kernel.
 
     Guarantees exactly one terminal `complete_run` (SUCCESS only when the
@@ -98,7 +99,8 @@ async def execute_and_stream(kernel: A2aKernel, rid: str, context_id: str,
         return
 
     try:
-        await _dispatch_to_engine(kernel, rid, context_id, text, auth)
+        await _dispatch_to_engine(kernel, rid, context_id, text, auth,
+                                  alive_ms)
         await kernel.complete_run(rid, _STATE_COMPLETED)
     except _EngineRunFailed as exc:
         await _safe_complete(kernel, rid, _STATE_FAILED, exc.detail)
@@ -120,7 +122,8 @@ async def _safe_complete(kernel: A2aKernel, rid: str, state: str,
 
 
 async def _dispatch_to_engine(kernel: A2aKernel, rid: str, context_id: str,
-                              text: str, auth: Any = None) -> None:
+                              text: str, auth: Any = None,
+                              alive_ms: int | None = None) -> None:
     """Drive the real ChatService.stream and translate frames.
 
     Returns only when an engine stream was actually consumed to its
@@ -164,7 +167,9 @@ async def _dispatch_to_engine(kernel: A2aKernel, rid: str, context_id: str,
         agentId="",
         query=text,
         sessionId=context_id,
-        aliveTime=None,
+        # R4-3：客户端超时对位 v3——v3 是 ws_server 的
+        # aliveTime=timeout_ms，None = 未声明（引擎默认）。
+        aliveTime=alive_ms,
         extraParams=None,
     )
 

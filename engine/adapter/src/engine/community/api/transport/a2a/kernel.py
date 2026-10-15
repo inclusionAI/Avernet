@@ -92,6 +92,9 @@ class A2aKernel:
         self._inject_dedup: dict[tuple[str, str], tuple[str, float]] = {}
         # E4/H1: interactionId → rid 注册表（HITL resolve 定位 run）
         self._interactions: dict[str, str] = {}
+        # R4-2: interaction-level pending ledger — registered but not yet resolved (the registry values in _interactions are
+        # never audited; repeat submissions/decisions are judged by this set)
+        self._resolved_interactions: set[str] = set()
         self._context_subs: dict[str, list[asyncio.Queue]] = {}
         self._total_bytes = 0
         self._global_lock = asyncio.Lock()
@@ -286,19 +289,51 @@ class A2aKernel:
         if r.state in wire.TERMINAL_STATES:
             return                     # T1：终态后不再注册新 interaction
         self._interactions[interaction_id] = rid
+        # R4-2: in-flight re-request (suspending the same tool again) → remove it from the resolved set, the iid returns to pending
+        self._resolved_interactions.discard(interaction_id)
         r.state = "TASK_STATE_INPUT_REQUIRED"
         await self._publish(rid, wire.wire_interaction_requested(
             rid, r.context_id, 0, interaction_id, payload))
 
     async def publish_interaction_resolved(self, rid: str,
                                            payload: dict[str, Any]) -> None:
-        """HITL 决议：state 回 WORKING。"""
+        """HITL 决议：按 iid 记账 + 全清后才回 WORKING（R4-2）。
+
+        gateway 注册表支持同一 run 多个 pending（SDK 并发 canUseTool），
+        决议只清自己——run 是否回 WORKING 取决于还有没有未决项，绝不用
+        一个 run 状态顶替每个 interaction 的可决性。决议帧不带 iid（旧
+        引擎侧回显/强恢复）= "引擎已恢复整个 run"——清空该 run 全部未决
+        项再回 WORKING（R1 兼容锚：已 resolve 后重复提交 → conflict 语义
+        不变）。
+        """
         r = self.runs[rid]
         if r.state in wire.TERMINAL_STATES:
             return                     # T1：终态后决议不改写 run 状态
-        r.state = "TASK_STATE_WORKING"
+        iid = payload.get("interactionId") or payload.get("id")
+        if isinstance(iid, str) and iid and \
+                self._interactions.get(iid) == rid:
+            self._resolved_interactions.add(iid)
+            unresolved = [i for i, owner in self._interactions.items()
+                          if owner == rid
+                          and i not in self._resolved_interactions]
+            if not unresolved:
+                r.state = "TASK_STATE_WORKING"
+        else:
+            self._resolved_interactions.update(
+                i for i, owner in self._interactions.items()
+                if owner == rid and i not in self._resolved_interactions)
+            r.state = "TASK_STATE_WORKING"
         await self._publish(rid, wire.wire_interaction_resolved(
             rid, r.context_id, 0, payload))
+
+    def interaction_pending(self, rid: str, interaction_id: str) -> bool:
+        """该 iid 在此 run 上是否仍是未决 pending（R4-2 router 冲突判定）。
+
+        注册且未 resolved 才可决；已 resolved 的重复提交、无主 iid 均
+        False——状态机不再代理这个判断。
+        """
+        return (self._interactions.get(interaction_id) == rid
+                and interaction_id not in self._resolved_interactions)
 
     async def publish_agent_progress(self, rid: str,
                                      payload: dict[str, Any],
