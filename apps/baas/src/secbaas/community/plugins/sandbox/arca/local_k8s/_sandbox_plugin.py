@@ -523,9 +523,11 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             V1Capabilities,
             V1ConfigMapVolumeSource,
             V1Container,
+            V1Capabilities,
             V1Deployment,
             V1DeploymentSpec,
             V1EnvVar,
+            V1HostPathVolumeSource,
             V1LabelSelector,
             V1ObjectMeta,
             V1PersistentVolumeClaimVolumeSource,
@@ -549,7 +551,12 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             resource_spec
         )
 
-        volume_mounts: list[V1VolumeMount] = []
+        volume_mounts: list[V1VolumeMount] = [
+            V1VolumeMount(
+                name="fuse-device",
+                mount_path="/opt/dev/fuse",
+            )
+        ]
         if pvc_name and storage_id:
             volume_mounts.append(
                 V1VolumeMount(
@@ -569,7 +576,17 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
                 requests={"cpu": cpu_request, "memory": memory_request},
                 limits={"cpu": cpu_limit, "memory": memory_limit},
             ),
-            volume_mounts=volume_mounts or None,
+            # SYS_ADMIN (not privileged): FUSE mounts need CAP_SYS_ADMIN to
+            # mount the fuse device, and a host-path device alone does not
+            # grant device-cgroup access on k3s-on-Docker. Full privileged
+            # breaks the runtime's admin/sudo PAM path, so only the needed
+            # capability is added instead.
+            security_context=V1SecurityContext(
+                capabilities=V1Capabilities(
+                    add=["SYS_ADMIN"],
+                ),
+            ),
+            volume_mounts=volume_mounts,
         )
 
         sidecar = V1Container(
@@ -617,6 +634,15 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
                     ),
                 )
             )
+        volumes.append(
+            V1Volume(
+                name="fuse-device",
+                host_path=V1HostPathVolumeSource(
+                    path="/dev/fuse",
+                    type="CharDevice",
+                ),
+            )
+        )
 
         deployment = V1Deployment(
             api_version="apps/v1",
