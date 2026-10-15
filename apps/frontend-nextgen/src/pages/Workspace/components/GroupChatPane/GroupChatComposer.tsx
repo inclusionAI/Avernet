@@ -215,7 +215,8 @@ export function GroupChatComposer({
         placeholder={
           session
             ? // dmore 附录 B：五态统一占位（不带会话名），断连灰底时同样呈现。
-              '可使用 /file 引用文件、/link 引用链接、/skill 调用能力'
+              // 群聊输入框仅支持 @ 提及成员（无 /file /link /skill 指令），勿照搬单聊占位。
+              '输入消息，@ 可提及会话成员'
             : '请选择一个会话'
         }
         slots={{

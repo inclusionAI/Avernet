@@ -1,24 +1,22 @@
-import { Button, ConfirmDialog, Empty, IconButton, Skeleton } from '@/components/ui';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
+import { Button, Empty, IconButton, Skeleton } from '@/components/ui';
+import { TooltipProvider } from '@/components/ui/Tooltip';
 import type { ParticipantView } from '@/domain/collaboration';
 import type { AuthenticatedUserName } from '@/domain/userIdentity';
 import { useSessionFilePreview } from '@/pages/Workspace/hooks/useSessionFilePreview';
 import { useSessionFileUpload } from '@/pages/Workspace/hooks/useSessionFileUpload';
 import { useSessionFiles } from '@/pages/Workspace/hooks/useSessionFiles';
 import type { SessionFileView } from '@/services/workspace/sessionFileService';
-import { formatFileSize, getPreviewKind } from '@/services/workspace/sessionFileUtils';
 import { cn } from '@/utils/cn';
-import { Download, Eye, FileText, Share2, Trash2, Upload, X } from 'lucide-react';
+import { FileText, Upload, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { formatMonthDayTime } from '../SessionCard';
 import {
   getSessionFileCategory,
   SESSION_FILE_CATEGORY_LABELS,
-  SessionFileTypeIcon,
   type SessionFileCategory,
 } from '../SessionFileTypeIcon';
 import { PreviewPane } from './SessionFilesPreviewPane';
+import { SessionFilesRow } from './SessionFilesRow';
 import { UploadFilesModal } from './UploadFilesModal';
 
 export interface SessionFilesPanelProps {
@@ -208,108 +206,16 @@ export function SessionFilesPanel({
               ) : (
                 <TooltipProvider>
                   <ul className="m-0 list-none p-0">
-                    {visibleFiles.map((file) => {
-                      // 下钻入口（与单聊侧 2026-10-12 验收拍板一致）：可预览文件点击行本体
-                      // 直接下钻，行内「预览」图标按钮保留（可见入口 + 禁用语义承载）。
-                      // 不可预览类型（非图片/PDF/文本白名单）：行本体仍为纯展示，
-                      // 按钮禁用并提示原因。
-                      // 用 aria-disabled 而非原生 disabled——禁用态仍需 hover 出 Tooltip，
-                      // 原生 disabled button 不派发 pointer 事件会让提示失效。
-                      const previewable = getPreviewKind(file.name, file.mimeType) !== 'other';
-                      const rowContent = (
-                        <>
-                          <SessionFileTypeIcon name={file.name} mimeType={file.mimeType} className="h-5 w-5 shrink-0" />
-                          <div className="min-w-0 flex-1">
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="block truncate text-[13px] leading-[21px] text-foreground">
-                                  {file.name}
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent>{file.name}</TooltipContent>
-                            </Tooltip>
-                            {/* 元数据两行结构（与单聊侧同构）：上传者 · 时间 · 大小。 */}
-                            <span className="mt-0.5 block truncate text-[11px] leading-[18px] text-muted-foreground">
-                              {file.ownerName} · {formatMonthDayTime(file.createdAt * 1000)} ·{' '}
-                              {formatFileSize(file.size)}
-                            </span>
-                          </div>
-                        </>
-                      );
-                      return (
-                        <li
-                          key={file.fileId}
-                          className="group flex h-[61px] items-center rounded-lg px-5 transition-colors hover:bg-zinc-100"
-                        >
-                          {previewable ? (
-                            <button
-                              type="button"
-                              onClick={() => setSelectedId(file.fileId)}
-                              className="m-0 flex min-w-0 flex-1 shrink cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-left"
-                            >
-                              {rowContent}
-                            </button>
-                          ) : (
-                            <div className="flex min-w-0 flex-1 shrink cursor-default items-center gap-1 text-left">
-                              {rowContent}
-                            </div>
-                          )}
-                          {/* 行操作（设计稿：悬停行底 zinc-100 时出现在右端）：常驻挂载
-                              opacity 切换可见（hover/focus-within），不做布局位移；Tooltip
-                              闪烁的历史对策仅限 pointer-events 切换，此处不受影响。 */}
-                          <div className="flex shrink-0 items-center opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-                            <IconButton
-                              label={previewable ? '预览文件' : '该文件类型暂不支持预览'}
-                              // PR#413 评审跟进 P3（#257104459）：视觉提示精简，读屏名称保留
-                              // 文件名——ariaLabel 恢复含文件名的完整可访问名称，读屏用户可区分行。
-                              ariaLabel={
-                                previewable ? `预览文件 ${file.name}` : `预览文件 ${file.name}（该文件类型暂不支持预览）`
-                              }
-                              icon={<Eye className="h-3.5 w-3.5" aria-hidden />}
-                              size="sm"
-                              variant="ghost"
-                              aria-disabled={previewable ? undefined : true}
-                              onClick={previewable ? () => setSelectedId(file.fileId) : undefined}
-                              className={cn(
-                                'h-5 w-5 text-muted-foreground hover:text-foreground',
-                                previewable ? undefined : 'cursor-not-allowed opacity-50',
-                              )}
-                            />
-                            <IconButton
-                              label="下载文件"
-                              icon={<Download className="h-3.5 w-3.5" aria-hidden />}
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => void filesState.downloadFile(file)}
-                              className="h-5 w-5 text-muted-foreground hover:text-foreground"
-                            />
-                            <IconButton
-                              label="分享文件"
-                              icon={<Share2 className="h-3.5 w-3.5" aria-hidden />}
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => void handleShare(file)}
-                              className="h-5 w-5 text-muted-foreground hover:text-foreground"
-                            />
-                            <ConfirmDialog
-                              title={`删除文件 ${file.name}`}
-                              description="删除后本会话成员将无法再查看该文件。"
-                              confirmText="删除"
-                              confirmVariant="destructive"
-                              onConfirm={() => void filesState.removeFile(file.fileId)}
-                            >
-                              <IconButton
-                                label="删除文件"
-                                icon={<Trash2 className="h-3.5 w-3.5" aria-hidden />}
-                                size="sm"
-                                variant="ghost"
-                                className="h-5 w-5 text-muted-foreground hover:text-foreground"
-                              />
-                            </ConfirmDialog>
-                          </div>
-                        </li>
-                      );
-                    })}
+                    {visibleFiles.map((file) => (
+                      <SessionFilesRow
+                        key={file.fileId}
+                        file={file}
+                        onOpenPreview={() => setSelectedId(file.fileId)}
+                        onDownload={(f) => void filesState.downloadFile(f)}
+                        onShare={(f) => void handleShare(f)}
+                        onDelete={(f) => void filesState.removeFile(f.fileId)}
+                      />
+                    ))}
                   </ul>
                 </TooltipProvider>
               )}

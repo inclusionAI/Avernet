@@ -4,7 +4,7 @@
 import { ConversationBotItem } from '@/pages/Workspace/Chat/components/ConversationBotItem';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import '@testing-library/jest-dom';
-import { fireEvent, render } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 const bot: ChatBotView = {
   botId: 'bot-1',
@@ -26,10 +26,12 @@ function renderBotItem(overrides: { expanded?: boolean; onToggle?: () => void } 
       selectedSessionId={null}
       origin="mine"
       scope="all"
+      sessionKey=""
       sessions={undefined}
       onToggle={onToggle}
       onOriginChange={noop}
       onScopeChange={noop}
+      onSearchSession={noop}
       onCreateSession={noop}
       onSelectSession={noop}
       onLoadMore={noop}
@@ -97,18 +99,149 @@ describe('ConversationBotItem 展开箭头', () => {
         selectedSessionId={null}
         origin="mine"
         scope="all"
-      onToggle={noop}
-      onOriginChange={noop}
-      onScopeChange={noop}
-      onCreateSession={noop}
-      onSelectSession={noop}
-      onLoadMore={noop}
-      onToggleFavorite={noop}
-      isFavoritePending={() => false}
-      onOpenAgentCodingBot={noop}
+        sessionKey=""
+        onToggle={noop}
+        onOriginChange={noop}
+        onScopeChange={noop}
+        onSearchSession={noop}
+        onCreateSession={noop}
+        onSelectSession={noop}
+        onLoadMore={noop}
+        onToggleFavorite={noop}
+        isFavoritePending={() => false}
+        onOpenAgentCodingBot={noop}
       />,
     );
     // 整行只剩主按钮,无展开箭头按钮。
     expect(container.querySelectorAll('button').length).toBe(1);
+  });
+});
+
+describe('ConversationBotItem 外跳 Bot', () => {
+  it.each([['managed'], ['team'], ['friend']] as const)('%s 分组 Coding Bot 可点且不出现普通会话操作区', (section) => {
+    const onOpenAgentCodingBot = jest.fn();
+    const { container, getByRole } = render(
+      <ConversationBotItem
+        bot={{
+          ...bot,
+          isAgentCodingBot: true,
+          templateName: 'Coding Bot',
+          chatable: false,
+        }}
+        section={section}
+        expanded={false}
+        selectedSessionId={null}
+        origin="mine"
+        scope="all"
+        sessionKey=""
+        onToggle={noop}
+        onOriginChange={noop}
+        onScopeChange={noop}
+        onSearchSession={noop}
+        onCreateSession={noop}
+        onSelectSession={noop}
+        onLoadMore={noop}
+        onToggleFavorite={noop}
+        isFavoritePending={() => false}
+        onOpenAgentCodingBot={onOpenAgentCodingBot}
+      />,
+    );
+
+    const trigger = getByRole('button', { name: '测试 Bot' });
+    expect(trigger).not.toHaveClass('opacity-50', 'cursor-not-allowed');
+    fireEvent.click(trigger);
+    expect(onOpenAgentCodingBot).toHaveBeenCalled();
+    expect(container.querySelector('button[aria-hidden="true"]')).toBeNull();
+    expect(screen.queryByRole('button', { name: '会话ID检索' })).not.toBeInTheDocument();
+  });
+});
+
+describe('ConversationBotItem 会话ID检索入口', () => {
+  const renderRow = (over: {
+    scope?: 'all' | 'favorite';
+    origin?: 'mine' | 'others';
+    sessionKey?: string;
+    expanded?: boolean;
+    chatable?: boolean;
+    isAgentCodingBot?: boolean;
+    onSearchSession?: (sessionKey: string) => void;
+  } = {}) => {
+    const onSearchSession = over.onSearchSession ?? jest.fn();
+    const utils = render(
+      <ConversationBotItem
+        bot={{
+          ...bot,
+          chatable: over.chatable ?? true,
+          isAgentCodingBot: over.isAgentCodingBot,
+        }}
+        section="managed"
+        expanded={over.expanded ?? false}
+        selectedSessionId={null}
+        origin={over.origin ?? 'mine'}
+        scope={over.scope ?? 'all'}
+        sessionKey={over.sessionKey ?? ''}
+        onToggle={noop}
+        onOriginChange={noop}
+        onScopeChange={noop}
+        onSearchSession={onSearchSession}
+        onCreateSession={noop}
+        onSelectSession={noop}
+        onLoadMore={noop}
+        onToggleFavorite={noop}
+        isFavoritePending={() => false}
+        onOpenAgentCodingBot={noop}
+      />,
+    );
+    return { ...utils, onSearchSession };
+  };
+
+  it('有效范围 all(含他人发起视角)始终提供搜索入口', () => {
+    renderRow({ origin: 'mine', scope: 'all' });
+    expect(screen.getByRole('button', { name: '会话ID检索' })).toBeInTheDocument();
+  });
+
+  it('仅 all 有效范围展示搜索切换到 favorite 后隐藏', () => {
+    renderRow({ scope: 'favorite' });
+    expect(screen.queryByRole('button', { name: '会话ID检索' })).not.toBeInTheDocument();
+  });
+
+  it('origin=others 沿用 all 有效范围,仍保留搜索入口', () => {
+    renderRow({ origin: 'others' });
+    expect(screen.getByRole('button', { name: '会话ID检索' })).toBeInTheDocument();
+  });
+
+  it('AgentCoding 与不可聊 Bot 不渲染搜索入口', () => {
+    const first = renderRow({ isAgentCodingBot: true });
+    expect(screen.queryByRole('button', { name: '会话ID检索' })).not.toBeInTheDocument();
+    first.unmount();
+    renderRow({ chatable: false });
+    expect(screen.queryByRole('button', { name: '会话ID检索' })).not.toBeInTheDocument();
+  });
+
+  it('生效中的检索在收起时仍可见:操作区常驻并给行名称让位', () => {
+    const { container } = renderRow({ sessionKey: 'agent:main:live', expanded: false });
+    const title = Array.from(container.querySelectorAll('span')).find((el) =>
+      el.className.includes('truncate'),
+    ) as HTMLElement;
+    // 生效中的检索钉住操作区,行名称让位 pr-24。
+    expect(title?.parentElement).toHaveClass('pr-24');
+    const actions = Array.from(container.querySelectorAll('div')).find((el) =>
+      el.className.includes('right-[34px]'),
+    ) as HTMLElement;
+    expect(actions.className).toContain('opacity-100');
+    // 🔍 按钮激活态主色,标记生效条件。
+    expect(screen.getByRole('button', { name: '会话ID检索' })).toHaveClass('text-primary');
+  });
+
+  it('提交检索透传 onSearchSession(已 trim),清空提交传播空串', () => {
+    const { onSearchSession } = renderRow({ expanded: true });
+    fireEvent.click(screen.getByRole('button', { name: '会话ID检索' }));
+    const input = screen.getByRole('textbox', { name: '会话ID检索' }) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: ' agent:main:k1 ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onSearchSession).toHaveBeenCalledWith('agent:main:k1');
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onSearchSession).toHaveBeenCalledWith('');
   });
 });

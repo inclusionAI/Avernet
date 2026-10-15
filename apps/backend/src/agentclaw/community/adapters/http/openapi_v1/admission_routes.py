@@ -21,6 +21,9 @@ _SPACE_SKILL_PUBLICATION = f"{_SPACE_SKILL_BASE}/publications"
 #: what ``gateway/core/paths/_pattern.py`` exists to prevent. Change ``REFUSED``
 #: here and that test is the one that will fail.
 ADMISSION: dict[tuple[str, str], AdmissionMode] = {
+    ("GET", "/openapi/v1/bots/{bot_id}/engine-version"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    # Minimal classification requires a verified human, but no Bot grant.
+    ("GET", "/openapi/v1/bots/{bot_id}/classification"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/bots/{bot_id}/avatar"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("PUT", "/openapi/v1/bots/{bot_id}/avatar"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/links"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
@@ -434,6 +437,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/security-observations",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "DELETE",

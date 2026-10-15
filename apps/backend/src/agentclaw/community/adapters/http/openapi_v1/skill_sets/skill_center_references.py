@@ -21,13 +21,14 @@ from agentclaw.community.api.skill_center_reference_service import (
 )
 from agentclaw.community.di import Injected
 
+from .path_params import SetIdPath
+
 
 router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references",
     tags=["skill-center-references"],
     route_class=PublicAPIRoute,
 )
-SetIdPath = Annotated[str, Path(description="Decimal SkillSet identifier.")]
 ReferenceIdPath = Annotated[str, Path(description="Durable Reference item identifier.")]
 IdempotencyKeyHeader = Annotated[
     str,

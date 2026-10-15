@@ -19,6 +19,11 @@
   validation-only warning. The local config template
   opts in for testing; full product FO/release validation remains pending.
 
+- `collaboration.nested_loop_execution_enabled` defaults to false and is valid
+  only when the total Loop execution switch is enabled. It controls admission
+  of new nested Runs; preview remains governed by compiler limits, while already
+  admitted Runs must remain recoverable when this admission switch is disabled.
+
 - The shared progression scanner starts with the service, without a separate
   configuration switch. It schedules bounded State Machine
   saved startup/dispatch/progression (including HumanInput request recovery), terminal Session completion, terminal IM and terminal checkpoint cleanup pages with the existing leader
@@ -159,8 +164,8 @@ additive schema but never guesses/backfills historical membership.
 
 ## Tests
 
-- `cargo test --package bcs --manifest-path src/bcs/Cargo.toml`
-- `cargo check --package bcs --all-targets --manifest-path src/bcs/Cargo.toml`
+- `cargo test --package bcs --manifest-path apps/bcs/Cargo.toml`
+- `cargo check --package bcs --all-targets --manifest-path apps/bcs/Cargo.toml`
 
 Eventing bootstrap resolves optional idle polling ceilings to the existing base
 intervals, and supplies both limits to EventingLifecycle. Old configurations keep

@@ -313,6 +313,7 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
         }
         Ok(vec![PendingHumanNodeView {
             node_id: "human_review".to_string(),
+            execution: None,
             display_name: "Human review".to_string(),
             instruction: "Review the draft".to_string(),
             response_ref: "run-1:human_review".to_string(),

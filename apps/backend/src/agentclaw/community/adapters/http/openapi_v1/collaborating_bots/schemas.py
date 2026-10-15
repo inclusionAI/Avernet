@@ -18,8 +18,16 @@ class CollaborationSummary(BaseModel):
     joined_at: datetime = Field(description="When the collaboration was created.")
 
 
+class CollaboratingBotSpace(BaseModel):
+    """Business-space reference included with a collaborating Bot."""
+
+    space_id: str = Field(description="Unique identifier of the business space.")
+    name: str = Field(description="Display name of the business space.")
+    kind: str = Field(description="Space kind from the business-space owner.")
+
+
 class CollaboratingBot(BaseModel):
-    """Safe Bot summary returned to one of its collaborators."""
+    """Bot summary returned to one of its collaborators."""
 
     bot_id: str = Field(description="Unique identifier of the Bot.")
     bot_name: str = Field(description="Display name of the Bot.")
@@ -32,9 +40,25 @@ class CollaboratingBot(BaseModel):
     )
     bot_type: str = Field(description="Product type of the Bot.")
     status: str = Field(description="Current lifecycle status of the Bot.")
+    template_type: str | None = Field(
+        default=None,
+        description="Template type of the Bot, when configured.",
+    )
+    template_config: dict | None = Field(
+        default=None,
+        description=(
+            "Stored template snapshot for compatibility with the legacy "
+            "collaborator listing. It can contain sensitive creator-supplied "
+            "values."
+        ),
+    )
+    space: CollaboratingBotSpace | None = Field(
+        default=None,
+        description="Business space assigned to the Bot, when resolved.",
+    )
     collaboration: CollaborationSummary = Field(
         description="The acting user's collaboration relationship with the Bot."
     )
 
 
-__all__ = ["CollaboratingBot", "CollaborationSummary"]
+__all__ = ["CollaboratingBot", "CollaboratingBotSpace", "CollaborationSummary"]

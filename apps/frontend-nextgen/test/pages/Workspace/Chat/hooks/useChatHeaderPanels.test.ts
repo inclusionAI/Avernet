@@ -119,6 +119,25 @@ it('副屏判空：无 <AixUI type="panel"> 时 Monitor 禁用且 toggle 空转�
   expect(result.current.sidePaneOpen).toBe(true);
 });
 
+it('真实态同步：渲染器挂载默认展开（onIsOpenChange(true)）即点亮 sidePaneOpen，Monitor 首点直接关闭', () => {
+  // 场景回放：消息渲染器挂载即 openTab 自动展开副屏（无任何用户点按）。
+  // 修复前 sidePaneOpen 盲镜像恒 false —— 收起钮不出现、Monitor 首点仍走「打开」空转。
+  const { options, closePanel } = makeOptions({ messages: makePanelMessages() });
+  const { result } = renderHook(() => useChatHeaderPanels(options));
+
+  act(() => result.current.onSidePaneIsOpenChange(true));
+  expect(result.current.sidePaneOpen).toBe(true);
+
+  // Mirror/真实态一致后，Monitor 首点语义即「关闭」。
+  act(() => result.current.toggleSidePane());
+  expect(closePanel).toHaveBeenCalledTimes(1);
+  expect(result.current.sidePaneOpen).toBe(false);
+
+  // autoCloseWhenEmpty 弹回等真实关态事件同样同步。
+  act(() => result.current.onSidePaneIsOpenChange(false));
+  expect(result.current.sidePaneOpen).toBe(false);
+});
+
 it('打开按消息标记幂等重建 tabs：BCS 天气卡（单引号 cardId/type/tab）原样重建 openTab 载荷', () => {
   // 真实线上形态：单引号属性 + 标签体 JSON（PanelCardTrigger 同款 payload 语义）。
   const weatherMessage = {

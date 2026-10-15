@@ -1,3 +1,4 @@
+import { SafeHtml } from '@/assets/TaskPanel/SafeHtml';
 import { Badge, Button } from '@/components/ui';
 import type { SessionFilePreviewState } from '@/pages/Workspace/hooks/useSessionFilePreview';
 import { formatFileSize } from '@/services/workspace/sessionFileUtils';
@@ -101,9 +102,9 @@ function PreviewBody({ file, preview, onDownload }: PreviewBodyProps) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         {isMarkdownFile(file.name) ? (
-          <div
+          <SafeHtml
             className="markdown-body app-scrollbar min-h-0 flex-1 overflow-y-auto px-6 py-4 text-sm leading-6 text-foreground"
-            dangerouslySetInnerHTML={{ __html: renderSessionFileMarkdown(preview.text) }}
+            html={renderSessionFileMarkdown(preview.text)}
           />
         ) : (
           <pre
@@ -156,7 +157,15 @@ interface PreviewPaneProps {
   onBack?: () => void;
 }
 
-export function PreviewPane({ file, filesStateEmpty, preview, onDownload, onReference, onShare, onBack }: PreviewPaneProps) {
+export function PreviewPane({
+  file,
+  filesStateEmpty,
+  preview,
+  onDownload,
+  onReference,
+  onShare,
+  onBack,
+}: PreviewPaneProps) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-card">
       {file ? (

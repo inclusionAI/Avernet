@@ -11,7 +11,10 @@ from uuid import uuid4
 import pytest
 
 from secbaas.community.core.repository.bot import BotRepository
-from secbaas.community.core.repository.publish import PublishRecord, PublishRepository
+from secbaas.community.core.repository.publish import (
+    PublishRecord,
+    PublishRepository,
+)
 from secbaas.community.core.utils.env_utils import get_current_env
 
 pytestmark = pytest.mark.integration
@@ -210,6 +213,13 @@ class TestPublishRepositoryProtocol:
         publish_repository: PublishRepository,
         db_transaction,
     ):
+        """Multiple rows come back for one bot — seeded with legal states.
+
+        The multi-row intent is satisfied with one live publish plus
+        terminal history: terminal rows still appear in ``list_by_bot_id``
+        and never arbitrate against the live one
+        (task 6.19 fixture repair).
+        """
         bot_id = bot_repository.insert_bot(
             bot_uuid=_generate_uuid(),
             tenant=TEST_TENANT,
@@ -236,21 +246,34 @@ class TestPublishRepositoryProtocol:
             domain="test_domain",
             bot_id=bot_id,
             publish_type="UPDATE",
-            status="ACTIVE",
+            status="SUCCESS",
+            creator="test_user",
+            modifier="test_user",
+        )
+        publish_id_3 = publish_repository.insert_publish(
+            tenant=TEST_TENANT,
+            env=TEST_ENV,
+            domain="test_domain",
+            bot_id=bot_id,
+            publish_type="UPDATE",
+            status="REJECTED",
             creator="test_user",
             modifier="test_user",
         )
 
         records = publish_repository.list_by_bot_id(bot_id, TEST_TENANT, TEST_ENV)
-        assert len(records) >= 2
+        assert len(records) >= 3
 
         record_ids = {r.id for r in records}
         assert publish_id_1 in record_ids
         assert publish_id_2 in record_ids
+        assert publish_id_3 in record_ids
 
-        # Verify ordering: newest first (id DESC)
         for r in records:
             assert r.bot_id == bot_id
+
+        # Verify ordering: newest first (id DESC)
+        assert [r.id for r in records] == sorted(record_ids, reverse=True)
 
     # ------------------------------------------------------------------
     # 6. get_active_by_bot_id (only non-terminal status)

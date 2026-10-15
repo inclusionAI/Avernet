@@ -2,6 +2,11 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
+Bot classification for group creation: `GET /openapi/v1/bots/{bot_id}/classification`
+returns only Bot ID/type to authenticated users, with optional `entity_id` for
+composite identities; no owner/editor permission is required. See the
+[Gateway classification contract](../../../../docs/specs/2026-10-13-bot-classification-openapi/spec.md).
+
 _Living coordination doc for the multi-session effort to ship the public
 `/openapi/v1` API. This is the shared map: what's done, what's left, who's on
 what, and how the pieces fit together._
@@ -1331,7 +1336,7 @@ the other six: this is what "done" looks like per category.
 |---|---|---|---|
 | POST | `/openapi/v1/bots` | Create a bot; may need Passport authorization | `201 Envelope[Bot]` or `202 Envelope[BotAuthPending]` |
 | GET | `/openapi/v1/bots` | List caller's bots (`keyword`, `engine`, `status`, paged) | `Envelope[Page[Bot]]` |
-| GET | `/openapi/v1/bots/collaborations` | List only Bots the caller collaborates on; each item exposes `entity_id`, `owner_id`, and the caller's collaboration role | `Envelope[Page[CollaboratingBot]]` |
+| GET | `/openapi/v1/bots/collaborations` | List only Bots the caller collaborates on; each item exposes Bot identity, template metadata/configuration, assigned space, and the caller's collaboration role | `Envelope[Page[CollaboratingBot]]` |
 | GET | `/openapi/v1/bots/check-name` | Bot-name availability (`name`) | `Envelope[NameCheck]` |
 | GET | `/openapi/v1/bots/ceiling` | Selected Space's Bot ceiling | `Envelope[Ceiling]` |
 | GET | `/openapi/v1/bots/{bot_id}` | Bot details | `Envelope[Bot]` |

@@ -31,6 +31,7 @@ export function GroupChatCollabPanel({
       activeRuns={
         session ? (
           <GroupChatActiveRuns
+            key={session.sessionId}
             messages={messages}
             participants={session.participants}
             abortingBotIds={abortingBotIds}

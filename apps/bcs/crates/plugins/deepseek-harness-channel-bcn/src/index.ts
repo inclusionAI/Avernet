@@ -41,7 +41,10 @@ export async function apply(ctx: Context, rawConfig: PluginConfig): Promise<() =
   client.start();
 
   return async () => {
-    await bridge?.dispose();
-    await client.stop();
+    try {
+      await bridge?.dispose();
+    } finally {
+      await client.stop();
+    }
   };
 }

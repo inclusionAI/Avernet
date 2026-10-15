@@ -190,6 +190,7 @@ export type EvolveTaskPageQuery = {
   pageSize: number;
   taskTypes?: string[];
   excludedTaskTypes?: string[];
+  targetType?: "bot";
   statuses?: string[];
   query?: string;
 };
@@ -220,6 +221,8 @@ export type EvolveOptimizeVersionRow = {
 };
 
 export type EvolveBotRuntime = {
+  entityId?: string;
+  entityType?: string;
   activeEngine: string | null;
   botType: string | null;
   hasServiceBot: boolean;
@@ -1554,6 +1557,16 @@ export class EvolveRepository {
     const params: unknown[] = [];
     if (input.createdBy) { clauses.push("created_by = ?"); params.push(input.createdBy); }
     if (input.ownerUserId) { clauses.push("user_id = ?"); params.push(input.ownerUserId); }
+    if (input.taskTypes && input.taskTypes.length === 0) return { rows: [], total: 0 };
+    if (input.targetType === "bot") {
+      // Invalid legacy config is read as empty config, just as in publicTask.
+      const config = "CASE WHEN JSON_VALID(config_json) THEN config_json ELSE '{}' END";
+      const target = `JSON_EXTRACT(${config}, '$.targetSkillAssetId')`;
+      const value = this.db.dbType === "sqlite"
+        ? target
+        : `CASE WHEN JSON_TYPE(${target}) = 'NULL' THEN NULL ELSE JSON_UNQUOTE(${target}) END`;
+      clauses.push(`COALESCE(${value}, '') = ''`);
+    }
     if (input.taskTypes?.length) {
       clauses.push(`task_type IN (${input.taskTypes.map(() => "?").join(",")})`);
       params.push(...input.taskTypes);
@@ -1912,11 +1925,12 @@ export class EvolveRepository {
 
   private async resolveOwnedEvolveBotRuntime(userId: string, botId: string, env?: string): Promise<EvolveBotRuntime | null> {
     const rows = await this.botDb.query<{
-      active_engine: string | null; bot_type: string | null; bot_status: string | null; binding_id: string | number | null;
+      entity_id: string; entity_type: string; active_engine: string | null; bot_type: string | null; bot_status: string | null; binding_id: string | number | null;
       device_provider: string | null; device_id: string | null;
       device_props: unknown; binding_status: string | null; env: string | null;
     }>(
       `SELECT b.active_engine, b.bot_type, b.status AS bot_status, b.binding_id,
+              b.entity_id, b.entity_type,
               d.device_provider, d.device_id, d.device_props, d.status AS binding_status,
               COALESCE(d.env, b.env) AS env
        FROM ac_bots b
@@ -1957,6 +1971,7 @@ export class EvolveRepository {
       [botId, userId, userId, env ?? "", env ?? ""],
     ).catch(() => []);
     return {
+      entityId: row.entity_id, entityType: row.entity_type,
       activeEngine: row.active_engine,
       botType: row.bot_type,
       hasServiceBot: Number(publishedRows[0]?.published_count ?? 0) > 0,

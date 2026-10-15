@@ -5,6 +5,7 @@ import React from 'react';
 
 /**
  * 「标签」列 cell —— engine / deployment chip 恒显,serviceMode chip 仅服务 Bot 显示。
+ * 容器实例概览单独放在「容器信息」列，避免与标签相互挤占。
  *
  * 非服务 Bot 不补 `—` 占位:前两个 chip 无条件渲染,本列不存在「零标签」状态,
  * 补占位符只会与版本列的 `—` 在同一行重复出现。

@@ -86,6 +86,8 @@ export class BcnWsClient {
     this.reconnectTimer = undefined;
     this.heartbeatTimer = undefined;
     this.rejectPending(new Error('BCN WebSocket client stopped'));
+    this.queuedEvents = [];
+    this.queuedEventBytes = 0;
     const socket = this.socket;
     this.socket = undefined;
     const openingSocket = this.openingSocket;

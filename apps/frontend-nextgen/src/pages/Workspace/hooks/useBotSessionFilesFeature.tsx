@@ -3,6 +3,8 @@
 import { BotSessionFilesPanel } from '@/pages/Workspace/components/BotSessionFiles/BotSessionFilesPanel';
 import { BotUploadFilesModal } from '@/pages/Workspace/components/BotSessionFiles/UploadFilesModal';
 import { ResizableWorkspaceSidebar } from '@/pages/Workspace/components/ResizableWorkspaceSidebar';
+import type { ComposerCapabilitySetsState } from '@/components/Workspace/CapabilitySetViewer/types';
+import { useBotCapabilitySets } from '@/pages/Workspace/hooks/useBotCapabilitySets';
 import { buildBotSessionCommandItems } from '@/pages/Workspace/hooks/botSessionCommandItems';
 import { useBotSessionFileUpload } from '@/pages/Workspace/hooks/useBotSessionFileUpload';
 import { useBotSessionFiles } from '@/pages/Workspace/hooks/useBotSessionFiles';
@@ -28,6 +30,9 @@ export interface UseBotSessionFilesFeatureResult {
   fileDrawerOpen: boolean;
   /** 打开文件上传 Modal（供 ComposerCapabilitiesMenu onUpload 调用）。 */
   openUpload: () => void;
+  /** 「通用协作能力」能力集只读查看装配（我的/团队 Bot 非空；好友 Bot 为 null，
+   *  「通用协作能力」文案区随之不渲染，规格见 add-composer-capability-set-viewer）。 */
+  capabilitySets: ComposerCapabilitySetsState | null;
 }
 
 export function useBotSessionFilesFeature(
@@ -43,6 +48,8 @@ export function useBotSessionFilesFeature(
   const files = useBotSessionFiles(botId, sessionId, userId, ownerId);
   const upload = useBotSessionFileUpload(botId, sessionId, userId, ownerId);
   const skillsState = useBotSkills(bot, userId);
+  // 「通用协作能力」能力集装配：好友 Bot / 不可会话 Bot 为 null（文案区随之隐藏）。
+  const capabilitySets = useBotCapabilitySets(bot, userId);
   const senderRef = useRef<SenderRef | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -221,5 +228,6 @@ export function useBotSessionFilesFeature(
     closeFileDrawer,
     fileDrawerOpen: drawerOpen,
     openUpload,
+    capabilitySets,
   };
 }

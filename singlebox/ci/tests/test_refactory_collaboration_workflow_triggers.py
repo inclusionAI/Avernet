@@ -6,7 +6,6 @@ WORKFLOW_PATHS = (
     REPO_ROOT / ".github/workflows/unit-tests.yml",
     REPO_ROOT / ".github/workflows/singlebox-coverage.yml",
     REPO_ROOT / ".github/workflows/architecture-checks.yml",
-    REPO_ROOT / ".github/workflows/e2e-tests.yml",
 )
 
 

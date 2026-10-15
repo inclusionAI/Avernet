@@ -1,11 +1,12 @@
 /** @jest-environment jsdom */
 import { CreateGroupModal } from '@/pages/Workspace/components/Modals/CreateGroupModal';
+import { queryIsServiceBot } from '@/services/workspace/botClassificationService';
 import { collaborationCandidateService } from '@/services/workspace/collaborationCandidateService';
 import { groupService } from '@/services/workspace/groupService';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 // 建群表单重度使用 Radix Select/Popover 等组件，jsdom 下异步渲染开销大：
 // 并行全量（--maxWorkers=50%）下个别用例在默认 30s 随机临界超时。
@@ -22,6 +23,7 @@ jest.mock('@/pages/Workspace/components/Modals/YamlEditor', () => ({
 
 // bare auto-mock: factory referencing jest.fn() trips @jest/globals TDZ (repo convention).
 jest.mock('@/services/workspace/groupService');
+jest.mock('@/services/workspace/botClassificationService');
 
 import { collaborationDefinitionService } from '@/services/workspace/collaborationDefinitionService';
 jest.mock('@/services/workspace/collaborationCandidateService');
@@ -76,6 +78,7 @@ async function selectLeader(label: string, optionName: RegExp) {
 }
 
 beforeEach(() => {
+  jest.mocked(queryIsServiceBot).mockReset().mockResolvedValue(false);
   gs.createGroup.mockReset();
   cs.listFriends.mockReset();
   cs.listCandidates.mockReset();
@@ -131,7 +134,8 @@ it('Bot 身份未命名时自动群名保留自身名称而非认证用户名', 
       onCreated={jest.fn()}
     />,
   );
-  fireEvent.click(await screen.findByRole('button', { name: '确认创建' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
   await waitFor(() =>
     expect(gs.createGroup).toHaveBeenCalledWith(expect.objectContaining({ name: expect.stringContaining('协作 Bot') })),
   );
@@ -148,6 +152,7 @@ it('free_chat strategy posts delivery_policy on confirm', async () => {
   fireEvent.change(screen.getByLabelText('协作群名称'), { target: { value: '我的群' } });
   fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
   await selectLeader('群主 Bot', /Alpha/);
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
 
   await waitFor(() =>
@@ -186,6 +191,7 @@ it('maps the auto-reply switch to the delivery policy and updates its helper tex
 
   fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
   await selectLeader('群主 Bot', /Alpha/);
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
 
   await waitFor(() =>
@@ -201,6 +207,7 @@ it('task_master_slave uses the selected manager as driver_bot_uuid', async () =>
   expect(screen.queryByText('主节点统一推进任务，其余成员作为 Worker 配合执行。')).not.toBeInTheDocument();
   fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
   await selectLeader('主节点（Manager Bot）', /Alpha/);
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
 
   await waitFor(() =>
@@ -219,6 +226,7 @@ it('falls back to participant names when the bot identity creates a group withou
   renderModal({ activeIdentity: botIdentity });
 
   fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
 
   await waitFor(() =>
@@ -261,6 +269,7 @@ it('state_machine submits definitionYaml as content_yaml body', async () => {
     setTimeout(() => resolve(), 100);
   });
   fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
 
   await waitFor(() =>
@@ -367,6 +376,7 @@ it('backend 400 shows YAML error inline without closing', async () => {
   fireEvent.click(screen.getByRole('button', { name: /校验 YAML/ }));
   await waitFor(() => expect(collaborationDefinitionService.validate).toHaveBeenCalled());
   fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
 
   expect(await screen.findByText(/YAML 校验不通过/)).toBeInTheDocument();
@@ -467,4 +477,58 @@ it('clears previous form state when reopened', async () => {
 
   await waitFor(() => expect((screen.getByLabelText('协作群名称') as HTMLInputElement).value).toBe(''));
   expect(screen.getByText('已选 0 个')).toBeInTheDocument();
+});
+
+it.each(['自由聊天', '任务协作', '自定义协作'])('%s carries the selected service Bot stage tag', async (kind) => {
+  jest.mocked(queryIsServiceBot).mockImplementation(async (id: string) => id === 'b1');
+  gs.createGroup.mockResolvedValue({ ok: true, data: { groupId: 'g-stage' } });
+  renderModal({ activeIdentity: botIdentity });
+  if (kind !== '自由聊天') fireEvent.click(screen.getByRole('radio', { name: kind }));
+  if (kind === '自定义协作') {
+    fireEvent.change(screen.getByLabelText('协作定义 YAML'), { target: { value: 'participants: [alpha]' } });
+    fireEvent.click(screen.getByRole('button', { name: /校验 YAML/ }));
+    await screen.findByRole('button', { name: /Alpha/ });
+  }
+  fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
+  if (kind === '任务协作') await selectLeader('主节点（Manager Bot）', /Alpha/);
+  fireEvent.click(await screen.findByRole('button', { name: '指定路由' }));
+  const selectedMembers = screen.getByTestId('group-participant-selected');
+  const serviceBotChip = within(selectedMembers).getByRole('group', { name: 'Alpha已选成员' });
+  expect(within(serviceBotChip).getByRole('group', { name: 'Alpha路由方式' })).toBeInTheDocument();
+  expect(within(serviceBotChip).getByRole('group', { name: 'Alpha运行阶段' })).toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: '服务 Bot 路由' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '确认创建' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '预发' }));
+  expect(within(serviceBotChip).getByText('Alpha（预发）')).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
+  await waitFor(() =>
+    expect(gs.createGroup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        participants: expect.arrayContaining([{ actor_id: 'b1', tags: ['verify'] }]),
+      }),
+    ),
+  );
+});
+
+it('shows classification failures, blocks submit, and retries before allowing dynamic routing', async () => {
+  jest.mocked(queryIsServiceBot).mockRejectedValueOnce(new Error('offline')).mockResolvedValue(true);
+  gs.createGroup.mockResolvedValue({ ok: true, data: { groupId: 'g-dynamic' } });
+  renderModal({ activeIdentity: botIdentity });
+  await screen.findByText('Bot 类型识别失败，请重试');
+  expect(screen.getByRole('button', { name: '确认创建' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '重试' }));
+  await screen.findByRole('button', { name: '动态路由规则' });
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: '指定路由' }));
+  fireEvent.click(screen.getByRole('button', { name: '草稿' }));
+  fireEvent.click(screen.getByRole('button', { name: '动态路由规则' }));
+  fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
+  await waitFor(() =>
+    expect(gs.createGroup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        participants: [{ actor_id: 'actor-bot' }],
+      }),
+    ),
+  );
 });

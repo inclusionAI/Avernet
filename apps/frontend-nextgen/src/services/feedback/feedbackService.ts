@@ -3,7 +3,7 @@ import { createFeedback } from '@/services/backendApi/feedback/feedbackControlle
 import { isEnvelopeSuccess } from '@/services/backendApi/types';
 
 /**
- * 反馈 Service（BBS 实验反馈通道 §5.2）。领域校验在前端兜底：reporter_id 必填、content 非空且 ≤4000 字。
+ * 反馈 Service（Avernet task 域 Feedback contract §8）。领域校验在前端兜底：reporter_id 必填、content 非空且 ≤4000 字。
  * 后端无幂等键：每次成功提交即新增一条；Service 仅做信封解码与错误归一，返回新记录 id。
  */
 export class FeedbackService {

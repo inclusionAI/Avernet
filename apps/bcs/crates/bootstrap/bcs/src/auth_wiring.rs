@@ -259,6 +259,7 @@ pub fn try_build_auth_chain_with_factories(
 }
 
 /// Build the priority-ordered chain from config and optional external factories.
+#[cfg(any(test, feature = "test-utils"))]
 pub fn build_auth_chain_with_factories(
     config: &AuthConfig,
     bot_registry: Arc<dyn BotRegistryCoreService>,
@@ -280,6 +281,7 @@ pub fn build_auth_chain_with_factories(
 }
 
 /// Build the priority-ordered chain from config.
+#[cfg(any(test, feature = "test-utils"))]
 pub fn build_auth_chain(
     config: &AuthConfig,
     bot_registry: Arc<dyn BotRegistryCoreService>,

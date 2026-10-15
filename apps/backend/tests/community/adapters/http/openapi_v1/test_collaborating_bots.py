@@ -16,6 +16,11 @@ from agentclaw.community.adapters.http.openapi_v1.principal import require_actin
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.core.bot_collaborator.models import CollaboratorRecord
+from agentclaw.community.core.bot_inventory.protocols import (
+    BotInventoryTemplatePort,
+    BusinessSpaceContextProtocol,
+)
+from agentclaw.community.core.bot_inventory.types import BusinessSpaceRef
 from tests.community.adapters.http.openapi_v1.conftest import user_scoped_client
 
 
@@ -35,11 +40,20 @@ def _relation(*, bot_id: str = "shared-1", owner_id: str = "owner-1"):
     )
 
 
-def _client(*, bots, collaborators, caller=None):
+def _client(*, bots, collaborators, caller=None, template_port=None, space_context=None):
+    if template_port is None:
+        template_port = MagicMock()
+        template_port.list_template_configs_by_bot_ids.return_value = {}
+    if space_context is None:
+        space_context = MagicMock()
+        space_context.bot_space.return_value = None
+
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotServiceProtocol, to=bots)
             binder.bind(CollaboratorServiceProtocol, to=collaborators)
+            binder.bind(BotInventoryTemplatePort, to=template_port)
+            binder.bind(BusinessSpaceContextProtocol, to=space_context)
 
     app = FastAPI()
     app.include_router(router)
@@ -65,14 +79,28 @@ def test_lists_only_collaborations_and_keeps_entity_and_owner_separate():
                 "active_engine": "teclaw",
                 "bot_type": "personal",
                 "status": "ACTIVE",
-                "template_config": {"token": "test-token"},
+                "template_type": "applicationCoding",
+                "space_id": "18",
             }
         ],
     }
     collaborators = MagicMock()
     collaborators.list_user_collaborations.return_value = [_relation()]
+    template_port = MagicMock()
+    template_port.list_template_configs_by_bot_ids.return_value = {
+        "shared-1": {"token": "test-token"}
+    }
+    space_context = MagicMock()
+    space_context.bot_space.return_value = BusinessSpaceRef(
+        space_id="18", name="Product", kind="team"
+    )
 
-    response = _client(bots=bots, collaborators=collaborators).get(
+    response = _client(
+        bots=bots,
+        collaborators=collaborators,
+        template_port=template_port,
+        space_context=space_context,
+    ).get(
         "/openapi/v1/bots/collaborations", params={"page": 2, "page_size": 7}
     )
 
@@ -90,6 +118,9 @@ def test_lists_only_collaborations_and_keeps_entity_and_owner_separate():
             "cluster_name": "ANDC",
             "bot_type": "personal",
             "status": "ACTIVE",
+            "template_type": "applicationCoding",
+            "template_config": {"token": "test-token"},
+            "space": {"space_id": "18", "name": "Product", "kind": "team"},
             "collaboration": {
                 "id": 17,
                 "role": "admin",
@@ -98,7 +129,12 @@ def test_lists_only_collaborations_and_keeps_entity_and_owner_separate():
         }
     ]
     assert "owner_entity_id" not in data["items"][0]
-    assert "template_config" not in data["items"][0]
+    template_port.list_template_configs_by_bot_ids.assert_called_once_with(["shared-1"])
+    space_context.bot_space.assert_called_once_with(
+        bot=bots.list_bots_by_owner_bot_pairs.return_value["items"][0],
+        owner_id="owner-1",
+        current_space=None,
+    )
     collaborators.list_user_collaborations.assert_called_once_with("collab-1")
     bots.list_bots_by_owner_bot_pairs.assert_called_once_with(
         pairs=[("shared-1", "owner-1")], page=2, page_size=7

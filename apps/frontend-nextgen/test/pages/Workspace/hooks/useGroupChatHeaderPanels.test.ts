@@ -192,3 +192,25 @@ it('副屏判空：无 <AixUI type="panel"> 时 Monitor 禁用且 toggle 空转�
   expect(openTab).toHaveBeenCalledTimes(1);
   expect(result.current.sidePaneOpen).toBe(true);
 });
+
+it('真实态同步：渲染器挂载默认展开（onIsOpenChange(true)）即点亮 sidePaneOpen，Monitor 首点直接关闭', () => {
+  // 场景回放：消息渲染器挂载即 openTab 自动展开副屏（无任何用户点按）。
+  // 修复前 sidePaneOpen 盲镜像恒 false —— 收起钮不出现、Monitor 首点仍走「打开」空转。
+  const { ref: handle, closePanel } = makePanelHandle();
+  const { result } = renderHook(() =>
+    useGroupChatHeaderPanels({
+      session: makeSession(),
+      messages: makePanelMessages(),
+      panelRef: handle,
+      toggleFavorite: jest.fn(),
+    }),
+  );
+
+  act(() => result.current.onSidePaneIsOpenChange(true));
+  expect(result.current.sidePaneOpen).toBe(true);
+
+  // 真实态一致后，Monitor 首点语义即「关闭」。
+  act(() => result.current.toggleSidePane());
+  expect(closePanel).toHaveBeenCalledTimes(1);
+  expect(result.current.sidePaneOpen).toBe(false);
+});

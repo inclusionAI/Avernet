@@ -8,6 +8,7 @@ import { useCollaborationTemplates } from '../../hooks/useCollaborationTemplates
 import { useCreateGroup } from '../../hooks/useCreateGroup';
 import { useGroupCollaborationPicker } from '../../hooks/useGroupCollaborationPicker';
 import { useParticipantBinding } from '../../hooks/useParticipantBinding';
+import { useServiceBotRouting } from '../../hooks/useServiceBotRouting';
 import { BindingSlot, YamlValidateButton } from './BindingSlot';
 import { CollaborationFlowAside } from './CollaborationFlowAside';
 import { CollaborationTemplatePicker } from './CollaborationTemplatePicker';
@@ -56,16 +57,11 @@ export function CreateGroupModal({
   const { reset: resetTemplates } = templates;
   const binding = useParticipantBinding(kind === 'task_dag');
 
-  const selectedBots = useMemo(() => {
-    const map = new Map<string, { id: string; name: string }>();
-    [...picker.friends, ...picker.mine, ...picker.candidates].forEach((bot) => {
-      if (botUuids.includes(bot.id)) map.set(bot.id, { id: bot.id, name: bot.name });
-    });
-    if (activeIdentity?.kind === 'bot' && botUuids.includes(activeIdentity.id)) {
-      map.set(activeIdentity.id, { id: activeIdentity.id, name: activeIdentity.displayName });
-    }
-    return Array.from(map.values());
-  }, [activeIdentity, botUuids, picker.candidates, picker.friends, picker.mine]);
+  const allAvailableBots = useAllAvailableBots(activeIdentity, picker);
+  const selectedBots = useMemo(
+    () => allAvailableBots.filter((bot) => botUuids.includes(bot.id)),
+    [allAvailableBots, botUuids],
+  );
 
   const leaderOptions = useMemo<GroupLeaderOption[]>(() => {
     return selectedBots.map((bot) => ({
@@ -75,11 +71,15 @@ export function CreateGroupModal({
     }));
   }, [activeIdentity, selectedBots]);
 
-  const allAvailableBots = useAllAvailableBots(activeIdentity, picker);
   const allBotName = (botId: string) => allAvailableBots.find((b) => b.id === botId)?.name ?? botId;
   const boundBotIds = Array.from(new Set(Object.values(binding.participantBindings).filter(Boolean)));
+  const participantBotIds = kind === 'task_dag' ? boundBotIds : botUuids;
+  const routing = useServiceBotRouting(participantBotIds, open);
   const activeRoleBotId = binding.participantBindings[binding.activeParticipantKey] ?? '';
-  const activeRoleBotOption = activeRoleBotId ? [{ id: activeRoleBotId, name: allBotName(activeRoleBotId) }] : [];
+  const boundBotOptions = boundBotIds.map(
+    (id) => allAvailableBots.find((bot) => bot.id === id) ?? { id, name: allBotName(id) },
+  );
+  const activeRoleBotOption = boundBotOptions.filter((bot) => bot.id === activeRoleBotId);
 
   useEffect(() => {
     const opening = open && !wasOpenRef.current;
@@ -136,7 +136,7 @@ export function CreateGroupModal({
   const hasParticipants =
     kind === 'task_dag' ? Object.values(binding.participantBindings).some(Boolean) : botUuids.length > 0;
   const hasLeader = kind === 'task_dag' ? true : kind === 'free_chat' ? Boolean(driverBotId) : Boolean(managerBotId);
-  const canSubmit = hasParticipants && hasLeader && binding.canSubmitTaskDag;
+  const canSubmit = hasParticipants && hasLeader && binding.canSubmitTaskDag && routing.ready;
 
   const bindingSlot: ReactNode = (
     <BindingSlot visible={kind === 'task_dag' && supportsStateMachine} binding={binding} botNameResolver={allBotName} />
@@ -161,6 +161,7 @@ export function CreateGroupModal({
     ) : null;
 
   const handleSubmit = async () => {
+    if (!canSubmit || creating) return;
     const currentHuman =
       activeIdentity?.kind === 'user' && activeIdentity.id && activeIdentity.id !== 'me' ? activeIdentity.id : null;
     let effectiveLeader: string;
@@ -185,7 +186,7 @@ export function CreateGroupModal({
         definitionYaml,
         driverBotUuid: effectiveLeader,
         originator: activeIdentity?.id ?? '',
-        participants: applyViewScope(participantIds, currentHuman),
+        participants: routing.applyTags(applyViewScope(participantIds, currentHuman)),
         context: context.trim() || undefined,
         participantBindings: kind === 'task_dag' ? participantBindingsArr : undefined,
       },
@@ -265,6 +266,8 @@ export function CreateGroupModal({
                 }
                 listViewportClassName={showFlowAside ? 'max-h-[420px]' : undefined}
                 fillAvailableHeight={!showFlowAside}
+                routing={routing}
+                additionalRoutingOptions={kind === 'task_dag' ? boundBotOptions : undefined}
               />
             )}
             {friendlyError && (

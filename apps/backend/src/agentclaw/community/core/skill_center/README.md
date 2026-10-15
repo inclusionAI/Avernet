@@ -16,6 +16,12 @@ provides:
   - "CurrentRuntimeLayoutProbeService"
   - "SkillQueryService"
   - "LocalSkillUploadService"
+  - "LocalSkillSecurityScanTaskHandler"
+  - "LocalSkillSecuritySyncTaskHandler"
+  - "LocalSkillSecurityTaskReconciler"
+  - "LocalSkillSecurityUploadObserver"
+  - "LocalSkillSecurityUploadHook"
+  - "NoopLocalSkillSecurityUploadHook"
   - "LocalSkillPackageRuntime"
   - "LocalSkillPackageRuntimeResult"
   - "SkillPackageValidator"
@@ -95,6 +101,7 @@ provides:
 consumes:
   - "BotRepository"
   - "BotCollabLogRepositoryProtocol"
+  - "LocalSkillSecurityObservationRepositoryProtocol"
   - "CollaboratorServiceProtocol"
   - "Events"
   - "core/mcp services"
@@ -105,6 +112,8 @@ consumes:
   - "MCPCenterPlugin"
   - "ObjectStoragePlugin"
   - "ImmutableObjectStorageCapability"
+  - "LocalSkillSecurityProviderProtocol (Plugin API V1)"
+  - "TaskQueueService"
   - "SecretResolver"
   - "SkillCenterClient"
   - "SkillCenterGateway"
@@ -131,12 +140,15 @@ internal_dependencies:
   - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.core.bot_config_surface    # BotConfigCoords, the shared config-category address type
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.local_skill_security_observation
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.mcp_default_exclusion
   - agentclaw.community.core.repository.protocols.center_skill_access
   - agentclaw.community.core.repository.protocols.space_skill_version # published Space Skill read contract consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center_types # query projection types consumed by this module
   - agentclaw.community.core.repository.protocols.space_skill_publication # Publication aggregate persistence contract
+  - agentclaw.community.core.repository.protocols.local_skill_security_observation # immutable Local upload observation facts
+  - agentclaw.community.plugin_api.local_skill_security_provider # outbound security provider contract
   - agentclaw.community.core.repository.protocols.skill_center_reference
   - agentclaw.community.core.repository.protocols.track_latest
   - agentclaw.community.core.repository.skill_center_reference_types

@@ -1,10 +1,26 @@
 use bcs_collaboration_runtime::fixed_loop::{compile_authoring_definition, execution_plan_content_hash};
+use bcs_collaboration_runtime::definition::node_loop_path;
+use bcs_collaboration_runtime::fixed_loop::NESTED_FIXED_LOOP_COMPILER_VERSION;
 use bcs_collaboration_runtime::snapshot::{load_state_machine_snapshot, snapshot_execution_plan};
 use bcs_config_api::FixedLoopLimits;
 use bcs_service_api::port::repo::StateMachineRunSnapshot;
 
 fn fixture() -> StateMachineRunSnapshot {
     let definition = serde_yaml::from_str(include_str!("fixtures/fixed_loop.yaml")).unwrap();
+    let compiled = compile_authoring_definition(definition, &FixedLoopLimits::default()).unwrap();
+    StateMachineRunSnapshot {
+        definition: compiled.definition,
+        execution_plan: Some(snapshot_execution_plan(compiled.plan.unwrap()).unwrap()),
+        resolved_participant_bindings: None,
+    }
+}
+
+fn nested_fixture() -> StateMachineRunSnapshot {
+    let mut definition: bcs_domain::CollaborationDefinition = serde_yaml::from_str(
+        include_str!("fixtures/nested_fixed_loop.yaml"),
+    ).unwrap();
+    definition.id = "nested-snapshot".into();
+    definition.version = 3;
     let compiled = compile_authoring_definition(definition, &FixedLoopLimits::default()).unwrap();
     StateMachineRunSnapshot {
         definition: compiled.definition,
@@ -120,4 +136,74 @@ fn legacy_v1_snapshot_load_keeps_original_graph_and_omits_plan() {
     let loaded = load_state_machine_snapshot(snapshot).unwrap();
     assert!(loaded.plan.is_none());
     assert_eq!(serde_json::to_value(loaded.definition).unwrap(), expected);
+}
+
+#[test]
+fn loop_path_accessor_normalizes_v1_and_validates_v2() {
+    let snapshot = fixture();
+    let mut plan = snapshot.execution_plan.unwrap().plan;
+    let legacy = plan.node_metadata.values().find(|meta| meta.loop_id.is_some()).unwrap().clone();
+    assert_eq!(node_loop_path(&plan, &legacy).unwrap(), vec![bcs_domain::StateMachineLoopFrame {
+        loop_id: legacy.loop_id.clone().unwrap(),
+        iteration: legacy.iteration.unwrap(),
+        max_iterations: legacy.max_iterations.unwrap(),
+    }]);
+    let ordinary = plan.node_metadata.values().find(|meta| meta.loop_id.is_none()).unwrap();
+    assert!(node_loop_path(&plan, ordinary).unwrap().is_empty());
+
+    plan.compiler_version = NESTED_FIXED_LOOP_COMPILER_VERSION.into();
+    assert!(node_loop_path(&plan, &legacy).is_err());
+    let mut nested = legacy.clone();
+    nested.loop_path = Some(vec![
+        bcs_domain::StateMachineLoopFrame { loop_id: "outer".into(), iteration: 2, max_iterations: 2 },
+        bcs_domain::StateMachineLoopFrame {
+            loop_id: nested.loop_id.clone().unwrap(),
+            iteration: nested.iteration.unwrap(),
+            max_iterations: nested.max_iterations.unwrap(),
+        },
+    ]);
+    assert_eq!(node_loop_path(&plan, &nested).unwrap(), nested.loop_path.clone().unwrap());
+    nested.loop_path.as_mut().unwrap().last_mut().unwrap().iteration += 1;
+    assert!(node_loop_path(&plan, &nested).is_err());
+    nested.loop_path.as_mut().unwrap().last_mut().unwrap().iteration = 0;
+    assert!(node_loop_path(&plan, &nested).is_err());
+}
+
+#[test]
+fn compiler_v2_snapshot_round_trips_and_rejects_rehashed_path_corruption() {
+    let loaded = load_state_machine_snapshot(nested_fixture()).unwrap();
+    let plan = loaded.plan.unwrap();
+    assert_eq!(plan.state_machine.nodes.len(), 17);
+    assert!(plan.node_metadata.values().any(|meta|
+        meta.loop_path.as_ref().is_some_and(|path| path.len() == 2)));
+
+    for mutation in 0..5 {
+        let mut snapshot = nested_fixture();
+        let plan = &mut snapshot.execution_plan.as_mut().unwrap().plan;
+        match mutation {
+            0 => plan.node_metadata.values_mut().find(|meta|
+                meta.loop_path.as_ref().is_some_and(|path| path.len() == 2))
+                .unwrap().loop_path.as_mut().unwrap()[0].iteration = 3,
+            1 => plan.node_metadata.values_mut().find(|meta|
+                meta.loop_path.as_ref().is_some_and(|path| path.len() == 2))
+                .unwrap().loop_path = None,
+            2 => {
+                let wrong = plan.node_metadata.values().find(|candidate|
+                    candidate.loop_path.as_ref().is_some_and(|path|
+                        path.len() == 2 && path[0].iteration == 2)
+                        && candidate.is_loop_result).unwrap().execution_node_id.clone();
+                let meta = plan.node_metadata.values_mut().find(|meta|
+                    meta.loop_path.as_ref().is_some_and(|path|
+                        path.len() == 2 && path[0].iteration == 1)
+                        && meta.is_loop_entry && meta.iteration == Some(2))
+                    .unwrap();
+                meta.previous_result_node_id = Some(wrong);
+            }
+            3 => { plan.edge_metadata.pop(); }
+            _ => snapshot.definition.requires.as_mut().unwrap().server_features
+                .retain(|feature| feature != "state_machine.loop.nesting"),
+        }
+        rehash(&mut snapshot);
+        assert!(load_state_machine_snapshot(snapshot).is_err(), "mutation {mutation}");
+    }
 }

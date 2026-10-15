@@ -32,6 +32,8 @@ export type InsertDeployHistoryInput = {
   action: "deploy" | "rollback" | "pull" | "migration" | "edit";
   fromDeployNumber?: number;
   specJson: string;
+  /** Host derives these from the frozen candidate manifest, never runtime input. */
+  facadeCommands?: string[];
   note?: string;
   botId?: string;
   ownerId?: string;
@@ -41,6 +43,44 @@ export type InsertDeployHistoryInput = {
 
 export class WorkflowDeployHistoryRepository {
   constructor(private db: IDatabase) {}
+
+  /** Caller has verified the immutable publication claim. Atomically fence
+   * activation by the reviewed active deployment and keep acknowledgement retry stable. */
+  async publishReviewed(input: InsertDeployHistoryInput, expectedActiveDeployNumber: number, activationGuard?: () => Promise<boolean>): Promise<void> {
+    if (!Number.isSafeInteger(expectedActiveDeployNumber) || expectedActiveDeployNumber < 1 || input.isActive !== true
+      || input.action !== 'deploy' || input.tagName !== `deploy/${input.workflowId}/#${input.deployNumber}`) throw new Error('Invalid reviewed publication');
+    await this.db.transaction(async tx => {
+      const lock = tx.dbType === 'mysql' || tx.dbType === 'zdas' ? ' FOR UPDATE' : '';
+      const workflow = await tx.query(`SELECT workflow_id FROM workflow_specs WHERE workflow_id = ?${lock}`, [input.workflowId]);
+      if (!workflow.length) throw new Error('Workflow not found');
+      if (activationGuard && !await activationGuard()) throw new Error('PUBLICATION_LEASE_CHANGED: activation authorization changed');
+      const active = (await tx.query<WorkflowDeployHistoryRow>(`SELECT * FROM workflow_deploy_history WHERE workflow_id = ? AND is_active = 1${lock}`, [input.workflowId]))[0];
+      if (active?.deploy_number === input.deployNumber && active.tag_name === input.tagName
+        && active.version === input.version && active.pack_id === input.packId && active.spec_json === input.specJson
+        && active.note === (input.note ?? null) && active.bot_id === (input.botId ?? null) && active.owner_id === (input.ownerId ?? null)) return;
+      if (!active || active.deploy_number !== expectedActiveDeployNumber) throw new Error('BASELINE_STALE: active deployment changed; no candidate activated');
+      if (input.facadeCommands !== undefined) {
+        if (!Array.isArray(input.facadeCommands) || input.facadeCommands.length > 100
+          || input.facadeCommands.some(command => !/^[a-z0-9][a-z0-9_-]{0,127}$/.test(command))) throw new Error('Invalid reviewed facade commands');
+        // Routing and workflow activation commit together. Conflicts abort all
+        // writes, and cleanup is scoped to this workflow only.
+        for (const command of input.facadeCommands) {
+          const existing = (await tx.query<{ workflow_id: string }>(`SELECT workflow_id FROM facade_bindings WHERE command = ?${lock}`, [command]))[0];
+          if (existing && existing.workflow_id !== input.workflowId) throw new Error('FACADE_CONFLICT: command belongs to another workflow');
+        }
+        await tx.exec('DELETE FROM facade_bindings WHERE workflow_id = ?', [input.workflowId]);
+        for (const command of [...new Set(input.facadeCommands)]) await tx.exec(`INSERT INTO facade_bindings
+          (command, workflow_id, pack_id, remark, gmt_create, gmt_modified) VALUES (?, ?, ?, NULL, ?, ?)`,
+        [command, input.workflowId, input.packId, tx.dialect.now(), tx.dialect.now()]);
+      }
+      await new WorkflowDeployHistoryRepository(tx).insert({ ...input, isActive: false });
+      await tx.exec('UPDATE workflow_deploy_history SET is_active = 0 WHERE workflow_id = ? AND is_active = 1', [input.workflowId]);
+      await tx.exec('UPDATE workflow_deploy_history SET is_active = 1 WHERE workflow_id = ? AND deploy_number = ?', [input.workflowId, input.deployNumber]);
+      const result = await tx.exec('UPDATE workflow_specs SET version = ?, spec_json = ?, pack_id = ?, gmt_modified = ? WHERE workflow_id = ?',
+        [input.version, input.specJson, input.packId, tx.dialect.now(), input.workflowId]);
+      if (result.affectedRows !== 1) throw new Error('Workflow activation write failed');
+    });
+  }
 
   async insert(input: InsertDeployHistoryInput): Promise<void> {
     const now = this.db.dialect.now();

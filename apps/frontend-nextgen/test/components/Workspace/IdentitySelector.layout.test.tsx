@@ -542,3 +542,46 @@ describe('WorkspaceIdentitySelector 布局形态与 hover 提示', () => {
     await waitFor(() => expect(trigger).toHaveAttribute('aria-expanded', 'false'));
   });
 });
+
+it('发现页 inline 布局隐藏标签并支持切换', async () => {
+  const onChange = jest.fn();
+  render(
+    <WorkspaceIdentitySelector
+      identities={identities}
+      activeId="human_900004"
+      onChange={onChange}
+      layout="inline"
+      headerLabel="为 Ta 加好友："
+    />,
+  );
+  const trigger = screen.getByRole('button', { name: '当前协作身份：示例用户' });
+  expect(trigger.parentElement).toHaveClass('flex', 'items-center');
+  expect(screen.queryByText('为 Ta 加好友：')).not.toBeInTheDocument();
+  expect(trigger).toHaveTextContent('示例用户');
+  expect(trigger).not.toHaveTextContent('900004');
+  expect(screen.queryByRole('button', { name: '切换工作身份' })).not.toBeInTheDocument();
+  fireEvent.click(trigger);
+  await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
+  fireEvent.click(screen.getByText('协作 Bot'));
+  expect(onChange).toHaveBeenCalledWith('bot-online');
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+});
+
+
+it('inline Bot 触发按钮展示引擎名称', () => {
+  render(<WorkspaceIdentitySelector identities={identities} activeId="bot-online" onChange={jest.fn()} layout="inline" />);
+  const trigger = screen.getByRole('button', { name: '当前协作身份：协作 Bot' });
+  expect(trigger).toHaveTextContent('OpenClaw');
+  expect(screen.getByText('OpenClaw')).toHaveClass('rounded-md', 'bg-muted', 'text-foreground');
+  expect(screen.queryByText('当前协作身份')).not.toBeInTheDocument();
+});
+
+
+it('inline 用户触发按钮展示蓝色用户标签', () => {
+  render(<WorkspaceIdentitySelector identities={identities} activeId="human_900004" onChange={jest.fn()} layout="inline" />);
+  const trigger = screen.getByRole('button', { name: '当前协作身份：示例用户' });
+  const label = screen.getByText('用户');
+  expect(trigger).toContainElement(label);
+  expect(label).toHaveClass('rounded-md', 'bg-primary/10', 'text-primary');
+  expect(trigger).not.toHaveTextContent('引擎类型暂无');
+});

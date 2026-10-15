@@ -15,6 +15,9 @@ from __future__ import annotations
 from injector import Module, inject, provider, singleton
 
 from agentclaw.community.di import config_community as cfg
+from agentclaw.community.di.local_skill_security_config import (
+    LocalSkillSecurityObservationConfig,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
@@ -67,7 +70,11 @@ class CommunityDatabaseModule(Module):
     @singleton
     @provider
     @inject
-    def database(self, config: cfg.CommunityDatabaseConfig) -> DatabasePlugin:
+    def database(
+        self,
+        config: cfg.CommunityDatabaseConfig,
+        security_config: LocalSkillSecurityObservationConfig,
+    ) -> DatabasePlugin:
         from sqlalchemy.engine import make_url
 
         from agentclaw.community.plugins.community.database import CommunityDatabase
@@ -84,4 +91,8 @@ class CommunityDatabaseModule(Module):
             safe_url,
             config.create_schema,
         )
-        return CommunityDatabase(config.url, create_schema=config.create_schema)
+        return CommunityDatabase(
+            config.url,
+            create_schema=config.create_schema,
+            security_schema_required=security_config.enabled,
+        )

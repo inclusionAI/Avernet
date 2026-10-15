@@ -57,7 +57,7 @@ export interface HelpLink {
 /**
  * 版本发布说明数据（用户须知 + 新版本内容）。由 ReleaseNotesCapability.load 异步拉取，
  * 数据源为内部雨燕配置（teamclaw-release-note_*）。富文本 HTML 来自受信运营平台，UI 用
- * dangerouslySetInnerHTML 渲染。Open Core 无此数据源 → capability 返回 null（菜单不展示该项）。
+ * 受约束的富文本渲染器展示。Open Core 无此数据源 → capability 返回 null（菜单不展示该项）。
  */
 export interface ReleaseNotesData {
   version?: string;
@@ -179,6 +179,8 @@ export interface AgentCodingInternalResources {
   codefuseTokenUrl: string | null;
   antCodeProjectsApiUrl: string | null;
   antCodeProjectBaseUrl: string | null;
+  xiaojinCodeProjectsApiUrl: string | null;
+  xiaojinCodeProjectBaseUrl: string | null;
 }
 
 /**
@@ -252,9 +254,45 @@ export interface OpenSourceExperienceNoticeSpec {
   acknowledgeLabel: string;
 }
 
+/**
+ * 「返回旧版」入口的灰度决策数据（OpenSpec add-gray-release-nextgen-switch 跨版本切流）。
+ * 由 capability 实现方（internal overlay）拉取并附带打点副作用；Open Core 无旧版形态不提供。
+ */
+export interface LegacyVersionDecision {
+  /** 旧版入口 URL；空串表示当前不可切回（不渲染入口）。 */
+  oldUrl: string;
+  /** 命中的灰度规则类型（preference / user_whitelist / dept_whitelist / percent / default / fail_open），供启动打点。 */
+  hitRule: string;
+}
+
+/**
+ * 版本切换（逃生舱）能力。「体验新版 / 返回旧版」跨版本切流的数据源与写口收口：
+ * - Open Core 默认 null（无旧版可切回，壳层不渲染入口、启动不发请求不打点）；
+ * - internal overlay 经 `src/extensions/internal.ts` 注入灰度判定实现（agentclaw
+ *   `/api/v1/gray/**` 判定接口；内部域名/信封细节只存在 overlay，不进 Open Core 产物）。
+ * UI（shell/LegacyVersionSwitch）只知道「拉取决策 + 写偏好 + 成功才跳转」，零后端知识。
+ */
+export interface LegacyVersionSwitchSpec {
+  /**
+   * 启动只读拉取灰度判定（含打点副作用：记录 hitRule；任何失败静默返回 null——
+   * 不弹错误提示、不影响任何渲染）。同会话内幂等缓存，避免重复请求。
+   */
+  loadLegacyVersionDecision(): Promise<LegacyVersionDecision | null>;
+  /**
+   * 写逃生舱偏好（幂等）；返回是否成功。协议层默认失败提示已由实现方静默取消，
+   * 失败文案与是否阻断跳转由调用方决定。
+   */
+  saveLegacyVersionPreference(version: 'old' | 'new'): Promise<boolean>;
+}
+
 export interface AppCapabilities {
   /** Open Core 返回版本化提示配置；Internal 返回 null，且不得访问知悉状态。 */
   getOpenSourceExperienceNotice: () => CapabilityResult<OpenSourceExperienceNoticeSpec | null>;
+  /**
+   * 版本切换（逃生舱）能力。Open Core 默认 null（无旧版可切回，壳层入口不渲染）；
+   * internal overlay 注入灰度判定实现（agentclaw /api/v1/gray/**）。
+   */
+  getLegacyVersionSwitch: () => CapabilityResult<LegacyVersionSwitchSpec | null>;
   getHelpLinks: () => CapabilityResult<HelpLink[]>;
   openExternal: (href: string) => CapabilityResult<null>;
   getRuntimeRouteRedirect: (context: RuntimeRouteContext) => CapabilityResult<string | null>;
@@ -318,16 +356,16 @@ export interface AppCapabilities {
    */
   getInviteCodeGatePolicy: () => CapabilityResult<InviteCodeGatePolicy>;
   /**
-   * 任务模块 API 路径前缀（execute/dashboard/list/grant/revoke 共用；bbs/list 暂不纳入，后端 openapi 面未开放）。
+   * 任务模块内部写接口 API 路径前缀（execute/grant/revoke 共用；dashboard/list/bbs/list 读接口统一走 TASK_READ_API_BASE，不纳入本 capability）。
    * Open Core 默认 `/openapi/v1/collaboration/tasks`（后端 openapi_v1/task 公开面，经 gateway spanner 鉴权；admission 已 OPEN execute/dashboard/list/grant/revoke）；
    * internal overlay 覆盖为 `/api/v1/collaboration/tasks`（内面，不经 spanner，内部网关直连 task 引擎）。
    * 同步签名：不发请求；taskController/taskGrantController 拼端点路径时读取（请求期调用，避免启动期 capability 未装填）。
    */
   getTaskApiBase: () => CapabilityResult<string>;
   /**
-   * 社区 BBS API 路径前缀（list/get/posts/create/close 共用）。
-   * 预发阶段统一走内部 /api Unified 面 `/api/v1/bbs/topics`（agentclawengine-pre；teamclawgw-pre 网关尚未合并
-   * /openapi/v1/bbs 转发，故 dev 直连 engine）；写口契约与 openapi §2.1–§2.6 一致（body 携 author_type+author_id、list 支持 author_id 过滤）。
+   * 社区 BBS Topic API 前缀（list/get/posts/create/close 共用）。
+   * 当前部署已切换公开 task 域 `/openapi/v1/collaboration/tasks/bbs/topics`；
+   * 写口 body 声明 author_type/author_id，列表支持 author_id 过滤。
    * 同步签名：不发请求；communityController 拼端点路径时读取（请求期调用，避免启动期 capability 未装填）。
    */
   getBbsApiBase: () => CapabilityResult<string>;
@@ -339,8 +377,9 @@ export interface AppCapabilities {
   getTaskClaimGrantStrategy: () => CapabilityResult<TaskClaimGrantStrategy>;
   /**
    * 内部专属侧栏一级导航项（Open Core 不应展示的内部入口）。
-   * 返回项 MUST 携带 `section`（'collab' | 'bot' | 'legacy'），合并点按同名分组末尾追加
-   * （`getMergedNavigationItems`，refactor-global-nav-shell）。
+   * 返回项 MUST 携带 `section`（'collab' | 'bot'），合并点按同名产品分组末尾追加
+   * （`getMergedNavigationItems`，refactor-global-nav-shell）。存量页面只保留直接 URL 访问，
+   * 不得借由该 capability 重新进入产品侧栏。
    * Open Core 默认 `[]`（不渲染任何内部导航项，符合 open-core-export-plan §5.2
    * 「导航中的内部入口」必须按开源模式分隔的强约束）；
    * internal overlay 经 `src/extensions/internal.ts` 注入「能力管理」「能力市场」两项（section: 'bot'），
@@ -387,6 +426,17 @@ export interface AppCapabilities {
    * 同步签名，组件仅消费可见性，不感知部署环境。
    */
   getBotRegistrationEnabled: () => CapabilityResult<boolean>;
+  getQwenWorkBotRegistrationConfig: (bcsEndpoint: string) => CapabilityResult<{ providerSlug: string; apiUrl: string }>;
+  /** Optional deployment-managed installer and executable; null uses the public release installer. */
+  getQwenWorkBridgeInstallation: () => CapabilityResult<{ installCommand: string; binary: string; profiles?: boolean; guideUrl?: string; personalizeBotName?: boolean } | null>;
+  /**
+   * Poolab 一键接入脚本与公开指南地址（部署差异）。Open Core 默认 `null`，表示该部署未启用
+   * Poolab 接入；internal overlay 覆盖为 `{ oneClickScriptUrl, guideUrl }` 以开放 Poolab Tab。
+   * `null` 同时也向 BotRegistrationDialog 表明 Poolab 选项不应渲染。
+   * 同步签名，不发请求。
+   */
+  getPoolabBridgeInstallation: () => CapabilityResult<{ oneClickScriptUrl: string; guideUrl: string } | null>;
+
   /**
    * 协作群高级配置（当前为钉钉绑定）。Open Core 默认关闭；internal overlay 覆盖为 true。
    * 同步签名，面板与渠道绑定加载均消费本能力，不感知部署环境。

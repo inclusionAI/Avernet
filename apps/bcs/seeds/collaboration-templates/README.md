@@ -14,6 +14,7 @@ collaboration-templates/
 │   ├── write-and-review.yaml
 │   ├── write-review-loop.yaml
 │   ├── research-writing-loops.yaml
+│   ├── nested-review-loops.yaml
 │   ├── world-cup-preview-content-production.yaml
 │   ├── micro-merchant-event-orchestration.yaml
 │   ├── parallel-expert-review.yaml
@@ -23,6 +24,7 @@ collaboration-templates/
 │   ├── write-and-review.yaml
 │   ├── write-review-loop.yaml
 │   ├── research-writing-loops.yaml
+│   ├── nested-review-loops.yaml
 │   ├── world-cup-preview-content-production.yaml
 │   ├── micro-merchant-event-orchestration.yaml
 │   ├── parallel-expert-review.yaml
@@ -44,6 +46,7 @@ collaboration-templates/
 | write-and-review | [写作质检协同](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/zh-CN/write-and-review.yaml) | [Write & Review](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/en-US/write-and-review.yaml) |
 | write-review-loop | [写作评审循环](zh-CN/write-review-loop.yaml) | [Writing Review Loop](en-US/write-review-loop.yaml) |
 | research-writing-loops | [资料与写作双循环](zh-CN/research-writing-loops.yaml) | [Research and Writing Loops](en-US/research-writing-loops.yaml) |
+| nested-review-loops | [嵌套交付评审循环](zh-CN/nested-review-loops.yaml) | [Nested Delivery Review Loops](en-US/nested-review-loops.yaml) |
 | world-cup-preview-content-production | [世界杯比赛前瞻内容生产](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/zh-CN/world-cup-preview-content-production.yaml) | [World Cup Preview Content Production](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/en-US/world-cup-preview-content-production.yaml) |
 | micro-merchant-event-orchestration | [小微商家活动协同](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/zh-CN/micro-merchant-event-orchestration.yaml) | [Micro-Merchant Event Orchestration](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/en-US/micro-merchant-event-orchestration.yaml) |
 | parallel-expert-review | [多专家并行协同](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/zh-CN/parallel-expert-review.yaml) | [Parallel Expert Review](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/en-US/parallel-expert-review.yaml) |
@@ -98,6 +101,26 @@ research_gaps ──> finalize       rewrite ──> finalize
 - 两个 body 都有 `review` 节点，逻辑作用域和执行 ID 各自独立；这是多个同级 Loop，不是嵌套。
 - `writing_loop` 首次执行的 previous_result 为空，已通过的资料评审结果通过普通 upstream output 传入。后续执行只自动携带本 Loop 上一次评审结果，因此评审输出保留完整资料依据与稿件。
 - 资料 exhausted 时生成缺口报告，整个写作 Loop 被跳过；写作 exhausted 时走 rewrite，最终汇总保留未通过状态。
+
+## 嵌套 Loop 模板
+
+`nested-review-loops`（嵌套交付评审循环）使用 `author`、`reviewer`、`owner` 三个必选角色。
+外层 `delivery_cycles` 最多执行两次交付迭代；每个父实例内的子 Loop `review_rounds`
+最多执行三轮稿件评审。
+
+```text
+delivery_cycles[1..2]
+  prepare ──> review_rounds[1..3]: draft ──> editorial_review
+                    │ approved / review_exhausted
+                    v
+                acceptance ── ready / retry_cycle
+```
+
+- 子 Loop 的轮次和 previous result 在每个新的父实例内重新开始，不会读取上一父实例的稿件评审结果。
+- `approved` 提前退出当前子 Loop；`review_exhausted` 只表示子 Loop 次数用尽，仍由外层 `acceptance` 明确验收。
+- `ready` 提前退出外层 Loop；持续 `retry_cycle` 到上限后产生 `delivery_exhausted`，最终汇总保留未通过状态。
+- 创建和执行需要同时开启 `collaboration.loop_execution_enabled` 与
+  `collaboration.nested_loop_execution_enabled`，并配置 LLM Judge。
 
 ## 恢复与副作用
 

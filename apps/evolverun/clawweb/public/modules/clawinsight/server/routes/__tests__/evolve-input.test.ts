@@ -70,6 +70,7 @@ beforeEach(async () => {
       bot_id TEXT NOT NULL,
       owner_id TEXT,
       entity_id TEXT,
+      entity_type TEXT NOT NULL DEFAULT 'staff',
       is_delete INTEGER NOT NULL DEFAULT 0,
       active_engine TEXT,
       bot_type TEXT,

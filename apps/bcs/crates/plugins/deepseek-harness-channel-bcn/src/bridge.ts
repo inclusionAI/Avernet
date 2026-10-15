@@ -3,10 +3,11 @@ import {
   installModelSelection,
   type Agent,
   type AgentHandle,
+  type AssistantStreamFrame,
   type ModelSelection,
 } from '@deepseek-ai/dsh-agent';
-import { createUserMessage, type ContentBlock, type TokenUsage } from '@deepseek-ai/dsh-llm';
-import type { JsonValue, Session, SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session';
+import { createUserMessage, type ContentBlock, type TokenUsage, type MessageId } from '@deepseek-ai/dsh-llm';
+import type { Session, SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session';
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence';
 import type { Config } from './config.js';
 import {
@@ -31,8 +32,17 @@ import {
   createBcsTaskCompleteTool,
 } from './task-tools.js';
 import type { BcnWsClient } from './ws-client.js';
+import { BcnInteractions } from './interactions.js';
 
 type BcnToolProfile = 'route' | 'manager' | 'worker' | 'none';
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /** @persistenceAttribution */
+    'bcn-channel': { kind: 'bcn-channel' };
+  }
+}
 
 interface ManagedAgent {
   sessionIdentity: string;
@@ -63,7 +73,7 @@ type BcnAgentContext = Context & {
 
 interface ToolResultSnapshot {
   callId: string;
-  content: ContentBlock[];
+  content: readonly ContentBlock[];
   isError: boolean;
 }
 
@@ -73,11 +83,14 @@ interface RunContext {
   groupId: string;
   bcsSessionId: string;
   turn?: number;
+  messageId?: MessageId;
+  liveAttempt?: { attemptId: string; revision: number; step: number; text: string };
   text: string;
   stepText: Map<number, string>;
   terminal: boolean;
   usage: { input: number; output: number };
   toolNames: Map<string, string>;
+  toolArguments: Map<string, unknown>;
   toolStarts: Set<string>;
   toolResults: Set<string>;
   pendingToolResults: Map<string, ToolResultSnapshot>;
@@ -96,6 +109,7 @@ export class BcnBridge {
   private completedRunIds: string[] = [];
   private disposers: Array<() => unknown> = [];
   private disposed = false;
+  private interactions: BcnInteractions;
 
   constructor(
     private readonly ctx: Context,
@@ -107,15 +121,20 @@ export class BcnBridge {
       error(message: string): void;
       debug?(message: string): void;
     },
-  ) {}
+  ) {
+    this.interactions = new BcnInteractions(client, agent => {
+      const id = this.activeRunBySessionId.get(String(agent.id));
+      const run = id ? this.runs.get(id) : undefined;
+      return run && !run.terminal ? run : undefined;
+    });
+  }
 
   start(): void {
     this.disposers.push(
       this.client.onRequest('chat.send', frame => this.handleChatSend(frame)),
       this.client.onRequest('chat.inject', frame => this.handleChatInject(frame)),
-      this.ctx.on('agent/inbox/claimed', payload => this.handleInboxClaimed(payload)),
-      this.ctx.on('agent/inbox/discarded', payload => this.handleInboxDiscarded(payload)),
-      this.ctx.on('session/event', (session, event) => this.handleSessionEvent(session, event)),
+      this.client.onRequest('chat.abort', frame => this.handleChatAbort(frame)),
+      this.client.onRequest('interaction.resolve', frame => this.interactions.resolve(frame)),
     );
   }
 
@@ -127,13 +146,15 @@ export class BcnBridge {
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
+    this.interactions.dispose();
     for (const dispose of this.disposers.splice(0).reverse()) await dispose();
     for (const run of this.runs.values()) {
       if (run.terminal) continue;
+      this.sendTerminal(run, 'aborted');
       const agent = this.ctx.agents.get(run.sessionId);
       agent?.cancel({ kind: 'disposed' });
     }
-    await Promise.allSettled([...this.ownedAgents].map(handle => handle.dispose()));
+    const results = await Promise.allSettled([...this.ownedAgents].map(handle => handle.dispose()));
     this.ownedAgents.clear();
     this.managedAgents.clear();
     this.sessionIdentityBySessionId.clear();
@@ -141,6 +162,8 @@ export class BcnBridge {
     this.runIdByTurn.clear();
     this.activeRunBySessionId.clear();
     this.runs.clear();
+    const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'BCN agent disposal failed');
   }
 
   async captureRoute(
@@ -222,7 +245,9 @@ export class BcnBridge {
     }
 
     const params: Record<string, unknown> = {
-      group_id: run.groupId,
+      // task.* accepts the session-shaped group_id wire representation.
+      // A bare V3 group id would lose the originating conversation.
+      group_id: run.bcsSessionId,
       target_bot: normalizedTarget,
       message: normalizedMessage,
       ...(responseMode ? { response_mode: responseMode } : {}),
@@ -250,7 +275,7 @@ export class BcnBridge {
     if (!normalizedMessage) return taskToolInvalid("'message' must be a non-empty string.");
 
     const response = await this.sendTaskRequest('task.message', {
-      group_id: run.groupId,
+      group_id: run.bcsSessionId,
       message: normalizedMessage,
     }, signal);
     if (!response.ok) return taskRequestFailure(response, 'TASK_MESSAGE_FAILED');
@@ -269,7 +294,7 @@ export class BcnBridge {
     if (!normalizedSummary) return taskToolInvalid("'summary' must be a non-empty string.");
 
     const response = await this.sendTaskRequest('task.complete', {
-      group_id: run.groupId,
+      group_id: run.bcsSessionId,
       summary: normalizedSummary,
     }, signal);
     if (!response.ok) return taskRequestFailure(response, 'TASK_COMPLETE_FAILED');
@@ -317,6 +342,7 @@ export class BcnBridge {
       terminal: false,
       usage: { input: 0, output: 0 },
       toolNames: new Map(),
+      toolArguments: new Map(),
       toolStarts: new Set(),
       toolResults: new Set(),
       pendingToolResults: new Map(),
@@ -327,11 +353,13 @@ export class BcnBridge {
 
     try {
       const managed = await this.getOrCreateAgent(sessionIdentity, toolProfile);
+      if (this.disposed || run.terminal) return;
       const message = createUserMessage({
         content: [{ type: 'text', text: formatInboundMessage(params) }],
-        source: { kind: 'plugin', plugin: 'deepseek-harness-channel-bcn', form: 'relay' },
+        source: { kind: 'bcn-channel' },
       });
       this.runIdByMessageId.set(String(message.id), runId);
+      run.messageId = message.id;
       managed.agent.followup(message);
     } catch {
       this.sendTerminal(run, 'error', 'DELIVERY_FAILED');
@@ -342,6 +370,7 @@ export class BcnBridge {
     let params: ChatInjectParams;
     try {
       params = parseChatInjectParams(frame.params);
+      if (!params.bcs_session_id?.trim()) throw new Error('BCN V3 chat.inject requires bcs_session_id');
     } catch (error) {
       this.client.sendResponse(frame.id, false, undefined, invalidRequest(error));
       return;
@@ -358,7 +387,7 @@ export class BcnBridge {
       );
       managed.agent.inject(createUserMessage({
         content: [{ type: 'text', text: formatInboundMessage(params) }],
-        source: { kind: 'plugin', plugin: 'deepseek-harness-channel-bcn', form: 'relay' },
+        source: { kind: 'bcn-channel' },
       }));
       this.client.sendResponse(frame.id, true, {});
     } catch {
@@ -370,11 +399,41 @@ export class BcnBridge {
     }
   }
 
+  private async handleChatAbort(frame: RequestFrame): Promise<void> {
+    const params = asRecord(frame.params);
+    const sessionId = asNonEmptyString(params?.session_key);
+    const runId = asNonEmptyString(params?.run_id);
+    if (!sessionId || !runId) {
+      this.client.sendResponse(frame.id, false, undefined, invalidRequest('chat.abort requires session_key and run_id'));
+      return;
+    }
+    const run = this.runs.get(runId);
+    if (!run || run.bcsSessionId !== sessionId) {
+      this.client.sendResponse(frame.id, false, undefined, {
+        code: run ? 'SCOPE_MISMATCH' : 'RUN_NOT_FOUND',
+        message: run ? 'run_id does not belong to session_key' : 'Unknown run_id',
+        retryable: false,
+      });
+      return;
+    }
+    if (run.terminal) {
+      this.client.sendResponse(frame.id, true, { aborted: false, aborted_run_ids: [] });
+      return;
+    }
+    // Mark terminal before awaiting anything, including agent creation.
+    // An acknowledged but not yet delivered run must never start afterwards.
+    this.sendTerminal(run, 'aborted');
+    const agent = this.ctx.agents.get(run.sessionId);
+    if (run.turn !== undefined) agent?.cancel({ kind: 'user' }, { keepInbox: true });
+    else if (run.messageId) agent?.inbox.remove(run.messageId);
+    this.client.sendResponse(frame.id, true, { aborted: true, aborted_run_ids: [runId] });
+  }
+
   private handleInboxClaimed(payload: { agent: Agent; message: { id: unknown }; turn: number }): void {
     const runId = this.runIdByMessageId.get(String(payload.message.id));
     if (!runId) return;
     const run = this.runs.get(runId);
-    if (!run || run.sessionId !== payload.agent.id) return;
+    if (!run || run.terminal || run.sessionId !== payload.agent.id) return;
     this.runIdByMessageId.delete(String(payload.message.id));
     run.turn = payload.turn;
     this.runIdByTurn.set(turnKey(payload.agent.id, payload.turn), runId);
@@ -399,14 +458,9 @@ export class BcnBridge {
     const run = runId ? this.runs.get(runId) : undefined;
     if (!run || run.terminal) return;
 
-    if (event.type === 'assistant/chunk') {
-      const chunk = event.data.chunk;
-      if (chunk.type !== 'text-delta' || !chunk.text) return;
-      this.appendDelta(run, event.data.step, chunk.text);
-      return;
-    }
     if (event.type === 'assistant/message') {
       this.captureAssistantMessage(run, event.data.step, event.data.message.content, event.data.usage);
+      if (run.liveAttempt?.step === event.data.step) delete run.liveAttempt;
       return;
     }
     if (event.type === 'tool/call') {
@@ -414,11 +468,10 @@ export class BcnBridge {
       return;
     }
     if (event.type === 'tool/result') {
-      const block = event.data.message.content[0];
       this.captureToolResult(run, {
-        callId: String(block.toolCallId),
-        content: block.content,
-        isError: block.isError === true || event.data.error !== undefined,
+        callId: String(event.data.message.toolCallId),
+        content: event.data.message.content,
+        isError: event.data.message.isError === true || event.data.error !== undefined,
       });
       return;
     }
@@ -432,6 +485,22 @@ export class BcnBridge {
       } else {
         this.sendTerminal(run, 'final', undefined, event.data.reason.kind);
       }
+    }
+  }
+
+  private handleAssistantStream(agent: Agent, frame: AssistantStreamFrame): void {
+    const runId = frame.type === 'start'
+      ? this.runIdByTurn.get(turnKey(agent.id, frame.turn))
+      : this.activeRunBySessionId.get(String(agent.id));
+    const run = runId ? this.runs.get(runId) : undefined;
+    if (!run || run.terminal) return;
+    if (frame.type === 'start') {
+      run.liveAttempt = { attemptId: String(frame.attemptId), revision: frame.revision, step: frame.step, text: '' };
+    } else {
+      const attempt = run.liveAttempt;
+      if (!attempt || attempt.attemptId !== String(frame.attemptId) || attempt.revision !== frame.revision) return;
+      if (frame.type === 'chunk' && frame.chunk.type === 'text-delta') attempt.text += frame.chunk.text;
+      else if (frame.type === 'end') delete run.liveAttempt;
     }
   }
 
@@ -450,7 +519,7 @@ export class BcnBridge {
   private captureAssistantMessage(
     run: RunContext,
     step: number,
-    content: ContentBlock[],
+    content: readonly ContentBlock[],
     usage: TokenUsage | undefined,
   ): void {
     if (usage) {
@@ -476,6 +545,7 @@ export class BcnBridge {
     } catch {
       // Preserve the provider's raw argument string when it is not complete JSON.
     }
+    run.toolArguments.set(callId, args);
     this.client.sendEvent('agent', {
       runId: run.runId,
       sessionId: run.bcsSessionId,
@@ -505,6 +575,8 @@ export class BcnBridge {
 
   private sendToolResult(run: RunContext, result: ToolResultSnapshot): void {
     if (run.toolResults.has(result.callId)) return;
+    const name = run.toolNames.get(result.callId);
+    if (!name) return;
     this.client.sendEvent('agent', {
       runId: run.runId,
       sessionId: run.bcsSessionId,
@@ -512,7 +584,7 @@ export class BcnBridge {
       ts: Date.now(),
       phase: 'result',
       toolCallId: result.callId,
-      name: run.toolNames.get(result.callId) ?? 'unknown',
+      name,
       result: { content: result.content },
       isError: result.isError,
     });
@@ -526,7 +598,12 @@ export class BcnBridge {
     stopReason?: string,
   ): void {
     if (run.terminal) return;
-    for (const pending of run.pendingToolResults.values()) this.sendToolResult(run, pending);
+    this.interactions.cancelRun(run.runId);
+    if (state === 'aborted' && run.liveAttempt?.text) {
+      this.captureAssistantMessage(run, run.liveAttempt.step, [{ type: 'text', text: run.liveAttempt.text }], undefined);
+    }
+    delete run.liveAttempt;
+    if (run.pendingToolResults.size) this.log?.warn('BCN run ended with unmatched tool results; no fabricated tool identity was emitted');
     run.pendingToolResults.clear();
 
     const payload: Record<string, unknown> = {
@@ -535,6 +612,7 @@ export class BcnBridge {
       ts: Date.now(),
       state,
     };
+    if (run.text) payload.content = run.text;
     if (state === 'final') {
       if (run.text) payload.content = run.text;
       if (run.usage.input || run.usage.output) payload.usage = run.usage;
@@ -549,8 +627,18 @@ export class BcnBridge {
     }
     this.client.sendEvent('chat', payload);
     run.terminal = true;
-    this.activeRunBySessionId.delete(String(run.sessionId));
+    if (this.activeRunBySessionId.get(String(run.sessionId)) === run.runId) {
+      this.activeRunBySessionId.delete(String(run.sessionId));
+    }
+    if (run.messageId) this.runIdByMessageId.delete(String(run.messageId));
     if (run.turn !== undefined) this.runIdByTurn.delete(turnKey(run.sessionId, run.turn));
+    run.text = '';
+    run.stepText.clear();
+    run.toolArguments.clear();
+    run.toolNames.clear();
+    run.toolStarts.clear();
+    run.toolResults.clear();
+    delete run.route;
     this.completedRunIds.push(run.runId);
     while (this.completedRunIds.length > 2_000) {
       const oldest = this.completedRunIds.shift();
@@ -580,24 +668,35 @@ export class BcnBridge {
     if (this.ctx.agents.get(sessionId)) {
       throw new Error('A non-BCN DSH agent already owns the derived BCN session id');
     }
-    const persistedHeader = (await this.ctx.sessionPersistence.list()).find(header => header.id === sessionId);
+    const persistedHeader = await this.ctx.sessionPersistence.stat(sessionId);
     const cwd = process.cwd();
     const bcnCtx = this.ctx as BcnAgentContext;
     const defaultSelection = bcnCtx.agentDefaultModel.currentSelection();
-    const recordedPreset = persistedHeader
-      ? presetForInspection(await this.ctx.sessionPersistence.inspect(sessionId))
-      : undefined;
+    let recordedPreset: string | undefined;
+    if (persistedHeader) {
+      const reader = await this.ctx.sessionPersistence.open(sessionId, 'read');
+      try {
+        recordedPreset = presetForInspection({ meta: reader.header, events: (await reader.read()).events });
+      } finally {
+        await reader.close();
+      }
+    }
     const presetId = (await bcnCtx.agentPresets.resolve(recordedPreset)).id;
-    const setup = async (agentCtx: Context) => {
+    const setup = async (agentCtx: Context, agent: Agent) => {
+      agentCtx.on('agent/inbox/claimed', payload => this.handleInboxClaimed(payload));
+      agentCtx.on('agent/inbox/discarded', payload => this.handleInboxDiscarded(payload));
+      agentCtx.on('session/event', (session, event) => this.handleSessionEvent(session, event));
+      agentCtx.on('agent/assistant-stream', ({ agent: owner, frame }) => this.handleAssistantStream(owner, frame));
       installModelSelection(agentCtx, {
-        current: selectionForSession(agentCtx.agent, defaultSelection),
+        current: selectionForSession(agent, defaultSelection),
         assembled: undefined,
       });
       (agentCtx as BcnAgentContext).systemPrompt.variable(
         'cwd',
-        () => agentCtx.agent?.session.header.cwd ?? cwd,
+        () => agent.session.header.cwd ?? cwd,
       );
       await bcnCtx.agentPresets.mount(agentCtx, presetId);
+      this.interactions.mount(agentCtx, agent);
       if (toolProfile === 'route') {
         agentCtx.tools.register(createBcsRouteTool(this));
       } else if (toolProfile === 'manager') {
@@ -610,6 +709,7 @@ export class BcnBridge {
     const agentOptions = {
       provider: defaultSelection.provider,
       model: defaultSelection.model,
+      ...(defaultSelection.reasoningEffort ? { reasoningEffort: defaultSelection.reasoningEffort } : {}),
     };
     const handle = persistedHeader
       ? await this.ctx.agents.resume({ resumeSessionId: sessionId, agentOptions, setup })
@@ -620,6 +720,10 @@ export class BcnBridge {
         setup,
       });
     const managed = { sessionIdentity, sessionId, agent: handle.agent, handle, toolProfile };
+    if (this.disposed) {
+      await handle.dispose();
+      throw new Error('BCN plugin was disposed during agent creation');
+    }
     this.ownedAgents.add(handle);
     this.sessionIdentityBySessionId.set(String(sessionId), sessionIdentity);
     return managed;
@@ -719,7 +823,7 @@ function formatInboundMessage(params: ChatSendParams | ChatInjectParams): string
   return `<bcn_context>\n${JSON.stringify(metadata)}\n</bcn_context>\n\n${text}`;
 }
 
-function visibleText(content: ContentBlock[]): string {
+function visibleText(content: readonly ContentBlock[]): string {
   return content.flatMap(block => block.type === 'text' ? [block.text] : []).join('');
 }
 

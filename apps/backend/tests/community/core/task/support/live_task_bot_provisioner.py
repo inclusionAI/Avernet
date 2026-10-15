@@ -490,5 +490,3 @@ class LiveTaskBotProvisioner:  # pragma: no cover — live task E2E provisioning
         )
         r.raise_for_status()
         return r.json()
-
-

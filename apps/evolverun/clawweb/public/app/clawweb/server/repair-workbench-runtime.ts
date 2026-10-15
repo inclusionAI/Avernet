@@ -13,11 +13,15 @@ import { createRepairBatchesRouter } from '@avernet/workflow/server/routes/repai
 import { createRepairAuthorizer, type RepairPrincipalResolver } from '@avernet/workflow/server/routes/repair-authorization';
 import { RepairBatchError } from '@avernet/workflow/server/contracts/repair-batch';
 import type { RepairExecutionPort } from '@avernet/workflow/server/contracts/repair-workbench';
+import type { RepairPublicationPort } from '@avernet/workflow/server/contracts/repair-release';
+import { createRepairReleaseService } from '@avernet/workflow/server/services/repair-release-service';
+import { createRepairVerificationService } from '@avernet/workflow/server/services/repair-verification-service';
 
 export function createWorkflowRepairRuntime(db: IDatabase, options: {
   principal: RepairPrincipalResolver;
   execution?: RepairExecutionPort;
-}): { service: ReturnType<typeof createRepairWorkbenchService>; router: Router } {
+  publication?: RepairPublicationPort;
+}): { service: ReturnType<typeof createRepairWorkbenchService>; release: ReturnType<typeof createRepairReleaseService>; router: Router } {
   const sources = createRepairSourcePort({
     groups: (tx, workflowId, sourceOptions) => new IssueAggregationRepository(tx).listSources(workflowId, sourceOptions),
     suggestions: async (tx, workflowId, sourceOptions) => {
@@ -57,6 +61,7 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
     return JSON.stringify(versions);
   };
   const service = createRepairWorkbenchService(db, sources, options.execution);
+  const release = createRepairReleaseService({ db, workbench: service, publisher: options.publication });
   const authorize = createRepairAuthorizer(options.principal, new BotWorkflowPermissionRepository(db));
-  return { service, router: createRepairBatchesRouter({ service, authorize }) };
+  return { service, release, router: createRepairBatchesRouter({ service, authorize, release, verification: createRepairVerificationService(db) }) };
 }

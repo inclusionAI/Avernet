@@ -12,7 +12,7 @@ export function isMarkdownFile(name: string): boolean {
   return ext === 'md' || ext === 'markdown';
 }
 
-/** 渲染 markdown 文本为净化 HTML（供 dangerouslySetInnerHTML）。 */
+/** 渲染 markdown 文本为净化 HTML（供 SafeHtml 受约束地转换为 React 元素）。 */
 export function renderSessionFileMarkdown(content: string): string {
   return sanitizeMarkdownHtml(md.render(content));
 }

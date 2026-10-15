@@ -144,4 +144,54 @@ describe('collaborationPrivacyRuntimeAdapter.submitPublication', () => {
     expect(result).toEqual({ status: 'completed', config: { scope: 'restricted', organizationPaths: [] } });
     expect((result as { approvalUrl?: string }).approvalUrl).toBeUndefined();
   });
+
+  it('提交可见性时按 scope 映射 visibility:限定组织可申请→protected、全部可见→public、不可见→private(对用户与对 Bot 一致)', async () => {
+    const { adapter, publishBotPublic } = createAdapterWithPublishResult({
+      success: true,
+      puid: 'pub-body',
+      approval_url: null,
+      state: 'SKIPPED',
+      last_operate: null,
+      visibility: 'public',
+      visibility_field: null,
+      error_msg: null,
+    });
+    await adapter.loadOverview('900004');
+
+    // 全部可见 → visibility = public
+    await adapter.submitPublication({ botId: 'bot-1', audience: 'user', config: { scope: 'all', organizationPaths: [] } });
+    expect(publishBotPublic).toHaveBeenLastCalledWith(
+      'bot-1',
+      '900004',
+      expect.objectContaining({ public_scope: 'user', visibility: 'public', view_depts: null }),
+      undefined,
+    );
+
+    // 限定组织可申请 → visibility = protected（对 Bot 受众同样传 protected）
+    await adapter.submitPublication({
+      botId: 'bot-1',
+      audience: 'bot',
+      config: { scope: 'restricted', organizationPaths: [['全网巡检']] },
+      deptEntries: [{ deptNo: 'A4195', deptName: '全网巡检' }],
+    });
+    expect(publishBotPublic).toHaveBeenLastCalledWith(
+      'bot-1',
+      '900004',
+      expect.objectContaining({
+        public_scope: 'agent',
+        visibility: 'protected',
+        view_depts: [{ deptNo: 'A4195', deptName: '全网巡检' }],
+      }),
+      undefined,
+    );
+
+    // 不可见 → visibility = private
+    await adapter.submitPublication({ botId: 'bot-1', audience: 'user', config: { scope: 'none', organizationPaths: [] } });
+    expect(publishBotPublic).toHaveBeenLastCalledWith(
+      'bot-1',
+      '900004',
+      expect.objectContaining({ public_scope: 'user', visibility: 'private', view_depts: null }),
+      undefined,
+    );
+  });
 });

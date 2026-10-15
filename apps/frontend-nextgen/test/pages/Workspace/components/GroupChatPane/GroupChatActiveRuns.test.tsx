@@ -6,230 +6,217 @@ import {
 } from '@/pages/Workspace/components/GroupChatPane/GroupChatActiveRuns';
 import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 Element.prototype.scrollIntoView ??= () => undefined;
 Element.prototype.hasPointerCapture ??= () => false;
 
-const participants = [
-  { actorId: 'bot-a', kind: 'bot', name: '甲', role: 'member', mode: 'auto' },
-  { actorId: 'bot-b', kind: 'bot', name: '乙', role: 'member', mode: 'auto' },
-] as never;
-
-const messages = [
-  {
-    id: 'm1',
-    role: 'assistant',
-    content: 'one',
-    status: 'streaming',
-    createdAt: 1_000,
-    extra: { botUuid: 'bot-a', runId: 'run-1' },
-  },
-  {
-    id: 'm2',
-    role: 'assistant',
-    content: 'two',
-    status: 'streaming',
-    createdAt: 2_000,
-    extra: { botUuid: 'bot-a', runId: 'run-2' },
-  },
-  {
-    id: 'm3',
-    role: 'assistant',
-    content: 'three',
-    status: 'streaming',
-    createdAt: 3_000,
-    extra: { botUuid: 'bot-b', runId: 'run-3' },
-  },
-] as never;
+const botIds = ['a', 'b', 'c', 'd', 'e'];
+const names = ['甲', '乙', '丙', '丁', '戊'];
+const participants = botIds.map((id, index) => ({
+  actorId: `bot-${id}`,
+  kind: 'bot',
+  name: names[index],
+  role: 'member',
+  mode: 'auto',
+})) as never;
+const messages = botIds.map((id, index) => ({
+  id: `reply-${id}`,
+  role: 'assistant',
+  content: id,
+  status: 'streaming',
+  createdAt: index + 1,
+  extra: { botUuid: `bot-${id}`, runId: `run-${id}` },
+}));
+const delivery = (id: string, overrides: Partial<DeliveryStatusView> = {}): DeliveryStatusView => ({
+  delivery_id: `delivery-${id}`,
+  message_id: `message-${id}`,
+  target_bot_id: `bot-${id}`,
+  flow_kind: 'group',
+  kind: 'send',
+  status: 'queued',
+  state_version: 1,
+  run_id: null,
+  wait_reason: 'prior_message_running',
+  admission_error: null,
+  content_preview: `排队内容-${id}`,
+  ...overrides,
+});
+const onAbortBot = () => jest.fn<(botId: string) => Promise<void>>().mockResolvedValue(undefined);
+const onCancelDelivery = () =>
+  jest.fn<(messageId: string, deliveryId: string) => Promise<void>>().mockResolvedValue(undefined);
+const openList = () => fireEvent.click(screen.getByRole('button', { name: '查看处理列表' }));
 
 describe('GroupChatActiveRuns', () => {
-  it('groups multiple runs by Bot in first-active-message order', () => {
-    expect(collectActiveBotRuns(messages, participants)).toEqual([
-      { botId: 'bot-a', botName: '甲', runCount: 2, startedAt: 1_000 },
-      { botId: 'bot-b', botName: '乙', runCount: 1, startedAt: 3_000 },
-    ]);
+  it('deduplicates streaming records by Bot without counting them as multiple Bots', () => {
+    expect(
+      collectActiveBotRuns(
+        [messages[0], { ...messages[0], id: 'another-segment', createdAt: 9 }] as never,
+        participants,
+      ),
+    ).toEqual([{ botId: 'bot-a', botName: '甲', runCount: 2, startedAt: 1 }]);
   });
 
-  it('renders ordered borderless actions and aborts each Bot independently', async () => {
-    const onAbortBot = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
-    const { rerender, unmount } = render(
+  it.each([1, 2, 3, 5])('shows queues for %i active Bots without exposing stop actions until opened', async (count) => {
+    const abort = onAbortBot();
+    render(
       <GroupChatActiveRuns
-        messages={messages}
+        messages={messages.slice(0, count) as never}
+        participants={participants}
+        abortingBotIds={new Set()}
+        onAbortBot={abort}
+        queuedDeliveries={botIds.slice(0, count).map((id) => delivery(id))}
+      />,
+    );
+    expect(screen.getByRole('status')).toHaveTextContent(`${count} 个 Bot 处理中 · ${count} 项待处理`);
+    expect(screen.queryByLabelText('群聊处理列表')).not.toBeInTheDocument();
+    openList();
+    await screen.findByLabelText('群聊处理列表');
+    expect(screen.getAllByRole('button', { name: /^停止 .+ 的当前回复$/ })).toHaveLength(count);
+    expect(abort).not.toHaveBeenCalled();
+    const visibleQueues = count < 3 ? count : 1;
+    expect(screen.getAllByRole('list', { name: /的排队消息$/ })).toHaveLength(visibleQueues);
+    expect(screen.queryByText('等待前一条消息完成')).not.toBeInTheDocument();
+    expect(screen.queryByText('输出中')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '收起处理列表' }));
+    await waitFor(() => expect(screen.queryByLabelText('群聊处理列表')).not.toBeInTheDocument());
+  });
+
+  it('stops only the chosen Bot and disables an already pending stop', async () => {
+    const abort = onAbortBot();
+    render(
+      <GroupChatActiveRuns
+        messages={messages.slice(0, 2) as never}
         participants={participants}
         abortingBotIds={new Set(['bot-a'])}
-        onAbortBot={onAbortBot}
+        onAbortBot={abort}
+        queuedDeliveries={[delivery('a'), delivery('b')]}
       />,
     );
+    fireEvent.click(screen.getByRole('button', { name: '选择要停止回复的 Bot' }));
+    expect(await screen.findByRole('button', { name: '正在停止 甲 的当前回复' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '停止 乙 的当前回复' }));
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(abort).toHaveBeenCalledWith('bot-b');
+    expect(screen.getByText('排队内容-a')).toBeInTheDocument();
+    expect(screen.getByText('排队内容-b')).toBeInTheDocument();
+  });
 
-    const strip = screen.getByLabelText('正在输出的 Bot');
-    expect(strip).toHaveClass('overflow-x-auto');
-    const buttons = screen.getAllByRole('button');
-    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
-      '正在终止 甲 的输出',
-      '终止 乙 的输出',
-    ]);
-    expect(screen.getByTestId('active-bot-run-bot-a')).toHaveClass('gap-3', 'rounded-lg', 'border-border');
-    expect(screen.getByTestId('active-bot-run-bot-a')).not.toHaveClass('w-64', 'justify-between');
-    expect(buttons[0]).toHaveClass('border-transparent', 'bg-transparent', 'hover:bg-destructive/10');
-    expect(screen.getByText('甲')).toHaveClass('text-foreground');
-    expect(screen.getByText('2 个输出中')).toBeInTheDocument();
-    expect(screen.getByText('终止中…')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '正在终止 甲 的输出' })).toBeDisabled();
+  it('cancels an exact delivery without affecting another recipient of the same message', async () => {
+    const cancel = onCancelDelivery(),
+      abort = onAbortBot();
+    render(
+      <GroupChatActiveRuns
+        messages={messages.slice(0, 2) as never}
+        participants={participants}
+        abortingBotIds={new Set()}
+        onAbortBot={abort}
+        queuedDeliveries={[
+          delivery('a', { message_id: 'shared-message' }),
+          delivery('b', { message_id: 'shared-message' }),
+        ]}
+        cancellingDeliveryIds={new Set(['delivery-b'])}
+        onCancelDelivery={cancel}
+      />,
+    );
+    openList();
+    const queue = await screen.findByRole('list', { name: '甲 的排队消息' });
+    fireEvent.click(within(queue).getByRole('button', { name: /取消发往 甲/ }));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(cancel).toHaveBeenCalledWith('shared-message', 'delivery-a');
+    expect(screen.getByRole('button', { name: /取消发往 乙/ })).toBeDisabled();
+    expect(abort).not.toHaveBeenCalled();
+    expect(screen.getByText('排队内容-a')).toBeInTheDocument();
+  });
 
-    fireEvent.click(screen.getByRole('button', { name: '终止 乙 的输出' }));
-    await waitFor(() => expect(onAbortBot).toHaveBeenCalledWith('bot-b'));
-    expect(onAbortBot).not.toHaveBeenCalledWith('bot-a');
-
+  it('switches the selected queue and falls back when that Bot leaves the activity list', async () => {
+    const props = {
+      participants,
+      abortingBotIds: new Set<string>(),
+      onAbortBot: onAbortBot(),
+      onCancelDelivery: onCancelDelivery(),
+    };
+    const { rerender } = render(
+      <GroupChatActiveRuns
+        {...props}
+        messages={messages as never}
+        queuedDeliveries={botIds.map((id) => delivery(id))}
+      />,
+    );
+    openList();
+    fireEvent.click(await screen.findByRole('button', { name: '查看 戊 的排队消息' }));
+    expect(screen.getByRole('button', { name: '查看 戊 的排队消息' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('排队内容-e')).toBeInTheDocument();
+    expect(screen.queryByText('排队内容-a')).not.toBeInTheDocument();
     rerender(
       <GroupChatActiveRuns
-        messages={
-          [
-            {
-              id: 'm1',
-              role: 'assistant',
-              content: 'one',
-              status: 'done',
-              extra: { botUuid: 'bot-a', runId: 'run-1' },
-            },
-            {
-              id: 'm2',
-              role: 'assistant',
-              content: 'two',
-              status: 'done',
-              extra: { botUuid: 'bot-a', runId: 'run-2' },
-            },
-            {
-              id: 'm3',
-              role: 'assistant',
-              content: 'three',
-              status: 'streaming',
-              extra: { botUuid: 'bot-b', runId: 'run-3' },
-            },
-          ] as never
-        }
-        participants={participants}
-        abortingBotIds={new Set()}
-        onAbortBot={onAbortBot}
+        {...props}
+        messages={messages.slice(0, 4) as never}
+        queuedDeliveries={botIds.slice(0, 4).map((id) => delivery(id))}
       />,
     );
-    expect(screen.queryByTestId('active-bot-run-bot-a')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '终止 乙 的输出' })).toBeInTheDocument();
-    unmount();
+    expect(screen.getByRole('button', { name: '查看 甲 的排队消息' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('排队内容-a')).toBeInTheDocument();
+    expect(screen.queryByText('排队内容-e')).not.toBeInTheDocument();
   });
 
-  it('does not reserve space when no Bot is streaming', () => {
-    const { container } = render(
-      <GroupChatActiveRuns
-        messages={
-          [
-            {
-              id: 'm-done',
-              role: 'assistant',
-              content: 'done',
-              status: 'done',
-              extra: { botUuid: 'bot-a', runId: 'run-done' },
-            },
-          ] as never
-        }
-        participants={participants}
-        abortingBotIds={new Set()}
-        onAbortBot={jest.fn()}
-      />,
-    );
-    expect(container).toBeEmptyDOMElement();
-  });
-});
-
-describe('GroupChatActiveRuns — 按 Bot 合并的活动/队列模块', () => {
-  const delivery = (botId: string, id: string, overrides: Partial<DeliveryStatusView> = {}): DeliveryStatusView => ({
-    delivery_id: id,
-    message_id: `m-${id}`,
-    target_bot_id: botId,
-    flow_kind: 'group',
-    kind: 'send',
-    status: 'queued',
-    state_version: 1,
-    run_id: null,
-    wait_reason: 'prior_message_running',
-    admission_error: null,
-    content_preview: `内容-${id}`,
-    ...overrides,
-  });
-
-  it('活跃+排队同 bot：单芯片同时含终止按钮与排队徽标，popover 只含该 bot 的排队消息', async () => {
+  it('counts processing and streaming once, and can stop a processing Bot before its message arrives', async () => {
+    const abort = onAbortBot();
     render(
       <GroupChatActiveRuns
-        messages={messages}
+        messages={messages.slice(0, 1) as never}
         participants={participants}
         abortingBotIds={new Set()}
-        onAbortBot={jest.fn()}
-        queuedDeliveries={[delivery('bot-a', 'd1'), delivery('bot-b', 'd2')]}
-        processingDeliveries={[delivery('bot-a', 'p1', { status: 'running' })]}
-        cancellingDeliveryIds={new Set()}
-        onCancelDelivery={jest.fn()}
+        onAbortBot={abort}
+        processingDeliveries={[delivery('a', { status: 'running' }), delivery('b', { status: 'running' })]}
       />,
     );
-
-    // 全局聚合排队芯片不再存在
-    expect(screen.queryByText(/\d+ 条排队中/)).not.toBeInTheDocument();
-
-    // bot-a 芯片：终止按钮 + 排队徽标同在一个模块
-    const chipA = screen.getByTestId('active-bot-run-bot-a');
-    expect(chipA).toHaveTextContent('甲');
-    expect(chipA).toHaveTextContent('1 条排队');
-    expect(screen.getByRole('button', { name: '终止 甲 的输出' })).toBeInTheDocument();
-
-    // 打开 bot-a 的 popover：处理中摘要 + 只含 bot-a 的排队消息
-    fireEvent.click(screen.getByTestId('bot-queue-trigger-bot-a'));
-    await waitFor(() => expect(screen.getByText('内容-d1')).toBeInTheDocument());
-    expect(screen.getByText('1 条处理中')).toBeInTheDocument();
-    expect(screen.getByText('等待前一条消息完成')).toBeInTheDocument();
-    expect(screen.queryByText('内容-d2')).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('2 个 Bot 处理中 · 0 项待处理');
+    openList();
+    fireEvent.click(await screen.findByRole('button', { name: '停止 乙 的当前回复' }));
+    expect(abort).toHaveBeenCalledWith('bot-b');
   });
 
-  it('终止按钮点击不冒泡（不展开 popover），仍触发 onAbortBot', async () => {
-    const onAbortBot = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
-    render(
-      <GroupChatActiveRuns
-        messages={messages}
-        participants={participants}
-        abortingBotIds={new Set()}
-        onAbortBot={onAbortBot}
-        queuedDeliveries={[delivery('bot-a', 'd1')]}
-        cancellingDeliveryIds={new Set()}
-        onCancelDelivery={jest.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: '终止 甲 的输出' }));
-
-    await waitFor(() => expect(onAbortBot).toHaveBeenCalledWith('bot-a'));
-    expect(screen.queryByText('内容-d1')).not.toBeInTheDocument();
-  });
-
-  it('仅排队（无活跃输出）的 bot：芯片无终止按钮、有排队徽标，可展开取消', async () => {
-    const onCancelDelivery = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  it('keeps a queued-only Bot cancellable without offering stop, with a safe preview fallback', async () => {
+    const cancel = onCancelDelivery();
     render(
       <GroupChatActiveRuns
         messages={[]}
         participants={participants}
         abortingBotIds={new Set()}
-        onAbortBot={jest.fn()}
-        queuedDeliveries={[delivery('bot-c', 'd9')]}
-        cancellingDeliveryIds={new Set()}
-        onCancelDelivery={onCancelDelivery}
+        onAbortBot={onAbortBot()}
+        queuedDeliveries={[delivery('unknown', { content_preview: null })]}
+        onCancelDelivery={cancel}
       />,
     );
+    expect(screen.getByRole('status')).toHaveTextContent('1 项待处理');
+    expect(screen.queryByRole('button', { name: '选择要停止回复的 Bot' })).not.toBeInTheDocument();
+    openList();
+    fireEvent.click(await screen.findByRole('button', { name: '取消发往 Bot 的排队消息：消息内容暂不可用' }));
+    expect(cancel).toHaveBeenCalledWith('message-unknown', 'delivery-unknown');
+    expect(screen.queryByRole('img', { name: '正在回复' })).not.toBeInTheDocument();
+  });
 
-    expect(screen.queryByRole('button', { name: /终止/ })).not.toBeInTheDocument();
-    const trigger = screen.getByTestId('bot-queue-trigger-bot-c');
-    expect(trigger).toHaveTextContent('Bot');
-    expect(trigger).toHaveTextContent('1 条排队');
+  it('does not reserve space when no Bot is active', () => {
+    const { container } = render(
+      <GroupChatActiveRuns
+        messages={[]}
+        participants={participants}
+        abortingBotIds={new Set()}
+        onAbortBot={onAbortBot()}
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
 
-    fireEvent.click(trigger);
-    await waitFor(() => expect(screen.getByText('内容-d9')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '取消发往 Bot 的排队消息' }));
-    await waitFor(() => expect(onCancelDelivery).toHaveBeenCalledWith('m-d9', 'd9'));
+  it('closes an emptied activity panel instead of reopening it for the next reply', async () => {
+    const props = { participants, abortingBotIds: new Set<string>(), onAbortBot: onAbortBot() };
+    const { rerender, container } = render(<GroupChatActiveRuns {...props} messages={messages.slice(0, 1) as never} />);
+    openList();
+    await screen.findByLabelText('群聊处理列表');
+    rerender(<GroupChatActiveRuns {...props} messages={[]} />);
+    expect(container).toBeEmptyDOMElement();
+    rerender(<GroupChatActiveRuns {...props} messages={messages.slice(0, 1) as never} />);
+    expect(screen.queryByLabelText('群聊处理列表')).not.toBeInTheDocument();
   });
 });

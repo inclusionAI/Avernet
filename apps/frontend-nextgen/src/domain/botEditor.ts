@@ -97,6 +97,8 @@ export interface BotEditorRoutine {
   model?: string;
   timeoutSecs?: number;
   modifiedAt?: string;
+  /** 后端若提供则展示；不可用时 UI 明确展示占位，不在前端推算。 */
+  nextRunAt?: string;
 }
 
 export interface BotEditorRoutineInput {

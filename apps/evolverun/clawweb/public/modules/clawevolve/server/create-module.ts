@@ -54,6 +54,7 @@ export type ClawevolveModuleOptions = {
   artifactUrlStore?: Pick<ObjectStore, "createSignedUrl">;
   /** Signing store whose endpoint is reachable from AIS containers. */
   aisArtifactUrlStore?: Pick<ObjectStore, "createSignedUrl">;
+  aisStatusHandlers?: EvolveRouterDeps["aisStatusHandlers"];
   artifactBucket?: string;
   skillPackageStorage?: SkillPackageStorageOptions;
   clawInsight?: ClawInsightInternalApi;
@@ -143,6 +144,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     skillPackages,
     artifactUrlStore: options.artifactUrlStore,
     aisArtifactUrlStore: options.aisArtifactUrlStore,
+    aisStatusHandlers: options.aisStatusHandlers,
     botWorkflowPermissionRepo: botWorkflowPermission,
     hostLocalSkills: options.hostLocalSkills ?? null,
     hostSpaces: options.hostSpaces,

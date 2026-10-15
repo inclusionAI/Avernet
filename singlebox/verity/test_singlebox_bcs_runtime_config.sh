@@ -184,3 +184,19 @@ test_partial_env_config_does_not_enable_local_llm
 test_e2e_mock_takes_precedence_over_env_config
 
 printf 'PASS: singlebox BCS runtime config tests\n'
+
+# Profile authorization survives repeated template regeneration.
+write_local_template
+export BCS_SERVER_ENV=local BCS_CONFIG_DIR="${TEST_ROOT}/qwenwork"
+unset BCS_E2E_MOCK_BASE_URL OPENCLAW_OPENAI_BASE_URL OPENCLAW_OPENAI_API_KEY OPENCLAW_OPENAI_MODEL_ID
+export SINGLEBOX_QWENWORK_PROVIDER_STATE="${TEST_ROOT}/qwenwork-provider.json"
+if [ -z "${QWENWORK_PYTHON:-}" ]; then
+    QWENWORK_PYTHON="$(uv python find 3.12)"
+fi
+export QWENWORK_PYTHON
+printf '{"provider_id":"prv_qwenwork","slug":"local"}' > "$SINGLEBOX_QWENWORK_PROVIDER_STATE"
+prepare_bcs_runtime_config
+prepare_bcs_runtime_config
+assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'registration_self_service_provider_ids = ["prv_qwenwork"]'
+assert_contains "${BCS_CONFIG_DIR}/bcs-config-local.toml" 'registration_self_service_provider_ids = ["prv_qwenwork"]'
+echo 'PASS: QwenWork authorization survives regeneration'

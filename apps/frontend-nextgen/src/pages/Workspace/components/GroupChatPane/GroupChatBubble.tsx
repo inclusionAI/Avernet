@@ -7,6 +7,7 @@ import { Bubble } from '@tc-chat/ui/es/Bubble';
 import { aixUiPlugin, fileRefPlugin } from '@tc-chat/ui/es/MarkdownRender';
 import { GroupChatRunStatus } from './GroupChatRunStatus';
 import { getMessageBlocks, getMessageTime, isStreamingAssistantMessage, resolveSender } from './messageHelpers';
+import { ReplyProgressIndicator } from './ReplyProgressIndicator';
 import { SystemMessageItem } from './SystemMessageItem';
 
 export interface GroupChatBubbleProps {
@@ -26,7 +27,6 @@ export interface GroupChatBubbleProps {
   onEdit?: () => void;
   isEditable?: boolean;
   onStop?: () => void;
-  now?: number;
 }
 
 export function GroupChatBubble({
@@ -43,7 +43,6 @@ export function GroupChatBubble({
   onEdit,
   isEditable,
   onStop,
-  now = Date.now(),
 }: GroupChatBubbleProps) {
   if (message.role === 'system') {
     return <SystemMessageItem message={message} />;
@@ -62,6 +61,9 @@ export function GroupChatBubble({
     onStop,
   };
   const messageActions = <MessageInteractionToolbar showCopy={false} {...messageActionsProps} />;
+  // dmore 协作群聊操作行显隐口径：仅回复对话最后一项(末尾的 Bot 回复)默认展示
+  // 全部操作图标，其余回复项与用户发送的消息都只在悬停/键盘聚焦时展示。
+  const shouldAlwaysShowActions = message.role === 'assistant' && isLastMessage;
 
   return (
     <>
@@ -70,11 +72,14 @@ export function GroupChatBubble({
           avatar={sender?.avatar}
           align={message.role === 'user' ? 'right' : 'left'}
           meta={
-            <MessageSenderMeta
-              name={sender?.name ?? (message.role === 'user' ? '未命名成员' : '未命名 Bot')}
-              time={getMessageTime(message)}
-              align={message.role === 'user' ? 'right' : 'left'}
-            />
+            <div className={`flex min-w-0 items-center gap-1.5 ${message.role === 'user' ? 'justify-end' : ''}`}>
+              <MessageSenderMeta
+                name={sender?.name ?? (message.role === 'user' ? '未命名成员' : '未命名 Bot')}
+                time={getMessageTime(message)}
+                align={message.role === 'user' ? 'right' : 'left'}
+              />
+              {isStreamingMessage ? <ReplyProgressIndicator /> : null}
+            </div>
           }
         >
           <Bubble
@@ -103,10 +108,11 @@ export function GroupChatBubble({
             onCopy={() => onCopy?.(messageText)}
             onEdit={onEdit}
             isEditable={message.role === 'user' && isEditable && Boolean(messageText.trim())}
+            revealOnHover={!shouldAlwaysShowActions}
           />
         ) : null}
       </div>
-      <GroupChatRunStatus message={message} participants={participants} now={now} />
+      <GroupChatRunStatus message={message} participants={participants} />
     </>
   );
 }

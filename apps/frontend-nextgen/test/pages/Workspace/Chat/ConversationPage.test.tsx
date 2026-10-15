@@ -242,9 +242,7 @@ describe('ConversationPage(Task 8 组合页)', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'AgentCoding Bot' }));
 
     expect(history.push).toHaveBeenCalledTimes(1);
-    expect(history.push).toHaveBeenCalledWith(
-      '/coding/coding-chat?botId=coding-bot%3A2088&space_id=73&space_name=%E6%B5%8B%E8%AF%95%E7%A9%BA%E9%97%B4',
-    );
+    expect(history.push).toHaveBeenCalledWith('/coding/coding-chat?botId=coding-bot');
   });
 
   it('origin=mine 选中会话渲染交互舞台(不渲染只读面板)', async () => {

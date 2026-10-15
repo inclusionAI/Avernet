@@ -2,6 +2,7 @@ import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { getBotEntryAvailability, type BotActionAvailability, type BotDomain } from '@/services/botWorkshop';
 import React from 'react';
 import BotDescriptionCell from './BotDescriptionCell';
+import { BotContainerInfo } from './BotContainerInfo';
 import BotInfoCell from './BotInfoCell';
 import { BotManagementMenu } from './BotManagementMenu';
 import BotPrimaryActionsCell from './BotPrimaryActionsCell';
@@ -27,6 +28,9 @@ export interface BotTableProps {
   /** 无详情权限时，整行及查看按钮仅打开基础信息，不进入编辑页。 */
   canEnterDetail?: (bot: BotDomain) => boolean;
   onOpenLogs?: (bot: BotDomain) => void;
+  onOpenTaskInstances?: (bot: BotDomain) => void;
+  canOpenTaskInstances?: (bot: BotDomain) => boolean;
+  onOpenContainers?: (bot: BotDomain) => void;
   onHealthCheck?: (bot: BotDomain) => void;
   onChangeSpace?: (bot: BotDomain) => void;
   onAuthorize?: (bot: BotDomain) => void;
@@ -55,6 +59,9 @@ const BotTable: React.FC<BotTableProps> = ({
   canOpenConversation,
   canEnterDetail,
   onOpenLogs,
+  onOpenTaskInstances,
+  canOpenTaskInstances,
+  onOpenContainers,
   onHealthCheck,
   onChangeSpace,
   onAuthorize,
@@ -84,19 +91,19 @@ const BotTable: React.FC<BotTableProps> = ({
       {
         id: 'info',
         header: '机器人信息',
-        width: 'w-[280px]',
+        width: 'w-[clamp(192px,16vw,240px)]',
         cell: (bot) => <BotInfoCell bot={bot} onClaimLock={onClaimLock} onReleaseLock={onReleaseLock} />,
       },
       {
-        // 不写死宽度:table-fixed 下由该列吸收剩余空间
         id: 'description',
         header: '描述',
+        // 描述列吸收可用空间；窄屏优先保留主要操作，完整描述仍可通过 Tooltip 查看。
         cell: (bot) => <BotDescriptionCell bot={bot} />,
       },
       {
         id: 'status',
         header: '状态',
-        width: 'w-[144px]',
+        width: 'w-[clamp(96px,8vw,112px)]',
         cell: (bot) => (
           <BotStatusCell
             bot={bot}
@@ -108,21 +115,27 @@ const BotTable: React.FC<BotTableProps> = ({
       {
         id: 'version',
         header: '版本',
-        width: 'w-[80px]',
+        width: 'w-[clamp(60px,5vw,72px)]',
         cell: (bot) => <BotVersionCell bot={bot} />,
       },
       {
         id: 'tags',
         header: 'bot 标签',
-        width: 'w-[220px]',
+        width: 'w-[clamp(120px,10vw,160px)]',
         cell: (bot) => <BotTagsCell bot={bot} />,
+      },
+      {
+        id: 'containers',
+        header: '容器信息',
+        width: 'w-[clamp(108px,9vw,128px)]',
+        cell: (bot) => (onOpenContainers ? <BotContainerInfo bot={bot} onOpen={onOpenContainers} /> : <span>—</span>),
       },
       ...(showOwner
         ? [
             {
               id: 'owner',
               header: 'Owner',
-              width: 'w-[140px]',
+              width: 'w-[clamp(96px,8vw,120px)]',
               cell: (bot: BotDomain) => (
                 <span className="truncate text-xs text-foreground">{bot.ownerName || bot.ownerId || '—'}</span>
               ),
@@ -132,8 +145,9 @@ const BotTable: React.FC<BotTableProps> = ({
       {
         id: 'primary-actions',
         header: '主要操作',
-        width: 'w-[360px]',
+        width: 'w-[224px]',
         align: 'end',
+        className: 'sticky right-12 z-10 bg-card group-hover:bg-muted/40',
         cell: (bot) => {
           const entry = getBotEntryAvailability(bot);
           return (
@@ -145,6 +159,8 @@ const BotTable: React.FC<BotTableProps> = ({
               conversationAllowed={(canOpenConversation?.(bot) ?? true) && entry.enabled}
               conversationDisabledReason={entry.enabled ? undefined : entry.disabledReason}
               onOpenLogs={onOpenLogs}
+              onOpenTaskInstances={onOpenTaskInstances}
+              canOpenTaskInstances={canOpenTaskInstances}
               onHealthCheck={onHealthCheck}
               inventoryActions={getInventoryActions?.(bot)}
               healthCheckAvailability={getHealthCheckAvailability?.(bot)}
@@ -156,22 +172,22 @@ const BotTable: React.FC<BotTableProps> = ({
       {
         id: 'more-actions',
         header: <span className="sr-only">更多操作</span>,
-        width: 'w-[72px]',
+        width: 'w-[48px]',
         align: 'end',
+        className: 'sticky right-0 z-10 bg-card group-hover:bg-muted/40',
         cell: (bot) => {
           if (!onAction) return null;
-          const isAgentCodingBot = bot.runtime.isAgentCodingBot;
           const generalConfigAvailability = getGeneralConfigAvailability?.(bot);
           return (
             <div className="flex justify-end" onClick={(event) => event.stopPropagation()}>
               <BotManagementMenu
                 bot={bot}
-                collaborationMode={isAgentCodingBot ? undefined : getCollaborationMode?.(bot)}
+                collaborationMode={getCollaborationMode?.(bot)}
                 lockedByOther={bot.lock?.status === 'other'}
                 onAction={onAction}
                 onManagePublication={onManagePublication}
                 onChangeSpace={onChangeSpace}
-                onAuthorize={isAgentCodingBot ? undefined : onAuthorize}
+                onAuthorize={onAuthorize}
                 canGeneralConfig={generalConfigAvailability?.enabled}
                 generalConfigDisabledReason={generalConfigAvailability?.disabledReason}
                 onGeneralConfig={onGeneralConfig}
@@ -188,6 +204,9 @@ const BotTable: React.FC<BotTableProps> = ({
       onConversation,
       canOpenConversation,
       onOpenLogs,
+      onOpenTaskInstances,
+      canOpenTaskInstances,
+      onOpenContainers,
       onHealthCheck,
       onChangeSpace,
       onAuthorize,
@@ -242,6 +261,7 @@ const BotTable: React.FC<BotTableProps> = ({
         ) : null
       }
       ariaLabel={ariaLabel}
+      minWidth={showOwner ? 'min-w-[1260px]' : 'min-w-[1180px]'}
     />
   );
 };

@@ -5,8 +5,10 @@
  * - 右缘面板互斥由 GroupWorkspaceArea 的单一 activePanel 统一（会话管理/历史消息/资源管理），
  *   本 Hook 不再持有面板开关态，只承载三块纯本地域：
  *   收藏模型（SessionView.favorite）、历史搜索（前端过滤，Service 同源）、副屏镜像开合。
- * - 群侧 GroupChatPane 在会话切换时 closePanelForce()，故副屏镜像态必须随切换复位
- *   （chat 孪生已在同边界补齐复位）；副屏打开路径共享 chat 侧
+ * - 群侧 GroupChatPane 在会话切换时 closePanelForce()，故副屏开合态必须随切换复位
+ *   （chat 孪生已在同边界补齐复位）；sidePaneOpen 经 ChatLayoutPanelSlot 承接 SDK
+ *   onIsOpenChange 保持真实开合态（含渲染器「挂载即 openTab」的默认展开），
+ *   toggle 仅乐观翻转、随后由真实态事件纠偏；副屏打开路径共享 chat 侧
  *   reopenSidePaneTabsFromMessages（按消息标记幂等重建，防 autoCloseWhenEmpty 弹回），
  *   图标判空共享 sessionHasSidePaneContent。
  * 历史搜索状态收口本 Hook（useMemo 前端过滤，Service 双源）。
@@ -37,10 +39,13 @@ export interface UseGroupChatHeaderPanelsOptions {
 export interface UseGroupChatHeaderPanelsResult {
   favorites: GroupChatFavoritesModel;
   historySearch: UseSessionHistorySearchModel;
+  /** 副屏真实开合态（ChatLayoutPanelSlot onIsOpenChange 同步；toggle 乐观翻转其后纠偏）。 */
   sidePaneOpen: boolean;
   /** 会话无副屏内容（消息无 <AixUI type="panel">）时 Monitor 图标禁用，toggle 空转。 */
   sidePaneDisabled: boolean;
   toggleSidePane: () => void;
+  /** 真实开合同步入口（接线至 ChatLayoutPanelSlot onOpenStateChange）。 */
+  onSidePaneIsOpenChange: (open: boolean) => void;
   /** 点击搜索结果后待定位高亮的 messageId（3s 后自动清除）。 */
   highlightMessageId: string | null;
   locateMessage: (messageId: string) => void;
@@ -80,8 +85,10 @@ const HIGHLIGHT_TIMEOUT_MS = 3000;
 export function useGroupChatHeaderPanels(options: UseGroupChatHeaderPanelsOptions): UseGroupChatHeaderPanelsResult {
   const { session, messages, panelRef } = options;
 
-  // 副屏 toggle 的本地镜像态（PanelHandle 无 isOpen 查询）。
+  // 副屏开合态：默认 false，经 ChatLayoutPanelSlot 承接 SDK onIsOpenChange 的真实态事件同步
+  // （含渲染器「挂载即 openTab」的默认展开），toggle 仅乐观翻转、随后由真实态事件纠偏。
   const [sidePaneOpen, setSidePaneOpen] = useState(false);
+  const onSidePaneIsOpenChange = useCallback((open: boolean) => setSidePaneOpen(open), []);
   const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -140,6 +147,7 @@ export function useGroupChatHeaderPanels(options: UseGroupChatHeaderPanelsOption
     sidePaneOpen,
     sidePaneDisabled,
     toggleSidePane,
+    onSidePaneIsOpenChange,
     highlightMessageId,
     locateMessage,
   };

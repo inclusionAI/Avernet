@@ -1414,7 +1414,11 @@ class TestResolveEngineSrcDir:
         original_exists = Path.exists
 
         def fake_exists(self):
-            if self.name == "src" and self.parent.parent.name == "engine" and self.parent.name == "adapter":
+            if (
+                self.name == "src"
+                and self.parent.parent.name == "engine"
+                and self.parent.name == "adapter"
+            ):
                 return False
             return original_exists(self)
 

@@ -177,9 +177,11 @@ from .authorized_apps import app_view_router as authorized_bots_router
 from .authorized_apps import router as authorized_apps_router
 from .authorized_apps import user_router as user_authorized_apps_router
 from .bots import router as bots_router
+from .bots.classification import router as classification_router
 from .collaboration_bots import public_router as collaboration_public_router
 from .collaborating_bots import router as collaborating_bots_router
 from .task import task_router
+from .bots.engine_version import router as engine_version_router
 from .bots.engine_config import router as engine_config_router
 from .bots.acli_clis import router as acli_clis_router
 from .bots.cli_tools import router as cli_tools_router
@@ -302,6 +304,7 @@ _MIXED_GROUPS = [
 # about which *response table* each gets; it does not change that they all
 # precede `bots`.
 _OPEN_SUBGROUPS = [
+    classification_router,
     # BBS Topics are tenant-wide content, not scoped to one addressed bot.
     bbs_read_router,
     # BBS Browse-Loop per-Bot reads + manual triggers: same /bots/{bot_id}/bbs
@@ -380,6 +383,7 @@ _SUBGROUPS = [
 # declares it explicitly so the admission rule is visible where the public
 # surface is assembled. FastAPI caches the shared dependency per request.
 _ADDRESSED_BOT_SUBGROUPS = [
+    engine_version_router,
     # The config manifest is collaborator-scoped (MEMBER to read, ADMIN to
     # write), so it may address a shared bot and takes the addressed-owner
     # grant rather than the own-bot one.

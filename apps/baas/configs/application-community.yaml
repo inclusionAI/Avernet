@@ -78,7 +78,15 @@ user_config:
 
   # BotRun 队列 Worker 配置
   bot_run_queue:
-    enabled: false                    # 是否启用队列 Worker
+    enabled: true                     # 是否启用队列 Worker
+    session_lock_expire_seconds: 300  # session 串行锁过期时间（秒）
+    session_lock_renew_seconds: 60    # session 串行锁自动续期间隔（秒）
+    qpm_refresh_seconds: 30.0         # QPM 配置刷新间隔（秒）
+    poll_interval_seconds: 1          # Worker 轮询间隔（秒）
+    discover_limit: 10                # 每轮发现的 bot 数上限
+    candidates_per_bot: 5             # 每个 bot 单次认领的候选数
+    max_concurrent: 50                # 单 Worker 最大并发执行数
+    heartbeat_interval_seconds: 30.0  # 心跳间隔（秒）
 
   teamclaw:
     base_url: "${TEAMCLAW_BASE_URL:-https://teamclaw.example.com}"
@@ -156,6 +164,13 @@ user_config:
         dev: "${BAAS_CALLBACK_HOST_DEV:-https://baas-dev.avernet-inc.com}"
         pre: "${BAAS_CALLBACK_HOST_PRE:-https://baas-pre.avernet-inc.com}"
         prod: "${BAAS_CALLBACK_HOST_PROD:-https://baas.avernet-inc.com}"
+
+  bcn:
+    api_key:
+      prefix: "${BCN_API_KEY_PREFIX:-dummy-prefix}"
+    uplink:
+      base_url: "${BCN_UPLINK_URL:-https://bcn.example.com}"
+      provider_id: "${BCN_UPLINK_ID:-dummy-provider}"
 
   api_gateway:
     admin_operators:

@@ -124,6 +124,7 @@ consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
+  - agentclaw.community.core.bot_management.engine_version.protocol
   - agentclaw.community.core.bot_inventory.local_progress
   - agentclaw.community.core.resources.link_workflow
   - agentclaw.community.core.service_bot.file_count_service_protocol
@@ -220,6 +221,7 @@ internal_dependencies:
   - agentclaw.community.core.common_config.beta_quota_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.common_config.common_config_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.common_config.bot_config_protocol  # Protocol + BotCommonConfigEntry defined in their owning core module, re-exported here
+  - agentclaw.community.core.cron.cron_admin_service_protocol
   - agentclaw.community.core.cron.cron_relay_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.desktop_bot.desktop_bot_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.devices.device_service_protocol  # Protocol defined in its owning core module, re-exported here

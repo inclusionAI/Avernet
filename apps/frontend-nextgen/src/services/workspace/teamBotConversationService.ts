@@ -9,7 +9,13 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
   const realBotId = dto.bot_id.trim();
   const ownerId = dto.entity_id?.trim() || undefined;
   const botId = ownerId ? `${realBotId}:${ownerId}` : realBotId;
-  const runtime = resolveBotRuntime({ engine: dto.engine, botType: dto.bot_type, botId });
+  const runtime = resolveBotRuntime({
+    botId: realBotId,
+    engine: dto.engine,
+    botType: dto.bot_type,
+    templateType: dto.template_type ?? undefined,
+    templateName: dto.template_name,
+  });
   return {
     botId,
     realBotId,

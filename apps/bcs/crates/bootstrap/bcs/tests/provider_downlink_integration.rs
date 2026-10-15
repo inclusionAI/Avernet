@@ -20,7 +20,8 @@ use bcs::LlmProviderType;
 use bcs_domain::SystemMessageEvent;
 use helpers::{
     MockBot, create_temp_bots_dir, create_test_config, start_test_server,
-    start_test_server_with_config, start_test_server_with_state,
+    start_persistent_test_server_with_config, start_test_server_with_config,
+    start_test_server_with_state,
 };
 use secrecy::Secret;
 use serde_json::{Value, json};

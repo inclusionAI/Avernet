@@ -31,12 +31,193 @@ async function scenario(run) {
     await act(async () => root.render(React.createElement(StateMachineRunView, { runId: 'run-1', autoRefresh: false })));
     await settle();
     const toggle = [...container.querySelectorAll('button')].find(button => button.textContent === '展开执行图');
-    if (expanded && toggle) await act(async () => toggle.click());
+    if (expanded && toggle) { await act(async () => toggle.click()); await settle(); }
   };
   try { await run(container, mount); }
   finally { await act(async () => root.unmount()); container.remove(); }
 }
+
+function nestedGraph() {
+  const value = {
+    run: { run_id: 'run-1', definition_id: 'nested', definition_version: 1, status: 'running' },
+    definition: { id: 'nested', version: 1, graph_mode: 'hierarchical', execution_graph_mode: 'acyclic', initial_nodes: ['prepare-1'] },
+    loops: {
+      outer: { display_name: 'Outer', max_iterations: 2, entry_node_id: 'prepare', result_node_id: 'assess',
+        body_node_ids: ['prepare', 'inner', 'assess'], continue_outcomes: ['repeat'], break_outcomes: ['done'], exhausted_outcome: 'capped' },
+      'outer/inner': { display_name: 'Inner', max_iterations: 2, entry_node_id: 'draft', result_node_id: 'review',
+        body_node_ids: ['draft', 'review'], continue_outcomes: ['revise'], break_outcomes: ['approved'], exhausted_outcome: 'exhausted' },
+    },
+    nodes: [], edges: [],
+  };
+  const add = (node_id, definition_node_id, path, status, outcome) => value.nodes.push({
+    node_id, display_name: definition_node_id, kind: 'bot_task', status, outcome, attempt: 0,
+    execution: { definition_node_id, loop_id: path.at(-1)[0], iteration: path.at(-1)[1], max_iterations: path.at(-1)[2],
+      loop_path: path.map(([loop_id, iteration, max_iterations]) => ({ loop_id, iteration, max_iterations })) },
+  });
+  for (let outer = 1; outer <= 2; outer++) {
+    const outerPath = [['outer', outer, 2]];
+    add(`prepare-${outer}`, 'prepare', outerPath, 'completed', 'complete');
+    add(`assess-${outer}`, 'assess', outerPath, outer === 1 ? 'completed' : 'pending', outer === 1 ? 'repeat' : undefined);
+    value.edges.push({ source: `prepare-${outer}`, target: `draft-${outer}-1`, outcome: 'complete' });
+    for (let inner = 1; inner <= 2; inner++) {
+      const path = [...outerPath, ['inner', inner, 2]];
+      const entered = outer === 1 || inner === 1;
+      add(`draft-${outer}-${inner}`, 'draft', path, entered ? 'completed' : 'pending', entered ? 'complete' : undefined);
+      add(`review-${outer}-${inner}`, 'review', path,
+        outer === 2 && inner === 1 ? 'running' : entered ? 'completed' : 'pending',
+        outer === 1 ? inner === 1 ? 'revise' : 'approved' : undefined);
+      value.edges.push({ source: `draft-${outer}-${inner}`, target: `review-${outer}-${inner}`, outcome: 'complete' });
+      value.edges.push(inner < 2
+        ? { source: `review-${outer}-${inner}`, target: `draft-${outer}-${inner + 1}`, outcome: 'revise', loop_route: { kind: 'continue', logical_outcome: 'revise' } }
+        : { source: `review-${outer}-${inner}`, target: `assess-${outer}`, outcome: 'revise', loop_route: { kind: 'exhausted', logical_outcome: 'exhausted' } });
+      value.edges.push({ source: `review-${outer}-${inner}`, target: `assess-${outer}`, outcome: 'approved', loop_route: { kind: 'break', logical_outcome: 'approved' } });
+    }
+  }
+  value.nodes.push({ node_id: 'publish', display_name: 'publish', kind: 'bot_task', status: 'pending', attempt: 0 });
+  value.edges.push({ source: 'assess-1', target: 'prepare-2', outcome: 'repeat', loop_route: { kind: 'continue', logical_outcome: 'repeat' } },
+    { source: 'assess-1', target: 'publish', outcome: 'done', loop_route: { kind: 'break', logical_outcome: 'done' } },
+    { source: 'assess-2', target: 'publish', outcome: 'repeat', loop_route: { kind: 'exhausted', logical_outcome: 'capped' } },
+    { source: 'assess-2', target: 'publish', outcome: 'done', loop_route: { kind: 'break', logical_outcome: 'done' } });
+  return value;
+}
+
+function sameIdNestedGraph() {
+  const value = nestedGraph();
+  value.loops['outer/outer'] = value.loops['outer/inner'];
+  delete value.loops['outer/inner'];
+  value.loops.outer.body_node_ids = value.loops.outer.body_node_ids.map(id => id === 'inner' ? 'outer' : id);
+  value.nodes.forEach(node => {
+    if (node.execution?.loop_path?.length === 2) {
+      node.execution.loop_id = 'outer';
+      node.execution.loop_path[1].loop_id = 'outer';
+    }
+  });
+  return value;
+}
+
+function threeLevelHumanGraph() {
+  const value = nestedGraph();
+  value.loops['outer/inner'].body_node_ids = ['draft', 'approval', 'review'];
+  value.loops['outer/inner/approval'] = {
+    display_name: 'Human approval', max_iterations: 2,
+    entry_node_id: 'human', result_node_id: 'human', body_node_ids: ['human'],
+    continue_outcomes: ['again'], break_outcomes: ['done'], exhausted_outcome: 'timed_out',
+  };
+  for (let outer = 1; outer <= 2; outer++) {
+    for (let inner = 1; inner <= 2; inner++) {
+      const draft = `draft-${outer}-${inner}`, review = `review-${outer}-${inner}`;
+      value.edges = value.edges.filter(edge => !(edge.source === draft && edge.target === review));
+      if (outer === 2 && inner === 1) {
+        const reviewNode = value.nodes.find(node => node.node_id === review);
+        reviewNode.status = 'pending'; delete reviewNode.outcome;
+      }
+      for (let human = 1; human <= 2; human++) {
+        const completed = outer === 1;
+        const running = outer === 2 && inner === 1 && human === 1;
+        value.nodes.push({
+          node_id: `human-${outer}-${inner}-${human}`, display_name: 'human', kind: 'human_input',
+          status: completed ? 'completed' : running ? 'running' : 'pending',
+          ...(completed ? { outcome: human === 1 ? 'again' : 'done', started_at: 10, completed_at: 20 } : {}),
+          attempt: 0,
+          execution: {
+            definition_node_id: 'human', loop_id: 'approval', iteration: human, max_iterations: 2,
+            loop_path: [
+              { loop_id: 'outer', iteration: outer, max_iterations: 2 },
+              { loop_id: 'inner', iteration: inner, max_iterations: 2 },
+              { loop_id: 'approval', iteration: human, max_iterations: 2 },
+            ],
+          },
+        });
+      }
+      value.edges.push(
+        { source: draft, target: `human-${outer}-${inner}-1`, outcome: 'complete' },
+        { source: `human-${outer}-${inner}-1`, target: `human-${outer}-${inner}-2`, outcome: 'again',
+          loop_route: { kind: 'continue', logical_outcome: 'again' } },
+        { source: `human-${outer}-${inner}-1`, target: review, outcome: 'done',
+          loop_route: { kind: 'break', logical_outcome: 'done' } },
+        { source: `human-${outer}-${inner}-2`, target: review, outcome: 'again',
+          loop_route: { kind: 'exhausted', logical_outcome: 'timed_out' } },
+        { source: `human-${outer}-${inner}-2`, target: review, outcome: 'done',
+          loop_route: { kind: 'break', logical_outcome: 'done' } },
+      );
+    }
+  }
+  return value;
+}
+
+function siblingNestedGraph() {
+  const value = nestedGraph();
+  value.loops['outer/inner_b'] = { ...structuredClone(value.loops['outer/inner']), display_name: 'Inner B' };
+  value.loops.outer.body_node_ids = ['prepare', 'inner', 'inner_b', 'assess'];
+  const childIds = new Set(value.nodes.filter(node => node.execution?.loop_path?.length === 2).map(node => node.node_id));
+  const siblingId = id => childIds.has(id) ? `sibling-${id}` : id;
+  value.nodes.push(...value.nodes.filter(node => childIds.has(node.node_id)).map(node => ({
+    ...structuredClone(node), node_id: siblingId(node.node_id),
+    execution: { ...structuredClone(node.execution), loop_id: 'inner_b',
+      loop_path: node.execution.loop_path.map((frame, index) => index === 1 ? { ...frame, loop_id: 'inner_b' } : { ...frame }) },
+  })));
+  value.edges.push(...value.edges.filter(edge => childIds.has(edge.source) || childIds.has(edge.target))
+    .map(edge => ({ ...structuredClone(edge), source: siblingId(edge.source), target: siblingId(edge.target) })));
+  return value;
+}
 try {
+  await scenario(async (container, mount) => {
+    graph = sameIdNestedGraph();
+    await mount(false);
+    assert.ok(container.querySelector('[data-loop-container="outer"]'));
+    assert.ok(container.querySelector('[data-loop-container="outer/outer"]'));
+    assert.equal(container.querySelectorAll('[data-loop-container]').length, 2);
+    assert.equal(container.querySelectorAll('[data-loop-id="outer"]').length, 4,
+      'same local IDs remain in separate parent and child containers');
+  });
+  await scenario(async (container, mount) => {
+    graph = threeLevelHumanGraph();
+    await mount(false);
+    assert.equal(container.querySelectorAll('[data-loop-container]').length, 3);
+    assert.ok(container.querySelector('[data-loop-container="outer/inner/approval"]'));
+    assert.equal(container.querySelectorAll('[data-loop-controls]').length, 3);
+    assert.match(container.querySelector('[data-loop-controls="outer/inner/approval"]').textContent, /等待人工/);
+    const human = container.querySelector('[data-loop-id="approval"]');
+    assert.ok(human);
+    assert.equal(human.dataset.loopIteration, '1');
+  });
+  await scenario(async (container, mount) => {
+    graph = siblingNestedGraph();
+    await mount(false);
+    const first = container.querySelector('[data-loop-container="outer/inner"]');
+    const second = container.querySelector('[data-loop-container="outer/inner_b"]');
+    assert.ok(first && second);
+    assert.equal(first.parentNode, second.parentNode);
+    assert.notEqual(first.querySelector('rect').getAttribute('x'), second.querySelector('rect').getAttribute('x'));
+  });
+  await scenario(async (container, mount) => {
+    graph = nestedGraph();
+    await mount(false);
+    assert.equal(container.querySelectorAll('[data-loop-container]').length, 2);
+    assert.ok(container.querySelector('[data-loop-container="outer"]'));
+    assert.ok(container.querySelector('[data-loop-container="outer/inner"]'));
+    const outer = container.querySelector('select[aria-label="Outer 查看执行"]');
+    let inner = container.querySelector('select[aria-label="Inner 查看执行"]');
+    assert.equal(outer.value, '2');
+    assert.deepEqual([...inner.options].map(option => option.value), ['1'], 'inner history belongs to selected outer #2');
+    await act(async () => { outer.value = '1'; outer.dispatchEvent(new dom.window.Event('change', { bubbles: true })); });
+    inner = container.querySelector('select[aria-label="Inner 查看执行"]');
+    assert.deepEqual([...inner.options].map(option => option.value), ['1', '2']);
+    assert.equal(inner.value, '2', 'switching the outer round switches to that instance history');
+    assert.equal(container.querySelectorAll('[data-loop-route="continue"]').length, 2);
+  });
+  await scenario(async (container, mount) => {
+    graph = nestedGraph();
+    await mount();
+    assert.equal(container.querySelectorAll('[data-loop-container="outer"]').length, 2,
+      'expanded history includes only entered outer instances');
+    assert.equal(container.querySelectorAll('[data-loop-container="outer/inner"]').length, 3,
+      'child history remains scoped to each entered parent instance');
+    assert.ok(container.querySelector('[data-loop-instance="outer/inner@1.2"]'));
+    assert.ok(container.querySelector('[data-loop-instance="outer/inner@2.1"]'));
+    assert.equal(container.querySelectorAll('[data-loop-id="inner"][data-loop-iteration="2"]').length, 2,
+      'the unentered child round is not presented as execution history');
+  });
   await scenario(async (container, mount) => {
     graph = JSON.parse(readFileSync(new URL('../../../tests/fixtures/fixed_loop_logical_view.json', import.meta.url), 'utf8'));
     graph.loops.revision_rounds.continue_display_name = '根据意见修订';
@@ -268,4 +449,4 @@ try {
     assert.doesNotMatch(container.textContent, /Work · 第 \d 轮|上限兜底/);
   });
 } finally { dom.window.close(); }
-console.log('Fixed Loop panel: logical/expanded views, actual history (100 limit, 0/5/10 entered), single execution, retry/cancel, exhausted/break, opaque detail IDs, first/later Human context and exact response target, v1 compatibility passed.');
+console.log('Fixed Loop panel: recursive same-ID/sibling/three-level Human containers, nested history isolation, logical/expanded views, actual history (100 limit, 0/5/10 entered), single execution, retry/cancel, exhausted/break, opaque detail IDs, first/later Human context and exact response target, v1 compatibility passed.');

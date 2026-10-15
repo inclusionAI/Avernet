@@ -189,7 +189,10 @@ export default function ConversationPage(): JSX.Element {
     sessions,
     others,
     onOpenSession: handleOpenSession,
+    // 好友 Bot 空态文案内「公开 Bot」链接:跳公开 Bot 发现页。
     onOpenPublicBots: () => history.push('/collaboration-square/bots'),
+    // 我的 Bot 空态文案内「Bot 管理」链接:跳 Bot 管理页创建 Bot。
+    onOpenBotWorkshop: () => history.push('/bot-workshop'),
     onOpenAgentCodingBot: openAgentCodingBot,
   };
 
@@ -288,6 +291,7 @@ export default function ConversationPage(): JSX.Element {
             highlightMessageId={headerPanels.highlightMessageId}
             sidePaneOpen={headerPanels.sidePaneOpen}
             onToggleSidePane={headerPanels.toggleSidePane}
+            onSidePaneIsOpenChange={headerPanels.onSidePaneIsOpenChange}
           />
         )}
       </div>

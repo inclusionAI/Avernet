@@ -1,0 +1,13 @@
+export type RepairVerificationSample = { flowId: string; status: string; deployNumber: number;
+  startedAt: number; completedAt: number | null; nodes: Array<{ nodeId: string; status: string }> };
+export type RepairVerificationEvidence = { deploymentId: string; deployNumber: number; candidateCommit: string;
+  samples: RepairVerificationSample[]; total: number; baseline: { deployNumber: number; total: number; succeeded: number; failed: number;
+    successRate: number | null; averageDurationMs: number | null; averageTokens: number | null; window: { from: number | null; to: number | null } };
+  status: 'waiting' | 'collecting' | 'ready'; note: string;
+  excludedUnknownVersions: number;
+  metrics: { window: { from: number | null; to: number | null }; succeeded: number; failed: number; completed: number;
+    successRate: number | null; averageDurationMs: number | null; averageTokens: number | null; diagnosedTimeoutRuns: number; diagnosedRuns: number };
+  recurrence: Array<{ itemId: string; signature: string | null; matchingRuns: number | null; diagnosedRuns: number }> };
+export type RepairVerificationConclusion = { id: string; workflowId: string; taskId: string; revision: number; stateVersion: number;
+  deploymentId: string; deployNumber: number; itemId: string; actorId: string; result: 'verified' | 'ineffective' | 'inconclusive';
+  reason: string; flowIds: string[]; createdAtMs: number };

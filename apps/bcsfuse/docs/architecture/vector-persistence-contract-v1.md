@@ -93,6 +93,13 @@ indexes.
 
 ## Failure behavior
 
+The optional `PointLookupVectorPersistenceBackend` exposes
+`load_by_id(id) -> VectorPoint | None` for primary-key reads. The ID is matched
+exactly, including punctuation and SQL wildcard characters; missing or deleted
+points return `None`. MySQL and internal OceanBase providers retain their
+existing decoding and database failure behavior. Consumers continue to support
+baseline providers through the previous `load_all()` lookup fallback.
+
 Storage, decoding, and consistency failures propagate to the caller. A
 provider must not return a partial change set with a checkpoint that skips the
 failed mutation. Consumers advance their local checkpoint only after applying

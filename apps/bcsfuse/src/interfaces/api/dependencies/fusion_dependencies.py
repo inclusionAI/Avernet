@@ -681,7 +681,13 @@ def _build_vector_index_for_worker(worker_id: str) -> bool:
         # 使用 staff_id 精确匹配，而非 profile_key.startswith(worker_id)
         # 原因：worker_id 可能包含 ":"（如 "bot_id:owner_id"），
         # startswith 会误匹配前缀相同的其他 worker（如 "default:334018" 匹配 "default:3340183"）
-        scan_result = profile_src.scan()
+        from src.domain.services.worker_profile_source import WorkerScopedProfileSource
+
+        scan_result = (
+            profile_src.scan_for_workers([worker_id])
+            if isinstance(profile_src, WorkerScopedProfileSource)
+            else profile_src.scan()
+        )
 
         def _profile_belongs_to_worker(profile):
             return getattr(profile, 'staff_id', None) == worker_id or getattr(profile, 'worker_id', None) == worker_id

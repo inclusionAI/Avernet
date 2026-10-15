@@ -40,17 +40,17 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
     """
 
     def __init__(
-            self, endpoint: str | None = None, timeout: float | None = None
+        self, endpoint: str | None = None, timeout: float | None = None
     ) -> None:
         self._bots: dict[str, dict[str, Any]] = {}
         self._session_outbound_rules: dict[str, list[dict[str, Any]]] = {}
         # Storage keys ("bot_config", "status", "outbound_rule") align with TeClaw API v2 response field names
 
     async def create_bot(
-            self,
-            bot_config: dict[str, Any],
-            *,
-            callback_context: DeviceCallbackContext | None = None,
+        self,
+        bot_config: dict[str, Any],
+        *,
+        callback_context: DeviceCallbackContext | None = None,
     ) -> BotCreateResult | BotAsyncTaskResult:
         """Create a new bot in the in-memory store.
 
@@ -122,11 +122,11 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
         return BotDestroyResult(teclaw_bot_id=bot_id, status="DELETED")
 
     async def update_bot(
-            self,
-            bot_id: str,
-            bot_config: dict[str, Any],
-            *,
-            callback_context: DeviceCallbackContext | None = None,
+        self,
+        bot_id: str,
+        bot_config: dict[str, Any],
+        *,
+        callback_context: DeviceCallbackContext | None = None,
     ) -> BotUpdateResult | BotAsyncTaskResult:
         """Update a bot's config in the in-memory store.
 
@@ -193,11 +193,11 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
         )
 
     async def update_outbound_rule(
-            self,
-            bot_id: str,
-            rules: dict[str, Any],
-            mode: OutBoundOperationRuleUpdatedMode | None = None,
-            session_key: str | None = None,
+        self,
+        bot_id: str,
+        rules: dict[str, Any],
+        mode: OutBoundOperationRuleUpdatedMode | None = None,
+        session_key: str | None = None,
     ) -> bool:
         """Store outbound operation rules for a bot in the in-memory store.
 
@@ -223,8 +223,8 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
                 "mode=append requires a non-empty session_key",
             )
         if (
-                resolved_mode != OutBoundOperationRuleUpdatedMode.APPEND
-                and session_key is not None
+            resolved_mode != OutBoundOperationRuleUpdatedMode.APPEND
+            and session_key is not None
         ):
             raise PaasError(
                 ErrorCode.CONFIG_INVALID,
@@ -241,7 +241,9 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
                     "placeholder": rule.get("placeholder") or "",
                     "separator": rule.get("separator") or "",
                 }
-                await self.append_session_outbound_rule(bot_id, session_key, session_rule)
+                await self.append_session_outbound_rule(
+                    bot_id, session_key, session_rule
+                )
             return True
 
         self._bots.setdefault(
@@ -253,7 +255,7 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
         return True
 
     async def append_session_outbound_rule(
-            self, bot_id: str, session_key: str, rule: dict[str, Any]
+        self, bot_id: str, session_key: str, rule: dict[str, Any]
     ) -> bool:
         """Append a session-scoped rule in the in-memory store.
 
@@ -270,15 +272,16 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
         self._session_outbound_rules.setdefault(session_key, []).append(rule)
         logger.info(
             "[stub-teclaw] session outbound rule appended bot_id=%s session_key=%s",
-            bot_id, session_key,
+            bot_id,
+            session_key,
         )
         return True
 
     async def restart_bot(
-            self,
-            bot_id: str,
-            *,
-            callback_context: DeviceCallbackContext | None = None,
+        self,
+        bot_id: str,
+        *,
+        callback_context: DeviceCallbackContext | None = None,
     ) -> BotRestartResult | BotAsyncTaskResult:
         """Restart a bot by re-applying its stored config.
 
@@ -350,7 +353,7 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
         )
 
     async def resolve_http_conn_info(
-            self, bot_id: str, port: int, path: str, template_id: int | None = None
+        self, bot_id: str, port: int, path: str, template_id: int | None = None
     ) -> HttpConnectionInfo:
         """Resolve HTTP connection info — deterministic stub URL.
 
@@ -380,7 +383,7 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
         )
 
     async def resolve_ws_conn_info(
-            self, bot_id: str, port: int, path: str, template_id: int | None = None
+        self, bot_id: str, port: int, path: str, template_id: int | None = None
     ) -> WsConnectionInfo:
         """Resolve WebSocket connection info — deterministic stub URL.
 

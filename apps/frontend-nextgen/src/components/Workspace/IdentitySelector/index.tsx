@@ -4,7 +4,7 @@ import { useCollapsedIdentityTooltip } from '@/hooks/useCollapsedIdentityTooltip
 import type { HumanIdentityStatus } from '@/hooks/useHumanIdentity';
 import type { Identity } from '@/services/workspace/workspaceModel';
 import { cn } from '@/utils/cn';
-import { ChevronDown, Info, Loader2 } from 'lucide-react';
+import { Bot, ChevronDown, Info, Loader2, UserRound, Users } from 'lucide-react';
 import { useRef, useState } from 'react';
 import {
   IdentitySection,
@@ -29,6 +29,12 @@ interface WorkspaceIdentitySelectorProps {
   triggerClassName?: string;
   /** 头部说明 Tooltip 文案定制（如协作广场公开Bot Tab 的好友关系说明）；缺省保持全局默认文案。 */
   headerTooltip?: string;
+  /** 弹层标题定制（如协作群菜单「切换协作身份」）；缺省显示「切换工作身份」。 */
+  popoverTitle?: string;
+  /** 弹层副提示文案定制（如协作群菜单「选择参与协作群会话的身份」）；缺省显示「切换后对工作区全局生效」。 */
+  popoverHint?: string;
+  /** 移除弹层标题旁的说明图标（如协作群菜单：副提示已说明用途）；缺省保留图标与默认说明。 */
+  hidePopoverInfo?: boolean;
   /**
    * 身份列表加载失败时的页内重试回调（AC-6）：提供时错误态展示「重试」按钮；
    * 缺省保持原空态文案（左上角等既有消费方行为不变）。
@@ -48,6 +54,9 @@ export function WorkspaceIdentitySelector({
   headerLabel,
   triggerClassName,
   headerTooltip,
+  popoverTitle,
+  popoverHint,
+  hidePopoverInfo,
   onRetry,
 }: WorkspaceIdentitySelectorProps) {
   const [open, setOpen] = useState(false);
@@ -92,9 +101,9 @@ export function WorkspaceIdentitySelector({
   ) : null;
   return (
     // sidebarChip：身份 chip 需占满侧栏行宽（w-full），否则按钮按内容收缩、气泡也随之变窄。
-    <div className={collapsedLayout ? undefined : sidebarChipLayout ? 'w-full' : 'space-y-1'}>
+    <div className={collapsedLayout ? undefined : sidebarChipLayout ? 'w-full' : layout === 'inline' ? 'flex min-w-0 items-center gap-2' : 'space-y-1'}>
       <Popover open={open} onOpenChange={handlePopoverOpenChange}>
-        {collapsedLayout || sidebarChipLayout ? null : (
+        {collapsedLayout || sidebarChipLayout || layout === 'inline' ? null : (
           <IdentitySectionHeader
             layout={layout}
             headerLabel={headerLabel}
@@ -151,34 +160,42 @@ export function WorkspaceIdentitySelector({
                 openerRef.current?.focus();
               }}
             >
-              <div className="mb-1.5 flex items-center justify-between gap-2 border-b border-border/70 px-1.5 pb-2">
-                <div className="flex min-w-0 items-center gap-1">
-                  <p className="text-xs font-medium text-foreground">切换工作身份</p>
-                  {!navigationLayout ? (
-                    <TooltipProvider delayDuration={300}>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span
-                            role="img"
-                            aria-label="协作身份说明"
-                            tabIndex={0}
-                            className="inline-flex cursor-help items-center text-muted-foreground"
-                          >
-                            <Info className="h-3.5 w-3.5" aria-hidden />
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          当前工作身份决定你以个人或指定 Bot
-                          身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  ) : null}
+              <div className="border-b border-border/70 px-1.5 pb-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-1">
+                    <p className="text-xs font-semibold text-foreground">{popoverTitle ?? '切换工作身份'}</p>
+                    {!navigationLayout && !hidePopoverInfo ? (
+                      <TooltipProvider delayDuration={300}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span
+                              role="img"
+                              aria-label="协作身份说明"
+                              tabIndex={0}
+                              className="inline-flex cursor-help items-center text-muted-foreground"
+                            >
+                              <Info className="h-3.5 w-3.5" aria-hidden />
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            当前工作身份决定你以个人或指定 Bot
+                            身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    ) : null}
+                  </div>
+                  {/* 右端计数胶囊：标题行第二信息点，直接回答「我有几个身份」。 */}
+                  <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
+                    {identities.length} 个身份
+                  </span>
                 </div>
+                <p className="mt-1 truncate text-[11px] text-muted-foreground">{popoverHint ?? '切换后对工作区全局生效'}</p>
               </div>
-              <div className="app-scrollbar max-h-80 space-y-1.5 overflow-y-auto">
+              <div className="app-scrollbar max-h-80 space-y-1 overflow-y-auto px-0.5">
                 <IdentitySection
                   title="用户身份"
+                  icon={UserRound}
                   identities={userIdentities}
                   activeId={activeId}
                   onSelect={handleIdentitySelect}
@@ -186,13 +203,19 @@ export function WorkspaceIdentitySelector({
                 />
                 <IdentitySection
                   title="Bot 身份"
+                  icon={Bot}
                   identities={botIdentities}
                   activeId={activeId}
                   onSelect={handleIdentitySelect}
                   userAvatarUrl={userAvatarUrl}
                 />
                 {identities.length === 0 ? (
-                  <p className="px-2 py-3 text-center text-xs text-muted-foreground">{emptyIdentityLabel}</p>
+                  <div className="flex flex-col items-center gap-2 px-2 py-5 text-center">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                      <Users className="h-4 w-4" aria-hidden />
+                    </span>
+                    <p className="m-0 text-xs text-muted-foreground">{emptyIdentityLabel}</p>
+                  </div>
                 ) : null}
               </div>
             </PopoverContent>

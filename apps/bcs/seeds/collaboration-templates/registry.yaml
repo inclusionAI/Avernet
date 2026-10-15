@@ -35,6 +35,10 @@ templates:
     tags: [loop, judge, branching, serial]
     priority: 36
 
+  nested-review-loops:
+    tags: [loop, judge, branching, serial]
+    priority: 37
+
   single-bot-guided-answer:
     tags: [single-step]
     priority: 40

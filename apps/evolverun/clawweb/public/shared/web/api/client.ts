@@ -662,7 +662,7 @@ export type RepairIssue = {
 
 export type RepairPlanAction = {
   actionId: string
-  type: 'container_command' | 'ocb_operation'
+  type: 'container_command' | 'ocb_operation' | 'engine_operation'
   summary: string
   risk: string
   verification: string
@@ -671,6 +671,12 @@ export type RepairPlanAction = {
   rollbackActionId?: string | null
   command?: string
   operation?: { type: string; params?: Record<string, unknown> }
+  engineOperation?: {
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+    path: string
+    body?: unknown
+    upload?: { targetPath: string; content: string; filename?: string; encoding?: 'utf8' | 'base64'; fields?: Record<string, string> }
+  }
 }
 
 export type RepairPlan = {
@@ -1274,6 +1280,7 @@ export const api = {
         method: 'POST', body: '{}',
       })
     },
+    /** Owner/admin only. Includes uploaded AIS Agent session archives from fixed execution Steps, newest first. */
     listTaskLogArchives(taskId: string): Promise<{ items: EvolveTaskLogArchive[] }> {
       return fetchJson(`${BASE}/evolve/tasks/${encodeURIComponent(taskId)}/log-archives`)
     },

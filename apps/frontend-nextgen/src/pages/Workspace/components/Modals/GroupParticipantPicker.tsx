@@ -1,14 +1,27 @@
-import { Badge, Button, Empty, Input, Segmented, Skeleton } from '@/components/ui';
+import {
+  Badge,
+  Button,
+  Empty,
+  Input,
+  Segmented,
+  Skeleton,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui';
 import type { CollaborationBotView } from '@/services/workspace/collaborationCandidateService';
 import { cn } from '@/utils/cn';
-import { Check, Plus, Search, X } from 'lucide-react';
+import { Check, Plus, Search } from 'lucide-react';
 import { useMemo } from 'react';
 import type { UseGroupCollaborationPickerResult } from '../../hooks/useGroupCollaborationPicker';
+import type { useServiceBotRouting } from '../../hooks/useServiceBotRouting';
+import { SelectedParticipantChip } from './SelectedParticipantChip';
 
 export interface GroupParticipantPickerProps {
   picker: UseGroupCollaborationPickerResult;
   selectedIds: string[];
-  selectedOptions: Array<{ id: string; name: string }>;
+  selectedOptions: Array<{ id: string; name: string; avatarUrl?: string }>;
   showMineTab: boolean;
   cardMode?: boolean;
   onToggle: (id: string) => void;
@@ -19,7 +32,14 @@ export interface GroupParticipantPickerProps {
   listViewportClassName?: string;
   /** 在固定高度面板中占满 Footer 上方的剩余空间。 */
   fillAvailableHeight?: boolean;
+  routing?: ReturnType<typeof useServiceBotRouting>;
+  /** 其他协作角色已绑定的 Bot：保留路由配置入口，不改变当前角色的选择。 */
+  additionalRoutingOptions?: Array<{ id: string; name: string; avatarUrl?: string }>;
 }
+
+/** 禁用成员 Bot 的整行悬停提示：统一列举不可选原因。 */
+const UNAVAILABLE_BOT_TOOLTIP =
+  '该 Bot 暂时无法参与新协作，可能原因为：已注销或删除、处于隐身状态、当前不在线';
 
 function matchesSearch(bot: CollaborationBotView, keyword: string): boolean {
   const q = keyword.trim().toLowerCase();
@@ -43,6 +63,8 @@ export function GroupParticipantPicker({
   prependBot,
   listViewportClassName,
   fillAvailableHeight = false,
+  routing,
+  additionalRoutingOptions = [],
 }: GroupParticipantPickerProps) {
   const visibleBots = useMemo(() => {
     const source = picker.tab === 'friends' ? picker.friends : picker.tab === 'mine' ? picker.mine : picker.candidates;
@@ -67,13 +89,16 @@ export function GroupParticipantPicker({
       ? picker.isLoadingMine
       : picker.isLoadingCandidates;
   const selectedBots = selectedOptions.filter((bot) => selectedIds.includes(bot.id));
+  const additionalBots = additionalRoutingOptions.filter(
+    (bot) => !selectedIds.includes(bot.id) && routing?.states[bot.id]?.status !== 'non_service',
+  );
 
   return (
     <div
       data-testid="group-participant-picker"
       className={cn('w-full min-w-0 max-w-full', fillAvailableHeight && 'flex min-h-0 flex-1 flex-col')}
     >
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-2 flex shrink-0 items-center justify-between">
         <span className="text-xs font-semibold text-foreground">
           成员 Bot <span className="text-destructive">*</span>
         </span>
@@ -82,32 +107,26 @@ export function GroupParticipantPicker({
         </span>
       </div>
 
-      {selectedBots.length > 0 && (
+      {(selectedBots.length > 0 || additionalBots.length > 0) && (
         <div
           data-testid="group-participant-selected"
-          className="app-scrollbar mb-3 flex max-h-24 min-w-0 max-w-full flex-wrap gap-2 overflow-y-auto pr-1"
+          className="app-scrollbar mb-3 flex max-h-24 min-w-0 max-w-full shrink-0 flex-wrap gap-2 overflow-y-auto pr-1"
         >
           {selectedBots.map((bot) => (
-            <span
+            <SelectedParticipantChip
               key={bot.id}
-              className="inline-flex items-center gap-1 rounded-md border border-primary/20 bg-primary/10 py-0.5 pl-1.5 pr-0.5"
-            >
-              <span className="max-w-30 truncate text-xs font-semibold text-primary">{bot.name}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                aria-label={`移除${bot.name}`}
-                className="h-4 w-4 rounded-md border-0 p-0 text-primary hover:bg-primary/10"
-                onClick={() => onToggle(bot.id)}
-              >
-                <X className="h-2.5 w-2.5" aria-hidden />
-              </Button>
-            </span>
+              bot={bot}
+              routing={routing}
+              onRemove={bot.id === excludeId ? undefined : () => onToggle(bot.id)}
+            />
+          ))}
+          {additionalBots.map((bot) => (
+            <SelectedParticipantChip key={bot.id} bot={bot} routing={routing} />
           ))}
         </div>
       )}
 
-      <div className="mb-3">
+      <div className="mb-3 shrink-0">
         <Segmented<UseGroupCollaborationPickerResult['tab']>
           value={picker.tab}
           onChange={picker.setTab}
@@ -120,7 +139,7 @@ export function GroupParticipantPicker({
         />
       </div>
 
-      <div className="relative mb-3">
+      <div className="relative mb-3 shrink-0">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           className="h-9 rounded-md pl-9"
@@ -180,7 +199,7 @@ export function GroupParticipantPicker({
               const unknown = bot.detailsResolved === false;
               const unavailable = unknown || bot.reachability === 'unreachable' || !bot.online;
               const isOriginator = prependBot && bot.id === prependBot.id;
-              return (
+              const row = (
                 <Button
                   key={bot.id}
                   type="button"
@@ -236,6 +255,20 @@ export function GroupParticipantPicker({
                     )}
                   </span>
                 </Button>
+              );
+              if (!unavailable) return row;
+              // 禁用 Button 不派发鼠标事件，外包 span 使整行可悬停，解释不可选原因。
+              return (
+                <TooltipProvider key={bot.id} delayDuration={300}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="block w-full">{row}</span>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[280px] whitespace-normal">
+                      {UNAVAILABLE_BOT_TOOLTIP}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               );
             })}
             {picker.isLoadingMore && (

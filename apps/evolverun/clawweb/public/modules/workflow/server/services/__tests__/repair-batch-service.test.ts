@@ -71,6 +71,21 @@ describe('repair workbench control service', () => {
     expect(load).toHaveBeenCalledTimes(1);
     expect(await f.db.query('SELECT * FROM workflow_repair_items')).toEqual([]);
   });
+  it('returns complete suggestion facets before filtering and pagination', async () => {
+    const f = await setup(25, false);
+    f.items.forEach((item, index) => { item.context = { diagnoses: [{
+      nodeId: index < 20 ? 'fetch' : 'write', failureMode: index < 20 ? 'timeout' : 'output',
+    }] }; });
+    const first = await f.service.candidates('wf-1', { pageSize: 20 });
+    expect(first.items).toHaveLength(20);
+    expect(first.facets).toEqual({ nodes: ['fetch', 'write'], failureModes: ['output', 'timeout'] });
+    const filtered = await f.service.candidates('wf-1', { nodeId: 'write', failureMode: 'output' });
+    expect(filtered.items).toHaveLength(5);
+    expect(filtered.facets).toEqual(first.facets);
+    const empty = await f.service.candidates('wf-1', { nodeId: 'missing' });
+    expect(empty.items).toHaveLength(0);
+    expect(empty.facets).toEqual(first.facets);
+  });
   it('applies node, problem type and signature filters before counts and pagination without changing the selection digest', async () => {
     const f = await setup(4, false);
     f.items.forEach((item, i) => { item.context = { signature: `issue-${i}`, diagnoses: [{ nodeId: i < 3 ? 'fetch' : 'write', failureMode: i === 2 ? 'other' : 'timeout' }] }; });
@@ -383,6 +398,72 @@ describe('repair workbench control service', () => {
     const outcome = await f.service.candidates('wf-1').then(() => 'unexpected success', error => error.code);
     expect(outcome).toBe('PAYLOAD_TOO_LARGE');
     expect(await f.db.query('SELECT * FROM workflow_repair_items')).toHaveLength(0);
+  });
+  it('recovers a late Git result on the same revision without dispatching another job', async () => {
+    const f = await setup();
+    const first = await f.service.create('human', f.request);
+    f.setRemoteStatus({ status: 'success', rawStatus: 'success', errorMessage: null });
+    await f.service.report({ workflowId: 'wf-1', taskId: first.taskId, revision: 1,
+      expectedStateVersion: 0, status: 'failed', error: { code: 'GIT_RESULT_UNAVAILABLE' } });
+    const draft = { candidateCommit: 'd'.repeat(40), parentCandidateCommit: first.input.baseline.packCommit,
+      packDigest: 'e'.repeat(40), itemResults: f.items.map(i => ({ itemId: i.itemId, status: 'changed', reason: 'Fixed' })) };
+    const checks = { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit,
+      packDigest: draft.packDigest, candidateDigest: digestRepairJson(draft), static: { status: 'passed' },
+      mock: { status: 'not_covered' }, coverage: f.items.map(i => ({ itemId: i.itemId })) };
+    f.setGeneratedResult({ status: 'succeeded', draft, checks });
+    await f.service.retryResult('human', first.taskId, 1);
+    expect((await f.service.task(first.taskId)).latestAttempt).toMatchObject({ revision: 1, phase: 'review', error: { code: 'GIT_RESULT_UNAVAILABLE' } });
+    expect(f.calls).toHaveLength(1);
+    await f.service.retryResult('human', first.taskId, 1);
+    expect(f.calls).toHaveLength(1);
+  });
+  it('retries a failed first generation with frozen input and one idempotent next revision', async () => {
+    const f = await setup();
+    const first = await f.service.create('human', { ...f.request, instructions: 'Keep business rules' });
+    f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: 'model failed' });
+    await f.service.reconcile();
+    f.items.push({ ...f.items[0], itemId: 'new-item', proposalKey: 'f'.repeat(64) });
+    const retry = { expectedRevision: 1, requestId: 'retry-first' };
+    const next = await f.service.retryGeneration('human', first.taskId, retry);
+    expect(next.input.items).toEqual(first.input.items);
+    expect(next.input.instructions).toBe('Keep business rules');
+    expect(next.input.parentCandidateCommit).toBeNull();
+    expect(next.revision).toBe(2);
+    expect(await f.service.retryGeneration('human', first.taskId, retry)).toEqual(next);
+    expect(f.calls).toHaveLength(2);
+    await expect(f.service.report({ workflowId: 'wf-1', taskId: first.taskId, revision: 1,
+      expectedStateVersion: 0, status: 'failed', error: { code: 'LATE' } })).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+  });
+  it.each(['AIS_FAILED', 'AIS_STOPPED', 'AIS_TIMEOUT'])('recovers an already-pushed candidate before retrying %s', async code => {
+    const f = await setup();
+    const first = await f.service.create('human', f.request);
+    await f.service.report({ workflowId: 'wf-1', taskId: first.taskId, revision: 1,
+      expectedStateVersion: 0, status: 'failed', error: { code } });
+    f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: 'Failed after Git push' });
+    const draft = { candidateCommit: 'd'.repeat(40), parentCandidateCommit: first.input.baseline.packCommit,
+      packDigest: 'e'.repeat(40), itemResults: f.items.map(i => ({ itemId: i.itemId, status: 'changed', reason: 'Fixed before platform failure' })) };
+    f.setGeneratedResult({ status: 'succeeded', draft, checks: { schemaVersion: 'workflow-repair-checks/v1',
+      candidateCommit: draft.candidateCommit, packDigest: draft.packDigest, candidateDigest: digestRepairJson(draft),
+      static: { status: 'passed' }, mock: { status: 'not_covered' }, coverage: f.items.map(i => ({ itemId: i.itemId })) } });
+    const originalRead = f.executionPort.readResult;
+    f.executionPort.readResult = vi.fn().mockRejectedValueOnce(new Error('Git transport unavailable')).mockImplementation(originalRead);
+    const retry = { expectedRevision: 1, requestId: 'recover-post-push' };
+    await expect(f.service.retryGeneration('human', first.taskId, retry)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+    expect((await f.service.task(first.taskId)).revisions).toHaveLength(1);
+    const recovered = await f.service.retryGeneration('human', first.taskId, retry);
+    expect(recovered).toMatchObject({ revision: 1, phase: 'review', error: { code } });
+    expect(await f.service.retryGeneration('human', first.taskId, retry)).toEqual(recovered);
+    expect((await f.service.task(first.taskId)).revisions).toHaveLength(1);
+    expect(f.calls).toHaveLength(1);
+  });
+  it('does not retry a timed-out generation while the remote job still runs', async () => {
+    const f = await setup();
+    const first = await f.service.create('human', f.request);
+    await f.service.report({ workflowId: 'wf-1', taskId: first.taskId, revision: 1,
+      expectedStateVersion: 0, status: 'failed', error: { code: 'AIS_TIMEOUT' } });
+    await expect(f.service.retryGeneration('human', first.taskId, { expectedRevision: 1, requestId: 'retry-timeout' }))
+      .rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+    expect(f.calls).toHaveLength(1);
   });
   it('settles trusted success to review and failed iteration retains success; cancellation releases items', async () => {
     const f = await setup();

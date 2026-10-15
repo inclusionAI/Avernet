@@ -4,6 +4,7 @@
 import MarkdownIt from 'markdown-it';
 import React, { useState } from 'react';
 import styled from 'styled-components';
+import { SafeHtml } from './SafeHtml';
 import { sanitizeMarkdownHtml } from './sanitizeHtml';
 import { C } from './tokens';
 
@@ -119,8 +120,9 @@ export const MarkdownCell: React.FC<{ content: string | null | undefined; fontSi
           overflow: 'auto',
           position: 'relative',
         }}
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+      >
+        <SafeHtml html={html} />
+      </MarkdownView>
       {collapsed && (
         <button
           type="button"

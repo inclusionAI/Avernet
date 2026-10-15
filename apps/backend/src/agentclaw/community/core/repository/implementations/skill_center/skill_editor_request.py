@@ -74,7 +74,13 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
 
     @staticmethod
     def _lock_editor_approval_policy(
-        session: Session, *, space_id: int, skill_id: int, actor_id: str, env: str
+        session: Session,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        env: str,
+        require_owner: bool,
     ) -> SkillSpaceBinding:
         binding = (
             session.query(SkillSpaceBinding)
@@ -119,7 +125,9 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
             .with_for_update()
             .first()
         )
-        owner = (
+        if member is None:
+            raise SpaceSkillGrantForbiddenError("active Team Space membership required")
+        if require_owner and (
             session.query(SkillGrant.id)
             .filter(
                 SkillGrant.skill_id == skill_id,
@@ -131,8 +139,8 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
             )
             .with_for_update()
             .first()
-        )
-        if member is None or owner is None:
+            is None
+        ):
             raise SpaceSkillGrantForbiddenError("current Skill Owner role required")
         return binding
 
@@ -146,6 +154,7 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
                 skill_id=skill_id,
                 actor_id=actor_id,
                 env=env,
+                require_owner=False,
             )
             return bool(binding.auto_approve_editor_requests)
 
@@ -165,6 +174,7 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
                 skill_id=skill_id,
                 actor_id=actor_id,
                 env=env,
+                require_owner=True,
             )
             binding.auto_approve_editor_requests = auto_approve_editor_requests
             session.flush()

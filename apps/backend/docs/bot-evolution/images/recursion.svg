@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="450" viewBox="0 0 1000 450" font-family="system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" role="img" aria-label="Level 3: improving the improvement mechanism">
+<title>Level 3: improving the improvement mechanism</title>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#475569"/></marker><marker id="ahl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/></marker></defs>
+<rect width="1000" height="450" fill="#ffffff"/>
+<rect x="20" y="15" width="960" height="120" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="1"/>
+<text x="32" y="30" font-size="12.5" font-weight="700" fill="#7c3aed" text-anchor="start" dominant-baseline="middle">Level 3 — improve the mechanism</text>
+<rect x="40" y="45" width="200" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="140.0" y="68.2375" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Experiment Ledger H</text>
+<text x="140.0" y="85.45" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">every level-2 experiment</text>
+<rect x="300" y="45" width="180" height="62" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="390.0" y="68.2375" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Meta-proposer</text>
+<text x="390.0" y="85.45" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">H → mechanism patch M′</text>
+<rect x="540" y="45" width="210" height="62" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+<text x="645.0" y="68.2375" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Mechanism verification</text>
+<text x="645.0" y="85.45" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">M′ vs M1 on held-out problems</text>
+<rect x="810" y="45" width="155" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="887.5" y="68.2375" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Adopt M2</text>
+<text x="887.5" y="85.45" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">human-approved (T3)</text>
+<path d="M 240 76 L 298 76" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="269" y="66" font-size="11.5" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle">evidence</text>
+<path d="M 480 76 L 538 76" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M 750 76 L 808 76" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="20" y="170" width="960" height="175" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="1"/>
+<text x="32" y="185" font-size="12.5" font-weight="700" fill="#2563eb" text-anchor="start" dominant-baseline="middle">Level 2 — improve the bot</text>
+<rect x="40" y="215" width="120" height="60" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="100.0" y="245.0" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Bot S1</text>
+<rect x="200" y="215" width="170" height="60" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="285.0" y="237.23749999999998" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Mechanism</text>
+<text x="285.0" y="254.45" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">M1, then M2</text>
+<rect x="410" y="215" width="140" height="60" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="480.0" y="245.0" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Candidate S′</text>
+<rect x="590" y="215" width="180" height="60" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+<text x="680.0" y="237.23749999999998" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Bot verification</text>
+<text x="680.0" y="254.45" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">S′ vs S1</text>
+<rect x="810" y="215" width="155" height="60" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="887.5" y="237.23749999999998" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Bot S2</text>
+<text x="887.5" y="254.45" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">or rejected</text>
+<rect x="410" y="297" width="140" height="34" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="480.0" y="314.0" font-size="12.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Environment</text>
+<path d="M 160 245 L 198 245" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M 370 245 L 408 245" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M 550 245 L 588 245" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M 770 245 L 808 245" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M 470 275 L 470 295" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M 490 297 L 490 277" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M 887 107 L 887 150 L 285 150 L 285 213" fill="none" stroke="#7c3aed" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="300" y="160" font-size="11.5" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">M2 takes over the next rounds</text>
+<path d="M 680 275 L 680 372 L 28 372 L 28 76 L 38 76" fill="none" stroke="#7c3aed" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="354" y="384" font-size="11.5" font-weight="400" fill="#7c3aed" text-anchor="middle" dominant-baseline="middle">experiment results — accepted and rejected</text>
+<rect x="20" y="402" width="960" height="34" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+<text x="500" y="419" font-size="12.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Verifier (suites, graders, gate floor, protocols) is fixed and human-owned — no loop may modify it.</text>
+</svg>

@@ -12,8 +12,31 @@ export type NotificationConfigRow = {
   on_failure_groups: string; // JSON array
   on_failure_message_title: string | null;
   on_failure_message_include_run_link: number;
+  /** JSON array of DingTalkNotifyEvent values. Null means legacy mode. */
+  notify_on: string | null;
+  /** JSON object of per-event options keyed by event name. */
+  event_options: string | null;
   gmt_create: number;
   gmt_modified: number;
+};
+
+export type DingTalkNotifyEvent =
+  | "workflow_started"
+  | "node_started"
+  | "node_succeeded"
+  | "node_failed"
+  | "node_rejected"
+  | "node_skipped"
+  | "workflow_succeeded"
+  | "workflow_failed"
+  | "workflow_cancelled";
+
+export type DingTalkEventOptions = {
+  title?: string;
+  includeRunLink?: boolean;
+  includeNodeOutput?: boolean;
+  maxOutputFields?: number;
+  maxOutputValueLen?: number;
 };
 
 export type NotificationConfigUpsert = {
@@ -23,9 +46,11 @@ export type NotificationConfigUpsert = {
   onFailureGroups: Array<{ openConversationId: string; name?: string }>;
   onFailureMessageTitle?: string | null;
   onFailureMessageIncludeRunLink: boolean;
+  notifyOn?: DingTalkNotifyEvent[];
+  eventOptions?: Partial<Record<DingTalkNotifyEvent, DingTalkEventOptions>>;
 };
 
-const SELECT_COLUMNS = "id, workflow_id, robot_code, app_secret, on_failure_users, on_failure_groups, on_failure_message_title, on_failure_message_include_run_link, gmt_create, gmt_modified" as const;
+const SELECT_COLUMNS = "id, workflow_id, robot_code, app_secret, on_failure_users, on_failure_groups, on_failure_message_title, on_failure_message_include_run_link, notify_on, event_options, gmt_create, gmt_modified" as const;
 
 export class WorkflowNotificationConfigRepository {
   constructor(private db: IDatabase) {}
@@ -46,6 +71,8 @@ export class WorkflowNotificationConfigRepository {
     const groupsJson = JSON.stringify(data.onFailureGroups);
     const messageTitle = data.onFailureMessageTitle ?? null;
     const includeRunLink = data.onFailureMessageIncludeRunLink ? 1 : 0;
+    const notifyOn = data.notifyOn && data.notifyOn.length > 0 ? JSON.stringify(data.notifyOn) : null;
+    const eventOptions = data.eventOptions && Object.keys(data.eventOptions).length > 0 ? JSON.stringify(data.eventOptions) : null;
 
     const existing = await this.findByWorkflowId(workflowId);
 
@@ -53,18 +80,31 @@ export class WorkflowNotificationConfigRepository {
       await this.db.exec(
         `UPDATE workflow_notification_configs
          SET robot_code = ?, app_secret = ?, on_failure_users = ?, on_failure_groups = ?,
-             on_failure_message_title = ?, on_failure_message_include_run_link = ?, gmt_modified = ?
+             on_failure_message_title = ?, on_failure_message_include_run_link = ?,
+             notify_on = ?, event_options = ?, gmt_modified = ?
          WHERE workflow_id = ?`,
-        [robotCode, appSecret, usersJson, groupsJson, messageTitle, includeRunLink, now, workflowId],
+        [robotCode, appSecret, usersJson, groupsJson, messageTitle, includeRunLink, notifyOn, eventOptions, now, workflowId],
       );
-      return { ...existing, robot_code: robotCode, app_secret: appSecret, on_failure_users: usersJson, on_failure_groups: groupsJson, on_failure_message_title: messageTitle, on_failure_message_include_run_link: includeRunLink, gmt_modified: now as number };
+      return {
+        ...existing,
+        robot_code: robotCode,
+        app_secret: appSecret,
+        on_failure_users: usersJson,
+        on_failure_groups: groupsJson,
+        on_failure_message_title: messageTitle,
+        on_failure_message_include_run_link: includeRunLink,
+        notify_on: notifyOn,
+        event_options: eventOptions,
+        gmt_modified: now as number,
+      };
     }
 
     await this.db.exec(
       `INSERT INTO workflow_notification_configs
-         (workflow_id, robot_code, app_secret, on_failure_users, on_failure_groups, on_failure_message_title, on_failure_message_include_run_link, gmt_create, gmt_modified)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [workflowId, robotCode, appSecret, usersJson, groupsJson, messageTitle, includeRunLink, now, now],
+         (workflow_id, robot_code, app_secret, on_failure_users, on_failure_groups,
+          on_failure_message_title, on_failure_message_include_run_link, notify_on, event_options, gmt_create, gmt_modified)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [workflowId, robotCode, appSecret, usersJson, groupsJson, messageTitle, includeRunLink, notifyOn, eventOptions, now, now],
     );
 
     const result = await this.findByWorkflowId(workflowId);

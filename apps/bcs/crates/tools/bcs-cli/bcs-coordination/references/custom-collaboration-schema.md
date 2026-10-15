@@ -97,7 +97,7 @@ runtime:
 ## Fixed Loop
 
 `collaboration validate` also accepts `version: 2 + graph_mode: hierarchical` for fixed Loop compilation and preview.
-It returns `VALIDATION_ONLY_FEATURE` when this deployment has v2 execution disabled (the default). For testing, set `collaboration.loop_execution_enabled = true` and restart BCS: validation then omits this warning and create/run/rerun are enabled together with Loop recovery. Ordinary workflow recovery starts with the service without a separate switch. The local config template opts in; full failover and production release gates remain pending.
+It returns `VALIDATION_ONLY_FEATURE` when this deployment has the required execution admission disabled. Single-level Loops require `collaboration.loop_execution_enabled = true`; nested Loops additionally require `collaboration.nested_loop_execution_enabled = true`. The nested switch defaults to false and is invalid unless the total Loop switch is enabled. These are new-Run/rerun admission controls: turning the nested switch off does not stop recovery or progression for already admitted Runs. Ordinary workflow recovery starts with the service without a separate switch.
 Do not use a successful preview as evidence that a deployment can execute Loop definitions.
 
 ```yaml
@@ -145,13 +145,12 @@ runtime:
 - Each break/exhausted transition needs at least one existing outer target. Empty break means run to the limit and then route to exhausted targets, not stop the whole workflow.
 - Body has exactly one entry and one result terminal. Result defines no body transitions; body nodes cannot be final_output. Keep the unique final_output outside the Loop.
 - Loop control nodes allow only `kind`, `display_name`, `loop`, `transitions`, `extensions`; no assignee, instruction, Judge, timeout or final_output fields, including null/false placeholders.
-- Nested loops, cross-body targets, arbitrary goto and unbounded loops are unsupported. The `ln-` node ID prefix is reserved in v2; authoring node IDs are at most 128 ASCII bytes.
+- A Loop body may contain fixed child Loops up to `collaboration.fixed_loop_limits.max_fixed_loop_depth` (default 4). Every Loop's `entry_node` and `result_node` must still be direct executable leaves, not child Loops. Targets stay local to their current scope; cross-scope targets, arbitrary goto and unbounded loops are unsupported. The `ln-` node ID prefix is reserved in v2; authoring node IDs are at most 128 ASCII bytes.
 - Multiple sibling Loops are supported in the same outer acyclic graph. An outer transition can target another Loop ID; BCS enters that Loop's entry node. Never target its body node directly. Each Loop has its own iteration count and previous result; the next Loop starts at iteration 1 with no previous result of its own, while the prior Loop's selected output is an ordinary upstream artifact.
 - Server-owned limits come from `collaboration.fixed_loop_limits`. Rejection reports the authoring path before any Run creation.
 - Preview retains authoring `graph_mode: hierarchical`, adds `execution_graph_mode: acyclic`, per-node `execution` and result-edge `loop_route`. Last-round edge outcome stays `complete`/the actual continue outcome while route kind/logical_outcome shows exhaustion.
 
-The internal compiler version is `bcs.fixed-loop.compiler/v1`. Generated IDs use a namespace-separated SHA-256 of the JSON
-tuple `(definition_id, definition_version, loop_id, iteration, body_node_id)`, truncated to 128 bits and prefixed with `ln-`.
+Single-level plans keep internal compiler version `bcs.fixed-loop.compiler/v1` and their existing ID/hash contract. Plans whose actual maximum Loop depth is at least two use `bcs.fixed-loop.compiler/v2`; their generated IDs include the complete outer-to-inner `(loop_id, iteration)` path. Public execution metadata and Loop entry context expose that path as `loop_path`, while the legacy `loop_id`, `iteration`, and `max_iterations` fields continue to describe the nearest Loop.
 Never parse or construct these IDs in clients. Preview IDs do not promise future Run identity.
 
 The example above intentionally has no Judge and always runs to its limit. For review-driven work, give the result a Judge with `outcomes: [approved, revise]`, set `continue_outcomes: [revise]` and `break_outcomes: [approved]`, then define outer `approved` and `exhausted` transitions. These business outcome names are chosen by the author, not reserved control keywords.
@@ -337,6 +336,8 @@ Treat `bcs-cli collaboration validate` output as authoritative for the current B
 Use `collaborate query --run ID` to obtain execution IDs and metadata;
 `--graph` includes continue/break/exhausted routes, `--pending` includes trusted
 first/later LoopContext, and `--node EXECUTION_ID` includes the retry attempt.
+Nested projections render the complete outer-to-inner Loop path; descriptor map
+keys use logical paths such as `outer/inner`.
 `--no-json` renders those fields as text. `collaborate respond --run ID --node
 EXECUTION_ID --content TEXT` only submits to an ID still returned in the
 current authenticated Human's pending list. Neither command parses generated

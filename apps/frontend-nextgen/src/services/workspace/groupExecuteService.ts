@@ -238,6 +238,13 @@ export async function createGroupViaExecute(
   ownerUserId: string,
   fallbackCreateGroup: (input: CreateGroupInput) => Promise<DomainResult<GroupView>>,
 ): Promise<DomainResult<GroupView>> {
+  // task execute 尚无 participant tags 契约，不能静默丢失用户指定的路由。
+  if (input.strategy === 'state_machine' && input.participants.some((participant) => participant.tags?.length)) {
+    return {
+      ok: false,
+      error: toDomainError('GROUP_ROUTE_UNSUPPORTED', '指定服务 Bot 路由时，请取消“是否以任务执行”后创建。'),
+    };
+  }
   const req = buildExecuteRequestFromGroup(input, ownerUserId);
   if (!req) return fallbackCreateGroup(input);
 

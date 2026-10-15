@@ -17,7 +17,7 @@ mode="${SINGLEBOX_COVERAGE_MODE:-real}"
 model_config_mode="${SINGLEBOX_COVERAGE_MODEL_CONFIG_MODE:-mock}"
 module_manifest="$script_dir/singlebox_coverage_modules.yaml"
 bcs_coverage_dir="$repo_root/apps/bcs/target/cov-e2e"
-bcs_line_min="${SINGLEBOX_COVERAGE_BCS_LINE_MIN:-40}"
+bcs_line_min="${SINGLEBOX_COVERAGE_BCS_LINE_MIN:-41}"
 bcs_method_min="${SINGLEBOX_COVERAGE_BCS_METHOD_MIN:-36}"
 coverage_standalone_root=""
 coverage_standalone_runtime=""
@@ -338,7 +338,8 @@ run_bcs_e2e() {
     summary.json \
     endpoint_coverage.xml \
     endpoint_coverage.txt \
-    cli_command_coverage.txt; do
+    cli_command_coverage.txt \
+    changed_line_coverage.json; do
     if [[ -f "$bcs_coverage_dir/$artifact" ]]; then
       cp "$bcs_coverage_dir/$artifact" "$bcs_report_dir/$artifact"
     fi

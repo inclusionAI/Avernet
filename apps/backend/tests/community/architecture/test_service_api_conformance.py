@@ -45,6 +45,9 @@ from __future__ import annotations
 
 import inspect
 
+from agentclaw.community.api.cron_admin_service import CronAdminServiceProtocol
+from agentclaw.community.core.cron.services.cron_admin import CronAdminService
+
 import pytest
 from agentclaw.community.api.file_count_service import FileCountServiceProtocol
 from agentclaw.community.api.mcp_scoped_config_service import MCPScopedConfigServiceProtocol
@@ -91,6 +94,8 @@ from agentclaw.community.api.source_credential_service import (
     SourceCredentialServiceProtocol,
 )
 from agentclaw.community.api.bot_space_service import BotSpaceServiceProtocol
+from agentclaw.community.api.engine_version_service import EngineVersionServiceProtocol
+from agentclaw.community.core.bot_management.engine_version.service import EngineVersionService
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.api.engine_connection_service import (
     EngineConnectionServiceProtocol,
@@ -316,6 +321,7 @@ from agentclaw.community.core.spaces.services import (
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
 _PAIRS = [
+    (CronAdminServiceProtocol, CronAdminService),
     (MCPScopedConfigServiceProtocol, MCPScopedConfigService),
     (FileCountServiceProtocol, FileCountService),
     (BuildIgnoreServiceProtocol, BuildIgnoreService),
@@ -338,6 +344,7 @@ _PAIRS = [
     (BotInventoryBotPort, BotService),
     (DesktopBotInventoryPort, DesktopBotService),
     (EngineConfigServiceProtocol, EngineConfigService),
+    (EngineVersionServiceProtocol, EngineVersionService),
     (EngineRuntimeRelayProtocol, EngineRuntimeRelay),
     (EngineConnectionServiceProtocol, EngineConnectionService),
     (HealthDiagnosisServiceProtocol, HealthDiagnosisService),

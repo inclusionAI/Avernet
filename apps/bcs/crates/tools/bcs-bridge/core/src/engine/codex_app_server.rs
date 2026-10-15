@@ -28,6 +28,7 @@ use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
 
 use crate::engine::cli::CliSession;
+use crate::engine::codex_transport::CodexConnection;
 use crate::engine::{Engine, TurnError, TurnOutcome, TurnRequest};
 use crate::sse;
 
@@ -39,13 +40,43 @@ use crate::sse;
 pub struct CodexAppServer {
     bin: PathBuf,
     prefix_args: Vec<String>,
+    desktop: bool,
+    socket: Option<PathBuf>,
 }
 
 impl CodexAppServer {
     /// `prefix_args` are placed before `app-server`, for launchers that select
     /// Codex through a subcommand or flag.
     pub fn new(bin: PathBuf, prefix_args: Vec<String>) -> Self {
-        Self { bin, prefix_args }
+        Self { bin, prefix_args, desktop: false, socket: None }
+    }
+
+    /// Connect over Unix WebSocket; never start, restart or stop the shared server.
+    pub fn desktop(socket: PathBuf) -> Self {
+        Self { bin: PathBuf::new(), prefix_args: Vec::new(), desktop: true, socket: Some(socket) }
+    }
+
+    fn launch_args(&self) -> Vec<String> {
+        let mut args = self.prefix_args.clone();
+        args.extend(["app-server".into(), "--listen".into(), "stdio://".into()]);
+        args
+    }
+
+    async fn abort_turn(&self, cli: &mut CodexConnection, thread_id: &str, turn_id: &str) -> Result<(), TurnError> {
+        if self.desktop {
+            let mut id = 1_000_000;
+            let mut backlog = VecDeque::new();
+            let cancellation = CancellationToken::new();
+            let interrupted = tokio::time::timeout(std::time::Duration::from_secs(5), rpc_call(
+                cli, &mut id, &mut backlog, "turn/interrupt",
+                json!({"threadId": thread_id, "turnId": turn_id}), &cancellation,
+            )).await;
+            cli.kill().await;
+            interrupted.map_err(|_| TurnError::Protocol("Desktop turn interruption was not acknowledged; inspect the saved thread".into()))??;
+            return Ok(());
+        }
+        cli.kill().await;
+        Ok(())
     }
 }
 
@@ -85,15 +116,15 @@ impl Engine for CodexAppServer {
         events: Sender<StreamEvent>,
         abort: CancellationToken,
     ) -> Result<TurnOutcome, TurnError> {
-        let mut args = self.prefix_args.clone();
-        args.extend([
-            "app-server".to_string(),
-            "--listen".to_string(),
-            "stdio://".to_string(),
-        ]);
-        let mut cli = CliSession::spawn(&self.bin, &args, &req.cwd, &[], req.trace.clone())
-            .await
-            .map_err(TurnError::Spawn)?;
+        if abort.is_cancelled() { return Err(TurnError::Aborted); }
+        let args = self.launch_args();
+        let mut cli = if self.desktop {
+            let socket = self.socket.as_deref().ok_or_else(|| TurnError::Protocol("Missing desktop socket".into()))?;
+            CodexConnection::connect(socket, req.trace.clone()).await?
+        } else {
+            CodexConnection::Process(CliSession::spawn(&self.bin, &args, &req.cwd, &[], req.trace.clone())
+                .await.map_err(TurnError::Spawn)?)
+        };
 
         let mut next_id = 1_u64;
         let mut backlog = VecDeque::new();
@@ -112,7 +143,9 @@ impl Engine for CodexAppServer {
             }),
             &abort,
         )
-        .await?;
+        .await.map_err(|error| if self.desktop && !matches!(error, TurnError::Aborted) {
+            TurnError::EngineExited("Cannot initialize the existing Codex app-server; check the desktop Unix WebSocket listener. No standalone server was started".into())
+        } else { error })?;
         send_notification(&mut cli, "initialized", Value::Null).await?;
 
         let thread = if let Some(session_id) = &req.engine_session_id {
@@ -144,15 +177,22 @@ impl Engine for CodexAppServer {
         }
         req.session_observer.established(&thread_id).await.map_err(TurnError::SessionStorage)?;
 
-        let turn = rpc_call(
+        // A shared server survives proxy disconnects. Obtain the turn id before
+        // observing cancellation, so cancellation can target this exact turn.
+        let start_abort = if self.desktop { CancellationToken::new() } else { abort.clone() };
+        if abort.is_cancelled() { return Err(TurnError::Aborted); }
+        let start = rpc_call(
             &mut cli,
             &mut next_id,
             &mut backlog,
             "turn/start",
             turn_start_params(&req, &thread_id),
-            &abort,
-        )
-        .await?;
+            &start_abort,
+        );
+        let turn = if self.desktop {
+            tokio::time::timeout(std::time::Duration::from_secs(30), start).await
+                .map_err(|_| TurnError::Protocol("turn/start timed out; outcome may be unknown, inspect the saved Codex thread before retrying".into()))??
+        } else { start.await? };
         let turn_id = extract_turn_id(&turn).ok_or_else(|| {
             TurnError::Protocol(format!("app-server turn response missing turn.id: {turn}"))
         })?;
@@ -162,7 +202,11 @@ impl Engine for CodexAppServer {
         loop {
             let value = tokio::select! {
                 _ = abort.cancelled() => {
-                    cli.kill().await;
+                    self.abort_turn(&mut cli, &thread_id, &turn_id).await?;
+                    return Err(TurnError::Aborted);
+                }
+                _ = events.closed() => {
+                    self.abort_turn(&mut cli, &thread_id, &turn_id).await?;
                     return Err(TurnError::Aborted);
                 }
                 value = next_message(&mut cli, &mut backlog) => value?,
@@ -172,7 +216,7 @@ impl Engine for CodexAppServer {
                 respond_server_request(&mut cli, &value).await?;
                 continue;
             }
-            if !matches_turn(&value, &thread_id, &turn_id) {
+            if !matches_turn(&value, &thread_id, &turn_id, self.desktop) {
                 continue;
             }
 
@@ -181,7 +225,7 @@ impl Engine for CodexAppServer {
                     if let Some(delta) = extract_delta(&value) {
                         deltas.push_str(&delta);
                         if send_event(&events, sse::chat_delta(&req.run_id, &delta)).await {
-                            cli.kill().await;
+                            self.abort_turn(&mut cli, &thread_id, &turn_id).await?;
                             return Err(TurnError::Aborted);
                         }
                     }
@@ -199,37 +243,37 @@ impl Engine for CodexAppServer {
                         )
                         .await
                         {
-                            cli.kill().await;
+                            self.abort_turn(&mut cli, &thread_id, &turn_id).await?;
                             return Err(TurnError::Aborted);
                         }
                     }
                 }
                 "item/started" => {
-                    if let Some(event) = map_item_started(&value, &req.run_id, &req.cwd) {
-                        if send_event(&events, event).await {
-                            return Err(TurnError::Aborted);
-                        }
+                    if let Some(event) = map_item_started(&value, &req.run_id, &req.cwd)
+                        && send_event(&events, event).await {
+                        self.abort_turn(&mut cli, &thread_id, &turn_id).await?;
+                        return Err(TurnError::Aborted);
                     }
                 }
                 "item/completed" => {
-                    if let Some(event) = map_item_completed(&value, &req.run_id, &req.cwd) {
-                        if send_event(&events, event).await {
-                            return Err(TurnError::Aborted);
-                        }
+                    if let Some(event) = map_item_completed(&value, &req.run_id, &req.cwd)
+                        && send_event(&events, event).await {
+                        self.abort_turn(&mut cli, &thread_id, &turn_id).await?;
+                        return Err(TurnError::Aborted);
                     }
                 }
                 "item/commandExecution/outputDelta" | "item/fileChange/outputDelta" => {
-                    if let Some(event) = map_tool_output_delta(&value, &req.run_id) {
-                        if send_event(&events, event).await {
-                            return Err(TurnError::Aborted);
-                        }
+                    if let Some(event) = map_tool_output_delta(&value, &req.run_id)
+                        && send_event(&events, event).await {
+                        self.abort_turn(&mut cli, &thread_id, &turn_id).await?;
+                        return Err(TurnError::Aborted);
                     }
                 }
                 "item/mcpToolCall/progress" => {
-                    if let Some(event) = map_mcp_progress(&value, &req.run_id) {
-                        if send_event(&events, event).await {
-                            return Err(TurnError::Aborted);
-                        }
+                    if let Some(event) = map_mcp_progress(&value, &req.run_id)
+                        && send_event(&events, event).await {
+                        self.abort_turn(&mut cli, &thread_id, &turn_id).await?;
+                        return Err(TurnError::Aborted);
                     }
                 }
                 "turn/completed" | "agent/turn_completed" => {
@@ -241,7 +285,7 @@ impl Engine for CodexAppServer {
                     } else {
                         deltas
                     };
-                    cli.close_stdin();
+                    cli.finish().await;
                     return Ok(TurnOutcome {
                         engine_session_id: Some(thread_id),
                         final_text: Some(final_text),
@@ -415,7 +459,7 @@ fn tool_item_args(item: &Value, item_type: &str, cwd: &Path) -> Value {
 }
 
 async fn rpc_call(
-    cli: &mut CliSession,
+    cli: &mut CodexConnection,
     next_id: &mut u64,
     backlog: &mut VecDeque<Value>,
     method: &str,
@@ -481,7 +525,7 @@ fn decode_rpc_response(value: Value, method: &str) -> Result<Value, TurnError> {
 }
 
 async fn send_notification(
-    cli: &mut CliSession,
+    cli: &mut CodexConnection,
     method: &str,
     params: Value,
 ) -> Result<(), TurnError> {
@@ -496,14 +540,14 @@ async fn send_notification(
     .await
 }
 
-async fn send_line(cli: &mut CliSession, value: &Value) -> Result<(), TurnError> {
+async fn send_line(cli: &mut CodexConnection, value: &Value) -> Result<(), TurnError> {
     let line = serde_json::to_string(value)
         .map_err(|error| TurnError::Protocol(format!("encode app-server request: {error}")))?;
     cli.write_line(&line).await.map_err(TurnError::Io)
 }
 
 async fn next_message(
-    cli: &mut CliSession,
+    cli: &mut CodexConnection,
     backlog: &mut VecDeque<Value>,
 ) -> Result<Value, TurnError> {
     if let Some(value) = backlog.pop_front() {
@@ -512,7 +556,7 @@ async fn next_message(
     next_live_message(cli).await
 }
 
-async fn next_live_message(cli: &mut CliSession) -> Result<Value, TurnError> {
+async fn next_live_message(cli: &mut CodexConnection) -> Result<Value, TurnError> {
     let Some(line) = cli.next_line().await.map_err(TurnError::Io)? else {
         return Err(TurnError::EngineExited(
             "app-server stdout EOF before result".into(),
@@ -522,7 +566,7 @@ async fn next_live_message(cli: &mut CliSession) -> Result<Value, TurnError> {
         .map_err(|error| TurnError::Protocol(format!("parse app-server JSON: {error}")))
 }
 
-async fn respond_server_request(cli: &mut CliSession, request: &Value) -> Result<(), TurnError> {
+async fn respond_server_request(cli: &mut CodexConnection, request: &Value) -> Result<(), TurnError> {
     let id = request.get("id").cloned().unwrap_or(Value::Null);
     send_line(
         cli,
@@ -602,10 +646,24 @@ fn extract_turn_id(value: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-fn matches_turn(value: &Value, thread_id: &str, turn_id: &str) -> bool {
+fn matches_turn(value: &Value, thread_id: &str, turn_id: &str, shared: bool) -> bool {
     let Some(params) = value.get("params") else {
         return false;
     };
+    if shared {
+        // A shared host can broadcast other tasks' notifications. Missing or
+        // malformed ownership is never evidence that an event belongs to us.
+        if params.get("threadId").and_then(Value::as_str) != Some(thread_id) {
+            return false;
+        }
+        let flat = params.get("turnId");
+        let nested = match value.get("method").and_then(Value::as_str) {
+            Some("turn/completed" | "agent/turn_completed") => params.pointer("/turn/id"),
+            _ => None,
+        };
+        return (flat.is_some() || nested.is_some())
+            && flat.into_iter().chain(nested).all(|id| id.as_str() == Some(turn_id));
+    }
     let thread_matches = params
         .get("threadId")
         .and_then(Value::as_str)
@@ -712,8 +770,42 @@ mod tests {
         let value = json!({
             "params": {"threadId": "t-1", "turnId": "turn-1"}
         });
-        assert!(matches_turn(&value, "t-1", "turn-1"));
-        assert!(!matches_turn(&value, "t-2", "turn-1"));
-        assert!(!matches_turn(&value, "t-1", "turn-2"));
+        for shared in [false, true] {
+            assert!(matches_turn(&value, "t-1", "turn-1", shared));
+            assert!(!matches_turn(&value, "t-2", "turn-1", shared));
+            assert!(!matches_turn(&value, "t-1", "turn-2", shared));
+        }
+    }
+
+    #[test]
+    fn shared_events_require_positive_ownership_but_cli_keeps_legacy_shapes() {
+        for method in ["agent/output_chunk", "agent/turn_completed", "agent/turn_failed"] {
+            let value = json!({"method":method,"params":{"text":"foreign"}});
+            assert!(!matches_turn(&value, "t-1", "turn-1", true));
+            assert!(matches_turn(&value, "t-1", "turn-1", false));
+        }
+        for params in [
+            json!({"threadId":"t-1"}),
+            json!({"turnId":"turn-1"}),
+            json!({"threadId":"t-1","turnId":null}),
+            json!({"threadId":null,"turnId":"turn-1"}),
+        ] {
+            assert!(!matches_turn(&json!({"params":params}), "t-1", "turn-1", true));
+        }
+    }
+
+    #[test]
+    fn shared_completion_checks_nested_turn_id_and_rejects_conflicts() {
+        for method in ["turn/completed", "agent/turn_completed"] {
+            let mut value = json!({"method":method,"params":{
+                "threadId":"t-1","turn":{"id":"turn-1"}}});
+            assert!(matches_turn(&value, "t-1", "turn-1", true));
+            assert!(!matches_turn(&value, "t-1", "turn-2", true));
+            value["params"]["turnId"] = json!("other-turn");
+            assert!(!matches_turn(&value, "t-1", "turn-1", true));
+            assert!(!matches_turn(&value, "t-1", "other-turn", true));
+            value["params"]["turnId"] = Value::Null;
+            assert!(!matches_turn(&value, "t-1", "turn-1", true));
+        }
     }
 }

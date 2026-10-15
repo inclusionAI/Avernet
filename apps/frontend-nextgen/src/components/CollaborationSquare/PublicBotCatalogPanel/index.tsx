@@ -25,7 +25,7 @@ export interface PublicBotCatalogPanelProps {
 
 function BotLoadingState() {
   return (
-    <div aria-label="正在加载公开 Bot" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <div aria-label="正在加载公开 Bot" className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
       {[0, 1, 2].map((item) => (
         <Card key={item}>
           <Skeleton.Card />
@@ -63,14 +63,19 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
 
   return (
     <>
-      <SquareIdentityPicker />
-      <SquareSearchBar
-        resource="bot"
-        query={vm.query}
-        mode={vm.mode}
-        onQueryChange={vm.setQuery}
-        onModeChange={vm.setMode}
-      />
+      <div className="flex flex-col items-end gap-3 md:flex-row md:items-center md:justify-end">
+        <SquareSearchBar
+          resource="bot"
+          query={vm.query}
+          mode={vm.mode}
+          onQueryChange={vm.setQuery}
+          onModeChange={vm.setMode}
+          className="w-full md:max-w-md"
+        />
+        <div className="w-full max-w-[280px] md:w-[280px] md:shrink-0">
+          <SquareIdentityPicker />
+        </div>
+      </div>
       {loading && <BotLoadingState />}
       {!loading && error && (
         <Card>
@@ -104,7 +109,7 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
         </Card>
       )}
       {showGrid && activeActor && (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
           {vm.bots.map((bot) => (
             <SquareBotCard
               key={getPublicBotTargetId(bot)}

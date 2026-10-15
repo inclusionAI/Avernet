@@ -4,6 +4,10 @@
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import type { ChatMessage } from '@tc-chat/core';
 
+// 会话 View 类型经本域收口再导出:Store 层禁止直连 Service(含 type import),
+// 快照等 Store 侧类型统一从这里取(仅 type 依赖,不引入运行时耦合)。
+export type { BotChatSessionView };
+
 export type ConversationOrigin = 'mine' | 'others';
 export type ConversationSessionScope = 'all' | 'favorite';
 export type ConversationBotSection = 'managed' | 'team' | 'friend';

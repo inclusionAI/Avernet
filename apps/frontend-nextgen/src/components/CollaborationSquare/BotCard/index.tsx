@@ -1,6 +1,6 @@
 import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/Card';
+import { IconButton } from '@/components/ui/IconButton';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import {
   getPublicBotTargetId,
@@ -8,7 +8,22 @@ import {
   type FriendRequestActor,
   type PublicBot,
 } from '@/domain/collaborationSquare/types';
-import { Bot, MessageCircle, Share2, UserPlus } from 'lucide-react';
+import { Bot, MessageCircleMore, Plus, Share2, UserRound } from 'lucide-react';
+import type { ReactElement } from 'react';
+
+/** 不改变卡片尺寸，悬浮或聚焦时展示完整文本。 */
+function FullTextTooltip({ text, children }: { text: string; children: ReactElement }) {
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>{children}</TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[min(24rem,calc(100vw-2rem))] whitespace-normal break-words text-left leading-5">
+          {text}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
 
 export interface SquareBotCardProps {
   bot: PublicBot;
@@ -43,88 +58,90 @@ export default function SquareBotCard({ bot, activeActor, busy, onShare, onPrima
       : '申请好友权限';
   const description = bot.description.trim() || '暂无描述';
   const descriptionText = (
-    <p className="m-0 min-h-10 line-clamp-2 break-words text-xs leading-5 text-muted-foreground">{description}</p>
+    <p tabIndex={0} className="m-0 min-h-10 line-clamp-2 break-words text-sm leading-5 text-muted-foreground">{description}</p>
   );
   return (
-    <Card className="flex h-full min-w-0 flex-col overflow-hidden">
-      <CardHeader className="p-4 pb-0">
-        <div className="flex min-w-0 flex-1 items-center gap-2.5">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Bot aria-hidden className="h-5 w-5" />
+    <Card className="flex h-full min-h-[156px] min-w-0 flex-col rounded-[22px] border-0 bg-muted/70 shadow-none">
+      <CardHeader className="items-start gap-3 p-5 pb-0">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-background text-primary">
+            <Bot aria-hidden className="h-8 w-8" />
           </div>
           <div className="min-w-0 flex-1">
-            <CardTitle className="truncate" title={bot.name}>
-              {bot.name}
-            </CardTitle>
+            <div className="flex min-w-0 items-center gap-2">
+              <CardTitle className="min-w-0 text-base">
+                <FullTextTooltip text={bot.name}>
+                  <span tabIndex={0} className="block truncate">{bot.name}</span>
+                </FullTextTooltip>
+              </CardTitle>
+            </div>
+            <div className="mt-1 flex min-w-0 items-center gap-3 text-xs text-muted-foreground">
+              <FullTextTooltip text={bot.ownerName}>
+                <span tabIndex={0} className="flex min-w-0 max-w-[40%] items-center gap-1">
+                  <UserRound aria-hidden className="h-3.5 w-3.5 shrink-0" />
+                  <span className="sr-only">Owner 用户：</span>
+                  <span className="truncate">{bot.ownerName}</span>
+                </span>
+              </FullTextTooltip>
+              <FullTextTooltip text={bot.id}>
+                <span className="flex min-w-0 flex-1 items-center gap-1" tabIndex={0}>
+                  <Bot aria-hidden className="h-3.5 w-3.5 shrink-0" />
+                  <span className="sr-only">Bot UUID：</span>
+                  <span className="truncate">{bot.id}</span>
+                </span>
+              </FullTextTooltip>
+            </div>
           </div>
         </div>
-        {primaryAction === 'self_target' ? (
-          <Badge tone="neutral">当前 Bot</Badge>
-        ) : owned ? (
-          <Badge tone="success">我的 Bot</Badge>
-        ) : applying ? (
-          <Badge tone="warning">申请中</Badge>
-        ) : null}
-        {!owned && friend && <Badge tone="success">已经是好友</Badge>}
+        <div className="ml-auto flex shrink-0 flex-wrap justify-end gap-2">
+          {owned && <Badge tone="success">我的 Bot</Badge>}
+          {primaryAction === 'self_target' ? (
+            <Badge tone="neutral">当前 Bot</Badge>
+          ) : applying ? (
+            <Badge tone="warning">申请中</Badge>
+          ) : friend ? (
+            <Badge tone="primary">好友Bot</Badge>
+          ) : null}
+        </div>
       </CardHeader>
-      <CardContent className="flex flex-1 flex-col gap-4 p-4 pt-3">
+      <CardContent className="flex flex-1 flex-col gap-2 px-5 pb-0 pt-3">
         {bot.description.trim() ? (
-          <TooltipProvider delayDuration={200}>
-            <Tooltip>
-              <TooltipTrigger asChild>{descriptionText}</TooltipTrigger>
-              <TooltipContent side="top" className="max-w-sm whitespace-normal break-words text-left leading-5">
-                {description}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <FullTextTooltip text={description}>{descriptionText}</FullTextTooltip>
         ) : (
           descriptionText
         )}
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 rounded-lg bg-muted/60 p-3 text-xs">
-          <dt className="font-medium text-muted-foreground">Owner 用户</dt>
-          <dd className="m-0 truncate text-foreground" title={bot.ownerName}>
-            {bot.ownerName}
-          </dd>
-          <dt className="font-medium text-muted-foreground">Bot UUID</dt>
-          <dd className="m-0 truncate text-foreground" tabIndex={0} title={bot.id}>
-            {bot.id}
-          </dd>
-          {bot.shortProfile && (
-            <>
-              <dt className="font-medium text-muted-foreground">Profile</dt>
-              <dd className="m-0 line-clamp-2 text-foreground" title={bot.shortProfile}>
-                {bot.shortProfile}
-              </dd>
-            </>
-          )}
-        </dl>
+        {bot.shortProfile && (
+          <FullTextTooltip text={`Profile：${bot.shortProfile}`}>
+            <p tabIndex={0} className="m-0 line-clamp-2 break-words text-xs text-muted-foreground">
+              <span className="font-medium">Profile：</span>
+              {bot.shortProfile}
+            </p>
+          </FullTextTooltip>
+        )}
       </CardContent>
-      <CardFooter className="flex-wrap justify-between gap-2 p-3">
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label={`分享 ${bot.name}`}
-          onClick={() => onShare(bot)}
-          leftIcon={<Share2 aria-hidden className="h-4 w-4" />}
-        >
-          分享
-        </Button>
-        <Button
-          size="sm"
-          loading={busy}
-          disabled={primaryDisabled}
-          onClick={() => onPrimaryAction(bot)}
-          leftIcon={
-            canStartConversation ? (
-              <MessageCircle aria-hidden className="h-4 w-4" />
-            ) : (
-              <UserPlus aria-hidden className="h-4 w-4" />
-            )
-          }
-        >
-          {primaryLabel}
-        </Button>
-      </CardFooter>
+        <div className="mt-auto flex shrink-0 items-center justify-end gap-2 px-5 pb-5 pt-3">
+          <IconButton
+            label={`分享 ${bot.name}`}
+            icon={<Share2 aria-hidden className="h-4 w-4" />}
+            onClick={() => onShare(bot)}
+            className="h-10 w-10 rounded-xl bg-background text-foreground"
+          />
+          {!primaryDisabled && (
+            <IconButton
+              label={primaryLabel}
+              loading={busy}
+              icon={
+                canStartConversation ? (
+                  <MessageCircleMore aria-hidden className="h-5 w-5" />
+                ) : (
+                  <Plus aria-hidden className="h-6 w-6" />
+                )
+              }
+              onClick={() => onPrimaryAction(bot)}
+              className="h-10 w-10 rounded-xl bg-background text-foreground"
+            />
+          )}
+        </div>
     </Card>
   );
 }

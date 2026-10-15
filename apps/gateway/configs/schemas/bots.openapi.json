@@ -24509,6 +24509,388 @@
         ],
         "title": "Envelope[SkillEditorApprovalPolicy]",
         "type": "object"
+      },
+      "BotClassification": {
+        "description": "Allowlisted fields available before an owner/editor relationship exists.",
+        "properties": {
+          "bot_id": {
+            "description": "The external Bot identifier.",
+            "examples": [
+              "bot-1"
+            ],
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "bot_type": {
+            "description": "Bot type: personal for individual use, service for published stage routing, or desktop for a desktop-managed Bot.",
+            "enum": [
+              "personal",
+              "service",
+              "desktop"
+            ],
+            "examples": [
+              "service"
+            ],
+            "title": "Bot Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot_id",
+          "bot_type"
+        ],
+        "title": "BotClassification",
+        "type": "object"
+      },
+      "Envelope_BotClassification_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotClassification"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[BotClassification]",
+        "type": "object"
+      },
+      "Envelope_SkillSecurityObservations_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillSecurityObservations"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[SkillSecurityObservations]",
+        "type": "object"
+      },
+      "SkillSecurityObservations": {
+        "description": "Current Local Skill upload and a page of its security history.",
+        "example": {
+          "current_status": "UNKNOWN",
+          "history": {
+            "items": [],
+            "total": 0
+          },
+          "provider_skill_id": "tc:123e4567-e89b-12d3-a456-426614174000"
+        },
+        "properties": {
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillSecurityObservation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Latest observed upload, null if the latest handoff failed or is unknown."
+          },
+          "current_failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillSecurityHandoffFailure"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Known failed handoff for the latest upload; never an older scan verdict."
+          },
+          "current_status": {
+            "description": "Current upload's observation/scan state; OBSERVATION_FAILED hides an older report.",
+            "title": "Current Status",
+            "type": "string"
+          },
+          "history": {
+            "$ref": "#/components/schemas/Page_SkillSecurityObservation_",
+            "description": "Bounded, newest-first page of successful upload observations."
+          },
+          "provider_skill_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stable security identity; null until observation enrollment succeeds.",
+            "title": "Provider Skill Id"
+          }
+        },
+        "required": [
+          "current_status",
+          "history"
+        ],
+        "title": "SkillSecurityObservations",
+        "type": "object"
+      },
+      "SkillSecurityHandoffFailure": {
+        "description": "A successful upload whose security handoff could not be completed.",
+        "properties": {
+          "observation_id": {
+            "description": "Identifier of this failed upload handoff.",
+            "title": "Observation Id",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "Digest of the exact submitted package.",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "snapshot_verified": {
+            "description": "Whether the immutable exact package was read back successfully.",
+            "title": "Snapshot Verified",
+            "type": "boolean"
+          },
+          "stage": {
+            "description": "Technical stage where observation failed.",
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "observation_id",
+          "sha256",
+          "stage",
+          "snapshot_verified"
+        ],
+        "title": "SkillSecurityHandoffFailure",
+        "type": "object"
+      },
+      "Page_SkillSecurityObservation_": {
+        "description": "One page of a list result: `total` counts every match, `items` holds the current page.",
+        "properties": {
+          "items": {
+            "description": "Items on the current page (present, possibly empty).",
+            "items": {
+              "$ref": "#/components/schemas/SkillSecurityObservation"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of items matching the query.",
+            "example": 1,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "Page[SkillSecurityObservation]",
+        "type": "object"
+      },
+      "SkillSecurityObservation": {
+        "description": "Recorded security check for one successful Local Skill upload.",
+        "example": {
+          "check_id": "check-123",
+          "created_at": "2026-10-12T08:59:00",
+          "observation_id": "upload-20261012-1",
+          "processing_status": "COMPLETED",
+          "report": {
+            "riskStatus": "PASS"
+          },
+          "risk_status": "PASS",
+          "scan_completed_at": "2026-10-12T09:01:00",
+          "scan_started_at": "2026-10-12T09:00:00",
+          "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "properties": {
+          "check_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider check identifier, when submitted.",
+            "title": "Check Id"
+          },
+          "created_at": {
+            "description": "Time the upload observation was recorded.",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "detail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider report detail link, when available.",
+            "title": "Detail Url"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Last local processing error code, if any.",
+            "title": "Error Code"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Last local processing error detail, if any.",
+            "title": "Error Message"
+          },
+          "observation_id": {
+            "description": "Identifier of this upload's scan record.",
+            "title": "Observation Id",
+            "type": "string"
+          },
+          "processing_status": {
+            "description": "Local scan-processing state, separate from risk status.",
+            "title": "Processing Status",
+            "type": "string"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Saved provider report, when available.",
+            "title": "Report"
+          },
+          "risk_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider risk finding; null until reported.",
+            "title": "Risk Status"
+          },
+          "scan_completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the scan report was saved, when known.",
+            "title": "Scan Completed At"
+          },
+          "scan_started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the scan began, when known.",
+            "title": "Scan Started At"
+          },
+          "sha256": {
+            "description": "SHA-256 digest of the immutable uploaded package.",
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "observation_id",
+          "sha256",
+          "processing_status",
+          "created_at"
+        ],
+        "title": "SkillSecurityObservation",
+        "type": "object"
       }
     }
   },
@@ -40323,7 +40705,9 @@
             "schema": {
               "description": "Decimal public identifier of the shared Repo Skill.",
               "title": "Skill Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -80736,7 +81120,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -80960,7 +81346,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -81169,7 +81557,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -81390,7 +81780,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -81616,7 +82008,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -81842,7 +82236,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -82063,7 +82459,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -82274,7 +82672,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -82485,7 +82885,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -82720,7 +83122,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -82957,7 +83361,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -83229,7 +83635,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -83478,7 +83886,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -83700,7 +84110,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -83911,7 +84323,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -84146,7 +84560,9 @@
             "schema": {
               "description": "Decimal SkillSet identifier.",
               "title": "Set Id",
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 4300
             }
           },
           {
@@ -90415,6 +90831,444 @@
         "summary": "Update Space Skill Editor Approval Policy",
         "tags": [
           "spaces"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/classification": {
+      "get": {
+        "description": "Read only Bot ID/type, without requiring owner or collaborator access.\n\nComposite BCS actor IDs are split by the caller: Bot ID in the path and\nentity suffix in the optional query. Omission uses the unique Bot lookup.\nA signed, authenticated user is required; only tenant-local records are read.",
+        "operationId": "get_bot_classification_openapi_v1_bots__bot_id__classification_get",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Entity suffix of a composite Bot identity; omit for a unique Bot ID.",
+            "in": "query",
+            "name": "entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 1024,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Entity suffix of a composite Bot identity; omit for a unique Bot ID.",
+              "examples": [
+                "owner-1"
+              ],
+              "title": "Entity Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_BotClassification_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Get Bot Classification",
+        "tags": [
+          "Bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/skills/{skill_id}/security-observations": {
+      "get": {
+        "description": "Read the current and historical scans for a visible Bot-local Skill.",
+        "operationId": "get_skill_security_observations_openapi_v1_bots__bot_id__skills__skill_id__security_observations_get",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The skill's id, as returned by the listing or upload (decimal digits, e.g. '42'). The id alone identifies the skill and its bot.",
+            "in": "path",
+            "name": "skill_id",
+            "required": true,
+            "schema": {
+              "description": "The skill's id, as returned by the listing or upload (decimal digits, e.g. '42'). The id alone identifies the skill and its bot.",
+              "title": "Skill Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "deprecated": true,
+            "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "deprecated": true,
+              "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+              "title": "Owner Id"
+            }
+          },
+          {
+            "description": "1-based page number.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "1-based page number.",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Items per page (max 100).",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page (max 100).",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SkillSecurityObservations_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Get Skill Security Observations",
+        "tags": [
+          "skills"
         ]
       }
     }

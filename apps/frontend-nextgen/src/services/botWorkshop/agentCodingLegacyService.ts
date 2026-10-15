@@ -7,6 +7,8 @@ import {
   getWorkflows,
   searchAntCodeProjects,
   type AntCodeProject,
+  type CodeRepositorySearchOptions,
+  type CodeRepositoryTenant,
   type WorkflowItem,
 } from '@/services/backendApi/legacyAICodingController';
 import { searchDomainBots, type Bot } from '@/services/backendApi/legacyBotController';
@@ -43,6 +45,8 @@ export {
 export type {
   AntCodeProject,
   ArchitectDomainOption,
+  CodeRepositorySearchOptions,
+  CodeRepositoryTenant,
   Bot,
   CodefuseModelDto,
   WorkflowItem,

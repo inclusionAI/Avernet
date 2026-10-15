@@ -18,8 +18,8 @@ export interface BcsPublicRequest {
   public_scope: 'user' | 'agent';
   /** 部门范围；null 或空数组表示不限部门。 */
   view_depts?: ViewDept[] | null;
-  /** public = 公开（是否限制部门由 view_depts 区分）；private = 不公开。 */
-  visibility?: 'public' | 'private';
+  /** public = 全部可见；protected = 限定组织可申请（范围由 view_depts 指定）；private = 不可见。 */
+  visibility?: 'public' | 'protected' | 'private';
 }
 
 /** 发布结果。除 success 外，快速路径可能不返回审批字段。 */

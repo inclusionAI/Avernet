@@ -179,6 +179,10 @@ a kernel that permits `F_SETPIPE_SZ` of at least 8 KiB.
 
 ### Distribution identity discovery
 
+For connections to an existing desktop host, see
+[Codex desktop host integration](docs/codex-desktop.md). The `codex-desktop`
+engine uses the host's Unix WebSocket and requires no engine executable.
+
 `IdentityResolver::registration_ref` receives the selected engine, canonical workspace
 and optional `--provider-bot-ref`. The default preserves the explicit reference;
 distributions can discover an existing local identity. Resolved references are
@@ -188,3 +192,61 @@ headers to both requests, with redirects disabled. Credentials stay in the
 short-lived client and are not added to saved bridge configuration. Identity
 verification remains the resolver's responsibility; discovery alone is not proof
 of identity. Company-specific SDK implementations belong in their distribution.
+
+
+## Named connection profiles
+
+Use `--profile <name>` consistently with `register`, `init`, `deinit` and `start`.
+Profiles keep configurations and relative state databases in separate
+`~/.bcn-bridge/profiles/<name>/` directories. A profile name selects local
+configuration, not an implicit service URL; supply the intended registration
+API and upstream endpoints when registering. Names accept 1-64 ASCII letters,
+digits, hyphens or underscores. `--config` remains supported but cannot be
+combined with `--profile`.
+
+Repeated registration of an existing profile verifies provider, engine and
+endpoints and reuses the stored Bot without a network registration request.
+Explicitly conflicting workspace/model options are rejected. New profiles may
+reuse local engine options from a verified active instance of the same engine.
+When QwenWork is stopped, saved regular TOML configs directly in ~/.bcn-bridge
+and named profiles are searched (bounded to 128 entries per directory, excluding
+backups and symlinks). Identical desktop settings are reused; conflicting
+settings block registration and require starting the intended existing profile.
+Only desktop settings cross environments,
+without sharing its BCN identity or durable state. One user still runs one bridge:
+stop the current instance before starting another profile. Status prints the
+active profile; this is not a remote connectivity claim.
+
+For intentional replacement, stop the bridge and use `register --replace-existing`.
+The CLI fences concurrent startup, retains a private rollback configuration
+beside the original. For the same Provider, API endpoint, mode, engine and Bot
+reference (omitted reference keeps the saved one), local settings are updated
+without registration; Bot ID, credentials, engine options and state are retained.
+Changing the Provider, API endpoint or explicit Bot reference performs new
+registration and selects fresh state. Changing mode or engine for the same Bot
+is rejected. Failures leave the original local config intact.
+
+Gateway webhook changes use the existing authenticated Provider PATCH API.
+Supply `BRIDGE_PROVIDER_ADMIN_TOKEN` or `--provider-admin-token`; a registration
+token or Bot token cannot authorize that change. This credential is never saved
+in the configuration. Legacy gateway configurations without webhook metadata
+also require this authenticated update to verify the endpoint. If a network or
+response error leaves the remote update uncertain, verify its endpoint before
+restarting; the original local configuration remains available.
+
+Profile reuse also verifies an explicitly supplied `--provider-bot-ref`. Omit it
+to retain the saved identity (plugin mode generates a reference on first registration).
+Gateway registration saves `registration.webhook_url`; reuse rejects a changed
+delivery URL, including its path or query. Legacy gateway configurations without
+this metadata cannot be verified and require stopped, explicit replacement.
+
+Explicit `--engine-bin` and gateway `--listen` values must also match the saved
+profile. Omitting these options preserves the saved runtime settings, even when
+they differ from CLI defaults. Executable paths retain symlink identity because
+wrapper behavior can depend on the invoked name. Use explicit replacement to
+change an executable or bind address.
+
+Gateway replacement may omit `--webhook-url` when saved metadata belongs to the
+same Provider, API endpoint, reference, engine and gateway mode. Local listener
+updates retain that endpoint without administrator authentication or network calls.
+New bindings still require an explicit webhook URL.

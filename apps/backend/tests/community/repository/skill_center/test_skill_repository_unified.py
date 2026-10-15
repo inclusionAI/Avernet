@@ -395,6 +395,40 @@ def test_public_local_replace_rejects_a_locator_change(skills, db):
             assert persisted.description == "old"
 
 
+def test_local_replacement_keeps_security_identity_out_of_ac_skill(skills, db):
+    with avernet_tenant_scope("tenant-a"):
+        skill = skills.create(
+            {
+                "name": "local",
+                "description": "old",
+                "git_path": "local:///skills/local",
+                "user_id": "owner",
+                "bolt_id": "bot",
+            }
+        )
+        first = skills.replace_bot_local_skill(
+            skill_id=skill["id"],
+            owner_id="owner",
+            bot_id="bot",
+            old_locator="/skills/local",
+            new_locator="/skills/local",
+            description="first",
+        )
+        assert first is not None
+        assert "local_security_incarnation_id" not in first
+        second = skills.replace_bot_local_skill(
+            skill_id=skill["id"],
+            owner_id="owner",
+            bot_id="bot",
+            old_locator="/skills/local",
+            new_locator="/skills/local",
+            description="second",
+        )
+        assert "local_security_incarnation_id" not in second
+        with db.orm_session() as session:
+            assert session.query(Skill).one().description == "second"
+
+
 def test_skill_identity_rejects_a_second_row_for_the_same_uuid(skills):
     skills.create({"name": "dup", "skill_uuid": "x", "version": 1})
     with pytest.raises(IntegrityError, match="UNIQUE constraint failed"):

@@ -4,7 +4,7 @@ import logging
 from time import perf_counter
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 
@@ -205,7 +205,7 @@ async def create_worker(payload: WorkerCreateRequest, request: Request) -> dict:
 
 
 async def _set_runtime_state(
-    worker_id: str, request: Request, online: bool, background_tasks: BackgroundTasks | None = None,
+    worker_id: str, request: Request, online: bool,
 ) -> dict:
     started_at = perf_counter() if online else None
     require_oss_auth(request)
@@ -225,16 +225,15 @@ async def _set_runtime_state(
         if online:
             phase_started_at = perf_counter()
             worker = await run_in_threadpool(
-                service.set_online, worker_id, updated_by="oss_api", defer_vector_sync=True,
+                service.set_online, worker_id, updated_by="oss_api",
             )
             logger.info(
-                "[ONLINE-TIMING] phase=state_write worker_id=%s elapsed_ms=%.1f",
+                "[ONLINE-TIMING] phase=state_and_vector_write worker_id=%s elapsed_ms=%.1f",
                 worker_id, (perf_counter() - phase_started_at) * 1000,
             )
             response = _runtime_response(worker)
-            background_tasks.add_task(service.sync_online_vectors_if_current, worker_id)
             logger.info(
-                "[ONLINE-TIMING] phase=route_ready worker_id=%s total_ms=%.1f vector_sync_scheduled=true",
+                "[ONLINE-TIMING] phase=route_ready worker_id=%s total_ms=%.1f vector_sync_completed=true",
                 worker_id, (perf_counter() - started_at) * 1000,
             )
             return response
@@ -265,8 +264,8 @@ async def _set_runtime_state(
 
 
 @router.put("/workers/{worker_id}/online")
-async def set_worker_online(worker_id: str, request: Request, background_tasks: BackgroundTasks) -> dict:
-    return await _set_runtime_state(worker_id, request, online=True, background_tasks=background_tasks)
+async def set_worker_online(worker_id: str, request: Request) -> dict:
+    return await _set_runtime_state(worker_id, request, online=True)
 
 
 @router.put("/workers/{worker_id}/offline")
@@ -275,8 +274,8 @@ async def set_worker_offline(worker_id: str, request: Request) -> dict:
 
 
 @external_router.put("/workers/{worker_id}/online")
-async def set_worker_online_external(worker_id: str, request: Request, background_tasks: BackgroundTasks) -> dict:
-    return await _set_runtime_state(worker_id, request, online=True, background_tasks=background_tasks)
+async def set_worker_online_external(worker_id: str, request: Request) -> dict:
+    return await _set_runtime_state(worker_id, request, online=True)
 
 
 @external_router.put("/workers/{worker_id}/offline")

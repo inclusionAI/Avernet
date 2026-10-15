@@ -138,6 +138,7 @@ fn ready(first: bool, mode: HumanInputNotificationMode) -> HumanInputReadyEvent 
     HumanInputReadyEvent {
         event_id: format!("request-{}", pending.node_id), group_id: "group-loop".into(),
         session_id: "session-loop".into(), run_id: "run-loop".into(), node_id: pending.node_id,
+        execution: pending.execution,
         display_name: pending.display_name, instruction: pending.instruction, assignee_actor_id: "human_1".into(),
         channel_type: "test-im".into(), notification_mode: mode, fixed_group_conversation_id: Some("shared-conversation".into()),
         response_ref: pending.response_ref, upstream_artifacts: pending.upstream_artifacts,
@@ -185,6 +186,30 @@ async fn first_and_later_loop_notifications_match_shared_context_goldens() {
             assert_eq!(saved.notification_text.matches("result-2").count(), usize::from(!first));
         }
     }
+}
+
+#[tokio::test]
+async fn nested_notification_renders_and_validates_the_complete_loop_path() {
+    let repo = Arc::new(MemoryHumanInputRequestRepo::new());
+    let provider = Arc::new(Provider::default());
+    let service = service(repo.clone(), provider).await;
+    let mut event = ready(true, HumanInputNotificationMode::DirectAssignee);
+    let context = event.loop_context.as_mut().unwrap();
+    context.loop_id = "inner".into();
+    context.iteration = 1;
+    context.max_iterations = 3;
+    context.loop_path = Some(vec![
+        bcs_domain::StateMachineLoopFrame { loop_id: "outer".into(), iteration: 2, max_iterations: 2 },
+        bcs_domain::StateMachineLoopFrame { loop_id: "inner".into(), iteration: 1, max_iterations: 3 },
+    ]);
+    service.publish_human_input_ready(event.clone()).await.unwrap();
+    let saved = repo.get(&event.event_id).await.unwrap().unwrap();
+    assert!(saved.notification_text.contains("路径：outer 2/2 → inner 1/3"));
+
+    let mut invalid = event;
+    invalid.event_id = "invalid-nested-context".into();
+    invalid.loop_context.as_mut().unwrap().loop_path.as_mut().unwrap()[1].iteration = 2;
+    assert!(service.publish_human_input_ready(invalid).await.is_err());
 }
 
 #[tokio::test]

@@ -51,7 +51,7 @@ user_config:
   # Per-owner device allocation policy (neutral knobs only).
   device_allocation:
     mode: "multi"
-    max_devices_per_entity: 5
+    max_devices_per_entity: 2
 
   # OSS↔NAS migration mount roots (host-side paths, deployment-neutral).
   # NOTE: the OssToNasConfig provider reads these as FLAT user_config keys

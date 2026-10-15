@@ -35,7 +35,6 @@ function renderRail(over: Partial<Parameters<typeof ConversationCollapsedRail>[0
     selectedSection: null,
     onQuickOpen: jest.fn(),
     onExpand: jest.fn(),
-    onOpenPublicBots: jest.fn(),
     onOpenAgentCodingBot: jest.fn(),
     ...over,
   };
@@ -95,9 +94,8 @@ describe('ConversationCollapsedRail（整栏收起的 Bot 泊位竖轨）', () =
     expect(props.onExpand).toHaveBeenCalledTimes(1);
   });
 
-  it('ends the rail with the public Bot discovery entry', () => {
-    const props = renderRail();
-    fireEvent.click(screen.getByRole('button', { name: '前往公开 Bot' }));
-    expect(props.onOpenPublicBots).toHaveBeenCalledTimes(1);
+  it('底端不再保留公开 Bot 发现入口（2026-10-14 体验修复）', () => {
+    renderRail();
+    expect(screen.queryByRole('button', { name: '前往公开 Bot' })).not.toBeInTheDocument();
   });
 });

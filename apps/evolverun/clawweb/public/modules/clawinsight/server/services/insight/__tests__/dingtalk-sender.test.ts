@@ -158,4 +158,23 @@ describe("DingTalkSender", () => {
     );
   });
 
+  it("accepts business-provided notification content and reuses the token cache", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input, init) => {
+      calls.push({ url: String(input), init });
+      return new Response(JSON.stringify(String(input).endsWith("/oauth2/accessToken")
+        ? { accessToken: "access-token", expireIn: 7200 } : { processQueryKey: "generic" }), { status: 200 });
+    }) as typeof fetch;
+    const sender = new DingTalkSender({ appKey: "app-key", appSecret: "app-secret", robotCode: "robot-code",
+      apiBaseUrl: "https://api.dingtalk.test", publicBaseUrl: "https://clawweb-pre.test" });
+    await sender.sendNotification({ recipientUserId: "123", title: "确认自愈方案", text: "方案与证据" });
+    await sender.sendNotification({ recipientUserId: "123", title: "自愈执行结果", text: "实际执行结果" });
+    expect(calls.filter(call => call.url.endsWith("/oauth2/accessToken"))).toHaveLength(1);
+    const deliveries = calls.filter(call => call.url.endsWith("/batchSend"));
+    expect(deliveries).toHaveLength(2);
+    const first = JSON.parse(String(deliveries[0].init?.body));
+    expect(first.userIds).toEqual(["000123"]);
+    expect(JSON.parse(first.msgParam)).toEqual({ title: "确认自愈方案", text: "方案与证据" });
+  });
+
 });

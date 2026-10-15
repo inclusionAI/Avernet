@@ -6,11 +6,13 @@ bypassing normal state machine transitions.
 
 from __future__ import annotations
 
+from secbaas.community.api.bot_manage import BotStatus
 from secbaas.community.api.publish_manage import (
     ForceSuccessResult,
     PublishAdminService,
     PublishConflictError,
     PublishNotFoundError,
+    PublishType,
     RestoreBotResult,
     UpdateBotStatusResult,
     UpdateDeviceStatusResult,
@@ -95,6 +97,22 @@ class DefaultPublishAdminService(PublishAdminService):
             env=env,
             modifier=modifier,
         )
+
+        # Abandon the still-PENDING clone of an UPDATE publish BEFORE the
+        # terminal SUCCESS write (design D2/D3): force-success skips every
+        # stage, so no device ever switched to the clone's config — the
+        # incumbent source bot (activated above) stays the single live
+        # ACTIVE row of the uuid. A retire failure propagates and leaves the
+        # publish non-terminal instead of hiding the clone behind SUCCESS.
+        if publish.publish_type == PublishType.UPDATE.value:
+            target_bot_id = (publish.extra_config or {}).get("target_bot_id")
+            if isinstance(target_bot_id, int):
+                self._retire_pending_clone(
+                    tenant=tenant,
+                    env=env,
+                    target_bot_id=target_bot_id,
+                    modifier=modifier,
+                )
 
         self._publish_repo.update_status(
             publish_id=publish_id,
@@ -366,3 +384,54 @@ class DefaultPublishAdminService(PublishAdminService):
             )
 
         return devices_updated, bot_updated
+
+    def _retire_pending_clone(
+        self,
+        *,
+        tenant: str,
+        env: str,
+        target_bot_id: int,
+        modifier: str,
+    ) -> None:
+        """Soft-delete the still-PENDING update clone reserved by a publish.
+
+        Guard sequence mirrors
+        ``DefaultPublishService._cleanup_pending_clone_on_update_failure``
+        (kept as a replication here because the admin service intentionally
+        holds repositories, not the publish service): no-op when the target
+        row is missing or no longer live PENDING, rel soft-delete failure is
+        tolerated (a PENDING clone should never carry rels), and any
+        failure soft-deleting the bot row itself propagates to the caller —
+        per design D2 the terminal status write must then never happen.
+        """
+        target_bot = self._bot_repo.get_by_id(target_bot_id, tenant=tenant, env=env)
+        if target_bot is None:
+            return
+        if target_bot.status != BotStatus.PENDING.value:
+            return
+
+        try:
+            self._rel_repo.soft_delete_by_bot_id(
+                bot_id=target_bot_id,
+                tenant=tenant,
+                env=env,
+                modifier=modifier,
+            )
+        except Exception:
+            logger.warning(
+                f"[admin_retire_clone] Failed to soft-delete device relationships "
+                f"for PENDING clone bot {target_bot_id} (may have none)",
+                exc_info=True,
+            )
+
+        self._bot_repo.soft_delete(
+            bot_id=target_bot_id,
+            tenant=tenant,
+            env=env,
+            modifier=modifier,
+        )
+        logger.warning(
+            f"ADMIN_FORCE_SUCCESS: retired still-PENDING update clone "
+            f"bot_id={target_bot_id} (tombstone is_deleted=bot_id); incumbent "
+            f"source bot remains the live ACTIVE row"
+        )

@@ -121,18 +121,16 @@ export function SharePopover({ open, anchorRef, title, onCreate, onClose, align 
                 >
                   {invitationUrl}
                 </span>
-                <button
-                  type="button"
-                  aria-label="复制链接"
+                <IconButton
+                  label={copied ? '已复制，点击再次复制' : '复制链接'}
+                  ariaLabel="复制链接"
+                  icon={
+                    copied ? <Check className="size-3.5 text-primary" aria-hidden /> : <Copy className="size-3.5" aria-hidden />
+                  }
+                  size="sm"
                   onClick={() => void handleCopy()}
-                  className="-mr-1 -mt-0.5 flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-                >
-                  {copied ? (
-                    <Check className="size-3.5 text-primary" aria-hidden />
-                  ) : (
-                    <Copy className="size-3.5" aria-hidden />
-                  )}
-                </button>
+                  className="-mr-1 -mt-0.5 size-6 shrink-0 rounded-md text-muted-foreground hover:bg-background hover:text-foreground"
+                />
               </div>
               <div className="mt-1.5 flex items-center justify-between border-t border-border/60 pt-1.5">
                 <span className="text-[11px] leading-4 text-muted-foreground">链接 {expiryLabel}后过期</span>

@@ -2,7 +2,7 @@
  * ChatHeaderRightPanel —— 对话页头部右缘面板容器 + 会话详情视图（chat-header-panels）。
  *
  * dmore artboard-005 实测：面板 = 右缘 sidebar 320 宽、48px 头行（标题 + 关闭）+ 内容分组；
- * 会话详情 = 只读行（会话名称/会话Key/会话创建时间），字段缺失隐藏行（不占位空白）。
+ * 会话详情 = 只读行（会话名称/会话 ID/会话创建时间;2026-10-14 口径统一:原稿"会话Key"与值 session ID 不符），字段缺失隐藏行（不占位空白）。
  * 容器复用 ResizableWorkspaceSidebar（与群域 SessionFilesSidebar/会话文件副屏同构容器模式）。
  */
 import { IconButton, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
@@ -70,7 +70,7 @@ export function SessionDetailPanel({ session }: SessionDetailPanelProps) {
   return (
     <section aria-label="会话详情" className="flex flex-col gap-1">
       <DetailRow label="会话名称" value={session.title} />
-      <DetailRow label="会话 Key" value={session.sessionId} />
+      <DetailRow label="会话 ID" value={session.sessionId} />
       <DetailRow label="会话创建时间" value={session.gmtCreate} />
     </section>
   );

@@ -86,6 +86,7 @@ from agentclaw.community.core.bot_inventory.adapters.noop_business_space import 
     NoopBusinessSpaceContext,
 )
 from agentclaw.community.core.bot_inventory.protocols import (
+    BotInventoryTemplatePort,
     BusinessSpaceContextProtocol,
 )
 from agentclaw.community.core.bot_inventory.types import (
@@ -276,6 +277,11 @@ def make_client(bots):
                     BotInventoryServiceProtocol,
                     to=inventory_service or unexpected,
                 )
+                # FastAPI resolves route dependencies before the handler can
+                # short-circuit an ungranted app to an empty collaboration
+                # page. Bind the template port to the same guard so this
+                # authorization test still fails if that path touches it.
+                binder.bind(BotInventoryTemplatePort, to=unexpected)
                 binder.bind(
                     LocalBotWorkflowServiceProtocol,
                     to=local_service or unexpected,

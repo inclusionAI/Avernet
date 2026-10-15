@@ -188,7 +188,7 @@ jobs:
             --base-ref "$BCS_BASE_REF" \
             --bcs-dir "$PWD" \
             --pass-rate-min 100 \
-            --overall-line-min 70 \
+            --overall-line-min 84 \
             --changed-line-min 80
 
       - name: Upload BCS test results

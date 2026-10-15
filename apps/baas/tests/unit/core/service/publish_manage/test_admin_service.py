@@ -211,6 +211,238 @@ class TestForceSuccess:
         assert result.devices_updated == 0
         assert result.bot_updated is False
 
+    async def test_force_success_update_publish_retires_clone_before_success(self):
+        """force_success: UPDATE publish retires its clone BEFORE the SUCCESS write."""
+        mock_publish = MagicMock()
+        mock_publish.status = "PENDING"
+        mock_publish.bot_id = 42
+        mock_publish.publish_type = "UPDATE"
+        mock_publish.extra_config = {"target_bot_id": 77}
+
+        pub_repo = MagicMock()
+        pub_repo.get_by_id.return_value = mock_publish
+        batch_repo = MagicMock()
+        batch_repo.list_by_publish_id.return_value = []
+        device_repo = MagicMock()
+        device_repo.list_by_bot_id.return_value = []
+
+        service = _make_service(
+            publish_repo=pub_repo,
+            batch_repo=batch_repo,
+            device_repo=device_repo,
+        )
+
+        with (
+            patch(
+                "secbaas.community.core.service.publish_manage._admin_service.get_current_env",
+                return_value="test",
+            ),
+            patch.object(
+                DefaultPublishAdminService, "_retire_pending_clone"
+            ) as mock_retire,
+        ):
+            ordering = MagicMock()
+            ordering.attach_mock(mock_retire, "retire_clone")
+            ordering.attach_mock(pub_repo.update_status, "update_status")
+
+            await service.force_success(
+                publish_id=1,
+                tenant="test-tenant",
+                modifier="test-user",
+            )
+
+        mock_retire.assert_called_once_with(
+            tenant="test-tenant",
+            env="test",
+            target_bot_id=77,
+            modifier="test-user",
+        )
+        pub_repo.update_status.assert_called_once_with(
+            publish_id=1,
+            tenant="test-tenant",
+            env="test",
+            status="SUCCESS",
+            modifier="test-user",
+        )
+        call_names = [name for name, _, _ in ordering.mock_calls]
+        assert call_names.index("retire_clone") < call_names.index("update_status")
+
+    async def test_force_success_update_publish_without_target_bot_id_skips_retire(
+        self,
+    ):
+        """force_success: UPDATE publish lacking an int target_bot_id skips retirement.
+
+        The clone retire is guarded by isinstance(target_bot_id, int): a
+        publish without extra_config (or without the pointer) must still
+        reach the terminal SUCCESS write.
+        """
+        mock_publish = MagicMock()
+        mock_publish.status = "PENDING"
+        mock_publish.bot_id = 42
+        mock_publish.publish_type = "UPDATE"
+        mock_publish.extra_config = None
+
+        pub_repo = MagicMock()
+        pub_repo.get_by_id.return_value = mock_publish
+        batch_repo = MagicMock()
+        batch_repo.list_by_publish_id.return_value = []
+        device_repo = MagicMock()
+        device_repo.list_by_bot_id.return_value = []
+
+        service = _make_service(
+            publish_repo=pub_repo,
+            batch_repo=batch_repo,
+            device_repo=device_repo,
+        )
+
+        with (
+            patch(
+                "secbaas.community.core.service.publish_manage._admin_service.get_current_env",
+                return_value="test",
+            ),
+            patch.object(
+                DefaultPublishAdminService, "_retire_pending_clone"
+            ) as mock_retire,
+        ):
+            await service.force_success(
+                publish_id=1,
+                tenant="test-tenant",
+                modifier="test-user",
+            )
+
+        mock_retire.assert_not_called()
+        pub_repo.update_status.assert_called_once_with(
+            publish_id=1,
+            tenant="test-tenant",
+            env="test",
+            status="SUCCESS",
+            modifier="test-user",
+        )
+
+
+class TestRetirePendingClone:
+    """_retire_pending_clone direct behavior (soft-delete of a PENDING clone)."""
+
+    def _make_clone_bot(
+        self,
+        *,
+        id: int = 77,
+        status: str = "PENDING",
+    ) -> MagicMock:
+        bot = MagicMock()
+        bot.id = id
+        bot.status = status
+        return bot
+
+    def test_pending_row_soft_deletes_rels_then_bot(self):
+        """A live PENDING clone gets rel soft-delete then bot soft-delete."""
+        clone = self._make_clone_bot(id=77, status="PENDING")
+        bot_repo = MagicMock()
+        bot_repo.get_by_id.return_value = clone
+        rel_repo = MagicMock()
+
+        service = _make_service(bot_repo=bot_repo, rel_repo=rel_repo)
+
+        service._retire_pending_clone(
+            tenant="test-tenant",
+            env="prod",
+            target_bot_id=77,
+            modifier="test-user",
+        )
+
+        bot_repo.get_by_id.assert_called_once_with(77, tenant="test-tenant", env="prod")
+        rel_repo.soft_delete_by_bot_id.assert_called_once_with(
+            bot_id=77,
+            tenant="test-tenant",
+            env="prod",
+            modifier="test-user",
+        )
+        bot_repo.soft_delete.assert_called_once_with(
+            bot_id=77,
+            tenant="test-tenant",
+            env="prod",
+            modifier="test-user",
+        )
+
+    def test_missing_row_is_a_noop(self):
+        """No clone row means nothing to retire."""
+        bot_repo = MagicMock()
+        bot_repo.get_by_id.return_value = None
+        rel_repo = MagicMock()
+
+        service = _make_service(bot_repo=bot_repo, rel_repo=rel_repo)
+
+        service._retire_pending_clone(
+            tenant="test-tenant",
+            env="prod",
+            target_bot_id=77,
+            modifier="test-user",
+        )
+
+        rel_repo.soft_delete_by_bot_id.assert_not_called()
+        bot_repo.soft_delete.assert_not_called()
+
+    def test_non_pending_row_is_a_noop(self):
+        """A clone already promoted (non-PENDING) must not be retired."""
+        clone = self._make_clone_bot(id=77, status="ACTIVE")
+        bot_repo = MagicMock()
+        bot_repo.get_by_id.return_value = clone
+        rel_repo = MagicMock()
+
+        service = _make_service(bot_repo=bot_repo, rel_repo=rel_repo)
+
+        service._retire_pending_clone(
+            tenant="test-tenant",
+            env="prod",
+            target_bot_id=77,
+            modifier="test-user",
+        )
+
+        rel_repo.soft_delete_by_bot_id.assert_not_called()
+        bot_repo.soft_delete.assert_not_called()
+
+    def test_rel_soft_delete_failure_tolerated_bot_still_deleted(self):
+        """A rel soft-delete failure is swallowed; the bot delete still runs."""
+        clone = self._make_clone_bot(id=77, status="PENDING")
+        bot_repo = MagicMock()
+        bot_repo.get_by_id.return_value = clone
+        rel_repo = MagicMock()
+        rel_repo.soft_delete_by_bot_id.side_effect = Exception("rel write failed")
+
+        service = _make_service(bot_repo=bot_repo, rel_repo=rel_repo)
+
+        service._retire_pending_clone(
+            tenant="test-tenant",
+            env="prod",
+            target_bot_id=77,
+            modifier="test-user",
+        )
+
+        bot_repo.soft_delete.assert_called_once_with(
+            bot_id=77,
+            tenant="test-tenant",
+            env="prod",
+            modifier="test-user",
+        )
+
+    def test_bot_soft_delete_failure_propagates(self):
+        """Per design D2 a bot soft-delete failure must propagate (no terminal write)."""
+        clone = self._make_clone_bot(id=77, status="PENDING")
+        bot_repo = MagicMock()
+        bot_repo.get_by_id.return_value = clone
+        bot_repo.soft_delete.side_effect = Exception("bot write failed")
+        rel_repo = MagicMock()
+
+        service = _make_service(bot_repo=bot_repo, rel_repo=rel_repo)
+
+        with pytest.raises(Exception, match="bot write failed"):
+            service._retire_pending_clone(
+                tenant="test-tenant",
+                env="prod",
+                target_bot_id=77,
+                modifier="test-user",
+            )
+
 
 # ============== _update_batches_and_records ==============
 

@@ -20,8 +20,8 @@ export function mapIdentityViewToIdentity(view: IdentityView): Identity {
 
 /**
  * @sdd: IdentityView[] → 展示用 Identity[]（含登录用户名覆盖）。
- * 与 WorkspaceIdentitySwitcher 的名称覆盖口径一致：preferAuthenticatedUserProfile 开启且
- * 用户身份项 id 匹配登录用户时，用登录用户显示名替换 mine 返回名，保证各入口身份名一致。
+ * preferAuthenticatedUserProfile 开启且用户身份项 id 匹配登录用户时，用登录用户
+ * 显示名替换 mine 返回名，保证各入口身份名一致。
  * 模块级身份选择器（如协作广场公开Bot Tab）复用本函数，不再各自内联覆盖逻辑。
  */
 export function mapIdentityViewsToDisplayIdentities(

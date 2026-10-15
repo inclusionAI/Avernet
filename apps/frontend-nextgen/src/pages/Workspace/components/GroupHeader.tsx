@@ -1,4 +1,5 @@
 import { IconButton } from '@/components/ui';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { GroupView, SessionView } from '@/domain/collaboration';
 import type { GroupChatFavoritesModel } from '@/pages/Workspace/hooks/useGroupChatHeaderPanels';
 import type { DomainResult } from '@/services/workspace/identityService';
@@ -31,7 +32,7 @@ export interface GroupHeaderProps {
 }
 
 /**
- * header chip（dmore artboard-003 群对话标题栏，48px 顶栏）：群身份 chip（头像堆/群名/会话 Key
+ * header chip（dmore artboard-003 群对话标题栏，48px 顶栏）：群身份 chip（头像堆/群名/会话 ID
  * 胶囊/用户与 Bot 计数）+ 右侧 28px 图标钮列。六槽位按设计稿 x=0/32/64/96/128/160 全量落地：
  * 收藏会话 / 分享 / 会话管理 / 历史消息 / 资源管理 / 副屏——其中五枚与 chat 页 ChatHeaderActions
  * 同构（Star/SlidersHorizontal/History/FolderOpen/Monitor），分享为协作群特有（SharePopover 气泡）。
@@ -104,7 +105,7 @@ export function GroupHeader({
     if (!selectedSession?.sessionId) return;
     try {
       await navigator.clipboard.writeText(selectedSession.sessionId);
-      toast.success('会话 Key 已复制');
+      toast.success('会话 ID 已复制');
     } catch {
       toast.error('复制失败，请手动复制。');
     }
@@ -134,19 +135,26 @@ export function GroupHeader({
               <GroupAvatarStack participants={participants} totalCount={totalCount} />
               <span className="truncate text-[13px] leading-[18px] text-zinc-600">{selectedGroup.name}</span>
               {selectedSession ? (
-                <span className="flex h-5 max-w-[180px] shrink-0 items-center gap-1 rounded-full bg-secondary px-2">
-                  <span className="truncate text-[11px] leading-[16.5px] text-foreground/85" title={selectedSession.sessionId}>
-                    {selectedSession.sessionId}
+                <TooltipProvider>
+                  <span className="flex h-5 max-w-[180px] shrink-0 items-center gap-1 rounded-full bg-secondary px-2">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="truncate text-[11px] leading-[16.5px] text-foreground/85">
+                          {selectedSession.sessionId}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>{selectedSession.sessionId}</TooltipContent>
+                    </Tooltip>
+                    <IconButton
+                      label="复制会话 ID"
+                      icon={<Copy className="h-3 w-3" aria-hidden />}
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void copySessionKey()}
+                      className="h-5 w-5 rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                    />
                   </span>
-                  <button
-                    type="button"
-                    aria-label="复制会话 Key"
-                    onClick={() => void copySessionKey()}
-                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
-                  >
-                    <Copy className="h-3 w-3" aria-hidden />
-                  </button>
-                </span>
+                </TooltipProvider>
               ) : null}
               {participants.length > 0 || totalCount > 0 ? (
                 <>
