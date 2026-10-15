@@ -732,3 +732,57 @@ class TestRestartBaasCodefuseTokenPassthrough:
 
         payload = svc._task_queue_service.enqueue.call_args.args[1]
         assert "codefuse_token" not in payload
+
+
+@pytest.mark.parametrize("coding_prepare", [False, True])
+@pytest.mark.parametrize("engine,bot_type", [("openclaw", "personal"), ("openclaw", "service"), ("aicoding", "personal"), ("architect", "personal")])
+def test_restart_registers_without_legacy_gates(coding_prepare, engine, bot_type):
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_request import AicodingBaasPreparation
+    svc, baas, _ = _make_service(template_config={"capabilities": {"bcn": {"join_as_provider": False}}})
+    svc._drm_reader.read.return_value = "false"
+    svc._bcn_service.register_provider_bot.return_value = {"bot_uuid": "bcn-1"}
+    bot = {**_make_bot(active_engine=engine, bot_type=bot_type), "ext": {"bcn_registered": True}}
+    if coding_prepare:
+        result = AicodingBaasPreparation(svc).prepare(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
+        assert result.bot_uuid == "BOT-uuid-9"
+    else:
+        svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
+        baas.upgrade_bot.assert_called_once()
+    expected = dict(teamclaw_bot_uuid="bot001", owner_workno="user001", name="TestBot", summary="")
+    if engine == "openclaw" and bot_type == "personal":
+        expected["connection_mode"] = "plugin"
+    svc._bcn_service.register_provider_bot.assert_called_once_with(**expected)
+
+
+@pytest.mark.parametrize("coding_prepare", [False, True])
+def test_restart_registration_failure_does_not_block_preparation(coding_prepare):
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_request import AicodingBaasPreparation
+    svc, baas, _ = _make_service(template_config={})
+    svc._drm_reader.read.return_value = "false"
+    svc._bcn_service.register_provider_bot.side_effect = RuntimeError("BCN unavailable")
+    bot = _make_bot()
+    if coding_prepare:
+        result = AicodingBaasPreparation(svc).prepare(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
+        assert result.bot_uuid == "BOT-uuid-9"
+    else:
+        svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
+        baas.upgrade_bot.assert_called_once()
+    svc._bcn_service.register_provider_bot.assert_called_once()
+
+
+@pytest.mark.parametrize("coding_prepare", [False, True])
+def test_restart_durable_intent_remains_early_return(coding_prepare):
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_request import AicodingBaasPreparation, BaasRestartInProgress
+    from agentclaw.community.core.devices.services.baas_publish_task_handlers import RESTART_REQUEST_ID_KEY, RESTART_WORKFLOW_BASELINE_KEY
+    svc, baas, device = _make_service(template_config={})
+    device.get_device.return_value.device_props = {
+        RESTART_REQUEST_ID_KEY: "existing-request", RESTART_WORKFLOW_BASELINE_KEY: 3,
+    }
+    bot = _make_bot()
+    if coding_prepare:
+        result = AicodingBaasPreparation(svc).prepare(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
+        assert isinstance(result, BaasRestartInProgress)
+    else:
+        svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
+    svc._bcn_service.register_provider_bot.assert_not_called()
+    baas.upgrade_bot.assert_not_called()

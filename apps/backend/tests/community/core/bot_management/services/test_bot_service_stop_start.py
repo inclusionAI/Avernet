@@ -305,7 +305,7 @@ class TestStartBotBcnRegister:
             ext_update={"bcn_registered": True},
         )
 
-    def test_claude_code_application_coding_does_not_trigger_bcn_register(self):
+    def test_claude_code_application_coding_triggers_bcn_register(self):
         svc = _make_service()
         svc._bcn_service = MagicMock()
         bot = _make_bot()
@@ -317,7 +317,7 @@ class TestStartBotBcnRegister:
              patch.object(BotService, "_is_claude_code_bcn_register_enabled", return_value=True):
             svc.start_bot(bot_id="bot001", user_id="user001")
 
-        svc._bcn_service.register_provider_bot.assert_not_called()
+        svc._bcn_service.register_provider_bot.assert_called_once()
 
     def test_claude_code_personal_coding_triggers_register_provider_bot(self):
         # active_engine=claude_code + template_type=personalCoding 时 start_bot 会调 BCN 注册接口。
@@ -403,7 +403,7 @@ class TestStartBotBcnRegister:
             summary="",
         )
 
-    def test_non_claude_code_does_not_trigger_bcn_register(self):
+    def test_non_claude_code_triggers_bcn_register(self):
         svc = _make_service()
         svc._bcn_service = MagicMock()
         bot = _make_bot()  # active_engine="moltis"
@@ -412,7 +412,7 @@ class TestStartBotBcnRegister:
         with patch.object(svc, "_allocate_device_async"):
             svc.start_bot(bot_id="bot001", user_id="user001")
 
-        svc._bcn_service.register_provider_bot.assert_not_called()
+        svc._bcn_service.register_provider_bot.assert_called_once()
 
     def test_teclaw_triggers_register_provider_bot(self):
         # active_engine=teclaw 时 start_bot 会调 BCN 注册接口 (与 claude_code 一致, 所有 bot_type).
@@ -570,10 +570,11 @@ class TestStartBotBcnRegister:
         # 严格只含 bcn_registered 一个键, 没有 token / uuid / 其它键
         assert ext_update == {"bcn_registered": True}
 
-    def test_drm_disabled_skips_register(self):
-        # DRM 开关关闭 → 即便是 claude_code, 也不调 BCN, 也不写 ext
+    def test_drm_disabled_still_registers(self):
+        # start 自动注册不受 create 的旧 DRM 开关影响。
         svc = _make_service()
         svc._bcn_service = MagicMock()
+        svc._bcn_service.register_provider_bot.return_value = {"bot_uuid": "bcn-1"}
         bot = _make_bot()
         bot["active_engine"] = "claude_code"
         bot["template_type"] = "normalCC"
@@ -584,8 +585,8 @@ class TestStartBotBcnRegister:
              patch.object(BotService, "_is_claude_code_bcn_register_enabled", return_value=False):
             svc.start_bot(bot_id="bot001", user_id="user001")
 
-        svc._bcn_service.register_provider_bot.assert_not_called()
-        mock_ext.assert_not_called()
+        svc._bcn_service.register_provider_bot.assert_called_once()
+        mock_ext.assert_called_once()
 
     def test_drm_unset_registers_provider_bot_by_default(self):
         """DRM 未配置时，Claude Code Bot 仍自动注册 BCN Provider。"""
@@ -743,3 +744,51 @@ class TestRestartBot:
         with patch.object(svc, "stop_bot", side_effect=BotNotFoundError("not found")):
             with pytest.raises(BotNotFoundError):
                 svc.restart_bot(bot_id="bot001", user_id="user001")
+
+
+@pytest.mark.parametrize("engine,bot_type", [
+    ("openclaw", "personal"), ("openclaw", "service"),
+    ("openclaw", "custom"), ("claude_code", "personal"),
+    ("aicoding", "service"), ("architect", "personal"),
+    ("moltis", "personal"), ("teclaw", "service"), ("future_engine", "custom"),
+])
+def test_start_registers_all_combinations_despite_disabled_capability_and_drm(engine, bot_type):
+    svc = _make_service()
+    svc._bcn_service = MagicMock()
+    svc._bcn_service.register_provider_bot.return_value = {"bot_uuid": "bcn-1"}
+    svc._drm_reader.read.return_value = "false"
+    svc._template_service = MagicMock()
+    svc._template_service.get_template_config.return_value = {
+        "capabilities": {"bcn": {"join_as_provider": False}}
+    }
+    bot = {**_make_bot(ext={"bcn_registered": True}), "active_engine": engine,
+           "bot_type": bot_type, "template_type": "applicationCoding"}
+    svc._repository.get_by_id_and_owner.return_value = bot
+    timeline = []
+    svc._bcn_service.register_provider_bot.side_effect = lambda **kw: (
+        timeline.append("register") or {"bot_uuid": "bcn-1"}
+    )
+    with patch.object(svc, "_allocate_device_async", side_effect=lambda **kw: timeline.append("allocate")), patch.object(svc, "update_bot_ext"):
+        svc.start_bot(bot_id="bot001", user_id="user001")
+    expected = dict(teamclaw_bot_uuid="bot001", owner_workno="user001", name="TestBot", summary="")
+    if engine == "openclaw" and bot_type == "personal":
+        expected["connection_mode"] = "plugin"
+    svc._bcn_service.register_provider_bot.assert_called_once_with(**expected)
+    assert timeline == ["register", "allocate"]
+
+
+def test_replacement_restart_reaches_real_start_registration():
+    svc = _make_service()
+    bot = {**_make_bot(binding_id=None), "active_engine": "openclaw", "bot_type": "personal"}
+    svc._repository.get_by_id_and_owner.return_value = bot
+    svc._bcn_service = MagicMock()
+    svc._bcn_service.register_provider_bot.return_value = {"bot_uuid": "bcn-1"}
+    svc._drm_reader.read.return_value = "false"
+    with patch.object(svc, "stop_bot", return_value=True), patch.object(svc, "_allocate_device_async") as allocation, patch.object(svc, "update_bot_ext"):
+        result = svc.restart_bot(bot_id="bot001", user_id="user001")
+    assert result["bot_id"] == "bot001"
+    allocation.assert_called_once()
+    svc._bcn_service.register_provider_bot.assert_called_once_with(
+        teamclaw_bot_uuid="bot001", owner_workno="user001", name="TestBot",
+        summary="", connection_mode="plugin",
+    )
