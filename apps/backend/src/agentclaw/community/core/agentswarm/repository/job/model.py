@@ -19,6 +19,8 @@ class AcAgentSwarmJobModel(_AgentSwarmBase, Base):
     lease_expires_at = Column(DateTime, nullable=True)
     attempts = Column(Integer, nullable=False, default=0)
     reclaims = Column(Integer, nullable=False, default=0)
+    progress_marker = Column(
+        BigInteger, nullable=False, default=-1, server_default="-1")
     deadline_at = Column(DateTime, nullable=False)
     last_error = Column(Text, nullable=True)
     cancel_requested = Column(Boolean, nullable=False, default=False, server_default="0")

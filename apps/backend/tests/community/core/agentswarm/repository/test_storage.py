@@ -981,6 +981,13 @@ class TestMandatoryColumns:
             table_name, body = match.group(1), match.group(2)
             cols = set(re.findall(r"^\s+`(\w+)`", body, re.MULTILINE))
             ddl_tables[table_name] = cols
+        # Later dated files evolve a table additively (`ALTER ... ADD COLUMN`)
+        # instead of rewriting its v1 CREATE TABLE — the added columns are
+        # part of the DDL shape too, or every migrated column reads as drift.
+        for match in re.finditer(r"ALTER TABLE `(\w+)`[^;]*", ddl_text):
+            ddl_tables.setdefault(match.group(1), set()).update(
+                re.findall(r"ADD COLUMN `(\w+)`", match.group(0))
+            )
         assert len(ddl_tables) == len(om.ALL_MODELS)
         assert len(ddl_tables) >= 8  # 7 swarm tables + append-only audit
         for model in om.ALL_MODELS:

@@ -33,7 +33,8 @@ class TestBareDefaultsContract:
         parsed = AgentSwarmConfig.from_block({
             "llm": {}, "orchestration": {}, "tenant_limits": {},
             "admission": {}, "drain": {}, "upstream_breaker": {},
-            "retention": {}, "egress": {},
+            "retention": {}, "egress": {}, "maintenance": {},
+            "executor": {},
         })
         assert parsed == AgentSwarmConfig()
 
@@ -200,18 +201,65 @@ class TestDefensiveParsing:
             assert cfg.artifact_store_root == \
                 AgentSwarmConfig().artifact_store_root, root
 
+    def test_maintenance_and_executor_knobs_parse(self):
+        cfg = AgentSwarmConfig.from_block({
+            "maintenance": {"enabled": False,
+                            "reaper_interval_seconds": 120},
+            "executor": {"max_platform_workers": 2},
+        })
+        assert cfg.maintenance.enabled is False
+        assert cfg.maintenance.reaper_interval_seconds == 120
+        assert cfg.executor.max_platform_workers == 2
+
+    def test_zero_and_junk_maintenance_knobs_take_defaults(self):
+        # a zero reaper cadence is a hot loop; zero platform workers would
+        # wedge every platform leg — both downgrade like other budget knobs
+        bare = AgentSwarmConfig()
+        cfg = AgentSwarmConfig.from_block({
+            "maintenance": {"reaper_interval_seconds": 0, "enabled": 7},
+            "executor": {"max_platform_workers": 0},
+        })
+        assert cfg.maintenance.reaper_interval_seconds == \
+            bare.maintenance.reaper_interval_seconds
+        assert cfg.maintenance.enabled is True  # non-bool junk keeps default
+        assert cfg.executor.max_platform_workers == \
+            bare.executor.max_platform_workers
+
+    def test_malformed_maintenance_knobs_take_defaults(self):
+        bare = AgentSwarmConfig()
+        cfg = AgentSwarmConfig.from_block({
+            "maintenance": {"reaper_interval_seconds": "hourly",
+                           "enabled": "nope"},
+            "executor": {"max_platform_workers": "many"},
+        })
+        assert cfg.maintenance.reaper_interval_seconds == \
+            bare.maintenance.reaper_interval_seconds
+        assert cfg.maintenance.enabled is False  # "nope" parses falsy
+        assert cfg.executor.max_platform_workers == \
+            bare.executor.max_platform_workers
+
+    def test_maintenance_enabled_accepts_yaml_truthy_strings(self):
+        assert AgentSwarmConfig.from_block(
+            {"maintenance": {"enabled": "yes"}}).maintenance.enabled is True
+        assert AgentSwarmConfig.from_block(
+            {"maintenance": {"enabled": "off"}}).maintenance.enabled is False
+        assert AgentSwarmConfig.from_block(
+            {"maintenance": {"enabled": None}}).maintenance.enabled is True
+
 
 class TestDiProviderWiring:
 
     def test_provider_parses_the_agentswarm_block(self, monkeypatch):
         import agentclaw.community.di.modules.agentswarm as wiring
 
+        # the llm knobs ride INSIDE the `agentswarm` block (its `llm`
+        # sub-block — the provider does not re-read the harness's
+        # top-level `llm` block)
         monkeypatch.setattr(
             wiring, "_block",
-            lambda name: ({"base_url": "https://api.test", "model": "gpt-x",
-                           "secret_name": "sk"}
-                          if name == "llm" else
-                          {"orchestration": {"max_turns": 7}}
+            lambda name: ({"llm": {"base_url": "https://api.test",
+                                    "model": "gpt-x", "secret_name": "sk"},
+                          "orchestration": {"max_turns": 7}}
                           if name == "agentswarm" else {}),
         )
         cfg = wiring.AgentSwarmModule().provide_config()

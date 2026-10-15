@@ -213,6 +213,57 @@ class AgentSwarmUpstreamBreakerConfig:
 
 
 @dataclass(frozen=True)
+class AgentSwarmMaintenanceConfig:
+    """The ``agentswarm.maintenance`` block — worker-hosted maintenance loops.
+
+    The orphan reaper (async-run-and-resume D-C) is the block's tenant: a
+    jittered sweep at ``reaper_interval_seconds`` cadence that re-enqueues
+    a fresh PENDING job for queue-orphans and forces fenced TIMED_OUT on
+    runs past their wall-clock deadline. ``enabled`` is the single-knob
+    rollback — false stops the loop without touching the worker or the
+    queue itself.
+    """
+
+    enabled: bool = True
+    reaper_interval_seconds: float = 300.0
+
+    @classmethod
+    def from_block(cls, block: dict) -> "AgentSwarmMaintenanceConfig":
+        d = cls()
+        block = block or {}
+        return cls(
+            enabled=_as_bool(block, "enabled", d.enabled),
+            reaper_interval_seconds=_as_float(
+                block, "reaper_interval_seconds",
+                d.reaper_interval_seconds, exclusive=True),
+        )
+
+
+@dataclass(frozen=True)
+class AgentSwarmExecutorConfig:
+    """The ``agentswarm.executor`` block — platform-bridge concurrency.
+
+    ``max_platform_workers`` bounds the module-scoped thread pool that
+    carries the sync ``BotPlatform`` legs (create/status/delete/chat) off
+    the event loop (async-run-and-resume D-B): the pool caps how many
+    platform calls one pod may have in flight, below and independently of
+    ``max_width`` subagent slots.
+    """
+
+    max_platform_workers: int = 4
+
+    @classmethod
+    def from_block(cls, block: dict) -> "AgentSwarmExecutorConfig":
+        d = cls()
+        block = block or {}
+        return cls(
+            max_platform_workers=_as_int(
+                block, "max_platform_workers",
+                d.max_platform_workers, minimum=1),
+        )
+
+
+@dataclass(frozen=True)
 class AgentSwarmEgressConfig:
     allowed_hosts: tuple[str, ...] = ()
     require_https: bool = False
@@ -306,6 +357,12 @@ class AgentSwarmConfig:
     upstream_breaker: AgentSwarmUpstreamBreakerConfig = field(
         default_factory=AgentSwarmUpstreamBreakerConfig
     )
+    maintenance: AgentSwarmMaintenanceConfig = field(
+        default_factory=AgentSwarmMaintenanceConfig
+    )
+    executor: AgentSwarmExecutorConfig = field(
+        default_factory=AgentSwarmExecutorConfig
+    )
     retention: AgentSwarmRetentionConfig = field(
         default_factory=AgentSwarmRetentionConfig
     )
@@ -340,6 +397,10 @@ class AgentSwarmConfig:
             drain=AgentSwarmDrainConfig.from_block(block.get("drain")),
             upstream_breaker=AgentSwarmUpstreamBreakerConfig.from_block(
                 block.get("upstream_breaker")),
+            maintenance=AgentSwarmMaintenanceConfig.from_block(
+                block.get("maintenance")),
+            executor=AgentSwarmExecutorConfig.from_block(
+                block.get("executor")),
             retention=AgentSwarmRetentionConfig.from_block(
                 block.get("retention")),
             egress=AgentSwarmEgressConfig.from_block(block.get("egress")),

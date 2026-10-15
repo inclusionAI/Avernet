@@ -180,6 +180,30 @@ def _ddl_by_table() -> dict[str, str]:
     return tables
 
 
+def _alter_added_columns_by_table() -> dict[str, set[str]]:
+    """Columns later dated files append via ``ALTER ... ADD COLUMN``.
+
+    A post-provision change evolves a table additively instead of rewriting
+    its v1 CREATE TABLE, so a table's DDL column set is its CREATE body
+    *plus* every column a later file ADDs. Parity that reads only CREATE
+    bodies would flag each migrated column as ORM drift the moment the
+    model mirrors it. Comment sections are already stripped, so only the
+    executable statement counts (doctrine prose may show example ALTERs).
+    """
+    added: dict[str, set[str]] = {}
+    for file in _sql_files():
+        text = _strip_comments(file.read_text(encoding="utf-8"))
+        for alter in re.finditer(
+            r"\bALTER\s+TABLE\s+`(\w+)`[^;]*", text, flags=re.IGNORECASE
+        ):
+            columns = re.findall(
+                r"\bADD\s+COLUMN\s+`(\w+)`", alter.group(0), flags=re.IGNORECASE
+            )
+            if columns:
+                added.setdefault(alter.group(1), set()).update(columns)
+    return added
+
+
 def _orm_tables() -> dict[str, type]:
     return {model.__tablename__: model for model in om.ALL_MODELS}
 
@@ -334,14 +358,22 @@ class TestOrmDdlParity:
 
         ORM→DDL keeps fresh provisions insertable; DDL→ORM keeps provisioned
         tables honest — an extra DDL column is dead weight, a missing ORM
-        column means the file drifted and was never regenerated.
+        column means the file drifted and was never regenerated. A table's
+        DDL shape is its CREATE TABLE body plus the columns later dated
+        files ADD (that is how a provisioned schema evolves, D38), so both
+        directions cover migrated columns too.
         """
         ddl = _ddl_by_table()
+        alter_added = _alter_added_columns_by_table()
         for name, model in _orm_tables().items():
             if name in _PENDING_EXEMPT_TABLES:
                 continue
             orm_cols = _orm_columns(model)
-            ddl_cols = _parse_columns(ddl[name]) | {"id", "gmt_create", "gmt_modified"}
+            ddl_cols = (
+                _parse_columns(ddl[name])
+                | alter_added.get(name, set())
+                | {"id", "gmt_create", "gmt_modified"}
+            )
             missing_in_ddl = orm_cols - ddl_cols
             extra_in_ddl = ddl_cols - orm_cols
             assert not missing_in_ddl, (

@@ -104,7 +104,7 @@ boundary). ORM models use SQLAlchemy `Base` from `core/base.py`.
 |---|---|
 | D34 resumable slices | every slice rehydrates from durable rows; any pod resumes |
 | D28 claim fencing | state writes carry `claim_epoch`; a fenced UPDATE matches the job row's current epoch or fails (lost slices exit `retry`) |
-| D40 reclaim breaker | `job.reclaims` counts no-progress reclaims; `reclaims > reclaim_max` → terminal `STUCK` |
+| D40 reclaim breaker | `job.reclaims` counts no-progress reclaims; `reclaims > reclaim_max` → terminal `STUCK`; routed-shard growth resets the count (`progress_marker`, progress-aware) |
 | D24 exactly-once | shard + terminal message persisted before terminal publish; a completed objective never re-runs |
 | D23 fresh context | every attempt constructs a fresh subagent; no cross-attempt leakage |
 | D42 valid output | jsonschema-validated `output_schema`s; invalid results retried, never routed |
@@ -125,7 +125,7 @@ All tables carry `id`, `env`, `tenant`, `is_deleted`, `gmt_create`,
 | `ac_agent_swarm_result_shard` | `shard_id`, `run_id`, `source_agent_id`, `payload`, `artifact_key`, `routed_at` |
 | `ac_agent_swarm_round` | `round_id`, `run_id`, `stage_index`, `orchestrator_steps`, `max_subagent_steps`, `cohort_agent_ids`, `started_at`, `ended_at` |
 | `ac_agent_swarm_guard_event` | `event_id`, `run_id`, `agent_id`, `kind`, `details` |
-| `ac_agent_swarm_job` | `job_id`, `run_id`, `status`, `run_at`, `claimed_by`, `claim_epoch`, `lease_expires_at`, `attempts`, `reclaims`, `deadline_at`, `last_error`, `cancel_requested` |
+| `ac_agent_swarm_job` | `job_id`, `run_id`, `status`, `run_at`, `claimed_by`, `claim_epoch`, `lease_expires_at`, `attempts`, `reclaims`, `progress_marker`, `deadline_at`, `last_error`, `cancel_requested` |
 
 ## D14 POC field mapping
 
@@ -195,6 +195,9 @@ multi-pod deployments).
 | `message_retention_tail` | 50 | rows kept per agent at terminal |
 | `artifact_inline_threshold` | 16384 | spill blobs to artifacts above |
 | `retention.artifact_ttl_days` / `sweep_interval_seconds` | 7/3600 | artifact sweeper |
+| `maintenance.enabled` | true | reaper loop switch (single-knob disable) |
+| `maintenance.reaper_interval_seconds` | 300 | reaper sweep cadence, jittered |
+| `executor.max_platform_workers` | 4 | platform-bridge thread pool size per pod |
 | `enabled` | true | worker startup switch |
 
 ## Operations runbook
@@ -216,6 +219,32 @@ multi-pod deployments).
   `{run_id}/{agent_id}/{result}` conformance, path-escape guard; nothing
   outside `artifact_store_root` is touched. Growth: heavy 100 spills/h ≈
   16.8k files — one hourly O(files) walk is negligible; revisit at ~100×.
+- **Orphan reaper** — the worker hosts a jittered maintenance loop (cadence
+  `maintenance.reaper_interval_seconds`, default 300s) that pages RUNNING
+  runs and probes job claimability. Re-enqueue first: a queue orphan (no job
+  row, or a terminal job under a RUNNING run) gets a fresh PENDING job — the
+  slice rehydrates and converges normally; a fenced TIMED_OUT is reserved
+  for runs past their wall-clock deadline. Every sweep action emits
+  `guard_event(kind=stuck, details="orphan")`. Multi-pod sweeps converge:
+  re-enqueue is guarded by `uk_job_run`, terminal writes are
+  `claim_epoch`-fenced (D28). Disable with `maintenance.enabled=false`.
+- **Deadline enforcement** — `deadline_at` joins the `claim_batch`/
+  `reclaim_batch` predicates: past-deadline jobs stay claimable precisely so
+  the rehydrated slice's wall-clock termination fires TIMED_OUT through the
+  existing fenced write path — a claim never bypasses rehydration. The
+  reaper's force-TIMED_OUT leg backstops runs whose job row is dead.
+- **Progress-aware reclaim breaker** — at claim time the worker mirrors the
+  run's routed-shard count into `job.progress_marker` (baseline sentinel
+  `-1` = unobserved). On reclaim, growth resets `reclaims` and updates the
+  marker — rolling restarts of long bot runs no longer trip D40; an
+  unchanged count increments as today, so genuine crash-idle loops still
+  STUCK. Mixed versions coexist: old replicas ignore the column, new
+  replicas treat `-1`/first observation as baseline, never as progress.
+- **Shared artifact root** — multi-replica deployments must point every
+  backend pod at the same `AGENTSWARM_ARTIFACT_ROOT` volume
+  (`artifact_store_root`): a pod resuming a run dereferences `artifact_key`
+  shards spilled by a dead pod. An unshared root surfaces as
+  missing-artifact reads exactly across pods.
 - **Indexes / perf** — submit-time COUNT scans bind only
   (`tenant`,`status`) today: known gap — counters degrade to fleet-wide
   scans; fix is binding `env` (or status-leading indexes) in the three
@@ -225,6 +254,20 @@ multi-pod deployments).
 - **Drain** — slice-bound writes are short; verify
   `drain.grace_seconds` (30) ≥ a slice's final write batch before shrinking
     pool/recycle values.
+
+## Rollout
+
+- **Migration first** — apply `sql/` files ascending **before** the release
+  that reads them (D38): `progress_marker` is additive and defaulted, so old
+  pods keep inserting the old row shape against the migrated table. Never
+  DROP back; a reversal is itself a new additive migration.
+- **Roll replicas** — restart workers with `drain.grace_seconds` (30)
+  covering a slice's final write batch; an unfinished slice either finishes
+  within the grace or releases via lease expiry and reschedules — the old
+  pod's late writes are rejected by `claim_epoch` fencing.
+- **Rollback** — single knob: `maintenance.enabled=false` stops the reaper
+  loop; reverted code leaves `progress_marker` inert (extra column ignored,
+  never repurposed).
 
 ## Data protection
 
