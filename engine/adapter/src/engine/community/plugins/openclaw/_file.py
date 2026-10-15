@@ -13,7 +13,10 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from engine.community.plugin_api.workspace_root import workspace_root, workspace_root_strict
+from engine.community.plugin_api.workspace_root import (
+    workspace_root,
+    workspace_root_strict,
+)
 from engine.community.plugins.file_count import count_files
 
 log = logging.getLogger("openclaw-port")
@@ -26,6 +29,12 @@ _PATH_PREFIX_PATTERN = re.compile(
 )
 _PATH_PREFIX_NEW = "/home/admin/.openclaw/"
 
+# The simulator backend expands ~/.aidesktop under its admin home. Each Bot
+# still owns one engine home; do not broaden the pre/prod address grammar.
+_SIMULATOR_PATH_PATTERN = re.compile(
+    r"^/home/admin/\.aidesktop/aidesktop_dev/bolt_data/[^/]+/[^/]+/openclaw/"
+)
+
 # 新增 singlebox 专用 regex — 仅在 baas 注入 OPENCLAW_WORKSPACE_DIR 时启用
 _SINGLEBOX_PATH_PATTERN = re.compile(
     r"^/aidesktop/aidesktop_singlebox/bolt_data/[^/]+/[^/]+/openclaw/"
@@ -35,13 +44,15 @@ _SINGLEBOX_PATH_PATTERN = re.compile(
 def _convert_path(target: str) -> Path:
     """Rewrite OSS-view path prefix to engine-view per-bot path.
 
-    Three branches (in order):
+    Address forms (in order):
     1. 线上 ARCA pre/prod (原 regex): 折叠到 hardcode /home/admin/.openclaw/
        — 跟改造前完全一致,线上行为字节级不变。
-    2. singlebox 多 bot: 折叠到 OPENCLAW_WORKSPACE_DIR 的父目录。
+    2. simulator dev: ~/.aidesktop expanded as /home/admin/.aidesktop,
+       folded to the same per-container /home/admin/.openclaw/ root.
+    3. singlebox 多 bot: 折叠到 OPENCLAW_WORKSPACE_DIR 的父目录。
        env 必须由 baas spawn 时注入; regex 匹配但 env 未设 → RuntimeError
        (配置错误,显式失败而非隐式降级)。
-    3. 其他: passthrough(engine-view 直接路径或 desktop bot 路径)。
+    4. 其他: passthrough(engine-view 直接路径或 desktop bot 路径)。
 
     Relocated intact from ``engines/openclaw/file.py:_convert_path``,本次
     扩展加入 singlebox 副分支以支持多 bot 共宿主下的 per-bot 隔离。
@@ -51,12 +62,16 @@ def _convert_path(target: str) -> Path:
 
     # Branch 1: 线上 OSS-view (pre|prod) — 改造前行为保留
     match = _PATH_PREFIX_PATTERN.match(target)
+    branch = "PROD_OSS"
+    if match is None:
+        match = _SIMULATOR_PATH_PATTERN.match(target)
+        branch = "SIMULATOR_DEV"
     if match:
         new_target = _PATH_PREFIX_NEW + target[match.end():]
         result = Path(new_target).expanduser()
         log.info(
-            "[_convert_path] branch=PROD_OSS input=%r → %s",
-            original, result,
+            "[_convert_path] branch=%s input=%r → %s",
+            branch, original, result,
         )
         return result
 
