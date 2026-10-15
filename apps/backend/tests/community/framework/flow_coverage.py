@@ -186,6 +186,12 @@ _SPACES_FAMILY_EXEMPT_REASON = (
 
 SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "aicoding": _EXEMPT_REASON,
+    "acli_clis": (
+        "Installs tools with the internal acli client, which the open-source "
+        "singlebox image does not ship, so a real install cannot run there. "
+        "Covered by service, port, engine runner/router and /openapi/v1 endpoint "
+        "tests; drain when singlebox gains an acli stand-in."
+    ),
     "spaces": _SPACES_FAMILY_EXEMPT_REASON,
     "market_favorites": _SPACES_FAMILY_EXEMPT_REASON,
     "work_orders": _SPACES_FAMILY_EXEMPT_REASON,

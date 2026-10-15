@@ -41,12 +41,12 @@ Backend paths are relative to `apps/backend/`; engine paths to
   - [x] One test per mapping in the plan (`not_running`, `engine_unsupported`, engine error code, `engine_unreachable`, success).
 - **Depends on:** Task 2 (contract)
 
-## Task 5: Backend — shared permission check and `AcliCliService`
+## Task 5: [x] Backend — shared permission check and `AcliCliService`
 - **Goal:** Orchestrate list / search / add / remove with the plan's ordering and rollbacks. "Guard" here means the permission check run before every write — the caller owns the bot, the bot is an active service bot, and its engine can run acli. The CLI identity switch already does this check inline; it moves to `core/caller_identity/guard.py` so both use the same code.
 - **Files:** `src/agentclaw/community/core/caller_identity/guard.py`, `core/caller_identity/service.py` (use the guard), `core/acli_clis/service.py`, `core/acli_clis/errors.py`, `tests/community/core/acli_clis/test_service.py`
 - **Done when:**
-  - [ ] Every spec acceptance criterion under Search, List, Add, Remove and Rollback failures has a passing test.
-  - [ ] `update_cli_call_type` uses the shared guard; its existing tests pass; `service.py` does not grow.
+  - [x] Every spec acceptance criterion under Search, List, Add, Remove and Rollback failures has a passing test.
+  - [x] `update_cli_call_type` uses the shared guard; its existing tests pass; `service.py` does not grow.
 - **Depends on:** Tasks 3, 4
 
 ## Task 6: Backend — public router and registration
