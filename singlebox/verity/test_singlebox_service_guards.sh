@@ -724,7 +724,7 @@ test_backend_start_injects_baas_openapi_key() (
   check_directory_exists() { return 0; }
   backend_ready() { return 0; }
   start_in_detached_session() {
-    printf 'api_key_secret=%s\napi_key_prefix=%s\n' \
+    printf 'authorization=%s\nauthorization_prefix=%s\n' \
       "${api_key_secret:-}" "${api_key_prefix:-}" > "${captured}"
     while [ ! -e "${release}" ]; do
       sleep 0.05
@@ -737,7 +737,7 @@ test_backend_start_injects_baas_openapi_key() (
     sleep 0.05
   done
 
-  expected=$'api_key_secret=test-baas-key\napi_key_prefix=pref0001'
+  expected=$'authorization=test-baas-key\nauthorization_prefix=pref0001'
   assert_eq "$expected" "$(cat "${captured}")" "Backend must receive the BAAS credential"
 
   touch "${release}"

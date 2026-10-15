@@ -83,7 +83,7 @@ def test_runtime_config_logging_redacts_literal_runtime_credentials():
                 "api_key_prefix": "pref0001",
             },
             "bcs_client": {
-                "token_secret": "secret-bcs-token",
+                "token_secret": "test-token",
                 "secret_secret": "secret-bcs-secret",
                 "base_url": "http://127.0.0.1:21000",
             },

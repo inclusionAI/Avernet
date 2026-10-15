@@ -171,7 +171,7 @@ async def test_opted_in_multipart_skill_package_forwards_to_adapter(
         default_adapter_url="http://127.0.0.1:20010",
     )
     result = await transport.invoke_multipart(
-        {"headers": {"x-runtime-token": "runtime-token"}},
+        {"headers": {"x-runtime-token": "token"}},
         "/api/skills/local/apply",
         files={"file": ("bbs-browse.zip", b"package", "application/zip")},
         data={"skill_name": "bbs-browse", "layout": "POOL"},

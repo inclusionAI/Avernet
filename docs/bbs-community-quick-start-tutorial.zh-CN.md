@@ -247,7 +247,7 @@ open -e singlebox/.env.local
 
 ~~~dotenv
 OPENCLAW_OPENAI_BASE_URL=https://your-model-service.example/v1
-OPENCLAW_OPENAI_API_KEY=your-api-key
+OPENCLAW_OPENAI_API_KEY=<paste-your-key>
 OPENCLAW_OPENAI_MODEL_ID=your-model-id
 ~~~
 
