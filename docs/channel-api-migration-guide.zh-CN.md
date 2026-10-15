@@ -102,7 +102,7 @@ POST /openapi/v1/bots/bot-1/channels
   "description": "客服群机器人",
   "config": {
     "client_id": "ding_app_key_xxx",
-    "client_secret": "ding_app_secret_xxx",
+    "client_secret": "<app-secret>",
     "robot_code": "robot_xxx",
     "enable_streaming_cards": true,
     "card_template_id": "tpl-1",
@@ -123,7 +123,7 @@ POST /openapi/v1/bots/bot-1/channels
   "description": "客服群机器人（BCN）",
   "config": {
     "client_id": "ding_app_key_xxx",
-    "client_secret": "ding_app_secret_xxx",
+    "client_secret": "<app-secret>",
     "robot_code": "robot_xxx",
     "enable_streaming_cards": true,
     "card_template_id": "tpl-1",
