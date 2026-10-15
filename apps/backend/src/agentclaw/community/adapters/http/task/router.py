@@ -35,6 +35,7 @@ from agentclaw.community.adapters.http.task.bbs_routes import router as bbs_api_
 from agentclaw.community.adapters.http.task.intake_routes import router as intake_api_router
 from agentclaw.community.adapters.http.task.callback_routes import (
     _dispatch,
+    persist_relay_report_audit,
     task_callback_router as task_callback_router,
 )
 from agentclaw.community.core.task.task_runner.client.callback_data_enricher import CallbackDataEnricher
@@ -399,15 +400,32 @@ async def report_callback(
                     for error in exc.errors()
                 ],
             )
+            # 校验失败也留审计底(best-effort,吞异常):422 的上报原文此前零留底。
+            await persist_relay_report_audit(
+                svc, raw=raw_event,
+                error=f"invalid relay report payload: {exc.error_count()} validation errors",
+            )
             return error_response(422, "Invalid relay report request", request)
-        graph = svc.get_task_dashboard(command.task_id)
-        if not graph.is_relay:
-            raise TaskStateError("relay report requires a relay task")
-        node = next((item for item in graph.tasks if item.node_id == command.node_id), None)
-        if node is None:
-            raise TaskStateError("relay report node does not exist")
-        require_relay_attempt(node, command.relay_token)
-        result = await svc.report(command)
+        try:
+            graph = svc.get_task_dashboard(command.task_id)
+            if not graph.is_relay:
+                raise TaskStateError("relay report requires a relay task")
+            node = next((item for item in graph.tasks if item.node_id == command.node_id), None)
+            if node is None:
+                raise TaskStateError("relay report node does not exist")
+            require_relay_attempt(node, command.relay_token)
+            result = await svc.report(command)
+        except Exception as relay_exc:
+            # 被拒上报(非 relay 图/节点不存在/token 过期/业务冲突)也落审计底;
+            # best-effort 吞异常,原异常照原路径外抛(不被掩盖、不被替换)。
+            await persist_relay_report_audit(
+                svc, raw=raw_event, command=command,
+                error=f"{type(relay_exc).__name__}: {relay_exc}",
+            )
+            raise
+        await persist_relay_report_audit(
+            svc, raw=raw_event, command=command, result=result
+        )
         return envelope(report_result_to_dto(result).model_dump(), request)
     return await _dispatch(request, "result", TaskCallbackRequest, svc, auth, registry, enricher)
 

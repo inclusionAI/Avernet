@@ -8,12 +8,16 @@ from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
     BotCandidate,
     NodeAction,
+    NodeActionEvent,
     Status,
     TaskCallbackData,
     TaskNodePatch,
     TaskReportCommand,
     TaskReportResult,
     task_spec_instruction,
+)
+from agentclaw.community.core.task.task_context.task_trajectory.relay_action_projection import (
+    relay_action_event_fields,
 )
 from agentclaw.community.core.task.task_runner.client.relay_prompt import (
     format_relay_execution_instruction,
@@ -51,8 +55,36 @@ class TaskServiceRelayMixin:
         )
 
     async def report(self, command: TaskReportCommand) -> TaskReportResult:
-        """Atomically apply EXECUTION_RESULT or PLAN_RESULT to the task graph."""
-        return self._graph.apply_relay_report(command)
+        """Atomically apply EXECUTION_RESULT or PLAN_RESULT to the task graph,
+        then mirror the recorded action events into the trajectory table.
+
+        写时发射:``apply_relay_report`` 返回本次上报记入 action_log 的动作事件,
+        逐条经 ``emit_trajectory_event`` 直插 ``task_trajectory_events``(观测旁路,
+        决策 #14 fire-and-forget 吞异常,失败不影响上报结果)。读时投影
+        (``merge_relay_action_log``)按签名去重后成为存量/旁路兜底,时间线不双份。
+        幂等重放(action_events 为 None)不重复发射。"""
+        result, action_events, _ = self._graph.apply_relay_report(command)
+        if action_events:
+            self._emit_relay_report_trajectory(command, action_events)
+        return result
+
+    def _emit_relay_report_trajectory(
+        self, command: TaskReportCommand, action_events: list[NodeActionEvent]
+    ) -> None:
+        """把上报动作事件转为 TrajectoryEvent 行发射(task_context_service 未接线 no-op)。"""
+        if self._task_context_service is None:
+            return
+        for event in action_events:
+            fields = relay_action_event_fields(
+                event, relay_event_id=command.event_id
+            )
+            node_id = fields.pop("node_id")
+            self._task_context_service.emit_trajectory_event(
+                command.task_id,
+                node_id,
+                event.action.value,
+                **fields,
+            )
 
     def _report_fact(self, report_type: str, payload: dict[str, Any]) -> Any:
         """Preserve the GraphService fact seam used by centralized BBS too."""

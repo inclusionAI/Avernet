@@ -412,7 +412,10 @@ class TestRouter:
         response = client.post("/api/v1/collaboration/tasks/callback/report", json=body)
         assert response.status_code == 200, response.text
         assert response.json()["data"]["status"] == "APPLIED"
-        assert svc.callback.calls[-1][1].event_id == "event-1"
+        report_calls = [
+            item for item in svc.callback.calls if item[0] == "new_relay_report"
+        ]
+        assert report_calls[-1][1].event_id == "event-1"
 
         rejected = client.post(
             "/api/v1/collaboration/tasks/callback/report",
@@ -453,7 +456,128 @@ class TestRouter:
             "data": None,
             "request_id": "",
         }
-        assert svc.callback.calls == []
+        # 校验失败也落 task_callback 审计:best-effort 字段 + 脱敏原文 + exec_error
+        ingests = [c for c in svc.callback.calls if c[0] == "ingest"]
+        assert len(ingests) == 1, "422 校验失败仍应落一条 relay 审计行"
+        payload = ingests[0][1].data
+        assert payload["result"]["success"] is False
+        assert "relay_token" not in str(payload["_raw_callback_body"].get("relay_token")) \
+            or payload["_raw_callback_body"]["relay_token"] == "***"
+        assert payload["result"]["exec_error"]
+
+    def test_new_relay_report_persists_callback_audit_on_success(self, task_client):
+        """成功上报:落一条 task_callback 审计行(invoker=relay,run_id=event_id+node_id
+        为幂等 upsert 键,orig 原文脱敏 relay_token,result.success=True)。"""
+        client, svc = task_client
+        svc.set_execution_config(
+            {"orchestration_mode": "relay", "intake_session_id": "tis-1"}
+        )
+        svc.set_node_status("t1", "t1", Status.RUNNING)
+        response = client.post(
+            "/api/v1/collaboration/tasks/callback/report",
+            json={
+                "task_id": "t1",
+                "node_id": "t1",
+                "event_type": "EXECUTION_RESULT",
+                "event_id": "event-1",
+                "relay_token": "run-1",
+                "event": {"execution_decision": "DECLINED"},
+            },
+        )
+        assert response.status_code == 200, response.text
+
+        ingests = [c for c in svc.callback.calls if c[0] == "ingest"]
+        assert len(ingests) == 1, "成功上报应恰好落一条审计行"
+        payload = ingests[0][1].data
+        # 幂等身份:(run_id=event_id, node_id) —— 经 loop_task_id 表达
+        assert payload["loop_task_id"] == "event-1::t1"
+        assert payload["node_id"] == "t1"
+        assert payload["event_id"] == "event-1"
+        assert payload["workflow_source"] == "relay"
+        assert payload["status"] == "EXECUTION_RESULT"
+        assert payload["result"]["success"] is True
+        assert payload["result"]["exec_error"] is None
+        # 原始报文留底且 token 脱敏
+        raw = payload["_raw_callback_body"]
+        assert raw["event_id"] == "event-1"
+        assert raw["relay_token"] == "***"
+        assert payload["result"]["_ext_info"]["task_id"] == "t1"
+
+    def test_new_relay_report_persists_callback_audit_on_rejection(
+        self, task_client
+    ):
+        """被拒上报(token 过期):审计照落——success=False + exec_error 携带拒绝原因,
+        原异常仍按原路径抛出(响应非 200)。"""
+        client, svc = task_client
+        svc.set_execution_config(
+            {"orchestration_mode": "relay", "intake_session_id": "tis-1"}
+        )
+        svc.set_node_status("t1", "t1", Status.RUNNING)
+        response = client.post(
+            "/api/v1/collaboration/tasks/callback/report",
+            json={
+                "task_id": "t1",
+                "node_id": "t1",
+                "event_type": "EXECUTION_RESULT",
+                "event_id": "event-stale",
+                "relay_token": "stale-run",
+                "event": {"execution_decision": "DECLINED"},
+            },
+        )
+        assert response.status_code != 200, "token 过期应被拒(原异常外抛)"
+
+        ingests = [c for c in svc.callback.calls if c[0] == "ingest"]
+        assert len(ingests) == 1, "被拒上报也应落审计行"
+        payload = ingests[0][1].data
+        assert payload["loop_task_id"] == "event-stale::t1"
+        assert payload["result"]["success"] is False
+        assert "expired" in str(payload["result"]["exec_error"])
+        assert payload["_raw_callback_body"]["relay_token"] == "***"
+
+    def test_relay_report_audit_payload_to_callback_record(self):
+        """payload → ``_to_callback_record`` 落库形态:run_id=event_id/node_id 正确、
+        invoker=relay、orig 为脱敏原文 JSON、endpoint 不经 HTTP 直接验证翻译层。"""
+        from agentclaw.community.adapters.http.task.callback_routes import (
+            relay_report_audit_payload,
+        )
+        from agentclaw.community.adapters.http.task.schemas_relay_report import (
+            TaskReportCommandDTO,
+        )
+        from agentclaw.community.core.task.task_runner.callback_adapter import (
+            _to_callback_record,
+        )
+        import json as _json
+
+        raw = {
+            "task_id": "t1",
+            "node_id": "n1",
+            "event_type": "EXECUTION_RESULT",
+            "event_id": "ev-9",
+            "relay_token": "secret-token",
+            "event": {"execution_decision": "DECLINED"},
+        }
+        command = TaskReportCommandDTO.model_validate(raw).to_domain()
+        payload = relay_report_audit_payload(
+            raw, command=command, result=TaskReportResult(TaskReportStatus.APPLIED)
+        )
+        record = _to_callback_record(payload, event_id="ev-9", process_status=None)
+
+        assert record.run_id == "ev-9"
+        assert record.node_id == "n1"
+        assert record.invoker == "relay"
+        assert record.status == "EXECUTION_RESULT"
+        assert record.result_success is True
+        assert record.event_id == "ev-9"
+        assert record.extend_props == {
+            "relay_report": True,
+            "task_id": "t1",
+            "event_type": "EXECUTION_RESULT",
+            "execution_decision": "DECLINED",
+        }
+        # orig = 脱敏原文(secret token 不进库)
+        orig = _json.loads(record.orig_callback_data)
+        assert orig["relay_token"] == "***"
+        assert orig["event_id"] == "ev-9"
 
     def test_intake_uses_authenticated_owner_and_server_session_header(
         self, human_task_client

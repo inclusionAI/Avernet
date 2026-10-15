@@ -209,6 +209,9 @@ def apply_relay_report(
             nonlocal next_seq
             event_payload = _json_value(dict(payload))
             event_payload["__node_id"] = command.node_id
+            # 执行人辅助键:写时发射的表行经 ext_info.holder_id 白名单投影出「执行人」,
+            # 与读时投影路径(node.run_info.assignee)同视觉。纯可观测,不入状态机。
+            event_payload["__holder_id"] = node.run_info.assignee
             if trace_payload is not None and not action_events:
                 event_payload["trace"] = trace_payload
             event = NodeActionEvent(

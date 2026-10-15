@@ -29,7 +29,12 @@ from agentclaw.community.adapters.http.task.translator import (
 from agentclaw.community.core.task.task_runner.client.callback_data_enricher import CallbackDataEnricher
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.domain.errors import TaskStateError
-from agentclaw.community.core.task.domain.models import Status
+from agentclaw.community.core.task.domain.models import (
+    Status,
+    TaskCallbackData,
+    TaskReportCommand,
+    TaskReportResult,
+)
 
 from agentclaw.community.core.task.task_runner.callback_correlation import CallbackCorrelationRegistry
 from agentclaw.community.di import Injected
@@ -69,6 +74,102 @@ def _session_id_of(raw_obj: Any) -> str:
         if isinstance(flow_runs, dict) and flow_runs.get("origin_session_id"):
             return str(flow_runs["origin_session_id"])
     return ""
+
+
+# ===== relay 统一上报审计留底(task_callback 原文落库;成功/失败皆落) =====
+
+
+def _redact_relay_token(raw: Any) -> dict[str, Any]:
+    """relay 原始报文的落库形态:浅拷贝并把 ``relay_token`` 值替换为掩码。"""
+    redacted = dict(raw) if isinstance(raw, dict) else {}
+    if "relay_token" in redacted:
+        redacted["relay_token"] = "***"
+    return redacted
+
+
+def relay_report_audit_payload(
+    raw: Any,
+    *,
+    command: TaskReportCommand | None = None,
+    result: TaskReportResult | None = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    """relay 上报 → ``task_callback`` 审计行 payload(对齐 ``_to_callback_record`` 消费约定)。
+
+    * 身份/幂等:``loop_task_id = "{event_id}::{node_id}"`` → ``(run_id=event_id, node_id)``
+      是表的唯一 upsert 键——同一 event 重放覆盖同一行,不同 event 各自成行。
+    * ``invoker="relay"``(``workflow_source``);``status``=event_type。
+    * 原文留底:``_raw_callback_body`` = relay_token 掩码后的请求体。
+    * 成败:``result.success`` + ``exec_error``(失败原因);```result._ext_info``` 携带
+      task_id/event_type/execution_decision 等路由外补充字段。
+    * ``command`` 缺席(422 校验失败)时 best-effort 从 raw 提取三键。
+    """
+    task_id = str((command.task_id if command else _pick(raw, "task_id")) or "")
+    node_id = str((command.node_id if command else _pick(raw, "node_id")) or "")
+    event_id = str((command.event_id if command else _pick(raw, "event_id")) or "")
+    if command is not None:
+        event_type = str(command.event_type.value)
+    else:
+        event_type = str(_pick(raw, "event_type") or "")
+    result_data: dict[str, Any] = {}
+    if result is not None:
+        result_data = {
+            "status": result.status.value,
+            "target_node_id": result.target_node_id,
+            "task_completed": result.task_completed,
+            "task_hung": result.task_hung,
+            "bbs_publish_pending": result.bbs_publish_pending,
+        }
+    decision = getattr(command.event, "execution_decision", None) if command else None
+    ext_info: dict[str, Any] = {
+        "relay_report": True,
+        "task_id": task_id,
+        "event_type": event_type,
+    }
+    if decision:
+        ext_info["execution_decision"] = str(decision)
+    return {
+        "loop_task_id": f"{event_id}::{node_id}",
+        "node_id": node_id,
+        "event_id": event_id,
+        "workflow_source": "relay",
+        "workflow_instance_id": "",
+        "status": event_type,
+        "_raw_callback_body": _redact_relay_token(raw),
+        "result": {
+            "success": error is None,
+            "data": result_data,
+            "exec_error": error,
+            "_ext_info": ext_info,
+        },
+    }
+
+
+def _pick(raw: Any, key: str) -> Any:
+    return raw.get(key) if isinstance(raw, dict) else None
+
+
+async def persist_relay_report_audit(
+    svc: TaskServiceProtocol,
+    *,
+    raw: Any,
+    command: TaskReportCommand | None = None,
+    result: TaskReportResult | None = None,
+    error: str | None = None,
+) -> None:
+    """relay 上报审计落库,``svc.callback.ingest`` 通道;best-effort:任何失败仅 WARNING,
+    绝不改变上报本身的结果/异常(``ingest`` 自身为纯落库旁路,同样吞异常)。"""
+    try:
+        payload = relay_report_audit_payload(
+            raw, command=command, result=result, error=error
+        )
+        await svc.callback.ingest(TaskCallbackData(data=payload))
+    except Exception as exc:  # noqa: BLE001  观测旁路,吞而不抛
+        logger.warning(
+            "[task_callback] relay report 审计落库失败 node=%s: %s",
+            getattr(command, "node_id", None) if command else None,
+            exc,
+        )
 
 
 async def _dispatch(

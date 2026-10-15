@@ -66,6 +66,12 @@ class TrajectoryEventDTO(BaseModel):
                     "actual_run_mode 优先,缺失回退 run_mode;仅该 node 在 timeline "
                     "中的最后一条事件携带,无模态为 None)",
     )
+    trace_steps: list[dict[str, Any]] | None = Field(
+        None,
+        description="Bot 上报的执行检查点(step/status/detail 三槽;读时自本事件 "
+                    "ext_info.trace 投影——relay 上报写时发射已随 ext_info 落表;"
+                    "无 trace 素材为 None)",
+    )
 
 
 class TaskTrajectoryDTO(BaseModel):
@@ -124,6 +130,7 @@ def trajectory_to_dto(trajectory: "TaskTrajectory") -> TaskTrajectoryDTO:
                 session_msgs=ev.session_msgs,
                 search_probe=ev.search_probe,
                 actual_run_mode=ev.actual_run_mode,
+                trace_steps=ev.trace_steps,
             )
             for ev in trajectory.timeline
         ],
