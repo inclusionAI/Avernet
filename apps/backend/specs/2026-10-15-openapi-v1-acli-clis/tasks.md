@@ -34,11 +34,11 @@ Backend paths are relative to `apps/backend/`; engine paths to
   - [x] `reconcile` behaviour and log lines unchanged (existing tests pass).
 - **Depends on:** —
 
-## Task 4: Backend — engine port
+## Task 4: [x] Backend — engine port
 - **Goal:** Call the engine endpoints and map every response.
 - **Files:** `src/agentclaw/community/core/acli_clis/__init__.py`, `core/acli_clis/port.py`, `core/acli_clis/arca_port.py`, `tests/community/core/acli_clis/test_arca_port.py`
 - **Done when:**
-  - [ ] One test per mapping in the plan (`not_running`, `engine_unsupported`, engine error code, `engine_unreachable`, success).
+  - [x] One test per mapping in the plan (`not_running`, `engine_unsupported`, engine error code, `engine_unreachable`, success).
 - **Depends on:** Task 2 (contract)
 
 ## Task 5: Backend — shared permission check and `AcliCliService`
