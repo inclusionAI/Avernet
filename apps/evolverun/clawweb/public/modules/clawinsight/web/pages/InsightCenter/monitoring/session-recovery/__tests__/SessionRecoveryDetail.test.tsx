@@ -167,3 +167,21 @@ it('rejects non-task responses without crashing and retains the last successful 
   expect(await screen.findByRole('alert')).toHaveTextContent('保留上次成功读取的数据');
   expect(screen.getByRole('button', { name: '确认完整方案' })).toBeVisible();
 });
+
+it('renders an actionable Owner request with a document link and collapses the technical basis', async () => {
+  const user = userEvent.setup();
+  const request = '**请为 Bot 申请目标文档的只读权限**\n\n- 目标文档：[打开目标文档](https://docs.example.com/team/book/doc)\n- 联系人：文档所有者 `document-owner`\n- 授权账号：`bot-reader`（Bot 使用的账号）\n\n完成后，勾选配合事项并确认方案。';
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, plan: { ...task.plan, owner_cooperation: [{ request, basis: '权限检查确认当前账号没有读取权限。' }] } } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  expect(await screen.findByText('请为 Bot 申请目标文档的只读权限')).toBeVisible();
+  const link = screen.getByRole('link', { name: '打开目标文档' });
+  expect(link).toHaveAttribute('href', 'https://docs.example.com/team/book/doc');
+  expect(link).toHaveAttribute('target', '_blank');
+  expect(screen.getByText('bot-reader')).toBeVisible();
+  expect(screen.getByText('权限检查确认当前账号没有读取权限。')).not.toBeVisible();
+  await user.click(screen.getByText('为什么需要你配合'));
+  expect(screen.getByText('权限检查确认当前账号没有读取权限。')).toBeVisible();
+  expect(screen.getByRole('button', { name: '确认完整方案' })).toBeDisabled();
+  await user.click(screen.getByLabelText('我已处理方案中的配合事项'));
+  expect(screen.getByRole('button', { name: '确认完整方案' })).toBeEnabled();
+});

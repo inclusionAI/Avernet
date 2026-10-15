@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { monitoringErrorText } from '../../../../api/monitoring';
 import { sessionRecoveryApi } from '../../../../api/session-recovery';
 import type { SessionRecoveryTask } from '../../../../types/session-recovery';
@@ -316,7 +318,10 @@ function RecoveryPlan({ task, busy, ownerFeedback, cooperationDone, onFeedback, 
     {(plan.owner_cooperation.length > 0 || task.status === 'waiting_owner') && <section className={`sr-owner-action ${task.status === 'waiting_owner' ? 'pending' : ''}`}>
     {plan.owner_cooperation.length > 0 && <div className="sr-owner-box">
       <h3><MonitoringIcon name="user" />需要 Owner 配合</h3>
-      {plan.owner_cooperation.map((item, index) => <div key={index} className="sr-owner-item"><p>{item.request}</p><span>依据：{item.basis}</span></div>)}
+      {plan.owner_cooperation.map((item, index) => <div key={index} className="sr-owner-item">
+        <div className="sr-owner-request"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ node, ...props }) => { void node; return <a {...props} target="_blank" rel="noreferrer" />; } }}>{item.request}</ReactMarkdown></div>
+        <details className="sr-disclosure"><summary>为什么需要你配合</summary><p className="sr-long-text">{item.basis}</p></details>
+      </div>)}
     </div>}
     {task.status === 'waiting_owner' && <div className="sr-decision-panel">
       <h3>确认方案</h3>

@@ -504,8 +504,17 @@
   margin-top:14px;
 }
 .sr-owner-item+.sr-owner-item { padding-top:12px; border-top:1px solid #f1dfb9 }
-.sr-owner-item p { margin:0; color:#4d3f23; font-size:14px; font-weight:550; line-height:1.8 }
-.sr-owner-item span { display:block; margin-top:4px; color:#8a6d38; font-size:12px; line-height:1.7 }
+.sr-owner-request { color:#4d3f23; font-size:14px; line-height:1.8; overflow-wrap:anywhere }
+.sr-owner-request p { margin:10px 0 0; font-weight:400 }
+.sr-owner-request p:first-child { margin-top:0 }
+.sr-owner-request p:first-child strong { font-size:16px; font-weight:650 }
+.sr-owner-request ul,.sr-owner-request ol { margin:12px 0; padding-left:22px; list-style:revert }
+.sr-owner-request li { margin-top:6px }
+.session-recovery-detail .sr-owner-request a { color:var(--blue); font-weight:600; text-decoration:underline; text-underline-offset:3px }
+.session-recovery-detail .sr-owner-request a:hover { color:#265bc6 }
+.sr-owner-request code { border-radius:4px; background:#f1e9da; padding:2px 4px; font:12px/1.6 "SFMono-Regular",Consolas,monospace }
+.sr-owner-item>.sr-disclosure { margin-top:14px }
+.sr-owner-item>.sr-disclosure .sr-long-text { margin-top:10px; color:#8a6d38; font-size:12px }
 
 .sr-decision-panel {
   margin-top:16px;
