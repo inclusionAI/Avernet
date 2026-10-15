@@ -307,18 +307,30 @@ class AsyncChatClient:
 
     @property
     def has_active_sessions(self) -> bool:
-        """是否有正在等待回复的活跃会话（供连接池过期清理使用）。"""
-        return len(self._active_sessions) > 0
+        """是否有活跃占据（供连接池过期清理/排空判断）。
+
+        R6-1：除等待中的编排会话外，A2A 后台 body task（wait_result=
+        False 的非等待发送）也算——sweep 不得把仍在服务真实 run 的连
+        接当空闲收口。
+        """
+        if len(self._active_sessions) > 0:
+            return True
+        return bool(getattr(self._client, "has_running_runs", False))
 
     def tracks_session(self, session_key: str) -> bool:
-        """该连接是否持有此 session 的在途编排状态——R4-1 归属查询。
+        """该连接是否持有此 session 的在途运行——R4-1/R6-1 归属查询。
 
-        A2A 的 CancelTask 依赖建连实例内记录的 engine_task_id
-        （_runs/_session_runs），取消必须路由到持有者连接；归属判定放在
-        编排层（_sessions 由 send/inject 注册、收口清除），与底层
-        传输无关——同一 session 的 send 与 abort 一致落在 holder 上。
+        双信号：①编排层 _sessions（调用方**等待期间**——等待中取消
+        落在等待者上永远正确）；②底层 A2A run 在途（**run 执行期**——
+        wait_result=False 的 ACK 返回后 _sessions 即被 pop，但 body
+        task 仍在消费流，CancelTask 的 engine_task_id 记录还活着）。
+        只看①会把"非等待发送后取消"退回普通负载分配，命中无记录的
+        连接 → RUN_NOT_TRACKED 永不发 CancelTask。
         """
-        return session_key in self._sessions
+        if session_key in self._sessions:
+            return True
+        inner_tracks = getattr(self._client, "tracks_session", None)
+        return bool(inner_tracks and inner_tracks(session_key))
 
     @property
     def active_session_count(self) -> int:

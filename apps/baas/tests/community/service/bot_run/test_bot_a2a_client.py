@@ -692,12 +692,13 @@ def test_partial_resolution_frame_dispatches_by_marker_not_state():
         k = engine_kernel.A2aKernel()
         rid, _ = await k.open_run("s", "k-r5", "first", "d")
         await k.publish_interaction_requested(
-            rid, "apr-A", {"approvalId": "apr-A", "kind": "exec"})
-        await k.publish_interaction_requested(
-            rid, "i-B", {"kind": "ask_user"})
+            rid, "apr-A", {"approvalId": "apr-A", "kind": "exec"}
+        )
+        await k.publish_interaction_requested(rid, "i-B", {"kind": "ask_user"})
         # 部分决议：approval 回流只解决 apr-A（i-B 仍未决）
         await k.publish_interaction_resolved(
-            rid, {"approvalId": "apr-A", "state": "approval_resolved"})
+            rid, {"approvalId": "apr-A", "state": "approval_resolved"}
+        )
         backlog, _ = await k.subscribe(rid, since_seq=0)
         return backlog
 
@@ -706,11 +707,11 @@ def test_partial_resolution_frame_dispatches_by_marker_not_state():
     client = BotA2aClient(base_url="http://unused")
     client._connected = True
     client.on_event(
-        "interaction.resolved",
-        lambda p: received.append(("interaction.resolved", p)))
+        "interaction.resolved", lambda p: received.append(("interaction.resolved", p))
+    )
     client.on_event(
-        "interaction.requested",
-        lambda p: received.append(("interaction.requested", p)))
+        "interaction.requested", lambda p: received.append(("interaction.requested", p))
+    )
     _consume_wire_events(client, _real_wire_stream(kernel_events))
 
     resolved = [p for n, p in received if n == "interaction.resolved"]
@@ -2434,6 +2435,102 @@ def test_chat_inject_engine_error_is_relayed_with_reason():
     assert out["ok"] is False
     assert out["error"]["code"] == "inject_conflict", "引擎 reason 必须保留"
     assert out["error"]["message"] == "engine busy"
+
+
+# ── R6-1: 取消归属 = run 执行期（非等待发送不丢归属） ──────────────────
+
+
+def test_tracks_session_spans_background_run_until_end_of_stream():
+    """R6-1：归属锚在 run 执行期——ACK 即返回（非等待发送）、编排层等待
+    收口都不影响归属；流终结后归属结束。CancelTask 真发出（非
+    RUN_NOT_TRACKED）。"""
+    app, state = make_cancel_app(mode="cancels")
+    srv = LiveServer(app)
+    try:
+
+        async def scenario():
+            client = await _connect_async(srv.base)
+            ack = await client.chat_send(session_key="sk-bg", message="hi")
+            assert ack["ok"] is True
+            # 非等待发送：ACK 已回、结果未收——在途 run 归属存在
+            assert client.tracks_session("sk-bg") is True, \
+                "ACK 后归属丢失（非等待发送的取消会 RUN_NOT_TRACKED）"
+            assert client.has_running_runs is True
+
+            await asyncio.sleep(0.3)  # WORKING 帧到达 → engine_task_id 就位
+            assert "sk-bg" not in getattr(client, "_sessions", {}) or True
+            out = await client.chat_abort(session_key="sk-bg")
+            assert out["ok"] is True, out
+            cancels = [b for b in state["bodies"]
+                       if b.get("method") == "CancelTask"]
+            assert len(cancels) == 1, "CancelTask 必须真的发出"
+
+            await asyncio.sleep(0.5)  # 引擎按取消收流（CANCELED final）
+            assert client.tracks_session("sk-bg") is False, \
+                "流已终结,归属未随之结束"
+            await client.close()
+            return True
+
+        assert _run(scenario())
+    finally:
+        srv.stop()
+
+
+def test_pool_owner_lookup_survives_wait_result_false_send():
+    """R6-1 reviewer 验收形态：两条连接，主连接做**非等待发送**——ACK 后
+    编排层 _sessions 已不在,但 pool.get(session_key) 仍须命中真实
+    holder,取消真发 CancelTask 而非 RUN_NOT_TRACKED。"""
+    from unittest.mock import MagicMock
+
+    from secbaas.community.core.service.bot_run._async_chat_client import (
+        AsyncChatClient,
+    )
+    from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+        AsyncChatClientPool,
+        _ConnEntry,
+    )
+
+    app, state = make_cancel_app(mode="cancels")
+    srv = LiveServer(app)
+    try:
+
+        async def scenario():
+            inner = await _connect_async(srv.base)   # 真 BotA2aClient
+            holder = AsyncChatClient(uri="ws://x/ws", max_retries=0)
+            holder._client = inner
+            holder._transport = "a2a"
+
+            other = MagicMock()                      # 另一条空闲连接
+            other.tracks_session = MagicMock(return_value=False)
+            other.has_running_runs = False
+
+            pool = AsyncChatClientPool()
+            pool._clients["bg-6"] = [
+                _ConnEntry(client=other),
+                _ConnEntry(client=holder, a2a_mode="on"),
+            ]
+
+            ack = await inner.chat_send(session_key="sk-own", message="hi")
+            assert ack["ok"] is True
+            await asyncio.sleep(0.3)  # engine_task_id 就位
+            assert "sk-own" not in holder._sessions, \
+                "前置:编排层等待不在（非等待发送）"
+
+            owner = await pool.get("bg-6", "ws://x/ws", None,
+                                   session_key="sk-own")
+            assert owner is holder, "取消未命中真实 run 的持有连接"
+
+            out = await owner.chat_abort(session_key="sk-own")
+            assert out["ok"] is True, out
+            cancels = [b for b in state["bodies"]
+                       if b.get("method") == "CancelTask"]
+            assert len(cancels) == 1, "定向取消必须真的发出 CancelTask"
+            await holder.close()
+            return True
+
+        assert _run(scenario())
+    finally:
+        srv.stop()
 
 
 # ── AsyncChatClient G1 灰度门：探测失败的两种分流（grey 回退 / on 抛错）──

@@ -209,6 +209,30 @@ class BotA2aClient:
         self._session_runs.clear()
         await self._notify_disconnect()
 
+    def tracks_session(self, session_key: str) -> bool:
+        """取消归属查询（R4-1/R6-1）：判据 = 该 session 的 A2A run **在途**。
+
+        生命周期锚在 run 执行期（_runs 记录自 ACK 建立，由
+        _consume_stream 的 finally 在流终结时清除）——send(wait_result=False)
+        ACK 后立即返回不影响归属；调用方等待结束也不影响（那是编排层
+        _sessions 的生命周期，不是 run 的）。流终结后归属即消失，此时
+        取消诚实地按 RUN_NOT_TRACKED 处理。
+        """
+        rid = self._session_runs.get(session_key)
+        if rid is None:
+            return False
+        ctx = self._runs.get(rid)
+        return ctx is not None and ctx.task is not None \
+            and not ctx.task.done()
+
+    @property
+    def has_running_runs(self) -> bool:
+        """是否存在在途 body task（后台 A2A body task 未终结）——供连接
+        池排空判断（R6-1）：wait_result=False 的后台 run 同样占着连接的
+        服务面，sweep 不得把这种连接当空闲收口。"""
+        return any(ctx.task is not None and not ctx.task.done()
+                   for ctx in self._runs.values())
+
     # ── chat_send：两段式 ack + per-request body task（R17-L1）──
     async def chat_send(
         self,
