@@ -13,6 +13,7 @@ authenticate a human session (``require_authenticated_user``). Live calls need
 BCS-side service-token support; until then this client is exercised through
 fakes/mocked transport only.
 """
+
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
@@ -41,9 +42,7 @@ class BcsChannelBindingClientProtocol(Protocol):
         """
         ...
 
-    async def push_config(
-        self, channel: ChannelRecord, *, binding_id: str
-    ) -> None:
+    async def push_config(self, channel: ChannelRecord, *, binding_id: str) -> None:
         """Full-replace the binding config (agentclaw is the source of truth)."""
         ...
 
@@ -65,7 +64,13 @@ def _binding_payload(channel: ChannelRecord) -> dict[str, Any]:
         send_mode = {"mode": "normal", "message_type": "markdown"}
     return {
         "channel_type": "dingtalk",
-        "account_ref": config.get("client_id") or "",
+        # account_ref 对齐老链路的键（robot_code）：BCS 的唯一性是全局
+        # ``find_active_by_account(channel_type, account_ref)``，与 target 无关。
+        # 用 client_id 会与存量绑定错开（老键=robot_code），不撞 409、静默
+        # 挂成双绑定且消息仍路由到老配置（假生效）。对齐老键让存量冲突显性
+        # 409，可由 _find_binding_id 接管；robot_code 为空的历史行回退
+        # client_id 兜底（新建立的 bcn 行 robot_code 一律必填）。
+        "account_ref": config.get("robot_code") or config.get("client_id") or "",
         "target": {"bot": {"bot_id": channel.bind_bot_id}},
         "group_chat_scope": config.get("group_chat_scope", "per_sender"),
         "outbound_visibility": config.get("outbound_visibility", "full_transcript"),
@@ -73,6 +78,12 @@ def _binding_payload(channel: ChannelRecord) -> dict[str, Any]:
             "robot_code": config.get("robot_code") or config.get("client_id") or "",
             "client_id": config.get("client_id") or "",
             "client_secret": config.get("client_secret") or "",
+            # BCS validates this as a boolean (Bot bindings only); always send
+            # an explicit value — the PATCH config is a full replace, and the
+            # stored row (agentclaw) is the source of truth.
+            "forward_sender_identity": bool(
+                config.get("forward_sender_identity", False)
+            ),
             "send_mode": send_mode,
         },
     }
@@ -148,23 +159,42 @@ class HttpBcsChannelBindingClient:
         return str(envelope["data"]["id"])
 
     async def _find_binding_id(self, channel: ChannelRecord) -> str | None:
-        """by-target lookup to recover a binding id after a lost writeback."""
+        """by-target lookup to recover a binding id after a lost writeback.
+
+        Matches on either account-ref value (robot_code — this surface's and
+        the legacy front-ends' key — and client_id, kept so rows whose stored
+        robot_code was empty still recover).
+
+        **Scope limit — only bare-bot-target bindings are recoverable.**
+        BCS matches ``target_json`` exactly, and the two legacy shapes this
+        surface cannot address are historical by construction: the ocb bot
+        page wrote ``bot_id = "{botId}:{entity|user}"`` and the Avernet group
+        bound ``target: {group: {...}}``. Those rows never answer a bare
+        ``target_id={bind_bot_id}`` lookup, so a 409 against them stays a
+        conflict (fail-closed) until a data migration re-homes them onto the
+        unified shape; BCS exposes no global list to probe alternately.
+        """
         query = (
             "?target_type=bot"
             f"&target_id={quote(channel.bind_bot_id)}"
             "&channel_type=dingtalk"
         )
         envelope = await self._request("GET", f"{_BINDING_PATH}/by-target{query}")
-        account_ref = channel.config.get("client_id") or ""
+        account_refs = {
+            str(ref)
+            for ref in (
+                channel.config.get("client_id"),
+                channel.config.get("robot_code"),
+            )
+            if ref
+        }
         for item in envelope.get("data", {}).get("items", []):
-            if item.get("account_ref") == account_ref:
+            if item.get("account_ref") in account_refs:
                 recovered = str(item.get("id") or "")
                 return recovered or None
         return None
 
-    async def push_config(
-        self, channel: ChannelRecord, *, binding_id: str
-    ) -> None:
+    async def push_config(self, channel: ChannelRecord, *, binding_id: str) -> None:
         if not binding_id:
             raise ChannelSyncError("channel has no bcs_binding_id to update")
         config = _binding_payload(channel)["config"]
