@@ -162,6 +162,18 @@ from agentclaw.community.core.cron.errors import (
     CronApiTimeoutError,
     CronRelayError,
 )
+from agentclaw.community.api.acli_cli_service import (
+    AcliBotNotRunningError,
+    AcliCliAlreadyGrantedError,
+    AcliCliNameMismatchError,
+    AcliCliNotGrantedError,
+    AcliDefaultCliError,
+    AcliEngineUnsupportedError,
+    AcliGrantSyncError,
+    AcliOperationFailedError,
+    AcliRequestRejectedError,
+    AcliRollbackFailedError,
+)
 from agentclaw.community.core.caller_identity.contracts import (
     CallerCallTypeInvalidError,
     CallerIdentityAmbiguousError,
@@ -364,6 +376,16 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     CallerMcpNotFoundError: (404, "Not found"),
     CallerMcpSyncError: (502, "Caller identity synchronization failed"),
     CallerCallTypeInvalidError: (500, "Internal error"),
+    AcliCliAlreadyGrantedError: (409, "CLI is already granted to this bot"),
+    AcliCliNotGrantedError: (404, "Not found"),
+    AcliDefaultCliError: (409, "Default CLIs cannot be removed"),
+    AcliCliNameMismatchError: (422, "Use the tool's acli market name"),
+    AcliEngineUnsupportedError: (501, "This bot's engine does not support acli CLIs"),
+    AcliBotNotRunningError: (409, "The bot has no running container"),
+    AcliRequestRejectedError: (422, "acli rejected the request"),
+    AcliOperationFailedError: (502, "The acli operation failed"),
+    AcliGrantSyncError: (502, "The CLI grant could not be synchronized"),
+    AcliRollbackFailedError: (500, "The change could not be rolled back"),
     MissingPrincipalError: (401, "Unauthorized"),
     # Byte-identical to the line above, deliberately. "You sent no principal" and
     # "your principal did not verify" must be indistinguishable, or the response

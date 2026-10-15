@@ -1,5 +1,10 @@
 """Structured data carried by the small set of actionable public errors."""
 
+from agentclaw.community.api.acli_cli_service import (
+    AcliCliNameMismatchError,
+    AcliContainerError,
+    AcliRollbackFailedError,
+)
 from agentclaw.community.api.bot_config_manifest_service import (
     ManifestValidationError,
 )
@@ -27,4 +32,10 @@ def error_data(exc: Exception) -> object | None:
         return exc.as_payload()
     if isinstance(exc, BotCreationRetainedError):
         return {"bot_id": exc.bot_id, "retryable": True}
+    if isinstance(exc, AcliContainerError):
+        return {"code": exc.code, "reason": exc.detail}
+    if isinstance(exc, AcliCliNameMismatchError):
+        return {"market_name": exc.market_name}
+    if isinstance(exc, AcliRollbackFailedError):
+        return {"state": exc.state}
     return None

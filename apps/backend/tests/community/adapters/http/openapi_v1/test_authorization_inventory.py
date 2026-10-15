@@ -528,6 +528,8 @@ def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/{publication_id}/upgrade"),
         ("PATCH", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"),
         ("PATCH", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type"),
+        ("POST", "/openapi/v1/bots/{bot_id}/clis"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/clis/{cli_code}"),
         ("POST", "/openapi/v1/bots/{bot_id}/skill-sets"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"),
         ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/activate"),

@@ -292,6 +292,12 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("PATCH", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type"): Check(
         PermissionLevel.OWNER, EDIT_LOCK
     ),
+    ("GET", "/openapi/v1/bots/{bot_id}/clis"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/clis/market"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/clis"): Check(PermissionLevel.OWNER, EDIT_LOCK),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/clis/{cli_code}"): Check(
+        PermissionLevel.OWNER, EDIT_LOCK
+    ),
     ("GET", "/openapi/v1/bots/{bot_id}/models"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/models/{model_id:path}"): Check(
         PermissionLevel.MEMBER

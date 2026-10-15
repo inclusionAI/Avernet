@@ -43,6 +43,7 @@ from agentclaw.community.di.modules.manifest_fetch_module import ManifestFetchMo
 from agentclaw.community.di.modules.bot_public_module import BotPublicModule
 from agentclaw.community.di.modules.bot_quota_module import BotQuotaModule
 from agentclaw.community.di.modules.task_module import TaskModule
+from agentclaw.community.di.modules.acli_clis_module import AcliClisModule
 from agentclaw.community.di.modules.caller_identity_module import CallerIdentityModule
 from agentclaw.community.di.modules.channel_module import ChannelModule
 from agentclaw.community.di.modules.common_config_module import CommonConfigModule
@@ -189,6 +190,7 @@ def build_injector(
         BotAppGrantModule(),
         BotChatOpenModule(),
         CallerIdentityModule(),
+        AcliClisModule(),
         UserListModule(),
         BotDormantModule(),
         TaskQueueModule(),

@@ -49,13 +49,13 @@ Backend paths are relative to `apps/backend/`; engine paths to
   - [x] `update_cli_call_type` uses the shared guard; its existing tests pass; `service.py` does not grow.
 - **Depends on:** Tasks 3, 4
 
-## Task 6: Backend — public router and registration
+## Task 6: [x] Backend — public router and registration
 - **Goal:** Publish the routes.
 - **Files:** `src/agentclaw/community/adapters/http/openapi_v1/bots/acli_clis.py`, `.../bots/schemas_acli_clis.py`, `openapi_v1/__init__.py`, `authorization_rules.py`, `admission_routes.py`, inventories, shared status map, schema snapshots, the four DI device modules, `tests/community/adapters/http/openapi_v1/test_acli_clis_endpoints.py`
 - **Done when:**
-  - [ ] Routes and status codes match the plan; `/clis/market` is not captured by `/clis/{cli_code}`.
-  - [ ] Authorization, admission, inventory and endpoint-coverage gates pass.
-  - [ ] The call-type route is unchanged.
+  - [x] Routes and status codes match the plan; `/clis/market` is not captured by `/clis/{cli_code}`.
+  - [x] Authorization, admission, inventory and endpoint-coverage gates pass.
+  - [x] The call-type route is unchanged.
 - **Depends on:** Task 5
 
 ## Task 7: Docs
