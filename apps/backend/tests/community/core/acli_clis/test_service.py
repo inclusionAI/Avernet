@@ -18,6 +18,9 @@ from agentclaw.community.core.acli_clis.errors import (
     AcliContainerError,
     AcliDefaultCliError,
     AcliEngineUnsupportedError,
+    AcliGrantSyncError,
+    AcliOperationFailedError,
+    AcliRequestRejectedError,
     AcliRollbackFailedError,
 )
 from agentclaw.community.core.acli_clis.port import (
@@ -27,7 +30,6 @@ from agentclaw.community.core.acli_clis.port import (
 )
 from agentclaw.community.core.acli_clis.service import AcliCliService
 from agentclaw.community.core.caller_identity.contracts import (
-    CallerCliSyncError,
     CallerIdentityIrreversibleError,
     CallerIdentityPermissionError,
     CallerIdentityReadOnlyError,
@@ -270,6 +272,7 @@ async def test_failed_install_changes_nothing() -> None:
     with pytest.raises(AcliContainerError) as caught:
         await _add(service, "nope")
 
+    assert isinstance(caught.value, AcliRequestRejectedError)
     assert (caught.value.code, caught.value.detail) == ("install_failed", "no such cli")
     assert agentpass.codes == ["dataphin"]
 
@@ -290,7 +293,7 @@ async def test_failed_grant_uninstalls_again() -> None:
     service, agentpass, container, _ = _service()
     agentpass.add_errors = [RuntimeError("agentpass down")]
 
-    with pytest.raises(CallerCliSyncError):
+    with pytest.raises(AcliGrantSyncError):
         await _add(service)
 
     assert agentpass.codes == ["dataphin"]
@@ -373,6 +376,7 @@ async def test_failed_uninstall_regrants_with_the_same_identity() -> None:
     with pytest.raises(AcliContainerError) as caught:
         await _remove(service)
 
+    assert isinstance(caught.value, AcliOperationFailedError)
     assert caught.value.code == "uninstall_failed"
     assert agentpass.codes == ["dataphin", "yuque-cli"]
     assert identities.overrides == {"yuque-cli": "caller"}
@@ -395,7 +399,7 @@ async def test_failed_revoke_touches_nothing_else() -> None:
     service, agentpass, _, _ = _service(granted=["dataphin", "yuque-cli"], container=container)
     agentpass.remove_error = RuntimeError("agentpass down")
 
-    with pytest.raises(CallerCliSyncError):
+    with pytest.raises(AcliGrantSyncError):
         await _remove(service)
 
     assert container.calls == []
@@ -504,3 +508,55 @@ async def test_engine_without_endpoints_reads_as_unsupported() -> None:
 
     with pytest.raises(AcliEngineUnsupportedError):
         await _add(service)
+
+
+async def test_grant_that_landed_despite_an_error_is_a_success() -> None:
+    service, agentpass, container, _ = _service()
+
+    class _LandsThenRaises(RuntimeError):
+        pass
+
+    def add_then_raise(*, bot, item):
+        agentpass.items.append(dict(item))
+        raise _LandsThenRaises("timeout after write")
+
+    agentpass.add_cli = add_then_raise  # type: ignore[method-assign]
+
+    tool = await _add(service)
+
+    assert tool.name == "yuque-cli"
+    assert "yuque-cli" in container.installed
+    assert [c[0] for c in container.calls] == ["install"]
+
+
+async def test_grant_recheck_failure_falls_back_to_uninstall() -> None:
+    service, agentpass, container, _ = _service()
+    agentpass.add_errors = [RuntimeError("agentpass down")]
+    reads = {"n": 0}
+    real_read = agentpass.current_passport_cli_items
+
+    def read_once(*, bot):
+        reads["n"] += 1
+        if reads["n"] > 1:
+            raise RuntimeError("still down")
+        return real_read(bot=bot)
+
+    agentpass.current_passport_cli_items = read_once  # type: ignore[method-assign]
+
+    with pytest.raises(AcliGrantSyncError):
+        await _add(service)
+
+    assert "yuque-cli" not in container.installed
+
+
+@pytest.mark.parametrize("code", ["timeout", "engine_unreachable"])
+async def test_uncertain_uninstall_stays_revoked_and_says_so(code) -> None:
+    container = _Container({"yuque-cli"})
+    container.uninstall_errors = [AcliPortError(code, "no answer")]
+    service, agentpass, _, _ = _service(granted=["dataphin", "yuque-cli"], container=container)
+
+    with pytest.raises(AcliRollbackFailedError) as caught:
+        await _remove(service)
+
+    assert caught.value.state == "revoked_install_unknown"
+    assert agentpass.codes == ["dataphin"]

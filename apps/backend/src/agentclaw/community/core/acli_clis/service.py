@@ -23,9 +23,12 @@ from agentclaw.community.core.acli_clis.errors import (
     AcliCliAlreadyGrantedError,
     AcliCliNameMismatchError,
     AcliCliNotGrantedError,
-    AcliContainerError,
+    AcliBotNotRunningError,
     AcliDefaultCliError,
     AcliEngineUnsupportedError,
+    AcliGrantSyncError,
+    AcliOperationFailedError,
+    AcliRequestRejectedError,
     AcliRollbackFailedError,
 )
 from agentclaw.community.core.acli_clis.port import (
@@ -35,7 +38,6 @@ from agentclaw.community.core.acli_clis.port import (
     AcliTool,
 )
 from agentclaw.community.core.caller_identity.contracts import (
-    CallerCliSyncError,
     CallerIdentityIrreversibleError,
     CallerLockEpochError,
 )
@@ -45,6 +47,7 @@ from agentclaw.community.core.caller_identity.guard import (
     require_owner_of_active_service_bot,
 )
 from agentclaw.community.core.caller_identity.models import McpCallType
+from agentclaw.community.core.errors import DomainError
 from agentclaw.community.core.mcp.services.cli_capabilities import (
     CliCapabilityManifestResolver,
 )
@@ -201,8 +204,16 @@ class AcliCliService:
                 "acli_cli_add_failed bot_id=%s cli_code=%s phase=grant error_type=%s",
                 bot_id, cli_code, type(error).__name__,
             )
+            if self._grant_landed(bot, cli_code):
+                # The write failed on the way back (a timeout, say) after
+                # Passport had applied it: the add actually succeeded.
+                logger.info(
+                    "acli_cli_add_succeeded bot_id=%s cli_code=%s grant=landed_despite_error",
+                    bot_id, cli_code,
+                )
+                return tool
             await self._undo_install(bot_id, owner_id, cli_code, reason="grant_failed")
-            raise CallerCliSyncError from error
+            raise AcliGrantSyncError from error
 
         logger.info(
             "acli_cli_add_succeeded bot_id=%s cli_code=%s version=%s duration_ms=%s",
@@ -243,7 +254,7 @@ class AcliCliService:
                 "acli_cli_remove_failed bot_id=%s cli_code=%s phase=revoke error_type=%s",
                 bot_id, cli_code, type(error).__name__,
             )
-            raise CallerCliSyncError from error
+            raise AcliGrantSyncError from error
 
         try:
             await self._port.uninstall(
@@ -255,6 +266,16 @@ class AcliCliService:
                 "acli_cli_remove_failed bot_id=%s cli_code=%s phase=uninstall error_code=%s",
                 bot_id, cli_code, error.code,
             )
+            if error.code in _UNCERTAIN_CODES:
+                # The uninstall may have completed out of sight. Re-granting
+                # could authorize a tool that is gone, so stay revoked — the
+                # safe side — and report that the program's state is unknown.
+                logger.error(
+                    "acli_cli_rollback_failed bot_id=%s cli_code=%s "
+                    "state=revoked_install_unknown error_code=%s",
+                    bot_id, cli_code, error.code,
+                )
+                raise AcliRollbackFailedError(cli_code, "revoked_install_unknown") from error
             self._undo_revoke(bot, cli_code, held[cli_code])
             raise _container_error(error) from error
 
@@ -366,6 +387,16 @@ class AcliCliService:
         if str(bot.get("active_engine") or "") not in ACLI_ENGINES:
             raise AcliEngineUnsupportedError
 
+    def _grant_landed(self, bot: Mapping[str, Any], cli_code: str) -> bool:
+        try:
+            return cli_code in self._granted_codes(bot)
+        except Exception as error:
+            logger.warning(
+                "acli_cli_grant_recheck_failed bot_id=%s cli_code=%s error_type=%s",
+                bot["bot_id"], cli_code, type(error).__name__,
+            )
+            return False
+
     def _granted_codes(self, bot: Mapping[str, Any]) -> set[str]:
         return {
             str(item["cli_code"]) for item in self._reconciler.current_passport_cli_items(bot=bot)
@@ -388,10 +419,20 @@ def _mode(value: object) -> str | None:
     return str(getattr(value, "value", value)).strip().lower() or None
 
 
-def _container_error(error: AcliPortError) -> Exception:
+#: Port codes after which the container may or may not have done the work.
+_UNCERTAIN_CODES = frozenset({"timeout", "engine_unreachable"})
+#: Port codes caused by the request itself rather than by the container.
+_REJECTED_CODES = frozenset({"install_failed", "invalid_input"})
+
+
+def _container_error(error: AcliPortError) -> DomainError:
     if error.code == "engine_unsupported":
         return AcliEngineUnsupportedError()
-    return AcliContainerError(error.code, error.message)
+    if error.code == "not_running":
+        return AcliBotNotRunningError(error.code, error.message)
+    if error.code in _REJECTED_CODES:
+        return AcliRequestRejectedError(error.code, error.message)
+    return AcliOperationFailedError(error.code, error.message)
 
 
 __all__ = ["ACLI_ENGINES", "AcliCliService", "BotCli"]

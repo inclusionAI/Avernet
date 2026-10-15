@@ -54,8 +54,8 @@ class AcliEngineUnsupportedError(DomainError):
 class AcliContainerError(DomainError):
     """The bot's container refused or failed the acli operation.
 
-    ``code`` is the port's code (``not_running``, ``install_failed``, …), so
-    the adapter can choose a status per cause.
+    ``code`` is the port's code (``not_running``, ``install_failed``, …) and
+    ``detail`` acli's own reason; the subclass says which kind of failure it is.
     """
 
     def __init__(self, code: str, message: str) -> None:
@@ -63,11 +63,31 @@ class AcliContainerError(DomainError):
         self.code = code
 
 
+class AcliBotNotRunningError(AcliContainerError):
+    """The bot has no running container to run acli in."""
+
+
+class AcliRequestRejectedError(AcliContainerError):
+    """acli rejected the request itself — most often a name the market lacks."""
+
+
+class AcliOperationFailedError(AcliContainerError):
+    """acli or the hop to the container failed for a reason outside the request."""
+
+
+class AcliGrantSyncError(DomainError):
+    """The Passport grant could not be written; nothing was left changed."""
+
+    def __init__(self) -> None:
+        super().__init__("the CLI grant could not be synchronized")
+
+
 class AcliRollbackFailedError(InternalError):
     """Undoing the first step of an add or remove failed too.
 
-    ``state`` names where the bot was left: ``installed_not_granted`` or
-    ``revoked_still_installed``.
+    ``state`` names where the bot was left: ``installed_not_granted``,
+    ``revoked_still_installed``, or ``revoked_install_unknown`` (revoked, and
+    the container's answer to the uninstall never arrived).
     """
 
     def __init__(self, cli_code: str, state: str) -> None:
@@ -79,11 +99,15 @@ class AcliRollbackFailedError(InternalError):
 
 
 __all__ = [
+    "AcliBotNotRunningError",
     "AcliCliAlreadyGrantedError",
     "AcliCliNameMismatchError",
     "AcliCliNotGrantedError",
     "AcliContainerError",
     "AcliDefaultCliError",
     "AcliEngineUnsupportedError",
+    "AcliGrantSyncError",
+    "AcliOperationFailedError",
+    "AcliRequestRejectedError",
     "AcliRollbackFailedError",
 ]
