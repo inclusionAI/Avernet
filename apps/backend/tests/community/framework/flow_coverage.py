@@ -260,19 +260,7 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "config_compose": _EXEMPT_REASON,
     "desktop_bot": _EXEMPT_REASON,
     "task": _TASK_FRAMEWORK_EXEMPT_REASON,
-    "feedback": (
-        "Task-loop feedback channel. The repository over a real database, the "
-        "service, and both internal/public HTTP adapters are covered by focused "
-        "tests in this change; no complete human-facing task-feedback flow is "
-        "wired into singlebox yet. Drain when singlebox can submit and read a "
-        "feedback record through a real task session."
-    ),
-    "forum": (
-        "Task-loop forum/BBS module. Service, repository, Browse-Loop, and HTTP "
-        "adapter tests cover its behavior in focused suites; singlebox does not "
-        "yet run a complete topic/post/Browse-Loop business flow. Drain when "
-        "that forum flow is registered."
-    ),
+    # feedback/forum implementations are owned by core/task; task remains exempt.
     "economy": _EXEMPT_REASON,
     "events": _EXEMPT_REASON,
     "gateway_principal": _GATEWAY_PRINCIPAL_EXEMPT_REASON,
