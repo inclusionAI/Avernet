@@ -756,3 +756,44 @@ class TestModeFlipReuseValidation:
         assert len(mode_reads) == 5
 
         await pool.close_all()
+
+
+# ==================== _read_a2a_mode failure tests ====================
+
+
+class TestReadA2aModeFailure:
+    """配置读取面异常——_read_a2a_mode 吞掉并回退 "off"（1b 灰度门有界：
+    配置面故障不得级联成建连失败，off 生产零变化语义在故障下保持成立）。"""
+
+    def test_get_config_raises_returns_off(self):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        svc = MagicMock()
+        svc.get_config.side_effect = RuntimeError("db error")
+        assert AsyncChatClientPool._read_a2a_mode(svc) == "off"
+
+    @pytest.mark.asyncio
+    async def test_config_read_error_defaults_new_clients_to_off(
+        self, mock_chat_client_class
+    ):
+        mock_cls, _ = mock_chat_client_class
+
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+        from secbaas.community.core.service.config import SystemConfigKey
+
+        def fake_get_config(key):
+            if key == SystemConfigKey.A2A_CLIENT_MODE:
+                raise RuntimeError("config store unavailable")
+            return MagicMock(conf_value="false")
+
+        config_service = MagicMock()
+        config_service.get_config.side_effect = fake_get_config
+        pool = AsyncChatClientPool(system_config_service=config_service)
+        await pool.get("sbx-cfg-down", "ws://host/ws")
+
+        assert mock_cls.call_args.kwargs["a2a_mode"] == "off"
+        await pool.close_all()

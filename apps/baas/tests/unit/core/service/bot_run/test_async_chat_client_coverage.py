@@ -2141,3 +2141,189 @@ class TestInteractionAnswerTransportAttribution:
         engine_client.interaction_resolve.assert_awaited_once_with(
             interaction_id="int-1", resolution=resolution
         )
+        assert (
+            engine_client.interaction_resolve.await_args.kwargs.get("session_key")
+            is None
+        )
+
+
+# ==================== a2a_mode construct validation ====================
+
+
+class TestA2aModeValidation:
+    def test_invalid_a2a_mode_is_rejected_at_construct(self, mock_bot_ws):
+        """非法灰度模式在构造期即拒——不落到中途探测时才炸。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient as _ACC,
+        )
+
+        with pytest.raises(ValueError, match="invalid a2a_mode"):
+            _ACC(uri="ws://host/ws", a2a_mode="bogus")
+
+    @pytest.mark.parametrize("mode", ["off", "grey", "on"])
+    def test_valid_modes_are_accepted(self, mode, mock_bot_ws):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient as _ACC,
+        )
+
+        client = _ACC(uri="ws://host/ws", a2a_mode=mode)
+        assert client._a2a_mode == mode
+
+
+# ==================== A2A base URL: unknown custom ws path ====================
+
+
+class TestA2aBaseUrlUnknownWsPath:
+    def test_unknown_custom_ws_path_falls_back_to_bare_host(self):
+        """末段非 ``ws`` 的自定义 ws_path：不猜前缀归属——base 维持 host 根，
+        由能力探测诚实回退（portal 前缀只在词汇表内剥）。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            _a2a_base_url_from_ws,
+        )
+
+        assert (
+            _a2a_base_url_from_ws("ws://host:20003/custom/endpoint")
+            == "http://host:20003"
+        )
+
+
+# ==================== B3: A2A 传输上的附件注入 → v3 重路由 ====================
+
+
+class _StubV3Transport:
+    """BotWebSocketClient 的 duck 替身——仅测试注入重路由消费的面。"""
+
+    instances: list["_StubV3Transport"] = []
+
+    def __init__(self, uri, client_id=None, client_version="1.0.0", headers=None):
+        self.uri = uri
+        self.connected = True
+        self._event_handlers: dict = {}
+        self.inject_calls: list[tuple[str, tuple, dict]] = []
+        self.close_calls = 0
+        _StubV3Transport.instances.append(self)
+
+    async def connect(self) -> dict:
+        return {"ok": True, "payload": {"server": {}}}
+
+    def on_event(self, name: str, handler) -> None:
+        self._event_handlers[name] = handler
+
+    def on_disconnect(self, handler) -> None:
+        pass
+
+    async def chat_inject(self, session_key: str, *args, **kwargs) -> dict:
+        self.inject_calls.append((session_key, args, kwargs))
+        return {"ok": True}
+
+    async def close(self) -> None:
+        self.close_calls += 1
+        self.connected = False
+
+
+@pytest.fixture
+def stub_v3_patch():
+    _StubV3Transport.instances = []
+    with patch(
+        "secbaas.community.core.service.bot_run._bot_websocket_client."
+        "BotWebSocketClient",
+        _StubV3Transport,
+    ):
+        yield
+    _StubV3Transport.instances = []
+
+
+def _a2a_acc_with_stub_main_client() -> AsyncChatClient:
+    """transport=a2a + 可收口的替身主连接（close 可 await）。"""
+    acc = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+    acc._client = MagicMock()
+    acc._client.connected = True
+    acc._client.close = AsyncMock()
+    acc._transport = "a2a"
+    return acc
+
+
+class TestInjectAttachmentsV3Reroute:
+    """16-5 双入口的另一侧：注入带附件同样必须重路由到 v3 专用连接。"""
+
+    @pytest.mark.asyncio
+    async def test_a2a_inject_with_attachments_reroutes_to_v3(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        acc = _a2a_acc_with_stub_main_client()
+
+        await acc.inject_message(
+            "with files", session_key="sk-att", attachments=[{"kind": "screenshot"}]
+        )
+
+        fallback = acc._v3_fallback
+        assert fallback is not None, "附件注入必须懒建 v3 专用连接"
+        assert fallback is _StubV3Transport.instances[-1]
+        assert fallback.inject_calls, "chat_inject 未打到 v3 fallback"
+        session_key, args, kwargs = fallback.inject_calls[0]
+        assert session_key == "sk-att"
+        assert args == (), f"参数应全关键字转 v3: {args}"
+        assert kwargs["message"] == "with files", f"message 必须原样转 v3: {kwargs}"
+        assert kwargs["attachments"] == [{"kind": "screenshot"}]
+
+        await acc.close()
+        assert acc._v3_fallback is None, "注入收口后 fallback 随 close 清空"
+
+    @pytest.mark.asyncio
+    async def test_second_a2a_inject_reuses_cached_v3_fallback(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """fallback 懒建一次后必须缓存复用——不得逐请求重建连接。"""
+        acc = _a2a_acc_with_stub_main_client()
+
+        await acc.inject_message("first", session_key="sk-1", attachments=[{"k": 1}])
+        first_fallback = acc._v3_fallback
+        await acc.inject_message("second", session_key="sk-2", attachments=[{"k": 2}])
+
+        assert acc._v3_fallback is first_fallback, "second 注入必须复用同一 fallback"
+        created = len(_StubV3Transport.instances)
+        assert created == 1, f"fallback 被重建 {created} 次（应为 1）"
+        assert len(first_fallback.inject_calls) == 2
+
+        await acc.close()
+        assert first_fallback.close_calls == 1, "收口必须关唯一的 fallback"
+
+    @pytest.mark.asyncio
+    async def test_bridge_snapshot_is_empty_without_client(self, mock_bot_ws):
+        """快照从当前传输取 handlers——无传输时空表（fallback 不注册假面）。"""
+        acc = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        assert acc._event_bridge_snapshot() == {}
+
+    @pytest.mark.asyncio
+    async def test_close_swallows_v3_fallback_close_failure(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """fallback close 抛错必须吞掉——主连接收口不得被旁支拖死。"""
+        acc = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        await acc.connect()
+
+        bad_fallback = MagicMock()
+        bad_fallback.close = AsyncMock(side_effect=RuntimeError("fallback boom"))
+        acc._v3_fallback = bad_fallback
+
+        await acc.close()  # 不得上抛
+
+        bad_fallback.close.assert_awaited_once()
+        assert acc._v3_fallback is None, "close 后 fallback 必须清空"
+        mock_bot_ws_instance.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_close_cleans_normal_v3_fallback(
+        self, mock_bot_ws, mock_bot_ws_instance, stub_v3_patch
+    ):
+        acc = _a2a_acc_with_stub_main_client()
+
+        await acc.inject_message("m", session_key="sk-1", attachments=[{"k": 1}])
+        fallback = acc._v3_fallback
+        assert fallback is not None
+
+        await acc.close()
+
+        assert fallback.close_calls == 1, "fallback 随 close 收口"
+        assert acc._v3_fallback is None
+        assert acc._v3_routed_sessions == {}

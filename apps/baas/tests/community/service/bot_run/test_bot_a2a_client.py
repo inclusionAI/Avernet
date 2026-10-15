@@ -17,12 +17,13 @@ import httpx
 import pytest
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from secbaas.community.api.bot_interaction._models import InteractionResolution
 from secbaas.community.core.service.bot_run._bot_a2a_client import (
     A2aUnavailableError,
     BotA2aClient,
+    _RunCtx,
 )
 from secbaas.community.core.service.bot_run._interaction_protocol import (
     EngineInteractionResolveExchange,
@@ -1677,5 +1678,708 @@ def test_attachment_hitl_answer_routes_via_v3_and_run_resumes():
         svc = _run(scenario())
         svc.record_engine_exchange.assert_called_once()
         assert svc.record_engine_exchange.call_args.kwargs["interaction_id"] == "i-1"
+    finally:
+        srv.stop()
+
+
+# ══════════ 改行覆盖率补齐：客户端面/abort 分层边缘/chat_inject 全条款 ══════════
+
+
+def _dead_rpc_url() -> str:
+    """刚释放的临时端口——连接必拒（保证性的传输失败源，不依赖端口占用）。"""
+    import socket
+
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    return f"http://127.0.0.1:{port}/rpc"
+
+
+def make_card_down_app() -> FastAPI:
+    """card GET 面故障（500）——A2aUnavailableError 的探测失败来源。"""
+    app = FastAPI()
+
+    @app.get("/.well-known/agent-card.json")
+    def card() -> Any:
+        return JSONResponse({"error": "engine down"}, status_code=500)
+
+    return app
+
+
+def test_card_probe_http_failure_raises_a2a_unavailable():
+    srv = LiveServer(make_card_down_app())
+    try:
+        with pytest.raises(A2aUnavailableError, match="capability probe failed"):
+            _run(_connect_async(srv.base))
+    finally:
+        srv.stop()
+
+
+def test_double_connect_is_rejected(stream_server):
+    async def scenario():
+        client = await _connect_async(stream_server.base)
+        try:
+            await client.connect()
+        finally:
+            await client.close()
+
+    with pytest.raises(RuntimeError, match="Already connected"):
+        _run(scenario())
+
+
+def test_features_property_is_card_features_face(stream_server):
+    async def scenario():
+        client = await _connect_async(stream_server.base)
+        # A2A 卡无 features 段——面恒为 None，不得伪造能力
+        assert client.features is None
+        assert client.server_info is not None
+        await client.close()
+
+    _run(scenario())
+
+
+def test_connect_probes_via_injected_http_factory():
+    srv = LiveServer(make_card_app("JSONRPC", "1.0"))
+    try:
+
+        async def scenario():
+            made: list[httpx.AsyncClient] = []
+
+            def factory() -> httpx.AsyncClient:
+                built = httpx.AsyncClient(timeout=5.0, proxy=None)
+                made.append(built)
+                return built
+
+            client = BotA2aClient(base_url=srv.base, http_transport_factory=factory)
+            hello = await client.connect()
+            assert hello["protocol"] == 1, hello
+            assert made, "探测请求必须经注入的 http 工厂出站"
+            await client.close()
+
+        _run(scenario())
+    finally:
+        srv.stop()
+
+
+def test_close_tolerates_raising_disconnect_callback():
+    """断连回调抛错不得炸 close——close 自身收口语义必须成立。"""
+    srv = LiveServer(make_card_app("JSONRPC", "1.0"))
+    try:
+
+        async def scenario():
+            client = await _connect_async(srv.base)
+
+            def boom(event_name: str, payload: dict) -> None:
+                raise RuntimeError("disconnect handler exploded")
+
+            client.on_disconnect(boom)
+            await client.close()
+            assert client.connected is False, "回调抛错后 close 仍须收口"
+
+        _run(scenario())
+    finally:
+        srv.stop()
+
+
+def test_chat_send_not_connected_is_not_fake_ok():
+    async def scenario():
+        client = BotA2aClient(base_url="http://unused")
+        return await client.chat_send(session_key="s", message="hi")
+
+    out = _run(scenario())
+    assert out["ok"] is False
+    assert out["error"]["code"] == "NOT_CONNECTED"
+
+
+def test_chat_send_transport_error_is_honest():
+    """出站连接失败 → TRANSPORT_ERROR + 原始错误，不得静默。"""
+
+    async def scenario():
+        client = BotA2aClient(base_url="http://unused")
+        client._connected = True
+        client.rpc_url = _dead_rpc_url()
+        return await client.chat_send(session_key="s", message="hi")
+
+    out = _run(scenario())
+    assert out["ok"] is False
+    assert out["error"]["code"] == "TRANSPORT_ERROR"
+    assert out["error"]["message"], "透传原始错误供排障"
+
+
+def test_chat_send_non_json_error_body_still_reports_http_status():
+    """非 SSE 且错误体非 JSON：HTTP 码仍须显式，message 留空不造垃圾。"""
+
+    app = FastAPI()
+
+    @app.get("/.well-known/agent-card.json")
+    def card() -> dict:
+        return {
+            "supportedInterfaces": [
+                {"protocolBinding": "JSONRPC", "protocolVersion": "1.0"}
+            ]
+        }
+
+    @app.post("/rpc")
+    async def rpc(request: Request) -> Any:
+        await request.json()
+        return Response("upstream exploded", status_code=400, media_type="text/plain")
+
+    srv = LiveServer(app)
+    try:
+
+        async def scenario():
+            client = await _connect_async(srv.base)
+            out = await client.chat_send(session_key="s", message="hi")
+            await client.close()
+            return out
+
+        out = _run(scenario())
+    finally:
+        srv.stop()
+    assert out["ok"] is False
+    assert out["error"]["code"] == "HTTP_400"
+    assert out["error"]["message"] == ""
+
+
+# ── 流消费边缘：message 成员 + 终态帧二次抑制 ──
+
+
+def test_message_member_dispatches_user_echo_chat_event():
+    seen = _run_terminal_scenario(
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {"message": {"parts": [{"text": "user echo"}]}},
+            },
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {
+                    "statusUpdate": {
+                        "taskId": "t1",
+                        "status": {"state": "TASK_STATE_COMPLETED"},
+                        "metadata": {"final": "true", "seq": 2},
+                    }
+                },
+            },
+        ]
+    )
+    echoes = [p for p in seen if p.get("state") == "message"]
+    assert len(echoes) == 1, f"message 成员未按用户回声出站: {seen}"
+    assert echoes[0]["sessionKey"] == "s"
+    assert echoes[0]["message"]["role"] == "user"
+    assert echoes[0]["message"]["content"][0]["text"] == "user echo"
+    # runId 是 BaaS 自己的 rid（messageId/幂等键语义），非引擎 taskId
+    assert echoes[0]["runId"].startswith("s:")
+    assert any(p.get("state") == "final" for p in seen)
+
+
+def test_second_final_frame_is_suppressed_after_first_terminal():
+    seen = _run_terminal_scenario(
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {
+                    "statusUpdate": {
+                        "taskId": "t1",
+                        "status": {"state": "TASK_STATE_COMPLETED"},
+                        "metadata": {"final": "true", "seq": 1},
+                    }
+                },
+            },
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {
+                    "statusUpdate": {
+                        "taskId": "t1",
+                        "status": {"state": "TASK_STATE_COMPLETED"},
+                        "metadata": {"final": "true", "seq": 2},
+                    }
+                },
+            },
+        ]
+    )
+    finals = [p for p in seen if p.get("state") == "final"]
+    assert len(finals) == 1, f"终态帧不得二次投递: {seen}"
+
+
+# ── _dispatch 契约：async handler 面与异常包裹 ──
+
+
+def test_dispatch_awaits_async_handlers_without_breaking_pipeline():
+    async def scenario():
+        client = BotA2aClient(base_url="http://unused")
+        seen: list[tuple[str, Any]] = []
+
+        async def chat_handler(payload: dict) -> None:
+            seen.append(("chat", payload["k"]))
+
+        async def wildcard(name: str, payload: dict) -> None:
+            seen.append(("wildcard", name))
+
+        client.on_event("chat", chat_handler)
+        client.on_event("*", wildcard)
+        await client._dispatch("chat", {"k": "v"})
+        return seen
+
+    seen = _run(scenario())
+    assert ("chat", "v") in seen, f"async 精确 handler 未被 await: {seen}"
+    assert ("wildcard", "chat") in seen, "精确 handler 完成前不得阻断通配"
+
+
+def test_dispatch_swallows_handler_errors_without_breaking_wildcard():
+    async def scenario():
+        client = BotA2aClient(base_url="http://unused")
+        seen: list[str] = []
+
+        async def boom(payload: dict) -> None:
+            raise RuntimeError("handler blew up")
+
+        async def wildcard(name: str, payload: dict) -> None:
+            seen.append(name)
+            raise ValueError("wildcard blew up")
+
+        client.on_event("chat", boom)
+        client.on_event("*", wildcard)
+        await client._dispatch("chat", {"k": 1})  # 双双抛错——不得上浮
+        return seen
+
+    seen = _run(scenario())
+    assert seen == ["chat"], "精确 handler 抛错后通配仍须执行"
+
+
+# ── abort 分层边缘：无卡快照 / 未追踪 run 断流 / 传输失败 / 畸形与非常规响应 ──
+
+
+def test_abort_without_card_snapshot_is_honestly_unsupported():
+    """能力卡快照缺失（未探测过/被覆写）——abort 诚实 CANCEL_UNSUPPORTED，
+    绝不从缺席的卡上猜引擎仍可取消。"""
+
+    async def scenario():
+        client = BotA2aClient(base_url="http://unused")
+        client._connected = True
+        ctx = _RunCtx("rid-noc", "s-noc")
+        ctx.engine_task_id = "eng-learned"  # 有引擎侧 id 也没用——无卡即不支持
+        client._runs["rid-noc"] = ctx
+        client._session_runs["s-noc"] = "rid-noc"
+        return await client.chat_abort("s-noc")
+
+    out = _run(scenario())
+    assert out["ok"] is False
+    assert out["a2a"] is True
+    assert out["error"]["code"] == "CANCEL_UNSUPPORTED"
+
+
+def test_abort_untracked_run_cuts_local_stream_not_send_cancel():
+    """引擎声明可取消但 run 的 taskId 尚未学到（开流未起帧）：不盲发
+    CancelTask——RUN_NOT_TRACKED + 本地断流（消费方立即脱困，不等收尾）。"""
+
+    async def scenario():
+        client = BotA2aClient(base_url="http://unused")
+        client._connected = True
+        client._server_info = {"server": {"card": _cancel_capable_card()}}
+        ctx = _RunCtx("rid-cut", "s-cut")
+        ctx.auth_token = "OPEN_API:" + "NOT_PROVIDED"   # 哨兵值等值拼接（规则口径）
+        ctx.task = asyncio.create_task(asyncio.sleep(30))
+        client._runs["rid-cut"] = ctx
+        client._session_runs["s-cut"] = "rid-cut"
+        out = await client.chat_abort("s-cut")
+        try:
+            await ctx.task  # local ctx canceled by abort——test-side收尸
+        except asyncio.CancelledError:
+            pass
+        return out, ctx.task.cancelled()
+
+    out, cut = _run(scenario())
+    assert out["ok"] is False
+    assert out["error"]["code"] == "RUN_NOT_TRACKED"
+    assert cut, "RUN_NOT_TRACKED 必须 fallback 本地断流"
+
+
+def make_cancel_response_app(responder) -> tuple[FastAPI, dict]:
+    """CancelTask 响应注入器：cancel-capable 卡 + WORKING 帧就位后挂起等
+    cancel 信号（engine_task_id 可学入），CancelTask 响应由 responder 出。"""
+    app = FastAPI()
+    state: dict[str, Any] = {"bodies": [], "seen": threading.Event()}
+
+    @app.get("/.well-known/agent-card.json")
+    def card() -> dict:
+        return _cancel_capable_card()
+
+    @app.post("/rpc")
+    async def rpc(request: Request) -> Any:
+        body = await request.json()
+        method = body.get("method")
+        if method == "SendStreamingMessage":
+            session = body["params"]["message"]["contextId"]
+
+            async def gen():
+                yield _sse(
+                    {
+                        "statusUpdate": {
+                            "taskId": "eng-2",
+                            "contextId": session,
+                            "status": {"state": "TASK_STATE_WORKING"},
+                            "metadata": {"seq": 1},
+                        }
+                    }
+                )
+                for _ in range(100):
+                    if state["seen"].is_set():
+                        break
+                    await asyncio.sleep(0.05)
+                yield _sse(
+                    {
+                        "statusUpdate": {
+                            "taskId": "eng-2",
+                            "contextId": session,
+                            "status": {"state": "TASK_STATE_COMPLETED"},
+                            "metadata": {"final": "true", "lastSeq": 2},
+                        }
+                    }
+                )
+
+            return StreamingResponse(gen(), media_type="text/event-stream")
+        if method == "CancelTask":
+            state["bodies"].append(body)
+            state["seen"].set()
+            return responder(body)
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": body.get("id"), "error": {"code": -32601}}
+        )
+
+    return app, state
+
+
+def test_chat_abort_transport_failure_is_honest():
+    """CancelTask 通道连接失败 → TRANSPORT_ERROR（非引擎语义、非假成功），
+    且 CancelTask 未上 wire（引擎侧零污染）。"""
+    app, state = make_cancel_response_app(
+        lambda body: JSONResponse({"boom": True}, status_code=500)
+    )
+    srv = LiveServer(app)
+    try:
+
+        async def scenario():
+            client = await _connect_async(srv.base)
+            await client.chat_send(session_key="s", message="hi")
+            await asyncio.sleep(0.15)  # WORKING 帧到达 → engine_task_id 就位
+            client.rpc_url = _dead_rpc_url()  # 注入传输面故障（引擎本身不可达语义）
+            out = await client.chat_abort(session_key="s")
+            await client.close()
+            return out
+
+        out = _run(scenario())
+    finally:
+        srv.stop()
+    assert out["ok"] is False
+    assert out["error"]["code"] == "TRANSPORT_ERROR"
+    assert out["error"]["message"], "透传原始错误供排障"
+    assert state["bodies"] == [], "CancelTask 不应已上 wire"
+
+
+def test_chat_abort_garbage_response_is_malformed_not_fake_ok():
+    """200 但响应体非 JSON → CANCEL_MALFORMED 诚实面，不得假成功。"""
+    app, state = make_cancel_response_app(
+        lambda body: Response("not-json at all", media_type="text/plain")
+    )
+    srv = LiveServer(app)
+    try:
+
+        async def scenario():
+            client = await _connect_async(srv.base)
+            await client.chat_send(session_key="s", message="hi")
+            await asyncio.sleep(0.15)
+            out = await client.chat_abort(session_key="s")
+            await client.close()
+            return out
+
+        out = _run(scenario())
+    finally:
+        srv.stop()
+    assert out["ok"] is False
+    assert out["error"]["code"] == "CANCEL_MALFORMED"
+    assert "unparseable http_200" in out["error"]["message"]
+    assert len(state["bodies"]) == 1
+
+
+def test_chat_abort_unexpected_result_state_is_not_success():
+    """result 存在但 state 非 CANCELED（异常乱序/引擎误解）——E4 纪律：
+    只有真实契约才算成功。"""
+    app, state = make_cancel_response_app(
+        lambda body: {
+            "jsonrpc": "2.0",
+            "id": body["id"],
+            "result": {
+                "task": {
+                    "id": body["params"]["taskId"],
+                    "status": {"state": "TASK_STATE_COMPLETED"},
+                }
+            },
+        }
+    )
+    srv = LiveServer(app)
+    try:
+
+        async def scenario():
+            client = await _connect_async(srv.base)
+            await client.chat_send(session_key="s", message="hi")
+            await asyncio.sleep(0.15)
+            out = await client.chat_abort(session_key="s")
+            await client.close()
+            return out
+
+        out = _run(scenario())
+    finally:
+        srv.stop()
+    assert out["ok"] is False
+    assert out["error"]["code"] == "CANCEL_RESULT_INVALID"
+    assert "unexpected cancel result" in out["error"]["message"]
+
+
+# ── chat_inject 全条款（R16-1 注入面此前整段未覆盖）──
+
+
+def make_inject_app(responder) -> tuple[FastAPI, dict]:
+    """InjectContext 引擎面速写：请求体/头钉入 state，响由 responder 出。"""
+    app = FastAPI()
+    state: dict[str, Any] = {"bodies": [], "headers": None}
+
+    @app.get("/.well-known/agent-card.json")
+    def card() -> dict:
+        return {
+            "supportedInterfaces": [
+                {"protocolBinding": "JSONRPC", "protocolVersion": "1.0"}
+            ]
+        }
+
+    @app.post("/rpc")
+    async def rpc(request: Request) -> Any:
+        body = await request.json()
+        state["bodies"].append(body)
+        state["headers"] = dict(request.headers)
+        return responder(body)
+
+    return app, state
+
+
+def _accepted_inject(body: dict) -> dict:
+    return {"jsonrpc": "2.0", "id": body["id"], "result": {"inject": "accepted"}}
+
+
+def _inject_status_responder(status: str):
+    def responder(body: dict) -> dict:
+        return {"jsonrpc": "2.0", "id": body["id"], "result": {"inject": status}}
+
+    return responder
+
+
+async def _inject_scenario(srv: LiveServer, **inject_kwargs: Any) -> dict:
+    client = await _connect_async(srv.base)
+    kwargs = {"message": "x", **inject_kwargs}
+    out = await client.chat_inject(session_key="s-inj", **kwargs)
+    await client.close()
+    return out
+
+
+def test_chat_inject_rejects_attachments_without_wire_side_effects():
+    app, state = make_inject_app(_accepted_inject)
+    srv = LiveServer(app)
+    try:
+
+        async def scenario():
+            client = await _connect_async(srv.base)
+            out = await client.chat_inject(
+                session_key="s",
+                message="x",
+                attachments=[{"kind": "screenshot"}],
+            )
+            await client.close()
+            return out
+
+        out = _run(scenario())
+    finally:
+        srv.stop()
+    assert out["ok"] is False
+    assert out["raise_"] is False, "纯数据错误——剖面由编排层收敛"
+    assert out["error"]["code"] == "ATTACHMENTS_UNSUPPORTED"
+    assert state["bodies"] == [], "附件请求绝不得静默 wire"
+
+
+def test_chat_inject_flattens_metadata_carries_token_and_parts():
+    app, state = make_inject_app(_accepted_inject)
+    srv = LiveServer(app)
+    try:
+
+        async def scenario():
+            return await _inject_scenario(
+                srv,
+                message={"content": [{"type": "text", "text": "补上下文"}]},
+                timeout_ms=1500,
+                auth_token="tok-inj",
+                chat_metadata={"source": "e2e"},
+            )
+
+        out = _run(scenario())
+    finally:
+        srv.stop()
+    assert out["ok"] is True, out
+    assert out["status"] == "accepted"
+    assert out["a2a"] is True
+    body = state["bodies"][0]
+    assert body["method"] == "InjectContext"
+    assert body["jsonrpc"] == "2.0"
+    assert body["params"]["contextId"] == "s-inj"
+    assert body["params"]["message"]["parts"] == [{"text": "补上下文"}], (
+        f"dict message 的 content 必须展平成 parts: {body}"
+    )
+    meta = body["params"]["metadata"]
+    assert meta["source"] == "e2e"
+    assert meta["timeoutMs"] == "1500"
+    assert meta["traceId"] == body["id"], "traceId 必须回填请求 id"
+    assert state["headers"]["x-iam-token"] == "tok-inj"
+
+
+def test_chat_inject_non_structured_messages_fall_back_to_string():
+    message = {"content": "plain"}
+    app, state = make_inject_app(_accepted_inject)
+    srv = LiveServer(app)
+    try:
+
+        async def scenario():
+            first = await _inject_scenario(
+                srv, message=message
+            )  # dict 但 content 非 parts 列表
+            second = await _inject_scenario(srv, message=42)  # 完全非结构化
+            await asyncio.sleep(0)
+            return first, second
+
+        first, second = _run(scenario())
+    finally:
+        srv.stop()
+    assert first["ok"] is True and second["ok"] is True
+    parts = [b["params"]["message"]["parts"] for b in state["bodies"]]
+    assert parts == [
+        [{"text": str(message)}],  # content 非 list → str(message) 兜底
+        [{"text": "42"}],  # 非 dict → str 兜底
+    ], f"非结构化 message 必须显式字符串化，不得炸不得静默: {parts}"
+
+
+def test_chat_inject_idempotent_statuses_are_ok():
+    for status in ("accepted", "duplicate_accepted", "duplicate_in_progress"):
+        app, _ = make_inject_app(_inject_status_responder(status))
+        srv = LiveServer(app)
+        try:
+            out = _run(_inject_scenario(srv))
+        finally:
+            srv.stop()
+        assert out["ok"] is True, f"{status} 注入被误判失败: {out}"
+        assert out["status"] == status
+
+
+def test_chat_inject_unknown_status_is_not_ok():
+    app, _ = make_inject_app(_inject_status_responder("weird"))
+    srv = LiveServer(app)
+    try:
+        out = _run(_inject_scenario(srv))
+    finally:
+        srv.stop()
+    assert out["ok"] is False, "未知 inject 状态不得凑成功"
+    assert out["status"] == "weird"
+    assert out["a2a"] is True
+
+
+def test_chat_inject_http_error_face_leaks_status():
+    app, _ = make_inject_app(
+        lambda body: JSONResponse({"error": "overloaded"}, status_code=503)
+    )
+    srv = LiveServer(app)
+    try:
+        out = _run(_inject_scenario(srv))
+    finally:
+        srv.stop()
+    assert out["ok"] is False
+    assert out["error"]["code"] == "HTTP_503"
+    assert "overloaded" in out["error"]["message"]
+
+
+def test_chat_inject_engine_error_is_relayed_with_reason():
+    def responder(body: dict) -> dict:
+        return {
+            "jsonrpc": "2.0",
+            "id": body["id"],
+            "error": {"message": "engine busy", "data": {"reason": "inject_conflict"}},
+        }
+
+    app, _ = make_inject_app(responder)
+    srv = LiveServer(app)
+    try:
+        out = _run(_inject_scenario(srv))
+    finally:
+        srv.stop()
+    assert out["ok"] is False
+    assert out["error"]["code"] == "inject_conflict", "引擎 reason 必须保留"
+    assert out["error"]["message"] == "engine busy"
+
+
+# ── AsyncChatClient G1 灰度门：探测失败的两种分流（grey 回退 / on 抛错）──
+
+
+def test_async_client_grey_mode_falls_back_to_v3_on_probe_failure():
+    from unittest.mock import patch
+
+    from secbaas.community.core.service.bot_run._async_chat_client import (
+        AsyncChatClient,
+    )
+
+    srv = LiveServer(make_card_down_app())
+    try:
+
+        async def scenario():
+            with patch(
+                "secbaas.community.core.service.bot_run._async_chat_client."
+                "BotWebSocketClient",
+                _FakeV3KingineTransport,
+            ):
+                acc = AsyncChatClient(
+                    uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
+                    a2a_mode="grey",
+                    max_retries=0,
+                )
+                hello = await acc.connect()
+                assert acc._transport == "v3-ws", (
+                    f"探测失败时 grey 必须回退 v3（不炸不断流）: {hello}"
+                )
+                assert acc._client is not None
+                await acc.close()
+                return True
+
+        assert _run(scenario())
+    finally:
+        srv.stop()
+
+
+def test_async_client_on_mode_raises_when_a2a_probe_fails():
+    from secbaas.community.core.service.bot_run._async_chat_client import (
+        AsyncChatClient,
+    )
+
+    srv = LiveServer(make_card_down_app())
+    try:
+
+        async def scenario():
+            acc = AsyncChatClient(
+                uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
+                a2a_mode="on",
+                max_retries=0,
+            )
+            await acc.connect()
+
+        with pytest.raises(A2aUnavailableError):
+            _run(scenario())
     finally:
         srv.stop()
