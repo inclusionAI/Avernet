@@ -133,7 +133,7 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
             icon={
               <Star
                 className={cn(
-                  'h-4 w-4',
+                  'h-3.5 w-3.5',
                   session.favorite === undefined || !session.favorite
                     ? 'text-muted-foreground'
                     : 'fill-star text-star',
@@ -142,7 +142,7 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
             }
             disabled={favoritePending || session.favorite === undefined || Boolean(actions?.pending)}
             aria-busy={favoritePending || Boolean(actions?.pending)}
-            className="rounded-md"
+            className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
             onClick={(event) => {
               event.stopPropagation();
               onToggleFavorite();

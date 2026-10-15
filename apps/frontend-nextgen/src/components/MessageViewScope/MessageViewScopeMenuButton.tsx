@@ -30,7 +30,7 @@ export function MessageViewScopeMenuButton({ onSelect, selected, disabled }: Mes
           icon={<Plus className="h-3.5 w-3.5" />}
           disabled={disabled}
           onClick={(event) => event.stopPropagation()}
-          className="h-6 w-6 rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
+          className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
         />
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-1">

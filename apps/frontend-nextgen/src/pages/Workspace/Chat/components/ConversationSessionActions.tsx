@@ -30,9 +30,12 @@ export function ConversationSessionActions({
               label={menu.busy ? '会话操作或列表加载中，请稍候' : '会话更多操作'}
               ariaLabel="会话更多操作"
               size="sm"
-              icon={<MoreHorizontal className="h-4 w-4" />}
+              icon={<MoreHorizontal className={withMeta ? 'h-4 w-4' : 'h-3.5 w-3.5'} />}
               disabled={menu.busy || favorite?.pending}
-              className="shrink-0"
+              className={cn(
+                'shrink-0',
+                !withMeta && 'h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground',
+              )}
             />
           </PopoverTrigger>
           <PopoverContent

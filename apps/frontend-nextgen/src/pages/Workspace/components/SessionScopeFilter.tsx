@@ -41,9 +41,15 @@ export function SessionScopeFilter({ value, onChange, allCount, favoriteCount, c
             </span>
           }
           className={cn(
-            'rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary',
-            compact && 'h-6 w-6',
-            value === 'favorite' && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary',
+            'rounded-md',
+            compact
+              ? 'h-6 w-6 hover:bg-muted'
+              : 'text-muted-foreground hover:bg-primary/10 hover:text-primary',
+            compact
+              ? value === 'favorite'
+                ? 'text-primary hover:text-primary'
+                : 'text-muted-foreground hover:text-foreground'
+              : value === 'favorite' && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary',
           )}
           onClick={(event) => event.stopPropagation()}
         />

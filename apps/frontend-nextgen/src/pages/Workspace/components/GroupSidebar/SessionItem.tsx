@@ -156,7 +156,7 @@ export const SessionItem = React.memo(function SessionItem({
               <IconButton
                 label="会话更多操作"
                 size="sm"
-                icon={<MoreHorizontal className="h-4 w-4" />}
+                icon={<MoreHorizontal className="h-3.5 w-3.5" />}
                 className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
               />
               </span>
@@ -219,8 +219,8 @@ export const SessionItem = React.memo(function SessionItem({
           <IconButton
             label={favorite ? '取消收藏' : '收藏会话'}
             size="sm"
-            icon={<Star className={cn('h-4 w-4', favorite ? 'fill-star text-star' : 'text-muted-foreground')} />}
-            className="rounded-md"
+            icon={<Star className={cn('h-3.5 w-3.5', favorite ? 'fill-star text-star' : 'text-muted-foreground')} />}
+            className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
             onClick={(e) => {
               e.stopPropagation();
               onToggleFavorite(session.sessionId);
