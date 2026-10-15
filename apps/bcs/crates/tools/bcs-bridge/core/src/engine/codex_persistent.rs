@@ -254,10 +254,16 @@ impl Router {
             matches.then_some(*lease)
         }).collect();
         for lease in owners {
-            if matches!(value["method"].as_str(), Some("turn/completed" | "agent/turn_completed" | "agent/turn_failed"))
-                && let Some(client) = self.clients.get_mut(&lease) {
-                let event_turn = value.pointer("/params/turnId").or_else(|| value.pointer("/params/turn/id")).and_then(Value::as_str);
-                if event_turn.is_none() || event_turn == client.turn.as_deref() { client.turn = None; }
+            if let Some(client) = self.clients.get_mut(&lease) {
+                if let (Some(thread), Some(turn)) = (&client.thread, &client.turn)
+                    && !super::codex_app_server::matches_turn(&value, thread, turn, false) {
+                    // Interrupt ACKs may precede a cancelled turn's final event.
+                    // Never deliver that stale event to a follow-up on this thread.
+                    continue;
+                }
+                if matches!(value["method"].as_str(), Some("turn/completed" | "agent/turn_completed" | "agent/turn_failed")) {
+                    client.turn = None;
+                }
             }
             self.deliver(lease, &value)?;
         }

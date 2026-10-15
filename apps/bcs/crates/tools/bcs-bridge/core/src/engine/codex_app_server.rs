@@ -666,9 +666,14 @@ fn extract_turn_id(value: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-fn matches_turn(value: &Value, thread_id: &str, turn_id: &str, shared: bool) -> bool {
+pub(super) fn matches_turn(value: &Value, thread_id: &str, turn_id: &str, shared: bool) -> bool {
     let Some(params) = value.get("params") else {
         return false;
+    };
+    let flat = params.get("turnId");
+    let nested = match value.get("method").and_then(Value::as_str) {
+        Some("turn/completed" | "agent/turn_completed" | "agent/turn_failed") => params.pointer("/turn/id"),
+        _ => None,
     };
     if shared {
         // A shared host can broadcast other tasks' notifications. Missing or
@@ -676,11 +681,6 @@ fn matches_turn(value: &Value, thread_id: &str, turn_id: &str, shared: bool) -> 
         if params.get("threadId").and_then(Value::as_str) != Some(thread_id) {
             return false;
         }
-        let flat = params.get("turnId");
-        let nested = match value.get("method").and_then(Value::as_str) {
-            Some("turn/completed" | "agent/turn_completed") => params.pointer("/turn/id"),
-            _ => None,
-        };
         return (flat.is_some() || nested.is_some())
             && flat.into_iter().chain(nested).all(|id| id.as_str() == Some(turn_id));
     }
@@ -688,10 +688,10 @@ fn matches_turn(value: &Value, thread_id: &str, turn_id: &str, shared: bool) -> 
         .get("threadId")
         .and_then(Value::as_str)
         .is_none_or(|value| value == thread_id);
-    let turn_matches = params
-        .get("turnId")
-        .and_then(Value::as_str)
-        .is_none_or(|value| value == turn_id);
+    // Dedicated stdio retains identifier-free legacy events, but every supplied
+    // turn identifier must match, including completions buffered before the ACK.
+    let turn_matches = flat.into_iter().chain(nested)
+        .all(|id| id.as_str() == Some(turn_id));
     thread_matches && turn_matches
 }
 
@@ -815,17 +815,19 @@ mod tests {
     }
 
     #[test]
-    fn shared_completion_checks_nested_turn_id_and_rejects_conflicts() {
-        for method in ["turn/completed", "agent/turn_completed"] {
-            let mut value = json!({"method":method,"params":{
-                "threadId":"t-1","turn":{"id":"turn-1"}}});
-            assert!(matches_turn(&value, "t-1", "turn-1", true));
-            assert!(!matches_turn(&value, "t-1", "turn-2", true));
-            value["params"]["turnId"] = json!("other-turn");
-            assert!(!matches_turn(&value, "t-1", "turn-1", true));
-            assert!(!matches_turn(&value, "t-1", "other-turn", true));
-            value["params"]["turnId"] = Value::Null;
-            assert!(!matches_turn(&value, "t-1", "turn-1", true));
+    fn completions_check_all_supplied_turn_ids_for_native_and_shared_connections() {
+        for shared in [false, true] {
+            for method in ["turn/completed", "agent/turn_completed", "agent/turn_failed"] {
+                let mut value = json!({"method":method,"params":{
+                    "threadId":"t-1","turn":{"id":"turn-1"}}});
+                assert!(matches_turn(&value, "t-1", "turn-1", shared));
+                assert!(!matches_turn(&value, "t-1", "turn-2", shared));
+                value["params"]["turnId"] = json!("other-turn");
+                assert!(!matches_turn(&value, "t-1", "turn-1", shared));
+                assert!(!matches_turn(&value, "t-1", "other-turn", shared));
+                value["params"]["turnId"] = Value::Null;
+                assert!(!matches_turn(&value, "t-1", "turn-1", shared));
+            }
         }
     }
 }

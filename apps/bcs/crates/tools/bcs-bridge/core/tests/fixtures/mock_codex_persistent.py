@@ -10,6 +10,8 @@ threads = set()
 turns = 0
 counter = 0
 ignore_interrupts = set()
+delayed_turns = set()
+delayed_completions = {}
 
 
 def send(value):
@@ -48,7 +50,25 @@ for raw in sys.stdin:
         turn = f"turn-{turns}"
         if prompt == "late-start":
             time.sleep(0.15)
+        stale = delayed_completions.pop(thread, None)
+        phase, shape = prompt.removeprefix("followup-").split(":") if stale else (None, None)
+
+        def stale_completion():
+            event_params = {"threadId": thread, "turn": {"id": stale, "status": "interrupted"}}
+            if shape == "flat":
+                event_params = {"threadId": thread, "turnId": stale}
+            elif shape == "conflicting":
+                event_params["turnId"] = turn
+            send({"method": "turn/completed", "params": event_params})
+            with open(log_path, "a") as log:
+                log.write(json.dumps({"pid": os.getpid(), "method": "fixture/stale-completion",
+                    "params": {"phase": phase, "shape": shape}}) + "\n")
+
+        if stale and phase == "before-ack":
+            stale_completion()
         send({"id": request["id"], "result": {"turn": {"id": turn}}})
+        if stale and phase == "after-ack":
+            stale_completion()
         if prompt == "fail":
             send({"method": "turn/completed", "params": {
                 "threadId": thread, "turnId": turn,
@@ -56,17 +76,26 @@ for raw in sys.stdin:
             continue
         if prompt == "ignore-interrupt":
             ignore_interrupts.add(turn)
-        if prompt in ("hold", "late-start", "ignore-interrupt"):
+        if prompt == "hold-delayed-completion":
+            delayed_turns.add(turn)
+        if prompt in ("hold", "late-start", "ignore-interrupt", "hold-delayed-completion"):
             continue
         send({"method": "item/agentMessage/delta", "params": {
-            "threadId": thread, "turnId": turn, "delta": f"{os.getpid()}:{prompt}"}})
+            "threadId": thread, "turnId": turn, "delta": f"{os.getpid()}:"}})
+        if stale and phase == "during-output":
+            stale_completion()
+        send({"method": "item/agentMessage/delta", "params": {
+            "threadId": thread, "turnId": turn, "delta": prompt}})
         send({"method": "turn/completed", "params": {
-            "threadId": thread, "turnId": turn, "turn": {"id": turn, "status": "completed"}}})
+            "threadId": thread, "turn": {"id": turn, "status": "completed"}}})
         continue
     elif method == "turn/interrupt":
         if params["turnId"] in ignore_interrupts:
             continue
         send({"id": request["id"], "result": {}})
+        if params["turnId"] in delayed_turns:
+            delayed_completions[params["threadId"]] = params["turnId"]
+            continue
         send({"method": "turn/completed", "params": dict(params, turn={"id": params["turnId"], "status": "interrupted"})})
         continue
     else:

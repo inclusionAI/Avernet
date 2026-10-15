@@ -214,3 +214,37 @@ async fn unacknowledged_interrupt_reaps_server_before_next_request_resumes() {
     assert_eq!(calls.iter().filter(|v| v["method"] == "initialize").count(), 2);
     assert_eq!(calls.iter().filter(|v| v["method"] == "thread/resume").count(), 1);
 }
+
+#[tokio::test]
+async fn delayed_interrupted_completion_cannot_finish_followup_on_same_thread() {
+    // Release the old completion only when the follow-up starts: no scheduling
+    // sleeps, and exercise delivery before/after its RPC ack and between deltas.
+    for phase in ["before-ack", "after-ack", "during-output"] {
+        for shape in ["nested", "flat", "conflicting"] {
+            let temp = tempfile::tempdir().unwrap();
+            let log = temp.path().join("rpc.jsonl");
+            let engine = engine(&log);
+            let abort = CancellationToken::new();
+            let held = {
+                let engine = engine.clone(); let abort = abort.clone();
+                tokio::spawn(async move { turn(&engine, "hold-delayed-completion", None, abort).await })
+            };
+            wait_method(&log, "turn/start", 1).await;
+            let calls = requests(&log);
+            let thread = calls.iter().find(|v| v["method"] == "turn/start").unwrap()["params"]["threadId"].as_str().unwrap().to_owned();
+            let pid = calls[0]["pid"].as_i64().unwrap();
+            abort.cancel();
+            assert!(matches!(held.await.unwrap(), Err(TurnError::Aborted)));
+            let prompt = format!("followup-{phase}:{shape}");
+            let next = turn(&engine, &prompt, Some(thread.clone()), CancellationToken::new()).await.unwrap();
+            assert_eq!(next.final_text.as_deref(), Some(format!("{pid}:{prompt}").as_str()), "{phase}/{shape}");
+            assert_eq!(next.engine_session_id.as_deref(), Some(thread.as_str()));
+            turn(&engine, "third", Some(thread), CancellationToken::new()).await.unwrap();
+            let calls = requests(&log);
+            assert_eq!(calls.iter().filter(|v| v["method"] == "fixture/stale-completion").count(), 1);
+            assert_eq!(calls.iter().filter(|v| v["method"] == "initialize").count(), 1);
+            assert_eq!(calls.iter().filter(|v| v["method"] == "turn/interrupt").count(), 1);
+            assert!(!calls.iter().any(|v| v["method"] == "thread/resume"));
+        }
+    }
+}
