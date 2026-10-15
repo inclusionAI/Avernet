@@ -38,18 +38,45 @@ from ._session_state import SessionState
 logger = get_logger("core-bot-run")
 
 
-def _a2a_base_url_from_ws(uri: str) -> str | None:
-    """ws(s)://host:port/... → http(s)://host:port；非 ws scheme 返回 None。
+def _strip_ws_endpoint_suffix(path: str) -> str:
+    """剥去路径尾部的 WS endpoint 后缀，保留其前的一切路由前缀。
 
-    A2A 端点与 v3 WS 端点同进程同端口（engine adapter :20003 单实例双面）。
+    后缀词汇集与 _claw_service._build_ws_url / adapter.ws_path() 同源：
+      - ``/api/{engine}/ws``（默认与 openclaw/claude_code adapter）
+      - ``/api/ws``（aicoding adapter）
+      - ``/ws``（直连形态，无前缀）
+    末段不是 ``ws``（未知自定义 ws_path）则不剥——base 维持旧语义
+    （host 根），由能力探测诚实回退，绝不猜前缀归属。
+    """
+    segments = path.strip("/").split("/") if path.strip("/") else []
+    if not segments or segments[-1] != "ws":
+        return ""
+    if len(segments) >= 3 and segments[-3] == "api" and segments[-2] != "api":
+        # /api/{engine}/ws 与 /api/ws（aicoding 的 engine 段就是 "ws"）
+        segments = segments[:-3]
+    elif len(segments) >= 2 and segments[-2] == "api":
+        segments = segments[:-2]
+    else:
+        segments = segments[:-1]
+    return "/" + "/".join(segments) if segments else ""
+
+
+def _a2a_base_url_from_ws(uri: str) -> str | None:
+    """ws(s)://host:port{prefix}/ws-endpoint → http(s)://host:port{prefix}。
+
+    A2A 端点与 v3 WS 端点同进程同端口（engine adapter :20003 单实例双面）；
+    真实调用方 _build_ws_url 产出 ``wss://proxy/proxypass/<target>{ws_path}``
+    形状——代理路由前缀必须保留在 base 上（只剥 WS endpoint 后缀，从后向前
+    按词汇集剥），否则 card/RPC 打到代理根，grey 永远回退、on 连不上。
     """
     if not isinstance(uri, str) or "://" not in uri:
         return None
     scheme, _, rest = uri.partition("://")
     if scheme not in ("ws", "wss"):
         return None
-    host_port = rest.split("/", 1)[0]
-    return ("https://" if scheme == "wss" else "http://") + host_port
+    host_port, _, raw_path = rest.partition("/")
+    prefix = _strip_ws_endpoint_suffix("/" + raw_path) if raw_path else ""
+    return ("https://" if scheme == "wss" else "http://") + host_port + prefix
 
 
 def _public_interaction_envelope(
@@ -214,10 +241,12 @@ class AsyncChatClient:
         self._a2a_mode = a2a_mode
         self._transport: str = "v3-ws"
         self._v3_fallback = None  # B3: A2A 传输上附件请求的 v3 重路由
-        # B3（1c）：session→run 归属路由表——附件请求 reroute 到 v3 后，
-        # 该 session 的 chat_abort 必须随 run 走 v3 专用连接（不丢语义；
-        # 正常 A2A session 的 abort 仍走 A2A 客户端的 CancelTask 转发）。
-        self._v3_routed_sessions: set[str] = set()
+        # B3（1c）→ P1-4：session→传输归属表——附件请求 reroute 到 v3 后，
+        # 该 session 的 chat_abort 与 HITL interaction_resolve 都必须随 run
+        # 走 v3 专用连接（A2A kernel 注册表里没有该 run；正常 A2A session
+        # 的答复仍走 A2A 客户端 CancelTask/ResolveInteraction 转发）。
+        # 值为归属标签 "v3"；send 时记、收口清、off/v3 模式永不写。
+        self._v3_routed_sessions: dict[str, str] = {}
         self.headers = headers or {}
         self.client_id = client_id or f"client-{uuid.uuid4().hex[:8]}"
         self.client_version = client_version
@@ -306,10 +335,7 @@ class AsyncChatClient:
         if self._a2a_mode in ("grey", "on"):
             a2a_base = _a2a_base_url_from_ws(self.uri)
             if a2a_base:
-                from secbaas.community.core.service.bot_run._bot_a2a_client import (
-                    A2aUnavailableError,
-                    BotA2aClient,
-                )
+                from ._bot_a2a_client import A2aUnavailableError, BotA2aClient
 
                 try:
                     candidate = BotA2aClient(base_url=a2a_base, headers=self.headers)
@@ -502,7 +528,7 @@ class AsyncChatClient:
                     self._sessions.pop(session_key, None)
                     self._condition.notify_all()
                 # B3（1c）：session 收口——归属路由表同步去标记
-                self._v3_routed_sessions.discard(session_key)
+                self._v3_routed_sessions.pop(session_key, None)
 
         finally:
             # 8. 释放并发信号量
@@ -644,7 +670,7 @@ class AsyncChatClient:
                     self._sessions.pop(session_key, None)
                     self._condition.notify_all()
                 # B3（1c）：session 收口——归属路由表同步去标记
-                self._v3_routed_sessions.discard(session_key)
+                self._v3_routed_sessions.pop(session_key, None)
 
         finally:
             if self._concurrency_sem is not None:
@@ -736,9 +762,8 @@ class AsyncChatClient:
         """
         if self._v3_fallback is not None:
             return self._v3_fallback
-        from secbaas.community.core.service.bot_run._bot_websocket_client import (
-            BotWebSocketClient,
-        )
+        # 调用期才解析（保持懒建语义；测试面经此注入替身）
+        from ._bot_websocket_client import BotWebSocketClient
 
         client = BotWebSocketClient(
             uri=self.uri,
@@ -865,12 +890,12 @@ class AsyncChatClient:
         # recv 循环的断流路径上报）。close() 一并收口。
         if attachments and self._transport == "a2a":
             target = await self._ensure_v3_fallback()
-            # B3（1c）：记归属——该 session 在 v3 专用连接上开了 run，
-            # 后续 chat_abort 随 run 走 v3，语义不丢。
-            self._v3_routed_sessions.add(session_key)
+            # B3（1c/P1-4）：记归属——该 session 在 v3 专用连接上开了 run，
+            # 后续 chat_abort 与 interaction_resolve 都随 run 走 v3，语义不丢。
+            self._v3_routed_sessions[session_key] = "v3"
         else:
             target = self._client
-            self._v3_routed_sessions.discard(session_key)
+            self._v3_routed_sessions.pop(session_key, None)
         send_result = await target.chat_send(
             session_key=session_key,
             message=message,
@@ -1311,7 +1336,19 @@ class AsyncChatClient:
                 interaction_id=interaction_id,
             )
             if command is not None:
+                # P1-4：答复按产生 interaction 的传输归属路由——B3 附件
+                # reroute 的 run 在 v3 专用连接上，ResolveInteraction 必须发
+                # 到那里（A2A kernel 注册表没有该 run，错发得 not_found、审批
+                # 无法恢复）。正常 A2A session 走 A2A 客户端并带 session_key
+                # （客户端用它取该 run 记录的 IAM 许可，P1-5）。off/v3 模式
+                # 恒走 self._client 且调用签名原样——原路径不动。
                 client = self._client
+                resolve_kwargs: dict[str, Any] = {}
+                if self._transport == "a2a":
+                    if session_key in self._v3_routed_sessions:
+                        client = self._v3_fallback
+                    else:
+                        resolve_kwargs["session_key"] = session_key
                 if client is None:
                     interaction_service.mark_failed(
                         session_key=session_key,
@@ -1323,6 +1360,7 @@ class AsyncChatClient:
                     exchange = await client.interaction_resolve(
                         interaction_id=command.interaction_id,
                         resolution=command.resolution,
+                        **resolve_kwargs,
                     )
                 except Exception as exc:
                     logger.warning(

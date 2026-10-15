@@ -1939,3 +1939,205 @@ async def test_mode_switch_dispatch_marks_accepted_rpc_resolved(mock_bot_ws):
         interaction_id="int-mode-1",
         envelope=engine_response,
     )
+
+
+# ══════════ P1-1: proxypass 路由前缀保留（_a2a_base_url_from_ws）══════════
+
+
+class TestA2aBaseUrlFromWs:
+    """ws(s):// URL → A2A HTTP base：只剥 WS endpoint 后缀，保留代理前缀。
+
+    WS 后缀词汇集（_claw_service._build_ws_url / adapter.ws_path()）：
+      /api/openclaw/ws       — openclaw adapter + DEFAULT_WS_PATH
+      /api/claude_code/ws    — claude_code adapter
+      /api/ws                — aicoding adapter
+      /api/{engine}/ws      — 无 adapter 引擎的默认
+      /ws                    — 直连形态（无前缀）
+    """
+
+    def test_proxypass_shape_keeps_route_prefix_wss(self):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            _a2a_base_url_from_ws,
+        )
+
+        uri = "wss://proxy.example/proxypass/sbx-1:20003/api/openclaw/ws"
+        assert (
+            _a2a_base_url_from_ws(uri) == "https://proxy.example/proxypass/sbx-1:20003"
+        )
+
+    def test_proxypass_shape_keeps_route_prefix_ws(self):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            _a2a_base_url_from_ws,
+        )
+
+        uri = "ws://proxy.example/proxypass/sbx-1/api/claude_code/ws"
+        assert _a2a_base_url_from_ws(uri) == "http://proxy.example/proxypass/sbx-1"
+
+    def test_aicoding_custom_adapter_ws_path_shape(self):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            _a2a_base_url_from_ws,
+        )
+
+        # aicoding adapter 的 ws_path=/api/ws：剥后不得把 /api 留在 base 上
+        uri = "wss://proxy.example/proxypass/sbx-1/api/ws"
+        assert _a2a_base_url_from_ws(uri) == "https://proxy.example/proxypass/sbx-1"
+
+    def test_default_engine_path_shape(self):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            _a2a_base_url_from_ws,
+        )
+
+        uri = "ws://proxy.example/proxypass/sbx-1/api/teclaw/ws"
+        assert _a2a_base_url_from_ws(uri) == "http://proxy.example/proxypass/sbx-1"
+
+    def test_direct_shape_no_prefix_strips_to_bare_base(self):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            _a2a_base_url_from_ws,
+        )
+
+        assert _a2a_base_url_from_ws("ws://host:20003/ws") == "http://host:20003"
+
+    def test_direct_shape_no_path(self):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            _a2a_base_url_from_ws,
+        )
+
+        assert _a2a_base_url_from_ws("ws://host:20003") == "http://host:20003"
+
+    def test_non_ws_scheme_returns_none(self):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            _a2a_base_url_from_ws,
+        )
+
+        assert _a2a_base_url_from_ws("http://host/api/openclaw/ws") is None
+        assert _a2a_base_url_from_ws("not-a-url") is None
+        assert _a2a_base_url_from_ws("") is None
+
+
+# ══════════ P1-4: 附件 v3 回退 run 的 HITL 答复归属路由 ══════════
+
+
+def _make_exchange(request_id="e-1", accepted=True) -> EngineInteractionResolveExchange:
+    request = {
+        "type": "req",
+        "id": request_id,
+        "method": "interaction.resolve",
+        "params": {"interactionId": "int-1", "decision": "allow-once"},
+    }
+    response = {"type": "res", "id": request_id, "ok": accepted}
+    if not accepted:
+        response["ok"] = False
+        response["error"] = {"code": "UNAVAILABLE", "message": "rejected"}
+    return EngineInteractionResolveExchange.from_frames(
+        request=request, response=response
+    )
+
+
+def _claim_service_for(resolution: InteractionResolution) -> MagicMock:
+    service = MagicMock()
+    service.claim_for_dispatch.return_value = InteractionDispatch(
+        session_key="sk1",
+        interaction_id="int-1",
+        resolution=resolution,
+    )
+    return service
+
+
+class TestInteractionAnswerTransportAttribution:
+    """B3 附件 run 建在 v3 专用连接上——它的 ResolveInteraction 也必须走
+    v3：A2A kernel 注册表里没有该 run，错发 A2A 得 not_found、审批永不
+    恢复。正常 A2A session 的答复走 A2A 客户端，并带 session 标识（供
+    run 上下文取 IAM token，P1-5）。off/v3 模式恒走 self._client 且签名
+    原样（现行契约）。"""
+
+    @pytest.mark.asyncio
+    async def test_rerouted_session_answer_goes_to_v3_fallback(self, mock_bot_ws):
+        resolution = InteractionResolution(kind="exec", decision="allow-once")
+        service = _claim_service_for(resolution)
+        acc = AsyncChatClient(
+            uri="ws://host/ws", max_retries=0, interaction_service=service
+        )
+        acc._transport = "a2a"
+        a2a_client = MagicMock(name="a2a")
+        a2a_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
+        v3_client = MagicMock(name="v3")
+        v3_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
+        acc._client = a2a_client
+        acc._v3_fallback = v3_client
+        acc._v3_routed_sessions["sk1"] = "v3"  # B3 归属：附件 reroute 过
+
+        await acc._dispatch_interaction_answer(
+            session_key="sk1", interaction_id="int-1", deadline_ms=None
+        )
+
+        v3_client.interaction_resolve.assert_awaited_once_with(
+            interaction_id="int-1", resolution=resolution
+        )
+        a2a_client.interaction_resolve.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_normal_a2a_session_answer_goes_to_a2a_with_session_key(
+        self, mock_bot_ws
+    ):
+        resolution = InteractionResolution(kind="exec", decision="allow-once")
+        service = _claim_service_for(resolution)
+        acc = AsyncChatClient(
+            uri="ws://host/ws", max_retries=0, interaction_service=service
+        )
+        acc._transport = "a2a"
+        a2a_client = MagicMock(name="a2a")
+        a2a_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
+        v3_client = MagicMock(name="v3")
+        v3_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
+        acc._client = a2a_client
+        acc._v3_fallback = v3_client
+
+        await acc._dispatch_interaction_answer(
+            session_key="sk1", interaction_id="int-1", deadline_ms=None
+        )
+
+        a2a_client.interaction_resolve.assert_awaited_once_with(
+            interaction_id="int-1", resolution=resolution, session_key="sk1"
+        )
+        v3_client.interaction_resolve.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_rerouted_session_without_fallback_marks_failed(self, mock_bot_ws):
+        resolution = InteractionResolution(kind="exec", decision="allow-once")
+        service = _claim_service_for(resolution)
+        acc = AsyncChatClient(
+            uri="ws://host/ws", max_retries=0, interaction_service=service
+        )
+        acc._transport = "a2a"
+        acc._client = MagicMock(name="a2a")
+        acc._v3_routed_sessions["sk1"] = "v3"
+        acc._v3_fallback = None  # fallback 已收口
+
+        await acc._dispatch_interaction_answer(
+            session_key="sk1", interaction_id="int-1", deadline_ms=None
+        )
+
+        service.mark_failed.assert_called_once()
+        assert service.mark_failed.call_args.kwargs["session_key"] == "sk1"
+
+    @pytest.mark.asyncio
+    async def test_off_mode_signature_stays_unchanged(self, mock_bot_ws):
+        """off/v3 模式：恒走 self._client、签名不带 session_key（现行契约
+        test_interaction_dispatch_uses_typed_claim_command 的精确钉）。"""
+        resolution = InteractionResolution(kind="exec", decision="allow-once")
+        service = _claim_service_for(resolution)
+        acc = AsyncChatClient(
+            uri="ws://host/ws", max_retries=0, interaction_service=service
+        )
+        engine_client = MagicMock()
+        engine_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
+        acc._client = engine_client  # off 模式 v3-ws，脏归属表也不得干扰
+        acc._v3_routed_sessions["sk1"] = "v3"
+
+        await acc._dispatch_interaction_answer(
+            session_key="sk1", interaction_id="int-1", deadline_ms=None
+        )
+
+        engine_client.interaction_resolve.assert_awaited_once_with(
+            interaction_id="int-1", resolution=resolution
+        )

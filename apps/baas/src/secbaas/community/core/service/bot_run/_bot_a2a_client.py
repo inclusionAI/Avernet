@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import time
 import uuid
 from collections.abc import Callable
@@ -27,12 +26,12 @@ from typing import Any
 
 import httpx
 
-from secbaas.community.api.bot_interaction._models import InteractionResolution
-from secbaas.community.core.service.bot_run._interaction_protocol import (
-    EngineInteractionResolveExchange,
-)
+from secbaas.community.api.bot_interaction import InteractionResolution
+from secbaas.community.logger import get_logger
 
-logger = logging.getLogger(__name__)
+from ._interaction_protocol import EngineInteractionResolveExchange
+
+logger = get_logger("core-bot-run")
 
 EventHandler = Callable[..., Any]
 
@@ -60,6 +59,7 @@ class _RunCtx:
         "terminal_emitted",
         "task",
         "engine_task_id",
+        "auth_token",
     )
 
     def __init__(self, rid: str, session_key: str):
@@ -72,6 +72,9 @@ class _RunCtx:
         # taskId，kernel 生成）——CancelTask 转发的定位键；BaaS 自己的 rid
         # 只是 messageId/幂等键，引擎不认识。
         self.engine_task_id: str | None = None
+        # P1-5：该次 chat_send 携带的调用方许可（X-IAM-Token gate 开启时
+        # CancelTask/ResolveInteraction 都必须用它——proxypass 头不是许可）。
+        self.auth_token: str | None = None
 
 
 def _message_to_text(message: Any) -> str:
@@ -276,6 +279,9 @@ class BotA2aClient:
         ctx = _RunCtx(rid, session_key)
         self._runs[rid] = ctx
         self._session_runs[session_key] = rid
+        # P1-5：run 上下文记录该次许可——后续 CancelTask/ResolveInteraction
+        # 不能只带 proxypass 头（gate 开启会 auth_required 拒）。
+        ctx.auth_token = auth_token or "OPEN_API:NOT_PROVIDED"
         ctx.task = asyncio.create_task(self._consume_stream(ctx, resp, client))
         return {"ok": True, "runId": rid, "a2a": True}
 
@@ -455,8 +461,10 @@ class BotA2aClient:
         )
 
     async def _emit_terminal_error(self, ctx: _RunCtx, code: str, message: str) -> None:
+        # P1-2：必须 await——否则 coroutine 从未启动，SSE error/EOF 无终态/
+        # 读异常三条分支都会静默丢终态（上层悬挂）。
         ctx.terminal_emitted = True
-        self._dispatch(
+        await self._dispatch(
             "chat",
             {
                 "state": "error",
@@ -560,9 +568,15 @@ class BotA2aClient:
             "method": "CancelTask",
             "params": {"taskId": task_id},
         }
+        # P1-5：CancelTask 带 run 记录的调用方许可（gate 开启时必需）。
+        cancel_headers = dict(self.headers)
+        if ctx.auth_token:
+            cancel_headers["X-IAM-Token"] = ctx.auth_token
         try:
             async with self._http(timeout=30.0) as http:
-                resp = await http.post(self.rpc_url, json=payload, headers=self.headers)
+                resp = await http.post(
+                    self.rpc_url, json=payload, headers=cancel_headers
+                )
         except Exception as e:
             return {
                 "ok": False,
@@ -705,9 +719,14 @@ class BotA2aClient:
         *,
         interaction_id: str,
         resolution: InteractionResolution,
+        session_key: str | None = None,
     ) -> EngineInteractionResolveExchange:
         """R17-6：返回真实 dataclass；按 from_frames 等价校验响应
-        （id 一致性 + result/error 结构）——不合规响应 accepted=False。"""
+        （id 一致性 + result/error 结构）——不合规响应 accepted=False。
+
+        P1-5：session_key 供请求头取“产生该 interaction 的 run”记录的
+        IAM 许可（gate 开启时 ResolveInteraction 必须带）——查不到 run
+        上下文时不伪造许可（转交既有 self.headers，引擎按需诚实拒绝）。"""
         resolution_payload: dict[str, Any] = {
             "decision": resolution.decision,
             "kind": resolution.kind,
@@ -731,7 +750,13 @@ class BotA2aClient:
             },
         }
         async with self._http(timeout=30.0) as http:
-            resp = await http.post(self.rpc_url, json=request, headers=self.headers)
+            resolve_headers = dict(self.headers)
+            ctx = None
+            if session_key is not None:
+                ctx = self._runs.get(self._session_runs.get(session_key, ""))
+            if ctx is not None and ctx.auth_token:
+                resolve_headers["X-IAM-Token"] = ctx.auth_token
+            resp = await http.post(self.rpc_url, json=request, headers=resolve_headers)
         try:
             response_body = resp.json()
         except Exception:

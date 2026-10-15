@@ -1057,14 +1057,14 @@ def test_abort_routes_with_the_run_b3_and_off_modes():
         acc._transport = "a2a"
         acc._client = _FakeTransport("a2a")
         acc._v3_fallback = _FakeTransport("v3")
-        acc._v3_routed_sessions.add("s-att")
+        acc._v3_routed_sessions["s-att"] = "v3"
         await acc.chat_abort("s-att", "r1")  # B3 reroute 过的 run
         await acc.chat_abort("s-normal")  # A2A 正常 session
 
         acc2 = AsyncChatClient(uri="ws://unused")
         acc2._transport = "v3-ws"  # off 模式
         acc2._client = _FakeTransport("v3-ws")
-        acc2._v3_routed_sessions.add("s-att")  # 脏标记也不得干扰 v3
+        acc2._v3_routed_sessions["s-att"] = "v3"  # 脏标记也不得干扰 v3
         await acc2.chat_abort("s-att")
 
     _run(scenario())
@@ -1073,3 +1073,609 @@ def test_abort_routes_with_the_run_b3_and_off_modes():
         ("a2a", "s-normal", None),
         ("v3-ws", "s-att", None),
     ]
+
+
+# ══════════ P1-2: 终态通知漏 await（三条分支各一 + 去重语义）══════════
+
+
+def _make_terminal_scenario_app(*, frames: list[Any]) -> FastAPI:
+    """按给定 SSE 行序列输出的极简引擎面（真 TCP）。
+
+    frames 中的 str 原样输出（可塞非 JSON 构造消费异常），dict 按
+    ``data: {json}\n\n`` 原样序列化（不套 result 外壳——可直接给顶层
+    error 帧）。
+    """
+    app = FastAPI()
+
+    @app.get("/.well-known/agent-card.json")
+    def card() -> dict:
+        return {
+            "supportedInterfaces": [
+                {"protocolBinding": "JSONRPC", "protocolVersion": "1.0"}
+            ]
+        }
+
+    @app.post("/rpc")
+    async def rpc(request: Request) -> Any:
+        await request.json()
+
+        async def gen():
+            for frame in frames:
+                if isinstance(frame, str):
+                    yield frame
+                else:
+                    yield f"data: {json.dumps(frame)}\n\n"
+
+        return StreamingResponse(gen(), media_type="text/event-stream")
+
+    return app
+
+
+def _run_terminal_scenario(frames: list[Any]) -> list[dict]:
+    """起真服务器 → 发送 → 收 handler chat 帧列表（含结尾收口）。"""
+    srv = LiveServer(_make_terminal_scenario_app(frames=frames))
+    try:
+
+        async def scenario():
+            client = await _connect_async(srv.base)
+            seen: list[dict] = []
+            client.on_event("chat", lambda p: seen.append(p))
+            await client.chat_send(session_key="s", message="hi")
+            await asyncio.sleep(0.3)  # body task 收完流
+            await client.close()
+            return seen
+
+        return _run(scenario())
+    finally:
+        srv.stop()
+
+
+def test_terminal_error_reaches_consumer_on_wire_error_frame():
+    """SSE error 帧分支：error 帧到达 → handler 必须恰好收到一次 error 终态。
+    （P1-2 复现：_emit_terminal_error 漏 await → coroutine 从未启动。）"""
+    seen = _run_terminal_scenario(
+        [
+            {"jsonrpc": "2.0", "id": 1, "result": {}},
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "error": {
+                    "code": -32000,
+                    "message": "gate denied",
+                    "data": {"reason": "auth_required"},
+                },
+            },
+        ]
+    )
+    errors = [p for p in seen if p.get("state") == "error"]
+    assert len(errors) == 1, f"error terminal missing/duplicated: {seen}"
+    assert errors[0].get("errorCode") == "auth_required"
+    assert errors[0].get("errorMessage") == "gate denied"
+
+
+def test_terminal_error_reaches_consumer_on_eof_without_terminal():
+    """EOF 无终态分支：流在终态前结束 → 必须收恰好一次
+    STREAM_CLOSED_WITHOUT_TERMINAL error（消费方不得悬挂）。"""
+    seen = _run_terminal_scenario(
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {
+                    "statusUpdate": {
+                        "taskId": "t1",
+                        "status": {"state": "TASK_STATE_WORKING"},
+                        "metadata": {"seq": 1},
+                    }
+                },
+            }
+        ]
+    )
+    errors = [p for p in seen if p.get("state") == "error"]
+    assert len(errors) == 1, f"no terminal on EOF: {seen}"
+    assert errors[0].get("errorCode") == "STREAM_CLOSED_WITHOUT_TERMINAL"
+
+
+def test_terminal_error_reaches_consumer_on_stream_exception():
+    """消费异常分支：行 JSON 解析抛错 → 必须收恰好一次 STREAM_ERROR。"""
+    seen = _run_terminal_scenario(
+        [
+            "data: {not-json",
+        ]
+    )
+    errors = [p for p in seen if p.get("state") == "error"]
+    assert len(errors) == 1, f"no terminal on stream exception: {seen}"
+    assert errors[0].get("errorCode") == "STREAM_ERROR"
+
+
+def test_terminal_emitted_dedup_across_branches():
+    """首见终态后后续异常/EOF 不得二次投递（terminal_emitted 单次语义）。"""
+    seen = _run_terminal_scenario(
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "error": {
+                    "code": -32000,
+                    "message": "first error",
+                    "data": {"reason": "a2a_error"},
+                },
+            },
+            "data: {garbage-after-terminal",
+        ]
+    )
+    errors = [p for p in seen if p.get("state") == "error"]
+    assert len(errors) == 1, f"terminal leaked twice: {seen}"
+    assert errors[0].get("errorMessage") == "first error"
+
+
+# ══════════ P1-1: proxypass 真实路径下的 A2A 闭环（带路径前缀的 LiveServer）══════════
+
+
+def make_proxypass_engine_app(prefix: str) -> FastAPI:
+    """真实 proxypass 形态引擎面：所有路由挂在 ``{prefix}`` 之下——
+    模拟 proxy ``wss://proxy/proxypass/<target>{ws_path}`` 的路径前缀语义。
+    卡检查 + 一轮流式回答，供 AsyncChatClient 经 _a2a_base_url_from_ws
+    转换后探测与收发。"""
+    app = FastAPI()
+
+    @app.get(f"{prefix}/.well-known/agent-card.json")
+    def card() -> dict:
+        return {
+            "supportedInterfaces": [
+                {"protocolBinding": "JSONRPC", "protocolVersion": "1.0"}
+            ],
+            "version": "0.1.0",
+        }
+
+    @app.post(f"{prefix}/rpc")
+    async def rpc(request: Request) -> Any:
+        body = await request.json()
+        if body["method"] == "SendStreamingMessage":
+            session = body["params"]["message"]["contextId"]
+
+            async def gen():
+                yield _sse(
+                    {
+                        "statusUpdate": {
+                            "taskId": "t1",
+                            "contextId": session,
+                            "status": {"state": "TASK_STATE_COMPLETED"},
+                            "metadata": {"final": "true", "lastSeq": 1},
+                        }
+                    }
+                )
+
+            return StreamingResponse(gen(), media_type="text/event-stream")
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": body.get("id"), "error": {"code": -32601}}
+        )
+
+    return app
+
+
+def test_proxypass_route_prefix_survives_to_card_and_rpc():
+    """P1-1 复现：wss://proxy/proxypass/<target>/api/openclaw/ws 转换出的
+    A2A base 必须保留路由前缀——card GET 与 RPC 都打到 {prefix}/ 而非代理根
+    （转换丢前缀时 grey 永远回退、on 直接连不上）。"""
+    prefix = "/proxypass/sbx-a2a-1"
+    srv = LiveServer(make_proxypass_engine_app(prefix))
+    try:
+
+        async def scenario():
+            from secbaas.community.core.service.bot_run._async_chat_client import (
+                AsyncChatClient,
+            )
+
+            acc = AsyncChatClient(
+                uri=f"ws://127.0.0.1:{srv.port}{prefix}/api/openclaw/ws",
+                a2a_mode="on",
+                max_retries=0,
+            )
+            assert acc._a2a_mode == "on"
+            hello = await acc.connect()
+            assert acc._transport == "a2a", (
+                f"probing must hit prefixed card: hello={hello}"
+            )
+            content, _events = await acc.send_message(session_key="s", message="hi")
+            base_url = acc._client.base_url
+            await acc.close()
+            return base_url
+
+        base_url = _run(scenario())
+        assert base_url == f"http://127.0.0.1:{srv.port}{prefix}"
+    finally:
+        srv.stop()
+
+
+# ══════════ P1-5: Gate 开启时 CancelTask/ResolveInteraction 带 run IAM token ══════════
+
+
+def make_gate_send_and_cancel_app(*, mode: str) -> tuple[FastAPI, dict]:
+    """IAM gate 开启端的引擎速写：所有 /rpc 都要求 X-IAM-Token 与 send 时
+    记录的 run 许可一致，否则 auth_required。
+
+    mode:
+      cancel  — 流等 CancelTask 信号；CancelTask 校验 token 后回 CANCELED
+      resolve — 流等 ResolveInteraction；INPUT_REQUIRED 交互推流
+    """
+    app = FastAPI()
+    state: dict[str, Any] = {
+        "cancel_bodies": [],
+        "cancel_headers": None,
+        "resolve_headers": None,
+        "run_token": None,
+        "seen": threading.Event(),
+    }
+
+    @app.get("/.well-known/agent-card.json")
+    def card() -> dict:
+        return _cancel_capable_card()
+
+    @app.post("/rpc")
+    async def rpc(request: Request) -> Any:
+        body = await request.json()
+        token = request.headers.get("x-iam-token")
+        method = body.get("method")
+
+        def gate() -> JSONResponse | None:
+            if token != state["run_token"]:
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": body.get("id"),
+                        "error": {
+                            "code": -32000,
+                            "message": "auth_required",
+                            "data": {"reason": "auth_required"},
+                        },
+                    }
+                )
+            return None
+
+        if method == "SendStreamingMessage":
+            state["run_token"] = token  # 登记该次 send 的许可
+            session = body["params"]["message"]["contextId"]
+
+            async def gen():
+                yield _sse(
+                    {
+                        "statusUpdate": {
+                            "taskId": "eng-1",
+                            "contextId": session,
+                            "status": {"state": "TASK_STATE_WORKING"},
+                            "metadata": {"seq": 1},
+                        }
+                    }
+                )
+                if mode == "resolve":
+                    yield _sse(
+                        {
+                            "statusUpdate": {
+                                "taskId": "eng-1",
+                                "contextId": session,
+                                "status": {"state": "TASK_STATE_INPUT_REQUIRED"},
+                                "metadata": {
+                                    "kind": "ask_user",
+                                    "interactionId": "i-gate",
+                                    "seq": 2,
+                                },
+                            }
+                        }
+                    )
+                for _ in range(200):
+                    if state["seen"].is_set():
+                        break
+                    await asyncio.sleep(0.05)
+                if mode == "resolve":
+                    yield _sse(
+                        {
+                            "statusUpdate": {
+                                "taskId": "eng-1",
+                                "contextId": session,
+                                "status": {"state": "TASK_STATE_WORKING"},
+                                "metadata": {
+                                    "interactionId": "i-gate",
+                                    "seq": 3,
+                                },
+                            }
+                        }
+                    )
+                yield _sse(
+                    {
+                        "statusUpdate": {
+                            "taskId": "eng-1",
+                            "contextId": session,
+                            "status": {"state": "TASK_STATE_CANCELED"}
+                            if mode == "cancel"
+                            else {"state": "TASK_STATE_COMPLETED"},
+                            "metadata": {"final": "true", "lastSeq": 9},
+                        }
+                    }
+                )
+
+            return StreamingResponse(gen(), media_type="text/event-stream")
+        if method == "CancelTask":
+            state["cancel_headers"] = dict(request.headers)
+            state["cancel_bodies"].append(body)
+            denied = gate()
+            if denied is not None:
+                return denied
+            state["seen"].set()
+            return {
+                "jsonrpc": "2.0",
+                "id": body["id"],
+                "result": {
+                    "task": {
+                        "id": body["params"]["taskId"],
+                        "status": {"state": "TASK_STATE_CANCELED"},
+                    }
+                },
+            }
+        if method == "ResolveInteraction":
+            state["resolve_headers"] = dict(request.headers)
+            denied = gate()
+            if denied is not None:
+                return denied
+            state["seen"].set()
+            return {
+                "jsonrpc": "2.0",
+                "id": body["id"],
+                "result": {"interaction": {"resolved": True}},
+            }
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": body.get("id"), "error": {"code": -32601}}
+        )
+
+    return app, state
+
+
+def test_gate_cancel_uses_run_iam_token():
+    """P1-5 复现：send 成功（带 token）→ CancelTask 必须携带该 run 记录的
+    X-IAM-Token（只带 proxypass 头会 auth_required，原本 abort 必败）。"""
+    app, state = make_gate_send_and_cancel_app(mode="cancel")
+    srv = LiveServer(app)
+    try:
+
+        async def scenario():
+            client = await _connect_async(srv.base)
+            ack = await client.chat_send(
+                session_key="s", message="hi", auth_token="tok-live"
+            )
+            assert ack["ok"] is True
+            await asyncio.sleep(0.15)  # WORKING 帧 → engine_task_id 就位
+            out = await client.chat_abort(session_key="s")
+            await asyncio.sleep(0.2)
+            await client.close()
+            return out
+
+        out = _run(scenario())
+        assert out["ok"] is True, f"CancelTask gate-rejected (no run token): {out}"
+        assert state["cancel_headers"]["x-iam-token"] == "tok-live"
+    finally:
+        srv.stop()
+
+
+def test_gate_resolve_uses_run_iam_token_and_run_resumes():
+    """P1-5 复现：send（带 token）→ interaction.requested → ResolveInteraction
+    带 run token 答复成功，同 run 经流恢复终态（不关 Gate、不打引擎补丁）。"""
+    app, state = make_gate_send_and_cancel_app(mode="resolve")
+    srv = LiveServer(app)
+    try:
+
+        async def scenario():
+            client = await _connect_async(srv.base)
+            seen: list[dict] = []
+            client.on_event("interaction.requested", lambda p: seen.append(("req", p)))
+            client.on_event(
+                "chat",
+                lambda p: (
+                    seen.append(("chat", p))
+                    if p.get("state") in ("final", "error")
+                    else None
+                ),
+            )
+            ack = await client.chat_send(
+                session_key="s", message="hi", auth_token="tok-live"
+            )
+            assert ack["ok"] is True
+            await asyncio.sleep(0.15)  # INPUT_REQUIRED 帧入流
+            exchange = await client.interaction_resolve(
+                interaction_id="i-gate",
+                resolution=InteractionResolution(kind="ask_user", decision="submit"),
+                session_key="s",
+            )
+            await asyncio.sleep(0.3)  # 流继续 → 终态
+            await client.close()
+            return exchange, seen
+
+        exchange, seen = _run(scenario())
+        assert exchange.accepted is True, f"resolve gate-rejected: {exchange}"
+        assert state["resolve_headers"]["x-iam-token"] == "tok-live"
+        assert any(n == "req" for n, _ in seen), "INTERACTION 请求未入流"
+        finals = [p for n, p in seen if n == "chat" and p.get("state") == "final"]
+        assert finals, f"同 run 未恢复终态: {seen}"
+    finally:
+        srv.stop()
+
+
+# ══════════ P1-4: 附件 v3 回退 run 的 HITL 闭环（真 a2a 面 + v3 duck 替身）══════════
+
+
+class _FakeV3KingineTransport:
+    """BotWebSocketClient 的 duck 替身（仅测试面）：_ensure_v3_fallback 用真
+    代码构造时会 new 本类（patch 点就在构造导入处），handlers 双注册/懒建/
+    close 收口全走被测代码；emit 模拟引擎经 v3 推帧（handler 签名与
+    BotWebSocketClient 一致：精确单参 + 通配两参）。"""
+
+    def __init__(self, uri: str, client_id=None, client_version="1.0.0", headers=None):
+        self.uri = uri
+        self.connected = True
+        self._event_handlers: dict[str, Any] = {}
+        self.chat_send_calls: list[tuple[str, dict]] = []
+        self.chat_abort_calls: list[tuple[str, Any]] = []
+        self.interaction_resolve_calls: list[tuple[str, Any]] = []
+        self.close_calls = 0
+
+    async def connect(self) -> dict[str, Any]:
+        return {"ok": True, "payload": {"server": {}}}
+
+    def on_event(self, name: str, handler: Any) -> None:
+        self._event_handlers[name] = handler
+
+    def on_disconnect(self, handler: Any) -> None:
+        pass
+
+    async def chat_send(self, session_key: str, message: str, **kwargs: Any) -> dict:
+        self.chat_send_calls.append((session_key, kwargs))
+        return {"ok": True}
+
+    async def chat_abort(self, session_key: str, run_id=None) -> dict:
+        self.chat_abort_calls.append((session_key, run_id))
+        return {"ok": True}
+
+    async def interaction_resolve(
+        self, *, interaction_id: str, resolution: InteractionResolution
+    ) -> Any:
+        self.interaction_resolve_calls.append((interaction_id, resolution))
+        return EngineInteractionResolveExchange.from_frames(
+            request={
+                "type": "req",
+                "id": "v3-e1",
+                "method": "interaction.resolve",
+                "params": {
+                    "interactionId": interaction_id,
+                    "decision": resolution.decision,
+                },
+            },
+            response={"type": "res", "id": "v3-e1", "ok": True},
+        )
+
+    async def close(self) -> None:
+        self.close_calls += 1
+        self.connected = False
+
+    def emit(self, event: str, payload: dict) -> None:
+        handler = self._event_handlers.get(event)
+        if handler:
+            result = handler(payload)
+            assert not asyncio.iscoroutine(result)
+        wildcard = self._event_handlers.get("*")
+        if wildcard:
+            result = wildcard(event, payload)
+            assert not asyncio.iscoroutine(result)
+
+
+def test_attachment_hitl_answer_routes_via_v3_and_run_resumes():
+    """P1-4 闭环：附件请求 → v3 run → interaction.requested → 用户答复 →
+    答复发到 v3 专用连接（A2A kernel 无此 run）→ 同一 v3 run 恢复收终态。
+
+    注入面说明：v3 侧（engine v3 WS 面）本测试树没有真实服务端实现，
+    BotWebSocketClient 构造点以 duck 替身注入——归属路由/handler 桥/
+    回收清表全为被测真实代码；a2a 侧探测走真 uvicorn TCP。"""
+    from unittest.mock import MagicMock, patch
+
+    from secbaas.community.api.bot_interaction import InteractionRequestedResult
+    from secbaas.community.core.service.bot_interaction import InteractionDispatch
+    from secbaas.community.core.service.bot_run._async_chat_client import (
+        AsyncChatClient,
+    )
+
+    srv = LiveServer(make_card_app("JSONRPC", "1.0"))
+    try:
+
+        async def scenario():
+            service = MagicMock()
+            service.record_requested.return_value = InteractionRequestedResult(
+                baas_interaction_id="BAAS-1", created=True
+            )
+            resolution = InteractionResolution(kind="exec", decision="allow-once")
+            service.claim_for_dispatch.return_value = InteractionDispatch(
+                session_key="hitl-1",
+                interaction_id="i-1",
+                resolution=resolution,
+            )
+            acc = AsyncChatClient(
+                uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
+                a2a_mode="on",
+                max_retries=0,
+                interaction_service=service,
+            )
+            hello = await acc.connect()
+            assert acc._transport == "a2a", hello
+
+            async def spy_resolve(**kwargs: Any) -> Any:
+                raise AssertionError("answer leaked to a2a transport")
+
+            assert acc._client is not None
+            acc._client.interaction_resolve = spy_resolve
+
+            with patch(
+                "secbaas.community.core.service.bot_run._bot_websocket_client.BotWebSocketClient",
+                _FakeV3KingineTransport,
+            ):
+                task = asyncio.create_task(
+                    acc.send_message(
+                        "approve?",
+                        session_key="hitl-1",
+                        attachments=[{"kind": "screenshot"}],
+                        auth_token="tok-live",
+                    )
+                )
+                await asyncio.sleep(0.05)  # reroute 发生
+                v3 = acc._v3_fallback
+                assert v3 is not None, "附件请求未 reroute 到 v3 fallback"
+                assert v3.chat_send_calls, "chat_send 未打到 v3"
+                assert v3.chat_send_calls[0][0] == "hitl-1"
+                assert v3.chat_send_calls[0][1]["attachments"] == [
+                    {"kind": "screenshot"}
+                ]
+
+                # 引擎经 v3 推同一 run 的 interaction.requested
+                v3.emit(
+                    "interaction.requested",
+                    {
+                        "sessionKey": "hitl-1",
+                        "interactionId": "i-1",
+                        "kind": "exec",
+                        "options": [{"label": "Once", "decision": "allow-once"}],
+                    },
+                )
+                # 用户答复 → 派发必须走 v3 连接（A2A 侧断言已布雷：必炸）
+                for _ in range(50):
+                    if v3.interaction_resolve_calls:
+                        break
+                    await asyncio.sleep(0.05)
+                assert v3.interaction_resolve_calls, "答复未路由到产生 run 的 v3 连接"
+                # 用户答复已应答后，服务端记取 exchange
+                assert service.claim_for_dispatch.call_count >= 1
+
+                # 同一 v3 run 恢复收尾：resolved + 终稿
+                v3.emit(
+                    "interaction.resolved",
+                    {"sessionKey": "hitl-1", "interactionId": "i-1"},
+                )
+                v3.emit(
+                    "chat",
+                    {
+                        "sessionKey": "hitl-1",
+                        "state": "final",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "text", "text": "resumed-after-approval"}
+                            ],
+                        },
+                    },
+                )
+                content, _events = await asyncio.wait_for(task, 5)
+                assert content == "resumed-after-approval"
+                assert "hitl-1" not in acc._v3_routed_sessions
+                await acc.close()
+                return service
+
+        svc = _run(scenario())
+        svc.record_engine_exchange.assert_called_once()
+        assert svc.record_engine_exchange.call_args.kwargs["interaction_id"] == "i-1"
+    finally:
+        srv.stop()
