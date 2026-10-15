@@ -127,7 +127,13 @@ function toPublicationRequest(command: PublicationCommand): BcsPublicRequest {
 
   return {
     public_scope: command.audience === 'user' ? 'user' : 'agent',
-    visibility: command.config.scope === 'none' ? 'private' : 'public',
+    // 限定组织可申请 → protected；全部可见 → public；不可见 → private。对用户与对 Bot 受众一致。
+    visibility:
+      command.config.scope === 'none'
+        ? 'private'
+        : command.config.scope === 'restricted'
+          ? 'protected'
+          : 'public',
     view_depts: viewDepts?.length ? viewDepts : null,
   };
 }
