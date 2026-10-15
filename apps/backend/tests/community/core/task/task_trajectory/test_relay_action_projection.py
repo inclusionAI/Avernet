@@ -303,8 +303,13 @@ def test_projection_projects_s6_dispatch_trace_from_action_log() -> None:
                                     "step": "S6_DISPATCH",
                                     "status": "completed",
                                     "detail": {
-                                        "input": {"target_node_id": "node-s6"},
-                                        "output": {"assignee": "bot-1"},
+                                        "action_type": "dispatch",
+                                        "action_input": '{"target_node_id":"node-s6"}',
+                                        "action_result": "delivered",
+                                        "status_from": "PENDING",
+                                        "status_to": "RUNNING",
+                                        "boost_reason": "relay handoff accepted",
+                                        "error_msg": None,
                                     },
                                 }
                             ]
@@ -325,8 +330,13 @@ def test_projection_projects_s6_dispatch_trace_from_action_log() -> None:
             "step": "S6_DISPATCH",
             "status": "completed",
             "detail": {
-                "input": {"target_node_id": "node-s6"},
-                "output": {"assignee": "bot-1"},
+                "action_type": "dispatch",
+                "action_input": '{"target_node_id":"node-s6"}',
+                "action_result": "delivered",
+                "status_from": "PENDING",
+                "status_to": "RUNNING",
+                "boost_reason": "relay handoff accepted",
+                "error_msg": None,
             },
         }
     ]

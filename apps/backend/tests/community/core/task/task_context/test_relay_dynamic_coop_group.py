@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from agentclaw.community.adapters.http.task.schemas_relay_report import (
@@ -404,19 +406,20 @@ def test_task_service_dispatch_completes_dynamic_group_delivery_chain() -> None:
     trace_steps = dispatch_log.payload["trace"]["steps"]
     assert len(trace_steps) == 1
     trace_step = trace_steps[0]
+    action_input = json.loads(trace_step["detail"]["action_input"])
     assert trace_step["step"] == "S6_DISPATCH"
     assert trace_step["status"] == "completed"
-    assert trace_step["detail"]["input"] == {
-        "task_id": "task-1",
-        "origin_node_id": "task-1",
-        "target_node_id": "node-group",
-        "run_mode": "coop_group",
-        "assignee": None,
-        "delivery_intake_status": "PENDING",
-    }
-    assert trace_step["detail"]["output"]["group_id"] == "grp-created"
-    assert trace_step["detail"]["output"]["actual_run_mode"] is None
-    assert "error" not in trace_step["detail"]
+    assert trace_step["detail"]["action_type"] == "dispatch"
+    assert trace_step["detail"]["action_result"] == "delivered"
+    assert trace_step["detail"]["status_from"] == "PENDING"
+    assert trace_step["detail"]["status_to"] == "RUNNING"
+    assert trace_step["detail"]["boost_reason"] == "relay handoff accepted by the selected runtime"
+    assert trace_step["detail"]["error_msg"] is None
+    assert action_input["origin_node_id"] == "task-1"
+    assert action_input["target_node_id"] == "node-group"
+    assert action_input["run_mode"] == "coop_group"
+    assert action_input["assignee"] is None
+    assert action_input["delivery_intake_status"] == "PENDING"
 
 
 class _FailingDispatcher:
@@ -457,17 +460,21 @@ def test_task_service_dispatch_failure_records_s6_error_details() -> None:
         "RuntimeError: delivery transport failed"
     )
     trace_step = dispatch_log.payload["trace"]["steps"][0]
+    action_input = json.loads(trace_step["detail"]["action_input"])
     assert trace_step["step"] == "S6_DISPATCH"
     assert trace_step["status"] == "failed"
-    assert trace_step["detail"]["input"]["origin_node_id"] == "task-1"
-    assert trace_step["detail"]["input"]["target_node_id"] == "node-failed"
-    assert trace_step["detail"]["output"]["run_mode"] == "single_bot"
-    assert trace_step["detail"]["output"]["assignee"] == "bot-worker"
-    assert trace_step["detail"]["error"] == {
-        "message": "RuntimeError: delivery transport failed",
-        "stage": "delivery",
-        "retryable": True,
-    }
+    assert trace_step["detail"]["action_type"] == "dispatch"
+    assert trace_step["detail"]["action_result"] == "failed"
+    assert trace_step["detail"]["status_from"] == "PENDING"
+    assert trace_step["detail"]["status_to"] == "RUNNING"
+    assert trace_step["detail"]["boost_reason"] == "relay handoff rejected by the selected runtime"
+    assert trace_step["detail"]["error_msg"] == (
+        "RuntimeError: delivery transport failed"
+    )
+    assert action_input["origin_node_id"] == "task-1"
+    assert action_input["target_node_id"] == "node-failed"
+    assert action_input["run_mode"] == "single_bot"
+    assert action_input["assignee"] == "bot-worker"
     assert intents.marks[-1] == ("task-1", "node-failed", False)
     assert "relay_token" not in dispatch_log.payload
     assert "relay_token" not in trace_step["detail"]
@@ -503,11 +510,17 @@ def test_task_service_dispatch_without_dispatcher_records_s6_error_without_state
     assert dispatch_log.payload["action_result"] == "failed"
     assert dispatch_log.payload["failure_reason"].endswith("relay dispatcher is not configured")
     trace_step = dispatch_log.payload["trace"]["steps"][0]
+    action_input = json.loads(trace_step["detail"]["action_input"])
     assert trace_step["step"] == "S6_DISPATCH"
     assert trace_step["status"] == "failed"
-    assert trace_step["detail"]["input"]["delivery_intake_status"] == "PENDING"
-    assert trace_step["detail"]["output"]["target_status"] == "RUNNING"
-    assert trace_step["detail"]["error"]["stage"] == "delivery"
+    assert trace_step["detail"]["action_type"] == "dispatch"
+    assert trace_step["detail"]["action_result"] == "failed"
+    assert trace_step["detail"]["status_from"] == "PENDING"
+    assert trace_step["detail"]["status_to"] == "RUNNING"
+    assert action_input["delivery_intake_status"] == "PENDING"
+    assert trace_step["detail"]["error_msg"].endswith(
+        "relay dispatcher is not configured"
+    )
 
 
 def test_task_service_dispatch_retires_legacy_root_with_s6_trace() -> None:
@@ -523,13 +536,18 @@ def test_task_service_dispatch_retires_legacy_root_with_s6_trace() -> None:
     dispatch_log = root.run_info.action_log[-1]
     assert dispatch_log.payload["action_result"] == "retired_legacy_root_intent"
     trace_step = dispatch_log.payload["trace"]["steps"][0]
+    action_input = json.loads(trace_step["detail"]["action_input"])
     assert trace_step["step"] == "S6_DISPATCH"
     assert trace_step["status"] == "completed"
-    assert trace_step["detail"]["input"]["target_node_id"] == "task-1"
-    assert trace_step["detail"]["output"] == {
-        "decision": "retired_legacy_root_intent",
-        "reason": "baton already in requester session",
-    }
+    assert trace_step["detail"]["action_type"] == "dispatch"
+    assert trace_step["detail"]["action_result"] == "retired_legacy_root_intent"
+    assert trace_step["detail"]["status_from"] == "RUNNING"
+    assert trace_step["detail"]["status_to"] == "RUNNING"
+    assert trace_step["detail"]["boost_reason"] == (
+        "legacy root intent retired to avoid duplicate delivery"
+    )
+    assert trace_step["detail"]["error_msg"] is None
+    assert action_input["target_node_id"] == "task-1"
 
 
 def _run(coroutine):

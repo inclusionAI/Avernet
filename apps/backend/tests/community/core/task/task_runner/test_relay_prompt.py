@@ -114,13 +114,14 @@ def test_relay_prompt_requires_structured_diagnostic_trace() -> None:
         acceptances=[],
     )
 
-    assert "每个 step.detail 都必须是结构化 JSON object" in prompt
-    assert "至少记录该步骤的 input 与 output" in prompt
-    assert "error={message,stage,retryable}" in prompt
+    assert "每个 step.detail 都使用 7 个固定字段" in prompt
+    assert "action_type、action_input、action_result、status_from、status_to、boost_reason、error_msg" in prompt
+    assert "S1~S4b 的 action_type=execute" in prompt
+    assert "S5.1~S5.5 的 action_type=plan" in prompt
+    assert "S6 由服务端补充 action_type=dispatch" in prompt
+    assert "不要在 detail 中另外展开 input/output/evidence/error 等一级字段" in prompt
     assert "S4a 记录执行计划、关键工具调用摘要、产物路径" in prompt
     assert "S5.3 记录搜索词、raw_item_count、候选评分" in prompt
-    assert "需要核验时记录 evidence=[{type,source,summary,reference}]" in prompt
     assert "manager-only manager_worker 群" in prompt
     assert "不放 relay_token、密钥、会话凭证" in prompt
     assert "trace JSON 在构造后固定" in prompt
-    assert "网络重试时必须与原请求字节一致" in prompt

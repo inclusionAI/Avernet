@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 from agentclaw.community.core.task.domain.errors import DispatchInProgress, TaskStateError
@@ -24,13 +25,20 @@ _BBS_DELIVERY_LEASE_MS = 600_000
 
 
 def _relay_delivery_trace(
-    status: str, detail: dict[str, object]
+    *,
+    status: str,
+    action_input: dict[str, object],
+    action_result: str,
+    status_from: Status,
+    status_to: Status,
+    boost_reason: str,
+    error_msg: str | None = None,
 ) -> dict[str, object]:
-    """Project S6 service-side dispatch facts in the same trace shape as S1-S5.
+    """Project S6 service-side facts into the seven shared trajectory fields.
 
-    S6 remains owned by the dispatch action log. The nested ``trace`` is only an
-    observability projection for trajectory rendering, not a report event and
-    not a state input. It intentionally omits relay_token and credentials.
+    This keeps the report's outer ``step/status/detail`` contract unchanged.
+    The trajectory owner can map ``detail`` directly to a trajectory event; the
+    delivery logic does not format or render it.
     """
     return {
         "trace": {
@@ -38,14 +46,26 @@ def _relay_delivery_trace(
                 {
                     "step": "S6_DISPATCH",
                     "status": status,
-                    "detail": detail,
+                    "detail": {
+                        "action_type": "dispatch",
+                        "action_input": json.dumps(
+                            action_input,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                        "action_result": action_result,
+                        "status_from": status_from.value,
+                        "status_to": status_to.value,
+                        "boost_reason": boost_reason,
+                        "error_msg": error_msg,
+                    },
                 }
             ]
         }
     }
 
 
-def _relay_delivery_input(task_id: str, node: TaskNode) -> dict:
+def _relay_delivery_input(task_id: str, node: TaskNode) -> dict[str, object]:
     extend_props = node.run_info.extend_props
     return {
         "task_id": task_id,
@@ -53,21 +73,11 @@ def _relay_delivery_input(task_id: str, node: TaskNode) -> dict:
         "target_node_id": node.node_id,
         "run_mode": node.run_info.run_mode,
         "assignee": node.run_info.assignee,
-        "delivery_intake_status": node.status.value,
-    }
-
-
-def _relay_delivery_output(node: TaskNode) -> dict:
-    extend_props = node.run_info.extend_props
-    return {
-        "run_mode": node.run_info.run_mode,
         "actual_run_mode": extend_props.get("actual_run_mode"),
-        "assignee": node.run_info.assignee,
         "group_id": extend_props.get("group_id"),
         "session_id": extend_props.get("session_id"),
-        "target_status": node.status.value,
+        "delivery_intake_status": node.status.value,
     }
-
 
 class TaskServiceDeliveryMixin:
     async def dispatch_node(self, task_id: str, node_id: str) -> TaskNode:
@@ -118,14 +128,12 @@ class TaskServiceDeliveryMixin:
                     "run_mode": node.run_info.run_mode,
                     "assignee": node.run_info.assignee,
                     **_relay_delivery_trace(
-                        "completed",
-                        {
-                            "input": _relay_delivery_input(task_id, node),
-                            "output": {
-                                "decision": "retired_legacy_root_intent",
-                                "reason": "baton already in requester session",
-                            },
-                        },
+                        status="completed",
+                        action_input=_relay_delivery_input(task_id, node),
+                        action_result="retired_legacy_root_intent",
+                        status_from=initial_status,
+                        status_to=node.status,
+                        boost_reason="legacy root intent retired to avoid duplicate delivery",
                     ),
                 },
                 status_from=initial_status,
@@ -166,11 +174,12 @@ class TaskServiceDeliveryMixin:
                     "run_mode": delivered.run_info.run_mode,
                     "assignee": delivered.run_info.assignee,
                     **_relay_delivery_trace(
-                        "completed",
-                        {
-                            "input": dispatch_input,
-                            "output": _relay_delivery_output(delivered),
-                        },
+                        status="completed",
+                        action_input=dispatch_input,
+                        action_result="delivered",
+                        status_from=initial_status,
+                        status_to=delivered.status,
+                        boost_reason="relay handoff accepted by the selected runtime",
                     ),
                 },
                 status_from=initial_status,
@@ -193,16 +202,13 @@ class TaskServiceDeliveryMixin:
                     "assignee": node.run_info.assignee,
                     "failure_reason": f"{type(exc).__name__}: {exc}",
                     **_relay_delivery_trace(
-                        "failed",
-                        {
-                            "input": dispatch_input,
-                            "output": _relay_delivery_output(node),
-                            "error": {
-                                "message": f"{type(exc).__name__}: {exc}",
-                                "stage": "delivery",
-                                "retryable": True,
-                            },
-                        },
+                        status="failed",
+                        action_input=dispatch_input,
+                        action_result="failed",
+                        status_from=initial_status,
+                        status_to=node.status,
+                        boost_reason="relay handoff rejected by the selected runtime",
+                        error_msg=f"{type(exc).__name__}: {exc}",
                     ),
                 },
                 status_from=initial_status,
