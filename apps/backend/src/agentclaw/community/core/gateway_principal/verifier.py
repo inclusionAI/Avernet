@@ -41,7 +41,6 @@ from agentclaw.community.core.gateway_principal.errors import (
 )
 from agentclaw.community.core.gateway_principal.models import (
     AppPrincipal,
-    BotPrincipal,
     GatewayPrincipal,
     GatewayUser,
     UserPrincipal,
@@ -276,22 +275,6 @@ def verify_principal_token(
     else.
     """
     return caller_from_claims(decode_principal_token(token, config))
-
-
-def verify_task_bot_principal_token(
-    token: str, config: PrincipalVerifierConfig,
-) -> VerifiedCaller:
-    """Verify an exclusive Bot identity for the internal task execution plane.
-
-    The ordinary public verifier deliberately refuses Bot-only callers. Task
-    execution has a narrower policy: precisely one gateway-authenticated Bot,
-    without borrowing a human or App identity, may act as a relay holder.
-    """
-    principals = _parse_principals(decode_principal_token(token, config).get("principals"))
-    _reject_contradictory_tenant(principals)
-    if len(principals) != 1 or not isinstance(principals[0], BotPrincipal):
-        raise PrincipalVerificationError("task execution requires one Bot principal")
-    return VerifiedCaller(principals=principals)
 
 
 def decode_principal_token(

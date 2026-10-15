@@ -23,7 +23,6 @@ from agentclaw.community.core.gateway_principal import (
     UserPrincipal,
     key_fingerprint,
     verify_principal_token,
-    verify_task_bot_principal_token,
 )
 from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
 
@@ -162,24 +161,6 @@ def test_user_wins_over_bot_when_both_identities_are_present():
     assert len(caller.principals) == 2
     assert isinstance(caller.principals[0], BotPrincipal)
     assert caller.user_id == "u-1"
-
-
-def test_task_bot_verifier_accepts_only_exclusive_signed_bot_identity():
-    caller = verify_task_bot_principal_token(mint([bot_principal()]), CONFIG)
-    assert len(caller.principals) == 1
-    assert isinstance(caller.principals[0], BotPrincipal)
-    assert caller.principals[0].bot.bot_uuid == "bot-abc"
-
-    for principals in (
-        [user_principal()],
-        [app_principal()],
-        [bot_principal(), user_principal()],
-        [bot_principal(), bot_principal()],
-    ):
-        with pytest.raises(PrincipalVerificationError):
-            verify_task_bot_principal_token(mint(principals), CONFIG)
-    with pytest.raises(PrincipalVerificationError):
-        verify_task_bot_principal_token(mint([bot_principal()], key="wrong-key"), CONFIG)
 
 
 def test_access_key_alongside_a_user_is_carried():

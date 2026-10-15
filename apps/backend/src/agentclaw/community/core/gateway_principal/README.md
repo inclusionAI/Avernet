@@ -42,7 +42,6 @@ provides:
   - PrincipalSignerConfig
   - VerifiedCaller
   - verify_principal_token
-  - verify_task_bot_principal_token
   - decode_principal_token
   - caller_from_claims
   - resign_principal_token
@@ -108,10 +107,3 @@ notice changes to the DTOs unless `VerifiedCaller.user_id` or `.tenant` changes
 meaning. Those two properties are the load-bearing surface: `user_id` scopes data
 to the caller and `tenant` scopes it to their tenant, and getting either wrong is
 a cross-tenant data leak rather than a bug.
-
-The task execution plane has a separate `verify_task_bot_principal_token` entry
-point. It uses the same signature, issuer, audience, expiry, schema and tenant
-checks, but accepts **exactly one Bot principal**. It does not change the
-`/openapi/v1` admission policy or allow a Bot to impersonate its owner. Task
-HTTP adapters must additionally authorize that Bot against the addressed
-TaskNode before accepting a context read, report or handoff.
