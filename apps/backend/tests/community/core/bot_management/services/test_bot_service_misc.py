@@ -1064,9 +1064,7 @@ class TestTemplateFactoryBranchCoverage:
         assert "template_config" not in result["items"][0]
         svc._template_service.list_templates_by_bot_ids.assert_not_called()
 
-    def test_aicoding_personal_coding_uses_legacy_bcn_provider_fallback(self):
-        assert BotService._should_register_bcn_provider(
-            active_engine="aicoding",
-            bot_type="personal",
-            template_type="personalCoding",
-        ) is True
+    def test_aicoding_personal_coding_uses_gateway_connection_mode(self):
+        assert BotService._resolve_bcn_provider_connection_mode(
+            active_engine="aicoding", bot_type="personal"
+        ) is None

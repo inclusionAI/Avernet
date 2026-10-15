@@ -11,7 +11,7 @@ import os
 import threading
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import httpx
 
@@ -70,6 +70,7 @@ from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.desktop_bot.desktop_bot_service_protocol import DesktopBotServiceProtocol
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.bot_management.services.bot_service import BotService
     # Type-only: runtime ``from agentclaw.community.di import config`` triggers
     # di/__init__ → container → desktop_bot_module → lifecycle →
     # desktop_bot_service, forming a cycle. The injected BaasConfig is
@@ -119,8 +120,10 @@ class DesktopBotService(DesktopBotServiceProtocol):
         skills_pool_native_creation_policy: SkillsPoolNativeCreationPolicy,
         skill_layout_repository: SkillsPoolLayoutRepositoryProtocol,
         layout_confirmation: LayoutInitializationConfirmationProtocol,
+        bot_service_provider: Callable[[], BotService],
     ):
         self._baas = baas_service
+        self._bot_service_provider = bot_service_provider
         self._passport = passport_plugin
         self._binding_repo = device_binding_repo
         self._bot_repo = bot_repository
@@ -168,6 +171,9 @@ class DesktopBotService(DesktopBotServiceProtocol):
             native_creation_policy=skills_pool_native_creation_policy,
             desktop_template_uuid=self._desktop_template_uuid,
             hooks=DesktopCreationLifecycleHooks(
+                register_bcn_provider=lambda **kwargs: (
+                    self._register_bot_to_bcn(**kwargs, skip_registered=True)
+                ),
                 layout_credentials_for_scope=lambda **kwargs: (
                     self._desktop_layout_credentials_for_scope(**kwargs)
                 ),
@@ -183,6 +189,46 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 ),
             ),
         )
+
+    def _register_bot_to_bcn(
+        self, *, bot: dict[str, Any], user_id: str, skip_registered: bool
+    ) -> None:
+        """Reuse the shared registration policy for Desktop create and restart."""
+        bot_id = bot["bot_id"]
+        ext = bot.get("ext") or {}
+        if isinstance(ext, str):
+            try:
+                ext = json.loads(ext)
+            except json.JSONDecodeError:
+                ext = {}
+        if skip_registered and isinstance(ext, dict) and ext.get("bcn_registered") is True:
+            return
+        active_engine = bot.get("active_engine") or DEFAULT_ENGINE_TYPE
+        try:
+            service = self._bot_service_provider()
+            connection_mode = service._resolve_bcn_provider_connection_mode(
+                active_engine=active_engine, bot_type="desktop"
+            )
+            logger.info(
+                "[DesktopBotService] event=bcn_registration_requested "
+                "bot_id=%s owner_id=%s active_engine=%s bot_type=desktop connection_mode=%s",
+                bot_id, user_id, active_engine, connection_mode,
+            )
+            service._register_bot_to_bcn_as_provider(
+                bot_id=bot_id,
+                user_id=user_id,
+                owner_workno=user_id,
+                bot_name=bot.get("bot_name") or bot_id,
+                bot_summary=bot.get("bot_desc") or "",
+                connection_mode=connection_mode,
+                respect_drm=False,
+            )
+        except Exception as error:
+            logger.warning(
+                "[DesktopBotService] event=bcn_registration_failed "
+                "bot_id=%s owner_id=%s active_engine=%s error_type=%s",
+                bot_id, user_id, active_engine, type(error).__name__,
+            )
 
     # ── list & status check ──────────────────────────────────────────────
 
@@ -788,6 +834,9 @@ class DesktopBotService(DesktopBotServiceProtocol):
                         if isinstance(passport, dict)
                         else ""
                     )
+                    self._register_bot_to_bcn(
+                        bot=existing, user_id=user_id, skip_registered=True
+                    )
                     return {
                         "bot_uuid": existing.get("device_id", ""),
                         "binding_id": existing.get("binding_id"),
@@ -945,6 +994,10 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 raise DesktopBotServiceError(
                     f"重启审批失败: publish_id={publish_id}, error={e}"
                 )
+
+        self._register_bot_to_bcn(
+            bot=bot, user_id=user_id, skip_registered=False
+        )
 
         # 记录本次进入 PENDING 的时刻,供周期扫描的过渡超时兜底使用。
         # 必须用这个独立时间戳而非 gmt_create:老 bot 的 gmt_create 早超

@@ -747,7 +747,7 @@ class TestRestartBot:
 
 
 @pytest.mark.parametrize("engine,bot_type", [
-    ("openclaw", "personal"), ("openclaw", "service"),
+    ("openclaw", "personal"), ("openclaw", "desktop"), ("openclaw", "service"),
     ("openclaw", "custom"), ("claude_code", "personal"),
     ("aicoding", "service"), ("architect", "personal"),
     ("moltis", "personal"), ("teclaw", "service"), ("future_engine", "custom"),
@@ -771,7 +771,7 @@ def test_start_registers_all_combinations_despite_disabled_capability_and_drm(en
     with patch.object(svc, "_allocate_device_async", side_effect=lambda **kw: timeline.append("allocate")), patch.object(svc, "update_bot_ext"):
         svc.start_bot(bot_id="bot001", user_id="user001")
     expected = dict(teamclaw_bot_uuid="bot001", owner_workno="user001", name="TestBot", summary="")
-    if engine == "openclaw" and bot_type == "personal":
+    if engine == "openclaw" and bot_type in ("personal", "desktop"):
         expected["connection_mode"] = "plugin"
     svc._bcn_service.register_provider_bot.assert_called_once_with(**expected)
     assert timeline == ["register", "allocate"]

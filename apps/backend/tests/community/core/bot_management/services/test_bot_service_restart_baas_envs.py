@@ -735,7 +735,7 @@ class TestRestartBaasCodefuseTokenPassthrough:
 
 
 @pytest.mark.parametrize("coding_prepare", [False, True])
-@pytest.mark.parametrize("engine,bot_type", [("openclaw", "personal"), ("openclaw", "service"), ("aicoding", "personal"), ("architect", "personal")])
+@pytest.mark.parametrize("engine,bot_type", [("openclaw", "personal"), ("openclaw", "desktop"), ("openclaw", "service"), ("aicoding", "personal"), ("architect", "personal")])
 def test_restart_registers_without_legacy_gates(coding_prepare, engine, bot_type):
     from agentclaw.community.core.bot_management.engines.aicoding.restart_request import AicodingBaasPreparation
     svc, baas, _ = _make_service(template_config={"capabilities": {"bcn": {"join_as_provider": False}}})
@@ -749,7 +749,7 @@ def test_restart_registers_without_legacy_gates(coding_prepare, engine, bot_type
         svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
         baas.upgrade_bot.assert_called_once()
     expected = dict(teamclaw_bot_uuid="bot001", owner_workno="user001", name="TestBot", summary="")
-    if engine == "openclaw" and bot_type == "personal":
+    if engine == "openclaw" and bot_type in ("personal", "desktop"):
         expected["connection_mode"] = "plugin"
     svc._bcn_service.register_provider_bot.assert_called_once_with(**expected)
 

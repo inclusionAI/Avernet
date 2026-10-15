@@ -947,6 +947,7 @@ class TestCreate:
             skills_pool_native_creation_policy=MagicMock(),
             skill_layout_repository=MagicMock(),
             layout_confirmation=MagicMock(),
+            bot_service_provider=MagicMock(),
         )
         service._fetch_machine_info = MagicMock(
             return_value={"device_token": "dev-tok-001"}
@@ -2552,6 +2553,7 @@ def _make_service():
         ),
         skill_layout_repository=MagicMock(),
         layout_confirmation=MagicMock(),
+        bot_service_provider=MagicMock(),
     )
 
 
@@ -2575,6 +2577,7 @@ def _make_service_with_mocks():
         ),
         "layout_repo": MagicMock(),
         "layout_confirmation": MagicMock(),
+        "bot_service": MagicMock(),
     }
     service = DesktopBotService(
         baas_service=mocks["baas"],
@@ -2587,6 +2590,7 @@ def _make_service_with_mocks():
         skills_pool_native_creation_policy=mocks["native_creation_policy"],
         skill_layout_repository=mocks["layout_repo"],
         layout_confirmation=mocks["layout_confirmation"],
+        bot_service_provider=lambda: mocks["bot_service"],
     )
     # _fetch_machine_info makes a real HTTP call; mock it for all unit tests
     service._fetch_machine_info = MagicMock(
@@ -2795,3 +2799,119 @@ class TestListUserBots:
 
         assert result == []
         assert mocks["bot_repo"].search_bots.call_count == 1
+
+
+@pytest.mark.parametrize("engine, mode", [("openclaw", "plugin"), ("hermes", None)])
+def test_desktop_create_registers_bcn_after_final_ext_write(engine, mode, caplog):
+    from agentclaw.community.core.bot_management.services.bot_service import BotService
+
+    caplog.set_level("INFO")
+    service, mocks = _make_service_with_mocks()
+    registrar = BotService.__new__(BotService)
+    registrar._repository = mocks["bot_repo"]
+    registrar._bcn_service = MagicMock()
+    registrar._bcn_service.register_provider_bot.return_value = {"bot_uuid": "registered", "bot_runtime_token": "never-log-token"}
+    mocks["bot_service"] = registrar
+    persisted = {}
+
+    def insert(data, *, layout):
+        persisted.update(data)
+        return dict(persisted)
+
+    def update(*args, **kwargs):
+        persisted.update(args[2] if args else kwargs["update_data"])
+        return dict(persisted)
+
+    mocks["bot_repo"].insert_with_initial_skill_layout.side_effect = insert
+    mocks["bot_repo"].get_by_id_and_owner.side_effect = lambda *args, **kwargs: dict(persisted) or None
+    mocks["bot_repo"].update_by_owner.side_effect = update
+    mocks["passport"].query_agent_passport.return_value = {"agent_code": "ac-1"}
+    mocks["baas"].post_bots_api.return_value = {"bot_uuid": "bu-1"}
+    mocks["binding_repo"].insert_binding.return_value = 20
+
+    result = service.create_after_authorization(
+        bot={"bot_id": "desk-bcn", "bot_name": "Desktop", "bot_desc": "desk description", "active_engine": engine},
+        user_id="u001", machine_id="m-002",
+    )
+    assert result["bot_id"] == "desk-bcn"
+    expected = dict(teamclaw_bot_uuid="desk-bcn", owner_workno="u001", name="Desktop", summary="desk description")
+    if mode:
+        expected["connection_mode"] = mode
+    registrar._bcn_service.register_provider_bot.assert_called_once_with(**expected)
+    # Registration merges its success marker after the lifecycle's full ext snapshot.
+    last_write = mocks["bot_repo"].update_by_owner.call_args.args[2]
+    assert last_write["ext"]["bcn_registered"] is True
+    assert last_write["ext"]["passport"] == {"agent_code": "ac-1", "status": "ISSUED"}
+    assert "bot_id=desk-bcn" in caplog.text
+    assert "registered" in caplog.text
+    assert "never-log-token" not in caplog.text
+    service._query_publish_status = MagicMock(return_value="FAILED")
+    service._POLL_INTERVAL_SECONDS = 0
+    service._poll_publish_progress(
+        publish_id="publish-1", binding_id="20", bot_id="desk-bcn", owner_id="u001", device_id="bu-1", engine_type=engine,
+    )
+    assert persisted["ext"]["bcn_registered"] is True
+    assert persisted["ext"]["start_status"] == "FAILED"
+
+    # A retained creation retries only if the previous registration did not succeed.
+    mocks["binding_repo"].get_by_id.return_value = MagicMock(
+        status="ACTIVE", device_provider="baas", device_id="bu-1", entity_id="u001", entity_type="staff",
+    )
+    service.create_after_authorization(bot={"bot_id": "desk-bcn"}, user_id="u001", machine_id="m-002")
+    assert registrar._bcn_service.register_provider_bot.call_count == 1
+    persisted["ext"].pop("bcn_registered")
+    service.create_after_authorization(bot={"bot_id": "desk-bcn"}, user_id="u001", machine_id="m-002")
+    assert registrar._bcn_service.register_provider_bot.call_count == 2
+    assert persisted["ext"]["bcn_registered"] is True
+
+
+def test_desktop_bcn_callback_failure_does_not_fail_creation(caplog):
+    service, mocks = _make_service_with_mocks()
+    mocks["bot_service"]._register_bot_to_bcn_as_provider.side_effect = RuntimeError("never-log-secret")
+    mocks["passport"].query_agent_passport.return_value = {"agent_code": "ac-1"}
+    mocks["baas"].post_bots_api.return_value = {"bot_uuid": "bu-1"}
+    mocks["binding_repo"].insert_binding.return_value = 20
+    result = service.create_after_authorization(
+        bot={"bot_id": "desk-fail", "bot_name": "Desktop"}, user_id="u001", machine_id="m-002",
+    )
+    assert result["bot_id"] == "desk-fail"
+    assert "event=bcn_registration_failed" in caplog.text
+    assert "error_type=RuntimeError" in caplog.text
+    assert "never-log-secret" not in caplog.text
+
+
+@pytest.mark.parametrize("raw_ext, skipped", [('{"bcn_registered": true}', True), ({"bcn_registered": True}, True), ("{", False), ("[]", False), ({}, False)])
+def test_desktop_registration_retry_reads_legacy_ext(raw_ext, skipped):
+    service, mocks = _make_service_with_mocks()
+    service._register_bot_to_bcn(bot={"bot_id": "desk-legacy", "ext": raw_ext}, user_id="owner", skip_registered=True)
+    if skipped:
+        mocks["bot_service"]._register_bot_to_bcn_as_provider.assert_not_called()
+    else:
+        mocks["bot_service"]._register_bot_to_bcn_as_provider.assert_called_once()
+
+
+@pytest.mark.parametrize("engine, mode", [("openclaw", "plugin"), ("hermes", None)])
+@pytest.mark.parametrize("register_fails", [False, True])
+def test_desktop_restart_refreshes_bcn_mode_even_when_already_registered(engine, mode, register_fails, caplog):
+    from agentclaw.community.core.bot_management.services.bot_service import BotService
+
+    service, mocks = _make_service_with_mocks()
+    _setup_local_lookup(mocks, bot_id="desk-restart", active_engine=engine)
+    bot = mocks["bot_repo"].get_by_id_and_owner.return_value
+    bot["ext"] = {"bcn_registered": True}
+    registrar = BotService.__new__(BotService)
+    registrar._repository = mocks["bot_repo"]
+    registrar._bcn_service = MagicMock()
+    registrar._bcn_service.register_provider_bot.return_value = {"bot_uuid": "registered"}
+    if register_fails:
+        registrar._bcn_service.register_provider_bot.side_effect = RuntimeError("never-log-restart-secret")
+    mocks["bot_service"] = registrar
+    mocks["baas"].restart_bot.return_value = {"publish_id": 5}
+    result = service.restart(bot_id="desk-restart", user_id="u001")
+    assert result["status"] == "PENDING"
+    expected = dict(teamclaw_bot_uuid="desk-restart", owner_workno="u001", name="desk-restart", summary="")
+    if mode:
+        expected["connection_mode"] = mode
+    registrar._bcn_service.register_provider_bot.assert_called_once_with(**expected)
+    mocks["binding_repo"].prepare_baas_desktop_restart.assert_called_once()
+    assert "never-log-restart-secret" not in caplog.text
