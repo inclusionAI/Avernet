@@ -5,18 +5,19 @@
 venv 无此依赖）。做法：向包注册一个空命名空间 + 手动填 wire/kernel/
 engine_bridge。
 """
+
 import importlib
 import pathlib
 import sys
 import types
 
-_ENGINE_SRC = (pathlib.Path(__file__).resolve().parents[6]
-               / "engine" / "adapter" / "src")
+_ENGINE_SRC = pathlib.Path(__file__).resolve().parents[6] / "engine" / "adapter" / "src"
 if not _ENGINE_SRC.is_dir():
     raise RuntimeError(f"engine src not found at {_ENGINE_SRC}")
 
 if str(_ENGINE_SRC) not in sys.path:
     sys.path.insert(0, str(_ENGINE_SRC))
+
 
 # 构造 engine.community.api.transport.a2a 的 stub 包（跳过真实 __init__
 # 的 router import 链），并预载它自己的三个真实子模块。
@@ -29,21 +30,22 @@ def _stub_pkg(fullname: str, path: pathlib.Path) -> types.ModuleType:
 
 _stub_pkg("engine", _ENGINE_SRC / "engine")
 _stub_pkg("engine.community", _ENGINE_SRC / "engine" / "community")
-_stub_pkg("engine.community.api",
-          _ENGINE_SRC / "engine" / "community" / "api")
-_stub_pkg("engine.community.api.transport",
-          _ENGINE_SRC / "engine" / "community" / "api" / "transport")
-_a2a = _stub_pkg("engine.community.api.transport.a2a",
-                 _ENGINE_SRC / "engine" / "community" / "api"
-                 / "transport" / "a2a")
+_stub_pkg("engine.community.api", _ENGINE_SRC / "engine" / "community" / "api")
+_stub_pkg(
+    "engine.community.api.transport",
+    _ENGINE_SRC / "engine" / "community" / "api" / "transport",
+)
+_a2a = _stub_pkg(
+    "engine.community.api.transport.a2a",
+    _ENGINE_SRC / "engine" / "community" / "api" / "transport" / "a2a",
+)
 
 _a2a.frames = importlib.import_module("engine.community.kernel.frames")
 wire = importlib.import_module("engine.community.api.transport.a2a.wire")
 _a2a.wire = wire
 kernel = importlib.import_module("engine.community.api.transport.a2a.kernel")
 _a2a.kernel = kernel
-bridge = importlib.import_module(
-    "engine.community.api.transport.a2a.engine_bridge")
+bridge = importlib.import_module("engine.community.api.transport.a2a.engine_bridge")
 
 __all__ = ["wire", "bridge", "kernel"]
 

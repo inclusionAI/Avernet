@@ -239,9 +239,7 @@ class AsyncChatClientPool:
         if system_config_service is None:
             return "off"
         try:
-            resp = system_config_service.get_config(
-                SystemConfigKey.A2A_CLIENT_MODE
-            )
+            resp = system_config_service.get_config(SystemConfigKey.A2A_CLIENT_MODE)
         except Exception:
             logger.warning(
                 "failed to read a2a_client_mode config, defaulting to off",
@@ -251,8 +249,7 @@ class AsyncChatClientPool:
         value = (resp.conf_value or "").strip().lower() if resp else ""
         if value not in ("off", "grey", "on"):
             if value:
-                logger.warning(
-                    "invalid a2a_client_mode %r, defaulting to off", value)
+                logger.warning("invalid a2a_client_mode %r, defaulting to off", value)
             return "off"
         return value
 

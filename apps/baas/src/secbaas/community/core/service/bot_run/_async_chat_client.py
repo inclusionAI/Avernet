@@ -213,7 +213,7 @@ class AsyncChatClient:
             raise ValueError(f"invalid a2a_mode: {a2a_mode!r}")
         self._a2a_mode = a2a_mode
         self._transport: str = "v3-ws"
-        self._v3_fallback = None          # B3: A2A 传输上附件请求的 v3 重路由
+        self._v3_fallback = None  # B3: A2A 传输上附件请求的 v3 重路由
         # B3（1c）：session→run 归属路由表——附件请求 reroute 到 v3 后，
         # 该 session 的 chat_abort 必须随 run 走 v3 专用连接（不丢语义；
         # 正常 A2A session 的 abort 仍走 A2A 客户端的 CancelTask 转发）。
@@ -307,12 +307,13 @@ class AsyncChatClient:
             a2a_base = _a2a_base_url_from_ws(self.uri)
             if a2a_base:
                 from secbaas.community.core.service.bot_run._bot_a2a_client import (
-                    A2aUnavailableError, BotA2aClient,
+                    A2aUnavailableError,
+                    BotA2aClient,
                 )
+
                 try:
-                    candidate = BotA2aClient(base_url=a2a_base,
-                                             headers=self.headers)
-                    await candidate.connect()   # card GET 能力探测
+                    candidate = BotA2aClient(base_url=a2a_base, headers=self.headers)
+                    await candidate.connect()  # card GET 能力探测
                     _client = candidate
                 except A2aUnavailableError as e:
                     if self._a2a_mode == "on":
@@ -341,9 +342,9 @@ class AsyncChatClient:
         # 直接 await 异步连接，不再需要 run_in_executor。
         # A2A 候选客户端在能力探测时已完成 connect（R16-4：不再二次连接，
         # hello 从 server_info 取）；v3 语义原样保留。
-        self._transport = ("a2a"
-                           if _client.__class__.__name__ == "BotA2aClient"
-                           else "v3-ws")
+        self._transport = (
+            "a2a" if _client.__class__.__name__ == "BotA2aClient" else "v3-ws"
+        )
         hello: dict[str, Any] | None = None
         try:
             if self._transport == "a2a":
@@ -535,9 +536,11 @@ class AsyncChatClient:
         # 正常 session 的 abort 走 A2A 客户端 CancelTask 转发。
         # off/v3 模式（transport != "a2a"）永远直连 self._client，
         # 路由表不参与——v3 原路径不动。
-        if (self._transport == "a2a"
-                and session_key in self._v3_routed_sessions
-                and self._v3_fallback is not None):
+        if (
+            self._transport == "a2a"
+            and session_key in self._v3_routed_sessions
+            and self._v3_fallback is not None
+        ):
             return await self._v3_fallback.chat_abort(
                 session_key=session_key,
                 run_id=run_id,
@@ -736,9 +739,13 @@ class AsyncChatClient:
         from secbaas.community.core.service.bot_run._bot_websocket_client import (
             BotWebSocketClient,
         )
+
         client = BotWebSocketClient(
-            uri=self.uri, client_id=self.client_id,
-            client_version=self.client_version, headers=self.headers)
+            uri=self.uri,
+            client_id=self.client_id,
+            client_version=self.client_version,
+            headers=self.headers,
+        )
         await client.connect()
         for event_name, handler in self._event_bridge_snapshot().items():
             client.on_event(event_name, handler)
@@ -774,7 +781,7 @@ class AsyncChatClient:
             except Exception:
                 logger.exception("v3 fallback close failed")
             self._v3_fallback = None
-        self._v3_routed_sessions.clear()   # B3（1c）：归属路由表随断连收口
+        self._v3_routed_sessions.clear()  # B3（1c）：归属路由表随断连收口
 
         interaction_tasks = list(self._interaction_tasks.values())
         for task in interaction_tasks:
