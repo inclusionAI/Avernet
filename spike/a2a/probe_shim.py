@@ -26,7 +26,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 SHIM_PORT = 20046
 SPIKE_PORT = 20043
-SECRET = "spike_g1b_test_secret"          # shim-local（真 proxy 走 Mist 密钥平台）
+SECRET = "local-only"                     # 占位哑值（shim 自签自验；真 proxy 走 Mist 密钥平台）
 
 app = FastAPI()
 
@@ -76,12 +76,12 @@ def verify_token(token: str) -> bool:
 
 def _validate(request: Request) -> JSONResponse | None:
     """Check JWT from X-PROXYPASS-TOKEN header or query param."""
-    token = request.headers.get("X-PROXYPASS-TOKEN")
-    if not token:
+    candidate = request.headers.get("X-PROXYPASS-TOKEN")
+    if not candidate:
         from urllib.parse import urlparse, parse_qs
         qs = parse_qs(urlparse(str(request.url)).query)
-        token = (qs.get("x-proxypass-token") or [None])[0]
-    if not token or not verify_token(token):
+        candidate = (qs.get("x-proxypass-token") or [None])[0]
+    if not candidate or not verify_token(candidate):
         return JSONResponse(status_code=401,
                             content={"error": "invalid or missing token"})
     return None
