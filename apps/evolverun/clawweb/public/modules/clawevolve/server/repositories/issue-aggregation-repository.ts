@@ -88,7 +88,7 @@ export class IssueAggregationRepository {
   /** Page the issue projection before loading frozen summaries, never page its suggestions. */
   async listPage(workflowId: string, query: { page: number; pageSize: number; nodeId?: string; failureMode?: string; sort?: IssueSort; severity?: string }) {
     const all = await this.readProjection(workflowId);
-    const runs = await this.priorityRuns(workflowId);
+    const runs = await this.priorityRuns(workflowId, [...new Set(all.flatMap(group => group.flowIds))]);
     const priorities = new Map(all.map(group => [group.signature, issuePriority(group, runs)]));
     const identity = (group: IssueGroup) => [...group.sources].sort((a, b) =>
       b.completedAtMs - a.completedAtMs || a.sourceId.localeCompare(b.sourceId))[0];
@@ -109,16 +109,19 @@ export class IssueAggregationRepository {
     return { groups: groups.map(group => ({ ...group, priority: priorities.get(group.signature)! })), facets, page: { page, pageSize: query.pageSize, total: filtered.length, totalPages } };
   }
 
-  private async priorityRuns(workflowId: string): Promise<IssueRun[]> {
+  private async priorityRuns(workflowId: string, affectedIds: string[]): Promise<IssueRun[]> {
     const runs = new Map<string, IssueRun>();
+    const nowMs = Date.now(), sinceMs = nowMs - 14 * 86_400_000;
+    const remember = (row: { flow_id: string; started_at: number }) => runs.set(row.flow_id, { flowId: row.flow_id,
+      startedAtMs: Number(row.started_at) < 1e12 ? Number(row.started_at) * 1000 : Number(row.started_at), nodes: [], analyzed: false });
     let after = '';
     for (;;) {
       const rows = await this.db.query<{ flow_id: string; started_at: number }>(
-        'SELECT flow_id, started_at FROM flow_runs WHERE workflow_id = ? AND flow_id > ? ORDER BY flow_id LIMIT 500', [workflowId, after]);
+        `SELECT flow_id, started_at FROM flow_runs WHERE workflow_id = ? AND flow_id > ?
+         AND ((started_at >= ? AND started_at <= ?) OR (started_at >= ? AND started_at <= ?))
+         ORDER BY flow_id LIMIT 500`, [workflowId, after, sinceMs / 1000, nowMs / 1000, sinceMs, nowMs]);
       if (!rows.length) break;
-      for (const row of rows) runs.set(row.flow_id, { flowId: row.flow_id,
-        startedAtMs: Number(row.started_at) < 1e12 ? Number(row.started_at) * 1000 : Number(row.started_at), nodes: [], analyzed: false });
-      if (runs.size > 50_000) throw new Error('Issue statistics exceed the supported history bound');
+      for (const row of rows) remember(row);
       after = rows.at(-1)!.flow_id;
     }
     for (const ids = [...runs.keys()]; ids.length;) {
@@ -144,6 +147,14 @@ export class IssueAggregationRepository {
         } catch { /* Invalid analyses never count as analyzed/clean evidence. */ }
       }
       afterId = analyses.at(-1)!.id;
+    }
+    // Older affected runs only supply last-occurrence/missing-time metadata;
+    // unrelated lifetime history is outside both statistics windows.
+    for (const ids = affectedIds.filter(id => !runs.has(id)); ids.length;) {
+      const batch = ids.splice(0, 200);
+      const rows = await this.db.query<{ flow_id: string; started_at: number }>(
+        `SELECT flow_id, started_at FROM flow_runs WHERE workflow_id = ? AND flow_id IN (${batch.map(() => '?').join(',')})`, [workflowId, ...batch]);
+      for (const row of rows) remember(row);
     }
     return [...runs.values()];
   }

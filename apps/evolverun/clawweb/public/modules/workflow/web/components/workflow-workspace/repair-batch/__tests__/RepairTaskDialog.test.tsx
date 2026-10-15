@@ -61,7 +61,7 @@ const candidates = () => ({
 it('shows one primary action, durable failed deployment status and Git links instead of prominent hashes', async () => {
   const detail = taskDetail('review', '候选已生成')
   detail.capabilities.publication = true
-  detail.release = { repositoryWebUrl: 'https://code.alipay.com/ClawMind/clawflows',
+  detail.release = { repositoryWebUrl: 'https://example.com/workflows/packs',
     approval: { id: 'approved', revision: 1, status: 'approved', target: { id: 'prod', environment: 'prod', label: '生产 Bot' } },
     deployments: [{ id: 'failed', approvalId: 'approved', revision: 1, status: 'failed', error: '发布入口不存在' }] } as never
   repairApi.task.mockResolvedValue(detail)
@@ -70,7 +70,7 @@ it('shows one primary action, durable failed deployment status and Git links ins
   expect(screen.getAllByLabelText('当前修复步骤与下一步')).toHaveLength(1)
   expect(screen.queryByRole('button', { name: '进入候选确认' })).not.toBeInTheDocument()
   expect(screen.getByRole('button', { name: /v1 · 部署失败/ })).toBeInTheDocument()
-  expect(screen.getByRole('link', { name: /查看 Git 提交/ })).toHaveAttribute('href', `https://code.alipay.com/ClawMind/clawflows/commit/${'d'.repeat(40)}`)
+  expect(screen.getByRole('link', { name: /查看 Git 提交/ })).toHaveAttribute('href', `https://example.com/workflows/packs/commit/${'d'.repeat(40)}`)
   expect(screen.getByText('d'.repeat(40))).not.toBeVisible()
 })
 

@@ -49,8 +49,8 @@ it('automatically records effective/recurring phases in a real DB and creates a 
       stateVersion: 0, status: 'succeeded', receipt: { deployNumber: 8 }, createdAtMs: Date.now() } as RepairDeployment;
     const records = new RepairReleaseRepository(f.db);
     await records.insert('deployment', { requestId: 'd' }, deployment);
-    const analyze = async (id: string, number: number, diagnoses: unknown[] = [], node = 'n') => {
-      const now = Math.floor(Date.now() / 1000);
+    const analyze = async (id: string, number: number, diagnoses: unknown[] = [], node = 'n', startedAt = Math.floor(Date.now() / 1000)) => {
+      const now = startedAt;
       await f.db.exec('INSERT INTO flow_runs VALUES (?, ?, ?, ?, ?, ?)', [id, 'wf-1', number, 'succeeded', now, now]);
       await f.db.exec('INSERT INTO node_executions VALUES (?, ?, ?, ?)', [id, node, 'succeeded', now]);
       await f.db.exec(`INSERT INTO workflow_evolution_analysis_runs (analysis_id, request_key, scope_type, scope_json, workflow_id, flow_id,
@@ -62,9 +62,15 @@ it('automatically records effective/recurring phases in a real DB and creates a 
     const recurring = (id: string) => [{ diagnosisId: 'diag', flowIds: [id], nodeId: 'n', failureSignature: 'timeout:n', failureMode: 'timeout', severity: 'high', reasoning: 'timeout observed', evidenceEventIds: [] }];
     await analyze('old', 7, recurring('old')); await analyze('unrelated', 8, [], 'other');
     const auto = createRepairAutoVerification(f.db);
+    for (let i = 0; i < 5; i++) {
+      await analyze(`stale-seconds-${i}`, 8, [], 'n', Math.floor(Date.now() / 1000) - 30 * 86400);
+      await analyze(`stale-millis-${i}`, 8, [], 'n', Date.now() - 30 * 86400000);
+      await analyze(`future-millis-${i}`, 8, [], 'n', Date.now() + 86400000);
+    }
+    expect(await auto.decisions(deployment)).toMatchObject([{ result: 'observing', eligibleSamples: 0 }]);
     await auto.observe(deployment);
     expect(await records.list(revision.taskId, 'verification')).toHaveLength(0);
-    for (let i = 0; i < 5; i++) await analyze(`new-${i}`, 8);
+    for (let i = 0; i < 5; i++) await analyze(`new-${i}`, 8, [], 'n', i % 2 ? Date.now() : Math.floor(Date.now() / 1000));
     await auto.observe(deployment); await auto.observe(deployment);
     expect(await records.list(revision.taskId, 'verification')).toHaveLength(1);
     expect((await service.candidates('wf-1')).items.find(item => item.itemId === 'item-0')?.state).toBe('verified');

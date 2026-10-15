@@ -43,11 +43,14 @@ export function createRepairAutoVerification(db: IDatabase, publication?: Repair
       if (versionChanged && applied?.status !== 'unchanged' && applied?.itemStates?.[item.itemId] !== 'unchanged') { result.push({ itemId: item.itemId, ...decideRepairEffect(rule, d.receipt!.deployNumber, []), reason: '当前生效版本已变化；重新核对已应用修改，旧版本证据不形成当前效果结论' }); continue; }
       const observedDeployNumber = versionChanged ? applied!.activeDeployNumber : d.receipt!.deployNumber;
       if (!rule) { result.push({ itemId: item.itemId, ...decideRepairEffect(null, d.receipt!.deployNumber, []) }); continue; }
+      const nowSeconds = Date.now() / 1000;
+      const startedAtSeconds = 'CASE WHEN fr.started_at >= 1000000000000 THEN fr.started_at / 1000.0 ELSE fr.started_at END';
       const rows = await db.query<{ flow_id: string; status: string; completed_at: number | null; node_status: string }>(
         `SELECT fr.flow_id, fr.status, fr.completed_at, ne.status AS node_status FROM flow_runs fr
          JOIN node_executions ne ON ne.flow_id = fr.flow_id AND ne.node_id = ?
-         WHERE fr.workflow_id = ? AND fr.workflow_deploy_number = ? AND fr.started_at >= ? ORDER BY fr.started_at DESC, ne.started_at DESC LIMIT 2000`,
-        [rule.nodeId, d.workflowId, observedDeployNumber, Math.floor((Date.now() - rule.windowDays * 86_400_000) / 1000)]);
+         WHERE fr.workflow_id = ? AND fr.workflow_deploy_number = ? AND ${startedAtSeconds} >= ? AND ${startedAtSeconds} <= ?
+         ORDER BY ${startedAtSeconds} DESC, ne.started_at DESC LIMIT 2000`,
+        [rule.nodeId, d.workflowId, observedDeployNumber, nowSeconds - rule.windowDays * 86_400, nowSeconds]);
       if (rows.length === 2000) { result.push({ itemId: item.itemId, ...decideRepairEffect(rule, d.receipt!.deployNumber, []), reason: '样本超过单轮验证上限，需缩小观察范围' }); continue; }
       const samples = new Map<string, EffectSample>();
       for (const row of rows) if (!samples.has(row.flow_id)) samples.set(row.flow_id, { flowId: row.flow_id,
