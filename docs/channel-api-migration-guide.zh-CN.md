@@ -2,7 +2,7 @@
 
 > 面向前端。老渠道配置是两条相互独立的链路，新体系合并为一个统一入口。本文覆盖：两条老链路的表单字段如何逐一映射到新接口、请求/响应示例、语义差异（哪些交互行为变了）、错误码，以及 TS 侧的接入点。
 >
-> 适用版本：`forward_sender_identity` 补齐之后（`feat(backend): expose forward_sender_identity on bcn_gateway channels`）。
+> 适用版本：`forward_sender_identity` 补齐 + 流式-模板联动校验 + stage（生效环境）维度移植之后（分支 `rel20261015-channel-forward-sender-identity`）。
 > 设计文档：[docs/superpowers/specs/2026-09-03-channel-binding-mode-design.md](superpowers/specs/2026-09-03-channel-binding-mode-design.md)
 > 新契约权威定义：`apps/gateway/configs/schemas/bots.openapi.json`（`channels` tag / `DingTalkChannelConfig*` 组件）
 
@@ -48,7 +48,7 @@
 | 卡片 templateId | `config.card_template_id` | |
 | 卡片变量 key 值 | `config.card_template_key` | |
 | 钉钉机器人 ID | `config.robot_code` | |
-| 生效环境（草稿/预发/线上，仅服务 Bot） | **无对应字段** | 新公开面只管理 draft；见 §4.7，**不要在新页面上做这个选择器** |
+| 生效环境（草稿/预发/线上，仅服务 Bot） | 顶层 `stage` | 忠实移植老选择器：`"draft"`（缺省）/`"verify"` /`"online"`；**verify/online 仅服务 Bot 可写**，个人 bot 传了 422；**创建后不可变**。见 §4.7 |
 | — | （新增可填）`dm_policy` / `allowlist` / `reply_to_message` / `aix_enable` / `include_sender_name` | 私聊策略、白名单、回复关联原消息、AIX 卡片、发送者姓名进上下文——老插件页没有、新契约支持的扩展，有交互需要可以自由补 |
 
 ### 2.2 老 BCN 页（BcsChannelManageTab / BCS bindings）→ `binding_mode: "bcn_gateway"`
@@ -84,6 +84,8 @@
 > 切换绑定方式 = **删除旧渠道 + 重新创建**，没有"改模式"的请求。
 
 > **流式联动校验**（创建与更新都查，两种模式一体适用）：`enable_streaming_cards: true` 时 `card_template_id` 必须非空，否则 422——`create` 侧响应是统一的 `"Invalid request"`，`update` 侧是 `"Channel mode violation"`。老表单有同款前端校验（"请输入卡片 templateId"），现在后端补齐为强约束。
+>
+> **stage 规则**：`stage` 只在创建时传（顶层字段），创建后不可变（更新请求传它会被 `extra="forbid"` 拒掉）；`"verify"/"online"` 只对 `bot_type=service` 的 Bot 开放，传给个人 Bot 422（`"Channel mode violation"`）。
 
 ---
 
@@ -96,6 +98,7 @@ POST /openapi/v1/bots/bot-1/channels
 {
   "type": "dingding",
   "binding_mode": "plugin",
+  "stage": "verify",          // ✳ 服务 Bot 才能传 verify/online；草稿档省略该字段即可
   "description": "客服群机器人",
   "config": {
     "client_id": "ding_app_key_xxx",
@@ -195,7 +198,7 @@ PUT /openapi/v1/bots/bot-1/channels/12/status
 4. **`binding_mode` 不可变**。编辑页把模式选择器做成禁用态；换模式走"删除重建"。
 5. **bcn 专属三字段对 plugin 渠道是 422**（矩阵见 §2.3），反之亦然。编辑表单按 `binding_mode` 条件渲染字段就不会踩。
 6. **列表口径变窄**：只回当前 owner 的 draft 钉钉渠道。老接口会带出的共享默认行（`aideskdingding`）、verify/online 行、其他渠道类型，新接口一律不出——列表为空≠配置丢失，渲染逻辑按新口径写。
-7. **没有"生效环境"选择**。`stage` 恒为 `"draft"`。服务 Bot 的预发/线上渠道配置由发布流程和内部面管理，新公开面没有、也别加这个交互（对应老插件页的草稿/预发/线上下拉框——迁移时**直接砍掉**）。
+7. **"生效环境"选择器已移植进公开面（仅服务 Bot）**。创建时顶层传 `stage`（`draft` 缺省 / `verify` / `online`），语义与老插件页一致：每一档是一行独立配置，发布流按 stage 现读各行合成对应环境的渠道配置。规则变化：①创建后不可变（老页面同样不给改）；②`verify/online` 行**不接运行时**——对它们做 PATCH/启停只改 DB（发布时才被读到），不会像 draft 行那样同步 openclaw/BCS；③个人 Bot 不开放这两个档位（422）。列表/单查对服务 Bot 会带出 verify/online 行，卡片按 `stage` 字段分组渲染即可。
 8. **没有 `send_mode` 提交字段**。老 BCN 的"普通文本 / 流式卡片"单选，映射为 `enable_streaming_cards` 开关（+ `card_template_id`）。后端推 BCS 时自动还原结构化 `send_mode`，前端不需要也没法直接表达 fallback message type。
 9. **回调地址指引不调接口**。老 BCN 页的"蚂蚁钉回调地址"展示+复制块是纯前端逻辑（按部署 env 拼串），新页面想在 bcn 模式下保留这个引导，把这个组件搬过来即可，与后端无关。
 10. **流式开关与模板是联动校验**（§2.3 末尾注）。表单上开"流式输出"就必须同时有模板 ID——提交前自己做这个前置校验，别等服务端 422。**注意 update 语义**：哪怕本次 PATCH 只改别的字段，只要"合并后的存量配置"处于"流式开+模板空"状态就会 422——历史上（含内部老入口）配出的这类缺口存量数据，会在下次任意编辑时被强制纠正（要么补模板，要么 `enable_streaming_cards: false`）。

@@ -2102,9 +2102,13 @@
             "type": "string"
           },
           "stage": {
-            "const": "draft",
             "default": "draft",
-            "description": "Configuration stage; the public API exposes draft only.",
+            "description": "Configuration stage the row belongs to. verify/online rows exist only as publish inputs for service Bots; other bots expose draft.",
+            "enum": [
+              "draft",
+              "verify",
+              "online"
+            ],
             "title": "Stage",
             "type": "string"
           },
@@ -2178,6 +2182,17 @@
             ],
             "description": "Optional human-readable purpose of the Channel.",
             "title": "Description"
+          },
+          "stage": {
+            "default": "draft",
+            "description": "Which configuration stage the row belongs to; the legacy UI's '生效环境' selector. verify/online rows are publish-flow inputs for service Bots and are rejected for other bot types. Immutable after creation.",
+            "enum": [
+              "draft",
+              "verify",
+              "online"
+            ],
+            "title": "Stage",
+            "type": "string"
           },
           "type": {
             "const": "dingding",

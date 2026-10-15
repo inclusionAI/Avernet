@@ -1122,3 +1122,159 @@ async def test_update_rejects_flag_on_plugin_channel():
     )
     assert response.status_code == 422
     assert json.loads(response.body)["message"] == "Channel mode violation"
+
+
+# ── stage 维度移植（老前端"生效环境"选择器 → 服务 Bot 专属写入口）──────
+
+
+class _ServiceRelay(_Relay):
+    """bot_type=service 的 resolve 结果（stage 行只对服务 Bot 开放）。"""
+
+    async def resolve_bot_off_loop(self, bot_id: str, owner_id: str, caller_id: str):
+        return BotFacts(
+            bot_id=bot_id,
+            bot_type="service",
+            active_engine="openclaw",
+            owner_id=owner_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_service_bot_stores_requested_stage():
+    service = _Channels()
+
+    await create_channel(
+        bot_id="bot-1",
+        body=ChannelCreate(
+            type="dingding",
+            stage="verify",
+            config={"client_id": "client-1", "client_secret": "secret-1"},
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_ServiceRelay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+
+    create_kwargs = next(c for name, c in service.calls if name == "create")
+    assert create_kwargs["stage"] == "verify"
+
+
+@pytest.mark.asyncio
+async def test_create_rejects_stage_rows_for_personal_bot():
+    service = _Channels()
+
+    response = await create_channel(
+        bot_id="bot-1",
+        body=ChannelCreate(
+            type="dingding",
+            stage="verify",
+            config={"client_id": "client-1", "client_secret": "secret-1"},
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+    assert response.status_code == 422
+    assert json.loads(response.body)["message"] == "Channel mode violation"
+    assert not any(name == "create" for name, _ in service.calls)
+
+
+@pytest.mark.asyncio
+async def test_list_for_service_bot_includes_verify_online_rows():
+    service = _Channels(
+        [
+            _record(1),
+            _record(2, stage="verify"),
+            _record(3, stage="online"),
+            _record(4, deleted=1, stage="verify"),
+        ]
+    )
+
+    result = await list_channels(
+        bot_id="bot-1",
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_ServiceRelay(),
+        service=service,
+    )
+
+    assert [item.id for item in result.data] == [1, 2, 3]
+    assert [item.stage for item in result.data] == ["draft", "verify", "online"]
+
+
+@pytest.mark.asyncio
+async def test_list_for_personal_bot_still_hides_verify_online_rows():
+    service = _Channels(
+        [
+            _record(1),
+            _record(2, stage="verify"),
+        ]
+    )
+
+    result = await list_channels(
+        bot_id="bot-1",
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+    )
+
+    assert [item.id for item in result.data] == [1]
+
+
+@pytest.mark.asyncio
+async def test_update_keeps_stored_stage():
+    service = _Channels([_record(status="0", stage="verify")])
+    assert service.records[1].stage == "verify"
+
+    await update_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelUpdate(config={"client_id": "client-2"}),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_ServiceRelay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+
+    assert service.records[1].stage == "verify"
+
+
+@pytest.mark.asyncio
+async def test_get_verify_row_visible_for_service_bot_only():
+    verify = _record(stage="verify")
+    # 服务 Bot：可读
+    result = await get_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_ServiceRelay(),
+        service=_Channels([verify]),
+    )
+    assert result.data.stage == "verify"
+    # 个人 bot：越界 → 404 信封（envelope_errors 捕获后落响应，不外抛）
+    denied = await get_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=_Channels([verify]),
+    )
+    assert denied.status_code == 404

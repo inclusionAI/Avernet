@@ -2,6 +2,7 @@
 Channel Service
 Business logic for channel configuration management.
 """
+
 import asyncio
 import copy
 import json
@@ -240,13 +241,15 @@ class ChannelService:
         """
         try:
             ctx = self._resolver.resolve_for_bot(
-                channel.bind_bot_id, channel.identity_id,
+                channel.bind_bot_id,
+                channel.identity_id,
             )
             plugin = self._device_sync_dispatcher.dispatch(ctx)
         except DeviceSyncUnavailableError as e:
             logger.warning(
                 "[ChannelService] teclaw delivery skipped for bot=%s: %s",
-                channel.bind_bot_id, e,
+                channel.bind_bot_id,
+                e,
             )
             return
         # sync_symlinks([]) → the Teclaw DeviceSync service recomposes and posts the
@@ -261,10 +264,13 @@ class ChannelService:
         except Exception as e:  # noqa: BLE001 — best-effort delivery
             logger.warning(
                 "[ChannelService] teclaw delivery failed for bot=%s: %s",
-                channel.bind_bot_id, e,
+                channel.bind_bot_id,
+                e,
             )
 
-    async def _dispatch_channel_sync(self, channel: ChannelRecord, *, action: str) -> None:
+    async def _dispatch_channel_sync(
+        self, channel: ChannelRecord, *, action: str
+    ) -> None:
         """Route a channel sync to the bot's container path.
 
         bcn_gateway → BCS binding orchestration; teclaw → recompose + deliver
@@ -280,7 +286,20 @@ class ChannelService:
             await self.sync_channel_to_openclaw(channel.id, action=action)
 
     async def _sync_bcn_binding(self, channel: ChannelRecord, *, action: str) -> None:
-        """apply → ensure active + push config; remove → deactivate. Fail-closed."""
+        """apply → ensure active + push config; remove → deactivate. Fail-closed.
+
+        verify/online 行是发布流的**输入**（各环境配置的合成原料），不接
+        运行时——与 openclaw 路径 ``sync_channel_to_openclaw`` 跳过这两个
+        stage 的既有语义对齐；bcn_gateway 按 spec §5 一期口径只在
+        draft/live 生效。
+        """
+        if channel.stage in ("verify", "online"):
+            logger.info(
+                "[ChannelService] skip BCS sync for stage=%s channel_id=%s",
+                channel.stage,
+                channel.id,
+            )
+            return
         if action == "apply":
             binding_id = await self._bcs_client.ensure_active(channel)
             self._store_bcs_binding_id(channel, binding_id)
@@ -369,12 +388,16 @@ class ChannelService:
 
         # 只处理钉钉类型配置
         if channel.type != "dingding":
-            logger.info(f"[sync_channel_to_openclaw] Skipping non-dingtalk channel: {channel.type}")
+            logger.info(
+                f"[sync_channel_to_openclaw] Skipping non-dingtalk channel: {channel.type}"
+            )
             return False
 
         # stage 为 verify 或 online 时跳过同步
         if channel.stage in ("verify", "online"):
-            logger.info(f"[sync_channel_to_openclaw] Skipping channel with stage={channel.stage}, channel_id={channel_id}")
+            logger.info(
+                f"[sync_channel_to_openclaw] Skipping channel with stage={channel.stage}, channel_id={channel_id}"
+            )
             return False
 
         # 2. 从 config 中提取 client_id
@@ -389,7 +412,9 @@ class ChannelService:
             raise ValueError(f"bind_bot_id not found for channel: {channel_id}")
 
         # 4. 获取 bot 工作目录，openclaw.json 位于工作目录下
-        work_path = self._bot_service.get_bot_work_path(bot_id=bind_bot_id, user_id=channel.identity_id, engine_type='openclaw')
+        work_path = self._bot_service.get_bot_work_path(
+            bot_id=bind_bot_id, user_id=channel.identity_id, engine_type="openclaw"
+        )
         openclaw_config_path = work_path / "openclaw.json"
 
         # 5. 如果文件不存在，抛出异常
@@ -410,15 +435,25 @@ class ChannelService:
             single_account_key = "channels.dingtalk"
             single_account_data = json_config.get(single_account_key)
 
-            if isinstance(single_account_data, dict) and single_account_data.get("clientId") == client_id:
+            if (
+                isinstance(single_account_data, dict)
+                and single_account_data.get("clientId") == client_id
+            ):
                 # 存在单账号格式且 clientId 匹配，更新单账号格式
-                logger.info(f"[sync_channel_to_openclaw] Updating single-account format for {client_id}")
+                logger.info(
+                    f"[sync_channel_to_openclaw] Updating single-account format for {client_id}"
+                )
                 target_key = single_account_key
-            elif isinstance(single_account_data, dict) and "clientId" in single_account_data:
+            elif (
+                isinstance(single_account_data, dict)
+                and "clientId" in single_account_data
+            ):
                 # 存在单账号格式但 clientId 不匹配，需要转换为多账号格式
                 existing_client_id = single_account_data.get("clientId")
-                logger.info(f"[sync_channel_to_openclaw] Converting single-account to multi-account format. "
-                           f"Existing: {existing_client_id}, New: {client_id}")
+                logger.info(
+                    f"[sync_channel_to_openclaw] Converting single-account to multi-account format. "
+                    f"Existing: {existing_client_id}, New: {client_id}"
+                )
 
                 # 先复制单账号数据到本地变量（避免引用问题）
                 existing_account_data = dict(single_account_data)
@@ -428,14 +463,18 @@ class ChannelService:
 
                 # 将现有单账号配置转换为多账号格式
                 # 注意：enabled 保留在 dingtalk 层级，其他字段移到 accounts
-                existing_account_key = f"channels.dingtalk.accounts.{existing_client_id}"
+                existing_account_key = (
+                    f"channels.dingtalk.accounts.{existing_client_id}"
+                )
                 for key, value in existing_account_data.items():
                     if value is not None and key != "enabled":
                         json_config.set(f"{existing_account_key}.{key}", value)
 
                 # 恢复 enabled 到 dingtalk 层级
                 if "enabled" in existing_account_data:
-                    json_config.set("channels.dingtalk.enabled", existing_account_data["enabled"])
+                    json_config.set(
+                        "channels.dingtalk.enabled", existing_account_data["enabled"]
+                    )
 
                 # 设置目标为多账号格式
                 target_key = dingtalk_key
@@ -457,7 +496,9 @@ class ChannelService:
                     f"{target_key}.robotCode": config.get("client_id"),
                     f"{target_key}.dmPolicy": dm_policy,
                     f"{target_key}.groupPolicy": "open",
-                    f"{target_key}.messageType": config.get("message_type","card" if enable_streaming_cards else "markdown"),
+                    f"{target_key}.messageType": config.get(
+                        "message_type", "card" if enable_streaming_cards else "markdown"
+                    ),
                     f"{target_key}.cardTemplateId": config.get("card_template_id"),
                     f"{target_key}.cardTemplateKey": config.get("card_template_key"),
                 }
@@ -470,7 +511,9 @@ class ChannelService:
                     f"{target_key}.robotCode": config.get("client_id"),
                     f"{target_key}.dmPolicy": dm_policy,
                     f"{target_key}.groupPolicy": "open",
-                    f"{target_key}.messageType": config.get("message_type", "card" if enable_streaming_cards else "markdown"),
+                    f"{target_key}.messageType": config.get(
+                        "message_type", "card" if enable_streaming_cards else "markdown"
+                    ),
                     f"{target_key}.cardTemplateId": config.get("card_template_id"),
                     f"{target_key}.cardTemplateKey": config.get("card_template_key"),
                 }
@@ -481,7 +524,9 @@ class ChannelService:
                     json_config.set(key, value)
 
             await json_config.save()
-            logger.info(f"[sync_channel_to_openclaw] Applied channel {channel_id} to {openclaw_config_path}")
+            logger.info(
+                f"[sync_channel_to_openclaw] Applied channel {channel_id} to {openclaw_config_path}"
+            )
 
         elif action == "remove":
             # 删除配置 - 兼容两种格式：
@@ -494,7 +539,9 @@ class ChannelService:
             if json_config.exists(dingtalk_key):
                 json_config.delete(dingtalk_key)
                 removed = True
-                logger.info(f"[sync_channel_to_openclaw] Removed account {client_id} from accounts")
+                logger.info(
+                    f"[sync_channel_to_openclaw] Removed account {client_id} from accounts"
+                )
 
                 # 检查是否还有其他账号
                 accounts_key = "channels.dingtalk.accounts"
@@ -503,16 +550,23 @@ class ChannelService:
                     # 没有账号了，删除 accounts 并设置 enabled: false
                     if json_config.exists(accounts_key):
                         json_config.delete(accounts_key)
-                        logger.info(f"[sync_channel_to_openclaw] Removed empty {accounts_key}")
+                        logger.info(
+                            f"[sync_channel_to_openclaw] Removed empty {accounts_key}"
+                        )
 
                     # 设置 enabled: false（保留 dingtalk 结构）
                     json_config.set("channels.dingtalk.enabled", False)
-                    logger.info(f"[sync_channel_to_openclaw] Set enabled to false for dingtalk")
+                    logger.info(
+                        "[sync_channel_to_openclaw] Set enabled to false for dingtalk"
+                    )
 
             # 尝试删除单账号格式 (直接检查 dingtalk.clientId)
             elif json_config.exists("channels.dingtalk"):
                 dingtalk_data = json_config.get("channels.dingtalk")
-                if isinstance(dingtalk_data, dict) and dingtalk_data.get("clientId") == client_id:
+                if (
+                    isinstance(dingtalk_data, dict)
+                    and dingtalk_data.get("clientId") == client_id
+                ):
                     # 匹配到单账号格式，清空配置但保留结构，设置 enabled: false
                     # 删除所有账号相关字段，只保留 enabled: false
                     for key in list(dingtalk_data.keys()):
@@ -520,13 +574,19 @@ class ChannelService:
                             json_config.delete(f"channels.dingtalk.{key}")
                     json_config.set("channels.dingtalk.enabled", False)
                     removed = True
-                    logger.info(f"[sync_channel_to_openclaw] Cleared single-account config and set enabled to false for {client_id}")
+                    logger.info(
+                        f"[sync_channel_to_openclaw] Cleared single-account config and set enabled to false for {client_id}"
+                    )
 
             if removed:
                 await json_config.save()
-                logger.info(f"[sync_channel_to_openclaw] Removed channel {channel_id} from {openclaw_config_path}")
+                logger.info(
+                    f"[sync_channel_to_openclaw] Removed channel {channel_id} from {openclaw_config_path}"
+                )
             else:
-                logger.info(f"[sync_channel_to_openclaw] Config for {client_id} not found, nothing to remove")
+                logger.info(
+                    f"[sync_channel_to_openclaw] Config for {client_id} not found, nothing to remove"
+                )
 
         else:
             raise ValueError(f"Invalid action: {action}. Must be 'apply' or 'remove'")
@@ -542,8 +602,12 @@ class ChannelService:
 
     # 排除字段列表（不从模版继承）
     EXCLUDED_TEMPLATE_FIELDS = {
-        "clientId", "clientSecret", "robotCode",
-        "cardTemplateId", "cardTemplateKey", "messageType",
+        "clientId",
+        "clientSecret",
+        "robotCode",
+        "cardTemplateId",
+        "cardTemplateKey",
+        "messageType",
         "enabled",
     }
 
@@ -573,9 +637,7 @@ class ChannelService:
         """
         # 1. 获取 bot 工作目录和 openclaw.json 路径
         work_path = self._bot_service.get_bot_work_path(
-            bot_id=bot_id,
-            user_id=owner_id,
-            engine_type='openclaw'
+            bot_id=bot_id, user_id=owner_id, engine_type="openclaw"
         )
         openclaw_config_path = work_path / "openclaw.json"
 
@@ -596,12 +658,10 @@ class ChannelService:
 
         # 过滤生效的 verify 和 online 配置（status='1', stage='verify'/'online'）
         verify_channels = [
-            ch for ch in all_channels
-            if ch.status == "1" and ch.stage == "verify"
+            ch for ch in all_channels if ch.status == "1" and ch.stage == "verify"
         ]
         online_channels = [
-            ch for ch in all_channels
-            if ch.status == "1" and ch.stage == "online"
+            ch for ch in all_channels if ch.status == "1" and ch.stage == "online"
         ]
 
         # 5. 提取钉钉配置和模版（避免重复提取）
@@ -611,8 +671,12 @@ class ChannelService:
         dingtalk_template = self._extract_dingtalk_template(dingtalk_config)
 
         # 6. 使用模版替换生成配置
-        verify_config = self._apply_template(template_config, verify_channels, dingtalk_template)
-        online_config = self._apply_template(template_config, online_channels, dingtalk_template)
+        verify_config = self._apply_template(
+            template_config, verify_channels, dingtalk_template
+        )
+        online_config = self._apply_template(
+            template_config, online_channels, dingtalk_template
+        )
 
         # 7. 生成 eval 配置：无条件生成，逻辑删除钉钉渠道（设置 enabled=False）
         eval_config = self._apply_template(template_config, [], dingtalk_template)
@@ -753,6 +817,7 @@ class ChannelService:
 @dataclass
 class OpenClawConfigs:
     """多环境 OpenClaw 配置"""
+
     verify: str  # openclaw_verify.json 内容
     online: str  # openclaw_online.json 内容
     eval: str  # openclaw_eval.json 内容，钉钉渠道已禁用

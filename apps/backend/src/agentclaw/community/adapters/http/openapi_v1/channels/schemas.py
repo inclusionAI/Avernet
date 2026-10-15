@@ -14,7 +14,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 ChannelType = Literal["dingding"]
 ChannelStatus = Literal["active", "inactive"]
-ChannelStage = Literal["draft"]
+# 三值口径与老前端一致（老页面"生效环境"选择器）：draft 是唯一可默认的
+# 值；verify/online 行是发布流的输入（按 stage 现读合成各环境的渠道配置），
+# 仅服务 Bot 允许写入。stage 在创建后不可变。
+ChannelStage = Literal["draft", "verify", "online"]
 ChannelBindingMode = Literal["plugin", "bcn_gateway"]
 GroupChatScope = Literal["per_sender", "conversation_shared"]
 OutboundVisibility = Literal["full_transcript", "lead_only"]
@@ -253,7 +256,7 @@ class DingTalkChannelConfig(BaseModel):
 
 
 class ChannelCreate(BaseModel):
-    """Create one inactive draft Channel on the Bot named in the path."""
+    """Create one inactive Channel row on the Bot named in the path."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -265,6 +268,15 @@ class ChannelCreate(BaseModel):
         description=(
             "How the Channel connects: 'plugin' writes openclaw.json direct "
             "config; 'bcn_gateway' syncs a BCS binding (per-sender sessions)."
+        ),
+    )
+    stage: ChannelStage = Field(
+        default="draft",
+        description=(
+            "Which configuration stage the row belongs to; the legacy UI's "
+            "'生效环境' selector. verify/online rows are publish-flow inputs "
+            "for service Bots and are rejected for other bot types. Immutable "
+            "after creation."
         ),
     )
 
@@ -339,7 +351,10 @@ class Channel(BaseModel):
     )
     stage: ChannelStage = Field(
         default="draft",
-        description="Configuration stage; the public API exposes draft only.",
+        description=(
+            "Configuration stage the row belongs to. verify/online rows exist "
+            "only as publish inputs for service Bots; other bots expose draft."
+        ),
     )
     created_at: datetime | None = Field(
         default=None, description="Channel creation time when available."

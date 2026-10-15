@@ -153,16 +153,32 @@ class HttpBcsChannelBindingClient:
         return str(envelope["data"]["id"])
 
     async def _find_binding_id(self, channel: ChannelRecord) -> str | None:
-        """by-target lookup to recover a binding id after a lost writeback."""
+        """by-target lookup to recover a binding id after a lost writeback.
+
+        Matches on either account-ref convention: bindings created through
+        this surface carry ``account_ref = client_id``, while bindings created
+        by the legacy front-end (which built the BCS payload itself) carry
+        ``account_ref = robot_code``. Both values are on the stored row, so
+        matching either recovers a legacy binding that a 409 surfaces —
+        without it, re-activating a channel over an old binding deadlocks in
+        unrecoverable conflicts.
+        """
         query = (
             "?target_type=bot"
             f"&target_id={quote(channel.bind_bot_id)}"
             "&channel_type=dingtalk"
         )
         envelope = await self._request("GET", f"{_BINDING_PATH}/by-target{query}")
-        account_ref = channel.config.get("client_id") or ""
+        account_refs = {
+            str(ref)
+            for ref in (
+                channel.config.get("client_id"),
+                channel.config.get("robot_code"),
+            )
+            if ref
+        }
         for item in envelope.get("data", {}).get("items", []):
-            if item.get("account_ref") == account_ref:
+            if item.get("account_ref") in account_refs:
                 recovered = str(item.get("id") or "")
                 return recovered or None
         return None

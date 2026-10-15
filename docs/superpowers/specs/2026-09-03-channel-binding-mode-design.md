@@ -45,6 +45,7 @@
   - `outbound_visibility: Literal["full_transcript", "lead_only"]`，默认 `full_transcript`
   - `forward_sender_identity: bool | None`，缺省 `false`——BCS 侧"外部人类归因披露"开关（仅 bot 绑定可开启，`bcs-channel` COSEC 门）；显式传 null 等同于未提供
 - 联动校验（两模式一致）：`enable_streaming_cards=true` 时 `card_template_id` 必须非空（无模板的流式卡片过去要到消息时刻才静默坏；现在 create 侧 422、update 侧按"合并存量后的终态"422）。
+- `stage` 维度移植（2026-10-15，对齐老插件页"生效环境"选择器）：`ChannelCreate.stage: Literal["draft", "verify", "online"]`，缺省 `"draft"`；`verify/online` 仅 `bot_type=service` 的 Bot 可写（其余 422），创建后不可变。服务 Bot 的 list/get/update/status/delete 对 verify/online 行放开行域；这些行**不接运行时**（openclaw 跳过既有语义不变，BCS sync 同跳），仍是发布流按 stage 现读的纯输入。
 
 ### 3.2 模式校验矩阵（服务端 422 拒绝）
 
@@ -108,7 +109,7 @@ config.get("binding_mode") == "bcn_gateway"
 
 - `engine_overrides_reader.overrides_for_stage` 跳过 `config.get("binding_mode") == "bcn_gateway"` 的行——`channels.dingding.accounts` 是插件直连语义，bcn 凭证不进 openclaw.json。
 - bcn 模式运行时 wiring **已存在、不在本设计内**：`plugins/local/process_manager.py:215-233` 在 openclaw 配置注入 `channels.bcs`（bcsUrl/botId）并加载 `openclaw-channel-bcn` 插件（插件未构建时跳过，不影响无 bcn 渠道的 bot）。
-- 一期口径：bcn_gateway 仅 draft/live 生效（个人 bot 直接对话）；verify/online 发布投递不支持 bcn 行（服务 bot 用 bcn 渠道属后续扩展）。
+- 一期口径：bcn_gateway 仅 draft/live 生效（个人 bot 直接对话）；verify/online 发布投递不支持 bcn 行（服务 bot 用 bcn 渠道属后续扩展）。stage 维度移植后仍不变——verify/online 行即使是 bcn_gateway 模式也**不同步 BCS**（`_sync_bcn_binding` 按 stage 跳过），只作为发布流的 DB 输入存在。
 
 ## 6. 鉴权
 

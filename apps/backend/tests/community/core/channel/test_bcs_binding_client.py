@@ -143,6 +143,31 @@ async def test_ensure_active_recovers_id_via_by_target_on_conflict():
 
 
 @pytest.mark.asyncio
+async def test_ensure_active_recovers_legacy_binding_by_robot_code():
+    """老前端直接建的绑定 account_ref=robot_code —— 恢复也要能对上。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(409, json={"code": 40900, "message": "conflict"})
+        if request.url.path.endswith("/by-target"):
+            return httpx.Response(
+                200,
+                json=_ok(
+                    {
+                        "items": [
+                            {"id": "bcs-legacy", "account_ref": "robot-1"},
+                            {"id": "unrelated", "account_ref": "someone-else"},
+                        ]
+                    }
+                ),
+            )
+        return httpx.Response(200, json=_ok(None))
+
+    # client_id=client-1 但存量绑定用的是 robot_code=robot-1
+    assert await _client(handler).ensure_active(_record()) == "bcs-legacy"
+
+
+@pytest.mark.asyncio
 async def test_ensure_active_conflict_without_recovery_raises():
     def handler(request: httpx.Request) -> httpx.Response:
         if request.method == "POST":
