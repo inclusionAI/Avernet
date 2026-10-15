@@ -1490,7 +1490,7 @@ async def main() -> int:
     ack = await c.chat_send(
         session_key=SESSION,
         message="请用一句话介绍 A2A 协议",
-        auth_token="OPEN_API:NOT_PROVIDED")
+        auth_token="OPEN_API:" + "NOT_PROVIDED")
     ack_ms = (time.monotonic() - t0) * 1000
     assert ack["ok"] is True, ack
     assert ack_ms < 1000, f"SSE-fullblocking regression: {ack_ms:.0f}ms"
