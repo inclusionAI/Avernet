@@ -20,7 +20,7 @@ export function createSessionRecoveryRuntime(options: {
   publicBaseUrl: string; snapshotId: number; artifactStore: RecoveryArtifactStore;
   notificationSender?: Pick<DingTalkNotificationSender, "sendNotification"> | null; logs?: AgentLogTool; runtimeTool?: AgentRuntimeTool;
   trajectory?: BotSessionTrajectoryReader; nasRoots: string[];
-  observationMs?: number; ownerWaitMs?: number; leaseSeconds?: number; launchGraceSeconds?: number;
+  observationMs?: number; leaseSeconds?: number; launchGraceSeconds?: number;
 }): SessionRecoveryRuntime | undefined {
   if (options.db.dbType === "noop") {
     console.warn("[session-recovery] unavailable: task database is not configured");
@@ -30,8 +30,8 @@ export function createSessionRecoveryRuntime(options: {
     console.warn("[session-recovery] unavailable: AIS Snapshot is not configured");
     return undefined;
   }
-  const observationMs = options.observationMs ?? 3600000, ownerWaitMs = options.ownerWaitMs ?? 3600000;
-  for (const value of [observationMs, ownerWaitMs]) if (!Number.isSafeInteger(value) || value < 20000) throw new Error("Invalid self-healing waiting deadline");
+  const observationMs = options.observationMs ?? 3600000;
+  if (!Number.isSafeInteger(observationMs) || observationMs < 20000) throw new Error("Invalid self-healing waiting deadline");
   const store = new SessionRecoveryTaskRepository(options.db, options.repo, options.artifactStore);
   const reporter = new HttpRecoveryResultReporter({ baseUrl: options.publicBaseUrl });
   let tasks: SessionRecoveryTaskService;
@@ -41,7 +41,7 @@ export function createSessionRecoveryRuntime(options: {
     targets: options.targets, trajectory: options.trajectory, logs: options.logs, runtimeTool: options.runtimeTool, business: () => tasks, publicBaseUrl: options.publicBaseUrl,
     snapshotId: options.snapshotId, nasRoots: options.nasRoots, leaseSeconds: options.leaseSeconds ?? 120,
     launchGraceSeconds: options.launchGraceSeconds ?? 1800, observationMs });
-  tasks = new SessionRecoveryTaskService({ tasks: store, agent, notifier, reporter, observationMs, ownerWaitMs,
+  tasks = new SessionRecoveryTaskService({ tasks: store, agent, notifier, reporter, observationMs,
     resolveTarget: async request => {
       const expected = { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[request.target.engine];
       const target = await options.targets.resolve({ environment: request.target.env, ownerId: request.target.entity_id, botId: request.target.bot_id });

@@ -34,7 +34,7 @@ export function observeRecovery(state: RecoveryTaskState, judgment: RecoveryJudg
 }
 
 /** One complete environment plan. Owner requests belong to that plan. */
-export function submitRecoveryPlan(state: RecoveryTaskState, plan: RecoveryPlan, now: number, ownerWaitMs: number): RecoveryTaskState {
+export function submitRecoveryPlan(state: RecoveryTaskState, plan: RecoveryPlan, now: number): RecoveryTaskState {
   active(state);
   if (state.phase !== "plan" || state.plan) conflict("本任务不能自动提交第二套修复方案");
   if (!plan || typeof plan !== "object" || [plan.summary, plan.basis, plan.scope, plan.verification].some(value => typeof value !== "string" || value.length > 8000)
@@ -60,7 +60,7 @@ export function submitRecoveryPlan(state: RecoveryTaskState, plan: RecoveryPlan,
   return next(state, {
     plan: { ...plan, digest, approvedAt: requiresOwner || state.level === "debug" ? null : now },
     status: requiresOwner ? "waiting_owner" : state.level === "debug" ? "completed" : "running",
-    phase: "apply", ownerDeadlineAt: requiresOwner ? now + ownerWaitMs : null,
+    phase: "apply", ownerDeadlineAt: null,
     ...(state.level === "debug" ? { judgment: { delivery: "unconfirmed", response: "unknown", effect: "not_intervened", summary: "未实际干预", evidence_ids: [] } as RecoveryJudgment } : {}),
   });
 }

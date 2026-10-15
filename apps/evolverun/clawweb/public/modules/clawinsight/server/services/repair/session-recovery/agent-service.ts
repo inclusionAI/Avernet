@@ -83,11 +83,14 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     const saved = await this.save(latest, value => ({ ...value, execution: { ...value.execution!, jobId } }), issued.execution.executionId);
     if (saved.execution?.executionId !== issued.execution.executionId || saved.execution.state === "ended") await this.deps.ais.stopExecution(jobId);
   }
-  async release(input: RecoveryStoredTask): Promise<void> {
+  async release(input: RecoveryStoredTask, onlyWaitingOwner = false): Promise<void> {
     const task = await this.required(input.taskId);
     if (!task.execution || task.execution.state === "ended" || (input.execution && input.execution.executionId !== task.execution.executionId)) return;
-    await this.save(task, value => ({ ...value, execution: this.executions.end(value.execution!),
-      timeline: [...value.timeline, this.event("execution", "本次执行结束，已保存任务上下文", { execution_id: value.execution!.executionId })] }), task.execution.executionId);
+    await this.save(task, value => {
+      if (onlyWaitingOwner && value.status !== "waiting_owner") fail(409, "Owner 已确认，请继续当前任务");
+      return { ...value, execution: this.executions.end(value.execution!),
+        timeline: [...value.timeline, this.event("execution", "本次执行结束，已保存任务上下文", { execution_id: value.execution!.executionId })] };
+    }, task.execution.executionId);
     // The wrapper sees ended on its next control poll and exits for Base to archive.
     // Forced cancellation is reserved for expired leases / the outer hard timeout.
   }
@@ -259,7 +262,9 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   }
   async report(task: RecoveryStoredTask, body: Record<string, unknown>) {
     if (body.phase !== task.phase) fail(409, "回报不对应当前阶段，请重新读取任务");
-    if (body.kind === "assessment") {
+    if (body.kind === "release") {
+      await this.release(task, true);
+    } else if (body.kind === "assessment") {
       await this.deps.business().assess(task.taskId, task.version, { decision: body.decision as "message" | "environment" | "observe", summary: body.summary as string, evidence_ids: body.evidence_ids as string[] });
     } else if (body.kind === "observation") {
       const judgment = body.judgment as RecoveryJudgment;

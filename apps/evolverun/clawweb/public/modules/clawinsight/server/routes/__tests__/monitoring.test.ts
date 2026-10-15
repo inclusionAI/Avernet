@@ -389,7 +389,7 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
     const tasks = new SessionRecoveryTaskRepository(db, new EvolveRepository(db), artifacts);
     const agent = { start: vi.fn().mockResolvedValue(undefined), release: vi.fn().mockResolvedValue(undefined) };
     const service = new SessionRecoveryTaskService({ tasks, agent,
-      notifier: { notify: vi.fn() }, reporter: { report: vi.fn() }, observationMs: 3600000, ownerWaitMs: 3600000 });
+      notifier: { notify: vi.fn() }, reporter: { report: vi.fn() }, observationMs: 3600000 });
     recovery = createMonitoringRecoveryTrigger({ config, service });
     await start();
     return { config, tasks, service, agent, artifacts,
