@@ -209,7 +209,7 @@ export function GroupChatComposer({
         submitType="enter"
         mention={mentionConfig}
         fileChip={fileChip}
-        placeholder={session ? '' : '请选择一个会话'}
+        placeholder={session ? '输入消息... (将以您的用户身份发送到群内)' : '请选择一个会话'}
         slots={{
           header:
             images.images.length > 0 ? (

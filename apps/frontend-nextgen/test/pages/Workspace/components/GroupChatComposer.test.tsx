@@ -289,7 +289,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     expect(screen.getByTestId('sender')).not.toHaveClass('[--aix-color-bg:hsl(var(--muted))]');
   });
 
-  it('群会话输入框不再展示命令引用提示', () => {
+  it('群会话输入框提示以用户身份发送', () => {
     render(
       <GroupChatComposer
         session={session}
@@ -300,6 +300,6 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
         onDraftChange={() => {}}
       />,
     );
-    expect(screen.getByTestId('sender')).toHaveAttribute('data-placeholder', '');
+    expect(screen.getByTestId('sender')).toHaveAttribute('data-placeholder', '输入消息... (将以您的用户身份发送到群内)');
   });
 });
