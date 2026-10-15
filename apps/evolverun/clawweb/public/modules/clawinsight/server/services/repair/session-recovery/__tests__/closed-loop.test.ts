@@ -113,6 +113,42 @@ it("Agent can observe existing progress without sending, and an unknown send is 
   await agent.retryMessage(await current(task.taskId), body); expect(runtime.sendMessage).toHaveBeenCalledTimes(1);
   await expect(agent.retryMessage(await current(task.taskId), { ...body, clientRequestId: "blind-repeat" })).rejects.toMatchObject({ status: 409 });
 });
+it("historical intervention cannot confirm this delivery but existing recovery can complete without a new message", async () => {
+  let task = await create();
+  await appendFile(sessionFile, JSON.stringify({ type: "message", id: "old-advice", message: { role: "user", content: "[会话自愈：old-delivery]\n继续" } }) + "\n");
+  const read = await inspect(task, "historical-read");
+  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "observe", summary: "原任务此前已恢复", evidence_ids: [read.evidenceId] });
+  task = await current(task.taskId);
+  const judgment = { delivery: "confirmed", response: "acted", effect: "recovered", summary: "原任务已恢复，本次未发消息", evidence_ids: [read.evidenceId] };
+  await expect(agent.report(task, { kind: "observation", phase: "observe", judgment })).rejects.toMatchObject({ status: 422 });
+  await agent.report(task, { kind: "observation", phase: "observe", judgment: { ...judgment, delivery: "unconfirmed" } });
+  expect((await current(task.taskId)).status).toBe("completed");
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+it("trajectory content paging stays within the task scope and preserves the audited result", async () => {
+  const read = vi.fn(async () => ({ source: "aivision_tclog", content: "正文片段", next_content_offset: 100 }));
+  (agent as any).deps.trajectory = { read };
+  const task = await create();
+  const result = await agent.trajectoryRead(task, { clientRequestId: "trace-content", purpose: "读取故障事件输出", trace_id: "trace-1",
+    observation_id: "event-1", field: "output", content_offset: 0, content_limit: 100 });
+  expect(read).toHaveBeenCalledWith(expect.objectContaining({ target: task.runtimeTarget!.target, sessionKey: request.session_key,
+    traceId: "trace-1", observationId: "event-1", field: "output", contentOffset: 0, contentLimit: 100, maxBytes: 128 * 1024 }));
+  expect(result.status).toBe("succeeded");
+  expect((await agent.toolGet(await current(task.taskId), result.toolCallId)).result).toEqual(result.result);
+  await expect(agent.trajectoryRead(await current(task.taskId), { clientRequestId: "invalid-page", purpose: "读取轨迹", field: "output" })).rejects.toMatchObject({ status: 422 });
+  await expect(agent.trajectoryRead(await current(task.taskId), { clientRequestId: "invalid-content", purpose: "读取轨迹", trace_id: "trace-1", field: "input", content_limit: 12001 })).rejects.toMatchObject({ status: 422 });
+});
+it("an oversized trajectory page is recorded as a readable failure instead of breaking audit persistence", async () => {
+  const read = vi.fn().mockResolvedValueOnce({ content: "x".repeat(300000) }).mockResolvedValueOnce({ traces: [] });
+  (agent as any).deps.trajectory = { read };
+  const task = await create();
+  const failed = await agent.trajectoryRead(task, { clientRequestId: "large-trace", purpose: "读取轨迹摘要" });
+  expect(failed.status).toBe("failed");
+  expect(failed.result).toMatchObject({ error: { code: "recovery_trajectory_page_too_large" } });
+  expect((await agent.toolGet(await current(task.taskId), failed.toolCallId)).status).toBe("failed");
+  const retried = await agent.trajectoryRead(await current(task.taskId), { clientRequestId: "smaller-trace", purpose: "缩小范围读取轨迹", limit: 1 });
+  expect(retried.status).toBe("succeeded");
+});
 afterEach(async () => { await db.close(); await rm(directory, { recursive: true, force: true }); });
 it("approves one plan in the same execution, retries the original session, recovers with durable evidence", async () => {
   let task = await toPlan(await create()); expect(submissions).toHaveLength(1); expect(submissions[0].input.credentials.executionTicket).toBeTruthy();
