@@ -143,10 +143,14 @@ export class ApprovalCardRepository {
     );
   }
 
-  /** Check if an empId is in the approver list for a card. */
+  /** Check if an empId is in the approver list for a card.
+   *  Strip leading zeros from both sides to handle cases where one side
+   *  stores/passes empIds as numeric strings (e.g. "47907" vs "047907").
+   */
   isApprover(card: ApprovalCardRow, empId: string): boolean {
-    const ids = card.approver_ids.split(",").map((s) => s.trim());
-    return ids.includes(empId);
+    const normalize = (s: string) => s.trim().replace(/^0+/, "") || "0";
+    const ids = card.approver_ids.split(",").map((s) => normalize(s));
+    return ids.includes(normalize(empId));
   }
 
   /** Parse approved_by / rejected_by comma-separated strings into arrays. */
@@ -186,28 +190,37 @@ export class ApprovalCardRepository {
       return { ok: false, status: card.status as "approved" | "rejected", approvedBy, rejectedBy, error: "审批已处理" };
     }
 
-    const approvedBy = this.parseList(card.approved_by);
-    const rejectedBy = this.parseList(card.rejected_by);
-    const approverIds = this.parseList(card.approver_ids);
+    const normalize = (s: string) => s.trim().replace(/^0+/, "") || "0";
+    const rawApprovedBy = this.parseList(card.approved_by);
+    const rawRejectedBy = this.parseList(card.rejected_by);
+    const approverIds = this.parseList(card.approver_ids).map(normalize);
+    const normalizedEmpId = normalize(empId);
+
+    // Find the canonical empId from the configured approver list.
+    // We compare ignoring leading zeros, but store using the DB's original format.
+    const rawApproverIds = this.parseList(card.approver_ids);
+    const canonicalEmpId = rawApproverIds.find((id) => normalize(id) === normalizedEmpId) ?? empId;
 
     // Idempotent: already performed this exact action
-    if (action === "approve" && approvedBy.includes(empId)) {
-      return this.evaluatePolicy(approverIds, approvedBy, rejectedBy, card.approval_policy);
+    if (action === "approve" && rawApprovedBy.some((id) => normalize(id) === normalizedEmpId)) {
+      return this.evaluatePolicy(approverIds, rawApprovedBy, rawRejectedBy, card.approval_policy);
     }
-    if (action === "reject" && rejectedBy.includes(empId)) {
-      return this.evaluatePolicy(approverIds, approvedBy, rejectedBy, card.approval_policy);
+    if (action === "reject" && rawRejectedBy.some((id) => normalize(id) === normalizedEmpId)) {
+      return this.evaluatePolicy(approverIds, rawApprovedBy, rawRejectedBy, card.approval_policy);
     }
 
-    // Apply action
+    // Apply action using the canonical empId (preserves leading zeros from DB config).
+    const approvedBy = [...rawApprovedBy];
+    const rejectedBy = [...rawRejectedBy];
     if (action === "approve") {
-      approvedBy.push(empId);
+      approvedBy.push(canonicalEmpId);
       // Remove from rejectedBy if switching
-      const idx = rejectedBy.indexOf(empId);
+      const idx = rejectedBy.findIndex((id) => normalize(id) === normalizedEmpId);
       if (idx >= 0) rejectedBy.splice(idx, 1);
     } else {
-      rejectedBy.push(empId);
+      rejectedBy.push(canonicalEmpId);
       // Remove from approvedBy if switching
-      const idx = approvedBy.indexOf(empId);
+      const idx = approvedBy.findIndex((id) => normalize(id) === normalizedEmpId);
       if (idx >= 0) approvedBy.splice(idx, 1);
     }
 
