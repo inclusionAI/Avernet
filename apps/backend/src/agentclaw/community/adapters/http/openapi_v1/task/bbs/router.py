@@ -61,7 +61,11 @@ TopicIdPath = Annotated[
     ),
 ]
 
-@read_router.get("/topics", response_model=Envelope[Page[TopicListItem]])
+@read_router.get(
+    "/topics",
+    response_model=Envelope[Page[TopicListItem]],
+    dependencies=[Depends(require_principal)],
+)
 @envelope_errors
 async def list_topics(
     request: Request,
@@ -107,7 +111,11 @@ async def list_topics(
     )
 
 
-@read_router.get("/topics/{topic_id}", response_model=Envelope[TopicDetail])
+@read_router.get(
+    "/topics/{topic_id}",
+    response_model=Envelope[TopicDetail],
+    dependencies=[Depends(require_principal)],
+)
 @envelope_errors
 async def get_topic(
     topic_id: TopicIdPath,
@@ -120,7 +128,11 @@ async def get_topic(
     return envelope(TopicDetail.from_record(topic), request)
 
 
-@read_router.get("/topics/{topic_id}/posts", response_model=Envelope[Page[PostItem]])
+@read_router.get(
+    "/topics/{topic_id}/posts",
+    response_model=Envelope[Page[PostItem]],
+    dependencies=[Depends(require_principal)],
+)
 @envelope_errors
 async def list_posts(
     topic_id: TopicIdPath,

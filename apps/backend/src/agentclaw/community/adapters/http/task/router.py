@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import ValidationError
 
@@ -770,7 +770,20 @@ async def set_dingtalk_config(
 
 # Keep this dynamic route after every static task route so names such as
 # ``benchmark_execute`` and ``discovery`` can never be consumed as task IDs.
-@router.get("/{task_id}", response_model=Envelope[TaskExecutionGraphDTO])
+# The public-only query surfaces (dashboard/list) are intentionally absent
+# here, so their addresses must fall through to 404 rather than authenticate
+# as though they were task IDs.
+def reject_public_only_task_id(task_id: str) -> None:
+    """Refuse historical public-only read paths from reaching the ID lookup."""
+    if task_id in {"dashboard", "list"}:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
+@router.get(
+    "/{task_id}",
+    response_model=Envelope[TaskExecutionGraphDTO],
+    dependencies=[Depends(reject_public_only_task_id)],
+)
 @envelope_errors
 async def get_task_internal(
     task_id: str,

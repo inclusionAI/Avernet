@@ -228,6 +228,9 @@
       "frontend_url": "http://localhost:8000",
       "robot_code": "dummy-robot-code"
     },
+    "task_dispatch": {
+      "backend_url": "http://localhost:8888"
+    },
     "task_queue_worker": {
       "enabled": true,
       "poll_interval_seconds": 0.2,

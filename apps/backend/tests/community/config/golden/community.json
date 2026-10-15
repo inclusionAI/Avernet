@@ -161,6 +161,9 @@
     "task_discovery": {
       "frontend_url": "${FRONTEND_URL:-http://localhost:8000}"
     },
+    "task_dispatch": {
+      "backend_url": ""
+    },
     "task_queue_worker": {
       "enabled": true
     },

@@ -436,7 +436,6 @@ GET /api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription: missing [
 GET /api/v1/collaboration/tasks/bots/{bot_id}/bbs/feed: missing [happy, error]
 GET /api/v1/collaboration/tasks/feedback: missing [happy, error]
 GET /api/v1/collaboration/tasks/trajectory: missing [happy, error]
-GET /api/v1/collaboration/tasks/{task_id}/context: missing [happy, error]
 GET /openapi/v1/collaboration/tasks/bbs/browse-subscriptions: missing [happy, error]
 GET /openapi/v1/collaboration/tasks/bbs/topics: missing [happy, error]
 GET /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}: missing [happy, error]
