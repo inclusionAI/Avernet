@@ -72,15 +72,25 @@ async def test_search_bots_records_relay_search_trace() -> None:
 
 
 class _ReportGraph:
-    """Serve ``apply_relay_report`` with a scripted outcome triple."""
+    """Serve ``apply_relay_report``/``query_task_dashboard`` with scripted facts."""
 
-    def __init__(self, outcome) -> None:
-        self._outcome = outcome
-        self.commands = []
+    def __init__(self, *, known_event_ids=None, apply_exc=None) -> None:
+        self.known_event_ids = set(known_event_ids or [])
+        self.apply_exc = apply_exc
+        self.apply_commands = []
+
+    def query_task_dashboard(self, task_id, node_id=None):
+        return SimpleNamespace(
+            extend_props={
+                "_relay_report_event_ids": {k: {} for k in self.known_event_ids},
+            },
+        )
 
     def apply_relay_report(self, command):
-        self.commands.append(command)
-        return self._outcome
+        if self.apply_exc is not None:
+            raise self.apply_exc
+        self.apply_commands.append(command)
+        return TaskReportResult(TaskReportStatus.APPLIED)
 
 
 class _RecordingContextService:
@@ -94,8 +104,8 @@ class _RecordingContextService:
 
 
 class _ReportService(TaskServiceRelayMixin):
-    def __init__(self, outcome, context_service) -> None:
-        self._graph = _ReportGraph(outcome)
+    def __init__(self, graph, context_service) -> None:
+        self._graph = graph
         self._task_context_service = context_service
         self._relay_adapter = SimpleNamespace(search=_Search())
 
@@ -111,92 +121,85 @@ def _report_command(event_id: str = "ev-1") -> TaskReportCommand:
     )
 
 
-def _action_event(action: NodeAction, ts: int, payload: dict) -> NodeActionEvent:
-    return NodeActionEvent(
-        seq=1,
-        ts=ts,
-        action=action,
-        status_from=Status.RUNNING,
-        status_to=Status.RUNNING,
-        payload=payload,
+def _trace_steps():
+    from agentclaw.community.core.task.domain.models import (
+        TaskReportTrace,
+        TaskReportTraceStep,
+    )
+
+    return TaskReportTrace(
+        steps=[
+            TaskReportTraceStep(
+                action_type="execute",
+                action_result="tool_error_reported",
+                action_input="读取上下文并执行检索",
+                status_from="RUNNING",
+                status_to="RUNNING",
+                boost_reason="S1 上下文读取完成",
+                error_msg=None,
+            ),
+            TaskReportTraceStep(
+                action_type="verify",
+                action_result="accept_pass",
+            ),
+            TaskReportTraceStep(  # 非法 action_type → 写侧跳过(防读侧丢行)
+                action_type="S5C_SEARCH",
+                action_result="completed",
+            ),
+        ]
     )
 
 
 @pytest.mark.asyncio
-async def test_report_emits_trajectory_rows_for_action_events() -> None:
-    """上报即发射:apply_relay_report 返回的每个 action event 逐条转
-    TrajectoryEvent kwargs 落表(gmt_create=动作 ts,action_result/error 与读时
-    投影同源;ext_info 脱辅助键 + 带 holder_id/relay_event_id)。"""
-    action_events = [
-        _action_event(
-            NodeAction.EXECUTE,
-            1790000000123,
-            {
-                "__node_id": "node-1",
-                "__holder_id": "bot-9",
-                "success": True,
-                "execution_decision": "ACCEPTED",
-                "output": {"result": "done"},
-            },
-        ),
-        _action_event(
-            NodeAction.VERIFY,
-            1790000000123,
-            {
-                "__node_id": "node-1",
-                "__holder_id": "bot-9",
-                "verdict": "DONE",
-                "done_items": [],
-                "gap_items": [],
-            },
-        ),
-    ]
-    outcome = (TaskReportResult(TaskReportStatus.APPLIED), action_events, True)
+async def test_report_emits_only_trace_step_rows() -> None:
+    """上报即发射 trace.step 行(**高层动作不落轨迹表**——2026-10-15 验收语义);
+    ``action_type`` 写侧先验枚举,非法跳过;``now_ms`` 按序 +1 保时序;
+    ext_info 带 trace_step/relay_event_id。"""
     ctx = _RecordingContextService()
-    service = _ReportService(outcome, ctx)
+    service = _ReportService(_ReportGraph(), ctx)
+    command = replace(
+        _report_command("ev-trace"), trace=_trace_steps(),
+    )
 
-    result = await service.report(_report_command())
+    result = await service.report(command)
 
     assert result.status == TaskReportStatus.APPLIED
-    assert [(c[0], c[1], c[2]) for c in ctx.calls] == [
-        ("task-1", "node-1", "execute"),
-        ("task-1", "node-1", "verify"),
-    ]
-    execute_kwargs = ctx.calls[0][3]
-    assert execute_kwargs["action_result"] == "success"
-    assert execute_kwargs["now_ms"] == 1790000000123, "发射行 gmt_create = 动作 ts"
-    assert execute_kwargs["ext_info"]["holder_id"] == "bot-9"
-    assert execute_kwargs["ext_info"]["relay_event_id"] == "ev-1"
-    assert "__node_id" not in execute_kwargs["ext_info"]
-    assert ctx.calls[1][3]["action_result"] == "accept_pass"
+    assert [(c[1], c[2]) for c in ctx.calls] == [
+        ("node-1", "execute"),
+        ("node-1", "verify"),
+    ], "只发 step 行;非法 action_type 跳过;高层动作(execute/verify apply 行)不落表"
+    step_1 = ctx.calls[0][3]
+    assert step_1["action_result"] == "tool_error_reported"
+    assert step_1["action_input"] == "读取上下文并执行检索"
+    assert step_1["status_from"] == "RUNNING" and step_1["status_to"] == "RUNNING"
+    assert step_1["boost_reason"] == "S1 上下文读取完成"
+    assert step_1["error_msg"] is None
+    assert step_1["attempt"] == 0
+    assert step_1["ext_info"] == {"trace_step": True, "relay_event_id": "ev-trace"}
+    assert step_1["now_ms"] + 1 == ctx.calls[1][3]["now_ms"], "step 行按序 +1"
 
 
 @pytest.mark.asyncio
-async def test_report_skips_trajectory_emission_on_replay() -> None:
-    """幂等重放:apply 判定为 replay(action_events=None)→ 不发射,表里不添行。"""
-    outcome = (TaskReportResult(TaskReportStatus.APPLIED), None, False)
+async def test_report_skips_step_emission_on_replay() -> None:
+    """重放上报(图里已有该 event_id 的回执)→ 不重复发射 step 行。"""
     ctx = _RecordingContextService()
-    service = _ReportService(outcome, ctx)
+    graph = _ReportGraph(known_event_ids={"ev-replay"})
+    service = _ReportService(graph, ctx)
+    command = replace(_report_command("ev-replay"), trace=_trace_steps())
 
-    result = await service.report(_report_command())
+    result = await service.report(command)
 
     assert result.status == TaskReportStatus.APPLIED
-    assert ctx.calls == [], "重放不重复发射"
+    assert ctx.calls == [], "重放(event_id 已有回执)不重复发射"
 
 
 @pytest.mark.asyncio
 async def test_report_without_context_service_is_noop() -> None:
     """``_task_context_service`` 未接线(轻量 DI)→ 上报正常,发射静默跳过。"""
-    action_events = [
-        _action_event(
-            NodeAction.EXECUTE, 1790000000123,
-            {"__node_id": "node-1", "success": True},
-        )
-    ]
-    outcome = (TaskReportResult(TaskReportStatus.APPLIED), action_events, True)
-    service = _ReportService(outcome, None)
+    service = _ReportService(_ReportGraph(), None)
+    command = replace(_report_command("ev-none"), trace=_trace_steps())
 
-    result = await service.report(_report_command("ev-none"))
+    result = await service.report(command)
 
     assert result.status == TaskReportStatus.APPLIED
 
@@ -204,114 +207,30 @@ async def test_report_without_context_service_is_noop() -> None:
 @pytest.mark.asyncio
 async def test_report_graph_failure_propagates_without_emission() -> None:
     """图应用失败(校验/token)→ 异常外抛,不发射任何轨迹行。"""
+    ctx = _RecordingContextService()
+    graph = _ReportGraph(apply_exc=TaskStateError("relay execution attempt has expired"))
+    service = _ReportService(graph, ctx)
 
-    class _FailingGraph:
-        def apply_relay_report(self, command):
-            raise TaskStateError("relay execution attempt has expired")
-
-    class _Service(TaskServiceRelayMixin):
-        def __init__(self) -> None:
-            self._graph = _FailingGraph()
-            self._task_context_service = _RecordingContextService()
-            self._relay_adapter = SimpleNamespace(search=_Search())
-
-    service = _Service()
     with pytest.raises(TaskStateError):
         await service.report(_report_command("ev-stale"))
-    assert service._task_context_service.calls == []
+    assert ctx.calls == []
 
 
 @pytest.mark.asyncio
-async def test_report_emits_trajectory_rows_for_trace_steps() -> None:
-    """trace.steps 逐条落表:上报即转——每个 step 一次 ``emit_trajectory_event``,
-    七字段(action_type/action_input/action_result/status_from/status_to/
-    boost_reason/error_msg)对齐轨迹事件表;``now_ms`` 以高层动作 ts 为基准按
-    step 序 +1 偏移(高层行 ts 被投影去重钉死,step 行排其后保时序);
-    ext_info 带 ``trace_step`` 标识 + ``relay_event_id`` 可追溯;非法
-    action_type(不在枚举内)跳过该条(读侧枚举强校验会丢行,写侧先拦)。
-    """
-    from agentclaw.community.core.task.domain.models import (
-        TaskReportTrace,
-        TaskReportTraceStep,
-    )
+async def test_report_precheck_failure_degrades_to_emit() -> None:
+    """预查读图失败 → best-effort 按未见过处理,step 行照发(宁多勿漏)。"""
+    class _BrokenGraph:
+        def query_task_dashboard(self, task_id, node_id=None):
+            raise RuntimeError("graph unavailable")
 
-    action_events = [
-        _action_event(
-            NodeAction.EXECUTE, 1790000000000,
-            {"__node_id": "node-1", "success": True},
-        ),
-    ]
-    outcome = (TaskReportResult(TaskReportStatus.APPLIED), action_events, True)
+        def apply_relay_report(self, command):
+            return TaskReportResult(TaskReportStatus.APPLIED)
+
     ctx = _RecordingContextService()
-    service = _ReportService(outcome, ctx)
-    command = replace(
-        _report_command("ev-trace"),
-        trace=TaskReportTrace(
-            steps=[
-                TaskReportTraceStep(
-                    action_type="execute",
-                    action_result="tool_error_reported",
-                    action_input="读取上下文并执行检索",
-                    status_from="RUNNING",
-                    status_to="RUNNING",
-                    boost_reason="S1 上下文读取完成",
-                    error_msg=None,
-                ),
-                TaskReportTraceStep(
-                    action_type="verify",
-                    action_result="accept_pass",
-                ),
-                TaskReportTraceStep(  # 非法 action_type → 写侧跳过(防读侧丢行)
-                    action_type="S5C_SEARCH",
-                    action_result="completed",
-                ),
-            ]
-        ),
-    )
+    service = _ReportService(_BrokenGraph(), ctx)
+    command = replace(_report_command("ev-degrade"), trace=_trace_steps())
 
     result = await service.report(command)
 
     assert result.status == TaskReportStatus.APPLIED
-    # 1 条高层行 + 2 条 step 行(非法的跳过)
-    assert [(c[1], c[2]) for c in ctx.calls] == [
-        ("node-1", "execute"),
-        ("node-1", "execute"),
-        ("node-1", "verify"),
-    ]
-    step_1 = ctx.calls[1][3]
-    assert step_1["action_result"] == "tool_error_reported"
-    assert step_1["action_input"] == "读取上下文并执行检索"
-    assert step_1["status_from"] == "RUNNING" and step_1["status_to"] == "RUNNING"
-    assert step_1["boost_reason"] == "S1 上下文读取完成"
-    assert step_1["error_msg"] is None
-    assert step_1["now_ms"] == 1790000000001, "step 行 ts = 高层 ts + 序号偏移"
-    assert step_1["ext_info"] == {
-        "trace_step": True,
-        "relay_event_id": "ev-trace",
-    }
-    step_2 = ctx.calls[2][3]
-    assert step_2["action_result"] == "accept_pass"
-    assert step_2["now_ms"] == 1790000000002
-    assert step_2["status_from"] is None and step_2["status_to"] is None
-
-
-@pytest.mark.asyncio
-async def test_report_trace_steps_skipped_on_replay_or_without_context() -> None:
-    """重放(action_events=None)不发射 step 行;context service 未接线同样静默。"""
-    from agentclaw.community.core.task.domain.models import (
-        TaskReportTrace,
-        TaskReportTraceStep,
-    )
-
-    outcome = (TaskReportResult(TaskReportStatus.APPLIED), None, False)
-    ctx = _RecordingContextService()
-    service = _ReportService(outcome, ctx)
-    command = replace(
-        _report_command("ev-replay"),
-        trace=TaskReportTrace(
-            steps=[TaskReportTraceStep(action_type="plan", action_result="success")],
-        ),
-    )
-
-    await service.report(command)
-    assert ctx.calls == [], "重放不重复发射 step 行"
+    assert len(ctx.calls) == 2

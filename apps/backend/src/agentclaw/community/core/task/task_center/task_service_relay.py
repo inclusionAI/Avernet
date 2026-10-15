@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
     BotCandidate,
     NodeAction,
-    NodeActionEvent,
     Status,
     TaskCallbackData,
     TaskNodePatch,
@@ -19,9 +19,6 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.task_context.task_trajectory.models import (
     TrajectoryActionType,
-)
-from agentclaw.community.core.task.task_context.task_trajectory.relay_action_projection import (
-    relay_action_event_fields,
 )
 from agentclaw.community.core.task.task_runner.client.relay_prompt import (
     format_relay_execution_instruction,
@@ -62,55 +59,54 @@ class TaskServiceRelayMixin:
 
     async def report(self, command: TaskReportCommand) -> TaskReportResult:
         """Atomically apply EXECUTION_RESULT or PLAN_RESULT to the task graph,
-        then mirror the recorded action events AND the reported trace steps
-        into the trajectory table.
+        then write the reported trace steps into the trajectory table.
 
-        写时发射:``apply_relay_report`` 返回本次上报记入 action_log 的动作事件,
-        逐条经 ``emit_trajectory_event`` 直插 ``task_trajectory_events``;``command.
-        trace.steps`` 同样逐条独立成行(七字段与轨迹表对齐,见
-        ``TaskReportTraceStep``——上报即转,**不做读时投影**)。观测旁路,决策 #14
-        fire-and-forget 吞异常,失败不影响上报结果;读时投影
-        (``merge_relay_action_log``)按签名去重后成为存量/旁路兜底,时间线不双份。
-        幂等重放(action_events 为 None)不重复发射。"""
-        result, action_events, _ = self._graph.apply_relay_report(command)
-        if action_events:
-            self._emit_relay_report_trajectory(command, action_events)
+        写时发射(2026-10-15 验收语义):relay 轨迹的**唯一事实源 = Bot 上报的
+        ``trace.steps``**——上报即逐条转 ``task_trajectory_events`` 行(七字段,
+        见 ``TaskReportTraceStep``),读取原样拼回;apply 记录的高层动作
+        (execute/verify/plan/transition)**不落轨迹表**(留在 action_log/图内,
+        是 dashboard 侧事实)。观测旁路,决策 #14 fire-and-forget:发射失败仅
+        日志,绝不影响上报结果。
+
+        幂等:发射前查图 ``_relay_report_event_ids`` ——该 event_id 已有回执 =
+        重放上报,跳过发射(apply 自身对重放返回既有结果,不重记账)。预查失败
+        best-effort 视为未见过(宁可多发,不可漏观测)。"""
+        already_known = self._relay_report_event_known(command)
+        result = self._graph.apply_relay_report(command)
+        if not already_known and command.trace is not None and command.trace.steps:
+            self._emit_trace_step_rows(command)
         return result
 
-    def _emit_relay_report_trajectory(
-        self, command: TaskReportCommand, action_events: list[NodeActionEvent]
-    ) -> None:
-        """把上报动作事件 + trace.steps 转为 TrajectoryEvent 行发射
-        (task_context_service 未接线 no-op)。"""
-        if self._task_context_service is None:
-            return
-        base_ts = 0
-        for event in action_events:
-            fields = relay_action_event_fields(
-                event, relay_event_id=command.event_id
+    def _relay_report_event_known(self, command: TaskReportCommand) -> bool:
+        """该 ``event_id`` 是否已有 relay 回执(= 重放上报)。读图失败 → False
+        (best-effort:预查不可用时宁可重发,不丢观测)。"""
+        try:
+            graph = self._graph.query_task_dashboard(command.task_id)
+            known = set(
+                (graph.extend_props.get("_relay_report_event_ids") or {}).keys()
             )
-            node_id = fields.pop("node_id")
-            base_ts = max(base_ts, event.ts)
-            self._task_context_service.emit_trajectory_event(
+            return command.event_id in known
+        except Exception:  # noqa: BLE001  观测旁路门闸,吞而不抛
+            logger.warning(
+                "[task][relay][trajectory] 上报预查失败,按未见过处理 "
+                "task=%s event=%s",
                 command.task_id,
-                node_id,
-                event.action.value,
-                **fields,
+                command.event_id,
+                exc_info=True,
             )
-        if command.trace is not None and command.trace.steps:
-            self._emit_trace_step_rows(command, base_ts)
+            return False
 
-    def _emit_trace_step_rows(
-        self, command: TaskReportCommand, base_ts: int
-    ) -> None:
+    def _emit_trace_step_rows(self, command: TaskReportCommand) -> None:
         """trace.steps 逐条写时落表:一 step 一行,七字段与轨迹表对齐。
 
-        ``now_ms`` 以本次上报高层动作的 ts 为基准按序 +1 偏移——高层行的 ts 被
-        读时投影的签名去重钉死(不能挪),step 行排在其后保住"上报→步骤"的先后
-        与 step 之间的顺序。``action_type`` 写侧先验枚举(读侧枚举强校验会整行
-        丢弃),非法值跳过该条 + WARNING。"""
-        steps = command.trace.steps if command.trace is not None else []
-        for offset, step in enumerate(steps, start=1):
+        ``now_ms`` 以当前时刻为基准按 step 序 +1 偏移,保证同一上报的 steps 在
+        timeline 内先后有序;``action_type`` 写侧先验枚举(读侧枚举强校验会把
+        未知值整行丢弃),非法值跳过该条 + WARNING;``ext_info`` 带
+        ``trace_step`` + ``relay_event_id`` 可追溯。"""
+        if self._task_context_service is None:
+            return
+        base_ts = int(time.time() * 1000)
+        for offset, step in enumerate(command.trace.steps, start=1):
             try:
                 action_type = TrajectoryActionType(step.action_type)
             except ValueError:

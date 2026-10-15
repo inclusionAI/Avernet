@@ -50,9 +50,10 @@ on-demand analysis-trigger failure MUST be visible — 504 + no backfill). The
 router maps via ``@envelope_errors`` / ``ENVELOPE_ERRORS``.
 
 Scope boundary: no FastAPI / transport (the router is P5b's other half). The
-centralized path keeps its independent trajectory-event stream. Relay reads its
-transactional ``task_action_log`` as an authoritative projection fallback so
-report/search/recovery/delivery facts cannot disappear from the timeline. The
+centralized path keeps its independent trajectory-event stream. **Relay
+(2026-10-15 验收语义)**:轨迹的 relay 事实 = 上报时逐条落表的 ``trace.steps``
+行(``TaskServiceRelayMixin.report`` 写时发射),不再读时投影 action_log——
+apply 记录的高层动作属于 dashboard 侧事实,不入轨迹时间线。The
 analyzer is the ONLY bot caller. ``TaskService`` remains a separate service.
 
 Authoritative: ``specs/2026-09-16-task-trajectory-collection-and-analysis/spec.md``
@@ -98,9 +99,6 @@ from agentclaw.community.core.task.task_context.task_trajectory.trajectory_lifec
 )
 from agentclaw.community.core.task.task_context.task_trajectory.trajectory_session_support import (
     TrajectorySessionSupport,
-)
-from agentclaw.community.core.task.task_context.task_trajectory.relay_action_projection import (
-    merge_relay_action_log,
 )
 from agentclaw.community.di.task_trajectory_config import TrajectoryAnalysisConfig
 
@@ -217,26 +215,6 @@ def _timeline_fingerprint(records: list[TrajectoryEventRecord]) -> str:
         )
         parts.append(f"|{rec.id}:{formatted}")
     return hashlib.sha256("".join(parts).encode("utf-8")).hexdigest()
-
-
-def _relay_timeline_fingerprint(base: str, trajectory: TaskTrajectory) -> str:
-    """Extend the persisted-event fingerprint with Relay action-log projection."""
-    parts = [base]
-    for event in trajectory.timeline:
-        parts.append(
-            "|".join(
-                (
-                    event.node_id,
-                    event.action_type.value,
-                    str(event.attempt),
-                    str(event.gmt_create),
-                    event.status_from.value if event.status_from else "",
-                    event.status_to.value if event.status_to else "",
-                    event.action_result,
-                )
-            )
-        )
-    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
 
 
 def _persisted_timeline_version(analysis_json: str | None) -> str | None:
@@ -486,7 +464,6 @@ class TaskTrajectoryService(
             do_analysis = True
         if not do_analysis:
             trajectory = self._assembler.assemble(task_id)
-            self._merge_relay_actions(trajectory)
             self._attach_node_outputs(trajectory)
             # session_detail=True 才实拉会话明细(REQ-8 不变式保持:纯读绝不写库——
             # merge_last_event_ext_info / backfill_analysis 只在分析路径可达;
@@ -520,7 +497,6 @@ class TaskTrajectoryService(
         # 1. Assemble the timeline (read-side; no DB write beyond the head UPSERT
         #    which preserves existing analysis/gmt_modified).
         trajectory = self._assembler.assemble(task_id)
-        relay_actions_merged = self._merge_relay_actions(trajectory)
         # 1a. 读时富化:每个子任务(task_id+node_id)的最后一条事件挂上该节点的
         #     当前产出(task_execution_graph 查询接口)。旁路,失败降级不抛;两模式
         #     返回的 timeline 同形态(含快路径直接返回的持久化分析)。
@@ -540,8 +516,6 @@ class TaskTrajectoryService(
             )
             records = None
         fingerprint = _timeline_fingerprint(records) if records is not None else None
-        if fingerprint is not None and relay_actions_merged:
-            fingerprint = _relay_timeline_fingerprint(fingerprint, trajectory)
 
         # 2. Incremental idempotent fast path: head analysis present AND its
         #    persisted ``timeline_version`` equals the freshly computed
@@ -645,28 +619,6 @@ class TaskTrajectoryService(
     # 节点当前态读时富化 — timeline 的"每子任务最后一条事件"携带执行产出 + 真实模态
     # (决策 #14 精神:观测旁路,graph 未接线/图读失败 → 跳过,绝不影响轨迹本体)。
     # ------------------------------------------------------------------
-
-    def _merge_relay_actions(self, trajectory: TaskTrajectory) -> bool:
-        """Project transactionally persisted Relay action logs on read."""
-        if self._graph is None:
-            return False
-        is_relay_task = getattr(self._graph, "is_relay_task", None)
-        if is_relay_task is None:
-            return False
-        try:
-            if not is_relay_task(trajectory.task_id):
-                return False
-            graph = self._graph.query_task_dashboard(trajectory.task_id)
-            self._graph.load_action_logs(graph)
-            return bool(merge_relay_action_log(trajectory, graph))
-        except Exception as ex:  # noqa: BLE001 - observability must not break reads
-            logger.warning(
-                "[task][trajectory] Relay action log projection failed task=%s: %s: %s",
-                trajectory.task_id,
-                type(ex).__name__,
-                ex,
-            )
-            return False
 
     def _attach_node_outputs(self, trajectory: TaskTrajectory) -> None:
         """把每个子任务(task_id+node_id)的**当前产出**与**真实执行模态**挂到它在
