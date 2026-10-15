@@ -218,7 +218,11 @@ run_real_singlebox() {
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
     STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
     bash "$repo_root/singlebox/singlebox.sh" --standalone setup all
+  # Gateway, BCS, and Backend use different env var names for the same HMAC
+  # principal contract. All three ends must receive the same coverage key.
   env SINGLEBOX_COVERAGE=1 SINGLEBOX_COVERAGE_DIR="$coverage_root/raw" OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE="$model_config_mode" \
+    principal_signing_key="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
+    AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
     AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
     BCS_DEBUG=true BCS_COVERAGE_FORCE_REBUILD="${BCS_COVERAGE_FORCE_REBUILD:-1}" \
     BACKEND_READY_ATTEMPTS="${BACKEND_READY_ATTEMPTS:-120}" \

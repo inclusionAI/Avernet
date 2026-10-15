@@ -539,6 +539,22 @@ test_5bot_openclaw_config_is_written_private() {
     fail "5bot openclaw config should be chmod 600"
 }
 
+test_coverage_gate_supplies_matching_principal_signing_keys() {
+  local coverage_start
+  coverage_start="$(sed -n '/^  env SINGLEBOX_COVERAGE=1/,/^    bash "$repo_root\/singlebox\/singlebox.sh" --standalone --with-bcs-coverage start all/p' \
+    "${ROOT}/singlebox/ci/singlebox_coverage.sh")"
+
+  grep -F 'principal_signing_key="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY"' \
+    <<<"$coverage_start" >/dev/null || \
+    fail "coverage stack must supply the Gateway principal signing key"
+  grep -F 'AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY"' \
+    <<<"$coverage_start" >/dev/null || \
+    fail "coverage stack must supply the BCS principal verification key"
+  grep -F 'AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY"' \
+    <<<"$coverage_start" >/dev/null || \
+    fail "coverage stack must supply the Backend principal verification key"
+}
+
 test_local_bcs_launchers_supply_required_signing_keys() {
   local singlebox_start five_bot_start group_secret_default principal_secret_default
   singlebox_start="$(sed -n '/^start_bcs_binary()/,/^}/p' "${ROOT}/singlebox/modules/bcs.sh")"
