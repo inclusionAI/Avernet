@@ -51,6 +51,8 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 
 _CALLER = "u-42"
+#: What the seam sees when no bypass is configured — the shipped default.
+_NO_BYPASS: frozenset[str] = frozenset()
 _PROBE = f"{PUBLIC_API_PREFIX}/bots/_probe"
 
 
@@ -189,7 +191,11 @@ def test_a_rejected_id_cannot_choose_how_much_it_logs(caplog):
 
     with caplog.at_level(logging.WARNING):
         with pytest.raises(UserIdMismatchError):
-            asyncio.run(require_user_id(principal={"user_id": _CALLER}, user_id=flood))
+            asyncio.run(
+                require_user_id(
+                    principal={"user_id": _CALLER}, user_id=flood, bypass=_NO_BYPASS
+                )
+            )
 
     logged = "\n".join(record.getMessage() for record in caplog.records)
     assert len(logged) < 500, "a caller must not choose the size of the log line"
@@ -201,7 +207,9 @@ def test_a_rejected_id_cannot_choose_how_much_it_logs(caplog):
 
 @pytest.mark.asyncio
 async def test_the_dependency_returns_the_request_user_id():
-    resolved = await require_user_id(principal={"user_id": _CALLER}, user_id=_CALLER)
+    resolved = await require_user_id(
+        principal={"user_id": _CALLER}, user_id=_CALLER, bypass=_NO_BYPASS
+    )
 
     assert resolved == _CALLER
 
@@ -209,14 +217,16 @@ async def test_the_dependency_returns_the_request_user_id():
 @pytest.mark.asyncio
 async def test_the_dependency_refuses_a_mismatch():
     with pytest.raises(UserIdMismatchError):
-        await require_user_id(principal={"user_id": _CALLER}, user_id="someone-else")
+        await require_user_id(
+            principal={"user_id": _CALLER}, user_id="someone-else", bypass=_NO_BYPASS
+        )
 
 
 @pytest.mark.asyncio
 async def test_the_dependency_refuses_an_unverifiable_caller():
     """Fail-closed on the principal before the parameter is even compared."""
     with pytest.raises(MissingPrincipalError):
-        await require_user_id(principal=None, user_id=_CALLER)
+        await require_user_id(principal=None, user_id=_CALLER, bypass=_NO_BYPASS)
 
 
 @pytest.mark.asyncio
@@ -231,7 +241,9 @@ async def test_the_mismatch_logs_both_ids(caplog):
     with caplog.at_level(logging.WARNING):
         with pytest.raises(UserIdMismatchError):
             await require_user_id(
-                principal={"user_id": _CALLER}, user_id="someone-else"
+                principal={"user_id": _CALLER},
+                user_id="someone-else",
+                bypass=_NO_BYPASS,
             )
 
     logged = "\n".join(record.getMessage() for record in caplog.records)

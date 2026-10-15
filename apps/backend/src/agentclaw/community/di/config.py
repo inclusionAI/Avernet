@@ -19,6 +19,9 @@ from typing import Any
 from agentclaw.community.di.task_dispatch_config import (
     TaskDispatchConfig as TaskDispatchConfig,
 )
+from agentclaw.community.di.openapi_user_id_bypass_config import (
+    OpenApiUserIdBypassConfig as OpenApiUserIdBypassConfig,
+)
 
 from agentclaw.community.core.bot_config_manifest.delivery_mode import (
     TeclawDeliveryMode,

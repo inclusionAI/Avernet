@@ -205,6 +205,16 @@ user_config:
   whitelist:
     operator_names: []
 
+  # Public API (/openapi/v1) caller-identity policy.
+  # user_id_bypass: ``user_id`` query values accepted as-is on every user-scoped
+  # public operation, whoever the authenticated person is — the "must name
+  # yourself" 403 is skipped for them. Empty = no exemption (the default).
+  # MUST stay empty in pre/prod: the backend refuses to boot there when this
+  # list is non-empty (OpenApiUserIdBypassConfigModule + the eager binding
+  # check), and tests pin the shipped value to empty.
+  openapi:
+    user_id_bypass: []
+
   # 浏览器 CORS allow-list — 中性默认仅 localhost origin。corp env overlay 追加
   # 公司前端 origin + envspot/tern-dev 正则；community 在
   # application-community.yaml 中列自己的前端 origin。allow_credentials=True 下不能

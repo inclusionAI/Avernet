@@ -791,7 +791,7 @@ async def test_no_handler_can_fall_back_to_a_bot_derived_owner():
     ]
 
     with pytest.raises(MissingPrincipalError):
-        await require_user_id(principal=None, user_id="u1")
+        await require_user_id(principal=None, user_id="u1", bypass=frozenset())
 
 
 def _api_routes(router_) -> list:

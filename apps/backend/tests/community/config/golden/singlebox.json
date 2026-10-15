@@ -183,6 +183,9 @@
     },
     "mock_tcauth": true,
     "nas_mount_root": "/home/admin/.bot_shared_nas/arca/arcaagentclaw",
+    "openapi": {
+      "user_id_bypass": []
+    },
     "openapi_bot": {
       "api_key_prefix": "${api_key_prefix:-}",
       "api_key_secret": "${api_key_secret:-}",

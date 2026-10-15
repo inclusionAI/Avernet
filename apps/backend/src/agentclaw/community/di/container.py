@@ -71,6 +71,9 @@ from agentclaw.community.di.modules.mcp_runtime_credentials_config_module import
     McpRuntimeCredentialsConfigModule,
 )
 from agentclaw.community.di.modules.mcp_module import McpModule
+from agentclaw.community.di.modules.openapi_user_id_bypass_config_module import (
+    OpenApiUserIdBypassConfigModule,
+)
 from agentclaw.community.di.modules.bot_message_feedback_module import BotMessageFeedbackModule
 from agentclaw.community.di.modules.quality_module import QualityModule
 from agentclaw.community.di.modules.runtime_projection_recovery_module import (
@@ -148,6 +151,10 @@ def build_injector(
         # (bot_id + tc_bot timeout). Sits in its own module to keep
         # ConfigModule at zero headroom under the 1000-line cap.
         TaskTrajectoryConfigModule(),
+        # Public-API ``user_id`` bypass list (``openapi`` user_config block).
+        # Own module for the same headroom reason; its provider refuses a
+        # non-empty list in pre/prod, surfaced at boot by the eager check.
+        OpenApiUserIdBypassConfigModule(),
         InstallationReadConfigModule(),
         SkillCenterModule(),
         SkillCenterGroup4Module(),
@@ -258,6 +265,9 @@ def eager_check_critical_bindings(injector: Injector) -> None:
     """
     from agentclaw.community.di.modules_bootstrap import get_eager_check_keys
     from agentclaw.community.api.bot_chat_service import OpenBotChatServiceProtocol
+    from agentclaw.community.di.openapi_user_id_bypass_config import (
+        OpenApiUserIdBypassConfig,
+    )
     from agentclaw.community.plugin_api.auth import AuthPlugin
     from agentclaw.community.plugin_api.database import DatabasePlugin
 
@@ -274,6 +284,11 @@ def eager_check_critical_bindings(injector: Injector) -> None:
         # rather than at the first outbound call. This entry only ensures the
         # pre/prod aggregate names it alongside the other critical bindings.
         HttpClientPoolConfig,
+        # Resolving it is what enforces "empty in pre/prod": the provider
+        # raises on a non-empty ``openapi.user_id_bypass`` there, and this is
+        # the step that turns that into a failed rollout instead of a 500 on
+        # the first user-scoped /openapi/v1 request.
+        OpenApiUserIdBypassConfig,
         *get_eager_check_keys(),
     ]
 
