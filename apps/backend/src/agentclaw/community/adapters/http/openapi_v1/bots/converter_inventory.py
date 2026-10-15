@@ -1,4 +1,4 @@
-"""Translate inventory cards without querying or exposing publication internals."""
+"""Convert inventory cards without querying or exposing publication internals."""
 
 from agentclaw.community.core.bot_inventory.types import (
     BotInventoryItem as CoreItem,

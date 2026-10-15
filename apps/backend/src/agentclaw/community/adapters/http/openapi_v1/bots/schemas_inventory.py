@@ -4,6 +4,8 @@ from pydantic import BaseModel, Field
 
 
 class InventoryPublication(BaseModel):
+    """Stored publication identity and status represented by a service Bot card."""
+
     id: int = Field(description="Publication id represented by this service card.")
     status: str = Field(
         description="Stored publication status, as in the legacy publish.status; "

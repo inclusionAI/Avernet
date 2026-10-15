@@ -136,7 +136,7 @@ from .startup_script_support import (
     _startup_script_target,
     _withdraw_the_write_if_the_bot_was_deleted,
 )
-from .inventory_projection import to_inventory_item as _to_inventory_item
+from .converter_inventory import to_inventory_item as _to_inventory_item
 from .schemas import (
     Bot,
     BotMetadata,
