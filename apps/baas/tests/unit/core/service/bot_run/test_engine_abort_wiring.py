@@ -323,11 +323,14 @@ async def test_baas_bot_service_abort_warns_on_unconfirmed_engine_abort(
 
     pool = MagicMock()
     ws_client = MagicMock()
-    ws_client.chat_abort = AsyncMock(return_value={
-        "ok": True, "a2a": True,
-        "task": {"id": "t", "state": "TASK_STATE_CANCELED"},
-        "engineAbort": "timeout",
-    })
+    ws_client.chat_abort = AsyncMock(
+        return_value={
+            "ok": True,
+            "a2a": True,
+            "task": {"id": "t", "state": "TASK_STATE_CANCELED"},
+            "engineAbort": "timeout",
+        }
+    )
     pool.get = AsyncMock(return_value=ws_client)
 
     resolver = MagicMock()
@@ -344,11 +347,11 @@ async def test_baas_bot_service_abort_warns_on_unconfirmed_engine_abort(
     with caplog.at_level(logging.WARNING):
         await service.abort(session_id="sess-1", binding_info=binding_info)
 
-    warned = [r for r in caplog.records
-              if "engine stop unconfirmed" in r.message]
+    warned = [r for r in caplog.records if "engine stop unconfirmed" in r.message]
     assert warned, caplog.text
-    assert "engineAbort" in warned[0].getMessage() or "timeout" \
-        in warned[0].getMessage()
+    assert (
+        "engineAbort" in warned[0].getMessage() or "timeout" in warned[0].getMessage()
+    )
 
 
 async def test_baas_bot_service_abort_confirmed_and_v3_shapes_do_not_warn(
@@ -360,8 +363,7 @@ async def test_baas_bot_service_abort_confirmed_and_v3_shapes_do_not_warn(
     resolver = MagicMock()
     resolver.dispatch_bot_ws_conn_info = AsyncMock(return_value=_conn_info())
 
-    for shape in ({"ok": True},
-                  {"ok": True, "a2a": True, "engineAbort": "confirmed"}):
+    for shape in ({"ok": True}, {"ok": True, "a2a": True, "engineAbort": "confirmed"}):
         pool = MagicMock()
         ws_client = MagicMock()
         ws_client.chat_abort = AsyncMock(return_value=shape)
@@ -376,8 +378,9 @@ async def test_baas_bot_service_abort_confirmed_and_v3_shapes_do_not_warn(
         )
         caplog.clear()
         await service.abort(session_id="sess-1", binding_info=binding_info)
-        assert not [r for r in caplog.records
-                    if "engine stop unconfirmed" in r.message], shape
+        assert not [
+            r for r in caplog.records if "engine stop unconfirmed" in r.message
+        ], shape
 
 
 async def test_claw_bot_service_abort_warns_on_unconfirmed_engine_abort(
@@ -387,15 +390,17 @@ async def test_claw_bot_service_abort_warns_on_unconfirmed_engine_abort(
     import logging
 
     secret_store = MagicMock(spec=SecretStorePlugin)
-    secret_store.generate_proxy_token = MagicMock(
-        return_value="test-token")
+    secret_store.generate_proxy_token = MagicMock(return_value="test-token")
     pool = MagicMock()
     ws_client = MagicMock()
-    ws_client.chat_abort = AsyncMock(return_value={
-        "ok": True, "a2a": True,
-        "task": {"id": "t", "state": "TASK_STATE_CANCELED"},
-        "engineAbort": "refused",
-    })
+    ws_client.chat_abort = AsyncMock(
+        return_value={
+            "ok": True,
+            "a2a": True,
+            "task": {"id": "t", "state": "TASK_STATE_CANCELED"},
+            "engineAbort": "refused",
+        }
+    )
     pool.get = AsyncMock(return_value=ws_client)
 
     service = ClawBotService(
@@ -412,7 +417,6 @@ async def test_claw_bot_service_abort_warns_on_unconfirmed_engine_abort(
     with caplog.at_level(logging.WARNING):
         await service.abort(session_id="sess-1", binding_info=binding_info)
 
-    warned = [r for r in caplog.records
-              if "engine stop unconfirmed" in r.message]
+    warned = [r for r in caplog.records if "engine stop unconfirmed" in r.message]
     assert warned, caplog.text
     assert "refused" in warned[0].getMessage()

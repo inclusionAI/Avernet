@@ -769,8 +769,9 @@ def _cancel_capable_card() -> dict:
     }
 
 
-def make_cancel_app(*, mode: str = "cancels",
-                    abort_outcome: str = "confirmed") -> tuple[FastAPI, dict]:
+def make_cancel_app(
+    *, mode: str = "cancels", abort_outcome: str = "confirmed"
+) -> tuple[FastAPI, dict]:
     """1c CancelTask 前后端速写（真 TCP）。
 
     mode:
@@ -960,9 +961,7 @@ def test_chat_abort_passes_through_unconfirmed_outcome():
         out = _run(scenario())
         assert out["ok"] is True, out
         assert out["task"]["state"] == "TASK_STATE_CANCELED"
-        assert out["engineAbort"] == "timeout", (
-            f"非 confirmed 结局必须原样透传: {out}"
-        )
+        assert out["engineAbort"] == "timeout", f"非 confirmed 结局必须原样透传: {out}"
     finally:
         srv.stop()
 

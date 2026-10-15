@@ -818,14 +818,18 @@ class BaasBotService(BotService):
             # 结果流已终结；引擎停止确认以 engineAbort 附录为准——非
             # confirmed 落结构化告警，不得推断执行已停止。
             abort_result = await client.chat_abort(session_key=session_id)
-            if isinstance(abort_result, dict) and abort_result.get("a2a") \
-                    and abort_result.get("ok") \
-                    and abort_result.get("engineAbort") != "confirmed":
+            if (
+                isinstance(abort_result, dict)
+                and abort_result.get("a2a")
+                and abort_result.get("ok")
+                and abort_result.get("engineAbort") != "confirmed"
+            ):
                 logger.warning(
                     "[BaasBotService.abort] transport cancelled but engine "
                     "stop unconfirmed: session_id=%s engineAbort=%s "
                     "(engine may still be running)",
-                    session_id, abort_result.get("engineAbort"),
+                    session_id,
+                    abort_result.get("engineAbort"),
                 )
             logger.info(
                 "[BaasBotService.abort] engine abort sent: session_id=%s",

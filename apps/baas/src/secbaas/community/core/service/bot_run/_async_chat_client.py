@@ -809,13 +809,15 @@ class AsyncChatClient:
             self._v3_fallback = None  # 失效收口；下次附件请求走重建
             logger.warning(
                 "[v3-fallback] disconnected: terminating %d routed "
-                "session(s) with explicit error", len(routed),
+                "session(s) with explicit error",
+                len(routed),
             )
             for session_key in routed:
                 state = self._sessions.get(session_key)
                 if state is not None and not state.chat_complete.is_set():
                     self._handle_terminal_error(
-                        state, session_key,
+                        state,
+                        session_key,
                         "fallback connection lost; run outcome unknown",
                         "fallback_disconnect",
                     )

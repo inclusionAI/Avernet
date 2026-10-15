@@ -2376,14 +2376,17 @@ class TestV3FallbackDisconnectRecovery:
 
         task = asyncio.create_task(
             acc.send_message(
-                "hi", session_key="sk-att-1",
+                "hi",
+                session_key="sk-att-1",
                 attachments=[{"kind": "screenshot"}],
             )
         )
         await self._wait_until(
-            lambda: bool(_StubV3Transport.instances)
-                and len(_StubV3Transport.instances[-1].chat_send_calls)
-                >= 1)
+            lambda: (
+                bool(_StubV3Transport.instances)
+                and len(_StubV3Transport.instances[-1].chat_send_calls) >= 1
+            )
+        )
         fallback = acc._v3_fallback
         assert fallback is not None
 
@@ -2408,7 +2411,8 @@ class TestV3FallbackDisconnectRecovery:
         async def consume() -> list[StreamChunk]:
             chunks: list[StreamChunk] = []
             async for chunk in acc.send_message_stream(
-                "hi", session_key="sk-att-2",
+                "hi",
+                session_key="sk-att-2",
                 attachments=[{"kind": "screenshot"}],
             ):
                 chunks.append(chunk)
@@ -2416,9 +2420,11 @@ class TestV3FallbackDisconnectRecovery:
 
         task = asyncio.create_task(consume())
         await self._wait_until(
-            lambda: bool(_StubV3Transport.instances)
-                and len(_StubV3Transport.instances[-1].chat_send_calls)
-                >= 1)
+            lambda: (
+                bool(_StubV3Transport.instances)
+                and len(_StubV3Transport.instances[-1].chat_send_calls) >= 1
+            )
+        )
         acc._v3_fallback.simulate_disconnect()
 
         chunks = await asyncio.wait_for(task, 2)
@@ -2434,19 +2440,20 @@ class TestV3FallbackDisconnectRecovery:
         仍在等回复的请求不被误杀（R17-5 隔离裁决）。"""
         acc = self._acc_with_awaitable_main()
 
-        a2a_task = asyncio.create_task(
-            acc.send_message("plain", session_key="sk-a2a")
-        )
+        a2a_task = asyncio.create_task(acc.send_message("plain", session_key="sk-a2a"))
         att_task = asyncio.create_task(
             acc.send_message(
-                "hi", session_key="sk-att-3",
+                "hi",
+                session_key="sk-att-3",
                 attachments=[{"kind": "screenshot"}],
             )
         )
         await self._wait_until(
-            lambda: bool(_StubV3Transport.instances)
-                and len(_StubV3Transport.instances[-1].chat_send_calls)
-                >= 1)
+            lambda: (
+                bool(_StubV3Transport.instances)
+                and len(_StubV3Transport.instances[-1].chat_send_calls) >= 1
+            )
+        )
         await self._wait_until(lambda: acc._client.chat_send.await_count == 1)
 
         acc._v3_fallback.simulate_disconnect()
@@ -2471,12 +2478,16 @@ class TestV3FallbackDisconnectRecovery:
 
         async def send_att(sk: str, min_count: int):
             task = asyncio.create_task(
-                acc.send_message("hi", session_key=sk,
-                                 attachments=[{"kind": "screenshot"}]))
+                acc.send_message(
+                    "hi", session_key=sk, attachments=[{"kind": "screenshot"}]
+                )
+            )
             await self._wait_until(
-                lambda: bool(_StubV3Transport.instances)
-                and len(_StubV3Transport.instances[-1].chat_send_calls)
-                >= min_count)
+                lambda: (
+                    bool(_StubV3Transport.instances)
+                    and len(_StubV3Transport.instances[-1].chat_send_calls) >= min_count
+                )
+            )
             return task
 
         task1 = await send_att("sk-att-4a", 1)
@@ -2487,11 +2498,16 @@ class TestV3FallbackDisconnectRecovery:
 
         created = len(_StubV3Transport.instances)
         task2 = asyncio.create_task(
-            acc.send_message("hi", session_key="sk-att-4b",
-                             attachments=[{"kind": "screenshot"}]))
+            acc.send_message(
+                "hi", session_key="sk-att-4b", attachments=[{"kind": "screenshot"}]
+            )
+        )
         await self._wait_until(
-            lambda: len(_StubV3Transport.instances) > created
-            and len(_StubV3Transport.instances[-1].chat_send_calls) >= 1)
+            lambda: (
+                len(_StubV3Transport.instances) > created
+                and len(_StubV3Transport.instances[-1].chat_send_calls) >= 1
+            )
+        )
         second = acc._v3_fallback
         assert second is not None and second is not first, "复用了已断开连接"
         assert len(_StubV3Transport.instances) == created + 1
@@ -2516,14 +2532,12 @@ class TestV3FallbackDisconnectRecovery:
         finally 路径上）时，_ensure_v3_fallback 不得返回死连接——就地
         失效收口（归属表清理）并重建。"""
         acc = self._acc_with_awaitable_main()
-        await acc.inject_message(
-            "m", session_key="sk-att-5", attachments=[{"k": 1}])
+        await acc.inject_message("m", session_key="sk-att-5", attachments=[{"k": 1}])
         first = acc._v3_fallback
         assert first is not None
         first.connected = False  # 死连接，未触发断连处理器
 
-        await acc.inject_message(
-            "m2", session_key="sk-att-5", attachments=[{"k": 1}])
+        await acc.inject_message("m2", session_key="sk-att-5", attachments=[{"k": 1}])
 
         second = acc._v3_fallback
         assert second is not first, "死连接被复用"
