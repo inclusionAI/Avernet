@@ -185,3 +185,26 @@ it('renders an actionable Owner request with a document link and collapses the t
   await user.click(screen.getByLabelText('我已处理方案中的配合事项'));
   expect(screen.getByRole('button', { name: '确认完整方案' })).toBeEnabled();
 });
+
+it('lets Owners expand verbose plan text without changing the saved plan or its approval', async () => {
+  const user = userEvent.setup();
+  const summary = '目标文档无法读取，需要申请访问权限后重试原任务。'.repeat(7);
+  const operation = '引导 Bot 核对可用申请工具，必要时由资源所有者授权，并继续原任务。'.repeat(6);
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, plan: { ...task.plan, summary, basis: '调查记录及权限依据。'.repeat(20), actions: [{ ...task.plan.actions[0], summary: operation }] } } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  const expandSummary = await screen.findByRole('button', { name: '展开方案结论' });
+  expect(expandSummary).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.getByRole('button', { name: '展开操作说明' })).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.getByText(summary)).toBeInTheDocument();
+  expect(screen.getByText(operation)).toBeInTheDocument();
+  await user.click(expandSummary);
+  expect(screen.getByRole('button', { name: '收起方案结论' })).toHaveAttribute('aria-expanded', 'true');
+  await user.click(screen.getByRole('button', { name: '展开操作说明' }));
+  expect(screen.getByRole('button', { name: '收起操作说明' })).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getByText(summary)).toBeVisible();
+  expect(screen.getByText(operation)).toBeVisible();
+  expect(screen.getByRole('button', { name: '确认完整方案' })).toBeDisabled();
+  await user.click(screen.getByLabelText('我已处理方案中的配合事项'));
+  await user.click(screen.getByRole('button', { name: '确认完整方案' }));
+  await waitFor(() => expect(sessionRecoveryApi.decide).toHaveBeenCalledWith('task', 'plan-digest', true, true, ''));
+});

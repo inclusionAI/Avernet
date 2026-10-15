@@ -360,8 +360,15 @@
 .sr-plan-summary { border-left:3px solid var(--blue); border-radius:0 10px 10px 0; background:#f3f7ff; padding:18px 20px }
 .sr-plan-summary h3 { margin:0 0 10px; color:#3169d4; font-size:12px; font-weight:600 }
 .sr-plan-summary p { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.85 }
-.sr-plan-summary .sr-plan-lead { color:#27354d; font-size:16px; font-weight:650 }
-.sr-plan-summary .sr-plan-description { margin-top:12px; color:#53637c; font-size:14px }
+.sr-plan-summary .sr-plan-text-content { color:#46566f; font-size:14px; font-weight:400 }
+.sr-plan-text { min-width:0 }
+.sr-plan-text-content { margin:0; color:#53637c; font-size:13px; font-weight:400; line-height:1.85; white-space:pre-wrap; overflow-wrap:anywhere }
+.sr-plan-text-content.collapsed { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden }
+.sr-action-title .sr-plan-text-content.collapsed { -webkit-line-clamp:2 }
+.sr-text-toggle { margin-top:7px; border:0; padding:0; background:transparent; color:#3169d4; font-size:12px!important; font-weight:400; cursor:pointer }
+.sr-text-toggle:hover { text-decoration:underline }
+.sr-text-toggle:focus-visible { outline:2px solid #3169d4; outline-offset:3px }
+.sr-action-rollback .sr-plan-text-content { font-size:12px }
 .sr-plan-context-grid { display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr); gap:24px; margin:26px 0; padding-bottom:24px; border-bottom:1px solid var(--line) }
 .sr-plan-context-grid>.sr-plan-block { margin:0 }
 .sr-plan-context-grid>.sr-plan-block+section { padding-left:22px; border-left:1px solid var(--line) }
@@ -419,8 +426,8 @@
 }
 .sr-action-title h3 {
   margin:1px 0 0;
-  font-size:16px;
-  font-weight:650;
+  font-size:14px;
+  font-weight:500;
   color:#2d3a4f;
 }
 .sr-action-grid {

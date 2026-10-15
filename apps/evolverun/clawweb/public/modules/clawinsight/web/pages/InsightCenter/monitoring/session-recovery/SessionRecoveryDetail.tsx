@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { monitoringErrorText } from '../../../../api/monitoring';
@@ -123,6 +123,29 @@ function CardHeader({ title, description, right }: { title: string; description?
       {description && <p>{description}</p>}
     </div>
     {right}
+  </div>;
+}
+
+function PlanText({ text, label, heading = false }: { text: string; label: string; heading?: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const [long, setLong] = useState(text.length > 120 || text.split('\n').length > 3);
+  const container = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const content = container.current?.firstElementChild as HTMLElement | undefined;
+    if (!content || typeof ResizeObserver === 'undefined') return;
+    const measure = () => {
+      const lineHeight = Number.parseFloat(window.getComputedStyle(content).lineHeight);
+      if (Number.isFinite(lineHeight)) setLong(content.scrollHeight > lineHeight * (heading ? 2 : 3) + 1);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [text, heading]);
+  const Text = heading ? 'h3' : 'p';
+  return <div className="sr-plan-text" ref={container}>
+    <Text className={`sr-plan-text-content ${long && !expanded ? 'collapsed' : ''}`}>{text}</Text>
+    {long && <button type="button" className="sr-text-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? '收起' : '展开'}{label}</button>}
   </div>;
 }
 
@@ -275,16 +298,16 @@ function RecoveryPlan({ task, busy, ownerFeedback, cooperationDone, onFeedback, 
     <CardHeader title="修复方案" right={<StatusPill status={plan.approvedAt ? 'completed' : 'waiting_owner'}>{plan.approvedAt ? '方案已确认' : task.status === 'waiting_owner' ? '等待确认' : '方案已提交'}</StatusPill>} />
     <div className="sr-plan-summary">
       <h3>方案结论</h3>
-      {plan.summary.split(/\n\s*\n/).map((paragraph, index) => <p key={index} className={index === 0 ? 'sr-plan-lead' : 'sr-plan-description'}>{paragraph}</p>)}
+      <PlanText text={plan.summary} label="方案结论" />
     </div>
     <div className="sr-plan-context-grid">
     <section className="sr-plan-block" aria-label="诊断依据">
       <h3>诊断依据</h3>
-      <div className="sr-plan-basis"><p className="sr-long-text">{plan.basis}</p></div>
+      <div className="sr-plan-basis"><PlanText text={plan.basis} label="诊断依据" /></div>
     </section>
     <section className="sr-plan-block" aria-label="影响范围">
       <h3>影响范围</h3>
-      <p className="sr-long-text">{plan.scope}</p>
+      <PlanText text={plan.scope} label="影响范围" />
     </section>
     </div>
     <section className="sr-plan-block" aria-label="方案动作">
@@ -293,13 +316,13 @@ function RecoveryPlan({ task, busy, ownerFeedback, cooperationDone, onFeedback, 
       {plan.actions.map((action, index) => <article key={action.actionId} id={`recovery-action-${encodeURIComponent(action.actionId)}`} className="sr-action">
         <div className="sr-action-title">
           <span>{index + 1}</span>
-          <div><h3>{action.summary}</h3></div>
+          <PlanText text={action.summary} label="操作说明" heading />
         </div>
         <div className="sr-action-grid">
-          <div><h4>风险</h4><p>{action.risk}</p></div>
-          <div><h4>验证</h4><p>{action.verification}</p></div>
+          <div><h4>风险</h4><PlanText text={action.risk} label="风险说明" /></div>
+          <div><h4>验证</h4><PlanText text={action.verification} label="验证方法" /></div>
         </div>
-        {action.rollback && <p className="sr-action-rollback"><strong>回退：</strong>{action.rollback}</p>}
+        {action.rollback && <div className="sr-action-rollback"><strong>回退：</strong><PlanText text={action.rollback} label="回退说明" /></div>}
         <details className="sr-disclosure">
           <summary>查看操作细节</summary>
           <p className="sr-note mono">操作标识：{action.actionId}</p>
@@ -313,7 +336,7 @@ function RecoveryPlan({ task, busy, ownerFeedback, cooperationDone, onFeedback, 
     </section>
     <section className="sr-plan-block" aria-label="验收方法">
       <h3>验收方法</h3>
-      <p className="sr-long-text">{plan.verification}</p>
+      <PlanText text={plan.verification} label="验收方法" />
     </section>
     {(plan.owner_cooperation.length > 0 || task.status === 'waiting_owner') && <section className={`sr-owner-action ${task.status === 'waiting_owner' ? 'pending' : ''}`}>
     {plan.owner_cooperation.length > 0 && <div className="sr-owner-box">
