@@ -870,7 +870,9 @@ def make_cancel_app(*, mode: str = "cancels") -> tuple[FastAPI, dict]:
                         "task": {
                             "id": body["params"]["taskId"],
                             "status": {"state": "TASK_STATE_CANCELED"},
-                        }
+                        },
+                        # 引擎侧真中止结局——chat_abort 透传给调用方观测
+                        "engineAbort": "confirmed",
                     },
                 }
             if mode == "refuse":
@@ -924,6 +926,8 @@ def test_chat_abort_forwards_cancel_task_to_engine():
         assert out["ok"] is True, out
         assert out["a2a"] is True
         assert out["task"]["state"] == "TASK_STATE_CANCELED"
+        # engineAbort 透传——调用方可观测引擎侧真中止结局
+        assert out["engineAbort"] == "confirmed", out
         cancels = [b for b in state["bodies"] if b.get("method") == "CancelTask"]
         assert len(cancels) == 1, f"CancelTask 上 wire {len(cancels)} 次"
         assert cancels[0]["params"]["taskId"] == "eng-1", cancels[0]
@@ -1716,6 +1720,39 @@ def test_card_probe_http_failure_raises_a2a_unavailable():
         srv.stop()
 
 
+def make_malformed_card_app(payload: Any) -> FastAPI:
+    """结构畸形卡——合法 JSON 但形态不兼容（非对象卡 / 接口表残缺）。
+
+    回归钉（PR #2743 review P2）：结构解析不得裸抛 AttributeError /
+    TypeError 击穿 A2aUnavailableError 承诺——那会让 grey 回退 v3 失效。
+    """
+    app = FastAPI()
+
+    @app.get("/.well-known/agent-card.json")
+    def card() -> Any:
+        return JSONResponse(payload)
+
+    return app
+
+
+_MALFORMED_CARDS: list[tuple[str, Any]] = [
+    ("array-card", []),
+    ("null-interfaces", {"supportedInterfaces": None}),
+    ("null-element", {"supportedInterfaces": [None]}),
+]
+
+
+@pytest.mark.parametrize("case,payload", _MALFORMED_CARDS)
+def test_card_structural_malform_converts_to_a2a_unavailable(
+        case, payload):
+    srv = LiveServer(make_malformed_card_app(payload))
+    try:
+        with pytest.raises(A2aUnavailableError, match="agent card|malformed"):
+            _run(_connect_async(srv.base))
+    finally:
+        srv.stop()
+
+
 def test_double_connect_is_rejected(stream_server):
     async def scenario():
         client = await _connect_async(stream_server.base)
@@ -2369,6 +2406,66 @@ def test_async_client_on_mode_raises_when_a2a_probe_fails():
     )
 
     srv = LiveServer(make_card_down_app())
+    try:
+
+        async def scenario():
+            acc = AsyncChatClient(
+                uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
+                a2a_mode="on",
+                max_retries=0,
+            )
+            await acc.connect()
+
+        with pytest.raises(A2aUnavailableError):
+            _run(scenario())
+    finally:
+        srv.stop()
+
+
+@pytest.mark.parametrize("case,payload", _MALFORMED_CARDS)
+def test_async_client_grey_malformed_card_falls_back_to_v3(case, payload):
+    """结构畸形卡不炸灰度门——grey 仍如约回退 v3（原 WS 服务照常可用）。"""
+    from unittest.mock import patch
+
+    from secbaas.community.core.service.bot_run._async_chat_client import (
+        AsyncChatClient,
+    )
+
+    srv = LiveServer(make_malformed_card_app(payload))
+    try:
+
+        async def scenario():
+            with patch(
+                "secbaas.community.core.service.bot_run._async_chat_client."
+                "BotWebSocketClient",
+                _FakeV3KingineTransport,
+            ):
+                acc = AsyncChatClient(
+                    uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
+                    a2a_mode="grey",
+                    max_retries=0,
+                )
+                hello = await acc.connect()
+                assert acc._transport == "v3-ws", (
+                    f"畸形卡({case})下 grey 必须回退 v3: {hello}"
+                )
+                await acc.close()
+                return True
+
+        assert _run(scenario())
+    finally:
+        srv.stop()
+
+
+@pytest.mark.parametrize("case,payload", _MALFORMED_CARDS)
+def test_async_client_on_mode_malformed_card_raises_a2a_error(case, payload):
+    """on 模式下畸形卡 = 明确的 A2aUnavailableError 失败，而非裸
+    AttributeError/TypeError 击穿建连。"""
+    from secbaas.community.core.service.bot_run._async_chat_client import (
+        AsyncChatClient,
+    )
+
+    srv = LiveServer(make_malformed_card_app(payload))
     try:
 
         async def scenario():

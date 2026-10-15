@@ -145,7 +145,11 @@ class BotA2aClient:
         return (self._server_info or {}).get("features")
 
     async def connect(self) -> dict[str, Any]:
-        """能力探测：card GET → JSONRPC + 1.x 才可用（灰度门）。"""
+        """能力探测：card GET → JSONRPC + 1.x 才可用（灰度门）。
+
+        合法 JSON 但结构不兼容（非对象卡、supportedInterfaces 残缺等）
+        一律转 A2aUnavailableError——灰度回退 v3 的承诺不许形态异常击穿。
+        """
         if self._connected:
             raise RuntimeError("Already connected")
         try:
@@ -155,12 +159,19 @@ class BotA2aClient:
                 card = resp.json()
         except Exception as e:
             raise A2aUnavailableError(f"A2A capability probe failed: {e}") from e
+        if not isinstance(card, dict):
+            raise A2aUnavailableError(
+                f"agent card is not an object: {type(card).__name__}")
+        interfaces = card.get("supportedInterfaces")
+        if not isinstance(interfaces, list) or not all(
+                isinstance(i, dict) for i in interfaces):
+            raise A2aUnavailableError("malformed supportedInterfaces on card")
         matched = any(
             (
                 i.get("protocolBinding") == "JSONRPC"
                 and str(i.get("protocolVersion", "")).startswith("1.")
             )
-            for i in card.get("supportedInterfaces", [])
+            for i in interfaces
         )
         if not matched:
             raise A2aUnavailableError("no JSONRPC 1.x interface on card")
@@ -629,10 +640,15 @@ class BotA2aClient:
         task = (body.get("result") or {}).get("task")
         state = ((task or {}).get("status") or {}).get("state")
         if has_result and not has_error and state == "TASK_STATE_CANCELED":
+            # engineAbort：引擎侧真中止的结局附录（confirmed/not_found/
+            # refused/timeout/unavailable）；老引擎不携带时为 None——
+            # 成功判定不受影响，仅 observability 透传。
+            engine_abort = (body.get("result") or {}).get("engineAbort")
             return {
                 "ok": True,
                 "a2a": True,
                 "task": {"id": (task or {}).get("id"), "state": state},
+                "engineAbort": engine_abort,
             }
         return {
             "ok": False,
