@@ -164,6 +164,8 @@ class SingleboxDevicesModule(Module):
 
         return InMemoryDeviceAdapterTransport(
             default_adapter_url=environ.get("SINGLEBOX_ENGINE_ADAPTER_URL"),
+            proxy_cron=True,
+            proxy_skills=True,
         )
 
     @singleton

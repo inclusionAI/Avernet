@@ -73,6 +73,42 @@ def test_require_local_profile_rejects_corp():
         main._require_local_profile(DeployProfile.CORP)
 
 
+def test_runtime_config_logging_redacts_literal_runtime_credentials():
+    from agentclaw.community import main
+
+    source = {
+        "user_config": {
+            "openapi_bot": {
+                "api_key_secret": "secret-baas-key",
+                "api_key_prefix": "pref0001",
+            },
+            "bcs_client": {
+                "token_secret": "secret-bcs-token",
+                "secret_secret": "secret-bcs-secret",
+                "base_url": "http://127.0.0.1:21000",
+            },
+        }
+    }
+    redacted = main._redact_runtime_config_for_log(source)
+
+    assert redacted == {
+        "user_config": {
+            "openapi_bot": {
+                "api_key_secret": "<redacted>",
+                "api_key_prefix": "pref0001",
+            },
+            "bcs_client": {
+                "token_secret": "<redacted>",
+                "secret_secret": "<redacted>",
+                "base_url": "http://127.0.0.1:21000",
+            },
+        }
+    }
+    # The logger must receive a copy, not a mutation of the live config dump.
+    assert source["user_config"]["openapi_bot"]["api_key_secret"] == "secret-baas-key"
+    assert source["user_config"]["bcs_client"]["token_secret"] == "secret-bcs-token"
+
+
 def test_main_registers_profile_provider_before_reading_sofa_config(monkeypatch):
     from agentclaw.community import _entry, local, main
     from agentclaw.community.core.config import provider as config_provider

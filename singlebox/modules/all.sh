@@ -24,7 +24,7 @@ STOP_ORDER=(frontend gateway demo_bot bots bcsfuse bcs backend baas)
 # startup order unchanged. Stop keeps the unconditional union above.
 if [ "${FRONTEND_VARIANT:-legacy}" != legacy ]; then
     SETUP_ORDER=(baas backend bcs bcsfuse bots gateway frontend)
-    START_ORDER=(baas backend bcsfuse bcs bots demo_bot gateway frontend)
+    START_ORDER=(baas backend bcsfuse bcs bots gateway demo_bot frontend)
 fi
 
 all_setup() {

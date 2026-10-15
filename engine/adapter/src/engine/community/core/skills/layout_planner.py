@@ -52,6 +52,7 @@ class LayoutIdentity:
 @dataclass(frozen=True, slots=True)
 class RuntimeLayoutContext:
     home: Path = Path("/home/admin")
+    openclaw_root: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,9 +94,25 @@ class _FilesystemTemplate:
         context: RuntimeLayoutContext,
     ) -> ResolvedFilesystemLayoutPlan:
         home = context.home
+        openclaw_root = context.openclaw_root
+        if openclaw_root is not None:
+            if identity.engine_type != "openclaw":
+                raise SkillLayoutResolutionError(
+                    "openclaw_root is only valid for the openclaw layout"
+                )
 
-        def path(relative: str) -> Path:
-            return home / relative
+            def path(relative: str) -> Path:
+                prefix = ".openclaw/"
+                if not relative.startswith(prefix):
+                    raise SkillLayoutResolutionError(
+                        "openclaw workspace-relative layout path is invalid"
+                    )
+                return openclaw_root / relative[len(prefix) :]
+
+        else:
+
+            def path(relative: str) -> Path:
+                return home / relative
 
         pool_root = path(self.pool_root)
         return ResolvedFilesystemLayoutPlan(
@@ -178,6 +195,20 @@ class ResolvedFilesystemLayoutPlan:
         """Compatibility name used by the existing runtime probe."""
 
         return self.ready_marker
+
+    @classmethod
+    def for_runtime_context(
+        cls,
+        engine: str,
+        context: RuntimeLayoutContext,
+    ) -> ResolvedFilesystemLayoutPlan:
+        return resolve_filesystem_skill_layout(
+            LayoutIdentity(
+                engine_type=engine,
+                layout_contract_version=LAYOUT_CONTRACT_VERSION,
+            ),
+            context,
+        )
 
     @classmethod
     def for_engine(

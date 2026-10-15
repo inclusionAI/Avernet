@@ -2983,6 +2983,7 @@ def verify_skill_mappings(
     mappings: list[SkillMapping],
     retired_mappings: Sequence[SkillMapping] = (),
     home: str | Path = "/home/admin",
+    layout_context: RuntimeLayoutContext | None = None,
     engine: str = "openclaw",
     source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
     additional_retirement_roots: Sequence[Path] = (),
@@ -2990,7 +2991,11 @@ def verify_skill_mappings(
 ) -> MappingVerificationResult:
     """验证受管激活入口精确解析到声明 layout 的 source。"""
 
-    layout = _Layout.for_engine(engine, Path(home))
+    layout = (
+        _Layout.for_runtime_context(engine, layout_context)
+        if layout_context is not None
+        else _Layout.for_engine(engine, Path(home))
+    )
     if apply_mode is MappingApplyMode.BEST_EFFORT:
         items, evidence = _best_effort_mapping_results(
             layout=layout,
@@ -3057,6 +3062,7 @@ def publish_pool_mappings(
     mappings: list[SkillMapping],
     retired_mappings: Sequence[SkillMapping] = (),
     home: str | Path = "/home/admin",
+    layout_context: RuntimeLayoutContext | None = None,
     engine: str = "openclaw",
     source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
     additional_retirement_roots: Sequence[Path] = (),
@@ -3064,7 +3070,11 @@ def publish_pool_mappings(
 ) -> MappingPublishResult:
     """按声明 layout 对齐全部受管 mapping，并保留外部入口。"""
 
-    layout = _Layout.for_engine(engine, Path(home))
+    layout = (
+        _Layout.for_runtime_context(engine, layout_context)
+        if layout_context is not None
+        else _Layout.for_engine(engine, Path(home))
+    )
     if apply_mode is MappingApplyMode.BEST_EFFORT:
         items, evidence = _best_effort_mapping_results(
             layout=layout,

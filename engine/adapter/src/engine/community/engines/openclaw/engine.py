@@ -40,6 +40,7 @@ from engine.community.core.engine.base import BaseEngine
 from engine.community.core.cli_tools.service import LocalCliToolsService
 from engine.community.core.engine.capability import Capability, EngineCapabilities
 from engine.community.core.engine.context import AuthContext
+from engine.community.plugin_api.workspace_root import openclaw_runtime_layout_context
 from engine.community.openclaw.client.gateway_client import (
     OpenClawGatewayClient,
     close_client,
@@ -169,12 +170,14 @@ class OpenClawEngine(BaseEngine):
         super().__init__(config)
         self._injected_client = client  # None in production; set only by tests
         self._injected_pool = pool  # None in production
+        skills_layout_context = openclaw_runtime_layout_context()
 
         # The single production transport impl shared by every adapter.
         self._port = OpenClawPluginImpl(
             client=client,
             pool=pool,
             center_content_adapter=build_center_content_adapter(),
+            skills_layout_context=skills_layout_context,
         )
 
         # ACL adapters implementing the core *Service protocols.
@@ -186,7 +189,10 @@ class OpenClawEngine(BaseEngine):
         self._models = OpenClawModelsAdapter(self._port)
         self._node = OpenClawNodeAdapter(self._port)
         self._mcp = OpenClawMcpAdapter(self._port)
-        self._skills = OpenClawSkillsAdapter(self._port)
+        self._skills = OpenClawSkillsAdapter(
+            self._port,
+            local_layout_context=skills_layout_context,
+        )
         # CLI tools need no port: placing a command is local filesystem work,
         # so the only per-engine fact is the directory — stated once, as the
         # deployment's own constant. **This is the line to change if OpenClaw's

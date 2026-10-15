@@ -1943,6 +1943,17 @@ class DefaultDeviceService(DeviceService):
                     detail_config.metadata = {}
                 detail_config.metadata.update(device_config.metadata)
 
+            # ARCA restart/update is a destroy-and-create flow. Inject the
+            # same runtime metadata start_device supplies so the sandbox
+            # plugin can reconstruct its local workspace callback context.
+            if detail_config.metadata is None:
+                detail_config.metadata = {}
+            detail_config.metadata["publish_id"] = str(publish_id or "")
+            detail_config.metadata["device_uuid"] = device_uuid
+            detail_config.metadata["tenant"] = tenant
+            if deploy_config and deploy_config.tc_bot_id:
+                detail_config.metadata["tc_bot_id"] = deploy_config.tc_bot_id
+
             # ===================================================================
             # WAVE 3: Create device and update DB
             # ===================================================================

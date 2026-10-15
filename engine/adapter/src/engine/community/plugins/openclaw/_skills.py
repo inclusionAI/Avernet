@@ -56,8 +56,16 @@ class _SkillsPortMixin:
     _DEFAULT_SKILLS_LINK_BASE_DIR = "/home/admin/.extra-skills"
     _skills_center_is_mounted = staticmethod(os.path.ismount)
 
-    @staticmethod
+    def _skills_runtime_home(self) -> Path:
+        """Return the legacy layout home used by compatibility-only callers."""
+        return self._skills_runtime_context().home
+
+    def _skills_runtime_context(self) -> RuntimeLayoutContext:
+        """Return the assembled per-process OpenClaw Skills layout context."""
+        return self._skills_layout_context
+
     def _pool_mappings(
+        self,
         params: dict[str, Any],
         *,
         source_layout: MappingSourceLayout,
@@ -68,6 +76,7 @@ class _SkillsPortMixin:
             source_layout=source_layout,
             payload=params.get(key, []),
             mapping_contract_version=params.get("mapping_contract_version"),
+            layout_context=self._skills_runtime_context(),
         )
 
     async def activate_pool_layout(
@@ -84,6 +93,7 @@ class _SkillsPortMixin:
                     source_layout=MappingSourceLayout.POOL,
                 ).mappings
             ),
+            home=self._skills_runtime_home(),
         )
         return PoolLayoutActivationPortResult(**result.to_data())
 
@@ -101,7 +111,8 @@ class _SkillsPortMixin:
         result = await asyncio.to_thread(
             cleanup_quarantine,
             engine="openclaw",
-            home=Path("/home/admin"),
+            home=self._skills_runtime_home(),
+            layout_context=self._skills_runtime_context(),
             migration_generation=params["migration_generation"],
         )
         return result.to_data()
@@ -112,6 +123,8 @@ class _SkillsPortMixin:
             engine="openclaw",
             expected_contract_version=params["layout_contract_version"],
             mapping_contract_version=MAPPING_CONTRACT_VERSION,
+            home=self._skills_runtime_home(),
+            layout_context=self._skills_runtime_context(),
         )
         return result.to_data()
 
@@ -137,6 +150,8 @@ class _SkillsPortMixin:
             "source_layout": MappingSourceLayout(
                 params.get("source_layout", MappingSourceLayout.POOL.value)
             ),
+            "home": self._skills_runtime_home(),
+            "layout_context": self._skills_runtime_context(),
         }
         if retired.mappings:
             publish_kwargs["retired_mappings"] = list(retired.mappings)
@@ -155,6 +170,7 @@ class _SkillsPortMixin:
         return await apply_logical_mapping_request(
             params=params,
             engine="openclaw",
+            layout_context=self._skills_runtime_context(),
             content_adapter=self._center_content_adapter,
         )
 
@@ -180,6 +196,8 @@ class _SkillsPortMixin:
             "source_layout": MappingSourceLayout(
                 params.get("source_layout", MappingSourceLayout.POOL.value)
             ),
+            "home": self._skills_runtime_home(),
+            "layout_context": self._skills_runtime_context(),
         }
         if retired.mappings:
             verify_kwargs["retired_mappings"] = list(retired.mappings)
@@ -259,11 +277,10 @@ class _SkillsPortMixin:
             return raw.resolve(strict=False)
         return (link_path.parent / raw).resolve(strict=False)
 
-    @staticmethod
-    def _skills_center_root() -> Path:
+    def _skills_center_root(self) -> Path:
         return resolve_filesystem_skill_layout(
             LayoutIdentity("openclaw", LAYOUT_CONTRACT_VERSION),
-            RuntimeLayoutContext(home=Path("/home/admin")),
+            self._skills_runtime_context(),
         ).pool_center
 
     async def ensure_center_skills(self, params: dict[str, Any]) -> dict[str, Any]:

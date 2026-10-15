@@ -42,7 +42,7 @@ TEAMCLAW_GW_BASE=http://127.0.0.1:29997
 frontend_configure_upstreams
 [[ "$TEAMCLAW_GW_BASE" == http://127.0.0.1:29997 ]]
 source "$ROOT/singlebox/modules/all.sh"
-[[ "${START_ORDER[*]}" == 'baas backend bcsfuse bcs bots demo_bot gateway frontend' ]]
+[[ "${START_ORDER[*]}" == 'baas backend bcsfuse bcs bots gateway demo_bot frontend' ]]
 [[ "${STOP_ORDER[*]}" == 'frontend gateway demo_bot bots bcsfuse bcs backend baas' ]]
 printf 'PASS: nextgen upstream defaults, overrides and Gateway lifecycle order\n'
 
@@ -82,7 +82,7 @@ FRONTEND_VARIANT=teamclaw
 # the leftover nextgen arrays and pass vacuously.
 unset _ALL_SH_LOADED
 source "$ROOT/singlebox/modules/all.sh"
-[[ "${START_ORDER[*]}" == 'baas backend bcsfuse bcs bots demo_bot gateway frontend' ]]
+[[ "${START_ORDER[*]}" == 'baas backend bcsfuse bcs bots gateway demo_bot frontend' ]]
 # Stop is the unconditional union (legacy + gateway), regardless of variant.
 [[ "${STOP_ORDER[*]}" == 'frontend gateway demo_bot bots bcsfuse bcs backend baas' ]]
 printf 'PASS: teamclaw variant mapping, upstreams and Gateway lifecycle order\n'

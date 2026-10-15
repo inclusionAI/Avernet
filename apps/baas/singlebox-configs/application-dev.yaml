@@ -53,6 +53,9 @@ user_config:
   api_gateway:
     admin_operators:
       - "operator-001"
+      # StubAuthPlugin authenticates local users as staff 000001; this entry
+      # allows singlebox startup to provision Backend's internal OpenAPI key.
+      - "000001"
       - "operator-002"
       - "operator-003"
 

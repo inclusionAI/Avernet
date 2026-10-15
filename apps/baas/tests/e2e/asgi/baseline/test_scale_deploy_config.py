@@ -101,4 +101,9 @@ class TestScaleDeployConfig:
         assert device_deploy_config.get("ttl_in_minutes") == 999
         assert device_deploy_config.get("envs") == {"SCALE_KEY": "scale_value"}
 
+        device_metadata = detail.get("extra_config", {}).get("metadata") or {}
+        assert device_metadata.get("bot_uuid") == bot["bot_uuid"]
+        assert device_metadata.get("entity_type") == "staff"
+        assert "entity_id" in device_metadata
+
         await cleanup_bot(api, bot["bot_uuid"])

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 
+from engine.community.core.skills.layout_planner import RuntimeLayoutContext
 from engine.community.kernel.center_content import CenterContentAdapter
 from engine.community.openclaw.client.gateway_client import (
     OpenClawGatewayClient,
@@ -28,10 +29,14 @@ class OpenClawPortBase:
         pool: TokenClientPool | None = None,
         *,
         center_content_adapter: CenterContentAdapter,
+        skills_layout_context: RuntimeLayoutContext | None = None,
     ) -> None:
         self._client = client
         self._pool = pool if pool is not None else TokenClientPool()
         self._center_content_adapter = center_content_adapter
+        self._skills_layout_context = (
+            skills_layout_context or RuntimeLayoutContext()
+        )
         # Lifetime cache: `providers.available` is global config (doesn't vary
         # per tenant), so we build the map at most once per process lifetime.
         self._model_provider_map: dict[str, str] | None = None

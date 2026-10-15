@@ -384,6 +384,7 @@ def inspect_runtime_layout(
     expected_contract_version: str = LAYOUT_CONTRACT_VERSION,
     mapping_contract_version: str | None = MAPPING_CONTRACT_VERSION,
     home: Path = Path("/home/admin"),
+    layout_context: RuntimeLayoutContext | None = None,
     repo_is_mounted: Callable[[Path], bool] = os.path.ismount,
     center_is_mounted: Callable[[Path], bool] | None = None,
     repo_delivery: RepoDelivery | None = None,
@@ -408,7 +409,7 @@ def inspect_runtime_layout(
             engine_type=engine,
             layout_contract_version=expected_contract_version,
         ),
-        RuntimeLayoutContext(home=home),
+        layout_context or RuntimeLayoutContext(home=home),
     )
     if engine == "openclaw":
         steady = inspect_openclaw_steady_active(

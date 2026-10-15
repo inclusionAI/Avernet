@@ -11,6 +11,7 @@ from engine.community.plugins.skills_pool.center_content import MountedCenterCon
 
 from engine.community.plugins.claude_code.plugin_impl import ClaudeCodePluginImpl
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
+from engine.community.core.skills.layout_planner import RuntimeLayoutContext
 from engine.community.plugins.skills_pool.layout_quarantine import (
     QuarantineCleanupResult,
     QuarantineCleanupStatus,
@@ -184,10 +185,11 @@ async def test_plugin_cleanup_port_returns_structured_result(
     )
 
     assert result["status"] == "CLEANED"
-    assert calls == [
-        {
-            "engine": engine,
-            "home": Path("/home/admin"),
-            "migration_generation": "generation-1",
-        }
-    ]
+    expected_call = {
+        "engine": engine,
+        "home": Path("/home/admin"),
+        "migration_generation": "generation-1",
+    }
+    if engine == "openclaw":
+        expected_call["layout_context"] = RuntimeLayoutContext()
+    assert calls == [expected_call]

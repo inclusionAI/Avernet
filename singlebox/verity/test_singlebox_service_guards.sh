@@ -593,6 +593,156 @@ test_backend_separates_profile_env_and_workspace_folder() {
   fi
 }
 
+test_baas_backend_openapi_key_state_is_validated_and_provisioned() (
+  setup_env
+  # shellcheck source=/dev/null
+  source "${ROOT}/singlebox/modules/baas.sh"
+
+  local curl_args
+  curl_args="$(mktemp)"
+  curl() {
+    printf '%s\n' "$*" > "${curl_args}"
+    printf '%s' '{"data":{"api_key":"test-baas-key","api_key_prefix":"pref0001"}}'
+  }
+  baas_ready() { return 0; }
+
+  if baas_backend_openapi_key_valid; then
+    fail "a missing BAAS credential state file should be invalid"
+  fi
+  printf '%s\n' '{"api_key":"","api_key_prefix":"pref0001"}' \
+    > "${BAAS_BACKEND_OPENAPI_KEY_FILE}"
+  if baas_backend_openapi_key_valid; then
+    fail "an empty BAAS API key should be invalid"
+  fi
+  printf '%s\n' '{"api_key":"test-baas-key","api_key_prefix":""}' \
+    > "${BAAS_BACKEND_OPENAPI_KEY_FILE}"
+  if baas_backend_openapi_key_valid; then
+    fail "an empty BAAS API key prefix should be invalid"
+  fi
+
+  rm -f "${BAAS_BACKEND_OPENAPI_KEY_FILE}"
+  baas_ensure_backend_openapi_key
+
+  grep -F 'allowed_bots' "${curl_args}" >/dev/null || \
+    fail "singlebox should provision an internally authorized BAAS key policy"
+  grep -F '/api/v1/admin/api-keys' "${curl_args}" >/dev/null || \
+    fail "singlebox should provision the key through the BAAS admin endpoint"
+  assert_eq "test-baas-key" "$(baas_backend_openapi_key)" "provisioned BAAS key"
+  assert_eq "pref0001" "$(baas_backend_openapi_prefix)" "provisioned BAAS key prefix"
+
+  local mode
+  if stat -f '%Lp' "${BAAS_BACKEND_OPENAPI_KEY_FILE}" >/dev/null 2>&1; then
+    mode="$(stat -f '%Lp' "${BAAS_BACKEND_OPENAPI_KEY_FILE}")"
+  else
+    mode="$(stat -c '%a' "${BAAS_BACKEND_OPENAPI_KEY_FILE}")"
+  fi
+  assert_eq "600" "$mode" "BAAS credential state permissions"
+)
+
+test_baas_start_invalidates_runtime_key_before_fresh_database() {
+  local start_body clear_line database_line
+  start_body="$(sed -n '/^baas_start()/,/^baas_ready()/p' "${ROOT}/singlebox/modules/baas.sh")"
+  clear_line="$(
+    grep -nF 'baas_clear_backend_openapi_key' <<<"$start_body" \
+      | head -1 | cut -d: -f1
+  )"
+  database_line="$(
+    grep -nF 'rm -f "${RUNTIME_DATA_DIR}/baas.db"' <<<"$start_body" \
+      | head -1 | cut -d: -f1
+  )"
+
+  [ -n "$clear_line" ] || fail "BAAS start should invalidate stale Backend credentials"
+  [ -n "$database_line" ] || fail "BAAS start should reset its local database"
+  [ "$clear_line" -lt "$database_line" ] || \
+    fail "BAAS credential invalidation must precede the fresh database reset"
+}
+
+test_backend_start_fails_without_baas_openapi_key() (
+  setup_env
+  export RUNTIME_DATA_DIR="$(mktemp -d)"
+  export BACKEND_DIR="$(mktemp -d)"
+  export BAAS_BACKEND_OPENAPI_KEY_FILE="${DEP_DIR}/baas-backend-openapi-key.json"
+  mkdir -p "${BACKEND_DIR}/.venv/bin" \
+    "${BACKEND_DIR}/src/agentclaw/community"
+  touch "${BACKEND_DIR}/.venv/bin/activate" \
+    "${BACKEND_DIR}/src/agentclaw/community/main.py"
+
+  # shellcheck source=/dev/null
+  source "${ROOT}/singlebox/modules/baas.sh"
+  # shellcheck source=/dev/null
+  source "${ROOT}/singlebox/modules/backend.sh"
+
+  local launched result
+  launched="${DEP_DIR}/backend-should-not-start"
+  stop_port_processes_if_owned() { return 0; }
+  stop_matching_processes_if_owned() { return 0; }
+  require_port_available_after_owned_stop() { return 0; }
+  check_directory_exists() { return 0; }
+  baas_ensure_backend_openapi_key() { return 23; }
+  start_in_detached_session() { printf 'launched' > "${launched}"; }
+
+  if backend_start; then
+    fail "Backend must fail when BAAS credential provisioning fails"
+  else
+    result=$?
+  fi
+  assert_eq "1" "$result" "failed BAAS credential provisioning return code"
+  [ ! -e "${launched}" ] || fail "Backend must not launch without a BAAS credential"
+)
+
+test_backend_start_injects_baas_openapi_key() (
+  setup_env
+  export RUNTIME_DATA_DIR="$(mktemp -d)"
+  export BACKEND_DIR="$(mktemp -d)"
+  export CHAT_ENGINE="openclaw"
+  export LOCAL_AIDESKTOP_DIR="$(mktemp -d)"
+  export LOCAL_MODE=true
+  export BAAS_BACKEND_OPENAPI_KEY_FILE="${DEP_DIR}/baas-backend-openapi-key.json"
+  mkdir -p "${BACKEND_DIR}/.venv/bin" \
+    "${BACKEND_DIR}/src/agentclaw/community"
+  touch "${BACKEND_DIR}/.venv/bin/activate" \
+    "${BACKEND_DIR}/src/agentclaw/community/main.py"
+
+  # shellcheck source=/dev/null
+  source "${ROOT}/singlebox/modules/baas.sh"
+  # shellcheck source=/dev/null
+  source "${ROOT}/singlebox/modules/backend.sh"
+
+  printf '%s\n' '{"api_key":"test-baas-key","api_key_prefix":"pref0001"}' \
+    > "${BAAS_BACKEND_OPENAPI_KEY_FILE}"
+  chmod 600 "${BAAS_BACKEND_OPENAPI_KEY_FILE}"
+  baas_ready() { return 0; }
+
+  local captured release expected attempt
+  captured="${DEP_DIR}/backend-openapi-env"
+  release="${DEP_DIR}/backend-start.release"
+  rm -f "${release}" "${captured}"
+
+  stop_port_processes_if_owned() { return 0; }
+  stop_matching_processes_if_owned() { return 0; }
+  require_port_available_after_owned_stop() { return 0; }
+  check_directory_exists() { return 0; }
+  backend_ready() { return 0; }
+  start_in_detached_session() {
+    printf 'api_key_secret=%s\napi_key_prefix=%s\n' \
+      "${api_key_secret:-}" "${api_key_prefix:-}" > "${captured}"
+    while [ ! -e "${release}" ]; do
+      sleep 0.05
+    done
+  }
+
+  backend_start
+  for attempt in $(seq 1 100); do
+    [ -s "${captured}" ] && break
+    sleep 0.05
+  done
+
+  expected=$'api_key_secret=test-baas-key\napi_key_prefix=pref0001'
+  assert_eq "$expected" "$(cat "${captured}")" "Backend must receive the BAAS credential"
+
+  touch "${release}"
+)
+
 test_dynamic_bot_gateway_receives_manual_model_credential() (
   setup_env
   export BCS_PORT="21000"
@@ -651,6 +801,10 @@ test_baas_start_aborts_when_bcn_plugin_setup_fails
 test_5bot_openclaw_config_is_written_private
 test_local_bcs_launchers_supply_required_signing_keys
 test_ready_banner_describes_full_stack
+test_baas_backend_openapi_key_state_is_validated_and_provisioned
+test_baas_start_invalidates_runtime_key_before_fresh_database
+test_backend_start_fails_without_baas_openapi_key
+test_backend_start_injects_baas_openapi_key
 test_backend_separates_profile_env_and_workspace_folder
 test_dynamic_bot_gateway_receives_manual_model_credential
 

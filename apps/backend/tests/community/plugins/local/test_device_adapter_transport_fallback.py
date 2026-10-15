@@ -83,6 +83,103 @@ async def test_cron_guard_blocks_models_from_leaking_cron_list():
     assert "unhandled path" in result["message"]
 
 
+@pytest.mark.asyncio
+async def test_opted_in_cron_and_skill_paths_proxy_to_runtime(monkeypatch):
+    """Singlebox routes real runtime state instead of fabricating it."""
+    captured = []
+
+    async def mock_proxy(adapter_url, conn_info, method, path, body, params, timeout):
+        captured.append((adapter_url, method, path, body))
+        return {"success": True, "data": path, "message": None}
+
+    transport = InMemoryDeviceAdapterTransport(
+        default_adapter_url="http://127.0.0.1:20010",
+        proxy_cron=True,
+        proxy_skills=True,
+    )
+    monkeypatch.setattr(transport, "_proxy", mock_proxy)
+
+    await transport.invoke(
+        {}, "POST", "/api/cron", body={"name": "bbs-browse-loop"}
+    )
+    await transport.invoke(
+        {}, "POST", "/api/skills/mappings/apply", body={"mappings": []}
+    )
+    await transport.invoke({}, "POST", "/api/skills/layout/probe", body={})
+
+    assert captured == [
+        ("http://127.0.0.1:20010", "POST", "/api/cron", {"name": "bbs-browse-loop"}),
+        ("http://127.0.0.1:20010", "POST", "/api/skills/mappings/apply", {"mappings": []}),
+        ("http://127.0.0.1:20010", "POST", "/api/skills/layout/probe", {}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_singlebox_transport_provider_enables_runtime_proxy(monkeypatch):
+    """The composition root must select real cron and Skill projection paths."""
+    from agentclaw.community.di.modules.infrastructure.singlebox.devices import (
+        SingleboxDevicesModule,
+    )
+
+    monkeypatch.setenv("SINGLEBOX_ENGINE_ADAPTER_URL", "")
+    transport = SingleboxDevicesModule().device_adapter_transport()
+    assert isinstance(transport, InMemoryDeviceAdapterTransport)
+
+    captured = []
+
+    async def mock_proxy(adapter_url, conn_info, method, path, body, params, timeout):
+        captured.append(path)
+        return {"success": True, "data": path, "message": None}
+
+    monkeypatch.setattr(transport, "_proxy", mock_proxy)
+    await transport.invoke({"target": "127.0.0.1:20010"}, "GET", "/api/cron")
+    await transport.invoke(
+        {"target": "127.0.0.1:20010"}, "POST", "/api/skills/mappings/apply", body={}
+    )
+    assert captured == ["/api/cron", "/api/skills/mappings/apply"]
+
+
+@pytest.mark.asyncio
+async def test_opted_in_multipart_skill_package_forwards_to_adapter(
+    monkeypatch: MonkeyPatch,
+):
+    """A real package upload must reach the engine, not a simulator digest."""
+    captured = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        assert str(request.url) == "http://127.0.0.1:20010/api/skills/local/apply"
+        assert request.headers["x-runtime-token"] == "runtime-token"
+        assert b"bbs-browse.zip" in request.content
+        assert b"skill_name" in request.content
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "data": {
+                    "skill_name": "bbs-browse",
+                    "action": "created",
+                    "content_digest": "sha256:test",
+                    "target_path": "/runtime/skills-local/bbs-browse",
+                },
+            },
+        )
+
+    _patch_httpx_async_client(monkeypatch, handler)
+    transport = InMemoryDeviceAdapterTransport(
+        proxy_skills=True,
+        default_adapter_url="http://127.0.0.1:20010",
+    )
+    result = await transport.invoke_multipart(
+        {"headers": {"x-runtime-token": "runtime-token"}},
+        "/api/skills/local/apply",
+        files={"file": ("bbs-browse.zip", b"package", "application/zip")},
+        data={"skill_name": "bbs-browse", "layout": "POOL"},
+    )
+    assert result["data"]["skill_name"] == "bbs-browse"
+    assert len(captured) == 1
+
+
 # ── URL resolution from conn_info (per-request, per-device) ──
 
 

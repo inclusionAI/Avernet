@@ -57,6 +57,16 @@ backend_start() {
         log_info "Already in virtual environment"
     fi
 
+    # Singlebox owns the Backend→BaaS internal credential. Do not ask users to
+    # configure it; the local stack provisions it after BAAS is healthy.
+    local backend_openapi_api_key backend_openapi_api_key_prefix
+    if ! baas_ensure_backend_openapi_key; then
+        log_error "Backend cannot start without the local BAAS OpenAPI credential"
+        return 1
+    fi
+    backend_openapi_api_key="$(baas_backend_openapi_key)" || return 1
+    backend_openapi_api_key_prefix="$(baas_backend_openapi_prefix)" || return 1
+
     # B11 extraction: agentclaw.community now lives in the openocb submodule; run its
     # main.py from there and put its src on PYTHONPATH (namespace-aggregates with the
     # editable corp src). The process greps below match on the "agentclaw/community/main.py"
@@ -99,6 +109,8 @@ backend_start() {
         # apps/backend/docs/openapi-v1/README.md) with the same dev key the
         # gateway signs with (gateway.sh) and BCS verifies with (bcs.sh), so
         # locally forwarded /openapi/v1 requests verify instead of all-401.
+        api_key_secret="${backend_openapi_api_key}" \
+        api_key_prefix="${backend_openapi_api_key_prefix}" \
         SERVER_ENV=dev DEPLOY_PROFILE=singlebox \
             AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE="${AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}" \
             DATABASE_URL="sqlite:///${RUNTIME_DATA_DIR}/backend.db" \
@@ -109,6 +121,7 @@ backend_start() {
             PYTHONPATH="${community_src}:${BACKEND_DIR}:${PYTHONPATH:-}" \
             start_in_detached_session "${backend_cmd[@]}" < /dev/null >> "${BACKEND_LOG}" 2>&1 &
         backend_pid=$!
+        unset backend_openapi_api_key
     else
         SERVER_ENV=dev DEPLOY_PROFILE=corp CHAT_ENGINE="${CHAT_ENGINE}" \
             AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}" \

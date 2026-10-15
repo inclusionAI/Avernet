@@ -278,18 +278,6 @@ class LocalProcessManager:
             str(workspace_dir)
         )
 
-        # singlebox 多 bot: backend 在 per-bot workspace/skills/ 下建了
-        # ``skills-repo -> ~/aiworkbench/skills-repo`` 这个全局共享 git repo 软链;
-        # openclaw 出于安全考虑默认拒绝「软链 escape configured root」
-        # (workspace 内 symlink 指向 root 之外的目标会被丢弃, 报
-        # ``reason=symlink-escape``)。docs/tools/skills 给出的官方配置:
-        # ``skills.load.allowSymlinkTargets`` 显式信任这些 target, 让 openclaw
-        # 接受 skill-repo 下的所有 skill。
-        aiworkbench_repo = Path.home() / "aiworkbench" / "skills-repo"
-        oc_config.setdefault("skills", {}).setdefault("load", {})[
-            "allowSymlinkTargets"
-        ] = [str(aiworkbench_repo)]
-
         # Wire up BCS channel + BCN plugin only when the plugin is built.
         # Without a built plugin, openclaw rejects the "bcs" channel id and
         # the extension entry, causing config validation failure and gateway exit.
@@ -847,6 +835,10 @@ class LocalProcessManager:
             # WebSocket handshakes when localhost is not in the bypass list.
             env["OPENCLAW_GATEWAY_URL"] = f"ws://127.0.0.1:{engine_port}"
             env["OPENCLAW_GATEWAY_TOKEN"] = ""
+            # The singlebox OpenClaw runtime speaks gateway protocol v3. The
+            # adapter global default is v4 for OpenClaw 2026.5.x, so pin it
+            # here for per-bot local gateways.
+            env["OPENCLAW_GATEWAY_PROTOCOL_VERSION"] = "3"
 
             # Disable adapter's built-in engine process management.
             # Empty START_CMD → EngineProcessSettings.enabled=False (config.py:78)

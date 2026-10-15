@@ -133,3 +133,44 @@ def test_unknown_contract_fails_closed() -> None:
             ),
             RuntimeLayoutContext(home=HOME),
         )
+
+
+def test_openclaw_runtime_context_replaces_virtual_home_prefix(tmp_path: Path) -> None:
+    """Per-Bot runtime roots remove the deployment-specific .openclaw segment."""
+    context = RuntimeLayoutContext(
+        home=tmp_path / "openclaw",
+        openclaw_root=tmp_path / "openclaw",
+    )
+    plan = resolve_skill_layout(
+        LayoutIdentity(
+            engine_type="openclaw",
+            layout_contract_version=LAYOUT_CONTRACT_VERSION,
+        ),
+        context,
+    )
+
+    assert isinstance(plan, ResolvedFilesystemLayoutPlan)
+    assert plan.active_root == tmp_path / "openclaw/workspace/skills"
+    assert plan.legacy_local == (
+        tmp_path / "openclaw/workspace/skills/skills-local"
+    )
+    assert plan.pool_local == (
+        tmp_path / "openclaw/workspace/skills-pool/skills-local"
+    )
+
+
+def test_openclaw_runtime_context_is_rejected_for_other_engines(
+    tmp_path: Path,
+) -> None:
+    context = RuntimeLayoutContext(
+        home=tmp_path,
+        openclaw_root=tmp_path / "openclaw",
+    )
+    with pytest.raises(SkillLayoutResolutionError, match="only valid"):
+        resolve_skill_layout(
+            LayoutIdentity(
+                engine_type="claude_code",
+                layout_contract_version=LAYOUT_CONTRACT_VERSION,
+            ),
+            context,
+        )
