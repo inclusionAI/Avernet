@@ -680,6 +680,53 @@ def test_approval_resolved_keeps_interaction_identity():
     assert ir[0].get("interactionId") == "apr-1"  # 身份保真
 
 
+def test_partial_resolution_frame_dispatches_by_marker_not_state():
+    """R5-2 复现（先红）：多 pending 部分决议的 resolved 帧携带
+    INPUT_REQUIRED——必须按 meta.kind 分层派发为 interaction.resolved，
+    不得把"已决议"误派发成新的 interaction.requested（审批面板回弹）。"""
+    import asyncio
+
+    from engine_shim import kernel as engine_kernel
+
+    async def produce_kernel_events():
+        k = engine_kernel.A2aKernel()
+        rid, _ = await k.open_run("s", "k-r5", "first", "d")
+        await k.publish_interaction_requested(
+            rid, "apr-A", {"approvalId": "apr-A", "kind": "exec"})
+        await k.publish_interaction_requested(
+            rid, "i-B", {"kind": "ask_user"})
+        # 部分决议：approval 回流只解决 apr-A（i-B 仍未决）
+        await k.publish_interaction_resolved(
+            rid, {"approvalId": "apr-A", "state": "approval_resolved"})
+        backlog, _ = await k.subscribe(rid, since_seq=0)
+        return backlog
+
+    kernel_events = _run(produce_kernel_events())
+    received: list[tuple[str, dict]] = []
+    client = BotA2aClient(base_url="http://unused")
+    client._connected = True
+    client.on_event(
+        "interaction.resolved",
+        lambda p: received.append(("interaction.resolved", p)))
+    client.on_event(
+        "interaction.requested",
+        lambda p: received.append(("interaction.requested", p)))
+    _consume_wire_events(client, _real_wire_stream(kernel_events))
+
+    resolved = [p for n, p in received if n == "interaction.resolved"]
+    requested = [p for n, p in received if n == "interaction.requested"]
+    assert requested and len(requested) == 2, (
+        f"应有两次 requested（apr-A/i-B）: {[(n, p.get('approvalId') or p.get('interactionId')) for n, p in received]}"
+    )
+    assert resolved, "INPUT_REQUIRED 的 resolved 帧被吞,未派发 interaction.resolved"
+    assert resolved[0].get("interactionId") == "apr-A", resolved[0]
+    # 部分决议帧绝不允许再派发第三次 requested
+    assert len(requested) == 2, (
+        "已决议帧被误派发为新 interaction.requested"
+        f"（第 3 次）: {[(n, p.get('approvalId') or p.get('interactionId')) for n, p in received]}"
+    )
+
+
 # ── R18-2: abort 不伪成功 ──
 
 

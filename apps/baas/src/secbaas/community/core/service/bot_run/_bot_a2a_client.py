@@ -393,25 +393,28 @@ class BotA2aClient:
         }
         frame = meta.get("engine_frame")
 
+        # R5-2 分层派发：resolved 判定以 meta.kind 独立标识为准，
+        # **不依赖帧状态**——多 pending 部分决议的 resolved 帧携带
+        # INPUT_REQUIRED（run 仍在等待其余交互），若按状态先行判定会
+        # 把"已决议"误派发成新的 interaction.requested（审批面板回弹）。
+        resolved_frame = meta.get("kind") == "interaction.resolved" or (
+            meta.get("interactionId")
+            and state == "TASK_STATE_WORKING"
+            and meta.get("kind") not in ("agent", "resolve_conflict")
+        )
+        if resolved_frame:
+            payload = dict(frame) if isinstance(frame, dict) else {}
+            payload.setdefault("interactionId", meta.get("interactionId"))
+            payload["state"] = "interaction.resolved"
+            payload["sessionKey"] = ctx.session_key
+            await self._dispatch("interaction.resolved", payload)
+            return
         if state == "TASK_STATE_INPUT_REQUIRED":
             payload = dict(frame) if isinstance(frame, dict) else {}
             payload.setdefault("interactionId", meta.get("interactionId"))
             payload.setdefault("state", "interaction.requested")
             payload["sessionKey"] = ctx.session_key
             await self._dispatch("interaction.requested", payload)
-            return
-        if (
-            meta.get("interactionId")
-            and state == "TASK_STATE_WORKING"
-            and meta.get("kind") not in ("agent", "resolve_conflict")
-        ):
-            # R18-1b：approval_resolved（interactionId 从 approvalId 提取）
-            # 与 interaction.resolved 同一事件身份出站。
-            payload = dict(frame) if isinstance(frame, dict) else {}
-            payload.setdefault("interactionId", meta.get("interactionId"))
-            payload["state"] = "interaction.resolved"
-            payload["sessionKey"] = ctx.session_key
-            await self._dispatch("interaction.resolved", payload)
             return
         if meta.get("kind") == "agent":
             payload = dict(frame) if isinstance(frame, dict) else {}
