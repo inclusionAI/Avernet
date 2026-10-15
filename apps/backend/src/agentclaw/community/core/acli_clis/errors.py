@@ -89,7 +89,10 @@ class AcliRollbackFailedError(InternalError):
     ``revoked_still_installed``, ``revoked_install_unknown`` (revoked, and
     the container's answer to the uninstall never arrived), or
     ``install_unknown_not_granted`` (never granted; the install's answer never
-    arrived and the cleanup uninstall failed too).
+    arrived and the cleanup uninstall failed too), ``grant_unknown_installed``
+    or ``revoke_unknown_installed`` (the Passport write failed and Passport
+    could not be re-read, so the grant's state is unknown and the program was
+    left in place).
     """
 
     def __init__(self, cli_code: str, state: str) -> None:
@@ -98,6 +101,16 @@ class AcliRollbackFailedError(InternalError):
             "the change could not be rolled back"
         )
         self.state = state
+
+
+class AcliIdentityCleanupError(AcliRollbackFailedError):
+    """The CLI was removed, but its caller override could not be cleared.
+
+    A later re-add would come back as ``caller`` instead of ``owner``.
+    """
+
+    def __init__(self, cli_code: str) -> None:
+        super().__init__(cli_code, "removed_caller_override_kept")
 
 
 __all__ = [
@@ -109,6 +122,7 @@ __all__ = [
     "AcliDefaultCliError",
     "AcliEngineUnsupportedError",
     "AcliGrantSyncError",
+    "AcliIdentityCleanupError",
     "AcliOperationFailedError",
     "AcliRequestRejectedError",
     "AcliRollbackFailedError",

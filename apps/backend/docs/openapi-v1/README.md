@@ -1715,8 +1715,11 @@ uninstalls again. Remove revokes first and uninstalls second; a failed uninstall
 re-grants with the same identity. When the undo fails too — or an uninstall's
 answer never arrives — the call answers `500` with `data.state` naming where the
 bot was left: `installed_not_granted`, `install_unknown_not_granted`,
-`revoked_still_installed`, or `revoked_install_unknown`. An install whose
-answer never arrives is uninstalled again before the error is returned.
+`grant_unknown_installed`, `revoked_still_installed`, `revoked_install_unknown`,
+`revoke_unknown_installed`, or `removed_caller_override_kept` (removed, but a
+re-add would come back as `caller`). An install whose answer never arrives is
+uninstalled again before the error is returned; a Passport write that reports an
+error but landed counts as done.
 
 | Status | When | `data` |
 |---|---|---|

@@ -26,6 +26,7 @@ from agentclaw.community.core.acli_clis.errors import (
     AcliDefaultCliError,
     AcliEngineUnsupportedError,
     AcliGrantSyncError,
+    AcliIdentityCleanupError,
     AcliOperationFailedError,
     AcliRequestRejectedError,
     AcliRollbackFailedError,
@@ -201,7 +202,8 @@ class AcliCliService(AcliCliServiceProtocol):
                 "acli_cli_add_failed bot_id=%s cli_code=%s phase=grant error_type=%s",
                 bot_id, cli_code, type(error).__name__,
             )
-            if self._grant_landed(bot, cli_code):
+            granted = self._grant_state(bot, cli_code)
+            if granted:
                 # The write failed on the way back (a timeout, say) after
                 # Passport had applied it: the add actually succeeded.
                 logger.info(
@@ -209,6 +211,16 @@ class AcliCliService(AcliCliServiceProtocol):
                     bot_id, cli_code,
                 )
                 return tool
+            if granted is None:
+                # Passport cannot say whether the grant landed. Uninstalling
+                # could leave a granted-but-missing tool, so keep the program
+                # and report that the grant is unknown.
+                logger.error(
+                    "acli_cli_rollback_failed bot_id=%s cli_code=%s "
+                    "state=grant_unknown_installed",
+                    bot_id, cli_code,
+                )
+                raise AcliRollbackFailedError(cli_code, "grant_unknown_installed") from error
             await self._undo_install(bot_id, owner_id, cli_code, reason="grant_failed")
             raise AcliGrantSyncError from error
 
@@ -251,7 +263,21 @@ class AcliCliService(AcliCliServiceProtocol):
                 "acli_cli_remove_failed bot_id=%s cli_code=%s phase=revoke error_type=%s",
                 bot_id, cli_code, type(error).__name__,
             )
-            raise AcliGrantSyncError from error
+            granted = self._grant_state(bot, cli_code)
+            if granted is None:
+                logger.error(
+                    "acli_cli_rollback_failed bot_id=%s cli_code=%s "
+                    "state=revoke_unknown_installed",
+                    bot_id, cli_code,
+                )
+                raise AcliRollbackFailedError(cli_code, "revoke_unknown_installed") from error
+            if granted:
+                raise AcliGrantSyncError from error
+            # The revoke landed despite the error: finish the removal.
+            logger.info(
+                "acli_cli_remove_continues bot_id=%s cli_code=%s revoke=landed_despite_error",
+                bot_id, cli_code,
+            )
 
         try:
             await self._port.uninstall(
@@ -329,10 +355,11 @@ class AcliCliService(AcliCliServiceProtocol):
     ) -> None:
         """Drop a removed CLI's caller override so a later re-add starts at owner.
 
-        Best effort, after the removal has already succeeded: the platform does
-        not let a bot fall back from ``caller`` to ``owner``, so when this CLI
-        was the bot's only caller resource the override is kept and the event
-        logged. A re-add then comes back as ``caller``, as the bot already is.
+        Runs after the removal itself succeeded. The platform does not let a
+        bot fall back from ``caller`` to ``owner``, so when this CLI was the
+        bot's only caller resource the override is deliberately kept and a
+        re-add comes back as ``caller``, as the bot already is. Any other
+        failure is raised as :class:`AcliIdentityCleanupError`.
         """
         engine_type = str(bot["active_engine"])
         overrides = self._identities.list_draft_cli_call_types(int(bot["id"]), engine_type)
@@ -368,10 +395,14 @@ class AcliCliService(AcliCliServiceProtocol):
                 bot["bot_id"], cli_code,
             )
         except Exception as error:
-            logger.warning(
-                "acli_cli_override_clear_failed bot_id=%s cli_code=%s error_type=%s",
+            # Removed, but the caller override persisted: a later re-add would
+            # silently come back as caller. Surface it rather than report success.
+            logger.error(
+                "acli_cli_rollback_failed bot_id=%s cli_code=%s "
+                "state=removed_caller_override_kept error_type=%s",
                 bot["bot_id"], cli_code, type(error).__name__,
             )
+            raise AcliIdentityCleanupError(cli_code) from error
 
     # ── shared checks ────────────────────────────────────────────────────
 
@@ -392,7 +423,8 @@ class AcliCliService(AcliCliServiceProtocol):
         if str(bot.get("active_engine") or "") not in ACLI_ENGINES:
             raise AcliEngineUnsupportedError
 
-    def _grant_landed(self, bot: Mapping[str, Any], cli_code: str) -> bool:
+    def _grant_state(self, bot: Mapping[str, Any], cli_code: str) -> bool | None:
+        """Whether Passport now grants ``cli_code``; ``None`` when it cannot say."""
         try:
             return cli_code in self._granted_codes(bot)
         except Exception as error:
@@ -400,7 +432,7 @@ class AcliCliService(AcliCliServiceProtocol):
                 "acli_cli_grant_recheck_failed bot_id=%s cli_code=%s error_type=%s",
                 bot["bot_id"], cli_code, type(error).__name__,
             )
-            return False
+            return None
 
     def _granted_codes(self, bot: Mapping[str, Any]) -> set[str]:
         return {

@@ -967,8 +967,9 @@ Spec：`apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`。
 
 **全部成功或全部不变。** 添加先安装后授权，授权失败则卸载回去；删除先撤销后卸载，卸载失败则以原身份重新授权。
 若回滚本身也失败（或卸载结果未知），返回 `500`，`data.state` 说明 bot 停留的状态：
-`installed_not_granted`、`install_unknown_not_granted`、`revoked_still_installed` 或 `revoked_install_unknown`。
-安装结果未知时，会先卸载再返回错误。
+`installed_not_granted`、`install_unknown_not_granted`、`grant_unknown_installed`、`revoked_still_installed`、
+`revoked_install_unknown`、`revoke_unknown_installed` 或 `removed_caller_override_kept`（已删除，但再次添加会以 `caller` 身份回来）。
+安装结果未知时，会先卸载再返回错误；Passport 写入报错但实际已生效时，按成功处理。
 
 | 状态码 | 场景 | `data` |
 |---|---|---|

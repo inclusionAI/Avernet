@@ -19,6 +19,7 @@ from agentclaw.community.core.acli_clis.errors import (
     AcliDefaultCliError,
     AcliEngineUnsupportedError,
     AcliGrantSyncError,
+    AcliIdentityCleanupError,
     AcliOperationFailedError,
     AcliRequestRejectedError,
     AcliRollbackFailedError,
@@ -436,15 +437,31 @@ async def test_remove_clears_a_caller_override_so_readd_starts_at_owner() -> Non
     assert identities.overrides == {}
 
 
-@pytest.mark.parametrize("error", [CallerIdentityIrreversibleError(), RuntimeError("db")])
-async def test_override_that_cannot_be_cleared_keeps_the_remove(error) -> None:
+async def test_override_kept_when_the_bot_cannot_fall_back_to_owner() -> None:
+    """The platform's caller->owner rule keeps the override; the remove succeeds."""
     identities = _Identities({"yuque-cli": "caller"})
-    identities.error = error
+    identities.error = CallerIdentityIrreversibleError()
     service, agentpass, _, _ = _service(granted=["dataphin", "yuque-cli"], identities=identities)
 
     await _remove(service)
 
     assert agentpass.codes == ["dataphin"]
+
+
+async def test_failed_override_clear_is_reported_not_swallowed() -> None:
+    identities = _Identities({"yuque-cli": "caller"})
+    identities.error = RuntimeError("db write failed")
+    service, agentpass, container, _ = _service(
+        granted=["dataphin", "yuque-cli"], identities=identities,
+        container=_Container({"yuque-cli"}),
+    )
+
+    with pytest.raises(AcliIdentityCleanupError) as caught:
+        await _remove(service)
+
+    assert caught.value.state == "removed_caller_override_kept"
+    assert agentpass.codes == ["dataphin"]
+    assert "yuque-cli" not in container.installed
 
 
 async def test_remove_without_override_does_not_write_identity() -> None:
@@ -529,7 +546,8 @@ async def test_grant_that_landed_despite_an_error_is_a_success() -> None:
     assert [c[0] for c in container.calls] == ["install"]
 
 
-async def test_grant_recheck_failure_falls_back_to_uninstall() -> None:
+async def test_unknown_grant_keeps_the_program_and_says_so() -> None:
+    """When Passport cannot be re-read, uninstalling could strand a granted tool."""
     service, agentpass, container, _ = _service()
     agentpass.add_errors = [RuntimeError("agentpass down")]
     reads = {"n": 0}
@@ -543,10 +561,12 @@ async def test_grant_recheck_failure_falls_back_to_uninstall() -> None:
 
     agentpass.current_passport_cli_items = read_once  # type: ignore[method-assign]
 
-    with pytest.raises(AcliGrantSyncError):
+    with pytest.raises(AcliRollbackFailedError) as caught:
         await _add(service)
 
-    assert "yuque-cli" not in container.installed
+    assert caught.value.state == "grant_unknown_installed"
+    assert "yuque-cli" in container.installed
+    assert [c[0] for c in container.calls] == ["install"]
 
 
 @pytest.mark.parametrize("code", ["timeout", "engine_unreachable"])
@@ -589,3 +609,42 @@ async def test_uncertain_install_with_failed_cleanup_reports_the_state() -> None
 
     assert caught.value.state == "install_unknown_not_granted"
     assert agentpass.codes == ["dataphin"]
+
+
+
+async def test_revoke_that_landed_despite_an_error_finishes_the_remove() -> None:
+    container = _Container({"yuque-cli"})
+    service, agentpass, container, _ = _service(granted=["dataphin", "yuque-cli"], container=container)
+
+    def revoke_then_raise(*, bot, cli_code):
+        agentpass.items = [i for i in agentpass.items if i["cli_code"] != cli_code]
+        raise RuntimeError("timeout after write")
+
+    agentpass.remove_cli = revoke_then_raise  # type: ignore[method-assign]
+
+    await _remove(service)
+
+    assert agentpass.codes == ["dataphin"]
+    assert "yuque-cli" not in container.installed
+
+
+async def test_revoke_with_unknown_outcome_keeps_the_program_and_says_so() -> None:
+    container = _Container({"yuque-cli"})
+    service, agentpass, container, _ = _service(granted=["dataphin", "yuque-cli"], container=container)
+    agentpass.remove_error = RuntimeError("agentpass down")
+    reads = {"n": 0}
+    real_read = agentpass.current_passport_cli_items
+
+    def read_once(*, bot):
+        reads["n"] += 1
+        if reads["n"] > 1:
+            raise RuntimeError("still down")
+        return real_read(bot=bot)
+
+    agentpass.current_passport_cli_items = read_once  # type: ignore[method-assign]
+
+    with pytest.raises(AcliRollbackFailedError) as caught:
+        await _remove(service)
+
+    assert caught.value.state == "revoke_unknown_installed"
+    assert container.calls == []
