@@ -13,6 +13,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from agentclaw.community.adapters.http.openapi_v1.clusters import ClusterName
+from .schemas_inventory import InventoryPublication
 from agentclaw.community.adapters.http.openapi_v1.service_publications.schemas import (
     EditLock,
 )
@@ -925,7 +926,11 @@ class BotInventoryItem(BaseModel):
         description="Normalized lifecycle state used by the inventory view."
     )
     status: str = Field(
-        description="Lifecycle status used by the owning view. Service cards expose draft/deploying/prestable/running/offline; other cards retain their owning service's status."
+        description="Stored Bot status for every card kind, identical in meaning to /bots status. For service publication state use publish.status or display_state."
+    )
+    publish: InventoryPublication | None = Field(
+        default=None,
+        description="Publication represented by this service card; null for non-service Bots or when no publication exists.",
     )
     internal_status: str | None = Field(
         default=None,
