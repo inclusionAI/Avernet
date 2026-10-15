@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
+from functools import lru_cache, partial
 
 from secbaas.community.api.config_manage import SystemConfigManageService
 from secbaas.community.core.service.config import SystemConfigKey
@@ -220,6 +221,10 @@ class AsyncChatClientPool:
                 interaction_service=self._interaction_service
                 if self._enable_process_interaction(self._system_config_service)
                 else None,
+                sensitive_bypass_keys_loader=partial(
+                    self._load_sensitive_bypass_keys,
+                    self._system_config_service,
+                ),
             )
             await new_client.connect()
 
@@ -308,6 +313,36 @@ class AsyncChatClientPool:
         if resp is None:
             return False
         return (resp.conf_value or "").strip().lower() == "true"
+
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def _load_sensitive_bypass_keys(
+        system_config_service: SystemConfigManageService | None,
+    ) -> tuple[str, ...]:
+        """读取敏感日志过滤豁免的 session_key 片段（lru_cache 进程级缓存）。
+
+        配置 ``bot_run.sensitive_bypass_session_keys``：逗号/换行
+        分隔的片段列表；_log_event 的 sessionKey 包含任一片段时，
+        兜底事件日志不做敏感字段过滤（全量打印 payload）。
+        读取失败或未配置返回空元组，默认仍做过滤。
+        """
+        if system_config_service is None:
+            return ()
+        try:
+            resp = system_config_service.get_config(
+                SystemConfigKey.SENSITIVE_BYPASS_SESSION_KEYS
+            )
+        except Exception:
+            logger.warning(
+                "failed to read sensitive_bypass_session_keys, "
+                "sensitive log filtering stays enabled",
+                exc_info=True,
+            )
+            return ()
+        if resp is None:
+            return ()
+        raw = (resp.conf_value or "").replace("\n", ",")
+        return tuple(part.strip() for part in raw.split(",") if part.strip())
 
     @staticmethod
     def _enable_process_interaction(

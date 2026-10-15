@@ -36,7 +36,7 @@ CALLER_SANDBOX_META_KEY = "caller_sandbox_id"
 
 
 def normalize_engine_type(
-    active_engine: str | None, template_type: str | None = None
+        active_engine: str | None, template_type: str | None = None
 ) -> str:
     """解析 engine_type,先按 template_type+active_engine 的特定组合归一化,再校验白名单。
 
@@ -61,10 +61,10 @@ def normalize_engine_type(
 
 
 def resolve_user_id(
-    metadata: dict[str, Any],
-    binding_info: BotBindingInfo | None,
-    context: "BotChatContext | None",
-    bot_id: str,
+        metadata: dict[str, Any],
+        binding_info: BotBindingInfo | None,
+        context: "BotChatContext | None",
+        bot_id: str,
 ) -> str:
     """从 metadata 中解析 user_id
 
@@ -90,7 +90,7 @@ def resolve_user_id(
         return binding_info.entity_id
 
     # 2. 检查 sender_options
-    sender_options = metadata.get("sender_options")
+    sender_options: dict[str, str] | None = metadata.get("sender_options")
     if sender_options:
         from_field = sender_options.get("from")
         if from_field == "owner" and binding_info:
@@ -146,7 +146,7 @@ def extract_lifecycle_stage(metadata: dict[str, Any] | None) -> str:
 
 
 def extract_session_id_from_record(
-    record: "BotRunRecord",
+        record: "BotRunRecord",
 ) -> str | None:
     """从运行记录中提取 session_id
 
@@ -212,8 +212,8 @@ def binding_data_to_info(data: BotBindingData) -> BotBindingInfo:
 
 
 def is_caller_mode(
-    metadata: dict[str, Any] | None,
-    binding_info: BotBindingInfo | None,
+        metadata: dict[str, Any] | None,
+        binding_info: BotBindingInfo | None,
 ) -> bool:
     """caller 模式判定：metadata 双键 + 引擎非 teclaw。
 
@@ -256,9 +256,9 @@ def build_caller_binding(bot_id: str, sandbox_id: str) -> BotBindingInfo:
 
 
 def build_chat_metadata(
-    metadata: dict[str, Any] | None,
-    run_id: str,
-    eval_session_log: EvalSessionLog,
+        metadata: dict[str, Any] | None,
+        run_id: str,
+        eval_session_log: EvalSessionLog,
 ) -> dict[str, Any]:
     """从 metadata 中构造 chat_metadata，用于透传到 WS chat 请求。
 
@@ -324,11 +324,11 @@ class _DefaultEngineAdapter:
     engine_type = ""
 
     def session_consistency_key(
-        self,
-        *,
-        tc_bot_id: str,
-        user_id: str,
-        run_id: str,
+            self,
+            *,
+            tc_bot_id: str,
+            user_id: str,
+            run_id: str,
     ) -> str:
         return f"agent:{tc_bot_id}:session:{run_id}:user:{user_id}"
 
@@ -337,12 +337,12 @@ _DEFAULT_ENGINE_ADAPTER = _DefaultEngineAdapter()
 
 
 def plan_session_id(
-    *,
-    tc_bot_id: str,
-    user_id: str,
-    run_id: str,
-    eval_id: str | None = None,
-    adapter: "BotEngineAdapter | None" = None,
+        *,
+        tc_bot_id: str,
+        user_id: str,
+        run_id: str,
+        eval_id: str | None = None,
+        adapter: "BotEngineAdapter | None" = None,
 ) -> str:
     key = eval_id or run_id
     effective = adapter if adapter is not None else _DEFAULT_ENGINE_ADAPTER
@@ -363,7 +363,7 @@ def strip_agent_main_prefix(session_id: str) -> str:
     使两种形式哈希到同一设备。循环剥离以对重复前缀幂等。
     """
     while session_id.startswith(_AGENT_MAIN_PREFIX):
-        session_id = session_id[len(_AGENT_MAIN_PREFIX) :]
+        session_id = session_id[len(_AGENT_MAIN_PREFIX):]
     return session_id
 
 
