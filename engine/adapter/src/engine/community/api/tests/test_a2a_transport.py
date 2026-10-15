@@ -648,19 +648,21 @@ class _FakeResolveChat:
         self.fail_once = fail_once
         self.fail_code = fail_code
 
-    async def resolve_exec_approval(self, session_key, run_id, decision,
-                                    message=None):
+    async def resolve_exec_approval(self, session_key, interaction_id,
+                                    decision, message=None):
         return self._record("exec", session_key=session_key,
-                            run_id=run_id, decision=decision,
+                            interaction_id=interaction_id, decision=decision,
                             message=message)
 
-    async def resolve_interaction(self, session_key, run_id, response):
+    async def resolve_interaction(self, session_key, interaction_id,
+                                  response):
         return self._record("ask_user", session_key=session_key,
-                            run_id=run_id, response=response)
+                            interaction_id=interaction_id, response=response)
 
-    async def resolve_mode_transition(self, session_key, run_id, decision):
+    async def resolve_mode_transition(self, session_key, interaction_id,
+                                      decision):
         return self._record("mode_switch", session_key=session_key,
-                            run_id=run_id, decision=decision)
+                            interaction_id=interaction_id, decision=decision)
 
     def _record(self, kind, **params):
         self.calls.append((kind, params))
@@ -689,6 +691,8 @@ async def test_resolve_interaction_full_loop(monkeypatch):
     k = R._kernel
 
     rid, _ = await k.open_run("hitl-ctx", "k", "first", "d")
+    # 回归钉：native id 已登记的 run 上，转发键必须是 BaaS 持有的真实
+    # interaction id——gateway pending 注册表只认它，native/kernel id 一概不认
     k.runs[rid].native_run_id = "native-42"
     await k.publish_interaction_requested(
         rid, "i-1", {"kind": "exec", "prompt": "rm test?"})
@@ -698,10 +702,11 @@ async def test_resolve_interaction_full_loop(monkeypatch):
          "resolution": {"decision": "approve", "kind": "exec",
                         "message": "ok go"}}, 1, None)
     assert out["interaction"]["resolved"] is True, out
-    # 引擎收到正确方法 + native id（16-3b）+ 完整决策字段
+    # 引擎收到正确方法 + 真实 interaction id + 完整决策字段
     kind, params = fake.calls[0]
     assert kind == "exec"
-    assert params["run_id"] == "native-42"       # 不是 kernel rid
+    assert params["interaction_id"] == "i-1"
+    assert "native-42" not in params.values()   # native id 不得顶替转发键
     assert params["decision"] == "approve"
     assert params["message"] == "ok go"          # message 不丢
     # run 恢复 WORKING + resolved 事件广播
@@ -728,7 +733,6 @@ async def test_resolve_interaction_conflict_and_not_found(monkeypatch):
 
     # conflict：已 resolve 后重复提交（run 已回 WORKING）
     rid, _ = await k.open_run("hitl-ctx2", "k2", "first", "d")
-    k.runs[rid].native_run_id = "n"
     await k.publish_interaction_requested(rid, "i-2", {})
     await k.publish_interaction_resolved(rid, {})   # 决策已有
     out2 = await R._resolve_interaction(
@@ -745,7 +749,6 @@ async def test_resolve_engine_rejection_and_internal_error(monkeypatch):
     R._kernel = kernel_mod.A2aKernel()
     k = R._kernel
     rid, _ = await k.open_run("hitl-ctx3", "k3", "first", "d")
-    k.runs[rid].native_run_id = "n"
     await k.publish_interaction_requested(rid, "i-3", {})
 
     out = await R._resolve_interaction(
@@ -761,7 +764,8 @@ async def test_resolve_validate_response_contract(monkeypatch):
     """_forward_resolve 判定必须用 R17-3 的真实 {success} 契约——
     一个返回 {ok: True} 的引擎 adapter 会被误判失败。"""
     class _OldContractChat:
-        async def resolve_interaction(self, session_key, run_id, response):
+        async def resolve_interaction(self, session_key, interaction_id,
+                                      response):
             return {"success": False,
                     "error": {"code": "OLD",
                                "message": "engine returned legacy shape"}}
@@ -770,7 +774,6 @@ async def test_resolve_validate_response_contract(monkeypatch):
     R = _install_resolve_bridge(monkeypatch, fake)
     k = R._kernel = kernel_mod.A2aKernel()
     rid, _ = await k.open_run("hitl-ctx4", "k4", "first", "d")
-    k.runs[rid].native_run_id = "n"
     await k.publish_interaction_requested(rid, "i-4", {})
     out = await R._resolve_interaction(
         {"interactionId": "i-4",
@@ -944,7 +947,6 @@ def test_cancel_does_not_touch_interaction_registry(app_client, monkeypatch):
 
     async def seed():
         rid, _ = await k.open_run("hitl-cancel", "kk", "first", "d")
-        k.runs[rid].native_run_id = "native-9"
         await k.publish_interaction_requested(
             rid, "i-cancel", {"kind": "exec", "prompt": "rm test?"})
         return rid
@@ -1041,10 +1043,11 @@ class _FakeAbortChat:
     """abort 通道 fake — ChatService.abort 的真实契约（ChatAbortResult）。
     与 _FakeChat 相同边界：假在 ChatService 插件面上。"""
 
-    def __init__(self, *, fail=False, hang=False):
+    def __init__(self, *, fail=False, hang=False, miss=False):
         self.calls: list = []
         self.fail = fail
         self.hang = hang
+        self.miss = miss
 
     async def abort(self, request, auth=None):
         self.calls.append(request)
@@ -1053,7 +1056,8 @@ class _FakeAbortChat:
         if self.fail:
             return ChatAbortResult(
                 ok=False, error=ErrorShape(code="REJECTED", message="denied"))
-        return ChatAbortResult(ok=True, aborted=True, run_id=request.run_id)
+        return ChatAbortResult(ok=True, aborted=not self.miss,
+                               run_id=request.run_id)
 
 
 def test_cancel_forwards_abort_keys_and_engine_reflow_is_idempotent(
@@ -1079,6 +1083,8 @@ def test_cancel_forwards_abort_keys_and_engine_reflow_is_idempotent(
     body = r.json()
     assert "error" not in body, body
     assert body["result"]["task"]["status"]["state"] == "TASK_STATE_CANCELED"
+    # abort 结局如实附录：引擎确认中止
+    assert body["result"]["engineAbort"] == "confirmed", body
 
     # 引擎收到 1 次 abort，定位键 = run 的规范 context + E4 引擎原生 id
     #（不是 kernel rid——engine 不认识传输层 id）
@@ -1140,6 +1146,8 @@ def test_abort_refused_still_canceled_snapshot_with_honest_log(
     body = r.json()
     assert "error" not in body, body
     assert body["result"]["task"]["status"]["state"] == "TASK_STATE_CANCELED"
+    # 不静默附录：refusal 以 engineAbort 上浮，调用方可判读
+    assert body["result"]["engineAbort"] == "refused", body
     assert len(fake.calls) == 1, "refused abort was still forwarded once"
 
     # 不静默：refusal 从引擎 code 结构化落日志
@@ -1156,6 +1164,31 @@ def test_abort_refused_still_canceled_snapshot_with_honest_log(
     run = k.get_run(rid)
     assert run.state == "TASK_STATE_CANCELED"
     assert run.latest_text == "已有增量"
+
+
+def test_abort_ok_but_not_aborted_reports_not_found(app_client, monkeypatch,
+                                                    caplog):
+    """ok=True, aborted=False 结局：引擎确认"无此在跑 run"（自然终局先于
+    abort 到达等）。传输面 CANCELED 仍成立（订阅已终结、迟到帧丢弃），
+    但 engineAbort 如实附录 not_found——不再把"引擎没有取消任何东西"
+    伪装成 confirmed。"""
+    import logging as _logging
+    fake = _FakeAbortChat(miss=True)
+    _install_fake_chat(monkeypatch, fake)
+    rid = _seed_run("abort-miss", "ak8")
+    k = R._kernel
+    k.runs[rid].native_run_id = "nat-miss"
+
+    with caplog.at_level(_logging.WARNING, logger="engine-a2a"):
+        r = _rpc(app_client, 1, "CancelTask", {"taskId": rid})
+
+    body = r.json()
+    assert "error" not in body, body
+    assert body["result"]["task"]["status"]["state"] == "TASK_STATE_CANCELED"
+    assert body["result"]["engineAbort"] == "not_found", body
+    noop = [rec for rec in caplog.records
+            if "engine abort found no active run" in rec.message]
+    assert noop, caplog.text
 
 
 def test_cancel_after_engine_final_no_abort_sent(app_client, monkeypatch):
@@ -1217,6 +1250,7 @@ def test_abort_channel_unavailable_or_timeout_keeps_canceled(
         r = _rpc(app_client, 1, "CancelTask", {"taskId": rid})
     assert r.json()["result"]["task"]["status"]["state"] == \
         "TASK_STATE_CANCELED"
+    assert r.json()["result"]["engineAbort"] == "unavailable"
     unavailable = [rec for rec in caplog.records
                    if "engine abort unavailable" in rec.message]
     assert unavailable, caplog.text
@@ -1229,6 +1263,7 @@ def test_abort_channel_unavailable_or_timeout_keeps_canceled(
     r2 = _rpc(app_client, 2, "CancelTask", {"taskId": rid2})
     assert r2.json()["result"]["task"]["status"]["state"] == \
         "TASK_STATE_CANCELED"
+    assert r2.json()["result"]["engineAbort"] == "timeout"
     timed_out = [rec for rec in caplog.records
                  if "engine abort timed out" in rec.message]
     assert timed_out, caplog.text
@@ -2429,7 +2464,6 @@ async def test_resolve_forward_kind_matrix_and_failures(monkeypatch):
         await R2._resolve_interaction({"interactionId": "i-v"}, 1, None)
 
     rid, _ = await K.open_run("rk", "k1", "first", "d")
-    K.runs[rid].native_run_id = "nat-r"
 
     async def repost(iid):
         await K.publish_interaction_requested(rid, iid, {})
@@ -2445,7 +2479,7 @@ async def test_resolve_forward_kind_matrix_and_failures(monkeypatch):
     assert kind == "ask_user" and params["response"] == "那就是这样"
     assert K.runs[rid].state == "TASK_STATE_WORKING"
 
-    # mode_switch 分发 + native id 定位
+    # mode_switch 分发 + BaaS 持有的真实 interaction id 定位
     await repost("i-m")
     out = await R2._resolve_interaction(
         {"interactionId": "i-m",
@@ -2455,7 +2489,7 @@ async def test_resolve_forward_kind_matrix_and_failures(monkeypatch):
     kind, params = fake.calls[-1]
     assert kind == "mode_switch"
     assert params["decision"] == "approve"
-    assert params["run_id"] == "nat-r"
+    assert params["interaction_id"] == "i-m"
 
     # 不支持的 kind → 边界错误
     await repost("i-x")
@@ -2464,20 +2498,25 @@ async def test_resolve_forward_kind_matrix_and_failures(monkeypatch):
             {"interactionId": "i-x",
              "resolution": {"decision": "y", "kind": "bio"}}, 4, None)
 
-    # native run id 未登记 → resolve_target_unavailable（引擎零转发）
+    # 引擎面不可用 → resolve_target_unavailable（引擎零转发）
     rid2, _ = await K.open_run("rk2", "k2", "first", "d")
-    await K.publish_interaction_requested(rid2, "i-nonat", {})
+    await K.publish_interaction_requested(rid2, "i-noeng", {})
     before = len(fake.calls)
+
+    def broken_plugin():
+        raise RuntimeError("engine chat surface unavailable")
+
+    monkeypatch.setattr(bridge, "_chat_plugin", broken_plugin)
     out = await R2._resolve_interaction(
-        {"interactionId": "i-nonat",
+        {"interactionId": "i-noeng",
          "resolution": {"decision": "approve"}}, 5, None)
     assert out["error"]["data"]["reason"] == "resolve_target_unavailable"
-    assert "native run id unavailable" in out["error"]["message"]
     assert len(fake.calls) == before
 
     # 转发超时 → unknown_outcome，run 保持 INPUT_REQUIRED
     class _HangingResolve:
-        async def resolve_interaction(self, session_key, run_id, response):
+        async def resolve_interaction(self, session_key, interaction_id,
+                                      response):
             await asyncio.sleep(10)
 
     _install_resolve_bridge(monkeypatch, _HangingResolve())

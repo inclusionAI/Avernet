@@ -115,7 +115,7 @@ class ClaudeCodeChatPort(Protocol):
     async def resolve_exec_approval(
         self,
         session_key: str,
-        run_id: str,
+        interaction_id: str,
         decision: str,
         message: str | None = None,
         token: str | None = None,
@@ -124,7 +124,9 @@ class ClaudeCodeChatPort(Protocol):
 
         Args:
             session_key: The session with the pending approval.
-            run_id: The run id awaiting approval.
+            interaction_id: The engine-issued identifier of the pending
+                interaction (gateway-generated, e.g. ``int:<uuid>``) — the
+                gateway's pending registry keys on it. NOT a run id.
             decision: ``allow`` / ``deny`` (the relay translates to its wire form).
             message: Optional human rationale.
             token: MCP token for per-token pool routing; None → default client.
@@ -137,7 +139,7 @@ class ClaudeCodeChatPort(Protocol):
     async def resolve_interaction(
         self,
         session_key: str,
-        run_id: str,
+        interaction_id: str,
         response: str | None = None,
         token: str | None = None,
     ) -> dict[str, Any]:
@@ -145,7 +147,9 @@ class ClaudeCodeChatPort(Protocol):
 
         Args:
             session_key: The session with the pending interaction.
-            run_id: The run id awaiting the user's answer.
+            interaction_id: The engine-issued identifier of the pending
+                interaction (gateway-generated, e.g. ``int:<uuid>``) — NOT
+                a run id.
             response: The user's free-text answer (None for "no response").
             token: MCP token for per-token pool routing; None → default client.
 
@@ -157,7 +161,7 @@ class ClaudeCodeChatPort(Protocol):
     async def resolve_mode_transition(
         self,
         session_key: str,
-        run_id: str,
+        interaction_id: str,
         decision: str,
         token: str | None = None,
     ) -> dict[str, Any]:
@@ -165,7 +169,9 @@ class ClaudeCodeChatPort(Protocol):
 
         Args:
             session_key: The session with the pending transition.
-            run_id: The run id awaiting the decision.
+            interaction_id: The engine-issued identifier of the pending
+                transition (gateway-generated, e.g. ``mt:<uuid>``; sent on
+                the wire as ``transitionId``) — NOT a run id.
             decision: ``accept`` / ``reject`` (the relay translates to its wire form).
             token: MCP token for per-token pool routing; None → default client.
 

@@ -1223,47 +1223,47 @@ class TestChatMixin:
         c.set_response("interaction.resolve", (_ok({}), []))
         impl, _ = _impl(c)
         out = await impl.resolve_exec_approval(
-            session_key="s", run_id="r1", decision="allow-once", message="ok")
+            session_key="s", interaction_id="int:r1", decision="allow-once", message="ok")
         assert out["success"] is True
         assert out["followup_events"] == []
         _, args, kw = _last_call(c)
-        assert kw["params"] == {"interactionId": "r1", "decision": "allow-once", "message": "ok"}
+        assert kw["params"] == {"interactionId": "int:r1", "decision": "allow-once", "message": "ok"}
 
     async def test_resolve_exec_approval_without_message(self):
         c = _FakeRelayClient()
         c.set_response("interaction.resolve", (_ok({}), []))
         impl, _ = _impl(c)
-        await impl.resolve_exec_approval(session_key="s", run_id="r1", decision="deny")
+        await impl.resolve_exec_approval(session_key="s", interaction_id="int:r1", decision="deny")
         _, args, kw = _last_call(c)
-        assert kw["params"] == {"interactionId": "r1", "decision": "deny"}
+        assert kw["params"] == {"interactionId": "int:r1", "decision": "deny"}
 
     async def test_resolve_interaction_with_response(self):
         c = _FakeRelayClient()
         ev = EventFrame(event="interaction.resolved", payload={"done": True})
         c.set_response("interaction.resolve", (_ok({"ack": True}), [ev]))
         impl, _ = _impl(c)
-        out = await impl.resolve_interaction(session_key="s", run_id="r1", response="ans")
+        out = await impl.resolve_interaction(session_key="s", interaction_id="int:r1", response="ans")
         assert out["success"] is True
         assert out["followup_events"] == [("interaction.resolved", {"done": True})]
         _, args, kw = _last_call(c)
-        assert kw["params"] == {"interactionId": "r1", "action": "submit", "message": "ans"}
+        assert kw["params"] == {"interactionId": "int:r1", "action": "submit", "message": "ans"}
 
     async def test_resolve_interaction_without_response(self):
         c = _FakeRelayClient()
         c.set_response("interaction.resolve", (_ok({}), []))
         impl, _ = _impl(c)
-        await impl.resolve_interaction(session_key="s", run_id="r1")
+        await impl.resolve_interaction(session_key="s", interaction_id="int:r1")
         _, args, kw = _last_call(c)
-        assert kw["params"] == {"interactionId": "r1", "action": "submit"}
+        assert kw["params"] == {"interactionId": "int:r1", "action": "submit"}
 
     async def test_resolve_mode_transition(self):
         c = _FakeRelayClient()
         c.set_response("mode_transition.resolve", (_ok({}), []))
         impl, _ = _impl(c)
-        out = await impl.resolve_mode_transition(session_key="s", run_id="r1", decision="proceed")
+        out = await impl.resolve_mode_transition(session_key="s", interaction_id="int:r1", decision="proceed")
         assert out["success"] is True
         _, args, kw = _last_call(c)
-        assert kw["params"] == {"transitionId": "r1", "decision": "proceed"}
+        assert kw["params"] == {"transitionId": "int:r1", "decision": "proceed"}
 
     async def test_resolve_connect_exception(self):
         impl, _ = _impl(_FakeRelayClient())
@@ -1271,7 +1271,7 @@ class TestChatMixin:
             raise ConnectionError("no relay")
         impl._relay = _bad_relay
         out = await impl.resolve_exec_approval(
-            session_key="s", run_id="r1", decision="allow-once")
+            session_key="s", interaction_id="int:r1", decision="allow-once")
         assert out["success"] is False
         assert out["error"]["code"] == "INTERNAL_ERROR"
 
@@ -1279,7 +1279,7 @@ class TestChatMixin:
         c = _FakeRelayClient()
         c.set_raise(ConnectionError("boom"))
         impl, _ = _impl(c)
-        out = await impl.resolve_interaction(session_key="s", run_id="r1")
+        out = await impl.resolve_interaction(session_key="s", interaction_id="int:r1")
         assert out["success"] is False
         assert out["error"]["code"] == "INTERNAL_ERROR"
 

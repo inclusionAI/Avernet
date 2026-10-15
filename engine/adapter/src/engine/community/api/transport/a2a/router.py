@@ -413,8 +413,17 @@ _HANDLERS["GetTask"] = _get_task
 # wait_for 只是病态 adapter 的兜底护栏（BaaS CancelTask HTTP 窗口 30s）。
 _ABORT_FORWARD_TIMEOUT_SECONDS = 30.0
 
+# abort 上行结局——CancelTask 响应以 engineAbort 字段如实附录，供调用方
+# 判读/告警。BaaS 成功判定不变（仍钉 result.task.status.state==CANCELED）：
+# 传输面取消对订阅者已生效，abort 只是引擎侧的尽力收口。
+_ABORT_CONFIRMED = "confirmed"       # ok=True, aborted=True：引擎确认中止
+_ABORT_NOT_FOUND = "not_found"       # ok=True, aborted=False：引擎无此在跑 run
+_ABORT_REFUSED = "refused"            # ok=False：引擎明确拒绝
+_ABORT_TIMEOUT = "timeout"           # 响应超时——结果不可知（可能已中止）
+_ABORT_UNAVAILABLE = "unavailable"   # abort 通道/引擎插件不可达
 
-async def _forward_engine_abort(run: Any) -> None:
+
+async def _forward_engine_abort(run: Any) -> str:
     """1c+：cancel_run 成功后向引擎发真实 ChatService.abort——与
     ws_server._handle_chat_abort 同一构造口径（ChatAbortRequest
     (session_key, run_id)）：session=run 的规范 context（与 gate 判定
@@ -423,8 +432,9 @@ async def _forward_engine_abort(run: Any) -> None:
     openclaw 传 ""）。auth=None 与 inject/resolve 上行一致（HTTP 面的
     文档化默认）。
 
-    失败诚实语义：不回滚、不上浮、不改响应——传输面 CANCELED 已生效
-    （T1 也挡住引擎迟到帧改写），abort 未达只如实落日志。
+    失败诚实语义：不回滚、不上浮、响应仍按传输面快照——传输面 CANCELED
+    已生效（T1 也挡住引擎迟到帧改写），但 abort 结局不再只落日志：以
+    返回值上浮给 _cancel_task，随响应 engineAbort 字段如实附录。
     """
     from engine.community.api.transport.a2a.engine_bridge import _chat_plugin
 
@@ -441,18 +451,26 @@ async def _forward_engine_abort(run: Any) -> None:
     except asyncio.TimeoutError:
         log.warning("engine abort timed out (transport cancel in effect): "
                     "run=%s context=%s", run.run_id, run.context_id)
-        return
+        return _ABORT_TIMEOUT
     except asyncio.CancelledError:
         raise
     except Exception as e:
         log.warning("engine abort unavailable: run=%s %s: %s",
                     run.run_id, type(e).__name__, e)
-        return
+        return _ABORT_UNAVAILABLE
     if not result.ok:
         log.warning("engine abort refused: run=%s code=%s message=%s "
                     "(transport cancel in effect)", run.run_id,
                     getattr(result.error, "code", "UNKNOWN"),
                     getattr(result.error, "message", ""))
+        return _ABORT_REFUSED
+    if not result.aborted:
+        log.warning("engine abort found no active run: run=%s native=%s "
+                    "(transport cancel in effect; engine run already "
+                    "finished or unknown to the engine)", run.run_id,
+                    run.native_run_id)
+        return _ABORT_NOT_FOUND
+    return _ABORT_CONFIRMED
 
 
 async def _cancel_task(params: dict[str, Any], req_id: Any,
@@ -481,11 +499,12 @@ async def _cancel_task(params: dict[str, Any], req_id: Any,
                                    "already_terminal": True}}}
     snapshot = await _kernel.cancel_run(tid)
     # 1c+：传输面 CANCELED 落定后上行引擎真中止——响应仍按传输面快照
-    # （BaaS 成功判定钉在 result.task.status.state==CANCELED，abort 未达
-    # 不改契约）；引擎 aborted 帧随流回流经 bridge 收口，T1 下与本次
-    # CANCELED 幂等收敛，迟到不二次终结。
-    await _forward_engine_abort(r)
-    return {"task": snapshot}
+    # （BaaS 成功判定钉在 result.task.status.state==CANCELED，abort 结局
+    # 不改成功判定），abort 结局以 engineAbort 如实附录供调用方判读；
+    # 引擎 aborted 帧随流回流经 bridge 收口，T1 下与本次 CANCELED 幂等
+    # 收敛，迟到不二次终结。
+    outcome = await _forward_engine_abort(r)
+    return {"task": snapshot, "engineAbort": outcome}
 
 
 _HANDLERS["CancelTask"] = _cancel_task
@@ -691,32 +710,35 @@ class _ResolveRejected(Exception):
         self.code = code
 
 
-async def _forward_resolve(*, session_key: str, run: Any,
+async def _forward_resolve(*, session_key: str,
+                           interaction_id: str,
                            resolution: dict[str, Any]) -> None:
-    """E4/16-3: 三类决策分发到 engine adapter 三方法（16-3b：native_run_id）。
+    """E4/16-3: 三类决策分发到 engine adapter 三方法。
 
-    Raises _ResolveRejected（结构化 code）——Internal ids检查先行。"""
+    转发键 = BaaS 持有的真实 interaction 标识——即 interaction.requested
+    帧上行的引擎侧 id（gateway 生成，如 ``int:<uuid>``）；引擎的 pending
+    注册表按它查找。kernel rid 是传输层 id、native run id 是执行标识，
+    引擎 resolve 注册表一概不认，严禁替换成二者之一。
+
+    Raises _ResolveRejected（结构化 code）。"""
     from engine.community.api.transport.a2a.engine_bridge import _chat_plugin
 
-    native = run.native_run_id
-    if not isinstance(native, str) or not native:
-        raise RuntimeError(
-            "native run id unavailable (run has no engine frames yet)")
     chat = _chat_plugin()
     kind = resolution.get("kind")
     decision = resolution.get("decision")
 
     if kind == "exec":
         coro = chat.resolve_exec_approval(
-            session_key=session_key, run_id=native, decision=decision,
-            message=resolution.get("message"))
+            session_key=session_key, interaction_id=interaction_id,
+            decision=decision, message=resolution.get("message"))
     elif kind in ("ask_user", None):
         coro = chat.resolve_interaction(
-            session_key=session_key, run_id=native,
+            session_key=session_key, interaction_id=interaction_id,
             response=resolution.get("answer") or resolution.get("message"))
     elif kind == "mode_switch":
         coro = chat.resolve_mode_transition(
-            session_key=session_key, run_id=native, decision=decision)
+            session_key=session_key, interaction_id=interaction_id,
+            decision=decision)
     else:
         raise _ParamError(f"unsupported resolution kind: {kind!r}")
 
@@ -757,7 +779,8 @@ async def _resolve_interaction(params: dict[str, Any], req_id: Any,
                           "data": {"reason": "resolve_conflict"}}}
 
     try:
-        await _forward_resolve(session_key=run.context_id, run=run,
+        await _forward_resolve(session_key=run.context_id,
+                               interaction_id=interaction_id,
                                resolution=resolution)
     except _ResolveRejected as e:
         if e.code == "INTERNAL_ERROR":

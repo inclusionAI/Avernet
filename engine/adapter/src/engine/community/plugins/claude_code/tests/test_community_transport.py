@@ -181,12 +181,12 @@ async def test_resolve_exec_approval_uses_interaction_resolve():
     c.set_response("interaction.resolve", (_ok({}), []))
     impl, _ = _impl(c)
     out = await impl.resolve_exec_approval(
-        session_key="s", run_id="r1", decision="allow-once", message="ok")
+        session_key="s", interaction_id="int:r1", decision="allow-once", message="ok")
     assert out["success"] is True
     method, args, kw = c.calls[-1]
     assert method == "send_request_with_events"
     assert args[0] == "interaction.resolve"
-    assert kw["params"]["interactionId"] == "r1"
+    assert kw["params"]["interactionId"] == "int:r1"
     assert kw["params"]["decision"] == "allow-once"
 
 
@@ -195,7 +195,7 @@ async def test_resolve_interaction_uses_interaction_resolve_submit():
     c.set_response("interaction.resolve", (_ok({}), []))
     impl, _ = _impl(c)
     out = await impl.resolve_interaction(
-        session_key="s", run_id="r1", response="answer")
+        session_key="s", interaction_id="int:r1", response="answer")
     assert out["success"] is True
     method, _, kw = c.calls[-1]
     assert kw["params"]["action"] == "submit"
@@ -207,7 +207,7 @@ async def test_resolve_mode_transition_uses_mode_transition_resolve():
     c.set_response("mode_transition.resolve", (_ok({}), []))
     impl, _ = _impl(c)
     out = await impl.resolve_mode_transition(
-        session_key="s", run_id="r1", decision="proceed")
+        session_key="s", interaction_id="int:r1", decision="proceed")
     assert out["success"] is True
     method, args, _ = c.calls[-1]
     assert method == "send_request_with_events" and args[0] == "mode_transition.resolve"
