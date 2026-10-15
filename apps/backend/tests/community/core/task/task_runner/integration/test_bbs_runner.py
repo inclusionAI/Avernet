@@ -36,7 +36,9 @@ def _execution_graph(task_id="t1", objective="整理基础架构方向架构师�
 
 
 class _FakeBot:
-    """bid 与 dispatch 共用 send_and_wait_async(bid prompt 含 "[bbs-bid]" 标记,dispatch msg 为任务快照)。
+    """bid 使用 send_and_wait_async；Relay dispatch 使用 send_message 接受指令。
+
+    bid prompt 含 ``[bbs-bid]`` 标记，dispatch 消息为任务快照。
 
     ``rates``: {bot_id: completion_rate or None (None=simulate bid error)}。
     ``dispatch_raises``: 若为真,dispatch 抛异常 → 走 notify except 收口分支(释放 claim)。
@@ -50,6 +52,9 @@ class _FakeBot:
         self.dispatch_raises = dispatch_raises
         self.sent_messages: list[tuple] = []   # dispatch 消息(给胜出 bot)
         self.bid_prompts: list[str] = []        # bid prompt
+
+    async def ensure_grant(self, bot_id):
+        self.granted = bot_id
 
     async def send_and_wait_async(self, *, bot_id, message, metadata=None, timeout=180.0, poll_interval=2.0):
         if "[bbs-bid]" in message:
@@ -79,10 +84,13 @@ class _FakeBot:
         }
 
     async def send_message(self, *, bot_id, message, metadata):
-        # 兼容保留:notify 不再调用 send_message(dispatch 走 send_and_wait_async)
         self.sent_messages.append((bot_id, message, metadata))
+        if self.dispatch_raises:
+            raise RuntimeError("dispatch failed")
         from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
-        return BotSendResult(run_id=f"r_{bot_id}", session_id=None)
+        return BotSendResult(
+            run_id=f"r_{bot_id}", session_id=f"sess-{bot_id}"
+        )
 
 
 class _FakeBcn:
@@ -211,7 +219,12 @@ class _FakeGraph:
                     node.status = patch.status
                 if patch.run_mode is not None:
                     node.run_info.run_mode = patch.run_mode
-                node.run_info.assignee = patch.assignee
+                clears_bbs_owner = (
+                    patch.extend_props_patch is not None
+                    and "bbs_owner" in patch.extend_props_patch
+                )
+                if patch.assignee is not None or clears_bbs_owner:
+                    node.run_info.assignee = patch.assignee or None
                 node.run_info.extend_props.update(patch.extend_props_patch or {})
                 if patch.progress_reason:
                     node.run_info.progress_reason = patch.progress_reason
@@ -346,6 +359,9 @@ def test_notify_reuses_existing_relay_bbs_node_for_dynamic_selection():
     assert graph.added_nodes == []
     assert graph.claimed == "A"
     assert bot.sent_messages and bot.sent_messages[0][0] == "A"
+    assert bot.granted == "A"
+    assert relay_node.run_info.extend_props["session_id"] == "sess-A"
+    assert relay_node.run_info.extend_props["run_id"] == "r_A"
 
     relay_msg = bot.sent_messages[0][1]
     assert "【分布式接力执行 S1-S6】" in relay_msg
@@ -429,6 +445,45 @@ def test_notify_relay_send_failure_releases_current_bbs_node():
     assert execution_graph.extend_props["bbs_node_id"] == "relay-bbs-send-failure"
 
 
+def test_relay_bbs_group_execution_persists_drill_down_ids():
+    """The manager_worker bypass must expose group/session IDs on the Relay node."""
+    graph = _FakeGraph()
+    execution_graph = _execution_graph("t-relay-group", _GOAL)
+    relay_node = TaskNode(
+        node_id="relay-group",
+        task_id=execution_graph.task_id,
+        status=Status.PENDING,
+        task_spec=execution_graph.tasks[0].task_spec,
+        run_info=RuntimeInfo(
+            run_mode="bbs", extend_props={"relay_token": "attempt-1"}
+        ),
+        node_run_graph=None,
+    )
+    execution_graph.tasks.append(relay_node)
+    graph.dashboard = execution_graph
+
+    async def group_executor(**kwargs):
+        return {
+            "group_id": "grp-drill",
+            "session_id": "sess-drill",
+            "success": True,
+        }
+
+    _run(notify(
+        execution_graph,
+        bcn=_FakeBcn(_roster("A")),
+        bot=_FakeBot(rates={"A": 80}),
+        graph=graph,
+        backend_url="http://x",
+        group_executor=group_executor,
+        target_node_id=relay_node.node_id,
+    ))
+
+    assert relay_node.run_info.extend_props["group_id"] == "grp-drill"
+    assert relay_node.run_info.extend_props["session_id"] == "sess-drill"
+    assert relay_node.status is Status.RUNNING
+
+
 def test_relay_bot_reply_before_callback_keeps_claim_and_records_pending_result():
     """A completed chat is not an EXECUTION_RESULT; late callbacks need a live baton."""
     graph = _FakeGraph()
@@ -482,11 +537,10 @@ def test_relay_callback_before_chat_reply_does_not_reopen_node():
     graph.dashboard = execution_graph
 
     class _CallbackFirstBot(_FakeBot):
-        async def send_and_wait_async(self, **kwargs):
-            result = await super().send_and_wait_async(**kwargs)
-            if "[bbs-bid]" not in kwargs["message"]:
-                relay_node.status = Status.DONE
-                relay_node.run_info.extend_props["execution_decision"] = "ACCEPTED"
+        async def send_message(self, **kwargs):
+            result = await super().send_message(**kwargs)
+            relay_node.status = Status.DONE
+            relay_node.run_info.extend_props["execution_decision"] = "ACCEPTED"
             return result
 
     bot = _CallbackFirstBot(rates={"A": 80})

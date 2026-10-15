@@ -83,7 +83,7 @@ class TaskExecutorBbsMixin:
             task_id, gid, session_id,
         )
 
-        return {"session_id": session_id, "success": True}
+        return {"group_id": gid, "session_id": session_id, "success": True}
 
         """
         # 阻塞轮询:终态判据 + output 来源**对齐** TaskExecutorResultPoller._poll_terminal(session 模)
