@@ -147,13 +147,19 @@ export const SessionItem = React.memo(function SessionItem({
           <Popover open={menuOpen} onOpenChange={setMenuOpen}>
             <PopoverTrigger asChild>
               {/* span 承载分享气泡锚点 ref（IconButton 本体让给菜单 trigger 的 ref 合并）。 */}
-              <span ref={shareAnchorRef} className="flex shrink-0">
-              <IconButton
-                label="会话更多操作"
-                size="sm"
-                icon={<MoreHorizontal className="h-3.5 w-3.5" />}
-                className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-              />
+              <span
+                ref={shareAnchorRef}
+                className={cn(
+                  'flex shrink-0 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100',
+                  menuOpen && 'opacity-100',
+                )}
+              >
+                <IconButton
+                  label="会话更多操作"
+                  size="sm"
+                  icon={<MoreHorizontal className="h-3.5 w-3.5" />}
+                  className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                />
               </span>
             </PopoverTrigger>
             <PopoverContent align="end" className="w-44 p-1">

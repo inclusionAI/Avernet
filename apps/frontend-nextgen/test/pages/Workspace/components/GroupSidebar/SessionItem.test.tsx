@@ -64,7 +64,12 @@ function openMenu() {
 describe('SessionItem 会话操作菜单（验收微调：对齐管理面板与 Bot 单聊能力）', () => {
   it('管理者菜单四项齐备且顺序为 管理会话→编辑标题→分享会话→删除会话，删除项为危险色', () => {
     renderSessionItem();
+    const actions = screen.getByRole('button', { name: '会话更多操作' }).parentElement;
+    expect(actions).toHaveClass('opacity-0', 'group-hover/row:opacity-100', 'group-focus-within/row:opacity-100');
+    expect(actions).not.toHaveClass('opacity-100');
     openMenu();
+    // 菜单开启后不依赖 hover，避免鼠标移入浮层时触发钮消失。
+    expect(actions).toHaveClass('opacity-100');
 
     const labels = ['管理会话', '编辑标题', '分享会话', '删除会话'];
     labels.forEach((label) => {

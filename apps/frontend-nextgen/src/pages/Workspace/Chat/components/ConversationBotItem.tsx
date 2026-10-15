@@ -134,9 +134,9 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             <AvatarTile
               src={bot.avatarUrl}
               label={bot.displayName}
-              className="h-4 w-4 rounded-full"
+              className="h-5 w-5 rounded-full"
               fallbackContent={
-                <span className="text-[8px] font-semibold leading-none tracking-[0.06em]">
+                <span className="text-[10px] font-semibold leading-none tracking-[0.06em]">
                   {bot.displayName.slice(0, 1)}
                 </span>
               }

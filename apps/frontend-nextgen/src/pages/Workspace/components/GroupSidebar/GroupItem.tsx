@@ -121,7 +121,7 @@ export const GroupItem = React.memo(function GroupItem({
           )}
         >
           <span className="flex h-9 w-9 shrink-0 items-center justify-center [&>span]:mr-0">
-            <GroupAvatarStack participants={group.participants} totalCount={stackTotalCount} />
+            <GroupAvatarStack participants={group.participants} totalCount={stackTotalCount} size={20} />
           </span>
           <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
             <TooltipProvider delayDuration={300}>
