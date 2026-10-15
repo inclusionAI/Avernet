@@ -61,6 +61,9 @@ _NON_ENDPOINT_FILES: frozenset[str] = frozenset({
     # Named in full rather than as a short pattern so this entry cannot
     # exempt anything else.
     "rule_shape_audit.py",
+    # The acli CLI rows of app.py's domain-error status map, split out
+    # because app.py is at the 1000-line module cap. A status table only.
+    "acli_cli_status.py",
     "__init__.py",
 })
 

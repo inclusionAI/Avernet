@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
 from typing import Any
 
 from agentclaw.community.core.acli_clis.errors import (
@@ -31,6 +30,7 @@ from agentclaw.community.core.acli_clis.errors import (
     AcliRequestRejectedError,
     AcliRollbackFailedError,
 )
+from agentclaw.community.core.acli_clis.protocols import AcliCliServiceProtocol, BotCli
 from agentclaw.community.core.acli_clis.port import (
     AcliMarketPage,
     AcliPort,
@@ -70,18 +70,7 @@ logger = get_logger()
 ACLI_ENGINES = frozenset({"openclaw", "claude_code"})
 
 
-@dataclass(frozen=True, slots=True)
-class BotCli:
-    """One CLI a bot holds in Passport."""
-
-    cli_code: str
-    cli_name: str
-    cli_desc: str
-    identity_mode: str
-    default: bool
-
-
-class AcliCliService:
+class AcliCliService(AcliCliServiceProtocol):
     """Orchestrates Passport and the container; owns no policy of its own."""
 
     def __init__(

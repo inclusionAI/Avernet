@@ -270,10 +270,10 @@ class CliPassportScopeReconciler:
             passport,
             desired_mcp_items=historical_mcp_items,
             mcp_identity_modes=mcp_identity_modes,
-            additional_cli_items=[
+            additional_cli_items=_dedupe_by_code([
                 *self._manifest_resolver.required_cli_items(engine_type, template_type),
                 *(added_cli_items or []),
-            ],
+            ]),
             cli_identity_modes=cli_identity_modes,
             removed_cli_codes=removed_cli_codes,
         )
@@ -376,6 +376,20 @@ def _merge_desired_mcp_identity_modes(
         item["identity_mode"] = _normalized_mcp_identity_mode(identity)
         merged.append(item)
     return merged
+
+
+def _dedupe_by_code(items: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """First occurrence wins: an explicit add of a not-yet-granted default
+    must not reach the strict normalizer as a duplicate code."""
+    seen: set[object] = set()
+    unique: list[Mapping[str, Any]] = []
+    for item in items:
+        code = item.get("cli_code")
+        if code in seen:
+            continue
+        seen.add(code)
+        unique.append(item)
+    return unique
 
 
 def _normalize_cli_additions(

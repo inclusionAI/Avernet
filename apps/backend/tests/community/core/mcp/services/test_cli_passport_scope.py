@@ -411,3 +411,21 @@ def test_mutation_failure_propagates_and_is_logged_without_details() -> None:
     assert "cli_passport_mutation_failed" in logged
     assert "agentpass_cli_scope_update_failed" in logged
     assert "agentpass-secret-body" not in logged
+
+
+def test_add_cli_of_an_ungranted_default_is_not_a_duplicate() -> None:
+    """``deepinsight-cli`` is an openclaw default the history lacks; adding it
+    explicitly must not hand the normalizer the same code twice."""
+    passport = _Passport()
+
+    result = _reconciler(passport).add_cli(
+        bot=_BOT,
+        item={
+            "cli_code": "deepinsight-cli",
+            "cli_name": "deepinsight-cli",
+            "cli_desc": "",
+            "identity_mode": "owner",
+        },
+    )
+
+    assert result.cli_codes == ("dataphin", "deepinsight-cli")

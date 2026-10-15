@@ -341,6 +341,7 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerLockEpochError,
     CallerMcpNotFoundError, CallerMcpSyncError,
 )
+from agentclaw.community.adapters.http.acli_cli_status import ACLI_CLI_ERROR_STATUS  # noqa: E402
 from agentclaw.community.core.skill_center.errors import (  # noqa: E402
     McpEndpointUnavailableError,
     McpPermissionDeniedError,
@@ -393,6 +394,7 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     # back off the whole endpoint over what is a per-Bot lock conflict.
     SkillSetControlPlaneLockUnavailableError: 409,
     SkillSetRuntimeReconcileError: 500,
+    **ACLI_CLI_ERROR_STATUS,
 }
 
 _DATA_PROXY_ERROR_STATUS_MAP: dict[type[DataProxyError], int] = {

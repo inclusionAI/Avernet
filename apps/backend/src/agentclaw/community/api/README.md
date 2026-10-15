@@ -119,6 +119,7 @@ provides:
   - BotQuotaServiceProtocol
   - SpaceSkillOfflineServiceProtocol
   - TcResourceReadyObserverProtocol
+  - AcliCliServiceProtocol
 consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
@@ -142,6 +143,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_config_manifest.credentials.service_protocol  # SourceCredentialServiceProtocol — defined in its owning core module, re-exported here (W3 #1471)
   - agentclaw.community.core.bot_config_manifest.credentials.errors  # error family raised by the re-exported Protocol's implementations
   - agentclaw.community.core.caller_identity.contracts  # Caller identity API DTOs and stable errors
+  - agentclaw.community.core.acli_clis.protocols  # acli CLI service contract, DTOs and errors, re-exported in acli_cli_service.py
   - agentclaw.community.core.caller_identity.credential  # CallerToken — typed in caller_credential.py
   - agentclaw.community.core.execution_identity.protocols  # execution identity service contract
   - agentclaw.community.core.caller_identity.protocols  # Caller collaborators — typed in caller_identity_service.py
