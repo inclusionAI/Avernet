@@ -985,6 +985,7 @@ Spec：`apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`。
 因此重启后仍在、也无需重启即可使用。删除 CLI 时会清除其 caller 覆盖，使再次添加从 `owner` 开始——
 除非它是 bot 最后一个 caller 资源（bot 不会从 `caller` 回退为 `owner`）。默认 CLI 每次启动都会重新授权，
 不能删除。开源镜像不带 acli：添加、删除与搜索返回 `502`，`code` 为 `acli_unavailable`。
+同一 bot 的添加与删除在单个 backend 实例内串行执行。
 
 ### 🟩 lucas-xzp · P1 —— resources（7 个端点）· `openapi_v1/resources/router.py`
 Bot 工作区的文件与目录；存储位置从不暴露。所有操作都以工作区相对路径 `path`

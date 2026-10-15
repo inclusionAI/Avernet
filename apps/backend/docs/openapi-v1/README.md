@@ -1738,6 +1738,7 @@ need none. A removed CLI's caller override is cleared so a re-add starts at
 falls back from `caller` to `owner`. Default CLIs are re-granted at every start
 and cannot be removed. The open-source image ships no acli: there, add, remove
 and search answer `502` with `code: acli_unavailable`.
+Adds and removes on one bot run one at a time within a backend instance.
 
 ### 🟩 lucas-xzp · P1 — resources (7 endpoints) · `openapi_v1/resources/router.py`
 The bot's workspace files and folders; storage location never exposed. Every

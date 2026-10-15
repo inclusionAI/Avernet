@@ -14,8 +14,11 @@ bot was left in, and the event is logged for repair.
 """
 from __future__ import annotations
 
+import asyncio
 import time
-from collections.abc import Mapping
+import weakref
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from typing import Any
 
 from agentclaw.community.core.acli_clis.errors import (
@@ -92,6 +95,12 @@ class AcliCliService(AcliCliServiceProtocol):
         self._reconciler = scope_reconciler
         self._manifest = manifest_resolver
         self._port = port
+        # One add/remove at a time per bot: each spans Passport and container
+        # steps with awaits between them, and the owner's edit lock is
+        # reentrant, so two of the owner's requests could otherwise interleave.
+        self._bot_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
+            weakref.WeakValueDictionary()
+        )
 
     # ── reads ────────────────────────────────────────────────────────────
 
@@ -150,6 +159,21 @@ class AcliCliService(AcliCliServiceProtocol):
         lock_epoch: int | None,
     ) -> AcliTool:
         """Install, then grant; uninstall again if the grant fails."""
+        async with self._serialized(bot_id):
+            return await self._add(
+                bot_id=bot_id, entity_id=entity_id, actor_id=actor_id,
+                cli_code=cli_code, lock_epoch=lock_epoch,
+            )
+
+    async def _add(
+        self,
+        *,
+        bot_id: str,
+        entity_id: str | None,
+        actor_id: str,
+        cli_code: str,
+        lock_epoch: int | None,
+    ) -> AcliTool:
         started = time.monotonic()
         bot = self._writable_bot(bot_id, entity_id, actor_id, lock_epoch)
         owner_id = str(bot["owner_id"])
@@ -265,6 +289,21 @@ class AcliCliService(AcliCliServiceProtocol):
         lock_epoch: int | None,
     ) -> None:
         """Revoke, then uninstall; re-grant if the uninstall fails."""
+        async with self._serialized(bot_id):
+            await self._remove(
+                bot_id=bot_id, entity_id=entity_id, actor_id=actor_id,
+                cli_code=cli_code, lock_epoch=lock_epoch,
+            )
+
+    async def _remove(
+        self,
+        *,
+        bot_id: str,
+        entity_id: str | None,
+        actor_id: str,
+        cli_code: str,
+        lock_epoch: int | None,
+    ) -> None:
         started = time.monotonic()
         bot = self._writable_bot(bot_id, entity_id, actor_id, lock_epoch)
         owner_id = str(bot["owner_id"])
@@ -332,6 +371,17 @@ class AcliCliService(AcliCliServiceProtocol):
             "acli_cli_remove_succeeded bot_id=%s cli_code=%s duration_ms=%s",
             bot_id, cli_code, int((time.monotonic() - started) * 1000),
         )
+
+    @asynccontextmanager
+    async def _serialized(self, bot_id: str) -> AsyncIterator[None]:
+        # Held locally while waiting or held, so the weak entry lives exactly
+        # as long as some request for this bot does.
+        lock = self._bot_locks.get(bot_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._bot_locks[bot_id] = lock
+        async with lock:
+            yield
 
     # ── rollback ─────────────────────────────────────────────────────────
 
@@ -487,7 +537,7 @@ def _mode(value: object) -> str | None:
 
 
 #: Port codes after which the container may or may not have done the work.
-_UNCERTAIN_CODES = frozenset({"timeout", "engine_unreachable"})
+_UNCERTAIN_CODES = frozenset({"timeout", "engine_unreachable", "bad_output"})
 #: Port codes caused by the request itself rather than by the container.
 _REJECTED_CODES = frozenset({"install_failed", "invalid_input"})
 

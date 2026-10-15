@@ -6,6 +6,7 @@ the point of the ordering and rollback is that they never disagree.
 """
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 
@@ -614,7 +615,7 @@ async def test_unknown_grant_keeps_the_program_and_says_so() -> None:
     assert [c[0] for c in container.calls] == ["install"]
 
 
-@pytest.mark.parametrize("code", ["timeout", "engine_unreachable"])
+@pytest.mark.parametrize("code", ["timeout", "engine_unreachable", "bad_output"])
 async def test_uncertain_uninstall_stays_revoked_and_says_so(code) -> None:
     container = _Container({"yuque-cli"})
     container.uninstall_errors = [AcliPortError(code, "no answer")]
@@ -628,7 +629,7 @@ async def test_uncertain_uninstall_stays_revoked_and_says_so(code) -> None:
 
 
 
-@pytest.mark.parametrize("code", ["timeout", "engine_unreachable"])
+@pytest.mark.parametrize("code", ["timeout", "engine_unreachable", "bad_output"])
 async def test_uncertain_install_is_cleaned_up_and_never_granted(code) -> None:
     """The install may have landed although its answer was lost: uninstall it."""
     container = _Container()
@@ -754,3 +755,29 @@ async def test_regrant_with_unknown_outcome_says_so() -> None:
         await _remove(service)
 
     assert caught.value.state == "revoke_unknown_installed"
+
+
+async def test_add_and_remove_on_one_bot_run_one_at_a_time() -> None:
+    """A remove waiting on its uninstall cannot be overtaken by an add of the same tool."""
+    service, agentpass, container, _ = _service(granted=["dataphin", "yuque-cli"])
+    container.installed.add("yuque-cli")
+    release = asyncio.Event()
+    real_uninstall = container.uninstall
+
+    async def slow_uninstall(**kwargs):
+        await release.wait()
+        return await real_uninstall(**kwargs)
+
+    container.uninstall = slow_uninstall  # type: ignore[method-assign]
+    removing = asyncio.create_task(_remove(service))
+    await asyncio.sleep(0)
+    adding = asyncio.create_task(_add(service))
+    await asyncio.sleep(0)
+
+    assert [c[0] for c in container.calls] == []  # the add has not installed yet
+    release.set()
+    await removing
+    await adding
+
+    assert "yuque-cli" in agentpass.codes
+    assert "yuque-cli" in container.installed
