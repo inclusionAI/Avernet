@@ -212,6 +212,11 @@ def test_relay_report_dto_carries_planned_runtime_fields() -> None:
             "event_id": "event-1",
             "relay_token": "generation-1",
             "event_type": "PLAN_RESULT",
+            "trace": {"steps": [{
+                "action_type": "plan", "action_input": "S5B_PLAN_NEXT_NODE",
+                "action_result": "completed", "status_from": "RUNNING",
+                "status_to": "RUNNING", "boost_reason": "plan", "error_msg": None,
+            }]},
             "event": {
                 "task_spec": {
                     "context": {"title": "下一棒", "background": ""},

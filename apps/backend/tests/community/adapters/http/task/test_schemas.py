@@ -120,6 +120,22 @@ def test_node_context_dto_projects_runtime_actual_goal() -> None:
     assert dto.capability_failure_reason is None
 
 
+
+_TRACE = {
+    "steps": [
+        {
+            "action_type": "plan",
+            "action_input": "S5A_REFRESH_GAPS",
+            "action_result": "gaps_refreshed",
+            "status_from": "RUNNING",
+            "status_to": "SUCCESS",
+            "boost_reason": "gaps 无变更",
+            "error_msg": None,
+        }
+    ]
+}
+
+
 def test_plan_report_dto_builds_one_unpersisted_node() -> None:
     command = TaskReportCommandDTO.model_validate(
         {
@@ -135,6 +151,7 @@ def test_plan_report_dto_builds_one_unpersisted_node() -> None:
                 },
                 "run_info": {"run_mode": "single_bot", "assignee": "bot-2"},
             },
+            "trace": _TRACE,
         }
     ).to_domain()
     assert command.event_id == "e1" and command.relay_token == "generation-1"
@@ -143,7 +160,7 @@ def test_plan_report_dto_builds_one_unpersisted_node() -> None:
     assert command.event.run_info.assignee == "bot-2"
 
 
-def test_report_dto_parses_optional_trace() -> None:
+def test_report_dto_requires_complete_trace() -> None:
     command = TaskReportCommandDTO.model_validate(
         {
             "task_id": "t1",
@@ -163,7 +180,10 @@ def test_report_dto_parses_optional_trace() -> None:
                         "action_type": "plan",
                         "action_result": "gaps_refreshed",
                         "action_input": "S5A_REFRESH_GAPS",
+                        "status_from": None,
+                        "status_to": None,
                         "boost_reason": "gaps \u65e0\u53d8\u66f4",
+                        "error_msg": None,
                     },
                 ],
             },
@@ -187,6 +207,7 @@ def test_plan_report_dto_rejects_client_generated_node_id() -> None:
                 "event_id": "e1",
                 "relay_token": "generation-1",
                 "event_type": "PLAN_RESULT",
+                "trace": _TRACE,
                 "event": {
                     "node_id": "client-node",
                     "task_spec": {
@@ -197,6 +218,71 @@ def test_plan_report_dto_rejects_client_generated_node_id() -> None:
                 },
             }
         ).to_domain()
+
+
+def _command_body() -> dict:
+    return {
+        "task_id": "t1",
+        "node_id": "n1",
+        "event_id": "e1",
+        "relay_token": "generation-1",
+        "event_type": "PLAN_RESULT",
+        "event": None,
+        "trace": _TRACE,
+    }
+
+
+def test_report_dto_requires_trace() -> None:
+    """trace 为必填:缺失 → ValidationError,错误信息明确指向 trace。"""
+    body = _command_body()
+    del body["trace"]
+    with pytest.raises(ValidationError) as excinfo:
+        TaskReportCommandDTO.model_validate(body)
+    assert any(
+        err["loc"] == ("trace",) and "Field required" in err["msg"]
+        for err in excinfo.value.errors()
+    ), excinfo.value.errors()
+
+
+def test_report_dto_requires_trace_steps() -> None:
+    """trace.steps 为必填:缺失 → 错误明确指向 trace.steps。"""
+    body = _command_body()
+    body["trace"] = {}
+    with pytest.raises(ValidationError) as excinfo:
+        TaskReportCommandDTO.model_validate(body)
+    assert any(
+        err["loc"] == ("trace", "steps") and "Field required" in err["msg"]
+        for err in excinfo.value.errors()
+    ), excinfo.value.errors()
+
+
+@pytest.mark.parametrize("missing_field", [
+    "action_type", "action_input", "action_result",
+    "status_from", "status_to", "boost_reason", "error_msg",
+])
+def test_report_dto_step_requires_all_seven_fields(missing_field) -> None:
+    """每个 step 七字段全键必填(RELAY 上报契约);缺谁 422 错误就点名谁。"""
+    body = _command_body()
+    step = {k: v for k, v in body["trace"]["steps"][0].items() if k != missing_field}
+    body["trace"]["steps"] = [step]
+    with pytest.raises(ValidationError) as excinfo:
+        TaskReportCommandDTO.model_validate(body)
+    assert any(
+        missing_field in str(err["loc"]) and "Field required" in err["msg"]
+        for err in excinfo.value.errors()
+    ), f"{missing_field} 缺失未被点名: {excinfo.value.errors()}"
+
+
+def test_report_dto_step_requires_known_action_type() -> None:
+    """action_type 必须为轨迹动作枚举值(submit|plan|dispatch|execute|verify|
+    reset|transition|relay)——否则读侧枚举强校验会丢行,入口先拦并点名。"""
+    body = _command_body()
+    body["trace"]["steps"][0]["action_type"] = "S5C_SEARCH_CANDIDATES"
+    with pytest.raises(ValidationError) as excinfo:
+        TaskReportCommandDTO.model_validate(body)
+    errors = excinfo.value.errors()
+    assert any("action_type" in str(err["loc"]) for err in errors), errors
+    assert any("submit" in err["msg"] and "relay" in err["msg"] for err in errors)
 
 
 def test_task_settings_dtos_accept_relay_execution() -> None:

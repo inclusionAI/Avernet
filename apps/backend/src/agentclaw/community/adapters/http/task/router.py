@@ -388,7 +388,19 @@ async def report_callback(
             # Manual parsing bypasses FastAPI's request validation, so surface
             # the caller's error as the endpoint's normal enveloped 422 instead
             # of letting Pydantic's exception become a 500. Loc/type/msg only:
-            # Pydantic also carries the raw input, which must not enter logs.
+            # Pydantic also carries the raw input, which must not enter logs or
+            # the response—the named message below is loc+msg only (值不回显).
+            # 字段路径下标渲染为 ``steps[0]`` 形态(int loc 段转 []),人读即定位。
+            def _loc_path(parts: tuple) -> str:
+                out = ""
+                for part in parts:
+                    out += f"[{part}]" if isinstance(part, int) else f".{part}"
+                return out.lstrip(".") or "body"
+
+            _named = "; ".join(
+                f"{_loc_path(error.get('loc') or ('body',))}: {error.get('msg')}"
+                for error in exc.errors()
+            )
             logger.warning(
                 "[task_relay_report] validation failed: %s",
                 [
@@ -403,9 +415,11 @@ async def report_callback(
             # 校验失败也留审计底(best-effort,吞异常):422 的上报原文此前零留底。
             await persist_relay_report_audit(
                 svc, raw=raw_event,
-                error=f"invalid relay report payload: {exc.error_count()} validation errors",
+                error=f"invalid relay report payload: {_named}",
             )
-            return error_response(422, "Invalid relay report request", request)
+            return error_response(
+                422, f"Invalid relay report request: {_named}", request,
+            )
         try:
             graph = svc.get_task_dashboard(command.task_id)
             if not graph.is_relay:

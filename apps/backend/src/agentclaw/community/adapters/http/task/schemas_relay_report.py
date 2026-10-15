@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from agentclaw.community.adapters.http.task.schemas import (
     AcceptanceResultDTO,
@@ -25,6 +25,9 @@ from agentclaw.community.core.task.domain.models import (
     TaskReportTraceStep,
     TaskReportEventType,
     TaskReportResult,
+)
+from agentclaw.community.core.task.task_context.task_trajectory.models import (
+    TrajectoryActionType,
 )
 
 
@@ -61,23 +64,41 @@ class PlannedNodeDTO(BaseModel):
 
 
 class TaskReportTraceStepDTO(BaseModel):
-    """单条 trace step,七字段与轨迹事件表对齐(见 domain ``TaskReportTraceStep``)。"""
+    """单条 trace step——七字段**全键必填**(2026-10-15 收紧契约):
+
+    ``action_type|action_input|action_result|status_from|status_to|boost_reason|
+    error_msg`` 一键不可缺(值可为 None);``action_type`` 必须为轨迹动作枚举值
+    (``submit|plan|dispatch|execute|verify|reset|transition|relay``)——读侧
+    枚举强校验会丢弃未知值,入口先拦并点名。
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     action_type: str = Field(min_length=1)
+    action_input: str | None
     action_result: str = Field(min_length=1)
-    action_input: str | None = None
-    status_from: str | None = None
-    status_to: str | None = None
-    boost_reason: str | None = None
-    error_msg: str | None = None
+    status_from: str | None
+    status_to: str | None
+    boost_reason: str | None
+    error_msg: str | None
+
+    @field_validator("action_type")
+    @classmethod
+    def _action_type_in_trajectory_vocab(cls, value: str) -> str:
+        allowed = "|".join(member.value for member in TrajectoryActionType)
+        try:
+            TrajectoryActionType(value)
+        except ValueError:
+            raise ValueError(
+                f"action_type 必须为轨迹动作枚举值之一: {allowed}"
+            ) from None
+        return value
 
 
 class TaskReportTraceDTO(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    steps: list[TaskReportTraceStepDTO] = Field(default_factory=list)
+    steps: list[TaskReportTraceStepDTO]
 
 
 class TaskReportCommandDTO(BaseModel):
@@ -92,7 +113,7 @@ class TaskReportCommandDTO(BaseModel):
     progress_reason: str = ""
     failure_reason: str | None = None
     task_acceptance_result: AcceptanceResultDTO | None = None
-    trace: TaskReportTraceDTO | None = None
+    trace: TaskReportTraceDTO
 
     def to_domain(self) -> TaskReportCommand:
         if self.event_type == TaskReportEventType.EXECUTION_RESULT:
