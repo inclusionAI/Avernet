@@ -590,17 +590,29 @@ def test_trajectory_dto_passes_through_actual_run_mode():
 
 
 @pytest.mark.unit
-def test_trajectory_display_html_renders_actual_run_mode():
-    """HTML 页在携带真实模态的事件上渲染「真实模态」展示行。"""
-    ev = TrajectoryEvent(
-        task_id="t1", node_id="n1", action_type=TrajectoryActionType.EXECUTE,
-        action_result="success", attempt=0,
-        gmt_create=1000, gmt_modified=1000,
-        actual_run_mode="coop_group",
-    )
+def test_trajectory_display_html_shows_actual_run_mode_per_subtask_block():
+    """HTML 子任务区块头展示该任务的真实模态(chip 取自区块末位事件的
+    actual_run_mode 富化);无模态的区块不渲染 chip。"""
+    events_n1 = [
+        TrajectoryEvent(
+            task_id="t1", node_id="n1", action_type=TrajectoryActionType.PLAN,
+            action_result="success", attempt=0, gmt_create=1000, gmt_modified=1000,
+        ),
+        TrajectoryEvent(
+            task_id="t1", node_id="n1", action_type=TrajectoryActionType.EXECUTE,
+            action_result="success", attempt=0, gmt_create=2000, gmt_modified=2000,
+            actual_run_mode="coop_group",  # 富化只挂最后一条
+        ),
+    ]
+    events_n2 = [
+        TrajectoryEvent(
+            task_id="t1", node_id="n2", action_type=TrajectoryActionType.PLAN,
+            action_result="success", attempt=0, gmt_create=1500, gmt_modified=1500,
+        ),
+    ]
     traj = TaskTrajectory(
-        task_id="t1", gmt_create=1000, gmt_modified=1000,
-        timeline=[ev], analysis=None,
+        task_id="t1", gmt_create=2000, gmt_modified=2000,
+        timeline=events_n1 + events_n2, analysis=None,
     )
     c = _build_client(_StubTrajectoryService(trajectory=traj))
     r = c.get(
@@ -608,8 +620,11 @@ def test_trajectory_display_html_renders_actual_run_mode():
         params={"task_id": "t1", "display": "html"},
     )
     assert r.status_code == 200
-    assert "真实模态" in r.text
-    assert "coop_group" in r.text
+    # 有模态的 n1 区块:头上一枚「真实模态 · coop_group」chip,仅此一枚
+    assert '<span class="nb-mode">真实模态 · coop_group</span>' in r.text
+    assert r.text.count('class="nb-mode"') == 1
+    # 事件卡片内不再重复展示模态行
+    assert r.text.count("真实模态") == 1
 
 
 @pytest.mark.unit
