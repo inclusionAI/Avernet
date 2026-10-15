@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import pytest
 from fastapi import FastAPI
@@ -99,35 +100,19 @@ def _inject_params(ctx, text, msg_id, msg_ctx=None):
 class _FakeChat:
     """Fake ChatService at the real plugin boundary."""
 
-    def __init__(self, *, ok=True, reject_times=0, hang=False):
+    def __init__(self, *, reject_times=0):
         self.calls: list[dict] = []
-        self.ok = ok
         self.reject_times = reject_times
-        self.hang = hang
         self.mro_inject = True
 
     async def inject(self, session_key, message, label=None, auth=None):
         self.calls.append({"sessionKey": session_key, "message": message,
                            "label": label})
-        if self.hang:
-            await asyncio.sleep(60)
         if self.reject_times > 0:
             self.reject_times -= 1
             return {"ok": False, "error": {"code": "REJECTED",
                                             "message": "denied"}}
-        if not self.ok:
-            return {"ok": False, "error": {"code": "REJECTED",
-                                            "message": "denied"}}
         return {"ok": True, "payload": {}}
-
-    async def stream(self, request, auth=None):
-        raise RuntimeError("unused in these tests")
-
-    class _Meta(type):
-        pass
-
-    def _has_inject_mro(self):  # helper replicating ws_server check
-        return self.mro_inject
 
 
 def _install_fake_chat(monkeypatch, fake):
@@ -239,7 +224,6 @@ def test_inject_timeout_unknown_state(app_client, monkeypatch):
     class _HangingFake:
         async def inject(self, session_key, message, label=None, auth=None):
             await asyncio.sleep(10)   # longer than the patched timeout below
-            return {"ok": True}
 
     monkeypatch.setattr(R, "_INJECT_FORWARD_TIMEOUT_SECONDS", 0.05)
     _install_fake_chat(monkeypatch, _HangingFake())
@@ -325,14 +309,10 @@ def test_inject_cancelled_marks_unknown_and_propagates(app_client,
             _inject_params("ctx-j", "取消样本", "inj-12"), 1, None))
         await asyncio.sleep(0.05)
         task.cancel()
-        try:
+        with pytest.raises(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            return "cancelled"
-        return "not-cancelled"
 
-    result = asyncio.run(scenario())
-    assert result == "cancelled", "CancelledError must propagate"
+    asyncio.run(scenario())   # CancelledError 未被吞即通过
     assert k._inject_dedup[("ctx-j", "inj-12")][0] == "unknown", \
         "cancelled reservation must NOT stay in_progress"
 
@@ -346,20 +326,15 @@ def test_inject_context_conflict_rejected_zero_side_effects(app_client,
     fake = _FakeChat()
     _install_fake_chat(monkeypatch, fake)
 
-    gate_calls: list[str] = []
-
-    async def fake_guard(request, rid, method, session_key, message_text,
-                         auth_gate_service):
-        gate_calls.append(session_key)
-        return None
-
-    monkeypatch.setattr(R, "_auth_gate_guard", fake_guard)
+    from unittest.mock import AsyncMock
+    guard_spy = AsyncMock()
+    monkeypatch.setattr(R, "_auth_gate_guard", guard_spy)
 
     r = _rpc(app_client, 1, "InjectContext",
              _inject_params("victim-B", "越权内容", "inj-6",
                             msg_ctx="allowed-A"))
     assert r.json()["error"]["code"] == -32602
-    assert gate_calls == [], "conflict rejected pre-gate"
+    guard_spy.assert_not_awaited(), "conflict rejected pre-gate"
     assert fake.calls == [], "zero engine dispatch"
     assert ("victim-B", "inj-6") not in R._kernel._inject_dedup
     # and no broadcast channels carry anything:
@@ -404,8 +379,7 @@ def test_inject_unavailable_engine_fails(app_client, monkeypatch):
 
 def test_inject_relay_none_fails(app_client, monkeypatch):
     class _NoInject:      # MRO has no inject → relay fallback path
-        async def stream(self, request, auth=None):
-            raise RuntimeError
+        pass
 
     _install_fake_chat(monkeypatch, _NoInject())
 
@@ -443,10 +417,12 @@ def test_send_message_executes_once_with_streaming_dedup(app_client,
     assert r1.json()["result"]["task"]["metadata"]["created"] is True
     # create_task runs on the TestClient portal loop — poll briefly for the
     # background dispatch to land (production path unchanged by the test).
+    # sleep 先行：轮询行必须每次至少执行一次，别写成永不执行的防御分支。
     import time as _time
-    _deadline = _time.monotonic() + 2.0
-    while not calls and _time.monotonic() < _deadline:
+    for _ in range(100):
         _time.sleep(0.02)
+        if calls:
+            break
     assert len(calls) == 1, "non-streaming FIRST must dispatch"
 
     with app_client.stream("POST", "/rpc", json={
@@ -790,12 +766,6 @@ async def test_resolve_validate_response_contract(monkeypatch):
                     "error": {"code": "OLD",
                                "message": "engine returned legacy shape"}}
 
-        async def resolve_exec_approval(self, **kwargs):
-            raise AssertionError("exec expected for kind=exec only when asked")
-
-        async def resolve_mode_transition(self, **kwargs):
-            raise AssertionError("mode switch expected for kind=mode_switch only")
-
     fake = _OldContractChat()
     R = _install_resolve_bridge(monkeypatch, fake)
     k = R._kernel = kernel_mod.A2aKernel()
@@ -1084,9 +1054,6 @@ class _FakeAbortChat:
             return ChatAbortResult(
                 ok=False, error=ErrorShape(code="REJECTED", message="denied"))
         return ChatAbortResult(ok=True, aborted=True, run_id=request.run_id)
-
-    async def stream(self, request, auth=None):
-        raise RuntimeError("unused in these tests")
 
 
 def test_cancel_forwards_abort_keys_and_engine_reflow_is_idempotent(
@@ -1433,8 +1400,8 @@ async def test_exhaustion_terminal_is_idempotent_after_real_final(monkeypatch):
                 yield _Frame("chat", {"state": "final", "runId": "nat-1",
                                       "message": {"content": [
                                           {"type": "text", "text": "终稿全文"}]}})
-                yield _Frame("chat", {"state": "delta", "runId": "nat-1",
-                                      "deltaText": "迟到增量"})
+                # bridge 在 final 处即 return，生成器不会再被拉取——
+                # 迟到帧的 T1 语义由下方 publish_final 的直接断言覆盖。
             return gen()
 
     _install_fake_chat(monkeypatch, _FinalChat())
@@ -1529,3 +1496,1006 @@ async def test_engine_error_frame_terminal_carries_structured_detail(
     assert meta["errorMessage"] == "模型上游连续失败"
     engine_frame = meta.get("engine_frame") or {}
     assert engine_frame.get("errorMessage") == "模型上游连续失败"
+
+
+# ── 引擎面不可用（评审 P2）：echo fallback 除名，诚实 FAILED ────────────────
+# 原缺陷：_chat_plugin() 抛错（无活跃引擎）时 _dispatch_to_engine 返回
+# False → _echo_fallback 把用户输入 echo 成回复 → COMPLETED。引擎不可用
+# 被伪装成执行成功。修复语义：不可用（抛错/返空）→ FAILED 终态 + 结构化
+# detail（errorCode=ENGINE_UNAVAILABLE，词汇对齐 inject 面的
+# inject_target_unavailable 诚实失败风格），SSE 消费者可观测。
+
+_ENGINE_UNAVAILABLE_CODE = "ENGINE_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_chat_plugin_raise_fails_with_engine_unavailable(monkeypatch):
+    """_chat_plugin() 抛错：run 以 FAILED 收口并携带结构化 detail，
+    不再 echo 用户输入、不再伪装 COMPLETED（评审最小复现的正名）。"""
+    monkeypatch.setattr(R, "_kernel", kernel_mod.A2aKernel())
+    k = R._kernel
+
+    def broken_plugin():
+        raise RuntimeError("no active engine")
+
+    monkeypatch.setattr(bridge, "_chat_plugin", broken_plugin)
+    rid, _ = await k.open_run("dead-ctx", "dk9", "first", "d")
+    _, q = await k.subscribe(rid, since_seq=0)
+    await bridge.execute_and_stream(k, rid, "dead-ctx", "查询")
+
+    events, terminal = await _drain_until_terminal(q)
+    assert terminal["ev"]["statusUpdate"]["status"]["state"] == \
+        "TASK_STATE_FAILED"
+    meta = terminal["ev"]["statusUpdate"]["metadata"]
+    assert meta["errorCode"] == _ENGINE_UNAVAILABLE_CODE, meta
+    assert meta["errorMessage"], meta            # 可解释，不裸 FAILED
+    assert "no active engine" in meta["errorMessage"]
+
+    run = k.get_run(rid)
+    assert run.state == "TASK_STATE_FAILED"
+    # echo 路径已除名：零增量、零终稿，内核快照不被用户输入污染
+    assert run.latest_text == "", run.latest_text
+    assert not any(e["type"] == "artifactUpdate" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_chat_plugin_none_fails_with_engine_unavailable(monkeypatch):
+    """引擎面返空（manager 已起但 chat 插件为 None）：同样诚实 FAILED，
+    不落到 AttributeError 深处、更不 echo。"""
+    monkeypatch.setattr(R, "_kernel", kernel_mod.A2aKernel())
+    k = R._kernel
+
+    monkeypatch.setattr(bridge, "_chat_plugin", lambda: None)
+    rid, _ = await k.open_run("none-ctx", "nk1", "first", "d")
+    _, q = await k.subscribe(rid, since_seq=0)
+    await bridge.execute_and_stream(k, rid, "none-ctx", "查询")
+
+    _, terminal = await _drain_until_terminal(q)
+    assert terminal["ev"]["statusUpdate"]["status"]["state"] == \
+        "TASK_STATE_FAILED"
+    meta = terminal["ev"]["statusUpdate"]["metadata"]
+    assert meta["errorCode"] == _ENGINE_UNAVAILABLE_CODE, meta
+    assert k.get_run(rid).state == "TASK_STATE_FAILED"
+    assert k.get_run(rid).latest_text == ""
+
+
+@pytest.mark.asyncio
+async def test_midstream_engine_crash_keeps_existing_failed_semantics(
+        monkeypatch):
+    """回归保护：引擎存在但流中途炸——既有未分类 FAILED 收口语义零变化
+    （FAILED 终态、已流出增量保留在快照、无 errorCode detail）。"""
+    monkeypatch.setattr(R, "_kernel", kernel_mod.A2aKernel())
+    k = R._kernel
+
+    class _CrashingChat:
+        async def stream(self, request, auth=None):
+            async def gen():
+                yield _Frame("chat", {"state": "delta", "runId": "nat-5",
+                                      "deltaText": "部分回答"})
+                raise RuntimeError("engine exploded mid-stream")
+            return gen()
+
+    _install_fake_chat(monkeypatch, _CrashingChat())
+    rid, _ = await k.open_run("crash-ctx", "ck1", "first", "d")
+    _, q = await k.subscribe(rid, since_seq=0)
+    await bridge.execute_and_stream(k, rid, "crash-ctx", "查询")
+
+    events, terminal = await _drain_until_terminal(q)
+    assert terminal["ev"]["statusUpdate"]["status"]["state"] == \
+        "TASK_STATE_FAILED"
+    # 既有语义：未分类失败不带结构化 errorCode（不加戏、不重分类）
+    assert not (terminal["ev"]["statusUpdate"]["metadata"].get("errorCode"))
+    run = k.get_run(rid)
+    assert run.state == "TASK_STATE_FAILED"
+    assert run.latest_text == "部分回答", run.latest_text
+
+
+def test_engine_unavailable_send_streaming_sse_observes_failed(
+        app_client, monkeypatch):
+    """生产入口全程留痕：SendStreamingMessage 经裸 FastAPI + 真分发路径，
+    _chat_plugin 抛错时 BaaS 式 SSE 消费者从终态帧直接读出 FAILED +
+    ENGINE_UNAVAILABLE（先例：streaming dedup 测试的 SSE 消费形态）。"""
+    def broken_plugin():
+        raise RuntimeError("no active engine")
+
+    monkeypatch.setattr(bridge, "_chat_plugin", broken_plugin)
+
+    rid_holder: dict = {}
+    failed_meta: list[dict] = []
+    saw_failed_marker = False
+    with app_client.stream("POST", "/rpc", json={
+            "jsonrpc": "2.0", "id": 1, "method": "SendStreamingMessage",
+            "params": {"message": {"role": "ROLE_USER",
+                                   "parts": [{"text": "用户输入原文"}],
+                                   "messageId": "sse1",
+                                   "contextId": "sse-ctx"}}}) as resp:
+        for line in resp.iter_lines():
+            if not line.startswith("data: "):
+                continue
+            ev = json.loads(line[6:]).get("result", {})
+            task, su = ev.get("task"), ev.get("statusUpdate")
+            if task and not rid_holder:
+                rid_holder["rid"] = task["id"]
+            if not su:
+                continue
+            rid_holder.setdefault("rid", su["taskId"])
+            meta = su.get("metadata") or {}
+            if su["status"]["state"] == "TASK_STATE_FAILED":
+                failed_meta.append(meta)
+                if meta.get("errorCode") == _ENGINE_UNAVAILABLE_CODE:
+                    saw_failed_marker = True
+            if meta.get("final") == "true":
+                break
+
+    assert saw_failed_marker, (failed_meta, rid_holder)
+    rid = rid_holder["rid"]
+    run = R._kernel.get_run(rid)
+    assert run.state == "TASK_STATE_FAILED"
+    # echo 彻底除名：用户输入绝不被包装成回复
+    assert "[echo" not in run.latest_text, run.latest_text
+    assert run.latest_text == "", run.latest_text
+
+
+# ══════════ 边界与治理闭环补齐：kernel 容量/逐出/队列治理 + rpc 映射 ══════════
+# 目标：每个分支断言真实行为——错误码形状、状态迁移、订阅者终结语义，
+# 不写只执行不断言的行程测试。
+
+
+# ── kernel：open_run 边界校验 + UNKNOWN_OUTCOME 判读符 ─────────────────────
+
+@pytest.mark.asyncio
+async def test_kernel_open_run_boundary_and_sentinel_repr():
+    k = kernel_mod.A2aKernel()
+    with pytest.raises(ValueError, match="contextId is required"):
+        await k.open_run(None, "kk", "first", None)      # contextId 非 str
+    with pytest.raises(ValueError, match="messageId must be a string"):
+        await k.open_run("c", 123, "first", None)        # messageId 非 str
+    with pytest.raises(ValueError, match="contextId is required"):
+        await k.open_run("c", "", "first", None)         # messageId 空串
+    assert repr(kernel_mod.A2aKernel.UNKNOWN_OUTCOME) == "UNKNOWN_OUTCOME"
+
+
+# ── kernel：容量硬拒 + 最旧终态逐出（订阅者收 None 终结）────────────────────
+
+@pytest.mark.asyncio
+async def test_kernel_capacity_refusal_and_oldest_finished_eviction(
+        monkeypatch):
+    monkeypatch.setattr(kernel_mod, "MAX_RUNS", 2)
+    k = kernel_mod.A2aKernel()
+    rid1, _ = await k.open_run("c1", "k1", "first", "d1")
+    rid2, _ = await k.open_run("c2", "k2", "first", "d2")
+    backlog, q = await k.subscribe(rid1, since_seq=0)
+
+    # 全员非终态且容量满 → 显式硬拒（D7 语义：无声突破上限不允许）
+    with pytest.raises(RuntimeError, match="run capacity exhausted"):
+        await k.open_run("c3", "k3", "first", "d3")
+
+    # 终态 run 成为可驱逐对象：新 open 逐出它而不是拒绝
+    await k.publish_delta(rid1, "部分内容")
+    await k.complete_run(rid1, "TASK_STATE_COMPLETED")
+    rid3, created = await k.open_run("c3", "k3", "first", "d3")
+    assert created is True and rid3 not in (rid1, rid2)
+    assert rid1 not in k.runs, "最旧终态 run 必须被逐出"
+    assert ("c1", "k1") not in k._idem, "幂等键随逐出清理"
+    assert set(k.runs) == {rid2, rid3}
+
+    # 被逐出 run 的订阅者收到 None 终结信号（事件先到、None 最后）
+    seen = []
+    while True:
+        ev = await asyncio.wait_for(q.get(), 2)
+        if ev is None:
+            break
+        seen.append(ev)
+    assert any(e["ev"]["statusUpdate"]["status"]["state"] ==
+               "TASK_STATE_COMPLETED" for e in seen
+               if e["type"] == "statusUpdate"), \
+        "逐出前订阅者必须已看到终态"
+
+
+@pytest.mark.asyncio
+async def test_kernel_budget_flip_marks_cache_limit_keeps_snapshot(
+        monkeypatch):
+    monkeypatch.setattr(kernel_mod, "MAX_BYTES_PER_RUN", 4)   # 任何事件都超
+    k = kernel_mod.A2aKernel()
+    rid, _ = await k.open_run("cb", "k", "first", "d")
+    r = k.get_run(rid)
+    assert r.cache_limit is True, "open_run 的 task 事件就应翻转 cache_limit"
+    assert r.events == [] and r.bytes == 0 and k._total_bytes == 0
+    await k.publish_delta(rid, "完整生成文本")
+    assert k.get_run(rid).latest_text == "完整生成文本"   # 快照与缓冲独立
+    assert await k.replay(rid, 0) is None                # 内容缓冲没了 → 拒绝重放
+
+
+@pytest.mark.asyncio
+async def test_kernel_slow_subscriber_kicked_on_publish():
+    size = kernel_mod.SUBSCRIBER_QUEUE_SIZE
+    k = kernel_mod.A2aKernel()
+    rid, _ = await k.open_run("slow", "sk", "first", "d")
+    _, q = await k.subscribe(rid, since_seq=0)
+    for i in range(size):
+        await k.publish_delta(rid, f"块{i}")
+    assert q.qsize() == size
+    await k.publish_delta(rid, "溢出块")             # 慢订阅者：队满即踢
+    assert k.runs[rid].subscribers == [], "被踢订阅者必须移出注册表"
+    drained = []
+    while not q.empty():
+        drained.append(q.get_nowait())
+    assert drained[-1] is None, "踢出时必须投递 None 终结信号"
+    assert len(drained) == size, "队头让位一件 + None 补位"
+
+
+@pytest.mark.asyncio
+async def test_kernel_terminal_delivery_kicks_full_subscriber():
+    size = kernel_mod.SUBSCRIBER_QUEUE_SIZE
+    k = kernel_mod.A2aKernel()
+    rid, _ = await k.open_run("tk", "kk", "first", "d")
+    _, q = await k.subscribe(rid, since_seq=0)
+    for i in range(size - 1):
+        await k.publish_delta(rid, f"块{i}")
+    await k.complete_run(rid, "TASK_STATE_COMPLETED")  # 状态事件占掉第 256 位
+    assert k.runs[rid].subscribers == [], \
+        "marker 投递队满：订阅者必须被移出并让位重投"
+    drained = []
+    while not q.empty():
+        drained.append(q.get_nowait())
+    assert drained[-1]["ev"]["statusUpdate"]["metadata"].get("final") == \
+        "true", "让位后 final marker 必须重新入队"
+
+
+@pytest.mark.asyncio
+async def test_kernel_inject_channel_overflow_and_orphan_commit():
+    size = kernel_mod.SUBSCRIBER_QUEUE_SIZE
+    k = kernel_mod.A2aKernel()
+    q = k.subscribe_context("ov")
+    for i in range(size):
+        k.publish_engine_inject("ov", f"通知{i}", f"inject-{i}")
+    k.publish_engine_inject("ov", "溢出消息", "inject-overflow")
+    assert q.qsize() == size, "背景广播队满：静默丢弃不炸"
+    assert len(k._context_subs["ov"]) == 1, "广播通道订阅者不被踢"
+    assert k.inject_commit("ov", "文本", "never-reserved") is False, \
+        "键不存在的 commit 必须显式 False（不广播）"
+    assert await k.inject_reserve("ov", "fresh") == "in_progress"
+    assert k.inject_commit("ov", "文本", "fresh") is True
+    assert q.qsize() == size, "commit 广播同样队满静默"
+
+
+def test_kernel_inject_dedup_ttl_prune():
+    k = kernel_mod.A2aKernel()
+    now = time.monotonic()
+    for i in range(kernel_mod._INJECT_DEDUP_MAX + 1):
+        k._inject_dedup[(f"c{i}", f"m{i}")] = (
+            "accepted", now - kernel_mod._INJECT_DEDUP_TTL_SECONDS * 2)
+
+    async def reserve():
+        return await k.inject_reserve("fresh-ctx", "fresh-key")
+
+    assert asyncio.run(reserve()) == "in_progress"
+    assert len(k._inject_dedup) == 1, "超上限时过期键必须成批清理"
+    assert ("fresh-ctx", "fresh-key") in k._inject_dedup
+
+
+@pytest.mark.asyncio
+async def test_kernel_lookup_errors_replay_expiry_and_subscribe_snapshot():
+    k = kernel_mod.A2aKernel()
+    with pytest.raises(LookupError):
+        await k.cancel_run("ghost-run")
+    with pytest.raises(LookupError):
+        await k.subscribe("ghost-run")
+    rid, _ = await k.open_run("lc", "k", "first", "d")
+    backlog, q = await k.subscribe(rid)          # since_seq=None：立即快照
+    snapshot = q.get_nowait()
+    assert snapshot["type"] == "task"
+    assert snapshot["ev"]["task"]["id"] == rid
+    await k.complete_run(rid, "TASK_STATE_COMPLETED")
+    k.runs[rid].replay_expires_at = time.monotonic() - 1
+    assert await k.replay(rid, 0) is None, "重放窗口过期必须显式拒绝"
+
+
+# ── rpc 边界信封矩阵 ────────────────────────────────────────────────────────
+
+def test_rpc_boundary_envelope_matrix(app_client):
+    raw = app_client.post("/rpc", json=[1, 2])       # body 本身非对象
+    body = raw.json()
+    assert body["error"]["code"] == -32600
+    assert body["id"] is None
+
+    no_params = app_client.post("/rpc", json={
+        "jsonrpc": "2.0", "id": 7, "method": "SendMessage"})
+    err = no_params.json()["error"]                   # params 缺省归一空对象
+    assert err["code"] == -32602
+    assert "params.message is required" in err["message"]
+
+    bad_params = app_client.post("/rpc", json={
+        "jsonrpc": "2.0", "id": 8, "method": "SendMessage",
+        "params": "string"})
+    assert bad_params.json()["error"]["code"] == -32602
+
+    unknown = _rpc(app_client, 9, "DoEverything", {})
+    assert unknown.json()["error"]["code"] == -32601
+
+    stray_message = _rpc(app_client, 10, "SendMessage", {"message": "字符串"})
+    stray = stray_message.json()["error"]
+    assert stray["code"] == -32602
+    assert "params.message is required and must be an object" in stray["message"]
+
+
+def test_context_required_maps_to_wire_error(app_client):
+    body = {"message": {"role": "ROLE_USER", "parts": [{"text": "x"}],
+                       "messageId": "nc1"}}
+    r = _rpc(app_client, 1, "SendMessage", body)
+    err = r.json()["error"]
+    assert err["code"] == -32602
+    assert err["data"]["reason"] == "context_required"   # wire.context_required
+    r2 = _rpc(app_client, 2, "SendStreamingMessage",
+              {"message": {"role": "ROLE_USER", "parts": [{"text": "x"}],
+                           "messageId": "nc2"}})
+    assert r2.json()["error"]["data"]["reason"] == "context_required"
+    bad_ctx_type = _rpc(app_client, 3, "SendMessage", {
+        "message": {"role": "ROLE_USER", "parts": [{"text": "x"}],
+                    "messageId": "nc3", "contextId": 42}})
+    bad = bad_ctx_type.json()["error"]
+    assert bad["code"] == -32602
+    assert bad["message"] == "message.contextId must be a string"
+
+
+def test_inject_requires_string_context_id_param(app_client, monkeypatch):
+    fake = _FakeChat()
+    _install_fake_chat(monkeypatch, fake)
+    r = _rpc(app_client, 1, "InjectContext",
+             {"message": {"role": "ROLE_USER", "parts": [{"text": "x"}],
+                         "messageId": "ncx"}})     # 缺 params.contextId
+    err = r.json()["error"]
+    assert err["code"] == -32602
+    assert err["message"] == "contextId is required (string)"
+    assert fake.calls == [] and not R._kernel._inject_dedup, \
+        "边界拒绝必须零引擎写入、零去重残留"
+
+
+def test_send_streaming_retry_only_unknown_outcome(app_client):
+    r = _rpc(app_client, 1, "SendStreamingMessage", {
+        "message": {"role": "ROLE_USER", "parts": [{"text": "x"}],
+                    "messageId": "absent-stream", "contextId": "cx"},
+        "metadata": {"avernet.retryOnly": True}})
+    err = r.json()["error"]
+    assert err["code"] == -32000
+    assert err["data"]["reason"] == "unknown_outcome"
+
+
+def test_get_task_and_replay_taskid_validation(app_client):
+    r0 = _rpc(app_client, 1, "GetTask", {})
+    assert r0.json()["error"]["code"] == -32602
+    r1 = _rpc(app_client, 2, "GetTask", {"taskId": "ghost"})
+    err1 = r1.json()["error"]
+    assert err1["code"] == -32000
+    assert err1["data"]["reason"] == "not_found_or_expired"
+    r2 = _rpc(app_client, 3, "ReplayEvents", {})
+    assert r2.json()["error"]["code"] == -32602
+
+
+def test_kernel_exceptions_map_to_protocol_errors(app_client, monkeypatch):
+    # 同键异文 → -32003 结构化冲突
+    async def counting(kernel, rid, ctx, text, auth=None):
+        await kernel.publish_delta(rid, "回")
+        await kernel.complete_run(rid)
+
+    monkeypatch.setattr(R, "execute_and_stream", counting)
+    m1 = {"message": {"role": "ROLE_USER", "parts": [{"text": "甲"}],
+                      "messageId": "dup-key", "contextId": "c-dup"}}
+    r1 = _rpc(app_client, 1, "SendMessage", m1)
+    assert r1.json()["result"]["task"]["metadata"]["created"] is True
+    m2 = {"message": {"role": "ROLE_USER", "parts": [{"text": "乙"}],
+                      "messageId": "dup-key", "contextId": "c-dup"}}
+    conflict = _rpc(app_client, 2, "SendMessage", m2).json()["error"]
+    assert conflict["code"] == -32003
+    assert conflict["data"]["reason"] == "key_conflict"
+
+    # 容量硬拒 → -32000 capacity：先等第一条 run 真正落到终态
+    # （后台 dispatch 才能把占位让出来，逐出可选而不是拒绝）。
+    rid_first = r1.json()["result"]["task"]["id"]
+    # sleep 先行：轮询行本身必然执行（不写永不执行的防御分支）
+    for _ in range(100):
+        time.sleep(0.02)
+        run_first = R._kernel.get_run(rid_first)
+        if run_first is None or \
+                run_first.state == "TASK_STATE_COMPLETED":
+            break
+    assert R._kernel.get_run(rid_first).state == "TASK_STATE_COMPLETED"
+
+    async def noop_dispatch(kernel, rid, ctx, text, auth=None):
+        pass                                          # 不收口：保持占位
+
+    # 作用域 monkeypatch：容量补丁不外溢到后续 LookupError/ValueError 段
+    with pytest.MonkeyPatch.context() as cap_mp:
+        cap_mp.setattr(kernel_mod, "MAX_RUNS", 1)
+        cap_mp.setattr(R, "execute_and_stream", noop_dispatch)
+        c1 = {"message": {"role": "ROLE_USER", "parts": [{"text": "x"}],
+                          "messageId": "cap-1", "contextId": "c-cap"}}
+        assert _rpc(app_client, 3, "SendMessage", c1).json()["result"][
+            "task"]["metadata"]["created"] is True
+        c2 = {"message": {"role": "ROLE_USER", "parts": [{"text": "y"}],
+                          "messageId": "cap-2", "contextId": "c-cap2"}}
+        capacity = _rpc(app_client, 4, "SendMessage", c2).json()["error"]
+    assert capacity["code"] == -32000
+    assert capacity["data"]["reason"] == "capacity"
+    assert "run capacity exhausted" in capacity["message"]
+
+    # LookupError → replay refused not_found（容量补丁先复位再徒手 seed）
+    monkeypatch.setattr(kernel_mod, "MAX_RUNS", 16)
+    async def seed():
+        rr, _ = await R._kernel.open_run("lk", "lk1", "first", "d")
+        return rr
+
+    rid = asyncio.run(seed())
+
+    async def missing_subscribe(rid_, since_seq=None):
+        raise LookupError(rid_)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(R._kernel, "subscribe", missing_subscribe)
+        mapped = _rpc(app_client, 5, "SubscribeToTask",
+                      {"taskId": rid}).json()["error"]
+    assert mapped["code"] == -32000
+    assert mapped["data"]["reason"] == "not_found"
+    # 非 contextId 的 ValueError → -32602 原样透传
+
+    async def boom(*args, **kwargs):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(R._kernel, "send_message", boom)
+    generic = _rpc(app_client, 6, "SendMessage", {
+        "message": {"role": "ROLE_USER", "parts": [{"text": "x"}],
+                    "messageId": "vb", "contextId": "c-vb"}}).json()["error"]
+    assert generic["code"] == -32602
+    assert generic["message"] == "boom"
+
+
+# ── ReplayEvents / SubscribeToTask 面上行为 ─────────────────────────────────
+
+def test_replay_events_success_and_refusals(app_client):
+    k = R._kernel
+
+    async def seed_completed():
+        rid, _ = await k.open_run("rp", "k", "first", "d")
+        await k.publish_delta(rid, "增量甲")
+        await k.complete_run(rid, "TASK_STATE_COMPLETED")
+        return rid
+
+    rid = asyncio.run(seed_completed())
+
+    with app_client.stream("POST", "/rpc", json={
+            "jsonrpc": "2.0", "id": "replay-hit", "method": "ReplayEvents",
+            "params": {"taskId": rid, "sinceSeq": 0}}) as resp:
+        assert resp.status_code == 200
+        states = []
+        for line in resp.iter_lines():
+            if not line.startswith("data: "):
+                continue
+            body = json.loads(line[6:])
+            assert body["id"] == "replay-hit"        # 信封带请求自身 id
+            su = body.get("result", {}).get("statusUpdate")
+            if su:
+                states.append(su["status"]["state"])
+                if (su.get("metadata") or {}).get("final") == "true":
+                    break
+    assert "TASK_STATE_COMPLETED" in states
+
+    k.get_run(rid).replay_expires_at = time.monotonic() - 1
+    expired = _rpc(app_client, 2, "ReplayEvents",
+                  {"taskId": rid, "sinceSeq": 0}).json()["error"]
+    assert expired["data"]["reason"] == "not_found_or_expired"
+
+    async def seed_limited():
+        rid2, _ = await k.open_run("rp2", "k2", "first", "d")
+        k.get_run(rid2).cache_limit = True
+        return rid2
+
+    limited = _rpc(app_client, 3, "ReplayEvents", params={
+        "taskId": asyncio.run(seed_limited()), "sinceSeq": 0}).json()["error"]
+    assert limited["data"]["reason"] == "cache_limit"
+
+    ghost = _rpc(app_client, 4, "ReplayEvents",
+                 {"taskId": "ghost", "sinceSeq": 0}).json()["error"]
+    assert ghost["data"]["reason"] == "not_found_or_expired"
+
+
+def test_subscribe_task_validation_and_live_snapshot(app_client):
+    k = R._kernel
+    assert _rpc(app_client, 1, "SubscribeToTask",
+                {"taskId": 42}).json()["error"]["code"] == -32602
+    ghost = _rpc(app_client, 2, "SubscribeToTask", {"taskId": "ghost"})
+    assert ghost.json()["error"]["data"]["reason"] == "not_found"
+
+    async def seed_terminal():
+        rid, _ = await k.open_run("st", "k", "first", "d")
+        await k.complete_run(rid, "TASK_STATE_COMPLETED")
+        return rid
+
+    terminal = _rpc(app_client, 3, "SubscribeToTask",
+                    {"taskId": asyncio.run(seed_terminal())}).json()["error"]
+    assert terminal["data"]["reason"] == "task_terminal_use_replay"
+
+    async def seed_live():
+        rid, _ = await k.open_run("st2", "k2", "first", "d")
+        return rid
+
+    rid_live = asyncio.run(seed_live())
+    resp = asyncio.run(R._subscribe_task({"taskId": rid_live}, 1, None))
+    assert resp.media_type == "text/event-stream"   # 活流挂订阅成功
+
+
+# ── SubscribeToContext：校验面 + 流生命周期（事件→None 信标收线）────────────
+
+def test_subscribe_context_requires_string_context(app_client):
+    bad = _rpc(app_client, 1, "SubscribeToContext", {})
+    assert bad.json()["error"]["code"] == -32602
+
+
+@pytest.mark.asyncio
+async def test_subscribe_context_stream_lifecycle(monkeypatch):
+    monkeypatch.setattr(R, "_kernel", kernel_mod.A2aKernel())
+    k = R._kernel
+    resp = await R._subscribe_context({"contextId": "sc"}, "ctx-sub", None)
+    assert resp.media_type == "text/event-stream"
+
+    async def collect():
+        return [chunk async for chunk in resp.body_iterator]
+
+    task = asyncio.create_task(collect())
+    await asyncio.sleep(0.05)       # 生成器挂上 q.get()，订阅注册完成
+    assert len(k._context_subs["sc"]) == 1
+
+    k.publish_engine_inject("sc", "后台注入", "inject-sc-1")
+    k._context_subs["sc"][0].put_nowait(None)      # None 信标 = 流终结契约
+
+    chunks = await asyncio.wait_for(task, 2)
+    assert len(chunks) == 1
+    body = json.loads(chunks[0][len("data: "):])
+    assert body["id"] == "ctx-sub"
+    msg = body["result"]["message"]
+    assert msg["messageId"] == "inject-sc-1"
+    assert msg["parts"][0]["text"] == "后台注入"
+    assert k._context_subs.get("sc") == [], "收线后必须摘除订阅"
+
+
+@pytest.mark.asyncio
+async def test_sse_slow_consumer_kicked_and_stream_closes(monkeypatch):
+    """慢消费的 SSE 订阅者被投递侧踢出后，生成器经 None 信标自然收线。"""
+    monkeypatch.setattr(R, "_kernel", kernel_mod.A2aKernel())
+    k = R._kernel
+    rid, _ = await k.open_run("sl", "k", "first", "d")
+    await k.publish_delta(rid, "先行块")
+    backlog, q = await k.subscribe(rid, since_seq=0)
+    resp = R._stream_response(11, rid, backlog, q)
+
+    async def producer():
+        for i in range(kernel_mod.SUBSCRIBER_QUEUE_SIZE + 20):
+            await k.publish_delta(rid, f"块{i}")
+
+    prod = asyncio.create_task(producer())
+
+    async def consume_slowly():
+        out = []
+        async for chunk in resp.body_iterator:
+            out.append(chunk)
+            await asyncio.sleep(0.001)   # 慢消费：制造投递侧可观察的队满
+        return out
+
+    chunks = await asyncio.wait_for(consume_slowly(), 10)
+    await prod
+    assert chunks, "先行 backlog 必须原样流出"
+    assert k.runs[rid].subscribers == [], "队满踢出后订阅者必须被移除"
+    assert any("先行块" in chunk for chunk in chunks)
+
+
+# ── wire 形状单测 ───────────────────────────────────────────────────────────
+
+def test_wire_artifact_update_merges_extra_metadata():
+    from engine.community.api.transport.a2a import wire as wire_mod
+    ev = wire_mod.wire_artifact_update("r", "c", 7, "text-1", "正文",
+                                       append=False, last_chunk=True,
+                                       extra_metadata={"errorCode": "X"})
+    au = ev["ev"]["artifactUpdate"]
+    assert au["metadata"]["seq"] == 7
+    assert au["metadata"]["errorCode"] == "X"
+    assert au["artifact"]["parts"][0]["text"] == "正文"
+    assert au["lastChunk"] is True
+
+
+# ── 引擎面文本抽取补遗 ───────────────────────────────────────────────────────
+
+def test_payload_text_string_content_and_delta_fallbacks():
+    assert bridge._payload_text(
+        {"message": {"content": "纯文本终稿"}}, "final") == "纯文本终稿"
+    assert bridge._payload_text({"deltaText": "增量兜底"}, "final") == "增量兜底"
+    assert bridge._payload_text({"state": "final"}, "final") == ""
+
+
+def test_message_text_ignores_non_list_parts():
+    # parts 非列表/缺失：空串聚合，不炸不臆造（边界契约）
+    assert R._message_text({"parts": "junk"}) == ""
+    assert R._message_text({}) == ""
+    assert R._message_text({"parts": [{"text": "正文"}, {"non_text": 1},
+                                      "杂项"]}) == "正文"
+
+
+# ── relay fallback：无 inject 引擎经 chat.inject 转发与拒绝 ────────────────
+
+def test_inject_relay_fallback_forward_and_refusal(app_client, monkeypatch):
+    from types import SimpleNamespace
+
+    class _RelayOnly:        # MRO 无 inject → relay fallback 路径
+        pass
+
+    _install_fake_chat(monkeypatch, _RelayOnly())
+    relay_calls: list[dict] = []
+
+    class _RelayP:
+        async def forward_request(self, request_id, method, params, auth,
+                                  timeout):
+            relay_calls.append({"request_id": request_id, "method": method,
+                                "params": params})
+            if params.get("message") == "拒绝正文":
+                return SimpleNamespace(ok=False, error=SimpleNamespace(
+                    message="relay denied", code="REJECTED"))
+            return SimpleNamespace(ok=True)
+
+    import engine.community.manager as mgr_mod
+    monkeypatch.setattr(mgr_mod.EngineManager, "get_instance",
+                        staticmethod(lambda: SimpleNamespace(relay=_RelayP())))
+
+    ok = _rpc(app_client, 1, "InjectContext",
+              _inject_params("rc", "通过正文", "rf-1"))
+    assert ok.json()["result"] == {"inject": "accepted"}
+    assert len(relay_calls) == 1
+    call = relay_calls[0]
+    assert call["method"] == "chat.inject"
+    assert call["request_id"].startswith("a2a-inject-")
+    assert call["params"] == {"sessionKey": "rc", "message": "通过正文"}
+
+    refused = _rpc(app_client, 2, "InjectContext",
+                   _inject_params("rc", "拒绝正文", "rf-2"))
+    err = refused.json()["error"]
+    assert err["data"]["reason"] == "inject_forward_failed"
+    assert "relay denied" in err["message"]
+    assert ("rc", "rf-2") not in R._kernel._inject_dedup, "拒绝后回滚可重试"
+
+
+# ── _forward_engine_abort：取消语义不被 except Exception 吞 ─────────────────
+
+@pytest.mark.asyncio
+async def test_forward_engine_abort_preserves_cancellation(monkeypatch):
+    fake = _FakeAbortChat(hang=True)
+    _install_fake_chat(monkeypatch, fake)
+    k = kernel_mod.A2aKernel()
+    rid, _ = await k.open_run("ac", "k", "first", "d")
+    task = asyncio.create_task(R._forward_engine_abort(k.get_run(rid)))
+    await asyncio.sleep(0.05)
+    assert fake.calls, "abort 应已上行"
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+# ── bridge：非 chat 帧无损路由（agent/approval/interaction.resolved）─────────
+
+@pytest.mark.asyncio
+async def test_bridge_routes_progress_interaction_and_approval_frames(
+        monkeypatch):
+    """R17/16: interaction.requested 无 iid 兜底 int-*、approval_* 家族、
+    agent/mode_transition 经 lossless 通道保 original_event；空载荷帧丢弃
+    不入流；终稿不被任何旁路帧污染。"""
+    monkeypatch.setattr(R, "_kernel", kernel_mod.A2aKernel())
+    k = R._kernel
+
+    class _EventsChat:
+        async def stream(self, request, auth=None):
+            async def gen():
+                yield _Frame("agent", {"state": "agent", "runId": "nat-p",
+                                       "agent": "Review"})
+                yield _Frame("mode_transition.resolved",
+                             {"state": "mode_transition.resolved",
+                              "runId": "nat-p", "mode": "review"})
+                yield _Frame("interaction.requested",
+                             {"state": "interaction.requested",
+                              "runId": "nat-p"})       # 无 interactionId
+                iid = next(key for key in k._interactions
+                           if key.startswith("int-"))
+                yield _Frame("interaction.resolved",
+                             {"state": "interaction.resolved",
+                              "runId": "nat-p", "interactionId": iid})
+                yield _Frame("approval_requested",
+                             {"state": "approval_requested",
+                              "runId": "nat-p"})       # 无 approvalId
+                apr = next(key for key in k._interactions
+                           if key.startswith("apr-"))
+                yield _Frame("approval_resolved",
+                             {"state": "approval_resolved",
+                              "runId": "nat-p", "approvalId": apr})
+                yield _Frame("agent", {})             # 空载荷：丢弃不入流
+                yield _Frame("chat", {"state": "final", "runId": "nat-p",
+                                      "message": {"content": [
+                                          {"type": "text", "text": "终稿"}]}})
+            return gen()
+
+    _install_fake_chat(monkeypatch, _EventsChat())
+    rid, _ = await k.open_run("ev2", "ek", "first", "d")
+    await bridge.execute_and_stream(k, rid, "ev2", "查询")
+
+    run = k.get_run(rid)
+    assert run.state == "TASK_STATE_COMPLETED"
+    assert run.native_run_id == "nat-p"
+    assert run.latest_text == "终稿", "旁路帧不得污染终稿"
+
+    agents = [e["ev"]["statusUpdate"]["metadata"]
+              for e in run.events if e["type"] == "statusUpdate"]
+    originals = [m["original_event"] for m in agents
+                 if m.get("kind") == "agent"]
+    assert "agent" in originals
+    assert "mode_transition.resolved" in originals, "事件名保真（R17-2）"
+    engine_frames = [m["engine_frame"] for m in agents
+                     if m.get("kind") == "agent"]
+    assert {"state": "agent", "runId": "nat-p",
+            "agent": "Review"} in engine_frames, "无损载荷入 metadata"
+
+    states = [e["ev"]["statusUpdate"]["status"]["state"]
+              for e in run.events if e["type"] == "statusUpdate"]
+    assert "TASK_STATE_INPUT_REQUIRED" in states
+    assert states.count("TASK_STATE_WORKING") >= 2, "两轮 resolve 落回 WORKING"
+
+    iids = [m["interactionId"] for m in agents if "interactionId" in m]
+    assert any(i.startswith("int-") for i in iids)
+    assert any(i.startswith("apr-") for i in iids)
+
+    # 空载荷 agent 帧（无 state 无内容）不入流：agent 事件恰两条
+    assert len(originals) == 2
+
+
+@pytest.mark.asyncio
+async def test_bridge_survives_dispatch_cancellation_and_vanished_run(
+        monkeypatch):
+    monkeypatch.setattr(R, "_kernel", kernel_mod.A2aKernel())
+    k = R._kernel
+    # 起步即消失的 run：publish_status 落异常 → 记录后安静返回
+    await bridge.execute_and_stream(k, "no-such-run", "vx", "文本")
+    assert "no-such-run" not in k.runs
+
+    # 泵流中被取消：CancelledError 上浮，run 不被伪造收口
+    class _NappingChat:
+        async def stream(self, request, auth=None):
+            async def gen():
+                yield _Frame("chat", {"state": "delta", "runId": "nat-c",
+                                      "deltaText": "开头"})
+                await asyncio.sleep(30)
+            return gen()
+
+    _install_fake_chat(monkeypatch, _NappingChat())
+    rid, _ = await k.open_run("cx-cancel", "ck1", "first", "d")
+    task = asyncio.create_task(
+        bridge.execute_and_stream(k, rid, "cx-cancel", "查询"))
+    for _ in range(200):
+        if k.runs[rid].native_run_id == "nat-c":
+            break
+        await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert k.get_run(rid).state == "TASK_STATE_WORKING", \
+        "被取消的 run 不得伪造终态"
+
+    # _safe_complete 收口失败（run 又已消失）只落日志不上抛
+    await bridge._safe_complete(k, "no-such-run", "TASK_STATE_FAILED")
+
+
+# ── AuthGate guard：异常放行 / 拒绝 / 幂等键接管 ────────────────────────────
+
+def _gate_mod():
+    import engine.community.api.transport.auth_gate as gate_mod
+    return gate_mod
+
+
+def test_auth_gate_guard_allows_on_gate_exception(app_client_gated,
+                                                  monkeypatch, caplog):
+    import logging as _logging
+    fake = _FakeChat()
+    _install_fake_chat(monkeypatch, fake)
+    gate_mod = _gate_mod()
+
+    async def exploding_verify(**kwargs):
+        raise ValueError("gate exploded")
+
+    monkeypatch.setattr(gate_mod, "verify_chat_send", exploding_verify)
+    with caplog.at_level(_logging.WARNING, logger="engine-a2a"):
+        r = _rpc(app_client_gated, 1, "InjectContext",
+                 _inject_params("gctx", "内容", "g-msg"),
+                 headers={"x-iam-token": "tok"})
+    assert r.json()["result"] == {"inject": "accepted"}, \
+        "gate 异常按 ws_server 同例放行"
+    assert any("auth_gate exception, allowing" in rec.message
+               for rec in caplog.records)
+    assert fake.calls, "放行后引擎写入真实发生"
+
+
+def test_auth_gate_guard_rejects_on_zero_check(app_client_gated, monkeypatch):
+    from engine.community.api.transport.auth_gate import AuthGateResult
+    fake = _FakeChat()
+    _install_fake_chat(monkeypatch, fake)
+    gate_mod = _gate_mod()
+
+    async def denying_verify(**kwargs):
+        return AuthGateResult(allowed=False, error_message="zero_check failed")
+
+    monkeypatch.setattr(gate_mod, "verify_chat_send", denying_verify)
+    r = _rpc(app_client_gated, 1, "InjectContext",
+             _inject_params("gctx2", "越权内容", "g2"),
+             headers={"x-iam-token": "tok"})
+    err = r.json()["error"]
+    assert err["code"] == -32000
+    assert err["data"]["reason"] == "ZERO_CHECK_FAILED"
+    assert err["message"] == "zero_check failed"
+    assert fake.calls == [], "拒绝时零引擎写入"
+
+
+def test_auth_gate_key_substitution_dedups(app_client_gated, monkeypatch):
+    from engine.community.api.transport.auth_gate import AuthGateResult
+    intercepted: list[str] = []
+
+    async def counting(kernel, rid, ctx, text, auth=None):
+        intercepted.append(rid)
+        await kernel.publish_delta(rid, "回")
+        await kernel.complete_run(rid)
+
+    monkeypatch.setattr(R, "execute_and_stream", counting)
+    gate_mod = _gate_mod()
+
+    async def keying_verify(**kwargs):
+        return AuthGateResult(allowed=True, idempotency_key="gate-owned-key")
+
+    monkeypatch.setattr(gate_mod, "verify_chat_send", keying_verify)
+    header = {"x-iam-token": "tok"}
+    m1 = {"message": {"role": "ROLE_USER", "parts": [{"text": "甲"}],
+                      "messageId": "client-m1", "contextId": "gctx3"}}
+    r1 = _rpc(app_client_gated, 1, "SendMessage", m1, headers=header)
+    assert r1.json()["result"]["task"]["metadata"]["created"] is True
+    m2 = {"message": {"role": "ROLE_USER", "parts": [{"text": "甲"}],
+                      "messageId": "client-m2", "contextId": "gctx3"}}
+    r2 = _rpc(app_client_gated, 2, "SendMessage", m2, headers=header)
+    body2 = r2.json()["result"]["task"]
+    assert body2["metadata"]["created"] is False, \
+        "gate 幂等键须覆盖客户端 messageId"
+    assert body2["id"] == r1.json()["result"]["task"]["id"]
+    for _ in range(100):        # sleep 先行：轮询行必然执行
+        time.sleep(0.02)
+        if intercepted:
+            break
+    assert len(intercepted) == 1, "幂等键接管下只分发一次"
+
+
+# ── ResolveInteraction：gate canonical context + 转发矩阵 ────────────────────
+
+def test_resolve_gate_context_and_not_found_paths(app_client_gated,
+                                                  monkeypatch):
+    from engine.community.api.transport.auth_gate import AuthGateResult
+    fake = _FakeResolveChat()
+    _install_resolve_bridge(monkeypatch, fake)
+    k = R._kernel
+
+    async def seed():
+        rid, _ = await k.open_run("hitl-g", "k", "first", "d")
+        k.runs[rid].native_run_id = "nat-g"
+        await k.publish_interaction_requested(rid, "i-g", {"kind": "ask_user"})
+        return rid
+
+    rid = asyncio.run(seed())
+    seen: dict[str, object] = {}
+    gate_mod = _gate_mod()
+
+    async def allowing_verify(*, session_key, message, iam_token, **kwargs):
+        seen["session"] = session_key
+        seen["message"] = message
+        return AuthGateResult(allowed=True)
+
+    monkeypatch.setattr(gate_mod, "verify_chat_send", allowing_verify)
+    header = {"x-iam-token": "tok"}
+    r = _rpc(app_client_gated, 1, "ResolveInteraction",
+             {"interactionId": "i-g",
+              "resolution": {"decision": "approve"}}, headers=header)
+    assert r.json()["result"]["interaction"]["resolved"] is True
+    assert seen == {"session": "hitl-g", "message": "approve"}, \
+        "gate 判定的 session/decision 必须与交互所属 run 同源（R13-3）"
+    assert k.runs[rid].state == "TASK_STATE_WORKING"
+    assert fake.calls, "resolve 应真实转发引擎"
+
+    no_iid = _rpc(app_client_gated, 2, "ResolveInteraction",
+                  {"resolution": {"decision": "approve"}}, headers=header)
+    assert no_iid.json()["error"]["code"] == -32602
+    ghost = _rpc(app_client_gated, 3, "ResolveInteraction",
+                 {"interactionId": "ghost",
+                  "resolution": {"decision": "approve"}}, headers=header)
+    assert ghost.json()["error"]["data"]["reason"] == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_resolve_forward_kind_matrix_and_failures(monkeypatch):
+    fake = _FakeResolveChat()
+    R2 = _install_resolve_bridge(monkeypatch, fake)
+    K = kernel_mod.A2aKernel()
+    monkeypatch.setattr(R2, "_kernel", K)
+
+    with pytest.raises(R2._ParamError, match="interactionId is required"):
+        await R2._resolve_interaction({"resolution": {"decision": "x"}}, 1,
+                                      None)
+    with pytest.raises(R2._ParamError,
+                       match="resolution.decision is required"):
+        await R2._resolve_interaction({"interactionId": "i-v"}, 1, None)
+
+    rid, _ = await K.open_run("rk", "k1", "first", "d")
+    K.runs[rid].native_run_id = "nat-r"
+
+    async def repost(iid):
+        await K.publish_interaction_requested(rid, iid, {})
+
+    # ask_user 默认分支：response 取 answer/message 字段
+    await repost("i-a")
+    out = await R2._resolve_interaction(
+        {"interactionId": "i-a",
+         "resolution": {"decision": "answer", "answer": "那就是这样",
+                        "kind": "ask_user"}}, 2, None)
+    assert out["interaction"]["resolved"] is True
+    kind, params = fake.calls[-1]
+    assert kind == "ask_user" and params["response"] == "那就是这样"
+    assert K.runs[rid].state == "TASK_STATE_WORKING"
+
+    # mode_switch 分发 + native id 定位
+    await repost("i-m")
+    out = await R2._resolve_interaction(
+        {"interactionId": "i-m",
+         "resolution": {"decision": "approve", "kind": "mode_switch"}}, 3,
+        None)
+    assert out["interaction"]["resolved"] is True
+    kind, params = fake.calls[-1]
+    assert kind == "mode_switch"
+    assert params["decision"] == "approve"
+    assert params["run_id"] == "nat-r"
+
+    # 不支持的 kind → 边界错误
+    await repost("i-x")
+    with pytest.raises(R2._ParamError, match="unsupported resolution kind"):
+        await R2._resolve_interaction(
+            {"interactionId": "i-x",
+             "resolution": {"decision": "y", "kind": "bio"}}, 4, None)
+
+    # native run id 未登记 → resolve_target_unavailable（引擎零转发）
+    rid2, _ = await K.open_run("rk2", "k2", "first", "d")
+    await K.publish_interaction_requested(rid2, "i-nonat", {})
+    before = len(fake.calls)
+    out = await R2._resolve_interaction(
+        {"interactionId": "i-nonat",
+         "resolution": {"decision": "approve"}}, 5, None)
+    assert out["error"]["data"]["reason"] == "resolve_target_unavailable"
+    assert "native run id unavailable" in out["error"]["message"]
+    assert len(fake.calls) == before
+
+    # 转发超时 → unknown_outcome，run 保持 INPUT_REQUIRED
+    class _HangingResolve:
+        async def resolve_interaction(self, session_key, run_id, response):
+            await asyncio.sleep(10)
+
+    _install_resolve_bridge(monkeypatch, _HangingResolve())
+    monkeypatch.setattr(R2, "_RESOLVE_FORWARD_TIMEOUT_SECONDS", 0.05)
+    await K.publish_interaction_requested(rid, "i-t", {})
+    out = await R2._resolve_interaction(
+        {"interactionId": "i-t", "resolution": {"decision": "approve"}},
+        6, None)
+    err = out["error"]
+    assert err["data"]["reason"] == "unknown_outcome"
+    assert "timeout" in err["message"]
+    assert K.runs[rid].state == "TASK_STATE_INPUT_REQUIRED", \
+        "结果不可知时不回写 WORKING"
+
+
+def test_message_text_requires_list_parts():
+    """parts 非 list（缺失/字符串/对象）一律空文本——而非裸抛炸 500。"""
+    assert R._message_text({}) == ""
+    assert R._message_text({"parts": "junk"}) == ""
+    assert R._message_text({"parts": {"text": "x"}}) == ""
+    assert R._message_text({"parts": [{"text": "甲"}, {"text": "乙"}]}) == "甲乙"

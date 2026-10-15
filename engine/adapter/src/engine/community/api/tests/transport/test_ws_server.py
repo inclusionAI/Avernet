@@ -2020,8 +2020,8 @@ class TestStreamExhaustedWithoutTerminal:
             yield EventFrame(event="chat", payload={
                 "runId": "nat-1", "state": "final",
                 "message": {"content": [{"type": "text", "text": "终稿"}]}})
-            yield EventFrame(event="chat", payload={
-                "runId": "nat-1", "state": "delta", "deltaText": "迟到"})
+            # relay 在首个终态帧即 break（ws_server.py:1790），生成器不会再
+            # 被拉取——final 之后的 yield 永不执行，不写永不运行的防御帧。
         fake_engine.chat.stream = stream
 
         await server._stream_chat_events(

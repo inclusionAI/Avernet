@@ -144,9 +144,10 @@ class A2aKernel:
         if out is self.UNKNOWN_OUTCOME:
             return out
         rid, created = out
-        r = self.runs.get(rid)
-        if r is None:
-            return self.UNKNOWN_OUTCOME
+        # open_run 只会返回三样：UNKNOWN_OUTCOME（上一行已排除）、注册在
+        # runs 里的既有 run（`existing in self.runs` 先验）、或刚注册的新 run；
+        # 返回点与本行之间无 await，run 不可能凭空消失——不做死路 None 分支。
+        r = self.runs[rid]
         return {"task": {"id": r.run_id, "contextId": r.context_id,
                          "status": {"state": r.state},
                          "metadata": {"created": created}}}
@@ -182,14 +183,11 @@ class A2aKernel:
         except asyncio.QueueFull:
             if q in r.subscribers:
                 r.subscribers.remove(q)
-            try:
-                q.get_nowait()
-            except asyncio.QueueEmpty:
-                pass
-            try:
-                q.put_nowait(item)
-            except asyncio.QueueFull:
-                pass
+            # 队列刚抛过 QueueFull：get_nowait 让出一件必成功；让位后
+            # put 也必成功——两步间无 await，单线程事件循环内不存在并发
+            # 生产者，不设永不可达的二层防御臂。
+            q.get_nowait()
+            q.put_nowait(item)
 
     def _evict(self, rid: str) -> None:
         r = self.runs.pop(rid, None)
@@ -233,14 +231,10 @@ class A2aKernel:
                     q.put_nowait(event)
                 except asyncio.QueueFull:
                     r.subscribers.remove(q)
-                    try:
-                        q.get_nowait()
-                    except asyncio.QueueEmpty:
-                        pass
-                    try:
-                        q.put_nowait(None)
-                    except asyncio.QueueFull:
-                        pass
+                    # 同 _deliver_terminal 的不可达性论证：刚满过的队列
+                    # get 让位必成功、让位后补投 None 也必成功。
+                    q.get_nowait()
+                    q.put_nowait(None)
 
     async def publish_delta(self, rid: str, text: str) -> None:
         r = self.runs[rid]

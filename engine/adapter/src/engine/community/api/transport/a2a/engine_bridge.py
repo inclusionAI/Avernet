@@ -9,8 +9,11 @@ Step-1 discovery (what this bridge actually calls):
   - Engine availability: `manager.chat` raises RuntimeError while no engine
     is active (before `await manager.initialize()`), and `get_instance()`
     can itself fail in non-DI unit-test contexts. When the surface does not
-    resolve, the bridge degrades to echo mode instead of leaving the run
-    hanging.
+    resolve, the bridge fails the run honestly — FAILED terminal + a
+    structured ``ENGINE_UNAVAILABLE`` detail (vocabulary aligned with the
+    inject surface's ``inject_target_unavailable``) — instead of leaving
+    the run hanging or fabricating a reply (the old echo fallback dressed
+    engine-downtime up as a successfully answered run; removed 2026-10-15).
   - Event vocabulary: EventFrame.payload is the ws_server chat envelope —
     `{"state": "delta"|"final"|"error"|"aborted", "message": {content
     blocks}, "deltaText": <increment>}` (canonical shape in
@@ -26,10 +29,10 @@ Dispatch mapping:
     success (partial deltas were already streamed and stay in the
     snapshot), so the SSE stream always ends in an explicit terminal.
 
-Echo fallback (MVP): context_id doubles as the chat session key
-(claude_code composes its own key from agentId/sessionId/userId; openclaw
-treats it as opaque) and auth=None — the documented HTTP-path default.
-Singlebox verification is the final judge of the real engine integration.
+Session key: context_id doubles as the chat session key (claude_code
+composes its own key from agentId/sessionId/userId; openclaw treats it as
+opaque) and auth=None — the documented HTTP-path default. Singlebox
+verification is the final judge of the real engine integration.
 """
 from __future__ import annotations
 
@@ -49,8 +52,10 @@ _STATE_WORKING = "TASK_STATE_WORKING"
 _STATE_FAILED = "TASK_STATE_FAILED"
 _STATE_CANCELED = "TASK_STATE_CANCELED"
 
-# echo fallback 的一次事件循环让位（把控制权交给 SSE 订阅者先注册）
-_ECHO_YIELD_SECONDS = 0.05
+# Engine-surface unavailability (manager/plugin raise, or chat surface
+# resolves to None). Vocabulary aligned with the inject surface's
+# `inject_target_unavailable` honest-failure naming.
+_ERROR_ENGINE_UNAVAILABLE = "ENGINE_UNAVAILABLE"
 
 # Terminal chat states from the ws_server relay vocabulary.
 _TERMINAL_CHAT_STATES = ("final", "error", "aborted")
@@ -77,11 +82,12 @@ async def execute_and_stream(kernel: A2aKernel, rid: str, context_id: str,
                              auth: Any = None) -> None:
     """Dispatch through EngineManager and pump events into kernel.
 
-    Guarantees exactly one terminal `complete_run` (SUCCESS unless the engine
-    stream signals error/aborted), so SSE subscribers always see the terminal
-    marker. `auth` carries the principal extracted at the transport boundary
-    (R12-4) — plugins that pool upstream connections per-tenant use it to
-    pick the right client.
+    Guarantees exactly one terminal `complete_run` (SUCCESS only when the
+    engine stream produced a real final; error/aborted/unavailable end in
+    FAILED/CANCELED with structured detail), so SSE subscribers always see
+    the terminal marker. `auth` carries the principal extracted at the
+    transport boundary (R12-4) — plugins that pool upstream connections
+    per-tenant use it to pick the right client.
     """
     log.info("bridge: run=%s context=%s text_len=%d", rid, context_id,
              len(text))
@@ -92,10 +98,7 @@ async def execute_and_stream(kernel: A2aKernel, rid: str, context_id: str,
         return
 
     try:
-        dispatched = await _dispatch_to_engine(kernel, rid, context_id, text,
-                                               auth)
-        if not dispatched:
-            await _echo_fallback(kernel, rid, text)
+        await _dispatch_to_engine(kernel, rid, context_id, text, auth)
         await kernel.complete_run(rid, _STATE_COMPLETED)
     except _EngineRunFailed as exc:
         await _safe_complete(kernel, rid, _STATE_FAILED, exc.detail)
@@ -117,20 +120,44 @@ async def _safe_complete(kernel: A2aKernel, rid: str, state: str,
 
 
 async def _dispatch_to_engine(kernel: A2aKernel, rid: str, context_id: str,
-                              text: str, auth: Any = None) -> bool:
+                              text: str, auth: Any = None) -> None:
     """Drive the real ChatService.stream and translate frames.
 
-    Returns True when an engine stream was actually consumed (whatever its
-    outcome). Returns False — leaving the run uncompleted — when the engine
-    surface is unavailable, so the caller can fall back to echo mode.
+    Returns only when an engine stream was actually consumed to its
+    terminal (whatever its outcome). Raises ``_EngineRunFailed`` with a
+    structured ``ENGINE_UNAVAILABLE`` detail when the engine surface does
+    not resolve — never fabricate a reply for an unavailable engine.
     """
     try:
         chat = _chat_plugin()
     except Exception as e:
         log.warning("bridge: engine chat surface unavailable (%s: %s) "
-                    "— echo fallback for run %s",
+                    "— failing run %s",
                     type(e).__name__, e, rid)
-        return False
+        raise _EngineRunFailed(
+            f"engine chat surface unavailable ({type(e).__name__}: {e})",
+            detail={
+                "errorCode": _ERROR_ENGINE_UNAVAILABLE,
+                "errorMessage": (
+                    f"The engine chat surface is unavailable "
+                    f"({type(e).__name__}: {e}); the run cannot be "
+                    f"dispatched."
+                ),
+            },
+        ) from e
+
+    if chat is None:
+        log.warning("bridge: engine chat surface resolved to None — "
+                    "failing run %s", rid)
+        raise _EngineRunFailed(
+            "engine chat surface resolved to None",
+            detail={
+                "errorCode": _ERROR_ENGINE_UNAVAILABLE,
+                "errorMessage": ("The engine chat surface is unavailable "
+                                 "(no active chat plugin); the run cannot "
+                                 "be dispatched."),
+            },
+        )
 
     request = ChatRequest(
         userId="",
@@ -221,7 +248,7 @@ async def _dispatch_to_engine(kernel: A2aKernel, rid: str, context_id: str,
                     if final_text:
                         await kernel.publish_final(rid, final_text)
                     # Terminal: let the outer handler complete the run.
-                    return True
+                    return
                 elif state == "error":
                     message = payload.get("errorMessage")
                     log.error("bridge: chat stream error for run %s: %s",
@@ -301,18 +328,6 @@ def _payload_text(payload: dict[str, Any], state: str = "final") -> str:
         if isinstance(inc, str) and inc:
             return inc
     return ""
-
-
-async def _echo_fallback(kernel: A2aKernel, rid: str, text: str) -> None:
-    """MVP echo: prove the kernel→SSE pipeline without a live engine.
-
-    Replaced implicitly once EngineManager resolves (real dispatch path); kept
-    as the no-engine behavior so unit-test and pre-initialize singlebox
-    contexts still stream a well-formed run to completion.
-    """
-    await asyncio.sleep(_ECHO_YIELD_SECONDS)  # yield to the event loop once
-    await kernel.publish_delta(rid, f"[echo] {text[:200]}")
-    await kernel.publish_final(rid, f"[echo-final] {text[:500]}")
 
 
 __all__ = ["execute_and_stream"]

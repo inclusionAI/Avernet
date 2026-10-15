@@ -627,10 +627,10 @@ async def _inject_context(params: dict[str, Any], rid: Any,
     msg = _get_message(params)
     # R13-3: canonical context validated pre-gate; guarded double-check.
     ctx, _ = _canonical_context("InjectContext", params, rid)
-    try:
-        reserve = await _kernel.inject_reserve(ctx, msg["messageId"])
-    except ValueError:
-        raise _ParamError("contextId is required (string)")
+    # ctx 已被上面的 canonical 提取校验为非空 str；inject_reserve 只做
+    # dict/哈希操作（坏键是 TypeError 不是 ValueError）——不存在可达的
+    # ValueError 源，不设死路 try/except。
+    reserve = await _kernel.inject_reserve(ctx, msg["messageId"])
     if reserve != "in_progress":
         # duplicate_in_progress / duplicate_accepted / duplicate_unknown
         return {"inject": reserve}
