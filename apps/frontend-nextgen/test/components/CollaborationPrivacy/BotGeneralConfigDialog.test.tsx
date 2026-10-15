@@ -10,6 +10,8 @@ import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
+// 避免通过 useHumanIdentity 透传加载 node_modules 中的 ESM 聊天适配器。
+jest.mock('@tc-chat/adapters', () => ({}));
 
 const mockCapabilities = jest.fn();
 jest.mock('@/capabilities', () => ({ getCapabilities: () => mockCapabilities() }));
@@ -107,7 +109,9 @@ describe('BotGeneralConfigDialog 通用配置弹窗（collab-permission-entry-mi
     expect(screen.getByRole('heading', { level: 4, name: 'Bot 可见性' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 4, name: 'Bot 好友审批' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 4, name: '协作能力' })).toBeInTheDocument();
-    expect(screen.getByText('Dream Mode')).toBeInTheDocument();
+    expect(screen.getByText('公开 Bot 画像')).toBeInTheDocument();
+    expect(screen.queryByText('任务认领')).not.toBeInTheDocument();
+    expect(screen.queryByText('Dream Mode')).not.toBeInTheDocument();
   });
 
   it('加载中展示骨架占位（无障碍标签：正在加载通用配置）', async () => {
@@ -146,7 +150,7 @@ describe('BotGeneralConfigDialog 通用配置弹窗（collab-permission-entry-mi
 
     await waitFor(() => expect(screen.getAllByText('加入 BCN 后才能修改协作权限')).toHaveLength(2));
     const dialog = within(screen.getByRole('dialog'));
-    expect(dialog.getAllByRole('switch')).toHaveLength(4);
+    expect(dialog.getAllByRole('switch')).toHaveLength(2);
     dialog.getAllByRole('switch').forEach((control) => expect(control).toBeDisabled());
   });
 });
@@ -261,7 +265,7 @@ describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:I
     const collaborationSwitches = dialog
       .getAllByRole('switch')
       .filter((control) => !control.getAttribute('aria-label')?.includes('共同编辑者发布'));
-    expect(collaborationSwitches).toHaveLength(4);
+    expect(collaborationSwitches).toHaveLength(2);
     collaborationSwitches.forEach((control) => expect(control).toBeDisabled());
   });
 
