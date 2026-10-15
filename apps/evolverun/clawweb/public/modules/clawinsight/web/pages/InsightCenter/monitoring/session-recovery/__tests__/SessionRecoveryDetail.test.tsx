@@ -210,7 +210,7 @@ it('separates plan conclusions, action titles, execution detail and evidence usi
 it('retains long purposes and separates linked conclusions from results and actual requests', async () => {
   const user = userEvent.setup();
   const purpose = '读取目标 Bot 当前的 MCP 配置和服务状态，核对原会话中语雀文档读取失败所使用的实际配置';
-  const conclusion = '**配置核查**\n\n- 服务已启用。\n- 文档访问权限仍需单独核对。';
+  const conclusion = '**配置核查**：服务 `enabled`，文档访问权限仍需单独核对。';
   vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'running', phase: 'assess', plan: null, timeline: [
     { event_id: 'read', at_ms: 1, kind: 'operation', actor: 'agent', summary: purpose, payload: { phase: 'assess', raw_tool_call_id: 'call', status: 'succeeded', request: { purpose, operation: 'engine_read', request: { method: 'GET', path: '/api/mcp' } }, result: { summary: '配置读取成功', httpStatus: 200 } } },
     { event_id: 'conclusion', at_ms: 2, kind: 'observation', actor: 'agent', summary: conclusion, payload: { phase: 'assess', sourceToolCallId: 'call', evidenceToolCallIds: ['call'], conclusionZh: conclusion, nextAction: '继续核对文档权限' } },
@@ -225,9 +225,21 @@ it('retains long purposes and separates linked conclusions from results and actu
   expect(within(card).getByRole('heading', { name: '结论' })).toBeVisible();
   expect(within(card).getByText('Bot default')).toBeVisible();
   expect(within(card).getByText('配置核查').tagName).toBe('STRONG');
-  expect(within(card).getByText('服务已启用。').closest('li')).toBeVisible();
-  expect(within(card).getByText('文档访问权限仍需单独核对。').closest('li')).toBeVisible();
+  expect(within(card).getByText('enabled').tagName).toBe('CODE');
+  expect(within(card).getByText(/文档访问权限仍需单独核对/)).toBeVisible();
   await user.click(within(card).getByText('查看本次调用的接口请求'));
   expect(within(within(card).getByText('查看本次调用的接口请求').closest('details')!).getByText(/"path": "\/api\/mcp"/)).toBeVisible();
   expect(within(card).queryByText('查看本次调用的 Shell 命令')).toBeNull();
+});
+
+
+it('preserves raw evidence including angle brackets and Markdown punctuation', async () => {
+  const excerpt = '<tool_result>**原始返回** & `literal`</tool_result>\n第二行原文';
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, evidence: [{ ...task.evidence[0], excerpt }] } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  fireEvent.click(await screen.findByText('展开详情'));
+  const evidence = document.querySelector('.sr-evidence-excerpt')!;
+  expect(evidence).toBeVisible();
+  expect(evidence.textContent).toBe(excerpt);
+  expect(evidence.children).toHaveLength(0);
 });

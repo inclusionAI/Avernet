@@ -269,7 +269,7 @@ function ProcessAction({ task, event, index, rawEvidence, loadEvidence, onViewAc
             <p className="sr-evidence-label">{evidenceIndex + 1}. {operationTitles[item.source] ?? item.source}</p>
             {item.excerpt.trim().startsWith('{') || item.excerpt.trim().startsWith('[')
               ? <details className="sr-disclosure"><summary>查看保存的原始记录</summary><RawDetails value={item.excerpt} /></details>
-              : <div className="sr-evidence-excerpt"><PlanMarkdown text={item.excerpt} /></div>}
+              : <div className="sr-evidence-excerpt">{item.excerpt}</div>}
             {item.tool_call_id !== callId && <details className="sr-disclosure" onToggle={(toggleEvent) => { if (toggleEvent.currentTarget.open && !rawEvidence[item.tool_call_id]) loadEvidence(item.tool_call_id); }}><summary>查看完整操作回执</summary><RawDetails value={rawEvidence[item.tool_call_id] ?? '正在读取…'} /></details>}
             <details className="sr-disclosure"><summary>记录位置与标识</summary><dl><DetailRow label="位置" mono>{item.location}</DetailRow><DetailRow label="证据编号" mono>{item.evidence_id}</DetailRow></dl></details>
           </div>)}</section>}
