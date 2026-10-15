@@ -244,7 +244,7 @@ def _admin_background_command(command: str, log_path: str) -> str:
 
 def _admin_command(command: str) -> str:
     as_admin = shlex.join(["su", "admin", "-c", command])
-    return f'if [ "$(id -un)" = admin ]; then {command} else {as_admin}; fi'
+    return f'if [ "$(id -un)" = admin ]; then\n{command}\nelse\n{as_admin}\nfi'
 
 
 def _deserialize_symbol(symbol: str | None) -> list[SynlinkMappingInfo]:

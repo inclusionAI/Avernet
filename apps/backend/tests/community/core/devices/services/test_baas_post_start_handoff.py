@@ -1,12 +1,13 @@
 """Post-publish initialization must not run the one-shot startup twice."""
 
 import json
+import subprocess
 from unittest.mock import MagicMock
 
 import pytest
 
 from agentclaw.community.core.devices.models import AllocatedDevice
-from agentclaw.community.core.devices.services.baas_container_init import BaasContainerInitializer
+from agentclaw.community.core.devices.services.baas_container_init import BaasContainerInitializer, _admin_command
 
 
 def run_handoff(service, *, engine="openclaw", kind="personal", props=None):
@@ -85,3 +86,14 @@ def test_symbol_config_write_failure_prevents_application_and_confirmation():
         run_handoff(service, props={"symbol": symbol})
     commands = [call.kwargs["cmd"] for call in service.exec_command_on_bot.call_args_list]
     assert not any("setup_skill_symlinks.sh" in cmd or "/starting_watchdog.sh " in cmd for cmd in commands)
+
+
+@pytest.mark.parametrize("identity", ["root", "admin"])
+def test_foreground_admin_command_actually_executes_in_both_transport_modes(identity):
+    # Stub only identity/user switching; let Bash parse and execute the real wrapper.
+    prelude = f'id() {{ printf %s {identity}; }}; su() {{ bash -c "$3"; }}; '
+    result = subprocess.run(
+        ["bash", "-c", prelude + _admin_command("printf %s applied")],
+        capture_output=True, text=True, check=True,
+    )
+    assert result.stdout == "applied"
