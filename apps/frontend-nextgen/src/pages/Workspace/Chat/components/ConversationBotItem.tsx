@@ -19,6 +19,7 @@ import { ChevronDown, ChevronRight, Plus, Search } from 'lucide-react';
 import React from 'react';
 import { AvatarTile } from '../../components/AvatarTile';
 import type { ConversationSessionListActions } from '../hooks/useConversationSessionActions';
+import { ConversationBotUnavailableTooltip, resolveBotUnavailable } from './ConversationBotUnavailableTooltip';
 import { OthersArea, type ConversationBotItemOthers } from './ConversationBotOthersArea';
 import { ConversationOriginFilter } from './ConversationOriginFilter';
 import { ConversationSessionIdSearchInput } from './ConversationSessionIdSearchInput';
@@ -84,6 +85,8 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   const isAgentCodingBot = Boolean(bot.isAgentCodingBot);
   const hasSessionControls = !isAgentCodingBot && bot.chatable;
   const interactive = isAgentCodingBot || bot.chatable;
+  // Bot 可用状态(bots 接口 status):FAILED/PENDING 整行禁用并悬停提示原因(判定与文案见包装器)。
+  const { reason: statusUnavailableReason, unavailable } = resolveBotUnavailable(bot.status);
   // AgentCoding 行徽标展示模板名(区分多个 AgentCoding Bot);普通 Bot 展示引擎名,dmore「至多一枚」不变。
   const runtimeLabel = bot.isAgentCodingBot ? bot.templateName || 'AgentCoding' : getBotEngineLabel(bot.engine);
   const canFavorite = supportsBotSessionFavorites(bot.engine);
@@ -91,7 +94,8 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   // 好友 Bot 仅在有收藏能力时暴露「会话」范围(TEClaw 无收藏接口,不发收藏请求)。
   const filterActive = (isManaged && origin === 'others') || (canFavorite && scope === 'favorite');
   const searchActive = sessionKey !== '';
-  const actionsPinned = expanded || filterActive || searchActive;
+  // 不可用 Bot 操作区不渲染,展开/筛选/检索激活态的让位与钉住一并抑制。
+  const actionsPinned = !unavailable && (expanded || filterActive || searchActive);
   // 搜索入口仅在有效范围 all 下展示:favorite 清空并隐藏(切回 all 不恢复),others 强制 all 保留。
   const searchVisible = scope === 'all';
   const showFilter = isManaged || canFavorite;
@@ -106,6 +110,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
     setSearchInputOpen((current) => !current);
   };
   const handleToggle = () => {
+    if (unavailable) return;
     // AgentCoding Bot 是可点击入口,但不建普通 session:直接进专用 coding 对话页(与工坊「去使用」一致)。
     if (bot.isAgentCodingBot) {
       onOpenAgentCodingBot(bot);
@@ -115,23 +120,25 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
     onToggle();
   };
 
-  return (
-    <div>
-      {/* 一级行与协作群统一为 52px：固定头像槽位，头像和操作相对两行文字整体居中。 */}
-      <div
-        className={cn(
-          'group relative mx-2 flex min-h-13 items-center gap-2 rounded-md px-2 transition-colors',
-          'hover:bg-muted/60',
-        )}
-      >
+/* 一级行与协作群统一为 52px：固定头像槽位，头像和操作相对两行文字整体居中。 */
+  const row = (
+    <div
+      aria-disabled={unavailable || undefined}
+      className={cn(
+        'group relative mx-2 flex min-h-13 items-center gap-2 rounded-md px-2 transition-colors',
+        'hover:bg-muted/60',
+        unavailable && 'opacity-60',
+      )}
+    >
         <Button
           variant="ghost"
           aria-label={bot.displayName}
-          aria-expanded={interactive ? expanded : false}
+          aria-expanded={interactive && !unavailable ? expanded : false}
           onClick={handleToggle}
           className={cn(
-            'flex h-auto min-h-13 min-w-0 flex-1 items-center justify-start gap-2 rounded-none px-0 py-1 text-left hover:bg-transparent',
-            !interactive && 'cursor-not-allowed opacity-50',
+'flex h-auto min-h-13 min-w-0 flex-1 items-center justify-start gap-2 rounded-none px-0 py-1 text-left hover:bg-transparent',
+            (!interactive || unavailable) && 'cursor-not-allowed',
+            !interactive && 'opacity-50',
           )}
         >
           <span className="flex h-9 w-9 shrink-0 items-center justify-center">
@@ -168,7 +175,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             )}
           </div>
         </Button>
-        {hasSessionControls && (
+        {hasSessionControls && !unavailable && (
           <div
             className={cn(
               'absolute top-1/2 right-[34px] z-10 flex -translate-y-1/2 items-center gap-0.5 pl-5',
@@ -235,7 +242,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
         )}
         {/* 展开箭头:鼠标可点的折叠入口(点击转发同一 toggle)。语义与键盘仍由
             主按钮承载,故不参与 Tab 序、对读屏隐藏,避免一行两个等价控件。 */}
-        {hasSessionControls && (
+        {hasSessionControls && !unavailable && (
           <Button
             type="button"
             variant="ghost"
@@ -253,7 +260,12 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           </Button>
         )}
       </div>
-      {expanded && hasSessionControls && (
+  );
+  return (
+    <div>
+      {/* 不可用 Bot 整行悬停提示原因(可用时包装器原样透传,不挂 Tooltip)。 */}
+      <ConversationBotUnavailableTooltip reason={statusUnavailableReason}>{row}</ConversationBotUnavailableTooltip>
+      {expanded && hasSessionControls && !unavailable && (
         // 展开区不再整体缩进:session 行(dmore 平齐化 1:1)自带全宽行槽,交互热区在行内部分级。
         <div aria-label={`会话列表：${bot.displayName}`}>
           {searchInputVisible && (

@@ -30,6 +30,8 @@ export interface ChatBotView {
   displayName: string;
   avatarUrl?: string;
   online: boolean;
+  /** bots 接口返回的原始状态(PENDING/ACTIVE/FAILED 等);视图侧对非可用态整行禁用,缺省视为可用。 */
+  status?: string;
   reachability?: 'reachable' | 'unreachable';
   chatable: boolean;
   engine?: string;
@@ -231,6 +233,7 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
     ownerId,
     displayName: dto.bot_name || dto.bot_id,
     online: dto.status === 'ACTIVE' || dto.status === 'online',
+    status: dto.status,
     reachability: 'reachable',
     chatable: COMPOUND_ID_RE.test(botId),
     engine: dto.engine_type ?? dto.engine,

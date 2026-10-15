@@ -139,6 +139,47 @@ describe('botSessionService', () => {
     ]);
   });
 
+  it('listOwnedBots 透传 bots 接口原始 status(视图侧判定 Bot 可用性)', async () => {
+    ownedMocked.listBots.mockResolvedValue({
+      data: {
+        items: [
+          {
+            bot_id: 'normal:3',
+            bot_name: '正常',
+            engine_type: 'claude_code',
+            template_type: 'normalCC',
+            owner_entity_id: '3',
+            status: 'ACTIVE',
+          },
+          {
+            bot_id: 'normal:4',
+            bot_name: '创建中',
+            engine_type: 'claude_code',
+            template_type: 'normalCC',
+            owner_entity_id: '4',
+            status: 'PENDING',
+          },
+          {
+            bot_id: 'normal:5',
+            bot_name: '异常',
+            engine_type: 'claude_code',
+            template_type: 'normalCC',
+            owner_entity_id: '5',
+            status: 'FAILED',
+          },
+        ],
+      },
+    });
+    const res = await botSessionService.listOwnedBots('human_900003');
+    expect(res.ok).toBe(true);
+    const views = (res.ok && res.data) as Array<{ displayName: string; status?: string }>;
+    expect(views.map((view) => [view.displayName, view.status])).toEqual([
+      ['正常', 'ACTIVE'],
+      ['创建中', 'PENDING'],
+      ['异常', 'FAILED'],
+    ]);
+  });
+
   it('listSessions 调用 controller 并映射为 BotChatSessionView', async () => {
     mocked.listBotSessions.mockResolvedValue({
       code: 200000,
