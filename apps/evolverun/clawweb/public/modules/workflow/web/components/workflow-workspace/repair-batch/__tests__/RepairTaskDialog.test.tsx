@@ -66,7 +66,7 @@ it('shows one primary action, durable failed deployment status and Git links ins
     deployments: [{ id: 'failed', approvalId: 'approved', revision: 1, status: 'failed', error: '发布入口不存在' }] } as never
   repairApi.task.mockResolvedValue(detail)
   render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit onClose={() => {}} onChanged={() => {}} />)
-  expect(await screen.findByRole('button', { name: '重试部署到生产 Bot' })).toBeEnabled()
+  expect(await screen.findByRole('button', { name: '发布此版本' })).toBeEnabled()
   expect(screen.getAllByLabelText('当前修复步骤与下一步')).toHaveLength(1)
   expect(screen.queryByRole('button', { name: '进入候选确认' })).not.toBeInTheDocument()
   expect(screen.getByRole('button', { name: /v1 · 部署失败/ })).toBeInTheDocument()
@@ -83,7 +83,7 @@ describe('RepairTaskDialog', () => {
     failed.latestAttempt.phase = 'failed'; failed.latestAttempt.error = { code: 'GIT_RESULT_UNAVAILABLE' }
     repairApi.task.mockResolvedValue(failed); repairApi.candidates.mockResolvedValue(candidates())
     render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit={false} onClose={() => {}} onChanged={() => {}} />)
-    await userEvent.click(await screen.findByRole('button', { name: '选择建议', exact: true }))
+    await userEvent.click(await screen.findByRole('button', { name: '生成优化草稿', exact: true }))
     await screen.findByRole('checkbox', { name: '选择修订项 新出现的修复建议' })
     expect(screen.queryByRole('button', { name: '核对原结果', exact: true })).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '核对任务状态', exact: true }))
@@ -103,7 +103,7 @@ describe('RepairTaskDialog', () => {
       throw new Error('response lost')
     })
     render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit onClose={() => {}} onChanged={() => {}} />)
-    await userEvent.click(await screen.findByRole('button', { name: '选择建议', exact: true }))
+    await userEvent.click(await screen.findByRole('button', { name: '生成优化草稿', exact: true }))
     await screen.findByRole('checkbox', { name: '选择修订项 新出现的修复建议' })
     await userEvent.click(screen.getByRole('button', { name: '确认生成下一版' }))
     const recovery = await screen.findByRole('button', { name: '核对任务状态', exact: true })
@@ -122,7 +122,7 @@ describe('RepairTaskDialog', () => {
     repairApi.candidates.mockResolvedValue(candidates())
     repairApi.revise.mockRejectedValueOnce({ status: 409, body: JSON.stringify({ code: 'SOURCE_CHANGED' }) }).mockResolvedValue({})
     render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit onClose={() => {}} onChanged={() => {}} />)
-    await userEvent.click(await screen.findByRole('button', { name: '选择建议', exact: true }))
+    await userEvent.click(await screen.findByRole('button', { name: '生成优化草稿', exact: true }))
     await screen.findByRole('checkbox', { name: '选择修订项 新出现的修复建议' })
     await userEvent.type(screen.getByRole('textbox', { name: '修复要求' }), '保留原分支')
     await userEvent.type(screen.getByRole('textbox', { name: '修改反馈' }), '补充边界')
@@ -275,14 +275,14 @@ describe('RepairTaskDialog', () => {
     await waitFor(() => expect(repairApi.revise).toHaveBeenCalledTimes(1))
     const firstId = repairApi.revise.mock.calls[0][1].requestId
     await userEvent.click(screen.getByRole('button', { name: '核对任务状态', exact: true }))
-    await userEvent.click(screen.getByRole('button', { name: '选择建议', exact: true }))
+    await userEvent.click(screen.getByRole('button', { name: '生成优化草稿', exact: true }))
     await waitFor(() => expect(screen.getByRole('button', { name: '确认生成下一版' })).toBeEnabled())
     await userEvent.click(screen.getByRole('button', { name: '确认生成下一版' }))
     await waitFor(() => expect(repairApi.revise).toHaveBeenCalledTimes(2))
     expect(repairApi.revise.mock.calls[1][1].requestId).toBe(firstId)
 
     await userEvent.click(screen.getByRole('button', { name: '核对任务状态', exact: true }))
-    await userEvent.click(screen.getByRole('button', { name: '选择建议', exact: true }))
+    await userEvent.click(screen.getByRole('button', { name: '生成优化草稿', exact: true }))
     feedback = screen.getByRole('textbox', { name: '修改反馈' })
     await userEvent.type(feedback, '，调整范围')
     await userEvent.click(screen.getByRole('button', { name: '确认生成下一版' }))
@@ -321,17 +321,17 @@ describe('RepairTaskDialog', () => {
     repairApi.task.mockResolvedValue(taskDetail('review', '候选已生成', ['item-1', 'item-2']));
     repairApi.candidates.mockResolvedValue(candidates());
     render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit onClose={() => {}} onChanged={() => {}} />);
-    await userEvent.click(await screen.findByRole('button', { name: '选择建议', exact: true }));
+    await userEvent.click(await screen.findByRole('button', { name: '生成优化草稿', exact: true }));
     await screen.findByRole('checkbox', { name: '选择修订项 新出现的修复建议' });
     await userEvent.type(screen.getByRole('textbox', { name: '修复要求' }), '保留原分支');
     await userEvent.click(screen.getByRole('checkbox', { name: '选择修订项 修复建议 2' }));
-    await userEvent.click(screen.getByRole('button', { name: '审核 Pack', exact: true }));
+    await userEvent.click(screen.getByRole('button', { name: '审阅并确认发布', exact: true }));
     expect(screen.getByText('候选已生成')).toBeVisible();
-    await userEvent.click(screen.getByRole('button', { name: '选择建议', exact: true }));
+    await userEvent.click(screen.getByRole('button', { name: '生成优化草稿', exact: true }));
     expect(screen.getByRole('textbox', { name: '修复要求' })).toHaveValue('保留原分支');
     expect(screen.getByRole('checkbox', { name: '选择修订项 修复建议 2' })).not.toBeChecked();
-    expect(screen.getByRole('button', { name: '部署候选', exact: true })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '效果验证', exact: true })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '审阅并确认发布', exact: true })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '自动验证', exact: true })).toBeDisabled();
     expect(repairApi.revise).not.toHaveBeenCalled();
   });
 
@@ -358,7 +358,7 @@ describe('RepairTaskDialog', () => {
     expect(repairApi.retryResult).toHaveBeenCalledWith('FIX-1', 1);
     expect(repairApi.retryGeneration).not.toHaveBeenCalled();
     expect(repairApi.revise).toHaveBeenCalledTimes(1);
-    await userEvent.click(screen.getByRole('button', { name: '选择建议', exact: true }));
+    await userEvent.click(screen.getByRole('button', { name: '生成优化草稿', exact: true }));
     expect(screen.getByRole('textbox', { name: '修复要求' })).toHaveValue('我的调整');
   });
 
@@ -366,7 +366,7 @@ describe('RepairTaskDialog', () => {
     repairApi.task.mockResolvedValue(taskDetail('review', '只读候选', ['item-1']));
     repairApi.candidates.mockResolvedValue(candidates());
     render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit={false} onClose={() => {}} onChanged={() => {}} />);
-    await userEvent.click(await screen.findByRole('button', { name: '选择建议', exact: true }));
+    await userEvent.click(await screen.findByRole('button', { name: '生成优化草稿', exact: true }));
     await screen.findByRole('checkbox', { name: '选择修订项 新出现的修复建议' });
     expect(screen.getByRole('button', { name: '确认生成下一版' })).toBeDisabled();
     expect(screen.getByText('当前只有查看权限，不能生成候选。')).toBeVisible();
@@ -378,7 +378,7 @@ describe('RepairTaskDialog', () => {
     failed.latestAttempt.phase = 'failed'; failed.latestAttempt.error = { code: 'GIT_RESULT_UNAVAILABLE' };
     repairApi.task.mockResolvedValue(failed); repairApi.candidates.mockResolvedValue(candidates());
     render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit onClose={() => {}} onChanged={() => {}} />);
-    await userEvent.click(await screen.findByRole('button', { name: '选择建议', exact: true }));
+    await userEvent.click(await screen.findByRole('button', { name: '生成优化草稿', exact: true }));
     await screen.findByRole('checkbox', { name: '选择修订项 新出现的修复建议' });
     expect(screen.getByRole('button', { name: '确认生成下一版' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '核对原结果', exact: true })).toBeEnabled();

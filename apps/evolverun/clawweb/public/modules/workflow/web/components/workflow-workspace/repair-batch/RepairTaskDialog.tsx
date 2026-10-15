@@ -246,7 +246,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
   const published = deployment?.status === 'succeeded'
   const deploying = detail?.release?.approval?.status === 'approved' || !!deployment
   const navigateRelease = () => document.getElementById(`repair-release-${taskId}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-  return <RepairWorkspace stage={published ? 4 : deploying ? 3 : 2} title={published ? '验证新版本效果，逐项记录结论' : deploying ? '部署已确认的候选 Pack' : '审阅差异与检查报告，确认候选'} subtitle={`${workflowId} · 审阅 → 确认候选 → 明确部署 → 验证效果`} onBack={() => { if (!busy) onClose() }} onSelect={detail && !deploying ? openSelection : undefined} onReview={() => setMode('detail')}
+  return <RepairWorkspace stage={published ? 4 : deploying ? 3 : 2} title={published ? '自动观察新版本效果' : deploying ? '核对同一个发布请求' : '审阅差异与检查报告，确认发布'} subtitle={`${workflowId} · 生成优化草稿 → 审阅并确认发布 → 自动验证`} onBack={() => { if (!busy) onClose() }} onSelect={detail && !deploying ? openSelection : undefined} onReview={() => setMode('detail')}
     onDeploy={detail?.capabilities.publication || deploying ? navigateRelease : undefined} onVerify={published ? navigateRelease : undefined} busy={busy}>
     {loading && <p role="status" className="text-xs text-muted-foreground">加载修复任务…</p>}
     {taskError && <p role="alert" className="text-xs text-destructive">{taskError} <button type="button" className={button} disabled={busy} onClick={reload}>重试读取任务</button></p>}

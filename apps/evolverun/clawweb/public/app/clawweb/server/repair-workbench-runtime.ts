@@ -21,7 +21,7 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
   principal: RepairPrincipalResolver;
   execution?: RepairExecutionPort;
   publication?: RepairPublicationPort;
-}): { service: ReturnType<typeof createRepairWorkbenchService>; release: ReturnType<typeof createRepairReleaseService>; router: Router } {
+}): { service: ReturnType<typeof createRepairWorkbenchService>; release: ReturnType<typeof createRepairReleaseService>; router: Router; monitor: { reconcile(): Promise<number> } } {
   const sources = createRepairSourcePort({
     groups: (tx, workflowId, sourceOptions) => new IssueAggregationRepository(tx).listSources(workflowId, sourceOptions),
     suggestions: async (tx, workflowId, sourceOptions) => {
@@ -63,5 +63,25 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
   const service = createRepairWorkbenchService(db, sources, options.execution);
   const release = createRepairReleaseService({ db, workbench: service, publisher: options.publication });
   const authorize = createRepairAuthorizer(options.principal, new BotWorkflowPermissionRepository(db));
-  return { service, release, router: createRepairBatchesRouter({ service, authorize, release, verification: createRepairVerificationService(db) }) };
+  const verification = createRepairVerificationService(db, options.publication);
+  const monitor = { async reconcile() {
+    const count = await service.reconcile();
+    let after = '';
+    for (;;) {
+      const pending = await db.query<{ record_id: string; body_json: string }>(`SELECT record_id, body_json FROM workflow_repair_release_records
+        WHERE record_kind = 'deployment' AND record_id > ? ORDER BY record_id LIMIT 100`, [after]);
+      if (!pending.length) break;
+      for (const row of pending) {
+        const deployment = JSON.parse(row.body_json);
+        if (['dispatching', 'running', 'uncertain'].includes(deployment.status)) {
+          try { await release.reconcile(deployment.actorId, deployment.taskId, deployment.id); }
+          catch { console.warn('[workflow-repair] publication reconciliation requires attention', { deploymentId: deployment.id }); }
+        }
+      }
+      after = pending.at(-1)!.record_id;
+    }
+    await verification.automatic.reconcile();
+    return count;
+  } };
+  return { service, release, monitor, router: createRepairBatchesRouter({ service, authorize, release, verification }) };
 }

@@ -80,6 +80,7 @@ export interface RepairWorkbenchService {
   candidates(workflowId: string, query?: RepairCandidatesQuery): Promise<Omit<RepairCandidatesResponse, 'canEdit'>>;
   item(workflowId: string, itemId: string): Promise<RepairInboxItem>;
   task(taskId: string): Promise<RepairTaskDetail>;
+  request(workflowId: string, requestId: string): Promise<RepairRevision | null>;
   create(actorId: string, request: RepairSelectionRequest): Promise<RepairRevision>;
   revise(actorId: string, taskId: string, request: RepairFeedbackRequest): Promise<RepairRevision>;
   disposition(actorId: string, input: { workflowId: string; itemId: string; inputDigest: string; expectedStateVersion: number;

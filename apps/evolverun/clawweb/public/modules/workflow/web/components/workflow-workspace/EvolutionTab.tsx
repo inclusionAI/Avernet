@@ -23,6 +23,8 @@ import RepairTaskDialog from './repair-batch/RepairTaskDialog'
 import { repairActionFailure } from '../../api/repair-action-error'
 import RepairSelectionWorkspace from './repair-batch/RepairSelectionWorkspace'
 import { exclusion, itemTitle, phases, primary, RepairDialog } from './repair-batch/repair-view'
+import IssuePrioritySummary from './IssuePrioritySummary'
+import { selectionConflicts } from './repair-batch/repair-selection'
 import Pagination from '../Pagination'
 import ApplySuggestionModal from './ApplySuggestionModal'
 import RemediesPanel from './RemediesPanel'
@@ -104,6 +106,8 @@ function DiagnosisPanel({
   accessReady: boolean
 }) {
   const [initialRepairView] = useState(() => readRepairView(workflowId))
+  const [sort, setSort] = useState<'priority' | 'frequency' | 'recent'>('priority')
+  const [severity, setSeverity] = useState('all')
   const [nodeFilter, setNodeFilter] = useState<string>('all')
   const [modeFilter, setModeFilter] = useState<string>('all')
   const [selectedSignature, setSelectedSignature] = useState<string | null>(issueSignature ?? null)
@@ -139,7 +143,7 @@ function DiagnosisPanel({
   const requestSequence = useRef(0)
   const detailRequests = useRef(new Set<string>())
   const detailEpoch = useRef(0)
-  const { data, isLoading, isError, refetch } = useIssueGroups(workflowId, { page: repairPage, pageSize: repairPageSize,
+  const { data, isLoading, isError, refetch } = useIssueGroups(workflowId, { page: repairPage, pageSize: repairPageSize, sort, ...(severity !== 'all' ? { severity } : {}),
     ...(nodeFilter !== 'all' ? { nodeId: nodeFilter } : {}), ...(modeFilter !== 'all' ? { failureMode: modeFilter } : {}) })
   const diagnoses = (data?.groups ?? []).flatMap(groupDiagnoses)
   const previewSignatures = JSON.stringify(data?.groups.map(group => group.signature) ?? [])
@@ -260,11 +264,11 @@ function DiagnosisPanel({
   const activeRepairTask = repairData?.tasks.find(task => ['drafting', 'review', 'blocked', 'publishing', 'failed'].includes(task.phase))
   const selectedItems = selectedRepairIds.flatMap(id => selectionItems[id] ? [selectionItems[id]] : [])
   const selectedIssueCount = new Set(selectedItems.map(item => item.context?.signature ?? item.groupKey)).size
-  const generationReason = draftNeedsCheck ? '提交结果尚未确认，请先核对任务状态。'
+  const conflicts = selectionConflicts(selectedItems)
+  const generationReason = conflicts.length ? '所选方案存在冲突，请在列表取消互斥方案后生成。' : draftNeedsCheck ? '提交结果尚未确认，请先核对任务状态。'
     : repairError ? '修复数据读取失败，请重试后再生成。'
     : repairLoading || !repairData ? '正在读取修复权限与任务状态…'
     : !canEdit || !repairData.canEdit ? '你只有查看权限，不能生成修复草稿。'
-    : activeRepairTask ? '已有修复任务，请继续审阅；生成失败可在任务内重试，无需取消。'
     : !repairData.capabilities.generation ? '生成服务尚未接入，暂不能生成草稿；仍可查看和选择建议。'
     : repairBusy ? '正在提交，请稍候。'
     : !selectedRepairIds.length ? '在问题下勾选要采用的建议，可跨问题、跨页多选。' : ''
@@ -336,7 +340,7 @@ function DiagnosisPanel({
     }
   }
   const submitDraft = async () => {
-    if (!repairData || !selectedRepairIds.length || repairBusy || activeRepairTask || draftNeedsCheck
+    if (!repairData || !selectedRepairIds.length || repairBusy || draftNeedsCheck
       || !canEdit || !repairData.canEdit || !repairData.capabilities.generation || repairLoading || repairError) return
     const input = { workflowId, itemIds: selectedRepairIds, inputDigest: repairData.inputDigest,
       instructions, includeHistorical: repairData.includeHistorical }
@@ -367,12 +371,10 @@ function DiagnosisPanel({
     if (repairBusy) return
     setRepairBusy(true); setRepairActionError('')
     try {
-      const result = await repairBatches.candidates(workflowId, { state: 'all', page: 1, pageSize: 1, includeHistorical })
-      if (result.workflowId !== workflowId) throw new Error('Workflow identity mismatch')
-      const task = result.tasks.find(task => ['drafting', 'review', 'blocked', 'publishing', 'failed'].includes(task.phase))
-      if (task) {
-        setSelectedTaskId(task.taskId); setDraftOpen(false)
-        setRepairNotice('已找到现有修复任务，进入审核并继续跟踪进度。')
+      const result = await repairBatches.request(workflowId, requestId.current)
+      if (result.revision) {
+        setSelectedTaskId(result.revision.taskId); setDraftOpen(false)
+        setRepairNotice('已找到此请求对应的修复任务，进入审阅并继续跟踪进度。')
       } else setRepairActionError('任务状态已核对，可以再次提交当前范围；相同内容沿用原请求编号。')
       setDraftNeedsCheck(false); setRepairRefresh(value => value + 1)
     } catch (error) { setRepairActionError(repairReadError(error)) }
@@ -475,7 +477,7 @@ function DiagnosisPanel({
       <div>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div><h3 className="text-sm font-semibold text-slate-900">问题与优化</h3>
-            <p className="mt-1 text-xs leading-5 text-slate-500">勾选建议 → 生成修复草稿 → 审阅修改。可跨问题多选，不会直接应用或部署。</p></div>
+            <p className="mt-1 text-xs leading-5 text-slate-500">选择问题与方案 → 生成优化草稿 → 审阅并确认发布 → 自动验证。可跨页取舍方案。</p></div>
           {!repairOpen && <button type="button" className={primary} onClick={() => setRepairOpen(true)}>进入修复处理</button>}
         </div>
       </div>
@@ -489,6 +491,7 @@ function DiagnosisPanel({
       {suggestionsLoading && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">历史建议仍在加载，不影响查看问题与修复任务。</p>}
       {repairNotice && <p role="status" className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">{repairNotice}</p>}
       {draftNeedsCheck && <p role="alert" className="text-xs text-destructive">{repairActionError || '提交结果尚未确认。'} <button type="button" disabled={repairBusy} className="underline" onClick={() => void recoverDraft()}>核对任务状态</button></p>}
+      {conflicts.length > 0 && <p role="alert" className="rounded border border-destructive/30 p-3 text-sm text-destructive">所选方案有 {conflicts.length} 处冲突，请取消其中一种方案；未选择的方案继续保留。</p>}
       {selectionNotice && !selectionNotice.startsWith('默认不选择') && <p role="status" className="text-xs text-amber-800">{selectionNotice}</p>}
 
 
@@ -507,6 +510,12 @@ function DiagnosisPanel({
               <input type="checkbox" aria-label="包含历史未复现" checked={includeHistorical} disabled={repairBusy}
                 onChange={event => changeHistoryScope(event.target.checked)} className="h-4 w-4 accent-blue-600" />包含历史未复现
             </label>
+            <select aria-label="问题排序" value={sort} onChange={event => { setSort(event.target.value as typeof sort); setRepairPage(1) }} className="rounded-md border border-input bg-background px-2 py-1 text-xs">
+              <option value="priority">影响优先</option><option value="frequency">近期频率</option><option value="recent">最近发生</option>
+            </select>
+            <select aria-label="影响程度" value={severity} onChange={event => { setSeverity(event.target.value); setRepairPage(1) }} className="rounded-md border border-input bg-background px-2 py-1 text-xs">
+              <option value="all">全部影响</option><option value="critical">严重</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option><option value="unknown">待评估</option>
+            </select>
             <select
               aria-label="问题节点"
               value={nodeFilter}
@@ -549,8 +558,7 @@ function DiagnosisPanel({
                 {suggestion?.verificationStatus === 'recurrence_detected' && <p className="mt-1.5 text-[11px] text-red-600">应用后再次出现 {suggestion.recurrenceCount ?? 1} 次，需要重新判断。</p>}
                 <ApplyTaskStatusBadge task={task} />
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 text-[10px] text-slate-400">
-                  <span>问题累计涉及 {cluster.runIds.length} 个运行</span>
-                  <span>{new Date(timeValue(cluster.latest.gmt_create)).toLocaleString()}</span>
+                  <IssuePrioritySummary priority={cluster.aggregation?.priority} />
                 </div>
               </div>
 

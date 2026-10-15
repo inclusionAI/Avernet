@@ -1,7 +1,8 @@
+import { createRepairAutoVerification } from './repair-auto-verification.js';
 import { randomUUID } from 'node:crypto';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { RepairBatchError } from '../contracts/repair-batch.js';
-import type { RepairDeployment } from '../contracts/repair-release.js';
+import type { RepairDeployment, RepairPublicationPort } from '../contracts/repair-release.js';
 import type { RepairVerificationEvidence, RepairVerificationConclusion } from '../contracts/repair-verification.js';
 import { RepairReleaseRepository } from '../repositories/repair-release-repository.js';
 import { RepairBatchRepository } from '../repositories/repair-batch-repository.js';
@@ -9,13 +10,14 @@ import { RepairBatchRepository } from '../repositories/repair-batch-repository.j
 /** Existing real runs only. Never trigger business executions or equate a
  * successful generation/deployment with a verified repair. Routes require full
  * workflow view access; limited Bot viewers cannot read aggregate evidence. */
-export function createRepairVerificationService(db: IDatabase) {
+export function createRepairVerificationService(db: IDatabase, publication?: RepairPublicationPort) {
   async function deployment(taskId: string, id: string, connection = db) {
     const value = (await new RepairReleaseRepository(connection).list<RepairDeployment>(taskId, 'deployment')).find(row => row.id === id);
     if (!value || value.status !== 'succeeded' || !value.receipt) throw new RepairBatchError('STATE_CONFLICT', '需要先确认候选已真实部署，才能验证效果');
     return value;
   }
   return {
+    automatic: createRepairAutoVerification(db, publication),
     async evidence(taskId: string, id: string): Promise<RepairVerificationEvidence> {
       const d = await deployment(taskId, id), number = d.receipt!.deployNumber;
       const samples = await db.query<{ flow_id: string; status: string; started_at: number; completed_at: number | null }>(
@@ -56,7 +58,7 @@ export function createRepairVerificationService(db: IDatabase) {
         rows.push({ flowId: sample.flow_id, status: sample.status, deployNumber: number, startedAt: sample.started_at,
           completedAt: sample.completed_at, nodes: nodes.map(node => ({ nodeId: node.node_id, status: node.status })) });
       }
-      return { deploymentId: id, deployNumber: number, candidateCommit: d.candidateCommit, samples: rows,
+      return { automatic: await this.automatic.decisions(d), deploymentId: id, deployNumber: number, candidateCommit: d.candidateCommit, samples: rows,
         excludedUnknownVersions: Number(unknown?.total ?? 0), recurrence,
         metrics: { window: { from: current?.first_started == null ? null : Number(current.first_started), to: current?.last_started == null ? null : Number(current.last_started) },
           succeeded: Number(current?.succeeded ?? 0), failed: Number(current?.failed ?? 0), completed: Number(current?.completed ?? 0),

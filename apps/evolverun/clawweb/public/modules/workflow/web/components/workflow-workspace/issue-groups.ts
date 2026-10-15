@@ -3,7 +3,10 @@ import { useEffect, useState } from 'react';
 import type { EvolveRunDiagnosis } from '@avernet/clawweb-shared/web/api/client';
 import { readOnlyJson } from '../../api/read-only-json';
 
+import type { IssuePriority } from '@avernet/clawevolve/server/services/evolution/issue-priority';
+
 export type IssueGroupView = {
+  priority?: IssuePriority;
   presentation?: 'summary';
   workflowId: string; signature: string; inputDigest: string; flowIds: string[];
   aggregationStatus: string; aggregationId: string | null; stale: boolean;
@@ -17,13 +20,15 @@ export type IssueGroupView = {
     certainty: 'supported' | 'hypothesis' | 'unknown'; sourceIds: string[] }> };
 };
 
-export type IssuePageQuery = { page: number; pageSize: number; nodeId?: string; failureMode?: string };
+export type IssuePageQuery = { page: number; pageSize: number; nodeId?: string; failureMode?: string; sort?: 'priority' | 'frequency' | 'recent'; severity?: string };
 export type IssuePage = { groups: IssueGroupView[]; facets?: { nodes: string[]; modes: string[] };
   page?: { page: number; pageSize: number; total: number; totalPages: number } };
 export function useIssueGroups(workflowId: string, query?: IssuePageQuery) {
   const params = new URLSearchParams({ workflowId, view: 'summary' });
   if (query) {
     params.set('page', String(query.page)); params.set('pageSize', String(query.pageSize));
+    if (query.sort) params.set('sort', query.sort);
+    if (query.severity) params.set('severity', query.severity);
     if (query.nodeId) params.set('nodeId', query.nodeId);
     if (query.failureMode) params.set('failureMode', query.failureMode);
   }

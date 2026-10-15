@@ -1,3 +1,4 @@
+import { issuePriority, compareIssuePriority, type IssueSort, type IssueRun, type IssuePriority } from '../services/evolution/issue-priority.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { canonicalJson, digestCanonicalJson, validateWorkflowEvolutionAnalysisResult } from '../services/evolution/contracts.js';
 import { buildAggregationModelInput, buildIssueGroups, ISSUE_AGGREGATION_INPUT_V1, ISSUE_AGGREGATION_INPUT_V2, validateIssueSummary,
@@ -14,7 +15,7 @@ type SnapshotIndexRow = Pick<WorkflowEvolutionAnalysisRow, 'analysis_id' | 'stat
 };
 type SnapshotBodyRow = Pick<WorkflowEvolutionAnalysisRow, 'analysis_id' | 'scope_json' | 'result_json'>;
 export type PresentedIssueGroup = IssueGroup & { summary: IssueSummary | null; summarySources: IssueGroup['sources']; stale: boolean; aggregationStatus: string; aggregationId: string | null;
-  aggregationInputVersion: IssueAggregationInputVersion | null; aggregationInputSummary: AggregationInputSummary | null };
+  priority?: IssuePriority; aggregationInputVersion: IssueAggregationInputVersion | null; aggregationInputSummary: AggregationInputSummary | null };
 
 function aggregationPayload(group: IssueGroup, inputVersion: IssueAggregationInputVersion): {
   input: IssueGroup | IssueAggregationModelInput; inputSummary: AggregationInputSummary;
@@ -72,7 +73,7 @@ export class IssueAggregationRepository {
       const entry = legacyByRun.get(row.flow_id) ?? { analysisId: 'legacy', flowId: row.flow_id, completedAtMs: time, diagnoses: [] };
       entry.completedAtMs = Math.max(entry.completedAtMs, time);
       entry.diagnoses.push({ diagnosisId: row.diagnosis_id, flowIds: [row.flow_id], nodeId: row.weak_node_id ?? row.node_id,
-        failureSignature: row.failure_signature, failureMode: row.failure_mode, severity: 'medium',
+        failureSignature: row.failure_signature, failureMode: row.failure_mode, severity: null,
         reasoning: row.error_text || row.failure_signature, evidenceEventIds: [] });
       legacyByRun.set(row.flow_id, entry);
     }
@@ -85,8 +86,10 @@ export class IssueAggregationRepository {
   }
 
   /** Page the issue projection before loading frozen summaries, never page its suggestions. */
-  async listPage(workflowId: string, query: { page: number; pageSize: number; nodeId?: string; failureMode?: string }) {
+  async listPage(workflowId: string, query: { page: number; pageSize: number; nodeId?: string; failureMode?: string; sort?: IssueSort; severity?: string }) {
     const all = await this.readProjection(workflowId);
+    const runs = await this.priorityRuns(workflowId);
+    const priorities = new Map(all.map(group => [group.signature, issuePriority(group, runs)]));
     const identity = (group: IssueGroup) => [...group.sources].sort((a, b) =>
       b.completedAtMs - a.completedAtMs || a.sourceId.localeCompare(b.sourceId))[0];
     const facets = {
@@ -96,12 +99,53 @@ export class IssueAggregationRepository {
     const filtered = all.filter(group => {
       const source = identity(group);
       return (!query.nodeId || (source?.nodeId ?? '未知节点') === query.nodeId)
-        && (!query.failureMode || source?.failureMode === query.failureMode);
+        && (!query.failureMode || source?.failureMode === query.failureMode)
+        && (!query.severity || (priorities.get(group.signature)!.severity ?? 'unknown') === query.severity);
     });
+    filtered.sort((a, b) => compareIssuePriority(priorities.get(a.signature)!, priorities.get(b.signature)!, query.sort ?? 'priority') || a.signature.localeCompare(b.signature));
     const totalPages = Math.max(1, Math.ceil(filtered.length / query.pageSize));
     const page = Math.min(query.page, totalPages);
     const groups = await this.present(workflowId, filtered.slice((page - 1) * query.pageSize, page * query.pageSize), ISSUE_AGGREGATION_INPUT_V2);
-    return { groups, facets, page: { page, pageSize: query.pageSize, total: filtered.length, totalPages } };
+    return { groups: groups.map(group => ({ ...group, priority: priorities.get(group.signature)! })), facets, page: { page, pageSize: query.pageSize, total: filtered.length, totalPages } };
+  }
+
+  private async priorityRuns(workflowId: string): Promise<IssueRun[]> {
+    const runs = new Map<string, IssueRun>();
+    let after = '';
+    for (;;) {
+      const rows = await this.db.query<{ flow_id: string; started_at: number }>(
+        'SELECT flow_id, started_at FROM flow_runs WHERE workflow_id = ? AND flow_id > ? ORDER BY flow_id LIMIT 500', [workflowId, after]);
+      if (!rows.length) break;
+      for (const row of rows) runs.set(row.flow_id, { flowId: row.flow_id,
+        startedAtMs: Number(row.started_at) < 1e12 ? Number(row.started_at) * 1000 : Number(row.started_at), nodes: [], analyzed: false });
+      if (runs.size > 50_000) throw new Error('Issue statistics exceed the supported history bound');
+      after = rows.at(-1)!.flow_id;
+    }
+    for (const ids = [...runs.keys()]; ids.length;) {
+      const batch = ids.splice(0, 200);
+      const nodes = await this.db.query<{ flow_id: string; node_id: string }>(
+        `SELECT DISTINCT flow_id, node_id FROM node_executions WHERE flow_id IN (${batch.map(() => '?').join(',')})`, batch);
+      for (const node of nodes) runs.get(node.flow_id)?.nodes.push(node.node_id);
+    }
+    let afterId = 0;
+    for (;;) {
+      const analyses = await this.db.query<WorkflowEvolutionAnalysisRow>(`SELECT id, flow_id, scope_json, result_json FROM workflow_evolution_analysis_runs
+        WHERE workflow_id = ? AND status = 'completed' AND scope_type <> ? AND id > ? ORDER BY id LIMIT 200`, [workflowId, SCOPE, afterId]);
+      if (!analyses.length) break;
+      for (const row of analyses) {
+        try {
+          const result = validateWorkflowEvolutionAnalysisResult(JSON.parse(row.result_json!));
+          const scope = JSON.parse(row.scope_json);
+          // Partial node analyses do not establish full coverage of other findings.
+          if (scope.nodeId || scope.nodeIds?.length) continue;
+          for (const id of [...(Array.isArray(scope.flowIds) ? scope.flowIds : []), ...(row.flow_id ? [row.flow_id] : []), ...result.diagnoses.flatMap(d => d.flowIds)]) {
+            const run = runs.get(id); if (run) run.analyzed = true;
+          }
+        } catch { /* Invalid analyses never count as analyzed/clean evidence. */ }
+      }
+      afterId = analyses.at(-1)!.id;
+    }
+    return [...runs.values()];
   }
 
   private async readProjection(workflowId: string): Promise<IssueGroup[]> {

@@ -224,7 +224,8 @@ describe('repair workbench control service', () => {
   it('arbitrates concurrent create attempts and rejects reused requests with changed instructions', async () => {
     const f = await setup();
     const attempts = await Promise.allSettled([f.service.create('human', f.request), f.service.create('human', { ...f.request, requestId: 'create-2' })]);
-    expect(attempts.filter(r => r.status === 'fulfilled')).toHaveLength(1);
+    expect(attempts.filter(r => r.status === 'fulfilled')).toHaveLength(2);
+    expect(f.calls).toHaveLength(1);
     expect(await f.db.query('SELECT * FROM ce_tasks')).toHaveLength(1);
     await expect(f.service.create('human', { ...f.request, instructions: 'changed' })).rejects.toMatchObject({ code: 'IDEMPOTENCY_MISMATCH' });
   });
@@ -488,4 +489,18 @@ describe('repair workbench control service', () => {
     expect((await f.service.candidates('wf-1')).items.every(i => i.state === 'pending')).toBe(true);
     await expect(f.service.report({ workflowId: 'wf-1', taskId: r2.taskId, revision: 2, expectedStateVersion: 1, status: 'failed', error: { code: 'LATE' } })).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
   });
+});
+
+it('allows independent scopes and reuses the same frozen scope instead of generating it twice', async () => {
+  const f = await repairFixture(2);
+  try {
+    const service = createRepairWorkbenchService(f.db, f.sourcePort, f.executionPort);
+    const inbox = await service.candidates('wf-1');
+    const request = { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: inbox.inputDigest, instructions: '', requestId: 'first' };
+    const first = await service.create('human', request);
+    const reused = await service.create('human', { ...request, requestId: 'same-scope' });
+    expect(reused.taskId).toBe(first.taskId); expect(f.calls).toHaveLength(1);
+    const independent = await service.create('human', { ...request, itemIds: ['item-1'], requestId: 'independent' });
+    expect(independent.taskId).not.toBe(first.taskId); expect(f.calls).toHaveLength(2);
+  } finally { await f.db.close(); }
 });

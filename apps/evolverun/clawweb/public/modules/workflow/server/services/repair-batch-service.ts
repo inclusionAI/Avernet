@@ -138,6 +138,24 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       }).map(source => source.item.itemId) };
     }
     const current = await repairStage(`sources_${mode}`, () => this.sources.load(db, workflowId, this.sources.hydrate ? 'summary' : mode, sourceScope));
+    // An automatic recurrence opens a new phase with a new proposal identity.
+    // Do not carry the previously applied operations into another generation.
+    const derived = new Set(current.map(source => source.item.itemId));
+    const maximumEpisodes = current.length + stored.length + 1;
+    for (let index = 0; index < current.length && index < maximumEpisodes; index++) {
+      const source = current[index];
+      const previous = byIdentity.get(identityKey(source.item, source.episodeKey));
+      const recurrence = previous?.context?.recurrence as { episodeKey?: string; flowIds?: string[]; reason?: string } | undefined;
+      if (!previous || !recurrence?.episodeKey || previous.state !== 'ineffective' && recurrence.reason !== 'baseline_changed') continue;
+      const proposalKey = digestRepairJson(['reassess', previous.itemId, recurrence.episodeKey]);
+      const itemId = digestRepairJson([workflowId, previous.groupKey, proposalKey, recurrence.episodeKey]);
+      if (derived.has(itemId)) continue;
+      derived.add(itemId);
+      current.push({ episodeKey: recurrence.episodeKey, initialState: 'pending', item: { ...source.item, itemId,
+        previousItemId: previous.itemId, proposalKey, proposal: null,
+        instruction: `${recurrence.reason === 'baseline_changed' ? '当前生效 Pack 已变化，请重新核对原修改的适用性。' : '原修改在生效版本明确复现。'}请依据新证据重新诊断并调整方案，不得原样重复已应用修改。关联运行：${(recurrence.flowIds ?? []).join(', ')}`,
+        context: { ...source.item.context, recurrence } } });
+    }
     current.forEach(source => validateRepairItem(source.item));
     const ordered = [...current].sort((a, b) => a.item.itemId.localeCompare(b.item.itemId));
     const inputDigest = sourceDigest(ordered);
@@ -168,6 +186,13 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       }
     }
     return { items: [...items.values()], inputDigest, materializable };
+  }
+  async request(workflowId: string, requestId: string): Promise<RepairRevision | null> {
+    if (!identity(workflowId, 190) || !requiredText(requestId, 128)) fail('INVALID_INPUT', 'Invalid request lookup');
+    const rows = await this.db.query<{ task_id: string; revision: number }>(
+      'SELECT task_id, revision FROM workflow_repair_revisions WHERE workflow_id = ? AND request_id = ?', [workflowId, requestId]);
+    if (!rows.length) return null;
+    return new RepairBatchRepository(this.db).getRevision(workflowId, rows[0].task_id, Number(rows[0].revision));
   }
   async candidates(workflowId: string, query: RepairCandidatesQuery = {}): Promise<Omit<RepairCandidatesResponse, 'canEdit'>> {
     return serial(this.db, async () => {
@@ -298,6 +323,15 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
           itemIds: request.itemIds, includeHistorical: request.includeHistorical === true,
         });
         if (snapshot.inputDigest !== request.inputDigest) fail('SOURCE_CHANGED', 'Repair sources changed; refresh the issue inbox');
+        if (!taskId) {
+          const occupied = snapshot.items.filter(item => request.itemIds.includes(item.itemId));
+          const taskIds = [...new Set(occupied.map(item => item.activeTaskId).filter((id): id is string => !!id))];
+          if (occupied.length === request.itemIds.length && occupied.every(item => item.state === 'processing') && taskIds.length === 1) {
+            const active = await this.readTask(tx, taskIds[0]);
+            if (canonicalRepairJson(active.latestAttempt.input.items.map(item => item.itemId).sort()) === canonicalRepairJson([...request.itemIds].sort())
+              && active.latestAttempt.input.instructions === request.instructions) return active.latestAttempt;
+          }
+        }
         const selected: RepairItem[] = [];
         for (const itemId of request.itemIds) {
           const item = snapshot.items.find(item => item.itemId === itemId);

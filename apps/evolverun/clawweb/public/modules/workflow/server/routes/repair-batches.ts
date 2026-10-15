@@ -144,6 +144,12 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
     if (!input.release) throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '当前宿主未接入候选审阅和部署服务');
     return input.release;
   }
+  router.get('/requests/lookup', handle(async (req, res) => {
+    const workflowId = text(req.query.workflowId, 'workflowId');
+    const actor = await access(req, res, workflowId, 'edit');
+    if (!actor) return;
+    res.json({ revision: await service.request(workflowId, text(req.query.requestId, 'requestId')) });
+  }));
   router.get('/:taskId/deployment-targets', handle(async (req, res) => {
     const selected = await taskAccess(req, res, 'edit');
     if (selected) res.json({ targets: await release().targets(selected.actor.actorId, selected.task.taskId) });
@@ -167,6 +173,10 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
   router.post('/:taskId/deployment', handle(async (req, res) => {
     const selected = await taskAccess(req, res, 'edit');
     if (selected) res.status(202).json(await release().deploy(selected.actor.actorId, selected.task.taskId, req.body));
+  }));
+  router.post('/:taskId/publish', handle(async (req, res) => {
+    const selected = await taskAccess(req, res, 'edit');
+    if (selected) res.status(202).json(await release().publish(selected.actor.actorId, selected.task.taskId, req.body));
   }));
   router.post('/:taskId/deployment/:deploymentId/reconcile', handle(async (req, res) => {
     const selected = await taskAccess(req, res, 'edit');

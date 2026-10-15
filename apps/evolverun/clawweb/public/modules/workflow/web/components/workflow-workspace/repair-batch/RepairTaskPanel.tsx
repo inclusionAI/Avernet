@@ -153,7 +153,7 @@ export default function RepairTaskPanel({ detail, canEdit, onFeedback, onCancel,
           <p className="mt-1 text-xs text-muted-foreground">{item.revision === revision.revision ? '当前查看' : '查看此版本'}</p>
         </button>)}</div>
       </section>
-      <section className="rounded-lg border border-input bg-card p-5"><h3 className="text-xs font-semibold">安全边界</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">{detail.latestAttempt.phase === 'published' ? '候选部署事实已记录；后续运行按部署版本验证。' : '生成候选尚未应用到工作流或部署；只有明确确认部署才影响新运行。'}效果验证单独记录，不自动关闭问题，也不自动回滚。</p></section>
+      <section className="rounded-lg border border-input bg-card p-5"><h3 className="text-xs font-semibold">安全边界</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">{detail.latestAttempt.phase === 'published' ? '候选部署事实已记录；后续运行按部署版本验证。' : '生成候选尚未应用到工作流或部署；只有明确确认部署才影响新运行。'}系统依据生效版本、相关节点和明确规则自动观察；证据不足时不判成功，也不自动回滚。</p></section>
       {!alreadyPublished && ['drafting', 'review', 'blocked', 'failed'].includes(detail.latestAttempt.phase) && <button className="text-xs text-muted-foreground hover:text-destructive" disabled={!canEdit || busy} onClick={onCancel}>取消修复任务</button>}
     </aside>
   </div>
