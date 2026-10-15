@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import time
 import uuid
 from types import SimpleNamespace
@@ -17,6 +18,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 from contextlib import contextmanager
 
 from agentclaw.community.core.base import Base
@@ -73,7 +75,14 @@ class _TestDB:
 
 @pytest.fixture()
 def db():
-    engine = create_engine("sqlite:///:memory:")
+    # The slice path offloads repo calls via asyncio.to_thread, so the
+    # engine must share one connection across threads (convention from
+    # test_durable_exec / the local database plugin).
+    engine = create_engine(
+        "sqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
     Base.metadata.create_all(engine, tables=[m.__table__ for m in om.ALL_MODELS])
     yield _TestDB(engine)
     engine.dispose()
@@ -549,3 +558,65 @@ class TestOutputSchemaValidation:
         assert agents[0].attempts == 1
         # The executor never even ran: a malformed envelope is a config error.
         assert factory.run_effects == []
+
+
+class TestLoopStaysLiveDuringSlowWrites:
+    """2.1 offload contract: slice-path repo calls run in a to_thread worker,
+    so the worker loop keeps heartbeating/drain-checking while a write is
+    blocked mid-DB. If a repo call ever moves back onto the loop thread,
+    the ticker below starves for the whole blocked write and this fails.
+    """
+
+    def test_ticker_keeps_ticking_while_a_repo_write_blocks(self, db):
+        script = [
+            _spawn_decision("a1", "goal-liveness"),
+            _wait_decision("a1"),
+            _finish_decision("liveness done"),
+        ]
+        factory = FakeFactory(scripts={"a1": [{"ok": True}]})
+        env = _build_env(db, script, factory)
+        run = _mk_run()
+        claim = _enqueue_and_claim(env, run)
+
+        original_create = env.agent_repo.create
+        write_started = threading.Event()
+
+        def slow_create(agent):
+            write_started.set()
+            time.sleep(1.5)
+            return original_create(agent)
+
+        env.agent_repo.create = slow_create
+
+        async def main():
+            ticks: list[float] = []
+            stop = asyncio.Event()
+
+            async def ticker():
+                while not stop.is_set():
+                    ticks.append(time.monotonic())
+                    await asyncio.sleep(0.05)
+
+            slice_task = asyncio.create_task(env.handler.handle_slice(
+                run.run_id, TENANT, claim["claim_epoch"], worker_id=WORKER,
+            ))
+            ticker_task = asyncio.create_task(ticker())
+            while not write_started.is_set():
+                await asyncio.sleep(0.005)
+            # The slow agent-row write is now blocking its to_thread worker
+            # for 1.5s; watch the loop tick across that window.
+            block_started = time.monotonic()
+            await asyncio.sleep(1.0)
+            stopped = time.monotonic()
+            stop.set()
+            outcome = await slice_task
+            await ticker_task
+            return outcome, [t for t in ticks if block_started < t < stopped]
+
+        outcome, ticks_during_blocked_write = asyncio.run(main())
+
+        assert outcome == "complete"
+        assert run.run_id and env.agent_repo.list_by_run(run.run_id, TENANT)
+        # ~0.05s cadence over a 1.0s window of a still-blocked write: a
+        # stalled loop (the pre-offload behavior) records zero ticks.
+        assert len(ticks_during_blocked_write) >= 5

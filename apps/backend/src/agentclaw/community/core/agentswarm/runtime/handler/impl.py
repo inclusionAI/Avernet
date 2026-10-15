@@ -24,6 +24,7 @@ from agentclaw.community.core.agentswarm.repository.round import RoundRepository
 from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
 from agentclaw.community.core.agentswarm.repository.job import JobRepository
 from agentclaw.community.core.agentswarm.runtime.pool import SubagentRuntime
+from agentclaw.community.core.agentswarm.runtime.offload import run_blocking
 from agentclaw.community.core.agentswarm.runtime.store import SliceStore
 from agentclaw.community.log import get_logger
 
@@ -107,7 +108,12 @@ class SwarmRunHandler:
 
     def force_stuck(self, run_id: RunId, tenant: TenantId, claim_epoch: int,
                     error: str, worker_id: str | None = None) -> bool:
-        """D40 reclaim circuit breaker: transition a poison run to terminal STUCK."""
+        """D40 reclaim circuit breaker: transition a poison run to terminal STUCK.
+
+        Synchronous by contract: the worker invokes it through
+        asyncio.to_thread, so it already runs off the event loop and its
+        repo calls stay direct.
+        """
         if worker_id is not None:
             self._worker_id = worker_id
         run = self._run_repo.get(run_id, tenant)
@@ -121,14 +127,18 @@ class SwarmRunHandler:
         )
         if ok:
             self._destroy_run_avernet_bots(run_id, tenant)
-            self.store.apply_run_retention(run_id, tenant)
+            self.store.apply_run_retention_blocking(run_id, tenant)
         self._job_repo.complete(run_id, tenant, self._worker_id, claim_epoch)
         return ok
 
     def force_fail(self, run_id: RunId, tenant: TenantId, claim_epoch: int,
                    error: str, worker_id: str | None = None) -> bool:
         """13.6 degradation: an unrecoverable slice error terminally fails the
-        run so it can never be left RUNNING with a dead job (stalled)."""
+        run so it can never be left RUNNING with a dead job (stalled).
+
+        Synchronous by contract: the worker invokes it through
+        asyncio.to_thread, so it already runs off the event loop.
+        """
         if worker_id is not None:
             self._worker_id = worker_id
         ok = self._run_repo.update_status(
@@ -141,7 +151,7 @@ class SwarmRunHandler:
             # run and its outcome; this slice must not touch the job either.
             return False
         self._destroy_run_avernet_bots(run_id, tenant)
-        self.store.apply_run_retention(run_id, tenant)
+        self.store.apply_run_retention_blocking(run_id, tenant)
         self._job_repo.complete(run_id, tenant, self._worker_id, claim_epoch)
         return True
 
@@ -157,6 +167,11 @@ class SwarmRunHandler:
         The slice is a multi-turn loop bounded by orchestration.slice_max_seconds;
         completions are drained and durably persisted before each orchestrator
         decision, so any pod can resume from shards alone (D34).
+
+        Every repo call on this loop path is offloaded through
+        runtime.offload.run_blocking so worker heartbeats and drain signals
+        never stall behind a write (D19: the thread hop wraps the whole,
+        session-scoped repo call; a session never spans an await).
         """
         self._claim_epoch = claim_epoch
         if worker_id is not None:
@@ -166,26 +181,38 @@ class SwarmRunHandler:
         self.set_slice_lost(False, run_id)
 
         if cancel_requested:
-            run = self._run_repo.get(run_id, tenant)
+            run = await run_blocking(self._run_repo.get, run_id, tenant)
             if run is not None and run.status is RunStatus.RUNNING:
-                if self._run_repo.update_status(
+                if await run_blocking(
+                    self._run_repo.update_status,
                     run_id, tenant, RunStatus.CANCELLED,
                     termination_reason=TerminationReason.CANCELLED,
                     claim_epoch=claim_epoch,
                 ):
-                    self.store.apply_run_retention(run_id, tenant)
-            self._job_repo.complete(run_id, tenant, self._worker_id, claim_epoch)
+                    await self.store.apply_run_retention(run_id, tenant)
+            await run_blocking(
+                self._job_repo.complete, run_id, tenant, self._worker_id,
+                claim_epoch,
+            )
             return "complete"
 
-        run = self._run_repo.get(run_id, tenant)
+        run = await run_blocking(self._run_repo.get, run_id, tenant)
         if run is None:
             return "fail"
         if run.status is not RunStatus.RUNNING:
-            self._job_repo.complete(run_id, tenant, self._worker_id, claim_epoch)
+            await run_blocking(
+                self._job_repo.complete, run_id, tenant, self._worker_id,
+                claim_epoch,
+            )
             return "complete"
 
-        state, done_pairs, interrupted = self.store.rehydrate(run, claim_epoch)
-        self._run_repo.update_status(run_id, tenant, RunStatus.RUNNING, claim_epoch=claim_epoch)
+        state, done_pairs, interrupted = await self.store.rehydrate(
+            run, claim_epoch,
+        )
+        await run_blocking(
+            self._run_repo.update_status,
+            run_id, tenant, RunStatus.RUNNING, claim_epoch=claim_epoch,
+        )
         deadline = self._deadline()
 
         try:
@@ -200,7 +227,7 @@ class SwarmRunHandler:
                 )
             while True:
                 self._check_lost()
-                self._drain_completions(
+                await self._drain_completions(
                     await self._runtime.wait_for_completions(timeout=0), state,
                 )
                 self._check_lost()
@@ -212,13 +239,15 @@ class SwarmRunHandler:
                 )
                 self._check_lost()
                 for ge in outcome.get("guard_events", []):
-                    self._guard_repo.create(ge)
+                    await run_blocking(self._guard_repo.create, ge)
 
                 term = outcome.get("terminate") or self._termination.evaluate(state)
                 if outcome.get("fatal") is not None:
-                    return self._finalize_failure(run_id, tenant, term, outcome, claim_epoch)
+                    return await self._finalize_failure(
+                        run_id, tenant, term, outcome, claim_epoch,
+                    )
                 if term is not None:
-                    return self._finalize(run_id, tenant, term, outcome, claim_epoch)
+                    return await self._finalize(run_id, tenant, term, outcome, claim_epoch)
 
                 if outcome.get("wait_refs") is not None:
                     await self._await_refs(
@@ -241,18 +270,19 @@ class SwarmRunHandler:
                     )
                 self._check_lost()
         except _SliceLost:
-            self._release_claim(run_id, tenant, claim_epoch, "slice lost")
+            await self._release_claim(run_id, tenant, claim_epoch, "slice lost")
             return "retry"
         except asyncio.CancelledError:
             # D23: cancellation propagates after cleanup — never swallowed.
-            self._release_claim(run_id, tenant, claim_epoch, "slice cancelled")
+            await self._release_claim(run_id, tenant, claim_epoch, "slice cancelled")
             raise
         finally:
             self._active_run_id = None
             self._active_tenant = None
             await self._runtime.stop()
 
-        self._job_repo.reschedule(
+        await run_blocking(
+            self._job_repo.reschedule,
             run_id, tenant, self._worker_id,
             self._config.orchestration.slice_interval, None, claim_epoch,
         )
@@ -261,17 +291,20 @@ class SwarmRunHandler:
     def _deadline(self) -> float:
         return time.monotonic() + self._config.orchestration.slice_max_seconds
 
-    def _release_claim(self, run_id: RunId, tenant: TenantId, claim_epoch: int,
-                       note: str) -> None:
-        self._job_repo.reschedule(
+    async def _release_claim(self, run_id: RunId, tenant: TenantId, claim_epoch: int,
+                             note: str) -> None:
+        await run_blocking(
+            self._job_repo.reschedule,
             run_id, tenant, self._worker_id,
             self._config.orchestration.slice_interval, note, claim_epoch,
         )
 
-    def _finalize(self, run_id: RunId, tenant: TenantId, term: TerminationReason,
-                  outcome: dict[str, Any], claim_epoch: int) -> str:
-        ok = self._run_repo.update_status(
-            run_id, tenant, self._resolve_final_status(term),
+    async def _finalize(self, run_id: RunId, tenant: TenantId, term: TerminationReason,
+                        outcome: dict[str, Any], claim_epoch: int) -> str:
+        ok = await run_blocking(
+            self._run_repo.update_status,
+            run_id, tenant,
+            self._resolve_final_status(term),
             termination_reason=term,
             final_answer=outcome.get("finish_answer")
             if term == TerminationReason.FINISH else None,
@@ -280,34 +313,42 @@ class SwarmRunHandler:
         if not ok:
             # Fenced off: the slice was reclaimed; the new owner decides.
             raise _SliceLost()
-        self._destroy_run_avernet_bots(run_id, tenant)
-        self.store.apply_run_retention(run_id, tenant)
-        self._job_repo.complete(run_id, tenant, self._worker_id, claim_epoch)
+        await run_blocking(self._destroy_run_avernet_bots, run_id, tenant)
+        await self.store.apply_run_retention(run_id, tenant)
+        await run_blocking(
+            self._job_repo.complete, run_id, tenant, self._worker_id,
+            claim_epoch,
+        )
         return "complete"
 
-    def _finalize_failure(self, run_id: RunId, tenant: TenantId,
-                          term: TerminationReason, outcome: dict[str, Any],
-                          claim_epoch: int) -> str:
-        ok = self._run_repo.update_status(
-            run_id, tenant, self._resolve_final_status(term or TerminationReason.ERROR),
+    async def _finalize_failure(self, run_id: RunId, tenant: TenantId,
+                                term: TerminationReason, outcome: dict[str, Any],
+                                claim_epoch: int) -> str:
+        ok = await run_blocking(
+            self._run_repo.update_status,
+            run_id, tenant,
+            self._resolve_final_status(term or TerminationReason.ERROR),
             termination_reason=term or TerminationReason.ERROR,
             error=outcome.get("fatal"),
             claim_epoch=claim_epoch,
         )
         if not ok:
             raise _SliceLost()
-        self._destroy_run_avernet_bots(run_id, tenant)
-        self.store.apply_run_retention(run_id, tenant)
-        self._job_repo.fail(
+        await run_blocking(self._destroy_run_avernet_bots, run_id, tenant)
+        await self.store.apply_run_retention(run_id, tenant)
+        await run_blocking(
+            self._job_repo.fail,
             run_id, tenant, outcome.get("fatal") or "run failed",
             self._worker_id, claim_epoch,
         )
         return "fail"
 
-    def _drain_completions(self, completions: list[dict[str, Any]],
-                           state: RunState | None) -> None:
+    async def _drain_completions(self, completions: list[dict[str, Any]],
+                                  state: RunState | None) -> None:
         for completion in completions:
-            self.store.persist_completion(completion, self._claim_epoch, state)
+            await self.store.persist_completion(
+                completion, self._claim_epoch, state,
+            )
 
     def _on_llm_exchange(self, system_prompt: str, user_prompt: str,
                          response_text: str, token_usage: Any,
@@ -334,7 +375,7 @@ class SwarmRunHandler:
                 continue
             kind = self._resolve_kind(run, envelope.name)
             agent_id = await self._runtime.spawn(run, envelope)
-            self.store.create_agent(Agent(
+            await self.store.create_agent(Agent(
                 agent_id=agent_id,
                 run_id=run.run_id,
                 tenant=run.tenant,
@@ -353,7 +394,7 @@ class SwarmRunHandler:
             done_pairs.add((envelope.name, envelope.objective))
             cohort.append(agent_id)
         if cohort:
-            self.store.create_round(run, state.round_index, cohort)
+            await self.store.create_round(run, state.round_index, cohort)
             state.round_index += 1
 
     @staticmethod
@@ -367,7 +408,7 @@ class SwarmRunHandler:
                           mode: WaitMode, deadline: float,
                           state: RunState | None = None) -> None:
         while True:
-            unsatisfied = self.store.unsatisfied_refs(run_id, tenant, refs)
+            unsatisfied = await self.store.unsatisfied_refs(run_id, tenant, refs)
             if not unsatisfied:
                 return
             if mode == WaitMode.ANY and len(unsatisfied) < len(refs):
@@ -378,7 +419,7 @@ class SwarmRunHandler:
                 # Budget exhausted mid-wait: persisted shards are the durable
                 # continuation point for the next slice (D34).
                 return
-            self._drain_completions(
+            await self._drain_completions(
                 await self._runtime.wait_for_completions(timeout=min(remaining, 0.25)),
                 state,
             )

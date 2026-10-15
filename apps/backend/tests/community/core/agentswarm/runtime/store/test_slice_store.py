@@ -9,6 +9,7 @@ Conventions follow the pool suite: sync test defs, hand-written fakes
 """
 from __future__ import annotations
 
+import asyncio
 import time
 
 import pytest
@@ -91,9 +92,9 @@ class TestPersistCompletionClaimFence:
 
         store = self._store(db)
         with pytest.raises(_SliceLost):
-            store.persist_completion(
+            asyncio.run(store.persist_completion(
                 self._completion(run, agent.agent_id), claim_epoch=lost_epoch,
-            )
+            ))
 
         stored = AgentRepository(db).get(run.run_id, agent.agent_id, TENANT)
         assert stored.status is dm.AgentStatus.QUEUED
@@ -112,10 +113,10 @@ class TestPersistCompletionClaimFence:
         epoch = self._claim(db, run)
 
         store = self._store(db)
-        store.persist_completion(
+        asyncio.run(store.persist_completion(
             self._completion(run, agent.agent_id, result={"r": 1}),
             claim_epoch=epoch,
-        )
+        ))
 
         shard = ResultShardRepository(db).get_by_run_agent(
             run.run_id, agent.agent_id, TENANT,

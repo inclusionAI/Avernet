@@ -12,6 +12,7 @@ import asyncio
 
 import pytest
 from sqlalchemy import create_engine, select
+from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.agentswarm.domain import models as dm
@@ -27,7 +28,12 @@ FATAL_TEXT = "unhandled decision type: _RogueDecision"
 
 @pytest.fixture()
 def db():
-    engine = create_engine("sqlite:///:memory:")
+    # StaticPool: the slice path offloads repo calls to to_thread workers.
+    engine = create_engine(
+        "sqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
     Base.metadata.create_all(engine, tables=[m.__table__ for m in om.ALL_MODELS])
     yield _TestDB(engine)
     engine.dispose()
@@ -88,9 +94,9 @@ class TestFatalOutcomeFinalizesFailedRun:
         retention_calls: list = []
         original_retention = env.handler.store.apply_run_retention
 
-        def spy_retention(run_id, tenant):
+        async def spy_retention(run_id, tenant):
             retention_calls.append((dm.RunId(run_id), tenant))
-            return original_retention(run_id, tenant)
+            return await original_retention(run_id, tenant)
 
         env.handler.store.apply_run_retention = spy_retention
 

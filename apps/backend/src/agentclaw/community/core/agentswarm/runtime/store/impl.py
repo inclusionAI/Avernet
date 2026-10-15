@@ -15,6 +15,7 @@ from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepos
 from agentclaw.community.core.agentswarm.repository.message import MessageRepository
 from agentclaw.community.core.agentswarm.repository.shard import ResultShardRepository
 from agentclaw.community.core.agentswarm.repository.round import RoundRepository
+from agentclaw.community.core.agentswarm.runtime.offload import run_blocking
 from agentclaw.community.log import get_logger
 
 logger = get_logger(__name__)
@@ -41,7 +42,12 @@ class SliceStore:
     materialization (agent status + result shard + assistant message, D24
     exactly-once), orchestrator decision messages (D18/D30), round rows,
     and terminal retention (D13). All writes are short sync repo calls —
-    no await inside any orm_session (D19).
+    no await inside any orm_session (D19). Repo calls on the worker
+    loop's async paths go through runtime.offload.run_blocking (a thread
+    hop around each complete, session-scoped repo call — never inside a
+    session). ``get_shards`` and ``record_llm_exchange`` stay synchronous:
+    the orchestrator invokes them through sync callbacks on the loop
+    thread, so they cannot be awaited here.
     """
 
     def __init__(
@@ -70,12 +76,12 @@ class SliceStore:
         self._last_seq = seq
         return seq
 
-    def create_agent(self, agent: Agent) -> Agent:
-        return self._agent_repo.create(agent)
+    async def create_agent(self, agent: Agent) -> Agent:
+        return await run_blocking(self._agent_repo.create, agent)
 
-    def create_round(self, run: Run, stage_index: int,
-                     cohort: list[AgentId]) -> None:
-        self._round_repo.create(Round(
+    async def create_round(self, run: Run, stage_index: int,
+                           cohort: list[AgentId]) -> None:
+        await run_blocking(self._round_repo.create, Round(
             id=RoundId(uuid.uuid4().hex),
             run_id=run.run_id,
             tenant=run.tenant,
@@ -86,8 +92,8 @@ class SliceStore:
             started_at=EpochMillis(_now_ms()),
         ))
 
-    def persist_completion(self, completion: dict[str, Any], claim_epoch: int,
-                           state: RunState | None = None) -> None:
+    async def persist_completion(self, completion: dict[str, Any], claim_epoch: int,
+                                 state: RunState | None = None) -> None:
         if self._lost_probe():
             return
         run_id = completion["run_id"]
@@ -99,7 +105,8 @@ class SliceStore:
 
         # D28: update_status is claim-epoch fenced — False means the claim
         # was lost and the reclaimer owns this agent's outcome.
-        updated = self._agent_repo.update_status(
+        updated = await run_blocking(
+            self._agent_repo.update_status,
             run_id, agent_id, tenant, status.value,
             attempts=completion["attempts"],
             output=agent_output(payload, artifact_key),
@@ -116,9 +123,9 @@ class SliceStore:
             )
             raise _SliceLost()
         if status is AgentStatus.COMPLETED:
-            self._record_injection(run_id, tenant, agent_id, payload)
-            self._create_shard(run_id, tenant, agent_id, payload,
-                               artifact_key, state)
+            await self._record_injection(run_id, tenant, agent_id, payload)
+            await self._create_shard(run_id, tenant, agent_id, payload,
+                                     artifact_key, state)
 
         content: dict[str, Any] = {"status": status.value}
         if payload is not None:
@@ -127,13 +134,14 @@ class SliceStore:
             content["artifact_key"] = artifact_key
         if completion["error"] is not None:
             content["error"] = completion["error"]
-        self.create_message(
-            run_id, tenant, agent_id, MessageRole.ASSISTANT,
-            content, token_usage=completion["token_usage"],
+        await run_blocking(
+            self._message_repo.create,
+            self._new_message(run_id, tenant, agent_id, MessageRole.ASSISTANT,
+                              content, completion["token_usage"]),
         )
 
-    def _record_injection(self, run_id: RunId, tenant: TenantId,
-                          agent_id: AgentId, payload: Any) -> None:
+    async def _record_injection(self, run_id: RunId, tenant: TenantId,
+                                agent_id: AgentId, payload: Any) -> None:
         from agentclaw.community.core.agentswarm.runtime.security import (
             detect_prompt_injection,
         )
@@ -144,19 +152,21 @@ class SliceStore:
         )
         markers = detect_prompt_injection(text)
         for marker in markers:
-            self._guard_repo.create(GuardEvent(
-                id=EventId(uuid.uuid4().hex),
-                run_id=run_id,
-                tenant=tenant,
-                agent_id=agent_id,
-                kind=GuardKind.PROMPT_INJECTION,
-                details={"marker": marker},
-                created_at=EpochMillis(_now_ms()),
-            ))
+            await run_blocking(
+                self._guard_repo.create, GuardEvent(
+                    id=EventId(uuid.uuid4().hex),
+                    run_id=run_id,
+                    tenant=tenant,
+                    agent_id=agent_id,
+                    kind=GuardKind.PROMPT_INJECTION,
+                    details={"marker": marker},
+                    created_at=EpochMillis(_now_ms()),
+                ),
+            )
 
-    def _create_shard(self, run_id: RunId, tenant: TenantId, agent_id: AgentId,
-                      payload: Any, artifact_key: Any,
-                      state: RunState | None) -> None:
+    async def _create_shard(self, run_id: RunId, tenant: TenantId, agent_id: AgentId,
+                            payload: Any, artifact_key: Any,
+                            state: RunState | None) -> None:
         if (payload is None) == (artifact_key is None):
             # D31 XOR violated upstream; refuse to persist a malformed shard.
             logger.error(
@@ -164,10 +174,12 @@ class SliceStore:
                 agent_id,
             )
             return
-        if self._shard_repo.get_by_run_agent(run_id, agent_id, tenant) is not None:
+        if await run_blocking(
+            self._shard_repo.get_by_run_agent, run_id, agent_id, tenant,
+        ) is not None:
             # D24: exactly-once side effects — never duplicate a persisted shard.
             return
-        self._shard_repo.create(ResultShard(
+        await run_blocking(self._shard_repo.create, ResultShard(
             id=ShardId(uuid.uuid4().hex),
             run_id=run_id,
             tenant=tenant,
@@ -179,10 +191,10 @@ class SliceStore:
         if state is not None:
             state.routed_shard_count += 1
 
-    def create_message(self, run_id: RunId, tenant: TenantId, agent_id: AgentId,
-                       role: MessageRole, content: Any,
-                       token_usage: Any = None) -> None:
-        self._message_repo.create(Message(
+    def _new_message(self, run_id: RunId, tenant: TenantId, agent_id: AgentId,
+                     role: MessageRole, content: Any,
+                     token_usage: Any = None) -> Message:
+        return Message(
             id=MessageId(uuid.uuid4().hex),
             run_id=run_id,
             tenant=tenant,
@@ -191,7 +203,17 @@ class SliceStore:
             role=role,
             content=content,
             token_usage=token_usage,
-        ))
+        )
+
+    def create_message(self, run_id: RunId, tenant: TenantId, agent_id: AgentId,
+                      role: MessageRole, content: Any,
+                      token_usage: Any = None) -> None:
+        # Sync path: called from the orchestrator's on_llm_exchange
+        # callback, which runs on the loop thread and cannot await.
+        self._message_repo.create(
+            self._new_message(run_id, tenant, agent_id, role, content,
+                              token_usage),
+        )
 
     def record_llm_exchange(self, run_id: RunId, tenant: TenantId,
                             user_prompt: str, decision_dict: dict[str, Any],
@@ -204,8 +226,10 @@ class SliceStore:
         self.create_message(run_id, tenant, orchestrator_id, MessageRole.DECISION,
                             decision_dict, token_usage=token_usage)
 
-    def apply_run_retention(self, run_id: RunId, tenant: TenantId) -> None:
+    def apply_run_retention_blocking(self, run_id: RunId, tenant: TenantId) -> None:
         # D13: on terminal, keep the per-agent tail plus shard-referenced rows.
+        # Sync core: the worker's force_stuck/force_fail run on a to_thread
+        # worker thread already, off the event loop.
         tail = self._config.message_retention_tail
         if tail <= 0:
             return
@@ -213,17 +237,23 @@ class SliceStore:
             self._message_repo.apply_retention(run_id, agent.agent_id, tenant, tail)
         self._message_repo.apply_retention(run_id, AgentId(run_id), tenant, tail)
 
-    def unsatisfied_refs(self, run_id: RunId, tenant: TenantId,
-                         refs: tuple[str, ...]) -> tuple[str, ...]:
-        shard_names = {
-            agent.name for agent in self._agent_repo.list_by_run(run_id, tenant)
-            if self._shard_repo.get_by_run_agent(
+    async def apply_run_retention(self, run_id: RunId, tenant: TenantId) -> None:
+        await run_blocking(self.apply_run_retention_blocking, run_id, tenant)
+
+    async def unsatisfied_refs(self, run_id: RunId, tenant: TenantId,
+                               refs: tuple[str, ...]) -> tuple[str, ...]:
+        shard_names = set()
+        for agent in await run_blocking(self._agent_repo.list_by_run, run_id, tenant):
+            if await run_blocking(
+                self._shard_repo.get_by_run_agent,
                 run_id, agent.agent_id, tenant,
-            ) is not None
-        }
+            ) is not None:
+                shard_names.add(agent.name)
         return tuple(ref for ref in refs if ref not in shard_names)
 
     def get_shards(self, run_id: RunId, tenant: TenantId) -> list[dict[str, Any]]:
+        # Sync path: the orchestrator invokes shard_getter as a sync
+        # callback on the loop thread.
         agents = {a.agent_id: a.name for a in self._agent_repo.list_by_run(run_id, tenant)}
         shards = self._shard_repo.list_by_run(run_id, tenant)
         return [
@@ -234,17 +264,26 @@ class SliceStore:
             for s in shards
         ]
 
-    def rehydrate(self, run: Run, claim_epoch: int = 0) -> tuple[RunState, set[tuple[str, str]], list[Agent]]:
+    async def rehydrate(self, run: Run, claim_epoch: int = 0) -> tuple[RunState, set[tuple[str, str]], list[Agent]]:
         state = RunState(run=run)
-        state.round_index = len(self._round_repo.list_by_run(run.run_id, run.tenant))
-        agents = self._agent_repo.list_by_run(run.run_id, run.tenant)
+        state.round_index = len(
+            await run_blocking(self._round_repo.list_by_run, run.run_id, run.tenant)
+        )
+        agents = await run_blocking(
+            self._agent_repo.list_by_run, run.run_id, run.tenant,
+        )
         state.total_agents_spawned = len(agents)
-        state.routed_shard_count = len(self._shard_repo.list_by_run(run.run_id, run.tenant))
+        state.routed_shard_count = len(
+            await run_blocking(self._shard_repo.list_by_run, run.run_id, run.tenant)
+        )
 
         done_pairs: set[tuple[str, str]] = set()
         interrupted: list[Agent] = []
         for agent in agents:
-            shard = self._shard_repo.get_by_run_agent(run.run_id, agent.agent_id, run.tenant)
+            shard = await run_blocking(
+                self._shard_repo.get_by_run_agent,
+                run.run_id, agent.agent_id, run.tenant,
+            )
             if shard is None:
                 if agent.status in (AgentStatus.QUEUED, AgentStatus.RUNNING):
                     interrupted.append(agent)
@@ -253,14 +292,14 @@ class SliceStore:
             if agent.status in (AgentStatus.QUEUED, AgentStatus.RUNNING):
                 # D24: finished before a crash — flip COMPLETED idempotently,
                 # never re-enqueue.
-                self._agent_repo.update_status(
+                await run_blocking(
+                    self._agent_repo.update_status,
                     run.run_id, agent.agent_id, run.tenant,
                     AgentStatus.COMPLETED.value,
                     output=agent_output(
                         shard.payload if shard.payload is not None else None,
                         shard.artifact_key,
                     ),
-                
                     claim_epoch=claim_epoch,
                 )
 
@@ -272,7 +311,8 @@ class SliceStore:
             if a.status in (AgentStatus.QUEUED, AgentStatus.RUNNING)
         ]
 
-        orchestrator_msgs = self._message_repo.list_by_agent(
+        orchestrator_msgs = await run_blocking(
+            self._message_repo.list_by_agent,
             run.run_id, AgentId(run.run_id), run.tenant,
         )
         for msg in orchestrator_msgs:

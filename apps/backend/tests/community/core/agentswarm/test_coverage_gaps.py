@@ -407,11 +407,11 @@ class TestSliceStoreGaps:
         run = self._mk_run(db)
         agent = _mk_agent(run, "a1")
         AgentRepository(db).create(agent)
-        db_probe.persist_completion(
+        asyncio.run(db_probe.persist_completion(
             self._completion(run, agent.agent_id, dm.AgentStatus.COMPLETED,
                              result={"r": 1}),
             claim_epoch=0,
-        )
+        ))
         stored = AgentRepository(db).get(run.run_id, agent.agent_id, TENANT)
         assert stored.status is dm.AgentStatus.QUEUED
 
@@ -420,10 +420,10 @@ class TestSliceStoreGaps:
         run = self._mk_run(db)
         agent = _mk_agent(run, "a1")
         AgentRepository(db).create(agent)
-        store.persist_completion(
+        asyncio.run(store.persist_completion(
             self._completion(run, agent.agent_id, dm.AgentStatus.COMPLETED),
             claim_epoch=self._claim_job(db, run),
-        )
+        ))
         shard = ResultShardRepository(db).get_by_run_agent(
             run.run_id, agent.agent_id, TENANT,
         )
@@ -434,11 +434,11 @@ class TestSliceStoreGaps:
         run = self._mk_run(db)
         agent = _mk_agent(run, "a1")
         AgentRepository(db).create(agent)
-        store.persist_completion(
+        asyncio.run(store.persist_completion(
             self._completion(run, agent.agent_id, dm.AgentStatus.FAILED,
                              error="boom"),
             claim_epoch=self._claim_job(db, run),
-        )
+        ))
         messages = MessageRepository(db).list_by_agent(
             run.run_id, agent.agent_id, TENANT,
         )
@@ -450,11 +450,11 @@ class TestSliceStoreGaps:
         run = self._mk_run(db)
         agent = _mk_agent(run, "a1")
         AgentRepository(db).create(agent)
-        store.persist_completion(
+        asyncio.run(store.persist_completion(
             self._completion(run, agent.agent_id, dm.AgentStatus.COMPLETED,
                              artifact_key="run/artifact"),
             claim_epoch=self._claim_job(db, run),
-        )
+        ))
         shard = ResultShardRepository(db).get_by_run_agent(
             run.run_id, agent.agent_id, TENANT,
         )
@@ -472,7 +472,7 @@ class TestSliceStoreGaps:
             run.run_id, TENANT, "prompt", {"kind": "handoff", "target": "researcher"},
             dm.TokenUsage(),
         )
-        state, done_pairs, interrupted = store.rehydrate(run)
+        state, done_pairs, interrupted = asyncio.run(store.rehydrate(run))
         assert state.turn_count == 1
         assert state.active_persona is not None
         assert state.active_persona.role == "researcher"
