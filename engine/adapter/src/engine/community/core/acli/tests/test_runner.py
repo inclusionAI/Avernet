@@ -51,6 +51,10 @@ if args[0] == "install":
     print(json.dumps({{"success": True, "name": args[1], "command": "di", "version": "1.0.9",
                        "cli": {{"name": args[1], "command": "di", "description": "DeepInsight"}}}}))
 elif args[:2] == ["tool", "list"]:
+    if mode == "list_no_tools":
+        print(json.dumps({{"success": True}})); sys.exit(0)
+    if mode == "list_null_tools":
+        print(json.dumps({{"success": True, "tools": None}})); sys.exit(0)
     names = os.environ.get("FAKE_ACLI_INSTALLED", "").split(",")
     print(json.dumps({{"success": True, "tools": [{{"name": n}} for n in names if n]}}))
 elif args[:2] == ["tool", "uninstall"]:
@@ -263,6 +267,27 @@ async def test_uninstall_of_unknown_tool_is_success_without_uninstall_call(
 
     assert result.uninstalled is False
     assert [c["args"][:2] for c in calls()] == [["tool", "list"]]
+
+
+async def test_uninstall_refuses_a_listing_without_tools(fake_acli, install_dir, monkeypatch):
+    """A malformed listing must not read as "not installed" and skip the uninstall."""
+    runner, calls = fake_acli
+    monkeypatch.setenv("FAKE_ACLI_MODE", "list_no_tools")
+
+    with pytest.raises(AcliError) as caught:
+        await runner.uninstall("dataphin", install_dir)
+
+    assert caught.value.code == "bad_output"
+    assert [c["args"][:2] for c in calls()] == [["tool", "list"]]
+
+
+async def test_uninstall_reads_a_null_listing_as_empty(fake_acli, install_dir, monkeypatch):
+    runner, _ = fake_acli
+    monkeypatch.setenv("FAKE_ACLI_MODE", "list_null_tools")
+
+    result = await runner.uninstall("dataphin", install_dir)
+
+    assert result.uninstalled is False
 
 
 async def test_uninstall_failure_raises(fake_acli, install_dir, monkeypatch):

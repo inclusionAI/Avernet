@@ -234,10 +234,14 @@ class AcliRunner:
             timeout=QUERY_TIMEOUT_SECONDS,
             failure_code="uninstall_failed",
         )
-        tools = listing.get("tools")
+        # A listing of the wrong shape must not read as "not installed": the
+        # grant is already revoked, and skipping the uninstall would leave
+        # the program on PATH. An explicit null is an empty listing.
+        if "tools" not in listing or not isinstance(listing["tools"], (list, type(None))):
+            raise AcliError("bad_output", "acli tool list returned no tools list")
         installed_names = {
             str(tool.get("name"))
-            for tool in (tools if isinstance(tools, list) else [])
+            for tool in listing["tools"] or []
             if isinstance(tool, Mapping)
         }
         if name not in installed_names:
