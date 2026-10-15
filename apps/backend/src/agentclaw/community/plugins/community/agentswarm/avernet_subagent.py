@@ -64,6 +64,7 @@ class AvernetSubagent:
                 # collide same-named spawns, so there is no name fallback.
                 idempotency_key=IdempotencyKey(
                     f"{self._run.run_id}:{self._agent_id}"),
+                owner_id=self._run.owner_id,
             )
         except Exception:
             raise
@@ -87,7 +88,8 @@ class AvernetSubagent:
             # until a spurious reclaim rips the job away mid-chat (#4):
             # offload the call to a thread, keep the loop breathing.
             text = await asyncio.to_thread(
-                self._platform.chat, bot_id=self._bot_id, message=prompt)
+                self._platform.chat, bot_id=self._bot_id, message=prompt,
+                owner_id=self._run.owner_id)
         except Exception:
             raise
         try:
@@ -101,7 +103,7 @@ class AvernetSubagent:
         # the platform's own TTL/lifecycle owns the orphan.
         if self._bot_id is not None:
             try:
-                self._platform.delete_bot(self._bot_id)
+                self._platform.delete_bot(self._bot_id, owner_id=self._run.owner_id)
             except Exception as exc:
                 logger.warning("[agentswarm][avernet] bot delete failed: %s", exc)
             finally:
@@ -114,7 +116,7 @@ class AvernetSubagent:
                           interval: float = 1.0) -> str:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            state = self._platform.bot_status(bot_id)
+            state = self._platform.bot_status(bot_id, owner_id=self._run.owner_id)
             if state == BotState.READY.value:
                 return state
             if state in _TERMINAL_FAILURE:

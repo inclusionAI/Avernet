@@ -51,6 +51,8 @@ class RunRepository(RunRepositoryProtocol):
                     final_answer=_dumps(run.final_answer) if run.final_answer is not None else None,
                     error=run.error,
                     active_idempotency_key=run.active_idempotency_key,
+                    owner_id=run.owner_id,
+                    model=getattr(run.run_options, 'model_name', None) or '',
                     started_at=run.started_at,
                     ended_at=run.ended_at,
                 )
@@ -254,6 +256,8 @@ class RunRepository(RunRepositoryProtocol):
             request_metadata=dm.RequestMetadata(**req_md_raw),
             status=_decode_run_status(row.status),
             started_at=dm.EpochMillis(row.started_at or 0),
+            owner_id=row.owner_id or "",
+            run_options=dm.RunOptions.from_metadata(row.request_metadata) if row.request_metadata else None,
             termination_reason=_decode_termination_reason(row.termination_reason),
             root_agent_id=dm.AgentId(row.root_agent_id) if row.root_agent_id else None,
             final_answer=_loads(row.final_answer),

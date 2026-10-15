@@ -21,6 +21,8 @@ class AcAgentSwarmRunModel(_AgentSwarmBase, Base):
     final_answer = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
     active_idempotency_key = Column(_ID190, nullable=True)
+    owner_id = Column(String(64), nullable=False, default="")
+    model = Column(String(128), nullable=False, default="")
     started_at = Column(BigInteger, nullable=True)
     ended_at = Column(BigInteger, nullable=True)
 

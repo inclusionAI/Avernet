@@ -10,6 +10,7 @@ from agentclaw.community.core.agentswarm.domain.models import (
     CompletionRequest, Decision, DecisionParse,
     FinishDecision, GuardEvent, HandoffDecision, LlmCallKind, Run,
     SpawnDecision, TerminationReason, WaitDecision, EpochMillis, EventId, GuardKind,
+    ModelId, WaitMode,
 )
 from agentclaw.community.plugin_api.agentswarm.llm import LLMProvider
 from agentclaw.community.core.agentswarm.orchestration.decision_parser import DecisionParser
@@ -189,6 +190,14 @@ class Orchestrator:
                         "[agentswarm][orchestrator] spawn skipped agent=%s guard=%s",
                         envelope.name, guard.kind.value,
                     )
+                    if guard.kind == GuardKind.DEDUPE_REJECT:
+                        # Re-asking for an already-in-flight agent is WAIT
+                        # expressed poorly, not a second spawn intent.
+                        # Convert to wait so the turn is credited as
+                        # progress, not a no-progress death spiral.
+                        if "wait" not in result:
+                            result["wait"] = WaitDecision(
+                                refs=(envelope.name,), mode=WaitMode.ALL)
                     continue
                 result["spawn"].append(envelope)
                 state.last_spawn_objectives.append(envelope.objective)
@@ -230,6 +239,7 @@ class Orchestrator:
                 kind=LlmCallKind.ORCHESTRATOR,
                 system_prompt=self._system_prompt(run, state),
                 user_prompt=prompt,
+                model=ModelId(run.run_options.model_name) if getattr(run, 'run_options', None) and run.run_options.model_name else None,
             )
             response = await self._llm.complete(request)
             parse = self._parser.parse(response.text)

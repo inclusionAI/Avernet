@@ -44,6 +44,7 @@ from agentclaw.community.api.agentswarm_service import (
 from agentclaw.community.core.agentswarm.domain.models import (
     AgentSpec, ProviderKind, RunStatus,
 )
+from agentclaw.community.core.agentswarm.domain.models import RunOptions
 from agentclaw.community.core.agentswarm.service.protocols import (
     AgentSwarmConfigError, AgentSwarmRunNotFoundError,
     GlobalRunLimitExceeded, QueueDepthExceeded, TenantRunLimitExceeded,
@@ -73,35 +74,16 @@ CurrentUserDep = Annotated[AuthenticatedUser, Depends(get_current_user)]
 
 router = APIRouter(prefix="/openapi/v1/agentswarm", tags=["agentswarm"])
 
-
-def _resolve_tenant(
-    user: Annotated[AuthenticatedUser, Depends(get_current_user)],
-) -> str:
-    """Effective tenant for this request — principal ONLY, fail closed.
-
-    D25: the authenticated principal is the tenant authority. No shipped
-    auth profile populated ``tntInstId`` when the ``X-Tenant-Id`` header
-    fallback existed, which made the client-controlled header the
-    effective tenant for every authenticated caller (P0-3) — so the
-    fallback is removed and this boundary never reads a client-supplied
-    tenant from any request attribute. A principal that carries no
-    tenant fails closed with 400.
-
-    A tenant that resolves to nothing is 400 rather than 401: the caller
-    may well be authenticated — their principal simply carries no tenant —
-    so "credentials" would be the wrong fix, and the precise message says
-    only the identity provider can produce one.
-    """
-    tenant = (user.tenantId or "").strip()
-    if not tenant:
-        raise HTTPException(
-            status_code=400,
-            detail="tenant unresolvable",
-        )
-    return tenant
-
-
-TenantDep = Annotated[str, Depends(_resolve_tenant)]
+# The tenant scope is an explicit, per-request API parameter on this
+# surface: the authenticated caller names the tenant the run belongs to,
+# fail-closed 400 when absent. No shipped auth profile provides a tenant
+# through the principal (BCS: user_id only), so the parameter is the single
+# source of tenancy here; cross-tenant access stays refused at the data
+# layer (repo scoping, D25 unchanged).
+TenantQuery = Annotated[
+    str,
+    Query(min_length=1, max_length=64, description="tenant scope for the run"),
+]
 
 
 def _audit(
@@ -135,12 +117,12 @@ def _audit(
 async def submit_run(
     dto: SubmitRunDTO,
     svc: AgentSwarmServiceDep,
-    tenant: TenantDep,
     user: CurrentUserDep,
     audit_writer: AgentSwarmAuditWriterDep,
     wait: bool = Query(False, description="block until terminal and return the full run"),
 ) -> SubmitRunResponseDTO | RunSummaryDTO:
-    req = _to_domain(dto, tenant)
+    tenant = (dto.tenant or "").strip()
+    req = _to_domain(dto, user.staffId)
     try:
         if wait:
             run = await svc.submit_sync(req)
@@ -174,7 +156,7 @@ async def submit_run(
 async def cancel_run(
     run_id: str,
     svc: AgentSwarmServiceDep,
-    tenant: TenantDep,
+    tenant: TenantQuery,
     user: CurrentUserDep,
     audit_writer: AgentSwarmAuditWriterDep,
 ) -> CancelResponseDTO:
@@ -192,7 +174,7 @@ async def cancel_run(
 async def get_run(
     run_id: str,
     svc: AgentSwarmServiceDep,
-    tenant: TenantDep,
+    tenant: TenantQuery,
 ) -> RunSummaryDTO:
     run = svc.get_run(run_id, tenant)
     if run is None:
@@ -203,7 +185,7 @@ async def get_run(
 @router.get("/runs")
 async def list_runs(
     svc: AgentSwarmServiceDep,
-    tenant: TenantDep,
+    tenant: TenantQuery,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status: RunStatus | None = Query(None),
@@ -221,7 +203,7 @@ async def list_runs(
 async def stream_run(
     run_id: str,
     svc: AgentSwarmServiceDep,
-    tenant: TenantDep,
+    tenant: TenantQuery,
 ) -> StreamingResponse:
     def _sse(event: str, data: dict) -> str:
         evt = StreamEventDTO(event=event, run_id=run_id, data=data)
@@ -280,7 +262,7 @@ async def stream_run(
 async def report(
     run_id: str,
     svc: AgentSwarmServiceDep,
-    tenant: TenantDep,
+    tenant: TenantQuery,
 ) -> HTMLResponse:
     run = svc.get_run(run_id, tenant)
     if run is None:
@@ -344,9 +326,10 @@ def _config_error_handler(request: Request, exc: AgentSwarmConfigError) -> JSONR
     return JSONResponse(status_code=400, content={"error": str(exc)})
 
 
-def _to_domain(dto: SubmitRunDTO, tenant: str) -> SubmitRunRequest:
+def _to_domain(dto: SubmitRunDTO, owner_id: str = "") -> SubmitRunRequest:
+    opts = dto.options
     return SubmitRunRequest(
-        tenant=tenant,
+        tenant=(dto.tenant or "").strip(),
         goal=dto.goal,
         agents=tuple(
             AgentSpec(
@@ -360,8 +343,9 @@ def _to_domain(dto: SubmitRunDTO, tenant: str) -> SubmitRunRequest:
             for a in dto.agents
         ),
         provider=ProviderKind.coerce(dto.provider),
-        model=dto.model,
         idempotency_key=dto.idempotency_key,
+        owner_id=owner_id,
+        run_options=RunOptions.from_dto(dto.options),
     )
 
 

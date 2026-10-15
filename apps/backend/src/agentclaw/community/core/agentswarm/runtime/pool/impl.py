@@ -185,6 +185,14 @@ class SubagentRuntime:
     async def get_pending_count(self) -> int:
         return self._work.qsize()
 
+    def dispose_run_agents_bots(self, run: Run, agents) -> list[str]:
+        # Run-terminal bot reconciliation via the factory (no-op for
+        # factories without the method, e.g. test doubles).
+        disposer = getattr(self._factory, "destroy_run_agents_bots", None)
+        if disposer is None:
+            return []
+        return disposer(run, agents)
+
     async def _worker_loop(self) -> None:
         while not self._slice_lost.is_set():
             try:

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from agentclaw.community.core.agentswarm.domain.models.enums import (
     AgentKind, AgentStatus, BotState, GuardKind, MessageRole, ProviderKind,
-    RunStatus, TerminationReason,
+    RunOptions, RunStatus, TerminationReason,
 )
 from agentclaw.community.core.agentswarm.domain.models.ids import (
     AgentId, ArtifactKey, BotId, EpochMillis, EventId, IdempotencyKey,
@@ -35,6 +35,8 @@ class Run:
     request_metadata: RequestMetadata
     status: RunStatus
     started_at: EpochMillis
+    owner_id: str = ""
+    run_options: RunOptions = None
     termination_reason: TerminationReason | None = None
     root_agent_id: AgentId | None = None
     final_answer: FinalAnswer | None = None

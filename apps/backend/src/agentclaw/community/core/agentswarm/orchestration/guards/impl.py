@@ -75,14 +75,18 @@ class GuardService:
         return None
 
     def check_width(self, state: RunState, current_width: int) -> GuardEvent | None:
-        if current_width >= self._max_width:
+        limit = self._max_width
+        options = getattr(state.run, 'run_options', None)
+        if options is not None and options.max_width is not None:
+            limit = min(options.max_width, self._max_width)
+        if current_width >= limit:
             return GuardEvent(
                 id=EventId(_gen_id()),
                 run_id=state.run.run_id,
                 tenant=state.run.tenant,
                 agent_id=None,
                 kind=GuardKind.WIDTH_EXCEEDED,
-                details={"width": current_width, "max": self._max_width},
+                details={"width": current_width, "max": limit},
                 created_at=EpochMillis(_now_ms()),
             )
         return None

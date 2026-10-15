@@ -129,12 +129,11 @@ class AgentSwarmModule(Module):
     @provider
     @singleton
     def provide_config(self) -> AgentSwarmConfig:
-        # The `agentswarm` block carries the operational knobs; the LLM
-        # comes from the TOP-LEVEL `llm` yaml block (the same one the
-        # harness reads — base_url + secret_name, resolved via
-        # SecretResolver). No agentswarm-specific LLM config exists.
+        # The `agentswarm` block carries the operational knobs and its own LLM
+        # sub-block (`agentswarm.llm` — base_url + secret_name, resolved via
+        # SecretResolver, model via the run-level API parameter). The
+        # top-level `llm` block belongs to the harness and is not read here.
         block = _block("agentswarm")
-        block["llm"] = _block("llm")
         return AgentSwarmConfig.from_block(block)
 
     @provider
@@ -241,25 +240,15 @@ class AgentSwarmModule(Module):
     def bot_platform(
         self,
         injector: Injector,
-        config: AgentSwarmConfig,
     ) -> BotPlatform:
-        """In-process host adapter from config.platform. Heavy imports
-        are call-local: the bot_management chain is circular at module
-        import time (bot_service→aicoding→bot_service), deferring the
-        chain here preserves the module's clean import."""
-        # P0-9: the platform identity is required, with no service-account
-        # fallback — bots created under an empty owner have no owner. The
-        # refusal is precise (AgentSwarmConfigError naming the knob);
-        # provide_runtime logs it before degrading to the none-platform
-        # mode, so it is never mistaken for an unbound wiring bug.
-        owner_id = config.host.owner_id.strip()
-        if not owner_id:
-            raise AgentSwarmConfigError(
-                "agentswarm.host.owner_id is not configured: the host "
-                "BotPlatform binding requires the account swarm-created "
-                "bots belong to (no service-account fallback) — set "
-                "host.owner_id in the agentswarm block"
-            )
+        """In-process host adapter. Heavy imports are call-local: the
+        bot_management chain is circular at module import time
+        (bot_service→aicoding→bot_service), deferring the chain here
+        preserves the module's clean import.
+
+        The provisioning owner is per-run (the authenticated caller,
+        P0-9 no-service-account stance) — enforced at the factory where
+        the run context is visible, not here where no run exists."""
         from agentclaw.community.api.bot_config_manifest_apply_service import (
             BotConfigManifestApplyServiceProtocol,
         )
@@ -269,14 +258,13 @@ class AgentSwarmModule(Module):
         )
         from agentclaw.community.core.bot_management.manifest_seam import ManifestCreationSeam
         from agentclaw.community.core.repository.protocols.bot import BotRepository
-        from agentclaw.community.core.grt_chat.services import GrtChatService
+        from agentclaw.community.core.service_bot.services.baas_service import BaasService
         from agentclaw.community.core.skill_center.skill_set_service_factory_protocol import SkillSetServiceFactoryProtocol
         from agentclaw.community.plugin_api.passport import PassportPlugin
         from agentclaw.community.plugins.community.agentswarm.host import (
             AvernetBotPlatform,
         )
         return AvernetBotPlatform(
-            owner_id=owner_id,
             manifest_seam=injector.get(ManifestCreationSeam),
             bot_service=injector.get(BotServiceProtocol),
             passport_plugin=injector.get(PassportPlugin),
@@ -284,7 +272,7 @@ class AgentSwarmModule(Module):
             bot_repo=injector.get(BotRepository),
             apply_service=injector.get(BotConfigManifestApplyServiceProtocol),
             space_context=injector.get(BusinessSpaceContextProtocol),
-            grt_chat=injector.get(GrtChatService),
+            baas_service=injector.get(BaasService),
         )
 
     @provider

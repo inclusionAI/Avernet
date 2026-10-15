@@ -18,7 +18,7 @@ from agentclaw.community.core.agentswarm.domain.models.ids import (
 )
 from agentclaw.community.core.agentswarm.domain.models.enums import (
     AgentKind, AgentStatus, BotState, DecisionKind, FinishReason, GuardKind,
-    LlmCallKind, MessageRole, ProviderKind, RunStatus, StreamEventKind, TaskQueueStatus,
+    LlmCallKind, MessageRole, ProviderKind, RunOptions, RunStatus, StreamEventKind, TaskQueueStatus,
     TerminationReason, WaitMode, WorkerOutcomeKind,
 )
 # BotCreateSpec is BotPlatform seam vocabulary — owned by the seam and

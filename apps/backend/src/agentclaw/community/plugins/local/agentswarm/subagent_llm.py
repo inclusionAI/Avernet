@@ -32,7 +32,9 @@ class LLMBackedSubagent:
         )
         request = CompletionRequest(
             kind=LlmCallKind.SUBAGENT,
-            model=ModelId(self._spec.model) if self._spec.model else None,
+            model=ModelId(self._spec.model) if self._spec.model
+                else ModelId(self._run.run_options.model_name) if getattr(self._run, 'run_options', None) and self._run.run_options.model_name
+                else None,
             system_prompt=prompt,
             user_prompt=envelope.objective,
         )

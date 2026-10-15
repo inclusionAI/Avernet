@@ -20,11 +20,13 @@ bind-agentswarm-host-bot-platform):
 - delete is phase-aware and best-effort: discard the pending creation when no
   bot exists, soft-delete the bot when one does, and never raise — teardown
   must not change the slice outcome.
-- chat drives the engine transport (``GrtChatService``): resolve the bot's
-  runtime binding, open the engine WebSocket, ``chat.send`` the objective,
-  return the final reply text. Its async is bridged onto one thread with its
-  own event loop because the seam's methods are synchronous by contract and
-  are called from inside the swarm's already-running loop, and the wait is
+- chat drives the engine transport directly: the chat endpoint comes from
+  the canonical BaaS ws-info (``BaasService.get_ws_info_by_bot_uuid`` — the
+  same resolution every other chat surface uses), and the adapter's
+  engine frames (``connect`` handshake + ``chat.send`` accumulate) are
+  spoken in-process. The async is bridged onto one thread with its own
+  event loop because the seam's methods are synchronous by contract and
+  are called from inside the swarm's already-running loop; the wait is
   bounded (``_CHAT_TIMEOUT_SECONDS``): a hung engine WebSocket surfaces as
   ``ChatTimeoutError`` rather than blocking the swarm thread forever.
 
@@ -45,6 +47,9 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import hashlib
+import json
+import ssl
+import uuid
 from typing import Any
 
 import yaml
@@ -70,7 +75,7 @@ from agentclaw.community.core.bot_management.manifest_seam import (
 from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
 )
-from agentclaw.community.core.grt_chat.services import GrtChatService
+from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.task_queue.types import (
     TERMINAL_STATUSES, TaskStatus,
 )
@@ -96,6 +101,13 @@ _BOT_DEAD = frozenset({"FAILED", "DELETED", "INACTIVE"})
 # WebSocket.
 _CHAT_TIMEOUT_SECONDS = 300.0
 
+# Engine chat transport: the in-pod adapter channel and its zero-check
+# machine-caller token (OPEN_API:<kind>:<app>; no certified token, and the
+# check itself fails open on its own infrastructure errors).
+_ENGINE_WS_PORT = 20003
+_ENGINE_WS_PATH = "/api/openclaw/ws"
+_ZERO_CHECK_OPEN_API_TOKEN = "OPEN_API:app:agentswarm"
+
 
 class ChatTimeoutError(RuntimeError):
     """The engine chat leg did not answer within ``_CHAT_TIMEOUT_SECONDS``.
@@ -110,6 +122,15 @@ class ChatTimeoutError(RuntimeError):
 
 def _idem_digest(idempotency_key: str, length: int) -> str:
     return hashlib.sha1(idempotency_key.encode("utf-8")).hexdigest()[:length]
+
+
+def bot_id_for(run_id: str, agent_id: str) -> str:
+    """Deterministic transient-bot identity for a (run, agent) pair.
+
+    The platform's create derives the same value from the spawn's
+    idempotency key, so a cleanup that only knows the run and agent ids
+    can still address the bot that was created for it."""
+    return f"ac_{_idem_digest(f'{run_id}:{agent_id}', 16)}"
 
 
 class AvernetBotPlatform(BotPlatform):
@@ -148,7 +169,7 @@ class AvernetBotPlatform(BotPlatform):
         bot_repo: Any,
         apply_service: Any,
         space_context: BusinessSpaceContextProtocol,
-        grt_chat: GrtChatService,
+        baas_service: BaasService,
     ) -> None:
         # owner_id is the run's provisioning identity (the submitter);
         # per-call: per_run when the swarm identity arrives via Run.user_id
@@ -160,19 +181,24 @@ class AvernetBotPlatform(BotPlatform):
         self._bot_repo = bot_repo
         self._apply_service = apply_service
         self._space_context = space_context
-        self._grt_chat = grt_chat
+        self._baas_service = baas_service
+        self._chat_timeout_seconds = _CHAT_TIMEOUT_SECONDS
 
 
     # ── create ────────────────────────────────────────────────────────────
 
     def create_bot(self, *, spec: BotCreateSpec,
-                   idempotency_key: IdempotencyKey) -> BotId:
+                   idempotency_key: IdempotencyKey, owner_id: str = "") -> BotId:
         # Heavy chain (bot_service -> aicoding -> di) imports call-local, so
         # plugin import never participates in the DI bootstrap cycle.
         from agentclaw.community.core.bot_management.create_flow import (
             submit_bot_creation_with_manifest,
         )
 
+        owner = (owner_id or "").strip() or self._default_owner
+        # Same digest as bot_id_for(): the subagent always passes the
+        # idempotency key f"{run_id}:{agent_id}", so a cleanup that only
+        # knows the (run, agent) pair addresses the identical bot id.
         bot_id = f"ac_{_idem_digest(idempotency_key, 16)}"
         # One persona per (run, spec): the same idempotency key derives the same
         # bot identifier, so a retried setup rebinds the same creation instead of
@@ -192,16 +218,16 @@ class AvernetBotPlatform(BotPlatform):
             sort_keys=False, allow_unicode=True, default_flow_style=False,
         )
         space = self._space_context.resolve_current(
-            owner_id=self._default_owner, header_space_id=None,
+            owner_id=owner, header_space_id=None,
         )
         submitted = submit_bot_creation_with_manifest(
-            user_id=self._default_owner,
-            nick_name=self._default_owner,
+            user_id=owner,
+            nick_name=owner,
             bot_id=bot_id,
             document=document,
-            modifier=self._default_owner,
+            modifier=owner,
             spec=HostCreateSpec(
-                entity_id=self._default_owner,
+                entity_id=owner,
                 engine_type=spec.engine or "openclaw",
                 bot_type=spec.bot_type or "personal",
                 bot_name=bot_name,
@@ -223,8 +249,8 @@ class AvernetBotPlatform(BotPlatform):
 
     # ── status: the narrow table ──────────────────────────────────────────
 
-    def bot_status(self, bot_id: BotId) -> str:
-        owner = self._default_owner
+    def bot_status(self, bot_id: BotId, owner_id: str = "") -> str:
+        owner = (owner_id or "").strip() or self._default_owner
         bot = self._bot_repo.get_by_id_and_entity(bot_id, owner)
         job = self._manifest_seam.find_job(entity_id=owner, bot_id=bot_id)
 
@@ -289,8 +315,8 @@ class AvernetBotPlatform(BotPlatform):
 
     # ── delete ────────────────────────────────────────────────────────────
 
-    def delete_bot(self, bot_id: BotId) -> bool:
-        owner = self._default_owner
+    def delete_bot(self, bot_id: BotId, owner_id: str = "") -> bool:
+        owner = (owner_id or "").strip() or self._default_owner
         try:
             bot = self._bot_repo.get_by_id_and_entity(bot_id, owner)
             if bot is None:
@@ -308,13 +334,14 @@ class AvernetBotPlatform(BotPlatform):
 
     # ── chat ──────────────────────────────────────────────────────────────
 
-    def chat(self, bot_id: BotId, message: str) -> str:
+    def chat(self, bot_id: BotId, message: str, owner_id: str = "") -> str:
         # The seam is synchronous by contract and is called from inside the
-        # swarm's running event loop; grt_chat is async. Bridge on one thread
-        # with its own loop — one chat per slice, so a fresh executor per call
-        # is both simple and bounded. The wait is finite: a hung engine
-        # WebSocket frees this thread (and the asyncio.to_thread caller in
-        # the subagent) with ChatTimeoutError instead of blocking forever.
+        # swarm's running event loop; the engine leg is async. Bridge on one
+        # thread with its own loop — one chat per slice, so a fresh executor
+        # per call is both simple and bounded. The wait is finite: a hung
+        # engine WebSocket frees this thread (and the asyncio.to_thread
+        # caller in the subagent) with ChatTimeoutError instead of blocking
+        # forever.
         #
         # No context manager: its __exit__ joins the worker, which would
         # re-block for the same hang the timeout just cut short. On overrun
@@ -322,7 +349,8 @@ class AvernetBotPlatform(BotPlatform):
         # runs on, abandoned — it owns the hung loop, nothing here can
         # cancel it across the sync seam.
         pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        future = pool.submit(asyncio.run, self._chat_once(bot_id, message))
+        owner = (owner_id or "").strip() or self._default_owner
+        future = pool.submit(asyncio.run, self._chat_once(bot_id, message, owner))
         try:
             reply = future.result(timeout=_CHAT_TIMEOUT_SECONDS)
         except concurrent.futures.TimeoutError as exc:
@@ -334,15 +362,168 @@ class AvernetBotPlatform(BotPlatform):
         pool.shutdown(wait=False)
         return reply
 
-    async def _chat_once(self, bot_id: BotId, message: str) -> str:
-        sandbox_id = self._grt_chat.get_sandbox_id(bot_id, self._default_owner)
-        if not sandbox_id:
+    def _engine_endpoint(self, bot_id: BotId, owner: str) -> tuple[str, str]:
+        """Resolve the bot's chat endpoint via BaaS ws-info.
+
+        The sandbox proxy only resolves targets the BaaS provider registry
+        knows (bot-uuid-minted targets close the WS 1008 in proxypass_ws),
+        so the connection pair always comes from the canonical
+        ``/api/v1/bots/{uuid}/ws-info`` resolution — never minted here.
+        """
+        bot = self._bot_repo.get_by_id_and_entity(bot_id, owner)
+        if bot is None:
+            raise RuntimeError(f"bot {bot_id} not found for chat")
+        bot_uuid = (bot.get("device_id") or "").strip()
+        if not bot_uuid:
             raise RuntimeError(
                 f"bot {bot_id} has no runtime binding to chat through"
             )
-        ws = await self._grt_chat.connect_engine_ws(sandbox_id)
         try:
-            result = await self._grt_chat.chat_send(ws, message)
-            return result.text
+            info = self._baas_service.get_ws_info_by_bot_uuid(
+                bot_uuid=bot_uuid,
+                port=_ENGINE_WS_PORT,
+                path=_ENGINE_WS_PATH,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[agentswarm][host-platform] baas ws-info failed for "
+                "bot=%s uuid=%s: %s", bot_id, bot_uuid, exc,
+            )
+            raise RuntimeError(
+                f"bot {bot_id} has no runtime binding to chat through"
+            ) from exc
+        ws_url = (getattr(info, "ws_url", "") or "").strip()
+        token = (getattr(info, "token", "") or "").strip()
+        if not ws_url or not token:
+            raise RuntimeError(
+                f"bot {bot_id} has no runtime binding to chat through"
+            )
+        return ws_url, token
+
+    async def _chat_once(self, bot_id: BotId, message: str, owner: str) -> str:
+        ws_url, token = self._engine_endpoint(bot_id, owner)
+        ws = await self._connect_engine(ws_url, token)
+        try:
+            return await self._chat_send(ws, message, token)
         finally:
             await ws.close()
+
+    async def _connect_engine(self, ws_url: str, token: str):
+        import websockets
+
+        ssl_context = None
+        if ws_url.startswith("wss://"):
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+        try:
+            ws = await asyncio.wait_for(
+                websockets.connect(
+                    ws_url,
+                    additional_headers={"x-proxypass-token": token},
+                    ssl=ssl_context,
+                    max_size=2 * 1024 * 1024,
+                ),
+                timeout=30,
+            )
+        except Exception as e:
+            raise ConnectionError(
+                f"engine websocket connect failed ({ws_url}): {e}"
+            ) from e
+
+        connect_frame = {
+            "type": "req",
+            "id": str(uuid.uuid4()),
+            "method": "connect",
+            "params": {
+                "minProtocol": 3,
+                "maxProtocol": 3,
+                "client": {
+                    "id": "cli",
+                    "version": "1.0.0",
+                    "platform": "MacIntel",
+                    "mode": "cli",
+                },
+                "role": "operator",
+                "x-moltis-mcp-token": token,
+                "scopes": [
+                    "operator.admin",
+                    "operator.read",
+                    "operator.write",
+                ],
+            },
+        }
+        try:
+            await ws.send(json.dumps(connect_frame))
+            raw = await asyncio.wait_for(ws.recv(), timeout=10)
+            resp = json.loads(raw)
+            if not resp.get("ok", False):
+                await ws.close()
+                raise ConnectionError(
+                    f"engine handshake failed: "
+                    f"{resp.get('error', {}).get('message', 'unknown error')}"
+                )
+            return ws
+        except ConnectionError:
+            raise
+        except Exception as e:
+            await ws.close()
+            raise ConnectionError(f"engine handshake failed: {e}") from e
+
+    async def _chat_send(self, ws, message: str, token: str) -> str:
+        """One chat.send round: the adapter's zero-check gate requires an
+        x-iam-token on every frame. OPEN_API:<kind>:<app> is the form it
+        accepts for machine callers (no certified token; the check fails
+        open on its own infrastructure errors)."""
+        request_id = str(uuid.uuid4())
+        request_frame = {
+            "type": "req",
+            "id": request_id,
+            "method": "chat.send",
+            "params": {
+                "sessionKey": "agent:main:default",
+                "message": message,
+                "deliver": False,
+                "idempotencyKey": request_id,
+                "x-iam-token": _ZERO_CHECK_OPEN_API_TOKEN,
+            },
+        }
+        await ws.send(json.dumps(request_frame))
+
+        deadline = asyncio.get_event_loop().time() + self._chat_timeout_seconds
+        accumulated_text = ""
+        while True:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"[host-platform][chat] timeout waiting for final: id={request_id}"
+                )
+            try:
+                raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
+            except asyncio.TimeoutError:
+                raise TimeoutError(
+                    f"[host-platform][chat] timeout waiting for final: id={request_id}"
+                )
+            except Exception as e:
+                raise ConnectionError(f"[host-platform][chat] ws closed: {e}") from e
+
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if data.get("type") != "event" or data.get("event") != "chat":
+                continue
+            payload = data.get("payload", {})
+            state = payload.get("state", "")
+            if state == "final":
+                for c in (payload.get("message", {}) or {}).get("content", []):
+                    if c.get("type") == "text":
+                        accumulated_text = c.get("text", "")
+                return accumulated_text
+            if state == "error":
+                raise RuntimeError(
+                    f"[host-platform][chat] agent error: "
+                    f"{payload.get('errorMessage', 'unknown')}"
+                )
+            if state == "aborted":
+                raise RuntimeError("[host-platform][chat] chat aborted")

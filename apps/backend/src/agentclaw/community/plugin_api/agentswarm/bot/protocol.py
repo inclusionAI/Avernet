@@ -66,22 +66,25 @@ class BotCreateSpec:
 class BotPlatform(Protocol):
 
     def create_bot(self, *, spec: BotCreateSpec,
-                   idempotency_key: IdempotencyKey) -> BotId:
+                   idempotency_key: IdempotencyKey,
+                   owner_id: str = "") -> BotId:
         """Provision a transient bot for the persona described by spec;
         returns a non-empty bot_id or raises when the platform cannot
         accept it. The adapter translates spec into the product create
-        request and composes the manifest document."""
+        request and composes the manifest document. ``owner_id`` is the
+        authenticated caller the bot is provisioned under."""
         ...
 
-    def bot_status(self, bot_id: BotId) -> str:
-        """Current BotState-like status string for the bot."""
+    def bot_status(self, bot_id: BotId, owner_id: str = "") -> str:
+        """Current BotState-like status string for the bot, scoped to the
+        provisioning owner."""
         ...
 
-    def delete_bot(self, bot_id: BotId) -> bool:
+    def delete_bot(self, bot_id: BotId, owner_id: str = "") -> bool:
         """Best-effort removal of the transient bot."""
         ...
 
-    def chat(self, bot_id: BotId, message: str) -> str:
+    def chat(self, bot_id: BotId, message: str, owner_id: str = "") -> str:
         """Send one objective and return the bot's raw reply text; the
         caller owns parsing. Non-2xx-equivalent failures raise. The wait
         is finite: a hung engine transport surfaces as a raised error

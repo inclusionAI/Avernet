@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS `ac_agent_swarm_run` (
     `final_answer`          text         DEFAULT NULL,
     `error`                 text         DEFAULT NULL,
     `active_idempotency_key` varchar(190) DEFAULT NULL          COMMENT 'active only while run is non-terminal (D29)',
+    `owner_id`               varchar(64)  NOT NULL DEFAULT ''   COMMENT 'authenticated caller — provisioned avernet bots are owned by this account',
+    `model`                  varchar(128) NOT NULL DEFAULT ''   COMMENT 'run-level API parameter — chat-completion model',
     `started_at`            bigint(20)  DEFAULT NULL           COMMENT 'epoch ms',
     `ended_at`              bigint(20)  DEFAULT NULL           COMMENT 'epoch ms',
     `is_deleted`            tinyint(1)   NOT NULL DEFAULT 0     COMMENT 'logical delete',

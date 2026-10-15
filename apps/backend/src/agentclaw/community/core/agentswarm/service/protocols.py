@@ -8,12 +8,70 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from agentclaw.community.core.agentswarm.domain.models import (
     AgentKind, AgentSpec, AgentStatus, GuardKind, ProviderKind, RequestMetadata, Run,
-    RunPage, RunStatus,
+    RunOptions, RunPage, RunStatus,
 )
+
+
+@dataclass(frozen=True)
+class RunOptions:
+    """Per-run orchestration overrides — ``None`` falls to deployment config.
+
+    Owns the full round-trip: `from_dto` (API boundary), `to_metadata`
+    (persistence boundary), `from_metadata` (post-restart recovery).
+    The serialization keys are a class-local concern — guard and handler
+    consumers never see raw string keys."""
+
+    PREFIX = "agentswarm.options"
+
+    slice_max_seconds: float | None = None
+    per_subagent_timeout_seconds: float | None = None
+    max_turns: int | None = None
+    max_total_agents: int | None = None
+    max_width: int | None = None
+
+    @classmethod
+    def from_dto(cls, dto) -> "RunOptions":
+        if dto is None:
+            return cls()
+        return cls(
+            slice_max_seconds=dto.slice_max_seconds,
+            per_subagent_timeout_seconds=dto.per_subagent_timeout_seconds,
+            max_turns=dto.max_turns,
+            max_total_agents=dto.max_total_agents,
+            max_width=dto.max_width,
+        )
+
+    @classmethod
+    def from_metadata(cls, md) -> "RunOptions":
+        ext = (getattr(md, "extend", None) or {}) if md else {}
+        ext = ext if isinstance(ext, dict) else {}
+
+        def val(key, cast):
+            raw = ext.get(f"{cls.PREFIX}.{key}")
+            return cast(raw) if raw is not None else None
+
+        return cls(
+            slice_max_seconds=val("slice_max_seconds", float),
+            per_subagent_timeout_seconds=val("per_subagent_timeout_seconds", float),
+            max_turns=val("max_turns", int),
+            max_total_agents=val("max_total_agents", int),
+            max_width=val("max_width", int),
+        )
+
+    def to_metadata(self, md) -> None:
+        for key, v in {
+            "slice_max_seconds": self.slice_max_seconds,
+            "per_subagent_timeout_seconds": self.per_subagent_timeout_seconds,
+            "max_turns": self.max_turns,
+            "max_total_agents": self.max_total_agents,
+            "max_width": self.max_width,
+        }.items():
+            if v is not None:
+                md.extend[f"{self.PREFIX}.{key}"] = str(v)
 
 
 @dataclass(frozen=True)
@@ -22,9 +80,10 @@ class SubmitRunRequest:
     goal: str
     agents: tuple[AgentSpec, ...]
     provider: ProviderKind = ProviderKind.DEFAULT
-    model: str | None = None
     request_metadata: RequestMetadata = field(default_factory=RequestMetadata)
     idempotency_key: str | None = None
+    owner_id: str = ""
+    run_options: RunOptions = field(default_factory=RunOptions)
 
 
 @dataclass(frozen=True)

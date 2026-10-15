@@ -89,6 +89,22 @@ class SwarmRunHandler:
             self._slice_lost.clear()
             self._runtime.set_slice_lost(False)
 
+    def _destroy_run_avernet_bots(self, run_id: RunId, tenant: TenantId) -> None:
+        # Lifecycle contract: any failed or cancelled run destroys every bot
+        # it provisioned. Best-effort after a successful terminal write — a
+        # cleanup error never blocks the transition.
+        try:
+            run = self._run_repo.get(run_id, tenant)
+            if run is None:
+                return
+            agents = self._agent_repo.list_by_run(run_id, tenant)
+            self._runtime.dispose_run_agents_bots(run, agents)
+        except Exception:
+            logger.exception(
+                "[agentswarm][swarm] post-terminal bot cleanup failed for run=%s",
+                run_id,
+            )
+
     def force_stuck(self, run_id: RunId, tenant: TenantId, claim_epoch: int,
                     error: str, worker_id: str | None = None) -> bool:
         """D40 reclaim circuit breaker: transition a poison run to terminal STUCK."""
@@ -104,6 +120,7 @@ class SwarmRunHandler:
             error=error, claim_epoch=claim_epoch,
         )
         if ok:
+            self._destroy_run_avernet_bots(run_id, tenant)
             self.store.apply_run_retention(run_id, tenant)
         self._job_repo.complete(run_id, tenant, self._worker_id, claim_epoch)
         return ok
@@ -123,6 +140,7 @@ class SwarmRunHandler:
             # D28 fence rejected this claim's write — a newer worker owns the
             # run and its outcome; this slice must not touch the job either.
             return False
+        self._destroy_run_avernet_bots(run_id, tenant)
         self.store.apply_run_retention(run_id, tenant)
         self._job_repo.complete(run_id, tenant, self._worker_id, claim_epoch)
         return True
@@ -262,6 +280,7 @@ class SwarmRunHandler:
         if not ok:
             # Fenced off: the slice was reclaimed; the new owner decides.
             raise _SliceLost()
+        self._destroy_run_avernet_bots(run_id, tenant)
         self.store.apply_run_retention(run_id, tenant)
         self._job_repo.complete(run_id, tenant, self._worker_id, claim_epoch)
         return "complete"
@@ -277,6 +296,7 @@ class SwarmRunHandler:
         )
         if not ok:
             raise _SliceLost()
+        self._destroy_run_avernet_bots(run_id, tenant)
         self.store.apply_run_retention(run_id, tenant)
         self._job_repo.fail(
             run_id, tenant, outcome.get("fatal") or "run failed",
