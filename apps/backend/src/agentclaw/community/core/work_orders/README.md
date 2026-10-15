@@ -196,11 +196,11 @@ the associated work-order status selects the approved or rejected template.
 
 ## Notification inbox and badge semantics
 
-- `PENDING_FOR_ME` contains pending approval notifications and unread notices
-  whose associated order is not terminal (or which have no associated order).
-- `PROCESSED_BY_ME` contains terminal approval notifications and notices that
-  are read **or** belong to a terminal order. APPROVED, REJECTED and FAILED are
-  terminal; PROCESSING is not. An unread result notice remains unread here.
+- `PENDING_FOR_ME` contains pending approval notifications and all unread notices.
+  Notice membership does not depend on the associated order's status or presence.
+- `PROCESSED_BY_ME` contains terminal approval notifications and read notices.
+  APPROVED, REJECTED and FAILED are terminal for approvals; PROCESSING is not.
+  Reading a notice moves it between inbox views on the next list query.
 - `INITIATED_BY_ME` with ALL/APPROVAL is an order projection: one row per order,
   sorted by the order's modification time and ID, with no attached notification.
   The existing applicant / legacy AUTO reviewer visibility predicate is retained.
@@ -211,14 +211,14 @@ the associated work-order status selects the approved or rejected template.
 - Compatibility: these are deliberate list-membership changes, not a schema
   migration. Consumers of initiated ALL must use work-order IDs for detail,
   rather than assuming every row has a notification ID. No frontend/BCN change
-  is included. Finished result notices move to processed even before reading.
+  is included. Unread result notices remain pending until read, including historical notices.
 - `pending_approval_count` counts distinct pending work orders for which the
   recipient has a `PENDING` approver record.
 - `unread_notice_count` counts unread `NOTICE` notifications only.
 - `badge_count` is `pending_approval_count + unread_notice_count`; notification
   read state never removes a still-actionable approval from the badge. It is a
-  reminder count, not the size of PENDING_FOR_ME; unread processed results still
-  contribute to it.
+  reminder count, not the size of a filtered or paginated list. Approval counting
+  additionally requires a pending approver record; that policy is unchanged.
 - `unread_count` retains the historical count of all unread notifications for
   compatibility and is not used to calculate `badge_count`.
 
