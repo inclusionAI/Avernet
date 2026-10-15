@@ -177,6 +177,7 @@ class AsyncChatClient:
         retry_base_backoff: float = 0.5,
         ignore_case: bool = False,
         interaction_service: BotInteractionService | None = None,
+        sensitive_bypass_keys_loader: Callable[[], tuple[str, ...]] | None = None,
     ):
         """初始化客户端
 
@@ -191,6 +192,8 @@ class AsyncChatClient:
             max_retries: WS 断连后自动重连次数，0 表示不重试
             retry_base_backoff: 重连退避基数（秒）
             ignore_case: sessionKey 模糊匹配是否忽略大小写
+            sensitive_bypass_keys_loader: 敏感日志豁免片段读取函数
+                （由连接池注入，返回解析后的片段元组）
         """
         self.uri = uri
         self.headers = headers or {}
@@ -204,6 +207,7 @@ class AsyncChatClient:
         self._retry_base_backoff = retry_base_backoff
         self._ignore_case = ignore_case
         self._interaction_service = interaction_service
+        self._sensitive_bypass_keys_loader = sensitive_bypass_keys_loader
         self._interaction_tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
 
         # 并发信号量：限制单连接总并发会话数，提供背压
@@ -597,6 +601,7 @@ class AsyncChatClient:
             session_key: 会话 key，不传则自动生成
             auth_token: 认证令牌，为空时传 OPEN_API:NOT_PROVIDED
             chat_metadata: 对话元数据
+            attachments: 附件
         """
         if session_key is None:
             session_key = f"{uuid.uuid4().hex}"
@@ -1294,6 +1299,18 @@ class AsyncChatClient:
             session_key: 会话 key（由装饰器注入）
             state: 会话状态（由装饰器注入）
         """
+        # session_key 命中豁免白名单时全量打印（不做敏感字段过滤）
+        bypass_keys = (
+            self._sensitive_bypass_keys_loader()
+            if self._sensitive_bypass_keys_loader is not None
+            else ()
+        )
+        if bypass_keys and any(k in session_key for k in bypass_keys):
+            logger.info(
+                "[log_event] event=%s, payload=%s", event_name, payload
+            )
+            return
+
         # 含敏感内容的字段按事件类型过滤
         _sensitive_keys: dict[str, tuple[str, ...]] = {
             "chat": ("message", "deltaText", "delta"),

@@ -875,6 +875,48 @@ class TestLogEvent:
         client._log_event("system", {"sessionKey": "unknown"})
         # Should not raise
 
+    @pytest.mark.asyncio
+    async def test_log_event_bypass_hits_logs_full_payload(
+        self, mock_bot_ws
+    ):
+        client = AsyncChatClient(
+            uri="ws://host/ws",
+            sensitive_bypass_keys_loader=lambda: ("sk1",),
+        )
+        _setup_session_state(client, "sk1")
+
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client.logger"
+        ) as mock_logger:
+            client._log_event(
+                "chat",
+                {"sessionKey": "sk1", "message": "secret-content"},
+            )
+
+        logged = str(mock_logger.info.call_args)
+        assert "secret-content" in logged
+
+    @pytest.mark.asyncio
+    async def test_log_event_bypass_miss_filters_sensitive(
+        self, mock_bot_ws
+    ):
+        client = AsyncChatClient(
+            uri="ws://host/ws",
+            sensitive_bypass_keys_loader=lambda: ("other-sess",),
+        )
+        _setup_session_state(client, "sk1")
+
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client.logger"
+        ) as mock_logger:
+            client._log_event(
+                "chat",
+                {"sessionKey": "sk1", "message": "secret-content"},
+            )
+
+        logged = str(mock_logger.info.call_args)
+        assert "secret-content" not in logged
+
 
 # ==================== _on_disconnect / _notify_disconnect ====================
 
