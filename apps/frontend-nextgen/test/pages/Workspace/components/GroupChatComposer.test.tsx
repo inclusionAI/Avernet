@@ -300,6 +300,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
         onDraftChange={() => {}}
       />,
     );
+    // 群聊输入框仅支持 @ 提及成员，占位不得宣传 /file /link /skill 指令（那是单聊 ChatPanel 的能力）。
     expect(screen.getByTestId('sender')).toHaveAttribute('data-placeholder', '输入消息... (将以您的用户身份发送到群内)');
   });
 });

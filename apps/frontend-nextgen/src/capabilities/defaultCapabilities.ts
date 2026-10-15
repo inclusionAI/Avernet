@@ -222,6 +222,9 @@ export const defaultCapabilities: AppCapabilities = {
     };
   },
   getQwenWorkBridgeInstallation: () => ({ status: 'available', value: null }),
+  // Open Core（外部部署）不启用 Poolab 接入：返回 null → BotRegistrationDialog 不渲染 Poolab Tab，
+  // PoolabRegistrationPanel 也不会被触及。internal overlay 覆盖为真实脚本/指南 URL。
+  getPoolabBridgeInstallation: () => ({ status: 'available', value: null }),
   // Open Core（外部部署）暂不提供群高级配置与内部渠道绑定能力，避免展示不可用配置并发起无效请求。
   getGroupAdvancedConfigEnabled: (): CapabilityResult<boolean> => ({
     status: 'available',

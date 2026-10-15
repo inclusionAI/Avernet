@@ -1,4 +1,15 @@
-import { Badge, Button, Empty, Input, Segmented, Skeleton } from '@/components/ui';
+import {
+  Badge,
+  Button,
+  Empty,
+  Input,
+  Segmented,
+  Skeleton,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui';
 import type { CollaborationBotView } from '@/services/workspace/collaborationCandidateService';
 import { cn } from '@/utils/cn';
 import { Check, Plus, Search } from 'lucide-react';
@@ -25,6 +36,10 @@ export interface GroupParticipantPickerProps {
   /** 其他协作角色已绑定的 Bot：保留路由配置入口，不改变当前角色的选择。 */
   additionalRoutingOptions?: Array<{ id: string; name: string; avatarUrl?: string }>;
 }
+
+/** 禁用成员 Bot 的整行悬停提示：统一列举不可选原因。 */
+const UNAVAILABLE_BOT_TOOLTIP =
+  '该 Bot 暂时无法参与新协作，可能原因为：已注销或删除、处于隐身状态、当前不在线';
 
 function matchesSearch(bot: CollaborationBotView, keyword: string): boolean {
   const q = keyword.trim().toLowerCase();
@@ -184,7 +199,7 @@ export function GroupParticipantPicker({
               const unknown = bot.detailsResolved === false;
               const unavailable = unknown || bot.reachability === 'unreachable' || !bot.online;
               const isOriginator = prependBot && bot.id === prependBot.id;
-              return (
+              const row = (
                 <Button
                   key={bot.id}
                   type="button"
@@ -240,6 +255,20 @@ export function GroupParticipantPicker({
                     )}
                   </span>
                 </Button>
+              );
+              if (!unavailable) return row;
+              // 禁用 Button 不派发鼠标事件，外包 span 使整行可悬停，解释不可选原因。
+              return (
+                <TooltipProvider key={bot.id} delayDuration={300}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="block w-full">{row}</span>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[280px] whitespace-normal">
+                      {UNAVAILABLE_BOT_TOOLTIP}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               );
             })}
             {picker.isLoadingMore && (

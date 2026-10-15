@@ -67,6 +67,12 @@ describe('CollaborationIdentityHeader', () => {
     expect(identityCard.querySelector('[aria-hidden="true"] > span:nth-child(1)')).toHaveTextContent('用户');
 
     fireEvent.click(identityCard);
+    // 协作群菜单语境:弹层标题为「切换协作身份」、副提示写实际用途、说明图标移除;
+    // 其他场景缺省「切换工作身份」/「切换后对工作区全局生效」且保留说明图标。
+    expect(await screen.findByText('切换协作身份')).toBeInTheDocument();
+    expect(screen.queryByText('切换工作身份')).not.toBeInTheDocument();
+    expect(screen.getByText('选择参与协作群会话的身份')).toBeInTheDocument();
+    expect(screen.queryByLabelText('协作身份说明')).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole('button', { name: /协作 Bot/ }));
 
     expect(mockSwitchIdentity).toHaveBeenCalledWith('bot-1');

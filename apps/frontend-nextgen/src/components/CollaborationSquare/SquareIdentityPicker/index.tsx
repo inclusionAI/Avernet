@@ -53,6 +53,11 @@ export function SquareIdentityPicker() {
         identityStatus={listStatus}
         identityError={listStatus === 'error' ? humanIdentityError : undefined}
         onRetry={() => void retryLoadIdentities()}
+        // 弹层文案写模块级身份在本 Tab 的实际用途(句式与协作群对齐);默认「全局生效」
+        // 与模块级行为不符;说明图标与副提示重复,一并隐藏。副提示控制在 20 字内防 320px 弹层截断。
+        popoverTitle="切换协作身份"
+        popoverHint="选择浏览公开Bot与发起好友申请的身份"
+        hidePopoverInfo
         // 使用语义背景色，保持与发现页背景的对比。
         triggerClassName="bg-background hover:bg-accent hover:text-foreground"
       />

@@ -1280,6 +1280,7 @@ export const api = {
         method: 'POST', body: '{}',
       })
     },
+    /** Owner/admin only. Includes uploaded AIS Agent session archives from fixed execution Steps, newest first. */
     listTaskLogArchives(taskId: string): Promise<{ items: EvolveTaskLogArchive[] }> {
       return fetchJson(`${BASE}/evolve/tasks/${encodeURIComponent(taskId)}/log-archives`)
     },

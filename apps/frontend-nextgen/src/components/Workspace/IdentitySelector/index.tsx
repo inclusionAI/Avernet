@@ -29,6 +29,12 @@ interface WorkspaceIdentitySelectorProps {
   triggerClassName?: string;
   /** 头部说明 Tooltip 文案定制（如协作广场公开Bot Tab 的好友关系说明）；缺省保持全局默认文案。 */
   headerTooltip?: string;
+  /** 弹层标题定制（如协作群菜单「切换协作身份」）；缺省显示「切换工作身份」。 */
+  popoverTitle?: string;
+  /** 弹层副提示文案定制（如协作群菜单「选择参与协作群会话的身份」）；缺省显示「切换后对工作区全局生效」。 */
+  popoverHint?: string;
+  /** 移除弹层标题旁的说明图标（如协作群菜单：副提示已说明用途）；缺省保留图标与默认说明。 */
+  hidePopoverInfo?: boolean;
   /**
    * 身份列表加载失败时的页内重试回调（AC-6）：提供时错误态展示「重试」按钮；
    * 缺省保持原空态文案（左上角等既有消费方行为不变）。
@@ -48,6 +54,9 @@ export function WorkspaceIdentitySelector({
   headerLabel,
   triggerClassName,
   headerTooltip,
+  popoverTitle,
+  popoverHint,
+  hidePopoverInfo,
   onRetry,
 }: WorkspaceIdentitySelectorProps) {
   const [open, setOpen] = useState(false);
@@ -154,8 +163,8 @@ export function WorkspaceIdentitySelector({
               <div className="border-b border-border/70 px-1.5 pb-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-1">
-                    <p className="text-xs font-semibold text-foreground">切换工作身份</p>
-                    {!navigationLayout ? (
+                    <p className="text-xs font-semibold text-foreground">{popoverTitle ?? '切换工作身份'}</p>
+                    {!navigationLayout && !hidePopoverInfo ? (
                       <TooltipProvider delayDuration={300}>
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -181,7 +190,7 @@ export function WorkspaceIdentitySelector({
                     {identities.length} 个身份
                   </span>
                 </div>
-                <p className="mt-1 truncate text-[11px] text-muted-foreground">切换后对工作区全局生效</p>
+                <p className="mt-1 truncate text-[11px] text-muted-foreground">{popoverHint ?? '切换后对工作区全局生效'}</p>
               </div>
               <div className="app-scrollbar max-h-80 space-y-1 overflow-y-auto px-0.5">
                 <IdentitySection

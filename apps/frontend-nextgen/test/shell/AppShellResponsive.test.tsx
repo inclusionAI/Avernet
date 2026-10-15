@@ -47,9 +47,6 @@ jest.mock('@/services/workspace/identityService', () => ({
 // 汉堡入口随 AppHeader 退役迁为 AppShell 内悬浮按钮，不再依赖顶栏 mock。
 jest.mock('@/shell/AppSidebar', () => ({ AppSidebar: () => <aside data-testid="app-sidebar" /> }));
 jest.mock('@/shell/SpaceSwitcher', () => ({ SpaceSwitcher: () => <div data-testid="space-switcher" /> }));
-jest.mock('@/shell/WorkspaceIdentitySwitcher', () => ({
-  WorkspaceIdentitySwitcher: () => <div data-testid="identity-switcher" />,
-}));
 
 // Drawer 原语桩化为受控组件：open=true 渲染 children，open=false 渲染 null。
 // 规避 Radix Dialog 在 jsdom 下退出动画不触发导致内容不卸载的问题。

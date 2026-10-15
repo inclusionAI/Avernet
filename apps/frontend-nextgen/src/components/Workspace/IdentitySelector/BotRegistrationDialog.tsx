@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import {
   Button,
   Empty,
@@ -15,8 +16,12 @@ import { useBotRegistrationToken } from '@/pages/Workspace/hooks/useBotRegistrat
 import { Check, Copy, MessageSquare, RefreshCw, Terminal } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { PoolabRegistrationPanel } from './PoolabRegistrationPanel';
 import { QwenWorkRegistrationPanel } from './QwenWorkRegistrationPanel';
 
+// engine 增加 'poolab' 由 getPoolabBridgeInstallation() 门控：Open Core 默认 null → 不渲染该 Tab；
+// internal overlay 注入脚本/指南 URL 后启用。
+type RegistrationEngine = 'openclaw' | 'qwenwork' | 'poolab';
 type AccessMode = 'self' | 'auto';
 
 interface BotRegistrationDialogProps {
@@ -33,7 +38,8 @@ function formatExpiresAt(expiresAt: number | null): string | null {
 }
 
 export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogProps) {
-  const [engine, setEngine] = useState<'openclaw' | 'qwenwork'>('openclaw');
+  const poolabEnabled = getCapabilities().getPoolabBridgeInstallation().value !== null;
+  const [engine, setEngine] = useState<RegistrationEngine>('openclaw');
   const [mode, setMode] = useState<AccessMode>('self');
   const [copied, setCopied] = useState(false);
   const copiedTimeoutRef = useRef<number | null>(null);
@@ -76,7 +82,7 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
           <ModalDescription className="leading-5">选择 Bot 类型，按对应指南完成接入。</ModalDescription>
         </ModalHeader>
 
-        <Segmented
+        <Segmented<RegistrationEngine>
           aria-label="Bot 类型"
           value={engine}
           onChange={setEngine}
@@ -84,10 +90,13 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
           options={[
             { value: 'openclaw', label: 'OpenClaw' },
             { value: 'qwenwork', label: '千问办公' },
+            ...(poolabEnabled ? [{ value: 'poolab' as const, label: 'Poolab' }] : []),
           ]}
         />
         {engine === 'qwenwork' ? (
           <QwenWorkRegistrationPanel open={open} />
+        ) : engine === 'poolab' ? (
+          <PoolabRegistrationPanel open={open} />
         ) : (
           <>
             <section className="space-y-2" aria-label="OpenClaw 接入方式">

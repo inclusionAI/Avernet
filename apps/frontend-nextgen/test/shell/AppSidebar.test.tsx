@@ -36,11 +36,6 @@ jest.mock('@/shell/SpaceSwitcher', () => ({
     <div data-testid={compact ? 'space-switcher-compact' : 'space-switcher'}>选择空间</div>
   ),
 }));
-jest.mock('@/shell/WorkspaceIdentitySwitcher', () => ({
-  WorkspaceIdentitySwitcher: ({ collapsed }: { collapsed?: boolean }) => (
-    <div data-testid={collapsed ? 'identity-switcher-collapsed' : 'identity-switcher'}>协作身份</div>
-  ),
-}));
 jest.mock('@/components/Admin/NotificationBell', () => ({
   NotificationBell: () => <div data-testid="notification-bell" />,
 }));

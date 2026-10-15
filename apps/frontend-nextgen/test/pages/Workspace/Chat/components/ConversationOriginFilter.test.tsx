@@ -73,7 +73,7 @@ describe('ConversationOriginFilter', () => {
         onScopeChange={onScopeChange}
       />,
     );
-    const trigger = screen.getByRole('button', { name: '发起归属与会话范围' });
+    const trigger = screen.getByRole('button', { name: '发起人与会话筛选' });
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole('button', { name: '他人发起' }));
     expect(onOriginChange).toHaveBeenCalledWith('others');
@@ -115,7 +115,7 @@ it('hides every scope option and its indicator when favorites are unsupported', 
   expect(screen.queryByText('会话')).not.toBeInTheDocument();
   expect(screen.queryByText('全部')).not.toBeInTheDocument();
   expect(screen.queryByText('已收藏')).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '发起归属' })).not.toHaveClass('bg-primary/10');
+  expect(screen.getByRole('button', { name: '发起人筛选' })).not.toHaveClass('bg-primary/10');
 });
 
 it('团队他人来源显示开发中且原生禁用，鼠标/键盘不触发选择；我的来源仍可选', () => {
@@ -165,7 +165,7 @@ describe('好友 Bot 会话范围筛选(supportsOrigin=false)', () => {
         onScopeChange={handlers.onScopeChange}
       />,
     );
-    const trigger = screen.getByRole('button', { name: '会话范围' });
+    const trigger = screen.getByRole('button', { name: '会话筛选' });
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole('button', { name: '已收藏' }));
@@ -186,7 +186,7 @@ describe('好友 Bot 会话范围筛选(supportsOrigin=false)', () => {
         onScopeChange={handlers.onScopeChange}
       />,
     );
-    const trigger = screen.getByRole('button', { name: '会话范围' });
+    const trigger = screen.getByRole('button', { name: '会话筛选' });
     expect(trigger).toHaveClass('text-primary');
     expect(screen.getByText('已收藏')).toBeInTheDocument();
     rerender(

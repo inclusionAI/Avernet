@@ -37,6 +37,9 @@ export function CollaborationIdentityHeader({ readOnly = false }: { readOnly?: b
         identityStatus={model.humanIdentityStatus}
         identityError={model.humanIdentityError}
         identityListLoading={model.identityListLoading}
+        popoverTitle="切换协作身份"
+        popoverHint="选择参与协作群会话的身份"
+        hidePopoverInfo
       />
     </section>
   );

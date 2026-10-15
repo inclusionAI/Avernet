@@ -5161,6 +5161,58 @@ describe("ClawEvolve step protocol", () => {
 });
 
 describe("ClawEvolve task log archive side channel", () => {
+  it.each(["failed", "succeeded"])("downloads registered AIS Agent sessions from a %s execution without collecting Bot logs", async status => {
+    const taskId = "SR-AIS-LOGS";
+    await repo.createTask({ taskId, taskType: "session_recovery", userId: "owner-1", botId: "bot-1",
+      taskName: "自愈日志", configJson: "{}", createdBy: "owner-1" });
+    const objectKey = `evolution/${taskId}/executions/exec-1/openclawSessions.tar.gz`;
+    const artifact = { objectKey, size: 128, sha256: "a".repeat(64), contentType: "application/gzip" };
+    const stepId = `${taskId}-AIS-1`;
+    await repo.createStep({ taskId, stepId, stepType: "agent_execution", stepNo: -1, command: "agent_execution",
+      ext: { aisExecution: { stepId, aisBase: { executionId: "exec-1" }, artifacts: {
+        openclawSessions: { objectKey, contentType: "application/gzip", requiredOnSuccess: true, allowEmpty: false },
+      } } } });
+    await repo.updateStepStatus(stepId, { status, output: { artifacts: { openclawSessions: artifact } } });
+    const url = `${baseUrl}/api/evolve/tasks/${taskId}/log-archives`;
+    const response = await fetch(url, { headers: { "X-User-Id": "owner-1" } });
+    expect(response.status).toBe(200);
+    const { items } = await response.json() as { items: Array<{ archiveId: string; status: string; metadata: Record<string, unknown> }> };
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ status: "succeeded", metadata: { source: "ais", executionId: "exec-1", stepId } });
+    // A later execution must not replace the fixed archive contract of the earlier one.
+    const secondStepId = `${taskId}-AIS-2`;
+    const secondKey = `evolution/${taskId}/executions/exec-2/openclawSessions.tar.gz`;
+    const secondContract = { stepId: secondStepId, aisBase: { executionId: "exec-2" }, artifacts: {
+      openclawSessions: { objectKey: secondKey, contentType: "application/gzip", requiredOnSuccess: true, allowEmpty: false },
+    } };
+    await repo.createStep({ taskId, stepId: secondStepId, stepType: "agent_execution", stepNo: -2, command: "agent_execution", ext: { aisExecution: secondContract } });
+    await repo.updateTaskConfig(taskId, { aisExecution: secondContract });
+    const pending = await fetch(url, { headers: { "X-User-Id": "owner-1" } });
+    expect((await pending.json() as { items: unknown[] }).items).toHaveLength(1);
+    await repo.updateStepStatus(secondStepId, { status: "succeeded", output: { artifacts: { openclawSessions: { ...artifact, objectKey: secondKey } } } });
+    const history = await fetch(url, { headers: { "X-User-Id": "owner-1" } });
+    expect((await history.json() as { items: Array<{ metadata: { executionId: string } }> }).items.map(item => item.metadata.executionId)).toEqual(["exec-2", "exec-1"]);
+    const download = await fetch(`${url}/${items[0].archiveId}/download-url`, { headers: { "X-User-Id": "owner-1" } });
+    expect(download.status).toBe(200);
+    expect(createSignedUrl).toHaveBeenCalledWith(objectKey, "GET", 86400, {},
+      expect.objectContaining({ "response-content-disposition": expect.stringContaining("openclaw-sessions.tar.gz") }));
+    expect(dispatchTaskLogArchive).not.toHaveBeenCalled();
+    expect(await repo.listTaskLogArchives(taskId)).toEqual([]);
+    const denied = await fetch(url, { headers: { "X-User-Id": "someone-else" } });
+    expect(denied.status).toBe(403);
+    createSignedUrl.mockClear();
+    const deniedDownload = await fetch(`${url}/${items[0].archiveId}/download-url`, { headers: { "X-User-Id": "someone-else" } });
+    expect(deniedDownload.status).toBe(403);
+    await repo.createTask({ taskId: "SR-OTHER", taskType: "session_recovery", taskName: "另一个任务", userId: "owner-1", botId: "bot-1",
+      configJson: "{}", createdBy: "owner-1" });
+    const other = await fetch(`${baseUrl}/api/evolve/tasks/SR-OTHER/log-archives/${items[0].archiveId}/download-url`, { headers: { "X-User-Id": "owner-1" } });
+    expect(other.status).toBe(404);
+    await repo.updateStepStatus(stepId, { status, output: { artifacts: { openclawSessions: { ...artifact, objectKey: "unrelated/private.tar.gz" } } } });
+    const changed = await fetch(`${url}/${items[0].archiveId}/download-url`, { headers: { "X-User-Id": "owner-1" } });
+    expect(changed.status).toBe(404);
+    expect(createSignedUrl).not.toHaveBeenCalled();
+  });
+
   it("returns an actionable error when task log storage is unavailable", async () => {
     await seedArcaBot("owner-1", "bot-arca");
     await repo.createTask({
@@ -5315,4 +5367,62 @@ it('uses the registered environment before dispatch and rejects an explicitly di
   const task = await repo.findTask((await response.json()).task_id);
   expect(JSON.parse(task!.config_json!)).toMatchObject({ botEnv: 'prod', targetSkill: { botEnv: 'prod' } });
   expect(hostLocalSkills.exportLocalSkill).toHaveBeenCalledWith(expect.objectContaining({ botId: 'default', botEnv: 'prod' }));
+});
+
+
+describe("optional task list filters", () => {
+  const filters = "taskTypes=diagnose,bench,bench_optimize,optimize,full&targetType=bot";
+  async function seed(id: string, type = "diagnose", config = "{}", creator = "owner-1") {
+    await repo.createTask({ taskId: id, taskType: type, userId: "bot-owner", botId: "bot-1",
+      taskName: id, configJson: config, createdBy: creator });
+  }
+  async function list(query = "") {
+    const response = await fetch(`${baseUrl}/api/evolve/tasks?${query}`, { headers: { "X-User-Id": "owner-1" } });
+    return { status: response.status, body: await response.json() as {
+      tasks: Array<{ task_id: string }>; total: number; totalPages: number;
+    } };
+  }
+  it("filters before pagination and count, while preserving legacy calls and creator scope", async () => {
+    for (const type of ["diagnose", "bench", "bench_optimize", "optimize", "full", "session_analysis", "pack"]) {
+      await seed(`EV-${type}`, type);
+    }
+    await seed("EV-skill", "full", JSON.stringify({ targetSkillAssetId: "asset-1" }));
+    await seed("EV-other-creator", "diagnose", "{}", "someone-else");
+    expect((await list()).body.total).toBe(8);
+    const pages = await Promise.all([1, 2, 3].map((page) => list(`${filters}&pageSize=2&page=${page}`)));
+    expect(pages.map((page) => page.body.total)).toEqual([5, 5, 5]);
+    expect(pages.map((page) => page.body.totalPages)).toEqual([3, 3, 3]);
+    expect(pages.flatMap((page) => page.body.tasks.map((task) => task.task_id)).sort()).toEqual(
+      ["diagnose", "bench", "bench_optimize", "optimize", "full"].map((type) => `EV-${type}`).sort(),
+    );
+    expect((await list(`${filters}&category=diagnosis`)).body.total).toBe(2);
+    expect((await list(`${filters}&category=repair`)).body).toMatchObject({ tasks: [], total: 0, totalPages: 1 });
+    expect((await list(`${filters}&query=EV-full`)).body.total).toBe(1);
+    expect((await list(`${filters}&status=success`)).body.total).toBe(0);
+    expect((await list(`${filters}&scope=all`)).status).toBe(403);
+  });
+  it("does not produce an empty filtered first page when the newest raw page consists of Skill tasks", async () => {
+    await seed("EV-bot");
+    for (let i = 0; i < 21; i++) await seed(`EV-skill-${i}`, "diagnose", '{"targetSkillAssetId":"asset"}');
+    await db.exec("UPDATE ce_tasks SET gmt_create = 9999999999 WHERE task_id LIKE 'EV-skill-%'");
+    const result = await list(`${filters}&pageSize=20`);
+    expect(result.body).toMatchObject({ tasks: [{ task_id: "EV-bot" }], total: 1, totalPages: 1 });
+  });
+  it("keeps legacy Bot configs with missing, null, empty or malformed JSON fields", async () => {
+    for (const [index, config] of ["{}", '{"targetSkillAssetId":null}', '{"targetSkillAssetId":""}', "", "invalid", "null"].entries()) {
+      await seed(`EV-legacy-${index}`, "diagnose", config);
+    }
+    expect((await list(filters)).body.total).toBe(6);
+  });
+  it("deduplicates task types and supports target-only filtering", async () => {
+    await seed("EV-bot");
+    await seed("EV-skill", "diagnose", '{"targetSkillAssetId":"asset"}');
+    expect((await list("taskTypes=diagnose,diagnose")).body.total).toBe(2);
+    expect((await list("targetType=bot")).body.total).toBe(1);
+  });
+  it.each(["taskTypes=", "taskTypes=unknown", "taskTypes=diagnose,", "taskTypes=pack", "taskTypes=diagnose&taskTypes=bench", "targetType=", "targetType=skill", "targetType=bot&targetType=bot"])(
+    "rejects invalid explicit filters: %s", async (query) => {
+      expect((await list(query)).status).toBe(400);
+    },
+  );
 });

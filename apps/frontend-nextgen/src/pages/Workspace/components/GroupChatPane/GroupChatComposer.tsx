@@ -209,6 +209,7 @@ export function GroupChatComposer({
         submitType="enter"
         mention={mentionConfig}
         fileChip={fileChip}
+        // 群聊不提供 /file /link /skill 指令；占位仅说明发送身份。
         placeholder={session ? '输入消息... (将以您的用户身份发送到群内)' : '请选择一个会话'}
         slots={{
           header:

@@ -178,10 +178,10 @@ describe('好友 Bot 会话范围筛选(装配)', () => {
       friendBots: [friendBot, teclawFriend],
       directory: directoryModel({ friendBots: [friendBot, teclawFriend] }),
     });
-    expect(screen.getByRole('button', { name: '会话范围' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '发起归属与会话范围' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '会话筛选' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '发起人与会话筛选' })).not.toBeInTheDocument();
     const teclawRow = screen.getByRole('button', { name: 'TEClaw 好友' }).closest('div') as HTMLElement;
-    expect(within(teclawRow).queryByRole('button', { name: '会话范围' })).not.toBeInTheDocument();
+    expect(within(teclawRow).queryByRole('button', { name: '会话筛选' })).not.toBeInTheDocument();
   });
 
   it('选择已收藏写好友范围、保留主选中;加载更多携带好友实际范围', () => {
@@ -201,7 +201,7 @@ describe('好友 Bot 会话范围筛选(装配)', () => {
     store.selectConversation({ botId, section: 'friend', origin: 'mine', scope: 'all', friendUserId: null, sessionId: 'fs-1' });
     syncStore();
 
-    fireEvent.click(screen.getByRole('button', { name: '会话范围' }));
+    fireEvent.click(screen.getByRole('button', { name: '会话筛选' }));
     fireEvent.click(screen.getByRole('button', { name: '已收藏' }));
     expect(useConversationStore.getState().scopeByFriendBotId[botId]).toBe('favorite');
     // 好友范围切换不投影主选中:选中会话保持。
@@ -211,7 +211,7 @@ describe('好友 Bot 会话范围筛选(装配)', () => {
     syncStore();
 
     // favorite 生效中:筛选按钮主色高亮,搜索入口隐藏。
-    expect(screen.getByRole('button', { name: '会话范围' })).toHaveClass('text-primary');
+    expect(screen.getByRole('button', { name: '会话筛选' })).toHaveClass('text-primary');
     expect(screen.queryByRole('button', { name: '会话ID检索' })).not.toBeInTheDocument();
 
     // 收藏列表存在 hasMore 时,加载更多回调用的是好友实际范围。
@@ -244,7 +244,7 @@ describe('好友 Bot 会话范围筛选(装配)', () => {
     expect(useConversationStore.getState().sessionKeyByBotId[botId]).toBe('agent:main:mark');
     syncStore();
 
-    fireEvent.click(screen.getByRole('button', { name: '会话范围' }));
+    fireEvent.click(screen.getByRole('button', { name: '会话筛选' }));
     fireEvent.click(screen.getByRole('button', { name: '已收藏' }));
     // Store 已随切换清空(sessionKeyByBotId),切回 all 不恢复。
     expect(useConversationStore.getState().sessionKeyByBotId[botId]).toBeUndefined();
@@ -252,7 +252,7 @@ describe('好友 Bot 会话范围筛选(装配)', () => {
     // favorite 下搜索入口隐藏。
     expect(screen.queryByRole('button', { name: '会话ID检索' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '会话范围' }));
+    fireEvent.click(screen.getByRole('button', { name: '会话筛选' }));
     fireEvent.click(screen.getByRole('button', { name: '全部' }));
     expect(useConversationStore.getState().scopeByFriendBotId[botId]).toBe('all');
     expect(useConversationStore.getState().sessionKeyByBotId[botId]).toBeUndefined();
@@ -271,13 +271,13 @@ describe('管理 Bot 搜索与既有筛选共用(装配)', () => {
       managedBots: [managedBot],
       directory: directoryModel({ managedBots: [managedBot] }),
     });
-    fireEvent.click(screen.getByRole('button', { name: '发起归属与会话范围' }));
+    fireEvent.click(screen.getByRole('button', { name: '发起人与会话筛选' }));
     fireEvent.click(screen.getByRole('button', { name: '已收藏' }));
     expect(useConversationStore.getState().scopeByManagedBotId[botId]).toBe('favorite');
     syncStore();
     expect(screen.queryByRole('button', { name: '会话ID检索' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '发起归属与会话范围' }));
+    fireEvent.click(screen.getByRole('button', { name: '发起人与会话筛选' }));
     fireEvent.click(screen.getByRole('button', { name: '他人发起' }));
     expect(useConversationStore.getState().originByManagedBotId[botId]).toBe('others');
     syncStore();

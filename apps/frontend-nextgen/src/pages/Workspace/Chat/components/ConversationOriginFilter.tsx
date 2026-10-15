@@ -49,10 +49,17 @@ export function ConversationOriginFilter({
   const [open, setOpen] = useState(false);
   // 激活态:管理/团队看归属(others)或范围(favorite);好友只看范围。
   const filterActive = (supportsOrigin && origin === 'others') || (supportsFavorites && scope === 'favorite');
-  const triggerName = supportsOrigin ? (supportsFavorites ? '发起归属与会话范围' : '发起归属') : '会话范围';
+  // 功能名与气泡分组标题(发起人/会话)对齐,避免「发起归属」内部术语。
+  const triggerName = supportsOrigin ? (supportsFavorites ? '发起人与会话筛选' : '发起人筛选') : '会话筛选';
+  // 状态双维度全展示:发起人与会话范围都露出(others/无收藏能力时气泡本就只有发起人分组,
+  // 不补会话维度),避免已收藏过滤生效时 tooltip 只报「我发起的」、蓝点来源不明。
   const triggerState = supportsOrigin
     ? origin === 'mine'
-      ? '我发起的'
+      ? supportsFavorites
+        ? scope === 'favorite'
+          ? '我发起的 · 已收藏'
+          : '我发起的 · 全部'
+        : '我发起的'
       : '他人发起的'
     : scope === 'favorite'
     ? '已收藏'
