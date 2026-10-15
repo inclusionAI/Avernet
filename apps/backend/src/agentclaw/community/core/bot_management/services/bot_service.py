@@ -3717,7 +3717,7 @@ class BotService(BotServiceProtocol):
         template_type: Optional[str],
         template_config: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """统一 create / start 注册 BCN Provider 的触发条件.
+        """create 注册 BCN Provider 的历史资格条件.
 
         如果 AC 模板工厂快照显式声明 capabilities，则 capabilities 是唯一事实源；
         缺失能力节点按 False，不再混用 legacy template_type fallback。旧 Bot 没有
@@ -3769,30 +3769,16 @@ class BotService(BotServiceProtocol):
         bot_name: str,
         bot_summary: str,
         connection_mode: Optional[Literal["plugin"]] = None,
+        *,
+        respect_drm: bool = True,
     ) -> None:
-        """Bot 创建/启动时把自己注册到 BCN 为 Provider (下行链路).
+        """Register with BCN best effort; create retains its historical DRM policy.
 
-        当前在以下场景调用 (由 create / start 判定):
-          - active_engine == "claude_code" 且 template_type 为 "normalCC"、None 或空字符串
-          - active_engine == "claude_code" 且 template_type == "personalCoding"
-          - active_engine == "aicoding" 且 template_type == "personalCoding"
-          - active_engine == "teclaw"
-          - active_engine == "openclaw" 且 bot_type 为 service 或 personal
-
-        受 DRM 开关 ``ClaudeCodeBcnRegister.enabled`` 控制 (默认关),
-        失败仅记 warning, 不阻塞 start 主流程 (与 _sync_bot_to_bcn 风格一致).
-        注册成功时往 ext 落 ``bcn_registered=True`` 标志, 不写 token.
-
-        Args:
-            bot_id: TC bot uuid
-            user_id: 当前调用者 (保留参数, 当前实现不写 token)
-            owner_workno: bot 所有者工号
-            bot_name: bot 显示名
-            bot_summary: bot 简介
+        Start/restart pass ``respect_drm=False`` so every legal lifecycle
+        execution attempts registration. Environment credential checks remain
+        owned by BcnService. Success only persists ``bcn_registered=True``.
         """
-        # DRM 开关: 默认关, 只有显式开启时才注册. 读取失败也按关处理.
-        # 排查日志关键字: [bot_service._register_bot_to_bcn_as_provider]
-        if not self._is_claude_code_bcn_register_enabled():
+        if respect_drm and not self._is_claude_code_bcn_register_enabled():
             logger.info(
                 f"[bot_service._register_bot_to_bcn_as_provider] disabled by DRM, "
                 f"skip bot_id={bot_id} owner={owner_workno} connection_mode={connection_mode}"
@@ -4661,56 +4647,26 @@ class BotService(BotServiceProtocol):
         resolved_nick_name = nick_name or user_id
         bot_owner_id = bot.get("owner_id") or user_id
 
-        try:
-            resolved_template_config = self._template_service.get_template_config(bot_id)
-        except Exception as e:
-            logger.warning(
-                f"[bot_service.start_bot] Failed to get template config for bot {bot_id}: {e}"
-            )
-            resolved_template_config = None
-
-        # 启动前先在 BCN 注册为 Provider bot (下行链路).
-        # 触发条件:
-        #   - active_engine == "claude_code" 且 template_type == "normalCC"
-        #   - active_engine == "claude_code" 且 template_type == "personalCoding"
-        #   - active_engine == "aicoding" 且 template_type == "personalCoding"
-        #   - active_engine == "teclaw" (所有 bot_type)
-        #   - active_engine == "openclaw" 且 bot_type 为 "service" 或 "personal"
-        # 失败不阻塞主流程, 与 _sync_bot_to_bcn 一致.
-        # 排查日志关键字: [bot_service._register_bot_to_bcn_as_provider]
-        should_register_bcn = self._should_register_bcn_provider(
-            active_engine=active_engine,
-            bot_type=bot_type,
-            template_type=template_type,
-            template_config=resolved_template_config,
-        )
+        # Every start attempts BCN registration before allocation; only mode varies.
         connection_mode = self._resolve_bcn_provider_connection_mode(
             active_engine=active_engine,
             bot_type=bot_type,
         )
-        if should_register_bcn:
-            logger.info(
-                f"[bot_service.start_bot] register bot to BCN as provider: "
-                f"bot_id={bot_id} active_engine={active_engine} "
-                f"bot_type={bot_type} template_type={template_type} "
-                f"connection_mode={connection_mode}"
-            )
-            self._register_bot_to_bcn_as_provider(
-                bot_id=bot_id,
-                user_id=user_id,
-                owner_workno=bot_owner_id,
-                bot_name=bot.get("bot_name") or bot_id,
-                bot_summary=bot.get("bot_desc") or "",
-                connection_mode=connection_mode,
-            )
-        else:
-            logger.info(
-                f"[bot_service.start_bot] skip BCN provider registration: "
-                f"bot_id={bot_id} active_engine={active_engine} "
-                f"bot_type={bot_type} template_type={template_type} "
-                f"connection_mode={connection_mode}"
-            )
-
+        logger.info(
+            f"[bot_service.start_bot] register bot to BCN as provider: "
+            f"bot_id={bot_id} active_engine={active_engine} "
+            f"bot_type={bot_type} template_type={template_type} "
+            f"connection_mode={connection_mode}"
+        )
+        self._register_bot_to_bcn_as_provider(
+            bot_id=bot_id,
+            user_id=user_id,
+            owner_workno=bot_owner_id,
+            bot_name=bot.get("bot_name") or bot_id,
+            bot_summary=bot.get("bot_desc") or "",
+            connection_mode=connection_mode,
+            respect_drm=False,
+        )
         logger.info(
             f"[bot_service.start_bot] start requested: bot_id={bot_id}, "
             f"user_id={user_id}, active_engine={active_engine}, bot_type={bot_type}, "
@@ -5174,7 +5130,7 @@ class BotService(BotServiceProtocol):
         bot_type = bot.get("bot_type") or "personal"
         bot_template_type = (bot.get("template_type") or "").strip()
 
-        # 先读取模板快照：BCN 能力门控与后续 BaaS restart 均使用同一份 resolved config。
+        # 先读取模板快照，供后续 BaaS restart 复用。
         try:
             resolved_template_config = self._template_service.get_template_config(bot_id)
         except Exception as e:
@@ -5186,34 +5142,28 @@ class BotService(BotServiceProtocol):
 
         # BaaS 原地重启不会经过 start_bot，这里补齐启动链路的 BCN Provider 注册。
         # 注册接口幂等：已注册时直接返回，也能重试创建阶段失败的注册。
-        should_register_bcn = self._should_register_bcn_provider(
-            active_engine=active_engine,
-            bot_type=bot_type,
-            template_type=bot_template_type,
-            template_config=resolved_template_config,
-        )
         connection_mode = self._resolve_bcn_provider_connection_mode(
             active_engine=active_engine,
             bot_type=bot_type,
         )
-        if should_register_bcn:
-            logger.info(
-                "[bot_service._restart_bot_baas] register bot to BCN as provider: "
-                "bot_id=%s active_engine=%s bot_type=%s template_type=%s connection_mode=%s",
-                bot_id,
-                active_engine,
-                bot_type,
-                bot_template_type,
-                connection_mode,
-            )
-            self._register_bot_to_bcn_as_provider(
-                bot_id=bot_id,
-                user_id=user_id,
-                owner_workno=bot.get("owner_id") or user_id,
-                bot_name=bot.get("bot_name") or bot_id,
-                bot_summary=bot.get("bot_desc") or "",
-                connection_mode=connection_mode,
-            )
+        logger.info(
+            "[bot_service._restart_bot_baas] register bot to BCN as provider: "
+            "bot_id=%s active_engine=%s bot_type=%s template_type=%s connection_mode=%s",
+            bot_id,
+            active_engine,
+            bot_type,
+            bot_template_type,
+            connection_mode,
+        )
+        self._register_bot_to_bcn_as_provider(
+            bot_id=bot_id,
+            user_id=user_id,
+            owner_workno=bot.get("owner_id") or user_id,
+            bot_name=bot.get("bot_name") or bot_id,
+            bot_summary=bot.get("bot_desc") or "",
+            connection_mode=connection_mode,
+            respect_drm=False,
+        )
 
         # 普通 restart 入口只重启当前 bot，不使用发布态 build 产物目录。
         # 发布态 verify/online 的重启由 PublishFlowService.restart_bot(publish_id) 处理。
@@ -5224,7 +5174,7 @@ class BotService(BotServiceProtocol):
             else None
         )
 
-        # resolved_template_config 已在 BCN 能力门控前读取，后续 BaaS restart 复用同一快照。
+        # resolved_template_config 已在 BCN 注册前读取，后续 BaaS restart 复用同一快照。
         # 与 _allocate_device_async（create / arca-restart 路径）同口径构造
         # extra_envs，并独立透传 template_config。extra_envs 提供引擎策略
         # 变量（BOT_TYPE / RELAY_DEFAULT_* / AIX_DEVFLOW_INFO / GIT_ADDRESSES），
