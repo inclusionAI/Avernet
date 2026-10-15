@@ -1,4 +1,5 @@
 import BotAvatar from '@/components/BotWorkshop/BotAvatar';
+import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
 import { DebugChatComposer } from '@/components/BotWorkshop/Editor/DebugChatComposer';
 import { BotModelSelector } from '@/components/Workspace/ChatPanel/BotModelSelector';
 import { Badge } from '@/components/ui/Badge';
@@ -15,7 +16,7 @@ import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
 import { parseDebugChatMessageContent } from '@/services/botWorkshop/debugChatFiles';
 import { botSessionService, type BotChatSessionView, type ChatBotView } from '@/services/workspace/botSessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { FileText, Loader2, Plus, RefreshCw, X } from 'lucide-react';
+import { FileText, Loader2, Maximize2, Minimize2, Plus, RefreshCw, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -69,13 +70,18 @@ export function DebugChatPanel({
   bot,
   runtimeStage,
   ownerId,
+  fullscreen = false,
   onClose,
+  onToggleFullscreen,
 }: {
   bot: BotDomain;
   runtimeStage?: BotRuntimeStage;
   ownerId?: string;
+  fullscreen?: boolean;
   onClose?: () => void;
+  onToggleFullscreen?: () => void;
 }) {
+  const avatarUrl = bot.avatarUrl || generateBotAvatar(bot.id || bot.name);
   const identityId = useWorkspaceStore((state) => state.activeIdentityId);
   const [sessions, setSessions] = useState<BotChatSessionView[]>([]);
   const [session, setSession] = useState<BotChatSessionView | null>(null);
@@ -149,7 +155,7 @@ export function DebugChatPanel({
   return (
     <aside className="flex h-full min-w-0 flex-1 flex-col bg-card">
       <div className="flex min-h-14 items-center gap-3 border-b border-border px-5 py-3">
-        <BotAvatar name={bot.name} avatarUrl={bot.avatarUrl} className="size-7 rounded-full" />
+        <BotAvatar name={bot.name} avatarUrl={avatarUrl} className="size-7 rounded-full" />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <p className="m-0 truncate text-base font-semibold">调试对话</p>
@@ -194,6 +200,16 @@ export function DebugChatPanel({
             ))}
           </SelectContent>
         </Select>
+        {onToggleFullscreen ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={fullscreen ? '还原调试对话窗口' : '全屏调试对话窗口'}
+            aria-pressed={fullscreen}
+            leftIcon={fullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            onClick={onToggleFullscreen}
+          />
+        ) : null}
         {onClose ? (
           <Button
             variant="ghost"

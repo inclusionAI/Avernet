@@ -44,7 +44,7 @@ test('已有渠道可进入编辑并回显后端配置', () => {
   expect(screen.getByRole('dialog')).toHaveTextContent('编辑钉钉渠道');
   expect(screen.getByDisplayValue('ding-app-1')).toBeInTheDocument();
   expect(screen.getByDisplayValue('tpl-1')).toBeInTheDocument();
-  expect(screen.getByPlaceholderText('留空则保持原 Secret')).toBeInTheDocument();
+  expect(screen.getByPlaceholderText('留空则保持原 app_secret')).toBeInTheDocument();
 });
 
 test('按绑定方式分栏展示渠道，并在 BCN 表单回显对应配置', () => {
@@ -83,7 +83,55 @@ test('按绑定方式分栏展示渠道，并在 BCN 表单回显对应配置', 
   fireEvent.click(screen.getByRole('button', { name: '编辑协作群' }));
   expect(screen.getByRole('dialog')).toHaveTextContent('基于 BCN');
   expect(screen.getByDisplayValue('robot-2')).toBeInTheDocument();
-  expect(screen.getByText('群内共享会话')).toBeInTheDocument();
+  expect(screen.getByText('透传钉钉发送人身份')).toBeInTheDocument();
+  expect(screen.queryByText('群聊会话模式')).not.toBeInTheDocument();
+});
+
+test('服务 Bot 新建开源插件渠道使用旧版字段集', () => {
+  render(
+    <ChannelConfigPanel
+      editable
+      serviceBot
+      channels={[]}
+      onCreate={jest.fn()}
+      onUpdate={jest.fn()}
+      onToggle={jest.fn()}
+      onDelete={jest.fn()}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: '新建配置' }));
+
+  expect(screen.getByText('场景描述')).toBeInTheDocument();
+  expect(screen.getByText('生效环境')).toBeInTheDocument();
+  expect(screen.getByText('app_key')).toBeInTheDocument();
+  expect(screen.getByText('app_secret')).toBeInTheDocument();
+  expect(screen.getByText('启用钉钉端流式输出')).toBeInTheDocument();
+  expect(screen.queryByText('私聊策略')).not.toBeInTheDocument();
+  expect(screen.queryByText('用户白名单')).not.toBeInTheDocument();
+});
+
+test('新建 BCN 渠道使用旧版字段集', () => {
+  render(
+    <ChannelConfigPanel
+      editable
+      channels={[]}
+      onCreate={jest.fn()}
+      onUpdate={jest.fn()}
+      onToggle={jest.fn()}
+      onDelete={jest.fn()}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole('tab', { name: '基于BCN' }));
+  fireEvent.click(screen.getByRole('button', { name: '新建配置' }));
+
+  expect(screen.getByText('Robot Code')).toBeInTheDocument();
+  expect(screen.getByText('透传钉钉发送人身份')).toBeInTheDocument();
+  expect(screen.getByText('app_key')).toBeInTheDocument();
+  expect(screen.getByText('app_secret')).toBeInTheDocument();
+  expect(screen.queryByText('群聊会话模式')).not.toBeInTheDocument();
+  expect(screen.queryByText('主动消息可见范围')).not.toBeInTheDocument();
 });
 
 test('按老版渠道表格展示草稿环境、机器人标识、状态和操作', () => {

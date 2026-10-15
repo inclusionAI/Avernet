@@ -24,6 +24,7 @@ import { cn } from '@/utils/cn';
 import { useLocation } from '@umijs/max';
 import React, { useEffect, useState } from 'react';
 import { DetailHeader } from './DetailHeader';
+import { DetailNavigation } from './DetailNavigation';
 import { mainTabs, moreTabs, type MainTab } from './detailTabs';
 
 const BotWorkshopDetailPage: React.FC = () => {
@@ -63,6 +64,7 @@ const BotWorkshopDetailPage: React.FC = () => {
   const [tab, setTab] = useState<MainTab>('capability');
   const [more, setMore] = useState<MoreConfigTab>();
   const [debugOpen, setDebugOpen] = useState(true);
+  const [debugFullscreen, setDebugFullscreen] = useState(false);
   useEffect(() => {
     if (!isOwner && more === 'engine') setMore(undefined);
   }, [isOwner, more]);
@@ -70,6 +72,7 @@ const BotWorkshopDetailPage: React.FC = () => {
     setTab('capability');
     setMore(undefined);
     setDebugOpen(true);
+    setDebugFullscreen(false);
   }, [id]);
   if (!id)
     return (
@@ -98,6 +101,17 @@ const BotWorkshopDetailPage: React.FC = () => {
       />
     );
   const bot = detail.bot;
+  const visibleMainTabs = mainTabs.filter((item) => item.key !== 'routine' || desktopPolicy.routines);
+  const visibleMoreTabs = moreTabs.filter(
+    (item) =>
+      ({
+        engine: desktopPolicy.engineConfig && isOwner,
+        md: desktopPolicy.markdown,
+        node: desktopPolicy.nodes,
+        channel: desktopPolicy.channels,
+        screen: desktopPolicy.screens,
+      })[item.key],
+  );
   return (
     <main className="bot-editor-shell flex h-full min-h-0 flex-col bg-background">
       <DetailHeader
@@ -112,66 +126,26 @@ const BotWorkshopDetailPage: React.FC = () => {
         onReload={() => void detail.retry()}
       />
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <nav
-          aria-label="Bot 编辑模块"
-          className="bot-editor-nav app-scrollbar flex w-20 shrink-0 flex-col items-center gap-2 overflow-y-auto border-r border-border bg-card py-3"
-        >
-          {mainTabs
-            .filter((item) => item.key !== 'routine' || desktopPolicy.routines)
-            .map((item) => (
-              <Button
-                key={item.key}
-                variant="ghost"
-                size="icon"
-                className={cn(
-                  'h-16 w-[60px] flex-col gap-1 rounded-lg text-xs font-normal text-muted-foreground',
-                  tab === item.key && !more && 'bg-muted text-foreground hover:bg-muted hover:text-foreground',
-                )}
-                aria-label={item.label}
-                onClick={() => {
-                  setTab(item.key);
-                  setMore(undefined);
-                }}
-              >
-                {item.icon}
-                <span>{item.label}</span>
-              </Button>
-            ))}
-          {moreTabs
-            .filter(
-              (item) =>
-                ({
-                  engine: desktopPolicy.engineConfig && isOwner,
-                  md: desktopPolicy.markdown,
-                  node: desktopPolicy.nodes,
-                  channel: desktopPolicy.channels,
-                  screen: desktopPolicy.screens,
-                }[item.key]),
-            )
-            .map((item) => (
-              <Button
-                key={item.key}
-                variant="ghost"
-                size="icon"
-                className={cn(
-                  'h-16 w-[60px] flex-col gap-1 rounded-lg text-xs font-normal text-muted-foreground',
-                  more === item.key && 'bg-muted text-foreground hover:bg-muted hover:text-foreground',
-                )}
-                aria-label={item.label}
-                onClick={() => {
-                  setMore(item.key);
-                  if (item.key === 'engine') void editor.loadEngineConfig();
-                }}
-              >
-                {item.icon}
-                <span>{item.label}</span>
-              </Button>
-            ))}
-        </nav>
+        <DetailNavigation
+          hidden={debugFullscreen}
+          mainTabs={visibleMainTabs}
+          moreTabs={visibleMoreTabs}
+          activeTab={tab}
+          activeMore={more}
+          onTabChange={(nextTab) => {
+            setTab(nextTab);
+            setMore(undefined);
+          }}
+          onMoreChange={(nextMore) => {
+            setMore(nextMore);
+            if (nextMore === 'engine') void editor.loadEngineConfig();
+          }}
+        />
         <section
           className={cn(
-            'app-scrollbar min-w-0 flex-1 bg-background overflow-y-auto lg:max-w-none',
-            debugOpen && 'border-r border-border lg:w-[56%] lg:flex-none',
+            'app-scrollbar min-w-0 flex-1 overflow-y-auto bg-background lg:max-w-none',
+            debugOpen && !debugFullscreen && 'border-r border-border lg:w-[56%] lg:flex-none',
+            debugFullscreen && 'hidden',
           )}
         >
           {editor.loading ? (
@@ -187,6 +161,7 @@ const BotWorkshopDetailPage: React.FC = () => {
             <ChannelConfigPanel
               channels={advanced.channels}
               editable={editable}
+              serviceBot={bot.serviceMode === 'service'}
               onCreate={advanced.createChannel}
               onUpdate={advanced.updateChannel}
               onToggle={advanced.toggleChannel}
@@ -214,6 +189,7 @@ const BotWorkshopDetailPage: React.FC = () => {
             />
           ) : tab === 'capability' ? (
             <CapabilityPanel
+              compact={debugOpen && !debugFullscreen}
               desktop={bot.deployment === 'local'}
               onLocalToggle={editor.toggleSkill}
               onLocalDelete={editor.deleteSkill}
@@ -277,12 +253,22 @@ const BotWorkshopDetailPage: React.FC = () => {
           )}
         </section>
         {debugOpen ? (
-          <div className="hidden min-w-0 flex-1 lg:flex">
+          <div
+            className={cn(
+              'hidden min-w-0 flex-1 transition-[flex-basis,width] duration-200 ease-out lg:flex',
+              debugFullscreen && 'flex',
+            )}
+          >
             <DebugChatPanel
               bot={bot}
               runtimeStage={runtimeStage}
               ownerId={addressedOwnerId}
-              onClose={() => setDebugOpen(false)}
+              fullscreen={debugFullscreen}
+              onClose={() => {
+                setDebugOpen(false);
+                setDebugFullscreen(false);
+              }}
+              onToggleFullscreen={() => setDebugFullscreen((current) => !current)}
             />
           </div>
         ) : null}

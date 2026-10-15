@@ -853,6 +853,45 @@ describe('BotTable 管理菜单重启词表（服务卡三动词分裂）', () =
     expect(screen.queryByRole('button', { name: /重启引擎/ })).not.toBeInTheDocument();
   });
 
+  test('创建失败的服务 Bot 可重启，但删除会明确说明后端生命周期限制', () => {
+    const bot = mapBotDto({
+      bot_id: 'service-creation-failed',
+      bot_name: '创建失败服务 Bot',
+      engine: 'openclaw',
+      kind: 'service',
+      bot_type: 'service',
+      status: 'FAILED',
+      actions: ['view'],
+    }).item;
+    renderTable(bot, { onAction: jest.fn().mockResolvedValue(undefined) });
+
+    fireEvent.click(screen.getByRole('button', { name: '管理 创建失败服务 Bot' }));
+
+    expect(screen.getByRole('button', { name: /重启 Bot/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /删除/ })).toBeDisabled();
+    expect(screen.getByLabelText('删除说明')).toBeInTheDocument();
+  });
+
+  test('部署中的服务 Bot 不允许推进发布阶段', () => {
+    const bot = mapBotDto({
+      bot_id: 'service-deploying',
+      bot_name: '部署中服务 Bot',
+      engine: 'openclaw',
+      kind: 'service',
+      bot_type: 'service',
+      status: 'PROVISIONING',
+      publish: { id: 1, status: 'DRAFT', version: 1 },
+      actions: ['view', 'publish_staging'],
+    }).item;
+    const onManagePublication = jest.fn();
+    renderTable(bot, { onManagePublication, onAction: jest.fn().mockResolvedValue(undefined) });
+
+    fireEvent.click(screen.getByRole('button', { name: '管理 部署中服务 Bot' }));
+
+    expect(screen.getByRole('button', { name: /发布与阶段推进/ })).toBeDisabled();
+    expect(screen.getByLabelText('发布与阶段推进说明')).toBeInTheDocument();
+  });
+
   test('服务行仅 disabled_actions.restart 声明时保留禁用入口（死灰按钮可展示服务端原因）', () => {
     const bot = mapBotDto({
       bot_id: 'service-restart-reason-card',

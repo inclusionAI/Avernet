@@ -2,6 +2,7 @@ import BotAvatar from '@/components/BotWorkshop/BotAvatar';
 import { BotBasicInfoDialog } from '@/components/BotWorkshop/BotBasicInfoDialog';
 import { Button } from '@/components/ui/Button';
 import type { BotDomain } from '@/domain/botWorkshop';
+import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
 import { ArrowLeft, ChevronRight, Pencil, Save, SlidersHorizontal } from 'lucide-react';
 import { useState } from 'react';
 export function DetailHeader({
@@ -27,6 +28,7 @@ export function DetailHeader({
 }) {
   const [basicInfoOpen, setBasicInfoOpen] = useState(false);
   const canEditBasic = editable && isOwner;
+  const avatarUrl = bot.avatarUrl || generateBotAvatar(bot.id || bot.name);
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-4 sm:px-6">
       <Button
@@ -42,7 +44,7 @@ export function DetailHeader({
         <ChevronRight className="size-3.5" aria-hidden />
       </div>
       <div className="min-w-0 flex flex-1 items-center gap-2">
-        <BotAvatar name={bot.name} avatarUrl={bot.avatarUrl} className="size-7 rounded-full" />
+        <BotAvatar name={bot.name} avatarUrl={avatarUrl} className="size-7 rounded-full" />
         <h1 className="m-0 truncate text-base font-semibold text-foreground">{bot.name}</h1>
         {canEditBasic ? (
           <Button

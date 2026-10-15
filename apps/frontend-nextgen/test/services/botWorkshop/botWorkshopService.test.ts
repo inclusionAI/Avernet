@@ -17,7 +17,7 @@ jest.mock('@/services/botWorkshop/botEditorService', () => ({
   botEditorService: { restartLifecycle: jest.fn() },
 }));
 jest.mock('@/services/botWorkshop/botAvatarService', () => ({
-  botAvatarService: { save: jest.fn() },
+  botAvatarService: { get: jest.fn(), save: jest.fn() },
 }));
 
 const mockedCreateBot = createBot as jest.MockedFunction<typeof createBot>;
@@ -28,6 +28,7 @@ const mockedRestartLifecycle = botEditorService.restartLifecycle as jest.MockedF
   typeof botEditorService.restartLifecycle
 >;
 const mockedSaveAvatar = botAvatarService.save as jest.MockedFunction<typeof botAvatarService.save>;
+const mockedGetAvatar = botAvatarService.get as jest.MockedFunction<typeof botAvatarService.get>;
 
 afterEach(() => {
   // 覆盖过引擎清单的用例退出时还原 Open 默认，避免污染同文件后续用例。
@@ -103,6 +104,25 @@ describe('botWorkshopService', () => {
 
     await expect(botWorkshopService.detail('bot-1', 'owner-1')).resolves.toMatchObject({ id: 'bot-1' });
     expect(mockedGetBot).toHaveBeenCalledWith('bot-1', 'owner-1');
+  });
+
+  test('详情接口未携带头像时读取 Bot 头像资源，保持与列表一致', async () => {
+    mockedGetBot.mockResolvedValue({
+      code: 200000,
+      data: {
+        bot_id: 'bot-1',
+        bot_name: '头像 Bot',
+        engine: 'openclaw',
+        status: 'ACTIVE',
+      },
+    });
+    mockedGetAvatar.mockResolvedValue('data:image/svg+xml;base64,avatar');
+
+    await expect(botWorkshopService.detail('bot-1')).resolves.toMatchObject({
+      id: 'bot-1',
+      avatarUrl: 'data:image/svg+xml;base64,avatar',
+    });
+    expect(mockedGetAvatar).toHaveBeenCalledWith('bot-1');
   });
 
   test('refuses local creation without a selected device and resolved directory', async () => {

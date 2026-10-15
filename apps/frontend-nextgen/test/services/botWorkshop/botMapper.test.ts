@@ -55,6 +55,17 @@ describe('botMapper', () => {
     expect(result.warnings).toEqual([]);
   });
 
+  test('详情接口的 ext.avatar_url 也映射为 Bot 头像', () => {
+    const result = mapBotDto({
+      bot_id: 'avatar-bot',
+      bot_name: '头像 Bot',
+      engine: 'openclaw',
+      ext: { avatar_url: 'data:image/svg+xml;base64,avatar' },
+    });
+
+    expect(result.item.avatarUrl).toBe('data:image/svg+xml;base64,avatar');
+  });
+
   test('Coding Bot 卡片画像保留模板名称', () => {
     const result = mapBotDto({
       bot_id: 'architect-1',
@@ -277,6 +288,51 @@ describe('botMapper', () => {
     const result = mapBotDto({ bot_id: 'failed-1', display_state: 'failed', status: 'FAILED' });
 
     expect(result.item.lifecycle).toBe('failed');
+  });
+
+  test.each([
+    [
+      'Bot 初始化优先于草稿发布态',
+      { status: 'PENDING', publish: { id: 1, status: 'DRAFT', version: 1 }, display_state: 'service_draft' },
+      'deploying',
+    ],
+    [
+      '没有发布记录的服务 Bot 初始化中',
+      { status: 'PROVISIONING', publish: null, display_state: 'service_draft' },
+      'deploying',
+    ],
+    [
+      '发布失败优先于旧部署中展示态',
+      { status: 'ACTIVE', publish: { id: 1, status: 'FAILED', version: 1 }, display_state: 'service_deploying' },
+      'failed',
+    ],
+    [
+      '发布成功优先于旧草稿展示态',
+      { status: 'ACTIVE', publish: { id: 1, status: 'SUCCESS', version: 1 }, display_state: 'service_draft' },
+      'running',
+    ],
+  ])('%s', (_label, fields, expected) => {
+    const result = mapBotDto({
+      bot_id: 'service-structured-status',
+      bot_type: 'service',
+      kind: 'service',
+      engine: 'openclaw',
+      ...fields,
+    });
+
+    expect(result.item.lifecycle).toBe(expected);
+  });
+
+  test('个人 Bot 仍使用原 display_state 兼容语义', () => {
+    const result = mapBotDto({
+      bot_id: 'personal-legacy-status',
+      bot_type: 'personal',
+      engine: 'openclaw',
+      status: 'ACTIVE',
+      display_state: 'running',
+    });
+
+    expect(result.item.lifecycle).toBe('running');
   });
 
   test('库存 kind=service 时识别为服务化，不受底层 bot_type 影响', () => {
