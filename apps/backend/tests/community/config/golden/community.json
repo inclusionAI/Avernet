@@ -77,7 +77,7 @@
       "task_deadline_seconds": 600
     },
     "device_allocation": {
-      "max_devices_per_entity": 5,
+      "max_devices_per_entity": 2,
       "mode": "multi"
     },
     "device_provider": "local",
@@ -231,7 +231,7 @@
     },
     "device_allocation": {
       "arca_legacy_tenant": "legacy",
-      "max_devices_per_entity": 5,
+      "max_devices_per_entity": 2,
       "mode": "multi"
     },
     "device_provider": {
