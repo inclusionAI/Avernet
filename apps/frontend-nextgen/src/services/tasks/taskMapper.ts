@@ -5,6 +5,22 @@
 import { isEnvelopeFailure } from '@/services/backendApi/types';
 import type { Envelope, ExecuteTaskRequest } from './taskModel';
 
+export type RelayModeCoverageSmokePhase =
+  | 'plan_single_bot'
+  | 'plan_dynamic_group'
+  | 'plan_bbs'
+  | 'normal';
+
+export interface RelayModeCoverageSmokeState {
+  version: 3;
+  current_phase: RelayModeCoverageSmokePhase;
+  planned_modes: Array<'single_bot' | 'coop_group' | 'bbs'>;
+}
+
+export interface TaskCardHiddenFlags {
+  relay_mode_coverage_smoke?: RelayModeCoverageSmokeState;
+}
+
 export interface TaskComposerForm {
   title: string;
   instruction: string;
@@ -16,6 +32,7 @@ export interface TaskComposerForm {
   deliverables?: string[];
   constraints?: string[];
   resources?: string[];
+  hidden_flags?: TaskCardHiddenFlags;
 }
 
 export interface TaskComposerContext {
@@ -55,6 +72,9 @@ export function buildExecuteRequest(form: TaskComposerForm, ctx: TaskComposerCon
           deliverables,
           constraints: (form.constraints ?? []).map((item) => item.trim()).filter(Boolean),
           resources: (form.resources ?? []).map((item) => item.trim()).filter(Boolean),
+          ...(form.hidden_flags?.relay_mode_coverage_smoke
+            ? { relay_mode_coverage_smoke: form.hidden_flags.relay_mode_coverage_smoke }
+            : {}),
         },
       },
       goal: {

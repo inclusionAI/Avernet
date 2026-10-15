@@ -124,6 +124,35 @@ describe('TaskLoopCard', () => {
     });
   });
 
+  it('forwards the hidden relay smoke flag when dispatching a confirmed task', () => {
+    const hidden_flags = {
+      relay_mode_coverage_smoke: {
+        version: 3,
+        current_phase: 'plan_single_bot',
+        planned_modes: [],
+      },
+    };
+    const task = {
+      task_type: 'dynamic',
+      goal: '完成存储行业尽调',
+      deliverables: ['尽调报告'],
+      acceptance_criteria: ['明确投资价值'],
+      constraints: ['全球市场'],
+      resources: [],
+    };
+    render(<TaskLoopCard {...cardProps({ type: 'task_ready', task, hidden_flags })} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+
+    expect(mockedSubmit).toHaveBeenCalledWith('执行任务', {
+      __taskAction: 'execute',
+      task: expect.objectContaining({
+        goal: '完成存储行业尽调',
+        hidden_flags,
+      }),
+    });
+  });
+
   it('normalizes legacy scalar list fields before dispatching execute action', () => {
     render(
       <TaskLoopCard

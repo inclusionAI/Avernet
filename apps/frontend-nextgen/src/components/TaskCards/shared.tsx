@@ -70,6 +70,7 @@ export function normalizeReadyTask(data: TaskCardData): TaskReadyData {
 
   return {
     ...base,
+    ...(data.hidden_flags ? { hidden_flags: data.hidden_flags } : {}),
     deliverables: asItems(base.deliverables),
     acceptance_criteria: asItems(base.acceptance_criteria),
     constraints: asItems(base.constraints),

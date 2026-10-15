@@ -1,6 +1,9 @@
 /** @jest-environment jsdom */
 import { deriveTaskTitle, useTaskExecuteFromCard } from '@/hooks/useTaskExecuteFromCard';
-import type { TaskComposerContext } from '@/services/tasks/taskMapper';
+import type {
+  RelayModeCoverageSmokeState,
+  TaskComposerContext,
+} from '@/services/tasks/taskMapper';
 import { buildTaskLaunchMessage } from '@/services/tasks/taskPanelMessage';
 import { executeTaskService } from '@/services/tasks/taskService';
 import { setTaskExecuteHandler } from '@/services/workspace/chatBridge';
@@ -56,6 +59,40 @@ describe('useTaskExecuteFromCard 卡片执行', () => {
       finish_time: 2,
       task_info: { execution_config: {} },
     });
+  });
+
+  it('确认烟测任务时保留 hidden_flags 并传给 execute service', async () => {
+    const smokeState: RelayModeCoverageSmokeState = {
+      version: 3,
+      current_phase: 'plan_single_bot',
+      planned_modes: [],
+    };
+    const submitPanelMessage = jest.fn();
+
+    renderHook(() =>
+      useTaskExecuteFromCard({
+        panelRef: { current: null } as never,
+        context,
+        submitPanelMessage,
+      }),
+    );
+
+    await act(async () => {
+      registeredHandler?.({
+        ...task,
+        hidden_flags: { relay_mode_coverage_smoke: smokeState },
+      });
+    });
+    await waitFor(() => expect(mockedExecute).toHaveBeenCalled());
+
+    expect(mockedExecute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        form: expect.objectContaining({
+          hidden_flags: { relay_mode_coverage_smoke: smokeState },
+        }),
+        ctx: context,
+      }),
+    );
   });
 
   it('点击确认后直接调用 executeTaskService 并发送副屏面板消息', async () => {
