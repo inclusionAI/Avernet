@@ -13,6 +13,7 @@ authenticate a human session (``require_authenticated_user``). Live calls need
 BCS-side service-token support; until then this client is exercised through
 fakes/mocked transport only.
 """
+
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
@@ -41,9 +42,7 @@ class BcsChannelBindingClientProtocol(Protocol):
         """
         ...
 
-    async def push_config(
-        self, channel: ChannelRecord, *, binding_id: str
-    ) -> None:
+    async def push_config(self, channel: ChannelRecord, *, binding_id: str) -> None:
         """Full-replace the binding config (agentclaw is the source of truth)."""
         ...
 
@@ -73,6 +72,12 @@ def _binding_payload(channel: ChannelRecord) -> dict[str, Any]:
             "robot_code": config.get("robot_code") or config.get("client_id") or "",
             "client_id": config.get("client_id") or "",
             "client_secret": config.get("client_secret") or "",
+            # BCS validates this as a boolean (Bot bindings only); always send
+            # an explicit value — the PATCH config is a full replace, and the
+            # stored row (agentclaw) is the source of truth.
+            "forward_sender_identity": bool(
+                config.get("forward_sender_identity", False)
+            ),
             "send_mode": send_mode,
         },
     }
@@ -162,9 +167,7 @@ class HttpBcsChannelBindingClient:
                 return recovered or None
         return None
 
-    async def push_config(
-        self, channel: ChannelRecord, *, binding_id: str
-    ) -> None:
+    async def push_config(self, channel: ChannelRecord, *, binding_id: str) -> None:
         if not binding_id:
             raise ChannelSyncError("channel has no bcs_binding_id to update")
         config = _binding_payload(channel)["config"]

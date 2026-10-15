@@ -4111,6 +4111,19 @@
             "title": "Enable Streaming Cards",
             "type": "boolean"
           },
+          "forward_sender_identity": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether inbound messages forward the DingTalk sender identity when binding_mode is 'bcn_gateway'; null otherwise.",
+            "title": "Forward Sender Identity"
+          },
           "group_chat_scope": {
             "anyOf": [
               {
@@ -4244,6 +4257,19 @@
             "description": "Whether DingTalk cards update while output streams.",
             "title": "Enable Streaming Cards",
             "type": "boolean"
+          },
+          "forward_sender_identity": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether inbound messages forward the DingTalk sender identity to the Bot's context; only valid when binding_mode is 'bcn_gateway'.",
+            "title": "Forward Sender Identity"
           },
           "group_chat_scope": {
             "anyOf": [
@@ -4412,6 +4438,19 @@
             ],
             "description": "Enable or disable streaming cards; omit to keep.",
             "title": "Enable Streaming Cards"
+          },
+          "forward_sender_identity": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether inbound messages forward the DingTalk sender identity; omit to keep. bcn_gateway channels only.",
+            "title": "Forward Sender Identity"
           },
           "group_chat_scope": {
             "anyOf": [

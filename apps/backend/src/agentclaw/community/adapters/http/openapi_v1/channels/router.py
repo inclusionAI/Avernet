@@ -119,6 +119,17 @@ def _status(value: str) -> ChannelStatus:
     return "active" if value == "1" else "inactive"
 
 
+# optional bcn_gateway-only config keys: an explicit null means "not provided"
+# (same semantics as client_secret) and is dropped before persisting — a stored
+# null would make the BCS ``_binding_payload``'s ``config.get(key, default)``
+# send null instead of the default/stored value.
+_BCN_OPTIONAL_KEYS: tuple[str, ...] = (
+    "group_chat_scope",
+    "outbound_visibility",
+    "forward_sender_identity",
+)
+
+
 def _safe_config(raw: dict[str, Any]) -> DingTalkChannelConfig:
     """Project the stored config without returning credentials or private URLs."""
     raw_allowlist = raw.get("allowlist")
@@ -141,6 +152,11 @@ def _safe_config(raw: dict[str, Any]) -> DingTalkChannelConfig:
         include_sender_name=bool(raw.get("include_sender_name", True)),
         group_chat_scope=raw.get("group_chat_scope"),
         outbound_visibility=raw.get("outbound_visibility"),
+        forward_sender_identity=(
+            bool(raw["forward_sender_identity"])
+            if "forward_sender_identity" in raw
+            else None
+        ),
     )
 
 
@@ -311,7 +327,7 @@ async def create_channel(
         user_id=user_id,
     )
     config = body.config.model_dump()
-    for bcn_key in ("group_chat_scope", "outbound_visibility"):
+    for bcn_key in _BCN_OPTIONAL_KEYS:
         if config.get(bcn_key) is None:
             config.pop(bcn_key, None)
     config["binding_mode"] = body.binding_mode
@@ -421,11 +437,7 @@ async def update_channel(
         patch = body.config.model_dump(exclude_unset=True)
         if patch.get("client_secret") is None:
             patch.pop("client_secret", None)
-        # Explicit nulls on bcn keys mean "not provided" (same semantics as
-        # client_secret): keeping them would persist null, and the BCS
-        # ``_binding_payload``'s ``config.get(key, default)`` would then send
-        # null instead of the default/stored value.
-        for bcn_key in ("group_chat_scope", "outbound_visibility"):
+        for bcn_key in _BCN_OPTIONAL_KEYS:
             if patch.get(bcn_key) is None:
                 patch.pop(bcn_key, None)
         config.update(patch)

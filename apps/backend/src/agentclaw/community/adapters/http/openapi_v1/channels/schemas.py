@@ -28,7 +28,11 @@ _PLUGIN_ONLY_FIELDS: tuple[str, ...] = (
     "aix_enable",
     "include_sender_name",
 )
-_BCN_ONLY_FIELDS: tuple[str, ...] = ("group_chat_scope", "outbound_visibility")
+_BCN_ONLY_FIELDS: tuple[str, ...] = (
+    "group_chat_scope",
+    "outbound_visibility",
+    "forward_sender_identity",
+)
 
 
 def validate_mode_matrix(
@@ -109,6 +113,13 @@ class DingTalkChannelConfigCreate(BaseModel):
         default=None,
         description="Outbound transcript visibility; only valid when binding_mode is 'bcn_gateway'.",
     )
+    forward_sender_identity: bool | None = Field(
+        default=None,
+        description=(
+            "Whether inbound messages forward the DingTalk sender identity to the "
+            "Bot's context; only valid when binding_mode is 'bcn_gateway'."
+        ),
+    )
 
 
 class DingTalkChannelConfigUpdate(BaseModel):
@@ -161,6 +172,13 @@ class DingTalkChannelConfigUpdate(BaseModel):
         default=None,
         description="New outbound visibility; omit to keep. bcn_gateway channels only.",
     )
+    forward_sender_identity: bool | None = Field(
+        default=None,
+        description=(
+            "Whether inbound messages forward the DingTalk sender identity; "
+            "omit to keep. bcn_gateway channels only."
+        ),
+    )
 
 
 class DingTalkChannelConfig(BaseModel):
@@ -205,6 +223,13 @@ class DingTalkChannelConfig(BaseModel):
     outbound_visibility: OutboundVisibility | None = Field(
         default=None,
         description="Outbound visibility when binding_mode is 'bcn_gateway'; null otherwise.",
+    )
+    forward_sender_identity: bool | None = Field(
+        default=None,
+        description=(
+            "Whether inbound messages forward the DingTalk sender identity when "
+            "binding_mode is 'bcn_gateway'; null otherwise."
+        ),
     )
 
 

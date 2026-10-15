@@ -1,4 +1,5 @@
 """HttpBcsChannelBindingClient wire-level tests (MockTransport, no real BCS)."""
+
 import json
 from datetime import UTC, datetime
 
@@ -67,11 +68,26 @@ async def test_ensure_active_posts_binding_and_returns_id():
         assert body["group_chat_scope"] == "per_sender"
         assert body["outbound_visibility"] == "full_transcript"
         assert body["config"]["robot_code"] == "robot-1"
-        assert body["config"]["send_mode"] == {"mode": "normal", "message_type": "markdown"}
+        assert body["config"]["forward_sender_identity"] is False
+        assert body["config"]["send_mode"] == {
+            "mode": "normal",
+            "message_type": "markdown",
+        }
         return httpx.Response(201, json=_ok({"id": "bcs-1"}))
 
     assert await _client(handler).ensure_active(_record()) == "bcs-1"
     assert ("POST", _BINDING_PATH) in seen
+
+
+@pytest.mark.asyncio
+async def test_ensure_active_forwards_sender_identity_when_set():
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["config"]["forward_sender_identity"] is True
+        return httpx.Response(201, json=_ok({"id": "bcs-2"}))
+
+    record = _record(forward_sender_identity=True)
+    assert await _client(handler).ensure_active(record) == "bcs-2"
 
 
 @pytest.mark.asyncio
@@ -117,9 +133,9 @@ async def test_ensure_active_recovers_id_via_by_target_on_conflict():
         if request.url.path.endswith("/by-target"):
             assert "target_type=bot" in str(request.url)
             assert "target_id=bot-1" in str(request.url)
-            return httpx.Response(200, json=_ok({
-                "items": [{"id": "bcs-9", "account_ref": "client-1"}]
-            }))
+            return httpx.Response(
+                200, json=_ok({"items": [{"id": "bcs-9", "account_ref": "client-1"}]})
+            )
         return httpx.Response(200, json=_ok({"id": "bcs-9"}))
 
     assert await _client(handler).ensure_active(_record()) == "bcs-9"
@@ -144,9 +160,13 @@ async def test_push_config_patches_full_config():
         body = json.loads(request.content)
         assert set(body) == {"config"}
         assert body["config"]["client_id"] == "client-1"
+        # full-replace config carries the flag every time (agentclaw is SoT)
+        assert body["config"]["forward_sender_identity"] is True
         return httpx.Response(200, json=_ok(None))
 
-    await _client(handler).push_config(_record(), binding_id="bcs-1")
+    await _client(handler).push_config(
+        _record(forward_sender_identity=True), binding_id="bcs-1"
+    )
 
 
 @pytest.mark.asyncio

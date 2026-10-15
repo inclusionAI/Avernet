@@ -517,6 +517,7 @@ def test_read_contract_never_defines_client_secret():
 
 # ── binding_mode 契约 ──────────────────────────────────────────────
 
+
 def test_create_defaults_to_plugin_mode():
     channel = ChannelCreate(
         type="dingding",
@@ -577,6 +578,7 @@ def test_create_rejects_bcn_fields_for_plugin_mode():
 
 
 # ── router binding_mode 投影与不可变校验 ───────────────────────────
+
 
 def _bcn_body() -> ChannelCreate:
     return ChannelCreate(
@@ -640,11 +642,13 @@ async def test_create_plugin_omits_bcn_keys():
 
 @pytest.mark.asyncio
 async def test_get_projects_binding_mode():
-    record = _record(config={
-        **_record().config,
-        "binding_mode": "bcn_gateway",
-        "group_chat_scope": "per_sender",
-    })
+    record = _record(
+        config={
+            **_record().config,
+            "binding_mode": "bcn_gateway",
+            "group_chat_scope": "per_sender",
+        }
+    )
     service = _Channels([record])
 
     response = await get_channel(
@@ -663,7 +667,9 @@ async def test_get_projects_binding_mode():
 
 @pytest.mark.asyncio
 async def test_update_rejects_binding_mode_change():
-    service = _Channels([_record(config={**_record().config, "binding_mode": "plugin"})])
+    service = _Channels(
+        [_record(config={**_record().config, "binding_mode": "plugin"})]
+    )
 
     response = await update_channel(
         bot_id="bot-1",
@@ -683,17 +689,27 @@ async def test_update_rejects_binding_mode_change():
 
 @pytest.mark.asyncio
 async def test_update_rejects_plugin_field_on_bcn_channel():
-    service = _Channels([_record(config={
-        **_record().config,
-        "binding_mode": "bcn_gateway",
-        "robot_code": "robot-1",
-    })])
+    service = _Channels(
+        [
+            _record(
+                config={
+                    **_record().config,
+                    "binding_mode": "bcn_gateway",
+                    "robot_code": "robot-1",
+                }
+            )
+        ]
+    )
 
     response = await update_channel(
         bot_id="bot-1",
         channel_id=1,
         body=ChannelUpdate(
-            config={"client_id": "client-2", "client_secret": "secret-2", "dm_policy": "open"}
+            config={
+                "client_id": "client-2",
+                "client_secret": "secret-2",
+                "dm_policy": "open",
+            }
         ),
         request=_request(),
         user_id="owner-1",
@@ -714,13 +730,20 @@ async def test_update_explicit_null_bcn_fields_keep_stored_values():
     ``_binding_payload`` 的 ``config.get(..., default)`` 对"键存在且为
     None"返回 None —— payload 会送 null。显式 null 按省略处理，保留存量值。
     """
-    service = _Channels([_record(status="0", config={
-        **_record().config,
-        "binding_mode": "bcn_gateway",
-        "robot_code": "robot-1",
-        "group_chat_scope": "per_sender",
-        "outbound_visibility": "full_transcript",
-    })])
+    service = _Channels(
+        [
+            _record(
+                status="0",
+                config={
+                    **_record().config,
+                    "binding_mode": "bcn_gateway",
+                    "robot_code": "robot-1",
+                    "group_chat_scope": "per_sender",
+                    "outbound_visibility": "full_transcript",
+                },
+            )
+        ]
+    )
     body = ChannelUpdate.model_validate(
         {
             "config": {
@@ -749,3 +772,199 @@ async def test_update_explicit_null_bcn_fields_keep_stored_values():
     assert update_args["config"]["outbound_visibility"] == "full_transcript"
     assert update_args["config"]["client_id"] == "client-2"
     assert result.data.config.group_chat_scope == "per_sender"
+
+
+# ── forward_sender_identity（BCN 专属：钉钉发送人身份透传开关）─────────
+
+
+def test_create_rejects_forward_sender_identity_for_plugin_mode():
+    with pytest.raises(ValidationError) as exc:
+        ChannelCreate(
+            type="dingding",
+            config={
+                "client_id": "client-1",
+                "client_secret": "secret-1",
+                "forward_sender_identity": True,
+            },
+        )
+    assert "forward_sender_identity" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_create_bcn_gateway_stores_forward_sender_identity():
+    service = _Channels()
+
+    await create_channel(
+        bot_id="bot-1",
+        body=ChannelCreate(
+            type="dingding",
+            binding_mode="bcn_gateway",
+            config={
+                "client_id": "client-1",
+                "client_secret": "secret-1",
+                "robot_code": "robot-1",
+                "forward_sender_identity": True,
+            },
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+
+    create_kwargs = next(c for name, c in service.calls if name == "create")
+    assert create_kwargs["config"]["forward_sender_identity"] is True
+
+
+@pytest.mark.asyncio
+async def test_create_bcn_gateway_omits_unset_flag():
+    """未传时不能落 null —— BCS payload 的 config.get 兜底 False。"""
+    service = _Channels()
+
+    await create_channel(
+        bot_id="bot-1",
+        body=_bcn_body(),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+
+    create_kwargs = next(c for name, c in service.calls if name == "create")
+    assert "forward_sender_identity" not in create_kwargs["config"]
+
+
+@pytest.mark.asyncio
+async def test_get_projects_forward_sender_identity():
+    bcn = _record(
+        config={
+            **_record().config,
+            "binding_mode": "bcn_gateway",
+            "forward_sender_identity": True,
+        }
+    )
+    plugin = _record(channel_id=2)
+
+    for channel_id, expected in ((1, True), (2, None)):
+        response = await get_channel(
+            bot_id="bot-1",
+            channel_id=channel_id,
+            request=_request(),
+            user_id="owner-1",
+            owner_id="owner-1",
+            relay=_Relay(),
+            service=_Channels([bcn, plugin]),
+        )
+        payload = json.loads(response.model_dump_json())["data"]
+        assert payload["config"]["forward_sender_identity"] == expected
+
+
+@pytest.mark.asyncio
+async def test_update_bcn_channel_sets_flag():
+    service = _Channels(
+        [
+            _record(
+                status="0",
+                config={
+                    **_record().config,
+                    "binding_mode": "bcn_gateway",
+                    "robot_code": "robot-1",
+                },
+            )
+        ]
+    )
+
+    await update_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelUpdate(
+            config={
+                "client_id": "client-2",
+                "client_secret": "secret-2",
+                "forward_sender_identity": True,
+            }
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+
+    update_args = next(value for name, value in service.calls if name == "update")
+    assert update_args["config"]["forward_sender_identity"] is True
+
+
+@pytest.mark.asyncio
+async def test_update_explicit_null_flag_keeps_stored_value():
+    service = _Channels(
+        [
+            _record(
+                status="0",
+                config={
+                    **_record().config,
+                    "binding_mode": "bcn_gateway",
+                    "robot_code": "robot-1",
+                    "forward_sender_identity": True,
+                },
+            )
+        ]
+    )
+
+    await update_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelUpdate.model_validate(
+            {
+                "config": {
+                    "client_id": "client-2",
+                    "client_secret": "secret-2",
+                    "forward_sender_identity": None,
+                }
+            }
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+
+    update_args = next(value for name, value in service.calls if name == "update")
+    assert update_args["config"]["forward_sender_identity"] is True
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_flag_on_plugin_channel():
+    service = _Channels([_record()])
+
+    response = await update_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelUpdate(
+            config={
+                "client_id": "client-2",
+                "client_secret": "secret-2",
+                "forward_sender_identity": True,
+            }
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+    assert response.status_code == 422
+    assert json.loads(response.body)["message"] == "Channel mode violation"
