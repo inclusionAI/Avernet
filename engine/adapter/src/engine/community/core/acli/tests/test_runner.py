@@ -301,7 +301,7 @@ async def test_market_without_keyword_omits_the_flag(fake_acli):
 
 
 @pytest.mark.parametrize(
-    "name", ["", "-rf", "../x", "a b", "x;rm", "a" * 300, None, "di@1.0.9", "@scope", "a/b"]
+    "name", ["", "-rf", "../x", "a b", "x;rm", "a" * 300, None, "di@1.0.9", "@scope", "a/b", "@antcli/yuntu-cli"]
 )
 def test_bad_names_are_refused(name):
     with pytest.raises(AcliError) as caught:
@@ -309,7 +309,7 @@ def test_bad_names_are_refused(name):
     assert caught.value.code == "invalid_input"
 
 
-@pytest.mark.parametrize("name", ["dataphin", "deepinsight-cli", "@antcli/yuntu-cli", "a_b.c"])
+@pytest.mark.parametrize("name", ["dataphin", "deepinsight-cli", "yuntu-cli", "a_b.c"])
 def test_market_names_are_accepted(name):
     assert validate_name(name) == name
 

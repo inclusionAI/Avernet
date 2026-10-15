@@ -48,8 +48,10 @@ class AddBotCli(BaseModel):
     cli_code: str = Field(
         min_length=1,
         max_length=256,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
         description="The tool's acli market name, e.g. `deepinsight-cli` "
-        "(not its command name `di`).",
+        "(not its command name `di`). Market names contain no `/`, so every "
+        "granted CLI can be addressed by `DELETE …/clis/{cli_code}`.",
     )
 
 

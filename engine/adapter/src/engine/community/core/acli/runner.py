@@ -38,12 +38,13 @@ from typing import Any
 
 log = logging.getLogger("engine.acli")
 
-#: A market name: ``dataphin``, ``deepinsight-cli``, or a scoped
-#: ``@antcli/yuntu-cli``. The first character is never ``-``, so a name cannot
-#: be read as a flag. A ``name@version`` pin is refused: acli records installs
-#: by bare name, so a pinned name could be installed but never found again to
-#: uninstall.
-_NAME_RE = re.compile(r"^(?:@[A-Za-z0-9][A-Za-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*$")
+#: A market name: ``dataphin``, ``deepinsight-cli``, ``yuntu-cli``. The first
+#: character is never ``-``, so a name cannot be read as a flag. Refused:
+#: ``name@version`` (acli records installs by bare name, so a pinned name could
+#: be installed but never found again to uninstall) and npm package names such
+#: as ``@antcli/yuntu-cli`` (not market names, and a ``/`` could not be
+#: addressed by the platform's ``DELETE …/clis/{cli_code}``).
+_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _MAX_NAME_LENGTH = 256
 _MAX_KEYWORD_LENGTH = 100
 _MAX_PAGE_SIZE = 100

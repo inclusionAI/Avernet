@@ -182,3 +182,13 @@ async def test_domain_errors_map_to_their_status_and_data(error, status, data) -
 
     assert response.status_code == status
     assert _body(response).get("data") == data
+
+
+
+@pytest.mark.parametrize("code", ["@antcli/yuntu-cli", "-rf", "a b", ""])
+def test_add_refuses_codes_delete_could_not_address(code) -> None:
+    """Every code POST accepts must be removable by ``DELETE …/clis/{cli_code}``."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        AddBotCli(cli_code=code)

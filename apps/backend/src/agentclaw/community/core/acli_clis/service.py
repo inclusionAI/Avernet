@@ -153,7 +153,8 @@ class AcliCliService(AcliCliServiceProtocol):
         started = time.monotonic()
         bot = self._writable_bot(bot_id, entity_id, actor_id, lock_epoch)
         owner_id = str(bot["owner_id"])
-        if cli_code in self._granted_codes(bot):
+        granted_before = self._granted_codes(bot)
+        if cli_code in granted_before:
             raise AcliCliAlreadyGrantedError(cli_code)
         logger.info(
             "acli_cli_add_requested bot_id=%s cli_code=%s actor_id=%s", bot_id, cli_code, actor_id
@@ -183,7 +184,9 @@ class AcliCliService(AcliCliServiceProtocol):
             # acli resolved an alias (``di`` → ``deepinsight-cli``). Passport
             # codes are market names, so undo and point the caller at it —
             # unless the bot already holds that tool, whose program must stay.
-            if tool.name not in self._granted_codes(bot):
+            # Judged against the pre-install snapshot: a fresh read here could
+            # fail and strand the program the alias just installed.
+            if tool.name not in granted_before:
                 await self._undo_install(bot_id, owner_id, tool.name, reason="name_mismatch")
             raise AcliCliNameMismatchError(cli_code, tool.name)
 
@@ -338,12 +341,17 @@ class AcliCliService(AcliCliServiceProtocol):
         try:
             self._reconciler.add_cli(bot=bot, item=item)
         except Exception as error:
+            granted = self._grant_state(bot, cli_code)
+            if granted:
+                # The re-grant landed despite the error: granted and installed,
+                # exactly as before the remove.
+                return
+            state = "revoke_unknown_installed" if granted is None else "revoked_still_installed"
             logger.error(
-                "acli_cli_rollback_failed bot_id=%s cli_code=%s state=revoked_still_installed "
-                "error_type=%s",
-                bot["bot_id"], cli_code, type(error).__name__,
+                "acli_cli_rollback_failed bot_id=%s cli_code=%s state=%s error_type=%s",
+                bot["bot_id"], cli_code, state, type(error).__name__,
             )
-            raise AcliRollbackFailedError(cli_code, "revoked_still_installed") from error
+            raise AcliRollbackFailedError(cli_code, state) from error
 
     def _clear_identity_override(
         self,
