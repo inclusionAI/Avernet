@@ -1,6 +1,7 @@
 """CLI snapshots copy independently of the engine root and retry cleanly."""
 
 import shutil
+import os
 from pathlib import Path
 import subprocess
 from unittest.mock import MagicMock
@@ -56,7 +57,7 @@ def migration(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
-def test_migration_copies_only_bin_and_materializes_executable_link(migration, caplog):
+def test_migration_copies_regular_executable_and_skips_link(migration, caplog):
     caplog.set_level("INFO")
     source, target, commands, migrate = migration
     local = source.parent / ".local"
@@ -66,7 +67,8 @@ def test_migration_copies_only_bin_and_materializes_executable_link(migration, c
     tool = tools / "cli"
     tool.write_text("#!/bin/sh\nprintf 'cli works'\n")
     tool.chmod(0o755)
-    (local / "bin/cli").symlink_to("../share/tools/cli")
+    (local / "bin/linked-cli").symlink_to("../share/tools/cli")
+    shutil.copy2(tool, local / "bin/cli")
     (local / "credentials").write_text("private-source-content")
 
     assert migrate()
@@ -78,7 +80,8 @@ def test_migration_copies_only_bin_and_materializes_executable_link(migration, c
     assert not (target.parent / ".local/share").exists()
     assert not (target.parent / ".local/credentials").exists()
     assert (target / "config.json").read_text() == "{}"
-    assert any("-avL" in cmd for cmd in commands)
+    assert not (target.parent / ".local/bin/linked-cli").exists()
+    assert any("--no-links" in cmd for cmd in commands)
     for event in ("request", "success"):
         assert f"service_bot.local_bin.{event}" in caplog.text
     assert "device_id=device-cli-test" in caplog.text
@@ -548,33 +551,152 @@ def test_build_rejects_non_directory_version_bin(tmp_path, caplog):
     assert "service_bot.local_bin.failure" in caplog.text
 
 
-@pytest.mark.parametrize("dangling_link", [False, True])
-def test_non_directory_cli_source_fails(tmp_path, dangling_link):
+def test_non_directory_cli_source_fails(tmp_path):
     source = tmp_path / "home"
     (source / ".local").mkdir(parents=True)
-    if dangling_link:
-        (source / ".local/bin").symlink_to("missing-directory")
-    else:
-        (source / ".local/bin").write_text("not a directory")
+    (source / ".local/bin").write_text("not a directory")
     with pytest.raises(NotADirectoryError):
         sync_local_bin_artifact(
-            source_home=source,
-            target_dir=tmp_path / "artifact",
-            device_id="device-cli-test",
-            version="2",
-            build_ignore_paths=(),
+            source_home=source, target_dir=tmp_path / "artifact",
+            device_id="device-cli-test", version="2", build_ignore_paths=(),
             run_command=MagicMock(),
         )
 
 
 @pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
-def test_cli_broken_file_link_fails_migration(migration, caplog):
+def test_cli_links_skip_and_retry_removes_literal_same_name_files(migration, tmp_path, caplog):
     caplog.set_level("INFO")
-    source, _, _, migrate = migration
+    source, artifact, commands, migrate = migration
     source_bin = source.parent / ".local/bin"
-    source_bin.mkdir(parents=True)
-    (source_bin / "cli").symlink_to("missing-cli-target")
-    with pytest.raises(BotBuildMigrationError):
-        migrate()
+    (source_bin / "nested").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "sentinel").write_text("outside-secret")
+    names = ["node", "npm", "harness", "broken", "directory", "nested/link", "literal*?[x]", r"back\slash*", r"plain\slash", "only[x]", "question?", "star*"]
+    for name in names:
+        (source_bin / name).write_text("previous")
+    (source_bin / "literalZZx").write_text("keep literal neighbour")
+    assert migrate()
+    for name in names:
+        path = source_bin / name
+        path.unlink()
+        path.symlink_to(outside if name == "directory" else ("missing" if name == "broken" else outside / "sentinel"))
+    assert migrate()
+    target_bin = artifact.parent / ".local/bin"
+    for name in names:
+        assert not (target_bin / name).exists()
+        assert not (target_bin / name).is_symlink()
+        assert (source_bin / name).is_symlink()
+    assert (target_bin / "literalZZx").read_text() == "keep literal neighbour"
+    assert (outside / "sentinel").read_text() == "outside-secret"
+    assert "outside-secret" not in caplog.text
+    assert "symlink_policy=skip" in caplog.text
+    assert "service_bot.local_bin.symlink.skip" in caplog.text
+    cli_commands = [cmd for cmd in commands if cmd[-1] == f"{target_bin}/"]
+    assert all("--no-links" in cmd and "-av" in cmd and "-avL" not in cmd for cmd in cli_commands)
+
+
+@pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
+@pytest.mark.parametrize("parent", [".", ".local", ".local/bin"])
+@pytest.mark.parametrize("dangling", [False, True])
+def test_source_symlink_parent_skips_and_cleans_old_bin(tmp_path, caplog, parent, dangling):
+    caplog.set_level("INFO")
+    source_home = tmp_path / "home"
+    outside = tmp_path / "outside"
+    (outside / ".local/bin").mkdir(parents=True)
+    (outside / ".local/bin/sentinel").write_text("never copy")
+    link = source_home / parent
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(tmp_path / "missing" if dangling else outside, target_is_directory=True)
+    artifact = tmp_path / "versions/3/openclaw"
+    target_bin = artifact.parent / ".local/bin"
+    target_bin.mkdir(parents=True)
+    (target_bin / "stale").write_text("stale")
+    commands = []
+
+    def run_command(**kwargs):
+        cmd = kwargs["cmd"]
+        commands.append(cmd)
+        subprocess.run(cmd[1:], check=True, capture_output=True)
+
+    sync_local_bin_artifact(
+        source_home=source_home, target_dir=artifact, device_id="device-cli-test",
+        version="3", build_ignore_paths=(), run_command=run_command,
+    )
+    assert list(target_bin.iterdir()) == []
+    assert len(commands) == 1 and commands[0][-2] != f"{source_home / '.local/bin'}/"
+    assert "reason=source_symlink" in caplog.text
+    assert link.is_symlink()
+
+
+@pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
+def test_nested_relative_directory_and_cycle_links_are_never_followed(migration, monkeypatch):
+    source, artifact, _, migrate = migration
+    source_bin = source.parent / ".local/bin"
+    (source_bin / "nested").mkdir(parents=True)
+    (source_bin / "nested/regular").write_text("regular")
+    (source_bin / "nested").chmod(0o750)
+    (source_bin / "alias").symlink_to("nested", target_is_directory=True)
+    (source_bin / "nested/cycle").symlink_to("..", target_is_directory=True)
+    (source_bin / "relative").symlink_to("nested/regular")
+    (source_bin / "ignored").mkdir()
+    (source_bin / "ignored/broken").symlink_to("missing")
+    # A scan or rsync which dereferences links would read or copy extra data.
+    monkeypatch.setattr(Path, "readlink", MagicMock(side_effect=AssertionError("must not read link target")))
+    assert migrate((".local/bin/ignored",))
+    target_bin = artifact.parent / ".local/bin"
+    assert (target_bin / "nested/regular").read_text() == "regular"
+    assert (target_bin / "nested").stat().st_mode & 0o777 == 0o750
+    assert sorted(path.relative_to(target_bin).as_posix() for path in target_bin.rglob("*")) == ["nested", "nested/regular"]
+
+
+def test_source_scan_io_failure_propagates_and_logs(tmp_path, monkeypatch, caplog):
+    from agentclaw.community.core.service_bot.services import local_bin_artifact
+
+    caplog.set_level("INFO")
+    source_home = tmp_path / "home"
+    (source_home / ".local/bin").mkdir(parents=True)
+    run = MagicMock()
+    monkeypatch.setattr(local_bin_artifact.os, "scandir", MagicMock(side_effect=PermissionError("scan denied")))
+    with pytest.raises(PermissionError, match="scan denied"):
+        sync_local_bin_artifact(
+            source_home=source_home, target_dir=tmp_path / "versions/3/openclaw",
+            device_id="device-cli-test", version="3", build_ignore_paths=(), run_command=run,
+        )
+    run.assert_not_called()
     assert "service_bot.local_bin.failure" in caplog.text
+    assert "error_type=PermissionError" in caplog.text
     assert "service_bot.local_bin.success" not in caplog.text
+
+
+def test_absent_artifact_source_link_skips_without_creating_target(tmp_path, caplog):
+    caplog.set_level("INFO")
+    source_home = tmp_path / "home"
+    source_home.symlink_to(tmp_path / "missing")
+    run = MagicMock()
+    target = tmp_path / "versions/3/openclaw"
+    sync_local_bin_artifact(
+        source_home=source_home, target_dir=target, device_id="device-cli-test",
+        version="3", build_ignore_paths=(), run_command=run,
+    )
+    run.assert_not_called()
+    assert not target.parent.exists()
+    assert "reason=source_symlink" in caplog.text
+
+
+@pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
+def test_skip_directory_link_removes_old_directory_and_omits_fifo(migration, tmp_path):
+    source, artifact, commands, migrate = migration
+    source_bin = source.parent / ".local/bin"
+    (source_bin / "directory").mkdir(parents=True)
+    (source_bin / "directory/old").write_text("previous")
+    assert migrate()
+    shutil.rmtree(source_bin / "directory")
+    (source_bin / "directory").symlink_to(tmp_path / "missing", target_is_directory=True)
+    os.mkfifo(source_bin / "pipe")
+    assert migrate()
+    target_bin = artifact.parent / ".local/bin"
+    assert list(target_bin.iterdir()) == []
+    assert (source_bin / "directory").is_symlink()
+    assert (source_bin / "pipe").exists()
+    assert "--no-devices" in commands[-1] and "--no-specials" in commands[-1]
