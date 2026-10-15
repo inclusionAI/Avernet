@@ -689,3 +689,6 @@ mod question_tests;
 
 #[path = "failed_tool_tests.rs"]
 mod failed_tool_tests;
+
+#[path = "tool_contract_tests.rs"]
+mod tool_contract_tests;

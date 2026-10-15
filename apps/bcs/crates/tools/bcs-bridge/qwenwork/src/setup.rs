@@ -38,6 +38,7 @@ fn deinitialize_at(config_path: &Path, options: &toml::Table, home: &Path) -> Re
     let candidates: Vec<_> = bots.iter().filter(|bot| bot.get("engine").and_then(toml::Value::as_str) == Some("qwenwork")).collect();
     if candidates.len() != 1 { bail!("Deinit requires exactly one qwenwork Bot"); }
     let engine = candidates[0].get("engine_options").and_then(toml::Value::as_table).context("QwenWork is not initialized")?;
+    let engine = desktop_options(engine)?;
     let listen = engine.get("listen").and_then(toml::Value::as_str).context("Missing listener")?;
     let secret = engine.get("hook_secret").and_then(toml::Value::as_str).filter(|s| !s.is_empty()).context("Missing Hook credential")?;
     let saved = options.get("settings_path").or_else(|| engine.get("settings_path"));
@@ -47,6 +48,7 @@ fn deinitialize_at(config_path: &Path, options: &toml::Table, home: &Path) -> Re
     };
     if !path.is_absolute() || path == config_path { bail!("Settings path must be absolute and distinct from bridge configuration"); }
     let Some(bytes) = read_optional(&path)? else { return Ok("No desktop settings file; nothing to remove".into()); };
+    let _desktop_lock = configuration_lock(&path.with_file_name("bcs-bridge.toml"))?;
     if fs::canonicalize(&path)? == fs::canonicalize(config_path)? { bail!("Settings and bridge configuration must not refer to the same file"); }
     let mut settings: Value = serde_json::from_slice(&bytes).map_err(|_| anyhow::anyhow!("Invalid desktop settings JSON"))?;
     let url = format!("http://{listen}/hooks");
@@ -77,7 +79,26 @@ fn initialize_at(config_path: &Path, overrides: &toml::Table, home: &Path) -> Re
     if indexes.len() != 1 { bail!("Initialization requires exactly one qwenwork Bot in the selected configuration"); }
     let bot = bots[indexes[0]].as_table_mut().context("Invalid Bot configuration")?;
     let mut engine = bot.get("engine_options").and_then(toml::Value::as_table).cloned().unwrap_or_default();
-    let previous_hook = engine.get("listen").and_then(toml::Value::as_str)
+    if let Some(value) = overrides.get("database_path") { engine.insert("database_path".into(), value.clone()); }
+    if !engine.contains_key("database_path") {
+        let candidates = ["QwenWorkCN", "QwenWork"].map(|name| home.join("Library/Application Support").join(name).join("data/agents.db"));
+        let existing: Vec<_> = candidates.iter().filter(|p| p.is_file()).collect();
+        if existing.len() != 1 { bail!("Cannot uniquely identify QwenWork database; pass --option database_path=/absolute/path/agents.db"); }
+        engine.insert("database_path".into(), existing[0].to_str().context("Database path must be UTF-8")?.into());
+    }
+    let settings_path = match overrides.get("settings_path").or_else(|| engine.get("settings_path")) {
+        Some(value) => PathBuf::from(value.as_str().context("settings_path must be a string")?),
+        None => home.join(if engine.get("database_path").and_then(toml::Value::as_str).unwrap_or_default().contains("QwenWorkCN") { ".qwenworkcn" } else { ".qwenwork" }).join("settings.json"),
+    };
+    if !settings_path.is_absolute() || settings_path == config_path { bail!("Settings path must be absolute and distinct from bridge configuration"); }
+    let shared_path = settings_path.with_file_name("bcs-bridge.toml");
+    if shared_path == config_path { bail!("Shared desktop settings must be distinct from profile configuration"); }
+    if fs::symlink_metadata(&shared_path).is_ok_and(|m| m.file_type().is_symlink()) { bail!("Shared desktop configuration must not be a symlink"); }
+    fs::create_dir_all(settings_path.parent().context("Settings require a parent directory")?)?;
+    let _desktop_lock = configuration_lock(&shared_path)?;
+    let old_shared = read_optional(&shared_path)?;
+    if let Some(bytes) = &old_shared { engine.extend(parse_shared(bytes)?); }
+    let mut previous_hook = engine.get("listen").and_then(toml::Value::as_str)
         .zip(engine.get("hook_secret").and_then(toml::Value::as_str))
         .map(|(listen, secret)| (format!("http://{listen}/hooks"), format!("Bearer {secret}")));
     for key in ["database_path", "listen"] {
@@ -85,25 +106,13 @@ fn initialize_at(config_path: &Path, overrides: &toml::Table, home: &Path) -> Re
     }
     engine.entry("listen").or_insert("127.0.0.1:52491".into());
     engine.entry("bot_id").or_insert(format!("bridge-qwenwork-{}", Uuid::new_v4().simple()).into());
+    let recover_hook = old_shared.is_none() && engine.get("hook_secret").and_then(toml::Value::as_str)
+        .is_none_or(|s| s.is_empty() || s.starts_with('<'));
     for key in ["secret", "hook_secret"] {
         if engine.get(key).and_then(toml::Value::as_str).is_none_or(|s| s.is_empty() || s.starts_with('<')) {
             engine.insert(key.into(), format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()).into());
         }
     }
-    if !engine.contains_key("database_path") {
-        let candidates = ["QwenWorkCN", "QwenWork"].map(|name| home.join("Library/Application Support").join(name).join("data/agents.db"));
-        let existing: Vec<_> = candidates.iter().filter(|p| p.is_file()).collect();
-        if existing.len() != 1 { bail!("Cannot uniquely identify QwenWork database; pass --option database_path=/absolute/path/agents.db"); }
-        engine.insert("database_path".into(), existing[0].to_str().context("Database path must be UTF-8")?.into());
-    }
-    let parsed = super::Options::parse(&engine).map_err(|_| anyhow::anyhow!("Invalid qwenwork options; check the database path and loopback listener"))?;
-    if parsed.secret == parsed.hook_secret { bail!("Channel and Hook credentials must be different"); }
-    super::session::validate(&parsed.database_path).map_err(|_| anyhow::anyhow!("Unsupported QwenWork database schema"))?;
-    let settings_path = match overrides.get("settings_path") {
-        Some(value) => PathBuf::from(value.as_str().context("settings_path must be a string")?),
-        None => parsed.settings_path.clone().unwrap_or_else(|| home.join(if parsed.database_path.to_string_lossy().contains("QwenWorkCN") { ".qwenworkcn" } else { ".qwenwork" }).join("settings.json")),
-    };
-    if !settings_path.is_absolute() || settings_path == config_path { bail!("Settings path must be absolute and distinct from bridge configuration"); }
     let old_settings = match fs::read(&settings_path) {
         Ok(bytes) => Some(bytes),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -114,6 +123,19 @@ fn initialize_at(config_path: &Path, overrides: &toml::Table, home: &Path) -> Re
         Some(bytes) => serde_json::from_slice(bytes).map_err(|_| anyhow::anyhow!("Invalid desktop settings JSON; no files changed"))?,
         None => json!({}),
     };
+    let mut recovered = false;
+    if recover_hook {
+        let listen = engine.get("listen").and_then(toml::Value::as_str).context("Invalid listener")?;
+        let url = format!("http://{listen}/hooks");
+        if let Some(secret) = recover_hook_credential(&settings, &url)? {
+            previous_hook = Some((url, format!("Bearer {secret}")));
+            engine.insert("hook_secret".into(), secret.into());
+            recovered = true;
+        }
+    }
+    let parsed = super::Options::parse(&engine).map_err(|_| anyhow::anyhow!("Invalid qwenwork options; check the database path and loopback listener"))?;
+    if parsed.secret == parsed.hook_secret { bail!("Channel and Hook credentials must be different"); }
+    super::session::validate(&parsed.database_path).map_err(|_| anyhow::anyhow!("Unsupported QwenWork database schema"))?;
     let mut failure_hooks = Vec::new();
     if let Some((url, authorization)) = &previous_hook {
         if let Some(entries) = settings.pointer("/hooks/PostToolUseFailure").and_then(Value::as_array) {
@@ -140,19 +162,84 @@ fn initialize_at(config_path: &Path, overrides: &toml::Table, home: &Path) -> Re
             .context("Invalid failure hooks")?.extend(failure_hooks);
     }
     engine.insert("settings_path".into(), settings_path.to_str().context("Settings path must be UTF-8")?.into());
+    let shared_bytes = toml::to_string_pretty(&engine)?.into_bytes();
     bot.insert("engine_options".into(), engine.into());
     let config_bytes = toml::to_string_pretty(&document).context("Cannot serialize bridge configuration")?.into_bytes();
     let settings_bytes = serde_json::to_vec_pretty(&settings).context("Cannot serialize desktop settings")?;
     let config_backup = backup(config_path, &original)?;
     let settings_backup = old_settings.as_ref().map(|bytes| backup(&settings_path, bytes)).transpose()?;
     // Reject concurrent changes rather than silently overwriting another editor.
-    if fs::read(config_path)? != original || read_optional(&settings_path)? != old_settings { bail!("Configuration changed during initialization; retry"); }
+    if fs::read(config_path)? != original || read_optional(&settings_path)? != old_settings || read_optional(&shared_path)? != old_shared { bail!("Configuration changed during initialization; retry"); }
     write_private(config_path, &config_bytes)?;
     if let Err(error) = write_private(&settings_path, &settings_bytes) {
         write_private(config_path, &original).context("Desktop settings write failed and bridge rollback failed; recover from backup")?;
         return Err(error).context("Cannot save desktop Hooks; bridge configuration restored");
     }
-    Ok(format!("QwenWork initialization complete.\nBridge config: {}\nConfig backup: {}\nSettings: {}\nSettings backup: {}\n\nFill these values in QwenWork's WeCom Bot channel (keep Secret private):\nWebSocket URL: ws://{}/ws\nBot ID: {}\nSecret: {}\n\nReload desktop Hooks, start bridge with the selected --config, then enable the channel.\nCheck: curl http://{}/health\n", config_path.display(), config_backup.display(), settings_path.display(), settings_backup.map(|p| p.display().to_string()).unwrap_or_else(|| "new settings file".into()), parsed.listen, parsed.bot_id, parsed.secret, parsed.listen))
+    if let Err(error) = write_private(&shared_path, &shared_bytes) {
+        write_private(config_path, &original).context("Shared settings write failed and profile rollback failed; recover from backup")?;
+        if let Some(bytes) = &old_settings { write_private(&settings_path, bytes)?; }
+        else { fs::remove_file(&settings_path)?; }
+        return Err(error).context("Cannot save shared desktop settings; profile and Hooks restored");
+    }
+    let recovery_note = if recovered { "Recovered existing bridge Hooks. Previous channel credentials were unavailable; configure the channel once with the values below.\n" } else { "" };
+    Ok(format!("QwenWork initialization complete.\n{recovery_note}Shared desktop config: {}\nBridge config: {}\nConfig backup: {}\nSettings: {}\nSettings backup: {}\n\nFill these values in QwenWork's WeCom Bot channel (keep Secret private):\nWebSocket URL: ws://{}/ws\nBot ID: {}\nSecret: {}\n\nReload desktop Hooks, start bridge with the selected --config, then enable the channel.\nCheck: curl http://{}/health\n", shared_path.display(), config_path.display(), config_backup.display(), settings_path.display(), settings_backup.map(|p| p.display().to_string()).unwrap_or_else(|| "new settings file".into()), parsed.listen, parsed.bot_id, parsed.secret, parsed.listen))
+}
+
+fn parse_shared(bytes: &[u8]) -> Result<toml::Table> {
+    let table: toml::Table = toml::from_str(std::str::from_utf8(bytes).context("Shared desktop configuration must be UTF-8")?)
+        .map_err(|_| anyhow::anyhow!("Invalid shared desktop configuration"))?;
+    if table.keys().any(|key| !["listen", "bot_id", "secret", "hook_secret", "database_path", "settings_path", "mcp_socket_path"].contains(&key.as_str())) {
+        bail!("Shared desktop configuration contains unsupported fields");
+    }
+    for key in ["listen", "bot_id", "secret", "hook_secret", "database_path", "settings_path"] {
+        if table.get(key).and_then(toml::Value::as_str).is_none_or(|s| s.is_empty()) {
+            bail!("Shared desktop configuration is incomplete; restore its backup");
+        }
+    }
+    Ok(table)
+}
+
+/// Runtime profiles retain their BCN identity, but resolve desktop options from
+/// the shared local configuration so an older profile cannot revive old secrets.
+pub(super) fn desktop_options(options: &toml::Table) -> Result<toml::Table> {
+    let mut result = options.clone();
+    if let Some(path) = options.get("settings_path").and_then(toml::Value::as_str) {
+        if let Some(bytes) = read_optional(&Path::new(path).with_file_name("bcs-bridge.toml"))? {
+            result.extend(parse_shared(&bytes)?);
+        }
+    }
+    Ok(result)
+}
+
+fn recover_hook_credential(settings: &Value, url: &str) -> Result<Option<String>> {
+    let events = ["PreToolUse", "PostToolUse", "Stop", "UserPromptSubmit", "QueryEnd", "PreCompact", "PostCompact"];
+    let mut selected = serde_json::Map::new();
+    let mut secret: Option<String> = None;
+    for event in events {
+        let mut matches = Vec::new();
+        for entry in settings.get("hooks").and_then(|hooks| hooks.get(event)).and_then(Value::as_array).into_iter().flatten() {
+            let mut entry = entry.clone();
+            let Some(list) = entry.get_mut("hooks").and_then(Value::as_array_mut) else { continue; };
+            list.retain(|h| h.get("type").and_then(Value::as_str) == Some("http") && h.get("url").and_then(Value::as_str) == Some(url));
+            for hook in list.iter() {
+                let value = hook.pointer("/headers/Authorization").and_then(Value::as_str)
+                    .and_then(|s| s.strip_prefix("Bearer ")).context("Existing listener has unrecognized Hooks; no files changed")?;
+                if value.len() != 64 || !value.bytes().all(|b| b.is_ascii_hexdigit()) || secret.as_ref().is_some_and(|s| s != value) {
+                    bail!("Existing listener has conflicting Hook credentials; no files changed");
+                }
+                secret = Some(value.to_owned());
+            }
+            if !list.is_empty() { matches.push(entry); }
+        }
+        selected.insert(event.into(), matches.into());
+    }
+    let Some(secret) = secret else { return Ok(None); };
+    for interaction in [false, true] {
+        let mut expected = json!({});
+        merge_hooks(&mut expected, url, &secret, interaction)?;
+        if expected["hooks"] == Value::Object(selected.clone()) { return Ok(Some(secret)); }
+    }
+    bail!("Existing listener Hooks do not match a complete bridge setup; no files changed")
 }
 
 fn owned_hook(hook: &Value, url: &str, authorization: &str) -> bool {

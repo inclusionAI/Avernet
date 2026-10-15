@@ -494,7 +494,7 @@ async fn gateway_local_replacement_retains_omitted_webhook_without_admin_or_regi
 }
 
 #[tokio::test]
-async fn stopped_qwen_profiles_keep_desktop_hooks_and_conflicting_settings_block_registration() {
+async fn stopped_qwen_profiles_reuse_shared_desktop_settings_and_reject_ambiguous_legacy_settings() {
     let home = tempfile::tempdir().unwrap();
     let old_api = Api::new().await;
     let args = ["--mode", "plugin", "--engine", "qwenwork", "--upstream-url", "ws://127.0.0.1:21000/ws/bot"];
@@ -534,10 +534,15 @@ async fn stopped_qwen_profiles_keep_desktop_hooks_and_conflicting_settings_block
     let mut conflict = old.clone();
     conflict["bot"][0]["engine_options"]["hook_secret"] = "different-hook-secret".into();
     std::fs::write(directory.join("qwenwork.toml"), toml::to_string(&conflict).unwrap()).unwrap();
-    let rejected = register(home.path(), &args).args(["--profile", "other", "--api-url", &prod_api.base]).output().await.unwrap();
+    let migrated = register(home.path(), &args).args(["--profile", "other", "--api-url", &prod_api.base]).output().await.unwrap();
+    assert!(migrated.status.success(), "{}", diagnostic(&migrated));
+    let other: toml::Value = toml::from_str(&std::fs::read_to_string(directory.join("profiles/other/bridge.toml")).unwrap()).unwrap();
+    assert_eq!(other["bot"][0]["engine_options"], old["bot"][0]["engine_options"]);
+    std::fs::remove_file(settings.with_file_name("bcs-bridge.toml")).unwrap();
+    let rejected = register(home.path(), &args).args(["--profile", "ambiguous", "--api-url", &prod_api.base]).output().await.unwrap();
     assert!(!rejected.status.success());
     assert!(diagnostic(&rejected).contains("conflicting desktop settings"));
-    assert_eq!(prod_api.calls().len(), 1);
-    assert!(!directory.join("profiles/other/bridge.toml").exists());
+    assert_eq!(prod_api.calls().len(), 2);
+    assert!(!directory.join("profiles/ambiguous/bridge.toml").exists());
     assert_eq!(std::fs::read(&settings).unwrap(), hooks);
 }

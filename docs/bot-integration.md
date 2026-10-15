@@ -259,13 +259,24 @@ authorization claim. The server ships two fixed MCP profiles, selected with
 allowed_profiles = ["native_mcp", "mcporter_mcp"]
 ```
 
-The default is `[]` (both disabled). This is a **deployment-wide grant**:
+For Bots without a Provider affiliation, the default is `[]` (both disabled).
+This is a **deployment-wide grant**:
 every authenticated uplink Bot, including a newly connected Bot, may request
 an enabled profile. Enable it only in deployments that trust those runtimes;
 it is not a per-Bot entitlement. Configuration changes require a server restart.
 V3 must be explicitly negotiated together with an allowed profile to enable
 `tool_result_task_intent`. V1/V2, denied and unknown kinds retain this capability
 as `false`. Ordinary plugin/native-tool integrations retain their existing path.
+
+Provider-affiliated Bots instead use the server-persisted Bot Provider ownership
+and that Provider's `coordination` configuration. This includes plugin Bots with
+no HTTP downlink binding. An active Provider's matching `native_mcp` or
+`mcporter_mcp` mode authorizes an explicit V3 request without a global uplink
+grant; disabled coordination or a mismatched mode cannot inherit that grant.
+Deleted ownership, a missing/disabled Provider, or invalid configuration fails
+closed. Native MCP results must match the Provider's exact `tool_name_mapping`.
+Reconnect reads the current Provider policy. Clients never select a Provider by
+supplying a Provider ID in their handshake or tool output.
 
 `native_mcp` fixes server `bcs` and exact tool names
 `mcp__bcs__bcs_assign_task`, `mcp__bcs__bcs_send_task_message`, and

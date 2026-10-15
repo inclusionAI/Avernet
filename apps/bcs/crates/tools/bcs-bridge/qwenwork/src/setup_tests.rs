@@ -45,6 +45,94 @@ fn detects_database_preserves_other_hooks_and_reuses_credentials_on_repeat() {
 }
 
 #[test]
+fn profiles_share_desktop_identity_but_keep_bcn_credentials_and_state_separate() {
+    let (root, local, settings) = fixture();
+    let pre = root.path().join("pre.toml");
+    let source = fs::read_to_string(&local).unwrap();
+    fs::write(&pre, format!("state_path='pre.sqlite3'\n{}", source.replace("keep-token", "pre-token").replace("bot-registered", "pre-bot"))).unwrap();
+    initialize_at(&local, &toml::Table::new(), root.path()).unwrap();
+    let original_hooks = fs::read(&settings).unwrap();
+    initialize_at(&pre, &toml::Table::new(), root.path()).unwrap();
+    let local_config: toml::Table = toml::from_str(&fs::read_to_string(&local).unwrap()).unwrap();
+    let pre_config: toml::Table = toml::from_str(&fs::read_to_string(&pre).unwrap()).unwrap();
+    assert_eq!(local_config["bot"][0]["engine_options"], pre_config["bot"][0]["engine_options"]);
+    assert_eq!(local_config["bot"][0]["token"].as_str(), Some("keep-token"));
+    assert_eq!(pre_config["bot"][0]["token"].as_str(), Some("pre-token"));
+    assert_eq!(pre_config["state_path"].as_str(), Some("pre.sqlite3"));
+    assert_eq!(fs::read(&settings).unwrap(), original_hooks);
+    let shared: toml::Table = toml::from_str(&fs::read_to_string(settings.with_file_name("bcs-bridge.toml")).unwrap()).unwrap();
+    assert!(!shared.contains_key("token"));
+    assert!(!shared.contains_key("provider_id"));
+    assert!(!shared.contains_key("state_path"));
+    let mut stale = shared.clone();
+    stale.insert("secret".into(), "stale-profile-secret".into());
+    assert_eq!(desktop_options(&stale).unwrap(), shared);
+}
+
+#[test]
+fn clearing_profile_configuration_preserves_shared_channel_credentials() {
+    let (root, config, settings) = fixture();
+    let uninitialized = fs::read(&config).unwrap();
+    initialize_at(&config, &toml::Table::new(), root.path()).unwrap();
+    let first = fs::read(&config).unwrap();
+    let hooks = fs::read(&settings).unwrap();
+    fs::remove_file(&config).unwrap();
+    fs::write(&config, uninitialized).unwrap();
+    initialize_at(&config, &toml::Table::new(), root.path()).unwrap();
+    assert_eq!(fs::read(&config).unwrap(), first);
+    assert_eq!(fs::read(&settings).unwrap(), hooks);
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(fs::metadata(settings.with_file_name("bcs-bridge.toml")).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+}
+
+#[test]
+fn old_complete_hooks_recover_hook_credential_without_overwriting_foreign_hooks() {
+    let (root, config, settings) = fixture();
+    let uninitialized = fs::read(&config).unwrap();
+    initialize_at(&config, &toml::Table::new(), root.path()).unwrap();
+    let old: toml::Table = toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+    let hooks = fs::read(&settings).unwrap();
+    fs::remove_file(settings.with_file_name("bcs-bridge.toml")).unwrap();
+    fs::write(&config, uninitialized).unwrap();
+    let message = initialize_at(&config, &toml::Table::new(), root.path()).unwrap();
+    assert!(message.contains("configure the channel once"));
+    let new: toml::Table = toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+    assert_eq!(old["bot"][0]["engine_options"]["hook_secret"], new["bot"][0]["engine_options"]["hook_secret"]);
+    assert_ne!(old["bot"][0]["engine_options"]["secret"], new["bot"][0]["engine_options"]["secret"]);
+    assert_eq!(fs::read(&settings).unwrap(), hooks);
+}
+
+#[test]
+fn incomplete_legacy_hooks_are_not_adopted_and_shared_credentials_are_not_created() {
+    let (root, config, settings) = fixture();
+    let before = fs::read(&config).unwrap();
+    let mut hooks = json!({});
+    merge_hooks(&mut hooks, "http://127.0.0.1:52491/hooks", &"a".repeat(64), false).unwrap();
+    hooks["hooks"].as_object_mut().unwrap().remove("Stop");
+    let bytes = serde_json::to_vec(&hooks).unwrap();
+    fs::write(&settings, &bytes).unwrap();
+    assert!(initialize_at(&config, &toml::Table::new(), root.path()).is_err());
+    assert_eq!(fs::read(&config).unwrap(), before);
+    assert_eq!(fs::read(&settings).unwrap(), bytes);
+    assert!(!settings.with_file_name("bcs-bridge.toml").exists());
+}
+
+#[test]
+fn shared_desktop_lock_blocks_other_profile_initialization_without_changes() {
+    let (root, config, settings) = fixture();
+    let before_config = fs::read(&config).unwrap();
+    let before_settings = fs::read(&settings).unwrap();
+    let shared = settings.with_file_name("bcs-bridge.toml");
+    let _lock = configuration_lock(&shared).unwrap();
+    assert!(initialize_at(&config, &toml::Table::new(), root.path()).is_err());
+    assert_eq!(fs::read(&config).unwrap(), before_config);
+    assert_eq!(fs::read(&settings).unwrap(), before_settings);
+    assert!(!shared.exists());
+}
+
+#[test]
 fn conflicting_hook_credential_or_invalid_json_changes_neither_file() {
     let (root, config, settings) = fixture();
     let original = fs::read(&config).unwrap();

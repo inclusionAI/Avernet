@@ -85,3 +85,13 @@ BotCore, ProviderCore and ProviderManagement synchronize gateway webhook/deletio
 changes through the injected projection. Delivery switching validates affiliation
 before owner-edge writes. Bot control-plane views hydrate upstream affiliation from
 Bot metadata without treating it as HTTP delivery or adding gateway-only privileges.
+
+Provider coordination policy also follows Bot-owned affiliation for plugin Bots.
+After authentication, the runtime connect use case matches an explicit V3 MCP
+client kind against that policy; only unaffiliated Bots use deployment-wide
+uplink grants. Deleted ownership, missing/disabled Providers and malformed policy
+fail closed. Reconnect reads current policy rather than persisting an entitlement.
+Policy resolution is bounded: plugin ownership uses one indexed metadata read and
+one Provider lookup (the Provider store's existing cache applies); legacy unbound
+or Gateway paths may additionally read the binding projection. There are no scans,
+batch fan-outs, new caches or writes. Message flow retains its per-run surface cache.

@@ -8,7 +8,24 @@ fn options(path: &Path, engine: &str) -> anyhow::Result<Option<toml::Table>> {
     let Some(previous) = source.previous else { return Ok(None); };
     let Some(bots) = previous.get("bot").and_then(toml::Value::as_array) else { return Ok(None); };
     if bots.len() != 1 || bots[0].get("engine").and_then(toml::Value::as_str) != Some(engine) { return Ok(None); }
-    Ok(bots[0].get("engine_options").and_then(toml::Value::as_table).cloned())
+    let mut options = bots[0].get("engine_options").and_then(toml::Value::as_table).cloned();
+    if engine == "qwenwork" {
+        if let Some(settings) = options.as_ref().and_then(|o| o.get("settings_path")).and_then(toml::Value::as_str) {
+            match fs::read(Path::new(settings).with_file_name("bcs-bridge.toml")) {
+                Ok(bytes) => {
+                    let shared: toml::Table = toml::from_str(std::str::from_utf8(&bytes).context("Invalid shared desktop configuration")?)
+                        .map_err(|_| anyhow::anyhow!("Invalid shared desktop configuration"))?;
+                    if shared.keys().any(|key| !["listen", "bot_id", "secret", "hook_secret", "database_path", "settings_path", "mcp_socket_path"].contains(&key.as_str())) {
+                        bail!("Shared desktop configuration contains unsupported fields");
+                    }
+                    if let Some(options) = options.as_mut() { options.extend(shared); }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => bail!("Cannot read shared desktop configuration"),
+            }
+        }
+    }
+    Ok(options)
 }
 
 fn entries(directory: &Path) -> anyhow::Result<Vec<fs::DirEntry>> {
