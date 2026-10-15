@@ -3,72 +3,74 @@
 ## Summary
 
 Give API callers create, read, update and delete control over the acli-managed
-command-line tools a bot can use. A caller can see which tools are available,
+command-line tools a bot can use. A caller can find tools in the acli market,
 add one to a bot and have it usable right away, change whose identity it runs
-under, and remove it — instead of the set being fixed by deployment
-configuration.
+under, and remove it. New tools need no platform release: anything published
+to the acli market can be added.
 
 ## Motivation
 
 Today a bot's acli-managed CLIs come only from the deployment's default
 profile: every matching bot gets the same tools (currently Dataphin and
-DeepInsight) at container start, and nobody can add or remove one. The public
-API exposes only one piece of the lifecycle — switching a tool between owner
-and caller identity. Removal exists only on an internal route, and it revokes
-permission without removing the tool from the container.
+DeepInsight), and nobody can add or remove one. Adding a tool to that profile
+means editing configuration in this repository and shipping a release. The
+public API exposes only one piece of the lifecycle — switching a tool between
+owner and caller identity. Removal exists only on an internal route, and it
+revokes permission without removing the tool from the container.
 
 Teams want to equip individual bots with the specific internal tools their work
-needs, through the same public API they already use for a bot's MCP servers.
+needs, through the same public API they already use for a bot's MCP servers,
+without waiting for a release each time a new tool is published.
 
 ## Terms
 
-- **Catalog** — the deployment-curated list of tools the platform knows how to
-  install. Only catalog tools can be added through this API.
-- **Default tool** — a catalog tool that the deployment's profile gives every
-  matching bot automatically.
-- **Grant** — the bot's recorded permission to use a tool. It lives on the
-  platform and survives container restarts.
-- **Installed** — the tool's program is present and runnable inside the bot's
-  running container.
+- **acli market** — the internal CLI market that the `acli` client searches and
+  installs from. It is the only catalog: the platform keeps no list of its own.
+- **Grant** — the bot's recorded permission to use a tool, held in AgentPass.
+  AgentPass is the single source of truth for which tools a bot has.
+- **Installed** — the tool's program is present and runnable in the bot's
+  container. Installed programs live on the container's persisted storage, so
+  they survive restarts.
+- **Default tool** — a tool the deployment's default profile gives every
+  matching bot; the platform re-adds it to AgentPass at every container start.
 
 ## User Stories
 
-- As an API caller, I want to list the tools in the catalog, so that I know
-  what I can add to a bot.
-- As a bot owner, I want to list the tools my bot has, with whether each is a
-  default and which identity it runs under, so that I know what the bot can do.
-- As a bot owner, I want to add a catalog tool to my bot and use it without
+- As a bot owner, I want to search the acli market from my bot, so that I know
+  what I can add.
+- As a bot owner, I want to list the tools my bot has, with which identity each
+  runs under and whether it is a default, so that I know what the bot can do.
+- As a bot owner, I want to add a market tool to my bot and use it without
   restarting the bot.
 - As a bot owner, I want to switch a tool between running as me and running as
   the person chatting with the bot.
-- As a bot owner, I want to remove a tool I added, so that the bot can no longer
-  run it.
+- As a bot owner, I want to remove a tool, so that the bot can no longer run it.
 
 ## Acceptance Criteria
 
-**Catalog**
-- [ ] Listing the catalog returns every catalog tool with its code, display
-      name and description, and nothing about install commands or download
-      locations.
+**Search the market**
+- [ ] Searching returns matching acli market tools with their identifier,
+      display name, description and command name, as reported by acli.
+- [ ] Search requires a running bot container, because acli runs there.
 
 **List a bot's tools**
-- [ ] Returns every tool the bot holds a grant for, each with code, name,
-      description, identity mode (`owner` or `caller`) and a `default` flag.
-- [ ] Tools the bot holds that are not in the catalog (for example, ones
-      granted at bot creation) are listed too, marked as not managed by this
-      API.
+- [ ] Returns every tool in the bot's AgentPass grant, whether or not it was
+      added through this API, each with code, name, description, identity mode
+      (`owner` or `caller`) and a `default` flag.
+- [ ] `default` is `true` only for tools the bot's default profile provides;
+      it is computed when the list is read and never stored.
 
 **Add**
-- [ ] Adding a catalog code grants it to the bot with identity `owner`, then
-      installs it in the bot's running container before responding.
-- [ ] The response reports the grant and, separately, the install outcome:
-      `installed`, `failed` (with a reason safe to show the caller), or
-      `not_running` when the bot has no running container.
-- [ ] A failed install leaves the grant in place; repeating the same add
-      retries the install and changes nothing else.
-- [ ] Adding a tool the bot already has is not an error; it re-runs the
-      install and reports the outcome.
-- [ ] Adding a code that is not in the catalog is refused, and nothing changes.
+- [ ] Adding a market tool grants it to the bot with identity `owner`, installs
+      it in the running container, and succeeds only if both succeed.
+- [ ] If the install fails, the grant is removed again and the add returns an
+      error saying why. The bot ends up as it was before the request.
+- [ ] Adding to a bot with no running container is refused, and nothing
+      changes.
+- [ ] Adding an identifier the acli market does not know is refused, and
+      nothing changes.
+- [ ] Adding a tool the bot already has is refused as a conflict, and nothing
+      changes.
 - [ ] Adding a tool never changes the bot's other tools, its MCP servers, or
       any identity mode already set.
 
@@ -78,38 +80,42 @@ needs, through the same public API they already use for a bot's MCP servers.
       results, same rollback when the platform update fails.
 
 **Remove**
-- [ ] Removing a tool revokes its grant and deletes its program from the
-      running container; afterwards the bot cannot run it.
+- [ ] Removing a tool revokes its grant, deletes its program from the
+      container, and succeeds only if both succeed.
+- [ ] If the program cannot be deleted, the grant is restored with the same
+      identity mode, and the remove returns an error saying why.
 - [ ] Removing a default tool is refused with an error that says it is a
       default, and nothing changes.
 - [ ] Removing a tool the bot does not have is refused as not found.
-- [ ] If the grant is revoked but the program cannot be deleted, the response
-      says so; the tool is still no longer authorized.
 - [ ] Removing a tool never changes the bot's other tools or MCP servers.
+
+**Rollback failures**
+- [ ] If an add or remove has to undo its first step and the undo itself fails,
+      the response says exactly which state the bot was left in, and the event
+      is logged with enough detail to repair it by hand.
 
 **All operations**
 - [ ] Only a caller allowed to change the bot may add, remove or update; the
       permission rules match the existing identity switch.
+- [ ] Bots whose engine cannot run acli get a clear "not supported" error.
 - [ ] No response or log carries tokens, credentials, or raw tool output that
       has not been masked.
 
 ## In Scope
 
-- Public API operations for: catalog listing, a bot's tool listing, add,
+- Public API operations for: market search, a bot's tool listing, add,
   identity update, and remove.
 - Installing and uninstalling in a running bot's container at request time.
 - Keeping the existing identity switch working at its current address.
 
 ## Out of Scope
 
-- Reinstalling tools after a container restart. The existing start-up installer
-  owns that. It is currently failing in production (its copy of the
-  deployment's tool list has drifted from the platform's), and fixing it is
-  tracked separately by another team. Until that fix ships, a tool added
-  through this API keeps its grant across a restart but must be re-added to be
-  runnable again.
-- Adding tools that are not in the catalog, or editing the catalog through the
-  API. New catalog tools are added by changing deployment configuration.
+- Reinstalling tools after a container restart: installed programs sit on
+  persisted storage, which the engine container keeps across restarts.
+- A platform-side catalog, allowlist, or any platform-side record of tools
+  beyond AgentPass.
+- Migrating tools that were granted outside this API; they are listed and can
+  be managed, and their owners will move to this API separately.
 - Letting a bot opt out of a default tool.
 - The separate upload-a-binary tool mechanism (bot configuration manifest
   "CLI tools"). It is unchanged and unrelated.
@@ -117,9 +123,5 @@ needs, through the same public API they already use for a bot's MCP servers.
 
 ## Open Questions
 
-- **Which bots may hold catalog tools?** Default: only bots whose engine and
-  template match a default profile (today: OpenClaw, and Claude Code except the
-  `normalCC` template), because only those containers have the installer.
-  Others are refused.
 - **Who may add and remove?** Default: the same rule as the identity switch —
   the owner of an active service bot. Collaborator admins are refused.
