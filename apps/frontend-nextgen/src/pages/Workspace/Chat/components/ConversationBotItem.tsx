@@ -113,10 +113,10 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
 
   return (
     <div>
-      {/* 一级行与协作群统一为 48px：头像与名称/类型两行整体居中，保留原有操作及显隐规则。 */}
+      {/* 一级行与协作群统一为 44px：头像和操作对齐名称，类型用轻量说明文字。 */}
       <div
         className={cn(
-          'group relative mx-2 flex min-h-12 items-center gap-2 rounded-md px-2 transition-colors',
+          'group relative mx-2 flex min-h-11 items-start gap-2 rounded-md px-2 transition-colors',
           'hover:bg-muted/60',
         )}
       >
@@ -126,14 +126,14 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           aria-expanded={interactive ? expanded : false}
           onClick={handleToggle}
           className={cn(
-            'flex h-auto min-h-12 min-w-0 flex-1 items-center justify-start gap-2 rounded-none px-0 py-1 text-left hover:bg-transparent',
+            'flex h-auto min-h-11 min-w-0 flex-1 items-start justify-start gap-2 rounded-none px-0 py-[3px] text-left hover:bg-transparent',
             !interactive && 'cursor-not-allowed opacity-50',
           )}
         >
           <AvatarTile
             src={bot.avatarUrl}
             label={bot.displayName}
-            className="h-4 w-4 rounded-full"
+            className="mt-0.5 h-4 w-4 rounded-full"
             fallbackContent={
               <span className="text-[8px] font-semibold leading-none tracking-[0.06em]">
                 {bot.displayName.slice(0, 1)}
@@ -142,7 +142,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           />
           <div
             className={cn(
-              'flex min-w-0 flex-1 flex-col items-start gap-0.5',
+              'flex min-w-0 flex-1 flex-col items-start',
               // 文字让位与操作区实际覆盖等宽:悬停/键盘聚焦弹出操作区,或任一筛选(归属/范围/检索)钉住可见。
               // 新建/检索/筛选全在时让位 96px(pr-24)且悬停/聚焦不可回缩(2026-10-14 对齐设计稿顺序:新建、检索、筛选);
               // 非钉住时仅悬停/键盘聚焦临时让位。
@@ -158,7 +158,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             {runtimeLabel && (
               <Badge
                 tone="outline"
-                className="block h-4 max-w-full shrink-0 truncate rounded bg-background px-1.5 py-0 text-[10px] leading-4 text-content-strong"
+                className="block max-w-full shrink-0 truncate rounded-none border-0 bg-transparent px-0 py-0 text-[11px] font-normal leading-4 text-muted-foreground"
               >
                 {runtimeLabel}
               </Badge>
@@ -168,7 +168,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
         {hasSessionControls && (
           <div
             className={cn(
-              'absolute inset-y-0 right-[34px] z-10 flex items-center gap-0.5 pl-5',
+              'absolute top-0.5 right-[34px] z-10 flex items-center gap-0.5 pl-5',
               'mask-[linear-gradient(to_right,transparent,black_20px)]',
               // 遮盖底撤除:按钮 hover 自带 muted 底,操作区不再叠一层与行底不一致的底色;
               // right-[34px] 使行尾箭头与操作区最右按钮(设计稿顺序 新建/检索/筛选,最右为筛选)之间
@@ -240,7 +240,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             aria-hidden="true"
             tabIndex={-1}
             onClick={handleToggle}
-            className="my-auto h-6 w-6 shrink-0 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="mt-0.5 h-6 w-6 shrink-0 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             {expanded ? (
               <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />

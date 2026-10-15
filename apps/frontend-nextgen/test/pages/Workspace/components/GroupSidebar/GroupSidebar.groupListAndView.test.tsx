@@ -43,7 +43,7 @@ describe('GroupSidebar', () => {
     expect(onCreateGroup).toHaveBeenCalled();
   });
 
-  it('群行 48px 双行形态，仅保留 kind 胶囊（公开/参与方式徽章移除）', () => {
+  it('群行 44px 双行形态，仅保留 kind 说明（公开/参与方式徽章移除）', () => {
     render(
       <GroupSidebar
         {...makeProps({
@@ -57,8 +57,8 @@ describe('GroupSidebar', () => {
     expect(groupTrigger.textContent).not.toContain('公开');
     expect(groupTrigger.textContent).not.toContain('固定群成员');
     expect(groupTrigger.textContent).not.toContain('6 个成员');
-    // 名称和类型分两行，与对话 Bot 行统一为 48px。
-    expect(groupTrigger).toHaveClass('min-h-12');
+    // 名称和类型分两行，与对话 Bot 行统一为 44px。
+    expect(groupTrigger).toHaveClass('min-h-11');
   });
 
   it('v2.1：群行首恒为成员头像堆（≤2 + 溢出徽标），无文件夹图标（用户反馈还原设计稿）', () => {
@@ -207,10 +207,10 @@ describe('GroupSidebar', () => {
     expect(identityWrapper?.parentElement).toBe(scrollContainer?.parentElement);
     expect(scrollContainer).toHaveClass('app-scrollbar', 'min-h-0', 'flex-1', 'overflow-y-auto');
     expect(scrollContainer?.firstElementChild).not.toBe(identityRegion);
-    // 群一级行：48px 双行布局，行背景胶囊与按钮热区分离。
+    // 群一级行：44px 双行布局，行背景胶囊与按钮热区分离。
     const groupRow = screen.getByRole('button', { name: /主站群/ }).closest('.group\\/row');
-    expect(groupRow).toHaveClass('relative', 'flex', 'min-h-12');
-    expect(screen.getByRole('button', { name: /主站群/ })).toHaveClass('min-h-12');
+    expect(groupRow).toHaveClass('relative', 'flex', 'min-h-11');
+    expect(screen.getByRole('button', { name: /主站群/ })).toHaveClass('min-h-11');
   });
 
   it('v2.1：群行无选中态（用户反馈移除）——选中群胶囊恒为 hover 弱底，不再落 bg-selected', () => {
