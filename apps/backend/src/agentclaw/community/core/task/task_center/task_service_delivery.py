@@ -23,6 +23,52 @@ _DEFAULT_DELIVERY_LEASE_MS = 60_000
 _BBS_DELIVERY_LEASE_MS = 600_000
 
 
+def _relay_delivery_trace(
+    status: str, detail: dict[str, object]
+) -> dict[str, object]:
+    """Project S6 service-side dispatch facts in the same trace shape as S1-S5.
+
+    S6 remains owned by the dispatch action log. The nested ``trace`` is only an
+    observability projection for trajectory rendering, not a report event and
+    not a state input. It intentionally omits relay_token and credentials.
+    """
+    return {
+        "trace": {
+            "steps": [
+                {
+                    "step": "S6_DISPATCH",
+                    "status": status,
+                    "detail": detail,
+                }
+            ]
+        }
+    }
+
+
+def _relay_delivery_input(task_id: str, node: TaskNode) -> dict:
+    extend_props = node.run_info.extend_props
+    return {
+        "task_id": task_id,
+        "origin_node_id": extend_props.get("relay_planned_by"),
+        "target_node_id": node.node_id,
+        "run_mode": node.run_info.run_mode,
+        "assignee": node.run_info.assignee,
+        "delivery_intake_status": node.status.value,
+    }
+
+
+def _relay_delivery_output(node: TaskNode) -> dict:
+    extend_props = node.run_info.extend_props
+    return {
+        "run_mode": node.run_info.run_mode,
+        "actual_run_mode": extend_props.get("actual_run_mode"),
+        "assignee": node.run_info.assignee,
+        "group_id": extend_props.get("group_id"),
+        "session_id": extend_props.get("session_id"),
+        "target_status": node.status.value,
+    }
+
+
 class TaskServiceDeliveryMixin:
     async def dispatch_node(self, task_id: str, node_id: str) -> TaskNode:
         """S6: claim a persisted intent, dispatch its authoritative node once."""
@@ -71,6 +117,16 @@ class TaskServiceDeliveryMixin:
                     "action_result": "retired_legacy_root_intent",
                     "run_mode": node.run_info.run_mode,
                     "assignee": node.run_info.assignee,
+                    **_relay_delivery_trace(
+                        "completed",
+                        {
+                            "input": _relay_delivery_input(task_id, node),
+                            "output": {
+                                "decision": "retired_legacy_root_intent",
+                                "reason": "baton already in requester session",
+                            },
+                        },
+                    ),
                 },
                 status_from=initial_status,
                 status_to=node.status,
@@ -82,6 +138,7 @@ class TaskServiceDeliveryMixin:
             )
             return node
         try:
+            dispatch_input = _relay_delivery_input(task_id, node)
             if node.status == Status.PENDING and node.run_info.run_mode != "bbs":
                 self._report_node_patch(TaskNodePatch(
                     task_id=task_id,
@@ -108,6 +165,13 @@ class TaskServiceDeliveryMixin:
                     "action_result": "delivered",
                     "run_mode": delivered.run_info.run_mode,
                     "assignee": delivered.run_info.assignee,
+                    **_relay_delivery_trace(
+                        "completed",
+                        {
+                            "input": dispatch_input,
+                            "output": _relay_delivery_output(delivered),
+                        },
+                    ),
                 },
                 status_from=initial_status,
                 status_to=delivered.status,
@@ -128,6 +192,18 @@ class TaskServiceDeliveryMixin:
                     "run_mode": node.run_info.run_mode,
                     "assignee": node.run_info.assignee,
                     "failure_reason": f"{type(exc).__name__}: {exc}",
+                    **_relay_delivery_trace(
+                        "failed",
+                        {
+                            "input": dispatch_input,
+                            "output": _relay_delivery_output(node),
+                            "error": {
+                                "message": f"{type(exc).__name__}: {exc}",
+                                "stage": "delivery",
+                                "retryable": True,
+                            },
+                        },
+                    ),
                 },
                 status_from=initial_status,
                 status_to=node.status,

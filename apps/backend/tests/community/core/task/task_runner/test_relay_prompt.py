@@ -101,3 +101,26 @@ def test_relay_prompt_pins_acceptance_wire_contract() -> None:
     assert "不得复制节点级 local_acceptance_result" in prompt
     assert "顶层 failure_reason" in prompt
     assert "禁止新增 planning_failure_reason 字段" in prompt
+
+
+def test_relay_prompt_requires_structured_diagnostic_trace() -> None:
+    prompt = format_relay_execution_instruction(
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+        backend_url="https://backend.example",
+        objective="完成任务",
+        instruction="执行并上报",
+        acceptances=[],
+    )
+
+    assert "每个 step.detail 都必须是结构化 JSON object" in prompt
+    assert "至少记录该步骤的 input 与 output" in prompt
+    assert "error={message,stage,retryable}" in prompt
+    assert "S4a 记录执行计划、关键工具调用摘要、产物路径" in prompt
+    assert "S5.3 记录搜索词、raw_item_count、候选评分" in prompt
+    assert "需要核验时记录 evidence=[{type,source,summary,reference}]" in prompt
+    assert "manager-only manager_worker 群" in prompt
+    assert "不放 relay_token、密钥、会话凭证" in prompt
+    assert "trace JSON 在构造后固定" in prompt
+    assert "网络重试时必须与原请求字节一致" in prompt

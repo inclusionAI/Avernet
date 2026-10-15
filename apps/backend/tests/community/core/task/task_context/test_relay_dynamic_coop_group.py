@@ -79,6 +79,14 @@ def _graph_service() -> TaskGraphService:
     return service
 
 
+def _target_extend_props(service, **updates) -> dict:
+    """Copy the fixture's non-secret run token without embedding it in new lines."""
+    root = service.query_task_dashboard("task-1").tasks[0]
+    extend_props = dict(root.run_info.extend_props)
+    extend_props.update(updates)
+    return extend_props
+
+
 def _accepted_execution() -> TaskReportCommand:
     return TaskReportCommand(
         task_id="task-1",
@@ -393,6 +401,135 @@ def test_task_service_dispatch_completes_dynamic_group_delivery_chain() -> None:
     assert dispatch_log.payload["action_result"] == "delivered"
     assert dispatch_log.payload["run_mode"] == "coop_group"
     assert dispatch_log.payload["assignee"] == "grp-created"
+    trace_steps = dispatch_log.payload["trace"]["steps"]
+    assert len(trace_steps) == 1
+    trace_step = trace_steps[0]
+    assert trace_step["step"] == "S6_DISPATCH"
+    assert trace_step["status"] == "completed"
+    assert trace_step["detail"]["input"] == {
+        "task_id": "task-1",
+        "origin_node_id": "task-1",
+        "target_node_id": "node-group",
+        "run_mode": "coop_group",
+        "assignee": None,
+        "delivery_intake_status": "PENDING",
+    }
+    assert trace_step["detail"]["output"]["group_id"] == "grp-created"
+    assert trace_step["detail"]["output"]["actual_run_mode"] is None
+    assert "error" not in trace_step["detail"]
+
+
+class _FailingDispatcher:
+    async def dispatch(self, node):
+        raise RuntimeError("delivery transport failed")
+
+
+def test_task_service_dispatch_failure_records_s6_error_details() -> None:
+    """S6 失败必须留下 input/output/error，用于定位创建群/会话/投递失败原因。"""
+    service = _graph_service()
+    target = TaskNode(
+        node_id="node-failed",
+        task_id="task-1",
+        status=Status.PENDING,
+        task_spec=TaskSpec(
+            Context("failed", title="failed"),
+            Goal("complete failed", []),
+        ),
+        run_info=RuntimeInfo(
+            run_mode="single_bot",
+            assignee="bot-worker",
+            extend_props=_target_extend_props(service, relay_planned_by="task-1"),
+        ),
+        node_run_graph=service.query_task_dashboard("task-1"),
+    )
+    service.query_task_dashboard("task-1").tasks.append(target)
+    intents = _DeliveryIntents()
+    task_service = TaskService(service, delivery_intents=intents)
+    task_service._relay_adapter._dispatcher = _FailingDispatcher()
+
+    with pytest.raises(RuntimeError, match="delivery transport failed"):
+        _run(task_service.dispatch_node("task-1", "node-failed"))
+
+    persisted = service.query_task_dashboard("task-1").tasks[-1]
+    dispatch_log = persisted.run_info.action_log[-1]
+    assert dispatch_log.payload["action_result"] == "failed"
+    assert dispatch_log.payload["failure_reason"] == (
+        "RuntimeError: delivery transport failed"
+    )
+    trace_step = dispatch_log.payload["trace"]["steps"][0]
+    assert trace_step["step"] == "S6_DISPATCH"
+    assert trace_step["status"] == "failed"
+    assert trace_step["detail"]["input"]["origin_node_id"] == "task-1"
+    assert trace_step["detail"]["input"]["target_node_id"] == "node-failed"
+    assert trace_step["detail"]["output"]["run_mode"] == "single_bot"
+    assert trace_step["detail"]["output"]["assignee"] == "bot-worker"
+    assert trace_step["detail"]["error"] == {
+        "message": "RuntimeError: delivery transport failed",
+        "stage": "delivery",
+        "retryable": True,
+    }
+    assert intents.marks[-1] == ("task-1", "node-failed", False)
+    assert "relay_token" not in dispatch_log.payload
+    assert "relay_token" not in trace_step["detail"]
+
+
+def test_task_service_dispatch_without_dispatcher_records_s6_error_without_state_damage() -> None:
+    """dispatcher 未配置也必须可观测，不能在失败日志组装时二次抛 UnboundLocalError。"""
+    service = _graph_service()
+    target = TaskNode(
+        node_id="node-unconfigured",
+        task_id="task-1",
+        status=Status.PENDING,
+        task_spec=TaskSpec(
+            Context("unconfigured", title="unconfigured"),
+            Goal("complete unconfigured", []),
+        ),
+        run_info=RuntimeInfo(
+            run_mode="single_bot",
+            assignee="bot-worker",
+            extend_props=_target_extend_props(service),
+        ),
+        node_run_graph=service.query_task_dashboard("task-1"),
+    )
+    service.query_task_dashboard("task-1").tasks.append(target)
+    task_service = TaskService(service, delivery_intents=_DeliveryIntents())
+    task_service._relay_adapter._dispatcher = None
+
+    with pytest.raises(TaskStateError, match="relay dispatcher is not configured"):
+        _run(task_service.dispatch_node("task-1", "node-unconfigured"))
+
+    persisted = service.query_task_dashboard("task-1").tasks[-1]
+    dispatch_log = persisted.run_info.action_log[-1]
+    assert dispatch_log.payload["action_result"] == "failed"
+    assert dispatch_log.payload["failure_reason"].endswith("relay dispatcher is not configured")
+    trace_step = dispatch_log.payload["trace"]["steps"][0]
+    assert trace_step["step"] == "S6_DISPATCH"
+    assert trace_step["status"] == "failed"
+    assert trace_step["detail"]["input"]["delivery_intake_status"] == "PENDING"
+    assert trace_step["detail"]["output"]["target_status"] == "RUNNING"
+    assert trace_step["detail"]["error"]["stage"] == "delivery"
+
+
+def test_task_service_dispatch_retires_legacy_root_with_s6_trace() -> None:
+    """Legacy root intent 的 S6 分支也保留 input/output，避免根棒投递只有结论。"""
+    service = _graph_service()
+    root = service.query_task_dashboard("task-1").tasks[0]
+    root.run_info.extend_props["relay_root"] = True
+    task_service = TaskService(service, delivery_intents=_DeliveryIntents())
+
+    delivered = _run(task_service.dispatch_node("task-1", "task-1"))
+
+    assert delivered.node_id == "task-1"
+    dispatch_log = root.run_info.action_log[-1]
+    assert dispatch_log.payload["action_result"] == "retired_legacy_root_intent"
+    trace_step = dispatch_log.payload["trace"]["steps"][0]
+    assert trace_step["step"] == "S6_DISPATCH"
+    assert trace_step["status"] == "completed"
+    assert trace_step["detail"]["input"]["target_node_id"] == "task-1"
+    assert trace_step["detail"]["output"] == {
+        "decision": "retired_legacy_root_intent",
+        "reason": "baton already in requester session",
+    }
 
 
 def _run(coroutine):

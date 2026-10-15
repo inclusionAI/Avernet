@@ -267,3 +267,66 @@ def test_projection_projects_trace_steps_from_action_payload() -> None:
         {"step": "S1", "status": "done", "detail": {"read": "spec"}},
         {"step": "S5b", "status": "ok", "detail": {}},
     ]
+
+
+def test_projection_projects_s6_dispatch_trace_from_action_log() -> None:
+    """S6 的 dispatch action log 也按 trace_steps 投影，服务端投递细览可排查。"""
+    graph = TaskExecutionGraph(
+        task_id="task-1",
+        run_id=1,
+        loop_round=0,
+        status=Status.RUNNING,
+        extend_props={"execution_config": {"orchestration_mode": "relay"}},
+    )
+    node = TaskNode(
+        node_id="node-s6",
+        task_id="task-1",
+        status=Status.RUNNING,
+        task_spec=None,
+        run_info=RuntimeInfo(
+            run_mode="single_bot",
+            assignee="bot-1",
+            action_log=[
+                NodeActionEvent(
+                    seq=1,
+                    ts=100,
+                    action=NodeAction.DISPATCH,
+                    status_from=Status.PENDING,
+                    status_to=Status.RUNNING,
+                    payload={
+                        "__node_id": "node-s6",
+                        "phase": "delivery",
+                        "action_result": "delivered",
+                        "trace": {
+                            "steps": [
+                                {
+                                    "step": "S6_DISPATCH",
+                                    "status": "completed",
+                                    "detail": {
+                                        "input": {"target_node_id": "node-s6"},
+                                        "output": {"assignee": "bot-1"},
+                                    },
+                                }
+                            ]
+                        },
+                    },
+                )
+            ],
+        ),
+        node_run_graph=graph,
+    )
+    graph.tasks.append(node)
+    trajectory = TaskTrajectory(task_id="task-1", gmt_create=100, gmt_modified=100)
+
+    merge_relay_action_log(trajectory, graph)
+
+    assert trajectory.timeline[0].trace_steps == [
+        {
+            "step": "S6_DISPATCH",
+            "status": "completed",
+            "detail": {
+                "input": {"target_node_id": "node-s6"},
+                "output": {"assignee": "bot-1"},
+            },
+        }
+    ]

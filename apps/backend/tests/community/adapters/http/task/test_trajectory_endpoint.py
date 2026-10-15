@@ -675,8 +675,44 @@ def test_trajectory_display_html_renders_trace_steps():
     assert r.status_code == 200
     assert "执行轨迹" in r.text
     assert "S1" in r.text and "S4b" in r.text
-    import html as _html_module
-    assert _html_module.escape('{"read": "spec"}') in r.text, "detail JSON 原文(转义后)应可见"
+    assert "其他 ·" in r.text
+    assert "输入 · input" not in r.text
+
+
+@pytest.mark.unit
+def test_trajectory_display_html_renders_structured_trace_detail() -> None:
+    """HTML 将 input/output/error 分槽展示，便于排查 S1~S6 的输入输出和错误原因。"""
+    trace_detail = {
+        "input": {"query": "storage candidates"},
+        "output": {"candidate_count": 0, "decision": "BBS"},
+        "error": {"message": "candidate service timeout", "stage": "search"},
+        "extra": {"raw_item_count": 12},
+    }
+    ev = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type=TrajectoryActionType.EXECUTE,
+        action_result="success", attempt=0,
+        gmt_create=1000, gmt_modified=1000,
+        trace_steps=[{"step": "S5C_SEARCH_CANDIDATES", "status": "failed",
+                      "detail": trace_detail}],
+    )
+    traj = TaskTrajectory(
+        task_id="t1", gmt_create=1000, gmt_modified=1000,
+        timeline=[ev], analysis=None,
+    )
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "display": "html"},
+    )
+
+    assert r.status_code == 200
+    assert "S5C_SEARCH_CANDIDATES" in r.text
+    assert "输入 · input" in r.text
+    assert "输出 · output" in r.text
+    assert "错误 · error" in r.text
+    assert "其他 ·" in r.text
+    assert "storage candidates" in r.text
+    assert "candidate service timeout" in r.text
 
 
 @pytest.mark.unit

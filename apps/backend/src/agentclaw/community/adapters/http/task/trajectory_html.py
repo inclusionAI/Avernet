@@ -105,6 +105,35 @@ def _result_chip(action_result: str, error_type: str | None) -> str:
     return f'<span class="{cls}">{html.escape(action_result)}</span>'
 
 
+def _render_trace_step(step: dict) -> str:
+    """Render one trace step with stable input/output/evidence/error slots.
+
+    Standard slots are labelled separately for quick diagnosis. Unknown fields
+    remain available under ``other``, so older traces do not lose information.
+    """
+    detail = step.get("detail")
+    detail = detail if isinstance(detail, dict) else {}
+    lines = [f'{step.get("step", "?")} | {step.get("status", "")}']
+    labels = (
+        ("输入 · input", "input"),
+        ("输出 · output", "output"),
+        ("证据 · evidence", "evidence"),
+        ("错误 · error", "error"),
+    )
+    standard_keys = {key for _, key in labels}
+    for label, key in labels:
+        value = detail.get(key)
+        if value not in (None, {}, []):
+            payload = json.dumps(value, ensure_ascii=False, indent=2)
+            lines.append(f"{label}\n{payload}")
+    other = {key: value for key, value in detail.items() if key not in standard_keys}
+    if other:
+        lines.append(
+            "其他 · " + json.dumps(other, ensure_ascii=False, sort_keys=True)
+        )
+    return "\n".join(lines)
+
+
 def _render_event(ev: "object") -> str:
     """渲染单条事件卡片(`ev` 是 TrajectoryEventDTO;以属性访问,避免 hard 依赖)。"""
     action_type = str(getattr(ev, "action_type", "") or "")
@@ -208,15 +237,7 @@ def _render_event(ev: "object") -> str:
     trace_steps = getattr(ev, "trace_steps", None)
     if trace_steps:
         step_lines = "\n".join(
-            "{} | {}{}".format(
-                s.get("step", "?"),
-                s.get("status", ""),
-                (
-                    " | " + json.dumps(s.get("detail"), ensure_ascii=False)
-                    if s.get("detail")
-                    else ""
-                ),
-            )
+            _render_trace_step(s)
             for s in trace_steps
             if isinstance(s, dict)
         )
