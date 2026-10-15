@@ -1729,7 +1729,7 @@ error but landed counts as done.
 | 422 | acli rejected the request (usually an unknown name) | `{code, reason}` |
 | 423 | Edit lock not held | — |
 | 501 | The bot's engine has no acli (only openclaw and claude_code do) | — |
-| 502 | acli or the container hop failed; the Passport write failed | `{code, reason}` for acli |
+| 502 | acli or the container hop failed; the Passport write failed or did not persist | `{code, reason}` for acli |
 
 Tools install into the manifest's `managed_bin_dir` (`/home/admin/.agentclaw/bin`),
 on persisted storage and on the engine's `PATH`, so they survive restarts and

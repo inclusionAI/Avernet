@@ -14,7 +14,7 @@ import time
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
-from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.plugin_api.passport import PassportPlugin, unpack_resource_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
@@ -101,6 +101,24 @@ def _seed_bot_with_added_cli(world) -> None:
     _seed_bot(world, clis=["dataphin", "yuque-cli"])
 
 
+def _seed_bot_with_stateful_passport(world) -> None:
+    """Passport keeps what is written, so the add's read-back finds its grant."""
+    _seed_bot(world)
+    passport = world.get(PassportPlugin)
+    clis = [{"cli_code": "dataphin", "cli_name": "dataphin", "cli_desc": "",
+             "identity_mode": "owner"}]
+
+    def update_passport(*_args, resource_scope=None, **_kwargs):
+        _mcps, written = unpack_resource_scope(resource_scope)
+        if written is not None:
+            clis[:] = [dict(item) for item in written]
+
+    passport.set_override("update_passport", update_passport)
+    passport.set_override(
+        "query_agent_passport", lambda *_a, **_k: {"mcps": [], "clis": list(clis)}
+    )
+
+
 @endpoint_test(
     method="GET",
     path="/openapi/v1/bots/{bot_id}/clis",
@@ -185,7 +203,7 @@ def search_acli_market_missing_bot():
         headers=_HEADERS,
         json_body={"cli_code": "deepinsight-cli"},
     ),
-    seed=_seed_bot,
+    seed=_seed_bot_with_stateful_passport,
     expect=ExpectSuccess(
         status=200,
         json_contains={

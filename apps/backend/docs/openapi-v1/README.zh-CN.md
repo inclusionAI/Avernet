@@ -979,7 +979,7 @@ Spec：`apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`。
 | 422 | acli 拒绝请求（通常是名称不存在） | `{code, reason}` |
 | 423 | 未持有编辑锁 | — |
 | 501 | bot 的引擎不支持 acli（仅 openclaw 与 claude_code 支持） | — |
-| 502 | acli 或容器调用失败；Passport 写入失败 | acli 场景为 `{code, reason}` |
+| 502 | acli 或容器调用失败；Passport 写入失败或未持久化 | acli 场景为 `{code, reason}` |
 
 工具安装到 manifest 的 `managed_bin_dir`（`/home/admin/.agentclaw/bin`），位于持久化存储且在引擎 `PATH` 上，
 因此重启后仍在、也无需重启即可使用。删除 CLI 时会清除其 caller 覆盖，使再次添加从 `owner` 开始——

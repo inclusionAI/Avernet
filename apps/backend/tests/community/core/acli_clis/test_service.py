@@ -301,6 +301,50 @@ async def test_failed_grant_uninstalls_again() -> None:
     assert "yuque-cli" not in container.installed
 
 
+async def test_grant_passport_does_not_keep_is_undone() -> None:
+    """A Passport that accepts the write but stores nothing (community self-issued)."""
+    service, agentpass, container, _ = _service()
+    agentpass.add_cli = lambda *, bot, item: None  # type: ignore[method-assign]
+
+    with pytest.raises(AcliGrantSyncError):
+        await _add(service)
+
+    assert agentpass.codes == ["dataphin"]
+    assert "yuque-cli" not in container.installed
+
+
+async def test_grant_passport_does_not_keep_with_failed_uninstall_reports_the_state() -> None:
+    service, agentpass, container, _ = _service()
+    agentpass.add_cli = lambda *, bot, item: None  # type: ignore[method-assign]
+    container.uninstall_errors = [AcliPortError("uninstall_failed", "busy")]
+
+    with pytest.raises(AcliRollbackFailedError) as caught:
+        await _add(service)
+
+    assert caught.value.state == "installed_not_granted"
+
+
+async def test_unreadable_passport_after_an_accepted_grant_is_a_success() -> None:
+    """The write was acknowledged; an unreadable re-check does not undo it."""
+    service, agentpass, container, _ = _service()
+    real_read = agentpass.current_passport_cli_items
+    reads = {"n": 0}
+
+    def read_once(*, bot):
+        reads["n"] += 1
+        if reads["n"] > 1:
+            raise RuntimeError("down")
+        return real_read(bot=bot)
+
+    agentpass.current_passport_cli_items = read_once  # type: ignore[method-assign]
+
+    tool = await _add(service)
+
+    assert tool.name == "yuque-cli"
+    assert "yuque-cli" in agentpass.codes
+    assert "yuque-cli" in container.installed
+
+
 async def test_failed_grant_and_failed_uninstall_reports_the_state() -> None:
     service, agentpass, container, _ = _service()
     agentpass.add_errors = [RuntimeError("agentpass down")]

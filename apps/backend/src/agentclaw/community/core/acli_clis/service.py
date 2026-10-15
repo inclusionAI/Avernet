@@ -227,6 +227,18 @@ class AcliCliService(AcliCliServiceProtocol):
             await self._undo_install(bot_id, owner_id, cli_code, reason="grant_failed")
             raise AcliGrantSyncError from error
 
+        if self._grant_state(bot, cli_code) is False:
+            # The write was accepted but Passport does not hold the grant —
+            # a Passport that stores no scope (the community self-issued one)
+            # or a concurrent whole-scope write that overwrote it. Undo the
+            # install rather than report a grant that does not exist.
+            logger.error(
+                "acli_cli_add_failed bot_id=%s cli_code=%s phase=grant_readback",
+                bot_id, cli_code,
+            )
+            await self._undo_install(bot_id, owner_id, cli_code, reason="grant_not_persisted")
+            raise AcliGrantSyncError
+
         logger.info(
             "acli_cli_add_succeeded bot_id=%s cli_code=%s version=%s duration_ms=%s",
             bot_id, cli_code, tool.version, int((time.monotonic() - started) * 1000),

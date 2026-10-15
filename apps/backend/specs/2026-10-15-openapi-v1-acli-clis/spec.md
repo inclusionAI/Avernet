@@ -68,6 +68,10 @@ without waiting for a release each time a new tool is published.
       error saying why. The bot ends up as it was before the request.
 - [x] Adding to a bot with no running container is refused, and nothing
       changes.
+- [x] An add succeeds only once AgentPass reads the grant back. A write that
+      is accepted but not kept (a Passport that stores no scope, or a
+      concurrent whole-scope write that overwrote it) uninstalls the program
+      again and returns an error.
 - [x] Tools are identified by their acli market name (for example
       `deepinsight-cli`), which is also the code stored in AgentPass. Passing
       another alias, such as the command name `di`, is refused with an error
@@ -99,7 +103,9 @@ without waiting for a release each time a new tool is published.
       example, one granted at bot creation) revokes the grant and succeeds;
       there is no program of ours to delete.
 - [x] After a successful remove, re-adding the same tool starts again at
-      identity `owner`.
+      identity `owner` — unless the tool was the bot's last `caller`
+      resource: the platform never lets a bot fall back from `caller` to
+      `owner`, so the override is kept and a re-add comes back as `caller`.
 - [x] Removing a tool never changes the bot's other tools or MCP servers.
 
 **Rollback failures**
