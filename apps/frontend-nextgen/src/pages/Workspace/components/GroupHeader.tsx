@@ -1,10 +1,24 @@
 import { IconButton } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
+import { ChatConnectionStatus } from '@/components/Workspace/ChatConnectionStatus';
 import type { GroupView, SessionView } from '@/domain/collaboration';
 import type { GroupChatFavoritesModel } from '@/pages/Workspace/hooks/useGroupChatHeaderPanels';
 import type { DomainResult } from '@/services/workspace/identityService';
 import { cn } from '@/utils/cn';
-import { Bot, ChevronRight, Copy, FolderOpen, History, Monitor, Settings2, Share2, SlidersHorizontal, Star, Users } from 'lucide-react';
+import type { ProviderConnectionStatus } from '@tc-chat/adapters';
+import {
+  Bot,
+  ChevronRight,
+  Copy,
+  FolderOpen,
+  History,
+  Monitor,
+  Settings2,
+  Share2,
+  SlidersHorizontal,
+  Star,
+  Users,
+} from 'lucide-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { GroupAvatarStack } from './GroupSidebar/GroupItem';
@@ -12,9 +26,18 @@ import { SharePopover } from './ManagePanel/SharePopover';
 
 export type GroupPanelKind = 'none' | 'members' | 'manage' | 'sessionManage' | 'resources' | 'history';
 
+const CONNECTION_COPY = {
+  connected: { label: '已连接', tone: 'success' },
+  connecting: { label: '连接中', tone: 'warning' },
+  reconnecting: { label: '重连中', tone: 'warning' },
+  error: { label: '连接失败', tone: 'error' },
+  disconnected: { label: '已断开', tone: 'neutral' },
+} as const;
+
 export interface GroupHeaderProps {
   selectedGroup: GroupView | null;
   selectedSession: SessionView | null;
+  connectionStatus: ProviderConnectionStatus;
   onOpenSessionList?: () => void;
   canManageGroup?: unknown;
   activePanel: GroupPanelKind;
@@ -36,8 +59,7 @@ export interface GroupHeaderProps {
  * 胶囊/用户与 Bot 计数）+ 右侧 28px 图标钮列。六槽位按设计稿 x=0/32/64/96/128/160 全量落地：
  * 收藏会话 / 分享 / 会话管理 / 历史消息 / 资源管理 / 副屏——其中五枚与 chat 页 ChatHeaderActions
  * 同构（Star/SlidersHorizontal/History/FolderOpen/Monitor），分享为协作群特有（SharePopover 气泡）。
- * 历史消息由右缘 GroupHistorySidebar 承载；连接状态文字不在 header 呈现：集中在 composer 帽条
- * ComposerStatusBar（change design 决策 7/8）。
+ * 历史消息由右缘 GroupHistorySidebar 承载；顶栏连接状态与对话页同形，输入帽条保留重连操作。
  */
 function HeaderIcon({
   label,
@@ -61,6 +83,7 @@ function HeaderIcon({
       size="sm"
       disabled={disabled}
       aria-pressed={active}
+      data-workspace-panel-trigger
       onClick={onClick}
       className={cn('rounded-md text-muted-foreground', active && 'bg-selected text-foreground', className)}
     />
@@ -70,6 +93,7 @@ function HeaderIcon({
 export function GroupHeader({
   selectedGroup,
   selectedSession,
+  connectionStatus,
   onOpenSessionList,
   activePanel,
   onTogglePanel,
@@ -126,14 +150,14 @@ export function GroupHeader({
 
         {selectedGroup ? (
           /* 群身份 chip：rounded-10 描边胶囊，白底悬空于顶栏（artboard-010 358×32 实测）。 */
-          <div className="flex min-w-0 max-w-full flex-1 items-center gap-2 sm:flex-none">
+          <div className="flex min-w-0 max-w-full flex-1 items-center gap-2">
             <div
               role="group"
               className="flex h-8 min-w-0 items-center gap-2 rounded-[10px] border border-border bg-card px-2.5"
               aria-label={`协作群 ${selectedGroup.name}`}
             >
               <GroupAvatarStack participants={participants} totalCount={totalCount} />
-              <span className="truncate text-[13px] leading-[18px] text-zinc-600">{selectedGroup.name}</span>
+              <span className="truncate text-[13px] leading-[18px] text-content-strong">{selectedGroup.name}</span>
               {selectedSession ? (
                 <TooltipProvider>
                   <span className="flex h-5 max-w-[180px] shrink-0 items-center gap-1 rounded-full bg-secondary px-2">
@@ -172,10 +196,11 @@ export function GroupHeader({
                 </>
               ) : null}
             </div>
+            {selectedSession ? <ChatConnectionStatus {...CONNECTION_COPY[connectionStatus]} /> : null}
           </div>
         ) : null}
 
-        <div className="flex flex-1 items-center justify-end gap-1">
+        <div className="flex shrink-0 items-center justify-end gap-1">
           {selectedSession || selectedGroup ? (
             /* 收藏会话：chat 同构禁用态（无会话渲染 disabled 而非隐藏）；收藏态星标填充。 */
             <HeaderIcon

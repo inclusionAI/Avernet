@@ -41,7 +41,7 @@ use bcs_service_api::application::connect::{
 use bcs_service_api::port::{
     FriendAuthSyncAction, FriendAuthSyncCommand, FriendAuthSyncPort,
     FriendConnectNotificationCommand, FriendConnectNotificationKind,
-    FriendConnectNotificationPort,
+    FriendConnectNotificationPort, FriendshipWritebackPort,
 };
 use bcs_service_api::RequestAuthHeaders;
 use bcs_service_api::port::repo::{
@@ -74,6 +74,11 @@ pub struct DbConnectService {
     friend_connect_notification: Arc<dyn FriendConnectNotificationPort>,
     /// BCS→backend friend-auth-sync; used by Task 11 triggers (grant/revoke).
     friend_auth_sync: Arc<dyn FriendAuthSyncPort>,
+    /// Edge→legacy reverse sync (coexistence window): mirrors Bot↔Bot
+    /// friendship decisions into `bcs_friendships`, which the collaboration
+    /// group gate (`bcs-group`) still reads. `None` = disabled (memory/local
+    /// profiles, tests without a legacy store).
+    friendship_writeback: Option<Arc<dyn FriendshipWritebackPort>>,
     env: String,
 }
 
@@ -96,6 +101,7 @@ impl DbConnectService {
             user_directory,
             friend_connect_notification,
             friend_auth_sync,
+            friendship_writeback: None,
             env,
         }
     }
@@ -103,6 +109,58 @@ impl DbConnectService {
     /// The env this service is scoped to.
     pub fn env(&self) -> &str {
         &self.env
+    }
+
+    /// Inject the edge→legacy friendship reverse-sync port.
+    ///
+    /// Builder style (consumes and returns self) so the existing `new`
+    /// signature and all current callers stay untouched; bootstrap is the
+    /// only production caller that sets it.
+    pub fn with_friendship_writeback(
+        mut self,
+        writeback: Option<Arc<dyn FriendshipWritebackPort>>,
+    ) -> Self {
+        self.friendship_writeback = writeback;
+        self
+    }
+
+    /// Reverse-sync a Bot↔Bot friendship into the legacy store. Best-effort:
+    /// missing port, non-bot pair, and write failures are all non-fatal —
+    /// `edge_grants` remains the source of truth during the coexistence window.
+    async fn writeback_add_friendship(&self, caller: &str, target: &str) {
+        let Some(writeback) = self.friendship_writeback.as_ref() else {
+            return;
+        };
+        if actor_kind_of(caller) != ActorKind::Bot || actor_kind_of(target) != ActorKind::Bot {
+            return;
+        }
+        if let Err(err) = writeback.add_friendship(caller, target).await {
+            warn!(
+                caller = %caller,
+                target = %target,
+                error = %err,
+                "friendship writeback add failed (best-effort; edge grant remains source of truth)"
+            );
+        }
+    }
+
+    /// Reverse-sync symmetric removal; same best-effort policy as
+    /// [`Self::writeback_add_friendship`].
+    async fn writeback_remove_friendship(&self, caller: &str, target: &str) {
+        let Some(writeback) = self.friendship_writeback.as_ref() else {
+            return;
+        };
+        if actor_kind_of(caller) != ActorKind::Bot || actor_kind_of(target) != ActorKind::Bot {
+            return;
+        }
+        if let Err(err) = writeback.remove_friendship(caller, target).await {
+            warn!(
+                caller = %caller,
+                target = %target,
+                error = %err,
+                "friendship writeback remove failed (best-effort)"
+            );
+        }
     }
 
     fn log_request_lookup_miss(&self, operation: &str, request_id: &str, extra: Option<&str>) {
@@ -399,6 +457,10 @@ impl ConnectService for DbConnectService {
                         }
                     }
 
+                    // Reverse-sync (coexistence): mirror the Bot↔Bot friendship
+                    // into the legacy store the group gate still reads.
+                    self.writeback_add_friendship(caller, to_bot).await;
+
                     Ok(ConnectResult {
                         request_ids,
                         edge_ids,
@@ -431,7 +493,10 @@ impl ConnectService for DbConnectService {
 
         // Only pending requests can be approved.
         if req.status == RequestStatus::Approved {
-            // Idempotent: return existing edge ids (if any).
+            // Idempotent: return existing edge ids (if any). Also backfill the
+            // legacy friendship row — pairs approved before the reverse-sync
+            // shipped have no bcs_friendships mirror (INSERT is idempotent).
+            self.writeback_add_friendship(&req.from_id, &req.to_id).await;
             return Ok(req.edge_id.into_iter().collect());
         }
         if req.status != RequestStatus::Pending {
@@ -527,6 +592,10 @@ impl ConnectService for DbConnectService {
                 );
             }
         }
+
+        // Reverse-sync (coexistence): mirror the Bot↔Bot friendship into the
+        // legacy store the group gate still reads.
+        self.writeback_add_friendship(&caller, &to_bot).await;
 
         Ok(edge_ids)
     }
@@ -746,6 +815,11 @@ impl ConnectService for DbConnectService {
         // TODO(installment-5): spec §4.1 models unfriend as a Revoke-kind
         // request that the owner directly approves; this direct-revoke path is
         // sufficient for T13. The revoke-request flow can layer on later.
+
+        // Reverse-sync (coexistence): drop the legacy friendship mirror for
+        // Bot↔Bot unfriends so stale rows cannot keep the group gate open.
+        self.writeback_remove_friendship(caller, target).await;
+
         Ok(revoked)
     }
 
@@ -1691,6 +1765,7 @@ mod tests {
     use bcs_edge_permission_store::{
         DbBotActorConfigStore, DbEdgeGrantStore, DbPermissionProfileStore, DbPermissionRequestStore,
     };
+    use bcs_service_api::FriendRepoPort;
 
     /// One shared LocalSqliteDbPlugin with all four tables, mirroring the
     /// store tests' DDL (edge_grants / permission_profiles /
@@ -1972,6 +2047,64 @@ mod tests {
             self.events.lock().await.push(command);
             Ok(())
         }
+    }
+
+    #[derive(Default)]
+    struct RecordingWriteback {
+        calls: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl RecordingWriteback {
+        fn calls(&self) -> Vec<String> {
+            self.calls.lock().expect("calls lock").clone()
+        }
+    }
+
+    #[async_trait]
+    impl FriendshipWritebackPort for RecordingWriteback {
+        async fn add_friendship(&self, caller: &str, target: &str) -> ServiceResult<()> {
+            self.calls
+                .lock()
+                .expect("calls lock")
+                .push(format!("add:{caller}:{target}"));
+            Ok(())
+        }
+
+        async fn remove_friendship(&self, caller: &str, target: &str) -> ServiceResult<bool> {
+            self.calls
+                .lock()
+                .expect("calls lock")
+                .push(format!("remove:{caller}:{target}"));
+            Ok(true)
+        }
+    }
+
+    struct FailingWriteback;
+
+    #[async_trait]
+    impl FriendshipWritebackPort for FailingWriteback {
+        async fn add_friendship(&self, _caller: &str, _target: &str) -> ServiceResult<()> {
+            Err(ServiceError::InternalError(
+                "friendship writeback unavailable".to_string(),
+            ))
+        }
+
+        async fn remove_friendship(&self, _caller: &str, _target: &str) -> ServiceResult<bool> {
+            Err(ServiceError::InternalError(
+                "friendship writeback unavailable".to_string(),
+            ))
+        }
+    }
+
+    fn service_with_writeback(
+        edge_grants: &Arc<dyn EdgeGrantRepoPort>,
+        profiles: &Arc<dyn PermissionProfileRepoPort>,
+        requests: &Arc<dyn PermissionRequestRepoPort>,
+        bot_config: &Arc<dyn BotActorConfigRepoPort>,
+        writeback: Arc<dyn FriendshipWritebackPort>,
+    ) -> DbConnectService {
+        service(edge_grants, profiles, requests, bot_config)
+            .with_friendship_writeback(Some(writeback))
     }
 
     fn service_with_notification(
@@ -3794,5 +3927,181 @@ mod tests {
         // The two pages return distinct request_ids (union order is stable
         // within a run: gmt_modified DESC).
         assert_ne!(page1.items[0].request_id, page2.items[0].request_id);
+    }
+
+    // ---- Edge→legacy friendship writeback reverse sync ----
+
+    #[tokio::test]
+    async fn auto_approved_bot_bot_connect_writebacks_legacy_friendship() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        // OPEN strategy → needs_approval false → auto-approve inside create_connect.
+        seed_bot(&db, "x:autoA", "protected", "protected", "OPEN", "online", Some("85020")).await;
+        seed_bot(&db, "x:autoB", "protected", "protected", "OPEN", "online", Some("85020")).await;
+        let recorder = Arc::new(RecordingWriteback::default());
+        let svc = service_with_writeback(&eg, &pp, &rq, &bc, recorder.clone());
+
+        let result = svc
+            .create_connect("x:autoA", "x:autoB", None, None)
+            .await
+            .expect("auto connect");
+
+        assert_eq!(result.status, ConnectStatus::Approved);
+        assert_eq!(
+            recorder.calls(),
+            vec!["add:x:autoA:x:autoB".to_string()],
+            "auto-approve must mirror the Bot↔Bot pair into the legacy store"
+        );
+    }
+
+    #[tokio::test]
+    async fn human_bot_connect_does_not_writeback() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:api", "public", "public", "OPEN", "online", Some("85020")).await;
+        let recorder = Arc::new(RecordingWriteback::default());
+        let svc = service_with_writeback(&eg, &pp, &rq, &bc, recorder.clone());
+
+        let result = svc
+            .create_connect("human_1", "x:api", None, None)
+            .await
+            .expect("human connect");
+
+        assert_eq!(result.status, ConnectStatus::Approved);
+        assert!(
+            recorder.calls().is_empty(),
+            "Human→Bot edges are out of writeback scope"
+        );
+    }
+
+    #[tokio::test]
+    async fn manual_approve_writebacks_and_idempotent_approve_backfills() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "bot_82ce3565", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        seed_bot(&db, "20260525_tzgcxt13:195302", "protected", "protected", "APPROVAL", "online", Some("330172")).await;
+        let recorder = Arc::new(RecordingWriteback::default());
+        let svc = service_with_writeback(&eg, &pp, &rq, &bc, recorder.clone());
+
+        let result = svc
+            .create_connect("bot_82ce3565", "20260525_tzgcxt13:195302", None, None)
+            .await
+            .expect("pending connect");
+        assert_eq!(result.status, ConnectStatus::Pending);
+
+        let request_id = result.request_ids.first().expect("pending request id").clone();
+        svc.approve(&request_id, "human_330172", None)
+            .await
+            .expect("manual approve");
+        assert_eq!(
+            recorder.calls(),
+            vec!["add:bot_82ce3565:20260525_tzgcxt13:195302".to_string()]
+        );
+
+        // Idempotent re-approve hits the already-Approved branch and backfills the
+        // legacy row (covers friendships approved before this sync shipped).
+        recorder.calls.lock().expect("clear").clear();
+        svc.approve(&request_id, "human_330172", None)
+            .await
+            .expect("idempotent approve");
+        assert_eq!(
+            recorder.calls(),
+            vec!["add:bot_82ce3565:20260525_tzgcxt13:195302".to_string()],
+            "idempotent approve must backfill the legacy row"
+        );
+    }
+
+    #[tokio::test]
+    async fn revoke_friend_writebacks_removal() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:r1", "public", "public", "OPEN", "online", Some("85020")).await;
+        seed_bot(&db, "x:r2", "public", "public", "OPEN", "online", Some("85020")).await;
+        let recorder = Arc::new(RecordingWriteback::default());
+        let svc = service_with_writeback(&eg, &pp, &rq, &bc, recorder.clone());
+
+        svc.create_connect("x:r1", "x:r2", None, None)
+            .await
+            .expect("connect");
+        recorder.calls.lock().expect("clear").clear();
+
+        svc.revoke_friend("x:r1", "x:r2", None)
+            .await
+            .expect("revoke");
+
+        assert_eq!(
+            recorder.calls(),
+            vec!["remove:x:r1:x:r2".to_string()],
+            "unfriend must drop the legacy friendship row"
+        );
+    }
+
+    #[tokio::test]
+    async fn connect_flow_keeps_legacy_friendship_in_sync() {
+        // Composition mirrors the DB profile in bootstrap/server.rs: DbConnectService
+        // with the real FriendshipWritebackService over a shared FriendRepoPort.
+        // The plain-token bot ids reproduce the original 403 payload shape.
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "bot_82ce3565", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        seed_bot(&db, "20260525_tzgcxt13:195302", "protected", "protected", "APPROVAL", "online", Some("330172")).await;
+
+        let friend_repo: Arc<bcs_friend::MemoryFriendRepo> = Arc::new(bcs_friend::MemoryFriendRepo::new());
+        let writeback = Arc::new(bcs_friend::FriendshipWritebackService::new(
+            friend_repo.clone(),
+            Arc::new(bcs_test_support::NoopRelationCoreService),
+        ));
+        let svc = service_with_writeback(&eg, &pp, &rq, &bc, writeback);
+
+        // Before: the legacy gate sees no friendship (the original 403 state).
+        assert!(!friend_repo
+            .are_friends("bot_82ce3565", "20260525_tzgcxt13:195302")
+            .await
+            .expect("are_friends before"));
+
+        let result = svc
+            .create_connect("bot_82ce3565", "20260525_tzgcxt13:195302", None, None)
+            .await
+            .expect("connect");
+        assert_eq!(result.status, ConnectStatus::Pending);
+
+        let request_id = result.request_ids.first().expect("pending request id").clone();
+        svc.approve(&request_id, "human_330172", None)
+            .await
+            .expect("approve");
+
+        // After approve: the legacy gate (bcs-group ensure_v1_reachable reads this
+        // exact repo/port) now sees the friendship → group creation passes.
+        assert!(friend_repo
+            .are_friends("bot_82ce3565", "20260525_tzgcxt13:195302")
+            .await
+            .expect("are_friends after approve"));
+
+        // After unfriend: the legacy row is gone → gate closes again.
+        svc.revoke_friend("bot_82ce3565", "20260525_tzgcxt13:195302", None)
+            .await
+            .expect("revoke");
+        assert!(!friend_repo
+            .are_friends("bot_82ce3565", "20260525_tzgcxt13:195302")
+            .await
+            .expect("are_friends after revoke"));
+    }
+
+    #[tokio::test]
+    async fn writeback_failure_is_best_effort() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:f1", "public", "public", "OPEN", "online", Some("85020")).await;
+        seed_bot(&db, "x:f2", "public", "public", "OPEN", "online", Some("85020")).await;
+        let svc = service_with_writeback(&eg, &pp, &rq, &bc, Arc::new(FailingWriteback));
+
+        let result = svc
+            .create_connect("x:f1", "x:f2", None, None)
+            .await
+            .expect("connect must succeed despite writeback failure");
+
+        assert_eq!(result.status, ConnectStatus::Approved);
+        assert!(eg.has_friend_edge("x:f1", "x:f2", "dev").await);
+
+        // Remove path is also best-effort: unfriend succeeds even though the
+        // writeback port fails, and the edge grant is torn down.
+        svc.revoke_friend("x:f1", "x:f2", None)
+            .await
+            .expect("revoke must succeed despite writeback failure");
+        assert!(!eg.has_friend_edge("x:f1", "x:f2", "dev").await);
     }
 }

@@ -4,12 +4,15 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotEditorCli, BotEditorMcp, BotEditorSkill } from '@/domain/botEditor';
+import { cn } from '@/utils/cn';
 import { Eye, FileCode2, FileText, Loader2, Plus, SquareTerminal, Trash2, UserRound } from 'lucide-react';
 import { useState } from 'react';
 
 interface CapabilityMembersProps {
   kind: 'skill' | 'mcp' | 'cli';
   items: Array<BotEditorSkill | BotEditorMcp | BotEditorCli>;
+  /** 调试面板同屏时避免横向挤压，卡片改为纵向单列。 */
+  compact?: boolean;
   editable: boolean;
   identities?: Record<string, 'caller' | 'owner'>;
   identityEditable?: boolean;
@@ -36,6 +39,7 @@ function sourceBadge(item: BotEditorSkill | BotEditorMcp | BotEditorCli) {
 export function CapabilityMembers({
   kind,
   items,
+  compact = false,
   editable,
   identities = {},
   onIdentity,
@@ -67,7 +71,7 @@ export function CapabilityMembers({
         ) : null}
       </div>
       {items.length ? (
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+        <div className={cn('grid grid-cols-1 gap-2', !compact && 'md:grid-cols-2 xl:grid-cols-3')}>
           {items.map((item) => {
           const id = 'serverCode' in item ? item.serverCode : 'code' in item ? item.code : item.id;
           const identity = identities[id] ?? 'owner';

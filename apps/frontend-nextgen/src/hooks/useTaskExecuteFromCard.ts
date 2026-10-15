@@ -8,7 +8,11 @@
  * → 本地插入 user 消息（SDK 自动）→ MarkdownRender 解析 → 副屏弹出
  * → 消息发后端落库 → loadHistory 拉回 → 副屏持久（切会话/刷新可恢复）。
  */
-import type { TaskComposerContext, TaskComposerForm } from '@/services/tasks/taskMapper';
+import type {
+  TaskCardHiddenFlags,
+  TaskComposerContext,
+  TaskComposerForm,
+} from '@/services/tasks/taskMapper';
 import { buildTaskLaunchMessage, buildTaskPanelAixUI } from '@/services/tasks/taskPanelMessage';
 import { runTaskPreflightMock } from '@/services/tasks/taskPreflightMock';
 import { executeTaskService } from '@/services/tasks/taskService';
@@ -43,6 +47,7 @@ interface TaskReadyTask {
   constraints?: string[];
   resources?: string[];
   workflow_id?: string;
+  hidden_flags?: TaskCardHiddenFlags;
 }
 
 export interface UseTaskExecuteFromCardOptions {
@@ -95,6 +100,7 @@ export function useTaskExecuteFromCard({
             deliverables: task.deliverables ?? [],
             constraints: task.constraints ?? [],
             resources: task.resources ?? [],
+            hidden_flags: task.hidden_flags,
             taskType: task.task_type === 'workflow' ? 'workflow' : 'dynamic',
             workflowId: task.workflow_id,
             background: task.background ?? '',
@@ -133,12 +139,7 @@ export function useTaskExecuteFromCard({
               finishedAt: record.finish_time,
             },
           });
-          const launchMessage = buildTaskLaunchMessage(panelMessage, record, {
-            holderId: context.ownerBotId,
-            instruction: form.instruction,
-            objective: form.objective,
-            acceptances: form.acceptances,
-          });
+          const launchMessage = buildTaskLaunchMessage(panelMessage, record);
           if (launchMessage.shouldTriggerBot) {
             (submitTaskExecutionMessage ?? submitPanelMessage)(launchMessage.content, context.ownerBotId);
           } else {

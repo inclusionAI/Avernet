@@ -1,3 +1,4 @@
+import { FriendRequestConfirmModal } from '@/components/CollaborationSquare/FriendRequestConfirmModal';
 import SquareBotCard from '@/components/CollaborationSquare/BotCard';
 import { BotProfileModal } from '@/components/CollaborationSquare/BotProfileModal';
 import { SquareIdentityPicker } from '@/components/CollaborationSquare/SquareIdentityPicker';
@@ -6,10 +7,10 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
-import type { BotCatalogViewModel } from '@/domain/collaborationSquare/types';
-import { getPublicBotActionKey, getPublicBotTargetId } from '@/domain/collaborationSquare/types';
+import type { BotCatalogViewModel, PublicBot } from '@/domain/collaborationSquare/types';
+import { getPublicBotActionKey, getPublicBotTargetId, resolvePublicBotPrimaryAction } from '@/domain/collaborationSquare/types';
 import { Bot, RefreshCw, Search } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export interface PublicBotCatalogPanelProps {
   /** 面板展示层 view model，由协作广场 store hook 产出。 */
@@ -43,6 +44,26 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
   const sentinelRef = useRef<HTMLDivElement>(null);
   const { hasMore, loading, loadingMore, error, loadMore } = vm;
   const activeActor = vm.activeActor;
+  const actorKey = activeActor ? `${activeActor.type}:${activeActor.id}` : '';
+  const [pending, setPending] = useState<{ bot: PublicBot; actorKey: string } | null>(null);
+  // 身份变化后必须重新确认，不能用旧弹窗为新身份发送申请。
+  useEffect(() => setPending(null), [actorKey]);
+  const pendingBot = pending?.actorKey === actorKey
+    ? vm.bots.find((bot) => getPublicBotTargetId(bot) === getPublicBotTargetId(pending.bot))
+    : undefined;
+  const canRequest = (bot: PublicBot) => Boolean(activeActor &&
+    !vm.busyKeys.includes(getPublicBotActionKey(activeActor, getPublicBotTargetId(bot))) &&
+    resolvePublicBotPrimaryAction({
+      activeActor,
+      targetActorId: getPublicBotTargetId(bot),
+      relationshipStatus: bot.relationshipStatus,
+      isOwnedByLoggedInUser: bot.isOwnedByLoggedInUser,
+    }) === 'request_friendship');
+  const requestTarget = pendingBot && canRequest(pendingBot) ? pendingBot : null;
+  const handlePrimaryAction = (bot: PublicBot) => {
+    if (canRequest(bot)) setPending({ bot, actorKey });
+    else vm.primaryAction(bot);
+  };
   const smartEmpty = Boolean(smartEmptyHint) && vm.mode === 'smart' && !vm.query.trim();
   const showGrid = Boolean(activeActor) && !loading && !error && !smartEmpty && vm.bots.length > 0;
 
@@ -117,7 +138,7 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
               activeActor={activeActor}
               busy={vm.busyKeys.includes(getPublicBotActionKey(activeActor, getPublicBotTargetId(bot)))}
               onShare={(item) => vm.share(item)}
-              onPrimaryAction={vm.primaryAction}
+              onPrimaryAction={handlePrimaryAction}
             />
           ))}
         </div>
@@ -135,6 +156,18 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
             重试
           </Button>
         </Card>
+      )}
+      {requestTarget && activeActor && (
+        <FriendRequestConfirmModal
+          bot={requestTarget}
+          actor={activeActor}
+          actorName={vm.activeActorName || activeActor.id}
+          onClose={() => setPending(null)}
+          onConfirm={() => {
+            setPending(null);
+            vm.primaryAction(requestTarget);
+          }}
+        />
       )}
       <BotProfileModal
         open={Boolean(vm.selectedBotId)}

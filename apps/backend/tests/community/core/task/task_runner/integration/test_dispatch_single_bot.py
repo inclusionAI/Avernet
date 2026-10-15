@@ -6,7 +6,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Relation,
     RuntimeInfo,
     Status,
     TaskExecutionGraph,
@@ -332,6 +331,7 @@ def test_prompt_formatter_relay_mode_injects_event_protocol_only():
     )
     node = _node()
     node.node_run_graph = graph
+    node.run_info.extend_props["relay_token"] = "attempt-1"
 
     prompt = PromptFormatterImpl().format_execute(
         {
@@ -346,62 +346,20 @@ def test_prompt_formatter_relay_mode_injects_event_protocol_only():
         node,
     )
 
-    assert "【分布式接力闭环】" in prompt
-    assert "GET http://backend/api/v1/collaboration/tasks/t1/context" in prompt
-    assert '"event_type": "EXECUTION_RESULT"' in prompt
-    assert "PLAN_RESULT" in prompt and "DISPATCH_RESULT" in prompt
-    assert "严禁回到中心化的 status/output/acceptance_result 节点终态回调" in prompt
-    assert "EXECUTION_RESULT 成功当作本棒结束" in prompt
-    assert "用户可见文案本地化" in prompt
-    assert "当前 Bot 能力不匹配，未执行本节点业务子项，将转交更合适的 Bot 接续执行" in prompt
+    assert "【分布式接力执行 S1-S6】" in prompt
+    assert "backend_url=http://backend" in prompt
+    assert "--backend-url" in prompt
+    assert "/api/v1/collaboration/tasks/t1/nodes/c1/context" in prompt
+    assert "event_type=EXECUTION_RESULT" in prompt
+    assert "PLAN_RESULT" in prompt and "DISPATCH_RESULT" not in prompt
+    assert "relay_token" in prompt
+    assert "S6" in prompt
     assert '"status": "SUCCESS"' not in prompt
     assert "唯一允许的节点回投" not in prompt
-    assert "收到 HTTP 200 后立即停止，不得再次 POST" not in prompt
-    assert "DECLINED 请求体示例如下" in prompt
-    assert '"payload": {"execution_decision": "DECLINED"}' in prompt
-    assert "DECLINED payload 只能携带 execution_decision" in prompt
-    assert "请求顶层字段必须包含 task_id、node_id、event_type、event_id、holder_id、relay_turn、progress_reason" in prompt
-    assert "已满足项写入 acceptance_result.done_items" in prompt
-    assert "未满足项写入 acceptance_result.gap_items" in prompt
-    assert "done_items 不得包含 passed=false 的项" in prompt
-    assert "作为顶层 relay_turn 字段提交，严禁放入 payload" in prompt
-    assert "node_id 必须是 PLAN_RESULT 返回的 target_node_id" in prompt
-    assert "HTTP 200 前，不得向用户宣称任务已完成" in prompt
-
-    s7 = prompt.split("S7/8", 1)[1].split("S8/8", 1)[0]
-    assert "严格按 SEARCH → PLAN_RESULT → DISPATCH_RESULT 执行" in s7
-    assert "SEARCH 前置不是跳过 S6" in s7
-    assert "S6 已在本地解析出唯一 next_task_spec" in s7
-    assert "不得提前上报 PLAN" in s7
-    assert "确定下一棒执行者与执行模态" in s7
-    assert "决策完成后统一进入上报阶段" in s7
-    assert s7.index("/api/v1/collaboration/tasks/search") < s7.index("event_type=PLAN_RESULT") < s7.index("event_type=DISPATCH_RESULT")
-    assert "gaps 为空时必须跳过搜索，直接提交 PLAN_RESULT(gaps=[], next_task_spec=null) 收口" in s7
-    assert "search_evidence={query, search_result, candidate_evaluations, origin_node_id（当前棒节点）}" in s7
-    assert "candidate_evaluations 必须覆盖每个返回候选" in s7
-    assert "score(0–100)" in s7
-    assert "score_reason" in s7
-
-    assert "固定阶段编号 S1-S8" in prompt
-    for stage in (
-        "S1/8 解析任务最新上下文",
-        "S2/8 计算当前GAP",
-        "S3/8 Bot能力匹配",
-        "S4/8 任务执行并统一上报",
-        "S5/8 更新GAP",
-        "S6/8 解析下一棒 TaskNode",
-        "S7/8 搜推并指定执行者",
-        "S8/8 实际交接",
-    ):
-        assert stage in prompt
-    assert prompt.count("GET http://backend/api/v1/collaboration/tasks/t1/context") == 1
-    assert "最小调用与输出契约" in prompt
-    assert "正常有GAP链路最多6次HTTP调用" in prompt
-    assert "无GAP链路不得调用search、DISPATCH_RESULT或dispatch" in prompt
-    assert "禁止步骤0、步骤0确认、S2-S3合并编号或协议章节号" in prompt
-    assert "S2/8" in prompt and "本阶段不调用 HTTP 上报接口" in prompt
-    assert "S5/8 更新GAP：不再重新读取图谱" in prompt
-    assert "S6/8" in prompt and "本阶段不调用 HTTP 上报接口" in prompt
+    assert "holder_id" not in prompt
+    assert "relay_turn" not in prompt
+    assert "target_node_id" in prompt
+    assert "TaskDispatcher.dispatch(target_node)" in prompt
 
 
 def test_static_relay_prompt_waits_for_every_member_and_preserves_markdown():
@@ -517,7 +475,7 @@ def test_static_plan_owner_reaches_final_openapi_bot_identity():
             assert task_id == "t1"
             return graph
 
-    dispatched = _run(TaskDispatcher(_GraphView()).dispatch(ready))
+    dispatched = _run(TaskDispatcher(_GraphView()).select_batch(ready))
     bot = _Bot()
     executor = TaskExecutor(
         bot=bot,
@@ -625,6 +583,7 @@ def _exe2(*, execution_config=None, owner_user_id="35983"):
     exe = TaskExecutor(
         bot=bot, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
         poller=poller, graph=graph, identity_resolver=_DoubleBcsBotIdentityResolver(),
+        api_base_url="https://backend.example",
     )
     return exe, bot, bcs, poller, graph
 
@@ -652,14 +611,15 @@ def test_dispatch_single_bot_2_group_bypass_creates_two_person_group():
 def test_dispatch_single_bot_2_group_uses_relay_protocol_in_relay_mode():
     """Relay HIT_SINGLE converts to a human-observer group but still uses Relay baton protocol."""
     exe, bot, bcs, poller, graph = _exe2(execution_config={"orchestration_mode": "relay"})
-    ok = _run(exe.dispatch([_node("drv", {"assignee_owner_id": "35983"})]))
+    ok = _run(exe.dispatch([_node("drv", {"assignee_owner_id": "35983", "relay_token": "attempt-1"})]))
 
     assert ok == [True]
     assert bot.sent == []
     context = bcs.created[0].context
-    assert "【分布式接力闭环】" in context
-    assert '"event_type": "EXECUTION_RESULT"' in context
-    assert "PLAN_RESULT" in context and "DISPATCH_RESULT" in context
+    assert "【分布式接力执行 S1-S6】" in context
+    assert "backend_url=https://backend.example" in context
+    assert "EXECUTION_RESULT" in context
+    assert "PLAN_RESULT" in context and "DISPATCH_RESULT" not in context
     assert "【业务节点执行协议】" not in context
     assert '"status": "SUCCESS"' not in context
     assert "唯一允许的节点回投" not in context
@@ -673,8 +633,6 @@ def test_dispatch_single_bot_2_group_disabled_falls_back_to_send():
     assert bot.sent and bot.sent[0][0] == "drv:35983"  # 老链路直发
     assert bcs.created == []
     assert poller.registered == []  # 默认 Push，不注册 poller
-
-
 def test_dispatch_single_bot_2_group_uses_task_human_owner_without_assignee_owner():
     """Relay 只有纯 assignee bot_id 时,仍按任务图谱 Human owner 建群并追加 observer。"""
     exe, bot, bcs, poller, graph = _exe2()  # 默认 true, graph owner_user_id=35983
@@ -696,122 +654,3 @@ def test_dispatch_single_bot_2_group_no_task_human_owner_falls_back_to_send():
     assert bot.sent  # 老链路
     assert bcs.created == []
     assert poller.registered == []  # 默认 Push，不注册 poller
-
-
-def test_resume_relay_turn_sends_plan_only_prompt_to_current_holder():
-    bot = _Bot()
-    exe = TaskExecutor(
-        bot=bot,
-        bcs=None,
-        formatter=PromptFormatterImpl(),
-        context=_Ctx(),
-        sink=None,
-        poller=_Poller(),
-        api_base_url="https://backend.example",
-    )
-    node = _node("group-1", {"relay_holder_id": "relay-driver:owner-1"})
-
-    assert _run(exe.resume_relay_turn(node, "renewed-turn")) is True
-    assert len(bot.sent) == 1
-    bot_id, message, metadata = bot.sent[0]
-    assert bot_id == "relay-driver:owner-1"
-    assert "[RESUME_RELAY]" in message
-    assert "不得重做业务执行" in message
-    assert "relay_turn=renewed-turn" in message
-    assert metadata == {"biz_task_id": "t1", "relay_resume": True}
-
-
-class _ResumeGraph:
-    """Expose the graph to the Relay resume path without adding graph writes."""
-
-    def __init__(self, dashboard):
-        self._dashboard = dashboard
-        self.patches = []
-
-    def query_task_dashboard(self, task_id, node_id=None):
-        assert task_id == "t1"
-        return self._dashboard
-
-    def report(self, data):
-        assert data.data["report_type"] == "NODE_PATCH"
-        patch = data.data["payload"]["patch"]
-        self.patches.append(patch)
-        return None
-
-
-def _resume_dashboard(node, successor=None):
-    dashboard = TaskExecutionGraph(
-        run_id=1,
-        loop_round=0,
-        status=Status.RUNNING,
-        task_id="t1",
-    )
-    dashboard.tasks.append(node)
-    if successor is not None:
-        dashboard.tasks.append(successor)
-        dashboard.relations.append(Relation(src_id=node.node_id, dst_id=successor.node_id))
-    return dashboard
-
-
-def test_resume_relay_turn_reuses_pending_successor_without_replanning():
-    """A persisted successor means PLAN_RESULT already succeeded on a prior attempt."""
-    bot = _Bot()
-    node = _node("group-1", {"relay_holder_id": "relay-driver:owner-1"})
-    successor = TaskNode(
-        node_id="c2",
-        task_id="t1",
-        status=Status.PENDING,
-        task_spec=node.task_spec,
-        run_info=RuntimeInfo(run_mode="single_bot"),
-        node_run_graph=None,
-    )
-    graph = _ResumeGraph(_resume_dashboard(node, successor))
-    exe = TaskExecutor(
-        bot=bot,
-        bcs=None,
-        formatter=PromptFormatterImpl(),
-        context=_Ctx(),
-        sink=None,
-        poller=_Poller(),
-        graph=graph,
-        api_base_url="https://backend.example",
-    )
-
-    assert _run(exe.resume_relay_turn(node, "renewed-turn")) is True
-    message = bot.sent[0][1]
-    assert "pending_target_node_id=c2" in message
-    assert "pending_run_mode=single_bot" in message
-    assert "PLAN_RESULT 已成功，不得重新规划同一节点" in message
-    assert (
-        "立即 POST https://backend.example/api/v1/collaboration/tasks/dispatch"
-        in message
-    )
-    assert "origin_node_id=c1" in message
-    assert "target_node_id=<pending_target_node_id>" in message
-    assert "holder_id=relay-driver:owner-1" in message
-    assert graph.patches[0].node_id == "c1"
-    assert graph.patches[0].extend_props_patch["_exec_request_input"] == message
-
-
-def test_resume_relay_turn_without_successor_continues_from_plan_result():
-    """No persisted successor means the holder must resume from PLAN_RESULT."""
-    bot = _Bot()
-    node = _node("group-1", {"relay_holder_id": "relay-driver:owner-1"})
-    graph = _ResumeGraph(_resume_dashboard(node))
-    exe = TaskExecutor(
-        bot=bot,
-        bcs=None,
-        formatter=PromptFormatterImpl(),
-        context=_Ctx(),
-        sink=None,
-        poller=_Poller(),
-        graph=graph,
-        api_base_url="https://backend.example",
-    )
-
-    assert _run(exe.resume_relay_turn(node, "renewed-turn")) is True
-    message = bot.sent[0][1]
-    assert "pending_target_node_id=" in message
-    assert "pending_run_mode=" in message
-    assert "先依据当前节点已有 output 和根目标计算 gap" in message
-    assert "无 gap 则 POST PLAN_RESULT" in message

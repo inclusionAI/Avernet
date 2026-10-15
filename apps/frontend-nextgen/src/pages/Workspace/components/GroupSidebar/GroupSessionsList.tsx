@@ -28,7 +28,7 @@ interface GroupSessionsListProps {
 }
 
 /** 协作群展开后的会话列表：加载/空态/列表/加载更多/分页错误统一在此自洽渲染。
- *  v2：行自带缩进（SessionItem ml-8）与背景胶囊，容器不再渲染树形导轨与缩进底色（对齐对话会话列表）。 */
+ *  行自带名称对齐缩进与背景胶囊，容器不渲染树形导轨与缩进底色（对齐对话会话列表）。 */
 export function GroupSessionsList({
   group,
   sessions,
@@ -58,7 +58,7 @@ export function GroupSessionsList({
       {error ? (
         <ListErrorState message={error} onRetry={() => void onRetrySessions?.()} />
       ) : !loaded ? (
-        /* 加载骨架：回声 SessionItem 行槽（ml-8 缩进标题条），对齐对话二级会话行骨架。 */
+        /* 加载骨架：回声 SessionItem 行槽及名称起点，对齐对话二级会话行骨架。 */
         <GroupSessionRowsSkeleton rows={3} />
       ) : visibleSessions.length === 0 ? (
         <div className="py-5 pr-4 pl-10">

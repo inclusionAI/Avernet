@@ -266,7 +266,8 @@ class OpenApiBotAdapter(
         _map_status(r)
 
     async def send_message(
-        self, *, bot_id: str, message: str, metadata: dict[str, Any]
+        self, *, bot_id: str, message: str, metadata: dict[str, Any],
+        message_id: str | None = None,
     ) -> BotSendResult:
         logger.info(
             "[task][openapi_bot] >>> send_message POST /openapi/v1/messages bot_id=%s base_url=%s msg_len=%s",
@@ -277,7 +278,10 @@ class OpenApiBotAdapter(
         async with self._client_for_current_loop() as client:
             r = await client.post(
                 "/openapi/v1/messages",
-                json={"bot_id": bot_id, "message": message},
+                json={
+                    "bot_id": bot_id, "message": message, "metadata": metadata,
+                    **({"message_id": message_id} if message_id else {}),
+                },
                 headers=self._headers(),
             )
         logger.info(

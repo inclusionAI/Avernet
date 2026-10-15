@@ -46,6 +46,9 @@ user_config:
     task_callback_url: "http://localhost:8888"
     task_callback_url_pre: "http://localhost:8888"
 
+  task_dispatch:
+    backend_url: "http://localhost:8888"
+
   # Privileged-user allow-lists (admin scopes) — SYNTHETIC ids, tests/ci only.
   # Real employee ids never ship in community source. Acceptance tests authorize
   # with "100000" (the doc-example placeholder).

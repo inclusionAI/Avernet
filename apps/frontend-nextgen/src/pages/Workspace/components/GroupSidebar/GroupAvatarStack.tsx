@@ -15,28 +15,40 @@ function isHttpUrl(url: string): boolean {
  * 超出部分以 N+ 徽标（8px 字、E8EAED 底）表达剩余人数。participants 未回填时不渲染行首
  * 标识（2026-10-12 用户反馈：群行不用文件夹图标,列表缺成员时由 hook 层按详情补拉）。
  */
-export function GroupAvatarStack({ participants, totalCount }: { participants: ParticipantView[]; totalCount: number }) {
+export function GroupAvatarStack({
+  participants,
+  totalCount,
+  size = 16,
+}: {
+  participants: ParticipantView[];
+  totalCount: number;
+  /** 侧栏放大头像；聊天标题等已有调用保持紧凑尺寸。 */
+  size?: 16 | 20;
+}) {
   const shown = participants.slice(0, AVATAR_STACK_MAX);
   const remaining = Math.max(0, totalCount - shown.length);
   if (shown.length === 0) return null;
   return (
-    <span className="-mr-1 flex h-4 shrink-0 items-center" aria-label={`成员 ${totalCount} 人`}>
+    <span className={cn('-mr-1 flex shrink-0 items-center', size === 20 ? 'h-5' : 'h-4')} aria-label={`成员 ${totalCount} 人`}>
       {shown.map((participant, index) => (
         <span
           key={participant.actorId ?? participant.name}
-          className={cn('rounded-full ring-1 ring-background', index > 0 && '-ml-[7px]')}
+          className={cn('rounded-full ring-1 ring-background', index > 0 && (size === 20 ? '-ml-3' : '-ml-[7px]'))}
         >
           <Avatar
             name={participant.name}
             src={participant.avatarUrl && isHttpUrl(participant.avatarUrl) ? participant.avatarUrl : undefined}
-            size={16}
+            size={size}
           />
         </span>
       ))}
       {remaining > 0 && (
         <span
           aria-hidden="true"
-          className="-ml-[7px] flex h-4 min-w-4 items-center justify-center rounded-full bg-secondary px-0.5 text-[8px] leading-none text-secondary-foreground ring-1 ring-background"
+          className={cn(
+            'flex items-center justify-center rounded-full bg-secondary px-0.5 leading-none text-secondary-foreground ring-1 ring-background',
+            size === 20 ? '-ml-3 h-5 min-w-5 text-[9px]' : '-ml-[7px] h-4 min-w-4 text-[8px]',
+          )}
         >
           {remaining}+
         </span>

@@ -4,9 +4,36 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from typing import Any
 
 from agentclaw.community.core.task.domain.models import Status, TaskInfo
+from agentclaw.community.core.task.domain.requests import TaskInfoRequest
+
+logger = logging.getLogger("task.service")
+
+
+def normalize_owner_bot_id(request: TaskInfoRequest) -> TaskInfoRequest:
+    """Normalize legacy ``bot_id:owner_id`` while preserving cross-owner bots."""
+    from dataclasses import replace
+
+    bot_id, separator, embedded_owner_id = str(request.owner_bot_id or "").partition(":")
+    if not separator:
+        return request
+    owner_user_id = request.owner_user_id or embedded_owner_id
+    if (
+        request.owner_user_id
+        and embedded_owner_id
+        and request.owner_user_id != embedded_owner_id
+    ):
+        logger.warning(
+            "[task][execute] owner identity mismatch: owner_bot_id=%s owner_user_id=%s; "
+            "keep owner_bot's real owner (embedded), owner_user_id is the executing observer",
+            request.owner_bot_id,
+            request.owner_user_id,
+        )
+        return replace(request, owner_user_id=owner_user_id)
+    return replace(request, owner_bot_id=bot_id, owner_user_id=owner_user_id)
 
 
 def parse_status_filter(status: str | None) -> list[Status] | None:

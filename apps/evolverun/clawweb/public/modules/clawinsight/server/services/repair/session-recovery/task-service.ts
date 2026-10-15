@@ -26,7 +26,6 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     notifier: RecoveryTaskNotifier;
     reporter: RecoveryTaskReporter;
     observationMs: number;
-    ownerWaitMs: number;
     now?: () => number;
     resolveTarget?: (request: RecoveryRequest) => Promise<AgentRuntimeTargetSnapshot>;
   }) { this.now = deps.now ?? Date.now; }
@@ -110,14 +109,14 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   }
 
   async plan(taskId: string, version: number, plan: RecoveryPlan): Promise<void> {
-    const task = await this.mutate(taskId, version, value => ({ ...value, ...submitRecoveryPlan(value, plan, this.now(), this.deps.ownerWaitMs),
+    const task = await this.mutate(taskId, version, value => ({ ...value, ...submitRecoveryPlan(value, plan, this.now()),
       timeline: [...value.timeline, this.event("plan", "agent", plan.summary, { plan })] }));
     if (task.status === "waiting_owner") await this.notify(task, "plan", plan.summary);
     if (task.status === "completed") await this.deps.agent.release(task);
   }
 
   async decide(taskId: string, digest: string, approved: boolean, actor: RecoveryActor, cooperationDone = false, feedback = ""): Promise<void> {
-    let previous = await this.required(taskId); this.owner(previous, actor);
+    const previous = await this.required(taskId); this.owner(previous, actor);
     const decision = previous.timeline.find(event => event.kind === "owner_decision" && event.payload.digest === digest);
     if (decision) {
       if (decision.payload.approved !== approved || decision.payload.cooperation_done !== cooperationDone || decision.payload.feedback !== feedback) this.fail(409, "方案决策不能被不同内容覆盖");
@@ -126,12 +125,6 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     }
     if (approved && previous.plan?.owner_cooperation.length && !cooperationDone) this.fail(422, "请先处理方案中的 Owner 配合事项");
     if (typeof feedback !== "string" || feedback.length > 4000 || containsSecret(feedback)) this.fail(422, "反馈格式无效");
-    if (approved && previous.ownerDeadlineAt !== null && previous.ownerDeadlineAt <= this.now()
-      && previous.execution && previous.execution.state !== "ended") {
-      // Owner can reply after the wrapper exits but before maintenance or Base's callback.
-      await this.deps.agent.release(previous);
-      previous = await this.required(taskId);
-    }
     const task = await this.mutate(taskId, previous.version, value => ({ ...value, ...decideRecoveryPlan(value, digest, approved, this.now()),
       timeline: [...value.timeline, this.event("owner_decision", "owner", approved ? "确认方案并完成配合事项" : "拒绝方案", { digest, approved, cooperation_done: cooperationDone, feedback })] }));
     if (approved) await this.deps.agent.start(task);
@@ -205,9 +198,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       try {
         if (task.status === "running" && ((!task.execution || task.execution.state === "ended")
          )) await this.start(task);
-        if (task.status === "waiting_owner" && task.ownerDeadlineAt !== null && task.ownerDeadlineAt <= this.now()) {
-          if (task.execution && task.execution.state !== "ended") await this.deps.agent.release(task);
-        } else if (task.status === "running" && ["observe", "verify"].includes(task.phase)
+        if (task.status === "running" && ["observe", "verify"].includes(task.phase)
           && task.observationDeadlineAt !== null && task.observationDeadlineAt <= this.now() && !task.requiresFreshObservation) {
           await this.observe(task.taskId, task.version, { delivery: task.judgment?.delivery ?? "unconfirmed", response: task.judgment?.response ?? "unknown",
             effect: "unknown", summary: "本轮观察到期，保存进度并等待诊断服务继续", evidence_ids: task.judgment?.evidence_ids ?? [] }, []);

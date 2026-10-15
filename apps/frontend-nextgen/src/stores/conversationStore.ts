@@ -9,6 +9,7 @@ import {
 } from './conversationStoreState';
 import {
   clearSessionKeyPatch,
+  instanceSelectionSet,
   invalidateFriendBotList,
   invalidateListCaches,
   revisionPatch,
@@ -89,6 +90,8 @@ export const useConversationStore = create<ConversationState>((set) => ({
         ...revisionPatch(state, botId),
       };
     }),
+  setBotInstanceSelection: (botId, instanceUuid) =>
+    set((state) => instanceSelectionSet(state, botId, instanceUuid.trim())),
   setFriendBotScope: (botId, scope) =>
     set((state) => {
       // 缺省 all:等值提交(no-op)不重放缓存失效与递增。

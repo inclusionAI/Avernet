@@ -69,6 +69,7 @@ class BcsCreateGroupRequest:
     routing_policy: dict[str, Any] | None = None               # 拉人/不发言投递策略,如 {"default_bot_final_delivery":"inject_observers"}(人类观察者场景)
     label: str | None = None                                   # 群显示标签
     master_bot: str | None = None                              # manager_worker 群的 master bot(=driver_bot/manager);与 ocb 拉群接口对齐,form_coop_group 注入
+    idempotency_key: str | None = None                         # Relay 同节点重投使用稳定键
 
 
 @dataclass
@@ -203,14 +204,10 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         extra_headers: dict[str, str] | None = None
         if req.caller_bot_token:
             extra_headers = {"Authorization": f"Bearer {req.caller_bot_token}"}
-            if len(req.caller_bot_token) > 4:
-                logger.info(f"create_group extra_headers with bot_token {req.driver_bot}={req.caller_bot_token[0:4]}")
-            else:
-                logger.error(f"create_group extra_headers with wrong bot_token {req.driver_bot}={req.caller_bot_token}")
 
         logger.info("[task][bcs_http_adapter] create_group body=%s", body)
         logger.info("[task][bcs_http_adapter] create_group event_subscriptions=%s", body.get("event_subscriptions"))
-        r = await self._req("POST", "/groups", json=body, idempotency_key=uuid.uuid4().hex,
+        r = await self._req("POST", "/groups", json=body, idempotency_key=req.idempotency_key or uuid.uuid4().hex,
                            extra_headers=extra_headers)
         data = r.json()
         # 实 BCS 创建群响应键名为 ``id``(``group_detail_to_create_json`` groups.rs:2093 与 v1 legacy
@@ -293,6 +290,7 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         message: str,
         session_id: str | None = None,
         caller_bearer: str | None = None,
+        idempotency_key: str | None = None,
     ) -> BotSendResult:
         """BCS A2A 单 bot 异步消息:``POST /bots/{target_bot_id}:{target_user_id}/chat-async``。
 
@@ -324,12 +322,46 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
                 "chat-async 把 caller 解析为 bot,预计 401 target=%s",
                 f"{target_bot_id}:{target_user_id}",
             )
-        r = await self._req("POST", path, json=body, extra_headers=extra_headers)
+        r = await self._req(
+            "POST",
+            path,
+            json=body,
+            idempotency_key=idempotency_key,
+            extra_headers=extra_headers,
+        )
         data = r.json()
         run_id = data.get("run_id")
         if not run_id:
             raise BcsClientError(f"send_message_a2a 响应缺 run_id: {_response_summary(r)}")
         return BotSendResult(run_id=run_id, session_id=data.get("session_id"))
+
+    async def get_chat_run(
+        self,
+        run_id: str,
+        *,
+        since_version: int = 0,
+        wait_ms: int = 0,
+        caller_bearer: str | None = None,
+    ) -> dict[str, Any]:
+        path = f"/chat/runs/{run_id}"
+        ts = str(int(time.time()))
+        headers = self._sign("GET", path, ts)
+        if caller_bearer:
+            headers["Authorization"] = f"Bearer {caller_bearer}"
+        params = {
+            "since_version": max(0, int(since_version)),
+            "wait_ms": max(0, int(wait_ms)),
+        }
+        async with self._client_for_current_loop() as client:
+            response = await client.request(
+                "GET", path, params=params, headers=headers,
+                timeout=max(10.0, params["wait_ms"] / 1000 + 10.0),
+            )
+        _map_status(response)
+        data = response.json()
+        if not isinstance(data, dict):
+            raise BcsClientError("chat run response is not an object")
+        return data
 
     async def validate_definition(self, definition_yaml: str) -> None:
         await self._req("POST", "/collaboration/definitions/validate", json={"yaml": definition_yaml})

@@ -111,6 +111,38 @@ export class AppConfigRepository {
     return this.findByKey(configKey);
   }
 
+  async listWorkflowIds(): Promise<string[]> {
+    return (await this.db.query<{ workflow_id: string }>('SELECT workflow_id FROM workflow_specs ORDER BY workflow_id')).map(row => row.workflow_id);
+  }
+
+  async listByPrefix(prefix: string): Promise<AppConfigRow[]> {
+    const escaped = prefix.replaceAll('!', '!!').replaceAll('_', '!_').replaceAll('%', '!%');
+    return this.db.query<AppConfigRow>(`SELECT ${SELECT_COLUMNS} FROM cm_app_config WHERE config_key LIKE ? ESCAPE '!' ORDER BY config_key`, [escaped + '%']);
+  }
+
+  /** Policy writes are one CAS, including enabled, so readers never see a newly-created enabled default. */
+  async compareAndSet(key: string, input: { configYaml: string; enabled: boolean; updatedBy: string; expectedVersion: number }): Promise<AppConfigRow> {
+    return this.db.transaction(async tx => {
+      const now = tx.dialect.now();
+      if (input.expectedVersion === 0) {
+        try {
+          await tx.exec(`INSERT INTO cm_app_config (config_key, config_yaml, version, enabled, updated_by, gmt_create, gmt_modified)
+            VALUES (?, ?, 1, ?, ?, ?, ?)`, [key, input.configYaml, input.enabled ? 1 : 0, input.updatedBy, now, now]);
+        } catch (error) {
+          if ((await new AppConfigRepository(tx).findByKey(key))) throw new Error('SETTINGS_CONFLICT');
+          throw error;
+        }
+      } else {
+        const changed = await tx.exec(`UPDATE cm_app_config SET config_yaml = ?, enabled = ?, updated_by = ?, version = version + 1, gmt_modified = ?
+          WHERE config_key = ? AND version = ?`, [input.configYaml, input.enabled ? 1 : 0, input.updatedBy, now, key, input.expectedVersion]);
+        if (changed.affectedRows !== 1) throw new Error('SETTINGS_CONFLICT');
+      }
+      const row = await new AppConfigRepository(tx).findByKey(key);
+      if (!row) throw new Error('SETTINGS_WRITE_LOST');
+      return row;
+    });
+  }
+
   async delete(configKey: string): Promise<boolean> {
     const result = await this.db.exec(
       "DELETE FROM cm_app_config WHERE config_key = ?",

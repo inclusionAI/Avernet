@@ -1,3 +1,5 @@
+import type { TaskCardHiddenFlags } from '@/services/tasks/taskMapper';
+
 export type TaskCardType = 'task_clarify' | 'task_multi_select' | 'task_ready';
 
 export type TaskReadyData = {
@@ -8,6 +10,7 @@ export type TaskReadyData = {
   acceptance_criteria?: string[];
   constraints?: string[];
   resources?: string[];
+  hidden_flags?: TaskCardHiddenFlags;
 };
 
 export type TaskCardData = {
@@ -23,6 +26,7 @@ export type TaskCardData = {
   questions?: string[];
   tasks?: Array<{ index: number; summary: string }>;
   prompt?: string;
+  hidden_flags?: TaskCardHiddenFlags;
 };
 
 export type EditableField = 'goal' | 'deliverables' | 'acceptance_criteria' | 'constraints' | 'resources';

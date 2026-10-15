@@ -132,3 +132,60 @@ describe('issue group read cost', () => {
     expect(group.summary?.summary).toBe('summary-issue-0-1');
   });
 });
+
+
+it('limits priority run reads to two weeks and affected IDs even beyond 50000 lifetime runs', async () => {
+  const { repository } = await seed(1, 1, 1);
+  raw.exec(`ALTER TABLE workflow_evolution_analysis_runs ADD COLUMN state_version INTEGER DEFAULT 0;
+    CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, workflow_id TEXT, started_at INTEGER);
+    CREATE TABLE node_executions (flow_id TEXT, node_id TEXT);`);
+  const now = Date.now();
+  const insert = raw.prepare("INSERT INTO flow_runs VALUES (?, 'wf', ?)");
+  raw.transaction(() => {
+    for (let i = 0; i < 50001; i++) insert.run(`old-${i}`, Math.floor((now - 30 * 86400000) / 1000));
+    insert.run('run-0-0', now - 20 * 86400000);
+    insert.run('recent-seconds', Math.floor((now - 3600000) / 1000));
+    insert.run('recent-millis', now - 3600000);
+    insert.run('previous-week', Math.floor((now - 10 * 86400000) / 1000));
+  })();
+  raw.exec("INSERT INTO node_executions VALUES ('recent-seconds', 'node-0'), ('recent-millis', 'node-0'), ('previous-week', 'node-0')");
+  const query = vi.spyOn(db, 'query');
+  const page = await repository.listPage('wf', { page: 1, pageSize: 20 });
+  expect(page.groups).toHaveLength(1);
+  expect(page.groups[0].priority).toMatchObject({
+    week: { related: 2, affected: 0, analyzed: 0 }, previousWeek: { related: 1 },
+    lastOccurredAtMs: now - 20 * 86400000, missingRunTimes: 0,
+  });
+  const runBatches = await Promise.all(query.mock.calls.flatMap(([sql], i) =>
+    /FROM flow_runs/.test(sql) ? [query.mock.results[i].value] : []));
+  expect(runBatches.flat()).toHaveLength(4);
+});
+
+
+it('bounds priority analysis reads by the statistics window and retains multi-run coverage', async () => {
+  const { repository } = await seed(1, 1, 1);
+  raw.exec(`ALTER TABLE workflow_evolution_analysis_runs ADD COLUMN state_version INTEGER DEFAULT 0;
+    CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, workflow_id TEXT, started_at INTEGER);
+    CREATE TABLE node_executions (flow_id TEXT, node_id TEXT);`);
+  const now = Date.now();
+  raw.prepare("INSERT INTO flow_runs VALUES ('single', 'wf', ?), ('multi', 'wf', ?)").run(now - 3600000, now - 3600000);
+  raw.exec("INSERT INTO node_executions VALUES ('single', 'node-0'), ('multi', 'node-0')");
+  const insert = raw.prepare(`INSERT INTO workflow_evolution_analysis_runs
+    (analysis_id, workflow_id, flow_id, scope_type, scope_json, status, result_json, requested_at_ms, completed_at_ms)
+    VALUES (?, 'wf', ?, 'single_run', ?, 'completed', ?, ?, ?)`);
+  const result = (id: string) => JSON.stringify({ schemaVersion: 'workflow-evolution-analysis/v1', analysisId: id,
+    facts: [], inferences: [], unknowns: [], diagnoses: [] });
+  raw.transaction(() => {
+    for (let i = 0; i < 1000; i++) insert.run(`history-${i}`, 'old', '{}', result(`history-${i}`), 1, 1);
+    insert.run('single', 'single', '{}', result('single'), now - 1000, now - 1000);
+    insert.run('multi', null, JSON.stringify({ flowIds: ['multi'] }), result('multi'), now - 1000, now - 1000);
+    insert.run('future', 'single', '{}', result('future'), now + 86400000, now + 86400000);
+  })();
+  const query = vi.spyOn(db, 'query');
+  const page = await repository.listPage('wf', { page: 1, pageSize: 20 });
+  expect(page.groups[0].priority?.week).toMatchObject({ related: 2, analyzed: 2 });
+  const analysisBatches = await Promise.all(query.mock.calls.flatMap(([sql], i) =>
+    /SELECT id, flow_id, scope_json, result_json FROM workflow_evolution_analysis_runs/.test(sql)
+      ? [query.mock.results[i].value] : []));
+  expect(analysisBatches.flat()).toHaveLength(2);
+});

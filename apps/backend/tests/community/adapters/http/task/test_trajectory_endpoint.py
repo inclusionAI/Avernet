@@ -560,6 +560,74 @@ def test_trajectory_dto_passes_through_enriched_node_output():
 
 
 @pytest.mark.unit
+def test_trajectory_dto_passes_through_actual_run_mode():
+    """真实模态读时富化(仅每 node 最后一条事件携带)经 DTO 透传为
+    ``timeline[i].actual_run_mode``;未挂载的事件为 null。"""
+    events = [
+        TrajectoryEvent(
+            task_id="t1", node_id="n1", action_type=TrajectoryActionType.PLAN,
+            action_result="success", attempt=0, gmt_create=1000, gmt_modified=1000,
+        ),
+        TrajectoryEvent(
+            task_id="t1", node_id="n1", action_type=TrajectoryActionType.EXECUTE,
+            action_result="success", attempt=0, gmt_create=2000, gmt_modified=2000,
+            actual_run_mode="single_bot",  # 富化只挂最后一条
+        ),
+    ]
+    traj = TaskTrajectory(
+        task_id="t1", gmt_create=1000, gmt_modified=1000,
+        timeline=events, analysis=None,
+    )
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1"},
+    )
+    assert r.status_code == 200
+    timeline = r.json()["data"]["timeline"]
+    assert timeline[0]["actual_run_mode"] is None
+    assert timeline[1]["actual_run_mode"] == "single_bot"
+
+
+@pytest.mark.unit
+def test_trajectory_display_html_shows_actual_run_mode_per_subtask_block():
+    """HTML 子任务区块头展示该任务的真实模态(chip 取自区块末位事件的
+    actual_run_mode 富化);无模态的区块不渲染 chip。"""
+    events_n1 = [
+        TrajectoryEvent(
+            task_id="t1", node_id="n1", action_type=TrajectoryActionType.PLAN,
+            action_result="success", attempt=0, gmt_create=1000, gmt_modified=1000,
+        ),
+        TrajectoryEvent(
+            task_id="t1", node_id="n1", action_type=TrajectoryActionType.EXECUTE,
+            action_result="success", attempt=0, gmt_create=2000, gmt_modified=2000,
+            actual_run_mode="coop_group",  # 富化只挂最后一条
+        ),
+    ]
+    events_n2 = [
+        TrajectoryEvent(
+            task_id="t1", node_id="n2", action_type=TrajectoryActionType.PLAN,
+            action_result="success", attempt=0, gmt_create=1500, gmt_modified=1500,
+        ),
+    ]
+    traj = TaskTrajectory(
+        task_id="t1", gmt_create=2000, gmt_modified=2000,
+        timeline=events_n1 + events_n2, analysis=None,
+    )
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "display": "html"},
+    )
+    assert r.status_code == 200
+    # 有模态的 n1 区块:头上一枚「真实模态 · coop_group」chip,仅此一枚
+    assert '<span class="nb-mode">真实模态 · coop_group</span>' in r.text
+    assert r.text.count('class="nb-mode"') == 1
+    # 事件卡片内不再重复展示模态行
+    assert r.text.count("真实模态") == 1
+
+
+@pytest.mark.unit
 def test_trajectory_display_html_renders_enriched_node_output():
     """HTML 页在携带产出的最后一条事件下渲染可折叠的「节点产出」块。"""
     ev = TrajectoryEvent(
@@ -779,6 +847,7 @@ def test_html_content_is_a_subset_of_json_payload():
         error_msg="search tool returned 500",
         boost_reason="第二轮选 botA 复执",
         holder_id="bot-a",
+        actual_run_mode="coop_group",
         output={"result": "done", "steps": 3},
         session_msgs=[{"role": "user", "content": "run the job"},
                       {"role": "assistant", "content": "tool failed: boom"}],
@@ -813,7 +882,8 @@ def test_html_content_is_a_subset_of_json_payload():
     for ev in data["timeline"]:
         for key in ("task_id", "node_id", "action_type", "action_result",
                     "action_input", "error_type", "error_msg",
-                    "boost_reason", "holder_id", "status_to"):
+                    "boost_reason", "holder_id", "status_to",
+                    "actual_run_mode"):
             val = ev.get(key)
             if val:
                 assert _html.escape(val) in page, f"{key}={val} 未在 HTML 展示"

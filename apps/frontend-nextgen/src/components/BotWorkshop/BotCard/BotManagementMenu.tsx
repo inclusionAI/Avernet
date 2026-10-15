@@ -5,6 +5,7 @@ import { restartPublishStageLabel, restartPublishStageOf } from '@/domain/botWor
 import type { BotDomain } from '@/services/botWorkshop';
 import { ArrowUpRight, MapPin, MoreHorizontal, ShieldCheck, Users } from 'lucide-react';
 import { useState } from 'react';
+import { canRestartFailedServiceBot, failedServiceDeleteReason, publicationManagementAvailability } from './botManagementPolicy';
 import { actionIcon, actionLabel, type BotCardManagementAction } from './config';
 import { ActionHelp, MenuSection } from './menuPrimitives';
 
@@ -41,11 +42,8 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
   const isAgentCodingBot = bot.runtime.isAgentCodingBot;
   const isServiceBot = bot.serviceMode === 'service';
   const restartUnsupported = bot.runtime.engine === 'teclaw';
-  // 重启词表（Avernet PR #1911）：动作名即路由键。服务卡由后端词表决定三个
-  // 重启动词各自落在哪张卡（draft→restart，predeploy/online→restart_publish）；词表与
-  // disabled_actions 均未声明时不渲染（对齐 bot-workshop-page.md §10.3 卡片操作口径）。
-  // Coding Bot 先隐藏「重启引擎」：OpenAPI refetch 契约尚未接入，等后端动作回传后再放开。
-  const restartDeclared = bot.actions.includes('restart') || Boolean(bot.disabledActions.restart);
+  // 动作词表由库存接口授权；创建失败但尚无发布记录时，通用重启接口是唯一恢复入口。
+  const restartDeclared = bot.actions.includes('restart') || Boolean(bot.disabledActions.restart) || canRestartFailedServiceBot(bot);
   const restartPublishDeclared =
     bot.actions.includes('restart_publish') || Boolean(bot.disabledActions.restart_publish);
   const restartPublishDisabledReason = bot.disabledActions.restart_publish;
@@ -56,6 +54,9 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
   const engineRestartEnabled = bot.actions.includes('engine_restart');
   const engineRestartDisabledReason = bot.disabledActions.engine_restart;
   const restartPublishStage = confirmAction === 'restart_publish' ? restartPublishStageOf(bot.lifecycle) : undefined;
+  const publication = publicationManagementAvailability(bot);
+  const restartEnabled = bot.actions.includes('restart') || canRestartFailedServiceBot(bot);
+  const deleteReason = failedServiceDeleteReason(bot);
   return (
     <>
       <Popover open={open} onOpenChange={setOpen}>
@@ -150,19 +151,19 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
           </MenuSection>
           {/* 发布与运维（流程与运行态操作 · 需二次确认或受锁保护） */}
           <MenuSection divider>
-            {bot.serviceMode === 'service' && onManagePublication ? (
+            {bot.serviceMode === 'service' && publication.visible && onManagePublication ? (
               <Button
                 variant="ghost"
                 size="sm"
                 className="w-full justify-start"
                 leftIcon={<ArrowUpRight className="size-4" />}
-                disabled={lockedByOther}
+                disabled={lockedByOther || !publication.enabled}
                 onClick={() => {
                   setOpen(false);
                   onManagePublication(bot);
                 }}
               >
-                发布与阶段推进
+                {publication.enabled ? '发布与阶段推进' : <ActionHelp description={publication.disabledReason!}>发布与阶段推进</ActionHelp>}
               </Button>
             ) : null}
             {restartUnsupported || !isServiceBot || restartDeclared ? (
@@ -171,7 +172,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
                 size="sm"
                 className="w-full justify-start"
                 leftIcon={actionIcon.restart}
-                disabled={restartUnsupported || lockedByOther || !bot.actions.includes('restart')}
+                disabled={restartUnsupported || lockedByOther || !restartEnabled}
                 onClick={() => {
                   setOpen(false);
                   setConfirmAction('restart');
@@ -254,7 +255,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
                 setConfirmAction('delete');
               }}
             >
-              {actionLabel.delete}
+              {deleteReason ? <ActionHelp description={deleteReason}>{actionLabel.delete}</ActionHelp> : actionLabel.delete}
             </Button>
           </MenuSection>
         </PopoverContent>

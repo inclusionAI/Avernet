@@ -1,3 +1,5 @@
+import { RepairAutomationDeniedError } from '../contracts/workflow-automation.js';
+import { repairEvidenceFacts, repairEvidenceFlows, validateAutomationOrigin } from '../contracts/repair-batch.js';
 import { randomUUID } from 'node:crypto';
 import { repairStage } from '../observability/repair-diagnostics.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
@@ -38,6 +40,7 @@ function selection(raw: RepairSelectionRequest): RepairSelectionRequest {
     || !/^[a-f0-9]{64}$/.test(raw.inputDigest) || !requiredText(raw.instructions, MAX_INSTRUCTIONS_CHARS, true)) fail('INVALID_INPUT', 'Invalid repair selection');
   if (raw.includeHistorical !== undefined && typeof raw.includeHistorical !== 'boolean') fail('INVALID_INPUT', 'Invalid history scope');
   return { workflowId: raw.workflowId, itemIds: [...raw.itemIds].sort(), inputDigest: raw.inputDigest,
+    ...(raw.automation ? { automation: validateAutomationOrigin(raw.automation) } : {}),
     instructions: raw.instructions, requestId: raw.requestId, includeHistorical: raw.includeHistorical === true };
 }
 function identityKey(item: RepairItem, episodeKey: string): string {
@@ -138,6 +141,42 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       }).map(source => source.item.itemId) };
     }
     const current = await repairStage(`sources_${mode}`, () => this.sources.load(db, workflowId, this.sources.hydrate ? 'summary' : mode, sourceScope));
+    // An automatic recurrence opens a new phase with a new proposal identity.
+    // Do not carry the previously applied operations into another generation.
+    const derived = new Set(current.map(source => source.item.itemId));
+    const maximumEpisodes = current.length + stored.length + 1;
+    for (let index = 0; index < current.length && index < maximumEpisodes; index++) {
+      const source = current[index];
+      const previous = byIdentity.get(identityKey(source.item, source.episodeKey));
+      if (previous?.state === 'no_action' && previous.disposition?.action === 'no_action') {
+        const disposition = previous.disposition;
+        const flows = repairEvidenceFlows(source.item);
+        const facts = repairEvidenceFacts(source.item);
+        const major = facts.severity >= 3;
+        const fresh = disposition.evidenceFlowIds && (flows.some(id => !disposition.evidenceFlowIds!.includes(id))
+          || facts.eventIds.some(id => !disposition.evidenceEventIds?.includes(id)) || facts.severity > (disposition.evidenceSeverity ?? 0));
+        const expired = disposition.untilMs !== undefined && disposition.untilMs <= Date.now();
+        if (expired || major && fresh) {
+          const episodeKey = digestRepairJson(['resume-disposition', previous.itemId, expired ? disposition.untilMs : [flows, facts]]);
+          const itemId = digestRepairJson([workflowId, previous.groupKey, previous.proposalKey, episodeKey]);
+          if (!derived.has(itemId)) {
+            derived.add(itemId);
+            current.push({ episodeKey, initialState: 'pending', item: { ...source.item, itemId, previousItemId: previous.itemId,
+              context: { ...source.item.context, dispositionResume: { reason: expired ? 'expired' : 'new_evidence', previousItemId: previous.itemId } } } });
+          }
+        }
+      }
+      const recurrence = previous?.context?.recurrence as { episodeKey?: string; flowIds?: string[]; reason?: string } | undefined;
+      if (!previous || !recurrence?.episodeKey || previous.state !== 'ineffective' && recurrence.reason !== 'baseline_changed') continue;
+      const proposalKey = digestRepairJson(['reassess', previous.itemId, recurrence.episodeKey]);
+      const itemId = digestRepairJson([workflowId, previous.groupKey, proposalKey, recurrence.episodeKey]);
+      if (derived.has(itemId)) continue;
+      derived.add(itemId);
+      current.push({ episodeKey: recurrence.episodeKey, initialState: 'pending', item: { ...source.item, itemId,
+        previousItemId: previous.itemId, proposalKey, proposal: null,
+        instruction: `${recurrence.reason === 'baseline_changed' ? '当前生效 Pack 已变化，请重新核对原修改的适用性。' : '原修改在生效版本明确复现。'}请依据新证据重新诊断并调整方案，不得原样重复已应用修改。关联运行：${(recurrence.flowIds ?? []).join(', ')}`,
+        context: { ...source.item.context, recurrence } } });
+    }
     current.forEach(source => validateRepairItem(source.item));
     const ordered = [...current].sort((a, b) => a.item.itemId.localeCompare(b.item.itemId));
     const inputDigest = sourceDigest(ordered);
@@ -168,6 +207,13 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       }
     }
     return { items: [...items.values()], inputDigest, materializable };
+  }
+  async request(workflowId: string, requestId: string): Promise<RepairRevision | null> {
+    if (!identity(workflowId, 190) || !requiredText(requestId, 128)) fail('INVALID_INPUT', 'Invalid request lookup');
+    const rows = await this.db.query<{ task_id: string; revision: number }>(
+      'SELECT task_id, revision FROM workflow_repair_revisions WHERE workflow_id = ? AND request_id = ?', [workflowId, requestId]);
+    if (!rows.length) return null;
+    return new RepairBatchRepository(this.db).getRevision(workflowId, rows[0].task_id, Number(rows[0].revision));
   }
   async candidates(workflowId: string, query: RepairCandidatesQuery = {}): Promise<Omit<RepairCandidatesResponse, 'canEdit'>> {
     return serial(this.db, async () => {
@@ -298,6 +344,15 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
           itemIds: request.itemIds, includeHistorical: request.includeHistorical === true,
         });
         if (snapshot.inputDigest !== request.inputDigest) fail('SOURCE_CHANGED', 'Repair sources changed; refresh the issue inbox');
+        if (!taskId) {
+          const occupied = snapshot.items.filter(item => request.itemIds.includes(item.itemId));
+          const taskIds = [...new Set(occupied.map(item => item.activeTaskId).filter((id): id is string => !!id))];
+          if (occupied.length === request.itemIds.length && occupied.every(item => item.state === 'processing') && taskIds.length === 1) {
+            const active = await this.readTask(tx, taskIds[0]);
+            if (canonicalRepairJson(active.latestAttempt.input.items.map(item => item.itemId).sort()) === canonicalRepairJson([...request.itemIds].sort())
+              && active.latestAttempt.input.instructions === request.instructions) return active.latestAttempt;
+          }
+        }
         const selected: RepairItem[] = [];
         for (const itemId of request.itemIds) {
           const item = snapshot.items.find(item => item.itemId === itemId);
@@ -317,6 +372,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         const input: RepairBatchInput = { schemaVersion: 'workflow-repair/v2', taskId: id,
           revision: (previous?.latestAttempt.revision ?? 0) + 1, baseline, items: selected,
           excludedSources: { count: excludedSourceRefs.length, digest: digestRepairJson(excludedSourceRefs) },
+          ...(request.automation ? { automation: request.automation } : {}),
           instructions: request.instructions, parentCandidateCommit, feedback,
           previousReportRef: previous?.latestSuccessful ? `${id}/revisions/${previous.latestSuccessful.revision}` : null,
           taskBranch: `repair/${request.workflowId}/${id}` };
@@ -346,7 +402,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       jobId = receipt.jobId;
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
-      failure = /^AIS executeSnapshot HTTP (?:400|401|403|404|422):/u.test(message) || message.startsWith('AIS executeSnapshot 失败:')
+      failure = error instanceof RepairAutomationDeniedError || /^AIS executeSnapshot HTTP (?:400|401|403|404|422):/u.test(message) || message.startsWith('AIS executeSnapshot 失败:')
         || message.includes('token/projectName 未配置') ? 'rejected' : 'uncertain';
     }
     await this.tx(tx => new RepairTaskRepository(tx).finishDispatch(revision.taskId, revision.revision, jobId, failure));

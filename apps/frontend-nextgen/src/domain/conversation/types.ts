@@ -55,6 +55,14 @@ export interface ConversationSessionListState {
   loadMoreError: string | null;
 }
 
+/** 多实例服务 Bot 的会话请求范围:按实例(device UUID)与发布阶段取数;缺省不传 = 不限定(现状行为)。 */
+export interface ConversationSessionRequestRange {
+  /** 实例标识(containers 接口返回的实例 id,即 device UUID)。 */
+  deviceUuid: string;
+  /** 发布阶段;缺省由服务端默认。 */
+  stage?: 'draft' | 'verify' | 'online';
+}
+
 export interface ConversationFriendGroupView {
   friend: ConversationUserView;
   state: 'unloaded' | 'loading' | 'loaded' | 'error';

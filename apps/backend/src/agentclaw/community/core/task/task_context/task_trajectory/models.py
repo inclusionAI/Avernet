@@ -1,7 +1,8 @@
 """任务轨迹采集与根因分析领域模型(REQ-1 / REQ-9)。
 
 纯 dataclass / enum 内存态领域对象 —— **transport/DB-agnostic**:
-不依赖 SQLAlchemy / FastAPI / 任何外部框架,不读不写 ``task_action_log``。
+不依赖 SQLAlchemy / FastAPI / 任何外部框架。领域对象本身不读写存储；
+Service 可将 Relay ``task_action_log`` 只读投影为这些事件。
 ``action_input`` / ``analysis`` / ``error_type`` / ``error_msg`` 等使用 ``... | None``
 均为有意合法域态(``None`` = 未计算 / 成功 / 无输入);``gmt_*`` 沿用本模块 ``int`` 毫秒
 时间戳约定(对齐 ``NodeActionEvent.ts`` / ``RuntimeInfo.start_time``),storage 层在做
@@ -101,9 +102,9 @@ class TrajectoryEvent:
     ``search_probe`` = **读时定向投影**字段(不落库;与 ``holder_id`` 同款白名单
     投影,是 REQ-1 "ext_info 不整体入领域" 边界的定向扩展而非破坏):派发搜推三问
     (关键词/返回结果/最终选择)的可展示摘要,由 assembler 从本事件行 ``ext_info``
-    投影——DISPATCH 事件取 ``_dispatch_rationale``,relay ``action_result="search"``
-    事件取顶层 ``search_sampling``+``candidates``;relay ``DISPATCH_RESULT`` 的
-    ``action_result="hit_single|hit_multi|miss"`` 事件取 ``search_evidence``。
+    投影——DISPATCH 事件取 ``_dispatch_rationale``，Relay 搜索事件取顶层
+    ``search_sampling``+``candidates``。Relay 的执行者决策随唯一的
+    ``PLAN_RESULT`` 一起持久化，不再生成独立派发事件。
     无素材的事件保持 ``None``(缺字段=无信号)。
     """
 
@@ -125,6 +126,7 @@ class TrajectoryEvent:
     output: dict[str, Any] | None = None      # 读时富化:节点当前产出(仅该节点最后一条事件;不落库)
     session_msgs: list[dict[str, Any]] | None = None  # 读时富化:子任务会话消息(BCS 键或引擎键分通道实拉/缓存;源自末位事件 ext_info.session_msgs 快照或本回合实拉;展示/DTO 用,不落库——纯读不写库,持久化仅分析路径 merge)
     search_probe: dict[str, Any] | None = None  # 读时定向投影:派发搜推三问采样摘要(源自本事件 ext_info;不落库,详见类 docstring)
+    actual_run_mode: str | None = None        # 读时富化:节点真实执行模态(single_bot|coop_group|bbs;经 effective_run_mode 定——extend_props.actual_run_mode 优先,缺失回退 run_mode;仅该节点最后一条事件携带;不落库,缺字段=无信号)
 
 
 @dataclass

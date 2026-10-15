@@ -12,7 +12,7 @@ import { createRepairBatchesRouter } from '../../routes/repair-batches.js';
 describe('reviewed candidate publication', () => {
   const fixtures: Awaited<ReturnType<typeof repairFixture>>[] = [];
   afterEach(async () => { for (const f of fixtures.splice(0)) await f.db.close(); });
-  async function setup(count = 1) {
+  async function setup(count = 1, partial = false) {
     const f = await repairFixture(count); fixtures.push(f);
     for (const migration of repairReleaseMigrations) for (const sql of migration.sql) await f.db.exec(f.db.dialect.renderDdl(sql));
     const baseline = { ...await f.executionPort.resolveBaseline('wf-1'), activeDeployNumber: 7, releaseRevision: 7 };
@@ -24,7 +24,7 @@ describe('reviewed candidate publication', () => {
     const revision = await workbench.create('reviewer', { workflowId: 'wf-1', itemIds: f.items.map(item => item.itemId),
       inputDigest: inbox.inputDigest, requestId: 'generate', instructions: '' });
     const draft = { candidateCommit: 'd'.repeat(40), parentCandidateCommit: baseline.packCommit, packDigest: 'e'.repeat(40),
-      itemResults: f.items.map(item => ({ itemId: item.itemId, status: 'changed', reason: 'fixed' })) };
+      itemResults: f.items.map((item, index) => ({ itemId: item.itemId, status: partial && index > 0 ? 'not_needed' : 'changed', reason: 'fixed' })) };
     await workbench.report({ workflowId: 'wf-1', taskId: revision.taskId, revision: 1, expectedStateVersion: 0,
       status: 'succeeded', draft, checks: { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit,
         packDigest: draft.packDigest, candidateDigest: digestRepairJson(draft), static: { status: 'passed' },
@@ -162,6 +162,23 @@ describe('reviewed candidate publication', () => {
     expect((await f.service.detail(f.revision.taskId)).deployments[0].status).toBe('running');
   });
 
+  it('reconfirms a different production target after failure without regenerating the candidate', async () => {
+    const f = await setup();
+    const approval = await f.service.confirm('reviewer', f.revision.taskId, f.request);
+    f.publisher.dispatch = async () => ({ status: 'failed', error: 'entry missing' });
+    await f.service.deploy('reviewer', f.revision.taskId, { revision: 1, expectedApprovalVersion: approval.stateVersion, requestId: 'failed-deploy' });
+    f.publisher.targets = async () => [{ id: 'new-prod', botId: 'new-bot', ownerId: 'owner', environment: 'prod', label: '生产 Bot' }];
+    const latest = (await f.workbench.task(f.revision.taskId)).latestSuccessful!;
+    const updated = await f.service.confirm('reviewer', f.revision.taskId, { ...f.request, targetId: 'new-prod',
+      expectedStateVersion: latest.stateVersion, requestId: 'change-target' });
+    expect(updated.target.id).toBe('new-prod');
+    expect(updated.candidateCommit).toBe(approval.candidateCommit);
+    expect((await f.service.detail(f.revision.taskId)).deployments).toHaveLength(1);
+    f.publisher.dispatch = async () => ({ status: 'running' });
+    expect(await f.service.deploy('reviewer', f.revision.taskId, { revision: 1,
+      expectedApprovalVersion: updated.stateVersion, requestId: 'new-target-deploy' })).toMatchObject({ status: 'running', approvalId: updated.id });
+  });
+
   it('reauthorizes the frozen target before stopping, including idempotent retries', async () => {
     const f = await setup();
     const approved = await f.service.confirm('reviewer', f.revision.taskId, f.request);
@@ -198,4 +215,30 @@ describe('reviewed candidate publication', () => {
       expect(hidden.capabilities.publication).toBe(false);
     } finally { await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); }); }
   });
+  it('publishes from one user decision and deduplicates concurrent and response-lost retries', async () => {
+    const f = await setup();
+    f.publisher.targets = async () => [{ id: 'target-1', scope: 'workflow', environment: 'pre', botId: '', ownerId: '', label: 'workflow scope' }];
+    const results = await Promise.allSettled([f.service.publish('reviewer', f.revision.taskId, f.request), f.service.publish('reviewer', f.revision.taskId, f.request)]);
+    expect(results.some(result => result.status === 'fulfilled')).toBe(true);
+    expect(f.dispatches).toHaveLength(1);
+    const repeated = await f.service.publish('reviewer', f.revision.taskId, f.request);
+    expect(repeated.candidateCommit).toBe('d'.repeat(40));
+    expect(f.dispatches).toHaveLength(1);
+    expect((await f.service.detail(f.revision.taskId)).deployments).toHaveLength(1);
+  });
+
+  it('excludes only actually applied changes while unadopted and not-needed items remain eligible', async () => {
+    const f = await setup(3, true);
+    const approved = await f.service.confirm('reviewer', f.revision.taskId, f.request);
+    const d = await f.service.deploy('reviewer', f.revision.taskId, { revision: 1, expectedApprovalVersion: approved.stateVersion, requestId: 'partial' });
+    await f.service.reconcile('reviewer', f.revision.taskId, d.id);
+    expect(await f.workbench.item('wf-1', 'item-0')).toMatchObject({ state: 'awaiting_verification' });
+    expect(await f.workbench.item('wf-1', 'item-1')).toMatchObject({ state: 'pending', activeTaskId: null });
+    expect(await f.workbench.item('wf-1', 'item-2')).toMatchObject({ state: 'pending', activeTaskId: null });
+    f.items.push({ ...f.items[2], itemId: 'new-D', groupKey: 'group-D', proposalKey: 'f'.repeat(64), proposal: { summary: 'new D' } });
+    const inbox = await f.workbench.candidates('wf-1');
+    const next = await f.workbench.create('reviewer', { workflowId: 'wf-1', itemIds: ['item-1', 'item-2', 'new-D'], inputDigest: inbox.inputDigest, requestId: 'next-round', instructions: '' });
+    expect(next.input.items.map(item => item.itemId).sort()).toEqual(['item-1', 'item-2', 'new-D']);
+  });
+
 });

@@ -37,6 +37,7 @@ class TaskInfoRecord:
     execution_config: Optional[dict[str, Any]]
     task_spec: dict[str, Any]
     status: Status
+    intake_session_id: Optional[str] = None
     # Read-side owner display fields. They are enriched from authoritative
     # Bot/staff services and are not persisted in task_info.
     owner_bot_name: Optional[str] = None

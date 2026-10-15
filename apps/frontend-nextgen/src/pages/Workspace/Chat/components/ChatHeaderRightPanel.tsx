@@ -1,11 +1,12 @@
 /**
  * ChatHeaderRightPanel —— 对话页头部右缘面板容器 + 会话详情视图（chat-header-panels）。
  *
- * dmore artboard-005 实测：面板 = 右缘 sidebar 320 宽、48px 头行（标题 + 关闭）+ 内容分组；
+ * 面板共用聊天右栏宽度，48px 头行（标题 + 关闭）+ 内容分组；
  * 会话详情 = 只读行（会话名称/会话 ID/会话创建时间;2026-10-14 口径统一:原稿"会话Key"与值 session ID 不符），字段缺失隐藏行（不占位空白）。
  * 容器复用 ResizableWorkspaceSidebar（与群域 SessionFilesSidebar/会话文件副屏同构容器模式）。
  */
 import { IconButton, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
+import { WORKSPACE_RIGHT_PANEL_LAYOUT } from '@/components/Workspace/workspacePanelLayout';
 import { ResizableWorkspaceSidebar } from '@/pages/Workspace/components/ResizableWorkspaceSidebar';
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
 import { X } from 'lucide-react';
@@ -23,10 +24,8 @@ export function ChatHeaderRightPanel({ title, onClose, children }: ChatHeaderRig
     <ResizableWorkspaceSidebar
       ariaLabel={`${title}面板`}
       side="right"
-      minWidth={320}
-      maxWidth={480}
-      defaultWidth={320}
-      storageKey="teamclaw:chat-header-right-panel-width"
+      onDismiss={onClose}
+      {...WORKSPACE_RIGHT_PANEL_LAYOUT}
       className="z-30 border-l border-border bg-card"
     >
       <div className="flex h-full min-h-0 flex-col">

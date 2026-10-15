@@ -739,16 +739,18 @@ async def test_do_analysis_true_passes_ext_info_lookup_to_analyzer():
 
 class _FakeNode:
     """A domain-shaped node stub — the probe touches only ``node_id`` /
-    ``status`` / ``run_info.extend_props`` / ``run_info.start_time`` /
-    ``run_info.output``(产出富化)."""
+    ``status`` / ``run_info.run_mode`` / ``run_info.extend_props`` /
+    ``run_info.start_time`` / ``run_info.output``(产出/模态富化)."""
 
     def __init__(self, *, node_id: str, status: Status, extend_props: dict | None = None,
                  start_time: int | None = None, output: dict | None = None,
+                 run_mode: str | None = None,
                  task_spec=None, assignee: str | None = None) -> None:
         self.node_id = node_id
         self.status = status
         self.task_spec = task_spec
         self.run_info = RuntimeInfo(
+            run_mode=run_mode,
             start_time=start_time,
             output=dict(output or {}),
             extend_props=dict(extend_props or {}),
@@ -970,12 +972,11 @@ async def test_do_analysis_fast_path_skips_probe():
 @pytest.mark.unit
 async def test_do_analysis_probe_passes_holder_bearer_token():
     """方案一(401 修复):会话历史读口有参与者级 ACL——探测经 BcsBotTokenProvider
-    解析 RUNNING 节点持有者 bot 的 session_token,以 caller_bearer 传入(BCS HTTP
-    层携带 ``Authorization: Bearer``)。持有者 id 取值序 relay_holder_id →
-    driver_bot_id → assignee。"""
+    解析 RUNNING 节点执行 Bot 的 session_token,以 caller_bearer 传入(BCS HTTP
+    层携带 ``Authorization: Bearer``)。执行 Bot 取值序 driver_bot_id → assignee。"""
     graph = _FakeGraph([
         _FakeNode(node_id="n-relay", status=Status.RUNNING,
-                  extend_props={"session_id": "sess-relay", "relay_holder_id": "bot-holder"},
+                  extend_props={"session_id": "sess-relay", "driver_bot_id": "bot-holder"},
                   start_time=500),
         _FakeNode(node_id="n-group", status=Status.RUNNING,
                   extend_props={"session_id": "sess-group", "driver_bot_id": "bot-driver"},
@@ -1006,7 +1007,7 @@ async def test_do_analysis_probe_passes_holder_bearer_token():
     await svc.get_trajectory("t1", do_analysis=True)
 
     by_sid = {c[0]: c[2] for c in bcs.calls}
-    assert by_sid["sess-relay"] == "tok-holder"   # relay_holder_id 优先
+    assert by_sid["sess-relay"] == "tok-holder"   # driver_bot_id
     assert by_sid["sess-group"] == "tok-driver"   # driver_bot_id 次之
     assert by_sid["sess-single"] == "tok-exec"    # assignee 兜底
     # 请求了全部三个持有者(顺序按卡住时长降序,不按构造序)
@@ -1020,10 +1021,10 @@ async def test_do_analysis_probe_omniauth_fallback_without_token():
     传 None(裸 HMAC 尝试,BCS 401 时由既有 WARNING 降级)——检测不抛、不阻断。"""
     graph = _FakeGraph([
         _FakeNode(node_id="n1", status=Status.RUNNING,
-                  extend_props={"session_id": "sess-1", "relay_holder_id": "bot-x"},
+                  extend_props={"session_id": "sess-1", "driver_bot_id": "bot-x"},
                   start_time=500),
         _FakeNode(node_id="n2", status=Status.RUNNING,
-                  extend_props={"session_id": "sess-2", "relay_holder_id": "bot-y"},
+                  extend_props={"session_id": "sess-2", "driver_bot_id": "bot-y"},
                   start_time=400),
     ])
     bcs = _FakeBcs(messages_by_session={
@@ -1051,7 +1052,7 @@ async def test_do_analysis_probe_omniauth_fallback_without_token():
         TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst"),
         graph=_FakeGraph([
             _FakeNode(node_id="n1", status=Status.RUNNING,
-                      extend_props={"session_id": "sess-1", "relay_holder_id": "bot-x"}),
+                      extend_props={"session_id": "sess-1", "driver_bot_id": "bot-x"}),
         ]),
         bcs=bcs2,
     )
@@ -1267,6 +1268,42 @@ async def test_get_trajectory_attaches_node_output_to_last_event():
     )
     n2_last = [e for e in result.timeline if e.node_id == "n2"][-1]
     assert n2_last.output is None, "空产出不挂(缺字段=无信号)"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_get_trajectory_attaches_actual_run_mode_to_last_event():
+    """真实模态读时富化:每个 (task_id,node_id) 的**最后一条**事件挂上该节点的
+    有效执行模态(``effective_run_mode``:``extend_props.actual_run_mode`` 优先,
+    缺失回退 ``run_info.run_mode``);更早的事件保持 None;两种模态都缺的节点
+    不挂(缺字段=无信号)。"""
+    graph = _output_graph([
+        _FakeNode(node_id="n1", status=Status.DONE, run_mode="coop_group",
+                  extend_props={"actual_run_mode": "single_bot"}),
+        _FakeNode(node_id="n2", status=Status.DONE, run_mode="bbs"),
+        _FakeNode(node_id="n3", status=Status.PENDING),  # 两种模态都缺 → 不挂
+    ])
+    timeline = [
+        _make_event(node_id="n1", action_type=TrajectoryActionType.PLAN, gmt_create=1000),
+        _make_event(node_id="n1", action_type=TrajectoryActionType.EXECUTE, gmt_create=2000),
+        _make_event(node_id="n2", action_type=TrajectoryActionType.PLAN, gmt_create=3000),
+        _make_event(node_id="n3", action_type=TrajectoryActionType.PLAN, gmt_create=4000),
+    ]
+    traj = _make_trajectory(task_id="t1", timeline=timeline)
+    svc = TaskTrajectoryService(_FakeAssembler(traj), _FakeRepo(), _FakeAnalyzer(), None,
+                                graph=graph)
+
+    result = await svc.get_trajectory("t1", do_analysis=False)
+
+    n1_events = [e for e in result.timeline if e.node_id == "n1"]
+    assert n1_events[0].actual_run_mode is None, "更早的 PLAN 事件不挂真实模态"
+    assert n1_events[-1].actual_run_mode == "single_bot", (
+        "最后一条事件挂有效模态:actual_run_mode 覆盖 run_mode=coop_group"
+    )
+    n2_last = [e for e in result.timeline if e.node_id == "n2"][-1]
+    assert n2_last.actual_run_mode == "bbs", "actual_run_mode 缺失回退 run_mode"
+    n3_last = [e for e in result.timeline if e.node_id == "n3"][-1]
+    assert n3_last.actual_run_mode is None, "两种模态都缺 → 不挂(缺字段=无信号)"
 
 
 @pytest.mark.asyncio
@@ -1643,10 +1680,10 @@ async def test_claude_code_session_key_dispatches_to_baas():
 @pytest.mark.unit
 async def test_mixed_bcs_and_engine_channels_probed_independently():
     """BCS 键 + 引擎键混合节点:各自分派正确通道;BCS 节点照旧解析持有者
-    Bearer(relay_holder_id),引擎节点走复合 bot_id。"""
+    Bearer(driver_bot_id),引擎节点走复合 bot_id。"""
     graph = _FakeGraph([
         _FakeNode(node_id="n-bcs", status=Status.RUNNING,
-                  extend_props={"session_id": "sess-group", "relay_holder_id": "bot-holder"},
+                  extend_props={"session_id": "sess-group", "driver_bot_id": "bot-holder"},
                   start_time=500),
         _FakeNode(node_id="n-eng", status=Status.RUNNING,
                   extend_props={"session_id": _ENGINE_SID, "assignee_owner_id": "35983"},

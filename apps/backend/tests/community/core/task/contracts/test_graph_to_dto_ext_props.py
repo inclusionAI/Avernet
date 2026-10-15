@@ -96,14 +96,12 @@ def test_graph_to_dto_uses_relay_effective_graph_status():
     info = _task_info("tdto-relay")
     info.execution_config["orchestration_mode"] = "relay"
     graph = svc.initialize_graph(info)
-    svc.add_task_nodes(
-        [_node("baton", "tdto-relay")],
-        parent_node_id="tdto-relay",
-        mark_parent_planning=False,
-    )
     root = next(node for node in graph.tasks if node.node_id == "tdto-relay")
-    baton = next(node for node in graph.tasks if node.node_id == "baton")
     root.status = Status.DONE
+    baton = _node("baton", "tdto-relay")
+    svc.add_task_nodes(
+        [baton], parent_node_id="tdto-relay", mark_parent_planning=False
+    )
     baton.status = Status.PENDING
     graph.extend_props["gaps"] = ["补齐研究缺口"]
     graph.status = Status.DONE  # legacy root-mirrored persisted value

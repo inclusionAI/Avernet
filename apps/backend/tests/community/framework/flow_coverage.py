@@ -54,6 +54,16 @@ _STRUCTURAL_NON_BUSINESS: frozenset[str] = frozenset(
 )
 
 
+def _has_python_source(directory: Path) -> bool:
+    """Distinguish a module tree from a bytecode-only cache remnant.
+
+    Some long-lived developer machines have empty ``__pycache__`` directories left
+    behind after a package was relocated. They are not modules in a clean checkout,
+    so counting them would make this denominator depend on ignored local state.
+    """
+    return any(source.is_file() and source.suffix == ".py" for source in directory.rglob("*"))
+
+
 def all_core_modules() -> set[str]:
     """Top-level business module package names under agentclaw/core/."""
     regular_packages = {
@@ -68,6 +78,7 @@ def all_core_modules() -> set[str]:
         if child.is_dir()
         and not child.name.startswith("_")
         and child.name not in regular_packages
+        and _has_python_source(child)
     }
     return (regular_packages | namespace_packages) - _STRUCTURAL_NON_BUSINESS
 
@@ -266,6 +277,7 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "config_compose": _EXEMPT_REASON,
     "desktop_bot": _EXEMPT_REASON,
     "task": _TASK_FRAMEWORK_EXEMPT_REASON,
+    # feedback/forum implementations are owned by core/task; task remains exempt.
     "economy": _EXEMPT_REASON,
     "events": _EXEMPT_REASON,
     "gateway_principal": _GATEWAY_PRINCIPAL_EXEMPT_REASON,

@@ -16,6 +16,8 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 const MAX_PENDING_RUNS: usize = 16;
 const MAX_ROUTES: usize = 1024;
 const ROUTE_TTL: Duration = Duration::from_secs(300);
+const MAX_OCCUPIED_RETRIES: u32 = 6;
+const MAX_OCCUPIED_BACKOFF: Duration = Duration::from_secs(8);
 
 struct PendingRun {
     handle: RunHandle,
@@ -50,6 +52,7 @@ struct BotClient {
 
 enum ConnectionFailure {
     Retry(&'static str),
+    AlreadyConnected,
     Fatal(anyhow::Error),
     Kicked,
 }
@@ -97,6 +100,7 @@ impl BotClient {
     }
 
     async fn run(mut self, stop: CancellationToken) -> anyhow::Result<()> {
+        let mut occupied_retries = 0;
         let outcome = loop {
             let connected = tokio::select! {
                 _ = stop.cancelled() => break Ok(()),
@@ -104,6 +108,7 @@ impl BotClient {
             };
             let result = match connected {
                 Ok((mut socket, identity)) => {
+                    occupied_retries = 0;
                     // Never cancel a spawned SQLite commit midway through
                     // shutdown: await it before releasing the database owner.
                     match self.state.sessions.save_identity(&self.config.url, &self.bot.provider_bot_ref, identity.clone()).await {
@@ -123,6 +128,7 @@ impl BotClient {
                 },
                 Err(error) => Err(error),
             };
+            let mut retry_delay = Duration::from_millis(self.config.reconnect_interval_ms);
             match result {
                 Ok(()) => break Ok(()),
                 Err(ConnectionFailure::Kicked) => {
@@ -130,6 +136,16 @@ impl BotClient {
                     break Ok(());
                 }
                 Err(ConnectionFailure::Fatal(error)) => break Err(error),
+                Err(ConnectionFailure::AlreadyConnected) => {
+                    if occupied_retries == MAX_OCCUPIED_RETRIES {
+                        break Err(anyhow!("BCS still reports an active WebSocket connection after bounded retries; stop the other bridge or wait for its connection to expire, then start again"));
+                    }
+                    retry_delay = retry_delay.saturating_mul(1 << occupied_retries).min(MAX_OCCUPIED_BACKOFF);
+                    occupied_retries += 1;
+                    tracing::warn!(provider_bot_ref = %self.bot.provider_bot_ref, attempt = occupied_retries,
+                        max_retries = MAX_OCCUPIED_RETRIES, delay_ms = retry_delay.as_millis() as u64,
+                        "BCS still holds the previous Bot connection; retrying bot.connect");
+                }
                 Err(ConnectionFailure::Retry(reason)) => {
                     tracing::warn!(provider_bot_ref = %self.bot.provider_bot_ref, reason, pending_runs = self.pending.len(),
                         "upstream disconnected; retaining runs for reconnect");
@@ -137,7 +153,7 @@ impl BotClient {
             }
             tokio::select! {
                 _ = stop.cancelled() => break Ok(()),
-                _ = tokio::time::sleep(Duration::from_millis(self.config.reconnect_interval_ms)) => {}
+                _ = tokio::time::sleep(retry_delay) => {}
             }
         };
         for pending in self.pending.values() {
@@ -186,7 +202,8 @@ impl BotClient {
             // V3 uplink: canonical Run Event frames and HITL interaction
             // support. A server without V3 answers with its best version and
             // the client adapts (only 2 and 3 are accepted below).
-            protocol_version:Some(3), client_kind:None,
+            protocol_version:Some(3),
+            client_kind:(self.bot.engine == "qwenwork").then(|| "native_mcp".to_owned()),
         };
         let request = BcsFrame::Request(RequestFrame::new(&id,"bot.connect",Some(
             serde_json::to_value(params).map_err(|error| ConnectionFailure::Fatal(error.into()))?)));
@@ -206,6 +223,9 @@ impl BotClient {
             }
         }).await.map_err(|_| ConnectionFailure::Retry("bot.connect response timeout"))??;
         if !response.ok {
+            if response.error.as_ref().is_some_and(|error| error.code == "already_connected") {
+                return Err(ConnectionFailure::AlreadyConnected);
+            }
             let retry = response.error.as_ref().is_some_and(|error| error.retryable || error.code == "bot_id_conflict");
             return Err(if retry { ConnectionFailure::Retry("bot.connect temporarily rejected") }
                 else { ConnectionFailure::Fatal(anyhow!("BCS rejected bot.connect; check Bot identity, token and protocol")) });
@@ -217,6 +237,10 @@ impl BotClient {
             return Err(ConnectionFailure::Fatal(anyhow!("bot.connect returned a mismatched identity, protocol or empty token")));
         }
         self.protocol_v3 = connected.protocol_version == 3;
+        if self.bot.engine == "qwenwork" && !connected.capabilities.as_ref()
+            .is_some_and(|capabilities| capabilities.tool_result_task_intent) {
+            tracing::warn!("BCS did not enable MCP task coordination; check the Bot Provider configuration and server version");
+        }
         let identity = ConnectionIdentity {bot_id:connected.bot_uuid,token:connected.token};
         Ok((socket, identity))
     }

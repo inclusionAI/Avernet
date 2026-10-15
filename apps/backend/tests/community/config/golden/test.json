@@ -90,6 +90,9 @@
       "scan_interval_hours": 1,
       "storage_dir": "./data/skills_scan"
     },
+    "task_dispatch": {
+      "backend_url": "http://localhost:8888"
+    },
     "task_queue_worker": {
       "enabled": true
     },

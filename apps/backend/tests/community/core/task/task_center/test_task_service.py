@@ -299,7 +299,7 @@ class TestHarnessWiring:
                               task_id_provider=lambda: "t1")
         _exec(facade, _task_info_request())
         assert "t1" in harness._registered
-        assert harness._on_harness_fn == facade._centralized_adapter.on_harness
+        assert harness._on_harness_fn == facade._recovery.recover
 
     def test_dashboard_registers_task_for_harness_on_this_worker(self):
         from agentclaw.community.core.task.task_harness.harness import TaskHarness

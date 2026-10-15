@@ -39,6 +39,7 @@ const session: SessionView = {
 const buildProps = (partial: Partial<GroupHeaderProps> = {}): GroupHeaderProps => ({
   selectedGroup: group,
   selectedSession: session,
+  connectionStatus: 'connected',
   onOpenSessionList: jest.fn(),
   canManageGroup: { allowed: true },
   activePanel: 'none',
@@ -71,6 +72,22 @@ it('chip 呈现群名、会话 ID 与用户/Bot 两级计数（artboard-010 形�
   expect(screen.getByText('sess-key-x1')).toBeInTheDocument();
   expect(screen.getByLabelText('2 用户')).toBeInTheDocument();
   expect(screen.getByLabelText('1 Bot')).toBeInTheDocument();
+});
+
+it('顶部连接状态随真实会话连接变化，无会话时不显示', () => {
+  const { rerender } = render(<GroupHeader {...buildProps()} />);
+  expect(screen.getByRole('status')).toHaveTextContent('已连接');
+  for (const [status, label] of [
+    ['connecting', '连接中'],
+    ['reconnecting', '重连中'],
+    ['error', '连接失败'],
+    ['disconnected', '已断开'],
+  ] as const) {
+    rerender(<GroupHeader {...buildProps({ connectionStatus: status })} />);
+    expect(screen.getByRole('status')).toHaveTextContent(label);
+  }
+  rerender(<GroupHeader {...buildProps({ selectedSession: null })} />);
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
 });
 
 it('点击会话 ID 胶囊复制按钮写入剪贴板并 toast', async () => {
@@ -134,7 +151,9 @@ it('右侧六枚图标钮按 artboard-003 顺序：收藏/分享/会话管理/�
 
 it('收藏按钮跟随 favorites 模型：收藏态填充、点击透传、无会话禁用', () => {
   const onToggle = jest.fn();
-  const { rerender } = render(<GroupHeader {...buildProps({ favorites: { favorite: true, disabled: false, onToggle } })} />);
+  const { rerender } = render(
+    <GroupHeader {...buildProps({ favorites: { favorite: true, disabled: false, onToggle } })} />,
+  );
 
   const star = screen.getByRole('button', { name: '取消收藏当前会话' });
   expect(star).toHaveAttribute('aria-pressed', 'true');
@@ -142,7 +161,11 @@ it('收藏按钮跟随 favorites 模型：收藏态填充、点击透传、无�
   fireEvent.click(star);
   expect(onToggle).toHaveBeenCalledTimes(1);
 
-  rerender(<GroupHeader {...buildProps({ selectedSession: null, favorites: { favorite: false, disabled: true, onToggle } })} />);
+  rerender(
+    <GroupHeader
+      {...buildProps({ selectedSession: null, favorites: { favorite: false, disabled: true, onToggle } })}
+    />,
+  );
   expect(screen.getByRole('button', { name: '收藏当前会话' })).toBeDisabled();
 });
 
@@ -157,7 +180,7 @@ it('图标钮面板开合状态以 aria-pressed 表达', () => {
   expect(screen.getByRole('button', { name: '副屏' })).toHaveAttribute('aria-pressed', 'true');
 });
 
-it('连接状态文字不再出现在 header（移交消息区 ConnectionBanner）', () => {
+it('连接状态使用顶栏独立状态区，不进入身份胶囊', () => {
   render(<GroupHeader {...buildProps()} />);
-  expect(screen.queryByText(/已断开|已连接|连接中|重连中/)).not.toBeInTheDocument();
+  expect(screen.getByRole('group', { name: '协作群 主站群' })).not.toContainElement(screen.getByRole('status'));
 });

@@ -127,8 +127,8 @@ export const SessionItem = React.memo(function SessionItem({
           onClick={() => onSelectSession(session.sessionId)}
           className={cn(
             'relative flex h-8 min-w-0 flex-1 items-center justify-start gap-2 rounded-md pl-2 pr-2 text-left hover:bg-transparent',
-            // 二级行缩进与收藏行右缘差异（对话行几何）：均 ml-8；收藏行右缘到边。
-            favorite ? 'ml-8 mr-2' : 'ml-8 mr-4',
+            // 标题左缘对齐一级名称：16px 外距 + 36px 头像槽 + 8px 间隔 = 52px margin + 8px padding。
+            favorite ? 'ml-[52px] mr-2' : 'ml-[52px] mr-4',
             // 长标题让位（去日期简化为两槽位仍照对话规格）：
             // 静默 pr-2（右界 24）；星标常驻（收藏/选中）右界 60；hover/聚焦/触屏/菜单开 右界 96。
             favorite && 'pr-[52px]',
@@ -138,12 +138,7 @@ export const SessionItem = React.memo(function SessionItem({
               'group-hover/row:pr-[88px] group-focus-within/row:pr-[88px] [@media(hover:none)]:pr-[88px] group-has-[[data-state=open]]/row:pr-[88px]',
           )}
         >
-          <span
-            className={cn(
-              'min-w-0 flex-1 truncate text-[13px] leading-[18px] tracking-[-0.08px]',
-              selected ? 'font-medium text-foreground' : 'font-normal text-content-strong',
-            )}
-          >
+          <span className="min-w-0 flex-1 truncate text-[13px] font-normal leading-[18px] text-content-strong">
             {session.title}
           </span>
         </Button>
@@ -152,13 +147,19 @@ export const SessionItem = React.memo(function SessionItem({
           <Popover open={menuOpen} onOpenChange={setMenuOpen}>
             <PopoverTrigger asChild>
               {/* span 承载分享气泡锚点 ref（IconButton 本体让给菜单 trigger 的 ref 合并）。 */}
-              <span ref={shareAnchorRef} className="flex shrink-0">
-              <IconButton
-                label="会话更多操作"
-                size="sm"
-                icon={<MoreHorizontal className="h-4 w-4" />}
-                className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-              />
+              <span
+                ref={shareAnchorRef}
+                className={cn(
+                  'flex shrink-0 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100',
+                  menuOpen && 'opacity-100',
+                )}
+              >
+                <IconButton
+                  label="会话更多操作"
+                  size="sm"
+                  icon={<MoreHorizontal className="h-3.5 w-3.5" />}
+                  className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                />
               </span>
             </PopoverTrigger>
             <PopoverContent align="end" className="w-44 p-1">
@@ -219,8 +220,8 @@ export const SessionItem = React.memo(function SessionItem({
           <IconButton
             label={favorite ? '取消收藏' : '收藏会话'}
             size="sm"
-            icon={<Star className={cn('h-4 w-4', favorite ? 'fill-star text-star' : 'text-muted-foreground')} />}
-            className="rounded-md"
+            icon={<Star className={cn('h-3.5 w-3.5', favorite ? 'fill-star text-star' : 'text-muted-foreground')} />}
+            className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
             onClick={(e) => {
               e.stopPropagation();
               onToggleFavorite(session.sessionId);

@@ -12,6 +12,7 @@ function render(ui: Parameters<typeof renderView>[0]) {
 }
 const repairApi = vi.hoisted(() => ({
   candidates: vi.fn(),
+  request: vi.fn(),
   item: vi.fn(),
   create: vi.fn(),
   disposition: vi.fn(),

@@ -43,6 +43,6 @@ def test_runner_falls_back_to_stub_without_backend():
     from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
     g = TaskGraphService()
     r = TaskRunner(g)  # 无 execution_backend
-    res = _run(r.start_run([_node()]))
-    assert res == [True]  # stub fallback
+    res = _run(r.start_run(_node()))
+    assert res is True  # stub fallback
     assert r._run_log  # 记了投递日志

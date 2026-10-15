@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 
 import httpx
 
@@ -265,6 +266,29 @@ def test_form_coop_group_adds_binding_targets_to_participants():
     }
     assert req.participant_bindings["editor"]["bot_ids"] == ["default:146836:double-owner"]
     assert req.participant_bindings["writer"]["bot_ids"] == ["default:153364:double-owner"]
+
+
+def test_form_coop_group_relay_uses_stable_node_scoped_idempotency_key():
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["mgr", "worker"],
+        collab_mode="manager_worker",
+        members_info=[{"bot_id": "mgr", "role": "manager"}, {"bot_id": "worker", "role": "worker"}],
+        extend_props={
+            "relay_execution": True,
+            "loop_task_id": "task-1::node-group",
+            "task_id": "task-1",
+            "node_id": "node-group",
+            "manager_bot_id": "mgr",
+        },
+    )))
+
+    expected = str(uuid.uuid5(
+        uuid.NAMESPACE_URL, "avernet-relay-group:task-1::node-group"
+    ))
+    assert bcs.created_req.idempotency_key == expected
 
 
 def test_form_coop_group_manager_worker_attaches_event_subscriptions():

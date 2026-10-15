@@ -32,7 +32,19 @@ function taskRecord(mode?: 'centralized' | 'relay') {
   return {
     task_id: 'task-1',
     task_info: {
-      execution_config: mode === 'relay' ? { orchestration_mode: 'relay', root_node_id: 'root-1' } : {},
+      execution_config:
+        mode === 'relay'
+          ? {
+              orchestration_mode: 'relay',
+              root_node_id: 'root-1',
+              root_execution_instruction: [
+                '[task-execute]',
+                'task_id=task-1; node_id=root-1',
+                'relay_token=x',
+                'backend_url=https://backend.example',
+              ].join('\n'),
+            }
+          : {},
     },
     create_time: '2026-09-17T00:00:00Z',
     finish_time: null,
@@ -84,7 +96,7 @@ describe('useTaskExecution relay bootstrap', () => {
     });
 
     expect(submitTaskExecutionMessage).toHaveBeenCalledWith(
-      expect.stringContaining('task_id=task-1; node_id=root-1; holder_id=bot-main'),
+      expect.stringContaining('backend_url=https://backend.example'),
       'bot-main',
     );
     expect(submitPanelMessage).not.toHaveBeenCalled();

@@ -36,7 +36,8 @@ export function createRepairReleaseService(input: {
     const approvals = await repo.list<RepairApproval>(taskId, 'approval');
     const selected = approvals.filter(a => a.revision === task.latestSuccessful?.revision)
       .sort((a, b) => b.stateVersion - a.stateVersion)[0];
-    return { approval: selected ?? null, deployments: await repo.list<RepairDeployment>(taskId, 'deployment') };
+    return { approval: selected ?? null, deployments: await repo.list<RepairDeployment>(taskId, 'deployment'),
+      repositoryWebUrl: input.publisher?.repositoryWebUrl?.() };
   }
   async function lock(tx: IDatabase, taskId: string) {
     const batches = new RepairBatchRepository(tx);
@@ -47,7 +48,14 @@ export function createRepairReleaseService(input: {
   }
   async function authorized(actor: string, workflowId: string, targetId: string) {
     const target = (await publisher().targets(workflowId, actor)).find(t => t.id === targetId);
-    if (!target) conflict('没有此部署目标的发布权限，或该 Bot 当前不可用', 'DEPLOY_TARGET_DENIED');
+    if (!target) conflict('没有此工作流发布范围的有效权限', 'DEPLOY_TARGET_DENIED');
+    return target;
+  }
+  async function recoveryAuthorized(actor: string, deployment: RepairDeployment) {
+    if (deployment.target.scope === 'workflow') return authorized(actor, deployment.workflowId, deployment.target.id);
+    const targets = await publisher().targets(deployment.workflowId, actor);
+    const target = targets.find(target => target.scope === 'workflow' || target.id === deployment.target.id);
+    if (!target) conflict('没有核对此工作流历史发布请求的权限', 'DEPLOY_TARGET_DENIED');
     return target;
   }
   async function settle(deployment: RepairDeployment, status: PublicationStatus): Promise<RepairDeployment> {
@@ -97,6 +105,13 @@ export function createRepairReleaseService(input: {
     configured: !!input.publisher,
     detail,
     async targets(actor, taskId) { const task = await workbench.task(taskId); return publisher().targets(task.workflowId, actor); },
+    async publish(actor, taskId, request) {
+      // One user decision; approval remains an internal immutable audit record.
+      const approval = await this.confirm(actor, taskId, request);
+      if (approval.target.scope !== 'workflow') conflict('请重新审阅工作流发布作用域，历史 Bot 授权不可迁移');
+      return this.deploy(actor, taskId, { revision: request.revision, expectedApprovalVersion: approval.stateVersion,
+        requestId: digestRepairJson(['publish', request.requestId]) });
+    },
     async confirm(actor, taskId, request: RepairConfirmRequest) {
       identity(actor, taskId, request.requestId, request.revision);
       const prior = await repo.retry<RepairApproval>(taskId, 'approval', { actor, ...request });
@@ -178,7 +193,8 @@ export function createRepairReleaseService(input: {
         const freshApproval = (await records.list<RepairApproval>(taskId, 'approval')).sort((a, b) => b.stateVersion - a.stateVersion)[0];
         const selected = revisions.find(r => r.revision === request.revision);
         if (!freshApproval || freshApproval.id !== approval.id || !selected || selected.phase !== 'review'
-          || selected.draft?.candidateCommit !== approval.candidateCommit || revisions[0].phase === 'drafting'
+          || selected.draft?.candidateCommit !== approval.candidateCommit || selected.draft?.packDigest !== approval.packDigest
+          || digestRepairJson(selected.draft) !== approval.candidateDigest || digestRepairJson(selected.checks) !== approval.checksDigest || revisions[0].phase === 'drafting'
           || revisions.find(r => r.draft !== null && r.phase !== 'no_change')?.revision !== request.revision) conflict('部署前候选或审核确认已变化');
         for (const item of selected.input.items) {
           if (!Array.isArray(selected.draft?.itemResults) || !selected.draft.itemResults.some(outcome => outcome.itemId === item.itemId && outcome.status === 'changed')) continue;
@@ -214,7 +230,7 @@ export function createRepairReleaseService(input: {
       const deployment = (await repo.list<RepairDeployment>(taskId, 'deployment')).find(d => d.id === deploymentId);
       if (!deployment) conflict('部署记录不存在');
       if (!actor?.trim()) throw new RepairBatchError('INVALID_INPUT', '缺少核对身份');
-      await authorized(actor, deployment.workflowId, deployment.target.id);
+      await recoveryAuthorized(actor, deployment);
       if (deployment.status === 'succeeded') return deployment;
       return settle(deployment, await publisher().reconcile(deployment));
     },
@@ -224,7 +240,7 @@ export function createRepairReleaseService(input: {
       if (!p.resume) throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '宿主未接入同一部署的恢复能力');
       const deployment = (await repo.list<RepairDeployment>(taskId, 'deployment')).find(row => row.id === deploymentId);
       if (!deployment || !['uncertain', 'running', 'dispatching'].includes(deployment.status)) conflict('此部署不需要恢复，请刷新核对');
-      await authorized(actor, deployment.workflowId, deployment.target.id);
+      await recoveryAuthorized(actor, deployment);
       const payload = { actor, deploymentId, requestId };
       const claimed = await db.transaction(async tx => {
         const { records } = await lock(tx, taskId);
@@ -243,7 +259,7 @@ export function createRepairReleaseService(input: {
       if (!p.stop) throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '宿主未接入安全停止未激活发布的能力');
       const d = (await repo.list<RepairDeployment>(taskId, 'deployment')).find(row => row.id === deploymentId);
       if (!d || d.status === 'succeeded') conflict('此候选已部署或记录不存在，不能停止或隐式回滚');
-      await authorized(actor, d.workflowId, d.target.id);
+      await recoveryAuthorized(actor, d);
       if (d.status === 'failed') return d;
       const payload = { actor, deploymentId, requestId };
       const first = await db.transaction(async tx => {

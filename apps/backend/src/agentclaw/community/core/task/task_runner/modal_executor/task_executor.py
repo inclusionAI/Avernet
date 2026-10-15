@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from typing import Any
 
 from agentclaw.community.core.task.domain.identity import compose_bot_identity
@@ -16,7 +17,7 @@ from agentclaw.community.core.task.domain.models import (
     task_spec_instruction,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
-from agentclaw.community.core.task.domain.errors import BotIdentityResolutionError
+from agentclaw.community.core.task.domain.errors import BotIdentityResolutionError, TaskStateError
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.core.task.task_context.task_context_service import build_task_runner_execution_event_kwargs
 
@@ -45,6 +46,9 @@ from agentclaw.community.core.task.task_runner.modal_executor.task_executor_bbs 
 from agentclaw.community.core.task.task_runner.modal_executor.task_executor_relay import (
     TaskExecutorRelayMixin,
 )
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor_owner import (
+    TaskExecutorOwnerMixin,
+)
 
 logger = logging.getLogger(__name__)
 _DISPATCH_CONCURRENCY = 8
@@ -70,7 +74,7 @@ def _human_observer_participant(owner_user_id: str) -> dict[str, Any]:
 _BCN_EVENT_CALLBACK_PATH = "/api/v1/collaboration/tasks/callback/report"
 
 
-class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
+class TaskExecutor(TaskExecutorOwnerMixin, TaskExecutorRelayMixin, TaskExecutorBbsMixin):
     def __init__(
         self,
         *,
@@ -228,29 +232,6 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
         config = (getattr(snapshot, "extend_props", None) or {}).get("execution_config") or {}
         return isinstance(config, dict) and config.get("orchestration_mode") == "relay"
 
-    def _singlebot_2_group_enabled(self, task_id: str) -> bool:
-        """singlebot_2_group 旁路开关(默认 True):single_bot 改建"二人 chat 群"(driver bot + 人类观察者,不发言)。
-        从 ``graph.extend_props["execution_config"]`` 读;graph 不可用/缺键 → True(默认走旁路);显式 False → 老链路。"""
-        if self._graph is None:
-            logger.info("[task][task-executor] singlebot_2_group 开关:graph 未接 → 默认 True(走旁路) task=%s", task_id)
-            return True
-        try:
-            snapshot = self._graph.query_task_dashboard(task_id)
-        except Exception:  # noqa: BLE001 graph 不可用 → 默认走旁路
-            logger.warning("[task][task-executor] singlebot_2_group 开关:graph 查询失败 → 默认 True task=%s", task_id)
-            return True
-        cfg = (getattr(snapshot, "extend_props", None) or {}).get("execution_config") or {}
-        if not isinstance(cfg, dict):
-            logger.info("[task][task-executor] singlebot_2_group 开关:execution_config 非 dict → 默认 True task=%s", task_id)
-            return True
-        val = cfg.get("singlebot_2_group", True)
-        enabled = val if isinstance(val, bool) else str(val).lower() not in ("false", "0", "no", "none", "")
-        logger.info(
-            "[task][task-executor] singlebot_2_group 开关:execution_config.singlebot_2_group=%s → enabled=%s task=%s",
-            val, enabled, task_id,
-        )
-        return enabled
-
     async def _dispatch_single_bot(
         self, node: TaskNode, sem: asyncio.Semaphore
     ) -> bool:
@@ -264,6 +245,9 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
         openapi_bot_id = compose_bot_identity(assignee, assignee_owner_id)
         loop_task_id = f"{node.task_id}::{node.node_id}"
         skill_report = self._node_skill_report_enabled(node)
+        fenced_relay = bool(node.run_info.extend_props.get("relay_token"))
+        if fenced_relay and not self._api_base_url:
+            raise TaskStateError("Relay Backend URL is not configured")
         session_id: str | None = None
         async with sem:
             # P2 旁路:singlebot_2_group(默认 true)且提交任务的 Human owner 在场且
@@ -312,11 +296,12 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
                 "backend": self._api_base_url,
             })
             message = self._formatter.format_execute(ctx, node)
-            sent = await self._bot.send_message(
-                bot_id=openapi_bot_id,
-                message=message,
-                metadata={"biz_task_id": node.task_id},
-            )
+            send_kwargs = {
+                "bot_id": openapi_bot_id,
+                "message": message,
+                "metadata": {"biz_task_id": node.task_id},
+            }
+            sent = await self._bot.send_message(**send_kwargs)
             run_id = sent.run_id
             session_id = sent.session_id
             if skill_report:
@@ -384,6 +369,7 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
                     for item in node.task_spec.goal.acceptances
                 ],
                 "upstream_outputs": ctx.get("sibling_outputs") or {},
+                "relay_token": node.run_info.extend_props.get("relay_token"),
             },
         )
         task_owner_id = self._resolve_owner_user_id(gf)
@@ -486,6 +472,10 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
         ctx["skill_report_enabled"] = self._node_skill_report_enabled(node)
         ctx["task_id"] = node.task_id
         ctx["node_id"] = node.node_id
+        if node.run_info.extend_props.get("relay_token"):
+            if not self._api_base_url:
+                raise TaskStateError("Relay Backend URL is not configured")
+            ctx["backend"] = self._api_base_url
         prompt = self._formatter.format_execute(ctx, node)
         definition_ref = (meta or {}).get("definition_ref")
         run_id = await self._bcs.start_state_machine_run(
@@ -552,48 +542,6 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
                 task_id=node.task_id, node_id=node.node_id, extend_props_patch=ep
             )
         )
-
-    def _resolve_graph_owner_user_id(self, task_id: str) -> str | None:
-        """从任务图谱解析提交任务的 Human 用户,而不是执行 Bot 的 owner。"""
-        if not task_id or self._graph is None:
-            return None
-        try:
-            snapshot = self._graph.query_task_dashboard(task_id)
-        except Exception:  # noqa: BLE001 graph 不可用/查询失败 → 不阻断建群
-            logger.warning("[task][task_executor] resolve graph owner_user_id 查询失败 task=%s", task_id)
-            return None
-        owner = (getattr(snapshot, "extend_props", None) or {}).get("owner_user_id")
-        logger.info(
-            "[task][task_executor] resolve_graph_owner_user_id task=%s owner=%s",
-            task_id,
-            owner,
-        )
-        return str(owner) if owner else None
-
-    def _resolve_owner_user_id(self, gf: GroupFormation) -> str | None:
-        """解析提交任务的 Human ``owner_user_id``。
-
-        优先使用 GroupFormation 显式透传的 Human owner,否则按
-        ``loop_task_id``/``task_id`` 反查任务图谱。执行 Bot 的
-        ``assignee_owner_id`` 只用于 Bot 身份组装,不能作为 Human observer 身份。
-        """
-        explicit = gf.extend_props.get("owner_user_id")
-        if explicit:
-            logger.info(
-                "[task][task_executor] resolve_owner_user_id 命中 gf.extend_props[owner_user_id] owner=%s",
-                explicit,
-            )
-            return str(explicit)
-        loop_task_id = gf.extend_props.get("loop_task_id") or ""
-        task_id = (loop_task_id.split("::", 1)[0] if loop_task_id else "") or (
-            gf.extend_props.get("task_id") or ""
-        )
-        owner = self._resolve_graph_owner_user_id(task_id)
-        if owner is None:
-            logger.info(
-                "[task][task_executor] resolve_owner_user_id 无来源(owner_user_id/loop_task_id/task_id 均无或 graph 无 owner)→ 不拉人类观察者"
-            )
-        return owner
 
     async def form_coop_group(self, gf: GroupFormation) -> str:
         bot_ids = list(dict.fromkeys(gf.bot_ids))
@@ -876,6 +824,7 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
                     skill_report_enabled=_skill_report,
                     relay_execution=bool(gf.extend_props.get("relay_execution")),
                     relay_blackboard=gf.extend_props.get("relay_blackboard"),
+                    relay_token=gf.extend_props.get("relay_token"),
                 )
             elif str(_task_instruction).lstrip().startswith("# 接自"):
                 # 接力协作群(static_plan):真正的多 bot 协作群 task_instruction 由 engine 从 TaskSpec 业务事实派生,未走
@@ -972,6 +921,10 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
             else:
                 logger.info("[task][task_executor] form_coop_group 无 owner_user_id → 不拉人类观察者 mode=%s", mode)
 
+        if gf.extend_props.get("relay_execution") and _loop_task_id:
+            req_kwargs["idempotency_key"] = str(uuid.uuid5(
+                uuid.NAMESPACE_URL, f"avernet-relay-group:{_loop_task_id}",
+            ))
         req = BcsCreateGroupRequest(**req_kwargs)
         logger.info(
             "[task][task_executor] form_coop_group create_group request collab=%s driver_bot=%s participants=%s group_strategy=%s has_definition=%s has_bindings=%s",

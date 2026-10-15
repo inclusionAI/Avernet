@@ -3,14 +3,15 @@
  *
  * 复用 chat 页的 SessionHistorySearchPanel 作面板本体（组件无 chat 会话耦合，仅
  * search 模型 + onLocate 两个 prop）；容器与 ChatHeaderRightPanel 同构
- * （ResizableWorkspaceSidebar 320-480px 可拖宽，默认 320，48px 头行：标题 + 关闭）。
- * 宽度持久化 key 独立于 chat 侧，避免两页共抢同一 localStorage 槽。
+ * （ResizableWorkspaceSidebar，48px 头行：标题 + 关闭）。
+ * 默认宽度、拖宽范围和宽度记忆与其余聊天右侧面板共用。
  */
 import { IconButton } from '@/components/ui';
-import type { UseSessionHistorySearchModel } from '@/pages/Workspace/Chat/hooks/useChatHeaderPanels';
+import { WORKSPACE_RIGHT_PANEL_LAYOUT } from '@/components/Workspace/workspacePanelLayout';
 import { SessionHistorySearchPanel } from '@/pages/Workspace/Chat/components/SessionHistorySearchPanel';
-import { ResizableWorkspaceSidebar } from '../ResizableWorkspaceSidebar';
+import type { UseSessionHistorySearchModel } from '@/pages/Workspace/Chat/hooks/useChatHeaderPanels';
 import { X } from 'lucide-react';
+import { ResizableWorkspaceSidebar } from '../ResizableWorkspaceSidebar';
 
 export interface GroupHistorySidebarProps {
   search: UseSessionHistorySearchModel;
@@ -24,10 +25,8 @@ export function GroupHistorySidebar({ search, onLocate, onClose }: GroupHistoryS
     <ResizableWorkspaceSidebar
       ariaLabel="历史消息面板"
       side="right"
-      minWidth={320}
-      maxWidth={480}
-      defaultWidth={320}
-      storageKey="teamclaw:group-history-panel-width"
+      onDismiss={onClose}
+      {...WORKSPACE_RIGHT_PANEL_LAYOUT}
       className="z-30 border-l border-border bg-card"
     >
       <div className="flex h-full min-h-0 flex-col">

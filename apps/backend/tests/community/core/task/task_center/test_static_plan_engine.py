@@ -52,7 +52,12 @@ class _Runner:
         self.started_nodes = []
         self.groups = []
 
-    async def start_run(self, nodes):
+    async def start_run(self, node):
+        self.started.append([node.node_id])
+        self.started_nodes.append([node])
+        return True
+
+    async def start_batch(self, nodes):
         self.started.append([n.node_id for n in nodes])
         self.started_nodes.append(list(nodes))
         return [True] * len(nodes)

@@ -16,6 +16,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from agentclaw.community.di.task_dispatch_config import (
+    TaskDispatchConfig as TaskDispatchConfig,
+)
+
 from agentclaw.community.core.bot_config_manifest.delivery_mode import (
     TeclawDeliveryMode,
 )
@@ -834,18 +838,9 @@ class TaskQueueConfig:
     app: str = DEFAULT_APP
 
 
-@dataclass(frozen=True)
-class TaskDispatchConfig:
-    """Task dispatch policy switches (``task_dispatch`` user_config block).
-
-    The deterministic candidate-count rule is the safe default. Set
-    ``task_search_skill_enabled: true`` only when the owner Bot task-search
-    round-trip should decide the dispatch shape. ``skill_report_enabled``
-    selects the unified task result Push/Pull protocol and defaults to true.
-    """
-
-    task_search_skill_enabled: bool = False
-    skill_report_enabled: bool = True
+# Note: TrajectoryAnalysisConfig lives in ``di/task_trajectory_config.py`` (moved
+# out to keep this monolith under the 1000-line architecture cap); its DI provider
+# is ``di/modules/task_trajectory_config_module.py::TaskTrajectoryConfigModule``.
 
 
 # Note: TrajectoryAnalysisConfig lives in ``di/task_trajectory_config.py`` (moved

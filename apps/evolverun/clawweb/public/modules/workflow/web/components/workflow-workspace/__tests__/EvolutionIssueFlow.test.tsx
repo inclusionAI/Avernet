@@ -133,7 +133,7 @@ describe('issue and optimization flow', () => {
 
     const issue = screen.getByText('fetch-data', { selector: 'span' }).closest('article')
     expect(issue).not.toBeNull()
-    expect(within(issue!).getByText('问题累计涉及 2 个运行')).toBeInTheDocument()
+    expect(within(issue!).getByText('影响、频率与覆盖率待评估')).toBeInTheDocument()
 
     await userEvent.click(within(issue!).getByRole('button', { name: '问题详情' }))
     const drawer = screen.getByRole('dialog', { name: '问题详情' })
@@ -240,8 +240,8 @@ describe('issue and optimization flow', () => {
     expect(within(taskDialog).getByText(/尚未应用到工作流或部署/)).toBeInTheDocument()
     await userEvent.click(within(taskDialog).getByRole('button', { name: /返回问题与优化/ }))
 
-    expect(screen.getByRole('button', { name: '生成修复草稿（0）' })).toBeDisabled()
-    expect(screen.getByText('已有修复任务，请继续审阅；生成失败可在任务内重试，无需取消。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '生成优化草稿（0）' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '继续现有任务' })).toBeInTheDocument()
   })
 
 
@@ -253,9 +253,9 @@ describe('issue and optimization flow', () => {
     await openIssueRepairs(false)
     const checkbox = await screen.findByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' })
     expect(checkbox).not.toBeChecked()
-    expect(screen.getByRole('button', { name: '生成修复草稿（0）' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '生成优化草稿（0）' })).toBeDisabled()
     await userEvent.click(checkbox)
-    expect(screen.getByRole('button', { name: '生成修复草稿（1）' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '生成优化草稿（1）' })).toBeEnabled()
   })
 
   it.each(['loading', 'error'])('keeps repair controls usable when issue summaries are %s', async state => {
@@ -266,7 +266,7 @@ describe('issue and optimization flow', () => {
     await waitFor(() => expect(repairApi.candidates).toHaveBeenCalled())
     await openIssueRepairs(false)
     expect(await screen.findByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' })).toBeVisible()
-    expect(screen.getByRole('button', { name: '生成修复草稿（0）' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '生成优化草稿（0）' })).toBeDisabled()
     expect(screen.queryByText(/当前工作流暂无已记录异常/)).not.toBeInTheDocument()
   })
 
@@ -360,11 +360,11 @@ describe('issue and optimization flow', () => {
 
     await openIssueRepairs(false)
     await userEvent.click(await screen.findByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' }))
-    expect(screen.getByRole('button', { name: '生成修复草稿（1）' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '生成优化草稿（1）' })).toBeEnabled()
     await closeIssue()
     await userEvent.click(screen.getByRole('checkbox', { name: '包含历史未复现' }))
 
-    expect(screen.getByRole('button', { name: '生成修复草稿（0）' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '生成优化草稿（0）' })).toBeDisabled()
     expect(screen.queryByRole('region', { name: '处理任务' })).not.toBeInTheDocument()
   })
 
@@ -390,7 +390,7 @@ describe('issue and optimization flow', () => {
 
     view.rerender(<MemoryRouter><EvolutionTab workflowId="wf-2" section="diagnosis" /></MemoryRouter>)
     expect(screen.queryByText('旧工作流修复项')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '生成修复草稿（0）' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '生成优化草稿（0）' })).toBeDisabled()
   })
 
   it.each([
@@ -472,7 +472,7 @@ describe('issue and optimization flow', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('8c8ed247-2578-4439-8857-e6a6a83e1211')
     expect(screen.queryByText('223')).not.toBeInTheDocument()
 
-    expect(screen.getByRole('button', { name: '生成修复草稿（0）' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '生成优化草稿（0）' })).toBeDisabled()
     expect(screen.getAllByRole('button', { name: '问题详情' }).length).toBeGreaterThan(0)
   })
 
@@ -555,7 +555,7 @@ describe('issue and optimization flow', () => {
     await userEvent.click(screen.getByRole('button', { name: '下一页建议' }))
     expect(await screen.findByText('建议来源已更新，原选择已清空，请重新确认范围。')).toBeInTheDocument()
     expect(await screen.findByRole('checkbox', { name: '选择 新来源建议' })).not.toBeChecked()
-    expect(screen.getByRole('button', { name: '生成修复草稿（0）' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '生成优化草稿（0）' })).toBeDisabled()
   })
 
 

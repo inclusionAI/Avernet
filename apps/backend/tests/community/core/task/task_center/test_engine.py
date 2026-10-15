@@ -117,14 +117,19 @@ class StubRunner:
         self.bbs_calls: list = []   # engine 升 BBS 可恢复态时经 start_run 派发的 task_id
         self._groups = []
 
-    async def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
-        self.run_calls.append(list(toDoTaskList))
+    async def start_run(self, node: TaskNode) -> bool:
+        self.run_calls.append([node])
         self.bbs_calls.extend(
-            node.task_id
-            for node in toDoTaskList
-            if node.run_info.run_mode == "bbs"
+            [node.task_id] if node.run_info.run_mode == "bbs" else []
         )
-        return [True] * len(toDoTaskList)
+        return True
+
+    async def start_batch(self, nodes: list[TaskNode]) -> list[bool]:
+        self.run_calls.append(list(nodes))
+        self.bbs_calls.extend(
+            node.task_id for node in nodes if node.run_info.run_mode == "bbs"
+        )
+        return [True] * len(nodes)
 
     async def form_coop_group(self, gf):
         self._groups.append(gf)
@@ -969,8 +974,8 @@ class TestOnPassBbsRecoverableGuard:
     def test_start_run_exception_clears_assignment_and_keeps_node_pending(self, svc, graph):
         """执行后端异常不能中断整轮；节点应清理在途执行者并留待 harness 重派。"""
         class _RaisingRunner(StubRunner):
-            async def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
-                self.run_calls.append(list(toDoTaskList))
+            async def start_batch(self, nodes: list[TaskNode]) -> list[bool]:
+                self.run_calls.append(list(nodes))
                 raise RuntimeError("transport unavailable")
 
         planner = StubPlanner(lambda _graph: [_child("c1")])

@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from fastapi import FastAPI
 from fastapi_injector import attach_injector
@@ -21,6 +23,9 @@ class _StubService:
 
     def __init__(self) -> None:
         self.last: dict | None = None
+
+    def get_task_dashboard(self, task_id):
+        return SimpleNamespace(is_relay=False)
 
     async def update_task_node_info(
         self,

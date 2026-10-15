@@ -80,16 +80,21 @@ export function createEvolveKnowledgeRouter(
       if (paged && (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 200 || signature)) {
         res.status(400).json({ error: 'invalid_issue_pagination' }); return;
       }
+      const sort = textOrNull(req.query.sort) ?? 'priority';
+      const severity = textOrNull(req.query.severity);
+      if (!['priority', 'frequency', 'recent'].includes(sort) || severity && !['critical', 'high', 'medium', 'low', 'unknown'].includes(severity)) {
+        res.status(400).json({ error: 'invalid_issue_sort_or_severity' }); return;
+      }
       const repository = new IssueAggregationRepository(_db);
       const result = paged ? await repository.listPage(workflowId, { page, pageSize,
-        nodeId: textOrNull(req.query.nodeId) ?? undefined, failureMode: textOrNull(req.query.failureMode) ?? undefined })
+        sort: sort as 'priority' | 'frequency' | 'recent', severity: severity ?? undefined, nodeId: textOrNull(req.query.nodeId) ?? undefined, failureMode: textOrNull(req.query.failureMode) ?? undefined })
         : { groups: await repository.list(workflowId, ISSUE_AGGREGATION_INPUT_V2, signature ?? undefined) };
       const groups = result.groups;
       // Opt-in presentation keeps full-source consumers unchanged.
       res.json({ ...result, groups: req.query.view === 'summary' ? groups.map(group => ({ ...group,
         presentation: 'summary',
-        sources: group.sources.map(({ proposal: _proposal, reasoning: _reasoning, evidenceEventIds: _evidence, ...source }) => ({
-          ...source, reasoning: '', evidenceEventIds: [],
+        sources: group.sources.map(({ proposal: _proposal, reasoning, evidenceEventIds: _evidence, ...source }) => ({
+          ...source, reasoning: reasoning.slice(0, 240), evidenceEventIds: [],
         })), summarySources: [],
         summary: group.summary ? { summary: group.summary.summary.slice(0, 240), causes: [], unknowns: [] } : null,
       })) : groups });

@@ -1174,6 +1174,7 @@ dependencies = [
  "bcs-db-local",
  "bcs-domain",
  "bcs-edge-permission-store",
+ "bcs-friend",
  "bcs-service-api",
  "bcs-test-support",
  "bcs-user-directory-api",

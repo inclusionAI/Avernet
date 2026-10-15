@@ -81,7 +81,7 @@ export default function IssueDetailDrawer({ cluster, suggestion, task, previousT
         <SuggestionActions suggestion={suggestion} canEdit={canEdit} legacyApplyEnabled={legacyApplyEnabled} onAction={onAction} onApply={onApply} />
       </footer>}>
         {tab === 'causes' && (groupDetail.loading ? <p role="status" className="text-sm text-slate-600">正在加载问题原因…</p>
-          : groupDetail.error ? <div role="alert" className="text-sm text-red-700">问题原因加载失败<button className="ml-2 underline" onClick={groupDetail.retry}>重试原因</button></div>
+          : groupDetail.error ? <div role="alert" className="text-sm text-red-700">问题原因加载失败，以下保留最近可用单次诊断：<p className="mt-2 whitespace-pre-wrap">{summary || '暂无诊断原因，请查看证据与历史'}</p><button className="ml-2 underline" onClick={groupDetail.retry}>重试原因</button></div>
           : groupDetail.group ? <IssueSummary group={groupDetail.group} /> : <section>
           <p className="text-xs font-semibold text-slate-900">最新诊断结论</p>
           <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{summary}</p>

@@ -81,7 +81,8 @@ impl EngineFactory for QwenWorkFactory {
         if !bin.as_os_str().is_empty() {
             return Err("qwenwork attaches to a running app; remove engine_bin".into());
         }
-        let options = Options::parse(options)?;
+        let options = setup::desktop_options(options).map_err(|_| "Cannot load shared QwenWork desktop configuration".to_string())?;
+        let options = Options::parse(&options)?;
         session::validate(&options.database_path)?;
         let listener = std::net::TcpListener::bind(options.listen)
             .map_err(|e| format!("qwenwork listener: {e}"))?;

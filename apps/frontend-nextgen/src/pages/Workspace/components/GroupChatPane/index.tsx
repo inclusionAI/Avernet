@@ -12,13 +12,13 @@ import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import { Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { GroupHeader } from '../GroupHeader';
+import { ComposerStatusBar } from './ComposerStatusBar';
 import { FuseSlot } from './FuseSlot';
 import { GroupChatCollabPanel } from './GroupChatCollabPanel';
 import { GroupChatComposer } from './GroupChatComposer';
-import { ComposerStatusBar } from './ComposerStatusBar';
 import { GroupChatMessageArea } from './GroupChatMessageArea';
-import { GroupQuestionPanel } from './GroupQuestionPanel';
 import type { GroupChatPaneProps } from './GroupChatPane.types';
+import { GroupQuestionPanel } from './GroupQuestionPanel';
 import { buildGroupMentionConfig, isHumanOnlyMention } from './mentionHelpers';
 import { resolveSender } from './messageHelpers';
 import { useGroupChatPaneActions } from './useGroupChatPaneActions';
@@ -168,6 +168,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
         <GroupHeader
           selectedGroup={group}
           selectedSession={session}
+          connectionStatus={connectionStatus}
           onOpenSessionList={onOpenSessionList}
           canManageGroup={canManageGroup}
           activePanel={activePanel}

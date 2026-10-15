@@ -27,7 +27,8 @@ function toneFor(lifecycle: BotDomain['lifecycle']): 'success' | 'error' | 'warn
 
 const BotStatusCell: React.FC<BotStatusCellProps> = ({ bot, progressExpanded, onToggleProgress }) => {
   const failureReason = bot.lifecycle === 'failed' ? bot.disabledActions.restart : undefined;
-  const badge = <Badge tone={toneFor(bot.lifecycle)}>{lifecycleLabel[bot.lifecycle]}</Badge>;
+  const statusLabel = bot.serviceMode === 'service' && bot.lifecycle === 'failed' ? '部署失败' : lifecycleLabel[bot.lifecycle];
+  const badge = <Badge tone={toneFor(bot.lifecycle)}>{statusLabel}</Badge>;
 
   if (bot.deployment === 'local' && ['deploying', 'failed'].includes(bot.lifecycle))
     return (

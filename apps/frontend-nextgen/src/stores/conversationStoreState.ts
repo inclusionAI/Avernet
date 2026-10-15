@@ -43,6 +43,8 @@ export interface ConversationState {
   scopeByFriendBotId: Record<string, ConversationSessionScope>;
   /** 每次 Bot 过滤条件实际变化 +1;供 Hook 组装请求代次,阻止旧响应(含 A→B→A)写回。 */
   sessionFilterRevisionByBotId: Record<string, number>;
+  /** 按 Bot 记忆的多实例服务 Bot 选中实例(device UUID;空记录=未限定);页面会话内记忆,重置用户状态时清空。 */
+  instanceSelectionByBotId: Record<string, string>;
 
   /** 主舞台当前选中(全 Store 单选);URL 投影由 Hook 写回 route。 */
   selectedBotId: string | null;
@@ -66,6 +68,8 @@ export interface ConversationState {
   setManagedBotOrigin(botId: string, origin: ConversationOrigin): void;
   setManagedBotScope(botId: string, scope: ConversationSessionScope): void;
   setSessionKeyFilter(botId: string, sessionKey: string): void;
+  /** 写入多实例服务 Bot 的选中实例(device UUID);实际变化时失效该 Bot 列表缓存并递增过滤代次。 */
+  setBotInstanceSelection(botId: string, instanceUuid: string): void;
   setFriendBotScope(botId: string, scope: ConversationSessionScope): void;
   setExpandedFriend(botId: string, friendUserId: string, expanded: boolean): void;
   setBotGroupCollapsed(groupId: string, collapsed: boolean): void;
@@ -90,6 +94,7 @@ export type ConversationInitialData = Omit<
   | 'setManagedBotOrigin'
   | 'setManagedBotScope'
   | 'setSessionKeyFilter'
+  | 'setBotInstanceSelection'
   | 'setFriendBotScope'
   | 'setExpandedFriend'
   | 'setBotGroupCollapsed'
@@ -110,6 +115,7 @@ export const conversationInitialState: ConversationInitialData = {
   sessionKeyByBotId: {},
   scopeByFriendBotId: {},
   sessionFilterRevisionByBotId: {},
+  instanceSelectionByBotId: {},
   selectedBotId: null,
   selectedSection: null,
   selectedOrigin: 'mine',

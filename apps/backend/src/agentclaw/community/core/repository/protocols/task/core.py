@@ -48,6 +48,11 @@ class TaskInfoRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def get_by_intake_session(self, session_id: str) -> Optional["TaskInfoRecord"]:
+        """Return the uniquely created task for an intake session, if any."""
+        ...
+
+    @abstractmethod
     def update_status(self, task_id: str, status: "Status") -> bool:
         """Set ``status`` on the row for ``task_id``. Returns ``True`` iff a row
         was updated."""
@@ -292,6 +297,33 @@ class TaskGraphRepositoryProtocol(Protocol):
     def create_graph(self, graph, *, runtime_status: "Status"):
         """Persist initial graph state and return its version."""
         ...
+
+    @abstractmethod
+    def create_intake_graph(self, task_info, graph, session_id: str) -> int:
+        """Atomically persist confirmed TaskInfo and root graph.
+
+        Relay roots run in the already-open intake Bot conversation; only
+        successor nodes create Backend delivery intents.
+        """
+        ...
+
+    @abstractmethod
+    def list_pending_delivery_intents(self, *, limit: int = 100) -> list[tuple[str, str]]: ...
+
+    @abstractmethod
+    def claim_delivery_intent(
+        self, task_id: str, node_id: str, relay_token: str, *, lease_ms: int = 60000,
+    ) -> tuple[str, str | None]: ...
+
+    @abstractmethod
+    def mark_delivery_intent(
+        self, task_id: str, node_id: str, lease_token: str, *, delivered: bool, error: str | None = None,
+    ) -> None: ...
+
+    @abstractmethod
+    def requeue_delivery_intent(
+        self, task_id: str, node_id: str, relay_token: str, *, reason: str,
+    ) -> None: ...
 
     @abstractmethod
     def save_graph(

@@ -311,6 +311,16 @@ def _render_timeline_grouped(timeline: list) -> str:
     for idx, ((task_id, node_id), events) in enumerate(blocks.items()):
         color = _NODE_BLOCK_PALETTE[idx % len(_NODE_BLOCK_PALETTE)]
         label = html.escape(node_id or "(无节点)")
+        # 真实模态(读时富化):服务层只挂在该子任务时间线的**末位**事件上,区块内
+        # 倒序找携带者;无携带事件(未接线/无模态)→ 不渲染 chip(缺字段=无信号)。
+        mode = next(
+            (
+                str(getattr(e, "actual_run_mode", None))
+                for e in reversed(events)
+                if getattr(e, "actual_run_mode", None)
+            ),
+            None,
+        )
         parts.append(
             f'<div class="node-block" style="border-left:4px solid {color};">'
             f'<div class="nb-head">'
@@ -318,6 +328,12 @@ def _render_timeline_grouped(timeline: list) -> str:
             f'border:1px solid {color}55;">接力任务{idx + 1}</span>'
             f'<span class="nb-node" style="color:{color};border-color:{color}55;'
             f'background:{color}1f;">{label}</span>'
+        )
+        if mode:
+            parts.append(
+                f'<span class="nb-mode">真实模态 · {html.escape(mode)}</span>'
+            )
+        parts.append(
             f'<span class="nb-sub">task {html.escape(task_id)} · 事件 {len(events)}</span>'
             f"</div>"
         )
@@ -432,6 +448,8 @@ def render_trajectory_html(dto: "TaskTrajectoryDTO", *, do_analysis: bool = Fals
   .nb-idx {{ font-weight: 700; font-size: 13px; padding: 2px 10px; border-radius: 6px; }}
   .nb-node {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 700;
               font-size: 13px; padding: 2px 10px; border-radius: 999px; border: 1px solid; }}
+  .nb-mode {{ font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px;
+              border: 1px solid #cbd5e1; background: #f1f5f9; color: #334155; }}
   .nb-sub {{ color: #94a3b8; font-size: 12px; }}
   .event {{ background: #fff; border: 1px solid #e2e8f0; border-left-width: 4px;
             border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }}

@@ -1,3 +1,4 @@
+import { repairEvidenceFacts, repairEvidenceFlows } from '../contracts/repair-batch.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import {
   RepairBatchError, boundedRepairJson, canonicalRepairJson, digestRepairJson,
@@ -108,7 +109,7 @@ export class RepairBatchRepository {
 
   async setDisposition(tx: IDatabase, input: {
     workflowId: string; itemId: string; expectedStateVersion: number; action: 'no_action' | 'restore';
-    actorId: string; requestId: string; reason: string;
+    actorId: string; requestId: string; reason: string; untilMs?: number;
   }): Promise<RepairDispositionResult> {
     if (!['no_action', 'restore'].includes(input.action) || !input.requestId?.trim() || input.requestId.length > 128
       || !input.actorId?.trim() || input.actorId.length > 128 || typeof input.reason !== 'string' || input.reason.length > 4000) conflict('INVALID_INPUT', 'Invalid disposition request');
@@ -121,6 +122,7 @@ export class RepairBatchRepository {
       if (audit.requestDigest !== requestDigest) conflict('IDEMPOTENCY_MISMATCH', 'Request id was already used with different content');
       return audit.response;
     }
+    if (input.untilMs !== undefined && (!Number.isSafeInteger(input.untilMs) || input.untilMs <= Date.now() || input.action !== 'no_action')) conflict('INVALID_INPUT', 'Invalid disposition deadline');
     const item = await this.readItem(tx, input.workflowId, input.itemId);
     if (!item) conflict('ITEM_NOT_FOUND', 'Repair item does not exist in this workflow');
     if (item.activeTaskId) conflict('ITEM_BUSY', 'A task owns this content version');
@@ -129,7 +131,8 @@ export class RepairBatchRepository {
     // The unique identity key prevents a second same-content/same-episode item, including on restore.
     const atMs = Date.now();
     const disposition: RepairDisposition = { action: input.action, actorId: input.actorId, reason: input.reason,
-      requestId: input.requestId, contentRevision: item.contentRevision, atMs };
+      requestId: input.requestId, contentRevision: item.contentRevision, atMs, evidenceFlowIds: repairEvidenceFlows(item), evidenceEventIds: repairEvidenceFacts(item).eventIds, evidenceSeverity: repairEvidenceFacts(item).severity,
+      ...(input.untilMs === undefined ? {} : { untilMs: input.untilMs }) };
     const state = input.action === 'no_action' ? 'no_action' : 'pending';
     const updated = await tx.exec(`UPDATE workflow_repair_items SET state = ?, state_version = state_version + 1,
       disposition_json = ?, updated_at_ms = ? WHERE workflow_id = ? AND item_id = ? AND state_version = ?
@@ -183,11 +186,6 @@ export class RepairBatchRepository {
       if (retry.workflow_id !== workflowId || retry.request_id !== request.requestId || retry.request_digest !== request.requestDigest) conflict('IDEMPOTENCY_MISMATCH', 'Revision request id already used');
       return revisionFromRow(retry);
     }
-    const active = await tx.query<Row>(`SELECT r.task_id, r.phase FROM workflow_repair_revisions r WHERE r.workflow_id = ?
-      AND r.revision = (SELECT MAX(r2.revision) FROM workflow_repair_revisions r2 WHERE r2.task_id = r.task_id)
-      AND r.phase NOT IN ('published', 'no_change', 'cancelled')
-      AND NOT EXISTS (SELECT 1 FROM workflow_repair_revisions published WHERE published.task_id = r.task_id AND published.phase = 'published')`, [workflowId]);
-    if (active.some(row => row.task_id !== input.taskId)) conflict('ACTIVE_TASK_CONFLICT', 'Workflow already has an editable repair task');
     const previous = await this.latest(tx, workflowId, input.taskId);
     if ((await tx.query('SELECT 1 FROM workflow_repair_revisions WHERE task_id = ? AND phase = ? LIMIT 1', [input.taskId, 'published'])).length) conflict('STATE_CONFLICT', '已部署任务不能再生成候选；请依据效果结论创建新基线任务');
     if (request.expectedAttemptRevision !== (previous?.revision ?? 0) || input.revision !== (previous?.revision ?? 0) + 1

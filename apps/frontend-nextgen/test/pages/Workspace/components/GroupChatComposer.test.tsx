@@ -289,7 +289,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     expect(screen.getByTestId('sender')).not.toHaveClass('[--aix-color-bg:hsl(var(--muted))]');
   });
 
-  it('placeholder 按稿换为通用能力占位（不带会话名，附录 B）', () => {
+  it('群会话输入框提示以用户身份发送', () => {
     render(
       <GroupChatComposer
         session={session}
@@ -301,6 +301,6 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
       />,
     );
     // 群聊输入框仅支持 @ 提及成员，占位不得宣传 /file /link /skill 指令（那是单聊 ChatPanel 的能力）。
-    expect(screen.getByTestId('sender')).toHaveAttribute('data-placeholder', '输入消息，@ 可提及会话成员');
+    expect(screen.getByTestId('sender')).toHaveAttribute('data-placeholder', '输入消息... (将以您的用户身份发送到群内)');
   });
 });

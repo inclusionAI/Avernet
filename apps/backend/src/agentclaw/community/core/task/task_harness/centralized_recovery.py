@@ -641,7 +641,9 @@ def _on_bg_done(self, bg: object) -> None:
         logger.error("[task][engine] background task 异常: %s", exc, exc_info=exc)
         return
     result = getattr(bg, "result", lambda: None)()
-    if isinstance(result, list) and any(item is not True for item in result):
+    if result is False or (
+        isinstance(result, list) and any(item is not True for item in result)
+    ):
         logger.error(
             "[task][engine] background start_run 投递失败 task=%s results=%s",
             getattr(bg, "_bbs_task_id", ""),
@@ -716,7 +718,7 @@ def _reset_root_plan_round(self, task_id: str) -> None:
 
 
 def _schedule_bbs_notify(self, task_id: str, execution_graph) -> None:
-    """可恢复拦截点(spec §5):fire-and-forget ``runner.start_run([bbs_node])``。
+    """可恢复拦截点(spec §5):fire-and-forget ``runner.start_run(bbs_node)``。
 
     命中根 BBS 可恢复态(bbs_mode + 未 claim)时调用——主动 bid→select→claim→
     dispatch 给 claim-enabled bot。上层只使用统一 start_run seam，不感知 BBS 专用方法。
@@ -748,7 +750,7 @@ def _schedule_bbs_notify(self, task_id: str, execution_graph) -> None:
         ),
     )
     loop = self._ensure_bbs_loop()
-    coroutine = self._runner.start_run([bbs_node])
+    coroutine = self._runner.start_run(bbs_node)
     try:
         bg = asyncio.run_coroutine_threadsafe(coroutine, loop)
     except Exception:

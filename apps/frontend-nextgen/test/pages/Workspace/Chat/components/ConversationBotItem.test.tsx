@@ -45,10 +45,8 @@ function renderBotItem(overrides: { expanded?: boolean; onToggle?: () => void } 
 
 describe('ConversationBotItem 操作区', () => {
   it('遮盖底撤除:操作区不再叠 sidebar-actions-cover 底色,筛选/加号/行尾箭头保持等宽 2px 间隙', () => {
-    const { container } = renderBotItem();
-    const cover = Array.from(container.querySelectorAll('div')).find((el) =>
-      el.className.includes('inset-y-0'),
-    ) as HTMLElement;
+    renderBotItem();
+    const cover = screen.getByRole('button', { name: '新建会话' }).parentElement as HTMLElement;
     expect(cover).toBeTruthy();
     // 不再叠与行底不一致的操作区底色。
     expect(cover.className).not.toContain('sidebar-actions-cover-hover');

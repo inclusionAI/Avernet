@@ -72,7 +72,7 @@ use bcs_collaboration_store::{
 use bcs_collaboration_template::{CollaborationTemplateServiceImpl, FileCollaborationTemplateRepo};
 use bcs_db_api::DbSqlFlavor;
 use bcs_domain::{MessageAudience, MessageVisibilityDomain, NewMessage, SenderType};
-use bcs_friend::{FriendCore, FriendRequestCore};
+use bcs_friend::{FriendCore, FriendRequestCore, FriendshipWritebackService};
 use bcs_friend_store::{
     DbFriendRequestStore, DbFriendStore, MemoryFriendRepo, MemoryFriendRequestRepo,
 };
@@ -1563,11 +1563,16 @@ fn build_invite_code_service(
         },
         _ => Arc::new(MemoryInviteCodeRepo::with_data_dir(config.bots_base_dir.clone())),
     };
-    Arc::new(InviteCodeServiceImpl::new(
-        repo,
-        invite_token_secret,
-        config.invite.public_claim_max_count,
-    ))
+    Arc::new(
+        InviteCodeServiceImpl::new(
+            repo,
+            invite_token_secret,
+            config.invite.public_claim_max_count,
+        )
+        // 与 invite-code gate 中间件同源接线：开关关闭时 /me 合成"已绑定"，
+        // 客户端提示行为完全由该后端开关控制。
+        .with_gate_enabled(config.invite.invite_code_gate_enabled),
+    )
 }
 
 async fn resolve_secret_value(
@@ -4659,16 +4664,28 @@ impl BcsServer {
                 ),
                 None => Arc::new(bcs_service_api::port::NoopFriendAuthSyncPort),
             };
-        let connect_service_impl = Arc::new(bcs_edge_permission::DbConnectService::new(
-            edge_grant_store.clone(),
-            profile_store.clone(),
-            request_store.clone(),
-            bot_config_store.clone(),
-            user_directory.clone(),
-            friend_connect_notification,
-            friend_auth_sync.clone(),
-            edge_permission_env,
-        ));
+        // Edge→legacy friendship reverse sync (coexistence): bots friended via
+        // the edge-permission Connect flow get a mirrored bcs_friendships row
+        // so the collaboration group gate (still reading the legacy store)
+        // sees the relationship. Spec: 2026-10-15-edge-connect-friendship-writeback.
+        let friendship_writeback: Arc<dyn bcs_service_api::port::FriendshipWritebackPort> =
+            Arc::new(FriendshipWritebackService::new(
+                friend_repo.clone(),
+                relation_svc.clone(),
+            ));
+        let connect_service_impl = Arc::new(
+            bcs_edge_permission::DbConnectService::new(
+                edge_grant_store.clone(),
+                profile_store.clone(),
+                request_store.clone(),
+                bot_config_store.clone(),
+                user_directory.clone(),
+                friend_connect_notification,
+                friend_auth_sync.clone(),
+                edge_permission_env,
+            )
+            .with_friendship_writeback(Some(friendship_writeback)),
+        );
         let connect_service: Arc<dyn bcs_service_api::application::ConnectService> =
             connect_service_impl.clone();
         let edge_permission_friend_sync: Arc<dyn bcs_service_api::EdgePermissionFriendSyncService> =

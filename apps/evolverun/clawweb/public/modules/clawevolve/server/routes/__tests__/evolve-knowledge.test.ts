@@ -145,7 +145,8 @@ describe("evolve knowledge endpoints", () => {
     expect((await response.json() as { groups: unknown[] }).groups).toHaveLength(1);
     const light = await (await fetch(`${baseUrl}/api/evolve/issue-groups?workflowId=wf&view=summary`)).json() as { groups: Array<{ presentation: string; sources: Array<Record<string, unknown>> }> };
     expect(light.groups[0].presentation).toBe('summary');
-    expect(light.groups[0].sources[0].reasoning).toBe('');
+    expect(light.groups[0].sources[0].reasoning.length).toBeGreaterThan(0);
+    expect(light.groups[0].sources[0].reasoning.length).toBeLessThanOrEqual(240);
     expect(light.groups[0].sources[0]).not.toHaveProperty('proposal');
     const detail = await (await fetch(`${baseUrl}/api/evolve/issue-groups?workflowId=wf&signature=timeout`)).json() as { groups: Array<{ sources: Array<{ proposal: { summary: string } }> }> };
     expect(detail.groups[0].sources[0].proposal.summary).toMatch(/timeout/);

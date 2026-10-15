@@ -1,7 +1,13 @@
 // 会话分页请求模块(从 useConversationSessions 拆出的请求生命周期,文件大小阈值):
 // 并发代次 + 请求去重 + 过滤身份校验 + 列表写回。与 conversationSessionCache 同为
 // 无状态纯函数模块,由 Hook 用 useRef 持有一份请求上下文装配(行内语义不变)。
-import type { ConversationBotSection, ConversationBotView, ConversationSessionScope } from '@/domain/conversation/types';
+import { getCapabilities } from '@/capabilities';
+import type {
+  ConversationBotSection,
+  ConversationBotView,
+  ConversationSessionRequestRange,
+  ConversationSessionScope,
+} from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
 import { BOT_SESSION_PAGE_SIZE } from '@/services/workspace/botSessionService';
 import { conversationService } from '@/services/workspace/conversationService';
@@ -51,6 +57,14 @@ export function loadSessionPage(
   const sectionOf: ConversationBotSection = view.section;
   const userIdNow = ctx.userId.current;
   if (!userIdNow || !view.bot.chatable || view.bot.isAgentCodingBot || isPending(botId, sectionOf)) return;
+  // 多实例服务 Bot 实例范围(capability 缺省 null → 零行为):首拉幂等触发实例清单加载
+  // (服务 Bot 专用,其余 no-op);多实例解析后自动选中写入 Store(过滤代次+1)经既有
+  // scopeSignature 触发重拉,此间在途的未带范围响应由 revision 写回校验自动丢弃。
+  const instanceScope = getCapabilities().getConversationInstanceScope().value;
+  if (!more) instanceScope?.ensureInstancesLoaded(view.bot);
+  const requestRange = instanceScope?.getSessionRange(view.bot) ?? undefined;
+  // 无范围时不追加调用参数:保持既有调用形状,全部既有用例零改动通过(开源版零行为变化)。
+  const requestRangeArgs: [] | [ConversationSessionRequestRange] = requestRange ? [requestRange] : [];
   // 请求快照:从最新 Store 读取生效过滤(mine 范围/好友范围/sessionKey/代次)。
   const store = useConversationStore.getState();
   const scope = isManagedConversationSection(sectionOf)
@@ -87,8 +101,24 @@ export function loadSessionPage(
   });
   void (
     isManagedConversationSection(sectionOf)
-      ? conversationService.listManagedSessions(view.bot, userIdNow, scope, page, BOT_SESSION_PAGE_SIZE, sessionKey)
-      : conversationService.listFriendBotSessions(view.bot, userIdNow, page, BOT_SESSION_PAGE_SIZE, scope, sessionKey)
+      ? conversationService.listManagedSessions(
+          view.bot,
+          userIdNow,
+          scope,
+          page,
+          BOT_SESSION_PAGE_SIZE,
+          sessionKey,
+          ...requestRangeArgs,
+        )
+      : conversationService.listFriendBotSessions(
+          view.bot,
+          userIdNow,
+          page,
+          BOT_SESSION_PAGE_SIZE,
+          scope,
+          sessionKey,
+          ...requestRangeArgs,
+        )
   ).then((result) => {
     ctx.inFlight.delete(requestKey);
     if (ctx.generation.current !== generation) return;

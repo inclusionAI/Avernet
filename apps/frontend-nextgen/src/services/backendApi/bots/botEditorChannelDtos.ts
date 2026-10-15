@@ -4,6 +4,7 @@ export interface ChannelDto extends BackendUnknownRecord {
   id: number;
   type: 'dingding';
   binding_mode?: 'plugin' | 'bcn_gateway';
+  stage?: 'draft' | 'verify' | 'online';
   description?: string;
   status: 'active' | 'inactive';
   created_at?: string | null;
@@ -22,5 +23,6 @@ export interface ChannelDto extends BackendUnknownRecord {
     include_sender_name?: boolean;
     group_chat_scope?: 'per_sender' | 'conversation_shared' | null;
     outbound_visibility?: 'full_transcript' | 'lead_only' | null;
+    forward_sender_identity?: boolean | null;
   };
 }

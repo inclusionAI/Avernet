@@ -26,6 +26,7 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
     def _to_row(record: TaskInfoRecord) -> TaskInfoModel:
         return TaskInfoModel(
             task_id=record.task_id,
+            intake_session_id=record.intake_session_id,
             source_type=record.source_type,
             owner_user_id=record.owner_user_id,
             owner_bot_id=record.owner_bot_id,
@@ -61,6 +62,11 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
     def get(self, task_id: str) -> Optional[TaskInfoRecord]:
         with self._db.orm_session() as db:
             row = db.query(self._model).filter(self._model.task_id == task_id).first()
+            return row.to_record() if row else None
+
+    def get_by_intake_session(self, session_id: str) -> Optional[TaskInfoRecord]:
+        with self._db.orm_session() as db:
+            row = db.query(self._model).filter(self._model.intake_session_id == session_id).first()
             return row.to_record() if row else None
 
     def update_status(self, task_id: str, status: Status) -> bool:

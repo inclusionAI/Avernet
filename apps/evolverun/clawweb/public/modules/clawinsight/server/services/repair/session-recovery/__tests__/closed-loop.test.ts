@@ -66,7 +66,7 @@ beforeEach(async () => {
   ais = { execute: vi.fn(async (_owner, params) => { submissions.push(JSON.parse(params["${clawevolve_params}"])); return `job-${submissions.length}`; }), getJobStatusDetail: vi.fn(async () => ({ status: "running", rawStatus: "RUNNING", errorMessage: null })), stopExecution: vi.fn(), getJobStatus: vi.fn() }; notifier = { notify: vi.fn() };
   agent = new SessionRecoveryAgentService({ tasks, repo, audit: new AgentToolCallRepository(db, "session_recovery"), ais, runtime, targets, business: () => service, publicBaseUrl: "https://service.invalid", snapshotId: 1, nasRoots: [directory], leaseSeconds: 120, launchGraceSeconds: 1800, observationMs: 3600000, now: () => now });
   reporter = { report: async result => { callbacks.push(result); } };
-  service = new SessionRecoveryTaskService({ tasks, agent, notifier, reporter, observationMs: 3600000, ownerWaitMs: 3600000, now: () => now, resolveTarget: async () => recoveryTargetSnapshot(target) });
+  service = new SessionRecoveryTaskService({ tasks, agent, notifier, reporter, observationMs: 3600000, now: () => now, resolveTarget: async () => recoveryTargetSnapshot(target) });
 });
 it("Agent-first MCP sends one targeted message without an environment approval and recovers the original session", async () => {
   let task = await create("approval", {});
@@ -113,6 +113,42 @@ it("Agent can observe existing progress without sending, and an unknown send is 
   await agent.retryMessage(await current(task.taskId), body); expect(runtime.sendMessage).toHaveBeenCalledTimes(1);
   await expect(agent.retryMessage(await current(task.taskId), { ...body, clientRequestId: "blind-repeat" })).rejects.toMatchObject({ status: 409 });
 });
+it("historical intervention cannot confirm this delivery but existing recovery can complete without a new message", async () => {
+  let task = await create();
+  await appendFile(sessionFile, JSON.stringify({ type: "message", id: "old-advice", message: { role: "user", content: "[会话自愈：old-delivery]\n继续" } }) + "\n");
+  const read = await inspect(task, "historical-read");
+  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "observe", summary: "原任务此前已恢复", evidence_ids: [read.evidenceId] });
+  task = await current(task.taskId);
+  const judgment = { delivery: "confirmed", response: "acted", effect: "recovered", summary: "原任务已恢复，本次未发消息", evidence_ids: [read.evidenceId] };
+  await expect(agent.report(task, { kind: "observation", phase: "observe", judgment })).rejects.toMatchObject({ status: 422 });
+  await agent.report(task, { kind: "observation", phase: "observe", judgment: { ...judgment, delivery: "unconfirmed" } });
+  expect((await current(task.taskId)).status).toBe("completed");
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+it("trajectory content paging stays within the task scope and preserves the audited result", async () => {
+  const read = vi.fn(async () => ({ source: "aivision_tclog", content: "正文片段", next_content_offset: 100 }));
+  (agent as any).deps.trajectory = { read };
+  const task = await create();
+  const result = await agent.trajectoryRead(task, { clientRequestId: "trace-content", purpose: "读取故障事件输出", trace_id: "trace-1",
+    observation_id: "event-1", field: "output", content_offset: 0, content_limit: 100 });
+  expect(read).toHaveBeenCalledWith(expect.objectContaining({ target: task.runtimeTarget!.target, sessionKey: request.session_key,
+    traceId: "trace-1", observationId: "event-1", field: "output", contentOffset: 0, contentLimit: 100, maxBytes: 128 * 1024 }));
+  expect(result.status).toBe("succeeded");
+  expect((await agent.toolGet(await current(task.taskId), result.toolCallId)).result).toEqual(result.result);
+  await expect(agent.trajectoryRead(await current(task.taskId), { clientRequestId: "invalid-page", purpose: "读取轨迹", field: "output" })).rejects.toMatchObject({ status: 422 });
+  await expect(agent.trajectoryRead(await current(task.taskId), { clientRequestId: "invalid-content", purpose: "读取轨迹", trace_id: "trace-1", field: "input", content_limit: 12001 })).rejects.toMatchObject({ status: 422 });
+});
+it("an oversized trajectory page is recorded as a readable failure instead of breaking audit persistence", async () => {
+  const read = vi.fn().mockResolvedValueOnce({ content: "x".repeat(300000) }).mockResolvedValueOnce({ traces: [] });
+  (agent as any).deps.trajectory = { read };
+  const task = await create();
+  const failed = await agent.trajectoryRead(task, { clientRequestId: "large-trace", purpose: "读取轨迹摘要" });
+  expect(failed.status).toBe("failed");
+  expect(failed.result).toMatchObject({ error: { code: "recovery_trajectory_page_too_large" } });
+  expect((await agent.toolGet(await current(task.taskId), failed.toolCallId)).status).toBe("failed");
+  const retried = await agent.trajectoryRead(await current(task.taskId), { clientRequestId: "smaller-trace", purpose: "缩小范围读取轨迹", limit: 1 });
+  expect(retried.status).toBe("succeeded");
+});
 afterEach(async () => { await db.close(); await rm(directory, { recursive: true, force: true }); });
 it("approves one plan in the same execution, retries the original session, recovers with durable evidence", async () => {
   let task = await toPlan(await create()); expect(submissions).toHaveLength(1); expect(submissions[0].input.credentials.executionTicket).toBeTruthy();
@@ -136,40 +172,35 @@ it("Debug logs proposed actions without messages, writes or Owner notification",
   await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "environment", summary: "拟修复局部配置", evidence_ids: [read.evidenceId] });
   task = await current(task.taskId); await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId); expect(task.status).toBe("completed"); expect(task.judgment!.effect).toBe("not_intervened"); expect(runtime.sendMessage).not.toHaveBeenCalled(); expect(notifier.notify).not.toHaveBeenCalled();
 });
-it("Owner expiry creates a new execution for the same task and isolates the old Base callback", async () => {
-  let task = await toPlan(await create()); await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId); const oldStep = (await repo.findStep(task.aisExecution!.stepId))!, oldId = task.execution!.executionId;
-  now += 3600001; await service.maintenance(); expect((await current(task.taskId)).execution!.state).toBe("ended"); await service.decide(task.taskId, task.plan!.digest, true, actor); task = await current(task.taskId); expect(submissions).toHaveLength(2); expect(task.execution!.executionId).not.toBe(oldId);
-  expect(await agent.handleAisStatus({ task: (await repo.findTask(task.taskId))!, step: oldStep, report: { status: "failed", summary: "旧容器收尾失败" } })).toMatchObject({ applied: true }); expect((await current(task.taskId)).execution!.executionId).toBe(task.execution!.executionId); expect((await current(task.taskId)).status).toBe("running");
-});
-it("late Owner approval retires the still-leased execution before maintenance or its successful Base callback", async () => {
+it("Base release preserves Owner wait and later approval isolates the old successful callback", async () => {
   let task = await toPlan(await create()); await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId);
   const oldStep = (await repo.findStep(task.aisExecution!.stepId))!, oldId = task.execution!.executionId;
-  const deadline = task.ownerDeadlineAt!;
-  while (now < deadline - 1) { now = Math.min(now + 60000, deadline - 1); await agent.heartbeat(await current(task.taskId)); }
-  now += 2;
-  expect((await current(task.taskId)).execution!.leaseExpiresAt).toBeGreaterThan(Math.floor(now / 1000));
+  expect(task.ownerDeadlineAt).toBeNull();
+  await agent.report(task, { kind: "release", phase: "apply" }); task = await current(task.taskId);
+  expect(task.status).toBe("waiting_owner"); expect(task.execution!.state).toBe("ended");
+  now += 12 * 3600000;
   await service.decide(task.taskId, task.plan!.digest, true, actor); task = await current(task.taskId);
   expect(submissions).toHaveLength(2); expect(task.execution!.executionId).not.toBe(oldId);
-  await agent.handleAisStatus({ task: (await repo.findTask(task.taskId))!, step: oldStep, report: { status: "succeeded", summary: "旧容器等待到期正常退出" } });
+  await agent.handleAisStatus({ task: (await repo.findTask(task.taskId))!, step: oldStep, report: { status: "succeeded", summary: "Base deadline graceful exit" } });
   expect((await current(task.taskId)).status).toBe("running");
   expect((await current(task.taskId)).execution!.executionId).toBe(task.execution!.executionId);
+  await service.reportResults(); expect(callbacks).toEqual([]);
 });
-it("Owner expiry, approval and notifications never report progress upstream", async () => {
+it("Owner approval before Base release continues the live execution instead of ending it", async () => {
   let task = await toPlan(await create()); await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId);
-  const oldStep = (await repo.findStep(task.aisExecution!.stepId))!, oldId = task.execution!.executionId;
-  now = task.ownerDeadlineAt! + 1;
-  await service.maintenance();
+  const oldId = task.execution!.executionId;
+  await service.decide(task.taskId, task.plan!.digest, true, actor); task = await current(task.taskId);
+  await expect(agent.report(task, { kind: "release", phase: "apply" })).rejects.toMatchObject({ status: 409 });
+  expect((await current(task.taskId)).execution!.state).not.toBe("ended");
+  expect((await current(task.taskId)).execution!.executionId).toBe(oldId); expect(submissions).toHaveLength(1);
+});
+it("maintenance ignores the obsolete Owner deadline while the execution heartbeat is live", async () => {
+  let task = await toPlan(await create()); await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId);
+  const oldId = task.execution!.executionId;
+  await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1, ownerDeadlineAt: now - 1 }));
+  await service.maintenance(); task = await current(task.taskId);
+  expect(task.status).toBe("waiting_owner"); expect(task.execution!.executionId).toBe(oldId); expect(task.execution!.state).not.toBe("ended");
   await service.reportResults(); expect(callbacks).toEqual([]);
-  expect((await current(task.taskId)).status).toBe("waiting_owner");
-  await service.decide(task.taskId, task.plan!.digest, true, actor);
-  await service.reportResults(); expect(callbacks).toEqual([]);
-  task = await current(task.taskId); expect(task.execution!.jobId).toBeTruthy();
-  await agent.handleAisStatus({ task: (await repo.findTask(task.taskId))!, step: oldStep, report: { status: "succeeded", summary: "旧容器正常收尾" } });
-  task = await current(task.taskId);
-  expect(task.status).toBe("running"); expect(task.execution!.executionId).not.toBe(oldId); expect(submissions).toHaveLength(2);
-  expect(task.pending_results).toEqual([]);
-  expect(task.timeline.some(event => event.kind === "owner_decision")).toBe(true);
-  expect(task.timeline.some(event => event.kind === "notification")).toBe(true);
 });
 it("NAS reads bind delivery to the current retry's actual user record, never an old marker or an assistant quote", async () => {
   let task = await toPlan(await create("automatic")); await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId);
@@ -576,7 +607,7 @@ it("waiting snapshots survive same-task resumes and restart before the final res
   const clock = vi.spyOn(Date, "now").mockImplementation(() => failed.retryAfterMs + 1);
   try {
     const restoredTasks = new SessionRecoveryTaskRepository(db, new EvolveRepository(db), artifactStore);
-    const restarted = new SessionRecoveryTaskService({ tasks: restoredTasks, agent, notifier, reporter, observationMs: 3600000, ownerWaitMs: 3600000 });
+    const restarted = new SessionRecoveryTaskService({ tasks: restoredTasks, agent, notifier, reporter, observationMs: 3600000 });
     const versions = task.pending_results.map(result => result.result_version);
     await restarted.reportResults();
     expect(callbacks.map(result => result.result_version)).toEqual(versions);

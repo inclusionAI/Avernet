@@ -9,6 +9,8 @@ const base = '/api/workflow-repairs'
 const segment = encodeURIComponent
 const post = <T,>(url: string, body: unknown) => fetchJson<T>(url, { method: 'POST', body: JSON.stringify(body) })
 export const repairBatches = {
+  request: (workflowId: string, requestId: string) => readOnlyJson<{ revision: RepairRevision | null }>(`${base}/requests/lookup?${new URLSearchParams({ workflowId, requestId })}`),
+  publish: (taskId: string, request: RepairConfirmRequest) => post<RepairDeployment>(`${base}/${segment(taskId)}/publish`, request),
   deploymentTargets: (taskId: string) => readOnlyJson<{ targets: RepairReleaseTarget[] }>(`${base}/${segment(taskId)}/deployment-targets`),
   confirm: (taskId: string, request: RepairConfirmRequest) => post<RepairApproval>(`${base}/${segment(taskId)}/confirm`, request),
   revokeConfirmation: (taskId: string, request: RepairDeployRequest) => post<RepairApproval>(`${base}/${segment(taskId)}/revoke-confirmation`, request),
@@ -37,7 +39,7 @@ export const repairBatches = {
   task: (taskId: string) => readOnlyJson<RepairTaskDetail>(`${base}/${segment(taskId)}`),
   create: (request: RepairSelectionRequest) => post<RepairRevision>(base, request),
   revise: (taskId: string, request: RepairFeedbackRequest) => post<RepairRevision>(`${base}/${segment(taskId)}/revisions`, request),
-  disposition: (itemId: string, request: { workflowId: string; inputDigest: string; expectedStateVersion: number; contentRevision: number; action: 'no_action' | 'restore'; reason: string; requestId: string; includeHistorical?: boolean }) =>
+  disposition: (itemId: string, request: { workflowId: string; inputDigest: string; expectedStateVersion: number; contentRevision: number; untilMs?: number; action: 'no_action' | 'restore'; reason: string; requestId: string; includeHistorical?: boolean }) =>
     post<StoredRepairItem>(`${base}/items/${segment(itemId)}/disposition`, request),
   cancel: (taskId: string, expectedRevision: number) => post<unknown>(`${base}/${segment(taskId)}/cancel`, { expectedRevision }),
   retryResult: (taskId: string, expectedRevision: number) => post<{ ok: true }>(`${base}/${segment(taskId)}/retry-result`, { expectedRevision }),

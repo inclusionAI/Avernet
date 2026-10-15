@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { repairBatches } from '../../../api/repair-batches'
 import type { RepairDiff, RepairTaskDetail } from '../../../../server/contracts/repair-workbench'
-import { button, primary, JsonDetails, phases } from './repair-view'
+import { button, primary, JsonDetails } from './repair-view'
 import PackDiff from './PackDiff'
 import RepairReleaseFlow from './RepairReleaseFlow'
+import { candidateLabel, repairGitLinks } from './repair-release-view'
 
 const message = (value: unknown) => value instanceof Error ? value.message : String(value)
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -32,6 +33,7 @@ export default function RepairTaskPanel({ detail, canEdit, onFeedback, onCancel,
   const diffCache = useRef(new Map<string, RepairDiff>())
   const revision = detail.revisions.find(item => item.revision === selectedRevision) ?? detail.latestAttempt
   const candidate = typeof revision.draft?.candidateCommit === 'string' ? revision.draft.candidateCommit : null
+  const gitLinks = repairGitLinks(detail.release?.repositoryWebUrl, revision.input.baseline.packCommit, candidate)
   const checks = revision.checks
   const outcomes = records(revision.draft?.itemResults)
   const coverage = records(checks?.coverage)
@@ -54,13 +56,10 @@ export default function RepairTaskPanel({ detail, canEdit, onFeedback, onCancel,
   const alreadyPublished = detail.revisions.some(row => row.phase === 'published')
   const canGenerate = canEdit && detail.capabilities.generation && !busy && !alreadyPublished
   return <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_19rem] pb-20">
-    <div aria-label="当前修复步骤与下一步" className="fixed bottom-3 left-6 right-6 z-50 flex items-center justify-between gap-3 rounded-lg border border-input bg-card px-4 py-3 shadow-lg">
-      <p className="text-sm font-semibold">{detail.release?.deployments[0]?.status === 'succeeded' ? '部署已完成，下一步验证效果' : detail.release?.deployments[0] && ['uncertain', 'running', 'dispatching'].includes(detail.release.deployments[0].status) ? '部署已提交，核对或继续完成同一请求' : detail.release?.approval?.status === 'approved' ? '候选已确认，下一步明确部署' : '审阅差异与检查报告，完成后确认候选'}</p>
-      <button className={primary} onClick={() => document.getElementById(`repair-release-${detail.taskId}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })}>{detail.release?.deployments[0]?.status === 'succeeded' ? '查看效果验证' : detail.release?.approval?.status === 'approved' ? '进入部署确认' : '进入候选确认'}</button>
-    </div>
     <section aria-label="修复任务详情" className="min-w-0 space-y-4">
       <section className={`rounded-lg border bg-card p-5 ${failed ? 'border-destructive/30' : 'border-input'}`}>
-        <p className="text-sm font-semibold text-foreground">最近尝试：v{detail.latestAttempt.revision} · {phases[detail.latestAttempt.phase] ?? detail.latestAttempt.phase}</p>
+        <p className="mb-2 text-xs text-muted-foreground">{detail.latestAttempt.input.automation ? '自动生成草稿 · 等待人工审阅' : '手动优化任务'}</p>
+        <p className="text-sm font-semibold text-foreground">最近尝试：v{detail.latestAttempt.revision} · {candidateLabel(detail, detail.latestAttempt)}</p>
         {failed && <>
           <p className="mt-2 text-xs leading-5 text-destructive">{awaitingResult ? 'AIS 已完成，但候选结果尚未读取成功。先重新读取原结果，不重复派发。' : detail.latestSuccessful ? `本轮生成失败，已保留 v${detail.latestSuccessful.revision} 候选。旧审核不自动恢复。` : '首次生成失败，尚无候选。可以沿用本轮范围与要求重新生成，无需取消任务。'}</p>
           <p className="mt-2 text-xs text-muted-foreground">{typeof detail.latestAttempt.error?.message === 'string' ? detail.latestAttempt.error.message : '执行未返回可接收的候选，请查看执行错误与检查记录。'}</p>
@@ -86,10 +85,18 @@ export default function RepairTaskPanel({ detail, canEdit, onFeedback, onCancel,
         <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-base font-semibold">候选 Pack · v{revision.revision}</h3>
           <label className="text-xs text-muted-foreground">查看版本 <select aria-label="查看修复版本" className="ml-2 rounded border border-input bg-background text-foreground p-2" value={revision.revision}
             onChange={event => { setSelectedRevision(Number(event.target.value)); setShowDiff(true); setDiff(null); setDiffError(''); setBase('baseline') }}>
-            {detail.revisions.map(item => <option key={item.revision} value={item.revision}>v{item.revision} · {phases[item.phase] ?? item.phase}</option>)}
+            {detail.revisions.map(item => <option key={item.revision} value={item.revision}>v{item.revision} · {candidateLabel(detail, item)}</option>)}
           </select></label>
         </div>
-        <div className="mt-4 grid gap-3 rounded bg-muted/50 p-3 text-xs sm:grid-cols-2"><div><p className="text-muted-foreground">固定基线</p><code className="mt-1 block break-all">{revision.input.baseline.packCommit}</code></div><div><p className="text-muted-foreground">当前查看候选</p><code className="mt-1 block break-all">{candidate ?? '尚未生成'}</code></div></div>
+        <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg bg-muted/40 px-4 py-3 text-sm">
+          <span className="font-medium">v{revision.revision} · {candidateLabel(detail, revision)}</span>
+          <span className="text-muted-foreground">基于部署 #{revision.input.baseline.activeDeployNumber ?? '未知'}</span>
+          {gitLinks?.candidate && <a className="text-primary hover:underline" href={gitLinks.candidate} target="_blank" rel="noopener noreferrer">查看 Git 提交 ↗</a>}
+          {gitLinks?.compare && <a className="text-primary hover:underline" href={gitLinks.compare} target="_blank" rel="noopener noreferrer">在 Git 查看完整变更 ↗</a>}
+        </div>
+        <details className="mt-3 text-xs text-muted-foreground"><summary className="cursor-pointer">版本技术信息</summary>
+          <dl className="mt-2 space-y-2 rounded-lg bg-muted/40 p-3"><dt>基线 commit</dt><dd className="break-all font-mono">{revision.input.baseline.packCommit}</dd>
+            <dt>候选 commit</dt><dd className="break-all font-mono">{candidate ?? '尚未生成'}</dd><dt>任务编号</dt><dd className="break-all font-mono">{detail.taskId}</dd></dl></details>
         {typeof revision.draft?.summary === 'string' && <p className="mt-3 text-sm leading-6">{revision.draft.summary}</p>}
         <nav aria-label="候选审核内容" className="mt-4 flex gap-5 border-b border-input">
           {([['diff', 'Pack 文件 Diff'], ['checks', '检查报告'], ['sources', '逐项结果']] as const).map(([key, label]) => <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)} className={`border-b-2 py-3 text-xs font-medium ${tab === key ? 'border-primary text-primary' : 'border-transparent text-muted-foreground'}`}>{label}</button>)}
@@ -140,13 +147,14 @@ export default function RepairTaskPanel({ detail, canEdit, onFeedback, onCancel,
       </section>}
     </section>
     <aside className="space-y-4 xl:sticky xl:top-4">
-      <section className="rounded-lg border border-input bg-card p-5"><h3 className="text-sm font-semibold">一次任务，多轮候选</h3><p className="mt-2 break-all font-mono text-[10px] text-muted-foreground">{detail.taskId}</p>
-        <p className="mt-3 text-xs leading-5 text-muted-foreground">基线不变，分支隔离。每轮失败与成功记录独立保留。</p>
+      <section className="rounded-lg border border-input bg-card p-5"><h3 className="text-sm font-semibold">候选版本</h3>
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">每轮生成与部署记录独立保留。选择版本查看变更，只有最新可用候选可以部署。</p>
         <div className="mt-4 divide-y divide-border/50">{detail.revisions.slice().sort((a, b) => b.revision - a.revision).map(item => <button key={item.revision} onClick={() => { setSelectedRevision(item.revision); setDiff(null); setShowDiff(true) }} className="block w-full py-3 text-left">
-          <p className={`text-xs font-medium ${item.revision === revision.revision ? 'text-primary' : 'text-foreground'}`}>v{item.revision} · {phases[item.phase]}</p><p className="mt-1 truncate font-mono text-[10px] text-muted-foreground/70">{typeof item.draft?.candidateCommit === 'string' ? item.draft.candidateCommit : '未生成候选 commit'}</p>
+          <p className={`text-sm font-medium ${item.revision === revision.revision ? 'text-primary' : 'text-foreground'}`}>v{item.revision} · {candidateLabel(detail, item)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{item.revision === revision.revision ? '当前查看' : '查看此版本'}</p>
         </button>)}</div>
       </section>
-      <section className="rounded-lg border border-input bg-card p-5"><h3 className="text-xs font-semibold">安全边界</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">{detail.latestAttempt.phase === 'published' ? '候选部署事实已记录；后续运行按部署版本验证。' : '生成候选尚未应用到工作流或部署；只有明确确认部署才影响新运行。'}效果验证单独记录，不自动关闭问题，也不自动回滚。</p></section>
+      <section className="rounded-lg border border-input bg-card p-5"><h3 className="text-xs font-semibold">安全边界</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">{detail.latestAttempt.phase === 'published' ? '候选部署事实已记录；后续运行按部署版本验证。' : '生成候选尚未应用到工作流或部署；只有明确确认部署才影响新运行。'}系统依据生效版本、相关节点和明确规则自动观察；证据不足时不判成功，也不自动回滚。</p></section>
       {!alreadyPublished && ['drafting', 'review', 'blocked', 'failed'].includes(detail.latestAttempt.phase) && <button className="text-xs text-muted-foreground hover:text-destructive" disabled={!canEdit || busy} onClick={onCancel}>取消修复任务</button>}
     </aside>
   </div>

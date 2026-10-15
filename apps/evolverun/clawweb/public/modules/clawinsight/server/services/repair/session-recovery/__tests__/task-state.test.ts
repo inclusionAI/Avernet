@@ -25,22 +25,22 @@ describe("session recovery business lifecycle", () => {
   });
   it("does not treat observation timeout as permission to repair", () => {
     const waiting = observeRecovery(state(), unknown, 1000);
-    expect(() => submitRecoveryPlan(waiting, plan, 1000, 2000)).toThrow();
+    expect(() => submitRecoveryPlan(waiting, plan, 1000)).toThrow();
   });
   it("requires persisted evidence for recovery claims", () => {
     expect(() => observeRecovery(state(), { ...unknown, effect: "recovered", evidence_ids: ["made-up"] }, 100)).toThrow();
     expect(() => observeRecovery(state(), { ...unknown, effect: "recovered" }, 100)).toThrow();
   });
   it("puts Owner cooperation in a complete plan and binds approval to its digest", () => {
-    const planned = submitRecoveryPlan({ ...state(), phase: "plan" }, plan, 100, 2000);
-    expect(planned).toMatchObject({ status: "waiting_owner", ownerDeadlineAt: 2100, phase: "apply" });
+    const planned = submitRecoveryPlan({ ...state(), phase: "plan" }, plan, 100);
+    expect(planned).toMatchObject({ status: "waiting_owner", ownerDeadlineAt: null, phase: "apply" });
     expect(() => decideRecoveryPlan(planned, "stale-plan", true, 200)).toThrow();
     const approved = decideRecoveryPlan(planned, planned.plan!.digest, true, 200);
     expect(approved.plan!.approvedAt).toBe(200);
     expect(approved.status).toBe("running");
   });
   it("does not request Owner decisions or grant writes in Debug", () => {
-    const debug = submitRecoveryPlan({ ...state(), phase: "plan", level: "debug" }, plan, 100, 2000);
+    const debug = submitRecoveryPlan({ ...state(), phase: "plan", level: "debug" }, plan, 100);
     expect(debug).toMatchObject({ status: "completed", ownerDeadlineAt: null, plan: { approvedAt: null } });
     expect(recoveryTaskResult(debug).effect).toBe("not_intervened");
   });
@@ -48,13 +48,13 @@ describe("session recovery business lifecycle", () => {
     const failed = observeRecovery({ ...state(), phase: "verify", plan: { ...plan, digest: "digest", approvedAt: 1 } },
       { ...unknown, effect: "not_recovered", evidence_ids: ["E1"] }, 500);
     expect(failed.status).toBe("failed");
-    expect(() => submitRecoveryPlan(failed, plan, 501, 1000)).toThrow();
+    expect(() => submitRecoveryPlan(failed, plan, 501)).toThrow();
   });
 });
 
 it("approves primary adjustments without requiring technical execution details", () => {
   const abstract: RecoveryPlan = { ...plan, actions: [{ actionId: "delete-duplicate", summary: "删除指定重复任务", risk: "保留正常任务", verification: "确认重复项已不存在", rollback: "恢复原配置" }] };
-  const value = submitRecoveryPlan({ ...state(), phase: "plan" }, abstract, 100, 2000);
+  const value = submitRecoveryPlan({ ...state(), phase: "plan" }, abstract, 100);
   expect(value.status).toBe("waiting_owner");
   expect(value.plan!.actions).toEqual(abstract.actions);
 });

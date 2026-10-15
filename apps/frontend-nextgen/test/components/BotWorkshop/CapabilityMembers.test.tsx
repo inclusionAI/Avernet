@@ -61,3 +61,17 @@ test('个人 Bot 的 MCP 访问方式不可切换时展示原因', async () => {
   fireEvent.focus(screen.getByTestId('mcp-identity-disabled-mcp-1'));
   expect(await screen.findByText('个人 Bot 固定使用 Owner 模式，不支持切换访问方式')).toBeInTheDocument();
 });
+
+test('调试对话框同屏时成员卡片保持单列，展开配置区后恢复多列断点', () => {
+  const { rerender } = render(
+    <CapabilityMembers kind="skill" compact items={[{ id: 'skill-1', name: '单列 Skill', active: true }]} editable />,
+  );
+
+  const compactGrid = screen.getByText('单列 Skill').closest('.grid');
+  expect(compactGrid).toHaveClass('grid-cols-1');
+  expect(compactGrid).not.toHaveClass('md:grid-cols-2', 'xl:grid-cols-3');
+
+  rerender(<CapabilityMembers kind="skill" items={[{ id: 'skill-1', name: '单列 Skill', active: true }]} editable />);
+  const expandedGrid = screen.getByText('单列 Skill').closest('.grid');
+  expect(expandedGrid).toHaveClass('md:grid-cols-2', 'xl:grid-cols-3');
+});

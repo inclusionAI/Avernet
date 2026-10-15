@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import os
-from urllib.parse import urlparse
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
@@ -62,9 +61,15 @@ from agentclaw.community.core.repository.protocols.task.forum import (
 )
 from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
 from agentclaw.community.core.task.task_center.task_service import TaskService
+from agentclaw.community.core.task.task_center.task_intake import TaskIntakeHandler
+from agentclaw.community.core.task.task_center.bot_intake_skill import BotTaskIntakeSkill
+from agentclaw.community.core.task.task_center.intake_target_resolver import DefaultIntakeTargetResolver
+from agentclaw.community.core.task.repository.task_intake_repository import TaskIntakeRepositoryProtocol
+from agentclaw.community.core.task.task_dispatch.search import TaskSearch
 from agentclaw.community.core.task.task_center.recovery_lifecycle import (
     TaskRecoveryLifecycle,
 )
+from agentclaw.community.core.task.task_center.delivery_lifecycle import TaskDeliveryLifecycle
 from agentclaw.community.core.task.feedback.services.feedback_service import FeedbackService
 from agentclaw.community.core.task.forum.browsing import (
     BbsBrowseLoopRunner,
@@ -148,7 +153,6 @@ class TaskModule(Module):
         # BBS Browse Loop — runner (push seam), scheduler (framework cron), and the
         # backend-owned Bot-side cron manager (openclaw mode). Singletons are also
         # discoverable by the application lifecycle auto-start path.
-        binder.bind(BbsBrowseLoopRunner, to=BbsBrowseLoopRunner, scope=singleton)
         binder.bind(BbsBrowseLoopScheduler, to=BbsBrowseLoopScheduler, scope=singleton)
         binder.bind(BbsBrowseCronManager, to=BbsBrowseCronManager, scope=singleton)
         # task_loop inbound callback 服务的进程内可信默认绑定(社区分布)。
@@ -158,6 +162,21 @@ class TaskModule(Module):
         # 不在此直绑,否则无参构造会漏掉 repo 注入。
         binder.bind(
             NoopCallbackAuthenticator, to=NoopCallbackAuthenticator, scope=singleton
+        )
+
+    @singleton
+    @provider
+    def bbs_browse_loop_runner(
+        self,
+        bot: OpenApiBotPort,
+        service: ForumServiceProtocol,
+        task_dispatch: TaskDispatchConfig,
+    ) -> BbsBrowseLoopRunner:
+        """Build the forum runner with this deployment's YAML-configured Backend URL."""
+        return BbsBrowseLoopRunner(
+            bot,
+            service,
+            backend_url=task_dispatch.backend_url,
         )
 
     @singleton
@@ -261,6 +280,14 @@ class TaskModule(Module):
             task_info_repo = injector.get(TaskInfoRepositoryProtocol)
         except Exception:  # noqa: BLE101 未绑定 → execute 跳过 task_info 落库
             task_info_repo = None
+        try:
+            delivery_intents = injector.get(TaskGraphRepositoryProtocol)
+        except Exception:
+            delivery_intents = None
+        try:
+            intake_repo = injector.get(TaskIntakeRepositoryProtocol)
+        except Exception:
+            intake_repo = None
         # 回投落库:TaskPersistenceModule 装了即取到(与 task_info_repo 同模块绑定);测试/纯内核
         # fixture 若未装则取不到 → 跳过回投落库(与 task_info_repo 缺省同语义,不阻断编排核推进)。
         if task_info_repo is not None:
@@ -305,6 +332,31 @@ class TaskModule(Module):
             staff_dept = injector.get(StaffDeptPlugin)
         except Exception:  # noqa: BLE101 未绑定 → list 不附加 owner_user_name
             staff_dept = None
+        from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
+            BcsBotTokenProvider,
+            NullBcsBotTokenProvider,
+        )
+
+        try:
+            bot_token_provider = injector.get(BcsBotTokenProvider)
+        except Exception:  # noqa: BLE101 未绑定时降级为无 token provider
+            bot_token_provider = NullBcsBotTokenProvider()
+        intake_handler = None
+        if intake_repo is not None and bot is not None and bot_service is not None:
+            intake_handler = TaskIntakeHandler(
+                intake_repo,
+                BotTaskIntakeSkill(
+                    bot,
+                    bot_service,
+                    bcs=bcs,
+                    bot_tokens=bot_token_provider,
+                    intake_repository=intake_repo,
+                ),
+                DefaultIntakeTargetResolver(
+                    bot_service, staff_profile=staff_dept,
+                    search=TaskSearch(discover_port),
+                ),
+            )
         # claim_on JOIN 灰度开关(默认关闭,HTTP 显式开启):经 task_claim_join_gate provider 解析
         # (系统配置 KV,跨副本共享);未绑(纯内核/轻量测试)→ None → gate 关 → 派发不做 claim_on 交集(不回归)。
         try:
@@ -317,23 +369,6 @@ class TaskModule(Module):
                 exc,
             )
             task_auth_gate = None
-        # 任务回投 origin 使用 bcs_client.task_callback_url[_pre]，由 BCS client
-        # 按当前环境选出对应地址。它是 BCS → Avernet 的真实回投通道，不能复用
-        # economy_governance 的卡片回调地址。
-        bcs_callback_url = ""
-        if bcs is not None:
-            _callback_fn = getattr(bcs, "task_callback_url", None)
-            if callable(_callback_fn):
-                bcs_callback_url = str(_callback_fn() or "").strip()
-        from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
-            BcsBotTokenProvider,
-            NullBcsBotTokenProvider,
-        )
-
-        try:
-            bot_token_provider = injector.get(BcsBotTokenProvider)
-        except Exception:  # noqa: BLE101 未绑定时降级为无 token provider
-            bot_token_provider = NullBcsBotTokenProvider()
         from agentclaw.community.core.task.task_discovery.notify_messages_provider import (
             NotifyMessagesProvider,
             NullNotifyMessagesProvider,
@@ -364,13 +399,15 @@ class TaskModule(Module):
             bot_service=bot_service,
             staff_dept=staff_dept,
             task_auth_gate=task_auth_gate,
-            api_base_url=self._callback_origin(bcs_callback_url),
+            api_base_url=task_dispatch.backend_url,
             bot_token_provider=bot_token_provider,
             notify_messages_provider=notify_messages_provider,
             task_search_skill_enabled=task_dispatch.task_search_skill_enabled,
             task_settings=task_settings,
             bot_bindings=bot_bindings,
             task_context_service=task_context_svc,
+            delivery_intents=delivery_intents,
+            intake_handler=intake_handler,
         )
 
     @singleton
@@ -497,6 +534,13 @@ class TaskModule(Module):
     @singleton
     @provider
     @inject
+    def task_delivery_lifecycle(self, injector: Injector) -> TaskDeliveryLifecycle:
+        """Retry persisted Relay handoffs independently of optional graph recovery."""
+        return TaskDeliveryLifecycle(injector)
+
+    @singleton
+    @provider
+    @inject
     def callback_authenticator(
         self, auth: NoopCallbackAuthenticator
     ) -> CallbackAuthenticator:
@@ -523,16 +567,6 @@ class TaskModule(Module):
                 exc,
             )
             return None
-
-    @staticmethod
-    def _callback_origin(task_callback_url: str) -> str:
-        """Return the callback origin; local default is preserved for missing config."""
-        if not task_callback_url:
-            return "http://localhost:8888"
-        parsed = urlparse(task_callback_url)
-        if not parsed.scheme or not parsed.netloc:
-            return "http://localhost:8888"
-        return f"{parsed.scheme}://{parsed.netloc}"
 
     @staticmethod
     def _resolve_discover(

@@ -83,11 +83,14 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     const saved = await this.save(latest, value => ({ ...value, execution: { ...value.execution!, jobId } }), issued.execution.executionId);
     if (saved.execution?.executionId !== issued.execution.executionId || saved.execution.state === "ended") await this.deps.ais.stopExecution(jobId);
   }
-  async release(input: RecoveryStoredTask): Promise<void> {
+  async release(input: RecoveryStoredTask, onlyWaitingOwner = false): Promise<void> {
     const task = await this.required(input.taskId);
     if (!task.execution || task.execution.state === "ended" || (input.execution && input.execution.executionId !== task.execution.executionId)) return;
-    await this.save(task, value => ({ ...value, execution: this.executions.end(value.execution!),
-      timeline: [...value.timeline, this.event("execution", "本次执行结束，已保存任务上下文", { execution_id: value.execution!.executionId })] }), task.execution.executionId);
+    await this.save(task, value => {
+      if (onlyWaitingOwner && value.status !== "waiting_owner") fail(409, "Owner 已确认，请继续当前任务");
+      return { ...value, execution: this.executions.end(value.execution!),
+        timeline: [...value.timeline, this.event("execution", "本次执行结束，已保存任务上下文", { execution_id: value.execution!.executionId })] };
+    }, task.execution.executionId);
     // The wrapper sees ended on its next control poll and exits for Base to archive.
     // Forced cancellation is reserved for expired leases / the outer hard timeout.
   }
@@ -158,9 +161,22 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     if (!this.deps.trajectory) fail(503, "轨迹读取未配置");
     const offset = body.offset ?? 0, limit = body.limit ?? 20;
     if (!Number.isSafeInteger(offset) || Number(offset) < 0 || !Number.isSafeInteger(limit) || Number(limit) < 1 || Number(limit) > 100
-      || body.trace_id !== undefined && (typeof body.trace_id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(body.trace_id))) fail(422, "轨迹范围无效");
-    return this.tool(task, body, "trajectory_read", false, () => this.deps.trajectory!.read({ target: task.runtimeTarget!.target,
-      sessionKey: task.request.session_key, offset: Number(offset), limit: Number(limit), traceId: body.trace_id as string | undefined }));
+      || body.trace_id !== undefined && (typeof body.trace_id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(body.trace_id))
+      || body.observation_id !== undefined && (typeof body.observation_id !== "string" || !/^[A-Za-z0-9_.:-]{1,255}$/.test(body.observation_id))
+      || body.field !== undefined && (typeof body.field !== "string" || !["input", "output"].includes(body.field) || !body.trace_id)
+      || body.observation_id !== undefined && !body.field
+      || body.content_offset !== undefined && (!Number.isSafeInteger(body.content_offset) || Number(body.content_offset) < 0 || !body.field)
+      || body.content_limit !== undefined && (!Number.isSafeInteger(body.content_limit) || Number(body.content_limit) < 1 || Number(body.content_limit) > 12000 || !body.field)) fail(422, "轨迹范围无效");
+    return this.tool(task, body, "trajectory_read", false, async () => {
+      const result = await this.deps.trajectory!.read({ target: task.runtimeTarget!.target,
+        sessionKey: task.request.session_key, offset: Number(offset), limit: Number(limit), traceId: body.trace_id as string | undefined, maxBytes: 128 * 1024,
+        observationId: body.observation_id as string | undefined, field: body.field as "input" | "output" | undefined,
+        contentOffset: body.content_offset as number | undefined, contentLimit: body.content_limit as number | undefined });
+      if (Buffer.byteLength(JSON.stringify(result), "utf8") > 128 * 1024) {
+        throw new SessionRecoveryError(422, "recovery_trajectory_page_too_large", "轨迹页过大，请缩小读取范围；正文使用 field 和 content_offset 分段读取");
+      }
+      return result;
+    });
   }
   async inspect(task: RecoveryStoredTask, body: Record<string, unknown>) {
     if (body.operation === "trajectory_read" && body.sessionKey !== task.request.session_key) fail(403, "轨迹必须属于原会话");
@@ -259,7 +275,9 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   }
   async report(task: RecoveryStoredTask, body: Record<string, unknown>) {
     if (body.phase !== task.phase) fail(409, "回报不对应当前阶段，请重新读取任务");
-    if (body.kind === "assessment") {
+    if (body.kind === "release") {
+      await this.release(task, true);
+    } else if (body.kind === "assessment") {
       await this.deps.business().assess(task.taskId, task.version, { decision: body.decision as "message" | "environment" | "observe", summary: body.summary as string, evidence_ids: body.evidence_ids as string[] });
     } else if (body.kind === "observation") {
       const judgment = body.judgment as RecoveryJudgment;

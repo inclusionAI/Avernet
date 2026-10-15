@@ -1,3 +1,4 @@
+import { WORKSPACE_RIGHT_PANEL_LAYOUT } from '@/components/Workspace/workspacePanelLayout';
 import { ResizableWorkspaceSidebar } from '../ResizableWorkspaceSidebar';
 import { SessionFilesPanel, type SessionFilesPanelProps } from './SessionFilesPanel';
 
@@ -13,10 +14,8 @@ export function SessionFilesSidebar(props: SessionFilesSidebarProps) {
     <ResizableWorkspaceSidebar
       ariaLabel="资源管理面板"
       side="right"
-      minWidth={320}
-      maxWidth={600}
-      defaultWidth={380}
-      storageKey="teamclaw:session-files-panel-width"
+      onDismiss={props.onClose}
+      {...WORKSPACE_RIGHT_PANEL_LAYOUT}
       className="z-30 bg-background"
     >
       <SessionFilesPanel {...props} />

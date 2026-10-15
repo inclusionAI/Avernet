@@ -211,7 +211,10 @@ async fn collect(
     let mut lifecycle = crate::lifecycle::Lifecycle::default();
     let mut seen = HashSet::new();
     let mut pending = HashSet::new();
-    let mut early_results = HashMap::new();
+    // Only wrapped MCP calls need an identity override. Keep the start's name
+    // until its matching result; never infer a privileged tool from output.
+    let mut wrapped_tools = HashMap::new();
+    let mut early_results: HashMap<String, Value> = HashMap::new();
     let mut early_bytes = 0usize;
     let mut completion_deadline = None;
     let mut answered: HashMap<String, Value> = HashMap::new();
@@ -275,7 +278,7 @@ async fn collect(
                 text = next;
                 finished |= done;
             }
-            Input::Hook(hook) => {
+            Input::Hook(mut hook) => {
                 let name = hook["hook_event_name"].as_str().unwrap_or_default();
                 if lifecycle.handle(&hook)? {
                     // Stop is advisory: the SDK can continue after Stop hooks.
@@ -311,19 +314,28 @@ async fn collect(
                         ));
                     }
                     if start {
+                        if let Some(name) = unwrap_mcp_call(&mut hook) {
+                            wrapped_tools.insert(id.clone(), name);
+                        }
                         pending.insert(id.clone());
                         emit(events, tool(run, &hook, ToolPhase::Start), abort, closed).await?;
-                        if let Some(result) = early_results.remove(&id) {
+                        if let Some(mut result) = early_results.remove(&id) {
                             early_bytes = early_bytes.saturating_sub(
                                 serde_json::to_vec(&result)
                                     .map_err(|e| TurnError::Protocol(e.to_string()))?
                                     .len(),
                             );
+                            if let Some(name) = wrapped_tools.remove(&id) {
+                                result["tool_name"] = name.into();
+                            }
                             emit(events, tool(run, &result, ToolPhase::Result), abort, closed)
                                 .await?;
                             pending.remove(&id);
                         }
                     } else if pending.remove(&id) {
+                        if let Some(name) = wrapped_tools.remove(&id) {
+                            hook["tool_name"] = name.into();
+                        }
                         emit(events, tool(run, &hook, ToolPhase::Result), abort, closed).await?;
                     } else {
                         early_bytes += serde_json::to_vec(&hook)
@@ -343,6 +355,25 @@ async fn collect(
             completion_deadline = Some(tokio::time::Instant::now() + Duration::from_secs(10));
         }
     }
+}
+
+pub(super) fn unwrap_mcp_call(hook: &mut Value) -> Option<String> {
+    if hook.get("tool_name").and_then(Value::as_str) != Some("mcp__qw-builtin__qwenwork_mcp_tool_call") {
+        return None;
+    }
+    let input = hook.get("tool_input")?;
+    let name = input.get("toolName")?.as_str()?;
+    let (server, tool) = name.strip_prefix("mcp__")?.split_once("__")?;
+    if name.len() > 1024 || server.is_empty() || tool.is_empty()
+        || !name.bytes().all(|c| c.is_ascii_alphanumeric() || b"_-.:".contains(&c)) {
+        return None;
+    }
+    let arguments = input.get("arguments")?.as_object()?;
+    let name = name.to_owned();
+    let arguments = Value::Object(arguments.clone());
+    hook["tool_name"] = name.clone().into();
+    hook["tool_input"] = arguments;
+    Some(name)
 }
 
 fn tool(run: &str, hook: &Value, phase: ToolPhase) -> StreamEvent {
@@ -370,7 +401,7 @@ fn tool(run: &str, hook: &Value, phase: ToolPhase) -> StreamEvent {
             } else {
                 None
             },
-            is_error: if failed { Some(true) } else { None },
+            is_error: (phase == ToolPhase::Result).then_some(failed),
             exit_code: None,
             duration_ms: None,
             cwd: None,

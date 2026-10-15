@@ -19,7 +19,7 @@ import { SharePopover } from '../ManagePanel/SharePopover';
 import { SessionScopeFilter } from '../SessionScopeFilter';
 import { GroupAvatarStack } from './GroupAvatarStack';
 import type { GroupItemProps, SessionTab } from './GroupItem.types';
-import { KIND_LABEL, SIDEBAR_TAG_CLASS } from './GroupItem.types';
+import { KIND_LABEL } from './GroupItem.types';
 import { GroupSessionsList } from './GroupSessionsList';
 
 // 头像堆已下沉至同目录 GroupAvatarStack（GroupHeader 同源引用），保留再导出兼容既有导入面。
@@ -101,11 +101,8 @@ export const GroupItem = React.memo(function GroupItem({
 
   return (
     <div className="py-0.5">
-      {/* v2 群一级行（dmore artboard-010「群目录一级_*」32px）：行背景胶囊与 hover 热区
-          分离（同对话 ConversationSessionRow 几何）；行首恒为成员头像堆（收起/展开同款，
-          详见 GroupAvatarStack）。无选中态（用户反馈）：胶囊恒为 hover 弱底，
-          选中群只经展开 chevron 与右侧会话列表表达。 */}
-      <div className="group/row relative flex min-h-8 items-center">
+      {/* 一级行统一为 52px：固定头像槽位，头像和操作相对两行文字整体居中。 */}
+      <div className="group/row relative flex min-h-13 items-center">
         <span
           aria-hidden="true"
           className="absolute inset-y-0 left-2 right-2 rounded-md bg-muted/60 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100"
@@ -116,29 +113,36 @@ export const GroupItem = React.memo(function GroupItem({
           aria-expanded={expanded}
           onClick={handleCardClick}
           className={cn(
-            'relative flex h-8 min-w-0 flex-1 items-center justify-start gap-2 rounded-md pl-2 pr-2 text-left hover:bg-transparent',
+            'relative flex h-auto min-h-13 min-w-0 flex-1 items-center justify-start gap-2 rounded-md py-1 pl-4 pr-2 text-left hover:bg-transparent',
             // 长标题让位：hover/聚焦/触屏/菜单开启时右界让出操作区（3 个 24px 图标 + right-2）。
             'group-hover/row:pr-[88px] group-focus-within/row:pr-[88px] [@media(hover:none)]:pr-[88px] group-has-[[data-state=open]]/row:pr-[88px]',
             // 操作区常显（展开/收藏 Tab/dots 开启）时同样让位，避免常显按钮与群名称重叠。
             actionsPinned && 'pr-[88px]',
           )}
         >
-          <GroupAvatarStack participants={group.participants} totalCount={stackTotalCount} />
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="min-w-0 flex-1 truncate text-[13px] leading-[18px] tracking-[-0.08px] text-content-strong">
-                  {group.name}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>{group.name}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          <Badge tone={KIND_TONE[group.kind]} className={cn('shrink-0 whitespace-nowrap', SIDEBAR_TAG_CLASS)}>
-            {KIND_LABEL[group.kind]}
-          </Badge>
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center [&>span]:mr-0">
+            <GroupAvatarStack participants={group.participants} totalCount={stackTotalCount} size={20} />
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="w-full min-w-0 truncate text-sm font-semibold leading-5 text-content-strong">
+                    {group.name}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{group.name}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <Badge
+              tone={KIND_TONE[group.kind]}
+              className="block max-w-full truncate rounded px-1.5 py-0.5 text-[10px] font-normal leading-3"
+            >
+              {KIND_LABEL[group.kind]}
+            </Badge>
+          </span>
           {/* 设计稿：仅展开态行内展示 chevron-down（收起态无箭头，点击整行仍可展开）。 */}
-          {expanded ? <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" /> : null}
+          {expanded ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /> : null}
         </Button>
         {/* v2 hover 操作区（设计稿未画，能力保留落位于行右缘轻量图标组）：
             新建会话入口 + 会话范围（全部/收藏）+ dots 菜单（管理/分享/解散）。
@@ -240,6 +244,8 @@ export const GroupItem = React.memo(function GroupItem({
           activeIdentity={activeIdentity}
         />
       )}
+
+      <div aria-hidden="true" className="mx-4 mt-1 border-b border-border/60" />
 
       <SharePopover
         open={shareOpen}

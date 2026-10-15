@@ -28,8 +28,17 @@ validates its chat metadata schema read-only, generates separate channel and Hoo
 credentials, and writes the registered Bot's engine options. It backs up both
 files, atomically writes private files, merges the required Hooks while preserving
 other Hooks, and reuses credentials on repeat execution. It never edits the
-WeCom channel database. Conflicting existing HTTP Hooks on the selected listener
-fail without modifying configuration.
+WeCom channel database. Desktop options are also saved privately to
+`bcs-bridge.toml` beside the selected desktop `settings.json`. Profiles reuse this
+shared listener, channel identity and Hook credential; BCN credentials and session
+state remain in each profile. Old profiles resolve the shared desktop options at
+startup. Stop the active bridge before starting another profile.
+
+The shared file survives clearing `~/.bcn-bridge`. For older installations with
+only Hooks remaining, initialization can recover the Hook credential from a
+complete, consistent bridge Hook set. Channel credentials cannot be recovered
+from Hooks: configure the channel once with the newly printed values in that
+case. Unrecognized or conflicting Hooks fail without modifying configuration.
 
 Fill the printed WebSocket URL, Bot ID and Secret in the desktop's WeCom Bot
 channel. Reload desktop Hooks, start bridge and enable the channel. The Secret
@@ -41,6 +50,22 @@ If detection is ambiguous or your installation uses different paths, append
 listener can be chosen with `--option listen=127.0.0.1:52493`; use the resulting
 printed URL and health command. The command requires exactly one QwenWork Bot
 in the selected bridge configuration.
+
+## MCP coordination tools
+
+QwenWork wraps native MCP calls in
+`mcp__qw-builtin__qwenwork_mcp_tool_call`. The bridge unwraps its object-valued
+`arguments` and qualified `toolName` for the start event, then uses that same name
+for the result with the matching tool call ID, including out-of-order Hooks.
+Unknown or malformed wrappers remain unchanged. Output cannot select a tool's
+identity or grant coordination permissions.
+
+Use a dedicated Provider with `coordination.mode = "native_mcp"` and exact
+`tool_name_mapping` entries for the desktop MCP server's three coordination tools:
+`bcs_assign_task`, `bcs_send_task_message`, and `bcs_task_complete`. For a server
+named `bcs-mcp`, map `mcp__bcs-mcp__bcs_assign_task` to `bcs_assign_task`, and likewise
+for the other two tools. Do not map the generic QwenWork wrapper to a coordination
+tool. BCS retains responsibility for Provider authorization and intent validation.
 
 ## Configure
 

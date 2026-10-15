@@ -21,7 +21,11 @@ from agentclaw.community.core.task.domain.models import (
     TaskNode,
     TaskSpec,
 )
-from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatcher
+from agentclaw.community.core.task.task_dispatch.dispatcher import (
+    CentralizedDispatchModeStrategy,
+    RelayHandoffDispatchModeStrategy,
+    TaskDispatcher,
+)
 from agentclaw.community.core.task.task_dispatch.strategies import (
     GroupFormation,
     SearchBasedDispatchStrategy,
@@ -95,7 +99,7 @@ def svc() -> TaskGraphService:
 class TestFourStates:
     def test_hit_single(self, svc):
         d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="bot_market"))
-        out = _run(d.dispatch([_node("c1")]))
+        out = _run(d.select_batch([_node("c1")]))
         assert out[0].run_info.run_mode == "single_bot"
         assert out[0].run_info.assignee == "bot_market"
 
@@ -107,21 +111,21 @@ class TestFourStates:
             owner_id="146836",
             owner_name="栖真",
         ))
-        out = _run(d.dispatch([_node("c1")]))
+        out = _run(d.select_batch([_node("c1")]))
         assert out[0].run_info.extend_props["assignee_name"] == "默认Bot"
         assert out[0].run_info.extend_props["assignee_owner_id"] == "146836"
         assert out[0].run_info.extend_props["assignee_owner_name"] == "栖真"
 
     def test_hit_group(self, svc):
         d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_GROUP, group_id="grp_tech"))
-        out = _run(d.dispatch([_node("c1")]))
+        out = _run(d.select_batch([_node("c1")]))
         assert out[0].run_info.run_mode == "coop_group"
         assert out[0].run_info.assignee == "grp_tech"
 
     def test_hit_multi_bots_marks_pending_group(self, svc):
         gf = GroupFormation(bot_ids=["bot_a", "bot_b"], collab_mode="manager_worker")
         d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_MULTI_BOTS, group_formation=gf))
-        out = _run(d.dispatch([_node("c1")]))
+        out = _run(d.select_batch([_node("c1")]))
         assert out[0].run_info.run_mode == "coop_group"
         assert out[0].run_info.assignee is None  # 拉群归编排核,留空
         assert out[0].run_info.extend_props.get("pending_group_formation") is gf
@@ -129,7 +133,7 @@ class TestFourStates:
 
     def test_miss_no_assignee_marks_events(self, svc):
         d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_bot_match"))
-        out = _run(d.dispatch([_node("c1")]))
+        out = _run(d.select_batch([_node("c1")]))
         assert out[0].run_info.run_mode is None
         assert out[0].run_info.assignee is None
         assert out[0].run_info.extend_props.get("miss_events") == ["no_bot_match"]
@@ -139,7 +143,7 @@ class TestBbsDegradation:
     def test_bbs_node_skips_search(self, svc):
         d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.MISS))
         node = _node("c1", run_mode="bbs", assignee="bot_bbs")
-        out = _run(d.dispatch([node]))
+        out = _run(d.select_batch([node]))
         assert out[0].run_info.run_mode == "bbs"
         assert out[0].run_info.assignee == "bot_bbs"
         assert len(strat.search_calls) == 0
@@ -155,7 +159,7 @@ class TestExecRetryReplay:
         d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="bot_other"))
         node = _node("c1", run_mode="single_bot", assignee="bot_orig")
         node.run_info.extend_props["harness_retries"] = 1
-        out = _run(d.dispatch([node]))
+        out = _run(d.select_batch([node]))
         assert out[0].run_info.run_mode == "single_bot"
         assert out[0].run_info.assignee == "bot_orig"
         assert len(strat.search_calls) == 0
@@ -167,7 +171,7 @@ class TestExecRetryReplay:
         ))
         node = _node("c1", run_mode="coop_group", assignee="grp_exist")
         node.run_info.extend_props["harness_retries"] = 1
-        out = _run(d.dispatch([node]))
+        out = _run(d.select_batch([node]))
         assert out[0].run_info.run_mode == "coop_group"
         assert out[0].run_info.assignee == "grp_exist"
         assert out[0].run_info.extend_props.get("pending_group_formation") is None  # 不重新拉群
@@ -176,7 +180,7 @@ class TestExecRetryReplay:
     def test_fresh_dispatch_not_replayed(self, svc):
         # harness_retries=0(首次派发)→ 正常搜推覆写
         d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="bot_market"))
-        out = _run(d.dispatch([_node("c1")]))
+        out = _run(d.select_batch([_node("c1")]))
         assert out[0].run_info.run_mode == "single_bot"
         assert out[0].run_info.assignee == "bot_market"
         assert len(strat.search_calls) == 1
@@ -186,7 +190,7 @@ class TestExecRetryReplay:
         d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="bot_market"))
         node = _node("c1", run_mode="single_bot", assignee=None)
         node.run_info.extend_props["harness_retries"] = 1
-        out = _run(d.dispatch([node]))
+        out = _run(d.select_batch([node]))
         assert out[0].run_info.assignee == "bot_market"
         assert len(strat.search_calls) == 1
 
@@ -195,7 +199,7 @@ class TestExecRetryReplay:
         d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.MISS))
         node = _node("c1", run_mode="bbs", assignee="bot_bbs")
         node.run_info.extend_props["harness_retries"] = 1
-        out = _run(d.dispatch([node]))
+        out = _run(d.select_batch([node]))
         assert out[0].run_info.run_mode == "bbs"
         assert out[0].run_info.assignee == "bot_bbs"
         assert len(strat.search_calls) == 0
@@ -206,14 +210,66 @@ class TestNoWriteGraph:
     def test_dispatch_returns_filled_nodes_only(self, svc):
         # dispatcher 持 graph 只读 config;不写图(不调 add/update/patch)。验证仅填充入参返回。
         d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="b1"))
-        out = _run(d.dispatch([_node("c1"), _node("c2")]))
+        out = _run(d.select_batch([_node("c1"), _node("c2")]))
         assert len(out) == 2
 
 
 class TestEmpty:
     def test_empty_list(self, svc):
         d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.MISS))
-        assert _run(d.dispatch([])) == []
+        assert _run(d.select_batch([])) == []
+
+
+class TestAtomicDispatch:
+    class _Runner:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def start_run(self, node):
+            self.calls.append(node.node_id)
+            return True
+
+        async def form_coop_group(self, group):
+            return "group-1"
+
+    def test_centralized_dispatch_selects_and_delivers_once(self, svc):
+        runner = self._Runner()
+        strategy = _StubDispatchStrategy(SearchResult(
+            outcome=SearchOutcome.HIT_SINGLE,
+            bot_id="bot-1",
+        ))
+        dispatcher = TaskDispatcher(
+            svc,
+            pool=[strategy],
+            runner=runner,
+            mode_strategies={"default": CentralizedDispatchModeStrategy()},
+        )
+
+        result = _run(dispatcher.dispatch(_node("c1")))
+
+        assert result.run_info.assignee == "bot-1"
+        assert runner.calls == ["c1"]
+
+    def test_relay_dispatch_preserves_executor_and_delivers_once(self, svc):
+        graph = svc.query_task_dashboard("t1")
+        graph.extend_props["execution_config"] = {"orchestration_mode": "relay"}
+        graph.extend_props["runtime_profile"] = {
+            "dispatcher_strategy": "relay_handoff",
+        }
+        runner = self._Runner()
+        dispatcher = TaskDispatcher(
+            svc,
+            runner=runner,
+            mode_strategies={
+                "relay_handoff": RelayHandoffDispatchModeStrategy(),
+            },
+        )
+        node = _node("c1", run_mode="single_bot", assignee="bot-1")
+
+        result = _run(dispatcher.dispatch(node))
+
+        assert result.run_info.assignee == "bot-1"
+        assert runner.calls == ["c1"]
 
 
 class TestSearchBasedDispatchStrategy:
@@ -699,7 +755,7 @@ class TestDispatchExceptionCarrier:
 
         d = TaskDispatcher(svc)
         d.set_strategies([_RaisingStrategy()])
-        node = _run(d.dispatch([_node("c1")]))[0]
+        node = _run(d.select_batch([_node("c1")]))[0]
 
         # node 留 PENDING(无执行者)+ dispatch_error 短状态串(harness 路由用,类型级)
         assert node.run_info.extend_props.get("dispatch_error") == "dispatch_exception:RuntimeError"
@@ -716,7 +772,7 @@ class TestDispatchExceptionCarrier:
         node = _node("c1")
         node.run_info.extend_props["_dispatch_failure"] = {"error_type": "stale", "error_msg": "old"}
         d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="bot1"))
-        out = _run(d.dispatch([node]))
+        out = _run(d.select_batch([node]))
         assert out[0].run_info.extend_props.get("_dispatch_failure") is None
 
     def test_rationale_assembly_failure_sets_assembly_error(self):

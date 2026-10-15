@@ -50,13 +50,22 @@ class SourceContext:
 
 @dataclass(frozen=True)
 class TaskInfoRequest:
-    task_spec: RequestTaskSpec
+    task_spec: TaskSpec | RequestTaskSpec
     source_type: "TaskSourceType"  # noqa: F821 — defined in models.py
     owner_user_id: str
     owner_bot_id: str
     execution_config: dict[str, Any] = field(default_factory=dict)
 
     def to_task_info(self, task_id: str) -> TaskInfo:
+        if isinstance(self.task_spec, TaskSpec):
+            return TaskInfo(
+                task_id=task_id,
+                task_spec=self.task_spec,
+                source_type=self.source_type.value,
+                owner_bot_id=self.owner_bot_id,
+                owner_user_id=self.owner_user_id,
+                execution_config=dict(self.execution_config),
+            )
         return TaskInfo(
             task_id=task_id,
             task_spec=TaskSpec(

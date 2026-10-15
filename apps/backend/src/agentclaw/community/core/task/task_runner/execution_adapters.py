@@ -32,8 +32,8 @@ from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatche
 from agentclaw.community.core.task.task_dispatch.search import TaskSearch
 from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
-from agentclaw.community.core.task.task_context.task_trajectory.trajectory_service import (
-    TaskTrajectoryService,
+from agentclaw.community.core.task.task_context.task_trajectory.trajectory_lifecycle import (
+    TaskTrajectoryLifecycle,
 )
 from agentclaw.community.core.task.task_runner.execution_events import TaskSemanticEvent
 
@@ -107,8 +107,8 @@ class CentralizedExecutionAdapter:
         self._poller_thread = None
         self._executor = self._build_executor()
         self._planner = self._build_planner()
-        self._dispatcher = self._build_dispatcher()
         self._runner = self._build_runner()
+        self._dispatcher = self._build_dispatcher()
         logger.info(
             "[task][engine] 构造完成 bot=%s bcs=%s discover=%s bcn=%s executor=%s",
             type(bot).__name__ if bot is not None else "None",
@@ -178,6 +178,11 @@ class CentralizedExecutionAdapter:
     def runner(self):
         """Shared delivery runtime exposed by the task_runner adapter."""
         return self._runner
+
+    @property
+    def dispatcher(self):
+        """Profile-selected single-node delivery entrypoint."""
+        return self._dispatcher
 
     @property
     def discover(self):
@@ -256,6 +261,8 @@ class CentralizedExecutionAdapter:
 
     def _build_dispatcher(self):
         from agentclaw.community.core.task.task_dispatch.dispatcher import (
+            CentralizedDispatchModeStrategy,
+            RelayHandoffDispatchModeStrategy,
             TaskDispatcher,
         )
         from agentclaw.community.core.task.task_dispatch.strategies import (
@@ -276,7 +283,15 @@ class CentralizedExecutionAdapter:
             )
         else:
             pool.append(SearchBasedDispatchStrategy())
-        return TaskDispatcher(self._graph, pool=pool)
+        return TaskDispatcher(
+            self._graph,
+            pool=pool,
+            runner=self._runner,
+            mode_strategies={
+                "default": CentralizedDispatchModeStrategy(),
+                "relay_handoff": RelayHandoffDispatchModeStrategy(),
+            },
+        )
 
     def _build_runner(self):
         from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
@@ -406,15 +421,15 @@ class CentralizedExecutionAdapter:
         "_enter_root_bbs": TaskHarness,
         "_maybe_propagate_hung": TaskHarness,
         "_reconcile_root_hung_if_blocked": TaskHarness,
-        "_emit_plan_trajectory": TaskTrajectoryService,
-        "_log_action": TaskTrajectoryService,
-        "_log_trajectory": TaskTrajectoryService,
-        "_transition_action_result": TaskTrajectoryService,
-        "_read_exec_error_origin": TaskTrajectoryService,
-        "_read_interface_error_code": TaskTrajectoryService,
-        "_read_exec_request_input_and_attempt": TaskTrajectoryService,
-        "_emit_execute_trajectory": TaskTrajectoryService,
-        "_static_runtime": TaskTrajectoryService,
+        "_emit_plan_trajectory": TaskTrajectoryLifecycle,
+        "_log_action": TaskTrajectoryLifecycle,
+        "_log_trajectory": TaskTrajectoryLifecycle,
+        "_transition_action_result": TaskTrajectoryLifecycle,
+        "_read_exec_error_origin": TaskTrajectoryLifecycle,
+        "_read_interface_error_code": TaskTrajectoryLifecycle,
+        "_read_exec_request_input_and_attempt": TaskTrajectoryLifecycle,
+        "_emit_execute_trajectory": TaskTrajectoryLifecycle,
+        "_static_runtime": TaskTrajectoryLifecycle,
         "_on_static_execute": TaskPlanner,
         "_static_next_wave": TaskPlanner,
         "_static_auto_report_on": TaskRunner,
@@ -757,13 +772,19 @@ class CentralizedExecutionAdapter:
 class RelayExecutionAdapter:
     """Relay delivery/search boundary over stable TaskRunner APIs."""
 
-    def __init__(self, *, runner: Any, discover: Any, user_id: str = "") -> None:
+    def __init__(self, *, runner: Any, discover: Any, dispatcher: Any = None,
+                 user_id: str = "") -> None:
         self._runner = runner
+        self._dispatcher = dispatcher
         self._search = TaskSearch(discover, user_id=user_id)
 
     @property
     def runner(self) -> Any:
         return self._runner
+
+    @property
+    def dispatcher(self) -> Any:
+        return self._dispatcher
 
     @property
     def search(self) -> TaskSearch:

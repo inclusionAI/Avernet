@@ -26,6 +26,7 @@ pub struct InviteCodeServiceImpl {
     repo: Arc<dyn InviteCodeRepoPort>,
     secret: Vec<u8>,
     public_claim_max_count: u64,
+    gate_enabled: bool,
     public_claim_lock: tokio::sync::Mutex<()>,
 }
 
@@ -39,8 +40,18 @@ impl InviteCodeServiceImpl {
             repo,
             secret,
             public_claim_max_count,
+            gate_enabled: true,
             public_claim_lock: tokio::sync::Mutex::new(()),
         }
+    }
+
+    /// Set the invite-code gate switch（bootstrap wires it from
+    /// `config.invite.invite_code_gate_enabled`）. When disabled, every caller
+    /// is treated as bound without touching the repo, so this backend switch
+    /// alone controls whether clients prompt for a binding.
+    pub fn with_gate_enabled(mut self, gate_enabled: bool) -> Self {
+        self.gate_enabled = gate_enabled;
+        self
     }
 
     fn normalize_code(code: &str) -> Result<String, ApplicationError> {
@@ -228,6 +239,14 @@ impl InviteCodeService for InviteCodeServiceImpl {
         &self,
         command: GetMyInviteCodeBinding,
     ) -> Result<InviteCodeBindingView, ApplicationError> {
+        if !self.gate_enabled {
+            // 开关关闭：所有调用者一律合成"已绑定"（无 bound_at 快照），
+            // 不查库、不做 human-only 校验——客户端是否提示完全由后端开关控制。
+            return Ok(InviteCodeBindingView {
+                bound: true,
+                bound_at: None,
+            });
+        }
         let user_id = Self::human_user_id(&command.caller)?;
         let record = self
             .repo
@@ -252,6 +271,11 @@ impl InviteCodeService for InviteCodeServiceImpl {
         &self,
         caller: &AuthenticatedCaller,
     ) -> Result<(), ApplicationError> {
+        // 防御纵深：gate 中间件在开关关闭时本就直接放行；此处短路保证服务自身
+        // 语义自洽（不依赖调用方是否先过中间件）。
+        if !self.gate_enabled {
+            return Ok(());
+        }
         let Some(user) = caller.user.as_ref() else {
             return Ok(());
         };
@@ -387,6 +411,76 @@ mod tests {
             ),
             repo,
         )
+    }
+
+    fn disabled_gate_service() -> (InviteCodeServiceImpl, Arc<FakeInviteCodeRepo>) {
+        let repo = Arc::new(FakeInviteCodeRepo::new());
+        (
+            InviteCodeServiceImpl::new(
+                repo.clone() as Arc<dyn InviteCodeRepoPort>,
+                b"secret".to_vec(),
+                1_000,
+            )
+            .with_gate_enabled(false),
+            repo,
+        )
+    }
+
+    #[tokio::test]
+    async fn disabled_gate_reports_every_caller_as_bound() {
+        let (svc, repo) = disabled_gate_service();
+
+        // 未绑定 human：开关关闭时合成为已绑定（无 bound_at）。
+        let view = svc
+            .get_my_invite_code_binding(GetMyInviteCodeBinding {
+                caller: human_caller("user-1"),
+            })
+            .await
+            .expect("query binding with gate disabled");
+        assert!(view.bound);
+        assert_eq!(view.bound_at, None);
+
+        // 非 human 调用者同样视为已绑定（human-only 校验不再先于短路）。
+        let view = svc
+            .get_my_invite_code_binding(GetMyInviteCodeBinding {
+                caller: AuthenticatedCaller {
+                    tenant: None,
+                    user: None,
+                    bot: None,
+                    app: None,
+                    access_key: None,
+                },
+            })
+            .await
+            .expect("non-human caller with gate disabled");
+        assert!(view.bound);
+        assert_eq!(view.bound_at, None);
+
+        // 合成视图不落库、不查库。
+        assert!(repo.records.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn disabled_gate_allows_access_without_binding() {
+        let (svc, _repo) = disabled_gate_service();
+        assert!(
+            svc.ensure_invite_code_access(&human_caller("user-9"))
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn enabled_gate_still_reports_unbound_from_repo() {
+        let (svc, _repo) = service();
+        let view = svc
+            .get_my_invite_code_binding(GetMyInviteCodeBinding {
+                caller: human_caller("user-1"),
+            })
+            .await
+            .expect("query binding with gate enabled");
+        assert!(!view.bound);
+        assert_eq!(view.bound_at, None);
     }
 
     #[tokio::test]

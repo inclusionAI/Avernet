@@ -298,14 +298,35 @@ _NO_USER_DIMENSION = {
     # principal (+ the declared owner_user_id query on join); the principal
     # authorises the call and the owner names whose Bot is toggled, neither
     # acts as an end user, so there is no user_id axis on the wire.
-    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription"),
-    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription"),
-    ("delete", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription"),
+    (
+        "get",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription",
+    ),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription",
+    ),
+    (
+        "delete",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription",
+    ),
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/feed"),
-    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/trigger-framework"),
-    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/trigger-self"),
-    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/cron-register"),
-    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/cron-remove"),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/trigger-framework",
+    ),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/trigger-self",
+    ),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/cron-register",
+    ),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/cron-remove",
+    ),
     # BBS unified writes name the author in the request body (author_type +
     # author_id); they are backend-API writes reachable by humans, Bots and
     # app-to-app callers, so there is no user_id axis on the wire.
@@ -727,14 +748,14 @@ def test_the_pinned_number_of_operations_take_it():
     # in the body). The owner is named on the wire rather than resolved from the
     # principal, so neither write names an end user and both drop out of
     # ``taking`` while moving into ``_NO_USER_DIMENSION``: 236 -> 234.
-# Merge from dev `193256c75` (Caller token per session): the
-# collaborating-Bot collection adds one user-scoped account-level read and
-# desktop-metadata awareness stays path-addressed; counts grow 1 here.
-# Desktop-metadata mount (Q1 in this iteration): avatar/links surface joins
-# the public schema -- six path-addressed user-scoped operations take
-# user_id like the rest of the {bot_id}-path tier, so ``taking`` grows
-# 246 -> 252 (and mirrors _BOT_ID_PLACEMENT["path"] 172 -> 178).
-# The Local Skill security read adds one user-scoped path operation.
+    # Merge from dev `193256c75` (Caller token per session): the
+    # collaborating-Bot collection adds one user-scoped account-level read and
+    # desktop-metadata awareness stays path-addressed; counts grow 1 here.
+    # Desktop-metadata mount (Q1 in this iteration): avatar/links surface joins
+    # the public schema -- six path-addressed user-scoped operations take
+    # user_id like the rest of the {bot_id}-path tier, so ``taking`` grows
+    # 246 -> 252 (and mirrors _BOT_ID_PLACEMENT["path"] 172 -> 178).
+    # The Local Skill security read adds one user-scoped path operation.
     # Engine release inspection adds one Bot-addressed read.
 # acli market CLIs: four path-addressed, user-scoped operations under
 # /bots/{bot_id}/clis take user_id like the identity switch beside them,

@@ -197,6 +197,52 @@ def _emit_bbs_trajectory(
         )
 
 
+async def _send_relay_bbs_message(bot, *, bot_id: str, message: str,
+                              task_id: str) -> dict[str, Any]:
+    """Accept a Relay BBS baton and return its communication handles immediately.
+
+    Distributed Relay BBS follows the same S6 contract as the other modalities:
+    dispatch means the channel accepted the instruction, not that the Bot has
+    finished. The winner reports ``EXECUTION_RESULT`` through its Skill callback.
+    Returning after ``send_message`` makes the session available for dashboard
+    drill-down while the baton is actually RUNNING.
+    """
+    await bot.ensure_grant(bot_id)
+    sent = await bot.send_message(
+        bot_id=bot_id, message=message, metadata={"biz_task_id": task_id}
+    )
+    return {
+        "status": "PENDING",
+        "run_id": sent.run_id,
+        "session_id": sent.session_id,
+    }
+
+
+def _persist_relay_bbs_dispatch_ids(
+    graph, task_id: str, node_id: str, result: object,
+) -> None:
+    """Expose the accepted Relay BBS communication handles on its graph node."""
+    if not isinstance(result, dict):
+        return
+    extend_props = {
+        key: result[key]
+        for key in ("group_id", "session_id", "run_id")
+        if result.get(key)
+    }
+    if not extend_props:
+        return
+    graph.report(TaskCallbackData(data={
+        "report_type": "NODE_PATCH",
+        "payload": {
+            "patch": TaskNodePatch(
+                task_id=task_id,
+                node_id=node_id,
+                extend_props_patch=extend_props,
+            )
+        },
+    }))
+
+
 async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
                  skill_name: str = _BBS_SKILL_NAME,
                  on_bbs_report=None, group_executor=None,
@@ -301,7 +347,10 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
         return
     logger.info("[task][bbs_mode] bid winner is=%s, task_id=%s", winner_bot_id, task_id)
 
-    _group_enabled = _singlebot_2_group_switch(graph, task_id)
+    _group_enabled = (
+        not (execution_graph.extend_props.get("execution_config") or {}).get("intake_session_id")
+        and _singlebot_2_group_switch(graph, task_id)
+    )
     actual_run_mode = "coop_group" if (_group_enabled and group_executor is not None) else "bbs"
 
     if target_node_id is not None:
@@ -353,9 +402,9 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
         }))
         logger.info("[task][bbs_mode] add_node, task_id=%s, nodes=%s", task_id, bbs_task_node)
 
-    # 任务msg:分布式 Relay 的 BBS 认领者仍是一条普通接力棒，只允许接收
-    # 同一的 S1-S8 闭环：S6 本地规划后先 search 决策，再 PLAN_RESULT、DISPATCH_RESULT、dispatch。
-    # 闭环；中心化 legacy BBS 才保留旧的 status/output 一次性上报协议。
+    # Relay BBS winner is an ordinary baton and receives the same S1-S6
+    # protocol: node context, execution report, one plan report, then dispatch.
+    # Centralized BBS retains its independent callback contract.
     relay_inputs = None
     if _relay_mode(execution_graph, target_node_id):
         relay_inputs = _relay_task_inputs(
@@ -432,6 +481,11 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
                         if relay_inputs is not None
                         else None
                     ),
+                    relay_token=(
+                        str(bbs_task_node.run_info.extend_props.get("relay_token") or "")
+                        if relay_inputs is not None
+                        else ""
+                    ),
                 )
             except Exception as exc:  # noqa: BLE101 建群/轮询失败 → 回退 send_and_wait(不阻断 single bot 投递)
                 logger.error(
@@ -452,11 +506,21 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
                 "[task][bbs_mode] send_and_wait 直发 task=%s node=%s winner=%s group_enabled=%s has_group_executor=%s",
                 task_id, bbs_task_node.node_id, winner_bot_id, _group_enabled, group_executor is not None,
             )
-            task_result = await bot.send_and_wait_async(
-                bot_id=winner_bot_id, message=msg, metadata={"biz_task_id": task_id},
-                timeout=_OVERALL_TIMEOUT_4_DOT,
-            )
+            if target_node_id is None:
+                task_result = await bot.send_and_wait_async(
+                    bot_id=winner_bot_id, message=msg,
+                    metadata={"biz_task_id": task_id},
+                    timeout=_OVERALL_TIMEOUT_4_DOT,
+                )
+            else:
+                task_result = await _send_relay_bbs_message(
+                    bot, bot_id=winner_bot_id, message=msg, task_id=task_id,
+                )
         logger.info("[task][bbs_mode] exec_done, task_id=%s, result=%s", task_id, task_result)
+        if target_node_id is not None:
+            _persist_relay_bbs_dispatch_ids(
+                graph, task_id, target_node_id, task_result
+            )
 
         if target_node_id is not None and _relay_bbs_execution_result_missing(
             graph, task_id, target_node_id
@@ -822,6 +886,7 @@ def _relay_task_msg(
         executor_bot_ids=[str(bot_id)],
         relay_execution=True,
         relay_blackboard=inputs["relay_blackboard"],
+        relay_token=node.run_info.extend_props.get("relay_token"),
     )
 
 

@@ -47,7 +47,8 @@ class DeliveryPort(Protocol):
 class TaskRunner:
     """将已派发 TaskNode 发送给单 bot/协作群/BBS 执行,并回收状态/详情/结果。
 
-    调用方:编排核(经 TaskService facade 驱动)。一个 start_run(批量)入口三模态自适应。
+    调用方:TaskDispatcher。``start_run(node)`` 是单节点投递原语；
+    ``start_batch(nodes)`` 仅是批量并发包装。
     三类投递后端经 ``set_delivery(mode, port)`` 注入(corp);缺省 stub 记投递日志返回 True。
     投递并发:``start_run`` 内部 ``asyncio.gather`` + ``_DELIVER_CONCURRENCY`` Semaphore 限流
     (对齐 backend lifecycle 模式,多节点网络投递并发防雪崩)。
@@ -71,17 +72,41 @@ class TaskRunner:
         """(非公开)注入执行投递后端。mode∈{"single_bot","coop_group","bbs"};corp ocb 仓注入真实实现。"""
         self._deliveries[mode] = port
 
-    async def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
-        """图谱上有 TaskNode 完成派发后立即触发执行。入参批量(刚被 dispatcher/adaptor patch 完
-        run_mode/assignee 的节点);返回每个任务派发是否成功 list[bool]。
+    async def start_run(self, node: TaskNode) -> bool:
+        """Deliver one authoritative node and return channel acceptance."""
+        if self._execution_backend is not None:
+            delivered = await self._execution_backend.dispatch([node])
+            return bool(delivered[0]) if delivered else False
+        port = self._deliveries.get(node.run_info.run_mode or "")
+        if port is not None:
+            return bool(await port.deliver(node))
+        try:
+            relay = bool(self._graph.query_task_dashboard(node.task_id).is_relay)
+        except Exception:  # noqa: BLE001 - lightweight centralized tests have no graph
+            relay = False
+        if relay or node.run_info.run_mode not in ("single_bot", "coop_group", "bbs"):
+            return False
+        logger.warning(
+            "[task][task_runner] start_run centralized stub mode=%s node=%s",
+            node.run_info.run_mode,
+            node.node_id,
+        )
+        self._run_log.append(
+            {
+                "task_id": node.task_id,
+                "node_id": node.node_id,
+                "run_mode": node.run_info.run_mode,
+                "assignee": node.run_info.assignee,
+                "loop_task_id": f"{node.task_id}::{node.node_id}",
+            }
+        )
+        return True
 
-        内部按 run_mode(str)自适应分发:有注入 delivery → ``await`` delivery.deliver(投递耗时 IO),
-        多节点经 ``asyncio.gather`` + ``_DELIVER_CONCURRENCY`` Semaphore 并发限流(对齐 backend lifecycle
-        模式,防投递雪崩);否则 stub 记日志返 True。
-        协程化:真实投递(单 bot workflow/BCS 协作群/BBS 广场)是网络 IO,并发 await 不阻塞编排核。"""
+    async def start_batch(self, nodes: list[TaskNode]) -> list[bool]:
+        """Batch convenience wrapper over the same delivery semantics."""
         if self._execution_backend is not None:
             # 真实后端一次接收完整批次，由其统一 semaphore 控制三种模态的并发。
-            return list(await self._execution_backend.dispatch(toDoTaskList))
+            return list(await self._execution_backend.dispatch(nodes))
 
         sem = asyncio.Semaphore(self._DELIVER_CONCURRENCY)
 
@@ -109,7 +134,7 @@ class TaskRunner:
                 )
                 return True
 
-        return list(await asyncio.gather(*[_deliver_one(n) for n in toDoTaskList]))
+        return list(await asyncio.gather(*[_deliver_one(n) for n in nodes]))
 
     async def form_coop_group(self, gf: GroupFormation) -> str:
         """(内部)HIT_MULTI_BOTS 动态拉协作群,复用 BCS 建群 → group_id。
@@ -128,19 +153,6 @@ class TaskRunner:
             gid,
         )
         return gid
-
-    async def resume_relay_turn(self, node: TaskNode, relay_turn: str) -> bool:
-        """Resume the current Relay holder at PLAN_RESULT without re-executing work."""
-        backend = self._execution_backend
-        resume = getattr(backend, "resume_relay_turn", None)
-        if not callable(resume):
-            logger.warning(
-                "[task][task_runner] relay resume unavailable node=%s execution_backend=%s",
-                node.node_id,
-                type(backend).__name__ if backend is not None else "None",
-            )
-            return False
-        return bool(await resume(node, relay_turn))
 
     async def get_group_session(self, group_id: str) -> str | None:
         """Fetch the initial session_id for a coop group; create one if absent."""
@@ -420,7 +432,12 @@ class TaskRunner:
                 [n.node_id for n in run_nodes],
             )
             try:
-                results = await self._runner.start_run(run_nodes)
+                start_batch = getattr(self._runner, "start_batch", None)
+                results = (
+                    await start_batch(run_nodes)
+                    if start_batch is not None
+                    else await self._runner.start_run(run_nodes)
+                )
             except Exception as ex:  # noqa: BLE001  start_run 异常→全部当失败,清 dispatching 留 PENDING 交 harness
                 logger.warning(
                     "[task][drain] task=%s start_run 异常:%s→全部留 PENDING 待 harness",

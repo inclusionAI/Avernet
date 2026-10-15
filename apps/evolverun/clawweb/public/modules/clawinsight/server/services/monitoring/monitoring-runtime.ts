@@ -2,7 +2,7 @@
 import type { Request } from 'express';
 import { getRepositories, type IDatabase } from '@avernet/clawweb-shared/server/db';
 import { MonitoringRepository } from '../../repositories/monitoring-repository.js';
-import { type MonitoringApi, MonitoringError } from './contracts.js';
+import { type MonitoringApi, type MonitoringRecoveryTrigger, MonitoringError } from './contracts.js';
 import type { DirectoryScope, LegacyReportBinding, MonitoringBotDirectory, MonitoringBrowserApi, MonitoringPrincipal } from './directory-contracts.js';
 import { createMonitoringService } from './monitoring-service.js';
 import { createMonitoringBrowserService } from './monitoring-browser-service.js';
@@ -16,6 +16,7 @@ export type MonitoringIntegration = {
   /** Confirms monitoring storage is exclusively routed to scope.tenant. */
   isolatedStorageTenant: string;
   bindings?: readonly LegacyReportBinding[];
+  recovery?: MonitoringRecoveryTrigger;
   principal: (request: Request) => Promise<MonitoringPrincipal>;
 };
 let configuredIntegration: MonitoringIntegration | null = null;
@@ -48,7 +49,7 @@ export function createMonitoringRuntime(
       const repository = new MonitoringRepository(getDb());
       const resolver = createTargetResolver(integration.directory, integration.scope, integration.bindings);
       const references = createMonitoringReferences(now);
-      assembled = { integration, service: createMonitoringService(repository, resolver, now),
+      assembled = { integration, service: createMonitoringService(repository, resolver, now, integration.recovery),
         browser: createMonitoringBrowserService(repository, integration.directory, references, integration.scope, now) };
       return assembled;
     } catch (error) {

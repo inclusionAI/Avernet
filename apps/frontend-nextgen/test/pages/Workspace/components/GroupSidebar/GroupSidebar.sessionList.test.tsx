@@ -63,15 +63,15 @@ describe('GroupSidebar', () => {
     expect(screen.queryByText(/3 个成员/)).not.toBeInTheDocument();
   });
 
-  it('v2 会话区：容器无缩进导轨/贯穿线，行自带背景胶囊与 ml-8 缩进（对话行同构）', () => {
+  it('会话区：容器无缩进导轨/贯穿线，行标题对齐固定头像槽后的一级名称', () => {
     render(<GroupSidebar {...makeProps()} />);
     const sessions = screen.getByLabelText('协作群会话列表：主站群');
     expect(sessions).not.toHaveClass('pl-6');
     expect(sessions.querySelectorAll('[data-session-tree-rail]').length).toBe(0);
     expect(sessions.querySelectorAll('[data-session-tree-elbow]').length).toBe(0);
-    // 会话行缩进由行 Button ml-8 承载（稿二级行 x=46 对齐），胶囊 hover/选中同几何。
+    // 会话行由 52px margin + 8px padding 对齐一级名称，胶囊 hover/选中同几何。
     const sessionTrigger = screen.getByRole('button', { name: /会话一/ });
-    expect(sessionTrigger).toHaveClass('ml-8');
+    expect(sessionTrigger).toHaveClass('ml-[52px]');
     const capsule = sessionTrigger.previousElementSibling as HTMLElement;
     expect(capsule).toHaveClass('left-2', 'right-2', 'rounded-md');
   });

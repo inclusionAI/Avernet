@@ -36,6 +36,7 @@ describe('useCollaborationSquareActorContext', () => {
       humanBotContext: { actorId: 'human_900003', userId: '900003' },
       viewer: { viewerActorType: 'human', viewerActorId: '900003' },
       activeActor: { type: 'human', id: '900003' },
+      activeActorName: '当前用户',
     });
     expect(reset).not.toHaveBeenCalled();
 
@@ -45,6 +46,7 @@ describe('useCollaborationSquareActorContext', () => {
       humanBotContext: { actorId: 'bot-1:900003', userId: '900003' },
       viewer: { viewerActorType: 'bot', viewerActorId: 'bot-1:900003' },
       activeActor: { type: 'bot', id: 'bot-1:900003' },
+      activeActorName: '当前 Bot',
     });
     expect(reset).toHaveBeenCalledTimes(1);
   });
@@ -58,6 +60,7 @@ describe('useCollaborationSquareActorContext', () => {
     expect(result.current).toMatchObject({
       viewer: { viewerActorType: 'human', viewerActorId: '900003' },
       activeActor: { type: 'human', id: '900003' },
+      activeActorName: '当前用户',
       humanBotContext: { actorId: 'human_900003', userId: '900003' },
     });
     expect(reset).not.toHaveBeenCalled();

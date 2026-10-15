@@ -68,10 +68,10 @@ class TaskServiceExecutionMixin:
             )
 
             logger.error("[task][task_service] run_workflow_begin, task_id=%s", task_id)
-            await self._runner.start_run([task_node])
+            await self._runner.start_run(task_node)
             logger.error("[task][task_service] run_workflow_end, task_id=%s", task_id)
 
-            return TaskOpResult(task_id=task_id, success=True, run_id=run_id)
+            return TaskOpResult(task_id=task_id, success=True, node_id=task_id, run_id=run_id)
         except Exception as exc:
             logger.error("[task][task_service] run_workflow_meet_exception, %s", exc)
             return TaskOpResult(
@@ -159,7 +159,7 @@ class TaskServiceExecutionMixin:
         )
         extend_props = {"group_id": start.group_id}
         return TaskOpResult(
-            task_id=task_id, success=True, run_id=run_id, extend_props=extend_props
+            task_id=task_id, success=True, node_id=task_id, run_id=run_id, extend_props=extend_props
         )
 
     async def _run_bbs(self, task_id, request, task_info, run_id) -> TaskOpResult:
@@ -169,7 +169,7 @@ class TaskServiceExecutionMixin:
 
         logger.info("[task][bbs_mode], finish_run_bbs, task_id=%s", task_id)
         return TaskOpResult(
-            task_id=task_id, success=True, run_id=run_id, extend_props={}
+            task_id=task_id, success=True, node_id=task_id, run_id=run_id, extend_props={}
         )
 
     def _persist_node_run(

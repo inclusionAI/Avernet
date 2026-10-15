@@ -40,6 +40,8 @@ from agentclaw.community.core.task.domain.models import (
     TaskInfo,
     TaskNode,
     TaskNodePatch,
+    TaskReportCommand,
+    TaskReportResult,
     TaskNodeQueryCriteria,
     TaskSpec,
     TaskSummary,
@@ -392,40 +394,16 @@ class TaskGraphService:
             raise AssertionError("unreachable graph version retry loop")
 
     def _get_node(self, graph: TaskExecutionGraph, node_id: str) -> TaskNode | None:
-        for n in graph.tasks:
-            if n.node_id == node_id:
-                return n
-        return None
+        return task_graph_support.get_node(graph, node_id)
 
     def _require_node(self, graph: TaskExecutionGraph, node_id: str) -> TaskNode:
-        node = self._get_node(graph, node_id)
-        if node is None:
-            raise NodeNotFoundError(
-                f"node_id={node_id} 不存在于 task_id={graph.tasks[0].task_id if graph.tasks else '?'}"
-            )
-        return node
+        return task_graph_support.require_node(graph, node_id)
 
     def _has_child(self, graph: TaskExecutionGraph, node_id: str) -> bool:
-        return any(
-            r.src_id == node_id and r.type == RelationType.DEPENDENCY
-            for r in graph.relations
-        )
+        return task_graph_support.has_child(graph, node_id)
 
     def _collect_subtree(self, graph: TaskExecutionGraph, node_id: str) -> set[str]:
-        """收集 node_id 及其所有后代 node_id(BFS over relations 分解树)。"""
-        subtree: set[str] = {node_id}
-        frontier = [node_id]
-        while frontier:
-            cur = frontier.pop()
-            for r in graph.relations:
-                if (
-                    r.src_id == cur
-                    and r.type == RelationType.DEPENDENCY
-                    and r.dst_id not in subtree
-                ):
-                    subtree.add(r.dst_id)
-                    frontier.append(r.dst_id)
-        return subtree
+        return task_graph_support.collect_subtree(graph, node_id)
 
     # ===== 4 核心写/读 =====
     def initialize_graph(self, task_info: TaskInfo) -> TaskExecutionGraph:
@@ -689,15 +667,59 @@ class TaskGraphService:
                     raise TaskStateError(
                         f"run_mode={requested_mode} is not allowed by frozen runtime profile"
                     )
+                single_bot_group_transport = (
+                    relay_mode
+                    and node.run_info.run_mode == "single_bot"
+                    and requested_mode == "coop_group"
+                    and patch.extend_props_patch is not None
+                    and patch.extend_props_patch.get("actual_run_mode") == "single_bot"
+                )
+                if (
+                    relay_mode
+                    and node.run_info.extend_props.get("relay_token")
+                    and requested_mode != node.run_info.run_mode
+                    and not single_bot_group_transport
+                ):
+                    node.run_info.extend_props["relay_token"] = uuid.uuid4().hex
                 node.run_info.run_mode = requested_mode
             if patch.assignee is not None:
+                dynamic_group_assignment = (
+                    relay_mode
+                    and node.run_info.assignee is None
+                    and node.run_info.extend_props.get(
+                        "pending_group_formation"
+                    ) is not None
+                    and patch.run_mode == "coop_group"
+                    and patch.extend_props_patch is not None
+                    and patch.extend_props_patch.get("group_id") == patch.assignee
+                )
+                if (
+                    relay_mode
+                    and node.run_info.extend_props.get("relay_token")
+                    and (patch.assignee or None) != node.run_info.assignee
+                    and not dynamic_group_assignment
+                ):
+                    node.run_info.extend_props["relay_token"] = uuid.uuid4().hex
                 node.run_info.assignee = patch.assignee or None
             if patch.progress_reason is not None:
                 node.run_info.progress_reason = patch.progress_reason or None
             if patch.failure_reason is not None:
                 node.run_info.failure_reason = patch.failure_reason or None
             if patch.extend_props_patch is not None:
+                if relay_mode and "relay_token" in patch.extend_props_patch:
+                    raise TaskStateError("relay_token is controlled by the graph")
+                old_retries = int(node.run_info.extend_props.get("harness_retries", 0) or 0)
                 node.run_info.extend_props.update(patch.extend_props_patch)
+                if relay_mode:
+                    new_retries = int(node.run_info.extend_props.get("harness_retries", 0) or 0)
+                    if new_retries > old_retries and node.run_info.extend_props.get("relay_token"):
+                        node.run_info.extend_props["relay_token"] = uuid.uuid4().hex
+                        # A new attempt starts from the same TaskSpec, not the
+                        # previous attempt's uncommitted business facts.
+                        node.run_info.extend_props.pop("execution_decision", None)
+                        node.run_info.actual_goal = None
+                        node.run_info.output.clear()
+                        node.run_info.acceptance_result = None
             if (
                 new_status == Status.RUNNING
                 and prev_status != Status.RUNNING
@@ -900,31 +922,26 @@ class TaskGraphService:
             self, task_id, bot_id, node_id=node_id, claim_id=claim_id
         )
 
-    def apply_relay_plan_result(
-        self,
-        *,
-        task_id: str,
-        origin_node_id: str,
-        gaps: list[str],
-        next_task_spec: TaskSpec | None,
-        holder_id: str,
-        max_rounds: int,
-    ) -> dict[str, Any]:
-        return task_graph_support.apply_relay_plan_result(
-            self,
-            task_id=task_id,
-            origin_node_id=origin_node_id,
-            gaps=gaps,
-            next_task_spec=next_task_spec,
-            holder_id=holder_id,
-            max_rounds=max_rounds,
-        )
+    def apply_relay_report(self, command: TaskReportCommand) -> TaskReportResult:
+        from agentclaw.community.core.task.task_context.relay_report import apply_relay_report
+
+        return apply_relay_report(self, command)
 
     def get_task_context(self, task_id: str) -> TaskContext:
         return task_graph_support.get_task_context(self, task_id)
 
+    def get_node_context(self, task_id: str, node_id: str) -> TaskContext:
+        return task_graph_support.get_node_context(self, task_id, node_id)
+
+    def initialize_intake_graph(self, task_info: TaskInfo, session_id: str) -> TaskExecutionGraph:
+        return task_graph_support.initialize_intake_graph(self, task_info, session_id)
+
     def load_action_logs(self, graph: TaskExecutionGraph, *, limit: int = 200) -> None:
         task_graph_support.load_action_logs(self, graph, limit=limit)
+
+    def is_relay_task(self, task_id: str) -> bool:
+        """Return the frozen orchestration mode without mutating the graph."""
+        return self.query_task_dashboard(task_id).is_relay
 
     def query_task_dashboard(
         self, task_id: str, node_id: str | None = None

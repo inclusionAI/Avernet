@@ -3,7 +3,7 @@
 // 由调用方(Hook)传入已鉴权的 Human ID,本 Service 不读取任何 Store / 路由。
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import { supportsBotSessionFavorites } from '@/domain/botEngine';
-import type { ConversationSessionScope } from '@/domain/conversation/types';
+import type { ConversationSessionRequestRange, ConversationSessionScope } from '@/domain/conversation/types';
 import {
   BOT_SESSION_PAGE_SIZE,
   botSessionService,
@@ -77,11 +77,13 @@ export const conversationService = {
     page: number = 1,
     pageSize: number = BOT_SESSION_PAGE_SIZE,
     sessionKey: string = '',
+    range?: ConversationSessionRequestRange,
   ): Promise<DomainResult<BotSessionPageView>> {
+    const rangeArgs: [] | [ConversationSessionRequestRange] = range ? [range] : [];
     if (scope === 'favorite' && supportsBotSessionFavorites(bot.engine)) {
-      return botSessionService.listFavoriteSessionsPage(bot, userId, page, pageSize);
+      return botSessionService.listFavoriteSessionsPage(bot, userId, page, pageSize, ...rangeArgs);
     }
-    const result = await botSessionService.listSessionsPage(bot, userId, page, pageSize, sessionKey);
+    const result = await botSessionService.listSessionsPage(bot, userId, page, pageSize, sessionKey, ...rangeArgs);
     return result.ok ? { ok: true, data: await conversationFavoriteService.hydrate(bot, userId, result.data) } : result;
   },
 
@@ -94,12 +96,14 @@ export const conversationService = {
     pageSize: number = BOT_SESSION_PAGE_SIZE,
     scope: ConversationSessionScope = 'all',
     sessionKey: string = '',
+    range?: ConversationSessionRequestRange,
   ): Promise<DomainResult<BotSessionPageView>> {
     const friendBot = { ...bot, isFriendBot: true };
+    const rangeArgs: [] | [ConversationSessionRequestRange] = range ? [range] : [];
     if (scope === 'favorite' && supportsBotSessionFavorites(bot.engine)) {
-      return botSessionService.listFavoriteSessionsPage(friendBot, userId, page, pageSize);
+      return botSessionService.listFavoriteSessionsPage(friendBot, userId, page, pageSize, ...rangeArgs);
     }
-    const result = await botSessionService.listSessionsPage(friendBot, userId, page, pageSize, sessionKey);
+    const result = await botSessionService.listSessionsPage(friendBot, userId, page, pageSize, sessionKey, ...rangeArgs);
     return result.ok
       ? { ok: true, data: await conversationFavoriteService.hydrate(friendBot, userId, result.data) }
       : result;

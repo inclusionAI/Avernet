@@ -71,6 +71,11 @@ impl BridgePeer {
         let bot_id = connect["params"]["bot_id"].as_str().expect("bot.connect bot_id").to_owned();
         // The bridge always requests V3; the peer negotiates its own version.
         assert_eq!(connect["params"]["protocol_version"], 3);
+        if self.config.bots.iter().any(|bot| bot.engine == "qwenwork") {
+            assert_eq!(connect["params"]["client_kind"], "native_mcp");
+        } else {
+            assert!(connect["params"]["client_kind"].is_null());
+        }
         match expected_token {
             Some(token) => assert_eq!(connect["params"]["token"], token),
             None => assert!(connect["params"].get("token").is_none()
@@ -85,6 +90,78 @@ impl BridgePeer {
         })).await;
         (bot_id, socket)
     }
+}
+
+#[tokio::test]
+async fn qwenwork_requests_native_mcp_without_changing_other_engine_handshakes() {
+    let mut peer = BridgePeer::one_bot().await;
+    peer.config.bots[0].engine = "qwenwork".into();
+    // Reuse the fake CLI engine; this test isolates the outgoing handshake.
+    let mut registry = EngineRegistry::builtin();
+    registry.register(bcs_bridge_core::engine::claude_code::ClaudeCodeFactory::custom("qwenwork", "unused", vec![]));
+    let state = Arc::new(AppState::new(peer.config.clone(), &registry).unwrap());
+    let (_, shutdown, task) = peer.start_state(state);
+    let _socket = peer.accept("bot-a", None).await;
+    stop(shutdown, task).await;
+}
+
+#[tokio::test]
+async fn immediate_restart_retries_the_old_connection_then_runs_normally() {
+    let peer = BridgePeer::one_bot().await;
+    let (_, shutdown, task) = peer.start().await;
+    for _ in 0..2 {
+        reject_connect(&peer, "already_connected").await;
+    }
+    let mut socket = peer.accept("bot-a", None).await;
+    send_json(&mut socket, chat_send("restart-request", "restart-run", "group-a:session-a", "after restart")).await;
+    let final_frame = recv_application(&mut socket, is_final).await;
+    assert_eq!(final_frame["payload"]["runId"], "restart-run");
+    assert_eq!(engine_starts(peer.dir.path()).len(), 1);
+    stop(shutdown, task).await;
+}
+
+#[tokio::test]
+async fn persistent_duplicate_connection_exhausts_its_retry_budget() {
+    let peer = BridgePeer::one_bot().await;
+    let (_, _shutdown, task) = peer.start().await;
+    for _ in 0..7 {
+        reject_connect(&peer, "already_connected").await;
+    }
+    let error = tokio::time::timeout(IO_TIMEOUT, task).await.unwrap().unwrap().unwrap_err();
+    assert!(error.to_string().contains("active WebSocket connection"));
+    assert!(tokio::time::timeout(Duration::from_millis(100), peer.listener.accept()).await.is_err());
+    assert!(!peer.dir.path().join("worker-1/engine-starts.jsonl").exists());
+}
+
+#[tokio::test]
+async fn credential_and_protocol_rejections_do_not_retry() {
+    for code in ["invalid_token", "unsupported_protocol_version", "dispatch_error"] {
+        let peer = BridgePeer::one_bot().await;
+        let (_, _shutdown, task) = peer.start().await;
+        reject_connect(&peer, code).await;
+        assert!(tokio::time::timeout(IO_TIMEOUT, task).await.unwrap().unwrap().is_err());
+        assert!(tokio::time::timeout(Duration::from_millis(100), peer.listener.accept()).await.is_err());
+    }
+}
+
+#[tokio::test]
+async fn shutdown_interrupts_duplicate_connection_backoff() {
+    let mut peer = BridgePeer::one_bot().await;
+    peer.config.plugin.as_mut().unwrap().reconnect_interval_ms = 8_000;
+    let (_, shutdown, task) = peer.start().await;
+    reject_connect(&peer, "already_connected").await;
+    shutdown.cancel();
+    tokio::time::timeout(Duration::from_secs(1), task).await.unwrap().unwrap().unwrap();
+    assert!(tokio::time::timeout(Duration::from_millis(100), peer.listener.accept()).await.is_err());
+}
+
+async fn reject_connect(peer: &BridgePeer, code: &str) {
+    let (stream, _) = tokio::time::timeout(IO_TIMEOUT, peer.listener.accept()).await.unwrap().unwrap();
+    let mut socket = accept_async(stream).await.unwrap();
+    let connect = recv_json(&mut socket).await;
+    assert_eq!(connect["method"], "bot.connect");
+    send_json(&mut socket, json!({"type":"res", "id":connect["id"], "ok":false,
+        "error":{"code":code,"message":"synthetic connection rejection","retryable":false}})).await;
 }
 
 #[tokio::test]

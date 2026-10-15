@@ -28,6 +28,7 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
 
   const botViewModel: BotCatalogViewModel = {
     activeActor: square.activeActor,
+    activeActorName: square.activeActorName,
     bots: square.visibleBots,
     busyKeys: square.busyKeys,
     query: square.botQuery,

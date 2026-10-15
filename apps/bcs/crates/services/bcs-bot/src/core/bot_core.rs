@@ -1,3 +1,6 @@
+#[path = "bot_coordination.rs"]
+mod coordination;
+
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -359,32 +362,8 @@ impl BotRegistryCoreService for BotCore {
             .await
             .ok_or_else(|| ServiceError::BotNotFound(bot_id.to_string()))?;
 
-        if let Some(bindings) = &self.provider_bindings {
-            if let Some(binding) = bindings.get_binding_by_bot_uuid(bot_id).await? {
-                if binding.disabled {
-                    return Err(ServiceError::InvalidOperation {
-                        message: format!("provider bot '{}' is disabled", bot_id),
-                        request_id: None,
-                    });
-                }
-                let providers = self.provider_repo.as_ref().ok_or_else(|| {
-                    ServiceError::InternalError("provider repo not configured".to_string())
-                })?;
-                let provider = providers
-                    .get_provider(&binding.provider_id)
-                    .await?
-                    .ok_or_else(|| ServiceError::InvalidOperation {
-                        message: format!("provider '{}' not found", binding.provider_id),
-                        request_id: None,
-                    })?;
-                if provider.disabled {
-                    return Err(ServiceError::InvalidOperation {
-                        message: format!("provider '{}' is disabled", provider.provider_id),
-                        request_id: None,
-                    });
-                }
-                return Ok(parse_coordination_config(&provider.config)?.into());
-            }
+        if let Some(surface) = self.provider_coordination_surface(bot_id).await? {
+            return Ok(surface);
         }
 
         let client_kind = self

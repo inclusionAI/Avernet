@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { RepairTaskDetail } from '../../../../server/contracts/repair-workbench'
-import type { RepairReleaseTarget } from '../../../../server/contracts/repair-release'
+import type { RepairConfirmRequest, RepairReleaseTarget } from '../../../../server/contracts/repair-release'
 import { repairBatches } from '../../../api/repair-batches'
 import { button, primary } from './repair-view'
 import RepairVerification from './RepairVerification'
@@ -9,95 +9,95 @@ import { repairReleaseError } from '../../../api/repair-release-error'
 export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, onRefresh }: {
   detail: RepairTaskDetail; selectedRevision: number; canEdit: boolean; onRefresh: () => void;
 }) {
-  const [dialog, setDialog] = useState<'confirm' | 'deploy' | 'stop' | null>(null)
-  const [targets, setTargets] = useState<RepairReleaseTarget[]>([])
-  const [targetId, setTargetId] = useState('')
+  const [dialog, setDialog] = useState(false)
+  const [target, setTarget] = useState<RepairReleaseTarget | null>(null)
   const [ack, setAck] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const request = useRef({ key: '', id: '' })
-  const approval = detail.release?.approval?.status === 'approved' ? detail.release.approval : null
-  const deployment = detail.release?.deployments[0]
+  const submitting = useRef(false)
+  const request = useRef<RepairConfirmRequest | null>(null)
+  const scope = `${detail.taskId}:${selectedRevision}`
+  const scopeRef = useRef(scope); scopeRef.current = scope
+  const panel = useRef<HTMLElement>(null)
   const revision = detail.latestSuccessful
-  const isCurrent = revision?.revision === selectedRevision && ['review', 'failed', 'no_change', 'blocked', 'published', 'publishing'].includes(detail.latestAttempt.phase)
-  const pending = deployment && ['dispatching', 'running', 'uncertain', 'created'].includes(deployment.status)
-  useEffect(() => { setDialog(null); setError(''); request.current = { key: '', id: '' } }, [detail.taskId, selectedRevision])
-  const refreshRef = useRef(onRefresh)
-  refreshRef.current = onRefresh
+  const isCurrent = revision?.revision === selectedRevision && detail.latestAttempt.phase !== 'drafting'
+  const deployment = detail.release?.deployments.find(row => row.revision === selectedRevision && row.status !== 'failed')
+    ?? detail.release?.deployments.find(row => row.revision === selectedRevision)
+  const pending = !!deployment && ['created', 'dispatching', 'running', 'uncertain'].includes(deployment.status)
+  const succeeded = deployment?.status === 'succeeded'
+  const canPublish = canEdit && isCurrent && detail.capabilities.publication && revision?.phase === 'review'
+  useEffect(() => { setDialog(false); setTarget(null); setAck(false); setError(''); request.current = null }, [scope])
   async function reconcile() {
-    if (!deployment || !canEdit) return
-    try {
-      const current = await repairBatches.reconcileDeployment(detail.taskId, deployment.id)
-      if (current.status !== deployment.status) refreshRef.current()
-    } catch (reason) { setError(repairReleaseError(reason)) }
+    if (!deployment || !canEdit || submitting.current) return
+    submitting.current = true; setBusy(true)
+    try { await repairBatches.reconcileDeployment(detail.taskId, deployment.id); onRefresh() }
+    catch (reason) { setError(repairReleaseError(reason)) }
+    finally { submitting.current = false; setBusy(false) }
   }
   useEffect(() => {
     if (!pending || !canEdit) return
     const timer = setInterval(() => { void reconcile() }, 15_000)
     return () => clearInterval(timer)
-  }, [pending, canEdit, detail.taskId, deployment?.id, deployment?.status])
-  async function openConfirm() {
-    setDialog('confirm'); setAck(false); setTargetId(''); setTargets([]); setBusy(true); setError('')
-    try { setTargets((await repairBatches.deploymentTargets(detail.taskId)).targets) }
-    catch (reason) { setError(repairReleaseError(reason)) }
-    finally { setBusy(false) }
-  }
-  async function submit() {
-    if (!revision || busy || !canEdit || !isCurrent) return
-    const key = JSON.stringify([dialog, detail.taskId, revision.revision, revision.stateVersion, targetId, ack, approval?.id])
-    if (request.current.key !== key) request.current = { key, id: crypto.randomUUID() }
-    setBusy(true); setError('')
+  }, [pending, canEdit, deployment?.id, deployment?.status])
+  async function open() {
+    const current = scope
+    setDialog(true); setTarget(null); setAck(false); setError(''); setLoading(true)
+    panel.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
     try {
-      if (dialog === 'confirm') await repairBatches.confirm(detail.taskId, { revision: revision.revision,
-        expectedStateVersion: revision.stateVersion, targetId, acknowledgeUncoveredChecks: ack, requestId: request.current.id })
-      else if (dialog === 'stop' && deployment) await repairBatches.stopDeployment(detail.taskId, deployment.id, request.current.id)
-      else if (dialog === 'deploy' && approval) await repairBatches.deploy(detail.taskId, { revision: revision.revision,
-        expectedApprovalVersion: approval.stateVersion, requestId: request.current.id })
-      request.current = { key: '', id: '' }; setDialog(null); onRefresh()
-    } catch (reason) { setError(repairReleaseError(reason)); onRefresh() }
-    finally { setBusy(false) }
+      const response = await repairBatches.deploymentTargets(detail.taskId)
+      const scopes = response.targets.filter(row => row.scope === 'workflow')
+      if (scopeRef.current !== current) return
+      if (scopes.length !== 1) throw new Error('没有唯一且已授权的工作流发布范围，请检查权限和宿主配置')
+      setTarget(scopes[0])
+    } catch (reason) { if (scopeRef.current === current) setError(repairReleaseError(reason)) }
+    finally { if (scopeRef.current === current) setLoading(false) }
   }
-  async function revoke() {
-    if (!approval || busy) return
-    setBusy(true); setError('')
-    try { await repairBatches.revokeConfirmation(detail.taskId, { revision: approval.revision, expectedApprovalVersion: approval.stateVersion, requestId: crypto.randomUUID() }); onRefresh() }
-    catch (reason) { setError(repairReleaseError(reason)) }
-    finally { setBusy(false) }
+  async function publish() {
+    if (!canPublish || !target || !ack || !revision || submitting.current) return
+    submitting.current = true; setBusy(true); setError('')
+    request.current ??= { revision: revision.revision, expectedStateVersion: revision.stateVersion,
+      requestId: crypto.randomUUID(), targetId: target.id, acknowledgeUncoveredChecks: ack }
+    try {
+      await repairBatches.publish(detail.taskId, request.current)
+      setDialog(false); request.current = null; onRefresh()
+    } catch (reason) { setError(repairReleaseError(reason)); onRefresh() }
+    finally { submitting.current = false; setBusy(false) }
   }
   async function resume() {
-    if (!deployment || busy) return
-    setBusy(true); setError('')
+    if (!deployment || submitting.current || !canEdit) return
+    submitting.current = true; setBusy(true)
     try { await repairBatches.resumeDeployment(detail.taskId, deployment.id, crypto.randomUUID()); onRefresh() }
     catch (reason) { setError(repairReleaseError(reason)) }
-    finally { setBusy(false) }
+    finally { submitting.current = false; setBusy(false) }
   }
-  const succeeded = deployment?.status === 'succeeded'
-  return <section aria-label="审阅部署与效果验证" className="rounded-lg border border-input bg-card p-5">
-    <div className="flex flex-wrap items-center justify-between gap-4">
-      <div><h3 className="text-base font-semibold">{succeeded ? `已部署 #${deployment.receipt?.deployNumber}，下一步验证效果` : pending ? '部署已提交，请核对执行结果' : approval ? `候选 v${approval.revision} 已确认，下一步部署` : '审阅完成后，确认此候选'}</h3>
-        <p className="mt-1 text-sm text-muted-foreground">{succeeded ? '部署成功不代表问题已解决。等待新版本实际运行，再逐项记录结论。' : pending ? '不重复派发，不生成新候选。只核对这一发布请求的真实结果。' : approval ? `目标：${approval.target.label}。部署使用已确认的完整 Pack，不会重新生成内容。` : '确认会锁定候选 commit、检查报告和目标 Bot；不会直接部署。'}</p></div>
-      {!succeeded && !pending && <button className={primary} disabled={!canEdit || busy || !isCurrent || !detail.capabilities.publication || revision?.phase !== 'review'}
-        onClick={() => approval ? setDialog('deploy') : void openConfirm()}>{approval ? deployment?.status === 'failed' ? '重试部署此候选' : '部署此候选' : '确认候选'}</button>}
-      {approval && !deployment && <button className={button} disabled={!canEdit || busy || !isCurrent} onClick={() => void revoke()}>撤销确认</button>}
-      {pending && <button className={button} disabled={busy || !canEdit} onClick={() => { void reconcile().then(onRefresh) }}>核对部署状态</button>}
-      {deployment?.status === 'uncertain' && <button className={primary} disabled={busy || !canEdit} onClick={() => void resume()}>继续完成此部署</button>}
-      {pending && <button className={button} disabled={busy || !canEdit} onClick={() => setDialog('stop')}>停止未激活的部署</button>}
-    </div>
-    {!isCurrent && !succeeded && <p className="mt-2 text-sm text-warning-foreground">当前查看的是历史候选。请切回最新候选后处理。</p>}
-    {!detail.capabilities.publication && !succeeded && <p className="mt-2 text-sm text-warning-foreground">当前无法部署：请管理员配置审核候选发布能力；可继续审阅，不会隐式部署。</p>}
-    {deployment?.error && <p role="alert" className="mt-2 text-sm text-destructive">{deployment.error}</p>}
-    {error && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}
-    {succeeded && <RepairVerification detail={detail} deployment={deployment} canEdit={canEdit} />}
-    {dialog && <div role="dialog" aria-label={dialog === 'stop' ? '停止未激活的部署' : dialog === 'confirm' ? '确认审核候选' : '确认部署候选'} className="mt-5 rounded-lg border border-primary/30 bg-background p-4">
-      <h4 className="font-semibold">{dialog === 'stop' ? '停止未激活的部署' : dialog === 'confirm' ? '确认审核候选' : '确认部署候选'}</h4>
-      <p className="mt-2 text-sm">v{revision?.revision} · commit <code>{String(revision?.draft?.candidateCommit ?? '').slice(0, 12)}</code></p>
-      {dialog === 'confirm' ? <>
-        <label className="mt-3 block text-sm">部署目标<select aria-label="部署目标 Bot" value={targetId} onChange={event => setTargetId(event.target.value)} className="ml-3 rounded border border-input bg-background p-2 text-foreground"><option value="">请选择目标 Bot</option>{targets.map(target => <option key={target.id} value={target.id}>{target.label}</option>)}</select></label>
-        {!busy && !targets.length && !error && <p className="mt-2 text-sm text-warning-foreground">没有可部署的目标。需要可访问、支持审核发布且具有此工作流编辑权限的 Bot。</p>}
-        <label className="mt-3 flex items-start gap-2 text-sm"><input type="checkbox" checked={ack} onChange={event => setAck(event.target.checked)} />我已审阅完整 Diff 与检查报告，知悉未覆盖的业务验证需要在部署后核对。</label>
-      </> : dialog === 'stop' ? <p className="mt-3 text-sm">仅停止尚未激活的发布请求，并阻止迟到执行激活。保留候选和历史，不回滚当前版本。若实际部署已完成，将核对部署事实而不是取消。</p> : <p className="mt-3 text-sm">即将把此完整 Pack 部署到 {approval?.target.label}，影响后续新运行。已有运行不切换版本。确认后才发起部署。</p>}
-      <div className="mt-4 flex justify-end gap-2"><button className={button} disabled={busy} onClick={() => setDialog(null)}>返回审阅</button>
-        <button className={primary} disabled={busy || dialog === 'confirm' && (!targetId || !ack)} onClick={() => void submit()}>{busy ? '提交中…' : dialog === 'stop' ? '确认停止，不回滚' : dialog === 'confirm' ? '仅确认候选' : '确认并部署'}</button></div>
+  const title = succeeded ? `已生效 #${deployment.receipt?.deployNumber}，系统自动观察效果`
+    : pending ? '发布结果待核对' : deployment?.status === 'failed' ? '发布未完成，候选已保留' : '审阅并确认发布'
+  return <section ref={panel} aria-label="审阅部署与效果验证" className="scroll-mt-6 rounded-xl border border-input bg-card p-5">
+    <h3 className="text-base font-semibold">{title}</h3>
+    <p className="mt-2 text-sm leading-6 text-muted-foreground">{succeeded ? '仅以生效版本、相关节点及可判定样本验证；证据不足时持续观察。'
+      : pending ? '先核对同一个发布请求，结果未明确前不重复发布。'
+      : '发布已审阅的完整 Pack，作用于此工作流在当前环境的后续新运行。已有运行保留原版本。'}</p>
+    {!isCurrent && !succeeded && <p className="mt-3 text-sm text-muted-foreground">当前查看的是历史候选，请切回最新可用候选。</p>}
+    {!detail.capabilities.publication && <p role="alert">发布能力未启用，请检查宿主配置。</p>}
+    {deployment?.error && <p className="mt-3 text-sm text-destructive">{deployment.error}</p>}
+    {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
+    {dialog && <div role="region" aria-label="确认发布候选" className="mt-4 space-y-3 border-t border-input pt-4">
+      <h4 className="font-semibold">发布候选 v{selectedRevision}</h4>
+      {loading ? <p role="status">正在核对工作流发布范围…</p> : target && <p>{target.label}</p>}
+      <p className="text-sm text-muted-foreground">影响范围包括本次 Diff 中的工作流、脚本和资源。业务效果及未覆盖检查将在生效后观察；无有效验证规则的问题不会自动宣称已修复。</p>
+      <label className="flex items-start gap-2 text-sm leading-6"><input type="checkbox" checked={ack} onChange={event => setAck(event.target.checked)} />我已审阅完整 Diff、检查报告和影响范围，接受未覆盖风险并确认发布此版本。</label>
     </div>}
+    {succeeded && <RepairVerification detail={detail} deployment={deployment} canEdit={canEdit} />}
+    <footer aria-label="当前修复步骤与下一步" className="fixed bottom-3 left-6 right-6 z-50 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-input bg-card px-5 py-3 shadow-lg">
+      <div><p className="text-sm font-semibold">{title}</p><p className="text-xs text-muted-foreground">生成优化草稿 → 审阅并确认发布 → 自动验证</p></div>
+      <div className="flex items-center gap-3">
+        {dialog && <button className={button} disabled={busy} onClick={() => setDialog(false)}>返回审阅</button>}
+        {pending && deployment.target.scope === 'workflow' && <button className={button} disabled={busy || !canEdit} onClick={() => void resume()}>继续原发布</button>}
+        {!succeeded && <button className={primary} disabled={busy || loading || (pending ? !canEdit : !canPublish || dialog && (!ack || !target))}
+          onClick={() => { if (pending) void reconcile(); else if (dialog) void publish(); else void open() }}>
+          {busy ? '提交中…' : pending ? '核对发布状态' : dialog ? '确认发布' : '发布此版本'}</button>}
+      </div>
+    </footer>
   </section>
 }

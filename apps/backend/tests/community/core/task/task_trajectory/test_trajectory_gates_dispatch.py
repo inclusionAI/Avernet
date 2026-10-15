@@ -199,7 +199,7 @@ class TestDispatcherWritesRationale:
             claim_on=[{"bot_id": "A:1"}],
             bot_kwargs={"outcome": "HIT_SINGLE", "bot_id": "A"},
         )
-        out = _run(d.dispatch([_node("c1")]))
+        out = _run(d.select_batch([_node("c1")]))
         rat = out[0].run_info.extend_props.get("_dispatch_rationale")
         assert rat is not None and isinstance(rat, dict)
         assert rat["strategy_name"] == "search"
@@ -230,7 +230,7 @@ class TestDispatcherWritesRationale:
             use_skill=False,
         )
         # Rule mode uses the unrestricted prefetch catalog directly.
-        out = _run(d.dispatch([_node("c1")]))
+        out = _run(d.select_batch([_node("c1")]))
         rat = out[0].run_info.extend_props.get("_dispatch_rationale")
         if rat is None:
             pytest.skip("rule mode MISS when no claim+public pool intersect; rationale skipped on MISS")
@@ -247,7 +247,7 @@ class TestDispatcherWritesRationale:
             claim_on=[{"bot_id": "A:1"}],
             bot_kwargs={"outcome": "MISS"},
         )
-        out = _run(d.dispatch([_node("c1")]))
+        out = _run(d.select_batch([_node("c1")]))
         rat = out[0].run_info.extend_props.get("_dispatch_rationale")
         assert rat is not None
         assert rat["strategy_name"] == "search"
@@ -264,7 +264,7 @@ class TestDispatcherWritesRationale:
         d.set_strategies([DirectDispatchStrategy()])
         node = _node("c1")
         node.run_info.extend_props["static_bot_id"] = "direct-bot"
-        out = _run(d.dispatch([node]))
+        out = _run(d.select_batch([node]))
         rat = out[0].run_info.extend_props.get("_dispatch_rationale")
         assert rat is not None
         assert rat["strategy_name"] == "direct"
@@ -284,7 +284,7 @@ class TestDispatcherWritesRationale:
         d = TaskDispatcher(svc)
         d.set_strategies([DirectDispatchStrategy()])
         node = _node("c1", run_mode="bbs", assignee="bbs-bot")
-        out = _run(d.dispatch([node]))
+        out = _run(d.select_batch([node]))
         assert "_dispatch_rationale" not in out[0].run_info.extend_props
 
 
@@ -314,7 +314,7 @@ class _RationaleStubDispatcher:
         self._gf = group_formation
         self._miss_reason = miss_reason
 
-    async def dispatch(self, nodes: list[TaskNode]) -> list[TaskNode]:
+    async def select_batch(self, nodes: list[TaskNode]) -> list[TaskNode]:
         for n in nodes:
             if self._rationale is not None:
                 n.run_info.extend_props["_dispatch_rationale"] = dict(self._rationale)
@@ -341,9 +341,13 @@ class _StubRunner:
     def __init__(self) -> None:
         self.run_calls: list[list[TaskNode]] = []
 
-    async def start_run(self, nodes):
+    async def start_batch(self, nodes):
         self.run_calls.append(list(nodes))
         return [True] * len(nodes)
+
+    async def start_run(self, node):
+        self.run_calls.append([node])
+        return True
 
     async def form_coop_group(self, gf):
         return "grp_stub"

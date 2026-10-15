@@ -24,7 +24,7 @@ function setup(callbackFails = false) {
   const notifier = { notify: vi.fn().mockResolvedValue(undefined) };
   const reporter = { report: callbackFails ? vi.fn().mockRejectedValue(new Error("callback offline")) : vi.fn().mockResolvedValue(undefined) };
   const deps = { tasks: store, agent, notifier, reporter,
-    observationMs: 3600000, ownerWaitMs: 900000, now: () => 100 };
+    observationMs: 3600000, now: () => 100 };
   return { records, delivery, agent, notifier, reporter, deps, service: new SessionRecoveryTaskService(deps) };
 }
 
@@ -85,7 +85,7 @@ describe("self-healing task orchestration", () => {
   });
 });
 
-it("slow callbacks cannot block state changes or Owner timeout handling", async () => {
+it("slow callbacks cannot block state changes or expire an Owner wait", async () => {
   const { service, records, reporter, agent } = setup();
   const ack = await service.create(request, actor); await flush();
   await service.executionFailure(ack.task_id, "执行失败，任务结束");
@@ -97,7 +97,7 @@ it("slow callbacks cannot block state changes or Owner timeout handling", async 
   let unblock!: () => void;
   reporter.report.mockImplementation(() => new Promise<void>(resolve => { unblock = resolve; }));
   const reporting = service.reportResults(); await flush();
-  await service.maintenance(); expect(agent.release).toHaveBeenCalledOnce();
+  await service.maintenance(); expect(agent.release).not.toHaveBeenCalled();
   expect(records.get(ack.task_id)!.pending_results).toHaveLength(1);
   unblock(); await reporting;
   expect(records.get(ack.task_id)!.pending_results).toEqual([]);

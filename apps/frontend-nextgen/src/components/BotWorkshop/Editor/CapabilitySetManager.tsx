@@ -7,47 +7,15 @@ import { Input } from '@/components/ui/Input';
 import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Switch } from '@/components/ui/Switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
-import type { BotCapabilitySet, BotEditorMcp, BotEditorSkill } from '@/domain/botEditor';
-import type { PendingSkillSetToggle } from '@/hooks/useSkillSetActivation';
+import type { BotCapabilitySet, BotEditorSkill } from '@/domain/botEditor';
 import type { CapabilityDetailTarget } from '@/services/botWorkshop/botCapabilityDetailService';
 import { ChevronDown, ChevronRight, Loader2, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CapabilityDetailDrawer } from './CapabilityDetailDrawer';
 import { CapabilityMembers } from './CapabilityMembers';
 import { CapabilityPickerModal } from './CapabilityPickerModal';
-export interface CapabilitySetManagerProps {
-  botId?: string;
-  ownerId?: string;
-  sets: BotCapabilitySet[];
-  mySkills: BotEditorSkill[];
-  marketSkills: BotEditorSkill[];
-  skillCenterSkills: BotEditorSkill[];
-  workshopSkills: BotEditorSkill[];
-  marketMcps: BotEditorMcp[];
-  editable: boolean;
-  onCreate: (name: string) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
-  onActive: (set: BotCapabilitySet, active: boolean) => Promise<void>;
-  pendingSkillSetToggle?: PendingSkillSetToggle;
-  onSkill: (setId: string, skillId: string, active: boolean) => Promise<void>;
-  onSkillCenterReferences: (setId: string, skillCodes: string[]) => Promise<void>;
-  onUploadSkillFolder: (files: File[]) => Promise<BotEditorSkill>;
-  onLocalToggle?: (skill: BotEditorSkill) => Promise<void>;
-  onLocalDelete?: (id: string) => Promise<void>;
-  onLocalUpload?: (file: File) => Promise<void>;
-  onMcp: (setId: string, serverCode: string, active: boolean) => Promise<void>;
-  onLoadCandidates: (
-    kind: 'skill' | 'mcp',
-    mcpQuery?: { source: 'internal' | 'open-platform'; keyword?: string },
-  ) => Promise<void>;
-  candidatesLoading?: boolean;
-  mcpCallTypes?: Record<string, 'caller' | 'owner'>;
-  callerContextEditable?: boolean;
-  mcpIdentityDisabledReason?: string;
-  updatingCallType?: string;
-  onMcpCallType?: (serverCode: string, callType: 'caller' | 'owner') => Promise<void>;
-}
-type Picker = { set: BotCapabilitySet; kind: 'skill' | 'mcp' };
+import type { CapabilityPicker, CapabilitySetManagerProps } from './capabilitySetManagerTypes';
+export type { CapabilitySetManagerProps } from './capabilitySetManagerTypes';
 
 export function CapabilitySetManager(props: CapabilitySetManagerProps) {
   const {
@@ -70,11 +38,11 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
   const [expanded, setExpanded] = useState<string[]>(sets[0] ? [sets[0].id] : []);
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState('');
-  const [picker, setPicker] = useState<Picker>();
+  const [picker, setPicker] = useState<CapabilityPicker>();
   const [pickerSuspendedForDetail, setPickerSuspendedForDetail] = useState(false);
   const [detailTarget, setDetailTarget] = useState<CapabilityDetailTarget>();
   const canAddMcp = getCapabilities().getBotMcpPickerEnabled().value;
-  const openPicker = (set: BotCapabilitySet, kind: Picker['kind']) => {
+  const openPicker = (set: BotCapabilitySet, kind: CapabilityPicker['kind']) => {
     setPickerSuspendedForDetail(false);
     setPicker({ set, kind });
     if (kind === 'skill') void onLoadCandidates(kind);
@@ -193,6 +161,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                       <CapabilityMembers
                         kind="skill"
                         items={set.skills}
+                        compact={props.compact}
                         onDetail={props.botId ? (id, name) => setDetailTarget({ kind: 'skill', id, name }) : undefined}
                         editable={editable}
                         onAdd={set.isDefault ? undefined : () => openPicker(set, 'skill')}
@@ -201,6 +170,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                       <CapabilityMembers
                         kind="mcp"
                         items={set.mcps}
+                        compact={props.compact}
                         onDetail={props.botId ? (id, name) => setDetailTarget({ kind: 'mcp', id, name }) : undefined}
                         editable={editable}
                         identities={props.mcpCallTypes}
@@ -211,7 +181,9 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                         onAdd={set.isDefault || !canAddMcp ? undefined : () => openPicker(set, 'mcp')}
                         onRemove={(id) => onMcp(set.id, id, false)}
                       />
-                      {set.clis.length ? <CapabilityMembers kind="cli" items={set.clis} editable={false} /> : null}
+                      {set.clis.length ? (
+                        <CapabilityMembers kind="cli" items={set.clis} compact={props.compact} editable={false} />
+                      ) : null}
                     </div>
                   ) : null}
                 </section>

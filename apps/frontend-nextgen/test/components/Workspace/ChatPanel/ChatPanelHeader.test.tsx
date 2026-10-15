@@ -1,29 +1,24 @@
 /** @jest-environment jsdom */
 // @jest/globals 必须先行：sonner mock factory 会在 ChatPanelHeader 的 require 链中被执行，
 // 若它先于 globals 被 require，factory 里的 jest.fn() 是 undefined（hoisting 坑，见项目备忘）。
+import { ChatPanelHeader } from '@/components/Workspace/ChatPanel/ChatPanelHeader';
+import type { ConversationTarget } from '@/services/workspace/workspaceModel';
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { toast } from 'sonner';
-import { ChatPanelHeader } from '@/components/Workspace/ChatPanel/ChatPanelHeader';
-import type { ConversationTarget } from '@/services/workspace/workspaceModel';
 
 // 只需 ChatLayout.Header 槽位结构（slotLeft/slotRight 分列），stub 掉 SDK 三槽布局。
 jest.mock('@tc-chat/ui/es/ChatLayout', () => {
   const { createElement } = require('react');
   const ChatLayout = (props: Record<string, unknown>) => createElement('div', null, props.children);
   ChatLayout.Header = (props: Record<string, unknown>) =>
-    createElement(
-      'div',
-      null,
-      createElement('div', null, props.slotLeft),
-      createElement('div', null, props.slotRight),
-    );
+    createElement('div', null, createElement('div', null, props.slotLeft), createElement('div', null, props.slotRight));
   return { ChatLayout };
 });
 
-jest.mock('sonner', () => ({ toast: { success: jest.fn(), error: jest.fn() } }));
+jest.mock('sonner');
 
 const target = {
   id: 'bot-1',
@@ -69,8 +64,8 @@ describe('ChatPanelHeader 会话 ID 复制与窄屏让位', () => {
     const pill = screen.getByRole('button', { name: `复制会话 ID ${sessionCode}` });
     expect(pill).toHaveClass('max-w-[180px]', 'shrink-[2]', 'min-w-0');
     expect(pill.querySelector('span')).toHaveClass('truncate');
-    // 标题保底 112px（sm 以上 120px）后才 ellipsis，不被胶囊立即挤没。
-    expect(screen.getByRole('heading', { name: 'Q3 经营复盘' })).toHaveClass('min-w-[112px]', 'truncate');
+    expect(screen.getByRole('group', { name: '对话 Q3 经营复盘' })).toContainElement(pill);
+    expect(screen.getByRole('heading', { name: 'Q3 经营复盘' })).toHaveClass('min-w-0', 'truncate');
   });
 
   it('无 sessionCode 时不渲染复制胶囊', () => {

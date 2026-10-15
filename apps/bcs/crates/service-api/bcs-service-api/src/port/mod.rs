@@ -12,6 +12,7 @@ pub mod event_metrics;
 pub mod event_recording;
 pub mod friend_connect_notification;
 pub mod friend_auth_sync;
+pub mod friendship_writeback;
 pub mod group_context;
 pub mod group_session_token;
 pub mod human_notify;
@@ -64,6 +65,7 @@ pub use friend_connect_notification::{
 pub use friend_auth_sync::{
     FriendAuthSyncAction, FriendAuthSyncCommand, FriendAuthSyncPort, NoopFriendAuthSyncPort,
 };
+pub use friendship_writeback::{FriendshipWritebackPort, NoopFriendshipWritebackPort};
 pub use group_context::{GroupDispatchContextPort, GroupHistoryBotRequestPort};
 pub use group_session_token::{
     GROUP_SESSION_TOKEN_MAX_COMPACT_LEN, GroupSessionTokenClaims, GroupSessionTokenError,

@@ -32,7 +32,8 @@ class OpenApiBotPort(Protocol):
 
     async def ensure_grant(self, bot_id: str) -> None: ...
     async def send_message(
-        self, *, bot_id: str, message: str, metadata: dict[str, Any]
+        self, *, bot_id: str, message: str, metadata: dict[str, Any],
+        message_id: str | None = None,
     ) -> BotSendResult: ...
     async def get_run(self, run_id: str) -> dict[str, Any]: ...
     async def cancel_run(self, run_id: str) -> None: ...
@@ -114,6 +115,7 @@ class BcsClientPort(Protocol):
         message: str,
         session_id: str | None = None,
         caller_bearer: str | None = None,
+        idempotency_key: str | None = None,
     ) -> BotSendResult:
         """BCS A2A(bot↔bot 1:1)异步消息:``POST /bots/{target_bot_id}:{target_user_id}/chat-async``。
 
@@ -123,6 +125,14 @@ class BcsClientPort(Protocol):
         目标用 ``bot_id:owner_id`` 寻址。``session_id`` 原样作 BCS session_key(多轮复用)。
         """
         ...
+    async def get_chat_run(
+        self,
+        run_id: str,
+        *,
+        since_version: int = 0,
+        wait_ms: int = 0,
+        caller_bearer: str | None = None,
+    ) -> dict[str, Any]: ...
     def task_callback_url(self) -> str:
         """Return the callback origin used by task event subscriptions."""
         ...

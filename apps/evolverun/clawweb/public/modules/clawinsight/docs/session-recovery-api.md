@@ -1,6 +1,38 @@
 # 会话自愈接口
 
-创建接口同步确认受理；处理进展、等待状态和最终结果通过异步结果接口回报。消息投递成功与原故障恢复分别表达。
+创建接口同步确认受理；效果等待超时和任务结束时通过异步结果接口回报。消息投递成功与原故障恢复分别表达。
+
+## 实时诊断自动触发（内测）
+
+ClawWeb 在现有 `POST /api/insight/v1/internal/monitoring/diagnosis-events` 完成身份校验和诊断落库后，调用已装配的自愈任务服务。诊断发送端不增加自愈请求，也不修改上报 DTO。
+
+自动触发同时满足：
+
+- `decision = ALERT` 且 `handlerName = NOT_COMPLETED`。当前实时诊断将 `task_completed` 映射为 `COMPLETED / NOT_COMPLETED`；缺失或其他值不推断为未完成。`PASS`、`UNRESOLVED` 和已完成任务不触发。
+- `ce_app_config` 中 `config_key = session_recovery_allowlist` 的记录已启用，且目标精确命中 `config_json.allowed_bots`。
+- 原诊断有合法的原会话键和非空诊断文本。缺失会话键时，不使用物理 `sessionId` 或 `traceId` 替代。
+
+白名单 JSON：
+
+```json
+{
+  "allowed_bots": [
+    { "bot_id": "example-bot", "entity_id": "example-owner", "env": "prod" }
+  ]
+}
+```
+
+每项仅包含 `bot_id / entity_id / env`，按完整三元组区分大小写精确匹配；环境为 `pre / prod`，不允许通配符、重复项或未知字段。`env` 指目标 Bot 环境。读取现有配置 Repository，使用现有管理员接口 `/api/evolve/app-config` 维护，不新增表、迁移、环境变量或凭据。代码不自动创建配置或填充内测名单。
+
+配置不存在、`enabled = 0` 或名单为空时，诊断正常落库和 ACK，不自动创建任务。每次符合触发条件的上报重新读取配置，修改后即时影响后续自动创建；已创建任务按原流程继续。配置读取失败、启用记录的格式无效或自愈服务暂不可用返回 `503`，不会默认放行。
+
+自动请求使用诊断的 `eventId / tcFaultLabel / botId / entityId / env / engine / sessionKey`。`diagnosis` 按“业务诊断＋系统诊断”保留原文本并校验总长，不静默截断。投递键固定为 `monitoring-<SHA-256(eventId)>`。不发送当前实时诊断未提供的 `error_location`，不发送 `execution_level`，沿用自愈服务默认 `approval`。无合法自愈输入时保存诊断、记录跳过原因并正常 ACK；自愈服务明确拒绝请求时返回不可重试的现有监控错误。
+
+需要自动创建的诊断，只有自愈任务持久化成功后才确认上报；不等待 Agent 执行或最终效果。任务保存失败返回 `503`，复用诊断发送端原有持久队列与退避重试。重复诊断也执行同一触发检查；诊断内容冲突先返回 `409`，不会创建自愈任务。固定投递键复用已有任务，响应丢失、重启或并发上报不创建第二个任务。
+
+诊断上报 ACK 继续使用原 `201 / 200` 和 `duplicate` 契约，不添加自愈状态。业务结果由现有自愈任务记录承载，不用诊断 ACK 表示恢复成功。本次自动触发接线不新增结果接收路由或再次调度逻辑。
+
+与 2026-09-23《会话自愈对接协议 v2（最小实现版）》相比，创建请求的原必填字段不变；现有接口已增加可选的 `error_location / execution_level`、受理响应的 `task_id`、完整任务结果及其版本和证据，以及继续原任务接口。当前接口不要求新增独立服务 Token；旧文档中仅有 `delivery` 的结果不能代表完整任务结论。
 
 ## 创建任务
 

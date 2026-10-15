@@ -5,7 +5,8 @@ import { useBotSessionFileUpload } from '@/pages/Workspace/hooks/useBotSessionFi
 import { useBotSkills } from '@/pages/Workspace/hooks/useBotSkills';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import { beforeEach, expect, it, jest } from '@jest/globals';
-import { renderHook } from '@testing-library/react';
+import '@testing-library/jest-dom';
+import { fireEvent, render, renderHook, screen } from '@testing-library/react';
 
 jest.mock('@/pages/Workspace/hooks/useBotSessionFiles');
 jest.mock('@/pages/Workspace/hooks/useBotSessionFileUpload');
@@ -64,4 +65,33 @@ it('好友 Bot 的 / 命令不展示 skill 入口', () => {
 
   const items = result.current.command.categories[0]?.items ?? [];
   expect(items.map((item) => item.name)).toEqual(['file', 'clear']);
+});
+
+it('对话资源面板点击外部收起，入口再次点击不会先关闭又打开', () => {
+  function Fixture() {
+    const files = useBotSessionFilesFeature(bot, session, 'human_900003', jest.fn());
+    return (
+      <>
+        <button
+          type="button"
+          data-workspace-panel-trigger
+          onClick={files.fileDrawerOpen ? files.closeFileDrawer : files.openFileDrawer}
+        >
+          资源入口
+        </button>
+        <button type="button">聊天消息</button>
+        {files.featureNode}
+      </>
+    );
+  }
+  render(<Fixture />);
+  const trigger = screen.getByText('资源入口');
+  fireEvent.click(trigger);
+  expect(screen.getByLabelText('资源管理面板')).toBeInTheDocument();
+  fireEvent.pointerDown(trigger);
+  fireEvent.click(trigger);
+  expect(screen.queryByLabelText('资源管理面板')).not.toBeInTheDocument();
+  fireEvent.click(trigger);
+  fireEvent.pointerDown(screen.getByText('聊天消息'));
+  expect(screen.queryByLabelText('资源管理面板')).not.toBeInTheDocument();
 });

@@ -26,6 +26,7 @@ export function SidePanelCollapseButton({
       icon={<PanelRightClose className="size-4" aria-hidden />}
       size="sm"
       onClick={onClick}
+      data-workspace-panel-trigger
       className={cn('absolute right-1.5 top-2 z-20 rounded-md text-muted-foreground', className)}
     />
   );
