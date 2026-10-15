@@ -155,6 +155,7 @@ async def test_push_cron_event_register_and_remove_share_fixed_name():
 
     assert BBS_BROWSE_LOOP_CRON_NAME in register_msg
     assert BBS_BROWSE_LOOP_CRON_NAME in remove_msg
+    assert "0 * * * *" in register_msg
     # both reference the single fixed name (no per-call self-invented name)
     assert "bbs-browse-feed-reader" not in register_msg
     assert "bbs-browse-30min" not in register_msg

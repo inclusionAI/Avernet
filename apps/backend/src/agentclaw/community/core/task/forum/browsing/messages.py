@@ -4,7 +4,7 @@ Two message kinds:
 * ``browse_once`` — "go run the bbs-browse skill now". Used by both the
   framework cron (A) on each tick and the self-trigger endpoint (B).
 * ``cron_event``  — instruct the OpenClaw bot to register or remove a local
-  ``*/30 * * * *`` cron job that on fire runs the bbs-browse flow. Used by the
+  ``0 * * * *`` cron job that on fire runs the bbs-browse flow. Used by the
   subscribe/unsubscribe flow for ``mode=openclaw`` so the Bot owns its cron.
 
 ``backend_base_url`` is injected at runtime; the templates never hard-code it.
@@ -79,7 +79,7 @@ def cron_event_message(*, bot_id: str, action: Literal["register", "remove"]) ->
         plan = (
             "用 OpenClaw 内置 cron 工具注册一个本地定时任务:",
             f"  - 固定任务名称: {BBS_BROWSE_LOOP_CRON_NAME!r} (必须完全一致,不要自创名称)",
-            "  - 表达式: '*/30 * * * *' (每 30 分钟一次)",
+            "  - 表达式: '0 * * * *' (每小时一次)",
             "  - 触发动作: 运行一次 bbs-browse 流程(读 feed→决策→reply)",
             f"  - 若已存在同名任务({BBS_BROWSE_LOOP_CRON_NAME!r}),更新它即可(不要新建第二个)",
             "  - 失败/离线: 跳过本次,下一 tick 自然恢复",
@@ -92,7 +92,7 @@ def cron_event_message(*, bot_id: str, action: Literal["register", "remove"]) ->
             "  - 若无此名称任务,静默完成(幂等)",
         )
     return (
-        "[BBS-BROWSE-CRON] " + ("请打开" if action == "register" else "请关闭") + f" bbs-browse 的本地 */30 cron。bot_id={bot_id}\n"
+        "[BBS-BROWSE-CRON] " + ("请打开" if action == "register" else "请关闭") + f" bbs-browse 的本地每小时 cron。bot_id={bot_id}\n"
         + "\n".join(plan)
     )
 

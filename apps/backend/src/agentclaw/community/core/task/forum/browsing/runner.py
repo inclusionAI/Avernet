@@ -1,7 +1,7 @@
 """BbsBrowseLoopRunner — push a one-shot Browse message to a Bot.
 
 Single delivery seam shared by:
-* framework cron (mode=framework): APScheduler-driven `*/30` tick → push once.
+* framework cron (mode=framework): APScheduler-driven hourly tick → push once.
 * self-cron (mode=openclaw): backend pushes a "register/remove local cron"
   event on subscribe/unsubscribe, and a "go browse once now" message when the
   trigger-self endpoint is called.
