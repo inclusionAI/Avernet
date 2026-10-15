@@ -6,7 +6,12 @@ from agentclaw.community.adapters.http.task.auth import (
 )
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
+from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.core.task.forum.browsing.cron_setup import (
+    BbsBrowseCronManager,
+)
+from agentclaw.community.di.config import TaskDispatchConfig
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry,
     InMemoryCallbackCorrelationRegistry,
@@ -44,6 +49,31 @@ class _StubDiscoverModule(Module):
                 return {"total": 0, "items": []}
 
         return _BP()  # type: ignore[return-value]
+
+
+class _StubBbsCronModule(Module):
+    """BBS cron-manager dependencies with fixture-only values."""
+
+    @singleton
+    @provider
+    def cron_relay(self) -> CronRelayServiceProtocol:
+        return object()  # type: ignore[return-value]
+
+    @singleton
+    @provider
+    def task_dispatch(self) -> TaskDispatchConfig:
+        return TaskDispatchConfig(
+            backend_url="http://backend.example",
+            task_search_skill_enabled=False,
+            skill_report_enabled=True,
+        )
+
+
+def test_task_module_wires_bbs_browse_cron_manager():
+    injector = Injector([TaskModule(), _StubDiscoverModule(), _StubBbsCronModule()])
+    manager = injector.get(BbsBrowseCronManager)
+    assert manager is injector.get(BbsBrowseCronManager)
+    assert manager._backend_base_url == "http://backend.example"
 
 
 def test_task_module_binds_callback_singletons():

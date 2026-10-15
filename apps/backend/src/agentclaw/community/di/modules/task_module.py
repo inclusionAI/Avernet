@@ -21,6 +21,7 @@ from agentclaw.community.adapters.http.task.auth import (
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
 from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
     HARNESS_POLLER,
@@ -154,7 +155,6 @@ class TaskModule(Module):
         # backend-owned Bot-side cron manager (openclaw mode). Singletons are also
         # discoverable by the application lifecycle auto-start path.
         binder.bind(BbsBrowseLoopScheduler, to=BbsBrowseLoopScheduler, scope=singleton)
-        binder.bind(BbsBrowseCronManager, to=BbsBrowseCronManager, scope=singleton)
         # task_loop inbound callback 服务的进程内可信默认绑定(社区分布)。
         # CORP/prod 的 HmacCallbackAuthenticator + 真实密钥由 corp adapter 覆写(经模块替换/子类)。
         # InMemoryCallbackCorrelationRegistry 经下方 in_memory_callback_correlation_registry
@@ -177,6 +177,19 @@ class TaskModule(Module):
             bot,
             service,
             backend_url=task_dispatch.backend_url,
+        )
+
+    @singleton
+    @provider
+    def bbs_browse_cron_manager(
+        self,
+        cron_relay: CronRelayServiceProtocol,
+        task_dispatch: TaskDispatchConfig,
+    ) -> BbsBrowseCronManager:
+        """Build the Bot-side BBS cron manager with its configured Backend URL."""
+        return BbsBrowseCronManager(
+            cron_relay=cron_relay,
+            backend_base_url=task_dispatch.backend_url,
         )
 
     @singleton
