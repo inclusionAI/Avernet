@@ -41,6 +41,7 @@ impl Default for CliDefaults {
 }
 
 pub struct BridgeApp {
+    registration_api: crate::registration::RegistrationApi,
     engines: EngineRegistry,
     profile: Arc<dyn DeployProfile>,
     credentials: Arc<dyn CredentialSource>,
@@ -58,8 +59,13 @@ impl BridgeApp {
     pub fn builder() -> BridgeAppBuilder {
         let mut identities: BTreeMap<String, Arc<dyn IdentityResolver>> = BTreeMap::new();
         identities.insert(StaticBearer.id().to_owned(), Arc::new(StaticBearer));
+        let mut engines = EngineRegistry::builtin();
+        if let Some(home) = std::env::var_os("CODEX_HOME") {
+            engines.register(bcs_bridge_core::engine::codex_desktop::CodexDesktopFactory::with_codex_home(home.into()));
+        }
         BridgeAppBuilder(Self {
-            engines: EngineRegistry::builtin(),
+            registration_api: crate::registration::RegistrationApi::default(),
+            engines,
             profile: Arc::new(ExplicitProfile),
             credentials: Arc::new(EnvCredentials),
             identities,
@@ -70,6 +76,8 @@ impl BridgeApp {
             deinitializers: BTreeMap::new(),
         })
     }
+
+    pub fn registration_api(&self) -> crate::registration::RegistrationApi { self.registration_api }
 
     pub fn engines(&self) -> &EngineRegistry { &self.engines }
     pub fn profile(&self) -> &dyn DeployProfile { self.profile.as_ref() }
@@ -128,6 +136,12 @@ impl BridgeApp {
 pub struct BridgeAppBuilder(BridgeApp);
 
 impl BridgeAppBuilder {
+    /// Select a distribution's registration route and success response format.
+    pub fn registration_api(mut self, api: crate::registration::RegistrationApi) -> Self {
+        self.0.registration_api = api;
+        self
+    }
+
     /// Add an engine, or replace the engine registered under the same id.
     pub fn engine(mut self, factory: impl EngineFactory + 'static) -> Self {
         self.0.engines.register(factory);

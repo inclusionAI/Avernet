@@ -140,3 +140,80 @@ url = "ws://127.0.0.1:21000/ws/bot"
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     assert!(home.path().join("plugin.sqlite3").exists());
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn codex_cwd_override_reaches_daemon_without_rewriting_default_or_bot_identity() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::tempdir().unwrap();
+    let a = home.path().join("project-a");
+    let b = home.path().join("project-b");
+    std::fs::create_dir(&a).unwrap();
+    std::fs::create_dir(&b).unwrap();
+    let executable = home.path().join("fake-codex");
+    let log = home.path().join("engine-cwd");
+    std::fs::write(&executable, "#!/bin/sh\npwd > \"$BRIDGE_TEST_CWD_LOG\"\nexit 1\n").unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let socket = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = socket.local_addr().unwrap();
+    let config = home.path().join("bridge.toml");
+    let original = format!(r#"
+provider_id = "cli-provider"
+listen = "{address}"
+state_path = "state.sqlite3"
+[registration]
+provider_auth = "static-bearer"
+[[bot]]
+provider_bot_ref = "fixed-reference"
+bot_id = "fixed-bot"
+token = "fixed-token"
+engine = "codex"
+engine_bin = {}
+cwd = {}
+"#, json!(executable), json!(a));
+    std::fs::write(&config, &original).unwrap();
+    drop(socket);
+    let client = Client::builder().no_proxy().timeout(Duration::from_secs(5)).build().unwrap();
+    for (cwd_override, expected) in [(Some(&b), &b), (None, &a)] {
+        let mut start = command(home.path());
+        start.env("BRIDGE_TEST_CWD_LOG", &log).args(["start", "--daemon", "--config"]).arg(&config);
+        if let Some(cwd) = cwd_override { start.arg("--cwd").arg(cwd); }
+        let started = start.output().await.unwrap();
+        assert!(started.status.success(), "{}", String::from_utf8_lossy(&started.stderr));
+        let response = client.post(format!("http://{address}/webhook"))
+            .bearer_auth("test-webhook-secret").header("X-BCN-Protocol-Version", "2.0").json(&json!({
+                "type":"req","id":"run-cwd","method":"chat.send","session_id":"same-bcs-session",
+                "to_bot":{"provider_id":"cli-provider","provider_bot_ref":"fixed-reference"},
+                "message":{"role":"user","content":[{"type":"text","text":"test"}]}
+            })).send().await;
+        // Always stop the child, including on a failed webhook request.
+        let body = match response { Ok(response) => response.text().await, Err(error) => Err(error) };
+        let stopped = command(home.path()).arg("stop").output().await.unwrap();
+        assert!(stopped.status.success());
+        let body = body.unwrap();
+        let actual = std::fs::read_to_string(&log).unwrap_or_else(|error| panic!("engine was not called: {error}; response: {body}"));
+        assert_eq!(Path::new(actual.trim()).canonicalize().unwrap(), expected.canonicalize().unwrap());
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), original);
+    }
+}
+
+#[tokio::test]
+async fn workspace_override_rejects_non_codex_missing_policy_and_non_directory() {
+    let home = tempfile::tempdir().unwrap();
+    let config = home.path().join("test.toml");
+    let file = home.path().join("plain-file");
+    std::fs::write(&file, "test").unwrap();
+    for (engine, policy, cwd, expected) in [
+        ("claude-code", "provider_auth='static-bearer'", home.path(), "one native Codex Bot"),
+        ("codex", "", home.path(), "registered identity policy"),
+        ("codex", "provider_auth='static-bearer'", file.as_path(), "must be a directory"),
+    ] {
+        let text = format!("provider_id='cli-provider'\nlisten='127.0.0.1:21000'\n[registration]\n{policy}\n[[bot]]\nprovider_bot_ref='fixed'\nengine='{engine}'\ncwd={}\n", json!(home.path()));
+        std::fs::write(&config, &text).unwrap();
+        let output = command(home.path()).args(["start", "--config"]).arg(&config).arg("--cwd").arg(cwd).output().await.unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains(expected), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), text);
+        assert!(!home.path().join(".bcn-bridge").exists());
+    }
+}

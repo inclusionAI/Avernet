@@ -26,6 +26,7 @@ pub mod cli;
 pub mod codex_app_server;
 pub mod codex_desktop;
 mod codex_transport;
+mod codex_persistent;
 pub mod trace;
 
 use std::collections::BTreeMap;
@@ -124,6 +125,11 @@ pub enum TurnError {
 
 #[async_trait::async_trait]
 pub trait Engine: Send + Sync {
+    /// Read-only availability check before registration/startup. Never creates a turn.
+    async fn preflight(&self) -> Result<(), TurnError> { Ok(()) }
+    /// Release persistent resources after service admission has stopped.
+    /// Repeated calls must be safe; the engine is not reused after shutdown.
+    async fn shutdown(&self) {}
     async fn run_turn(
         &self,
         req: TurnRequest,
@@ -164,7 +170,7 @@ impl EngineRegistry {
         let mut registry = Self::new();
         registry.register(claude_code::ClaudeCodeFactory::default());
         registry.register(codex_app_server::CodexAppServerFactory::default());
-        registry.register(codex_desktop::CodexDesktopFactory);
+        registry.register(codex_desktop::CodexDesktopFactory::default());
         registry
     }
 

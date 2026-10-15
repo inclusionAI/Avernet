@@ -33,7 +33,7 @@ async fn desktop_reuses_shared_server_streams_resumes_and_interrupts_only_its_tu
                 let method = request["method"].as_str().unwrap();
                 let params = &request["params"];
                 let response = match method {
-                    "initialize" => json!({}),
+                    "initialize" => json!({"userAgent":"codex/test"}),
                     "initialized" => continue,
                     "thread/start" => json!({"thread":{"id":"desktop-thread"}}),
                     "thread/resume" => {
@@ -86,7 +86,7 @@ async fn desktop_reuses_shared_server_streams_resumes_and_interrupts_only_its_tu
         }
     });
     let options = toml::Table::from_iter([("socket".into(), socket.to_str().unwrap().into())]);
-    let engine = CodexDesktopFactory.build(std::path::PathBuf::new(), &options).unwrap();
+    let engine = CodexDesktopFactory::default().build(std::path::PathBuf::new(), &options).unwrap();
     for prompt in ["first", "second", "cancel", "drop", "after-cancel"] {
         let mut request = TurnRequest::new(prompt, prompt, temp.path(), Arc::new(Observer));
         if prompt != "first" { request.engine_session_id = Some("desktop-thread".into()); }
@@ -115,9 +115,93 @@ async fn missing_desktop_socket_has_no_cli_fallback() {
     let temp = tempfile::tempdir().unwrap();
     let socket = temp.path().join("missing.sock");
     let options = toml::Table::from_iter([("socket".into(), socket.to_str().unwrap().into())]);
-    let engine = CodexDesktopFactory.build(std::path::PathBuf::new(), &options).unwrap();
+    let engine = CodexDesktopFactory::default().build(std::path::PathBuf::new(), &options).unwrap();
     let (sender, _receiver) = tokio::sync::mpsc::channel(1);
     let result = engine.run_turn(TurnRequest::new("missing", "test", temp.path(), Arc::new(Observer)),
         sender, CancellationToken::new()).await;
     assert!(result.unwrap_err().to_string().contains("No standalone server was started"));
+}
+
+#[tokio::test]
+async fn automatic_detection_initializes_only_and_reconnects_after_host_restart() {
+    let home = tempfile::tempdir().unwrap();
+    let directory = home.path().join("app-server-control");
+    std::fs::create_dir(&directory).unwrap();
+    let path = directory.join("app-server-control.sock");
+    let engine = CodexDesktopFactory::with_codex_home(home.path().into())
+        .build(std::path::PathBuf::new(), &toml::Table::new()).unwrap();
+    for _ in 0..2 {
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let value: Value = serde_json::from_str(ws.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
+            assert_eq!(value["method"], "initialize");
+            ws.send(json!({"id":value["id"],"result":{"userAgent":"codex/test"}}).to_string().into()).await.unwrap();
+            let value: Value = serde_json::from_str(ws.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
+            assert_eq!(value["method"], "initialized");
+            assert!(ws.next().await.unwrap().unwrap().is_close());
+        });
+        engine.preflight().await.unwrap();
+        server.await.unwrap();
+        std::fs::remove_file(&path).unwrap();
+    }
+    let error = engine.preflight().await.unwrap_err().to_string();
+    assert!(error.contains("desktop detection failed"));
+    assert!(!path.exists());
+}
+
+#[tokio::test]
+async fn detection_rejects_files_unsafe_aliases_stale_and_other_protocol_sockets() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("selected.sock");
+    let options = toml::Table::from_iter([("socket".into(), path.to_str().unwrap().into())]);
+    let engine = CodexDesktopFactory::default().build(std::path::PathBuf::new(), &options).unwrap();
+    std::fs::write(&path, "not a socket").unwrap();
+    assert!(engine.preflight().await.is_err());
+    std::fs::remove_file(&path).unwrap();
+    let target = home.path().join("target.sock");
+    let listener = tokio::net::UnixListener::bind(&target).unwrap();
+    symlink(&target, &path).unwrap();
+    std::fs::set_permissions(home.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(engine.preflight().await.is_err());
+    std::fs::set_permissions(home.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    drop(listener);
+    let listener = tokio::net::UnixListener::bind(&path).unwrap();
+    drop(listener);
+    assert!(engine.preflight().await.is_err());
+    std::fs::remove_file(&path).unwrap();
+    let listener = tokio::net::UnixListener::bind(&path).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o777)).unwrap();
+    assert!(engine.preflight().await.is_err());
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let server = tokio::spawn(async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut data = [0u8; 1024];
+        let _ = stream.read(&mut data).await;
+        stream.write_all(b"not a WebSocket protocol\n").await.unwrap();
+    });
+    assert!(engine.preflight().await.is_err());
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn detection_rejects_non_codex_websocket_initialization() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("other.sock");
+    let listener = tokio::net::UnixListener::bind(&path).unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let value: Value = serde_json::from_str(ws.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
+        ws.send(json!({"id":value["id"],"result":{}}).to_string().into()).await.unwrap();
+        assert!(ws.next().await.unwrap().unwrap().is_close());
+    });
+    let options = toml::Table::from_iter([("socket".into(), path.to_str().unwrap().into())]);
+    let engine = CodexDesktopFactory::default().build(std::path::PathBuf::new(), &options).unwrap();
+    assert!(engine.preflight().await.unwrap_err().to_string().contains("Codex initialization response"));
+    server.await.unwrap();
 }

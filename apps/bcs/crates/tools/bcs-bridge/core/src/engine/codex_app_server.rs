@@ -1,6 +1,9 @@
 //! `CodexAppServer` driver: runs `codex app-server` over the Codex JSON-RPC
 //! stdio protocol.
 //!
+//! The owned stdio server stays alive across turns. Loaded threads use
+//! `turn/start` directly; `thread/resume` is used after a Bridge/server restart.
+//!
 //! Invocation (`<prefix_args>` is configured by [`CodexAppServerFactory`] and
 //! empty for the built-in `codex` engine):
 //!
@@ -27,7 +30,6 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
 
-use crate::engine::cli::CliSession;
 use crate::engine::codex_transport::CodexConnection;
 use crate::engine::{Engine, TurnError, TurnOutcome, TurnRequest};
 use crate::sse;
@@ -42,18 +44,35 @@ pub struct CodexAppServer {
     prefix_args: Vec<String>,
     desktop: bool,
     socket: Option<PathBuf>,
+    native: super::codex_persistent::NativeServer,
 }
 
 impl CodexAppServer {
     /// `prefix_args` are placed before `app-server`, for launchers that select
     /// Codex through a subcommand or flag.
     pub fn new(bin: PathBuf, prefix_args: Vec<String>) -> Self {
-        Self { bin, prefix_args, desktop: false, socket: None }
+        Self { bin, prefix_args, desktop: false, socket: None, native: Default::default() }
     }
 
     /// Connect over Unix WebSocket; never start, restart or stop the shared server.
     pub fn desktop(socket: PathBuf) -> Self {
-        Self { bin: PathBuf::new(), prefix_args: Vec::new(), desktop: true, socket: Some(socket) }
+        Self { bin: PathBuf::new(), prefix_args: Vec::new(), desktop: true, socket: Some(socket), native: Default::default() }
+    }
+
+    pub(super) async fn initialize(&self, cli: &mut CodexConnection, next_id: &mut u64,
+        backlog: &mut VecDeque<Value>, abort: &CancellationToken) -> Result<(), TurnError> {
+        let initialization = rpc_call(cli, next_id, backlog, "initialize", json!({
+            "clientInfo": { "name": "bridge-provider", "version": env!("CARGO_PKG_VERSION") },
+            "capabilities": null,
+        }), abort);
+        let result = if self.desktop {
+            tokio::time::timeout(std::time::Duration::from_secs(5), initialization).await
+                .map_err(|_| TurnError::Protocol("Codex desktop detection timed out during initialization".into()))?
+        } else { initialization.await }?;
+        if self.desktop && result.get("userAgent").and_then(Value::as_str).is_none_or(str::is_empty) {
+            return Err(TurnError::Protocol("Selected desktop endpoint did not return a Codex initialization response; no task was created".into()));
+        }
+        send_notification(cli, "initialized", Value::Null).await
     }
 
     fn launch_args(&self) -> Vec<String> {
@@ -110,6 +129,16 @@ impl crate::engine::EngineFactory for CodexAppServerFactory {
 
 #[async_trait::async_trait]
 impl Engine for CodexAppServer {
+    async fn shutdown(&self) { self.native.shutdown().await; }
+
+    async fn preflight(&self) -> Result<(), TurnError> {
+        if !self.desktop { return Ok(()); }
+        let socket = self.socket.as_deref().ok_or_else(|| TurnError::Protocol("Missing desktop socket".into()))?;
+        let mut connection = CodexConnection::connect(socket, None).await?;
+        let result = self.initialize(&mut connection, &mut 1, &mut VecDeque::new(), &CancellationToken::new()).await;
+        connection.kill().await;
+        result
+    }
     async fn run_turn(
         &self,
         req: TurnRequest,
@@ -117,38 +146,25 @@ impl Engine for CodexAppServer {
         abort: CancellationToken,
     ) -> Result<TurnOutcome, TurnError> {
         if abort.is_cancelled() { return Err(TurnError::Aborted); }
-        let args = self.launch_args();
-        let mut cli = if self.desktop {
+        let (mut cli, loaded) = if self.desktop {
             let socket = self.socket.as_deref().ok_or_else(|| TurnError::Protocol("Missing desktop socket".into()))?;
-            CodexConnection::connect(socket, req.trace.clone()).await?
+            (CodexConnection::connect(socket, req.trace.clone()).await?, false)
         } else {
-            CodexConnection::Process(CliSession::spawn(&self.bin, &args, &req.cwd, &[], req.trace.clone())
-                .await.map_err(TurnError::Spawn)?)
+            self.native.connect(self, &self.bin, &self.launch_args(), &req, &abort).await?
         };
 
         let mut next_id = 1_u64;
         let mut backlog = VecDeque::new();
 
-        rpc_call(
-            &mut cli,
-            &mut next_id,
-            &mut backlog,
-            "initialize",
-            json!({
-                "clientInfo": {
-                    "name": "bridge-provider",
-                    "version": env!("CARGO_PKG_VERSION"),
-                },
-                "capabilities": null,
-            }),
-            &abort,
-        )
-        .await.map_err(|error| if self.desktop && !matches!(error, TurnError::Aborted) {
-            TurnError::EngineExited("Cannot initialize the existing Codex app-server; check the desktop Unix WebSocket listener. No standalone server was started".into())
-        } else { error })?;
-        send_notification(&mut cli, "initialized", Value::Null).await?;
-
-        let thread = if let Some(session_id) = &req.engine_session_id {
+        if self.desktop {
+            self.initialize(&mut cli, &mut next_id, &mut backlog, &abort)
+                .await.map_err(|error| if !matches!(error, TurnError::Aborted) {
+                    TurnError::EngineExited("Cannot initialize the existing Codex app-server; check the desktop Unix WebSocket listener. No standalone server was started".into())
+                } else { error })?;
+        }
+        let thread = if loaded {
+            json!({"thread": {"id": req.engine_session_id}})
+        } else if let Some(session_id) = &req.engine_session_id {
             rpc_call(
                 &mut cli,
                 &mut next_id,
@@ -612,7 +628,7 @@ fn thread_resume_params(req: &TurnRequest, thread_id: &str) -> Value {
 }
 
 fn turn_start_params(req: &TurnRequest, thread_id: &str) -> Value {
-    json!({
+    let mut params = json!({
         "threadId": thread_id,
         "clientUserMessageId": req.run_id,
         "input": [{
@@ -627,7 +643,11 @@ fn turn_start_params(req: &TurnRequest, thread_id: &str) -> Value {
             "type": "readOnly",
             "networkAccess": false,
         },
-    })
+    });
+    if let Some(model) = req.model.as_deref().filter(|model| !model.is_empty()) {
+        params["model"] = json!(model);
+    }
+    params
 }
 
 fn extract_thread_id(value: &Value) -> Option<String> {

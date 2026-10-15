@@ -45,6 +45,9 @@ struct InitArgs {
 
 #[derive(Args)]
 struct StartArgs {
+    /// Override the working directory for one native Codex Bot, for this run only
+    #[arg(long)]
+    cwd: Option<PathBuf>,
     /// Run in the background and wait for successful initialization (Unix only)
     #[arg(long)]
     daemon: bool,
@@ -141,13 +144,35 @@ pub async fn run(cli: Cli, app: &BridgeApp) -> anyhow::Result<()> {
             if !config_path.try_exists().context("Cannot inspect bridge configuration")? {
                 bail!("Configuration not found at {}. Provide bridge.toml or pass --config.", config_path.display());
             }
-            let config = config::load_runtime(&config_path, app.credentials())
+            let (settings, mut config) = config::load_runtime_with_settings(&config_path, app.credentials())
                 // load_runtime sanitizes parser/credential errors. Retain its useful
                 // message without exposing the underlying error chain or config text.
                 .map_err(|error| anyhow::anyhow!("Cannot load bridge configuration at {}: {error}", config_path.display()))?;
+            if let Some(cwd) = &args.cwd {
+                if config.bots.len() != 1 || !matches!(config.bots[0].engine.as_str(), "codex" | "codex-desktop") {
+                    bail!("--cwd requires a configuration containing one native Codex Bot");
+                }
+                let cwd = cwd.canonicalize().context("Cannot resolve requested working directory")?;
+                if !cwd.is_dir() { bail!("Working directory must be a directory"); }
+                if settings.provider_auth.is_none() {
+                    bail!("This legacy configuration has no recorded identity policy; set registration.provider_auth to this Bot's registered identity policy before using --cwd");
+                }
+                config.bots[0].cwd = cwd;
+            }
+            for bot in &config.bots {
+                app.engines().build(bot).map_err(anyhow::Error::msg)?.preflight().await?;
+            }
+            if let Some(policy) = &settings.provider_auth {
+                let identity = app.identity(policy)?;
+                for bot in &config.bots {
+                    if matches!(bot.engine.as_str(), "codex" | "codex-desktop") {
+                        identity.validate_workspace(bot, settings.api_url.as_deref()).await?;
+                    }
+                }
+            }
             #[cfg(unix)] {
                 let config_path = config_path.canonicalize().context("Cannot resolve bridge configuration path")?;
-                if args.daemon { return crate::instance::start_daemon(&config_path, &runtime_dir()?).await; }
+                if args.daemon { return crate::instance::start_daemon(&config_path, &runtime_dir()?, args.cwd.as_deref()).await; }
                 crate::instance::run(config, app.engines(), &config_path, &runtime_dir()?).await
             }
             #[cfg(not(unix))] {

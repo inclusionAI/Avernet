@@ -475,6 +475,14 @@ export interface AppCapabilities {
    * 同步签名，组件仅消费可见性，不感知部署环境。
    */
   getBotRegistrationEnabled: () => CapabilityResult<boolean>;
+  /** Additional deployment-owned onboarding panels; public deployments default to none. */
+  getAdditionalBotRegistrationPanels: () => CapabilityResult<
+    {
+      id: string;
+      label: string;
+      Panel: ComponentType<{ open: boolean }>;
+    }[]
+  >;
   getQwenWorkBotRegistrationConfig: (bcsEndpoint: string) => CapabilityResult<{ providerSlug: string; apiUrl: string }>;
   /** Optional deployment-managed installer and executable; null uses the public release installer. */
   getQwenWorkBridgeInstallation: () => CapabilityResult<{ installCommand: string; binary: string; profiles?: boolean; guideUrl?: string; personalizeBotName?: boolean } | null>;
