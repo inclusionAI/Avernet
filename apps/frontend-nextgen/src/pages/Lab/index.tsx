@@ -53,7 +53,7 @@ function LabFeatureCard({
       <p className="m-0 text-sm leading-6 text-muted-foreground">{feature.description}</p>
       <div className="flex items-center justify-between">
         <Button
-          className="h-9 bg-foreground px-4 text-xs text-background hover:opacity-90"
+          className="h-9 px-4 text-xs"
           onClick={() => history.push(feature.href)}
           rightIcon={<ArrowRight className="size-3.5" aria-hidden />}
         >

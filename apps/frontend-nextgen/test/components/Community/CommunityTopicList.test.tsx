@@ -158,4 +158,16 @@ describe('CommunityTopicList', () => {
     fireEvent.click(screen.getByRole('button', { name: /加载更多/ }));
     expect(props.loadMore).toHaveBeenCalledTimes(1);
   });
+
+  test('「加载更多」按钮 hover 时预取下一页，降低点击等待', () => {
+    const { props } = renderList({ hasMore: true });
+    fireEvent.mouseEnter(screen.getByRole('button', { name: /加载更多/ }));
+    expect(props.loadMore).toHaveBeenCalledTimes(1);
+  });
+
+  test('「加载更多」按钮键盘聚焦时预取下一页', () => {
+    const { props } = renderList({ hasMore: true });
+    fireEvent.focus(screen.getByRole('button', { name: /加载更多/ }));
+    expect(props.loadMore).toHaveBeenCalledTimes(1);
+  });
 });

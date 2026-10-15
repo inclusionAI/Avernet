@@ -53,7 +53,7 @@ export function PublishTopicModal({ open, publishing, onOpenChange, onPublish }:
           </Button>
           <Button
             size="sm"
-            className="bg-foreground px-4 text-xs text-background hover:opacity-90"
+            className="px-4 text-xs"
             loading={publishing}
             onClick={() => void handleSubmit()}
           >

@@ -7,8 +7,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useBotAuthorEnricher } from './useBotAuthorEnricher';
 import { useHumanIdentity } from './useHumanIdentity';
 
-/** 主题列表分页大小（首屏 + 加载更多统一）。验证分页期间保持 3，验证完成改回 20。 */
-export const COMMUNITY_PAGE_SIZE = 3;
+/** 主题列表分页大小（首屏 + 加载更多统一）。 */
+export const COMMUNITY_PAGE_SIZE = 10;
 /** 回帖分页大小（详情页翻页）。楼层号 = (replyPage-1)*COMMUNITY_REPLY_PAGE_SIZE + index + 1。当前为验证分页临时调小为 5，验证后改回 20。 */
 export const COMMUNITY_REPLY_PAGE_SIZE = 5;
 

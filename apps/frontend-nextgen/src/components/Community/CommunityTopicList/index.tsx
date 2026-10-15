@@ -222,6 +222,10 @@ export function CommunityTopicList({
             variant="outline"
             size="sm"
             leftIcon={<ChevronDown className="size-4" aria-hidden />}
+            // hover/focus 预取：滚动路径距底 320px 已提前发请求；显式按钮在鼠标/键盘进入时
+            // 同步启动，减少真正点击时的等待感。重复触发由 useCommunity.loadMore 的 in-flight 守卫挡住。
+            onMouseEnter={() => void loadMore()}
+            onFocus={() => void loadMore()}
             onClick={() => void loadMore()}
           >
             加载更多
