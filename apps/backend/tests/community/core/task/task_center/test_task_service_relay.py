@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -218,3 +219,99 @@ async def test_report_graph_failure_propagates_without_emission() -> None:
     with pytest.raises(TaskStateError):
         await service.report(_report_command("ev-stale"))
     assert service._task_context_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_report_emits_trajectory_rows_for_trace_steps() -> None:
+    """trace.steps 逐条落表:上报即转——每个 step 一次 ``emit_trajectory_event``,
+    七字段(action_type/action_input/action_result/status_from/status_to/
+    boost_reason/error_msg)对齐轨迹事件表;``now_ms`` 以高层动作 ts 为基准按
+    step 序 +1 偏移(高层行 ts 被投影去重钉死,step 行排其后保时序);
+    ext_info 带 ``trace_step`` 标识 + ``relay_event_id`` 可追溯;非法
+    action_type(不在枚举内)跳过该条(读侧枚举强校验会丢行,写侧先拦)。
+    """
+    from agentclaw.community.core.task.domain.models import (
+        TaskReportTrace,
+        TaskReportTraceStep,
+    )
+
+    action_events = [
+        _action_event(
+            NodeAction.EXECUTE, 1790000000000,
+            {"__node_id": "node-1", "success": True},
+        ),
+    ]
+    outcome = (TaskReportResult(TaskReportStatus.APPLIED), action_events, True)
+    ctx = _RecordingContextService()
+    service = _ReportService(outcome, ctx)
+    command = replace(
+        _report_command("ev-trace"),
+        trace=TaskReportTrace(
+            steps=[
+                TaskReportTraceStep(
+                    action_type="execute",
+                    action_result="tool_error_reported",
+                    action_input="读取上下文并执行检索",
+                    status_from="RUNNING",
+                    status_to="RUNNING",
+                    boost_reason="S1 上下文读取完成",
+                    error_msg=None,
+                ),
+                TaskReportTraceStep(
+                    action_type="verify",
+                    action_result="accept_pass",
+                ),
+                TaskReportTraceStep(  # 非法 action_type → 写侧跳过(防读侧丢行)
+                    action_type="S5C_SEARCH",
+                    action_result="completed",
+                ),
+            ]
+        ),
+    )
+
+    result = await service.report(command)
+
+    assert result.status == TaskReportStatus.APPLIED
+    # 1 条高层行 + 2 条 step 行(非法的跳过)
+    assert [(c[1], c[2]) for c in ctx.calls] == [
+        ("node-1", "execute"),
+        ("node-1", "execute"),
+        ("node-1", "verify"),
+    ]
+    step_1 = ctx.calls[1][3]
+    assert step_1["action_result"] == "tool_error_reported"
+    assert step_1["action_input"] == "读取上下文并执行检索"
+    assert step_1["status_from"] == "RUNNING" and step_1["status_to"] == "RUNNING"
+    assert step_1["boost_reason"] == "S1 上下文读取完成"
+    assert step_1["error_msg"] is None
+    assert step_1["now_ms"] == 1790000000001, "step 行 ts = 高层 ts + 序号偏移"
+    assert step_1["ext_info"] == {
+        "trace_step": True,
+        "relay_event_id": "ev-trace",
+    }
+    step_2 = ctx.calls[2][3]
+    assert step_2["action_result"] == "accept_pass"
+    assert step_2["now_ms"] == 1790000000002
+    assert step_2["status_from"] is None and step_2["status_to"] is None
+
+
+@pytest.mark.asyncio
+async def test_report_trace_steps_skipped_on_replay_or_without_context() -> None:
+    """重放(action_events=None)不发射 step 行;context service 未接线同样静默。"""
+    from agentclaw.community.core.task.domain.models import (
+        TaskReportTrace,
+        TaskReportTraceStep,
+    )
+
+    outcome = (TaskReportResult(TaskReportStatus.APPLIED), None, False)
+    ctx = _RecordingContextService()
+    service = _ReportService(outcome, ctx)
+    command = replace(
+        _report_command("ev-replay"),
+        trace=TaskReportTrace(
+            steps=[TaskReportTraceStep(action_type="plan", action_result="success")],
+        ),
+    )
+
+    await service.report(command)
+    assert ctx.calls == [], "重放不重复发射 step 行"

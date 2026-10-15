@@ -628,58 +628,6 @@ def test_trajectory_display_html_shows_actual_run_mode_per_subtask_block():
 
 
 @pytest.mark.unit
-def test_trajectory_dto_passes_through_trace_steps():
-    """trace_steps 读时定向投影经 DTO 透传为 ``timeline[i].trace_steps``;未携带为 null。"""
-    ev1 = TrajectoryEvent(
-        task_id="t1", node_id="n1", action_type=TrajectoryActionType.PLAN,
-        action_result="success", attempt=0, gmt_create=1000, gmt_modified=1000,
-    )
-    ev2 = TrajectoryEvent(
-        task_id="t1", node_id="n1", action_type=TrajectoryActionType.EXECUTE,
-        action_result="success", attempt=0, gmt_create=2000, gmt_modified=2000,
-        trace_steps=[{"step": "S1", "status": "done", "detail": {"read": "spec"}},
-                     {"step": "S4b", "status": "ok", "detail": {}}],
-    )
-    traj = TaskTrajectory(task_id="t1", gmt_create=2000, gmt_modified=2000,
-                         timeline=[ev1, ev2], analysis=None)
-    c = _build_client(_StubTrajectoryService(trajectory=traj))
-    r = c.get("/openapi/v1/collaboration/tasks/trajectory", params={"task_id": "t1"})
-    assert r.status_code == 200
-    timeline = r.json()["data"]["timeline"]
-    assert timeline[0]["trace_steps"] is None
-    assert timeline[1]["trace_steps"] == [
-        {"step": "S1", "status": "done", "detail": {"read": "spec"}},
-        {"step": "S4b", "status": "ok", "detail": {}},
-    ]
-
-
-@pytest.mark.unit
-def test_trajectory_display_html_renders_trace_steps():
-    """HTML 页在携带 trace 的事件下渲染可折叠的「执行轨迹」块(step/status/detail 逐行)。"""
-    ev = TrajectoryEvent(
-        task_id="t1", node_id="n1", action_type=TrajectoryActionType.EXECUTE,
-        action_result="success", attempt=0,
-        gmt_create=1000, gmt_modified=1000,
-        trace_steps=[{"step": "S1", "status": "done", "detail": {"read": "spec"}},
-                     {"step": "S4b", "status": "ok", "detail": {}}],
-    )
-    traj = TaskTrajectory(
-        task_id="t1", gmt_create=1000, gmt_modified=1000,
-        timeline=[ev], analysis=None,
-    )
-    c = _build_client(_StubTrajectoryService(trajectory=traj))
-    r = c.get(
-        "/openapi/v1/collaboration/tasks/trajectory",
-        params={"task_id": "t1", "display": "html"},
-    )
-    assert r.status_code == 200
-    assert "执行轨迹" in r.text
-    assert "S1" in r.text and "S4b" in r.text
-    import html as _html_module
-    assert _html_module.escape('{"read": "spec"}') in r.text, "detail JSON 原文(转义后)应可见"
-
-
-@pytest.mark.unit
 def test_trajectory_display_html_renders_enriched_node_output():
     """HTML 页在携带产出的最后一条事件下渲染可折叠的「节点产出」块。"""
     ev = TrajectoryEvent(

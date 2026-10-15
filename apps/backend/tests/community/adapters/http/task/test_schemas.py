@@ -160,9 +160,10 @@ def test_report_dto_parses_optional_trace() -> None:
             "trace": {
                 "steps": [
                     {
-                        "step": "S5A_REFRESH_GAPS",
-                        "status": "completed",
-                        "detail": {"gaps": []},
+                        "action_type": "plan",
+                        "action_result": "gaps_refreshed",
+                        "action_input": "S5A_REFRESH_GAPS",
+                        "boost_reason": "gaps \u65e0\u53d8\u66f4",
                     },
                 ],
             },
@@ -170,9 +171,11 @@ def test_report_dto_parses_optional_trace() -> None:
     ).to_domain()
 
     assert command.trace is not None
-    assert command.trace.steps[0].step == "S5A_REFRESH_GAPS"
-    assert command.trace.steps[0].status == "completed"
-    assert command.trace.steps[0].detail == {"gaps": []}
+    assert command.trace.steps[0].action_type == "plan"
+    assert command.trace.steps[0].action_result == "gaps_refreshed"
+    assert command.trace.steps[0].action_input == "S5A_REFRESH_GAPS"
+    assert command.trace.steps[0].status_from is None
+    assert command.trace.steps[0].status_to is None
 
 
 def test_plan_report_dto_rejects_client_generated_node_id() -> None:

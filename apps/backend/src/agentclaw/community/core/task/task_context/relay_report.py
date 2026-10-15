@@ -188,9 +188,10 @@ def apply_relay_report(
             raise TaskStateError("relay origin has already handed off a successor")
 
         action_events: list[NodeActionEvent] = []
-        trace_payload = (
-            _json_value(asdict(command.trace)) if command.trace is not None else None
-        )
+        # NB: 不再把 trace 注入 action_log payload——trace 的持久载体已改为
+        # 上报时逐条独立落 task_trajectory_events 行(mixin._emit_trace_step_rows),
+        # 表行即事实,action_log 里再存一份汇总会双源。trace 仍入 _fingerprint
+        # (幂等:同 event 不同 trace = 冲突)。
         next_seq = len(node.run_info.action_log) + 1
         graph_repo = getattr(graph_service, "_graph_repo", None)
         if graph_repo is not None:
@@ -212,8 +213,6 @@ def apply_relay_report(
             # 执行人辅助键:写时发射的表行经 ext_info.holder_id 白名单投影出「执行人」,
             # 与读时投影路径(node.run_info.assignee)同视觉。纯可观测,不入状态机。
             event_payload["__holder_id"] = node.run_info.assignee
-            if trace_payload is not None and not action_events:
-                event_payload["trace"] = trace_payload
             event = NodeActionEvent(
                 seq=next_seq,
                 ts=now,

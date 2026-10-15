@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
@@ -16,12 +17,17 @@ from agentclaw.community.core.task.domain.models import (
     TaskReportResult,
     task_spec_instruction,
 )
+from agentclaw.community.core.task.task_context.task_trajectory.models import (
+    TrajectoryActionType,
+)
 from agentclaw.community.core.task.task_context.task_trajectory.relay_action_projection import (
     relay_action_event_fields,
 )
 from agentclaw.community.core.task.task_runner.client.relay_prompt import (
     format_relay_execution_instruction,
 )
+
+logger = logging.getLogger("task.relay")
 
 
 class TaskServiceRelayMixin:
@@ -56,11 +62,14 @@ class TaskServiceRelayMixin:
 
     async def report(self, command: TaskReportCommand) -> TaskReportResult:
         """Atomically apply EXECUTION_RESULT or PLAN_RESULT to the task graph,
-        then mirror the recorded action events into the trajectory table.
+        then mirror the recorded action events AND the reported trace steps
+        into the trajectory table.
 
         写时发射:``apply_relay_report`` 返回本次上报记入 action_log 的动作事件,
-        逐条经 ``emit_trajectory_event`` 直插 ``task_trajectory_events``(观测旁路,
-        决策 #14 fire-and-forget 吞异常,失败不影响上报结果)。读时投影
+        逐条经 ``emit_trajectory_event`` 直插 ``task_trajectory_events``;``command.
+        trace.steps`` 同样逐条独立成行(七字段与轨迹表对齐,见
+        ``TaskReportTraceStep``——上报即转,**不做读时投影**)。观测旁路,决策 #14
+        fire-and-forget 吞异常,失败不影响上报结果;读时投影
         (``merge_relay_action_log``)按签名去重后成为存量/旁路兜底,时间线不双份。
         幂等重放(action_events 为 None)不重复发射。"""
         result, action_events, _ = self._graph.apply_relay_report(command)
@@ -71,19 +80,63 @@ class TaskServiceRelayMixin:
     def _emit_relay_report_trajectory(
         self, command: TaskReportCommand, action_events: list[NodeActionEvent]
     ) -> None:
-        """把上报动作事件转为 TrajectoryEvent 行发射(task_context_service 未接线 no-op)。"""
+        """把上报动作事件 + trace.steps 转为 TrajectoryEvent 行发射
+        (task_context_service 未接线 no-op)。"""
         if self._task_context_service is None:
             return
+        base_ts = 0
         for event in action_events:
             fields = relay_action_event_fields(
                 event, relay_event_id=command.event_id
             )
             node_id = fields.pop("node_id")
+            base_ts = max(base_ts, event.ts)
             self._task_context_service.emit_trajectory_event(
                 command.task_id,
                 node_id,
                 event.action.value,
                 **fields,
+            )
+        if command.trace is not None and command.trace.steps:
+            self._emit_trace_step_rows(command, base_ts)
+
+    def _emit_trace_step_rows(
+        self, command: TaskReportCommand, base_ts: int
+    ) -> None:
+        """trace.steps 逐条写时落表:一 step 一行,七字段与轨迹表对齐。
+
+        ``now_ms`` 以本次上报高层动作的 ts 为基准按序 +1 偏移——高层行的 ts 被
+        读时投影的签名去重钉死(不能挪),step 行排在其后保住"上报→步骤"的先后
+        与 step 之间的顺序。``action_type`` 写侧先验枚举(读侧枚举强校验会整行
+        丢弃),非法值跳过该条 + WARNING。"""
+        steps = command.trace.steps if command.trace is not None else []
+        for offset, step in enumerate(steps, start=1):
+            try:
+                action_type = TrajectoryActionType(step.action_type)
+            except ValueError:
+                logger.warning(
+                    "[task][relay][trajectory] trace step 非法 action_type 跳过 "
+                    "task=%s node=%s event=%s action_type=%s",
+                    command.task_id, command.node_id, command.event_id,
+                    step.action_type,
+                )
+                continue
+            self._task_context_service.emit_trajectory_event(
+                command.task_id,
+                command.node_id,
+                action_type,
+                action_result=step.action_result,
+                action_input=step.action_input,
+                status_from=step.status_from,
+                status_to=step.status_to,
+                attempt=0,
+                boost_reason=step.boost_reason,
+                error_msg=step.error_msg,
+                ext_info={
+                    "trace_step": True,
+                    "relay_event_id": command.event_id,
+                },
+                now_ms=base_ts + offset,
             )
 
     def _report_fact(self, report_type: str, payload: dict[str, Any]) -> Any:

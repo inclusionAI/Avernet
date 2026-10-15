@@ -204,27 +204,6 @@ def _render_event(ev: "object") -> str:
         parts.append(f"<pre>{html.escape(lines)}</pre>")
         parts.append("</details>")
 
-    # 执行轨迹(读时定向投影;Bot 上报的 trace 检查点,可折叠;step/status/detail 逐行)
-    trace_steps = getattr(ev, "trace_steps", None)
-    if trace_steps:
-        step_lines = "\n".join(
-            "{} | {}{}".format(
-                s.get("step", "?"),
-                s.get("status", ""),
-                (
-                    " | " + json.dumps(s.get("detail"), ensure_ascii=False)
-                    if s.get("detail")
-                    else ""
-                ),
-            )
-            for s in trace_steps
-            if isinstance(s, dict)
-        )
-        parts.append('<details class="ev-input">')
-        parts.append(f"<summary>执行轨迹 · trace {len(trace_steps)} 步</summary>")
-        parts.append(f"<pre>{html.escape(step_lines)}</pre>")
-        parts.append("</details>")
-
     # 搜推明细(读时定向投影;dispatch / relay search 事件携带,可折叠)——结构化呈现:
     # 整体搜索词 / 分词关键词 / 每个关键词的命中 bot 列表 / 候选打分评估
     # (score + score_reason + 选中决策/reject_reason) / 最终匹配结果。

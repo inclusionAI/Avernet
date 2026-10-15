@@ -95,9 +95,6 @@ from agentclaw.community.core.repository.protocols.task import (
 )
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.core.task.repository.types import TrajectoryEventRecord
-from agentclaw.community.core.task.task_context.task_trajectory.relay_action_projection import (
-    project_trace_steps,
-)
 from agentclaw.community.core.task.task_context.task_trajectory.models import (
     ReasonCatalog,
     TaskTrajectory,
@@ -131,23 +128,6 @@ def _holder_id_from_ext_info(ext_info: str | None) -> str | None:
         return None
     value = str(holder_id).strip()
     return value or None
-
-
-def _trace_steps_from_ext_info(ext_info: str | None) -> "list[dict] | None":
-    """从自由 JSON 中定向投影 Bot 上报的执行检查点(``trace.steps``);
-
-    与 ``holder_id``/``search_probe`` 同款白名单投影(REQ-1 边界的定向扩展,
-    不整体透传 ext_info);转换复用 ``project_trace_steps``(与 relay 读时投影同形)。
-    损坏 JSON → ``None``,不影响该行读取。"""
-    if not ext_info:
-        return None
-    try:
-        data = json.loads(ext_info)
-    except (TypeError, ValueError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    return project_trace_steps(data)
 
 
 def _search_probe_from_ext_info(
@@ -400,5 +380,4 @@ class TaskTrajectoryAssembler:
             holder_id=_holder_id_from_ext_info(rec.ext_info),
             analysis=rec.analysis,
             search_probe=_search_probe_from_ext_info(rec.ext_info, rec.action_result),
-            trace_steps=_trace_steps_from_ext_info(rec.ext_info),
         )
