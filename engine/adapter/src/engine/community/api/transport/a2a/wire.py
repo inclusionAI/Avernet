@@ -81,10 +81,17 @@ def wire_artifact_update(run_id: str, context_id: str, seq: int,
 
 
 def wire_terminal_marker(run_id: str, context_id: str, state: str,
-                         last_seq: int) -> dict[str, Any]:
-    """Stage-4 terminal update; final + lastSeq in metadata."""
+                         last_seq: int,
+                         detail: dict[str, Any] | None = None
+                         ) -> dict[str, Any]:
+    """Stage-4 terminal update; final + lastSeq in metadata.
+
+    ``detail`` rides along on failure terminations (errorCode/errorMessage,
+    engine_frame passthrough) so the A2A consumer resolves failures
+    explainably instead of guessing from the bare state."""
     return wire_status_update(run_id, context_id, state, seq=last_seq,
-                              final=True, last_seq=last_seq)
+                              final=True, last_seq=last_seq,
+                              extra_metadata=detail)
 
 
 def wire_inject_message(context_id: str, text: str,

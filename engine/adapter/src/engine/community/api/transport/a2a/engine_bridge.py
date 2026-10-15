@@ -19,10 +19,12 @@ Step-1 discovery (what this bridge actually calls):
 Dispatch mapping:
   - chat `delta`    → kernel.publish_delta(rid, text)
   - chat `final`    → kernel.publish_final(rid, text)
-  - `error`         → complete_run FAILED
+  - `error`         → complete_run FAILED (+ structured error detail)
   - `aborted`       → complete_run CANCELED
-  - stream exhausted without a terminal event → publish_final(accumulated)
-    + COMPLETE, so the SSE stream always terminates.
+  - stream exhausted without a terminal event → complete_run FAILED with a
+    structured ``STREAM_TERMINATED_WITHOUT_FINAL`` detail — never fake
+    success (partial deltas were already streamed and stay in the
+    snapshot), so the SSE stream always ends in an explicit terminal.
 
 Echo fallback (MVP): context_id doubles as the chat session key
 (claude_code composes its own key from agentId/sessionId/userId; openclaw
@@ -55,7 +57,15 @@ _TERMINAL_CHAT_STATES = ("final", "error", "aborted")
 
 
 class _EngineRunFailed(Exception):
-    """Chat stream reported `state=error` — run must fail."""
+    """Chat stream reported `state=error` (or died without a terminal) —
+    run must fail. ``detail`` becomes the terminal statusUpdate metadata so
+    the A2A consumer gets an explainable error (BaaS reads ``errorMessage``
+    there — _bot_a2a_client._on_statusUpdate)."""
+
+    def __init__(self, message: str,
+                 detail: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.detail = detail
 
 
 class _EngineRunAborted(Exception):
@@ -87,8 +97,8 @@ async def execute_and_stream(kernel: A2aKernel, rid: str, context_id: str,
         if not dispatched:
             await _echo_fallback(kernel, rid, text)
         await kernel.complete_run(rid, _STATE_COMPLETED)
-    except _EngineRunFailed:
-        await _safe_complete(kernel, rid, _STATE_FAILED)
+    except _EngineRunFailed as exc:
+        await _safe_complete(kernel, rid, _STATE_FAILED, exc.detail)
     except _EngineRunAborted:
         await _safe_complete(kernel, rid, _STATE_CANCELED)
     except asyncio.CancelledError:
@@ -98,9 +108,10 @@ async def execute_and_stream(kernel: A2aKernel, rid: str, context_id: str,
         await _safe_complete(kernel, rid, _STATE_FAILED)
 
 
-async def _safe_complete(kernel: A2aKernel, rid: str, state: str) -> None:
+async def _safe_complete(kernel: A2aKernel, rid: str, state: str,
+                         detail: dict[str, Any] | None = None) -> None:
     try:
-        await kernel.complete_run(rid, state)
+        await kernel.complete_run(rid, state, detail)
     except Exception:
         log.exception("bridge: complete_run(%s, %s) failed", rid, state)
 
@@ -215,18 +226,37 @@ async def _dispatch_to_engine(kernel: A2aKernel, rid: str, context_id: str,
                     message = payload.get("errorMessage")
                     log.error("bridge: chat stream error for run %s: %s",
                               rid, message)
-                    raise _EngineRunFailed(str(message or "engine error"))
+                    raise _EngineRunFailed(
+                        str(message or "engine error"),
+                        detail={
+                            "errorCode": str(
+                                payload.get("errorCode")
+                                or "ENGINE_STREAM_ERROR"),
+                            "errorMessage": str(message or "engine error"),
+                            "engine_frame": dict(payload),
+                        },
+                    )
                 elif state == "aborted":
                     raise _EngineRunAborted()
 
-    if accumulated:
-        # Stream exhausted without a terminal frame (e.g. cached-request
-        # replays closed early, upstream dropped the final) — reaching here
-        # means no "final" state was seen (final returns at the loop above).
-        # Publish the accumulated text as the final artifact so replay stays
-        # coherent.
-        await kernel.publish_final(rid, "".join(accumulated))
-    return True
+    # Stream exhausted without a terminal frame — upstream died silently
+    # (cluster E2E 2026-10-15: model-provider retry ladder exhausted, the
+    # stream simply ended with neither final nor error; reproduced twice).
+    # Never dress that as success: partial deltas were already streamed and
+    # stay in the snapshot; the run must end FAILED with a structured,
+    # explainable error so subscribers don't hang and don't get a fake
+    # COMPLETED. (Reaching here also proves no "final" state was seen —
+    # final returns at the loop above.)
+    raise _EngineRunFailed(
+        "engine stream ended without a terminal frame",
+        detail={
+            "errorCode": "STREAM_TERMINATED_WITHOUT_FINAL",
+            "errorMessage": (
+                "The engine interaction stream ended before a terminal "
+                "result was produced; the run did not complete."
+            ),
+        },
+    )
 
 
 def _chat_plugin() -> Any:

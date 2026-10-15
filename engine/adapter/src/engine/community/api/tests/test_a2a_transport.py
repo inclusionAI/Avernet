@@ -30,8 +30,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -40,7 +38,6 @@ from fastapi.testclient import TestClient
 import engine.community.api.transport.a2a.router as R
 import engine.community.api.transport.a2a.engine_bridge as bridge
 from engine.community.api.transport.a2a import kernel as kernel_mod
-from engine.community.api.transport.a2a.router import InjectForwardRejected
 from engine.community.core.chat.models import ChatAbortRequest, ChatAbortResult  # noqa: E402
 from engine.community.kernel.frames import ErrorShape  # noqa: E402
 
@@ -1332,3 +1329,203 @@ async def test_cancel_mid_stream_engine_aborted_frame_reflow(monkeypatch):
     marker = await asyncio.wait_for(q.get(), 2)
     assert marker["ev"]["statusUpdate"]["metadata"]["final"] == "true"
     assert q.empty(), "aborted 回流后不得二次终结"
+
+
+# ── 终态收口（cluster E2E 2026-10-15 缺陷回归）─────────────────────────────
+# provider 重试耗尽后上游静默断流：桥接消费循环原本把"流尽无终态"包装成
+# publish_final(已收增量) + COMPLETED —— 伪装成功；既无 error 也不可解释。
+# 修复语义：流尽且未见 final/error → FAILED 终态 + 结构化错误元数据；
+# 正常 final 先到的流幂等不重发；HITL 挂起中断流同样显式失败收口。
+
+_STREAM_END_CODE = "STREAM_TERMINATED_WITHOUT_FINAL"
+
+
+async def _drain_until_terminal(q: asyncio.Queue):
+    """收队列事件直到 final 终态 marker（deliver_terminal 保证非 None）。"""
+    events: list[dict] = []
+    while True:
+        ev = await asyncio.wait_for(q.get(), 2)
+        assert ev is not None
+        events.append(ev)
+        if ev.get("type") == "statusUpdate" and \
+                ev["ev"]["statusUpdate"].get("metadata", {}).get("final") == "true":
+            return events, ev
+
+
+@pytest.mark.asyncio
+async def test_provider_death_exhausted_stream_is_failed_terminal(monkeypatch):
+    """流尽无终态（provider 全链失败，上游既无 final 也无 error 帧断流）：
+    run 必须 FAILED 收口、终态帧携带结构化可解释错误；已流出的增量留在
+    快照但不得包装成假终稿。"""
+    monkeypatch.setattr(R, "_kernel", kernel_mod.A2aKernel())
+    k = R._kernel
+
+    class _DyingChat:
+        async def stream(self, request, auth=None):
+            async def gen():
+                yield _Frame("chat", {"state": "delta", "runId": "nat-99",
+                                      "deltaText": "回答开头"})
+                # provider 重试耗尽：无 final/error/aborted，流直接结束
+            return gen()
+
+    _install_fake_chat(monkeypatch, _DyingChat())
+    rid, _ = await k.open_run("die-ctx", "dk1", "first", "d")
+    _, q = await k.subscribe(rid, since_seq=0)
+    await bridge.execute_and_stream(k, rid, "die-ctx", "查询")
+
+    events, terminal = await _drain_until_terminal(q)
+    assert terminal["ev"]["statusUpdate"]["status"]["state"] == \
+        "TASK_STATE_FAILED"
+    meta = terminal["ev"]["statusUpdate"]["metadata"]
+    assert meta["errorCode"] == _STREAM_END_CODE, meta
+    assert meta["errorMessage"], meta   # 订阅者拿到可解释错误，不再悬挂
+
+    run = k.get_run(rid)
+    assert run.state == "TASK_STATE_FAILED"
+    # 只发过增量（非 final 增量流），不伪装终稿
+    assert run.latest_text == "回答开头"
+    chunks = [e for e in events if e["type"] == "artifactUpdate"]
+    assert chunks
+    assert all(
+        c["ev"]["artifactUpdate"]["lastChunk"] is False for c in chunks)
+
+
+@pytest.mark.asyncio
+async def test_exhaustion_no_frames_fails_without_fake_success(monkeypatch):
+    """零帧流尽（上游默认即死）：不入 publish_final 空串终稿、不 COMPLETED
+    ——FAILED 终态必须照常终结订阅者。"""
+    monkeypatch.setattr(R, "_kernel", kernel_mod.A2aKernel())
+    k = R._kernel
+
+    class _SilentChat:
+        async def stream(self, request, auth=None):
+            async def gen():
+                return
+                yield  # pragma: no cover — keep this an async generator
+            return gen()
+
+    _install_fake_chat(monkeypatch, _SilentChat())
+    rid, _ = await k.open_run("silent-ctx", "sk1", "first", "d")
+    _, q = await k.subscribe(rid, since_seq=0)
+    await bridge.execute_and_stream(k, rid, "silent-ctx", "查询")
+
+    events, terminal = await _drain_until_terminal(q)
+    assert terminal["ev"]["statusUpdate"]["status"]["state"] == \
+        "TASK_STATE_FAILED"
+    assert terminal["ev"]["statusUpdate"]["metadata"]["errorCode"] == \
+        _STREAM_END_CODE
+    assert k.get_run(rid).state == "TASK_STATE_FAILED"
+    assert not any(e["type"] == "artifactUpdate" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_exhaustion_terminal_is_idempotent_after_real_final(monkeypatch):
+    """正常 final 先到：bridge 在 final 处即收口，断流不合成 error、不改写
+    终态；T1 下迟到终稿/迟到 FAILED 不复活。"""
+    monkeypatch.setattr(R, "_kernel", kernel_mod.A2aKernel())
+    k = R._kernel
+
+    class _FinalChat:
+        async def stream(self, request, auth=None):
+            async def gen():
+                yield _Frame("chat", {"state": "delta", "runId": "nat-1",
+                                      "deltaText": "开头"})
+                yield _Frame("chat", {"state": "final", "runId": "nat-1",
+                                      "message": {"content": [
+                                          {"type": "text", "text": "终稿全文"}]}})
+                yield _Frame("chat", {"state": "delta", "runId": "nat-1",
+                                      "deltaText": "迟到增量"})
+            return gen()
+
+    _install_fake_chat(monkeypatch, _FinalChat())
+    rid, _ = await k.open_run("ok-ctx", "ok1", "first", "d")
+    _, q = await k.subscribe(rid, since_seq=0)
+    await bridge.execute_and_stream(k, rid, "ok-ctx", "查询")
+
+    _, terminal = await _drain_until_terminal(q)
+    assert terminal["ev"]["statusUpdate"]["status"]["state"] == \
+        "TASK_STATE_COMPLETED"
+    assert "errorCode" not in terminal["ev"]["statusUpdate"]["metadata"]
+    run = k.get_run(rid)
+    assert run.state == "TASK_STATE_COMPLETED"
+    assert run.latest_text == "终稿全文"
+    # T1：迟到 final/FAILED 不改写首个终态
+    await k.publish_final(rid, "迟到终稿")
+    await k.complete_run(rid, "TASK_STATE_FAILED")
+    assert run.state == "TASK_STATE_COMPLETED"
+    assert run.latest_text == "终稿全文"
+    assert q.empty(), "终态后不得再次终结订阅者"
+
+
+@pytest.mark.asyncio
+async def test_exhaustion_during_hitl_fails_run_and_invalidates_interaction(
+        monkeypatch):
+    """INPUT_REQUIRED 挂起中断流：run 显式 FAILED（不无限挂、不伪装
+    COMPLETED）；迟到 ResolveInteraction 判 not_found，引擎零转发。"""
+    class _HitlDeathChat(_FakeResolveChat):
+        async def stream(self, request, auth=None):
+            async def gen():
+                yield _Frame("chat", {"state": "delta", "runId": "nat-77",
+                                      "deltaText": "开头"})
+                yield _Frame("interaction.requested", {
+                    "state": "interaction.requested", "runId": "nat-77",
+                    "interactionId": "i-77", "questions": ["继续?"]})
+                # 交互等待中上游死亡：无终帧
+            return gen()
+
+    fake = _HitlDeathChat()
+    R2 = _install_resolve_bridge(monkeypatch, fake)
+    monkeypatch.setattr(R2, "_kernel", kernel_mod.A2aKernel())
+    k = R2._kernel
+
+    rid, _ = await k.open_run("hitl-die-ctx", "hk1", "first", "d")
+    _, q = await k.subscribe(rid, since_seq=0)
+    await bridge.execute_and_stream(k, rid, "hitl-die-ctx", "查询")
+
+    events, terminal = await _drain_until_terminal(q)
+    states = [e["ev"]["statusUpdate"]["status"]["state"] for e in events
+              if e["type"] == "statusUpdate"]
+    assert "TASK_STATE_INPUT_REQUIRED" in states    # HITL 先到过现场
+    assert terminal["ev"]["statusUpdate"]["status"]["state"] == \
+        "TASK_STATE_FAILED"
+    assert terminal["ev"]["statusUpdate"]["metadata"]["errorCode"] == \
+        _STREAM_END_CODE
+    assert k.get_run(rid).state == "TASK_STATE_FAILED"
+
+    # 迟到 resolve：run 已终态 → not_found，引擎零转发（不复活）
+    out = await R2._resolve_interaction(
+        {"interactionId": "i-77",
+         "resolution": {"decision": "approve", "kind": "exec"}}, 1, None)
+    assert out["error"]["data"]["reason"] == "not_found"
+    assert fake.calls == []
+
+
+@pytest.mark.asyncio
+async def test_engine_error_frame_terminal_carries_structured_detail(
+        monkeypatch):
+    """引擎显式 error 帧（如插件 {success:False} 错误面）：FAILED 终态携带
+    引擎 errorCode/errorMessage + engine_frame 透传——错误不吞、细节可解。"""
+    monkeypatch.setattr(R, "_kernel", kernel_mod.A2aKernel())
+    k = R._kernel
+
+    class _ErrorChat:
+        async def stream(self, request, auth=None):
+            async def gen():
+                yield _Frame("chat", {"state": "error", "runId": "nat-4",
+                                      "errorCode": "PROVIDER_FAILED",
+                                      "errorMessage": "模型上游连续失败"})
+            return gen()
+
+    _install_fake_chat(monkeypatch, _ErrorChat())
+    rid, _ = await k.open_run("err-ctx", "ek1", "first", "d")
+    _, q = await k.subscribe(rid, since_seq=0)
+    await bridge.execute_and_stream(k, rid, "err-ctx", "查询")
+
+    _, terminal = await _drain_until_terminal(q)
+    assert terminal["ev"]["statusUpdate"]["status"]["state"] == \
+        "TASK_STATE_FAILED"
+    meta = terminal["ev"]["statusUpdate"]["metadata"]
+    assert meta["errorCode"] == "PROVIDER_FAILED"
+    assert meta["errorMessage"] == "模型上游连续失败"
+    engine_frame = meta.get("engine_frame") or {}
+    assert engine_frame.get("errorMessage") == "模型上游连续失败"

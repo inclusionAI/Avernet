@@ -153,7 +153,11 @@ class A2aKernel:
 
     # ── completion ──
     async def complete_run(self, rid: str,
-                           state: str = "TASK_STATE_COMPLETED") -> None:
+                           state: str = "TASK_STATE_COMPLETED",
+                           detail: dict[str, Any] | None = None) -> None:
+        """终态单次（T1）：``detail`` 只随首个终态下发（结构化错误说明，
+        errorCode/errorMessage/engine_frame），run 已终态时连同迟到
+        complete_run 一起丢弃，不复活、不二次终结。"""
         r = self.runs[rid]
         if r.state in wire.TERMINAL_STATES:
             # T1（§8.6）：终态单次——迟到终帧不覆盖首个终态（cancel 胜出），
@@ -161,10 +165,11 @@ class A2aKernel:
             return
         r.state = state
         await self._publish(rid, wire.wire_status_update(
-            rid, r.context_id, state, seq=r.last_seq))
+            rid, r.context_id, state, seq=r.last_seq,
+            extra_metadata=detail))
         r.replay_expires_at = time.monotonic() + TERMINAL_TTL_SECONDS
         marker = wire.wire_terminal_marker(rid, r.context_id, state,
-                                           r.last_seq)
+                                           r.last_seq, detail)
         for q in list(r.subscribers):
             self._deliver_terminal(r, q, marker)
         asyncio.get_running_loop().call_later(TERMINAL_TTL_SECONDS,
