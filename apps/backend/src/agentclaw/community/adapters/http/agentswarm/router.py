@@ -175,6 +175,7 @@ async def get_run(
     run_id: str,
     svc: AgentSwarmServiceDep,
     tenant: TenantQuery,
+    _user: CurrentUserDep,
 ) -> RunSummaryDTO:
     run = svc.get_run(run_id, tenant)
     if run is None:
@@ -186,6 +187,7 @@ async def get_run(
 async def list_runs(
     svc: AgentSwarmServiceDep,
     tenant: TenantQuery,
+    _user: CurrentUserDep,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status: RunStatus | None = Query(None),
@@ -204,6 +206,7 @@ async def stream_run(
     run_id: str,
     svc: AgentSwarmServiceDep,
     tenant: TenantQuery,
+    _user: CurrentUserDep,
 ) -> StreamingResponse:
     def _sse(event: str, data: dict) -> str:
         evt = StreamEventDTO(event=event, run_id=run_id, data=data)
@@ -263,6 +266,7 @@ async def report(
     run_id: str,
     svc: AgentSwarmServiceDep,
     tenant: TenantQuery,
+    _user: CurrentUserDep,
 ) -> HTMLResponse:
     run = svc.get_run(run_id, tenant)
     if run is None:
