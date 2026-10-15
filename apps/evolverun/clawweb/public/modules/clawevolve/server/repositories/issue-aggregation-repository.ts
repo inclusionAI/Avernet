@@ -130,10 +130,12 @@ export class IssueAggregationRepository {
         `SELECT DISTINCT flow_id, node_id FROM node_executions WHERE flow_id IN (${batch.map(() => '?').join(',')})`, batch);
       for (const node of nodes) runs.get(node.flow_id)?.nodes.push(node.node_id);
     }
-    let afterId = 0;
-    for (;;) {
+    // Runtime statistics only need analyses completed within the same two-week window.
+    for (let afterId = 0; runs.size;) {
       const analyses = await this.db.query<WorkflowEvolutionAnalysisRow>(`SELECT id, flow_id, scope_json, result_json FROM workflow_evolution_analysis_runs
-        WHERE workflow_id = ? AND status = 'completed' AND scope_type <> ? AND id > ? ORDER BY id LIMIT 200`, [workflowId, SCOPE, afterId]);
+        WHERE workflow_id = ? AND status = 'completed' AND scope_type <> ?
+        AND COALESCE(completed_at_ms, requested_at_ms) >= ? AND COALESCE(completed_at_ms, requested_at_ms) <= ?
+        AND id > ? ORDER BY id LIMIT 200`, [workflowId, SCOPE, sinceMs, nowMs, afterId]);
       if (!analyses.length) break;
       for (const row of analyses) {
         try {

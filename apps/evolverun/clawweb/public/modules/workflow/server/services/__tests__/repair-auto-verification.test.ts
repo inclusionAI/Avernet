@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { decideRepairEffect } from '../repair-auto-verification.js';
 const rule = { version: 'node-timeout/v1' as const, nodeId: 'n', signature: 'timeout:n', windowDays: 7, minimumSamples: 5 };
 const sample = { flowId: 'run', deployNumber: 8, completed: true, nodeStatus: 'succeeded', analysisComplete: true, signatures: [] as string[] };
@@ -71,7 +71,7 @@ it('automatically records effective/recurring phases in a real DB and creates a 
     await auto.observe(deployment);
     expect(await records.list(revision.taskId, 'verification')).toHaveLength(0);
     for (let i = 0; i < 5; i++) await analyze(`new-${i}`, 8, [], 'n', i % 2 ? Date.now() : Math.floor(Date.now() / 1000));
-    await auto.observe(deployment); await auto.observe(deployment);
+    await auto.reconcile(); await auto.reconcile();
     expect(await records.list(revision.taskId, 'verification')).toHaveLength(1);
     expect((await service.candidates('wf-1')).items.find(item => item.itemId === 'item-0')?.state).toBe('verified');
     await f.db.exec('UPDATE workflow_deploy_history SET deploy_number = 9');
@@ -106,5 +106,48 @@ it('automatically records effective/recurring phases in a real DB and creates a 
     await auto.observe(d2);
     expect((await service.candidates('wf-1')).items.find(item => item.previousItemId === next!.itemId)).toMatchObject({ state: 'pending', proposal: null });
 
+  } finally { await f.db.close(); }
+});
+
+
+it('reconciles only deployments with a currently watched task revision, without duplicate observations', async () => {
+  const f = await repairFixture(3);
+  try {
+    for (const m of repairReleaseMigrations) for (const sql of m.sql) await f.db.exec(f.db.dialect.renderDdl(sql));
+    const service = createRepairWorkbenchService(f.db, f.sourcePort, f.executionPort);
+    const inbox = await service.candidates('wf-1');
+    await service.create('actor', { workflowId: 'wf-1', itemIds: f.items.map(item => item.itemId),
+      inputDigest: inbox.inputDigest, requestId: 'watched-fixture', instructions: '' });
+    await f.db.exec("UPDATE workflow_repair_items SET active_task_id = 'watched', active_revision = 2, state = 'awaiting_verification' WHERE item_id = 'item-0'");
+    await f.db.exec("UPDATE workflow_repair_items SET active_task_id = 'watched', active_revision = 2, state = 'verified' WHERE item_id = 'item-1'");
+    await f.db.exec("UPDATE workflow_repair_items SET active_task_id = 'closed', active_revision = 1, state = 'ineffective' WHERE item_id = 'item-2'");
+    const records = new RepairReleaseRepository(f.db);
+    for (let i = 0; i < 250; i++) await records.insert('deployment', { requestId: `history-${i}` }, {
+      id: `history-${String(i).padStart(3, '0')}`, workflowId: 'wf-1', taskId: `history-${i}`, revision: 1,
+      stateVersion: 0, createdAtMs: 1, status: 'succeeded', receipt: { deployNumber: i },
+    } as RepairDeployment);
+    for (const [id, taskId, revision] of [['closed', 'closed', 1], ['obsolete-revision', 'watched', 1], ['current', 'watched', 2]] as const) {
+      await records.insert('deployment', { requestId: id }, { id, workflowId: 'wf-1', taskId, revision,
+        stateVersion: 0, createdAtMs: 1, status: 'succeeded', receipt: { deployNumber: 300 } } as RepairDeployment);
+    }
+    const auto = createRepairAutoVerification(f.db);
+    const observe = vi.spyOn(auto, 'observe').mockResolvedValue();
+    const query = vi.spyOn(f.db, 'query');
+    expect(await auto.reconcile()).toBe(1);
+    expect(observe).toHaveBeenCalledTimes(1);
+    expect(observe.mock.calls[0][0].id).toBe('current');
+    const deployments = await Promise.all(query.mock.calls.flatMap(([sql], i) =>
+      /SELECT .*record_id, .*body_json FROM workflow_repair_release_records/.test(sql)
+        ? [query.mock.results[i].value] : []));
+    expect(deployments.flat()).toHaveLength(1);
+    // Verified items still need recurrence detection after the initial conclusion.
+    await f.db.exec("UPDATE workflow_repair_items SET state = 'no_action' WHERE item_id = 'item-0'");
+    observe.mockClear();
+    expect(await auto.reconcile()).toBe(1);
+    expect(observe).toHaveBeenCalledTimes(1);
+    await f.db.exec("UPDATE workflow_repair_items SET state = 'ineffective' WHERE item_id = 'item-1'");
+    observe.mockClear();
+    expect(await auto.reconcile()).toBe(0);
+    expect(observe).not.toHaveBeenCalled();
   } finally { await f.db.close(); }
 });

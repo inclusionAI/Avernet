@@ -145,8 +145,11 @@ export function createRepairAutoVerification(db: IDatabase, publication?: Repair
   }, async reconcile() {
     let after = '', count = 0;
     for (;;) {
-      const rows = await db.query<{ record_id: string; body_json: string }>(`SELECT record_id, body_json FROM workflow_repair_release_records
-        WHERE record_kind = 'deployment' AND record_id > ? ORDER BY record_id LIMIT 100`, [after]);
+      const rows = await db.query<{ record_id: string; body_json: string }>(`SELECT r.record_id, r.body_json FROM workflow_repair_release_records r
+        JOIN (SELECT DISTINCT workflow_id, active_task_id, active_revision FROM workflow_repair_items
+          WHERE state IN ('awaiting_verification', 'verified') AND active_task_id IS NOT NULL) watched
+          ON r.task_id = watched.active_task_id AND r.workflow_id = watched.workflow_id AND r.revision = watched.active_revision
+        WHERE r.record_kind = 'deployment' AND r.record_id > ? ORDER BY r.record_id LIMIT 100`, [after]);
       if (!rows.length) break;
       for (const row of rows) {
         const d = JSON.parse(row.body_json) as RepairDeployment;
