@@ -113,10 +113,10 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
 
   return (
     <div>
-      {/* 一级行与协作群统一为 44px：头像和操作对齐名称，类型用轻量说明文字。 */}
+      {/* 一级行与协作群统一为 52px：固定头像槽位，头像和操作相对两行文字整体居中。 */}
       <div
         className={cn(
-          'group relative mx-2 flex min-h-11 items-start gap-2 rounded-md px-2 transition-colors',
+          'group relative mx-2 flex min-h-13 items-center gap-2 rounded-md px-2 transition-colors',
           'hover:bg-muted/60',
         )}
       >
@@ -126,23 +126,25 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           aria-expanded={interactive ? expanded : false}
           onClick={handleToggle}
           className={cn(
-            'flex h-auto min-h-11 min-w-0 flex-1 items-start justify-start gap-2 rounded-none px-0 py-[3px] text-left hover:bg-transparent',
+            'flex h-auto min-h-13 min-w-0 flex-1 items-center justify-start gap-2 rounded-none px-0 py-1 text-left hover:bg-transparent',
             !interactive && 'cursor-not-allowed opacity-50',
           )}
         >
-          <AvatarTile
-            src={bot.avatarUrl}
-            label={bot.displayName}
-            className="mt-0.5 h-4 w-4 rounded-full"
-            fallbackContent={
-              <span className="text-[8px] font-semibold leading-none tracking-[0.06em]">
-                {bot.displayName.slice(0, 1)}
-              </span>
-            }
-          />
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center">
+            <AvatarTile
+              src={bot.avatarUrl}
+              label={bot.displayName}
+              className="h-4 w-4 rounded-full"
+              fallbackContent={
+                <span className="text-[8px] font-semibold leading-none tracking-[0.06em]">
+                  {bot.displayName.slice(0, 1)}
+                </span>
+              }
+            />
+          </span>
           <div
             className={cn(
-              'flex min-w-0 flex-1 flex-col items-start',
+              'flex min-w-0 flex-1 flex-col items-start gap-0.5',
               // 文字让位与操作区实际覆盖等宽:悬停/键盘聚焦弹出操作区,或任一筛选(归属/范围/检索)钉住可见。
               // 新建/检索/筛选全在时让位 96px(pr-24)且悬停/聚焦不可回缩(2026-10-14 对齐设计稿顺序:新建、检索、筛选);
               // 非钉住时仅悬停/键盘聚焦临时让位。
@@ -157,8 +159,8 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             </span>
             {runtimeLabel && (
               <Badge
-                tone="outline"
-                className="block max-w-full shrink-0 truncate rounded-none border-0 bg-transparent px-0 py-0 text-[11px] font-normal leading-4 text-muted-foreground"
+                tone="neutral"
+                className="block max-w-full shrink-0 truncate rounded px-1.5 py-0.5 text-[10px] font-normal leading-3"
               >
                 {runtimeLabel}
               </Badge>
@@ -168,7 +170,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
         {hasSessionControls && (
           <div
             className={cn(
-              'absolute top-0.5 right-[34px] z-10 flex items-center gap-0.5 pl-5',
+              'absolute top-1/2 right-[34px] z-10 flex -translate-y-1/2 items-center gap-0.5 pl-5',
               'mask-[linear-gradient(to_right,transparent,black_20px)]',
               // 遮盖底撤除:按钮 hover 自带 muted 底,操作区不再叠一层与行底不一致的底色;
               // right-[34px] 使行尾箭头与操作区最右按钮(设计稿顺序 新建/检索/筛选,最右为筛选)之间
@@ -240,7 +242,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             aria-hidden="true"
             tabIndex={-1}
             onClick={handleToggle}
-            className="mt-0.5 h-6 w-6 shrink-0 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="h-6 w-6 shrink-0 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             {expanded ? (
               <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
@@ -271,6 +273,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           )}
         </div>
       )}
+      <div aria-hidden="true" className="mx-4 mt-1 border-b border-border/60" />
     </div>
   );
 });

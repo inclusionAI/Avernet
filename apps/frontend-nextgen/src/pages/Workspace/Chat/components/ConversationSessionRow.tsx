@@ -4,7 +4,7 @@
 //
 // dmore index.html「会话目录二级*」帧 1:1 复原(2026-10-10 像素实测,B1 tasks 6.1 裁决):
 // - 无树形 rail/前置消息图标:文字 13px/18px、x 与一级 bot 行平齐(稿 x=240);
-// - hover 交互热区分级:左缘较 bot 胶囊(全宽 inset-x-2)再内缩 24、右缘再内缩 8,收藏行右缘到边;
+// - 标题左缘对齐一级名称(固定 36px 头像槽之后);右缘内缩 8,收藏行右缘到边;
 // - 选中胶囊与 bot 行同构:全宽(#EBEBEB → bg-selected) rx6(稿 实测 x208..510);
 //   hover 胶囊与选中胶囊同几何(inset-x-2 全宽)——hover/选中背景长度一致,
 //   行内按钮的热区宽度(左缘内缩/右缘为星标让位)只作用于点击,不再用于背景;
@@ -65,9 +65,9 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
         onClick={onSelect}
         className={cn(
           'relative flex h-8 min-w-0 flex-1 items-center justify-start gap-2 rounded-md pl-2 pr-2 text-left hover:bg-transparent',
-          // 交互/点击热区分级:左缘 +24px、右缘 +8px(较 bot 胶囊);收藏行右缘到边(稿 271/279 宽)。
+          // 标题左缘对齐一级名称：16px 外距 + 36px 头像槽 + 8px 间隔 = 52px margin + 8px padding。
           // 仅界定点击范围,hover 背景已移交全宽胶囊。
-          favorite ? 'ml-8 mr-2' : 'ml-8 mr-4',
+          favorite ? 'ml-[52px] mr-2' : 'ml-[52px] mr-4',
           // 长标题让位(星标/「…」与标题互叠,两者都看不清):文字右界 = mr + pr,须按图标可见性
           // 提前截断。让位只压缩文字(pr 不动热区 mr、不动胶囊几何),pl-2 恒定 → 标题起点不随状态跳动:
           // - 静默态(未收藏且未选中)图标全隐 → 基础 pr-2,右界 24px(同原 px-2);
@@ -84,12 +84,7 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
           ],
         )}
       >
-        <span
-          className={cn(
-            'min-w-0 flex-1 truncate text-[13px] leading-[18px] tracking-[-0.08px]',
-            selected ? 'font-medium text-foreground' : 'font-normal text-content-strong',
-          )}
-        >
+        <span className="min-w-0 flex-1 truncate text-[13px] font-normal leading-[18px] text-content-strong">
           {session.title}
         </span>
         {readOnly && (

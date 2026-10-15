@@ -32,21 +32,19 @@ describe('ConversationSessionRow 平齐化与热区分级（dmore 1:1）', () =>
     // 稿二级行:无前置消息图标、右余部无「N 条」列。
     expect(container.querySelector('svg.lucide-message-square')).toBeNull();
     expect(screen.queryByText('21 条')).not.toBeInTheDocument();
-    // 文字 13px/18px:正常 #525252(text-content-strong),选中 #09090B 中黑 500。
+    // 文字 13px/18px，与一级名称同色；选中仅由背景区分，不再加黑加粗。
     const title = screen.getByText('对话会话');
     expect(title).toHaveClass('text-[13px]', 'leading-[18px]');
-    // 条期望展开写（禁条件 expect）：选中 500/#09090B，未选 400/#525252。
-    const expectation = selected ? ['font-medium', 'text-foreground'] : ['font-normal', 'text-content-strong'];
-    expect(title).toHaveClass(...expectation);
+    expect(title).toHaveClass('font-normal', 'text-content-strong');
   });
 
-  it('点击热区分级：非收藏行左缘内缩 24px、右缘内缩 8px；收藏行右缘到边', () => {
+  it('标题对齐一级名称：固定头像槽后起排；非收藏行右缘内缩，收藏行右缘到边', () => {
     const { container, rerender } = render(
       <ConversationSessionRow session={session} selected={false} onSelect={jest.fn()} />,
     );
     const plainButton = screen.getByRole('button', { name: '对话会话' });
-    // 非收藏点击热区：ml-8（较 bot 胶囊 inset-x-2 再内缩 24px）/ mr-4（再内缩 8px，稿 Button 271px 宽）。
-    expect(plainButton).toHaveClass('ml-8', 'mr-4');
+    // 52px margin + 8px padding，与一级名称的 16px 外距 + 36px 头像槽 + 8px 间隔一致。
+    expect(plainButton).toHaveClass('ml-[52px]', 'mr-4');
     // hover 背景由全宽胶囊承载（见下条同几何用例），选中不再使用行首品牌指示棒。
     expect(plainButton).not.toHaveClass('bg-primary/10');
 
@@ -60,7 +58,7 @@ describe('ConversationSessionRow 平齐化与热区分级（dmore 1:1）', () =>
     );
     const favoriteButton = screen.getByRole('button', { name: '对话会话' });
     // 收藏行热区右缘到边（稿 Button 279px 宽），为常驻星标让出完整热区。
-    expect(favoriteButton).toHaveClass('ml-8', 'mr-2');
+    expect(favoriteButton).toHaveClass('ml-[52px]', 'mr-2');
     expect(container.firstElementChild).not.toBeNull();
   });
 
