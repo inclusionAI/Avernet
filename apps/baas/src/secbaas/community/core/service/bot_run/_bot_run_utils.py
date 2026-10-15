@@ -71,9 +71,10 @@ def resolve_user_id(
     优先级：
     1. 个人 bot（bot_type == "personal"）直接使用 entity_id
     2. metadata.sender_options.from = owner 时，取 binding_info.entity_id
-    3. context.app_type == 'bot' 时，从 context.app_id（格式 bot_id:entity_id）解析 entity_id
-    4. 否则取 context.app_id
-    5. 最后 fallback 到 bot_id
+    3. metadata.sender_options.from 为自定义值（非 owner 的非空字符串）时，直接作为 user_id
+    4. context.app_type == 'bot' 时，从 context.app_id（格式 bot_id:entity_id）解析 entity_id
+    5. 否则取 context.app_id
+    6. 最后 fallback 到 bot_id
 
     Args:
         metadata: 会话元数据
@@ -94,6 +95,8 @@ def resolve_user_id(
         from_field = sender_options.get("from")
         if from_field == "owner" and binding_info:
             return binding_info.entity_id
+        if from_field and from_field != "owner":
+            return from_field
 
     # 3. 当 app_type == 'bot' 时，app_id 格式为 bot_id:entity_id，取 entity_id 部分
     # 4. 否则取 context.app_id
