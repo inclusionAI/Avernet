@@ -4,7 +4,7 @@ import { validateWorkflowEvolutionAnalysisResult } from '@avernet/clawevolve/ser
 type SampleAnalysis = { analysisComplete: boolean; signatures: string[] };
 type AnalysisRow = { id: number; completed_at_ms: number | null; flow_id: string | null; scope_json: string; result_json: string };
 
-function samplePredicate(db: IDatabase, ids: string[]) {
+export function sampleAnalysisPredicate(db: IDatabase, ids: string[]) {
   const binds = ids.map(() => '?').join(',');
   const scope = "CASE WHEN JSON_VALID(scope_json) THEN scope_json ELSE '{}' END";
   const result = "CASE WHEN JSON_VALID(result_json) THEN result_json ELSE '{}' END";
@@ -30,7 +30,7 @@ export async function fillRepairSampleAnalyses(db: IDatabase, workflowId: string
   const ids = [...samples.keys()];
   for (let offset = 0; offset < ids.length; offset += 100) {
     const batch = new Set(ids.slice(offset, offset + 100));
-    const predicate = samplePredicate(db, [...batch]);
+    const predicate = sampleAnalysisPredicate(db, [...batch]);
     const visited = new Set<string>();
     let before: { time: number; id: number } | null = null;
     while (visited.size < batch.size) {

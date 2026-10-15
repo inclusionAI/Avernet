@@ -58,6 +58,7 @@ export default function RepairTaskPanel({ detail, canEdit, onFeedback, onCancel,
   return <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_19rem] pb-20">
     <section aria-label="修复任务详情" className="min-w-0 space-y-4">
       <section className={`rounded-lg border bg-card p-5 ${failed ? 'border-destructive/30' : 'border-input'}`}>
+        <p className="mb-2 text-xs text-muted-foreground">{detail.latestAttempt.input.automation ? '自动生成草稿 · 等待人工审阅' : '手动优化任务'}</p>
         <p className="text-sm font-semibold text-foreground">最近尝试：v{detail.latestAttempt.revision} · {candidateLabel(detail, detail.latestAttempt)}</p>
         {failed && <>
           <p className="mt-2 text-xs leading-5 text-destructive">{awaitingResult ? 'AIS 已完成，但候选结果尚未读取成功。先重新读取原结果，不重复派发。' : detail.latestSuccessful ? `本轮生成失败，已保留 v${detail.latestSuccessful.revision} 候选。旧审核不自动恢复。` : '首次生成失败，尚无候选。可以沿用本轮范围与要求重新生成，无需取消任务。'}</p>

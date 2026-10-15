@@ -144,7 +144,7 @@ export class IssueAggregationRepository {
           // Partial node analyses do not establish full coverage of other findings.
           if (scope.nodeId || scope.nodeIds?.length) continue;
           for (const id of [...(Array.isArray(scope.flowIds) ? scope.flowIds : []), ...(row.flow_id ? [row.flow_id] : []), ...result.diagnoses.flatMap(d => d.flowIds)]) {
-            const run = runs.get(id); if (run) run.analyzed = true;
+            const run = runs.get(id); if (run) run.analyzed = result.unknowns.length === 0;
           }
         } catch { /* Invalid analyses never count as analyzed/clean evidence. */ }
       }

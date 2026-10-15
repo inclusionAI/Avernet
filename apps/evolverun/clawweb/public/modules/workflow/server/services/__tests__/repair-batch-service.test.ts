@@ -504,3 +504,25 @@ it('allows independent scopes and reuses the same frozen scope instead of genera
     expect(independent.taskId).not.toBe(first.taskId); expect(f.calls).toHaveLength(2);
   } finally { await f.db.close(); }
 });
+
+it('retains ignored evidence until expiry or materially new high-impact evidence, without rewriting its audit', async () => {
+  const f = await repairFixture(1);
+  const service = createRepairWorkbenchService(f.db, f.sourcePort, f.executionPort);
+  try {
+    f.items[0].context = { diagnoses: [{ flowId: 'old', severity: 'high', evidenceEventIds: ['event-old'] }] };
+    const inbox = await service.candidates('wf-1');
+    const untilMs = Date.now() + 1000;
+    await service.disposition('actor', { workflowId: 'wf-1', itemId: 'item-0', inputDigest: inbox.inputDigest,
+      contentRevision: 1, expectedStateVersion: 0, action: 'no_action', reason: '等待业务窗口', requestId: 'defer', untilMs });
+    expect((await service.candidates('wf-1')).items.some(item => item.previousItemId === 'item-0')).toBe(false);
+    f.items[0].context = { diagnoses: [{ flowId: 'old', severity: 'high', evidenceEventIds: ['event-old', 'event-critical-new'] }] };
+    const fresh = await service.candidates('wf-1');
+    expect(fresh.items.some(item => item.previousItemId === 'item-0' && item.state === 'pending')).toBe(true);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(untilMs + 1000);
+    const expired = await service.candidates('wf-1');
+    expect(expired.items.some(item => item.previousItemId === 'item-0' && item.context?.dispositionResume)).toBe(true);
+    now.mockRestore();
+    const stored = (await f.db.query<{ disposition_json: string }>('SELECT disposition_json FROM workflow_repair_items WHERE item_id = ?', ['item-0']))[0];
+    expect(JSON.parse(stored.disposition_json)).toMatchObject({ reason: '等待业务窗口', untilMs, evidenceEventIds: ['event-old'] });
+  } finally { vi.restoreAllMocks(); await f.db.close(); }
+});

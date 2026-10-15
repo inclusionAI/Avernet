@@ -6,6 +6,7 @@ import type { RepairSourcePort } from '../contracts/repair-workbench.js';
 
 type RecordValue = Record<string, unknown>;
 type DiagnosisSource = {
+  severity?: 'low' | 'medium' | 'high' | 'critical' | null;
   diagnosisId: string; flowId: string; analysisId: string; failureSignature: string;
   failureMode: string; nodeId: string | null; reasoning: string; evidenceEventIds: string[];
   proposal?: RecordValue; sourceId: string; completedAtMs: number;
@@ -121,7 +122,7 @@ export function createRepairSourcePort(readers: RepairSourceReaders): RepairSour
       throw new RepairBatchError('CONTENT_MISMATCH', 'Source belongs to another workflow');
     }
     const diagnosisContext = (source: DiagnosisSource): RecordValue => ({
-      analysisId: source.analysisId, diagnosisId: source.diagnosisId, flowId: source.flowId,
+      severity: source.severity ?? null, analysisId: source.analysisId, diagnosisId: source.diagnosisId, flowId: source.flowId,
       nodeId: source.nodeId, failureMode: source.failureMode, reasoning: source.reasoning, completedAtMs: source.completedAtMs,
       evidenceEventIds: source.evidenceEventIds, evidenceCount: source.evidenceEventIds.length,
     });

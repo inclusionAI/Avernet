@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { AutomationOrigin } from './workflow-automation.js';
 
 export const REPAIR_BATCH_SCHEMA = 'workflow-repair/v2' as const;
 export const MAX_ITEMS = 100;
@@ -23,7 +24,7 @@ export type RepairItem = {
   context?: Record<string, unknown>;
 };
 export type RepairItemState = 'pending' | 'processing' | 'awaiting_verification' | 'verified' | 'ineffective' | 'no_action';
-export type RepairDisposition = { action: 'no_action' | 'restore'; actorId: string; reason: string; contentRevision: number; requestId: string; atMs: number };
+export type RepairDisposition = { action: 'no_action' | 'restore'; actorId: string; reason: string; contentRevision: number; requestId: string; atMs: number; untilMs?: number; evidenceFlowIds?: string[]; evidenceEventIds?: string[]; evidenceSeverity?: number };
 export type StoredRepairItem = RepairItem & {
   workflowId: string; episodeKey: string; state: RepairItemState; stateVersion: number;
   activeTaskId: string | null; activeRevision: number | null;
@@ -36,6 +37,7 @@ export type RepairBaseline = {
 export type RepairBatchInput = {
   schemaVersion: typeof REPAIR_BATCH_SCHEMA; taskId: string; revision: number; baseline: RepairBaseline;
   items: RepairItem[]; excludedSources: { count: number; digest: string }; instructions: string;
+  automation?: AutomationOrigin;
   parentCandidateCommit: string | null; feedback: string; previousReportRef: string | null; taskBranch: string;
 };
 export type RepairRevisionPhase = 'drafting' | 'review' | 'blocked' | 'publishing' | 'published' | 'no_change' | 'failed' | 'cancelled';
@@ -105,12 +107,18 @@ export function validateRepairItem(value: unknown): RepairItem {
   boundedRepairJson(value, MAX_FROZEN_BYTES);
   return value as RepairItem;
 }
+export function validateAutomationOrigin(value: unknown): AutomationOrigin {
+  valid(object(value) && value.kind === 'daily' && digest(value.intentId)
+    && integer(value.policyVersion, 1) && integer(value.evidenceCutoffMs, 1), 'automation origin');
+  return value as AutomationOrigin;
+}
 export function validateRepairBatchInput(value: unknown): RepairBatchInput {
   boundedRepairJson(value, MAX_FROZEN_BYTES);
   valid(object(value) && value.schemaVersion === REPAIR_BATCH_SCHEMA, 'schemaVersion');
   valid(gitIdentity(value.taskId, 64) && integer(value.revision, 1), 'revision identity');
   valid(Array.isArray(value.items) && value.items.length > 0 && value.items.length <= MAX_ITEMS, 'items');
   value.items.forEach(validateRepairItem);
+  if (value.automation !== undefined) validateAutomationOrigin(value.automation);
   valid(new Set(value.items.map(item => item.itemId)).size === value.items.length, 'duplicate items');
   valid(object(value.excludedSources) && integer(value.excludedSources.count) && digest(value.excludedSources.digest), 'excludedSources');
   valid(text(value.instructions, MAX_INSTRUCTIONS_CHARS, true) && text(value.feedback, MAX_INSTRUCTIONS_CHARS, true), 'instructions/feedback');
@@ -126,4 +134,20 @@ export function validateRepairBatchInput(value: unknown): RepairBatchInput {
     && !baseline.specPath.split('/').some(part => part === '..' || part === '.' || part === ''), 'specPath');
   valid(value.taskBranch === `repair/${baseline.workflowId}/${value.taskId}`, 'taskBranch');
   return value as RepairBatchInput;
+}
+
+/** Flow identity, rather than analysis IDs or rewritten text, detects materially new ignored-scope evidence. */
+export function repairEvidenceFlows(item: RepairItem): string[] {
+  const diagnoses = Array.isArray(item.context?.diagnoses) ? item.context.diagnoses : [];
+  return [...new Set([...item.sources.flatMap(source => source.kind === 'diagnosis_candidate' ? [source.flowId] : []),
+    ...diagnoses.flatMap((entry: any) => [entry?.flowId, ...(Array.isArray(entry?.flowIds) ? entry.flowIds : [])])]
+    .filter((id): id is string => typeof id === 'string' && !!id))].sort();
+}
+
+export function repairEvidenceFacts(item: RepairItem) {
+  const diagnoses = Array.isArray(item.context?.diagnoses) ? item.context.diagnoses : [];
+  const eventIds = [...new Set(diagnoses.flatMap((entry: any) => Array.isArray(entry?.evidenceEventIds) ? entry.evidenceEventIds : [])
+    .filter((id: unknown): id is string => typeof id === 'string'))].sort() as string[];
+  const severity = diagnoses.reduce((rank: number, entry: any) => Math.max(rank, ['low', 'medium', 'high', 'critical'].indexOf(entry?.severity) + 1), 0);
+  return { eventIds, severity };
 }

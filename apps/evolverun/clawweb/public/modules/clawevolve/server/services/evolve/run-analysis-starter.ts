@@ -21,6 +21,7 @@ export type RunAnalysisStartInput = {
   botId?: string;
   botEnv?: string;
   force?: boolean;
+  automatic?: { workflowId: string; policyVersion: number; requestId: string; dispatchToken: string };
 };
 
 export type RunAnalysisStartResult = {
@@ -84,6 +85,7 @@ export function createRunAnalysisStarter(input: {
   db: IDatabase;
   dispatch?: Dispatch;
   publicBaseUrl?: string;
+  beforeDispatch?: (request: RunAnalysisStartInput) => Promise<void>;
 }): RunAnalysisStarter {
   const { repo, db } = input;
   const dispatch = input.dispatch ?? dispatchEvolveCommand;
@@ -205,6 +207,7 @@ export function createRunAnalysisStarter(input: {
 
       try {
         const callbackUrl = `${input.publicBaseUrl ?? getClawWebPublicBaseUrl()}/api/evolve/internal/tasks/${encodeURIComponent(nextTaskId)}/steps/${encodeURIComponent(stepId)}/bot-callback`;
+        await input.beforeDispatch?.(request);
         const dispatched = await dispatch({
           taskId: nextTaskId,
           stepPk: 0,
@@ -221,10 +224,12 @@ export function createRunAnalysisStarter(input: {
         await repo.markDispatched(stepId, dispatched.runId, dispatched.sessionId, dispatched.platformResponse);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        await repo.updateStepStatus(stepId, { status: "failed", errorCode: "DISPATCH_FAILED", errorMessage: message });
+        const denied = error instanceof RunAnalysisStartError && error.code === 'AUTOMATION_AUTHORITY_CHANGED';
+        const code = denied ? 'AUTOMATION_AUTHORITY_CHANGED' : 'DISPATCH_FAILED';
+        await repo.updateStepStatus(stepId, { status: "failed", errorCode: code, errorMessage: message });
         await repo.failFlowAnalysis(flowId);
-        await workflowEvolutionRepo.failAnalysisRun(analysisId, "DISPATCH_FAILED", Date.now()).catch(() => undefined);
-        throw new RunAnalysisStartError(502, "DISPATCH_FAILED", message);
+        await workflowEvolutionRepo.failAnalysisRun(analysisId, code, Date.now()).catch(() => undefined);
+        throw new RunAnalysisStartError(denied ? 403 : 502, code, message);
       }
 
       return {

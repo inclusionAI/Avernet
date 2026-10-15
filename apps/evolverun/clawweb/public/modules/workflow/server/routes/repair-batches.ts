@@ -131,6 +131,7 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
       workflowId, itemId: text(req.params.itemId, 'itemId'), inputDigest: req.body.inputDigest,
       expectedStateVersion: req.body.expectedStateVersion, contentRevision: req.body.contentRevision,
       action: req.body.action, reason: req.body.reason, requestId: req.body.requestId,
+      ...(req.body.untilMs === undefined ? {} : { untilMs: req.body.untilMs }),
       ...(req.body.includeHistorical === undefined ? {} : { includeHistorical: req.body.includeHistorical }),
     }));
   }));

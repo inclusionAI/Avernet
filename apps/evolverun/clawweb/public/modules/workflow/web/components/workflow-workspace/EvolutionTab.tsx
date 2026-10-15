@@ -51,12 +51,15 @@ function readRepairView(workflowId: string): RepairViewState {
     includeHistorical: false, selectedTaskId: '' }
   try {
     const saved = JSON.parse(sessionStorage.getItem(`workflow-repair:${workflowId}`) ?? '{}')
+    const query = new URLSearchParams(window.location.search)
+    const task = query.get('workflowId') === workflowId ? query.get('repairTaskId') : null
+    const linkedTask = task && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(task) ? task : ''
     return {
       repairOpen: saved.repairOpen === true,
       repairPage: Number.isSafeInteger(saved.repairPage) && saved.repairPage > 0 ? saved.repairPage : fallback.repairPage,
       repairPageSize: Number.isSafeInteger(saved.repairPageSize) && [10, 20, 50].includes(saved.repairPageSize) ? saved.repairPageSize : fallback.repairPageSize,
       includeHistorical: saved.includeHistorical === true,
-      selectedTaskId: typeof saved.selectedTaskId === 'string' ? saved.selectedTaskId : '',
+      selectedTaskId: linkedTask || (typeof saved.selectedTaskId === 'string' ? saved.selectedTaskId : ''),
     }
   } catch { return fallback }
 }
@@ -135,6 +138,7 @@ function DiagnosisPanel({
   const [selectedTaskId, setSelectedTaskId] = useState(initialRepairView.selectedTaskId)
   const [disposition, setDisposition] = useState<{ item: RepairInboxItem; action: 'no_action' | 'restore' } | null>(null)
   const [dispositionReason, setDispositionReason] = useState('')
+  const [dispositionUntil, setDispositionUntil] = useState('')
   const initializedDigest = useRef('')
   const knownRepairControl = useRef('')
   const knownRepairStates = useRef(new Map<string, string>())
@@ -384,6 +388,7 @@ function DiagnosisPanel({
     if (!repairData || !disposition || !dispositionReason.trim() || repairBusy) return
     const input = { workflowId, inputDigest: repairData.inputDigest,
       expectedStateVersion: disposition.item.stateVersion, contentRevision: disposition.item.contentRevision,
+      ...(disposition.action === 'no_action' && dispositionUntil ? { untilMs: Date.parse(dispositionUntil + ':00+08:00') } : {}),
       action: disposition.action, reason: dispositionReason.trim(), includeHistorical: repairData.includeHistorical }
     setRepairBusy(true); setRepairActionError('')
     try {
@@ -399,7 +404,7 @@ function DiagnosisPanel({
       detailEpoch.current += 1
       detailRequests.current.clear()
       setRepairDetails({}); setRepairDetailLoading({}); setRepairDetailErrors({})
-      setDisposition(null); setDispositionReason(''); resetRequestId(); setRepairRefresh(value => value + 1)
+      setDisposition(null); setDispositionReason(''); setDispositionUntil(''); resetRequestId(); setRepairRefresh(value => value + 1)
     } catch (error) { setRepairActionError(error instanceof Error ? error.message : String(error)) }
     finally { setRepairBusy(false) }
   }
@@ -453,6 +458,9 @@ function DiagnosisPanel({
           <textarea aria-label="处置原因" rows={4} maxLength={2000} value={dispositionReason} disabled={repairBusy}
             onChange={event => setDispositionReason(event.target.value)} className="mt-2 w-full rounded-lg border border-input bg-background p-3 font-normal leading-5 text-foreground" />
         </label>
+        {disposition.action === 'no_action' && <label className="mt-3 block text-xs text-foreground">暂缓至（Asia/Shanghai，留空表示明确忽略当前证据）
+          <input type="datetime-local" aria-label="暂缓截止时间" value={dispositionUntil} disabled={repairBusy} onChange={event => setDispositionUntil(event.target.value)} className="mt-2 block rounded border border-input bg-background p-2" />
+          <span className="mt-1 block text-muted-foreground">期限到达或出现新的高影响证据时重新提示；原处置记录保留。</span></label>}
         {repairActionError && <p role="alert" className="mt-3 text-xs text-destructive">{repairActionError}</p>}
         <button type="button" className={`${primary} mt-4`} disabled={repairBusy || !dispositionReason.trim()} onClick={() => void submitDisposition()}>
           {repairBusy ? '提交中…' : '确认'}

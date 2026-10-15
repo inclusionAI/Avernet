@@ -1,6 +1,7 @@
 // Browser-safe boundary: type-only dependencies; no database, HTTP or AIS implementation.
 import type { RepairBaseline, RepairBatchInput, RepairItem, RepairItemState, RepairRevision, StoredRepairItem } from './repair-batch.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
+import type { AutomationOrigin } from './workflow-automation.js';
 import type { RepairReleaseDetail } from './repair-release.js';
 
 export type RepairCapabilities = { generation: boolean; diff: boolean; publication: boolean; reason: string | null };
@@ -39,6 +40,7 @@ export type RepairTaskDetail = {
     errorCode: string | null; jobId: string | null; attempt: number; executionId: string | null; rawStatus: string | null };
 };
 export type RepairSelectionRequest = {
+  automation?: AutomationOrigin;
   workflowId: string; itemIds: string[]; inputDigest: string; instructions: string; requestId: string; includeHistorical?: boolean;
 };
 export type RepairFeedbackRequest = RepairSelectionRequest & {
@@ -84,7 +86,7 @@ export interface RepairWorkbenchService {
   create(actorId: string, request: RepairSelectionRequest): Promise<RepairRevision>;
   revise(actorId: string, taskId: string, request: RepairFeedbackRequest): Promise<RepairRevision>;
   disposition(actorId: string, input: { workflowId: string; itemId: string; inputDigest: string; expectedStateVersion: number;
-    contentRevision: number; action: 'no_action' | 'restore'; reason: string; requestId: string; includeHistorical?: boolean }): Promise<StoredRepairItem>;
+    contentRevision: number; untilMs?: number; action: 'no_action' | 'restore'; reason: string; requestId: string; includeHistorical?: boolean }): Promise<StoredRepairItem>;
   cancel(actorId: string, taskId: string, expectedRevision: number): Promise<void>;
   retryResult(actorId: string, taskId: string, expectedRevision: number): Promise<void>;
   retryGeneration(actorId: string, taskId: string, request: { expectedRevision: number; requestId: string }): Promise<RepairRevision>;
