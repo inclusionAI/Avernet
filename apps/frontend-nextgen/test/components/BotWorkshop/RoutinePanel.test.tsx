@@ -58,8 +58,7 @@ test('任务卡片按摘要布局展示更新时间、频率、下次执行和�
 });
 
 test('后端未返回下次执行时间时不渲染该字段', () => {
-  const routineWithoutNextRun = { ...routine };
-  delete routineWithoutNextRun.nextRunAt;
+  const routineWithoutNextRun = { ...routine, nextRunAt: undefined };
   render(
     <RoutinePanel
       routines={[routineWithoutNextRun]}
