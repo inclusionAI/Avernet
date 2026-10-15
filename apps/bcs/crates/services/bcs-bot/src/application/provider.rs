@@ -97,6 +97,34 @@ impl ProviderManagement {
             .await
     }
 
+    /// Authority ownership initialization for a freshly created admin Bot
+    /// (spec §10.3 trusted delegation): the Provider-admin credential
+    /// authenticates the identity authority, so its declared single owner
+    /// initializes the owner edge the same way the trusted register chain
+    /// does — but the audit actor records `Provider { provider_id }`
+    /// (the Provider credential is its own principal), never the claimed
+    /// Human. The Provider-registration legacy guard already refuses
+    /// re-registering an existing Bot under a divergent owner, so a
+    /// divergent-owner composite conflict never reaches this call and
+    /// every composite failure propagates honestly.
+    async fn ensure_authority_ownership(
+        &self,
+        bot_uuid: &str,
+        owner: &str,
+        provider_id: &str,
+    ) -> ServiceResult<()> {
+        let mutation = bcs_service_api::types::bot_authority::AuthorityMutation {
+            mutation_id: uuid::Uuid::new_v4().to_string(),
+            actor: bcs_service_api::types::bot_authority::AuthorityActor::Provider {
+                provider_id: provider_id.to_string(),
+            },
+        };
+        self.registry
+            .initialize_ownership(bot_uuid, owner, mutation)
+            .await?;
+        Ok(())
+    }
+
     async fn resolve_owner_nick_name(&self, staff_no: &str) -> String {
         let Some(user_directory) = self.user_directory.as_ref() else {
             return staff_no.to_string();
@@ -290,6 +318,8 @@ impl ProviderManagementService for ProviderManagement {
             .await?;
         if !duplicate_registration {
             self.ensure_owner_binding(&binding.bot_uuid, &owner).await?;
+            self.ensure_authority_ownership(&binding.bot_uuid, &owner, &command.provider_id)
+                .await?;
         }
         let created = !duplicate_registration;
         let capabilities = if created {

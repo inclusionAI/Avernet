@@ -32,6 +32,9 @@ pub struct EnsureCurrentHumanActorResult {
     #[serde(rename = "actor_uuid")]
     pub human_id: String,
     pub human_created: bool,
+    /// The verified login nick healed a fallback-shaped stored display
+    /// name (absent or the raw staff_no placeholder) during this ensure.
+    pub name_repaired: bool,
     pub matched_bots: Vec<String>,
     pub edges_created: u32,
     pub edges_upgraded: u32,

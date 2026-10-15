@@ -815,6 +815,23 @@ impl BotRepoPort for MemoryBotRepo {
         Ok(bcs_service_api::EnsureHumanResult { created: true })
     }
 
+    /// In-memory mirror of the SQL `update_human_name` semantics: touch
+    /// only the `name` of the `human_<staff_no>` row; an absent row is a
+    /// contract no-op (no error), matching the persistent store.
+    async fn update_human_name(&self, staff_no: &str, new_name: &str) -> ServiceResult<()> {
+        let bot_uuid = format!("human_{}", staff_no);
+        let mut bots = self.bots.write().await;
+        if let Some(existing) = bots.get_mut(&bot_uuid) {
+            existing.capabilities.name = Some(new_name.to_string());
+            info!(
+                bot_uuid = %bot_uuid,
+                staff_no = %staff_no,
+                "update_human_name (in-memory): human actor name updated"
+            );
+        }
+        Ok(())
+    }
+
     async fn list_legacy_bots_for_owner(
         &self,
         staff_no: &str,

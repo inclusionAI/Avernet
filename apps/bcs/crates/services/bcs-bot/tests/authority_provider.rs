@@ -18,11 +18,11 @@ use bcs_bot_store::provider::{MemoryBotProviderStore, MemoryProviderStore};
 use bcs_service_api::core::RetireProviderBotParams;
 use bcs_service_api::port::repo::{BotAuthorityRepoPort, bot_provider::BotProviderRepoPort};
 use bcs_service_api::types::bot_authority::{
-    AuthorityActor, TransferAction, TransferCommand, TransferKey, TransferStatus,
-    human_actor_id,
+    AuthorityActor, BotAccessRelation, TransferAction, TransferCommand, TransferKey,
+    TransferStatus, human_actor_id,
 };
 use bcs_service_api::{
-    BotCapabilities, BotCatalogCleanupPort,
+    ActorKind, BotCapabilities, BotCatalogCleanupPort,
     BotRegistryCoreService, ChannelBindingCleanupPort,
     DeleteProviderBotCommand, ProviderAuthMode, ProviderBotBindingRepoPort,
     ProviderBotConnectionMode, ProviderBotCoreService,
@@ -680,4 +680,200 @@ async fn provider_only_actor_needs_its_token_never_in_mutation() {
     let refused = ctx.provider_core.retire_registered_bot(params).await;
     assert!(refused.is_err(), "verification-only token gate");
     assert!(ctx.registry.get(bot_uuid).await.is_some());
+}
+
+// ---------------------------------------------------------------------------
+// Admin registration ownership minting (spec §10.3 trusted delegation):
+// a freshly created admin Bot initializes its owner edge in the same
+// registration call; the audit initiator is `provider_{id}` — the
+// Provider credential vouches for the declared identity and never
+// impersonates the claimed Human in the audit identity.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn admin_registration_mints_ownership_for_the_declared_owner() {
+    let ctx = test_context();
+    let (provider_id, admin_token) = register_provider(&ctx).await;
+    let owner = "33333333";
+
+    let outcome = ctx
+        .management
+        .register_provider_bot(RegisterProviderBotCommand {
+            webhook_url: None,
+            provider_id: provider_id.clone(),
+            provider_admin_token: admin_token.clone(),
+            name: "Owned Bot".to_string(),
+            summary: None,
+            owners: vec![owner.to_string()],
+            provider_bot_ref: "owned-ref".to_string(),
+            domains: Vec::new(),
+            skills: Vec::new(),
+            scopes: Vec::new(),
+            bot_uuid: None,
+            reject_existing_bot_uuid: false,
+            connection_mode: ProviderBotConnectionMode::Gateway,
+        })
+        .await
+        .expect("fresh admin registration");
+    assert!(outcome.created);
+
+    // The owner edge is live for the strict authority read ...
+    let relation = ctx
+        .bot_repo
+        .role(&human_actor_id(owner), &outcome.bot_uuid)
+        .await
+        .expect("role read");
+    assert_eq!(relation, Some(BotAccessRelation::Owner));
+
+    // ... backed by the necessary Human actor row (no user directory
+    // wired in this harness → the staff_no fallback name, matching the
+    // trusted-register behavior).
+    let human = ctx
+        .registry
+        .get(&human_actor_id(owner))
+        .await
+        .expect("human actor row ensured");
+    assert_eq!(human.actor_kind, ActorKind::Human);
+    assert_eq!(human.capabilities.name.as_deref(), Some(owner));
+
+    // The `initialize` audit records the PROVIDER principal; the
+    // claimed Human never appears as its own initiator anywhere.
+    let rows = audit_rows(&ctx.bot_repo, &outcome.bot_uuid).await;
+    assert!(
+        rows.iter().any(|(action, kind, id, _)| action == "initialize"
+            && kind == "provider"
+            && id == &format!("provider_{provider_id}")),
+        "admin mint audits the Provider identity: {rows:?}"
+    );
+    assert_no_token_in_audit(&ctx.bot_repo, &admin_token).await;
+}
+
+#[tokio::test]
+async fn admin_reregistration_under_a_divergent_owner_is_refused() {
+    // The Provider-registration legacy guard refuses re-registering an
+    // existing Bot under a different claimed owner ("Bot owner does not
+    // match registration owner"): the committed owner is protected
+    // BEFORE the authority composite is ever consulted.
+    let ctx = test_context();
+    let (provider_id, admin_token) = register_provider(&ctx).await;
+    register_legacy_bot(&ctx, "legacy-owned:11111111").await;
+    {
+        use bcs_service_api::port::repo::BotRepoPort;
+        ctx.bot_repo
+            .ensure_human_actor("11111111", "11111111")
+            .await
+            .expect("ensure the original owner's actor row");
+    }
+    ctx.registry
+        .initialize_ownership(
+            "legacy-owned:11111111",
+            "11111111",
+            AuthorityMutation {
+                mutation_id: "seed-owner".to_string(),
+                actor: AuthorityActor::Human {
+                    user_id: "11111111".to_string(),
+                },
+            },
+        )
+        .await
+        .expect("seed the original owner");
+
+    let refused = ctx
+        .management
+        .register_provider_bot(RegisterProviderBotCommand {
+            webhook_url: None,
+            provider_id: provider_id.clone(),
+            provider_admin_token: admin_token,
+            name: "Reclaimed".to_string(),
+            summary: None,
+            owners: vec!["22222222".to_string()],
+            provider_bot_ref: "legacy-owned:11111111".to_string(),
+            domains: Vec::new(),
+            skills: Vec::new(),
+            scopes: Vec::new(),
+            // Re-register the SAME bot id (the route derives this from
+            // provider_bot_ref for allow-listed providers); the legacy
+            // guard compares the claimed owner with the committed
+            // created record and refuses the divergence.
+            bot_uuid: Some("legacy-owned:11111111".to_string()),
+            reject_existing_bot_uuid: false,
+            connection_mode: ProviderBotConnectionMode::Gateway,
+        })
+        .await;
+    assert!(
+        matches!(refused, Err(ServiceError::Forbidden(_))),
+        "divergent-owner re-registration must be refused: {refused:?}"
+    );
+
+    assert_eq!(
+        ctx.bot_repo
+            .role(&human_actor_id("11111111"), "legacy-owned:11111111")
+            .await
+            .expect("role read"),
+        Some(BotAccessRelation::Owner),
+    );
+    assert_eq!(
+        ctx.bot_repo
+            .role(&human_actor_id("22222222"), "legacy-owned:11111111")
+            .await
+            .expect("role read"),
+        None,
+        "the divergent claim leaves no edge"
+    );
+    let rows = audit_rows(&ctx.bot_repo, "legacy-owned:11111111").await;
+    assert!(
+        !rows
+            .iter()
+            .any(|(action, kind, _, _)| action == "initialize" && kind == "provider"),
+        "no provider initialize audit fired on the refused attempt: {rows:?}"
+    );
+}
+
+#[tokio::test]
+async fn admin_duplicate_registration_is_an_idempotent_replay() {
+    // Same provider + same ref → the duplicate short-circuit: the
+    // existing Bot is returned and NO second owner initialization
+    // fires (a backend retry must never double-mint).
+    let ctx = test_context();
+    let (provider_id, admin_token) = register_provider(&ctx).await;
+    let owner = "33333333";
+    let command = |token: &str| RegisterProviderBotCommand {
+        webhook_url: None,
+        provider_id: provider_id.clone(),
+        provider_admin_token: token.to_string(),
+        name: "Owned Bot".to_string(),
+        summary: None,
+        owners: vec![owner.to_string()],
+        provider_bot_ref: "owned-ref".to_string(),
+        domains: Vec::new(),
+        skills: Vec::new(),
+        scopes: Vec::new(),
+        bot_uuid: None,
+        reject_existing_bot_uuid: false,
+        connection_mode: ProviderBotConnectionMode::Gateway,
+    };
+
+    let outcome = ctx
+        .management
+        .register_provider_bot(command(&admin_token))
+        .await
+        .expect("fresh admin registration");
+    assert!(outcome.created);
+
+    let replay = ctx
+        .management
+        .register_provider_bot(command(&admin_token))
+        .await
+        .expect("duplicate re-registration succeeds as a replay");
+    assert!(!replay.created);
+    assert_eq!(replay.bot_uuid, outcome.bot_uuid);
+
+    let rows = audit_rows(&ctx.bot_repo, &outcome.bot_uuid).await;
+    assert_eq!(
+        rows.iter()
+            .filter(|(action, _, _, _)| action == "initialize")
+            .count(),
+        1,
+        "exactly one initialize audit across the replay: {rows:?}"
+    );
 }
