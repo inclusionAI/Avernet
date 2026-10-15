@@ -1,4 +1,5 @@
 import type { AisStatusHandler } from "../services/ais/status-handler.js";
+import { aisSessionLogArchives } from "../services/ais/session-log-archives.js";
 import { SkillPackageStorage } from "../services/object-storage/skill-package-storage.js";
 import { applySkillVersion } from "../services/evolve/skill-application.js";
 import type { EvolveHostCapabilities } from "../services/evolve/host-capabilities.js";
@@ -4078,7 +4079,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const task = await repo.findTask(String(req.params.taskId));
     if (!task) { res.status(404).json({ error: "任务不存在" }); return; }
     if (!canManageTaskLogs(req, task)) { res.status(403).json({ error: "只有任务 Owner 或管理员可获取日志" }); return; }
-    res.json({ items: (await repo.listTaskLogArchives(task.task_id)).map(taskLogArchiveView) });
+    const sessions = aisSessionLogArchives(task, await repo.listSteps(task.task_id), getArtifactBucket());
+    res.json({ items: [...sessions, ...(await repo.listTaskLogArchives(task.task_id)).map(taskLogArchiveView)] });
   }));
 
   router.post("/tasks/:taskId/log-archives", asyncHandler(async (req, res) => {
@@ -4156,6 +4158,17 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const task = await repo.findTask(String(req.params.taskId));
     if (!task) { res.status(404).json({ error: "任务不存在" }); return; }
     if (!canManageTaskLogs(req, task)) { res.status(403).json({ error: "只有任务 Owner 或管理员可下载日志" }); return; }
+    if (String(req.params.archiveId).startsWith("AIS-")) {
+      const archive = aisSessionLogArchives(task, await repo.listSteps(task.task_id), getArtifactBucket())
+        .find(item => item.archiveId === req.params.archiveId);
+      if (!archive) { res.status(404).json({ error: "Agent 会话归档尚不可下载" }); return; }
+      const objectKey = archive.artifact.ref.slice(`oss://${getArtifactBucket()}/`.length);
+      const filename = `${task.task_id}-${archive.archiveId}-openclaw-sessions.tar.gz`;
+      const url = await artifactUrlStore.createSignedUrl(objectKey, "GET", EVOLVE_ARTIFACT_URL_TTL_SECONDS, {},
+        { "response-content-disposition": `attachment; filename="${filename}"` });
+      res.set("Cache-Control", "no-store").json({ url, filename, expiresInSeconds: EVOLVE_ARTIFACT_URL_TTL_SECONDS });
+      return;
+    }
     const archive = await repo.findTaskLogArchive(task.task_id, String(req.params.archiveId));
     if (!archive || archive.status !== "succeeded" || !archive.artifact_ref) {
       res.status(404).json({ error: "日志归档尚不可下载" }); return;

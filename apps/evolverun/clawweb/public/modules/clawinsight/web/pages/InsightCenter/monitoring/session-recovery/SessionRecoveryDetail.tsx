@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { api, type EvolveTaskLogArchive } from '@avernet/clawweb-shared/web/api/client';
 import { monitoringErrorText } from '../../../../api/monitoring';
 import { sessionRecoveryApi } from '../../../../api/session-recovery';
 import type { SessionRecoveryTask } from '../../../../types/session-recovery';
@@ -124,6 +125,54 @@ function CardHeader({ title, description, right }: { title: string; description?
     </div>
     {right}
   </div>;
+}
+
+function AgentSessionLogs({ task }: { task: SessionRecoveryTask }) {
+  const [archives, setArchives] = useState<EvolveTaskLogArchive[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [downloading, setDownloading] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    void api.evolve.listTaskLogArchives(task.taskId).then(value => {
+      if (!Array.isArray(value.items)) throw new Error('日志归档响应不完整，请刷新重试。');
+      if (active) {
+        setArchives(value.items.filter(item => item.status === 'succeeded' && item.metadata?.source === 'ais'));
+        setError('');
+      }
+    }).catch(failure => { if (active) setError(failure?.status === 403 ? '只有任务 Owner 或管理员可下载 Agent 会话日志。' : monitoringErrorText(failure)); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [task]);
+
+  const download = async (archiveId: string) => {
+    setDownloading(archiveId);
+    setError('');
+    try {
+      const result = await api.evolve.getTaskLogArchiveDownloadUrl(task.taskId, archiveId);
+      const anchor = document.createElement('a');
+      anchor.href = result.url; anchor.download = result.filename;
+      document.body.appendChild(anchor); anchor.click(); anchor.remove();
+    } catch (failure) { setError(monitoringErrorText(failure)); }
+    finally { setDownloading(null); }
+  };
+  return <section className="sr-card compact">
+    <CardHeader title="Agent 会话日志" description="下载自愈 Agent 的原始会话归档，供排查执行过程。" />
+    {error && <p role="alert">{error}</p>}
+    {!archives.length && !error && <p className="sr-empty">{loading ? '正在读取日志归档…' : '暂无可下载归档，执行结束并上传后可下载。'}</p>}
+    {archives.map(archive => {
+      const completedAt = archive.completedAt == null ? NaN : typeof archive.completedAt === 'number'
+        ? archive.completedAt < 10_000_000_000 ? archive.completedAt * 1000 : archive.completedAt
+        : new Date(archive.completedAt).getTime();
+      return <div key={archive.archiveId} className="sr-note-box">
+      <p>执行批次：{String(archive.metadata?.stepId ?? archive.archiveId).replace(`${task.taskId}-`, '')}</p>
+      <p>{formatTime(Number.isFinite(completedAt) ? completedAt : undefined)} · {Math.ceil((archive.artifact?.size ?? 0) / 1024)} KB</p>
+      <button type="button" className="sr-button" disabled={downloading !== null}
+        aria-label={`下载 Agent 会话日志 · ${archive.metadata?.stepId ?? archive.archiveId}`}
+        onClick={() => void download(archive.archiveId)}>{downloading === archive.archiveId ? '准备下载…' : '下载 Agent 会话日志'}</button>
+    </div>;
+    })}
+  </section>;
 }
 
 function PlanMarkdown({ text }: { text: string }) {
@@ -526,6 +575,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
           <ReviewSection task={task} busy={busy} annotationLayer={annotationLayer} annotationCorrect={annotationCorrect} annotationReason={annotationReason} annotationEvidence={annotationEvidence} onLayer={setAnnotationLayer} onCorrect={setAnnotationCorrect} onReason={setAnnotationReason} onEvidence={setAnnotationEvidence} onSubmit={() => void annotate()} />
         </div>
         <aside className="sr-side">
+          <AgentSessionLogs key={task.taskId} task={task} />
           <section className="sr-card compact">
             <CardHeader title="任务信息" />
             <dl>

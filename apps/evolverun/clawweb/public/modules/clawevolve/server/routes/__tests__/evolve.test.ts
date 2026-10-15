@@ -5161,6 +5161,58 @@ describe("ClawEvolve step protocol", () => {
 });
 
 describe("ClawEvolve task log archive side channel", () => {
+  it.each(["failed", "succeeded"])("downloads registered AIS Agent sessions from a %s execution without collecting Bot logs", async status => {
+    const taskId = "SR-AIS-LOGS";
+    await repo.createTask({ taskId, taskType: "session_recovery", userId: "owner-1", botId: "bot-1",
+      taskName: "自愈日志", configJson: "{}", createdBy: "owner-1" });
+    const objectKey = `evolution/${taskId}/executions/exec-1/openclawSessions.tar.gz`;
+    const artifact = { objectKey, size: 128, sha256: "a".repeat(64), contentType: "application/gzip" };
+    const stepId = `${taskId}-AIS-1`;
+    await repo.createStep({ taskId, stepId, stepType: "agent_execution", stepNo: -1, command: "agent_execution",
+      ext: { aisExecution: { stepId, aisBase: { executionId: "exec-1" }, artifacts: {
+        openclawSessions: { objectKey, contentType: "application/gzip", requiredOnSuccess: true, allowEmpty: false },
+      } } } });
+    await repo.updateStepStatus(stepId, { status, output: { artifacts: { openclawSessions: artifact } } });
+    const url = `${baseUrl}/api/evolve/tasks/${taskId}/log-archives`;
+    const response = await fetch(url, { headers: { "X-User-Id": "owner-1" } });
+    expect(response.status).toBe(200);
+    const { items } = await response.json() as { items: Array<{ archiveId: string; status: string; metadata: Record<string, unknown> }> };
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ status: "succeeded", metadata: { source: "ais", executionId: "exec-1", stepId } });
+    // A later execution must not replace the fixed archive contract of the earlier one.
+    const secondStepId = `${taskId}-AIS-2`;
+    const secondKey = `evolution/${taskId}/executions/exec-2/openclawSessions.tar.gz`;
+    const secondContract = { stepId: secondStepId, aisBase: { executionId: "exec-2" }, artifacts: {
+      openclawSessions: { objectKey: secondKey, contentType: "application/gzip", requiredOnSuccess: true, allowEmpty: false },
+    } };
+    await repo.createStep({ taskId, stepId: secondStepId, stepType: "agent_execution", stepNo: -2, command: "agent_execution", ext: { aisExecution: secondContract } });
+    await repo.updateTaskConfig(taskId, { aisExecution: secondContract });
+    const pending = await fetch(url, { headers: { "X-User-Id": "owner-1" } });
+    expect((await pending.json() as { items: unknown[] }).items).toHaveLength(1);
+    await repo.updateStepStatus(secondStepId, { status: "succeeded", output: { artifacts: { openclawSessions: { ...artifact, objectKey: secondKey } } } });
+    const history = await fetch(url, { headers: { "X-User-Id": "owner-1" } });
+    expect((await history.json() as { items: Array<{ metadata: { executionId: string } }> }).items.map(item => item.metadata.executionId)).toEqual(["exec-2", "exec-1"]);
+    const download = await fetch(`${url}/${items[0].archiveId}/download-url`, { headers: { "X-User-Id": "owner-1" } });
+    expect(download.status).toBe(200);
+    expect(createSignedUrl).toHaveBeenCalledWith(objectKey, "GET", 86400, {},
+      expect.objectContaining({ "response-content-disposition": expect.stringContaining("openclaw-sessions.tar.gz") }));
+    expect(dispatchTaskLogArchive).not.toHaveBeenCalled();
+    expect(await repo.listTaskLogArchives(taskId)).toEqual([]);
+    const denied = await fetch(url, { headers: { "X-User-Id": "someone-else" } });
+    expect(denied.status).toBe(403);
+    createSignedUrl.mockClear();
+    const deniedDownload = await fetch(`${url}/${items[0].archiveId}/download-url`, { headers: { "X-User-Id": "someone-else" } });
+    expect(deniedDownload.status).toBe(403);
+    await repo.createTask({ taskId: "SR-OTHER", taskType: "session_recovery", taskName: "另一个任务", userId: "owner-1", botId: "bot-1",
+      configJson: "{}", createdBy: "owner-1" });
+    const other = await fetch(`${baseUrl}/api/evolve/tasks/SR-OTHER/log-archives/${items[0].archiveId}/download-url`, { headers: { "X-User-Id": "owner-1" } });
+    expect(other.status).toBe(404);
+    await repo.updateStepStatus(stepId, { status, output: { artifacts: { openclawSessions: { ...artifact, objectKey: "unrelated/private.tar.gz" } } } });
+    const changed = await fetch(`${url}/${items[0].archiveId}/download-url`, { headers: { "X-User-Id": "owner-1" } });
+    expect(changed.status).toBe(404);
+    expect(createSignedUrl).not.toHaveBeenCalled();
+  });
+
   it("returns an actionable error when task log storage is unavailable", async () => {
     await seedArcaBot("owner-1", "bot-arca");
     await repo.createTask({

@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import SessionRecoveryDetail from '../SessionRecoveryDetail';
+import { api } from '@avernet/clawweb-shared/web/api/client';
+vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { evolve: { listTaskLogArchives: vi.fn(), getTaskLogArchiveDownloadUrl: vi.fn() } } }));
 import { sessionRecoveryApi } from '../../../../../api/session-recovery';
 vi.mock('../../../../../api/session-recovery', () => ({ sessionRecoveryApi: { detail: vi.fn(), decide: vi.fn(), annotate: vi.fn(), toolCall: vi.fn() } }));
 const task = { taskId: 'task', status: 'waiting_owner', phase: 'apply', request: { diagnosis: '原任务失败', target: { bot_id: 'default' }, session_key: 'original' },
@@ -9,6 +11,7 @@ const task = { taskId: 'task', status: 'waiting_owner', phase: 'apply', request:
   timeline: [{ event_id: 'event', at_ms: 1, kind: 'plan', actor: 'agent', summary: '提出方案', payload: { evidence_ids: ['evidence'] } }], evidence: [{ evidence_id: 'evidence', tool_call_id: 'call', source: 'session', location: 'line:1', excerpt: '原失败消息' }] };
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(api.evolve.listTaskLogArchives).mockResolvedValue({ items: [] });
   // jsdom does not implement browser layout or scrolling.
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
   vi.mocked(sessionRecoveryApi.detail).mockResolvedValue(task as never);
@@ -242,4 +245,29 @@ it('preserves raw evidence including angle brackets and Markdown punctuation', a
   expect(evidence).toBeVisible();
   expect(evidence.textContent).toBe(excerpt);
   expect(evidence.children).toHaveLength(0);
+});
+
+it('downloads an archived self-healing Agent session using the existing log archive API', async () => {
+  vi.mocked(api.evolve.listTaskLogArchives).mockResolvedValue({ items: [{ archiveId: 'AIS-7', status: 'succeeded',
+    metadata: { source: 'ais', stepId: 'task-AIS-2', executionId: 'exec-2' }, artifact: { size: 110183 } }] } as never);
+  vi.mocked(api.evolve.getTaskLogArchiveDownloadUrl).mockResolvedValue({ url: 'https://oss.example.test/session.tar.gz', filename: 'agent-session.tar.gz' });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const user = userEvent.setup();
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  await user.click(await screen.findByRole('button', { name: '下载 Agent 会话日志 · task-AIS-2' }));
+  await waitFor(() => expect(api.evolve.getTaskLogArchiveDownloadUrl).toHaveBeenCalledWith('task', 'AIS-7'));
+  expect(click).toHaveBeenCalledTimes(1);
+  vi.mocked(api.evolve.getTaskLogArchiveDownloadUrl).mockRejectedValue({ status: 503 });
+  await user.click(screen.getByRole('button', { name: '下载 Agent 会话日志 · task-AIS-2' }));
+  expect(await screen.findByText('监控服务暂不可用，请稍后重试。')).toBeVisible();
+  expect(click).toHaveBeenCalledTimes(1);
+  click.mockRestore();
+});
+
+it('keeps task details usable when log downloads are forbidden', async () => {
+  vi.mocked(api.evolve.listTaskLogArchives).mockRejectedValue({ status: 403 });
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  expect(await screen.findByText('只有任务 Owner 或管理员可下载 Agent 会话日志。')).toBeVisible();
+  expect(screen.getByText('完整修复方案')).toBeVisible();
+  expect(screen.queryByRole('button', { name: /下载 Agent 会话日志/ })).toBeNull();
 });
