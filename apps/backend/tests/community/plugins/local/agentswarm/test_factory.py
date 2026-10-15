@@ -31,7 +31,7 @@ from agentclaw.community.plugins.local.agentswarm.subagent_llm import (
 )
 
 _LLM_SPEC = dm.AgentSpec(name="s1", role="research", kind=dm.AgentKind.LLM)
-_AVENET_SPEC = dm.AgentSpec(name="scout", role="worker", kind=dm.AgentKind.AVENET)
+_AVENET_SPEC = dm.AgentSpec(name="scout", role="worker", kind=dm.AgentKind.BOT)
 
 
 def _mk_run(run_id="run-42") -> Run:
@@ -44,26 +44,29 @@ def _mk_run(run_id="run-42") -> Run:
         request_metadata=RequestMetadata(),
         status=RunStatus.RUNNING,
         started_at=EpochMillis(int(time.time() * 1000)),
+        owner_id="factory-owner",
     )
 
 
 class _RecordingPlatform:
-    """Minimal BotPlatform double: records (spec, idempotency_key)."""
+    """Minimal BotPlatform double: records (spec, idempotency_key) and
+    answers the seam's optional widening with defaults."""
 
     def __init__(self) -> None:
         self.created: list[tuple] = []
 
-    def create_bot(self, *, spec, idempotency_key):
+    def create_bot(self, *, spec, idempotency_key, owner_id=""):
         self.created.append((spec, idempotency_key))
         return "bot-42"
 
-    def bot_status(self, bot_id):
+    def bot_status(self, bot_id, owner_id=""):
         return dm.BotState.READY.value
 
-    def chat(self, bot_id, message):
+    def chat(self, bot_id, message, owner_id="", session_key=None,
+             cancel_event=None):
         return "{}"
 
-    def delete_bot(self, bot_id):
+    def delete_bot(self, bot_id, owner_id=""):
         return True
 
 
@@ -112,7 +115,7 @@ class TestSpawnIdentity:
         factory = DefaultSubagentFactory(llm=None, platform=platform)
         run = _mk_run()
         spec = dm.AgentSpec(name="scout", role="worker",
-                            kind=dm.AgentKind.AVENET)
+                            kind=dm.AgentKind.BOT)
 
         first = factory.create(spec, run, dm.AgentId("agent-one"))
         second = factory.create(spec, run, dm.AgentId("agent-two"))
@@ -130,7 +133,7 @@ class TestSpawnIdentity:
         factory = DefaultSubagentFactory(llm=None, platform=platform)
         run = _mk_run()
         spec = dm.AgentSpec(name="scout", role="worker",
-                            kind=dm.AgentKind.AVENET)
+                            kind=dm.AgentKind.BOT)
 
         first = factory.create(spec, run, dm.AgentId("agent-1"))
         asyncio.run(first.setup())

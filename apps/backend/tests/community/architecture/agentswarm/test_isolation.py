@@ -68,9 +68,13 @@ _SCHEMAS = (
 #     the host BotCreateContext types both as open str (bot_management
 #     owns no enum for either), and the adapter derives the cluster from
 #     engine, so a new engine never drifts a closed set here.
+#   owner_id — the provisioning caller identity on the BotPlatform seam: an
+#     open principal string owned by the auth layer; the empty default is
+#     "defer to the platform's configured bootstrap owner", never a
+#     service-account fallback.
 _STR_DEFAULT_ALLOWLIST: frozenset[str] = frozenset({
     "provider", "model", "instructions", "description", "identity_file",
-    "engine", "bot_type",
+    "engine", "bot_type", "owner_id",
 })
 
 # Closed-set parameter vocabulary must be typed with one of the module

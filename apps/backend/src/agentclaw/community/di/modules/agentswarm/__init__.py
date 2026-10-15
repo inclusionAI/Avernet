@@ -240,6 +240,7 @@ class AgentSwarmModule(Module):
     def bot_platform(
         self,
         injector: Injector,
+        config: AgentSwarmConfig,
     ) -> BotPlatform:
         """In-process host adapter. Heavy imports are call-local: the
         bot_management chain is circular at module import time
@@ -248,7 +249,13 @@ class AgentSwarmModule(Module):
 
         The provisioning owner is per-run (the authenticated caller,
         P0-9 no-service-account stance) — enforced at the factory where
-        the run context is visible, not here where no run exists."""
+        the run context is visible. The profile-level bootstrap owner
+        (``agentswarm.host.owner_id``) still names the fallback account
+        swarm-created bots belong to: blank means no platform opt-in, so
+        the provider refuses construction with the precise error instead
+        of minting ownerless bots (``provide_runtime`` degrades this
+        refusal to none-platform mode). ``max_platform_workers`` sizes
+        the module-scoped chat bridge (``executor`` block)."""
         from agentclaw.community.api.bot_config_manifest_apply_service import (
             BotConfigManifestApplyServiceProtocol,
         )
@@ -264,7 +271,16 @@ class AgentSwarmModule(Module):
         from agentclaw.community.plugins.community.agentswarm.host import (
             AvernetBotPlatform,
         )
+        host_owner = (config.host.owner_id or "").strip()
+        if not host_owner:
+            raise AgentSwarmConfigError(
+                "agentswarm.host.owner_id is required but blank — it is "
+                "the account the swarm's transient bots belong to (no "
+                "service-account fallback); set host.owner_id in the "
+                "agentswarm block to bind the BotPlatform"
+            )
         return AvernetBotPlatform(
+            owner_id=host_owner,
             manifest_seam=injector.get(ManifestCreationSeam),
             bot_service=injector.get(BotServiceProtocol),
             passport_plugin=injector.get(PassportPlugin),
@@ -273,6 +289,7 @@ class AgentSwarmModule(Module):
             apply_service=injector.get(BotConfigManifestApplyServiceProtocol),
             space_context=injector.get(BusinessSpaceContextProtocol),
             baas_service=injector.get(BaasService),
+            max_platform_workers=config.executor.max_platform_workers,
         )
 
     @provider

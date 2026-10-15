@@ -5,12 +5,16 @@ leg records what the with-manifest submit would have received (patched at
 ``create_flow`` — the adapter imports it call-local, so the module-level
 attribute patch is exactly what the call sees). The status table is pinned
 branch for branch against the narrow mapping's documented vocabulary; the
-chat leg exercises the real thread-bridge (async fakes under ``asyncio.run``
-in the adapter's own thread).
+chat leg exercises the real frame protocol over a scripted engine websocket
+(``_patch_engine_routes`` swaps only the two container-provided edges —
+endpoint resolution and the ws handshake), including the per-attempt
+sessionKey addressing and the cooperative-cancel receive slices.
 """
 from __future__ import annotations
 
 import asyncio
+import json
+import threading
 import time
 import types
 
@@ -84,34 +88,55 @@ class _Space:
         return types.SimpleNamespace(kind="personal", numeric_id=None)
 
 
-class _GrtChat:
-    def __init__(self, sandbox="sb-1", reply="final answer"):
-        self.sandbox = sandbox
+class _Baas:
+    """Stand-in for the ws-info resolution: never reached in these tests
+    (the endpoint pair is patched), exactly like the real service when the
+    bot's runtime binding is scripted."""
+
+    def get_ws_info_by_bot_uuid(self, *, bot_uuid, port, path):
+        raise AssertionError("ws-info must not be resolved in unit fakes")
+
+
+class _ScriptedEngineWs:
+    """Fake engine websocket speaking the adapter's frame protocol: captures
+    every chat.send request (its sessionKey + message), then answers with a
+    scripted final event. ``recv`` optionally stalls, faking a hung engine."""
+
+    def __init__(self, reply="final answer", stall_seconds=0.0):
         self.reply = reply
-        self.sent: list = []
+        self.stall_seconds = stall_seconds
+        self.sent_frames: list[dict] = []
+        self.closed = False
 
-    def get_sandbox_id(self, bot_id, owner_id):
-        return self.sandbox
+    async def send(self, raw):
+        frame = json.loads(raw)
+        self.sent_frames.append(frame)
 
-    async def connect_engine_ws(self, sandbox_id):
-        return types.SimpleNamespace(
-            close=_noop_async, closed=False,
-        )
+    async def recv(self):
+        if self.stall_seconds:
+            await asyncio.sleep(self.stall_seconds)
+        message = (self.sent_frames and self.sent_frames[-1]) or {}
+        request_id = str(message.get("id") or "req")
+        return json.dumps({
+            "type": "event",
+            "event": "chat",
+            "payload": {
+                "state": "final",
+                "message": {"content": [{"type": "text", "text": self.reply}]},
+                "id": request_id,
+            },
+        })
 
-    async def chat_send(self, ws, message):
-        self.sent.append(message)
-        return types.SimpleNamespace(text=self.reply)
-
-
-async def _noop_async():
-    return None
+    async def close(self):
+        self.closed = True
 
 
 def _job(status, last_error=None):
     return types.SimpleNamespace(status=status, last_error=last_error)
 
 
-def _mk(config=None, seam=None, apply_=None, repo=None, bot_svc=None, grt=None):
+def _mk(config=None, seam=None, apply_=None, repo=None, bot_svc=None,
+        bridge_workers=None):
     return AvernetBotPlatform(
         owner_id="owner-1",
         manifest_seam=seam or _Seam(),
@@ -121,8 +146,24 @@ def _mk(config=None, seam=None, apply_=None, repo=None, bot_svc=None, grt=None):
         bot_repo=repo or _Repo(),
         apply_service=apply_ or _Apply(),
         space_context=_Space(),
-        grt_chat=grt or _GrtChat(),
+        baas_service=_Baas(),
+        max_platform_workers=bridge_workers or 4,
     )
+
+
+def _patch_engine_routes(monkeypatch, ws):
+    """Point the real chat leg at ``ws``: endpoint resolution and the
+    engine connect handshake are the two container-provided edges; the
+    frame protocol (send/recv/accumulate) stays the production code."""
+    monkeypatch.setattr(
+        AvernetBotPlatform, "_engine_endpoint",
+        lambda self, bot_id, owner: ("ws://fake", "tok"),
+    )
+
+    async def _connect(self, ws_url, token):
+        return ws
+
+    monkeypatch.setattr(AvernetBotPlatform, "_connect_engine", _connect)
 
 
 # ── config validation ────────────────────────────────────────────────────
@@ -324,32 +365,80 @@ class TestDelete:
 class TestChat:
 
     def test_missing_runtime_binding_fails_clear(self):
-        platform = _mk(grt=_GrtChat(sandbox=None))
+        # A bot row without a runtime binding (no device_id) answers with
+        # the precise refusal before any transport is attempted.
+        platform = _mk(repo=_Repo(bot={"status": "ACTIVE"}))
         with pytest.raises(RuntimeError, match="no runtime binding"):
             platform.chat("b1", "objective='x'")
 
-    def test_round_trip_returns_the_reply_text(self):
-        grt = _GrtChat(reply="the answer is 42")
-        platform = _mk(grt=grt)
-        assert platform.chat("b1", "objective='y'") == "the answer is 42"
-        assert grt.sent == ["objective='y'"]
-
-    def test_stalled_engine_leg_raises_within_the_bound(self, monkeypatch):
-        # A hung engine WebSocket must free the swarm's thread with the
-        # typed error at the (patched-to-tiny) bound, not after the stall.
-        async def _stalled(bot_id, message):
-            await asyncio.sleep(1.0)  # simulates the engine ws hang
-            return "never"
-
-        monkeypatch.setattr(host_module, "_CHAT_TIMEOUT_SECONDS", 0.05)
+    def test_round_trip_returns_the_reply_text(self, monkeypatch):
+        ws = _ScriptedEngineWs(reply="the answer is 42")
         platform = _mk()
-        monkeypatch.setattr(platform, "_chat_once", _stalled)
+        _patch_engine_routes(monkeypatch, ws)
+        assert platform.chat("b1", "objective='y'") == "the answer is 42"
+        (frame,) = ws.sent_frames
+        assert frame["method"] == "chat.send"
+        assert frame["params"]["message"] == "objective='y'"
+        assert frame["params"]["x-iam-token"] == host_module._ZERO_CHECK_OPEN_API_TOKEN
+        assert ws.closed
+
+    def test_default_caller_keeps_the_fixed_session_key(self, monkeypatch):
+        # A chat without a derived session keeps the historical address:
+        # outside/default callers are unaffected by D-I.
+        ws = _ScriptedEngineWs()
+        platform = _mk()
+        _patch_engine_routes(monkeypatch, ws)
+        platform.chat("b1", "objective='x'")
+        (frame,) = ws.sent_frames
+        assert frame["params"]["sessionKey"] == "agent:main:default"
+
+    def test_session_key_is_used_verbatim_when_provided(self, monkeypatch):
+        ws = _ScriptedEngineWs()
+        platform = _mk()
+        _patch_engine_routes(monkeypatch, ws)
+        platform.chat("b1", "objective='x'",
+                      session_key="agent:agent-9:attempt:4")
+        (frame,) = ws.sent_frames
+        assert frame["params"]["sessionKey"] == "agent:agent-9:attempt:4"
+
+    def test_cancelled_event_unwinds_within_the_receive_slice(
+            self, monkeypatch):
+        ws = _ScriptedEngineWs(reply="late", stall_seconds=30.0)
+        platform = _mk()
+        _patch_engine_routes(monkeypatch, ws)
+        cancel = threading.Event()
+
+        def _cancel_soon():
+            time.sleep(0.05)
+            cancel.set()
+
+        setter = threading.Thread(target=_cancel_soon)
+        setter.start()
+        started = time.monotonic()
+        reply = platform.chat("b1", "objective='x'", cancel_event=cancel)
+        elapsed = time.monotonic() - started
+        setter.join(timeout=1)
+        assert reply == ""
+        assert ws.closed
+        # unwound at the next slice checkpoint, not after the 30s stall
+        assert elapsed < 2.0
+
+    def test_stalled_engine_leg_raises_within_the_bound(
+            self, monkeypatch):
+        # A hung engine WebSocket must free the call with the typed error
+        # at the (patched-to-tiny) bound, not after the stall.
+        ws = _ScriptedEngineWs(reply="never", stall_seconds=30.0)
+        monkeypatch.setattr(host_module, "_CHAT_TIMEOUT_SECONDS", 0.05)
+        monkeypatch.setattr(host_module, "_RECV_SLICE_SECONDS", 0.05)
+        platform = _mk()
+        platform._chat_timeout_seconds = host_module._CHAT_TIMEOUT_SECONDS
+        _patch_engine_routes(monkeypatch, ws)
         started = time.monotonic()
         with pytest.raises(host_module.ChatTimeoutError,
                            match="did not finish within"):
             platform.chat("b1", "objective='x'")
-        # freed at the bound, long before the 1.0s stall elapses
-        assert time.monotonic() - started < 0.9
+        # freed at the bound, long before the 30s stall elapses
+        assert time.monotonic() - started < 2.0
 
     def test_chat_timeout_is_a_runtime_error(self):
         # The subagent treats every chat failure through the common

@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import threading
 import time
 import types
@@ -232,27 +233,55 @@ def _finish_decision(answer: str) -> str:
     return json.dumps({"kind": "finish", "answer": answer})
 
 
-class _ScriptedGrtChat:
+class _ScriptedEngineWs:
+    """Fake engine websocket: captures the chat.send frame (message +
+    sessionKey), answers with the scripted reply. The adapter's real frame
+    protocol drives it exactly as it drives a live container."""
 
     def __init__(self, reply: str):
         self.reply = reply
-        self.received: list[str] = []
-        self.sandboxes: list[str] = []
+        self.sent_frames: list[dict] = []
+        self.closed = False
 
-    def get_sandbox_id(self, bot_id, owner_id):
-        self.sandboxes.append(bot_id)
-        return f"sb-{bot_id}"
+    async def send(self, raw):
+        self.sent_frames.append(json.loads(raw))
 
-    async def connect_engine_ws(self, sandbox_id):
-        return types.SimpleNamespace(close=_noop_async, closed=False)
+    async def recv(self):
+        if self.sent_frames and self.sent_frames[-1].get("method") == "chat.send":
+            request_id = self.sent_frames[-1]["id"]
+            return json.dumps({
+                "type": "event",
+                "event": "chat",
+                "payload": {
+                    "state": "final",
+                    "message": {"content": [
+                        {"type": "text", "text": self.reply},
+                    ]},
+                    "id": request_id,
+                },
+            })
+        raise AssertionError("unexpected recv before any chat.send")
 
-    async def chat_send(self, ws, message):
-        self.received.append(message)
-        return types.SimpleNamespace(text=self.reply)
+    async def close(self):
+        self.closed = True
 
 
-async def _noop_async():
-    return None
+def _patch_engine_edges(monkeypatch, platform, ws):
+    """Swap the two container-provided edges (BaaS ws-info resolution and
+    the engine ws handshake) for the scripted websocket; every frame above
+    them is the production chat leg."""
+    endpoints: list[tuple[str, str]] = []
+
+    def _endpoint(self, bot_id, owner):
+        endpoints.append((bot_id, owner))
+        return "ws://fake", "tok"
+
+    async def _connect(self, ws_url, token):
+        return ws
+
+    monkeypatch.setattr(type(platform), "_engine_endpoint", _endpoint)
+    monkeypatch.setattr(type(platform), "_connect_engine", _connect)
+    return endpoints
 
 
 def _stand_in_for_provisioning(world) -> list[dict]:
@@ -391,7 +420,7 @@ class TestAvernetKindEndToEnd:
 
     @pytest.mark.asyncio
     async def test_avernet_agent_runs_a_real_swarm_round(
-            self, world, swarm_db, tmp_path):
+            self, world, swarm_db, tmp_path, monkeypatch):
         from agentclaw.community.core.config.provider import load_config
         load_config().user_config["aidesktop_root"] = str(tmp_path)
 
@@ -399,11 +428,15 @@ class TestAvernetKindEndToEnd:
         from agentclaw.community.core.skill_center.skill_set_service_factory_protocol import (
             SkillSetServiceFactoryProtocol,
         )
+        from agentclaw.community.core.service_bot.services.baas_service import (
+            BaasService,
+        )
         from agentclaw.community.plugin_api.passport import PassportPlugin
 
         created = _stand_in_for_provisioning(world)
-        grt = _ScriptedGrtChat(reply='{"answer": "survey ok"}')
-        platform = AvernetBotPlatform(            owner_id=OWNER,
+        ws = _ScriptedEngineWs(reply='{"answer": "survey ok"}')
+        platform = AvernetBotPlatform(
+            owner_id=OWNER,
             manifest_seam=world.get(ManifestCreationSeam),
             bot_service=world.get(BotServiceProtocol),
             passport_plugin=world.get(PassportPlugin),
@@ -411,8 +444,9 @@ class TestAvernetKindEndToEnd:
             bot_repo=world.get(BotRepository),
             apply_service=world.get(BotConfigManifestApplyServiceProtocol),
             space_context=world.get(BusinessSpaceContextProtocol),
-            grt_chat=grt,
+            baas_service=world.get(BaasService),
         )
+        endpoints = _patch_engine_edges(monkeypatch, platform, ws)
 
         script = [
             _spawn_decision(("surveyor", "survey the incident")),
@@ -423,11 +457,12 @@ class TestAvernetKindEndToEnd:
         req = SubmitRunRequest(
             tenant=TENANT,
             goal="e2e: an avernet-kind agent answers through the platform",
+            owner_id=OWNER,
             agents=(
                 dm.AgentSpec(
                     name="surveyor", role="swarm surveyor persona",
                     instructions="Be a concise surveyor.",
-                    kind=dm.AgentKind.AVENET,
+                    kind=dm.AgentKind.BOT,
                 ),
             ),
         )
@@ -495,6 +530,17 @@ class TestAvernetKindEndToEnd:
         assert report.trigger == CREATE_ON_CONTAINER_TRIGGER
         assert report.status is ApplyStatus.SUCCEEDED
 
-        assert len(grt.received) == 1
-        assert "survey the incident" in grt.received[0]
-        assert grt.sandboxes == [expected_id]
+        # The chat leg: one round, the message the orchestrator spawned,
+        # the run's owner, and the per-attempt engine session (D-I) — the
+        # sessionKey derives from the persisted agent id, so a respawned
+        # turn of this run would open a different conversation.
+        (chat_frame,) = [f for f in ws.sent_frames
+                         if f.get("method") == "chat.send"]
+        assert "survey the incident" in chat_frame["params"]["message"]
+        assert endpoints == [(expected_id, OWNER)]
+        spawned_agent = agents[0].agent_id
+        session_key = chat_frame["params"]["sessionKey"]
+        assert re.fullmatch(f"agent:{spawned_agent}:attempt:\\d+",
+                            session_key), session_key
+        assert session_key != "agent:main:default"
+        assert ws.closed

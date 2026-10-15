@@ -13,6 +13,8 @@ through asyncio.run, hand-written fakes (no MagicMock).
 from __future__ import annotations
 
 import asyncio
+import re
+import threading
 import time
 
 import pytest
@@ -60,7 +62,9 @@ def _mk_envelope(objective="survey the logs", boundaries="stay read-only"):
 
 class FakePlatform:
     """Hand-fake BotPlatform: scripted statuses (last one holds),
-    one-shot failures, every call recorded."""
+    one-shot failures, every call recorded. Signatures carry the seam's
+    optional widening (owner_id/session_key/cancel_event) exactly as the
+    real platform reads them."""
 
     def __init__(self, statuses=None, chat_reply='{"result": 42}',
                  fail_create=False, fail_chat=False, fail_delete=False,
@@ -74,27 +78,32 @@ class FakePlatform:
         self.created: list[tuple] = []
         self.status_queries: list[str] = []
         self.chats: list[tuple[str, str]] = []
+        self.session_keys: list[str | None] = []
+        self.cancel_events: list[threading.Event | None] = []
         self.deletes: list[str] = []
 
-    def create_bot(self, *, spec, idempotency_key):
+    def create_bot(self, *, spec, idempotency_key, owner_id=""):
         if self.fail_create:
             raise RuntimeError("platform refused")
         self.created.append((spec, idempotency_key))
         return self.bot_id
 
-    def bot_status(self, bot_id):
+    def bot_status(self, bot_id, owner_id=""):
         self.status_queries.append(bot_id)
         if len(self.statuses) > 1:
             return self.statuses.pop(0)
         return self.statuses[0]
 
-    def chat(self, bot_id, message):
+    def chat(self, bot_id, message, owner_id="", session_key=None,
+             cancel_event=None):
         if self.fail_chat:
             raise RuntimeError("bot unreachable")
         self.chats.append((bot_id, message))
+        self.session_keys.append(session_key)
+        self.cancel_events.append(cancel_event)
         return self.chat_reply
 
-    def delete_bot(self, bot_id):
+    def delete_bot(self, bot_id, owner_id=""):
         if self.fail_delete:
             raise RuntimeError("platform gone")
         self.deletes.append(bot_id)
@@ -293,6 +302,33 @@ class TestRunTask:
 
         asyncio.run(main())
 
+    def test_run_task_chats_under_a_per_attempt_session_key(self):
+        # The engine conversation is addressed per attempt (D-I): the key
+        # derives from the subagent's agent identity plus its attempt
+        # serial, so re-executed turns never share a session.
+        async def main():
+            gw = FakePlatform()
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID)
+            await sub.setup()
+            await sub.run_task(_mk_envelope())
+            (key,) = gw.session_keys
+            assert re.fullmatch(
+                r"agent:agent-1:attempt:\d+", str(key)), key
+            assert gw.cancel_events[0] is not None
+
+        asyncio.run(main())
+
+    def test_explicit_attempt_is_used_verbatim_in_the_session_key(self):
+        async def main():
+            gw = FakePlatform()
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID,
+                                  attempt=7)
+            await sub.setup()
+            await sub.run_task(_mk_envelope())
+            assert gw.session_keys == ["agent:agent-1:attempt:7"]
+
+        asyncio.run(main())
+
 
 class TestTeardown:
 
@@ -342,7 +378,8 @@ class TestChatOffloadsLongCalls:
         import time as _time
 
         class _SlowChatPlatform(FakePlatform):
-            def chat(self, bot_id, message):
+            def chat(self, bot_id, message, owner_id="", session_key=None,
+                     cancel_event=None):
                 _time.sleep(0.15)
                 return '{"result": "done"}'
 

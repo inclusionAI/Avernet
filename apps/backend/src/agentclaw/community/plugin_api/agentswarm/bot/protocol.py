@@ -32,6 +32,7 @@ sees or guesses the document format.
 """
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from typing import NewType, Protocol, runtime_checkable
 
@@ -84,11 +85,28 @@ class BotPlatform(Protocol):
         """Best-effort removal of the transient bot."""
         ...
 
-    def chat(self, bot_id: BotId, message: str, owner_id: str = "") -> str:
+    def chat(self, bot_id: BotId, message: str, owner_id: str = "",
+             session_key: str | None = None,
+             cancel_event: threading.Event | None = None) -> str:
         """Send one objective and return the bot's raw reply text; the
         caller owns parsing. Non-2xx-equivalent failures raise. The wait
         is finite: a hung engine transport surfaces as a raised error
         (RuntimeError-family, e.g. the community adapter's ChatTimeoutError)
         rather than an unbounded block — the caller offloads this call to
-        a thread, which must not be held hostage forever."""
+        a thread, which must not be held hostage forever.
+
+        ``session_key`` (async-run-and-resume D-I) names the engine-side
+        conversation this turn belongs to. The caller derives it per
+        attempt (``agent:{agent_id}:attempt:{attempt}``) so a re-executed
+        turn — plain retry or post-crash respawn — never inherits the
+        orphaned turn's history. ``None`` keeps the platform's default
+        conversation addressing for outside callers.
+
+        ``cancel_event`` is the cooperative-cancel handle for the
+        cancellable platform bridge (async-run-and-resume D-B): the
+        caller sets it when the asyncio side is cancelled (slice lost,
+        pool shutdown, run cancel) and a platform capable of honouring it
+        unwinds its in-flight transport within its own receive bounds.
+        A platform that does not support it ignores the event — its own
+        deadline still bounds the wait."""
         ...
