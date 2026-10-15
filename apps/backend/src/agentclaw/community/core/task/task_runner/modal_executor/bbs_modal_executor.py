@@ -481,6 +481,11 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
                         if relay_inputs is not None
                         else None
                     ),
+                    relay_token=(
+                        str(bbs_task_node.run_info.extend_props.get("relay_token") or "")
+                        if relay_inputs is not None
+                        else ""
+                    ),
                 )
             except Exception as exc:  # noqa: BLE101 建群/轮询失败 → 回退 send_and_wait(不阻断 single bot 投递)
                 logger.error(

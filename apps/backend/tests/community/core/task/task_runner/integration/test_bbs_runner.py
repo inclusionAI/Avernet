@@ -462,7 +462,10 @@ def test_relay_bbs_group_execution_persists_drill_down_ids():
     execution_graph.tasks.append(relay_node)
     graph.dashboard = execution_graph
 
+    group_calls: list[dict] = []
+
     async def group_executor(**kwargs):
+        group_calls.append(kwargs)
         return {
             "group_id": "grp-drill",
             "session_id": "sess-drill",
@@ -479,6 +482,7 @@ def test_relay_bbs_group_execution_persists_drill_down_ids():
         target_node_id=relay_node.node_id,
     ))
 
+    assert group_calls and group_calls[0]["relay_token"] == "attempt-1"
     assert relay_node.run_info.extend_props["group_id"] == "grp-drill"
     assert relay_node.run_info.extend_props["session_id"] == "sess-drill"
     assert relay_node.status is Status.RUNNING

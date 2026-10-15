@@ -28,6 +28,7 @@ class TaskExecutorBbsMixin:
         acceptances: list[dict[str, Any]] | None = None,
         upstream_outputs: dict[str, Any] | None = None,
         relay_blackboard: dict[str, Any] | None = None,
+        relay_token: str = "",
     ) -> dict:
         """BBS 旁路:single bot 任务改由 manager_worker 协作群执行(受 singlebot_2_group 开关控制)。
 
@@ -67,6 +68,7 @@ class TaskExecutorBbsMixin:
                 "acceptances": acceptances or [],
                 "upstream_outputs": upstream_outputs or {},
                 "relay_blackboard": relay_blackboard or {},
+                "relay_token": relay_token,
             })
         logger.info(
             "[task][bbs_mode] manager_worker 群建群前 task=%s node=%s driver=%s owner=%s",
