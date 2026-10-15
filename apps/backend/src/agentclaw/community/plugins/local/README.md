@@ -106,6 +106,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.tracer
   - agentclaw.community.plugins.prod.baas_service    # LocalBaasService inherits ProdBaasService to reuse httpx logic, override URL only
   - agentclaw.community.plugins.community.agentswarm.avernet_subagent  # the local DefaultSubagentFactory builds avernet-kind subagents through the community impl
+  - agentclaw.community.plugins.community.agentswarm.host  # bot_id_for: the deterministic swarm-persona bot identity the local factory shares with the platform adapter
   - agentclaw.community.utils.env_utils
   - agentclaw.community.utils.avernet_tenant_guard  # Shared tenant isolation for local SQLite ORM models
 ```

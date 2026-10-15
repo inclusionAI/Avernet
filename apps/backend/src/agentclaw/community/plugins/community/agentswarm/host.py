@@ -138,46 +138,56 @@ _DEFAULT_SESSION_KEY = "agent:main:default"
 # every chat — cancelled or timed-out legs included — so repeated timeouts
 # cannot grow the live thread set past ``max_platform_workers``; the pool
 # only ever shuts down at process exit (atexit → ``shutdown_chat_bridge``).
-_BRIDGE_MAX_WORKERS: int | None = None
-_BRIDGE_EXECUTOR: concurrent.futures.ThreadPoolExecutor | None = None
-_BRIDGE_LOCK = threading.Lock()
+# The laziness lives inside a holder instance, not module globals: the
+# lazy double-checked-locking singleton shape is forbidden by
+# tests/community/architecture/test_no_dcl_singletons.
+class _ChatBridge:
+    """First-use-created chat pool; size pinned before the pool ever runs."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._max_workers: int | None = None
+        self._executor: concurrent.futures.ThreadPoolExecutor | None = None
+
+    def set_max_workers(self, max_workers: int) -> None:
+        """Called from ``AvernetBotPlatform.__init__`` (the DI provider passes
+        ``agentswarm.executor.max_platform_workers``); first call wins."""
+        with self._lock:
+            if self._executor is None:
+                self._max_workers = max(1, int(max_workers))
+
+    def executor(self) -> concurrent.futures.ThreadPoolExecutor:
+        with self._lock:
+            if self._executor is None:
+                self._executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=self._max_workers or _DEFAULT_MAX_PLATFORM_WORKERS,
+                    thread_name_prefix="agentswarm-chat",
+                )
+            return self._executor
+
+    def shutdown(self) -> None:
+        """Process-exit close hook; during operation nothing calls this:
+        workers return to the pool after every leg, cancelled or not."""
+        with self._lock:
+            executor, self._executor = self._executor, None
+            self._max_workers = None
+        if executor is not None:
+            executor.shutdown(wait=True, cancel_futures=True)
+
+
+_CHAT_BRIDGE = _ChatBridge()
 
 
 def set_chat_bridge_max_workers(max_workers: int) -> None:
-    """Record the desired bridge size before the pool's first use.
-
-    Called from ``AvernetBotPlatform.__init__`` (the DI provider passes
-    ``agentswarm.executor.max_platform_workers``). First construction wins:
-    once live workers exist the size stays fixed for the process."""
-    global _BRIDGE_MAX_WORKERS
-    with _BRIDGE_LOCK:
-        if _BRIDGE_EXECUTOR is None:
-            _BRIDGE_MAX_WORKERS = max(1, int(max_workers))
+    _CHAT_BRIDGE.set_max_workers(max_workers)
 
 
 def chat_bridge_executor() -> concurrent.futures.ThreadPoolExecutor:
-    """The module-scoped platform bridge pool (lazy singleton)."""
-    global _BRIDGE_EXECUTOR
-    with _BRIDGE_LOCK:
-        if _BRIDGE_EXECUTOR is None:
-            _BRIDGE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-                max_workers=_BRIDGE_MAX_WORKERS or _DEFAULT_MAX_PLATFORM_WORKERS,
-                thread_name_prefix="agentswarm-chat",
-            )
-        return _BRIDGE_EXECUTOR
+    return _CHAT_BRIDGE.executor()
 
 
 def shutdown_chat_bridge() -> None:
-    """Process-exit close hook (atexit). During operation nothing calls
-    this: workers return to the pool after every leg, cancelled or not,
-    and ``shutdown(wait=True, cancel_futures=True)`` would only join at
-    the cost of refusing new chats."""
-    global _BRIDGE_EXECUTOR, _BRIDGE_MAX_WORKERS
-    with _BRIDGE_LOCK:
-        executor, _BRIDGE_EXECUTOR = _BRIDGE_EXECUTOR, None
-        _BRIDGE_MAX_WORKERS = None
-    if executor is not None:
-        executor.shutdown(wait=True, cancel_futures=True)
+    _CHAT_BRIDGE.shutdown()
 
 
 atexit.register(shutdown_chat_bridge)
