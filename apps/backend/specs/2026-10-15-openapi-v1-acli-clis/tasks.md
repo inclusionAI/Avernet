@@ -66,13 +66,13 @@ Backend paths are relative to `apps/backend/`; engine paths to
   - [x] `docker/agent/avernet.dockerfile` puts `/home/admin/.agentclaw/bin` on `PATH` (added at implementation start, on the user's go-ahead).
 - **Depends on:** Tasks 2, 6
 
-## Task 8: Verification
+## Task 8: [x] Verification
 - **Goal:** Confirm the feature meets the spec.
 - **Done when:**
-  - [ ] Every spec acceptance criterion maps to a passing test and is checked off in `spec.md`.
-  - [ ] Backend touched packages, `tests/community/adapters/http/openapi_v1/`, architecture tests and Ruff pass; engine `core/acli` and `api` tests pass.
-  - [ ] Every touched source file is under 1,000 lines.
-  - [ ] The PR states what was not run (real acli install) and lists the manual sandbox check.
+  - [x] Every spec acceptance criterion maps to a passing test and is checked off in `spec.md`.
+  - [x] Backend touched packages, `tests/community/adapters/http/openapi_v1/`, architecture tests and Ruff pass; engine `core/acli` and `api` tests pass.
+  - [x] Every touched source file is under 1,000 lines.
+  - [x] The PR states what was not run (real acli install) and lists the manual sandbox check.
 - **Depends on:** Tasks 1–7
 
 ---

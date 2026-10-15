@@ -49,66 +49,69 @@ without waiting for a release each time a new tool is published.
 ## Acceptance Criteria
 
 **Search the market**
-- [ ] Searching by keyword returns a page of acli market tools, each with its
+- [x] Searching by keyword returns a page of acli market tools, each with its
       market name, command name, description and latest version, as reported
       by acli; the caller can request further pages.
-- [ ] Search requires a running bot container, because acli runs there.
+- [x] Search requires a running bot container, because acli runs there.
 
 **List a bot's tools**
-- [ ] Returns every tool in the bot's AgentPass grant, whether or not it was
+- [x] Returns every tool in the bot's AgentPass grant, whether or not it was
       added through this API, each with code, name, description, identity mode
       (`owner` or `caller`) and a `default` flag.
-- [ ] `default` is `true` only for tools the bot's default profile provides;
+- [x] `default` is `true` only for tools the bot's default profile provides;
       it is computed when the list is read and never stored.
 
 **Add**
-- [ ] Adding a market tool grants it to the bot with identity `owner`, installs
+- [x] Adding a market tool grants it to the bot with identity `owner`, installs
       it in the running container, and succeeds only if both succeed.
-- [ ] If the install fails, the grant is removed again and the add returns an
+- [x] If the install fails, the grant is removed again and the add returns an
       error saying why. The bot ends up as it was before the request.
-- [ ] Adding to a bot with no running container is refused, and nothing
+- [x] Adding to a bot with no running container is refused, and nothing
       changes.
-- [ ] Tools are identified by their acli market name (for example
+- [x] Tools are identified by their acli market name (for example
       `deepinsight-cli`), which is also the code stored in AgentPass. Passing
       another alias, such as the command name `di`, is refused with an error
       naming the market name, and nothing changes.
-- [ ] Adding a name the acli market does not know is refused, and nothing
+- [x] Adding a name the acli market does not know is refused, and nothing
       changes.
-- [ ] Adding a tool the bot already has is refused as a conflict, and nothing
+- [x] Adding a tool the bot already has is refused as a conflict, and nothing
       changes.
-- [ ] Adding a tool never changes the bot's other tools, its MCP servers, or
+- [x] Adding a tool never changes the bot's other tools, its MCP servers, or
       any identity mode already set.
 
 **Update identity**
-- [ ] Switching a tool between `owner` and `caller` behaves exactly as the
+- [x] Switching a tool between `owner` and `caller` behaves exactly as the
       existing identity switch does today: same permission checks, same
       results, same rollback when the platform update fails.
 
 **Remove**
-- [ ] Removing a tool revokes its grant, deletes its program from the
+- [x] Removing a tool revokes its grant, deletes its program from the
       container, and succeeds only if both succeed.
-- [ ] If the program cannot be deleted, the grant is restored with the same
-      identity mode, and the remove returns an error saying why.
-- [ ] Removing a default tool is refused with an error that says it is a
+- [x] If the program cannot be deleted, the grant is restored with the same
+      identity mode, and the remove returns an error saying why. When the
+      container's answer never arrives (timeout, unreachable), the tool stays
+      revoked and the error names the state `revoked_install_unknown`, since
+      re-granting could authorize a tool that is already gone.
+- [x] Removing a default tool is refused with an error that says it is a
       default, and nothing changes.
-- [ ] Removing a tool the bot does not have is refused as not found.
-- [ ] Removing a granted tool that was never installed through this API (for
+- [x] Removing a tool the bot does not have is refused as not found.
+- [x] Removing a granted tool that was never installed through this API (for
       example, one granted at bot creation) revokes the grant and succeeds;
       there is no program of ours to delete.
-- [ ] After a successful remove, re-adding the same tool starts again at
+- [x] After a successful remove, re-adding the same tool starts again at
       identity `owner`.
-- [ ] Removing a tool never changes the bot's other tools or MCP servers.
+- [x] Removing a tool never changes the bot's other tools or MCP servers.
 
 **Rollback failures**
-- [ ] If an add or remove has to undo its first step and the undo itself fails,
+- [x] If an add or remove has to undo its first step and the undo itself fails,
       the response says exactly which state the bot was left in, and the event
       is logged with enough detail to repair it by hand.
 
 **All operations**
-- [ ] Only a caller allowed to change the bot may add, remove or update; the
+- [x] Only a caller allowed to change the bot may add, remove or update; the
       permission rules match the existing identity switch.
-- [ ] Bots whose engine cannot run acli get a clear "not supported" error.
-- [ ] No response or log carries tokens, credentials, or raw tool output that
+- [x] Bots whose engine cannot run acli get a clear "not supported" error.
+- [x] No response or log carries tokens, credentials, or raw tool output that
       has not been masked.
 
 ## In Scope
