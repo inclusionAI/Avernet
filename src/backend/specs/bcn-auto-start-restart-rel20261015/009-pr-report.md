@@ -17,7 +17,9 @@
 尚未创建 PR，无平台评审证据。
 
 ## ACI/CI
-- Local: focused tests and independent review/regression in progress.
+- Local: independent Review PASS; 549 focused tests passed; full Backend 22,270 passed / 39 skipped / 0 failed or errors.
+- Local coverage (base 1ce85adc6, source head ac821fa20): lines 113569/126726=89.62%; changed executable lines 14/14=100%. Same XML validated with project Python 3.12 after host Python2 report-check selection error.
+- Rebase: completed against freshly fetched GitHub origin/REL20261015@1ce85adc6, source topic commits e80901492 and ac821fa20.
 - Remote: PENDING (PR not yet created).
 - Required evidence: actual executed tests, line coverage numerator/denominator, changed-line coverage numerator/denominator; no fabricated job results.
 
