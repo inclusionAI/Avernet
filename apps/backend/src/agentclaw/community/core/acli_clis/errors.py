@@ -86,8 +86,10 @@ class AcliRollbackFailedError(InternalError):
     """Undoing the first step of an add or remove failed too.
 
     ``state`` names where the bot was left: ``installed_not_granted``,
-    ``revoked_still_installed``, or ``revoked_install_unknown`` (revoked, and
-    the container's answer to the uninstall never arrived).
+    ``revoked_still_installed``, ``revoked_install_unknown`` (revoked, and
+    the container's answer to the uninstall never arrived), or
+    ``install_unknown_not_granted`` (never granted; the install's answer never
+    arrived and the cleanup uninstall failed too).
     """
 
     def __init__(self, cli_code: str, state: str) -> None:

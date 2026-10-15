@@ -168,6 +168,14 @@ class AcliCliService(AcliCliServiceProtocol):
                 "acli_cli_add_failed bot_id=%s cli_code=%s phase=install error_code=%s",
                 bot_id, cli_code, error.code,
             )
+            if error.code in _UNCERTAIN_CODES:
+                # The install may have completed out of sight. Uninstall so the
+                # bot cannot be left with an ungranted program; if that fails
+                # too, the state is unknown and is reported as such.
+                await self._undo_install(
+                    bot_id, owner_id, cli_code,
+                    reason="install_uncertain", state="install_unknown_not_granted",
+                )
             raise _container_error(error) from error
 
         if tool.name != cli_code:
@@ -276,7 +284,15 @@ class AcliCliService(AcliCliServiceProtocol):
 
     # ── rollback ─────────────────────────────────────────────────────────
 
-    async def _undo_install(self, bot_id: str, owner_id: str, name: str, *, reason: str) -> None:
+    async def _undo_install(
+        self,
+        bot_id: str,
+        owner_id: str,
+        name: str,
+        *,
+        reason: str,
+        state: str = "installed_not_granted",
+    ) -> None:
         try:
             await self._port.uninstall(
                 bot_id=bot_id, owner_id=owner_id, name=name,
@@ -284,11 +300,11 @@ class AcliCliService(AcliCliServiceProtocol):
             )
         except AcliPortError as error:
             logger.error(
-                "acli_cli_rollback_failed bot_id=%s cli_code=%s state=installed_not_granted "
+                "acli_cli_rollback_failed bot_id=%s cli_code=%s state=%s "
                 "reason=%s error_code=%s",
-                bot_id, name, reason, error.code,
+                bot_id, name, state, reason, error.code,
             )
-            raise AcliRollbackFailedError(name, "installed_not_granted") from error
+            raise AcliRollbackFailedError(name, state) from error
 
     def _undo_revoke(self, bot: Mapping[str, Any], cli_code: str, item: Mapping[str, Any]) -> None:
         # The caller/owner override lives in its own table and the revoke did

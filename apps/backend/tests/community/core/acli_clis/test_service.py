@@ -560,3 +560,32 @@ async def test_uncertain_uninstall_stays_revoked_and_says_so(code) -> None:
 
     assert caught.value.state == "revoked_install_unknown"
     assert agentpass.codes == ["dataphin"]
+
+
+
+@pytest.mark.parametrize("code", ["timeout", "engine_unreachable"])
+async def test_uncertain_install_is_cleaned_up_and_never_granted(code) -> None:
+    """The install may have landed although its answer was lost: uninstall it."""
+    container = _Container()
+    container.install_error = AcliPortError(code, "no answer")
+    service, agentpass, container, _ = _service(container=container)
+
+    with pytest.raises(AcliOperationFailedError) as caught:
+        await _add(service)
+
+    assert caught.value.code == code
+    assert [c[0] for c in container.calls] == ["install", "uninstall"]
+    assert agentpass.codes == ["dataphin"]
+
+
+async def test_uncertain_install_with_failed_cleanup_reports_the_state() -> None:
+    container = _Container()
+    container.install_error = AcliPortError("timeout", "no answer")
+    container.uninstall_errors = [AcliPortError("engine_unreachable", "gone")]
+    service, agentpass, _, _ = _service(container=container)
+
+    with pytest.raises(AcliRollbackFailedError) as caught:
+        await _add(service)
+
+    assert caught.value.state == "install_unknown_not_granted"
+    assert agentpass.codes == ["dataphin"]
