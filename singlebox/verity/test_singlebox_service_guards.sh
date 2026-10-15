@@ -44,6 +44,7 @@ test_all_start_rolls_back_started_services_on_failure() {
   backend_start() { printf '%s\n' "start:backend" >> "$events_file"; }
   bcs_start() { printf '%s\n' "start:bcs" >> "$events_file"; }
   bots_start() { printf '%s\n' "start:bots" >> "$events_file"; }
+  gateway_start() { printf '%s\n' "start:gateway" >> "$events_file"; }
   demo_bot_start() { printf '%s\n' "start:demo_bot" >> "$events_file"; return 23; }
   frontend_start() { printf '%s\n' "start:frontend" >> "$events_file"; }
 
@@ -51,6 +52,7 @@ test_all_start_rolls_back_started_services_on_failure() {
   backend_stop() { printf '%s\n' "stop:backend" >> "$events_file"; }
   bcs_stop() { printf '%s\n' "stop:bcs" >> "$events_file"; }
   bots_stop() { printf '%s\n' "stop:bots" >> "$events_file"; }
+  gateway_stop() { printf '%s\n' "stop:gateway" >> "$events_file"; }
   demo_bot_stop() { printf '%s\n' "stop:demo_bot" >> "$events_file"; }
   frontend_stop() { printf '%s\n' "stop:frontend" >> "$events_file"; }
 
@@ -58,7 +60,7 @@ test_all_start_rolls_back_started_services_on_failure() {
     fail "all_start should fail when demo_bot_start fails"
   fi
 
-  assert_eq $'start:baas\nstart:backend\nstart:bcs\nstart:bots\nstart:demo_bot\nstop:bots\nstop:bcs\nstop:backend\nstop:baas' \
+  assert_eq $'start:baas\nstart:backend\nstart:bcs\nstart:bots\nstart:gateway\nstart:demo_bot\nstop:gateway\nstop:bots\nstop:bcs\nstop:backend\nstop:baas' \
     "$(cat "$events_file")" \
     "all_start rollback order"
 }

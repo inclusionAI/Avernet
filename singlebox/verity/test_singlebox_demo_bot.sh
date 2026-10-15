@@ -557,6 +557,7 @@ test_bbs_start_seeds_topics_bots_skills_and_subscriptions_in_order() (
 
   backend_ready() { return 0; }
   bcs_ready() { return 0; }
+  demo_bbs_require_gateway() { return 0; }
   demo_bbs_validate_definitions() { return 0; }
   demo_bbs_topics_seed() {
     printf '%s\n' "topics" >> "$sequence_file"
@@ -594,6 +595,7 @@ test_bbs_start_fails_fast_when_topic_seed_fails() (
   demo_bbs_validate_definitions() { return 0; }
   backend_ready() { return 0; }
   bcs_ready() { return 0; }
+  demo_bbs_require_gateway() { return 0; }
   demo_bbs_topics_seed() {
     log_error "topic seed failed"
     return 1
@@ -697,18 +699,32 @@ SH
   fi
 )
 
-test_all_order_includes_bots_and_demo_before_frontend() {
+test_all_order_places_gateway_before_demo_bot() {
   setup_env
   # shellcheck source=/dev/null
   source "${ROOT}/singlebox/modules/all.sh"
-  # bcsfuse starts before bcs (all.sh's canonical order); this pin was left on
-  # the older swap by an earlier order change — dev itself fails it today.
-  assert_eq "baas backend bcsfuse bcs bots demo_bot frontend" "${START_ORDER[*]}" "all start order"
-  # Stop is the unconditional union (legacy + gateway): a stack started under a
-  # non-legacy FRONTEND_VARIANT is routinely stopped from a shell without it,
-  # and gateway_stop is a no-op when the gateway is not running.
+  # demo_bot uploads BBS demo skills through Gateway, so Gateway must be part
+  # of every variant's canonical start order and must precede demo_bot.
+  assert_eq "baas backend bcsfuse bcs bots gateway demo_bot frontend" "${START_ORDER[*]}" "all start order"
   assert_eq "frontend gateway demo_bot bots bcsfuse bcs backend baas" "${STOP_ORDER[*]}" "all stop order"
 }
+
+test_start_fails_fast_when_gateway_is_not_ready() (
+  setup_env
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  demo_bbs_gateway_ready() { return 1; }
+  local errors=""
+  log_error() { errors="${errors}${1}\n"; }
+
+  if demo_bot_start >/tmp/singlebox-demo-gateway-test.out 2>&1; then
+    fail "demo_bot_start must fail when Gateway is unavailable"
+  fi
+  grep -F 'Gateway is not ready' <<<"$errors" >/dev/null || \
+    fail "missing Gateway readiness error"
+  grep -F 'BBS demo skills are uploaded through Gateway' <<<"$errors" >/dev/null || \
+    fail "missing Gateway dependency explanation"
+)
 
 test_backend_ready_function_exists() {
   setup_env
@@ -748,7 +764,8 @@ test_admin_onboard_posts_demo_metadata
 test_ensure_skips_connect_when_already_visible
 test_ensure_reports_missing_bot_without_auto_onboard
 test_ensure_does_not_onboard_after_fatal_verification_error
-test_all_order_includes_bots_and_demo_before_frontend
+test_all_order_places_gateway_before_demo_bot
+test_start_fails_fast_when_gateway_is_not_ready
 test_backend_ready_function_exists
 
-printf 'PASS: singlebox demo bot module tests\n'
+printf '%s\n' "PASS: singlebox demo bot module tests"

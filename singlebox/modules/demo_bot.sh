@@ -59,11 +59,6 @@ demo_bot_backend_base_url() {
     printf 'http://127.0.0.1:%s\n' "${DEMO_BACKEND_PORT}"
 }
 
-demo_bot_gateway_base_url() {
-    demo_bot_defaults
-    printf 'http://127.0.0.1:%s\n' "${DEMO_GATEWAY_PORT}"
-}
-
 demo_bot_bcs_base_url() {
     printf 'http://127.0.0.1:%s\n' "${BCS_PORT}"
 }
@@ -274,6 +269,27 @@ demo_bbs_skill_activate() {
             and .data.runtime_projection.pending_count == 0
         ' >/dev/null 2>&1; then
         log_error "Failed to activate BBS demo skill ${skill_name} for ${backend_bot_id}. Check ${DEMO_BOT_LOG}"
+        return 1
+    fi
+}
+
+demo_bot_gateway_base_url() {
+    demo_bot_defaults
+    printf 'http://127.0.0.1:%s\n' "${DEMO_GATEWAY_PORT}"
+}
+
+demo_bbs_gateway_ready() {
+    local base_url
+    base_url="$(demo_bot_gateway_base_url)"
+    curl --noproxy '*' --connect-timeout 1 --max-time 2 -fsS \
+        "${base_url}/health" >/dev/null 2>&1
+}
+
+demo_bbs_require_gateway() {
+    local base_url
+    base_url="$(demo_bot_gateway_base_url)"
+    if ! demo_bbs_gateway_ready; then
+        log_error "Gateway is not ready at ${base_url}. BBS demo skills are uploaded through Gateway; start all or gateway first."
         return 1
     fi
 }
@@ -603,6 +619,7 @@ demo_bot_start() {
         log_error "BCS is not ready; cannot finish singlebox startup"
         return 1
     }
+    demo_bbs_require_gateway || return 1
 
     demo_bbs_topics_seed || return 1
 

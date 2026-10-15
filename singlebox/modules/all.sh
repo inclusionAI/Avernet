@@ -7,25 +7,19 @@ _ALL_SH_LOADED=1
 # toolchain is NOT included here — use `install-tools` command separately.
 #
 # Full singlebox stack: BAAS/backend create the developer runtime, BCS runs
-# collaboration, bots starts the 5 local profiles, demo_bot starts the
-# backend-created developer bot, then frontend exposes the workbench. BCN
-# onboarding remains an explicit product action.
-SETUP_ORDER=(baas backend bcs bcsfuse bots frontend)
-START_ORDER=(baas backend bcsfuse bcs bots demo_bot frontend)
-# STOP (and clean) run over the legacy list PLUS gateway, unconditionally:
-# a stack started under one FRONTEND_VARIANT is routinely stopped from a
-# shell without it (one-off env prefix, reverted .env.local), and gateway_stop
-# is a no-op when the gateway is not running — an order that omits the
-# gateway strands it with port 8889 bound and no status line (status follows
-# START_ORDER below).
+# collaboration, bots starts the 5 local profiles, gateway publishes the local
+# OpenAPI/auth routes, demo_bot installs its skills through that gateway, and
+# then frontend exposes the workbench. BCN onboarding remains an explicit
+# product action.
+#
+# Gateway is independent of FRONTEND_VARIANT: nextgen/teamclaw consume it as a
+# frontend upstream, while legacy's demo_bot still needs it for local Skill
+# upload. It therefore belongs to the canonical start order for every variant.
+SETUP_ORDER=(baas backend bcs bcsfuse bots gateway frontend)
+START_ORDER=(baas backend bcsfuse bcs bots gateway demo_bot frontend)
+# STOP (and clean) reverse the canonical start order. gateway_stop is a no-op
+# when the gateway is not running, so stopping a partial stack stays safe.
 STOP_ORDER=(frontend gateway demo_bot bots bcsfuse bcs backend baas)
-# Nextgen and the external teamclaw checkout consume Gateway OpenAPI/auth
-# routes; the legacy UI keeps its existing direct-service topology and
-# startup order unchanged. Stop keeps the unconditional union above.
-if [ "${FRONTEND_VARIANT:-legacy}" != legacy ]; then
-    SETUP_ORDER=(baas backend bcs bcsfuse bots gateway frontend)
-    START_ORDER=(baas backend bcsfuse bcs bots gateway demo_bot frontend)
-fi
 
 all_setup() {
     for svc in "${SETUP_ORDER[@]}"; do
