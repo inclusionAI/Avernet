@@ -262,6 +262,30 @@ function eventEvidenceIds(event: RecoveryEvent): unknown[] {
 }
 
 function ProcessAction({ task, event, index, rawEvidence, loadEvidence, onViewAction }: { task: SessionRecoveryTask; event: RecoveryEvent; index: number; rawEvidence: Record<string, unknown>; loadEvidence: (id: string) => void; onViewAction: (id: string) => void }) {
+  if (['plan', 'notification', 'owner_decision', 'created', 'execution', 'waiting', 'resumed', 'result', 'annotation'].includes(event.kind)) {
+    const submitted = record(event.payload.plan);
+    const counts = [Array.isArray(submitted.actions) ? `Agent 操作 ${submitted.actions.length} 项` : '', Array.isArray(submitted.owner_cooperation) ? `Owner 事项 ${submitted.owner_cooperation.length} 项` : ''].filter(Boolean).join(' · ');
+    const outcome = event.kind === 'plan' ? `方案已提交${counts ? ` · ${counts}` : ''}`
+      : event.kind === 'notification' ? event.payload.sent === true ? '钉钉通知已发送' : event.payload.sent === false ? '钉钉通知发送失败' : event.summary
+      : event.kind === 'owner_decision' ? event.payload.approved === true ? 'Owner 已确认完整方案' : event.payload.approved === false ? 'Owner 已拒绝方案' : event.summary
+      : event.summary;
+    const evidenceIds = eventEvidenceIds(event);
+    const relatedEvidence = task.evidence.filter(item => evidenceIds.includes(item.evidence_id) || evidenceIds.includes(item.tool_call_id)
+      || event === task.timeline[0] && !task.timeline.some(entry => entry.payload.raw_tool_call_id === item.tool_call_id || eventEvidenceIds(entry).includes(item.evidence_id)));
+    return <li className="sr-process-event"><article>
+      <div className="sr-process-event-header"><h3>{eventTitles[event.kind] || outcome}</h3><time>{formatTime(event.at_ms)}</time></div>
+      {(eventTitles[event.kind] && outcome !== eventTitles[event.kind]) && <p>{outcome}</p>}
+      {typeof event.payload.feedback === 'string' && event.payload.feedback.trim() && <PlanMarkdown text={event.payload.feedback} />}
+      {event.kind === 'annotation' && typeof event.payload.reason === 'string' && <PlanMarkdown text={event.payload.reason} />}
+      <details className="sr-disclosure"><summary>查看记录原文</summary><PlanMarkdown text={event.summary} />
+        {relatedEvidence.map(item => <div key={item.evidence_id} className="sr-evidence-card">
+          <div className="sr-evidence-excerpt">{item.excerpt}</div>
+          <details className="sr-disclosure" onToggle={(toggleEvent) => { if (toggleEvent.currentTarget.open && !rawEvidence[item.tool_call_id]) loadEvidence(item.tool_call_id); }}><summary>查看完整操作回执</summary><RawDetails value={rawEvidence[item.tool_call_id] ?? '正在读取…'} /></details>
+        </div>)}
+        <RawDetails value={event.payload} />
+      </details>
+    </article></li>;
+  }
   const callId = typeof event.payload.raw_tool_call_id === 'string' ? event.payload.raw_tool_call_id : undefined;
   const evidence = task.evidence.find(item => callId && item.tool_call_id === callId);
   let savedResult: Record<string, unknown> = {};
@@ -330,7 +354,8 @@ function ProcessAction({ task, event, index, rawEvidence, loadEvidence, onViewAc
   </li>;
 }
 
-function RecoveryPlan({ task, busy, ownerFeedback, cooperationDone, onFeedback, onCooperation, onDecide }: {
+function RecoveryPlan({ task, busy, ownerFeedback, cooperationDone, onFeedback, onCooperation, onDecide, review }: {
+  review?: ReactNode;
   task: SessionRecoveryTask;
   busy: boolean;
   ownerFeedback: string;
@@ -343,83 +368,74 @@ function RecoveryPlan({ task, busy, ownerFeedback, cooperationDone, onFeedback, 
   if (!plan) return null;
   return <section id="recovery-plan" className="sr-plan">
     <CardHeader title="修复方案" right={<StatusPill status={plan.approvedAt ? 'completed' : 'waiting_owner'}>{plan.approvedAt ? '方案已确认' : task.status === 'waiting_owner' ? '等待确认' : '方案已提交'}</StatusPill>} />
-    {plan.owner_cooperation.length > 0 && <a className="sr-owner-jump" href="#recovery-owner-cooperation"><MonitoringIcon name="user" />本方案有 {plan.owner_cooperation.length} 项需要你配合<span>查看事项与确认方案 ↓</span></a>}
-    <div className="sr-plan-summary">
-      <h3>方案说明</h3>
+    <section className="sr-plan-block sr-plan-overview" aria-label="问题与处理思路">
+      <h3>问题与处理思路</h3>
+      <div className="sr-plan-body sr-plan-summary">
       <PlanMarkdown text={plan.summary} />
-    </div>
-    <div className="sr-plan-context-grid">
-    <section className="sr-plan-block" aria-label="诊断依据">
-      <h3>问题与证据依据</h3>
-      <div className="sr-plan-basis"><PlanMarkdown text={plan.basis} /></div>
-    </section>
-    <section className="sr-plan-block" aria-label="影响范围">
-      <h3>修改范围</h3>
-      <PlanMarkdown text={plan.scope} />
-    </section>
-    </div>
-    <section className="sr-plan-block" aria-label="方案动作">
-      <h3>主要调整动作（{plan.actions.length}）</h3>
-      <div className="sr-action-list">
-      {plan.actions.map((action, index) => <article key={action.actionId} id={`recovery-action-${encodeURIComponent(action.actionId)}`} className="sr-action">
-        <div className="sr-action-title">
-          <span>{index + 1}</span>
-          <h4>调整动作 {index + 1}</h4>
-        </div>
-        <div className="sr-action-description"><PlanMarkdown text={action.summary} /></div>
-        <div className="sr-action-grid">
-          <div><h4>风险</h4><PlanMarkdown text={action.risk} /></div>
-          <div><h4>验证</h4><PlanMarkdown text={action.verification} /></div>
-        </div>
-        {action.rollback && <div className="sr-action-rollback"><strong>回退：</strong><PlanMarkdown text={action.rollback} /></div>}
-        <details className="sr-disclosure">
-          <summary>查看操作细节</summary>
-          <p className="sr-note mono">操作标识：{action.actionId}</p>
-          {action.operation && <RawDetails value={action.operation} />}
-          {action.engineOperation && <><p className="sr-note">参考接口请求</p><RawDetails value={action.engineOperation} /></>}
-          {action.command && <><p className="sr-note">参考命令</p><RawDetails value={action.command} /></>}
-        </details>
-      </article>)}
+      <details className="sr-disclosure sr-plan-support"><summary>查看诊断依据与处理范围</summary>
+        <div className="sr-operation-field"><h4>问题与证据依据</h4><PlanMarkdown text={plan.basis} /></div>
+        <div className="sr-operation-field"><h4>处理范围</h4><PlanMarkdown text={plan.scope} /></div>
+      </details>
       </div>
-      {plan.actions.length === 0 && <div className="sr-empty">方案未列出具体操作。</div>}
     </section>
-    <section className="sr-plan-block sr-plan-verification" aria-label="验收方法">
-      <h3>验收方法</h3>
-      <PlanMarkdown text={plan.verification} />
-    </section>
-    {(plan.owner_cooperation.length > 0 || task.status === 'waiting_owner') && <section id="recovery-owner-cooperation" className={`sr-owner-action ${task.status === 'waiting_owner' ? 'pending' : ''}`}>
-    {plan.owner_cooperation.length > 0 && <div className="sr-owner-box">
-      <h3><MonitoringIcon name="user" />需要 Owner 配合</h3>
-      {plan.owner_cooperation.map((item, index) => <div key={index} className="sr-owner-item">
-        <div className="sr-owner-request"><PlanMarkdown text={item.request} /></div>
-        <details className="sr-disclosure"><summary>为什么需要你配合</summary><div className="sr-long-text"><PlanMarkdown text={item.basis} /></div></details>
-      </div>)}
-    </div>}
-    {task.status === 'waiting_owner' && <div className="sr-decision-panel">
-      <h3>确认方案</h3>
-      <p>确认调整范围、主要动作及配合事项后，Agent 将继续执行。</p>
-      <label>补充信息或处理说明<textarea maxLength={4000} value={ownerFeedback} onChange={(event) => onFeedback(event.target.value)} placeholder="填写补充信息或配合事项的处理情况" /></label>
-      {plan.owner_cooperation.length > 0 && <label className="sr-check"><input type="checkbox" checked={cooperationDone} onChange={(event) => onCooperation(event.target.checked)} />我已处理方案中的配合事项</label>}
-      <div className="sr-actions"><button type="button" className="sr-button primary" disabled={busy || (plan.owner_cooperation.length > 0 && !cooperationDone)} onClick={() => onDecide(true)}>{busy ? '提交中…' : '确认完整方案'}</button><button type="button" className="sr-button" disabled={busy} onClick={() => onDecide(false)}>拒绝方案</button></div>
-    </div>}
+    {(plan.owner_cooperation.length > 0 || plan.actions.length > 0) && <section className="sr-plan-block" aria-label="完整执行安排">
+      <h3>执行安排</h3>
+      <ol className="sr-plan-body sr-plan-steps">
+        {plan.owner_cooperation.map((item, index) => <li key={`owner-${index}`} className="sr-plan-step owner" id={index === 0 ? 'recovery-owner-cooperation' : undefined}>
+          <div className="sr-plan-step-heading"><span className="sr-step-actor"><MonitoringIcon name="user" />Owner</span><span className="sr-note">方案确认前处理</span></div>
+          <div className="sr-owner-request"><PlanMarkdown text={item.request} /></div>
+          <details className="sr-disclosure"><summary>查看这项安排的依据</summary><PlanMarkdown text={item.basis} /></details>
+          {task.status === 'waiting_owner' && index === plan.owner_cooperation.length - 1 && <div className="sr-owner-feedback">
+            <label>补充信息或处理说明<textarea maxLength={4000} value={ownerFeedback} onChange={(event) => onFeedback(event.target.value)} placeholder="填写处理进度或补充信息，供 Agent 继续处理时参考" /></label>
+            <label className="sr-check"><input type="checkbox" checked={cooperationDone} onChange={(event) => onCooperation(event.target.checked)} />我已处理方案中的配合事项</label>
+          </div>}
+        </li>)}
+        {plan.actions.map(action => <li key={action.actionId} id={`recovery-action-${encodeURIComponent(action.actionId)}`} className="sr-plan-step agent">
+          <div className="sr-plan-step-heading"><span className="sr-step-actor"><MonitoringIcon name="bot" />自愈 Agent</span><span className="sr-note">按确认的方案继续执行</span></div>
+          <div className="sr-action-description"><PlanMarkdown text={action.summary} /></div>
+          <details className="sr-disclosure sr-action-safeguards"><summary>查看风险、验证与回退</summary>
+            <div className="sr-action-grid">
+              <div><h4>风险</h4><PlanMarkdown text={action.risk} /></div>
+              <div><h4>验证</h4><PlanMarkdown text={action.verification} /></div>
+            </div>
+            {action.rollback && <div className="sr-action-rollback"><strong>回退：</strong><PlanMarkdown text={action.rollback} /></div>}
+          </details>
+          <details className="sr-disclosure"><summary>查看操作细节</summary>
+            <p className="sr-note mono">操作标识：{action.actionId}</p>
+            {action.operation && <RawDetails value={action.operation} />}
+            {action.engineOperation && <><p className="sr-note">参考接口请求</p><RawDetails value={action.engineOperation} /></>}
+            {action.command && <><p className="sr-note">参考命令</p><RawDetails value={action.command} /></>}
+          </details>
+        </li>)}
+      </ol>
     </section>}
+    <section className="sr-plan-block sr-plan-closeout" aria-label="验收与确认">
+      <h3>验收与确认</h3>
+      <div className="sr-plan-body">
+      <PlanMarkdown text={plan.verification} />
+      {task.status === 'waiting_owner' && <div className="sr-decision-panel">
+        <h4>确认完整方案</h4>
+        <p>请核对上述分工、处理安排与验收标准，确认后 Agent 将继续执行。</p>
+        {plan.owner_cooperation.length === 0 && <label>补充信息或处理说明<textarea maxLength={4000} value={ownerFeedback} onChange={(event) => onFeedback(event.target.value)} placeholder="填写补充信息" /></label>}
+        <div className="sr-actions"><button type="button" className="sr-button primary" disabled={busy || (plan.owner_cooperation.length > 0 && !cooperationDone)} onClick={() => onDecide(true)}>{busy ? '提交中…' : '确认完整方案'}</button><button type="button" className="sr-button" disabled={busy} onClick={() => onDecide(false)}>拒绝方案</button></div>
+      </div>}
+      {review}
+      </div>
+    </section>
   </section>;
 }
 
-function ReviewSection({ task, busy, annotationLayer, annotationCorrect, annotationReason, annotationEvidence, onLayer, onCorrect, onReason, onEvidence, onSubmit }: {
-  task: SessionRecoveryTask;
+function ReviewSection({ busy, annotationLayer, annotationCorrect, annotationReason, onLayer, onCorrect, onReason, onSubmit }: {
   busy: boolean;
   annotationLayer: 'delivery' | 'response' | 'effect';
   annotationCorrect: string;
   annotationReason: string;
-  annotationEvidence: string[];
   onLayer: (value: 'delivery' | 'response' | 'effect') => void;
   onCorrect: (value: string) => void;
   onReason: (value: string) => void;
-  onEvidence: (value: string[]) => void;
   onSubmit: () => void;
 }) {
-  return <section className="sr-card sr-review">
+  return <section className="sr-review sr-terminal-review">
     <details>
       <summary>人工复核</summary>
       <p>人工标注会与 Agent 的原判断一并保留，不覆盖原结论。</p>
@@ -428,10 +444,6 @@ function ReviewSection({ task, busy, annotationLayer, annotationCorrect, annotat
         <label>是否正确<select value={annotationCorrect} onChange={(event) => onCorrect(event.target.value)}><option value="true">正确</option><option value="false">错误</option><option value="unknown">无法判断</option></select></label>
       </div>
       <label>理由<textarea value={annotationReason} maxLength={4000} onChange={(event) => onReason(event.target.value)} /></label>
-      <fieldset>
-        <legend>引用证据</legend>
-        <div className="sr-checkboxes">{task.evidence.map((item) => <label key={item.evidence_id}><input type="checkbox" checked={annotationEvidence.includes(item.evidence_id)} onChange={(event) => onEvidence(event.target.checked ? [...annotationEvidence, item.evidence_id] : annotationEvidence.filter((id) => id !== item.evidence_id))} />{item.evidence_id}</label>)}</div>
-      </fieldset>
       <button type="button" className="sr-button primary" disabled={busy || !annotationReason.trim()} onClick={onSubmit}>保存标注</button>
     </details>
   </section>;
@@ -445,7 +457,6 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
   const [annotationLayer, setAnnotationLayer] = useState<'delivery' | 'response' | 'effect'>('effect');
   const [annotationCorrect, setAnnotationCorrect] = useState('true');
   const [annotationReason, setAnnotationReason] = useState('');
-  const [annotationEvidence, setAnnotationEvidence] = useState<string[]>([]);
   const [rawEvidence, setRawEvidence] = useState<Record<string, unknown>>({});
   const [ownerFeedback, setOwnerFeedback] = useState('');
   const [cooperationDone, setCooperationDone] = useState(false);
@@ -490,7 +501,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
   }, [taskId, revision]);
 
   useEffect(() => { setCooperationDone(false); setOwnerFeedback(''); }, [taskId, task?.plan?.digest]);
-  useEffect(() => { setAnnotationReason(''); setAnnotationEvidence([]); setRawEvidence({}); }, [taskId]);
+  useEffect(() => { setAnnotationReason(''); setRawEvidence({}); }, [taskId]);
 
   const decide = async (approved: boolean) => {
     if (!task?.plan || busy) return;
@@ -522,10 +533,9 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
         layer: annotationLayer,
         correct: annotationCorrect === 'unknown' ? null : annotationCorrect === 'true',
         reason: annotationReason,
-        evidence_ids: annotationEvidence,
+        evidence_ids: [],
       });
       setAnnotationReason('');
-      setAnnotationEvidence([]);
       setRevision((value) => value + 1);
     } catch (failure) {
       setError(monitoringErrorText(failure));
@@ -537,6 +547,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
   const currentPhase = phases.find((item) => item.key === currentPhaseKey);
   const lastEvent = task?.timeline.at(-1);
   const effect = task?.judgment?.effect ?? 'unknown';
+  const review = task && ['completed', 'failed'].includes(task.status) ? <ReviewSection busy={busy} annotationLayer={annotationLayer} annotationCorrect={annotationCorrect} annotationReason={annotationReason} onLayer={setAnnotationLayer} onCorrect={setAnnotationCorrect} onReason={setAnnotationReason} onSubmit={() => void annotate()} /> : null;
   const viewPlan = () => {
     setPhaseSelection({ taskId, phase: 'plan' });
     window.requestAnimationFrame(() => document.getElementById('recovery-plan')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
@@ -570,9 +581,10 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
       <div className="sr-layout">
         <div className="sr-main">
           <RecoveryWorkflow task={task} currentPhase={currentPhaseKey} selected={selectedPhase} onSelect={(phase) => setPhaseSelection({ taskId, phase })} grouped={grouped} rawEvidence={rawEvidence} loadEvidence={(id) => void loadEvidence(id)}>
-            {selectedPhase === 'plan' && <RecoveryPlan task={task} busy={busy} ownerFeedback={ownerFeedback} cooperationDone={cooperationDone} onFeedback={setOwnerFeedback} onCooperation={setCooperationDone} onDecide={(approved) => void decide(approved)} />}
+            {selectedPhase === 'plan' && <RecoveryPlan task={task} busy={busy} ownerFeedback={ownerFeedback} cooperationDone={cooperationDone} onFeedback={setOwnerFeedback} onCooperation={setCooperationDone} onDecide={(approved) => void decide(approved)} review={review} />}
+            {!task.plan && selectedPhase === currentPhaseKey && review}
+            {task.plan && selectedPhase === 'verify' && review && <button type="button" className="sr-button" onClick={viewPlan}>查看方案与人工复核</button>}
           </RecoveryWorkflow>
-          <ReviewSection task={task} busy={busy} annotationLayer={annotationLayer} annotationCorrect={annotationCorrect} annotationReason={annotationReason} annotationEvidence={annotationEvidence} onLayer={setAnnotationLayer} onCorrect={setAnnotationCorrect} onReason={setAnnotationReason} onEvidence={setAnnotationEvidence} onSubmit={() => void annotate()} />
         </div>
         <aside className="sr-side">
           <AgentSessionLogs key={task.taskId} task={task} />

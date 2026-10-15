@@ -26,10 +26,15 @@ it('keeps the plan, Owner cooperation and approval together in stage three', asy
   expect(screen.getByRole('tab', { name: /形成修复方案/ })).toHaveAttribute('aria-current', 'step');
   expect(screen.getByText('完整修复方案')).toBeVisible();
   expect(screen.getByText('确认权限已开放')).toBeVisible();
-  expect(screen.getByRole('heading', { name: '方案说明' })).toBeVisible();
-  expect(screen.getByRole('heading', { name: '问题与证据依据' })).toBeVisible();
-  expect(screen.getByRole('heading', { name: '修改范围' })).toBeVisible();
-  expect(screen.getByRole('heading', { name: '验收方法' })).toBeVisible();
+  expect(screen.getByRole('heading', { name: '问题与处理思路' })).toBeVisible();
+  const arrangement = screen.getByRole('region', { name: '完整执行安排' });
+  expect(within(arrangement).getByText('确认权限已开放')).toBeVisible();
+  expect(within(arrangement).getByText('修正配置')).toBeVisible();
+  expect(arrangement.querySelectorAll('.sr-plan-step')).toHaveLength(2);
+  expect(screen.getByText('查看诊断依据与处理范围')).toBeVisible();
+  expect(screen.getByRole('heading', { name: '验收与确认' })).toBeVisible();
+  expect(screen.queryByRole('heading', { name: /主要调整动作|需要 Owner 配合/ })).toBeNull();
+  expect(screen.queryByText('人工复核')).toBeNull();
   expect(screen.getByRole('button', { name: '确认完整方案' })).toBeDisabled();
   await user.type(screen.getByLabelText('补充信息或处理说明'), '权限已开放');
   await user.click(screen.getByRole('tab', { name: /执行环境修复/ }));
@@ -45,15 +50,24 @@ it('keeps the plan, Owner cooperation and approval together in stage three', asy
   expect(screen.getByRole('button', { name: '确认完整方案' })).toBeEnabled();
   await user.click(screen.getByRole('button', { name: '确认完整方案' }));
   await waitFor(() => expect(sessionRecoveryApi.decide).toHaveBeenCalledWith('task', 'plan-digest', true, true, '权限已开放'));
-  expect(screen.queryByText('完整任务时间线')).toBeNull(); await user.click(screen.getByText('展开详情')); expect(screen.getByText('原失败消息')).toBeVisible();
+  expect(screen.queryByText('完整任务时间线')).toBeNull(); await user.click(screen.getByText('查看记录原文')); expect(screen.getByText('原失败消息')).toBeVisible();
 });
-it('loads full audited evidence on demand and retains manual judgment', async () => {
+it('retains audited evidence and shows a simple collapsed review only after task completion', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', phase: 'verify', plan: { ...task.plan, approvedAt: 2 } } as never);
   vi.mocked(sessionRecoveryApi.toolCall).mockResolvedValue({ result: { stdout: '完整原始回执' } });
-  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />); await screen.findByText('原失败消息');
-  fireEvent.click(screen.getByText('展开详情')); fireEvent.click(screen.getByText('查看完整操作回执')); await waitFor(() => expect(sessionRecoveryApi.toolCall).toHaveBeenCalledWith('task', 'call'));
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  fireEvent.click(await screen.findByRole('tab', { name: /形成修复方案/ }));
+  await screen.findByText('原失败消息');
+  fireEvent.click(screen.getByText('查看记录原文')); fireEvent.click(screen.getByText('查看完整操作回执')); await waitFor(() => expect(sessionRecoveryApi.toolCall).toHaveBeenCalledWith('task', 'call'));
   await screen.findByText(/完整原始回执/);
-  fireEvent.change(screen.getByLabelText('理由'), { target: { value: '前后原文已核对' } }); fireEvent.click(screen.getByLabelText('evidence'));
-  fireEvent.click(screen.getByRole('button', { name: '保存标注' })); await waitFor(() => expect(sessionRecoveryApi.annotate).toHaveBeenCalledWith('task', { layer: 'effect', correct: true, reason: '前后原文已核对', evidence_ids: ['evidence'] }));
+  const review = screen.getByText('人工复核').closest('details')!;
+  expect(review).not.toHaveAttribute('open');
+  expect(review.closest('[aria-label="验收与确认"]')).not.toBeNull();
+  fireEvent.click(screen.getByText('人工复核'));
+  expect(screen.queryByText('引用证据')).toBeNull();
+  fireEvent.change(screen.getByLabelText('理由'), { target: { value: '前后原文已核对' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存标注' }));
+  await waitFor(() => expect(sessionRecoveryApi.annotate).toHaveBeenCalledWith('task', { layer: 'effect', correct: true, reason: '前后原文已核对', evidence_ids: [] }));
 });
 it('renders an explicit error without silently presenting an empty timeline', async () => {
   vi.mocked(sessionRecoveryApi.detail).mockRejectedValue(new Error('fixture offline')); render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
@@ -71,8 +85,11 @@ it('shows the business adjustment and defaults all technical execution detail to
   expect(screen.getByText('确认权限已开放')).toBeVisible();
   expect(screen.getByText('printf fixture')).not.toBeVisible();
   expect(screen.getByText(/"path": "\/api\/cron\/daily"/)).not.toBeVisible();
+  expect(screen.getByText('原失败证据')).not.toBeVisible();
+  await user.click(screen.getByText('查看诊断依据与处理范围'));
   expect(screen.getByText('原失败证据')).toBeVisible();
   expect(screen.getByText('原操作成功')).toBeVisible();
+  await user.click(screen.getAllByText('查看风险、验证与回退')[0]);
   expect(screen.getByText('恢复原值', { exact: false })).toBeVisible();
   await user.click(screen.getAllByText('查看操作细节')[0]);
   expect(screen.getByText('printf fixture')).toBeVisible();
@@ -183,7 +200,7 @@ it('renders an actionable Owner request with a document link and collapses the t
   expect(link).toHaveAttribute('target', '_blank');
   expect(screen.getByText('bot-reader')).toBeVisible();
   expect(screen.getByText('当前账号没有读取权限。')).not.toBeVisible();
-  await user.click(screen.getByText('为什么需要你配合'));
+  await user.click(screen.getByText('查看这项安排的依据'));
   expect(screen.getByText('当前账号没有读取权限。').closest('li')).toBeVisible();
   expect(screen.getByText('权限检查').tagName).toBe('STRONG');
   expect(screen.getByRole('button', { name: '确认完整方案' })).toBeDisabled();
@@ -201,6 +218,7 @@ it('separates plan conclusions, action titles, execution detail and evidence usi
   expect(screen.getByRole('heading', { name: '处理', exact: true })).toBeVisible();
   expect(screen.getByText('引导 Bot 申请文档读取权限')).toBeVisible();
   expect(screen.getByText('检查是否有可用申请能力。')).toBeVisible();
+  await user.click(screen.getByText('查看诊断依据与处理范围'));
   expect(screen.getByText('已确认当前账号不能读取目标文档。')).toBeVisible();
   expect(screen.getByText('原会话实际取得文档正文。')).toBeVisible();
   expect(screen.getByRole('button', { name: '确认完整方案' })).toBeDisabled();
@@ -240,7 +258,7 @@ it('preserves raw evidence including angle brackets and Markdown punctuation', a
   const excerpt = '<tool_result>**原始返回** & `literal`</tool_result>\n第二行原文';
   vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, evidence: [{ ...task.evidence[0], excerpt }] } as never);
   render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
-  fireEvent.click(await screen.findByText('展开详情'));
+  fireEvent.click(await screen.findByText('查看记录原文'));
   const evidence = document.querySelector('.sr-evidence-excerpt')!;
   expect(evidence).toBeVisible();
   expect(evidence.textContent).toBe(excerpt);
@@ -270,4 +288,15 @@ it('keeps task details usable when log downloads are forbidden', async () => {
   expect(await screen.findByText('只有任务 Owner 或管理员可下载 Agent 会话日志。')).toBeVisible();
   expect(screen.getByText('完整修复方案')).toBeVisible();
   expect(screen.queryByRole('button', { name: /下载 Agent 会话日志/ })).toBeNull();
+});
+
+it('shows an Owner-only plan as one complete arrangement without fabricating an Agent action', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, plan: { ...task.plan, actions: [] } } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  const arrangement = await screen.findByRole('region', { name: '完整执行安排' });
+  expect(arrangement.querySelectorAll('.sr-plan-step')).toHaveLength(1);
+  expect(within(arrangement).getByText('确认权限已开放')).toBeVisible();
+  expect(within(arrangement).queryByText('自愈 Agent')).toBeNull();
+  expect(screen.queryByText('方案未列出具体操作。')).toBeNull();
+  expect(screen.getByRole('button', { name: '确认完整方案' })).toBeDisabled();
 });
