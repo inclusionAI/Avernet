@@ -64,7 +64,13 @@ def _binding_payload(channel: ChannelRecord) -> dict[str, Any]:
         send_mode = {"mode": "normal", "message_type": "markdown"}
     return {
         "channel_type": "dingtalk",
-        "account_ref": config.get("client_id") or "",
+        # account_ref 对齐老链路的键（robot_code）：BCS 的唯一性是全局
+        # ``find_active_by_account(channel_type, account_ref)``，与 target 无关。
+        # 用 client_id 会与存量绑定错开（老键=robot_code），不撞 409、静默
+        # 挂成双绑定且消息仍路由到老配置（假生效）。对齐老键让存量冲突显性
+        # 409，可由 _find_binding_id 接管；robot_code 为空的历史行回退
+        # client_id 兜底（新建立的 bcn 行 robot_code 一律必填）。
+        "account_ref": config.get("robot_code") or config.get("client_id") or "",
         "target": {"bot": {"bot_id": channel.bind_bot_id}},
         "group_chat_scope": config.get("group_chat_scope", "per_sender"),
         "outbound_visibility": config.get("outbound_visibility", "full_transcript"),
@@ -155,13 +161,18 @@ class HttpBcsChannelBindingClient:
     async def _find_binding_id(self, channel: ChannelRecord) -> str | None:
         """by-target lookup to recover a binding id after a lost writeback.
 
-        Matches on either account-ref convention: bindings created through
-        this surface carry ``account_ref = client_id``, while bindings created
-        by the legacy front-end (which built the BCS payload itself) carry
-        ``account_ref = robot_code``. Both values are on the stored row, so
-        matching either recovers a legacy binding that a 409 surfaces —
-        without it, re-activating a channel over an old binding deadlocks in
-        unrecoverable conflicts.
+        Matches on either account-ref value (robot_code — this surface's and
+        the legacy front-ends' key — and client_id, kept so rows whose stored
+        robot_code was empty still recover).
+
+        **Scope limit — only bare-bot-target bindings are recoverable.**
+        BCS matches ``target_json`` exactly, and the two legacy shapes this
+        surface cannot address are historical by construction: the ocb bot
+        page wrote ``bot_id = "{botId}:{entity|user}"`` and the Avernet group
+        bound ``target: {group: {...}}``. Those rows never answer a bare
+        ``target_id={bind_bot_id}`` lookup, so a 409 against them stays a
+        conflict (fail-closed) until a data migration re-homes them onto the
+        unified shape; BCS exposes no global list to probe alternately.
         """
         query = (
             "?target_type=bot"

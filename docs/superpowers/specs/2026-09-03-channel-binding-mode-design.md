@@ -90,7 +90,7 @@ config.get("binding_mode") == "bcn_gateway"
 | group_chat_scope / outbound_visibility | 同名透传 |
 | forward_sender_identity | 同名透传（`bool` 强转显式发送；BCS 要求 boolean，PATCH config 全量替换要求每次携带） |
 | — | `target: { bot_id }`（bot 维度） |
-| — | `account_ref`：由 client_id 派生（实现期与 BCS 对齐唯一性规则） |
+| — | `account_ref`：对齐老链路的键 = `robot_code`（BCS 唯一性是全局 `find_active_by_account(channel_type, account_ref)`，与 target 无关；用 client_id 会与老存量错开、不撞 409 而挂成静默双绑定——老绑定继续路由、新渠道假生效）。robot_code 为空的历史行回退 client_id 兜底。2026-10-15 已与 BCS 代码实证（`bcs-channel/service.rs` find_active_by_account、`bcs-channel-store/db.rs` target_json 精确匹配） |
 
 ### 4.3 生命周期 → BCS 操作
 
@@ -121,7 +121,7 @@ bcn_gateway 写路径复用现有全部门槛：`require_granted_addressed_bot`�
 |---|---|---|---|
 | 1 | BCS 真实钉钉 provider | 本仓库仅 test provider；现状未知 | 与 BCS/B 线确认位置、负责人、排期；编排层可先开发，用 test provider + singlebox 验证 |
 | 2 | BCS bindings API 服务间鉴权 | 当前 `require_authenticated_user` 人类会话 | BCS 增加 service token + 操作者身份透传（跨团队） |
-| 3 | account_ref 唯一性规则、`per_sender` 在 provider 侧实际生效性 | 未确认 | 实现期与 BCS 对齐 |
+| 3 | ~~account_ref 唯一性规则~~（已实证并对齐 robot_code；遗留：**异形态存量绑定**——老 ocb `botId:{后缀}` target 与老 Avernet 群绑定——BCS by-target 按字符串精确匹配查不到，无法服务器端接管，需数据订正并用真数据做迁移回归）、`per_sender` 在 provider 侧实际生效性 | 未确认 | 实现期与 BCS 对齐 |
 
 ## 8. 测试与交付
 

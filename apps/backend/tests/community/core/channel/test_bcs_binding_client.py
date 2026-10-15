@@ -63,7 +63,8 @@ async def test_ensure_active_posts_binding_and_returns_id():
         assert request.headers["Authorization"] == "Bearer token-1"
         body = json.loads(request.content)
         assert body["channel_type"] == "dingtalk"
-        assert body["account_ref"] == "client-1"
+        # 与老链路同键（BCS 唯一性 = (channel_type, account_ref) 全局键）
+        assert body["account_ref"] == "robot-1"
         assert body["target"] == {"bot": {"bot_id": "bot-1"}}
         assert body["group_chat_scope"] == "per_sender"
         assert body["outbound_visibility"] == "full_transcript"
@@ -165,6 +166,20 @@ async def test_ensure_active_recovers_legacy_binding_by_robot_code():
 
     # client_id=client-1 但存量绑定用的是 robot_code=robot-1
     assert await _client(handler).ensure_active(_record()) == "bcs-legacy"
+
+
+@pytest.mark.asyncio
+async def test_payload_account_ref_falls_back_to_client_id_without_robot_code():
+    """robot_code 为空的历史 bcn 行回退 client_id 兜底（新行 robot_code 必填）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["account_ref"] == "client-1"
+        return httpx.Response(201, json=_ok({"id": "bcs-1"}))
+
+    record = _record()
+    record.config["robot_code"] = ""
+    await _client(handler).ensure_active(record)
 
 
 @pytest.mark.asyncio

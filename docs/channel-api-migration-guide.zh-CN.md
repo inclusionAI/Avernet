@@ -64,7 +64,7 @@
 | 群聊会话模式 | `config.group_chat_scope` | `per_sender`（默认）/ `conversation_shared`；不传则后端按 `per_sender` 落库 |
 | 主动消息可见范围 | `config.outbound_visibility` | `full_transcript`（默认）/ `lead_only` |
 | BCN Bot ID（`{botId}:{userId}` 拼接） | **不再传递** | BCS 侧 `target` 由**后端**从路径 `bot_id` 派生，前端删掉 `resolveBcsBotId` 逻辑 |
-| `account_ref` | **不再传递** | 后端派生（= `client_id`） |
+| `account_ref` | **不再传递** | 后端派生（= `robot_code`，与老键一致）。BCS 按 `(channel_type, account_ref)` **全局**判重：同一 robot 已被老链路绑定时，新渠道激活会撞 409——这是**有意的显性失败**（避免老绑定继续路由、新渠道假生效的双绑定），存量接管需管理员迁移 |
 | `env`（部署环境） | **不再提交**（也从来不该提交——老 BCS 契约 write 端就是拒绝的） | env 是 BCS 注入的运行态 |
 | 回调地址指引（复制按钮） | **不经过接口** | 纯前端拼串展示，沿用老逻辑即可（见 §4.9） |
 | 绑定启停（PATCH `{active}`） | `PUT .../status` | 前端不再维护 BCN 绑定的 activate/deactivate |
