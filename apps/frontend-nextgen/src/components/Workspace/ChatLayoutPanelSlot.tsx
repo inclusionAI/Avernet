@@ -13,10 +13,11 @@
  * App 侧 onOpenStateChange 串联其后，获得与 SDK 一致的真实开合态
  * （Monitor 激活态与 SidePanelCollapseButton 显隐同源消费）。
  */
+import { useWorkspacePanelDismiss } from '@/hooks/useWorkspacePanelDismiss';
 import type { PanelHandle } from '@tc-chat/core';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import type { ChatLayoutPanelProps } from '@tc-chat/ui/es/ChatLayout/types';
-import { forwardRef, useCallback } from 'react';
+import { forwardRef, useCallback, useId, useRef, useState } from 'react';
 
 /** Root cloneElement 注入的内部 props（公开类型未声明，运行时存在）。 */
 type ChatLayoutPanelInjectedProps = {
@@ -35,22 +36,52 @@ const ChatLayoutPanelWithInjectedProps = ChatLayout.Panel as unknown as React.Co
   ChatLayoutPanelProps & ChatLayoutPanelInjectedProps & React.RefAttributes<PanelHandle>
 >;
 
-export const ChatLayoutPanelSlot = forwardRef<PanelHandle, ChatLayoutPanelSlotProps>(
-  function ChatLayoutPanelSlot(props, ref) {
-    const { onOpenStateChange, ...rest } = props;
-    const injected = rest as ChatLayoutPanelProps & ChatLayoutPanelInjectedProps;
-    const rootIsOpenChange = injected.onIsOpenChange;
-    const handleIsOpenChange = useCallback(
-      (isOpen: boolean) => {
-        // Root 注入的 setter 原样透传（ResizeHandle 开合镜像不受影响）。
-        rootIsOpenChange?.(isOpen);
-        onOpenStateChange?.(isOpen);
-      },
-      [rootIsOpenChange, onOpenStateChange],
-    );
-    return <ChatLayoutPanelWithInjectedProps {...injected} ref={ref} onIsOpenChange={handleIsOpenChange} />;
-  },
-);
+export const ChatLayoutPanelSlot = forwardRef<PanelHandle, ChatLayoutPanelSlotProps>(function ChatLayoutPanelSlot(
+  props,
+  ref,
+) {
+  const { onOpenStateChange, ...rest } = props;
+  const handleRef = useRef<PanelHandle | null>(null);
+  const panelClass = `workspace-sdk-panel-${useId().replace(/:/g, '')}`;
+  const [open, setOpen] = useState(props.defaultOpen ?? false);
+  const setHandle = useCallback(
+    (handle: PanelHandle | null) => {
+      handleRef.current = handle;
+      if (typeof ref === 'function') ref(handle);
+      else if (ref) ref.current = handle;
+    },
+    [ref],
+  );
+  const contains = useCallback(
+    (target: Node) => {
+      const panel = document.querySelector(`.${panelClass}`);
+      // SDK Root 将拖宽条紧邻放在 Panel 前，不能增加外层 div 破坏宽度/插槽识别。
+      return !!(panel?.contains(target) || panel?.previousElementSibling?.contains(target));
+    },
+    [panelClass],
+  );
+  const dismiss = useCallback(() => handleRef.current?.closePanel(), []);
+  useWorkspacePanelDismiss(open, contains, dismiss);
+  const injected = rest as ChatLayoutPanelProps & ChatLayoutPanelInjectedProps;
+  const rootIsOpenChange = injected.onIsOpenChange;
+  const handleIsOpenChange = useCallback(
+    (isOpen: boolean) => {
+      setOpen(isOpen);
+      // Root 注入的 setter 原样透传（ResizeHandle 开合镜像不受影响）。
+      rootIsOpenChange?.(isOpen);
+      onOpenStateChange?.(isOpen);
+    },
+    [rootIsOpenChange, onOpenStateChange],
+  );
+  return (
+    <ChatLayoutPanelWithInjectedProps
+      {...injected}
+      ref={setHandle}
+      className={[injected.className, 'workspace-sdk-panel', panelClass].filter(Boolean).join(' ')}
+      onIsOpenChange={handleIsOpenChange}
+    />
+  );
+});
 // ChatLayoutRoot 以 displayName === 'ChatLayout.Panel' 识别副屏插槽（cloneElement 注入宽态与
 // onIsOpenChange），故此处保留同名 displayName 才能被 Root 识别为插槽并完成注入。
 ChatLayoutPanelSlot.displayName = 'ChatLayout.Panel';

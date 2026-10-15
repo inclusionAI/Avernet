@@ -4,7 +4,19 @@ import type { GroupView, SessionView } from '@/domain/collaboration';
 import type { GroupChatFavoritesModel } from '@/pages/Workspace/hooks/useGroupChatHeaderPanels';
 import type { DomainResult } from '@/services/workspace/identityService';
 import { cn } from '@/utils/cn';
-import { Bot, ChevronRight, Copy, FolderOpen, History, Monitor, Settings2, Share2, SlidersHorizontal, Star, Users } from 'lucide-react';
+import {
+  Bot,
+  ChevronRight,
+  Copy,
+  FolderOpen,
+  History,
+  Monitor,
+  Settings2,
+  Share2,
+  SlidersHorizontal,
+  Star,
+  Users,
+} from 'lucide-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { GroupAvatarStack } from './GroupSidebar/GroupItem';
@@ -61,6 +73,7 @@ function HeaderIcon({
       size="sm"
       disabled={disabled}
       aria-pressed={active}
+      data-workspace-panel-trigger
       onClick={onClick}
       className={cn('rounded-md text-muted-foreground', active && 'bg-selected text-foreground', className)}
     />

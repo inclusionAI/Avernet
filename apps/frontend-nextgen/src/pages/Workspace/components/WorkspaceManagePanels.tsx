@@ -2,7 +2,6 @@ import type { DeliveryPolicy, GroupView, IdentityView, SessionView } from '@/dom
 import type { DingTalkBindingState } from '@/services/workspace/channelBindingService';
 import type { PolicyResult } from '@/services/workspace/groupService';
 import type { DomainResult } from '@/services/workspace/identityService';
-import { useEffect } from 'react';
 import type { GroupPanelKind } from './GroupHeader';
 import type { GroupDingTalkConfig } from './ManagePanel/DingTalkConfigPanel';
 import { GroupManagePanel } from './ManagePanel/GroupManagePanel';
@@ -57,40 +56,16 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
     onClose,
   } = props;
 
-  useEffect(() => {
-    if (activePanel !== 'manage' && activePanel !== 'sessionManage') return;
-
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target as Element | null;
-      if (!target?.closest) return;
-      if (
-        target.closest(
-          '[data-manage-panel="true"], [data-manage-panel-trigger], [role="dialog"], [role="menu"], [role="alertdialog"]',
-        )
-      ) {
-        return;
-      }
-      onClose();
-    };
-
-    document.addEventListener('pointerdown', handlePointerDown);
-    return () => document.removeEventListener('pointerdown', handlePointerDown);
-  }, [activePanel, onClose]);
-
   if (!group) return null;
 
-  // 不渲染全屏点击层，避免遮挡页面交互；点击管理面板外部区域自动收起，
-  // 面板内部、管理入口及浮层交互均保持打开。
-  // 导致群列表与会话框无法上下滚动。面板改为与 members 面板一致的纯 inline 侧栏;
-  // 关闭由 ManagePanelHeader 的 X 按钮 / GroupHeader 齿轮 toggle 承担。
-  // （验收微调：移除 PR 364 引入的「点击面板外部自动收起」全局 pointerdown 监听，
-  //   避免双击消息流选中文本时右侧副屏被意外收起；副屏作为常驻工作区只走显式关闭。）
+  // 不使用遮罩；公共侧栏处理外部点击，保留内部及 Portal 浮层交互。
   return (
     <>
       {activePanel === 'manage' ? (
         <ResizableWorkspaceSidebar
           ariaLabel="群管理面板"
           data-manage-panel="true"
+          onDismiss={onClose}
           side="right"
           minWidth={320}
           maxWidth={600}
@@ -127,6 +102,7 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
         <ResizableWorkspaceSidebar
           ariaLabel="会话管理面板"
           data-manage-panel="true"
+          onDismiss={onClose}
           side="right"
           minWidth={320}
           maxWidth={600}

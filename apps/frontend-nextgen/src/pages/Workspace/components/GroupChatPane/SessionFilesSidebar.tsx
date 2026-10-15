@@ -13,6 +13,7 @@ export function SessionFilesSidebar(props: SessionFilesSidebarProps) {
     <ResizableWorkspaceSidebar
       ariaLabel="资源管理面板"
       side="right"
+      onDismiss={props.onClose}
       minWidth={320}
       maxWidth={600}
       defaultWidth={380}

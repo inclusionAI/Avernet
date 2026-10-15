@@ -23,6 +23,7 @@ export function ChatHeaderRightPanel({ title, onClose, children }: ChatHeaderRig
     <ResizableWorkspaceSidebar
       ariaLabel={`${title}面板`}
       side="right"
+      onDismiss={onClose}
       minWidth={320}
       maxWidth={480}
       defaultWidth={320}

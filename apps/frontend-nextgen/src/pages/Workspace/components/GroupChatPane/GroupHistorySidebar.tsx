@@ -7,10 +7,10 @@
  * 宽度持久化 key 独立于 chat 侧，避免两页共抢同一 localStorage 槽。
  */
 import { IconButton } from '@/components/ui';
-import type { UseSessionHistorySearchModel } from '@/pages/Workspace/Chat/hooks/useChatHeaderPanels';
 import { SessionHistorySearchPanel } from '@/pages/Workspace/Chat/components/SessionHistorySearchPanel';
-import { ResizableWorkspaceSidebar } from '../ResizableWorkspaceSidebar';
+import type { UseSessionHistorySearchModel } from '@/pages/Workspace/Chat/hooks/useChatHeaderPanels';
 import { X } from 'lucide-react';
+import { ResizableWorkspaceSidebar } from '../ResizableWorkspaceSidebar';
 
 export interface GroupHistorySidebarProps {
   search: UseSessionHistorySearchModel;
@@ -24,6 +24,7 @@ export function GroupHistorySidebar({ search, onLocate, onClose }: GroupHistoryS
     <ResizableWorkspaceSidebar
       ariaLabel="历史消息面板"
       side="right"
+      onDismiss={onClose}
       minWidth={320}
       maxWidth={480}
       defaultWidth={320}

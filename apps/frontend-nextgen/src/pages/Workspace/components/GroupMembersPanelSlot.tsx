@@ -1,5 +1,7 @@
 import type { GroupView, SessionView } from '@/domain/collaboration';
+import { useWorkspacePanelDismiss } from '@/hooks/useWorkspacePanelDismiss';
 import type { PolicyResult } from '@/services/workspace/groupService';
+import { useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { MembersPanel } from './MembersPanel';
 
@@ -12,10 +14,13 @@ interface GroupMembersPanelSlotProps {
 }
 
 export function GroupMembersPanelSlot({ open, group, session, canManage, onClose }: GroupMembersPanelSlotProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const contains = useCallback((target: Node) => panelRef.current?.contains(target) ?? false, []);
+  useWorkspacePanelDismiss(open, contains, onClose);
   if (!open) return null;
 
   return (
-    <div className="flex w-[min(320px,30vw)] max-w-[30vw] shrink-0 border-l border-border">
+    <div ref={panelRef} className="flex w-[min(320px,30vw)] max-w-[30vw] shrink-0 border-l border-border">
       <MembersPanel
         group={group}
         session={session}

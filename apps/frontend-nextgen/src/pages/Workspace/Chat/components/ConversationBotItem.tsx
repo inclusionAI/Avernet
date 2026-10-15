@@ -12,16 +12,16 @@ import type {
   ConversationSessionScope,
 } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
-import type { ConversationSessionListActions } from '../hooks/useConversationSessionActions';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { cn } from '@/utils/cn';
 import { ChevronDown, ChevronRight, Plus, Search } from 'lucide-react';
 import React from 'react';
 import { AvatarTile } from '../../components/AvatarTile';
+import type { ConversationSessionListActions } from '../hooks/useConversationSessionActions';
 import { OthersArea, type ConversationBotItemOthers } from './ConversationBotOthersArea';
 import { ConversationOriginFilter } from './ConversationOriginFilter';
-import { ConversationSessionList } from './ConversationSessionList';
 import { ConversationSessionIdSearchInput } from './ConversationSessionIdSearchInput';
+import { ConversationSessionList } from './ConversationSessionList';
 
 export type { ConversationBotItemOthers } from './ConversationBotOthersArea';
 
@@ -148,13 +148,10 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
               // 文字让位与操作区实际覆盖等宽:悬停/键盘聚焦弹出操作区,或任一筛选(归属/范围/检索)钉住可见。
               // 新建/检索/筛选全在时让位 96px(pr-24)且悬停/聚焦不可回缩(2026-10-14 对齐设计稿顺序:新建、检索、筛选);
               // 非钉住时仅悬停/键盘聚焦临时让位。
-              hasSessionControls &&
-                (actionsPinned
-                  ? 'pr-24'
-                  : 'group-hover:pr-24 group-focus-within:pr-24'),
+              hasSessionControls && (actionsPinned ? 'pr-24' : 'group-hover:pr-24 group-focus-within:pr-24'),
             )}
           >
-            <span className="w-full min-w-0 truncate text-sm font-normal leading-5 text-content-strong">
+            <span className="w-full min-w-0 truncate text-sm font-semibold leading-5 text-content-strong">
               {bot.displayName}
             </span>
             {runtimeLabel && (
@@ -255,9 +252,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
       {expanded && hasSessionControls && (
         // 展开区不再整体缩进:session 行(dmore 平齐化 1:1)自带全宽行槽,交互热区在行内部分级。
         <div aria-label={`会话列表：${bot.displayName}`}>
-          {searchInputVisible && (
-            <ConversationSessionIdSearchInput value={sessionKey} onSearch={onSearchSession} />
-          )}
+          {searchInputVisible && <ConversationSessionIdSearchInput value={sessionKey} onSearch={onSearchSession} />}
           {isOthers ? (
             <OthersArea others={others} />
           ) : (

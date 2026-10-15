@@ -46,6 +46,7 @@ function HeaderIcon({
       disabled={disabled}
       onClick={onClick}
       aria-pressed={active}
+      data-workspace-panel-trigger
       className={cn('rounded-md text-muted-foreground', active && 'bg-selected text-foreground')}
     />
   );

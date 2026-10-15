@@ -127,7 +127,7 @@ export const GroupItem = React.memo(function GroupItem({
             <TooltipProvider delayDuration={300}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="w-full min-w-0 truncate text-sm font-normal leading-5 text-content-strong">
+                  <span className="w-full min-w-0 truncate text-sm font-semibold leading-5 text-content-strong">
                     {group.name}
                   </span>
                 </TooltipTrigger>

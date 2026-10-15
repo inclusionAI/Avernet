@@ -1,4 +1,5 @@
 import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
+import { useWorkspacePanelDismiss } from '@/hooks/useWorkspacePanelDismiss';
 import { cn } from '@/utils/cn';
 import { ChevronLeft, ChevronRight, GripVertical } from 'lucide-react';
 import type { KeyboardEvent, ReactNode, PointerEvent as ReactPointerEvent } from 'react';
@@ -26,6 +27,7 @@ interface ResizableWorkspaceSidebarProps extends Omit<React.HTMLAttributes<HTMLE
   defaultWidth?: number;
   /** 宽度持久化 key（默认为左栏 key）；不同面板传独立 key 避免互相覆盖。 */
   storageKey?: string;
+  onDismiss?: () => void; // 右侧临时面板点击外部关闭；左侧常驻列表不启用。
 }
 
 function clampWidth(width: number, minWidth: number, maxWidth: number): number {
@@ -85,6 +87,7 @@ export function ResizableWorkspaceSidebar({
   maxWidth: maxWidthProp,
   defaultWidth: defaultWidthProp,
   storageKey: storageKeyProp,
+  onDismiss,
   ...rest
 }: ResizableWorkspaceSidebarProps) {
   const isRight = side === 'right';
@@ -93,6 +96,8 @@ export function ResizableWorkspaceSidebar({
   const defaultW = defaultWidthProp ?? WORKSPACE_SIDEBAR_DEFAULT_WIDTH;
   const storageK = storageKeyProp ?? WORKSPACE_SIDEBAR_STORAGE_KEY;
   const sidebarRef = useRef<HTMLElement | null>(null);
+  const containsTarget = useCallback((target: Node) => sidebarRef.current?.contains(target) ?? false, []);
+  useWorkspacePanelDismiss(isRight, containsTarget, onDismiss);
   const contentId = `workspace-sidebar-content-${useId().replace(/:/g, '')}`;
   const [preferredWidth, setPreferredWidth] = useState(() => readStoredWidth(storageK, defaultW, minW, maxW));
   const [collapsed, setCollapsed] = useState(() => (isRight ? false : readStoredCollapsed()));
