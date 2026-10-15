@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { monitoringErrorText } from '../../../../api/monitoring';
@@ -126,27 +126,11 @@ function CardHeader({ title, description, right }: { title: string; description?
   </div>;
 }
 
-function PlanText({ text, label, heading = false }: { text: string; label: string; heading?: boolean }) {
-  const [expanded, setExpanded] = useState(false);
-  const [long, setLong] = useState(text.length > 120 || text.split('\n').length > 3);
-  const container = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const content = container.current?.firstElementChild as HTMLElement | undefined;
-    if (!content || typeof ResizeObserver === 'undefined') return;
-    const measure = () => {
-      const lineHeight = Number.parseFloat(window.getComputedStyle(content).lineHeight);
-      if (Number.isFinite(lineHeight)) setLong(content.scrollHeight > lineHeight * (heading ? 2 : 3) + 1);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(content);
-    return () => observer.disconnect();
-  }, [text, heading]);
-  const Text = heading ? 'h3' : 'p';
-  return <div className="sr-plan-text" ref={container}>
-    <Text className={`sr-plan-text-content ${long && !expanded ? 'collapsed' : ''}`}>{text}</Text>
-    {long && <button type="button" className="sr-text-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? '收起' : '展开'}{label}</button>}
-  </div>;
+function PlanMarkdown({ text }: { text: string }) {
+  // Plain legacy prose gets paragraph breaks at existing sentence boundaries only.
+  // Authored Markdown and multiline content retain their original structure.
+  const markdown = /[\n`*#\[\]<>~]/.test(text) ? text : text.replace(/([。；])(?=\S)/g, '$1\n\n');
+  return <div className="sr-plan-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ node, ...props }) => { void node; return <a {...props} target="_blank" rel="noreferrer" />; } }}>{markdown}</ReactMarkdown></div>;
 }
 
 function RecoveryWorkflow({ task, currentPhase, selected, onSelect, grouped, rawEvidence, loadEvidence, children }: {
@@ -207,10 +191,12 @@ const eventTitles: Record<string, string> = {
 };
 
 function actionTitle(event: RecoveryEvent, request: Record<string, unknown>, source?: string): string {
+  if (event.kind === 'observation' && typeof event.payload.sourceToolCallId === 'string') return '记录工具调用结论';
   if (eventTitles[event.kind]) return eventTitles[event.kind];
   // Like Repair, prefer the action's purpose. Detailed reasoning is body text, not a heading.
-  const purpose = request.purpose ?? event.summary;
-  if (typeof purpose === 'string' && purpose.length <= 32 && !purpose.includes('\n')) return purpose;
+  if (typeof request.purpose === 'string' && request.purpose.trim()) return request.purpose;
+  // Older events may contain a whole analysis instead of an operation purpose.
+  if (event.summary.length <= 32 && !event.summary.includes('\n')) return event.summary;
   return operationTitles[String(request.operation)] ?? operationTitles[source ?? ''] ?? '查看本次操作记录';
 }
 
@@ -220,6 +206,8 @@ function eventEvidenceIds(event: RecoveryEvent): unknown[] {
     ...(Array.isArray(judgment.evidence_ids) ? judgment.evidence_ids : []),
     ...(Array.isArray(event.payload.evidence_ids) ? event.payload.evidence_ids : []),
     ...(Array.isArray(event.payload.evidence) ? event.payload.evidence.map(item => record(item).evidence_id) : []),
+    ...(Array.isArray(event.payload.evidenceToolCallIds) ? event.payload.evidenceToolCallIds : []),
+    event.payload.sourceToolCallId,
     event.payload.evidence_id,
   ];
 }
@@ -234,20 +222,25 @@ function ProcessAction({ task, event, index, rawEvidence, loadEvidence, onViewAc
   const receipt = record(callId ? rawEvidence[callId] : undefined);
   const request = record(receipt.request ?? event.payload.request);
   const result = { ...savedResult, ...record(event.payload.result), ...record(receipt.result) };
-  const conclusion = record(result.conclusion ?? event.payload.conclusion);
   const judgment = record(event.payload.judgment);
   const status = typeof receipt.status === 'string' ? receipt.status : typeof event.payload.status === 'string' ? event.payload.status : '';
   const action = task.plan?.actions.find(item => item.actionId === request.actionId);
   const title = actionTitle(event, request, evidence?.source);
-  const detailedSummary = result.summary ?? result.resultSummary ?? event.payload.result_summary ?? judgment.summary
+  const linkedConclusion = callId ? task.timeline.find(item => item.kind === 'observation' && item.payload.sourceToolCallId === callId && typeof item.payload.conclusionZh === 'string') : undefined;
+  const conclusion = linkedConclusion?.payload ?? (typeof event.payload.sourceToolCallId === 'string' ? event.payload : {});
+  const detailText = conclusion.conclusionZh ?? judgment.summary
     ?? (event.summary !== title && event.summary !== request.purpose ? event.summary : undefined);
-  const resultSummary = typeof detailedSummary === 'string' ? detailedSummary : ({
+  const recordedResult = result.summary;
+  const resultSummary = typeof recordedResult === 'string' ? recordedResult : ({
     pending: '操作尚未开始。', running: '正在执行，等待返回结果。', executing: '正在执行，等待返回结果。',
-    succeeded: '操作已完成。', failed: '操作失败，展开查看原因。', unknown: '操作结果尚未确定。', canceled: '操作已取消。',
+    succeeded: '调用已完成。', failed: '调用失败，展开查看原因。', unknown: '调用结果尚未确定。', canceled: '调用已取消。',
   }[status]);
+  const actualCommand = typeof request.command === 'string' ? request.command : undefined;
+  const actualRequest = request.engineOperation ?? (typeof record(request.request).method === 'string' && typeof record(request.request).path === 'string' ? request.request : undefined);
+  const target = task.request.target;
   const error = typeof result.error === 'string' ? result.error : record(result.error).message;
-  const evidenceIds = eventEvidenceIds(event);
-  const relatedEvidence = task.evidence.filter(item => callId && item.tool_call_id === callId || evidenceIds.includes(item.evidence_id)
+  const evidenceIds = [...eventEvidenceIds(event), ...(linkedConclusion ? eventEvidenceIds(linkedConclusion) : [])];
+  const relatedEvidence = task.evidence.filter(item => callId && item.tool_call_id === callId || evidenceIds.includes(item.evidence_id) || evidenceIds.includes(item.tool_call_id)
     // Retain old, unlinked evidence with the task's initial record rather than dropping it.
     || event === task.timeline[0] && !task.timeline.some(entry => entry.payload.raw_tool_call_id === item.tool_call_id || eventEvidenceIds(entry).includes(item.evidence_id)));
   const effect = typeof judgment.effect === 'string' && judgment.effect in effectLabels ? judgment.effect as keyof typeof effectLabels : undefined;
@@ -255,23 +248,28 @@ function ProcessAction({ task, event, index, rawEvidence, loadEvidence, onViewAc
     <div className="sr-process-index">{index + 1}</div>
     <article>
       <div className="sr-process-header"><h3>{title}</h3><div className="sr-process-status">{status && <StatusPill status={status}>{actionStatusLabels[status] || status}</StatusPill>}{effect && <StatusPill status={effect}>{effectLabels[effect]}</StatusPill>}</div></div>
-      {resultSummary && <p className="sr-process-result sr-result-preview"><span>结果：</span>{resultSummary}</p>}
-      {typeof conclusion.nextAction === 'string' && <p className="sr-process-next"><span>后续动作：</span>{conclusion.nextAction}</p>}
+      {resultSummary && <div className="sr-process-result sr-result-preview"><span>结果：</span><PlanMarkdown text={resultSummary} />{typeof result.httpStatus === 'number' && <span className="sr-receipt-code">HTTP {result.httpStatus}</span>}{typeof result.exitCode === 'number' && <span className="sr-receipt-code">退出码 {result.exitCode}</span>}</div>}
+      {typeof conclusion.nextAction === 'string' && <div className="sr-process-next"><span>后续动作：</span><PlanMarkdown text={conclusion.nextAction} /></div>}
       <details className="sr-disclosure sr-operation-details" onToggle={(toggleEvent) => { if (toggleEvent.currentTarget.open && callId && !rawEvidence[callId]) loadEvidence(callId); }}>
         <summary><span className="sr-when-closed">展开详情</span><span className="sr-when-open">收起详情</span></summary>
         <div className="sr-operation-body">
-          {typeof request.purpose === 'string' && request.purpose !== title && <div className="sr-operation-field"><h4>操作目的</h4><p className="sr-long-text">{request.purpose}</p></div>}
+          {(callId || event.kind === 'operation') && <dl className="sr-operation-target">
+            <DetailRow label="任务目标">{`Bot ${target.bot_id}${target.engine ? ` · ${target.engine}` : ''}${target.env ? ` · ${target.env}` : ''}`}</DetailRow>
+            {typeof result.session_id === 'string' && <DetailRow label="读取会话" mono>{result.session_id}</DetailRow>}
+          </dl>}
           {typeof error === 'string' && <p className="sr-process-error"><strong>失败原因：</strong>{error}</p>}
-          {typeof detailedSummary === 'string' && <div className="sr-operation-field"><h4>{event.kind === 'assessment' || event.kind === 'observation' ? '判断说明' : '操作结果'}</h4><p className="sr-long-text">{detailedSummary}</p></div>}
-          {typeof conclusion.text === 'string' && conclusion.text !== detailedSummary && <div className="sr-operation-field"><h4>结论</h4><p className="sr-long-text">{conclusion.text}</p></div>}
-          {typeof event.payload.feedback === 'string' && event.payload.feedback.trim() && <div className="sr-operation-field"><h4>Owner 补充说明</h4><p className="sr-long-text">{event.payload.feedback}</p></div>}
-          {typeof (result.message ?? request.message) === 'string' && <div className="sr-operation-field"><h4>发送的恢复消息</h4><p className="sr-long-text">{String(result.message ?? request.message)}</p></div>}
+          {typeof detailText === 'string' && <div className="sr-operation-field"><h4>{event.kind === 'assessment' || event.kind === 'observation' && !event.payload.sourceToolCallId ? '判断说明' : conclusion.conclusionZh ? '结论' : '记录说明'}</h4><div className="sr-long-text"><PlanMarkdown text={detailText} /></div></div>}
+          {typeof event.payload.feedback === 'string' && event.payload.feedback.trim() && <div className="sr-operation-field"><h4>Owner 补充说明</h4><PlanMarkdown text={event.payload.feedback} /></div>}
+          {typeof (result.message ?? request.message) === 'string' && <div className="sr-operation-field"><h4>发送的恢复消息</h4><PlanMarkdown text={String(result.message ?? request.message)} /></div>}
+          {actualCommand && <details className="sr-disclosure"><summary>查看本次调用的 Shell 命令</summary><RawDetails value={actualCommand} /></details>}
+          {actualRequest != null && <details className="sr-disclosure"><summary>查看本次调用的接口请求</summary><RawDetails value={actualRequest} /></details>}
+          {(typeof result.stdout === 'string' || typeof result.stderr === 'string') && <details className="sr-disclosure"><summary>查看命令输出</summary>{typeof result.stdout === 'string' && <><p className="sr-note">标准输出</p><RawDetails value={result.stdout} /></>}{typeof result.stderr === 'string' && <><p className="sr-note">错误输出</p><RawDetails value={result.stderr} /></>}</details>}
           {action && <button type="button" className="sr-action-reference" onClick={() => onViewAction(action.actionId)}>方案动作：{action.summary} →</button>}
           {relatedEvidence.length > 0 && <section className="sr-operation-evidence"><h4>相关记录与依据</h4>{relatedEvidence.map((item, evidenceIndex) => <div key={item.evidence_id} className="sr-evidence-card">
             <p className="sr-evidence-label">{evidenceIndex + 1}. {operationTitles[item.source] ?? item.source}</p>
             {item.excerpt.trim().startsWith('{') || item.excerpt.trim().startsWith('[')
               ? <details className="sr-disclosure"><summary>查看保存的原始记录</summary><RawDetails value={item.excerpt} /></details>
-              : <p className="sr-evidence-excerpt">{item.excerpt}</p>}
+              : <div className="sr-evidence-excerpt"><PlanMarkdown text={item.excerpt} /></div>}
             {item.tool_call_id !== callId && <details className="sr-disclosure" onToggle={(toggleEvent) => { if (toggleEvent.currentTarget.open && !rawEvidence[item.tool_call_id]) loadEvidence(item.tool_call_id); }}><summary>查看完整操作回执</summary><RawDetails value={rawEvidence[item.tool_call_id] ?? '正在读取…'} /></details>}
             <details className="sr-disclosure"><summary>记录位置与标识</summary><dl><DetailRow label="位置" mono>{item.location}</DetailRow><DetailRow label="证据编号" mono>{item.evidence_id}</DetailRow></dl></details>
           </div>)}</section>}
@@ -296,33 +294,35 @@ function RecoveryPlan({ task, busy, ownerFeedback, cooperationDone, onFeedback, 
   if (!plan) return null;
   return <section id="recovery-plan" className="sr-plan">
     <CardHeader title="修复方案" right={<StatusPill status={plan.approvedAt ? 'completed' : 'waiting_owner'}>{plan.approvedAt ? '方案已确认' : task.status === 'waiting_owner' ? '等待确认' : '方案已提交'}</StatusPill>} />
+    {plan.owner_cooperation.length > 0 && <a className="sr-owner-jump" href="#recovery-owner-cooperation"><MonitoringIcon name="user" />本方案有 {plan.owner_cooperation.length} 项需要你配合<span>查看事项与确认方案 ↓</span></a>}
     <div className="sr-plan-summary">
-      <h3>方案结论</h3>
-      <PlanText text={plan.summary} label="方案结论" />
+      <h3>方案说明</h3>
+      <PlanMarkdown text={plan.summary} />
     </div>
     <div className="sr-plan-context-grid">
     <section className="sr-plan-block" aria-label="诊断依据">
-      <h3>诊断依据</h3>
-      <div className="sr-plan-basis"><PlanText text={plan.basis} label="诊断依据" /></div>
+      <h3>问题与证据依据</h3>
+      <div className="sr-plan-basis"><PlanMarkdown text={plan.basis} /></div>
     </section>
     <section className="sr-plan-block" aria-label="影响范围">
-      <h3>影响范围</h3>
-      <PlanText text={plan.scope} label="影响范围" />
+      <h3>修改范围</h3>
+      <PlanMarkdown text={plan.scope} />
     </section>
     </div>
     <section className="sr-plan-block" aria-label="方案动作">
-      <h3>拟执行操作（{plan.actions.length}）</h3>
+      <h3>主要调整动作（{plan.actions.length}）</h3>
       <div className="sr-action-list">
       {plan.actions.map((action, index) => <article key={action.actionId} id={`recovery-action-${encodeURIComponent(action.actionId)}`} className="sr-action">
         <div className="sr-action-title">
           <span>{index + 1}</span>
-          <PlanText text={action.summary} label="操作说明" heading />
+          <h4>调整动作 {index + 1}</h4>
         </div>
+        <div className="sr-action-description"><PlanMarkdown text={action.summary} /></div>
         <div className="sr-action-grid">
-          <div><h4>风险</h4><PlanText text={action.risk} label="风险说明" /></div>
-          <div><h4>验证</h4><PlanText text={action.verification} label="验证方法" /></div>
+          <div><h4>风险</h4><PlanMarkdown text={action.risk} /></div>
+          <div><h4>验证</h4><PlanMarkdown text={action.verification} /></div>
         </div>
-        {action.rollback && <div className="sr-action-rollback"><strong>回退：</strong><PlanText text={action.rollback} label="回退说明" /></div>}
+        {action.rollback && <div className="sr-action-rollback"><strong>回退：</strong><PlanMarkdown text={action.rollback} /></div>}
         <details className="sr-disclosure">
           <summary>查看操作细节</summary>
           <p className="sr-note mono">操作标识：{action.actionId}</p>
@@ -334,16 +334,16 @@ function RecoveryPlan({ task, busy, ownerFeedback, cooperationDone, onFeedback, 
       </div>
       {plan.actions.length === 0 && <div className="sr-empty">方案未列出具体操作。</div>}
     </section>
-    <section className="sr-plan-block" aria-label="验收方法">
+    <section className="sr-plan-block sr-plan-verification" aria-label="验收方法">
       <h3>验收方法</h3>
-      <PlanText text={plan.verification} label="验收方法" />
+      <PlanMarkdown text={plan.verification} />
     </section>
-    {(plan.owner_cooperation.length > 0 || task.status === 'waiting_owner') && <section className={`sr-owner-action ${task.status === 'waiting_owner' ? 'pending' : ''}`}>
+    {(plan.owner_cooperation.length > 0 || task.status === 'waiting_owner') && <section id="recovery-owner-cooperation" className={`sr-owner-action ${task.status === 'waiting_owner' ? 'pending' : ''}`}>
     {plan.owner_cooperation.length > 0 && <div className="sr-owner-box">
       <h3><MonitoringIcon name="user" />需要 Owner 配合</h3>
       {plan.owner_cooperation.map((item, index) => <div key={index} className="sr-owner-item">
-        <div className="sr-owner-request"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ node, ...props }) => { void node; return <a {...props} target="_blank" rel="noreferrer" />; } }}>{item.request}</ReactMarkdown></div>
-        <details className="sr-disclosure"><summary>为什么需要你配合</summary><p className="sr-long-text">{item.basis}</p></details>
+        <div className="sr-owner-request"><PlanMarkdown text={item.request} /></div>
+        <details className="sr-disclosure"><summary>为什么需要你配合</summary><div className="sr-long-text"><PlanMarkdown text={item.basis} /></div></details>
       </div>)}
     </div>}
     {task.status === 'waiting_owner' && <div className="sr-decision-panel">
@@ -511,11 +511,11 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
 
     {!task ? <div role="status" className="sr-empty large">{error ? '任务未能加载，请重试。' : '正在读取任务…'}</div> : <>
       <section className="sr-summary-grid">
-        <article className="sr-summary-card"><span>当前阶段</span><strong>{currentPhase?.title || '—'}</strong><p>{lastEvent?.summary || '等待任务执行记录。'}</p></article>
-        <article className="sr-summary-card"><span>恢复效果</span><strong>{effectLabels[effect]}</strong><p>{task.judgment?.summary || '等待 Agent 提交效果判断和证据。'}</p></article>
+        <article className="sr-summary-card"><span>当前阶段</span><strong>{currentPhase?.title || '—'}</strong><PlanMarkdown text={lastEvent?.summary || '等待任务执行记录。'} /></article>
+        <article className="sr-summary-card"><span>恢复效果</span><strong>{effectLabels[effect]}</strong><PlanMarkdown text={task.judgment?.summary || '等待 Agent 提交效果判断和证据。'} /></article>
       </section>
 
-      {task.status === 'failed' && <section role="alert" className="sr-alert danger"><MonitoringIcon name="alert" /><div><strong>自愈执行失败</strong><p>{task.judgment?.summary || lastEvent?.summary || '本次自愈执行未完成，详见阶段操作与证据。'}</p></div></section>}
+      {task.status === 'failed' && <section role="alert" className="sr-alert danger"><MonitoringIcon name="alert" /><div><strong>自愈执行失败</strong><PlanMarkdown text={task.judgment?.summary || lastEvent?.summary || '本次自愈执行未完成，详见阶段操作与证据。'} /></div></section>}
       {task.status === 'waiting_owner' && <section role="status" className="sr-alert warning"><MonitoringIcon name="user" /><div><strong>需要确认修复方案</strong><p>请查看完整方案及配合事项，确认后 Agent 将继续处理。</p></div><button type="button" className="sr-button primary" onClick={viewPlan}>查看方案</button></section>}
 
       <div className="sr-layout">

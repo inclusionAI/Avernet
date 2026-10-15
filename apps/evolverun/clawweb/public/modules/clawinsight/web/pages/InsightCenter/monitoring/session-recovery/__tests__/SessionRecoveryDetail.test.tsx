@@ -23,9 +23,9 @@ it('keeps the plan, Owner cooperation and approval together in stage three', asy
   expect(screen.getByRole('tab', { name: /形成修复方案/ })).toHaveAttribute('aria-current', 'step');
   expect(screen.getByText('完整修复方案')).toBeVisible();
   expect(screen.getByText('确认权限已开放')).toBeVisible();
-  expect(screen.getByRole('heading', { name: '方案结论' })).toBeVisible();
-  expect(screen.getByRole('heading', { name: '诊断依据' })).toBeVisible();
-  expect(screen.getByRole('heading', { name: '影响范围' })).toBeVisible();
+  expect(screen.getByRole('heading', { name: '方案说明' })).toBeVisible();
+  expect(screen.getByRole('heading', { name: '问题与证据依据' })).toBeVisible();
+  expect(screen.getByRole('heading', { name: '修改范围' })).toBeVisible();
   expect(screen.getByRole('heading', { name: '验收方法' })).toBeVisible();
   expect(screen.getByRole('button', { name: '确认完整方案' })).toBeDisabled();
   await user.type(screen.getByLabelText('补充信息或处理说明'), '权限已开放');
@@ -114,11 +114,11 @@ it('switches stages and shows every returned action with its status while retain
   await user.click(within(tabs).getByRole('tab', { name: /判断干预方式/ }));
   expect(screen.queryByText('完整修复方案')).toBeNull();
   expect(panel().getByText('读取原会话')).toBeVisible();
-  expect(panel().getByText('定位到失败消息', { selector: '.sr-result-preview' })).toBeVisible();
+  expect(panel().getByText('定位到失败消息')).toBeVisible();
   expect(sessionRecoveryApi.toolCall).not.toHaveBeenCalled();
   await user.click(panel().getAllByText('展开详情')[0]);
   await waitFor(() => expect(sessionRecoveryApi.toolCall).toHaveBeenCalledWith('task', 'read'));
-  await user.click(within(panel().getByRole('heading', { name: '读取原会话', exact: true }).closest('article')!).getByText('技术信息')); expect(await panel().findByText(/原会话详细回执/)).toBeVisible();
+  await user.click(within(panel().getByRole('heading', { name: '读取原会话', exact: true }).closest('article')!).getByText('技术信息')); expect(within(within(panel().getByRole('heading', { name: '读取原会话', exact: true }).closest('article')!).getByText('技术信息').closest('details')!).getByText(/原会话详细回执/)).toBeVisible();
   await user.click(screen.getByRole('button', { name: '刷新任务' }));
   await waitFor(() => expect(sessionRecoveryApi.detail).toHaveBeenCalledTimes(2));
   expect(within(tabs).getByRole('tab', { name: /判断干预方式/ })).toHaveAttribute('aria-selected', 'true');
@@ -150,7 +150,8 @@ it('keeps long reasoning out of action headings and shows the evidence beside th
   expect(screen.queryByRole('heading', { name: '故障与恢复证据' })).toBeNull();
   const judgment = panel.getByRole('heading', { name: '判断干预方式', exact: true }).closest('article')!;
   await user.click(within(judgment).getByText('展开详情'));
-  expect(within(judgment).getByText(reasoning, { selector: '.sr-long-text' })).toBeVisible();
+  expect(judgment.querySelector('.sr-long-text')).toBeVisible();
+  expect(judgment.querySelector('.sr-long-text')?.textContent?.replace(/\s/g, '')).toBe(reasoning.replace(/\s/g, ''));
   expect(within(judgment).getByText('原失败消息')).toBeVisible();
   expect(within(judgment).getByText('line:1')).not.toBeVisible();
 });
@@ -171,40 +172,62 @@ it('rejects non-task responses without crashing and retains the last successful 
 it('renders an actionable Owner request with a document link and collapses the technical basis', async () => {
   const user = userEvent.setup();
   const request = '**请为 Bot 申请目标文档的只读权限**\n\n- 目标文档：[打开目标文档](https://docs.example.com/team/book/doc)\n- 联系人：文档所有者 `document-owner`\n- 授权账号：`bot-reader`（Bot 使用的账号）\n\n完成后，勾选配合事项并确认方案。';
-  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, plan: { ...task.plan, owner_cooperation: [{ request, basis: '权限检查确认当前账号没有读取权限。' }] } } as never);
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, plan: { ...task.plan, owner_cooperation: [{ request, basis: '**权限检查**\n\n- 当前账号没有读取权限。' }] } } as never);
   render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
   expect(await screen.findByText('请为 Bot 申请目标文档的只读权限')).toBeVisible();
   const link = screen.getByRole('link', { name: '打开目标文档' });
   expect(link).toHaveAttribute('href', 'https://docs.example.com/team/book/doc');
   expect(link).toHaveAttribute('target', '_blank');
   expect(screen.getByText('bot-reader')).toBeVisible();
-  expect(screen.getByText('权限检查确认当前账号没有读取权限。')).not.toBeVisible();
+  expect(screen.getByText('当前账号没有读取权限。')).not.toBeVisible();
   await user.click(screen.getByText('为什么需要你配合'));
-  expect(screen.getByText('权限检查确认当前账号没有读取权限。')).toBeVisible();
+  expect(screen.getByText('当前账号没有读取权限。').closest('li')).toBeVisible();
+  expect(screen.getByText('权限检查').tagName).toBe('STRONG');
   expect(screen.getByRole('button', { name: '确认完整方案' })).toBeDisabled();
   await user.click(screen.getByLabelText('我已处理方案中的配合事项'));
   expect(screen.getByRole('button', { name: '确认完整方案' })).toBeEnabled();
 });
 
-it('lets Owners expand verbose plan text without changing the saved plan or its approval', async () => {
+it('separates plan conclusions, action titles, execution detail and evidence using the existing strings', async () => {
   const user = userEvent.setup();
-  const summary = '目标文档无法读取，需要申请访问权限后重试原任务。'.repeat(7);
-  const operation = '引导 Bot 核对可用申请工具，必要时由资源所有者授权，并继续原任务。'.repeat(6);
-  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, plan: { ...task.plan, summary, basis: '调查记录及权限依据。'.repeat(20), actions: [{ ...task.plan.actions[0], summary: operation }] } } as never);
+  const summary = '### 问题\n\n目标文档缺少读取权限。\n\n### 处理\n\n申请访问权限后重试原任务。';
+  const operation = '**引导 Bot 申请文档读取权限**\n\n**执行安排**\n\n1. 检查是否有可用申请能力。\n2. 没有申请能力时由 Owner 联系资源所有者。';
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, plan: { ...task.plan, summary, basis: '**调查结果**\n\n- 已确认当前账号不能读取目标文档。', verification: '1. 原会话实际取得文档正文。\n2. 回答依据该文档完成原始要求。', actions: [{ ...task.plan.actions[0], summary: operation }] } } as never);
   render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
-  const expandSummary = await screen.findByRole('button', { name: '展开方案结论' });
-  expect(expandSummary).toHaveAttribute('aria-expanded', 'false');
-  expect(screen.getByRole('button', { name: '展开操作说明' })).toHaveAttribute('aria-expanded', 'false');
-  expect(screen.getByText(summary)).toBeInTheDocument();
-  expect(screen.getByText(operation)).toBeInTheDocument();
-  await user.click(expandSummary);
-  expect(screen.getByRole('button', { name: '收起方案结论' })).toHaveAttribute('aria-expanded', 'true');
-  await user.click(screen.getByRole('button', { name: '展开操作说明' }));
-  expect(screen.getByRole('button', { name: '收起操作说明' })).toHaveAttribute('aria-expanded', 'true');
-  expect(screen.getByText(summary)).toBeVisible();
-  expect(screen.getByText(operation)).toBeVisible();
+  expect(await screen.findByRole('heading', { name: '问题', exact: true })).toBeVisible();
+  expect(screen.getByRole('heading', { name: '处理', exact: true })).toBeVisible();
+  expect(screen.getByText('引导 Bot 申请文档读取权限')).toBeVisible();
+  expect(screen.getByText('检查是否有可用申请能力。')).toBeVisible();
+  expect(screen.getByText('已确认当前账号不能读取目标文档。')).toBeVisible();
+  expect(screen.getByText('原会话实际取得文档正文。')).toBeVisible();
   expect(screen.getByRole('button', { name: '确认完整方案' })).toBeDisabled();
   await user.click(screen.getByLabelText('我已处理方案中的配合事项'));
   await user.click(screen.getByRole('button', { name: '确认完整方案' }));
   await waitFor(() => expect(sessionRecoveryApi.decide).toHaveBeenCalledWith('task', 'plan-digest', true, true, ''));
+});
+
+
+it('retains long purposes and separates linked conclusions from results and actual requests', async () => {
+  const user = userEvent.setup();
+  const purpose = '读取目标 Bot 当前的 MCP 配置和服务状态，核对原会话中语雀文档读取失败所使用的实际配置';
+  const conclusion = '**配置核查**\n\n- 服务已启用。\n- 文档访问权限仍需单独核对。';
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'running', phase: 'assess', plan: null, timeline: [
+    { event_id: 'read', at_ms: 1, kind: 'operation', actor: 'agent', summary: purpose, payload: { phase: 'assess', raw_tool_call_id: 'call', status: 'succeeded', request: { purpose, operation: 'engine_read', request: { method: 'GET', path: '/api/mcp' } }, result: { summary: '配置读取成功', httpStatus: 200 } } },
+    { event_id: 'conclusion', at_ms: 2, kind: 'observation', actor: 'agent', summary: conclusion, payload: { phase: 'assess', sourceToolCallId: 'call', evidenceToolCallIds: ['call'], conclusionZh: conclusion, nextAction: '继续核对文档权限' } },
+  ] } as never);
+  vi.mocked(sessionRecoveryApi.toolCall).mockResolvedValue({ status: 'succeeded', request: { purpose, operation: 'engine_read', request: { method: 'GET', path: '/api/mcp' } }, result: { httpStatus: 200 } });
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  const card = (await screen.findByRole('heading', { name: purpose })).closest('article')!;
+  expect(card.querySelector('.sr-result-preview')).toHaveTextContent('配置读取成功');
+  expect(card.querySelector('.sr-result-preview')).not.toHaveTextContent('文档访问权限');
+  expect(within(card).getByText('继续核对文档权限')).toBeVisible();
+  await user.click(within(card).getByText('展开详情'));
+  expect(within(card).getByRole('heading', { name: '结论' })).toBeVisible();
+  expect(within(card).getByText('Bot default')).toBeVisible();
+  expect(within(card).getByText('配置核查').tagName).toBe('STRONG');
+  expect(within(card).getByText('服务已启用。').closest('li')).toBeVisible();
+  expect(within(card).getByText('文档访问权限仍需单独核对。').closest('li')).toBeVisible();
+  await user.click(within(card).getByText('查看本次调用的接口请求'));
+  expect(within(within(card).getByText('查看本次调用的接口请求').closest('details')!).getByText(/"path": "\/api\/mcp"/)).toBeVisible();
+  expect(within(card).queryByText('查看本次调用的 Shell 命令')).toBeNull();
 });
