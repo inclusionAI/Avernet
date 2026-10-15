@@ -3695,7 +3695,7 @@ class BotService(BotServiceProtocol):
         template_type: Optional[str],
         template_config: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """统一 create / start 注册 BCN Provider 的触发条件.
+        """create 注册 BCN Provider 的历史资格条件.
 
         如果 AC 模板工厂快照显式声明 capabilities，则 capabilities 是唯一事实源；
         缺失能力节点按 False，不再混用 legacy template_type fallback。旧 Bot 没有
