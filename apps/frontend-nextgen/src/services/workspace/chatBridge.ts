@@ -22,10 +22,23 @@ chatBridgeHelper.set('main', chatBridge);
 type TaskExecuteHandler = (task: Record<string, unknown>) => void;
 
 let taskExecuteHandler: TaskExecuteHandler | null = null;
+let pendingAutoExecuteTask: Record<string, unknown> | null = null;
+let pendingAutoExecuteClearTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** 注入任务执行拦截回调（useWorkspace/useGroupChat 挂载时调，卸载传 null 清除）。 */
 export function setTaskExecuteHandler(fn: TaskExecuteHandler | null): void {
   taskExecuteHandler = fn;
+  if (fn && pendingAutoExecuteTask) {
+    // Inline cards mount before the page-level hook effect in some React render orders.
+    // Keep the pre-confirmed evaluation action inside the execute path instead of leaking it as a user message.
+    const task = pendingAutoExecuteTask;
+    pendingAutoExecuteTask = null;
+    if (pendingAutoExecuteClearTimer) {
+      clearTimeout(pendingAutoExecuteClearTimer);
+      pendingAutoExecuteClearTimer = null;
+    }
+    fn(task);
+  }
 }
 
 /** 原始 submit 引用（模块加载时捕获，未被拦截层覆盖）。execute 成功后用此发 <AixUI> 给 bot。 */
@@ -47,10 +60,20 @@ if (typeof window !== 'undefined') {
   origSubmit = raw.submit.bind(chatBridge);
   raw.submit = (content: string, extra?: unknown) => {
     if (extra && typeof extra === 'object' && (extra as { __taskAction?: string }).__taskAction === 'execute') {
-      const task = (extra as { task?: Record<string, unknown> }).task;
+      const action = extra as { task?: Record<string, unknown>; __taskAutoExecute?: boolean };
+      const task = action.task;
       if (task && taskExecuteHandler) {
         // 拦截执行动作：调宿主注入的执行回调（execute + 发副屏消息）。
         taskExecuteHandler(task);
+        return;
+      }
+      if (task && action.__taskAutoExecute === true) {
+        pendingAutoExecuteTask = task;
+        if (pendingAutoExecuteClearTimer) clearTimeout(pendingAutoExecuteClearTimer);
+        pendingAutoExecuteClearTimer = setTimeout(() => {
+          pendingAutoExecuteTask = null;
+          pendingAutoExecuteClearTimer = null;
+        }, 0);
         return;
       }
     }

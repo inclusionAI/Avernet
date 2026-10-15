@@ -18,6 +18,10 @@ export interface RelayModeCoverageSmokeState {
 }
 
 export interface TaskCardHiddenFlags {
+  /** Evaluation cards are already confirmed; the host consumes this flag and auto-runs the existing card execute path. */
+  evaluation_auto_execute?: true;
+  /** Unique card delivery id used only by the host to prevent history remounts from creating duplicate tasks. */
+  evaluation_auto_execute_id?: string;
   relay_mode_coverage_smoke?: RelayModeCoverageSmokeState;
 }
 
