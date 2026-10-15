@@ -757,11 +757,19 @@ class AsyncChatClient:
         """B3（16-5）：A2A 连接上的附件请求→懒建 v3 专用客户端。
 
         handlers 从当前传输桥面复刻双注册（两个客户端 duck 面等义——同一套
-        编排回调，会话收流一致性由 payload 形状契约保证）；on_disconnect
-        刻意不挂（R17-5 的会话归属隔离裁决）。单连接、不池化、close 收口。
+        编排回调，会话收流一致性由 payload 形状契约保证）；on_disconnect 挂
+        **专用隔离处理器**（R17-5 的会话归属隔离裁决：只终结归属本连接的
+        会话，全局 _on_disconnect 会误杀 A2A 侧正常运行的请求）。复用前先
+        查 connected——死连接失效收口后重建，不把坏连接发给下一个附件请求。
         """
         if self._v3_fallback is not None:
-            return self._v3_fallback
+            if self._v3_fallback.connected:
+                return self._v3_fallback
+            # 死连接不复用：就地失效（身份守卫保证旧连接迟到的断连通知
+            # 不会误伤后续重建的新连接），归属路由表随之收口——这些会话
+            # 的 run 已随连接死亡，重路由语义不得残留。
+            self._v3_fallback = None
+            self._v3_routed_sessions.clear()
         # 调用期才解析（保持懒建语义；测试面经此注入替身）
         from ._bot_websocket_client import BotWebSocketClient
 
@@ -774,8 +782,45 @@ class AsyncChatClient:
         await client.connect()
         for event_name, handler in self._event_bridge_snapshot().items():
             client.on_event(event_name, handler)
+        client.on_disconnect(self._v3_fallback_disconnect_handler(client))
         self._v3_fallback = client
         return client
+
+    def _v3_fallback_disconnect_handler(self, client: Any) -> Callable[..., Any]:
+        """R17-5/R3-2：fallback 断连的隔离收口处理器。
+
+        与全局 _on_disconnect 的区别（也是它存在的理由）：只终结经
+        _v3_routed_sessions 登记的、归属本 fallback 连接的会话——A2A 主
+        连接上的在途请求一概不受影响。被终结的等待方收到明确 error
+        （复用 _handle_terminal_error 的两路收口：非流式 chat_complete
+        置位 + 流式 error chunk），不再悬挂等自身超时。
+
+        身份守卫：处理器捕获构造时的 client 实例；旧连接迟到的断连通知
+        （重建后 recv_loop 才走到 finally）直接忽略，不清新连接、不终结
+        新连接的会话。已 ACK 的请求**不自动重发**——重复执行风险由显式
+        失败交还调用方决策。
+        """
+
+        def handler(event_name: str, payload: dict[str, Any]) -> None:
+            if self._v3_fallback is not client:
+                return  # 旧连接的迟到通知：被守卫挡下
+            routed = list(self._v3_routed_sessions.keys())
+            self._v3_routed_sessions.clear()
+            self._v3_fallback = None  # 失效收口；下次附件请求走重建
+            logger.warning(
+                "[v3-fallback] disconnected: terminating %d routed "
+                "session(s) with explicit error", len(routed),
+            )
+            for session_key in routed:
+                state = self._sessions.get(session_key)
+                if state is not None and not state.chat_complete.is_set():
+                    self._handle_terminal_error(
+                        state, session_key,
+                        "fallback connection lost; run outcome unknown",
+                        "fallback_disconnect",
+                    )
+
+        return handler
 
     def _event_bridge_snapshot(self) -> dict:
         """当前传输的已注册 handlers 快照（B3 双注册用）。"""
@@ -884,10 +929,11 @@ class AsyncChatClient:
             timeout,
         )
         # ── B3（16-5）请求级特性门：A2A 传输上的附件请求重路由到 v3 专用
-        # 连接——不静默丢参、不硬错。v3 fallback 懒创建一次；事件 handlers
-        # 双注册（同一套编排回调）；on_disconnect 刻意**不**注册（R17-5：
-        # 全局断连回调会误杀 A2A 侧正常运行中的请求——断连由 fallback 自身
-        # recv 循环的断流路径上报）。close() 一并收口。
+        # 连接——不静默丢参、不硬错。v3 fallback 懒创建一次（复用前查
+        # connected，死连接就地失效重建）；事件 handlers 双注册（同一套
+        # 编排回调）；on_disconnect 挂专用隔离处理器（R17-5/PR #2743 R3-2：
+        # 只终结归属 fallback 的会话——全局断连回调会误杀 A2A 侧正常运行
+        # 中的请求）。close() 一并收口。
         if attachments and self._transport == "a2a":
             target = await self._ensure_v3_fallback()
             # B3（1c/P1-4）：记归属——该 session 在 v3 专用连接上开了 run，

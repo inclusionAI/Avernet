@@ -769,7 +769,8 @@ def _cancel_capable_card() -> dict:
     }
 
 
-def make_cancel_app(*, mode: str = "cancels") -> tuple[FastAPI, dict]:
+def make_cancel_app(*, mode: str = "cancels",
+                    abort_outcome: str = "confirmed") -> tuple[FastAPI, dict]:
     """1c CancelTask 前后端速写（真 TCP）。
 
     mode:
@@ -871,8 +872,8 @@ def make_cancel_app(*, mode: str = "cancels") -> tuple[FastAPI, dict]:
                             "id": body["params"]["taskId"],
                             "status": {"state": "TASK_STATE_CANCELED"},
                         },
-                        # 引擎侧真中止结局——chat_abort 透传给调用方观测
-                        "engineAbort": "confirmed",
+                        # 引擎侧 abort 结局——chat_abort 透传给调用方观测
+                        "engineAbort": abort_outcome,
                     },
                 }
             if mode == "refuse":
@@ -935,6 +936,33 @@ def test_chat_abort_forwards_cancel_task_to_engine():
         errors = [p for p in seen if p.get("state") == "error"]
         assert errors, f"no terminal to consumer: {seen}"
         assert errors[0].get("errorCode") == "TASK_STATE_CANCELED"
+    finally:
+        srv.stop()
+
+
+def test_chat_abort_passes_through_unconfirmed_outcome():
+    """验收 5（R3-3）：非 confirmed 结局经 BaaS 透传不丢失——ok 判定
+    只认 state==CANCELED，engineAbort 供调用方告警消费。"""
+    app, state = make_cancel_app(mode="cancels", abort_outcome="timeout")
+    srv = LiveServer(app)
+    try:
+
+        async def scenario():
+            client = await _connect_async(srv.base)
+            ack = await client.chat_send(session_key="s", message="hi")
+            assert ack["ok"] is True
+            await asyncio.sleep(0.15)  # WORKING 帧到达 → engine_task_id 就位
+            out = await client.chat_abort(session_key="s")
+            await asyncio.sleep(0.4)  # 引擎经流推 CANCELED 终态
+            await client.close()
+            return out
+
+        out = _run(scenario())
+        assert out["ok"] is True, out
+        assert out["task"]["state"] == "TASK_STATE_CANCELED"
+        assert out["engineAbort"] == "timeout", (
+            f"非 confirmed 结局必须原样透传: {out}"
+        )
     finally:
         srv.stop()
 
@@ -1743,8 +1771,7 @@ _MALFORMED_CARDS: list[tuple[str, Any]] = [
 
 
 @pytest.mark.parametrize("case,payload", _MALFORMED_CARDS)
-def test_card_structural_malform_converts_to_a2a_unavailable(
-        case, payload):
+def test_card_structural_malform_converts_to_a2a_unavailable(case, payload):
     srv = LiveServer(make_malformed_card_app(payload))
     try:
         with pytest.raises(A2aUnavailableError, match="agent card|malformed"):
@@ -2020,7 +2047,7 @@ def test_abort_untracked_run_cuts_local_stream_not_send_cancel():
         client._connected = True
         client._server_info = {"server": {"card": _cancel_capable_card()}}
         ctx = _RunCtx("rid-cut", "s-cut")
-        ctx.auth_token = "OPEN_API:" + "NOT_PROVIDED"   # 哨兵值等值拼接（规则口径）
+        ctx.auth_token = "OPEN_API:" + "NOT_PROVIDED"  # 哨兵值等值拼接（规则口径）
         ctx.task = asyncio.create_task(asyncio.sleep(30))
         client._runs["rid-cut"] = ctx
         client._session_runs["s-cut"] = "rid-cut"

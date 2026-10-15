@@ -307,3 +307,112 @@ async def test_claw_bot_service_abort_swallows_engine_error(
     )
 
     ws_client.chat_abort.assert_awaited_once()
+
+
+# ── R3-3（PR #2743）：engineAbort 结局的调用方消费 ──────────────────────────
+# ok=True 的含义限定：A2A 传输下只代表传输任务已取消；引擎停止确认以
+# engineAbort 为准——非 confirmed 必须落结构化告警（可观测），v3 形态
+# 返回（无 a2a/engineAbort 键）不告警，行为零变化。
+
+
+async def test_baas_bot_service_abort_warns_on_unconfirmed_engine_abort(
+    binding_info: BotBindingInfo, caplog
+):
+    """验收 6：传输取消成功但引擎停止未确认→ 结构化告警。"""
+    import logging
+
+    pool = MagicMock()
+    ws_client = MagicMock()
+    ws_client.chat_abort = AsyncMock(return_value={
+        "ok": True, "a2a": True,
+        "task": {"id": "t", "state": "TASK_STATE_CANCELED"},
+        "engineAbort": "timeout",
+    })
+    pool.get = AsyncMock(return_value=ws_client)
+
+    resolver = MagicMock()
+    resolver.dispatch_bot_ws_conn_info = AsyncMock(return_value=_conn_info())
+    service = BaasBotService(
+        config=BaasBotServiceConfig(),
+        client_pool=pool,
+        wss_resolver=resolver,
+        session_service=MagicMock(),
+        engine_adapter_registry=BotEngineAdapterRegistry({}),
+        eval_consistency_check=NoopEvalConsistencyCheck(),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await service.abort(session_id="sess-1", binding_info=binding_info)
+
+    warned = [r for r in caplog.records
+              if "engine stop unconfirmed" in r.message]
+    assert warned, caplog.text
+    assert "engineAbort" in warned[0].getMessage() or "timeout" \
+        in warned[0].getMessage()
+
+
+async def test_baas_bot_service_abort_confirmed_and_v3_shapes_do_not_warn(
+    binding_info: BotBindingInfo, caplog
+):
+    """confirmed 结局与 v3 形态返回（无 a2a 键）都不告警。"""
+    import logging
+
+    resolver = MagicMock()
+    resolver.dispatch_bot_ws_conn_info = AsyncMock(return_value=_conn_info())
+
+    for shape in ({"ok": True},
+                  {"ok": True, "a2a": True, "engineAbort": "confirmed"}):
+        pool = MagicMock()
+        ws_client = MagicMock()
+        ws_client.chat_abort = AsyncMock(return_value=shape)
+        pool.get = AsyncMock(return_value=ws_client)
+        service = BaasBotService(
+            config=BaasBotServiceConfig(),
+            client_pool=pool,
+            wss_resolver=resolver,
+            session_service=MagicMock(),
+            engine_adapter_registry=BotEngineAdapterRegistry({}),
+            eval_consistency_check=NoopEvalConsistencyCheck(),
+        )
+        caplog.clear()
+        await service.abort(session_id="sess-1", binding_info=binding_info)
+        assert not [r for r in caplog.records
+                    if "engine stop unconfirmed" in r.message], shape
+
+
+async def test_claw_bot_service_abort_warns_on_unconfirmed_engine_abort(
+    binding_info: BotBindingInfo, caplog
+):
+    """验收 6：Claw 侧同样消费 engineAbort——非 confirmed 落告警。"""
+    import logging
+
+    secret_store = MagicMock(spec=SecretStorePlugin)
+    secret_store.generate_proxy_token = MagicMock(
+        return_value="test-token")
+    pool = MagicMock()
+    ws_client = MagicMock()
+    ws_client.chat_abort = AsyncMock(return_value={
+        "ok": True, "a2a": True,
+        "task": {"id": "t", "state": "TASK_STATE_CANCELED"},
+        "engineAbort": "refused",
+    })
+    pool.get = AsyncMock(return_value=ws_client)
+
+    service = ClawBotService(
+        config=BotServiceConfig(
+            proxy_base_url="https://proxy",
+            proxy_ws_base_url="wss://proxy",
+            adapter_port=20003,
+        ),
+        client_pool=pool,
+        secret_store=secret_store,
+        engine_adapter_registry=BotEngineAdapterRegistry({}),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await service.abort(session_id="sess-1", binding_info=binding_info)
+
+    warned = [r for r in caplog.records
+              if "engine stop unconfirmed" in r.message]
+    assert warned, caplog.text
+    assert "refused" in warned[0].getMessage()

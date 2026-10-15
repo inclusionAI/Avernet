@@ -23,6 +23,7 @@ from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.service.bot_interaction import InteractionDispatch
 from secbaas.community.core.service.bot_run._async_chat_client import (
     AsyncChatClient,
+    BotSessionError,
     ConcurrentSessionError,
     NotConnectedError,
     SessionState,
@@ -2191,7 +2192,11 @@ class TestA2aBaseUrlUnknownWsPath:
 
 
 class _StubV3Transport:
-    """BotWebSocketClient 的 duck 替身——仅测试注入重路由消费的面。"""
+    """BotWebSocketClient 的 duck 替身——仅测试注入重路由消费的面。
+
+    R3-2 扩展：记录断连处理器并可模拟 recv_loop finally 的断连通知
+    （connected=False + 回调），供 fallback 断连收口/重建场景使用。
+    """
 
     instances: list["_StubV3Transport"] = []
 
@@ -2200,7 +2205,9 @@ class _StubV3Transport:
         self.connected = True
         self._event_handlers: dict = {}
         self.inject_calls: list[tuple[str, tuple, dict]] = []
+        self.chat_send_calls: list[tuple[str, tuple, dict]] = []
         self.close_calls = 0
+        self.disconnect_handler = None
         _StubV3Transport.instances.append(self)
 
     async def connect(self) -> dict:
@@ -2210,10 +2217,20 @@ class _StubV3Transport:
         self._event_handlers[name] = handler
 
     def on_disconnect(self, handler) -> None:
-        pass
+        self.disconnect_handler = handler
+
+    def simulate_disconnect(self) -> None:
+        """模拟 recv_loop finally：连接失效 + 触发断连处理器。"""
+        self.connected = False
+        if self.disconnect_handler is not None:
+            self.disconnect_handler("disconnect", {})
 
     async def chat_inject(self, session_key: str, *args, **kwargs) -> dict:
         self.inject_calls.append((session_key, args, kwargs))
+        return {"ok": True}
+
+    async def chat_send(self, session_key: str, *args, **kwargs) -> dict:
+        self.chat_send_calls.append((session_key, args, kwargs))
         return {"ok": True}
 
     async def close(self) -> None:
@@ -2327,3 +2344,189 @@ class TestInjectAttachmentsV3Reroute:
         assert fallback.close_calls == 1, "fallback 随 close 收口"
         assert acc._v3_fallback is None
         assert acc._v3_routed_sessions == {}
+
+
+class TestV3FallbackDisconnectRecovery:
+    """PR #2743 R3-2：fallback 断连的隔离收口与连接恢复。
+
+    回归钉：fallback WS 断连此前既不通知等待方（ACK 后上层悬挂等自身
+    超时）、也不失效坏连接（后续附件请求继续复用）。现在断连处理器只
+    终结归属 fallback 的会话——A2A 主连接的在途请求不受影响。
+    """
+
+    async def _wait_until(self, predicate, timeout_s: float = 2.0) -> None:
+        deadline = asyncio.get_running_loop().time() + timeout_s
+        while not predicate():
+            if asyncio.get_running_loop().time() > deadline:
+                raise AssertionError("condition not reached in time")
+            await asyncio.sleep(0.005)
+
+    def _acc_with_awaitable_main(self) -> AsyncChatClient:
+        acc = _a2a_acc_with_stub_main_client()
+        acc._client.chat_send = AsyncMock(return_value={"ok": True})
+        return acc
+
+    @pytest.mark.asyncio
+    async def test_ack_then_disconnect_terminates_waiter(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """验收 1+2 组合（非流式）：ACK 后断连——无超时等待方及时收到
+        明确 error，不悬挂；且不自动重发已 ACK 的请求。"""
+        acc = self._acc_with_awaitable_main()
+
+        task = asyncio.create_task(
+            acc.send_message(
+                "hi", session_key="sk-att-1",
+                attachments=[{"kind": "screenshot"}],
+            )
+        )
+        await self._wait_until(
+            lambda: bool(_StubV3Transport.instances)
+                and len(_StubV3Transport.instances[-1].chat_send_calls)
+                >= 1)
+        fallback = acc._v3_fallback
+        assert fallback is not None
+
+        fallback.simulate_disconnect()
+
+        with pytest.raises(BotSessionError, match="fallback connection lost"):
+            await asyncio.wait_for(task, 2)
+        # 不自动重发：断连后 fallback/主连接都没有第二次 chat.send
+        assert len(fallback.chat_send_calls) == 1
+        assert acc._client.chat_send.await_count == 0
+        # 坏连接不再被持有；归属路由表收口
+        assert acc._v3_fallback is None
+        assert acc._v3_routed_sessions == {}
+
+    @pytest.mark.asyncio
+    async def test_ack_then_disconnect_terminates_stream_waiter(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """验收 2（流式）：断连后流式消费者收到 error chunk 并结束迭代。"""
+        acc = self._acc_with_awaitable_main()
+
+        async def consume() -> list[StreamChunk]:
+            chunks: list[StreamChunk] = []
+            async for chunk in acc.send_message_stream(
+                "hi", session_key="sk-att-2",
+                attachments=[{"kind": "screenshot"}],
+            ):
+                chunks.append(chunk)
+            return chunks
+
+        task = asyncio.create_task(consume())
+        await self._wait_until(
+            lambda: bool(_StubV3Transport.instances)
+                and len(_StubV3Transport.instances[-1].chat_send_calls)
+                >= 1)
+        acc._v3_fallback.simulate_disconnect()
+
+        chunks = await asyncio.wait_for(task, 2)
+        errs = [c for c in chunks if c.type == "error"]
+        assert errs, f"stream ended without error chunk: {chunks}"
+        assert "fallback connection lost" in errs[-1].content
+
+    @pytest.mark.asyncio
+    async def test_disconnect_spares_inflight_a2a_requests(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """验收 3：fallback 断连只终结归属会话——A2A 主连接上 ACK 已过、
+        仍在等回复的请求不被误杀（R17-5 隔离裁决）。"""
+        acc = self._acc_with_awaitable_main()
+
+        a2a_task = asyncio.create_task(
+            acc.send_message("plain", session_key="sk-a2a")
+        )
+        att_task = asyncio.create_task(
+            acc.send_message(
+                "hi", session_key="sk-att-3",
+                attachments=[{"kind": "screenshot"}],
+            )
+        )
+        await self._wait_until(
+            lambda: bool(_StubV3Transport.instances)
+                and len(_StubV3Transport.instances[-1].chat_send_calls)
+                >= 1)
+        await self._wait_until(lambda: acc._client.chat_send.await_count == 1)
+
+        acc._v3_fallback.simulate_disconnect()
+
+        with pytest.raises(BotSessionError):
+            await asyncio.wait_for(att_task, 2)
+        # A2A 请求不受影响：仍在等待
+        await asyncio.sleep(0.1)
+        assert not a2a_task.done(), "fallback 断连误杀了 A2A 侧在途请求"
+        # 收尾：A2A 会话正常自然结束（chat_complete 置位）
+        state = acc._sessions.get("sk-a2a")
+        state.chat_complete.set()
+        await asyncio.wait_for(a2a_task, 2)
+
+    @pytest.mark.asyncio
+    async def test_attachment_after_disconnect_rebuilds_connection(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """验收 4：断连后再次发送附件——建立新连接并正常发送，不缺
+        不重用旧连接。"""
+        acc = self._acc_with_awaitable_main()
+
+        async def send_att(sk: str, min_count: int):
+            task = asyncio.create_task(
+                acc.send_message("hi", session_key=sk,
+                                 attachments=[{"kind": "screenshot"}]))
+            await self._wait_until(
+                lambda: bool(_StubV3Transport.instances)
+                and len(_StubV3Transport.instances[-1].chat_send_calls)
+                >= min_count)
+            return task
+
+        task1 = await send_att("sk-att-4a", 1)
+        first = acc._v3_fallback
+        first.simulate_disconnect()
+        with pytest.raises(BotSessionError):
+            await asyncio.wait_for(task1, 2)
+
+        created = len(_StubV3Transport.instances)
+        task2 = asyncio.create_task(
+            acc.send_message("hi", session_key="sk-att-4b",
+                             attachments=[{"kind": "screenshot"}]))
+        await self._wait_until(
+            lambda: len(_StubV3Transport.instances) > created
+            and len(_StubV3Transport.instances[-1].chat_send_calls) >= 1)
+        second = acc._v3_fallback
+        assert second is not None and second is not first, "复用了已断开连接"
+        assert len(_StubV3Transport.instances) == created + 1
+        assert second in _StubV3Transport.instances
+        assert len(second.chat_send_calls) == 1
+
+        # 收尾：第二连接存活；旧连接的迟到断连通知（验收 5）不
+        # 清新连接、不误杀其等待方
+        first.simulate_disconnect()
+        assert acc._v3_fallback is second, "旧连接迟到通知清掉了新连接"
+        await asyncio.sleep(0.05)
+        assert not task2.done(), "旧连接迟到通知误杀了新连接的等待方"
+        second.simulate_disconnect()
+        with pytest.raises(BotSessionError):
+            await asyncio.wait_for(task2, 2)
+
+    @pytest.mark.asyncio
+    async def test_dead_fallback_is_judged_unhealthy_without_notification(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """复用健康检查：连接已死但断连通知尚未送达（recv_loop 还在
+        finally 路径上）时，_ensure_v3_fallback 不得返回死连接——就地
+        失效收口（归属表清理）并重建。"""
+        acc = self._acc_with_awaitable_main()
+        await acc.inject_message(
+            "m", session_key="sk-att-5", attachments=[{"k": 1}])
+        first = acc._v3_fallback
+        assert first is not None
+        first.connected = False  # 死连接，未触发断连处理器
+
+        await acc.inject_message(
+            "m2", session_key="sk-att-5", attachments=[{"k": 1}])
+
+        second = acc._v3_fallback
+        assert second is not first, "死连接被复用"
+        assert len(_StubV3Transport.instances) == 2
+        assert len(second.inject_calls) == 1
+        await acc.close()

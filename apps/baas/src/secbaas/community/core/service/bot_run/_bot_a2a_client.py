@@ -161,10 +161,12 @@ class BotA2aClient:
             raise A2aUnavailableError(f"A2A capability probe failed: {e}") from e
         if not isinstance(card, dict):
             raise A2aUnavailableError(
-                f"agent card is not an object: {type(card).__name__}")
+                f"agent card is not an object: {type(card).__name__}"
+            )
         interfaces = card.get("supportedInterfaces")
         if not isinstance(interfaces, list) or not all(
-                isinstance(i, dict) for i in interfaces):
+            isinstance(i, dict) for i in interfaces
+        ):
             raise A2aUnavailableError("malformed supportedInterfaces on card")
         matched = any(
             (
@@ -540,6 +542,11 @@ class BotA2aClient:
             真实契约判定）：ok=True——本地 body task **不**取消：
             engine 沿 SSE 推 CANCELED 终态，消费方经 final 分支收
             terminal error（订阅断流语义由引擎侧终态承载）。
+
+        ok=True 的含义限定（R3-3）：A2A 传输任务已取消、结果流已终结；
+        不单独保证引擎执行及其副作用已停止——引擎取消确认以响应附录的
+        engineAbort 为准（confirmed/not_found/refused/timeout/
+        unavailable），非 confirmed 值时引擎可能仍在执行。
         """
         rid = run_id or self._session_runs.get(session_key)
         ctx = self._runs.get(rid or "")
@@ -640,7 +647,7 @@ class BotA2aClient:
         task = (body.get("result") or {}).get("task")
         state = ((task or {}).get("status") or {}).get("state")
         if has_result and not has_error and state == "TASK_STATE_CANCELED":
-            # engineAbort：引擎侧真中止的结局附录（confirmed/not_found/
+            # engineAbort：引擎侧 abort 的结局附录（confirmed/not_found/
             # refused/timeout/unavailable）；老引擎不携带时为 None——
             # 成功判定不受影响，仅 observability 透传。
             engine_abort = (body.get("result") or {}).get("engineAbort")
