@@ -429,6 +429,13 @@ export interface AppCapabilities {
   getQwenWorkBotRegistrationConfig: (bcsEndpoint: string) => CapabilityResult<{ providerSlug: string; apiUrl: string }>;
   /** Optional deployment-managed installer and executable; null uses the public release installer. */
   getQwenWorkBridgeInstallation: () => CapabilityResult<{ installCommand: string; binary: string; profiles?: boolean; guideUrl?: string; personalizeBotName?: boolean } | null>;
+  /**
+   * Poolab 一键接入脚本与公开指南地址（部署差异）。Open Core 默认 `null`，表示该部署未启用
+   * Poolab 接入；internal overlay 覆盖为 `{ oneClickScriptUrl, guideUrl }` 以开放 Poolab Tab。
+   * `null` 同时也向 BotRegistrationDialog 表明 Poolab 选项不应渲染。
+   * 同步签名，不发请求。
+   */
+  getPoolabBridgeInstallation: () => CapabilityResult<{ oneClickScriptUrl: string; guideUrl: string } | null>;
 
   /**
    * 协作群高级配置（当前为钉钉绑定）。Open Core 默认关闭；internal overlay 覆盖为 true。
