@@ -49,7 +49,28 @@ class ReplaceRequest(BaseModel):
     tools: list[ReplaceToolItem] = Field(default_factory=list)
 
 
+class AcliInstallRequest(BaseModel):
+    """``POST /api/cli/acli/install`` — install one tool from the acli market.
+
+    ``install_dir`` comes from the platform (the manifest's
+    ``managed_bin_dir``) rather than from engine config, so it is the same
+    directory the container start-up already puts on the engine's ``PATH``.
+    """
+
+    name: str
+    install_dir: str
+
+
+class AcliUninstallRequest(BaseModel):
+    """``POST /api/cli/acli/uninstall`` — remove a tool acli installed."""
+
+    name: str
+    install_dir: str
+
+
 __all__ = [
+    "AcliInstallRequest",
+    "AcliUninstallRequest",
     "DeleteRequest",
     "InstallRequest",
     "ReplaceRequest",

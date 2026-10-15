@@ -26,19 +26,21 @@ import base64
 import binascii
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
-
 from engine.community.api.caps import check_capability
 from engine.community.api.cli.schemas import (
+    AcliInstallRequest,
+    AcliUninstallRequest,
     DeleteRequest,
     InstallRequest,
     ReplaceRequest,
 )
 from engine.community.api.response import ApiResponse
+from engine.community.core.acli.runner import AcliError, AcliRunner
 from engine.community.core.cli_tools.models import CliToolPayload
 from engine.community.core.cli_tools.service import InvalidCliToolNameError
 from engine.community.core.engine.capability import Capability
 from engine.community.manager import EngineManager
+from fastapi import APIRouter, HTTPException, Query
 
 router = APIRouter(prefix="/api/cli", tags=["cli"])
 log = logging.getLogger("api-cli")
@@ -197,6 +199,93 @@ async def download_cli_tool(name: str = Query(...)) -> ApiResponse:
             "size_bytes": tool.size_bytes,
             "md5": tool.md5,
             "content_b64": base64.b64encode(tool.data).decode("ascii"),
+        },
+        warning=warning,
+    )
+
+
+# ── acli market tools ─────────────────────────────────────────────────────
+#
+# Same conventions as above: bad input is a 400, anything acli refused is a
+# 200 with ``success: false`` and ``error`` set to the runner's code, and 404
+# stays reserved for "this engine build has no such endpoint".
+
+_ACLI_RUNNER = AcliRunner()
+
+
+def _acli() -> AcliRunner:
+    return _ACLI_RUNNER
+
+
+def _acli_refusal(error: AcliError, warning: str | None) -> ApiResponse:
+    if error.code == "invalid_input":
+        raise HTTPException(status_code=400, detail=error.message) from error
+    return ApiResponse(
+        success=False, error=error.code, message=error.message, warning=warning
+    )
+
+
+@router.post("/acli/install", response_model=ApiResponse)
+async def install_acli_tool(request: AcliInstallRequest) -> ApiResponse:
+    """Install one acli market tool into ``install_dir``."""
+    warning = check_capability(Capability.CLI_ACLI_INSTALL)
+    try:
+        tool = await _acli().install(request.name, request.install_dir)
+    except AcliError as error:
+        return _acli_refusal(error, warning)
+    return ApiResponse(
+        success=True,
+        data={
+            "name": tool.name,
+            "command": tool.command,
+            "description": tool.description,
+            "version": tool.version,
+        },
+        warning=warning,
+    )
+
+
+@router.post("/acli/uninstall", response_model=ApiResponse)
+async def uninstall_acli_tool(request: AcliUninstallRequest) -> ApiResponse:
+    """Uninstall an acli tool. One acli never installed here is success."""
+    warning = check_capability(Capability.CLI_ACLI_UNINSTALL)
+    try:
+        result = await _acli().uninstall(request.name, request.install_dir)
+    except AcliError as error:
+        return _acli_refusal(error, warning)
+    return ApiResponse(
+        success=True,
+        data={"name": result.name, "uninstalled": result.uninstalled},
+        warning=warning,
+    )
+
+
+@router.get("/acli/market", response_model=ApiResponse)
+async def list_acli_market(
+    keyword: str = Query(""),
+    page_no: int = Query(1),
+    page_size: int = Query(20),
+) -> ApiResponse:
+    """One page of the acli market, filtered by ``keyword``."""
+    warning = check_capability(Capability.CLI_ACLI_MARKET)
+    try:
+        page = await _acli().market(keyword, page_no, page_size)
+    except AcliError as error:
+        return _acli_refusal(error, warning)
+    return ApiResponse(
+        success=True,
+        data={
+            "items": [
+                {
+                    "name": t.name,
+                    "command": t.command,
+                    "description": t.description,
+                    "version": t.version,
+                }
+                for t in page.items
+            ],
+            "total": page.total,
+            "has_more": page.has_more,
         },
         warning=warning,
     )

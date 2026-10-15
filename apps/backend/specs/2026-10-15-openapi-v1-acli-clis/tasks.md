@@ -16,13 +16,13 @@ Backend paths are relative to `apps/backend/`; engine paths to
   - [x] Output is masked and truncated in logs and never returned raw.
 - **Depends on:** —
 
-## Task 2: Engine — endpoints and capabilities
+## Task 2: [x] Engine — endpoints and capabilities
 - **Goal:** Expose the runner to the platform.
 - **Files:** `api/cli/router.py`, `api/cli/schemas.py`, `core/engine/capability.py`, `engines/openclaw/engine.py`, `engines/claude_code/engine.py`, `api/tests/test_cli_router.py`
 - **Done when:**
-  - [ ] `POST /api/cli/acli/install`, `POST /api/cli/acli/uninstall`, `GET /api/cli/acli/market` follow the router's refusal conventions.
-  - [ ] The three capabilities are declared supported by openclaw and claude_code.
-  - [ ] Router tests cover success, refusal and bad input.
+  - [x] `POST /api/cli/acli/install`, `POST /api/cli/acli/uninstall`, `GET /api/cli/acli/market` follow the router's refusal conventions.
+  - [x] The three capabilities are declared supported by openclaw and claude_code.
+  - [x] Router tests cover success, refusal and bad input.
 - **Depends on:** Task 1
 
 ## Task 3: Backend — install directory and AgentPass add/remove

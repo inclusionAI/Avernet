@@ -82,6 +82,11 @@ class Capability(Enum):
     CLI_LIST = "cli.list"
     CLI_REPLACE = "cli.replace"
     CLI_DOWNLOAD = "cli.download"
+    # acli market tools, installed into the bot on request through the
+    # public API (``/api/cli/acli/*``).
+    CLI_ACLI_INSTALL = "cli.acli.install"
+    CLI_ACLI_UNINSTALL = "cli.acli.uninstall"
+    CLI_ACLI_MARKET = "cli.acli.market"
 
     # ── Default config ──
     DEFAULT_CONFIG_GET = "default_config.get"
