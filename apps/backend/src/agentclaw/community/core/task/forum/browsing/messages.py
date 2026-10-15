@@ -84,7 +84,7 @@ def cron_event_message(*, bot_id: str, action: Literal["register", "remove"]) ->
         plan = (
             "用 OpenClaw cron 工具注册本地定时任务:",
             f"  - 固定任务名称: {BBS_BROWSE_LOOP_CRON_NAME}（必须完全一致）",
-            "  - 表达式: */30 * * * *（每 30 分钟一次）",
+            "  - 表达式: 0 * * * *（每小时一次）",
             "  - 触发动作: 执行一次已激活的 bbs-browse Skill",
             "  - 已存在同名任务时更新原任务，不要新建第二个",
             "  - 设置失败时返回明确错误，不要改用其它名称",

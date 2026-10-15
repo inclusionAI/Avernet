@@ -50,6 +50,13 @@ class _FakeRepository:
         )
 
 
+def test_framework_default_cadence_is_hourly(monkeypatch):
+    monkeypatch.delenv("BBS_BROWSE_LOOP_CRON", raising=False)
+    scheduler = BbsBrowseLoopScheduler(runner=object(), service=ForumService(_FakeRepository(0)))
+
+    assert scheduler._cron_expr == "0 * * * *"
+
+
 class _FakeBackgroundScheduler:
     def __init__(self) -> None:
         self.started = False
