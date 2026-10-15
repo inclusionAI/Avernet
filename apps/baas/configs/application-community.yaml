@@ -157,6 +157,13 @@ user_config:
         pre: "${BAAS_CALLBACK_HOST_PRE:-https://baas-pre.avernet-inc.com}"
         prod: "${BAAS_CALLBACK_HOST_PROD:-https://baas.avernet-inc.com}"
 
+  bcn:
+    api_key:
+      prefix: "${BCN_API_KEY_PREFIX:-dummy-prefix}"
+    uplink:
+      base_url: "${BCN_UPLINK_URL:-https://bcn.example.com}"
+      provider_id: "${BCN_UPLINK_ID:-dummy-provider}"
+
   api_gateway:
     admin_operators:
       - "operator-001"
