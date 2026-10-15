@@ -186,11 +186,9 @@ class LiveTaskBotProvisioner:  # pragma: no cover — live task E2E provisioning
         """``PUT /api/bots/{bot_id}`` 改 ``bot_desc`` → 触发 ``bot_service._sync_bot_to_bcn`` → ``BcnService.onboard_bot``
         → BCN ``POST /admin/bots/onboard`` 把 ``{bot_id}:{owner_id}`` 注册进协作网。
 
-        **为何需要**:`create_bot` 对 ``openclaw+personal`` bot 主动 skip BCN provider 注册
-        (``_should_register_bcn_provider`` 返回 False + DRM 默认关),provisioned bot 默认不在 BCN;
-        ``form_coop_group`` 建群校验成员时 BCS 按 ``{bot_id}:{owner_id}`` 查会 404 ``bot_not_found``。
-        本方法走 **update(上行 onboard)路**——不经 ``_should_register_bcn_provider``/DRM gate——把 bot 入网 BCN。
-        **coop_group 成员 bot 建群前必须 onboard**(single_bot/BBS 用不到,调了也无害)。
+        create_bot 会尝试 Provider 注册，但环境凭据缺失或注册失败时可跳过。
+        本方法显式走 update 上行 onboard，供协作网集成测试准备成员；
+        coop_group 测试在建群前调用，确保测试成员已存在于 BCN。
         """
         r = await self._http.put(
             f"{self._backend}/api/bots/{bot_id}",

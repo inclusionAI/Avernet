@@ -99,7 +99,6 @@ def lifecycle():
     )
     service._template_service.get_template.return_value = None
     service._template_service.get_template_config.return_value = None
-    service._should_register_bcn_provider = Mock(return_value=False)
     service._resolve_bcn_provider_connection_mode = Mock(return_value="ws")
     service._build_engine_extra_envs = Mock(return_value=None)
     service._attach_template_uid_context = Mock(return_value=None)

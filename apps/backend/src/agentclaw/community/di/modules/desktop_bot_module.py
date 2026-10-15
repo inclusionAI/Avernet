@@ -1,7 +1,10 @@
 """DesktopBotModule — production bindings for desktop_bot."""
 
+from typing import Callable
+
 from injector import Binder, Module, inject, provider, singleton
 
+from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.api.desktop_bot_service import DesktopBotServiceProtocol
 from agentclaw.community.core.desktop_bot.lifecycle import DesktopBotLifecycle
 from agentclaw.community.core.desktop_bot.services.desktop_bot_service import DesktopBotService
@@ -48,6 +51,7 @@ class DesktopBotModule(Module):
         skills_pool_native_creation_policy: SkillsPoolNativeCreationPolicy,
         skill_layout_repository: SkillsPoolLayoutRepositoryProtocol,
         layout_confirmation: LayoutInitializationConfirmationProtocol,
+        bot_service_provider: Callable[[], BotService],
     ) -> DesktopBotService:
         return DesktopBotService(
             baas_service=baas_service,
@@ -60,6 +64,7 @@ class DesktopBotModule(Module):
             skills_pool_native_creation_policy=skills_pool_native_creation_policy,
             skill_layout_repository=skill_layout_repository,
             layout_confirmation=layout_confirmation,
+            bot_service_provider=bot_service_provider,
         )
 
     @singleton
