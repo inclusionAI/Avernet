@@ -25,8 +25,8 @@ Backend paths are relative to `apps/backend/`; engine paths to
   - [ ] Router tests cover success, refusal and bad input.
 - **Depends on:** Task 1
 
-## Task 3: Backend — install directory and reconciler writes
-- **Goal:** Read and validate the install directory; add `add_cli` / `remove_cli`.
+## Task 3: Backend — install directory and AgentPass add/remove
+- **Goal:** Read and validate the install directory; add `add_cli` / `remove_cli` to `CliPassportScopeReconciler`, the existing class that is the only code allowed to write a bot's AgentPass CLI list (it rebuilds the whole MCP + CLI list and writes it in one call, because AgentPass replaces the list on every update).
 - **Files:** `src/agentclaw/community/core/mcp/services/cli_capabilities.py`, `.../cli_passport_scope.py`, `tests/community/core/mcp/services/test_cli_capabilities.py`, the reconciler's test module
 - **Done when:**
   - [ ] The resolver exposes `managed_bin_dir`; an invalid value fails loading.
@@ -41,8 +41,8 @@ Backend paths are relative to `apps/backend/`; engine paths to
   - [ ] One test per mapping in the plan (`not_running`, `engine_unsupported`, engine error code, `engine_unreachable`, success).
 - **Depends on:** Task 2 (contract)
 
-## Task 5: Backend — guard extraction and `AcliCliService`
-- **Goal:** Orchestrate list / search / add / remove with the plan's ordering and rollbacks.
+## Task 5: Backend — shared permission check and `AcliCliService`
+- **Goal:** Orchestrate list / search / add / remove with the plan's ordering and rollbacks. "Guard" here means the permission check run before every write — the caller owns the bot, the bot is an active service bot, and its engine can run acli. The CLI identity switch already does this check inline; it moves to `core/caller_identity/guard.py` so both use the same code.
 - **Files:** `src/agentclaw/community/core/caller_identity/guard.py`, `core/caller_identity/service.py` (use the guard), `core/acli_clis/service.py`, `core/acli_clis/errors.py`, `tests/community/core/acli_clis/test_service.py`
 - **Done when:**
   - [ ] Every spec acceptance criterion under Search, List, Add, Remove and Rollback failures has a passing test.
