@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import re
+import signal
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -37,10 +38,13 @@ from typing import Any
 
 log = logging.getLogger("engine.acli")
 
-#: A market name as acli accepts it: ``dataphin``, ``deepinsight-cli``,
-#: ``@antcli/yuntu-cli``, optionally ``name@version``. The first character is
-#: never ``-``, so a name cannot be read as a flag.
-_NAME_RE = re.compile(r"^[A-Za-z0-9@][A-Za-z0-9._@/-]{0,255}$")
+#: A market name: ``dataphin``, ``deepinsight-cli``, or a scoped
+#: ``@antcli/yuntu-cli``. The first character is never ``-``, so a name cannot
+#: be read as a flag. A ``name@version`` pin is refused: acli records installs
+#: by bare name, so a pinned name could be installed but never found again to
+#: uninstall.
+_NAME_RE = re.compile(r"^(?:@[A-Za-z0-9][A-Za-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*$")
+_MAX_NAME_LENGTH = 256
 _MAX_KEYWORD_LENGTH = 100
 _MAX_PAGE_SIZE = 100
 #: The directory acli is told to install into must be a ``bin`` directory:
@@ -51,6 +55,9 @@ ACLI_HOME_NAME = "acli-home"
 
 INSTALL_TIMEOUT_SECONDS = 300.0
 QUERY_TIMEOUT_SECONDS = 30.0
+#: How long to wait for a killed process group to be reaped before giving up
+#: on it. Bounded so a process that ignores the kill cannot hold the request.
+_REAP_TIMEOUT_SECONDS = 5.0
 
 _MAX_LOGGED_OUTPUT = 4096
 _MAX_ERROR_MESSAGE = 512
@@ -109,7 +116,12 @@ def mask_secrets(text: str) -> str:
 
 
 def validate_name(name: str) -> str:
-    if not isinstance(name, str) or not _NAME_RE.fullmatch(name) or ".." in name:
+    if (
+        not isinstance(name, str)
+        or len(name) > _MAX_NAME_LENGTH
+        or not _NAME_RE.fullmatch(name)
+        or ".." in name
+    ):
         raise AcliError("invalid_input", f"invalid acli tool name: {name!r}")
     return name
 
@@ -192,7 +204,7 @@ class AcliRunner:
         directory = validate_install_dir(install_dir)
         payload = await self._run(
             ["install", name, "--install-dir", str(directory), "--yes"],
-            env=self._env_for(directory),
+            env=self._env_for(directory, failure_code="install_failed"),
             timeout=INSTALL_TIMEOUT_SECONDS,
             failure_code="install_failed",
         )
@@ -211,7 +223,7 @@ class AcliRunner:
         """Uninstall ``name`` if acli installed it; a tool acli never installed is success."""
         validate_name(name)
         directory = validate_install_dir(install_dir)
-        env = self._env_for(directory)
+        env = self._env_for(directory, failure_code="uninstall_failed")
         listing = await self._run(
             ["tool", "list"],
             env=env,
@@ -263,10 +275,31 @@ class AcliRunner:
     # ── execution ────────────────────────────────────────────────────────
 
     @staticmethod
-    def _env_for(install_dir: Path) -> dict[str, str]:
+    def _env_for(install_dir: Path, *, failure_code: str) -> dict[str, str]:
         home = acli_home_for(install_dir)
-        home.mkdir(parents=True, exist_ok=True)
+        try:
+            home.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            log.warning("[acli] cannot prepare HOME=%s: %s", home, error)
+            raise AcliError(failure_code, f"cannot prepare acli home under {install_dir.parent}") from error
         return {**os.environ, "HOME": str(home)}
+
+    @staticmethod
+    async def _kill_group(proc: asyncio.subprocess.Process) -> None:
+        """Kill acli and everything it started, then reap it, bounded.
+
+        acli runs npm and installers as children that inherit its pipes, so
+        killing acli alone would leave them holding the pipes open and the
+        request waiting on them.
+        """
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=_REAP_TIMEOUT_SECONDS)
+        except TimeoutError:
+            log.warning("[acli] pid=%s not reaped after kill", proc.pid)
 
     async def _run(
         self,
@@ -285,6 +318,9 @@ class AcliRunner:
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                # Its own process group, so a timeout or a cancelled request
+                # can kill acli together with whatever it spawned.
+                start_new_session=True,
             )
         except (FileNotFoundError, PermissionError) as error:
             log.warning("[acli] unavailable argv=%s: %s", argv[:3], error)
@@ -292,10 +328,12 @@ class AcliRunner:
         try:
             raw_out, raw_err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except TimeoutError as error:
-            proc.kill()
-            await proc.communicate()
+            await self._kill_group(proc)
             log.warning("[acli] timeout argv=%s after %.0fs", argv[:3], timeout)
             raise AcliError("timeout", f"acli did not finish within {timeout:.0f}s") from error
+        except asyncio.CancelledError:
+            await self._kill_group(proc)
+            raise
         stdout = raw_out.decode("utf-8", errors="replace")
         stderr = raw_err.decode("utf-8", errors="replace")
         duration_ms = int((time.monotonic() - started) * 1000)

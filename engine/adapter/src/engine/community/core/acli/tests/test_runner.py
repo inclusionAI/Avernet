@@ -6,10 +6,12 @@ what reaches the process — the part a shell-free design is meant to guarantee
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import stat
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -26,10 +28,16 @@ _FAKE = r'''#!{python}
 import json, os, sys
 args = sys.argv[1:]
 with open(os.environ["FAKE_ACLI_LOG"], "a") as log:
-    log.write(json.dumps({{"args": args, "home": os.environ.get("HOME")}}) + "\n")
+    log.write(json.dumps({{"args": args, "home": os.environ.get("HOME"), "pid": os.getpid()}}) + "\n")
 mode = os.environ.get("FAKE_ACLI_MODE", "ok")
 if mode == "sleep":
     import time; time.sleep(5)
+if mode == "spawn":
+    import subprocess, time
+    child = subprocess.Popen(["sleep", "30"])
+    with open(os.environ["FAKE_ACLI_LOG"] + ".child", "w") as f:
+        f.write(str(child.pid))
+    time.sleep(30)
 if mode == "badjson":
     print("{{not: json"); sys.exit(0)
 if mode == "garbage":
@@ -54,6 +62,19 @@ elif args[0] == "list":
         {{"name": "dataphin", "command": "dataphin", "description": "d", "version": "1.4.14"}},
         "skip-me"]}}))
 '''
+
+
+def _alive(pid: int) -> bool:
+    """Running, not merely a zombie awaiting a reaper that may never come."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    try:
+        with open(f"/proc/{pid}/stat") as stat_file:
+            return stat_file.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except FileNotFoundError:
+        return False
 
 
 @pytest.fixture
@@ -160,6 +181,56 @@ async def test_timeout_kills_and_reports(fake_acli, install_dir, monkeypatch):
     assert caught.value.code == "timeout"
 
 
+async def test_timeout_kills_children_holding_the_pipes(
+    fake_acli, install_dir, tmp_path, monkeypatch
+):
+    """A grandchild that inherits acli's stdout must not keep the request waiting."""
+    runner, _ = fake_acli
+    monkeypatch.setenv("FAKE_ACLI_MODE", "spawn")
+    monkeypatch.setattr("engine.community.core.acli.runner.QUERY_TIMEOUT_SECONDS", 1.0)
+
+    started = time.monotonic()
+    with pytest.raises(AcliError) as caught:
+        await runner.market("x", 1, 10)
+
+    assert caught.value.code == "timeout"
+    assert time.monotonic() - started < 10
+    child_pid = int((tmp_path / "calls.jsonl.child").read_text())
+    await asyncio.sleep(0.2)
+    assert not _alive(child_pid)
+
+
+async def test_cancelled_request_kills_acli(fake_acli, install_dir, monkeypatch):
+    runner, calls = fake_acli
+    monkeypatch.setenv("FAKE_ACLI_MODE", "sleep")
+
+    task = asyncio.create_task(runner.market("x", 1, 10))
+    for _ in range(100):
+        if calls():
+            break
+        await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert not _alive(calls()[0]["pid"])
+
+
+async def test_unwritable_install_dir_is_a_refusal_not_a_crash(fake_acli, tmp_path):
+    runner, calls = fake_acli
+    blocker = tmp_path / "file"
+    blocker.write_text("")
+    install_dir = str(blocker / "x" / "bin")
+
+    with pytest.raises(AcliError) as caught:
+        await runner.install("dataphin", install_dir)
+    assert caught.value.code == "install_failed"
+    with pytest.raises(AcliError) as caught:
+        await runner.uninstall("dataphin", install_dir)
+    assert caught.value.code == "uninstall_failed"
+    assert calls() == []
+
+
 async def test_missing_acli_is_unavailable(tmp_path, install_dir):
     runner = AcliRunner(executable=str(tmp_path / "no-such-acli"))
 
@@ -230,7 +301,7 @@ async def test_market_without_keyword_omits_the_flag(fake_acli):
 
 
 @pytest.mark.parametrize(
-    "name", ["", "-rf", "../x", "a b", "x;rm", "a" * 300, None]
+    "name", ["", "-rf", "../x", "a b", "x;rm", "a" * 300, None, "di@1.0.9", "@scope", "a/b"]
 )
 def test_bad_names_are_refused(name):
     with pytest.raises(AcliError) as caught:
@@ -238,7 +309,7 @@ def test_bad_names_are_refused(name):
     assert caught.value.code == "invalid_input"
 
 
-@pytest.mark.parametrize("name", ["dataphin", "deepinsight-cli", "@antcli/yuntu-cli", "di@1.0.9"])
+@pytest.mark.parametrize("name", ["dataphin", "deepinsight-cli", "@antcli/yuntu-cli", "a_b.c"])
 def test_market_names_are_accepted(name):
     assert validate_name(name) == name
 
@@ -279,3 +350,22 @@ def test_runner_leaves_process_home_untouched(fake_acli, install_dir):
     before = os.environ.get("HOME")
     validate_install_dir(install_dir)
     assert os.environ.get("HOME") == before
+
+
+class _StuckProcess:
+    pid = 999_999_999
+
+    async def wait(self) -> int:
+        await asyncio.sleep(60)
+        return 0
+
+
+async def test_kill_group_tolerates_gone_and_unreapable_processes(monkeypatch):
+    """An already-gone group, and a process that never reaps, must not hang or raise."""
+    def gone(pid, sig):
+        raise ProcessLookupError(pid)
+
+    monkeypatch.setattr("engine.community.core.acli.runner.os.killpg", gone)
+    monkeypatch.setattr("engine.community.core.acli.runner._REAP_TIMEOUT_SECONDS", 0.1)
+
+    await AcliRunner._kill_group(_StuckProcess())
