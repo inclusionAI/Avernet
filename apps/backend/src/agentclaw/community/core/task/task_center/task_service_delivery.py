@@ -24,7 +24,7 @@ _DEFAULT_DELIVERY_LEASE_MS = 60_000
 _BBS_DELIVERY_LEASE_MS = 600_000
 
 
-def _relay_delivery_trace(
+def _relay_delivery_fields(
     *,
     status: str,
     action_input: dict[str, object],
@@ -34,11 +34,38 @@ def _relay_delivery_trace(
     boost_reason: str,
     error_msg: str | None = None,
 ) -> dict[str, object]:
-    """Project S6 service-side facts into the seven shared trajectory fields.
+    """S6 七字段(与轨迹事件表对齐);action_log 与写时发射共用的单一事实源。"""
+    return {
+        "action_type": "dispatch",
+        "action_input": json.dumps(
+            action_input,
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        "action_result": action_result,
+        "status_from": status_from.value,
+        "status_to": status_to.value,
+        "boost_reason": boost_reason,
+        "error_msg": error_msg,
+    }
 
-    This keeps the report's outer ``step/status/detail`` contract unchanged.
-    The trajectory owner can map ``detail`` directly to a trajectory event; the
-    delivery logic does not format or render it.
+
+def _relay_delivery_trace(
+    status: str,
+    *,
+    action_input: dict[str, object],
+    action_result: str,
+    status_from: Status,
+    status_to: Status,
+    boost_reason: str,
+    error_msg: str | None = None,
+) -> dict[str, object]:
+    """Project S6 service-side facts into the shared step payload contract
+    (``trace.steps[0].detail`` 即七字段,经 `_relay_delivery_fields` 单源产出)。
+
+    This keeps the report's outer ``step/status/detail`` contract unchanged
+    for action_log 消费方;trajectory 侧已改为**写时**落表行
+    (``TaskServiceDeliveryMixin._emit_delivery_trajectory``),不再读时投影。
     """
     return {
         "trace": {
@@ -46,19 +73,15 @@ def _relay_delivery_trace(
                 {
                     "step": "S6_DISPATCH",
                     "status": status,
-                    "detail": {
-                        "action_type": "dispatch",
-                        "action_input": json.dumps(
-                            action_input,
-                            ensure_ascii=False,
-                            sort_keys=True,
-                        ),
-                        "action_result": action_result,
-                        "status_from": status_from.value,
-                        "status_to": status_to.value,
-                        "boost_reason": boost_reason,
-                        "error_msg": error_msg,
-                    },
+                    "detail": _relay_delivery_fields(
+                        status=status,
+                        action_input=action_input,
+                        action_result=action_result,
+                        status_from=status_from,
+                        status_to=status_to,
+                        boost_reason=boost_reason,
+                        error_msg=error_msg,
+                    ),
                 }
             ]
         }
@@ -78,6 +101,51 @@ def _relay_delivery_input(task_id: str, node: TaskNode) -> dict[str, object]:
         "session_id": extend_props.get("session_id"),
         "delivery_intake_status": node.status.value,
     }
+
+def _emit_delivery_trajectory(
+    service: "TaskServiceDeliveryMixin",
+    task_id: str,
+    node_id: str,
+    *,
+    status: str,
+    action_input: dict[str, object],
+    action_result: str,
+    status_from: Status,
+    status_to: Status,
+    boost_reason: str,
+    error_msg: str | None = None,
+) -> None:
+    """S6 写时发射:交付事实与 action_log 同步落一条 ``task_trajectory_events``
+    行(action_type=dispatch,七字段单源出 `_relay_delivery_fields`;attempt=0
+    与 append_action_event 默认一致,读侧投影按秒粒度签名去重归一)。
+    fire-and-forget:吞异常不抛(``_task_context_service`` 未接线 no-op)。"""
+    context = getattr(service, "_task_context_service", None)
+    if context is None:
+        return
+    try:
+        context.emit_trajectory_event(
+            task_id,
+            node_id,
+            "dispatch",
+            action_result=action_result,
+            action_input=json.dumps(
+                action_input, ensure_ascii=False, sort_keys=True,
+            ),
+            status_from=status_from,
+            status_to=status_to,
+            attempt=0,
+            boost_reason=boost_reason,
+            error_msg=error_msg,
+            ext_info={"trace_step": True, "step": "S6_DISPATCH"},
+        )
+    except Exception:  # noqa: BLE001  观测旁路,吞而不抛
+        logger.warning(
+            "relay delivery trajectory emission failed task=%s node=%s",
+            task_id,
+            node_id,
+            exc_info=True,
+        )
+
 
 class TaskServiceDeliveryMixin:
     async def dispatch_node(self, task_id: str, node_id: str) -> TaskNode:
@@ -139,6 +207,15 @@ class TaskServiceDeliveryMixin:
                 status_from=initial_status,
                 status_to=node.status,
             )
+            _emit_delivery_trajectory(
+                self, task_id, node_id,
+                status="completed",
+                action_input=_relay_delivery_input(task_id, node),
+                action_result="retired_legacy_root_intent",
+                status_from=initial_status,
+                status_to=node.status,
+                boost_reason="legacy root intent retired to avoid duplicate delivery",
+            )
             logger.warning(
                 "retired legacy relay root delivery intent task=%s node=%s",
                 task_id,
@@ -185,6 +262,15 @@ class TaskServiceDeliveryMixin:
                 status_from=initial_status,
                 status_to=delivered.status,
             )
+            _emit_delivery_trajectory(
+                self, task_id, node_id,
+                status="completed",
+                action_input=dispatch_input,
+                action_result="delivered",
+                status_from=initial_status,
+                status_to=delivered.status,
+                boost_reason="relay handoff accepted by the selected runtime",
+            )
             return delivered
         except Exception as exc:
             intents.mark_delivery_intent(
@@ -213,6 +299,16 @@ class TaskServiceDeliveryMixin:
                 },
                 status_from=initial_status,
                 status_to=node.status,
+            )
+            _emit_delivery_trajectory(
+                self, task_id, node_id,
+                status="failed",
+                action_input=dispatch_input,
+                action_result="failed",
+                status_from=initial_status,
+                status_to=node.status,
+                boost_reason="relay handoff rejected by the selected runtime",
+                error_msg=f"{type(exc).__name__}: {exc}",
             )
             raise
 

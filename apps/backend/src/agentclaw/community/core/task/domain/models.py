@@ -498,11 +498,22 @@ class TaskNodePatch:
 
 @dataclass(frozen=True)
 class TaskReportTraceStep:
-    """One Bot-side Relay check point submitted with a report event."""
+    """One Bot-side Relay check point submitted with a report event.
 
-    step: str
-    status: str
-    detail: dict[str, Any] = field(default_factory=dict)
+    上报时逐条与轨迹事件表对齐(七字段协议):每条 step 在 ``TaskServiceRelayMixin.
+    report`` 写时经 ``emit_trajectory_event`` 独立落一行 ``task_trajectory_events``
+    ——不做读时投影,已约定 action_type 必须取自 ``TrajectoryActionType``
+    (submit|plan|dispatch|execute|verify|reset|transition|relay),非法值写侧
+    跳过(读侧枚举强校验会丢行,先拦在上游)。
+    """
+
+    action_type: str
+    action_result: str
+    action_input: str | None = None
+    status_from: str | None = None
+    status_to: str | None = None
+    boost_reason: str | None = None
+    error_msg: str | None = None
 
 
 @dataclass(frozen=True)

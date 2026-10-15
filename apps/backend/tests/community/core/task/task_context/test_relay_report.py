@@ -164,37 +164,27 @@ def test_report_trace_is_recorded_once_and_is_part_of_event_fingerprint() -> Non
     trace = TaskReportTrace(
         steps=[
             TaskReportTraceStep(
-                step="S1_CONTEXT",
-                status="completed",
-                detail={"node_id": "task-1"},
+                action_type="execute",
+                action_result="context_read",
+                action_input="读取上下文",
             ),
-            TaskReportTraceStep(
-                step="S2_GAPS", status="completed", detail={"gaps": ["g1"]}
-            ),
-            TaskReportTraceStep(step="S4A_EXECUTION", status="completed", detail={}),
+            TaskReportTraceStep(action_type="plan", action_result="gaps_refreshed"),
+            TaskReportTraceStep(action_type="verify", action_result="accept_pass"),
         ]
     )
     execution = replace(_execution(), trace=trace)
 
     assert service.apply_relay_report(execution).status == TaskReportStatus.APPLIED
 
+    # trace 不再注入 action_log payload(持久载体已改 trajectory 表行)
     actions = service.query_task_dashboard("task-1").tasks[0].run_info.action_log
-    assert actions[0].payload["trace"] == {
-        "steps": [
-            {
-                "step": "S1_CONTEXT",
-                "status": "completed",
-                "detail": {"node_id": "task-1"},
-            },
-            {"step": "S2_GAPS", "status": "completed", "detail": {"gaps": ["g1"]}},
-            {"step": "S4A_EXECUTION", "status": "completed", "detail": {}},
-        ],
-    }
-    assert "trace" not in actions[1].payload
+    for action in actions:
+        assert "trace" not in action.payload
 
+    # trace 属于 event fingerprint:同 event_id 不同 trace → 冲突拒绝
     changed_trace = TaskReportTrace(
         steps=[
-            TaskReportTraceStep(step="S1_CONTEXT", status="completed", detail={}),
+            TaskReportTraceStep(action_type="execute", action_result="changed"),
         ]
     )
     with pytest.raises(TaskStateError, match="conflicts"):
@@ -222,9 +212,9 @@ def test_plan_report_trace_is_recorded_once() -> None:
         trace=TaskReportTrace(
             steps=[
                 TaskReportTraceStep(
-                    step="S5A_REFRESH_GAPS",
-                    status="completed",
-                    detail={"gaps": ["g1"]},
+                    action_type="plan",
+                    action_result="gaps_refreshed",
+                    action_input="S5A_REFRESH_GAPS",
                 ),
             ]
         ),
@@ -234,16 +224,9 @@ def test_plan_report_trace_is_recorded_once() -> None:
 
     actions = service.query_task_dashboard("task-1").tasks[0].run_info.action_log
     assert result.status == TaskReportStatus.APPLIED
-    assert actions[-2].payload["trace"] == {
-        "steps": [
-            {
-                "step": "S5A_REFRESH_GAPS",
-                "status": "completed",
-                "detail": {"gaps": ["g1"]},
-            }
-        ],
-    }
-    assert "trace" not in actions[-1].payload
+    # trace 不再注入 action_log(持久载体改为 trajectory 表行);重放同 command 幂等
+    for action in actions:
+        assert "trace" not in action.payload
 
 
 def test_accepted_empty_output_is_still_a_recoverable_execution_fact() -> None:

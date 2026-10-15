@@ -61,11 +61,17 @@ class PlannedNodeDTO(BaseModel):
 
 
 class TaskReportTraceStepDTO(BaseModel):
+    """单条 trace step,七字段与轨迹事件表对齐(见 domain ``TaskReportTraceStep``)。"""
+
     model_config = ConfigDict(extra="forbid")
 
-    step: str = Field(min_length=1)
-    status: str = Field(min_length=1)
-    detail: dict[str, Any] = Field(default_factory=dict)
+    action_type: str = Field(min_length=1)
+    action_result: str = Field(min_length=1)
+    action_input: str | None = None
+    status_from: str | None = None
+    status_to: str | None = None
+    boost_reason: str | None = None
+    error_msg: str | None = None
 
 
 class TaskReportTraceDTO(BaseModel):
@@ -157,9 +163,13 @@ class TaskReportCommandDTO(BaseModel):
             trace=TaskReportTrace(
                 steps=[
                     TaskReportTraceStep(
-                        step=item.step,
-                        status=item.status,
-                        detail=dict(item.detail),
+                        action_type=item.action_type,
+                        action_result=item.action_result,
+                        action_input=item.action_input,
+                        status_from=item.status_from,
+                        status_to=item.status_to,
+                        boost_reason=item.boost_reason,
+                        error_msg=item.error_msg,
                     )
                     for item in self.trace.steps
                 ],

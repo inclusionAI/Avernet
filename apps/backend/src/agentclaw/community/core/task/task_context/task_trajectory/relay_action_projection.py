@@ -63,36 +63,6 @@ def _search_probe(payload: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def project_trace_steps(
-    source: dict[str, Any] | None,
-) -> list[dict[str, Any]] | None:
-    """``trace.steps`` → 归一的 ``trace_steps``(step/status/detail 三槽)。
-
-    数据源为 Bot 随上报携带的执行检查点(S1~S5;S6 派发侧推导,不在此)。``source``
-    既可是表行 ext_info(W2 写时发射随 payload 落入 ext_info.trace)也可是 action
-    payload 本体——两种形态都认。防御式:缺素材/形态不合 → ``None``(缺字段=无信号),
-    绝不抛。
-    """
-    if not isinstance(source, dict):
-        return None
-    trace = source.get("trace")
-    trace = trace if isinstance(trace, dict) else source
-    steps = trace.get("steps")
-    if not isinstance(steps, list) or not steps:
-        return None
-    projected: list[dict[str, Any]] = []
-    for step in steps:
-        if not isinstance(step, dict) or not step.get("step"):
-            continue
-        detail = step.get("detail")
-        projected.append({
-            "step": str(step["step"]),
-            "status": str(step.get("status") or ""),
-            "detail": dict(detail) if isinstance(detail, dict) else {},
-        })
-    return projected or None
-
-
 def relay_action_event_fields(
     event: NodeActionEvent,
     *,
@@ -178,7 +148,6 @@ def _to_trajectory_event(
         ),
         holder_id=holder_id,
         search_probe=_search_probe(payload),
-        trace_steps=project_trace_steps(payload),
     )
 
 

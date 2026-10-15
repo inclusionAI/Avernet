@@ -878,43 +878,6 @@ def test_assemble_legacy_rationale_still_projects_without_sampling_keys():
     assert probe["keywords"] == [] and probe["raw_item_count"] == 0
 
 
-def test_assemble_projects_trace_steps_from_ext_info():
-    """trace_steps 读时定向投影:表行 ext_info 的 ``trace.steps``(Bot 上报的
-    S1~S5 执行检查点,W2 写时发射已随 ext_info 落表)→ 事件 ``trace_steps``;
-    归一为 ``step/status/detail`` 三槽;无素材/损坏 JSON → None(缺字段=无信号)。"""
-    import json as _json
-
-    ext = _json.dumps({
-        "schema_v": 1,
-        "execution_decision": "ACCEPTED",
-        "trace": {
-            "steps": [
-                {"step": "S1", "status": "done", "detail": {"read": "spec"}},
-                {"step": "S4b", "status": "ok", "detail": {}},
-            ]
-        },
-    }, ensure_ascii=False)
-    repo = _FakeRepo(events=[
-        # 携带 trace 的写时发射行(execute)→ 投影出 trace_steps
-        _event_record(id=1, node_id="n1", action_type="execute",
-                      action_result="success", ext_info=ext),
-        # 无 trace 素材的行 → None
-        _event_record(id=2, node_id="n2", action_type="plan",
-                      action_result="success", ext_info='{"schema_v":1}'),
-        # 损坏 JSON → None(不影响该行读取)
-        _event_record(id=3, node_id="n3", action_type="verify",
-                      action_result="accept_pass", ext_info="{not-json"),
-    ])
-    timeline = TaskTrajectoryAssembler(repo).assemble("T-1").timeline
-
-    assert timeline[0].trace_steps == [
-        {"step": "S1", "status": "done", "detail": {"read": "spec"}},
-        {"step": "S4b", "status": "ok", "detail": {}},
-    ]
-    assert timeline[1].trace_steps is None
-    assert timeline[2].trace_steps is None
-
-
 def test_assemble_events_without_search_material_keep_probe_none():
     """无搜推素材(无 ext_info / 无关键 key / 损坏 JSON / 非 relay search 事件)→ None。"""
     repo = _FakeRepo(events=[
