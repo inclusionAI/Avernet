@@ -87,7 +87,7 @@ const CollaborationFlowPreview: React.FC<CollaborationFlowPreviewProps> = ({
   // Binding/selection updates rebuild node data, but should preserve the user's viewport.
   const viewportLayoutKey = result.layout && JSON.stringify({
     nodes: result.layout.nodes.map(({ id, parentId, position }) => [id, parentId, position.x, position.y]),
-    groups: result.layout.groups.map(({ id, position, width, height }) => [id, position.x, position.y, width, height]),
+    groups: result.layout.groups.map(({ id, parentId, position, width, height }) => [id, parentId, position.x, position.y, width, height]),
     edges: result.layout.edges.map(({ source, target }) => [source, target]),
   });
   useEffect(() => {
@@ -177,7 +177,8 @@ const CollaborationFlowPreview: React.FC<CollaborationFlowPreviewProps> = ({
       >
         <ReactFlow<Node>
           nodes={[...result.layout.groups.map((group) => ({ id: group.id, type: 'loopContainer',
-            position: group.position, data: { title: group.title, maxIterations: group.maxIterations, loopId: group.loopId },
+            position: group.position, parentId: group.parentId,
+            data: { title: group.title, maxIterations: group.maxIterations, loopId: group.loopId },
             style: { width: group.width, height: group.height }, draggable: false, selectable: false, focusable: false })), ...nodes]}
           edges={edges}
           nodeTypes={nodeTypes}

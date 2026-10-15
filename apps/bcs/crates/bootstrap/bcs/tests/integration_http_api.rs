@@ -100,3 +100,38 @@ async fn bcs_http_bot_detail_endpoint_requires_caller() {
     println!("Bot detail endpoint status: {}", response.status());
     assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn concurrent_bcs_processes_keep_their_own_ports() {
+    let (_first_dir, first_data) = create_temp_dir();
+    let (_second_dir, second_data) = create_temp_dir();
+    let mut first = ProcessManager::new();
+    let mut second = ProcessManager::new();
+    let (first_port, second_port) = tokio::join!(
+        first.start_bcs(&first_data), second.start_bcs(&second_data),
+    );
+    let first_port = first_port.expect("First BCS should start");
+    let second_port = second_port.expect("Second BCS should start");
+    assert_ne!(first_port, second_port);
+    first.kill_all();
+    let response = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{}/health", second_port))
+        .timeout(Duration::from_secs(5)).send().await.unwrap();
+    assert!(response.status().is_success());
+}
+
+#[tokio::test]
+async fn occupied_port_does_not_make_another_bcs_process_ready() {
+    let (_first_dir, first_data) = create_temp_dir();
+    let (_second_dir, second_data) = create_temp_dir();
+    let mut first = ProcessManager::new();
+    let mut second = ProcessManager::new();
+    let port = first.start_bcs(&first_data).await.expect("First BCS should start");
+    let error = second.start_bcs_with_port(&second_data, port).await
+        .expect_err("Another process's health response must not establish readiness");
+    assert!(error.to_string().contains("exited before readiness"), "{}", error);
+    let response = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{}/health", port))
+        .timeout(Duration::from_secs(5)).send().await.unwrap();
+    assert!(response.status().is_success());
+}

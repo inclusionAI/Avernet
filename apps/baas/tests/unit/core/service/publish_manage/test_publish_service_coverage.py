@@ -316,11 +316,11 @@ class TestCreatePublishOrphanCleanup:
         svc._bot_service.get_bot = AsyncMock(return_value=bot)
 
         orphan = _make_publish_record(id=50, publish_type="CREATE", status="PENDING")
-        svc._publish_repo.get_active_by_bot_id.return_value = orphan
         svc._publish_batch_repo.list_by_publish_id.return_value = []  # no batches = orphan
 
-        # After cleanup, create proceeds normally
-        svc._publish_repo.get_active_by_bot_id.side_effect = [orphan, None]
+        # After cleanup, create proceeds normally; the pre-insert
+        # protection-set query also sees no actives
+        svc._publish_repo.list_active_by_bot_ids.side_effect = [[orphan], [], []]
         svc._publish_repo.insert_publish.return_value = 1
 
         new_pub = _make_publish_record(id=1, publish_type="CREATE", status="PENDING")
@@ -358,7 +358,7 @@ class TestCreatePublishOrphanCleanup:
         svc._bot_service.get_bot = AsyncMock(return_value=bot)
 
         orphan = _make_publish_record(id=50, publish_type="UPDATE", status="PENDING")
-        svc._publish_repo.get_active_by_bot_id.side_effect = [orphan, None]
+        svc._publish_repo.list_active_by_bot_ids.side_effect = [[orphan], [], []]
         svc._publish_batch_repo.list_by_publish_id.return_value = []
 
         # cleanup returns None (no target_bot_id)
@@ -404,7 +404,7 @@ class TestCreatePublishOrphanCleanup:
         svc._bot_service.get_bot = AsyncMock(return_value=bot)
 
         orphan = _make_publish_record(id=50, publish_type="CREATE", status="PENDING")
-        svc._publish_repo.get_active_by_bot_id.return_value = orphan
+        svc._publish_repo.list_active_by_bot_ids.return_value = [orphan]
         svc._publish_batch_repo.list_by_publish_id.return_value = []
 
         # Make update_status fail during cleanup
@@ -439,7 +439,7 @@ class TestCreatePublishConcurrentConflict:
 
         existing = _make_publish_record(id=99, publish_type="CREATE", status="ACTIVE")
         existing.gmt_modified = datetime.now()  # not stale
-        svc._publish_repo.get_active_by_bot_id.return_value = existing
+        svc._publish_repo.list_active_by_bot_ids.return_value = [existing]
         svc._publish_repo.now.return_value = datetime.now()
 
         mock_batch = _make_batch_record(status="COMPLETED")

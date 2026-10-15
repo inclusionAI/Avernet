@@ -6,14 +6,18 @@ import type { UseGroupCollaborationPickerResult } from './useGroupCollaborationP
 export function useAllAvailableBots(
   activeIdentity: IdentityView | null | undefined,
   picker: UseGroupCollaborationPickerResult,
-): Array<{ id: string; name: string }> {
+): Array<{ id: string; name: string; avatarUrl?: string }> {
   return useMemo(() => {
-    const map = new Map<string, { id: string; name: string }>();
+    const map = new Map<string, { id: string; name: string; avatarUrl?: string }>();
     [...picker.friends, ...picker.mine, ...picker.candidates].forEach((bot) => {
-      map.set(bot.id, { id: bot.id, name: bot.name });
+      map.set(bot.id, { id: bot.id, name: bot.name, avatarUrl: bot.avatarUrl });
     });
     if (activeIdentity?.kind === 'bot') {
-      map.set(activeIdentity.id, { id: activeIdentity.id, name: activeIdentity.displayName });
+      map.set(activeIdentity.id, {
+        id: activeIdentity.id,
+        name: activeIdentity.displayName,
+        avatarUrl: activeIdentity.avatarUrl,
+      });
     }
     return Array.from(map.values());
   }, [activeIdentity, picker.candidates, picker.friends, picker.mine]);

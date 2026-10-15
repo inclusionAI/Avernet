@@ -1,14 +1,15 @@
 // 收起侧栏（56px）的「Bot 泊位」竖轨：整栏收起不留盲区，收起条仍回答
-// 「有谁 / 开着哪个 / 还能去哪发现」。分组以「界珠」短分隔打结，选中 Bot 亮出
+// 「有谁 / 开着哪个」。分组以「界珠」短分隔打结，选中 Bot 亮出
 // 泊位缺口（primary 左刻 + 底），好友 Bot 头像带在线信号点——所有图形都承载
 // 信息，不做纯装饰。头像是干净的一列：不留任何贯穿线（首版细轨从半透明头像
 // 中间穿过，读成故障线，已撤）。
 // 交互与展开态同口径：头像直达打开会话（不强迫展开侧栏）；AgentCoding Bot
 // 走专用 coding 对话；不可聊 Bot 保持降权占位（与分组「泊位」一致）；
-// +N 溢出 / 空位虚线占位 / 发现入口各有语义，其中前两者请求展开完整侧栏。
+// +N 溢出 / 空位虚线占位各有语义，均请求展开完整侧栏
+//（2026-10-14 体验修复：底端不再保留公开 Bot 发现入口）。
 import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
 import type { ConversationBotSection, ConversationBotView } from '@/domain/conversation/types';
-import { Compass, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { AvatarTile } from '../../components/AvatarTile';
 
@@ -31,7 +32,6 @@ export interface ConversationCollapsedRailProps {
   onQuickOpen(view: ConversationBotView): void;
   /** 「+N 溢出 / 空位占位」入口：请求展开完整侧栏。 */
   onExpand(): void;
-  onOpenPublicBots(): void;
   /** AgentCoding Bot 不建普通会话，直达专用 coding 对话页（与 Bot 行为一致）。 */
   onOpenAgentCodingBot(bot: ConversationBotView['bot']): void;
 }
@@ -122,7 +122,7 @@ function NonInteractiveTile({ view }: { view: ConversationBotView }) {
   );
 }
 
-/** 空位虚线占位：分组无成员时仍留一个「可泊」缺口，点击展开侧栏走空态「前往公开 Bot」。 */
+/** 空位虚线占位：分组无成员时仍留一个「可泊」缺口，点击展开侧栏走分组空态引导。 */
 function EmptyTile({ label, onExpand }: { label: string; onExpand(): void }) {
   return (
     <Tooltip>
@@ -147,7 +147,6 @@ export function ConversationCollapsedRail({
   selectedSection,
   onQuickOpen,
   onExpand,
-  onOpenPublicBots,
   onOpenAgentCodingBot,
 }: ConversationCollapsedRailProps) {
   return (
@@ -218,23 +217,7 @@ export function ConversationCollapsedRail({
             </div>
           );
         })}
-        {/* 收起条收口：底端发现入口，让整条泊位轨道以「还能去哪补充泊位」作结。 */}
-        <div className="mt-auto pt-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                aria-label="前往公开 Bot"
-                className="h-9 w-9 rounded-full bg-primary/10 text-primary hover:bg-primary/15"
-                onClick={onOpenPublicBots}
-              >
-                <Compass className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">公开 Bot · 发现更多</TooltipContent>
-          </Tooltip>
         </div>
-      </div>
     </TooltipProvider>
   );
 }

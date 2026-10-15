@@ -181,6 +181,7 @@ from .bots.classification import router as classification_router
 from .collaboration_bots import public_router as collaboration_public_router
 from .collaborating_bots import router as collaborating_bots_router
 from .task import task_router
+from .bots.engine_version import router as engine_version_router
 from .bots.engine_config import router as engine_config_router
 from .bots.cli_tools import router as cli_tools_router
 from .bots.config_manifest import router as config_manifest_router
@@ -381,6 +382,7 @@ _SUBGROUPS = [
 # declares it explicitly so the admission rule is visible where the public
 # surface is assembled. FastAPI caches the shared dependency per request.
 _ADDRESSED_BOT_SUBGROUPS = [
+    engine_version_router,
     # The config manifest is collaborator-scoped (MEMBER to read, ADMIN to
     # write), so it may address a shared bot and takes the addressed-owner
     # grant rather than the own-bot one.

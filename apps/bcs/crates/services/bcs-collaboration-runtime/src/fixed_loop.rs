@@ -1,5 +1,4 @@
-//! Pure authoring compilation. Execution remains gated by the v1 validator
-//! until persisted-plan loading and runtime progression are integrated.
+//! Pure bounded fixed-Loop authoring compilation to the ordinary execution DAG.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -7,7 +6,7 @@ use bcs_config_api::FixedLoopLimits;
 use bcs_domain::{
     CollaborationDefinition, CollaborationRuntimeDefinition,
     CompiledArtifactProjection, CompiledEdgeMetadata, CompiledNodeMetadata, FixedLoopDefinition,
-    StateMachineExecutionPlan, StateMachineGraphMode, StateMachineLoopRoute,
+    StateMachineExecutionPlan, StateMachineGraphMode, StateMachineLoopFrame, StateMachineLoopRoute,
     StateMachineLoopRouteKind, StateMachineNodeDefinition, StateMachineNodeKind,
     StateMachineTransition,
 };
@@ -18,6 +17,7 @@ use sha2::{Digest, Sha256};
 use crate::definition::{CompiledStateMachine, ensure_acyclic, validate_definition};
 
 pub const FIXED_LOOP_COMPILER_VERSION: &str = "bcs.fixed-loop.compiler/v1";
+pub const NESTED_FIXED_LOOP_COMPILER_VERSION: &str = "bcs.fixed-loop.compiler/v2";
 const MACHINE_PATH: &str = "$.runtime.state_machine";
 const LOOP_FEATURES: [&str; 5] = [
     "state_machine.version.2",
@@ -26,6 +26,7 @@ const LOOP_FEATURES: [&str; 5] = [
     "state_machine.loop.mode.fixed",
     "state_machine.loop.previous_result",
 ];
+const LOOP_NESTING_FEATURE: &str = "state_machine.loop.nesting";
 
 pub struct CompiledAuthoringDefinition {
     pub definition: CollaborationDefinition,
@@ -89,13 +90,14 @@ fn compile_definition(
         return Err(invalid(format!("{MACHINE_PATH}.graph_mode"), "version 2 requires hierarchical"));
     }
     let mut count = 0usize;
+    let mut max_loop_depth = 0u32;
     for (id, node) in &machine.nodes {
         let path = format!("{MACHINE_PATH}.nodes.{id}");
         validate_id(id, &path)?;
         let added = if node.kind == StateMachineNodeKind::Loop {
-            validate_loop(id, node, &machine.nodes, limits)?;
-            let body = node.loop_definition.as_ref().expect("validated loop");
-            body.nodes.len().checked_mul(body.max_iterations as usize)
+            let (cost, depth) = validate_loop(node, &machine.nodes, limits, 1, &path)?;
+            max_loop_depth = max_loop_depth.max(depth);
+            Some(cost)
         } else {
             if node.loop_definition.is_some() {
                 return Err(invalid(format!("{path}.loop"), "only kind: loop may define loop"));
@@ -113,111 +115,32 @@ fn compile_definition(
         return Err(invalid(format!("{MACHINE_PATH}.nodes"), "must have exactly one outer final_output node"));
     }
 
-    let mut nodes = BTreeMap::new();
-    let mut metadata = BTreeMap::new();
-    let mut edges = Vec::new();
-    let mut expansion_budget = LimitedWriter {
+    let compiler_version = if max_loop_depth >= 2 {
+        NESTED_FIXED_LOOP_COMPILER_VERSION
+    } else {
+        FIXED_LOOP_COMPILER_VERSION
+    };
+    let mut expansion = Expansion {
+        definition: &definition,
+        compiler_version,
+        nodes: BTreeMap::new(),
+        metadata: BTreeMap::new(),
+        authoring_paths: BTreeMap::new(),
+        edges: Vec::new(),
+        budget: LimitedWriter {
         written: 0,
         limit: limits.max_compiled_state_machine_bytes,
+        },
     };
     for (id, node) in &machine.nodes {
-        if let Some(body) = &node.loop_definition {
-            for iteration in 1..=body.max_iterations {
-                for (body_id, body_node) in &body.nodes {
-                    let edge_start = edges.len();
-                    let execution_id = execution_node_id(&definition, id, iteration, body_id);
-                    let is_result = body_id == &body.result_node;
-                    let mut compiled_node = body_node.clone();
-                    compiled_node.transitions.clear();
-                    if is_result {
-                        for outcome in &body.continue_outcomes {
-                            let (targets, kind, logical, projection) = if iteration < body.max_iterations {
-                                (
-                                    vec![execution_node_id(&definition, id, iteration + 1, &body.entry_node)],
-                                    StateMachineLoopRouteKind::Continue,
-                                    outcome.clone(),
-                                    CompiledArtifactProjection::ControlOnly,
-                                )
-                            } else {
-                                (
-                                    node.transitions[&body.exhausted_outcome].targets.iter()
-                                        .map(|target| outer_target(&definition, target)).collect(),
-                                    StateMachineLoopRouteKind::Exhausted,
-                                    body.exhausted_outcome.clone(),
-                                    CompiledArtifactProjection::Artifact,
-                                )
-                            };
-                            add_transition(&mut compiled_node, &mut edges, &execution_id, outcome, targets,
-                                projection, Some(StateMachineLoopRoute { kind, logical_outcome: logical }),
-                                if iteration < body.max_iterations { body.continue_display_name.clone() }
-                                else { node.transitions[&body.exhausted_outcome].display_name.clone() });
-                        }
-                        for outcome in &body.break_outcomes {
-                            let targets = node.transitions[outcome].targets.iter()
-                                .map(|target| outer_target(&definition, target)).collect();
-                            add_transition(&mut compiled_node, &mut edges, &execution_id, outcome, targets,
-                                CompiledArtifactProjection::Artifact,
-                                Some(StateMachineLoopRoute { kind: StateMachineLoopRouteKind::Break, logical_outcome: outcome.clone() }),
-                                node.transitions[outcome].display_name.clone());
-                        }
-                    } else {
-                        for (outcome, transition) in &body_node.transitions {
-                            let targets = transition.targets.iter()
-                                .map(|target| execution_node_id(&definition, id, iteration, target)).collect();
-                            add_transition(&mut compiled_node, &mut edges, &execution_id, outcome, targets,
-                                CompiledArtifactProjection::Artifact, None, transition.display_name.clone());
-                            compiled_node.transitions.get_mut(outcome).expect("inserted transition").guard = transition.guard.clone();
-                        }
-                    }
-                    let previous_result_node_id = if body_id == &body.entry_node && iteration > 1 {
-                        Some(execution_node_id(&definition, id, iteration - 1, &body.result_node))
-                    } else {
-                        None
-                    };
-                    let node_metadata = CompiledNodeMetadata {
-                        execution_node_id: execution_id.clone(),
-                        definition_node_id: body_id.clone(),
-                        loop_id: Some(id.clone()),
-                        iteration: Some(iteration),
-                        max_iterations: Some(body.max_iterations),
-                        is_loop_entry: body_id == &body.entry_node,
-                        is_loop_result: is_result,
-                        previous_result_node_id,
-                    };
-                    check_expansion_budget(&mut expansion_budget, &compiled_node, &node_metadata, &edges[edge_start..])?;
-                    metadata.insert(execution_id.clone(), node_metadata);
-                    if nodes.insert(execution_id, compiled_node).is_some() {
-                        return Err(invalid(format!("{MACHINE_PATH}.nodes.{id}"), "generated execution ID collision"));
-                    }
-                }
-            }
+        if node.kind == StateMachineNodeKind::Loop {
+            expansion.expand_loop(id, node, &machine.nodes, &[], &format!("{MACHINE_PATH}.nodes.{id}"))?;
         } else {
-            let edge_start = edges.len();
-            let mut compiled_node = node.clone();
-            compiled_node.transitions.clear();
-            for (outcome, transition) in &node.transitions {
-                let targets = transition.targets.iter().map(|target| outer_target(&definition, target)).collect();
-                add_transition(&mut compiled_node, &mut edges, id, outcome, targets,
-                    CompiledArtifactProjection::Artifact, None, transition.display_name.clone());
-                compiled_node.transitions.get_mut(outcome).expect("inserted transition").guard = transition.guard.clone();
-            }
-            let node_metadata = CompiledNodeMetadata {
-                execution_node_id: id.clone(),
-                definition_node_id: id.clone(),
-                loop_id: None,
-                iteration: None,
-                max_iterations: None,
-                is_loop_entry: false,
-                is_loop_result: false,
-                previous_result_node_id: None,
-            };
-            check_expansion_budget(&mut expansion_budget, &compiled_node, &node_metadata, &edges[edge_start..])?;
-            metadata.insert(id.clone(), node_metadata);
-            if nodes.insert(id.clone(), compiled_node).is_some() {
-                return Err(invalid(format!("{MACHINE_PATH}.nodes.{id}"), "execution ID collision"));
-            }
+            expansion.expand_ordinary(id, node, &machine.nodes, &[], None,
+                &format!("{MACHINE_PATH}.nodes.{id}"))?;
         }
     }
+    let Expansion { nodes, metadata, authoring_paths, mut edges, .. } = expansion;
     let mut executable_definition = definition.clone();
     let mut executable_machine = machine.clone();
     executable_machine.version = 1;
@@ -225,27 +148,30 @@ fn compile_definition(
     executable_machine.nodes = nodes;
     executable_definition.runtime = CollaborationRuntimeDefinition::StateMachine(executable_machine.clone());
     if let Some(requires) = &mut executable_definition.requires {
-        requires.server_features.retain(|feature| !LOOP_FEATURES.contains(&feature.as_str()));
+        requires.server_features.retain(|feature| {
+            !LOOP_FEATURES.contains(&feature.as_str()) && feature != LOOP_NESTING_FEATURE
+        });
     }
     let mut execution = validate_definition(executable_definition).map_err(|error| {
         // Preserve the authoring location for errors emitted by the reused DAG validator.
         let message = error.to_string();
         let path = metadata.values().find(|meta| meta.loop_id.is_some() && message.contains(&meta.execution_node_id))
-            .map(|meta| match &meta.loop_id {
-                Some(id) => format!("{MACHINE_PATH}.nodes.{id}.loop.nodes.{}", meta.definition_node_id),
-                None => format!("{MACHINE_PATH}.nodes.{}", meta.definition_node_id),
-            }).unwrap_or_else(|| format!("{MACHINE_PATH}.nodes"));
+            .and_then(|meta| authoring_paths.get(&meta.execution_node_id).cloned())
+            .unwrap_or_else(|| format!("{MACHINE_PATH}.nodes"));
         invalid(path, message)
     })?;
     let mut requires = execution.definition.requires.clone().unwrap_or_default();
     let mut features: BTreeSet<_> = requires.server_features.into_iter().collect();
     features.extend(LOOP_FEATURES.map(str::to_string));
+    if max_loop_depth >= 2 {
+        features.insert(LOOP_NESTING_FEATURE.into());
+    }
     requires.server_features = features.into_iter().collect();
     definition.requires = Some(requires);
     edges.sort_by(|a, b| (&a.source_execution_node_id, &a.outcome, &a.target_execution_node_id)
         .cmp(&(&b.source_execution_node_id, &b.outcome, &b.target_execution_node_id)));
     let plan = StateMachineExecutionPlan {
-        compiler_version: FIXED_LOOP_COMPILER_VERSION.into(),
+        compiler_version: compiler_version.into(),
         state_machine: executable_machine,
         node_metadata: metadata,
         edge_metadata: edges,
@@ -273,26 +199,219 @@ pub fn execution_plan_content_hash(
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn execution_node_id(
-    definition: &CollaborationDefinition,
-    loop_id: &str,
-    iteration: u32,
-    body_id: &str,
-) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(b"bcs.fixed-loop.compiler/v1/execution-node\0");
-    // Length-delimited JSON tuple prevents ambiguous concatenations of authoring identifiers.
-    let tuple = (&definition.id, definition.version, loop_id, iteration, body_id);
-    serde_json::to_writer(&mut hasher, &tuple).expect("string/integer tuple serializes");
-    let hash = format!("{:x}", hasher.finalize());
-    format!("ln-{}", &hash[..32])
+struct Expansion<'a> {
+    definition: &'a CollaborationDefinition,
+    compiler_version: &'static str,
+    nodes: BTreeMap<String, StateMachineNodeDefinition>,
+    metadata: BTreeMap<String, CompiledNodeMetadata>,
+    // Compiler-only provenance; never changes persisted plan bytes or hashes.
+    authoring_paths: BTreeMap<String, String>,
+    edges: Vec<CompiledEdgeMetadata>,
+    budget: LimitedWriter,
 }
 
-fn outer_target(definition: &CollaborationDefinition, target: &str) -> String {
-    let CollaborationRuntimeDefinition::StateMachine(machine) = &definition.runtime else { unreachable!() };
-    match machine.nodes.get(target).and_then(|node| node.loop_definition.as_ref()) {
-        Some(body) => execution_node_id(definition, target, 1, &body.entry_node),
-        None => target.to_string(),
+struct LoopLeafRole<'a> {
+    loop_id: &'a str,
+    body: &'a FixedLoopDefinition,
+    iteration: u32,
+}
+
+impl Expansion<'_> {
+    fn expand_loop(
+        &mut self,
+        loop_id: &str,
+        loop_node: &StateMachineNodeDefinition,
+        parent_scope: &BTreeMap<String, StateMachineNodeDefinition>,
+        parent_frames: &[StateMachineLoopFrame],
+        node_path: &str,
+    ) -> CompileResult<()> {
+        let body = loop_node.loop_definition.as_ref().expect("validated Loop");
+        for iteration in 1..=body.max_iterations {
+            let mut frames = parent_frames.to_vec();
+            frames.push(StateMachineLoopFrame {
+                loop_id: loop_id.into(), iteration, max_iterations: body.max_iterations,
+            });
+            for (body_id, body_node) in &body.nodes {
+                let body_path = format!("{node_path}.loop.nodes.{body_id}");
+                if body_node.kind == StateMachineNodeKind::Loop {
+                    self.expand_loop(body_id, body_node, &body.nodes, &frames, &body_path)?;
+                } else if body_id == &body.result_node {
+                    self.expand_loop_result(
+                        body_id, body_node, loop_node, parent_scope, parent_frames,
+                        &frames, LoopLeafRole { loop_id, body, iteration }, &body_path,
+                    )?;
+                } else {
+                    self.expand_ordinary(
+                        body_id, body_node, &body.nodes, &frames,
+                        Some(LoopLeafRole { loop_id, body, iteration }), &body_path,
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn expand_ordinary(
+        &mut self,
+        definition_node_id: &str,
+        node: &StateMachineNodeDefinition,
+        scope: &BTreeMap<String, StateMachineNodeDefinition>,
+        frames: &[StateMachineLoopFrame],
+        role: Option<LoopLeafRole<'_>>,
+        path: &str,
+    ) -> CompileResult<()> {
+        let edge_start = self.edges.len();
+        let execution_id = self.execution_node_id(frames, definition_node_id);
+        let mut compiled_node = node.clone();
+        compiled_node.transitions.clear();
+        for (outcome, transition) in &node.transitions {
+            let targets = transition.targets.iter()
+                .map(|target| self.target_execution_id(scope, frames, target)).collect();
+            add_transition(&mut compiled_node, &mut self.edges, &execution_id, outcome, targets,
+                CompiledArtifactProjection::Artifact, None, transition.display_name.clone());
+            compiled_node.transitions.get_mut(outcome).expect("inserted transition").guard = transition.guard.clone();
+        }
+        self.insert_leaf(execution_id, definition_node_id, compiled_node, frames, role, edge_start, path)
+    }
+
+    fn expand_loop_result(
+        &mut self,
+        definition_node_id: &str,
+        node: &StateMachineNodeDefinition,
+        loop_node: &StateMachineNodeDefinition,
+        parent_scope: &BTreeMap<String, StateMachineNodeDefinition>,
+        parent_frames: &[StateMachineLoopFrame],
+        frames: &[StateMachineLoopFrame],
+        role: LoopLeafRole<'_>,
+        path: &str,
+    ) -> CompileResult<()> {
+        let edge_start = self.edges.len();
+        let execution_id = self.execution_node_id(frames, definition_node_id);
+        let mut compiled_node = node.clone();
+        compiled_node.transitions.clear();
+        for outcome in &role.body.continue_outcomes {
+            let (targets, kind, logical, projection, display_name) =
+                if role.iteration < role.body.max_iterations {
+                    let mut next_frames = frames.to_vec();
+                    next_frames.last_mut().expect("Loop frame").iteration += 1;
+                    (
+                        vec![self.target_execution_id(&role.body.nodes, &next_frames, &role.body.entry_node)],
+                        StateMachineLoopRouteKind::Continue,
+                        outcome.clone(),
+                        CompiledArtifactProjection::ControlOnly,
+                        role.body.continue_display_name.clone(),
+                    )
+                } else {
+                    let transition = &loop_node.transitions[&role.body.exhausted_outcome];
+                    (
+                        transition.targets.iter().map(|target|
+                            self.target_execution_id(parent_scope, parent_frames, target)).collect(),
+                        StateMachineLoopRouteKind::Exhausted,
+                        role.body.exhausted_outcome.clone(),
+                        CompiledArtifactProjection::Artifact,
+                        transition.display_name.clone(),
+                    )
+                };
+            add_transition(&mut compiled_node, &mut self.edges, &execution_id, outcome, targets,
+                projection, Some(StateMachineLoopRoute { kind, logical_outcome: logical }), display_name);
+        }
+        for outcome in &role.body.break_outcomes {
+            let transition = &loop_node.transitions[outcome];
+            let targets = transition.targets.iter().map(|target|
+                self.target_execution_id(parent_scope, parent_frames, target)).collect();
+            add_transition(&mut compiled_node, &mut self.edges, &execution_id, outcome, targets,
+                CompiledArtifactProjection::Artifact,
+                Some(StateMachineLoopRoute {
+                    kind: StateMachineLoopRouteKind::Break, logical_outcome: outcome.clone(),
+                }), transition.display_name.clone());
+        }
+        self.insert_leaf(execution_id, definition_node_id, compiled_node, frames, Some(role), edge_start, path)
+    }
+
+    fn insert_leaf(
+        &mut self,
+        execution_id: String,
+        definition_node_id: &str,
+        compiled_node: StateMachineNodeDefinition,
+        frames: &[StateMachineLoopFrame],
+        role: Option<LoopLeafRole<'_>>,
+        edge_start: usize,
+        path: &str,
+    ) -> CompileResult<()> {
+        let (loop_id, iteration, max_iterations, is_loop_entry, is_loop_result, previous_result_node_id) =
+            match role {
+                Some(role) => {
+                    let is_entry = definition_node_id == role.body.entry_node;
+                    let is_result = definition_node_id == role.body.result_node;
+                    let previous = if is_entry && role.iteration > 1 {
+                        let mut previous_frames = frames.to_vec();
+                        previous_frames.last_mut().expect("Loop frame").iteration -= 1;
+                        Some(self.execution_node_id(&previous_frames, &role.body.result_node))
+                    } else { None };
+                    (Some(role.loop_id.into()), Some(role.iteration), Some(role.body.max_iterations),
+                        is_entry, is_result, previous)
+                }
+                None => (None, None, None, false, false, None),
+            };
+        let metadata = CompiledNodeMetadata {
+            execution_node_id: execution_id.clone(),
+            definition_node_id: definition_node_id.into(),
+            loop_id,
+            iteration,
+            max_iterations,
+            loop_path: (self.compiler_version == NESTED_FIXED_LOOP_COMPILER_VERSION)
+                .then(|| frames.to_vec()).filter(|path| !path.is_empty()),
+            is_loop_entry,
+            is_loop_result,
+            previous_result_node_id,
+        };
+        if self.nodes.contains_key(&execution_id) || self.metadata.contains_key(&execution_id) {
+            return Err(invalid(path, "generated execution ID collision"));
+        }
+        check_expansion_budget(&mut self.budget, &compiled_node, &metadata, &self.edges[edge_start..])?;
+        self.metadata.insert(execution_id.clone(), metadata);
+        self.authoring_paths.insert(execution_id.clone(), path.into());
+        self.nodes.insert(execution_id, compiled_node);
+        Ok(())
+    }
+
+    fn target_execution_id(
+        &self,
+        scope: &BTreeMap<String, StateMachineNodeDefinition>,
+        frames: &[StateMachineLoopFrame],
+        target: &str,
+    ) -> String {
+        match scope.get(target).and_then(|node| node.loop_definition.as_ref()) {
+            Some(body) => {
+                let mut target_frames = frames.to_vec();
+                target_frames.push(StateMachineLoopFrame {
+                    loop_id: target.into(), iteration: 1, max_iterations: body.max_iterations,
+                });
+                self.execution_node_id(&target_frames, &body.entry_node)
+            }
+            None => self.execution_node_id(frames, target),
+        }
+    }
+
+    fn execution_node_id(&self, frames: &[StateMachineLoopFrame], body_id: &str) -> String {
+        if frames.is_empty() {
+            return body_id.into();
+        }
+        let mut hasher = Sha256::new();
+        if self.compiler_version == FIXED_LOOP_COMPILER_VERSION {
+            let frame = frames.last().expect("Loop frame");
+            hasher.update(b"bcs.fixed-loop.compiler/v1/execution-node\0");
+            let tuple = (&self.definition.id, self.definition.version,
+                &frame.loop_id, frame.iteration, body_id);
+            serde_json::to_writer(&mut hasher, &tuple).expect("string/integer tuple serializes");
+        } else {
+            hasher.update(b"bcs.fixed-loop.compiler/v2/execution-node\0");
+            let path: Vec<_> = frames.iter().map(|frame| (&frame.loop_id, frame.iteration)).collect();
+            let tuple = (&self.definition.id, self.definition.version, path, body_id);
+            serde_json::to_writer(&mut hasher, &tuple).expect("string/integer tuple serializes");
+        }
+        let hash = format!("{:x}", hasher.finalize());
+        format!("ln-{}", &hash[..32])
     }
 }
 
@@ -319,13 +438,16 @@ fn add_transition(
 }
 
 fn validate_loop(
-    id: &str,
     node: &StateMachineNodeDefinition,
     outer: &BTreeMap<String, StateMachineNodeDefinition>,
     limits: &FixedLoopLimits,
-) -> CompileResult<()> {
-    let node_path = format!("{MACHINE_PATH}.nodes.{id}");
+    depth: u32,
+    node_path: &str,
+) -> CompileResult<(usize, u32)> {
     let path = format!("{node_path}.loop");
+    if depth > limits.max_fixed_loop_depth {
+        return Err(resource_limit(&path, "fixed Loop nesting exceeds max_fixed_loop_depth"));
+    }
     let body = node.loop_definition.as_ref().ok_or_else(|| invalid(&path, "loop is required"))?;
     if body.continue_display_name.as_ref().is_some_and(|name| name.trim().is_empty()) {
         return Err(invalid(format!("{path}.continue_display_name"), "must be a nonblank string"));
@@ -337,7 +459,7 @@ fn validate_loop(
         || node.judge.is_some() || node.action.is_some() || node.output_contract.is_some()
         || node.node_timeout_ms.is_some() || node.max_attempts.is_some() || node.visibility.is_some() || node.final_output
     {
-        return Err(invalid(&node_path, "loop must not contain executable node fields"));
+        return Err(invalid(node_path, "loop must not contain executable node fields"));
     }
     if body.max_iterations == 0 || body.max_iterations > limits.max_fixed_loop_iterations {
         let mut error = invalid(format!("{path}.max_iterations"), "must be positive and within max_fixed_loop_iterations");
@@ -352,6 +474,9 @@ fn validate_loop(
     for (field, value) in [("entry_node", &body.entry_node), ("result_node", &body.result_node)] {
         if value.trim().is_empty() || !body.nodes.contains_key(value) {
             return Err(invalid(format!("{path}.{field}"), "must reference a body node"));
+        }
+        if body.nodes[value].kind == StateMachineNodeKind::Loop {
+            return Err(invalid(format!("{path}.{field}"), "must reference a direct executable node, not a child Loop"));
         }
     }
     let continues = outcomes(&body.continue_outcomes, &format!("{path}.continue_outcomes"), false)?;
@@ -397,17 +522,44 @@ fn validate_loop(
     if node.transitions.keys().cloned().collect::<BTreeSet<_>>() != expected {
         return Err(invalid(format!("{node_path}.transitions"), "keys must equal break outcomes plus exhausted outcome"));
     }
-    validate_body(body, &path)
+    let (body_cost, max_depth) = validate_body(body, &path, limits, depth)?;
+    let cost = body_cost.checked_mul(body.max_iterations as usize)
+        .ok_or_else(|| resource_limit(&path, "compiled node count overflow"))?;
+    Ok((cost, max_depth))
 }
 
-fn validate_body(body: &FixedLoopDefinition, path: &str) -> CompileResult<()> {
+fn validate_body(
+    body: &FixedLoopDefinition,
+    path: &str,
+    limits: &FixedLoopLimits,
+    depth: u32,
+) -> CompileResult<(usize, u32)> {
     let mut upstreams: BTreeMap<String, Vec<String>> = body.nodes.keys().map(|id| (id.clone(), Vec::new())).collect();
+    let mut cost = 0usize;
+    let mut max_depth = depth;
     for (id, node) in &body.nodes {
         let node_path = format!("{path}.nodes.{id}");
         validate_id(id, &node_path)?;
-        if node.loop_definition.is_some() || !matches!(node.kind, StateMachineNodeKind::BotTask | StateMachineNodeKind::HumanInput) {
-            return Err(invalid(&node_path, "body only supports executable bot_task/human_input nodes; nested loops are unsupported"));
-        }
+        let node_cost = match node.kind {
+            StateMachineNodeKind::Loop => {
+                let next_depth = depth.checked_add(1)
+                    .ok_or_else(|| resource_limit(&node_path, "fixed Loop nesting depth overflow"))?;
+                let (node_cost, node_depth) = validate_loop(
+                    node, &body.nodes, limits, next_depth, &node_path,
+                )?;
+                max_depth = max_depth.max(node_depth);
+                node_cost
+            }
+            StateMachineNodeKind::BotTask | StateMachineNodeKind::HumanInput => {
+                if node.loop_definition.is_some() {
+                    return Err(invalid(format!("{node_path}.loop"), "only kind: loop may define loop"));
+                }
+                1
+            }
+            _ => return Err(invalid(&node_path, "Loop body only supports bot_task, human_input, or loop nodes")),
+        };
+        cost = cost.checked_add(node_cost)
+            .ok_or_else(|| resource_limit(&node_path, "compiled node count overflow"))?;
         if node.final_output {
             return Err(invalid(format!("{node_path}.final_output"), "body nodes must not be final_output"));
         }
@@ -433,7 +585,7 @@ fn validate_body(body: &FixedLoopDefinition, path: &str) -> CompileResult<()> {
         return Err(invalid(format!("{path}.entry_node"), "must be the only zero in-degree body node"));
     }
     // In a finite DAG, one root and one terminal imply every node lies on a root-to-terminal path.
-    Ok(())
+    Ok((cost, max_depth))
 }
 
 fn validate_id(id: &str, path: &str) -> CompileResult<()> {

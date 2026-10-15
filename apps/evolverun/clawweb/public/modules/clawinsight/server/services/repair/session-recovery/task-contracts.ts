@@ -24,7 +24,7 @@ export type RecoveryJudgment = {
   evidence_ids: string[];
 };
 /** Approved business action; concrete transport details are optional execution references. */
-export type RecoveryPlanAction = Omit<AgentPlanAction, "type"> & { type?: AgentPlanAction["type"] };
+export type RecoveryPlanAction = Omit<AgentPlanAction, "type"> & { type?: AgentPlanAction["type"]; operationScope?: import("./action-scope.js").RecoveryActionScope };
 export type RecoveryPlan = {
   summary: string;
   basis: string;
@@ -67,9 +67,9 @@ export type RecoveryTaskResult = {
   event_id: string;
   task_id: string;
   result_version: number;
-  status: RecoveryTaskStatus;
+  status: "waiting_effect" | "completed" | "failed";
   phase: RecoveryPhase;
-  waiting_reason: "owner_approval" | "owner_cooperation" | "effect" | null;
+  waiting_reason: "effect" | null;
   effect: RecoveryEffect;
   result_text: string;
   evidence_ids: string[];
@@ -87,6 +87,8 @@ export interface RecoveryTaskStore {
   find(taskId: string): Promise<RecoveryStoredTask | null>;
   listForEvent(eventId: string, ownerId: string): Promise<RecoveryStoredTask[]>;
   update(taskId: string, expectedVersion: number, change: (current: RecoveryStoredTask) => RecoveryStoredTask): Promise<RecoveryStoredTask | null>;
+  failResult?(taskId: string, resultVersion: number): Promise<void>;
   acknowledgeResult(taskId: string, resultVersion: number): Promise<void>;
+  listForReporting?(limit: number, afterTaskId?: string): Promise<RecoveryStoredTask[]>;
   listForMaintenance?(limit: number, afterTaskId?: string): Promise<RecoveryStoredTask[]>;
 }

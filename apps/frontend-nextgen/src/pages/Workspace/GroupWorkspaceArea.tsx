@@ -152,6 +152,7 @@ export function GroupWorkspaceArea({
         chat={chat.chat}
         supportState={chat.supportState}
         connectionStatus={chat.connectionStatus}
+        questions={chat.questions}
         groupBootstrapProcessing={chat.groupBootstrapProcessing}
         send={chat.send}
         submitPanelMessage={chat.submitPanelMessage}

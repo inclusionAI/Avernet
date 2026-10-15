@@ -24,7 +24,15 @@ function currentList(botId: string, section: ConversationBotSection): Conversati
 }
 
 function favoriteListLoading(botId: string, section: ConversationBotSection): boolean {
-  const cache = useConversationStore.getState().sessionsByBotId[botId];
+  const store = useConversationStore.getState();
+  // 好友 Bot 的 favorite 列表分页同样阻止收藏写入(移行使 offset 前移,与分页重取互斥)。
+  if (section === 'friend') {
+    return (
+      (store.scopeByFriendBotId[botId] ?? 'all') === 'favorite' &&
+      store.friendBotSessionsByBotId[botId]?.isLoadingMore === true
+    );
+  }
+  const cache = store.sessionsByBotId[botId];
   return (
     isManagedConversationSection(section) &&
     cache?.origin === 'mine' &&
@@ -86,7 +94,11 @@ export function useConversationFavorites(options: {
         const list = currentList(botId, section);
         if (!list?.items.some((item) => item.sessionId === sessionId)) return true;
         const cache = store.sessionsByBotId[botId];
-        const remove = isManagedConversationSection(section) && cache?.scope === 'favorite' && !result.data;
+        // favorite 视图取消收藏移除行并回算 total(管理/好友同语义);all 视图仅翻转星标。
+        const favoriteScope = isManagedConversationSection(section)
+          ? cache?.scope === 'favorite'
+          : (store.scopeByFriendBotId[botId] ?? 'all') === 'favorite';
+        const remove = favoriteScope && !result.data;
         const next = {
           ...list,
           items: remove
@@ -106,7 +118,8 @@ export function useConversationFavorites(options: {
             botId,
             section,
             origin: 'mine',
-            scope: 'favorite',
+            // 好友 Bot 的主选中范围恒 all(好友筛选只作用于侧栏列表);managed 保持 favorite 视图语义。
+            scope: isManagedConversationSection(section) ? 'favorite' : 'all',
             friendUserId: null,
             sessionId: null,
           });

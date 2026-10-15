@@ -144,6 +144,55 @@ test('negotiates BCN Bot WebSocket V3, dispatches requests, and sends canonical 
   assert.equal((event?.payload as Record<string, unknown>)?.seq, event?.seq);
 });
 
+test('fails closed when the server negotiates V2 or omits canonical V3 capabilities', async t => {
+  for (const protocolVersion of [2, 3]) {
+    const warnings: string[] = [];
+    const server = await localBcnServer((socket, frame) => {
+      if (frame.method === 'bot.connect') socket.send(JSON.stringify({
+        type: 'res', id: frame.id, ok: true,
+        payload: { is_new: false, bot_uuid: 'bot-123', token: 'bot-secret', protocol_version: protocolVersion },
+      }));
+    });
+    t.after(() => closeServer(server));
+    const client = new BcnWsClient({
+      endpoint: await resolveEndpoint(server.endpoint),
+      session: botSession(server.endpoint), config: testConfig(),
+      onSessionChanged: async () => {},
+      log: { info: () => {}, warn: message => warnings.push(message), error: () => {} },
+    });
+    t.after(() => client.stop());
+    client.start();
+    await waitFor(() => warnings.length > 0, 'invalid negotiation was not rejected');
+    assert.equal(client.connected, false);
+    await client.stop();
+  }
+});
+
+test('reconnect replays queued interaction and terminal events with unchanged shared sequence', async t => {
+  const server = await localBcnServer();
+  t.after(() => closeServer(server));
+  const client = new BcnWsClient({
+    endpoint: await resolveEndpoint(server.endpoint),
+    session: botSession(server.endpoint),
+    config: testConfig({ reconnectInitialMs: 100, reconnectMaxMs: 100 }),
+    onSessionChanged: async () => {},
+  });
+  t.after(() => client.stop());
+  client.start();
+  await waitFor(() => client.connected, 'initial connection failed');
+  server.sockets[0]!.terminate();
+  await waitFor(() => !client.connected, 'disconnect was not observed');
+  client.sendEvent('interaction', {
+    runId: 'queued-run', sessionId: 'canonical-session', ts: Date.now(),
+    interactionId: 'question', phase: 'resolved', kind: 'exec', decision: 'deny',
+  });
+  client.sendEvent('chat', { runId: 'queued-run', sessionId: 'canonical-session', ts: Date.now(), state: 'aborted' });
+  await waitFor(() => server.frames.filter(f => f.type === 'event').length === 2, 'queued events were not delivered');
+  const events = server.frames.filter(f => f.type === 'event');
+  assert.deepEqual(events.map(f => f.seq), [1, 2]);
+  assert.deepEqual(events.map(f => (f.payload as Record<string, unknown>).seq), [1, 2]);
+});
+
 test('reconnects with exponential backoff and stops reconnecting after disposal', async t => {
   let connects = 0;
   const server = await localBcnServer((socket, frame) => {

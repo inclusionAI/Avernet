@@ -46,7 +46,7 @@ pub use channel::{
 pub use collaboration::{
     CompiledArtifactProjection, CompiledEdgeMetadata, CompiledNodeMetadata,
     FixedLoopDefinition, FixedLoopMode, LoopContext, PreviousLoopResult,
-    StateMachineExecutionPlan, StateMachineLoopRoute, StateMachineLoopRouteKind,
+    StateMachineExecutionPlan, StateMachineLoopFrame, StateMachineLoopRoute, StateMachineLoopRouteKind,
     StateMachineNodeExecutionMetadata,
     ChatRuntimeProfile, CollaborationDefinition, CollaborationDefinitionRef,
     CollaborationMetadata, CollaborationParticipantBinding, CollaborationRequirements,

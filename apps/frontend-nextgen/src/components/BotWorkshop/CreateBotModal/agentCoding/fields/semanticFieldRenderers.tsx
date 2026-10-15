@@ -69,6 +69,8 @@ export function renderSemanticTemplateField({
   modelsLoadError,
   botId,
   onReloadModels,
+  codeRepoTenants,
+  onCodeRepoTenantChange,
 }: SemanticFieldRendererProps): React.ReactNode {
   if (fieldTypeOf(field) === 'antcode') {
     return (
@@ -79,6 +81,8 @@ export function renderSemanticTemplateField({
         onChange={(next) => onChange(normalizeCodeRepoItems(next))}
         disabled={disabled}
         description={field.description}
+        tenant={codeRepoTenants?.[field.field_key]}
+        onTenantChange={(nextTenant) => onCodeRepoTenantChange?.(field.field_key, nextTenant)}
       />
     );
   }

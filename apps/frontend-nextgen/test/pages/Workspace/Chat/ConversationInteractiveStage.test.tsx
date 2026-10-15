@@ -64,6 +64,7 @@ const mockFileFeature: UseBotSessionFilesFeatureResult = {
   closeFileDrawer: () => {},
   fileDrawerOpen: false,
   openUpload: () => {},
+  capabilitySets: null,
 };
 
 const mockUseTaskExecution = jest.fn(

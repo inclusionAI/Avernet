@@ -42,20 +42,23 @@ export function SquareIdentityPicker() {
   };
 
   return (
-    // 与协作群共用 collaboration 选择器卡片；身份来源与切换仍由发现模块独立维护。
+    // 发现页使用单行身份选择器；身份来源与切换仍由发现模块独立维护。
     <div className="w-full max-w-[280px] shrink-0">
       <WorkspaceIdentitySelector
         identities={displayIdentities}
         activeId={selectedIdentity?.id ?? null}
         onChange={handleChange}
         userAvatarUrl={humanIdentity?.avatarUrl}
-        layout="collaboration"
+        layout="inline"
         identityStatus={listStatus}
         identityError={listStatus === 'error' ? humanIdentityError : undefined}
-        headerLabel="为 Ta 加好友："
-        headerTooltip="每个身份（用户或 Bot）都拥有各自独立的好友关系。"
         onRetry={() => void retryLoadIdentities()}
-        // 发现页底色为 bg-muted，卡片保留协作群布局，但用背景 token 确保与页面对比清晰。
+        // 弹层文案写模块级身份在本 Tab 的实际用途(句式与协作群对齐);默认「全局生效」
+        // 与模块级行为不符;说明图标与副提示重复,一并隐藏。副提示控制在 20 字内防 320px 弹层截断。
+        popoverTitle="切换协作身份"
+        popoverHint="选择浏览公开Bot与发起好友申请的身份"
+        hidePopoverInfo
+        // 使用语义背景色，保持与发现页背景的对比。
         triggerClassName="bg-background hover:bg-accent hover:text-foreground"
       />
     </div>

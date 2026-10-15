@@ -129,6 +129,11 @@ export interface CollaborationDefinitionGraphNode {
     loop_id: string;
     iteration: number;
     max_iterations: number;
+    loop_path?: Array<{
+      loop_id: string;
+      iteration: number;
+      max_iterations: number;
+    }>;
   };
 }
 

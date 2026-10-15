@@ -43,6 +43,7 @@ pub(crate) struct EventingRuntime {
     pub provisioning_lifecycle: Option<Arc<dyn ServiceLifecycle>>,
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 pub(crate) fn memory_event_repo() -> Arc<MemoryEventStore> {
     Arc::new(MemoryEventStore::new())
 }

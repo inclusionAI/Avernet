@@ -13,15 +13,18 @@ pub struct RegistrationSettings {
     /// Registration API prefix; `--api-url` or the deploy profile default when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_url: Option<String>,
+    /// Persisted gateway delivery endpoint, used to verify profile reuse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_url: Option<String>,
 }
 impl Default for RegistrationSettings {
-    fn default() -> Self { Self { api_url: None } }
+    fn default() -> Self { Self { api_url: None, webhook_url: None } }
 }
 
 fn parse(text: &str) -> anyhow::Result<(RegistrationSettings, toml::Table)> {
     let mut table: toml::Table = toml::from_str(text).map_err(|_| anyhow::anyhow!("Invalid bridge TOML configuration"))?;
     let settings = match table.remove("registration") {
-        Some(value) => value.try_into().map_err(|_| anyhow::anyhow!("Invalid [registration] configuration; expected api_url"))?,
+        Some(value) => value.try_into().map_err(|_| anyhow::anyhow!("Invalid [registration] configuration; expected api_url and optional webhook_url"))?,
         None => RegistrationSettings::default(),
     };
     Ok((settings, table))
@@ -55,17 +58,28 @@ pub fn runtime(table: &toml::Table, path: &Path, webhook_token: Option<&str>) ->
 pub struct Bootstrap {
     pub settings: RegistrationSettings,
     pub original: Option<String>,
+    pub previous: Option<toml::Table>,
 }
 
 pub fn read_bootstrap(path: &Path) -> anyhow::Result<Bootstrap> {
+    read_registration_source(path, false)
+}
+
+pub fn read_registration_source(path: &Path, replace_existing: bool) -> anyhow::Result<Bootstrap> {
     let original = read_existing(path)?;
     let (settings, mut table) = parse(original.as_deref().unwrap_or(""))?;
     if table.contains_key("provider_id") || table.contains_key("bot") {
-        bail!("A bridge runtime configuration already exists; refusing to overwrite it");
+        if !replace_existing {
+            bail!("A bridge runtime configuration already exists. Reuse it with init/start, or stop the bridge and register with --replace-existing to back it up and replace it");
+        }
+        if table.get("provider_id").and_then(toml::Value::as_str).is_none()
+            || !table.get("bot").and_then(toml::Value::as_array).is_some_and(|bots| !bots.is_empty())
+        { bail!("Existing runtime configuration is incomplete; review it before replacing"); }
+        return Ok(Bootstrap { settings, original, previous: Some(table) });
     }
     table.remove("bcs_to_provider_token");
     if !table.is_empty() { bail!("Before registration, configuration may contain only [registration] settings"); }
-    Ok(Bootstrap { settings, original })
+    Ok(Bootstrap { settings, original, previous: None })
 }
 
 fn read_existing(path: &Path) -> anyhow::Result<Option<String>> {
@@ -112,6 +126,19 @@ impl PreparedConfig {
         let temporary = tempfile::Builder::new().prefix(".bridge-registration-").suffix(".toml")
             .tempfile_in(parent).context("Cannot prepare a private bridge configuration file")?;
         Ok(Self { path: path.into(), original, _lock: lock, temporary })
+    }
+
+    /// Save a private, durable rollback configuration before any registration request.
+    /// The backup stays beside the original so its relative state paths remain valid.
+    pub fn backup_original(&self) -> anyhow::Result<PathBuf> {
+        let original = self.original.as_ref().context("No runtime configuration to back up")?;
+        let parent = self.path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+        let mut backup = tempfile::Builder::new().prefix(".bridge-backup-").suffix(".toml")
+            .tempfile_in(parent).context("Cannot prepare private configuration backup")?;
+        backup.write_all(original.as_bytes()).context("Cannot write configuration backup")?;
+        backup.as_file().sync_all().context("Cannot sync configuration backup")?;
+        let (_, path) = backup.keep().map_err(|_| anyhow::anyhow!("Cannot retain configuration backup"))?;
+        Ok(path)
     }
 
     pub fn save(mut self, text: &str) -> anyhow::Result<()> {

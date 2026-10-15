@@ -4,11 +4,13 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveBaasConfig, resolveInsightHandoffConfig } from "@avernet/clawweb-shared/server/db";
 import {
-  resolveRepairConfig,
+  resolveRepairConfig as resolveConfiguredRepairConfig,
   resolveRepairTaskControlPlaneEnvironment,
 } from "../config.js";
 
 const temporaryDirectories: string[] = [];
+const baseSnapshots = { pre: 62_800_354, prod: 62_900_272 };
+const resolveRepairConfig = (configPath?: string) => resolveConfiguredRepairConfig(baseSnapshots, configPath);
 
 function configFile(repairExecution: string): string {
   const directory = mkdtempSync(join(tmpdir(), "clawweb-repair-config-"));
@@ -39,9 +41,9 @@ describe("resolveRepairConfig", () => {
     }
   });
 
-  it("uses a server-side Snapshot ID without parallel AIStudio auth config", () => {
+  it("uses the host-provided Base Snapshots without parallel AIStudio auth config", () => {
     const config = resolveRepairConfig();
-    expect(config.aisSnapshotIds).toEqual({ pre: 62_510_265, prod: 62_380_375 });
+    expect(config.aisSnapshotIds).toEqual(baseSnapshots);
     expect(config.decisionGraceSeconds).toBe(900);
     expect(config.contextWaitSeconds).toBe(1800);
     expect(config.executionLeaseSeconds).toBe(90);
@@ -64,7 +66,6 @@ describe("resolveRepairConfig", () => {
     expect(config.baas).toEqual(resolveBaasConfig());
   });
   it("selects the standard Repair package without changing business waiting deadlines", () => {
-    vi.stubEnv("REPAIR_AIS_USE_BASE", "true");
     expect(resolveRepairConfig()).toMatchObject({ packageId: "clawevolve-repair", decisionGraceSeconds: 900 });
   });
 
@@ -99,26 +100,6 @@ describe("resolveRepairConfig", () => {
     expect(resolveRepairTaskControlPlaneEnvironment({
       publicBaseUrl: "http://localhost:5173",
     }, "prod")).toBe("prod");
-  });
-
-  it("lets each control-plane environment select an independent Repair Snapshot", () => {
-    vi.stubEnv("REPAIR_AIS_PRE_SNAPSHOT_ID", "70000001");
-    vi.stubEnv("REPAIR_AIS_PROD_SNAPSHOT_ID", "70000002");
-
-    expect(resolveRepairConfig().aisSnapshotIds).toEqual({
-      pre: 70_000_001,
-      prod: 70_000_002,
-    });
-  });
-
-  it("keeps the legacy Snapshot ID as the fallback for both environments", () => {
-    vi.stubEnv("REPAIR_AIS_SNAPSHOT_ID", "70000003");
-    const path = configFile("    decisionGraceSeconds: 120");
-
-    expect(resolveRepairConfig(path).aisSnapshotIds).toEqual({
-      pre: 70_000_003,
-      prod: 70_000_003,
-    });
   });
 
   it("allows the Repair decision grace to be configured for Plan and Apply waits", () => {

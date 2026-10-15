@@ -8,7 +8,7 @@ import { cn } from '@/utils/cn';
 import type { ChatMessage } from '@tc-chat/core';
 import { BubbleList } from '@tc-chat/ui/es/BubbleList';
 import { ArrowDown } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type MutableRefObject } from 'react';
 import { GroupChatBubble, ThinkingBubble } from './GroupChatBubble';
 import { GroupChatEmptyState } from './GroupChatEmptyState';
 
@@ -65,13 +65,6 @@ export function GroupChatMessageList({
     () => messages.some((message) => message.role === 'assistant' && message.status === 'streaming'),
     [messages],
   );
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!hasStreamingMessage) return;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [hasStreamingMessage]);
   const lastMessage = messages[messages.length - 1];
   const hasSettledAssistantResponse = lastMessage?.role === 'assistant' && lastMessage.status !== 'pending';
   const showThinkingBubble =
@@ -150,7 +143,6 @@ export function GroupChatMessageList({
                 onCopy={(text) => interactions.copyText(text)}
                 onEdit={() => onEditMessage(message)}
                 isEditable={isEditable}
-                now={now}
               />
             </div>
           );

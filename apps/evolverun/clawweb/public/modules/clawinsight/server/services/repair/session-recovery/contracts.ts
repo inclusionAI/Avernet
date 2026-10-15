@@ -30,6 +30,7 @@ export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
   finishApply(taskId: string, version: number, input: { applicable: boolean; success: boolean; summary: string }): Promise<void>;
   executionFailure(taskId: string, reason: string, executionId?: string): Promise<void>;
   maintenance(): Promise<void>;
+  reportResults(): Promise<void>;
 }
 /** Worker Service API; the factory supplies the existing Agent service. */
 export interface SessionRecoveryAgentApi {
@@ -43,6 +44,7 @@ export interface SessionRecoveryAgentApi {
   logs(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
   apply(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
   retryMessage(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
+  reconcileWrite(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
   conclusion(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
   report(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;
   toolGet(task: RecoveryStoredTask, id: string): Promise<AgentToolCall & { toolCallId: string }>;
@@ -64,3 +66,12 @@ export type RecoveryResult = {
 export interface RecoveryResultReporter { report(result: RecoveryResult): Promise<void> }
 export type RecoveryDeliveryLog = RecoveryResult & { event: "session_recovery_delivery" };
 export interface RecoveryLogger { log(result: RecoveryDeliveryLog): void }
+
+/** Service assembly contract; HTTP authentication belongs to the router adapter. */
+export type SessionRecoveryRuntime = {
+  service: SessionRecoveryApi;
+  tasks?: SessionRecoveryTaskApi;
+  agent?: SessionRecoveryAgentApi;
+  maintenance?: () => Promise<void>;
+  reportResults?: () => Promise<void>;
+};

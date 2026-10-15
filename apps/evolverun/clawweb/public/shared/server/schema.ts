@@ -24,6 +24,7 @@ import { cleanupEvolveSchema } from './migrations/evolve-schema-cleanup.js';
  */
 
 import { repairBatchMigrations } from "./schema-repair-batch.js";
+import { repairReleaseMigrations } from "./schema-repair-release.js";
 
 export type DbType = "sqlite" | "mysql" | "zdas";
 
@@ -3309,4 +3310,5 @@ END`,
     sql: [`ALTER TABLE flow_runs ADD COLUMN retry_epoch INTEGER DEFAULT 0`],
   },
   recoveryTaskContextMigration,
+  ...repairReleaseMigrations,
 ];

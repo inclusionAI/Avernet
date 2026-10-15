@@ -1,41 +1,9 @@
-# Recovery task context capacity
+# Session recovery storage
 
-Migration v141 expands the existing `ce_tasks.config_json` column from TEXT to
-MEDIUMTEXT. Recovery tasks keep their timeline and evidence references in this
-column; no table, index or separate delivery store is added.
+The shared `ce_tasks.config_json` expansion is withdrawn. Version 141 stays reserved with no SQL; this change neither widens nor shrinks an existing column.
 
-## Managed database deployment
+Session recovery reuses `ce_tasks`, `ce_steps` and `ce_repair_tool_calls`. Phase reports, complete plans, judgments, evidence attachments and result snapshots use the existing object store with digest references. Compact pending result references and retry state live in `ce_tasks.config_json.resultDelivery`; successful delivery is recorded in the phase report.
 
-Before deploying the corresponding ClawWeb code, inspect the existing column:
+The unshipped v142 migration for `ce_session_recovery_results` is removed. Neither `ce_session_recovery_records` nor `ce_session_recovery_results` is required. No new table, remote DDL or column expansion is part of this change. Existing widened columns are not automatically shrunk.
 
-```sql
-SHOW FULL COLUMNS FROM `ce_tasks` LIKE 'config_json';
-```
-
-For an existing TEXT column, apply this change through the normal database
-change process:
-
-```sql
-ALTER TABLE `ce_tasks`
-  MODIFY COLUMN `config_json` MEDIUMTEXT NOT NULL
-  COMMENT '业务任务扩展与运行上下文';
-```
-
-Inspect the column again and confirm MEDIUMTEXT, NOT NULL and preservation of
-existing task records. A database already using MEDIUMTEXT needs no ALTER.
-For fresh managed installations, apply the existing table definitions and this
-upgrade before starting the application. SQLite requires no column change;
-its canonical migration registry records v141 at startup.
-
-Managed MySQL/ZDAS deployments that deny runtime DDL skip startup migrations.
-The registered v141 migration does not replace this external upgrade. Align
-the deployment's schema-version ledger only after all intervening migrations
-have been verified; do not mark unrelated migrations as applied.
-
-## Rollback
-
-Reverting application code does not require shrinking this column or deleting
-task history. Keep MEDIUMTEXT during rollback. Shrinking to TEXT can lose data
-or fail once any existing JSON exceeds 65,535 bytes; it is a separate reviewed
-database change requiring a size check and backup, rather than a deployment
-rollback step.
+Callbacks occur only on effect-wait expiry or task completion. Owner waiting, approval, notification and annotation remain local business history. Legacy inline Task data is converted on subsequent updates; only waiting-effect and terminal result snapshots remain eligible for delivery.

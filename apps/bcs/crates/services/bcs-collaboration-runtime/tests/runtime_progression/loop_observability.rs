@@ -121,7 +121,7 @@ async fn loop_observations_preserve_v1_and_classify_compile_rejections_without_e
         (bcs_config_api::FixedLoopLimits { max_compiled_state_machine_bytes: 1, ..Default::default() }, Reason::ResourceLimit),
     ] {
         h.runtime = h.runtime.with_fixed_loop_limits(limits);
-        let outcome = h.runtime.validate_definition_yaml(bcs_service_api::ValidateCollaborationDefinitionYamlCommand {
+        let outcome = h.runtime.validate_definition_yaml(ValidateCollaborationDefinitionYamlCommand {
             definition_yaml: fixture.into(), judge_available: true,
         }).await.unwrap();
         assert!(!outcome.valid);
@@ -129,7 +129,7 @@ async fn loop_observations_preserve_v1_and_classify_compile_rejections_without_e
     }
     h.runtime = h.runtime.with_fixed_loop_limits(Default::default());
     definition["runtime"]["state_machine"]["graph_mode"] = json!("acyclic");
-    let invalid = h.runtime.validate_definition_yaml(bcs_service_api::ValidateCollaborationDefinitionYamlCommand {
+    let invalid = h.runtime.validate_definition_yaml(ValidateCollaborationDefinitionYamlCommand {
         definition_yaml: serde_yaml::to_string(&definition).unwrap(), judge_available: true,
     }).await.unwrap();
     assert!(!invalid.valid);

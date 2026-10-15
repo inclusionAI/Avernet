@@ -115,7 +115,7 @@
   /* 聊天面板 bot 回复气泡底色(rgb 246,249,255)。 */
   --color-chat-bubble-bot: hsl(var(--brand) / 0.04);
   --shell-header-height: 56px;
-  --shell-sidebar-width: 200px; /* SVG 稿 rail 实宽 200（restore-design-v2 精修） */
+  --shell-sidebar-width: 224px; /* SVG 稿 rail 实宽 200（restore-design-v2 精修）；品牌锁版换新版后加宽至 224（单行预算 200px：图标组 96px + 锁版 ≤104px），见 AppSidebar 品牌区注释 */
 
   /* 浮层层级统一由组件 Token 管理，避免业务页面散落 z-index 魔法数。
      注意：Select/Popover 等锚定浮层会 Portal 到 body，若层级低于 Drawer/Dialog，
@@ -599,6 +599,48 @@ button {
 @media (prefers-reduced-motion: reduce) {
   .chat-skeleton-sweep,
   .chat-skeleton-dot {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
+   「通用协作能力」能力集气泡（CapabilitySetViewer）专属动效：
+   capability-pop-in —— 气泡开合淡入轻浮（ui/Popover 的 animate-in 工具类缺编译
+   插件为空操作，此处局部补齐，作用域仅限本气泡 className，不影响其余弹层）；
+   capability-page-in —— 列表 ⇄ 明细双页导航的明细页进入右滑淡入。
+   prefers-reduced-motion 下全部静止。
+   ========================================================================== */
+@keyframes capability-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.capability-popover[data-state='open'] {
+  animation: capability-pop-in 150ms ease-out;
+}
+
+@keyframes capability-page-in {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.capability-page-in {
+  animation: capability-page-in 180ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .capability-popover[data-state='open'],
+  .capability-page-in {
     animation: none;
   }
 }

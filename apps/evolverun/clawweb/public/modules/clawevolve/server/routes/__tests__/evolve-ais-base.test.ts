@@ -23,14 +23,14 @@ describe("ClawEvolve AIS Base transport", () => {
     server = undefined;
   });
 
-  async function start(status = "running", options: { handlerName?: string; handler?: import("../../services/ais/status-handler.js").AisStatusHandler; fixedContract?: boolean } = {}) {
+  async function start(status = "running", options: { handlerName?: string; handler?: import("../../services/ais/status-handler.js").AisStatusHandler; fixedContract?: boolean; taskType?: string } = {}) {
     const applyAisStatus = vi.fn().mockResolvedValue(true);
     const createSignedUrl = vi.fn().mockResolvedValue("https://oss.example/legacy-signed");
     const createAisSignedUrl = vi.fn().mockResolvedValue("https://oss.example/ais-signed");
     const repo = {
-      findTask: vi.fn().mockResolvedValue({ task_id: taskId, config_json: JSON.stringify({ ...config, ...(options.fixedContract ? { stepId: "new-execution" } : {}), aisBase: { ...config.aisBase, ...(options.handlerName ? { statusHandler: options.handlerName } : {}) } }) } as EvolveTaskRow),
+      findTask: vi.fn().mockResolvedValue({ task_id: taskId, task_type: options.taskType ?? "session_analysis", config_json: JSON.stringify({ ...config, ...(options.fixedContract ? { stepId: "new-execution" } : {}), aisBase: { ...config.aisBase, ...(options.handlerName ? { statusHandler: options.handlerName } : {}) } }) } as EvolveTaskRow),
       findStep: vi.fn().mockResolvedValue({
-        task_id: taskId, step_id: stepId, step_type: "session_ais", status,
+        task_id: taskId, step_id: stepId, step_type: options.taskType ? "agent_execution" : "session_ais", status,
         ...(options.fixedContract ? { ext_json: JSON.stringify({ aisExecution: { ...config, aisBase: { statusHandler: "custom" } } }) } : {}),
       } as EvolveStepRow),
       applyAisStatus,
@@ -67,6 +67,32 @@ describe("ClawEvolve AIS Base transport", () => {
       "evolution/SA-1/result.json", "PUT", 86_400, { "Content-Type": "application/json" },
     );
     expect(createSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it.each(["repair", "session_recovery"])("handles %s Base archives and execution reports through the existing contract", async (taskType) => {
+    const handler = vi.fn().mockResolvedValue({ applied: true });
+    const { base, createAisSignedUrl, applyAisStatus } = await start("running", {
+      taskType, handlerName: "custom", handler,
+    });
+    const path = `${base}/internal/tasks/${taskId}/steps/${stepId}`;
+    const artifact = { objectKey: "evolution/SA-1/result.json", size: 10,
+      sha256: "a".repeat(64), contentType: "application/json" };
+    const upload = await fetch(`${path}/artifacts/upload-url`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ executor: "ais", artifactName: "result", ...artifact }),
+    });
+    expect(upload.status).toBe(200);
+    expect(createAisSignedUrl).toHaveBeenCalledOnce();
+    const report = await fetch(`${path}/report`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "succeeded", output: { taskId, success: true, artifacts: { result: artifact } } }),
+    });
+    expect(report.status).toBe(200);
+    expect(handler).toHaveBeenCalledWith(expect.objectContaining({
+      task: expect.objectContaining({ task_type: taskType }),
+      report: expect.objectContaining({ status: "succeeded" }),
+    }));
+    expect(applyAisStatus).not.toHaveBeenCalled();
   });
 
   it("selects the AIS upload contract from the explicit executor", async () => {

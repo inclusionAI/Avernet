@@ -6,7 +6,7 @@ import { groupService } from '@/services/workspace/groupService';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 // 建群表单重度使用 Radix Select/Popover 等组件，jsdom 下异步渲染开销大：
 // 并行全量（--maxWorkers=50%）下个别用例在默认 30s 随机临界超时。
@@ -492,8 +492,14 @@ it.each(['自由聊天', '任务协作', '自定义协作'])('%s carries the sel
   fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
   if (kind === '任务协作') await selectLeader('主节点（Manager Bot）', /Alpha/);
   fireEvent.click(await screen.findByRole('button', { name: '指定路由' }));
+  const selectedMembers = screen.getByTestId('group-participant-selected');
+  const serviceBotChip = within(selectedMembers).getByRole('group', { name: 'Alpha已选成员' });
+  expect(within(serviceBotChip).getByRole('group', { name: 'Alpha路由方式' })).toBeInTheDocument();
+  expect(within(serviceBotChip).getByRole('group', { name: 'Alpha运行阶段' })).toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: '服务 Bot 路由' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: '确认创建' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: '预发' }));
+  expect(within(serviceBotChip).getByText('Alpha（预发）')).toBeInTheDocument();
   await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
   await waitFor(() =>

@@ -1,0 +1,61 @@
+use std::{fs, path::{Path, PathBuf}};
+use anyhow::{Context, bail};
+
+use crate::config;
+
+fn options(path: &Path, engine: &str) -> anyhow::Result<Option<toml::Table>> {
+    let source = config::read_registration_source(path, true)?;
+    let Some(previous) = source.previous else { return Ok(None); };
+    let Some(bots) = previous.get("bot").and_then(toml::Value::as_array) else { return Ok(None); };
+    if bots.len() != 1 || bots[0].get("engine").and_then(toml::Value::as_str) != Some(engine) { return Ok(None); }
+    Ok(bots[0].get("engine_options").and_then(toml::Value::as_table).cloned())
+}
+
+fn entries(directory: &Path) -> anyhow::Result<Vec<fs::DirEntry>> {
+    let iter = match fs::read_dir(directory) {
+        Ok(iter) => iter,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(_) => bail!("Cannot inspect saved bridge configurations"),
+    };
+    let mut result = Vec::new();
+    for entry in iter {
+        if result.len() == 128 { bail!("Too many saved configurations to select desktop settings safely"); }
+        result.push(entry.context("Cannot inspect saved bridge configuration")?);
+    }
+    Ok(result)
+}
+
+/// Only desktop options cross environments; no BCN credentials or state are copied.
+pub(super) async fn existing_options(root: &Path, target: &Path, engine: &str) -> anyhow::Result<Option<toml::Table>> {
+    #[cfg(unix)]
+    if let Some(active) = crate::instance::current_configuration(root).await? {
+        if let Some(options) = options(&active, engine)? { return Ok(Some(options)); }
+    }
+    if engine != "qwenwork" { return Ok(None); }
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    for entry in entries(root)? {
+        let path = entry.path();
+        if entry.file_type()?.is_file() && path.extension().is_some_and(|extension| extension == "toml")
+            && !entry.file_name().to_string_lossy().starts_with('.') { candidates.push(path); }
+    }
+    let profiles = root.join("profiles");
+    if fs::symlink_metadata(&profiles).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        bail!("Saved profiles directory must not be a symlink");
+    }
+    for entry in entries(&profiles)? {
+        if !entry.file_type()?.is_dir() { continue; }
+        let path = entry.path().join("bridge.toml");
+        if fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_file()) { candidates.push(path); }
+    }
+    let mut selected = None;
+    for candidate in candidates {
+        if candidate == target { continue; }
+        if let Some(options) = options(&candidate, engine)? {
+            if selected.as_ref().is_some_and(|previous| previous != &options) {
+                bail!("Saved QwenWork profiles have conflicting desktop settings; start the intended existing profile before registering another environment");
+            }
+            selected = Some(options);
+        }
+    }
+    Ok(selected)
+}

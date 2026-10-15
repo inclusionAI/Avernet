@@ -73,53 +73,72 @@ interface BotAbilitySettingsProps {
   onToggleDirect: (bot: CollaborationBot, setting: DirectSetting, value: boolean | 'online' | 'hidden') => void;
   /** 通用配置弹窗 2×2 网格布局；缺省为页面列表布局（divide-y）。 */
   grid?: boolean;
+  /** 仅展示指定能力项；缺省展示全部。Coding Bot 由通用配置弹窗按模板能力裁剪。 */
+  visibleSettings?: readonly DirectSetting[];
 }
 
 /** 协作能力分区：四个开关行。 */
-export function BotAbilitySettings({ bot, busyAction, onToggleDirect, grid = false }: BotAbilitySettingsProps) {
+export function BotAbilitySettings({
+  bot,
+  busyAction,
+  onToggleDirect,
+  grid = false,
+  visibleSettings,
+}: BotAbilitySettingsProps) {
   const directBusy = (setting: DirectSetting) => busyAction === `${bot.id}:${setting}`;
+  const shouldShow = (setting: DirectSetting) => !visibleSettings || visibleSettings.includes(setting);
   const rows = (
     <>
-      <SettingRow
-        label="参与协作群聊"
-        description="控制当前 Bot 是否可参与群聊。关闭后无法加入新协作群，已加入的协作群也不再回复。"
-        checked={bot.collaborationStatus === 'online'}
-        disabled={!bot.joinedBcn || bot.collaborationStatus === 'offline'}
-        busy={directBusy('collaborationStatus')}
-        onChange={(checked) => onToggleDirect(bot, 'collaborationStatus', checked ? 'online' : 'hidden')}
-        paddingClassName={grid ? 'py-3' : undefined}
-      />
-      <SettingRow
-        label="公开 Bot 画像"
-        description="允许其他用户在群聊中通过「融合模式」查看公开画像并进行跨 Bot 增量洞察。"
-        checked={bot.profilePublic}
-        disabled={!bot.joinedBcn || bot.profilePublicStatus === 'unavailable'}
-        busy={directBusy('profilePublic')}
-        status={bot.profilePublicStatus === 'unavailable' ? '暂不可用' : undefined}
-        statusReason={
-          bot.profilePublicStatus === 'unavailable' ? '该 Bot 尚未对其他 Bot 开放可见，请先调整 Bot 可见性' : undefined
-        }
-        onChange={(checked) => onToggleDirect(bot, 'profilePublic', checked)}
-        paddingClassName={grid ? 'py-3' : undefined}
-      />
-      <SettingRow
-        label="任务认领"
-        description="开启后，Bot 将每天自动扫描任务广场并认领可执行的任务。"
-        checked={bot.taskClaimingEnabled}
-        disabled={!bot.joinedBcn}
-        busy={directBusy('taskClaimingEnabled')}
-        onChange={(checked) => onToggleDirect(bot, 'taskClaimingEnabled', checked)}
-        paddingClassName={grid ? 'py-3' : undefined}
-      />
-      <SettingRow
-        label="Dream Mode"
-        description="开启后，Bot 将每天基于用户数据（语雀、会议纪要等）挖掘潜在任务并推送。"
-        checked={bot.dreamModelEnabled}
-        disabled={!bot.joinedBcn}
-        busy={directBusy('dreamModelEnabled')}
-        onChange={(checked) => onToggleDirect(bot, 'dreamModelEnabled', checked)}
-        paddingClassName={grid ? 'py-3' : undefined}
-      />
+      {shouldShow('collaborationStatus') && (
+        <SettingRow
+          label="参与协作群聊"
+          description="控制当前 Bot 是否可参与群聊。关闭后无法加入新协作群，已加入的协作群也不再回复。"
+          checked={bot.collaborationStatus === 'online'}
+          disabled={!bot.joinedBcn || bot.collaborationStatus === 'offline'}
+          busy={directBusy('collaborationStatus')}
+          onChange={(checked) => onToggleDirect(bot, 'collaborationStatus', checked ? 'online' : 'hidden')}
+          paddingClassName={grid ? 'py-3' : undefined}
+        />
+      )}
+      {shouldShow('profilePublic') && (
+        <SettingRow
+          label="公开 Bot 画像"
+          description="允许其他用户在群聊中通过「融合模式」查看公开画像并进行跨 Bot 增量洞察。"
+          checked={bot.profilePublic}
+          disabled={!bot.joinedBcn || bot.profilePublicStatus === 'unavailable'}
+          busy={directBusy('profilePublic')}
+          status={bot.profilePublicStatus === 'unavailable' ? '暂不可用' : undefined}
+          statusReason={
+            bot.profilePublicStatus === 'unavailable'
+              ? '该 Bot 尚未对其他 Bot 开放可见，请先调整 Bot 可见性'
+              : undefined
+          }
+          onChange={(checked) => onToggleDirect(bot, 'profilePublic', checked)}
+          paddingClassName={grid ? 'py-3' : undefined}
+        />
+      )}
+      {shouldShow('taskClaimingEnabled') && (
+        <SettingRow
+          label="任务认领"
+          description="开启后，Bot 将每天自动扫描任务广场并认领可执行的任务。"
+          checked={bot.taskClaimingEnabled}
+          disabled={!bot.joinedBcn}
+          busy={directBusy('taskClaimingEnabled')}
+          onChange={(checked) => onToggleDirect(bot, 'taskClaimingEnabled', checked)}
+          paddingClassName={grid ? 'py-3' : undefined}
+        />
+      )}
+      {shouldShow('dreamModelEnabled') && (
+        <SettingRow
+          label="Dream Mode"
+          description="开启后，Bot 将每天基于用户数据（语雀、会议纪要等）挖掘潜在任务并推送。"
+          checked={bot.dreamModelEnabled}
+          disabled={!bot.joinedBcn}
+          busy={directBusy('dreamModelEnabled')}
+          onChange={(checked) => onToggleDirect(bot, 'dreamModelEnabled', checked)}
+          paddingClassName={grid ? 'py-3' : undefined}
+        />
+      )}
     </>
   );
   return (

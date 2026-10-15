@@ -3,19 +3,15 @@ import { resolveRepairRequestActor } from "../services/repair/common/request-act
 import { parseAgentExecutionTicket } from "../services/repair/common/agent-execution.js";
 import { AgentToolError } from "../services/repair/common/agent-tools/errors.js";
 import type { RecoveryActor } from "../services/repair/session-recovery/contracts.js";
-import { timingSafeEqual } from "node:crypto";
 import { Router, json, type Request } from "express";
-import type { SessionRecoveryApi, SessionRecoveryTaskApi, SessionRecoveryAgentApi } from "../services/repair/session-recovery/contracts.js";
 import { SessionRecoveryError } from "../services/repair/session-recovery/errors.js";
 import { BotRuntimeError } from "@avernet/clawweb-shared/server/services/bot-runtime";
-export type SessionRecoveryRuntime = {
-  service: SessionRecoveryApi; triggerToken: string;
-  tasks?: SessionRecoveryTaskApi;
-  agent?: SessionRecoveryAgentApi;
-  maintenance?: () => Promise<void>;
+import { redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
+import type { SessionRecoveryRuntime } from "../services/repair/session-recovery/contracts.js";
+export type SessionRecoveryRouterOptions = SessionRecoveryRuntime & {
   resolveActor?: (req: Request) => Promise<RecoveryActor | null>;
 };
-export function createSessionRecoveryRouter(supplied?: SessionRecoveryRuntime): Router {
+export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOptions): Router {
   const router = Router();
   const runtime = () => {
     const value = supplied;
@@ -24,10 +20,7 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRuntime): 
   };
   router.post("/internal/monitoring/session-recoveries", json({ limit: "64kb", inflate: false }), async (req, res, next) => {
     try {
-      const deps = runtime(), expected = Buffer.from(deps.triggerToken);
-      const actual = Buffer.from(req.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "");
-      if (!expected.length) throw new SessionRecoveryError(503, "recovery_not_ready", "自愈调用凭据未配置");
-      if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw new SessionRecoveryError(401, "recovery_unauthorized", "自愈调用凭据无效");
+      const deps = runtime();
       res.set("Cache-Control", "no-store");
       res.status(202).json(await deps.service.create(req.body, { userId: "session-recovery-service", isAdmin: true }));
     } catch (error) { next(error); }
@@ -72,11 +65,6 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRuntime): 
   });
   router.post("/internal/monitoring/session-recoveries/:taskId/continue", async (req, res, next) => {
     try {
-      const expected = Buffer.from(runtime().triggerToken);
-      const actual = Buffer.from(req.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "");
-      if (!expected.length || actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
-        throw new SessionRecoveryError(401, "recovery_unauthorized", "自愈调用凭据无效");
-      }
       await tasks().resume(String(req.params.taskId)); res.status(202).json({ status: "accepted", task_id: String(req.params.taskId) });
     } catch (error) { next(error); }
   });
@@ -91,7 +79,7 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRuntime): 
   });
   const toolRoutes = {
     "/tools/session/read": "sessionRead", "/tools/session/trajectories": "trajectoryRead", "/tools/runtime/inspect": "inspect", "/tools/logs/search": "logs",
-    "/tools/apply-action": "apply", "/tools/retry-message": "retryMessage", "/tools/record-conclusion": "conclusion", "/report": "report",
+    "/tools/apply-action": "apply", "/tools/retry-message": "retryMessage", "/tools/record-conclusion": "conclusion", "/tools/reconcile-write": "reconcileWrite", "/report": "report",
   } as const;
   for (const [path, method] of Object.entries(toolRoutes)) router.post(`${workerPath}${path}`, json({ limit: "128kb", inflate: false }), async (req, res, next) => {
     try {
@@ -109,6 +97,10 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRuntime): 
       : (error as { type?: string })?.type === "entity.too.large" ? new SessionRecoveryError(413, "invalid_session_recovery", "请求过大")
       : (error as { type?: string })?.type === "entity.parse.failed" ? new SessionRecoveryError(422, "invalid_session_recovery", "JSON 格式无效")
       : new SessionRecoveryError(503, "recovery_unavailable", "自愈发送服务暂不可用；发送结果可能未知");
+    if (failure.status >= 500) console.error("[session-recovery] request failed", JSON.stringify({
+      method: req.method, path: redactPersistableText(req.path, 1024),
+      error: redactPersistableText(error instanceof Error ? error.stack ?? error.message : String(error), 4096),
+    }));
     res.status(failure.status).json({ error: failure.code, message: failure.message });
   });
   return router;

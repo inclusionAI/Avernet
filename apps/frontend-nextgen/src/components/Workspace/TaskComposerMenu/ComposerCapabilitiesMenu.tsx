@@ -1,8 +1,15 @@
 // @asset-migrated: teamclaw 自研
-/** ComposerCapabilitiesMenu —— Sender 左侧「通用协作能力」胶囊触发器 + 单行三项能力菜单 + 工作流子面板。
+/** ComposerCapabilitiesMenu —— Sender 左侧「＋ | 通用协作能力」双区胶囊。
  *
- * 多胶囊叠加（2026-10-12 语义修正）：选中项不再取代胶囊触发器——＋触发器常驻，
- * 选中项以 chip 列表在触发器右侧并列追加，可继续点 ＋ 添加；每 chip 独立 x 清除。
+ * 胶囊拆区（add-composer-capability-set-viewer，2026-10-14）：DMore 179×28 胶囊保持原视觉，
+ * 以竖分隔线为界拆为两个独立触发区——
+ * - ＋ 圆钮（aria「添加附件」）：打开原混排菜单（上传文件/添加图片/文件管理 + 动态任务/工作流任务），行为不变；
+ * - 「通用协作能力 ⌄」文案区：仅当调用方装配 capabilitySets（单聊 我的/团队 Bot）时渲染，
+ *   打开只读能力集查看（CapabilitySetViewer：已激活集 + 【查看明细】Skills/MCP 子面板）。
+ * 好友 Bot 会话与协作群不传 capabilitySets → 文案区不渲染，＋ 区独立保留。
+ *
+ * 多胶囊叠加（2026-10-12 语义修正）：选中项不再取代胶囊触发器——胶囊常驻，
+ * 选中项以 chip 列表在胶囊右侧并列追加，可继续点击添加；每 chip 独立 x 清除。
  * 叠加规则：同一工作流按 workflowId 去重、动态任务全场至多一个（见 useTaskExecution）。
  *
  * dmore 实测（hd_f54eba11 index.html，2026-10-10）：
@@ -12,7 +19,6 @@
  * - 工作流子面板 240×236 rx12（无标题行）：搜索框 206×28 rx8（占位 12px #B9BEC5）+ 行 218×34 rx12（icon+13px）。
  */
 import {
-  Badge,
   Button,
   Popover,
   PopoverContent,
@@ -22,19 +28,22 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui';
+import { CapabilitySetViewer } from '@/components/Workspace/CapabilitySetViewer';
+import type { ComposerCapabilitySetsState } from '@/components/Workspace/CapabilitySetViewer/types';
+import { MenuRow, SelectionChip } from '@/components/Workspace/TaskComposerMenu/ComposerMenuPrimitives';
 import { WorkflowSubPanel, type WorkflowPanelItem } from '@/components/Workspace/TaskComposerMenu/WorkflowSubPanel';
 import type { UseTaskExecutionResult } from '@/hooks/useTaskExecution';
 import type { ComposerSelection, WorkflowSelection } from '@/services/tasks/taskMapper';
 import { composerSelectionKey } from '@/services/tasks/taskMapper';
 import { cn } from '@/utils/cn';
-import { ChevronDown, FileUp, FolderOpen, ImageDown, Plus, Sparkles, Workflow, X } from 'lucide-react';
-import React, { useEffect, useRef, useState } from 'react';
+import { ChevronDown, FileUp, FolderOpen, ImageDown, Plus, Sparkles, Workflow } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 
 /** 功能开关。clawweb 内部环境 /api/workflows 已实测可用（restore-design-chat-page-b2-b3 design.md D4 回填），开闸。 */
 const WORKFLOW_TASK_ENABLED = true;
 
 export interface ComposerCapabilitiesMenuProps {
-  execution: UseTaskExecutionResult;
+  execution?: UseTaskExecutionResult;
   onUpload?: () => void;
   /** 添加图片回调（打开文件选择器）。单聊设计稿未含此项；群域传入时仍保留「添加图片」行。 */
   onAddImage?: () => void;
@@ -44,53 +53,17 @@ export interface ComposerCapabilitiesMenuProps {
   disabled?: boolean;
   disabledReason?: string | null;
   /** 可叠加选中项（胶囊 chips）：workflow 按 workflowId 去重、动态任务至多一个。 */
-  selections: ComposerSelection[];
+  selections?: ComposerSelection[];
   onWorkflowSelected?: (w: WorkflowSelection) => void;
   onDynamicSelected?: () => void;
   /** 清除指定胶囊（key 见 composerSelectionKey：'dynamic' | workflowId）。 */
   onRemoveSelection?: (key: string) => void;
+  /** 能力集只读查看装配（useBotCapabilitySets；单聊 我的/团队 Bot 传入）。
+   * 不传时「通用协作能力」文案区不渲染——好友 Bot 会话与协作群即此形态，＋ 区独立保留。 */
+  capabilitySets?: ComposerCapabilitySetsState | null;
+  /** 调试会话仅复用附件与能力集入口，不暴露任务创建菜单。 */
+  showTaskEntries?: boolean;
   className?: string;
-}
-
-/** 菜单行：单行 34px（dmore 148×34 rx6，icon 14px + 13px 文案，无 desc）。 */
-const MenuRow = React.forwardRef<
-  HTMLButtonElement,
-  {
-    icon: React.ReactNode;
-    label: string;
-    onClick?: () => void;
-    disabled?: boolean;
-    onMouseEnter?: () => void;
-    onMouseLeave?: () => void;
-  }
->(({ icon, label, onClick, disabled, onMouseEnter, onMouseLeave }, ref) => (
-  <Button
-    ref={ref}
-    variant="ghost"
-    onClick={onClick}
-    disabled={disabled}
-    onMouseEnter={onMouseEnter}
-    onMouseLeave={onMouseLeave}
-    className="h-[34px] w-full justify-start gap-1 rounded-md px-2.5 text-left text-[13px] font-normal text-foreground"
-  >
-    <span aria-hidden="true" className="flex size-3.5 shrink-0 items-center justify-center">
-      {icon}
-    </span>
-    <span className="min-w-0 flex-1 truncate">{label}</span>
-  </Button>
-));
-MenuRow.displayName = 'MenuRow';
-
-/** 选中态 chip：并列叠加形态（多胶囊语义），x 单独清除；形状沿用 dmore 选中帧。 */
-function SelectionChip({ label, onClear }: { label: string; onClear: () => void }) {
-  return (
-    <Badge tone="primary" className="gap-1 py-0.5 pr-1">
-      <span className="max-w-[160px] truncate">{label}</span>
-      <Button variant="ghost" size="icon" onClick={onClear} className="h-4 w-4" aria-label="取消选择">
-        <X className="h-3 w-3" />
-      </Button>
-    </Badge>
-  );
 }
 
 /** 菜单主体：单行三项（上传文件/动态任务/工作流任务）；工作流行 hover 延迟展开右侧子面板。 */
@@ -105,6 +78,7 @@ function MenuBody({
   workflows,
   workflowsLoading,
   onWorkflowHover,
+  showTaskEntries = true,
 }: {
   onUpload?: () => void;
   /** 添加图片回调（打开文件选择器）。单聊设计稿未含此项；群域传入时仍保留「添加图片」行。 */
@@ -118,6 +92,7 @@ function MenuBody({
   workflows: WorkflowPanelItem[];
   workflowsLoading: boolean;
   onWorkflowHover?: () => void;
+  showTaskEntries?: boolean;
 }) {
   const [wfOpen, setWfOpen] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -168,39 +143,42 @@ function MenuBody({
           disabled={disabled}
         />
       )}
-      <MenuRow icon={<Sparkles className="size-3.5" />} label="动态任务" onClick={onDynamic} disabled={disabled} />
-      <Popover open={workflowDisabled ? false : wfOpen} onOpenChange={setWfOpen}>
-        <PopoverTrigger asChild>
-          <MenuRow
-            icon={<Workflow className="size-3.5" />}
-            label="工作流任务"
-            disabled={workflowDisabled}
-            onMouseEnter={enter}
-            onMouseLeave={leave}
-          />
-        </PopoverTrigger>
-        <PopoverContent
-          side="right"
-          align="start"
-          sideOffset={2}
-          className="w-[240px] rounded-xl p-[10px]"
-          onMouseEnter={enter}
-          onMouseLeave={leave}
-        >
-          <WorkflowSubPanel
-            workflows={workflows}
-            loading={workflowsLoading}
-            onPick={(w) => {
-              setWfOpen(false);
-              onPickWorkflow?.(w);
-            }}
-          />
-        </PopoverContent>
-      </Popover>
+      {showTaskEntries ? (
+        <>
+          <MenuRow icon={<Sparkles className="size-3.5" />} label="动态任务" onClick={onDynamic} disabled={disabled} />
+          <Popover open={workflowDisabled ? false : wfOpen} onOpenChange={setWfOpen}>
+            <PopoverTrigger asChild>
+              <MenuRow
+                icon={<Workflow className="size-3.5" />}
+                label="工作流任务"
+                disabled={workflowDisabled}
+                onMouseEnter={enter}
+                onMouseLeave={leave}
+              />
+            </PopoverTrigger>
+            <PopoverContent
+              side="right"
+              align="start"
+              sideOffset={2}
+              className="w-[240px] rounded-xl p-[10px]"
+              onMouseEnter={enter}
+              onMouseLeave={leave}
+            >
+              <WorkflowSubPanel
+                workflows={workflows}
+                loading={workflowsLoading}
+                onPick={(w) => {
+                  setWfOpen(false);
+                  onPickWorkflow?.(w);
+                }}
+              />
+            </PopoverContent>
+          </Popover>
+        </>
+      ) : null}
     </div>
   );
 }
-
 export function ComposerCapabilitiesMenu({
   execution,
   onUpload,
@@ -213,10 +191,13 @@ export function ComposerCapabilitiesMenu({
   onWorkflowSelected,
   onDynamicSelected,
   onRemoveSelection,
+  capabilitySets,
+  showTaskEntries = true,
   className,
 }: ComposerCapabilitiesMenuProps) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
+  const [capabilityOpen, setCapabilityOpen] = useState(false);
   const pickWorkflow = (w: WorkflowPanelItem) => {
     onWorkflowSelected?.(w);
     close();
@@ -231,46 +212,80 @@ export function ComposerCapabilitiesMenu({
 
   return (
     <div className={cn('flex items-center gap-2', className)}>
-      {/* ＋胶囊触发器常驻（多胶囊语义）：有选中项时 chips 并列其右，仍可继续点 ＋ 添加。 */}
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          {/* 胶囊触发器（dmore 179×28）：＋圆钮 + 竖分隔线 + 文案 + 下拉指示。
-           * 总开关 disabled 只禁用子项并呈现 disabledReason，触发器保持可开（spec Scenario「不可会话态」）。 */}
-          <Button
-            variant="ghost"
-            aria-label="通用协作能力"
-            aria-haspopup="menu"
-            aria-expanded={open}
-            className="h-7 gap-0 px-0"
-          >
-            <span aria-hidden="true" className="flex size-7 items-center justify-center rounded-full">
+      <div className="flex items-center">
+        {/* ＋区（aria「添加附件」）：打开原混排菜单（附件行 + 任务行），行为与拆分前完全一致。
+         * 胶囊常驻（多胶囊语义）：有选中项时 chips 并列其右，仍可继续点击添加。
+         * 总开关 disabled 只禁用子项并呈现 disabledReason，触发器保持可开（spec Scenario「不可会话态」）。 */}
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              aria-label="添加附件"
+              aria-haspopup="menu"
+              aria-expanded={open}
+              className="size-7 rounded-full p-0"
+            >
               <Plus className="size-3" />
-            </span>
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-[162px] rounded-xl p-[7px]">
+            <MenuBody
+              onUpload={withClose(onUpload)}
+              onAddImage={withClose(onAddImage)}
+              onManageFiles={withClose(onManageFiles)}
+              onDynamic={execution ? () => {
+                onDynamicSelected?.();
+                close();
+              } : undefined}
+              onPickWorkflow={execution && enableWorkflow && WORKFLOW_TASK_ENABLED ? pickWorkflow : undefined}
+              workflowEnabled={enableWorkflow && WORKFLOW_TASK_ENABLED}
+              disabled={disabled}
+              workflows={execution?.workflows ?? []}
+              workflowsLoading={execution?.workflowsLoading ?? false}
+              onWorkflowHover={execution ? () => void execution.loadWorkflows() : undefined}
+              showTaskEntries={showTaskEntries}
+            />
+            {disabled && disabledReason && <p className="mt-1 px-2 text-xs text-destructive">{disabledReason}</p>}
+          </PopoverContent>
+        </Popover>
+        {/* 「通用协作能力」文案区：仅单聊 我的/团队 Bot 装配（capabilitySets 非空）。
+         * 好友 Bot 会话与协作群不传 → 文案区与竖分隔线均不渲染，＋ 区独立保留。 */}
+        {capabilitySets ? (
+          <>
             <span aria-hidden="true" className="mx-2.5 h-4 w-px bg-border" />
-            <span className="text-[13px] font-normal leading-none text-foreground">通用协作能力</span>
-            <ChevronDown aria-hidden="true" className="ml-1.5 size-3 text-muted-foreground" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent align="start" className="w-[162px] rounded-xl p-[7px]">
-          <MenuBody
-            onUpload={withClose(onUpload)}
-            onAddImage={withClose(onAddImage)}
-            onManageFiles={withClose(onManageFiles)}
-            onDynamic={() => {
-              onDynamicSelected?.();
-              close();
-            }}
-            onPickWorkflow={enableWorkflow && WORKFLOW_TASK_ENABLED ? pickWorkflow : undefined}
-            workflowEnabled={enableWorkflow && WORKFLOW_TASK_ENABLED}
-            disabled={disabled}
-            workflows={execution.workflows}
-            workflowsLoading={execution.workflowsLoading}
-            onWorkflowHover={() => void execution.loadWorkflows()}
-          />
-          {disabled && disabledReason && <p className="mt-1 px-2 text-xs text-destructive">{disabledReason}</p>}
-        </PopoverContent>
-      </Popover>
-      {selections.map((selection) => {
+            <Popover
+              open={capabilityOpen}
+              onOpenChange={(next) => {
+                setCapabilityOpen(next);
+                // 每次打开重拉（spec「数据刷新」）；Popover 卸载内容即重置明细态。
+                if (next) capabilitySets.load();
+              }}
+            >
+              <PopoverTrigger asChild>
+                <Button
+                  variant="ghost"
+                  aria-label="通用协作能力"
+                  aria-haspopup="menu"
+                  aria-expanded={capabilityOpen}
+                  className="h-7 gap-0 px-0"
+                >
+                  <span className="text-[13px] font-normal leading-none text-foreground">通用协作能力</span>
+                  <ChevronDown aria-hidden="true" className="ml-1.5 size-3 text-muted-foreground" />
+                </Button>
+              </PopoverTrigger>
+              {/* 能力集气泡（PRD demo TokenComposer 规格）：320px 双页卡片，自带头部/滚动，
+               * 阴影沿用 demo 大阴影 0_16px_40px fg/0.12。 */}
+              <PopoverContent
+                align="start"
+                className="capability-popover w-[320px] rounded-2xl p-0 shadow-[0_16px_40px_hsl(var(--foreground)/0.12)]"
+              >
+                <CapabilitySetViewer state={capabilitySets} />
+              </PopoverContent>
+            </Popover>
+          </>
+        ) : null}
+      </div>
+      {(selections ?? []).map((selection) => {
         const key = composerSelectionKey(selection);
         return (
           <SelectionChip

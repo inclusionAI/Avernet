@@ -451,6 +451,8 @@ pub struct CompiledNodeMetadata {
     pub loop_id: Option<String>,
     pub iteration: Option<u32>,
     pub max_iterations: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loop_path: Option<Vec<StateMachineLoopFrame>>,
     pub is_loop_entry: bool,
     pub is_loop_result: bool,
     pub previous_result_node_id: Option<String>,
@@ -479,6 +481,16 @@ pub struct StateMachineNodeExecutionMetadata {
     pub loop_id: String,
     pub iteration: u32,
     pub max_iterations: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loop_path: Option<Vec<StateMachineLoopFrame>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(deny_unknown_fields)]
+pub struct StateMachineLoopFrame {
+    pub loop_id: String,
+    pub iteration: u32,
+    pub max_iterations: u32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -500,6 +512,8 @@ pub struct LoopContext {
     pub loop_id: String,
     pub iteration: u32,
     pub max_iterations: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loop_path: Option<Vec<StateMachineLoopFrame>>,
     // Deliberately serialized as null for the first iteration.
     #[serde(deserialize_with = "deserialize_previous_loop_result")]
     pub previous_result: Option<PreviousLoopResult>,

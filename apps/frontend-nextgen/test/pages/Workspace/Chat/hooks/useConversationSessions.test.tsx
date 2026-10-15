@@ -109,7 +109,7 @@ describe('useConversationSessions', () => {
 
     act(() => result.current.toggleBot('bot-a:2088', 'managed'));
 
-    await waitFor(() => expect(listManagedSessions).toHaveBeenCalledWith(managedBot.bot, '327325', 'all', 1));
+    await waitFor(() => expect(listManagedSessions).toHaveBeenCalledWith(managedBot.bot, '327325', 'all', 1, 10, ''));
     const view = await waitFor(() => {
       const current = useConversationStore.getState().sessionsByBotId['bot-a:2088'];
       expect(current.sessions.items).toHaveLength(2);
@@ -147,7 +147,9 @@ describe('useConversationSessions', () => {
     act(() => result.current.toggleBot('bot-a:2088', 'managed'));
     act(() => useConversationStore.getState().setManagedBotScope('bot-a:2088', 'favorite'));
 
-    await waitFor(() => expect(listManagedSessions).toHaveBeenCalledWith(managedBot.bot, '327325', 'favorite', 1));
+    await waitFor(() =>
+      expect(listManagedSessions).toHaveBeenCalledWith(managedBot.bot, '327325', 'favorite', 1, 10, ''),
+    );
     const favoriteView = await waitFor(() => {
       const current = useConversationStore.getState().sessionsByBotId['bot-a:2088'];
       expect(current.sessions.items[0]?.sessionId).toBe('fav-1');
@@ -181,7 +183,7 @@ describe('useConversationSessions', () => {
 
     act(() => result.current.toggleBot('fb-1:327325', 'friend'));
 
-    await waitFor(() => expect(listFriendBotSessions).toHaveBeenCalledWith(friendBot.bot, '327325', 1));
+    await waitFor(() => expect(listFriendBotSessions).toHaveBeenCalledWith(friendBot.bot, '327325', 1, 10, 'all', ''));
     await waitFor(() => {
       expect(useConversationStore.getState().friendBotSessionsByBotId['fb-1:327325'].items).toHaveLength(1);
     });
@@ -261,7 +263,7 @@ describe('useConversationSessions', () => {
 
     await act(async () => result.current.loadMoreSessions('bot-a:2088', 'managed', 'all'));
 
-    expect(listManagedSessions).toHaveBeenLastCalledWith(managedBot.bot, '327325', 'all', 2);
+    expect(listManagedSessions).toHaveBeenLastCalledWith(managedBot.bot, '327325', 'all', 2, 10, '');
     let view = useConversationStore.getState().sessionsByBotId['bot-a:2088'];
     expect(view.sessions.items.map((item) => item.sessionId)).toEqual(['s1', 's2']);
     expect(view.sessions.page).toBe(2);
@@ -269,13 +271,13 @@ describe('useConversationSessions', () => {
 
     listManagedSessions.mockResolvedValueOnce(okPage(['s3'], 25));
     await act(async () => result.current.loadMoreSessions('bot-a:2088', 'managed', 'all'));
-    expect(listManagedSessions).toHaveBeenLastCalledWith(managedBot.bot, '327325', 'all', 3);
+    expect(listManagedSessions).toHaveBeenLastCalledWith(managedBot.bot, '327325', 'all', 3, 10, '');
     view = useConversationStore.getState().sessionsByBotId['bot-a:2088'];
     expect(view.sessions.items.map((item) => item.sessionId)).toEqual(['s1', 's2', 's3']);
 
     listManagedSessions.mockResolvedValueOnce(okPage(['s4'], 30));
     await act(async () => result.current.loadMoreSessions('bot-a:2088', 'managed', 'all'));
-    expect(listManagedSessions).toHaveBeenLastCalledWith(managedBot.bot, '327325', 'all', 3);
+    expect(listManagedSessions).toHaveBeenLastCalledWith(managedBot.bot, '327325', 'all', 3, 10, '');
   });
 
   it('loadMoreSessions paginates friend Bot sessions', async () => {
@@ -286,7 +288,7 @@ describe('useConversationSessions', () => {
 
     await act(async () => result.current.loadMoreSessions('fb-1:327325', 'friend', 'all'));
 
-    expect(listFriendBotSessions).toHaveBeenLastCalledWith(friendBot.bot, '327325', 2);
+    expect(listFriendBotSessions).toHaveBeenLastCalledWith(friendBot.bot, '327325', 2, 10, 'all', '');
     const state = useConversationStore.getState().friendBotSessionsByBotId['fb-1:327325'];
     expect(state.items.map((item) => item.sessionId)).toEqual(['fs1', 'fs2']);
     expect(state.hasMore).toBe(false);
@@ -307,7 +309,7 @@ it('normalizes remembered and selected TEClaw favorite scope before loading sess
     sessionId: 's1',
   });
   const { result } = renderSessions({ managedBots: [teclaw] });
-  await waitFor(() => expect(listManagedSessions).toHaveBeenCalledWith(teclaw.bot, '327325', 'all', 1));
+  await waitFor(() => expect(listManagedSessions).toHaveBeenCalledWith(teclaw.bot, '327325', 'all', 1, 10, ''));
   expect(listManagedSessions.mock.calls.every((call) => call[2] === 'all')).toBe(true);
   expect(useConversationStore.getState().scopeByManagedBotId[teclaw.bot.botId]).toBe('all');
   expect(useConversationStore.getState().selectedScope).toBe('all');
@@ -370,7 +372,7 @@ it('refills a shifted favorite page after unfavoriting without skipping or dupli
   await act(async () => {
     await result.current.loadMoreSessions(managedBot.bot.botId, 'managed', 'favorite');
   });
-  expect(listManagedSessions).toHaveBeenCalledWith(managedBot.bot, '327325', 'favorite', 1);
+  expect(listManagedSessions).toHaveBeenCalledWith(managedBot.bot, '327325', 'favorite', 1, 10, '');
   const list = useConversationStore.getState().sessionsByBotId[managedBot.bot.botId].sessions;
   expect(list.items.map((item) => item.sessionId)).toEqual([...items.map((item) => item.sessionId), 's10']);
   expect(list.items[0].favorite).toBe(true);
@@ -399,7 +401,7 @@ it('exposes session actions and blocks pagination during deletion, then refills 
     await pending;
   });
   await act(async () => result.current.loadMoreSessions(managedBot.bot.botId, 'managed', 'all'));
-  expect(listManagedSessions).toHaveBeenLastCalledWith(managedBot.bot, '327325', 'all', 1);
+  expect(listManagedSessions).toHaveBeenLastCalledWith(managedBot.bot, '327325', 'all', 1, 10, '');
   const list = useConversationStore.getState().sessionsByBotId[managedBot.bot.botId].sessions;
   expect(list.items.map((s) => s.sessionId)).toEqual([...ids.slice(1), 's11']);
   expect(list.total).toBe(20);
@@ -424,7 +426,9 @@ it('resumes a deferred scope load when the pending session action finishes', asy
     deletion.resolve({ ok: true, data: null });
     await pending;
   });
-  await waitFor(() => expect(listManagedSessions).toHaveBeenLastCalledWith(managedBot.bot, '327325', 'favorite', 1));
+  await waitFor(() =>
+    expect(listManagedSessions).toHaveBeenLastCalledWith(managedBot.bot, '327325', 'favorite', 1, 10, ''),
+  );
 });
 
 it('expands managed and friend Bots exclusively, selects their first session and reuses cached sessions', async () => {
@@ -473,7 +477,7 @@ describe('团队 Bot 复用管理会话', () => {
     const { result } = renderSessions({ managedBots: [teamBot] });
     act(() => result.current.toggleBot(teamBot.bot.botId, 'team'));
     await waitFor(() => expect(useConversationStore.getState().selectedSessionId).toBe('first'));
-    expect(listManagedSessions).toHaveBeenCalledWith(teamBot.bot, '327325', 'all', 1);
+    expect(listManagedSessions).toHaveBeenCalledWith(teamBot.bot, '327325', 'all', 1, 10, '');
     expect(listFriendBotSessions).not.toHaveBeenCalled();
     expect(useConversationStore.getState().selectedSection).toBe('team');
     act(() => result.current.selectMineSession(teamBot.bot.botId, 'first'));

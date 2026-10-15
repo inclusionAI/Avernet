@@ -20,7 +20,6 @@ import { GroupConfigFields, type GroupStrategyKind } from './GroupConfigFields';
 import type { GroupLeaderOption } from './GroupLeaderSelect';
 import { formatAutoGroupName } from './groupNaming';
 import { GroupParticipantPicker } from './GroupParticipantPicker';
-import { ServiceBotRoutingFields } from './ServiceBotRoutingFields';
 
 export type { CreateGroupModalProps } from './CreateGroupModal.types';
 
@@ -76,9 +75,11 @@ export function CreateGroupModal({
   const boundBotIds = Array.from(new Set(Object.values(binding.participantBindings).filter(Boolean)));
   const participantBotIds = kind === 'task_dag' ? boundBotIds : botUuids;
   const routing = useServiceBotRouting(participantBotIds, open);
-  const hasRoutingFields = participantBotIds.some((id) => routing.states[id]?.status !== 'non_service');
   const activeRoleBotId = binding.participantBindings[binding.activeParticipantKey] ?? '';
-  const activeRoleBotOption = activeRoleBotId ? [{ id: activeRoleBotId, name: allBotName(activeRoleBotId) }] : [];
+  const boundBotOptions = boundBotIds.map(
+    (id) => allAvailableBots.find((bot) => bot.id === id) ?? { id, name: allBotName(id) },
+  );
+  const activeRoleBotOption = boundBotOptions.filter((bot) => bot.id === activeRoleBotId);
 
   useEffect(() => {
     const opening = open && !wasOpenRef.current;
@@ -210,7 +211,7 @@ export function CreateGroupModal({
             data-testid="create-group-modal-body"
             className={cn(
               'app-scrollbar flex h-full min-h-0 min-w-0 max-w-full flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto px-6 py-6',
-              showFlowAside || hasRoutingFields ? 'lg:overflow-y-auto' : 'lg:overflow-y-hidden',
+              showFlowAside ? 'lg:overflow-y-auto' : 'lg:overflow-y-hidden',
             )}
           >
             <GroupConfigFields
@@ -264,10 +265,11 @@ export function CreateGroupModal({
                     : null
                 }
                 listViewportClassName={showFlowAside ? 'max-h-[420px]' : undefined}
-                fillAvailableHeight={!showFlowAside && !hasRoutingFields}
+                fillAvailableHeight={!showFlowAside}
+                routing={routing}
+                additionalRoutingOptions={kind === 'task_dag' ? boundBotOptions : undefined}
               />
             )}
-            <ServiceBotRoutingFields actorIds={participantBotIds} botName={allBotName} routing={routing} />
             {friendlyError && (
               <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{friendlyError}</p>
             )}

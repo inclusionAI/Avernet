@@ -1,5 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import type { RepairInboxFilter, RepairWorkbenchService } from '../contracts/repair-workbench.js';
+import type { RepairReleaseService } from '../contracts/repair-release.js';
+import type { createRepairVerificationService } from '../services/repair-verification-service.js';
 import { RepairBatchError, boundedRepairJson, MAX_REQUEST_BYTES } from '../contracts/repair-batch.js';
 import { finishRepairDiagnostic, recordRepairAccess, repairRequestDiagnostic, repairStage } from '../observability/repair-diagnostics.js';
 
@@ -30,7 +32,8 @@ function boolean(value: unknown, field: string, fallback = false): boolean {
 /** Transport adapter. Authorization is injected by a verified-login composition root.
  * No unsigned callback or publication route is exposed here.
  */
-export function createRepairBatchesRouter(input: { service: RepairWorkbenchService; authorize: RepairAuthorize }): Router {
+export function createRepairBatchesRouter(input: { service: RepairWorkbenchService; authorize: RepairAuthorize; release?: RepairReleaseService;
+  verification?: ReturnType<typeof createRepairVerificationService> }): Router {
   const router = Router();
   const { service, authorize } = input;
   router.use((request, response, next) => repairRequestDiagnostic(context => {
@@ -74,6 +77,25 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
     const actor = await access(request, response, task.workflowId, mode);
     return actor ? { task, actor } : null;
   }
+  router.get('/:taskId/deployment/:deploymentId/verification', handle(async (req, res) => {
+    const access = await taskAccess(req, res, 'view');
+    if (!access) return;
+    if (!input.verification) throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '效果验证尚未配置');
+    res.json({ evidence: await input.verification.evidence(access.task.taskId, text(req.params.deploymentId, 'deploymentId')),
+      conclusions: await input.verification.conclusions(access.task.taskId) });
+  }));
+  router.post('/:taskId/deployment/:deploymentId/verification', handle(async (req, res) => {
+    const access = await taskAccess(req, res, 'edit');
+    if (!access) return;
+    if (!input.verification) throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '效果验证尚未配置');
+    res.json(await input.verification.conclude(access.actor.actorId, access.task.taskId, text(req.params.deploymentId, 'deploymentId'), req.body));
+  }));
+  router.post('/:taskId/deployment/:deploymentId/reopen-item', handle(async (req, res) => {
+    const selected = await taskAccess(req, res, 'edit');
+    if (!selected) return;
+    if (!input.verification) throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '效果验证尚未配置');
+    res.json(await input.verification.reopen(selected.actor.actorId, selected.task.taskId, text(req.params.deploymentId, 'deploymentId'), req.body));
+  }));
   const candidates = handle(async (req, res) => {
     const query = req.method === 'GET' ? req.query : req.body;
     const workflowId = text(query?.workflowId, 'workflowId');
@@ -114,7 +136,41 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
   }));
   router.get('/:taskId', handle(async (req, res) => {
     const selected = await taskAccess(req, res, 'view');
-    if (selected) res.json(selected.task);
+    if (selected) res.json({ ...selected.task,
+      ...(input.release ? { release: await input.release.detail(selected.task.taskId),
+        capabilities: { ...selected.task.capabilities, publication: input.release.configured && selected.actor.canEdit } } : {}) });
+  }));
+  function release() {
+    if (!input.release) throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '当前宿主未接入候选审阅和部署服务');
+    return input.release;
+  }
+  router.get('/:taskId/deployment-targets', handle(async (req, res) => {
+    const selected = await taskAccess(req, res, 'edit');
+    if (selected) res.json({ targets: await release().targets(selected.actor.actorId, selected.task.taskId) });
+  }));
+  router.post('/:taskId/confirm', handle(async (req, res) => {
+    const selected = await taskAccess(req, res, 'edit');
+    if (selected) res.json(await release().confirm(selected.actor.actorId, selected.task.taskId, req.body));
+  }));
+  router.post('/:taskId/revoke-confirmation', handle(async (req, res) => {
+    const selected = await taskAccess(req, res, 'edit');
+    if (selected) res.json(await release().revoke(selected.actor.actorId, selected.task.taskId, req.body));
+  }));
+  router.post('/:taskId/deployment/:deploymentId/resume', handle(async (req, res) => {
+    const selected = await taskAccess(req, res, 'edit');
+    if (selected) res.json(await release().resume(selected.actor.actorId, selected.task.taskId, text(req.params.deploymentId, 'deploymentId'), text(req.body.requestId, 'requestId')));
+  }));
+  router.post('/:taskId/deployment/:deploymentId/stop', handle(async (req, res) => {
+    const selected = await taskAccess(req, res, 'edit');
+    if (selected) res.json(await release().stop(selected.actor.actorId, selected.task.taskId, text(req.params.deploymentId, 'deploymentId'), text(req.body.requestId, 'requestId')));
+  }));
+  router.post('/:taskId/deployment', handle(async (req, res) => {
+    const selected = await taskAccess(req, res, 'edit');
+    if (selected) res.status(202).json(await release().deploy(selected.actor.actorId, selected.task.taskId, req.body));
+  }));
+  router.post('/:taskId/deployment/:deploymentId/reconcile', handle(async (req, res) => {
+    const selected = await taskAccess(req, res, 'edit');
+    if (selected) res.json(await release().reconcile(selected.actor.actorId, selected.task.taskId, text(req.params.deploymentId, 'deploymentId')));
   }));
   router.get('/:taskId/revisions/:revision', handle(async (req, res) => {
     const selected = await taskAccess(req, res, 'view');
@@ -135,6 +191,18 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
     if (!selected) return;
     await service.cancel(selected.actor.actorId, selected.task.taskId, revision(req.body?.expectedRevision));
     res.json({ ok: true });
+  }));
+  router.post('/:taskId/retry-result', handle(async (req, res) => {
+    const selected = await taskAccess(req, res, 'edit');
+    if (!selected) return;
+    await service.retryResult(selected.actor.actorId, selected.task.taskId, revision(req.body?.expectedRevision));
+    res.status(202).json({ ok: true });
+  }));
+  router.post('/:taskId/retry-generation', handle(async (req, res) => {
+    const selected = await taskAccess(req, res, 'edit');
+    if (!selected) return;
+    res.status(202).json(await service.retryGeneration(selected.actor.actorId, selected.task.taskId,
+      { expectedRevision: revision(req.body?.expectedRevision), requestId: text(req.body?.requestId, 'requestId') }));
   }));
   router.post('/:taskId/retry-dispatch', handle(async (req, res) => {
     const selected = await taskAccess(req, res, 'edit');

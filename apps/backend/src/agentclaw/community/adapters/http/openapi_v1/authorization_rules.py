@@ -125,6 +125,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # this set. Reading what a bot has is part of working on it; installing an
     # executable on someone's bot is an ADMIN act. No EDIT_LOCK — like the
     # manifest beside them, these are not drafted.
+    ("GET", "/openapi/v1/bots/{bot_id}/engine-version"): Check(PermissionLevel.MEMBER, explicit=True),
     ("GET", "/openapi/v1/bots/{bot_id}/cli-tools"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/cli-tools"): Check(PermissionLevel.ADMIN),
     (

@@ -1,10 +1,25 @@
-import { getCodexRegistrationInputError, quoteShellArg } from './botRegistrationCommand';
+import { getBotRegistrationNameError, quoteShellArg } from './botRegistrationCommand';
 import type { BridgeRelease } from './bridgeReleaseService';
 
 export const QWEN_CONFIG_ARGUMENT = '"$HOME/.bcn-bridge/qwenwork.toml"';
 const BINARY = '"$HOME/.local/bin/bcs-bridge"';
-export const QWEN_START_COMMAND = `${BINARY} --config ${QWEN_CONFIG_ARGUMENT} start --daemon\n${BINARY} status`;
-export const QWEN_INIT_COMMAND = `if ${BINARY} init --help >/dev/null 2>&1; then\n  ${BINARY} --config ${QWEN_CONFIG_ARGUMENT} init --engine qwenwork\nelse\n  printf '%s\\n' '当前 Bridge 不支持自动初始化，请先升级到包含 init 的版本。' >&2\n  false\nfi`;
+function configSelector(profile?: string): string {
+  if (profile !== undefined) {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(profile)) throw new Error('Invalid bridge profile');
+    return `--profile ${quoteShellArg(profile)}`;
+  }
+  return `--config ${QWEN_CONFIG_ARGUMENT}`;
+}
+
+export function buildQwenWorkStartCommand(binary = BINARY, profile?: string): string {
+  const stop = profile ? `${binary} stop &&\n` : '';
+  return `${stop}${binary} ${configSelector(profile)} start --daemon &&\n${binary} status`;
+}
+export const QWEN_START_COMMAND = buildQwenWorkStartCommand();
+export function buildQwenWorkInitCommand(binary = BINARY, profile?: string): string {
+  return `if ${binary} init --help >/dev/null 2>&1; then\n  ${binary} ${configSelector(profile)} init --engine qwenwork\nelse\n  printf '%s\\n' '当前 Bridge 不支持自动初始化，请先升级到包含 init 的版本。' >&2\n  false\nfi`;
+}
+export const QWEN_INIT_COMMAND = buildQwenWorkInitCommand();
 
 function downloadDirectory(release: BridgeRelease): string {
   return '"$HOME"/Downloads/' + quoteShellArg(`bcs-bridge-${release.version}`);
@@ -27,17 +42,19 @@ export function buildBridgeInstallCommand(release: BridgeRelease): string {
 export function buildQwenWorkRegistrationCommand({
   token,
   botName,
-  cwd,
   apiUrl,
   bcsEndpoint,
+  binary = BINARY,
+  profile,
 }: {
   token: string;
   botName: string;
-  cwd: string;
   apiUrl: string;
   bcsEndpoint: string;
+  binary?: string;
+  profile?: string;
 }): string {
-  if (!token || getCodexRegistrationInputError(botName, cwd)) return '';
+  if ((profile !== undefined && !/^[A-Za-z0-9_-]{1,64}$/.test(profile)) || !token || getBotRegistrationNameError(botName)) return '';
   let upstream: URL;
   try {
     const api = new URL(apiUrl);
@@ -54,8 +71,6 @@ export function buildQwenWorkRegistrationCommand({
     return '';
   }
   upstream.protocol = upstream.protocol === 'https:' ? 'wss:' : 'ws:';
-  const directory = cwd.trim();
-  const path = directory.startsWith('~/') ? '"$HOME"' + quoteShellArg(directory.slice(1)) : quoteShellArg(directory);
   const args = [
     'register',
     '--token',
@@ -73,7 +88,15 @@ export function buildQwenWorkRegistrationCommand({
     '--upstream-url',
     upstream.href,
   ];
-  return `${BINARY} --config ${QWEN_CONFIG_ARGUMENT} ${args
+  return `${binary} ${configSelector(profile)} ${args
     .map(quoteShellArg)
-    .join(' ')} --provider-bot-ref "qwenwork-$(openssl rand -hex 12)" --cwd ${path}`;
+    .join(' ')}`;
+}
+
+export function buildQwenWorkOnboardingCommand(
+  input: Parameters<typeof buildQwenWorkRegistrationCommand>[0],
+): string {
+  const registration = buildQwenWorkRegistrationCommand(input);
+  if (!registration) return '';
+  return `${registration} &&\n(\n${buildQwenWorkInitCommand(input.binary, input.profile)}\n) &&\n${buildQwenWorkStartCommand(input.binary, input.profile)}`;
 }

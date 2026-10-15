@@ -11,6 +11,9 @@ pub struct Cli {
     /// Configuration file (default: ~/.bcn-bridge/bridge.toml)
     #[arg(long, global = true, env = "BRIDGE_CONFIG")]
     config: Option<PathBuf>,
+    /// Named configuration for register/init/start; status/stop refer to the active instance
+    #[arg(long, global = true, conflicts_with = "config")]
+    profile: Option<String>,
     #[command(subcommand)]
     command: Commands,
 }
@@ -62,7 +65,26 @@ pub fn parse(app: &BridgeApp) -> Cli {
         }
     });
     let matches = command.get_matches_mut();
-    Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.format(&mut command).exit())
+    from_matches(app, &mut command, &matches)
+}
+
+fn from_matches(app: &BridgeApp, command: &mut clap::Command, matches: &clap::ArgMatches) -> Cli {
+    let omit_model_default = matches.subcommand().is_some_and(|(name, registration)| {
+        name == "register"
+            && registration.get_one::<String>("engine").is_some_and(|engine| !app.uses_registration_model_default(engine))
+            && registration.value_source("model") == Some(clap::parser::ValueSource::DefaultValue)
+    });
+    let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.format(command).exit());
+    if let Commands::Register(args) = &mut cli.command {
+        args.model_is_explicit = matches.subcommand().is_some_and(|(_, registration)|
+            registration.value_source("model") == Some(clap::parser::ValueSource::CommandLine));
+        args.listen_is_explicit = matches.subcommand().is_some_and(|(_, registration)|
+            registration.value_source("listen") == Some(clap::parser::ValueSource::CommandLine));
+    }
+    if omit_model_default {
+        if let Commands::Register(args) = &mut cli.command { args.model = None; }
+    }
+    cli
 }
 
 /// Detach a newly executed child before initializing the multithreaded Tokio runtime.
@@ -86,13 +108,20 @@ pub async fn run(cli: Cli, app: &BridgeApp) -> anyhow::Result<()> {
         Commands::Status | Commands::Stop => bail!("Instance management requires Unix"),
         _ => {}
     }
-    let config_path = match cli.config {
-        Some(path) => path,
-        None => dirs::home_dir().context("Cannot locate home directory; pass --config")?
+    let named_profile = cli.profile.is_some();
+    let config_path = match (cli.profile, cli.config) {
+        (Some(name), None) => crate::profiles::configuration(
+            &dirs::home_dir().context("Cannot locate home directory")?, &name)?,
+        (None, Some(path)) => path,
+        (None, None) => dirs::home_dir().context("Cannot locate home directory; pass --config")?
             .join(".bcn-bridge/bridge.toml"),
+        _ => bail!("Use either --profile or --config"),
     };
     match cli.command {
-        Commands::Register(args) => registration::register(*args, &config_path, app).await,
+        Commands::Register(args) => {
+            if named_profile && args.reuse_profile(&config_path, app)? { return Ok(()); }
+            registration::register(*args, &config_path, app).await
+        }
         command @ (Commands::Init(_) | Commands::Deinit(_)) => {
             let cleanup = matches!(command, Commands::Deinit(_));
             let args = match command { Commands::Init(args) | Commands::Deinit(args) => args, _ => unreachable!() };
@@ -143,6 +172,28 @@ fn runtime_dir() -> anyhow::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn engine_model_default_policy_preserves_explicit_models_and_other_engines() {
+        let app = BridgeApp::builder().without_registration_model_default("codex").build();
+        for (engine, explicit, expected) in [
+            ("codex", None, None),
+            ("codex", Some("deployment-model"), Some("deployment-model")),
+            ("codex", Some("explicit-model"), Some("explicit-model")),
+            ("claude-code", None, Some("deployment-model")),
+        ] {
+            let mut command = Cli::command().mut_subcommand("register", |register| {
+                register.mut_arg("model", |arg| arg.default_value("deployment-model"))
+            });
+            let mut args = vec!["bcs-bridge", "register", "--token", "test-token", "--bot-name", "Test",
+                "--engine", engine, "--provider-auth", "static-bearer"];
+            if let Some(model) = explicit { args.extend(["--model", model]); }
+            let matches = command.clone().try_get_matches_from(args).unwrap();
+            let cli = from_matches(&app, &mut command, &matches);
+            let Commands::Register(args) = cli.command else { panic!("expected registration"); };
+            assert_eq!(args.model.as_deref(), expected);
+        }
+    }
 
     #[test]
     fn start_rejects_misspelled_daemon_flag() {

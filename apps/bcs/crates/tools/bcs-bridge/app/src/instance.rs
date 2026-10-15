@@ -81,6 +81,13 @@ impl Drop for Instance {
     }
 }
 
+/// Fence runtime startup throughout replacement registration, without stopping an instance.
+pub fn reserve_registration(runtime_dir: &Path) -> anyhow::Result<File> {
+    let paths = Paths::new(runtime_dir);
+    paths.create()?;
+    paths.lock(true)?.context("A bridge instance is running; stop it with bcs-bridge stop before --replace-existing")
+}
+
 pub async fn run(config: ProviderConfig, engines: &EngineRegistry, config_path: &Path, runtime_dir: &Path) -> anyhow::Result<()> {
     let paths = Paths::new(runtime_dir);
     paths.create()?;
@@ -180,10 +187,17 @@ async fn inspect(paths: &Paths) -> anyhow::Result<Option<Response>> {
     }
 }
 
+pub async fn current_configuration(runtime_dir: &Path) -> anyhow::Result<Option<PathBuf>> {
+    Ok(inspect(&Paths::new(runtime_dir)).await?.map(|response| response.record.config))
+}
+
 pub async fn status(runtime_dir: &Path) -> anyhow::Result<()> {
     match inspect(&Paths::new(runtime_dir)).await? {
         None => println!("Bridge is stopped"),
-        Some(response) => println!("Bridge is {} (PID {}, config {})", response.state, response.record.pid, response.record.config.display()),
+        Some(response) => {
+            println!("Bridge is {} (PID {}, config {})", response.state, response.record.pid, response.record.config.display());
+            println!("Active profile: {}", crate::profiles::active_name(runtime_dir, &response.record.config).unwrap_or("legacy/custom"));
+        }
     }
     Ok(())
 }

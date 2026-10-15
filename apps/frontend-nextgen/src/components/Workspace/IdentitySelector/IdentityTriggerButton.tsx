@@ -2,6 +2,8 @@
 // 从 IdentitySelectorParts 拆出为独立文件（工程红线：Component 单文件 ≤300 行），
 // 渲染语义与拆分前一一对应，无行为变化。
 import { Button, type ButtonProps } from '@/components/ui';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
+import { getBotEngineLabel } from '@/domain/botEngine';
 import { resolveOpenApiUserId } from '@/domain/userIdentity';
 import type { Identity } from '@/services/workspace/workspaceModel';
 import { cn } from '@/utils/cn';
@@ -18,6 +20,7 @@ interface IdentityTriggerButtonProps extends Omit<ButtonProps, 'children' | 'var
 
 export const IdentityTriggerButton = forwardRef<HTMLButtonElement, IdentityTriggerButtonProps>(
   ({ identity, open, layout, userAvatarUrl, className, ...buttonProps }, ref) => {
+    const inlineLayout = layout === 'inline';
     const sidebarLayout = layout === 'sidebar';
     const collapsedLayout = layout === 'collapsed';
     const collaborationLayout = layout === 'collaboration';
@@ -32,7 +35,9 @@ export const IdentityTriggerButton = forwardRef<HTMLButtonElement, IdentityTrigg
         aria-expanded={open}
         aria-label={`当前协作身份：${identity.name}`}
         className={cn(
-          collapsedLayout
+          inlineLayout
+            ? 'h-9 min-w-0 flex-1 justify-between gap-2 rounded-lg px-2.5 text-left text-xs'
+            : collapsedLayout
             ? 'h-8 w-8 shrink-0 rounded-full border border-border bg-muted/40 p-0 text-xs font-semibold text-primary hover:bg-muted hover:text-primary'
             : sidebarChipLayout
             ? 'h-8 w-full rounded-lg bg-transparent px-2 text-left hover:bg-accent/50 hover:text-foreground'
@@ -41,7 +46,7 @@ export const IdentityTriggerButton = forwardRef<HTMLButtonElement, IdentityTrigg
             : 'h-auto w-full justify-between gap-2 text-left',
           sidebarLayout
             ? 'min-h-9 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-foreground hover:bg-muted hover:text-foreground'
-            : !collapsedLayout && !collaborationLayout && !sidebarChipLayout && 'min-h-10 rounded-lg px-2 py-1',
+            : !inlineLayout && !collapsedLayout && !collaborationLayout && !sidebarChipLayout && 'min-h-10 rounded-lg px-2 py-1',
           navigationLayout && open && 'border-primary',
           className,
         )}
@@ -90,15 +95,44 @@ export const IdentityTriggerButton = forwardRef<HTMLButtonElement, IdentityTrigg
           <>
             <IdentityAvatar
               identity={identity}
-              size={sidebarLayout || collaborationLayout ? 'xs' : 'sm'}
+              size={inlineLayout || sidebarLayout || collaborationLayout ? 'xs' : 'sm'}
               userAvatarUrl={userAvatarUrl}
             />
-            <IdentityDetails
-              identity={identity}
-              compact={sidebarLayout || collaborationLayout}
-              summaryOnly={sidebarLayout}
-              userIdLabel={collaborationLayout ? '用户 ID' : undefined}
-            />
+            {inlineLayout ? (
+              <>
+                <TooltipProvider delayDuration={200}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="min-w-0 flex-1 truncate">{identity.name}</span>
+                    </TooltipTrigger>
+                    <TooltipContent>{identity.name}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                {identity.kind === 'bot' ? (
+                  <TooltipProvider delayDuration={200}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="max-w-[40%] shrink-0 truncate rounded-md bg-muted px-2 py-0.5 text-xs font-normal text-foreground">
+                          {getBotEngineLabel(identity.engine) || '引擎类型暂无'}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>{getBotEngineLabel(identity.engine) || '引擎类型暂无'}</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                ) : (
+                  <span className="shrink-0 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-normal text-primary">
+                    用户
+                  </span>
+                )}
+              </>
+            ) : (
+              <IdentityDetails
+                identity={identity}
+                compact={sidebarLayout || collaborationLayout}
+                summaryOnly={sidebarLayout}
+                userIdLabel={collaborationLayout ? '用户 ID' : undefined}
+              />
+            )}
             <ChevronDown
               className={cn(
                 collaborationLayout ? 'h-3 w-3' : sidebarLayout ? 'h-3.5 w-3.5' : 'h-4 w-4',

@@ -126,3 +126,26 @@ describe("EvolveRepository collaborative Bot access", () => {
     }));
   });
 });
+
+
+describe("task list target filter SQL", () => {
+  it("uses guarded MySQL JSON extraction in the shared COUNT and SELECT predicate", async () => {
+    const db = new RecordingDb((sql) => sql.includes("COUNT(*)") ? [{ total: 0 }] : []);
+    await new EvolveRepository(db).listTasksPage({ createdBy: "creator", ownerUserId: "owner",
+      page: 2, pageSize: 20, taskTypes: ["diagnose", "full"], targetType: "bot", statuses: ["running"], query: "keyword" });
+    expect(db.calls).toHaveLength(2);
+    const [count, rows] = db.calls;
+    expect(count.sql.split("WHERE ")[1]).toBe(rows.sql.split("WHERE ")[1].split(" ORDER BY")[0]);
+    expect(count.sql).toContain("CASE WHEN JSON_VALID(config_json) THEN config_json ELSE '{}' END");
+    expect(count.sql).toContain("JSON_UNQUOTE");
+    expect(count.sql).toContain("JSON_TYPE");
+    expect(count.params).toEqual(["creator", "owner", "diagnose", "full", "running", ...Array(5).fill("%keyword%")]);
+    expect(rows.params).toEqual([...count.params, 20, 20]);
+  });
+  it("returns an empty type intersection without accidentally dropping the filter", async () => {
+    const db = new RecordingDb(() => []);
+    expect(await new EvolveRepository(db).listTasksPage({ createdBy: "creator", page: 1, pageSize: 20, taskTypes: [] }))
+      .toEqual({ rows: [], total: 0 });
+    expect(db.calls).toHaveLength(0);
+  });
+});

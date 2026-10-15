@@ -61,6 +61,7 @@ export interface RoutineDto extends BackendUnknownRecord {
   model?: string | null;
   timeout_secs?: number | null;
   gmt_modified?: string;
+  next_run_at?: string;
 }
 export interface RoutineWrite {
   name: string;

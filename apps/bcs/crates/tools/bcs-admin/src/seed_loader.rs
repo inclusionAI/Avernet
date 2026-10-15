@@ -302,6 +302,7 @@ mod tests {
                 "micro-merchant-event-orchestration",
                 "write-review-loop",
                 "research-writing-loops",
+                "nested-review-loops",
                 "single-bot-guided-answer",
             ]
         );
@@ -351,6 +352,18 @@ mod tests {
             assert_eq!(content.participant_summary_json.as_object().unwrap().len(), 4);
             let nodes = &content.definition_json["runtime"]["state_machine"]["nodes"];
             assert_eq!(nodes.as_object().unwrap().values().filter(|node| node["kind"] == "loop").count(), 2);
+        }
+
+        let nested_loops = catalog.templates.iter().find(|template| template.id == "nested-review-loops")
+            .with_context(|| "missing nested-review-loops")?;
+        assert_eq!(nested_loops.priority, 37);
+        assert_eq!(nested_loops.contents.len(), 2);
+        for content in &nested_loops.contents {
+            assert_eq!(content.participant_summary_json.as_object().unwrap().len(), 3);
+            let outer = &content.definition_json["runtime"]["state_machine"]["nodes"]["delivery_cycles"];
+            assert_eq!(outer["loop"]["max_iterations"], 2);
+            assert_eq!(outer["loop"]["nodes"]["review_rounds"]["kind"], "loop");
+            assert_eq!(outer["loop"]["nodes"]["review_rounds"]["loop"]["max_iterations"], 3);
         }
 
         let bot_human_bot = catalog

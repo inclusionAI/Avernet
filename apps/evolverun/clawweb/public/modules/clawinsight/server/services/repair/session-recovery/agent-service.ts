@@ -1,3 +1,4 @@
+import { assertActionScope } from "./action-scope.js";
 import { comparableRequestPayload } from "../../../repositories/repair/agent-tool-call-record.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
@@ -108,8 +109,11 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         timeline: business.timeline.slice(-60).map(event => ({ ...event, payload: event.kind === "operation" ? { tool_call_id: event.payload.tool_call_id, status: event.payload.status, evidence_id: event.payload.evidence_id } : event.payload })),
         evidence: business.evidence.map(item => ({ ...item, excerpt: item.excerpt.slice(0, 1500) })),
       }, handbook: savedRecoveryHandbook(task),
-      timings: { heartbeatSeconds: 20, decisionPollSeconds: 20 }, tools: { logs_search: !!this.deps.logs,
-        runtime_inspect: true, session_read: true, supportedActionTypes: task.request.target.engine === "TE" ? ["engine_operation"] : ["container_command", "engine_operation"], engine: BotEngineOperations.capabilities(task.runtimeTarget!.target.activeEngine), trajectory_read: !!this.deps.trajectory, nasSessionRead: task.request.target.engine !== "TE", nasRoots: this.deps.nasRoots ?? [], ocb_operation: false, apply_action: task.plan?.approvedAt != null, retry_message: true } };
+      timings: { heartbeatSeconds: 20, decisionPollSeconds: 20 }, planProtocol: {
+        operationScope: "Engine 操作需在方案内提供参考请求或 operationScope: { operation, target? }。operation 是业务动作（例如 cron.delete、file.write），target 是定时任务ID、MCP code 或绝对文件路径。参数内容可调整，主要动作和对象不可更换。Shell 仍需遵守方案的业务范围，服务不解析 Shell 的业务语义。",
+        unknownWrite: "未知写入先读取现场，用 reconcile_write 提交 applied / not_applied 和后续读取证据。原调用记录保持不可变；核实后可继续方案，不会自动重放。",
+      }, tools: { logs_search: !!this.deps.logs,
+        runtime_inspect: true, session_read: true, supportedActionTypes: task.request.target.engine === "TE" ? ["engine_operation"] : ["container_command", "engine_operation"], engine: BotEngineOperations.capabilities(task.runtimeTarget!.target.activeEngine), trajectory_read: !!this.deps.trajectory, nasSessionRead: task.request.target.engine !== "TE", nasRoots: this.deps.nasRoots ?? [], ocb_operation: false, apply_action: task.plan?.approvedAt != null, retry_message: true, reconcile_write: true } };
   }
   async heartbeat(task: RecoveryStoredTask, sessionId?: string) {
     if (task.execution?.state === "ended") return { state: "ended" };
@@ -184,6 +188,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         || Object.keys(actualEngine).some(key => !["method", "path", "body", "upload"].includes(key))) fail(422, "Engine 请求只能包含 method、path、body 或 upload");
       const request = actualEngine as EngineOperation;
       BotEngineOperations.validate(task.runtimeTarget!.target.activeEngine, request, true);
+      assertActionScope(action, request);
       actualAction = { ...action, type: "engine_operation", command: undefined, operation: undefined, engineOperation: request };
       actualRequest = { ...body, engineOperation: request };
     } else {
@@ -195,7 +200,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     const current = await this.deps.targets.resolve({ environment: task.request.target.env, ownerId: task.request.target.entity_id, botId: task.request.target.bot_id });
     if (recoveryTargetSnapshot(current).fingerprint !== task.runtimeTarget!.fingerprint) fail(409, "目标现场已变化，需上报方案不再适用");
     // Approval identifies the business action; actual transport details are audited, not equality-fenced.
-    return this.tool(task, actualRequest, "apply_action", true, () => this.runtimeTool.applyApprovedAction(this.context(task), actualAction));
+    return this.tool(task, actualRequest, "apply_action", true, markDispatched => { markDispatched(); return this.runtimeTool.applyApprovedAction(this.context(task), actualAction); });
   }
 
   async retryMessage(task: RecoveryStoredTask, body: Record<string, unknown>) {
@@ -205,7 +210,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     if (!prior && (task.status !== "running" || (initial ? !!task.plan : task.phase !== "apply" || !task.plan?.approvedAt))) fail(409, "消息只能在初始判断或获批方案执行阶段由 Agent 决定");
     if (typeof body.message !== "string" || !body.message.trim() || body.message.length > 8000) fail(422, "重试消息格式无效");
     const key = initial ? task.request.delivery_key : `retry-${createHash("sha256").update(`${task.taskId}:${String(body.clientRequestId)}`).digest("hex").slice(0, 48)}`;
-    return this.tool(task, body, "retry_message", task.level !== "debug", async () => {
+    return this.tool(task, body, "retry_message", task.level !== "debug", async markDispatched => {
       if (task.level === "debug") return { status: "not_intervened", dry_run: true, delivery_key: key, message: body.message, initial_message: initial };
       const currentTarget = await this.deps.targets.resolve({ environment: task.request.target.env, ownerId: task.request.target.entity_id, botId: task.request.target.bot_id });
       if (recoveryTargetSnapshot(currentTarget).fingerprint !== task.runtimeTarget!.fingerprint) fail(409, "目标运行位置已变化，不能投递旧方案的重试消息");
@@ -215,6 +220,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       const marker = `[会话自愈：${key}]`;
       const startedAt = this.now();
       const message = `${marker}\n${body.message}`;
+      markDispatched();
       const receipt = await this.deps.runtime.sendMessage({ target: task.runtimeTarget!.target, expectedEngine: { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[task.request.target.engine] as "openclaw" | "claude_code" | "teclaw", sessionKey: task.request.session_key,
         deliveryKey: key, messageMarker: marker, message }).catch(() => ({ status: "unknown" as const }));
       return { ...receipt, delivery_key: key, message, initial_message: initial, started_at_ms: startedAt, finished_at_ms: this.now() };
@@ -224,6 +230,20 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     const call = await this.deps.audit.findToolCall(id);
     if (!call || call.taskId !== task.taskId) fail(404, "操作记录不存在");
     return { ...call, toolCallId: call.callId };
+  }
+  async reconcileWrite(task: RecoveryStoredTask, body: Record<string, unknown>) {
+    const source = await this.toolGet(task, String(body.sourceToolCallId));
+    if (!source.isWrite || source.status !== "unknown" || source.stepId !== task.current!.stepId) fail(409, "只能核实当前步骤的未知写入结果");
+    if (!["applied", "not_applied"].includes(String(body.outcome)) || typeof body.summary !== "string" || !body.summary.trim()
+      || !Array.isArray(body.evidenceToolCallIds) || !body.evidenceToolCallIds.length) fail(422, "核实需要明确结果、依据和后续读取证据");
+    for (const id of body.evidenceToolCallIds) {
+      const evidence = await this.toolGet(task, String(id));
+      if (evidence.isWrite || evidence.status !== "succeeded" || evidence.id <= source.id
+        || evidence.executionId !== task.execution!.executionId
+        || !["session_read", "trajectory_read", "runtime_inspect", "logs_search"].includes(evidence.toolName)) fail(422, "必须引用本次执行中、未知操作之后的成功读取证据");
+    }
+    return this.tool(task, body, "reconcile_write", false, async () => ({ sourceToolCallId: source.callId,
+      outcome: body.outcome, summary: body.summary, evidenceToolCallIds: body.evidenceToolCallIds }));
   }
   async conclusion(task: RecoveryStoredTask, body: Record<string, unknown>) {
     const source = await this.toolGet(task, String(body.sourceToolCallId));
@@ -250,7 +270,9 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     } else if (body.kind === "plan") {
       const plan = body.plan as RecoveryPlan;
       if (Array.isArray(plan?.actions)) for (const action of plan.actions) {
+        if (!action || typeof action !== "object") fail(422, "方案操作格式无效");
         if (task.request.target.engine === "TE" && (action.type === "container_command" || action.command !== undefined)) fail(422, "TE 不提供 Shell，需使用声明接口或在方案中说明 Owner 配合事项");
+        if (task.request.target.engine === "TE" && !action.engineOperation && !action.operationScope) fail(422, "TE 方案动作必须声明 operationScope 或参考 Engine 请求");
         if (action.engineOperation) BotEngineOperations.validate(task.runtimeTarget!.target.activeEngine, action.engineOperation, true);
       }
       await this.deps.business().plan(task.taskId, task.version, plan);
@@ -276,7 +298,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     }
     return { applied: await this.deps.repo.updateStepStatus(step.step_id, { ...report, expectedStep: { status: step.status, output_json: step.output_json } }) };
   };
-  private async tool(task: RecoveryStoredTask, body: Record<string, unknown>, name: string, write: boolean, run: () => Promise<unknown>) {
+  private async tool(task: RecoveryStoredTask, body: Record<string, unknown>, name: string, write: boolean, run: (markDispatched: () => void) => Promise<unknown>) {
     if (typeof body.clientRequestId !== "string" || !body.clientRequestId.trim() || typeof body.purpose !== "string" || !body.purpose.trim()) fail(422, "工具调用需要稳定 clientRequestId 与 purpose");
     const scope = task.authorizationScopeDigest!, execution = task.execution!;
     const { call, created } = await this.deps.audit.createToolCall({ callId: `tc-${randomUUID()}`, taskId: task.taskId, stepId: task.current!.stepId,
@@ -286,13 +308,22 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         const config = locked.taskConfig as RecoveryStoredTask | undefined;
         if (!config || config.execution?.executionId !== execution.executionId || config.execution.state === "ended"
           || config.execution.leaseExpiresAt <= Math.floor(this.now() / 1000)) fail(409, "执行授权已变化");
+        if (name === "reconcile_write" && calls.some(item => item.toolName === "reconcile_write" && item.status === "succeeded"
+          && (item.result as Record<string, unknown>)?.sourceToolCallId === body.sourceToolCallId
+          && (item.result as Record<string, unknown>)?.outcome !== body.outcome)) fail(409, "已核实的写入结果不能被相反结论覆盖");
         if (write && (config.level === "debug" || config.status !== "running")) fail(403, "当前不能执行实际干预");
         if (name === "retry_message" && config.phase === "assess") {
-          if (config.plan || calls.some(item => item.toolName === "retry_message")) fail(409, "初始消息已领取，不能再次发送");
+          if (config.plan || calls.some(item => item.toolName === "retry_message"
+            && !(item.status === "failed" && (item.result as Record<string, unknown>)?.dispatched === false)
+            && !calls.some(check => check.toolName === "reconcile_write" && check.status === "succeeded"
+              && (check.result as Record<string, unknown>)?.sourceToolCallId === item.callId
+              && (check.result as Record<string, unknown>)?.outcome === "not_applied"))) fail(409, "初始消息已领取，不能再次发送");
         } else if (write && (config.phase !== "apply" || !config.plan?.approvedAt)) fail(403, "当前没有方案操作授权");
         if (write && name === "apply_action" && (config.plan?.digest !== task.plan?.digest
           || !config.plan?.actions.some(action => action.actionId === body.actionId))) fail(403, "当前操作不属于有效获批方案");
-        if (write && calls.some(item => item.isWrite && item.status === "unknown")) fail(409, "已有写操作结果未知，不能盲目重放");
+        if (write && calls.some(item => item.isWrite && item.status === "unknown"
+          && !calls.some(check => check.toolName === "reconcile_write" && check.status === "succeeded"
+            && (check.result as Record<string, unknown>)?.sourceToolCallId === item.callId))) fail(409, "已有写操作结果未知，不能盲目重放");
       } });
     if (!created) {
       const evidenceId = ["succeeded", "failed", "unknown"].includes(call.status)
@@ -303,16 +334,18 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     const claimed = await this.deps.audit.claimToolCall({ callId: call.callId, executionId: execution.executionId,
       authorizationScopeDigest: scope, leaseOwner, leaseExpiresAt: Math.floor(this.now() / 1000) + 180 });
     if (!claimed) fail(409, "工具调用已被领取");
+    let dispatched = false;
     let result: unknown, status: "succeeded" | "failed" | "unknown" = "succeeded";
     try {
-      result = redactEvidenceValue(await run());
+      result = redactEvidenceValue(await run(() => { dispatched = true; }));
       if ((result as Record<string, unknown>)?.status === "failed") status = "failed";
       else if ((result as Record<string, unknown>)?.status === "unknown") status = "unknown";
     } catch (error) {
-      status = write ? "unknown" : "failed";
-      result = { error: error instanceof SessionRecoveryError ? { code: error.code, message: redactPersistableText(error.message, 1000) }
+      status = write && dispatched ? "unknown" : "failed";
+      result = { dispatched, error: error instanceof SessionRecoveryError ? { code: error.code, message: redactPersistableText(error.message, 1000) }
         : { code: "controlled_operation_unconfirmed", message: "受控操作未确认，需核对现场与审计" } };
     }
+    result = { ...result as Record<string, unknown>, recorded_at_ms: this.now() };
     await this.deps.audit.completeToolCall({ callId: call.callId, executionId: execution.executionId, authorizationScopeDigest: scope,
       status, leaseOwner, result });
     const evidenceId = await this.recordToolEvidence(task.taskId, call.callId, name, body, status, result);
@@ -320,23 +353,13 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   }
   private async recordToolEvidence(taskId: string, callId: string, name: string, body: Record<string, unknown>, status: string, result: unknown) {
     const current = await this.required(taskId), evidenceId = `evidence-${callId}`;
-    if (current.evidence.some(item => item.evidence_id === evidenceId)) return evidenceId;
-    const evidence = { evidence_id: evidenceId, tool_call_id: callId, source: name,
-      location: typeof (result as Record<string, unknown>)?.source === "string" ? String((result as Record<string, unknown>).source) : `tool-call:${callId}`,
-      excerpt: JSON.stringify(result).slice(0, 2000) };
     const receipt = result as Record<string, unknown>;
     const initialDelivery = name === "retry_message" && receipt.initial_message === true && receipt.dry_run !== true
       ? recoveryResult(current.request, receipt as unknown as Parameters<typeof recoveryResult>[1], Number(receipt.started_at_ms), Number(receipt.finished_at_ms)) : undefined;
-    await this.save(current, value => value.evidence.some(item => item.evidence_id === evidenceId) ? value : ({ ...value, evidence: [...value.evidence, evidence],
-      ...(initialDelivery ? { delivery: initialDelivery, observationDeadlineAt: initialDelivery.delivery.finished_at_ms + this.deps.observationMs } : {}),
-      timeline: [...value.timeline, this.event("operation", body.purpose as string, { tool_call_id: callId, request: recoveryToolRequest(body), result: {
-        delivery_confirmed: (result as Record<string, unknown>)?.delivery_confirmed,
-        session_id: (result as Record<string, unknown>)?.session_id,
-        delivery_key: (result as Record<string, unknown>)?.delivery_key,
-        message: (result as Record<string, unknown>)?.message,
-        initial_message: (result as Record<string, unknown>)?.initial_message,
-        dry_run: (result as Record<string, unknown>)?.dry_run,
-      }, status, evidence_id: evidenceId, raw_tool_call_id: callId })] }));
+    // Tool requests, results and evidence are projected from the existing audit ledger.
+    const latestInitial = [...current.timeline].reverse().find(event => event.kind === "operation" && (event.payload.result as Record<string, unknown>)?.initial_message === true);
+    if (initialDelivery && latestInitial?.payload.tool_call_id === callId && JSON.stringify(initialDelivery) !== JSON.stringify(current.delivery)) await this.save(current, value => ({ ...value,
+      delivery: initialDelivery, observationDeadlineAt: initialDelivery.delivery.finished_at_ms + this.deps.observationMs }));
     return evidenceId;
   }
   private context(task: RecoveryStoredTask): AgentToolContext {

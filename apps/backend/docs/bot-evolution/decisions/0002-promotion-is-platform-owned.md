@@ -1,0 +1,50 @@
+# Promotion of evolved bot revisions is platform-owned
+
+> 中文版：[0002-promotion-is-platform-owned.zh-CN.md](0002-promotion-is-platform-owned.zh-CN.md)
+
+Status: proposed (draft decision record; promote to `docs/adr/` on acceptance).
+
+## Decision
+
+Evolution strategies are pluggable, but **promotion is not**. Only the
+platform gate can move a bot's `active` genome ref. Strategies may submit
+candidate patches; bots may submit observations and
+draft patches to an inbox. Neither can write to a live bot, its workspace, or
+its genome refs.
+
+A candidate is promotable only when the platform floor passes (schema,
+locked genes and pins untouched, secret/PII scan, no permission escalation,
+no regression on platform-owned regression and safety suites, budget), the
+verification verdict under the binding's verification profile is `accept`
+(owners may choose a stricter profile, strategies cannot loosen it), and the
+patch's risk tier is approved
+(auto for low tiers under owner policy, human review otherwise; tools, script,
+and policy changes are locked by default and never auto-promoted).
+
+Verification is likewise platform-owned. Suites, graders, verification
+profiles, and protocols live outside the genome. They are read-only to
+strategies, bots, and the level-3 meta-loop, and change only through
+human-reviewed changes. A new improvement mechanism (strategy version)
+proposed by the meta-loop is adopted only after mechanism verification and
+human approval. Strategy inputs never include
+holdout, regression, or safety cases.
+
+Design: [`../08-promotion.md`](../08-promotion.md).
+
+## Consequences
+
+- ClawEvolve's tune stage must stop editing the live workspace and instead
+  emit patches from a sandbox; pack/restore leaves the evolution flow.
+- Any third-party strategy can be enabled without trusting it with
+  production write access.
+- Bot owners get a review queue and per-bot policy (enabled strategies,
+  auto-promote ceiling, budgets).
+- Every promotion and rollback is audited with evidence and evaluation links.
+
+## Alternatives
+
+- **Each strategy promotes by its own rules** (today's ClawEvolve accept rule
+  plus in-place edits). Rejected: reward hacking and self-grading are the
+  dominant failure mode reported for self-improving agents.
+- **Always require human approval.** Rejected as default: blocks low-risk
+  memory updates; kept available as an owner policy.

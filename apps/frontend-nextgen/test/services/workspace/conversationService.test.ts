@@ -93,7 +93,17 @@ describe('conversationService.listDirectory', () => {
     botMocked.listBotMetadata.mockResolvedValue({
       code: 200000,
       data: {
-        items: [{ bot_id: 'bot-b', owner_id: '327325', bot_name: 'Bot B', status: 'ACTIVE' }],
+        items: [
+          {
+            bot_id: 'bot-b',
+            owner_id: '327325',
+            bot_name: 'Bot B',
+            engine: 'claude_code',
+            template_type: 'personalCoding',
+            template_name: '个人 Coding Bot',
+            status: 'ACTIVE',
+          },
+        ],
       },
       message: 'OK',
       request_id: 'r',
@@ -128,6 +138,7 @@ describe('conversationService.listDirectory', () => {
         online: true,
         chatable: true,
         isFriendBot: true,
+        isAgentCodingBot: true,
       }),
     ]);
   });

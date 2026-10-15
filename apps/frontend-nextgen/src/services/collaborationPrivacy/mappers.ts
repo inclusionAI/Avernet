@@ -6,6 +6,7 @@ import type {
   OrganizationSearchEntry,
   PublicAudience,
   PublicConfig,
+  PublicScope,
 } from '@/domain/collaborationPrivacy/types';
 import type { CollaborationBotDto, OrgDeptDto, OrgUserDto } from '@/services/backendApi';
 import { normalizeEmployeeNumber } from '@/utils/employeeNumber';
@@ -82,22 +83,48 @@ export function mapOrgDeptToPath(dto: OrgDeptDto): OrganizationPath {
   return mapOrgDeptToEntry(dto).path;
 }
 
+function resolveUserPublicationScope(
+  visibility: CollaborationBotDto['visibility'],
+  referenceCount: number,
+): PublicScope {
+  // 对用户受众判断保持既有逻辑：public 由 view_scope_user_friend_deps 区分全部/部分；
+  // protected 仍视为限定组织可申请；private 或缺失视为不可见。本函数仅在用户受众分支调用。
+  if (visibility === 'public') {
+    return referenceCount > 0 ? 'restricted' : 'all';
+  }
+  if (visibility === 'protected') {
+    return 'restricted';
+  }
+  return 'none';
+}
+
+function resolveAgentPublicationScope(
+  visibility: CollaborationBotDto['visibility'],
+  referenceCount: number,
+): PublicScope {
+  // 对 Bot(agent) 受众新判断：visibility 为 private 或缺失 → 不可见；
+  // 否则（public/protected）按 view_scope_agent_friend_deps 区分——空为全部可见，非空为部分部门可见。
+  // agent 可见性由后端 friend_check_in_strategy 派生（bot scope public 逻辑），故 protected 与 public 同等视为「可见」，
+  // 不再像用户受众那样把 protected 无条件归为限定组织可申请。
+  if (visibility !== 'public' && visibility !== 'protected') {
+    return 'none';
+  }
+  return referenceCount > 0 ? 'restricted' : 'all';
+}
+
 function mapCurrentPublication(
   visibility: CollaborationBotDto['visibility'],
   references: DepartmentScopeReference[],
+  audience: PublicAudience,
 ): PublicConfig {
   const entries = references
     .filter((reference): reference is DepartmentScopeReference & { path: OrganizationPath } => Boolean(reference.path))
     .map((reference) => ({ deptNo: reference.deptNo, path: reference.path }));
   const organizationPaths = entries.map((entry) => entry.path);
   const scope =
-    visibility === 'public'
-      ? references.length > 0
-        ? 'restricted'
-        : 'all'
-      : visibility === 'protected'
-      ? 'restricted'
-      : 'none';
+    audience === 'bot'
+      ? resolveAgentPublicationScope(visibility, references.length)
+      : resolveUserPublicationScope(visibility, references.length);
   return {
     scope,
     organizationPaths: scope === 'restricted' ? organizationPaths : [],
@@ -110,10 +137,12 @@ function mapCurrentPublications(dto: CollaborationBotDto): Record<PublicAudience
     user: mapCurrentPublication(
       dto.user_visibility,
       readDepartmentScopeReferences(dto.friend_ext, 'view_scope_user_friend_deps'),
+      'user',
     ),
     bot: mapCurrentPublication(
       dto.visibility,
       readDepartmentScopeReferences(dto.friend_ext, 'view_scope_agent_friend_deps'),
+      'bot',
     ),
   };
 }

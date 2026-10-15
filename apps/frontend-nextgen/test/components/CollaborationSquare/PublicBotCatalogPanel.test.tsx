@@ -57,13 +57,15 @@ describe('PublicBotCatalogPanel identity picker', () => {
     expect(screen.queryByText(/左上角工作身份切换/)).not.toBeInTheDocument();
   });
 
-  it('身份选择器位于搜索栏之前（提示卡原位置）', () => {
+  it('身份选择器位于搜索栏右侧，窄屏时自然换行', () => {
     const { container } = render(<PublicBotCatalogPanel vm={buildVm()} scrollRootRef={{ current: null }} />);
 
     const picker = screen.getByTestId('square-identity-picker');
     const search = screen.getByTestId('square-search');
     expect(container.contains(picker)).toBe(true);
-    expect(picker.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+    expect(picker.parentElement).toHaveClass('max-w-[280px]', 'md:w-[280px]');
+    expect(picker.parentElement?.parentElement).toHaveClass('md:flex-row', 'flex-col', 'md:items-center', 'md:justify-end');
+    expect(search.compareDocumentPosition(picker) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
   });

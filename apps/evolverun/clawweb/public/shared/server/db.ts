@@ -462,7 +462,6 @@ export function resolveBaasConfig(configPath?: string): ResolvedBaasConfig {
 }
 
 export type ResolvedRepairServiceConfig = {
-  aisSnapshotIds: Record<"pre" | "prod", number>;
   decisionGraceSeconds: number;
   contextWaitSeconds: number;
   executionLeaseSeconds: number;
@@ -480,26 +479,12 @@ export type ResolvedRepairServiceConfig = {
 /** Resolve Repair-only integration gaps through ClawWeb's central YAML config. */
 export function resolveRepairServiceConfig(configPath?: string): ResolvedRepairServiceConfig {
   const yaml = readYamlConfig(configPath).repair;
-  const legacyAisSnapshotId = envInt(
-    "REPAIR_AIS_SNAPSHOT_ID",
-    yaml?.ais?.snapshotId ?? 62_380_375,
-  );
   const contextWaitSeconds = envInt(
     "REPAIR_CONTEXT_WAIT_SECONDS",
     yaml?.execution?.contextWaitSeconds ?? 30 * 60,
   );
   const legacyCompatibleAgentTimeout = Math.max(15 * 60, contextWaitSeconds + 5 * 60);
   return {
-    aisSnapshotIds: {
-      pre: envInt(
-        "REPAIR_AIS_PRE_SNAPSHOT_ID",
-        yaml?.ais?.snapshots?.pre ?? legacyAisSnapshotId,
-      ),
-      prod: envInt(
-        "REPAIR_AIS_PROD_SNAPSHOT_ID",
-        yaml?.ais?.snapshots?.prod ?? legacyAisSnapshotId,
-      ),
-    },
     decisionGraceSeconds: envInt(
       "REPAIR_DECISION_GRACE_SECONDS",
       yaml?.execution?.decisionGraceSeconds ?? 15 * 60,

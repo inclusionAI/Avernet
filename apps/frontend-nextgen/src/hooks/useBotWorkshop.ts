@@ -165,7 +165,15 @@ export function useBotWorkshop() {
     ...state,
     spaceId,
     currentSpaceKind: currentSpace?.spaceType === 'TEAM' ? 'team' : 'personal',
-    canOpenConversation: (bot: BotDomain) => Boolean(currentOpenApiUserId && bot.ownerId === currentOpenApiUserId),
+    // Only Agent Coding Bot extends the workbench conversational route to explicit
+    // collaborators. Other engines keep the original Owner-only workbench entry so
+    // this fix remains scoped to Coding Bot behavior.
+    canOpenConversation: (bot: BotDomain) =>
+      Boolean(
+        currentOpenApiUserId &&
+          (bot.ownerId === currentOpenApiUserId ||
+            (Boolean(bot.runtime?.isAgentCodingBot) && bot.actions.includes('edit'))),
+      ),
     canEnterDetail,
     loading: requestIdentity.loading || spaceLoading || !spaceInitialized || state.loading,
     error: requestIdentity.error ?? spaceError ?? state.error,
@@ -187,6 +195,7 @@ export function useBotWorkshop() {
     // 不应显示受协作者权限保护的任务实例入口。
     canOpenTaskInstances: (bot: BotDomain) =>
       Boolean(currentOpenApiUserId && (bot.ownerId === currentOpenApiUserId || bot.actions.includes('edit'))),
+    canRestartContainer: (bot: BotDomain) => Boolean(currentOpenApiUserId && bot.ownerId === currentOpenApiUserId),
     creating: createFlow.creating,
     createAuthorization: createFlow.authorization,
     createSpaces: state.createScenario

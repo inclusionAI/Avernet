@@ -148,7 +148,7 @@ export function CollabPanel({ panel, activeRuns }: CollabPanelProps) {
     if (!activeRuns) return null;
     return (
       <div className="border-t border-border bg-background px-3 pb-1 pt-1.5 sm:px-6" data-testid="collab-panel">
-        {activeRuns}
+        <div className="mx-auto w-[calc(100%-64px)] pl-3 pr-1.5">{activeRuns}</div>
       </div>
     );
   }

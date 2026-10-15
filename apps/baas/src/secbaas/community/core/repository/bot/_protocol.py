@@ -103,7 +103,7 @@ class BotRepository(Protocol):
 
         Matches the 0525 SQL: baas_bot b ON b.bot_uuid = eb.device_id AND b.status = 'ACTIVE'
         Used by health-check validating/online queries.
-        Does NOT filter is_deleted — matching the original SQL behaviour.
+        Filters is_deleted=0 — returns live ACTIVE rows only (mirrors the ORM filter).
         """
         ...
 
@@ -183,6 +183,44 @@ class BotRepository(Protocol):
         record occupies a distinct unique-key slot (``is_deleted = bot_id``),
         so the live slot stays free and the clone is a fresh INSERT;
         soft-deleted records are left untouched. Returns the new record ID.
+        """
+        ...
+
+    def reconcile_unclaimed_pending_bots(
+        self,
+        bot_uuid: str,
+        tenant: str,
+        env: str,
+        modifier: str = "system",
+        exclude_bot_ids: set[int] | None = None,
+    ) -> int:
+        """Soft-delete every live PENDING bot row for the uuid in ONE transaction.
+
+        Reconcile sweep for clones that no non-terminal publish claims
+        (design D5): within a single session, list the live PENDING rows
+        of ``(bot_uuid, tenant, env)`` ordered id descending, then for
+        each row soft-delete its ``baas_bot_device_rel`` rows (rel
+        tombstone: ``is_deleted = own rel id``, as in
+        ``complete_update_transfer``) and the bot row itself
+        (``soft_delete`` write shape: ``is_deleted = bot_id``,
+        ``modifier``, ``gmt_modified``). Soft-deleted rows are never
+        revived — each tombstone keeps its own unique-key slot — and
+        non-PENDING rows are never touched. Returns the number of bot
+        rows soft-deleted.
+
+        ``exclude_bot_ids`` (design D5.6/D5.7 "claim-set protection") is
+        the set of bot row ids that are NEVER selected for soft-deletion.
+        It must contain (a) the resolved source bot row the new publish
+        targets — a never-published first-generation PENDING row is the
+        SOURCE of a CREATE publish, not an unclaimed clone, and sweeping
+        it would destroy the bot itself — and (b) every ``target_bot_id``
+        claimed by a non-finished publish across ALL generations of the
+        uuid, including retired/soft-deleted ones: a uuid with any
+        unfinished publish is in-flight, so its claimed clones must never
+        be reconciled (the caller computes this via the include-deleted
+        generation scan). ``None`` or an empty set means no exclusion —
+        sweep every live PENDING row (callers unable to identify any
+        protected id pass ``None`` deliberately).
         """
         ...
 

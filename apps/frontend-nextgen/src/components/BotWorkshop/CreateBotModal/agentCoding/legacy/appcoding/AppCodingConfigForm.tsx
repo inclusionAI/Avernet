@@ -7,7 +7,7 @@
  * 当用户在创建 Bot 时选择「应用 Coding」引擎类型后展示，
  * 收集 template_config 所需的各字段并向上层暴露 onChange 回调。
  */
-import type { WorkflowItem } from '@/services/botWorkshop/agentCodingLegacyService';
+import type { CodeRepositoryTenant, WorkflowItem } from '@/services/botWorkshop/agentCodingLegacyService';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { validateYuqueKbRepoBindings } from '../aicoding/configFields';
 import { AppCodingAdvancedConfig } from './AppCodingAdvancedConfig';
@@ -18,6 +18,7 @@ import {
   isResourceSpecEnabledFromUrl,
 } from './AppCodingConfigUtils';
 import { AppCodingRepositoryFields } from './AppCodingRepositoryFields';
+import { DEFAULT_CODE_REPOSITORY_TENANT } from './CodeRepositoryTenantSwitch';
 import type { ModelOption } from './CodingModelConfigField';
 import { Hosting24x7ConfigField } from './Hosting24x7ConfigField';
 type TemplateConfig = Record<string, any>;
@@ -70,6 +71,9 @@ export const AppCodingConfigForm = forwardRef<AppCodingConfigFormRef, AppCodingC
     const [backendRepos, setBackendRepos] = useState<string[]>(['']);
     const [frontendRepos, setFrontendRepos] = useState<string[]>(['']);
     const [libRepos, setLibRepos] = useState<string[]>(['']);
+    const [backendRepoTenant, setBackendRepoTenant] = useState<CodeRepositoryTenant>(DEFAULT_CODE_REPOSITORY_TENANT);
+    const [frontendRepoTenant, setFrontendRepoTenant] = useState<CodeRepositoryTenant>(DEFAULT_CODE_REPOSITORY_TENANT);
+    const [libRepoTenant, setLibRepoTenant] = useState<CodeRepositoryTenant>(DEFAULT_CODE_REPOSITORY_TENANT);
     const [architectBotId, setArchitectBotId] = useState('');
     const [devflowWorkflow, setDevflowWorkflow] = useState<WorkflowItem | null>(null);
     const [enable24x7Hosting, setEnable24x7Hosting] = useState(true);
@@ -233,6 +237,12 @@ export const AppCodingConfigForm = forwardRef<AppCodingConfigFormRef, AppCodingC
           setBackendRepos={setBackendRepos}
           setFrontendRepos={setFrontendRepos}
           setLibRepos={setLibRepos}
+          backendRepoTenant={backendRepoTenant}
+          setBackendRepoTenant={setBackendRepoTenant}
+          frontendRepoTenant={frontendRepoTenant}
+          setFrontendRepoTenant={setFrontendRepoTenant}
+          libRepoTenant={libRepoTenant}
+          setLibRepoTenant={setLibRepoTenant}
           duplicateRepoUrls={duplicateRepoUrls}
           yuqueKbRepos={yuqueKbRepos}
           setYuqueKbRepos={setYuqueKbRepos}

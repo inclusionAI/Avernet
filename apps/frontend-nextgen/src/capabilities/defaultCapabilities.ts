@@ -11,6 +11,7 @@ import type {
   CapabilityResult,
   HumanIdentity,
   InviteCodeGatePolicy,
+  LegacyVersionSwitchSpec,
   LoginStrategy,
   MetricsDashboardSpec,
   OpenSourceExperienceNoticeSpec,
@@ -40,6 +41,9 @@ export const defaultCapabilities: AppCapabilities = {
   }),
   // Open Core 默认不暴露内部帮助链接，避免内部 URL 泄漏。
   getHelpLinks: () => ({ status: 'available', value: [] }),
+  // Open Core 无旧版可切回：不提供版本切换能力，壳层「返回旧版」入口不渲染、启动不发请求不打点。
+  getLegacyVersionSwitch: (): CapabilityResult<LegacyVersionSwitchSpec | null> =>
+    unsupported(null, '当前部署形态不提供版本切换'),
   openExternal: () => unsupported(null, '当前运行环境暂不支持打开外部链接'),
   // Open Core 默认路由重定向：当前无收敛项——/space-admin、/ticket-center 由页面级 getAdminSections
   // 守卫（阿里云形态 spaces=false 时 SpaceAdmin 页 replace 回落 /ticket-center），不在运行期重定向。
@@ -127,6 +131,8 @@ export const defaultCapabilities: AppCapabilities = {
       codefuseTokenUrl: null,
       antCodeProjectsApiUrl: null,
       antCodeProjectBaseUrl: null,
+      xiaojinCodeProjectsApiUrl: null,
+      xiaojinCodeProjectBaseUrl: null,
     },
   }),
   // Open Core 无内网 antwork 照片服务数据源 → 成员头像返回 null，成员行 UI 回退首字母占位。
@@ -215,6 +221,10 @@ export const defaultCapabilities: AppCapabilities = {
       value: { providerSlug, apiUrl: bcsEndpoint },
     };
   },
+  getQwenWorkBridgeInstallation: () => ({ status: 'available', value: null }),
+  // Open Core（外部部署）不启用 Poolab 接入：返回 null → BotRegistrationDialog 不渲染 Poolab Tab，
+  // PoolabRegistrationPanel 也不会被触及。internal overlay 覆盖为真实脚本/指南 URL。
+  getPoolabBridgeInstallation: () => ({ status: 'available', value: null }),
   // Open Core（外部部署）暂不提供群高级配置与内部渠道绑定能力，避免展示不可用配置并发起无效请求。
   getGroupAdvancedConfigEnabled: (): CapabilityResult<boolean> => ({
     status: 'available',

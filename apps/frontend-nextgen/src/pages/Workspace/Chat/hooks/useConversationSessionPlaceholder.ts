@@ -1,6 +1,7 @@
 import type { ConversationBotView } from '@/domain/conversation';
 import { conversationBotSelectionService } from '@/services/workspace/conversationBotSelectionService';
 import { useConversationStore } from '@/stores/conversationStore';
+import { selectedSnapshotMatches } from '@/stores/conversationStoreState';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import type { ConversationSessionsModel } from './useConversationSessions.types';
@@ -29,11 +30,28 @@ export function useConversationSessionPlaceholder(options: {
     (item) => item.bot.botId === state.selectedBotId && item.section === state.selectedSection,
   );
   if (!view || state.selectedOrigin !== 'mine') return null;
+  // 已打开的主会话被过滤条件移出列表(spec: 搜索只改变侧栏列表,不自动关闭主会话),
+  // 占位一律不遮蔽:加载/空态/失败/未命中都不会切换舞台,仍由保留快照驱动。
+  if (
+    selectedSnapshotMatches(state.selectedSessionSnapshot, {
+      botId: state.selectedBotId,
+      section: state.selectedSection,
+      origin: state.selectedOrigin,
+      scope: state.selectedScope,
+      friendUserId: state.selectedFriendUserId,
+      sessionId: state.selectedSessionId,
+    })
+  )
+    return null;
+  // 好友 Bot 的生效范围读 scopeByFriendBotId(选中范围恒 all,不随好友筛选投影);
+  // 管理/团队 Bot 沿用已同步的 selectedScope。
+  const effectiveScope =
+    view.section === 'friend' ? state.scopeByFriendBotId[view.bot.botId] ?? 'all' : state.selectedScope;
   const list = conversationBotSelectionService.getList({
     botId: view.bot.botId,
     section: view.section,
     origin: 'mine',
-    scope: state.selectedScope,
+    scope: effectiveScope,
   });
   if (list && !list.loading && !list.error && list.items.some((item) => item.sessionId === state.selectedSessionId))
     return null;
@@ -44,7 +62,7 @@ export function useConversationSessionPlaceholder(options: {
       ? 'error'
       : list.items.length || list.hasMore
       ? 'unselected'
-      : state.selectedScope === 'favorite'
+      : effectiveScope === 'favorite'
       ? 'favorite-empty'
       : 'empty';
   return {
@@ -67,7 +85,7 @@ export function useConversationSessionPlaceholder(options: {
     },
     retry: () => options.sessions.retrySessions(view.bot.botId, view.section),
     showAll: () => {
-      conversationBotSelectionService.showAll(view.bot.botId);
+      conversationBotSelectionService.showAll(view.bot.botId, view.section);
       options.sessions.retrySessions(view.bot.botId, view.section);
     },
   };

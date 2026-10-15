@@ -185,9 +185,11 @@ export class RepairBatchRepository {
     }
     const active = await tx.query<Row>(`SELECT r.task_id, r.phase FROM workflow_repair_revisions r WHERE r.workflow_id = ?
       AND r.revision = (SELECT MAX(r2.revision) FROM workflow_repair_revisions r2 WHERE r2.task_id = r.task_id)
-      AND r.phase NOT IN ('published', 'no_change', 'cancelled')`, [workflowId]);
+      AND r.phase NOT IN ('published', 'no_change', 'cancelled')
+      AND NOT EXISTS (SELECT 1 FROM workflow_repair_revisions published WHERE published.task_id = r.task_id AND published.phase = 'published')`, [workflowId]);
     if (active.some(row => row.task_id !== input.taskId)) conflict('ACTIVE_TASK_CONFLICT', 'Workflow already has an editable repair task');
     const previous = await this.latest(tx, workflowId, input.taskId);
+    if ((await tx.query('SELECT 1 FROM workflow_repair_revisions WHERE task_id = ? AND phase = ? LIMIT 1', [input.taskId, 'published'])).length) conflict('STATE_CONFLICT', '已部署任务不能再生成候选；请依据效果结论创建新基线任务');
     if (request.expectedAttemptRevision !== (previous?.revision ?? 0) || input.revision !== (previous?.revision ?? 0) + 1
       || (previous && !['review', 'blocked', 'failed'].includes(previous.phase))) conflict('STATE_CONFLICT', 'Revision is not editable or latest attempt changed');
     if (previous && canonicalRepairJson(previous.input.baseline) !== canonicalRepairJson(input.baseline)) conflict('CONTENT_MISMATCH', 'A task cannot change its frozen baseline');
@@ -228,7 +230,7 @@ export class RepairBatchRepository {
     if (current.stateVersion !== expectedStateVersion || current.phase !== 'drafting') conflict('STATE_CONFLICT', 'Draft result was already settled');
   }
   async completeDraft(tx: IDatabase, input: RevisionIdentity & {
-    draft: Record<string, unknown>; checks: Record<string, unknown>; phase: 'review' | 'blocked' | 'no_change';
+    draft: Record<string, unknown>; checks: Record<string, unknown>; phase: 'review' | 'blocked' | 'no_change'; recoverRead?: boolean;
   }): Promise<RepairRevision> {
     const current = await this.currentAttempt(tx, input);
     if (!['review', 'blocked', 'no_change'].includes(input.phase)
@@ -238,12 +240,13 @@ export class RepairBatchRepository {
     const checksJson = boundedRepairJson(input.checks, MAX_REPORT_BYTES);
     if (current.phase === input.phase && current.draft !== null && current.checks !== null
       && canonicalRepairJson(current.draft) === draftJson && canonicalRepairJson(current.checks) === checksJson) return current;
-    this.requireDraftCas(current, input.expectedStateVersion);
+    if (!(input.recoverRead && current.phase === 'failed' && ['GIT_RESULT_UNAVAILABLE', 'AIS_FAILED', 'AIS_STOPPED', 'AIS_TIMEOUT'].includes(String(current.error?.code))
+      && current.stateVersion === input.expectedStateVersion)) this.requireDraftCas(current, input.expectedStateVersion);
     const result = await tx.exec(`UPDATE workflow_repair_revisions SET phase = ?, state_version = state_version + 1,
       draft_json = ?, checks_json = ?, candidate_digest = ?, checks_digest = ?, updated_at_ms = ?
-      WHERE workflow_id = ? AND task_id = ? AND revision = ? AND state_version = ? AND phase = 'drafting' AND draft_json IS NULL`,
+      WHERE workflow_id = ? AND task_id = ? AND revision = ? AND state_version = ? AND phase = ? AND draft_json IS NULL`,
     [input.phase, draftJson, checksJson, digestRepairJson(input.draft), digestRepairJson(input.checks), Date.now(),
-      input.workflowId, input.taskId, input.revision, input.expectedStateVersion]);
+      input.workflowId, input.taskId, input.revision, input.expectedStateVersion, current.phase]);
     if (result.affectedRows !== 1) conflict('STATE_CONFLICT', 'Draft result was already settled');
     if (input.phase === 'no_change') {
       await tx.exec(`UPDATE workflow_repair_items SET state = 'pending', active_task_id = NULL, active_revision = NULL,

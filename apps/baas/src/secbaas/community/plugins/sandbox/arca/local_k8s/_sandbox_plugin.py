@@ -24,6 +24,9 @@ out-of-cluster 模式下通过 localhost + NodePort 访问。
 | LOCAL_K8S_EXTRA_ENVS | - | 否 | JSON 对象，注入到 Pod 容器的环境变量（可被 envs 入参覆盖） |
 | LOCAL_K8S_OUTBOUND_RULE | - | 否 | JSON 对象，作为 ``OutBoundOperationRule`` 的环境变量 fallback |
 | LOCAL_K8S_SIDECAR_IMAGE | avernet-engine-sidecar:latest | 否 | engine sidecar 镜像 |
+| LOCAL_K8S_SHARED_PVC_NAME | bot-shared-data | 否 | 共享 PVC 名称 |
+| LOCAL_K8S_SHARED_PVC_SIZE | 10Gi | 否 | 共享 PVC 总大小 |
+| LOCAL_K8S_SHARED_PVC_HOST_MOUNT_PATH | - | 否 | 插件 Pod 上共享 PVC 的挂载路径；配置后 delete_storage 会删除该 bot 的 subPath 目录 |
 
 colima + k3s 最小示例（NodePort，无需额外映射端口）：
 ::
@@ -82,6 +85,16 @@ _SIDECAR_PROXY_PORT = 38080
 _SIDECAR_ADMIN_PORT = 38081
 _SIDECAR_HEADER_RULES_PATH = "/etc/sidecar/header-rules/header-rules.yaml"
 
+_BOT_DATA_MOUNT_PATH = "/home/admin"
+_STORAGE_ID_ANNOTATION = "secbaas.local-k8s.io/storage-id"
+
+# Shared PVC used for all local_k8s bot data. Each bot gets a distinct subPath
+# inside this PVC, so backend can mount the same PVC at /home/admin/.merge_nas
+# and read {storage_id} without any code changes on the backend side.
+_SHARED_BOT_DATA_PVC_NAME = "bot-shared-data"
+_SHARED_BOT_DATA_PVC_SIZE = "10Gi"
+_SHARED_BOT_DATA_PVC_ACCESS_MODE = "ReadWriteOnce"
+
 # Environment variable names consumed by this plugin.
 ENV_KUBECONFIG = "LOCAL_K8S_KUBECONFIG"
 _ENV_FALLBACK_KUBECONFIG_PATH = "KUBECONFIG"
@@ -98,6 +111,9 @@ ENV_IMAGE_PULL_POLICY = "LOCAL_K8S_IMAGE_PULL_POLICY"
 ENV_NODE_PORT = "LOCAL_K8S_NODE_PORT"
 ENV_EXTRA_ENVS = "LOCAL_K8S_EXTRA_ENVS"
 ENV_OUTBOUND_RULE = "LOCAL_K8S_OUTBOUND_RULE"
+ENV_SHARED_PVC_NAME = "LOCAL_K8S_SHARED_PVC_NAME"
+ENV_SHARED_PVC_SIZE = "LOCAL_K8S_SHARED_PVC_SIZE"
+ENV_SHARED_PVC_HOST_MOUNT_PATH = "LOCAL_K8S_SHARED_PVC_HOST_MOUNT_PATH"
 
 _INCLUSTER_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 
@@ -149,6 +165,16 @@ def _build_deployment_name(template_id: str) -> str:
 
 def _build_service_name(deployment_name: str) -> str:
     return f"{deployment_name}-svc"
+
+
+def _shared_pvc_name() -> str:
+    """返回共享 PVC 名称，可通过环境变量覆盖。"""
+    return _env(ENV_SHARED_PVC_NAME) or _SHARED_BOT_DATA_PVC_NAME
+
+
+def _shared_pvc_size() -> str:
+    """返回共享 PVC 大小，可通过环境变量覆盖。"""
+    return _env(ENV_SHARED_PVC_SIZE) or _SHARED_BOT_DATA_PVC_SIZE
 
 
 def _resolve_image(image_override: str | None) -> str:
@@ -429,6 +455,54 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         logger.info("local_k8s: created configmap %s/%s", namespace, configmap_name)
         return configmap_name
 
+    def _create_shared_bot_data_pvc(self) -> str:
+        """创建（或复用）共享 PVC，所有 bot 的 subPath 都在其下。
+
+        幂等：PVC 已存在时直接返回现有名称，避免重复创建导致冲突。
+        """
+        from kubernetes.client import (
+            ApiException,
+            CoreV1Api,
+            V1ObjectMeta,
+            V1PersistentVolumeClaim,
+            V1PersistentVolumeClaimSpec,
+            V1ResourceRequirements,
+        )
+
+        namespace = _namespace()
+        pvc_name = _shared_pvc_name()
+        core_api = CoreV1Api(self._client())
+
+        try:
+            core_api.read_namespaced_persistent_volume_claim(
+                name=pvc_name, namespace=namespace
+            )
+            logger.info(
+                "local_k8s: shared pvc %s/%s already exists, reuse", namespace, pvc_name
+            )
+            return pvc_name
+        except ApiException as e:
+            if e.status == 404:
+                pass
+            else:
+                raise
+
+        size = _shared_pvc_size()
+        pvc = V1PersistentVolumeClaim(
+            api_version="v1",
+            kind="PersistentVolumeClaim",
+            metadata=V1ObjectMeta(name=pvc_name, namespace=namespace),
+            spec=V1PersistentVolumeClaimSpec(
+                access_modes=[_SHARED_BOT_DATA_PVC_ACCESS_MODE],
+                resources=V1ResourceRequirements(requests={"storage": size}),
+            ),
+        )
+        core_api.create_namespaced_persistent_volume_claim(
+            namespace=namespace, body=pvc
+        )
+        logger.info("local_k8s: created shared pvc %s/%s", namespace, pvc_name)
+        return pvc_name
+
     def _create_deployment(
         self,
         deployment_name: str,
@@ -439,6 +513,9 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         envs: dict[str, str] | None,
         resource_spec: ResourceSpecification | None,
         configmap_name: str,
+        pvc_name: str | None = None,
+        storage_id: str | None = None,
+        mount_path: str = _BOT_DATA_MOUNT_PATH,
     ) -> None:
         """创建包含 bot-runtime 与 envoy-sidecar 的双容器 Deployment。"""
         from kubernetes.client import (
@@ -451,6 +528,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             V1EnvVar,
             V1LabelSelector,
             V1ObjectMeta,
+            V1PersistentVolumeClaimVolumeSource,
             V1PodSpec,
             V1PodTemplateSpec,
             V1ResourceRequirements,
@@ -466,9 +544,20 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             "template-id": _sanitize_name(template_id),
             "managed-by": "secbaas-local-k8s",
         }
+        annotations = {_STORAGE_ID_ANNOTATION: storage_id} if storage_id else None
         cpu_request, cpu_limit, memory_request, memory_limit = _build_resources(
             resource_spec
         )
+
+        volume_mounts: list[V1VolumeMount] = []
+        if pvc_name and storage_id:
+            volume_mounts.append(
+                V1VolumeMount(
+                    name="bot-data",
+                    mount_path=mount_path,
+                    sub_path=storage_id,
+                )
+            )
 
         container = V1Container(
             name=self.CONTAINER_NAME,
@@ -480,6 +569,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
                 requests={"cpu": cpu_request, "memory": memory_request},
                 limits={"cpu": cpu_limit, "memory": memory_limit},
             ),
+            volume_mounts=volume_mounts or None,
         )
 
         sidecar = V1Container(
@@ -512,24 +602,34 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             ),
         )
 
+        volumes = [
+            V1Volume(
+                name="header-rules",
+                config_map=V1ConfigMapVolumeSource(name=configmap_name),
+            )
+        ]
+        if pvc_name:
+            volumes.append(
+                V1Volume(
+                    name="bot-data",
+                    persistent_volume_claim=V1PersistentVolumeClaimVolumeSource(
+                        claim_name=pvc_name
+                    ),
+                )
+            )
+
         deployment = V1Deployment(
             api_version="apps/v1",
             kind="Deployment",
-            metadata=V1ObjectMeta(name=deployment_name, labels=labels),
+            metadata=V1ObjectMeta(
+                name=deployment_name, labels=labels, annotations=annotations
+            ),
             spec=V1DeploymentSpec(
                 replicas=1,
                 selector=V1LabelSelector(match_labels={"app": deployment_name}),
                 template=V1PodTemplateSpec(
-                    metadata=V1ObjectMeta(labels=labels),
-                    spec=V1PodSpec(
-                        containers=[container, sidecar],
-                        volumes=[
-                            V1Volume(
-                                name="header-rules",
-                                config_map=V1ConfigMapVolumeSource(name=configmap_name),
-                            )
-                        ],
-                    ),
+                    metadata=V1ObjectMeta(labels=labels, annotations=annotations),
+                    spec=V1PodSpec(containers=[container, sidecar], volumes=volumes),
                 ),
             ),
         )
@@ -667,11 +767,37 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         # 合并环境变量。优先级：调用方 envs > LOCAL_K8S_EXTRA_ENVS > metadata 默认值
         merged_envs = _resolve_extra_envs()
         merged_envs.update(envs or {})
+
+        # 优先使用 BaaS 侧 Storage 参数（与 backend 各 composer 对齐），
+        # 否则退回到 metadata.bot_id（独立使用插件时）。
+        storage_id: str | None = None
+        if storage and storage.storage_id:
+            storage_id = storage.storage_id
+        elif metadata and metadata.get("bot_id"):
+            storage_id = metadata["bot_id"]
+
         if metadata:
             merged_envs.setdefault("BOT_ID", metadata.get("bot_id", ""))
 
         # 优先使用入参中的 outbound rule，否则回退到 LOCAL_K8S_OUTBOUND_RULE 环境变量。
         effective_rule = outbound_operation_rule or _resolve_outbound_rule()
+
+        # 如果携带 storage_id，则在共享 PVC 中按 storage_id 分 subPath。
+        mount_path = storage.path if storage and storage.path else _BOT_DATA_MOUNT_PATH
+        quota = (
+            storage.quota if storage and storage.quota else _SHARED_BOT_DATA_PVC_SIZE
+        )
+        pvc_name = self._create_shared_bot_data_pvc() if storage_id else None
+        effective_storage = (
+            Storage(
+                storage_id=storage_id,
+                type="pvc",
+                path=mount_path,
+                quota=quota,
+            )
+            if storage_id
+            else None
+        )
 
         configmap_name = self._create_header_rules_configmap(
             deployment_name=deployment_name,
@@ -686,6 +812,9 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             envs=merged_envs,
             resource_spec=resource_spec,
             configmap_name=configmap_name,
+            pvc_name=pvc_name,
+            storage_id=storage_id,
+            mount_path=mount_path,
         )
         self._create_service(deployment_name, container_port)
         pod_name = self._wait_for_pod(deployment_name, ready_timeout_in_seconds)
@@ -701,13 +830,46 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             ttl_in_minutes=ttl_in_minutes,
             resources=resource_spec,
             sidecar_container_name=_SIDECAR_CONTAINER_NAME,
+            pvc_name=pvc_name,
+            storage=effective_storage,
         )
+
+    def _resolve_storage_id_from_deployment(self, deployment_name: str) -> str | None:
+        """读取 Deployment 注解，恢复 storage id。"""
+        from kubernetes.client import ApiException, AppsV1Api
+
+        namespace = _namespace()
+        apps_api = AppsV1Api(self._client())
+        try:
+            deployment = apps_api.read_namespaced_deployment(
+                name=deployment_name, namespace=namespace
+            )
+        except ApiException as e:
+            if e.status == 404:
+                return None
+            raise
+        annotations = (
+            deployment.metadata.annotations if deployment.metadata else None
+        ) or {}
+        storage_id = annotations.get(_STORAGE_ID_ANNOTATION)
+        return storage_id if isinstance(storage_id, str) else None
 
     def connect_sync_sandbox(self, sandbox_id: str) -> ArcaSandbox:
         """连接到已存在的沙箱。"""
         pod_name = self._find_pod_name(sandbox_id)
         if not pod_name:
             raise RuntimeError(f"local_k8s: no pod found for sandbox {sandbox_id}")
+        recovered_storage_id = self._resolve_storage_id_from_deployment(sandbox_id)
+        pvc_name = _shared_pvc_name() if recovered_storage_id else None
+        storage = (
+            Storage(
+                storage_id=recovered_storage_id,
+                type="pvc",
+                path=_BOT_DATA_MOUNT_PATH,
+            )
+            if recovered_storage_id
+            else None
+        )
         return LocalK8sArcaSandbox(
             sandbox_id=sandbox_id,
             pod_name=pod_name,
@@ -717,6 +879,8 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             container_name=self.CONTAINER_NAME,
             credentials=self._credentials,
             sidecar_container_name=_SIDECAR_CONTAINER_NAME,
+            pvc_name=pvc_name,
+            storage=storage,
         )
 
     def close(self) -> None:
@@ -781,12 +945,62 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         )
 
     def delete_storage(self, storage_id: str, tenant_name: str) -> bool:
-        """本地模式无 NAS 存储，直接返回 True。"""
-        logger.info(
-            "local_k8s: delete_storage storage_id=%s tenant_name=%s (no-op)",
-            storage_id,
-            tenant_name,
-        )
+        """删除 bot 在共享 PVC 中的 subPath 目录。
+
+        当 ``LOCAL_K8S_SHARED_PVC_HOST_MOUNT_PATH`` 未配置时，插件没有共享 PVC
+        的文件系统入口，退化为幂等 no-op（与 local_proc/local_docker 保持一致）。
+        配置后，会删除 ``{host_mount_path}/{storage_id}`` 目录。
+        """
+        if not storage_id:
+            return True
+
+        host_mount_path = _env(ENV_SHARED_PVC_HOST_MOUNT_PATH)
+        if not host_mount_path:
+            logger.info(
+                "local_k8s: delete_storage storage_id=%s tenant_name=%s "
+                "(shared PVC host mount path not configured, no-op)",
+                storage_id,
+                tenant_name,
+            )
+            return True
+
+        import shutil
+
+        real_host = os.path.realpath(host_mount_path)
+        target = os.path.join(host_mount_path, storage_id)
+        real_target = os.path.realpath(target)
+
+        # 安全校验：禁止删除挂载点本身或路径逃逸到挂载点之外。
+        if real_target == real_host:
+            logger.warning(
+                "local_k8s: refuse to delete shared PVC host mount path itself: %s",
+                real_host,
+            )
+            return False
+        if not real_target.startswith(real_host + os.sep):
+            logger.warning(
+                "local_k8s: refuse to delete path outside shared PVC mount: %s",
+                real_target,
+            )
+            return False
+
+        if os.path.exists(real_target):
+            try:
+                shutil.rmtree(real_target)
+                logger.info(
+                    "local_k8s: deleted storage subPath %s for storage_id=%s",
+                    real_target,
+                    storage_id,
+                )
+            except OSError as e:
+                logger.warning(
+                    "local_k8s: failed to delete storage subPath %s: %s",
+                    real_target,
+                    e,
+                )
+                return False
+        else:
+            logger.info("local_k8s: storage subPath already gone: %s", real_target)
         return True
 
 

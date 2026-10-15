@@ -1,11 +1,9 @@
 /** @jest-environment jsdom */
-// 搜索弹窗（GlobalSearchDialog）的模块图引入 @umijs/max：@jest/globals 须最先 import，
-// 且 @umijs/max factory 不引用外部 const（AppSidebar 的 import 求值早于 const 初始化）。
-import { afterEach, expect, it, jest } from '@jest/globals';
+// 搜索弹窗（GlobalSearchDialog）的模块图引入 @umijs/max：mock factory 不引用外部 const。
 import { extendCapabilities } from '@/capabilities';
-import { AppSidebar } from '@/shell/AppSidebar';
 import { getMergedNavigationItems } from '@/shell/navigation';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { afterEach, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen } from '@testing-library/react';
@@ -38,11 +36,6 @@ jest.mock('@/shell/SpaceSwitcher', () => ({
     <div data-testid={compact ? 'space-switcher-compact' : 'space-switcher'}>选择空间</div>
   ),
 }));
-jest.mock('@/shell/WorkspaceIdentitySwitcher', () => ({
-  WorkspaceIdentitySwitcher: ({ collapsed }: { collapsed?: boolean }) => (
-    <div data-testid={collapsed ? 'identity-switcher-collapsed' : 'identity-switcher'}>协作身份</div>
-  ),
-}));
 jest.mock('@/components/Admin/NotificationBell', () => ({
   NotificationBell: () => <div data-testid="notification-bell" />,
 }));
@@ -62,6 +55,9 @@ jest.mock('@/shell/HelpMenu', () => ({
     <div data-testid={variant === 'more' ? 'more-menu' : 'help-menu'} />
   ),
 }));
+
+// 先注册所有 mock，再加载会间接导入 @umijs/max 的侧栏模块。
+const { AppSidebar } = require('@/shell/AppSidebar') as typeof import('@/shell/AppSidebar');
 
 const renderSidebar = (props: Partial<Parameters<typeof AppSidebar>[0]> = {}) =>
   render(
@@ -153,8 +149,8 @@ it('顶部功能图标排布（设计稿 artboard-016）：搜索入口位于通
 });
 
 // 展开态品牌区单行回归（设计稿 artboard-016：单行 52px）：compact 锁版与三枚功能图标同排。
-// 此前内部字标锁版 ≈102px 同排曾致文字经 min-w-0 折叠钻到图标下被覆盖，终局解法是锁版按
-// 176px 预算自缩（图标组 96px + 锁版 ≤80px）保持单行；本测试锁结构而非像素：
+// 此前内部字标锁版 ≈102px 同排曾致文字经 min-w-0 折叠钻到图标下被覆盖，终局解法是锁版按单行
+// 预算自缩（图标组 96px；设计稿 176px/锁版 ≤80px，品牌锁版换新版后 rail 加宽至 224：200px/≤104px）保持单行；本测试锁结构而非像素：
 // Logo 与搜索按钮落在同一位图行容器内（无独立图标行），且行内次序保持设计稿。
 it('展开态品牌区单行排布：Logo 锁版与功能图标同容器，行内次序 Logo → 搜索 → 通知 → 折叠', () => {
   const view = renderSidebar();

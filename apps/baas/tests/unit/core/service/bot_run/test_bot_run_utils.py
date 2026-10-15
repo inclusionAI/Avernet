@@ -76,14 +76,23 @@ class TestResolveUserId:
         result = resolve_user_id(metadata, binding_info, context, "bot_id")
         assert result == "entity456"
 
-    def test_from_sender_options_other(self):
-        """优先级1: sender_options.from 非 owner 时，回退到 context.app_id"""
-        metadata = {"sender_options": {"from": "other"}}
+    def test_custom_from_returned_directly(self):
+        """sender_options.from 为自定义值（非 owner 非空）时，直接作为 user_id"""
+        metadata = {"sender_options": {"from": "custom-user-001"}}
         binding_info = MockBotBindingInfo(entity_id="entity456")
         context = MockBotChatContext(app_id="app789")
 
         result = resolve_user_id(metadata, binding_info, context, "bot_id")
-        assert result == "app789"
+        assert result == "custom-user-001"
+
+    def test_custom_from_without_binding_info(self):
+        """自定义 from 不依赖 binding_info，即使为 None 也直接返回"""
+        metadata = {"sender_options": {"from": "custom-user-002"}}
+        binding_info = None
+        context = MockBotChatContext(app_id="app789")
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_id")
+        assert result == "custom-user-002"
 
     def test_from_context_app_id(self):
         """优先级2: 取 context.app_id"""
@@ -135,6 +144,24 @@ class TestResolveUserId:
         """binding_info 为 None 但 from=owner 时，回退到 context"""
         metadata = {"sender_options": {"from": "owner"}}
         binding_info = None
+        context = MockBotChatContext(app_id="app789")
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_id")
+        assert result == "app789"
+
+    def test_empty_from_value_falls_through(self):
+        """from 为空字符串时，回退到 context"""
+        metadata = {"sender_options": {"from": ""}}
+        binding_info = MockBotBindingInfo(entity_id="entity123")
+        context = MockBotChatContext(app_id="app789")
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_id")
+        assert result == "app789"
+
+    def test_none_from_value_falls_through(self):
+        """from 显式为 None 时，回退到 context"""
+        metadata = {"sender_options": {"from": None}}
+        binding_info = MockBotBindingInfo(entity_id="entity123")
         context = MockBotChatContext(app_id="app789")
 
         result = resolve_user_id(metadata, binding_info, context, "bot_id")
@@ -206,9 +233,9 @@ class TestResolveUserId:
         result = resolve_user_id(metadata, binding_info, context, "bot_id")
         assert result == "app456"
 
-    def test_bot_app_type_overrides_sender_options_non_owner(self):
-        """app_type='bot' 在 sender_options 非 owner 时生效"""
-        metadata = {"sender_options": {"from": "other"}}
+    def test_custom_from_overrides_bot_app_type(self):
+        """自定义 from 优先级高于 app_type='bot' 的 app_id entity 解析"""
+        metadata = {"sender_options": {"from": "custom-user-001"}}
         binding_info = MockBotBindingInfo(entity_id="entity123")
         context = MockBotChatContext(
             app_id="bot-abc:user-from-app-id",
@@ -216,7 +243,7 @@ class TestResolveUserId:
         )
 
         result = resolve_user_id(metadata, binding_info, context, "bot_id")
-        assert result == "user-from-app-id"
+        assert result == "custom-user-001"
 
 
 # ==================== Tests: extract_lifecycle_stage ====================

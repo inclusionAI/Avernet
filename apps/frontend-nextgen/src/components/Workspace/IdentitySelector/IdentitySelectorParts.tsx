@@ -16,7 +16,7 @@ function isAvatarUrl(avatar: string): boolean {
   return /^https?:\/\//.test(avatar);
 }
 
-export type IdentitySelectorLayout = 'default' | 'sidebar' | 'collapsed' | 'collaboration' | 'sidebarChip';
+export type IdentitySelectorLayout = 'default' | 'sidebar' | 'collapsed' | 'collaboration' | 'sidebarChip' | 'inline';
 
 /** 非折叠布局头部标签区，保留 default/sidebar 标题与 Tooltip 合同。 */
 export function IdentitySectionHeader({
@@ -41,6 +41,7 @@ export function IdentitySectionHeader({
       <div
         className={cn(
           'flex items-center gap-1 px-1 text-xs text-foreground',
+          layout === 'inline' && 'shrink-0 whitespace-nowrap',
           sidebarLayout ? 'pb-1 font-semibold' : layout === 'collaboration' ? 'font-semibold' : 'font-medium',
         )}
       >

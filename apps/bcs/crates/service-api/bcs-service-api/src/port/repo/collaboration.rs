@@ -13,6 +13,9 @@ use super::collaboration_dispatch::*;
 use super::collaboration_publication::*;
 use super::collaboration_terminal_im::*;
 
+/// Maximum identities in a node-status read or atomic branch-skip write.
+pub const STATE_MACHINE_NODE_BATCH_LIMIT: usize = 200;
+
 /// Immutable rendered opening. Recovery never re-renders from current Group
 /// configuration. The stable client id identifies the message-history barrier.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -702,6 +705,19 @@ pub trait StateMachineRunRepoPort: Send + Sync {
     /// CAS Pending/Ready/RetryScheduled to Skipped only while the Run is Running.
     /// A false result must not stop traversal of an already Skipped branch.
     async fn skip_node(&self, run_id: &str, node_id: &str, skipped_at: u64) -> ServiceResult<bool>;
+
+    /// Read only IDs/statuses, scoped to this Run/environment. Missing IDs are
+    /// omitted. Reject duplicates or more than STATE_MACHINE_NODE_BATCH_LIMIT IDs.
+    async fn get_node_statuses(&self, run_id: &str, node_ids: &[String])
+        -> ServiceResult<BTreeMap<String, crate::types::StateMachineNodeStatus>>;
+
+    /// Atomically skip every distinct requested Pending/Ready/RetryScheduled
+    /// node while the Run is Running. If any identity is missing or in another
+    /// state (including Skipped), return false with NO writes. This fence lets
+    /// traversal batch ancestors with descendants without crossing a raced
+    /// Running node. Reject duplicates and batches over the shared limit.
+    /// Empty input succeeds without IO; persistence failures propagate.
+    async fn skip_nodes(&self, run_id: &str, node_ids: &[String], skipped_at: u64) -> ServiceResult<bool>;
 
     async fn update_run_status(
         &self,
