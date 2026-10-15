@@ -101,6 +101,10 @@ impl GroupManagement {
         }
 
         let is_friend = self.friend.are_friends(driver_bot_id, target_bot_id).await;
+        if self.registry.collaboration_owner(&[driver_bot_id.into(), target.bot_uuid.clone()]).await?.is_some() {
+            return Ok(());
+        }
+
         match target.capabilities.visibility.as_str() {
             "public" => Ok(()),
             _ if is_friend => Ok(()),
@@ -122,6 +126,10 @@ impl GroupManagement {
                 "Bot '{}' is hidden (offline) and cannot be invited into a group",
                 target.bot_uuid
             )));
+        }
+
+        if self.registry.collaboration_owner(&[driver_bot_id.into(), target.bot_uuid.clone()]).await?.is_some() {
+            return Ok(());
         }
 
         match target.capabilities.visibility.as_str() {
@@ -200,6 +208,10 @@ impl GroupManagement {
         }
 
         let is_friend = self.friend.are_friends(driver_bot_id, target_bot_id).await;
+        if self.registry.collaboration_owner(&[driver_bot_id.into(), target.bot_uuid.clone()]).await?.is_some() {
+            return Ok(());
+        }
+
         match target.capabilities.visibility.as_str() {
             "public" => Ok(()),
             _ if is_friend => Ok(()),
@@ -449,6 +461,11 @@ impl GroupManagement {
     ) -> Result<WorkbenchAuthorizedHuman, WorkbenchUseCaseError> {
         let actor_id = bound_actor_id.ok_or(WorkbenchUseCaseError::Unauthorized)?;
         let staff_no = staff_no_from_bound_actor(Some(actor_id))?;
+
+        let mut actors = group.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+        actors.push(actor_id.into());
+        self.registry.collaboration_owner(&actors).await
+            .map_err(|error| match error { ServiceError::Forbidden(_) => WorkbenchUseCaseError::ForbiddenCollaborationScope, other => WorkbenchUseCaseError::Service(other) })?;
 
         if human_has_group_access(self.registry.as_ref(), group, actor_id, staff_no).await {
             return Ok(WorkbenchAuthorizedHuman {

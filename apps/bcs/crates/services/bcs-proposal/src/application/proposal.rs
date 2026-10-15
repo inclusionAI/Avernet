@@ -164,6 +164,13 @@ impl GroupProposalUseCases {
         if target_bot_id == driver_bot_id {
             return Ok(bot);
         }
+        let owner = self.registry.collaboration_owner(&[driver_bot_id.into(), target_bot_id.into()]).await?;
+        if owner.is_some() {
+            if bot.status == bcs_service_api::ActorStatus::Hidden {
+                return Err(GroupUseCaseError::Forbidden("hidden Bot cannot be invited into a group".into()));
+            }
+            return Ok(bot);
+        }
         let is_friend = self.friend.are_friends(driver_bot_id, target_bot_id).await;
         match bot.capabilities.visibility.as_str() {
             "public" => Ok(bot),
@@ -277,6 +284,14 @@ impl GroupProposalService for GroupProposalUseCases {
             )));
         }
 
+        let mut actors = proposal.participants.clone();
+        actors.push(proposal.driver_bot.clone());
+        if self.registry.collaboration_owner(&actors).await?.is_some() {
+            let caller = cmd.caller_actor_id.as_deref().filter(|id| !id.is_empty())
+                .ok_or_else(|| GroupUseCaseError::Unauthorized("caller is required for same_owner collaboration".into()))?;
+            actors.push(caller.into());
+            self.registry.collaboration_owner(&actors).await?;
+        }
         self.ensure_limits(&proposal).await?;
 
         let mut participants = Vec::with_capacity(proposal.participants.len());

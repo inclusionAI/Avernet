@@ -101,6 +101,8 @@ pub struct RegisterProviderRequest {
     pub protocol_version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coordination: Option<ProviderCoordinationConfigDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collaboration_scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,6 +143,8 @@ pub struct ProviderInfoResponse {
     pub disabled: bool,
     pub created_at: u64,
     pub updated_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collaboration_scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -162,6 +166,8 @@ pub struct PatchProviderRequest {
     pub coordination: Option<ProviderCoordinationConfigDto>,
     #[serde(default)]
     pub organization_management: Option<ProviderOrganizationManagementConfigDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collaboration_scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

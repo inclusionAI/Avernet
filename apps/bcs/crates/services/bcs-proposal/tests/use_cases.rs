@@ -692,6 +692,7 @@ fn bot(bot_uuid: &str, name: &str, visibility: &str, created_by: Option<&str>) -
 #[derive(Default)]
 struct FakeRegistry {
     bots: RwLock<HashMap<String, RegisteredBot>>,
+    same_owner: std::sync::atomic::AtomicBool,
 }
 
 impl FakeRegistry {
@@ -702,6 +703,14 @@ impl FakeRegistry {
 
 #[async_trait]
 impl BotRegistryCoreService for FakeRegistry {
+    async fn collaboration_owner(&self, actor_ids: &[String]) -> ServiceResult<Option<String>> {
+        if !self.same_owner.load(Ordering::SeqCst) { return Ok(None); }
+        let bots = self.bots.read().unwrap();
+        if actor_ids.iter().any(|id| id.strip_prefix("human_").or_else(|| bots.get(id).and_then(|b| b.created_by.as_deref())) != Some("alice")) {
+            return Err(ServiceError::Forbidden("same_owner".into()));
+        }
+        Ok(Some("alice".into()))
+    }
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
         self.bots.write().unwrap().insert(
             bot_id.clone(),
@@ -1362,4 +1371,73 @@ fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[tokio::test]
+async fn confirm_proposal_rechecks_scope_before_creating_any_group_or_session() {
+    let fixture = Fixture::new()
+        .with_bot("driver", "Local", "public", Some("alice"))
+        .with_bot("foreign", "Foreign", "public", Some("bob"))
+        .with_friendship("driver", "foreign");
+    fixture.proposal.store(ProposalBuilder::new("driver", "stale proposal")
+        .driver("driver").participants(vec!["driver".into(), "foreign".into()])
+        .build_with_token("stale-scope")).await;
+    fixture.registry.same_owner.store(true, Ordering::SeqCst);
+    assert!(fixture.service().confirm_proposal(GroupProposalConfirmCommand {
+        caller_actor_id: Some("human_alice".into()), token: "stale-scope".into(),
+    }).await.is_err());
+    assert_eq!(fixture.group.count().await, 0);
+    assert!(fixture.session_management.commands.lock().await.is_empty());
+    assert!(fixture.system_message.notifications.lock().await.is_empty());
+    assert!(fixture.proposal.get("stale-scope").await.is_some());
+}
+
+#[tokio::test]
+async fn confirm_proposal_allows_same_owner_private_bot_without_friendship() {
+    let fixture = Fixture::new()
+        .with_bot("driver", "Local", "private", Some("alice"))
+        .with_bot("peer", "Peer", "private", Some("alice"));
+    fixture.registry.same_owner.store(true, Ordering::SeqCst);
+    fixture.proposal.store(ProposalBuilder::new("driver", "owner collaboration")
+        .driver("driver").participants(vec!["driver".into(), "peer".into()])
+        .build_with_token("own-scope")).await;
+    assert!(fixture.service().confirm_proposal(GroupProposalConfirmCommand {
+        caller_actor_id: Some("human_alice".into()), token: "own-scope".into(),
+    }).await.is_ok());
+    assert_eq!(fixture.group.count().await, 1);
+    assert_eq!(fixture.session_management.commands.lock().await.len(), 1);
+}
+
+#[tokio::test]
+async fn same_owner_scope_does_not_override_hidden_status() {
+    let fixture = Fixture::new()
+        .with_bot("driver", "Local", "private", Some("alice"))
+        .with_bot("hidden", "Hidden", "private", Some("alice"));
+    fixture.registry.bots.write().unwrap().get_mut("hidden").unwrap().status = bcs_service_api::ActorStatus::Hidden;
+    fixture.registry.same_owner.store(true, Ordering::SeqCst);
+    fixture.proposal.store(ProposalBuilder::new("driver", "hidden peer")
+        .driver("driver").participants(vec!["driver".into(), "hidden".into()])
+        .build_with_token("hidden-scope")).await;
+    assert!(fixture.service().confirm_proposal(GroupProposalConfirmCommand {
+        caller_actor_id: Some("human_alice".into()), token: "hidden-scope".into(),
+    }).await.is_err());
+    assert_eq!(fixture.group.count().await, 0);
+}
+
+#[tokio::test]
+async fn scoped_proposal_confirmation_requires_an_authenticated_owner_actor() {
+    let fixture = Fixture::new().with_bot("driver", "Local", "private", Some("alice"));
+    fixture.registry.same_owner.store(true, Ordering::SeqCst);
+    fixture.proposal.store(ProposalBuilder::new("driver", "owner only")
+        .driver("driver").participants(vec!["driver".into()]).build_with_token("actor-scope")).await;
+    for caller in [None, Some("human_bob".into())] {
+        assert!(fixture.service().confirm_proposal(GroupProposalConfirmCommand {
+            caller_actor_id: caller, token: "actor-scope".into(),
+        }).await.is_err());
+        assert_eq!(fixture.group.count().await, 0);
+        assert!(fixture.proposal.get("actor-scope").await.is_some());
+    }
+    assert!(fixture.service().confirm_proposal(GroupProposalConfirmCommand {
+        caller_actor_id: Some("human_alice".into()), token: "actor-scope".into(),
+    }).await.is_ok());
 }

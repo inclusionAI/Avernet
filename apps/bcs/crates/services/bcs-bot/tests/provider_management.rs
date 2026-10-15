@@ -146,6 +146,7 @@ async fn register_provider(ctx: &TestContext) -> (String, String) {
     let registered = ctx
         .management
         .register_provider(RegisterProviderCommand {
+                collaboration_scope: None,
             slug: None,
             name: "Provider".to_string(),
             webhook_url: Some("https://provider.example.com/bcs/webhook".to_string()),

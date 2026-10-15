@@ -24,18 +24,49 @@ use serde_json::{Value, json};
 /// `GroupCore` owns group behavior and delegates persistence to a repository.
 #[derive(Clone)]
 pub struct GroupCore {
+    policy_gate: Option<Arc<tokio::sync::RwLock<()>>>,
     repo: Arc<dyn GroupRepoPort>,
+    collaboration_registry: Option<Arc<dyn bcs_service_api::BotRegistryCoreService>>,
     event_record_factory: Option<Arc<dyn EventRecordFactoryPort>>,
 }
 
 impl GroupCore {
+    async fn require_public_scope(&self, id: &str) -> ServiceResult<()> {
+        if let Some(registry) = &self.collaboration_registry {
+            let group = self.repo.try_get(id).await?.ok_or_else(|| ServiceError::GroupNotFound(id.into()))?;
+            let actors = group.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+            if registry.collaboration_owner(&actors).await?.is_some() {
+                return Err(ServiceError::Forbidden("same_owner groups must remain private".into()));
+            }
+        }
+        Ok(())
+    }
+    async fn require_participant_scope(&self, id: &str, participant: &Participant) -> ServiceResult<()> {
+        if let Some(registry) = &self.collaboration_registry {
+            let group = self.repo.try_get(id).await?.ok_or_else(|| ServiceError::GroupNotFound(id.into()))?;
+            let mut actors = group.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+            actors.push(participant.bot_uuid.clone());
+            if registry.collaboration_owner(&actors).await?.is_some() && group.visibility != "private" {
+                return Err(ServiceError::Forbidden("same_owner groups must remain private".into()));
+            }
+        }
+        Ok(())
+    }
+    pub fn with_policy_gate(mut self, gate: Arc<tokio::sync::RwLock<()>>) -> Self { self.policy_gate = Some(gate); self }
+    pub fn with_collaboration_registry(mut self, registry: Arc<dyn bcs_service_api::BotRegistryCoreService>) -> Self {
+        self.collaboration_registry = Some(registry);
+        self
+    }
+
     pub fn new() -> Self {
         Self::memory()
     }
 
     pub fn with_repo(repo: Arc<dyn GroupRepoPort>) -> Self {
         Self {
+            policy_gate: None,
             repo,
+            collaboration_registry: None,
             event_record_factory: None,
         }
     }
@@ -62,6 +93,13 @@ impl Default for GroupCore {
 #[async_trait]
 impl GroupCoreService for GroupCore {
     async fn upsert(&self, group: Group) -> ServiceResult<()> {
+        let _policy_read = match &self.policy_gate { Some(gate) => Some(gate.read().await), None => None };
+        if let Some(registry) = &self.collaboration_registry {
+            let actors = group.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+            if registry.collaboration_owner(&actors).await?.is_some() && group.visibility != "private" {
+                return Err(ServiceError::Forbidden("same_owner groups must remain private".into()));
+            }
+        }
         self.repo.upsert(group).await
     }
 
@@ -77,11 +115,29 @@ impl GroupCoreService for GroupCore {
     }
 
     async fn mutate(&self, command: GroupMutationCommand) -> ServiceResult<Group> {
+        let _policy_read = match &self.policy_gate { Some(gate) => Some(gate.read().await), None => None };
         let current = self
             .repo
             .try_get(&command.group_id)
             .await?
             .ok_or_else(|| ServiceError::GroupNotFound(command.group_id.clone()))?;
+        if let Some(registry) = &self.collaboration_registry {
+            let mut actors = current.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+            match &command.mutation {
+                GroupMutationKind::AddParticipant { participant, .. } => actors.push(participant.bot_uuid.clone()),
+                GroupMutationKind::RemoveParticipant { actor_id, .. } => actors.retain(|id| id != actor_id),
+                _ => {},
+            }
+            if registry.collaboration_owner(&actors).await?.is_some() {
+                let visibility = match &command.mutation {
+                    GroupMutationKind::PatchMutableFields(patch) => patch.visibility.as_deref().unwrap_or(&current.visibility),
+                    _ => &current.visibility,
+                };
+                if visibility != "private" {
+                    return Err(ServiceError::Forbidden("same_owner groups must remain private".into()));
+                }
+            }
+        }
         let next_version = current.version.checked_add(1).ok_or_else(|| {
             ServiceError::Conflict(format!("Group '{}' version overflow", current.id))
         })?;
@@ -133,6 +189,10 @@ impl GroupCoreService for GroupCore {
         id: &str,
         patch: GroupMutableFieldsPatch,
     ) -> ServiceResult<()> {
+        let _policy_read = match &self.policy_gate { Some(gate) => Some(gate.read().await), None => None };
+        if patch.visibility.as_deref() == Some("public") {
+            self.require_public_scope(id).await?;
+        }
         self.repo.patch_mutable_fields(id, patch).await
     }
 
@@ -149,6 +209,8 @@ impl GroupCoreService for GroupCore {
     }
 
     async fn add_participant(&self, id: &str, participant: Participant) -> ServiceResult<()> {
+        let _policy_read = match &self.policy_gate { Some(gate) => Some(gate.read().await), None => None };
+        self.require_participant_scope(id, &participant).await?;
         self.repo.add_participant(id, participant).await
     }
 
@@ -158,6 +220,8 @@ impl GroupCoreService for GroupCore {
         participant: Participant,
         actor_is_public: bool,
     ) -> ServiceResult<()> {
+        let _policy_read = match &self.policy_gate { Some(gate) => Some(gate.read().await), None => None };
+        self.require_participant_scope(id, &participant).await?;
         self.repo
             .add_participant_with_visibility_guard(id, participant, actor_is_public)
             .await
@@ -308,6 +372,8 @@ impl GroupCoreService for GroupCore {
     }
 
     async fn update_visibility(&self, id: &str, visibility: &str) -> ServiceResult<()> {
+        let _policy_read = match &self.policy_gate { Some(gate) => Some(gate.read().await), None => None };
+        if visibility == "public" { self.require_public_scope(id).await?; }
         self.repo.update_visibility(id, visibility).await
     }
 

@@ -30,6 +30,10 @@ pub(super) async fn verify_group_chat_caller_access(
     group: &Group,
     caller: &CallerContext,
 ) -> ServiceResult<()> {
+    let actor = caller_actor_id(caller).ok_or_else(|| ServiceError::Unauthorized("authenticated actor is required".into()))?;
+    let mut scope_actors = group.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+    scope_actors.push(actor);
+    flow.registry.collaboration_owner(&scope_actors).await?;
     match caller {
         CallerContext::Bot(bot) => match group.get_participant(&bot.bot_uuid) {
             Some(participant) if participant.is_bot() => Ok(()),

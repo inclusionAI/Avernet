@@ -553,6 +553,11 @@ impl CollaborationRuntime {
             .ok_or_else(|| {
                 CollaborationRuntimeError::Forbidden("run session is unavailable".to_string())
             })?;
+        self.sessions.authorize_collaboration(&run.session_id, actor_id).await
+            .map_err(|error| match error {
+                SessionUseCaseError::Internal(ServiceError::Forbidden(message)) => CollaborationRuntimeError::Forbidden(message),
+                other => CollaborationRuntimeError::Internal(ServiceError::InternalError(other.to_string())),
+            })?;
         let authorized = session.participants.iter().any(|participant| {
             participant.bot_uuid == actor_id
                 && participant.is_human()
@@ -2965,6 +2970,11 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             // established by the server-side authentication port may be
             // materialized into the session.
             if let Some(human) = authenticated_human.as_ref() {
+                self.sessions.authorize_collaboration(&session_id, &human.actor_id).await
+                    .map_err(|error| match error {
+                        SessionUseCaseError::Internal(ServiceError::Forbidden(message)) => CollaborationRuntimeError::Forbidden(message),
+                        other => CollaborationRuntimeError::Internal(ServiceError::InternalError(other.to_string())),
+                    })?;
                 let existing = session
                     .participants
                     .iter()

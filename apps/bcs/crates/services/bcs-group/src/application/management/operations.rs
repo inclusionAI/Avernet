@@ -60,6 +60,12 @@ impl GroupManagementService for GroupManagement {
     ) -> Result<GroupAddMemberResult, GroupUseCaseError> {
         let (caller, group) = self.authorize_add_member(&cmd).await?;
 
+        let mut scope_actors = group.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+        scope_actors.extend([caller.clone(), cmd.bot_id.clone()]);
+        if self.registry.collaboration_owner(&scope_actors).await?.is_some() {
+            if group.visibility != "private" { return Err(GroupUseCaseError::Forbidden("same_owner groups must remain private".into())); }
+        }
+
         let bot = self
             .registry
             .get(&cmd.bot_id)
@@ -395,6 +401,12 @@ impl GroupManagementService for GroupManagement {
             ));
         }
 
+        if visibility == "public" {
+            let actors = group.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+            if self.registry.collaboration_owner(&actors).await?.is_some() {
+                return Err(GroupUseCaseError::Forbidden("same_owner groups must remain private".into()));
+            }
+        }
         if visibility == "public" {
             if group.group_kind == GroupKind::Dm {
                 return Err(GroupUseCaseError::InvalidProposal(

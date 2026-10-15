@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_service_api::types::MessageViewScope;
+use bcs_service_api::types::{EventActor, EventActorType, MessageViewScope};
+use bcs_service_api::core::{GroupMutationCommand, GroupMutationKind};
 use bcs_service_api::{
     ActorKind, BotRegistryCoreService, CreateInviteTokenCommand, GroupCoreService, GroupKind,
     GroupStatus, InviteService, InviteTargetType, InviteTokenError, InviteTokenPayload,
@@ -285,6 +286,9 @@ impl InviteService for InviteServiceImpl {
             .await?;
 
         self.ensure_actor_is_human(&actor_id).await?;
+        let mut scope_actors = group.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+        scope_actors.push(actor_id.clone());
+        self.registry.collaboration_owner(&scope_actors).await?;
 
         if group.participants.iter().any(|p| p.bot_uuid == actor_id) {
             return Ok(JoinByInviteResult {
@@ -314,7 +318,12 @@ impl InviteService for InviteServiceImpl {
             tags: Vec::new(),
             message_view_scope: cmd.message_view_scope.unwrap_or(MessageViewScope::Full),
         };
-        self.group.add_participant(group_id, participant).await?;
+        self.group.mutate(GroupMutationCommand {
+            group_id: group_id.clone(),
+            actor: EventActor { actor_type: EventActorType::Human, id: actor_id.clone(), display_name: cmd.nick_name.clone() },
+            correlation_id: None, trace_id: None,
+            mutation: GroupMutationKind::AddParticipant { participant, actor_is_public: true },
+        }).await?;
 
         Ok(JoinByInviteResult {
             joined: true,
@@ -349,6 +358,12 @@ impl InviteService for InviteServiceImpl {
             .await?;
 
         self.ensure_actor_is_human(&actor_id).await?;
+        let mut scope_actors = group.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+        scope_actors.push(actor_id.clone());
+        if self.registry.collaboration_owner(&scope_actors).await?.is_some() {
+            scope_actors.extend(session.participants.iter().map(|p| p.bot_uuid.clone()));
+            self.registry.collaboration_owner(&scope_actors).await?;
+        }
 
         if session.participants.iter().any(|p| p.bot_uuid == actor_id) {
             return Ok(JoinByInviteResult {

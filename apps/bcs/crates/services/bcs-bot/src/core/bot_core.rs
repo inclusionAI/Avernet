@@ -186,6 +186,13 @@ impl ServiceLifecycle for BotCore {
 
 #[async_trait]
 impl BotRegistryCoreService for BotCore {
+    async fn collaboration_owner(&self, actor_ids: &[String]) -> ServiceResult<Option<String>> {
+        let Some(metadata) = &self.bot_providers else { return Ok(None); };
+        let mut ids = actor_ids.to_vec();
+        ids.sort(); ids.dedup();
+        let actors = metadata.collaboration_actors(&ids).await?;
+        super::collaboration_policy::enforce_owner_scope(&actors, &ids)
+    }
     async fn create_registration_if_absent(
         &self, bot_id: String, capabilities: BotCapabilities, created_by: &str, token: &str,
     ) -> ServiceResult<bool> {

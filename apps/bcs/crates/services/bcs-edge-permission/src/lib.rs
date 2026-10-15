@@ -66,6 +66,7 @@ fn new_request_id() -> String {
 /// root knows which environment this process serves); the `ConnectService`
 /// trait methods carry no env parameter, so the service owns it.
 pub struct DbConnectService {
+    collaboration_registry: Option<Arc<dyn bcs_service_api::BotRegistryCoreService>>,
     edge_grants: Arc<dyn EdgeGrantRepoPort>,
     profiles: Arc<dyn PermissionProfileRepoPort>,
     requests: Arc<dyn PermissionRequestRepoPort>,
@@ -78,6 +79,11 @@ pub struct DbConnectService {
 }
 
 impl DbConnectService {
+    pub fn with_collaboration_registry(mut self, registry: Arc<dyn bcs_service_api::BotRegistryCoreService>) -> Self {
+        self.collaboration_registry = Some(registry);
+        self
+    }
+
     pub fn new(
         edge_grants: Arc<dyn EdgeGrantRepoPort>,
         profiles: Arc<dyn PermissionProfileRepoPort>,
@@ -89,6 +95,7 @@ impl DbConnectService {
         env: String,
     ) -> Self {
         Self {
+            collaboration_registry: None,
             edge_grants,
             profiles,
             requests,
@@ -251,6 +258,10 @@ impl ConnectService for DbConnectService {
             .await
             .ok_or_else(|| ServiceError::BotNotFound(to_bot.to_string()))?;
 
+        let same_owner = match &self.collaboration_registry {
+            Some(registry) => registry.collaboration_owner(&[caller.into(), to_bot.into()]).await?.is_some(),
+            None => false,
+        };
         // 4. Idempotency: already friends → Approved (no new ids).
         if self.edge_grants.has_friend_edge(caller, to_bot, &self.env).await {
             return Ok(ConnectResult {
@@ -282,16 +293,16 @@ impl ConnectService for DbConnectService {
         if cfg.status == "hidden" {
             return Err(ServiceError::BotHidden(to_bot.to_string()));
         }
-        if caller_kind == ActorKind::Bot && is_private_visibility(&cfg.visibility) {
+        if caller_kind == ActorKind::Bot && !same_owner && is_private_visibility(&cfg.visibility) {
             return Err(ServiceError::PrivateBotCannotCollaborate);
         }
-        if caller_kind == ActorKind::Human && is_private_visibility(&cfg.user_visibility) {
+        if caller_kind == ActorKind::Human && !same_owner && is_private_visibility(&cfg.user_visibility) {
             return Err(ServiceError::Forbidden(format!(
                 "bot '{to_bot}' is not human-addable"
             )));
         }
 
-        if caller_kind == ActorKind::Human && normalize_policy_value(&cfg.user_visibility) == "protected" {
+        if caller_kind == ActorKind::Human && !same_owner && normalize_policy_value(&cfg.user_visibility) == "protected" {
             let user_friend_scope = bot_friend_ext_view_scope_user_friend_deps(&cfg.friend_ext);
             if !user_friend_scope.is_empty()
                 && !self
@@ -303,7 +314,7 @@ impl ConnectService for DbConnectService {
                 )));
             }
         }
-        if caller_kind == ActorKind::Bot && normalize_policy_value(&cfg.visibility) == "protected" {
+        if caller_kind == ActorKind::Bot && !same_owner && normalize_policy_value(&cfg.visibility) == "protected" {
             let agent_friend_scope = bot_friend_ext_view_scope_agent_friend_deps(&cfg.friend_ext);
             if !agent_friend_scope.is_empty()
                 && !self
@@ -321,11 +332,11 @@ impl ConnectService for DbConnectService {
             && self
                 .caller_department_matches_friend_allowlist(caller, &cfg, request_auth.as_ref())
                 .await;
-        let needs_approval = !(friend_strategy == "open" || dept_free_auto_approved);
+        let needs_approval = !(same_owner || friend_strategy == "open" || dept_free_auto_approved);
         // Dispatch on the caller-appropriate visibility: bots on `visibility`,
         // humans on `user_visibility`. The matching `private` case is rejected
         // above for that kind, so only public/protected reach here in practice.
-        let collab_visibility = if caller_kind == ActorKind::Human {
+        let collab_visibility = if same_owner { "protected".to_string() } else if caller_kind == ActorKind::Human {
             normalize_policy_value(&cfg.user_visibility)
         } else {
             normalize_policy_value(&cfg.visibility)
@@ -428,6 +439,10 @@ impl ConnectService for DbConnectService {
                 self.log_request_lookup_miss("approve", request_id, Some(decider));
                 ServiceError::FriendRequestNotFound(request_id.to_string())
             })?;
+
+        if let Some(registry) = &self.collaboration_registry {
+            registry.collaboration_owner(&[req.from_id.clone(), req.to_id.clone()]).await?;
+        }
 
         // Only pending requests can be approved.
         if req.status == RequestStatus::Approved {
@@ -1433,18 +1448,25 @@ impl EdgePermissionFriendSyncService for DbConnectService {
 /// path (`build_authz_context`) both read the same `edge_grants` store, giving a
 /// single source of truth for inbound admission and injected runtime authz.
 pub struct DbAdmissionService {
+    collaboration_registry: Option<Arc<dyn bcs_service_api::BotRegistryCoreService>>,
     edge_grants: Arc<dyn EdgeGrantRepoPort>,
     bot_config: Arc<dyn BotActorConfigRepoPort>,
     profiles: Arc<dyn PermissionProfileRepoPort>,
 }
 
 impl DbAdmissionService {
+    pub fn with_collaboration_registry(mut self, registry: Arc<dyn bcs_service_api::BotRegistryCoreService>) -> Self {
+        self.collaboration_registry = Some(registry);
+        self
+    }
+
     pub fn new(
         edge_grants: Arc<dyn EdgeGrantRepoPort>,
         bot_config: Arc<dyn BotActorConfigRepoPort>,
         profiles: Arc<dyn PermissionProfileRepoPort>,
     ) -> Self {
         Self {
+            collaboration_registry: None,
             edge_grants,
             bot_config,
             profiles,
@@ -1536,6 +1558,13 @@ impl AdmissionService for DbAdmissionService {
             });
         }
 
+        if let Some(registry) = &self.collaboration_registry {
+            if registry.collaboration_owner(&[actor.into(), bot.into(), originator.into()]).await?.is_some() {
+                let grant = self.ensure_default_profile_ref(bot, env, GrantSource::EdgeGrant).await
+                    .ok_or_else(|| ServiceError::InternalError("same_owner profile is unavailable".into()))?;
+                return Ok(AdmissionResult { allowed: true, grants: vec![grant], reason_code: AdmissionReason::Ok, public_default: false });
+            }
+        }
         // §4.3 step 2: friend edge (any direction, D12 default-profile edge).
         // `originator` is accepted but friend edges carry
         // `originator_policy_type=any` (D7) so they are always active for any

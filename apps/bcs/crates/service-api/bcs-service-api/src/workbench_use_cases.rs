@@ -59,6 +59,8 @@ pub struct WorkbenchConnectOutcome {
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorkbenchUseCaseError {
+    #[error("Provider collaboration requires the same owner")]
+    ForbiddenCollaborationScope,
     #[error("valid Human cookie is required for this Workbench request")]
     Unauthorized,
     #[error("current Human is not a participant and owns no Bot in this group")]
@@ -101,6 +103,7 @@ impl WorkbenchUseCaseError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Unauthorized => "unauthorized",
+            Self::ForbiddenCollaborationScope => "forbidden_collaboration_scope",
             Self::ForbiddenGroupAccess => "forbidden_group_access",
             Self::ForbiddenViewActor => "forbidden_view_actor",
             Self::ForbiddenSender => "forbidden_sender",

@@ -132,6 +132,13 @@ impl MySqlGroupStore {
         );
 
         let mut steps = Vec::with_capacity(2 + g_participants.len());
+        let guard_step = if let Some(lock) = self.public_provider_lock(&group)? {
+            steps.push(DbTransactionStep::Query(lock));
+            steps.push(DbTransactionStep::Query(self.public_bot_lock(&group)));
+            let guard = steps.len();
+            steps.push(DbTransactionStep::Query(self.public_scope_assertion(&group, None)));
+            Some(guard)
+        } else { None };
         steps.push(DbTransactionStep::Execute(DbStatement::with_params(
             // 1. Upsert session metadata
             &upsert_sql,
@@ -183,7 +190,20 @@ impl MySqlGroupStore {
             )));
         }
 
+        if let Some(guard) = guard_step {
+            // Bind the first group_id INSERT value to the assertion row. An
+            // empty assertion fails before the write and rolls back the txn.
+            let index = guard + 1;
+            if let DbTransactionStep::Execute(statement) = &steps[index] {
+                let mut params = statement.params().iter().cloned().map(DbTransactionParam::Value).collect::<Vec<_>>();
+                params[0] = DbTransactionParam::query_result(guard, 0, "group_id");
+                steps[index] = DbTransactionStep::Execute(DbStatement::with_transaction_params(statement.sql(), params));
+            }
+        }
         self.db.plugin().transaction(steps).await.map_err(|e| {
+            if provider_scope_guard::public_scope_denied(&e, guard_step) {
+                return ServiceError::Forbidden("same_owner groups must remain private".into());
+            }
             warn!(group_id = %group_id, error = %e, "upsert transaction failed");
             ServiceError::InternalError(e.to_string())
         })?;
@@ -207,6 +227,9 @@ impl MySqlGroupStore {
         id: &str,
         patch: GroupMutableFieldsPatch,
     ) -> ServiceResult<()> {
+        if self.provider_scope_guard && patch.visibility.is_some() {
+            return self.guarded_legacy_mutation(id, GroupEventfulMutation::PatchMutableFields(patch)).await;
+        }
         let routing_policy_snapshot = match patch.default_bot_final_delivery {
             Some(delivery) => Some((
                 delivery,
@@ -328,6 +351,11 @@ impl MySqlGroupStore {
 
     /// Add a participant to a session.
     pub(crate) async fn add_participant_sql(&self, id: &str, participant: Participant) -> ServiceResult<()> {
+        if self.provider_scope_guard {
+            return self.guarded_legacy_mutation(id, GroupEventfulMutation::AddParticipant {
+                participant, actor_is_public: true,
+            }).await;
+        }
         // Verify group exists
         if self.get(id).await.is_none() {
             return Err(ServiceError::GroupNotFound(id.to_string()));
@@ -397,6 +425,11 @@ impl MySqlGroupStore {
         participant: Participant,
         actor_is_public: bool,
     ) -> ServiceResult<()> {
+        if self.provider_scope_guard {
+            return self.guarded_legacy_mutation(id, GroupEventfulMutation::AddParticipant {
+                participant, actor_is_public,
+            }).await;
+        }
         let role = Self::role_to_str(&participant.role);
         let actor_kind = Self::actor_kind_to_str(participant.actor_kind);
         let mode = Self::mode_to_str(participant.effective_mode());
@@ -744,6 +777,11 @@ impl MySqlGroupStore {
     }
 
     pub(crate) async fn update_visibility_sql(&self, id: &str, visibility: &str) -> ServiceResult<()> {
+        if self.provider_scope_guard {
+            return self.guarded_legacy_mutation(id, GroupEventfulMutation::PatchMutableFields(
+                GroupMutableFieldsPatch { visibility: Some(visibility.into()), ..Default::default() }
+            )).await;
+        }
         // Verify group exists
         if self.get(id).await.is_none() {
             return Err(ServiceError::GroupNotFound(id.to_string()));

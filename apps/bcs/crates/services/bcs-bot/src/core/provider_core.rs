@@ -1,3 +1,4 @@
+use bcs_service_api::ProviderCollaborationScope;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -240,6 +241,9 @@ impl ProviderCore {
             None => new_bot_uuid(),
         };
 
+        if let Some(metadata) = &self.bot_providers {
+            metadata.validate_provider_affiliation(&provider.provider_id, &bot_uuid).await?;
+        }
         match connection_mode {
             ProviderBotConnectionMode::Gateway => {
                 let session_token = new_session_token();
@@ -747,6 +751,15 @@ impl ProviderCoreService for ProviderCore {
         coordination: Option<ProviderCoordinationConfig>, slug: Option<String>,
         admin_callback_url: Option<String>,
     ) -> ServiceResult<RegisteredProvider> {
+        self.register_provider_with_policy(name, webhook_url, auth_mode, created_by, protocol_version, coordination, slug, admin_callback_url, None).await
+    }
+
+    async fn register_provider_with_policy(
+        &self, name: String, webhook_url: Option<String>, auth_mode: ProviderAuthMode,
+        created_by: String, protocol_version: Option<String>,
+        coordination: Option<ProviderCoordinationConfig>, slug: Option<String>,
+        admin_callback_url: Option<String>, scope: Option<ProviderCollaborationScope>,
+    ) -> ServiceResult<RegisteredProvider> {
         if let Some(slug) = slug.as_deref() { validate_provider_slug(slug)?; }
         let provider_id = new_provider_id();
         validate_external_id("provider_id", &provider_id)?;
@@ -780,6 +793,11 @@ impl ProviderCoreService for ProviderCore {
         let mut config = provider_config(webhook_url.as_deref(), auth_mode, protocol_version, coordination)?;
         if let Some(url) = admin_callback_url.as_deref() {
             config = replace_admin_callback_url(&config, url)?;
+        }
+        if let Some(scope) = scope {
+            let mut value: serde_json::Map<String, Value> = serde_json::from_str(&config)?;
+            value.insert("collaboration_scope".into(), serde_json::to_value(scope)?);
+            config = serde_json::to_string(&value)?;
         }
         let provider = ProviderRecord {
             provider_id: provider_id.clone(),
@@ -928,6 +946,16 @@ impl ProviderCoreService for ProviderCore {
         organization_management: Option<ProviderOrganizationManagementConfig>, slug: Option<String>,
         admin_callback_url: Option<String>,
     ) -> ServiceResult<ProviderRecord> {
+        self.update_provider_with_policy(provider_id, provider_admin_token, authenticated_staff_id, name, webhook_url, protocol_version, coordination, organization_management, slug, admin_callback_url, None).await
+    }
+
+    async fn update_provider_with_policy(
+        &self, provider_id: &str, provider_admin_token: &str, authenticated_staff_id: &str,
+        name: Option<String>, webhook_url: Option<String>, protocol_version: Option<String>,
+        coordination: Option<ProviderCoordinationConfig>,
+        organization_management: Option<ProviderOrganizationManagementConfig>, slug: Option<String>,
+        admin_callback_url: Option<String>, scope: Option<ProviderCollaborationScope>,
+    ) -> ServiceResult<ProviderRecord> {
         let current = self
             .provider_admin_for_path(provider_id, provider_admin_token)
             .await?;
@@ -989,6 +1017,15 @@ impl ProviderCoreService for ProviderCore {
                 source,
                 organization_management,
             )?);
+        }
+        if let Some(scope) = scope {
+            let current_scope = ProviderCollaborationScope::from_config(&current.config)?;
+            if current_scope == ProviderCollaborationScope::SameOwner && scope == ProviderCollaborationScope::Standard {
+                return Err(ServiceError::Forbidden("same_owner Provider policy cannot be relaxed through Provider administration".into()));
+            }
+            let mut value: serde_json::Map<String, Value> = serde_json::from_str(config.as_deref().unwrap_or(&current.config))?;
+            value.insert("collaboration_scope".into(), serde_json::to_value(scope)?);
+            config = Some(serde_json::to_string(&value)?);
         }
         self.providers
             .update_provider_metadata(provider_id, name.as_deref(), config.as_deref(), slug.as_deref(), now_ms())

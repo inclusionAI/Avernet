@@ -85,6 +85,12 @@ impl GroupMetricsSnapshotPort for MemoryGroupRepo {
 
 #[async_trait]
 impl GroupRepoPort for MemoryGroupRepo {
+    async fn has_public_group_with_members(&self, actor_ids: &[String]) -> ServiceResult<bool> {
+        let ids = actor_ids.iter().collect::<std::collections::HashSet<_>>();
+        Ok(self.groups.read().await.values().any(|g| g.visibility == "public" && g.record_status != "deleted"
+            && g.participants.iter().any(|p| ids.contains(&p.bot_uuid))))
+    }
+
     async fn finalize_provisioning(&self, command: FinalizeGroupProvisioning) -> ServiceResult<()> {
         let event_store =
             self.event_store

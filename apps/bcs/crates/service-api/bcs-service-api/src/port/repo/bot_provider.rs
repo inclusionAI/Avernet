@@ -5,6 +5,11 @@ use crate::bot_provider::{BotConnectionMode, BotProviderRecord};
 
 #[async_trait]
 pub trait BotProviderRepoPort: Send + Sync {
+    /// Bounded batch of fresh authorization projections. Implementations must not
+    /// interpret storage failures as missing affiliation or standard policy.
+    async fn collaboration_actors(&self, _ids: &[String]) -> ServiceResult<Vec<super::collaboration_actor::CollaborationActor>> {
+        Err(crate::ServiceError::InternalError("collaboration policy lookup is not configured".into()))
+    }
     /// Includes tombstones so a deleted Provider/ref cannot be silently reused.
     async fn get_provider_bot(&self, bot_uuid: &str) -> ServiceResult<Option<BotProviderRecord>>;
 
@@ -15,6 +20,12 @@ pub trait BotProviderRepoPort: Send + Sync {
 
     /// None means missing Bot. An existing, unmigrated Bot is an error.
     async fn get_connection_mode(&self, bot_uuid: &str) -> ServiceResult<Option<BotConnectionMode>>;
+
+    /// Preflight before merging an existing Bot's capabilities. The attachment
+    /// write must revalidate atomically; this read alone is not a concurrency fence.
+    async fn validate_provider_affiliation(&self, _provider_id: &str, _bot_uuid: &str) -> ServiceResult<()> {
+        Err(crate::ServiceError::InternalError("Provider affiliation validation is not configured".into()))
+    }
 
     /// Attach an existing active Bot without replacing its credential or owner.
     /// Allows the existing upstream-to-gateway transition, never Provider transfer

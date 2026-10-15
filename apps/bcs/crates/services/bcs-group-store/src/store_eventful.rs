@@ -138,11 +138,20 @@ impl MySqlGroupStore {
         if let Some(stored_json) = &routing_policy_snapshot {
             lock_params.push(Value::from(stored_json.as_deref()));
         }
-        let mut steps = vec![DbTransactionStep::Query(DbStatement::with_params(
-            lock_sql,
-            lock_params,
-        ))];
-        let group_id = DbTransactionParam::query_result(0, 0, "group_id");
+        let mut steps = Vec::new();
+        let public_guard = if !deleting { self.public_provider_lock(&terminal)? } else { None };
+        if let Some(lock) = &public_guard {
+            steps.push(DbTransactionStep::Query(lock.clone()));
+            steps.push(DbTransactionStep::Query(self.public_bot_lock(&terminal)));
+        }
+        let cas_step = steps.len();
+        steps.push(DbTransactionStep::Query(DbStatement::with_params(lock_sql, lock_params)));
+        let guard_step = if public_guard.is_some() {
+            let guard = steps.len();
+            steps.push(DbTransactionStep::Query(self.public_scope_assertion(&terminal, Some(cas_step))));
+            Some(guard)
+        } else { None };
+        let group_id = DbTransactionParam::query_result(guard_step.unwrap_or(cas_step), 0, "group_id");
 
         match &command.mutation {
             GroupEventfulMutation::PatchMutableFields(patch) => {
@@ -470,10 +479,14 @@ impl MySqlGroupStore {
             ));
         }
         if let Err(error) = self.db.plugin().transaction(steps).await {
-            if routing_policy_snapshot.is_some() && transaction_lock_row_is_missing(&error) {
+            if provider_scope_guard::public_scope_denied(&error, guard_step) {
+                return Err(ServiceError::Forbidden("same_owner groups must remain private".into()));
+            }
+            if (cas_step == 0 && transaction_lock_row_is_missing(&error))
+                || provider_scope_guard::public_scope_denied(&error, Some(cas_step)) {
                 self.cache.write().await.remove(&command.group_id);
                 return Err(ServiceError::Conflict(format!(
-                    "Group '{}' routing policy changed concurrently",
+                    "Group '{}' version or routing policy changed concurrently",
                     command.group_id
                 )));
             }

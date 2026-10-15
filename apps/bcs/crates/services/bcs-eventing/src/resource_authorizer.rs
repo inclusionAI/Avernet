@@ -35,6 +35,7 @@ impl CoreEventSubscriptionAuthorizer {
     async fn group_management_actor_ids(
         &self,
         group_id: &str,
+        caller: &AuthenticatedCaller,
     ) -> Result<Vec<String>, ApplicationError> {
         let group = self
             .groups
@@ -46,6 +47,13 @@ impl CoreEventSubscriptionAuthorizer {
                     "Event Subscription scope was not found",
                 )
             })?;
+        let mut scope_actors = group.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+        if let Some(bot) = &caller.bot { scope_actors.push(bot.bot_uuid.clone()); }
+        if let Some(user) = &caller.user { scope_actors.push(format!("human_{}", user.id)); }
+        self.registry.collaboration_owner(&scope_actors).await.map_err(|error| match error {
+            bcs_service_api::ServiceError::Forbidden(message) => ApplicationError::event_subscription_forbidden(message),
+            other => ApplicationError::internal(other.to_string()),
+        })?;
         let mut actor_ids = vec![group.driver_bot.clone(), group.originator().to_string()];
         if group.group_strategy == GroupStrategy::ManagerWorker {
             actor_ids.extend(
@@ -131,7 +139,7 @@ impl EventSubscriptionAuthorizer for CoreEventSubscriptionAuthorizer {
         _action: EventSubscriptionAuthorizationAction,
     ) -> Result<AuthorizedEventSubscriptionScope, ApplicationError> {
         let actor_ids = match scope.scope_type {
-            EventSubscriptionScopeType::Group => self.group_management_actor_ids(&scope.id).await?,
+            EventSubscriptionScopeType::Group => self.group_management_actor_ids(&scope.id, caller).await?,
         };
         let actor = self.authorized_actor(caller, actor_ids).await?;
         Ok(AuthorizedEventSubscriptionScope {
