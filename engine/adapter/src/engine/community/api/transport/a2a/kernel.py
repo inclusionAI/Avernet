@@ -446,7 +446,7 @@ class A2aKernel:
     def get_run(self, rid: str) -> _Run | None:
         return self.runs.get(rid)
 
-    def interaction_run(self, interaction_id: str) -> tuple[str, Run] | None:
+    def interaction_run(self, interaction_id: str) -> tuple[str, _Run] | None:
         """E4/H1: (rid, run)——不存在/已驱逐返回 None。"""
         rid = self._interactions.get(interaction_id)
         if rid is None:
