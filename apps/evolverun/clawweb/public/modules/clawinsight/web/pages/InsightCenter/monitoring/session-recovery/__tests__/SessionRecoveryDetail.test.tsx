@@ -6,7 +6,7 @@ import { sessionRecoveryApi } from '../../../../../api/session-recovery';
 vi.mock('../../../../../api/session-recovery', () => ({ sessionRecoveryApi: { detail: vi.fn(), decide: vi.fn(), annotate: vi.fn(), toolCall: vi.fn() } }));
 const task = { taskId: 'task', status: 'waiting_owner', phase: 'apply', request: { diagnosis: '原任务失败', target: { bot_id: 'default' }, session_key: 'original' },
   judgment: { effect: 'not_recovered', summary: '原问题仍存在' }, plan: { digest: 'plan-digest', approvedAt: null, summary: '完整修复方案', basis: '原失败证据', scope: '当前目标', verification: '原操作成功', actions: [{ actionId: 'fix', summary: '修正配置', risk: '局部变更', verification: '读取配置', command: 'printf fixture', rollback: '恢复原值' }], owner_cooperation: [{ request: '确认权限已开放', basis: '权限缺失' }] },
-  timeline: [{ event_id: 'event', at_ms: 1, actor: 'agent', summary: '提出方案', payload: { evidence: '原证据' } }], evidence: [{ evidence_id: 'evidence', tool_call_id: 'call', source: 'session', location: 'line:1', excerpt: '原失败消息' }] };
+  timeline: [{ event_id: 'event', at_ms: 1, kind: 'plan', actor: 'agent', summary: '提出方案', payload: { evidence_ids: ['evidence'] } }], evidence: [{ evidence_id: 'evidence', tool_call_id: 'call', source: 'session', location: 'line:1', excerpt: '原失败消息' }] };
 beforeEach(() => {
   vi.clearAllMocks();
   // jsdom does not implement browser layout or scrolling.
@@ -42,12 +42,12 @@ it('keeps the plan, Owner cooperation and approval together in stage three', asy
   expect(screen.getByRole('button', { name: '确认完整方案' })).toBeEnabled();
   await user.click(screen.getByRole('button', { name: '确认完整方案' }));
   await waitFor(() => expect(sessionRecoveryApi.decide).toHaveBeenCalledWith('task', 'plan-digest', true, true, '权限已开放'));
-  expect(screen.queryByText('完整任务时间线')).toBeNull(); expect(screen.getByText('原失败消息')).toBeVisible();
+  expect(screen.queryByText('完整任务时间线')).toBeNull(); await user.click(screen.getByText('展开详情')); expect(screen.getByText('原失败消息')).toBeVisible();
 });
 it('loads full audited evidence on demand and retains manual judgment', async () => {
   vi.mocked(sessionRecoveryApi.toolCall).mockResolvedValue({ result: { stdout: '完整原始回执' } });
   render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />); await screen.findByText('原失败消息');
-  fireEvent.click(screen.getByText('查看完整操作原文与回执')); await waitFor(() => expect(sessionRecoveryApi.toolCall).toHaveBeenCalledWith('task', 'call'));
+  fireEvent.click(screen.getByText('展开详情')); fireEvent.click(screen.getByText('查看完整操作回执')); await waitFor(() => expect(sessionRecoveryApi.toolCall).toHaveBeenCalledWith('task', 'call'));
   await screen.findByText(/完整原始回执/);
   fireEvent.change(screen.getByLabelText('理由'), { target: { value: '前后原文已核对' } }); fireEvent.click(screen.getByLabelText('evidence'));
   fireEvent.click(screen.getByRole('button', { name: '保存标注' })); await waitFor(() => expect(sessionRecoveryApi.annotate).toHaveBeenCalledWith('task', { layer: 'effect', correct: true, reason: '前后原文已核对', evidence_ids: ['evidence'] }));
@@ -92,11 +92,11 @@ it('switches stages and shows every returned action with its status while retain
   const tabs = await screen.findByRole('tablist');
   const panel = () => within(screen.getByRole('tabpanel'));
   expect(within(tabs).getByRole('tab', { name: /执行环境修复/ })).toHaveAttribute('aria-selected', 'true');
-  expect(panel().getByText('等待执行配置修改')).toBeVisible();
-  expect(panel().getByText('正在修改配置')).toBeVisible();
+  expect(panel().getByRole('heading', { name: '等待执行配置修改' })).toBeVisible();
+  expect(panel().getByRole('heading', { name: '恢复正常的任务配置' })).toBeVisible();
   expect(panel().getByText('等待执行')).toBeVisible();
   expect(panel().getByText('执行中')).toBeVisible();
-  expect(panel().getByText('恢复正常的任务配置', { exact: false, selector: 'p' })).toBeVisible();
+  await user.click(within(panel().getByRole('heading', { name: '恢复正常的任务配置' }).closest('article')!).getByText('展开详情'));
   expect(panel().queryByRole('button', { name: '确认完整方案' })).toBeNull();
   expect(panel().queryByText('修正配置')).toBeNull();
   expect(screen.queryByText('原会话响应')).toBeNull();
@@ -105,20 +105,20 @@ it('switches stages and shows every returned action with its status while retain
   await user.click(panel().getByRole('button', { name: '方案动作：修正配置 →' }));
   expect(panel().getByText('修正配置')).toBeVisible();
   expect(panel().queryByRole('button', { name: '确认完整方案' })).toBeNull();
-  expect(panel().getByText('核对配置失败')).toBeVisible();
+  expect(panel().getByRole('heading', { name: '核对配置失败' })).toBeVisible(); await user.click(within(panel().getByRole('heading', { name: '核对配置失败' }).closest('article')!).getByText('展开详情'));
   expect(panel().getByText('连接被拒绝', { exact: false, selector: 'p' })).toBeVisible();
-  expect(panel().getByText('提出完整方案')).toBeVisible();
-  expect(panel().getByText('通知 Owner 确认')).toBeVisible();
-  expect(panel().getByText('Owner 确认完整方案')).toBeVisible();
+  expect(panel().getByRole('heading', { name: '提交修复方案' })).toBeVisible();
+  expect(panel().getByRole('heading', { name: '发送通知' })).toBeVisible();
+  expect(panel().getByRole('heading', { name: '记录 Owner 的方案决定' })).toBeVisible();
   expect(panel().queryByText('读取原会话')).toBeNull();
   await user.click(within(tabs).getByRole('tab', { name: /判断干预方式/ }));
   expect(screen.queryByText('完整修复方案')).toBeNull();
   expect(panel().getByText('读取原会话')).toBeVisible();
-  expect(panel().getByText('定位到失败消息')).toBeVisible();
+  expect(panel().getByText('定位到失败消息', { selector: '.sr-result-preview' })).toBeVisible();
   expect(sessionRecoveryApi.toolCall).not.toHaveBeenCalled();
-  await user.click(panel().getAllByText('查看操作详情')[0]);
+  await user.click(panel().getAllByText('展开详情')[0]);
   await waitFor(() => expect(sessionRecoveryApi.toolCall).toHaveBeenCalledWith('task', 'read'));
-  expect(await panel().findByText(/原会话详细回执/)).toBeVisible();
+  await user.click(within(panel().getByRole('heading', { name: '读取原会话', exact: true }).closest('article')!).getByText('技术信息')); expect(await panel().findByText(/原会话详细回执/)).toBeVisible();
   await user.click(screen.getByRole('button', { name: '刷新任务' }));
   await waitFor(() => expect(sessionRecoveryApi.detail).toHaveBeenCalledTimes(2));
   expect(within(tabs).getByRole('tab', { name: /判断干预方式/ })).toHaveAttribute('aria-selected', 'true');
@@ -132,4 +132,38 @@ it('switches stages and shows every returned action with its status while retain
   await user.click(within(tabs).getByRole('tab', { name: /执行环境修复/ }));
   expect(panel().queryByRole('button', { name: '确认完整方案' })).toBeNull();
   expect(panel().queryByText('Owner 确认完整方案')).toBeNull();
+});
+
+
+it('keeps long reasoning out of action headings and shows the evidence beside the judgment', async () => {
+  const user = userEvent.setup();
+  const reasoning = '原 Bot 已自行完成权限诊断，通过工具确认目标知识库不在可访问列表，并确认文档读取权限不足。'.repeat(5);
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'running', phase: 'observe', plan: null, timeline: [
+    { event_id: 'read', at_ms: 1, kind: 'operation', actor: 'agent', summary: '读取原会话', payload: { raw_tool_call_id: 'call', status: 'succeeded', request: { purpose: '读取原会话' } } },
+    { event_id: 'assess', at_ms: 2, kind: 'assessment', actor: 'agent', summary: reasoning, payload: { decision: 'observe', evidence_ids: ['evidence'] } },
+  ] } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  await user.click(await screen.findByRole('tab', { name: /判断干预方式/ }));
+  const panel = within(screen.getByRole('tabpanel'));
+  expect(panel.getByRole('heading', { name: '判断干预方式', exact: true })).toBeVisible();
+  expect(panel.queryByRole('heading', { name: reasoning })).toBeNull();
+  expect(screen.queryByRole('heading', { name: '故障与恢复证据' })).toBeNull();
+  const judgment = panel.getByRole('heading', { name: '判断干预方式', exact: true }).closest('article')!;
+  await user.click(within(judgment).getByText('展开详情'));
+  expect(within(judgment).getByText(reasoning, { selector: '.sr-long-text' })).toBeVisible();
+  expect(within(judgment).getByText('原失败消息')).toBeVisible();
+  expect(within(judgment).getByText('line:1')).not.toBeVisible();
+});
+
+it('rejects non-task responses without crashing and retains the last successful task', async () => {
+  const user = userEvent.setup();
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValueOnce({ error: 'unavailable' } as never).mockResolvedValueOnce(task as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('自愈任务详情响应不完整');
+  await user.click(screen.getByRole('button', { name: '重新加载' }));
+  expect(await screen.findByRole('button', { name: '确认完整方案' })).toBeVisible();
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, timeline: null } as never);
+  await user.click(screen.getByRole('button', { name: '刷新任务' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('保留上次成功读取的数据');
+  expect(screen.getByRole('button', { name: '确认完整方案' })).toBeVisible();
 });

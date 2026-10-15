@@ -170,9 +170,38 @@ function RecoveryWorkflow({ task, currentPhase, selected, onSelect, grouped, raw
   </section>;
 }
 
+const operationTitles: Record<string, string> = {
+  session_read: '读取原会话记录', trajectory_read: '读取原任务执行轨迹',
+  runtime_inspect: '检查 Bot 运行环境', engine_read: '读取 Bot 配置',
+  logs_search: '查询故障日志', retry_message: '向原会话发送恢复消息',
+  apply_action: '执行方案中的修复动作', reconcile_write: '核实操作结果',
+};
+const eventTitles: Record<string, string> = {
+  created: '接收问题诊断', assessment: '判断干预方式', observation: '检查原任务恢复情况',
+  plan: '提交修复方案', notification: '发送通知', owner_decision: '记录 Owner 的方案决定',
+};
+
+function actionTitle(event: RecoveryEvent, request: Record<string, unknown>, source?: string): string {
+  if (eventTitles[event.kind]) return eventTitles[event.kind];
+  // Like Repair, prefer the action's purpose. Detailed reasoning is body text, not a heading.
+  const purpose = request.purpose ?? event.summary;
+  if (typeof purpose === 'string' && purpose.length <= 32 && !purpose.includes('\n')) return purpose;
+  return operationTitles[String(request.operation)] ?? operationTitles[source ?? ''] ?? '查看本次操作记录';
+}
+
+function eventEvidenceIds(event: RecoveryEvent): unknown[] {
+  const judgment = record(event.payload.judgment);
+  return [
+    ...(Array.isArray(judgment.evidence_ids) ? judgment.evidence_ids : []),
+    ...(Array.isArray(event.payload.evidence_ids) ? event.payload.evidence_ids : []),
+    ...(Array.isArray(event.payload.evidence) ? event.payload.evidence.map(item => record(item).evidence_id) : []),
+    event.payload.evidence_id,
+  ];
+}
+
 function ProcessAction({ task, event, index, rawEvidence, loadEvidence, onViewAction }: { task: SessionRecoveryTask; event: RecoveryEvent; index: number; rawEvidence: Record<string, unknown>; loadEvidence: (id: string) => void; onViewAction: (id: string) => void }) {
   const callId = typeof event.payload.raw_tool_call_id === 'string' ? event.payload.raw_tool_call_id : undefined;
-  const evidence = task.evidence.find(item => item.tool_call_id === callId);
+  const evidence = task.evidence.find(item => callId && item.tool_call_id === callId);
   let savedResult: Record<string, unknown> = {};
   if (evidence) {
     try { savedResult = record(JSON.parse(evidence.excerpt)); } catch { /* Evidence may contain text or a truncated receipt. */ }
@@ -183,36 +212,48 @@ function ProcessAction({ task, event, index, rawEvidence, loadEvidence, onViewAc
   const conclusion = record(result.conclusion ?? event.payload.conclusion);
   const judgment = record(event.payload.judgment);
   const status = typeof receipt.status === 'string' ? receipt.status : typeof event.payload.status === 'string' ? event.payload.status : '';
-  const resultSummary = result.summary ?? result.resultSummary ?? event.payload.result_summary ?? judgment.summary;
-  const error = typeof result.error === 'string' ? result.error : record(result.error).message;
   const action = task.plan?.actions.find(item => item.actionId === request.actionId);
-  const evidenceIds = [
-    ...(Array.isArray(judgment.evidence_ids) ? judgment.evidence_ids : []),
-    ...(Array.isArray(event.payload.evidence_ids) ? event.payload.evidence_ids : []),
-    event.payload.evidence_id,
-  ];
-  const relatedEvidence = task.evidence.filter(item => item.tool_call_id === callId || evidenceIds.includes(item.evidence_id));
+  const title = actionTitle(event, request, evidence?.source);
+  const detailedSummary = result.summary ?? result.resultSummary ?? event.payload.result_summary ?? judgment.summary
+    ?? (event.summary !== title && event.summary !== request.purpose ? event.summary : undefined);
+  const resultSummary = typeof detailedSummary === 'string' ? detailedSummary : ({
+    pending: '操作尚未开始。', running: '正在执行，等待返回结果。', executing: '正在执行，等待返回结果。',
+    succeeded: '操作已完成。', failed: '操作失败，展开查看原因。', unknown: '操作结果尚未确定。', canceled: '操作已取消。',
+  }[status]);
+  const error = typeof result.error === 'string' ? result.error : record(result.error).message;
+  const evidenceIds = eventEvidenceIds(event);
+  const relatedEvidence = task.evidence.filter(item => callId && item.tool_call_id === callId || evidenceIds.includes(item.evidence_id)
+    // Retain old, unlinked evidence with the task's initial record rather than dropping it.
+    || event === task.timeline[0] && !task.timeline.some(entry => entry.payload.raw_tool_call_id === item.tool_call_id || eventEvidenceIds(entry).includes(item.evidence_id)));
   const effect = typeof judgment.effect === 'string' && judgment.effect in effectLabels ? judgment.effect as keyof typeof effectLabels : undefined;
   return <li className={`sr-process-action ${status} ${event.actor === 'service' ? 'control' : ''}`}>
     <div className="sr-process-index">{index + 1}</div>
     <article>
-      <div className="sr-process-header"><h3>{event.summary}</h3><div className="sr-process-status">{status && <StatusPill status={status}>{actionStatusLabels[status] || status}</StatusPill>}{effect && <StatusPill status={effect}>{effectLabels[effect]}</StatusPill>}</div></div>
-      {typeof request.purpose === 'string' && request.purpose !== event.summary && <p className="sr-process-result"><span>目的：</span>{request.purpose}</p>}
-      {typeof resultSummary === 'string' && resultSummary !== event.summary && <p className="sr-process-result"><span>结果：</span>{resultSummary}</p>}
-      {typeof error === 'string' && <p className="sr-process-error"><strong>失败原因：</strong>{error}</p>}
-      {typeof conclusion.text === 'string' && <p className="sr-process-result"><span>结论：</span>{conclusion.text}</p>}
+      <div className="sr-process-header"><h3>{title}</h3><div className="sr-process-status">{status && <StatusPill status={status}>{actionStatusLabels[status] || status}</StatusPill>}{effect && <StatusPill status={effect}>{effectLabels[effect]}</StatusPill>}</div></div>
+      {resultSummary && <p className="sr-process-result sr-result-preview"><span>结果：</span>{resultSummary}</p>}
       {typeof conclusion.nextAction === 'string' && <p className="sr-process-next"><span>后续动作：</span>{conclusion.nextAction}</p>}
-      {typeof event.payload.feedback === 'string' && event.payload.feedback.trim() && <p className="sr-process-result"><span>Owner 补充说明：</span>{event.payload.feedback}</p>}
-      {action && <button type="button" className="sr-action-reference" onClick={() => onViewAction(action.actionId)}>方案动作：{action.summary} →</button>}
-      {relatedEvidence.map(item => <p key={item.evidence_id} className="sr-process-source">证据来源：{item.source} · {item.location}</p>)}
-      <div className="sr-timeline-meta"><span>{actorLabels[event.actor]}</span><time>{formatTime(event.at_ms)}</time></div>
-      {typeof result.message === 'string' && <details className="sr-disclosure"><summary>查看发送的自愈消息</summary><p className="sr-long-text">{result.message}</p></details>}
-      <details className="sr-disclosure" onToggle={(toggleEvent) => { if (toggleEvent.currentTarget.open && callId && !rawEvidence[callId]) loadEvidence(callId); }}>
-        <summary>查看操作详情</summary>
-        {evidence && <div className="sr-note-box"><strong>关联证据</strong><p>{evidence.excerpt}</p></div>}
-        <RawDetails value={event.payload} />
-        {callId && <RawDetails value={rawEvidence[callId] ?? '正在读取完整操作原文与回执…'} />}
+      <details className="sr-disclosure sr-operation-details" onToggle={(toggleEvent) => { if (toggleEvent.currentTarget.open && callId && !rawEvidence[callId]) loadEvidence(callId); }}>
+        <summary><span className="sr-when-closed">展开详情</span><span className="sr-when-open">收起详情</span></summary>
+        <div className="sr-operation-body">
+          {typeof request.purpose === 'string' && request.purpose !== title && <div className="sr-operation-field"><h4>操作目的</h4><p className="sr-long-text">{request.purpose}</p></div>}
+          {typeof error === 'string' && <p className="sr-process-error"><strong>失败原因：</strong>{error}</p>}
+          {typeof detailedSummary === 'string' && <div className="sr-operation-field"><h4>{event.kind === 'assessment' || event.kind === 'observation' ? '判断说明' : '操作结果'}</h4><p className="sr-long-text">{detailedSummary}</p></div>}
+          {typeof conclusion.text === 'string' && conclusion.text !== detailedSummary && <div className="sr-operation-field"><h4>结论</h4><p className="sr-long-text">{conclusion.text}</p></div>}
+          {typeof event.payload.feedback === 'string' && event.payload.feedback.trim() && <div className="sr-operation-field"><h4>Owner 补充说明</h4><p className="sr-long-text">{event.payload.feedback}</p></div>}
+          {typeof (result.message ?? request.message) === 'string' && <div className="sr-operation-field"><h4>发送的恢复消息</h4><p className="sr-long-text">{String(result.message ?? request.message)}</p></div>}
+          {action && <button type="button" className="sr-action-reference" onClick={() => onViewAction(action.actionId)}>方案动作：{action.summary} →</button>}
+          {relatedEvidence.length > 0 && <section className="sr-operation-evidence"><h4>相关记录与依据</h4>{relatedEvidence.map((item, evidenceIndex) => <div key={item.evidence_id} className="sr-evidence-card">
+            <p className="sr-evidence-label">{evidenceIndex + 1}. {operationTitles[item.source] ?? item.source}</p>
+            {item.excerpt.trim().startsWith('{') || item.excerpt.trim().startsWith('[')
+              ? <details className="sr-disclosure"><summary>查看保存的原始记录</summary><RawDetails value={item.excerpt} /></details>
+              : <p className="sr-evidence-excerpt">{item.excerpt}</p>}
+            {item.tool_call_id !== callId && <details className="sr-disclosure" onToggle={(toggleEvent) => { if (toggleEvent.currentTarget.open && !rawEvidence[item.tool_call_id]) loadEvidence(item.tool_call_id); }}><summary>查看完整操作回执</summary><RawDetails value={rawEvidence[item.tool_call_id] ?? '正在读取…'} /></details>}
+            <details className="sr-disclosure"><summary>记录位置与标识</summary><dl><DetailRow label="位置" mono>{item.location}</DetailRow><DetailRow label="证据编号" mono>{item.evidence_id}</DetailRow></dl></details>
+          </div>)}</section>}
+          <details className="sr-disclosure"><summary>技术信息</summary><RawDetails value={event.payload} />{callId && <RawDetails value={rawEvidence[callId] ?? '正在读取完整操作原文与回执…'} />}</details>
+        </div>
       </details>
+      <div className="sr-timeline-meta"><span>{actorLabels[event.actor]}</span><time>{formatTime(event.at_ms)}</time></div>
     </article>
   </li>;
 }
@@ -288,22 +329,6 @@ function RecoveryPlan({ task, busy, ownerFeedback, cooperationDone, onFeedback, 
   </section>;
 }
 
-function EvidenceSection({ task, rawEvidence, loadEvidence }: { task: SessionRecoveryTask; rawEvidence: Record<string, unknown>; loadEvidence: (id: string) => void }) {
-  return <section className="sr-card">
-    <CardHeader title="故障与恢复证据" description="保留原失败、实际操作和后续结果，用于核对 Agent 的判断。" right={<span className="sr-count">{task.evidence.length} 条</span>} />
-    {task.evidence.length ? <div className="sr-evidence-list">
-      {task.evidence.map((evidence) => <article key={evidence.evidence_id} className="sr-evidence-card">
-        <div className="sr-evidence-title"><p>{evidence.source} · {evidence.location}</p><code>{evidence.evidence_id}</code></div>
-        <p className="sr-evidence-excerpt">{evidence.excerpt}</p>
-        <details className="sr-disclosure" onToggle={(event) => { if (event.currentTarget.open && !rawEvidence[evidence.tool_call_id]) loadEvidence(evidence.tool_call_id); }}>
-          <summary>查看完整操作原文与回执</summary>
-          <RawDetails value={rawEvidence[evidence.tool_call_id] ?? '正在读取…'} />
-        </details>
-      </article>)}
-    </div> : <div className="sr-empty">尚未取得可核验的证据。</div>}
-  </section>;
-}
-
 function ReviewSection({ task, busy, annotationLayer, annotationCorrect, annotationReason, annotationEvidence, onLayer, onCorrect, onReason, onEvidence, onSubmit }: {
   task: SessionRecoveryTask;
   busy: boolean;
@@ -364,6 +389,10 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
       try {
         const value = await sessionRecoveryApi.detail(taskId, signal);
         if (active && !signal.aborted) {
+          if (!value || value.taskId !== taskId || !Array.isArray(value.timeline) || !Array.isArray(value.evidence) || !value.request?.target) {
+            setError(record(value).buserviceErrorCode === 'USER_NOT_LOGIN' ? '登录状态已失效，请重新登录后刷新。' : '自愈任务详情响应不完整，请刷新重试。');
+            return;
+          }
           setLoaded({ taskId, task: value });
           setError('');
         }
@@ -466,7 +495,6 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
           <RecoveryWorkflow task={task} currentPhase={currentPhaseKey} selected={selectedPhase} onSelect={(phase) => setPhaseSelection({ taskId, phase })} grouped={grouped} rawEvidence={rawEvidence} loadEvidence={(id) => void loadEvidence(id)}>
             {selectedPhase === 'plan' && <RecoveryPlan task={task} busy={busy} ownerFeedback={ownerFeedback} cooperationDone={cooperationDone} onFeedback={setOwnerFeedback} onCooperation={setCooperationDone} onDecide={(approved) => void decide(approved)} />}
           </RecoveryWorkflow>
-          <EvidenceSection task={task} rawEvidence={rawEvidence} loadEvidence={(id) => void loadEvidence(id)} />
           <ReviewSection task={task} busy={busy} annotationLayer={annotationLayer} annotationCorrect={annotationCorrect} annotationReason={annotationReason} annotationEvidence={annotationEvidence} onLayer={setAnnotationLayer} onCorrect={setAnnotationCorrect} onReason={setAnnotationReason} onEvidence={setAnnotationEvidence} onSubmit={() => void annotate()} />
         </div>
         <aside className="sr-side">
