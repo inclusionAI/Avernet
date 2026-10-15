@@ -103,6 +103,7 @@ class AsyncChatClientPool:
         sandbox_id: str,
         uri: str,
         headers: dict[str, str] | None = None,
+        session_key: str | None = None,
     ) -> AsyncChatClient:
         """获取该 sandbox_id 对应的连接（Least-Sessions 选择，On-demand 扩容）
 
@@ -110,10 +111,30 @@ class AsyncChatClientPool:
             sandbox_id: 沙箱标识，作为连接池的 key
             uri: WebSocket URI
             headers: WebSocket 请求头
+            session_key: R4-1 session 归属定向。携带时先按归属查找持有
+                该 session 在途状态的连接（覆盖含 mode-stale 的全部连接）
+                ——A2A 的 CancelTask 依赖建连实例内的 engine_task_id 记
+                录，"普通负载分配"在默认 max_conns_per_sandbox=2 下即可
+                把取消路由到无记录的新连接（RUN_NOT_TRACKED，永不发
+                CancelTask）。无归属时回退正常分配（v3 chat.abort 按
+                sessionKey 对任意连接成立；A2A 由内层诚实判
+                RUN_NOT_TRACKED）。
 
         Returns:
             可用的 AsyncChatClient 实例
         """
+        # R4-1：归属查找先于一切建连/模式决策（多出来的 owner 对象不应
+        # 触发扩容；mode-stale 持有者的连接模式不参与校验——它正在服务
+        # 该 session 的在途 run）。
+        if session_key is not None:
+            owner = self._find_session_owner(sandbox_id, session_key)
+            if owner is not None:
+                logger.info(
+                    "[ChatClientPool] session-routed get: sandbox=%s owner_conns=%d",
+                    sandbox_id,
+                    len(self._clients.get(sandbox_id, [])),
+                )
+                return owner
         # P1-3：每次 get() 决策点读一次当前灰度模式——复用连接前校验其
         # 建连模式快照与当前配置一致，不一致的停止承接新请求（空闲即时
         # 收口关闭，在途的排空后关闭）。读频与建连同一粒度（每 get 恰一
@@ -341,6 +362,26 @@ class AsyncChatClientPool:
                 sandbox_id,
             )
             asyncio.ensure_future(self._safe_close(entry.client))
+
+    def _find_session_owner(
+        self, sandbox_id: str, session_key: str
+    ) -> AsyncChatClient | None:
+        """按 session 找持有它的连接（R4-1）。
+
+        扫描面 = 该 key 的全部连接：忙/闲不限（归属与负载无关）、模式
+        不限（模式翻转后仍在途的旧连接继续服务它的 run，直到收口）。
+        单条探测失败不传染（连接坏由既有清理路径处理）。
+        """
+        for entry in self._clients.get(sandbox_id, []):
+            try:
+                if entry.client.tracks_session(session_key):
+                    return entry.client
+            except Exception:
+                logger.exception(
+                    "[ChatClientPool] session owner probe failed: sandbox=%s",
+                    sandbox_id,
+                )
+        return None
 
     def _pick_idle(
         self, sandbox_id: str, expected_mode: str | None = None

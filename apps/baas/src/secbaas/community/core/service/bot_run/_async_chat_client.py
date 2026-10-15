@@ -310,6 +310,16 @@ class AsyncChatClient:
         """是否有正在等待回复的活跃会话（供连接池过期清理使用）。"""
         return len(self._active_sessions) > 0
 
+    def tracks_session(self, session_key: str) -> bool:
+        """该连接是否持有此 session 的在途编排状态——R4-1 归属查询。
+
+        A2A 的 CancelTask 依赖建连实例内记录的 engine_task_id
+        （_runs/_session_runs），取消必须路由到持有者连接；归属判定放在
+        编排层（_sessions 由 send/inject 注册、收口清除），与底层
+        传输无关——同一 session 的 send 与 abort 一致落在 holder 上。
+        """
+        return session_key in self._sessions
+
     @property
     def active_session_count(self) -> int:
         """当前活跃会话数（供连接池负载均衡使用）。"""

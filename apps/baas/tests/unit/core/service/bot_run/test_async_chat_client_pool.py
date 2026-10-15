@@ -247,6 +247,90 @@ class TestReconnectAwareness:
         await pool.close_all()
 
 
+# ==================== R4-1: session 归属定向 get ====================
+
+
+class TestSessionRoutedGet:
+    """取消/关联操作绝不能走负载均衡分配——A2A 的 CancelTask 依赖建连
+    实例内的 engine_task_id 记录，发到别的连接就是 RUN_NOT_TRACKED。"""
+
+    @pytest.mark.asyncio
+    async def test_session_owner_wins_even_when_busy(self, mock_chat_client_class):
+        """默认 max_conns_per_sandbox=2 下"唯一在跑请求 + 取消"原本会扩
+        出第二条无记录的连接——session_routed get 必须直落持有者，零新建。"""
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+            _ConnEntry,
+        )
+
+        pool = AsyncChatClientPool(max_conns_per_sandbox=2)
+        owner = MagicMock()
+        owner.tracks_session = MagicMock(return_value=True)
+        pool._clients["sbx-1"] = [_ConnEntry(client=owner, a2a_mode="on")]
+
+        result = await pool.get("sbx-1", "ws://host/ws", None, session_key="sk-run")
+
+        assert result is owner, "取消必须命中持有者连接,不得新建/扩容"
+        mock_chat_client_class[0].assert_not_called()
+        await pool.close_all()
+
+    @pytest.mark.asyncio
+    async def test_mode_stale_owner_is_still_routed(self, mock_chat_client_class):
+        """模式翻转后仍在途的旧连接（mode-stale）继续服务它的 run——归
+        属查找不校验连接模式快照。"""
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+            _ConnEntry,
+        )
+
+        pool = AsyncChatClientPool(max_conns_per_sandbox=2)
+        owner = MagicMock()
+        owner.tracks_session = MagicMock(return_value=True)
+        pool._clients["sbx-2"] = [_ConnEntry(client=owner, a2a_mode="on")]
+
+        result = await pool.get("sbx-2", "ws://host/ws", None, session_key="sk-run")
+        assert result is owner
+        await pool.close_all()
+
+    @pytest.mark.asyncio
+    async def test_no_owner_falls_back_to_plain_allocation(
+        self, mock_chat_client_class
+    ):
+        """无归属（未开跑/已收口）→ 正常分配路径行为不变。"""
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        pool = AsyncChatClientPool(max_conns_per_sandbox=2)
+        result = await pool.get(
+            "sbx-3", "ws://host/ws", None, session_key="ghost-session"
+        )
+        assert result is mock_chat_client_class[1]
+        await pool.close_all()
+
+    @pytest.mark.asyncio
+    async def test_owner_probe_failure_isolated(self, mock_chat_client_class):
+        """单条连接 tracks_session 抛错不传染——继续查其它连接。"""
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+            _ConnEntry,
+        )
+
+        pool = AsyncChatClientPool(max_conns_per_sandbox=2)
+        broken = MagicMock()
+        broken.tracks_session = MagicMock(side_effect=RuntimeError("boom"))
+        owner = MagicMock()
+        owner.tracks_session = MagicMock(return_value=True)
+        pool._clients["sbx-4"] = [
+            _ConnEntry(client=broken),
+            _ConnEntry(client=owner),
+        ]
+
+        result = await pool.get("sbx-4", "ws://host/ws", None, session_key="sk-run")
+        assert result is owner
+        await pool.close_all()
+
+
 # ==================== total_connections tests ====================
 
 

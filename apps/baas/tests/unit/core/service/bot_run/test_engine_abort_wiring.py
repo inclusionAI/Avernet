@@ -114,6 +114,7 @@ async def test_baas_bot_service_abort_sends_chat_abort(binding_info: BotBindingI
         "target",
         "wss://proxy/proxypass/target/api/openclaw/ws",
         {"x-proxypass-token": "token-1"},
+        session_key="sess-1",
     )
     ws_client.chat_abort.assert_awaited_once_with(
         session_key="sess-1",
@@ -246,6 +247,7 @@ async def test_claw_bot_service_abort_sends_chat_abort(binding_info: BotBindingI
         "sandbox-1",
         "wss://proxy/proxypass/ARCA_sandbox-1:20003/api/openclaw/ws",
         {"x-proxypass-token": "test-token"},
+        session_key="sess-1",
     )
     ws_client.chat_abort.assert_awaited_once_with(
         session_key="sess-1",

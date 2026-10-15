@@ -239,6 +239,7 @@ class ClawBotService(BotService):
         headers = self._get_headers(sandbox_id)
 
         client = await self._client_pool.get(sandbox_id, url, headers)
+
         try:
             auth_token = context.build_auth_token() if context else None
             app_id = context.app_id if context else None
@@ -304,6 +305,7 @@ class ClawBotService(BotService):
         headers = self._get_headers(sandbox_id)
 
         client = await self._client_pool.get(sandbox_id, url, headers)
+
         auth_token = context.build_auth_token() if context else None
         app_id = context.app_id if context else None
 
@@ -366,6 +368,7 @@ class ClawBotService(BotService):
         headers = self._get_headers(sandbox_id)
 
         client = await self._client_pool.get(sandbox_id, url, headers)
+
         try:
             auth_token = context.build_auth_token() if context else None
             await client.inject_message(
@@ -546,7 +549,10 @@ class ClawBotService(BotService):
         headers = self._get_headers(sandbox_id)
 
         try:
-            client = await self._client_pool.get(sandbox_id, url, headers)
+            client = await self._client_pool.get(
+                sandbox_id, url, headers, session_key=session_id
+            )
+
             # 注意：chat.abort 的 run_id 是引擎侧 run 标识，与 baas_bot_run.run_id
             # 语义不同，不能把后者透传过去；用 sessionKey 定位即可。
             # R3-3：A2A 传输下 chat_abort ok=True 只代表传输任务已取消、
