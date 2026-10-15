@@ -952,6 +952,38 @@ _已定案的决策（PR #610）：路径保持嵌套（`/openapi/v1/bots/mcp/..
 调用者"有权限"（该端点仅供参考，真正的强制点是 MCP 服务器本身）—— 已用测试钉住，使其读起来
 是一个决策而非 bug。_
 
+### ✅ Bot 的 acli CLI（4 个端点）· `openapi_v1/bots/acli_clis.py` —— **已实现（2026-10-15）**
+管理 bot 从内部 acli 市场安装的命令行工具。**AgentPass 是 bot 拥有哪些 CLI 的唯一记录**；
+**acli 市场是唯一的目录**（平台不维护清单，新发布的工具无需发版即可添加）。
+Spec：`apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`。
+
+| 方法 | 路径 | 权限 | 用途 |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/{bot_id}/clis` | MEMBER | bot 授权中的全部 CLI：`cli_code`、`cli_name`、`cli_desc`、`identity_mode`、`default` |
+| GET | `/openapi/v1/bots/{bot_id}/clis/market` | MEMBER | 在运行中的 bot 容器内搜索 acli 市场（`keyword`、`page_no`、`page_size`） |
+| POST | `/openapi/v1/bots/{bot_id}/clis` | OWNER + 编辑锁 | `{cli_code}`（**市场名**，如 `deepinsight-cli`，而不是 `di`）：先安装，再以 `owner` 授权 |
+| DELETE | `/openapi/v1/bots/{bot_id}/clis/{cli_code}` | OWNER + 编辑锁 | 先撤销授权，再卸载 |
+| PATCH | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type` | OWNER + 编辑锁 | 不变：切换 `owner`/`caller` |
+
+**全部成功或全部不变。** 添加先安装后授权，授权失败则卸载回去；删除先撤销后卸载，卸载失败则以原身份重新授权。
+若回滚本身也失败（或卸载结果未知），返回 `500`，`data.state` 说明 bot 停留的状态：
+`installed_not_granted`、`revoked_still_installed` 或 `revoked_install_unknown`。
+
+| 状态码 | 场景 | `data` |
+|---|---|---|
+| 404 | 删除 bot 没有的 CLI | — |
+| 409 | 已授权；删除默认 CLI；无运行中的容器 | 容器场景为 `{code, reason}` |
+| 422 | 传入别名（`di`） | `{market_name}` |
+| 422 | acli 拒绝请求（通常是名称不存在） | `{code, reason}` |
+| 423 | 未持有编辑锁 | — |
+| 501 | bot 的引擎不支持 acli（仅 openclaw 与 claude_code 支持） | — |
+| 502 | acli 或容器调用失败；Passport 写入失败 | acli 场景为 `{code, reason}` |
+
+工具安装到 manifest 的 `managed_bin_dir`（`/home/admin/.agentclaw/bin`），位于持久化存储且在引擎 `PATH` 上，
+因此重启后仍在、也无需重启即可使用。删除 CLI 时会清除其 caller 覆盖，使再次添加从 `owner` 开始——
+除非它是 bot 最后一个 caller 资源（bot 不会从 `caller` 回退为 `owner`）。默认 CLI 每次启动都会重新授权，
+不能删除。开源镜像不带 acli：添加、删除与搜索返回 `502`，`code` 为 `acli_unavailable`。
+
 ### 🟩 lucas-xzp · P1 —— resources（7 个端点）· `openapi_v1/resources/router.py`
 Bot 工作区的文件与目录；存储位置从不暴露。所有操作都以工作区相对路径 `path`
 查询参数寻址，七个端点均要求 `bot_id` 与 `user_id`。
@@ -1186,6 +1218,10 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
 
+- **2026-10-15** —— **Bot 的 acli CLI。** 新增 `GET`/`POST /openapi/v1/bots/{bot_id}/clis`、
+  `GET …/clis/market` 与 `DELETE …/clis/{cli_code}`：搜索 acli 市场、添加（先安装后授权）与删除
+  （先撤销后卸载）bot 的工具，均为全部成功或全部不变，回滚失败时返回具体状态。AgentPass 仍是唯一记录，
+  acli 市场是唯一目录。
 - **2026-08-27** —— **Owner 级定时任务聚合列表。** 新增
   `GET /openapi/v1/bots/routines/all`：按认证用户聚合其名下（含协作参与）所有 Bot
   的定时任务，全部运行态（draft/verify/online）平铺，同一配置跨运行态可多行并以

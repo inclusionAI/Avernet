@@ -58,11 +58,12 @@ Backend paths are relative to `apps/backend/`; engine paths to
   - [x] The call-type route is unchanged.
 - **Depends on:** Task 5
 
-## Task 7: Docs
+## Task 7: [x] Docs
 - **Goal:** Document the engine contract and public routes.
 - **Files:** `docs/bot-config-manifest/engine-requirements.zh-CN.md`, `docs/openapi-v1/README.md`, `docs/openapi-v1/README.zh-CN.md`
 - **Done when:**
-  - [ ] Engine endpoints, install-directory rationale, public routes and error codes are documented.
+  - [x] Engine endpoints, install-directory rationale, public routes and error codes are documented.
+  - [x] `docker/agent/avernet.dockerfile` puts `/home/admin/.agentclaw/bin` on `PATH` (added at implementation start, on the user's go-ahead).
 - **Depends on:** Tasks 2, 6
 
 ## Task 8: Verification

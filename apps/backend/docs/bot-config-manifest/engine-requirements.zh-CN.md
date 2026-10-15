@@ -188,6 +188,23 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
 对本机引擎适配器 API 的调用 + 就绪等待 + 重试），提升 script 用户的体验。
 届时按 `startup-ops` 独立契约版本化，probe 门控。
 
+- **A3（acli 市场工具，公开 API `/openapi/v1/bots/{bot_id}/clis` 使用）**：与 A2 的上传二进制
+  不同，这里由引擎在容器内调用 `acli` 安装市场上的工具。openclaw 与 claude_code 提供三个端点，
+  约定与 A2 相同：参数非法返回 `400`，acli 拒绝返回 `200` + `success:false` + `error`，
+  `404` 只表示「引擎没有该端点」。
+
+  | 端点 | 请求 | 语义 |
+  | --- | --- | --- |
+  | `POST /api/cli/acli/install` | `{name, install_dir}` | `acli install <name> --install-dir <install_dir> --yes --json`，返回 `{name, command, description, version}` |
+  | `POST /api/cli/acli/uninstall` | `{name, install_dir}` | acli 有记录则 `acli tool uninstall <name> --yes --json`；没有记录也算成功（`uninstalled: false`） |
+  | `GET /api/cli/acli/market` | `?keyword=&page_no=&page_size=` | `acli list` 的一页：`{items, total, has_more}` |
+
+  **`install_dir` 由平台下发（manifest 的 `managed_bin_dir`），这是对 A2「落点归引擎」的有意例外**：
+  该目录必须与容器启动脚本放进引擎 `PATH`、并由启动安装器使用的是同一个目录，manifest 是它的唯一来源；
+  在引擎配置里再写一份只会像设备侧 YAML 那样漂移。引擎以 `HOME=<install_dir 的父目录>/acli-home`
+  运行 acli，使 acli 的安装记录与程序一起落在持久化存储上，重启后仍能卸载；超时或请求取消时整组杀掉
+  acli 及其子进程。
+
 ## 5. 开放问题（定稿前需要拍板）
 
 | # | 问题 | 倾向 | 决策人 |
