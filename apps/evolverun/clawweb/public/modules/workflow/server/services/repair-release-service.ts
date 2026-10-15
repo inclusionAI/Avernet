@@ -36,7 +36,8 @@ export function createRepairReleaseService(input: {
     const approvals = await repo.list<RepairApproval>(taskId, 'approval');
     const selected = approvals.filter(a => a.revision === task.latestSuccessful?.revision)
       .sort((a, b) => b.stateVersion - a.stateVersion)[0];
-    return { approval: selected ?? null, deployments: await repo.list<RepairDeployment>(taskId, 'deployment') };
+    return { approval: selected ?? null, deployments: await repo.list<RepairDeployment>(taskId, 'deployment'),
+      repositoryWebUrl: input.publisher?.repositoryWebUrl?.() };
   }
   async function lock(tx: IDatabase, taskId: string) {
     const batches = new RepairBatchRepository(tx);

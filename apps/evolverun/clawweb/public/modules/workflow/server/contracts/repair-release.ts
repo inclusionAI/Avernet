@@ -24,6 +24,8 @@ export type PublicationStatus = { status: 'running' | 'uncertain' | 'failed'; er
   | { status: 'succeeded'; receipt: PublicationReceipt };
 /** Host Plugin API: freeze an authorized target; publish/reconcile the exact trusted identity. */
 export interface RepairPublicationPort {
+  /** Credential-free HTTPS repository URL supplied by the trusted Host. */
+  repositoryWebUrl?(): string | undefined;
   targets(workflowId: string, actorId: string): Promise<RepairReleaseTarget[]>;
   activeBaseline(workflowId: string): Promise<RepairBaseline>;
   dispatch(deployment: RepairDeployment): Promise<PublicationStatus>;
@@ -38,6 +40,7 @@ export type RepairConfirmRequest = {
 export type RepairDeployRequest = { revision: number; expectedApprovalVersion: number; requestId: string };
 export type RepairReleaseDetail = {
   approval: RepairApproval | null; deployments: RepairDeployment[];
+  repositoryWebUrl?: string;
 };
 /** Service API; routes enforce authenticated workflow access in addition to target checks. */
 export interface RepairReleaseService {

@@ -162,6 +162,23 @@ describe('reviewed candidate publication', () => {
     expect((await f.service.detail(f.revision.taskId)).deployments[0].status).toBe('running');
   });
 
+  it('reconfirms a different production target after failure without regenerating the candidate', async () => {
+    const f = await setup();
+    const approval = await f.service.confirm('reviewer', f.revision.taskId, f.request);
+    f.publisher.dispatch = async () => ({ status: 'failed', error: 'entry missing' });
+    await f.service.deploy('reviewer', f.revision.taskId, { revision: 1, expectedApprovalVersion: approval.stateVersion, requestId: 'failed-deploy' });
+    f.publisher.targets = async () => [{ id: 'new-prod', botId: 'new-bot', ownerId: 'owner', environment: 'prod', label: '生产 Bot' }];
+    const latest = (await f.workbench.task(f.revision.taskId)).latestSuccessful!;
+    const updated = await f.service.confirm('reviewer', f.revision.taskId, { ...f.request, targetId: 'new-prod',
+      expectedStateVersion: latest.stateVersion, requestId: 'change-target' });
+    expect(updated.target.id).toBe('new-prod');
+    expect(updated.candidateCommit).toBe(approval.candidateCommit);
+    expect((await f.service.detail(f.revision.taskId)).deployments).toHaveLength(1);
+    f.publisher.dispatch = async () => ({ status: 'running' });
+    expect(await f.service.deploy('reviewer', f.revision.taskId, { revision: 1,
+      expectedApprovalVersion: updated.stateVersion, requestId: 'new-target-deploy' })).toMatchObject({ status: 'running', approvalId: updated.id });
+  });
+
   it('reauthorizes the frozen target before stopping, including idempotent retries', async () => {
     const f = await setup();
     const approved = await f.service.confirm('reviewer', f.revision.taskId, f.request);
