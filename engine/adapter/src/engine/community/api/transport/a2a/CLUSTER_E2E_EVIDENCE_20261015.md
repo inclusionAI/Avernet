@@ -246,3 +246,32 @@ Engine-side alignment for the fallback rounds:
 | Replay bisector (header-bisect evidence) | runtime pod `/tmp/replay_bisect.py`, `/tmp/replay_out.txt`; host canonical `.replay_bisect.py` |
 | SO_ORIGINAL_DST probe | runtime pod `/tmp/oodst.py`; result `OSError(92)`; host canonical `.oodst_probe.py` |
 | Captured engine request (headers/body) | runtime pod `/tmp/relay_last_headers.json`, `/tmp/relay_last_body.json` (76,825 bytes) |
+## Fourth stage — CancelTask real-abort regression (2f5543a5b, same-day afternoon)
+
+Bot re-republished onto overlay `arca-openclaw:a2a-2f5543a5b` (1c + 1c+ engine
+abort forwarding). Engine runtime pod `--ff4c50a40bb8` (10.42.0.46), model relay
+re-deployed from the canonical host copy (recipe above).
+
+Round A — mid-flight cancel (real abort):
+- baas `AsyncChatClient(a2a_mode="grey")` → real card GET → `transport=a2a`
+- long-form prompt launched, cancel 8s in:
+  `chat_abort → {'ok': True, 'a2a': True, 'task': {'id': 'c6bf81d96697', 'state': 'TASK_STATE_CANCELED'}}`
+- consumer terminal: `BotSessionError: session ended with error state: TASK_STATE_CANCELED`
+- **engine upstream proof** (adaptor_err.log): `13:07:01,042 Sent request:
+  method=chat.abort, id=d77b4ae7` — the A2A CancelTask drove a REAL
+  `ChatService.abort` RPC to the openclaw engine; `13:07:01,152
+  [chat_stream][terminal_recv] {'event': 'chat', 'state': 'aborted',
+  runId='c595c838...', sessionKey='cancel-a-...'}` — the upstream engine actually
+  aborted the model run (abort + aborted-event reflow inside the same second,
+  T1-idempotent with the transport-layer CANCELED).
+
+Round B — post-terminal repeat cancel (honest refusal):
+- full round-trip first: `content='A2A通'` over a2a (real model via relay)
+- abort after completion:
+  `{'ok': False, 'a2a': True, 'error': {'code': 'task_terminal', 'message': 'task already terminal (TASK_STATE_COMPLETED)', 'retryable': False}}`
+- no second upstream abort attempted (terminal pre-intercept, guard tested by unit
+  suite, log window clean).
+
+Verdict: cluster-level closed loop confirmed — BaaS `chat_abort` → gated
+`CancelTask` → kernel CANCELED → real `chat.abort` upstream → engine aborted
+event reflow → terminal delivered to consumer; repeat-cancel is honest refusal.
