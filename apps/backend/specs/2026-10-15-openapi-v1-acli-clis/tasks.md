@@ -5,15 +5,15 @@
 Backend paths are relative to `apps/backend/`; engine paths to
 `engine/adapter/src/engine/community/`.
 
-## Task 1: Engine — `AcliRunner`
+## Task 1: [x] Engine — `AcliRunner`
 - **Goal:** Run acli install / uninstall / market safely and turn its JSON into results or typed errors.
 - **Files:** `core/acli/__init__.py`, `core/acli/runner.py`, `core/acli/tests/test_runner.py`
 - **Done when:**
-  - [ ] Each operation runs the exact argv in the plan with `HOME=<parent of install_dir>/acli-home`, via `create_subprocess_exec`.
-  - [ ] Bad `name`, `keyword`, `install_dir` or page bounds are refused before any process starts.
-  - [ ] Uninstall of a name absent from `acli tool list` succeeds with `uninstalled: false`.
-  - [ ] Tests with a fake `acli` cover success, every error code, timeout and missing acli.
-  - [ ] Output is masked and truncated in logs and never returned raw.
+  - [x] Each operation runs the exact argv in the plan with `HOME=<parent of install_dir>/acli-home`, via `create_subprocess_exec`.
+  - [x] Bad `name`, `keyword`, `install_dir` or page bounds are refused before any process starts.
+  - [x] Uninstall of a name absent from `acli tool list` succeeds with `uninstalled: false`.
+  - [x] Tests with a fake `acli` cover success, every error code, timeout and missing acli.
+  - [x] Output is masked and truncated in logs and never returned raw.
 - **Depends on:** —
 
 ## Task 2: Engine — endpoints and capabilities
