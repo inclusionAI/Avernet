@@ -25,13 +25,13 @@ Backend paths are relative to `apps/backend/`; engine paths to
   - [x] Router tests cover success, refusal and bad input.
 - **Depends on:** Task 1
 
-## Task 3: Backend — install directory and AgentPass add/remove
+## Task 3: [x] Backend — install directory and AgentPass add/remove
 - **Goal:** Read and validate the install directory; add `add_cli` / `remove_cli` to `CliPassportScopeReconciler`, the existing class that is the only code allowed to write a bot's AgentPass CLI list (it rebuilds the whole MCP + CLI list and writes it in one call, because AgentPass replaces the list on every update).
 - **Files:** `src/agentclaw/community/core/mcp/services/cli_capabilities.py`, `.../cli_passport_scope.py`, `tests/community/core/mcp/services/test_cli_capabilities.py`, the reconciler's test module
 - **Done when:**
-  - [ ] The resolver exposes `managed_bin_dir`; an invalid value fails loading.
-  - [ ] `add_cli` / `remove_cli` carry the full MCP scope and all other CLI identities.
-  - [ ] `reconcile` behaviour and log lines unchanged (existing tests pass).
+  - [x] The resolver exposes `managed_bin_dir`; an invalid value fails loading.
+  - [x] `add_cli` / `remove_cli` carry the full MCP scope and all other CLI identities.
+  - [x] `reconcile` behaviour and log lines unchanged (existing tests pass).
 - **Depends on:** —
 
 ## Task 4: Backend — engine port

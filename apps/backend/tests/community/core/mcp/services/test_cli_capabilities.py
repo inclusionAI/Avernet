@@ -125,6 +125,7 @@ def _manifest_document() -> dict:
     return {
         "version": 1,
         "manifest_version": "test-v1",
+        "managed_bin_dir": "/home/admin/.agentclaw/bin",
         "catalog": {
             "dataphin": {
                 "cli_name": "dataphin-cli",
@@ -232,6 +233,29 @@ def test_manifest_rejects_invalid_catalog_and_profile_schema(
         profile["default_cli_codes"] = ["missing"]
 
     with pytest.raises(ValueError):
+        CliCapabilityManifestResolver(_write_manifest(tmp_path, document))
+
+
+def test_manifest_document_fixture_is_valid(tmp_path: Path) -> None:
+    """The negative cases below must fail for their own reason, not the fixture's."""
+    resolver = CliCapabilityManifestResolver(_write_manifest(tmp_path, _manifest_document()))
+    assert resolver.managed_bin_dir == "/home/admin/.agentclaw/bin"
+
+
+def test_shipped_manifest_installs_into_the_managed_bin_dir() -> None:
+    assert CliCapabilityManifestResolver(MANIFEST).managed_bin_dir == "/home/admin/.agentclaw/bin"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [None, 3, "relative/bin", "/home/admin/../etc/bin", "/home/admin/.agentclaw/lib"],
+)
+def test_manifest_rejects_invalid_managed_bin_dir(tmp_path: Path, value: object) -> None:
+    """acli is told to install here, so only an absolute ``bin`` directory is accepted."""
+    document = deepcopy(_manifest_document())
+    document["managed_bin_dir"] = value
+
+    with pytest.raises(ValueError, match="managed_bin_dir"):
         CliCapabilityManifestResolver(_write_manifest(tmp_path, document))
 
 
