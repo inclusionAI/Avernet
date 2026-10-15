@@ -17,8 +17,51 @@ def test_relay_prompt_uses_internal_network_without_bcs_credential() -> None:
     assert "生产内网白名单" in prompt
     assert "不读取或发送 BCS session token" in prompt
     assert "X-Relay-Token 使用本次 relay_token" in prompt
+    assert "完整 JSON 必须从 stdin 传入" in prompt
+    assert "禁止位置参数、data 包装或 POST --relay-token" in prompt
+    assert "必须在当前执行会话直接执行并检查 stdout" in prompt
     assert "BCS 会话文件读取凭证" not in prompt
     assert "Authorization" not in prompt
+
+
+def test_relay_prompt_pins_mode_and_recovery_invariants() -> None:
+    prompt = format_relay_execution_instruction(
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+        backend_url="https://backend.example",
+        objective="完成任务",
+        instruction="执行并上报",
+        acceptances=[],
+    )
+
+    assert "若 accepted_plan_report 非空，不重做 S2-S5" in prompt
+    assert "bbs_publish_pending=false 才恢复 dispatch" in prompt
+    assert "单 Bot 会话、动态协作群会话和 BBS 会话都不改变本节点" in prompt
+    assert "群 ID、会话 ID 或群成员列表" in prompt
+    assert "不能替代节点标识，也不能跳过 S5c 搜索" in prompt
+    assert "stdin JSON 必须是 {query,task_id,node_id,relay_token}" in prompt
+    assert "422 是请求契约错误，不是 candidates=[]" in prompt
+    assert "不得预填 node_id/status/node_run_graph" in prompt
+
+
+def test_relay_prompt_forbids_dispatch_for_terminal_and_bbs_plans() -> None:
+    prompt = format_relay_execution_instruction(
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+        backend_url="https://backend.example",
+        objective="完成任务",
+        instruction="执行并上报",
+        acceptances=[],
+    )
+
+    assert "S6 只有在 target_node_id 非空且 bbs_publish_pending=false" in prompt
+    assert "task_completed=true、task_hung=true 或 bbs_publish_pending=true" in prompt
+    assert "不得调用 dispatch" in prompt
+    assert "HTTP 422 表示契约非法" in prompt
+    assert "HTTP 409 表示状态冲突或执行代次失效" in prompt
+    assert "禁止换 event_id 或 token" in prompt
 
 
 def test_relay_prompt_forbids_direct_web_tools() -> None:
