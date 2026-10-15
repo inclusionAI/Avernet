@@ -37,6 +37,7 @@ from agentclaw.community.core.session_resources.session_resource_service_protoco
 log = logging.getLogger("session_resource.service")
 _WINDOWS_FORBIDDEN_FILENAME_CHARACTERS = frozenset('<>:"/\\|?*')
 _MAX_FILENAME_UTF8_BYTES = 255
+_SINGLE_CHAT_WITHDRAWAL_SCOPES = ("personal_bot_chat", "friend_bot_chat", "openapi_session")
 
 
 class SessionResourceService(SessionResourceServiceProtocol):
@@ -382,6 +383,7 @@ class SessionResourceService(SessionResourceServiceProtocol):
             owner_id,
             bot_id,
             session_hash,
+            withdrawal_scope_types=_SINGLE_CHAT_WITHDRAWAL_SCOPES,
         )
         if result is None:
             raise ValueError("resource_not_found")

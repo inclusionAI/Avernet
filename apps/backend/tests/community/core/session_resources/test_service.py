@@ -89,7 +89,7 @@ class _Repo:
         )
         return self.value
 
-    def soft_delete(self, resource_id, owner_id, bot_id, session_key_hash):
+    def soft_delete(self, resource_id, owner_id, bot_id, session_key_hash, *, withdrawal_scope_types=()):
         self.value = replace(self.value, status=SessionResourceStatus.DELETED)
         return self.value
 
