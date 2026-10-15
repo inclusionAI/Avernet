@@ -77,6 +77,7 @@ from agentclaw.community.core.repository.protocols.task import (
 from agentclaw.community.core.task.domain.errors import (
     TrajectoryAnalysisNotConfiguredError,
 )
+from agentclaw.community.core.task.domain.models import effective_run_mode
 from agentclaw.community.core.task.repository.types import TrajectoryEventRecord
 from agentclaw.community.core.task.task_context.task_trajectory.analyzer import (
     TaskTrajectoryAnalyzer,
@@ -641,7 +642,7 @@ class TaskTrajectoryService(
         return trajectory
 
     # ------------------------------------------------------------------
-    # 节点产出读时富化 — timeline 的"每子任务最后一条事件"携带执行产出
+    # 节点当前态读时富化 — timeline 的"每子任务最后一条事件"携带执行产出 + 真实模态
     # (决策 #14 精神:观测旁路,graph 未接线/图读失败 → 跳过,绝不影响轨迹本体)。
     # ------------------------------------------------------------------
 
@@ -668,14 +669,17 @@ class TaskTrajectoryService(
             return False
 
     def _attach_node_outputs(self, trajectory: TaskTrajectory) -> None:
-        """把每个子任务(task_id+node_id)的**当前产出**挂到它在 timeline 中的
-        **最后一条**事件上。
+        """把每个子任务(task_id+node_id)的**当前产出**与**真实执行模态**挂到它在
+        timeline 中的**最后一条**事件上。
 
         产出数据经 ``task_execution_graph`` 的查询接口获取
         (``query_task_dashboard`` → ``node.run_info.output``——执行回投写图的
-        节点级 dict 产出)。倒序扫 timeline 找每个 node 的末位事件(正序时间线的
-        "最新一条"),挂 ``ev.output``(浅拷贝与图现场解耦)。挂载语义:
-        空 ``{}`` / 缺失的产出保持 ``None``(缺字段=无信号,DTO/HTML 不透出)。
+        节点级 dict 产出)。真实模态取 ``effective_run_mode(node)``
+        (``run_info.extend_props.actual_run_mode`` 优先,缺失回退 ``run_mode``),
+        同源同挂法。倒序扫 timeline 找每个 node 的末位事件(正序时间线的
+        "最新一条"),挂 ``ev.output``(浅拷贝与图现场解耦)与
+        ``ev.actual_run_mode``。挂载语义:空 ``{}`` / 缺失的产出、无模态均保持
+        ``None``(缺字段=无信号,DTO/HTML 不透出)。
 
         旁路保障:``graph`` 未接线(轻量 DI)→ 静默跳过;图读失败(任务已删 /
         relay 外部托管等)→ WARNING + 返回未富化;一律**不**影响 ``get_trajectory``
@@ -693,23 +697,32 @@ class TaskTrajectoryService(
             )
             return
         outputs: dict[str, dict] = {}
+        run_modes: dict[str, str] = {}
         root_spec = None
         for node in getattr(graph, "tasks", []):
             out = getattr(node.run_info, "output", None)
             if isinstance(out, dict) and out:
                 outputs[node.node_id] = out
+            # 真实模态:actual_run_mode 优先(执行时交通覆盖),缺失回退 run_mode;
+            # 两者皆缺 → 不挂(缺字段=无信号)。
+            mode = effective_run_mode(node)
+            if mode:
+                run_modes[node.node_id] = mode
             if node.node_id == trajectory.task_id:
                 root_spec = getattr(node, "task_spec", None)
-        if outputs:
+        if outputs or run_modes:
             last_seen: set[str] = set()
             for ev in reversed(trajectory.timeline):
                 node_id = ev.node_id
                 if node_id in last_seen:
-                    continue  # 该节点更早的事件:production 只挂最后一条
+                    continue  # 该节点的当前态(output/modality)只挂最后一条
                 last_seen.add(node_id)
                 out = outputs.get(node_id)
                 if out:
                     ev.output = dict(out)
+                mode = run_modes.get(node_id)
+                if mode:
+                    ev.actual_run_mode = mode
         self._attach_submit_goal(trajectory, root_spec)
 
     def _attach_submit_goal(self, trajectory: TaskTrajectory, root_spec) -> None:

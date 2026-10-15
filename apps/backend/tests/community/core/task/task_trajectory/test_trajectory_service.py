@@ -739,16 +739,18 @@ async def test_do_analysis_true_passes_ext_info_lookup_to_analyzer():
 
 class _FakeNode:
     """A domain-shaped node stub — the probe touches only ``node_id`` /
-    ``status`` / ``run_info.extend_props`` / ``run_info.start_time`` /
-    ``run_info.output``(产出富化)."""
+    ``status`` / ``run_info.run_mode`` / ``run_info.extend_props`` /
+    ``run_info.start_time`` / ``run_info.output``(产出/模态富化)."""
 
     def __init__(self, *, node_id: str, status: Status, extend_props: dict | None = None,
                  start_time: int | None = None, output: dict | None = None,
+                 run_mode: str | None = None,
                  task_spec=None, assignee: str | None = None) -> None:
         self.node_id = node_id
         self.status = status
         self.task_spec = task_spec
         self.run_info = RuntimeInfo(
+            run_mode=run_mode,
             start_time=start_time,
             output=dict(output or {}),
             extend_props=dict(extend_props or {}),
@@ -1266,6 +1268,42 @@ async def test_get_trajectory_attaches_node_output_to_last_event():
     )
     n2_last = [e for e in result.timeline if e.node_id == "n2"][-1]
     assert n2_last.output is None, "空产出不挂(缺字段=无信号)"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_get_trajectory_attaches_actual_run_mode_to_last_event():
+    """真实模态读时富化:每个 (task_id,node_id) 的**最后一条**事件挂上该节点的
+    有效执行模态(``effective_run_mode``:``extend_props.actual_run_mode`` 优先,
+    缺失回退 ``run_info.run_mode``);更早的事件保持 None;两种模态都缺的节点
+    不挂(缺字段=无信号)。"""
+    graph = _output_graph([
+        _FakeNode(node_id="n1", status=Status.DONE, run_mode="coop_group",
+                  extend_props={"actual_run_mode": "single_bot"}),
+        _FakeNode(node_id="n2", status=Status.DONE, run_mode="bbs"),
+        _FakeNode(node_id="n3", status=Status.PENDING),  # 两种模态都缺 → 不挂
+    ])
+    timeline = [
+        _make_event(node_id="n1", action_type=TrajectoryActionType.PLAN, gmt_create=1000),
+        _make_event(node_id="n1", action_type=TrajectoryActionType.EXECUTE, gmt_create=2000),
+        _make_event(node_id="n2", action_type=TrajectoryActionType.PLAN, gmt_create=3000),
+        _make_event(node_id="n3", action_type=TrajectoryActionType.PLAN, gmt_create=4000),
+    ]
+    traj = _make_trajectory(task_id="t1", timeline=timeline)
+    svc = TaskTrajectoryService(_FakeAssembler(traj), _FakeRepo(), _FakeAnalyzer(), None,
+                                graph=graph)
+
+    result = await svc.get_trajectory("t1", do_analysis=False)
+
+    n1_events = [e for e in result.timeline if e.node_id == "n1"]
+    assert n1_events[0].actual_run_mode is None, "更早的 PLAN 事件不挂真实模态"
+    assert n1_events[-1].actual_run_mode == "single_bot", (
+        "最后一条事件挂有效模态:actual_run_mode 覆盖 run_mode=coop_group"
+    )
+    n2_last = [e for e in result.timeline if e.node_id == "n2"][-1]
+    assert n2_last.actual_run_mode == "bbs", "actual_run_mode 缺失回退 run_mode"
+    n3_last = [e for e in result.timeline if e.node_id == "n3"][-1]
+    assert n3_last.actual_run_mode is None, "两种模态都缺 → 不挂(缺字段=无信号)"
 
 
 @pytest.mark.asyncio

@@ -143,6 +143,14 @@ def _render_event(ev: "object") -> str:
             f'<span class="ev-value">{html.escape(str(holder_id))}</span></div>'
         )
 
+    # 真实执行模态(读时富化;仅每个 node 的最后一条事件携带)
+    actual_run_mode = getattr(ev, "actual_run_mode", None)
+    if actual_run_mode:
+        parts.append(
+            '<div class="ev-meta"><span class="ev-label">真实模态</span>'
+            f'<span class="ev-value">{html.escape(str(actual_run_mode))}</span></div>'
+        )
+
     # 状态迁移
     if status_from or status_to:
         frm = html.escape(str(status_from)) if status_from else "∅"

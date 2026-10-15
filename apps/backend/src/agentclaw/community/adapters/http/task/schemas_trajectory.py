@@ -59,6 +59,13 @@ class TrajectoryEventDTO(BaseModel):
                     "action_result=search 事件取顶层 search_sampling+candidates;"
                     "无搜推素材的事件为 None)",
     )
+    actual_run_mode: str | None = Field(
+        None,
+        description="子任务真实执行模态(single_bot|coop_group|bbs;读时经 "
+                    "effective_run_mode 定——task_node_run_info.extend_props."
+                    "actual_run_mode 优先,缺失回退 run_mode;仅该 node 在 timeline "
+                    "中的最后一条事件携带,无模态为 None)",
+    )
 
 
 class TaskTrajectoryDTO(BaseModel):
@@ -116,6 +123,7 @@ def trajectory_to_dto(trajectory: "TaskTrajectory") -> TaskTrajectoryDTO:
                 output=ev.output,
                 session_msgs=ev.session_msgs,
                 search_probe=ev.search_probe,
+                actual_run_mode=ev.actual_run_mode,
             )
             for ev in trajectory.timeline
         ],
