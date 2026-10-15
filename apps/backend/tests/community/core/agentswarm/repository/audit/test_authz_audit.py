@@ -172,6 +172,7 @@ class RaisingAuditWriter:
 
 def _spec_body() -> dict:
     return {
+        "tenant": TENANT,
         "goal": "map the incident",
         "agents": [{"name": "scout", "role": "research"}],
         "idempotency_key": "idem-audit",
@@ -380,7 +381,8 @@ class TestRouterAuditTrail:
     def test_cancel_known_run_records_row(self, app_deps):
         client = self._client(app_deps)
         _, _, audit = app_deps
-        resp = client.post("/openapi/v1/agentswarm/runs/run-1/cancel")
+        resp = client.post("/openapi/v1/agentswarm/runs/run-1/cancel",
+                           params={"tenant": TENANT})
         assert resp.status_code == 200
         (row,) = audit.rows
         assert row["action"] == "cancel_requested"
@@ -390,7 +392,8 @@ class TestRouterAuditTrail:
     def test_cancel_unknown_run_records_not_found_reason(self, app_deps):
         client = self._client(app_deps)
         _, _, audit = app_deps
-        resp = client.post("/openapi/v1/agentswarm/runs/nope/cancel")
+        resp = client.post("/openapi/v1/agentswarm/runs/nope/cancel",
+                           params={"tenant": TENANT})
         assert resp.status_code == 404
         (row,) = audit.rows
         assert row["action"] == "cancel_requested"

@@ -48,7 +48,7 @@ class TestEnums:
 
     def test_agent_kind(self):
         assert dm.AgentKind.LLM == "llm"
-        assert dm.AgentKind.AVENET == "avernet"
+        assert dm.AgentKind.BOT == "bot"
 
     def test_bot_state_terminal_failures(self):
         assert dm.BotState.AUTHORIZATION_REJECTED == "AUTHORIZATION_REJECTED"

@@ -143,6 +143,7 @@ def _post(path: str, payload: str | dict,
 def _submit_body(goal: str = "wire goal",
                  idem: str | None = None) -> dict:
     body = {
+        "tenant": TENANT,
         "goal": goal,
         "agents": [{"name": "a1", "role": "work"}],
     }
@@ -244,12 +245,14 @@ class TestOverTheWire:
         assert body == {"ready": True}
 
     def test_anonymous_request_is_401(self, wire):
-        status, _, _ = _get("/openapi/v1/agentswarm/runs")
+        status, _, _ = _get(f"/openapi/v1/agentswarm/runs?tenant={TENANT}")
         assert status == 401
 
     def test_unknown_run_is_404(self, wire):
-        status, body, _ = _get("/openapi/v1/agentswarm/runs/does-not-exist",
-                              headers=AUTH)
+        status, body, _ = _get(
+            f"/openapi/v1/agentswarm/runs/does-not-exist?tenant={TENANT}",
+            headers=AUTH,
+        )
         assert status == 404
         # Under /openapi/v1 the app-level handler wraps routing and
         # handler-raised HTTPExceptions in the standard ErrorEnvelope
@@ -266,7 +269,7 @@ class TestOverTheWire:
         assert status == 200
         run_id = submit["run_id"]
         status, body, _ = _get(
-            f"/openapi/v1/agentswarm/runs/{run_id}",
+            f"/openapi/v1/agentswarm/runs/{run_id}?tenant={TENANT}",
             headers={**AUTH, "X-Tenant-Id": "tenant-b"},
         )
         assert status == 200
@@ -276,8 +279,10 @@ class TestOverTheWire:
         # test's orchestrator script across the per-test reset
         deadline = time.time() + 30
         while time.time() < deadline:
-            status, body, _ = _get(f"/openapi/v1/agentswarm/runs/{run_id}",
-                                   headers=AUTH)
+            status, body, _ = _get(
+                f"/openapi/v1/agentswarm/runs/{run_id}?tenant={TENANT}",
+                headers=AUTH,
+            )
             if status != 200 or body["status"] != "RUNNING":
                 break
             time.sleep(0.1)
@@ -297,8 +302,10 @@ class TestOverTheWire:
 
         deadline = time.time() + 30
         while time.time() < deadline:
-            status, body, _ = _get(f"/openapi/v1/agentswarm/runs/{run_id}",
-                                   headers=AUTH)
+            status, body, _ = _get(
+                f"/openapi/v1/agentswarm/runs/{run_id}?tenant={TENANT}",
+                headers=AUTH,
+            )
             if status != 200:
                 break
             if body["status"] != "RUNNING":
@@ -375,8 +382,10 @@ class TestOverTheWire:
         run_id = first["run_id"]
         deadline = time.time() + 30
         while time.time() < deadline:
-            status, body, _ = _get(f"/openapi/v1/agentswarm/runs/{run_id}",
-                                   headers=AUTH)
+            status, body, _ = _get(
+                f"/openapi/v1/agentswarm/runs/{run_id}?tenant={TENANT}",
+                headers=AUTH,
+            )
             if status != 200:
                 break
             if body["status"] != "RUNNING":
@@ -391,7 +400,7 @@ class TestOverTheWire:
         run_id = submit["run_id"]
 
         req = urllib.request.Request(
-            f"{BASE}/openapi/v1/agentswarm/runs/{run_id}/events",
+            f"{BASE}/openapi/v1/agentswarm/runs/{run_id}/events?tenant={TENANT}",
             headers={"Accept": "text/event-stream", **AUTH},
         )
         events: list[tuple[str, dict]] = []
@@ -426,8 +435,10 @@ class TestOverTheWire:
         deadline = time.time() + 30
         status = 200
         while time.time() < deadline:
-            status, body, _ = _get(f"/openapi/v1/agentswarm/runs/{run_id}",
-                                   headers=AUTH)
+            status, body, _ = _get(
+                f"/openapi/v1/agentswarm/runs/{run_id}?tenant={TENANT}",
+                headers=AUTH,
+            )
             if status != 200:
                 break
             if body["status"] != "RUNNING":
@@ -435,7 +446,7 @@ class TestOverTheWire:
             time.sleep(0.1)
 
         req = urllib.request.Request(
-            f"{BASE}/openapi/v1/agentswarm/runs/{run_id}/report",
+            f"{BASE}/openapi/v1/agentswarm/runs/{run_id}/report?tenant={TENANT}",
             headers=AUTH,
         )
         with urllib.request.urlopen(req, timeout=10) as resp:

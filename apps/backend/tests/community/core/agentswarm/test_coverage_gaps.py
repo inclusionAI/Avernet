@@ -159,9 +159,14 @@ class TestDefaultSubagentFactory:
     @pytest.mark.asyncio
     async def test_avernet_kind_creates_avernet_subagent(self):
         factory = DefaultSubagentFactory(StubLLMProvider(), platform=object())
+        # Bots provision under the run's authenticated caller (P0-9
+        # no-service-account stance); a callerless run fails clear at
+        # spawn time, so the create-path battery carries an owner.
+        run = _mk_run()
+        run.owner_id = "staff-7"
         sub = factory.create(
-            dm.AgentSpec(name="b1", role="worker", kind=dm.AgentKind.AVENET),
-            _mk_run(),
+            dm.AgentSpec(name="b1", role="worker", kind=dm.AgentKind.BOT),
+            run,
             dm.AgentId("agent-b1"),
         )
         assert isinstance(sub, AvernetSubagent)
@@ -174,7 +179,7 @@ class TestDefaultSubagentFactory:
         factory = DefaultSubagentFactory(StubLLMProvider())
         with pytest.raises(AgentSwarmConfigError, match="BotPlatform"):
             factory.create(
-                dm.AgentSpec(name="b1", role="worker", kind=dm.AgentKind.AVENET),
+                dm.AgentSpec(name="b1", role="worker", kind=dm.AgentKind.BOT),
                 _mk_run(),
                 dm.AgentId("agent-b1"),
             )
@@ -245,7 +250,7 @@ class TestAvernetSubagentTeardown:
         factory = DefaultSubagentFactory(llm=None)
         with pytest.raises(AgentSwarmConfigError, match="BotPlatform"):
             factory.create(
-                dm.AgentSpec(name="b", role="worker", kind=dm.AgentKind.AVENET),
+                dm.AgentSpec(name="b", role="worker", kind=dm.AgentKind.BOT),
                 _mk_run(),
                 dm.AgentId("agent-b"),
             )
@@ -256,9 +261,13 @@ class TestAvernetSubagentTeardown:
             DefaultSubagentFactory,
         )
         factory = DefaultSubagentFactory(llm=None, platform=object())
+        # P0-9: bots provision under the run's authenticated caller, so
+        # the create-path battery carries an owner (see factory gate).
+        run = _mk_run()
+        run.owner_id = "staff-7"
         sub = factory.create(
-            dm.AgentSpec(name="b", role="worker", kind=dm.AgentKind.AVENET),
-            _mk_run(),
+            dm.AgentSpec(name="b", role="worker", kind=dm.AgentKind.BOT),
+            run,
             dm.AgentId("agent-b"),
         )
         assert isinstance(sub, bot_pkg.AvernetSubagent)
