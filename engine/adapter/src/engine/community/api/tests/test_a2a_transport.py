@@ -655,9 +655,14 @@ class _FakeResolveChat:
                             message=message)
 
     async def resolve_interaction(self, session_key, interaction_id,
-                                  response):
+                                  decision="submit", answer=None,
+                                  message=None, answers=None, values=None,
+                                  selected_options=None):
         return self._record("ask_user", session_key=session_key,
-                            interaction_id=interaction_id, response=response)
+                            interaction_id=interaction_id, decision=decision,
+                            answer=answer, message=message, answers=answers,
+                            values=values,
+                            selected_options=selected_options)
 
     async def resolve_mode_transition(self, session_key, interaction_id,
                                       decision):
@@ -765,7 +770,7 @@ async def test_resolve_validate_response_contract(monkeypatch):
     一个返回 {ok: True} 的引擎 adapter 会被误判失败。"""
     class _OldContractChat:
         async def resolve_interaction(self, session_key, interaction_id,
-                                      response):
+                                      **kw):
             return {"success": False,
                     "error": {"code": "OLD",
                                "message": "engine returned legacy shape"}}
@@ -1037,7 +1042,7 @@ def test_agent_card_declares_cancel_extension(app_client):
     assert EXTENSION_URIS["cancel"] in uris, uris
 
 
-# ══════════ 1c+: CancelTask 引擎真中止（abort 上行，TC-CANCEL 闭环）══════════
+# ══════════ 1c+: CancelTask 引擎 abort 上行（best-effort，TC-CANCEL 闭环）══════════
 
 class _FakeAbortChat:
     """abort 通道 fake — ChatService.abort 的真实契约（ChatAbortResult）。
@@ -2468,16 +2473,65 @@ async def test_resolve_forward_kind_matrix_and_failures(monkeypatch):
     async def repost(iid):
         await K.publish_interaction_requested(rid, iid, {})
 
-    # ask_user 默认分支：response 取 answer/message 字段
+    # ask_user 默认分支：提交 decision + 文本答案逐字转发（R3-1）
     await repost("i-a")
     out = await R2._resolve_interaction(
         {"interactionId": "i-a",
-         "resolution": {"decision": "answer", "answer": "那就是这样",
+         "resolution": {"decision": "submit", "answer": "那就是这样",
                         "kind": "ask_user"}}, 2, None)
     assert out["interaction"]["resolved"] is True
     kind, params = fake.calls[-1]
-    assert kind == "ask_user" and params["response"] == "那就是这样"
+    assert kind == "ask_user"
+    assert params["decision"] == "submit"
+    assert params["answer"] == "那就是这样"
     assert K.runs[rid].state == "TASK_STATE_WORKING"
+
+    # R3-1：取消决策逐字转发——不得被改写成 submit；结构化答案不丢
+    await repost("i-cx")
+    out = await R2._resolve_interaction(
+        {"interactionId": "i-cx",
+         "resolution": {"decision": "cancel", "kind": "ask_user"}}, 7, None)
+    assert out["interaction"]["resolved"] is True, out
+    kind, params = fake.calls[-1]
+    assert kind == "ask_user"
+    assert params["decision"] == "cancel", "取消被改写成了 submit"
+    assert params["answer"] is None
+
+    await repost("i-sa")
+    out = await R2._resolve_interaction(
+        {"interactionId": "i-sa",
+         "resolution": {"decision": "submit", "kind": "ask_user",
+                        "answers": {"q1": "A", "q2": "B"},
+                        "values": {"f1": "v1"},
+                        "selected_options": [["o1", "o2"]]}}, 8, None)
+    assert out["interaction"]["resolved"] is True, out
+    kind, params = fake.calls[-1]
+    assert kind == "ask_user"
+    assert params["answers"] == {"q1": "A", "q2": "B"}
+    assert params["values"] == {"f1": "v1"}
+    assert params["selected_options"] == [["o1", "o2"]]
+
+    # selectedOptions 的 v3 wire 形态也接受（规范化到 selected_options）
+    await repost("i-so")
+    out = await R2._resolve_interaction(
+        {"interactionId": "i-so",
+         "resolution": {"decision": "submit", "kind": "ask_user",
+                        "selectedOptions": [["ox"]]}}, 9, None)
+    assert out["interaction"]["resolved"] is True, out
+    _, params = fake.calls[-1]
+    assert params["selected_options"] == [["ox"]]
+
+    # 载荷类型不符 → 边界错误，不带病下行
+    with pytest.raises(R2._ParamError, match="selected_options"):
+        await R2._resolve_interaction(
+            {"interactionId": "i-bad",
+             "resolution": {"decision": "submit", "kind": "ask_user",
+                            "selected_options": "junk"}}, 10, None)
+    with pytest.raises(R2._ParamError, match="answers"):
+        await R2._resolve_interaction(
+            {"interactionId": "i-bad2",
+             "resolution": {"decision": "submit", "kind": "ask_user",
+                            "answers": ["junk"]}}, 11, None)
 
     # mode_switch 分发 + BaaS 持有的真实 interaction id 定位
     await repost("i-m")
@@ -2516,7 +2570,7 @@ async def test_resolve_forward_kind_matrix_and_failures(monkeypatch):
     # 转发超时 → unknown_outcome，run 保持 INPUT_REQUIRED
     class _HangingResolve:
         async def resolve_interaction(self, session_key, interaction_id,
-                                      response):
+                                      **kw):
             await asyncio.sleep(10)
 
     _install_resolve_bridge(monkeypatch, _HangingResolve())

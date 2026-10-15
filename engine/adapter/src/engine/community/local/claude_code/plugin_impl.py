@@ -133,14 +133,27 @@ class LocalClaudeCodePluginImpl(ClaudeCodePlugin):
         self,
         session_key: str,
         interaction_id: str,
-        response: str | None = None,
+        decision: str = "submit",
+        answer: str | None = None,
+        message: str | None = None,
+        answers: dict[str, str] | None = None,
+        values: dict[str, str] | None = None,
+        selected_options: list[list[str]] | None = None,
         token: str | None = None,
     ) -> dict[str, Any]:
-        return {
-            "success": True,
-            "error": None,
-            "payload": {"interactionId": interaction_id, "response": response},
-        }
+        payload: dict[str, Any] = {"interactionId": interaction_id,
+                                   "decision": decision}
+        if answer is not None:
+            payload["answer"] = answer
+        if message is not None:
+            payload["message"] = message
+        if answers is not None:
+            payload["answers"] = answers
+        if values is not None:
+            payload["values"] = values
+        if selected_options is not None:
+            payload["selectedOptions"] = [list(o) for o in selected_options]
+        return {"success": True, "error": None, "payload": payload}
 
     async def resolve_mode_transition(
         self,

@@ -269,7 +269,10 @@ async def test_local_claude_code_plugin_stateful_ports_and_error_branches():
 
     # chat resolve_* branches.
     assert (await plugin.resolve_exec_approval("s", "r1", "allow"))["payload"]["decision"] == "allow"
-    assert (await plugin.resolve_interaction("s", "r1", "yes"))["payload"]["response"] == "yes"
+    resolved = (await plugin.resolve_interaction("s", "r1", answer="yes"))["payload"]
+    assert resolved["decision"] == "submit" and resolved["answer"] == "yes"
+    cancelled = (await plugin.resolve_interaction("s", "r1", decision="cancel"))["payload"]
+    assert cancelled["decision"] == "cancel", "cancel 决策被改写"
     assert (await plugin.resolve_mode_transition("s", "r1", "accept"))["payload"]["decision"] == "accept"
 
 

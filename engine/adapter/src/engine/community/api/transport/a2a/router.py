@@ -408,19 +408,20 @@ _HANDLERS["GetTask"] = _get_task
 
 # ── CancelTask (1c/TC-CANCEL，设计 §7：幂等；终态后取消 → 标准错误) ──
 
-# 1c+：引擎真中止上行的响应时序上限。与 _RESOLVE/_INJECT 家族同口径；
+# 1c+：引擎 abort 上行（best-effort）的响应时序上限。与 _RESOLVE/_INJECT 家族同口径；
 # 端口自带更短的 RPC 超时（claude_code port chat.abort 10s），这里的
 # wait_for 只是病态 adapter 的兜底护栏（BaaS CancelTask HTTP 窗口 30s）。
 _ABORT_FORWARD_TIMEOUT_SECONDS = 30.0
 
 # abort 上行结局——CancelTask 响应以 engineAbort 字段如实附录，供调用方
-# 判读/告警。BaaS 成功判定不变（仍钉 result.task.status.state==CANCELED）：
-# 传输面取消对订阅者已生效，abort 只是引擎侧的尽力收口。
-_ABORT_CONFIRMED = "confirmed"       # ok=True, aborted=True：引擎确认中止
-_ABORT_NOT_FOUND = "not_found"       # ok=True, aborted=False：引擎无此在跑 run
-_ABORT_REFUSED = "refused"            # ok=False：引擎明确拒绝
-_ABORT_TIMEOUT = "timeout"           # 响应超时——结果不可知（可能已中止）
-_ABORT_UNAVAILABLE = "unavailable"   # abort 通道/引擎插件不可达
+# 判读/告警。BaaS 成功判定不变（仍钉 result.task.status.state==CANCELED）。
+# 语义边界（R3-3）：传输任务终结与引擎停止是两个不同的事实——
+# engineAbort 除 confirmed 外的任何值都不保证引擎已停止。
+_ABORT_CONFIRMED = "confirmed"       # ok=True, aborted=True：引擎确认取消目标运行
+_ABORT_NOT_FOUND = "not_found"       # ok=True, aborted=False：引擎侧无匹配的在跑运行
+_ABORT_REFUSED = "refused"            # ok=False：引擎未执行中止（不应一概推断为业务拒绝）
+_ABORT_TIMEOUT = "timeout"           # 等待 abort 结果超时——是否已取消不可知
+_ABORT_UNAVAILABLE = "unavailable"   # abort 调用无法完成——是否已停止不可知
 
 
 async def _forward_engine_abort(run: Any) -> str:
@@ -432,9 +433,17 @@ async def _forward_engine_abort(run: Any) -> str:
     openclaw 传 ""）。auth=None 与 inject/resolve 上行一致（HTTP 面的
     文档化默认）。
 
-    失败诚实语义：不回滚、不上浮、响应仍按传输面快照——传输面 CANCELED
-    已生效（T1 也挡住引擎迟到帧改写），但 abort 结局不再只落日志：以
-    返回值上浮给 _cancel_task，随响应 engineAbort 字段如实附录。
+    两层事实语义（R3-3）：
+    - 传输取消：cancel_run 已终结订阅者与 run 终态，T1 挡住引擎迟到帧；
+      响应 state==CANCELED 对传输面属实。
+    - 引擎停止：本方法是 best-effort 上行，结局经返回值如实附录；
+      非 confirmed 时引擎可能仍在执行，调用方不得据传输取消成功
+      推断执行已停止。
+
+    不重试、不回滚、不上浮改判：重复 CancelTask 被 task_terminal 挡下后
+    不会再发 abort；取消确认与 abort 重试机制留作后续设计——本 PR 不
+    引入"取消中"状态机。连接不可达（unavailable）也不得推断"引擎已停
+    止"。
     """
     from engine.community.api.transport.a2a.engine_bridge import _chat_plugin
 
@@ -477,7 +486,8 @@ async def _cancel_task(params: dict[str, Any], req_id: Any,
                        _gated_key: str | None) -> dict[str, Any]:
     """§8.6：cancel 改 run 状态与订阅者终结——kernel 不触碰
     interaction/resolution 注册表（HITL 记录独立于 run 生命周期）；
-    引擎真中止上行由 _forward_engine_abort 在 cancel_run 之后发起。
+    引擎侧 abort 上行（best-effort，结局附录进 engineAbort）由
+    _forward_engine_abort 在 cancel_run 之后发起。
 
     幂等契约（§7 表）：已终态 run 上 cancel 不迁移、不重复终结、不再
     发 abort——标准错误，data 带 {state, already_terminal} 让迟到的
@@ -498,7 +508,7 @@ async def _cancel_task(params: dict[str, Any], req_id: Any,
                           "data": {"reason": "task_terminal", "state": r.state,
                                    "already_terminal": True}}}
     snapshot = await _kernel.cancel_run(tid)
-    # 1c+：传输面 CANCELED 落定后上行引擎真中止——响应仍按传输面快照
+    # 1c+：传输面 CANCELED 落定后上行引擎 abort——响应仍按传输面快照
     # （BaaS 成功判定钉在 result.task.status.state==CANCELED，abort 结局
     # 不改成功判定），abort 结局以 engineAbort 如实附录供调用方判读；
     # 引擎 aborted 帧随流回流经 bridge 收口，T1 下与本次 CANCELED 幂等
@@ -710,6 +720,48 @@ class _ResolveRejected(Exception):
         self.code = code
 
 
+def _validated_resolution(resolution: dict[str, Any]) -> dict[str, Any]:
+    """resolution 载荷的边界规范化（PR #2743 R3-1）。
+
+    类型不符 = 边界错误（_ParamError → 422），不带病下行。ask_user 的
+    结构化答案（answers/values/selected_options|selectedOptions）原样
+    保留——与 v3 builder（build_interaction_resolve_request）等价，灰度
+    切换不得丢失载荷/改写决策。"""
+    decision = resolution.get("decision")
+    if not isinstance(decision, str) or not decision:
+        raise _ParamError("resolution.decision is required")
+    out: dict[str, Any] = {"decision": decision}
+    kind = resolution.get("kind")
+    if kind is not None and not isinstance(kind, str):
+        raise _ParamError("resolution.kind must be a string")
+    if kind:
+        out["kind"] = kind
+    for field in ("answer", "message"):
+        value = resolution.get(field)
+        if value is not None and not isinstance(value, str):
+            raise _ParamError(f"resolution.{field} must be a string")
+        if value is not None:
+            out[field] = value
+    for field in ("answers", "values"):
+        value = resolution.get(field)
+        if value is not None and not isinstance(value, dict):
+            raise _ParamError(f"resolution.{field} must be an object")
+        if value is not None:
+            out[field] = value
+    selected = resolution.get("selected_options")
+    if selected is None:
+        selected = resolution.get("selectedOptions")   # 容忍 v3 wire 形态
+    if selected is not None:
+        if not isinstance(selected, list) or any(
+                not isinstance(opt, (list, tuple))
+                or any(not isinstance(s, str) for s in opt)
+                for opt in selected):
+            raise _ParamError("resolution.selected_options must be a list "
+                              "of string lists")
+        out["selected_options"] = [list(opt) for opt in selected]
+    return out
+
+
 async def _forward_resolve(*, session_key: str,
                            interaction_id: str,
                            resolution: dict[str, Any]) -> None:
@@ -719,6 +771,10 @@ async def _forward_resolve(*, session_key: str,
     帧上行的引擎侧 id（gateway 生成，如 ``int:<uuid>``）；引擎的 pending
     注册表按它查找。kernel rid 是传输层 id、native run id 是执行标识，
     引擎 resolve 注册表一概不认，严禁替换成二者之一。
+
+    resolution 载荷经 _validated_resolution 规范化：decision 与结构化
+    答案全量转发（R3-1——cancel 不得被改写成 submit，answers/values/
+    selected_options 不得丢）。
 
     Raises _ResolveRejected（结构化 code）。"""
     from engine.community.api.transport.a2a.engine_bridge import _chat_plugin
@@ -734,7 +790,12 @@ async def _forward_resolve(*, session_key: str,
     elif kind in ("ask_user", None):
         coro = chat.resolve_interaction(
             session_key=session_key, interaction_id=interaction_id,
-            response=resolution.get("answer") or resolution.get("message"))
+            decision=decision,
+            answer=resolution.get("answer"),
+            message=resolution.get("message"),
+            answers=resolution.get("answers"),
+            values=resolution.get("values"),
+            selected_options=resolution.get("selected_options"))
     elif kind == "mode_switch":
         coro = chat.resolve_mode_transition(
             session_key=session_key, interaction_id=interaction_id,
@@ -763,9 +824,10 @@ async def _resolve_interaction(params: dict[str, Any], req_id: Any,
     interaction_id = params.get("interactionId")
     if not isinstance(interaction_id, str) or not interaction_id:
         raise _ParamError("interactionId is required (string)")
-    resolution = params.get("resolution")
-    if not isinstance(resolution, dict) or not resolution.get("decision"):
+    raw_resolution = params.get("resolution")
+    if not isinstance(raw_resolution, dict):
         raise _ParamError("resolution.decision is required")
+    resolution = _validated_resolution(raw_resolution)
 
     located = _kernel.interaction_run(interaction_id)
     if located is None or located[1].state in wire.TERMINAL_STATES:

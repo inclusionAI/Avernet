@@ -195,11 +195,43 @@ async def test_resolve_interaction_uses_interaction_resolve_submit():
     c.set_response("interaction.resolve", (_ok({}), []))
     impl, _ = _impl(c)
     out = await impl.resolve_interaction(
-        session_key="s", interaction_id="int:r1", response="answer")
+        session_key="s", interaction_id="int:r1", decision="submit",
+        answer="answer")
     assert out["success"] is True
     method, _, kw = c.calls[-1]
-    assert kw["params"]["action"] == "submit"
-    assert kw["params"]["message"] == "answer"
+    assert kw["params"]["decision"] == "submit", kw["params"]
+    assert kw["params"]["answer"] == "answer", kw["params"]
+
+
+async def test_resolve_interaction_cancel_is_forwarded_verbatim():
+    """R3-1：取消决策逐字上 wire——绝不得改写成 submit。"""
+    c = _FakeRelayClient()
+    c.set_response("interaction.resolve", (_ok({}), []))
+    impl, _ = _impl(c)
+    out = await impl.resolve_interaction(
+        session_key="s", interaction_id="int:r1", decision="cancel")
+    assert out["success"] is True
+    _, _, kw = c.calls[-1]
+    assert kw["params"]["decision"] == "cancel", kw["params"]
+    assert "answer" not in kw["params"]
+
+
+async def test_resolve_interaction_structured_answers_wire_encoding():
+    """R3-1：answers/values 全量转发，selected_options 在本边界转
+    selectedOptions（内层 tuple 也要转 list——与 v3 builder 同构）。"""
+    c = _FakeRelayClient()
+    c.set_response("interaction.resolve", (_ok({}), []))
+    impl, _ = _impl(c)
+    out = await impl.resolve_interaction(
+        session_key="s", interaction_id="int:r1", decision="submit",
+        answers={"q1": "A"}, values={"v": "x"},
+        selected_options=[("o1", "o2")])
+    assert out["success"] is True
+    _, _, kw = c.calls[-1]
+    params = kw["params"]
+    assert params["answers"] == {"q1": "A"}
+    assert params["values"] == {"v": "x"}
+    assert params["selectedOptions"] == [["o1", "o2"]], params
 
 
 async def test_resolve_mode_transition_uses_mode_transition_resolve():

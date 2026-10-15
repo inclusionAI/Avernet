@@ -298,7 +298,12 @@ class ClaudeCodeChatAdapter(ChatService):
         self,
         session_key: str,
         interaction_id: str,
-        response: str | None = None,
+        decision: str = "submit",
+        answer: str | None = None,
+        message: str | None = None,
+        answers: dict[str, str] | None = None,
+        values: dict[str, Any] | None = None,
+        selected_options: list[list[str]] | None = None,
         auth: AuthContext | None = None,
     ) -> dict[str, Any]:
         """Resolve a pending AskUserQuestion interaction via the port."""
@@ -306,7 +311,12 @@ class ClaudeCodeChatAdapter(ChatService):
         return await self._port.resolve_interaction(
             session_key=session_key,
             interaction_id=interaction_id,
-            response=response,
+            decision=decision,
+            answer=answer,
+            message=message,
+            answers=answers,
+            values=values,
+            selected_options=selected_options,
             token=token,
         )
 

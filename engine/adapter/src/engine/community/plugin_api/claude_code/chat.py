@@ -140,7 +140,12 @@ class ClaudeCodeChatPort(Protocol):
         self,
         session_key: str,
         interaction_id: str,
-        response: str | None = None,
+        decision: str = "submit",
+        answer: str | None = None,
+        message: str | None = None,
+        answers: dict[str, str] | None = None,
+        values: dict[str, Any] | None = None,
+        selected_options: list[list[str]] | None = None,
         token: str | None = None,
     ) -> dict[str, Any]:
         """Resolve a pending AskUserQuestion interaction via ``interaction.resolve``.
@@ -150,7 +155,14 @@ class ClaudeCodeChatPort(Protocol):
             interaction_id: The engine-issued identifier of the pending
                 interaction (gateway-generated, e.g. ``int:<uuid>``) — NOT
                 a run id.
-            response: The user's free-text answer (None for "no response").
+            decision: ``submit`` / ``cancel`` — forwarded verbatim; a cancel
+                must never be turned into a submit.
+            answer: The user's free-text answer (None for "no response").
+            message: Optional human rationale, forwarded alongside the answer.
+            answers: Structured multi-question answers (question → answer).
+            values: Structured form values.
+            selected_options: Multi-select choices (one string-list per
+                question); encoded on the wire as ``selectedOptions``.
             token: MCP token for per-token pool routing; None → default client.
 
         Returns:

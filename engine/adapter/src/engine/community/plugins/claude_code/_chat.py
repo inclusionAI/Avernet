@@ -200,20 +200,44 @@ class _ChatPortMixin:
         self,
         session_key: str,
         interaction_id: str,
-        response: str | None = None,
+        decision: str = "submit",
+        answer: str | None = None,
+        message: str | None = None,
+        answers: dict[str, str] | None = None,
+        values: dict[str, Any] | None = None,
+        selected_options: list[list[str]] | None = None,
         token: str | None = None,
     ) -> dict[str, Any]:
-        """Resolve a pending AskUserQuestion via ``interaction.resolve`` (submit).
+        """Resolve a pending AskUserQuestion via ``interaction.resolve``.
+
+        Wire shape mirrors the v3 builder (``build_interaction_resolve_request``):
+
+        - ``decision`` — ``submit`` / ``cancel``. A cancel is forwarded as a
+          cancel; it must never be laundered into a "submit" action.
+        - ``answer`` / ``message`` — free-text reply (``answer`` is the
+          payload the gateway surfaces to the SDK resume).
+        - ``answers`` / ``values`` — structured multi-question maps.
+        - ``selected_options`` — multi-select choices; converted at this
+          boundary to the wire key ``selectedOptions`` (list of string
+          lists).
 
         ``interaction_id`` — see ``resolve_exec_approval``: the pending
         interaction's own identifier, never a run id.
         """
         params: dict[str, Any] = {
             "interactionId": interaction_id,
-            "action": "submit",
+            "decision": decision,
         }
-        if response is not None:
-            params["message"] = response
+        if answer is not None:
+            params["answer"] = answer
+        if message is not None:
+            params["message"] = message
+        if answers is not None:
+            params["answers"] = answers
+        if values is not None:
+            params["values"] = values
+        if selected_options is not None:
+            params["selectedOptions"] = [list(o) for o in selected_options]
         return await self._resolve_with_events(
             "interaction.resolve", params, "interaction.resolved")
 
