@@ -30,7 +30,7 @@ import { useCreateGroupSessionFlow } from './useCreateGroupSessionFlow';
 
 export function useCollaborationSquare(resource: SquareResource) {
   const store = useCollaborationSquareStore();
-  const { humanIdentityStatus, humanBotContext, viewer, activeActor } = useCollaborationSquareActorContext(
+  const { humanIdentityStatus, humanBotContext, viewer, activeActor, activeActorName } = useCollaborationSquareActorContext(
     resource,
     store.reset,
   );
@@ -205,6 +205,7 @@ export function useCollaborationSquare(resource: SquareResource) {
   return {
     ...store,
     activeActor,
+    activeActorName,
     visibleBots,
     visibleGroups,
     selectedGroup,

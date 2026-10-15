@@ -254,6 +254,8 @@ export interface SquareDeepLink {
  * 由公共展示组件 {@link PublicBotCatalogPanel} 消费。
  */
 export interface BotCatalogViewModel {
+  /** 当前申请身份的展示名称，仅用于确认提示。 */
+  activeActorName?: string;
   activeActor: FriendRequestActor | null;
   bots: PublicBot[];
   busyKeys: string[];
