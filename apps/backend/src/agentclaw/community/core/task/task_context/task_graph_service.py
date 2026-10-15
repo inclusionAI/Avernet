@@ -667,10 +667,18 @@ class TaskGraphService:
                     raise TaskStateError(
                         f"run_mode={requested_mode} is not allowed by frozen runtime profile"
                     )
+                single_bot_group_transport = (
+                    relay_mode
+                    and node.run_info.run_mode == "single_bot"
+                    and requested_mode == "coop_group"
+                    and patch.extend_props_patch is not None
+                    and patch.extend_props_patch.get("actual_run_mode") == "single_bot"
+                )
                 if (
                     relay_mode
                     and node.run_info.extend_props.get("relay_token")
                     and requested_mode != node.run_info.run_mode
+                    and not single_bot_group_transport
                 ):
                     node.run_info.extend_props["relay_token"] = uuid.uuid4().hex
                 node.run_info.run_mode = requested_mode

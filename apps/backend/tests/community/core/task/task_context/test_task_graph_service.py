@@ -334,6 +334,42 @@ class TestUpdateTaskNodeInfo:
         assert node.run_info.run_mode == "single_bot"
         assert node.run_info.assignee == "bot1"
 
+    def test_relay_single_bot_group_transport_keeps_execution_generation(
+        self, svc: TaskGraphService, graph
+    ):
+        graph.extend_props["execution_config"] = {"orchestration_mode": "relay"}
+        node = svc._get_node(graph, "t1")
+        node.run_info.run_mode = "single_bot"
+        node.run_info.assignee = "bot-manager"
+        node.run_info.extend_props["relay_token"] = "generation-1"
+
+        svc.update_task_node_info(
+            _patch(
+                "t1",
+                "t1",
+                run_mode="coop_group",
+                extend_props_patch={"actual_run_mode": "single_bot"},
+            )
+        )
+
+        assert node.run_info.run_mode == "coop_group"
+        assert node.run_info.extend_props["actual_run_mode"] == "single_bot"
+        assert node.run_info.extend_props["relay_token"] == "generation-1"
+
+    def test_relay_business_run_mode_change_rotates_execution_generation(
+        self, svc: TaskGraphService, graph
+    ):
+        graph.extend_props["execution_config"] = {"orchestration_mode": "relay"}
+        node = svc._get_node(graph, "t1")
+        node.run_info.run_mode = "single_bot"
+        node.run_info.extend_props["relay_token"] = "generation-1"
+
+        svc.update_task_node_info(
+            _patch("t1", "t1", run_mode="coop_group")
+        )
+
+        assert node.run_info.extend_props["relay_token"] != "generation-1"
+
     def test_status_direct_reset_harness(self, svc: TaskGraphService, graph):
         svc.add_task_nodes([_node("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))

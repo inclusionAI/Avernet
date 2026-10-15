@@ -180,6 +180,34 @@ def test_delivery_intent_claim_is_exclusive_and_recoverable() -> None:
         assert session.query(TaskDeliveryIntentModel).one().attempt == 2
 
 
+def test_single_bot_group_transport_preserves_active_delivery_lease() -> None:
+    db, graph_service, repo, task_info, result = _setup()
+    graph_service.initialize_intake_graph(task_info, result.session_id)
+    node_id, relay_token = _plan_successor(graph_service)
+    state, lease_token = repo.claim_delivery_intent("task-1", node_id, relay_token)
+    assert state == "CLAIMED" and lease_token
+
+    graph_service.update_task_node_info(TaskNodePatch(
+        task_id="task-1",
+        node_id=node_id,
+        run_mode="coop_group",
+        extend_props_patch={"actual_run_mode": "single_bot"},
+    ))
+
+    node = next(
+        item for item in graph_service.query_task_dashboard("task-1").tasks
+        if item.node_id == node_id
+    )
+    assert node.run_info.extend_props["relay_token"] == relay_token
+    assert repo.claim_delivery_intent("task-1", node_id, relay_token)[0] == "DELIVERING"
+    repo.mark_delivery_intent(
+        "task-1", node_id, lease_token, delivered=True,
+    )
+    assert repo.claim_delivery_intent("task-1", node_id, relay_token) == (
+        "DELIVERED", None,
+    )
+
+
 def test_retry_reopens_same_node_delivery_with_new_generation() -> None:
     db, graph_service, repo, task_info, result = _setup()
     graph_service.initialize_intake_graph(task_info, result.session_id)
