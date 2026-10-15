@@ -28,10 +28,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import re
 import threading
 import time
-import types
 from contextlib import contextmanager
 
 import pytest
@@ -234,24 +232,36 @@ def _finish_decision(answer: str) -> str:
 
 
 class _ScriptedEngineWs:
-    """Fake engine websocket: captures the chat.send frame (message +
-    sessionKey), answers with the scripted reply. The adapter's real frame
-    protocol drives it exactly as it drives a live container."""
+    """Fake engine websocket: captures every frame the platform sends
+    (sessions.reset and chat.send carry the conversation the leg served),
+    answering each request with the live engine's own script — the
+    reset's res, the send's ack res, then the final chat event with the
+    scripted reply. The adapter's real frame protocol drives it exactly
+    as it drives a live container."""
 
     def __init__(self, reply: str):
         self.reply = reply
         self.sent_frames: list[dict] = []
         self.closed = False
+        self._answers: list[dict] = []
 
     async def send(self, raw):
-        self.sent_frames.append(json.loads(raw))
-
-    async def recv(self):
-        if self.sent_frames and self.sent_frames[-1].get("method") == "chat.send":
-            request_id = self.sent_frames[-1]["id"]
-            return json.dumps({
-                "type": "event",
-                "event": "chat",
+        frame = json.loads(raw)
+        self.sent_frames.append(frame)
+        method = frame.get("method")
+        request_id = frame.get("id")
+        if method == "sessions.reset":
+            self._answers.append({
+                "type": "res", "id": request_id, "ok": True,
+                "payload": {"ok": True, "key": frame["params"]["key"]},
+            })
+        elif method == "chat.send":
+            self._answers.append({
+                "type": "res", "id": request_id, "ok": True,
+                "payload": {"accepted": True},
+            })
+            self._answers.append({
+                "type": "event", "event": "chat",
                 "payload": {
                     "state": "final",
                     "message": {"content": [
@@ -260,7 +270,10 @@ class _ScriptedEngineWs:
                     "id": request_id,
                 },
             })
-        raise AssertionError("unexpected recv before any chat.send")
+
+    async def recv(self):
+        assert self._answers, "unexpected recv with no request to answer"
+        return json.dumps(self._answers.pop(0))
 
     async def close(self):
         self.closed = True
@@ -530,17 +543,17 @@ class TestAvernetKindEndToEnd:
         assert report.trigger == CREATE_ON_CONTAINER_TRIGGER
         assert report.status is ApplyStatus.SUCCEEDED
 
-        # The chat leg: one round, the message the orchestrator spawned,
-        # the run's owner, and the per-attempt engine session (D-I) — the
-        # sessionKey derives from the persisted agent id, so a respawned
-        # turn of this run would open a different conversation.
-        (chat_frame,) = [f for f in ws.sent_frames
-                         if f.get("method") == "chat.send"]
+        # The chat leg: one round per leg — the reset of the engine-served
+        # session first, then the message the orchestrator spawned, on the
+        # same key, to the run's owner. The swarm passes no session key,
+        # so both frames address the engine-served default conversation,
+        # and the reset is what makes each leg fresh.
+        assert [f["method"] for f in ws.sent_frames] == [
+            "sessions.reset", "chat.send",
+        ]
+        reset_frame, chat_frame = ws.sent_frames
         assert "survey the incident" in chat_frame["params"]["message"]
         assert endpoints == [(expected_id, OWNER)]
-        spawned_agent = agents[0].agent_id
-        session_key = chat_frame["params"]["sessionKey"]
-        assert re.fullmatch(f"agent:{spawned_agent}:attempt:\\d+",
-                            session_key), session_key
-        assert session_key != "agent:main:default"
+        assert reset_frame["params"]["key"] == "agent:main:default"
+        assert chat_frame["params"]["sessionKey"] == "agent:main:default"
         assert ws.closed

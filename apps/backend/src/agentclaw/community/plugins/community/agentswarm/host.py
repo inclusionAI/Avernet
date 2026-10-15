@@ -23,8 +23,14 @@ bind-agentswarm-host-bot-platform):
 - chat drives the engine transport directly: the chat endpoint comes from
   the canonical BaaS ws-info (``BaasService.get_ws_info_by_bot_uuid`` — the
   same resolution every other chat surface uses), and the adapter's
-  engine frames (``connect`` handshake + ``chat.send`` accumulate) are
-  spoken in-process. The async-in engine leg runs on the calling thread's
+  engine frames (``connect`` handshake, one fail-soft ``sessions.reset``
+  of the conversation the upcoming chat.send addresses — the engine's
+  blessed fresh-conversation mechanism, since the engine serves only the
+  sessions it knows and never auto-creates a chat on a novel key — then
+  ``chat.send`` accumulate) are spoken in-process. A refused chat.send (the
+  engine answers the outstanding request with ok false or accepted false)
+  raises immediately instead of waiting out the whole receive deadline.
+  The async-in engine leg runs on the calling thread's
   own loop: the swarm's subagent drives the sync ``chat`` entry point
   from the module-scoped bounded chat bridge
   (``chat_bridge_executor()``) so one pod never holds more than
@@ -114,6 +120,14 @@ _CHAT_TIMEOUT_SECONDS = 300.0
 # slice, so a chat cancelled from the asyncio side unwinds within one
 # slice of the set() rather than after the full remaining deadline.
 _RECV_SLICE_SECONDS = 1.0
+
+# Upper bound on one sessions.reset round (send + consuming its res),
+# the fresh-conversation prelude before every chat.send. The reset is
+# deliberately fail-soft: a slow or broken answer only warns — a
+# reset that never completes must not hold the chat leg (or its bridge
+# worker) hostage; the receive slices inside keep it cooperative with
+# the shared cancel event just like the chat loop.
+_SESSION_RESET_SECONDS = 10.0
 _HASHED_IDEMPOTENCY_ID_DIGITS = 16
 
 # One worker per concurrent engine chat the pod may carry: the default for
@@ -128,8 +142,11 @@ _ENGINE_WS_PORT = 20003
 _ENGINE_WS_PATH = "/api/openclaw/ws"
 _ZERO_CHECK_OPEN_API_TOKEN = "OPEN_API:app:agentswarm"
 
-# Conversation addressing for a chat whose caller did not derive one: the
-# historical fixed session, kept for outside/default callers.
+# Conversation addressing for a chat whose caller carries none: the
+# engine-served fixed session. The engine only serves sessions it knows
+# (a chat.send on a novel key is refused with no events), so the
+# reset-before-chat prelude resets this same key — the engine's blessed
+# fresh-conversation mechanism — instead of minting per-attempt keys.
 _DEFAULT_SESSION_KEY = "agent:main:default"
 
 # Module-scoped chat bridge (async-run-and-resume D-B): one bounded pool
@@ -477,10 +494,83 @@ class AvernetBotPlatform(BotPlatform):
         ws_url, token = self._engine_endpoint(bot_id, owner)
         ws = await self._connect_engine(ws_url, token)
         try:
+            # Reset-before-chat: the upcoming chat.send addresses one
+            # session key, and the engine's blessed fresh-conversation
+            # mechanism is sessions.reset on that key — a retried or
+            # respawned leg must not inherit the orphaned turn's history.
+            # Fail-soft inside: a failed reset only warns and the chat
+            # proceeds.
+            await self._reset_session(
+                ws, session_key or _DEFAULT_SESSION_KEY, cancel_event)
             return await self._chat_send(
                 ws, message, token, session_key, cancel_event)
         finally:
             await ws.close()
+
+    async def _reset_session(self, ws, session_key: str,
+                             cancel_event: threading.Event | None) -> None:
+        """One fail-soft ``sessions.reset`` round for the conversation the
+        upcoming chat.send will address. The whole round trip is bounded
+        (``asyncio.wait_for`` over ``_SESSION_RESET_SECONDS``); on timeout,
+        transport error, or a refused reset the reset is abandoned with a
+        warning and the chat proceeds — prior-turn context may be
+        inherited, which is an answer quality risk, never a liveness one.
+        A cancelled chat unwinds the round quietly: its caller stopped
+        waiting, so there is nothing left to reset for."""
+        reset_id = str(uuid.uuid4())
+        reset_frame = {
+            "type": "req",
+            "id": reset_id,
+            "method": "sessions.reset",
+            "params": {
+                "key": session_key,
+                "x-iam-token": _ZERO_CHECK_OPEN_API_TOKEN,
+            },
+        }
+        try:
+            await asyncio.wait_for(
+                self._reset_session_round(ws, reset_frame, reset_id,
+                                          cancel_event),
+                timeout=_SESSION_RESET_SECONDS,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "[agentswarm][host-platform] session reset failed; chat "
+                "proceeds, prior-turn context may be inherited "
+                "(session=%s): %s", session_key, exc,
+            )
+
+    async def _reset_session_round(self, ws, reset_frame: dict,
+                                   reset_id: str,
+                                   cancel_event: threading.Event | None
+                                   ) -> None:
+        """Send one sessions.reset frame and consume its res. The recv
+        wait runs in the chat's receive slices so a cancelled chat unwinds
+        the reset within one slice; frames that are not this reset's res
+        (stale events, unrelated responses) are ignored until it lands or
+        the outer bound fires."""
+        await ws.send(json.dumps(reset_frame))
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                return
+            try:
+                raw = await asyncio.wait_for(
+                    ws.recv(), timeout=_RECV_SLICE_SECONDS)
+            except asyncio.TimeoutError:
+                continue
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if data.get("type") != "res" or data.get("id") != reset_id:
+                continue
+            if not data.get("ok", False):
+                payload = data.get("payload")
+                raise RuntimeError(
+                    f"engine refused the reset: {payload!r}")
+            return
 
     async def _connect_engine(self, ws_url: str, token: str):
         import websockets
@@ -550,16 +640,20 @@ class AvernetBotPlatform(BotPlatform):
         """One chat.send round: the adapter's zero-check gate requires an
         x-iam-token on every frame. OPEN_API:<kind>:<app> is the form it
         accepts for machine callers (no certified token; the check fails
-        open on its own infrastructure errors). ``session_key`` addresses a
-        per-attempt engine conversation — the historical fixed session only
-        when this call carries none."""
+        open on its own infrastructure errors). ``session_key`` names a
+        known engine conversation — the engine-served default when this
+        call carries none; a refuse answer (ok false or accepted false)
+        comes back as the res for the outstanding request id and fails the
+        leg immediately instead of eating the receive deadline (the live
+        engine never events a refused send)."""
         request_id = str(uuid.uuid4())
+        chat_session_key = session_key or _DEFAULT_SESSION_KEY
         request_frame = {
             "type": "req",
             "id": request_id,
             "method": "chat.send",
             "params": {
-                "sessionKey": session_key or _DEFAULT_SESSION_KEY,
+                "sessionKey": chat_session_key,
                 "message": message,
                 "deliver": False,
                 "idempotencyKey": request_id,
@@ -596,6 +690,23 @@ class AvernetBotPlatform(BotPlatform):
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:
+                continue
+            if data.get("type") == "res" and data.get("id") == request_id:
+                # The res for this very chat.send: a healthy send answers
+                # ok/accepted true (the ack before the events); ok false
+                # or accepted false is the engine's refusal, and no
+                # events follow — fail now, not at the deadline. Other res
+                # frames (late answers to earlier requests, say) keep
+                # being ignored.
+                payload = data.get("payload")
+                if (not data.get("ok", False)
+                        or (isinstance(payload, dict)
+                            and payload.get("accepted") is False)):
+                    detail = raw if len(raw) <= 300 else raw[:297] + "..."
+                    raise RuntimeError(
+                        f"[host-platform][chat] engine refused chat.send "
+                        f"for session {chat_session_key}: {detail}"
+                    )
                 continue
             if data.get("type") != "event" or data.get("event") != "chat":
                 continue

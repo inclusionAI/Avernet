@@ -13,11 +13,12 @@ host's module-scoped bounded bridge + ``asyncio.futures.wrap_future``). A
 cancelled chat hands its bridge worker a shared ``threading.Event`` — the
 engine recv loop checks it between receive slices — so in-flight engine
 rounds unwind cooperatively and the worker returns to the pool instead of
-being abandoned. Each construction derives a fresh engine conversation
-serial (``agent:{agent_id}:attempt:{serial}``), so a re-executed turn
-(plain retry or post-crash respawn) never inherits the orphaned turn's
-history (D-I; ``resumeEnabled``/``chat.resume`` is the documented follow-up
-for mid-turn survival, explicitly not implemented here).
+being abandoned. The chat call carries no ``session_key`` — the platform
+addresses the engine-served conversation and resets it per leg (host.py's
+reset-before-chat), so a re-executed turn (plain retry or post-crash
+respawn) never inherits the orphaned turn's history (``resumeEnabled``/
+``chat.resume`` remains the documented follow-up for mid-turn survival,
+explicitly not implemented here).
 """
 from __future__ import annotations
 
@@ -52,32 +53,12 @@ _CREATE_CALL_TIMEOUT_SECONDS = 120.0
 _STATUS_CALL_TIMEOUT_SECONDS = 30.0
 _DELETE_CALL_TIMEOUT_SECONDS = 60.0
 
-# Engine conversation serials (async-run-and-resume D-I): one serial per
-# subagent construction. The pool constructs a fresh subagent per attempt,
-# so within one pod retries advance the serial by one; a respawn on any
-# pod reads a fresh boot-generation prefix, so a re-executed turn never
-# lands in the crashed turn's engine session. The serial is opaque to the
-# engine — freshness, not count readability, is the contract.
-_BOOT_GENERATION_MS = time.time_ns() // 1_000_000
-_SERIAL_SCALE = 1_000_000
-_SESSION_SERIALS: dict[tuple[str, str], int] = {}
-_SESSION_SERIALS_LOCK = threading.Lock()
-
-
-def _next_session_serial(run_id: str, agent_id: str) -> int:
-    key = (str(run_id), str(agent_id))
-    with _SESSION_SERIALS_LOCK:
-        index = _SESSION_SERIALS.get(key, 0) + 1
-        _SESSION_SERIALS[key] = index
-    return _BOOT_GENERATION_MS * _SERIAL_SCALE + index
-
 
 class AvernetSubagent:
 
     def __init__(self, spec: AgentSpec, run: Run,
                  platform: BotPlatform,
                  agent_id: AgentId, *,
-                 attempt: int | None = None,
                  create_call_timeout: float = _CREATE_CALL_TIMEOUT_SECONDS,
                  status_call_timeout: float = _STATUS_CALL_TIMEOUT_SECONDS,
                  delete_call_timeout: float = _DELETE_CALL_TIMEOUT_SECONDS,
@@ -88,13 +69,6 @@ class AvernetSubagent:
         self._agent_id = agent_id
         self._bot_id: str | None = None
         self.name = spec.name
-        # The engine conversation this subagent's chat belongs to. Default
-        # None derives the next serial at construction; an explicit ``attempt``
-        # (tests, a future factory widening) is used verbatim.
-        self._session_attempt = (
-            attempt if attempt is not None
-            else _next_session_serial(run.run_id, agent_id)
-        )
         self._create_call_timeout = create_call_timeout
         self._status_call_timeout = status_call_timeout
         self._delete_call_timeout = delete_call_timeout
@@ -144,18 +118,16 @@ class AvernetSubagent:
         if self._bot_id is None:
             raise RuntimeError("setup not completed")
         prompt = f"objective={envelope.objective!r} boundaries={envelope.boundaries!r}"
-        # The engine session is per-attempt (D-I): a retried or respawned
-        # turn opens a fresh conversation instead of continuing the orphaned
-        # turn's history.
-        session_key = (
-            f"agent:{self._agent_id}:attempt:{self._session_attempt}")
+        # No session_key crosses the seam: the platform addresses the
+        # engine-served conversation and resets it per leg (host.py), so a
+        # retried or respawned turn opens a fresh conversation instead of
+        # continuing the orphaned turn's history.
         cancel = threading.Event()
         self._register_active_chat(cancel)
         leg = functools.partial(
             self._platform.chat,
             bot_id=self._bot_id, message=prompt,
             owner_id=self._run.owner_id,
-            session_key=session_key,
             cancel_event=cancel,
         )
         # Chat rides the module-scoped bounded bridge (host.py), not the raw

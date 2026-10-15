@@ -1,4 +1,4 @@
-"""Cancellable chat bridge + per-attempt engine session tests
+"""Cancellable chat bridge + engine session addressing tests
 (async-run-and-resume 2.4/2.5).
 
 The bridge under test is the production wiring: ``AvernetSubagent.run_task``
@@ -9,16 +9,16 @@ asyncio wrapper only cancels PENDING work; a RUNNING thread exits
 cooperatively through the event (recv slices in production, the event wait
 in these fakes) — that is what makes the thread-leak bound real.
 
-Per-attempt session keys (D-I): every construction derives a fresh engine
-conversation serial, so retried and respawned turns never share a session
-and a respawned turn's shard reflects only the respawned result.
+Session addressing: the swarm passes no ``session_key`` at all — the live
+engine only serves the conversations it knows and never auto-creates a
+chat on a novel key, so per-leg freshness moved into the platform (host.py
+resets the engine-served session before every chat.send). What crosses
+the bridge is just the cancel registry and the default conversation.
 """
 from __future__ import annotations
 
 import asyncio
 import json
-import re
-import threading
 import time
 
 import pytest
@@ -295,12 +295,15 @@ class TestSlowLegsLoopLiveness:
 
 
 class _SessionModelPlatform:
-    """Mock platform modelling per-session engine conversations: every
-    chat appends to the session's history and answers with what that
-    session has seen — so a stale session would show up in the reply."""
+    """Recording platform modelling the session the engine serves: every
+    chat appends to the session its caller addressed and answers with what
+    that session has seen. The swarm now addresses nothing — the key the
+    platform records for every leg is None, and fresh context is the
+    platform's own reset-before-chat, not caller-derived addressing."""
 
     def __init__(self):
-        self.sessions: dict[str, list[str]] = {}
+        self.sessions: dict[str | None, list[str]] = {}
+        self.session_keys: list[str | None] = []
 
     def create_bot(self, *, spec, idempotency_key, owner_id=""):
         return "bot-42"
@@ -313,61 +316,33 @@ class _SessionModelPlatform:
 
     def chat(self, bot_id, message, owner_id="", session_key=None,
              cancel_event=None):
+        self.session_keys.append(session_key)
         history = self.sessions.setdefault(session_key, [])
         history.append(message)
         return json.dumps({"history": history})
 
 
-class TestPerAttemptSessionKey:
+class TestSessionAddressing:
 
-    def test_retry_and_respawn_attempts_never_share_a_session(self):
+    def test_retry_attempts_pass_no_session_key(self):
+        # The per-attempt key derivation is gone from the caller: a retried
+        # or respawned turn never mints a novel key the live engine would
+        # refuse — every leg addresses the platform's own conversation and
+        # relies on its per-leg reset (host.py) for fresh context.
         platform = _SessionModelPlatform()
 
         async def main():
-            for objective in ("first", "second", "third"):
+            for _ in range(3):
                 sub = _ready_subagent(platform)
-                await sub.run_task(_mk_envelope(objective=objective))
-
-        asyncio.run(main())
-        session_keys = list(platform.sessions)
-        assert all(
-            re.fullmatch(r"agent:agent-1:attempt:\d+", k)
-            for k in session_keys), session_keys
-        assert len(set(session_keys)) == 3, (
-            "re-executed turns must open fresh engine sessions")
-
-    def test_respawned_turn_shard_reflects_only_the_respawned_result(self):
-        platform = _SessionModelPlatform()
-
-        async def main():
-            first = _ready_subagent(platform)
-            await first.run_task(_mk_envelope(objective="orphaned turn"))
-            # Pod crash: the first subagent and its in-flight turn are lost;
-            # the engine session it opened keeps the orphaned history.
-            del first
-
-            respawn = _ready_subagent(platform)
-            return await respawn.run_task(
-                _mk_envelope(objective="RESPAWNED turn"))
-
-        result = asyncio.run(main())
-        assert result.output["history"] == [
-            "objective='RESPAWNED turn' boundaries='stay read-only'"
-        ], "the respawned shard inherited the orphaned turn's history"
-        session_keys = list(platform.sessions)
-        assert len(session_keys) == 2 and session_keys[0] != session_keys[1]
-
-    def test_explicit_attempts_map_one_to_one_onto_sessions(self):
-        platform = _SessionModelPlatform()
-
-        async def main():
-            for attempt in (1, 2, 3):
-                sub = _ready_subagent(platform, attempt=attempt)
                 await sub.run_task(_mk_envelope())
 
         asyncio.run(main())
-        assert [k for k in platform.sessions] == [
-            "agent:agent-1:attempt:1",
-            "agent:agent-1:attempt:2",
-            "agent:agent-1:attempt:3",
-        ]
+        assert list(platform.sessions) == [None]
+        assert platform.session_keys == [None, None, None]
+
+    def test_the_attempt_session_machinery_is_gone(self):
+        # The removal is surgical, not a parked-off flag: reaching for the
+        # old per-attempt widening fails loudly instead of silently
+        # minting novel engine keys again.
+        with pytest.raises(TypeError):
+            _ready_subagent(_SessionModelPlatform(), attempt=7)

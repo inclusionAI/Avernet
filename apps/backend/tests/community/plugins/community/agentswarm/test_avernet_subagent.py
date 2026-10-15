@@ -13,7 +13,6 @@ through asyncio.run, hand-written fakes (no MagicMock).
 from __future__ import annotations
 
 import asyncio
-import re
 import threading
 import time
 
@@ -302,30 +301,33 @@ class TestRunTask:
 
         asyncio.run(main())
 
-    def test_run_task_chats_under_a_per_attempt_session_key(self):
-        # The engine conversation is addressed per attempt (D-I): the key
-        # derives from the subagent's agent identity plus its attempt
-        # serial, so re-executed turns never share a session.
+    def test_run_task_passes_no_session_key(self):
+        # The chat call carries no ``session_key``: the platform addresses
+        # the engine-served conversation and resets it per leg (host.py),
+        # so attempts never mint novel keys the live engine would refuse.
+        # The cancel event still crosses the seam for cooperative unwind.
         async def main():
             gw = FakePlatform()
             sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID)
             await sub.setup()
             await sub.run_task(_mk_envelope())
-            (key,) = gw.session_keys
-            assert re.fullmatch(
-                r"agent:agent-1:attempt:\d+", str(key)), key
+            assert gw.session_keys == [None]
             assert gw.cancel_events[0] is not None
 
         asyncio.run(main())
 
-    def test_explicit_attempt_is_used_verbatim_in_the_session_key(self):
+    def test_retried_attempts_keep_passing_no_session_key(self):
+        # Freshness is per construction on the platform side (its
+        # reset-before-chat), not a caller-derived conversation id: every
+        # attempt of every construction passes exactly no session key.
         async def main():
             gw = FakePlatform()
-            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID,
-                                  attempt=7)
-            await sub.setup()
-            await sub.run_task(_mk_envelope())
-            assert gw.session_keys == ["agent:agent-1:attempt:7"]
+            for _ in range(3):
+                sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID)
+                await sub.setup()
+                sub._bot_id = "bot-42"
+                await sub.run_task(_mk_envelope())
+            assert gw.session_keys == [None, None, None]
 
         asyncio.run(main())
 

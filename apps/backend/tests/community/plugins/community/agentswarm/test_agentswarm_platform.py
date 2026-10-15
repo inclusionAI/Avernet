@@ -7,8 +7,12 @@ attribute patch is exactly what the call sees). The status table is pinned
 branch for branch against the narrow mapping's documented vocabulary; the
 chat leg exercises the real frame protocol over a scripted engine websocket
 (``_patch_engine_routes`` swaps only the two container-provided edges —
-endpoint resolution and the ws handshake), including the per-attempt
-sessionKey addressing and the cooperative-cancel receive slices.
+endpoint resolution and the ws handshake): the fail-soft sessions.reset
+prelude on the very key the upcoming chat.send addresses (the engine's
+blessed fresh-conversation mechanism), the default/verbatim sessionKey
+addressing, the fail-fast refusal answer (ok false / accepted false) that
+frees a leg immediately instead of eating the receive deadline, and the
+cooperative-cancel receive slices.
 """
 from __future__ import annotations
 
@@ -98,34 +102,77 @@ class _Baas:
 
 
 class _ScriptedEngineWs:
-    """Fake engine websocket speaking the adapter's frame protocol: captures
-    every chat.send request (its sessionKey + message), then answers with a
-    scripted final event. ``recv`` optionally stalls, faking a hung engine."""
+    """Fake engine websocket speaking the adapter's frame protocol between
+    the (patched-away) handshake and close. Every frame the platform sends
+    is recorded, and each request is answered scriptedly one frame at a
+    time, mirroring the live engine's observed answers:
 
-    def __init__(self, reply="final answer", stall_seconds=0.0):
+    - ``sessions.reset`` gets its res (ok, or the refusal when scripted);
+    - ``chat.send`` gets the ok/accepted ack res and then the final chat
+      event — or, when scripted, only the refused res (ok false, accepted
+      false, no events following: exactly the live refusal trace).
+
+    ``recv`` optionally stalls first, faking a hung engine; it also hangs
+    when a scripted request produced no answer at all (the reset that the
+    engine never answers)."""
+
+    def __init__(self, reply="final answer", stall_seconds=0.0,
+                 refuse_chat=False, refuse_reset=False,
+                 reset_goes_silent=False):
         self.reply = reply
         self.stall_seconds = stall_seconds
+        self.refuse_chat = refuse_chat
+        self.refuse_reset = refuse_reset
+        self.reset_goes_silent = reset_goes_silent
         self.sent_frames: list[dict] = []
         self.closed = False
+        self._answers: list[dict] = []
+
+    def _on_frame(self, frame: dict) -> None:
+        method = frame.get("method")
+        request_id = frame.get("id")
+        if method == "sessions.reset":
+            if self.reset_goes_silent:
+                return
+            ok = not self.refuse_reset
+            self._answers.append({
+                "type": "res", "id": request_id, "ok": ok,
+                "payload": {"ok": ok, "key": frame["params"]["key"]},
+            })
+        elif method == "chat.send":
+            if self.refuse_chat:
+                self._answers.append({
+                    "type": "res", "id": request_id, "ok": False,
+                    "payload": {"accepted": False, "cached": None},
+                })
+                return
+            self._answers.append({
+                "type": "res", "id": request_id, "ok": True,
+                "payload": {"accepted": True},
+            })
+            self._answers.append({
+                "type": "event", "event": "chat",
+                "payload": {
+                    "state": "final",
+                    "message": {"content": [
+                        {"type": "text", "text": self.reply},
+                    ]},
+                    "id": request_id,
+                },
+            })
 
     async def send(self, raw):
         frame = json.loads(raw)
         self.sent_frames.append(frame)
+        self._on_frame(frame)
 
     async def recv(self):
         if self.stall_seconds:
             await asyncio.sleep(self.stall_seconds)
-        message = (self.sent_frames and self.sent_frames[-1]) or {}
-        request_id = str(message.get("id") or "req")
-        return json.dumps({
-            "type": "event",
-            "event": "chat",
-            "payload": {
-                "state": "final",
-                "message": {"content": [{"type": "text", "text": self.reply}]},
-                "id": request_id,
-            },
-        })
+        if not self._answers:
+            # nothing scripted to answer with: hang like a stuck engine
+            await asyncio.sleep(30.0)
+        return json.dumps(self._answers.pop(0))
 
     async def close(self):
         self.closed = True
@@ -376,30 +423,113 @@ class TestChat:
         platform = _mk()
         _patch_engine_routes(monkeypatch, ws)
         assert platform.chat("b1", "objective='y'") == "the answer is 42"
-        (frame,) = ws.sent_frames
-        assert frame["method"] == "chat.send"
-        assert frame["params"]["message"] == "objective='y'"
-        assert frame["params"]["x-iam-token"] == host_module._ZERO_CHECK_OPEN_API_TOKEN
+        assert [f["method"] for f in ws.sent_frames] == [
+            "sessions.reset", "chat.send",
+        ]
+        chat_frame = ws.sent_frames[-1]
+        assert chat_frame["params"]["message"] == "objective='y'"
+        assert chat_frame["params"]["x-iam-token"] == host_module._ZERO_CHECK_OPEN_API_TOKEN
         assert ws.closed
 
-    def test_default_caller_keeps_the_fixed_session_key(self, monkeypatch):
-        # A chat without a derived session keeps the historical address:
-        # outside/default callers are unaffected by D-I.
+    def test_sessions_reset_precedes_chat_send_on_the_default_key(
+            self, monkeypatch):
+        # A chat without an explicit key resets and then addresses the
+        # engine-served default session: the reset is the engine-blessed
+        # fresh-conversation mechanism, and it must run on the very key
+        # the upcoming chat.send uses, before that frame goes out.
         ws = _ScriptedEngineWs()
         platform = _mk()
         _patch_engine_routes(monkeypatch, ws)
         platform.chat("b1", "objective='x'")
-        (frame,) = ws.sent_frames
-        assert frame["params"]["sessionKey"] == "agent:main:default"
+        assert [f["method"] for f in ws.sent_frames] == [
+            "sessions.reset", "chat.send",
+        ]
+        reset_frame, chat_frame = ws.sent_frames
+        assert reset_frame["params"]["key"] == "agent:main:default"
+        assert chat_frame["params"]["sessionKey"] == "agent:main:default"
+        assert reset_frame["id"] != chat_frame["id"]
 
     def test_session_key_is_used_verbatim_when_provided(self, monkeypatch):
+        # The widened SPI parameter survives: an explicit caller with a
+        # known-good key gets both the reset and the send on that key.
         ws = _ScriptedEngineWs()
         platform = _mk()
         _patch_engine_routes(monkeypatch, ws)
         platform.chat("b1", "objective='x'",
                       session_key="agent:agent-9:attempt:4")
-        (frame,) = ws.sent_frames
-        assert frame["params"]["sessionKey"] == "agent:agent-9:attempt:4"
+        reset_frame, chat_frame = ws.sent_frames
+        assert reset_frame["params"]["key"] == "agent:agent-9:attempt:4"
+        assert chat_frame["params"]["sessionKey"] == "agent:agent-9:attempt:4"
+
+    def test_unanswered_session_reset_is_fail_soft_and_logged(
+            self, monkeypatch, caplog):
+        # A reset that never gets its res only warns (bounded by the
+        # reset wait) and the chat proceeds: context freshness is an
+        # answer-quality risk, never a liveness one.
+        ws = _ScriptedEngineWs(reset_goes_silent=True)
+        monkeypatch.setattr(host_module, "_SESSION_RESET_SECONDS", 0.1)
+        platform = _mk()
+        _patch_engine_routes(monkeypatch, ws)
+        with caplog.at_level(
+                "WARNING",
+                logger="agentclaw.community.plugins.community.agentswarm.host"):
+            assert platform.chat("b1", "objective='x'") == "final answer"
+        assert "session reset failed; chat proceeds" in caplog.text
+        assert "session=agent:main:default" in caplog.text
+        chat_frame = [f for f in ws.sent_frames
+                      if f.get("method") == "chat.send"]
+        assert len(chat_frame) == 1
+
+    def test_refused_session_reset_is_fail_soft_and_logged(
+            self, monkeypatch, caplog):
+        # A reset answered ok=false is an error, not a refusal of the
+        # chat: warn and continue to the send.
+        ws = _ScriptedEngineWs(refuse_reset=True)
+        platform = _mk()
+        _patch_engine_routes(monkeypatch, ws)
+        with caplog.at_level(
+                "WARNING",
+                logger="agentclaw.community.plugins.community.agentswarm.host"):
+            assert platform.chat("b1", "objective='x'") == "final answer"
+        assert "session reset failed; chat proceeds" in caplog.text
+
+    def test_refused_chat_send_raises_promptly(self, monkeypatch):
+        # The live refusal trace: the engine answers the outstanding
+        # chat.send with ok=false/accepted=false and then never events —
+        # the leg must raise right away with the session key and the
+        # abbreviated payload, not sit out the receive deadline.
+        ws = _ScriptedEngineWs(refuse_chat=True)
+        platform = _mk()
+        _patch_engine_routes(monkeypatch, ws)
+        started = time.monotonic()
+        with pytest.raises(RuntimeError, match="refused chat.send") as caught:
+            platform.chat("b1", "objective='x'")
+        elapsed = time.monotonic() - started
+        assert elapsed < host_module._CHAT_TIMEOUT_SECONDS / 10
+        message = str(caught.value)
+        assert "session agent:main:default" in message
+        assert '"accepted": false' in message
+        assert ws.sent_frames[-1]["method"] == "chat.send"
+
+    def test_non_matching_res_frames_do_not_fail_the_chat(
+            self, monkeypatch):
+        # Only the res that carries the outstanding request_id speaks for
+        # this chat: unrelated res frames keep flowing past the loop.
+        ws = _ScriptedEngineWs()
+        original_on_frame = ws._on_frame
+
+        def _on_frame_with_noise(frame):
+            original_on_frame(frame)
+            if frame.get("method") == "sessions.reset":
+                ws._answers.insert(0, {
+                    "type": "res", "id": "someone-elses-request",
+                    "ok": False, "payload": {"accepted": False},
+                })
+
+        ws._on_frame = _on_frame_with_noise
+        platform = _mk()
+        _patch_engine_routes(monkeypatch, ws)
+        assert platform.chat("b1", "objective='x'") == "final answer"
 
     def test_cancelled_event_unwinds_within_the_receive_slice(
             self, monkeypatch):
@@ -426,10 +556,13 @@ class TestChat:
     def test_stalled_engine_leg_raises_within_the_bound(
             self, monkeypatch):
         # A hung engine WebSocket must free the call with the typed error
-        # at the (patched-to-tiny) bound, not after the stall.
+        # at the (patched-to-tiny) bound, not after the stall — the
+        # reset prelude included: its own tiny bound abdicates first,
+        # fail-soft, and the deadline below still bounds the chat.
         ws = _ScriptedEngineWs(reply="never", stall_seconds=30.0)
         monkeypatch.setattr(host_module, "_CHAT_TIMEOUT_SECONDS", 0.05)
         monkeypatch.setattr(host_module, "_RECV_SLICE_SECONDS", 0.05)
+        monkeypatch.setattr(host_module, "_SESSION_RESET_SECONDS", 0.05)
         platform = _mk()
         platform._chat_timeout_seconds = host_module._CHAT_TIMEOUT_SECONDS
         _patch_engine_routes(monkeypatch, ws)
