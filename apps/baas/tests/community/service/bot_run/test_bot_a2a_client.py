@@ -566,7 +566,8 @@ def test_approval_resolved_keeps_interaction_identity():
 # ── R18-2: abort 不伪成功 ──
 
 def test_chat_abort_reports_unsupported_not_fake_success(stream_server):
-    """本地断流≠Engine 取消——不得报告 ok=True（R18-2 复现）。"""
+    """老引擎回归：card 不声明 cancel 能力（1c 之前/灰度期残留）——本地断流
+    ≠Engine 取消，不得报告 ok=True（R18-2 语义保留为能力门分支）。"""
     async def scenario():
         client = await _connect_async(stream_server.base)
         await client.chat_send(session_key="s", message="hi")
@@ -576,8 +577,9 @@ def test_chat_abort_reports_unsupported_not_fake_success(stream_server):
         return out
 
     out = _run(scenario())
-    # 引擎侧 CancelTask 是已声明的 1c 缺口——诚实面就是不支持
+    # 引擎未声明取消能力——诚实面就是不支持（无 CancelTask 盲发）
     assert out["ok"] is False, f"abort 伪成功: {out}"
+    assert out["error"]["code"] == "CANCEL_UNSUPPORTED"
 
 
 # ── R18-3: resolve 畸形响应三例 ──
@@ -621,3 +623,271 @@ def test_resolve_malformed_response_matrix():
             assert isinstance(out, EngineInteractionResolveExchange)
         finally:
             srv.stop()
+
+
+# ══════════ 1c: chat.abort → CancelTask 转发（TC-CANCEL）══════════
+
+CANCEL_EXT_URI = "https://avernet.local/a2a/ext/cancel/v1"
+
+
+def _cancel_capable_card() -> dict:
+    """能力卡声明 cancel extension 的引擎形态（1c 起的真引擎）。"""
+    return {
+        "supportedInterfaces": [
+            {"protocolBinding": "JSONRPC", "protocolVersion": "1.0"}],
+        "version": "0.1.0",
+        "capabilities": {
+            "streaming": True, "pushNotifications": False,
+            "extensions": [{"url": CANCEL_EXT_URI, "required": False}],
+        },
+    }
+
+
+def make_cancel_app(*, mode: str = "cancels") -> tuple[FastAPI, dict]:
+    """1c CancelTask 前后端速写（真 TCP）。
+
+    mode:
+      cancels  — 流开跑后等 cancel 信号，收到即推 CANCELED 终态经流收尾
+      refuse   — CancelTask 出 task_terminal 标准错误；流自行 COMPLETED
+      http_500 — CancelTask 通道回 500；流自行 COMPLETED
+
+    返回 (app, handle)：handle["bodies"] 记录 server 收到的 CancelTask 请求。
+    """
+    app = FastAPI()
+    state: dict[str, Any] = {"bodies": [], "cancel_seen": threading.Event()}
+
+    @app.get("/.well-known/agent-card.json")
+    def card() -> dict:
+        return _cancel_capable_card()
+
+    @app.post("/rpc")
+    async def rpc(request: Request) -> Any:
+        body = await request.json()
+        method = body.get("method")
+        if method == "SendStreamingMessage":
+            session = body["params"]["message"]["contextId"]
+
+            async def gen():
+                yield _sse({"statusUpdate": {
+                    "taskId": "eng-1", "contextId": session,
+                    "status": {"state": "TASK_STATE_WORKING"},
+                    "metadata": {"seq": 1}}})
+                yield _sse({"artifactUpdate": {
+                    "taskId": "eng-1", "contextId": session,
+                    "artifact": {"parts": [{"text": "回答中"}]},
+                    "append": False, "lastChunk": False,
+                    "metadata": {"seq": 2}}})
+                if mode == "cancels":
+                    # 等 cancel 信号——分片轮询，绝不阻塞 server loop
+                    #（否则 CancelTask 请求本身进不来，同 loop 死锁）。
+                    for _ in range(200):
+                        if state["cancel_seen"].is_set():
+                            break
+                        await asyncio.sleep(0.05)
+                    yield _sse({"statusUpdate": {
+                        "taskId": "eng-1", "contextId": session,
+                        "status": {"state": "TASK_STATE_CANCELED"},
+                        "metadata": {"final": "true", "lastSeq": 3}}})
+                else:
+                    await asyncio.sleep(0.5)
+                    yield _sse({"artifactUpdate": {
+                        "taskId": "eng-1", "contextId": session,
+                        "artifact": {"parts": [{"text": "完整终稿"}]},
+                        "append": False, "lastChunk": True,
+                        "metadata": {"seq": 3}}})
+                    yield _sse({"statusUpdate": {
+                        "taskId": "eng-1", "contextId": session,
+                        "status": {"state": "TASK_STATE_COMPLETED"},
+                        "metadata": {"final": "true", "lastSeq": 4}}})
+            return StreamingResponse(gen(), media_type="text/event-stream")
+        if method == "CancelTask":
+            state["bodies"].append(body)
+            if mode == "cancels":
+                state["cancel_seen"].set()
+                return {"jsonrpc": "2.0", "id": body["id"],
+                        "result": {"task": {
+                            "id": body["params"]["taskId"],
+                            "status": {"state": "TASK_STATE_CANCELED"}}}}
+            if mode == "refuse":
+                # 终态后取消 → 标准错误（task_terminal，data 带 state 判读）
+                return JSONResponse({"jsonrpc": "2.0", "id": body["id"],
+                                     "error": {
+                                         "code": -32000,
+                                         "message": "task already terminal "
+                                                    "(TASK_STATE_COMPLETED)",
+                                         "data": {"reason": "task_terminal",
+                                                  "state": "TASK_STATE_COMPLETED",
+                                                  "already_terminal": True}}})
+            if mode == "malformed":
+                # 200 但无 result 也无 error（id 也不回显）——畸形响应
+                return {"wrong": "shape", "id": None}
+            return JSONResponse({"boom": True}, status_code=500)
+        return JSONResponse({"jsonrpc": "2.0", "id": body.get("id"),
+                            "error": {"code": -32601}})
+
+    return app, state
+
+
+def test_chat_abort_forwards_cancel_task_to_engine():
+    """真转发：wire 上的 taskId = 引擎侧 run id（流上捕获，1c 前 BaaS 只见
+    传输层 rid）；成功判 ok；消费方经流收 CANCELED 终态 error，不悬挂。"""
+    app, state = make_cancel_app(mode="cancels")
+    srv = LiveServer(app)
+    try:
+        async def scenario():
+            client = await _connect_async(srv.base)
+            seen: list[dict] = []
+            client.on_event("chat", lambda p: seen.append(p))
+            ack = await client.chat_send(session_key="s", message="hi")
+            assert ack["ok"] is True
+            await asyncio.sleep(0.15)   # WORKING 帧到达 → engine_task_id 就位
+            out = await client.chat_abort(session_key="s")
+            await asyncio.sleep(0.5)    # CancelTask 语义下引擎经流推终态
+            await client.close()
+            return out, seen
+
+        out, seen = _run(scenario())
+        assert out["ok"] is True, out
+        assert out["a2a"] is True
+        assert out["task"]["state"] == "TASK_STATE_CANCELED"
+        cancels = [b for b in state["bodies"] if b.get("method") == "CancelTask"]
+        assert len(cancels) == 1, f"CancelTask 上 wire {len(cancels)} 次"
+        assert cancels[0]["params"]["taskId"] == "eng-1", cancels[0]
+        assert cancels[0]["jsonrpc"] == "2.0"
+        errors = [p for p in seen if p.get("state") == "error"]
+        assert errors, f"no terminal to consumer: {seen}"
+        assert errors[0].get("errorCode") == "TASK_STATE_CANCELED"
+    finally:
+        srv.stop()
+
+
+def test_chat_abort_engine_refusal_is_explicit_not_fake_ok():
+    """任务终态语义：引擎拒绝（task_terminal）→ 明确 ok=False；
+    本地流不被误杀——消费方按引擎真实走向收 COMPLETED final。"""
+    app, state = make_cancel_app(mode="refuse")
+    srv = LiveServer(app)
+    try:
+        async def scenario():
+            client = await _connect_async(srv.base)
+            finals: list[dict] = []
+            client.on_event("chat", lambda p: finals.append(p)
+                            if p.get("state") in ("final", "error") else None)
+            await client.chat_send(session_key="s", message="hi")
+            await asyncio.sleep(0.15)
+            out = await client.chat_abort(session_key="s")
+            await asyncio.sleep(0.8)
+            await client.close()
+            return out, finals
+
+        out, finals = _run(scenario())
+        assert out["ok"] is False, out
+        assert out["error"]["code"] == "task_terminal"
+        assert any(p.get("state") == "final" for p in finals), \
+            f"拒绝后本地流被误杀: {finals}"
+    finally:
+        srv.stop()
+
+
+def test_chat_abort_transport_error_is_explicit():
+    """传输面错误（HTTP 500）同样不假成功——错误码显式 HTTP_500。"""
+    app, state = make_cancel_app(mode="http_500")
+    srv = LiveServer(app)
+    try:
+        async def scenario():
+            client = await _connect_async(srv.base)
+            await client.chat_send(session_key="s", message="hi")
+            await asyncio.sleep(0.15)
+            out = await client.chat_abort(session_key="s")
+            await client.close()
+            return out
+
+        out = _run(scenario())
+        assert out["ok"] is False, out
+        assert out["error"]["code"] == "HTTP_500"
+    finally:
+        srv.stop()
+
+
+def test_chat_abort_malformed_result_is_not_fake_ok():
+    """200 但响应畸形（无 result/error、id 不回显）→ CANCEL_MALFORMED，
+    不得从畸形响应推导成功（E4 判定纪律）。"""
+    app, state = make_cancel_app(mode="malformed")
+    srv = LiveServer(app)
+    try:
+        async def scenario():
+            client = await _connect_async(srv.base)
+            await client.chat_send(session_key="s", message="hi")
+            await asyncio.sleep(0.15)
+            out = await client.chat_abort(session_key="s")
+            await client.close()
+            return out
+
+        out = _run(scenario())
+        assert out["ok"] is False, out
+        assert out["error"]["code"] == "CANCEL_MALFORMED"
+        assert len(state["bodies"]) == 1
+    finally:
+        srv.stop()
+
+
+def test_chat_abort_unknown_run_is_honest_not_fake_ok():
+    """无可用引擎 task id（从未开流/已收尾的 session）→ 不盲发、不假 ok：
+    RUN_NOT_TRACKED + 零 CancelTask 请求上 wire，本地断流 fallback 保留。"""
+    app, state = make_cancel_app(mode="cancels")
+    srv = LiveServer(app)
+    try:
+        async def scenario():
+            client = await _connect_async(srv.base)
+            out = await client.chat_abort(session_key="ghost-session")
+            await client.close()
+            return out
+
+        out = _run(scenario())
+        assert out["ok"] is False, out
+        assert out["error"]["code"] == "RUN_NOT_TRACKED"
+        assert state["bodies"] == [], \
+            "无 task id 不得盲发 CancelTask"
+    finally:
+        srv.stop()
+
+
+def test_abort_routes_with_the_run_b3_and_off_modes():
+    """编排层归属路由：B3 附件 reroute 的 session 的 abort 随 run 走 v3
+    专用连接；A2A 正常 session 走 A2A 客户端；off/v3 模式永远 self._client
+    （原路径不动，路由表不干扰）。"""
+    from secbaas.community.core.service.bot_run._async_chat_client import (
+        AsyncChatClient,
+    )
+    calls: list[tuple] = []
+
+    class _FakeTransport:
+        connected = True
+
+        def __init__(self, tag: str):
+            self.tag = tag
+
+        async def chat_abort(self, session_key, run_id=None):
+            calls.append((self.tag, session_key, run_id))
+            return {"ok": True}
+
+    async def scenario():
+        acc = AsyncChatClient(uri="ws://unused")
+        acc._transport = "a2a"
+        acc._client = _FakeTransport("a2a")
+        acc._v3_fallback = _FakeTransport("v3")
+        acc._v3_routed_sessions.add("s-att")
+        await acc.chat_abort("s-att", "r1")       # B3 reroute 过的 run
+        await acc.chat_abort("s-normal")           # A2A 正常 session
+
+        acc2 = AsyncChatClient(uri="ws://unused")
+        acc2._transport = "v3-ws"                  # off 模式
+        acc2._client = _FakeTransport("v3-ws")
+        acc2._v3_routed_sessions.add("s-att")      # 脏标记也不得干扰 v3
+        await acc2.chat_abort("s-att")
+
+    _run(scenario())
+    assert calls == [
+        ("v3", "s-att", "r1"),
+        ("a2a", "s-normal", None),
+        ("v3-ws", "s-att", None),
+    ]

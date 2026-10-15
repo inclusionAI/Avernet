@@ -10,6 +10,8 @@ Invariants:
   3. subscribe(): lock-internal snapshot+registration (no loss window)
   4. slow subscriber: kicked on QueueFull with termination signal
   5. complete_run(): set state → publish terminal → finish
+  6. T1 终态单次（§8.6）：run 进终态后 cancel 胜出——后续 delta/final/
+     status/interaction 帧全部丢弃，迟到的 complete_run 不改写状态
 """
 from __future__ import annotations
 
@@ -153,6 +155,10 @@ class A2aKernel:
     async def complete_run(self, rid: str,
                            state: str = "TASK_STATE_COMPLETED") -> None:
         r = self.runs[rid]
+        if r.state in wire.TERMINAL_STATES:
+            # T1（§8.6）：终态单次——迟到终帧不覆盖首个终态（cancel 胜出），
+            # 不二次终结订阅者。
+            return
         r.state = state
         await self._publish(rid, wire.wire_status_update(
             rid, r.context_id, state, seq=r.last_seq))
@@ -233,6 +239,8 @@ class A2aKernel:
 
     async def publish_delta(self, rid: str, text: str) -> None:
         r = self.runs[rid]
+        if r.state in wire.TERMINAL_STATES:
+            return                     # T1：终态后增量丢弃（cancel 胜出）
         first = not r.saw_delta
         r.saw_delta = True
         r.latest_text += text          # 增量累积进内容快照（R12-7）
@@ -243,6 +251,8 @@ class A2aKernel:
 
     async def publish_final(self, rid: str, text: str) -> None:
         r = self.runs[rid]
+        if r.state in wire.TERMINAL_STATES:
+            return                     # T1：终态后终稿不改写内核快照
         r.latest_text = text           # 终稿全量替换快照（R12-7）
         await self._publish(rid, wire.wire_artifact_update(
             rid, r.context_id, 0, f"text-{rid}", text,
@@ -262,6 +272,8 @@ class A2aKernel:
 
     async def publish_status(self, rid: str, state: str) -> None:
         r = self.runs[rid]
+        if r.state in wire.TERMINAL_STATES:
+            return                     # T1：终态后不做状态回退
         r.state = state
         await self._publish(rid, wire.wire_status_update(
             rid, r.context_id, state, seq=0))
@@ -269,10 +281,12 @@ class A2aKernel:
     async def publish_interaction_requested(self, rid: str,
                                             interaction_id: str,
                                             payload: dict[str, Any]) -> None:
-        self._interactions[interaction_id] = rid
         """HITL 请求：state 转 INPUT_REQUIRED（终态之外的专用状态，
         complete_run 语义不变）。"""
         r = self.runs[rid]
+        if r.state in wire.TERMINAL_STATES:
+            return                     # T1：终态后不再注册新 interaction
+        self._interactions[interaction_id] = rid
         r.state = "TASK_STATE_INPUT_REQUIRED"
         await self._publish(rid, wire.wire_interaction_requested(
             rid, r.context_id, 0, interaction_id, payload))
@@ -281,6 +295,8 @@ class A2aKernel:
                                            payload: dict[str, Any]) -> None:
         """HITL 决议：state 回 WORKING。"""
         r = self.runs[rid]
+        if r.state in wire.TERMINAL_STATES:
+            return                     # T1：终态后决议不改写 run 状态
         r.state = "TASK_STATE_WORKING"
         await self._publish(rid, wire.wire_interaction_resolved(
             rid, r.context_id, 0, payload))
@@ -291,8 +307,32 @@ class A2aKernel:
         """agent/tool/mode_transition 事件不上收 run 状态，仅作为
         statusUpdate 流出（R17-2：事件名保留，本方法签名带 event_name）。"""
         r = self.runs[rid]
+        if r.state in wire.TERMINAL_STATES:
+            return                     # T1：终态后迟到帧不再入流
         await self._publish(rid, wire.wire_agent_progress(
             rid, r.context_id, 0, payload, event_name=event_name))
+
+    # ── cancel（TC-CANCEL，设计 §7/§8.6）──
+
+    async def cancel_run(self, rid: str) -> dict[str, Any]:
+        """非终态 run → CANCELED 终态；只做状态迁移与订阅者终结——
+        不触碰 _interactions 注册表（§8.6：HITL resolution 记录独立于
+        run 生命周期，迟到决策仍可判读）。
+
+        幂等（T1）：已终态 run 不迁移、不重复终结——返回当前快照（state
+        即终局事实），判读交给 caller（router：终态后取消 → 标准错误，
+        data 带 state 消除歧义）。
+        """
+        r = self.runs.get(rid)
+        if r is None:
+            raise LookupError(rid)
+        if r.state not in wire.TERMINAL_STATES:
+            await self.complete_run(rid, "TASK_STATE_CANCELED")
+        return self.run_snapshot(r)
+
+    def run_snapshot(self, r: _Run) -> dict[str, Any]:
+        return {"id": r.run_id, "contextId": r.context_id,
+                "status": {"state": r.state}, "metadata": {}}
 
     # ── subscribe / replay ──
     async def subscribe(self, rid: str, since_seq: int | None = None

@@ -7,12 +7,17 @@ from __future__ import annotations
 from typing import Any
 
 # Extension URIs (G2 locked — spike/a2a/settings.py EXT_URIS same origin)
+# 1c：spec v1.0 AgentCapabilities 无标准 cancellation 字段（capabilities 仅
+# streaming/pushNotifications/extensions；CancelTask 本身是核心方法），服务
+# 侧取消能力以 extension URI 锁定声明——BaaS 端读卡判读（灰度期老引擎
+# 无此声明 → abort 诚实不回退假 ok）。
 EXT_BASE = "https://avernet.local/a2a/ext"
 EXTENSION_URIS = {
     "inject": f"{EXT_BASE}/inject/v1",
     "context": f"{EXT_BASE}/context/v1",
     "replay": f"{EXT_BASE}/replay/v1",
     "retry": f"{EXT_BASE}/retry/v1",
+    "cancel": f"{EXT_BASE}/cancel/v1",
 }
 
 

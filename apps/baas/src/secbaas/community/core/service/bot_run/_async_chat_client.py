@@ -214,6 +214,10 @@ class AsyncChatClient:
         self._a2a_mode = a2a_mode
         self._transport: str = "v3-ws"
         self._v3_fallback = None          # B3: A2A 传输上附件请求的 v3 重路由
+        # B3（1c）：session→run 归属路由表——附件请求 reroute 到 v3 后，
+        # 该 session 的 chat_abort 必须随 run 走 v3 专用连接（不丢语义；
+        # 正常 A2A session 的 abort 仍走 A2A 客户端的 CancelTask 转发）。
+        self._v3_routed_sessions: set[str] = set()
         self.headers = headers or {}
         self.client_id = client_id or f"client-{uuid.uuid4().hex[:8]}"
         self.client_version = client_version
@@ -496,6 +500,8 @@ class AsyncChatClient:
                     self._active_sessions.discard(session_key)
                     self._sessions.pop(session_key, None)
                     self._condition.notify_all()
+                # B3（1c）：session 收口——归属路由表同步去标记
+                self._v3_routed_sessions.discard(session_key)
 
         finally:
             # 8. 释放并发信号量
@@ -524,6 +530,18 @@ class AsyncChatClient:
                 "Not connected. Call connect() first or wait for reconnection."
             )
         assert self._client is not None
+        # B3（1c）：附件请求 reroute 过 v3 的 session——run 在 v3 专用
+        # 连接上，abort 随 run 走 v3（A2A 客户端没有该 run 的归属）；
+        # 正常 session 的 abort 走 A2A 客户端 CancelTask 转发。
+        # off/v3 模式（transport != "a2a"）永远直连 self._client，
+        # 路由表不参与——v3 原路径不动。
+        if (self._transport == "a2a"
+                and session_key in self._v3_routed_sessions
+                and self._v3_fallback is not None):
+            return await self._v3_fallback.chat_abort(
+                session_key=session_key,
+                run_id=run_id,
+            )
         return await self._client.chat_abort(
             session_key=session_key,
             run_id=run_id,
@@ -622,6 +640,8 @@ class AsyncChatClient:
                     self._active_sessions.discard(session_key)
                     self._sessions.pop(session_key, None)
                     self._condition.notify_all()
+                # B3（1c）：session 收口——归属路由表同步去标记
+                self._v3_routed_sessions.discard(session_key)
 
         finally:
             if self._concurrency_sem is not None:
@@ -754,6 +774,7 @@ class AsyncChatClient:
             except Exception:
                 logger.exception("v3 fallback close failed")
             self._v3_fallback = None
+        self._v3_routed_sessions.clear()   # B3（1c）：归属路由表随断连收口
 
         interaction_tasks = list(self._interaction_tasks.values())
         for task in interaction_tasks:
@@ -837,8 +858,12 @@ class AsyncChatClient:
         # recv 循环的断流路径上报）。close() 一并收口。
         if attachments and self._transport == "a2a":
             target = await self._ensure_v3_fallback()
+            # B3（1c）：记归属——该 session 在 v3 专用连接上开了 run，
+            # 后续 chat_abort 随 run 走 v3，语义不丢。
+            self._v3_routed_sessions.add(session_key)
         else:
             target = self._client
+            self._v3_routed_sessions.discard(session_key)
         send_result = await target.chat_send(
             session_key=session_key,
             message=message,

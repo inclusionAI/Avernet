@@ -807,3 +807,260 @@ async def test_resolve_validate_response_contract(monkeypatch):
         {"interactionId": "i-4",
          "resolution": {"decision": "approve"}}, 1, None)
     assert out["error"]["data"]["reason"] == "resolve_forward_failed"
+
+
+# ══════════ 1c: CancelTask 闭环（TC-CANCEL，设计 §7/§8.6）══════════
+
+def _seed_run(open_ctx: str, key: str, *,
+               state: str | None = "TASK_STATE_WORKING") -> str:
+    """open→(WORKING)→可选终态，同一 asyncio.run 内完成。"""
+    k = R._kernel
+
+    async def seed():
+        rid, _ = await k.open_run(open_ctx, key, "first", "d")
+        if state:
+            await k.publish_status(rid, state)
+        return rid
+
+    return asyncio.run(seed())
+
+
+@pytest.fixture()
+def app_client_gated(monkeypatch):
+    """同 app_client 但 gate 开关打开——真实 _auth_gate_guard 生效。"""
+    app = FastAPI()
+
+    class _OnGate:
+        async def get_switch(self) -> bool:
+            return True
+
+        async def set_switch(self, enabled: bool) -> None:  # pragma: no cover
+            pass
+
+        async def verify(self, token: str, content: str,  # pragma: no cover
+                         session_id: str):
+            raise NotImplementedError
+
+    service = _OnGate()
+
+    class _Module(Module):
+        def configure(self, binder: Binder) -> None:
+            binder.bind(AuthGateService, to=InstanceProvider(service),
+                        scope=SingletonScope)
+
+    attach_injector(app, Injector([_Module()]))
+    app.include_router(R.router)
+    monkeypatch.setattr(R, "_kernel", kernel_mod.A2aKernel())
+    with TestClient(app) as client:
+        yield client
+
+
+def test_cancel_working_run_terminal_event_and_delta_drop(app_client):
+    """TC-CANCEL 主路径：WORKING run → CANCELED；订阅者收 cancel 终态；
+    迟到 delta/final 不再改变终稿与状态（T1：终态之后全丢弃）。"""
+    k = R._kernel
+
+    async def seed():
+        rid, _ = await k.open_run("cx", "mk1", "first", "d")
+        await k.publish_status(rid, "TASK_STATE_WORKING")
+        await k.publish_delta(rid, "部分回答")
+        backlog, q = await k.subscribe(rid, since_seq=0)
+        return rid, q
+
+    rid, q = asyncio.run(seed())
+    r = _rpc(app_client, 1, "CancelTask", {"taskId": rid})
+    body = r.json()
+    assert "error" not in body, body
+    task = body["result"]["task"]
+    assert task["id"] == rid
+    assert task["status"]["state"] == "TASK_STATE_CANCELED"
+
+    # 订阅者收到完整的 cancel 终态序列（先 CANCELED statusUpdate、后
+    # final 终结 marker——与既有 complete_run 推送序列同构），且仅一次。
+    async def drain_terminal():
+        seen: list[dict] = []
+        while True:
+            ev = await asyncio.wait_for(q.get(), 2)
+            seen.append(ev)
+            meta = ev["ev"]["statusUpdate"]["metadata"]
+            if meta.get("final") == "true":
+                # 终结之后队列必须再无事件（T1 单次终结）
+                assert q.empty()
+                return seen
+
+    events = asyncio.run(drain_terminal())
+    states = [e["ev"]["statusUpdate"]["status"]["state"] for e in events]
+    assert states == ["TASK_STATE_CANCELED", "TASK_STATE_CANCELED"], states
+    assert events[0]["ev"]["statusUpdate"]["metadata"].get("final") is None
+    marker_meta = events[1]["ev"]["statusUpdate"]["metadata"]
+    assert marker_meta["final"] == "true"
+    assert "lastSeq" in marker_meta
+
+    # 迟到增量/终稿被丢弃——cancel 在运行方向胜出（§8.6）
+    async def late():
+        await k.publish_delta(rid, "迟到增量")
+        await k.publish_final(rid, "迟到终稿")
+
+    asyncio.run(late())
+    run = k.get_run(rid)
+    assert run.state == "TASK_STATE_CANCELED"
+    assert run.latest_text == "部分回答", run.latest_text
+
+    # T1：迟到的 complete_run 不再改写状态或二次终结
+    async def late_complete():
+        await k.complete_run(rid, "TASK_STATE_COMPLETED")
+
+    asyncio.run(late_complete())
+    run = k.get_run(rid)
+    assert run.state == "TASK_STATE_CANCELED"
+
+    # T1 全迟到帧面：bridge 仍在泵流时状态不得复活、不得二次终结、
+    # 也不得在 cancel 后注册新 interaction（注册表仅由 cancel 前帧持有）
+    seq_before = run.last_seq
+    async def late_frames():
+        await k.publish_status(rid, "TASK_STATE_WORKING")
+        await k.publish_interaction_requested(rid, "i-late", {})
+        await k.publish_interaction_resolved(rid, {"interactionId": "i-late"})
+        await k.publish_agent_progress(rid, {"state": "agent"})
+
+    asyncio.run(late_frames())
+    run = k.get_run(rid)
+    assert run.state == "TASK_STATE_CANCELED", \
+        "迟到 status/interaction 帧复活了终态 run"
+    assert run.last_seq == seq_before, "迟到帧在终结后追加了事件"
+    assert "i-late" not in k._interactions
+    # 订阅者不再收到终结之后的任何事件
+    assert q.empty()
+
+
+def test_cancel_terminal_states_and_not_found(app_client):
+    """终态后取消 → 标准错误（data 带 state + already_terminal 判读）；
+    not found → 显式错误码；重复 cancel 已取消 run 同一错误面。"""
+    k = R._kernel
+
+    async def seed_terminal(state: str) -> str:
+        rid, _ = await k.open_run("cx", f"tk-{state}", "first", "d")
+        await k.publish_status(rid, "TASK_STATE_WORKING")
+        await k.complete_run(rid, state)
+        return rid
+
+    rid_done = asyncio.run(seed_terminal("TASK_STATE_COMPLETED"))
+    r = _rpc(app_client, 1, "CancelTask", {"taskId": rid_done})
+    err = r.json()["error"]
+    assert err["code"] == -32000
+    assert err["data"]["reason"] == "task_terminal"
+    assert err["data"]["state"] == "TASK_STATE_COMPLETED"
+    assert err["data"]["already_terminal"] is True
+    assert k.get_run(rid_done).state == "TASK_STATE_COMPLETED"
+
+    # 幂等面：重复 cancel 已 CANCELED 的 run → 同一标准错误，
+    # data.state 携带 CANCELED 事实（迟到重试可判读 run 终局，无静默歧义）
+    rid_cx = asyncio.run(seed_terminal("TASK_STATE_CANCELED"))
+    r2 = _rpc(app_client, 2, "CancelTask", {"taskId": rid_cx})
+    err2 = r2.json()["error"]
+    assert err2["data"]["reason"] == "task_terminal"
+    assert err2["data"]["state"] == "TASK_STATE_CANCELED"
+    assert err2["data"]["already_terminal"] is True
+
+    r3 = _rpc(app_client, 3, "CancelTask", {"taskId": "ghost-run"})
+    assert r3.json()["error"]["data"]["reason"] == "not_found_or_expired"
+
+
+def test_cancel_does_not_touch_interaction_registry(app_client, monkeypatch):
+    """§8.6：cancel 不回写/删除 resolution 记录——注册表仍在，resolve 在
+    run 终态后判 not_found（结构化错误，非栈污染）。"""
+    fake = _FakeResolveChat()
+    _install_resolve_bridge(monkeypatch, fake)
+    k = R._kernel
+
+    async def seed():
+        rid, _ = await k.open_run("hitl-cancel", "kk", "first", "d")
+        k.runs[rid].native_run_id = "native-9"
+        await k.publish_interaction_requested(
+            rid, "i-cancel", {"kind": "exec", "prompt": "rm test?"})
+        return rid
+
+    rid = asyncio.run(seed())
+    r = _rpc(app_client, 1, "CancelTask", {"taskId": rid})
+    assert r.json()["result"]["task"]["status"]["state"] == \
+        "TASK_STATE_CANCELED"
+    # registry 不被 cancel 触碰（HITL 记录与 run 生命周期解耦）
+    assert k._interactions["i-cancel"] == rid
+
+    async def try_resolve():
+        return await R._resolve_interaction(
+            {"interactionId": "i-cancel",
+             "resolution": {"decision": "approve", "kind": "exec"}}, 1, None)
+
+    out = asyncio.run(try_resolve())
+    assert out["error"]["data"]["reason"] == "not_found", out
+    assert fake.calls == [], "终端 run 的 resolve 不得再触发引擎转发"
+
+
+def test_cancel_gate_checks_the_run_context(app_client, monkeypatch):
+    """CancelTask 是写操作——与 ResolveInteraction 对齐进 gate；gate 判定
+    用的 session 即目标 run 的 context（R13-3 同源约束）。"""
+    rid = _seed_run("ctx-cancel", "gk1")
+    seen: list[tuple[str, str | None]] = []
+
+    async def fake_guard(request, rid_, method, session_key, message_text,
+                         auth_gate_service):
+        seen.append((method, session_key))
+        return None
+
+    monkeypatch.setattr(R, "_auth_gate_guard", fake_guard)
+    r = _rpc(app_client, 1, "CancelTask", {"taskId": rid})
+    assert r.json()["result"]["task"]["status"]["state"] == \
+        "TASK_STATE_CANCELED"
+    assert seen == [("CancelTask", "ctx-cancel")]
+
+
+def test_cancel_gate_rejection_blocks_state_change(app_client, monkeypatch):
+    """gate 拒 → 错误透传，run 状态不动（写操作不因 gate 失败而半途落地）。"""
+    rid = _seed_run("ctx-cancel2", "gk2")
+
+    async def rejecting_guard(request, rid_, method, session_key,
+                              message_text, auth_gate_service):
+        return R._rpc_error_response(
+            rid_, {"code": -32000, "message": "zero_check failed",
+                   "data": {"reason": "ZERO_CHECK_FAILED"}})
+
+    monkeypatch.setattr(R, "_auth_gate_guard", rejecting_guard)
+    r = _rpc(app_client, 1, "CancelTask", {"taskId": rid})
+    assert r.json()["error"]["data"]["reason"] == "ZERO_CHECK_FAILED"
+    assert R._kernel.get_run(rid).state == "TASK_STATE_WORKING"
+
+
+def test_cancel_requires_iam_token_when_gate_on(app_client_gated):
+    """gate 打开的真实防卫路径：无 x-iam-token 的 CancelTask 被拒，零状态变化。"""
+    rid = _seed_run("ctx-token", "gk3")
+    r = _rpc(app_client_gated, 1, "CancelTask", {"taskId": rid})
+    err = r.json()["error"]
+    assert err["code"] == -32000
+    assert err["data"]["reason"] == "auth_required"
+    assert err["message"] == "Missing x-iam-token"
+    assert R._kernel.get_run(rid).state == "TASK_STATE_WORKING"
+
+
+def test_cancel_malformed_params_rejected(app_client):
+    """F8：畸形 params 全走 -32602（先于 gate、零内核副作用）。"""
+    for i, bad in enumerate([{}, {"taskId": ""}, {"taskId": 42},
+                             {"taskId": None}, {"taskId": ["x"]}]):
+        r = _rpc(app_client, i, "CancelTask", bad)
+        assert r.json()["error"]["code"] == -32602, (bad, r.json())
+    # handler 直调的防御面（绕过 pre-gate normalization 时也不裸抛）
+    async def direct_call():
+        with pytest.raises(R._ParamError):
+            await R._cancel_task({"taskId": 42}, 1, None)
+
+    asyncio.run(direct_call())
+
+
+def test_agent_card_declares_cancel_extension(app_client):
+    """能力卡锁定：CancelTask 服务能力以 extension URI 声明（spec v1.0
+    AgentCapabilities 无标准 cancellation 字段——沿用 EXTENSION_URIS 格式）。"""
+    r = app_client.get("/.well-known/agent-card.json")
+    card = r.json()
+    uris = [e["url"] for e in card["capabilities"]["extensions"]]
+    from engine.community.api.transport.a2a.card import EXTENSION_URIS
+    assert EXTENSION_URIS["cancel"] in uris, uris

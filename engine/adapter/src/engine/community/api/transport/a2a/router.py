@@ -48,10 +48,13 @@ _kernel = A2aKernel()
 # collected mid-run and silently kill the event stream.
 _BRIDGE_TASKS: set[asyncio.Task] = set()
 
-# Methods that can trigger engine execution — gated exactly like ws_server's
-# handling of chat.send / chat.inject.
+# Methods that can trigger engine execution or state mutation — gated
+# exactly like ws_server's handling of chat.send / chat.inject. CancelTask
+# 是写操作（改写 run 终态），与 ResolveInteraction 同级进 gate；
+# GetTask/SubscribeToTask/ReplayEvents 只读，不进（既有先例）。
 _GATED_METHODS = frozenset({"SendMessage", "SendStreamingMessage",
-                            "InjectContext", "ResolveInteraction"})
+                            "InjectContext", "ResolveInteraction",
+                            "CancelTask"})
 
 _HANDLERS: dict[str, Any] = {}
 
@@ -113,6 +116,18 @@ def _canonical_context(method: str, params: dict[str, Any], rid: Any
         decision = (resolution.get("decision", "") if isinstance(
             resolution, dict) else "")
         return run.context_id, str(decision)
+
+    if method == "CancelTask":
+        # 1c/TC-CANCEL：canonical session = 目标 run 的 context（gate 与
+        # 状态写同源）；text 为空（无消息载荷）。
+        tid = params.get("taskId")
+        if not isinstance(tid, str) or not tid:
+            raise _ParamError("taskId is required (string)")
+        r = _kernel.get_run(tid)
+        if r is None:
+            # gate 前即不存在——留给 handler 出结构化 not_found
+            return None, ""
+        return r.context_id, ""
 
     msg = params.get("message")
     if method == "InjectContext":
@@ -385,6 +400,38 @@ async def _get_task(params: dict[str, Any], req_id: Any,
                       "metadata": {}}}
 
 _HANDLERS["GetTask"] = _get_task
+
+
+# ── CancelTask (1c/TC-CANCEL，设计 §7：幂等；终态后取消 → 标准错误) ──
+
+async def _cancel_task(params: dict[str, Any], req_id: Any,
+                       _gated_key: str | None) -> dict[str, Any]:
+    """§8.6：cancel 只改 run 状态与订阅者终结——kernel 不触碰
+    interaction/resolution 注册表（HITL 记录独立于 run 生命周期）。
+
+    幂等契约（§7 表）：已终态 run 上 cancel 不迁移、不重复终结——
+    标准错误，data 带 {state, already_terminal} 让迟到的重复 cancel
+    可判读 run 终局（CANCELED 与 COMPLETED 同一错误面、以 data.state
+    区分，无静默 no-op 歧义）。
+    """
+    tid = params.get("taskId")
+    if not isinstance(tid, str) or not tid:
+        raise _ParamError("taskId is required (string)")
+    r = _kernel.get_run(tid)
+    if r is None:
+        return {"error": {"code": -32000,
+                          "message": "task not found or expired",
+                          "data": {"reason": "not_found_or_expired"}}}
+    if r.state in wire.TERMINAL_STATES:
+        return {"error": {"code": -32000,
+                          "message": f"task already terminal ({r.state})",
+                          "data": {"reason": "task_terminal", "state": r.state,
+                                   "already_terminal": True}}}
+    snapshot = await _kernel.cancel_run(tid)
+    return {"task": snapshot}
+
+
+_HANDLERS["CancelTask"] = _cancel_task
 
 
 # ── SubscribeToTask ──

@@ -37,6 +37,11 @@ EventHandler = Callable[..., Any]
 _TERMINAL_WIRE_STATES = ("TASK_STATE_FAILED", "TASK_STATE_CANCELED",
                          "TASK_STATE_REJECTED")
 
+# 1c：引擎能力卡上 CancelTask 服务能力的 extension 声明（与
+# engine/.../a2a/card.py EXTENSION_URIS["cancel"] 同源——spec v1.0
+# AgentCapabilities 无标准 cancellation 字段，能力以 extension 锁定）。
+_CANCEL_EXT_URI = "https://avernet.local/a2a/ext/cancel/v1"
+
 
 class A2aUnavailableError(RuntimeError):
     """目标不可用/非 JSONRPC 1.x——工厂回退 v3 的灰度门信号。"""
@@ -44,7 +49,7 @@ class A2aUnavailableError(RuntimeError):
 
 class _RunCtx:
     __slots__ = ("rid", "session_key", "final_text", "terminal_emitted",
-                 "task")
+                 "task", "engine_task_id")
 
     def __init__(self, rid: str, session_key: str):
         self.rid = rid
@@ -52,6 +57,10 @@ class _RunCtx:
         self.final_text: str | None = None
         self.terminal_emitted = False
         self.task: asyncio.Task | None = None
+        # 1c：wire 上的引擎侧 run id（statusUpdate/artifactUpdate 帧的
+        # taskId，kernel 生成）——CancelTask 转发的定位键；BaaS 自己的 rid
+        # 只是 messageId/幂等键，引擎不认识。
+        self.engine_task_id: str | None = None
 
 
 def _message_to_text(message: Any) -> str:
@@ -275,11 +284,18 @@ class BotA2aClient:
                 return
 
     async def _on_task(self, ctx: _RunCtx, task: dict[str, Any]) -> None:
+        # 1c：task 快照的 id = 引擎 kernel run id（CancelTask 定位键）。
+        if not ctx.engine_task_id and isinstance(task.get("id"), str):
+            ctx.engine_task_id = task["id"]
         logger.debug("[a2a] task opened rid=%s state=%s", ctx.rid,
                      (task.get("status") or {}).get("state"))
 
     async def _on_artifactUpdate(self, ctx: _RunCtx,
                                   au: dict[str, Any]) -> None:
+        # 1c：流帧 taskId 即引擎 run id——首见即登记（SSE 订阅时序下
+        # task 快照不保证出现，statusUpdate/artifactUpdate 是可靠来源）。
+        if not ctx.engine_task_id and isinstance(au.get("taskId"), str):
+            ctx.engine_task_id = au["taskId"]
         parts = (au.get("artifact") or {}).get("parts") or []
         text = "".join(p.get("text", "") for p in parts
                        if isinstance(p, dict))
@@ -299,6 +315,8 @@ class BotA2aClient:
                                 su: dict[str, Any]) -> None:
         meta = su.get("metadata") or {}
         state = (su.get("status") or {}).get("state", "")
+        if not ctx.engine_task_id and isinstance(su.get("taskId"), str):
+            ctx.engine_task_id = su["taskId"]
         base = {"runId": su.get("taskId"), "sessionKey": ctx.session_key,
                 "seq": meta.get("seq")}
         frame = meta.get("engine_frame")
@@ -396,23 +414,106 @@ class BotA2aClient:
             except Exception:
                 logger.exception("[a2a] wildcard handler failed")
 
-    # ── abort（CancelTask 为 1c 缺口——诚实 ok=False）──
+    # ── abort（1c：chat.abort → CancelTask 转发）──
+    def _supports_cancel(self) -> bool:
+        """引擎能力卡是否声明 cancel extension（灰度期老引擎没有——
+        abort 诚实不转发，绝不向不支持的引擎猜语义）。"""
+        card = ((self._server_info or {}).get("server") or {}).get("card")
+        if not isinstance(card, dict):
+            return False
+        extensions = (card.get("capabilities") or {}).get("extensions")
+        if not isinstance(extensions, list):
+            return False
+        return any(isinstance(e, dict) and e.get("url") == _CANCEL_EXT_URI
+                   for e in extensions)
+
     async def chat_abort(self, session_key: str,
                         run_id: str | None = None) -> dict[str, Any]:
-        """R18-2：Engine 侧 CancelTask 是已声明的 1c 缺口——诚实返回不
-        支持；本地 body-task 取消是**订阅断流**（不同语义），绝不作为
-        abort 成功上报（ok 判断点在 _send_chat_request 一侧，ok=False
-        会如实抛 ChatRequestError）。"""
+        """chat.abort → CancelTask（设计 §7）。
+
+        语义分层（每层显式，无假成功）：
+          - 引擎未声明 cancel 能力（老引擎）：保留原行为——本地 body-task
+            取消是**订阅断流** + 诚实 CANCEL_UNSUPPORTED；
+          - 引擎侧 task id 未知（未开流/已收尾/未知 session）：RUN_NOT_TRACKED
+            ，不盲发 CancelTask，本地断流 fallback 保留；
+          - engine 显式拒绝（task_terminal 等）：ok=False 原样透传引擎
+            reason——本地流不动（引擎语义成立，run 会自然收尾，误杀本地
+            task 只会让消费方悬挂）；
+          - 传输/通道错误：TRANSPORT_ERROR/HTTP_*（ok=False）；
+          - 成功（result.task.status.state==TASK_STATE_CANCELED，E4 式
+            真实契约判定）：ok=True——本地 body task **不**取消：
+            engine 沿 SSE 推 CANCELED 终态，消费方经 final 分支收
+            terminal error（订阅断流语义由引擎侧终态承载）。
+        """
         rid = run_id or self._session_runs.get(session_key)
         ctx = self._runs.get(rid or "")
-        if ctx and ctx.task and not ctx.task.done():
-            # 订阅断流：让消费方收 terminal error 而不是悬挂——但 abort
-            # 面本身不成功。
-            ctx.task.cancel()
+
+        if not self._supports_cancel():
+            if ctx and ctx.task and not ctx.task.done():
+                # 订阅断流：让消费方尽快脱困——但 abort 面本身不成功。
+                ctx.task.cancel()
+            return {"ok": False, "a2a": True,
+                    "error": {"code": "CANCEL_UNSUPPORTED",
+                              "message": "engine does not declare cancel "
+                                         "capability",
+                              "retryable": False}}
+
+        task_id = ctx.engine_task_id if ctx else None
+        if not task_id:
+            if ctx and ctx.task and not ctx.task.done():
+                ctx.task.cancel()
+            return {"ok": False, "a2a": True,
+                    "error": {"code": "RUN_NOT_TRACKED",
+                              "message": "no engine task id known for "
+                                         "session/run",
+                              "retryable": False}}
+
+        request_id = f"cxl-{uuid.uuid4().hex[:12]}"
+        payload = {"jsonrpc": "2.0", "id": request_id,
+                   "method": "CancelTask", "params": {"taskId": task_id}}
+        try:
+            async with self._http(timeout=30.0) as http:
+                resp = await http.post(self.rpc_url, json=payload,
+                                       headers=self.headers)
+        except Exception as e:
+            return {"ok": False, "a2a": True,
+                    "error": {"code": "TRANSPORT_ERROR",
+                              "message": str(e)[:200], "retryable": False}}
+        if resp.status_code != 200:
+            return {"ok": False, "a2a": True,
+                    "error": {"code": f"HTTP_{resp.status_code}",
+                              "message": resp.text[:200], "retryable": False}}
+        try:
+            body = resp.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict) or body.get("id") != request_id:
+            return {"ok": False, "a2a": True,
+                    "error": {"code": "CANCEL_MALFORMED",
+                              "message": f"unparseable http_{resp.status_code}",
+                              "retryable": False}}
+        has_result = isinstance(body.get("result"), dict)
+        has_error = isinstance(body.get("error"), dict)
+        if has_error and not has_result:
+            err = body["error"]
+            return {"ok": False, "a2a": True,
+                    "error": {"code":
+                              (err.get("data") or {}).get("reason",
+                                                         "a2a_error"),
+                              "message": err.get("message", "")[:200],
+                              "retryable": False}}
+        # E4 纪律：成功只认真实契约——result.task.status.state==CANCELED；
+        # result 但 state 不符（或 result/error 双有/双无）都不得判成功。
+        task = (body.get("result") or {}).get("task")
+        state = ((task or {}).get("status") or {}).get("state")
+        if has_result and not has_error and state == "TASK_STATE_CANCELED":
+            return {"ok": True, "a2a": True,
+                    "task": {"id": (task or {}).get("id"),
+                             "state": state}}
         return {"ok": False, "a2a": True,
-                "error": {"code": "CANCEL_UNSUPPORTED",
-                          "message": "engine CancelTask lands in stage 1c; "
-                                     "engine-side abort unavailable",
+                "error": {"code": "CANCEL_RESULT_INVALID",
+                          "message": f"unexpected cancel result: "
+                                     f"{str(body)[:200]}",
                           "retryable": False}}
 
     # ── chat_inject（R16-1 签名；R17-7 metadata 平铺+timeout）──
