@@ -5,6 +5,12 @@
 # held, the engine idles) exactly like the production turn that sat silent
 # until an operator noticed. Only the idle watchdog ends this turn.
 IFS= read -r _first
+i=0
+while [ "$i" -lt 10 ]; do
+  echo '{"type":"system","subtype":"status","message":"c2d8ef8f"}'
+  sleep 0.1
+  i=$((i + 1))
+done
 echo '{"type":"system","subtype":"init","session_id":"cc-sess-idle"}'
 echo '{"type":"system","subtype":"task_started","task_id":"t-a","tool_use_id":"toolu_a","task_type":"local_agent"}'
 echo '{"type":"result","subtype":"success","result":"launched one finder"}'
