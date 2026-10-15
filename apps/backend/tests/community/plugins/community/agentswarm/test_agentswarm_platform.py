@@ -238,6 +238,45 @@ class TestCreate:
         assert first == again and first.startswith("ac_") and len(first) == 19
         assert [w["bot_id"] for w in seen] == [first, first]
 
+    def test_name_refusal_adopts_the_live_persona_row(self, monkeypatch):
+        # D16 respawn after a mid-creation crash: bot_service's name check
+        # refuses the re-create; the live row under our derived id is ours.
+        from agentclaw.community.core.bot_management.services.bot_service import (
+            BotNameExistsError,
+        )
+
+        def refuse(**kwargs):
+            raise BotNameExistsError(
+                f" Bot name '{kwargs['spec'].bot_name}' already exists")
+
+        monkeypatch.setattr(create_flow, "submit_bot_creation_with_manifest",
+                             refuse)
+        platform = _mk(repo=_Repo(bot={"bot_id": "ac_adopted"}))
+        spec = BotCreateSpec(name="scout", description="a surveyor")
+        adopted = platform.create_bot(spec=spec, idempotency_key="run-1:scout")
+        assert adopted.startswith("ac_") and len(adopted) == 19
+
+    def test_name_refusal_without_our_row_reraises(self, monkeypatch):
+        # Same-name row that is NOT our derived identity cannot exist
+        # (digest names collide only across identical keys); a missing
+        # row therefore re-raises instead of inventing a persona.
+        from agentclaw.community.core.bot_management.services.bot_service import (
+            BotNameExistsError,
+        )
+
+        def refuse(**kwargs):
+            raise BotNameExistsError(
+                f"Bot name '{kwargs['spec'].bot_name}' already exists")
+
+        monkeypatch.setattr(create_flow, "submit_bot_creation_with_manifest",
+                             refuse)
+        platform = _mk()
+        with pytest.raises(BotNameExistsError):
+            platform.create_bot(
+                spec=BotCreateSpec(name="scout", description="a surveyor"),
+                idempotency_key="run-1:scout",
+            )
+
     def test_submit_receives_the_persona_not_inventions(self, monkeypatch):
         seen = self._record_submit(monkeypatch)
         platform = _mk()

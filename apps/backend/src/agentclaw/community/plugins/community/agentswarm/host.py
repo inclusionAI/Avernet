@@ -290,6 +290,9 @@ class AvernetBotPlatform(BotPlatform):
         from agentclaw.community.core.bot_management.create_flow import (
             submit_bot_creation_with_manifest,
         )
+        from agentclaw.community.core.bot_management.services.bot_service import (
+            BotNameExistsError,
+        )
 
         owner = (owner_id or "").strip() or self._default_owner
         # Same digest as bot_id_for(): the subagent always passes the
@@ -317,31 +320,50 @@ class AvernetBotPlatform(BotPlatform):
         space = self._space_context.resolve_current(
             owner_id=owner, header_space_id=None,
         )
-        submitted = submit_bot_creation_with_manifest(
-            user_id=owner,
-            nick_name=owner,
-            bot_id=bot_id,
-            document=document,
-            modifier=owner,
-            spec=HostCreateSpec(
-                entity_id=owner,
-                engine_type=spec.engine or "openclaw",
-                bot_type=spec.bot_type or "personal",
-                bot_name=bot_name,
-                bot_desc=spec.description or None,
-                template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
-                engine_properties={},
-            ),
-            context=BotCreateContext(
-                deployment_mode=BotCreateDeploymentMode.CLOUD,
-                space_kind=space.kind,
-                space_quota=True,
-            ),
-            bot_service=self._bot_service,
-            passport_plugin=self._passport,
-            skill_set_factory=self._skill_set_factory,
-            manifest_seam=self._manifest_seam,
-        )
+        try:
+            submitted = submit_bot_creation_with_manifest(
+                user_id=owner,
+                nick_name=owner,
+                bot_id=bot_id,
+                document=document,
+                modifier=owner,
+                spec=HostCreateSpec(
+                    entity_id=owner,
+                    engine_type=spec.engine or "openclaw",
+                    bot_type=spec.bot_type or "personal",
+                    bot_name=bot_name,
+                    bot_desc=spec.description or None,
+                    template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
+                    engine_properties={},
+                ),
+                context=BotCreateContext(
+                    deployment_mode=BotCreateDeploymentMode.CLOUD,
+                    space_kind=space.kind,
+                    space_quota=True,
+                ),
+                bot_service=self._bot_service,
+                passport_plugin=self._passport,
+                skill_set_factory=self._skill_set_factory,
+                manifest_seam=self._manifest_seam,
+            )
+        except BotNameExistsError:
+            # A D16 respawn after a mid-creation crash re-derives the same
+            # deterministic persona, and bot_service's name check refuses
+            # the re-create (upstream-owned, not idempotent). The refused
+            # name carries this idempotency key's digest, so the row it
+            # collides with is OUR identity: adopt it when the derived
+            # bot_id has a live row; adopt makes respawn idempotent for
+            # any kill timing. A same-name row that is NOT ours cannot
+            # exist (digest names collide only across identical keys).
+            existing = self._bot_repo.get_by_id_and_entity(bot_id, owner)
+            if existing is None:
+                raise
+            logger.warning(
+                "[agentswarm][host-platform] adopting live persona bot %s "
+                "after create-name refusal (idempotency_key=%s)",
+                bot_id, idempotency_key,
+            )
+            return BotId(bot_id)
         return BotId(submitted.bot_id)
 
     # ── status: the narrow table ──────────────────────────────────────────
