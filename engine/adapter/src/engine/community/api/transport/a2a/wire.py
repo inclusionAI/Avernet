@@ -132,21 +132,29 @@ def wire_interaction_requested(run_id: str, context_id: str, seq: int,
 
 
 def wire_interaction_resolved(run_id: str, context_id: str, seq: int,
-                              payload: dict[str, Any]) -> dict[str, Any]:
-    """HITL 决议（§8.6/R18-1b）：WORKING + 完整 engine_frame。
+                              payload: dict[str, Any],
+                              state: str | None = None) -> dict[str, Any]:
+    """HITL 决议（§8.6/R18-1b/R5-2）：run 真实状态 + 完整 engine_frame。
 
     R18-1b：approval_resolved 只带 approvalId 的帧也要保住**交互身份**事件
-    ——meta.interactionId 从 interactionId / id / approvalId 三键提取，
-    BaaS 消费端按 interactionId 出现与否派发 interaction.resolved。
+    ——meta.interactionId 从 interactionId / id / approvalId 三键提取。
+
+    R5-2：多 pending 部分决议时 run 仍是 INPUT_REQUIRED——帧状态必须反映
+    真实状态，不得硬编码 WORKING（否则 SSE/Replay 说 run 已恢复而 GetTask
+    说在等输入，对外语义自相矛盾）。消费端的"这是 resolved 事件"判定
+    用 meta.kind == "interaction.resolved" 独立标识，**不依赖帧状态**：
+    INPUT_REQUIRED 的 resolved 帧、新 requested 帧在 BaaS 分层派发下不再
+    混淆。state 缺省 WORKING 仅为签名兼容，kernel 一律显式传真实状态。
     """
-    meta: dict[str, Any] = {"seq": seq, "engine_frame": dict(payload)}
+    meta: dict[str, Any] = {"seq": seq, "engine_frame": dict(payload),
+                            "kind": "interaction.resolved"}
     iid = (payload.get("interactionId") or payload.get("id")
            or payload.get("approvalId"))
     if isinstance(iid, (str, int)):
         meta["interactionId"] = iid
     return {"seq": seq, "type": "statusUpdate", "ev": {
         "statusUpdate": {"taskId": run_id, "contextId": context_id,
-                          "status": {"state": "TASK_STATE_WORKING"},
+                          "status": {"state": state or "TASK_STATE_WORKING"},
                           "metadata": meta}}}
 
 

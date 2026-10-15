@@ -309,22 +309,34 @@ class A2aKernel:
         r = self.runs[rid]
         if r.state in wire.TERMINAL_STATES:
             return                     # T1：终态后决议不改写 run 状态
-        iid = payload.get("interactionId") or payload.get("id")
-        if isinstance(iid, str) and iid and \
-                self._interactions.get(iid) == rid:
-            self._resolved_interactions.add(iid)
-            unresolved = [i for i, owner in self._interactions.items()
-                          if owner == rid
-                          and i not in self._resolved_interactions]
-            if not unresolved:
-                r.state = "TASK_STATE_WORKING"
+        # 身份三键提取（R5-1，与 wire R18-1b 同集）：OpenClaw 审批回流
+        # 只带 approvalId（bridge 原样上抛），漏它会把"有明确身份的单项
+        # 决议"错打进 legacy 全清分支。
+        iid = (payload.get("interactionId") or payload.get("id")
+               or payload.get("approvalId"))
+        if isinstance(iid, str) and iid:
+            if self._interactions.get(iid) == rid:
+                self._resolved_interactions.add(iid)
+                unresolved = [i for i, owner in self._interactions.items()
+                              if owner == rid
+                              and i not in self._resolved_interactions]
+                if not unresolved:
+                    r.state = "TASK_STATE_WORKING"
+            # 有明确身份但未注册/不匹配：按"未知身份的独立事件"只原样
+            # 发布——既不 per-iid 清账，也**不得降级清全**（R5-1：未知
+            # 身份不是"run 已整体恢复"的证据，清全会让同 run 其余
+            # pending 被 conflict 锁死）。
         else:
+            # 真正无身份的 legacy 帧（旧引擎回显/强恢复）= "引擎恢复整个
+            # run"——清空全部未决再回 WORKING（R1 幂等锚保留）。
             self._resolved_interactions.update(
                 i for i, owner in self._interactions.items()
                 if owner == rid and i not in self._resolved_interactions)
             r.state = "TASK_STATE_WORKING"
+        # R5-2：wire 帧携带 run **真实**状态（部分决议仍是
+        # INPUT_REQUIRED）+ 独立事件标识——见 wire_interaction_resolved 语义。
         await self._publish(rid, wire.wire_interaction_resolved(
-            rid, r.context_id, 0, payload))
+            rid, r.context_id, 0, payload, state=r.state))
 
     def interaction_pending(self, rid: str, interaction_id: str) -> bool:
         """该 iid 在此 run 上是否仍是未决 pending（R4-2 router 冲突判定）。

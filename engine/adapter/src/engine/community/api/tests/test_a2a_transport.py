@@ -1117,6 +1117,71 @@ async def test_legacy_resolution_without_iid_clears_all_pending(monkeypatch):
     assert fake.calls == [], "引擎已 resume 的 run 不得再上行决策"
 
 
+# ══════════ R5: approvalId 身份提取 + wire 帧状态与 run 一致 ══════════
+
+@pytest.mark.asyncio
+async def test_approval_resolved_only_clears_that_pending():
+    """R5-1 回归钉：approval 回流只带 approvalId（bridge 原样上抛）——
+    单项清账不清全，i-B 仍可决；wire resolved 帧携带 run 真实状态（B
+    未决时 INPUT_REQUIRED，全清后 WORKING），与 GetTask 语义一致。"""
+    k = kernel_mod.A2aKernel()
+    rid, _ = await k.open_run("ctx-apr", "ka", "first", "d")
+    await k.publish_interaction_requested(
+        rid, "apr-A", {"approvalId": "apr-A"})
+    await k.publish_interaction_requested(rid, "i-B", {})
+
+    await k.publish_interaction_resolved(
+        rid, {"approvalId": "apr-A", "state": "approval_resolved"})
+
+    assert k.interaction_pending(rid, "apr-A") is False
+    assert k.interaction_pending(rid, "i-B") is True, \
+        "approval 回流被当成 legacy 全清,锁死了同 run 其余 pending"
+    assert k.runs[rid].state == "TASK_STATE_INPUT_REQUIRED"
+
+    backlog, _ = await k.subscribe(rid, since_seq=0)
+    resolved_frames = [e for e in backlog if e["type"] == "statusUpdate"
+                      and (e["ev"]["statusUpdate"].get("metadata")
+                           or {}).get("kind") == "interaction.resolved"]
+    assert resolved_frames, "resolved 事件缺 kind 独立标识"
+    su = resolved_frames[-1]["ev"]["statusUpdate"]
+    assert su["status"]["state"] == "TASK_STATE_INPUT_REQUIRED", \
+        "wire 帧谎报 WORKING（run 实际仍在等待 i-B）"
+    assert (su.get("metadata", {}).get("engine_frame")
+            or {}).get("approvalId") == "apr-A"
+
+    # 第二个 pending 照常可决；全清后最后一条 resolved 帧如实是 WORKING
+    await k.publish_interaction_resolved(rid, {"interactionId": "i-B"})
+    assert k.runs[rid].state == "TASK_STATE_WORKING"
+    backlog2, _ = await k.subscribe(rid, since_seq=0)
+    resolved2 = [e for e in backlog2 if e["type"] == "statusUpdate"
+                 and (e["ev"]["statusUpdate"].get("metadata")
+                      or {}).get("kind") == "interaction.resolved"]
+    assert resolved2[-1]["ev"]["statusUpdate"]["status"]["state"] == \
+        "TASK_STATE_WORKING"
+
+
+@pytest.mark.asyncio
+async def test_unknown_identity_resolution_clears_nothing():
+    """R5-1：有明确身份但未注册/不匹配——不清全、不改状态（不降级成
+    legacy），事件原样上行。"""
+    k = kernel_mod.A2aKernel()
+    rid, _ = await k.open_run("ctx-ghost", "kg", "first", "d")
+    await k.publish_interaction_requested(rid, "i-g1", {})
+    await k.publish_interaction_requested(rid, "i-g2", {})
+
+    await k.publish_interaction_resolved(
+        rid, {"interactionId": "ghost", "state": "interaction.resolved"})
+
+    assert k.interaction_pending(rid, "i-g1") is True, \
+        "未知身份决议清掉了不相关 pending"
+    assert k.interaction_pending(rid, "i-g2") is True
+    assert k.runs[rid].state == "TASK_STATE_INPUT_REQUIRED"
+    backlog, _ = await k.subscribe(rid, since_seq=0)
+    kinds = [(e["ev"]["statusUpdate"].get("metadata") or {}).get("kind")
+             for e in backlog if e["type"] == "statusUpdate"]
+    assert "interaction.resolved" in kinds, "未知身份的事件未原样上行"
+
+
 # ══════════ R4-3: 客户端超时贯穿到 ChatRequest.aliveTime ══════════
 
 def test_timeout_ms_reaches_chat_request(app_client, monkeypatch):
