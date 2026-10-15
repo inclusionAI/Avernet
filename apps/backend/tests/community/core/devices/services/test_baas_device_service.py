@@ -1296,7 +1296,7 @@ class TestStartServiceInitSteps:
         assert "install_engine.sh" in cmds[1]
         assert "setup_supervisor_sync_service.sh" in cmds[2]
         assert "setup_engine_dirs.sh" in cmds[3]
-        assert "start_service.sh" in cmds[-2]
+        assert not any("/start_service.sh " in cmd for cmd in cmds)
         assert "starting_watchdog.sh" in cmds[-1]
 
     def test_startup_user_selection_is_limited_to_service_and_watchdog(self):
@@ -1347,7 +1347,7 @@ class TestStartServiceInitSteps:
         assert "init failed" in msg.lower() or "bootstrap" in msg.lower()
         svc.report_device_alive.assert_not_called()
 
-    def test_start_service_passes_bot_type(self):
+    def test_post_publish_does_not_repeat_startup_for_coding_bot_type(self):
         svc, baas = self._make_success_svc()
 
         with patch(
@@ -1364,8 +1364,11 @@ class TestStartServiceInitSteps:
             c for c in baas.exec_command_on_bot.call_args_list
             if "start_service.sh" in c.kwargs.get("cmd", "")
         ]
-        assert len(start_cmd_calls) == 1
-        assert "--bot_type personalCoding" in start_cmd_calls[0].kwargs["cmd"]
+        assert start_cmd_calls == []
+        assert any(
+            "starting_watchdog.sh" in call.kwargs.get("cmd", "")
+            for call in baas.exec_command_on_bot.call_args_list
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1548,6 +1551,7 @@ class TestInitStepEdgeCases:
         svc = _make_service(baas_service=baas)
 
         symbol = json.dumps([{"source": "./skill_a", "target": "/opt/skills/a"}])
+        baas.exec_command_on_bot.return_value = {"exit_code": 0}
         svc._create_baas_skill_symlink_conf(bot_uuid="BOT-1", symbol=symbol)
 
         baas.exec_command_on_bot.assert_called_once()

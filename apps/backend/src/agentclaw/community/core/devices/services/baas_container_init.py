@@ -12,7 +12,7 @@ logger = get_logger()
 
 
 class BaasContainerInitializer:
-    """Run the post-publish bootstrap sequence inside a BaaS container."""
+    """Complete Backend configuration and confirm the existing BaaS startup."""
 
     def __init__(self, baas_service) -> None:
         self._baas_service = baas_service
@@ -31,9 +31,14 @@ class BaasContainerInitializer:
         admins: list[str] | None,
         codefuse_token: str | None = None,
     ) -> None:
-        """Execute the 6-step init sequence inside the BaaS container."""
-        entity_id = device.device_props.get("entity_id")
-        entity_type = device.device_props.get("entity_type")
+        """Finish post-publish handoff without repeating one-shot service startup.
+
+        BaaS has already completed start_service.sh, including security cleanup.
+        Keep the existing configuration steps and report its preserved result
+        with the Backend Binding identity. Business startup arguments remain
+        accepted for caller compatibility; this handoff does not rewrite the
+        runtime's credentials or restart its processes.
+        """
         client_id = str(device.device_props.get("client_id") or device.device_id)
         symbol = device.device_props.get("symbol")
         envs = device.device_props.get("envs")
@@ -48,21 +53,14 @@ class BaasContainerInitializer:
         self._run_baas_install_engine(bot_uuid)
         self._run_baas_setup_sync_service(bot_uuid, engine)
         self._ensure_baas_engine_dirs(bot_uuid, engine)
-        self._create_baas_skill_symlink_conf(bot_uuid, symbol)
+        if self._create_baas_skill_symlink_conf(bot_uuid, symbol):
+            self._apply_baas_skill_symlinks(bot_uuid, engine)
         self._write_codefuse_token(bot_uuid, codefuse_token)
-        self._start_baas_sandbox_service(
+        self.dispatch_watchdog(
             bot_uuid=bot_uuid,
             client_id=client_id,
-            engine=engine,
-            bot_type=bot_type,
-            bot_id=bot_id,
-            owner_id=owner_id,
             token=callback_token,
             startup_identity=effective_startup_identity,
-            entity_id=entity_id,
-            entity_type=entity_type,
-            stage="draft",
-            admins=",".join(admins) if admins else None,
         )
 
     def _write_codefuse_token(self, bot_uuid: str, codefuse_token: str | None) -> None:
@@ -117,10 +115,10 @@ class BaasContainerInitializer:
         except Exception as e:
             logger.warning("[_ensure_baas_engine_dirs] failed (non-fatal): %s", e)
 
-    def _create_baas_skill_symlink_conf(self, bot_uuid: str, symbol: str | None) -> None:
+    def _create_baas_skill_symlink_conf(self, bot_uuid: str, symbol: str | None) -> bool:
         mappings = _deserialize_symbol(symbol)
         if not mappings:
-            return
+            return False
 
         config_lines = [f"{m.source.lstrip('./')} {m.target}" for m in mappings]
         config_content = "\n".join(config_lines)
@@ -130,12 +128,27 @@ class BaasContainerInitializer:
             "cat > /var/run/agentclaw/skill-symlinks.conf << 'EOFCONF'\n"
             f"{config_content}\nEOFCONF"
         )
-        self._baas_service.exec_command_on_bot(
+        result = self._baas_service.exec_command_on_bot(
             bot_uuid=bot_uuid,
             cmd=cmd,
             timeout_seconds=30,
         )
+        if result.get("exit_code") != 0:
+            raise RuntimeError("BaaS skill symlink config write failed")
         logger.info("[_create_baas_skill_symlink_conf] written: bot_uuid=%s", bot_uuid)
+        return True
+
+    def _apply_baas_skill_symlinks(self, bot_uuid: str, engine: str) -> None:
+        """Consume nonempty legacy symbol config without running full startup."""
+        if engine in {"aicoding", "claude_code"}:
+            command = "/home/admin/bin/aicoding/setup_skill_symlinks.sh"
+        else:
+            command = shlex.join(["/home/admin/bin/setup_skill_symlinks.sh", "--engine", engine])
+        result = self._baas_service.exec_command_on_bot(
+            bot_uuid=bot_uuid, cmd=_admin_command(command), timeout_seconds=30,
+        )
+        if result.get("exit_code") != 0:
+            raise RuntimeError("BaaS skill symlink application failed")
 
     def _start_baas_sandbox_service(
         self,
@@ -153,6 +166,7 @@ class BaasContainerInitializer:
         admins: str | None = None,
         startup_identity: str | None,
     ) -> None:
+        """Legacy explicit-start compatibility helper; not used by run()."""
         args = [
             "/home/admin/bin/start_service.sh",
             "--token",
@@ -219,14 +233,18 @@ class BaasContainerInitializer:
             cmd=watchdog_cmd,
             timeout_seconds=30,
         )
-        logger.info("[_start_baas_sandbox_service] watchdog dispatched: bot_uuid=%s", bot_uuid)
+        logger.info("[dispatch_watchdog] startup confirmation dispatched: bot_uuid=%s", bot_uuid)
 
 
 def _admin_background_command(command: str, log_path: str) -> str:
     """Preserve startup envs and support both root and admin exec transports."""
     body = f"nohup {command} >> {shlex.quote(log_path)} 2>&1 &"
-    as_admin = shlex.join(["su", "admin", "-c", body])
-    return f'if [ "$(id -un)" = admin ]; then {body} else {as_admin}; fi'
+    return _admin_command(body)
+
+
+def _admin_command(command: str) -> str:
+    as_admin = shlex.join(["su", "admin", "-c", command])
+    return f'if [ "$(id -un)" = admin ]; then {command} else {as_admin}; fi'
 
 
 def _deserialize_symbol(symbol: str | None) -> list[SynlinkMappingInfo]:
