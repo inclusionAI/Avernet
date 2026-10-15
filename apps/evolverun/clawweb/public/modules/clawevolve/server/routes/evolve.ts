@@ -4577,7 +4577,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
   router.use("/internal/tasks/:taskId", asyncHandler(async (req, res, next) => {
     if (!repo) { next(); return; }
     const task = await repo.findTask(String(req.params.taskId));
-    if (task && ['repair', 'workflow_repair'].includes(task.task_type)) {
+    if (task?.task_type === 'workflow_repair') {
       res.status(404).json({ error: "任务不存在" }); return;
     }
     next();
