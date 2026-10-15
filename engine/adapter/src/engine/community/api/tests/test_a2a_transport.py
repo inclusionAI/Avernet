@@ -41,6 +41,8 @@ import engine.community.api.transport.a2a.router as R
 import engine.community.api.transport.a2a.engine_bridge as bridge
 from engine.community.api.transport.a2a import kernel as kernel_mod
 from engine.community.api.transport.a2a.router import InjectForwardRejected
+from engine.community.core.chat.models import ChatAbortRequest, ChatAbortResult  # noqa: E402
+from engine.community.kernel.frames import ErrorShape  # noqa: E402
 
 
 # ── fixtures ───────────────────────────────────────────────────────────────
@@ -1064,3 +1066,269 @@ def test_agent_card_declares_cancel_extension(app_client):
     uris = [e["url"] for e in card["capabilities"]["extensions"]]
     from engine.community.api.transport.a2a.card import EXTENSION_URIS
     assert EXTENSION_URIS["cancel"] in uris, uris
+
+
+# ══════════ 1c+: CancelTask 引擎真中止（abort 上行，TC-CANCEL 闭环）══════════
+
+class _FakeAbortChat:
+    """abort 通道 fake — ChatService.abort 的真实契约（ChatAbortResult）。
+    与 _FakeChat 相同边界：假在 ChatService 插件面上。"""
+
+    def __init__(self, *, fail=False, hang=False):
+        self.calls: list = []
+        self.fail = fail
+        self.hang = hang
+
+    async def abort(self, request, auth=None):
+        self.calls.append(request)
+        if self.hang:
+            await asyncio.sleep(30)
+        if self.fail:
+            return ChatAbortResult(
+                ok=False, error=ErrorShape(code="REJECTED", message="denied"))
+        return ChatAbortResult(ok=True, aborted=True, run_id=request.run_id)
+
+    async def stream(self, request, auth=None):
+        raise RuntimeError("unused in these tests")
+
+
+def test_cancel_forwards_abort_keys_and_engine_reflow_is_idempotent(
+        app_client, monkeypatch):
+    """abort 上行口径：cancel_run 成功后 router 携 ChatService 句柄发
+    ChatService.abort——与 ws_server._handle_chat_abort 同一构造
+    (ChatAbortRequest(session_key=run.context_id, run_id=native_run_id))；
+    引擎侧 aborted 帧回流（bridge _safe_complete 正是 state=aborted 的
+    收口路径）在 T1 下幂等不炸。"""
+    fake = _FakeAbortChat()
+    _install_fake_chat(monkeypatch, fake)
+    k = R._kernel
+
+    async def seed():
+        rid, _ = await k.open_run("abort-ctx", "ak1", "first", "d")
+        await k.publish_status(rid, "TASK_STATE_WORKING")
+        return rid
+
+    rid = asyncio.run(seed())
+    k.runs[rid].native_run_id = "nat-7"
+
+    r = _rpc(app_client, 1, "CancelTask", {"taskId": rid})
+    body = r.json()
+    assert "error" not in body, body
+    assert body["result"]["task"]["status"]["state"] == "TASK_STATE_CANCELED"
+
+    # 引擎收到 1 次 abort，定位键 = run 的规范 context + E4 引擎原生 id
+    #（不是 kernel rid——engine 不认识传输层 id）
+    assert len(fake.calls) == 1
+    req = fake.calls[0]
+    assert isinstance(req, ChatAbortRequest)
+    assert req.session_key == "abort-ctx"
+    assert req.run_id == "nat-7"
+
+    # 引擎 aborted 帧迟到回流：不改写状态、不二次终结、不上浮（T1 已终态早退）
+    async def reflow():
+        await bridge._safe_complete(k, rid, "TASK_STATE_CANCELED")
+
+    asyncio.run(reflow())
+    run = k.get_run(rid)
+    assert run.state == "TASK_STATE_CANCELED"
+
+
+def test_cancel_abort_without_native_run_id_sends_session_key(
+        app_client, monkeypatch):
+    """native_run_id 未登记（引擎尚无帧回流：SUBMITTED/极早期 run）时
+    abort 仍上行——run_id=None 落到 port 的 session 级中止语义
+    （claude_code 省略 runId 字段；openclaw 传 ""）。"""
+    fake = _FakeAbortChat()
+    _install_fake_chat(monkeypatch, fake)
+    rid = _seed_run("abort-early", "ak2")
+    # native_run_id 未注入（None）
+
+    r = _rpc(app_client, 1, "CancelTask", {"taskId": rid})
+    assert r.json()["result"]["task"]["status"]["state"] == \
+        "TASK_STATE_CANCELED"
+    assert len(fake.calls) == 1
+    req = fake.calls[0]
+    assert req.session_key == "abort-early"
+    assert req.run_id is None
+
+
+def test_abort_refused_still_canceled_snapshot_with_honest_log(
+        app_client, monkeypatch, caplog):
+    """abort ok=False 诚实语义：传输面取消已生效——run 不复活、不回滚，
+    CancelTask 仍如实回 CANCELED 快照（BaaS 判定契约只认 state），
+    失败只落日志不静默。"""
+    import logging as _logging
+    fake = _FakeAbortChat(fail=True)
+    _install_fake_chat(monkeypatch, fake)
+    k = R._kernel
+
+    async def seed():
+        rid, _ = await k.open_run("abort-refused", "ak3", "first", "d")
+        await k.publish_status(rid, "TASK_STATE_WORKING")
+        await k.publish_delta(rid, "已有增量")
+        return rid
+
+    rid = asyncio.run(seed())
+
+    with caplog.at_level(_logging.WARNING, logger="engine-a2a"):
+        r = _rpc(app_client, 1, "CancelTask", {"taskId": rid})
+
+    body = r.json()
+    assert "error" not in body, body
+    assert body["result"]["task"]["status"]["state"] == "TASK_STATE_CANCELED"
+    assert len(fake.calls) == 1, "refused abort was still forwarded once"
+
+    # 不静默：refusal 从引擎 code 结构化落日志
+    refused = [rec for rec in caplog.records if "engine abort refused" in rec.message]
+    assert refused, caplog.text
+    assert "REJECTED" in refused[0].getMessage()
+
+    # run 不复活：迟到引擎帧不改写终态与终稿
+    async def late():
+        await k.publish_delta(rid, "迟到增量")
+        await k.complete_run(rid, "TASK_STATE_COMPLETED")
+
+    asyncio.run(late())
+    run = k.get_run(rid)
+    assert run.state == "TASK_STATE_CANCELED"
+    assert run.latest_text == "已有增量"
+
+
+def test_cancel_after_engine_final_no_abort_sent(app_client, monkeypatch):
+    """引擎自然终局先到 + CancelTask 后到 → 既有 task_terminal 错误面，
+    且不向引擎发二次 abort（终态下取消对 engine 无意义、也避免误伤
+    同 session 后续 run）。"""
+    fake = _FakeAbortChat()
+    _install_fake_chat(monkeypatch, fake)
+    k = R._kernel
+
+    async def seed():
+        rid, _ = await k.open_run("abort-final", "ak4", "first", "d")
+        await k.publish_final(rid, "自然终稿")
+        await k.complete_run(rid, "TASK_STATE_COMPLETED")
+        return rid
+
+    rid = asyncio.run(seed())
+    r = _rpc(app_client, 1, "CancelTask", {"taskId": rid})
+    err = r.json()["error"]
+    assert err["data"]["reason"] == "task_terminal"
+    assert err["data"]["state"] == "TASK_STATE_COMPLETED"
+    assert fake.calls == [], "terminal run 不得再触发引擎 abort"
+
+
+def test_repeat_cancel_does_not_re_abort(app_client, monkeypatch):
+    """T1 幂等：第二次 CancelTask 走 task_terminal 错误面（终态单次）
+    ——引擎侧只收到 1 次 abort。"""
+    fake = _FakeAbortChat()
+    _install_fake_chat(monkeypatch, fake)
+    rid = _seed_run("abort-twice", "ak5")
+    k = R._kernel
+    k.runs[rid].native_run_id = "nat-2"
+
+    r1 = _rpc(app_client, 1, "CancelTask", {"taskId": rid})
+    assert r1.json()["result"]["task"]["status"]["state"] == \
+        "TASK_STATE_CANCELED"
+    r2 = _rpc(app_client, 2, "CancelTask", {"taskId": rid})
+    err = r2.json()["error"]
+    assert err["data"]["reason"] == "task_terminal"
+    assert err["data"]["state"] == "TASK_STATE_CANCELED"
+    assert len(fake.calls) == 1, "重复 cancel 不得重复 abort"
+    assert fake.calls[0].run_id == "nat-2"
+
+
+def test_abort_channel_unavailable_or_timeout_keeps_canceled(
+        app_client, monkeypatch, caplog):
+    """abort 通道不可用（无活跃引擎）/ 引擎挂死超时：CancelTask 响应仍
+    如实回 CANCELED 快照且限时返回（不随引擎挂死），失败落日志不静默，
+    run 不复活。"""
+    import logging as _logging
+
+    # a) 无活跃引擎：_chat_plugin 抛 RuntimeError
+    def broken_plugin():
+        raise RuntimeError("engine chat surface unavailable")
+
+    monkeypatch.setattr(bridge, "_chat_plugin", broken_plugin)
+    rid = _seed_run("abort-none", "ak6")
+    with caplog.at_level(_logging.WARNING, logger="engine-a2a"):
+        r = _rpc(app_client, 1, "CancelTask", {"taskId": rid})
+    assert r.json()["result"]["task"]["status"]["state"] == \
+        "TASK_STATE_CANCELED"
+    unavailable = [rec for rec in caplog.records
+                   if "engine abort unavailable" in rec.message]
+    assert unavailable, caplog.text
+
+    # b) 引擎 abort 挂死：限时返回（超时上限可注入），响应不变
+    fake = _FakeAbortChat(hang=True)
+    _install_fake_chat(monkeypatch, fake)
+    monkeypatch.setattr(R, "_ABORT_FORWARD_TIMEOUT_SECONDS", 0.05)
+    rid2 = _seed_run("abort-hang", "ak7")
+    r2 = _rpc(app_client, 2, "CancelTask", {"taskId": rid2})
+    assert r2.json()["result"]["task"]["status"]["state"] == \
+        "TASK_STATE_CANCELED"
+    timed_out = [rec for rec in caplog.records
+                 if "engine abort timed out" in rec.message]
+    assert timed_out, caplog.text
+    assert R._kernel.get_run(rid2).state == "TASK_STATE_CANCELED"
+
+
+@pytest.mark.asyncio
+async def test_cancel_mid_stream_engine_aborted_frame_reflow(monkeypatch):
+    """真 bridge 泵流中 CancelTask：首帧注入 native_run_id → abort 上行带
+    该 id；引擎 aborted 帧经 bridge 真实消费路径回流（_EngineRunAborted →
+    _safe_complete）——T1 下与 cancel_run 的 CANCELED 幂等收敛，订阅者只
+    收到一次终态终结。"""
+    monkeypatch.setattr(R, "_kernel", kernel_mod.A2aKernel())
+    k = R._kernel
+
+    class _StreamAbortChat:
+        def __init__(self):
+            self.calls: list = []
+            self.abort_seen = asyncio.Event()
+
+        async def abort(self, request, auth=None):
+            self.calls.append(request)
+            self.abort_seen.set()
+            return ChatAbortResult(ok=True, aborted=True,
+                                   run_id=request.run_id)
+
+        async def stream(self, request, auth=None):
+            async def gen():
+                yield _Frame("chat", {"state": "delta", "runId": "nat-88",
+                                      "deltaText": "开头"})
+                await self.abort_seen.wait()
+                yield _Frame("chat", {"state": "aborted", "runId": "nat-88",
+                                      "stopReason": "rpc"})
+            return gen()
+
+    fake = _StreamAbortChat()
+    _install_fake_chat(monkeypatch, fake)
+
+    rid, _ = await k.open_run("flow-ctx", "fk1", "first", "d")
+    task = asyncio.create_task(
+        bridge.execute_and_stream(k, rid, "flow-ctx", "查询"))
+    # 首帧落地 → native id 已由 bridge 注入（E4）
+    for _ in range(200):
+        if k.runs[rid].native_run_id == "nat-88":
+            break
+        await asyncio.sleep(0.01)
+    assert k.runs[rid].native_run_id == "nat-88"
+    assert k.runs[rid].state == "TASK_STATE_WORKING"
+
+    out = await R._cancel_task({"taskId": rid}, 1, None)
+    assert out["task"]["status"]["state"] == "TASK_STATE_CANCELED"
+    # abort 上行定位键 = context + E4 首帧注入的引擎原生 id
+    assert len(fake.calls) == 1
+    assert fake.calls[0].session_key == "flow-ctx"
+    assert fake.calls[0].run_id == "nat-88"
+
+    await asyncio.wait_for(task, 5)   # bridge 消费 aborted 帧后自然收口
+    assert k.get_run(rid).state == "TASK_STATE_CANCELED"
+
+    # 订阅者只见一次终态终结（T1：aborted 回流不二次终结）
+    backlog, q = await k.subscribe(rid, since_seq=0)
+    states = [e["ev"]["statusUpdate"]["status"]["state"]
+              for e in backlog if e["type"] == "statusUpdate"]
+    assert states.count("TASK_STATE_CANCELED") == 1, states
+    marker = await asyncio.wait_for(q.get(), 2)
+    assert marker["ev"]["statusUpdate"]["metadata"]["final"] == "true"
+    assert q.empty(), "aborted 回流后不得二次终结"

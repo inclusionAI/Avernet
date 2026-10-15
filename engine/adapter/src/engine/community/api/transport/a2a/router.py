@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import uuid
 from typing import Any
 
@@ -36,7 +37,10 @@ from engine.community.api.transport.a2a import wire
 from engine.community.api.transport.a2a.card import EXTENSION_URIS, make_agent_card
 from engine.community.api.transport.a2a.engine_bridge import execute_and_stream
 from engine.community.api.transport.a2a.kernel import A2aKernel, KeyConflictError
+from engine.community.core.chat.models import ChatAbortRequest
 from engine.community.plugin_api.auth_gate.protocol import AuthGateService
+
+log = logging.getLogger("engine-a2a")
 
 router = APIRouter()
 
@@ -404,15 +408,63 @@ _HANDLERS["GetTask"] = _get_task
 
 # ── CancelTask (1c/TC-CANCEL，设计 §7：幂等；终态后取消 → 标准错误) ──
 
+# 1c+：引擎真中止上行的响应时序上限。与 _RESOLVE/_INJECT 家族同口径；
+# 端口自带更短的 RPC 超时（claude_code port chat.abort 10s），这里的
+# wait_for 只是病态 adapter 的兜底护栏（BaaS CancelTask HTTP 窗口 30s）。
+_ABORT_FORWARD_TIMEOUT_SECONDS = 30.0
+
+
+async def _forward_engine_abort(run: Any) -> None:
+    """1c+：cancel_run 成功后向引擎发真实 ChatService.abort——与
+    ws_server._handle_chat_abort 同一构造口径（ChatAbortRequest
+    (session_key, run_id)）：session=run 的规范 context（与 gate 判定
+    同源，R13-3），run_id=E4 桥注入的引擎原生 id（未登记时 None——
+    两侧 port 均支持 session 级中止：claude_code 省略 runId，
+    openclaw 传 ""）。auth=None 与 inject/resolve 上行一致（HTTP 面的
+    文档化默认）。
+
+    失败诚实语义：不回滚、不上浮、不改响应——传输面 CANCELED 已生效
+    （T1 也挡住引擎迟到帧改写），abort 未达只如实落日志。
+    """
+    from engine.community.api.transport.a2a.engine_bridge import _chat_plugin
+
+    try:
+        chat = _chat_plugin()
+        result = await asyncio.wait_for(
+            chat.abort(
+                ChatAbortRequest(session_key=run.context_id,
+                                 run_id=run.native_run_id),
+                auth=None,
+            ),
+            timeout=_ABORT_FORWARD_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        log.warning("engine abort timed out (transport cancel in effect): "
+                    "run=%s context=%s", run.run_id, run.context_id)
+        return
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        log.warning("engine abort unavailable: run=%s %s: %s",
+                    run.run_id, type(e).__name__, e)
+        return
+    if not result.ok:
+        log.warning("engine abort refused: run=%s code=%s message=%s "
+                    "(transport cancel in effect)", run.run_id,
+                    getattr(result.error, "code", "UNKNOWN"),
+                    getattr(result.error, "message", ""))
+
+
 async def _cancel_task(params: dict[str, Any], req_id: Any,
                        _gated_key: str | None) -> dict[str, Any]:
-    """§8.6：cancel 只改 run 状态与订阅者终结——kernel 不触碰
-    interaction/resolution 注册表（HITL 记录独立于 run 生命周期）。
+    """§8.6：cancel 改 run 状态与订阅者终结——kernel 不触碰
+    interaction/resolution 注册表（HITL 记录独立于 run 生命周期）；
+    引擎真中止上行由 _forward_engine_abort 在 cancel_run 之后发起。
 
-    幂等契约（§7 表）：已终态 run 上 cancel 不迁移、不重复终结——
-    标准错误，data 带 {state, already_terminal} 让迟到的重复 cancel
-    可判读 run 终局（CANCELED 与 COMPLETED 同一错误面、以 data.state
-    区分，无静默 no-op 歧义）。
+    幂等契约（§7 表）：已终态 run 上 cancel 不迁移、不重复终结、不再
+    发 abort——标准错误，data 带 {state, already_terminal} 让迟到的
+    重复 cancel 可判读 run 终局（CANCELED 与 COMPLETED 同一错误面、
+    以 data.state 区分，无静默 no-op 歧义）。
     """
     tid = params.get("taskId")
     if not isinstance(tid, str) or not tid:
@@ -428,6 +480,11 @@ async def _cancel_task(params: dict[str, Any], req_id: Any,
                           "data": {"reason": "task_terminal", "state": r.state,
                                    "already_terminal": True}}}
     snapshot = await _kernel.cancel_run(tid)
+    # 1c+：传输面 CANCELED 落定后上行引擎真中止——响应仍按传输面快照
+    # （BaaS 成功判定钉在 result.task.status.state==CANCELED，abort 未达
+    # 不改契约）；引擎 aborted 帧随流回流经 bridge 收口，T1 下与本次
+    # CANCELED 幂等收敛，迟到不二次终结。
+    await _forward_engine_abort(r)
     return {"task": snapshot}
 
 
