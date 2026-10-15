@@ -50,7 +50,7 @@ it('keeps the plan, Owner cooperation and approval together in stage three', asy
   expect(screen.getByRole('button', { name: '确认完整方案' })).toBeEnabled();
   await user.click(screen.getByRole('button', { name: '确认完整方案' }));
   await waitFor(() => expect(sessionRecoveryApi.decide).toHaveBeenCalledWith('task', 'plan-digest', true, true, '权限已开放'));
-  expect(screen.queryByText('完整任务时间线')).toBeNull(); await user.click(screen.getByText('查看记录原文')); expect(screen.getByText('原失败消息')).toBeVisible();
+  expect(screen.queryByText('完整任务时间线')).toBeNull(); await user.click(screen.getByText('展开详情')); expect(screen.getByText('原失败消息')).toBeVisible();
 });
 it('retains audited evidence and shows a simple collapsed review only after task completion', async () => {
   vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', phase: 'verify', plan: { ...task.plan, approvedAt: 2 } } as never);
@@ -58,16 +58,22 @@ it('retains audited evidence and shows a simple collapsed review only after task
   render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
   fireEvent.click(await screen.findByRole('tab', { name: /形成修复方案/ }));
   await screen.findByText('原失败消息');
-  fireEvent.click(screen.getByText('查看记录原文')); fireEvent.click(screen.getByText('查看完整操作回执')); await waitFor(() => expect(sessionRecoveryApi.toolCall).toHaveBeenCalledWith('task', 'call'));
+  fireEvent.click(screen.getByText('展开详情')); fireEvent.click(screen.getByText('查看完整操作回执')); await waitFor(() => expect(sessionRecoveryApi.toolCall).toHaveBeenCalledWith('task', 'call'));
   await screen.findByText(/完整原始回执/);
   const review = screen.getByText('人工复核').closest('details')!;
   expect(review).not.toHaveAttribute('open');
-  expect(review.closest('[aria-label="验收与确认"]')).not.toBeNull();
+  expect(review.closest('[role="tabpanel"]')).toBeNull();
+  expect(screen.getByRole('region', { name: '任务概览' }).nextElementSibling).toBe(review.closest('section'));
   fireEvent.click(screen.getByText('人工复核'));
   expect(screen.queryByText('引用证据')).toBeNull();
   fireEvent.change(screen.getByLabelText('理由'), { target: { value: '前后原文已核对' } });
+  fireEvent.click(screen.getByRole('tab', { name: /投递恢复消息/ }));
+  expect(screen.getByLabelText('理由')).toHaveValue('前后原文已核对');
   fireEvent.click(screen.getByRole('button', { name: '保存标注' }));
   await waitFor(() => expect(sessionRecoveryApi.annotate).toHaveBeenCalledWith('task', { layer: 'effect', correct: true, reason: '前后原文已核对', evidence_ids: [] }));
+  expect(await screen.findByRole('status')).toHaveTextContent('人工复核已保存');
+  fireEvent.change(screen.getByLabelText('理由'), { target: { value: '补充核对结果' } });
+  expect(screen.queryByText('人工复核已保存，Agent 原判断保留。')).toBeNull();
 });
 it('renders an explicit error without silently presenting an empty timeline', async () => {
   vi.mocked(sessionRecoveryApi.detail).mockRejectedValue(new Error('fixture offline')); render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
@@ -125,8 +131,9 @@ it('switches stages and shows every returned action with its status while retain
   await user.click(panel().getByRole('button', { name: '方案动作：修正配置 →' }));
   expect(panel().getByText('修正配置')).toBeVisible();
   expect(panel().queryByRole('button', { name: '确认完整方案' })).toBeNull();
-  expect(panel().getByRole('heading', { name: '核对配置失败' })).toBeVisible(); await user.click(within(panel().getByRole('heading', { name: '核对配置失败' }).closest('article')!).getByText('展开详情'));
-  expect(panel().getByText('连接被拒绝', { exact: false, selector: 'p' })).toBeVisible();
+  const failedCall = panel().getByRole('heading', { name: '核对配置失败' }).closest('article')!;
+  expect(within(failedCall).getByText('连接被拒绝', { exact: false, selector: 'p' })).toBeVisible();
+  await user.click(within(failedCall).getByText('展开详情'));
   expect(panel().getByRole('heading', { name: '提交修复方案' })).toBeVisible();
   expect(panel().getByRole('heading', { name: '发送通知' })).toBeVisible();
   expect(panel().getByRole('heading', { name: '记录 Owner 的方案决定' })).toBeVisible();
@@ -135,6 +142,7 @@ it('switches stages and shows every returned action with its status while retain
   expect(screen.queryByText('完整修复方案')).toBeNull();
   expect(panel().getByText('读取原会话')).toBeVisible();
   expect(panel().getByText('定位到失败消息')).toBeVisible();
+  expect(panel().getByText('制定修复方案')).toBeVisible();
   expect(sessionRecoveryApi.toolCall).not.toHaveBeenCalled();
   await user.click(panel().getAllByText('展开详情')[0]);
   await waitFor(() => expect(sessionRecoveryApi.toolCall).toHaveBeenCalledWith('task', 'read'));
@@ -169,6 +177,9 @@ it('keeps long reasoning out of action headings and shows the evidence beside th
   expect(panel.queryByRole('heading', { name: reasoning })).toBeNull();
   expect(screen.queryByRole('heading', { name: '故障与恢复证据' })).toBeNull();
   const judgment = panel.getByRole('heading', { name: '判断干预方式', exact: true }).closest('article')!;
+  expect(within(judgment).getByText('处理方式：')).toBeVisible();
+  expect(within(judgment).getByText('继续观察')).toBeVisible();
+  expect(judgment.querySelector('.sr-long-text')).not.toBeVisible();
   await user.click(within(judgment).getByText('展开详情'));
   expect(judgment.querySelector('.sr-long-text')).toBeVisible();
   expect(judgment.querySelector('.sr-long-text')?.textContent?.replace(/\s/g, '')).toBe(reasoning.replace(/\s/g, ''));
@@ -241,13 +252,16 @@ it('retains long purposes and separates linked conclusions from results and actu
   const card = (await screen.findByRole('heading', { name: purpose })).closest('article')!;
   expect(card.querySelector('.sr-result-preview')).toHaveTextContent('配置读取成功');
   expect(card.querySelector('.sr-result-preview')).not.toHaveTextContent('文档访问权限');
+  expect(card.querySelector('.sr-process-conclusion')).toBeVisible();
+  expect(card.querySelector('.sr-process-conclusion')).toHaveTextContent('文档访问权限仍需单独核对');
   expect(within(card).getByText('继续核对文档权限')).toBeVisible();
   await user.click(within(card).getByText('展开详情'));
   expect(within(card).getByRole('heading', { name: '结论' })).toBeVisible();
   expect(within(card).getByText('Bot default')).toBeVisible();
-  expect(within(card).getByText('配置核查').tagName).toBe('STRONG');
-  expect(within(card).getByText('enabled').tagName).toBe('CODE');
-  expect(within(card).getByText(/文档访问权限仍需单独核对/)).toBeVisible();
+  const fullConclusion = within(card.querySelector('.sr-operation-body')! as HTMLElement);
+  expect(fullConclusion.getByText('配置核查').tagName).toBe('STRONG');
+  expect(fullConclusion.getByText('enabled').tagName).toBe('CODE');
+  expect(fullConclusion.getByText(/文档访问权限仍需单独核对/)).toBeVisible();
   await user.click(within(card).getByText('查看本次调用的接口请求'));
   expect(within(within(card).getByText('查看本次调用的接口请求').closest('details')!).getByText(/"path": "\/api\/mcp"/)).toBeVisible();
   expect(within(card).queryByText('查看本次调用的 Shell 命令')).toBeNull();
@@ -258,7 +272,7 @@ it('preserves raw evidence including angle brackets and Markdown punctuation', a
   const excerpt = '<tool_result>**原始返回** & `literal`</tool_result>\n第二行原文';
   vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, evidence: [{ ...task.evidence[0], excerpt }] } as never);
   render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
-  fireEvent.click(await screen.findByText('查看记录原文'));
+  fireEvent.click(await screen.findByText('展开详情'));
   const evidence = document.querySelector('.sr-evidence-excerpt')!;
   expect(evidence).toBeVisible();
   expect(evidence.textContent).toBe(excerpt);
