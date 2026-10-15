@@ -187,8 +187,8 @@ class BaasDeviceService(DeviceService):
     ) -> AllocatedDevice:
         """Create a BaaS-managed device via ``POST /api/v1/bots`` and
         ``approve_publish``. Returns an ``AllocatedDevice`` whose
-        ``device_props`` carry ``bot_uuid`` + ``publish_id`` so
-        ``_start_service`` (polling) and ``_do_release`` (destroy) can use them.
+        ``device_props`` carry ``bot_uuid`` + ``publish_id`` so the durable
+        create-publish poll/init tasks and ``_do_release`` (destroy) can use them.
         """
         bot_name = bolt_id  # parent uses bot_id for naming; bot_name passed in via extra_envs not available here
         return self._allocate_via_baas(
@@ -510,31 +510,6 @@ class BaasDeviceService(DeviceService):
             baas_service=self._baas_service,
             device=device,
             shell_cmd=shell_cmd,
-        )
-
-    def _start_service(
-        self,
-        *,
-        device: AllocatedDevice,
-        nas_mappings: list[NasMappingInfo] | None = None,
-        engine: str = DEFAULT_ENGINE_TYPE,
-        bot_type: str = "",
-        bot_id: str | None = None,
-        owner_id: str | None = None,
-        admins: list[str] | None = None,
-        codefuse_token: str | None = None,
-    ) -> tuple[bool, str]:
-        return baas_publish_lifecycle.run_start_service_polling(
-            baas_service=self._baas_service,
-            device=device,
-            run_container_init=self._run_container_init,
-            report_device_alive=self.report_device_alive,
-            engine=engine,
-            bot_type=bot_type,
-            bot_id=bot_id,
-            owner_id=owner_id,
-            admins=admins,
-            codefuse_token=codefuse_token,
         )
 
     def poll_publish_once(self, *, publish_id: int) -> str | None:

@@ -2,7 +2,7 @@
 
 Part 1: _resolve_bot_by_binding_id
 Part 2: provider=baas lifecycle hooks (_setup_directory, _do_allocate,
-        _do_allocate_nas, _start_service, _do_release, _query_device_info)
+        _do_allocate_nas, _run_container_init, _do_release, _query_device_info)
 """
 
 from __future__ import annotations
@@ -1141,7 +1141,7 @@ class TestDoAllocate:
 
 
 # ---------------------------------------------------------------------------
-# _start_service (polling)
+# _run_container_init
 # ---------------------------------------------------------------------------
 
 
@@ -1158,140 +1158,40 @@ def _device_with_publish(publish_id: str = "12345") -> AllocatedDevice:
     )
 
 
-class TestStartService:
-    def test_missing_publish_id_returns_failure(self):
-        svc = _make_service()
-        device = AllocatedDevice(
-            device_id="x", device_provider=BAAS_DEVICE_PROVIDER,
-            device_props={"callback_token": "t"},
-        )
-        ok, msg = svc._start_service(device=device)
-        assert ok is False
-        assert "publish_id" in msg
+class TestContainerInitSteps:
+    """Tests for the container init sequence that runs after publish SUCCESS."""
 
-    def test_invalid_publish_id_returns_failure(self):
-        svc = _make_service()
-        device = AllocatedDevice(
-            device_id="x", device_provider=BAAS_DEVICE_PROVIDER,
-            device_props={"publish_id": "not-a-number", "callback_token": "t"},
-        )
-        ok, msg = svc._start_service(device=device)
-        assert ok is False
-        assert "invalid publish_id" in msg
-
-    def test_success_calls_report_device_alive(self):
+    def _make_svc(self):
         baas = MagicMock()
         baas._baas_api_base = "http://baas.local"
-        baas.get_publish_progress.return_value = {"status": "SUCCESS"}
         baas.exec_command_on_bot.return_value = {"exit_code": 0, "stdout": "", "stderr": ""}
         svc = _make_service(baas_service=baas)
-        svc.report_device_alive = MagicMock()
-
-        with patch(
-            "agentclaw.community.core.devices.services.baas_device_service.time.sleep",
-            return_value=None,
-        ):
-            ok, msg = svc._start_service(device=_device_with_publish())
-
-        assert ok is True
-        svc.report_device_alive.assert_called_once_with(
-            device_id="staff_u001_default_abc",
-            token="tok-123",
-        )
-
-    def test_failed_returns_failure_for_parent_to_mark_failed(self):
-        baas = MagicMock()
-        baas._baas_api_base = "http://baas.local"
-        baas.get_publish_progress.return_value = {"status": "FAILED"}
-        svc = _make_service(baas_service=baas)
-        svc.report_device_alive = MagicMock()
-
-        with patch(
-            "agentclaw.community.core.devices.services.baas_device_service.time.sleep",
-            return_value=None,
-        ):
-            ok, msg = svc._start_service(device=_device_with_publish())
-
-        assert ok is False
-        assert "FAILED" in msg
-        svc.report_device_alive.assert_not_called()
-
-    def test_transient_error_is_retried(self):
-        from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
-
-        baas = MagicMock()
-        baas._baas_api_base = "http://baas.local"
-        baas.get_publish_progress.side_effect = [
-            BaasServiceError("flake"),
-            {"status": "SUCCESS"},
-        ]
-        baas.exec_command_on_bot.return_value = {"exit_code": 0}
-        svc = _make_service(baas_service=baas)
-        svc.report_device_alive = MagicMock()
-
-        with patch(
-            "agentclaw.community.core.devices.services.baas_device_service.time.sleep",
-            return_value=None,
-        ):
-            ok, _ = svc._start_service(device=_device_with_publish())
-
-        assert ok is True
-        assert baas.get_publish_progress.call_count == 2
-
-    def test_timeout_returns_failure(self):
-        baas = MagicMock()
-        baas._baas_api_base = "http://baas.local"
-        baas.get_publish_progress.return_value = {"status": "PENDING"}
-        svc = _make_service(baas_service=baas)
-
-        times = iter([0.0, 999_999.0])
-
-        def _fake_monotonic():
-            try:
-                return next(times)
-            except StopIteration:
-                return 999_999.0
-
-        with patch(
-            "agentclaw.community.core.devices.services.baas_device_service.time.sleep",
-            return_value=None,
-        ), patch(
-            "agentclaw.community.core.devices.services.baas_device_service.time.monotonic",
-            side_effect=_fake_monotonic,
-        ):
-            ok, msg = svc._start_service(device=_device_with_publish())
-
-        assert ok is False
-        assert "timeout" in msg.lower()
-
-
-class TestStartServiceInitSteps:
-    """Tests for the 6-step container init that runs after publish SUCCESS."""
-
-    def _make_success_svc(self):
-        baas = MagicMock()
-        baas._baas_api_base = "http://baas.local"
-        baas.get_publish_progress.return_value = {"status": "SUCCESS"}
-        baas.exec_command_on_bot.return_value = {"exit_code": 0, "stdout": "", "stderr": ""}
-        svc = _make_service(baas_service=baas)
-        svc.report_device_alive = MagicMock()
         return svc, baas
 
-    def test_init_commands_called_in_order(self):
-        svc, baas = self._make_success_svc()
-
+    @staticmethod
+    def _run_init(svc, *, engine="openclaw", bot_type=""):
         with patch(
             "agentclaw.community.core.devices.services.baas_device_service.time.sleep",
             return_value=None,
         ):
-            ok, _ = svc._start_service(device=_device_with_publish(), engine="aicoding")
+            svc._run_container_init(
+                bot_uuid="BAAS-CTR-xxx",
+                device=_device_with_publish(),
+                engine=engine,
+                bot_type=bot_type,
+                bot_id=None,
+                owner_id=None,
+                callback_token="tok-123",
+                startup_identity="12345",
+                admins=None,
+            )
 
-        assert ok is True
-        calls = baas.exec_command_on_bot.call_args_list
-        cmds = [c.kwargs.get("cmd", c[1].get("cmd", "")) if c.kwargs else "" for c in calls]
-        if not cmds[0]:
-            cmds = [c[1]["cmd"] for c in calls]
+    def test_init_commands_called_in_order(self):
+        svc, baas = self._make_svc()
 
+        self._run_init(svc, engine="aicoding")
+
+        cmds = [c.kwargs["cmd"] for c in baas.exec_command_on_bot.call_args_list]
         assert "bootstrap_minimal.sh" in cmds[0]
         assert "install_engine.sh" in cmds[1]
         assert "setup_supervisor_sync_service.sh" in cmds[2]
@@ -1300,13 +1200,9 @@ class TestStartServiceInitSteps:
         assert "starting_watchdog.sh" in cmds[-1]
 
     def test_startup_user_selection_is_limited_to_service_and_watchdog(self):
-        svc, baas = self._make_success_svc()
+        svc, baas = self._make_svc()
 
-        with patch(
-            "agentclaw.community.core.devices.services.baas_device_service.time.sleep",
-            return_value=None,
-        ):
-            svc._start_service(device=_device_with_publish())
+        self._run_init(svc)
 
         for call in baas.exec_command_on_bot.call_args_list:
             cmd = call.kwargs.get("cmd", "")
@@ -1316,49 +1212,26 @@ class TestStartServiceInitSteps:
                 assert "su admin" not in cmd
 
     def test_init_uses_correct_bot_uuid(self):
-        svc, baas = self._make_success_svc()
+        svc, baas = self._make_svc()
 
-        with patch(
-            "agentclaw.community.core.devices.services.baas_device_service.time.sleep",
-            return_value=None,
-        ):
-            svc._start_service(device=_device_with_publish())
+        self._run_init(svc)
 
         for call in baas.exec_command_on_bot.call_args_list:
             assert call.kwargs.get("bot_uuid") == "BAAS-CTR-xxx"
 
-    def test_init_failure_returns_false(self):
+    def test_init_failure_propagates(self):
         from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
 
-        baas = MagicMock()
-        baas._baas_api_base = "http://baas.local"
-        baas.get_publish_progress.return_value = {"status": "SUCCESS"}
+        svc, baas = self._make_svc()
         baas.exec_command_on_bot.side_effect = BaasServiceError("bootstrap failed")
-        svc = _make_service(baas_service=baas)
-        svc.report_device_alive = MagicMock()
 
-        with patch(
-            "agentclaw.community.core.devices.services.baas_device_service.time.sleep",
-            return_value=None,
-        ):
-            ok, msg = svc._start_service(device=_device_with_publish())
-
-        assert ok is False
-        assert "init failed" in msg.lower() or "bootstrap" in msg.lower()
-        svc.report_device_alive.assert_not_called()
+        with pytest.raises(BaasServiceError, match="bootstrap failed"):
+            self._run_init(svc)
 
     def test_post_publish_does_not_repeat_startup_for_coding_bot_type(self):
-        svc, baas = self._make_success_svc()
+        svc, baas = self._make_svc()
 
-        with patch(
-            "agentclaw.community.core.devices.services.baas_device_service.time.sleep",
-            return_value=None,
-        ):
-            svc._start_service(
-                device=_device_with_publish(),
-                bot_type="personalCoding",
-                engine="aicoding",
-            )
+        self._run_init(svc, engine="aicoding", bot_type="personalCoding")
 
         start_cmd_calls = [
             c for c in baas.exec_command_on_bot.call_args_list
@@ -1493,41 +1366,6 @@ class TestQueryDeviceInfo:
 # ===========================================================================
 # Additional coverage: error paths and edge cases
 # ===========================================================================
-
-
-class TestStartServiceErrorPaths:
-    """Cover error branches in _start_service."""
-
-    def test_publish_success_missing_bot_uuid(self):
-        """Line 353: publish SUCCESS but device_props has no bot_uuid."""
-        baas = MagicMock()
-        baas._baas_api_base = "http://baas.local"
-        baas.get_publish_progress.return_value = {"status": "SUCCESS"}
-        svc = _make_service(baas_service=baas)
-
-        device = _device_with_publish()
-        device.device_props = {"publish_id": "12345", "callback_token": "tok"}  # No bot_uuid
-
-        with patch("agentclaw.community.core.devices.services.baas_device_service.time.sleep"):
-            ok, msg = svc._start_service(device=device, engine="aicoding")
-
-        assert ok is False
-        assert "missing bot_uuid" in msg
-
-    def test_report_device_alive_failure(self):
-        """Lines 378-382: report_device_alive fails after SUCCESS."""
-        baas = MagicMock()
-        baas._baas_api_base = "http://baas.local"
-        baas.get_publish_progress.return_value = {"status": "SUCCESS"}
-        baas.exec_command_on_bot.return_value = {"exit_code": 0}
-        svc = _make_service(baas_service=baas)
-        svc.report_device_alive = MagicMock(side_effect=RuntimeError("network timeout"))
-
-        with patch("agentclaw.community.core.devices.services.baas_device_service.time.sleep"):
-            ok, msg = svc._start_service(device=_device_with_publish(), engine="aicoding")
-
-        assert ok is False
-        assert "report_device_alive failed" in msg
 
 
 class TestInitStepEdgeCases:

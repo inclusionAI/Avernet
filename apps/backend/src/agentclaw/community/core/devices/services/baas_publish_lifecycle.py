@@ -15,9 +15,6 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-_PUBLISH_POLL_INTERVAL_SECONDS = 5
-_PUBLISH_POLL_TIMEOUT_SECONDS = 600
-
 
 def create_publish_poll_idempotency_key(*, binding_id: int, publish_id: int) -> str:
     """Return the stable key for one live create-publish poll lifecycle."""
@@ -134,109 +131,6 @@ def dispatch_pool_layout_confirmation(
     except Exception as exc:
         return False, f"Skills Pool startup callback dispatch failed: {exc}"
     return True, "Skills Pool startup callback dispatched"
-
-
-def run_start_service_polling(
-    *,
-    baas_service: Any,
-    device: AllocatedDevice,
-    run_container_init: Callable[..., None],
-    report_device_alive: Callable[..., None],
-    engine: str,
-    bot_type: str,
-    bot_id: str | None,
-    owner_id: str | None,
-    admins: list[str] | None,
-    codefuse_token: str | None,
-) -> tuple[bool, str]:
-    """Block until BaaS publish reaches SUCCESS, run init, then mark alive."""
-    publish_id_raw = device.device_props.get("publish_id")
-    callback_token = device.device_props.get("callback_token", "")
-    bot_uuid = device.device_props.get("bot_uuid", "")
-    if not publish_id_raw:
-        return False, "missing publish_id in device_props"
-    try:
-        publish_id = int(publish_id_raw)
-    except (TypeError, ValueError):
-        return False, f"invalid publish_id: {publish_id_raw!r}"
-
-    start = time.monotonic()
-    last_status = ""
-    from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
-
-    logger.info(
-        "[_start_service] BaaS device polling start: device_id=%s publish_id=%s",
-        device.device_id,
-        publish_id,
-    )
-
-    while (time.monotonic() - start) < _PUBLISH_POLL_TIMEOUT_SECONDS:
-        time.sleep(_PUBLISH_POLL_INTERVAL_SECONDS)
-        try:
-            progress = baas_service.get_publish_progress(
-                publish_id=publish_id,
-                include_devices=False,
-            )
-        except BaasServiceError as exc:
-            logger.warning(
-                "[_start_service] get_publish_progress transient error "
-                "(will retry): publish_id=%s error=%s",
-                publish_id,
-                exc,
-            )
-            continue
-
-        status = (progress or {}).get("status", "")
-        last_status = status
-        logger.info(
-            "[_start_service] publish progress: device_id=%s publish_id=%s status=%s",
-            device.device_id,
-            publish_id,
-            status,
-        )
-
-        if status == "SUCCESS":
-            if not bot_uuid:
-                return False, "publish SUCCESS but missing bot_uuid in device_props"
-
-            try:
-                run_container_init(
-                    bot_uuid=bot_uuid,
-                    device=device,
-                    engine=engine,
-                    bot_type=bot_type,
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    callback_token=callback_token,
-                    startup_identity=str(publish_id),
-                    admins=admins,
-                    codefuse_token=codefuse_token,
-                )
-            except Exception as exc:
-                logger.exception(
-                    "[_start_service] container init failed: device_id=%s error=%s",
-                    device.device_id,
-                    exc,
-                )
-                return False, f"container init failed: {exc}"
-
-            try:
-                report_device_alive(device_id=device.device_id, token=callback_token)
-            except Exception as exc:
-                logger.exception(
-                    "[_start_service] report_device_alive failed after SUCCESS: %s",
-                    exc,
-                )
-                return False, f"report_device_alive failed: {exc}"
-            return True, "BaaS publish SUCCESS, init done, device active"
-
-        if status == "FAILED":
-            return False, f"BaaS publish FAILED: publish_id={publish_id}"
-
-    return False, (
-        f"BaaS publish polling timeout after {_PUBLISH_POLL_TIMEOUT_SECONDS}s "
-        f"(last_status={last_status!r}, publish_id={publish_id})"
-    )
 
 
 def poll_publish_once(*, baas_service: Any, publish_id: int) -> str | None:

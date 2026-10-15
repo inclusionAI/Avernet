@@ -20,7 +20,7 @@ def write_codefuse_token_baas(
     """解码 auth_code 并在 BaaS 容器内写 codefuse.json（仅当 codefuse_token 非空）。
 
     在 start_service.sh 之前同步 exec 写入；容器 setup_cfuse.sh "非空保留" 会保住该
-    token。解码失败 / 非零退出抛异常，由 _start_service 的 try/except 承接为
+    token。解码失败 / 非零退出抛异常，由 run_create_init_once 的 try/except 承接为
     (False, msg)，bot 停 FAILED（token 缺失则首聊鉴权失败，强一致阻断优于"假活"）。
     """
     if not codefuse_token:
