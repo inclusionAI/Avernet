@@ -104,6 +104,7 @@ class TestParamPassthrough:
             session_key_timeout=15.0,
             max_retries=3,
             retry_base_backoff=2.0,
+            a2a_mode="off",
             ignore_case=False,
             interaction_service=None,
         )
@@ -121,7 +122,10 @@ class TestParamPassthrough:
         )
 
         config_service = MagicMock()
+        # 构造调用按序读三键：A2A_CLIENT_MODE → SESSION_KEY_IGNORE_CASE →
+        # INTERACTION_PROCESS（B2 工厂配置门），side_effect 按位序供给。
         config_service.get_config.side_effect = [
+            MagicMock(conf_value="off"),
             MagicMock(conf_value="false"),
             MagicMock(conf_value="true"),
         ]
