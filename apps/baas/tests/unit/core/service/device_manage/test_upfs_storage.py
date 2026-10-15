@@ -298,11 +298,13 @@ async def test_recreate_retains_destroy_then_create_order_without_upfs_precheck(
     svc = service()
     tpl = template()
     tpl.upfs_volume_id_pre = None
+    recreate_deploy_config = deploy()
+    recreate_deploy_config.tc_bot_id = "BOT-one"
     svc._resolve_device_for_operation = MagicMock(
         return_value=(
             SimpleNamespace(id=1, provider_device_id="old", status="ACTIVE"),
             DeviceConfig(
-                deploy_config=deploy(),
+                deploy_config=recreate_deploy_config,
                 metadata={"trace": "keep"},
             ),
             SimpleNamespace(config=tpl, template_uuid="TEMPLATE-one"),
@@ -317,7 +319,13 @@ async def test_recreate_retains_destroy_then_create_order_without_upfs_precheck(
 
     async def create(*args, **kwargs):
         events.append("create")
-        assert kwargs["detail_config"].metadata == {"trace": "keep"}
+        assert kwargs["detail_config"].metadata == {
+            "trace": "keep",
+            "publish_id": "",
+            "device_uuid": "DEVICE-one",
+            "tenant": "tenant",
+            "tc_bot_id": "BOT-one",
+        }
         raise ValueError("plugin rejected missing volume")
 
     svc._paas_facade.destroy_device.side_effect = destroy
