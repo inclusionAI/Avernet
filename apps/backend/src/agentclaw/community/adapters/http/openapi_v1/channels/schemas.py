@@ -275,8 +275,9 @@ class ChannelCreate(BaseModel):
         description=(
             "Which configuration stage the row belongs to; the legacy UI's "
             "'生效环境' selector. verify/online rows are publish-flow inputs "
-            "for service Bots and are rejected for other bot types. Immutable "
-            "after creation."
+            "for service Bots, exist only for 'plugin' channels (the legacy "
+            "BCN page has no stage concept), and are rejected for other bot "
+            "types. Immutable after creation."
         ),
     )
 
@@ -291,6 +292,14 @@ class ChannelCreate(BaseModel):
             enable_streaming_cards=self.config.enable_streaming_cards,
             card_template_id=self.config.card_template_id,
         )
+        # 老实现里"生效环境"是插件页专属能力（BCN 页无 stage 概念）。当前
+        # 消费方亦然：发布流只合成 plugin 行的 engine_overrides，BCS 同步
+        # 又跳过 verify/online —— 放行只会产出一个无消费方的组合。
+        if self.stage != "draft" and self.binding_mode == "bcn_gateway":
+            raise ValueError(
+                "stage 'verify'/'online' applies to plugin channels; "
+                "bcn_gateway channels resolve their environment through BCS"
+            )
         return self
 
     description: str | None = Field(

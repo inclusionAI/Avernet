@@ -1278,3 +1278,19 @@ async def test_get_verify_row_visible_for_service_bot_only():
         service=_Channels([verify]),
     )
     assert denied.status_code == 404
+
+
+def test_create_rejects_stage_rows_for_bcn_gateway_mode():
+    """老实现"生效环境"是插件页专属；bcn 行的 verify/online 无消费方，422。"""
+    with pytest.raises(ValidationError) as exc:
+        ChannelCreate(
+            type="dingding",
+            binding_mode="bcn_gateway",
+            stage="verify",
+            config={
+                "client_id": "client-1",
+                "client_secret": "secret-1",
+                "robot_code": "robot-1",
+            },
+        )
+    assert "plugin channels" in str(exc.value)

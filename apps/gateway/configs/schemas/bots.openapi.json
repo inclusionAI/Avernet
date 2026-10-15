@@ -2185,7 +2185,7 @@
           },
           "stage": {
             "default": "draft",
-            "description": "Which configuration stage the row belongs to; the legacy UI's '生效环境' selector. verify/online rows are publish-flow inputs for service Bots and are rejected for other bot types. Immutable after creation.",
+            "description": "Which configuration stage the row belongs to; the legacy UI's '生效环境' selector. verify/online rows are publish-flow inputs for service Bots, exist only for 'plugin' channels (the legacy BCN page has no stage concept), and are rejected for other bot types. Immutable after creation.",
             "enum": [
               "draft",
               "verify",

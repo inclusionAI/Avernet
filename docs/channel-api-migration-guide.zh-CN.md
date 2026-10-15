@@ -26,7 +26,7 @@
 
 | 操作 | 方法与路径 | 说明 |
 |---|---|---|
-| 列表 | `GET /openapi/v1/bots/{bot_id}/channels` | 只返回**当前 owner 的 draft 钉钉渠道**（见 §4.6） |
+| 列表 | `GET /openapi/v1/bots/{bot_id}/channels` | 当前 owner 的钉钉渠道；个人 Bot 只回 **draft 行**，服务 Bot 额外带出 **verify/online 行**（见 §4.6/§4.7） |
 | 创建 | `POST /openapi/v1/bots/{bot_id}/channels` → 201 | 创建后是 **inactive** 状态，需要再调激活 |
 | 单查 | `GET /openapi/v1/bots/{bot_id}/channels/{channel_id}` | |
 | 部分更新 | `PATCH /openapi/v1/bots/{bot_id}/channels/{channel_id}` | omit/null = 保持（见 §4.3） |
@@ -85,7 +85,7 @@
 
 > **流式联动校验**（创建与更新都查，两种模式一体适用）：`enable_streaming_cards: true` 时 `card_template_id` 必须非空，否则 422——`create` 侧响应是统一的 `"Invalid request"`，`update` 侧是 `"Channel mode violation"`。老表单有同款前端校验（"请输入卡片 templateId"），现在后端补齐为强约束。
 >
-> **stage 规则**：`stage` 只在创建时传（顶层字段），创建后不可变（更新请求传它会被 `extra="forbid"` 拒掉）；`"verify"/"online"` 只对 `bot_type=service` 的 Bot 开放，传给个人 Bot 422（`"Channel mode violation"`）。
+> **stage 规则**：`stage` 只在创建时传（顶层字段），创建后不可变（更新请求传它会被 `extra="forbid"` 拒掉）；`"verify"/"online"` 只对 `bot_type=service` 的 Bot 开放，传给个人 Bot 422（`"Channel mode violation"`）；bcn_gateway 渠道一律 `"draft"`（422 拒其他档位——`"Invalid request"`）。
 
 ---
 
@@ -197,8 +197,8 @@ PUT /openapi/v1/bots/bot-1/channels/12/status
 3. **omit 与 null 等价**（写操作全字段如此）：`PATCH` 里字段没传、或传了 `null`，都是"保持不变"。
 4. **`binding_mode` 不可变**。编辑页把模式选择器做成禁用态；换模式走"删除重建"。
 5. **bcn 专属三字段对 plugin 渠道是 422**（矩阵见 §2.3），反之亦然。编辑表单按 `binding_mode` 条件渲染字段就不会踩。
-6. **列表口径变窄**：只回当前 owner 的 draft 钉钉渠道。老接口会带出的共享默认行（`aideskdingding`）、verify/online 行、其他渠道类型，新接口一律不出——列表为空≠配置丢失，渲染逻辑按新口径写。
-7. **"生效环境"选择器已移植进公开面（仅服务 Bot）**。创建时顶层传 `stage`（`draft` 缺省 / `verify` / `online`），语义与老插件页一致：每一档是一行独立配置，发布流按 stage 现读各行合成对应环境的渠道配置。规则变化：①创建后不可变（老页面同样不给改）；②`verify/online` 行**不接运行时**——对它们做 PATCH/启停只改 DB（发布时才被读到），不会像 draft 行那样同步 openclaw/BCS；③个人 Bot 不开放这两个档位（422）。列表/单查对服务 Bot 会带出 verify/online 行，卡片按 `stage` 字段分组渲染即可。
+6. **列表口径变窄**：个人 Bot 只回当前 owner 的 draft 钉钉渠道（老接口会带出的共享默认行 `aideskdingding`、verify/online 行、其他渠道类型一并消失）；服务 Bot 例外——它的 verify/online 行**会**带出（§4.7），前端按 `stage` 字段分组渲染。
+7. **"生效环境"选择器已移植进公开面（仅服务 Bot + 仅 plugin 模式）**。创建时顶层传 `stage`（`draft` 缺省 / `verify` / `online`），语义与老插件页一致：每一档是一行独立配置，发布流按 stage 现读各行合成对应环境的渠道配置。四条规则：①创建后不可变（老页面同样不给改）；②`verify/online` 行**不接运行时**——对它们做 PATCH/启停只改 DB（发布时才被读到），不会像 draft 行那样同步 openclaw/BCS；③个人 Bot 不开放这两个档位（422）；④**bcn_gateway 模式一律 draft**（老 BCN 页本来就没有档位概念，且 bcn 行不进发布流的 engine_overrides——传了 422）。列表/单查对服务 Bot 会带出 verify/online 行，卡片按 `stage` 字段分组渲染即可。
 8. **没有 `send_mode` 提交字段**。老 BCN 的"普通文本 / 流式卡片"单选，映射为 `enable_streaming_cards` 开关（+ `card_template_id`）。后端推 BCS 时自动还原结构化 `send_mode`，前端不需要也没法直接表达 fallback message type。
 9. **回调地址指引不调接口**。老 BCN 页的"蚂蚁钉回调地址"展示+复制块是纯前端逻辑（按部署 env 拼串），新页面想在 bcn 模式下保留这个引导，把这个组件搬过来即可，与后端无关。
 10. **流式开关与模板是联动校验**（§2.3 末尾注）。表单上开"流式输出"就必须同时有模板 ID——提交前自己做这个前置校验，别等服务端 422。**注意 update 语义**：哪怕本次 PATCH 只改别的字段，只要"合并后的存量配置"处于"流式开+模板空"状态就会 422——历史上（含内部老入口）配出的这类缺口存量数据，会在下次任意编辑时被强制纠正（要么补模板，要么 `enable_streaming_cards: false`）。
@@ -212,7 +212,7 @@ PUT /openapi/v1/bots/bot-1/channels/12/status
 | 403 | 403xxx | 写操作需要 Bot 管理员 | 提示无权限 |
 | 404 | 404xxx | 渠道不在该 Bot 范围（含非 draft、非 owner、已删） | 刷新列表 |
 | 409 | 409xxx | bcn 激活时 BCS 绑定冲突（如同 robot 已绑到别的 target） | 提示检查钉钉侧绑定归属 |
-| 422 | 422xxx | 两类：① 请求体校验失败——必填缺失、未知字段（`extra="forbid"`）、类型错误、**创建时**的模式矩阵违规。这类响应 `message` 固定为 `"Invalid request"`，**不带具体字段细节**，排查靠本地表单校验对齐 §2.3 矩阵；② **更新时**的模式矩阵违规，`message: "Channel mode violation"` | 按矩阵做前置校验，不要依赖服务端报文定位字段 |
+| 422 | 422xxx | 三类：① 请求体校验失败——必填缺失、未知字段（`extra="forbid"`）、类型错误、**创建时**的模式矩阵违规、**创建时**的 bcn+stage 违规。这类响应 `message` 固定为 `"Invalid request"`，**不带具体字段细节**，排查靠本地表单校验对齐 §2.3 矩阵；② 路由侧违规——个人 Bot 的 stage 请求、**更新时**的模式矩阵违规，`message: "Channel mode violation"` | 按矩阵做前置校验，不要依赖服务端报文定位字段 |
 | 423 | 423xxx | Bot 有协作者且当前用户未持编辑锁 | 引导去拿编辑锁 |
 | 502 | 502xxx | 激活/同步运行时失败（含 BCS 不可达） | 提示重试，渠道保持 inactive |
 
@@ -227,3 +227,5 @@ PUT /openapi/v1/bots/bot-1/channels/12/status
 3. **表单**：`src/components/BotWorkshop/Editor/ChannelFormModal.tsx` 的 bcn 分支加"透传钉钉发送人身份"开关（仅 `bindingMode === 'bcn_gateway'` 渲染），`botAdvancedConfigService.createChannel/updateChannel` 的 bcn config 分支带上该字段（不传 = 后端按 false）。
 
 对照校验：新读投影回显的 `forward_sender_identity` 为 `null`（plugin 行）时表单不要当成 false 渲染，直接隐藏即可。
+
+4. **stage（生效环境）**：`botEditorChannelDtos.ts` 的 create body 加顶层 `stage?: 'draft'|'verify'|'online'`，读模型透传 `stage` 字段（服务 Bot 列表会带出 verify/online 行，按它分组）；表单上"生效环境"选择器仅在 `bot_type=service && bindingMode==='plugin'` 时渲染（老页面同款条件），其余场景不提供该控件即可——后端本来就是 422 兜底，前端前置隐藏最顺。
