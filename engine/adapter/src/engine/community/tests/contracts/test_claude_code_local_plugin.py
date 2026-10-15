@@ -273,6 +273,16 @@ async def test_local_claude_code_plugin_stateful_ports_and_error_branches():
     assert resolved["decision"] == "submit" and resolved["answer"] == "yes"
     cancelled = (await plugin.resolve_interaction("s", "r1", decision="cancel"))["payload"]
     assert cancelled["decision"] == "cancel", "cancel 决策被改写"
+    full = (await plugin.resolve_interaction(
+        "s", "r1", decision="submit", answer="a", message="m",
+        answers={"q1": "A"}, values={"v": "x"},
+        selected_options=(("o1",),),
+    ))["payload"]
+    assert full == {
+        "interactionId": "r1", "decision": "submit", "answer": "a",
+        "message": "m", "answers": {"q1": "A"}, "values": {"v": "x"},
+        "selectedOptions": [["o1"]],
+    }, full
     assert (await plugin.resolve_mode_transition("s", "r1", "accept"))["payload"]["decision"] == "accept"
 
 

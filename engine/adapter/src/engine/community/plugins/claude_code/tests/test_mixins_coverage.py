@@ -1265,6 +1265,18 @@ class TestChatMixin:
         _, args, kw = _last_call(c)
         assert kw["params"] == {"interactionId": "int:r1", "decision": "cancel"}
 
+    async def test_resolve_interaction_answer_and_message_wire_encoding(self):
+        # R3-1 补充：自由文本 answer 与人工说明 message 同等上 wire
+        #（v3 builder 同构）
+        c = _FakeRelayClient()
+        c.set_response("interaction.resolve", (_ok({}), []))
+        impl, _ = _impl(c)
+        await impl.resolve_interaction(
+            session_key="s", interaction_id="int:r1", answer="ans", message="why")
+        _, args, kw = _last_call(c)
+        assert kw["params"] == {"interactionId": "int:r1", "decision": "submit",
+                                "answer": "ans", "message": "why"}
+
     async def test_resolve_interaction_structured_payload(self):
         # R3-1：answers/values 逐字上 wire；selected_options 在边界转
         # selectedOptions（内层 tuple 也转 list）

@@ -2532,6 +2532,18 @@ async def test_resolve_forward_kind_matrix_and_failures(monkeypatch):
             {"interactionId": "i-bad2",
              "resolution": {"decision": "submit", "kind": "ask_user",
                             "answers": ["junk"]}}, 11, None)
+    with pytest.raises(R2._ParamError, match="decision is required"):
+        await R2._resolve_interaction(
+            {"interactionId": "i-bad3",
+             "resolution": {"kind": "ask_user"}}, 12, None)
+    with pytest.raises(R2._ParamError, match="kind must be a string"):
+        await R2._resolve_interaction(
+            {"interactionId": "i-bad4",
+             "resolution": {"decision": "submit", "kind": 5}}, 13, None)
+    with pytest.raises(R2._ParamError, match="answer must be a string"):
+        await R2._resolve_interaction(
+            {"interactionId": "i-bad5",
+             "resolution": {"decision": "submit", "answer": 42}}, 14, None)
 
     # mode_switch 分发 + BaaS 持有的真实 interaction id 定位
     await repost("i-m")
