@@ -51,6 +51,26 @@ export const repairBatchMigrations = [
   UNIQUE INDEX uk_repair_revision_request (request_key),
   INDEX idx_repair_revision_workflow (workflow_id)
 ) COMMENT='Workflow修复任务修订'`,
+      // v110 was SQLite-only: fresh MySQL/ZDAS databases need the base table
+      // before the ALTERs below. Existing tables and records are left intact.
+      // Keep the lesson index inline because ZDAS skips standalone CREATE INDEX.
+      `CREATE TABLE IF NOT EXISTS workflow_healing_outcomes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  outcome_id VARCHAR(64) NOT NULL COMMENT '结果ID',
+  lesson_id VARCHAR(64) NOT NULL COMMENT '经验ID',
+  workflow_id VARCHAR(64) COMMENT '工作流ID',
+  node_id VARCHAR(64) COMMENT '节点ID',
+  action VARCHAR(64) NOT NULL COMMENT '动作',
+  applied INTEGER NOT NULL DEFAULT 0 COMMENT '是否应用',
+  succeeded INTEGER NOT NULL DEFAULT 0 COMMENT '是否成功',
+  verdict VARCHAR(64) NOT NULL DEFAULT 'neutral' COMMENT '结果评价',
+  note TEXT COMMENT '备注',
+  created_by VARCHAR(128) COMMENT '创建人',
+  gmt_create INTEGER NOT NULL DEFAULT (unixepoch()),
+  gmt_modified INTEGER NOT NULL DEFAULT (unixepoch()),
+  UNIQUE (outcome_id),
+  INDEX idx_workflow_healing_outcomes_lesson (lesson_id, gmt_create)
+)`,
       `ALTER TABLE workflow_healing_outcomes ADD COLUMN repair_item_id VARCHAR(64) COMMENT '关联修复处理项ID'`,
       `ALTER TABLE workflow_healing_outcomes ADD COLUMN repair_revision INTEGER COMMENT '关联修复任务修订版本号'`,
       `ALTER TABLE workflow_healing_outcomes ADD COLUMN deployed_version INTEGER COMMENT '本次处置关联的Workflow部署版本号'`,
