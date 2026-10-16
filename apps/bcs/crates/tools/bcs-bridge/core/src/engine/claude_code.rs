@@ -1188,6 +1188,12 @@ impl Engine for ClaudeCode {
                                 input,
                             )
                             .await?;
+                            // The watchdog measures ENGINE silence, but the
+                            // await above parked on a human decision for an
+                            // unbounded time during which engine silence is
+                            // protocol-required. Restart the window: the moment
+                            // the approval lands, the engine owes output again.
+                            idle_deadline = tokio::time::Instant::now() + idle_window;
                         }
                         CcMap::Ignore | CcMap::Malformed => {}
                     }
