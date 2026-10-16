@@ -15,7 +15,17 @@ impl SessionObserver for Observer {
 }
 
 fn engine(log: &std::path::Path) -> Arc<CodexAppServer> {
-    Arc::new(CodexAppServer::new(PathBuf::from("/usr/bin/python3"), vec![
+    // Resolve python3 the way the shell would: /usr/bin/python3 is not
+    // universal (some Linux images keep it under /usr/local), and a missing
+    // interpreter made this suite fail deterministically far from the actual
+    // assertion under test.
+    let python = std::env::var("PATH").ok().and_then(|paths| {
+        paths.split(':').map(PathBuf::from).find_map(|dir| {
+            let candidate = dir.join("python3");
+            candidate.is_file().then_some(candidate)
+        })
+    }).unwrap_or_else(|| PathBuf::from("/usr/bin/python3"));
+    Arc::new(CodexAppServer::new(python, vec![
         format!("{}/tests/fixtures/mock_codex_persistent.py", env!("CARGO_MANIFEST_DIR")),
         log.to_string_lossy().into_owned(),
     ]))

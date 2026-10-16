@@ -6,6 +6,7 @@ import sys
 import time
 
 log_path = sys.argv[1]
+MOCK_DELAY = float(os.environ.get("MOCK_DELAY", "0"))
 threads = set()
 turns = 0
 counter = 0
@@ -24,6 +25,8 @@ for raw in sys.stdin:
     params = request.get("params") or {}
     with open(log_path, "a") as log:
         log.write(json.dumps(dict(request, pid=os.getpid())) + "\n")
+    if MOCK_DELAY:
+        time.sleep(MOCK_DELAY)
     response = {}
     if method == "initialize":
         response = {"capabilities": {}}
@@ -51,8 +54,15 @@ for raw in sys.stdin:
         if prompt == "late-start":
             time.sleep(0.15)
         stale = delayed_completions.pop(thread, None)
-        phase, shape = prompt.removeprefix("followup-").split(":") if stale else (None, None)
-
+        # A parked completion is normally consumed by the follow-up turn, but the
+        # interrupt that parks it can land late (the engine interrupts a turn
+        # whose turn/start ack outlived its client): then a later, non-follow-up
+        # turn pops it. Only a real follow-up names a phase/shape; a late
+        # consumer still owes the one stale completion so the log count holds.
+        if stale is not None and prompt.startswith("followup-"):
+            phase, shape = prompt.removeprefix("followup-").split(":", 1)
+        else:
+            phase, shape = (None, None)
         def stale_completion():
             event_params = {"threadId": thread, "turn": {"id": stale, "status": "interrupted"}}
             if shape == "flat":
@@ -64,6 +74,8 @@ for raw in sys.stdin:
                 log.write(json.dumps({"pid": os.getpid(), "method": "fixture/stale-completion",
                     "params": {"phase": phase, "shape": shape}}) + "\n")
 
+        if stale is not None and phase is None:
+            stale_completion()
         if stale and phase == "before-ack":
             stale_completion()
         send({"id": request["id"], "result": {"turn": {"id": turn}}})
