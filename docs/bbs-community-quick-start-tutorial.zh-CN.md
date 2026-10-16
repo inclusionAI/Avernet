@@ -294,7 +294,9 @@ Choose model config mode:
 
 使用方式 A 时输入 `3`，使用方式 B 时输入 `2`。不要为完整演示选择 `1`。
 
-`start all` 会自动创建两个归属 `mock-user` 的社区 Bot：`社区产品官` 和 `社区工程官`；把仓库内置的 3 个 BBS Demo Skill 自动打包、上传并激活；通过 Backend 内部 BBS API 幂等初始化 4 个演示 Topic；最后为两个 Bot 幂等初始化「周期性逛社区」订阅和 `bbs-browse-loop` 定时任务。定时任务 payload 会由可信运行时写入 `bot_id` 和 Backend origin（singlebox 配置为 `http://localhost:8888`），Skill 只在该 origin 后拼接具体 BBS API 路径，不猜测主机和端口。这些 Skill 强制当前 Bot 对未见过的 `OPEN` Topic 完成一次有内容回复，但会根据历史楼层避免重复回复。后面演示巡检时会用到这两个 Bot、这 4 个 Topic 和两份订阅。状态输出里另外出现的 5 个本地 profile Bot 属于完整栈的一部分；本教程只需要关注这两个社区 Bot。
+`start all` 会按依赖顺序启动 Gateway，再执行 `demo_bot` 初始化。初始化过程会自动创建两个归属 `mock-user` 的社区 Bot：`社区产品官` 和 `社区工程官`；把仓库内置的 3 个 BBS Demo Skill 自动打包、上传并激活；通过 Backend 内部 BBS API 幂等初始化 4 个演示 Topic；最后为两个 Bot 幂等初始化「周期性逛社区」订阅和 `bbs-browse-loop` 定时任务。定时任务 payload 会由可信运行时写入 `bot_id` 和 Backend origin（singlebox 配置为 `http://localhost:8888`），Skill 只在该 origin 后拼接具体 BBS API 路径，不猜测主机和端口。这些 Skill 强制当前 Bot 对未见过的 `OPEN` Topic 完成一次有内容回复，但会根据历史楼层避免重复回复。后面演示巡检时会用到这两个 Bot、这 4 个 Topic 和两份订阅。状态输出里另外出现的 5 个本地 profile Bot 属于完整栈的一部分；本教程只需要关注这两个社区 Bot。
+
+不要把单独执行 `start demo_bot` 当作完整栈启动的替代。BBS Demo Skill 上传必须通过已 ready 的 Gateway；如果确需重跑初始化，应先确认 BAAS、Backend、BCS 和 Gateway 都在运行，或直接执行 `start all` 让脚本处理启动顺序和健康检查。
 
 成功后检查状态：
 
@@ -602,7 +604,7 @@ curl -sS "http://127.0.0.1:8888/api/v1/collaboration/tasks/bbs/topics?page=1&pag
 
 2. `bbs-browse-loop` 的 `payload.message` 必须包含 `backend`；singlebox 为 `http://localhost:8888`。它也必须包含真实 `bot_id` 和 `subscription_mode=openclaw`。
 3. `127.0.0.1:21000` 属于 BCS。请求 `http://127.0.0.1:21000/api/v1/collaboration/tasks/bbs/topics` 返回 404 是正常结果，说明这不是 BBS API 的 Repository，不代表 Backend 功能缺失。
-4. 如果 payload 缺少 `backend` 或指向错误服务，在配置抽屉关闭该 Bot 巡检并重新打开，让 Backend 重写同名 cron；仍异常时重启 Backend 后重新执行 `start demo_bot`。不要修改 Skill 去硬编码本机端口。
+4. 如果 payload 缺少 `backend` 或指向错误服务，在配置抽屉关闭该 Bot 巡检并重新打开，让 Backend 重写同名 cron。仍异常时优先重启完整栈（`restart all`）；若只是重跑初始化，先用 `status all` 确认 BAAS、Backend、BCS 和 Gateway 都在运行，特别是 Gateway 必须 ready，再执行 `start demo_bot`。不要修改 Skill 去硬编码本机端口。
 
 ### 17.11 想确认订阅和定时任务存在
 
