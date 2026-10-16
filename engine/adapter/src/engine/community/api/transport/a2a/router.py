@@ -90,7 +90,8 @@ class _ParamError(ValueError):
 @router.get("/.well-known/agent-card.json")
 async def agent_card() -> dict[str, Any]:
     from engine.community.config import get_local_base_url
-    return make_agent_card(get_local_base_url())
+    return make_agent_card(get_local_base_url(),
+                           resolve_supported=_engine_resolve_supported())
 
 
 def _canonical_context(method: str, params: dict[str, Any], rid: Any
@@ -781,6 +782,22 @@ _KIND_RESOLVE_METHOD = {
     None: "resolve_interaction",
     "mode_switch": "resolve_mode_transition",
 }
+
+
+def _engine_resolve_supported() -> bool:
+    """P0/stage2 §5：resolve 声明真值——活动引擎 ChatService 实现
+    `_KIND_RESOLVE_METHOD.values()` 全部三方法才为 True。
+
+    与 `_forward_resolve` 运行期门控同源（同一词汇表），部分支持=不
+    声明，免于 "card 声明≠实际能力"；取插件失败按不声明处理（保守）。
+    请求时计算、无缓存——声明与实现不漂移。"""
+    try:
+        from engine.community.api.transport.a2a.engine_bridge import _chat_plugin
+        chat = _chat_plugin()
+    except Exception:
+        return False
+    return all(getattr(chat, m, None) is not None
+               for m in set(_KIND_RESOLVE_METHOD.values()))
 
 
 def _validated_resolution(resolution: dict[str, Any]) -> dict[str, Any]:
