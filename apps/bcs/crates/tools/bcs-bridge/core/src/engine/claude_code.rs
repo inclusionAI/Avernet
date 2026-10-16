@@ -1052,13 +1052,18 @@ async fn handle_control_request(
 /// Default sliding idle window for the engine stream. Every received line
 /// pushes the turn's "still making progress" deadline this far out; only a
 /// stream that stays silent for the whole window fails the turn — with a
-/// named error that reports the stalled background count. Two minutes stays
-/// clear of every legitimate silence (model TTFT spikes, a non-streaming
-/// foreground tool before it auto-backgrounds) while surfacing a wedged
-/// stream (2026-10-14/2026-10-16: quiet with pending work while BCS waited
-/// on a final that never came) in minutes rather than only at the outer run
-/// deadline. A per-turn `req.idle_timeout` override still wins when set.
-const IDLE_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
+/// named error that reports the stalled background count. The window must
+/// cover silences that are protocol-required, not stalls: model TTFT spikes
+/// on large contexts, and the full runtime of a background task or async
+/// agent the engine is waiting on (recorded live: task_started to
+/// task_notification the stream emits nothing for the task's whole
+/// duration — a 3-minute background wait is 3 minutes of legitimate
+/// silence). Ten minutes absorbs those while still surfacing a genuinely
+/// wedged stream (2026-10-14/2026-10-16 class) long before the outer run
+/// deadline. A shorter window was tried (120s, 2026-10-16) and reverted:
+/// it killed healthy turns parked on multi-minute background work. A
+/// per-turn `req.idle_timeout` override still wins when set.
+const IDLE_WINDOW: std::time::Duration = std::time::Duration::from_secs(600);
 
 #[async_trait::async_trait]
 impl Engine for ClaudeCode {
