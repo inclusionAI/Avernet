@@ -1,6 +1,7 @@
 # Engine 传输层协议替换：v3 WebSocket 帧 → A2A（架构设计）
 
-日期：2026-10-13（v5，四轮评审：R1 七项 + R2 五项 + R3 三项 + R4 两项 P2 修正）
+日期：2026-10-13（v5，四轮评审：R1 七项 + R2 五项 + R3 三项 + R4 两项 P2 修正；2026-10-16
+外部评审（xianmuyq）吸收三项非阻塞文档口径）
 状态：**总体方案评审通过（R4）；文档评审结束，转入代码与实测证据评审；全客户端迁移/收割按各阶段退出条件单独批准**
 范围：engine adapter 传输层协议替换详设 + 全客户端迁移蓝图。BaaS / backend / BCS /
 前端 / 桌面各客户端线的详细改造各自后补 spec，本文只画依赖与阶段边界。
@@ -28,6 +29,9 @@
 | R3 | card 示例缺必填 skills / §13 引用方式 | 文档 | 成立（spec：skills 必填） | §6.5 最小 conversation skill；§13 直引 §3.1.2 |
 | R4 | retry-only wire 字段名不一致（正文 `avernet.retryOnly` vs 附录裸 `retryOnly`；v3 无键名） | P2 | 成立（分裂实现即破坏 D14：未读到标志→按 FIRST 执行） | §8.5.2 wire 字段表（唯一路径）+ A.3 同步 |
 | R4 | conversation skill 缺必填 tags | P2 | 成立（spec §4.4.5：AgentSkill `tags` 必填） | §6.5 补 `"tags": ["conversation"]` + golden fixture 注记 |
+| 外部评审（xianmuyq，2026-10-16） | 能力卡 = A2A contract 投影的定位缺规范性表述，防新引擎把 A2A server 下沉到 plugin | 非阻塞 | 成立（§5/§6 分层已具其形，但无"单引擎禁止自建协议壳"条款） | §6.5 投影约定 |
+| 外部评审（xianmuyq，2026-10-16） | CancelTask `ok=true` 边界未写死到调用方文档（传输取消 ≠ 引擎无副作用） | 非阻塞 | 成立（wire 已有 engineAbort 五值判定 + 确认态语义，缺对外判读口径） | §8.8 调用方判读口径 |
+| 外部评审（xianmuyq，2026-10-16） | REL 前须拍板 `/rpc` auth gate 默认策略 + 回滚方式 | 非阻塞 | 成立（沿用 v3 AuthGate 策略，但新增 HTTP 入口的部署边界与回退未明确） | §6.6 gate 口径 + O9 开放决策 |
 
 ## 1. 背景与问题
 
@@ -215,12 +219,63 @@ class EngineChatService(Protocol):
 `url` base 由部署侧注入（config 差异不进业务码道）；`skills` 与 skill 内 `tags` 均为 spec 必填（§4.4.5：tags 为必填数组、至少一元素）——card 示例已内置最小 conversation skill（含 tags），G1a 可直接拿一份可校验 card；生成 golden fixture 时去掉示意注释并替换占位 url；动态 skills 来源 = O3；extension URI
 命名在 G2 与 SDK 版本一起锁定。
 
+**投影约定（规范性）**：Agent Card **是本 adapter 层对统一 A2A contract 的投影**，
+不是任何单一引擎的能力公告——标准面（card / `/rpc` / SSE）的宿主恒为 adapter
+壳；异构引擎的差异只收敛在 ChatService 插件契约（能力探测 + extension 语义）上，
+引擎实现不含 card / 协议绑定概念。由此：**新增引擎 = 实现 ChatService SPI（含
+能力探测与 extension 语义），"每引擎再各建一份 A2A server" 视为违反分层**
+（与"kernel 无 transport import、A2A 壳无状态所有权"同一条 arch 线的延伸：
+单引擎无协议壳所有权）。当前 `card.py` 统一生成固定 extension 声明与 conversation
+skill，并非按各引擎能力动态生成；声明表示 adapter 支持该扩展协议，不保证每个
+引擎支持其全部操作，调用方仍须处理能力不支持的结果。O3 的动态 skills 来源尚属
+后续决策；若采用 bot manifest 派生，也应由 adapter 生成 card，而非引擎直接产出。
+
 ### 6.6 鉴权与版本协商
 
-传输级鉴权语义不变（proxypass x-proxypass-token JWT；card securitySchemes 以 Bearer
-声明）。版本协商：`A2A-Version: 1.0` 请求头（或请求参数）+ card
+代理层的 `x-proxypass-token` 与 engine AuthGate 使用的 `X-IAM-Token` 是不同
+层次的凭据，不能互相替代。当前 `card.py` 尚未输出 `securitySchemes`，不能将能力卡
+视为鉴权已配置的证明。版本协商：`A2A-Version: 1.0` 请求头（或请求参数）+ card
 `supportedInterfaces[].protocolVersion`；不支持 → `VersionNotSupportedError`。
 `x-moltis-mcp-token` 历史参数退役。
+
+#### 当前实现与部署边界
+
+本 PR 不改变 gate 默认行为，也不批准公网开放（§2 非目标）。`app.py` 常驻注册
+card 与 `/rpc`，BaaS 是否选用 A2A 不控制服务端路由是否存在。
+
+- A2A 使用与 v3 相同的 `AuthGateService`。Community 的 `NoopAuthGateService`
+  默认关闭；即使启用，其 `verify()` 仍允许请求，不能当作真实身份校验。
+- `_GATED_METHODS` 覆盖 `SendMessage`、`SendStreamingMessage`、`InjectContext`、
+  `ResolveInteraction`、`CancelTask`。启用时缺少 `X-IAM-Token` 会被拒绝；
+  `verify_chat_send` 抛异常时当前仍沿用 v3 的放行行为。
+- card 与读取/订阅/回放方法不经过上述方法级 gate。只打开开关并不能证明
+  `/rpc` 全部方法已受保护；代理入口、engine 直连和订阅数据的访问边界必须一起核验。
+- 当前迁移仅适用于具有既定访问控制的内部调用链。与 v3 共用监听端口或网络
+  可达性不等于新增 HTTP 面没有风险，不得因此新增公网或不受控直连入口。
+
+#### REL 发布检查与两类回退
+
+O9 关闭前，不将本 PR 的合入视为 A2A 对外开放批准。发布负责人须在目标 REL
+上线记录中明确并由相关负责人确认以下事项；这些是**待执行检查**，不是已验证结论：
+
+- [ ] 记录目标环境、允许调用方、代理入口及 engine 直连限制，核验读取、订阅、
+      回放与写方法的访问边界，不只验证 SendMessage。
+- [ ] 记录实际装配的 AuthGate 实现、默认开关及配置来源；若生产依赖 gate，必须
+      使用真实校验实现，不能以 Noop 开关开启代替验收。
+- [ ] 明确校验异常放行策略是否被目标环境接受，以及外围控制；改变默认值或异常
+      策略须另行完成 v3/A2A 兼容性验证，不能仅修改本文宣称已生效。
+- [ ] 验证合法、缺失和无效凭据、校验服务异常，以及 BaaS 的发送/取消/交互决议
+      链路；记录结果、负责人和批准日期。公网开放另行评审。
+- [ ] 演练客户端协议回退与服务端入口回退，记录可恢复的版本和入口配置。
+
+**协议回退**：将 `bot_run.a2a_client_mode` 设为 `off`，使 BaaS 按既有连接池
+切换逻辑回到 v3；已有在途连接不应被假定已立即关闭。该操作不撤销 engine 的
+`/rpc`，也不停止已发起的引擎执行。
+
+**入口回退**：如需收回 A2A 暴露面，应在部署入口阻断 A2A 路径、同时收紧 engine
+直连，或回滚到已验证的不含该路由的 engine 版本；确认 card、`/rpc` 及既有 SSE
+连接均按部署策略处理，并回归 v3。当前没有独立的 A2A 服务端路由关闭开关；不能
+将 BaaS 的 `off` 或关闭 AuthGate 当成入口回退，后者反而取消了方法级校验。
 
 ### 6.7 错误映射
 
@@ -241,7 +296,7 @@ Task 级失败进 `TASK_STATE_FAILED`；SSE 中途异常以流内事件 + 恢复
 | connect/hello-ok | 无握手 + `A2A-Version` 头 | 版本不支持 → `VersionNotSupportedError` | TC-CONN |
 | chat.send | `SendMessage`（contextId 续会话） | 幂等窗口语义 §8.5 | TC-SEND |
 | chat 流式 EventFrame | `SendStreamingMessage`（SSE） | 首事件 Task；文本增量走 `artifactUpdate`（§8.4/D10）；流在终态终止 | TC-DELTA |
-| chat.abort | `CancelTask`（幂等） | 终态后取消 → 标准错误 | TC-CANCEL |
+| chat.abort | `CancelTask`（终态单次迁移） | 传输取消 ≠ 引擎停止；终态后取消报错且不重发 abort，见 §8.8 | TC-CANCEL |
 | chat.resume（run 精确恢复） | 恢复 extension `ReplayEvents`（D12：活/终态适用） | 快照≠回放；`SubscribeToTask` 只做快照+实时 | TC-RESUME |
 | 活任务重挂（无精确要求） | 标准 `SubscribeToTask` | 首事件 = 当前 Task 快照 | TC-RESUME |
 | chat.subscribe（会话订阅） | extension `SubscribeToContext` | 与 Task 契约分离 | TC-SESSUB |
@@ -391,6 +446,41 @@ extension `ResetContext(contextId)`：保留 contextId，清空引擎会话历�
 task 不受影响、订阅不撤销、事件缓冲按 run 独立。TC-RESET 对拍现 v3 行为固化；
 对拍暴露额外副作用时以 v3 行为回填（阶段 1 显式产出）。
 
+### 8.8 CancelTask：调用方判读口径
+
+本节记录当前实现，不新增取消状态机或自动重试。A2A JSON-RPC 成功结果为
+`result.task` 与 Avernet 附录字段 `result.engineAbort`；BaaS 的 `chat_abort`
+包装结果另有 `ok`，不能将它误认为 A2A 标准字段。
+
+- **传输取消成功**：`result.task.status.state == TASK_STATE_CANCELED`。
+  BaaS 仅在合法成功响应且状态满足此条件时返回 `ok=true`，表示任务已进入取消
+  终态、服务端结果流已终结；不保证客户端已消费完终态帧，更不保证引擎执行与
+  工具副作用已停止。仅收到 HTTP 200 不是成功依据。
+- **引擎取消确认**：传输终态落定后，adapter best-effort 调用 `ChatService.abort`。
+  结果通过 `engineAbort` 返回，不改变已落定的传输取消状态：
+
+  | `engineAbort` | 含义 | 调用方可否据此认定引擎确认取消 |
+  |---|---|---|
+  | `confirmed` | 引擎返回 `ok=True, aborted=True` | 可以，限于引擎对目标运行的取消确认 |
+  | `not_found` | 引擎返回 `ok=True, aborted=False`，未匹配到运行 | 不可以；可能已结束或未被定位 |
+  | `refused` | 引擎返回 `ok=False` | 不可以；不一概解释为业务拒绝 |
+  | `timeout` | 等待引擎 abort 结果超时 | 不可以；执行状态未知 |
+  | `unavailable` | 无法完成 abort 调用 | 不可以；执行状态未知 |
+  | 缺失 / `null` / 未识别值 | 兼容旧响应或未知结果 | 不可以；不得默认为 `confirmed` |
+
+- 即使 `confirmed`，也不承诺撤销取消前已经发生的副作用。调用方不得将传输
+  取消显示为“工具完全停止且无副作用”；非 `confirmed` 时应保留引擎停止未确认
+  的提示/结构化告警。HTTP 超时或断连也不证明取消未生效。
+- **重复取消**：已终态 task 返回 `task_terminal`，包含 `state` 与
+  `already_terminal=true`；不再迁移状态、终结流或上行 abort。因此“幂等”仅指
+  不重复产生取消副作用，不承诺重复调用仍返回成功，也不是引擎 abort 重试机制。
+  目标不存在或已过期返回 `not_found_or_expired`，不能推断引擎已停止。
+
+影响范围：BaaS 取消调用方与 A2A 直接消费者应按上述两层结果判读；ChatService
+插件无需因本次文档澄清调整实现。wire、配置和默认行为均不变。
+现有回归证据入口：`test_a2a_transport.py` 的取消/abort 五值、终态重复取消用例，
+以及 `test_bot_a2a_client.py` 的取消转发、未确认结果透传与非法结果拒绝用例。
+
 ## 9. 测试策略
 
 1. 对拍（双壳等价回归）：TC-* 全集
@@ -491,6 +581,7 @@ task 不受影响、订阅不撤销、事件缓冲按 run 独立。TC-RESET 对�
 | O5 | a2a-sdk 跟版策略 | minor 自动跟、major 评审制 | G2 |
 | O6 | 去 extension 二期纯化评估 | 阶段 4 前一次 | 阶段 4 前 |
 | O8 | extension URI 命名空间 | 内部 URI 方案 | G2 |
+| O9 | REL 的 AuthGate 默认策略与入口回退 | 按 §6.6 核验实际实现、默认值、异常策略与访问边界；未确认不开放新外部入口 | REL 前，由发布负责人记录批准结论 |
 
 （O7 已关闭 → D10：文本流走 artifact，不引入 delta extension。）
 
@@ -507,7 +598,7 @@ task 不受影响、订阅不撤销、事件缓冲按 run 独立。TC-RESET 对�
 | 流式发消息 | `SendStreamingMessage`（SSE） | `POST /message:stream` |
 | 查任务 | `GetTask`（幂等） | `GET /tasks/{id}` |
 | 列任务 | `ListTasks` | `GET /tasks` |
-| 取消 | `CancelTask`（幂等） | `POST /tasks/{id}:cancel` |
+| 取消 | `CancelTask`（重复取消边界见 §8.8） | `POST /tasks/{id}:cancel` |
 | 重挂任务流 | `SubscribeToTask`（快照+实时） | `POST /tasks/{id}:subscribe` |
 | 推送配置 | `CreateTaskPushNotificationConfig` 等 | （本期不用） |
 
