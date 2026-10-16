@@ -389,6 +389,28 @@ class TestStatusNarrowTable:
         assert _mk(seam=seam, repo=repo, apply_=apply_).bot_status(
             "b1") == BotState.APPLY_FAILED.value
 
+    def test_failed_report_mid_boot_with_live_device_is_provisioning(self):
+        # the quota-race flap: apply FAILED while the durable publish
+        # pipeline still owns the boot — a burst APPLY_FAILED panic
+        # destroys a healthy mid-boot bot (re-create wedges upstream)
+        seam = _Seam()
+        seam.jobs["b1"] = _job(TaskStatus.RUNNING)
+        repo = _Repo(bot={"status": "PENDING", "device_id": "BOT-x"})
+        apply_ = _Apply(types.SimpleNamespace(
+            trigger=CREATE_ON_CONTAINER_TRIGGER, status=ApplyStatus.FAILED))
+        assert _mk(seam=seam, repo=repo, apply_=apply_).bot_status(
+            "b1") == BotState.PROVISIONING.value
+
+    def test_failed_report_mid_boot_without_device_is_apply_failed(self):
+        # no pipeline left to wait on: the apply verdict stands
+        seam = _Seam()
+        seam.jobs["b1"] = _job(TaskStatus.RUNNING)
+        repo = _Repo(bot={"status": "PENDING"})
+        apply_ = _Apply(types.SimpleNamespace(
+            trigger=CREATE_ON_CONTAINER_TRIGGER, status=ApplyStatus.FAILED))
+        assert _mk(seam=seam, repo=repo, apply_=apply_).bot_status(
+            "b1") == BotState.APPLY_FAILED.value
+
     def test_job_succeeded_is_ready_without_a_report(self):
         seam = _Seam()
         seam.jobs["b1"] = _job(TaskStatus.SUCCEEDED)

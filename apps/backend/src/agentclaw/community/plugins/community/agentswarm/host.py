@@ -411,6 +411,20 @@ class AvernetBotPlatform(BotPlatform):
                 # Record-first engines apply before the container: applied,
                 # container still coming.
                 return BotState.PROVISIONING.value
+            if (bot_status_ not in _BOT_UP
+                    and bool((bot.get("device_id") or "").strip())):
+                # A failed create-apply over a mid-boot row with a live
+                # device binding is not a provisioning verdict: under N-way
+                # concurrent persona creates the quota serialization makes
+                # apply reports flap FAILED while the durable publish
+                # pipeline (row + BaaS device) is still booting — a burst
+                # APPLY_FAILED here tore down healthy mid-boot bots and
+                # pushed the re-create into bot_service's duplicate-row
+                # trap. The device pipeline owns the outcome; the caller's
+                # own poll budget bounds the wait. An UP row keeps the
+                # apply verdict (config-side failure on a working bot,
+                # under the anti-duplicate rule).
+                return BotState.PROVISIONING.value
             return BotState.APPLY_FAILED.value
         if job.status not in TERMINAL_STATUSES:
             # Live job with no creation report yet: every remaining in-flight
