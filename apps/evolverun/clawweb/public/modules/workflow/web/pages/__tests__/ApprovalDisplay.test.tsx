@@ -82,3 +82,11 @@ describe('authorized handler visibility', () => {
     expect(screen.getByText('003')).toBeTruthy();
   });
 });
+
+it('keeps a later name paired with its ID after a blank name', async () => {
+  show({ ...card, approverIds: ['001', '002', '003'], approverNames: ['Alex', '', 'Chris'] });
+  const chris = await screen.findByText('Chris');
+  expect(chris.textContent).toContain('003');
+  expect(chris.textContent).not.toContain('002');
+  expect(screen.getByText('002').textContent).not.toContain('Chris');
+});

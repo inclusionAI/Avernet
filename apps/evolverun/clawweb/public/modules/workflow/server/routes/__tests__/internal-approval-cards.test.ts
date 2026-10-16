@@ -130,6 +130,23 @@ describe("POST /approval-cards", () => {
     expect(inserts.length).toBe(1);
   });
 
+  it.each([
+    ["001,002,003", "Alex,,Chris", "001,002,003", "Alex,002,Chris"],
+    ["001,002,003", ", Chris ,", "001,002,003", "001,Chris,003"],
+    ["001,,003", "Alex,Ignored,Chris", "001,003", "Alex,Chris"],
+    ["001,002", undefined, "001,002", "001,002"],
+  ])("keeps names aligned with IDs (%s, %s)", async (ids, names, savedIds, savedNames) => {
+    const { repo, inserts } = makeRepo({});
+    const { base } = await createServer(repo);
+    const res = await fetch(base, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...validPayload, approver_ids: ids, approver_names: names }),
+    });
+    expect(res.status).toBe(201);
+    expect(inserts[0].params[7]).toBe(savedIds);
+    expect(inserts[0].params[8]).toBe(savedNames);
+  });
+
   it("reuses an existing pending card instead of inserting a duplicate", async () => {
     const { repo, inserts, queries } = makeRepo({
       existingPending: { id: 777, flow_id: "flow-1", node_id: "review" },

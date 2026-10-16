@@ -95,6 +95,14 @@ export function createInternalApprovalCardsRouter(approvalCardRepo: ApprovalCard
         return;
       }
 
+      // Pair names with their original ID slots before discarding empty IDs.
+      // Filtering names independently shifts later names onto the wrong people.
+      const names = approver_names?.split(",").map((name) => name.trim());
+      const approvers = approver_ids.split(",").map((id, index) => ({
+        id: id.trim(),
+        name: names?.[index] || id.trim(),
+      })).filter((approver) => approver.id);
+
       const id = await approvalCardRepo.create({
         flowId: flow_id,
         nodeId: node_id,
@@ -103,8 +111,8 @@ export function createInternalApprovalCardsRouter(approvalCardRepo: ApprovalCard
         approvalType: approval_type,
         message,
         cardFields: card_fields_json ? JSON.parse(card_fields_json) : undefined,
-        approverIds: approver_ids.split(",").map((s: string) => s.trim()).filter(Boolean),
-        approverNames: approver_names ? approver_names.split(",").map((s: string) => s.trim()).filter(Boolean) : undefined,
+        approverIds: approvers.map((approver) => approver.id),
+        approverNames: approvers.map((approver) => approver.name),
         approvalPolicy: approval_policy ?? "any",
         deliveryMode: delivery_mode ?? "card-web",
       });
