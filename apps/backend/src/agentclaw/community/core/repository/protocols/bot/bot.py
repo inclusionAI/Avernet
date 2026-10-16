@@ -53,6 +53,7 @@ class BotRepository(Protocol):
         owner_id: str,
         *,
         execution_options: dict | None = None,
+        env: str | None = None,
     ) -> Optional[Dict[str, Any]]:
         """Get bot by bot_id and owner_id.
 
@@ -62,6 +63,9 @@ class BotRepository(Protocol):
         refresh-token callback, which is served under ``/api`` and thus runs
         under the DEFAULT tenant but must resolve an external-tenant bot).
         ``None`` means no override — preserves existing behavior.
+
+        ``env`` optionally overrides the runtime data environment for admin
+        cross-env corrections; ``None`` keeps the current-env scoping.
         """
         ...
 
@@ -279,9 +283,18 @@ class BotRepository(Protocol):
 
     @abstractmethod
     def update_space_by_owner(
-        self, *, bot_id: str, owner_id: str, space_id: int
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        space_id: int,
+        env: str | None = None,
     ) -> Optional[Dict[str, Any]]:
-        """Atomically replace the structured Space assignment of an owned Bot."""
+        """Atomically replace the structured Space assignment of an owned Bot.
+
+        ``env`` optionally overrides the runtime data environment for admin
+        cross-env corrections; ``None`` keeps the current-env scoping.
+        """
         ...
 
     @abstractmethod

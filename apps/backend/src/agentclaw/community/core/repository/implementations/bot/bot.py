@@ -154,8 +154,10 @@ class BotRepository(
 
     # ── queries (env-scoped — adopt prod) ───────────────────────
 
-    def _env(self):
-        return self.Model.env == get_current_env()
+    def _env(self, env: Optional[str] = None):
+        # Optional explicit env keeps admin cross-env corrections on the
+        # same single business code path as every other caller.
+        return self.Model.env == (env or get_current_env())
 
     @staticmethod
     def _to_caller_identity_dict(bot: BotModel) -> Dict[str, Any]:
@@ -171,13 +173,14 @@ class BotRepository(
         owner_id: str,
         *,
         execution_options: Optional[dict] = None,
+        env: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         with self._db.orm_session() as db:
             q = db.query(self.Model).filter(
                 self.Model.bot_id == bot_id,
                 self.Model.owner_id == owner_id,
                 self.Model.is_delete == 0,
-                self._env(),
+                self._env(env),
             )
             if execution_options:
                 q = q.execution_options(**execution_options)
@@ -599,7 +602,12 @@ class BotRepository(
         return self.get_by_id_and_owner(bot_id, owner_id)
 
     def update_space_by_owner(
-        self, *, bot_id: str, owner_id: str, space_id: int
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        space_id: int,
+        env: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Update only ``space_id`` without widening the generic allowlist.
 
@@ -615,7 +623,7 @@ class BotRepository(
                     self.Model.bot_id == bot_id,
                     self.Model.owner_id == owner_id,
                     self.Model.is_delete == 0,
-                    self._env(),
+                    self._env(env),
                 )
                 .update(
                     {
@@ -628,7 +636,7 @@ class BotRepository(
             )
         if rowcount == 0:
             return None
-        return self.get_by_id_and_owner(bot_id, owner_id)
+        return self.get_by_id_and_owner(bot_id, owner_id, env=env)
 
     def compare_and_set_ext(
         self,
