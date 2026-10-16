@@ -207,14 +207,17 @@ impl<'a> CcTurnMapper<'a> {
         );
     }
 
-    /// Remove the first queue entry matching a delivered notification (by
-    /// either key): the delivery already released its wait directly, and the
-    /// wake that ends up carrying its alias must not empty-pop a second
-    /// consumer out of a pending set that has already drained.
+    /// Remove the first queue entry matching a delivered notification. Each key
+    /// is compared only when the caller actually supplies it: a `None` argument
+    /// matches nothing, so a tool-result delivery (which carries only a
+    /// tool_use_id) cannot remove another task's notice merely because that
+    /// notice also lacks a task_id. The delivery already released its wait
+    /// directly, and the wake that ends up carrying its alias must not empty-pop
+    /// a second consumer out of a pending set that has already drained.
     fn cancel_enqueued_alias(&mut self, task_id: Option<&str>, tool_use_id: Option<&str>) {
         if let Some(i) = self.enqueued.iter().position(|notice| {
-            notice.tool_use_id.as_deref() == tool_use_id
-                || notice.task_id.as_deref() == task_id
+            (tool_use_id.is_some() && notice.tool_use_id.as_deref() == tool_use_id)
+                || (task_id.is_some() && notice.task_id.as_deref() == task_id)
         }) {
             self.enqueued.remove(i);
         }
@@ -1049,13 +1052,13 @@ async fn handle_control_request(
 /// Default sliding idle window for the engine stream. Every received line
 /// pushes the turn's "still making progress" deadline this far out; only a
 /// stream that stays silent for the whole window fails the turn — with a
-/// named error that reports the stalled background count. Ten minutes
-/// clears every legitimate silence observed in production captures (model
-/// TTFT spikes, quiet waits between background-task rounds) by an order of
-/// magnitude, while a wedged stream (2026-10-14: quiet with pending work
-/// while BCS waited on a final that never came) surfaces in minutes instead
-/// of only at the outer run deadline.
-const IDLE_WINDOW: std::time::Duration = std::time::Duration::from_secs(600);
+/// named error that reports the stalled background count. Two minutes stays
+/// clear of every legitimate silence (model TTFT spikes, a non-streaming
+/// foreground tool before it auto-backgrounds) while surfacing a wedged
+/// stream (2026-10-14/2026-10-16: quiet with pending work while BCS waited
+/// on a final that never came) in minutes rather than only at the outer run
+/// deadline. A per-turn `req.idle_timeout` override still wins when set.
+const IDLE_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
 
 #[async_trait::async_trait]
 impl Engine for ClaudeCode {
@@ -1969,6 +1972,42 @@ mod tests {
         let wake = r#"{"type":"system","subtype":"init","session_id":"cc-sess-wake"}"#;
         assert!(matches!(mapper.map_line(wake), CcMap::SessionId(_)));
         assert_eq!(mapper.background_pending(), 0, "wake releases y, not x's spent alias");
+    }
+
+    #[test]
+    fn inline_delivery_cancels_the_matching_alias_not_a_taskidless_one() {
+        // Two auto-backgrounded tasks. Task A's task_notification OMITS task_id
+        // (some CLI recordings do), so its queued alias is {task_id: None, …}.
+        // When B is delivered inline, cancelling B's alias must key on B's own
+        // id — it must NOT match A's notice merely because A's task_id is also
+        // absent. Otherwise the following wake pops B's spent slot, A's wait is
+        // stranded, and the turn hangs until the idle watchdog.
+        let mut mapper = CcTurnMapper::new("r-1");
+        for u in ["toolu_a", "toolu_b"] {
+            let started = format!(
+                r#"{{"type":"system","subtype":"task_started","tool_use_id":"{u}","task_type":"local_bash"}}"#
+            );
+            assert!(matches!(mapper.map_line(&started), CcMap::Ignore));
+        }
+        assert_eq!(mapper.background_pending(), 2);
+        // A's completion notification omits task_id; B's carries both keys.
+        let notice_a = r#"{"type":"system","subtype":"task_notification","tool_use_id":"toolu_a","status":"completed"}"#;
+        assert!(matches!(mapper.map_line(notice_a), CcMap::Ignore));
+        let notice_b = r#"{"type":"system","subtype":"task_notification","task_id":"t-b","tool_use_id":"toolu_b","status":"completed"}"#;
+        assert!(matches!(mapper.map_line(notice_b), CcMap::Ignore));
+        assert_eq!(mapper.background_pending(), 2, "enqueue alone must not release");
+        // B delivered inline — releases B and must cancel B's alias, not A's.
+        let delivered_b = json!({
+            "type": "user",
+            "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_b", "is_error": false, "content": "b done"}]}
+        }).to_string();
+        assert!(matches!(mapper.map_line(&delivered_b), CcMap::Events(_)));
+        assert_eq!(mapper.background_pending(), 1, "B released by its inline delivery");
+        // The wake must release A through A's still-queued alias. If B's cancel
+        // wrongly removed A's alias, the wake pops B's spent slot and A hangs.
+        let wake = r#"{"type":"system","subtype":"init","session_id":"cc-sess-wake"}"#;
+        assert!(matches!(mapper.map_line(wake), CcMap::SessionId(_)));
+        assert_eq!(mapper.background_pending(), 0, "wake releases A, not B's spent alias");
     }
 
     #[test]
