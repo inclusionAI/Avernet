@@ -84,12 +84,19 @@ Retained summary text is labeled separately from the latest aggregation attempt.
 A not-generated, queued or failed current attempt never labels retained content
 as nonexistent. Frozen summary evidence and current issue evidence remain distinct.
 
-Proposal comparison groups actual node/path/op/value changes on the loaded page,
-not similar titles. Equal values share a comparison direction, with every original
-item, source and checkbox retained. Different values remain alternatives. The UI
-states the page/total limit and does not invent a best choice without same-baseline
-effect evidence. Existing server proposal identities still consolidate exact patch
-sources; no new cross-page merge or automatic recommendation is introduced.
+Issue cards show severity, recent observed issue counts and supported trends. Detailed
+coverage counts, sample numerators/denominators, node/source evidence and sorting
+rules remain in collapsed statistics details. Unknown evidence remains unknown;
+insufficient coverage gets one short warning instead of repeated empty rates.
+
+Suggestions are selected directly in their original list. Independent changes and
+equal-value changes do not create a comparison directory. Only the existing
+structural conflict checker over all selected items adds an actionable conflict
+notice: the choices, node/setting, differing values and an option to remove one.
+Long conflicting values remain available in collapsed details. Parent/child paths,
+delete operations and test operations keep their existing semantics. Cross-page
+selection, generation blockers and server-side source/Pack validation remain in
+place; no title-based merge, recommendation or identity rewrite is introduced.
 
 The Diff's optional trailing-whitespace fold is presentation-only. It compares
 corresponding removed/added lines, preserves indentation and blank-line changes,

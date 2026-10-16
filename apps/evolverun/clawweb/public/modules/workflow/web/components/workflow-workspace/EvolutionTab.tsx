@@ -23,6 +23,7 @@ import RepairTaskDialog from './repair-batch/RepairTaskDialog'
 import RepairTaskEntry from './repair-batch/RepairTaskEntry'
 import { repairActionFailure } from '../../api/repair-action-error'
 import RepairSelectionWorkspace from './repair-batch/RepairSelectionWorkspace'
+import RepairProposalChoices from './repair-batch/RepairProposalChoices'
 import { exclusion, itemTitle, phases, primary, RepairDialog } from './repair-batch/repair-view'
 import IssuePrioritySummary from './IssuePrioritySummary'
 import { selectionConflicts } from './repair-batch/repair-selection'
@@ -508,7 +509,7 @@ function DiagnosisPanel({
       {suggestionsLoading && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">历史建议仍在加载，不影响查看问题与修复任务。</p>}
       {repairNotice && <p role="status" className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">{repairNotice}</p>}
       {draftNeedsCheck && <p role="alert" className="text-xs text-destructive">{repairActionError || '提交结果尚未确认。'} <button type="button" disabled={repairBusy} className="underline" onClick={() => void recoverDraft()}>核对任务状态</button></p>}
-      {conflicts.length > 0 && <p role="alert" className="rounded border border-destructive/30 p-3 text-sm text-destructive">所选方案有 {conflicts.length} 处冲突，请取消其中一种方案；未选择的方案继续保留。</p>}
+      <RepairProposalChoices items={selectedItems} onRemove={toggleRepairItem} disabled={repairBusy} />
       {selectionNotice && !selectionNotice.startsWith('默认不选择') && <p role="status" className="text-xs text-amber-800">{selectionNotice}</p>}
 
 

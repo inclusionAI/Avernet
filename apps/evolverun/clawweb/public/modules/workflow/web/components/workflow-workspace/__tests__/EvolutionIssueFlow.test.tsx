@@ -133,7 +133,7 @@ describe('issue and optimization flow', () => {
 
     const issue = screen.getByText('fetch-data', { selector: 'span' }).closest('article')
     expect(issue).not.toBeNull()
-    expect(within(issue!).getByText('影响、频率与覆盖率待评估')).toBeInTheDocument()
+    expect(within(issue!).getByText('统计暂不可用')).toBeInTheDocument()
 
     await userEvent.click(within(issue!).getByRole('button', { name: '问题详情' }))
     const drawer = screen.getByRole('dialog', { name: '问题详情' })

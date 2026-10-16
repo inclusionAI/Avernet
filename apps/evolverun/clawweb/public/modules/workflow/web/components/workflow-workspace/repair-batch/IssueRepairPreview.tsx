@@ -1,7 +1,6 @@
 import type { RepairInboxItem } from '../../../../server/contracts/repair-workbench'
 import { changeSummary, sourceRunCount } from './RepairItemDetail'
 import { exclusion, itemTitle, itemHeading, states } from './repair-view'
-import RepairProposalChoices from './RepairProposalChoices'
 
 export function IssueRepairPreviewLoading() {
   return <div role="status" aria-label="修复建议加载中" className="mt-4 min-h-32 rounded-lg bg-slate-50 p-3">
@@ -21,7 +20,6 @@ export default function IssueRepairPreview({ items, total, selected, canEdit, li
   if (!total) return <p className="mt-3 text-xs text-slate-500">暂无可供选择的修复建议，仍可查看问题原因与证据。</p>
   return <section aria-label="本问题修复建议" className="mt-4">
     <p className="mb-2 text-xs font-semibold text-slate-600">修复建议 · {total} 条</p>
-    <RepairProposalChoices items={items} total={total} onInspect={onDetail} />
     <div className="divide-y divide-slate-100">{items.map(item => {
       const checked = selected.includes(item.itemId)
       const reason = exclusion(item)
