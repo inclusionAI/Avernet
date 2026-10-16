@@ -15,6 +15,10 @@ def format_relay_execution_instruction(
     context_path = f"/api/v1/collaboration/tasks/{task_id}/nodes/{node_id}/context"
     return "\n".join([
         "[task-execute]",
+        "S0 路由锁：本指令是 Backend 下发的分布式接力执行入口，必须由 task-loop Skill 承接；"
+        "禁止任何业务 Skill 抢占入口或直接执行业务任务。task-loop 是编排 Skill，"
+        "业务 Skill 只能在 S2/S3/S4/S5 中作为工具被 task-loop 调用。"
+        "S0 只做入口路由，不进入 trace.steps，也不新增 report event；完成路由锁定后进入 S1。",
         "【分布式接力执行 S1-S6】当前节点是唯一执行范围；根目标和前序事实以 S1 快照为准。",
         f"task_id={task_id}; node_id={node_id}",
         f"relay_token={relay_token}（仅用于区分同一节点的执行代次，不是身份凭证）",

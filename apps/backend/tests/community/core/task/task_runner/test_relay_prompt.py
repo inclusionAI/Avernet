@@ -3,6 +3,28 @@ from agentclaw.community.core.task.task_runner.client.relay_prompt import (
 )
 
 
+def test_relay_prompt_routes_relay_entry_through_task_loop() -> None:
+    prompt = format_relay_execution_instruction(
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+        backend_url="https://backend.example",
+        objective="完成任务",
+        instruction="执行并上报",
+        acceptances=[],
+    )
+
+    assert "S0 路由锁：本指令是 Backend 下发的分布式接力执行入口" in prompt
+    assert "必须由 task-loop Skill 承接" in prompt
+    assert "禁止任何业务 Skill 抢占入口或直接执行业务任务" in prompt
+    assert "task-loop 是编排 Skill" in prompt
+    assert "业务 Skill 只能在 S2/S3/S4/S5 中作为工具被 task-loop 调用" in prompt
+    assert "S0 只做入口路由，不进入 trace.steps，也不新增 report event" in prompt
+    assert "完成路由锁定后进入 S1" in prompt
+    assert prompt.index("[task-execute]") < prompt.index("S0 路由锁")
+    assert "S0_CONTEXT" not in prompt
+
+
 def test_relay_prompt_uses_internal_network_without_bcs_credential() -> None:
     prompt = format_relay_execution_instruction(
         task_id="task-1",
@@ -165,6 +187,11 @@ def test_relay_delivery_prompt_uses_required_trace_contract() -> None:
         relay_execution=True,
         relay_token="generation-1",
     )
+
+    assert "S0 路由锁：本指令是 Backend 下发的分布式接力执行入口" in prompt
+    assert "必须由 task-loop Skill 承接" in prompt
+    assert "业务 Skill 只能在 S2/S3/S4/S5 中作为工具被 task-loop 调用" in prompt
+    assert "S0 只做入口路由，不进入 trace.steps，也不新增 report event" in prompt
 
     assert "每次 report 请求都必须带顶层 trace={steps:[...]}" in prompt
     assert "HTTP 契约允许省略 trace" in prompt
