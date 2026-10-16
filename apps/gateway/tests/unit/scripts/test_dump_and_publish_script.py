@@ -136,6 +136,7 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
         "Collaboration / Invite Codes",
         "Collaboration / Channels",
         "Collaboration / Event Subscriptions",
+        "Group Context",
     ]
     assert document["paths"]["/openapi/v1/collaboration/sessions/{session_id}/token"][
         "post"
