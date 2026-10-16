@@ -818,7 +818,10 @@ def _cancel_capable_card() -> dict:
 
 
 def make_cancel_app(
-    *, mode: str = "cancels", abort_outcome: str = "confirmed"
+    *,
+    mode: str = "cancels",
+    abort_outcome: str = "confirmed",
+    first_frame_gate: bool = False,
 ) -> tuple[FastAPI, dict]:
     """1c CancelTask 前后端速写（真 TCP）。
 
@@ -826,11 +829,19 @@ def make_cancel_app(
       cancels  — 流开跑后等 cancel 信号，收到即推 CANCELED 终态经流收尾
       refuse   — CancelTask 出 task_terminal 标准错误；流自行 COMPLETED
       http_500 — CancelTask 通道回 500；流自行 COMPLETED
+      empty    — 流立即 EOF：一个帧都不发（R7-F1 流死无身份面）
+
+    first_frame_gate=True 时首个 SSE 帧闸在 state["first_frame"] 上——
+    复现"ACK 已返回、engine_task_id 未就位"的真实时序窗口。
 
     返回 (app, handle)：handle["bodies"] 记录 server 收到的 CancelTask 请求。
     """
     app = FastAPI()
-    state: dict[str, Any] = {"bodies": [], "cancel_seen": threading.Event()}
+    state: dict[str, Any] = {
+        "bodies": [],
+        "cancel_seen": threading.Event(),
+        "first_frame": threading.Event(),
+    }
 
     @app.get("/.well-known/agent-card.json")
     def card() -> dict:
@@ -844,6 +855,15 @@ def make_cancel_app(
             session = body["params"]["message"]["contextId"]
 
             async def gen():
+                if mode == "empty":
+                    # 流死无身份：EOF 在任何帧之前——消费方收
+                    # STREAM_CLOSED_WITHOUT_TERMINAL，engine_task_id 永远缺失。
+                    return
+                if first_frame_gate:
+                    for _ in range(200):
+                        if state["first_frame"].is_set():
+                            break
+                        await asyncio.sleep(0.05)
                 yield _sse(
                     {
                         "statusUpdate": {
@@ -1110,6 +1130,130 @@ def test_chat_abort_unknown_run_is_honest_not_fake_ok():
         assert state["bodies"] == [], "无 task id 不得盲发 CancelTask"
     finally:
         srv.stop()
+
+
+def test_chat_abort_waits_for_engine_identity_before_cancel():
+    """R7-F1：ACK 已返回、首帧被闸门挡住（engine_task_id 尚未就位）时取消
+    ——归属成立（run 已登记、body task 在途），abort 必须等身份就绪再发
+    CancelTask，不得把"尚未读到引擎 ID"误判成"不归属"而只断本地流。"""
+    app, state = make_cancel_app(mode="cancels", first_frame_gate=True)
+    srv = LiveServer(app)
+    try:
+
+        async def scenario():
+            client = await _connect_async(srv.base)
+            ack = await client.chat_send(session_key="s", message="hi")
+            assert ack["ok"] is True
+
+            # 无任何 sleep：立即取消——此时 engine_task_id 一定未就位。
+            abort_task = asyncio.create_task(client.chat_abort(session_key="s"))
+
+            async def release_first_frame():
+                # 给 abort 进入"等身份"的机会再放行首帧（否则又变时序赛跑）。
+                await asyncio.sleep(0.2)
+                state["first_frame"].set()
+
+            await asyncio.create_task(release_first_frame())
+            out = await abort_task
+            await asyncio.sleep(0.5)  # CancelTask 语义下引擎经流推终态
+            await client.close()
+            return out
+
+        out = _run(scenario())
+        assert out["ok"] is True, out
+        assert out["task"]["state"] == "TASK_STATE_CANCELED"
+        cancels = [b for b in state["bodies"] if b.get("method") == "CancelTask"]
+        assert len(cancels) == 1, f"CancelTask 上 wire {len(cancels)} 次"
+        assert cancels[0]["params"]["taskId"] == "eng-1", cancels[0]
+    finally:
+        srv.stop()
+
+
+def test_chat_abort_immediate_after_ack_still_cancels():
+    """R7-F1：ACK 后零 sleep 立即取消也要发出 CancelTask——身份就绪/消费
+    终结双重置位的事件保证确定性，不靠时序运气（老 suite 全靠 sleep(0.15)
+    等 WORKING 帧绕开了这个窗口）。"""
+    app, state = make_cancel_app(mode="cancels")
+    srv = LiveServer(app)
+    try:
+
+        async def scenario():
+            client = await _connect_async(srv.base)
+            ack = await client.chat_send(session_key="s", message="hi")
+            assert ack["ok"] is True
+            out = await client.chat_abort(session_key="s")  # 无 sleep，紧跟 ACK
+            await asyncio.sleep(0.5)  # 引擎经流推 CANCELED 终态
+            await client.close()
+            return out
+
+        out = _run(scenario())
+        assert out["ok"] is True, out
+        cancels = [b for b in state["bodies"] if b.get("method") == "CancelTask"]
+        assert len(cancels) == 1, f"CancelTask 上 wire {len(cancels)} 次"
+        assert cancels[0]["params"]["taskId"] == "eng-1", cancels[0]
+    finally:
+        srv.stop()
+
+
+def test_chat_abort_after_stream_died_without_identity_is_prompt():
+    """R7-F1 边界：流已 EOF 收口、identity 事件由消费终结侧置位——abort
+    不得空等 30s 超时，读不到身份就诚实 RUN_NOT_TRACKED 快速返回。"""
+    app, state = make_cancel_app(mode="empty")
+    srv = LiveServer(app)
+    try:
+
+        async def scenario():
+            client = await _connect_async(srv.base)
+            ack = await client.chat_send(session_key="s", message="hi")
+            assert ack["ok"] is True
+            await asyncio.sleep(0.5)  # 消费方收 EOF→STREAM_CLOSED_WITHOUT_TERMINAL
+            t0 = time.monotonic()
+            out = await client.chat_abort(session_key="s")
+            elapsed = time.monotonic() - t0
+            await client.close()
+            return out, elapsed
+
+        out, elapsed = _run(scenario())
+        assert out["ok"] is False, out
+        assert out["error"]["code"] == "RUN_NOT_TRACKED", out
+        assert elapsed < 5.0, f"abort 悬挂 {elapsed:.1f}s——消费终结未释放身份等待"
+        assert state["bodies"] == [], "无 task id 不得盲发 CancelTask"
+    finally:
+        srv.stop()
+
+
+def test_chat_abort_identity_wait_times_out_and_cuts_local_stream(monkeypatch):
+    """R7-F1 上限分支：病态活流（连接活着但一个帧都不发）——身份等待超时
+    后落回诚实 RUN_NOT_TRACKED + 本地断流，不无限悬挂 abort。"""
+
+    async def scenario():
+        from secbaas.community.core.service.bot_run import _bot_a2a_client as mod
+
+        monkeypatch.setattr(mod, "_CANCEL_IDENTITY_TIMEOUT_SECONDS", 0.05)
+        client = mod.BotA2aClient(base_url="http://unused")
+        client._connected = True
+        client._server_info = {"server": {"card": _cancel_capable_card()}}
+        ctx = mod._RunCtx("rid-wait", "s-wait")
+        ctx.auth_token = "OPEN_API:" + "NOT_PROVIDED"
+        ctx.task = asyncio.create_task(asyncio.sleep(30))
+        # identity_ready 永不置位（活流不发帧）
+        client._runs["rid-wait"] = ctx
+        client._session_runs["s-wait"] = "rid-wait"
+
+        t0 = time.monotonic()
+        out = await client.chat_abort("s-wait")
+        elapsed = time.monotonic() - t0
+        try:
+            await ctx.task
+        except asyncio.CancelledError:
+            pass
+        return out, elapsed, ctx.task.cancelled()
+
+    out, elapsed, cut = _run(scenario())
+    assert out["ok"] is False, out
+    assert out["error"]["code"] == "RUN_NOT_TRACKED", out
+    assert elapsed < 5.0, f"身份等待未走上限就绪/失败（{elapsed:.1f}s）"
+    assert cut, "超时后必须 fallback 本地断流"
 
 
 def test_abort_routes_with_the_run_b3_and_off_modes():
@@ -2086,7 +2230,8 @@ def test_abort_without_card_snapshot_is_honestly_unsupported():
 
 
 def test_abort_untracked_run_cuts_local_stream_not_send_cancel():
-    """引擎声明可取消但 run 的 taskId 尚未学到（开流未起帧）：不盲发
+    """引擎声明可取消但 run 的 taskId 已确定学不到（流终结置位身份事件、
+    无 ID——R7-F1 后"尚未就位"窗口改为等待身份而非判不归属）：不盲发
     CancelTask——RUN_NOT_TRACKED + 本地断流（消费方立即脱困，不等收尾）。"""
 
     async def scenario():
@@ -2096,6 +2241,9 @@ def test_abort_untracked_run_cuts_local_stream_not_send_cancel():
         ctx = _RunCtx("rid-cut", "s-cut")
         ctx.auth_token = "OPEN_API:" + "NOT_PROVIDED"  # 哨兵值等值拼接（规则口径）
         ctx.task = asyncio.create_task(asyncio.sleep(30))
+        # 模拟 SSE 消费终结而无 ID（流早夭）：身份事件置位、engine_task_id
+        # 仍缺——生产上可达（live 流不会学不到身份却永不置位）。
+        ctx.identity_ready.set()
         client._runs["rid-cut"] = ctx
         client._session_runs["s-cut"] = "rid-cut"
         out = await client.chat_abort("s-cut")
@@ -2453,21 +2601,20 @@ def test_tracks_session_spans_background_run_until_end_of_stream():
             ack = await client.chat_send(session_key="sk-bg", message="hi")
             assert ack["ok"] is True
             # 非等待发送：ACK 已回、结果未收——在途 run 归属存在
-            assert client.tracks_session("sk-bg") is True, \
+            assert client.tracks_session("sk-bg") is True, (
                 "ACK 后归属丢失（非等待发送的取消会 RUN_NOT_TRACKED）"
+            )
             assert client.has_running_runs is True
 
             await asyncio.sleep(0.3)  # WORKING 帧到达 → engine_task_id 就位
             assert "sk-bg" not in getattr(client, "_sessions", {}) or True
             out = await client.chat_abort(session_key="sk-bg")
             assert out["ok"] is True, out
-            cancels = [b for b in state["bodies"]
-                       if b.get("method") == "CancelTask"]
+            cancels = [b for b in state["bodies"] if b.get("method") == "CancelTask"]
             assert len(cancels) == 1, "CancelTask 必须真的发出"
 
             await asyncio.sleep(0.5)  # 引擎按取消收流（CANCELED final）
-            assert client.tracks_session("sk-bg") is False, \
-                "流已终结,归属未随之结束"
+            assert client.tracks_session("sk-bg") is False, "流已终结,归属未随之结束"
             await client.close()
             return True
 
@@ -2495,12 +2642,12 @@ def test_pool_owner_lookup_survives_wait_result_false_send():
     try:
 
         async def scenario():
-            inner = await _connect_async(srv.base)   # 真 BotA2aClient
+            inner = await _connect_async(srv.base)  # 真 BotA2aClient
             holder = AsyncChatClient(uri="ws://x/ws", max_retries=0)
             holder._client = inner
             holder._transport = "a2a"
 
-            other = MagicMock()                      # 另一条空闲连接
+            other = MagicMock()  # 另一条空闲连接
             other.tracks_session = MagicMock(return_value=False)
             other.has_running_runs = False
 
@@ -2513,17 +2660,14 @@ def test_pool_owner_lookup_survives_wait_result_false_send():
             ack = await inner.chat_send(session_key="sk-own", message="hi")
             assert ack["ok"] is True
             await asyncio.sleep(0.3)  # engine_task_id 就位
-            assert "sk-own" not in holder._sessions, \
-                "前置:编排层等待不在（非等待发送）"
+            assert "sk-own" not in holder._sessions, "前置:编排层等待不在（非等待发送）"
 
-            owner = await pool.get("bg-6", "ws://x/ws", None,
-                                   session_key="sk-own")
+            owner = await pool.get("bg-6", "ws://x/ws", None, session_key="sk-own")
             assert owner is holder, "取消未命中真实 run 的持有连接"
 
             out = await owner.chat_abort(session_key="sk-own")
             assert out["ok"] is True, out
-            cancels = [b for b in state["bodies"]
-                       if b.get("method") == "CancelTask"]
+            cancels = [b for b in state["bodies"] if b.get("method") == "CancelTask"]
             assert len(cancels) == 1, "定向取消必须真的发出 CancelTask"
             await holder.close()
             return True

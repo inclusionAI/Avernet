@@ -46,6 +46,12 @@ _TERMINAL_WIRE_STATES = (
 # AgentCapabilities 无标准 cancellation 字段，能力以 extension 锁定）。
 _CANCEL_EXT_URI = "https://avernet.local/a2a/ext/cancel/v1"
 
+# R7-F1：ACK 已返回、首帧未消费时取消——归属成立但身份未就位，abort
+# 在此上限内等身份（事件由"引擎 task id 首见"或"消费终结（无 ID 亦置
+# 位）"双重释放，正常路径毫秒级返回）；上限只兜"流活着但引擎迟迟不发
+# 帧"的病态挂死，超时落回诚实 RUN_NOT_TRACKED。
+_CANCEL_IDENTITY_TIMEOUT_SECONDS = 30.0
+
 
 class A2aUnavailableError(RuntimeError):
     """目标不可用/非 JSONRPC 1.x——工厂回退 v3 的灰度门信号。"""
@@ -59,6 +65,7 @@ class _RunCtx:
         "terminal_emitted",
         "task",
         "engine_task_id",
+        "identity_ready",
         "auth_token",
     )
 
@@ -72,9 +79,19 @@ class _RunCtx:
         # taskId，kernel 生成）——CancelTask 转发的定位键；BaaS 自己的 rid
         # 只是 messageId/幂等键，引擎不认识。
         self.engine_task_id: str | None = None
+        # R7-F1：身份就绪信号——engine_task_id 首见或消费终结（含无 ID 的
+        # 早夭流）置位。chat_abort 对"已登记、尚未读到 ID"的 run 依据它等
+        # 待身份，而不是把该窗口误判成不归属。
+        self.identity_ready: asyncio.Event = asyncio.Event()
         # P1-5：该次 chat_send 携带的调用方许可（X-IAM-Token gate 开启时
         # CancelTask/ResolveInteraction 都必须用它——proxypass 头不是许可）。
         self.auth_token: str | None = None
+
+    def note_engine_task_id(self, tid: Any) -> None:
+        """R7-F1：引擎侧 run id 首见即登记并释放身份等待。"""
+        if not self.engine_task_id and isinstance(tid, str):
+            self.engine_task_id = tid
+            self.identity_ready.set()
 
 
 def _message_to_text(message: Any) -> str:
@@ -222,16 +239,16 @@ class BotA2aClient:
         if rid is None:
             return False
         ctx = self._runs.get(rid)
-        return ctx is not None and ctx.task is not None \
-            and not ctx.task.done()
+        return ctx is not None and ctx.task is not None and not ctx.task.done()
 
     @property
     def has_running_runs(self) -> bool:
         """是否存在在途 body task（后台 A2A body task 未终结）——供连接
         池排空判断（R6-1）：wait_result=False 的后台 run 同样占着连接的
         服务面，sweep 不得把这种连接当空闲收口。"""
-        return any(ctx.task is not None and not ctx.task.done()
-                   for ctx in self._runs.values())
+        return any(
+            ctx.task is not None and not ctx.task.done() for ctx in self._runs.values()
+        )
 
     # ── chat_send：两段式 ack + per-request body task（R17-L1）──
     async def chat_send(
@@ -355,6 +372,9 @@ class BotA2aClient:
             if not ctx.terminal_emitted:
                 await self._emit_terminal_error(ctx, "STREAM_ERROR", str(e)[:200])
         finally:
+            # R7-F1：消费终结即释放身份等待——流早夭（无 ID）时阻塞在
+            # identity_ready 上的 abort 也能立即落回诚实 RUN_NOT_TRACKED。
+            ctx.identity_ready.set()
             await resp.aclose()
             await client.aclose()
             self._runs.pop(ctx.rid, None)
@@ -367,8 +387,7 @@ class BotA2aClient:
 
     async def _on_task(self, ctx: _RunCtx, task: dict[str, Any]) -> None:
         # 1c：task 快照的 id = 引擎 kernel run id（CancelTask 定位键）。
-        if not ctx.engine_task_id and isinstance(task.get("id"), str):
-            ctx.engine_task_id = task["id"]
+        ctx.note_engine_task_id(task.get("id"))
         logger.debug(
             "[a2a] task opened rid=%s state=%s",
             ctx.rid,
@@ -380,8 +399,7 @@ class BotA2aClient:
     ) -> None:
         # 1c：流帧 taskId 即引擎 run id——首见即登记（SSE 订阅时序下
         # task 快照不保证出现，statusUpdate/artifactUpdate 是可靠来源）。
-        if not ctx.engine_task_id and isinstance(au.get("taskId"), str):
-            ctx.engine_task_id = au["taskId"]
+        ctx.note_engine_task_id(au.get("taskId"))
         parts = (au.get("artifact") or {}).get("parts") or []
         text = "".join(p.get("text", "") for p in parts if isinstance(p, dict))
         if au.get("lastChunk") and not au.get("append"):
@@ -408,8 +426,7 @@ class BotA2aClient:
     ) -> None:
         meta = su.get("metadata") or {}
         state = (su.get("status") or {}).get("state", "")
-        if not ctx.engine_task_id and isinstance(su.get("taskId"), str):
-            ctx.engine_task_id = su["taskId"]
+        ctx.note_engine_task_id(su.get("taskId"))
         base = {
             "runId": su.get("taskId"),
             "sessionKey": ctx.session_key,
@@ -560,7 +577,9 @@ class BotA2aClient:
           - 引擎未声明 cancel 能力（老引擎）：保留原行为——本地 body-task
             取消是**订阅断流** + 诚实 CANCEL_UNSUPPORTED；
           - 引擎侧 task id 未知（未开流/已收尾/未知 session）：RUN_NOT_TRACKED
-            ，不盲发 CancelTask，本地断流 fallback 保留；
+            ，不盲发 CancelTask，本地断流 fallback 保留；例外（R7-F1）——
+            run 已登记且在途、只是身份尚未就位（ACK 后首帧未消费）：等待
+            identity_ready 再判，窗口未关不判"不归属"；
           - engine 显式拒绝（task_terminal 等）：ok=False 原样透传引擎
             reason——本地流不动（引擎语义成立，run 会自然收尾，误杀本地
             task 只会让消费方悬挂）；
@@ -593,6 +612,19 @@ class BotA2aClient:
             }
 
         task_id = ctx.engine_task_id if ctx else None
+        # R7-F1：ACK 已返回、首帧尚未消费（run 已登记、body task 在途）时，
+        # 归属成立、只是身份未就位——等待 identity_ready（引擎 task id 首见
+        # 或消费终结双重置位）再判，不把"尚未读到 ID"误判成"不归属"：
+        # 那样只会断掉本地结果流，引擎侧照跑且永远收不到 CancelTask。
+        if not task_id and ctx is not None:
+            try:
+                await asyncio.wait_for(
+                    ctx.identity_ready.wait(),
+                    timeout=_CANCEL_IDENTITY_TIMEOUT_SECONDS,
+                )
+            except TimeoutError:
+                pass  # 流活着但引擎迟迟不发帧——超时落回诚实失败
+            task_id = ctx.engine_task_id
         if not task_id:
             if ctx and ctx.task and not ctx.task.done():
                 ctx.task.cancel()
