@@ -9,7 +9,7 @@
 
 `POST /api/bots/change-space-for-others`（#2699，管理员批量迁移 bot 归属空间）在预发实测时（2026-10-15 20:16，trace `0b446a4d17920666103644083efd55`）对生产 bot 返回 `Bot不存在`。
 
-根因不是 bug：`ac_bots` 为 prepub/prod 共库共表（ZDAS datasource `agentclawdb_ds`），环境隔离靠 `env` 列在**仓储层查询条件**实现——`get_by_id_and_owner` / `update_space_by_owner` 均硬挂 `env == get_current_env()`。预发实例（`get_current_env() == "pre"`）永远匹配不到 `env='prod'` 的行。
+根因不是 bug：`ac_bots` 为 prepub/prod 共库共表（同一内部数据源 datasource `agentclawdb_ds`），环境隔离靠 `env` 列在**仓储层查询条件**实现——`get_by_id_and_owner` / `update_space_by_owner` 均硬挂 `env == get_current_env()`。预发实例（`get_current_env() == "pre"`）永远匹配不到 `env='prod'` 的行。
 
 诉求（用户确认）：**在预发实例上订正 prod 行的 `ac_bots.space_id`**。性质 = 当下权宜（prod 尚无此端点）+ 长期运维能力（带外修数）。
 
