@@ -59,6 +59,9 @@ jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
 describe('CommunityPage 滚动容器结构', () => {
   test('列表视：滚动 main 必须是 h-full flex 外层的 flex 子项，否则 overflow-y-auto 失效', () => {
     render(<CommunityPage />);
+    const publishButton = screen.getByRole('button', { name: '发布主题' });
+    expect(publishButton).toHaveClass('bg-primary', 'text-primary-foreground');
+    expect(publishButton).not.toHaveClass('bg-foreground');
     const scrollMain = screen.getByRole('main');
     expect(scrollMain).toHaveClass('overflow-y-auto', 'flex-1', 'min-h-0');
     expect(scrollMain.parentElement).toHaveClass('h-full', 'flex', 'flex-col');

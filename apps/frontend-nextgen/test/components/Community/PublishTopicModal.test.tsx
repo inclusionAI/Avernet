@@ -41,6 +41,10 @@ describe('PublishTopicModal', () => {
     const onOpenChange = jest.fn();
     render(<PublishTopicModal open publishing={false} onOpenChange={onOpenChange} onPublish={jest.fn()} />);
 
+    const publishButton = screen.getByRole('button', { name: '发布' });
+    expect(publishButton).toHaveClass('bg-primary', 'text-primary-foreground');
+    expect(publishButton).not.toHaveClass('bg-foreground');
+
     const backButton = screen.getByRole('button', { name: '返回社区列表' });
     expect(backButton).toBeVisible();
     await user.click(backButton);
