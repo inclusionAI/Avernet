@@ -1,8 +1,8 @@
 # Bot 基因组是进化的单元，构建在 Bot Config Manifest 之上
 
-> English version: [0001-bot-genome-is-the-unit-of-evolution.md](0001-bot-genome-is-the-unit-of-evolution.md)
+> English version: [0019-bot-genome-is-the-unit-of-evolution.md](0019-bot-genome-is-the-unit-of-evolution.md)
 
-状态：proposed（决策草案；接受后晋升到 `docs/adr/`）。
+状态：accepted（2026-10-16；原为 bot-evolution 决策草案 DR-1）。负责人：@totalfrank，已签字确认。引擎负责人：@totalfrank，已签字认可记忆相关后果（策展记忆进入基因组；保留文件规则在 RSI-05 投影契约落地时修订）。
 
 ## 决策
 
@@ -41,7 +41,7 @@ Manifest 保持对修订版无感知。它只获得格式特性（一种内容�
 记忆投影契约，并修订当前「apply 从不触碰 `MEMORY.md` 和 `IDENTITY.md`」的规则：
 由引擎而不是 Backend 决定策展条目如何投影。
 
-设计：[`../01-genome.zh-CN.md`](../01-genome.zh-CN.md)。
+设计：[`apps/backend/docs/bot-evolution/01-genome.zh-CN.md`](../../apps/backend/docs/bot-evolution/01-genome.zh-CN.md)。
 
 ## 影响
 

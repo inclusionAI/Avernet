@@ -49,7 +49,7 @@
 | 基因组修订版，以及第 3 级复用的修订版/引用/补丁机制 | [01-genome.zh-CN.md](01-genome.zh-CN.md) |
 
 **运行位置。** 在新模块 `apps/evolution` 中，与 Strategy Registry、进化运行、
-验证和实验记录并列（模块放置位置是待定决策 D-1，参见 [design.zh-CN.md](design.zh-CN.md)）。
+验证和实验记录并列（模块放置位置是决策 D-1，参见 [ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.zh-CN.md)）。
 元循环不需要任何 Backend 代码：机制是进化策略版本，而不是 Bot 的期望状态。
 
 ## 2. 领域模型

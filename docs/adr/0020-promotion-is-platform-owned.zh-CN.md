@@ -1,8 +1,8 @@
 # 被进化 bot 修订版的晋升归平台所有
 
-> English version: [0002-promotion-is-platform-owned.md](0002-promotion-is-platform-owned.md)
+> English version: [0020-promotion-is-platform-owned.md](0020-promotion-is-platform-owned.md)
 
-状态：proposed（决策草案；接受后晋升到 `docs/adr/`）。
+状态：accepted（2026-10-16；原为 bot-evolution 决策草案 DR-2）。负责人：@totalfrank，已签字确认。
 
 ## 决策
 
@@ -23,7 +23,7 @@
 验证并获得人工批准后才会被采用。进化策略的输入永远不包含封存集（holdout）、
 回归集或安全集的用例。
 
-设计：[`../08-promotion.zh-CN.md`](../08-promotion.zh-CN.md)。
+设计：[`apps/backend/docs/bot-evolution/08-promotion.zh-CN.md`](../../apps/backend/docs/bot-evolution/08-promotion.zh-CN.md)。
 
 ## 影响
 

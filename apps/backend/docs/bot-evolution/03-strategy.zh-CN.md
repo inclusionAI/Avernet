@@ -33,7 +33,7 @@
 | 通用 API 约定和公开端点索引 | [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) |
 | 改进策略本身（像基因组一样带版本的改进机制，第 3 级） | [10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md) |
 
-**归属位置。** Strategy Registry 位于提议的新模块 `apps/evolution` 中（待定决策 D-1，推荐方案 A：遵循 Backend DI/插件模式的 Python 服务；参见 [design.zh-CN.md](design.zh-CN.md)）。它是 ClawEvolve 的 `official-stage-catalog.json` 与 `ce_stage_skill_implementations` 的泛化。策略实现归其作者所有（包括默认进化策略所在的 `apps/evolverun`）。能力的**提供方**（provider）是平台代码（位于 `apps/evolution`）或引擎适配器代码（例如，引擎的会话导出提供 `experience.sessions`）。
+**归属位置。** Strategy Registry 位于新模块 `apps/evolution` 中（决策 D-1，方案 A：遵循 Backend DI/插件模式的 Python 服务；参见 [ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.zh-CN.md)）。它是 ClawEvolve 的 `official-stage-catalog.json` 与 `ce_stage_skill_implementations` 的泛化。策略实现归其作者所有（包括默认进化策略所在的 `apps/evolverun`）。能力的**提供方**（provider）是平台代码（位于 `apps/evolution`）或引擎适配器代码（例如，引擎的会话导出提供 `experience.sessions`）。
 
 ![策略端口与上下文](images/strategy-port.zh-CN.svg)
 
@@ -495,7 +495,7 @@ class Operation:
 
 1. **一个端口。** 平台只认识一个策略接口，它只有一个方法 `run(ctx)`。ClawEvolve、其他团队的优化器以及平台自带的组合式策略都实现同一个端口。
 2. **一个出口。** 策略只能通过传给它的上下文访问平台。它不能晋升、不能读取留出测试、不能触碰线上 bot，也不能读取平台存储。因此，无论策略是什么，隔离与预算都在同一处强制执行。（**预算**是在 bot 绑定中设置的每次运行的支出上限：以美元计的模型花费、挂钟时间和评估 rollout 次数，其中一次 rollout 指针对一个 bot 版本运行一个评估用例一次。每次模型调用、智能体会话和评估都计入 `ctx.budget`，耗尽时运行即停止。）这是一项有意的限制：策略只能使用能力目录（§4）所提供的东西，不能自带模型密钥或智能体运行时。它自身的计算（解析、搜索、排序）不受限制。新的需求应在第二个策略也需要时通过新增目录条目来满足，而不是为单个策略开例外。
-3. **策略提议，平台决定。** 策略提交候选。记录、验证、门禁和晋升仍由平台负责（DR-2，[decisions/0002-promotion-is-platform-owned.zh-CN.md](decisions/0002-promotion-is-platform-owned.zh-CN.md)）。
+3. **策略提议，平台决定。** 策略提交候选。记录、验证、门禁和晋升仍由平台负责（DR-2，[../../../../docs/adr/0020-promotion-is-platform-owned.zh-CN.md](../../../../docs/adr/0020-promotion-is-platform-owned.zh-CN.md)）。
 4. **关于代码的事实通过注册记录；关于 bot 的选择通过配置。** 有些信息对某个策略版本而言无论哪个 bot 使用都成立，例如“ClawEvolve 2.0.0 驱动 OpenClaw 智能体并读取会话历史”。这类信息在注册记录中记录一次。另一些信息是针对某个 bot 的决定，例如“bot_123 每晚运行 ClawEvolve，可以修改 persona 和 skills，预算为 20 美元”。这些信息存放在 bot 的绑定中（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)），所有者可随时修改，而无需触碰策略。
 5. **概念少，且只定义一次。** 每个术语只有一个定义；没有字段重复表达另一个字段（例如，引擎兼容性由 `needs` 推导，而不是单独声明）。
 
@@ -1283,4 +1283,4 @@ async def test_redispatch_does_not_duplicate(fake_platform):
 | S-6 | 一致性测试通过之前，“在开发环境之外绑定”是什么意思 | 提议：一致性状态为 `pending` 或 `failed` 的版本只能在本地测试环境和开发用 bot 上运行 |
 | S-7 | TypeScript 策略 SDK 何时发布 | 先 Python；当第一个非 Python 策略接入时再发布 TypeScript 版本 |
 | S-8 | 沙箱化的作业 worker 如何访问策略自己的进度存储 | 策略在自己的存储中持久化自己的进度（已达成一致）。待定：沙箱化的作业 worker 如何访问该存储——例如在注册记录中为策略自有存储声明一条出口白名单条目，或由平台提供一个按运行划分、平台从不解读的不透明 blob。与 [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) 中的 ER-10 是同一项决策 |
-| D-1 | 控制平面的模块归属（registry 运行在哪里） | `apps/evolution`（方案 A）；参见 [design.zh-CN.md](design.zh-CN.md) |
+| D-1 | 控制平面的模块归属（registry 运行在哪里） | 已决定：`apps/evolution`（方案 A）；参见 [ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.zh-CN.md) |

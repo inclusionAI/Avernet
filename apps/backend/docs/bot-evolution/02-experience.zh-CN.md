@@ -59,8 +59,8 @@ bot 上的文档摘要，对服务型 bot 而言则是当时正在提供服务�
 | 共享的 API 约定和公开端点索引 | 进化 API | [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) |
 | 用于改进问题的冻结经验快照（第 3 层级，后续） | 元进化 | [10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md) |
 
-**运行位置。** 该存储是进化控制面的一部分，位于提议的新模块 `apps/evolution`
-中（待定决策 D-1 的推荐选项 A；见 [design.zh-CN.md](design.zh-CN.md)）。会话
+**运行位置。** 该存储是进化控制面的一部分，位于新模块 `apps/evolution`
+中（决策 D-1，[ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.zh-CN.md)）。会话
 导出在**引擎适配器**中实现，因为引擎拥有自己的物理布局（依据仓库根目录 `AGENTS.md` 的规则（“物理布局归 Engine Runtime 及其带版本的布局契约所有”；ADR 0014 是这条规则的一个应用））和
 聊天历史；Backend 不得了解引擎的会话路径。
 

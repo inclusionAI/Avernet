@@ -62,12 +62,12 @@ which names the documents to read first.
 | [research.md](research.md) | Appendix | Industry survey and codebase evidence |
 | [work-items.md](work-items.md) | Appendix | Work items for follow-up sessions, with dependencies |
 
-Draft decision records (status `proposed`). They live here while under
-discussion; once accepted, each is promoted to `docs/adr/` with the next free
-ADR number:
+Decision records. Accepted ones are promoted to `docs/adr/` with the next free
+ADR number; drafts stay in [decisions/](decisions/) while under discussion:
 
-- [DR-1 — Bot Genome is the unit of evolution](decisions/0001-bot-genome-is-the-unit-of-evolution.md)
-- [DR-2 — Promotion is platform-owned](decisions/0002-promotion-is-platform-owned.md)
+- [DR-1 — Bot Genome is the unit of evolution](../../../../docs/adr/0019-bot-genome-is-the-unit-of-evolution.md)
+- [DR-2 — Promotion is platform-owned](../../../../docs/adr/0020-promotion-is-platform-owned.md)
+- [D-1 — Evolution control plane in `apps/evolution`](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.md)
 - [DR-3 — Bot principal for the evolution surface](decisions/0003-bot-principal-for-evolution-surface.md) (**postponed**: how bots talk to the platform is decided first)
 
 ## Glossary

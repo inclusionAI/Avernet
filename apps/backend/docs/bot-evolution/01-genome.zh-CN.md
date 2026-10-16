@@ -7,7 +7,7 @@
 > 指向这些修订版的引用（ref），用于变更它们的补丁，以及存储并提供这些内容的
 > 基因组注册表（Genome Registry）。
 
-提议决策：[DR-1](decisions/0001-bot-genome-is-the-unit-of-evolution.zh-CN.md)。
+已接受的决策：[DR-1](../../../../docs/adr/0019-bot-genome-is-the-unit-of-evolution.zh-CN.md)。
 基于 Bot Config Manifest（`apps/backend/docs/bot-config-manifest/`）构建。
 
 ## 1. 目的与范围
@@ -1592,13 +1592,14 @@ apply_service.apply(bot=bot, document=compiled.document)
 | G-2 | 完整的补丁操作集，以及操作是否映射到 JSON Patch（RFC 6902） | RSI-02 |
 | G-3 | 锁定基因的默认值 | RSI-02 “完成标准”：评审者就锁定基因的默认值达成一致 |
 | G-4 | `engine_config` 键白名单 | P3/P4 |
-| G-5 | 引擎记忆投影契约，以及引擎负责人对修改保留文件规则的签字确认 | RSI-05；DR-1 的后果；过渡方案 `LESSONS.md` |
+| G-5 | 引擎记忆投影契约（引擎负责人在接受 DR-1 时已签字认可修改保留文件规则） | RSI-05；DR-1 的后果；过渡方案 `LESSONS.md` |
 | G-6 | 当补丁产生与已有修订版完全相同的内容时的谱系（相同 id、不同的父代路径） | 提议：返回已有修订版，并将额外的派生关系记录为一个实验记录事件 |
 | G-7 | `risk_overrides` 是否可以降低等级 | 提议：只能提升 |
 | G-8 | 归档的 blob 保留清扫 | v1 无条件保留；任何清扫都必须保留可从任意修订版到达的 blob，绝不能删除 `promoted` 修订版的 blob |
 | G-9 | 候选 id 与修订版 id | 提议：保留两种标识。候选 id 是存储的补丁的内容哈希（§6.5）；记录的候选修订版 id 是 `{spec, policy}` 的内容哈希（§4.4）。两者都出现在判定（[07-verification.zh-CN.md](07-verification.zh-CN.md)）和实验记录条目中。替代方案：只使用修订版 id 作为句柄 |
 | G-10 | `memory.update` 操作 | 在 §6.1 中为记忆整合而提议；等级与 `memory.add` / `memory.retire` 相同，为 T1。替代方案：将更新表示为 retire + add |
 
-相关：在 RSI-02（模式与补丁格式）、RSI-03（Backend 中的注册表）和 RSI-04
-（面向基因组的 Manifest 变更）开始之前，DR-1 必须被接受（RSI-01）；见
+相关：DR-1 已在 RSI-01 中被接受（[ADR 0019](../../../../docs/adr/0019-bot-genome-is-the-unit-of-evolution.zh-CN.md)），
+RSI-02（模式与补丁格式）、RSI-03（Backend 中的注册表）和 RSI-04
+（面向基因组的 Manifest 变更）因此可以开始；见
 [work-items.zh-CN.md](work-items.zh-CN.md)。

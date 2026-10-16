@@ -69,8 +69,8 @@ regression coverage"), but it never applies one.
 
 **Where it runs.** In the new `apps/evolution` module, together with the
 Evolution Run service, the Strategy Registry, the Experience Store, and the
-Verification Service (recommended option A of open decision D-1 in
-[design.md](design.md)). Genome revisions it references live in Backend
+Verification Service (decision D-1,
+[ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.md)). Genome revisions it references live in Backend
 (`core/bot_genome/`); the ledger stores their ids, never their content.
 
 **Phasing.** Recording starts in the first iteration (work item RSI-21,
@@ -1170,4 +1170,4 @@ records the promotion of r41 with its reason. False-acceptance rate for
 | L-6 | Export operation status lookup path | Resolved: `GET /bots/{bot_id}/evolution/operations/{operation}` ([09-evolution-api.md](09-evolution-api.md)); the export's `202` returns `{operation_id}` |
 | L-7 | Selector set and niche definitions for `map_elites` | Fixed in RSI-17 when a second selector is actually needed |
 | L-8 | Experience expiry vs evidence links | Proposed: keep ids, mark expired; never block expiry because the ledger references an episode |
-| D-1 | Module placement of the control plane | Recommended: `apps/evolution` (see [design.md](design.md)) |
+| D-1 | Module placement of the control plane | Decided: `apps/evolution` (see [ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.md)) |

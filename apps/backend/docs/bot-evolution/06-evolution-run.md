@@ -55,11 +55,11 @@ Two principles from the strategy design shape this service:
   whatever the strategy is.
 - **Strategies propose; the platform decides.** A run submits candidates.
   Recording, verification, the gate, and promotion stay platform-owned
-  ([DR-2](decisions/0002-promotion-is-platform-owned.md)). A run can never
+  ([DR-2](../../../../docs/adr/0020-promotion-is-platform-owned.md)). A run can never
   move a bot's `active` ref.
 
 **Placement.** The service lives in the new module `apps/evolution`
-(recommended option A of open decision D-1, see [design.md](design.md)),
+(decision D-1, see [ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.md)),
 next to the Strategy Registry, the Experience Store, the Verification
 Service, and the Experiment Ledger. Runs are long-running, LLM-heavy, bursty
 work that should scale and fail independently of Backend request serving.
@@ -2263,7 +2263,7 @@ queue ([08-promotion.md](08-promotion.md)); the run itself never moves
 
 | ID | Decision | Options / proposal |
 | --- | --- | --- |
-| D-1 | Module placement of the control plane | A. new `apps/evolution` (**recommended**); B. Backend `core/evolution/`; C. ClawWeb's TS control plane. See [design.md](design.md) |
+| D-1 | Module placement of the control plane | Decided: A. new `apps/evolution`. See [ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.md) |
 | ER-1 | Where the auto-promote ceiling lives | Resolved (proposed fields): `auto_promote_ceiling` and `rollout` are binding fields (§2.2, §3.1), read by Promotion ([08-promotion.md](08-promotion.md)) |
 | ER-2 | Where per-bot ceilings and the per-bot freeze are configured | Proposal: `limits` (daily/monthly USD) and `frozen` fields on the bot's bindings document; per-tenant ceilings in tenant settings |
 | ER-3 | Iteration limits | Governance lists "iterations" among per-run limits, but the platform cannot see a strategy's rounds. Proposal: count candidate submissions (`max_candidates`) or drop the dimension |

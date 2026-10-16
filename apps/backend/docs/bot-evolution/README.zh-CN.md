@@ -57,11 +57,12 @@ API，以及代码示例。
 | [research.zh-CN.md](research.zh-CN.md) | 附录 | 业界调研与代码库证据 |
 | [work-items.zh-CN.md](work-items.zh-CN.md) | 附录 | 供后续会话使用的工作项及其依赖关系 |
 
-决策记录草案（状态为 `proposed`）。讨论期间它们存放在这里；一旦被接受，每一份
-都会以下一个可用的 ADR 编号晋升到 `docs/adr/`：
+决策记录。已接受的记录以下一个可用的 ADR 编号晋升到 `docs/adr/`；草案在讨论期间
+存放在 [decisions/](decisions/) 中：
 
-- [DR-1 —— Bot 基因组是进化的单元](decisions/0001-bot-genome-is-the-unit-of-evolution.zh-CN.md)
-- [DR-2 —— 晋升归平台所有](decisions/0002-promotion-is-platform-owned.zh-CN.md)
+- [DR-1 —— Bot 基因组是进化的单元](../../../../docs/adr/0019-bot-genome-is-the-unit-of-evolution.zh-CN.md)
+- [DR-2 —— 晋升归平台所有](../../../../docs/adr/0020-promotion-is-platform-owned.zh-CN.md)
+- [D-1 —— 进化控制面放在 `apps/evolution`](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.zh-CN.md)
 - [DR-3 —— 进化接入面上的 bot 主体](decisions/0003-bot-principal-for-evolution-surface.zh-CN.md)（**已推迟**：先确定 bot 如何与平台通信）
 
 ## 术语表

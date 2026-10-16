@@ -5,8 +5,8 @@
 > Status: DRAFT. Service in the [bot evolution architecture](design.md).
 > Who decides whether a verified candidate changes a bot: the separation of
 > powers, the gate, risk tiers, the review queue, promotion of a revision to
-> `active`, rollout, and going back. Proposed decision:
-> [DR-2](decisions/0002-promotion-is-platform-owned.md).
+> `active`, rollout, and going back. Accepted decision:
+> [DR-2](../../../../docs/adr/0020-promotion-is-platform-owned.md).
 
 ## 1. Purpose and scope
 
@@ -68,7 +68,7 @@ report, review-queue, and approve/reject paths under `/bots/{bot_id}/evolution/`
 are served by Backend; the other evolution endpoints are served by
 `apps/evolution`; [09-evolution-api.md](09-evolution-api.md) indexes them
 as one public surface and routes each path to its serving service (this
-follows the recommended option of D-1 in [design.md](design.md)).
+follows decision D-1, [ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.md)).
 
 **Callers in the first iteration** are deterministic pipelines (nightly jobs,
 CI, product backends) and humans (bot owners, tenant admins, reviewers),
@@ -504,7 +504,7 @@ Caller rules that follow from the table:
 
 ### 3.1 Decision record: DR-2
 
-DR-2 (status: proposed) states the decision this doc implements:
+DR-2 (status: accepted, [ADR 0020](../../../../docs/adr/0020-promotion-is-platform-owned.md)) states the decision this doc implements:
 
 > Evolution strategies are pluggable, but **promotion is not**. Only the
 > platform gate can move a bot's `active` genome ref. Strategies may submit
@@ -1476,11 +1476,11 @@ wait in the review queue.
 - **P-6: Delegated reviewers.** How an owner names a delegate and whether T2
   reviews may require two reviewers for some genes. Kept minimal until
   authorization is designed.
-- **P-7: DR-2 acceptance.** DR-2 is proposed; it is promoted to `docs/adr/` on
-  acceptance (work item RSI-01).
 
 Resolved:
 
+- **P-7: DR-2 acceptance.** Accepted and promoted to
+  [ADR 0020](../../../../docs/adr/0020-promotion-is-platform-owned.md) (work item RSI-01).
 - **Default regression tolerance.** `default@1` of
   [07-verification.md](07-verification.md): zero newly failing `safety`
   cases; `regression` tolerance 1, and a spent tolerance
@@ -1491,5 +1491,5 @@ Resolved:
   Experience, Strategy registry, Evolution Run, Verification, Ledger, and
   Meta-evolution endpoints by `apps/evolution`;
   [09-evolution-api.md](09-evolution-api.md) indexes them under one public
-  `/openapi/v1` surface and routes each path to its serving service. This follows the recommended option of D-1
-  ([design.md](design.md)).
+  `/openapi/v1` surface and routes each path to its serving service. This follows decision D-1
+  ([ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.md)).

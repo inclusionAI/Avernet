@@ -59,7 +59,7 @@ S′，平台对其进行验证并决定如何处理它。实验记录为每次�
 
 **在哪里运行。** 在新的 `apps/evolution` 模块中，与进化运行服务、进化策略注册表
 （Strategy Registry）、经验存储（Experience Store）以及验证服务（Verification
-Service）放在一起（[design.zh-CN.md](design.zh-CN.md) 中待定决策 D-1 的推荐选项 A）。
+Service）放在一起（决策 D-1，[ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.zh-CN.md)）。
 它所引用的基因组修订版存放在 Backend（`core/bot_genome/`）中；实验记录只存储它们的
 id，从不存储其内容。
 
@@ -1086,4 +1086,4 @@ async def submit(self, run: Run, cand: Candidate) -> str:
 | L-6 | 导出操作的状态查询路径 | 已解决：`GET /bots/{bot_id}/evolution/operations/{operation}`（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)）；导出的 `202` 返回 `{operation_id}` |
 | L-7 | 选择器集合以及 `map_elites` 的生态位定义 | 在 RSI-17 中、当真正需要第二个选择器时确定 |
 | L-8 | 经验过期 vs 证据链接 | 提议：保留 id，标记为已过期；绝不因为实验记录引用了某个片段而阻止其过期 |
-| D-1 | 控制平面的模块位置 | 推荐：`apps/evolution`（见 [design.zh-CN.md](design.zh-CN.md)） |
+| D-1 | 控制平面的模块位置 | 已决定：`apps/evolution`（见 [ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.zh-CN.md)） |

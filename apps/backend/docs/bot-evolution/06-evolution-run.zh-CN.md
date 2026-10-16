@@ -50,11 +50,11 @@
 - **唯一出口。** 策略只能通过其上下文访问平台。因此，无论策略是什么，隔离和
   预算都在这里、在同一处强制执行。
 - **策略提议；平台决定。** 运行提交候选。记录、验证、门禁和晋升始终由平台负责
-  （[DR-2](decisions/0002-promotion-is-platform-owned.zh-CN.md)）。运行永远不能
+  （[DR-2](../../../../docs/adr/0020-promotion-is-platform-owned.zh-CN.md)）。运行永远不能
   移动 Bot 的 `active` 引用。
 
-**位置。** 本服务位于新模块 `apps/evolution`（待定决策 D-1 的推荐方案 A，见
-[design.zh-CN.md](design.zh-CN.md)），与 Strategy Registry、Experience Store、Verification
+**位置。** 本服务位于新模块 `apps/evolution`（决策 D-1，见
+[ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.zh-CN.md)），与 Strategy Registry、Experience Store、Verification
 Service 和 Experiment Ledger 并列。运行是长时、大量调用 LLM、突发性的工作，
 应当独立于 Backend 的请求服务进行扩缩容和故障隔离。本服务泛化了 ClawEvolve 的
 `ce_tasks` / `ce_steps` 表和 claim-report 端点（ClawWeb 控制面中的
@@ -2107,7 +2107,7 @@ ClawEvolve 自身的代码见 [04-default-strategies.zh-CN.md](04-default-strate
 
 | ID | 决策 | 选项 / 提议 |
 | --- | --- | --- |
-| D-1 | 控制面的模块位置 | A. 新建 `apps/evolution`（**推荐**）；B. Backend `core/evolution/`；C. ClawWeb 的 TS 控制面。见 [design.zh-CN.md](design.zh-CN.md) |
+| D-1 | 控制面的模块位置 | 已决定：A. 新建 `apps/evolution`。见 [ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.zh-CN.md) |
 | ER-1 | 自动晋升上限放在哪里 | 已解决（提议字段）：`auto_promote_ceiling` 和 `rollout` 是绑定字段（§2.2、§3.1），由晋升读取（[08-promotion.zh-CN.md](08-promotion.zh-CN.md)） |
 | ER-2 | Bot 级上限和 Bot 级冻结在哪里配置 | 提议：在 Bot 的绑定文档上增加 `limits`（每日/每月美元）和 `frozen` 字段；租户级上限放在租户设置中 |
 | ER-3 | 迭代次数限制 | 治理要求把“迭代次数”列为单次运行限制之一，但平台看不到策略的轮次。提议：统计候选提交次数（`max_candidates`），或去掉该维度 |

@@ -1,8 +1,8 @@
 # Bot Genome is the unit of evolution, built on the Bot Config Manifest
 
-> 中文版：[0001-bot-genome-is-the-unit-of-evolution.zh-CN.md](0001-bot-genome-is-the-unit-of-evolution.zh-CN.md)
+> 中文版：[0019-bot-genome-is-the-unit-of-evolution.zh-CN.md](0019-bot-genome-is-the-unit-of-evolution.zh-CN.md)
 
-Status: proposed (draft decision record; promote to `docs/adr/` on acceptance).
+Status: accepted (2026-10-16; formerly bot-evolution draft decision DR-1). Owner: @totalfrank, signed off. Engine owner: @totalfrank, signed off on the memory consequence (curated memory joins the genome; the reserved-file rule is amended once the RSI-05 projection contract lands).
 
 ## Decision
 
@@ -50,7 +50,7 @@ engine-owned. This requires an engine memory projection contract and
 amends the current rule that `MEMORY.md` and `IDENTITY.md` are never touched
 by apply: the engine, not Backend, decides how curated items are projected.
 
-Design: [`../01-genome.md`](../01-genome.md).
+Design: [`apps/backend/docs/bot-evolution/01-genome.md`](../../apps/backend/docs/bot-evolution/01-genome.md).
 
 ## Consequences
 

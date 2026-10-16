@@ -141,7 +141,9 @@ interactions, and open decisions.
 
 Appendices: [research.md](research.md) (industry survey and codebase
 evidence), [work-items.md](work-items.md) (RSI-01…RSI-24 for follow-up
-sessions), and the draft decision records in [decisions/](decisions/).
+sessions), and the decision records: [ADR 0019](../../../../docs/adr/0019-bot-genome-is-the-unit-of-evolution.md) (DR-1),
+[ADR 0020](../../../../docs/adr/0020-promotion-is-platform-owned.md) (DR-2),
+[ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.md) (D-1), and the postponed DR-3 in [decisions/](decisions/).
 
 ### 4.3 How the parts work together: one run
 
@@ -217,20 +219,21 @@ wants clear ownership and a transport-agnostic core. Proposed split:
 | --- | --- | --- |
 | Genome, Promotion | **Backend** | Owns desired state, the Manifest, the publish chain, tenancy, and approvals. Promotion must sit beside apply. |
 | Physical projection of a genome onto a workspace, memory import/export, session export | **Engine adapter** (`engine/adapter/`, Python package `engine.community`) | The engine owns workspace layout and chat history, per the repository rule in `AGENTS.md` ("Physical layout ownership belongs to Engine Runtime and its versioned layout contract"; ADR 0014 is one application of it). New engine-side contracts, no Backend paths. |
-| Evolution Run, Strategy Registry, Experience, Verification, Experiment Ledger, Meta-evolution | **New module `apps/evolution`** (recommended) | Long-running, model-heavy, bursty work that should scale and fail independently of Backend request serving. |
+| Evolution Run, Strategy Registry, Experience, Verification, Experiment Ledger, Meta-evolution | **New module `apps/evolution`** (D-1) | Long-running, model-heavy, bursty work that should scale and fail independently of Backend request serving. |
 | Strategy implementations | **Strategy authors** (`apps/evolverun` for ClawEvolve) | Pluggable by definition. |
 | Sandbox eval bots | **Backend `eval_publish` + eval_env plugins + BaaS** | Eval-env deployment exists (Quality Task); the plugin seams are no-op stubs today. |
 | UI | `apps/frontend-nextgen` (later); the AgentEvolve UI as interim | |
 
-**Open decision D-1 (where the evolution services live).**
+**Decision D-1 (where the evolution services live): option A, accepted** in
+[ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.md).
 
 | Option | For | Against |
 | --- | --- | --- |
-| A. New Python service `apps/evolution` with the Backend DI/plugin pattern (**recommended**) | Clean boundary; same constitution tooling (DI, `plugin_api`, conformance tests); scales independently | New deployable; needs singlebox wiring |
+| A. New Python service `apps/evolution` with the Backend DI/plugin pattern (**chosen**) | Clean boundary; same constitution tooling (DI, `plugin_api`, conformance tests); scales independently | New deployable; needs singlebox wiring |
 | B. Inside Backend as `core/evolution/` | No new service; direct access to Genome and Manifest services | Long-running model jobs inside the request-serving backend; Backend is already very large |
 | C. Promote ClawWeb's TS control plane | Reuses working code | Outside the constitution's DI/plugin/conformance tooling; Node only; mixed with UI |
 
-Recommendation: **A**, with Genome and Promotion in Backend (they are part of
+Decision: **A**, with Genome and Promotion in Backend (they are part of
 desired state) and ClawWeb kept as the UI and as the host of the ClawEvolve
 strategy during migration.
 

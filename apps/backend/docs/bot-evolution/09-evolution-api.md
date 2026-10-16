@@ -41,8 +41,8 @@ the Genome and Promotion endpoints (including the candidate report,
 review-queue, and approve/reject paths) by **Backend** (beside the Manifest
 and the apply pipeline), and the Experience, Strategy registry, Evolution
 Run, Verification, Ledger, Meta-evolution, and shared operation endpoints
-by the proposed new module **`apps/evolution`** (open decision D-1 in
-[design.md](design.md)). This doc presents both as one public `/openapi/v1`
+by the new module **`apps/evolution`** (decision D-1,
+[ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.md)). This doc presents both as one public `/openapi/v1`
 surface.
 The conventions in this doc are implemented once per service, in each
 service's HTTP adapter layer, so that core logic stays transport-agnostic.

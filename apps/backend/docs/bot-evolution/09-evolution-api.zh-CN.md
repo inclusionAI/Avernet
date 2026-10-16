@@ -36,8 +36,8 @@ OpenAPI 文档生成，且不添加 API 所不具备的能力，因此调用方�
 **运行位置。** API 由同一前缀后的两个服务提供：基因组和晋升端点（包括候选
 报告、评审队列以及批准/拒绝路径）由 **Backend** 提供（与 Manifest 和应用
 流水线并列）；经验、进化策略注册表、进化运行、验证、实验记录、元进化以及
-共享操作端点由提议的新模块 **`apps/evolution`** 提供（[design.zh-CN.md](design.zh-CN.md)
-中的待定决策 D-1）。本文档将二者呈现为一个公开的 `/openapi/v1`
+共享操作端点由新模块 **`apps/evolution`** 提供（决策 D-1，
+[ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.zh-CN.md)）。本文档将二者呈现为一个公开的 `/openapi/v1`
 接口面。
 本文档中的约定在每个服务中实现一次，位于各服务的 HTTP 适配层，从而使核心
 逻辑保持与传输无关。

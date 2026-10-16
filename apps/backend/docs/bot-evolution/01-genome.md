@@ -7,7 +7,7 @@
 > definition, the refs that point at them, the patches that change them, and
 > the Genome Registry that stores and serves them.
 
-Proposed decision: [DR-1](decisions/0001-bot-genome-is-the-unit-of-evolution.md).
+Accepted decision: [DR-1](../../../../docs/adr/0019-bot-genome-is-the-unit-of-evolution.md).
 Builds on the Bot Config Manifest (`apps/backend/docs/bot-config-manifest/`).
 
 ## 1. Purpose and scope
@@ -1731,13 +1731,13 @@ The ordering, failure handling, and service-bot publish path are owned by
 | G-2 | Full patch op set and whether ops map onto JSON Patch (RFC 6902) | RSI-02 |
 | G-3 | Locked-gene defaults | RSI-02 "done when": reviewers agree on locked-gene defaults |
 | G-4 | `engine_config` key allowlist | P3/P4 |
-| G-5 | Engine memory projection contract, and the engine owners' sign-off on amending the reserved-file rule | RSI-05; DR-1 consequence; interim `LESSONS.md` |
+| G-5 | Engine memory projection contract (the engine owner signed off on amending the reserved-file rule when accepting DR-1) | RSI-05; DR-1 consequence; interim `LESSONS.md` |
 | G-6 | Lineage when a patch produces content identical to an existing revision (same id, different parent path) | Proposed: return the existing revision, record the extra derivation as a Ledger event |
 | G-7 | Whether `risk_overrides` may lower a tier | Proposed: raise only |
 | G-8 | Blob retention sweep for the archive | v1 unconditional; any sweep must keep blobs reachable from any revision, never those of `promoted` revisions |
 | G-9 | Candidate id vs revision id | Proposed: keep both identities. The candidate id is the content hash of the stored patch (§6.5); the recorded candidate revision id is the content hash of `{spec, policy}` (§4.4). Both appear in the verdict ([07-verification.md](07-verification.md)) and in ledger entries. Alternative: use only the revision id as the handle |
 | G-10 | `memory.update` op | Proposed in §6.1 for memory consolidation; tier T1 like `memory.add` / `memory.retire`. Alternative: express an update as retire + add |
 
-Related: DR-1 must be accepted (RSI-01) before RSI-02 (schema and patch
+Related: DR-1 was accepted in RSI-01 ([ADR 0019](../../../../docs/adr/0019-bot-genome-is-the-unit-of-evolution.md)), unblocking RSI-02 (schema and patch
 format), RSI-03 (Registry in Backend), and RSI-04 (Manifest changes for the
-genome) start; see [work-items.md](work-items.md).
+genome); see [work-items.md](work-items.md).

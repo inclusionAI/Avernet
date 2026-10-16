@@ -75,8 +75,8 @@ today, and it is what turns logs into attributable fitness signal ("revision
 | Frozen experience snapshots for improvement problems (level 3, later) | Meta-evolution | [10-meta-evolution.md](10-meta-evolution.md) |
 
 **Where it runs.** The store is part of the evolution control plane, in the
-proposed new module `apps/evolution` (recommended option A of open decision
-D-1; see [design.md](design.md)). Session export is implemented in the
+new module `apps/evolution` (decision D-1,
+[ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.md)). Session export is implemented in the
 **engine adapter**, because the engine owns its physical layout (per the repository rule in `AGENTS.md` ("Physical layout ownership belongs to Engine Runtime and its versioned layout contract"; ADR 0014 is one application of it))
 and its chat history; Backend must not learn engine session paths.
 

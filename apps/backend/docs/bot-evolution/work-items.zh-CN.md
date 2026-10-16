@@ -24,6 +24,11 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 ## P0 — 契约与决策
 
 ### RSI-01 接受或修订三项决策草案
+- **状态**：已完成（2026-10-16）。DR-1 →
+  [ADR 0019](../../../../docs/adr/0019-bot-genome-is-the-unit-of-evolution.zh-CN.md)，DR-2 →
+  [ADR 0020](../../../../docs/adr/0020-promotion-is-platform-owned.zh-CN.md)，D-1 方案 A →
+  [ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.zh-CN.md)；负责人均为 @totalfrank 并已签字确认，
+  包括引擎负责人对 DR-1 记忆相关后果的签字认可。DR-3 仍推迟。
 - **模块**：arch
 - **目标**：由所有者决定 DR-1（基因组 = 进化单位，构建于 Manifest 之上）和
   DR-2（晋升由平台所有）。DR-3（进化接口面使用 Bot 主体）已推迟，直到 Bot 与
@@ -291,7 +296,7 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 
 | ID | 决策 | 位置 |
 | --- | --- | --- |
-| D-1 | 控制面模块放置 | design.md → RSI-01 |
+| D-1 | 控制面模块放置 | 已决定：`apps/evolution`（[ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.zh-CN.md)） |
 | DS-1（原 D-2） | 默认进化策略执行器的长期宿主（TS 还是 Python） | 04-default-strategies.md → RSI-13 |
 | DS-2（原 D-3） | 将 ClawBench 作为平台默认评分器 | 04-default-strategies.md → RSI-11 |
 | DS-3（原 D-4） | Workflow YAML 作为基因还是独立 artifact | 04-default-strategies.md |

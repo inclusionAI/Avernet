@@ -58,7 +58,7 @@ level-2 rounds.
 
 **Where it runs.** In the new module `apps/evolution`, next to the Strategy
 Registry, Evolution Run, Verification, and the ledger (module placement is
-open decision D-1, see [design.md](design.md)). The meta-loop needs no Backend
+decision D-1, see [ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.md)). The meta-loop needs no Backend
 code: mechanisms are strategy versions, not bot desired state.
 
 ## 2. Domain model

@@ -122,7 +122,9 @@ Dreams、Hermes Curator，以及 ClawEvolve 本身）都可以归结为在一个
 
 附录：[research.zh-CN.md](research.zh-CN.md)（业界调研与代码库证据）、
 [work-items.zh-CN.md](work-items.zh-CN.md)（供后续会话使用的 RSI-01…RSI-24），
-以及 [decisions/](decisions/) 中的决策记录草案。
+以及决策记录：[ADR 0019](../../../../docs/adr/0019-bot-genome-is-the-unit-of-evolution.zh-CN.md)（DR-1）、
+[ADR 0020](../../../../docs/adr/0020-promotion-is-platform-owned.zh-CN.md)（DR-2）、
+[ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.zh-CN.md)（D-1），以及 [decisions/](decisions/) 中已推迟的 DR-3。
 
 ### 4.3 各部分如何协同：一次运行
 
@@ -185,20 +187,21 @@ Dreams、Hermes Curator，以及 ClawEvolve 本身）都可以归结为在一个
 | --- | --- | --- |
 | 基因组、晋升 | **Backend** | 拥有期望状态、Manifest、发布链路、租户和审批。晋升必须紧挨着应用。 |
 | 基因组到工作区的物理投影、记忆导入/导出、会话导出 | **引擎适配器**（`engine/adapter/`，Python 包 `engine.community`） | 引擎拥有工作区布局和聊天历史，依据仓库根目录 `AGENTS.md` 的规则（“物理布局归 Engine Runtime 及其带版本的布局契约所有”；ADR 0014 是这条规则的一个应用）。新的引擎侧契约，不引入 Backend 路径。 |
-| 进化运行、Strategy Registry、经验、验证、实验记录、元进化 | **新模块 `apps/evolution`**（推荐） | 长时、模型密集、突发性的工作，应当独立于 Backend 请求服务进行扩缩容和故障隔离。 |
+| 进化运行、Strategy Registry、经验、验证、实验记录、元进化 | **新模块 `apps/evolution`**（D-1） | 长时、模型密集、突发性的工作，应当独立于 Backend 请求服务进行扩缩容和故障隔离。 |
 | 进化策略实现 | **策略作者**（ClawEvolve 在 `apps/evolverun`） | 按定义即可插拔。 |
 | 沙箱评测 bot | **Backend `eval_publish` + eval_env 插件 + BaaS** | 评测环境部署已存在（Quality Task）；插件接缝目前是空实现桩。 |
 | UI | `apps/frontend-nextgen`（之后）；过渡期使用 AgentEvolve UI | |
 
-**待定决策 D-1（进化服务放在哪里）。**
+**决策 D-1（进化服务放在哪里）：已接受方案 A**，见
+[ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.zh-CN.md)。
 
 | 选项 | 优点 | 缺点 |
 | --- | --- | --- |
-| A. 新的 Python 服务 `apps/evolution`，采用 Backend 的 DI/插件模式（**推荐**） | 边界清晰；使用相同的宪章工具（DI、`plugin_api`、一致性测试）；独立扩缩容 | 新的可部署单元；需要 singlebox 接线 |
+| A. 新的 Python 服务 `apps/evolution`，采用 Backend 的 DI/插件模式（**已选定**） | 边界清晰；使用相同的宪章工具（DI、`plugin_api`、一致性测试）；独立扩缩容 | 新的可部署单元；需要 singlebox 接线 |
 | B. 放在 Backend 内，作为 `core/evolution/` | 无需新服务；可直接访问 Genome 和 Manifest 服务 | 长时模型作业运行在处理请求的后端中；Backend 已经非常庞大 |
 | C. 升级 ClawWeb 的 TS 控制面 | 复用可用代码 | 不在宪章的 DI/插件/一致性工具范围内；仅限 Node；与 UI 混在一起 |
 
-推荐：**A**，基因组和晋升放在 Backend（它们属于期望状态），ClawWeb 保留为 UI，
+决定：**A**，基因组和晋升放在 Backend（它们属于期望状态），ClawWeb 保留为 UI，
 并在迁移期间作为 ClawEvolve 进化策略的宿主。
 
 ## 7. 关键契约

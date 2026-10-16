@@ -26,6 +26,12 @@ the rest.
 ## P0 — Contracts and decisions
 
 ### RSI-01 Accept or revise the three draft decisions
+- **Status**: done (2026-10-16). DR-1 →
+  [ADR 0019](../../../../docs/adr/0019-bot-genome-is-the-unit-of-evolution.md), DR-2 →
+  [ADR 0020](../../../../docs/adr/0020-promotion-is-platform-owned.md), D-1 option A →
+  [ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.md); all owned and signed off
+  by @totalfrank, including the engine-owner sign-off on DR-1's memory
+  consequence. DR-3 stays postponed.
 - **Module**: arch
 - **Goal**: Owners decide DR-1 (genome = unit of evolution, built on
   Manifest) and DR-2 (promotion is platform-owned). DR-3 (bot principal for
@@ -334,7 +340,7 @@ evolution run, `V-` verification, `P-` promotion, `A-` API, `O-` meta-evolution.
 
 | ID | Decision | Where |
 | --- | --- | --- |
-| D-1 | Control-plane module placement | design.md → RSI-01 |
+| D-1 | Control-plane module placement | Decided: `apps/evolution` ([ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.md)) |
 | DS-1 (was D-2) | Long-term host of default strategy runners (TS vs Python) | 04-default-strategies.md → RSI-13 |
 | DS-2 (was D-3) | ClawBench as platform default grader | 04-default-strategies.md → RSI-11 |
 | DS-3 (was D-4) | Workflow YAML as gene or separate artifact | 04-default-strategies.md |

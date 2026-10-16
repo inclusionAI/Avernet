@@ -4,8 +4,8 @@
 
 > 状态：草案（DRAFT）。[Bot 进化架构](design.zh-CN.md)中的一项服务。
 > 由谁决定一个已验证的候选是否改变 bot：权力分立、门禁、风险等级、评审队列、
-> 将修订版晋升为 `active`、发布，以及回到旧版本。提议的决策：
-> [DR-2](decisions/0002-promotion-is-platform-owned.zh-CN.md)。
+> 将修订版晋升为 `active`、发布，以及回到旧版本。已接受的决策：
+> [DR-2](../../../../docs/adr/0020-promotion-is-platform-owned.zh-CN.md)。
 
 ## 1. 目的与范围
 
@@ -56,8 +56,8 @@ LLM 编写的技能在没有评测引导修订时往往毫无增益；harness �
 `/openapi/v1` 前缀下（§10）：基因组与晋升端点，包括 `/bots/{bot_id}/evolution/` 下的
 候选报告、评审队列和 approve/reject 路径，由 Backend 提供；其他进化端点由
 `apps/evolution` 提供；[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) 将它们
-索引为一个统一的公开接口面，并把每条路径路由到提供它的服务（这遵循 [design.zh-CN.md](design.zh-CN.md) 中 D-1 的
-推荐选项）。
+索引为一个统一的公开接口面，并把每条路径路由到提供它的服务（这遵循决策 D-1，
+[ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.zh-CN.md)）。
 
 **第一次迭代中的调用方**是确定性流水线（夜间作业、CI、产品后端）和人（bot 所有者、
 租户管理员、评审者），通过 API 和工作台 UI 调用。Bot 调用方随 DR-3 推迟；
@@ -481,7 +481,7 @@ class CandidateReport:
 
 ### 3.1 决策记录：DR-2
 
-DR-2（状态：提议）陈述了本文所实现的决策：
+DR-2（状态：已接受，[ADR 0020](../../../../docs/adr/0020-promotion-is-platform-owned.zh-CN.md)）陈述了本文所实现的决策：
 
 > 进化策略是可插拔的，但**晋升不是**。只有平台门禁能移动 bot 的 `active`
 > 基因组引用。策略可以提交候选补丁。策略和 bot 都不能写入线上 bot、其
@@ -1440,11 +1440,11 @@ UI 后端发出同样的调用。
 - **P-6：受委派评审者。** 所有者如何指定委派人，以及对于某些基因，T2
   评审是否可以要求两名评审者。在授权设计完成之前
   保持最小化。
-- **P-7：DR-2 的采纳。** DR-2 目前为提议状态；采纳后将被提升到 `docs/adr/`
-  （工作项 RSI-01）。
 
 已解决：
 
+- **P-7：DR-2 的采纳。** 已接受并提升为
+  [ADR 0020](../../../../docs/adr/0020-promotion-is-platform-owned.zh-CN.md)（工作项 RSI-01）。
 - **默认回归容差。** [07-verification.zh-CN.md](07-verification.zh-CN.md) 中的
   `default@1`：`safety` 新失败用例为零；
   `regression` 容差为 1，且已用掉的容差
@@ -1455,5 +1455,5 @@ UI 后端发出同样的调用。
   经验、策略注册表、进化运行、验证、实验记录和
   元进化端点由 `apps/evolution` 提供；
   [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) 将它们索引在统一的公开
-  `/openapi/v1` 接口面下，并把每条路径路由到提供它的服务。这遵循 D-1 的推荐选项
-  （[design.zh-CN.md](design.zh-CN.md)）。
+  `/openapi/v1` 接口面下，并把每条路径路由到提供它的服务。这遵循决策 D-1
+  （[ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.zh-CN.md)）。

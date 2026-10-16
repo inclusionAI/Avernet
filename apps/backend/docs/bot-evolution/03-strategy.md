@@ -52,9 +52,9 @@ It does not own:
 | Shared API conventions and the public endpoint index | [09-evolution-api.md](09-evolution-api.md) |
 | Improving a strategy itself (mechanisms versioned like genomes, level 3) | [10-meta-evolution.md](10-meta-evolution.md) |
 
-**Placement.** The Strategy Registry lives in the proposed new module
-`apps/evolution` (open decision D-1, recommended option A: a Python service
-following the Backend DI/plugin pattern; see [design.md](design.md)). It
+**Placement.** The Strategy Registry lives in the new module
+`apps/evolution` (decision D-1, option A: a Python service
+following the Backend DI/plugin pattern; see [ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.md)). It
 generalizes ClawEvolve's `official-stage-catalog.json` and
 `ce_stage_skill_implementations`. Strategy implementations are owned by
 their authors (including `apps/evolverun` for the defaults). Capability
@@ -664,7 +664,7 @@ status" and that train evaluation returns "scores and critiques".
 3. **Strategies propose; the platform decides.** A strategy submits
    candidates. Recording, verification, the gate, and promotion stay
    platform-owned (DR-2,
-   [decisions/0002-promotion-is-platform-owned.md](decisions/0002-promotion-is-platform-owned.md)).
+   [../../../../docs/adr/0020-promotion-is-platform-owned.md](../../../../docs/adr/0020-promotion-is-platform-owned.md)).
 4. **Facts about code are registered; choices about bots are configured.**
    Some information is true of a strategy version no matter which bot uses
    it, for example "ClawEvolve 2.0.0 drives OpenClaw agents and reads
@@ -1724,4 +1724,4 @@ how verification works, or how service bots are published.
 | S-6 | What "bound outside development" means before conformance passes | Proposed: versions with `pending` or `failed` conformance can run only in the local harness and on development bots |
 | S-7 | When the TypeScript strategy SDK ships | Python first; TypeScript second, when the first non-Python strategy is onboarded |
 | S-8 | How a sandboxed job worker reaches the strategy's own progress store | Strategies persist their own progress in their own storage (agreed). Open: how a sandboxed job worker reaches that storage — e.g. an egress allowlist entry declared in the registration record for the strategy's own store, or a platform-provided opaque per-run blob that the platform never interprets. Same decision as ER-10 in [06-evolution-run.md](06-evolution-run.md) |
-| D-1 | Module placement of the control plane (where the registry runs) | `apps/evolution` (option A); see [design.md](design.md) |
+| D-1 | Module placement of the control plane (where the registry runs) | Decided: `apps/evolution` (option A); see [ADR 0021](../../../../docs/adr/0021-evolution-control-plane-in-apps-evolution.md) |
