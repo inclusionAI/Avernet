@@ -43,32 +43,31 @@ function dataRow() {
   return screen.getAllByRole('row')[1];
 }
 
-/** 版本列是第 4 列(索引 3),标签列是第 5 列(索引 4)。 */
-function cellAt(index: number) {
-  return dataRow().querySelectorAll('td')[index];
+function cellForHeader(name: string) {
+  const headerIndex = screen.getAllByRole('columnheader').findIndex((header) => header.textContent === name);
+  return dataRow().querySelectorAll('td')[headerIndex];
 }
 
 function versionCell() {
-  return cellAt(3);
+  return cellForHeader('版本');
 }
 
 function tagsCell() {
-  return cellAt(4);
+  return cellForHeader('bot 标签');
 }
 
 function containersCell() {
-  return cellAt(5);
+  return cellForHeader('容器信息');
 }
 
 describe('BotTable 表格结构', () => {
   const bot = mapBotDto({ bot_id: 'b1', bot_name: 'Openclaw Bot', engine: 'openclaw', status: 'ACTIVE' }).item;
 
-  test('按 8 列顺序渲染表头，容器信息独立于 Bot 标签', () => {
+  test('短描述收进机器人信息，容器信息仍独立于 Bot 标签', () => {
     renderTable(bot);
 
     expect(screen.getAllByRole('columnheader').map((header) => header.textContent)).toEqual([
       '机器人信息',
-      '描述',
       '状态',
       '版本',
       'bot 标签',
@@ -76,8 +75,16 @@ describe('BotTable 表格结构', () => {
       '主要操作',
       '更多操作',
     ]);
-    expect(screen.getByRole('table', { name: 'Bot 列表' })).toHaveClass('min-w-[1180px]');
+    expect(screen.getByRole('table', { name: 'Bot 列表' })).toHaveClass('min-w-[1000px]');
     expect(screen.getByRole('columnheader', { name: '主要操作' })).toHaveClass('sticky', 'right-12');
+  });
+
+  test('长描述保留独立列，避免重要信息被截短', () => {
+    const longDescriptionBot = { ...bot, description: '用于承接跨团队知识问答与自动化任务处理的服务机器人，包含完整的业务上下文。' };
+    renderTable(longDescriptionBot);
+
+    expect(screen.getByRole('columnheader', { name: '描述' })).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'Bot 列表' })).toHaveClass('min-w-[1180px]');
   });
 
   test('数据行固定 h-16 行高并带 hover 反馈', () => {
@@ -132,13 +139,30 @@ describe('BotTable 表格结构', () => {
     fireEvent.click(dataRow());
     expect(onView).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: '进度' }));
+    fireEvent.click(screen.getByRole('button', { name: '展开桌面 Bot 状态详情' }));
     expect(screen.getByText('桌面环境初始化')).toBeInTheDocument();
     expect(screen.getByRole('list', { name: '桌面 Bot 初始化步骤' })).toBeInTheDocument();
     expect(screen.getByRole('progressbar', { name: '下载进度' })).toHaveAttribute('value', '42');
 
-    fireEvent.click(screen.getByRole('button', { name: '进度' }));
+    fireEvent.click(screen.getByRole('button', { name: '收起桌面 Bot 状态详情' }));
     expect(screen.queryByText('桌面环境初始化')).not.toBeInTheDocument();
+  });
+
+  test('离线桌面 Bot 将打开客户端入口放入折叠详情', () => {
+    const offlineBot = mapBotDto({
+      bot_id: 'desktop-offline',
+      bot_name: 'Offline Desktop Bot',
+      bot_type: 'desktop',
+      engine: 'openclaw',
+      display_state: 'local_offline',
+    }).item;
+    render(<BotTable bots={[offlineBot]} onView={noop} />);
+
+    expect(screen.getByText('已下线')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '打开客户端' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '展开桌面 Bot 状态详情' }));
+    expect(screen.getByText('设备离线')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开客户端' })).toBeInTheDocument();
   });
 
   test('机器人信息列渲染 20px DiceBear 头像、名称与 entityKey', () => {
@@ -154,7 +178,7 @@ describe('BotTable 表格结构', () => {
   test('没有数据时只渲染表头,空态由页面承担', () => {
     render(<BotTable bots={[]} onView={noop} />);
 
-    expect(screen.getAllByRole('columnheader')).toHaveLength(8);
+    expect(screen.getAllByRole('columnheader')).toHaveLength(7);
     expect(screen.getAllByRole('row')).toHaveLength(1);
     expect(screen.queryByText('暂无 Bot')).not.toBeInTheDocument();
   });
