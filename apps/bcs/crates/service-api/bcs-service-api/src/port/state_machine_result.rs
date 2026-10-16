@@ -15,8 +15,10 @@ pub struct StateMachineResultPublishCommand {
 
 /// Publishes a completed one-shot state-machine result back into its chat
 /// session without coupling the collaboration runtime to routing or delivery.
-/// Success acknowledges the existing synchronous message-flow acceptance, not
-/// every recipient's completion. An error may follow a partial publication.
+/// Success acknowledges durable Group queue acceptance for managed recipients
+/// and synchronous delivery acceptance for legacy recipients, not Bot completion.
+/// An error may follow a partial publication. Conflicting history, empty queue
+/// admissions and rejected recipients must not be acknowledged as success.
 /// Stable message identity deduplicates history, but does not promise idempotent
 /// Bot routing: callers must not blindly replay an ambiguous invocation.
 #[async_trait]

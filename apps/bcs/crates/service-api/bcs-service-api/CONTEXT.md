@@ -1,5 +1,12 @@
 # bcs-service-api Context
 
+
+MessageFlowService::publish_state_machine_result accepts the original one-shot
+result command. Success acknowledges durable Group admission for managed targets
+and synchronous acceptance for legacy targets, never Bot completion. Publication
+must reject conflicting facts, empty admission and rejected/failed targets.
+Stable history identity does not promise idempotent legacy network delivery.
+
 ## Provides
 
 ProviderManagementService and ProviderCoreService expose public slug discovery

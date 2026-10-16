@@ -82,6 +82,9 @@ pub struct AdmitMessageDeliveries {
     /// manager result, not the `chat_error` history row as Bot conversation input.
     pub display_message: Option<DeliveryDisplayMessage>,
     pub message_id: String,
+    /// Ordinary canonical bodies use a text envelope. One-shot Group chat
+    /// results may instead retain a StateMachine/Public string with Bot sender
+    /// and nonempty Run identity; stores preserve that producer fact verbatim.
     pub message: NewMessage,
     pub flow_kind: DeliveryFlowKind,
     pub targets: Vec<DeliveryAdmissionTarget>,

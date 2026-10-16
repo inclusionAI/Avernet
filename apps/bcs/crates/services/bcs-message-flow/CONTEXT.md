@@ -26,6 +26,16 @@ original Provider route still resolves, the active-run index contains exactly
 the target run, and the managed lane contains no other active Send. Otherwise
 abort remains unconfirmed; the scheduler must not claim that the Worker stopped.
 
+
+One-shot StateMachine chat results enter MessageFlowService with immutable
+producer facts. Group queue admission owns the message/delivery transaction;
+legacy delivery persists the same StateMachine/Public string, Run and original
+time before sending. Conflict, rejection, empty admission and legacy failure
+propagate before publication acknowledgement. Queue payload reconstruction reads
+these strings both as Send sources and bound Inject context. Fully managed
+replays reuse durable deliveries; mixed replays fail as ambiguous because legacy
+recipients have no durable delivery ledger. Runtime retry policy is unchanged.
+
 ## Provides
 
 The shared human-mention notify helper owns the per-Group external-notify

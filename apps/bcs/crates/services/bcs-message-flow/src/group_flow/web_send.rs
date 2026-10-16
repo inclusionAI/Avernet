@@ -2,7 +2,15 @@ use super::*;
 
 pub async fn handle_web_send(
     flow: &BcsMessageFlow,
+    cmd: WebSendCommand,
+) -> ServiceResult<WebSendOutcome> {
+    handle_web_send_with_result(flow, cmd, None).await
+}
+
+pub(super) async fn handle_web_send_with_result(
+    flow: &BcsMessageFlow,
     mut cmd: WebSendCommand,
+    result_message: Option<&state_machine_result::ResultMessage>,
 ) -> ServiceResult<WebSendOutcome> {
     log_message_received(&cmd, MessageLogMode::FreeChat);
 
@@ -53,6 +61,21 @@ pub async fn handle_web_send(
         build_explicit_mention_decision(&group, &cmd.mentions, &cmd.message, &overlay)
     };
 
+    if result_message.is_some() {
+        if !matches!(group.group_strategy, GroupStrategy::Chat | GroupStrategy::ManagerWorker)
+            || !group.participants.iter().any(|p| p.is_bot() && p.bot_uuid == cmd.from_actor_id) {
+            return Err(ServiceError::InvalidOperation {
+                message: "Chat result requires its original sender in a Chat or ManagerWorker Session".into(),
+                request_id: None,
+            });
+        }
+        if !decision.targets.iter().any(|target| target.delivery_type == DeliveryType::Send) {
+            return Err(ServiceError::InvalidOperation {
+                message: "Chat result has no reply-producing target".into(), request_id: None,
+            });
+        }
+    }
+
     log_routing_digest(
         &cmd,
         &decision,
@@ -79,12 +102,15 @@ pub async fn handle_web_send(
     } else {
         SenderType::Bot
     };
-    let admission = match crate::queued_admission::prepare_group_admission(flow, &group, &cmd, &decision,
-        &sender_display_name, from_bot_owner.clone()).await? {
+    let admission = match crate::queued_admission::prepare_group_admission_with_message(flow, &group, &cmd, &decision,
+        &sender_display_name, from_bot_owner.clone(), result_message.map(|result| (result.id.as_str(), &result.message))).await? {
         Some(command) => Some(flow.managed_deliveries.as_ref().ok_or_else(|| ServiceError::InternalError("queue service unavailable".into()))?
             .admit(command).await.map_err(|_| ServiceError::InternalError("queue admission persistence failed".into()))?),
         None => None,
     };
+    if let (Some(result), Some(admitted)) = (result_message, admission.as_ref()) {
+        result.validate_admission(admitted, &decision)?;
+    }
     if let Some(result) = admission.as_ref().filter(|r| r.duplicate) {
         return Ok(WebSendOutcome {
             queue_admission: Some(result.into()),
@@ -95,19 +121,23 @@ pub async fn handle_web_send(
         });
     }
     if admission.is_none() {
-    try_persist_group_message(
-        flow,
-        &cmd.group_id,
-        cmd.session_id.as_deref(),
-        &cmd.from_actor_id,
-        sender_type,
-        "chat",
-        persisted_inbound_content(&cmd.message, cmd.attachments.as_deref(), &cmd.mentions),
-        cmd.idempotency_key.as_deref(),
-        None,
-        "", // run_id: user messages don't associate with bot runs
-    )
-    .await?;
+        if let Some(result) = result_message {
+            result.persist(flow).await?;
+        } else {
+            try_persist_group_message(
+                flow,
+                &cmd.group_id,
+                cmd.session_id.as_deref(),
+                &cmd.from_actor_id,
+                sender_type,
+                "chat",
+                persisted_inbound_content(&cmd.message, cmd.attachments.as_deref(), &cmd.mentions),
+                cmd.idempotency_key.as_deref(),
+                None,
+                "", // run_id: user messages don't associate with bot runs
+            )
+            .await?;
+        }
     }
     // Notify @-mentioned humans only after the message is accepted and
     // persisted, and only if the content passes the outbound policy that

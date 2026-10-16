@@ -1,5 +1,12 @@
 # bcs-message-store Context
 
+
+Group admission also accepts one-shot chat results as StateMachine/Public
+strings with a Bot sender and nonempty Run identity. Canonical history retains
+the original string and timestamp, atomically with target deliveries. Arbitrary
+string bodies for other flows remain invalid. Shared Memory/SQLite repository
+conformance covers the shape, duplicate identity and invalid variants.
+
 ## Provides
 
 admit_batch commits canonical sources, target admissions, sequence allocation and
