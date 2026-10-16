@@ -26,7 +26,15 @@ export function buildDeepSeekHarnessRegistrationCommand(input: DeepSeekHarnessRe
   if (!input.token.trim() || getDeepSeekHarnessInputError(input)) return '';
   try {
     const endpoint = new URL(input.bcsEndpoint);
-    if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password) return '';
+    if (
+      !['http:', 'https:'].includes(endpoint.protocol) ||
+      !endpoint.hostname ||
+      endpoint.username ||
+      endpoint.password ||
+      endpoint.search ||
+      endpoint.hash
+    )
+      return '';
   } catch {
     return '';
   }
