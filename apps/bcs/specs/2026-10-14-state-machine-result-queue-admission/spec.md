@@ -329,3 +329,22 @@ route → targets
 - 初始 head 的 Intel macOS bridge job 失败于进程重启次数断言；bridge-core
   仅依赖未修改的 bcs-protocol，不依赖本次改动的 service-api/message-flow。
   用户明确要求 bridge 另行处理，本 PR 不扩展该问题的修复范围，也不将失败宣称为通过。
+
+## 15. 评审核验：真实授权 owner 的结果回传（2026-10-16）
+
+评审提出 sender 会被普通群 router 排除，导致 owner 发起的一次性结果无法回传。
+核对实际路径后，该结论不适用于本入口：
+
+- 公共一次性权限检查仅允许 Normal 群、Chat/ManagerWorker 策略，caller 必须是
+  `group.driver_bot`，runtime 将 caller 保留为结果 sender。
+- `handle_web_send_with_result` 的普通群路径实际调用
+  `route_with_overlay(group, message, None, overlay)`，第三个参数不是 sender。
+  router 的 sender 排除过滤只在参数为 Some 时生效；Normal 群允许 owner 收到自己的结果。
+- DM 路径确实传入 sender，但公共一次性权限检查明确拒绝 DM，不能据此推断普通群结果被排除。
+
+增加 `authorized_group_owner_receives_its_one_shot_result_with_queue_on_or_off`：
+用真实 MessageRouter、publisher、message-flow 和 Group owner sender，覆盖
+Chat/ManagerWorker × queue on/off × 原服务/metrics 装饰器共八种组合。
+核验原始 owner 历史身份、owner 的 Send admission、重建的 chat.send 帧和实际下行接受。
+`cargo test --manifest-path apps/bcs/Cargo.toml -p bcs --lib state_machine_result_tests`
+共 19 项通过；八种 owner 组合均通过，无需修改生产路由。

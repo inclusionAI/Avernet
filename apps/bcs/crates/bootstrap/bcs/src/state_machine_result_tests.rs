@@ -402,3 +402,49 @@ async fn instrumented_result_publication_propagates_inner_conflicts_and_delivery
         }
     }
 }
+
+#[tokio::test]
+async fn authorized_group_owner_receives_its_one_shot_result_with_queue_on_or_off() {
+    for strategy in [GroupStrategy::Chat, GroupStrategy::ManagerWorker] {
+        for queued in [false, true] {
+            for decorated in [false, true] {
+                let limits = queued.then(|| BTreeMap::from([
+                    ("bot-driver".into(), 10), ("bot-observer".into(), 10),
+                ]));
+                let (_, messages, managed, delivery, flow) =
+                    publication_fixture_with_options(strategy, limits).await;
+                let group = flow.group.get("group-1").await.unwrap();
+                assert_eq!(group.group_kind, bcs_service_api::GroupKind::Normal);
+                let mut command = publication_command();
+                // The public one-shot permission check requires the group owner;
+                // the runtime preserves that caller as created_by/sender_bot_id.
+                command.sender_bot_id = group.driver_bot.clone();
+                let service: Arc<dyn MessageFlowService> = if decorated {
+                    #[cfg(feature = "prometheus-metrics")]
+                    { Arc::new(crate::metrics::InstrumentedMessageFlowService::new(flow.clone(), Arc::from("test"))) }
+                    #[cfg(not(feature = "prometheus-metrics"))]
+                    { flow.clone() }
+                } else { flow.clone() };
+                let publisher = MessageFlowStateMachineResultPublisher::new(service);
+                publisher.publish_state_machine_result(command).await.unwrap();
+                let history = messages.run_chat_segments("group-1:result", &group.driver_bot, "one-shot-result")
+                    .await.unwrap();
+                assert_eq!(history.len(), 1);
+                assert_eq!(history[0].sender_id, group.driver_bot);
+                assert_eq!(history[0].content, serde_json::json!("状态机最终结果"));
+                if queued {
+                    let rows = managed.snapshot(None).await.unwrap();
+                    let send = rows.iter().find(|row| row.target_bot_id == group.driver_bot
+                        && row.state.kind == bcs_service_api::DeliveryType::Send).unwrap();
+                    let preparer = bcs_message_flow::queued_group::QueuedGroupPreparation {
+                        flow: Arc::downgrade(&flow), deliveries: managed,
+                    };
+                    let prepared = preparer.prepare(send).await.unwrap();
+                    assert_eq!(serde_json::to_value(&prepared.command.frame).unwrap()["method"], "chat.send");
+                    assert!(delivery.deliver(prepared.command).await.unwrap().delivered);
+                }
+                assert!(delivery.targets().await.iter().any(|target| target.bot_id() == group.driver_bot));
+            }
+        }
+    }
+}
