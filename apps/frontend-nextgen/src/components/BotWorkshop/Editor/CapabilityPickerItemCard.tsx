@@ -1,7 +1,7 @@
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import type { BotEditorMcp, BotEditorSkill } from '@/domain/botEditor';
-import { Check, ExternalLink, Plug, Shapes } from 'lucide-react';
+import { Check, ExternalLink, Loader2, Plug, Shapes, Trash2 } from 'lucide-react';
 
 type PickerItem = BotEditorSkill | BotEditorMcp;
 
@@ -15,6 +15,9 @@ interface CapabilityPickerItemCardProps {
   active: boolean;
   alreadyAdded: boolean;
   selectionDisabled: boolean;
+  /** 「我的 Skill」未添加项悬停显示的删除按钮（DELETE /openapi/v1/bots/{bot_id}/skills/{skill_id}，由上层回调实现）。 */
+  onDelete?: () => void;
+  deleting?: boolean;
   onSelect: () => void;
   onViewSkill?: (skill: BotEditorSkill) => void;
 }
@@ -25,12 +28,14 @@ export function CapabilityPickerItemCard({
   active,
   alreadyAdded,
   selectionDisabled,
+  onDelete,
+  deleting = false,
   onSelect,
   onViewSkill,
 }: CapabilityPickerItemCardProps) {
   return (
     <div
-      className={`flex min-h-24 min-w-0 flex-col rounded-md border border-border p-3 text-left ${
+      className={`group relative flex min-h-24 min-w-0 flex-col rounded-md border border-border p-3 text-left ${
         active ? 'border-primary bg-accent' : ''
       } ${alreadyAdded ? 'opacity-50' : ''}`}
     >
@@ -55,6 +60,17 @@ export function CapabilityPickerItemCard({
         </span>
         {active ? <Check className="size-4 shrink-0 text-primary" /> : null}
       </Button>
+      {onDelete && !alreadyAdded ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="absolute right-1.5 top-1.5 z-10 size-6 p-0 text-destructive opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+          aria-label={`删除${item.name}`}
+          disabled={deleting}
+          leftIcon={deleting ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+          onClick={() => onDelete()}
+        />
+      ) : null}
       {kind === 'skill' ? (
         <Button
           variant="link"
