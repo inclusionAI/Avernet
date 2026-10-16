@@ -647,6 +647,11 @@ class AsyncChatClient:
         if self._concurrency_sem is not None:
             await self._concurrency_sem.acquire()
 
+        # R9-F1：出口旗标先于外层 try 绑定——请求通过入口连接检查后可能
+        # 在信号量/同 session 排队期间断连，恢复执行到内层连接复查时抛
+        # NotConnectedError，finally 必须读得到已初始化的旗标，否则
+        # UnboundLocalError 会吞掉真实断连原因。
+        stream_send_failed = False
         try:
             async with self._condition:
                 while session_key in self._active_sessions:
@@ -684,10 +689,6 @@ class AsyncChatClient:
                 if not self.is_connected:
                     raise NotConnectedError("Connection lost before sending message.")
 
-                # R7-F2/R8：同 send_message 口径——等待侧只清理"run 从未
-                # 开始"；提前 break/超时/收口时 run 仍在引擎侧执行，归属由
-                # 终态处理/断连/close 释放。
-                stream_send_failed = False
                 try:
                     await self._send_chat_request(
                         session_key=session_key,
@@ -1071,13 +1072,17 @@ class AsyncChatClient:
     def _release_v3_ownership_if_terminal(
         self, session_key: str, chat_state: Any, payload: dict[str, Any]
     ) -> None:
-        """R7-F2/R8：run 终态统一释放 v3 fallback 归属标记。
+        """R7-F2/R8/R9：run 终态统一释放 v3 fallback 归属标记。
 
         生命周期唯一事实源=引擎侧 run 结束。与等待面彻底解耦：
         等待方可能早已返回（wait_result=False / 超时）、可能仍在等
         （终态先于 ACK 恢复到达，R8-F3）、可能被中途取消（R8-F2）——
         本方法只看帧本身，不枚举等待方形态，也不依赖 session state
         是否已被 pop。
+
+        R9-F2：帧上的 sessionKey 是引擎侧装饰形态（前后缀/大小写），
+        与发送时的登记键可能不同——归并沿用 SessionKeyMatcher 同套
+        分发语义（精确→contains），不能精确查找把模糊匹配语义拆了。
 
         注入帧不算主 run 终态（注入前后主 run 仍在执行，R8-F1）：
         沿用正常 final 分支的注入排除口径（runId inject- 前缀 /
@@ -1090,9 +1095,17 @@ class AsyncChatClient:
             return
         if payload.get("stopReason") == "inject":
             return
-        if session_key not in self._v3_routed_sessions:
-            return
-        self._v3_routed_sessions.pop(session_key, None)
+        # R9-F2：装饰 key → 登记键归并（state 已删的后台态也要能匹配，
+        # 独立于 _sessions 的 matcher，直接对归属表跑同语义查找）
+        reg_key = session_key
+        if reg_key not in self._v3_routed_sessions:
+            matched = SessionKeyMatcher(
+                self._v3_routed_sessions, ignore_case=self._ignore_case
+            ).find(session_key)
+            if matched is None:
+                return
+            reg_key = matched.key
+        self._v3_routed_sessions.pop(reg_key, None)
         logger.debug(
             "[chat] v3 routed run terminal: sessionKey=%s state=%s，归属释放",
             session_key,
@@ -1208,6 +1221,13 @@ class AsyncChatClient:
         由 @_with_session_trace 装饰器自动查找 state 并恢复 trace context，
         使日志的 traceid 能正确关联原始请求。
         """
+        # R9-F3：agent final/error 是真实终态通道（_derive_event_name 可把
+        # 无显式事件名的终态派发为 agent；WS 转发层遇终态直接结束，不保证
+        # 再补 chat 终态）——释放接入在 state 判定之前，等待中与后台两态
+        # 无差别。
+        self._release_v3_ownership_if_terminal(
+            session_key, payload.get("state", ""), payload
+        )
         if state is None:
             logger.warning(
                 "[agent] No session state for sessionKey=%s, ignore_case=%s",
@@ -1564,6 +1584,10 @@ class AsyncChatClient:
             session_key: 会话 key（由装饰器注入）
             state: 会话状态（由装饰器注入）
         """
+        # R9-F3：error 通道同样终结 run——释放接入在 state 判定之前。
+        self._release_v3_ownership_if_terminal(
+            session_key, payload.get("state", ""), payload
+        )
         if state is None:
             logger.warning(
                 "[error] No session state for sessionKey=%s, ignore_case=%s",

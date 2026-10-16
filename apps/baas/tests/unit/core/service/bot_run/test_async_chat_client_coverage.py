@@ -2863,6 +2863,159 @@ class TestAttachFallbackRunOwnershipLifecycle:
         assert acc.has_active_sessions is False, "终态后连接仍不可排空"
         await acc.close()
 
+    # ─────────── R9：归属释放的时序/key 规范化/终态通道三面 ───────────
+
+    @pytest.mark.asyncio
+    async def test_stream_disconnect_while_enqueued_raises_notconnected(
+        self, mock_bot_ws
+    ):
+        """R9-F1：流式请求通过入口连接检查后在并发/同 session 排队期间
+        断连——恢复执行必须抛 NotConnectedError，不得被 finally 里未初始化
+        变量的 UnboundLocalError 吞掉真实断连原因。"""
+        acc = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        acc._transport = "v3-ws"  # 该缺陷与传输无关，普通 v3 模式同样成立
+        acc._transport = "a2a"
+        acc._client = MagicMock()
+        acc._client.connected = True
+        acc._client.close = AsyncMock()
+
+        # 先占住同 session 让生成器排队（入口检查此时已通过）
+        async with acc._condition:
+            acc._active_sessions.add("sk-att")
+
+        async def consume():
+            agen = acc.send_message_stream(
+                "m", session_key="sk-att", attachments=[{"k": 1}], timeout=5.0
+            )
+            async for chunk in agen:
+                pass
+
+        t = asyncio.create_task(consume())
+        await asyncio.sleep(0.1)  # t 已在 condition 排队
+        acc._client.connected = False  # 排队期间断连
+        async with acc._condition:
+            acc._active_sessions.discard("sk-att")
+            acc._condition.notify_all()
+
+        with pytest.raises(NotConnectedError):
+            await t
+        await acc.close()
+
+    @pytest.mark.asyncio
+    async def test_decorated_terminal_key_still_releases_ownership(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """R9-F2：引擎终态帧的 sessionKey 是发送 key 的前后缀装饰形态
+        （SessionKeyMatcher 语义）——释放必须能从装饰 key 归并回发送时的
+        登记键，等待中与后台两态都不许残留。"""
+        acc = self._acc_with_owned_a2a_main()
+        decorated = "agent:claude-code-ws:session:sk-att:user:claude-code-ws"
+        final_frame = {
+            "sessionKey": decorated,
+            "state": "final",
+            "message": {"content": [{"type": "text", "text": "done"}]},
+        }
+
+        # 后台态：等待方已收口，state=None 分支收帧
+        await acc.send_message(
+            "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
+        )
+        assert "sk-att" in acc._v3_routed_sessions
+        acc._v3_fallback._event_handlers["chat"](final_frame)
+        assert "sk-att" not in acc._v3_routed_sessions, (
+            "装饰 key 的后台终态未释放归属"
+        )
+        assert acc.has_active_sessions is False
+
+        # 等待中态：装饰 key 终态唤醒等待方，归属同样释放
+        task = asyncio.create_task(
+            acc.send_message(
+                "m2", session_key="sk-att", attachments=[{"k": 1}], wait_result=True
+            )
+        )
+        await self._wait_until(lambda: len(acc._v3_fallback.chat_send_calls) == 2)
+        acc._v3_fallback._event_handlers["chat"](final_frame)
+        content, _payloads = await task
+        assert content == "done"
+        assert "sk-att" not in acc._v3_routed_sessions, "装饰 key 的等待中终态未释放归属"
+        await acc.close()
+
+    @pytest.mark.asyncio
+    async def test_agent_and_error_terminal_channels_release_ownership(
+        self, mock_bot_ws
+    ):
+        """R9-F3a：终态不保证走 chat 通道（_derive_event_name 可派发为
+        agent，WS 转发层遇终态直接结束）——agent final/error 与 error 通道
+        必须同样释放归属，后台态（state=None）不许漏。"""
+        acc = self._acc_with_owned_a2a_main()
+        acc._client._event_handlers = {
+            "chat": acc._on_chat,
+            "agent": acc._on_agent,
+            "error": acc._on_error,
+        }
+        with patch(
+            "secbaas.community.core.service.bot_run._bot_websocket_client."
+            "BotWebSocketClient",
+            _StubV3Transport,
+        ):
+            # agent final 通道（后台态）
+            await acc.send_message(
+                "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
+            )
+            acc._v3_fallback._event_handlers["agent"](
+                {"sessionKey": "sk-att", "stream": "assistant", "state": "final"}
+            )
+            assert "sk-att" not in acc._v3_routed_sessions, (
+                "agent final 通道未释放归属"
+            )
+
+            # error 通道（后台态）
+            await acc.send_message(
+                "m2", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
+            )
+            acc._v3_fallback._event_handlers["error"](
+                {"sessionKey": "sk-att", "state": "error", "errorMessage": "boom"}
+            )
+            assert "sk-att" not in acc._v3_routed_sessions, "error 通道未释放归属"
+        await acc.close()
+
+    @pytest.mark.asyncio
+    async def test_agent_final_wake_releases_ownership_in_wait(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """R9-F3b：等待方被 agent final 唤醒（仅 agent 通道终结、无 chat
+        final）——run 已终结，归属必须释放。"""
+        acc = self._acc_with_owned_a2a_main()
+        acc._client._event_handlers = {
+            "chat": acc._on_chat,
+            "agent": acc._on_agent,
+            "error": acc._on_error,
+        }
+
+        task = asyncio.create_task(
+            acc.send_message(
+                "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=True
+            )
+        )
+        await self._wait_until(
+            lambda: acc._v3_fallback is not None
+            and bool(acc._v3_fallback.chat_send_calls)
+        )
+        acc._v3_fallback._event_handlers["agent"](
+            {
+                "sessionKey": "sk-att",
+                "stream": "assistant",
+                "state": "final",
+                "message": {"content": [{"text": "agent done"}]},
+            }
+        )
+        await task
+        assert "sk-att" not in acc._v3_routed_sessions, (
+            "agent final 唤醒后归属未释放"
+        )
+        assert acc.has_active_sessions is False
+        await acc.close()
+
 
 class _GatedV3Transport(_StubV3Transport):
     """慢建连替身：connect 闸在类级事件上——复现并发首发都看到
