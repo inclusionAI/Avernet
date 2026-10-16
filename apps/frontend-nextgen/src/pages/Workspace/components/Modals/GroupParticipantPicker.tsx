@@ -1,21 +1,11 @@
-import {
-  Badge,
-  Button,
-  Empty,
-  Input,
-  Segmented,
-  Skeleton,
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui';
-import type { CollaborationBotView, RecommendCandidateView } from '@/services/workspace/collaborationCandidateService';
+import { Button, Empty, Input, Segmented, Skeleton } from '@/components/ui';
+import type { CollaborationBotView } from '@/services/workspace/collaborationCandidateService';
 import { cn } from '@/utils/cn';
-import { Check, Plus, Search, Sparkles } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { useMemo } from 'react';
 import type { CandidateFilterMode, UseGroupCollaborationPickerResult } from '../../hooks/useGroupCollaborationPicker';
 import type { useServiceBotRouting } from '../../hooks/useServiceBotRouting';
+import { ParticipantRow } from './ParticipantRow';
 import { SelectedParticipantChip } from './SelectedParticipantChip';
 
 export interface GroupParticipantPickerProps {
@@ -37,18 +27,10 @@ export interface GroupParticipantPickerProps {
   additionalRoutingOptions?: Array<{ id: string; name: string; avatarUrl?: string }>;
 }
 
-/** 禁用成员 Bot 的整行悬停提示：统一列举不可选原因。 */
-const UNAVAILABLE_BOT_TOOLTIP =
-  '该 Bot 暂时无法参与新协作，可能原因为：已注销或删除、处于隐身状态、当前不在线';
-
 function matchesSearch(bot: CollaborationBotView, keyword: string): boolean {
   const q = keyword.trim().toLowerCase();
   if (!q) return true;
   return [bot.name, bot.summary ?? ''].some((text) => text.toLowerCase().includes(q));
-}
-
-function avatarText(name: string): string {
-  return name.trim().slice(0, 1).toUpperCase() || 'B';
 }
 
 /** 发起协作成员选择：好友/可协作 Bot 双 Tab + 名称搜索 + 已选 chips。 */
@@ -248,96 +230,17 @@ export function GroupParticipantPicker({
               if (target.scrollHeight - target.scrollTop - target.clientHeight < 40) picker.loadMore();
             }}
           >
-            {visibleBots.map((bot) => {
-              const selected = selectedIds.includes(bot.id);
-              const unknown = bot.detailsResolved === false;
-              const unavailable = unknown || bot.reachability === 'unreachable' || !bot.online;
-              const isOriginator = prependBot && bot.id === prependBot.id;
-              const row = (
-                <Button
-                  key={bot.id}
-                  type="button"
-                  variant="ghost"
-                  size="md"
-                  disabled={unavailable}
-                  aria-pressed={selected}
-                  className={cn(
-                    'h-auto min-w-0 w-full max-w-full justify-start gap-2 rounded-none border-0 px-3 py-2 text-left',
-                    unknown
-                      ? 'cursor-not-allowed bg-muted/40 text-muted-foreground'
-                      : cardMode
-                      ? selected
-                        ? 'rounded-lg border border-primary bg-primary/10 hover:bg-primary/10'
-                        : 'rounded-lg border border-border bg-card hover:border-primary/30 hover:bg-primary/10'
-                      : selected
-                      ? 'bg-primary/10 hover:bg-primary/10'
-                      : 'hover:bg-muted/50',
-                    unknown && cardMode && 'rounded-lg border border-border',
-                  )}
-                  onClick={() => onToggle(bot.id)}
-                >
-                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
-                    {avatarText(bot.name)}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate text-xs font-semibold text-foreground">{bot.name}</span>
-                      {isOriginator && (
-                        <span className="shrink-0 rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
-                          发起方
-                        </span>
-                      )}
-                      <Badge tone={unavailable ? 'neutral' : 'primary'} className="flex shrink-0 items-center gap-1">
-                        <i className={cn('h-1.5 w-1.5 rounded-full', bot.online ? 'bg-success' : 'bg-muted')} />
-                        {unknown ? '未知' : bot.online ? '在线' : '隐身'}
-                      </Badge>
-                    </span>
-                    {bot.summary && (
-                      <span className="mt-1 block truncate text-xs text-muted-foreground">{bot.summary}</span>
-                    )}
-                    {recommendActive && (bot as Partial<RecommendCandidateView>).shortProfile && (
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-                              <Sparkles className="h-3 w-3 shrink-0 text-amber-400" aria-hidden />
-                              <span className="truncate">{(bot as Partial<RecommendCandidateView>).shortProfile}</span>
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>{(bot as Partial<RecommendCandidateView>).shortProfile}</TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    )}
-                  </span>
-                  <span
-                    className={cn(
-                      'flex h-6 w-6 shrink-0 items-center justify-center rounded-full border',
-                      selected ? 'border-primary bg-primary' : 'border-primary/20 bg-card',
-                    )}
-                  >
-                    {selected ? (
-                      <Check className="h-4 w-4 text-primary-foreground" aria-hidden />
-                    ) : (
-                      <Plus className="h-4 w-4 text-primary" />
-                    )}
-                  </span>
-                </Button>
-              );
-              if (!unavailable) return row;
-              // 禁用 Button 不派发鼠标事件，外包 span 使整行可悬停，解释不可选原因。
-              return (
-                <TooltipProvider key={bot.id} delayDuration={300}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="block w-full">{row}</span>
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-[280px] whitespace-normal">
-                      {UNAVAILABLE_BOT_TOOLTIP}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              );
-            })}
+            {visibleBots.map((bot) => (
+              <ParticipantRow
+                key={bot.id}
+                bot={bot}
+                selected={selectedIds.includes(bot.id)}
+                recommendActive={recommendActive}
+                isOriginator={Boolean(prependBot && bot.id === prependBot.id)}
+                cardMode={cardMode}
+                onToggle={onToggle}
+              />
+            ))}
             {picker.isLoadingMore && (
               <div className="px-4 py-3">
                 <Skeleton.Block className="h-6 w-full rounded-lg" />

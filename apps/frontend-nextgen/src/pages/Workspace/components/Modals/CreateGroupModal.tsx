@@ -20,6 +20,7 @@ import { GroupConfigFields, type GroupStrategyKind } from './GroupConfigFields';
 import type { GroupLeaderOption } from './GroupLeaderSelect';
 import { formatAutoGroupName } from './groupNaming';
 import { GroupParticipantPicker } from './GroupParticipantPicker';
+import { useGoalAutoSelect } from './useGoalAutoSelect';
 
 export type { CreateGroupModalProps } from './CreateGroupModal.types';
 
@@ -44,8 +45,7 @@ export function CreateGroupModal({
   const [managerBotId, setManagerBotId] = useState('');
   const [enableTaskExecute, setEnableTaskExecute] = useState(GROUP_CREATE_VIA_EXECUTE);
   const wasOpenRef = useRef(false);
-  // 协作目标推荐态下用户手动取消过的 Bot：再次推荐不自动选中（用户取消优先），手动重新勾选即解除记录。
-  const goalDeselectedRef = useRef<Set<string>>(new Set());
+  const goalAutoSelect = useGoalAutoSelect(picker, setBotUuids);
   const supportsStateMachine = activeIdentity?.kind === 'bot';
   const activeIdentityDisplayName = activeIdentity
     ? resolveAuthenticatedDisplayName(
@@ -99,20 +99,8 @@ export function CreateGroupModal({
     setEnableTaskExecute(GROUP_CREATE_VIA_EXECUTE);
     resetTemplates();
     binding.reset();
-    goalDeselectedRef.current = new Set();
+    goalAutoSelect.reset();
   }, [activeIdentity?.id, activeIdentity?.kind, open, resetTemplates, binding.reset]);
-
-  // 协作目标智能推荐结果落地后自动全选（用户取消过的除外）；画像筛选搜索结果不自动选中。
-  useEffect(() => {
-    if (picker.recommendSource !== 'goal' || picker.isLoadingRecommend || picker.recommendations.length === 0) return;
-    const incoming = picker.recommendations
-      .filter((bot) => !goalDeselectedRef.current.has(bot.id))
-      .map((bot) => bot.id);
-    if (incoming.length === 0) return;
-    setBotUuids((prev) =>
-      incoming.every((id) => prev.includes(id)) ? prev : Array.from(new Set([...prev, ...incoming])),
-    );
-  }, [picker.recommendSource, picker.isLoadingRecommend, picker.recommendations]);
 
   const toggleBot = (id: string) => {
     clearError();
@@ -128,20 +116,15 @@ export function CreateGroupModal({
     }
     if (activeIdentity?.kind === 'bot' && id === activeIdentity.id) return;
     if (botUuids.includes(id)) {
-      // 取消勾选：协作目标推荐态下取消的推荐项记入排除集，再次推荐时不自动选中。
-      if (picker.recommendSource === 'goal' && picker.recommendations.some((bot) => bot.id === id)) {
-        goalDeselectedRef.current.add(id);
-      }
+      goalAutoSelect.recordCancel(id);
       setBotUuids((prev) => prev.filter((x) => x !== id));
     } else {
-      // 重新勾选视为撤销取消意愿，解除排除记录。
-      goalDeselectedRef.current.delete(id);
+      goalAutoSelect.clearCancel(id);
       setBotUuids((prev) => [...prev, id]);
     }
     if (driverBotId === id) setDriverBotId(activeIdentity?.kind === 'bot' ? activeIdentity.id : '');
     if (managerBotId === id) setManagerBotId('');
   };
-
   const switchKind = (next: GroupStrategyKind) => {
     clearError();
     setKind(next);
@@ -152,17 +135,14 @@ export function CreateGroupModal({
     }
     if (next !== 'task_master_slave') setManagerBotId('');
   };
-
   const setField = (setter: (value: string) => void) => (value: string) => {
     clearError();
     setter(value);
   };
-
   const hasParticipants =
     kind === 'task_dag' ? Object.values(binding.participantBindings).some(Boolean) : botUuids.length > 0;
   const hasLeader = kind === 'task_dag' ? true : kind === 'free_chat' ? Boolean(driverBotId) : Boolean(managerBotId);
   const canSubmit = hasParticipants && hasLeader && binding.canSubmitTaskDag && routing.ready;
-
   const bindingSlot: ReactNode = (
     <BindingSlot visible={kind === 'task_dag' && supportsStateMachine} binding={binding} botNameResolver={allBotName} />
   );
