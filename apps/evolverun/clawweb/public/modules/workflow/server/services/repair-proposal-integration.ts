@@ -206,7 +206,7 @@ export function createProposalCoordinator(input:{db:IDatabase;read:(workflowId:s
           if(!plan||plan.relation==='uncertain'||plan.relation!=='exact'&&status!=='ready')throw new RepairBatchError('INVALID_INPUT','重叠修改尚待整合，请等待或只选择一项原建议');}
         for(const plan of result.plans){const members=plan.itemIds.filter(id=>ids.has(id));if(!members.length)continue;
           if(plan.relation!=='exact'&&members.length!==plan.itemIds.length)throw new RepairBatchError('SOURCE_CHANGED','方案选择不完整，请重新确认范围');
-          plans.push({id:digestRepairJson([fp,plan.itemIds]),originalItemIds:members,goals:plan.changes,relation:plan.relation,...(result.causes?{causes:result.causes.filter(c=>c.itemIds.every(id=>members.includes(id)))}:{}),...(result.unknowns?{unknowns:result.unknowns}:{})});
+          plans.push({id:digestRepairJson([fp,plan.itemIds]),originalItemIds:members,goals:plan.changes,relation:plan.relation,...(result.causes?{causes:result.causes.filter(c=>c.itemIds.some(id=>members.includes(id)))}:{}),...(result.unknowns?{unknowns:result.unknowns}:{})});
           }
       }
       // Check across issue groups too: group-local model suggestions cannot authorize cross-group overwrites.

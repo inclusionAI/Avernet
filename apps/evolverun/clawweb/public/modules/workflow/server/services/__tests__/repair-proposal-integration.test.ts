@@ -3,6 +3,7 @@ import { repairFixture } from './repair-batch-fixtures.js';
 import { repairReleaseMigrations } from '@avernet/clawweb-shared/server/schema-repair-release';
 import { createRepairWorkbenchService } from '../repair-batch-service.js';
 import { createProposalCoordinator, type ProposalModelPort } from '../repair-proposal-integration.js';
+import { WorkflowAutomationRepository } from '../../repositories/workflow-automation-repository.js';
 import { digestRepairJson } from '../../contracts/repair-batch.js';
 let f: Awaited<ReturnType<typeof repairFixture>>;
 afterEach(() => f?.raw.close());
@@ -52,7 +53,10 @@ it('retries 429 after Retry-After across instances, but blocks permanent failure
  const {c,classify,advance,read,model}=await setup();
  classify.mockRejectedValueOnce(Object.assign(new Error('limited'),{status:429,retryAfterMs:60000}));
  await c.tick();advance(3000);await Promise.all([c.tick(),createProposalCoordinator({db:f.db,read,model,now:()=>4000}).tick()]);
- expect(classify).toHaveBeenCalledTimes(1);advance(59000);await c.tick();expect(classify).toHaveBeenCalledTimes(1);
+ expect(classify).toHaveBeenCalledTimes(1);
+ const budget=(await f.db.query<{body_json:string}>("SELECT body_json FROM workflow_repair_release_records WHERE record_kind = 'proposal_budget'"))[0];
+ expect(JSON.parse(budget.body_json)).toMatchObject({leaseToken:null,leaseUntilMs:0,nextAtMs:64000});
+ advance(59000);await c.tick();expect(classify).toHaveBeenCalledTimes(1);
  advance(2000);await c.tick();expect(classify).toHaveBeenCalledTimes(2);
 });
 it('discards expired model output when sources change mid-flight',async()=>{
@@ -73,8 +77,12 @@ it('resumes bounded historical batches and source revisions after restart withou
  const {items,baseline}=await read('wf-1');const cards=await c.present('wf-1',items,baseline);
  expect(new Set(cards.flatMap(card=>card.aggregation!.itemIds)).size).toBe(205);
  expect(classify.mock.calls.every(call=>call[0].items.length<=100)).toBe(true);
- expect(classify).toHaveBeenCalledTimes(2); // Shared conservative token budget is exhausted, not a lost batch.
- advance(60000);await c.tick();expect(classify).toHaveBeenCalledTimes(3);
+ // Queue order can put either a 100-source or a 5-source unit first. A large
+ // unit exhausts this window; the separate budget tests assert exact deadlines.
+ expect(classify.mock.calls.length).toBeGreaterThanOrEqual(1);
+ expect(classify.mock.calls.length).toBeLessThan(3);
+ for(let window=0;window<2;window++){advance(60000);await c.tick();await c.tick();}
+ expect(classify).toHaveBeenCalledTimes(3);
  const final=await read('wf-1');expect((await c.present('wf-1',final.items,final.baseline)).every(i=>i.aggregation?.status==='ready')).toBe(true);
 });
 it('blocks a permanent provider failure across jobs until explicit recovery',async()=>{
@@ -125,4 +133,52 @@ it('serves original queued suggestions through strict bounded JSON before any mo
  const page=await integrated.candidates('wf-1',{previewSignatures:['issue']});
  expect(page.items).toHaveLength(3);expect(page.items.every(i=>i.aggregation?.status==='queued')).toBe(true);
  expect(JSON.parse(JSON.stringify(page)).items).toHaveLength(3);
+});
+
+it.each(['requests','tokens'] as const)('releases the %s budget lease and another instance resumes exactly at the next window',async(limit)=>{
+ const {c,read,model,classify,advance}=await setup();
+ const repo=new WorkflowAutomationRepository(f.db);
+ const budget=await repo.ensure('wf-1','proposal_budget',model.key,{window:1000,tokens:limit==='tokens'?200000:0,requests:limit==='requests'?20:0},1000);
+ await c.tick();advance(3000);await c.tick();
+ expect(classify).not.toHaveBeenCalled();
+ const cooldown=await repo.get(budget.id);
+ expect(cooldown).toMatchObject({leaseToken:null,leaseUntilMs:0,nextAtMs:61000});
+ let restartTime=60999;
+ const restarted=createProposalCoordinator({db:f.db,read,model,now:()=>restartTime});
+ await restarted.tick();expect(classify).not.toHaveBeenCalled();
+ restartTime=61000;await restarted.tick();expect(classify).toHaveBeenCalledTimes(1);
+});
+
+it('retains a reviewed shared cause in every affected frozen plan without adding unselected sources',async()=>{
+ const {c,read,classify,advance}=await setup();
+ f.items.forEach((item,i)=>{(item.proposal!.operations as Array<Record<string,unknown>>)[0].nodeId=`node-${i}`});
+ const shared={title:'共同输入缺失',certainty:'hypothesis',itemIds:['item-0','item-1'],evidenceIds:[]};
+ classify.mockResolvedValueOnce({plans:f.items.map(item=>({itemIds:[item.itemId],title:`修复 ${item.itemId}`,changes:['校验输入'],relation:'complementary'})),conflicts:[],causes:[shared],unknowns:[]});
+ await c.tick();advance(3000);await c.tick();
+ const snapshot=await read('wf-1');
+ const reviewed=(await c.present('wf-1',snapshot.items,snapshot.baseline)).filter(card=>card.itemId!=='item-2');
+ expect(reviewed.every(card=>card.aggregation?.causes?.[0].itemIds.join(',')==='item-0,item-1')).toBe(true);
+ const integrated=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort,c);
+ const page=await integrated.candidates('wf-1');
+ const revision=await integrated.create('reviewer',{workflowId:'wf-1',itemIds:['item-0','item-1'],inputDigest:page.inputDigest,instructions:'',requestId:'shared-cause'});
+ expect(revision.input.items.map(item=>item.itemId)).toEqual(['item-0','item-1']);
+ expect(revision.input.integration?.plans).toHaveLength(2);
+ expect(revision.input.integration?.plans.map(plan=>plan.causes)).toEqual(reviewed.map(card=>card.aggregation!.causes));
+});
+
+it.each([false,true])('resolves every original member to the same aggregation details (hydration=%s)',async(hydrate)=>{
+ const {c,advance}=await setup();await c.tick();advance(3000);await c.tick();
+ if(hydrate)f.sourcePort.hydrate=async(_db,_wf,items)=>items.map(item=>({...item,context:{...item.context,detailEvidence:'inline body'}}));
+ const integrated=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort,c);
+ const page=await integrated.candidates('wf-1');const expected=page.items[0].aggregation!;
+ for(const id of expected.itemIds){
+  const detail=await integrated.item('wf-1',id);
+  expect(detail.itemId).toBe(id);
+  expect(detail.aggregation?.id).toBe(expected.id);
+  expect(detail.aggregation?.itemIds).toEqual(expected.itemIds);
+  expect(detail.aggregation?.title).toBe(expected.title);
+  expect(detail.aggregation?.status).toBe('ready');
+  expect(detail.aggregation?.originals.map(item=>item.itemId)).toEqual(expected.itemIds);
+  if(hydrate)expect(detail.aggregation?.originals.every(item=>item.context?.detailEvidence==='inline body')).toBe(true);
+ }
 });

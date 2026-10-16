@@ -313,7 +313,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       if (this.proposals && this.execution) {
         const all = (await this.readSnapshot(workflowId, true)).items;
         const cards = await this.proposals.present(workflowId, all, await this.execution.resolveBaseline(workflowId));
-        const card = cards.find(value => value.itemId === itemId);
+        const card = cards.find(value => value.itemId === itemId || value.aggregation?.itemIds.includes(itemId));
         if (card?.aggregation) {
           const originals = this.sources.hydrate ? await this.sources.hydrate(this.db, workflowId, card.aggregation.originals) : card.aggregation.originals;
           item = { ...item, aggregation: { ...card.aggregation, originals: originals.map(value => ({ ...card.aggregation!.originals.find(i => i.itemId === value.itemId)!, ...value })) } };
