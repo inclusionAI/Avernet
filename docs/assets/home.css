@@ -542,6 +542,7 @@ dialog.demo video { display: block; width: 100%; aspect-ratio: 16 / 9; backgroun
 @media (max-width: 760px) {
   :root { --gutter: 16px; }
   .nav { gap: 10px; }
+  .nav .star-label-detail { display: none; }
   .section { padding: 72px 0; }
   .hero { padding: 44px 0 150px; }
   .hero h1 { font-size: clamp(24px, 6.6vw, 30px); }
