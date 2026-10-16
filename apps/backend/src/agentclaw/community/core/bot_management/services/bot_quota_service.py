@@ -68,17 +68,24 @@ class BotQuotaService(BotQuotaServiceProtocol):
         except Exception as exc:
             raise BotQuotaUnavailableError("Bot quota state is unavailable") from exc
 
-    def _inspect(self, scope: BotQuotaScope) -> BotQuotaSnapshot:
+    def _inspect(
+        self, scope: BotQuotaScope, *, env: str | None = None
+    ) -> BotQuotaSnapshot:
+        env = env or get_current_env()
         ceiling = self._ceiling(scope)
         if scope.space_type is SpaceType.PERSONAL:
             used = self._repository.count_cloud_bots_in_personal_space(
                 owner_id=scope.owner_id,
                 personal_space_id=scope.space_id,
+                env=env,
             )
         else:
             if scope.space_id is None:
                 raise BotQuotaConfigurationError("Team Space requires a numeric id")
-            used = self._repository.count_cloud_bots_by_space(space_id=scope.space_id)
+            used = self._repository.count_cloud_bots_by_space(
+                space_id=scope.space_id,
+                env=env,
+            )
         return BotQuotaSnapshot(scope=scope, ceiling=ceiling, used=int(used))
 
     def assert_can_add(
@@ -97,16 +104,18 @@ class BotQuotaService(BotQuotaServiceProtocol):
         *,
         owner_id: str,
         space_id: int | None,
+        env: str | None = None,
     ) -> Iterator[BotQuotaSnapshot]:
+        env = env or get_current_env()
         try:
-            scope = self._scope(owner_id=owner_id, space_id=space_id)
+            scope = self._scope(owner_id=owner_id, space_id=space_id, env=env)
         except BotQuotaError:
             raise
         except Exception as exc:
             raise BotQuotaUnavailableError("Bot quota state is unavailable") from exc
-        with self._locked(scope):
+        with self._locked(scope, env=env):
             try:
-                snapshot = self._assert_available(self._inspect(scope))
+                snapshot = self._assert_available(self._inspect(scope, env=env))
             except BotQuotaError:
                 raise
             except Exception as exc:
@@ -168,7 +177,9 @@ class BotQuotaService(BotQuotaServiceProtocol):
             )
         return scope
 
-    def _scope(self, *, owner_id: str, space_id: int | None) -> BotQuotaScope:
+    def _scope(
+        self, *, owner_id: str, space_id: int | None, env: str | None = None
+    ) -> BotQuotaScope:
         if space_id is None:
             return BotQuotaScope(
                 owner_id=owner_id,
@@ -176,7 +187,7 @@ class BotQuotaService(BotQuotaServiceProtocol):
                 space_name="Personal",
                 space_type=SpaceType.PERSONAL,
             )
-        space = self._space_access.require_space(space_id=space_id)
+        space = self._space_access.require_space(space_id=space_id, env=env)
         if (
             owner_id
             and space.space_type is SpaceType.PERSONAL
@@ -197,8 +208,10 @@ class BotQuotaService(BotQuotaServiceProtocol):
         return snapshot
 
     @contextmanager
-    def _locked(self, scope: BotQuotaScope) -> Iterator[None]:
-        lock_key = self._lock_key(scope)
+    def _locked(
+        self, scope: BotQuotaScope, *, env: str | None = None
+    ) -> Iterator[None]:
+        lock_key = self._lock_key(scope, env=env)
         try:
             lock_value = self._cache.acquire_lock_strict(
                 lock_key, ttl=_QUOTA_LOCK_TTL_SECONDS
@@ -225,11 +238,11 @@ class BotQuotaService(BotQuotaServiceProtocol):
                 )
 
     @staticmethod
-    def _lock_key(scope: BotQuotaScope) -> str:
+    def _lock_key(scope: BotQuotaScope, *, env: str | None = None) -> str:
         raw = "\0".join(
             (
                 get_current_avernet_tenant(),
-                get_current_env(),
+                env or get_current_env(),
                 scope.lock_scope,
             )
         )

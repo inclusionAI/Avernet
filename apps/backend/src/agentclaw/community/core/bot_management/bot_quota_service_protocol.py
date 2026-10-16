@@ -24,6 +24,7 @@ class BotQuotaServiceProtocol(Protocol):
         *,
         owner_id: str,
         space_id: int | None,
+        env: str | None = None,
     ) -> AbstractContextManager[BotQuotaSnapshot]: ...
 
     def set_team_ceiling(self, *, space_id: int, ceiling: int) -> int: ...

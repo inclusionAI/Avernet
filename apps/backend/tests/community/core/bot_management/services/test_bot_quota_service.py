@@ -21,6 +21,7 @@ from agentclaw.community.core.bot_management.services.bot_quota_service import (
 from agentclaw.community.core.spaces.models import SpaceRecord, SpaceType
 from agentclaw.community.plugin_api.cache import CacheLockInfrastructureError
 from agentclaw.community.plugins.local.cache import MemoryCachePlugin
+from agentclaw.community.utils.env_utils import get_current_env
 
 pytestmark = pytest.mark.unit
 
@@ -78,6 +79,7 @@ def test_personal_space_reuses_the_owner_ceiling_and_counts_legacy_rows():
     repository.count_cloud_bots_in_personal_space.assert_called_once_with(
         owner_id="u1",
         personal_space_id=7,
+        env=get_current_env(),
     )
 
 
@@ -92,7 +94,9 @@ def test_team_space_defaults_to_twenty_and_counts_every_owner():
     policy.get_bots_ceiling.assert_called_once_with(
         entity_type="space", entity_id="42", default=20
     )
-    repository.count_cloud_bots_by_space.assert_called_once_with(space_id=42)
+    repository.count_cloud_bots_by_space.assert_called_once_with(
+        space_id=42, env=get_current_env()
+    )
 
 
 def test_team_space_uses_its_individual_override():
@@ -133,7 +137,9 @@ def test_guard_recounts_under_the_scope_lock_and_releases_it():
     lock_key = cache.acquire_lock_strict.call_args.args[0]
     assert lock_key.startswith("bot-quota:")
     cache.release_lock.assert_called_once_with(lock_key, "lease-token")
-    repository.count_cloud_bots_by_space.assert_called_once_with(space_id=42)
+    repository.count_cloud_bots_by_space.assert_called_once_with(
+        space_id=42, env=get_current_env()
+    )
 
 
 def test_a_second_mutation_on_the_same_scope_is_busy():
@@ -176,7 +182,7 @@ def test_operator_override_only_accepts_a_real_team_space():
     service, _repository, policy, _cache, access = _service()
 
     assert service.set_team_ceiling(space_id=42, ceiling=25) == 25
-    access.require_space.assert_called_once_with(space_id=42)
+    access.require_space.assert_called_once_with(space_id=42, env=None)
     policy.set_bots_ceiling.assert_called_once_with(
         entity_type="space", entity_id="42", ceiling=25
     )
@@ -196,4 +202,50 @@ def test_reset_removes_only_the_override_and_returns_the_team_default():
     assert ceiling == 20
     policy.clear_bots_ceiling.assert_called_once_with(
         entity_type="space", entity_id="42"
+    )
+
+
+def test_guard_add_threads_explicit_env_to_space_resolution_and_counts():
+    service, repository, _policy, _cache, access = _service()
+    repository.count_cloud_bots_by_space.return_value = 0
+
+    with service.guard_add(owner_id="u1", space_id=42, env="prod") as snapshot:
+        assert snapshot.ceiling == TEAM_DEFAULT_BOT_CEILING
+
+    access.require_space.assert_called_once_with(space_id=42, env="prod")
+    repository.count_cloud_bots_by_space.assert_called_once_with(
+        space_id=42, env="prod"
+    )
+
+
+def test_guard_add_lock_key_uses_explicit_env():
+    # The lock key must land in the target env's namespace, not the running
+    # process's, so cross-env corrections serialize against the peer instance.
+    from hashlib import sha256
+
+    from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+
+    service, repository, _policy, cache, _access = _service()
+    repository.count_cloud_bots_by_space.return_value = 0
+
+    with service.guard_add(owner_id="u1", space_id=42, env="prod"):
+        pass
+    with service.guard_add(owner_id="u1", space_id=42):
+        pass
+
+    keys = [call.args[0] for call in cache.acquire_lock_strict.call_args_list]
+    assert keys[0] != keys[1]
+    raw = "\0".join((get_current_avernet_tenant(), "prod", "team:42"))
+    assert keys[0] == f"bot-quota:{sha256(raw.encode('utf-8')).hexdigest()}"
+
+
+def test_guard_add_counts_personal_space_legacy_rows_in_explicit_env():
+    service, repository, _policy, _cache, _access = _service()
+    repository.count_cloud_bots_in_personal_space.return_value = 0
+
+    with service.guard_add(owner_id="u1", space_id=None, env="prod"):
+        pass
+
+    repository.count_cloud_bots_in_personal_space.assert_called_once_with(
+        owner_id="u1", personal_space_id=None, env="prod"
     )

@@ -56,7 +56,7 @@ class SpaceServiceProtocol(Protocol):
 class SpaceAccessServiceProtocol(Protocol):
     @abstractmethod
     def require_space_member(
-        self, *, space_id: int, user_id: str
+        self, *, space_id: int, user_id: str, env: str | None = None
     ) -> tuple[SpaceRecord, SpaceMemberRecord]: ...
 
 
