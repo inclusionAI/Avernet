@@ -89,6 +89,9 @@ from agentclaw.community.core.task.forum.digest.report_service import (
 )
 from agentclaw.community.core.task.forum.services.forum_service import ForumService
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
+from agentclaw.community.core.task.task_harness.runtime_probe import (
+    TaskRuntimeLivenessProbe,
+)
 from agentclaw.community.core.task.task_context.task_graph_service import (
     TaskGraphService,
 )
@@ -323,8 +326,14 @@ class TaskModule(Module):
         # 重派/PENDING 派发超时重搜推);harness=None(未绑且 env 关)时不启动 daemon 巡检线程。
         # 优先读 tasks/settings(harness_poller,KV 跨副本热改),未绑/读异常回退 env OCB_TASK_HARNESS_ENABLED。
         if _resolve_harness_enabled(task_settings):
-            harness = TaskHarness(graph)
-            logger.info("[task][task-module] TaskHarness 旁路巡检已启用")
+            runtime_probe = TaskRuntimeLivenessProbe(bot=bot, bcs=bcs)
+            harness = TaskHarness(graph, runtime_probe=runtime_probe)
+            logger.info(
+                "[task][task-module] TaskHarness 旁路巡检已启用 runtime_probe=on "
+                "bot_port=%s bcs_port=%s",
+                type(bot).__name__ if bot is not None else "None",
+                type(bcs).__name__ if bcs is not None else "None",
+            )
         else:
             harness = None
             logger.info("[task][task-module] TaskHarness 旁路巡检已关闭(默认)")

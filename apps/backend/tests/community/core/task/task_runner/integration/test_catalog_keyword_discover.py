@@ -50,6 +50,55 @@ class _FakeBps:
         return {"total": len(hits), "items": hits}
 
 
+class _RuntimeFakeBps:
+    """Include catalog hits that expose conflicting backend runtime states."""
+
+    def search_catalog_public_bots_by_keyword(
+        self, *, search=None, page=1, page_size=20, caller=None, request_id="",
+        filters=None, **_,
+    ):
+        items = [
+            {
+                "bot_id": "B_OK",
+                "owner_id": "U1",
+                "bot_uuid": "B_OK:U1",
+                "status": "ACTIVE",
+                "is_online": True,
+                "runtime_state": "online",
+            },
+            {
+                "bot_id": "B_IS_OFFLINE",
+                "owner_id": "U2",
+                "bot_uuid": "B_IS_OFFLINE:U2",
+                "status": "ACTIVE",
+                "is_online": False,
+                "runtime_state": "online",
+            },
+            {
+                "bot_id": "B_STATUS_OFFLINE",
+                "owner_id": "U3",
+                "bot_uuid": "B_STATUS_OFFLINE:U3",
+                "status": "PENDING",
+                "is_online": True,
+                "runtime_state": "online",
+            },
+            {
+                "bot_id": "B_RUNTIME_OFFLINE",
+                "owner_id": "U4",
+                "bot_uuid": "B_RUNTIME_OFFLINE:U4",
+                "status": "ACTIVE",
+                "is_online": True,
+                "runtime_state": "offline",
+            },
+            {
+                "bot_id": "B_UNKNOWN_FIELDS",
+                "owner_id": "U5",
+                "bot_uuid": "B_UNKNOWN_FIELDS:U5",
+            },
+        ]
+        return {"total": len(items), "items": items}
+
+
 class _ExplodingBps:
     """search 抛异常→应被收口为空,不阻断。"""
 
@@ -93,6 +142,21 @@ class TestCatalogKeywordDiscover(unittest.TestCase):
         res = d.search_by_keyword(keyword="x", user_id="146836")
         self.assertEqual(res["total"], 0)
         self.assertEqual(res["items"], [])
+
+    def test_offline_or_abnormal_runtime_candidates_are_filtered(self) -> None:
+        d = CatalogKeywordBotDiscover(_RuntimeFakeBps())
+        res = d.search_by_keyword(keyword="bot", user_id="146836")
+        self.assertEqual(
+            {item["bot_id"] for item in res["items"]},
+            {"B_OK", "B_UNKNOWN_FIELDS"},
+        )
+
+    def test_missing_runtime_fields_are_not_filtered(self) -> None:
+        d = CatalogKeywordBotDiscover(_RuntimeFakeBps())
+        res = d.search_by_keyword(keyword="bot", user_id="146836")
+        self.assertIn(
+            "B_UNKNOWN_FIELDS", {item["bot_id"] for item in res["items"]}
+        )
 
     def test_items_carry_recommend_score(self) -> None:
         d = CatalogKeywordBotDiscover(_FakeBps())

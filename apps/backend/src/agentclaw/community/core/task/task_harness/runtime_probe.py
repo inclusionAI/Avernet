@@ -1,0 +1,376 @@
+"""Internal runtime liveness probe for task execution nodes.
+
+The probe asks already-installed OpenAPI/BCS adapters for authoritative runtime
+state and, where available, a deterministic heartbeat cursor.  It is an
+internal Harness seam: no public task protocol, HTTP contract, or report event
+is added here.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+from dataclasses import dataclass
+from typing import Any, Literal
+
+from agentclaw.community.core.task.domain.models import TaskNode
+
+logger = logging.getLogger("task.harness.runtime_probe")
+
+RuntimeLivenessState = Literal[
+    "active",
+    "terminal_success",
+    "terminal_failed",
+    "unknown",
+]
+
+
+@dataclass(frozen=True)
+class RuntimeProbeResult:
+    """One liveness observation and the evidence used to derive it.
+
+    ``heartbeat_cursor`` is a stable digest of runtime state/message facts. It
+    does not need to be globally meaningful; callers only compare consecutive
+    observations to determine whether the runtime showed new activity.
+    """
+
+    state: RuntimeLivenessState
+    progressed: bool = False
+    heartbeat_cursor: str | None = None
+    source: str | None = None
+    status: str | None = None
+    detail: dict[str, Any] | None = None
+    error: str | None = None
+
+
+_TERMINAL_SUCCESS = {"completed", "succeeded", "success", "done", "terminal_success"}
+_TERMINAL_FAILED = {
+    "failed",
+    "error",
+    "errored",
+    "aborted",
+    "cancelled",
+    "canceled",
+    "timeout",
+    "timed_out",
+    "expired",
+    "offline",
+    "deleted",
+    "dormant",
+}
+_ACTIVE = {
+    "active", "running", "processing", "inprogress", "in_progress",
+    "pending", "queued", "delivering", "started", "accepted",
+}
+
+
+def _normalized_status(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _classify_status(value: Any) -> RuntimeLivenessState | None:
+    status = _normalized_status(value)
+    if not status:
+        return None
+    if status in _TERMINAL_SUCCESS:
+        return "terminal_success"
+    if status in _TERMINAL_FAILED:
+        return "terminal_failed"
+    if status in _ACTIVE:
+        return "active"
+    return None
+
+
+def _digest(value: Any) -> str:
+    try:
+        text = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    except Exception:  # noqa: BLE001 - masking must never fail the probe
+        text = repr(value)
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _last_message_cursor(messages: Any) -> Any:
+    if not isinstance(messages, list) or not messages:
+        return None
+    last = messages[-1]
+    if not isinstance(last, dict):
+        return {"last": str(last), "count": len(messages)}
+    selected = {
+        key: last.get(key)
+        for key in (
+            "id", "message_id", "version", "updated_at", "created_at", "role",
+            "content", "text", "seq",
+        )
+        if last.get(key) is not None
+    }
+    return {"last": selected or last, "count": len(messages)}
+
+
+def _join_cursors(*parts: Any) -> str | None:
+    values = [part for part in parts if part not in (None, "", {})]
+    if not values:
+        return None
+    return _digest(values)
+
+
+def _run_cursor(run: dict[str, Any]) -> Any:
+    if not isinstance(run, dict):
+        return None
+    return {
+        key: run.get(key)
+        for key in ("status", "version", "updated_at", "updated_at_ms", "completed_at")
+        if run.get(key) is not None
+    }
+
+
+def _group_cursor(group: dict[str, Any]) -> Any:
+    if not isinstance(group, dict):
+        return None
+    session = group.get("session") if isinstance(group.get("session"), dict) else {}
+    return {
+        "group": {
+            key: group.get(key)
+            for key in (
+                "status", "version", "updated_at", "updated_at_ms", "state",
+            )
+            if group.get(key) is not None
+        },
+        "session": {
+            key: session.get(key)
+            for key in (
+                "status", "version", "updated_at", "updated_at_ms", "state",
+            )
+            if isinstance(session, dict) and session.get(key) is not None
+        },
+    }
+
+
+class TaskRuntimeLivenessProbe:
+    """Read runtime status and heartbeats through existing internal ports."""
+
+    def __init__(self, *, bot: Any = None, bcs: Any = None) -> None:
+        self._bot = bot
+        self._bcs = bcs
+
+    async def probe(
+        self,
+        node: TaskNode,
+        *,
+        previous_cursor: str | None = None,
+    ) -> RuntimeProbeResult:
+        """Return one internal liveness observation for a dispatched node."""
+        props = getattr(node.run_info, "extend_props", {}) or {}
+        run_id = str(props.get("run_id") or "").strip() or None
+        session_id = str(props.get("session_id") or "").strip() or None
+        group_id = str(props.get("group_id") or "").strip() or None
+
+        # Single-bot can be turned into a manager-worker group. The authoritative
+        # runtime handle decides the probe, not only the persisted run_mode.
+        if group_id:
+            return await self._probe_group(
+                run_id=run_id,
+                group_id=group_id,
+                session_id=session_id,
+                previous_cursor=previous_cursor,
+            )
+        if run_id:
+            return await self._probe_bot_run(
+                run_id=run_id,
+                session_id=session_id,
+                previous_cursor=previous_cursor,
+            )
+        return RuntimeProbeResult(
+            state="unknown",
+            source="node",
+            detail={"reason": "no_dispatch_handle"},
+        )
+
+    def _active_result(
+        self,
+        *,
+        source: str,
+        status: str | None,
+        cursor: str | None,
+        previous_cursor: str | None,
+        detail: dict[str, Any] | None = None,
+    ) -> RuntimeProbeResult:
+        progressed = bool(previous_cursor and cursor and cursor != previous_cursor)
+        return RuntimeProbeResult(
+            state="active",
+            progressed=progressed,
+            heartbeat_cursor=cursor,
+            source=source,
+            status=status,
+            detail=detail,
+        )
+
+    async def _probe_bot_run(
+        self,
+        *,
+        run_id: str,
+        session_id: str | None,
+        previous_cursor: str | None,
+    ) -> RuntimeProbeResult:
+        if self._bot is None:
+            return RuntimeProbeResult(
+                state="unknown",
+                source="openapi_bot",
+                detail={"reason": "port_missing"},
+            )
+        try:
+            run = await self._bot.get_run(run_id)
+        except Exception as exc:  # noqa: BLE001 - probe must be observable, not fatal
+            return RuntimeProbeResult(
+                state="unknown",
+                source="openapi_bot.run",
+                error=f"{type(exc).__name__}: {exc}"[:500],
+            )
+        if not isinstance(run, dict):
+            return RuntimeProbeResult(
+                state="unknown",
+                source="openapi_bot.run",
+                error="run response is not an object",
+            )
+        status = _normalized_status(run.get("status"))
+        state = _classify_status(status) or "unknown"
+        if state in {"terminal_success", "terminal_failed"}:
+            return RuntimeProbeResult(
+                state=state,
+                source="openapi_bot.run",
+                status=status,
+                detail={"run_id": run_id},
+            )
+
+        cursor_value = _run_cursor(run)
+        message_error: str | None = None
+        if session_id:
+            try:
+                messages = await self._bot.get_session_messages(session_id, limit=20)
+                cursor_value = (
+                    cursor_value,
+                    _last_message_cursor(messages),
+                )
+            except Exception as exc:  # noqa: BLE001 - heartbeat read is optional
+                message_error = f"{type(exc).__name__}: {exc}"[:500]
+        cursor = _join_cursors(cursor_value)
+        return self._active_result(
+            source="openapi_bot.run",
+            status=status or "active",
+            cursor=cursor,
+            previous_cursor=previous_cursor,
+            detail={
+                "run_id": run_id,
+                "session_id": session_id,
+                "message_probe_error": message_error,
+            },
+        )
+
+    async def _probe_group(
+        self,
+        *,
+        run_id: str | None,
+        group_id: str,
+        session_id: str | None,
+        previous_cursor: str | None,
+    ) -> RuntimeProbeResult:
+        if self._bcs is None:
+            return RuntimeProbeResult(
+                state="unknown",
+                source="bcs",
+                detail={"reason": "port_missing"},
+            )
+
+        run: dict[str, Any] | None = None
+        run_error: str | None = None
+        if run_id:
+            try:
+                value = await self._bcs.get_state_machine_run(run_id)
+                if not isinstance(value, dict):
+                    raise ValueError("state-machine run response is not an object")
+                run = value
+            except Exception as exc:  # noqa: BLE001
+                run_error = f"{type(exc).__name__}: {exc}"[:500]
+
+        group: dict[str, Any] | None = None
+        group_error: str | None = None
+        try:
+            value = await self._bcs.get_group(group_id)
+            if not isinstance(value, dict):
+                raise ValueError("group response is not an object")
+            group = value
+        except Exception as exc:  # noqa: BLE001
+            group_error = f"{type(exc).__name__}: {exc}"[:500]
+
+        run_status = _normalized_status((run or {}).get("status"))
+        run_state = _classify_status(run_status) if run is not None else None
+        if run_state in {"terminal_success", "terminal_failed"}:
+            return RuntimeProbeResult(
+                state=run_state,
+                source="bcs.state_machine_run",
+                status=run_status,
+                detail={"run_id": run_id, "group_id": group_id},
+            )
+
+        session = group.get("session") if isinstance(group, dict) else {}
+        session_status = _normalized_status(
+            session.get("status") if isinstance(session, dict) else None
+        )
+        group_status = _normalized_status((group or {}).get("status"))
+        group_state = _classify_status(group_status)
+        session_state = _classify_status(session_status)
+        if group_state == "terminal_failed" or session_state == "terminal_failed":
+            return RuntimeProbeResult(
+                state="terminal_failed",
+                source="bcs.group",
+                status=group_status or session_status,
+                detail={"group_id": group_id, "run_error": run_error},
+            )
+        if group_state == "terminal_success" or session_state == "terminal_success":
+            return RuntimeProbeResult(
+                state="terminal_success",
+                source="bcs.group",
+                status=group_status or session_status,
+                detail={"group_id": group_id, "run_error": run_error},
+            )
+        if group is None and run is None:
+            return RuntimeProbeResult(
+                state="unknown",
+                source="bcs",
+                detail={"group_id": group_id, "run_id": run_id},
+                error=group_error or run_error,
+            )
+        if group is None and run is not None:
+            return self._active_result(
+                source="bcs.state_machine_run",
+                status=run_status,
+                cursor=_join_cursors(_run_cursor(run)),
+                previous_cursor=previous_cursor,
+                detail={"run_error": run_error, "group_id": group_id},
+            )
+
+        cursor_value = _group_cursor(group)
+        message_error: str | None = None
+        if session_id:
+            try:
+                messages = await self._bcs.get_session_messages(session_id, limit=20)
+                cursor_value = (
+                    cursor_value,
+                    _last_message_cursor(messages),
+                )
+            except Exception as exc:  # noqa: BLE001 - heartbeat read is optional
+                message_error = f"{type(exc).__name__}: {exc}"[:500]
+        cursor = _join_cursors(cursor_value)
+        return self._active_result(
+            source="bcs.group",
+            status=group_status or session_status or "active",
+            cursor=cursor,
+            previous_cursor=previous_cursor,
+            detail={
+                "group_id": group_id,
+                "run_id": run_id,
+                "session_id": session_id,
+                "run_error": run_error,
+                "message_probe_error": message_error,
+            },
+        )

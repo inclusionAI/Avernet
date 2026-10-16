@@ -24,6 +24,9 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.task.domain.models import AcceptanceResult, AcceptanceVerdict
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
+from agentclaw.community.core.task.task_harness.runtime_probe import (
+    RuntimeProbeResult,
+)
 
 
 def _task_info(task_id: str = "t1") -> TaskInfo:
@@ -87,6 +90,23 @@ class Recorder:
         self.patches.append(patch)
 
 
+class _ScriptedProbe:
+    """Return a queue of internal probe observations."""
+
+    def __init__(self, *observations: RuntimeProbeResult):
+        self.observations = list(observations)
+        self.calls = 0
+
+    async def probe(self, node, previous_cursor=None):
+        index = min(self.calls, len(self.observations) - 1)
+        self.calls += 1
+        return self.observations[index]
+
+
+def _runtime_result(state: str, *, progressed: bool = False, **kwargs):
+    return RuntimeProbeResult(state=state, progressed=progressed, **kwargs)
+
+
 class TestHarnessOnlyPollsExecutionLeaves:
     def test_relay_root_is_not_reset(self, svc, graph):
         graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
@@ -121,6 +141,115 @@ class TestHarnessOnlyPollsExecutionLeaves:
         assert resets == []
         assert svc._get_node(graph, "c1").status == Status.RUNNING
         assert rec.patches == []
+
+    def test_relay_active_with_progress_is_not_reset(self, svc, graph):
+        graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+        _dispatch_running(svc, graph, "c1")
+        probe = _ScriptedProbe(_runtime_result("active", progressed=True))
+        clock = _Clock(0.0)
+        rec = Recorder()
+        h = TaskHarness(
+            svc, rec, clock=clock, default_sla_timeout=1,
+            runtime_probe=probe, runtime_probe_threshold=1,
+        )
+        h.register("t1")
+        h._poll_once()
+        clock.advance(10.0)
+
+        assert h._poll_once() == []
+        assert svc._get_node(graph, "c1").status == Status.RUNNING
+        assert probe.calls == 1
+        assert rec.patches == []
+
+    def test_relay_runtime_failure_is_reset(self, svc, graph):
+        graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+        _dispatch_running(svc, graph, "c1")
+        probe = _ScriptedProbe(_runtime_result("terminal_failed"))
+        clock = _Clock(0.0)
+        rec = Recorder()
+        h = TaskHarness(
+            svc, rec, clock=clock, default_sla_timeout=1,
+            runtime_probe=probe, runtime_probe_threshold=1,
+        )
+        h.register("t1")
+        h._poll_once()
+        clock.advance(10.0)
+        resets = h._poll_once()
+
+        assert len(resets) == 1
+        assert resets[0].exec_error == "runtime_failed"
+        assert rec.patches[0].exec_error == "runtime_failed"
+
+    def test_relay_unknown_requires_consecutive_failures(self, svc, graph):
+        graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+        _dispatch_running(svc, graph, "c1")
+        probe = _ScriptedProbe(_runtime_result("unknown"))
+        clock = _Clock(0.0)
+        rec = Recorder()
+        h = TaskHarness(
+            svc, rec, clock=clock, default_sla_timeout=1,
+            runtime_probe=probe, runtime_probe_threshold=1,
+            runtime_retry_threshold=3,
+        )
+        h.register("t1")
+        h._poll_once()
+        clock.advance(10.0)
+        assert h._poll_once() == []
+        clock.advance(10.0)
+        assert h._poll_once() == []
+        clock.advance(10.0)
+        resets = h._poll_once()
+
+        assert len(resets) == 1
+        assert resets[0].exec_error == "runtime_unresponsive"
+
+    def test_relay_no_progress_requires_sla_and_consecutive_observations(
+        self, svc, graph
+    ):
+        graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+        _dispatch_running(svc, graph, "c1")
+        probe = _ScriptedProbe(_runtime_result("active"))
+        clock = _Clock(0.0)
+        rec = Recorder()
+        h = TaskHarness(
+            svc, rec, clock=clock, default_sla_timeout=30,
+            runtime_probe=probe, runtime_probe_threshold=1,
+            runtime_retry_threshold=3,
+        )
+        h.register("t1")
+        h._poll_once()
+        for _ in range(3):
+            clock.advance(10.0)
+            assert h._poll_once() == []
+
+        clock.advance(6.0)
+        resets = h._poll_once()
+        assert len(resets) == 1
+        assert resets[0].exec_error == "runtime_no_progress"
+
+    def test_relay_terminal_success_unreported_needs_sla_and_three_probes(
+        self, svc, graph
+    ):
+        graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+        _dispatch_running(svc, graph, "c1")
+        probe = _ScriptedProbe(_runtime_result("terminal_success"))
+        clock = _Clock(0.0)
+        rec = Recorder()
+        h = TaskHarness(
+            svc, rec, clock=clock, default_sla_timeout=30,
+            runtime_probe=probe, runtime_probe_threshold=1,
+            runtime_retry_threshold=3,
+        )
+        h.register("t1")
+        h._poll_once()
+        for _ in range(3):
+            clock.advance(10.0)
+            assert h._poll_once() == []
+
+        clock.advance(6.0)
+        resets = h._poll_once()
+        assert len(resets) == 1
+        assert resets[0].exec_error == "terminal_success_unreported"
 
     def test_running_parent_with_children_is_not_reset(self, svc, graph):
         svc.add_task_nodes([_child("c1")], parent_node_id="t1")

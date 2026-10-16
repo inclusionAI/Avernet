@@ -24,6 +24,46 @@ from agentclaw.community.core.task.task_runner.client.protocols import (
 
 logger = logging.getLogger("task.catalog.search")
 
+# Runtime state vocabulary comes from the existing search/discovery contracts:
+# BCSFuse/runtime_state uses online|offline, while the Backend Bot lifecycle
+# uses ACTIVE/PENDING/OFFLINE/RELEASING/FAILED. The catalog's ``status=online``
+# filter governs publication state; these two explicit runtime facts govern
+# whether the Bot is currently addressable.
+_DISPATCHABLE_RUNTIME_STATES = {"online"}
+# ``ac_bots.status`` uses the BotService lifecycle vocabulary
+# PENDING/ACTIVE/OFFLINE/RELEASING/FAILED; only ACTIVE is dispatchable.
+_DISPATCHABLE_LIFECYCLE_STATUSES = {"active"}
+
+
+def _normalize_state(value: Any) -> str:
+    return str(value if value is not None else "").strip().lower()
+
+
+def _runtime_ready(item: dict[str, Any]) -> bool:
+    """Post-filter catalog-online candidates that are currently undispatchable.
+
+    Only the existing authoritative runtime fields are interpreted:
+    ``is_online`` from BCS catalog metadata, ``runtime_state`` from the legacy
+    BCSFuse/Discovery contract, and Backend Bot lifecycle ``status``. Missing
+    fields stay permissive so catalog variants do not cause accidental
+    over-filtering; a present field must explicitly say the Bot is online/active.
+    """
+    if item.get("is_online") is False:
+        return False
+
+    runtime_state = item.get("runtime_state")
+    if runtime_state not in (None, "") and _normalize_state(
+        runtime_state
+    ) not in _DISPATCHABLE_RUNTIME_STATES:
+        return False
+
+    status = item.get("status")
+    if status not in (None, "") and _normalize_state(
+        status
+    ) not in _DISPATCHABLE_LIFECYCLE_STATUSES:
+        return False
+    return True
+
 # 派发候选预查可见性判据:锁 ``visibility=public``(bot↔bot 协作走 agent 域,不用人类
 # user_visibility);``user_visibility`` 三值全匹配以中和 BCS None/Human 分支对该字段的默认
 # {public,protected}(见 bcs-http search_bots viewer_kind / bcs-bot-store search_candidates)。
@@ -50,7 +90,9 @@ class CatalogKeywordBotDiscover:
 
     - 关键词为空 → 返空(对齐 catalog 空关键词行为);
     - 无语义 score → 合成 ``recommend.score``(命中次序降权),保 stable 排序供策略排序;
-    - ``filters``(runtime_state 等) 本类忽略(catalog 无 runtime 在线态维度);catalog 视野用
+    - ``filters`` 的关键字意图由本地 runtime post-filter 保护:只解释现有契约中的
+      ``is_online``/``runtime_state``/Bot 生命周期 ``status`` 三类权威字段,且只有
+      online/ACTIVE 才可派发;字段缺失时不误伤;catalog 视野用
       ``_DISPATCH_CATALOG_FILTERS`` 锁 ``visibility=public`` 且中和 ``user_visibility``
       (BCS None/Human 分支默认 {public,protected}),只取公开可认领 bot,不含 protected;
     - 身份参数:catalog ``caller`` 在 ``search_public_bot_metadata`` 顶部即 ``del caller``(废弃),
@@ -131,17 +173,35 @@ class CatalogKeywordBotDiscover:
                 exc_info=True,
             )
             return []
-        items = res.get("items") or [] if isinstance(res, dict) else []
+        raw_items = res.get("items") or [] if isinstance(res, dict) else []
+        valid_items = [item for item in raw_items if isinstance(item, dict)]
+        items = [item for item in valid_items if _runtime_ready(item)]
+        filtered_count = len(valid_items) - len(items)
+        if filtered_count:
+            logger.info(
+                "catalog_search_offline_filtered request_id=%s search=%r "
+                "raw_count=%d filtered_count=%d candidate_ids=%s",
+                request_id,
+                (search or "")[:500],
+                len(valid_items),
+                filtered_count,
+                [
+                    item.get("bot_uuid") or item.get("bot_id")
+                    for item in items
+                ],
+            )
         logger.debug(
-            "catalog_search_complete request_id=%s search=%r raw_total=%s item_count=%d candidate_ids=%s",
+            "catalog_search_complete request_id=%s search=%r raw_total=%s "
+            "raw_count=%d filtered_count=%d item_count=%d candidate_ids=%s",
             request_id,
             (search or "")[:500],
             res.get("total") if isinstance(res, dict) else None,
+            len(valid_items),
+            filtered_count,
             len(items),
             [
                 item.get("bot_uuid") or item.get("bot_id")
                 for item in items
-                if isinstance(item, dict)
             ],
         )
         return items

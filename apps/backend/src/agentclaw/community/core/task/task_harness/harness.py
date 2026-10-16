@@ -17,6 +17,7 @@ from dataclasses import replace
 from typing import Any, Callable
 
 from agentclaw.community.core.task.domain.models import (
+    TaskNode,
     AcceptanceResult,
     AcceptanceVerdict,
     Status,
@@ -25,6 +26,10 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     TaskNodeQueryCriteria,
     effective_run_mode,
+)
+from agentclaw.community.core.task.task_harness.runtime_probe import (
+    RuntimeProbeResult,
+    TaskRuntimeLivenessProbe,
 )
 
 logger = logging.getLogger("task.harness")
@@ -59,6 +64,9 @@ class TaskHarness:
         default_pending_timeout: float = _DEFAULT_PENDING_TIMEOUT,
         interval: float = _DEFAULT_INTERVAL,
         wall_clock_ms: Callable[[], int] | None = None,
+        runtime_probe: TaskRuntimeLivenessProbe | None = None,
+        runtime_probe_threshold: float = 120.0,
+        runtime_retry_threshold: int = 3,
     ) -> None:
         """graph: TaskGraphService(只读查询 RUNNING + execution_config);on_harness_fn: 编排核复位入口。
         sla_timeout:RUNNING 卡死 backstop(>poller execute SLA);pending_timeout:PENDING 派发异常重搜推。"""
@@ -75,6 +83,10 @@ class TaskHarness:
         self._dispatched_at: dict[
             tuple[str, str], float
         ] = {}  # (task_id,node_id) -> 首见 RUNNING 时钟
+        self._runtime_probe = runtime_probe
+        self._runtime_probe_threshold = runtime_probe_threshold
+        self._runtime_retry_threshold = runtime_retry_threshold
+        self._runtime_seen: dict[tuple[str, str], dict[str, Any]] = {}
         self._pending_seen_at: dict[
             tuple[str, str], float
         ] = {}  # (task_id,node_id) -> 首见 PENDING(未派发)时钟
@@ -144,6 +156,128 @@ class TaskHarness:
         """Return True for a Relay-mode task graph."""
         return bool(graph.is_relay)
 
+    async def _relay_runtime_harness(
+        self,
+        task_id: str,
+        node: TaskNode,
+        *,
+        elapsed: float,
+        sla: float,
+    ) -> TaskNodePatch | None:
+        """Turn one Relay runtime observation into a harness decision.
+
+        Pure elapsed time is only a duty-cycle trigger here, never failure
+        evidence. A node is retried only after authoritative terminal failure,
+        repeated unknown/unresponsive probes, or repeated no-progress
+        observations after the execution SLA.
+        """
+        if self._runtime_probe is None:
+            return None
+        key = (task_id, node.node_id)
+        current = self._runtime_seen.setdefault(
+            key,
+            {
+                "cursor": None,
+                "unknown": 0,
+                "no_progress": 0,
+                "success_unreported": 0,
+            },
+        )
+        try:
+            result = await self._runtime_probe.probe(
+                node, previous_cursor=current.get("cursor")
+            )
+        except Exception as exc:  # noqa: BLE001 - probing must never break harness
+            logger.warning(
+                "[task][harness] runtime probe failed task=%s node=%s error=%s",
+                task_id, node.node_id, str(exc)[:500], exc_info=True,
+            )
+            result = RuntimeProbeResult(
+                state="unknown", error=f"{type(exc).__name__}: {exc}"[:500]
+            )
+
+        current["cursor"] = result.heartbeat_cursor
+        detail = {
+            "runtime_state": result.state,
+            "runtime_status": result.status,
+            "runtime_source": result.source,
+            "runtime_error": result.error,
+        }
+        reason: str | None = None
+
+        if result.state == "terminal_failed":
+            reason = "runtime_failed"
+        elif result.state == "terminal_success":
+            current["success_unreported"] += 1
+            current["unknown"] = 0
+            current["no_progress"] = 0
+            if (
+                elapsed > sla
+                and current["success_unreported"] >= self._runtime_retry_threshold
+            ):
+                reason = "terminal_success_unreported"
+        elif result.state == "active":
+            current["success_unreported"] = 0
+            if result.progressed:
+                current["unknown"] = 0
+                current["no_progress"] = 0
+            else:
+                current["no_progress"] += 1
+                if (
+                    elapsed > sla
+                    and current["no_progress"] >= self._runtime_retry_threshold
+                ):
+                    reason = "runtime_no_progress"
+            current["unknown"] = 0 if result.progressed else current["unknown"]
+        elif result.state == "unknown":
+            current["unknown"] += 1
+            current["no_progress"] = 0
+            if current["unknown"] >= self._runtime_retry_threshold:
+                reason = "runtime_unresponsive"
+
+        if reason is None:
+            logger.info(
+                "[task][harness] runtime probe observed task=%s node=%s state=%s "
+                "status=%s source=%s progressed=%s elapsed=%.0fs",
+                task_id, node.node_id, result.state, result.status, result.source,
+                result.progressed, elapsed,
+            )
+            return None
+
+        logger.warning(
+            "[task][harness] runtime harness retry task=%s node=%s reason=%s state=%s "
+            "status=%s source=%s elapsed=%.0fs sla=%.0fs",
+            task_id, node.node_id, reason, result.state, result.status,
+            result.source, elapsed, sla,
+        )
+        return TaskNodePatch(
+            task_id=task_id,
+            node_id=node.node_id,
+            exec_error=reason,
+            failure_reason=result.error,
+            extend_props_patch={
+                "harness_probe": {
+                    **detail,
+                    "reason": reason,
+                    "elapsed_seconds": elapsed,
+                    "sla_seconds": sla,
+                    "unknown_count": current.get("unknown", 0),
+                    "no_progress_count": current.get("no_progress", 0),
+                    "success_unreported_count": current.get(
+                        "success_unreported", 0
+                    ),
+                }
+            },
+        )
+
+    def _await_runtime_harness(
+        self, task_id: str, node: TaskNode, *, elapsed: float, sla: float
+    ) -> TaskNodePatch | None:
+        coroutine = self._relay_runtime_harness(
+            task_id, node, elapsed=elapsed, sla=sla
+        )
+        return asyncio.run(coroutine)
+
     def _pending_timeout(self, task_id: str) -> float:
         """读 PENDING_TIMEOUT(派发异常/未派发→重搜推;优先 execution_config,缺省 default)。"""
         try:
@@ -183,7 +317,6 @@ class TaskHarness:
                 for n in nodes
                 if effective_run_mode(n) in _EXEC_MODES
                 and not self._is_relay_root(task_graph, n)
-                and not self._is_relay_mode(task_graph)
             ]
             now = self._clock()
             for n in nodes:
@@ -193,6 +326,16 @@ class TaskHarness:
                 t0 = self._dispatched_at.get(key)
                 if t0 is None:
                     self._dispatched_at[key] = now  # 首见:记时,本轮不判
+                    continue
+                if task_graph.is_relay:
+                    elapsed = now - t0
+                    if elapsed < self._runtime_probe_threshold:
+                        continue
+                    runtime_patch = self._await_runtime_harness(
+                        task_id, n, elapsed=elapsed, sla=sla
+                    )
+                    if runtime_patch is not None:
+                        resets.append(runtime_patch)
                     continue
                 if now - t0 > sla:
                     if effective_run_mode(n) == "bbs" and not task_graph.is_relay:
@@ -236,8 +379,12 @@ class TaskHarness:
             self._dispatched_at = {
                 k: v for k, v in self._dispatched_at.items() if k in seen
             }
+            self._runtime_seen = {
+                k: v for k, v in self._runtime_seen.items() if k in seen
+            }
             for patch in resets:
                 self._dispatched_at.pop((patch.task_id, patch.node_id), None)
+                self._runtime_seen.pop((patch.task_id, patch.node_id), None)
         # Scan②:扫描 status=FAILED(执行层失败:terminal_invalid/exec 报错等)真执行叶子 → harness
         # 重新派发执行重试。**验收不过(verdict FAILED)已由 on_report 记录为节点 DONE,不在此扫**——
         # 故此处 FAILED 仅执行层失败,与验收 gap(DONE,不重派)语义不同。FAILED 不走 SLA 计时,
