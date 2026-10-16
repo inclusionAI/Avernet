@@ -358,3 +358,47 @@ async fn disabling_queue_does_not_bypass_an_existing_result_lane() {
     assert!(delivery.frames().await.is_empty());
     assert_eq!(messages.get_current_seq("group-1:result").await.unwrap(), 1);
 }
+
+#[cfg(feature = "prometheus-metrics")]
+#[tokio::test]
+async fn instrumented_result_publication_preserves_queue_and_legacy_behavior() {
+    for queued in [false, true] {
+        let (_, messages, managed, delivery, flow) = publication_fixture(queued).await;
+        let instrumented = Arc::new(crate::metrics::InstrumentedMessageFlowService::new(
+            flow, Arc::from("test"),
+        ));
+        let publisher = MessageFlowStateMachineResultPublisher::new(instrumented);
+        publisher.publish_state_machine_result(publication_command()).await.unwrap();
+        let history = messages.run_chat_segments("group-1:result", "bot-observer", "one-shot-result")
+            .await.unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].content, serde_json::json!("状态机最终结果"));
+        if queued {
+            assert!(managed.snapshot(None).await.unwrap().iter().any(|row|
+                row.target_bot_id == "bot-driver" && row.state.kind == bcs_service_api::DeliveryType::Send));
+            assert!(delivery.frames().await.is_empty());
+        } else {
+            assert!(delivery.targets().await.iter().any(|target| target.bot_id() == "bot-driver"));
+        }
+    }
+}
+
+#[cfg(feature = "prometheus-metrics")]
+#[tokio::test]
+async fn instrumented_result_publication_propagates_inner_conflicts_and_delivery_errors() {
+    for queued in [false, true] {
+        let (_, _, _, delivery, flow) = publication_fixture(queued).await;
+        let instrumented = crate::metrics::InstrumentedMessageFlowService::new(flow, Arc::from("test"));
+        if queued {
+            instrumented.publish_state_machine_result(publication_command()).await.unwrap();
+            let mut changed = publication_command();
+            changed.content = "conflicting result".into();
+            assert!(matches!(instrumented.publish_state_machine_result(changed).await,
+                Err(bcs_service_api::ServiceError::Conflict(_))));
+        } else {
+            delivery.not_delivered_for("bot-driver").await;
+            let error = instrumented.publish_state_machine_result(publication_command()).await.unwrap_err();
+            assert!(error.to_string().contains("legacy delivery was not accepted"));
+        }
+    }
+}

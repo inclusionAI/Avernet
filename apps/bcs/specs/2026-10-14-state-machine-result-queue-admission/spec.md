@@ -302,7 +302,7 @@ route → targets
 - 修复后：`cargo test --manifest-path apps/bcs/Cargo.toml -p bcs --lib state_machine_result_tests --no-default-features`：16 项通过。包含 queue on/off、队列存在但目标不受管、manager/driver 路由、原始行形状、长 Run ID、重复/冲突、孤儿行、容量拒绝、下行错误、混合目标、lane drain、字符串 Inject 上下文和消息事件。
 - `cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-message-flow -p bcs-message-store -p bcs-service-api`：62 个测试套件，共 896 项通过。覆盖既有 Group/System/Task/Direct A2A 与 Memory/SQLite repository conformance；新字符串 admission 形状也进入共享仓储契约测试。
 - 状态机相关测试首次并行运行时，一项日志捕获计数断言失败（期望 4 条、得到 3 条）；单独复跑通过。`cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-collaboration-runtime --test runtime_progression -- --test-threads=1`：258 项全部通过。未改动该日志测试或 runtime 实现。
-- `git diff --check` 通过。新增源文件及其他修改源文件均小于 1,000 行；既有 bootstrap `server.rs` 从 7,053 行降至 6,993 行，未扩大其历史大文件规模。
+- `git diff --check` 通过。新增源文件均小于 1,000 行；既有 bootstrap `server.rs` 从 7,053 行降至 6,993 行，监控装饰器拆出后 `metrics.rs` 从 2,130 行降至 1,949 行。未扩大历史大文件规模。
 
 架构门禁与未完成验证：
 
@@ -310,3 +310,22 @@ route → targets
 - 从 HEAD 导出的未修改源码重跑导入边界检查，按文件/规则归一化的 51 条报告与本次工作区完全一致，无新增导入边界报告。未修改或放宽任何门禁。
 - R25 后续通过 `cargo test --workspace --no-fail-fast -- --list` 编译整个 workspace，导致本机磁盘不足；该步骤及架构 runner 已中止，并清理本次生成的对象文件缓存。之后重新完成上述发布专项及相关模块测试。完整架构门禁不能记为通过。
 - 未执行完整 workspace 测试、统一 Singlebox E2E/覆盖率、真实 MySQL 集成测试或线上复现；本次没有 schema/migration 变更，也没有修复既有 Published 孤儿数据。
+
+## 14. 评审修复：监控装饰器必须转发新入口（2026-10-16）
+
+评审指出 `InstrumentedMessageFlowService` 未覆盖新增的 application 方法，
+启用 Prometheus metrics 时会落入默认的未配置错误。bootstrap 的装配路径确实
+会注入该装饰器，因此这是实际发布路径缺陷。
+
+- 先增加启用 metrics 的真实 publisher 回归：队列开/关发布、内容冲突、legacy
+  拒绝均经过装饰器。修复前两个新测试失败，复现未配置错误。
+- 装饰器显式转发原 command 及 inner 的返回结果；不新增指标标签或修改发布语义。
+- 将该装饰器按职责移至 `message_flow_metrics.rs`，保留原 public export，
+  避免继续扩张已有的超限 metrics 文件。
+- 默认特性下 18 项发布测试、原有 metrics wrapper 集成测试 1 项、
+  metrics 相关单测 16 项全部通过。发布测试加 `--no-default-features` 的命令也
+  通过 18 项，但自引用的 dev-dependency 会统一启用默认 feature，不能将其
+  作为 metrics 未编译的证明；`cargo check --manifest-path apps/bcs/Cargo.toml -p bcs --lib --no-default-features` 另行编译检查通过。
+- 初始 head 的 Intel macOS bridge job 失败于进程重启次数断言；bridge-core
+  仅依赖未修改的 bcs-protocol，不依赖本次改动的 service-api/message-flow。
+  用户明确要求 bridge 另行处理，本 PR 不扩展该问题的修复范围，也不将失败宣称为通过。

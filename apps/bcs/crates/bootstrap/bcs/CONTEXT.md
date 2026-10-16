@@ -2,6 +2,12 @@
 
 ## Provides
 
+The Prometheus message-flow decorator transparently forwards one-shot result
+publication, including its original command and errors. Enabling metrics does
+not select the application's unconfigured default or change Group queue/legacy
+acceptance. Its implementation is isolated in message_flow_metrics.rs and keeps
+the existing metrics::InstrumentedMessageFlowService export.
+
 - Composition of the internal Bot self facade with the shared registry Core and
   deployment-owned `AgentIdentityFactoryRegistration` verifier. Public builds
   without a registered verifier fail closed; multiple verifiers fail startup.
