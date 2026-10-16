@@ -19,6 +19,9 @@ from typing import Any
 from agentclaw.community.di.task_dispatch_config import (
     TaskDispatchConfig as TaskDispatchConfig,
 )
+from agentclaw.community.di.acli_market_config import (
+    AcliMarketConfig as AcliMarketConfig,
+)
 from agentclaw.community.di.openapi_user_id_bypass_config import (
     OpenApiUserIdBypassConfig as OpenApiUserIdBypassConfig,
 )
@@ -582,18 +585,6 @@ class AixConfig:
     """
 
     preview_url: str = ""
-
-
-@dataclass(frozen=True)
-class AcliMarketConfig:
-    """The acli CLI market's search API, called from the backend.
-
-    ``search_url`` is the full URL of the market's search endpoint; it comes
-    from the deployment overlay and is empty by default, which turns
-    ``GET /openapi/v1/bots/market/clis`` into a "not configured" refusal.
-    """
-
-    search_url: str = ""
 
 
 @dataclass(frozen=True)
