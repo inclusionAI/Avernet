@@ -31,7 +31,7 @@ export function SystemMessageItem({ message }: { message: ChatMessage }) {
               )}
             </p>
           </TooltipTrigger>
-          <TooltipContent className="max-w-[min(32rem,calc(100vw-2rem))] whitespace-pre-wrap break-words border-foreground bg-foreground text-background">
+          <TooltipContent className="max-w-[min(32rem,calc(100vw-2rem))] whitespace-pre-wrap break-words border-[var(--color-system-message-tooltip)] bg-[var(--color-system-message-tooltip)] text-[var(--color-system-message-tooltip-foreground)]">
             {message.content}
           </TooltipContent>
         </Tooltip>
