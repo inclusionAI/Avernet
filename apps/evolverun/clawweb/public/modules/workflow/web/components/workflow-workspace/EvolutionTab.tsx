@@ -20,6 +20,7 @@ import IssueRepairPreview, { IssueRepairPreviewLoading } from './repair-batch/Is
 import RepairSelectionBar from './repair-batch/RepairSelectionBar'
 import DetailDrawer from './DetailDrawer'
 import RepairTaskDialog from './repair-batch/RepairTaskDialog'
+import RepairTaskEntry from './repair-batch/RepairTaskEntry'
 import { repairActionFailure } from '../../api/repair-action-error'
 import RepairSelectionWorkspace from './repair-batch/RepairSelectionWorkspace'
 import { exclusion, itemTitle, phases, primary, RepairDialog } from './repair-batch/repair-view'
@@ -136,6 +137,9 @@ function DiagnosisPanel({
   const [draftNeedsCheck, setDraftNeedsCheck] = useState(false)
   const [repairNotice, setRepairNotice] = useState('')
   const [selectedTaskId, setSelectedTaskId] = useState(initialRepairView.selectedTaskId)
+  const returnScroll = useRef(0)
+  const openTask = (id: string) => { returnScroll.current = window.scrollY; setSelectedTaskId(id) }
+  const closeTask = () => { setSelectedTaskId(''); requestAnimationFrame(() => window.scrollTo?.(0, returnScroll.current)) }
   const [disposition, setDisposition] = useState<{ item: RepairInboxItem; action: 'no_action' | 'restore' } | null>(null)
   const [dispositionReason, setDispositionReason] = useState('')
   const [dispositionUntil, setDispositionUntil] = useState('')
@@ -147,9 +151,10 @@ function DiagnosisPanel({
   const requestSequence = useRef(0)
   const detailRequests = useRef(new Set<string>())
   const detailEpoch = useRef(0)
-  const { data, isLoading, isError, refetch } = useIssueGroups(workflowId, { page: repairPage, pageSize: repairPageSize, sort, ...(severity !== 'all' ? { severity } : {}),
+  const { data, isLoading, isError, isFetching, isPlaceholderData, refetch } = useIssueGroups(workflowId, { page: repairPage, pageSize: repairPageSize, sort, ...(severity !== 'all' ? { severity } : {}),
     ...(nodeFilter !== 'all' ? { nodeId: nodeFilter } : {}), ...(modeFilter !== 'all' ? { failureMode: modeFilter } : {}) })
   const diagnoses = (data?.groups ?? []).flatMap(groupDiagnoses)
+  const updatingIssues = !!isFetching || !!isPlaceholderData
   const previewSignatures = JSON.stringify(data?.groups.map(group => group.signature) ?? [])
   const previewSourceVersion = JSON.stringify(data?.groups.map(group => group.inputDigest) ?? [])
   const queryClient = useQueryClient()
@@ -161,7 +166,7 @@ function DiagnosisPanel({
     staleTime: 30_000, gcTime: 300_000, retry: false, refetchInterval: 60_000,
   })
   const repairData = accessReady && !repairQuery.isError ? repairQuery.data ?? null : null
-  const repairLoading = repairQuery.isPending || repairQuery.isFetching || !accessReady
+  const repairLoading = repairQuery.isPending || repairQuery.isFetching || !accessReady || updatingIssues
   const repairError = repairQuery.error ? repairReadError(repairQuery.error) : ''
 
   const previousRepairScope = useRef({ queryClient, workflowId, includeHistorical, canEdit, repairRefresh })
@@ -265,7 +270,7 @@ function DiagnosisPanel({
   const repairBackedSignatureKeys = new Set(repairData?.repairSignatureKeys ?? [])
   const filtered = enriched
   const issuePage = data?.page ?? { page: 1, pageSize: repairPageSize, total: enriched.length, totalPages: 1 }
-  const activeRepairTask = repairData?.tasks.find(task => ['drafting', 'review', 'blocked', 'publishing', 'failed'].includes(task.phase))
+  const activeRepairTask = [...(repairData?.tasks ?? [])].sort((a, b) => b.updatedAtMs - a.updatedAtMs).find(task => ['drafting', 'review', 'blocked', 'publishing', 'failed'].includes(task.phase))
   const selectedItems = selectedRepairIds.flatMap(id => selectionItems[id] ? [selectionItems[id]] : [])
   const selectedIssueCount = new Set(selectedItems.map(item => item.context?.signature ?? item.groupKey)).size
   const conflicts = selectionConflicts(selectedItems)
@@ -468,7 +473,7 @@ function DiagnosisPanel({
       </RepairDialog>
 
   if (selectedTaskId) return <RepairTaskDialog workflowId={workflowId} taskId={selectedTaskId} includeHistorical={includeHistorical}
-    canEdit={canEdit && repairData?.canEdit === true} onClose={() => setSelectedTaskId('')} onChanged={() => setRepairRefresh(value => value + 1)} />
+    canEdit={canEdit && repairData?.canEdit === true} onClose={closeTask} onChanged={() => setRepairRefresh(value => value + 1)} />
   if (draftOpen) return <>
     <RepairSelectionWorkspace workflowId={workflowId} includeHistorical={includeHistorical} refreshToken={repairRefresh} selected={selectedRepairIds}
       selectedItems={selectedItems} instructions={instructions} busy={repairBusy} reason={generationReason} error={repairActionError}
@@ -490,7 +495,11 @@ function DiagnosisPanel({
         </div>
       </div>
 
+      <RepairTaskEntry tasks={repairData?.tasks ?? []} issueCount={data?.page?.total} loading={repairLoading}
+        onOpen={openTask} />
+
       {isLoading && <p role="status" className="rounded-lg bg-slate-50 p-4 text-xs text-slate-500">正在加载问题摘要；修复建议和任务独立加载。</p>}
+      {!isLoading && updatingIssues && <p role="status" className="rounded-lg bg-muted p-3 text-xs text-muted-foreground">正在更新筛选与排序，暂保留上一结果；建议区域保留加载占位，期间不能新增选择。</p>}
       {isError && <div role="alert" className="rounded-lg bg-red-50 p-4 text-xs text-red-600">问题分组加载失败，不能显示为没有问题。<button type="button" onClick={() => void refetch()} className="ml-2 underline">重试问题</button></div>}
 
       {repairOpen && repairLoading && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">{repairData
@@ -510,7 +519,7 @@ function DiagnosisPanel({
         </div>
       )}
 
-      {data && !isLoading && !isError && <section className="space-y-4">
+      {data && !isLoading && !isError && <section aria-label="问题列表" aria-busy={updatingIssues} className="space-y-4">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
           <h3 className="text-sm font-semibold text-slate-900">问题列表 · 共 {issuePage.total} 个问题</h3>
           <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -592,24 +601,15 @@ function DiagnosisPanel({
         <Pagination page={issuePage.page} pageSize={issuePage.pageSize} total={issuePage.total}
           onChange={(page, pageSize) => { setRepairPage(page); setRepairPageSize(pageSize) }} />
       </section>}
-      {repairData && repairData.tasks.length > 0 && <section aria-label="处理任务" className="rounded-xl border border-slate-200 bg-white p-4">
-        <h3 className="text-sm font-semibold text-slate-900">修复任务</h3>
-        <div className="mt-3 space-y-2">
-          {repairData.tasks.length ? repairData.tasks.map(task => <div key={task.taskId} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs">
-            <span className="break-all font-medium text-slate-700">{task.taskId} · v{task.revision} · {phases[task.phase] ?? task.phase}</span>
-            <span className="text-slate-500">{task.itemCount} 项 · {new Date(task.updatedAtMs).toLocaleString()}</span>
-            <button type="button" className="font-medium text-blue-600 hover:text-blue-800" onClick={() => setSelectedTaskId(task.taskId)}>查看任务</button>
-          </div>) : null}
-        </div>
-      </section>}
       {!selectedSignature && !selectedRepairItemId && !historyOpen && !selectionOpen && !draftOpen && <RepairSelectionBar fixed count={selectedRepairIds.length} issueCount={selectedIssueCount} reason={generationReason}
         onGenerate={openDraft} onView={() => setSelectionOpen(true)}
         onClear={repairBusy ? undefined : () => setSelectedRepairIds([])}
-        onTask={activeRepairTask ? () => setSelectedTaskId(activeRepairTask.taskId) : undefined} />}
+        onTask={activeRepairTask ? () => openTask(activeRepairTask.taskId) : undefined} />}
 
       <button type="button" className="text-sm text-slate-600 hover:text-blue-700 hover:underline"
         onClick={() => { setRepairOpen(true); setHistoryOpen(true) }}>全部建议与历史</button>
       {historyOpen && <RepairDialog title="全部建议与历史" onClose={() => setHistoryOpen(false)}>
+        <p className="mb-3 text-xs text-muted-foreground">全部历史，不受上方问题筛选影响；此视图的分页和筛选单独生效。</p>
         <p className="mb-3 text-xs text-slate-500">用于查找未出现在当前问题页的旧建议；这里的分页仅针对建议。</p>
         <IssueRepairSuggestions key={repairRefresh} workflowId={workflowId} includeHistorical={includeHistorical}
           cacheVersion={repairCacheVersion}
@@ -621,10 +621,10 @@ function DiagnosisPanel({
           onGenerate={() => { if (!generationReason) { setHistoryOpen(false); openDraft() } }} />
       </RepairDialog>}
 
-      {standaloneSuggestions.length > 0 && issuePage.total === 0 && <section aria-label="已有建议跟进" className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+      {!isLoading && !isError && !updatingIssues && data && standaloneSuggestions.length > 0 && issuePage.total === 0 && <section aria-label="已有建议跟进" className="overflow-hidden rounded-xl border border-slate-200 bg-white">
         <div className="border-b border-slate-200 px-4 py-3">
           <h3 className="text-sm font-semibold text-slate-900">已有建议跟进</h3>
-          <p className="mt-1 text-xs leading-5 text-slate-500">保留已有建议与应用记录，不代表整个问题已验证解决。</p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">全部历史，不受上方问题筛选影响。保留已有建议与应用记录，不代表整个问题已验证解决。</p>
         </div>
         <div className="divide-y divide-slate-100">
           {standaloneSuggestions.map(suggestion => {
@@ -654,7 +654,7 @@ function DiagnosisPanel({
         cluster={selectedIssue.cluster}
         repairContent={repairContent}
         repairFooter={<RepairSelectionBar count={selectedRepairIds.length} issueCount={selectedIssueCount} reason={generationReason}
-          onGenerate={openDraft} onTask={activeRepairTask ? () => { closeDetail(); setSelectedTaskId(activeRepairTask.taskId) } : undefined} />}
+          onGenerate={openDraft} onTask={activeRepairTask ? () => { closeDetail(); openTask(activeRepairTask.taskId) } : undefined} />}
         suggestion={selectedIssue.suggestion}
         task={selectedIssue.suggestion ? applyTaskMap[selectedIssue.suggestion.id] : undefined}
         previousTask={selectedIssue.suggestion ? applyTasks.find((task) => task.suggestionId === selectedIssue.suggestion?.id

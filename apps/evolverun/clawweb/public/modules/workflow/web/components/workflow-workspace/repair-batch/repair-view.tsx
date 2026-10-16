@@ -9,6 +9,10 @@ export const states: Record<RepairInboxItem['state'], string> = {
 }
 export const phases: Record<string, string> = { drafting: '生成中', review: '待审阅', blocked: '检查阻塞', publishing: '发布中', published: '已发布', no_change: '无需变更', failed: '失败', cancelled: '已取消' }
 export const itemTitle = (item: RepairInboxItem) => typeof item.proposal?.summary === 'string' ? item.proposal.summary : item.instruction || item.itemId
+export const itemHeading = (item: RepairInboxItem) => {
+  const title = itemTitle(item).replace(/\b(?:pending\s+)?suggestion(?:Id)?[\s:#_-]*\d+\b/gi, '关联建议').split('\n')[0].trim()
+  return title.length > 96 ? title.slice(0, 96) + '…' : title
+}
 export const isLegacyPreview = (item: RepairInboxItem) => !item.sourceAvailable && item.updatedAtMs === 0
 export function exclusion(item: RepairInboxItem, taskId?: string) {
   if (isLegacyPreview(item)) return '历史预览，请在原处理流程查看'

@@ -1,6 +1,15 @@
 // @vitest-environment node
 import { expect, it, vi } from 'vitest';
 import { decideRepairEffect } from '../repair-auto-verification.js';
+
+it('reports actual valid coverage and missing evidence without relaxing the verdict', () => {
+  const rule = { version: 'node-timeout/v1', nodeId: 'n', signature: 'timeout:n', windowDays: 7, minimumSamples: 5 } as const;
+  const rows = Array.from({ length: 6 }, (_, i) => ({ flowId: String(i), deployNumber: 8, completed: true,
+    nodeStatus: 'succeeded', analysisComplete: i < 4, signatures: [] }));
+  expect(decideRepairEffect(rule, 8, rows)).toMatchObject({ result: 'observing', eligibleSamples: 4,
+    sampleSummary: { related: 6, complete: 4, missingAnalysis: 2, unsuccessfulNode: 0 } });
+  expect(decideRepairEffect(rule, 8, [{ ...rows[0], signatures: ['timeout:n'] }])).toMatchObject({ result: 'ineffective', eligibleSamples: 0 });
+});
 const rule = { version: 'node-timeout/v1' as const, nodeId: 'n', signature: 'timeout:n', windowDays: 7, minimumSamples: 5 };
 const sample = { flowId: 'run', deployNumber: 8, completed: true, nodeStatus: 'succeeded', analysisComplete: true, signatures: [] as string[] };
 it('requires an explicit rule, exact version, related completed node, complete analysis and minimum samples', () => {

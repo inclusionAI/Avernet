@@ -246,7 +246,15 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
   const published = deployment?.status === 'succeeded'
   const deploying = detail?.release?.approval?.status === 'approved' || !!deployment
   const navigateRelease = () => document.getElementById(`repair-release-${taskId}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-  return <RepairWorkspace stage={published ? 4 : deploying ? 3 : 2} title={published ? '自动观察新版本效果' : deploying ? '核对同一个发布请求' : '审阅差异与检查报告，确认发布'} subtitle={`${workflowId} · 生成优化草稿 → 审阅并确认发布 → 自动验证`} onBack={() => { if (!busy) onClose() }} onSelect={detail && !deploying ? openSelection : undefined} onReview={() => setMode('detail')}
+  const navigateReview = () => document.getElementById(`repair-review-${taskId}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  const navigateScope = () => document.getElementById(`repair-scope-${taskId}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  const latestPhase = detail?.latestAttempt.phase
+  const title = latestPhase === 'failed' ? (detail?.latestSuccessful ? '最新生成失败，已保留可用候选' : '优化草稿生成失败，先恢复原任务')
+    : latestPhase === 'no_change' ? '本轮无需变更，查看已有候选与效果'
+    : latestPhase === 'drafting' ? '正在生成优化草稿'
+    : latestPhase === 'cancelled' ? '任务已取消，保留历史记录'
+    : published ? '自动观察新版本效果' : deploying ? '核对同一个发布请求' : '审阅差异与检查报告，确认发布'
+  return <RepairWorkspace stage={published ? 4 : deploying ? 3 : ['failed', 'drafting', 'no_change'].includes(latestPhase ?? '') ? 1 : 2} title={title} subtitle={`${workflowId} · 生成优化草稿 → 审阅并确认发布 → 自动验证`} onBack={() => { if (!busy) onClose() }} onSelect={detail ? (published || deploying ? navigateScope : openSelection) : undefined} onReview={navigateReview}
     onDeploy={detail?.capabilities.publication || deploying ? navigateRelease : undefined} onVerify={published ? navigateRelease : undefined} busy={busy}>
     {loading && <p role="status" className="text-xs text-muted-foreground">加载修复任务…</p>}
     {taskError && <p role="alert" className="text-xs text-destructive">{taskError} <button type="button" className={button} disabled={busy} onClick={reload}>重试读取任务</button></p>}

@@ -1,6 +1,7 @@
 import type { RepairInboxItem } from '../../../../server/contracts/repair-workbench'
 import { changeSummary, sourceRunCount } from './RepairItemDetail'
-import { exclusion, itemTitle, states } from './repair-view'
+import { exclusion, itemTitle, itemHeading, states } from './repair-view'
+import RepairProposalChoices from './RepairProposalChoices'
 
 export function IssueRepairPreviewLoading() {
   return <div role="status" aria-label="修复建议加载中" className="mt-4 min-h-32 rounded-lg bg-slate-50 p-3">
@@ -20,6 +21,7 @@ export default function IssueRepairPreview({ items, total, selected, canEdit, li
   if (!total) return <p className="mt-3 text-xs text-slate-500">暂无可供选择的修复建议，仍可查看问题原因与证据。</p>
   return <section aria-label="本问题修复建议" className="mt-4">
     <p className="mb-2 text-xs font-semibold text-slate-600">修复建议 · {total} 条</p>
+    <RepairProposalChoices items={items} total={total} onInspect={onDetail} />
     <div className="divide-y divide-slate-100">{items.map(item => {
       const checked = selected.includes(item.itemId)
       const reason = exclusion(item)
@@ -30,7 +32,7 @@ export default function IssueRepairPreview({ items, total, selected, canEdit, li
           className="mt-1 h-4 w-4 shrink-0 accent-blue-600" />
         <div className="min-w-0 flex-1">
           <button type="button" className="text-left text-sm font-medium leading-6 text-slate-900 hover:text-blue-700"
-            aria-label={`查看建议 ${itemTitle(item)}`} onClick={() => onDetail(item)}>{itemTitle(item)}</button>
+            aria-label={`查看建议 ${itemHeading(item)}`} onClick={() => onDetail(item)}>{itemHeading(item)}</button>
           <p className="mt-0.5 line-clamp-1 text-xs leading-5 text-slate-600">{changeSummary(item)}</p>
           <p className="mt-1 text-xs text-slate-500">{states[item.state]} · {runs === null ? '来源运行数未知' : `依据覆盖 ${runs} 个运行`}{reason && ` · ${reason}`}</p>
         </div>

@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query'
 import type { RepairCandidatesResponse, RepairInboxItem, RepairInboxFilter } from '../../../../server/contracts/repair-workbench'
 import { repairBatches } from '../../../api/repair-batches'
 import { repairReadError } from '../../../api/repair-read-error'
-import { exclusion, itemTitle, states } from './repair-view'
+import { exclusion, itemTitle, itemHeading, states } from './repair-view'
+import RepairProposalChoices from './RepairProposalChoices'
 import { changeSummary, sourceRunCount } from './RepairItemDetail'
 
 /** Compare and select suggestions within one issue; evidence is fetched only on expansion. */
@@ -39,6 +40,9 @@ export default function IssueRepairSuggestions({ workflowId, signature, includeH
       </select>
     </div>
     <p className="text-xs leading-5 text-slate-500">勾选要采用的方案，再生成修复草稿供审阅。可跨问题多选，不会直接应用或部署。</p>
+    {data && <RepairProposalChoices items={data.items} total={data.page.total} onInspect={item => {
+      setExpanded(item.itemId); requestAnimationFrame(() => document.getElementById(`repair-suggestion-${item.itemId}`)?.scrollIntoView({ block: 'start' }))
+    }} />}
     {loading ? <p role="status" className="text-sm text-slate-600">正在加载修复建议…</p>
       : error ? <div role="alert" className="text-sm text-red-700">{error}<button className="ml-2 underline" onClick={() => void query.refetch()}>重试建议</button></div>
       : !data?.items.length ? <p className="text-sm text-slate-600">当前范围没有匹配的修复建议。可调整状态或历史范围，分析依据仍可查看。</p>
@@ -46,13 +50,13 @@ export default function IssueRepairSuggestions({ workflowId, signature, includeH
         const reason = exclusion(item)
         const checked = selected.includes(item.itemId)
         const runs = sourceRunCount(item)
-        return <article key={item.itemId} className={`rounded-lg border p-3 ${checked ? 'border-blue-300 bg-blue-50/30' : 'border-slate-200'}`}>
+        return <article id={`repair-suggestion-${item.itemId}`} key={item.itemId} className={`rounded-lg border p-3 ${checked ? 'border-blue-300 bg-blue-50/30' : 'border-slate-200'}`}>
           <div className="flex items-start gap-3">
             <input type="checkbox" aria-label={`选择 ${itemTitle(item)}`} checked={checked}
               disabled={!canEdit || !data.canEdit || !!reason || !checked && selected.length >= limit}
               onChange={() => onToggle?.(item.itemId)} className="mt-1 h-4 w-4 shrink-0 accent-blue-600" />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold leading-6 text-slate-900">{itemTitle(item)}</p>
+              <p className="text-sm font-semibold leading-6 text-slate-900">{itemHeading(item)}</p>
               <p className="mt-1 text-xs leading-5 text-slate-600">{changeSummary(item)}</p>
               <p className="mt-1 text-xs text-slate-500">{states[item.state]} · {runs === null ? '来源运行数未知' : `依据覆盖 ${runs} 个运行`}</p>
               {reason && <p className="mt-1 text-xs text-amber-700">{reason}</p>}

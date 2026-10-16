@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RepairTaskDetail } from '../../../../../server/contracts/repair-workbench'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const repairApi = vi.hoisted(() => ({
   task: vi.fn(),
@@ -12,6 +13,7 @@ const repairApi = vi.hoisted(() => ({
   cancel: vi.fn(),
   revise: vi.fn(),
   diff: vi.fn(),
+  verification: vi.fn(),
 }))
 vi.mock('../../../../api/repair-batches', () => ({ repairBatches: repairApi }))
 
@@ -76,6 +78,65 @@ it('shows one primary action, durable failed deployment status and Git links ins
 
 beforeEach(() => { Object.values(repairApi).forEach(mock => mock.mockReset()); repairApi.diff.mockResolvedValue({ files: [], truncated: false }) })
 afterEach(() => vi.useRealTimers())
+
+it('shows the selected historical failure and identifies the latest execution separately', async () => {
+  const detail = taskDetail('review', '最新成功候选')
+  detail.latestAttempt.revision = 6
+  const failed = { ...detail.latestAttempt, revision: 5, phase: 'failed', draft: null, checks: null,
+    error: { code: 'AIS_FAILED', message: 'Failed to submit task, Please resubmit!' } } as RepairTaskDetail['latestAttempt']
+  detail.revisions = [detail.latestAttempt, failed]
+  repairApi.task.mockResolvedValue(detail)
+  render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit={false} onClose={() => {}} onChanged={() => {}} />)
+  await userEvent.selectOptions(await screen.findByRole('combobox', { name: '查看修复版本' }), '5')
+  expect(screen.getByText('所选版本 v5：生成失败')).toBeVisible()
+  expect(screen.getByText(/最近 v6 的执行记录/)).toBeVisible()
+  expect(screen.getByText(/AIS 任务执行或提交失败/)).toBeVisible()
+  expect(screen.queryByText('当前查看的是历史候选，请切回最新可用候选。')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '发布此版本' })).not.toBeInTheDocument()
+})
+
+it('makes failure without any successful candidate a recovery state rather than a review target', async () => {
+  const detail = taskDetail('drafting')
+  detail.latestAttempt.phase = 'failed'; detail.latestAttempt.error = { code: 'AIS_FAILED', message: 'Failed to submit task' }
+  repairApi.task.mockResolvedValue(detail)
+  render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit onClose={() => {}} onChanged={() => {}} />)
+  expect(await screen.findByRole('heading', { name: '优化草稿生成失败，先恢复原任务' })).toBeVisible()
+  expect(screen.queryByText('当前查看的是历史候选，请切回最新可用候选。')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '发布此版本' })).not.toBeInTheDocument()
+})
+
+it('explains the latest no-change attempt without calling it historical or asking for publication', async () => {
+  const detail = taskDetail('review', '原候选')
+  const next = { ...detail.latestAttempt, revision: 2, phase: 'no_change', draft: { summary: '已有修改覆盖此建议' } } as RepairTaskDetail['latestAttempt']
+  detail.latestAttempt = next; detail.revisions = [next, detail.latestSuccessful!]
+  repairApi.task.mockResolvedValue(detail)
+  render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit={false} onClose={() => {}} onChanged={() => {}} />)
+  await userEvent.selectOptions(await screen.findByRole('combobox', { name: '查看修复版本' }), '2')
+  expect(screen.getByText('所选版本 v2：无需变更')).toBeVisible()
+  expect(screen.getByRole('heading', { name: '本轮无需重新发布' })).toBeVisible()
+  expect(screen.queryByText('当前查看的是历史候选，请切回最新可用候选。')).not.toBeInTheDocument()
+})
+
+it('lets a read-only user revisit a published scope and candidate without editing or publishing', async () => {
+  const detail = taskDetail('review', '已审阅的候选', ['item-1'])
+  detail.capabilities.publication = true
+  detail.release = { deployments: [{ id: 'deploy-1', revision: 1, status: 'succeeded', receipt: { deployNumber: 160 } }] } as never
+  repairApi.task.mockResolvedValue(detail)
+  const scroll = vi.fn()
+  Element.prototype.scrollIntoView = scroll
+  repairApi.verification.mockResolvedValue({ evidence: null, conclusions: [] })
+  render(<QueryClientProvider client={new QueryClient()}><RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit={false} onClose={() => {}} onChanged={() => {}} /></QueryClientProvider>)
+  await screen.findByText('候选 Pack · v1')
+  await userEvent.click(screen.getByRole('button', { name: '生成优化草稿', exact: true }))
+  expect(screen.getByRole('heading', { name: '本轮冻结范围' })).toBeVisible()
+  expect(screen.queryByRole('button', { name: '确认生成下一版' })).not.toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: '审阅并确认发布', exact: true }))
+  expect(scroll.mock.instances.at(-1)).toBe(document.getElementById('repair-review-FIX-1'))
+  expect(repairApi.candidates).not.toHaveBeenCalled()
+  expect(repairApi.revise).not.toHaveBeenCalled()
+  expect(repairApi.retryDispatch).not.toHaveBeenCalled()
+  expect(screen.queryByRole('button', { name: '发布此版本' })).not.toBeInTheDocument()
+})
 
 describe('RepairTaskDialog', () => {
   it('refreshes a read-only failed task without invoking result recovery mutations', async () => {

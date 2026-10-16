@@ -250,7 +250,8 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       const selectedPage = Math.min(page, totalPages);
       const items = filtered.slice((selectedPage - 1) * pageSize, selectedPage * pageSize);
       const response: Omit<RepairCandidatesResponse, 'canEdit'> = { schemaVersion: 'workflow-repair/v2', workflowId, inputDigest: snapshot.inputDigest, items,
-        tasks: [...heads.values()].map(r => ({ taskId: r.taskId, revision: r.revision, phase: r.phase, updatedAtMs: r.updatedAtMs, itemCount: r.input.items.length })),
+        tasks: [...heads.values()].map(r => ({ taskId: r.taskId, revision: r.revision, phase: r.phase, updatedAtMs: r.updatedAtMs, itemCount: r.input.items.length,
+          title: (r.input.items.map(item => item.proposal?.summary || item.instruction).find(value => typeof value === 'string' && value.trim()) as string | undefined)?.trim().split('\n')[0].slice(0, 72) || `优化 ${r.input.items.length} 项问题` })),
         repairSignatureKeys, facets,
         counts, page: { page: selectedPage, pageSize, total: filtered.length, totalPages },
         includeHistorical, activeLookbackDays: REPAIR_ACTIVE_LOOKBACK_DAYS,

@@ -73,6 +73,12 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
   }
   const title = succeeded ? `已生效 #${deployment.receipt?.deployNumber}，系统自动观察效果`
     : pending ? '发布结果待核对' : deployment?.status === 'failed' ? '发布未完成，候选已保留' : '审阅并确认发布'
+  const selected = detail.revisions.find(row => row.revision === selectedRevision)
+  if (selected && ['failed', 'no_change', 'drafting', 'cancelled'].includes(selected.phase) && !succeeded && !pending) return <section aria-label="候选发布状态" className="rounded-xl border border-input bg-card p-5 text-sm text-muted-foreground">
+    <h3 className="font-semibold text-foreground">{selected.phase === 'failed' ? '所选版本生成失败，尚无可发布候选' : selected.phase === 'no_change' ? '本轮无需重新发布' : selected.phase === 'cancelled' ? '任务已取消' : '正在生成候选，暂不进入发布'}</h3>
+    <p className="mt-2">{selected.phase === 'failed' ? '查看本版本错误和最近任务状态；历史失败版本不会因后续成功而变为成功。' : '查看本版本范围与逐项结果；此入口不执行生成或发布。'}</p>
+    {!!detail.release?.deployments.some(row => row.status === 'succeeded') && <p className="mt-2">已有生效版本的发布与观察记录保留，切换对应候选版本查看。</p>}
+  </section>
   return <section ref={panel} aria-label="审阅部署与效果验证" className="scroll-mt-6 rounded-xl border border-input bg-card p-5">
     <h3 className="text-base font-semibold">{title}</h3>
     <p className="mt-2 text-sm leading-6 text-muted-foreground">{succeeded ? '仅以生效版本、相关节点及可判定样本验证；证据不足时持续观察。'

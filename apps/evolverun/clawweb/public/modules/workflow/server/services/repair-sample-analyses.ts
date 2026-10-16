@@ -2,7 +2,7 @@ import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { validateWorkflowEvolutionAnalysisResult } from '@avernet/clawevolve/server/services/evolution/contracts';
 
 type SampleAnalysis = { analysisComplete: boolean; signatures: string[] };
-type AnalysisRow = { id: number; completed_at_ms: number | null; flow_id: string | null; scope_json: string; result_json: string };
+type AnalysisRow = { id: number; completed_at_ms: number | null; requested_at_ms: number; flow_id: string | null; scope_json: string; result_json: string };
 
 export function sampleAnalysisPredicate(db: IDatabase, ids: string[]) {
   const binds = ids.map(() => '?').join(',');
@@ -34,11 +34,11 @@ export async function fillRepairSampleAnalyses(db: IDatabase, workflowId: string
     const visited = new Set<string>();
     let before: { time: number; id: number } | null = null;
     while (visited.size < batch.size) {
-      const cursor = before ? 'AND (COALESCE(completed_at_ms, 0) < ? OR (COALESCE(completed_at_ms, 0) = ? AND id < ?))' : '';
+      const cursor = before ? 'AND (COALESCE(completed_at_ms, requested_at_ms) < ? OR (COALESCE(completed_at_ms, requested_at_ms) = ? AND id < ?))' : '';
       const rows: AnalysisRow[] = await db.query<AnalysisRow>(
-        `SELECT id, completed_at_ms, flow_id, scope_json, result_json FROM workflow_evolution_analysis_runs
+        `SELECT id, completed_at_ms, requested_at_ms, flow_id, scope_json, result_json FROM workflow_evolution_analysis_runs
          WHERE workflow_id = ? AND status = 'completed' AND scope_type <> 'issue_aggregate' AND ${predicate.sql} ${cursor}
-         ORDER BY COALESCE(completed_at_ms, 0) DESC, id DESC LIMIT 200`,
+         ORDER BY COALESCE(completed_at_ms, requested_at_ms) DESC, id DESC LIMIT 200`,
         [workflowId, ...predicate.params, ...(before ? [before.time, before.time, before.id] : [])]);
       if (!rows.length) break;
       for (const row of rows) {
@@ -62,7 +62,7 @@ export async function fillRepairSampleAnalyses(db: IDatabase, workflowId: string
         }
       }
       const last = rows.at(-1)!;
-      before = { time: Number(last.completed_at_ms ?? 0), id: Number(last.id) };
+      before = { time: Number(last.completed_at_ms ?? last.requested_at_ms), id: Number(last.id) };
       if (rows.length < 200) break;
     }
   }

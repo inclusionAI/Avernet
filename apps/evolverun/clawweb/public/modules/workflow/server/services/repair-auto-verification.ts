@@ -8,7 +8,8 @@ import type { RepairEffectRule, RepairVerificationConclusion } from '../contract
 import { RepairBatchRepository } from '../repositories/repair-batch-repository.js';
 import { RepairReleaseRepository } from '../repositories/repair-release-repository.js';
 export type EffectSample = { flowId: string; deployNumber: number; completed: boolean; nodeStatus: string; analysisComplete: boolean; signatures: string[] };
-export type RepairEffectDecision = { result: 'observing' | 'verified' | 'ineffective'; reason: string; eligibleSamples: number; flowIds: string[]; rule: RepairEffectRule | null; observedDeployNumber?: number };
+export type RepairEffectDecision = { result: 'observing' | 'verified' | 'ineffective'; reason: string; eligibleSamples: number; flowIds: string[]; rule: RepairEffectRule | null; observedDeployNumber?: number;
+  sampleSummary?: { related: number; complete: number; missingAnalysis: number; unsuccessfulNode: number } };
 /** v1 intentionally handles objectively diagnosed node timeouts only. Quality, cost,
  * absent node identity and arbitrary text have no automatic success verifier. */
 export function effectRule(item: RepairItem): RepairEffectRule | null {
@@ -20,11 +21,13 @@ export function effectRule(item: RepairItem): RepairEffectRule | null {
 export function decideRepairEffect(rule: RepairEffectRule | null, deployNumber: number, input: EffectSample[]): RepairEffectDecision {
   const samples = [...new Map(input.filter(row => row.deployNumber === deployNumber && row.completed
     && ['succeeded', 'failed', 'timeout', 'timed_out'].includes(row.nodeStatus)).map(row => [row.flowId, row])).values()];
-  const base = { rule, eligibleSamples: samples.length, flowIds: samples.map(row => row.flowId).sort() };
+  const clean = samples.filter(row => row.nodeStatus === 'succeeded' && row.analysisComplete && (!rule || !row.signatures.includes(rule.signature)));
+  const base = { rule, eligibleSamples: clean.length, flowIds: samples.map(row => row.flowId).sort(),
+    sampleSummary: { related: samples.length, complete: clean.length, missingAnalysis: samples.filter(row => !row.analysisComplete).length,
+      unsuccessfulNode: samples.filter(row => row.nodeStatus !== 'succeeded').length } };
   if (!rule) return { ...base, result: 'observing', reason: '缺少适用于此问题的自动验证规则' };
   const recurring = samples.filter(row => row.signatures.includes(rule.signature));
   if (recurring.length) return { ...base, result: 'ineffective', flowIds: recurring.map(row => row.flowId).sort(), reason: '生效版本的相关节点诊断明确复现原问题' };
-  const clean = samples.filter(row => row.nodeStatus === 'succeeded' && row.analysisComplete);
   if (clean.length < rule.minimumSamples || clean.length !== samples.length) return { ...base, result: 'observing', reason: `相关节点有效且已分析样本 ${clean.length}/${rule.minimumSamples}，继续观察；失败或未分析不视为通过` };
   return { ...base, result: 'verified', reason: `${rule.version}：7天内至少${rule.minimumSamples}次相关节点成功且完整分析未发现原签名；仅证明此超时问题满足规则` };
 }

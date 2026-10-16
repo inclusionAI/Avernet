@@ -112,8 +112,12 @@ export class IssueAggregationRepository {
   private async priorityRuns(workflowId: string, affectedIds: string[]): Promise<IssueRun[]> {
     const runs = new Map<string, IssueRun>();
     const nowMs = Date.now(), sinceMs = nowMs - 14 * 86_400_000;
-    const remember = (row: { flow_id: string; started_at: number }) => runs.set(row.flow_id, { flowId: row.flow_id,
-      startedAtMs: Number(row.started_at) < 1e12 ? Number(row.started_at) * 1000 : Number(row.started_at), nodes: [], analyzed: false });
+    const remember = (row: { flow_id: string; started_at: number }) => {
+      const started = Number(row.started_at);
+      if (!Number.isFinite(started) || started <= 0) return;
+      runs.set(row.flow_id, { flowId: row.flow_id, startedAtMs: started < 1e12 ? started * 1000 : started,
+        nodes: [], analyzed: false, coverage: { whole: null, nodes: {}, legacyNodes: [] } });
+    };
     let after = '';
     for (;;) {
       const rows = await this.db.query<{ flow_id: string; started_at: number }>(
@@ -130,25 +134,60 @@ export class IssueAggregationRepository {
         `SELECT DISTINCT flow_id, node_id FROM node_executions WHERE flow_id IN (${batch.map(() => '?').join(',')})`, batch);
       for (const node of nodes) runs.get(node.flow_id)?.nodes.push(node.node_id);
     }
-    // Runtime statistics only need analyses completed within the same two-week window.
+    // Completed analysis is distinct from sufficient evidence. Select latest
+    // applicable scope by effective time, rather than letting insertion order win.
     for (let afterId = 0; runs.size;) {
-      const analyses = await this.db.query<WorkflowEvolutionAnalysisRow>(`SELECT id, flow_id, scope_json, result_json FROM workflow_evolution_analysis_runs
+      const analyses = await this.db.query<WorkflowEvolutionAnalysisRow>(`SELECT id, flow_id, scope_json, result_json, completed_at_ms, requested_at_ms FROM workflow_evolution_analysis_runs
         WHERE workflow_id = ? AND status = 'completed' AND scope_type <> ?
         AND COALESCE(completed_at_ms, requested_at_ms) >= ? AND COALESCE(completed_at_ms, requested_at_ms) <= ?
         AND id > ? ORDER BY id LIMIT 200`, [workflowId, SCOPE, sinceMs, nowMs, afterId]);
       if (!analyses.length) break;
       for (const row of analyses) {
+        let scope: { flowIds?: string[]; nodeId?: string; nodeIds?: string[] } = {};
+        let validScope = true;
+        try {
+          const parsed = JSON.parse(row.scope_json);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('INVALID_SCOPE');
+          scope = parsed;
+          validScope = (scope.nodeId == null || typeof scope.nodeId === 'string')
+            && [scope.flowIds, scope.nodeIds].every(ids => ids == null || Array.isArray(ids) && ids.every(id => typeof id === 'string'));
+        } catch { validScope = false; }
+        const ids = new Set([...(Array.isArray(scope.flowIds) ? scope.flowIds.filter(id => typeof id === 'string') : []), ...(row.flow_id ? [row.flow_id] : [])]);
+        let completed = false, complete = false;
         try {
           const result = validateWorkflowEvolutionAnalysisResult(JSON.parse(row.result_json!));
-          const scope = JSON.parse(row.scope_json);
-          // Partial node analyses do not establish full coverage of other findings.
-          if (scope.nodeId || scope.nodeIds?.length) continue;
-          for (const id of [...(Array.isArray(scope.flowIds) ? scope.flowIds : []), ...(row.flow_id ? [row.flow_id] : []), ...result.diagnoses.flatMap(d => d.flowIds)]) {
-            const run = runs.get(id); if (run) run.analyzed = result.unknowns.length === 0;
-          }
-        } catch { /* Invalid analyses never count as analyzed/clean evidence. */ }
+          result.diagnoses.forEach(d => d.flowIds.forEach(id => ids.add(id)));
+          completed = validScope; complete = validScope && result.unknowns.length === 0;
+        } catch {
+          // Identity references can invalidate older coverage without trusting
+          // an unsupported result as completed analysis or clean evidence.
+          try {
+            const raw = JSON.parse(row.result_json!);
+            if (Array.isArray(raw?.diagnoses)) for (const diagnosis of raw.diagnoses) {
+              if (Array.isArray(diagnosis?.flowIds)) for (const id of diagnosis.flowIds) if (typeof id === 'string') ids.add(id);
+            }
+          } catch { /* Declared row/scope identities still fence malformed JSON. */ }
+        }
+        const fact = { at: Number(row.completed_at_ms ?? row.requested_at_ms), id: Number(row.id), completed, complete };
+        const nodeIds = [...new Set([...(typeof scope.nodeId === 'string' ? [scope.nodeId] : []),
+          ...(Array.isArray(scope.nodeIds) ? scope.nodeIds.filter(id => typeof id === 'string') : [])])];
+        for (const id of ids) {
+          const coverage = runs.get(id)?.coverage; if (!coverage) continue;
+          const newer = (prior: typeof fact | null | undefined) => !prior || fact.at > prior.at || fact.at === prior.at && fact.id > prior.id;
+          if (nodeIds.length) for (const node of nodeIds) { if (newer(coverage.nodes[node])) coverage.nodes[node] = fact; }
+          else if (newer(coverage.whole)) coverage.whole = fact;
+        }
       }
       afterId = analyses.at(-1)!.id;
+    }
+    // Legacy diagnoses prove an issue was examined at a node, not that the
+    // entire run was analyzed or that missing evidence was healthy.
+    for (const ids = [...runs.keys()]; ids.length;) {
+      const batch = ids.splice(0, 200);
+      const legacy = await this.db.query<{ flow_id: string; node_id: string | null }>(
+        `SELECT DISTINCT flow_id, COALESCE(weak_node_id, node_id) AS node_id FROM workflow_healing_diagnoses
+         WHERE workflow_id = ? AND flow_id IN (${batch.map(() => '?').join(',')})`, [workflowId, ...batch]);
+      for (const row of legacy) if (row.node_id) runs.get(row.flow_id)?.coverage?.legacyNodes.push(row.node_id);
     }
     // Older affected runs only supply last-occurrence/missing-time metadata;
     // unrelated lifetime history is outside both statistics windows.
@@ -174,7 +213,7 @@ export class IssueAggregationRepository {
     const cached = cache.get(workflowId);
     if (cached?.version === before && Date.now() - cached.at < 10_000) return cached.groups;
     cache.delete(workflowId);
-    const groups = await this.groups(workflowId);
+    const groups = await this.groups(workflowId, { tolerateInvalid: true });
     // Read-only acceleration; preparation always rebuilds its authoritative inputs.
     // Do not pin a mixed snapshot if evidence changed while constructing it.
     if (before === await version() && Buffer.byteLength(JSON.stringify(groups), 'utf8') <= 8 * 1024 * 1024) {
