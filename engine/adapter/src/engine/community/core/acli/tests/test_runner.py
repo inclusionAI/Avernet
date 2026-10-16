@@ -63,10 +63,6 @@ elif args[:2] == ["tool", "uninstall"]:
     if mode == "uninstall_fail":
         print(json.dumps({{"success": False, "error": "busy"}})); sys.exit(1)
     print(json.dumps({{"success": True, "name": args[2]}}))
-elif args[0] == "list":
-    print(json.dumps({{"success": True, "total": 12, "hasMore": True, "list": [
-        {{"name": "dataphin", "command": "dataphin", "description": "d", "version": "1.4.14"}},
-        "skip-me"]}}))
 '''
 
 
@@ -199,7 +195,7 @@ async def test_timeout_kills_children_holding_the_pipes(
 
     started = time.monotonic()
     with pytest.raises(AcliError) as caught:
-        await runner.market("x", 1, 10)
+        await runner.uninstall("x")
 
     assert caught.value.code == "timeout"
     assert time.monotonic() - started < 10
@@ -212,7 +208,7 @@ async def test_cancelled_request_kills_acli(fake_acli, install_dir, monkeypatch)
     runner, calls = fake_acli
     monkeypatch.setenv("FAKE_ACLI_MODE", "sleep")
 
-    task = asyncio.create_task(runner.market("x", 1, 10))
+    task = asyncio.create_task(runner.uninstall("x"))
     for _ in range(100):
         if calls():
             break
@@ -326,29 +322,6 @@ async def test_uninstall_failure_raises(fake_acli, install_dir, monkeypatch):
     assert caught.value.message == "busy"
 
 
-async def test_market_pages_and_skips_malformed_rows(fake_acli, monkeypatch):
-    runner, calls = fake_acli
-    monkeypatch.setenv("HOME", "/somewhere")
-
-    page = await runner.market("data", 2, 20)
-
-    assert [t.name for t in page.items] == ["dataphin"]
-    assert (page.total, page.has_more) == (12, True)
-    [call] = calls()
-    assert call["args"] == [
-        "list", "--page-no", "2", "--page-size", "20", "--keyword", "data", "--json",
-    ]
-    assert call["home"] == "/somewhere"
-
-
-async def test_market_without_keyword_omits_the_flag(fake_acli):
-    runner, calls = fake_acli
-
-    await runner.market("", 1, 10)
-
-    assert "--keyword" not in calls()[0]["args"]
-
-
 @pytest.mark.parametrize(
     "name", ["", "-rf", "../x", "a b", "x;rm", "a" * 300, None, "di@1.0.9", "@scope", "a/b", "@antcli/yuntu-cli"]
 )
@@ -385,12 +358,6 @@ async def test_bad_input_starts_no_process(fake_acli, install_dir):
         await runner.install("-x")
     with pytest.raises(AcliError):
         await runner.uninstall("../x")
-    with pytest.raises(AcliError):
-        await runner.market("--keyword", 1, 10)
-    with pytest.raises(AcliError):
-        await runner.market("x", 0, 10)
-    with pytest.raises(AcliError):
-        await runner.market("x", 1, 101)
 
     assert calls() == []
 

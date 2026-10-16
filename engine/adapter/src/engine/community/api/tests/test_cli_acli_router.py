@@ -13,7 +13,6 @@ import pytest
 from engine.community.api.cli import router
 from engine.community.core.acli.runner import (
     AcliError,
-    AcliMarketPage,
     AcliTool,
     AcliUninstallResult,
 )
@@ -27,7 +26,6 @@ from fastapi.testclient import TestClient
 ACLI_CAPS = {
     Capability.CLI_ACLI_INSTALL,
     Capability.CLI_ACLI_UNINSTALL,
-    Capability.CLI_ACLI_MARKET,
 }
 #: The module, not the ``router`` object the package re-exports under that name.
 router_module = importlib.import_module("engine.community.api.cli.router")
@@ -50,15 +48,7 @@ class _FakeRunner:
             raise self.error
         return AcliUninstallResult(name=name, uninstalled=True)
 
-    async def market(self, keyword: str, page_no: int, page_size: int) -> AcliMarketPage:
-        self.calls.append(("market", keyword, page_no, page_size))
-        if self.error:
-            raise self.error
-        return AcliMarketPage(
-            items=(AcliTool("dataphin", "dataphin", "d", "1.4.14"),),
-            total=3,
-            has_more=False,
-        )
+
 
 
 def _engine_class(caps: set[Capability]):
@@ -163,36 +153,6 @@ def test_uninstall_refusal(client, runner):
     assert (body["success"], body["error"], body["message"]) == (False, "uninstall_failed", "busy")
 
 
-def test_market_page(client, runner):
-    body = client.get(
-        "/api/cli/acli/market", params={"keyword": "data", "page_no": 2, "page_size": 5}
-    ).json()
-
-    assert body["success"] is True
-    assert body["data"] == {
-        "items": [
-            {"name": "dataphin", "command": "dataphin", "description": "d", "version": "1.4.14"}
-        ],
-        "total": 3,
-        "has_more": False,
-    }
-    assert runner.calls == [("market", "data", 2, 5)]
-
-
-def test_market_defaults(client, runner):
-    client.get("/api/cli/acli/market")
-
-    assert runner.calls == [("market", "", 1, 20)]
-
-
-def test_market_refusal(client, runner):
-    runner.error = AcliError("acli_unavailable", "acli is not installed")
-
-    body = client.get("/api/cli/acli/market").json()
-
-    assert (body["success"], body["error"]) == (False, "acli_unavailable")
-
-
 def test_engine_without_the_capability_refuses_with_501(runner):
     client = _client(set())
     try:
@@ -201,7 +161,6 @@ def test_engine_without_the_capability_refuses_with_501(runner):
              {"json": {"name": "x"}}),
             ("post", "/api/cli/acli/uninstall",
              {"json": {"name": "x"}}),
-            ("get", "/api/cli/acli/market", {}),
         ):
             assert getattr(client, method)(path, **kwargs).status_code == 501, path
         assert runner.calls == []

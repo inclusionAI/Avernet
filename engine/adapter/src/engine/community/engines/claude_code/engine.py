@@ -92,7 +92,6 @@ CLAUDE_CODE_COMMUNITY_CAPABILITIES: EngineCapabilities = EngineCapabilities(
         # acli market tools, managed through the public API.
         Capability.CLI_ACLI_INSTALL,
         Capability.CLI_ACLI_UNINSTALL,
-        Capability.CLI_ACLI_MARKET,
         # ── Cron ──
         Capability.CRON_LIST,
         Capability.CRON_CREATE,

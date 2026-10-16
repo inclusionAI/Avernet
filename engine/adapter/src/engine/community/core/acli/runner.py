@@ -1,7 +1,8 @@
 """``AcliRunner`` — the only code in the engine that executes ``acli``.
 
-``acli`` is the client for the internal CLI market: it searches the market,
-installs a tool by its market name, and uninstalls what it installed. The
+``acli`` is the client for the internal CLI market: it installs a tool by its
+market name and uninstalls what it installed. (Searching the market is the
+platform's job; it needs no container.) The
 platform reaches this through ``/api/cli/acli/*`` so a bot can gain or lose a
 tool without a restart.
 
@@ -48,8 +49,6 @@ log = logging.getLogger("engine.acli")
 #: addressed by the platform's ``DELETE …/clis/{cli_code}``).
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _MAX_NAME_LENGTH = 256
-_MAX_KEYWORD_LENGTH = 100
-_MAX_PAGE_SIZE = 100
 #: The directory acli is told to install into must be a ``bin`` directory:
 #: binary products land in it directly, and npm products treat its parent as
 #: their prefix, so both kinds end up in the same ``PATH`` entry.
@@ -74,8 +73,7 @@ class AcliError(Exception):
     """acli could not do what was asked.
 
     ``code`` is one of ``invalid_input``, ``acli_unavailable``, ``timeout``,
-    ``bad_output``, ``install_failed``, ``uninstall_failed``,
-    ``market_failed``. ``message`` is safe to return to a caller.
+    ``bad_output``, ``install_failed``, ``uninstall_failed``. ``message`` is safe to return to a caller.
     """
 
     def __init__(self, code: str, message: str) -> None:
@@ -104,13 +102,6 @@ class AcliUninstallResult:
 
     name: str
     uninstalled: bool
-
-
-@dataclass(frozen=True, slots=True)
-class AcliMarketPage:
-    items: tuple[AcliTool, ...]
-    total: int
-    has_more: bool
 
 
 def mask_secrets(text: str) -> str:
@@ -156,22 +147,6 @@ def acli_home_for(install_dir: Path) -> Path:
     return install_dir.parent / ACLI_HOME_NAME
 
 
-def _validate_keyword(keyword: str) -> str:
-    if (
-        not isinstance(keyword, str)
-        or len(keyword) > _MAX_KEYWORD_LENGTH
-        or keyword.startswith("-")
-        or any(ord(ch) < 32 for ch in keyword)
-    ):
-        raise AcliError("invalid_input", "invalid market keyword")
-    return keyword
-
-
-def _validate_page(page_no: int, page_size: int) -> None:
-    if not 1 <= page_no <= 10_000 or not 1 <= page_size <= _MAX_PAGE_SIZE:
-        raise AcliError("invalid_input", "page_no or page_size out of range")
-
-
 def _bounded(text: str, limit: int) -> str:
     masked = mask_secrets(text)
     return masked if len(masked) <= limit else masked[:limit] + "…"
@@ -191,15 +166,6 @@ def _parse_json(stdout: str) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
     return value if isinstance(value, dict) else None
-
-
-def _tool_from(payload: Mapping[str, Any]) -> AcliTool:
-    return AcliTool(
-        name=str(payload.get("name") or ""),
-        command=str(payload.get("command") or ""),
-        description=str(payload.get("description") or ""),
-        version=str(payload.get("version") or ""),
-    )
 
 
 class AcliRunner:
@@ -278,31 +244,6 @@ class AcliRunner:
             failure_code="uninstall_failed",
         )
         return AcliUninstallResult(name=name, uninstalled=True)
-
-    async def market(self, keyword: str, page_no: int, page_size: int) -> AcliMarketPage:
-        """One page of the acli market, filtered by ``keyword`` (may be empty)."""
-        _validate_keyword(keyword)
-        _validate_page(page_no, page_size)
-        argv = ["list", "--page-no", str(page_no), "--page-size", str(page_size)]
-        if keyword:
-            argv += ["--keyword", keyword]
-        payload = await self._run(
-            argv,
-            env=dict(self._environ),
-            timeout=QUERY_TIMEOUT_SECONDS,
-            failure_code="market_failed",
-        )
-        rows = payload.get("list")
-        items = tuple(
-            _tool_from(row) for row in (rows if isinstance(rows, list) else [])
-            if isinstance(row, Mapping)
-        )
-        total = payload.get("total")
-        return AcliMarketPage(
-            items=items,
-            total=total if isinstance(total, int) else len(items),
-            has_more=bool(payload.get("hasMore")),
-        )
 
     # ── execution ────────────────────────────────────────────────────────
 
@@ -393,7 +334,6 @@ class AcliRunner:
 __all__ = [
     "ACLI_HOME_NAME",
     "AcliError",
-    "AcliMarketPage",
     "AcliRunner",
     "AcliTool",
     "AcliUninstallResult",

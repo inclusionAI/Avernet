@@ -86,7 +86,6 @@ class Capability(Enum):
     # public API (``/api/cli/acli/*``).
     CLI_ACLI_INSTALL = "cli.acli.install"
     CLI_ACLI_UNINSTALL = "cli.acli.uninstall"
-    CLI_ACLI_MARKET = "cli.acli.market"
 
     # ── Default config ──
     DEFAULT_CONFIG_GET = "default_config.get"

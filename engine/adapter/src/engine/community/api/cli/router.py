@@ -264,35 +264,4 @@ async def uninstall_acli_tool(request: AcliUninstallRequest) -> ApiResponse:
     )
 
 
-@router.get("/acli/market", response_model=ApiResponse)
-async def list_acli_market(
-    keyword: str = Query(""),
-    page_no: int = Query(1),
-    page_size: int = Query(20),
-) -> ApiResponse:
-    """One page of the acli market, filtered by ``keyword``."""
-    warning = check_capability(Capability.CLI_ACLI_MARKET)
-    try:
-        page = await _acli().market(keyword, page_no, page_size)
-    except AcliError as error:
-        return _acli_refusal(error, warning)
-    return ApiResponse(
-        success=True,
-        data={
-            "items": [
-                {
-                    "name": t.name,
-                    "command": t.command,
-                    "description": t.description,
-                    "version": t.version,
-                }
-                for t in page.items
-            ],
-            "total": page.total,
-            "has_more": page.has_more,
-        },
-        warning=warning,
-    )
-
-
 __all__ = ["router"]
