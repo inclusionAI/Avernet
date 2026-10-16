@@ -46,7 +46,7 @@ export function BotBasicInfoDialog({
         <div className="space-y-4">
           <div className="space-y-2">
             <p className="m-0 text-sm font-medium">头像</p>
-            <AvatarSettings botId={bot.id} editable={editable} onSaved={onAvatarSaved} />
+            {open && editable ? <AvatarSettings botId={bot.id} editable onSaved={onAvatarSaved} /> : null}
           </div>
           <label className="block space-y-2 text-sm font-medium">
             名称

@@ -106,7 +106,7 @@ describe('botWorkshopService', () => {
     expect(mockedGetBot).toHaveBeenCalledWith('bot-1', 'owner-1');
   });
 
-  test('详情接口未携带头像时读取 Bot 头像资源，保持与列表一致', async () => {
+  test('详情接口缺少当前用户身份时不读取 owner-only 头像资源', async () => {
     mockedGetBot.mockResolvedValue({
       code: 200000,
       data: {
@@ -118,11 +118,34 @@ describe('botWorkshopService', () => {
     });
     mockedGetAvatar.mockResolvedValue('data:image/svg+xml;base64,avatar');
 
-    await expect(botWorkshopService.detail('bot-1')).resolves.toMatchObject({
+    await expect(botWorkshopService.detail('bot-1', undefined, undefined)).resolves.toMatchObject({
+      id: 'bot-1',
+    });
+    expect(mockedGetAvatar).not.toHaveBeenCalled();
+  });
+
+  test('详情接口未携带头像时仅 Owner 读取头像资源', async () => {
+    mockedGetBot.mockResolvedValue({
+      code: 200000,
+      data: {
+        bot_id: 'bot-1',
+        bot_name: '头像 Bot',
+        owner_entity_id: 'owner-1',
+        engine: 'openclaw',
+        status: 'ACTIVE',
+      },
+    });
+    mockedGetAvatar.mockResolvedValue('data:image/svg+xml;base64,avatar');
+
+    await expect(botWorkshopService.detail('bot-1', 'owner-1', 'owner-1')).resolves.toMatchObject({
       id: 'bot-1',
       avatarUrl: 'data:image/svg+xml;base64,avatar',
     });
     expect(mockedGetAvatar).toHaveBeenCalledWith('bot-1');
+
+    mockedGetAvatar.mockClear();
+    await expect(botWorkshopService.detail('bot-1', 'owner-1', 'collaborator-1')).resolves.toMatchObject({ id: 'bot-1' });
+    expect(mockedGetAvatar).not.toHaveBeenCalled();
   });
 
   test('refuses local creation without a selected device and resolved directory', async () => {

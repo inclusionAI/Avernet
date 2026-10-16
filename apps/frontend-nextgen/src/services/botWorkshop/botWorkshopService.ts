@@ -91,13 +91,13 @@ export const botWorkshopService = {
       hasMore: result.hasMore,
     };
   },
-  async detail(id: string, ownerId?: string): Promise<BotDomain | undefined> {
+  async detail(id: string, ownerId?: string, currentUserId?: string): Promise<BotDomain | undefined> {
     const response = await getBot(id, ownerId);
     const dto = response.data;
     if (!dto) return undefined;
     const result = mapBotDto(dto as BackendUnknownRecord, id);
     if (!result.item.runtime.visibleInOpenCore) return undefined;
-    if (result.item.avatarUrl) return result.item;
+    if (result.item.avatarUrl || !currentUserId || result.item.ownerId !== currentUserId) return result.item;
     // 详情接口尚未稳定回传 avatar_url；复用头像资源接口，保证编辑页与列表展示同一份 Bot 头像。
     try {
       const avatarUrl = await botAvatarService.get(id);

@@ -8,21 +8,20 @@ import { useState } from 'react';
 import { canRestartFailedServiceBot, failedServiceDeleteReason, publicationManagementAvailability } from './botManagementPolicy';
 import { actionIcon, actionLabel, type BotCardManagementAction } from './config';
 import { ActionHelp, MenuSection } from './menuPrimitives';
-
 interface BotManagementMenuProps {
   bot: BotDomain;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   collaborationMode?: 'authorize' | 'request';
   lockedByOther: boolean;
   onAction: (action: BotCardManagementAction, bot: BotDomain) => Promise<void>;
   onManagePublication?: (bot: BotDomain) => void;
   onChangeSpace?: (bot: BotDomain) => void;
   onAuthorize?: (bot: BotDomain) => void;
-  /** 通用配置菜单项（collab-permission-entry-migration）：门禁与回调可选，未传时不渲染。 */
   canGeneralConfig?: boolean;
   generalConfigDisabledReason?: string;
   onGeneralConfig?: (bot: BotDomain) => void;
 }
-
 export function BotManagementMenu(props: BotManagementMenuProps) {
   const {
     bot,
@@ -36,14 +35,15 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
     generalConfigDisabledReason,
     onGeneralConfig,
   } = props;
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = props.open ?? uncontrolledOpen;
+  const setOpen = props.onOpenChange ?? setUncontrolledOpen;
   const [confirmAction, setConfirmAction] = useState<BotCardManagementAction>();
   const [confirming, setConfirming] = useState(false);
   if (bot.lifecycle === 'deploying') return null;
   const isAgentCodingBot = bot.runtime.isAgentCodingBot;
   const isServiceBot = bot.serviceMode === 'service';
   const restartUnsupported = bot.runtime.engine === 'teclaw';
-  // 动作词表由库存接口授权；创建失败但尚无发布记录时，通用重启接口是唯一恢复入口。
   const restartDeclared = bot.actions.includes('restart') || Boolean(bot.disabledActions.restart) || canRestartFailedServiceBot(bot);
   const restartPublishDeclared =
     bot.actions.includes('restart_publish') || Boolean(bot.disabledActions.restart_publish);
