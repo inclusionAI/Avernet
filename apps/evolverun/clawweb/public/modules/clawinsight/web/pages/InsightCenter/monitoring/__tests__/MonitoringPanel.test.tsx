@@ -197,6 +197,7 @@ describe('MonitoringPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '监控 Bot bot-te' }));
     fireEvent.click(await screen.findByRole('button', { name: /^bot-new.*监控中/ }));
     await waitFor(() => expect(api.targetStatus.mock.lastCall?.[0]).toBe('bot-new'));
+    await waitFor(() => expect(screen.getByRole('button', { name: '刷新' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '刷新' }));
     await waitFor(() => expect(api.options).toHaveBeenCalledTimes(3));
     expect(screen.getByRole('button', { name: '监控 Bot bot-new' })).toBeInTheDocument();
