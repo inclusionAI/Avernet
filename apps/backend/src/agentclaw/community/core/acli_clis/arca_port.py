@@ -40,10 +40,11 @@ class BotDeviceContextPort(Protocol):
 INSTALL_PATH = "/api/cli/acli/install"
 UNINSTALL_PATH = "/api/cli/acli/uninstall"
 
-#: The engine gives acli 300 s to install and 30 s + 300 s to uninstall
-#: (list, then uninstall); these leave room for the hop on top.
+#: The engine gives acli 300 s to install and 30 s + 300 s + 30 s to
+#: uninstall (list, uninstall, list again to confirm); these leave room for
+#: the hop on top.
 INSTALL_TIMEOUT_SECONDS = 330.0
-UNINSTALL_TIMEOUT_SECONDS = 360.0
+UNINSTALL_TIMEOUT_SECONDS = 390.0
 
 
 class ArcaAcliPort(AcliPort):

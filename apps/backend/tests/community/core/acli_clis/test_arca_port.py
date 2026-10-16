@@ -79,6 +79,8 @@ async def test_uninstall_reports_whether_anything_was_removed() -> None:
 
     assert removed is False
     assert transport.calls[0][2] == UNINSTALL_PATH
+    # The engine may take 30 s + 300 s + 30 s (list, uninstall, confirm).
+    assert transport.calls[0][5] > 360
 
 
 @pytest.mark.parametrize(
