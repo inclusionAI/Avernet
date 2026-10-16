@@ -162,7 +162,9 @@ function installRuntime(
     },
     channel: {
       routing: {
-        resolveAgentRoute() {
+        resolveAgentRoute({ cfg, peer }: any) {
+          assert.equal(peer.kind, 'direct');
+          assert.equal(cfg.session.dmScope, 'per-account-channel-peer');
           return { agentId: 'agent-1', sessionKey: 'session-1' };
         },
       },
@@ -313,6 +315,7 @@ describe('OpenClaw gateway protocol compatibility', () => {
       assert.equal(responses.length, 1);
       assert.equal(responses[0].ok, true);
       const observationText = '[Image attachment: name=diagram.png; image content is not available in this silent observation]';
+      assert.equal(capturedInbound.value?.ChatType, 'direct');
       assert.equal(capturedInbound.value?.Body, observationText);
       assert.equal(capturedInbound.value?.MediaUrl, undefined);
       assert.equal(capturedInbound.value?.MediaUrls, undefined);

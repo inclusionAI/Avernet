@@ -1299,7 +1299,7 @@ export function resolveChatRunId(requestId: unknown, idempotencyKey: unknown): s
 /**
  * Select the BCS identity OpenClaw should wrap in its own agent/channel route.
  * Protocol v3 supplies both fields with the same canonical session id. Older
- * frames keep their existing group-based histories.
+ * frames fall back to the group ID as their synthetic direct peer identity.
  */
 export function resolveEngineSessionPeerId(
   params: Pick<ChatSendParams, 'session_key' | 'bcs_group_id'>
@@ -1312,6 +1312,17 @@ export function resolveEngineSessionPeerId(
     return requestedSessionKey === canonicalSessionId ? requestedSessionKey : canonicalSessionId;
   }
   return params.bcs_group_id || onboardingPeerId;
+}
+
+/** Keep BCS sessions isolated even when the host defaults direct chats to main. */
+export function withBcsDirectSessionScope<T extends { session?: Record<string, unknown> }>(
+  cfg: T,
+): Omit<T, 'session'> & { session: Record<string, unknown> & { dmScope: 'per-account-channel-peer' } } {
+  const { session, ...rest } = cfg;
+  return {
+    ...rest,
+    session: { ...session, dmScope: 'per-account-channel-peer' },
+  };
 }
 
 /** Handle chat.send request from BCS. */
@@ -1386,7 +1397,7 @@ export async function handleChatSend(
 
   try {
     const rt = getBcsRuntime();
-    const currentCfg = await rt.config.loadConfig();
+    const currentCfg = withBcsDirectSessionScope(await rt.config.loadConfig());
     const preparedImages = await prepareImageAttachments({
       attachments: imageAttachments,
       abortSignal: abortController.signal,
@@ -1411,7 +1422,7 @@ export async function handleChatSend(
       channel: CHANNEL_ID,
       accountId: account.accountId,
       peer: {
-        kind: 'group',
+        kind: 'direct',
         id: resolveEngineSessionPeerId(params, `onboarding-${account.botId}`),
       },
     });
@@ -1450,7 +1461,7 @@ export async function handleChatSend(
       AccountId: account.accountId,
       OriginatingChannel: CHANNEL_ID,
       OriginatingTo: bcsGroupId || `bcs:${account.botId}`,
-      ChatType: 'group',
+      ChatType: 'direct',
       SenderName: senderName,
       SenderId: senderId,
       Provider: CHANNEL_ID,
@@ -1821,14 +1832,14 @@ export async function handleChatInject(
   // Record into OpenClaw session and inject message via gateway
   try {
     const rt = getBcsRuntime();
-    const currentCfg = await rt.config.loadConfig();
+    const currentCfg = withBcsDirectSessionScope(await rt.config.loadConfig());
 
     const route = rt.channel.routing.resolveAgentRoute({
       cfg: currentCfg,
       channel: CHANNEL_ID,
       accountId: account.accountId,
       peer: {
-        kind: 'group',
+        kind: 'direct',
         id: resolveEngineSessionPeerId(params, `onboarding-${account.botId}`),
       },
     });
@@ -1859,7 +1870,7 @@ export async function handleChatInject(
       AccountId: account.accountId,
       OriginatingChannel: CHANNEL_ID,
       OriginatingTo: bcsGroupId || `bcs:${account.botId}`,
-      ChatType: 'group',
+      ChatType: 'direct',
       SenderName: senderName,
       SenderId: senderId,
       Provider: CHANNEL_ID,
@@ -2089,7 +2100,7 @@ export async function handleChatHistory(
 
   try {
     const rt = getBcsRuntime();
-    const currentCfg = await rt.config.loadConfig();
+    const currentCfg = withBcsDirectSessionScope(await rt.config.loadConfig());
 
     // Look up the OpenClaw sessionKey from the reverse mapping
     let sessionKey = resolveSessionKeyFromGroupId(bcsGroupId);
@@ -2101,7 +2112,7 @@ export async function handleChatHistory(
         channel: CHANNEL_ID,
         accountId: account.accountId,
         peer: {
-          kind: 'group',
+          kind: 'direct',
           id: bcsGroupId,
         },
       });
