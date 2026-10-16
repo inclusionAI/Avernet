@@ -37,20 +37,24 @@ const session: SessionView = {
 };
 
 const buildProps = (partial: Partial<GroupHeaderProps> = {}): GroupHeaderProps => ({
-  selectedGroup: group,
-  selectedSession: session,
-  connectionStatus: 'connected',
-  onOpenSessionList: jest.fn(),
-  canManageGroup: { allowed: true },
-  activePanel: 'none',
-  onTogglePanel: jest.fn(),
-  favorites: { favorite: false, disabled: false, onToggle: jest.fn() },
-  sidePaneOpen: false,
-  onToggleSidePane: jest.fn(),
-  onRequestDissolve: jest.fn(),
-  onRequestShareGroup: jest.fn(async () => ({ ok: true as const, data: { invitationUrl: 'http://example.com' } })),
-  onRequestShareSession: jest.fn(async () => ({ ok: true as const, data: { invitationUrl: 'http://example.com' } })),
-  ...partial,
+  selectedGroup: partial.selectedGroup === undefined ? group : partial.selectedGroup,
+  selectedSession: partial.selectedSession === undefined ? session : partial.selectedSession,
+  connectionStatus: partial.connectionStatus ?? 'connected',
+  onOpenSessionList: partial.onOpenSessionList ?? jest.fn(),
+  canManageGroup: partial.canManageGroup ?? { allowed: true },
+  activePanel: partial.activePanel ?? 'none',
+  onTogglePanel: partial.onTogglePanel ?? jest.fn(),
+  favorites: partial.favorites ?? { favorite: false, disabled: false, onToggle: jest.fn() },
+  sidePaneOpen: partial.sidePaneOpen ?? false,
+  sidePaneDisabled: partial.sidePaneDisabled,
+  onToggleSidePane: partial.onToggleSidePane ?? jest.fn(),
+  onRequestDissolve: partial.onRequestDissolve,
+  onRequestShareGroup:
+    partial.onRequestShareGroup ??
+    jest.fn(async () => ({ ok: true as const, data: { invitationUrl: 'http://example.com' } })),
+  onRequestShareSession:
+    partial.onRequestShareSession ??
+    jest.fn(async () => ({ ok: true as const, data: { invitationUrl: 'http://example.com' } })),
 });
 
 it('窄屏会话列表入口位于 chip 左侧并使用右箭头图标', () => {
