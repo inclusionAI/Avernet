@@ -1,3 +1,4 @@
+import { productionRunsSql } from "@avernet/clawweb-shared/server/services/run-purpose";
 /**
  * HealthSnapshotRepository — stores and queries daily health score snapshots.
  */
@@ -67,7 +68,7 @@ export class HealthSnapshotRepository {
 
   async getDistinctWorkflowIds(): Promise<string[]> {
     const rows = await this.db.query<Row>(
-      `SELECT DISTINCT workflow_id FROM flow_runs WHERE started_at >= ${Math.floor(Date.now() / 1000) - 7 * 86400}`,
+      `SELECT DISTINCT workflow_id FROM ${productionRunsSql()} flow_runs WHERE started_at >= ${Math.floor(Date.now() / 1000) - 7 * 86400}`,
       [],
     );
     return rows.map((r) => String(r.workflow_id));

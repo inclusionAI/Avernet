@@ -1,3 +1,5 @@
+import RepairTrialPanel from './RepairTrialPanel'
+import type { RepairTrial } from '../../../../server/contracts/repair-trial'
 import { useEffect, useRef, useState } from 'react'
 import type { RepairTaskDetail } from '../../../../server/contracts/repair-workbench'
 import type { RepairConfirmRequest, RepairReleaseTarget } from '../../../../server/contracts/repair-release'
@@ -9,6 +11,9 @@ import { repairReleaseError } from '../../../api/repair-release-error'
 export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, onRefresh }: {
   detail: RepairTaskDetail; selectedRevision: number; canEdit: boolean; onRefresh: () => void;
 }) {
+  const [trialOpen, setTrialOpen] = useState(false)
+  const [trialConfigured, setTrialConfigured] = useState(false)
+  const [trials, setTrials] = useState<RepairTrial[]>([])
   const [dialog, setDialog] = useState(false)
   const [target, setTarget] = useState<RepairReleaseTarget | null>(null)
   const [ack, setAck] = useState(false)
@@ -29,7 +34,7 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
   const pending = !!deployment && ['created', 'dispatching', 'running', 'uncertain'].includes(deployment.status)
   const succeeded = deployment?.status === 'succeeded'
   const canPublish = canEdit && isCurrent && detail.capabilities.publication && (revision?.phase === 'review' || automaticReady && revision?.phase === 'no_change')
-  useEffect(() => { setDialog(false); setTarget(null); setAck(false); setError(''); request.current = null }, [scope])
+  useEffect(() => { setDialog(false); setTrialOpen(false); setTrialConfigured(false); setTrials([]); setTarget(null); setAck(false); setError(''); request.current = null }, [scope])
   async function reconcile() {
     if (!deployment || !canEdit || submitting.current) return
     submitting.current = true; setBusy(true)
@@ -91,8 +96,10 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
     {!detail.capabilities.publication && <p role="alert">发布能力未启用，请检查宿主配置。</p>}
     {deployment?.error && <p className="mt-3 text-sm text-destructive">{deployment.error}</p>}
     {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
+    {selected?.draft?.candidateCommit && <RepairTrialPanel taskId={detail.taskId} revision={selected} enabled={!!canEdit && !!isCurrent && selected.phase === 'review'} open={trialOpen} onClose={() => setTrialOpen(false)} onTrials={(rows, configured) => { setTrials(rows); setTrialConfigured(configured) }} />}
     {dialog && <div role="region" aria-label="确认发布候选" className="mt-4 space-y-3 border-t border-input pt-4">
       <h4 className="font-semibold">发布候选 v{selectedRevision}</h4>
+      {!trials.some(row => row.revision === selectedRevision && row.candidateCommit === selected?.draft?.candidateCommit && row.status === 'succeeded') && <p className="text-sm text-muted-foreground">此候选尚无成功试跑记录。可以明确跳过试跑，直接确认发布。</p>}
       {loading ? <p role="status">正在核对工作流发布范围…</p> : target && <p>{target.label}</p>}
       <p className="text-sm text-muted-foreground">影响范围包括本次 Diff 中的工作流、脚本和资源。业务效果及未覆盖检查将在生效后观察；无有效验证规则的问题不会自动宣称已修复。</p>
       <label className="flex items-start gap-2 text-sm leading-6"><input type="checkbox" checked={ack} onChange={event => setAck(event.target.checked)} />我已审阅完整 Diff、检查报告和影响范围，接受未覆盖风险并确认发布此版本。</label>
@@ -101,6 +108,7 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
     <footer aria-label="当前修复步骤与下一步" className="fixed bottom-3 left-6 right-6 z-50 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-input bg-card px-5 py-3 shadow-lg">
       <div><p className="text-sm font-semibold">{title}</p><p className="text-xs text-muted-foreground">生成优化草稿 → 审阅并确认发布 → 自动验证</p></div>
       <div className="flex items-center gap-3">
+        {trialConfigured && canEdit && isCurrent && selected?.phase === 'review' && !pending && !succeeded && <button className={button} disabled={busy} onClick={() => setTrialOpen(true)}>先试跑</button>}
         {dialog && <button className={button} disabled={busy} onClick={() => setDialog(false)}>返回审阅</button>}
         {pending && deployment.target.scope === 'workflow' && <button className={button} disabled={busy || !canEdit} onClick={() => void resume()}>继续原发布</button>}
         {!succeeded && <button className={primary} disabled={busy || loading || (pending ? !canEdit : !canPublish || dialog && (!ack || !target))}

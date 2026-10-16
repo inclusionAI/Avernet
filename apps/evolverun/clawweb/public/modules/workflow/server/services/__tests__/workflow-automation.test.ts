@@ -306,3 +306,12 @@ it.each([true, false])('notifies a final no_change round only when prior batches
   expect(notices()).toHaveLength(priorChanged ? 1 : 0);
   expect(f.calls).toHaveLength(2);
 });
+it('excludes trials from terminal analysis and daily jobs', async () => {
+  const f = await fixture(false, 0);
+  await f.db.exec("INSERT INTO workflow_repair_release_records (record_kind, record_id, workflow_id, task_id, revision, request_key, request_digest, body_json, state_version, created_at_ms, updated_at_ms) VALUES ('trial', 'late-run', 'wf-1', 'task', 1, 'trial-request', 'digest', '{}', 1, 1, 1)");
+  await f.service.onRunTerminal({ flowId: 'late-run', status: 'failed' });
+  await f.service.tick();
+  expect(f.ports.analysis.start).not.toHaveBeenCalled();
+  expect(f.ports.notify).not.toHaveBeenCalled();
+  expect((await f.service.status('wf-1')).jobs.filter(job => job.kind === 'auto_run')).toEqual([]);
+});

@@ -15,6 +15,7 @@ export function useFlowRuns(params?: {
   botOwnerId?: string
   botId?: string
   inputQuery?: string
+  purpose?: 'production' | 'trial' | 'all'
   enabled?: boolean
 }) {
   const { enabled, ...queryParams } = params ?? {}

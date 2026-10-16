@@ -1,3 +1,4 @@
+import { productionRunsSql, isTrialRun } from "@avernet/clawweb-shared/server/services/run-purpose";
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { IssueAggregationRepository } from '@avernet/clawevolve/server/repositories/issue-aggregation-repository';
 import type { AutoAnalysisSettings } from './task-guard/auto-analysis-settings.js';
@@ -36,6 +37,9 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
   }
   async function runAnalysis(record: AutomationJob) {
     let job = await repo.claim(record.id, now()); if (!job) return;
+    if (await isTrialRun(input.db, job.data.flowId)) {
+      await repo.patch(job, { status: 'blocked', reason: 'CANDIDATE_TRIAL' }, now(), true); return;
+    }
     const observed = await bounded(input.ports.analysis.lookup(job.data.flowId));
     if (observed.status === 'completed') {
       await repo.patch(job, { status: 'done', reason: observed.complete === false ? 'PARTIAL_ANALYSIS' : null,
@@ -66,7 +70,7 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
     // deliberately excluded by the previous scan even if already modified.
     const sinceMs = (policy.scopeVersion === 'all-qualified/v1' ? Math.min(watermark, Number(job.data.scopeUntilMs) - DAY) : watermark) - 60000;
     const cursor = job.data.cursor as { modified: number | string; id: number } | null;
-    const rows = await input.db.query<{ id: number; flow_id: string; modified: number | string }>(`SELECT id, flow_id, COALESCE(gmt_modified, gmt_create) AS modified FROM flow_runs
+    const rows = await input.db.query<{ id: number; flow_id: string; modified: number | string }>(`SELECT id, flow_id, COALESCE(gmt_modified, gmt_create) AS modified FROM ${productionRunsSql()} flow_runs
       WHERE workflow_id = ? AND completed_at IS NOT NULL AND status IN ('succeeded', 'failed', 'cancelled')
       ${policy.scopeVersion === 'all-qualified/v1' ? 'AND started_at > 0 AND ((started_at < 1000000000000 AND started_at < ?) OR (started_at >= 1000000000000 AND started_at < ?))' : ''}
       AND COALESCE(gmt_modified, gmt_create) >= ? AND COALESCE(gmt_modified, gmt_create) <= ?
@@ -233,7 +237,7 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
     },
     async onRunTerminal(event) {
       if (event.status !== 'failed') return;
-      const row = (await input.db.query<{ workflow_id: string }>('SELECT workflow_id FROM flow_runs WHERE flow_id = ?', [event.flowId]))[0];
+      const row = (await input.db.query<{ workflow_id: string }>(`SELECT workflow_id FROM ${productionRunsSql()} flow_runs WHERE flow_id = ?`, [event.flowId]))[0];
       if (!row) return;
       try { await authority(row.workflow_id); } catch (error) { if (error instanceof RepairAutomationDeniedError) return; throw error; }
       const job = await repo.ensure(row.workflow_id, 'auto_run', event.flowId, { flowId: event.flowId, evidenceCutoffMs: now() }, now());

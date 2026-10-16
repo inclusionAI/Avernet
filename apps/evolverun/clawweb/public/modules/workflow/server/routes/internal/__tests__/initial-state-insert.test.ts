@@ -18,7 +18,7 @@ const db = {
     inserted = { sql, params };
     return { affectedRows: 1 };
   },
-  query: async () => [{ flow_id: "flow", state_json: inserted?.params[4] ?? null }],
+  query: async (sql: string) => sql.includes("workflow_repair_release_records") ? [] : [{ flow_id: "flow", state_json: inserted?.params[4] ?? null }],
   transaction: async (fn: (database: IDatabase) => Promise<unknown>) => fn(db as IDatabase),
   close: async () => {},
 } as IDatabase;

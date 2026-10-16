@@ -7,6 +7,7 @@ let db: SqliteDatabase;
 let raw: Database.Database;
 beforeEach(() => {
   raw = new Database(':memory:');
+  raw.exec("CREATE TABLE workflow_repair_release_records (record_id TEXT, record_kind TEXT, workflow_id TEXT)");
   db = new SqliteDatabase(raw);
   raw.exec(`CREATE TABLE workflow_evolution_analysis_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, analysis_id TEXT, workflow_id TEXT, flow_id TEXT,
@@ -237,4 +238,15 @@ it('bounds priority analysis reads by the statistics window and retains multi-ru
     /SELECT id, flow_id, scope_json, result_json, completed_at_ms, requested_at_ms FROM workflow_evolution_analysis_runs/.test(sql)
       ? [query.mock.results[i].value] : []));
   expect(analysisBatches.flat()).toHaveLength(2);
+});
+
+it('removes trial evidence from model and legacy issue frequency sources', async () => {
+  const { now, add, repository } = coverageFixture();
+  add('trial-analysis', now - 1000, { flowIds: ['covered'] });
+  raw.exec("INSERT INTO workflow_repair_release_records VALUES ('covered', 'trial_run', 'wf')");
+  raw.exec("INSERT INTO workflow_healing_diagnoses VALUES ('legacy-trial', 'wf', 'covered', 'trial-only', 'timeout', 'node-0', NULL, 'timeout', 1)");
+  expect(await repository.listSources('wf')).toEqual([]);
+  const result = await repository.listPage('wf', { page: 1, pageSize: 20 });
+  expect(result.groups).toEqual([]);
+  expect(result.page.total).toBe(0);
 });

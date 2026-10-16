@@ -1,8 +1,8 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import type { RepairTaskDetail } from '../../../../../server/contracts/repair-workbench'
-const api = vi.hoisted(() => ({ deploymentTargets: vi.fn(), publish: vi.fn(), reconcileDeployment: vi.fn() }))
+const api = vi.hoisted(() => ({ deploymentTargets: vi.fn(), publish: vi.fn(), reconcileDeployment: vi.fn(), trials: vi.fn(async () => ({ configured: true, trials: [] })) }))
 vi.mock('../../../../api/repair-batches', () => ({ repairBatches: api }))
 import RepairReleaseFlow from '../RepairReleaseFlow'
 const revision = { revision: 1, phase: 'review', stateVersion: 1, draft: { candidateCommit: 'a'.repeat(40) } } as RepairTaskDetail['latestAttempt']
@@ -59,3 +59,11 @@ it('keeps intermediate automatic candidates and failed-round fallbacks non-execu
     automaticProgress: { completedBatches: 1, totalBatches: 3, changedItems: 100, publishable: false } }} selectedRevision={1} canEdit onRefresh={() => {}} />);
   expect(screen.getByRole('button', { name: '发布此版本' })).toBeDisabled();
 });
+
+it('hides candidate execution when the Host has no runtime capability while publication stays available', async () => {
+  api.trials.mockResolvedValueOnce({ configured: false, trials: [] })
+  render(<RepairReleaseFlow detail={detail} selectedRevision={1} canEdit onRefresh={() => {}} />)
+  await waitFor(() => expect(api.trials).toHaveBeenCalledWith('task', 0))
+  expect(screen.queryByRole('button', { name: '先试跑' })).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '发布此版本' })).toBeEnabled()
+})

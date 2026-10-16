@@ -1,3 +1,4 @@
+import { productionRunsSql } from '@avernet/clawweb-shared/server/services/run-purpose';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import type { VersionObservation } from '../contracts/workflow-version-comparison.js';
 
@@ -17,7 +18,7 @@ export class WorkflowVersionComparisonRepository {
        SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded,
        SUM(CASE WHEN status IN ('failed', 'aborted', 'cancelled', 'canceled') THEN 1 ELSE 0 END) AS failed,
        SUM(CASE WHEN status NOT IN (${terminal}) THEN 1 ELSE 0 END) AS unfinished
-       FROM flow_runs WHERE workflow_id = ? AND workflow_deploy_number = ? AND ${started} >= ? AND ${started} < ?`,
+       FROM ${productionRunsSql()} flow_runs WHERE workflow_id = ? AND workflow_deploy_number = ? AND ${started} >= ? AND ${started} < ?`,
       [workflowId, deployNumber, fromMs, toMs]);
     const terminalRuns = Number(row?.terminal ?? 0), succeededRuns = Number(row?.succeeded ?? 0);
     return { deployNumber, fromMs, toMs, terminalRuns, succeededRuns, failedRuns: Number(row?.failed ?? 0),
@@ -25,7 +26,7 @@ export class WorkflowVersionComparisonRepository {
   }
   async unknown(workflowId: string, windows: Array<{ fromMs: number; toMs: number }>): Promise<number> {
     if (!windows.length) return 0;
-    const [row] = await this.db.query<{ total: number }>(`SELECT COUNT(*) AS total FROM flow_runs fr
+    const [row] = await this.db.query<{ total: number }>(`SELECT COUNT(*) AS total FROM ${productionRunsSql()} fr
       WHERE fr.workflow_id = ? AND fr.status IN (${terminal}) AND (fr.workflow_deploy_number IS NULL OR NOT EXISTS
       (SELECT 1 FROM workflow_deploy_history dh WHERE dh.workflow_id = fr.workflow_id AND dh.deploy_number = fr.workflow_deploy_number
        AND dh.action IN ('deploy', 'rollback', 'pull', 'migration')))

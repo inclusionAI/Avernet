@@ -1,3 +1,4 @@
+import { productionRunsSql, productionDiagnosesSql } from "@avernet/clawweb-shared/server/services/run-purpose";
 import { randomUUID } from "node:crypto";
 import { recordSkillTaskEvent, skillAuditTransaction, skillTestBenchSnapshot, type SkillTaskEventUpdate } from './skill-audit.js';
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
@@ -1444,7 +1445,7 @@ export class EvolveRepository {
   }>> {
     return this.db.query(
       `SELECT flow_id, workflow_id, status, failed_count, started_at, completed_at
-       FROM flow_runs
+       FROM ${productionRunsSql()} flow_runs
        WHERE workflow_id = ? AND status = 'failed' AND failed_count > 0
          AND gmt_create >= ?
          AND evolution_analysis_status IS NULL
@@ -1460,7 +1461,7 @@ export class EvolveRepository {
   }>> {
     return this.db.query(
       `SELECT flow_id, evolution_analysis_status, evolution_analyzed_at
-       FROM flow_runs
+       FROM ${productionRunsSql()} flow_runs
        WHERE workflow_id = ? AND evolution_analysis_status IS NOT NULL
        ORDER BY evolution_analyzed_at DESC`,
       [workflowId],
@@ -1482,7 +1483,7 @@ export class EvolveRepository {
     const params: unknown[] = [options.workflowId];
     const totalRow = (await this.db.query<{ total: number }>(
       `SELECT COUNT(*) AS total FROM (
-         SELECT failure_signature FROM workflow_healing_diagnoses WHERE workflow_id = ? GROUP BY failure_signature
+         SELECT failure_signature FROM ${productionDiagnosesSql()} workflow_healing_diagnoses WHERE workflow_id = ? GROUP BY failure_signature
        ) t`,
       params,
     ))[0];
@@ -1499,7 +1500,7 @@ export class EvolveRepository {
       `SELECT failure_signature, node_id, executor_type, failure_mode,
               COUNT(*) AS occurrence_count,
               GROUP_CONCAT(DISTINCT flow_id) AS evidence_flow_ids
-       FROM workflow_healing_diagnoses
+       FROM ${productionDiagnosesSql()} workflow_healing_diagnoses
        WHERE workflow_id = ?
        GROUP BY failure_signature, node_id, executor_type, failure_mode
        ORDER BY occurrence_count DESC, MAX(gmt_create) DESC

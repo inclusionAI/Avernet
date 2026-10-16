@@ -1,3 +1,4 @@
+import { productionRunsSql, productionNodesSql } from "@avernet/clawweb-shared/server/services/run-purpose";
 /**
  * NodeStatsRepository — aggregates node_executions by workflowId for analytics.
  *
@@ -92,7 +93,7 @@ export class NodeStatsRepository {
         MIN(NULLIF(duration_ms, 0)) AS min_duration_ms,
         MAX(CASE WHEN status = 'failed' THEN error_text ELSE NULL END) AS last_error_text,
         MAX(CASE WHEN status = 'failed' THEN completed_at ELSE NULL END) AS last_error_at
-      FROM node_executions
+      FROM ${productionNodesSql()} node_executions
       WHERE workflow_id = ? ${timeFilter}
       GROUP BY node_id
       ORDER BY failed_count DESC, avg_duration_ms DESC
@@ -105,7 +106,7 @@ export class NodeStatsRepository {
     }
 
     // 2. Get total run count (distinct flow_ids)
-    const countSql = `SELECT COUNT(DISTINCT flow_id) AS total_runs FROM node_executions WHERE workflow_id = ? ${timeFilter}`;
+    const countSql = `SELECT COUNT(DISTINCT flow_id) AS total_runs FROM ${productionNodesSql()} node_executions WHERE workflow_id = ? ${timeFilter}`;
     const countRows = await this.db.query<Row>(countSql, [workflowId]);
     const totalRuns = Number(countRows[0]?.total_runs ?? 0);
 
@@ -168,7 +169,7 @@ export class NodeStatsRepository {
     // Fetch all durations per node (client-side percentile for SQLite compatibility)
     const sql = `
       SELECT node_id, duration_ms
-      FROM node_executions
+      FROM ${productionNodesSql()} node_executions
       WHERE workflow_id = ? ${timeFilter} AND duration_ms IS NOT NULL AND duration_ms > 0
       ORDER BY node_id, duration_ms
     `;
@@ -213,7 +214,7 @@ export class NodeStatsRepository {
 
     const sql = `
       SELECT node_id, token_usage_json
-      FROM node_executions
+      FROM ${productionNodesSql()} node_executions
       WHERE workflow_id = ? ${timeFilter} AND token_usage_json IS NOT NULL AND token_usage_json != ''
     `;
     const rows = await this.db.query<Row>(sql, [workflowId]);
@@ -274,7 +275,7 @@ export class NodeStatsRepository {
         END AS error_category,
         COUNT(*) AS cat_count,
         MIN(error_text) AS sample_error
-      FROM node_executions
+      FROM ${productionNodesSql()} node_executions
       WHERE workflow_id = ? ${timeFilter} AND status = 'failed' AND error_text IS NOT NULL
       GROUP BY node_id, error_category
       ORDER BY cat_count DESC
@@ -327,7 +328,7 @@ export class NodeStatsRepository {
             END
         END AS error_category,
         COUNT(*) AS cat_count
-      FROM node_executions
+      FROM ${productionNodesSql()} node_executions
       WHERE workflow_id = ? AND node_id = ? ${timeFilter} AND status = 'failed' AND error_text IS NOT NULL
       GROUP BY error_category
       ORDER BY cat_count DESC
@@ -339,7 +340,7 @@ export class NodeStatsRepository {
     for (const cr of catRows) {
       const cat = String(cr.error_category);
       const sampleSql = `
-        SELECT error_text FROM node_executions
+        SELECT error_text FROM ${productionNodesSql()} node_executions
         WHERE workflow_id = ? AND node_id = ? ${timeFilter} AND status = 'failed' AND error_text IS NOT NULL
         AND (
           ${this.categoryToSqlCondition(cat)}
@@ -396,7 +397,7 @@ export class NodeStatsRepository {
          COUNT(*) AS total_runs,
          SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded_runs,
          SUM(CASE WHEN status IN ('failed', 'aborted', 'cancelled', 'canceled') THEN 1 ELSE 0 END) AS failed_runs
-       FROM flow_runs
+       FROM ${productionRunsSql()} flow_runs
        WHERE workflow_id = ?
          AND started_at >= ?
          AND status IN ('succeeded', 'failed', 'aborted', 'cancelled', 'canceled')
@@ -444,7 +445,7 @@ export class NodeStatsRepository {
       `SELECT
          SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded_runs,
          SUM(CASE WHEN status IN ('failed', 'aborted', 'cancelled', 'canceled') THEN 1 ELSE 0 END) AS failed_runs
-       FROM flow_runs WHERE workflow_id = ? ${timeFilter}`,
+       FROM ${productionRunsSql()} flow_runs WHERE workflow_id = ? ${timeFilter}`,
       [workflowId],
     );
     const succeededRuns = Number(runRateRows[0]?.succeeded_runs ?? 0);

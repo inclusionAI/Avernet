@@ -1,3 +1,4 @@
+import { productionRunsSql } from "@avernet/clawweb-shared/server/services/run-purpose";
 import { issuePriority, compareIssuePriority, type IssueSort, type IssueRun, type IssuePriority } from '../services/evolution/issue-priority.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { canonicalJson, digestCanonicalJson, validateWorkflowEvolutionAnalysisResult } from '../services/evolution/contracts.js';
@@ -59,6 +60,16 @@ export class IssueAggregationRepository {
       }
       afterId = rows.at(-1)!.id;
     }
+    // Analyses can cover several runs. Remove trial identities from every evidence location.
+    const trialRows = await this.db.query<{ record_id: string }>(
+      "SELECT record_id FROM workflow_repair_release_records WHERE record_kind IN ('trial', 'trial_run') AND workflow_id = ?", [workflowId]);
+    const trialIds = new Set(trialRows.map(row => row.record_id));
+    for (const analysis of analyses) {
+      if (analysis.flowId && trialIds.has(analysis.flowId)) analysis.flowId = null;
+      analysis.flowIds = analysis.flowIds?.filter(id => !trialIds.has(id));
+      analysis.diagnoses = analysis.diagnoses.map(d => ({ ...d, flowIds: d.flowIds.filter(id => !trialIds.has(id)) }))
+        .filter(d => d.flowIds.length > 0);
+    }
     const coveredRuns = new Set(analyses.flatMap(a => [...(a.flowIds ?? []), ...(a.flowId ? [a.flowId] : []), ...a.diagnoses.flatMap(d => d.flowIds)]));
     const legacy = await this.db.query<{
       diagnosis_id: string; flow_id: string; failure_signature: string; failure_mode: string; node_id: string | null;
@@ -66,7 +77,7 @@ export class IssueAggregationRepository {
     }>('SELECT diagnosis_id, flow_id, failure_signature, failure_mode, node_id, weak_node_id, error_text, gmt_modified FROM workflow_healing_diagnoses WHERE workflow_id = ?', [workflowId]);
     const legacyByRun = new Map<string, IssueAnalysis>();
     for (const row of legacy) {
-      if (coveredRuns.has(row.flow_id)) continue;
+      if (trialIds.has(row.flow_id) || coveredRuns.has(row.flow_id)) continue;
       const numeric = Number(row.gmt_modified);
       const time = Number.isFinite(numeric) ? (numeric < 1e12 ? numeric * 1000 : numeric) : Date.parse(String(row.gmt_modified)) || 0;
       if (options.sinceMs !== undefined && time < options.sinceMs) continue;
@@ -121,7 +132,7 @@ export class IssueAggregationRepository {
     let after = '';
     for (;;) {
       const rows = await this.db.query<{ flow_id: string; started_at: number }>(
-        `SELECT flow_id, started_at FROM flow_runs WHERE workflow_id = ? AND flow_id > ?
+        `SELECT flow_id, started_at FROM ${productionRunsSql()} flow_runs WHERE workflow_id = ? AND flow_id > ?
          AND ((started_at >= ? AND started_at <= ?) OR (started_at >= ? AND started_at <= ?))
          ORDER BY flow_id LIMIT 500`, [workflowId, after, sinceMs / 1000, nowMs / 1000, sinceMs, nowMs]);
       if (!rows.length) break;
@@ -194,7 +205,7 @@ export class IssueAggregationRepository {
     for (const ids = affectedIds.filter(id => !runs.has(id)); ids.length;) {
       const batch = ids.splice(0, 200);
       const rows = await this.db.query<{ flow_id: string; started_at: number }>(
-        `SELECT flow_id, started_at FROM flow_runs WHERE workflow_id = ? AND flow_id IN (${batch.map(() => '?').join(',')})`, [workflowId, ...batch]);
+        `SELECT flow_id, started_at FROM ${productionRunsSql()} flow_runs WHERE workflow_id = ? AND flow_id IN (${batch.map(() => '?').join(',')})`, [workflowId, ...batch]);
       for (const row of rows) remember(row);
     }
     return [...runs.values()];

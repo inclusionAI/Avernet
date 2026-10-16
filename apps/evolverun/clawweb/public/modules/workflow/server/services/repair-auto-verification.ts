@@ -1,4 +1,5 @@
 import { changedChainItems } from '../contracts/repair-automatic-chain.js';
+import { productionRunsSql } from "@avernet/clawweb-shared/server/services/run-purpose";
 import { randomUUID } from 'node:crypto';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { fillRepairSampleAnalyses } from './repair-sample-analyses.js';
@@ -51,7 +52,7 @@ export function createRepairAutoVerification(db: IDatabase, publication?: Repair
       const nowSeconds = Date.now() / 1000;
       const startedAtSeconds = 'CASE WHEN fr.started_at >= 1000000000000 THEN fr.started_at / 1000.0 ELSE fr.started_at END';
       const rows = await db.query<{ flow_id: string; status: string; completed_at: number | null; node_status: string }>(
-        `SELECT fr.flow_id, fr.status, fr.completed_at, ne.status AS node_status FROM flow_runs fr
+        `SELECT fr.flow_id, fr.status, fr.completed_at, ne.status AS node_status FROM ${productionRunsSql()} fr
          JOIN node_executions ne ON ne.flow_id = fr.flow_id AND ne.node_id = ?
          WHERE fr.workflow_id = ? AND fr.workflow_deploy_number = ? AND ${startedAtSeconds} >= ? AND ${startedAtSeconds} <= ?
          ORDER BY ${startedAtSeconds} DESC, ne.started_at DESC LIMIT 2000`,

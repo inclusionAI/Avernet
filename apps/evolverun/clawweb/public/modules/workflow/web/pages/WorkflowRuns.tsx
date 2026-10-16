@@ -153,6 +153,7 @@ function computeStatsFallback(runs: FlowRun[], succeededRuns: number, failedRuns
 export default function WorkflowRuns() {
   const { workflowId } = useParams<{ workflowId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
+  const [purpose, setPurpose] = useState<'production' | 'trial'>('production')
   const [statusFilter, setStatusFilter] = useState('')
   const [search, setSearch] = useState('')
   const [timeRange, setTimeRange] = useState('7d')
@@ -173,7 +174,7 @@ export default function WorkflowRuns() {
   const timeParams = useMemo(() => toTimeRange(timeRange), [timeRange])
 
   // Reset page when filters change
-  const filterKey = `${statusFilter}|${timeRange}|${debouncedInputQuery}`
+  const filterKey = `${purpose}|${statusFilter}|${timeRange}|${debouncedInputQuery}`
   useMemo(() => { setPage(0) }, [filterKey])
 
   // Sync inputQuery to URL search params so it can be bookmarked/shared
@@ -189,6 +190,7 @@ export default function WorkflowRuns() {
 
   const { data, isLoading, isError, error, refetch, isFetching } = useFlowRuns({
     workflowId: workflowId ?? undefined,
+    purpose,
     status: statusFilter || undefined,
     ...timeParams,
     limit: PAGE_SIZE,
@@ -281,6 +283,7 @@ export default function WorkflowRuns() {
 
       {/* Filters */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
+        <label className="text-sm">运行用途<select aria-label="运行用途" className="ml-2 rounded border border-input bg-background p-2" value={purpose} onChange={event => setPurpose(event.target.value as 'production' | 'trial')}><option value="production">正式运行</option><option value="trial">候选试跑</option></select></label>
         <StatusFilter value={statusFilter} onChange={setStatusFilter} />
         <SearchInput
           value={search}

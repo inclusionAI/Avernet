@@ -1637,8 +1637,10 @@ export const api = {
       botOwnerId?: string
       botId?: string
       inputQuery?: string
+      purpose?: 'production' | 'trial' | 'all'
     }): Promise<FlowRunsResponse> {
       const sp = new URLSearchParams()
+      if (params?.purpose) sp.set('purpose', params.purpose)
       if (params?.status) sp.set('status', params.status)
       if (params?.statuses?.length) sp.set('statuses', params.statuses.join(','))
       if (params?.query) sp.set('query', params.query)

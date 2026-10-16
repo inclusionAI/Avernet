@@ -14,9 +14,10 @@ afterEach(async () => { for (const db of databases.splice(0)) await db.close(); 
 function fixture() {
   const raw = new Database(':memory:'); const db = new SqliteDatabase(raw); databases.push(db);
   raw.exec(`CREATE TABLE workflow_deploy_history (workflow_id TEXT, deploy_number INTEGER, version INTEGER, is_active INTEGER, gmt_create INTEGER, action TEXT);
-    CREATE TABLE flow_runs (workflow_id TEXT, workflow_deploy_number INTEGER, status TEXT, started_at INTEGER);
+    CREATE TABLE flow_runs (flow_id TEXT, workflow_id TEXT, workflow_deploy_number INTEGER, status TEXT, started_at INTEGER);
+    CREATE TABLE workflow_repair_release_records (record_kind TEXT, record_id TEXT);
     INSERT INTO workflow_deploy_history VALUES ('wf',10,1,0,1999900000,'deploy'),('wf',11,1,0,1999950000,'rollback'),('wf',12,2,1,2000000000,'deploy'),('wf',13,3,0,2000000010,'edit'),('other',12,2,1,2000000000,'deploy');`);
-  const insert = raw.prepare('INSERT INTO flow_runs VALUES (?, ?, ?, ?)');
+  const insert = raw.prepare('INSERT INTO flow_runs (workflow_id, workflow_deploy_number, status, started_at) VALUES (?, ?, ?, ?)');
   insert.run('wf',10,'succeeded',1999900001); insert.run('wf',10,'failed',1999900002);
   insert.run('wf',11,'failed',1999950001); insert.run('wf',12,'succeeded',2000000001);
   insert.run('wf',12,'cancelled',2000000002000); insert.run('wf',12,'running',2000000003);
@@ -60,4 +61,12 @@ it('validates HTTP input and exposes only the requested workflow through the exi
     const response = await fetch(base, {headers:{'X-Staff-Id':'owner'}}); expect(response.status).toBe(200);
     expect((await response.json()).data.current.terminalRuns).toBe(2);
   } finally { await new Promise<void>((resolve,reject) => server.close(error => error ? reject(error) : resolve())); }
+});
+
+it('excludes candidate roots and children from deployment observations and unknown-deployment counts', async () => {
+  const { service, raw } = fixture();
+  raw.exec("INSERT INTO flow_runs VALUES ('trial-root','wf',NULL,'failed',2000000001),('trial-child','wf',12,'failed',2000000002); INSERT INTO workflow_repair_release_records VALUES ('trial_run','trial-root'),('trial_run','trial-child')");
+  const result = await service.compare('wf');
+  expect(result.current).toMatchObject({ terminalRuns: 2, failedRuns: 1, successRate: 50 });
+  expect(result.excludedUnknownDeployment).toBe(2);
 });

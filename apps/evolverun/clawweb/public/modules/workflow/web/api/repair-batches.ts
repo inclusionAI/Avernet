@@ -1,3 +1,4 @@
+import type { RepairTrial, RepairTrialRequest, RepairTrialOptions, RepairTrialTarget } from '../../server/contracts/repair-trial'
 import { fetchJson } from '@avernet/clawweb-shared/web/api/client'
 import { readOnlyJson } from './read-only-json'
 import type { RepairCandidatesQuery, RepairCandidatesResponse, RepairDiff, RepairFeedbackRequest, RepairInboxItem, RepairSelectionRequest, RepairTaskDetail } from '../../server/contracts/repair-workbench'
@@ -9,6 +10,9 @@ const base = '/api/workflow-repairs'
 const segment = encodeURIComponent
 const post = <T,>(url: string, body: unknown) => fetchJson<T>(url, { method: 'POST', body: JSON.stringify(body) })
 export const repairBatches = {
+  trials: (taskId: string, offset = 0) => readOnlyJson<{ configured: boolean; nextOffset?: number | null; trials: RepairTrial[] }>(`${base}/${segment(taskId)}/trials?offset=${offset}`),
+  trialOptions: (taskId: string, revision: number) => readOnlyJson<RepairTrialOptions & { inputSchemaDigest: string; targets: RepairTrialTarget[] }>(`${base}/${segment(taskId)}/trials/options?revision=${revision}`),
+  startTrial: (taskId: string, request: RepairTrialRequest) => post<RepairTrial>(`${base}/${segment(taskId)}/trials`, request),
   request: (workflowId: string, requestId: string) => readOnlyJson<{ revision: RepairRevision | null }>(`${base}/requests/lookup?${new URLSearchParams({ workflowId, requestId })}`),
   publish: (taskId: string, request: RepairConfirmRequest) => post<RepairDeployment>(`${base}/${segment(taskId)}/publish`, request),
   deploymentTargets: (taskId: string) => readOnlyJson<{ targets: RepairReleaseTarget[] }>(`${base}/${segment(taskId)}/deployment-targets`),

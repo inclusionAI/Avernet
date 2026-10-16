@@ -1,3 +1,4 @@
+import { productionRunSql } from "@avernet/clawweb-shared/server/services/run-purpose";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 
 export type SignatureByVersionRow = {
@@ -56,7 +57,7 @@ export class EvolutionMetricsRepository {
          COUNT(*) AS occurrence_count
        FROM diagnosis_cards d
        LEFT JOIN flow_runs f ON f.flow_id = d.flow_id
-       ${signature ? "WHERE d.failure_signature = ?" : ""}
+       WHERE ${productionRunSql("d.flow_id")} ${signature ? "AND d.failure_signature = ?" : ""}
        GROUP BY d.failure_signature, f.workflow_version
        ORDER BY d.failure_signature, f.workflow_version`,
       params,
