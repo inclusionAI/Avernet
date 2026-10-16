@@ -1135,6 +1135,8 @@ def test_agent_card_with_resolve_support_declares_uri_last():
     c = make_agent_card("http://127.0.0.1:20003", resolve_supported=True)
     urls = [e["url"] for e in c["capabilities"]["extensions"]]
     assert RESOLVE_URI in urls
+    # 声明位序=最后（老消费方按索引/位序跳过未知扩展时 resolve 不前置扰序）
+    assert urls[-1] == RESOLVE_URI
     # 既有五项不受影响（retry 被 router:232 retry-only 校验消费，不能动）
     assert "https://avernet.local/a2a/ext/retry/v1" in urls
     assert "https://avernet.local/a2a/ext/cancel/v1" in urls
