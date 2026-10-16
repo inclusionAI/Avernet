@@ -785,7 +785,7 @@ export function classifyFailure(input: {
 - Create: `apps/frontend/src/adapters/a2a/stream.ts`
 - Test: `apps/frontend/src/adapters/a2a/__tests__/stream.test.ts`
 
-线上格式实锤（router `_sse()`/`_stream_response()`）：`POST /rpc` 响应 `text/event-stream`，每个 `data: {json}\n\n` 是**完整 JSON-RPC 响应信封**；`result` 为 wire 事件 `{seq, type, ev: {statusUpdate|artifactUpdate|...}}`；流在 `statusUpdate.metadata.final == "true"` 后由服务端关闭。
+线上格式实锤（**2026-10-16 用户复审修订**）：`POST /rpc` 响应 `text/event-stream`，每个 `data: {json}\n\n` 是**完整 JSON-RPC 响应信封**；`result` 是**成员式 wire 事件**——`wire.kernel_event_to_wire()` 剥掉 `{seq,type,ev}` 包装直出内层成员，即 `{task|message|statusUpdate|artifactUpdate: {...}}` 恰一成员，`seq` 在**成员的 metadata** 里（`member.metadata.seq`；task 成员无 seq→客户端 null）；流在 statusUpdate 成员 `metadata.final == "true"` 后由服务端关闭。权威样例 = 分支 `__tests__/fixtures/engine-wire-snapshot.json`（引擎实跑产出，勿手编）。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -801,19 +801,22 @@ function sseResponse(chunks: string[], status = 200): Response {
   const resp = new Response(stream, { status });
   return resp;
 }
-const evt = (body: any) =>
-  `data: ${JSON.stringify({ jsonrpc: '2.0', id: 1, result: body })}\n\n`;
+// ⚠️ wire 格式修订（用户复审）：成员式对象，无 {seq,type,ev} 包装。
+const evt = (result: any) =>
+  `data: ${JSON.stringify({ jsonrpc: '2.0', id: 1, result })}\n\n`;
 const artifactEvt = (seq: number, text: string) => evt({
-  seq, type: 'artifactUpdate',
-  ev: { artifactUpdate: { taskId: 't1', contextId: 'c1',
+  artifactUpdate: { taskId: 't1', contextId: 'c1',
     artifact: { parts: [{ text }] }, append: true, lastChunk: false,
-    metadata: { seq } } },
+    metadata: { seq } },
 });
 const finalEvt = (seq: number) => evt({
-  seq, type: 'statusUpdate',
-  ev: { statusUpdate: { taskId: 't1', contextId: 'c1',
+  statusUpdate: { taskId: 't1', contextId: 'c1',
     status: { state: 'TASK_STATE_COMPLETED' },
-    metadata: { seq, final: 'true', lastSeq: seq } } },
+    metadata: { seq, final: 'true', lastSeq: seq } },
+});
+const firstTaskEvt = () => evt({
+  task: { id: 't1', contextId: 'c1',
+    status: { state: 'TASK_STATE_WORKING' }, metadata: {} },
 });
 
 async function collect(gen: AsyncGenerator<any>) {
@@ -823,14 +826,12 @@ async function collect(gen: AsyncGenerator<any>) {
 }
 
 describe('SSE 流解析（engine _sse() 口径）', () => {
-  it('逐事件产出：task/statusUpdate/artifactUpdate 转成扁平 wire 事件', async () => {
+  it('逐事件产出：成员式结果转成扁平 wire 事件（task seq=null）', async () => {
     const fetchImpl = async () => sseResponse([
-      evt({ seq: 0, type: 'task', ev: { task: { id: 't1', status: {} } } }),
-      artifactEvt(1, '你'),
-      finalEvt(2),
+      firstTaskEvt(), artifactEvt(1, '你'), finalEvt(2),
     ]);
     const events = await collect(streamRpc('http://x/rpc', buildRpcRequest('SendStreamingMessage', {}), { fetchImpl: fetchImpl as any }));
-    expect(events.map((e) => [e.seq, e.type])).toEqual([[0, 'task'], [1, 'artifactUpdate'], [2, 'statusUpdate']]);
+    expect(events.map((e) => [e.seq, e.type])).toEqual([[null, 'task'], [1, 'artifactUpdate'], [2, 'statusUpdate']]);
     expect(events[1].metadata).toEqual({ seq: 1 });
     expect(events[2].metadata.final).toBe('true');
   });
@@ -894,104 +895,29 @@ describe('SSE 流解析（engine _sse() 口径）', () => {
 
 - [ ] **Step 3: 最小实现**
 
+⚠️ 本段实现示例**已按 2026-10-16 用户复审修订**：原实现按错误的 kernel 内部
+格式（`{seq,type,ev}` 包装）编写且两轮内部 review 自洽失察——真实 router 发送
+成员式结果（`kernel_event_to_wire` 剥壳直出内层成员）。**执行版以 ocb 分支
+`f3a407b8d9`/`68cee987fb`/`71f762336c` 为准**，此处仅保留成员判定核心示意：
+
 ```ts
-/**
- * A2A SSE 流解析（engine router _sse()/_stream_response() 口径）。
- * wire 事件形态：result = {seq, type, ev: {statusUpdate|artifactUpdate|task|message}}；
- * 终态以 statusUpdate.metadata.final==="true" 判定（服务端随后关流）。
- * M1 不含恢复/取消——这里只有单向流消费。
- */
-import { parseRpcMessage, classifyFailure, type RpcRequest, type WireFailure } from './rpc';
-
-export interface WireEvent {
-  seq: number;
-  type: string;                       // 'task' | 'statusUpdate' | 'artifactUpdate' | ...
-  member: Record<string, unknown>;    // ev.* 的内层成员
-  metadata: Record<string, unknown>;
-}
-
-const SEP = '\n\n';
-
-function memberMetadata(type: string, ev: Record<string, unknown>): Record<string, unknown> {
-  const inner = (ev[type] ?? {}) as Record<string, any>;
-  return (inner.metadata ?? {}) as Record<string, unknown>;
-}
-
-export async function* streamRpc(
-  rpcUrl: string, request: RpcRequest,
-  opts: { iamToken?: string; signal?: AbortSignal; fetchImpl?: typeof fetch },
-): AsyncGenerator<WireEvent> {
-  const headers = new Headers({
-    'content-type': 'application/json',
-    accept: 'text/event-stream',
-    ...(opts.iamToken ? { 'x-iam-token': opts.iamToken } : {}),
-  });
-  let resp: Response;
-  try {
-    resp = await (opts.fetchImpl ?? fetch)(rpcUrl, {
-      method: 'POST', headers, signal: opts.signal,
-      body: JSON.stringify(request),
-    });
-  } catch (err) {
-    if (opts.signal?.aborted) return;                  // 主动取消：非失败
-    throw Object.assign(new TypeError('a2a transport'), {
-      failure: classifyFailure({}) ?? { kind: 'transport' },
-    });
-  }
-  if (!resp.ok) {
-    const failure = classifyFailure({ httpStatus: resp.status });
-    throw Object.assign(new Error(`a2a http ${resp.status}`), { failure });
-  }
-  if (!resp.body) {
-    throw Object.assign(new Error('a2a empty body'), { failure: { kind: 'protocol' } });
-  }
-
-  const reader = (resp.body as ReadableStream<Uint8Array>).getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) return;
-      buffer += decoder.decode(value, { stream: true });
-      let idx: number;
-      while ((idx = buffer.indexOf(SEP)) >= 0) {
-        const rawEvent = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + SEP.length);
-        for (const line of rawEvent.split('\n')) {
-          if (!line.startsWith('data:')) continue;    // 注释/空行忽略
-          const parsed = parseRpcMessage(line.slice(5).trim());
-          if (!parsed) {
-            throw Object.assign(new Error('a2a bad envelope'), { failure: { kind: 'protocol' } });
-          }
-          if (parsed.error) {
-            throw Object.assign(new Error(parsed.error.message), {
-              failure: classifyFailure({ rpcError: parsed.error })!,
-            });
-          }
-          const result = parsed.result as Record<string, any> | undefined;
-          if (!result || typeof result !== 'object' || typeof result.type !== 'string') {
-            throw Object.assign(new Error('a2a bad result'), { failure: { kind: 'protocol' } });
-          }
-          const ev = (result.ev ?? {}) as Record<string, unknown>;
-          const event: WireEvent = {
-            seq: result.seq, type: result.type,
-            member: (ev[result.type] ?? {}) as Record<string, unknown>,
-            metadata: memberMetadata(result.type, ev),
-          };
-          yield event;
-          if (event.type === 'statusUpdate' && event.metadata.final === 'true') {
-            return;
-          }
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-    await (resp.body as ReadableStream<Uint8Array>).cancel().catch(() => undefined);
-  }
-}
+// 成员识别（恰一合法成员；zero/multiple → protocol failure）
+const KNOWN = ['task', 'message', 'statusUpdate', 'artifactUpdate'] as const;
+const members = KNOWN.filter((k) =>
+  Object.prototype.hasOwnProperty.call(result, k));
+if (members.length !== 1) throw /* failure: { kind: 'protocol' } */;
+const type = members[0];
+const member = result[type];
+const metadata = (member.metadata ?? {}) as Record<string, unknown>;
+const event: WireEvent = {
+  seq: typeof metadata.seq === 'number' ? metadata.seq : null,
+  type, member, metadata,
+};
 ```
+
+其余面（信封校验、响应 id 关联、content-type 分流 JSON 错误体、pending-buffer
+上限、card 探测超时/取消）同样以分支实现为准。原始错误版实现已从本计划移除。
+
 
 - [ ] **Step 4: 验证通过**
 
@@ -1028,14 +954,15 @@ git push -u origin feat/a2a-frontend-client
 
 A2AProvider 接线、SendStreamingMessage 恢复/取消/禁发规则、HITL 结构化事件、M2 的禁发-恢复预算测试（终审约束 3）、企业代理链映射。
 
-**M2 接线前必须补（终审复审 2026-10-16 发现，APPROVE 附带）**：`streamRpc` 对"流面鉴权拒绝"不可见——引擎 AuthGate 拒绝经 `_rpc_error_response` 返回 HTTP 200 + 紧凑 JSON（无 `data:` 行、无 `\n\n`），M1 的 SSE 解析会静默零事件完成，既不出 `auth` 失败也不触发 locked-v3 升级。修法：流结束且零 SSE 事件（或 content-type 为 application/json）时对累积 buffer 跑 `parseRpcMessage` + `classifyFailure`。
+**M2 接线前必须补**——~~streamRpc 流面鉴权拒绝盲区~~ **已于 M1 修复轮关闭**（用户复审升级为 M1 项，见执行状态）。
 
-## 执行状态（2026-10-16 收官）
+## 执行状态（2026-10-16 用户复审后终版）
 
-- P0 ✅ Avernet `f5e08d8d1..ee3167f69`（card 条件声明 + 引擎真值 + 终审加固，模块 96 passed）
-- M1 ✅ ocb `feat/a2a-frontend-client` `ab17a98dbe..5e3cc3a84f`（6 模块+3 修复 commit，44 passed，UNWIRED grep 双证，已推 origin，基线 origin/dev@754d4b333）
-- 终审：APPROVE_WITH_NITS → 修复轮 6 findings（F1 鉴权分类对引擎现实升格/F2 中段失败 typed/F3 畸形卡守卫/F7 scheme fail-fast/F8 seq null/F5 降级测试/F9 顺序钉住/F10 取值加固）→ 聚焦复审 APPROVE
-- 测试环境配方见 spec §1 M1 注记（公共 registry jest 沙箱 + .umi 占位）；套件级回归移交 ocb CI
+- P0 ✅ Avernet `f5e08d8d1..ee3167f69`（card 条件声明 + 引擎真值 + 终审加固，模块 96 passed）。**工程门禁核查**：engine CI 无按文件行数的门禁（ci_test.sh=pytest+report_check 覆盖率门）；router.py 1025 行/test 3040 行为 PR#2743 既有规模，本次净增 +33/+100，不触任何 CI 门禁；800-max 属全局编码规则的既有债务，router 拆分列为独立后续任务不夹带。
+- M1 ✅ ocb `feat/a2a-frontend-client` `ab17a98dbe..71f762336c` 共 12 commits 已推 origin（基线 origin/dev@754d4b333）。**71 passed**，UNWIRED 保持。
+- 内部批量终审 APPROVE 后**用户复审推翻 wire 结论**（P1×2 发现）：①streamRpc 消费了 kernel 内部格式而非 router 实发的 `kernel_event_to_wire` 成员式输出（真实流全事件会被误判 protocol，客户端+客户端测试互证假象）；②流面鉴权拒绝（HTTP 200+JSON 体）不可达 classifier、auth 死路。
+- 修复轮（`f3a407b8d9`/`68cee987fb`/`71f762336c`）：成员式解析+**引擎实跑产出的跨仓 fixture**（`fixtures/engine-wire-snapshot.json` 锚死格式）；content-type 分流 JSON 错误体进分类器（auth 路径激活）+`sse_eof_no_final`；信封硬校验+id 关联；pending-buffer 上限 1MiB（RED 阶段实复现挂死级 DoS）；card 探测超时/取消。
+- 教训固化：客户端解析器的测试 fixture 必须由**服务端真实函数产出**，客户端自写样例会与服务端漂移形成虚假自洽。
 
 ## Self-Review 记录
 
