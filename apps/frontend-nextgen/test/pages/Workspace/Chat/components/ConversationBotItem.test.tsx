@@ -303,3 +303,52 @@ describe('ConversationBotItem Bot 可用状态(FAILED/PENDING 整行禁用)', ()
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('ConversationBotItem 行徽标', () => {
+  const renderBadgeRow = (overrides: Partial<ChatBotView> = {}) => {
+    render(
+      <ConversationBotItem
+        bot={{ ...bot, ...overrides }}
+        section="managed"
+        expanded={false}
+        selectedSessionId={null}
+        origin="mine"
+        scope="all"
+        sessionKey=""
+        onToggle={noop}
+        onOriginChange={noop}
+        onScopeChange={noop}
+        onSearchSession={noop}
+        onCreateSession={noop}
+        onSelectSession={noop}
+        onLoadMore={noop}
+        onToggleFavorite={noop}
+        isFavoritePending={() => false}
+        onOpenAgentCodingBot={noop}
+      />,
+    );
+  };
+
+  it('AgentCoding 缺模板名但保留模板分类时展示分类而不是 AgentCoding', () => {
+    renderBadgeRow({ isAgentCodingBot: true, chatable: false, templateType: 'generalCC' });
+    expect(screen.getByText('generalCC')).toBeInTheDocument();
+    expect(screen.queryByText('AgentCoding')).not.toBeInTheDocument();
+  });
+
+  it('普通 CC Bot 展示引擎标签而不是 AgentCoding', () => {
+    renderBadgeRow({ engine: 'claude_code' });
+    expect(screen.getByText('ClaudeCode')).toBeInTheDocument();
+    expect(screen.queryByText('AgentCoding')).not.toBeInTheDocument();
+  });
+
+  it('徽标位于名称下方独立行,超长模板名按整行截断且不新增 Tooltip', () => {
+    renderBadgeRow({
+      isAgentCodingBot: true,
+      chatable: false,
+      templateName: '非常长非常长非常长非常长模板名',
+    });
+    const label = screen.getByText('非常长非常长非常长非常长模板名');
+    expect(label).toHaveClass('max-w-full', 'truncate');
+    expect(label.closest('[data-state="tooltip"]')).toBeNull();
+  });
+});

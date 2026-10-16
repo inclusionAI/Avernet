@@ -87,8 +87,11 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   const interactive = isAgentCodingBot || bot.chatable;
   // Bot 可用状态(bots 接口 status):FAILED/PENDING 整行禁用并悬停提示原因(判定与文案见包装器)。
   const { reason: statusUnavailableReason, unavailable } = resolveBotUnavailable(bot.status);
-  // AgentCoding 行徽标展示模板名(区分多个 AgentCoding Bot);普通 Bot 展示引擎名,dmore「至多一枚」不变。
-  const runtimeLabel = bot.isAgentCodingBot ? bot.templateName || 'AgentCoding' : getBotEngineLabel(bot.engine);
+  // AgentCoding 行徽标展示模板名(区分多个 AgentCoding Bot);历史 Bot 缺模板名时回退展示模板分类,
+  // 普通 Bot 展示引擎名,dmore「至多一枚」不变。
+  const runtimeLabel = bot.isAgentCodingBot
+    ? bot.templateName || bot.templateType || 'AgentCoding'
+    : getBotEngineLabel(bot.engine);
   const canFavorite = supportsBotSessionFavorites(bot.engine);
   // 筛选/搜索的激活与可见:归属 others 或 favorite 范围点亮筛选;归属+范围筛选对管理 Bot 开放,
   // 好友 Bot 仅在有收藏能力时暴露「会话」范围(TEClaw 无收藏接口,不发收藏请求)。
