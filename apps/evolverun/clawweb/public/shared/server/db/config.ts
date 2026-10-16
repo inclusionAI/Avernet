@@ -209,6 +209,16 @@ type YamlAutoHealConfig = {
   diagnosisPrompt?: string;
   pollTimeoutMs?: number;
   pollIntervalMs?: number;
+  /** Git remote URL for clawflows (the repo that owns packs and deploy tags). */
+  clawflowsRemoteUrl?: string;
+  /** Git username for push authentication. */
+  gitUsername?: string;
+  /** Git author name for commits. */
+  gitAuthorName?: string;
+  /** Git author email for commits. */
+  gitAuthorEmail?: string;
+  /** Git auth token/password for push authentication (env > yaml). */
+  gitToken?: string;
 };
 
 type YamlSmartOnboardingConfig = {

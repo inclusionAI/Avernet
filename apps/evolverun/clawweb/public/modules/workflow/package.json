@@ -11,6 +11,10 @@
       "types": "./dist/server/index.d.ts",
       "import": "./dist/server/index.js"
     },
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "import": "./dist/server/index.js"
+    },
     "./server/*": {
       "types": "./dist/server/*.d.ts",
       "import": "./dist/server/*.js"

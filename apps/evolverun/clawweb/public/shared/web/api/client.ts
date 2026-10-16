@@ -75,6 +75,10 @@ import type {
   AutoHealDiagnosisPollResult,
   AutoHealApplyRequest,
   AutoHealApplyResult,
+  AutoHealSaveRequest,
+  AutoHealSaveResult,
+  AutoHealDeployRequest,
+  AutoHealDeployResult,
   AutoHealRunRequest,
   AutoHealRunResult,
   BotPermission,
@@ -2648,6 +2652,20 @@ export const api = {
 
     apply(params: AutoHealApplyRequest): Promise<AutoHealApplyResult> {
       return fetchJson<AutoHealApplyResult>(`${BASE}/auto-heal/apply`, {
+        method: 'POST',
+        body: JSON.stringify(params),
+      })
+    },
+
+    save(params: AutoHealSaveRequest): Promise<AutoHealSaveResult> {
+      return fetchJson<AutoHealSaveResult>(`${BASE}/auto-heal/save`, {
+        method: 'POST',
+        body: JSON.stringify(params),
+      })
+    },
+
+    deploy(params: AutoHealDeployRequest): Promise<AutoHealDeployResult> {
+      return fetchJson<AutoHealDeployResult>(`${BASE}/auto-heal/deploy`, {
         method: 'POST',
         body: JSON.stringify(params),
       })

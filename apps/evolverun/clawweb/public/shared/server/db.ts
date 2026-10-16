@@ -531,13 +531,28 @@ export function resolveRepairServiceConfig(configPath?: string): ResolvedRepairS
 }
 
 /** Resolve auto-heal config from env var > yaml. */
-export function resolveAutoHealConfig(configPath?: string): { botId: string; diagnosisPrompt: string; pollTimeoutMs: number; pollIntervalMs: number } {
+export function resolveAutoHealConfig(configPath?: string): {
+  botId: string;
+  diagnosisPrompt: string;
+  pollTimeoutMs: number;
+  pollIntervalMs: number;
+  clawflowsRemoteUrl: string;
+  gitUsername: string;
+  gitAuthorName: string;
+  gitAuthorEmail: string;
+  gitToken: string;
+} {
   const yaml = readYamlConfig(configPath);
   return {
     botId: getEnv("AUTO_HEAL_BOT_ID") ?? yaml.autoHeal?.botId ?? "",
     diagnosisPrompt: getEnv("AUTO_HEAL_DIAGNOSIS_PROMPT") ?? yaml.autoHeal?.diagnosisPrompt ?? "",
     pollTimeoutMs: envInt("AUTO_HEAL_POLL_TIMEOUT_MS", yaml.autoHeal?.pollTimeoutMs ?? 1800000),
     pollIntervalMs: envInt("AUTO_HEAL_POLL_INTERVAL_MS", yaml.autoHeal?.pollIntervalMs ?? 3000),
+    clawflowsRemoteUrl: getEnv("AUTO_HEAL_CLAWFLOWS_REMOTE_URL") ?? yaml.autoHeal?.clawflowsRemoteUrl ?? "",
+    gitUsername: getEnv("AUTO_HEAL_GIT_USERNAME") ?? yaml.autoHeal?.gitUsername ?? "clawweb",
+    gitAuthorName: getEnv("AUTO_HEAL_GIT_AUTHOR_NAME") ?? yaml.autoHeal?.gitAuthorName ?? "ClawWeb AutoHeal",
+    gitAuthorEmail: getEnv("AUTO_HEAL_GIT_AUTHOR_EMAIL") ?? yaml.autoHeal?.gitAuthorEmail ?? "clawweb@antgroup.com",
+    gitToken: getEnv("AUTO_HEAL_GIT_TOKEN") ?? yaml.autoHeal?.gitToken ?? "",
   };
 }
 
