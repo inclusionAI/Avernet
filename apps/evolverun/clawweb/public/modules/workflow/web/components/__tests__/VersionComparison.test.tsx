@@ -55,3 +55,14 @@ it('drops dropdown selections when switching workflows even without a URL select
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/workflows/second/version-comparison?'))
   expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/second/') && String(url).includes('baseline='))).toBe(false)
 })
+
+it.each(['network', 'json'])('keeps unexpected %s failures behind the generic message', async failure => {
+  vi.stubGlobal('fetch', vi.fn(async () => {
+    if (failure === 'network') throw new Error('private proxy diagnostic')
+    return { ok: true, json: async () => { throw new SyntaxError('unexpected private HTML fragment') } }
+  }))
+  render(<SuccessTrendCard workflowId="workflow" currentSuccessRate="—" currentDetail="" />)
+  fireEvent.click(screen.getByRole('button', { name: '版本对比' }))
+  await screen.findByText('版本对比加载失败')
+  expect(screen.queryByText(/private/)).not.toBeInTheDocument()
+})

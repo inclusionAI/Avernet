@@ -82,7 +82,7 @@ export default function WorkflowWorkspace() {
     setSelectedId(id)
     const next = new URLSearchParams(searchParams)
     next.set('workflowId', id)
-    if (id !== selectedId) {
+    if (id !== selectedWorkflow?.workflow_id) {
       next.delete('baseline')
       next.delete('current')
     }

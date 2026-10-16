@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, useLocation } from 'react-router-dom'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 const queryHooks = vi.hoisted(() => ({
@@ -35,7 +35,8 @@ import WorkflowWorkspace from '../WorkflowWorkspace'
 
 function LocationProbe() {
   const location = useLocation()
-  return <output aria-label="workspace-location">{location.search}</output>
+  const navigate = useNavigate()
+  return <><button onClick={() => navigate(-1)}>浏览器后退</button><output aria-label="workspace-location">{location.search}</output></>
 }
 
 function renderWorkspace(path = '/workflows/workspace?workflowId=wf-1&tab=evolution&evoTab=suggestions') {
@@ -107,4 +108,20 @@ describe('unified task escort navigation', () => {
     expect(screen.getByText('管理员大盘内容')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '数据大盘' })).toHaveAttribute('aria-current', 'page')
   })
+})
+
+it('clears the displayed workflow versions after browser Back leaves a different local selection', async () => {
+  renderWorkspace('/workflows/workspace?workflowId=wf-1&view=version-comparison&baseline=159&current=160')
+  const chooseSecond = async () => {
+    await userEvent.click(screen.getByRole('button', { name: /切换工作流.*示例工作流/ }))
+    await userEvent.click(screen.getByRole('button', { name: /备用工作流.*wf-2/ }))
+  }
+  await chooseSecond()
+  await userEvent.click(screen.getByRole('button', { name: '浏览器后退' }))
+  expect(screen.getByLabelText('workspace-location')).toHaveTextContent('workflowId=wf-1')
+  expect(screen.getByLabelText('workspace-location')).toHaveTextContent('baseline=159')
+  await chooseSecond()
+  expect(screen.getByLabelText('workspace-location')).toHaveTextContent('workflowId=wf-2')
+  expect(screen.getByLabelText('workspace-location')).not.toHaveTextContent('baseline=')
+  expect(screen.getByLabelText('workspace-location')).not.toHaveTextContent('current=')
 })

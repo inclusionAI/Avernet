@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { WorkflowVersionComparison, VersionObservation } from '../../server/contracts/workflow-version-comparison.js'
 
+class ComparisonUnavailableError extends Error {}
+
 const formatTime = (ms: number) => new Date(ms).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
 export function VersionComparison({ workflowId }: { workflowId: string }) {
   return <VersionComparisonPanel key={workflowId} workflowId={workflowId} />
@@ -24,10 +26,10 @@ function VersionComparisonPanel({ workflowId }: { workflowId: string }) {
     if (selection.baseline !== undefined) query.set('baseline', String(selection.baseline))
     if (selection.current !== undefined) query.set('current', String(selection.current))
     fetch(`/api/workflows/${encodeURIComponent(workflowId)}/version-comparison?${query}`).then(async response => {
-      if (!response.ok) throw new Error(response.status === 503
-        ? '版本对比服务未就绪，请联系管理员检查服务配置。' : '版本对比加载失败')
+      if (response.status === 503) throw new ComparisonUnavailableError()
+      if (!response.ok) throw new Error('comparison failed')
       return response.json()
-    }).then(json => { if (!cancelled) setData(json.data) }).catch((error: unknown) => { if (!cancelled) setError(error instanceof Error ? error.message : '版本对比加载失败') })
+    }).then(json => { if (!cancelled) setData(json.data) }).catch((error: unknown) => { if (!cancelled) setError(error instanceof ComparisonUnavailableError ? '版本对比服务未就绪，请联系管理员检查服务配置。' : '版本对比加载失败') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [workflowId, selection.baseline, selection.current, retry])
