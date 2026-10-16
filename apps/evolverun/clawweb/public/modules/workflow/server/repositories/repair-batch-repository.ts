@@ -1,4 +1,4 @@
-import { automaticAdvance, isAutomaticBatch } from '../contracts/repair-automatic-chain.js';
+import { automaticAdvance, changedChainItems, isAutomaticBatch } from '../contracts/repair-automatic-chain.js';
 import { repairEvidenceFacts, repairEvidenceFlows } from '../contracts/repair-batch.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import {
@@ -248,7 +248,15 @@ export class RepairBatchRepository {
     [input.phase, draftJson, checksJson, digestRepairJson(input.draft), digestRepairJson(input.checks), Date.now(),
       input.workflowId, input.taskId, input.revision, input.expectedStateVersion, current.phase]);
     if (result.affectedRows !== 1) conflict('STATE_CONFLICT', 'Draft result was already settled');
-    if (input.phase === 'no_change' && !isAutomaticBatch(current.input)) {
+    let releaseUnchanged = input.phase === 'no_change' && !isAutomaticBatch(current.input);
+    const origin = current.input.automation;
+    if (input.phase === 'no_change' && isAutomaticBatch(current.input) && origin!.batchIndex === origin!.batchCount! - 1) {
+      const revisions = await new RepairBatchRepository(tx).listRevisions(input.workflowId, input.taskId);
+      // Only a complete, validated zero-change chain releases every reservation.
+      // Intermediate batches and candidates containing prior changes keep ownership.
+      releaseUnchanged = changedChainItems(revisions, revisions[0], true).length === 0;
+    }
+    if (releaseUnchanged) {
       await tx.exec(`UPDATE workflow_repair_items SET state = 'pending', active_task_id = NULL, active_revision = NULL,
         state_version = state_version + 1, updated_at_ms = ? WHERE workflow_id = ? AND active_task_id = ? AND state = 'processing'`,
       [Date.now(), input.workflowId, input.taskId]);

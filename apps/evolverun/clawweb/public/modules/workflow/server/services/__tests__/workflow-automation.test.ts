@@ -291,6 +291,9 @@ it.each([true, false])('notifies a final no_change round only when prior batches
       status: changed ? 'succeeded' : 'no_change', draft, checks: { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit,
         packDigest: draft.packDigest, candidateDigest: digestRepairJson(draft), static: { status: 'passed' }, mock: { status: 'not_covered' },
         coverage: task.latestAttempt.input.items.map(item => ({ itemId: item.itemId })) } });
+    const ownership = await f.workbench.candidates('wf-1');
+    expect(ownership.counts.processing).toBe(index === 0 ? 100 : priorChanged ? 101 : 0);
+    if (index === 1 && !priorChanged) expect(ownership.counts.pending).toBe(101);
     f.advance(); await f.restart().tick();
     if (!index) { f.advance(); await f.restart().tick(); }
   }
@@ -305,4 +308,11 @@ it.each([true, false])('notifies a final no_change round only when prior batches
   f.advance(); await f.restart().tick();
   expect(notices()).toHaveLength(priorChanged ? 1 : 0);
   expect(f.calls).toHaveLength(2);
+  if (!priorChanged) {
+    const inbox = await f.workbench.candidates('wf-1');
+    const item = await f.workbench.item('wf-1', 'item-0');
+    expect(item).toMatchObject({ state: 'pending', activeTaskId: null, activeRevision: null });
+    await f.workbench.create('human', { workflowId: 'wf-1', itemIds: [item.itemId], inputDigest: inbox.inputDigest, instructions: '人工重新评估', requestId: 'after-unchanged-round' });
+    expect(f.calls).toHaveLength(3);
+  }
 });
