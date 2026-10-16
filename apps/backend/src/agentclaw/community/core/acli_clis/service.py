@@ -33,6 +33,7 @@ from agentclaw.community.core.acli_clis.errors import (
     AcliRequestRejectedError,
     AcliRollbackFailedError,
 )
+from agentclaw.community.core.acli_clis.market import AcliMarketSearch
 from agentclaw.community.core.acli_clis.protocols import AcliCliServiceProtocol, BotCli
 from agentclaw.community.core.acli_clis.port import (
     AcliMarketPage,
@@ -80,6 +81,7 @@ class AcliCliService(AcliCliServiceProtocol):
         scope_reconciler: CliPassportScopeReconciler,
         manifest_resolver: CliCapabilityManifestResolver,
         port: AcliPort,
+        market: AcliMarketSearch,
     ) -> None:
         self._bots = bot_repository
         self._locks = lock_repository
@@ -87,6 +89,7 @@ class AcliCliService(AcliCliServiceProtocol):
         self._reconciler = scope_reconciler
         self._manifest = manifest_resolver
         self._port = port
+        self._market = market
         # One add/remove at a time per bot: each spans Passport and container
         # steps with awaits between them, and the owner's edit lock is
         # reentrant, so two of the owner's requests could otherwise interleave.
@@ -117,27 +120,13 @@ class AcliCliService(AcliCliServiceProtocol):
         ]
 
     async def search_market(
-        self,
-        *,
-        bot_id: str,
-        entity_id: str,
-        keyword: str,
-        page_no: int,
-        page_size: int,
+        self, *, keyword: str, page_no: int, page_size: int
     ) -> AcliMarketPage:
-        """One page of the acli market, searched from inside the bot's container."""
-        bot = load_bot(self._bots, bot_id=bot_id, entity_id=entity_id)
-        self._require_acli_engine(bot)
-        try:
-            return await self._port.market(
-                bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
-                keyword=keyword,
-                page_no=page_no,
-                page_size=page_size,
-            )
-        except AcliPortError as error:
-            raise _container_error(error) from error
+        """One page of the acli market. The market is the same for every bot,
+        so no bot or container is involved."""
+        return await asyncio.to_thread(
+            self._market.search, keyword=keyword, page_no=page_no, page_size=page_size
+        )
 
     # ── writes ───────────────────────────────────────────────────────────
 

@@ -222,6 +222,7 @@ from .identity import router as identity_router
 from .local import router as local_router
 from .loadtest import router as loadtest_router
 from .market import router as market_router
+from .market.acli_clis import router as acli_market_router
 from .mcp import router as mcp_router
 from .mcp.router import bot_mcp_router
 from .bot_logs import router as logs_router
@@ -562,6 +563,11 @@ def build_public_router() -> APIRouter:
     # before the ``{bot_id}`` wildcard router below.
     public.include_router(
         market_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    public.include_router(
+        acli_market_router,
         responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )

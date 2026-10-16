@@ -189,7 +189,7 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
 届时按 `startup-ops` 独立契约版本化，probe 门控。
 
 - **A3（acli 市场工具，公开 API `/openapi/v1/bots/{bot_id}/clis` 使用）**：与 A2 的上传二进制
-  不同，这里由引擎在容器内调用 `acli` 安装市场上的工具。openclaw 与 claude_code 提供三个端点，
+  不同，这里由引擎在容器内调用 `acli` 安装市场上的工具。openclaw 与 claude_code 提供两个端点（市场搜索不需要容器，由 backend 直接调用市场 API），
   约定与 A2 相同：参数非法返回 `400`，acli 拒绝返回 `200` + `success:false` + `error`，
   `404` 只表示「引擎没有该端点」。
 
@@ -197,7 +197,6 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
   | --- | --- | --- |
   | `POST /api/cli/acli/install` | `{name}` | `acli install <name> --install-dir <引擎安装目录> --yes --json`，返回 `{name, command, description, version}` |
   | `POST /api/cli/acli/uninstall` | `{name}` | acli 有记录则 `acli tool uninstall <name> --yes --json`；没有记录也算成功（`uninstalled: false`） |
-  | `GET /api/cli/acli/market` | `?keyword=&page_no=&page_size=` | `acli list` 的一页：`{items, total, has_more}` |
 
   **安装目录归引擎（与 A2 一致）**：平台只给出工具名，不下发也不知道安装目录。openclaw 与 claude_code
   共用固定目录 `/home/admin/.agentclaw/bin`（引擎常量 `ACLI_INSTALL_DIR`，不可配置：镜像只把这个目录放进

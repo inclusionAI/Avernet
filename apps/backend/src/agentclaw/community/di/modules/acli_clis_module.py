@@ -1,10 +1,13 @@
 """Bindings for managing a bot's acli market CLIs."""
 from __future__ import annotations
 
+from typing import Annotated
+
 from injector import Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.acli_cli_service import AcliCliServiceProtocol
 from agentclaw.community.core.acli_clis.arca_port import ArcaAcliPort
+from agentclaw.community.core.acli_clis.market import AcliMarketSearch
 from agentclaw.community.core.acli_clis.service import AcliCliService
 from agentclaw.community.core.mcp.services.cli_capabilities import (
     CliCapabilityManifestResolver,
@@ -19,7 +22,9 @@ from agentclaw.community.core.repository.protocols.bot import (
 from agentclaw.community.core.repository.protocols.identity import (
     CallerIdentityRepositoryProtocol,
 )
+from agentclaw.community.di import config as cfg
 from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
+from agentclaw.community.plugin_api.http_client import QUALIFIER_GENERAL, HttpClient
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
@@ -36,6 +41,8 @@ class AcliClisModule(Module):
         identity_repository: CallerIdentityRepositoryProtocol,
         passport_plugin: PassportPlugin,
         transport: DeviceAdapterTransport,
+        market_config: cfg.AcliMarketConfig,
+        http_client: Annotated[HttpClient, QUALIFIER_GENERAL],
         injector: Injector,
     ) -> AcliCliServiceProtocol:
         # Resolved here rather than injected: importing the resolver at module
@@ -57,6 +64,11 @@ class AcliClisModule(Module):
             port=ArcaAcliPort(
                 resolver=injector.get(DeviceContextResolver),
                 transport=transport,
+            ),
+            # The market search needs no container: it calls the configured
+            # market API with the general client (no base URL of its own).
+            market=AcliMarketSearch(
+                http_client=http_client, search_url=market_config.search_url
             ),
         )
 

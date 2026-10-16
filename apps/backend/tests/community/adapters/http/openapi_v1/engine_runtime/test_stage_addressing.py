@@ -106,7 +106,6 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("patch", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"),
     ("patch", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type"),
     ("get", "/openapi/v1/bots/{bot_id}/clis"),
-    ("get", "/openapi/v1/bots/{bot_id}/clis/market"),
     ("post", "/openapi/v1/bots/{bot_id}/clis"),
     ("delete", "/openapi/v1/bots/{bot_id}/clis/{cli_code}"),
     ("get", "/openapi/v1/bots/{bot_id}/authorized-apps"),

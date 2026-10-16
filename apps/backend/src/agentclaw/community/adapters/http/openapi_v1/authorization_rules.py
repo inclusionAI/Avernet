@@ -311,7 +311,6 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         PermissionLevel.OWNER, EDIT_LOCK
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/clis"): Check(PermissionLevel.MEMBER),
-    ("GET", "/openapi/v1/bots/{bot_id}/clis/market"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/clis"): Check(PermissionLevel.OWNER, EDIT_LOCK),
     ("DELETE", "/openapi/v1/bots/{bot_id}/clis/{cli_code}"): Check(
         PermissionLevel.OWNER, EDIT_LOCK
@@ -649,6 +648,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         "tenant-identical marketplace"
     ),
     ("POST", "/openapi/v1/bots/market/skills"): NoCheck("tenant-identical marketplace"),
+    ("GET", "/openapi/v1/bots/market/clis"): NoCheck("tenant-identical marketplace"),
     ("GET", "/openapi/v1/bots/mcp/servers"): NoCheck(
         "tenant-identical MCP catalogue and per-caller config"
     ),

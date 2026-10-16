@@ -1705,7 +1705,7 @@ release). Spec: `apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`.
 | Method | Path | Bar | Purpose |
 |---|---|---|---|
 | GET | `/openapi/v1/bots/{bot_id}/clis` | MEMBER | Every CLI in the bot's grant: `cli_code`, `cli_name`, `cli_desc`, `identity_mode`, `default` |
-| GET | `/openapi/v1/bots/{bot_id}/clis/market` | MEMBER | Search the acli market from inside the running bot (`keyword`, `page_no`, `page_size`) |
+| GET | `/openapi/v1/bots/market/clis` | Any caller | Search the acli market (`keyword`, `page_no`, `page_size`). Not tied to a bot: the backend calls the market API at the configured `acli_market.search_url`; with none configured the answer is `501`, and an unreachable market is `502`. |
 | POST | `/openapi/v1/bots/{bot_id}/clis` | OWNER + edit lock | `{cli_code}` (the **market name**, e.g. `deepinsight-cli`, not `di`): install, then grant as `owner` |
 | DELETE | `/openapi/v1/bots/{bot_id}/clis/{cli_code}` | OWNER + edit lock | Revoke, then uninstall |
 | PATCH | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type` | OWNER + edit lock | Unchanged: switch `owner`/`caller` |
@@ -2022,7 +2022,7 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 ## Changelog (append a dated line whenever you move the board)
 
 - **2026-10-15** — **acli CLIs on a bot.** `GET`/`POST /openapi/v1/bots/{bot_id}/clis`,
-  `GET …/clis/market` and `DELETE …/clis/{cli_code}`: search the acli market,
+  `GET /openapi/v1/bots/market/clis` and `DELETE …/clis/{cli_code}`: search the acli market,
   add (install, then grant) and remove (revoke, then uninstall) a bot's tools,
   each all-or-nothing with a named state when a rollback fails. AgentPass stays
   the only record; the acli market is the only catalog.

@@ -960,7 +960,7 @@ Spec：`apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`。
 | 方法 | 路径 | 权限 | 用途 |
 |---|---|---|---|
 | GET | `/openapi/v1/bots/{bot_id}/clis` | MEMBER | bot 授权中的全部 CLI：`cli_code`、`cli_name`、`cli_desc`、`identity_mode`、`default` |
-| GET | `/openapi/v1/bots/{bot_id}/clis/market` | MEMBER | 在运行中的 bot 容器内搜索 acli 市场（`keyword`、`page_no`、`page_size`） |
+| GET | `/openapi/v1/bots/market/clis` | 任意调用方 | 搜索 acli 市场（`keyword`、`page_no`、`page_size`）。不绑定 bot：backend 直接调用配置项 `acli_market.search_url` 指向的市场 API；未配置时返回 `501`，市场不可达返回 `502`。 |
 | POST | `/openapi/v1/bots/{bot_id}/clis` | OWNER + 编辑锁 | `{cli_code}`（**市场名**，如 `deepinsight-cli`，而不是 `di`）：先安装，再以 `owner` 授权 |
 | DELETE | `/openapi/v1/bots/{bot_id}/clis/{cli_code}` | OWNER + 编辑锁 | 先撤销授权，再卸载 |
 | PATCH | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type` | OWNER + 编辑锁 | 不变：切换 `owner`/`caller` |
@@ -1222,7 +1222,7 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
 
 - **2026-10-15** —— **Bot 的 acli CLI。** 新增 `GET`/`POST /openapi/v1/bots/{bot_id}/clis`、
-  `GET …/clis/market` 与 `DELETE …/clis/{cli_code}`：搜索 acli 市场、添加（先安装后授权）与删除
+  `GET /openapi/v1/bots/market/clis` 与 `DELETE …/clis/{cli_code}`：搜索 acli 市场、添加（先安装后授权）与删除
   （先撤销后卸载）bot 的工具，均为全部成功或全部不变，回滚失败时返回具体状态。AgentPass 仍是唯一记录，
   acli 市场是唯一目录。
 - **2026-08-27** —— **Owner 级定时任务聚合列表。** 新增

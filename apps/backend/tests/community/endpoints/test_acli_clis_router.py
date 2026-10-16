@@ -1,8 +1,10 @@
 """Endpoint coverage for ``/openapi/v1/bots/{bot_id}/clis``.
 
 The cases run the real router, service, Passport scope writer and engine port.
-The bot's container is the in-memory adapter's simulated acli market, reached
-through a fake device resolver; Passport is the test profile's recording fake.
+The bot's container is the in-memory adapter's simulated acli install target,
+reached through a fake device resolver; Passport is the test profile's
+recording fake. The market search reaches the test profile's stubbed HTTP
+client at a configured URL.
 Ordering, rollback and every failure branch are pinned by the service tests in
 ``tests/community/core/acli_clis``.
 """
@@ -10,10 +12,15 @@ Ordering, rollback and every failure branch are pinned by the service tests in
 from __future__ import annotations
 
 import time
+from typing import Annotated
+
+import httpx
 
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
+from agentclaw.community.di import config as cfg
+from agentclaw.community.plugin_api.http_client import QUALIFIER_GENERAL, HttpClient
 from agentclaw.community.plugin_api.passport import PassportPlugin, unpack_resource_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -158,43 +165,65 @@ def list_bot_clis_missing_bot():
     """An absent bot reads as the standard 404."""
 
 
+_MARKET_URL = "https://market.example.test/api/v1/cli-tools/search"
+
+
+def _seed_market(world) -> None:
+    """A configured market whose API answers with two published tools."""
+    _seed_owner(world)
+    world.injector.binder.bind(
+        cfg.AcliMarketConfig, to=cfg.AcliMarketConfig(search_url=_MARKET_URL), scope=None
+    )
+    world.get(Annotated[HttpClient, QUALIFIER_GENERAL]).set_response(
+        "get",
+        httpx.Response(
+            200,
+            json={"success": True, "errorMsg": None, "data": [
+                {"id": 1, "name": "deepinsight-cli", "command": "di",
+                 "description": "1", "version": "1.0.9", "readme": "# DI"},
+                {"id": 2, "name": "dataphin", "command": "dataphin",
+                 "description": "dataphinCLI工具", "version": "1.4.14"},
+            ]},
+            request=httpx.Request("GET", _MARKET_URL),
+        ),
+    )
+
+
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/bots/{bot_id}/clis/market",
+    path="/openapi/v1/bots/market/clis",
     scenario="happy",
-    input=CaseInput(
-        path_params={"bot_id": _BOT_ID},
-        query_params={**_QUERY, "keyword": "deep"},
-        headers=_HEADERS,
-    ),
-    seed=_seed_bot,
+    input=CaseInput(query_params={"keyword": "d", "page_size": 1}, headers=_HEADERS),
+    seed=_seed_market,
     expect=ExpectSuccess(
         status=200,
         json_contains={
             "code": 200000,
             "data": {
                 "items": [{"name": "deepinsight-cli", "command": "di",
-                           "description": "", "version": "1.0.0"}],
-                "total": 1,
-                "has_more": False,
+                           "description": "1", "version": "1.0.9"}],
+                "total": 2,
+                "has_more": True,
             },
         },
     ),
 )
 def search_acli_market_happy():
-    """The search runs in the bot's container and returns the market's page."""
+    """The backend asks the configured market API; no bot or container is involved."""
 
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/bots/{bot_id}/clis/market",
+    path="/openapi/v1/bots/market/clis",
     scenario="error",
-    input=CaseInput(path_params={"bot_id": "missing_acli_bot"}, query_params=_QUERY, headers=_HEADERS),
+    input=CaseInput(query_params={"keyword": "d"}, headers=_HEADERS),
     seed=_seed_owner,
-    expect=ExpectError(status=404, json_contains={"message": "Not found", "data": None}),
+    expect=ExpectError(
+        status=501, json_contains={"message": "The acli market is not configured", "data": None}
+    ),
 )
-def search_acli_market_missing_bot():
-    """Searching needs a bot to search from."""
+def search_acli_market_not_configured():
+    """A deployment with no market URL refuses the search plainly."""
 
 
 @endpoint_test(

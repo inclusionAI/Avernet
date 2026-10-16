@@ -12,7 +12,6 @@ import asyncio
 from typing import Any, Mapping, Protocol, runtime_checkable
 
 from agentclaw.community.core.acli_clis.port import (
-    AcliMarketPage,
     AcliPort,
     AcliPortError,
     AcliTool,
@@ -40,13 +39,11 @@ class BotDeviceContextPort(Protocol):
 
 INSTALL_PATH = "/api/cli/acli/install"
 UNINSTALL_PATH = "/api/cli/acli/uninstall"
-MARKET_PATH = "/api/cli/acli/market"
 
 #: The engine gives acli 300 s to install and 30 s + 300 s to uninstall
 #: (list, then uninstall); these leave room for the hop on top.
 INSTALL_TIMEOUT_SECONDS = 330.0
 UNINSTALL_TIMEOUT_SECONDS = 360.0
-MARKET_TIMEOUT_SECONDS = 60.0
 
 
 class ArcaAcliPort(AcliPort):
@@ -87,26 +84,6 @@ class ArcaAcliPort(AcliPort):
             # for it, or a remove would succeed without evidence.
             raise AcliPortError("bad_output", "the engine's uninstall reply has no result")
         return uninstalled
-
-    async def market(
-        self, *, bot_id: str, owner_id: str, keyword: str, page_no: int, page_size: int
-    ) -> AcliMarketPage:
-        data = await self._invoke(
-            bot_id, owner_id, "GET", MARKET_PATH,
-            params={"keyword": keyword, "page_no": page_no, "page_size": page_size},
-            timeout=MARKET_TIMEOUT_SECONDS,
-        )
-        rows = data.get("items")
-        items = tuple(
-            _tool(row) for row in (rows if isinstance(rows, list) else [])
-            if isinstance(row, Mapping)
-        )
-        total = data.get("total")
-        return AcliMarketPage(
-            items=items,
-            total=total if isinstance(total, int) else len(items),
-            has_more=bool(data.get("has_more")),
-        )
 
     async def _invoke(
         self,
@@ -187,6 +164,5 @@ __all__ = [
     "ArcaAcliPort",
     "BotDeviceContextPort",
     "INSTALL_PATH",
-    "MARKET_PATH",
     "UNINSTALL_PATH",
 ]

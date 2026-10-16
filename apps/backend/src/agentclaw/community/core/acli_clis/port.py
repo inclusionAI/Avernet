@@ -9,7 +9,7 @@ service and the HTTP layer branch on:
 * ``invalid_input`` — the engine refused the request as malformed.
 * ``timeout`` / ``engine_unreachable`` — the call itself failed.
 * any code the engine's runner reported (``install_failed``,
-  ``uninstall_failed``, ``acli_unavailable``, ``market_failed``, …).
+  ``uninstall_failed``, ``acli_unavailable``, ``bad_output``, …).
 """
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ class AcliMarketPage:
 
 @runtime_checkable
 class AcliPort(Protocol):
-    """Install, uninstall and search acli tools in one bot's container."""
+    """Install and uninstall acli tools in one bot's container."""
 
     @abstractmethod
     async def install(
@@ -77,13 +77,6 @@ class AcliPort(Protocol):
         self, *, bot_id: str, owner_id: str, name: str
     ) -> bool:
         """Uninstall ``name``. ``False`` means acli had nothing installed."""
-        ...
-
-    @abstractmethod
-    async def market(
-        self, *, bot_id: str, owner_id: str, keyword: str, page_no: int, page_size: int
-    ) -> AcliMarketPage:
-        """One page of the acli market, searched from inside the container."""
         ...
 
 

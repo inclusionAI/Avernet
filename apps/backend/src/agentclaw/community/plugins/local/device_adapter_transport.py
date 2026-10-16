@@ -95,21 +95,13 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
         body: dict[str, Any],
         params: dict[str, Any],
     ) -> dict[str, Any]:
-        """A tiny acli market, so ``/openapi/v1/bots/{bot_id}/clis`` runs end to end.
+        """A tiny acli install target, so ``/openapi/v1/bots/{bot_id}/clis`` runs end to end.
 
         Mirrors the engine contract (``/api/cli/acli/*``): an unknown name is
         ``install_failed``, a command alias resolves to its market name, and
         uninstalling a tool never installed here is success.
         """
         installed = self._acli_installed.setdefault(_device_key(conn_info), set())
-        if path == "/api/cli/acli/market":
-            keyword = str(params.get("keyword") or "")
-            items = [
-                {"name": name, "command": command, "description": "", "version": "1.0.0"}
-                for name, command in _ACLI_MARKET.items()
-                if keyword in name
-            ]
-            return {"success": True, "data": {"items": items, "total": len(items), "has_more": False}}
         name = str(body.get("name") or "")
         if path == "/api/cli/acli/install":
             market_name = _ACLI_ALIASES.get(name, name)

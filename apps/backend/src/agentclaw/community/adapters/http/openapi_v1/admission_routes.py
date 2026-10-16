@@ -277,7 +277,6 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/clis"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/clis/market"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/clis"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "DELETE",
@@ -704,6 +703,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("DELETE", "/openapi/v1/bots/source-credentials/{name}"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/org/dept"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skills"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/market/clis"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/mcp-servers"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skill-center/skills"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skill-center/sync"): AdmissionMode.USER_GATED,

@@ -36,8 +36,8 @@ without waiting for a release each time a new tool is published.
 
 ## User Stories
 
-- As a bot owner, I want to search the acli market from my bot, so that I know
-  what I can add.
+- As a bot owner, I want to search the acli market, so that I know what I can
+  add.
 - As a bot owner, I want to list the tools my bot has, with which identity each
   runs under and whether it is a default, so that I know what the bot can do.
 - As a bot owner, I want to add a market tool to my bot and use it without
@@ -51,8 +51,11 @@ without waiting for a release each time a new tool is published.
 **Search the market**
 - [x] Searching by keyword returns a page of acli market tools, each with its
       market name, command name, description and latest version, as reported
-      by acli; the caller can request further pages.
-- [x] Search requires a running bot container, because acli runs there.
+      by the market; the caller can request further pages.
+- [x] Search is not tied to a bot: the market is the same for every bot, so
+      the backend asks the market directly and no container is needed. A
+      deployment with no market configured refuses the search as not
+      configured; an unreachable market is reported as unavailable.
 
 **List a bot's tools**
 - [x] Returns every tool in the bot's AgentPass grant, whether or not it was

@@ -133,7 +133,6 @@ class _Container:
         self.installed = set(installed or ())
         self.install_error: AcliPortError | None = None
         self.uninstall_errors: list[AcliPortError] = []
-        self.market_error: AcliPortError | None = None
         self.resolves_to: dict[str, str] = {"di": "deepinsight-cli"}
         self.calls: list[tuple] = []
 
@@ -153,10 +152,16 @@ class _Container:
         self.installed.discard(name)
         return present
 
-    async def market(self, *, bot_id, owner_id, keyword, page_no, page_size):
-        self.calls.append(("market", keyword, page_no, page_size))
-        if self.market_error:
-            raise self.market_error
+
+
+class _Market:
+    """The market search, which needs no bot or container."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def search(self, *, keyword, page_no, page_size):
+        self.calls.append((keyword, page_no, page_size))
         return AcliMarketPage((AcliTool("dataphin", "dataphin", "d", "1.4.14"),), 1, False)
 
 
@@ -178,6 +183,7 @@ def _service(
         scope_reconciler=agentpass,  # type: ignore[arg-type]
         manifest_resolver=_Manifest(),  # type: ignore[arg-type]
         port=container,  # type: ignore[arg-type]
+        market=_Market(),  # type: ignore[arg-type]
     )
     return service, agentpass, container, identities
 
@@ -197,27 +203,14 @@ async def _remove(service, code="yuque-cli", *, actor=OWNER, lock_epoch=None):
 # ── search ───────────────────────────────────────────────────────────────
 
 
-async def test_search_runs_in_the_bots_container() -> None:
+async def test_search_asks_the_market_and_touches_no_bot_or_container() -> None:
     service, _, container, _ = _service()
 
-    page = await service.search_market(
-        bot_id="bot-1", entity_id=OWNER, keyword="data", page_no=2, page_size=5
-    )
+    page = await service.search_market(keyword="data", page_no=2, page_size=5)
 
     assert [t.name for t in page.items] == ["dataphin"]
-    assert container.calls == [("market", "data", 2, 5)]
-
-
-async def test_search_without_a_running_container_fails() -> None:
-    container = _Container()
-    container.market_error = AcliPortError("not_running", "no container")
-    service, *_ = _service(container=container)
-
-    with pytest.raises(AcliContainerError) as caught:
-        await service.search_market(
-            bot_id="bot-1", entity_id=OWNER, keyword="", page_no=1, page_size=5
-        )
-    assert caught.value.code == "not_running"
+    assert service._market.calls == [("data", 2, 5)]
+    assert container.calls == []
 
 
 # ── list ─────────────────────────────────────────────────────────────────
@@ -597,15 +590,6 @@ async def test_a_stale_lock_epoch_is_refused() -> None:
     await _add(service, lock_epoch=5)
 
     assert [c[0] for c in container.calls] == ["install"]
-
-
-async def test_search_on_an_engine_without_acli_is_unsupported() -> None:
-    service, *_ = _service(bot=_bot(active_engine="hermes"))
-
-    with pytest.raises(AcliEngineUnsupportedError):
-        await service.search_market(
-            bot_id="bot-1", entity_id=OWNER, keyword="", page_no=1, page_size=5
-        )
 
 
 async def test_engine_without_endpoints_reads_as_unsupported() -> None:

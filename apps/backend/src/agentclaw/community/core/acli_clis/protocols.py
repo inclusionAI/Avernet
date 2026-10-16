@@ -18,6 +18,8 @@ from agentclaw.community.core.acli_clis.errors import (
     AcliDefaultCliError,
     AcliEngineUnsupportedError,
     AcliGrantSyncError,
+    AcliMarketNotConfiguredError,
+    AcliMarketUnavailableError,
     AcliOperationFailedError,
     AcliRequestRejectedError,
     AcliRollbackFailedError,
@@ -52,14 +54,10 @@ class AcliCliServiceProtocol(Protocol):
 
     @abstractmethod
     async def search_market(
-        self,
-        *,
-        bot_id: str,
-        entity_id: str,
-        keyword: str,
-        page_no: int,
-        page_size: int,
-    ) -> AcliMarketPage: ...
+        self, *, keyword: str, page_no: int, page_size: int
+    ) -> AcliMarketPage:
+        """One page of published acli market tools; not tied to any bot."""
+        ...
 
     @abstractmethod
     async def add(
@@ -94,6 +92,8 @@ __all__ = [
     "AcliDefaultCliError",
     "AcliEngineUnsupportedError",
     "AcliGrantSyncError",
+    "AcliMarketNotConfiguredError",
+    "AcliMarketUnavailableError",
     "AcliMarketPage",
     "AcliOperationFailedError",
     "AcliRequestRejectedError",

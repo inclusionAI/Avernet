@@ -18,6 +18,9 @@ from agentclaw.community.adapters.http.openapi_v1.bots.acli_clis import (
     list_bot_clis,
     remove_bot_cli,
     router,
+)
+from agentclaw.community.adapters.http.openapi_v1.market.acli_clis import (
+    router as market_router,
     search_acli_market,
 )
 from agentclaw.community.adapters.http.openapi_v1.bots.schemas_acli_clis import AddBotCli
@@ -29,7 +32,9 @@ from agentclaw.community.api.acli_cli_service import (
     AcliDefaultCliError,
     AcliEngineUnsupportedError,
     AcliGrantSyncError,
+    AcliMarketNotConfiguredError,
     AcliMarketPage,
+    AcliMarketUnavailableError,
     AcliOperationFailedError,
     AcliRequestRejectedError,
     AcliRollbackFailedError,
@@ -65,7 +70,7 @@ async def test_routes_and_bars() -> None:
     paths = app.openapi()["paths"]
 
     assert set(paths["/openapi/v1/bots/{bot_id}/clis"]) == {"get", "post"}
-    assert set(paths["/openapi/v1/bots/{bot_id}/clis/market"]) == {"get"}
+    assert "/openapi/v1/bots/{bot_id}/clis/market" not in paths
     assert set(paths["/openapi/v1/bots/{bot_id}/clis/{cli_code}"]) == {"delete"}
     for method in ("GET",):
         rule = AUTHORIZATION[(method, "/openapi/v1/bots/{bot_id}/clis")]
@@ -95,19 +100,36 @@ async def test_list_returns_every_grant() -> None:
     service.list_bot_clis.assert_called_once_with(bot_id="bot-1", entity_id="owner")
 
 
-async def test_market_search_passes_paging() -> None:
+async def test_market_search_is_not_bot_scoped_and_passes_paging() -> None:
+    app = FastAPI()
+    app.include_router(market_router)
+    assert set(app.openapi()["paths"]["/openapi/v1/bots/market/clis"]) == {"get"}
+    rule = AUTHORIZATION[("GET", "/openapi/v1/bots/market/clis")]
+    assert rule.__class__.__name__ == "NoCheck"
+
     service = AsyncMock()
     service.search_market.return_value = AcliMarketPage(
         (AcliTool("dataphin", "dataphin", "d", "1.4.14"),), 7, True
     )
 
-    response = await search_acli_market("bot-1", _request(), "owner", "owner", "data", 2, 5, service)
+    response = await search_acli_market(_request(), "data", 2, 5, service)
 
     assert response.data.items[0].name == "dataphin"
     assert (response.data.total, response.data.has_more) == (7, True)
-    service.search_market.assert_awaited_once_with(
-        bot_id="bot-1", entity_id="owner", keyword="data", page_no=2, page_size=5
-    )
+    service.search_market.assert_awaited_once_with(keyword="data", page_no=2, page_size=5)
+
+
+@pytest.mark.parametrize(
+    ("error", "status"),
+    [(AcliMarketNotConfiguredError(), 501), (AcliMarketUnavailableError(), 502)],
+)
+async def test_market_errors_map_to_their_status(error, status) -> None:
+    service = AsyncMock()
+    service.search_market.side_effect = error
+
+    response = await search_acli_market(_request(), "", 1, 20, service)
+
+    assert response.status_code == status
 
 
 async def test_add_passes_the_current_users_lock_epoch() -> None:

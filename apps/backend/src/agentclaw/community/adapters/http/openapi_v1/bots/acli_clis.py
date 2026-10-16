@@ -1,8 +1,8 @@
 """A bot's acli market CLIs — ``/openapi/v1/bots/{bot_id}/clis``.
 
-List what the bot is granted, search the acli market, add a tool (installed in
-the running container, then granted) and remove one (revoked, then
-uninstalled). Switching a CLI's identity stays at
+List what the bot is granted, add a tool (installed in the running container,
+then granted) and remove one (revoked, then uninstalled). Searching the market
+is ``GET /openapi/v1/bots/market/clis``: the market is the same for every bot. Switching a CLI's identity stays at
 ``PATCH …/clis/{cli_code}/call-type``.
 
 Nothing about ordering or rollback is decided here: ``AcliCliService`` owns
@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 from typing import Annotated
 
-from fastapi import APIRouter, Path, Query, Request
+from fastapi import APIRouter, Path, Request
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -36,8 +36,6 @@ from agentclaw.community.api.collaborator_lock_service import (
 from agentclaw.community.di import Injected
 
 from .schemas_acli_clis import (
-    AcliMarketItem,
-    AcliMarketPageResult,
     AddBotCli,
     AddedBotCli,
     BotCliItem,
@@ -90,39 +88,6 @@ async def list_bot_clis(
             )
             for item in items
         ],
-        request,
-    )
-
-
-@router.get("/market", response_model=Envelope[AcliMarketPageResult])
-@envelope_errors
-async def search_acli_market(
-    bot_id: BotIdPath,
-    request: Request,
-    user_id: UserIdDep,
-    owner_id: OwnerIdDep,
-    keyword: Annotated[
-        str, Query(max_length=100, description="Search text; empty lists the whole market.")
-    ] = "",
-    page_no: Annotated[int, Query(ge=1, le=10_000, description="1-based page.")] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100, description="Page size.")] = 20,
-    service: AcliCliServiceProtocol = Injected(AcliCliServiceProtocol),
-) -> Envelope[AcliMarketPageResult]:
-    """Search the acli market from inside the bot's running container."""
-    page = await service.search_market(
-        bot_id=bot_id, entity_id=owner_id, keyword=keyword, page_no=page_no, page_size=page_size
-    )
-    return envelope(
-        AcliMarketPageResult(
-            items=[
-                AcliMarketItem(
-                    name=t.name, command=t.command, description=t.description, version=t.version
-                )
-                for t in page.items
-            ],
-            total=page.total,
-            has_more=page.has_more,
-        ),
         request,
     )
 

@@ -176,6 +176,8 @@ from agentclaw.community.api.acli_cli_service import (
     AcliDefaultCliError,
     AcliEngineUnsupportedError,
     AcliGrantSyncError,
+    AcliMarketNotConfiguredError,
+    AcliMarketUnavailableError,
     AcliOperationFailedError,
     AcliRequestRejectedError,
     AcliRollbackFailedError,
@@ -394,6 +396,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     AcliRequestRejectedError: (422, "acli rejected the request"),
     AcliOperationFailedError: (502, "The acli operation failed"),
     AcliGrantSyncError: (502, "The CLI grant could not be synchronized"),
+    AcliMarketNotConfiguredError: (501, "The acli market is not configured"),
+    AcliMarketUnavailableError: (502, "The acli market is unavailable"),
     AcliRollbackFailedError: (500, "The change could not be rolled back"),
     MissingPrincipalError: (401, "Unauthorized"),
     # Byte-identical to the line above, deliberately. "You sent no principal" and

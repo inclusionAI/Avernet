@@ -8,7 +8,6 @@ import pytest
 
 from agentclaw.community.core.acli_clis.arca_port import (
     INSTALL_PATH,
-    MARKET_PATH,
     UNINSTALL_PATH,
     ArcaAcliPort,
 )
@@ -80,33 +79,6 @@ async def test_uninstall_reports_whether_anything_was_removed() -> None:
 
     assert removed is False
     assert transport.calls[0][2] == UNINSTALL_PATH
-
-
-async def test_market_passes_query_and_skips_malformed_rows() -> None:
-    transport = _Transport({"success": True, "data": {
-        "items": [{"name": "dataphin", "command": "dataphin", "description": "", "version": "1"}, 3],
-        "total": 9, "has_more": True,
-    }})
-
-    page = await _port(transport).market(
-        bot_id="bot-1", owner_id="owner-1", keyword="data", page_no=2, page_size=5
-    )
-
-    assert [t.name for t in page.items] == ["dataphin"]
-    assert (page.total, page.has_more) == (9, True)
-    assert transport.calls[0][1:5] == (
-        "GET", MARKET_PATH, None, {"keyword": "data", "page_no": 2, "page_size": 5},
-    )
-
-
-async def test_market_without_total_counts_items() -> None:
-    transport = _Transport({"success": True, "data": {"items": "not-a-list"}})
-
-    page = await _port(transport).market(
-        bot_id="bot-1", owner_id="owner-1", keyword="", page_no=1, page_size=5
-    )
-
-    assert (page.items, page.total, page.has_more) == ((), 0, False)
 
 
 @pytest.mark.parametrize(

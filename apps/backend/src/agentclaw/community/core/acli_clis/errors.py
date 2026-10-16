@@ -103,6 +103,20 @@ class AcliRollbackFailedError(InternalError):
         self.state = state
 
 
+class AcliMarketNotConfiguredError(DomainError):
+    """This deployment has no acli market search URL configured."""
+
+    def __init__(self) -> None:
+        super().__init__("the acli market is not configured for this deployment")
+
+
+class AcliMarketUnavailableError(DomainError):
+    """The acli market did not answer, or answered something unusable."""
+
+    def __init__(self) -> None:
+        super().__init__("the acli market is unavailable")
+
+
 __all__ = [
     "AcliBotNotRunningError",
     "AcliCliAlreadyGrantedError",
@@ -112,6 +126,8 @@ __all__ = [
     "AcliDefaultCliError",
     "AcliEngineUnsupportedError",
     "AcliGrantSyncError",
+    "AcliMarketNotConfiguredError",
+    "AcliMarketUnavailableError",
     "AcliOperationFailedError",
     "AcliRequestRejectedError",
     "AcliRollbackFailedError",

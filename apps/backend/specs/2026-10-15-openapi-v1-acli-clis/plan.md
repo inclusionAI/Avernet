@@ -50,7 +50,6 @@ New `core/acli/runner.py` — `AcliRunner`, the only code that executes acli:
 - `uninstall(name)` → first `acli tool list --json`; if `name` is
   absent, success with `uninstalled: false` (nothing of ours to delete);
   otherwise `acli tool uninstall <name> --yes --json`.
-- `market(keyword, page_no, page_size)` → `acli list …`; returns the page.
 - `acli_home` is `<parent of the install directory>/acli-home`, so acli's record sits
   beside the programs on persisted storage.
 - Inputs validated before any process starts: `name` and `keyword` against
@@ -68,9 +67,8 @@ New `core/acli/runner.py` — `AcliRunner`, the only code that executes acli:
 | --- | --- |
 | `POST /api/cli/acli/install` | `{name}` |
 | `POST /api/cli/acli/uninstall` | `{name}` |
-| `GET /api/cli/acli/market` | `?keyword=&page_no=&page_size=` |
 
-New capabilities `CLI_ACLI_INSTALL`, `CLI_ACLI_UNINSTALL`, `CLI_ACLI_MARKET`,
+New capabilities `CLI_ACLI_INSTALL`, `CLI_ACLI_UNINSTALL`,
 declared supported by the openclaw and claude_code engines.
 
 ### Backend — install directory
@@ -139,12 +137,17 @@ route does.
 | Method | Path | Result |
 | --- | --- | --- |
 | GET | `/openapi/v1/bots/{bot_id}/clis` | `[{cli_code, cli_name, cli_desc, identity_mode, default}]` |
-| GET | `/openapi/v1/bots/{bot_id}/clis/market?keyword=&page_no=&page_size=` | `{items:[{name, command, description, version}], total, has_more}` |
+| GET | `/openapi/v1/bots/market/clis?keyword=&page_no=&page_size=` | `{items:[{name, command, description, version}], total, has_more}` |
 | POST | `/openapi/v1/bots/{bot_id}/clis` | body `{cli_code}` → `{cli_code, command, version}` |
 | DELETE | `/openapi/v1/bots/{bot_id}/clis/{cli_code}` | `{cli_code}` |
 | PATCH | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type` | unchanged |
 
-`/clis/market` is declared before `/clis/{cli_code}` so it is not captured.
+The market search is mounted with the other `/openapi/v1/bots/market/*` routes,
+before the `{bot_id}` wildcard. It calls the market API directly
+(`core/acli_clis/market.py`, `AcliMarketSearch`): `GET <acli_market.search_url>
+?status=published&q=<keyword>` answers `{success, data: [ … ]}` with every match
+at once, so paging is done in the backend. The URL is deployment config (prod
+and pre differ); empty means `501` not configured.
 Status mapping: `not_running` → `409`; `engine_unsupported` → `501`;
 `not_found`, `cli_name_mismatch` → `422`; `install_failed`,
 `uninstall_failed`, `engine_unreachable`, `timeout` → `502`; guard errors reuse

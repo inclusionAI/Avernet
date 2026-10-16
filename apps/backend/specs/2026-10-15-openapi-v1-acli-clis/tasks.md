@@ -20,7 +20,7 @@ Backend paths are relative to `apps/backend/`; engine paths to
 - **Goal:** Expose the runner to the platform.
 - **Files:** `api/cli/router.py`, `api/cli/schemas.py`, `core/engine/capability.py`, `engines/openclaw/engine.py`, `engines/claude_code/engine.py`, `api/tests/test_cli_router.py`
 - **Done when:**
-  - [x] `POST /api/cli/acli/install`, `POST /api/cli/acli/uninstall`, `GET /api/cli/acli/market` follow the router's refusal conventions.
+  - [x] `POST /api/cli/acli/install` and `POST /api/cli/acli/uninstall` follow the router's refusal conventions.
   - [x] The three capabilities are declared supported by openclaw and claude_code.
   - [x] Router tests cover success, refusal and bad input.
 - **Depends on:** Task 1
@@ -52,7 +52,7 @@ Backend paths are relative to `apps/backend/`; engine paths to
 - **Goal:** Publish the routes.
 - **Files:** `src/agentclaw/community/adapters/http/openapi_v1/bots/acli_clis.py`, `.../bots/schemas_acli_clis.py`, `openapi_v1/__init__.py`, `authorization_rules.py`, `admission_routes.py`, inventories, shared status map, schema snapshots, the four DI device modules, `tests/community/adapters/http/openapi_v1/test_acli_clis_endpoints.py`
 - **Done when:**
-  - [x] Routes and status codes match the plan; `/clis/market` is not captured by `/clis/{cli_code}`.
+  - [x] Routes and status codes match the plan; `/bots/market/clis` is mounted before the `{bot_id}` wildcard.
   - [x] Authorization, admission, inventory and endpoint-coverage gates pass.
   - [x] The call-type route is unchanged.
 - **Depends on:** Task 5
