@@ -38,6 +38,8 @@ export function proposalConflicts(items: RepairInboxItem[]): ProposalConflict[] 
 }
 export function proposalPending(items: RepairInboxItem[]): boolean {
   const ids = new Set(items.map(item => item.itemId));
+  if (items.length > 1 && items.some(item => item.readSummary && !item.readSummary.conflictsComplete
+    && !(item.aggregation?.status === 'ready' && item.aggregation.relation !== 'uncertain' && item.aggregation.itemIds.every(id => ids.has(id))))) return true;
   if (items.some(item => item.aggregation?.status === 'ready' && item.aggregation.relation !== 'exact' && item.aggregation.itemIds.some(id => !ids.has(id)))) return true;
   return selectionConflicts(items).some(c => {
     const pair = items.filter(i => c.itemIds.includes(i.itemId));

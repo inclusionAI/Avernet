@@ -1,3 +1,4 @@
+import { inboxSummary, inboxPages } from './repair-inbox-projection.js';
 import { prepareProposalEvidence } from './repair-proposal-evidence.js';
 import type { ProposalCoordinator } from './repair-proposal-integration.js';
 import { automaticChain, isAutomaticBatch } from '../contracts/repair-automatic-chain.js';
@@ -7,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { repairStage } from '../observability/repair-diagnostics.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import {
-  RepairBatchError, boundedRepairJson, canonicalRepairJson, digestRepairJson, validateRepairItem,
+  RepairBatchError, boundedRepairJson, canonicalRepairJson, digestRepairJson, validateRepairItem, validateRepairItemStructure,
   MAX_ITEMS, MAX_REQUEST_BYTES, MAX_INSTRUCTIONS_CHARS, MAX_RESULT_BYTES, MAX_REPORT_BYTES,
   type RepairBatchInput, type RepairItem, type RepairRevision, type StoredRepairItem,
 } from '../contracts/repair-batch.js';
@@ -181,7 +182,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         instruction: `${recurrence.reason === 'baseline_changed' ? '当前生效 Pack 已变化，请重新核对原修改的适用性。' : '原修改在生效版本明确复现。'}请依据新证据重新诊断并调整方案，不得原样重复已应用修改。关联运行：${(recurrence.flowIds ?? []).join(', ')}`,
         context: { ...source.item.context, recurrence } } });
     }
-    current.forEach(source => validateRepairItem(source.item));
+    current.forEach(source => validateRepairItemStructure(source.item));
     const ordered = [...current].sort((a, b) => a.item.itemId.localeCompare(b.item.itemId));
     const inputDigest = sourceDigest(ordered);
     const items = new Map<string, RepairInboxItem>(stored.filter(item => !shadowed.has(item.itemId))
@@ -209,6 +210,9 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         const source = materializable.get(item.itemId);
         if (source) materializable.set(item.itemId, { ...source, item });
       }
+    }
+    if (mode === 'full') for (const item of items.values()) {
+      if (!scope?.itemIds || scope.itemIds.includes(item.itemId)) validateRepairItem(item);
     }
     return { items: [...items.values()], inputDigest, materializable };
   }
@@ -261,9 +265,11 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       const filtered = scopedItems.filter(item => inboxMatch(item, state));
       const repairSignatureKeys = [...new Set(scopedItems.flatMap(item =>
         (item.aggregation?.originals ?? [item]).flatMap(original => typeof original.context?.signature === 'string' && original.context.signature.trim() ? [repairSignatureKey(original.context.signature)] : [])))].sort();
-      const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+      const summaries = query.rawItems ? filtered : filtered.map(inboxSummary);
+      const pages = inboxPages(summaries, pageSize);
+      const totalPages = pages.length;
       const selectedPage = Math.min(page, totalPages);
-      const items = filtered.slice((selectedPage - 1) * pageSize, selectedPage * pageSize);
+      const items = pages[selectedPage - 1];
       const response: Omit<RepairCandidatesResponse, 'canEdit'> = { schemaVersion: 'workflow-repair/v2', workflowId, inputDigest: snapshot.inputDigest, items,
         tasks: [...heads.values()].map(r => {
           const itemCount = isAutomaticBatch(r.input) ? r.input.automation!.totalItems ?? new Set(revisions.filter(v => v.taskId === r.taskId).flatMap(v => v.input.items.map(item => item.itemId))).size : r.input.items.length;
@@ -274,6 +280,17 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         counts, page: { page: selectedPage, pageSize, total: filtered.length, totalPages },
         includeHistorical, activeLookbackDays: REPAIR_ACTIVE_LOOKBACK_DAYS,
         capabilities: this.capabilities(), limits: { maxItems: MAX_ITEMS, maxRequestBytes: MAX_REQUEST_BYTES } };
+      // Complete metadata is independently pageable; callers must not treat the first page as all tasks/facets.
+      const metadataPage = query.metadataPage ?? 1;
+      if (!safeInteger(metadataPage, 1)) fail('INVALID_INPUT', 'Invalid metadata page');
+      const metadataArrays = [response.tasks, response.repairSignatureKeys, response.facets.nodes, response.facets.failureModes];
+      response.metadata = { page: metadataPage, totalPages: Math.max(1, ...metadataArrays.map(rows => Math.ceil(rows.length / 50))),
+        digest: digestRepairJson(metadataArrays),
+        tasks: response.tasks.length, signatureKeys: repairSignatureKeys.length, nodes: facets.nodes.length, failureModes: facets.failureModes.length };
+      const start = (metadataPage - 1) * 50;
+      response.tasks = response.tasks.sort((a,b)=>b.updatedAtMs-a.updatedAtMs||a.taskId.localeCompare(b.taskId)).slice(start,start+50);
+      response.repairSignatureKeys = repairSignatureKeys.slice(start,start+50);
+      response.facets = { nodes: facets.nodes.slice(start,start+50), failureModes: facets.failureModes.slice(start,start+50) };
       if (query.previewSignatures) {
         const groups = [...new Set(query.previewSignatures)].map(signature => ({ signature,
           matches: filtered.filter(item => matchesScope(item, { signature }))
@@ -286,18 +303,22 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         groups.forEach(({ matches }, index) => {
           const preview = response.issuePreviews![index];
           for (const item of matches.slice(0, 3)) {
-            const bytes = Buffer.byteLength(canonicalRepairJson(item), 'utf8') + (preview.items.length ? 1 : 0);
+            const summary = inboxSummary(item);
+            const bytes = Buffer.byteLength(canonicalRepairJson(summary), 'utf8') + (preview.items.length ? 1 : 0);
             if (bytes > remainingBytes) continue;
-            preview.items.push(item);
+            preview.items.push(summary);
             remainingBytes -= bytes;
           }
         });
       }
-      boundedRepairJson(response, MAX_INBOX_READ_BYTES);
+      try { boundedRepairJson(response, MAX_INBOX_READ_BYTES - 256); } catch (error) {
+        if (error instanceof RepairBatchError) throw new RepairBatchError(error.code, error.message, { ...error.details, stage: 'candidates_response', reasonCode: 'REPAIR_RESPONSE_TOO_LARGE' });
+        throw error;
+      }
       return response;
     });
   }
-  async item(workflowId: string, itemId: string): Promise<RepairInboxItem> {
+  async item(workflowId: string, itemId: string, originalOnly = false): Promise<RepairInboxItem> {
     return serial(this.db, async () => {
       if (!requiredText(itemId, 64)) fail('INVALID_INPUT', 'Invalid itemId');
       let item: RepairInboxItem | undefined;
@@ -310,16 +331,18 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         item = (await this.snapshot(this.db, workflowId, 'full', { itemIds: [itemId], includeHistorical: true })).items.find(candidate => candidate.itemId === itemId);
       }
       if (!item) fail('ITEM_NOT_FOUND', 'Repair item does not exist');
-      if (this.proposals && this.execution) {
+      if (!originalOnly && this.proposals && this.execution) {
         const all = (await this.readSnapshot(workflowId, true)).items;
         const cards = await this.proposals.present(workflowId, all, await this.execution.resolveBaseline(workflowId));
         const card = cards.find(value => value.itemId === itemId || value.aggregation?.itemIds.includes(itemId));
         if (card?.aggregation) {
-          const originals = this.sources.hydrate ? await this.sources.hydrate(this.db, workflowId, card.aggregation.originals) : card.aggregation.originals;
-          item = { ...item, aggregation: { ...card.aggregation, originals: originals.map(value => ({ ...card.aggregation!.originals.find(i => i.itemId === value.itemId)!, ...value })) } };
+          item = { ...item, aggregation: inboxSummary(card).aggregation };
         }
       }
-      boundedRepairJson(item, MAX_TASK_READ_BYTES);
+      try { boundedRepairJson(item, MAX_TASK_READ_BYTES); } catch (error) {
+        if (error instanceof RepairBatchError) throw new RepairBatchError(error.code, error.message, { ...error.details, stage: 'item_response', reasonCode: 'REPAIR_RESPONSE_TOO_LARGE' });
+        throw error;
+      }
       return item;
     });
   }

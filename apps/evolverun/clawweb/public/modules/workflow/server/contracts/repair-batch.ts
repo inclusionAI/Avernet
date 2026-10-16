@@ -96,17 +96,26 @@ export function validateSourceRef(value: unknown): SourceRef {
   }
   return value as SourceRef;
 }
-export function validateRepairItem(value: unknown): RepairItem {
+/** Structural validation for trusted reads; frozen task bytes are checked separately. */
+export function validateRepairItemStructure(value: unknown): RepairItem {
   valid(object(value), 'item');
   valid(text(value.itemId, 64) && text(value.groupKey, 128) && digest(value.proposalKey) && integer(value.contentRevision, 1), 'item identity');
   valid(value.previousItemId === null || text(value.previousItemId, 64), 'previousItemId');
   valid(value.proposal === null || object(value.proposal), 'proposal');
   valid(value.context === undefined || object(value.context), 'context');
-  valid(text(value.instruction, MAX_INSTRUCTIONS_CHARS, true), 'instruction');
+  valid(typeof value.instruction === 'string', 'instruction');
   valid(Array.isArray(value.sources) && value.sources.length > 0, 'item sources');
   value.sources.forEach(validateSourceRef);
-  boundedRepairJson(value, MAX_FROZEN_BYTES);
   return value as RepairItem;
+}
+export function validateRepairItem(value: unknown): RepairItem {
+  const item = validateRepairItemStructure(value);
+  valid(text(item.instruction, MAX_INSTRUCTIONS_CHARS, true), 'instruction');
+  try { boundedRepairJson(item, MAX_FROZEN_BYTES); } catch (error) {
+    if (error instanceof RepairBatchError) throw new RepairBatchError(error.code, error.message, { ...error.details, stage: 'frozen_item', reasonCode: 'REPAIR_FROZEN_ITEM_TOO_LARGE' });
+    throw error;
+  }
+  return item;
 }
 export function validateAutomationOrigin(value: unknown): AutomationOrigin {
   valid(object(value) && value.kind === 'daily' && digest(value.intentId)
@@ -119,7 +128,10 @@ export function validateAutomationOrigin(value: unknown): AutomationOrigin {
   return value as AutomationOrigin;
 }
 export function validateRepairBatchInput(value: unknown): RepairBatchInput {
-  boundedRepairJson(value, MAX_FROZEN_BYTES);
+  try { boundedRepairJson(value, MAX_FROZEN_BYTES); } catch (error) {
+    if (error instanceof RepairBatchError) throw new RepairBatchError(error.code, error.message, { ...error.details, stage: 'frozen_batch', reasonCode: 'REPAIR_FROZEN_BATCH_TOO_LARGE' });
+    throw error;
+  }
   valid(object(value) && value.schemaVersion === REPAIR_BATCH_SCHEMA, 'schemaVersion');
   valid(gitIdentity(value.taskId, 64) && integer(value.revision, 1), 'revision identity');
   valid(Array.isArray(value.items) && value.items.length > 0 && value.items.length <= MAX_ITEMS, 'items');

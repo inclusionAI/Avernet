@@ -26,6 +26,7 @@ export function changeSummary(item: RepairInboxItem) {
   }).join('；') + (operations.length > 3 ? `；另 ${operations.length - 3} 项` : '')
 }
 export function sourceRunCount(item: RepairInboxItem): number | null {
+  if (item.readSummary) return item.readSummary.runCount || null
   if (item.aggregation) return item.aggregation.flowIds.length || null
   return new Set(item.sources.flatMap(source => source.kind === 'diagnosis_candidate' ? [source.flowId] : [])).size || null
 }
@@ -88,7 +89,7 @@ export default function RepairItemDetail({ item, detail, loading, error, onLoad,
     </section>
     <section aria-label="判断依据" className="space-y-3 border-t border-slate-100 pt-4">
       <h4 className="text-sm font-semibold text-slate-900">判断依据</h4>
-      <p className="text-xs leading-5 text-slate-500">{shown.sources.length} 条来源引用。以下诊断支持这条建议，不代表覆盖整个问题的所有运行。</p>
+      <p className="text-xs leading-5 text-slate-500">{shown.readSummary?.sourceCount ?? shown.sources.length} 条来源引用。以下诊断支持这条建议，不代表覆盖整个问题的所有运行。</p>
       {loading && <p role="status" className="text-xs text-slate-500">正在读取该建议的完整内容与依据，不影响浏览问题列表…</p>}
       {error && <div role="alert" className="text-xs text-red-600">建议详情读取失败：{error}<button type="button" className="ml-2 underline" onClick={() => onLoad(item.itemId)}>重试详情</button></div>}
       {!loading && !error && detail && !diagnoses.length && <p className="text-xs text-slate-500">暂无关联诊断正文，保留来源引用供核对。</p>}

@@ -179,7 +179,8 @@ it.each([false,true])('resolves every original member to the same aggregation de
   expect(detail.aggregation?.title).toBe(expected.title);
   expect(detail.aggregation?.status).toBe('ready');
   expect(detail.aggregation?.originals.map(item=>item.itemId)).toEqual(expected.itemIds);
-  if(hydrate)expect(detail.aggregation?.originals.every(item=>item.context?.detailEvidence==='inline body')).toBe(true);
+  expect(detail.aggregation?.originals.every(item=>!!item.readSummary)).toBe(true);
+  if(hydrate)expect((await integrated.item('wf-1',id,true)).context?.detailEvidence).toBe('inline body');
  }
 });
 

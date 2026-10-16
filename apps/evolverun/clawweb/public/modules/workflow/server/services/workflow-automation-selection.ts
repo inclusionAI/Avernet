@@ -13,7 +13,7 @@ async function legacyAutomaticScope(workbench: AutomationWorkbench, issues: Issu
   let inputDigest = '';
   for (const group of ranked.groups) {
     if (!group.priority?.severity) continue;
-    const page = await workbench.candidates(workflowId, { state: 'pending', signature: group.signature, pageSize: 100 });
+    const page = await workbench.candidates(workflowId, { state: 'pending', signature: group.signature, pageSize: 100, rawItems: true });
     if (!page.capabilities.generation) return null;
     if (inputDigest && inputDigest !== page.inputDigest) return null;
     inputDigest = page.inputDigest;

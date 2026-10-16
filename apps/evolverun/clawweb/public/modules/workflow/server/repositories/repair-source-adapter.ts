@@ -1,7 +1,7 @@
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { repairStage } from '../observability/repair-diagnostics.js';
-import { RepairBatchError, boundedRepairJson, canonicalRepairJson, digestRepairJson, MAX_FROZEN_BYTES,
-  validateRepairItem, type RepairItem, type RepairItemState } from '../contracts/repair-batch.js';
+import { RepairBatchError, canonicalRepairJson, digestRepairJson,
+  validateRepairItem, validateRepairItemStructure, type RepairItem, type RepairItemState } from '../contracts/repair-batch.js';
 import type { RepairSourcePort } from '../contracts/repair-workbench.js';
 
 type RecordValue = Record<string, unknown>;
@@ -175,7 +175,7 @@ export function createRepairSourcePort(readers: RepairSourceReaders): RepairSour
         // Legacy work in progress is visible but is not silently re-enqueued as a new pending item.
         const state = legacyState(suggestion.status);
         if ((legacyPriority[state] ?? 0) > (legacyPriority[row.initialState ?? 'pending'] ?? 0)) row.initialState = state;
-        validateRepairItem(row.item);
+        validateRepairItemStructure(row.item);
         items.set(itemId, row);
       } catch (error) {
         if (!(error instanceof RepairBatchError) || !['INVALID_INPUT', 'PAYLOAD_TOO_LARGE'].includes(error.code)) throw error;
@@ -197,8 +197,8 @@ export function createRepairSourcePort(readers: RepairSourceReaders): RepairSour
         row.item.context![key] = [...new Map((row.item.context![key] as RecordValue[]).map(value => [canonicalRepairJson(value), value])).values()]
           .sort((a, b) => canonicalRepairJson(a).localeCompare(canonicalRepairJson(b)));
       }
-      validateRepairItem(row.item);
-      boundedRepairJson(row.item, MAX_FROZEN_BYTES);
+      validateRepairItemStructure(row.item);
+      if (mode === 'full' && (!scope?.itemIds || scope.itemIds.includes(row.item.itemId))) validateRepairItem(row.item);
     }
     return [...items.values()].sort((a, b) => a.item.itemId.localeCompare(b.item.itemId));
   } };

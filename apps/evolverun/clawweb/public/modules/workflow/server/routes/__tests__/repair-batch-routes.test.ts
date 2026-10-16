@@ -6,6 +6,7 @@ import { gzipSync } from 'node:zlib';
 import { createRepairWorkbenchService } from '../../services/repair-batch-service.js';
 import { createRepairBatchesRouter } from '../repair-batches.js';
 import { repairFixture } from '../../services/__tests__/repair-batch-fixtures.js';
+import { createRepairSourcePort } from '../../repositories/repair-source-adapter.js';
 import { digestRepairJson } from '../../contracts/repair-batch.js';
 
 describe('repair workbench HTTP authorization and lifecycle', () => {
@@ -36,6 +37,31 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     }
     return { ...f, service, request };
   }
+  it.each([1,110])('reads oversized evidence from %i diagnoses through real GET/POST without applying the generation freeze limit', async count => {
+    const f = await repairFixture(0); close.push(() => f.db.close());
+    const source = { diagnosisId:'d',analysisId:'a',flowId:'run',sourceId:'s',completedAtMs:1,
+      failureSignature:'timeout',failureMode:'timeout',nodeId:'query',reasoning:'证'.repeat(366000)+'x'.repeat(976),evidenceEventIds:[],
+      proposal:{summary:'修复查询',operations:[{op:'replace',nodeId:'query',path:'/prompt',value:'full prompt'}]} };
+    const sources=Array.from({length:count},(_,i)=>({...source,diagnosisId:`d-${i}`,analysisId:`a-${i}`,flowId:`run-${i}`,sourceId:`s-${i}`,reasoning:count===1?source.reasoning:'x'.repeat(9600)}));
+    const port=createRepairSourcePort({groups:async()=>[{workflowId:'wf-1',signature:'timeout|step1',inputDigest:'a'.repeat(64),sources}],suggestions:async()=>[],evidence:async()=>[]});
+    const service=createRepairWorkbenchService(f.db,port,f.executionPort);
+    const app=express();app.use(express.json({limit:'10mb'}));app.use('/api/workflow-repairs',createRepairBatchesRouter({service,authorize:async()=>({actorId:'test',canEdit:true})}));
+    const server=await new Promise<Server>(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s))});close.unshift(()=>new Promise<void>(resolve=>server.close(()=>resolve())));
+    const url=`http://127.0.0.1:${(server.address() as {port:number}).port}/api/workflow-repairs`;
+    const body={workflowId:'wf-1',previewSignatures:['timeout|step1']};
+    for(const post of [false,true]){
+      const response=await fetch(url+(post?'/candidates/query':'/candidates?workflowId=wf-1&previewSignature=timeout%7Cstep1'),post?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:undefined);
+      const json=await response.json();
+      console.log('oversized source HTTP reproduction',JSON.stringify({method:post?'POST':'GET',requestBytes:post?Buffer.byteLength(JSON.stringify(body)):0,status:response.status,responseBytes:Buffer.byteLength(JSON.stringify(json)),code:json.code,limit:json.limit,actualBytes:json.actualBytes}));
+      expect(response.status).toBe(200);expect(Buffer.byteLength(JSON.stringify(json))).toBeLessThan(64*1024);
+      expect(json.page.total).toBe(1);expect(json.items[0].readSummary).toMatchObject({sourceCount:count,runCount:count,diagnosisCount:count});
+      const detail=await fetch(url+`/items/${json.items[0].itemId}?workflowId=wf-1`).then(r=>r.json());
+      expect(detail.context.diagnoses).toHaveLength(count);
+      expect(detail.context.diagnoses[0].reasoning).toBe(sources[0].reasoning);
+      await expect(service.create('test',{workflowId:'wf-1',inputDigest:json.inputDigest,itemIds:[json.items[0].itemId],instructions:'',requestId:'oversize'})).rejects.toMatchObject({code:'PAYLOAD_TOO_LARGE'});
+    }
+    expect(f.calls).toHaveLength(0);expect(await f.db.query('SELECT * FROM workflow_repair_items')).toEqual([]);
+  });
   it('requires view/edit permission and derives the mutation actor from verified authorization', async () => {
     const f = await setup();
     expect((await f.request('/candidates?workflowId=wf-1', undefined, 'denied')).status).toBe(403);
@@ -106,7 +132,9 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     expect((await f.request('/candidates/query', body, 'denied')).status).toBe(403);
     expect((await f.request('/candidates/query', { ...body, previewSignatures: [...previewSignatures, 'extra'] })).status).toBe(400);
     expect((await f.request('/candidates/query', { ...body, pageSize: 201 })).status).toBe(400);
-    expect((await f.request('/candidates/query', { ...body, extra: 'x'.repeat(256 * 1024) })).status).toBe(413);
+    const oversized=await f.request('/candidates/query', { ...body, extra: 'x'.repeat(256 * 1024) });
+    expect(oversized).toMatchObject({status:413,body:{code:'PAYLOAD_TOO_LARGE',stage:'request_body',reasonCode:'REPAIR_REQUEST_TOO_LARGE',limit:262144}});
+    expect(oversized.body.actualBytes).toBeGreaterThan(262144);
   });
   it('keeps dispositions usable with generation unavailable and cancels with a JSON acknowledgement', async () => {
     const f = await setup(false);
