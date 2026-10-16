@@ -118,9 +118,9 @@ export const healingBootstrapSql = [
   `CREATE TABLE IF NOT EXISTS workflow_healing_diagnoses (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   diagnosis_id VARCHAR(64) NOT NULL COMMENT '诊断记录ID',
-  flow_id VARCHAR(64) NOT NULL COMMENT '运行流ID',
+  flow_id VARCHAR(190) NOT NULL COMMENT '运行流ID',
   workflow_id VARCHAR(190) NOT NULL COMMENT '工作流ID',
-  run_id VARCHAR(64) COMMENT 'Run ID',
+  run_id VARCHAR(190) COMMENT 'Run ID',
   node_id VARCHAR(190) COMMENT '节点ID',
   failure_signature VARCHAR(512) NOT NULL COMMENT '失败签名',
   failure_mode VARCHAR(64) NOT NULL COMMENT '失败模式',

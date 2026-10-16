@@ -16,6 +16,10 @@ describe('healing outcomes bootstrap', () => {
     for (const ddl of statements) {
       expect(ddl).toMatch(/workflow_id VARCHAR\(190\)/);
       expect(ddl).not.toMatch(/(?:weak_)?node_id VARCHAR\(64\)/);
+      if (ddl.includes('CREATE TABLE IF NOT EXISTS workflow_healing_diagnoses (')) {
+        expect(ddl).toContain('flow_id VARCHAR(190) NOT NULL');
+        expect(ddl).toContain('run_id VARCHAR(190)');
+      }
       for (const line of ddl.split('\n').map(line => line.trim())) {
         const index = line.match(/^(?:UNIQUE(?: INDEX \w+)?|INDEX \w+) \((.*)\)/);
         if (!index) continue;
