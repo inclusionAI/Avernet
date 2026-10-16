@@ -9,6 +9,27 @@ const repairMigration = repairBatchMigrations.find(m => m.version === 136)!;
 const createPrefix = 'CREATE TABLE IF NOT EXISTS workflow_healing_outcomes (';
 
 describe('healing outcomes bootstrap', () => {
+  it.each([mysqlDialect, zdasDialect])('preserves supported workflow/node IDs and index budgets on $name', async dialect => {
+    const statements: string[] = [];
+    await repairMigration.migrate!({ dbType: dialect.name, dialect,
+      exec: async (sql: string) => { statements.push(sql); } } as unknown as IDatabase);
+    for (const ddl of statements) {
+      expect(ddl).toMatch(/workflow_id VARCHAR\(190\)/);
+      expect(ddl).not.toMatch(/(?:weak_)?node_id VARCHAR\(64\)/);
+      for (const line of ddl.split('\n').map(line => line.trim())) {
+        const index = line.match(/^(?:UNIQUE(?: INDEX \w+)?|INDEX \w+) \((.*)\)/);
+        if (!index) continue;
+        const bytes = index[1].split(',').reduce((sum, item) => {
+          const column = item.trim().match(/^(\w+)(?:\((\d+)\))?$/)!;
+          const definition = ddl.match(new RegExp(`^\\s*${column[1]} (VARCHAR|BINARY|BIGINT|TIMESTAMP)(?:\\((\\d+)\\))?`, 'm'))!;
+          const length = Number(column[2] ?? definition[2]);
+          return sum + (definition[1] === 'VARCHAR' ? length * 4 : definition[1] === 'BINARY' ? length : definition[1] === 'TIMESTAMP' ? 4 : 8);
+        }, 0);
+        expect(bytes, line).toBeLessThanOrEqual(dialect.maxIndexKeyLength);
+      }
+    }
+  });
+
   it('precreates ZDAS healing tables with bounded lookup indexes and full-signature identity keys', async () => {
     const statements: string[] = [];
     const db = { dbType: 'zdas', dialect: zdasDialect, exec: async (sql: string) => { statements.push(sql); } } as unknown as IDatabase;
@@ -22,7 +43,7 @@ describe('healing outcomes bootstrap', () => {
       expect(ddl).not.toMatch(/UNIQUE \(workflow_id, (?:failure_)?signature\)/);
     }
     expect(statements.find(sql => sql.includes('CREATE TABLE IF NOT EXISTS workflow_healing_suggestions (')))
-      .toContain('INDEX idx_wh_suggestions_signature (workflow_id, failure_signature(127))');
+      .toContain('INDEX idx_wh_suggestions_signature (workflow_id(64), failure_signature(127))');
   });
 
   it('provisions the skipped healing sources and verification fields used by the repair runtime', () => {

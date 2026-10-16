@@ -94,8 +94,8 @@ export const healingBootstrapSql = [
   `CREATE TABLE IF NOT EXISTS workflow_healing_lessons (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   lesson_id VARCHAR(64) NOT NULL COMMENT '经验ID',
-  workflow_id VARCHAR(64) COMMENT '关联工作流ID',
-  node_id VARCHAR(64) COMMENT '关联节点ID',
+  workflow_id VARCHAR(190) COMMENT '关联工作流ID',
+  node_id VARCHAR(190) COMMENT '关联节点ID',
   failure_signature VARCHAR(512) NOT NULL COMMENT '失败签名',
   failure_mode VARCHAR(64) NOT NULL COMMENT '失败模式',
   executor_type VARCHAR(64) COMMENT '执行器类型',
@@ -119,13 +119,13 @@ export const healingBootstrapSql = [
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   diagnosis_id VARCHAR(64) NOT NULL COMMENT '诊断记录ID',
   flow_id VARCHAR(64) NOT NULL COMMENT '运行流ID',
-  workflow_id VARCHAR(64) NOT NULL COMMENT '工作流ID',
+  workflow_id VARCHAR(190) NOT NULL COMMENT '工作流ID',
   run_id VARCHAR(64) COMMENT 'Run ID',
-  node_id VARCHAR(64) COMMENT '节点ID',
+  node_id VARCHAR(190) COMMENT '节点ID',
   failure_signature VARCHAR(512) NOT NULL COMMENT '失败签名',
   failure_mode VARCHAR(64) NOT NULL COMMENT '失败模式',
   executor_type VARCHAR(64) COMMENT '执行器类型',
-  weak_node_id VARCHAR(64) COMMENT '薄弱节点ID',
+  weak_node_id VARCHAR(190) COMMENT '薄弱节点ID',
   suggested_fix_kind VARCHAR(64) COMMENT '建议修法类型',
   lesson_id_hit VARCHAR(64) COMMENT '命中经验ID',
   error_text TEXT COMMENT '错误文本',
@@ -139,8 +139,8 @@ export const healingBootstrapSql = [
   `CREATE TABLE IF NOT EXISTS workflow_healing_suggestion_actions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   signature VARCHAR(512) NOT NULL,
-  workflow_id VARCHAR(64) NOT NULL,
-  node_id VARCHAR(64),
+  workflow_id VARCHAR(190) NOT NULL,
+  node_id VARCHAR(190),
   action VARCHAR(32) NOT NULL,
   fix_kind VARCHAR(64),
   note TEXT,
@@ -152,9 +152,9 @@ export const healingBootstrapSql = [
 )`,
   `CREATE TABLE IF NOT EXISTS workflow_healing_suggestions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  workflow_id VARCHAR(64) NOT NULL COMMENT '关联工作流ID',
-  node_id VARCHAR(64) COMMENT '节点ID',
-  weak_node_id VARCHAR(64) COMMENT '薄弱节点ID',
+  workflow_id VARCHAR(190) NOT NULL COMMENT '关联工作流ID',
+  node_id VARCHAR(190) COMMENT '节点ID',
+  weak_node_id VARCHAR(190) COMMENT '薄弱节点ID',
   failure_signature VARCHAR(512) NOT NULL COMMENT '失败签名',
   failure_mode VARCHAR(64) COMMENT '失败模式',
   fix_kind VARCHAR(64) COMMENT '修法类型',
@@ -184,8 +184,8 @@ export const healingBootstrapSql = [
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   outcome_id VARCHAR(64) NOT NULL COMMENT '结果ID',
   lesson_id VARCHAR(64) NOT NULL COMMENT '经验ID',
-  workflow_id VARCHAR(64) COMMENT '工作流ID',
-  node_id VARCHAR(64) COMMENT '节点ID',
+  workflow_id VARCHAR(190) COMMENT '工作流ID',
+  node_id VARCHAR(190) COMMENT '节点ID',
   action VARCHAR(64) NOT NULL COMMENT '动作',
   applied INTEGER NOT NULL DEFAULT 0 COMMENT '是否应用',
   succeeded INTEGER NOT NULL DEFAULT 0 COMMENT '是否成功',
@@ -203,11 +203,15 @@ export const healingBootstrapSql = [
 async function bootstrapHealingTables(db: IDatabase): Promise<void> {
   for (const ddl of healingBootstrapSql) {
     const safe = db.dbType !== 'zdas' ? ddl : ddl
+      .replace('INDEX idx_workflow_healing_lessons_workflow (workflow_id, status, gmt_create)',
+        'INDEX idx_workflow_healing_lessons_workflow (workflow_id(127), status, gmt_create)')
+      .replace('INDEX idx_wh_suggestions_wf_status (workflow_id, status, gmt_create)',
+        'INDEX idx_wh_suggestions_wf_status (workflow_id(127), status, gmt_create)')
       // utf8mb4: (127 + 64) * 4 = 764 bytes, below ZDAS's 767-byte limit.
       .replace('INDEX idx_workflow_healing_lessons_signature (failure_signature, failure_mode)',
         'INDEX idx_workflow_healing_lessons_signature (failure_signature(127), failure_mode)')
       .replace('INDEX idx_wh_suggestions_signature (workflow_id, failure_signature)',
-        'INDEX idx_wh_suggestions_signature (workflow_id, failure_signature(127))')
+        'INDEX idx_wh_suggestions_signature (workflow_id(64), failure_signature(127))')
       // A prefix UNIQUE would reject distinct signatures sharing a long prefix.
       // Hash both complete values, with a length-delimited workflow identity.
       .replace(/UNIQUE \(workflow_id, (signature|failure_signature)\)/,
