@@ -241,6 +241,9 @@ class AsyncChatClient:
         self._a2a_mode = a2a_mode
         self._transport: str = "v3-ws"
         self._v3_fallback = None  # B3: A2A 传输上附件请求的 v3 重路由
+        # R7-F4：fallback 的检查/建连/发布互斥——并发首发都看到 None 会各
+        # 建一条连接（身份守卫吞首连断连、末连断连误杀全部归属 run）。
+        self._v3_fallback_lock = asyncio.Lock()
         # B3（1c）→ P1-4：session→传输归属表——附件请求 reroute 到 v3 后，
         # 该 session 的 chat_abort 与 HITL interaction_resolve 都必须随 run
         # 走 v3 专用连接（A2A kernel 注册表里没有该 run；正常 A2A session
@@ -312,22 +315,31 @@ class AsyncChatClient:
         R6-1：除等待中的编排会话外，A2A 后台 body task（wait_result=
         False 的非等待发送）也算——sweep 不得把仍在服务真实 run 的连
         接当空闲收口。
+
+        R7-F2：v3 fallback 上的附件后台 run 同样占据本连接的服务面
+        （归属标记随 run 存活，与 A2A 的 has_running_runs 同口径）。
         """
         if len(self._active_sessions) > 0:
             return True
-        return bool(getattr(self._client, "has_running_runs", False))
+        if bool(getattr(self._client, "has_running_runs", False)):
+            return True
+        return bool(self._v3_routed_sessions)
 
     def tracks_session(self, session_key: str) -> bool:
-        """该连接是否持有此 session 的在途运行——R4-1/R6-1 归属查询。
+        """该连接是否持有此 session 的在途运行——R4-1/R6-1/R7-F2 归属查询。
 
-        双信号：①编排层 _sessions（调用方**等待期间**——等待中取消
+        三信号：①编排层 _sessions（调用方**等待期间**——等待中取消
         落在等待者上永远正确）；②底层 A2A run 在途（**run 执行期**——
         wait_result=False 的 ACK 返回后 _sessions 即被 pop，但 body
-        task 仍在消费流，CancelTask 的 engine_task_id 记录还活着）。
+        task 仍在消费流，CancelTask 的 engine_task_id 记录还活着）；
+        ③v3 fallback 归属标记（**附件 run 执行期**——B3 reroute 的 run
+        建在 v3 专用连接上，标记由后台终态帧释放，不随等待方收口）。
         只看①会把"非等待发送后取消"退回普通负载分配，命中无记录的
         连接 → RUN_NOT_TRACKED 永不发 CancelTask。
         """
         if session_key in self._sessions:
+            return True
+        if session_key in self._v3_routed_sessions:
             return True
         inner_tracks = getattr(self._client, "tracks_session", None)
         return bool(inner_tracks and inner_tracks(session_key))
@@ -499,6 +511,9 @@ class AsyncChatClient:
                     state = SessionState(trace_context=trace_ctx)
                     self._sessions[session_key] = state
 
+            # R7-F2：归属标记是否随 run 存活（等待方收口后 run 仍在 v3
+            # fallback 连接上执行：ACK 返回 / 等待超时两种离开方式）
+            keep_routed_marker = False
             try:
                 # 3. 检查连接状态
                 if not self.is_connected:
@@ -521,11 +536,29 @@ class AsyncChatClient:
                     raise
 
                 if not wait_result:
+                    # R7-F2：ACK 已返回≠run 结束——B3 附件 run 在 v3 专用
+                    # 连接上继续执行，归属标记随 run 存活（由后台终态帧/
+                    # 断连/close 释放），等待方的 finally 不得收口它。
+                    keep_routed_marker = (
+                        self._transport == "a2a"
+                        and session_key in self._v3_routed_sessions
+                    )
                     return state.content, state.agent_payloads
 
                 # 5. 等待主对话事件完成
                 if timeout:
-                    await asyncio.wait_for(state.chat_complete.wait(), timeout=timeout)
+                    try:
+                        await asyncio.wait_for(
+                            state.chat_complete.wait(), timeout=timeout
+                        )
+                    except TimeoutError:
+                        # R7-F2：超时=等待方收口但 engine 侧 run 仍在执行
+                        # ——归属随 run 存活，同 wait_result=False 口径。
+                        keep_routed_marker = (
+                            self._transport == "a2a"
+                            and session_key in self._v3_routed_sessions
+                        )
+                        raise
                 else:
                     # 无超时等待
                     await state.chat_complete.wait()
@@ -549,8 +582,11 @@ class AsyncChatClient:
                     self._active_sessions.discard(session_key)
                     self._sessions.pop(session_key, None)
                     self._condition.notify_all()
-                # B3（1c）：session 收口——归属路由表同步去标记
-                self._v3_routed_sessions.pop(session_key, None)
+                # B3（1c）/R7-F2：归属随 run 生命周期，不随等待方收口——
+                # keep_routed_marker 仅在 run 可能仍在 v3 连接上执行时为真
+                # （ACK 返回/等待超时），其余离开方式都意味着 run 已终结。
+                if not keep_routed_marker:
+                    self._v3_routed_sessions.pop(session_key, None)
 
         finally:
             # 8. 释放并发信号量
@@ -783,30 +819,36 @@ class AsyncChatClient:
         **专用隔离处理器**（R17-5 的会话归属隔离裁决：只终结归属本连接的
         会话，全局 _on_disconnect 会误杀 A2A 侧正常运行的请求）。复用前先
         查 connected——死连接失效收口后重建，不把坏连接发给下一个附件请求。
-        """
-        if self._v3_fallback is not None:
-            if self._v3_fallback.connected:
-                return self._v3_fallback
-            # 死连接不复用：就地失效（身份守卫保证旧连接迟到的断连通知
-            # 不会误伤后续重建的新连接），归属路由表随之收口——这些会话
-            # 的 run 已随连接死亡，重路由语义不得残留。
-            self._v3_fallback = None
-            self._v3_routed_sessions.clear()
-        # 调用期才解析（保持懒建语义；测试面经此注入替身）
-        from ._bot_websocket_client import BotWebSocketClient
 
-        client = BotWebSocketClient(
-            uri=self.uri,
-            client_id=self.client_id,
-            client_version=self.client_version,
-            headers=self.headers,
-        )
-        await client.connect()
-        for event_name, handler in self._event_bridge_snapshot().items():
-            client.on_event(event_name, handler)
-        client.on_disconnect(self._v3_fallback_disconnect_handler(client))
-        self._v3_fallback = client
-        return client
+        R7-F4：检查/建连/发布全程持锁（含死连接失效）——并发首发只建一条
+        连接；锁内重查使后来者直接复用，不再落到"各自 connect、后者覆盖
+        前者"（那条路上身份守卫会吞掉首连断连、末连断连误杀全部归属）。
+        """
+        # 单次初始化互斥：锁内重查（第一发布前的并发等待者都能看到成品）
+        async with self._v3_fallback_lock:
+            if self._v3_fallback is not None:
+                if self._v3_fallback.connected:
+                    return self._v3_fallback
+                # 死连接不复用：就地失效（身份守卫保证旧连接迟到的断连通知
+                # 不会误伤后续重建的新连接），归属路由表随之收口——这些
+                # 会话的 run 已随连接死亡，重路由语义不得残留。
+                self._v3_fallback = None
+                self._v3_routed_sessions.clear()
+            # 调用期才解析（保持懒建语义；测试面经此注入替身）
+            from ._bot_websocket_client import BotWebSocketClient
+
+            client = BotWebSocketClient(
+                uri=self.uri,
+                client_id=self.client_id,
+                client_version=self.client_version,
+                headers=self.headers,
+            )
+            await client.connect()
+            for event_name, handler in self._event_bridge_snapshot().items():
+                client.on_event(event_name, handler)
+            client.on_disconnect(self._v3_fallback_disconnect_handler(client))
+            self._v3_fallback = client
+            return client
 
     def _v3_fallback_disconnect_handler(self, client: Any) -> Callable[..., Any]:
         """R17-5/R3-2：fallback 断连的隔离收口处理器。
@@ -1067,6 +1109,20 @@ class AsyncChatClient:
 
         # No state associated with this session key
         if state is None:
+            # R7-F2：wait_result=False/超时后的后台终态帧——等待方已把
+            # session state pop 收口，本分支是 v3 fallback run 归属标记的
+            # 唯一见证者：final/error 即 run 生命周期终点，随释归属
+            # （无标记/非 a2a 时为 no-op，off 路径零变化）。
+            if (
+                chat_state in ("final", "error")
+                and session_key in self._v3_routed_sessions
+            ):
+                self._v3_routed_sessions.pop(session_key, None)
+                logger.debug(
+                    "[chat] background v3 run terminal: sessionKey=%s state=%s",
+                    session_key,
+                    chat_state,
+                )
             logger.warning(
                 f"[chat] No session state for sessionKey={session_key}, "
                 f"state={chat_state}, text_len={len(text)}, ignore_case={self._ignore_case}"
