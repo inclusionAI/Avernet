@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import time
 import weakref
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Mapping
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -184,6 +184,20 @@ class AcliCliService(AcliCliServiceProtocol):
             tool = await self._port.install(
                 bot_id=bot_id, owner_id=owner_id, name=cli_code,
             )
+        except asyncio.CancelledError:
+            # The request was abandoned (a worker shutting down, say) while the
+            # engine may still finish the install. Treat it like any uncertain
+            # install: clean up, shielded so the cleanup itself survives the
+            # cancellation, then let the cancellation through.
+            logger.warning(
+                "acli_cli_add_failed bot_id=%s cli_code=%s phase=install error_code=cancelled",
+                bot_id, cli_code,
+            )
+            await self._shielded(self._undo_install(
+                bot_id, owner_id, cli_code,
+                reason="install_cancelled", state="install_unknown_not_granted",
+            ))
+            raise
         except AcliPortError as error:
             logger.warning(
                 "acli_cli_add_failed bot_id=%s cli_code=%s phase=install error_code=%s",
@@ -325,6 +339,15 @@ class AcliCliService(AcliCliServiceProtocol):
             await self._port.uninstall(
                 bot_id=bot_id, owner_id=owner_id, name=cli_code,
             )
+        except asyncio.CancelledError:
+            # Abandoned mid-uninstall: whether the program is gone is unknown,
+            # so stay revoked, the safe side, and record the state.
+            logger.error(
+                "acli_cli_rollback_failed bot_id=%s cli_code=%s "
+                "state=revoked_install_unknown error_code=cancelled",
+                bot_id, cli_code,
+            )
+            raise
         except AcliPortError as error:
             logger.warning(
                 "acli_cli_remove_failed bot_id=%s cli_code=%s phase=uninstall error_code=%s",
@@ -358,6 +381,18 @@ class AcliCliService(AcliCliServiceProtocol):
             self._bot_locks[bot_id] = lock
         async with lock:
             yield
+
+    @staticmethod
+    async def _shielded(cleanup: Awaitable[None]) -> None:
+        """Run ``cleanup`` to completion even though the caller was cancelled.
+
+        A failed cleanup is already logged with its state by the cleanup
+        itself; the cancellation, not that error, is what the caller sees.
+        """
+        try:
+            await asyncio.shield(cleanup)
+        except (AcliRollbackFailedError, asyncio.CancelledError):
+            pass
 
     # ── rollback ─────────────────────────────────────────────────────────
 

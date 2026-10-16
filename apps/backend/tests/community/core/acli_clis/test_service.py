@@ -365,6 +365,40 @@ async def test_regrant_passport_does_not_keep_reports_revoked_still_installed() 
     assert "yuque-cli" in container.installed
 
 
+async def test_cancelled_install_is_cleaned_up_and_the_cancel_propagates() -> None:
+    """An abandoned request must not leave a program the engine finished installing."""
+    container = _Container()
+    real_install = container.install
+
+    async def install_then_cancel(**kwargs):
+        await real_install(**kwargs)
+        raise asyncio.CancelledError
+
+    container.install = install_then_cancel  # type: ignore[method-assign]
+    service, agentpass, _, _ = _service(container=container)
+
+    with pytest.raises(asyncio.CancelledError):
+        await _add(service)
+
+    assert "yuque-cli" not in container.installed
+    assert agentpass.codes == ["dataphin"]
+
+
+async def test_cancelled_uninstall_stays_revoked_and_the_cancel_propagates() -> None:
+    container = _Container({"yuque-cli"})
+
+    async def cancelled(**kwargs):
+        raise asyncio.CancelledError
+
+    container.uninstall = cancelled  # type: ignore[method-assign]
+    service, agentpass, _, _ = _service(granted=["dataphin", "yuque-cli"], container=container)
+
+    with pytest.raises(asyncio.CancelledError):
+        await _remove(service)
+
+    assert agentpass.codes == ["dataphin"]
+
+
 async def test_failed_grant_and_failed_uninstall_reports_the_state() -> None:
     service, agentpass, container, _ = _service()
     agentpass.add_errors = [RuntimeError("agentpass down")]
