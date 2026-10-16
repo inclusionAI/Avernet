@@ -5,6 +5,9 @@ import type { SessionRecoverySummary } from '../../../../types/session-recovery'
 const statusLabels: Record<SessionRecoverySummary['status'], string> = {
   running: '执行中', waiting_owner: '等待方案确认', waiting_effect: '等待效果', completed: '已完成', failed: '执行失败',
 };
+const statusClasses: Record<SessionRecoverySummary['status'], string> = {
+  running: 'running', waiting_owner: 'unknown', waiting_effect: 'unknown', completed: '', failed: 'error',
+};
 export function RecoveryTaskLinks({ eventId }: { eventId: string }) {
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -18,9 +21,15 @@ export function RecoveryTaskLinks({ eventId }: { eventId: string }) {
     return () => controller.abort();
   }, [eventId, revision]);
   if (error === eventId) return <div className="recovery-task-links" role="status">自愈任务暂时无法读取。<button type="button" className="copy-btn" onClick={() => setRevision(value => value + 1)}>重试</button></div>;
-  if (loaded?.eventId !== eventId || !loaded.items.length) return null;
-  return <section className="recovery-task-links" aria-label="对应的自愈任务"><strong>自愈任务</strong>{loaded.items.map(task =>
-    <Link key={task.task_id} className="recovery-task-link" to={`/insight?module=monitoring&recoveryTaskId=${encodeURIComponent(task.task_id)}`}>
-      <span>查看自愈任务</span><span>{statusLabels[task.status]}</span><code>{task.task_id}</code>
-    </Link>)}</section>;
+  const task = loaded?.eventId === eventId ? loaded.items[0] : null;
+  if (!task) return null;
+  return <section className="recovery-task-links" aria-label="对应的自愈任务">
+    <span className="recovery-task-label">自愈任务</span>
+    <div className="recovery-task-item">
+      <span className={`health ${statusClasses[task.status]}`}><span className="dot" />{statusLabels[task.status]}</span>
+      <Link className="recovery-task-link" title={task.task_id} aria-label={`查看自愈任务 ${statusLabels[task.status]} ${task.task_id}`} to={`/insight?module=monitoring&recoveryTaskId=${encodeURIComponent(task.task_id)}`}>
+        查看任务<span aria-hidden="true">↗</span>
+      </Link>
+    </div>
+  </section>;
 }

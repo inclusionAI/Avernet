@@ -34,16 +34,16 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('MonitoringPanel', () => {
-  it('links each recovery task to the exact diagnosis and shows its status without creating a task', async () => {
+  it('links the diagnosis to its recovery task and shows its current status without creating a task', async () => {
     vi.mocked(sessionRecoveryApi.list).mockResolvedValue({ items: [
       { task_id: 'SR-first', status: 'waiting_owner', phase: 'plan', effect: 'unknown' },
-      { task_id: 'SR-second', status: 'completed', phase: 'observe', effect: 'recovered' },
     ] });
     render(<MemoryRouter><MonitoringPanel /></MemoryRouter>);
     fireEvent.click(await screen.findByRole('button', { name: /外部服务异常/ }));
     const first = await screen.findByRole('link', { name: /查看自愈任务.*等待方案确认.*SR-first/ });
     expect(first).toHaveAttribute('href', '/insight?module=monitoring&recoveryTaskId=SR-first');
-    expect(screen.getByRole('link', { name: /查看自愈任务.*已完成.*SR-second/ })).toHaveAttribute('href', '/insight?module=monitoring&recoveryTaskId=SR-second');
+    expect(screen.getAllByRole('link', { name: /查看自愈任务/ })).toHaveLength(1);
+    expect(first).toHaveAttribute('title', 'SR-first');
     expect(sessionRecoveryApi.list).toHaveBeenCalledWith('diag-1', expect.any(AbortSignal));
   });
   it('retries failed recovery-link reads instead of presenting the error as no task', async () => {
