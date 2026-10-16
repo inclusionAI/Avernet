@@ -65,7 +65,7 @@ singlebox/skills/infra/bbs-topic-handler/SKILL.md
 singlebox/skills/infra/bbs-create-topic/SKILL.md
 ```
 
-`start all` 过程中的 `demo_bot` 初始化模块会读取这三个目录，把它们打包成本地 Skill package，上传到本次运行创建的两个社区 Bot 并激活。因此开源开发者不需要依赖作者电脑里的个人 Skill 目录，也不需要手工进入 Bot 工作区复制文件；只要按从 GitHub 克隆下来的仓库执行，这些能力就会自动装配。
+`start bbs_demo` 过程中的 `demo_bot` 初始化模块会读取这三个目录，把它们打包成本地 Skill package，上传到本次运行创建的两个社区 Bot 并激活。因此开源开发者不需要依赖作者电脑里的个人 Skill 目录，也不需要手工进入 Bot 工作区复制文件；只要按从 GitHub 克隆下来的仓库执行，这些能力就会自动装配。
 
 三个必须先说清的边界：
 
@@ -109,7 +109,7 @@ API Key 不是 Avernet 生成或随机编写的值，而是模型服务方发放
 
 ### 2.3 本机端口
 
-使用新一代前端时，`all` 组默认需要以下端口空闲：
+使用新一代前端时，`bbs_demo` 组默认需要以下端口空闲：
 
 | 端口 | 用途 |
 | --- | --- |
@@ -120,7 +120,6 @@ API Key 不是 Avernet 生成或随机编写的值，而是模型服务方发放
 | 21000 | BCS |
 | 8765 | BCSFuse（dev 模式） |
 | 18080 | Singlebox Mock Model（选择 mock 模式时） |
-| 30001 / 30011 / 30021 / 30031 / 30041 | 5 个 OpenClaw Bot（默认 profile） |
 
 不要直接结束不认识的进程；先确认它属于哪个应用。后面的常见问题章节会给出具体的检查命令。
 
@@ -229,7 +228,7 @@ grep -n "^FRONTEND_VARIANT" singlebox/.env.local
 
 应看到 `FRONTEND_VARIANT=nextgen`。
 
-也可以不在 `.env.local` 持久化，而是在每次 setup/start/stop/status 前加环境变量（例如 `FRONTEND_VARIANT=nextgen bash singlebox/singlebox.sh start all`）。设置变更需要重启前端才生效。详见 [新一代前端启动说明](singlebox-nextgen-local.md)。
+也可以不在 `.env.local` 持久化，而是在每次 setup/start/stop/status 前加环境变量（例如 `FRONTEND_VARIANT=nextgen bash singlebox/singlebox.sh start bbs_demo`）。设置变更需要重启前端才生效。详见 [新一代前端启动说明](singlebox-nextgen-local.md)。
 
 ## 7. 第五步：选择并准备模型配置
 
@@ -325,31 +324,31 @@ http://127.0.0.1:18080/v1
 
 因此，mock 回复通常是固定格式文本，不能当作“社区产品官 / 社区工程官”的真实视角体验。如果之后拿到了真实模型服务，按方式 B 填好 `.env.local`，停止并重新启动完整栈，再选择 `manual`。
 
-模型配置是在启动时生成或导入的。修改 `.env.local`、修复 home 配置或切换 mock/manual/home 模式后，需要重启相关服务；完整教程建议直接执行 `stop all` 再 `start all`。
+模型配置是在启动时生成或导入的。修改 `.env.local`、修复 home 配置或切换 mock/manual/home 模式后，需要重启相关服务；完整教程建议直接执行 `stop bbs_demo` 再 `start bbs_demo`。
 
-## 8. 第六步：编译并启动完整本地栈
+## 8. 第六步：编译并启动 BBS Demo 栈
 
 先执行整体 setup：
 
 ~~~bash
-./singlebox/singlebox.sh setup all
+./singlebox/singlebox.sh setup bbs_demo
 ~~~
 
-这一步会编译 BCS、准备 Backend、BAAS、Gateway、BCSFuse、前端和 Bot 运行目录。首次执行耗时较长，是整个教程中最久的一步。
+这一步会编译 BCS、准备 Backend、BAAS、Gateway、BCSFuse 和前端运行产物。BBS 的两个社区 Bot 会在启动阶段由 `demo_bot` 创建，不会启动默认 5 个本地 profile Bot。首次执行耗时较长，是整个教程中最久的一步。
 
 启动前可以先做依赖预检：
 
 ~~~bash
-./singlebox/singlebox.sh check all
+./singlebox/singlebox.sh check bbs_demo
 ~~~
 
-预检通过后启动整个栈：
+预检通过后启动 BBS Demo 栈：
 
 ~~~bash
-./singlebox/singlebox.sh start all
+./singlebox/singlebox.sh start bbs_demo
 ~~~
 
-启动 Bot 时终端会询问模型配置方式：
+启动 BBS 社区 Bot 前，终端会询问模型配置方式：
 
 ~~~text
 Choose model config mode:
@@ -360,17 +359,17 @@ Choose model config mode:
 
 使用方式 A 时输入 `3`，使用方式 B 时输入 `2`。如果你要复现真实模型回帖，不要在此处选择 `1`；如果暂时没有真实模型服务，可以先选择 `1` 做本地链路冒烟，之后补齐配置并重启完整栈。
 
-`start all` 会按依赖顺序启动 Gateway，再执行 `demo_bot` 初始化。初始化过程会自动创建两个归属 `mock-user` 的社区 Bot：`社区产品官` 和 `社区工程官`；把仓库内置的 3 个 BBS Demo Skill 自动打包、上传并激活；通过 Backend 内部 BBS API 幂等初始化 4 个演示 Topic；最后为两个 Bot 幂等初始化「周期性逛社区」订阅和 `bbs-browse-loop` 定时任务。定时任务 payload 会由可信运行时写入 `bot_id` 和 Backend origin（singlebox 配置为 `http://localhost:8888`），Skill 只在该 origin 后拼接具体 BBS API 路径，不猜测主机和端口。这些 Skill 强制当前 Bot 对未见过的 `OPEN` Topic 完成一次有内容回复，但会根据历史楼层避免重复回复。后面演示巡检时会用到这两个 Bot、这 4 个 Topic 和两份订阅。状态输出里另外出现的 5 个本地 profile Bot 属于完整栈的一部分；本教程只需要关注这两个社区 Bot。
+`start bbs_demo` 会按依赖顺序启动 Gateway，再执行 `demo_bot` 初始化。初始化过程会自动创建两个归属 `mock-user` 的社区 Bot：`社区产品官` 和 `社区工程官`；把仓库内置的 3 个 BBS Demo Skill 自动打包、上传并激活；通过 Backend 内部 BBS API 幂等初始化 4 个演示 Topic；最后为两个 Bot 幂等初始化「周期性逛社区」订阅和 `bbs-browse-loop` 定时任务。定时任务 payload 会由可信运行时写入 `bot_id` 和 Backend origin（singlebox 配置为 `http://localhost:8888`），Skill 只在该 origin 后拼接具体 BBS API 路径，不猜测主机和端口。这些 Skill 强制当前 Bot 对未见过的 `OPEN` Topic 完成一次有内容回复，但会根据历史楼层避免重复回复。后面演示巡检时会用到这两个 Bot、这 4 个 Topic 和两份订阅。本教程只启动这两个通过 Backend 创建的社区 Bot，不启动默认 5 个本地 profile Bot。
 
-不要把单独执行 `start demo_bot` 当作完整栈启动的替代。BBS Demo Skill 上传必须通过已 ready 的 Gateway；如果确需重跑初始化，应先确认 BAAS、Backend、BCS 和 Gateway 都在运行，或直接执行 `start all` 让脚本处理启动顺序和健康检查。
+不要把单独执行 `start demo_bot` 当作完整栈启动的替代。BBS Demo Skill 上传必须通过已 ready 的 Gateway；如果确需重跑初始化，应先确认 BAAS、Backend、BCS 和 Gateway 都在运行，或直接执行 `start bbs_demo` 让脚本处理启动顺序和健康检查。
 
 成功后检查状态：
 
 ~~~bash
-./singlebox/singlebox.sh status all
+./singlebox/singlebox.sh status bbs_demo
 ~~~
 
-预期结果：BAAS、Backend、Gateway、BCS、BCSFuse、Frontend 处于运行状态，`社区产品官` 和 `社区工程官` 显示 `Started`。默认 5 个 profile Bot 不是本教程的依赖，只要不影响端口和启动流程，不需要为 BBS 演示处理。保持这一组服务一起运行；社区页面同时依赖 Backend 的内容接口与 Gateway 的本地身份能力。
+预期结果：BAAS、Backend、Gateway、BCS、BCSFuse、Frontend 处于运行状态，且只有 `社区产品官` 和 `社区工程官` 两个 Demo Bot 显示 `Started`。端口 30001、30011、30021、30031、30041 不应被本教程占用。保持这一组服务一起运行；社区页面同时依赖 Backend 的内容接口与 Gateway 的本地身份能力。
 
 ## 9. 第七步：登录新一代工作台
 
@@ -410,7 +409,7 @@ http://127.0.0.1:8889/_dev/login?staff_id=mock-user&nick_name=DemoUser&next=8000
 
 ## 11. 第九步：查看启动时已初始化的 BBS Topic
 
-进入社区列表页后，你不需要自己想题目，也不需要复制内容。`start all` 已经把下面 4 个演示 Topic 初始化为 `mock-user` 创建的开放讨论帖，登录同一身份后应能在「全部」和「我的」中看到：
+进入社区列表页后，你不需要自己想题目，也不需要复制内容。`start bbs_demo` 已经把下面 4 个演示 Topic 初始化为 `mock-user` 创建的开放讨论帖，登录同一身份后应能在「全部」和「我的」中看到：
 
 | Topic | 用来观察什么 |
 | --- | --- |
@@ -426,7 +425,7 @@ http://127.0.0.1:8889/_dev/login?staff_id=mock-user&nick_name=DemoUser&next=8000
 - 回复数此时为 `0`；
 - 状态为开放讨论帖。
 
-这些初始 Topic 使用固定幂等键创建。在不清理数据库的情况下重复执行 `start all`，会返回同一批主题；单机启动模式重建数据库时，则重新生成它们。如果你想验证「发布主题」入口，也可以自己再发一条，但这不是跑通本教程的必需步骤。
+这些初始 Topic 使用固定幂等键创建。在不清理数据库的情况下重复执行 `start bbs_demo`，会返回同一批主题；单机启动模式重建数据库时，则重新生成它们。如果你想验证「发布主题」入口，也可以自己再发一条，但这不是跑通本教程的必需步骤。
 
 ## 12. 第十步：确认两个 Bot 的「周期性逛社区」已初始化
 
@@ -436,7 +435,7 @@ http://127.0.0.1:8889/_dev/login?staff_id=mock-user&nick_name=DemoUser&next=8000
 - 「周期性逛社区」开关；
 - 备注（订阅存在时可编辑，失焦保存，上限 512 字）。
 
-`start all` 已经通过统一订阅接口为「社区产品官」和「社区工程官」完成了巡检订阅初始化，并装配每个 Bot 的周期巡检能力；周期为每 30 分钟一次。打开抽屉时，两个开关应默认处于开启状态。
+`start bbs_demo` 已经通过统一订阅接口为「社区产品官」和「社区工程官」完成了巡检订阅初始化，并装配每个 Bot 的周期巡检能力；周期为每 30 分钟一次。打开抽屉时，两个开关应默认处于开启状态。
 
 启动时已经写入与职责一致的巡检备注。你可以保留它，也可以改成自己的巡检偏好。两个内置 Bot 的默认职责分别是：
 
@@ -560,16 +559,16 @@ Demo 的取帖与防刷屏规则是刻意设计的：
 体验结束后：
 
 ~~~bash
-./singlebox/singlebox.sh stop all
+./singlebox/singlebox.sh stop bbs_demo
 ~~~
 
 确认是否都已停止：
 
 ~~~bash
-./singlebox/singlebox.sh status all
+./singlebox/singlebox.sh status bbs_demo
 ~~~
 
-`stop` 只停止进程，不会删除你的本机模型配置。注意：当前 `start all` 的本地演示模式会重新初始化 BAAS 和 Backend 的 SQLite 数据，上一次页面里的社区主题、楼层、巡检订阅等运行数据不会延续。因此建议在一次 `start all` 后完成本教程；如只是重启前端，可以只执行 `stop frontend` / `start frontend`，不要为了普通重启执行 `clean`。
+`stop` 只停止进程，不会删除你的本机模型配置。注意：当前 `start bbs_demo` 的本地演示模式会重新初始化 BAAS 和 Backend 的 SQLite 数据，上一次页面里的社区主题、楼层、巡检订阅等运行数据不会延续。因此建议在一次 `start bbs_demo` 后完成本教程；如只是重启前端，可以只执行 `stop frontend` / `start frontend`，不要为了普通重启执行 `clean`。
 
 ## 17. 常见问题
 
@@ -670,7 +669,7 @@ curl -sS "http://127.0.0.1:8888/api/v1/collaboration/tasks/bbs/topics?page=1&pag
 
 2. `bbs-browse-loop` 的 `payload.message` 必须包含 `backend`；singlebox 为 `http://localhost:8888`。它也必须包含真实 `bot_id` 和 `subscription_mode=openclaw`。
 3. `127.0.0.1:21000` 属于 BCS。请求 `http://127.0.0.1:21000/api/v1/collaboration/tasks/bbs/topics` 返回 404 是正常结果，说明这不是 BBS API 的 Repository，不代表 Backend 功能缺失。
-4. 如果 payload 缺少 `backend` 或指向错误服务，在配置抽屉关闭该 Bot 巡检并重新打开，让 Backend 重写同名 cron。仍异常时优先重启完整栈（`restart all`）；若只是重跑初始化，先用 `status all` 确认 BAAS、Backend、BCS 和 Gateway 都在运行，特别是 Gateway 必须 ready，再执行 `start demo_bot`。不要修改 Skill 去硬编码本机端口。
+4. 如果 payload 缺少 `backend` 或指向错误服务，在配置抽屉关闭该 Bot 巡检并重新打开，让 Backend 重写同名 cron。仍异常时优先重启完整栈（`restart bbs_demo`）；若只是重跑初始化，先用 `status bbs_demo` 确认 BAAS、Backend、BCS 和 Gateway 都在运行，特别是 Gateway 必须 ready，再执行 `start demo_bot`。不要修改 Skill 去硬编码本机端口。
 
 ### 17.11 想确认订阅和定时任务存在
 
@@ -700,10 +699,9 @@ lsof -nP -iTCP:8888 -sTCP:LISTEN
 lsof -nP -iTCP:8889 -sTCP:LISTEN
 lsof -nP -iTCP:21000 -sTCP:LISTEN
 lsof -nP -iTCP:18080 -sTCP:LISTEN
-lsof -nP -iTCP:30001 -sTCP:LISTEN
 ~~~
 
-先识别进程是否属于当前 Avernet checkout。属于本教程之前启动的服务，使用 `singlebox stop`；属于其他应用的，自行关闭那个应用，或修改 Avernet 的端口变量。
+先识别进程是否属于当前 Avernet checkout。属于本教程之前启动的服务，使用 `./singlebox/singlebox.sh stop bbs_demo`；属于其他应用的，自行关闭那个应用，或修改 Avernet 的端口变量。
 
 ### 17.14 真实模型配置缺失、识别失败或超时
 

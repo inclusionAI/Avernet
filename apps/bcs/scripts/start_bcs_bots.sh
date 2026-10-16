@@ -903,7 +903,10 @@ ${models_block}
     ]
   },
   "messages": {
-    "ackReactionScope": "group-mentions"
+    "ackReactionScope": "group-mentions",
+    "groupChat": {
+      "visibleReplies": "automatic"
+    }
   },
   "commands": {
     "native": "auto",

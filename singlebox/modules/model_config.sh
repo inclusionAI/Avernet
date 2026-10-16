@@ -136,7 +136,7 @@ singlebox_model_config_required_for_services() {
     local service
     for service in "$@"; do
         case "$service" in
-            all|baas|bots|bcs_bots|hybrid|merchant_hybrid)
+            all|bbs_demo|baas|bots|bcs_bots|hybrid|merchant_hybrid)
                 return 0
                 ;;
         esac
@@ -147,9 +147,11 @@ singlebox_model_config_required_for_services() {
 singlebox_mock_model_stop_required_for_services() {
     local service
     for service in "$@"; do
-        if [ "$service" = "all" ]; then
-            return 0
-        fi
+        case "$service" in
+            all|bbs_demo)
+                return 0
+                ;;
+        esac
     done
     return 1
 }

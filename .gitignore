@@ -38,6 +38,7 @@ singlebox/.dependencies/
 .quickstart-openclaw/
 .openclaw-host-bcn/
 .standalone-openclaw/
+.singlebox-tools/
 test-bots/
 
 # Databases

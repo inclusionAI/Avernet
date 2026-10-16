@@ -65,6 +65,65 @@ test_all_start_rolls_back_started_services_on_failure() {
     "all_start rollback order"
 }
 
+test_bbs_demo_orders_exclude_profile_bots() {
+  setup_env
+  # shellcheck source=/dev/null
+  source "${ROOT}/singlebox/modules/bbs_demo.sh"
+
+  assert_eq "baas backend bcs bcsfuse gateway frontend" "${BBS_DEMO_SETUP_ORDER[*]}" "BBS demo setup order"
+  assert_eq "baas backend bcsfuse bcs gateway demo_bot frontend" "${BBS_DEMO_START_ORDER[*]}" "BBS demo start order"
+  assert_eq "frontend demo_bot gateway bcs bcsfuse backend baas" "${BBS_DEMO_STOP_ORDER[*]}" "BBS demo stop order"
+
+  local svc
+  for svc in "${BBS_DEMO_SETUP_ORDER[@]}" "${BBS_DEMO_START_ORDER[@]}" "${BBS_DEMO_STOP_ORDER[@]}"; do
+    if [ "$svc" = bots ]; then
+      fail "BBS demo must not depend on the 5 local profile bots"
+    fi
+  done
+}
+
+test_bbs_demo_start_excludes_bots_and_rolls_back_on_failure() {
+  setup_env
+  # shellcheck source=/dev/null
+  source "${ROOT}/singlebox/modules/bbs_demo.sh"
+
+  local events_file
+  events_file="$(mktemp)"
+  check_prereqs_for_services() { return 0; }
+
+  baas_start() { printf '%s\n' "start:baas" >> "$events_file"; }
+  backend_start() { printf '%s\n' "start:backend" >> "$events_file"; }
+  bcsfuse_start() { printf '%s\n' "start:bcsfuse" >> "$events_file"; }
+  bcs_start() { printf '%s\n' "start:bcs" >> "$events_file"; }
+  gateway_start() { printf '%s\n' "start:gateway" >> "$events_file"; }
+  demo_bot_start() { printf '%s\n' "start:demo_bot" >> "$events_file"; return 23; }
+  frontend_start() { printf '%s\n' "start:frontend" >> "$events_file"; }
+
+  baas_ready() { return 0; }
+  backend_ready() { return 0; }
+  bcsfuse_ready() { return 0; }
+  bcs_ready() { return 0; }
+  gateway_ready() { return 0; }
+  demo_bot_ready() { return 0; }
+  frontend_ready() { return 0; }
+
+  baas_stop() { printf '%s\n' "stop:baas" >> "$events_file"; }
+  backend_stop() { printf '%s\n' "stop:backend" >> "$events_file"; }
+  bcsfuse_stop() { printf '%s\n' "stop:bcsfuse" >> "$events_file"; }
+  bcs_stop() { printf '%s\n' "stop:bcs" >> "$events_file"; }
+  gateway_stop() { printf '%s\n' "stop:gateway" >> "$events_file"; }
+  demo_bot_stop() { printf '%s\n' "stop:demo_bot" >> "$events_file"; }
+  frontend_stop() { printf '%s\n' "stop:frontend" >> "$events_file"; }
+
+  if bbs_demo_start; then
+    fail "bbs_demo_start should fail when demo_bot_start fails"
+  fi
+
+  assert_eq $'start:baas\nstart:backend\nstart:bcsfuse\nstart:bcs\nstart:gateway\nstart:demo_bot\nstop:gateway\nstop:bcs\nstop:bcsfuse\nstop:backend\nstop:baas' \
+    "$(cat "$events_file")" \
+    "BBS demo rollback order without bots"
+}
+
 test_backend_health_failure_stops_backend() {
   setup_env
   # shellcheck source=/dev/null
@@ -801,6 +860,8 @@ test_dynamic_bot_gateway_receives_manual_model_credential() (
 )
 
 test_all_start_rolls_back_started_services_on_failure
+test_bbs_demo_orders_exclude_profile_bots
+test_bbs_demo_start_excludes_bots_and_rolls_back_on_failure
 test_backend_health_failure_stops_backend
 test_backend_wait_fails_when_started_process_exits
 test_backend_default_readiness_window_covers_cold_start
