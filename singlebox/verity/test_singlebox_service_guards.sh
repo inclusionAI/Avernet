@@ -82,6 +82,19 @@ test_bbs_demo_orders_exclude_profile_bots() {
   done
 }
 
+test_check_prereqs_preserves_caller_service_variable() {
+  setup_env
+  # shellcheck source=/dev/null
+  source "${ROOT}/singlebox/env/utils.sh"
+  # shellcheck disable=SC2034
+  local svc=bbs_demo
+  stub_prereqs_return_zero() { return 0; }
+  frontend_prereqs() { stub_prereqs_return_zero; }
+
+  check_prereqs_for_services frontend >/dev/null
+  assert_eq "bbs_demo" "$svc" "prereq iteration must not overwrite caller service"
+}
+
 test_bbs_demo_start_excludes_bots_and_rolls_back_on_failure() {
   setup_env
   # shellcheck source=/dev/null
@@ -861,6 +874,7 @@ test_dynamic_bot_gateway_receives_manual_model_credential() (
 
 test_all_start_rolls_back_started_services_on_failure
 test_bbs_demo_orders_exclude_profile_bots
+test_check_prereqs_preserves_caller_service_variable
 test_bbs_demo_start_excludes_bots_and_rolls_back_on_failure
 test_backend_health_failure_stops_backend
 test_backend_wait_fails_when_started_process_exits
