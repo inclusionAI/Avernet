@@ -2327,7 +2327,8 @@ export class EvolveRepository {
           input.ext === undefined ? null : JSON.stringify(input.ext),
           lifecycleAt, terminal ? lifecycleAt : null, now, stepId],
       );
-      if (input.status === "failed" || input.status === "canceled") {
+      // Auxiliary Agent executions do not own the business Task's terminal state.
+      if ((input.status === "failed" || input.status === "canceled") && step.step_type !== "agent_execution") {
         await tx.exec(
           "UPDATE ce_tasks SET status = ?, error_message = ?, gmt_modified = ? WHERE task_id = ?",
           [input.status === "canceled" ? "canceled" : "failed", input.errorMessage ?? input.status, now, step.task_id],
