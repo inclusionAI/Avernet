@@ -23,6 +23,7 @@ from agentclaw.community.core.repository.protocols.identity import (
     CallerIdentityRepositoryProtocol,
 )
 from agentclaw.community.di import config as cfg
+from agentclaw.community.di.modules.config_module import _block
 from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
 from agentclaw.community.plugin_api.http_client import QUALIFIER_GENERAL, HttpClient
 from agentclaw.community.plugin_api.passport import PassportPlugin
@@ -30,6 +31,16 @@ from agentclaw.community.plugin_api.passport import PassportPlugin
 
 class AcliClisModule(Module):
     """Compose ``AcliCliService`` from the Passport writer and the engine port."""
+
+    @singleton
+    @provider
+    def acli_market_config(self) -> cfg.AcliMarketConfig:
+        """The acli market's search URL — empty unless the deployment overlay sets
+        ``user_config.acli_market.search_url`` (it differs per environment)."""
+        search_url = _block("acli_market").get("search_url", "")
+        return cfg.AcliMarketConfig(
+            search_url=search_url.strip() if isinstance(search_url, str) else "",
+        )
 
     @singleton
     @provider

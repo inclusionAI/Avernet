@@ -46,7 +46,7 @@ async def search_acli_market(
     page_size: Annotated[int, Query(ge=1, le=100, description="Page size.")] = 20,
     service: AcliCliServiceProtocol = Injected(AcliCliServiceProtocol),
 ) -> Envelope[AcliMarketPageResult]:
-    """One page of published acli market tools matching ``keyword``."""
+    """One page of published acli market tools matching the keyword."""
     page = await service.search_market(keyword=keyword, page_no=page_no, page_size=page_size)
     return envelope(
         AcliMarketPageResult(

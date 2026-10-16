@@ -349,6 +349,7 @@ _NO_USER_DIMENSION = {
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/skills"),
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/mcp-servers"),
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/skill-center/skills"),
+    ("get", f"{PUBLIC_API_PREFIX}/bots/market/clis"),
     # Public Skill Center status and tag catalogues are tenant-wide reads.
     ("get", f"{PUBLIC_API_PREFIX}/bots/skills/{{skill_code}}/publish/status"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/market/skill-center/tags"),
@@ -554,8 +555,10 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # six path-addressed user-scoped operations) joins the public schema, so
 # ``path`` grows 172 -> 178. Classification and the Local Skill security read
 # each add another path-addressed operation. The four acli market CLI
-# operations under /bots/{bot_id}/clis add four more: 181 -> 185.
-_BOT_ID_PLACEMENT = {"path": 185, "query": 1, "none": 125}
+# operations under /bots/{bot_id}/clis add four more: 181 -> 185. The acli
+# market search then moves to the tenant-wide /bots/market/clis, so one of
+# them leaves the path tier: path 185 -> 184, none 125 -> 126.
+_BOT_ID_PLACEMENT = {"path": 184, "query": 1, "none": 126}
 
 
 def _schema() -> dict:
@@ -759,8 +762,9 @@ def test_the_pinned_number_of_operations_take_it():
     # Engine release inspection adds one Bot-addressed read.
 # acli market CLIs: four path-addressed, user-scoped operations under
 # /bots/{bot_id}/clis take user_id like the identity switch beside them,
-# so ``taking`` grows 254 -> 258.
-    assert len(taking) == 258
+# so ``taking`` grows 254 -> 258. The market search then moves to the
+# tenant-wide /bots/market/clis, which takes no user: 258 -> 257.
+    assert len(taking) == 257
 
 
 def test_the_exempt_operations_take_none():

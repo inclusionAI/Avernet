@@ -751,16 +751,6 @@ class ConfigModule(Module):
 
     @singleton
     @provider
-    def acli_market(self) -> cfg.AcliMarketConfig:
-        """The acli market's search URL — empty unless the overlay sets it."""
-        block = _block("acli_market")
-        search_url = block.get("search_url", "")
-        return cfg.AcliMarketConfig(
-            search_url=search_url.strip() if isinstance(search_url, str) else "",
-        )
-
-    @singleton
-    @provider
     def masa_agent_eval(self) -> cfg.MasaAgentEvalConfig:
         """MasaAgentEval API 配置 — 评测服务外部调用。"""
         block = _block("masa_agent_eval")
