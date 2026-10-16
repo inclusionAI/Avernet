@@ -605,6 +605,7 @@
 }
 .sr-check input { width:15px; height:15px; accent-color:#2f66d8 }
 .sr-actions { display:flex; flex-wrap:wrap; gap:9px; margin-top:14px }
+.sr-hero-actions { display:flex; flex-wrap:wrap; align-items:center; gap:9px }
 
 .sr-timeline-meta {
   display:flex;

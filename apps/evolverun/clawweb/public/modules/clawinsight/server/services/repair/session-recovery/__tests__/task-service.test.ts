@@ -10,7 +10,7 @@ function setup(callbackFails = false) {
   const store: RecoveryTaskStore = {
     create: async value => { if (records.has(value.taskId)) throw new Error("duplicate"); records.set(value.taskId, structuredClone(value)); },
     find: async id => records.has(id) ? structuredClone(records.get(id)!) : null,
-    listForEvent: async (eventId, ownerId) => [...records.values()].filter(value => value.request.event_id === eventId && value.request.target.entity_id === ownerId),
+    listForEvent: async (eventId, ownerId) => [...records.values()].filter(value => value.request.event_id === eventId && (value.request.target.entity_id === ownerId || value.shared === true)),
     listForReporting: async (limit, afterTaskId = "") => [...records.values()].filter(value => value.taskId > afterTaskId && value.pending_results.length > 0).sort((a, b) => a.taskId.localeCompare(b.taskId)).slice(0, limit),
     listForMaintenance: async (limit, afterTaskId = "") => [...records.values()].filter(value => value.taskId > afterTaskId).slice(0, limit),
     update: async (id, version, change) => {
@@ -82,6 +82,24 @@ describe("self-healing task orchestration", () => {
   it("does not reveal another Owner's task", async () => {
     const { service } = setup(); const ack = await service.create(request, actor);
     await expect(service.detail(ack.task_id, { userId: "stranger", isAdmin: false })).rejects.toMatchObject({ status: 403 });
+  });
+  it("keeps legacy tasks private and sharing idempotent without changing the workflow or reporting results", async () => {
+    const { service, records, agent, reporter } = setup();
+    const { task_id } = await service.create(request, actor); await flush();
+    delete records.get(task_id)!.shared;
+    expect(await service.detail(task_id, actor)).toMatchObject({ shared: false, canOperate: true, canManageShare: true });
+    await expect(service.detail(task_id, { userId: "reader", isAdmin: false })).rejects.toMatchObject({ status: 403 });
+    await expect(service.setTaskShared(task_id, "true" as any, actor)).rejects.toMatchObject({ status: 422 });
+    await service.setTaskShared(task_id, true, actor);
+    const version = records.get(task_id)!.version;
+    await service.setTaskShared(task_id, true, actor);
+    expect(records.get(task_id)!.version).toBe(version);
+    expect(await service.detail(task_id, { userId: "reader", isAdmin: false })).toMatchObject({ shared: true, canOperate: false, canManageShare: false });
+    expect(await service.list(request.event_id, { userId: "reader", isAdmin: false })).toHaveLength(1);
+    await service.setTaskShared(task_id, false, { userId: "admin", isAdmin: true });
+    await expect(service.detail(task_id, { userId: "reader", isAdmin: false })).rejects.toMatchObject({ status: 403 });
+    expect(records.get(task_id)).toMatchObject({ phase: "assess", status: "running", pending_results: [] });
+    expect(agent.start).toHaveBeenCalledTimes(1); expect(reporter.report).not.toHaveBeenCalled();
   });
 });
 

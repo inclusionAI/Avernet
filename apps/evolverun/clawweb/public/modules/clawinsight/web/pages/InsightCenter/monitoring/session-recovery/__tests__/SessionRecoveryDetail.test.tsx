@@ -5,8 +5,8 @@ import SessionRecoveryDetail from '../SessionRecoveryDetail';
 import { api } from '@avernet/clawweb-shared/web/api/client';
 vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { evolve: { listTaskLogArchives: vi.fn(), getTaskLogArchiveDownloadUrl: vi.fn() } } }));
 import { sessionRecoveryApi } from '../../../../../api/session-recovery';
-vi.mock('../../../../../api/session-recovery', () => ({ sessionRecoveryApi: { detail: vi.fn(), decide: vi.fn(), annotate: vi.fn(), toolCall: vi.fn() } }));
-const task = { taskId: 'task', status: 'waiting_owner', phase: 'apply', request: { diagnosis: '原任务失败', target: { bot_id: 'default' }, session_key: 'original' },
+vi.mock('../../../../../api/session-recovery', () => ({ sessionRecoveryApi: { detail: vi.fn(), decide: vi.fn(), annotate: vi.fn(), toolCall: vi.fn(), setTaskShared: vi.fn() } }));
+const task = { taskId: 'task', shared: false, canOperate: true, canManageShare: true, status: 'waiting_owner', phase: 'apply', request: { diagnosis: '原任务失败', target: { bot_id: 'default' }, session_key: 'original' },
   judgment: { effect: 'not_recovered', summary: '原问题仍存在' }, plan: { digest: 'plan-digest', approvedAt: null, summary: '完整修复方案', basis: '原失败证据', scope: '当前目标', verification: '原操作成功', actions: [{ actionId: 'fix', summary: '修正配置', risk: '局部变更', verification: '读取配置', command: 'printf fixture', rollback: '恢复原值' }], owner_cooperation: [{ request: '确认权限已开放', basis: '权限缺失' }] },
   timeline: [{ event_id: 'event', at_ms: 1, kind: 'plan', actor: 'agent', summary: '提出方案', payload: { evidence_ids: ['evidence'] } }], evidence: [{ evidence_id: 'evidence', tool_call_id: 'call', source: 'session', location: 'line:1', excerpt: '原失败消息' }] };
 beforeEach(() => {
@@ -17,6 +17,40 @@ beforeEach(() => {
   vi.mocked(sessionRecoveryApi.detail).mockResolvedValue(task as never);
   vi.mocked(sessionRecoveryApi.decide).mockResolvedValue({ ok: true });
   vi.mocked(sessionRecoveryApi.annotate).mockResolvedValue({ ok: true });
+  vi.mocked(sessionRecoveryApi.setTaskShared).mockResolvedValue(task as never);
+});
+it('lets the Owner open and close sharing using the existing task controls', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValueOnce(task as never).mockResolvedValue({ ...task, shared: true } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  fireEvent.click(await screen.findByRole('button', { name: '分享' }));
+  await waitFor(() => expect(sessionRecoveryApi.setTaskShared).toHaveBeenCalledWith('task', true));
+  await screen.findByText('已公开分享');
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue(task as never);
+  fireEvent.click(screen.getByRole('button', { name: '关闭分享' }));
+  await waitFor(() => expect(sessionRecoveryApi.setTaskShared).toHaveBeenLastCalledWith('task', false));
+  await screen.findByRole('button', { name: '分享' });
+});
+it('shows shared tasks read-only without approval, Owner cooperation, annotations or Agent log downloads', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, shared: true, canOperate: false, canManageShare: false } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  await screen.findByText('共享的只读自愈任务');
+  expect(screen.getByText('完整修复方案')).toBeVisible();
+  expect(screen.queryByRole('button', { name: /确认完整方案|拒绝方案|关闭分享|^分享$/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  expect(api.evolve.listTaskLogArchives).not.toHaveBeenCalled();
+  expect(sessionRecoveryApi.decide).not.toHaveBeenCalled();
+  expect(sessionRecoveryApi.annotate).not.toHaveBeenCalled();
+});
+it('clears shared task contents when the Owner revokes sharing', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, shared: true, canOperate: false, canManageShare: false } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  await screen.findByText('完整修复方案');
+  vi.mocked(sessionRecoveryApi.detail).mockRejectedValue({ status: 403 });
+  fireEvent.click(screen.getByRole('button', { name: '刷新任务' }));
+  await screen.findByText('权限不足，请联系任务 Owner 开启分享。');
+  expect(screen.queryByText('完整修复方案')).not.toBeInTheDocument();
+  expect(screen.queryByText('共享的只读自愈任务')).not.toBeInTheDocument();
 });
 it('keeps the plan, Owner cooperation and approval together in stage three', async () => {
   const user = userEvent.setup();

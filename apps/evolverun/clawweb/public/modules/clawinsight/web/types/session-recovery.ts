@@ -1,5 +1,8 @@
 export type SessionRecoveryTask = {
   taskId: string;
+  shared: boolean;
+  canOperate: boolean;
+  canManageShare: boolean;
   level: 'debug' | 'approval' | 'automatic';
   status: 'running' | 'waiting_owner' | 'waiting_effect' | 'completed' | 'failed';
   phase: 'assess' | 'observe' | 'plan' | 'apply' | 'verify';

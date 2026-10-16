@@ -68,6 +68,49 @@ beforeEach(async () => {
   reporter = { report: async result => { callbacks.push(result); } };
   service = new SessionRecoveryTaskService({ tasks, agent, notifier, reporter, observationMs: 3600000, now: () => now, resolveTarget: async () => recoveryTargetSnapshot(target) });
 });
+it("persists sharing and authorizes read-only task links without granting Owner actions", async () => {
+  const task = await create();
+  const read = await inspect(task, "share-evidence");
+  let principal: typeof actor | null = actor;
+  const app = express();
+  app.use(createSessionRecoveryRouter({ service, tasks: service, agent, resolveActor: async () => principal }));
+  const server = await new Promise<ReturnType<typeof app.listen>>(resolve => { const opened = app.listen(0, "127.0.0.1", () => resolve(opened)); });
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/monitoring/session-recoveries`;
+  const call = async (path: string, method = "GET", body?: unknown) => {
+    const response = await fetch(base + path, { method, ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }) });
+    return { status: response.status, body: await response.json() };
+  };
+  try {
+    const version = (await current(task.taskId)).version;
+    const scope = `/${task.taskId}`;
+    expect(await call(scope + "/share", "PATCH", { shared: true })).toMatchObject({ status: 200, body: { shared: true, canOperate: true } });
+    const restored = new SessionRecoveryTaskRepository(db, new EvolveRepository(db), artifactStore);
+    expect(await restored.find(task.taskId)).toMatchObject({ shared: true, version: version + 1, phase: "assess", status: "running", execution: task.execution });
+    const raw = JSON.parse((await repo.findTask(task.taskId))!.config_json);
+    expect(raw.shared).toBe(true);
+    principal = { userId: "reader", isAdmin: false };
+    expect(await call(`?event_id=${request.event_id}`)).toMatchObject({ status: 200, body: { items: [{ task_id: task.taskId }] } });
+    const visible = await call(scope);
+    expect(visible).toMatchObject({ status: 200, body: { shared: true, canOperate: false, canManageShare: false } });
+    expect(visible.body.execution).toBeUndefined(); expect(visible.body.aisExecution).toBeUndefined();
+    expect((await call(scope + `/tool-calls/${read.toolCallId}`)).status).toBe(200);
+    for (const [suffix, method, body] of [
+      ["/share", "PATCH", { shared: false }],
+      ["/decision", "POST", { plan_digest: "digest", approved: true, cooperation_done: true }],
+      ["/annotations", "POST", { layer: "effect", correct: true, reason: "read only", evidence_ids: [] }],
+    ] as const) expect((await call(scope + suffix, method, body)).status).toBe(403);
+    principal = null;
+    expect((await call(scope)).status).toBe(401);
+    principal = actor;
+    expect((await call(scope + "/share", "PATCH", { shared: "true" })).status).toBe(422);
+    expect((await call(scope + "/share", "PATCH", { shared: false })).status).toBe(200);
+    principal = { userId: "reader", isAdmin: false };
+    expect((await call(scope)).status).toBe(403);
+    expect((await call(scope + `/tool-calls/${read.toolCallId}`)).status).toBe(403);
+    expect(await call(`?event_id=${request.event_id}`)).toMatchObject({ status: 200, body: { items: [] } });
+    expect(runtime.sendMessage).not.toHaveBeenCalled();
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
 it("Agent-first MCP sends one targeted message without an environment approval and recovers the original session", async () => {
   let task = await create("approval", {});
   expect(task.phase).toBe("assess"); expect(runtime.sendMessage).not.toHaveBeenCalled();

@@ -43,6 +43,10 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
     try { res.set("Cache-Control", "no-store").json(await tasks().detail(String(req.params.taskId), await actor(req))); }
     catch (error) { next(error); }
   });
+  router.patch("/monitoring/session-recoveries/:taskId/share", json({ limit: "8kb", inflate: false }), async (req, res, next) => {
+    try { res.set("Cache-Control", "no-store").json(await tasks().setTaskShared(String(req.params.taskId), req.body?.shared, await actor(req))); }
+    catch (error) { next(error); }
+  });
   router.get("/monitoring/session-recoveries/:taskId/tool-calls/:toolCallId", async (req, res, next) => {
     try {
       const task = await tasks().detail(String(req.params.taskId), await actor(req));

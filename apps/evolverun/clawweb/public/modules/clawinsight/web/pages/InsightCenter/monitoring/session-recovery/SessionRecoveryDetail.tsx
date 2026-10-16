@@ -405,7 +405,7 @@ function RecoveryPlan({ task, busy, ownerFeedback, cooperationDone, onFeedback, 
           <div className="sr-plan-step-heading"><span className="sr-step-actor"><MonitoringIcon name="user" />Owner</span><span className="sr-note">方案确认前处理</span></div>
           <div className="sr-owner-request"><PlanMarkdown text={item.request} /></div>
           <details className="sr-disclosure"><summary>查看这项安排的依据</summary><PlanMarkdown text={item.basis} /></details>
-          {task.status === 'waiting_owner' && index === plan.owner_cooperation.length - 1 && <div className="sr-owner-feedback">
+          {task.canOperate && task.status === 'waiting_owner' && index === plan.owner_cooperation.length - 1 && <div className="sr-owner-feedback">
             <label>补充信息或处理说明<textarea maxLength={4000} value={ownerFeedback} onChange={(event) => onFeedback(event.target.value)} placeholder="填写处理进度或补充信息，供 Agent 继续处理时参考" /></label>
             <label className="sr-check"><input type="checkbox" checked={cooperationDone} onChange={(event) => onCooperation(event.target.checked)} />我已处理方案中的配合事项</label>
           </div>}
@@ -433,7 +433,7 @@ function RecoveryPlan({ task, busy, ownerFeedback, cooperationDone, onFeedback, 
       <h3>验收与确认</h3>
       <div className="sr-plan-body">
       <PlanMarkdown text={plan.verification} />
-      {task.status === 'waiting_owner' && <div className="sr-decision-panel">
+      {task.canOperate && task.status === 'waiting_owner' && <div className="sr-decision-panel">
         <h4>确认完整方案</h4>
         <p>请核对上述分工、处理安排与验收标准，确认后 Agent 将继续执行。</p>
         {plan.owner_cooperation.length === 0 && <label>补充信息或处理说明<textarea maxLength={4000} value={ownerFeedback} onChange={(event) => onFeedback(event.target.value)} placeholder="填写补充信息" /></label>}
@@ -474,6 +474,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
   const [loaded, setLoaded] = useState<{ taskId: string; task: SessionRecoveryTask } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [sharingBusy, setSharingBusy] = useState(false);
   const [revision, setRevision] = useState(0);
   const [annotationLayer, setAnnotationLayer] = useState<'delivery' | 'response' | 'effect'>('effect');
   const [annotationCorrect, setAnnotationCorrect] = useState('true');
@@ -507,7 +508,11 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
           setError('');
         }
       } catch (failure) {
-        if (active && !signal.aborted) setError(monitoringErrorText(failure));
+        if (active && !signal.aborted) {
+          const status = (failure as { status?: number } | null)?.status;
+          if (status === 401 || status === 403 || status === 404) { setLoaded(null); setRawEvidence({}); }
+          setError(status === 403 ? '权限不足，请联系任务 Owner 开启分享。' : monitoringErrorText(failure));
+        }
       }
     };
     void load();
@@ -526,7 +531,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
   useEffect(() => { setAnnotationReason(''); setAnnotationSaved(false); setRawEvidence({}); }, [taskId]);
 
   const decide = async (approved: boolean) => {
-    if (!task?.plan || busy) return;
+    if (!task?.canOperate || !task.plan || busy) return;
     setBusy(true);
     try {
       await sessionRecoveryApi.decide(taskId, task.plan.digest, approved, cooperationDone, ownerFeedback);
@@ -548,7 +553,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
   };
 
   const annotate = async () => {
-    if (!task || !annotationReason.trim() || busy) return;
+    if (!task?.canOperate || !annotationReason.trim() || busy) return;
     setBusy(true);
     setAnnotationSaved(false);
     try {
@@ -582,11 +587,20 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
   const stageSummary = task ? {
     completed: effect === 'recovered' ? '原任务已恢复，可查看下方处理过程和判断依据。' : '本次自愈处理已结束，恢复情况请查看效果判断。',
     failed: '本次自愈未完成，请查看失败说明和相关操作记录。',
-    waiting_owner: task.plan?.owner_cooperation.length ? '请先处理方案中的配合事项，再确认完整方案。' : '请核对完整修复方案，确认后 Agent 将继续执行。',
+    waiting_owner: !task.canOperate ? '等待 Owner 处理配合事项并确认修复方案。' : task.plan?.owner_cooperation.length ? '请先处理方案中的配合事项，再确认完整方案。' : '请核对完整修复方案，确认后 Agent 将继续执行。',
     waiting_effect: '恢复效果尚未确定，等待原会话出现新的执行结果。',
     running: lastEvent?.summary || '等待任务执行记录。',
   }[task.status] : '';
-  const review = task && ['completed', 'failed'].includes(task.status) ? <ReviewSection busy={busy} saved={annotationSaved} annotationLayer={annotationLayer} annotationCorrect={annotationCorrect} annotationReason={annotationReason} onLayer={(value) => { setAnnotationLayer(value); setAnnotationSaved(false); }} onCorrect={(value) => { setAnnotationCorrect(value); setAnnotationSaved(false); }} onReason={(value) => { setAnnotationReason(value); setAnnotationSaved(false); }} onSubmit={() => void annotate()} /> : null;
+  const review = task?.canOperate && ['completed', 'failed'].includes(task.status) ? <ReviewSection busy={busy} saved={annotationSaved} annotationLayer={annotationLayer} annotationCorrect={annotationCorrect} annotationReason={annotationReason} onLayer={(value) => { setAnnotationLayer(value); setAnnotationSaved(false); }} onCorrect={(value) => { setAnnotationCorrect(value); setAnnotationSaved(false); }} onReason={(value) => { setAnnotationReason(value); setAnnotationSaved(false); }} onSubmit={() => void annotate()} /> : null;
+  const toggleSharing = async () => {
+    if (!task?.canManageShare || sharingBusy) return;
+    setSharingBusy(true);
+    try {
+      await sessionRecoveryApi.setTaskShared(taskId, !task.shared);
+      setRevision(value => value + 1);
+    } catch (failure) { setError(monitoringErrorText(failure)); }
+    finally { setSharingBusy(false); }
+  };
   const viewPlan = () => {
     setPhaseSelection({ taskId, phase: 'plan' });
     window.requestAnimationFrame(() => document.getElementById('recovery-plan')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
@@ -600,7 +614,11 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
         <h1>自愈任务详情</h1>
         {task && <div className="sr-target"><span><MonitoringIcon name="bot" /></span><div><strong>{task.request.target.bot_id}</strong><p>{[task.request.target.engine, task.request.target.env, levelLabels[task.level]].filter(Boolean).join(' · ')}</p></div></div>}
       </div>
-      <button type="button" className="sr-button" onClick={() => setRevision((value) => value + 1)}><MonitoringIcon name="refresh" />刷新任务</button>
+      <div className="sr-hero-actions">
+        {task?.shared && <StatusPill status="completed">已公开分享</StatusPill>}
+        {task?.canManageShare && <button type="button" className="sr-button" disabled={sharingBusy} onClick={() => void toggleSharing()}>{sharingBusy ? '更新中…' : task.shared ? '关闭分享' : '分享'}</button>}
+        <button type="button" className="sr-button" onClick={() => setRevision((value) => value + 1)}><MonitoringIcon name="refresh" />刷新任务</button>
+      </div>
     </header>
 
     {error && <div role="alert" className="sr-alert danger">
@@ -609,11 +627,12 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
     </div>}
 
     {!task ? <div role="status" className="sr-empty large">{error ? '任务未能加载，请重试。' : '正在读取任务…'}</div> : <>
+      {!task.canOperate && <section role="status" className="sr-alert"><MonitoringIcon name="user" /><div><strong>共享的只读自愈任务</strong><p>可查看方案、执行过程与恢复结果；方案确认、配合事项和人工标注仅任务 Owner 可操作。</p></div></section>}
       {task.status === 'failed' && <section role="alert" className="sr-alert danger"><MonitoringIcon name="alert" /><div><strong>自愈执行失败</strong><div className="sr-failure-preview"><PlanMarkdown text={failureSummary} /></div><details className="sr-disclosure"><summary>查看完整失败说明</summary><PlanMarkdown text={failureSummary} /></details></div><button type="button" className="sr-button" onClick={() => {
         setPhaseSelection({ taskId, phase: currentPhaseKey });
         window.requestAnimationFrame(() => document.getElementById('recovery-stage-process')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
       }}>查看执行记录</button></section>}
-      {task.status === 'waiting_owner' && <section role="status" className="sr-alert warning"><MonitoringIcon name="user" /><div><strong>需要确认修复方案</strong><p>{stageSummary}</p></div><button type="button" className="sr-button primary" onClick={viewPlan}>查看方案</button></section>}
+      {task.status === 'waiting_owner' && <section role="status" className="sr-alert warning"><MonitoringIcon name="user" /><div><strong>{task.canOperate ? '需要确认修复方案' : '等待 Owner 确认修复方案'}</strong><p>{stageSummary}</p></div><button type="button" className="sr-button primary" onClick={viewPlan}>查看方案</button></section>}
       <section className="sr-summary-grid" aria-label="任务概览">
         <article className="sr-summary-card sr-stage-summary">
           <div className="sr-summary-heading"><span className="sr-summary-icon"><MonitoringIcon name="clock" /></span><h2>当前阶段</h2><StatusPill status={task.status}>{statusLabels[task.status]}</StatusPill></div>
@@ -663,7 +682,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
             <p className="sr-diagnosis-preview">{task.request.diagnosis}</p>
             <details className="sr-disclosure"><summary>查看完整诊断与错误位置</summary><p className="sr-long-text">{task.request.diagnosis}</p>{task.request.error_location && <div className="sr-note-box"><strong>错误位置</strong><p>{task.request.error_location}</p></div>}</details>
           </section>
-          <AgentSessionLogs key={task.taskId} task={task} />
+          {task.canOperate && <AgentSessionLogs key={task.taskId} task={task} />}
         </aside>
       </div>
     </>}

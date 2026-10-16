@@ -5,7 +5,7 @@ import { SessionRecoveryError } from "./errors.js";
 import { parseRequest } from "./validation.js";
 import { recoveryHandbook } from "./handbook.js";
 import { decideRecoveryPlan, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan } from "./task-state.js";
-import type { RecoveryActor, RecoveryAcknowledgment, RecoveryRequest, RecoveryResult, SessionRecoveryTaskApi } from "./contracts.js";
+import type { RecoveryActor, RecoveryAcknowledgment, RecoveryRequest, RecoveryResult, RecoveryTaskView, SessionRecoveryTaskApi } from "./contracts.js";
 import type { RecoveryEvidence, RecoveryJudgment, RecoveryLevel, RecoveryPlan, RecoveryTaskResult, RecoveryTimelineEvent, RecoveryStoredTask, RecoveryTaskStore } from "./task-contracts.js";
 
 export interface RecoveryAgentExecutor {
@@ -43,7 +43,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     }
     const runtimeTarget = await this.deps.resolveTarget?.(request);
     const task: RecoveryStoredTask = { schemaVersion: "session-recovery-task/v1", taskId, request, level,
-      status: "running", phase: "assess", version: 1, observationDeadlineAt: null, ownerDeadlineAt: null,
+      status: "running", phase: "assess", version: 1, shared: false, observationDeadlineAt: null, ownerDeadlineAt: null,
       ...(runtimeTarget ? { runtimeTarget, authorizationScopeDigest: createHash("sha256").update(JSON.stringify({ target: request.target, level })).digest("hex"), current: { stepId: `${taskId}-1` } } : {}),
       plan: null, judgment: null, evidence: [], pending_results: [], timeline: [this.event("created", "service", "收到诊断并创建自愈任务", { request, handbook, initial_intervention: "agent" }),
         ...(level === "debug" ? [this.event("message", "service", "Debug：仅记录干预策略，不实际发送", { initial_intervention: "agent" })] : [])] };
@@ -141,12 +141,21 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   async list(eventId: string, actor: RecoveryActor) {
     if (!eventId || eventId.length > 128) this.fail(422, "event_id 无效");
     const tasks = await this.deps.tasks.listForEvent(eventId, actor.userId);
-    return tasks.map(task => ({ task_id: task.taskId, status: task.status, phase: task.phase, effect: task.judgment?.effect ?? "unknown" }));
+    return tasks.filter(task => this.canOperate(task, actor) || task.shared === true)
+      .map(task => ({ task_id: task.taskId, status: task.status, phase: task.phase, effect: task.judgment?.effect ?? "unknown" }));
   }
-  async detail(taskId: string, actor: RecoveryActor): Promise<RecoveryStoredTask> {
-    const task = await this.required(taskId); this.owner(task, actor);
+  async detail(taskId: string, actor: RecoveryActor): Promise<RecoveryTaskView> {
+    const task = await this.required(taskId);
+    const canOperate = this.canOperate(task, actor);
+    if (!canOperate && task.shared !== true) this.fail(403, "权限不足，请联系任务 Owner 开启分享");
     const { pending_results: _pending, execution: _execution, authorizationScopeDigest: _scope, aisExecution: _ais, ...view } = task;
-    return { ...view, pending_results: [] };
+    return { ...view, pending_results: [], shared: task.shared === true, canOperate, canManageShare: canOperate };
+  }
+  async setTaskShared(taskId: string, shared: boolean, actor: RecoveryActor): Promise<RecoveryTaskView> {
+    if (typeof shared !== "boolean") this.fail(422, "shared 必须为布尔值");
+    const task = await this.required(taskId); this.owner(task, actor);
+    if (task.shared !== shared) await this.mutate(taskId, task.version, value => ({ ...value, shared, version: value.version + 1 }));
+    return this.detail(taskId, actor);
   }
 
   async annotate(taskId: string, actor: RecoveryActor, input: {
@@ -260,7 +269,10 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     const task = await this.deps.tasks.find(taskId); if (!task) this.fail(404, "自愈任务不存在"); return task;
   }
   private owner(task: RecoveryStoredTask, actor: RecoveryActor): void {
-    if (task.request.target.entity_id !== actor.userId && !actor.isAdmin) this.fail(403, "无权查看或操作该任务");
+    if (!this.canOperate(task, actor)) this.fail(403, "无权查看或操作该任务");
+  }
+  private canOperate(task: RecoveryStoredTask, actor: RecoveryActor): boolean {
+    return task.request.target.entity_id === actor.userId || actor.isAdmin;
   }
   private level(raw: unknown): RecoveryLevel {
     const value = (raw as Record<string, unknown>).execution_level ?? "approval";

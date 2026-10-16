@@ -141,15 +141,20 @@ Owner 等待（包括到期释放容器）、阶段变化、审批、通知和�
 
 任务入口：`/insight?module=monitoring&recoveryTaskId=<task_id>`。
 
-页面查询、决策和人工标注使用现有用户登录身份，操作只允许该任务 Owner。
+页面查询、分享设置、决策和人工标注使用现有用户登录身份。默认仅任务 Owner 或管理员可查看；Owner 或管理员可开启分享，开启后其他登录用户可通过任务链接只读查看方案、时间线、效果和工具调用证据。方案确认、配合事项确认、人工标注和修改分享设置仍仅允许 Owner 或管理员。Agent 原始会话日志下载沿用现有日志接口的 Owner／管理员权限。
+
+分享开关沿用自进化的 `ce_tasks.config_json.shared`，未设置视为关闭，不新增表或迁移。详情响应的 `shared / canOperate / canManageShare` 表达当前分享状态及当前用户的操作权限。关闭分享后，共享访客的详情和证据读取立即返回 `403`。分享设置不推进任务阶段、不重新执行 Agent、不触发上游结果回传。
 
 ```text
 GET  /api/insight/v1/monitoring/session-recoveries?event_id=…
 GET  /api/insight/v1/monitoring/session-recoveries/:taskId
+PATCH /api/insight/v1/monitoring/session-recoveries/:taskId/share
 GET  /api/insight/v1/monitoring/session-recoveries/:taskId/tool-calls/:toolCallId
 POST /api/insight/v1/monitoring/session-recoveries/:taskId/decision
 POST /api/insight/v1/monitoring/session-recoveries/:taskId/annotations
 ```
+
+分享设置请求：`{ "shared": true }`（关闭为 `false`），返回更新后的任务详情。仅布尔值合法；重复设置同一状态幂等。
 
 方案确认请求：`{ "plan_digest": "…", "approved": true, "cooperation_done": true, "feedback": "已处理所需配合事项" }`。配合事项不为空时必须确认完成；决策绑定完整方案摘要，不能改写已确认的决策。
 

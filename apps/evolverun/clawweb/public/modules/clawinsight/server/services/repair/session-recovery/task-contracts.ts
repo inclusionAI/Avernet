@@ -49,6 +49,8 @@ export type RecoveryTaskState = {
   status: RecoveryTaskStatus;
   phase: RecoveryPhase;
   version: number;
+  /** Absent on legacy tasks; only true enables read-only sharing. */
+  shared?: boolean;
   observationDeadlineAt: number | null;
   ownerDeadlineAt: number | null;
   plan: (RecoveryPlan & { digest: string; approvedAt: number | null }) | null;
