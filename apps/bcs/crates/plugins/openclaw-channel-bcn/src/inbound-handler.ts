@@ -1633,47 +1633,53 @@ export async function handleChatSend(
   }
 }
 
-/** Handle session.delete request from BCS - delete local session via gateway. */
+/** Delete exactly one canonical BCS Session's local engine history. */
 export async function handleSessionDelete(
   request: RequestFrame,
   client: BcsWsClient,
-  _account: ResolvedBcsAccount,
+  account: ResolvedBcsAccount,
   log?: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void; error: (...args: unknown[]) => void },
   dataDir?: string,
 ): Promise<void> {
   const params = request.params as unknown as SessionDeleteParams;
-  const bcsGroupId = params.bcs_group_id;
-  log?.info?.(`[session.delete] Deleting session for group ${bcsGroupId}`);
-
-  // 1. Find sessionKey from memory mapping
-  const sessionKey = groupIdToSessionKey.get(bcsGroupId);
-
-  if (!sessionKey) {
-    log?.warn?.(`[session.delete] No sessionKey mapping found for group ${bcsGroupId}`);
-    client.sendResponse(request.id, true, {}); // ACK anyway
+  const bcsSessionId = nonEmptyString(params.bcs_session_id);
+  const scope = parseSessionScopedGroupId(bcsSessionId);
+  if (!scope || scope.sessionId.length <= scope.groupId.length + 1
+    || (params.bcs_group_id !== undefined && nonEmptyString(params.bcs_group_id) !== scope.groupId)) {
+    client.sendResponse(request.id, false, undefined, {
+      code: 'INVALID_REQUEST',
+      message: 'session.delete requires a canonical bcs_session_id and a matching bcs_group_id when supplied',
+      retryable: false,
+    });
     return;
   }
 
   try {
     const rt = getBcsRuntime();
-    const currentCfg = await rt.config.loadConfig();
-
-    // 2. Call gateway sessions.delete
-    await callGatewaySessionDelete({
+    const currentCfg = withBcsDirectSessionScope(await rt.config.loadConfig());
+    // Resolve from the canonical ID and account, including after a plugin restart.
+    // A group's latest-session cache must never select a deletion target.
+    const route = rt.channel.routing.resolveAgentRoute({
       cfg: currentCfg,
-      sessionKey,
-      dataDir,
-      log,
+      channel: CHANNEL_ID,
+      accountId: account.accountId,
+      peer: { kind: 'direct', id: scope.sessionId },
     });
+    const sessionKey = route.sessionKey;
+    await callGatewaySessionDelete({ cfg: currentCfg, sessionKey, dataDir, log });
 
-    // 3. Clean up memory mappings
     sessionKeyToGroupId.delete(sessionKey);
-    groupIdToSessionKey.delete(bcsGroupId);
+    sessionKeyToBcsSessionId.delete(sessionKey);
+    sessionKeyToRouteScope.delete(sessionKey);
+    for (const [ key, value ] of groupIdToSessionKey) {
+      if (value === sessionKey) groupIdToSessionKey.delete(key);
+    }
     sessionRoutingMode.delete(sessionKey);
     sessionKeyToClient.delete(sessionKey);
     sessionTaskGroupInfo.delete(sessionKey);
+    pendingRouteBySessionKey.delete(sessionKey);
 
-    log?.info?.(`[session.delete] Session deleted: ${sessionKey}`);
+    log?.info?.(`[session.delete] Session deleted: ${bcsSessionId} -> ${sessionKey}`);
     client.sendResponse(request.id, true, {});
   } catch (err) {
     log?.error?.(`[session.delete] Failed: ${err instanceof Error ? err.message : String(err)}`);

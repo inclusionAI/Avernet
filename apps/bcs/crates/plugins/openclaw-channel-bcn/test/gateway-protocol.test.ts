@@ -13,6 +13,8 @@ import {
   handleChatInject,
   handleSessionDelete,
   rememberTaskToolSession,
+  resolveBcsSessionIdFromSessionKey,
+  resolveSessionKeyFromGroupId,
 } from '../src/inbound-handler.js';
 
 const REQUIRED_GATEWAY_PROTOCOL = 4;
@@ -43,6 +45,7 @@ function createResponseClient() {
 async function startGatewayStub(options?: {
   onChatInject?: (frame: any) => void;
   chatInjectPayload?: Record<string, unknown>;
+  rejectSessionDelete?: boolean;
 }) {
   const frames: any[] = [];
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
@@ -118,6 +121,10 @@ async function startGatewayStub(options?: {
       }
 
       if (frame.method === 'sessions.delete') {
+        if (options?.rejectSessionDelete) {
+          socket.send(JSON.stringify({ type: 'res', id: frame.id, ok: false, error: { message: 'delete rejected' } }));
+          return;
+        }
         socket.send(JSON.stringify({
           type: 'res',
           id: frame.id,
@@ -162,10 +169,10 @@ function installRuntime(
     },
     channel: {
       routing: {
-        resolveAgentRoute({ cfg, peer }: any) {
+        resolveAgentRoute({ cfg, peer, accountId }: any) {
           assert.equal(peer.kind, 'direct');
           assert.equal(cfg.session.dmScope, 'per-account-channel-peer');
-          return { agentId: 'agent-1', sessionKey: 'session-1' };
+          return { agentId: 'agent-1', sessionKey: `agent:agent-1:bcs:${accountId}:direct:${peer.id}` };
         },
       },
       reply: {
@@ -381,7 +388,7 @@ describe('OpenClaw gateway protocol compatibility', () => {
     const { client, responses } = createResponseClient();
 
     try {
-      rememberTaskToolSession('session-delete-key', {} as any, 'group-delete', {
+      rememberTaskToolSession('agent:agent-1:bcs:default:direct:group-delete:abcdef12', {} as any, 'group-delete', {
         session_id: 'group-delete:abcdef12',
         participants: [],
         originator: 'bot-1',
@@ -397,7 +404,7 @@ describe('OpenClaw gateway protocol compatibility', () => {
           type: 'req',
           id: 'delete-1',
           method: 'session.delete',
-          params: { bcs_group_id: 'group-delete' },
+          params: { bcs_group_id: 'group-delete', bcs_session_id: 'group-delete:abcdef12' },
         } as any,
         client as any,
         { accountId: 'default', botId: 'bot-1' } as any,
@@ -410,6 +417,7 @@ describe('OpenClaw gateway protocol compatibility', () => {
       assert.deepEqual(connectFrame?.params?.scopes, [ 'operator.admin' ]);
       const deleteFrame = gateway.frames.find(frame => frame.method === 'sessions.delete');
       assert.ok(deleteFrame);
+      assert.equal(deleteFrame.params.key, 'agent:agent-1:bcs:default:direct:group-delete:abcdef12');
       assert.equal('force' in (deleteFrame.params ?? {}), false);
     } finally {
       abortAllStreams();
@@ -417,4 +425,76 @@ describe('OpenClaw gateway protocol compatibility', () => {
       await rm(dataDir, { recursive: true, force: true });
     }
   });
+
+  it('deletes only the requested Session and account, including without memory mappings', async () => {
+    abortAllStreams();
+    const gateway = await startGatewayStub();
+    const dataDir = await mkdtemp(join(tmpdir(), 'bcn-exact-delete-'));
+    installRuntime(gateway.port, join(dataDir, 'sessions.json'));
+    const { client, responses } = createResponseClient();
+    const key = (account: string, suffix: string) => `agent:agent-1:bcs:${account}:direct:group-delete:${suffix}`;
+    rememberTaskToolSession(key('first', 'a'), {} as any, 'group-delete', undefined, 'group-delete:a');
+    rememberTaskToolSession(key('first', 'b'), {} as any, 'group-delete', undefined, 'group-delete:b');
+    rememberTaskToolSession(key('second', 'a'), {} as any, 'group-delete', undefined, 'group-delete:a');
+    try {
+      await handleSessionDelete({ type: 'req', id: 'exact-delete', method: 'session.delete',
+        params: { bcs_session_id: 'group-delete:a' },
+      } as any, client as any, { accountId: 'first' } as any, undefined, dataDir);
+      assert.equal(responses[0]?.ok, true);
+      assert.equal(resolveBcsSessionIdFromSessionKey(key('first', 'a')), undefined);
+      assert.equal(resolveBcsSessionIdFromSessionKey(key('first', 'b')), 'group-delete:b');
+      assert.equal(resolveBcsSessionIdFromSessionKey(key('second', 'a')), 'group-delete:a');
+      assert.equal(resolveSessionKeyFromGroupId('group-delete'), key('second', 'a'));
+      assert.deepEqual(gateway.frames.filter(frame => frame.method === 'sessions.delete').map(frame => frame.params.key), [ key('first', 'a') ]);
+
+      abortAllStreams(); // Simulate plugin restart: deletion must still reach the exact persisted key.
+      await handleSessionDelete({ type: 'req', id: 'restart-delete', method: 'session.delete',
+        params: { bcs_session_id: 'group-delete:a' },
+      } as any, client as any, { accountId: 'first' } as any, undefined, dataDir);
+      assert.equal(responses[1]?.ok, true);
+      assert.deepEqual(gateway.frames.filter(frame => frame.method === 'sessions.delete').map(frame => frame.params.key), [ key('first', 'a'), key('first', 'a') ]);
+    } finally {
+      abortAllStreams();
+      await gateway.close();
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects ambiguous deletion targets before contacting the gateway', async () => {
+    const { client, responses } = createResponseClient();
+    setBcsRuntime({ config: { loadConfig() { throw new Error('must not load config'); } } } as any);
+    for (const params of [
+      { bcs_group_id: 'group-delete' },
+      { bcs_session_id: 'group-delete' },
+      { bcs_session_id: 'group-delete:' },
+      { bcs_session_id: 'group-delete:a', bcs_group_id: 'another-group' },
+    ]) {
+      await handleSessionDelete({ type: 'req', id: 'invalid', method: 'session.delete', params } as any,
+        client as any, { accountId: 'first' } as any);
+    }
+    assert.equal(responses.length, 4);
+    assert.ok(responses.every(response => !response.ok && response.error?.code === 'INVALID_REQUEST'));
+  });
+
+  it('reports deletion failure and preserves mappings for retry', async () => {
+    const gateway = await startGatewayStub({ rejectSessionDelete: true });
+    const dataDir = await mkdtemp(join(tmpdir(), 'bcn-delete-failure-'));
+    installRuntime(gateway.port, join(dataDir, 'sessions.json'));
+    const { client, responses } = createResponseClient();
+    const key = 'agent:agent-1:bcs:first:direct:group-delete:a';
+    rememberTaskToolSession(key, {} as any, 'group-delete', undefined, 'group-delete:a');
+    try {
+      await handleSessionDelete({ type: 'req', id: 'failed-delete', method: 'session.delete',
+        params: { bcs_session_id: 'group-delete:a' },
+      } as any, client as any, { accountId: 'first' } as any, undefined, dataDir);
+      assert.equal(responses[0]?.ok, false);
+      assert.equal(responses[0]?.error?.code, 'DELETE_FAILED');
+      assert.equal(resolveBcsSessionIdFromSessionKey(key), 'group-delete:a');
+    } finally {
+      abortAllStreams();
+      await gateway.close();
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
 });

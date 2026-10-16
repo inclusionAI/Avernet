@@ -245,8 +245,10 @@ export interface ChatSendResponse {
 
 /** Parameters for session.delete request (BCS → Bot). */
 export interface SessionDeleteParams {
-  /** BCS group ID being deleted. */
-  bcs_group_id: string;
+  /** Canonical BCS Session ID whose local engine history is being deleted. */
+  bcs_session_id: string;
+  /** Optional consistency check; never identifies a deletion target by itself. */
+  bcs_group_id?: string;
 }
 
 export interface ChatHistoryParams {

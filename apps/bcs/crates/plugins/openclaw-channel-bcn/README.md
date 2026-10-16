@@ -25,6 +25,12 @@ terminal run succeed with an empty `aborted_run_ids`; unknown or cross-session
 run IDs are rejected. The plugin requires protocol V3, so the key is the
 canonical BCS Session ID from the original `chat.send`.
 
+`session.delete` requires the canonical `bcs_session_id`; optional
+`bcs_group_id` must match it. Group-only requests are rejected. The plugin
+resolves and deletes only that Session for the current account, including after
+a restart; it never deletes every Session in a Group. See the
+[deletion contract](../../../docs/session-delete-protocol.md).
+
 ## 1.0.26 patch: OpenClaw direct-chat sessions
 
 BCS owns group participation, routing and turn selection. The plugin uses

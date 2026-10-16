@@ -32,6 +32,12 @@
 This crate owns Rule Bot behavior and client-side session state. It does not
 change BCS routing policy, server application services, or persistence.
 
+## Session cleanup contract
+
+`session.delete` requires a canonical `bcs_session_id` and clears only that
+Session. An optional `bcs_group_id` is checked for consistency. Group-only
+cleanup requests are rejected. See [the delivery contract](../../../docs/session-delete-protocol.md).
+
 ## Tests
 
 - `cargo test --package bcs-rule-bot --manifest-path src/bcs/Cargo.toml`
