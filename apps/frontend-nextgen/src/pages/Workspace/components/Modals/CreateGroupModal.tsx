@@ -20,6 +20,7 @@ import { GroupConfigFields, type GroupStrategyKind } from './GroupConfigFields';
 import type { GroupLeaderOption } from './GroupLeaderSelect';
 import { formatAutoGroupName } from './groupNaming';
 import { GroupParticipantPicker } from './GroupParticipantPicker';
+import { useGoalAutoSelect } from './useGoalAutoSelect';
 
 export type { CreateGroupModalProps } from './CreateGroupModal.types';
 
@@ -33,7 +34,7 @@ export function CreateGroupModal({
 }: CreateGroupModalProps) {
   const { run, friendlyError, creating, clearError } = useCreateGroup();
   const { viewScope, changeViewScope, applyViewScope } = useCreateGroupViewScope(open, clearError);
-  const picker = useGroupCollaborationPicker(activeIdentity?.id, open, activeIdentity?.kind === 'user');
+  const picker = useGroupCollaborationPicker(activeIdentity?.id, open, activeIdentity?.kind === 'user', activeIdentity?.kind);
   const [kind, setKind] = useState<GroupStrategyKind>('free_chat');
   const [name, setName] = useState('');
   const [context, setContext] = useState('');
@@ -44,6 +45,7 @@ export function CreateGroupModal({
   const [managerBotId, setManagerBotId] = useState('');
   const [enableTaskExecute, setEnableTaskExecute] = useState(GROUP_CREATE_VIA_EXECUTE);
   const wasOpenRef = useRef(false);
+  const goalAutoSelect = useGoalAutoSelect(picker, setBotUuids);
   const supportsStateMachine = activeIdentity?.kind === 'bot';
   const activeIdentityDisplayName = activeIdentity
     ? resolveAuthenticatedDisplayName(
@@ -97,6 +99,7 @@ export function CreateGroupModal({
     setEnableTaskExecute(GROUP_CREATE_VIA_EXECUTE);
     resetTemplates();
     binding.reset();
+    goalAutoSelect.reset();
   }, [activeIdentity?.id, activeIdentity?.kind, open, resetTemplates, binding.reset]);
 
   const toggleBot = (id: string) => {
@@ -112,11 +115,16 @@ export function CreateGroupModal({
       return;
     }
     if (activeIdentity?.kind === 'bot' && id === activeIdentity.id) return;
-    setBotUuids((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    if (botUuids.includes(id)) {
+      goalAutoSelect.recordCancel(id);
+      setBotUuids((prev) => prev.filter((x) => x !== id));
+    } else {
+      goalAutoSelect.clearCancel(id);
+      setBotUuids((prev) => [...prev, id]);
+    }
     if (driverBotId === id) setDriverBotId(activeIdentity?.kind === 'bot' ? activeIdentity.id : '');
     if (managerBotId === id) setManagerBotId('');
   };
-
   const switchKind = (next: GroupStrategyKind) => {
     clearError();
     setKind(next);
@@ -127,17 +135,14 @@ export function CreateGroupModal({
     }
     if (next !== 'task_master_slave') setManagerBotId('');
   };
-
   const setField = (setter: (value: string) => void) => (value: string) => {
     clearError();
     setter(value);
   };
-
   const hasParticipants =
     kind === 'task_dag' ? Object.values(binding.participantBindings).some(Boolean) : botUuids.length > 0;
   const hasLeader = kind === 'task_dag' ? true : kind === 'free_chat' ? Boolean(driverBotId) : Boolean(managerBotId);
   const canSubmit = hasParticipants && hasLeader && binding.canSubmitTaskDag && routing.ready;
-
   const bindingSlot: ReactNode = (
     <BindingSlot visible={kind === 'task_dag' && supportsStateMachine} binding={binding} botNameResolver={allBotName} />
   );
@@ -235,6 +240,8 @@ export function CreateGroupModal({
               onKindChange={switchKind}
               onNameChange={setField(setName)}
               onContextChange={setField(setContext)}
+              canRecommend={Boolean(context.trim())}
+              onRecommend={() => picker.recommendByGoal(context.trim())}
               onDriverChange={(value) => {
                 clearError();
                 setDriverBotId(value);
