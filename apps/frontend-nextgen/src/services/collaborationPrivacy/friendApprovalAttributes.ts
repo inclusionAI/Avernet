@@ -1,4 +1,5 @@
 import type { FriendApprovalConfig, PendingPublication, PublicAudience } from '@/domain/collaborationPrivacy/types';
+import type { ViewDept } from '@/services/backendApi';
 
 export type FriendCheckInStrategy = 'OPEN' | 'APPROVAL' | 'DEPT_FREE';
 export type FriendExt = Record<string, unknown>;
@@ -10,7 +11,8 @@ export interface FriendApprovalAttributesSnapshot {
 
 export interface FriendApprovalBackendState {
   strategy: FriendCheckInStrategy;
-  noCheckScopeFriendDeps: string[];
+  /** 免审批部门条目；旧格式纯字符串条目解析为 deptNo、deptName 为空。 */
+  noCheckScopeDepartmentEntries: ViewDept[];
 }
 
 const approvalStrategies: FriendCheckInStrategy[] = ['OPEN', 'APPROVAL', 'DEPT_FREE'];
@@ -78,6 +80,36 @@ function normalizeDepartmentNos(value: unknown): string[] {
   ].sort((left, right) => left.localeCompare(right));
 }
 
+/** 读取免审批部门条目，兼容旧格式（纯字符串=历史编码）与新格式（{deptNo, deptName} 对象，兼容下划线形态）。 */
+function readNoCheckScopeDepartmentEntries(value: unknown): ViewDept[] {
+  if (!Array.isArray(value)) return [];
+  const entries = value
+    .map((item): ViewDept | undefined => {
+      if (typeof item === 'string') {
+        const departmentNo = item.trim();
+        return departmentNo ? { deptNo: departmentNo, deptName: '' } : undefined;
+      }
+      if (!isRecord(item)) return undefined;
+      const deptNo = String(item.deptNo ?? item.dept_no ?? '').trim();
+      const deptName = String(item.deptName ?? item.dept_name ?? item.name ?? '').trim();
+      return deptNo || deptName ? { deptNo, deptName } : undefined;
+    })
+    .filter((entry): entry is ViewDept => Boolean(entry));
+  return [...new Map(entries.map((entry) => [entry.deptNo || entry.deptName, entry])).values()].sort((left, right) =>
+    (left.deptNo || left.deptName).localeCompare(right.deptNo || right.deptName),
+  );
+}
+
+/** 规范化写入的免审批部门条目：编码与名称均必填，按编码去重排序，保证序列比对稳定。 */
+function normalizeDepartmentEntries(entries: ViewDept[]): ViewDept[] {
+  const normalized = entries
+    .map((entry) => ({ deptNo: entry.deptNo.trim(), deptName: entry.deptName.trim() }))
+    .filter((entry) => entry.deptNo && entry.deptName);
+  return [...new Map(normalized.map((entry) => [entry.deptNo, entry])).values()].sort((left, right) =>
+    left.deptNo.localeCompare(right.deptNo),
+  );
+}
+
 function asStrategy(value: unknown): FriendCheckInStrategy {
   const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
   return approvalStrategies.includes(normalized as FriendCheckInStrategy)
@@ -89,7 +121,7 @@ export function readFriendApprovalAttributes(snapshot: FriendApprovalAttributesS
   const friendExt = isRecord(snapshot.friend_ext) ? snapshot.friend_ext : {};
   return {
     strategy: asStrategy(snapshot.friend_check_in_strategy),
-    noCheckScopeFriendDeps: normalizeDepartmentNos(friendExt.no_check_scope_friend_deps),
+    noCheckScopeDepartmentEntries: readNoCheckScopeDepartmentEntries(friendExt.no_check_scope_friend_deps),
   };
 }
 
@@ -100,7 +132,7 @@ export function mapFriendApprovalAttributesToDomain(
   return {
     mode: state.strategy === 'OPEN' ? 'none' : state.strategy === 'DEPT_FREE' ? 'partial_exempt' : 'all',
     exemptOrganizationPaths: [],
-    exemptDepartmentNos: state.noCheckScopeFriendDeps,
+    exemptDepartmentNos: normalizeDepartmentNos(state.noCheckScopeDepartmentEntries.map((entry) => entry.deptNo)),
   };
 }
 
@@ -113,22 +145,33 @@ export function toFriendCheckInStrategy(config: FriendApprovalConfig): FriendChe
 /**
  * friend_ext 在后端是顶层整体替换语义。先复制当前对象，再只替换免审批部门，
  * 避免丢失 public_*_approval、view_scope_*_friend_deps 等已有子字段。
+ * 免审批部门条目与 Bot 可见范围 view_depts 同格式写入：{deptNo, deptName} 对象数组。
  */
-export function mergeFriendExtNoCheckScope(currentFriendExt: unknown, noCheckScopeFriendDeps: unknown): FriendExt {
+export function mergeFriendExtNoCheckScope(currentFriendExt: unknown, departmentEntries: ViewDept[]): FriendExt {
   const nextFriendExt: FriendExt = isRecord(currentFriendExt) ? structuredClone(currentFriendExt) : {};
-  nextFriendExt.no_check_scope_friend_deps = normalizeDepartmentNos(noCheckScopeFriendDeps);
+  nextFriendExt.no_check_scope_friend_deps = normalizeDepartmentEntries(departmentEntries);
   return nextFriendExt;
+}
+
+function configDepartmentEntries(config: FriendApprovalConfig): ViewDept[] {
+  if (config.mode !== 'partial_exempt') return [];
+  return (config.exemptOrganizationEntries ?? [])
+    .map((entry) => ({ deptNo: entry.deptNo.trim(), deptName: entry.path.join(' / ') }))
+    .filter((entry) => entry.deptNo && entry.deptName);
 }
 
 export function buildFriendApprovalAttributesPatch(
   current: FriendApprovalAttributesSnapshot,
   config: FriendApprovalConfig,
 ): { friend_ext: FriendExt; friend_check_in_strategy: FriendCheckInStrategy } {
-  const departmentNos = config.mode === 'partial_exempt' ? config.exemptDepartmentNos ?? [] : [];
-  const friendExt = mergeFriendExtNoCheckScope(current.friend_ext, departmentNos);
-  const normalizedDepartmentNos = friendExt.no_check_scope_friend_deps as string[];
-  if (config.mode === 'partial_exempt' && normalizedDepartmentNos.length === 0) {
-    throw new Error('部分组织免审批时缺少部门编码，无法提交好友审批策略');
+  const friendExt = mergeFriendExtNoCheckScope(current.friend_ext, configDepartmentEntries(config));
+  const normalizedEntries = friendExt.no_check_scope_friend_deps as ViewDept[];
+  if (
+    config.mode === 'partial_exempt' &&
+    (normalizedEntries.length === 0 ||
+      normalizedEntries.some((entry) => !entry.deptNo.trim() || !entry.deptName.trim()))
+  ) {
+    throw new Error('部分组织免审批时缺少部门编码或名称，无法提交好友审批策略');
   }
   return {
     friend_ext: friendExt,
