@@ -244,6 +244,10 @@ class AsyncChatClient:
         # R7-F4：fallback 的检查/建连/发布互斥——并发首发都看到 None 会各
         # 建一条连接（身份守卫吞首连断连、末连断连误杀全部归属 run）。
         self._v3_fallback_lock = asyncio.Lock()
+        # R10：正在分派 v3 fallback 帧的来源标记——归属释放只认 fallback
+        # 帧（A2A 主连接与 fallback 共用同一套编排回调，不标记来源会让
+        # A2A run 的终态参与 fallback 归属匹配而误清在途附件 run）。
+        self._on_v3_fallback_frame = False
         # B3（1c）→ P1-4：session→传输归属表——附件请求 reroute 到 v3 后，
         # 该 session 的 chat_abort 与 HITL interaction_resolve 都必须随 run
         # 走 v3 专用连接（A2A kernel 注册表里没有该 run；正常 A2A session
@@ -836,11 +840,35 @@ class AsyncChatClient:
                 headers=self.headers,
             )
             await client.connect()
+            # R10：桥注册一律走来源包装——释放锚点靠 _on_v3_fallback_frame
+            # 区分"帧来自 fallback"，A2A 主连接同名 handler 不带标记。
             for event_name, handler in self._event_bridge_snapshot().items():
-                client.on_event(event_name, handler)
+                client.on_event(event_name, self._v3_scoped_bridge(handler))
             client.on_disconnect(self._v3_fallback_disconnect_handler(client))
             self._v3_fallback = client
             return client
+
+    def _v3_scoped_bridge(self, handler: Callable) -> Callable:
+        """R10：fallback 桥面来源包装——标记"正在分派 fallback 帧"。
+
+        归属释放只认带来源标记的帧：A2A 主连接与 fallback 双桥注册共用
+        同一套编排回调，A2A run（独立归属体系）的终态若参与 fallback
+        归属匹配，裸 key 间的包含关系（chat-1 ⊂ chat-10）会误中前缀
+        session 而清掉在途附件 run 的归属。
+
+        语义前提：bridged handler 全部同步（_on_chat/_on_agent/_on_error/
+        _log_event 均为 sync def）——标记的置位/复位绑定外层调用栈。若未来
+        有返回协程的 handler 加入桥面，须改用 contextvar 承载标记。
+        """
+
+        def wrapped(*args: Any, **kwargs: Any) -> Any:
+            self._on_v3_fallback_frame = True
+            try:
+                return handler(*args, **kwargs)
+            finally:
+                self._on_v3_fallback_frame = False
+
+        return wrapped
 
     def _v3_fallback_disconnect_handler(self, client: Any) -> Callable[..., Any]:
         """R17-5/R3-2：fallback 断连的隔离收口处理器。
@@ -1080,6 +1108,11 @@ class AsyncChatClient:
         本方法只看帧本身，不枚举等待方形态，也不依赖 session state
         是否已被 pop。
 
+        R10：只认 v3 fallback 来源帧（_v3_scoped_bridge 置位）——归属
+        标记只描述 fallback 连接上的 run；A2A 主连接借用同一套回调，其
+        终态（各自持有独立归属记录）不得参与本表匹配，否则裸 key 包含
+        关系（chat-1 ⊂ chat-10）会误清在途附件 run。
+
         R9-F2：帧上的 sessionKey 是引擎侧装饰形态（前后缀/大小写），
         与发送时的登记键可能不同——归并沿用 SessionKeyMatcher 同套
         分发语义（精确→contains），不能精确查找把模糊匹配语义拆了。
@@ -1088,6 +1121,8 @@ class AsyncChatClient:
         沿用正常 final 分支的注入排除口径（runId inject- 前缀 /
         stopReason==inject）。无标记/非 a2a 时为 no-op（off 路径零变化）。
         """
+        if not self._on_v3_fallback_frame:
+            return  # R10：非 fallback 来源帧不参与本表清理
         if chat_state not in ("final", "error"):
             return
         run_id = payload.get("runId") or payload.get("run_id")

@@ -3016,6 +3016,47 @@ class TestAttachFallbackRunOwnershipLifecycle:
         assert acc.has_active_sessions is False
         await acc.close()
 
+    # ─────────── R10：归属释放只认 v3 fallback 来源帧 ───────────
+
+    @pytest.mark.asyncio
+    async def test_a2a_terminal_spares_fallback_ownership_of_prefix_session(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """R10：A2A 主连接与 v3 fallback 共用事件 handler，但归属标记只属
+        于 fallback 上的 run——A2A session（裸 key，自身是另一 fallback
+        session 的超串，如 chat-10 ⊃ chat-1）的终态经主连接分发时，不得
+        在归属子表 contains 误中前缀 session 而清掉 fallback 的归属。"""
+        acc = self._acc_with_owned_a2a_main()
+        acc._client._event_handlers["chat"] = acc._on_chat  # 双注册同形
+
+        # chat-1：附件 run，后台在途于 v3 fallback
+        await acc.send_message(
+            "m1", session_key="chat-1", attachments=[{"k": 1}], wait_result=False
+        )
+        assert "chat-1" in acc._v3_routed_sessions
+        fallback = acc._v3_fallback
+
+        # chat-10：A2A 主连接 run（裸 key，包含 chat-1 为前缀）终结
+        acc._client._event_handlers["chat"](
+            {
+                "sessionKey": "chat-10",
+                "state": "final",
+                "message": {"content": [{"type": "text", "text": "done"}]},
+            }
+        )
+
+        assert "chat-1" in acc._v3_routed_sessions, (
+            "A2A session 终态误清了 fallback 前缀 session 的归属"
+        )
+        assert acc.tracks_session("chat-1") is True
+        # chat-1 的取消仍必须路由到持有 run 的 v3 fallback
+        await acc.chat_abort("chat-1")
+        assert fallback.chat_abort_calls == [("chat-1", {"run_id": None})], (
+            "跨 session 误清理后 abort 被错发 A2A 主连接"
+        )
+        acc._client.chat_abort.assert_not_awaited()
+        await acc.close()
+
 
 class _GatedV3Transport(_StubV3Transport):
     """慢建连替身：connect 闸在类级事件上——复现并发首发都看到
