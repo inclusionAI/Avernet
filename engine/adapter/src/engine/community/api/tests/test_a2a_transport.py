@@ -1190,6 +1190,33 @@ def test_card_endpoint_no_resolve_decl_when_plugin_unavailable(
     assert RESOLVE_URI not in urls
 
 
+class _PoisonedAttrChat:
+    """奇异插件：属性访问本身抛错（非 AttributeError）——真值检查
+    须降级为不声明，card 端点不得 500。三方法全毒化，绕开 all() 的
+    缺位短路路径，必中属性访问异常。"""
+    @property
+    def resolve_exec_approval(self):
+        raise RuntimeError("poisoned plugin surface")
+
+    @property
+    def resolve_interaction(self):
+        raise RuntimeError("poisoned plugin surface")
+
+    @property
+    def resolve_mode_transition(self):
+        raise RuntimeError("poisoned plugin surface")
+
+
+def test_card_endpoint_no_resolve_decl_when_attr_access_raises(
+        app_client, monkeypatch):
+    monkeypatch.setattr(bridge, "_chat_plugin",
+                        lambda: _PoisonedAttrChat())
+    resp = app_client.get("/.well-known/agent-card.json")
+    assert resp.status_code == 200  # 真值检查吞异常降级，card 永可答
+    urls = [e["url"] for e in resp.json()["capabilities"]["extensions"]]
+    assert RESOLVE_URI not in urls
+
+
 # ══════════ R4-2: 多 pending 交互逐个可决（gateway 并发 canUseTool）══════════
 
 @pytest.mark.asyncio

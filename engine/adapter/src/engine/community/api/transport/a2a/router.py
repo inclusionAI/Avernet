@@ -790,14 +790,15 @@ def _engine_resolve_supported() -> bool:
 
     与 `_forward_resolve` 运行期门控同源（同一词汇表），部分支持=不
     声明，免于 "card 声明≠实际能力"；取插件失败按不声明处理（保守）。
-    请求时计算、无缓存——声明与实现不漂移。"""
+    属性访问抛错（奇异插件）同样降级为不声明——card 端点永可答，
+    不因真值检查 500。请求时计算、无缓存——声明与实现不漂移。"""
     try:
         from engine.community.api.transport.a2a.engine_bridge import _chat_plugin
         chat = _chat_plugin()
+        return all(getattr(chat, m, None) is not None
+                   for m in set(_KIND_RESOLVE_METHOD.values()))
     except Exception:
         return False
-    return all(getattr(chat, m, None) is not None
-               for m in set(_KIND_RESOLVE_METHOD.values()))
 
 
 def _validated_resolution(resolution: dict[str, Any]) -> dict[str, Any]:
