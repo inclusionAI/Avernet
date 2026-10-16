@@ -76,6 +76,7 @@ from agentclaw.community.core.bot_management.utils import (
     clear_baas_publish_failure_ext as _clear_baas_publish_failure_ext,
     is_baas_publish_failure_message as _utils_is_baas_publish_failure_message,
 )
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.bot_management.readiness import (
     has_stale_baas_publish_failure,
     is_bot_ready,
@@ -956,7 +957,9 @@ async def change_space_for_others(
         "bot_list": [
             {"owner_id": "240841", "bot_id": "20261014_xxxx"},
             ...
-        ]
+        ],
+        "env": "prod"  # optional; defaults to the runtime env;
+                       # blank/whitespace is treated as absent
     }
 
     Only specific staff IDs can call this interface. Every Bot in
@@ -1008,13 +1011,30 @@ async def change_space_for_others(
                 data=None,
             )
 
+        env_value = data.get("env")
+        if env_value is not None:
+            if not isinstance(env_value, str):
+                return ApiResponse(
+                    success=False,
+                    message="参数错误: env 必须是字符串",
+                    error_code=400,
+                    data=None,
+                )
+            env_value = env_value.strip() or None
+
         results = []
         succeeded = 0
+        failed_reasons: dict[str, int] = {}
+
+        def _fail(key: str) -> None:
+            failed_reasons[key] = failed_reasons.get(key, 0) + 1
+
         for item in bot_list:
             owner_id = (item.get("owner_id") or "").strip() if isinstance(item, dict) else ""
             bot_id = (item.get("bot_id") or "").strip() if isinstance(item, dict) else ""
 
             if not owner_id or not bot_id:
+                _fail("MissingFields")
                 results.append(
                     {
                         "owner_id": owner_id,
@@ -1027,7 +1047,10 @@ async def change_space_for_others(
 
             try:
                 assignment = space_service.change_space(
-                    bot_id=bot_id, owner_id=owner_id, space_id=space_id
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    space_id=space_id,
+                    env=env_value,
                 )
                 succeeded += 1
                 results.append(
@@ -1041,6 +1064,7 @@ async def change_space_for_others(
                     }
                 )
             except BotNotFoundError:
+                _fail("BotNotFound")
                 results.append(
                     {
                         "owner_id": owner_id,
@@ -1049,7 +1073,28 @@ async def change_space_for_others(
                         "message": f"Bot不存在: {bot_id}",
                     }
                 )
-            except (BotOperationNotAllowedError, SpaceError, BotQuotaError) as e:
+            except BotOperationNotAllowedError as e:
+                _fail("NotAllowed")
+                results.append(
+                    {
+                        "owner_id": owner_id,
+                        "bot_id": bot_id,
+                        "success": False,
+                        "message": str(e),
+                    }
+                )
+            except SpaceError as e:
+                _fail("SpaceError")
+                results.append(
+                    {
+                        "owner_id": owner_id,
+                        "bot_id": bot_id,
+                        "success": False,
+                        "message": str(e),
+                    }
+                )
+            except BotQuotaError as e:
+                _fail("Quota")
                 results.append(
                     {
                         "owner_id": owner_id,
@@ -1063,6 +1108,7 @@ async def change_space_for_others(
                     "[bot_router.change_space_for_others] Unhandled item failure "
                     f"error_type={type(e).__name__}"
                 )
+                _fail("Unhandled")
                 results.append(
                     {
                         "owner_id": owner_id,
@@ -1073,16 +1119,20 @@ async def change_space_for_others(
                 )
 
         failed = len(results) - succeeded
+        effective_env = env_value or get_current_env()
         logger.info(
             f"[bot_router.change_space_for_others] space_id={space_id} "
             f"caller={caller_user_id}({caller_nick_name}) "
-            f"total={len(results)} succeeded={succeeded} failed={failed}"
+            f"env={effective_env} "
+            f"total={len(results)} succeeded={succeeded} "
+            f"failed={failed} failed_reasons={failed_reasons}"
         )
         return ApiResponse(
             success=True,
             message=f"批量变更完成: 成功 {succeeded} 个, 失败 {failed} 个",
             data={
                 "space_id": space_id,
+                "env": effective_env,
                 "total": len(results),
                 "succeeded": succeeded,
                 "failed": failed,

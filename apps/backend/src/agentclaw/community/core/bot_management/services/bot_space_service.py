@@ -55,6 +55,10 @@ class BotSpaceService(BotSpaceServiceProtocol):
         # single business code path. Order of checks is load-bearing for
         # unknown env values: the bot lookup fails fast before quota or
         # write is ever reached.
+        # An explicit env is matched as-is against the ``env`` column —
+        # no family folding (gray->prod, prepub->pre); folding only
+        # applies to the runtime fallback. Invalid values fail closed
+        # at the bot lookup.
         env = env or get_current_env()
         bot = self._repository.get_by_id_and_owner(bot_id, owner_id, env=env)
         if bot is None:

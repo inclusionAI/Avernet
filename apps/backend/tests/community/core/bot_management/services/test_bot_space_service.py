@@ -276,6 +276,7 @@ def test_default_env_falls_back_to_runtime_everywhere():
     access.require_space_member.assert_called_once_with(
         space_id=42, user_id="u1", env=get_current_env()
     )
+    repository.get_by_id_and_owner.assert_called_once_with("b1", "u1", env=get_current_env())
     repository.update_space_by_owner.assert_called_once_with(
         bot_id="b1", owner_id="u1", space_id=42, env=get_current_env()
     )

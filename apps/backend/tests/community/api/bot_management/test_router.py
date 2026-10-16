@@ -2566,8 +2566,12 @@ class TestChangeSpaceForOthers:
         assert body["data"]["failed"] == 0
         assert all(r["success"] and r["changed"] for r in body["data"]["results"])
         assert space_svc.change_space.call_count == 2
-        space_svc.change_space.assert_any_call(bot_id="b1", owner_id="u1", space_id=123)
-        space_svc.change_space.assert_any_call(bot_id="b2", owner_id="u2", space_id=123)
+        space_svc.change_space.assert_any_call(
+            bot_id="b1", owner_id="u1", space_id=123, env=None
+        )
+        space_svc.change_space.assert_any_call(
+            bot_id="b2", owner_id="u2", space_id=123, env=None
+        )
 
     def test_mixed_batch_reports_per_item_outcome(self, space_admin_client):
         from agentclaw.community.core.bot_management.bot_quota import (
@@ -2585,7 +2589,7 @@ class TestChangeSpaceForOthers:
             used=1,
         )
 
-        def _change(*, bot_id, owner_id, space_id):
+        def _change(*, bot_id, owner_id, space_id, env=None):
             if bot_id == "missing":
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
             if bot_id == "quota":
@@ -2660,3 +2664,73 @@ class TestChangeSpaceForOthers:
         body = resp.json()
         assert body["data"]["failed"] == 1
         assert "personal space" in body["data"]["results"][0]["message"]
+
+    def test_env_threaded_to_service_and_echoed(self, space_admin_client):
+        tc, space_svc = space_admin_client
+        space_svc.change_space.return_value = _assignment(changed=True)
+        resp = tc.post(
+            "/api/bots/change-space-for-others",
+            json={
+                "space_id": 123,
+                "bot_list": [{"owner_id": "u1", "bot_id": "b1"}],
+                "env": "prod",
+            },
+        )
+        body = resp.json()
+        assert body["success"] is True
+        space_svc.change_space.assert_called_once_with(
+            bot_id="b1", owner_id="u1", space_id=123, env="prod"
+        )
+        assert body["data"]["env"] == "prod"
+
+    def test_env_blank_treated_as_absent(self, space_admin_client):
+        from agentclaw.community.utils.env_utils import get_current_env
+
+        tc, space_svc = space_admin_client
+        space_svc.change_space.return_value = _assignment(changed=True)
+        resp = tc.post(
+            "/api/bots/change-space-for-others",
+            json={
+                "space_id": 123,
+                "bot_list": [{"owner_id": "u1", "bot_id": "b1"}],
+                "env": "   ",
+            },
+        )
+        body = resp.json()
+        assert body["success"] is True
+        space_svc.change_space.assert_called_once_with(
+            bot_id="b1", owner_id="u1", space_id=123, env=None
+        )
+        assert body["data"]["env"] == get_current_env()
+
+    def test_env_wrong_type_rejected(self, space_admin_client):
+        tc, space_svc = space_admin_client
+        resp = tc.post(
+            "/api/bots/change-space-for-others",
+            json={
+                "space_id": 123,
+                "bot_list": [{"owner_id": "u1", "bot_id": "b1"}],
+                "env": 123,
+            },
+        )
+        assert resp.json()["error_code"] == 400
+        space_svc.change_space.assert_not_called()
+
+    def test_failed_reasons_appear_in_summary_log(self, space_admin_client, caplog):
+        import logging as _logging
+
+        tc, space_svc = space_admin_client
+        space_svc.change_space.side_effect = BotNotFoundError("Bot not found: b1")
+        with caplog.at_level(_logging.INFO, logger="start"):
+            tc.post(
+                "/api/bots/change-space-for-others",
+                json={
+                    "space_id": 123,
+                    "bot_list": [{"owner_id": "u1", "bot_id": "b1"}],
+                },
+            )
+        assert any(
+            "failed_reasons={'BotNotFound': 1}" in r.message
+            for r in caplog.records
+            if "change_space_for_others" in r.message
+        )
