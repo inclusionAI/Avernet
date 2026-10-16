@@ -182,3 +182,19 @@ it.each([false,true])('resolves every original member to the same aggregation de
   if(hydrate)expect(detail.aggregation?.originals.every(item=>item.context?.detailEvidence==='inline body')).toBe(true);
  }
 });
+
+it.each([false,true])('accepts supported evidence only from a cause member (cross-item cause=%s)',async(shared)=>{
+ const {c,read,classify,advance}=await setup(2);
+ f.items[0].context!.diagnoses=[{flowId:'run-0',evidence:[{eventId:'event-a',payload:{observation:'A'}}]}];
+ f.items[1].context!.diagnoses=[{flowId:'run-1',evidence:[{eventId:'event-b',payload:{observation:'B'}}]}];
+ const cause={title:'B evidence',certainty:'supported',itemIds:shared?['item-0','item-1']:['item-0'],evidenceIds:['event-b']};
+ classify.mockResolvedValueOnce({plans:[{itemIds:['item-0','item-1'],title:'Integrate both goals',changes:['both goals'],relation:'complementary'}],conflicts:[],causes:[cause],unknowns:[]});
+ await c.tick();advance(3000);await c.tick();
+ const snapshot=await read('wf-1');const cards=await c.present('wf-1',snapshot.items,snapshot.baseline);
+ if(shared){expect(cards).toHaveLength(1);expect(cards[0].aggregation?.causes).toEqual([cause]);}
+ else {
+  expect(cards.every(card=>card.aggregation?.status==='unavailable')).toBe(true);
+  expect(cards.flatMap(card=>card.aggregation?.causes??[])).toEqual([]);
+  await expect(c.prepare('wf-1',snapshot.items,snapshot.baseline)).rejects.toThrow(/整合/);
+ }
+});

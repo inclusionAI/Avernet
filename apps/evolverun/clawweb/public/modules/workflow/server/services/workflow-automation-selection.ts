@@ -18,7 +18,8 @@ async function legacyAutomaticScope(workbench: AutomationWorkbench, issues: Issu
     if (inputDigest && inputDigest !== page.inputDigest) return null;
     inputDigest = page.inputDigest;
     for (const item of expandProposalCards(page.items)) {
-      if (item.state !== 'pending' || !item.sourceAvailable || (!Array.isArray(item.context?.diagnoses) || !item.context.diagnoses.length) || JSON.stringify(item).length > 32000) continue;
+      const { aggregation: _projection, ...raw } = item;
+      if (item.state !== 'pending' || !item.sourceAvailable || (!Array.isArray(item.context?.diagnoses) || !item.context.diagnoses.length) || Buffer.byteLength(JSON.stringify(raw)) > 32000) continue;
       try {
         const proposal = validateWorkflowPatchProposal(item.proposal);
         if (proposal.workflowId !== workflowId || proposal.baseSpecDigest !== baseline.specDigest) continue;
@@ -30,13 +31,21 @@ async function legacyAutomaticScope(workbench: AutomationWorkbench, issues: Issu
   const shortlist = [...new Map(candidates.slice(0, 100).map(item => [item.itemId, item])).values()];
   const ambiguous = new Set(proposalConflicts(shortlist).flatMap(conflict => conflict.itemIds));
   const items: RepairInboxItem[] = [];
-  let bytes = 0;
+  const units = new Map<string, RepairInboxItem[]>();
   for (const item of shortlist) {
-    if (ambiguous.has(item.itemId) || proposalPending(shortlist.filter(i => i.aggregation?.id === item.aggregation?.id))) continue;
-    const size = Buffer.byteLength(JSON.stringify(item));
-    if (bytes + size > 100000) continue;
-    items.push(item); bytes += size;
-    if (items.length === 5) break;
+    const key = item.aggregation?.id ?? item.itemId;
+    const unit = units.get(key) ?? []; unit.push(item); units.set(key, unit);
+  }
+  let bytes = 0, selectedUnits = 0;
+  for (const unit of units.values()) {
+    const ids = new Set(unit.map(item => item.itemId));
+    if (unit.some(item => ambiguous.has(item.itemId) || item.aggregation?.itemIds.some(id => !ids.has(id))) || proposalPending(unit)) continue;
+    const size = unit.reduce((sum,item) => { const {aggregation:_projection,...raw}=item; return sum + Buffer.byteLength(JSON.stringify(raw)); },0);
+    if (bytes + size > 100000 || items.length + unit.length > MAX_ITEMS) continue;
+    items.push(...unit); bytes += size; selectedUnits++;
+    // Legacy scope selects up to five displayed choices; their original members
+    // remain atomic and still obey the shared original-item and byte limits.
+    if (selectedUnits === 5) break;
   }
   if (!items.length) return null;
   const fingerprint = digestRepairJson({ baseline: baseline.packCommit, items: items.map(item => ({ id: item.itemId,

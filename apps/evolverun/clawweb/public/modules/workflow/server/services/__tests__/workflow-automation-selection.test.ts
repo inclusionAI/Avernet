@@ -50,3 +50,62 @@ it('retains an explainable empty scope when the pending inbox is empty', async (
     expect(result).toMatchObject({ items: [], batches: [], deferred: {} });
   } finally { await f.db.close(); }
 });
+
+async function legacyPlanFixture(oversized = false) {
+  const f = await repairFixture(7);
+  const baseline = await f.executionPort.resolveBaseline('wf-1');
+  for (const [i,item] of f.items.entries()) {
+    item.proposal = { schemaVersion:'workflow-patch/v1', workflowId:'wf-1', baseSpecDigest:baseline.specDigest,
+      summary:`fix-${i}`, operations:[{op:'replace',nodeId:i<6?'query':'other',path:'/executor/prompt',value:`goal-${i}`}] };
+    item.context = {signature:'issue',diagnoses:[{flowId:`run-${i}`,severity:'high'}], ...(oversized && i<6 ? {details:'x'.repeat(19000)} : {})};
+  }
+  const workbench = createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort);
+  const page = await workbench.candidates('wf-1',{state:'pending',pageSize:100});
+  const originals = page.items.slice(0,6);
+  const card = {...originals[0],aggregation:{id:'six-member-plan',fingerprint:'plan-version',itemIds:originals.map(item=>item.itemId),
+    title:'Integrate six goals',changes:['preserve six goals'],relation:'complementary' as const,status:'ready' as const,
+    originals,flowIds:originals.map((_item,i)=>`run-${i}`),conflicts:[]}};
+  workbench.candidates = async()=>({...page,items:[card,page.items[6]]});
+  const issues = {listPage:async()=>({groups:[{signature:'issue',priority:{severity:'high'}}]})} as unknown as IssueAggregationRepository;
+  return {f,workbench,issues,baseline};
+}
+
+it('keeps a six-original ready plan whole in legacy automatic selection',async()=>{
+  const {f,workbench,issues,baseline}=await legacyPlanFixture();
+  try {
+    const selected=await selectAutomaticScope(workbench,issues,'wf-1',baseline);
+    expect(selected?.items.filter(item=>item.aggregation?.id==='six-member-plan').map(item=>item.itemId))
+      .toEqual(['item-0','item-1','item-2','item-3','item-4','item-5']);
+    expect(selected?.items.map(item=>item.itemId)).toContain('item-6');
+  } finally {await f.db.close();}
+});
+
+it('defers an over-budget plan as a whole and still selects another fitting legacy unit',async()=>{
+  const {f,workbench,issues,baseline}=await legacyPlanFixture(true);
+  try {
+    const selected=await selectAutomaticScope(workbench,issues,'wf-1',baseline);
+    expect(selected?.items.map(item=>item.itemId)).toEqual(['item-6']);
+  } finally {await f.db.close();}
+});
+
+it('keeps the legacy five-choice limit for independent original suggestions',async()=>{
+  const {f,workbench,issues,baseline}=await legacyPlanFixture();
+  try {
+    const page=await workbench.candidates('wf-1');
+    const originals=[...page.items[0].aggregation!.originals,page.items[1]].map((item,i)=>({...item,
+      proposal:{...item.proposal,operations:[{op:'replace',nodeId:`separate-${i}`,path:'/executor/prompt',value:`goal-${i}`}]}}));
+    workbench.candidates=async()=>({...page,items:originals});
+    const selected=await selectAutomaticScope(workbench,issues,'wf-1',baseline);
+    expect(selected?.items.map(item=>item.itemId)).toEqual(['item-0','item-1','item-2','item-3','item-4']);
+  } finally {await f.db.close();}
+});
+
+it('does not select the remaining members of a partly unavailable legacy plan',async()=>{
+  const {f,workbench,issues,baseline}=await legacyPlanFixture();
+  try {
+    const page=await workbench.candidates('wf-1');
+    page.items[0].aggregation!.originals[5].sourceAvailable=false;
+    const selected=await selectAutomaticScope(workbench,issues,'wf-1',baseline);
+    expect(selected?.items.map(item=>item.itemId)).toEqual(['item-6']);
+  } finally {await f.db.close();}
+});

@@ -70,6 +70,11 @@ Partially selected semantic plans cannot silently add excluded sources. Daily
 optimization uses the same memberships and defers incomplete/conflicting plans;
 a plan cannot be split across automatic generation batches.
 
+Legacy automatic selection keeps at most five displayed choices, selecting each
+plan's originals atomically within 100 originals / 100,000 input bytes. Partial,
+conflicting or over-budget plans are deferred whole; other fitting choices remain
+eligible. Display projections are excluded from the original-input byte count.
+
 Original suggestions/evidence and cause support/hypothesis/unknown are collapsed.
 Only actual selected incompatible goals prompt a concrete choice. Queued,
 organizing, retryable, unavailable, stale and uncertain states remain distinct.
@@ -87,6 +92,11 @@ critical evidence block integrated generation. No external-only log ID is treate
 as if TaskGuard could retrieve its body. Size failures remain explicit, not silent
 truncation or invented complete coverage. Evidence is untrusted data, not authority
 to execute tools or expand the repair scope.
+
+Each cited cause event must belong to at least one of that cause's original item
+IDs. Evidence-array clipping is detected both inside payloads and during final
+context redaction, even without a truncation marker; strict freezing then fails.
+Intentional credential-field removal remains redaction rather than clipping.
 
 ## Generation contract and migration
 

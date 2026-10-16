@@ -1,12 +1,23 @@
 import { redactEvidenceValue } from '@avernet/clawweb-shared/server/services/redaction';
 import { canonicalRepairJson, digestRepairJson, RepairBatchError, type RepairItem } from '../contracts/repair-batch.js';
+/** Compare retained fields only: intentional credential removal is not clipping. */
+function collectionClipped(before:unknown, after:unknown):boolean {
+  if(Array.isArray(before)&&Array.isArray(after))return before.length!==after.length||after.some((value,index)=>collectionClipped(before[index],value));
+  if(before&&after&&typeof before==='object'&&typeof after==='object')return Object.entries(after).some(([key,value])=>collectionClipped((before as Record<string,unknown>)[key],value));
+  return false;
+}
 /** Inline only. Omitted exact duplicates retain an index; no unreadable external log references masquerade as evidence. */
 export function prepareProposalEvidence<T extends RepairItem>(items:T[], strict=false):T[] {
   return items.map(item=>{
     const context=structuredClone(item.context??{});
     const diagnoses=(Array.isArray(context.diagnoses)?context.diagnoses:[]) as Array<Record<string,any>>;
     const sourceIndex:Array<Record<string,unknown>>=[], examples:Array<Record<string,unknown>>=[];
-    const seen=new Map<string,number>();let missing=false;
+    const seen=new Map<string,number>();let missing=false,clipped=false;
+    const redacted=(value:unknown)=>{
+      const safe=redactEvidenceValue(value);
+      clipped=collectionClipped(value,safe)||clipped;
+      return safe;
+    };
     for(const diagnosis of diagnoses){
       const evidence=(Array.isArray(diagnosis.evidence)?diagnosis.evidence:[]) as Array<Record<string,any>>;
       const refs:Array<Record<string,any>>=evidence.map(event=>{
@@ -26,7 +37,7 @@ export function prepareProposalEvidence<T extends RepairItem>(items:T[], strict=
         evidence:refs.map(e=>({eventId:e.eventId??null,payloadDigest:e.payloadDigest??null,missing:!!e.missing}))});
     }
     const safe=redacted({...context,diagnoses:examples}) as Record<string,unknown>;
-    const clipped=canonicalRepairJson(safe).includes('[TRUNCATED');
+    clipped=clipped||canonicalRepairJson(safe).includes('[TRUNCATED');
     if(strict&&(missing||clipped))throw new RepairBatchError('INVALID_INPUT','关键证据缺失、摘要被裁剪或原文校验失败，请补充证据后再整合');
     return {...item,context:{...safe,evidencePacket:{schemaVersion:'repair-evidence-packet/v1',sourceIndex,
       originalDiagnoses:diagnoses.length,representatives:examples.length,missingEvidence:missing,clipped,
@@ -34,4 +45,3 @@ export function prepareProposalEvidence<T extends RepairItem>(items:T[], strict=
       digest:digestRepairJson(safe)}}};
   });
 }
-function redacted(value:unknown){return redactEvidenceValue(value);}

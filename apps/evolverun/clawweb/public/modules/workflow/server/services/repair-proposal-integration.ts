@@ -79,11 +79,11 @@ function validate(raw:unknown, items:RepairInboxItem[]): ProposalGrouping {
     for(const id of plan.itemIds)covered.add(id);
   }
   if(covered.size!==allowed.size)throw new Error('MODEL_OMITTED_SOURCE');
-  const available = new Set(items.flatMap(item => ((item.context?.diagnoses??[]) as Array<Record<string,any>>).flatMap(d => (Array.isArray(d.evidence)?d.evidence:[]).filter((e:any)=>!e.missing&&e.payload!=null).map((e:any)=>e.eventId))));
+  const available = new Map(items.map(item => [item.itemId,new Set(((item.context?.diagnoses??[]) as Array<Record<string,any>>).flatMap(d => (Array.isArray(d.evidence)?d.evidence:[]).filter((e:any)=>!e.missing&&e.payload!=null).map((e:any)=>e.eventId)))]));
   const causes = data.causes ?? [];
   if(items.some(i=>Array.isArray(i.context?.diagnoses)&&i.context.diagnoses.length)&&(!Array.isArray(causes)||!causes.length))throw new Error('MODEL_OMITTED_CAUSES');
   if(!Array.isArray(causes)||causes.length>100||causes.some(c=>!c||typeof c.title!=='string'||!c.title.trim()||c.title.length>500||!['supported','hypothesis','unknown'].includes(c.certainty)
-    ||!Array.isArray(c.itemIds)||!c.itemIds.length||c.itemIds.some(id=>!allowed.has(id))||!Array.isArray(c.evidenceIds)||c.evidenceIds.some(id=>!available.has(id))))throw new Error('MODEL_CAUSE_REFERENCE_INVALID');
+    ||!Array.isArray(c.itemIds)||!c.itemIds.length||c.itemIds.some(id=>!allowed.has(id))||!Array.isArray(c.evidenceIds)||c.evidenceIds.some(id=>!c.itemIds.some(itemId=>available.get(itemId)?.has(id)))))throw new Error('MODEL_CAUSE_REFERENCE_INVALID');
   if(data.unknowns!==undefined&&(!Array.isArray(data.unknowns)||data.unknowns.length>50||data.unknowns.some(t=>typeof t!=='string'||t.length>1000)))throw new Error('MODEL_UNKNOWNS_INVALID');
 
   return {plans:data.plans.map(p=>({...p,itemIds:[...p.itemIds].sort()})),conflicts,causes:causes.map(c=>({...c,certainty:c.certainty==='supported'&&!c.evidenceIds.length?'hypothesis':c.certainty})),unknowns:data.unknowns??[]};
