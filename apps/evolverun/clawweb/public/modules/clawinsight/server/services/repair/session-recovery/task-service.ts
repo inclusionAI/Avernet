@@ -8,6 +8,8 @@ import { decideRecoveryPlan, observeRecovery, recoveryTaskResult, resumeRecovery
 import type { RecoveryActor, RecoveryAcknowledgment, RecoveryRequest, RecoveryResult, RecoveryTaskView, SessionRecoveryTaskApi } from "./contracts.js";
 import type { RecoveryEvidence, RecoveryJudgment, RecoveryLevel, RecoveryPlan, RecoveryTaskResult, RecoveryTimelineEvent, RecoveryStoredTask, RecoveryTaskStore } from "./task-contracts.js";
 
+const EXECUTION_RETRY_DELAYS_MS = [20000, 60000] as const;
+
 export interface RecoveryAgentExecutor {
   start(task: RecoveryStoredTask): Promise<void>;
   release(task: RecoveryStoredTask): Promise<void>;
@@ -64,7 +66,12 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     task = await this.required(task.taskId);
     if (task.status !== "running") return;
     try { await this.deps.agent.start(task); }
-    catch { await this.executionFailure(task.taskId, "自愈 Agent 启动失败"); }
+    catch (error) {
+      const latest = await this.required(task.taskId);
+      // A stale dispatcher must not fail a replacement that another worker already owns.
+      if (latest.execution?.executionId !== task.execution?.executionId || latest.executionRetry?.retryAt) throw error;
+      await this.executionFailure(task.taskId, "自愈 Agent 启动失败", task.execution?.executionId);
+    }
   }
 
   async recordDelivery(taskId: string, result: RecoveryResult): Promise<void> {
@@ -183,12 +190,21 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     if (task.status === "failed") await this.deps.agent.release(task);
   }
 
-  async executionFailure(taskId: string, reason: string, executionId?: string): Promise<void> {
+  async executionFailure(taskId: string, reason: string, executionId?: string, retryable = false): Promise<void> {
     const previous = await this.required(taskId);
     if (previous.status !== "running" || (executionId && (previous.execution?.executionId !== executionId || previous.execution.state === "ended"))) return;
-    const task = await this.mutate(taskId, previous.version, value => { if (executionId && (value.execution?.executionId !== executionId || value.execution.state === "ended")) this.fail(409, "旧执行已结束"); return { ...value, status: "failed", version: value.version + 1,
-      judgment: this.failureJudgment(value, reason),
-      timeline: [...value.timeline, this.event("execution", "service", reason, {})] }; });
+    const task = await this.mutate(taskId, previous.version, value => {
+      if (value.status !== "running") this.fail(409, "任务已离开执行阶段");
+      if (executionId && (value.execution?.executionId !== executionId || value.execution.state === "ended")) this.fail(409, "旧执行已结束");
+      const failures = (value.executionRetry?.failures ?? 0) + 1;
+      const delay = retryable ? EXECUTION_RETRY_DELAYS_MS[failures - 1] : undefined;
+      const summary = delay !== undefined ? `${reason}；已保存进度，${delay / 1000} 秒后重试 AIS 执行（第 ${failures} 次重试）`
+        : retryable ? `${reason}；AIS 执行重试次数已用尽（失败 ${failures} 次），原任务效果未确认` : reason;
+      return { ...value, status: delay !== undefined ? "running" : "failed", version: value.version + 1,
+        executionRetry: { failures, retryAt: delay !== undefined ? this.now() + delay : 0 },
+        judgment: delay !== undefined ? value.judgment : this.failureJudgment(value, summary),
+        timeline: [...value.timeline, this.event("execution", "service", summary, { execution_id: executionId, retryable, failures, retry_at_ms: delay !== undefined ? this.now() + delay : null })] };
+    });
     await this.deps.agent.release(task);
   }
 
@@ -205,13 +221,16 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       for (const task of batch) {
       cursor = task.taskId;
       try {
-        if (task.status === "running" && ((!task.execution || task.execution.state === "ended")
-         )) await this.start(task);
+        // Persisted retry scheduling also survives a process restart between state save and release.
+        if (task.status === "running" && task.executionRetry?.retryAt && task.execution?.state !== "ended") await this.deps.agent.release(task);
         if (task.status === "running" && ["observe", "verify"].includes(task.phase)
           && task.observationDeadlineAt !== null && task.observationDeadlineAt <= this.now() && !task.requiresFreshObservation) {
           await this.observe(task.taskId, task.version, { delivery: task.judgment?.delivery ?? "unconfirmed", response: task.judgment?.response ?? "unknown",
             effect: "unknown", summary: "本轮观察到期，保存进度并等待诊断服务继续", evidence_ids: task.judgment?.evidence_ids ?? [] }, []);
+          continue;
         }
+        if (task.status === "running" && (!task.execution || task.execution.state === "ended" || task.executionRetry?.retryAt)
+          && (task.executionRetry?.retryAt ?? 0) <= this.now()) await this.start(task);
       } catch { console.error("[session-recovery] maintenance failed", task.taskId); }
       }
     }

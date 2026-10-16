@@ -30,7 +30,7 @@ export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
   observe(taskId: string, version: number, judgment: RecoveryJudgment, evidence: RecoveryEvidence[]): Promise<void>;
   plan(taskId: string, version: number, plan: RecoveryPlan): Promise<void>;
   finishApply(taskId: string, version: number, input: { applicable: boolean; success: boolean; summary: string }): Promise<void>;
-  executionFailure(taskId: string, reason: string, executionId?: string): Promise<void>;
+  executionFailure(taskId: string, reason: string, executionId?: string, retryable?: boolean): Promise<void>;
   maintenance(): Promise<void>;
   reportResults(): Promise<void>;
 }

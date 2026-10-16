@@ -53,7 +53,18 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   async start(input: RecoveryStoredTask): Promise<void> {
     let task = await this.required(input.taskId);
     if (task.status !== "running") return;
-    if (task.execution && task.execution.state !== "ended" && task.execution.leaseExpiresAt > Math.floor(this.now() / 1000)) return;
+    // Only the lifecycle monitor may retire an expired execution; never overlap live jobs.
+    if (task.execution && task.execution.state !== "ended") return;
+    if ((task.executionRetry?.retryAt ?? 0) > this.now()) return;
+    if (task.executionRetry?.retryAt) {
+      if (task.execution?.jobId) {
+        try {
+          const remote = await this.deps.ais.getJobStatusDetail(task.execution.jobId);
+          if (remote.status === "running" || remote.rawStatus === "notfound") return;
+        } catch { console.error("[session-recovery] previous AIS job state unavailable; retry remains pending", task.taskId); return; }
+      }
+      if (!await this.settleInterruptedTools(task)) return;
+    }
     if (!task.runtimeTarget || !task.current || !task.authorizationScopeDigest) fail(503, "目标快照未配置");
     if (!Number.isSafeInteger(this.deps.snapshotId) || this.deps.snapshotId <= 0) fail(503, "自愈 AIS Base Snapshot 未配置");
     const executionNo = (task.executionNo ?? 0) + 1;
@@ -62,6 +73,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     const contract = agentExecutionContract(identity);
     const reserved = await this.deps.tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1,
       execution: issued.execution, executionNo, aisExecution: contract,
+      ...(value.executionRetry ? { executionRetry: { ...value.executionRetry, retryAt: 0 } } : {}),
       timeline: [...value.timeline, this.event("execution", "启动自愈 Agent", { execution_id: issued.execution.executionId })] }));
     if (!reserved) return; // Another dispatcher/decision owns the current state; never launch a second job.
     task = reserved;
@@ -74,7 +86,12 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       runtime: { clawwebUrl: this.deps.publicBaseUrl, package: { packageId: this.deps.packageId ?? "clawevolve-session-recovery" } } };
     let jobId: string;
     try { jobId = await this.deps.ais.execute(task.request.target.entity_id, { "${clawevolve_params}": JSON.stringify(envelope) }, this.deps.snapshotId); }
-    catch { await this.deps.business().executionFailure(task.taskId, "自愈 Agent 派发失败", issued.execution.executionId); return; }
+    catch (error) {
+      const reason = redactPersistableText(error instanceof Error ? error.message : "未取得 AIS 派发回执", 1500);
+      await this.deps.business().executionFailure(task.taskId, `自愈 Agent 派发失败：${reason}`, issued.execution.executionId, true);
+      await this.deps.repo.updateStepStatus(contract.stepId, { status: "failed", errorCode: "AIS_DISPATCH_FAILED", errorMessage: reason, retryable: true });
+      return;
+    }
     await this.deps.repo.markExternalDispatched(contract.stepId, jobId, { executionId: issued.execution.executionId, jobId });
     const latest = await this.required(task.taskId);
     if (latest.execution?.executionId !== issued.execution.executionId || latest.execution.state === "ended") {
@@ -93,6 +110,28 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     }, task.execution.executionId);
     // The wrapper sees ended on its next control poll and exits for Base to archive.
     // Forced cancellation is reserved for expired leases / the outer hard timeout.
+  }
+  private async settleInterruptedTools(task: RecoveryStoredTask): Promise<boolean> {
+    // An interrupted HTTP request may still finish. Wait for its existing lease before
+    // marking an abandoned write unknown; the next Agent must reconcile, never replay it.
+    const calls = await this.deps.audit.listActiveToolCalls(task.taskId, 500);
+    for (const call of calls) {
+      if (call.executionId !== task.execution?.executionId) continue;
+      if (call.status === "executing" && (call.leaseExpiresAt ?? Infinity) > Math.floor(this.now() / 1000)) return false;
+      const result = { dispatched: call.status === "executing", recorded_at_ms: this.now(),
+        error: { code: "AGENT_EXECUTION_INTERRUPTED", message: "原执行已中断，写入需读取现场后核实" } };
+      try {
+        if (call.status === "pending") await this.deps.audit.cancelPendingToolCall(call.callId, call.executionId, call.authorizationScopeDigest, result);
+        else await this.deps.audit.completeToolCall({ callId: call.callId, executionId: call.executionId,
+          authorizationScopeDigest: call.authorizationScopeDigest, leaseOwner: call.leaseOwner ?? undefined,
+          status: call.isWrite ? "unknown" : "failed", result });
+      } catch (error) {
+        // A late receipt or another reconciler may have finalized the immutable call.
+        const latest = await this.deps.audit.findToolCall(call.callId);
+        if (!latest || ["pending", "executing"].includes(latest.status)) throw error;
+      }
+    }
+    return calls.length < 500; // Continue settling a larger ledger on the next maintenance pass.
   }
   async verify(taskId: string, executionId: string, ticket: string, control = false): Promise<RecoveryStoredTask> {
     const task = await this.required(taskId);
@@ -311,7 +350,15 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       return { applied: identical, duplicate: identical };
     }
     if (currentExecution && report.status !== "running") {
-      if (task.status === "running") await this.deps.business().executionFailure(task.taskId, "自愈容器执行中断，已保存证据与操作记录，效果仍未确认", task.execution!.executionId);
+      if (task.status === "running") {
+        if (report.errorCode === "AGENT_LEASE_EXPIRED" && task.execution!.jobId) {
+          const remote = await this.deps.ais.getJobStatusDetail(task.execution!.jobId);
+          if (remote.status === "running" || remote.rawStatus === "notfound") return { applied: false };
+        }
+        const detail = redactPersistableText(report.errorMessage ?? report.summary ?? "未取得有效运行回报", 1500);
+        const reason = redactPersistableText(`自愈 AIS 执行中断${task.execution!.jobId ? `（作业 ${task.execution!.jobId}）` : ""}${report.errorCode ? ` [${report.errorCode}]` : ""}：${detail}`, 2000);
+        await this.deps.business().executionFailure(task.taskId, reason, task.execution!.executionId, report.retryable !== false);
+      }
       else await this.release(task);
     }
     return { applied: await this.deps.repo.updateStepStatus(step.step_id, { ...report, expectedStep: { status: step.status, output_json: step.output_json } }) };
@@ -332,7 +379,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         if (write && (config.level === "debug" || config.status !== "running")) fail(403, "当前不能执行实际干预");
         if (name === "retry_message" && config.phase === "assess") {
           if (config.plan || calls.some(item => item.toolName === "retry_message"
-            && !(item.status === "failed" && (item.result as Record<string, unknown>)?.dispatched === false)
+            && item.status !== "canceled" && !(item.status === "failed" && (item.result as Record<string, unknown>)?.dispatched === false)
             && !calls.some(check => check.toolName === "reconcile_write" && check.status === "succeeded"
               && (check.result as Record<string, unknown>)?.sourceToolCallId === item.callId
               && (check.result as Record<string, unknown>)?.outcome === "not_applied"))) fail(409, "初始消息已领取，不能再次发送");
