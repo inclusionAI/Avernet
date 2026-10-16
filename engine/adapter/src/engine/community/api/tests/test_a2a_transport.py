@@ -1145,6 +1145,49 @@ def test_agent_card_with_resolve_support_declares_uri_last():
     assert resolve_entry["required"] is False
 
 
+class _FullResolveChat:
+    """三方法全有——声明满足。"""
+    def resolve_exec_approval(self, **kw): ...
+    def resolve_interaction(self, **kw): ...
+    def resolve_mode_transition(self, **kw): ...
+
+
+class _PartialResolveChat:
+    """缺 mode_switch——部分支持=不声明。"""
+    def resolve_exec_approval(self, **kw): ...
+    def resolve_interaction(self, **kw): ...
+
+
+def test_card_endpoint_declares_resolve_for_full_engine(
+        app_client, monkeypatch):
+    monkeypatch.setattr(bridge, "_chat_plugin", lambda: _FullResolveChat())
+    resp = app_client.get("/.well-known/agent-card.json")
+    assert resp.status_code == 200
+    urls = [e["url"] for e in resp.json()["capabilities"]["extensions"]]
+    assert RESOLVE_URI in urls
+
+
+def test_card_endpoint_no_resolve_decl_for_partial_engine(
+        app_client, monkeypatch):
+    monkeypatch.setattr(bridge, "_chat_plugin", lambda: _PartialResolveChat())
+    resp = app_client.get("/.well-known/agent-card.json")
+    urls = [e["url"] for e in resp.json()["capabilities"]["extensions"]]
+    assert RESOLVE_URI not in urls
+    # 基础五项仍在，老消费方（BaaS abort 判读）不受影响
+    assert "https://avernet.local/a2a/ext/cancel/v1" in urls
+
+
+def test_card_endpoint_no_resolve_decl_when_plugin_unavailable(
+        app_client, monkeypatch):
+    def _raise():
+        raise RuntimeError("no active engine")
+    monkeypatch.setattr(bridge, "_chat_plugin", _raise)
+    resp = app_client.get("/.well-known/agent-card.json")
+    assert resp.status_code == 200  # card 永可答，声明保守缺席
+    urls = [e["url"] for e in resp.json()["capabilities"]["extensions"]]
+    assert RESOLVE_URI not in urls
+
+
 # ══════════ R4-2: 多 pending 交互逐个可决（gateway 并发 canUseTool）══════════
 
 @pytest.mark.asyncio
