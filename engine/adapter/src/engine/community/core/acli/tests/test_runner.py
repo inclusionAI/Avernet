@@ -53,6 +53,8 @@ if args[0] == "install":
 elif args[:2] == ["tool", "list"]:
     if mode == "list_no_tools":
         print(json.dumps({{"success": True}})); sys.exit(0)
+    if mode == "list_entry":
+        print(json.dumps({{"success": True, "tools": [json.loads(os.environ["FAKE_ACLI_ENTRY"])]}})); sys.exit(0)
     if mode == "list_null_tools":
         print(json.dumps({{"success": True, "tools": None}})); sys.exit(0)
     names = os.environ.get("FAKE_ACLI_INSTALLED", "").split(",")
@@ -279,6 +281,22 @@ async def test_uninstall_refuses_a_listing_without_tools(fake_acli, install_dir,
     """A malformed listing must not read as "not installed" and skip the uninstall."""
     runner, calls = fake_acli
     monkeypatch.setenv("FAKE_ACLI_MODE", "list_no_tools")
+
+    with pytest.raises(AcliError) as caught:
+        await runner.uninstall("dataphin")
+
+    assert caught.value.code == "bad_output"
+    assert [c["args"][:2] for c in calls()] == [["tool", "list"]]
+
+
+@pytest.mark.parametrize("entry", ['{}', '{"name": ""}', '"dataphin"', '{"name": 3}'])
+async def test_uninstall_refuses_a_listing_entry_without_a_name(
+    fake_acli, install_dir, monkeypatch, entry
+):
+    """A nameless entry must not read as some other tool and skip the uninstall."""
+    runner, calls = fake_acli
+    monkeypatch.setenv("FAKE_ACLI_MODE", "list_entry")
+    monkeypatch.setenv("FAKE_ACLI_ENTRY", entry)
 
     with pytest.raises(AcliError) as caught:
         await runner.uninstall("dataphin")

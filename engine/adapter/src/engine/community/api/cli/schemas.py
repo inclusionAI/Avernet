@@ -53,7 +53,7 @@ class AcliInstallRequest(BaseModel):
     """``POST /api/cli/acli/install`` — install one tool from the acli market.
 
     The caller names only the tool. Where it is installed is the engine's
-    choice (``load_acli_install_dir``), shared by every engine.
+    choice (``ACLI_INSTALL_DIR``), shared by every engine.
     """
 
     name: str

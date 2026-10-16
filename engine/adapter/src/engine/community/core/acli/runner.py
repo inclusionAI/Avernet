@@ -15,7 +15,7 @@ installed in ``$HOME/.acli/tools`` and appends a ``PATH`` line to
 ``$HOME/.profile``. The container's real ``HOME`` (``/root``) does not survive
 a restart, while ``/home/admin`` does, so every install and uninstall runs with
 ``HOME`` set to ``<parent of install_dir>/acli-home``. The install directory
-itself is the engine's choice (``engine.community.config.load_acli_install_dir``);
+itself is the engine's choice (``engine.community.config.ACLI_INSTALL_DIR``);
 the platform names only the tool. That keeps acli's record
 beside the programs it describes, so an uninstall after a restart still finds
 the tool, and keeps the ``.profile`` edit out of the real home.
@@ -260,11 +260,14 @@ class AcliRunner:
         # the program on PATH. An explicit null is an empty listing.
         if "tools" not in listing or not isinstance(listing["tools"], (list, type(None))):
             raise AcliError("bad_output", "acli tool list returned no tools list")
-        installed_names = {
-            str(tool.get("name"))
-            for tool in listing["tools"] or []
-            if isinstance(tool, Mapping)
-        }
+        installed_names: set[str] = set()
+        for tool in listing["tools"] or []:
+            # Same rule as the listing itself: an entry without a usable name
+            # must not read as "some other tool", or the uninstall is skipped.
+            tool_name = tool.get("name") if isinstance(tool, Mapping) else None
+            if not isinstance(tool_name, str) or not tool_name:
+                raise AcliError("bad_output", "acli tool list returned an entry without a name")
+            installed_names.add(tool_name)
         if name not in installed_names:
             log.info("[acli] uninstall name=%s result=not_installed", name)
             return AcliUninstallResult(name=name, uninstalled=False)

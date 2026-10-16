@@ -217,7 +217,7 @@ RUN ln -sf /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-bundle.crt
 FROM node:22-bookworm-slim AS runtime
 
 # /home/admin/.agentclaw/bin is where the engine installs acli market tools
-# (engine config ENGINE_ACLI_INSTALL_DIR, this by default); it is on PATH so the
+# (engine constant ACLI_INSTALL_DIR); it is on PATH so the
 # agent can run a tool as soon as it is added.
 ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/admin \

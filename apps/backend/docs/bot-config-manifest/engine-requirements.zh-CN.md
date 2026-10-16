@@ -200,8 +200,8 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
   | `GET /api/cli/acli/market` | `?keyword=&page_no=&page_size=` | `acli list` 的一页：`{items, total, has_more}` |
 
   **安装目录归引擎（与 A2 一致）**：平台只给出工具名，不下发也不知道安装目录。openclaw 与 claude_code
-  共用同一个目录，默认 `/home/admin/.agentclaw/bin`（可用 `ENGINE_ACLI_INSTALL_DIR` 覆盖，必须是以 `bin`
-  结尾的绝对路径），与启动时安装的默认 CLI 同目录、同一份 acli 记录，且在引擎 `PATH` 上。引擎以
+  共用固定目录 `/home/admin/.agentclaw/bin`（引擎常量 `ACLI_INSTALL_DIR`，不可配置：镜像只把这个目录放进
+  `PATH`，换目录会装出 agent 运行不了的工具），与启动时安装的默认 CLI 同目录、同一份 acli 记录。引擎以
   `HOME=<安装目录的父目录>/acli-home` 运行 acli，使 acli 的安装记录与程序一起落在持久化存储上，重启后
   仍能卸载；超时或请求取消时整组杀掉 acli 及其子进程。
 

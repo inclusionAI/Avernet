@@ -220,10 +220,9 @@ def test_callers_cannot_choose_the_install_directory(client, runner):
     assert runner.calls == [("install", "dataphin")]
 
 
-def test_install_directory_comes_from_engine_config(monkeypatch):
-    from engine.community.config import DEFAULT_ACLI_INSTALL_DIR, load_acli_install_dir
+def test_the_runner_installs_into_the_fixed_engine_directory():
+    """The one directory the agent image puts on ``PATH``; not configurable."""
+    from engine.community.config import ACLI_INSTALL_DIR
 
-    monkeypatch.delenv("ENGINE_ACLI_INSTALL_DIR", raising=False)
-    assert load_acli_install_dir() == DEFAULT_ACLI_INSTALL_DIR == "/home/admin/.agentclaw/bin"
-    monkeypatch.setenv("ENGINE_ACLI_INSTALL_DIR", " /opt/tools/bin ")
-    assert load_acli_install_dir() == "/opt/tools/bin"
+    assert ACLI_INSTALL_DIR == "/home/admin/.agentclaw/bin"
+    assert str(router_module._ACLI_RUNNER._install_dir) == ACLI_INSTALL_DIR

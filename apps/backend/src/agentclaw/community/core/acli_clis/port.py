@@ -31,10 +31,14 @@ class AcliPortError(Exception):
 class AcliTool:
     """One acli market tool, as acli describes it.
 
-    Example, from ``acli install deepinsight-cli --json`` (acli 2.0.7)::
+    Examples, from rows of ``acli list --keyword data --json`` (acli 2.0.7)::
 
+        AcliTool(name="dataphin", command="dataphin",
+                 description="dataphinCLI工具", version="1.4.14")
         AcliTool(name="deepinsight-cli", command="di",
-                 description="DeepInsight", version="1.0.9")
+                 description="1", version="1.0.9")
+
+    The market also returns ``id`` and ``author``; they are not kept.
     """
 
     #: The market name, e.g. ``deepinsight-cli``. It is also the tool's code in
@@ -43,7 +47,8 @@ class AcliTool:
     #: The executable acli puts on ``PATH``, e.g. ``di``. acli accepts it as an
     #: alias on install; the API refuses it in favour of ``name``.
     command: str
-    #: Free text from the market, e.g. ``DeepInsight``; may be empty.
+    #: Free text the tool's author wrote, e.g. ``dataphinCLI工具``; may be empty,
+    #: and may be long Markdown (release notes).
     description: str
     #: The installed or latest version, e.g. ``1.0.9``; may be empty.
     version: str

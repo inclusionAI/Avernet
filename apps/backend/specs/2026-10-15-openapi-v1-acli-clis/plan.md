@@ -42,9 +42,9 @@ New `core/acli/runner.py` — `AcliRunner`, the only code that executes acli:
 - Every call is `asyncio.create_subprocess_exec` with a fixed argv (never a
   shell), `--json`, a timeout (300 s install/uninstall, 30 s market/list), and
   `HOME=<acli_home>` added to the inherited environment.
-- The runner is built with the engine's install directory (`load_acli_install_dir`,
-  `/home/admin/.agentclaw/bin` by default, `ENGINE_ACLI_INSTALL_DIR` overrides);
-  a value that is not an absolute `…/bin` path stops it being built.
+- The runner is built with the engine's install directory, the constant
+  `ACLI_INSTALL_DIR` (`/home/admin/.agentclaw/bin`). It is fixed, not
+  configurable: the agent image puts only this directory on `PATH`.
 - `install(name)` → `acli install <name> --install-dir <dir> --yes --json`;
   returns `{name, command, description, version}` from the JSON.
 - `uninstall(name)` → first `acli tool list --json`; if `name` is

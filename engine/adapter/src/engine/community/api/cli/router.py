@@ -36,7 +36,7 @@ from engine.community.api.cli.schemas import (
     ReplaceRequest,
 )
 from engine.community.api.response import ApiResponse
-from engine.community.config import load_acli_install_dir
+from engine.community.config import ACLI_INSTALL_DIR
 from engine.community.core.acli.runner import AcliError, AcliRunner
 from engine.community.core.cli_tools.models import CliToolPayload
 from engine.community.core.cli_tools.service import InvalidCliToolNameError
@@ -214,7 +214,7 @@ async def download_cli_tool(name: str = Query(...)) -> ApiResponse:
 
 # This module wires the runner: it hands acli the process environment and the
 # engine's install directory, so neither is chosen by core code or by a caller.
-_ACLI_RUNNER = AcliRunner(environ=os.environ, install_dir=load_acli_install_dir())
+_ACLI_RUNNER = AcliRunner(environ=os.environ, install_dir=ACLI_INSTALL_DIR)
 
 
 def _acli() -> AcliRunner:
