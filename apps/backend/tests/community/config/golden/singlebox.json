@@ -61,7 +61,8 @@
       "personal_bot_template_uuid": "TEMPLATE-54942a40aa794eaaae2be166f94890ed",
       "teclaw_template_uuid": "TEMPLATE-3106e731ffb04e0285e27c387e153737",
       "template_uuid": "TEMPLATE-4d0e2849d7004111836333de782b95d8",
-      "tenant": "team_claw"
+      "tenant": "team_claw",
+      "runtime_identity_metadata": true
     },
     "bcn": {
       "base_url": "http://localhost:21000"
@@ -267,7 +268,8 @@
       "personal_bot_template_uuid": "TEMPLATE-54942a40aa794eaaae2be166f94890ed",
       "teclaw_template_uuid": "TEMPLATE-3106e731ffb04e0285e27c387e153737",
       "template_uuid": "TEMPLATE-4d0e2849d7004111836333de782b95d8",
-      "tenant": "team_claw"
+      "tenant": "team_claw",
+      "runtime_identity_metadata": true
     },
     "bcn": {
       "base_url": "http://localhost:21000",

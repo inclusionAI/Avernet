@@ -1253,11 +1253,6 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                     extra_config=DeviceConfig(
                         template_uuid=bot_record.template_uuid,
                         deploy_config=effective_deploy_config,
-                        metadata={
-                            "bot_uuid": bot_record.bot_uuid,
-                            "entity_type": bot_config.entity_type,
-                            "entity_id": bot_config.entity_id,
-                        },
                     ),
                 )
                 device = self._device_service.create_device(
@@ -2920,15 +2915,6 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                     if target_bot_record
                     else bot_record.template_uuid,
                     deploy_config=new_bot_config.deploy_config,
-                    metadata={
-                        "bot_uuid": (
-                            target_bot_record.bot_uuid
-                            if target_bot_record
-                            else bot_record.bot_uuid
-                        ),
-                        "entity_type": new_bot_config.entity_type,
-                        "entity_id": new_bot_config.entity_id,
-                    },
                 )
                 device_repo.update_device(
                     device_id=device_record.id,

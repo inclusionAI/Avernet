@@ -8,7 +8,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
-from secbaas.community.api.bot_manage import BotConfig, BotStatus
+from secbaas.community.api.bot_manage import BotStatus
 from secbaas.community.api.publish_manage import (
     DEFAULT_CALLBACK_TIMEOUT_SECONDS,
     BatchStatus,
@@ -370,7 +370,7 @@ class TestPublishCreation:
         mock_bot.id = 1
         mock_bot.template_uuid = "template-uuid-1"
         mock_bot.domain = "test_domain"
-        mock_bot.config = BotConfig(entity_id="entity-1")
+        mock_bot.config = None
 
         mock_publish = MagicMock()
         mock_publish.id = 1
@@ -7625,7 +7625,7 @@ class TestCreatePublishScaleValidation:
         mock_bot.template_uuid = "template-uuid"
         mock_bot.domain = "test.domain"
         mock_bot.extra_config = {}
-        mock_bot.config = BotConfig(entity_id="entity-1")
+        mock_bot.config = None
 
         mock_publish = MagicMock()
         mock_publish.id = 1

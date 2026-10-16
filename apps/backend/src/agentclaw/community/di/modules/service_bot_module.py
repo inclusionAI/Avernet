@@ -387,6 +387,7 @@ class ServiceBotModule(Module):
             general_http_client=general_http,
             secret_resolver=secret_resolver,
             personal_bot_template_uuid=baas.personal_bot_template_uuid,
+            runtime_identity_metadata=baas.runtime_identity_metadata,
             common_whitelist_service=common_whitelist_service,
             outbound_rule_provider=outbound_rule_provider,
             theta_master_key_secret=secret_names.aicoding_theta_master_key,

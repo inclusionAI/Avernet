@@ -581,6 +581,7 @@ class ConfigModule(Module):
             desktop_template_uuid=block.get(
                 "desktop_template_uuid", defaults.desktop_template_uuid
             ),
+            runtime_identity_metadata=bool(block.get("runtime_identity_metadata", False)),
             teclaw_template_uuid=block.get(
                 "teclaw_template_uuid", defaults.teclaw_template_uuid
             ),

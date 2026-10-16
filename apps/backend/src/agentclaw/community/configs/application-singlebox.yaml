@@ -158,6 +158,7 @@ user_config:
     api_base_url: "http://localhost:8890"
     template_uuid: "TEMPLATE-4d0e2849d7004111836333de782b95d8"
     tenant: "team_claw"
+    runtime_identity_metadata: true
     arca_template_id_pre: "ARCA-TEMPLATE-000000001403860d"
     arca_template_id: "TEMPLATE-2e3192faa8994fe8bb8bc7be8671b431"
     # Relocated from di/config.py neutral defaults (C1).

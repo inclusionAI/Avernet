@@ -514,6 +514,11 @@ class BaasConfig:
     eval_template_uuid: str = ""
     # Personal bot via BaaS (poolab template) — deploy supplies it.
     personal_bot_template_uuid: str = ""
+    # Singlebox-only. When enabled, Backend sends the bot identity through
+    # the existing BaaS ``deploy_config.arca_metadata`` field so the local
+    # process sandbox can resolve a workspace without BAAS core lifecycle
+    # changes. Every non-singlebox deployment leaves this disabled.
+    runtime_identity_metadata: bool = False
 
 
 @dataclass(frozen=True)
