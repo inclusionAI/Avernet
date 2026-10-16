@@ -228,6 +228,7 @@ fn entry_active_state_uses_superseded_marker_not_business_valid_to() {
         scope_level: ScopeLevel::Session,
         scope: "sess-001".into(),
         content: "张三存活".into(),
+        creator: "judge_bot".into(),
         visible_to: GroupContextPolicy::users(Vec::<String>::new()),
         collect_from: GroupContextPolicy::users(["judge_bot"]),
         supersedes: None,

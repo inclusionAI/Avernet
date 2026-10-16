@@ -105,6 +105,9 @@ pub struct GroupContextEntry {
     /// concatenation is performed.
     pub scope: String,
     pub content: String,
+    /// The actor that wrote this version row. Business updates create a new
+    /// row, so this records the write-time creator rather than being mutated.
+    pub creator: String,
     pub visible_to: GroupContextPolicy,
     pub collect_from: GroupContextPolicy,
     /// Physical `id` of the old version superseded by this row.

@@ -12,6 +12,7 @@ pub fn entry(context_id: &str, name: &str, scope: &str, content: &str) -> NewGro
         name: name.into(),
         scope_level: ScopeLevel::Session,
         scope: scope.into(),
+        creator: "judge_bot".into(),
         content: content.into(),
         visible_to: GroupContextPolicy::users(["judge_bot"]),
         collect_from: GroupContextPolicy::users(["judge_bot"]),
@@ -52,6 +53,7 @@ pub async fn supersede_preserves_history(repo: &dyn GroupContextRepo) {
                 name: "player_state".into(),
                 scope_level: ScopeLevel::Session,
                 scope: "sess-001".into(),
+                creator: "judge_bot".into(),
                 content: "张三出局".into(),
                 visible_to: GroupContextPolicy::users(Vec::<String>::new()),
                 collect_from: GroupContextPolicy::users(["judge_bot"]),
@@ -115,6 +117,7 @@ pub async fn supersede_preserves_multiple_history_versions(repo: &dyn GroupConte
                 name: "version_chain".into(),
                 scope_level: ScopeLevel::Session,
                 scope: "sess-chain".into(),
+                creator: "judge_bot".into(),
                 content: "v2".into(),
                 visible_to: GroupContextPolicy::users(["judge_bot"]),
                 collect_from: GroupContextPolicy::users(["judge_bot"]),
@@ -144,6 +147,7 @@ pub async fn supersede_preserves_multiple_history_versions(repo: &dyn GroupConte
                 name: "version_chain".into(),
                 scope_level: ScopeLevel::Session,
                 scope: "sess-chain".into(),
+                creator: "judge_bot".into(),
                 content: "v3".into(),
                 visible_to: GroupContextPolicy::users(["judge_bot"]),
                 collect_from: GroupContextPolicy::users(["judge_bot"]),
@@ -201,6 +205,7 @@ pub async fn supersede_stale_id_returns_conflict(repo: &dyn GroupContextRepo) {
         name: "cas_test".into(),
         scope_level: ScopeLevel::Session,
         scope: "sess-001".into(),
+        creator: "judge_bot".into(),
         content: "v2".into(),
         visible_to: GroupContextPolicy::users(["judge_bot"]),
         collect_from: GroupContextPolicy::users(["judge_bot"]),
@@ -230,6 +235,7 @@ pub async fn supersede_stale_id_returns_conflict(repo: &dyn GroupContextRepo) {
         name: "cas_test".into(),
         scope_level: ScopeLevel::Session,
         scope: "sess-001".into(),
+        creator: "judge_bot".into(),
         content: "stale-v3".into(),
         visible_to: GroupContextPolicy::users(["judge_bot"]),
         collect_from: GroupContextPolicy::users(["judge_bot"]),
@@ -259,6 +265,33 @@ pub async fn supersede_stale_id_returns_conflict(repo: &dyn GroupContextRepo) {
         .expect("get active")
         .expect("active row");
     assert_eq!(active.content, "v2");
+}
+
+pub async fn creator_is_persisted_for_each_version(repo: &dyn GroupContextRepo) {
+    let mut first_params = entry("ctx-creators", "creator_audit", "sess-creators", "v1");
+    first_params.creator = "writer-a".into();
+    let first = repo.create_active(first_params).await.expect("create v1");
+
+    let mut second_params = entry("ctx-creators", "creator_audit", "sess-creators", "v2");
+    second_params.creator = "writer-b".into();
+    second_params.supersedes = Some(first.id);
+    let second = repo
+        .supersede_active("creator_audit", "sess-creators", first.id, second_params)
+        .await
+        .expect("supersede v1 -> v2");
+    assert_eq!(second.creator, "writer-b");
+
+    let versions = repo
+        .list_versions(&first.context_id)
+        .await
+        .expect("list versions");
+    assert_eq!(
+        versions
+            .iter()
+            .map(|entry| entry.creator.as_str())
+            .collect::<Vec<_>>(),
+        vec!["writer-a", "writer-b"]
+    );
 }
 
 pub async fn list_active_by_multiple_scopes(repo: &dyn GroupContextRepo) {

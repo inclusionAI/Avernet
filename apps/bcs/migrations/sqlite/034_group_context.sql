@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS bcs_group_contexts (
     scope_level TEXT NOT NULL CHECK (scope_level IN ('group', 'session', 'round')),
     scope TEXT NOT NULL,
     content TEXT NOT NULL,
+    creator TEXT NOT NULL,
     visible_to_json TEXT NOT NULL,
     collect_from_json TEXT NOT NULL,
     supersedes INTEGER NULL,

@@ -36,6 +36,7 @@ pub struct NewGroupContextEntry {
     pub scope_level: ScopeLevel,
     pub scope: String,
     pub content: String,
+    pub creator: String,
     pub visible_to: GroupContextPolicy,
     pub collect_from: GroupContextPolicy,
     pub supersedes: Option<i64>,
@@ -131,7 +132,7 @@ impl SqlGroupContextStore {
     }
 
     fn select_cols(&self) -> String {
-        let base = "id, context_id, name, scope_level, scope, content, visible_to_json, \
+        let base = "id, context_id, name, scope_level, scope, content, creator, visible_to_json, \
                     collect_from_json, supersedes, change_reason, valid_from, valid_to, \
                     is_superseded, gmt_superseded, tx_time, gmt_create, gmt_modified";
         format!(
@@ -211,6 +212,7 @@ impl SqlGroupContextStore {
             scope_level,
             scope: db_get_column(row, "scope").map_err(GroupContextStoreError::backend)?,
             content: db_get_column(row, "content").map_err(GroupContextStoreError::backend)?,
+            creator: db_get_column(row, "creator").map_err(GroupContextStoreError::backend)?,
             visible_to: serde_json::from_str(&visible_raw)
                 .map_err(GroupContextStoreError::backend)?,
             collect_from: serde_json::from_str(&collect_raw)
@@ -267,9 +269,9 @@ impl GroupContextRepo for SqlGroupContextStore {
             .to_string();
         let sql = self.sql_with_timestamp_params(
             "INSERT INTO bcs_group_contexts \
-             (context_id, name, scope_level, scope, content, visible_to_json, collect_from_json, \
+             (context_id, name, scope_level, scope, content, creator, visible_to_json, collect_from_json, \
               supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
                      __bcs_group_context_timestamp_ms__, FALSE, NULL, __bcs_group_context_timestamp_ms__)",
         );
         let result = self
@@ -282,6 +284,7 @@ impl GroupContextRepo for SqlGroupContextStore {
                     DbValue::from(scope_level.as_str()),
                     DbValue::from(params.scope.as_str()),
                     DbValue::from(params.content.as_str()),
+                    DbValue::from(params.creator.as_str()),
                     DbValue::from(visible.as_str()),
                     DbValue::from(collect.as_str()),
                     params
@@ -340,9 +343,9 @@ impl GroupContextRepo for SqlGroupContextStore {
             .unwrap_or(DbValue::Null);
         let insert_sql = self.sql_with_timestamp_params(
             "INSERT INTO bcs_group_contexts \
-             (context_id, name, scope_level, scope, content, visible_to_json, collect_from_json, \
+             (context_id, name, scope_level, scope, content, creator, visible_to_json, collect_from_json, \
               supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
                      __bcs_group_context_timestamp_ms__, FALSE, NULL, __bcs_group_context_timestamp_ms__)",
         );
 
@@ -381,6 +384,7 @@ impl GroupContextRepo for SqlGroupContextStore {
                     DbValue::from(scope_level.as_str()),
                     DbValue::from(params.scope.as_str()),
                     DbValue::from(params.content.as_str()),
+                    DbValue::from(params.creator.as_str()),
                     DbValue::from(visible.as_str()),
                     DbValue::from(collect.as_str()),
                     DbValue::from(expected_active_id),
@@ -718,6 +722,7 @@ mod tests {
                 scope_level: ScopeLevel::Session,
                 scope: "sess-001".into(),
                 content: "张三出局".into(),
+                creator: "judge_bot".into(),
                 visible_to: GroupContextPolicy::users(["judge_bot"]),
                 collect_from: GroupContextPolicy::users(["judge_bot"]),
                 supersedes: None,
@@ -761,6 +766,7 @@ mod tests {
                     scope_level,
                     scope: scope.into(),
                     content: name.into(),
+                    creator: "judge_bot".into(),
                     visible_to: GroupContextPolicy::users(["judge_bot"]),
                     collect_from: GroupContextPolicy::users(["judge_bot"]),
                     supersedes: None,

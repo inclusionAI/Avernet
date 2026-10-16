@@ -146,6 +146,7 @@ fn row_from_new(id: i64, params: NewGroupContextEntry) -> GroupContextEntry {
         scope_level: params.scope_level,
         scope: params.scope,
         content: params.content,
+        creator: params.creator,
         visible_to: params.visible_to,
         collect_from: params.collect_from,
         supersedes: params.supersedes,

@@ -18,12 +18,15 @@ use crate::scope::{ResolvedScope, resolve_scope, resolve_scopes};
 pub const MAX_CONTENT_BYTES: usize = 4 * 1024;
 pub const MAX_NAME_CHARS: usize = 255;
 pub const MAX_POLICY_BYTES: usize = 4096;
+pub const MAX_CREATOR_CHARS: usize = 255;
 
 const INVALID_PARAM: &str = "invalid_param";
 const PERMISSION_DENIED: &str = "permission_denied";
 const NOT_FOUND: &str = "not_found";
 const CONFLICT: &str = "conflict";
 const PAYLOAD_TOO_LARGE: &str = "payload_too_large";
+
+const SYSTEM_CREATOR: &str = "system";
 
 pub struct GroupContextApplicationServiceImpl {
     repo: Arc<dyn GroupContextRepo>,
@@ -39,6 +42,7 @@ impl GroupContextApplicationServiceImpl {
         scope: ResolvedScope,
         name: String,
         content: String,
+        creator: String,
         visible_to: GroupContextPolicy,
         collect_from: GroupContextPolicy,
         change_reason: Option<String>,
@@ -56,6 +60,7 @@ impl GroupContextApplicationServiceImpl {
                 scope_level: scope.scope_level,
                 scope: scope.scope,
                 content,
+                creator,
                 visible_to,
                 collect_from,
                 supersedes: None,
@@ -75,6 +80,7 @@ impl GroupContextApplicationServiceImpl {
         scope: ResolvedScope,
         name: String,
         content: String,
+        creator: String,
         visible_to: GroupContextPolicy,
         collect_from: GroupContextPolicy,
         change_reason: Option<String>,
@@ -96,6 +102,7 @@ impl GroupContextApplicationServiceImpl {
                     scope_level: scope.scope_level,
                     scope: scope.scope,
                     content,
+                    creator,
                     visible_to,
                     collect_from,
                     supersedes: Some(old.id),
@@ -128,6 +135,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
             scope,
             command.name,
             command.content,
+            command.actor_id.clone(),
             command.visible_to,
             command.collect_from,
             None,
@@ -181,6 +189,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
             scope,
             command.name,
             content,
+            command.actor_id.clone(),
             visible_to,
             collect_from,
             command.change_reason,
@@ -280,6 +289,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
                     scope,
                     command.name,
                     command.content,
+                    SYSTEM_CREATOR.to_string(),
                     command.visible_to,
                     command.collect_from,
                     None,
@@ -293,6 +303,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
                     scope,
                     command.name,
                     command.content,
+                    SYSTEM_CREATOR.to_string(),
                     command.visible_to,
                     command.collect_from,
                     None,
@@ -308,13 +319,18 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
 
 fn validate_actor(actor_id: &str) -> Result<(), ApplicationError> {
     if actor_id.trim().is_empty() {
-        Err(ApplicationError::invalid(
+        return Err(ApplicationError::invalid(
             INVALID_PARAM,
             "actor_id is required",
-        ))
-    } else {
-        Ok(())
+        ));
     }
+    if actor_id.chars().count() > MAX_CREATOR_CHARS {
+        return Err(ApplicationError::payload_too_large(
+            PAYLOAD_TOO_LARGE,
+            format!("actor_id exceeds {MAX_CREATOR_CHARS} characters"),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_name(name: &str) -> Result<(), ApplicationError> {

@@ -49,6 +49,11 @@ async fn memory_lists_active_by_multiple_scopes() {
 }
 
 #[tokio::test]
+async fn memory_persists_creator_for_each_version() {
+    common::creator_is_persisted_for_each_version(&MemoryGroupContextRepo::new()).await;
+}
+
+#[tokio::test]
 async fn sqlite_duplicate_active_conflicts_from_partial_unique_index() {
     let repo = sqlite_repo().await;
     common::create_duplicate_active_conflicts(&repo).await;
@@ -76,6 +81,12 @@ async fn sqlite_supersede_stale_id_returns_conflict() {
 async fn sqlite_lists_active_by_multiple_scopes() {
     let repo = sqlite_repo().await;
     common::list_active_by_multiple_scopes(&repo).await;
+}
+
+#[tokio::test]
+async fn sqlite_persists_creator_for_each_version() {
+    let repo = sqlite_repo().await;
+    common::creator_is_persisted_for_each_version(&repo).await;
 }
 
 #[tokio::test]

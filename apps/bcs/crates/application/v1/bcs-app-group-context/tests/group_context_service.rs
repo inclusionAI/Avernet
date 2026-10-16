@@ -252,6 +252,18 @@ async fn add_and_update_reject_values_larger_than_storage_columns() {
 
     let error = app
         .add(add_for_validation(
+            &"a".repeat(256),
+            "oversized_actor",
+            "game-room-7",
+            policy(&[]),
+            policy(&["judge_bot"]),
+        ))
+        .await
+        .expect_err("oversized actor rejected before storage");
+    assert_code(error, "payload_too_large");
+
+    let error = app
+        .add(add_for_validation(
             "judge_bot",
             &"n".repeat(256),
             "game-room-7",
@@ -664,6 +676,79 @@ async fn update_maps_missing_permission_and_stale_supersede() {
         .await
         .expect_err("concurrent supersede maps to conflict");
     assert_code(error, "conflict");
+}
+
+#[tokio::test]
+async fn add_update_and_systemset_record_version_creators() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+
+    app.add(AddGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "creator_audit".into(),
+        scope_level: ScopeLevel::Session,
+        content: "v1".into(),
+        visible_to: policy(&[]),
+        collect_from: policy(&["judge_bot", "admin"]),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("add succeeds");
+    let first = repo
+        .get_active("creator_audit", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("first version");
+    assert_eq!(first.creator, "judge_bot");
+
+    app.update(UpdateGroupContext {
+        actor_id: "admin".into(),
+        request_context: ctx(),
+        name: "creator_audit".into(),
+        scope_level: ScopeLevel::Session,
+        content: Some("v2".into()),
+        change_reason: None,
+        visible_to: None,
+        collect_from: None,
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("update succeeds");
+
+    app.systemset(SystemSetGroupContext {
+        request_context: ctx(),
+        name: "creator_audit".into(),
+        scope_level: ScopeLevel::Session,
+        content: "v3".into(),
+        visible_to: policy(&[]),
+        collect_from: policy(&["judge_bot", "admin"]),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("systemset succeeds");
+
+    let active = repo
+        .get_active("creator_audit", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("active version");
+    assert_eq!(active.creator, "system");
+
+    let versions = repo
+        .list_versions(&active.context_id)
+        .await
+        .expect("versions ok");
+    assert_eq!(
+        versions
+            .iter()
+            .map(|entry| entry.creator.as_str())
+            .collect::<Vec<_>>(),
+        vec!["judge_bot", "admin", "system"]
+    );
 }
 
 #[tokio::test]

@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS bcs_group_contexts (
     scope_level VARCHAR(16) NOT NULL,
     scope VARCHAR(255) NOT NULL,
     content TEXT NOT NULL,
+    creator VARCHAR(255) NOT NULL,
     visible_to_json JSON NOT NULL,
     collect_from_json JSON NOT NULL,
     supersedes BIGINT NULL,
