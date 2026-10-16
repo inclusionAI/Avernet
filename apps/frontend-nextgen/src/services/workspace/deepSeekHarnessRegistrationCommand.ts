@@ -1,4 +1,4 @@
-import { getBotRegistrationNameError, quoteShellArg } from './botRegistrationCommand';
+import { quoteShellArg } from './botRegistrationCommand';
 
 export const DSH_VERSION = '0.2.1-alpha.2';
 export const DSH_PLUGIN_PACKAGE = '@avernet-plugin/deepseek-harness-channel-bcn@latest';
@@ -15,8 +15,8 @@ export function getDeepSeekHarnessInputError({
   botName,
   profile,
 }: Pick<DeepSeekHarnessRegistrationInput, 'botName' | 'profile'>): string | null {
-  const nameError = getBotRegistrationNameError(botName);
-  if (nameError) return nameError;
+  const nameLength = Array.from(botName.trim()).length;
+  if (nameLength < 2 || nameLength > 64) return 'Bot 名称需要填写 2–64 个字符。';
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(profile.trim()))
     return 'Profile 需为 1–64 位小写字母、数字或连字符，并以字母或数字开头。';
   return null;
