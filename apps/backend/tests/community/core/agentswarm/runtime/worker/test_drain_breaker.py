@@ -32,7 +32,7 @@ from agentclaw.community.core.agentswarm.runtime.pool import (
 
 from tests.community.core.agentswarm.runtime.handler.test_swarm_slice import (
     TENANT, FakeFactory, RepeatingLLMProvider, _TestDB, _build_env,
-    _finish_decision, _mk_run, _spawn_decision, _wait_decision,
+    _finish_decision, _mk_run, _spawn_decision, _wait_decision, _spin_ref,
 )
 
 
@@ -528,7 +528,7 @@ def _job_state(db, run_id):
 class TestRealHandlerDrain:
 
     def test_over_grace_slice_released_to_reclaimable_pending(self, real_db):
-        # A wait on a name that never resolves keeps the real slice
+        # A wait on a permanently-unsatisfied ref keeps the real slice
         # non-terminal for its whole 10s budget, so grace cannot cover it.
         # Grace 0.4 keeps the abort join (min(grace, 5s)) above the wait
         # loop's 0.25s lost-check chunk, so the unwind stays cooperative.
@@ -538,6 +538,7 @@ class TestRealHandlerDrain:
             llm=RepeatingLLMProvider(_wait_decision("ghost")),
         )
         run = _mk_run()
+        _spin_ref(env, run)
         env.run_repo.create(run)
         env.job_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
 
@@ -602,11 +603,13 @@ class TestRealHandlerDrain:
 class TestHeartbeatDuringDrain:
     """Drain edge (12.2): between batch jobs the in-flight map is
     momentarily empty while the poll loop still holds claimed, un-started
-    jobs. The heartbeat must stay alive for those gaps — exiting would let
-    their leases expire in a reclaim and execute the jobs twice.
+    jobs. The heartbeat must stay alive for those gaps — exiting would
+    strand the drain lifecycle. Actual lease renewal is the dedicated
+    thread's job (test_lease_renewal.py); here the heartbeat only has to
+    outlive the gap.
     """
 
-    def test_heartbeat_survives_empty_inflight_gap_and_renews_pending_batch(self):
+    def test_heartbeat_survives_empty_inflight_gap(self):
         async def main():
             repo = DrainJobRepo()
             handler = DrainHandler()
@@ -621,22 +624,11 @@ class TestHeartbeatDuringDrain:
             heartbeat = asyncio.create_task(worker._heartbeat_loop())
             try:
                 await asyncio.sleep(0.08)   # several heartbeat intervals
-                # Old condition (running or inflight) exits here; the
-                # drained batch would then never be renewed again.
+                # Old condition (running or inflight) exits here; a heartbeat
+                # exiting here would strand the drain lifecycle.
                 assert not heartbeat.done()
 
-                # the next claimed batch job becomes in-flight: renew it
-                worker._inflight["drain-run-2"] = {
-                    "tenant": TENANT, "claim_epoch": 1,
-                }
-                leases_before = len(repo.leases)
-                await asyncio.sleep(0.08)
-                renewals = repo.leases[leases_before:]
-                assert any(run_id == "drain-run-2"
-                           for run_id, _ in renewals)
-
                 # poll loop finished and nothing is in flight: clean exit
-                worker._inflight.pop("drain-run-2", None)
                 await asyncio.wait_for(heartbeat, timeout=1.0)
                 assert heartbeat.done() and not heartbeat.cancelled()
             finally:

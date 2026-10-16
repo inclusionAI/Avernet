@@ -144,6 +144,7 @@ class RunOptions:
     max_turns: int | None = None
     max_total_agents: int | None = None
     max_width: int | None = None
+    max_attempts: int | None = None
 
     @classmethod
     def from_dto(cls, dto) -> "RunOptions":
@@ -156,11 +157,18 @@ class RunOptions:
             max_turns=dto.max_turns,
             max_total_agents=dto.max_total_agents,
             max_width=dto.max_width,
+            max_attempts=getattr(dto, "max_attempts", None),
         )
 
     @classmethod
     def from_metadata(cls, md) -> "RunOptions":
-        ext = (getattr(md, "extend", None) or {}) if md else {}
+        # Accept either a RequestMetadata object (attribute ``extend``) or the
+        # raw decoded dict read back from the run row — the repository hands
+        # over whatever it loaded, and both shapes carry the same keys.
+        if isinstance(md, dict):
+            ext = md.get("extend") or {}
+        else:
+            ext = (getattr(md, "extend", None) or {}) if md else {}
         ext = ext if isinstance(ext, dict) else {}
         prefix = "agentswarm.options"
 
@@ -169,20 +177,24 @@ class RunOptions:
             return cast(raw) if raw is not None else None
 
         return cls(
+            model_name=ext.get(f"{prefix}.model_name"),
             slice_max_seconds=val("slice_max_seconds", float),
             per_subagent_timeout_seconds=val("per_subagent_timeout_seconds", float),
             max_turns=val("max_turns", int),
             max_total_agents=val("max_total_agents", int),
             max_width=val("max_width", int),
+            max_attempts=val("max_attempts", int),
         )
 
     def to_metadata(self, md) -> None:
         for key, v in {
+            "model_name": self.model_name,
             "slice_max_seconds": self.slice_max_seconds,
             "per_subagent_timeout_seconds": self.per_subagent_timeout_seconds,
             "max_turns": self.max_turns,
             "max_total_agents": self.max_total_agents,
             "max_width": self.max_width,
+            "max_attempts": self.max_attempts,
         }.items():
             if v is not None:
                 md.extend[f"agentswarm.options.{key}"] = str(v)

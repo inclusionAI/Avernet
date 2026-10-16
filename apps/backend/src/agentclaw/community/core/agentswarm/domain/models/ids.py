@@ -32,7 +32,7 @@ def spawn_digest(run_id: str, agent_id: str, attempt: int,
     and a cross-slice replay of the same attempt number re-derives the
     crashed slice's identity (the adopt leg's input). This is the ONE
     canonical derivation: the bot platform's persona id
-    (``ac_{sha1(key)[:16]}``), its display name (``{spec.name}-{sha1(key)[:8]}``),
+    (``agent_swarm_{sha1(key)[:16]}``), its display name (``{spec.name}-{sha1(key)[:8]}``),
     and the llm-kind bare executor digest all come from this helper, so
     runtime, plugins, and the deterministic-derivation cleanup belt can
     never drift apart. Host's create/adopt code stays untouched — it

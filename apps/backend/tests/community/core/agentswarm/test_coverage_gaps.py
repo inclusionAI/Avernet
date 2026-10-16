@@ -336,6 +336,40 @@ class TestTerminationEvaluatorGaps:
         reason = TerminationEvaluator(max_total_agents=4).evaluate(state)
         assert reason == dm.TerminationReason.MAX_AGENTS
 
+    def test_slow_provisioning_wave_is_not_flat_progress(self):
+        # In-flight provisioning is activity: a BaaS persona takes
+        # ~90-120s, so a cohort mid-provisioning (spawned > routed) must
+        # never stack the streak even on repeated satisfied-ref waits.
+        evaluator = TerminationEvaluator(no_progress_threshold=3)
+
+        state = RunState(run=_mk_run())
+        state.turn_count = 1
+        state.total_agents_spawned = 0
+        state.routed_shard_count = 0
+        assert evaluator.evaluate(state) is None
+
+        state.turn_count = 2
+        state.total_agents_spawned = 3
+        state.routed_shard_count = 0
+        assert evaluator.evaluate(state) is None
+
+        for turn in range(3, 8):
+            state.turn_count = turn
+            assert evaluator.evaluate(state) is None
+
+    def test_truly_stalled_run_trips_no_progress(self):
+        evaluator = TerminationEvaluator(no_progress_threshold=3)
+        state = RunState(run=_mk_run())
+        state.total_agents_spawned = 2
+        state.routed_shard_count = 2
+        for turn in range(1, 5):
+            state.turn_count = turn
+            reason = evaluator.evaluate(state)
+            if turn >= 4:
+                assert reason is dm.TerminationReason.NO_PROGRESS
+            else:
+                assert reason is None
+
 
 class TestRepositoryDecoders:
 
@@ -622,14 +656,26 @@ class TestWorkerLifecycle:
         worker = AgentSwarmWorker(
             config=self._config(), handler=handler, job_repo=StubJobRepo(),
         )
+        worker._loop_ref = asyncio.get_running_loop()
         worker._inflight["run-x"] = {"tenant": TENANT, "claim_epoch": 1}
         worker._running = True
-        heartbeat = asyncio.create_task(worker._heartbeat_loop())
+        renewal = asyncio.create_task(self._run_lease_renewal_once(worker))
         await asyncio.sleep(0.1)
         worker._running = False
-        await heartbeat
+        await renewal
         assert ("set-slice-lost", "run-x") in handler.calls
         assert "run-x" not in worker._inflight
+
+    @staticmethod
+    async def _run_lease_renewal_once(worker) -> None:
+        worker._lease_stop.clear()
+        thread = asyncio.get_running_loop().run_in_executor(
+            None, worker._lease_renewal_loop,
+        )
+        await asyncio.sleep(0.1)
+        worker._lease_stop.set()
+        worker._clear_inflight("run-x")
+        await thread
 
     @pytest.mark.asyncio
     async def test_run_job_failure_force_fails_the_run_and_clears_inflight(self):
@@ -847,6 +893,24 @@ def _handoff_decision(target) -> str:
     return json.dumps({"kind": "handoff", "target": target})
 
 
+def _spin_ref(repos, run: dm.Run, name: str = "ghost") -> None:
+    # A permanently-unsatisfied wait ref WITH a row: a shardless KILLED agent
+    # is neither respawned by rehydrate (not QUEUED/RUNNING) nor fail-fast
+    # (not FAILED), so _await_refs blocks to the slice budget. The post-fix
+    # spin driver: a never-spawned name would now YIELD instead of spinning.
+    repos["agent"].create(dm.Agent(
+        agent_id=dm.AgentId(uuid.uuid4().hex), run_id=run.run_id,
+        tenant=run.tenant, parent_agent_id=None, depth=0, name=name,
+        role=f"goal-{name}", kind=dm.AgentKind.LLM,
+        task_spec=dm.TaskEnvelope(
+            name=name, objective=f"goal-{name}", output_schema={},
+            boundaries="", parent_goal=run.goal,
+        ),
+        spawn_round=0, status=dm.AgentStatus.KILLED, attempts=0,
+        idempotency_key=dm.IdempotencyKey(uuid.uuid4().hex), output={},
+    ))
+
+
 def _enqueue_claim(repos, run: dm.Run, worker: str = WORKER) -> dict:
     repos["run"].create(run)
     repos["job"].enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
@@ -917,6 +981,7 @@ class TestSwarmHandlerEdges:
             db, llm=RepeatingLLMProvider(_wait_decision("ghost")), config=config,
         )
         run = _mk_run()
+        _spin_ref(repos, run)
         claim = _enqueue_claim(repos, run)
         outcome = asyncio.run(handler.handle_slice(
             run.run_id, TENANT, claim["claim_epoch"], worker_id=WORKER,

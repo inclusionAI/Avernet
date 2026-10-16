@@ -24,6 +24,17 @@ class AgentSpecDTO(BaseModel):
         Annotated[str, Field(max_length=200)],
         Annotated[str, Field(max_length=2000)],
     ] = Field(default_factory=dict, max_length=32)
+    config_manifest: str = Field(
+        default="", max_length=200_000,
+        description=(
+            "Full five-category bot_config_manifest YAML document for "
+            "this agent (mcp/resources/skills/cli_tools/identity + "
+            "sources + script), exactly as POST /openapi/v1/bots/"
+            "with-manifest accepts it. When present, the swarm "
+            "provisions the agent's bot from this document verbatim; "
+            "the platform's preflight validates its grammar."
+        ),
+    )
 
 
 class RunOptionsDTO(BaseModel):
@@ -57,6 +68,11 @@ class RunOptionsDTO(BaseModel):
         default=None, ge=1, le=16,
         description="Max concurrently in-flight agents (e.g. 10 tasks "
         "with max_width=3: only 3 run at a time, the rest queue).")
+    max_attempts: int | None = Field(
+        default=None, ge=1, le=3,
+        description="Per-agent retry cap for this run (fresh-context attempts). "
+        "Omitted falls to the deployment default (3). Non-retryable failures "
+        "(e.g. a space quota ceiling) stop at the first attempt regardless.")
 
 
 class SubmitRunDTO(BaseModel):

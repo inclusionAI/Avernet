@@ -346,6 +346,7 @@ def _to_domain(dto: SubmitRunDTO, owner_id: str = "") -> SubmitRunRequest:
                 bot_type=a.bot_type or "personal",
                 identity_file=a.identity_file or "SOUL.md",
                 metadata=a.metadata,
+                config_manifest=a.config_manifest,
             )
             for a in dto.agents
         ),

@@ -20,8 +20,9 @@ import pytest
 
 from agentclaw.community.core.agentswarm.domain import models as dm
 from agentclaw.community.core.agentswarm.domain.models import (
-    AgentId, AgentSpec, EpochMillis, ProviderKind, RequestMetadata, Run,
-    RunId, RunStatus, TaskEnvelope, TenantId,
+    AgentId, AgentSpec, EpochMillis, NonRetryableProvisioningError,
+    ProviderKind, RequestMetadata, Run, RunId, RunStatus, TaskEnvelope,
+    TenantId,
 )
 from agentclaw.community.plugins.community.agentswarm.avernet_subagent import (
     AvernetSubagent,
@@ -169,6 +170,38 @@ class TestLifecycle:
 
         asyncio.run(main())
 
+    def test_config_manifest_crosses_the_seam_verbatim(self):
+        # The catalog spec's manifest document is the ONE per-agent
+        # parameter for rich bot scenes; the subagent must carry it into
+        # BotCreateSpec untouched (the host adapter, not the subagent,
+        # decides what a blank document means).
+        async def main():
+            gw = FakePlatform()
+            document = (
+                "schema_version: 1\nmanifest:\n  identity:\n"
+                "    - type: SOUL.md\n      content: 'be meticulous'\n"
+                "  skills: []\nscript:\n  body: 'echo provisioned'\n"
+            )
+            spec = AgentSpec(name="clerk", role="filing clerk",
+                             config_manifest=document)
+            sub = AvernetSubagent(spec, _mk_run(), gw, _AGENT_ID)
+            await sub.setup()
+            create_spec, _ = gw.created[0]
+            assert create_spec.config_manifest == document
+
+        asyncio.run(main())
+
+    def test_blank_config_manifest_crosses_as_blank(self):
+        async def main():
+            gw = FakePlatform()
+            spec = AgentSpec(name="clerk", role="worker")
+            sub = AvernetSubagent(spec, _mk_run(), gw, _AGENT_ID)
+            await sub.setup()
+            create_spec, _ = gw.created[0]
+            assert create_spec.config_manifest == ""
+
+        asyncio.run(main())
+
     def test_empty_bot_id_fails_fast_without_polling(self):
         async def main():
             gw = FakePlatform(statuses=["PROVISIONING"], bot_id="")
@@ -244,13 +277,13 @@ class TestLifecycle:
 
         asyncio.run(main())
 
-    def test_poll_deadline_expires_to_timeout(self):
+    def test_poll_deadline_expires_to_non_retryable(self):
         async def main():
             gw = FakePlatform(statuses=["PROVISIONING"])
             sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, _AGENT_ID)
             sub._bot_id = "bot-42"
-            state = await sub._poll_ready("bot-42", timeout=0.0, interval=0.01)
-            assert state == "TIMEOUT"
+            with pytest.raises(NonRetryableProvisioningError):
+                await sub._poll_ready("bot-42", timeout=0.0, interval=0.01)
             assert gw.status_queries == []
 
         asyncio.run(main())

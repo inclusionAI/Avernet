@@ -257,15 +257,14 @@ class AgentSwarmModule(Module):
         (bot_service→aicoding→bot_service), deferring the chain here
         preserves the module's clean import.
 
-        The provisioning owner is per-run (the authenticated caller,
-        P0-9 no-service-account stance) — enforced at the factory where
-        the run context is visible. The profile-level bootstrap owner
-        (``agentswarm.host.owner_id``) still names the fallback account
-        swarm-created bots belong to: blank means no platform opt-in, so
-        the provider refuses construction with the precise error instead
-        of minting ownerless bots (``provide_runtime`` degrades this
-        refusal to none-platform mode). ``max_platform_workers`` sizes
-        the module-scoped chat bridge (``executor`` block)."""
+        The provisioning owner is per-run and per-call exclusively — the
+        authenticated submitter the run carries: the factory's P0-9 gate
+        refuses a callerless run, and every seam call hands the run's
+        owner_id to the platform, which itself refuses a blank one. No
+        profile-level identity exists: the config names no owner, and
+        construction never refuses for identity reasons.
+        ``max_platform_workers`` sizes the module-scoped chat bridge
+        (``executor`` block)."""
         from agentclaw.community.api.bot_config_manifest_apply_service import (
             BotConfigManifestApplyServiceProtocol,
         )
@@ -281,16 +280,7 @@ class AgentSwarmModule(Module):
         from agentclaw.community.plugins.community.agentswarm.host import (
             AvernetBotPlatform,
         )
-        host_owner = (config.host.owner_id or "").strip()
-        if not host_owner:
-            raise AgentSwarmConfigError(
-                "agentswarm.host.owner_id is required but blank — it is "
-                "the account the swarm's transient bots belong to (no "
-                "service-account fallback); set host.owner_id in the "
-                "agentswarm block to bind the BotPlatform"
-            )
         return AvernetBotPlatform(
-            owner_id=host_owner,
             manifest_seam=injector.get(ManifestCreationSeam),
             bot_service=injector.get(BotServiceProtocol),
             passport_plugin=injector.get(PassportPlugin),
@@ -318,11 +308,13 @@ class AgentSwarmModule(Module):
         try:
             platform: BotPlatform | None = injector.get(BotPlatform)
         except AgentSwarmConfigError as exc:
-            # The designed refusal (e.g. agentswarm.host.owner_id not
-            # configured): precise, logged, never mistaken for a wiring
-            # bug, and the swarm keeps its none-platform fail-clear mode.
+            # A config-family error raised inside the platform's
+            # construction chain (a mis-parsed knob deep in a
+            # platform-side dependency): precise, logged, and degraded
+            # to the same fail-clear mode; avernet-kind spawns fail
+            # clear at the factory.
             logger.warning(
-                "[agentswarm] BotPlatform refused construction: %s "
+                "[agentswarm] BotPlatform construction failed: %s "
                 "(avernet-kind spawns will fail clear at the factory)", exc,
             )
             platform = None
@@ -337,7 +329,10 @@ class AgentSwarmModule(Module):
             )
             platform = None
         attempt_repo = injector.get(AgentAttemptRepository)
-        factory = DefaultSubagentFactory(llm, platform, attempt_repo=attempt_repo)
+        factory = DefaultSubagentFactory(
+            llm, platform, attempt_repo=attempt_repo,
+            setup_timeout=config.orchestration.setup_timeout,
+        )
         store = FilesystemArtifactStore(config.artifact_store_root)
         # The pool's binding-journal SliceStore (D-L): the same repos, its
         # own probe — the journal write's authority is the D28 claim fence
@@ -358,6 +353,7 @@ class AgentSwarmModule(Module):
             max_width=config.orchestration.max_width,
             max_attempts=config.orchestration.subagent_max_attempts,
             per_task_timeout=config.orchestration.per_subagent_timeout,
+            setup_timeout=config.orchestration.setup_timeout,
             artifact_inline_threshold=config.artifact_inline_threshold,
             upstream_breaker=UpstreamBreaker(
                 failure_threshold=config.upstream_breaker.failure_threshold,
@@ -417,11 +413,14 @@ class AgentSwarmModule(Module):
         job_repo: JobRepository,
         run_repo: RunRepository,
         guard_repo: GuardEventRepository,
+        attempt_repo: AgentAttemptRepository,
     ) -> AgentSwarmWorker:
         # run_repo/guard_repo host the maintenance reaper (async-run-and-
         # resume 4.1): the DI root always passes both, so production
         # workers sweep; constructor defaults keep embedded uses opt-out.
+        # attempt_repo backs the terminal-cleanup reconciliation leg.
         return AgentSwarmWorker(
             config=config, handler=handler, job_repo=job_repo,
             run_repo=run_repo, guard_repo=guard_repo,
+            attempt_repo=attempt_repo,
         )

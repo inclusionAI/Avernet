@@ -186,7 +186,6 @@ def _job(status, last_error=None):
 def _mk(config=None, seam=None, apply_=None, repo=None, bot_svc=None,
         bridge_workers=None):
     return AvernetBotPlatform(
-        owner_id="owner-1",
         manifest_seam=seam or _Seam(),
         bot_service=bot_svc or _BotSvc(),
         passport_plugin=types.SimpleNamespace(),
@@ -234,9 +233,11 @@ class TestCreate:
         seen = self._record_submit(monkeypatch)
         platform = _mk()
         spec = BotCreateSpec(name="scout", description="a surveyor")
-        first = platform.create_bot(spec=spec, idempotency_key="run-1:scout")
-        again = platform.create_bot(spec=spec, idempotency_key="run-1:scout")
-        assert first == again and first.startswith("ac_") and len(first) == 19
+        first = platform.create_bot(spec=spec, idempotency_key="run-1:scout",
+                      owner_id="owner-1")
+        again = platform.create_bot(spec=spec, idempotency_key="run-1:scout",
+                      owner_id="owner-1")
+        assert first == again and first.startswith("agent_swarm_") and len(first) == 28
         assert [w["bot_id"] for w in seen] == [first, first]
 
     def test_name_refusal_adopts_the_live_persona_row(self, monkeypatch):
@@ -254,8 +255,9 @@ class TestCreate:
                              refuse)
         platform = _mk(repo=_Repo(bot={"bot_id": "ac_adopted"}))
         spec = BotCreateSpec(name="scout", description="a surveyor")
-        adopted = platform.create_bot(spec=spec, idempotency_key="run-1:scout")
-        assert adopted.startswith("ac_") and len(adopted) == 19
+        adopted = platform.create_bot(spec=spec, idempotency_key="run-1:scout",
+                      owner_id="owner-1")
+        assert adopted.startswith("agent_swarm_") and len(adopted) == 28
 
     def test_adopt_leg_unchanged_under_a_per_attempt_key(self, monkeypatch):
         # D-J only changes the CALLER-side key string; the create/adopt code
@@ -266,7 +268,7 @@ class TestCreate:
             BotNameExistsError,
         )
 
-        derived = f"ac_{_idem_digest('run-1:agent-9:2', 16)}"
+        derived = f"agent_swarm_{_idem_digest('run-1:agent-9:2', 16)}"
 
         def refuse(**kwargs):
             raise BotNameExistsError(
@@ -277,9 +279,11 @@ class TestCreate:
         platform = _mk(repo=_Repo(bot={"bot_id": derived}))
         spec = BotCreateSpec(name="scout", description="a surveyor")
         first = platform.create_bot(spec=spec,
-                                    idempotency_key="run-1:agent-9:2")
+                                    idempotency_key="run-1:agent-9:2",
+                                    owner_id="owner-1")
         again = platform.create_bot(spec=spec,
-                                    idempotency_key="run-1:agent-9:2")
+                                    idempotency_key="run-1:agent-9:2",
+                                    owner_id="owner-1")
         assert first == again == derived
 
     def test_name_refusal_without_our_row_reraises(self, monkeypatch):
@@ -301,6 +305,7 @@ class TestCreate:
             platform.create_bot(
                 spec=BotCreateSpec(name="scout", description="a surveyor"),
                 idempotency_key="run-1:scout",
+                owner_id="owner-1",
             )
 
     def test_submit_receives_the_persona_not_inventions(self, monkeypatch):
@@ -310,7 +315,8 @@ class TestCreate:
             name="clerk", description="a filing clerk",
             instructions="File weekly reports.",
         )
-        platform.create_bot(spec=spec, idempotency_key="run-2:clerk")
+        platform.create_bot(spec=spec, idempotency_key="run-2:clerk",
+                      owner_id="owner-1")
         (w,) = seen
         assert w["user_id"] == "owner-1" and w["modifier"] == "owner-1"
         document = w["document"]
@@ -318,7 +324,7 @@ class TestCreate:
         assert "type: SOUL.md" in document
         assert "File weekly reports." in document
         host_spec = w["spec"]
-        assert host_spec.bot_name == f"clerk-{first8(w['bot_id'][3:])}"
+        assert host_spec.bot_name == f"clerk-{first8(w['bot_id'][12:])}"
         assert host_spec.engine_type == "openclaw"
         assert host_spec.bot_desc == "a filing clerk"
         assert w["context"].deployment_mode.value == "cloud"
@@ -328,20 +334,137 @@ class TestCreate:
         seen = self._record_submit(monkeypatch)
         platform = _mk()
         spec = BotCreateSpec(name="blank")
-        platform.create_bot(spec=spec, idempotency_key="run-3:blank")
+        platform.create_bot(spec=spec, idempotency_key="run-3:blank",
+                      owner_id="owner-1")
         document = seen[0]["document"]
         assert "type: SOUL.md" in document
         # empty content is the value ("no persona text"), not a filler default
         assert "content: ''" in document
         assert "Complete the assigned task" not in document
 
+    def test_spec_manifest_is_submitted_verbatim(self, monkeypatch):
+        # A spec carrying a full config_manifest document submits THAT
+        # outer-whitespace-tight document byte-identical — never
+        # re-synthesized, never merged with the identity-only persona
+        # shape. The platform's own preflight (inside the submit) is the
+        # single grammar authority.
+        seen = self._record_submit(monkeypatch)
+        platform = _mk()
+        document = (
+            "schema_version: 1\n"
+            "manifest:\n"
+            "  identity:\n"
+            "    - type: SOUL.md\n"
+            "      content: 'You are a meticulous greeter.'\n"
+            "  mcp: []\n"
+            "  resources: []\n"
+            "  skills: []\n"
+            "  cli_tools: []\n"
+            "script:\n"
+            "  body: 'echo manifest-provisioned'"
+        )
+        spec = BotCreateSpec(
+            name="clerk", description="a filing clerk",
+            instructions="File weekly reports.",
+            config_manifest=document,
+        )
+        platform.create_bot(spec=spec, idempotency_key="run-4:clerk",
+                      owner_id="owner-1")
+        (w,) = seen
+        assert w["document"] == document
+        # instructions do NOT leak into a document the caller authored
+        assert "File weekly reports." not in w["document"]
+
+    def test_blank_manifest_keeps_the_synthesized_persona_document(
+            self, monkeypatch):
+        # Regression pin: a spec without a document composes exactly the
+        # identity-only manifest synthesized today — identity type from
+        # the spec's identity_file, content from its instructions.
+        seen = self._record_submit(monkeypatch)
+        platform = _mk()
+        spec = BotCreateSpec(
+            name="clerk", description="a filing clerk",
+            instructions="File weekly reports.",
+            identity_file="RULES.md",
+        )
+        platform.create_bot(spec=spec, idempotency_key="run-5:clerk",
+                      owner_id="owner-1")
+        (w,) = seen
+        assert w["document"] == (
+            "schema_version: 1\n"
+            "manifest:\n"
+            "  identity:\n"
+            "  - type: RULES.md\n"
+            "    content: File weekly reports.\n"
+        )
+        assert "mcp" not in w["document"] and "skills" not in w["document"]
+
+    def test_whitespace_manifest_keeps_the_synthesized_persona_document(
+            self, monkeypatch):
+        # "Blank" reads as stripped-blank: a whitespace-only document is
+        # not a manifest and must fall back to the synthesized persona
+        # document, never be preflighted as a parse-failing YAML doc.
+        seen = self._record_submit(monkeypatch)
+        platform = _mk()
+        spec = BotCreateSpec(
+            name="clerk", instructions="File weekly reports.",
+            config_manifest="   \n\t  \n",
+        )
+        platform.create_bot(spec=spec, idempotency_key="run-5b:clerk",
+                      owner_id="owner-1")
+        (w,) = seen
+        assert w["document"] == (
+            "schema_version: 1\n"
+            "manifest:\n"
+            "  identity:\n"
+            "  - type: SOUL.md\n"
+            "    content: File weekly reports.\n"
+        )
+
+    def test_manifest_validation_refusal_is_non_retryable(
+            self, monkeypatch):
+        # A preflight-refused document is deterministic: every attempt
+        # would refuse identically, so the host maps the platform's
+        # validation error to the swarm's non-retryable marker instead
+        # of letting the pool burn the attempt budget.
+        from agentclaw.community.core.bot_config_manifest.schema import (
+            ManifestValidationError, Violation,
+        )
+
+        def refuse(**kwargs):
+            raise ManifestValidationError([Violation(
+                location="manifest.skills[0]",
+                code="content_not_a_skill_package",
+                message="skills entries must be fetchable packages",
+            )])
+
+        monkeypatch.setattr(create_flow, "submit_bot_creation_with_manifest",
+                            refuse)
+        platform = _mk()
+        from agentclaw.community.core.agentswarm.domain.models import (
+            NonRetryableProvisioningError,
+        )
+        with pytest.raises(NonRetryableProvisioningError,
+                           match="must be fetchable packages"):
+            platform.create_bot(
+                spec=BotCreateSpec(
+                    name="clerk",
+                    config_manifest="schema_version: 1\nmanifest:\n"
+                                    "  skills:\n"
+                                    "    - name: x\n      content: y\n"),
+                idempotency_key="run-6:clerk",
+                owner_id="owner-1",
+            )
+
     def test_different_idempotency_keys_get_different_identities(
             self, monkeypatch):
         seen = self._record_submit(monkeypatch)
         platform = _mk()
         spec = BotCreateSpec(name="scout")
-        platform.create_bot(spec=spec, idempotency_key="run-a:scout")
-        platform.create_bot(spec=spec, idempotency_key="run-b:scout")
+        platform.create_bot(spec=spec, idempotency_key="run-a:scout",
+                      owner_id="owner-1")
+        platform.create_bot(spec=spec, idempotency_key="run-b:scout",
+                      owner_id="owner-1")
         names = {w["spec"].bot_name for w in seen}
         ids = {w["bot_id"] for w in seen}
         assert len(names) == 2 and len(ids) == 2
@@ -358,13 +481,13 @@ class TestStatusNarrowTable:
 
     def test_no_job_answer_is_provisioning(self):
         platform = _mk()
-        assert platform.bot_status("ac_unknown") == BotState.PROVISIONING.value
+        assert platform.bot_status("ac_unknown", owner_id="owner-1") == BotState.PROVISIONING.value
 
     def test_live_job_windows_are_provisioning(self):
         for status in (TaskStatus.PENDING, TaskStatus.RUNNING):
             seam = _Seam()
             seam.jobs["b1"] = _job(status)
-            assert _mk(seam=seam).bot_status("b1") == BotState.PROVISIONING.value
+            assert _mk(seam=seam).bot_status("b1", owner_id="owner-1") == BotState.PROVISIONING.value
 
     def test_terminal_job_without_bot_maps_the_jobs_own_answer(self):
         cases = [
@@ -379,13 +502,13 @@ class TestStatusNarrowTable:
         for status, err, want in cases:
             seam = _Seam()
             seam.jobs["b1"] = _job(status, err)
-            assert _mk(seam=seam).bot_status("b1") == want, (status, err)
+            assert _mk(seam=seam).bot_status("b1", owner_id="owner-1") == want, (status, err)
 
     def test_dead_bot_is_create_failed_even_with_live_job(self):
         seam = _Seam()
         seam.jobs["b1"] = _job(TaskStatus.SUCCEEDED)
         repo = _Repo(bot={"status": "FAILED"})
-        assert _mk(seam=seam, repo=repo).bot_status("b1") == BotState.CREATE_FAILED.value
+        assert _mk(seam=seam, repo=repo).bot_status("b1", owner_id="owner-1") == BotState.CREATE_FAILED.value
 
     def test_report_success_with_container_up_is_ready(self):
         seam = _Seam()
@@ -394,7 +517,7 @@ class TestStatusNarrowTable:
         apply_ = _Apply(types.SimpleNamespace(
             trigger=CREATE_ON_CONTAINER_TRIGGER, status=ApplyStatus.SUCCEEDED))
         assert _mk(seam=seam, repo=repo, apply_=apply_).bot_status(
-            "b1") == BotState.READY.value
+            "b1", owner_id="owner-1") == BotState.READY.value
 
     def test_report_success_with_container_coming_is_provisioning(self):
         # record-first engines apply before the container exists
@@ -404,7 +527,7 @@ class TestStatusNarrowTable:
         apply_ = _Apply(types.SimpleNamespace(
             trigger=CREATE_ON_CONTAINER_TRIGGER, status=ApplyStatus.SUCCEEDED))
         assert _mk(seam=seam, repo=repo, apply_=apply_).bot_status(
-            "b1") == BotState.PROVISIONING.value
+            "b1", owner_id="owner-1") == BotState.PROVISIONING.value
 
     def test_failed_creation_report_is_apply_failed(self):
         seam = _Seam()
@@ -413,7 +536,7 @@ class TestStatusNarrowTable:
         apply_ = _Apply(types.SimpleNamespace(
             trigger=CREATE_ON_CONTAINER_TRIGGER, status=ApplyStatus.FAILED))
         assert _mk(seam=seam, repo=repo, apply_=apply_).bot_status(
-            "b1") == BotState.APPLY_FAILED.value
+            "b1", owner_id="owner-1") == BotState.APPLY_FAILED.value
 
     def test_failed_report_mid_boot_with_live_device_is_provisioning(self):
         # the quota-race flap: apply FAILED while the durable publish
@@ -425,7 +548,7 @@ class TestStatusNarrowTable:
         apply_ = _Apply(types.SimpleNamespace(
             trigger=CREATE_ON_CONTAINER_TRIGGER, status=ApplyStatus.FAILED))
         assert _mk(seam=seam, repo=repo, apply_=apply_).bot_status(
-            "b1") == BotState.PROVISIONING.value
+            "b1", owner_id="owner-1") == BotState.PROVISIONING.value
 
     def test_failed_report_mid_boot_without_device_is_apply_failed(self):
         # no pipeline left to wait on: the apply verdict stands
@@ -435,13 +558,13 @@ class TestStatusNarrowTable:
         apply_ = _Apply(types.SimpleNamespace(
             trigger=CREATE_ON_CONTAINER_TRIGGER, status=ApplyStatus.FAILED))
         assert _mk(seam=seam, repo=repo, apply_=apply_).bot_status(
-            "b1") == BotState.APPLY_FAILED.value
+            "b1", owner_id="owner-1") == BotState.APPLY_FAILED.value
 
     def test_job_succeeded_is_ready_without_a_report(self):
         seam = _Seam()
         seam.jobs["b1"] = _job(TaskStatus.SUCCEEDED)
         repo = _Repo(bot={"status": "ACTIVE"})
-        assert _mk(seam=seam, repo=repo).bot_status("b1") == BotState.READY.value
+        assert _mk(seam=seam, repo=repo).bot_status("b1", owner_id="owner-1") == BotState.READY.value
 
     def test_bot_up_job_gave_up_is_apply_failed_not_create_failed(self):
         # the anti-duplicate rule: a working bot is never reported as a
@@ -449,7 +572,7 @@ class TestStatusNarrowTable:
         seam = _Seam()
         seam.jobs["b1"] = _job(TaskStatus.FAILED, "post-container kept failing")
         repo = _Repo(bot={"status": "ACTIVE"})
-        assert _mk(seam=seam, repo=repo).bot_status("b1") == BotState.APPLY_FAILED.value
+        assert _mk(seam=seam, repo=repo).bot_status("b1", owner_id="owner-1") == BotState.APPLY_FAILED.value
 
     def test_terminal_job_bot_in_middle_state_is_terminal_not_provisioning(self):
         # PENDING/STOPPED are neither up nor dead; with the job terminal
@@ -461,7 +584,7 @@ class TestStatusNarrowTable:
                 seam.jobs["b1"] = _job(job_status, "gave up")
                 repo = _Repo(bot={"status": state})
                 assert _mk(seam=seam, repo=repo).bot_status(
-                    "b1") == BotState.CREATE_FAILED.value, (job_status, state)
+                    "b1", owner_id="owner-1") == BotState.CREATE_FAILED.value, (job_status, state)
 
 
 # ── delete ────────────────────────────────────────────────────────────────
@@ -473,7 +596,7 @@ class TestDelete:
         seam = _Seam()
         bot_svc = _BotSvc()
         platform = _mk(seam=seam, bot_svc=bot_svc)
-        assert platform.delete_bot("b1") is True
+        assert platform.delete_bot("b1", owner_id="owner-1") is True
         assert seam.discards == [("b1", "owner-1")]
         assert bot_svc.deleted == []
 
@@ -481,7 +604,7 @@ class TestDelete:
         repo = _Repo(bot={"status": "ACTIVE"})
         bot_svc = _BotSvc()
         platform = _mk(repo=repo, bot_svc=bot_svc)
-        assert platform.delete_bot("b1") is True
+        assert platform.delete_bot("b1", owner_id="owner-1") is True
         assert bot_svc.deleted == [("b1", "owner-1")]
 
     def test_repository_failure_is_swallowed_to_false(self):
@@ -490,7 +613,7 @@ class TestDelete:
                 raise RuntimeError("db down")
 
         platform = _mk(repo=_Boom())
-        assert platform.delete_bot("b1") is False
+        assert platform.delete_bot("b1", owner_id="owner-1") is False
 
 
 # ── chat ─────────────────────────────────────────────────────────────────
@@ -503,13 +626,15 @@ class TestChat:
         # the precise refusal before any transport is attempted.
         platform = _mk(repo=_Repo(bot={"status": "ACTIVE"}))
         with pytest.raises(RuntimeError, match="no runtime binding"):
-            platform.chat("b1", "objective='x'")
+            platform.chat("b1", "objective='x'",
+                      owner_id="owner-1")
 
     def test_round_trip_returns_the_reply_text(self, monkeypatch):
         ws = _ScriptedEngineWs(reply="the answer is 42")
         platform = _mk()
         _patch_engine_routes(monkeypatch, ws)
-        assert platform.chat("b1", "objective='y'") == "the answer is 42"
+        assert platform.chat("b1", "objective='y'",
+                      owner_id="owner-1") == "the answer is 42"
         assert [f["method"] for f in ws.sent_frames] == [
             "sessions.reset", "chat.send",
         ]
@@ -527,7 +652,8 @@ class TestChat:
         ws = _ScriptedEngineWs()
         platform = _mk()
         _patch_engine_routes(monkeypatch, ws)
-        platform.chat("b1", "objective='x'")
+        platform.chat("b1", "objective='x'",
+                      owner_id="owner-1")
         assert [f["method"] for f in ws.sent_frames] == [
             "sessions.reset", "chat.send",
         ]
@@ -543,7 +669,8 @@ class TestChat:
         platform = _mk()
         _patch_engine_routes(monkeypatch, ws)
         platform.chat("b1", "objective='x'",
-                      session_key="agent:agent-9:attempt:4")
+                      session_key="agent:agent-9:attempt:4",
+                      owner_id="owner-1")
         reset_frame, chat_frame = ws.sent_frames
         assert reset_frame["params"]["key"] == "agent:agent-9:attempt:4"
         assert chat_frame["params"]["sessionKey"] == "agent:agent-9:attempt:4"
@@ -560,7 +687,8 @@ class TestChat:
         with caplog.at_level(
                 "WARNING",
                 logger="agentclaw.community.plugins.community.agentswarm.host"):
-            assert platform.chat("b1", "objective='x'") == "final answer"
+            assert platform.chat("b1", "objective='x'",
+                      owner_id="owner-1") == "final answer"
         assert "session reset failed; chat proceeds" in caplog.text
         assert "session=agent:main:default" in caplog.text
         chat_frame = [f for f in ws.sent_frames
@@ -577,7 +705,8 @@ class TestChat:
         with caplog.at_level(
                 "WARNING",
                 logger="agentclaw.community.plugins.community.agentswarm.host"):
-            assert platform.chat("b1", "objective='x'") == "final answer"
+            assert platform.chat("b1", "objective='x'",
+                      owner_id="owner-1") == "final answer"
         assert "session reset failed; chat proceeds" in caplog.text
 
     def test_refused_chat_send_raises_promptly(self, monkeypatch):
@@ -590,7 +719,8 @@ class TestChat:
         _patch_engine_routes(monkeypatch, ws)
         started = time.monotonic()
         with pytest.raises(RuntimeError, match="refused chat.send") as caught:
-            platform.chat("b1", "objective='x'")
+            platform.chat("b1", "objective='x'",
+                      owner_id="owner-1")
         elapsed = time.monotonic() - started
         assert elapsed < host_module._CHAT_TIMEOUT_SECONDS / 10
         message = str(caught.value)
@@ -616,7 +746,8 @@ class TestChat:
         ws._on_frame = _on_frame_with_noise
         platform = _mk()
         _patch_engine_routes(monkeypatch, ws)
-        assert platform.chat("b1", "objective='x'") == "final answer"
+        assert platform.chat("b1", "objective='x'",
+                      owner_id="owner-1") == "final answer"
 
     def test_cancelled_event_unwinds_within_the_receive_slice(
             self, monkeypatch):
@@ -632,7 +763,8 @@ class TestChat:
         setter = threading.Thread(target=_cancel_soon)
         setter.start()
         started = time.monotonic()
-        reply = platform.chat("b1", "objective='x'", cancel_event=cancel)
+        reply = platform.chat("b1", "objective='x'", cancel_event=cancel,
+                               owner_id="owner-1")
         elapsed = time.monotonic() - started
         setter.join(timeout=1)
         assert reply == ""
@@ -656,7 +788,8 @@ class TestChat:
         started = time.monotonic()
         with pytest.raises(host_module.ChatTimeoutError,
                            match="did not finish within"):
-            platform.chat("b1", "objective='x'")
+            platform.chat("b1", "objective='x'",
+                      owner_id="owner-1")
         # freed at the bound, long before the 30s stall elapses
         assert time.monotonic() - started < 2.0
 
@@ -665,3 +798,40 @@ class TestChat:
         # Exception path; the typed error must stay in that family so a
         # timed-out chat reads as an attempt failure, not a wedge.
         assert issubclass(host_module.ChatTimeoutError, RuntimeError)
+
+
+# ── identity law: blank per-call owner is refused ─────────────────────────
+
+
+class TestBlankOwnerRefusal:
+
+    def test_every_method_refuses_a_blank_owner_immediately(self):
+        platform = _mk()
+        spec = BotCreateSpec(name="scout")
+        for blank in ("", "   "):
+            with pytest.raises(RuntimeError, match="no ambient identity"):
+                platform.create_bot(spec=spec,
+                                     idempotency_key="run-1:scout",
+                                     owner_id=blank)
+            with pytest.raises(RuntimeError, match="no ambient identity"):
+                platform.bot_status("b1", owner_id=blank)
+            with pytest.raises(RuntimeError, match="no ambient identity"):
+                platform.delete_bot("b1", owner_id=blank)
+            with pytest.raises(RuntimeError, match="no ambient identity"):
+                platform.chat("b1", "objective='x'", owner_id=blank)
+
+    def test_blank_owner_create_never_reaches_the_submit_chain(
+            self, monkeypatch,
+    ):
+        seen: list = []
+
+        def fake_submit(**kwargs):
+            seen.append(kwargs)
+
+        monkeypatch.setattr(create_flow, "submit_bot_creation_with_manifest",
+                            fake_submit)
+        platform = _mk()
+        with pytest.raises(RuntimeError, match="no ambient identity"):
+            platform.create_bot(spec=BotCreateSpec(name="scout"),
+                                idempotency_key="run-1:scout")
+        assert seen == []

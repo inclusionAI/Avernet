@@ -16,3 +16,6 @@ class RunState:
     routed_shard_count: int = 0
     recent_decision: Any = None
     active_persona: AgentSpec | None = None
+    # Refs of the LAST persisted wait decision — a resumed slice owes
+    # durable work to those refs; any later decision resets it.
+    pending_wait_refs: tuple[str, ...] = ()

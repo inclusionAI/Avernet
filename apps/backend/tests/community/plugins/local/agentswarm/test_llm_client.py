@@ -208,18 +208,52 @@ class TestNonRetryableFailures:
 
         asyncio.run(main())
 
-    def test_rate_limited_429_is_client_error_current_behavior(self):
-        # NOTE: found-vs-expected — the task brief lists 429 among retryable
-        # transient failures, but current source retries only 5xx status
-        # errors plus transport errors; every 4xx including 429 raises
-        # immediately. This test pins current source behavior.
+    @pytest.mark.parametrize("status", [408, 425])
+    def test_transient_4xx_request_timeout_and_too_early_are_retried(
+            self, status, monkeypatch):
+        _skip_retry_waits(monkeypatch)
+
+        async def main():
+            server = FakeOpenAIServer([
+                httpx.Response(status, json={"error": "transient 4xx"}),
+                httpx.Response(200, json=_ok_body("after retry")),
+            ])
+            client = _make_client(server, max_retries=3)
+            resp = await client.complete(_req())
+            await client._client.aclose()
+
+            assert resp.text == "after retry"
+            assert len(server.requests) == 2
+
+        asyncio.run(main())
+
+    def test_rate_limited_429_is_retried(self, monkeypatch):
+        # 429 is a transient 4xx (server throttle), so it is retried like a
+        # 5xx instead of failing immediately.
+        _skip_retry_waits(monkeypatch)
+
         async def main():
             server = FakeOpenAIServer([
                 httpx.Response(429, json={"error": "rate limited"}),
+                httpx.Response(200, json=_ok_body("after retry")),
+            ])
+            client = _make_client(server, max_retries=3)
+            resp = await client.complete(_req())
+            await client._client.aclose()
+
+            assert resp.text == "after retry"
+            assert len(server.requests) == 2
+
+        asyncio.run(main())
+
+    def test_forbidden_403_is_client_error_no_retry(self):
+        async def main():
+            server = FakeOpenAIServer([
+                httpx.Response(403, json={"error": "forbidden"}),
                 httpx.Response(200, json=_ok_body("never reached")),
             ])
             client = _make_client(server, max_retries=3)
-            with pytest.raises(RuntimeError, match=r"failed \(client error\): 429"):
+            with pytest.raises(RuntimeError, match=r"failed \(client error\): 403"):
                 await client.complete(_req())
             await client._client.aclose()
 

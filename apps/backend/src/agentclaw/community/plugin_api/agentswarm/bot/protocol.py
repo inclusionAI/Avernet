@@ -7,12 +7,12 @@ adapter (``plugins/community/agentswarm/host.py`` — the
 create-with-manifest flow for provisioning, the grt_chat engine
 transport for the chat leg) is bound by the ``AgentSwarmModule.bot_platform``
 DI provider (``di/modules/agentswarm``) in the composition root's base
-module list. Constructing the adapter requires the configured host owner
-(``agentswarm.host.owner_id`` — the account swarm-created bots belong to,
-no service-account fallback); the provider refuses construction with a
-precise ``AgentSwarmConfigError`` when it is blank, and profiles whose
-platform-side dependencies that provider cannot resolve keep the designed
-failure — avernet-kind spawns fail
+module list. Constructing the adapter requires no profile-level
+identity of any kind — the provisioning owner is per-run and per-call
+exclusively (the authenticated submitter the run carries; the platform
+refuses a blank per-call ``owner_id`` rather than falling back), while
+profiles whose platform-side dependencies that provider cannot resolve
+keep the designed failure — avernet-kind spawns fail
 clear at the factory — and
 the swarm defines the seam and the
 composition root binds the host's in-process BotPlatform adapter; nothing
@@ -48,6 +48,12 @@ class BotCreateSpec:
     per-agent provision parameters (engine/bot_type/identity_file)
     the catalog spec chose. The adapter derives cluster from engine
     (a bijection, not a config) and composes the manifest document.
+
+    ``config_manifest``, when non-blank, is a complete five-category
+    bot_config_manifest YAML document; the adapter submits it verbatim
+    in place of the persona document it would otherwise synthesize
+    (blank keeps that synthesis — additive default, no behavior
+    change for existing callers).
     """
     name: str
     description: str = ""
@@ -57,6 +63,7 @@ class BotCreateSpec:
     bot_type: str = "personal"
     identity_file: str = "SOUL.md"
     metadata: dict[str, str] = field(default_factory=dict)
+    config_manifest: str = ""
 
 
 

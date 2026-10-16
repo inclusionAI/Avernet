@@ -116,6 +116,8 @@ class Orchestrator:
           - "finish_answer": Any | None
           - "persona": str | None (resolved handoff target)
           - "guard_events": list[GuardEvent]
+          - "defer_refs": list[str] (spawn names deferred by the
+            width/depth cap this turn — re-emitted once capacity frees)
         """
         result: dict[str, Any] = {
             "terminate": None,
@@ -126,6 +128,7 @@ class Orchestrator:
             "finish_answer": None,
             "persona": None,
             "guard_events": [],
+            "defer_refs": [],
         }
 
         parse: DecisionParse = await self._decide_with_repair(
@@ -190,7 +193,14 @@ class Orchestrator:
                         "[agentswarm][orchestrator] spawn skipped agent=%s guard=%s",
                         envelope.name, guard.kind.value,
                     )
-                    if guard.kind == GuardKind.DEDUPE_REJECT:
+                    if guard.kind in (GuardKind.WIDTH_EXCEEDED,
+                                      GuardKind.DEPTH_EXCEEDED):
+                        # A spawn this turn's width/depth cap deferred is a
+                        # deferral, not a dropped intent: re-emitted once
+                        # capacity frees. Recorded so the slice yields
+                        # instead of waiting on a name that has no row.
+                        result["defer_refs"].append(envelope.name)
+                    elif guard.kind == GuardKind.DEDUPE_REJECT:
                         # Re-asking for an already-in-flight agent is WAIT
                         # expressed poorly, not a second spawn intent.
                         # Convert to wait so the turn is credited as

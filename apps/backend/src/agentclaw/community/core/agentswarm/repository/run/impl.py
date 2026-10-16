@@ -286,7 +286,7 @@ class RunRepository(RunRepositoryProtocol):
             status=_decode_run_status(row.status),
             started_at=dm.EpochMillis(row.started_at or 0),
             owner_id=row.owner_id or "",
-            run_options=dm.RunOptions.from_metadata(row.request_metadata) if row.request_metadata else None,
+            run_options=dm.RunOptions.from_metadata(req_md_raw) if req_md_raw else None,
             termination_reason=_decode_termination_reason(row.termination_reason),
             root_agent_id=dm.AgentId(row.root_agent_id) if row.root_agent_id else None,
             final_answer=_loads(row.final_answer),

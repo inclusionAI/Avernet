@@ -142,3 +142,11 @@ class AgentSpec:
     """Persona identity file in the manifest (SOUL.md, RULES.md,
     CLAUDE.md for claude_code); engine-gated."""
     metadata: dict[str, str] = field(default_factory=dict)
+    config_manifest: str = ""
+    """Full five-category `bot_config_manifest` YAML document
+    (mcp/resources/skills/cli_tools/identity + sources + script),
+    exactly as `POST /openapi/v1/bots/with-manifest` accepts it. When
+    non-blank, the host adapter submits THIS document verbatim instead
+    of synthesizing the identity-only one — the platform's own
+    preflight stays authoritative for its grammar. Blank keeps the
+    synthesized persona document (today's behavior)."""

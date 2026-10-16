@@ -21,6 +21,9 @@ from agentclaw.community.core.agentswarm.domain.models.enums import (
     LlmCallKind, MessageRole, ProviderKind, RunOptions, RunStatus, StreamEventKind, TaskQueueStatus,
     TerminationReason, WaitMode, WorkerOutcomeKind,
 )
+from agentclaw.community.core.agentswarm.domain.models.errors import (
+    NonRetryableProvisioningError,
+)
 # BotCreateSpec is BotPlatform seam vocabulary — owned by the seam and
 # re-exported for every domain consumer.
 from agentclaw.community.plugin_api.agentswarm.bot import BotCreateSpec
@@ -53,4 +56,5 @@ __all__ = [
     "Decision",
     "RequestMetadata", "AgentSpec", "BotCreateSpec", "Run", "Agent", "Message",
     "ResultShard", "Round", "GuardEvent", "NameAliasMap",
+    "NonRetryableProvisioningError",
 ]

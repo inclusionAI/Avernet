@@ -13,11 +13,7 @@ from dataclasses import dataclass, field
 # minimums: a zero poll interval is a hot loop, a zero slice/timeout/sweep
 # budget or pending capacity wedges the worker. ``open_seconds`` alone
 # still accepts 0 — an immediate-retry breaker is a valid setting, pinned
-# at the runtime level by the drain-breaker tests. ``host.owner_id`` is
-# the one refusal: a shipped host block with a blank owner raises
-# ``AgentSwarmConfigError`` (P0-9 — an ownerless bot has no provisioning
-# identity; there is no service-account fallback to downgrade to). The
-# bare-default
+# at the runtime level by the drain-breaker tests. The bare-default
 # contract matters as much: an absent block parses to exactly what
 # ``AgentSwarmConfig()`` constructs, so profiles that ship no block keep
 # their current behavior (missing LLM stays fail-clear at submit, /tmp
@@ -110,9 +106,10 @@ class AgentSwarmOrchestrationConfig:
     max_depth: int = 5
     repair_max: int = 2
     subagent_max_attempts: int = 3
-    per_subagent_timeout: float = 120.0
+    per_subagent_timeout: float = 300.0
+    setup_timeout: float = 300.0
     orchestrator_turn_interval: float = 1.0
-    slice_max_seconds: float = 300.0
+    slice_max_seconds: float = 900.0
     slice_interval: float = 1.0
     respawn_max: int = 3
     reclaim_max: int = 5
@@ -127,7 +124,7 @@ class AgentSwarmOrchestrationConfig:
     def from_block(cls, block: dict) -> "AgentSwarmOrchestrationConfig":
         d = cls()
         block = block or {}
-        return cls(
+        cfg = cls(
             max_turns=_as_int(block, "max_turns", d.max_turns, minimum=1),
             max_total_agents=_as_int(block, "max_total_agents", d.max_total_agents, minimum=1),
             max_width=_as_int(block, "max_width", d.max_width, minimum=1),
@@ -135,6 +132,7 @@ class AgentSwarmOrchestrationConfig:
             repair_max=_as_int(block, "repair_max", d.repair_max, minimum=0),
             subagent_max_attempts=_as_int(block, "subagent_max_attempts", d.subagent_max_attempts, minimum=1),
             per_subagent_timeout=_as_float(block, "per_subagent_timeout", d.per_subagent_timeout),
+            setup_timeout=_as_float(block, "setup_timeout", d.setup_timeout),
             orchestrator_turn_interval=_as_float(block, "orchestrator_turn_interval", d.orchestrator_turn_interval),
             slice_max_seconds=_as_float(block, "slice_max_seconds", d.slice_max_seconds, exclusive=True),
             slice_interval=_as_float(block, "slice_interval", d.slice_interval, exclusive=True),
@@ -152,6 +150,30 @@ class AgentSwarmOrchestrationConfig:
             no_progress_threshold=_as_int(
                 block, "no_progress_threshold", d.no_progress_threshold, minimum=1),
         )
+        # A single attempt is setup() then run_task(); if their budgets do
+        # not fit inside one slice, the slice cancels the attempt mid-phase,
+        # no completion is produced, and the agent wedges non-terminal
+        # forever. Fail clear at config load rather than wedge at runtime.
+        if (cfg.setup_timeout + cfg.per_subagent_timeout) > cfg.slice_max_seconds:
+            raise ValueError(
+                "orchestration.setup_timeout + per_subagent_timeout "
+                f"({cfg.setup_timeout} + {cfg.per_subagent_timeout} = "
+                f"{cfg.setup_timeout + cfg.per_subagent_timeout}s) exceeds "
+                f"slice_max_seconds ({cfg.slice_max_seconds}s): an attempt "
+                "cannot finish inside a slice and every agent would wedge."
+            )
+        # The worker renews a held lease every lease_seconds/3 on a dedicated
+        # wall-clock thread (starvation-proof), so the lease need not outlast
+        # a whole slice. Very small leases still leave no room for a single
+        # renewal round-trip plus jitter, and a lapsed lease hands the job to
+        # a peer's reclaim — fail clear at config load.
+        if cfg.lease_seconds < 30:
+            raise ValueError(
+                f"orchestration.lease_seconds ({cfg.lease_seconds}) too low; "
+                "the heartbeat renews every lease/3 and a lost lease reclaims "
+                "the job — use >= 30"
+            )
+        return cfg
 
 
 @dataclass(frozen=True)
@@ -295,55 +317,11 @@ class AgentSwarmRetentionConfig:
         )
 
 
-
-
-
-@dataclass(frozen=True)
-class AgentSwarmHostConfig:
-    """The ``agentswarm.host`` block — the host platform side's identity.
-
-    ``owner_id`` is the account swarm-created bots belong to (P0-9): the
-    one config knob defensive parsing REFUSES instead of downgrading —
-    a host block with a blank owner raises, because an ownerless bot has
-    no provisioning identity and no service-account fallback exists. An
-    absent block keeps ``owner_id=""`` (no platform opt-in); the refusal
-    for that state lives in the ``AgentSwarmModule.bot_platform``
-    provider.
-    """
-
-    owner_id: str = ""
-
-    @classmethod
-    def from_block(cls, block: dict) -> "AgentSwarmHostConfig":
-        if block is None:
-            return cls()
-        if not isinstance(block, dict):
-            block = {}
-        owner_id = _as_str(block, "owner_id").strip()
-        if not owner_id:
-            # Call-local on purpose: service/impl.py imports this module at
-            # top level, so a module-level import of service.protocols here
-            # closes a config -> service -> config import cycle.
-            from agentclaw.community.core.agentswarm.service.protocols import (
-                AgentSwarmConfigError,
-            )
-            raise AgentSwarmConfigError(
-                "agentswarm.host.owner_id is required but blank: it is the "
-                "account the swarm's transient bots belong to (no "
-                "service-account fallback) — set host.owner_id in the "
-                "agentswarm block"
-            )
-        return cls(owner_id=owner_id)
-
-
 @dataclass(frozen=True)
 class AgentSwarmConfig:
     llm: LlmConfig | None = None
     orchestration: AgentSwarmOrchestrationConfig = field(
         default_factory=AgentSwarmOrchestrationConfig
-    )
-    host: AgentSwarmHostConfig = field(
-        default_factory=AgentSwarmHostConfig
     )
     tenant_limits: AgentSwarmTenantLimits = field(
         default_factory=AgentSwarmTenantLimits
@@ -389,7 +367,6 @@ class AgentSwarmConfig:
             llm=LlmConfig.from_block(block.get("llm")),
             orchestration=AgentSwarmOrchestrationConfig.from_block(
                 block.get("orchestration")),
-            host=AgentSwarmHostConfig.from_block(block.get("host")),
             tenant_limits=AgentSwarmTenantLimits.from_block(
                 block.get("tenant_limits")),
             admission=AgentSwarmAdmissionConfig.from_block(

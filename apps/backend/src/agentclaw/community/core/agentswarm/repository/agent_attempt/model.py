@@ -1,7 +1,7 @@
 """`ac_agent_swarm_agent_attempt` ORM model — the per-attempt executor ledger."""
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Column, Index, Integer, String
+from sqlalchemy import BigInteger, Column, Index, Integer, String, Text
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.agentswarm.repository.base import (
@@ -20,6 +20,8 @@ class AcAgentSwarmAgentAttemptModel(_AgentSwarmBase, Base):
     executor_id = Column(String(64), nullable=False)
     executor_name = Column(String(128), nullable=False)
     executor_state = Column(String(32), nullable=False, default="SPAWNED")
+    result_status = Column(String(32), nullable=True)
+    result_message = Column(Text, nullable=True)
     started_at = Column(BigInteger, nullable=True)
     ended_at = Column(BigInteger, nullable=True)
 

@@ -25,6 +25,9 @@ from agentclaw.community.core.base import Base
 from agentclaw.community.core.agentswarm.domain import models as dm
 from agentclaw.community.core.agentswarm.repository import registry as om
 from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
+from agentclaw.community.core.agentswarm.repository.agent_attempt import (
+    AgentAttemptRepository,
+)
 from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
 from agentclaw.community.core.agentswarm.repository.job import JobRepository
 from agentclaw.community.core.agentswarm.repository.message import MessageRepository
@@ -196,6 +199,24 @@ def _wait_decision(*refs) -> str:
     return json.dumps({"kind": "wait", "refs": list(refs), "mode": "all"})
 
 
+def _spin_ref(env, run: dm.Run, name: str = "ghost") -> None:
+    # A permanently-unsatisfied wait ref WITH a row: a shardless KILLED agent
+    # is neither respawned by rehydrate (not QUEUED/RUNNING) nor fail-fast
+    # (not FAILED), so _await_refs blocks to the slice budget. The post-fix
+    # spin driver: a never-spawned name would now YIELD instead of spinning.
+    env.agent_repo.create(dm.Agent(
+        agent_id=dm.AgentId(uuid.uuid4().hex), run_id=run.run_id,
+        tenant=run.tenant, parent_agent_id=None, depth=0, name=name,
+        role=f"goal-{name}", kind=dm.AgentKind.LLM,
+        task_spec=dm.TaskEnvelope(
+            name=name, objective=f"goal-{name}", output_schema={},
+            boundaries="", parent_goal=run.goal,
+        ),
+        spawn_round=0, status=dm.AgentStatus.KILLED, attempts=0,
+        idempotency_key=dm.IdempotencyKey(uuid.uuid4().hex), output={},
+    ))
+
+
 def _finish_decision(answer) -> str:
     return json.dumps({"kind": "finish", "answer": answer})
 
@@ -248,6 +269,7 @@ def _build_env(db, script: list[str], factory: FakeFactory, *,
     round_repo = RoundRepository(db)
     guard_repo = GuardEventRepository(db)
     job_repo = JobRepository(db)
+    attempt_repo = AgentAttemptRepository(db)
     llm = llm or StubLLMProvider(script=script)
     orchestrator = Orchestrator(
         llm=llm,
@@ -276,6 +298,7 @@ def _build_env(db, script: list[str], factory: FakeFactory, *,
         message_repo=message_repo, shard_repo=shard_repo, round_repo=round_repo,
         guard_repo=guard_repo, job_repo=job_repo, llm=llm,
         orchestrator=orchestrator, runtime=runtime, handler=handler,
+        attempt_repo=attempt_repo,
     )
 
 
@@ -522,17 +545,20 @@ class TestOutputSchemaValidation:
             run.run_id, TENANT, claim["claim_epoch"], worker_id=WORKER,
         ))
 
-        # The wait on the failed agent cannot be satisfied within the slice
-        # budget; the slice reschedules (never terminal) and the failed result
-        # plus its error are already durable.
-        assert outcome == "reschedule"
+        # The failed agent blocks the awaited ref and can never grow a
+        # shard, so the wait aborts the whole run terminally (fail-fast)
+        # instead of parking the slice to its budget.
+        assert outcome == "fail"
         agents = env.agent_repo.list_by_run(run.run_id, TENANT)
         assert len(agents) == 1
         assert agents[0].status is dm.AgentStatus.FAILED
         assert agents[0].attempts == 2
         assert agents[0].error.startswith("schema_validation:")
         assert env.shard_repo.list_by_run(run.run_id, TENANT) == []
-        assert env.run_repo.get(run.run_id, TENANT).status is dm.RunStatus.RUNNING
+        stored = env.run_repo.get(run.run_id, TENANT)
+        assert stored.status is dm.RunStatus.FAILED
+        assert stored.termination_reason is dm.TerminationReason.ERROR
+        assert agents[0].agent_id in (stored.error or "")
 
     def test_malformed_schema_is_non_retryable(self, db):
         # A string schema is rejected at the parse boundary (repair-able);
@@ -552,11 +578,14 @@ class TestOutputSchemaValidation:
         outcome = asyncio.run(env.handler.handle_slice(
             run.run_id, TENANT, claim["claim_epoch"], worker_id=WORKER,
         ))
-        assert outcome == "reschedule"
+        # The agent fails without a shard; the wait on it aborts the run
+        # through the fail-fast path rather than parking to the budget.
+        assert outcome == "fail"
         agents = env.agent_repo.list_by_run(run.run_id, TENANT)
         assert agents[0].status is dm.AgentStatus.FAILED
         assert agents[0].error == "envelope_schema_invalid"
         assert agents[0].attempts == 1
+        assert env.run_repo.get(run.run_id, TENANT).status is dm.RunStatus.FAILED
         # The executor never even ran: a malformed envelope is a config error.
         assert factory.run_effects == []
 
@@ -621,3 +650,51 @@ class TestLoopStaysLiveDuringSlowWrites:
         # ~0.05s cadence over a 1.0s window of a still-blocked write: a
         # stalled loop (the pre-offload behavior) records zero ticks.
         assert len(ticks_during_blocked_write) >= 5
+
+class TestMidSliceCancel:
+    """A cancel landing after the claim snapshot must terminalize between
+    turns — no second cohort spawns while the run is being cancelled."""
+
+    def test_mid_slice_cancel_stops_next_turn_and_terminalizes(self, db):
+        script = [_spawn_decision("a1", "goal-a1"), _spawn_decision("a2", "goal-a2")]
+        factory = FakeFactory(scripts={"a1": [], "a2": []})
+        late_llm = _LateCancelLLM(script)
+        env = _build_env(db, script, factory, llm=late_llm)
+        run = _mk_run(goal="mid-slice cancel")
+        late_llm.arm(env.job_repo, run.run_id, TENANT)
+        claim = _enqueue_and_claim(env, run)
+
+        outcome = asyncio.run(env.handler.handle_slice(
+            run.run_id, TENANT, claim["claim_epoch"], worker_id=WORKER,
+        ))
+
+        assert outcome == "complete"
+        stored = env.run_repo.get(run.run_id, TENANT)
+        assert stored.status is dm.RunStatus.CANCELLED
+        assert stored.termination_reason is dm.TerminationReason.CANCELLED
+        agents = env.agent_repo.list_by_run(run.run_id, TENANT)
+        assert [a.name for a in agents] == ["a1"]
+        assert _job_row(db, run.run_id)["status"] == "SUCCEEDED"
+
+
+class _LateCancelLLM:
+    """StubLLMProvider battery that flips the durable cancel flag right
+    after the first decision, so the cancel lands mid-slice (between
+    turns), after the claim-time snapshot already said no."""
+
+    def __init__(self, script: list[str]) -> None:
+        from agentclaw.community.plugins.local.agentswarm.llm_stub import (
+            StubLLMProvider,
+        )
+        self._inner = StubLLMProvider(script=script)
+        self._armed = None
+
+    def arm(self, job_repo, run_id, tenant) -> None:
+        self._armed = (job_repo, run_id, tenant)
+
+    async def complete(self, request):
+        response = await self._inner.complete(request)
+        if self._armed is not None and self._inner.call_count == 1:
+            job_repo, run_id, tenant = self._armed
+            assert job_repo.request_cancel(run_id, tenant)
+        return response

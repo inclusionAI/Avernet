@@ -88,10 +88,10 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
             status=RunStatus.RUNNING,
             started_at=EpochMillis(int(time.time() * 1000)),
             owner_id=req.owner_id,
+            run_options=req.run_options,
         )
         run.active_idempotency_key = req.idempotency_key
-        if run.run_options is not None:
-            run.run_options.to_metadata(run.request_metadata)
+        run.run_options.to_metadata(run.request_metadata)
         created = self._run_repo.create(run)
         if created.run_id != RunId(run_id):
             # Lost the submit race: create() converged onto the winner's

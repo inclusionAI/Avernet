@@ -7,10 +7,12 @@ Pinned here (each maps to a review finding):
   and hands the *resolved value* to the client; the name travels only
   as the lookup key, and an unresolvable secret fails clear with
   ``AgentSwarmConfigError`` instead of shipping the name as a Bearer.
-- P0-9 — ``bot_platform`` passes the configured
-  ``agentswarm.host.owner_id`` and refuses construction when it is
-  blank (no service-account fallback); ``provide_runtime`` logs the
-  refusal instead of swallowing it into a misleading "unbound".
+- P0-9 — ``bot_platform`` binds the host adapter with no profile-level
+  identity: the provisioning owner exists only per-run/per-call (the
+  authenticated submitter the run carries), every seam method passes
+  the run's ``owner_id`` through, and the platform itself refuses a
+  blank one. ``provide_runtime`` still degrades a failed platform
+  construction to none-platform mode instead of wedging boot.
 - P1-9 — the config-built ``GuardService`` is one shared singleton
   (orchestrator and handler enforce identical limits from the yaml
   block), ``SubagentRuntime`` receives an ``UpstreamBreaker`` built
@@ -31,7 +33,7 @@ from dataclasses import dataclass
 import pytest
 
 from agentclaw.community.core.agentswarm.config.settings import (
-    AgentSwarmConfig, AgentSwarmHostConfig, AgentSwarmOrchestrationConfig,
+    AgentSwarmConfig, AgentSwarmExecutorConfig, AgentSwarmOrchestrationConfig,
     AgentSwarmUpstreamBreakerConfig, LlmConfig,
 )
 from agentclaw.community.core.agentswarm.orchestration.decision_parser import (
@@ -84,6 +86,26 @@ class _RaisingInjector:
     def get(self, key):
         self.requested.append(key)
         raise self._exc
+
+
+class _PlatformBrokenInjector:
+    """Platform chain broken, interior wiring healthy: raises for the
+    ``BotPlatform`` binding only, serves inert stubs for every other key —
+
+    the P1-9 tests use it to compose a runtime whose non-platform
+    wiring (interior repos, the factory, the binding store) stays
+    observable while only the host seam is absent, mirroring the
+    production none-platform degrade."""
+
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+        self.requested: list[object] = []
+
+    def get(self, key):
+        self.requested.append(key)
+        if key is BotPlatform:
+            raise self._exc
+        return object()
 
 
 class _ServingInjector:
@@ -165,59 +187,67 @@ class TestLlmSecretResolution:
         assert resolver.seen == []
 
 
-# ── P0-9: owner_id reaches the platform; refusal is precise ────────────
+# ── P0-9: identity is per-call only; the provider needs no config ─────
 
-class TestBotPlatformOwner:
+class TestBotPlatformIdentity:
 
-    def test_provider_refuses_blank_owner_with_a_precise_error(self):
-        with pytest.raises(AgentSwarmConfigError) as excinfo:
-            AgentSwarmModule().bot_platform(
-                injector=None, config=AgentSwarmConfig(),
-            )
-        message = str(excinfo.value)
-        assert "host.owner_id" in message
-        assert "no service-account fallback" in message
+    def test_provider_builds_the_platform_without_any_host_block(
+            self, monkeypatch,
+    ):
+        from agentclaw.community.plugins.community.agentswarm import (
+            host as host_module,
+        )
+        from agentclaw.community.plugins.community.agentswarm.host import (
+            AvernetBotPlatform,
+        )
+        seen: dict = {}
+        monkeypatch.setattr(
+            host_module, "set_chat_bridge_max_workers",
+            lambda workers: seen.setdefault("workers", workers),
+        )
+        platform = AgentSwarmModule().bot_platform(
+            injector=_ServingInjector(object()),
+            config=AgentSwarmConfig(executor=AgentSwarmExecutorConfig(
+                max_platform_workers=7)),
+        )
+        assert isinstance(platform, AvernetBotPlatform)
+        assert not hasattr(platform, "_default_owner")
+        assert seen["workers"] == 7
 
-    def test_platform_is_built_with_the_configured_owner(
+    def test_platform_is_built_with_no_ambient_identity(
             self, test_injector,
     ):
         from agentclaw.community.plugins.community.agentswarm.host import (
             AvernetBotPlatform,
         )
-        config = AgentSwarmConfig(
-            host=AgentSwarmHostConfig(owner_id="owner-1"),
-        )
-        test_injector.binder.bind(AgentSwarmConfig, to=config)
+        test_injector.binder.bind(
+            AgentSwarmConfig, to=AgentSwarmConfig())
         platform = test_injector.get(BotPlatform)
         assert isinstance(platform, AvernetBotPlatform)
-        assert platform._default_owner == "owner-1"
+        assert not hasattr(platform, "_default_owner")
 
-    def test_runtime_logs_the_owner_refusal_and_degrades(
+    def test_runtime_degrades_a_config_error_in_the_platform_chain(
             self, caplog,
     ):
-        refusal = AgentSwarmConfigError(
-            "agentswarm.host.owner_id is not configured"
-        )
-        injector = _RaisingInjector(refusal)
+        refusal = AgentSwarmConfigError("platform chain misconfigured")
+        injector = _PlatformBrokenInjector(refusal)
         config = AgentSwarmConfig()
         with caplog.at_level(logging.WARNING, logger=_WIRING_LOGGER):
             runtime = AgentSwarmModule().provide_runtime(
                 injector=injector, llm=StubLLMProvider(), config=config,
             )
-        assert injector.requested == [BotPlatform]
-        assert "host.owner_id" in caplog.text
+        assert injector.requested[0] is BotPlatform
+        assert "platform chain misconfigured" in caplog.text
         assert runtime is not None
 
     def test_runtime_takes_the_bound_platform(self):
         platform = _Platform()
         injector = _ServingInjector(platform)
-        config = AgentSwarmConfig(
-            host=AgentSwarmHostConfig(owner_id="owner-1"),
-        )
+        config = AgentSwarmConfig()
         runtime = AgentSwarmModule().provide_runtime(
             injector=injector, llm=StubLLMProvider(), config=config,
         )
-        assert injector.requested == [BotPlatform]
+        assert injector.requested[0] is BotPlatform
         assert runtime._factory._platform is platform
 
 
@@ -246,7 +276,7 @@ class TestConfiguredOrchestration:
             guards=guards, config=config,
         )
         runtime = module.provide_runtime(
-            injector=_RaisingInjector(AgentSwarmConfigError("no platform")),
+            injector=_PlatformBrokenInjector(AgentSwarmConfigError("no platform")),
             llm=StubLLMProvider(), config=config,
         )
         handler = module.provide_handler(
@@ -266,7 +296,7 @@ class TestConfiguredOrchestration:
     def test_runtime_receives_a_breaker_built_from_config(self):
         config = _wired_config()
         runtime = AgentSwarmModule().provide_runtime(
-            injector=_RaisingInjector(AgentSwarmConfigError("no platform")),
+            injector=_PlatformBrokenInjector(AgentSwarmConfigError("no platform")),
             llm=StubLLMProvider(), config=config,
         )
         breaker = runtime._upstream_breaker
@@ -277,7 +307,7 @@ class TestConfiguredOrchestration:
 
     def test_default_config_still_wires_a_breaker(self):
         runtime = AgentSwarmModule().provide_runtime(
-            injector=_RaisingInjector(AgentSwarmConfigError("no platform")),
+            injector=_PlatformBrokenInjector(AgentSwarmConfigError("no platform")),
             llm=StubLLMProvider(), config=AgentSwarmConfig(),
         )
         assert runtime._upstream_breaker is not None
@@ -290,7 +320,7 @@ class TestConfiguredOrchestration:
             guards=module.provide_guards(config), config=config,
         )
         runtime = module.provide_runtime(
-            injector=_RaisingInjector(AgentSwarmConfigError("no platform")),
+            injector=_PlatformBrokenInjector(AgentSwarmConfigError("no platform")),
             llm=StubLLMProvider(), config=config,
         )
         handler = module.provide_handler(

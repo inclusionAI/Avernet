@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import threading
 import time
 import uuid
 from typing import Any
@@ -32,6 +33,26 @@ _DEAD_JOB_STATUSES = frozenset((
     dm.TaskQueueStatus.TIMED_OUT.value,
 ))
 
+# Terminal run statuses: a run here can never be claimed again, so its
+# personas must be destroyed. The reconciliation pass pages them to catch
+# the ones the slice paths did not reach (crash between terminal write
+# and inline destroy).
+_TERMINAL_RUN_STATUSES = (
+    dm.RunStatus.COMPLETED,
+    dm.RunStatus.FAILED,
+    dm.RunStatus.CANCELLED,
+    dm.RunStatus.TIMED_OUT,
+    dm.RunStatus.GUARD_KILLED,
+    dm.RunStatus.STUCK,
+)
+
+_EXECUTOR_STATE_DESTROYED = "DESTROYED"
+
+# Lease-renewal thread: bounded join on shutdown. The thread only does a
+# short sync DB update per in-flight run, so 5s is generous headroom; a
+# hung join must never wedge drain past its abort window.
+_LEASE_THREAD_JOIN_MAX_SECONDS = 5.0
+
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
@@ -46,28 +67,40 @@ class AgentSwarmWorker(LifecycleBase):
         job_repo: Any,
         run_repo: Any = None,
         guard_repo: Any = None,
+        attempt_repo: Any = None,
     ) -> None:
         # run_repo/guard_repo host the maintenance reaper (async-run-and-
         # -resume 4.1). None keeps the pre-reaper constructor surface working
         # for embedded uses that opt out of the sweep — the DI composition
         # root always passes both, so production always sweeps.
+        # attempt_repo backs the terminal-cleanup reconciliation leg; None
+        # skips only that leg.
         self._config = config
         self._handler = handler
         self._job_repo = job_repo
         self._run_repo = run_repo
         self._guard_repo = guard_repo
+        self._attempt_repo = attempt_repo
         self._worker_id = uuid.uuid4().hex[:16]
         self._running = False
         self._task: asyncio.Task | None = None
         self._heartbeat_task: asyncio.Task | None = None
         self._maintenance_task: asyncio.Task | None = None
         self._inflight: dict[str, dict] = {}
+        # Lease renewal runs on a dedicated wall-clock thread so slice work
+        # starving the asyncio loop cannot lapse a lease and hand the job to
+        # a peer's reclaim. Every _inflight access is serialized by _inflight_lock.
+        self._inflight_lock = threading.Lock()
+        self._lease_thread: threading.Thread | None = None
+        self._lease_stop = threading.Event()
+        self._loop_ref: asyncio.AbstractEventLoop | None = None
 
     def _maintenance_enabled(self) -> bool:
         return (
             self._config.maintenance.enabled
             and self._run_repo is not None
             and self._guard_repo is not None
+            and self._attempt_repo is not None
         )
 
     async def startup(self) -> None:
@@ -76,6 +109,14 @@ class AgentSwarmWorker(LifecycleBase):
             return
         self._running = True
         logger.info("[agentswarm][worker] started worker_id=%s", self._worker_id)
+        self._loop_ref = asyncio.get_running_loop()
+        self._lease_stop.clear()
+        self._lease_thread = threading.Thread(
+            target=self._lease_renewal_loop,
+            name=f"agentswarm-lease-{self._worker_id}",
+            daemon=True,
+        )
+        self._lease_thread.start()
         self._task = asyncio.create_task(self._loop())
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         if self._maintenance_enabled():
@@ -94,10 +135,11 @@ class AgentSwarmWorker(LifecycleBase):
            its current iteration; jobs already claimed by that iteration
            still complete normally.
         2. grace wait — up to ``config.drain.grace_seconds`` for in-flight
-           ``handle_slice`` calls to finish. The heartbeat loop keeps
-           renewing in-flight leases while ``_inflight`` is non-empty, so a
-           healthy drain does not lose claims to lease expiry. Tracked
-           via ``self._inflight``.
+           ``handle_slice`` calls to finish. The dedicated lease-renewal
+           thread keeps renewing in-flight leases while ``_inflight`` is
+           non-empty (and the heartbeat loop keeps the drain life-cycle
+           alive), so a healthy drain does not lose claims to lease expiry.
+           Tracked via ``self._inflight``.
         3. cooperative abort — grace expired with slices still in flight:
            signal ``set_slice_lost(True)`` per in-flight run so the slice
            unwinds through its checkpoint+release path (the job is
@@ -131,7 +173,7 @@ class AgentSwarmWorker(LifecycleBase):
                 {loop_task}, timeout=max(0.0, grace),
             )
             if pending:
-                for run_id in list(self._inflight):
+                for run_id in self._inflight_snapshot():
                     self._handler.set_slice_lost(True, run_id)
                 abort_join = min(grace, _ABORT_JOIN_MAX_SECONDS)
                 _, still_pending = await asyncio.wait(
@@ -140,7 +182,7 @@ class AgentSwarmWorker(LifecycleBase):
                 if still_pending:
                     logger.warning(
                         "[agentswarm][worker] drain abort timed out, cancelling %d in-flight run(s)",
-                        len(self._inflight),
+                        self._inflight_count(),
                     )
                     loop_task.cancel()
                     try:
@@ -155,7 +197,21 @@ class AgentSwarmWorker(LifecycleBase):
                 await self._heartbeat_task
             except asyncio.CancelledError:
                 pass
+        self._stop_lease_thread()
         logger.info("[agentswarm][worker] stopped worker_id=%s", self._worker_id)
+
+    def _stop_lease_thread(self) -> None:
+        thread = self._lease_thread
+        if thread is None:
+            return
+        self._lease_stop.set()
+        thread.join(timeout=_LEASE_THREAD_JOIN_MAX_SECONDS)
+        if thread.is_alive():
+            logger.warning(
+                "[agentswarm][worker] lease renewal thread did not exit within %ss",
+                _LEASE_THREAD_JOIN_MAX_SECONDS,
+            )
+        self._lease_thread = None
 
     @staticmethod
     def _consume(task: asyncio.Task) -> None:
@@ -196,7 +252,7 @@ class AgentSwarmWorker(LifecycleBase):
                 self._worker_id,
             )
             return
-        self._inflight[run_id] = job
+        self._mark_inflight(run_id, job)
         try:
             outcome = await self._handler.handle_slice(
                     run_id, tenant, epoch, cancel, worker_id=self._worker_id,
@@ -216,7 +272,81 @@ class AgentSwarmWorker(LifecycleBase):
                     run_id, tenant, str(exc), self._worker_id, epoch,
                 )
         finally:
+            self._clear_inflight(run_id)
+
+    def _mark_inflight(self, run_id: str, job: dict) -> None:
+        with self._inflight_lock:
+            self._inflight[run_id] = job
+
+    def _clear_inflight(self, run_id: str) -> None:
+        with self._inflight_lock:
             self._inflight.pop(run_id, None)
+
+    def _inflight_snapshot(self) -> dict[str, dict]:
+        with self._inflight_lock:
+            return dict(self._inflight)
+
+    def _inflight_count(self) -> int:
+        with self._inflight_lock:
+            return len(self._inflight)
+
+    def _lease_should_run(self) -> bool:
+        with self._inflight_lock:
+            have_inflight = bool(self._inflight)
+        return (
+            self._running
+            or have_inflight
+            or (self._task is not None and not self._task.done())
+        )
+
+    def _notify_slice_lost(self, run_id: str) -> None:
+        loop = self._loop_ref
+        if loop is None:
+            return
+        try:
+            loop.call_soon_threadsafe(self._on_lease_lost, run_id)
+        except RuntimeError:
+            # Loop already closed during teardown; nothing to unwind.
+            pass
+
+    def _on_lease_lost(self, run_id: str) -> None:
+        self._handler.set_slice_lost(True, run_id)
+        self._clear_inflight(run_id)
+
+    def _lease_renewal_loop(self) -> None:
+        # Runs on a dedicated thread: renews leases on wall-clock time so a
+        # CPU-bound slice starving the asyncio loop cannot let the lease lapse
+        # and hand the job to a peer's reclaim (the slice_lost root cause).
+        lease = self._config.orchestration.lease_seconds
+        while not self._lease_stop.is_set() and self._lease_should_run():
+            self._renew_inflight_leases(lease)
+            # Wall-clock wait, not asyncio.sleep: the whole point is that
+            # this loop does not depend on the event loop being scheduled.
+            if self._lease_stop.wait(self._lease_interval(lease)):
+                break
+
+    def _lease_interval(self, lease: int) -> float:
+        return lease / 3.0
+
+    def _renew_inflight_leases(self, lease: int) -> None:
+        for run_id, job in self._inflight_snapshot().items():
+            try:
+                ok = self._job_repo.renew_lease(
+                    run_id, job["tenant"], self._worker_id, lease,
+                    job["claim_epoch"],
+                )
+            except Exception:
+                logger.exception(
+                    "[agentswarm][worker] lease renew failed for run=%s",
+                    run_id,
+                )
+                continue
+            if not ok:
+                logger.warning(
+                    "[agentswarm][worker] lease lost for run=%s (epoch=%d)",
+                    run_id, job["claim_epoch"],
+                )
+                self._notify_slice_lost(run_id)
 
     async def _loop(self) -> None:
         poll = self._config.orchestration.poll_interval
@@ -232,33 +362,15 @@ class AgentSwarmWorker(LifecycleBase):
             await asyncio.sleep(max(0.0, delay))
 
     async def _heartbeat_loop(self) -> None:
-        # Drains keep their leases: renew while running OR while in-flight
-        # slices are still unwinding (12.2), so grace-period work does not
-        # get reclaimed from under a healthy drain. The poll task's liveness
-        # keeps this loop alive too: during a drain _inflight is momentarily
-        # empty between batch jobs while claimed work still waits in the
-        # poll loop — an early exit there would let those leases expire and
-        # the jobs execute twice.
-        lease = self._config.orchestration.lease_seconds
-        interval = lease / 3.0
-        while (self._running or self._inflight
-               or (self._task is not None and not self._task.done())):
+        # Lifecycle keeper for the drain contract (12.2): it lives as long as
+        # there is anything to keep alive — running, in-flight slices
+        # unwinding, or the poll task holding claimed-but-unstarted jobs —
+        # so a healthy drain does not exit early and strand leases. Actual
+        # lease renewal happens on _lease_renewal_loop, off this event loop,
+        # so a CPU-bound slice cannot starve it into a reclaim.
+        interval = self._config.orchestration.lease_seconds / 3.0
+        while self._lease_should_run():
             await asyncio.sleep(interval)
-            lost = []
-            for run_id, job in list(self._inflight.items()):
-                ok = await asyncio.to_thread(
-                    self._job_repo.renew_lease,
-                    run_id, job["tenant"], self._worker_id, lease, job["claim_epoch"],
-                )
-                if not ok:
-                    logger.warning(
-                        "[agentswarm][worker] lease lost for run=%s (epoch=%d)",
-                        run_id, job["claim_epoch"],
-                    )
-                    self._handler.set_slice_lost(True, run_id)
-                    lost.append(run_id)
-            for run_id in lost:
-                self._inflight.pop(run_id, None)
 
     # ── 4.1/4.2: maintenance reaper (async-run-and-resume) ────────────
 
@@ -295,8 +407,53 @@ class AgentSwarmWorker(LifecycleBase):
             for run in runs.items:
                 acted += await self._reap_or_ignore(run)
             if page * runs.page_size >= runs.total:
-                return acted
+                break
             page += 1
+        if self._attempt_repo is not None:
+            acted += await self._reconcile_terminal_cleanup()
+        return acted
+
+    async def _reconcile_terminal_cleanup(self) -> int:
+        """Destroy personas of TERMINAL runs the slice paths never reached.
+
+        A run becomes terminal by several routes: the slice's own
+        ``_finalize*`` (which destroy inline), the reaper's age-off (which
+        destroys here), or a crash between the terminal write and the
+        inline destroy. This pass closes the last gap: any terminal run
+        whose attempt ledger still holds a non-DESTROYED row gets the
+        idempotent ``ensure_run_cleanup``. It converges — once every row
+        is DESTROYED the run stops appearing actionable — so the sweep is
+        safe to repeat forever across pods.
+        """
+        acted = 0
+        for status in _TERMINAL_RUN_STATUSES:
+            page = 1
+            while True:
+                runs = await run_blocking(
+                    self._run_repo.list_status_page,
+                    status, page, _SWEEP_PAGE_SIZE,
+                )
+                for run in runs.items:
+                    if await self._has_undestroyed_ledger(run.run_id, run.tenant):
+                        await run_blocking(
+                            self._handler.ensure_run_cleanup,
+                            run.run_id, run.tenant,
+                        )
+                        acted += 1
+                if page * runs.page_size >= runs.total:
+                    break
+                page += 1
+        return acted
+
+    async def _has_undestroyed_ledger(self, run_id: dm.RunId,
+                                      tenant: dm.TenantId) -> bool:
+        bindings = await run_blocking(
+            self._attempt_repo.list_agent_bindings, run_id, tenant,
+        )
+        return any(
+            row.get("executor_state") != _EXECUTOR_STATE_DESTROYED
+            for row in bindings
+        )
 
     def _fresh_run(self, run: dm.Run) -> bool:
         """One lease window of submit grace: run.create commits before the
@@ -406,6 +563,12 @@ class AgentSwarmWorker(LifecycleBase):
                 run.run_id,
             )
             return 0
+        # The run is now terminal and will never be claimed again, so its
+        # personas must be torn down HERE — the slice's terminal paths never
+        # run for a run aged off by the reaper.
+        await run_blocking(
+            self._handler.ensure_run_cleanup, run.run_id, run.tenant,
+        )
         await self._emit_orphan_guard_event(run)
         logger.info(
             "[agentswarm][worker] reaper aged off past-deadline orphan run=%s",

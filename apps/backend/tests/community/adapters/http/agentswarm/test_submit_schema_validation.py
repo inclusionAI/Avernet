@@ -37,10 +37,12 @@ AGENTS_MAX = 64
 METADATA_MAX_ENTRIES = 32
 METADATA_KEY_MAX = 200
 METADATA_VALUE_MAX = 2000
+CONFIG_MANIFEST_MAX = 200_000
 
 
 def _body(**overrides) -> dict:
     body = {
+        "tenant": "teamclaw",
         "goal": "summarize the incident timeline",
         "agents": [{"name": "scout", "role": "research"}],
     }
@@ -198,3 +200,66 @@ class TestMetadataCaps:
         metadata["k" * METADATA_KEY_MAX] = "v" * METADATA_VALUE_MAX
         dto = AgentSpecDTO(name="scout", role="research", metadata=metadata)
         assert len(dto.metadata) == METADATA_MAX_ENTRIES
+
+
+class TestConfigManifest:
+    """The per-agent manifest document — ONE total parameter that
+    expresses mcp/resources/skills/cli_tools/identity + sources + script
+    per agent, instead of inventing a narrow per-agent field."""
+
+    def test_manifest_accepted_and_default_blank(self):
+        document = (
+            "schema_version: 1\n"
+            "manifest:\n"
+            "  identity:\n"
+            "    - type: SOUL.md\n"
+            "      content: 'be meticulous'\n"
+            "  mcp: []\n"
+            "  skills: []\n"
+            "script:\n"
+            "  body: 'echo provisioned'\n"
+        )
+        assert AgentSpecDTO(name="scout", role="research").config_manifest == ""
+        dto = AgentSpecDTO(
+            name="scout", role="research", config_manifest=document)
+        assert dto.config_manifest == document
+
+    def test_over_length_manifest_rejected(self):
+        with pytest.raises(ValidationError) as exc:
+            AgentSpecDTO(
+                name="scout", role="research",
+                config_manifest="x" * (CONFIG_MANIFEST_MAX + 1),
+            )
+        assert "string_too_long" in _error_types(exc)
+
+    def test_at_length_manifest_accepted(self):
+        dto = AgentSpecDTO(
+            name="scout", role="research",
+            config_manifest="x" * CONFIG_MANIFEST_MAX,
+        )
+        assert len(dto.config_manifest) == CONFIG_MANIFEST_MAX
+
+    def test_unknown_agent_field_still_refused_beside_manifest(self):
+        # extra="forbid" must hold after the field addition: a typo'd
+        # neighbor is 422, not silently ignored.
+        with pytest.raises(ValidationError) as exc:
+            SubmitRunDTO(**_body(
+                agents=[_agent(config_manifest="schema_version: 1",
+                               power=9001)]))
+        assert "extra_forbidden" in _error_types(exc)
+        assert ("agents", 0, "power") in [e["loc"] for e in exc.value.errors()]
+
+    def test_manifest_flows_into_domain_spec(self):
+        # The router's DTO→domain mapping (router._to_domain) carries the
+        # document through: it is the wire value the host adapter later
+        # submits verbatim.
+        from agentclaw.community.adapters.http.agentswarm.router import (
+            _to_domain,
+        )
+        document = "schema_version: 1\nscript:\n  body: 'echo x'\n"
+        req = _to_domain(SubmitRunDTO(
+            tenant="t",
+            goal="summarize the incident timeline",
+            agents=[_agent(config_manifest=document)],
+        ))
+        assert req.agents[0].config_manifest == document

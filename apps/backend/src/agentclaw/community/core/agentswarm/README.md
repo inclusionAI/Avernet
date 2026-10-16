@@ -286,9 +286,9 @@ multi-pod deployments).
   subagent calls the host platform through the in-process `BotPlatform`
   seam; the subagent itself opens no socket. Binding preconditions: the
   `task_queue_worker` runs (creations complete as its durable jobs), a
-  functional `SandboxRuntimeClient` binding for the chat leg, and
-  `agentswarm.host.owner_id` names the account swarm-created bots belong
-  to (required — no service-account fallback).
+  functional `SandboxRuntimeClient` binding for the chat leg, and every
+  provisioning call carries the run's authenticated submitter as its
+  per-call `owner_id` — no profile-level identity exists.
 - **Prompt injection** — subagent output is untrusted: `SliceStore`
   records `prompt_injection` guard events for detected markers while still
   routing the result; the orchestrator wraps results in an

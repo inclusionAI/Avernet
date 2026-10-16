@@ -277,6 +277,28 @@ class JobRepository(JobRepositoryProtocol):
             )
         return result.rowcount > 0
 
+    def bump_reclaim(self, run_id: dm.RunId, tenant: dm.TenantId, worker_id: str,
+                     claim_epoch: int) -> int | None:
+        """Atomically increment ``reclaims`` for a slice_lost self-reschedule
+        and return the new value; None when the fence no longer matches."""
+        with self._db.orm_session() as session:
+            result = session.execute(
+                update(om.AcAgentSwarmJobModel).where(
+                    om.AcAgentSwarmJobModel.run_id == run_id,
+                    om.AcAgentSwarmJobModel.tenant == tenant,
+                    om.AcAgentSwarmJobModel.claimed_by == worker_id,
+                    om.AcAgentSwarmJobModel.claim_epoch == claim_epoch,
+                ).values(reclaims=om.AcAgentSwarmJobModel.reclaims + 1)
+            )
+            if result.rowcount != 1:
+                return None
+            return session.execute(
+                select(om.AcAgentSwarmJobModel.reclaims).where(
+                    om.AcAgentSwarmJobModel.run_id == run_id,
+                    om.AcAgentSwarmJobModel.tenant == tenant,
+                )
+            ).scalar_one()
+
     def complete(self, run_id: dm.RunId, tenant: dm.TenantId,
                  worker_id: str, claim_epoch: int) -> bool:
         with self._db.orm_session() as session:

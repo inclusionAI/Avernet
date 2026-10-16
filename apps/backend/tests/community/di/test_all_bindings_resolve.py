@@ -60,15 +60,6 @@ ALLOWED_TO_FAIL: dict[str, str] = {
         "depends on OpenApiBotPort, bound only under corp; unbound in test.",
     "agentclaw.community.core.task.forum.browsing.scheduler.BbsBrowseLoopScheduler":
         "depends on the runner (BbsBrowseLoopRunner), bound only under corp; unbound in test.",
-    # The agentswarm BotPlatform is the designed-refusing binding: the
-    # host adapter requires `agentswarm.host.owner_id` (the account
-    # swarm-created bots belong to — no service-account fallback), and the
-    # neutral test overlay intentionally ships no host block. Profiles that
-    # run the platform side set the owner and the binding constructs;
-    # provide_runtime logs the refusal and degrades to the none-platform
-    # mode exactly as for unbound platform deps.
-    "agentclaw.community.plugin_api.agentswarm.bot.protocol.BotPlatform":
-        "needs agentswarm.host.owner_id; the neutral test overlay ships none.",
 }
 
 

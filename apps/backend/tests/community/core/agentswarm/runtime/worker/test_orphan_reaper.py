@@ -74,6 +74,7 @@ def _mk_worker(env, config: AgentSwarmConfig | None = None) -> AgentSwarmWorker:
     return AgentSwarmWorker(
         config=config or env.cfg, handler=env.handler, job_repo=env.job_repo,
         run_repo=env.run_repo, guard_repo=env.guard_repo,
+        attempt_repo=env.attempt_repo,
     )
 
 
@@ -419,3 +420,60 @@ class TestDeadlineExpiryLeg:
         assert env.run_repo.get(run.run_id, run.tenant).status \
             is dm.RunStatus.RUNNING
         assert _job_rows(db, run.run_id)[0]["status"] == "PENDING"
+
+
+class _DisposeFactory:
+    def __init__(self) -> None:
+        self.disposals: list[str] = []
+
+    def destroy_run_agents_bots(self, run, agents) -> list[str]:
+        self.disposals.append(str(run.run_id))
+        return [str(run.run_id)]
+
+
+class TestTerminalCleanupReconciliation:
+    """The terminal-cleanup leg: a run that is already terminal but whose
+    attempt ledger still holds non-DESTROYED rows gets the idempotent
+    destroy sweep. This closes the gap where the slice's inline destroy
+    never ran (crash between the terminal write and the sweep, or a
+    reaper/other terminal path)."""
+
+    def _terminal_run_with_ledger(self, db):
+        env = _build_env(db, [_finish_decision("x")], _DisposeFactory(),
+                         config=_reaper_config())
+        run = _mk_run()
+        env.run_repo.create(run)
+        env.job_repo.enqueue(run_id=run.run_id, tenant=run.tenant,
+                             deadline_seconds=3600)
+        claim = env.job_repo.claim_batch("dead", [TENANT], 1, 60)[0]
+        env.run_repo.update_status(
+            run.run_id, run.tenant, dm.RunStatus.FAILED,
+            termination_reason=dm.TerminationReason.ERROR,
+            error="crashed before sweep", claim_epoch=claim["claim_epoch"],
+        )
+        env.attempt_repo.record_agent_attempt_intent(
+            run.run_id, run.tenant, dm.AgentId("agent-x"), 1, 1, "bot", "", "x",
+        )
+        return env, run
+
+    def test_terminal_run_with_live_ledger_row_is_cleaned(self, db):
+        env, run = self._terminal_run_with_ledger(db)
+        factory = env.runtime._factory
+        assert factory.disposals == []
+
+        acted = asyncio.run(_mk_worker(env)._sweep_once())
+
+        assert acted == 1
+        assert factory.disposals == [str(run.run_id)]
+
+    def test_already_destroyed_ledger_row_is_not_re_cleaned(self, db):
+        env, run = self._terminal_run_with_ledger(db)
+        env.attempt_repo.mark_intent_binding_destroyed(
+            run.run_id, run.tenant, dm.AgentId("agent-x"), 1,
+        )
+        factory = env.runtime._factory
+
+        acted = asyncio.run(_mk_worker(env)._sweep_once())
+
+        assert acted == 0
+        assert factory.disposals == []

@@ -7,7 +7,7 @@ import uuid
 from typing import Any
 
 from agentclaw.community.core.agentswarm.domain.models import (
-    AgentId, AgentStatus, IdempotencyKey, Run,
+    AgentId, AgentStatus, IdempotencyKey, NonRetryableProvisioningError, Run,
     SubagentResult, TaskEnvelope, TenantId, AgentSpec, AgentKind,
 )
 from dataclasses import dataclass
@@ -46,6 +46,7 @@ class _WorkItem:
     idempotency_key: IdempotencyKey
     tenant: TenantId
     claim_epoch: int = 0
+    max_attempts: int = 3
 
 
 def _now_ms() -> int:
@@ -73,6 +74,7 @@ class SubagentRuntime:
         max_width: int = 8,
         max_attempts: int = 3,
         per_task_timeout: float = 120.0,
+        setup_timeout: float = 240.0,
         artifact_inline_threshold: int = 16384,
         upstream_breaker: UpstreamBreaker | None = None,
         binding_store: "SliceStore | None" = None,
@@ -82,6 +84,7 @@ class SubagentRuntime:
         self._max_width = max_width
         self._max_attempts = max_attempts
         self._per_task_timeout = per_task_timeout
+        self._setup_timeout = setup_timeout
         self._artifact_inline_threshold = artifact_inline_threshold
         self._upstream_breaker = upstream_breaker
         self._binding_store = binding_store
@@ -173,9 +176,20 @@ class SubagentRuntime:
             idempotency_key=idempotency_key or IdempotencyKey(f"{run.run_id}:{minted}"),
             tenant=run.tenant,
             claim_epoch=self._claim_epoch,
+            max_attempts=self._resolve_max_attempts(run),
         )
         await self._work.put(item)
         return minted
+
+    def _resolve_max_attempts(self, run: Run) -> int:
+        # Per-run override wins when present; absent falls to this pod's
+        # configured default. Snapshotted at spawn so every attempt of the
+        # item sees one value even though options are re-read per slice.
+        opts = getattr(run, "run_options", None)
+        override = getattr(opts, "max_attempts", None) if opts is not None else None
+        if override is None:
+            return self._max_attempts
+        return max(1, min(int(override), self._max_attempts))
 
     async def wait_for_completions(self, timeout: float | None = None) -> list[dict[str, Any]]:
         if timeout is None or timeout < 0:
@@ -247,13 +261,19 @@ class SubagentRuntime:
                     "[agentswarm][runtime] agent=%s envelope_schema_invalid: %s",
                     item.agent_id, exc,
                 )
+                await self._journal_result(
+                    item, 1, "FAILED", "envelope_schema_invalid",
+                )
                 return self._mk_result(
                     item, AgentStatus.FAILED, None, "envelope_schema_invalid", 1,
                 )
 
         last_error: str | None = None
-        for attempt in range(1, self._max_attempts + 1):
+        attempts_used = item.max_attempts
+        for attempt in range(1, item.max_attempts + 1):
+            attempts_used = attempt
             if self._slice_lost.is_set():
+                await self._journal_result(item, attempt, "SLICE_LOST", "slice_lost")
                 return self._mk_result(item, AgentStatus.FAILED, None, "slice_lost", attempt)
 
             if (self._upstream_breaker is not None
@@ -261,6 +281,8 @@ class SubagentRuntime:
                 # 12.5: fail fast without calling the subagent — a run degrades
                 # through its normal failure path instead of burning the
                 # attempt budget waiting out timeouts against a dead upstream.
+                await self._journal_result(
+                    item, attempt, "FAILED", "upstream_breaker_open")
                 return self._mk_result(
                     item, AgentStatus.FAILED, None, "upstream_breaker_open", attempt,
                 )
@@ -277,7 +299,12 @@ class SubagentRuntime:
                 subagent = self._factory.create(
                     spec, item.run, item.agent_id, attempt,
                 )
-                await subagent.setup()
+                # Write-ahead: the binding INTENT lands before setup()
+                # so a setup failure leaves a reconcilable ledger row.
+                await self._journal_intent(subagent, spec, item, attempt)
+                await asyncio.wait_for(
+                    subagent.setup(), timeout=self._setup_timeout,
+                )
                 await self._journal_binding(subagent, spec, item, attempt)
                 raw = await asyncio.wait_for(
                     subagent.run_task(item.envelope),
@@ -288,6 +315,8 @@ class SubagentRuntime:
                     if schema_error is not None:
                         # D42: schema-invalid results are retried, never routed.
                         last_error = f"schema_validation: {schema_error}"
+                        await self._journal_result(
+                            item, attempt, "FAILED", last_error)
                         logger.warning(
                             "[agentswarm][runtime] agent=%s attempt=%d schema_validation=: %s",
                             item.agent_id, attempt, schema_error,
@@ -299,9 +328,11 @@ class SubagentRuntime:
                     # materialized — a spill failure must not pair a recorded
                     # success with the attempt's recorded failure.
                     self._upstream_breaker.record_success()
+                await self._journal_result(item, attempt, "COMPLETED", None)
                 return result
             except asyncio.TimeoutError:
                 last_error = "timeout"
+                await self._journal_result(item, attempt, "TIMEOUT", "timeout")
                 self._record_upstream_failure()
                 logger.warning("[agentswarm][runtime] agent=%s attempt=%d timeout", item.agent_id, attempt)
             except asyncio.CancelledError:
@@ -320,8 +351,25 @@ class SubagentRuntime:
                     "[agentswarm][runtime] agent=%s attempt=%d binding journal fenced out",
                     item.agent_id, attempt,
                 )
+                # Terminal cooperative unwind: the item ends at the next
+                # top-of-loop check, so journal this attempt's outcome now.
+                await self._journal_result(item, attempt, "SLICE_LOST", "slice_lost")
             except Exception as exc:
+                if self._is_non_retryable(exc):
+                    # Deterministic provisioning failures (a space quota
+                    # ceiling) will fail every retry the same way — fail
+                    # now without burning the attempt budget, and never
+                    # feed the LLM upstream breaker.
+                    last_error = f"{type(exc).__name__}: {exc}"
+                    logger.warning(
+                        "[agentswarm][runtime] agent=%s attempt=%d "
+                        "non_retryable=%s error=%s",
+                        item.agent_id, attempt, type(exc).__name__, exc,
+                    )
+                    await self._journal_result(item, attempt, "FAILED", last_error)
+                    break
                 last_error = str(exc)
+                await self._journal_result(item, attempt, "FAILED", last_error)
                 self._record_upstream_failure()
                 logger.warning("[agentswarm][runtime] agent=%s attempt=%d error=%s", item.agent_id, attempt, exc)
             finally:
@@ -336,18 +384,55 @@ class SubagentRuntime:
                             item.agent_id,
                         )
 
-        return self._mk_result(item, AgentStatus.FAILED, None, last_error, self._max_attempts)
+        await self._journal_result(
+            item, attempts_used, "FAILED", last_error,
+        )
+        return self._mk_result(
+            item, AgentStatus.FAILED, None, last_error, attempts_used,
+        )
+
+    @staticmethod
+    def _is_non_retryable(exc: BaseException) -> bool:
+        # Agentswarm-owned marker only — the pool never imports the host
+        # platform that raised the original error (D17).
+        return isinstance(exc, NonRetryableProvisioningError)
+
+    async def _journal_intent(self, subagent: Any, spec: AgentSpec,
+                               item: _WorkItem, attempt: int) -> None:
+        """Write-ahead binding INTENT journal, before ``setup()``.
+
+        The row lands keyed by the attempt UK under the same D28 claim
+        fence as every other slice write, with whatever executor
+        surface the subagent exposes at spawn time (a bot-kind persona
+        is still blank — the terminal destroy sweep reconciles blank
+        rows through the attempt's derived identity). A pre-D-J double
+        without the executor attribute journals nothing, exactly like
+        the post-setup settle. A fenced-out insert unwinds as
+        ``SliceLost`` so a dead claim never provisions a persona.
+        """
+        if self._binding_store is None or self._slice_lost.is_set():
+            return
+        if getattr(subagent, "executor_id", None) is None:
+            return
+        executor_id = str(getattr(subagent, "executor_id", "") or "")
+        executor_name = str(getattr(subagent, "executor_name", "") or spec.name)
+        await self._binding_store.journal_attempt_intent(
+            item.run, item.agent_id, item.claim_epoch, attempt,
+            self._executor_kind(spec), executor_id, executor_name,
+        )
 
     async def _journal_binding(self, subagent: Any, spec: AgentSpec,
                                 item: _WorkItem, attempt: int) -> None:
-        """Journal the attempt's executor identity after setup (D-L).
+        """Settle the attempt's executor identity after setup (D-L).
 
-        The read is additive SPI getattr: subagent doubles without the
-        executor surfaces journal nothing (a pre-D-J double must not mint
-        a blank ledger row), and a blank executor_id skips the write the
-        same way. ``executor_state`` is journal-time SPAWNED; the per
-        attempt teardown never marks ledger rows — only the terminal
-        destroy sweep writes DESTROYED.
+        The store call is insert-or-settle by the attempt UK: with the
+        write-ahead intent row already landed it becomes the fenced
+        UPDATE that fills in the provisioned persona's executor id and
+        flips ``executor_state`` to BOUND; every attempt still converges
+        on exactly one row. The read stays additive SPI getattr: a blank
+        executor_id (a pre-D-J double, or a setup that surfaced no
+        identity) skips the settle — the intent row the destroy sweep
+        reconciles stays.
         """
         if self._binding_store is None or self._slice_lost.is_set():
             return
@@ -358,6 +443,25 @@ class SubagentRuntime:
         await self._binding_store.record_agent_binding(
             item.run, item.agent_id, item.claim_epoch, attempt,
             self._executor_kind(spec), executor_id, executor_name,
+        )
+
+    async def _journal_result(self, item: _WorkItem, attempt: int,
+                              result_status: str,
+                              result_message: str | None) -> None:
+        """Best-effort per-attempt outcome write on the ledger.
+
+        Every terminal outcome of an attempt (COMPLETED/FAILED/SLICE_LOST/
+        TIMEOUT) is recorded so the ledger's ``executor_state`` — which is
+        provisioning-only — no longer hides a failed attempt behind a
+        SPAWNED row. The write is diagnostic: a journal failure must never
+        raise or change the attempt's control flow, and the store call is
+        itself best-effort (SliceStore.journal_attempt_result).
+        """
+        if self._binding_store is None:
+            return
+        await self._binding_store.journal_attempt_result(
+            item.run, item.agent_id, item.claim_epoch, attempt,
+            result_status, result_message,
         )
 
     @staticmethod

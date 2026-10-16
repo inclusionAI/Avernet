@@ -26,7 +26,7 @@ from agentclaw.community.core.agentswarm.orchestration.termination import (
 from tests.community.core.agentswarm.runtime.handler.test_swarm_slice import (
     TENANT, WORKER, _TestDB, FakeFactory, RepeatingLLMProvider, _build_env,
     _enqueue_and_claim, _finish_decision, _mk_run, _spawn_decision,
-    _wait_decision,
+    _wait_decision, _spin_ref,
 )
 
 import dataclasses
@@ -154,7 +154,7 @@ class TestClaimEpochFencing:
 
 class TestReclaimCircuitBreaker:
     def test_no_progress_reclaims_trip_to_terminal_stuck(self, db):
-        # A wait decision on a name that never resolves keeps the slice
+        # A wait decision on a permanently-unsatisfied ref keeps the slice
         # non-terminal for its whole budget: the run can only progress via
         # reclaim, which the D40 breaker eventually terminates. The
         # turn-based no-progress evaluator is neutralized so it cannot
@@ -166,6 +166,7 @@ class TestReclaimCircuitBreaker:
             termination=TerminationEvaluator(no_progress_threshold=999),
         )
         run = _mk_run()
+        _spin_ref(env, run)
         first = _enqueue_and_claim(env, run)
         env.job_repo.renew_lease(
             run.run_id, TENANT, WORKER, -1, first["claim_epoch"],
@@ -304,6 +305,7 @@ class TestRollingRestartWithProgressSurvivesBreaker:
             termination=TerminationEvaluator(no_progress_threshold=999),
         )
         run = _mk_run()
+        _spin_ref(env, run)
         claim = _enqueue_and_claim(env, run)
         env.job_repo.renew_lease(
             run.run_id, TENANT, WORKER, -1, claim["claim_epoch"],
@@ -509,6 +511,7 @@ class TestPersonaReplayAcrossSlices:
             FakeFactory(), config=_tight_config(),
         )
         run = _mk_run()
+        _spin_ref(env_a, run)
         claim = _enqueue_and_claim(env_a, run)
 
         outcome_a = asyncio.run(env_a.handler.handle_slice(

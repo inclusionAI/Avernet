@@ -18,6 +18,12 @@ from agentclaw.community.core.agentswarm.domain.models import (
 )
 
 
+# 4xx statuses that are transient (retryable): the server-side throttle /
+# timeout / too-early markers. Every other 4xx is a permanent client error
+# (bad auth, bad request) and must fail immediately without burning retries.
+_TRANSIENT_STATUSES = frozenset({408, 425, 429})
+
+
 class OpenAICompatibleClient:
     def __init__(
         self,
@@ -72,7 +78,8 @@ class OpenAICompatibleClient:
                 parsed = self._parse_response(response.json(), model)
                 return parsed
             except httpx.HTTPStatusError as exc:
-                if 400 <= exc.response.status_code < 500:
+                if (400 <= exc.response.status_code < 500
+                        and exc.response.status_code not in _TRANSIENT_STATUSES):
                     raise RuntimeError(
                         f"chat completion failed (client error): {exc.response.status_code}"
                     ) from exc

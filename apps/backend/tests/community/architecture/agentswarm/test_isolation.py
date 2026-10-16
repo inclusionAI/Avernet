@@ -69,12 +69,17 @@ _SCHEMAS = (
 #     owns no enum for either), and the adapter derives the cluster from
 #     engine, so a new engine never drifts a closed set here.
 #   owner_id — the provisioning caller identity on the BotPlatform seam: an
-#     open principal string owned by the auth layer; the empty default is
-#     "defer to the platform's configured bootstrap owner", never a
-#     service-account fallback.
+#     open principal string owned by the auth layer; blank never falls
+#     back to an ambient identity — the platform fails the call clear
+#     and the factory gates on the run's authenticated submitter.
+#   config_manifest — a caller-authored document, not vocabulary: the
+#     full bot_config_manifest YAML string, whose grammar the platform's
+#     own preflight owns; blank means "the host synthesizes the
+#     identity-only persona document", so "" is a semantic default, not
+#     one value of an open set.
 _STR_DEFAULT_ALLOWLIST: frozenset[str] = frozenset({
     "provider", "model", "instructions", "description", "identity_file",
-    "engine", "bot_type", "owner_id",
+    "engine", "bot_type", "owner_id", "config_manifest",
 })
 
 # Closed-set parameter vocabulary must be typed with one of the module

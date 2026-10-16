@@ -113,7 +113,8 @@ class TestDefensiveParsing:
 
     def test_valid_values_parse(self):
         cfg = AgentSwarmConfig.from_block({
-            "orchestration": {"max_turns": 3, "slice_max_seconds": 12.5},
+            "orchestration": {"max_turns": 3, "slice_max_seconds": 12.5,
+                              "setup_timeout": 5, "per_subagent_timeout": 5},
             "retention": {"artifact_ttl_days": 30},
             "message_retention_tail": 10,
             "artifact_store_root": "/var/agentswarm",
@@ -181,7 +182,8 @@ class TestDefensiveParsing:
         # strict positivity must not clamp legitimate sub-second cadences
         cfg = AgentSwarmConfig.from_block({
             "orchestration": {"poll_interval": 0.25, "slice_interval": 0.1,
-                              "slice_max_seconds": 1},
+                              "slice_max_seconds": 1,
+                              "setup_timeout": 0.4, "per_subagent_timeout": 0.4},
             "drain": {"grace_seconds": 0.5},
             "retention": {"sweep_interval_seconds": 1},
             "admission": {"max_pending_jobs": 1},
@@ -281,56 +283,35 @@ class TestDiProviderWiring:
             assert "AGENTSWARM_ARTIFACT_ROOT" in text, name
 
 
-class TestHostOwnerRequired:
-    """``agentswarm.host.owner_id`` — required when the host block ships
-    (P0-9): the account swarm-created bots belong to has no
-    service-account fallback, so a present-but-blank owner is a config
-    error, not a downgrade. An absent block keeps the bare-defaults
-    contract (no platform side opted in), and the refusal for an
-    unconfigured owner happens at the bot_platform provider."""
+class TestNoProfileLevelIdentity:
+    """The config names no provisioning identity — ever. A ``host`` block
+    of any shape (set owner, blank owner, non-string owner) parses to
+    exactly the bare default: ``from_block`` treats it as an unknown
+    key, there is no ``host`` field on ``AgentSwarmConfig``, and no
+    value raises. The provisioning owner exists only per-run/per-call —
+    the authenticated submitter carried by the run."""
 
-    def test_host_block_with_blank_owner_raises_config_error(self):
-        from agentclaw.community.core.agentswarm.service.protocols import (
-            AgentSwarmConfigError,
-        )
-        for owner in ("", "   "):
-            with pytest.raises(AgentSwarmConfigError):
-                AgentSwarmConfig.from_block({"host": {"owner_id": owner}})
+    def test_config_has_no_host_field(self):
+        assert not hasattr(AgentSwarmConfig(), "host")
 
-    def test_host_owner_error_names_the_knob_and_the_reason(self):
-        from agentclaw.community.core.agentswarm.service.protocols import (
-            AgentSwarmConfigError,
-        )
-        with pytest.raises(AgentSwarmConfigError) as excinfo:
-            AgentSwarmConfig.from_block({"host": {"owner_id": ""}})
-        message = str(excinfo.value)
-        assert "host.owner_id" in message
-        assert "no service-account fallback" in message
+    def test_host_block_with_any_owner_is_ignored_not_parsed(self):
+        for block in (
+            {"host": {"owner_id": "owner-1"}},
+            {"host": {"owner_id": " owner-1 "}},
+            {"host": {"owner_id": ""}},
+            {"host": {"owner_id": "   "}},
+            {"host": {"owner_id": 7}},
+            {"host": None},
+            {"host": {}},
+            {"host": "owner-1"},
+        ):
+            parsed = AgentSwarmConfig.from_block(block)
+            assert parsed == AgentSwarmConfig(), block
+            assert not hasattr(parsed, "host")
 
-    def test_host_block_with_set_owner_parses(self):
-        cfg = AgentSwarmConfig.from_block({"host": {"owner_id": "owner-1"}})
-        assert cfg.host.owner_id == "owner-1"
-
-    def test_host_owner_strips_surrounding_blanks(self):
-        cfg = AgentSwarmConfig.from_block({"host": {"owner_id": " owner-1 "}})
-        assert cfg.host.owner_id == "owner-1"
-
-    def test_absent_host_block_keeps_bare_default_owner(self):
-        # no host block: no platform opt-in, owner stays empty and the
-        # bot_platform provider refuses construction (logged by
-        # provide_runtime) — the bare-defaults contract is unchanged.
-        assert AgentSwarmConfig.from_block({}).host.owner_id == ""
+    def test_absent_host_block_equals_bare_default(self):
         assert AgentSwarmConfig.from_block({}) == AgentSwarmConfig()
         assert AgentSwarmConfig.from_block(None) == AgentSwarmConfig()
-
-    def test_non_string_owner_downgrades_to_refusal(self):
-        from agentclaw.community.core.agentswarm.service.protocols import (
-            AgentSwarmConfigError,
-        )
-        # a present host block with a non-string owner cannot parse to a
-        # usable identity — same precise refusal as a blank one.
-        with pytest.raises(AgentSwarmConfigError):
-            AgentSwarmConfig.from_block({"host": {"owner_id": 7}})
 
 
 class TestTerminationKnobs:

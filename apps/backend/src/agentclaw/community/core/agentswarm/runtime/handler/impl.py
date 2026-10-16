@@ -72,6 +72,7 @@ class SwarmRunHandler:
         self._worker_id = uuid.uuid4().hex[:8]
         self._active_run_id: RunId | None = None
         self._active_tenant: TenantId | None = None
+        self._finalized = False
         self.store = SliceStore(
             config, agent_repo, message_repo, shard_repo, round_repo,
             lost_probe=lambda: self._slice_lost.is_set(),
@@ -109,6 +110,22 @@ class SwarmRunHandler:
                 run_id,
             )
 
+    def ensure_run_cleanup(self, run_id: RunId, tenant: TenantId) -> bool:
+        """Idempotent teardown guarantee for a TERMINAL run.
+
+        Safe to call from any path, any number of times, any pod: it only
+        acts once the run row is terminal, and ``destroy_run_agents_bots``
+        converges per ledger row (delete-if-live, then mark DESTROYED), so
+        concurrent callers cannot double-delete or resurrect a settled row.
+        Returns True when it ran the sweep. A still-RUNNING run returns False
+        — its personas are live and the slice owns them.
+        """
+        run = self._run_repo.get(run_id, tenant)
+        if run is None or run.status is RunStatus.RUNNING:
+            return False
+        self._destroy_run_avernet_bots(run_id, tenant)
+        return True
+
     def force_stuck(self, run_id: RunId, tenant: TenantId, claim_epoch: int,
                     error: str, worker_id: str | None = None) -> bool:
         """D40 reclaim circuit breaker: transition a poison run to terminal STUCK.
@@ -130,9 +147,69 @@ class SwarmRunHandler:
         )
         if ok:
             self._destroy_run_avernet_bots(run_id, tenant)
-            self.store.apply_run_retention_blocking(run_id, tenant)
+        self.store.apply_run_retention_blocking(run_id, tenant)
         self._job_repo.complete(run_id, tenant, self._worker_id, claim_epoch)
         return ok
+
+    async def _finalize_cancelled(self, run_id: RunId, tenant: TenantId,
+                                  claim_epoch: int) -> str:
+        """Terminal CANCELLED through the fenced write, persona teardown,
+        retention, and job completion. Shared by the claim-time cancel
+        entry and the mid-slice cancel re-probe: a cancel landing after
+        the slice claimed the job must terminalize promptly instead of
+        waiting out the slice budget spawning further cohorts."""
+        if self._finalized:
+            await run_blocking(
+                self._job_repo.complete, run_id, tenant, self._worker_id,
+                claim_epoch,
+            )
+            return "complete"
+        # Stop the pool first: in-flight attempts must stop persisting
+        # and retried provisioning must not mint new personas once the
+        # cancellation is being applied (the drain's cooperative-unwind
+        # idiom — lost_probe gates every journal/persist write).
+        self.set_slice_lost(True, run_id)
+        run = await run_blocking(self._run_repo.get, run_id, tenant)
+        if run is not None and run.status is RunStatus.RUNNING:
+            if await run_blocking(
+                self._run_repo.update_status,
+                run_id, tenant, RunStatus.CANCELLED,
+                termination_reason=TerminationReason.CANCELLED,
+                claim_epoch=claim_epoch,
+            ):
+                await run_blocking(
+                    self._destroy_run_avernet_bots, run_id, tenant,
+                )
+                await self.store.apply_run_retention(run_id, tenant)
+        await run_blocking(
+            self._job_repo.complete, run_id, tenant, self._worker_id,
+            claim_epoch,
+        )
+        return "complete"
+
+    async def _finalize_stuck_slice_lost(self, run_id: RunId, tenant: TenantId,
+                                         claim_epoch: int,
+                                         ref: dict[str, Any]) -> str:
+        """D40 terminal for a run looping on a shardless slice_lost ref."""
+        detail = (
+            f"slice_lost reclaim circuit breaker: shardless agent "
+            f"agent_id={ref.get('agent_id')} name={ref.get('name')} "
+            f"attempts={ref.get('attempts')}"
+        )
+        ok = await run_blocking(
+            self._run_repo.update_status,
+            run_id, tenant, RunStatus.STUCK,
+            termination_reason=TerminationReason.STUCK,
+            error=detail, claim_epoch=claim_epoch,
+        )
+        if not ok:
+            raise _SliceLost()
+        await run_blocking(self._destroy_run_avernet_bots, run_id, tenant)
+        await self.store.apply_run_retention(run_id, tenant)
+        await run_blocking(
+            self._job_repo.complete, run_id, tenant, self._worker_id, claim_epoch,
+        )
+        return "stuck"
 
     def force_fail(self, run_id: RunId, tenant: TenantId, claim_epoch: int,
                    error: str, worker_id: str | None = None) -> bool:
@@ -181,29 +258,14 @@ class SwarmRunHandler:
             self._worker_id = worker_id
         self._active_run_id = run_id
         self._active_tenant = tenant
+        self._finalized = False
         self.set_slice_lost(False, run_id)
         # The slice's fencing token for spawn-time journaling (D-K/D-L):
         # every WorkItem the pool enqueues in this slice snapshots it.
         self._runtime.set_claim_epoch(claim_epoch)
 
         if cancel_requested:
-            run = await run_blocking(self._run_repo.get, run_id, tenant)
-            if run is not None and run.status is RunStatus.RUNNING:
-                if await run_blocking(
-                    self._run_repo.update_status,
-                    run_id, tenant, RunStatus.CANCELLED,
-                    termination_reason=TerminationReason.CANCELLED,
-                    claim_epoch=claim_epoch,
-                ):
-                    await run_blocking(
-                        self._destroy_run_avernet_bots, run_id, tenant,
-                    )
-                    await self.store.apply_run_retention(run_id, tenant)
-            await run_blocking(
-                self._job_repo.complete, run_id, tenant, self._worker_id,
-                claim_epoch,
-            )
-            return "complete"
+            return await self._finalize_cancelled(run_id, tenant, claim_epoch)
 
         run = await run_blocking(self._run_repo.get, run_id, tenant)
         if run is None:
@@ -218,6 +280,18 @@ class SwarmRunHandler:
         state, done_pairs, interrupted = await self.store.rehydrate(
             run, claim_epoch,
         )
+        # D34 crash/lost-claim survival: if a crash parked this
+        # slice mid-wait on a ref whose agent is now FAILED, the wait is
+        # unsatisfiable — fail fast through the same fenced path instead
+        # of respawning the doomed wait.
+        if state.pending_wait_refs:
+            failed_ref = await self.store.first_failed_wait_ref(
+                run_id, tenant, state.pending_wait_refs,
+            )
+            if failed_ref is not None:
+                return await self._abort_failed_blocking_ref(
+                    run_id, tenant, failed_ref, claim_epoch,
+                )
         await run_blocking(
             self._run_repo.update_status,
             run_id, tenant, RunStatus.RUNNING, claim_epoch=claim_epoch,
@@ -226,6 +300,7 @@ class SwarmRunHandler:
 
         try:
             await self._runtime.start()
+            reschedule_slice_lost = False
             for agent in interrupted:
                 # D16/D24: re-instantiate interrupted agents under their existing
                 # identity and idempotency key — never under a fresh AgentId.
@@ -235,6 +310,16 @@ class SwarmRunHandler:
                     idempotency_key=agent.idempotency_key,
                 )
             while True:
+                if await run_blocking(
+                    self._job_repo.is_cancel_requested, run_id, tenant,
+                ):
+                    # A cancel that landed after this slice claimed the job
+                    # must not wait out the slice budget (up to
+                    # slice_max_seconds of further spawning) — honor it
+                    # between turns.
+                    return await self._finalize_cancelled(
+                        run_id, tenant, claim_epoch,
+                    )
                 self._check_lost()
                 await self._drain_completions(
                     await self._runtime.wait_for_completions(timeout=0), state,
@@ -259,10 +344,35 @@ class SwarmRunHandler:
                     return await self._finalize(run_id, tenant, term, outcome, claim_epoch)
 
                 if outcome.get("wait_refs") is not None:
-                    await self._await_refs(
+                    failed_ref = await self._await_refs(
                         run_id, tenant, outcome["wait_refs"],
                         outcome.get("wait_mode") or WaitMode.ALL, deadline, state,
                     )
+                    if (isinstance(failed_ref, dict)
+                            and "_reschedule_slice_lost" in failed_ref):
+                        # Count the no-progress reschedule and trip the D40
+                        # breaker ourselves: a PENDING reschedule is claimed
+                        # via claim_batch (reclaimed=False), so the worker's
+                        # reclaim_batch breaker check never sees it.
+                        reclaims = await run_blocking(
+                            self._job_repo.bump_reclaim,
+                            run_id, tenant, self._worker_id, claim_epoch,
+                        )
+                        if (reclaims is not None
+                                and reclaims > self._config.orchestration.reclaim_max):
+                            return await self._finalize_stuck_slice_lost(
+                                run_id, tenant, claim_epoch,
+                                failed_ref["_reschedule_slice_lost"],
+                            )
+                        reschedule_slice_lost = True
+                        break
+                    if failed_ref is not None:
+                        # A FAILED agent blocks an ACTIVE wait ref its
+                        # shard can never satisfy — abort the run
+                        # instead of wedging the slice forever.
+                        return await self._abort_failed_blocking_ref(
+                            run_id, tenant, failed_ref, claim_epoch,
+                        )
                 elif outcome.get("spawn"):
                     await self._dispatch_spawn(run, state, outcome["spawn"], done_pairs)
                 elif outcome.get("persona") is not None:
@@ -290,6 +400,11 @@ class SwarmRunHandler:
             self._active_tenant = None
             await self._runtime.stop()
 
+        if reschedule_slice_lost:
+            await self._release_claim(
+                run_id, tenant, claim_epoch, "slice_lost shardless ref",
+            )
+            return "reschedule"
         await run_blocking(
             self._job_repo.reschedule,
             run_id, tenant, self._worker_id,
@@ -415,23 +530,83 @@ class SwarmRunHandler:
 
     async def _await_refs(self, run_id: RunId, tenant: TenantId, refs: tuple[str, ...],
                           mode: WaitMode, deadline: float,
-                          state: RunState | None = None) -> None:
+                          state: RunState | None = None) -> dict[str, Any] | None:
+        """Block until the refs are satisfiable; never wedge on dead agents.
+
+        Returns the failed-blocking agent dict when a FAILED agent
+        blocks an ACTIVE (unsatisfied) wait ref — evaluated AFTER a full
+        batch drain, so a batch that satisfies the goal (or the ANY
+        mode's needed ref) wins over a failure landing in the same
+        batch. Returns ``{"_reschedule_slice_lost": {...}}`` when a
+        shardless FAILED slice_lost agent parks the wait (the in-slice
+        respawn re-fences at this claim epoch, so the ref can never be
+        satisfied here) — the sentinel tells ``handle_slice`` to
+        reschedule immediately. Budget exhaustion still returns None
+        (D34: persisted shards are the durable continuation point)."""
         while True:
             unsatisfied = await self.store.unsatisfied_refs(run_id, tenant, refs)
             if not unsatisfied:
-                return
+                return None
+            # An unsatisfied ref with NO agent row is a deferred spawn
+            # (width/depth cap rejected it this slice), not a dead branch:
+            # yield to the next turn so the orchestrator re-emits the spawn
+            # once capacity frees. Never fail, never slice_lost.
+            unspawned = await self.store.unspawned_wait_refs(
+                run_id, tenant, unsatisfied)
+            if unspawned == tuple(unsatisfied):
+                return None
             if mode == WaitMode.ANY and len(unsatisfied) < len(refs):
-                return
+                return None
+            failed = await self.store.first_failed_wait_ref(
+                run_id, tenant, unsatisfied,
+            )
+            if failed is not None:
+                return failed
+            # A shardless FAILED slice_lost agent is revivable by the next
+            # claim's rehydrate prologue, but NOT by this slice: its respawn
+            # re-fences at our claim epoch. Return the sentinel so
+            # handle_slice reschedules NOW instead of blocking to the
+            # deadline and looping as an uncounted PENDING claim.
+            slice_lost = await self.store.first_slice_lost_wait_ref(
+                run_id, tenant, unsatisfied,
+            )
+            if slice_lost is not None:
+                return {"_reschedule_slice_lost": slice_lost}
             self._check_lost()
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                # Budget exhausted mid-wait: persisted shards are the durable
-                # continuation point for the next slice (D34).
-                return
+                return None
+            if await run_blocking(
+                self._job_repo.is_cancel_requested, run_id, tenant,
+            ):
+                return None
             await self._drain_completions(
                 await self._runtime.wait_for_completions(timeout=min(remaining, 0.25)),
                 state,
             )
+
+    async def _abort_failed_blocking_ref(self, run_id: RunId, tenant: TenantId,
+                                          failed: dict[str, Any],
+                                          claim_epoch: int) -> str:
+        """Terminate the run because a FAILED agent blocks an awaited ref.
+
+        The run cannot make progress, so it is failed through the fenced
+        ``_finalize_failure`` write (``TerminationReason.ERROR``), carrying
+        the failed agent's id, attempts, and error in the run's error
+        string. ``self._finalized`` makes it fire at most once per slice.
+        """
+        if self._finalized:
+            return "fail"
+        self._finalized = True
+        detail = (
+            f"failed agent blocks awaited refs: "
+            f"agent_id={failed.get('agent_id')} name={failed.get('name')} "
+            f"attempts={failed.get('attempts')} error={failed.get('error')!r}"
+        )
+        return await self._finalize_failure(
+            run_id, tenant, TerminationReason.ERROR,
+            {"fatal": detail}, claim_epoch,
+        )
 
     @staticmethod
     def _resolve_final_status(term: TerminationReason) -> RunStatus:

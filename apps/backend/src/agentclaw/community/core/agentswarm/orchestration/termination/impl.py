@@ -26,6 +26,7 @@ class _NoProgressWindow:
 
     last_turn: int = -1
     last_routed_shard_count: int = -1
+    last_spawn_count: int = -1
     flat_streak: int = 0
 
 
@@ -74,16 +75,23 @@ class TerminationEvaluator:
             self._windows.move_to_end(run_id)
         if window.last_turn != state.turn_count:
             # One observation per orchestrator turn (the handler evaluates
-            # once after each decision): a turn that routes no new shard
-            # since the previous turn is one no-progress observation. The
-            # first observation is the baseline; spawning alone is not
-            # progress — only a routed result shard is.
+            # once after each decision). A turn is FLAT only when nothing
+            # is in flight AND nothing new landed: routed shards are real
+            # progress, newly dispatched spawns are progress, and spawned-
+            # but-unsharded agents are IN FLIGHT — a mid-provisioning cohort
+            # (a BaaS persona takes ~90-120s) with spawned > routed is
+            # activity by definition; a repeated WAIT on already-satisfied
+            # refs during that window must not stack the streak.
+            in_flight = state.total_agents_spawned - state.routed_shard_count
             if state.routed_shard_count > window.last_routed_shard_count >= 0:
+                window.flat_streak = 0
+            elif in_flight > 0:
                 window.flat_streak = 0
             elif window.last_routed_shard_count >= 0:
                 window.flat_streak += 1
             window.last_turn = state.turn_count
             window.last_routed_shard_count = state.routed_shard_count
+            window.last_spawn_count = state.total_agents_spawned
         return window.flat_streak >= self._no_progress_threshold
 
     def _wall_clock(self, state: RunState) -> bool:

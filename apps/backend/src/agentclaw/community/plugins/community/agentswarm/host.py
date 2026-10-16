@@ -18,8 +18,13 @@ bind-agentswarm-host-bot-platform):
   (ordinary creates, record-first engines, later explicit applies) is out of
   scope here, and the unit tests pin every branch of the narrow table.
 - delete is phase-aware and best-effort: discard the pending creation when no
-  bot exists, soft-delete the bot when one does, and never raise — teardown
-  must not change the slice outcome.
+  bot exists, soft-delete the bot when one does, and never raise in
+  teardown once a per-call owner is present — teardown must not change
+  the slice outcome.
+- identity is per-call, exclusively: every method refuses a blank
+  ``owner_id`` (the run's authenticated submitter is the only owner any
+  platform call ever acts under; no profile-level or ambient identity
+  exists, and the SPI ``owner_id`` string never falls back to one).
 - chat drives the engine transport directly: the chat endpoint comes from
   the canonical BaaS ws-info (``BaasService.get_ws_info_by_bot_uuid`` — the
   same resolution every other chat surface uses), and the adapter's
@@ -43,8 +48,12 @@ bind-agentswarm-host-bot-platform):
 
 The adapter is a pure function of its three inputs — (spec, idempotency_key,
 host profile) — and owns no state of its own. ``model`` and ``metadata`` on the
-spec have no manifest/create slot today (engine_config is refused at creation);
-the host profile documents them as not honored rather than inventing one.
+spec have no create slot today (engine_config is refused at creation); the host
+profile documents them as not honored rather than inventing one. The one
+document-shaped input is ``config_manifest``: when the spec carries a full
+five-category bot_config_manifest YAML document, the adapter submits it verbatim
+(a suitable identity category is the caller's care); blank keeps the composed
+identity-only persona document.
 
 Bound by the ``AgentSwarmModule.bot_platform`` DI provider
 (``di/modules/agentswarm``), which sits in the composition root's base module
@@ -69,11 +78,15 @@ import yaml
 
 from agentclaw.community.core.agentswarm.domain.models import (
     BotCreateSpec, BotId, BotState, IdempotencyKey,
+    NonRetryableProvisioningError,
 )
 from agentclaw.community.plugin_api.agentswarm.bot import BotPlatform
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER, CREATE_PRE_CONTAINER_TRIGGER,
+)
+from agentclaw.community.core.bot_config_manifest.schema import (
+    ManifestValidationError,
 )
 from agentclaw.community.core.bot_config_manifest.create_job import (
     AUTHORIZATION_WINDOW_ELAPSED, BOT_COULD_NOT_BE_PROVISIONED,
@@ -233,7 +246,7 @@ def bot_id_for(run_id: str, agent_id: str) -> str:
     The platform's create derives the same value from the spawn's
     idempotency key, so a cleanup that only knows the run and agent ids
     can still address the bot that was created for it."""
-    return f"ac_{_idem_digest(f'{run_id}:{agent_id}', _HASHED_IDEMPOTENCY_ID_DIGITS)}"
+    return f"agent_swarm_{_idem_digest(f'{run_id}:{agent_id}', _HASHED_IDEMPOTENCY_ID_DIGITS)}"
 
 
 class AvernetBotPlatform(BotPlatform):
@@ -255,7 +268,6 @@ class AvernetBotPlatform(BotPlatform):
     def __init__(
         self,
         *,
-        owner_id: str = "",
         manifest_seam: ManifestCreationSeam,
         bot_service: Any,
         passport_plugin: Any,
@@ -266,9 +278,6 @@ class AvernetBotPlatform(BotPlatform):
         baas_service: BaasService,
         max_platform_workers: int = _DEFAULT_MAX_PLATFORM_WORKERS,
     ) -> None:
-        # owner_id is the run's provisioning identity (the submitter);
-        # per-call: per_run when the swarm identity arrives via Run.user_id
-        self._default_owner = owner_id
         self._manifest_seam = manifest_seam
         self._bot_service = bot_service
         self._passport = passport_plugin
@@ -293,19 +302,34 @@ class AvernetBotPlatform(BotPlatform):
         from agentclaw.community.core.bot_management.services.bot_service import (
             BotNameExistsError,
         )
+        from agentclaw.community.core.bot_management.bot_quota import (
+            BotQuotaExceededError,
+        )
 
-        owner = (owner_id or "").strip() or self._default_owner
+        owner = (owner_id or "").strip()
+        if not owner:
+            raise RuntimeError(
+                "provisioning requires the run's authenticated owner "
+                "(per-call owner_id); no ambient identity exists"
+            )
         # Same digest as bot_id_for(): the subagent always passes the
         # idempotency key f"{run_id}:{agent_id}", so a cleanup that only
         # knows the (run, agent) pair addresses the identical bot id.
         bot_id = (
-            f"ac_{_idem_digest(idempotency_key, _HASHED_IDEMPOTENCY_ID_DIGITS)}")
+            f"agent_swarm_{_idem_digest(idempotency_key, _HASHED_IDEMPOTENCY_ID_DIGITS)}")
         # One persona per (run, spec): the same idempotency key derives the same
         # bot identifier, so a retried setup rebinds the same creation instead of
         # minting a second one (and soft-name collisions across concurrent runs
         # are impossible: the name carries the key's digest).
         bot_name = f"{spec.name}-{_idem_digest(idempotency_key, 8)}"
-        document = yaml.safe_dump(
+        # A caller-supplied manifest document REPLACES the synthesized
+        # persona document: the spec's config_manifest is the full
+        # five-category bot_config_manifest exactly as the platform's
+        # with-manifest surface accepts it, so the platform's own
+        # preflight stays the single authority on its grammar. Blank
+        # (or whitespace-only) keeps today's behavior: identity-only
+        # synthesis from the spec's identity_file + instructions.
+        document = spec.config_manifest.strip() or yaml.safe_dump(
             {
                 "schema_version": 1,
                 "manifest": {
@@ -364,12 +388,31 @@ class AvernetBotPlatform(BotPlatform):
                 bot_id, idempotency_key,
             )
             return BotId(bot_id)
+        except BotQuotaExceededError as exc:
+            # A Space-scoped quota ceiling fails every retry the same way,
+            # so surface the swarm's non-retryable marker (the pool fails
+            # the agent without burning the attempt budget).
+            raise NonRetryableProvisioningError(str(exc)) from exc
+        except ManifestValidationError as exc:
+            # A refused manifest document is deterministic: the same
+            # document preflight-refuses identically on every attempt,
+            # so fail now with the non-retryable marker instead of
+            # burning the attempt budget on identical refusals. Narrowly
+            # the platform's own validation type (raised inside the
+            # submit, before anything is persisted) — quota refusals
+            # above keep their classification.
+            raise NonRetryableProvisioningError(str(exc)) from exc
         return BotId(submitted.bot_id)
 
     # ── status: the narrow table ──────────────────────────────────────────
 
     def bot_status(self, bot_id: BotId, owner_id: str = "") -> str:
-        owner = (owner_id or "").strip() or self._default_owner
+        owner = (owner_id or "").strip()
+        if not owner:
+            raise RuntimeError(
+                "provisioning requires the run's authenticated owner "
+                "(per-call owner_id); no ambient identity exists"
+            )
         bot = self._bot_repo.get_by_id_and_entity(bot_id, owner)
         job = self._manifest_seam.find_job(entity_id=owner, bot_id=bot_id)
 
@@ -449,7 +492,15 @@ class AvernetBotPlatform(BotPlatform):
     # ── delete ────────────────────────────────────────────────────────────
 
     def delete_bot(self, bot_id: BotId, owner_id: str = "") -> bool:
-        owner = (owner_id or "").strip() or self._default_owner
+        owner = (owner_id or "").strip()
+        if not owner:
+            # The blank-owner refusal is deliberately raised, not swallowed:
+            # an ownerless delete could never address the right persona,
+            # and the factory's sweep catches it as a logged miss.
+            raise RuntimeError(
+                "provisioning requires the run's authenticated owner "
+                "(per-call owner_id); no ambient identity exists"
+            )
         try:
             bot = self._bot_repo.get_by_id_and_entity(bot_id, owner)
             if bot is None:
@@ -476,7 +527,12 @@ class AvernetBotPlatform(BotPlatform):
         # ``_CHAT_TIMEOUT_SECONDS`` deadline and receive slices, either of
         # which (or the caller's cancel_event) unwinds the worker back to
         # the bridge pool instead of abandoning it.
-        owner = (owner_id or "").strip() or self._default_owner
+        owner = (owner_id or "").strip()
+        if not owner:
+            raise RuntimeError(
+                "provisioning requires the run's authenticated owner "
+                "(per-call owner_id); no ambient identity exists"
+            )
         try:
             return asyncio.run(self._chat_once(
                 bot_id, message, owner, session_key, cancel_event))

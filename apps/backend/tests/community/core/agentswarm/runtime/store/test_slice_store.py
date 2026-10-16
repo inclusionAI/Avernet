@@ -290,3 +290,471 @@ class TestRecordAgentBindingJournal:
         ))
         assert AgentAttemptRepository(db).list_agent_bindings(
             run.run_id, TENANT) == []
+
+
+class TestWriteAheadIntentAndSettle:
+    """Write-ahead binding intent (pre-setup) with post-setup settlement.
+
+    The intent row exists even when setup() fails (so the terminal
+    destroy sweep can reconcile a partially created persona), and the
+    post-setup settle flips the SAME attempt row to BOUND with the real
+    persona identity — one row per attempt either way.
+    """
+
+    @pytest.fixture()
+    def db(self):
+        engine = create_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        Base.metadata.create_all(engine, tables=[m.__table__ for m in om.ALL_MODELS])
+        yield _TestDB(engine)
+        engine.dispose()
+
+    def _store(self, db) -> SliceStore:
+        return SliceStore(
+            AgentSwarmConfig(),
+            AgentRepository(db), MessageRepository(db),
+            ResultShardRepository(db), RoundRepository(db),
+            lost_probe=lambda: False,
+            attempt_repo=AgentAttemptRepository(db),
+        )
+
+    def _claim(self, db, run) -> int:
+        job_repo = JobRepository(db)
+        job_repo.enqueue(run_id=run.run_id, tenant=run.tenant,
+                         deadline_seconds=3600)
+        return job_repo.claim_batch(FENCE_WORKER, [run.tenant], 1, 0)[0][
+            "claim_epoch"]
+
+    def test_intent_row_exists_on_setup_failure_settled_on_success(self, db):
+        run = _mk_run(goal="write-ahead")
+        RunRepository(db).create(run)
+        agent = _mk_agent(run, "bot-agent")
+        agent.kind = dm.AgentKind.BOT
+        AgentRepository(db).create(agent)
+        epoch = self._claim(db, run)
+        store = self._store(db)
+
+        # Intent lands before setup, executor_id still blank (bot kind).
+        asyncio.run(store.journal_attempt_intent(
+            run, agent.agent_id, epoch, attempt=1,
+            executor_kind=dm.AgentKind.BOT.value,
+            executor_id="", executor_name="scout",
+        ))
+        (intent,) = AgentAttemptRepository(db).list_agent_bindings(
+            run.run_id, TENANT)
+        assert intent["executor_id"] == ""
+        assert intent["executor_state"] == "SPAWNED"
+        assert intent["attempt"] == 1
+        assert intent["claim_epoch"] == epoch
+
+        # Setup failed: no settle — the row stays attempted-but-blank, the
+        # state the terminal destroy sweep reconciles by derived identity.
+        rows = AgentAttemptRepository(db).list_agent_bindings(run.run_id, TENANT)
+        assert len(rows) == 1 and rows[0]["executor_state"] == "SPAWNED"
+
+        # A successful attempt: the settle updates the SAME row to BOUND.
+        asyncio.run(store.record_agent_binding(
+            run, agent.agent_id, epoch, attempt=1,
+            executor_kind=dm.AgentKind.BOT.value,
+            executor_id="ac_personaid", executor_name="scout-ab12cd34",
+        ))
+        (settled,) = AgentAttemptRepository(db).list_agent_bindings(
+            run.run_id, TENANT)
+        assert settled["executor_id"] == "ac_personaid"
+        assert settled["executor_state"] == "BOUND"
+        assert settled["attempt"] == 1
+
+    def test_stale_epoch_intent_is_inert_and_unwinds(self, db):
+        run = _mk_run(goal="intent-fenced")
+        RunRepository(db).create(run)
+        agent = _mk_agent(run, "bot-agent")
+        AgentRepository(db).create(agent)
+        lost_epoch = self._claim(db, run)
+        time.sleep(0.02)
+        JobRepository(db).reclaim_batch(RECLAIMER, 1, 60)
+
+        with pytest.raises(_SliceLost):
+            asyncio.run(self._store(db).journal_attempt_intent(
+                run, agent.agent_id, lost_epoch, attempt=1,
+                executor_kind=dm.AgentKind.BOT.value,
+                executor_id="", executor_name="scout",
+            ))
+
+        assert AgentAttemptRepository(db).list_agent_bindings(
+            run.run_id, TENANT) == []
+
+    def test_predawn_intent_settle_replay_is_idempotent(self, db):
+        run = _mk_run(goal="intent-replay")
+        RunRepository(db).create(run)
+        agent = _mk_agent(run, "bot-agent")
+        AgentRepository(db).create(agent)
+        epoch = self._claim(db, run)
+        store = self._store(db)
+
+        asyncio.run(store.journal_attempt_intent(
+            run, agent.agent_id, epoch, attempt=2,
+            executor_kind=dm.AgentKind.BOT.value,
+            executor_id="", executor_name="scout",
+        ))
+        asyncio.run(store.record_agent_binding(
+            run, agent.agent_id, epoch, attempt=2,
+            executor_kind=dm.AgentKind.BOT.value,
+            executor_id="ac_personaid", executor_name="scout-ab12cd34",
+        ))
+        # A settle replay (crash after the UPDATE, before the caller acked)
+        # converges on the same single BOUND row.
+        asyncio.run(store.record_agent_binding(
+            run, agent.agent_id, epoch, attempt=2,
+            executor_kind=dm.AgentKind.BOT.value,
+            executor_id="ac_personaid", executor_name="scout-ab12cd34",
+        ))
+        rows = AgentAttemptRepository(db).list_agent_bindings(run.run_id, TENANT)
+        assert len(rows) == 1 and rows[0]["executor_state"] == "BOUND"
+
+    def test_missing_attempt_repo_intent_is_a_no_op_composition(self, db):
+        run = _mk_run(goal="intent-norepo")
+        RunRepository(db).create(run)
+        epoch = self._claim(db, run)
+
+        asyncio.run(SliceStore(
+            AgentSwarmConfig(),
+            AgentRepository(db), MessageRepository(db),
+            ResultShardRepository(db), RoundRepository(db),
+            lost_probe=lambda: False,
+        ).journal_attempt_intent(
+            run, dm.AgentId("agent-x"), epoch, attempt=1,
+            executor_kind=dm.AgentKind.BOT.value,
+            executor_id="", executor_name="scout",
+        ))
+        assert AgentAttemptRepository(db).list_agent_bindings(
+            run.run_id, TENANT) == []
+
+
+class TestFirstFailedWaitRef:
+    """The shared fail-fast predicate: only FAILED+shardless blocking refs."""
+
+    @pytest.fixture()
+    def db(self):
+        engine = create_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        Base.metadata.create_all(engine, tables=[m.__table__ for m in om.ALL_MODELS])
+        yield _TestDB(engine)
+        engine.dispose()
+
+    def _store(self, db) -> SliceStore:
+        return SliceStore(
+            AgentSwarmConfig(),
+            AgentRepository(db), MessageRepository(db),
+            ResultShardRepository(db), RoundRepository(db),
+            lost_probe=lambda: False,
+        )
+
+    def _claim(self, db, run) -> int:
+        job_repo = JobRepository(db)
+        job_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
+        return job_repo.claim_batch(FENCE_WORKER, [TENANT], 1, 0)[0][
+            "claim_epoch"]
+
+    def _fail_agent(self, db, run, agent, error: str = "boom") -> None:
+        epoch = self._claim(db, run)
+        assert AgentRepository(db).update_status(
+            run.run_id, agent.agent_id, TENANT, dm.AgentStatus.FAILED.value,
+            attempts=3, error=error, claim_epoch=epoch,
+        )
+
+    def test_failed_agent_with_shard_and_running_agent_stay_quiet(self, db):
+        run = _mk_run(goal="predicate-quiet")
+        RunRepository(db).create(run)
+        failed = _mk_agent(run, "a1")
+        running = _mk_agent(run, "a2")
+        AgentRepository(db).create(failed)
+        AgentRepository(db).create(running)
+        self._fail_agent(db, run, failed)
+        store = self._store(db)
+        # A FAILED agent nobody waits on, and a RUNNING agent, never block.
+        assert asyncio.run(store.first_failed_wait_ref(
+            run.run_id, TENANT, (),
+        )) is None
+        assert asyncio.run(store.first_failed_wait_ref(
+            run.run_id, TENANT, ("a2",),
+        )) is None
+        # A FAILED agent that delivered a shard cannot block the ref.
+        ResultShardRepository(db).create(dm.ResultShard(
+            id=dm.ShardId("sh-1"), run_id=run.run_id, tenant=TENANT,
+            source_agent_id=failed.agent_id, payload={"ok": True},
+            artifact_key=None, routed_at=dm.EpochMillis(int(time.time() * 1000)),
+        ))
+        assert asyncio.run(store.first_failed_wait_ref(
+            run.run_id, TENANT, ("a1",),
+        )) is None
+
+    def test_failed_shardless_agent_is_the_blocking_ref(self, db):
+        run = _mk_run(goal="predicate-fire")
+        RunRepository(db).create(run)
+        failed = _mk_agent(run, "a1")
+        AgentRepository(db).create(failed)
+        self._fail_agent(db, run, failed)
+        found = asyncio.run(self._store(db).first_failed_wait_ref(
+            run.run_id, TENANT, ("a1",),
+        ))
+        assert found == {
+            "agent_id": failed.agent_id, "name": "a1",
+            "attempts": 3, "error": "boom",
+        }
+
+    def test_slice_lost_failed_agent_never_blocks_the_ref(self, db):
+        run = _mk_run(goal="predicate-slice-lost")
+        RunRepository(db).create(run)
+        failed = _mk_agent(run, "a1")
+        AgentRepository(db).create(failed)
+        self._fail_agent(db, run, failed, error="slice_lost")
+        # A slice_lost FAILED row is a reclaimed claim, not a dead branch:
+        # the rescheduled slice respawns the agent under its D16 identity
+        # (see rehydrate), so the ref stays satisfiable and never blocks.
+        assert asyncio.run(self._store(db).first_failed_wait_ref(
+            run.run_id, TENANT, ("a1",),
+        )) is None
+
+    def test_slice_lost_shardless_agent_is_the_reschedule_signal(self, db):
+        run = _mk_run(goal="predicate-slice-lost-signal")
+        RunRepository(db).create(run)
+        failed = _mk_agent(run, "a1")
+        AgentRepository(db).create(failed)
+        self._fail_agent(db, run, failed, error="slice_lost")
+        store = self._store(db)
+        # The inverse predicate: first_failed_wait_ref stays quiet on a
+        # slice_lost row (revivable), while first_slice_lost_wait_ref fires
+        # on exactly that row — the in-slice deadlock signal.
+        assert asyncio.run(store.first_failed_wait_ref(
+            run.run_id, TENANT, ("a1",),
+        )) is None
+        assert asyncio.run(store.first_slice_lost_wait_ref(
+            run.run_id, TENANT, ("a1",),
+        )) == {
+            "agent_id": failed.agent_id, "name": "a1",
+            "attempts": 3, "error": "slice_lost",
+        }
+
+    def test_slice_lost_agent_with_shard_is_not_the_signal(self, db):
+        run = _mk_run(goal="predicate-slice-lost-shard")
+        RunRepository(db).create(run)
+        failed = _mk_agent(run, "a1")
+        AgentRepository(db).create(failed)
+        self._fail_agent(db, run, failed, error="slice_lost")
+        ResultShardRepository(db).create(dm.ResultShard(
+            id=dm.ShardId("sh-sl"), run_id=run.run_id, tenant=TENANT,
+            source_agent_id=failed.agent_id, payload={"ok": True},
+            artifact_key=None, routed_at=dm.EpochMillis(int(time.time() * 1000)),
+        ))
+        assert asyncio.run(self._store(db).first_slice_lost_wait_ref(
+            run.run_id, TENANT, ("a1",),
+        )) is None
+
+
+class TestUnspawnedWaitRefs:
+    """A wait ref with no agent row is a deferral, not a dead branch."""
+
+    @pytest.fixture()
+    def db(self):
+        engine = create_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        Base.metadata.create_all(engine, tables=[m.__table__ for m in om.ALL_MODELS])
+        yield _TestDB(engine)
+        engine.dispose()
+
+    def _store(self, db) -> SliceStore:
+        return SliceStore(
+            AgentSwarmConfig(),
+            AgentRepository(db), MessageRepository(db),
+            ResultShardRepository(db), RoundRepository(db),
+            lost_probe=lambda: False,
+        )
+
+    def test_refs_without_a_row_are_returned_and_known_refs_excluded(self, db):
+        run = _mk_run(goal="unspawned")
+        RunRepository(db).create(run)
+        spawned = _mk_agent(run, "spawned")
+        AgentRepository(db).create(spawned)
+        store = self._store(db)
+
+        # The name with a row is known; the deferred name has no row.
+        assert asyncio.run(store.unspawned_wait_refs(
+            run.run_id, TENANT, ("spawned", "deferred"),
+        )) == ("deferred",)
+
+    def test_empty_refs_short_circuits_to_empty(self, db):
+        run = _mk_run(goal="unspawned-empty")
+        RunRepository(db).create(run)
+        assert asyncio.run(self._store(db).unspawned_wait_refs(
+            run.run_id, TENANT, (),
+        )) == ()
+
+
+class TestRehydrate:
+    """The peer-respawn half: rehydrate revives FAILED slice_lost rows."""
+
+    @pytest.fixture()
+    def db(self):
+        engine = create_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        Base.metadata.create_all(engine, tables=[m.__table__ for m in om.ALL_MODELS])
+        yield _TestDB(engine)
+        engine.dispose()
+
+    def _store(self, db, attempt_repo=None) -> SliceStore:
+        return SliceStore(
+            AgentSwarmConfig(),
+            AgentRepository(db), MessageRepository(db),
+            ResultShardRepository(db), RoundRepository(db),
+            lost_probe=lambda: False,
+            attempt_repo=attempt_repo,
+        )
+
+    def _claim(self, db, run) -> int:
+        job_repo = JobRepository(db)
+        job_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
+        return job_repo.claim_batch(FENCE_WORKER, [TENANT], 1, 0)[0][
+            "claim_epoch"]
+
+    def _fail_agent(self, db, run, agent, error: str = "boom") -> int:
+        epoch = self._claim(db, run)
+        assert AgentRepository(db).update_status(
+            run.run_id, agent.agent_id, TENANT, dm.AgentStatus.FAILED.value,
+            attempts=3, error=error, claim_epoch=epoch,
+        )
+        return epoch
+
+    def test_slice_lost_failed_shardless_agent_is_revived_and_reset_to_running(self, db):
+        run = _mk_run(goal="rehydrate-slice-lost")
+        RunRepository(db).create(run)
+        failed = _mk_agent(run, "a1")
+        AgentRepository(db).create(failed)
+        epoch = self._fail_agent(db, run, failed, error="slice_lost")
+
+        store = self._store(db)
+        _, _, interrupted = asyncio.run(store.rehydrate(run, epoch))
+
+        assert [a.agent_id for a in interrupted] == [failed.agent_id]
+        stored = AgentRepository(db).get(run.run_id, failed.agent_id, TENANT)
+        assert stored.status is dm.AgentStatus.RUNNING
+        assert stored.attempts == 0
+        assert stored.ended_at is None
+        # The row is an in-flight agent for THIS slice's wait: neither
+        # the slice_lost sentinel nor the fail-fast predicate may fire
+        # on the ref the prologue just respawned.
+        assert asyncio.run(store.first_slice_lost_wait_ref(
+            run.run_id, TENANT, ("a1",),
+        )) is None
+        assert asyncio.run(store.first_failed_wait_ref(
+            run.run_id, TENANT, ("a1",),
+        )) is None
+
+    def test_stale_epoch_reset_is_inert_and_skips_revival(self, db):
+        run = _mk_run(goal="rehydrate-stale-fence")
+        RunRepository(db).create(run)
+        failed = _mk_agent(run, "a1")
+        AgentRepository(db).create(failed)
+        stale_epoch = self._fail_agent(db, run, failed, error="slice_lost")
+        time.sleep(0.02)
+        current = JobRepository(db).reclaim_batch(RECLAIMER, 1, 60)[0][
+            "claim_epoch"]
+        assert current != stale_epoch
+
+        _, _, interrupted = asyncio.run(self._store(db).rehydrate(
+            run, stale_epoch))
+
+        # The current owner revives, not this stale slice: its fenced
+        # reset is inert and the agent row stays exactly as the reclaimer
+        # will find it.
+        assert interrupted == []
+        stored = AgentRepository(db).get(run.run_id, failed.agent_id, TENANT)
+        assert stored.status is dm.AgentStatus.FAILED
+        assert stored.error == "slice_lost"
+        assert stored.attempts == 3
+
+    def test_other_error_failed_shardless_agent_stays_terminal(self, db):
+        run = _mk_run(goal="rehydrate-boom")
+        RunRepository(db).create(run)
+        failed = _mk_agent(run, "a1")
+        AgentRepository(db).create(failed)
+        self._fail_agent(db, run, failed, error="boom")
+
+        _, _, interrupted = asyncio.run(self._store(db).rehydrate(run))
+
+        assert interrupted == []
+
+    def test_revive_cap_stops_respawn_after_burned_budget(self, db):
+        # The ledger rows are the DB-recorded retry history: once an agent
+        # burned subagent_max_attempts provisionings, a later claim's
+        # revive must be refused so the failed run terminalizes instead of
+        # minting personas forever.
+        run = _mk_run(goal="rehydrate-retry-cap")
+        RunRepository(db).create(run)
+        failed = _mk_agent(run, "a1")
+        AgentRepository(db).create(failed)
+        epoch = self._fail_agent(db, run, failed, error="slice_lost")
+
+        attempt_repo = AgentAttemptRepository(db)
+        for burned in range(AgentSwarmConfig().orchestration.subagent_max_attempts):
+            assert attempt_repo.record_agent_attempt_intent(
+                run.run_id, TENANT, failed.agent_id, epoch, burned + 1,
+                dm.AgentKind.BOT.value, f"persona-{burned}", "a1",
+            )
+        assert attempt_repo.count_agent_provisionings(
+            run.run_id, TENANT, failed.agent_id,
+        ) == AgentSwarmConfig().orchestration.subagent_max_attempts
+
+        store = self._store(db, attempt_repo=attempt_repo)
+        _, _, interrupted = asyncio.run(store.rehydrate(run, epoch))
+
+        assert interrupted == []
+        stored = AgentRepository(db).get(run.run_id, failed.agent_id, TENANT)
+        assert stored.status is dm.AgentStatus.FAILED
+        assert stored.error == "slice_lost"
+
+    def test_revive_below_cap_still_respawns(self, db):
+        run = _mk_run(goal="rehydrate-retry-below")
+        RunRepository(db).create(run)
+        failed = _mk_agent(run, "a1")
+        AgentRepository(db).create(failed)
+        epoch = self._fail_agent(db, run, failed, error="slice_lost")
+        attempt_repo = AgentAttemptRepository(db)
+        assert attempt_repo.record_agent_attempt_intent(
+            run.run_id, TENANT, failed.agent_id, epoch, 1,
+            dm.AgentKind.BOT.value, "persona-first", "a1",
+        )
+
+        store = self._store(db, attempt_repo=attempt_repo)
+        _, _, interrupted = asyncio.run(store.rehydrate(run, epoch))
+
+        assert [a.agent_id for a in interrupted] == [failed.agent_id]
+
+    def test_completed_agent_objective_seeds_the_dedup_set(self, db):
+        # An already-COMPLETED row (shard delivered) must still contribute
+        # its objective to last_spawn_objectives, so the dedup guard blocks
+        # a re-spawn of a finished name (the duplicate-row bug fix).
+        run = _mk_run(goal="rehydrate-dedup")
+        RunRepository(db).create(run)
+        done = _mk_agent(run, "w1_everyone")
+        AgentRepository(db).create(done)
+        ResultShardRepository(db).create(dm.ResultShard(
+            id=dm.ShardId("sh-done"), run_id=run.run_id, tenant=TENANT,
+            source_agent_id=done.agent_id, payload={"ok": True},
+            artifact_key=None, routed_at=dm.EpochMillis(int(time.time() * 1000)),
+        ))
+
+        state, _, _ = asyncio.run(self._store(db).rehydrate(run))
+
+        assert done.task_spec.objective in state.last_spawn_objectives

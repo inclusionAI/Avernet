@@ -216,7 +216,7 @@ class TestPerAttemptThreading:
         digest16 = dm.spawn_digest("run-42", "agent-s1", 2, 16)
         digest8 = dm.spawn_digest("run-42", "agent-s1", 2, 8)
         assert sub.executor_id == digest16
-        assert not sub.executor_id.startswith("ac_")
+        assert not sub.executor_id.startswith("agent_swarm_")
         assert sub.executor_name == f"s1-{digest8}"
 
 
@@ -375,7 +375,7 @@ class TestDestroyRunAgentsBotsSweep:
         assert len(rows) == 2 and all(
             r["executor_state"] == "DESTROYED" for r in rows)
 
-    def test_llm_kind_rows_are_never_deleted_and_stay_spawned(self):
+    def test_llm_kind_rows_settle_ledger_without_platform_calls(self):
         db = _sqlite_db()
         epoch = _seed_run_and_claim(db, "run-sweep")
         assert _journal(db, "run-sweep", "agent-llm", epoch, 1,
@@ -383,10 +383,29 @@ class TestDestroyRunAgentsBotsSweep:
         platform = _DeletionPlatform()
         destroyed = self._factory(db, platform).destroy_run_agents_bots(
             _mk_run("run-sweep"), [])
+        # Nothing platform-backed exists for an llm-kind row: the sweep
+        # settles the ledger (churn fix — an unsettled row keeps
+        # _has_undestroyed_ledger True and the reaper re-visiting the
+        # terminal run forever) without a single platform call.
         assert destroyed == []
         assert platform.deleted == []
         (row,) = self._rows(db)
-        assert row["executor_state"] == "SPAWNED"
+        assert row["executor_state"] == "DESTROYED"
+
+    def test_blank_llm_intent_rows_settle_by_correlation(self):
+        db = _sqlite_db()
+        epoch = _seed_run_and_claim(db, "run-sweep")
+        assert AgentAttemptRepository(db).record_agent_attempt_intent(
+            dm.RunId("run-sweep"), TenantId("tenant-a"),
+            dm.AgentId("agent-llm"), epoch, 1,
+            dm.AgentKind.LLM.value, "", "clerk-intent") is True
+        platform = _DeletionPlatform()
+        destroyed = self._factory(db, platform).destroy_run_agents_bots(
+            _mk_run("run-sweep"), [])
+        assert destroyed == []
+        assert platform.deleted == []
+        (row,) = self._rows(db)
+        assert row["executor_state"] == "DESTROYED"
 
     def test_legacy_belt_destroys_derived_and_recorded_ids(self):
         from agentclaw.community.plugins.community.agentswarm.host import (
@@ -403,9 +422,9 @@ class TestDestroyRunAgentsBotsSweep:
         ]
         destroyed = self._factory(db, platform).destroy_run_agents_bots(
             _mk_run("run-sweep"), agents)
-        assert sorted(destroyed) == [
+        assert sorted(destroyed) == sorted([
             bot_id_for("run-sweep", "agent-1"), "ac_kept",
-        ]
+        ])
         assert sorted(platform.deleted) == sorted(destroyed)
 
     def test_gone_and_failing_deletes_do_not_block_the_rest(self):
@@ -447,3 +466,192 @@ class TestDestroyRunAgentsBotsSweep:
             _mk_run("run-sweep"), [_mk_sweep_agent("scout", "agent-1")])
         assert destroyed == [bot_id_for("run-sweep", "agent-1")]
         assert "ac_ledger" not in platform.deleted
+
+
+def _derived_intent_id(run_id, agent_id, attempt):
+    return "agent_swarm_" + dm.spawn_digest(
+        str(run_id), str(agent_id), int(attempt), 16)
+
+
+def _journal_intent(db, run_id, agent_id, epoch, attempt):
+    assert AgentAttemptRepository(db).record_agent_attempt_intent(
+        dm.RunId(run_id), TenantId("tenant-a"), dm.AgentId(agent_id),
+        epoch, attempt, dm.AgentKind.BOT.value, "", "scout") is True
+
+
+def _backdate_started_at(db, run_id, agent_id, started_at_ms):
+    from sqlalchemy import update
+
+    from agentclaw.community.core.agentswarm.repository.agent_attempt import (
+        model as om_attempt,
+    )
+    with db.orm_session() as session:
+        session.execute(
+            update(om_attempt.AcAgentSwarmAgentAttemptModel).where(
+                om_attempt.AcAgentSwarmAgentAttemptModel.run_id == run_id,
+                om_attempt.AcAgentSwarmAgentAttemptModel.tenant
+                == TenantId("tenant-a"),
+                om_attempt.AcAgentSwarmAgentAttemptModel.agent_id == agent_id,
+            ).values(started_at=started_at_ms)
+        )
+
+
+class _MaterializationProbePlatform(_DeletionPlatform):
+    """BotPlatform double whose bot_status answers a scripted per-id
+    state (PROVISIONING by default), and which records every status
+    probe so the deferral path proves itself by absence: a deferred row
+    issues a probe and never reaches delete_bot."""
+
+    def __init__(self, statuses: dict | None = None) -> None:
+        super().__init__()
+        self.statuses = statuses or {}
+        self.status_probes: list[str] = []
+
+    def bot_status(self, bot_id, owner_id=""):
+        self.status_probes.append(str(bot_id))
+        outcome = self.statuses.get(str(bot_id),
+                                    dm.BotState.PROVISIONING.value)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+class TestBlankIntentMaterializationGrace:
+    """A bot-kind persona's bootstrap is a DURABLE async job: the blank
+    intent row is journaled at spawn and the persona materializes
+    seconds to minutes later (task-queue retry cadence). A cancel-time
+    sweep must not mark the row DESTROYED before materialization —
+    a live-proven leak of ac_bot + ACTIVE BaaS device + held quota —
+    so unmaterialized personas inside the grace window defer to the
+    reaper's next cycle, and past it settle cleanly instead of
+    churning the reaper forever."""
+
+    def _factory(self, db, platform):
+        return DefaultSubagentFactory(
+            llm=None, platform=platform,
+            attempt_repo=AgentAttemptRepository(db),
+        )
+
+    def _rows(self, db):
+        return AgentAttemptRepository(db).list_agent_bindings(
+            dm.RunId("run-sweep"), TenantId("tenant-a"))
+
+    def test_unmaterialized_within_grace_defers_no_delete_no_marks(self):
+        db = _sqlite_db()
+        epoch = _seed_run_and_claim(db, "run-sweep")
+        _journal_intent(db, "run-sweep", "agent-1", epoch, 1)
+        derived = _derived_intent_id("run-sweep", "agent-1", 1)
+
+        platform = _MaterializationProbePlatform()
+        destroyed = self._factory(db, platform).destroy_run_agents_bots(
+            _mk_run("run-sweep"), [])
+
+        # Deferred wholesale: one status probe, no delete call, no
+        # marks — the reaper's next cycle re-attempts the row.
+        assert destroyed == []
+        assert platform.status_probes == [derived]
+        assert platform.deleted == []
+        (row,) = self._rows(db)
+        assert row["executor_state"] == "SPAWNED"
+
+    def test_unmaterialized_probe_failure_defers_like_provisioning(self):
+        db = _sqlite_db()
+        epoch = _seed_run_and_claim(db, "run-sweep")
+        _journal_intent(db, "run-sweep", "agent-1", epoch, 1)
+        derived = _derived_intent_id("run-sweep", "agent-1", 1)
+
+        platform = _MaterializationProbePlatform(statuses={
+            derived: RuntimeError("platform unreachable"),
+        })
+        destroyed = self._factory(db, platform).destroy_run_agents_bots(
+            _mk_run("run-sweep"), [])
+
+        assert destroyed == []
+        assert platform.status_probes == [derived]
+        assert platform.deleted == []
+        (row,) = self._rows(db)
+        assert row["executor_state"] == "SPAWNED"
+
+    def test_unmaterialized_past_grace_gives_up_and_settles(self):
+        db = _sqlite_db()
+        epoch = _seed_run_and_claim(db, "run-sweep")
+        _journal_intent(db, "run-sweep", "agent-1", epoch, 1)
+        derived = _derived_intent_id("run-sweep", "agent-1", 1)
+        # Past the give-up horizon (2 x orchestration.setup_timeout,
+        # default 300s): the default factory grace expired long ago.
+        _backdate_started_at(
+            db, "run-sweep", dm.AgentId("agent-1"),
+            int(time.time() * 1000) - 3 * 600 * 1000,
+        )
+
+        platform = _MaterializationProbePlatform()
+        destroyed = self._factory(db, platform).destroy_run_agents_bots(
+            _mk_run("run-sweep"), [])
+
+        # Settle cleanly: the quiet-if-gone delete is attempted once
+        # (harmless when nothing materialized) and BOTH marks settle
+        # the row so it can never churn the reaper forever.
+        assert destroyed == []
+        assert platform.status_probes == [derived]
+        assert platform.deleted == [derived]
+        (row,) = self._rows(db)
+        assert row["executor_state"] == "DESTROYED"
+
+    def test_materialized_by_status_destroyed_as_today(self):
+        db = _sqlite_db()
+        epoch = _seed_run_and_claim(db, "run-sweep")
+        _journal_intent(db, "run-sweep", "agent-1", epoch, 1)
+        derived = _derived_intent_id("run-sweep", "agent-1", 1)
+
+        platform = _MaterializationProbePlatform(statuses={
+            derived: dm.BotState.READY.value,
+        })
+        destroyed = self._factory(db, platform).destroy_run_agents_bots(
+            _mk_run("run-sweep"), [])
+
+        assert destroyed == [derived]
+        assert platform.status_probes == [derived]
+        assert platform.deleted == [derived]
+        (row,) = self._rows(db)
+        assert row["executor_state"] == "DESTROYED"
+
+    def test_settled_executor_rows_bypass_the_grace_probe(self):
+        # Regression pin: the materialization gate exists ONLY for
+        # blank-intent rows; a settled executor_id row goes straight
+        # to the delete as before, whatever bot_status would answer.
+        db = _sqlite_db()
+        epoch = _seed_run_and_claim(db, "run-sweep")
+        assert _journal(db, "run-sweep", "agent-1", epoch, 1,
+                        dm.AgentKind.BOT.value, "ac_settled", "scout")
+
+        platform = _MaterializationProbePlatform()
+        destroyed = self._factory(db, platform).destroy_run_agents_bots(
+            _mk_run("run-sweep"), [])
+
+        assert destroyed == ["ac_settled"]
+        assert platform.status_probes == []
+        assert platform.deleted == ["ac_settled"]
+        (row,) = self._rows(db)
+        assert row["executor_state"] == "DESTROYED"
+
+    def test_setup_timeout_threads_to_the_grace_horizon(self):
+        # The horizon is row.started_at + 2 x setup_timeout: a tiny
+        # configured budget makes even a fresh intent row past-grace,
+        # which is the configured-knob path the DI root wires.
+        db = _sqlite_db()
+        epoch = _seed_run_and_claim(db, "run-sweep")
+        _journal_intent(db, "run-sweep", "agent-1", epoch, 1)
+        derived = _derived_intent_id("run-sweep", "agent-1", 1)
+
+        platform = _MaterializationProbePlatform()
+        factory = DefaultSubagentFactory(
+            llm=None, platform=platform,
+            attempt_repo=AgentAttemptRepository(db),
+            setup_timeout=0.0,
+        )
+        destroyed = factory.destroy_run_agents_bots(_mk_run("run-sweep"), [])
+
+        assert destroyed == []
+        assert platform.deleted == [derived]
+        (row,) = self._rows(db)
+        assert row["executor_state"] == "DESTROYED"

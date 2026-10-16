@@ -449,7 +449,6 @@ class TestAvernetKindEndToEnd:
         created = _stand_in_for_provisioning(world)
         ws = _ScriptedEngineWs(reply='{"answer": "survey ok"}')
         platform = AvernetBotPlatform(
-            owner_id=OWNER,
             manifest_seam=world.get(ManifestCreationSeam),
             bot_service=world.get(BotServiceProtocol),
             passport_plugin=world.get(PassportPlugin),
@@ -525,12 +524,12 @@ class TestAvernetKindEndToEnd:
         # the exact derivation through the canonical helper against the
         # agent row the swarm itself just persisted.
         spawned_agent = agents[0].agent_id
-        expected_id = "ac_" + spawn_digest(run_id, spawned_agent, 1, 16)
+        expected_id = "agent_swarm_" + spawn_digest(run_id, spawned_agent, 1, 16)
         assert bot["bot_id"] == expected_id
         assert bot["status"] == "ACTIVE"
         assert bot["owner_id"] == OWNER
         assert bot["bot_desc"] == "swarm surveyor persona"
-        assert bot["bot_name"] == f"surveyor-{expected_id[3:11]}"
+        assert bot["bot_name"] == f"surveyor-{expected_id[12:20]}"
 
         job = seam.find_job(entity_id=OWNER, bot_id=expected_id)
         assert job is not None and job.status is TaskStatus.SUCCEEDED

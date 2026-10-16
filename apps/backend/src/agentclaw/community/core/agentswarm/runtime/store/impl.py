@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from agentclaw.community.core.agentswarm.config.settings import AgentSwarmConfig
 from agentclaw.community.core.agentswarm.domain.models import (
-    Agent, AgentId, AgentKind, AgentStatus, BotState, EpochMillis, Message, MessageId, MessageRole, ResultShard, Round, RoundId, Run, RunId, ShardId, TenantId, EventId, GuardEvent, GuardKind, EpochMillis,
+    Agent, AgentId, AgentKind, AgentStatus, BotState, DecisionKind, EpochMillis, Message, MessageId, MessageRole, ResultShard, Round, RoundId, Run, RunId, ShardId, TenantId, EventId, GuardEvent, GuardKind, EpochMillis,
 )
 from agentclaw.community.core.agentswarm.orchestration.state import RunState
 from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
@@ -23,6 +23,10 @@ from agentclaw.community.core.agentswarm.runtime.slice_lost import SliceLost
 from agentclaw.community.log import get_logger
 
 logger = get_logger(__name__)
+
+# The pool's error string for a FAILED completion produced by a lost claim
+# (a reclaimed slice). Not a dead branch: rehydrate respawns it.
+_SLICE_LOST_ERROR = "slice_lost"
 
 
 def _now_ms() -> int:
@@ -144,15 +148,78 @@ class SliceStore:
                               content, completion["token_usage"]),
         )
 
+    async def journal_attempt_intent(self, run: Run, agent_id: AgentId,
+                                      claim_epoch: int, attempt: int,
+                                      executor_kind: str, executor_id: str,
+                                      executor_name: str) -> None:
+        """Write-ahead the attempt's binding INTENT, before setup().
+
+        Fencing mirrors ``persist_completion`` exactly: the intent insert
+        rides the D28 claim fence (the job row's CURRENT claim_epoch) and
+        a fenced-out stale slice unwinds as ``SliceLost`` instead of
+        journaling for a dead claim — so a lost claim never provisions a
+        persona either. ``record_agent_binding`` (post-setup) is the
+        settlement leg of this same row.
+        """
+        if self._lost_probe():
+            return
+        if self._attempt_repo is None:
+            return
+        journaled = await run_blocking(
+            self._attempt_repo.record_agent_attempt_intent,
+            run.run_id, run.tenant, agent_id, claim_epoch, attempt,
+            executor_kind, executor_id, executor_name,
+        )
+        if not journaled:
+            logger.info(
+                "[agentswarm][swarm] claim fence rejected binding intent "
+                "agent=%s attempt=%d claim_epoch=%d", agent_id, attempt,
+                claim_epoch,
+            )
+            raise SliceLost()
+
+    async def journal_attempt_result(self, run: Run, agent_id: AgentId,
+                                      claim_epoch: int, attempt: int,
+                                      result_status: str,
+                                      result_message: str | None) -> None:
+        """Best-effort per-attempt outcome write on the ledger (diagnostic).
+
+        Unlike the intent/settle legs this never raises and never unwinds
+        as ``SliceLost``: it records a completed attempt's outcome
+        (COMPLETED/FAILED/SLICE_LOST/TIMEOUT), and a lost or fenced write
+        for a diagnostic field must not fail the completion that produced
+        it."""
+        if self._lost_probe() or self._attempt_repo is None:
+            return
+        try:
+            updated = await run_blocking(
+                self._attempt_repo.record_attempt_result,
+                run.run_id, run.tenant, agent_id, claim_epoch, attempt,
+                result_status, result_message,
+            )
+        except Exception:
+            logger.warning(
+                "[agentswarm][swarm] attempt result journal failed "
+                "agent=%s attempt=%d status=%s", agent_id, attempt,
+                result_status,
+            )
+            return
+        if not updated:
+            logger.info(
+                "[agentswarm][swarm] attempt result journal matched no row "
+                "agent=%s attempt=%d claim_epoch=%d status=%s", agent_id,
+                attempt, claim_epoch, result_status,
+            )
+
     async def record_agent_binding(self, run: Run, agent_id: AgentId,
                                     claim_epoch: int, attempt: int,
                                     executor_kind: str, executor_id: str,
                                     executor_name: str) -> None:
-        """Journal one started attempt into the durable ledger (D-K/D-L).
+        """Settle the attempt's ledger row to BOUND after setup (D-K/D-L).
 
         Write ordering is D-L: the call happens after ``subagent.setup()``
         returned, so the executor identity is real. Fencing mirrors
-        ``persist_completion`` exactly — the ledger insert rides the D28
+        ``persist_completion`` exactly — the settlement rides the D28
         claim fence (the job row's CURRENT claim_epoch), and a fenced-out
         stale slice unwinds as ``SliceLost`` instead of corrupting the
         journal. After the ledger row lands, the legacy
@@ -302,7 +369,7 @@ class SliceStore:
         await run_blocking(self.apply_run_retention_blocking, run_id, tenant)
 
     async def unsatisfied_refs(self, run_id: RunId, tenant: TenantId,
-                               refs: tuple[str, ...]) -> tuple[str, ...]:
+                                refs: tuple[str, ...]) -> tuple[str, ...]:
         shard_names = set()
         for agent in await run_blocking(self._agent_repo.list_by_run, run_id, tenant):
             if await run_blocking(
@@ -311,6 +378,105 @@ class SliceStore:
             ) is not None:
                 shard_names.add(agent.name)
         return tuple(ref for ref in refs if ref not in shard_names)
+
+    async def first_failed_wait_ref(self, run_id: RunId, tenant: TenantId,
+                                    refs: tuple[str, ...]) -> dict[str, Any] | None:
+        """The first unsatisfiable wait ref: its agent is terminal FAILED.
+
+        An agent blocks a wait ref when its row is terminal FAILED and no
+        shard exists for it — FAILED rows never grow a shard
+        (``persist_completion``), so every such ref can only be satisfied
+        by a spawn that will never be scheduled (no respawn/supersede
+        exists). The one exception is ``error='slice_lost'``: that FAILED
+        row is a reclaimed claim (a transient reclaim artifact, not a dead
+        branch), and ``rehydrate`` revives it so the rescheduled slice
+        respawns the agent under its D16 identity — the ref stays
+        satisfiable and must not fail the run. A shard-checked
+        COMPLETE-side agent and any non-FAILED agent stay quiet: a dead
+        optional branch must not kill a would-succeed run.
+
+        Used by BOTH the in-slice wait (`SwarmRunHandler._await_refs`)
+        and the rehydrate prologue, so the in-slice wedge and the
+        post-crash wedge die through the same predicate. Returns
+        ``{"agent_id", "name", "attempts", "error"}`` of the first
+        failed-blocking agent, else None.
+        """
+        if not refs:
+            return None
+        wanted = set(refs)
+        for agent in await run_blocking(
+                self._agent_repo.list_by_run, run_id, tenant):
+            if (agent.name not in wanted
+                    or agent.status is not AgentStatus.FAILED):
+                continue
+            if agent.error == _SLICE_LOST_ERROR:
+                # A slice_lost failure is a reclaimed claim, not a dead
+                # branch: the rescheduled slice respawns the agent under
+                # its D16 identity (see rehydrate), so this ref is still
+                # satisfiable and must not fail the run.
+                continue
+            if await run_blocking(
+                self._shard_repo.get_by_run_agent,
+                run_id, agent.agent_id, tenant,
+            ) is not None:
+                continue
+            return {
+                "agent_id": agent.agent_id,
+                "name": agent.name,
+                "attempts": agent.attempts,
+                "error": agent.error,
+            }
+        return None
+
+    async def first_slice_lost_wait_ref(self, run_id: RunId, tenant: TenantId,
+                                        refs: tuple[str, ...]) -> dict[str, Any] | None:
+        """The first unsatisfied wait ref whose agent is a shardless FAILED
+        ``slice_lost`` row — the in-slice-wait deadlock signal.
+
+        Mirror of ``first_failed_wait_ref`` with the ONE predicate inverted:
+        fires ONLY on ``error == 'slice_lost'`` shardless FAILED rows. Such a
+        row is revivable by the *rehydrate prologue* (D16), but the IN-SLICE
+        wait can never satisfy it (the respawn re-fences at the current claim
+        epoch). Returning this ref lets ``_await_refs`` force an immediate
+        reschedule instead of blocking to the slice deadline.
+
+        Returns ``{"agent_id", "name", "attempts", "error"}`` of the first
+        shardless FAILED slice_lost agent on a waited ref, else None.
+        """
+        if not refs:
+            return None
+        wanted = set(refs)
+        for agent in await run_blocking(
+                self._agent_repo.list_by_run, run_id, tenant):
+            if (agent.name not in wanted
+                    or agent.status is not AgentStatus.FAILED
+                    or agent.error != _SLICE_LOST_ERROR):
+                continue
+            if await run_blocking(
+                self._shard_repo.get_by_run_agent,
+                run_id, agent.agent_id, tenant,
+            ) is not None:
+                continue
+            return {
+                "agent_id": agent.agent_id,
+                "name": agent.name,
+"attempts": agent.attempts,
+                    "error": agent.error,
+                }
+        return None
+
+    async def unspawned_wait_refs(self, run_id: RunId, tenant: TenantId,
+                                  refs: tuple[str, ...]) -> tuple[str, ...]:
+        """Refs that name NO agent row at all — a spawn deferred by the
+        width/depth cap this slice (or a name awaited ahead of its spawn).
+        Not failed, not lost: a pure deferral the next turn resolves."""
+        if not refs:
+            return ()
+        known = {
+            a.name for a in await run_blocking(
+                self._agent_repo.list_by_run, run_id, tenant)
+        }
+        return tuple(r for r in refs if r not in known)
 
     def get_shards(self, run_id: RunId, tenant: TenantId) -> list[dict[str, Any]]:
         # Sync path: the orchestrator invokes shard_getter as a sync
@@ -346,7 +512,63 @@ class SliceStore:
                 run.run_id, agent.agent_id, run.tenant,
             )
             if shard is None:
-                if agent.status in (AgentStatus.QUEUED, AgentStatus.RUNNING):
+                # A FAILED slice_lost row is a reclaim artifact the peer
+                # must respawn; a FAILED row with any other error stays
+                # terminal (genuine failure -> run fails, no wedge).
+                revivable = (
+                    agent.status in (AgentStatus.QUEUED, AgentStatus.RUNNING)
+                    or (agent.status is AgentStatus.FAILED
+                        and agent.error == _SLICE_LOST_ERROR)
+                )
+                if revivable:
+                    if agent.status is AgentStatus.FAILED:
+                        if self._attempt_repo is not None:
+                            burned = await run_blocking(
+                                self._attempt_repo.count_agent_provisionings,
+                                run.run_id, run.tenant, agent.agent_id,
+                            )
+                            if burned >= self._config.orchestration.subagent_max_attempts:
+                                # A poison agent that already burned its
+                                # whole provisioning budget (the ledger rows
+                                # ARE the DB-recorded retry history) must
+                                # not mint yet another persona after a
+                                # reclaim — stay FAILED so the wait's
+                                # fail-fast terminates the run instead of
+                                # respawning forever.
+                                logger.warning(
+                                    "[agentswarm][swarm] revive cap reached "
+                                    "agent=%s name=%s burned=%d max=%d",
+                                    agent.agent_id, agent.name, burned,
+                                    self._config.orchestration.subagent_max_attempts,
+                                )
+                                continue
+                        # Un-poison the row before this slice waits on it:
+                        # left FAILED, the in-slice wait classifies the very
+                        # ref this slice respawned as shardless slice_lost,
+                        # fires the reschedule sentinel on it, and loops the
+                        # run to D40 before the respawn can complete. Flip
+                        # the row back to a RUNNING in-flight state under
+                        # the claim fence (same fenced idempotent-write
+                        # shape as the shard-present QUEUED->COMPLETED
+                        # flip); error=None is update_status's
+                        # leave-unchanged contract — the status flip is
+                        # what un-classifies the ref.
+                        reset = await run_blocking(
+                            self._agent_repo.update_status,
+                            run.run_id, agent.agent_id, run.tenant,
+                            AgentStatus.RUNNING.value,
+                            attempts=0, error=None, claim_epoch=claim_epoch,
+                        )
+                        if not reset:
+                            # A stale epoch means this slice must not own
+                            # the respawn; the row stays FAILED for the
+                            # current claim owner to revive.
+                            logger.info(
+                                "[agentswarm][swarm] stale claim, revival "
+                                "skipped agent=%s claim_epoch=%d",
+                                agent.agent_id, claim_epoch,
+                            )
+                            continue
                     interrupted.append(agent)
                 continue
             done_pairs.add((agent.name, agent.task_spec.objective))
@@ -366,10 +588,11 @@ class SliceStore:
 
         # Spawn history for still-open agents so the orchestrator's dedup guard
         # cannot replay an objective that is already in flight (D34: rebuilt
-        # from durable rows, not kept in memory).
+        # from durable rows, not kept in memory). ALL rows contribute — a
+        # finished (COMPLETED) row's objective must stay in the dedup set so
+        # an already-done name is never re-spawned as a duplicate row.
         state.last_spawn_objectives = [
             a.task_spec.objective for a in agents
-            if a.status in (AgentStatus.QUEUED, AgentStatus.RUNNING)
         ]
 
         orchestrator_msgs = await run_blocking(
@@ -380,6 +603,15 @@ class SliceStore:
             if not isinstance(msg.content, dict) or msg.role != MessageRole.DECISION:
                 continue
             state.turn_count += 1
+            # The tail DECISION message is the slice's live wait intent
+            # (any later decision supersedes it); when the last decision a
+            # crashed slice persisted was a wait, those refs are what the
+            # resumed slice owes durable work to.
+            if msg.content.get("kind") == DecisionKind.WAIT.value:
+                state.pending_wait_refs = tuple(
+                    str(ref) for ref in (msg.content.get("refs") or ()))
+            else:
+                state.pending_wait_refs = ()
             if msg.content.get("kind") == "handoff":
                 target = msg.content.get("target")
                 for spec in run.agent_catalog:

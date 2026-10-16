@@ -30,7 +30,7 @@ import time
 
 from agentclaw.community.core.agentswarm.domain.models import (
     AgentId, AgentSpec, BotCreateSpec, BotState, IdempotencyKey, Run,
-    SubagentResult, TaskEnvelope, spawn_digest,
+    SubagentResult, TaskEnvelope, NonRetryableProvisioningError, spawn_digest,
 )
 from agentclaw.community.plugin_api.agentswarm.bot import BotPlatform
 from agentclaw.community.log import get_logger
@@ -104,6 +104,7 @@ class AvernetSubagent:
                     bot_type=self._spec.bot_type,
                     identity_file=self._spec.identity_file,
                     metadata=dict(self._spec.metadata),
+                    config_manifest=self._spec.config_manifest,
                 ),
                 # Platform identity follows the spawn's durable identity and
                 # the attempt: agent_id is stable across D16 respawns (rebind
@@ -206,6 +207,7 @@ class AvernetSubagent:
     async def _poll_ready(self, bot_id: str, timeout: float = 300.0,
                           interval: float = 1.0) -> str:
         deadline = time.monotonic() + timeout
+        state = ""
         while time.monotonic() < deadline:
             state = await asyncio.wait_for(
                 asyncio.to_thread(
@@ -217,9 +219,19 @@ class AvernetSubagent:
             if state == BotState.READY.value:
                 return state
             if state in _TERMINAL_FAILURE:
+                # A terminal-failure state will not become READY by polling
+                # longer, so stop the poll now; the pool decides whether the
+                # failure is worth another attempt.
                 raise RuntimeError(f"bot {bot_id} creation failed: {state}")
             await asyncio.sleep(interval)
-        return "TIMEOUT"
+        # A persona still not READY after the whole window is wedged behind
+        # an upstream that never settles (a quota-scope lock held by
+        # concurrent creates, a soft-deleted row blocking re-insert). The
+        # same wait would repeat identically, so this is deterministic —
+        # fail the attempt rather than retry through the full window again.
+        raise NonRetryableProvisioningError(
+            f"bot {bot_id} did not become READY within {timeout:.0f}s "
+            f"(last state={state!r})")
 
     def _register_active_chat(self, cancel: threading.Event | None) -> None:
         with self._chat_registry_lock:

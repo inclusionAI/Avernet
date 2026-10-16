@@ -164,33 +164,27 @@ class TestTerminationEvaluator:
         assert tv.evaluate(state) == TerminationReason.MAX_AGENTS
 
     def test_no_progress(self):
-        # Reachable no-progress: N consecutive orchestrator turns with no
-        # newly-routed shard. The handler calls evaluate once per turn
-        # (after the decision), and the dedup guard forbids duplicate
-        # objectives, so all spawns carry unique objectives — the flat
-        # routed_shard_count is the progress signal, not equal objectives.
+        # Reachable no-progress: N consecutive orchestrator turns with
+        # nothing in flight (spawned == routed) and no newly-routed
+        # shard. The handler evaluates once per turn after the decision.
         tv = TerminationEvaluator(no_progress_threshold=3)
         state = RunState(run=_mk_run())
         state.total_agents_spawned = 2
-        state.last_spawn_objectives = ["scan logs", "scan traces"]
-        state.routed_shard_count = 0
+        state.routed_shard_count = 2
 
         # Turn 1: first observation is the window baseline.
         state.turn_count = 1
         assert tv.evaluate(state) is None
 
-        # Turns 2-3: new turns, still no shard routed — flat, not terminal.
+        # Turns 2-3: nothing in flight, no new shard — flat counts stack.
         state.turn_count = 2
-        state.last_spawn_objectives.append("scan metrics")
-        state.total_agents_spawned += 1
         assert tv.evaluate(state) is None
         state.turn_count = 3
-        state.last_spawn_objectives.append("scan alerts")
-        state.total_agents_spawned += 1
         assert tv.evaluate(state) is None
 
-        # Turn 4: third consecutive turn with no newly-routed shard -> trip
-        # (turn budget / max agents / wall clock all far from firing).
+        # Turn 4: third consecutive flat turn with no in-flight cohort
+        # stacks the streak past the threshold (turn budget / max agents /
+        # wall clock all far from firing).
         state.turn_count = 4
         assert tv.evaluate(state) == TerminationReason.NO_PROGRESS
 
@@ -211,21 +205,23 @@ class TestTerminationEvaluator:
 
     def test_no_progress_streak_resets_after_late_shard(self):
         # Two flat turns build a streak; one late shard resets it, so a
-        # full fresh threshold is required after the reset.
+        # full fresh threshold is required after the reset. The run must
+        # have nothing in flight for the streak to build at all.
         tv = TerminationEvaluator(no_progress_threshold=3)
         state = RunState(run=_mk_run())
         state.total_agents_spawned = 2
-        state.last_spawn_objectives = ["o1", "o2"]
-        for turn in (1, 2, 3):
+        state.routed_shard_count = 2
+        for turn in (1, 2):
             state.turn_count = turn
             assert tv.evaluate(state) is None
-        state.turn_count = 4
-        state.routed_shard_count = 1
+        state.turn_count = 3
+        state.routed_shard_count = 3
+        state.total_agents_spawned = 3
         assert tv.evaluate(state) is None
-        for turn in (5, 6):
+        for turn in (4, 5):
             state.turn_count = turn
             assert tv.evaluate(state) is None
-        state.turn_count = 7
+        state.turn_count = 6
         assert tv.evaluate(state) == TerminationReason.NO_PROGRESS
 
     def test_none_when_healthy(self):
@@ -581,6 +577,32 @@ class TestOrchestrator:
         assert [ge.kind.value for ge in result["guard_events"]] == [
             "width_exceeded", "width_exceeded",
         ]
+
+    def test_width_rejected_spawn_records_defer_refs(self):
+        # A width-rejected spawn must be recorded as a deferral (defer_refs),
+        # not dropped silently: the later wait() on this name would otherwise
+        # target an agent row that never exists and wedge the run.
+        script = json.dumps({
+            "kind": "spawn_agent",
+            "agents": [
+                {"name": "w4_a", "objective": "o-a"},
+                {"name": "w6_spawn", "objective": "o-b"},
+            ],
+        })
+        stub = StubLLMProvider(script=[script])
+        orch = Orchestrator(
+            llm=stub, parser=DecisionParser(),
+            guards=GuardService(max_width=0),
+            config=AgentSwarmConfig(
+                orchestration=AgentSwarmOrchestrationConfig(repair_max=2),
+            ),
+        )
+        run = _mk_run()
+        state = RunState(run=run)
+        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        assert result["spawn"] == []
+        assert result["defer_refs"] == ["w4_a", "w6_spawn"]
+        assert result["terminate"] is None
 
     def test_dedup_only_rejected_batch_continues(self):
         # Even a fully dedupe-rejected batch (the model re-requests existing
