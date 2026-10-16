@@ -31,6 +31,7 @@ export interface BotTableProps {
   onOpenTaskInstances?: (bot: BotDomain) => void;
   canOpenTaskInstances?: (bot: BotDomain) => boolean;
   onOpenContainers?: (bot: BotDomain) => void;
+  canViewContainers?: (bot: BotDomain) => boolean;
   onHealthCheck?: (bot: BotDomain) => void;
   onChangeSpace?: (bot: BotDomain) => void;
   onAuthorize?: (bot: BotDomain) => void;
@@ -62,6 +63,7 @@ const BotTable: React.FC<BotTableProps> = ({
   onOpenTaskInstances,
   canOpenTaskInstances,
   onOpenContainers,
+  canViewContainers,
   onHealthCheck,
   onChangeSpace,
   onAuthorize,
@@ -128,7 +130,12 @@ const BotTable: React.FC<BotTableProps> = ({
         id: 'containers',
         header: '容器信息',
         width: 'w-[clamp(108px,9vw,128px)]',
-        cell: (bot) => (onOpenContainers ? <BotContainerInfo bot={bot} onOpen={onOpenContainers} /> : <span>—</span>),
+        cell: (bot) =>
+          onOpenContainers ? (
+            <BotContainerInfo bot={bot} canView={canViewContainers?.(bot) ?? true} onOpen={onOpenContainers} />
+          ) : (
+            <span>—</span>
+          ),
       },
       ...(showOwner
         ? [
@@ -207,6 +214,7 @@ const BotTable: React.FC<BotTableProps> = ({
       onOpenTaskInstances,
       canOpenTaskInstances,
       onOpenContainers,
+      canViewContainers,
       onHealthCheck,
       onChangeSpace,
       onAuthorize,
@@ -227,6 +235,7 @@ const BotTable: React.FC<BotTableProps> = ({
 
   const handleRowClick = React.useCallback(
     (bot: BotDomain) => {
+      if (!getBotEntryAvailability(bot).enabled) return;
       if (onRowClick) {
         onRowClick(bot);
         return;
@@ -252,7 +261,7 @@ const BotTable: React.FC<BotTableProps> = ({
       rows={bots}
       getRowKey={(bot) => bot.cardId ?? bot.entityKey}
       onRowClick={handleRowClick}
-      isRowClickable={(bot) => (canEnterDetail && !canEnterDetail(bot)) || getBotEntryAvailability(bot).enabled}
+      isRowClickable={(bot) => getBotEntryAvailability(bot).enabled}
       renderExpandedRow={(bot) =>
         bot.deployment === 'local' &&
         ['deploying', 'failed'].includes(bot.lifecycle) &&

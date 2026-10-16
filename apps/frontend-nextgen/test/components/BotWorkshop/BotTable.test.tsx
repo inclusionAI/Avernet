@@ -872,7 +872,7 @@ describe('BotTable 管理菜单重启词表（服务卡三动词分裂）', () =
     expect(screen.getByLabelText('删除说明')).toBeInTheDocument();
   });
 
-  test('部署中的服务 Bot 不允许推进发布阶段', () => {
+  test('部署中的服务 Bot 不展示任何操作入口或行点击', () => {
     const bot = mapBotDto({
       bot_id: 'service-deploying',
       bot_name: '部署中服务 Bot',
@@ -883,13 +883,14 @@ describe('BotTable 管理菜单重启词表（服务卡三动词分裂）', () =
       publish: { id: 1, status: 'DRAFT', version: 1 },
       actions: ['view', 'publish_staging'],
     }).item;
-    const onManagePublication = jest.fn();
-    renderTable(bot, { onManagePublication, onAction: jest.fn().mockResolvedValue(undefined) });
+    const onView = jest.fn();
+    render(<BotTable bots={[bot]} onView={onView} onManagePublication={jest.fn()} onAction={jest.fn().mockResolvedValue(undefined)} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '管理 部署中服务 Bot' }));
-
-    expect(screen.getByRole('button', { name: /发布与阶段推进/ })).toBeDisabled();
-    expect(screen.getByLabelText('发布与阶段推进说明')).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: '部署中服务 Bot 主要操作' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '管理 部署中服务 Bot' })).not.toBeInTheDocument();
+    expect(dataRow()).not.toHaveAttribute('tabindex');
+    fireEvent.click(dataRow());
+    expect(onView).not.toHaveBeenCalled();
   });
 
   test('服务行仅 disabled_actions.restart 声明时保留禁用入口（死灰按钮可展示服务端原因）', () => {

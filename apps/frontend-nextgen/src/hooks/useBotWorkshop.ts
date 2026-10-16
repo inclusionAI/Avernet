@@ -195,6 +195,7 @@ export function useBotWorkshop() {
     // 不应显示受协作者权限保护的任务实例入口。
     canOpenTaskInstances: (bot: BotDomain) =>
       Boolean(currentOpenApiUserId && (bot.ownerId === currentOpenApiUserId || bot.actions.includes('edit'))),
+    canViewContainers: (bot: BotDomain) => Boolean(currentOpenApiUserId && (bot.ownerId === currentOpenApiUserId || bot.actions.includes('edit'))),
     canRestartContainer: (bot: BotDomain) => Boolean(currentOpenApiUserId && bot.ownerId === currentOpenApiUserId),
     creating: createFlow.creating,
     createAuthorization: createFlow.authorization,

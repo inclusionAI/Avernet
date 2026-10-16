@@ -6,6 +6,8 @@ import React from 'react';
 
 export interface BotContainerInfoProps {
   bot: BotDomain;
+  /** 列表库存声明的 Owner/协作者容器查看资格。 */
+  canView?: boolean;
   onOpen: (bot: BotDomain) => void;
 }
 
@@ -19,10 +21,10 @@ function isEligible(bot: BotDomain) {
  * 老版本只在独立列内展示“活跃数 / 实例总数”，并通过悬浮文案提示点击查看详情。
  * 列表接口未携带 summary 时，仅为当前页合格 Bot 请求一次容器快照。
  */
-export function BotContainerInfo({ bot, onOpen }: BotContainerInfoProps) {
+export function BotContainerInfo({ bot, canView = true, onOpen }: BotContainerInfoProps) {
   const [snapshot, setSnapshot] = React.useState<ContainerSnapshot>();
   const [failed, setFailed] = React.useState(false);
-  const eligible = isEligible(bot);
+  const eligible = canView && isEligible(bot);
 
   React.useEffect(() => {
     if (!eligible) return undefined;

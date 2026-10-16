@@ -39,6 +39,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
   const [open, setOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<BotCardManagementAction>();
   const [confirming, setConfirming] = useState(false);
+  if (bot.lifecycle === 'deploying') return null;
   const isAgentCodingBot = bot.runtime.isAgentCodingBot;
   const isServiceBot = bot.serviceMode === 'service';
   const restartUnsupported = bot.runtime.engine === 'teclaw';

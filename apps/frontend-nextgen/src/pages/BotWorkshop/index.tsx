@@ -105,6 +105,7 @@ const BotWorkshopPage: React.FC = () => {
                     onOpenTaskInstances={workshop.openTaskInstances}
                     canOpenTaskInstances={workshop.canOpenTaskInstances}
                     onOpenContainers={setContainerBot}
+                    canViewContainers={workshop.canViewContainers}
                     onChangeSpace={(bot) => {
                       if (workshop.canChangeSpace(bot)) workshop.openSpaceChange(bot);
                     }}
