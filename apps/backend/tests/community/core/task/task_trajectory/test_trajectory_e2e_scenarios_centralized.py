@@ -14,7 +14,7 @@ REAL rule analyzer):
   rule analyzer derives ``failure_reason`` starting with
   ``underlying_interface_error:`` including the description.
 * 执行 hung 住一直不上报结果 (协作群 run_mode=multi_bot) — the SLA-timeout
-  RESET row carries elapsed vs the 协作群 900s threshold (vs 单 bot 600s), the
+  RESET row carries elapsed vs the 协作群 900s threshold (vs 单 bot 900s), the
   harness-max escalation lands the terminal HUNG transition with the
   ``exec_stuck`` reason, and the analyzer derives ``execution_timeout:``.
 * 验收不通过 (single_bot + 协作群) — the VERIFY row carries
@@ -431,14 +431,14 @@ class TestInterfaceErrorReason:
 
 
 # ---------------------------------------------------------------------------
-# S7 — 执行 hung 住一直不上报结果 (协作群 multi_bot 900s SLA vs 单 bot 600s)
+# S7 — 执行 hung 住一直不上报结果 (协作群 multi_bot 900s SLA vs 单 bot 900s)
 # ---------------------------------------------------------------------------
 
 
 class TestHungNoReportReason:
     def test_group_hung_sla_breach_and_hung_reason_recorded(self):
         """A 协作群 node that never reports back: the SLA-timeout RESET row
-        carries the 协作群 900s threshold (not the single-bot 600s) + elapsed
+        carries the 协作群 900s threshold (not the single-bot 900s) + elapsed
         since start; the harness-max escalation lands the HUNG transition with
         the exec_stuck reason; the analyzer derives execution_timeout:."""
         repo = TaskTrajectoryRepository(_make_db())
@@ -465,7 +465,7 @@ class TestHungNoReportReason:
         rec = reset_rows[0]
         assert rec.action_result == "sla_timeout"
         ext = json.loads(rec.ext_info)
-        # 协作群 SLA = 900s (900_000ms) — the group threshold, not single 600s
+        # 协作群 SLA = 900s (900_000ms) — the group threshold, not single 900s
         assert ext["sla_threshold_ms"] == 900_000
         assert 9_000 <= ext["elapsed_ms"] <= 60_000  # started 10s ago
         # NO execute row ever landed — the node never reported a result

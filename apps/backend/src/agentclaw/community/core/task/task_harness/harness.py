@@ -30,10 +30,10 @@ from agentclaw.community.core.task.domain.models import (
 logger = logging.getLogger("task.harness")
 
 _DEFAULT_SLA_TIMEOUT = (
-    600.0  # single_bot/BBS RUNNING 卡死 backstop(>poller execute SLA 600s)
+    900.0  # single_bot/BBS RUNNING:统一给 15 分钟窗口
 )
 _DEFAULT_COOP_GROUP_SLA_TIMEOUT = (
-    900.0  # coop_group 超时 15 分钟,给群会话更长的收敛窗口
+    900.0  # coop_group RUNNING:15 分钟
 )
 _DEFAULT_PENDING_TIMEOUT = 180.0  # PENDING 派发异常/未派发→重搜推(短阈值尽快重试)
 _DEFAULT_INTERVAL = 120.0  # 巡检间隔 2min(RUNNING/PENDING/FAILED 三扫一次;FAILED 仅执行层失败:验收 FAIL 已记录 DONE 不在此,external FAILED 由 on_harness 入口跳过)
@@ -112,8 +112,7 @@ class TaskHarness:
     def _sla_timeout(self, task_id: str, node=None) -> float:
         """读节点 RUNNING SLA。
 
-        execution_config.SLA_TIMEOUT 仍可统一覆盖;未配置时,协作群默认 15 分钟,
-        single_bot/BBS 继续使用原默认值。
+        execution_config.SLA_TIMEOUT 仍可统一覆盖;未配置时,三种模态默认 15 分钟。
         """
         try:
             cfg = self._graph._execution_config(task_id)
@@ -141,6 +140,10 @@ class TaskHarness:
             )
         )
 
+    def _is_relay_mode(self, graph) -> bool:
+        """Return True for a Relay-mode task graph."""
+        return bool(graph.is_relay)
+
     def _pending_timeout(self, task_id: str) -> float:
         """读 PENDING_TIMEOUT(派发异常/未派发→重搜推;优先 execution_config,缺省 default)。"""
         try:
@@ -151,10 +154,12 @@ class TaskHarness:
         return float(t) if t is not None else self._default_pending
 
     def _poll_once(self) -> list[TaskNodePatch]:
-        """巡检一轮:遍历已登记 task 的 RUNNING 节点,首见记时,超时复位。节点执行模态优先读取 actual_run_mode。
+        """巡检一轮 RUNNING/PENDING/FAILED 节点。
 
-        复位经 ``on_harness_fn``(编排核 on_harness:复位 PENDING + 正常重投);未注入则只返复位 patch(测试用)。
-        返回本轮应用的复位 patch 列表(测试断言用)。"""
+        RUNNING 节点按 actual_run_mode 计时;Relay 模式的 RUNNING 节点
+        不做纯时间 reset,因为没有真实失败事实时,超时不能证明会话已死。
+        PENDING 与 FAILED 仍按原逻辑派发/重投。
+        """
         if self._on_harness_fn is None:
             return []
         resets: list[TaskNodePatch] = []
@@ -178,6 +183,7 @@ class TaskHarness:
                 for n in nodes
                 if effective_run_mode(n) in _EXEC_MODES
                 and not self._is_relay_root(task_graph, n)
+                and not self._is_relay_mode(task_graph)
             ]
             now = self._clock()
             for n in nodes:
@@ -600,9 +606,9 @@ class TaskHarness:
 # read ``execution_config`` + ``run_mode`` and reuse the harness's own default
 # constants, giving the engine a clean public seam without duplicating the
 # numbers. They mirror ``TaskHarness._sla_timeout`` / ``_pending_timeout`` for
-# the **default-constructed** harness (prod wiring: 600 / 900 / 180 s); a
+# the **default-constructed** harness (prod wiring: 900 / 900 / 180 s); a
 # harness instance constructed with custom defaults (test-only) is out of
-# scope for the trajectory gate — the spec (REQ-4) records the 600 / 900 / 180
+# scope for the trajectory gate — the spec (REQ-4) records the 900 / 900 / 180
 # baseline. If ``_sla_timeout`` / ``_pending_timeout`` selection logic changes,
 # update these mirrors in lockstep.
 
@@ -614,8 +620,8 @@ def effective_sla_threshold_ms(
     """Effective RUNNING-SLA threshold in **ms** for the trajectory RESET gate.
 
     Honors the per-node ``execution_config["SLA_TIMEOUT"]`` override; otherwise
-    picks ``coop_group`` (900 s) vs the single_bot/BBS default (600 s) by
-    ``run_mode``. Mirrors ``TaskHarness._sla_timeout`` (default-constructed).
+    all execution modes default to 900 s. Mirrors
+    ``TaskHarness._sla_timeout`` (default-constructed).
     """
     cfg = execution_config or {}
     t = cfg.get("SLA_TIMEOUT")

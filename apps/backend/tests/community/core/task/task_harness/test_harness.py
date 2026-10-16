@@ -107,10 +107,9 @@ class TestHarnessOnlyPollsExecutionLeaves:
         assert root.status == Status.RUNNING
         assert rec.patches == []
 
-    def test_relay_successor_is_still_reset(self, svc, graph):
+    def test_relay_successor_is_not_reset_by_pure_timeout(self, svc, graph):
         graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
         _dispatch_running(svc, graph, "c1")
-
         clock = _Clock(0.0)
         rec = Recorder()
         h = TaskHarness(svc, rec, clock=clock, default_sla_timeout=1.0)
@@ -119,9 +118,9 @@ class TestHarnessOnlyPollsExecutionLeaves:
         clock.advance(10.0)
         resets = h._poll_once()
 
-        assert resets[0].node_id == "c1"
-        assert resets[0].status == Status.PENDING
-        assert rec.patches[0].node_id == "c1"
+        assert resets == []
+        assert svc._get_node(graph, "c1").status == Status.RUNNING
+        assert rec.patches == []
 
     def test_running_parent_with_children_is_not_reset(self, svc, graph):
         svc.add_task_nodes([_child("c1")], parent_node_id="t1")
@@ -192,7 +191,7 @@ class TestRetryTimerReset:
 
 
 class TestCoopGroupTimeout:
-    def test_coop_group_default_timeout_is_twelve_minutes(self, svc, graph):
+    def test_coop_group_default_timeout_is_fifteen_minutes(self, svc, graph):
         _dispatch_running(
             svc, graph, "c1", run_mode="coop_group", assignee="group1"
         )

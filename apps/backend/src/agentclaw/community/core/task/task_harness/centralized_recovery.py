@@ -106,8 +106,8 @@ def _reset_sla_threshold_ms(
 ) -> int | None:
     """Effective SLA threshold (ms) for a RESET trajectory event (REQ-4).
 
-    Timeout-class triggers only: ``sla_timeout`` → RUNNING SLA (600 / 900 s
-    by ``run_mode``, overridable via ``execution_config["SLA_TIMEOUT"]``);
+    Timeout-class triggers only: ``sla_timeout`` → RUNNING SLA (900 s for all modes, overridable via
+    ``execution_config["SLA_TIMEOUT"]``);
     ``pending_dispatch_stuck`` → pending timeout (180 s, overridable via
     ``execution_config["PENDING_TIMEOUT"]``). Non-timeout triggers
     (``exec_failed_retry`` / ``bbs_lease_expired`` / ``harness_max``) →
