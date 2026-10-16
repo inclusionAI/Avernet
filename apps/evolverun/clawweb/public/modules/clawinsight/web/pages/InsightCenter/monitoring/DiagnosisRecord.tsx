@@ -40,6 +40,7 @@ export function DiagnosisRecord({ item, open, toggle }: { item: DiagnosisItem; o
       <Icon name="chevron" className="expand-icon" />
     </button>
     {open && <div id={detailId} className="record-detail">
+      <RecoveryTaskLinks eventId={item.diagnosisId} />
       <div className="diagnosis-narratives">{[['业务诊断', item.businessDiagnosis, 'text'], ['系统诊断', item.systemDiagnosis, 'code']].map(([label, text, icon]) => <section key={label} className="narrative"><h3 className="narrative-label"><Icon name={icon as 'text' | 'code'} />{label}</h3><p>{text ?? '—'}</p></section>)}</div>
       <dl className="detail-grid">
         <Field label="TC 故障标签" value={item.tcFaultLabel} /><Field label="诊断置信度" value={item.confidence === null ? null : `${(item.confidence * 100).toFixed(1)}%`} emphasis />
@@ -48,7 +49,6 @@ export function DiagnosisRecord({ item, open, toggle }: { item: DiagnosisItem; o
         <Field label="会话时间" value={displayTime(item.occurredAt)} /><Field label="诊断完成时间" value={displayTime(item.diagnosedAt)} />
       </dl>
       <div className="detail-identifiers">{ids.map(([label, value]) => value && <div className="id-line" key={label}><span>{label}</span><code>{value}</code><button className="copy-btn" type="button" aria-label={`复制${label}`} onClick={() => void copy(label!, value)}><Icon name="copy" /></button></div>)}</div>
-      <RecoveryTaskLinks eventId={item.diagnosisId} />
       <p className="copy-message" role="status">{copyMessage}</p>
     </div>}
   </article>;

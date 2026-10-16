@@ -145,6 +145,8 @@ Owner 等待（包括到期释放容器）、阶段变化、审批、通知和�
 
 分享开关沿用自进化的 `ce_tasks.config_json.shared`，未设置视为关闭，不新增表或迁移。详情响应的 `shared / canOperate / canManageShare` 表达当前分享状态及当前用户的操作权限。关闭分享后，共享访客的详情和证据读取立即返回 `403`。分享设置不推进任务阶段、不重新执行 Agent、不触发上游结果回传。
 
+监控页面展开诊断记录后，在记录顶部列出对应的可查看自愈任务及其状态。通过诊断的 `diagnosisId`（即 `event_id`）关联，每个任务链接独立指向其详情；没有可查看任务时不显示入口。
+
 ```text
 GET  /api/insight/v1/monitoring/session-recoveries?event_id=…
 GET  /api/insight/v1/monitoring/session-recoveries/:taskId
