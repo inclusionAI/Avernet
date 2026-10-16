@@ -962,6 +962,9 @@ async def change_space_for_others(
                        # blank/whitespace is treated as absent
     }
 
+    ``data.env`` in the response echoes the effective data env (the
+    explicit request value, or the runtime env when absent).
+
     Only specific staff IDs can call this interface. Every Bot in
     ``bot_list`` is moved into the ONE Space named by ``space_id``, each
     through the same per-Bot policy as the user-facing route: the target
