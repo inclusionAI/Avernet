@@ -8,7 +8,7 @@ import { Switch } from '@/components/ui/Switch';
 import type { CollaborationBot, PublicAudience } from '@/domain/collaborationPrivacy/types';
 import type { DirectSetting } from '@/services/collaborationPrivacy';
 import { cn } from '@/utils/cn';
-import { botFriendApprovalSection, botVisibilitySection } from './botVisibilityCopy';
+import { botFriendApprovalSection, botVisibilitySection, visibilityAudience } from './botVisibilityCopy';
 import { ControlStateTooltip, LabelHelpTooltip } from './HelpTooltip';
 import { RelationCard } from './RelationCard';
 import { RequestList } from './RequestList';
@@ -157,29 +157,43 @@ export function BotAbilitySettings({
 
 interface BotVisibilitySettingsProps extends VisibilitySectionCallbacks {
   bot: CollaborationBot;
+  showUserVisibility?: boolean;
+  /** 外部 Bot 无审批链路：不渲染待审批/审批链接，也不因审批态禁用编辑（数据面已由外部合同归一）。 */
+  isExternalBot?: boolean;
 }
 
 /** Bot 可见性分区：标题 + 双 audience 行（对用户 / 对 Bot 独立配置）。 */
-export function BotVisibilitySettings({ bot, onEditPublication, onViewScope }: BotVisibilitySettingsProps) {
+export function BotVisibilitySettings({
+  bot,
+  showUserVisibility = true,
+  isExternalBot = false,
+  onEditPublication,
+  onViewScope,
+}: BotVisibilitySettingsProps) {
   return (
     <>
       <div className="mb-3 flex items-center gap-1.5">
         <h4 className="m-0 text-xs font-semibold tracking-wide text-muted-foreground">{botVisibilitySection.title}</h4>
-        <LabelHelpTooltip label={botVisibilitySection.title} content={botVisibilitySection.description} />
+        <LabelHelpTooltip
+          label={botVisibilitySection.title}
+          content={showUserVisibility ? botVisibilitySection.description : visibilityAudience.bot.description}
+        />
       </div>
       <div className="divide-y divide-border">
-        <RelationCard
-          audience="user"
-          config={bot.publication.user}
-          pending={bot.pendingPublications.user}
-          disabled={!bot.joinedBcn}
-          onEdit={() => onEditPublication(bot, 'user')}
-          onViewScope={() => onViewScope(bot, 'user')}
-        />
+        {showUserVisibility && (
+          <RelationCard
+            audience="user"
+            config={bot.publication.user}
+            pending={bot.pendingPublications.user}
+            disabled={!bot.joinedBcn}
+            onEdit={() => onEditPublication(bot, 'user')}
+            onViewScope={() => onViewScope(bot, 'user')}
+          />
+        )}
         <RelationCard
           audience="bot"
           config={bot.publication.bot}
-          pending={bot.pendingPublications.bot}
+          pending={isExternalBot ? undefined : bot.pendingPublications.bot}
           disabled={!bot.joinedBcn}
           onEdit={() => onEditPublication(bot, 'bot')}
           onViewScope={() => onViewScope(bot, 'bot')}

@@ -70,13 +70,14 @@ export function ExternalBotPanel({ active }: { active: boolean }) {
       {
         id: 'actions',
         header: '操作',
-        width: 'w-[120px]',
+        width: 'w-[144px]',
         align: 'end',
         cell: (bot) => (
           <Button
             variant="ghost"
             size="sm"
-            leftIcon={<Settings2 className="size-3.5" aria-hidden />}
+            className="whitespace-nowrap"
+            leftIcon={<Settings2 className="size-3.5 shrink-0" aria-hidden />}
             onClick={() => setConfigBot(bot)}
           >
             通用配置
@@ -142,7 +143,11 @@ export function ExternalBotPanel({ active }: { active: boolean }) {
         }}
       />
       {configBot ? (
-        <BotGeneralConfigDialog bot={externalBotToGeneralConfig(configBot)} onClose={() => setConfigBot(undefined)} />
+        <BotGeneralConfigDialog
+          bot={externalBotToGeneralConfig(configBot)}
+          isExternalBot
+          onClose={() => setConfigBot(undefined)}
+        />
       ) : null}
     </section>
   );

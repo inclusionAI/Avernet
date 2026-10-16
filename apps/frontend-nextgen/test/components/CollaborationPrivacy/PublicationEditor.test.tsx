@@ -138,4 +138,87 @@ describe('PublicationEditor', () => {
       ],
     );
   });
+
+  it('外部 Bot 始终提供限定组织可申请，按保存语义提交组织完整名称', async () => {
+    // TC Open Core 会隐藏受限选项，但外部 Bot 合同必须提供限定组织可申请（PATCH 直改）。
+    mockRestrictedPublicationScopeEnabled = false;
+    jest.useFakeTimers();
+    const onSubmit = jest.fn();
+    const externalEntry: OrganizationSearchEntry = {
+      deptNo: 'A4195',
+      path: ['蚂蚁集团-CRO线-大安全技术部'],
+    };
+    render(
+      <PublicationEditor
+        open
+        audience="bot"
+        isExternalBot
+        initialConfig={{ scope: 'all', organizationPaths: [] }}
+        onSearch={jest.fn(async () => [externalEntry])}
+        onClose={jest.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    expect(screen.getByRole('radio', { name: /限定组织可申请/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '提交审批' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('radio', { name: /限定组织可申请/ }));
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索组织范围' }), { target: { value: '大安全' } });
+    await act(async () => {
+      jest.advanceTimersByTime(1000);
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /蚂蚁集团-CRO线-大安全技术部/ })).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /蚂蚁集团-CRO线-大安全技术部/ }));
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      {
+        scope: 'restricted',
+        organizationPaths: [externalEntry.path],
+        organizationEntries: [externalEntry],
+      },
+      [{ deptNo: 'A4195', deptName: '蚂蚁集团-CRO线-大安全技术部' }],
+    );
+  });
+
+  it('外部 Bot 已配置的名称范围回显不因能力开关降级为不可见', () => {
+    mockRestrictedPublicationScopeEnabled = false;
+    render(
+      <PublicationEditor
+        open
+        audience="bot"
+        isExternalBot
+        initialConfig={{ scope: 'restricted', organizationPaths: [['蚂蚁集团-CRO线-大安全技术部']] }}
+        onSearch={jest.fn(async () => [])}
+        onClose={jest.fn()}
+        onSubmit={jest.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('radio', { name: /限定组织可申请/ })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByText('蚂蚁集团-CRO线-大安全技术部')).toBeInTheDocument();
+    expect(screen.queryByText('当前可见性“限定组织可申请”已下线，请重新选择“不可见”或“全部可见”。')).not.toBeInTheDocument();
+  });
+
+  it('外部 Bot 配置未变化时提示无需保存，而非审批话术', () => {
+    render(
+      <PublicationEditor
+        open
+        audience="bot"
+        isExternalBot
+        initialConfig={{ scope: 'all', organizationPaths: [] }}
+        onSearch={jest.fn(async () => [])}
+        onClose={jest.fn()}
+        onSubmit={jest.fn()}
+      />,
+    );
+
+    expect(screen.getByText('可见性未发生变化，无需保存')).toBeInTheDocument();
+    expect(screen.queryByText('可见性未发生变化，无需提交审批')).not.toBeInTheDocument();
+  });
 });

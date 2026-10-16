@@ -6,8 +6,11 @@
 export type CollaborationPrivacyLoadScope =
   /** 用户身份(或工作身份尚未选定)：只解析当前用户，不请求 Bot 列表与其画像公开配置。 */
   | { target: 'currentUser' }
-  /** Bot 工作身份：读取 Bot 列表，但只对 botId 命中的 Bot 做部门回显与 BCSFuse config 读取。 */
-  | { target: 'activeBot'; botId: string }
+  /**
+   * Bot 工作身份：读取 Bot 列表，但只对 botId 命中的 Bot 做部门回显与 BCSFuse config 读取。
+   * external=true 表示外部 Bot 通用配置弹窗：对 Bot 可见性按外部合同归一（名称字符串、无审批态）。
+   */
+  | { target: 'activeBot'; botId: string; external?: true }
   /**
    * 遗留全量：对列表内所有 Bot 做 hydrate。仅供未显式传 loadScope 的既有调用与全量回归测试使用，
    * 生产入口(useCollaborationPrivacy)必须传 currentUser / activeBot，不得依赖此默认值。
@@ -31,4 +34,12 @@ export function resolvePrivacyLoadScope(
 ): CollaborationPrivacyLoadScope {
   if (identity?.kind === 'bot') return { target: 'activeBot', botId: identity.id };
   return { target: 'currentUser' };
+}
+
+/**
+ * BotWorkshop 通用配置弹窗按指定 Bot 的加载范围；external 由外部 Bot 入口显式声明
+ * （不按 Bot ID 猜测），运行期按外部合同归一对 Bot 可见性。
+ */
+export function resolveFixedBotLoadScope(botId: string, external: boolean): CollaborationPrivacyLoadScope {
+  return external ? { target: 'activeBot', botId, external: true } : { target: 'activeBot', botId };
 }

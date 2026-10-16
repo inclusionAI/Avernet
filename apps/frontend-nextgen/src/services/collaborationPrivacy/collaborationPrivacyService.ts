@@ -113,10 +113,14 @@ export class CollaborationPrivacyService {
 
   async submitPublication(command: PublicationCommand, signal?: AbortSignal) {
     const bot = this.requireWritableBot(command.botId);
-    if (bot.pendingPublications[command.audience]) throw new Error('该可见性已有待审批变更');
+    // 外部 Bot 无审批链路：不能被遗留的 pending 拦截（否则旧审批字段会永远卡住保存）。
+    if (!command.isExternalBot && bot.pendingPublications[command.audience]) {
+      throw new Error('该可见性已有待审批变更');
+    }
     const config = validatePublicConfig(normalizePublicConfig(command.config));
-    if (publicConfigsEqual(bot.publication[command.audience], config))
-      throw new Error('可见性未发生变化，无需提交审批');
+    if (publicConfigsEqual(bot.publication[command.audience], config)) {
+      throw new Error(command.isExternalBot ? '可见性未发生变化，无需保存' : '可见性未发生变化，无需提交审批');
+    }
     const actionKey = `publication:${command.botId}:${command.audience}`;
     if (this.inFlightActions.has(actionKey)) throw new Error('该可见性正在提交，请勿重复操作');
     this.inFlightActions.add(actionKey);

@@ -334,4 +334,45 @@ describe('useCollaborationPrivacy fixedBotId（BotWorkshop 通用配置弹窗形
     expect(result.current.error).toBeNull();
     expect(result.current.visibleBots).toEqual([]);
   });
+
+  it('外部 Bot 弹窗按 external scope 加载，并把 isExternalBot 透传到提交', async () => {
+    mockedUseHumanIdentity.mockReturnValue({
+      status: 'ready',
+      identity: { userId: '900004', displayName: '真实用户', online: true },
+    });
+    const mockedLoadOverview = jest
+      .spyOn(collaborationPrivacyService, 'loadOverview')
+      .mockResolvedValue(overviewWithBots);
+
+    const { result } = renderHook(() => useCollaborationPrivacy({ fixedBotId: 'bot-2', isExternalBot: true }));
+
+    await waitFor(() =>
+      expect(mockedLoadOverview).toHaveBeenCalledWith('900004', expect.any(AbortSignal), {
+        target: 'activeBot',
+        botId: 'bot-2',
+        external: true,
+      }),
+    );
+
+    const mockedSubmitPublication = jest
+      .spyOn(collaborationPrivacyService, 'submitPublication')
+      .mockResolvedValue(overviewWithBots.bots[1]);
+    act(() => {
+      result.current.openPublicationEditor(overviewWithBots.bots[1], 'bot');
+    });
+    await act(async () => {
+      await result.current.submitPublication({ scope: 'all', organizationPaths: [] }, [
+        { deptNo: 'A4195', deptName: '蚂蚁集团-CRO线-大安全技术部' },
+      ]);
+    });
+
+    expect(mockedSubmitPublication).toHaveBeenCalledWith({
+      botId: 'bot-2',
+      audience: 'bot',
+      config: { scope: 'all', organizationPaths: [] },
+      deptEntries: [{ deptNo: 'A4195', deptName: '蚂蚁集团-CRO线-大安全技术部' }],
+      isExternalBot: true,
+    });
+    await waitFor(() => expect(result.current.publicationEditor).toBeNull());
+  });
 });
