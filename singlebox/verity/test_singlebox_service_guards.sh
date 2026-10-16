@@ -542,8 +542,10 @@ test_5bot_openclaw_config_is_written_private() {
 }
 
 test_coverage_gate_supplies_matching_principal_signing_keys() {
-  local coverage_start
+  local coverage_start coverage_e2e
   coverage_start="$(sed -n '/^  env SINGLEBOX_COVERAGE=1/,/^    bash "$repo_root\/singlebox\/singlebox.sh" --standalone --with-bcs-coverage start all/p' \
+    "${ROOT}/singlebox/ci/singlebox_coverage.sh")"
+  coverage_e2e="$(sed -n '/^run_bcs_e2e()/,/^}/p' \
     "${ROOT}/singlebox/ci/singlebox_coverage.sh")"
 
   grep -F 'principal_signing_key="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY"' \
@@ -555,6 +557,9 @@ test_coverage_gate_supplies_matching_principal_signing_keys() {
   grep -F 'AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY"' \
     <<<"$coverage_start" >/dev/null || \
     fail "coverage stack must supply the Backend principal verification key"
+  grep -F 'AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY"' \
+    <<<"$coverage_e2e" >/dev/null || \
+    fail "coverage e2e client must use the BCS principal signing key"
 }
 
 test_local_bcs_launchers_supply_required_signing_keys() {
@@ -818,6 +823,7 @@ test_baas_start_passes_bcn_runtime_configuration
 test_baas_start_aborts_when_bcn_plugin_setup_fails
 test_5bot_openclaw_config_is_written_private
 test_local_bcs_launchers_supply_required_signing_keys
+test_coverage_gate_supplies_matching_principal_signing_keys
 test_ready_banner_describes_full_stack
 test_baas_backend_openapi_key_state_is_validated_and_provisioned
 test_baas_start_invalidates_runtime_key_before_fresh_database
