@@ -169,7 +169,7 @@ export default function WorkflowRuns() {
   const user = getClientUser()
 
   // Health data for Token stats (from node_executions aggregation, more reliable than flow_runs.total_token_usage)
-  const { data: healthData } = useWorkflowHealth(workflowId ?? null)
+  const { data: healthData } = useWorkflowHealth(purpose === 'production' ? workflowId ?? null : null)
 
   const timeParams = useMemo(() => toTimeRange(timeRange), [timeRange])
 
@@ -283,7 +283,7 @@ export default function WorkflowRuns() {
 
       {/* Filters */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <label className="text-sm">运行用途<select aria-label="运行用途" className="ml-2 rounded border border-input bg-background p-2" value={purpose} onChange={event => setPurpose(event.target.value as 'production' | 'trial')}><option value="production">正式运行</option><option value="trial">候选试跑</option></select></label>
+        <label className="text-sm">运行用途<select aria-label="运行用途" className="ml-2 rounded border border-input bg-background p-2" value={purpose} onChange={event => { setPurpose(event.target.value as 'production' | 'trial'); setActiveTab('runs'); setHighlightNodeId(null) }}><option value="production">正式运行</option><option value="trial">候选试跑</option></select></label>
         <StatusFilter value={statusFilter} onChange={setStatusFilter} />
         <SearchInput
           value={search}
@@ -314,7 +314,7 @@ export default function WorkflowRuns() {
       {runs.length > 0 && (
         <>
         {/* 成功率趋势 — 单独一行 */}
-        {workflowId && (
+        {purpose === 'production' && workflowId && (
           <div className="mb-4">
             <SuccessTrendCard
               workflowId={workflowId}
@@ -355,8 +355,8 @@ export default function WorkflowRuns() {
           />
           <StatCard
             label="Token Usage"
-            value={healthData?.totalTokens != null ? healthData.totalTokens.toLocaleString() : (stats.totalTokens != null ? stats.totalTokens.toLocaleString() : '—')}
-            detail="总 Token (节点聚合)"
+            value={purpose === 'production' && healthData?.totalTokens != null ? healthData.totalTokens.toLocaleString() : (stats.totalTokens != null ? stats.totalTokens.toLocaleString() : '—')}
+            detail={purpose === 'production' ? '总 Token (节点聚合)' : '当前页试跑 Token'}
             color="gray"
           />
         </div>
@@ -364,10 +364,10 @@ export default function WorkflowRuns() {
       )}
 
       {/* 健康度卡片 */}
-      {workflowId && <div className="mb-6"><HealthScoreCard workflowId={workflowId} onNodeClick={(nodeId) => { setActiveTab('nodes'); setHighlightNodeId(nodeId); }} /></div>}
+      {purpose === 'production' && workflowId && <div className="mb-6"><HealthScoreCard workflowId={workflowId} onNodeClick={(nodeId) => { setActiveTab('nodes'); setHighlightNodeId(nodeId); }} /></div>}
 
       {/* Tab 切换 */}
-      <div className="mb-4 flex items-center gap-1 border-b border-gray-200">
+      {purpose === 'production' && <div className="mb-4 flex items-center gap-1 border-b border-gray-200">
         <button
           onClick={() => setActiveTab('runs')}
           className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${activeTab === 'runs' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
@@ -380,10 +380,10 @@ export default function WorkflowRuns() {
         >
           节点分析
         </button>
-      </div>
+      </div>}
 
       {/* 节点分析 Tab */}
-      {activeTab === 'nodes' && workflowId && (
+      {purpose === 'production' && activeTab === 'nodes' && workflowId && (
         <NodeAnalysisPanel workflowId={workflowId} highlightNodeId={highlightNodeId} />
       )}
 

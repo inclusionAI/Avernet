@@ -18,7 +18,7 @@ export async function registerRunRequest(db: IDatabase, body: Record<string, unk
     const child = typeof body.run_request_parent_flow_id === 'string';
     if (child && (!request.flowId || body.run_request_parent_flow_id !== request.flowId || body.flow_id === request.flowId
       || !request.options.workflowIds?.includes(String(body.workflow_id)))) denied();
-    if (typeof body.flow_id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(body.flow_id) || request.status === 'failed'
+    if (typeof body.flow_id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(body.flow_id) || request.status === 'failed'
       || !child && body.workflow_id !== request.workflowId
       || body.candidate_commit !== request.candidateCommit || body.pack_digest !== request.packDigest || body.input_digest !== request.inputDigest
       || body.run_request_bot_id !== request.target.botId || body.run_request_owner_id !== request.target.ownerId

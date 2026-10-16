@@ -38,6 +38,9 @@ it('freezes the reviewed Pack, validates input, deduplicates dispatch and binds 
     const registered = { flow_id: 'actual-native-flow', workflow_id: 'wf-1', workflow_version: -1, workflow_deploy_number: null,
       origin_bot_id: 'bot:owner', run_request_id: trial.id, run_request_bot_id: 'bot', run_request_owner_id: 'owner',
       candidate_commit: trial.candidateCommit, pack_digest: trial.packDigest, input_digest: trial.inputDigest };
+    const longIdInsert = async () => { throw Error('oversized id must not reach persistence'); };
+    await expect(registerRunRequest(f.db, { ...registered, flow_id: 'a'.repeat(65) }, longIdInsert)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+    expect((await service.list(rev.taskId))[0].flowId).toBeNull();
     const insert = async (tx: typeof f.db) => { await tx.exec("INSERT INTO flow_runs VALUES (?, ?, 'bot:owner', 'waiting', NULL, NULL)", [registered.flow_id, registered.workflow_id]); };
     await expect(registerRunRequest(f.db, registered, async () => { throw Error('insert failed'); })).rejects.toThrow('insert failed');
     expect(f.raw.prepare("SELECT COUNT(*) AS n FROM workflow_repair_release_records WHERE record_kind='trial_run'").get()).toEqual({ n: 0 });
@@ -51,6 +54,11 @@ it('freezes the reviewed Pack, validates input, deduplicates dispatch and binds 
     expect(f.raw.prepare("SELECT COUNT(*) AS n FROM workflow_repair_release_records WHERE record_kind='trial_run'").get()).toEqual({ n: 2 });
     expect(f.raw.prepare("SELECT workflow_id FROM workflow_repair_release_records WHERE record_id='child-flow'").get()).toEqual({ workflow_id: 'child' });
     expect((await service.list(rev.taskId))[0]).toMatchObject({ flowId: 'actual-native-flow', status: 'waiting' });
+    const boundary = 'b'.repeat(64);
+    await registerRunRequest(f.db, { ...child, flow_id: boundary }, async tx => { await tx.exec("INSERT INTO flow_runs VALUES (?, 'child', 'bot:owner', 'running', NULL, NULL)", [boundary]); });
+    expect(f.raw.prepare("SELECT record_id FROM workflow_repair_release_records WHERE record_id=?").get(boundary)).toEqual({ record_id: boundary });
+    f.raw.prepare("UPDATE flow_runs SET status='aborted' WHERE flow_id='actual-native-flow'").run();
+    expect((await service.list(rev.taskId))[0].status).toBe('failed');
     expect((await workbench.task(rev.taskId)).latestSuccessful?.phase).toBe('review');
     await expect(service.resolveRunRequest(trial.id, { botId: 'other', ownerId: 'owner' })).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
     f.raw.prepare("UPDATE flow_runs SET status='failed' WHERE flow_id='actual-native-flow'").run();

@@ -39,7 +39,7 @@ export function createRepairTrialService(input: { db: IDatabase; workbench: Repa
     const row = trial.flowId ? (await db.query<{ workflow_id: string; origin_bot_id: string; status: string; result_json: string | null; total_duration_ms: number | null }>(
       'SELECT workflow_id, origin_bot_id, status, result_json, total_duration_ms FROM flow_runs WHERE flow_id = ?', [trial.flowId]))[0] : null;
     if (row && row.workflow_id === trial.workflowId && row.origin_bot_id === `${trial.target.botId}:${trial.target.ownerId}`) {
-      result.status = row.status === 'succeeded' ? 'succeeded' : ['failed', 'cancelled', 'canceled'].includes(row.status) ? 'failed'
+      result.status = row.status === 'succeeded' ? 'succeeded' : ['failed', 'aborted', 'cancelled', 'canceled'].includes(row.status) ? 'failed'
         : ['waiting', 'blocked', 'paused'].includes(row.status) ? 'waiting' : 'running';
       if (typeof row.result_json === 'string') {
         try { result.output = JSON.stringify(redactTrial(JSON.parse(row.result_json), values), null, 2).slice(0, 8192); }
