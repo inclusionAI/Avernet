@@ -302,6 +302,7 @@ class AcliCliService(AcliCliServiceProtocol):
             bot_id, cli_code, actor_id,
         )
 
+        write_error: Exception | None = None
         try:
             self._reconciler.remove_cli(bot=bot, cli_code=cli_code)
         except Exception as error:
@@ -309,17 +310,16 @@ class AcliCliService(AcliCliServiceProtocol):
                 "acli_cli_remove_failed bot_id=%s cli_code=%s phase=revoke error_type=%s",
                 bot_id, cli_code, type(error).__name__,
             )
-            # Nothing is uninstalled yet, so an unreadable Passport leaves the
-            # program installed with the grant in an unknown state.
-            if not self._passport_shows(
-                bot, cli_code, granted=False, unknown_state="revoke_unknown_installed",
-                cause=error,
-            ):
-                raise AcliGrantSyncError from error
-            logger.info(
-                "acli_cli_remove_continues bot_id=%s cli_code=%s revoke=landed_despite_error",
-                bot_id, cli_code,
-            )
+            write_error = error
+        # Confirm the revoke before the destructive step, even after a clean
+        # write: uninstalling while Passport still grants the tool would leave
+        # the bot authorized for a missing command. Nothing is uninstalled yet,
+        # so an unreadable Passport leaves the grant in an unknown state.
+        if not self._passport_shows(
+            bot, cli_code, granted=False, unknown_state="revoke_unknown_installed",
+            cause=write_error,
+        ):
+            raise AcliGrantSyncError from write_error
 
         try:
             await self._port.uninstall(
@@ -388,19 +388,23 @@ class AcliCliService(AcliCliServiceProtocol):
         The caller/owner override lives in its own table and the revoke did not
         touch it, so re-granting restores the same identity.
         """
+        write_error: Exception | None = None
         try:
             self._reconciler.add_cli(bot=bot, item=item)
         except Exception as error:
-            if not self._passport_shows(
-                bot, cli_code, granted=True, unknown_state="revoke_unknown_installed",
-                cause=error,
-            ):
-                logger.error(
-                    "acli_cli_rollback_failed bot_id=%s cli_code=%s "
-                    "state=revoked_still_installed error_type=%s",
-                    bot["bot_id"], cli_code, type(error).__name__,
-                )
-                raise AcliRollbackFailedError(cli_code, "revoked_still_installed") from error
+            write_error = error
+        # Read back after a clean write too: a re-grant Passport did not keep
+        # leaves the bot revoked with its program installed.
+        if not self._passport_shows(
+            bot, cli_code, granted=True, unknown_state="revoke_unknown_installed",
+            cause=write_error,
+        ):
+            logger.error(
+                "acli_cli_rollback_failed bot_id=%s cli_code=%s "
+                "state=revoked_still_installed error_type=%s",
+                bot["bot_id"], cli_code, type(write_error).__name__ if write_error else None,
+            )
+            raise AcliRollbackFailedError(cli_code, "revoked_still_installed") from write_error
 
     # ── shared checks ────────────────────────────────────────────────────
 

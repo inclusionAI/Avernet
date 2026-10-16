@@ -336,6 +336,35 @@ async def test_unreadable_read_back_keeps_the_program_and_says_so() -> None:
     assert [c[0] for c in container.calls] == ["install"]
 
 
+async def test_revoke_passport_does_not_keep_is_refused_before_uninstalling() -> None:
+    """A revoke that is accepted but not kept must not be followed by an uninstall."""
+    service, agentpass, container, _ = _service(
+        granted=["dataphin", "yuque-cli"], container=_Container({"yuque-cli"})
+    )
+    agentpass.remove_cli = lambda *, bot, cli_code: None  # type: ignore[method-assign]
+
+    with pytest.raises(AcliGrantSyncError):
+        await _remove(service)
+
+    assert "yuque-cli" in agentpass.codes
+    assert "yuque-cli" in container.installed
+    assert container.calls == []
+
+
+async def test_regrant_passport_does_not_keep_reports_revoked_still_installed() -> None:
+    """A compensating re-grant that returns cleanly but is not kept is still a failed undo."""
+    container = _Container({"yuque-cli"})
+    container.uninstall_errors = [AcliPortError("uninstall_failed", "busy")]
+    service, agentpass, _, _ = _service(granted=["dataphin", "yuque-cli"], container=container)
+    agentpass.add_cli = lambda *, bot, item: None  # type: ignore[method-assign]
+
+    with pytest.raises(AcliRollbackFailedError) as caught:
+        await _remove(service)
+
+    assert caught.value.state == "revoked_still_installed"
+    assert "yuque-cli" in container.installed
+
+
 async def test_failed_grant_and_failed_uninstall_reports_the_state() -> None:
     service, agentpass, container, _ = _service()
     agentpass.add_errors = [RuntimeError("agentpass down")]

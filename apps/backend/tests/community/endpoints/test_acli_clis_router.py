@@ -101,12 +101,16 @@ def _seed_bot_with_added_cli(world) -> None:
     _seed_bot(world, clis=["dataphin", "yuque-cli"])
 
 
-def _seed_bot_with_stateful_passport(world) -> None:
-    """Passport keeps what is written, so the add's read-back finds its grant."""
+def _seed_stateful_bot_with_added_cli(world) -> None:
+    _seed_bot_with_stateful_passport(world, ("dataphin", "yuque-cli"))
+
+
+def _seed_bot_with_stateful_passport(world, codes: tuple[str, ...] = ("dataphin",)) -> None:
+    """Passport keeps what is written, so a write's read-back sees its effect."""
     _seed_bot(world)
     passport = world.get(PassportPlugin)
-    clis = [{"cli_code": "dataphin", "cli_name": "dataphin", "cli_desc": "",
-             "identity_mode": "owner"}]
+    clis = [{"cli_code": code, "cli_name": code, "cli_desc": "", "identity_mode": "owner"}
+            for code in codes]
 
     def update_passport(*_args, resource_scope=None, **_kwargs):
         _mcps, written = unpack_resource_scope(resource_scope)
@@ -248,7 +252,7 @@ def add_bot_cli_alias():
         query_params=_QUERY,
         headers=_HEADERS,
     ),
-    seed=_seed_bot_with_added_cli,
+    seed=_seed_stateful_bot_with_added_cli,
     expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"deleted": True}}),
 )
 def remove_bot_cli_happy():
