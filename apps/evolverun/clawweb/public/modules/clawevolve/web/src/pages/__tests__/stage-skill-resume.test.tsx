@@ -157,6 +157,7 @@ describe('Stage Skill exact-version resume', () => {
       ],
     })
     open('/evolve/stage-skills/new')
+    await screen.findByRole('option', { name: 'Skill 加固' })
     fireEvent.change(await screen.findByRole('combobox', { name: '进化流程' }), { target: { value: 'skill_hardening' } })
     const stageSelect = screen.getByRole('combobox', { name: '开放的 Stage' }) as HTMLSelectElement
     expect(stageSelect.value).toBe('hardening')
