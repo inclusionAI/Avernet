@@ -68,7 +68,10 @@ describe('BotRegistrationDialog Poolab Tab 门控', () => {
     render(<BotRegistrationDialog open onClose={() => {}} />);
 
     expect(screen.getByRole('button', { name: 'Poolab' })).toBeInTheDocument();
-    // 默认仍是 OpenClaw Tab
+    expect(screen.getByRole('button', { name: 'Poolab' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByText(/如何接入 OpenClaw/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'OpenClaw' }));
     expect(screen.getByText(/如何接入 OpenClaw/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Poolab' }));

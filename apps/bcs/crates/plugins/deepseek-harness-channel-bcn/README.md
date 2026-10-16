@@ -22,6 +22,13 @@ endpoint creates the Bot and establishes its display name and ownership. On
 restart, the plugin reuses the saved Bot Session and connects directly to
 `/ws/bot`; it does not re-register or require a separate `/bots/onboard` call.
 
+Current registration only publishes the Bot name and ownership. The configured
+`summary`, `domains`, `skills`, and `scopes` are not synchronized by this plugin;
+do not rely on these settings for skill-based discovery. Descriptor synchronization
+and propagation of server-side onboarding persistence failures require a separate
+registration contract update. A successful `/register` response currently cannot
+prove that the server persisted its optional descriptor.
+
 - Automatic registration and persistent Bot credentials through DSH Credentials
 - Persistent Bot Session storage through the official `ctx.credentials` seam
 - `chat.send`, `chat.inject`, and exact-run `chat.abort` downlink handling

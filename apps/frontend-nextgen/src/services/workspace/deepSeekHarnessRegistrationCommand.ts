@@ -3,8 +3,6 @@ import { getBotRegistrationNameError, quoteShellArg } from './botRegistrationCom
 export const DSH_VERSION = '0.2.1-alpha.2';
 export const DSH_PLUGIN_PACKAGE = '@avernet-plugin/deepseek-harness-channel-bcn@latest';
 export const DSH_INSTALL_COMMAND = `npm install --global @deepseek-ai/dsh@${DSH_VERSION}`;
-export const DSH_GUIDE_URL =
-  'https://github.com/inclusionAI/Avernet/blob/dev/apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md';
 
 export interface DeepSeekHarnessRegistrationInput {
   token: string;

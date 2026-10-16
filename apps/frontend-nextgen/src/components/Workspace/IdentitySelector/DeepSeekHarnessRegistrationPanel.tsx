@@ -5,7 +5,6 @@ import { useBotRegistrationToken } from '@/pages/Workspace/hooks/useBotRegistrat
 import {
   buildDeepSeekHarnessRegistrationCommand,
   buildDeepSeekHarnessStartCommand,
-  DSH_GUIDE_URL,
   DSH_INSTALL_COMMAND,
   DSH_VERSION,
   getDeepSeekHarnessInputError,
@@ -40,7 +39,7 @@ function Command({ label, value }: { label: string; value: string }) {
 
 export function DeepSeekHarnessRegistrationPanel({ open }: { open: boolean }) {
   const guide = getCapabilities().getDeepSeekHarnessRegistrationGuideUrl();
-  const guideUrl = guide.status === 'available' && guide.value ? guide.value : DSH_GUIDE_URL;
+  const guideUrl = guide.status === 'available' ? guide.value : null;
   const { token, expiresAt, isLoading, error, bcsEndpoint, retry } = useBotRegistrationToken(open);
   const { identity } = useHumanIdentity();
   const [editedBotName, setEditedBotName] = useState<string | null>(null);
@@ -105,9 +104,11 @@ export function DeepSeekHarnessRegistrationPanel({ open }: { open: boolean }) {
         <p>首次注册成功后，同一 Profile 再次启动无需接入 Token。</p>
         <Command label="启动命令" value={buildDeepSeekHarnessStartCommand(profile)} />
       </section>
-      <a href={guideUrl} target="_blank" rel="noopener noreferrer" className="text-primary underline">
-        完整接入指南与兼容说明
-      </a>
+      {guideUrl ? (
+        <a href={guideUrl} target="_blank" rel="noopener noreferrer" className="text-primary underline">
+          完整接入指南与兼容说明
+        </a>
+      ) : null}
     </div>
   );
 }
