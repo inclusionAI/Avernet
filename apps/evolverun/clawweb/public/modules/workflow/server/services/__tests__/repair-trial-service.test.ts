@@ -21,7 +21,7 @@ it('freezes the reviewed Pack, validates input, deduplicates dispatch and binds 
     let sends = 0, saves = 0;
     const service = createRepairTrialService({ db: f.db, workbench, port: {
       targets: async (_w, actor) => actor === 'actor' ? [{ id: 'bot', botId: 'bot', ownerId: 'owner', environment: 'prod', label: 'Bot' }] : [],
-      inspect: async () => ({ packId: base.packId, workflowIds: ['wf-1', 'child'], candidateRef: `refs/heads/snapshots/${draft.candidateCommit}`, inputSchema: { type: 'object', required: ['query'], properties: { query: { type: 'string' }, password: { type: 'string' } } } }),
+      inspect: async (_candidate, mode) => ({ ...(mode === 'saved' ? { source: 'saved' as const } : {}), packId: base.packId, workflowIds: ['wf-1', 'child'], candidateRef: `refs/heads/snapshots/${draft.candidateCommit}`, inputSchema: { type: 'object', required: ['query'], properties: { query: { type: 'string' }, password: { type: 'string' } } } }),
       save: async () => { saves++; }, dispatch: async () => { sends++; throw Error('response lost'); },
     } });
     const request = { revision: 1, expectedStateVersion: 1, requestId: 'trial', targetId: 'bot', input: { query: 'hello', password: 'very-secret' }, inputSchemaDigest: digestRepairJson((await service.options('actor', rev.taskId, 1)).inputSchema) };
@@ -73,10 +73,13 @@ it('freezes the reviewed Pack, validates input, deduplicates dispatch and binds 
     const legacy = await service.start('actor', rev.taskId, { ...request, mode: 'saved', requestId: 'legacy', input: { query: 'ordinary saved input' } });
     expect(legacy.mode).toBe('saved'); expect(saves).toBe(1);
     await expect(service.resolveRunRequest(legacy.id, { botId: 'bot', ownerId: 'owner' })).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
-    const ordinary = { flow_id: 'legacy-root', workflow_id: 'wf-1', workflow_version: -1,
+    const ordinary = { flow_id: 'legacy-root', workflow_id: 'wf-1',
       origin_bot_id: 'bot', origin_session_key: `agent:main:workflow-trial:${legacy.id}` };
     const legacyInsert = (flowId: string, workflowId = 'wf-1') => async (tx: typeof f.db) => { await tx.exec("INSERT INTO flow_runs VALUES (?, ?, 'bot', 'succeeded', NULL, NULL)", [flowId, workflowId]); };
     expect(await registerRunRequest(f.db, ordinary, legacyInsert('legacy-root'))).toBe('created');
+    expect(await registerRunRequest(f.db, { ...ordinary, flow_id: 'legacy-null', workflow_version: null }, legacyInsert('legacy-null'))).toBe('created');
+    expect(await registerRunRequest(f.db, { ...ordinary, flow_id: 'legacy-draft', workflow_version: -1 }, legacyInsert('legacy-draft'))).toBe('created');
+    await expect(registerRunRequest(f.db, { ...ordinary, workflow_version: 1 }, legacyInsert('must-not-insert'))).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
     expect(await registerRunRequest(f.db, ordinary, async () => { throw Error('duplicate persistence'); })).toBe('existing');
     // Old runtimes cannot stop a duplicate execution: retain its actual record and purpose.
     expect(await registerRunRequest(f.db, { ...ordinary, flow_id: 'legacy-second' }, legacyInsert('legacy-second'))).toBe('created');

@@ -71,7 +71,7 @@ async function registerSavedRun(db: IDatabase, body: Record<string, unknown>, in
   // Exact requests must use the new signed-context registration path.
   if (request.mode !== 'saved') throw new RepairBatchError('STATE_CONFLICT', '精确执行缺少冻结请求登记身份');
   if (typeof body.flow_id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(body.flow_id)
-    || !parentId && (body.workflow_id !== request.workflowId || body.workflow_version !== -1)
+    || !parentId && (body.workflow_id !== request.workflowId || body.workflow_version != null && body.workflow_version !== -1)
     || body.workflow_deploy_number != null
     || body.origin_bot_id && ![request.target.botId, `${request.target.botId}:${request.target.ownerId}`].includes(String(body.origin_bot_id))) {
     throw new RepairBatchError('STATE_CONFLICT', '兼容执行的运行身份不匹配');

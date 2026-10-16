@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { RepairBatchError, digestRepairJson, type RepairRevision } from '../contracts/repair-batch.js';
 import type { RepairWorkbenchService } from '../contracts/repair-workbench.js';
-import type { RepairTrial, RepairTrialCandidate, RepairTrialPort, RepairTrialRequest } from '../contracts/repair-trial.js';
+import type { RepairTrial, RepairTrialCandidate, RepairTrialOptions, RepairTrialPort, RepairTrialRequest } from '../contracts/repair-trial.js';
 import { RepairReleaseRepository } from '../repositories/repair-release-repository.js';
 import { RepairBatchRepository } from '../repositories/repair-batch-repository.js';
 import { redactTrial, trialSensitiveValues, validateTrialInput } from './repair-trial-input.js';
@@ -73,8 +73,16 @@ export function createRepairTrialService(input: { db: IDatabase; workbench: Repa
       const task = await workbench.task(taskId), revision = task.latestSuccessful;
       if (!revision || revision.revision !== request.revision || revision.phase !== 'review' || revision.stateVersion !== request.expectedStateVersion || task.latestAttempt.phase === 'drafting'
         || (revision.checks?.static as { status?: string })?.status !== 'passed') conflict('候选已变化或静态检查未通过，请刷新后重试');
-      const frozen = candidate(task.workflowId, taskId, revision), options = await port().inspect(frozen);
-      if (digestRepairJson(options.inputSchema) !== request.inputSchemaDigest) conflict('参数定义已变化，请重新填写');
+      const frozen = candidate(task.workflowId, taskId, revision);
+      let options: RepairTrialOptions;
+      try { options = await port().inspect(frozen, request.mode === 'saved' ? 'saved' : undefined); }
+      catch (error) {
+        if (request.mode !== 'saved') throw error;
+        throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '无法确认远端保存版参数定义，旧插件兼容不可用；请升级插件精确执行');
+      }
+      if (request.mode === 'saved' && options.source !== 'saved') throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '宿主尚未接入保存版参数校验');
+      if (digestRepairJson(options.inputSchema) !== request.inputSchemaDigest) conflict(request.mode === 'saved'
+        ? '远端保存版与候选参数定义不同，旧插件兼容不可用；请升级插件精确执行' : '参数定义已变化，请重新填写');
       validateTrialInput(request.input, options.inputSchema);
       if (request.mode === 'saved') {
         const reserved = new Set(['local', 'debug', 'remote', 'version', 'tag', 'file', 'chat-inject-level', 'chatInjectLevel']);

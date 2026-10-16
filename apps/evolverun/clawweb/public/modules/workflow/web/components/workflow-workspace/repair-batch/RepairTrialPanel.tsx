@@ -81,7 +81,7 @@ export default function RepairTrialPanel({ taskId, revision, enabled, open, onCl
       {!options ? <p role="status">正在读取候选参数和授权生产 Bot…</p> : <>
         <label className="block text-sm"><input type="checkbox" checked={savedMode} disabled={busy || uncertain || submitted} onChange={event => setSavedMode(event.target.checked)} /> 使用旧插件兼容模式</label>
         {!savedMode && <p className="text-sm text-muted-foreground">精确执行需要新版 ClawMind；未更新的插件请在执行前选择兼容模式。</p>}
-        {savedMode && <p className="text-sm text-muted-foreground">运行远端已保存版，未固定此候选，结果仅供参考。旧版可能重复执行或触发原有通知；参数按旧命令方式传递，不支持敏感输入。</p>}
+        {savedMode && <p className="text-sm text-muted-foreground">运行远端已保存版，未固定此候选，结果仅供参考。仅在保存版与候选参数定义一致时可用。旧版可能重复执行或触发原有通知；参数按旧命令方式传递，不支持敏感输入。</p>}
         <label className="block text-sm">执行 Bot<select aria-label="执行 Bot" className="ml-3 rounded border border-input bg-background p-2" value={targetId} disabled={busy || uncertain} onChange={event => setTargetId(event.target.value)}>
           <option value="">请选择生产 Bot</option>{options.targets.map(bot => <option key={bot.id} value={bot.id}>{bot.label}</option>)}
         </select></label>
