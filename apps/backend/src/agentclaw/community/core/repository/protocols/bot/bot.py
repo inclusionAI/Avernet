@@ -342,12 +342,15 @@ class BotRepository(Protocol):
         *,
         owner_id: str,
         personal_space_id: int | None,
+        env: str | None = None,
     ) -> int:
         """Count an owner's live Bots in their logical Personal Space.
 
         Legacy rows with ``space_id IS NULL`` belong to that same scope and are
         included alongside the numeric Personal Space id when one exists.
         Desktop and TeClaw Bots do not consume quota and are excluded.
+        An explicit ``env`` targets a specific environment for admin
+        cross-env corrections.
         """
         ...
 
@@ -356,10 +359,12 @@ class BotRepository(Protocol):
         self,
         *,
         space_id: int,
+        env: str | None = None,
     ) -> int:
         """Count live quota-consuming Bots in one Space across owners.
 
-        Desktop and TeClaw Bots are excluded.
+        Desktop and TeClaw Bots are excluded. An explicit ``env`` targets a
+        specific environment for admin cross-env corrections.
         """
         ...
 

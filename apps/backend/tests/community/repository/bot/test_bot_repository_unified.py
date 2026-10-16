@@ -935,4 +935,43 @@ def test_update_space_by_owner_explicit_env(repo, db):
     assert updated["space_id"] == 9
     # The tail re-read must honor the explicit env too.
     assert repo.get_by_id_and_owner("bot-1", "emp1", env="prod")["space_id"] == 9
+    # The write filter itself must be env-scoped — a runtime-env write
+    # must not silently touch the prod row.
+    assert (
+        repo.update_space_by_owner(
+            bot_id="bot-1", owner_id="emp1", space_id=99
+        )
+        is None
+    )
+    # … and the prod row must be untouched (the runtime-env write did not
+    # land), not just invisible to the default-env re-read.
+    assert repo.get_by_id_and_owner("bot-1", "emp1", env="prod")["space_id"] == 9
     assert repo.get_by_id_and_owner("bot-1", "emp1") is None
+
+
+def test_count_cloud_bots_by_space_explicit_env(repo, db):
+    rec = repo.insert(_data())
+    with repo._db.orm_session() as s:
+        s.query(BotModel).filter(BotModel.id == rec["id"]).update(
+            {BotModel.env: "prod", BotModel.space_id: 5}
+        )
+    assert repo.count_cloud_bots_by_space(space_id=5, env="prod") == 1
+    assert repo.count_cloud_bots_by_space(space_id=5) == 0
+
+
+def test_count_cloud_bots_in_personal_space_explicit_env(repo, db):
+    rec = repo.insert(_data(bot_type="personal"))
+    with repo._db.orm_session() as s:
+        s.query(BotModel).filter(BotModel.id == rec["id"]).update(
+            {BotModel.env: "prod", BotModel.space_id: 5}
+        )
+    assert (
+        repo.count_cloud_bots_in_personal_space(
+            owner_id="emp1", personal_space_id=5, env="prod"
+        )
+        == 1
+    )
+    assert (
+        repo.count_cloud_bots_in_personal_space(owner_id="emp1", personal_space_id=5)
+        == 0
+    )

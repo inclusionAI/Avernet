@@ -154,7 +154,7 @@ class BotRepository(
 
     # ── queries (env-scoped — adopt prod) ───────────────────────
 
-    def _env(self, env: Optional[str] = None):
+    def _env(self, *, env: Optional[str] = None):
         # Optional explicit env keeps admin cross-env corrections on the
         # same single business code path as every other caller.
         return self.Model.env == (env or get_current_env())
@@ -180,7 +180,7 @@ class BotRepository(
                 self.Model.bot_id == bot_id,
                 self.Model.owner_id == owner_id,
                 self.Model.is_delete == 0,
-                self._env(env),
+                self._env(env=env),
             )
             if execution_options:
                 q = q.execution_options(**execution_options)
@@ -623,7 +623,7 @@ class BotRepository(
                     self.Model.bot_id == bot_id,
                     self.Model.owner_id == owner_id,
                     self.Model.is_delete == 0,
-                    self._env(env),
+                    self._env(env=env),
                 )
                 .update(
                     {
