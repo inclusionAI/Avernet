@@ -15,7 +15,8 @@ import { Tag } from '../Tag';
 
 export interface WorkOrderCardProps {
   workOrder: WorkOrder;
-  onApprove?: (workOrderId: number | string) => void;
+  // 返回 Promise 供本组件跟踪 in-flight 态（按钮 loading 防抖）；同步 void 兼容旧调用方。
+  onApprove?: (workOrderId: number | string) => void | Promise<void>;
   onReject?: (workOrderId: number | string, remark: string) => void | Promise<void>;
   onView?: (workOrder: WorkOrder) => void;
   canAct?: boolean; // 通知中心容器决定是否可操作（缺 identity 时只读）
@@ -28,6 +29,17 @@ export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canA
   const [rejectOpen, setRejectOpen] = useState(false);
   const [remark, setRemark] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // 同意：与驳回共用 submitting in-flight 态，请求期间按钮 loading，防止连点重复调用审批接口。
+  const submitApprove = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await onApprove?.(wo.workOrderId);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const submitReject = async () => {
     const text = remark.trim();
@@ -90,9 +102,10 @@ export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canA
                   size="sm"
                   variant="primary"
                   disabled={!canAct}
+                  loading={submitting}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onApprove?.(wo.workOrderId);
+                    void submitApprove();
                   }}
                 >
                   同意
@@ -100,7 +113,7 @@ export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canA
                 <Button
                   size="sm"
                   variant="destructive"
-                  disabled={!canAct}
+                  disabled={!canAct || submitting}
                   onClick={(e) => {
                     e.stopPropagation();
                     setRejectOpen(true);
