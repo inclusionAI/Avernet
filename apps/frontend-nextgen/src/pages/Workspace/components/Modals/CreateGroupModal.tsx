@@ -33,7 +33,7 @@ export function CreateGroupModal({
 }: CreateGroupModalProps) {
   const { run, friendlyError, creating, clearError } = useCreateGroup();
   const { viewScope, changeViewScope, applyViewScope } = useCreateGroupViewScope(open, clearError);
-  const picker = useGroupCollaborationPicker(activeIdentity?.id, open, activeIdentity?.kind === 'user');
+  const picker = useGroupCollaborationPicker(activeIdentity?.id, open, activeIdentity?.kind === 'user', activeIdentity?.kind);
   const [kind, setKind] = useState<GroupStrategyKind>('free_chat');
   const [name, setName] = useState('');
   const [context, setContext] = useState('');
@@ -44,6 +44,8 @@ export function CreateGroupModal({
   const [managerBotId, setManagerBotId] = useState('');
   const [enableTaskExecute, setEnableTaskExecute] = useState(GROUP_CREATE_VIA_EXECUTE);
   const wasOpenRef = useRef(false);
+  // 协作目标推荐态下用户手动取消过的 Bot：再次推荐不自动选中（用户取消优先），手动重新勾选即解除记录。
+  const goalDeselectedRef = useRef<Set<string>>(new Set());
   const supportsStateMachine = activeIdentity?.kind === 'bot';
   const activeIdentityDisplayName = activeIdentity
     ? resolveAuthenticatedDisplayName(
@@ -97,7 +99,20 @@ export function CreateGroupModal({
     setEnableTaskExecute(GROUP_CREATE_VIA_EXECUTE);
     resetTemplates();
     binding.reset();
+    goalDeselectedRef.current = new Set();
   }, [activeIdentity?.id, activeIdentity?.kind, open, resetTemplates, binding.reset]);
+
+  // 协作目标智能推荐结果落地后自动全选（用户取消过的除外）；画像筛选搜索结果不自动选中。
+  useEffect(() => {
+    if (picker.recommendSource !== 'goal' || picker.isLoadingRecommend || picker.recommendations.length === 0) return;
+    const incoming = picker.recommendations
+      .filter((bot) => !goalDeselectedRef.current.has(bot.id))
+      .map((bot) => bot.id);
+    if (incoming.length === 0) return;
+    setBotUuids((prev) =>
+      incoming.every((id) => prev.includes(id)) ? prev : Array.from(new Set([...prev, ...incoming])),
+    );
+  }, [picker.recommendSource, picker.isLoadingRecommend, picker.recommendations]);
 
   const toggleBot = (id: string) => {
     clearError();
@@ -112,7 +127,17 @@ export function CreateGroupModal({
       return;
     }
     if (activeIdentity?.kind === 'bot' && id === activeIdentity.id) return;
-    setBotUuids((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    if (botUuids.includes(id)) {
+      // 取消勾选：协作目标推荐态下取消的推荐项记入排除集，再次推荐时不自动选中。
+      if (picker.recommendSource === 'goal' && picker.recommendations.some((bot) => bot.id === id)) {
+        goalDeselectedRef.current.add(id);
+      }
+      setBotUuids((prev) => prev.filter((x) => x !== id));
+    } else {
+      // 重新勾选视为撤销取消意愿，解除排除记录。
+      goalDeselectedRef.current.delete(id);
+      setBotUuids((prev) => [...prev, id]);
+    }
     if (driverBotId === id) setDriverBotId(activeIdentity?.kind === 'bot' ? activeIdentity.id : '');
     if (managerBotId === id) setManagerBotId('');
   };
@@ -235,6 +260,8 @@ export function CreateGroupModal({
               onKindChange={switchKind}
               onNameChange={setField(setName)}
               onContextChange={setField(setContext)}
+              canRecommend={Boolean(context.trim())}
+              onRecommend={() => picker.recommendByGoal(context.trim())}
               onDriverChange={(value) => {
                 clearError();
                 setDriverBotId(value);

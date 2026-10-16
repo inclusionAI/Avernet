@@ -1,5 +1,6 @@
 import { Button, Checkbox, Input, Switch } from '@/components/ui';
 import { cn } from '@/utils/cn';
+import { Sparkles } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { GroupLeaderSelect, type GroupLeaderOption } from './GroupLeaderSelect';
 import { YamlCodeEditor } from './YamlEditor';
@@ -37,6 +38,10 @@ export interface GroupConfigFieldsProps {
   onKindChange: (kind: GroupStrategyKind) => void;
   onNameChange: (value: string) => void;
   onContextChange: (value: string) => void;
+  /** 协作目标智能推荐是否可触发（目标为空时置灰）；不传 onRecommend 则不显示推荐按钮。 */
+  canRecommend?: boolean;
+  /** 点击智能推荐：以协作目标为关键词推荐可协作 Bot。 */
+  onRecommend?: () => void;
   onDriverChange: (value: string) => void;
   onManagerChange: (value: string) => void;
   onDeliveryChange: (value: DeliveryPolicy) => void;
@@ -63,6 +68,8 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
     onKindChange,
     onNameChange,
     onContextChange,
+    canRecommend,
+    onRecommend,
     onDriverChange,
     onManagerChange,
     onDeliveryChange,
@@ -88,13 +95,29 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
           <label className="mb-1.5 block text-xs font-semibold text-foreground" htmlFor="create-group-context">
             协作目标
           </label>
-          <Input
-            id="create-group-context"
-            value={context}
-            onChange={(event) => onContextChange(event.target.value)}
-            placeholder="请输入协作目标"
-            className="h-9 rounded-md"
-          />
+          <div className="flex min-w-0 gap-2">
+            <Input
+              id="create-group-context"
+              value={context}
+              onChange={(event) => onContextChange(event.target.value)}
+              placeholder="请输入协作目标"
+              className="h-9 min-w-0 rounded-md"
+            />
+            {onRecommend && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!canRecommend}
+                onClick={onRecommend}
+                aria-label="智能推荐可协作 Bot"
+                className="h-9 shrink-0 gap-1 rounded-md"
+              >
+                <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                智能推荐
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 

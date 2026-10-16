@@ -389,6 +389,126 @@ it('disables confirm until at least one participant is selected', async () => {
   expect(screen.getByRole('button', { name: '确认创建' })).toBeDisabled();
 });
 
+it('协作目标智能推荐落地后自动全选推荐结果', async () => {
+  cs.listCandidates.mockResolvedValue({
+    ok: true,
+    data: { items: bots, total: bots.length, offset: 0, limit: 50, hasMore: false },
+  });
+  cs.recommendCandidates.mockResolvedValue({
+    ok: true,
+    data: [
+      {
+        id: 'b1',
+        name: 'Alpha',
+        online: true,
+        status: 'online',
+        reachability: 'reachable',
+        recommendScore: 0.9,
+        shortProfile: '值班相关',
+      },
+    ],
+  });
+  renderModal();
+
+  fireEvent.change(screen.getByLabelText('协作目标'), { target: { value: '提升值班效率' } });
+  fireEvent.click(screen.getByRole('button', { name: '智能推荐可协作 Bot' }));
+
+  // 推荐链路含 350ms 防抖，且本组件在 jsdom 下渲染开销大，放宽 waitFor 超时。
+  await waitFor(
+    () => {
+      expect(screen.getByText('已选 1 个')).toBeInTheDocument();
+    },
+    { timeout: 5000 },
+  );
+  expect(screen.getByTestId('group-participant-selected')).toHaveTextContent('Alpha');
+});
+
+it('再次智能推荐不勾选用户取消过的 Bot，新出现的结果仍自动选中', async () => {
+  cs.listCandidates.mockResolvedValue({
+    ok: true,
+    data: { items: bots, total: bots.length, offset: 0, limit: 50, hasMore: false },
+  });
+  cs.recommendCandidates.mockResolvedValue({
+    ok: true,
+    data: [
+      { id: 'b1', name: 'Alpha', online: true, status: 'online', reachability: 'reachable', recommendScore: 0.9 },
+      { id: 'b2', name: 'Beta', online: true, status: 'online', reachability: 'reachable', recommendScore: 0.8 },
+    ],
+  });
+  renderModal();
+
+  fireEvent.change(screen.getByLabelText('协作目标'), { target: { value: '值班' } });
+  fireEvent.click(screen.getByRole('button', { name: '智能推荐可协作 Bot' }));
+  await waitFor(
+    () => {
+      expect(screen.getByText('已选 2 个')).toBeInTheDocument();
+    },
+    { timeout: 5000 },
+  );
+
+  // 用户取消 Alpha：再次推荐时取消优先，不应被自动勾回。
+  fireEvent.click(within(screen.getByTestId('group-participant-list')).getByRole('button', { name: /Alpha/ }));
+  await waitFor(
+    () => {
+      expect(screen.getByText('已选 1 个')).toBeInTheDocument();
+    },
+    { timeout: 5000 },
+  );
+  expect(screen.getByTestId('group-participant-selected')).not.toHaveTextContent('Alpha');
+
+  // 修改目标再次智能推荐：Alpha 保持取消，Beta 保持选中。
+  fireEvent.change(screen.getByLabelText('协作目标'), { target: { value: '值班响应' } });
+  fireEvent.click(screen.getByRole('button', { name: '智能推荐可协作 Bot' }));
+  await waitFor(
+    () => {
+      expect(
+        within(screen.getByTestId('group-participant-list')).getByRole('button', { name: /Alpha/ }),
+      ).toBeInTheDocument();
+    },
+    { timeout: 5000 },
+  );
+  expect(screen.getByText('已选 1 个')).toBeInTheDocument();
+  expect(screen.getByTestId('group-participant-selected')).toHaveTextContent('Beta');
+  expect(screen.getByTestId('group-participant-selected')).not.toHaveTextContent('Alpha');
+});
+
+it('按画像筛选搜索结果不自动选中', async () => {
+  cs.listCandidates.mockResolvedValue({
+    ok: true,
+    data: { items: bots, total: bots.length, offset: 0, limit: 50, hasMore: false },
+  });
+  cs.recommendCandidates.mockResolvedValue({
+    ok: true,
+    data: [
+      {
+        id: 'b1',
+        name: 'Alpha',
+        online: true,
+        status: 'online',
+        reachability: 'reachable',
+        recommendScore: 0.9,
+        shortProfile: '值班相关',
+      },
+    ],
+  });
+  renderModal();
+
+  fireEvent.click(screen.getByRole('button', { name: '可协作 Bot' }));
+  fireEvent.click(screen.getByText('按画像筛选'));
+  const profileSearchInput = await screen.findByLabelText('按画像关键词搜索可协作 Bot');
+  fireEvent.change(profileSearchInput, { target: { value: '值班' } });
+
+  await waitFor(
+    () => {
+      expect(
+        within(screen.getByTestId('group-participant-list')).getByRole('button', { name: /Alpha/ }),
+      ).toBeInTheDocument();
+    },
+    { timeout: 5000 },
+  );
+  expect(screen.getByText('已选 0 个')).toBeInTheDocument();
+});
+
 it('keeps the create actions outside the scroll region after selecting a bot', async () => {
   renderModal();
 
