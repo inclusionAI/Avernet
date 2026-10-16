@@ -38,6 +38,7 @@ it('freezes the reviewed Pack, validates input, deduplicates dispatch and binds 
     const registered = { flow_id: 'actual-native-flow', workflow_id: 'wf-1', workflow_version: -1, workflow_deploy_number: null,
       origin_bot_id: 'bot:owner', run_request_id: trial.id, run_request_bot_id: 'bot', run_request_owner_id: 'owner',
       candidate_commit: trial.candidateCommit, pack_digest: trial.packDigest, input_digest: trial.inputDigest };
+    await expect(registerRunRequest(f.db, { flow_id: 'missing-exact-context', workflow_id: 'wf-1', origin_session_key: `agent:main:workflow-trial:${trial.id}` }, async () => {})).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
     const longIdInsert = async () => { throw Error('oversized id must not reach persistence'); };
     await expect(registerRunRequest(f.db, { ...registered, flow_id: 'a'.repeat(65) }, longIdInsert)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
     expect((await service.list(rev.taskId))[0].flowId).toBeNull();
@@ -67,5 +68,20 @@ it('freezes the reviewed Pack, validates input, deduplicates dispatch and binds 
     f.raw.prepare("UPDATE workflow_repair_release_records SET body_json=? WHERE record_id=?").run(JSON.stringify({ ...JSON.parse(failed.body_json), status: 'failed' }), trial.id);
     await expect(registerRunRequest(f.db, registered, insert)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
     await expect(registerRunRequest(f.db, { ...child, flow_id: 'late-child' }, insert)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+    await expect(service.start('actor', rev.taskId, { ...request, mode: 'saved', requestId: 'sensitive-legacy' })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    await expect(service.start('actor', rev.taskId, { ...request, mode: 'saved', requestId: 'nested-sensitive-legacy', input: { query: 'ordinary', credentials: { value: 'test-only' } } })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    const legacy = await service.start('actor', rev.taskId, { ...request, mode: 'saved', requestId: 'legacy', input: { query: 'ordinary saved input' } });
+    expect(legacy.mode).toBe('saved'); expect(saves).toBe(1);
+    await expect(service.resolveRunRequest(legacy.id, { botId: 'bot', ownerId: 'owner' })).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+    const ordinary = { flow_id: 'legacy-root', workflow_id: 'wf-1', workflow_version: -1,
+      origin_bot_id: 'bot', origin_session_key: `agent:main:workflow-trial:${legacy.id}` };
+    const legacyInsert = (flowId: string, workflowId = 'wf-1') => async (tx: typeof f.db) => { await tx.exec("INSERT INTO flow_runs VALUES (?, ?, 'bot', 'succeeded', NULL, NULL)", [flowId, workflowId]); };
+    expect(await registerRunRequest(f.db, ordinary, legacyInsert('legacy-root'))).toBe('created');
+    expect(await registerRunRequest(f.db, ordinary, async () => { throw Error('duplicate persistence'); })).toBe('existing');
+    // Old runtimes cannot stop a duplicate execution: retain its actual record and purpose.
+    expect(await registerRunRequest(f.db, { ...ordinary, flow_id: 'legacy-second' }, legacyInsert('legacy-second'))).toBe('created');
+    expect(await registerRunRequest(f.db, { flow_id: 'legacy-child', workflow_id: 'child', state_json: JSON.stringify({ subworkflowMeta: { parentFlowId: 'legacy-root' } }) }, legacyInsert('legacy-child', 'child'))).toBe('created');
+    expect((await service.list(rev.taskId)).find(row => row.id === legacy.id)).toMatchObject({ mode: 'saved', flowId: 'legacy-root', status: 'succeeded' });
+
   } finally { await f.db.close(); }
 });

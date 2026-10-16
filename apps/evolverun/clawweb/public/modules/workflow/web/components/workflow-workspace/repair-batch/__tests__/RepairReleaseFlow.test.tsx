@@ -67,3 +67,13 @@ it('hides candidate execution when the Host has no runtime capability while publ
   expect(screen.queryByRole('button', { name: '先试跑' })).not.toBeInTheDocument()
   expect(screen.getByRole('button', { name: '发布此版本' })).toBeEnabled()
 })
+
+it('does not count a successful legacy saved run as successful verification of the reviewed candidate', async () => {
+  api.trials.mockResolvedValueOnce({ configured: true, trials: [{ mode: 'saved', id: 'legacy', revision: 1,
+    candidateCommit: 'a'.repeat(40), status: 'succeeded', target: { label: 'Bot' }, createdAtMs: 1, input: {} }] as never[] })
+  api.deploymentTargets.mockResolvedValue({ targets: [{ id: 'workflow:pre:wf', scope: 'workflow', label: '工作流 wf', environment: 'pre' }] })
+  render(<RepairReleaseFlow detail={detail} selectedRevision={1} canEdit onRefresh={() => {}} />)
+  await screen.findByText('兼容执行：远端保存版 · 运行成功')
+  await userEvent.click(screen.getByRole('button', { name: '发布此版本', exact: true }))
+  expect(await screen.findByText(/此候选尚无成功试跑记录/)).toBeInTheDocument()
+})

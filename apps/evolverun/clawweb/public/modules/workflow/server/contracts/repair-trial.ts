@@ -4,12 +4,13 @@ export type RepairTrialCandidate = { workflowId: string; taskId: string; revisio
 export type RepairTrialOptions = { packId: string; workflowIds?: string[]; candidateRef: string; inputSchema: Record<string, unknown> | null };
 export type RepairTrialStatus = 'dispatching' | 'awaiting_run' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'unknown';
 export type RepairTrial = RepairTrialCandidate & {
+  mode?: 'pinned' | 'saved';
   id: string; flowId: string | null; requestId: string; actorId: string; target: RepairTrialTarget;
   stateVersion: number; createdAtMs: number; updatedAtMs: number; status: RepairTrialStatus;
   input: Record<string, unknown>; inputDigest: string; inputSchemaDigest: string; options: RepairTrialOptions;
   error: string | null; output?: string; durationMs?: number | null;
 };
-export type RepairTrialRequest = { revision: number; expectedStateVersion: number; requestId: string;
+export type RepairTrialRequest = { mode?: 'pinned' | 'saved'; revision: number; expectedStateVersion: number; requestId: string;
   targetId: string; input: Record<string, unknown>; inputSchemaDigest: string };
 /** Host boundary: production, authorized and capable Bots only; no editable workspace or saved-latest execution. */
 export interface RepairTrialPort {
@@ -17,6 +18,6 @@ export interface RepairTrialPort {
   inspect(candidate: RepairTrialCandidate): Promise<RepairTrialOptions>;
   /** Pin exact candidate in isolated immutable Git ref. Idempotent; no deploy tag/active pointer writes. */
   save(candidate: RepairTrialCandidate, options: RepairTrialOptions): Promise<void>;
-  /** Only workflow/request identities enter the existing run command. Message acceptance is not workflow completion. Never auto-retry. */
+  /** Exact mode carries a request selector; saved compatibility quotes non-sensitive ordinary parameters. Message acceptance is not completion. Never auto-retry. */
   dispatch(trial: RepairTrial): Promise<{ status: 'accepted' | 'unknown' | 'failed' }>;
 }

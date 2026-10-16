@@ -60,3 +60,18 @@ it('shows a useful JSON validation error and allows correction without dispatch'
   expect(await screen.findByRole('alert')).toHaveTextContent('参数 JSON 格式无效')
   expect(api.startTrial).not.toHaveBeenCalled(); expect(input).toBeEnabled()
 })
+
+it('offers an explicit legacy saved run and labels its success as unverified candidate evidence', async () => {
+  const saved = { ...trial, mode: 'saved', status: 'succeeded' }
+  api.startTrial.mockResolvedValue(saved)
+  api.trials.mockResolvedValue({ configured: true, trials: [saved] })
+  render(panel())
+  await userEvent.click(await screen.findByRole('checkbox', { name: '使用旧插件兼容模式' }))
+  await userEvent.selectOptions(await screen.findByRole('combobox', { name: '执行 Bot' }), 'prod:owner:bot')
+  await userEvent.type(screen.getByRole('textbox', { name: 'query' }), 'hello')
+  await userEvent.click(screen.getByRole('button', { name: '运行远端保存版' }))
+  expect(api.startTrial).toHaveBeenCalledWith('task', expect.objectContaining({ mode: 'saved', input: { query: 'hello' } }))
+  expect(screen.getByText('兼容执行：远端保存版 · 运行成功')).toBeInTheDocument()
+  expect(screen.getByText(/此结果不代表已验证候选/)).toBeInTheDocument()
+  expect(screen.queryByText('候选 v1 · 运行成功')).not.toBeInTheDocument()
+})
