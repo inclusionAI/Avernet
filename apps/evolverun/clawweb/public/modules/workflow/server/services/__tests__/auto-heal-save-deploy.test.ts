@@ -6,7 +6,10 @@
  *   2. Deploy: deploy_number computation, git tag, deploy_history insert,
  *      setActive, version sync, and auto-run trigger.
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import Database from "better-sqlite3";
 import { sqliteDialect } from "@avernet/clawweb-shared/server/db/dialect";
 import { WorkflowSpecRepository } from "../../repositories/workflow-spec-repository.js";
@@ -16,6 +19,9 @@ import { AutoHealSaveService } from "../auto-heal-save-service.js";
 import { AutoHealDeployService } from "../auto-heal-deploy-service.js";
 import * as gitClient from "../clawflows-git-client.js";
 import type { WorkflowSpec } from "../../workflow.js";
+
+// Capture the real implementation before any beforeEach mocks it.
+const realCreateTempRepo = gitClient.createTempRepo;
 
 const TEST_SPEC: WorkflowSpec = {
   id: "wf-test",
@@ -392,5 +398,41 @@ describe("AutoHealDeployService", () => {
     expect(placeholder?.tag_name).toBeNull();
     expect(real?.is_active).toBe(1);
     expect(real?.tag_name).toBe("deploy/wf-test/#6");
+  });
+});
+
+describe("createTempRepo", () => {
+  let originalClawwebTemp: string | undefined;
+  let tempDir: string | undefined;
+
+  beforeEach(() => {
+    originalClawwebTemp = process.env.CLAWWEB_TEMP_DIR;
+    tempDir = mkdtempSync(path.join(tmpdir(), "cw-autoheal-test-"));
+    process.env.CLAWWEB_TEMP_DIR = tempDir;
+    // Restore the real implementation for these tests.
+    vi.spyOn(gitClient, "createTempRepo").mockImplementation(realCreateTempRepo);
+  });
+
+  afterEach(() => {
+    if (tempDir) {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+    if (originalClawwebTemp === undefined) {
+      delete process.env.CLAWWEB_TEMP_DIR;
+    } else {
+      process.env.CLAWWEB_TEMP_DIR = originalClawwebTemp;
+    }
+  });
+
+  it("creates a temp directory under CLAWWEB_TEMP_DIR", async () => {
+    const repo = await gitClient.createTempRepo();
+    expect(repo.startsWith(tempDir!)).toBe(true);
+    expect(statSync(repo).isDirectory()).toBe(true);
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  it("throws a clear error when the configured temp dir parent is missing", async () => {
+    process.env.CLAWWEB_TEMP_DIR = path.join(tempDir!, "missing", "deep");
+    await expect(gitClient.createTempRepo()).rejects.toThrow("临时 git 目录的父路径不存在");
   });
 });

@@ -114,8 +114,23 @@ async function configureGitCredential(
   );
 }
 
+function getTempRepoPrefix(): string {
+  const configured = process.env.CLAWWEB_TEMP_DIR || process.env.TMPDIR || tmpdir();
+  return path.join(configured, "cw-autoheal-");
+}
+
 export async function createTempRepo(): Promise<string> {
-  return mkdtemp(path.join(tmpdir(), "cw-autoheal-"));
+  const prefix = getTempRepoPrefix();
+  const parent = path.dirname(prefix);
+  if (!existsSync(parent)) {
+    throw new Error(`临时 git 目录的父路径不存在: ${parent} (CLAWWEB_TEMP_DIR/TMPDIR=${process.env.CLAWWEB_TEMP_DIR || process.env.TMPDIR || ""})`);
+  }
+  try {
+    return await mkdtemp(prefix);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`无法创建临时 git 目录: ${message} (prefix=${prefix})`);
+  }
 }
 
 export async function removeTempRepo(repoDir: string): Promise<void> {
