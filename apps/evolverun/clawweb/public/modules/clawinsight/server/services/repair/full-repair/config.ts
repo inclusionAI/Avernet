@@ -6,32 +6,14 @@ import {
 } from "@avernet/clawweb-shared/server/db";
 import { getCurrentEnv } from "@avernet/clawweb-shared/server/env";
 import type { RepairControlPlaneEnvironment, RepairTaskConfig } from "./contracts.js";
+import { resolveTaskControlPlaneEnvironment } from "../common/task-control-plane.js";
 
-const PRE_CONTROL_PLANE_HOSTS = new Set([
-  "clawweb-pre.alipay.com",
-  "clawweb-pre.antgroup-inc.cn",
-]);
-const PROD_CONTROL_PLANE_HOSTS = new Set([
-  "clawweb.alipay.com",
-  "clawweb.antgroup-inc.cn",
-]);
-
-/** Resolve legacy tasks without coupling their AIS runtime to the target Bot environment. */
+/** Preserve legacy snapshot selection while sharing strict ownership resolution with background workers. */
 export function resolveRepairTaskControlPlaneEnvironment(
   task: Pick<RepairTaskConfig, "controlPlaneEnvironment" | "publicBaseUrl">,
   fallback: RepairControlPlaneEnvironment,
 ): RepairControlPlaneEnvironment {
-  if (task.controlPlaneEnvironment === "pre" || task.controlPlaneEnvironment === "prod") {
-    return task.controlPlaneEnvironment;
-  }
-  try {
-    const hostname = new URL(task.publicBaseUrl).hostname.toLowerCase();
-    if (PRE_CONTROL_PLANE_HOSTS.has(hostname)) return "pre";
-    if (PROD_CONTROL_PLANE_HOSTS.has(hostname)) return "prod";
-  } catch {
-    // Historical local/test tasks use the current deployment as their fallback.
-  }
-  return fallback;
+  return resolveTaskControlPlaneEnvironment(task) ?? fallback;
 }
 
 export type RepairConfig = {

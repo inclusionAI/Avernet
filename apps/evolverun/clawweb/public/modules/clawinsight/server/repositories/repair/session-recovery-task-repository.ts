@@ -1,3 +1,4 @@
+import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../../services/repair/common/task-control-plane.js";
 import { createHash } from "node:crypto";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { nowForDb } from "@avernet/clawweb-shared/server/db";
@@ -36,7 +37,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       "SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery' AND task_id > ? AND status IN ('pending','running','waiting_owner','waiting_effect') ORDER BY task_id ASC LIMIT ?", [afterTaskId, limit]);
     return (await Promise.all(rows.map(row => this.find(row.task_id)))).filter((task): task is RecoveryStoredTask => !!task);
   }
-  async listForReporting(limit: number, afterTaskId = ""): Promise<RecoveryStoredTask[]> {
+  async listForReporting(limit: number, afterTaskId: string, controlPlaneEnvironment: AgentControlPlaneEnvironment): Promise<RecoveryStoredTask[]> {
     this.limit(limit);
     const result: RecoveryStoredTask[] = [];
     let cursor = afterTaskId;
@@ -51,6 +52,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       for (const row of rows) {
         cursor = row.task_id;
         let state = JSON.parse(row.config_json);
+        if (resolveTaskControlPlaneEnvironment(state) !== controlPlaneEnvironment) continue;
         if (state.artifactStorage !== 2) {
           await this.update(row.task_id, state.version, value => ({ ...value, version: value.version + 1 }));
           state = JSON.parse((await this.tasks.findTask(row.task_id))!.config_json);

@@ -1,3 +1,4 @@
+import { getCurrentEnv } from "@avernet/clawweb-shared/server/env";
 import { SessionRecoveryNotifier } from "./notification.js";
 import { type IDatabase } from "@avernet/clawweb-shared/server/db";
 import type { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
@@ -30,18 +31,19 @@ export function createSessionRecoveryRuntime(options: {
     console.warn("[session-recovery] unavailable: AIS Snapshot is not configured");
     return undefined;
   }
+  const controlPlaneEnvironment = getCurrentEnv() === "prod" ? "prod" : "pre";
   const observationMs = options.observationMs ?? 3600000;
   if (!Number.isSafeInteger(observationMs) || observationMs < 20000) throw new Error("Invalid self-healing waiting deadline");
   const store = new SessionRecoveryTaskRepository(options.db, options.repo, options.artifactStore);
   const reporter = new HttpRecoveryResultReporter({ baseUrl: options.publicBaseUrl });
   let tasks: SessionRecoveryTaskService;
   const notifier = new SessionRecoveryNotifier(options.notificationSender, options.publicBaseUrl);
-  const agent = new SessionRecoveryAgentService({ tasks: store, repo: options.repo,
+  const agent = new SessionRecoveryAgentService({ controlPlaneEnvironment, tasks: store, repo: options.repo,
     audit: new AgentToolCallRepository(options.db, "session_recovery"), ais: options.ais, runtime: options.runtime,
     targets: options.targets, trajectory: options.trajectory, logs: options.logs, runtimeTool: options.runtimeTool, business: () => tasks, publicBaseUrl: options.publicBaseUrl,
     snapshotId: options.snapshotId, nasRoots: options.nasRoots, leaseSeconds: options.leaseSeconds ?? 120,
     launchGraceSeconds: options.launchGraceSeconds ?? 1800, observationMs });
-  tasks = new SessionRecoveryTaskService({ tasks: store, agent, notifier, reporter, observationMs,
+  tasks = new SessionRecoveryTaskService({ controlPlaneEnvironment, tasks: store, agent, notifier, reporter, observationMs,
     resolveTarget: async request => {
       const expected = { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[request.target.engine];
       const target = await options.targets.resolve({ environment: request.target.env, ownerId: request.target.entity_id, botId: request.target.bot_id });

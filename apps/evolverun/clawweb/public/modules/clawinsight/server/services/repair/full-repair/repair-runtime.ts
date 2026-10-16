@@ -1,3 +1,4 @@
+import { resolveTaskControlPlaneEnvironment } from "../common/task-control-plane.js";
 import { BotEngineOperations } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import { createHash, randomUUID } from "node:crypto";
 import type { EvolveRepository, EvolveStepRow, EvolveTaskRow } from "@avernet/clawevolve/server/repositories/evolve-repository";
@@ -4603,6 +4604,8 @@ export class RepairTaskService {
     const task = await this.deps.repo.findTask(reportedTask.task_id);
     if (!task || task.task_type !== "repair") return { applied: false };
     const config = taskConfig(task), contract = config.aisExecution;
+    const owner = resolveTaskControlPlaneEnvironment(config);
+    if (owner && owner !== this.deps.config.controlPlaneEnvironment) return { applied: false };
     if (step.step_type !== "agent_execution" || step.task_id !== task.task_id) return { applied: false };
     const currentExecution = contract?.stepId === step.step_id && contract.aisBase.executionId === config.execution.executionId;
     if (["succeeded", "failed"].includes(step.status)) {

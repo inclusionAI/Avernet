@@ -1,3 +1,4 @@
+import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../common/task-control-plane.js";
 import { assertActionScope } from "./action-scope.js";
 import { comparableRequestPayload } from "../../../repositories/repair/agent-tool-call-record.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -40,6 +41,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   private readonly runtimeTool: AgentRuntimeTool;
   private readonly now: () => number;
   constructor(private readonly deps: {
+    controlPlaneEnvironment: AgentControlPlaneEnvironment;
     tasks: RecoveryTaskStore; repo: EvolveRepository; audit: AgentToolCallRepository;
     ais: AisExecutor; runtime: BotRuntime; targets: BotTargetResolver; trajectory?: RecoveryTrajectoryReader; logs?: AgentLogTool; runtimeTool?: AgentRuntimeTool;
     business: () => SessionRecoveryTaskApi; publicBaseUrl: string; snapshotId: number;
@@ -52,11 +54,12 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   }
   async start(input: RecoveryStoredTask): Promise<void> {
     let task = await this.required(input.taskId);
-    if (task.status !== "running") return;
+    if (task.status !== "running" || resolveTaskControlPlaneEnvironment(task) !== this.deps.controlPlaneEnvironment) return;
     // Only the lifecycle monitor may retire an expired execution; never overlap live jobs.
     if (task.execution && task.execution.state !== "ended") return;
     if ((task.executionRetry?.retryAt ?? 0) > this.now()) return;
     if (task.executionRetry?.retryAt) {
+      if (task.executionRetry.executionId !== task.execution?.executionId) return;
       if (task.execution?.jobId) {
         try {
           const remote = await this.deps.ais.getJobStatusDetail(task.execution.jobId);
@@ -102,6 +105,8 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   }
   async release(input: RecoveryStoredTask, onlyWaitingOwner = false): Promise<void> {
     const task = await this.required(input.taskId);
+    const owner = resolveTaskControlPlaneEnvironment(task);
+    if (owner && owner !== this.deps.controlPlaneEnvironment) return;
     if (!task.execution || task.execution.state === "ended" || (input.execution && input.execution.executionId !== task.execution.executionId)) return;
     await this.save(task, value => {
       if (onlyWaitingOwner && value.status !== "waiting_owner") fail(409, "Owner 已确认，请继续当前任务");
@@ -352,6 +357,8 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   }
   readonly handleAisStatus: AisStatusHandler = async ({ task: row, step, report }) => {
     const task = await this.required(row.task_id);
+    const owner = resolveTaskControlPlaneEnvironment(task);
+    if (owner && owner !== this.deps.controlPlaneEnvironment) return { applied: false };
     if (step.step_type !== "agent_execution" || step.task_id !== task.taskId) return { applied: false };
     const currentExecution = task.execution?.state !== "ended" && task.aisExecution?.stepId === step.step_id && task.aisExecution.aisBase.executionId === task.execution?.executionId;
     if (["succeeded", "failed"].includes(step.status)) {

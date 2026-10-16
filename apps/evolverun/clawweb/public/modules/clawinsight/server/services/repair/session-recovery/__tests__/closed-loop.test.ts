@@ -64,9 +64,9 @@ beforeEach(async () => {
   }) };
   const targets = { resolve: vi.fn(async () => target) };
   ais = { execute: vi.fn(async (_owner, params) => { submissions.push(JSON.parse(params["${clawevolve_params}"])); return `job-${submissions.length}`; }), getJobStatusDetail: vi.fn(async () => ({ status: "running", rawStatus: "RUNNING", errorMessage: null })), stopExecution: vi.fn(), getJobStatus: vi.fn() }; notifier = { notify: vi.fn() };
-  agent = new SessionRecoveryAgentService({ tasks, repo, audit: new AgentToolCallRepository(db, "session_recovery"), ais, runtime, targets, business: () => service, publicBaseUrl: "https://service.invalid", snapshotId: 1, nasRoots: [directory], leaseSeconds: 120, launchGraceSeconds: 1800, observationMs: 3600000, now: () => now });
+  agent = new SessionRecoveryAgentService({ controlPlaneEnvironment: "pre", tasks, repo, audit: new AgentToolCallRepository(db, "session_recovery"), ais, runtime, targets, business: () => service, publicBaseUrl: "https://service.invalid", snapshotId: 1, nasRoots: [directory], leaseSeconds: 120, launchGraceSeconds: 1800, observationMs: 3600000, now: () => now });
   reporter = { report: async result => { callbacks.push(result); } };
-  service = new SessionRecoveryTaskService({ tasks, agent, notifier, reporter, observationMs: 3600000, now: () => now, resolveTarget: async () => recoveryTargetSnapshot(target) });
+  service = new SessionRecoveryTaskService({ controlPlaneEnvironment: "pre", tasks, agent, notifier, reporter, observationMs: 3600000, now: () => now, resolveTarget: async () => recoveryTargetSnapshot(target) });
 });
 it("persists sharing and authorizes read-only task links without granting Owner actions", async () => {
   const task = await create();
@@ -283,13 +283,13 @@ it("effect waiting resumes the paused phase without resending advice", async () 
   let task = await toObserve(await create()); const count = vi.mocked(runtime.sendMessage).mock.calls.length; expect(task.observationDeadlineAt).toBeTypeOf("number"); now = task.observationDeadlineAt! + 1; await service.maintenance(); task = await current(task.taskId); expect(task.status).toBe("waiting_effect"); await service.resume(task.taskId); task = await current(task.taskId); expect(task.phase).toBe("observe"); expect(task.requiresFreshObservation).toBe(true); await inspect(task, "read-resume"); expect((await current(task.taskId)).requiresFreshObservation).toBe(false); expect(runtime.sendMessage).toHaveBeenCalledTimes(count);
 });
 it("forced stop converges through the shared handler with unknown effect", async () => {
-  let task = await create(); ais.getJobStatusDetail.mockResolvedValue({ status: "stopped", rawStatus: "STOPPED", errorMessage: null }); await reconcileAgentExecutions({ db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) }); task = await current(task.taskId); expect(task.status).toBe("failed"); expect(task.judgment!.effect).toBe("unknown"); expect(task.execution!.state).toBe("ended");
+  let task = await create(); ais.getJobStatusDetail.mockResolvedValue({ status: "stopped", rawStatus: "STOPPED", errorMessage: null }); await reconcileAgentExecutions({ controlPlaneEnvironment: "pre", db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) }); task = await current(task.taskId); expect(task.status).toBe("failed"); expect(task.judgment!.effect).toBe("unknown"); expect(task.execution!.state).toBe("ended");
 });
 it("retries confirmed AIS startup failures in the same task, survives restart and reports only after exhaustion", async () => {
   let task = await create();
   const taskId = task.taskId, firstExecution = task.execution!.executionId, firstTicket = submissions[0].input.credentials.executionTicket;
   ais.getJobStatusDetail.mockResolvedValue({ status: "failed", rawStatus: "failed", errorMessage: "failed to create task for container: context canceled" });
-  const reconcile = () => reconcileAgentExecutions({ db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
+  const reconcile = () => reconcileAgentExecutions({ controlPlaneEnvironment: "pre", db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
   await reconcile(); task = await current(taskId);
   expect(task.status).toBe("running"); expect(task.execution!.state).toBe("ended");
   expect(task.timeline.some(event => event.summary.includes("context canceled"))).toBe(true);
@@ -298,7 +298,7 @@ it("retries confirmed AIS startup failures in the same task, survives restart an
   await service.maintenance(); expect(submissions).toHaveLength(1);
   // Reconstruct the existing services over the same persistent task and ledger.
   tasks = new SessionRecoveryTaskRepository(db, repo, artifactStore);
-  service = new SessionRecoveryTaskService({ tasks, agent, notifier, reporter, observationMs: 3600000, now: () => now });
+  service = new SessionRecoveryTaskService({ controlPlaneEnvironment: "pre", tasks, agent, notifier, reporter, observationMs: 3600000, now: () => now });
   now += 20000;
   await Promise.all([service.maintenance(), service.maintenance()]);
   task = await current(taskId);
@@ -329,12 +329,12 @@ it("retries dispatch failures with revoked tickets instead of failing the accept
 it("waits for the expired AIS job to stop before replacing its execution", async () => {
   let task = await create(); const executionId = task.execution!.executionId;
   now = task.execution!.leaseExpiresAt * 1000 + 1;
-  await reconcileAgentExecutions({ db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
+  await reconcileAgentExecutions({ controlPlaneEnvironment: "pre", db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
   await service.maintenance(); task = await current(task.taskId);
   expect(ais.stopExecution).toHaveBeenCalledWith("job-1"); expect(submissions).toHaveLength(1);
   expect(task.status).toBe("running"); expect(task.execution!.executionId).toBe(executionId);
   ais.getJobStatusDetail.mockResolvedValue({ status: "stopped", rawStatus: "stopped", errorMessage: null });
-  await reconcileAgentExecutions({ db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
+  await reconcileAgentExecutions({ controlPlaneEnvironment: "pre", db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
   now += 20000; await service.maintenance(); expect(submissions).toHaveLength(2);
 });
 it("preserves an approved plan and unknown write evidence across an AIS retry", async () => {
@@ -365,7 +365,7 @@ it("does not retry a non-retryable Base failure or notify Owner about infrastruc
 it("a successful AIS retry continues the original workflow and sends only its final result", async () => {
   let task = await create();
   ais.getJobStatusDetail.mockResolvedValue({ status: "failed", rawStatus: "failed", errorMessage: "container startup canceled" });
-  await reconcileAgentExecutions({ db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
+  await reconcileAgentExecutions({ controlPlaneEnvironment: "pre", db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
   now += 20000; await service.maintenance();
   task = await toObserve(await current(task.taskId));
   const read = await inspect(task, "read-after-retry");
@@ -379,7 +379,7 @@ it("projects every AIS attempt and Host-provided job link without exposing execu
   ais.jobUrl = vi.fn((id: string) => `https://ais.example.test/jobs/${id}`);
   let task = await create(); const firstId = task.execution!.executionId;
   ais.getJobStatusDetail.mockResolvedValue({ status: "failed", rawStatus: "failed", errorMessage: "container startup canceled" });
-  await reconcileAgentExecutions({ db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
+  await reconcileAgentExecutions({ controlPlaneEnvironment: "pre", db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
   now += 20000; await service.maintenance(); task = await current(task.taskId);
   const view = await service.detail(task.taskId, actor);
   expect(view.executions).toEqual([
@@ -738,6 +738,9 @@ it("migrates legacy pending results before reporting and preserves their origina
   const result = { event_id: task.request.event_id, task_id: task.taskId, result_version: task.version, status: "failed" as const, phase: task.phase, waiting_reason: null, effect: "unknown" as const, result_text: "历史结果", evidence_ids: [] };
   const evidence = { evidence_id: "legacy-evidence", tool_call_id: "legacy-call", source: "session", location: "original:1", excerpt: "历史现场" };
   await db.exec("UPDATE ce_tasks SET config_json = ? WHERE task_id = ?", [JSON.stringify({ ...task, status: "failed", evidence: [evidence], pending_results: [{ ...result, status: "waiting_owner", result_version: 0 }, result] }), task.taskId]);
+  const legacyRow = (await repo.findTask(task.taskId))!;
+  expect(await tasks.listForReporting(20, "", "prod")).toEqual([]);
+  expect(await repo.findTask(task.taskId)).toEqual(legacyRow);
   // Old tasks had no phase artifact; preserve the original Step identity.
   await db.exec("UPDATE ce_steps SET output_json = NULL WHERE task_id = ? AND step_no > 0", [task.taskId]);
   await service.reportResults();
@@ -775,7 +778,7 @@ it("waiting snapshots survive same-task resumes and restart before the final res
   expect(task.pending_results.map(result => result.status)).toEqual(["waiting_effect", "waiting_effect", "completed"]);
   expect(task.pending_results[0]).toEqual(firstResult);
   expect(runtime.sendMessage).toHaveBeenCalledOnce();
-  expect(await tasks.listForReporting(20)).toEqual([]);
+  expect(await tasks.listForReporting(20, "", "pre")).toEqual([]);
   const stored = JSON.parse((await repo.findTask(task.taskId))!.config_json);
   expect(stored.pending_results).toBeUndefined(); expect(stored.timeline).toBeUndefined();
   expect(stored.resultDelivery).toHaveLength(3);
@@ -783,7 +786,7 @@ it("waiting snapshots survive same-task resumes and restart before the final res
   const clock = vi.spyOn(Date, "now").mockImplementation(() => failed.retryAfterMs + 1);
   try {
     const restoredTasks = new SessionRecoveryTaskRepository(db, new EvolveRepository(db), artifactStore);
-    const restarted = new SessionRecoveryTaskService({ tasks: restoredTasks, agent, notifier, reporter, observationMs: 3600000 });
+    const restarted = new SessionRecoveryTaskService({ controlPlaneEnvironment: "pre", tasks: restoredTasks, agent, notifier, reporter, observationMs: 3600000 });
     const versions = task.pending_results.map(result => result.result_version);
     await restarted.reportResults();
     expect(callbacks.map(result => result.result_version)).toEqual(versions);
@@ -833,4 +836,51 @@ it("a failed Step write cannot commit terminal state or its pending callback", a
   await db.exec("DROP TRIGGER fail_recovery_report");
   await service.executionFailure(task.taskId, "执行异常");
   await service.reportResults(); expect(callbacks).toHaveLength(1); expect(callbacks[0].status).toBe("failed");
+});
+
+it("isolates background recovery maintenance by control plane without hiding shared tasks", async () => {
+  let task = await create();
+  expect(task.controlPlaneEnvironment).toBe("pre");
+  const prodAgent = new SessionRecoveryAgentService({ controlPlaneEnvironment: "prod", tasks, repo,
+    audit: new AgentToolCallRepository(db, "session_recovery"), ais, runtime, targets: { resolve: async () => target },
+    business: () => prod, publicBaseUrl: "https://clawweb.alipay.com", snapshotId: 1, nasRoots: [directory],
+    leaseSeconds: 120, launchGraceSeconds: 1800, observationMs: 3600000, now: () => now });
+  const prod = new SessionRecoveryTaskService({ controlPlaneEnvironment: "prod", tasks, agent: prodAgent, notifier, reporter, observationMs: 3600000, now: () => now });
+  expect((await prod.detail(task.taskId, actor)).taskId).toBe(task.taskId);
+  now = task.execution!.leaseExpiresAt * 1000 + 1;
+  await prod.maintenance(); await prodAgent.start(task);
+  await reconcileAgentExecutions({ controlPlaneEnvironment: "prod", db, repo, handlers: { session_recovery: prodAgent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
+  const step = (await repo.findStep(task.aisExecution!.stepId))!;
+  await prodAgent.handleAisStatus({ task: (await repo.findTask(task.taskId))!, step, report: { status: "failed", retryable: true } });
+  await prod.executionFailure(task.taskId, "foreign worker", task.execution!.executionId, true);
+  expect(ais.getJobStatusDetail).not.toHaveBeenCalled(); expect(ais.stopExecution).not.toHaveBeenCalled();
+  expect(submissions).toHaveLength(1); expect((await current(task.taskId)).execution).toEqual(task.execution);
+  await service.executionFailure(task.taskId, "finished", task.execution!.executionId);
+  await prod.reportResults(); expect(callbacks).toEqual([]);
+  await service.reportResults(); expect(callbacks).toHaveLength(1);
+});
+
+it("does not release a replacement execution carrying an older retry marker", async () => {
+  let task = await create(); const failedExecution = task.execution!.executionId;
+  const step = (await repo.findStep(task.aisExecution!.stepId))!;
+  await agent.handleAisStatus({ task: (await repo.findTask(task.taskId))!, step, report: { status: "failed", retryable: true } });
+  task = await current(task.taskId);
+  expect(task.executionRetry?.executionId).toBe(failedExecution);
+  await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1,
+    execution: { ...value.execution!, executionId: "replacement-from-legacy-worker", state: "dispatching", invalidatedAt: null, jobId: "replacement-job" } }));
+  now += 20000;
+  await service.maintenance();
+  task = await current(task.taskId);
+  expect(task.execution!.executionId).toBe("replacement-from-legacy-worker");
+  expect(task.execution!.state).toBe("dispatching"); expect(submissions).toHaveLength(1);
+});
+
+it("leaves unmarked legacy recovery tasks unclaimed rather than guessing from the Bot environment", async () => {
+  let task = await create();
+  await tasks.update(task.taskId, task.version, value => { const { controlPlaneEnvironment: _environment, ...legacy } = value; return { ...legacy, version: value.version + 1 }; });
+  task = await current(task.taskId); now = task.execution!.leaseExpiresAt * 1000 + 1;
+  await service.maintenance();
+  await reconcileAgentExecutions({ controlPlaneEnvironment: "pre", db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
+  expect(ais.getJobStatusDetail).not.toHaveBeenCalled(); expect(ais.stopExecution).not.toHaveBeenCalled();
+  expect((await current(task.taskId)).execution).toEqual(task.execution);
 });

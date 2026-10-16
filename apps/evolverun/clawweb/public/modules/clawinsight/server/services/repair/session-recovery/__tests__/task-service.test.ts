@@ -23,7 +23,7 @@ function setup(callbackFails = false) {
   const agent = { start: vi.fn().mockResolvedValue(undefined), release: vi.fn().mockResolvedValue(undefined), listExecutions: vi.fn().mockResolvedValue([]) };
   const notifier = { notify: vi.fn().mockResolvedValue(undefined) };
   const reporter = { report: callbackFails ? vi.fn().mockRejectedValue(new Error("callback offline")) : vi.fn().mockResolvedValue(undefined) };
-  const deps = { tasks: store, agent, notifier, reporter,
+  const deps = { controlPlaneEnvironment: "pre" as const, tasks: store, agent, notifier, reporter,
     observationMs: 3600000, now: () => 100 };
   return { records, delivery, agent, notifier, reporter, deps, service: new SessionRecoveryTaskService(deps) };
 }
