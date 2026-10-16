@@ -60,13 +60,15 @@ describe('unified task escort navigation', () => {
   })
 
   it('switches workflows from the page header instead of the sidebar', async () => {
-    renderWorkspace('/workflows/workspace?workflowId=wf-1')
+    renderWorkspace('/workflows/workspace?workflowId=wf-1&view=version-comparison&baseline=159&current=160')
 
     const header = screen.getByRole('banner')
     await userEvent.click(within(header).getByRole('button', { name: /切换工作流.*示例工作流/ }))
     await userEvent.click(screen.getByRole('button', { name: /备用工作流.*wf-2/ }))
 
     expect(screen.getByLabelText('workspace-location')).toHaveTextContent('workflowId=wf-2')
+    expect(screen.getByLabelText('workspace-location')).not.toHaveTextContent('baseline=')
+    expect(screen.getByLabelText('workspace-location')).not.toHaveTextContent('current=')
     expect(within(header).getByRole('button', { name: /切换工作流.*备用工作流/ })).toBeInTheDocument()
     expect(screen.queryByText('当前工作流')).not.toBeInTheDocument()
   })
