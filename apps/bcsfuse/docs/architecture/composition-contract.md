@@ -314,12 +314,14 @@ read. A missing Profile provider returns 503, and
 Profile read/write/activation failures return 500 `PROFILE_SYNC_FAILED` rather
 than a false success. Worker changes made before such a failure may remain
 committed; repeating the same sync safely completes the Profile step.
-Public SQLite and MySQL Profile stores add the nullable `description` column on
-startup if an existing table predates this contract; existing rows remain
-readable and new writes persist the Profile description. The public MySQL store
-requires `ALTER TABLE` permission for this one-time migration. Internal
-DBA-managed providers that skip automatic schema creation must add or verify
-the column in their environment before adopting this sync contract.
+SQLite and MySQL Profile stores persist `description` under the reserved
+`__bcsfuse_profile_description_v1__` key in the existing `metadata` JSON
+column. Reads remove that storage key from caller-visible metadata. The key
+is written even when the description is null, so clearing a description does
+not revive a value from a previously added column; rows without the key can
+still read such a legacy column when present. The reserved key cannot be used
+as caller metadata. This contract requires no table alteration, including in
+internal DBA-managed deployments.
 
 With `ENABLE_PROFILE_EMBEDDING_INDEX=true`, successful explicit profile
 activation also refreshes the selected profile's vectors. Other profiles'

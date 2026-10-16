@@ -25,6 +25,10 @@ from src.domain.models.worker_profile_content import (
     WorkerProfileContentList,
 )
 from src.infra.adapters.sqlite_schema import init_schema
+from src.infra.profile_description_metadata import (
+    split_profile_description,
+    with_profile_description,
+)
 
 
 def _serialized_connection(method):
@@ -43,7 +47,6 @@ CREATE TABLE IF NOT EXISTS bcsfuse_worker_profile_contents (
     worker_id TEXT NOT NULL,
     profile_id TEXT NOT NULL DEFAULT 'default',
     display_name TEXT,
-    description TEXT,
     soul_md TEXT,
     agents_md TEXT,
     tools_md TEXT,
@@ -95,18 +98,6 @@ class SQLiteWorkerProfileContentStore:
         # 初始化 profile contents 表
         cursor = self._conn.cursor()
         cursor.executescript(CREATE_WORKER_PROFILE_CONTENTS_TABLE)
-        cursor.execute("PRAGMA table_info(bcsfuse_worker_profile_contents)")
-        if "description" not in {row[1] for row in cursor.fetchall()}:
-            try:
-                cursor.execute(
-                    "ALTER TABLE bcsfuse_worker_profile_contents ADD COLUMN description TEXT"
-                )
-            except sqlite3.OperationalError as error:
-                if "duplicate column name" not in str(error).lower():
-                    raise
-                cursor.execute("PRAGMA table_info(bcsfuse_worker_profile_contents)")
-                if "description" not in {row[1] for row in cursor.fetchall()}:
-                    raise
         self._conn.commit()
 
     def _row_to_content(self, row: sqlite3.Row) -> WorkerProfileContent:
@@ -127,6 +118,9 @@ class SQLiteWorkerProfileContentStore:
                 metadata = json.loads(row["metadata"])
             except (json.JSONDecodeError, TypeError):
                 pass
+        metadata, description = split_profile_description(
+            metadata, row["description"] if "description" in row.keys() else None,
+        )
 
         # 解析 contents（扩展内容 JSON Map）
         # 包含 LLM 分析结果: {"profile": "语义画像", "capabilities": ["标签", ...]}
@@ -141,7 +135,7 @@ class SQLiteWorkerProfileContentStore:
             worker_id=row["worker_id"],
             profile_id=row["profile_id"],
             display_name=row["display_name"],
-            description=row["description"],
+            description=description,
             soul_md=row["soul_md"],
             agents_md=row["agents_md"],
             tools_md=row["tools_md"],
@@ -187,7 +181,6 @@ class SQLiteWorkerProfileContentStore:
                 """
                 UPDATE bcsfuse_worker_profile_contents SET
                     display_name = ?,
-                    description = ?,
                     soul_md = ?,
                     agents_md = ?,
                     tools_md = ?,
@@ -203,7 +196,6 @@ class SQLiteWorkerProfileContentStore:
                 """,
                 (
                     content.display_name,
-                    content.description,
                     content.soul_md,
                     content.agents_md,
                     content.tools_md,
@@ -211,7 +203,7 @@ class SQLiteWorkerProfileContentStore:
                     content.heartbeat_md,
                     json.dumps(content.contents),
                     json.dumps([s.model_dump() for s in content.skill_sets]),
-                    json.dumps(content.metadata),
+                    json.dumps(with_profile_description(content.metadata, content.description)),
                     content.content_type.value,
                     new_version,
                     now.isoformat(),
@@ -225,19 +217,18 @@ class SQLiteWorkerProfileContentStore:
             cursor.execute(
                 """
                 INSERT INTO bcsfuse_worker_profile_contents (
-                    id, worker_id, profile_id, display_name, description,
+                    id, worker_id, profile_id, display_name,
                     soul_md, agents_md, tools_md, boot_md, heartbeat_md,
                     contents, skill_sets, metadata,
                     content_type, is_active,
                     version, gmt_create, gmt_modify
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record_id,
                     content.worker_id,
                     profile_id,
                     content.display_name,
-                    content.description,
                     content.soul_md,
                     content.agents_md,
                     content.tools_md,
@@ -245,7 +236,7 @@ class SQLiteWorkerProfileContentStore:
                     content.heartbeat_md,
                     json.dumps(content.contents),
                     json.dumps([s.model_dump() for s in content.skill_sets]),
-                    json.dumps(content.metadata),
+                    json.dumps(with_profile_description(content.metadata, content.description)),
                     content.content_type.value,
                     1 if content.is_active else 0,
                     1,
@@ -273,21 +264,22 @@ class SQLiteWorkerProfileContentStore:
             cursor = self._conn.cursor()
             try:
                 values = (
-                    content.display_name, content.description, content.soul_md,
+                    content.display_name, content.soul_md,
                     content.agents_md, content.tools_md, content.boot_md,
                     content.heartbeat_md, json.dumps(content.contents),
                     json.dumps([item.model_dump() for item in content.skill_sets]),
-                    json.dumps(content.metadata), content.content_type.value,
+                    json.dumps(with_profile_description(content.metadata, content.description)),
+                    content.content_type.value,
                 )
                 if expected_version is None:
                     try:
                         cursor.execute(
                             """INSERT INTO bcsfuse_worker_profile_contents (
-                                id, worker_id, profile_id, display_name, description,
+                                id, worker_id, profile_id, display_name,
                                 soul_md, agents_md, tools_md, boot_md, heartbeat_md,
                                 contents, skill_sets, metadata, content_type,
                                 is_active, version, gmt_create, gmt_modify
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
                             (
                                 self._generate_id(content.worker_id, profile_id),
                                 content.worker_id, profile_id, *values,
@@ -305,7 +297,7 @@ class SQLiteWorkerProfileContentStore:
                 else:
                     cursor.execute(
                         """UPDATE bcsfuse_worker_profile_contents SET
-                            display_name = ?, description = ?, soul_md = ?,
+                            display_name = ?, soul_md = ?,
                             agents_md = ?, tools_md = ?, boot_md = ?,
                             heartbeat_md = ?, contents = ?, skill_sets = ?,
                             metadata = ?, content_type = ?, version = version + 1,

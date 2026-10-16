@@ -38,7 +38,7 @@ import uuid
 from typing import TYPE_CHECKING, List, Optional
 
 from mysql.connector import Error as MySQLError
-from mysql.connector.errorcode import ER_DUP_ENTRY, ER_DUP_FIELDNAME
+from mysql.connector.errorcode import ER_DUP_ENTRY
 
 if TYPE_CHECKING:
     from src.infra.public.database.mysql_connection_pool import (
@@ -50,6 +50,10 @@ from src.domain.models.worker_profile_content import (
     SkillSet,
     WorkerProfileContent,
     WorkerProfileContentList,
+)
+from src.infra.profile_description_metadata import (
+    split_profile_description,
+    with_profile_description,
 )
 
 logger = logging.getLogger(__name__)
@@ -111,7 +115,6 @@ class MySQLWorkerProfileContentStore:
                             worker_id VARCHAR(128) NOT NULL,
                             profile_id VARCHAR(128) NOT NULL DEFAULT 'default',
                             display_name VARCHAR(255),
-                            description MEDIUMTEXT,
                             soul_md MEDIUMTEXT,
                             agents_md MEDIUMTEXT,
                             tools_md MEDIUMTEXT,
@@ -130,19 +133,6 @@ class MySQLWorkerProfileContentStore:
                             INDEX idx_bcsfuse_worker_profile_contents_active (worker_id, is_active)
                         )
                     """)
-                    cursor.execute(
-                        "SHOW COLUMNS FROM bcsfuse_worker_profile_contents LIKE 'description'"
-                    )
-                    if cursor.fetchone() is None:
-                        try:
-                            cursor.execute(
-                                "ALTER TABLE bcsfuse_worker_profile_contents "
-                                "ADD COLUMN description MEDIUMTEXT AFTER display_name"
-                            )
-                        except MySQLError as error:
-                            # Concurrent app startup may have added the column.
-                            if error.errno != ER_DUP_FIELDNAME:
-                                raise
                 finally:
                     cursor.close()
                 conn.commit()
@@ -196,11 +186,14 @@ class MySQLWorkerProfileContentStore:
 
     def _row_to_content(self, row: dict) -> WorkerProfileContent:
         """Convert database row to WorkerProfileContent."""
+        metadata, description = split_profile_description(
+            self._parse_json(row["metadata"]), row.get("description"),
+        )
         return WorkerProfileContent(
             worker_id=row["worker_id"],
             profile_id=row["profile_id"],
             display_name=row["display_name"],
-            description=row["description"],
+            description=description,
             soul_md=row["soul_md"],
             agents_md=row["agents_md"],
             tools_md=row["tools_md"],
@@ -208,7 +201,7 @@ class MySQLWorkerProfileContentStore:
             heartbeat_md=row["heartbeat_md"],
             contents=self._parse_json(row["contents"]),
             skill_sets=self._parse_skill_sets(row["skill_sets"]),
-            metadata=self._parse_json(row["metadata"]),
+            metadata=metadata,
             content_type=ProfileContentType(row["content_type"]),
             is_active=bool(row["is_active"]),
             version=row["version"],
@@ -223,7 +216,6 @@ class MySQLWorkerProfileContentStore:
             "worker_id": content.worker_id,
             "profile_id": content.profile_id or "default",
             "display_name": content.display_name,
-            "description": content.description,
             "soul_md": content.soul_md,
             "agents_md": content.agents_md,
             "tools_md": content.tools_md,
@@ -231,7 +223,9 @@ class MySQLWorkerProfileContentStore:
             "heartbeat_md": content.heartbeat_md,
             "contents": self._serialize_json(content.contents),
             "skill_sets": self._serialize_json([s.model_dump() for s in content.skill_sets]),
-            "metadata": self._serialize_json(content.metadata),
+            "metadata": self._serialize_json(
+                with_profile_description(content.metadata, content.description)
+            ),
             "content_type": content.content_type.value,
             "is_active": 1 if content.is_active else 0,
             "version": content.version,
@@ -262,7 +256,6 @@ class MySQLWorkerProfileContentStore:
                     cursor.execute("""
                         UPDATE bcsfuse_worker_profile_contents SET
                             display_name = %s,
-                            description = %s,
                             soul_md = %s,
                             agents_md = %s,
                             tools_md = %s,
@@ -277,7 +270,6 @@ class MySQLWorkerProfileContentStore:
                         WHERE worker_id = %s AND profile_id = %s
                     """, (
                         data["display_name"],
-                        data["description"],
                         data["soul_md"],
                         data["agents_md"],
                         data["tools_md"],
@@ -294,17 +286,16 @@ class MySQLWorkerProfileContentStore:
                 else:
                     cursor.execute("""
                         INSERT INTO bcsfuse_worker_profile_contents (
-                            id, worker_id, profile_id, display_name, description,
+                            id, worker_id, profile_id, display_name,
                             soul_md, agents_md, tools_md, boot_md, heartbeat_md,
                             contents, skill_sets, metadata,
                             content_type, is_active, version
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         content_id,
                         data["worker_id"],
                         data["profile_id"],
                         data["display_name"],
-                        data["description"],
                         data["soul_md"],
                         data["agents_md"],
                         data["tools_md"],
@@ -354,15 +345,15 @@ class MySQLWorkerProfileContentStore:
                     try:
                         cursor.execute(
                             """INSERT INTO bcsfuse_worker_profile_contents (
-                                id, worker_id, profile_id, display_name, description,
+                                id, worker_id, profile_id, display_name,
                                 soul_md, agents_md, tools_md, boot_md, heartbeat_md,
                                 contents, skill_sets, metadata, content_type,
                                 is_active, version
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s,
                                       %s, %s, %s, %s, %s, 1)""",
                             (
                                 data["id"], data["worker_id"], data["profile_id"],
-                                data["display_name"], data["description"], data["soul_md"],
+                                data["display_name"], data["soul_md"],
                                 data["agents_md"], data["tools_md"], data["boot_md"],
                                 data["heartbeat_md"], data["contents"], data["skill_sets"],
                                 data["metadata"], data["content_type"], data["is_active"],
@@ -376,14 +367,14 @@ class MySQLWorkerProfileContentStore:
                 else:
                     cursor.execute(
                         """UPDATE bcsfuse_worker_profile_contents SET
-                            display_name = %s, description = %s, soul_md = %s,
+                            display_name = %s, soul_md = %s,
                             agents_md = %s, tools_md = %s, boot_md = %s,
                             heartbeat_md = %s, contents = %s, skill_sets = %s,
                             metadata = %s, content_type = %s, version = version + 1,
                             gmt_modify = CURRENT_TIMESTAMP
                         WHERE worker_id = %s AND profile_id = %s AND version = %s""",
                         (
-                            data["display_name"], data["description"], data["soul_md"],
+                            data["display_name"], data["soul_md"],
                             data["agents_md"], data["tools_md"], data["boot_md"],
                             data["heartbeat_md"], data["contents"], data["skill_sets"],
                             data["metadata"], data["content_type"],

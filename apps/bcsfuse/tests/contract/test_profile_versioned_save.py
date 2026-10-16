@@ -1,5 +1,6 @@
 """Profile stores reject stale full-document writes used by sparse sync."""
 
+import json
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from threading import Barrier, Event, Lock
 from unittest.mock import MagicMock, patch
@@ -262,6 +263,80 @@ def test_mysql_versioned_save_commits_and_returns_persisted_version():
     assert saved.is_active is True
     connection.commit.assert_called_once()
     connection.rollback.assert_not_called()
+
+
+def test_mysql_versioned_save_stores_description_without_a_new_column():
+    pool = MagicMock()
+    connection = pool.get_connection.return_value
+    cursor = connection.cursor.return_value
+    cursor.rowcount = 1
+    cursor.fetchone.return_value = {
+        "gmt_create": "2026-10-01 10:00:00",
+        "gmt_modify": "2026-10-01 10:01:00",
+        "version": 2,
+        "is_active": 1,
+    }
+    with patch.object(MySQLWorkerProfileContentStore, "_ensure_schema"):
+        store = MySQLWorkerProfileContentStore(pool)
+
+    saved = store.save_if_version(WorkerProfileContent(
+        worker_id="bot:owner", description="New description",
+        metadata={"source": "api"},
+    ), 1)
+
+    assert saved.description == "New description"
+    update_sql, parameters = cursor.execute.call_args_list[0].args
+    assert "description" not in update_sql
+    assert any(
+        isinstance(parameter, str)
+        and "New description" in parameter
+        and json.loads(parameter).get("source") == "api"
+        for parameter in parameters
+    )
+
+
+def test_mysql_profile_read_restores_description_from_existing_metadata_column():
+    pool = MagicMock()
+    pool.get_connection.return_value.cursor.return_value.fetchone.return_value = {
+        "worker_id": "bot:owner",
+        "profile_id": "default",
+        "display_name": "Bot",
+        "soul_md": "Soul",
+        "agents_md": None,
+        "tools_md": None,
+        "boot_md": None,
+        "heartbeat_md": None,
+        "contents": "{}",
+        "skill_sets": "[]",
+        "metadata": json.dumps({
+            "source": "api",
+            "__bcsfuse_profile_description_v1__": "Indexed profile",
+        }),
+        "content_type": "api",
+        "is_active": 1,
+        "version": 2,
+        "gmt_create": "2026-10-01 10:00:00",
+        "gmt_modify": "2026-10-01 10:01:00",
+    }
+    with patch.object(MySQLWorkerProfileContentStore, "_ensure_schema"):
+        store = MySQLWorkerProfileContentStore(pool)
+
+    profile = store.get("bot:owner", "default")
+
+    assert profile.description == "Indexed profile"
+    assert profile.metadata == {"source": "api"}
+
+
+def test_mysql_profile_store_does_not_alter_existing_schema():
+    pool = MagicMock()
+
+    MySQLWorkerProfileContentStore(pool)
+
+    executed = [call.args[0] for call in
+                pool.get_connection.return_value.cursor.return_value.execute.call_args_list]
+    assert len(executed) == 1
+    assert "CREATE TABLE IF NOT EXISTS bcsfuse_worker_profile_contents" in executed[0]
+    assert "description MEDIUMTEXT" not in executed[0]
 
 
 def test_mysql_versioned_create_treats_duplicate_as_conflict():
