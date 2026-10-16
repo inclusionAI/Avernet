@@ -905,3 +905,24 @@ class TestBuildChatMetadataTitleModel:
             {}, run_id="run-2", eval_session_log=NoopEvalSessionLog()
         )
         assert "sender_options" not in result
+
+    def test_runtime_binding_copied_to_chat_send_params(self):
+        binding = {
+            "version": 1,
+            "source": "dingtalk",
+            "openConversationId": "cid-1",
+            "bcsSessionId": "sess-1",
+            "bcsGroupId": "group-1",
+        }
+        result = build_chat_metadata(
+            {"teamclaw_runtime_binding": binding},
+            run_id="run-1",
+            eval_session_log=NoopEvalSessionLog(),
+        )
+        assert result["teamclawRuntimeBinding"] == binding
+
+    def test_absent_runtime_binding_omitted(self):
+        result = build_chat_metadata(
+            {}, run_id="run-2", eval_session_log=NoopEvalSessionLog()
+        )
+        assert "teamclawRuntimeBinding" not in result

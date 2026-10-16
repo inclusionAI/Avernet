@@ -17,8 +17,11 @@ pub(super) async fn frame_for_target(
         flow.registry.get_protocol_version(&target.bot_uuid).await,
         delivery_target,
     );
-    let context_projection =
-        context_projection_for_delivery(flow, group, cmd.session_id.as_deref()).await;
+    let delivery_session = load_delivery_session(flow, cmd.session_id.as_deref()).await;
+    let context_projection = delivery_session
+        .as_ref()
+        .and_then(|session| context_projection_from_meta(session.meta.as_ref()))
+        .unwrap_or_else(|| default_context_projection(group));
     let wire_attachments = cmd.attachments.as_ref().and_then(|attachments| {
         let attachments = attachments
             .iter()
@@ -133,7 +136,25 @@ pub(super) async fn frame_for_target(
             },
         );
     }
+    if let Some(session) = delivery_session.as_ref() {
+        stamp_teamclaw_runtime_binding(&mut frame, session.meta.as_ref());
+    }
     frame
+}
+
+async fn load_delivery_session(
+    flow: &BcsMessageFlow,
+    session_id: Option<&str>,
+) -> Option<bcs_domain::Session> {
+    let session_id = session_id?;
+    let sessions = flow.session_management.as_ref()?;
+    match sessions.get(session_id).await {
+        Ok(session) => session,
+        Err(error) => {
+            warn!(%session_id, %error, "failed to load session delivery metadata");
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,32 +168,18 @@ pub(crate) async fn context_projection_for_delivery(
     group: &Group,
     session_id: Option<&str>,
 ) -> ContextProjection {
-    if let Some(projection) = context_projection_for_session(flow, session_id).await {
-        return projection;
-    }
-    if is_human_bot_dm(group) {
-        return ContextProjection::DirectBot;
-    }
-    ContextProjection::Group
+    load_delivery_session(flow, session_id)
+        .await
+        .as_ref()
+        .and_then(|session| context_projection_from_meta(session.meta.as_ref()))
+        .unwrap_or_else(|| default_context_projection(group))
 }
 
-async fn context_projection_for_session(
-    flow: &BcsMessageFlow,
-    session_id: Option<&str>,
-) -> Option<ContextProjection> {
-    let Some(session_id) = session_id else {
-        return None;
-    };
-    let Some(session_management) = flow.session_management.as_ref() else {
-        return None;
-    };
-    match session_management.get(session_id).await {
-        Ok(Some(session)) => context_projection_from_meta(session.meta.as_ref()),
-        Ok(None) => None,
-        Err(error) => {
-            warn!(%session_id, %error, "failed to load session for context projection");
-            None
-        }
+fn default_context_projection(group: &Group) -> ContextProjection {
+    if is_human_bot_dm(group) {
+        ContextProjection::DirectBot
+    } else {
+        ContextProjection::Group
     }
 }
 

@@ -82,7 +82,7 @@ pub use ws::{
     apply_channel_info, apply_sender_display_name, build_chat_inject_frame, build_chat_send_frame,
     build_direct_chat_inject_frame, build_direct_chat_send_frame,
     build_recipient_group_context,
-    now_ms, response_directive_for_delivery,
+    now_ms, response_directive_for_delivery, stamp_teamclaw_runtime_binding,
     error_codes,
 };
 

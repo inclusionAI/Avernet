@@ -310,6 +310,10 @@ def build_chat_metadata(
     # materialize 路径的 resolve_user_id 按 dict 读取 .get("from")。
     if metadata.get("sender_options"):
         chat_metadata["sender_options"] = metadata["sender_options"]
+    if metadata.get("teamclaw_runtime_binding"):
+        chat_metadata["teamclawRuntimeBinding"] = metadata[
+            "teamclaw_runtime_binding"
+        ]
     return chat_metadata
 
 

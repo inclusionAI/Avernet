@@ -8,6 +8,7 @@ use bcs_protocol::{
     Attachment as WireAttachment, BcsFrame, ChannelInfo, ChannelSource, RequestFrame,
     apply_channel_info, build_chat_inject_frame, build_chat_send_frame,
     build_direct_chat_inject_frame, build_direct_chat_send_frame, now_ms,
+    stamp_teamclaw_runtime_binding,
 };
 use bcs_service_api::{
     ActiveBotRunContext, ActorKind, ActorStatus, BotAbortDeliveryCommand, BotDeliveryCommand,

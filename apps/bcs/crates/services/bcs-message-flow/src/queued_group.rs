@@ -9,7 +9,7 @@ use crate::queued_payload::read_bounded_queued_payload;
 use bcs_domain::message_delivery::{DeliveryFlowKind, PersistedMessageDelivery};
 use bcs_protocol::{
     ChannelInfo, ChannelSource, GroupContextInput, GroupContextParticipant, apply_channel_info,
-    build_chat_send_frame, build_direct_chat_send_frame,
+    build_chat_send_frame, build_direct_chat_send_frame, stamp_teamclaw_runtime_binding,
 };
 use bcs_service_api::PreparedManagedDelivery;
 use bcs_service_api::{
@@ -819,6 +819,7 @@ async fn prepare_queued_group_bounded(
             },
         );
     }
+    stamp_teamclaw_runtime_binding(&mut frame, session.meta.as_ref());
     let owner = match &delivery_target {
         BotDeliveryTarget::WebSocket { .. } => BotRunTransportOwner::WebSocket,
         BotDeliveryTarget::HttpProvider {

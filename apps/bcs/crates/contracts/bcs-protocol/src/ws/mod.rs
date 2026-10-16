@@ -19,5 +19,5 @@ pub use protocol::{
     ToolResultContent, UsageInfo, WsBotCapabilities, apply_channel_info, apply_sender_display_name,
     build_chat_inject_frame, build_chat_send_frame, build_direct_chat_inject_frame,
     build_direct_chat_send_frame, build_recipient_group_context, build_session_key, error_codes,
-    now_ms, response_directive_for_delivery,
+    now_ms, response_directive_for_delivery, stamp_teamclaw_runtime_binding,
 };
