@@ -37,7 +37,8 @@ An intentionally silent or empty agent run can still produce `NO_REPLY`.
 
 Each canonical BCS Session ID becomes a synthetic direct peer. The plugin
 locally enforces `session.dmScope: per-account-channel-peer` for BCS processing
-without changing the host configuration, so accounts and BCS Sessions do not
+in both the default scope and BCS route-binding overrides without changing the
+host configuration, so accounts and BCS Sessions do not
 share OpenClaw's default main DM history. Send, inject and uncached history
 lookups use the same direct routing rules; reply destinations remain BCS IDs.
 

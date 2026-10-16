@@ -29,8 +29,42 @@ describe('BCS direct-chat sessions', () => {
     assert.equal(withBcsDirectSessionScope({}).session.dmScope, 'per-account-channel-peer');
   });
 
+  for (const dmScope of [ 'main', 'per-peer', 'per-channel-peer' ]) {
+    it(`overrides BCS route binding scope ${dmScope} without mutating host bindings`, () => {
+      const session = Object.freeze({ dmScope, groupScope: 'per-group' });
+      const route = Object.freeze({
+        type: 'route', agentId: 'editor',
+        match: Object.freeze({ channel: ' BCS ', accountId: '*' }), session,
+      });
+      const legacyRoute = Object.freeze({ agentId: 'legacy', match: { channel: 'bcs' } });
+      const other = Object.freeze({ agentId: 'personal', match: { channel: 'telegram' }, session });
+      const acp = Object.freeze({ type: 'acp', agentId: 'acp', match: { channel: 'bcs' } });
+      const cfg = Object.freeze({ bindings: Object.freeze([ route, legacyRoute, other, acp ]) });
+      const scoped = withBcsDirectSessionScope(cfg);
+      assert.equal(scoped.bindings?.[0].session?.dmScope, 'per-account-channel-peer');
+      assert.equal(scoped.bindings?.[0].session?.groupScope, 'per-group');
+      assert.equal(scoped.bindings?.[0].agentId, 'editor');
+      assert.equal(scoped.bindings?.[0].match, route.match);
+      assert.notEqual(scoped.bindings?.[0], route);
+      assert.notEqual(scoped.bindings?.[0].session, session);
+      assert.equal(scoped.bindings?.[1].session?.dmScope, 'per-account-channel-peer');
+      assert.equal(scoped.bindings?.[1].agentId, 'legacy');
+      assert.equal(scoped.bindings?.[2], other);
+      assert.equal(scoped.bindings?.[3], acp);
+      assert.equal(cfg.bindings[0], route);
+      assert.equal(route.session.dmScope, dmScope);
+      assert.equal('session' in legacyRoute, false);
+    });
+  }
+
   it('dispatches direct turns with unchanged BCS context and distinct session peers', async () => {
-    const hostCfg = Object.freeze({ session: Object.freeze({ dmScope: 'main' }) });
+    const hostCfg = Object.freeze({
+      session: Object.freeze({ dmScope: 'main' }),
+      bindings: Object.freeze([ Object.freeze({
+        agentId: 'editor', match: { channel: 'bcs', accountId: '*' },
+        session: Object.freeze({ dmScope: 'main' }),
+      }) ]),
+    });
     const routes: any[] = [];
     const contexts: any[] = [];
     const recorded: any[] = [];
@@ -44,10 +78,14 @@ describe('BCS direct-chat sessions', () => {
             routes.push(input);
             assert.equal(input.peer.kind, 'direct');
             assert.equal(input.cfg.session.dmScope, 'per-account-channel-peer');
+            const binding = input.cfg.bindings[0];
+            const effectiveScope = binding.session?.dmScope ?? input.cfg.session.dmScope;
+            assert.equal(effectiveScope, 'per-account-channel-peer');
+            assert.equal(binding.agentId, 'editor');
             // Model the SDK's account/channel/peer scoped direct session key.
             return {
-              agentId: 'agent-1',
-              sessionKey: `agent:agent-1:bcs:${input.accountId}:direct:${input.peer.id}`,
+              agentId: binding.agentId,
+              sessionKey: `agent:${binding.agentId}:bcs:${input.accountId}:direct:${input.peer.id}`,
             };
           },
         },
@@ -99,5 +137,6 @@ describe('BCS direct-chat sessions', () => {
       assert.equal(resolveBcsSessionIdFromSessionKey(ctx.SessionKey), routes[index].peer.id);
     }
     assert.equal(hostCfg.session.dmScope, 'main');
+    assert.equal(hostCfg.bindings[0].session.dmScope, 'main');
   });
 });

@@ -1314,14 +1314,37 @@ export function resolveEngineSessionPeerId(
   return params.bcs_group_id || onboardingPeerId;
 }
 
-/** Keep BCS sessions isolated even when the host defaults direct chats to main. */
-export function withBcsDirectSessionScope<T extends { session?: Record<string, unknown> }>(
+type SessionScopeBinding = {
+  type?: string;
+  match: { channel: string };
+  session?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+/** Isolate BCS direct sessions in a local config copy, including route overrides. */
+export function withBcsDirectSessionScope<T extends {
+  session?: Record<string, unknown>;
+  bindings?: readonly SessionScopeBinding[];
+}>(
   cfg: T,
-): Omit<T, 'session'> & { session: Record<string, unknown> & { dmScope: 'per-account-channel-peer' } } {
-  const { session, ...rest } = cfg;
+): Omit<T, 'session' | 'bindings'> & {
+    session: Record<string, unknown> & { dmScope: 'per-account-channel-peer' };
+    bindings?: SessionScopeBinding[];
+  } {
+  const { session, bindings, ...rest } = cfg;
   return {
     ...rest,
     session: { ...session, dmScope: 'per-account-channel-peer' },
+    ...(bindings ? {
+      bindings: bindings.map(binding => {
+        if ((binding.type !== undefined && binding.type !== 'route')
+          || binding.match.channel.trim().toLowerCase() !== CHANNEL_ID) return binding;
+        return {
+          ...binding,
+          session: { ...binding.session, dmScope: 'per-account-channel-peer' },
+        };
+      }),
+    } : {}),
   };
 }
 
