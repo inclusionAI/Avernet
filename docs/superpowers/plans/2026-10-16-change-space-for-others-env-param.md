@@ -316,6 +316,7 @@ git commit -m "feat(backend): explicit env on space access checks"
 
 **Files:**
 - Modify: `apps/backend/src/agentclaw/community/core/bot_management/bot_quota_service_protocol.py:22-26`（`guard_add`）
+- Modify: `apps/backend/src/agentclaw/community/core/spaces/protocols.py:19`（消费侧窄化协议 `SpaceAccessServiceProtocol.require_space`）、`:25`（`require_space_member`）——BotQuotaService 以它做类型标注，`_scope` 调 `require_space(..., env=…)` 需协议同步补 `env: str | None = None`
 - Modify: `apps/backend/src/agentclaw/community/core/bot_management/services/bot_quota_service.py:71-82`（`_inspect`）、`:95-118`（`guard_add`）、`:171-189`（`_scope`）、`:200-226`（`_locked`）、`:228-237`（`_lock_key`）
 - Test: `apps/backend/tests/community/core/bot_management/services/test_bot_quota_service.py`（追加 + 修正 2 处既有计数断言）
 
@@ -469,6 +470,7 @@ git commit -m "feat(backend): quota guard honors explicit env incl. lock key"
 
 **Files:**
 - Modify: `apps/backend/src/agentclaw/community/core/bot_management/bot_space_service_protocol.py:16-18`
+- Modify: `apps/backend/src/agentclaw/community/core/bot_management/bot_space.py:14`（`BotSpaceAccessProtocol.require_space_member` 补 `env: str | None = None`——BotSpaceService 以它标注 `_space_access`）
 - Modify: `apps/backend/src/agentclaw/community/core/bot_management/services/bot_space_service.py:44-104`
 - Test: `apps/backend/tests/community/core/bot_management/services/test_bot_space_service.py`（追加 + 修正 6 处既有断言）
 
