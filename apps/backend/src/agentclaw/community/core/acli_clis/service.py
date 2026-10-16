@@ -29,6 +29,8 @@ from agentclaw.community.core.acli_clis.errors import (
     AcliDefaultCliError,
     AcliEngineUnsupportedError,
     AcliGrantSyncError,
+    AcliMarketNotConfiguredError,
+    AcliMarketUnavailableError,
     AcliOperationFailedError,
     AcliRequestRejectedError,
     AcliRollbackFailedError,
@@ -165,6 +167,11 @@ class AcliCliService(AcliCliServiceProtocol):
         # re-add restores it. Read before installing, so a failed read
         # changes nothing.
         identity_mode = self._kept_identity(bot, cli_code)
+        # Refuse a command alias before anything is installed, when the market
+        # can say what the alias stands for.
+        market_name = await self._alias_target(cli_code)
+        if market_name is not None:
+            raise AcliCliNameMismatchError(cli_code, market_name)
         logger.info(
             "acli_cli_add_requested bot_id=%s cli_code=%s actor_id=%s", bot_id, cli_code, actor_id
         )
@@ -395,9 +402,18 @@ class AcliCliService(AcliCliServiceProtocol):
         state: str = "installed_not_granted",
     ) -> None:
         try:
-            await self._port.uninstall(
+            # Shielded: a request cancelled mid-cleanup must not stop the
+            # uninstall it already asked for.
+            await asyncio.shield(self._port.uninstall(
                 bot_id=bot_id, owner_id=owner_id, name=name,
+            ))
+        except asyncio.CancelledError:
+            logger.error(
+                "acli_cli_rollback_failed bot_id=%s cli_code=%s state=%s "
+                "reason=%s error_code=cancelled",
+                bot_id, name, state, reason,
             )
+            raise
         except AcliPortError as error:
             logger.error(
                 "acli_cli_rollback_failed bot_id=%s cli_code=%s state=%s "
@@ -460,6 +476,23 @@ class AcliCliService(AcliCliServiceProtocol):
     def _require_acli_engine(bot: Mapping[str, Any]) -> None:
         if str(bot.get("active_engine") or "") not in ACLI_ENGINES:
             raise AcliEngineUnsupportedError
+
+    async def _alias_target(self, cli_code: str) -> str | None:
+        """The market name ``cli_code`` is a command alias for, if the market says so.
+
+        ``None`` when ``cli_code`` is itself a market name, or when the market
+        cannot be asked; the install's own reply is then the check of last
+        resort, as before.
+        """
+        try:
+            page = await asyncio.to_thread(
+                self._market.search, keyword=cli_code, page_no=1, page_size=100
+            )
+        except (AcliMarketNotConfiguredError, AcliMarketUnavailableError):
+            return None
+        if any(tool.name == cli_code for tool in page.items):
+            return None
+        return next((t.name for t in page.items if t.command == cli_code), None)
 
     def _kept_identity(self, bot: Mapping[str, Any], cli_code: str) -> str:
         """``caller`` if the owner set this tool to caller before, else ``owner``.

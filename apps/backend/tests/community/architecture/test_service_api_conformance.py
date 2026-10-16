@@ -318,6 +318,9 @@ from agentclaw.community.core.spaces.services import (
     SpaceService,
 )
 
+from agentclaw.community.api.acli_cli_service import AcliCliServiceProtocol
+from agentclaw.community.core.acli_clis.service import AcliCliService
+
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
 _PAIRS = [
@@ -377,6 +380,7 @@ _PAIRS = [
     (ServiceEditLockServiceProtocol, ServiceEditLockService),
     (ServiceArtifactLineageReaderProtocol, ServiceArtifactLineageReader),
     (SpaceSkillOfflineServiceProtocol, SpaceSkillOfflineService),
+    (AcliCliServiceProtocol, AcliCliService),
 ]
 
 _IDS = [f"{p.__name__}->{c.__name__}" for p, c in _PAIRS]

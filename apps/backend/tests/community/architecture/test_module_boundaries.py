@@ -66,6 +66,7 @@ BOUNDARY_SIGNIFICANT_MODULES: frozenset[str] = frozenset({
     "agentclaw.corp.plugins.prod",
     # Core domains (legacy buckets routers/, services/, utils/, models/ excluded)
     "agentclaw.community.core.access",
+    "agentclaw.community.core.acli_clis",
     "agentclaw.community.core.aicoding",
     "agentclaw.community.core.approval",
     "agentclaw.community.core.auth",

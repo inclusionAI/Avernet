@@ -147,6 +147,22 @@ def acli_home_for(install_dir: Path) -> Path:
     return install_dir.parent / ACLI_HOME_NAME
 
 
+def _installed_tool(tools: list[Mapping[str, Any]], name: str) -> str | None:
+    """The market name of the installed tool ``name`` refers to, or ``None``.
+
+    ``name`` is normally the market name, but an install requested by alias
+    (``di``) records the market name (``deepinsight-cli``); matching the
+    command as well lets the cleanup of such an install still find it.
+    """
+    for tool in tools:
+        if tool["name"] == name:
+            return name
+    for tool in tools:
+        if tool.get("command") == name:
+            return str(tool["name"])
+    return None
+
+
 def _bounded(text: str, limit: int) -> str:
     masked = mask_secrets(text)
     return masked if len(masked) <= limit else masked[:limit] + "…"
@@ -215,6 +231,24 @@ class AcliRunner:
         validate_name(name)
         directory = self._install_dir
         env = self._env_for(directory, failure_code="uninstall_failed")
+        target = _installed_tool(await self._list_installed(env), name)
+        if target is None:
+            log.info("[acli] uninstall name=%s result=not_installed", name)
+            return AcliUninstallResult(name=name, uninstalled=False)
+        await self._run(
+            ["tool", "uninstall", target, "--yes"],
+            env=env,
+            timeout=INSTALL_TIMEOUT_SECONDS,
+            failure_code="uninstall_failed",
+        )
+        # acli's uninstall reply carries no reliable result, so the listing is
+        # the evidence: the tool must be gone, or the uninstall did not happen.
+        if _installed_tool(await self._list_installed(env), target) is not None:
+            raise AcliError("uninstall_failed", "acli reported success but the tool is still installed")
+        return AcliUninstallResult(name=target, uninstalled=True)
+
+    async def _list_installed(self, env: dict[str, str]) -> list[Mapping[str, Any]]:
+        """Every tool acli has installed here, each with a usable ``name``."""
         listing = await self._run(
             ["tool", "list"],
             env=env,
@@ -226,24 +260,15 @@ class AcliRunner:
         # the program on PATH. An explicit null is an empty listing.
         if "tools" not in listing or not isinstance(listing["tools"], (list, type(None))):
             raise AcliError("bad_output", "acli tool list returned no tools list")
-        installed_names: set[str] = set()
+        tools: list[Mapping[str, Any]] = []
         for tool in listing["tools"] or []:
             # Same rule as the listing itself: an entry without a usable name
             # must not read as "some other tool", or the uninstall is skipped.
             tool_name = tool.get("name") if isinstance(tool, Mapping) else None
             if not isinstance(tool_name, str) or not tool_name:
                 raise AcliError("bad_output", "acli tool list returned an entry without a name")
-            installed_names.add(tool_name)
-        if name not in installed_names:
-            log.info("[acli] uninstall name=%s result=not_installed", name)
-            return AcliUninstallResult(name=name, uninstalled=False)
-        await self._run(
-            ["tool", "uninstall", name, "--yes"],
-            env=env,
-            timeout=INSTALL_TIMEOUT_SECONDS,
-            failure_code="uninstall_failed",
-        )
-        return AcliUninstallResult(name=name, uninstalled=True)
+            tools.append(tool)
+        return tools
 
     # ── execution ────────────────────────────────────────────────────────
 

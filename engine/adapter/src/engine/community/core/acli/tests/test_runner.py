@@ -30,6 +30,13 @@ args = sys.argv[1:]
 with open(os.environ["FAKE_ACLI_LOG"], "a") as log:
     log.write(json.dumps({{"args": args, "home": os.environ.get("HOME"), "pid": os.getpid()}}) + "\n")
 mode = os.environ.get("FAKE_ACLI_MODE", "ok")
+_STATE = os.environ["FAKE_ACLI_LOG"] + ".installed"
+def _installed():
+    if os.path.exists(_STATE):
+        return [e for e in open(_STATE).read().split(",") if e]
+    return [e for e in os.environ.get("FAKE_ACLI_INSTALLED", "").split(",") if e]
+def _save(entries):
+    open(_STATE, "w").write(",".join(entries))
 if mode == "sleep":
     import time; time.sleep(5)
 if mode == "spawn":
@@ -57,12 +64,17 @@ elif args[:2] == ["tool", "list"]:
         print(json.dumps({{"success": True, "tools": [json.loads(os.environ["FAKE_ACLI_ENTRY"])]}})); sys.exit(0)
     if mode == "list_null_tools":
         print(json.dumps({{"success": True, "tools": None}})); sys.exit(0)
-    names = os.environ.get("FAKE_ACLI_INSTALLED", "").split(",")
-    print(json.dumps({{"success": True, "tools": [{{"name": n}} for n in names if n]}}))
+    tools = []
+    for entry in _installed():
+        name, _, command = entry.partition(":")
+        tools.append({{"name": name, "command": command}} if command else {{"name": name}})
+    print(json.dumps({{"success": True, "tools": tools}}))
 elif args[:2] == ["tool", "uninstall"]:
     if mode == "uninstall_fail":
         print(json.dumps({{"success": False, "error": "busy"}})); sys.exit(1)
-    print(json.dumps({{"success": True, "name": args[2]}}))
+    if mode != "uninstall_noop":
+        _save([e for e in _installed() if e.partition(":")[0] != args[2]])
+    print(json.dumps({{}}))
 '''
 
 
@@ -255,10 +267,10 @@ async def test_uninstall_removes_a_tool_acli_installed(fake_acli, install_dir, m
     result = await runner.uninstall("deepinsight-cli")
 
     assert result.uninstalled is True
-    list_call, uninstall_call = calls()
-    assert list_call["args"] == ["tool", "list", "--json"]
+    list_call, uninstall_call, confirm_call = calls()
+    assert list_call["args"] == confirm_call["args"] == ["tool", "list", "--json"]
     assert uninstall_call["args"] == ["tool", "uninstall", "deepinsight-cli", "--yes", "--json"]
-    assert {list_call["home"], uninstall_call["home"]} == {str(acli_home_for(Path(install_dir)))}
+    assert {c["home"] for c in calls()} == {str(acli_home_for(Path(install_dir)))}
 
 
 async def test_uninstall_of_unknown_tool_is_success_without_uninstall_call(
@@ -308,6 +320,32 @@ async def test_uninstall_reads_a_null_listing_as_empty(fake_acli, install_dir, m
     result = await runner.uninstall("dataphin")
 
     assert result.uninstalled is False
+
+
+async def test_uninstall_confirms_the_tool_is_gone(fake_acli, install_dir, monkeypatch):
+    """acli's reply proves nothing; a tool still listed afterwards is a failure."""
+    runner, calls = fake_acli
+    monkeypatch.setenv("FAKE_ACLI_INSTALLED", "dataphin")
+    monkeypatch.setenv("FAKE_ACLI_MODE", "uninstall_noop")
+
+    with pytest.raises(AcliError) as caught:
+        await runner.uninstall("dataphin")
+
+    assert caught.value.code == "uninstall_failed"
+    assert [c["args"][:2] for c in calls()] == [
+        ["tool", "list"], ["tool", "uninstall"], ["tool", "list"],
+    ]
+
+
+async def test_uninstall_by_alias_removes_the_tool_it_named(fake_acli, install_dir, monkeypatch):
+    """Cleaning up an install requested as ``di`` must find ``deepinsight-cli``."""
+    runner, calls = fake_acli
+    monkeypatch.setenv("FAKE_ACLI_INSTALLED", "deepinsight-cli:di,dataphin")
+
+    result = await runner.uninstall("di")
+
+    assert (result.name, result.uninstalled) == ("deepinsight-cli", True)
+    assert calls()[1]["args"] == ["tool", "uninstall", "deepinsight-cli", "--yes", "--json"]
 
 
 async def test_uninstall_failure_raises(fake_acli, install_dir, monkeypatch):

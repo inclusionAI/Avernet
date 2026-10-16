@@ -20,6 +20,7 @@ from agentclaw.community.core.acli_clis.errors import (
     AcliDefaultCliError,
     AcliEngineUnsupportedError,
     AcliGrantSyncError,
+    AcliMarketUnavailableError,
     AcliOperationFailedError,
     AcliRequestRejectedError,
     AcliRollbackFailedError,
@@ -159,10 +160,18 @@ class _Market:
 
     def __init__(self) -> None:
         self.calls: list[tuple] = []
+        self.tools = (
+            AcliTool("dataphin", "dataphin", "d", "1.4.14"),
+            AcliTool("deepinsight-cli", "di", "1", "1.0.9"),
+        )
+        self.error: Exception | None = None
 
     def search(self, *, keyword, page_no, page_size):
         self.calls.append((keyword, page_no, page_size))
-        return AcliMarketPage((AcliTool("dataphin", "dataphin", "d", "1.4.14"),), 1, False)
+        if self.error:
+            raise self.error
+        matches = tuple(t for t in self.tools if keyword in t.name or keyword in t.command)
+        return AcliMarketPage(matches, len(matches), False)
 
 
 def _service(
@@ -403,8 +412,56 @@ async def test_failed_grant_and_failed_uninstall_reports_the_state() -> None:
     assert caught.value.state == "installed_not_granted"
 
 
-async def test_alias_is_refused_with_the_market_name_and_undone() -> None:
+async def test_alias_is_refused_before_installing_when_the_market_knows_it() -> None:
     service, agentpass, container, _ = _service()
+
+    with pytest.raises(AcliCliNameMismatchError) as caught:
+        await _add(service, "di")
+
+    assert caught.value.market_name == "deepinsight-cli"
+    assert container.calls == []
+    assert agentpass.codes == ["dataphin"]
+
+
+async def test_an_unreachable_market_leaves_the_install_reply_as_the_alias_check() -> None:
+    service, _, container, _ = _service()
+    service._market.error = AcliMarketUnavailableError()
+
+    with pytest.raises(AcliCliNameMismatchError):
+        await _add(service, "di")
+
+    assert [c[0] for c in container.calls] == ["install", "uninstall"]
+
+
+async def test_cancelled_cleanup_uninstall_still_runs_and_the_cancel_propagates() -> None:
+    """The undo after a failed grant is shielded like the install-time cleanup."""
+    service, agentpass, container, _ = _service()
+    agentpass.add_errors = [RuntimeError("agentpass down")]
+    real_uninstall = container.uninstall
+    gate = asyncio.Event()
+
+    async def slow_uninstall(**kwargs):
+        await gate.wait()
+        return await real_uninstall(**kwargs)
+
+    container.uninstall = slow_uninstall  # type: ignore[method-assign]
+    task = asyncio.create_task(_add(service))
+    for _ in range(50):
+        await asyncio.sleep(0)
+    task.cancel()
+    gate.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    for _ in range(50):
+        await asyncio.sleep(0)
+
+    assert "yuque-cli" not in container.installed
+
+
+async def test_alias_is_refused_with_the_market_name_and_undone() -> None:
+    """Without the market's answer, the install reply catches the alias."""
+    service, agentpass, container, _ = _service()
+    service._market.error = AcliMarketUnavailableError()
 
     with pytest.raises(AcliCliNameMismatchError) as caught:
         await _add(service, "di")
@@ -417,6 +474,19 @@ async def test_alias_is_refused_with_the_market_name_and_undone() -> None:
 async def test_alias_of_a_held_tool_does_not_uninstall_it() -> None:
     container = _Container({"deepinsight-cli"})
     service, _, container, _ = _service(granted=["deepinsight-cli"], container=container)
+
+    with pytest.raises(AcliCliNameMismatchError):
+        await _add(service, "di")
+
+    # The market resolves the alias first, so nothing is installed at all.
+    assert "deepinsight-cli" in container.installed
+    assert container.calls == []
+
+
+async def test_alias_of_a_held_tool_without_the_market_does_not_uninstall_it() -> None:
+    container = _Container({"deepinsight-cli"})
+    service, _, container, _ = _service(granted=["deepinsight-cli"], container=container)
+    service._market.error = AcliMarketUnavailableError()
 
     with pytest.raises(AcliCliNameMismatchError):
         await _add(service, "di")
@@ -728,6 +798,7 @@ async def test_revoke_with_unknown_outcome_keeps_the_program_and_says_so() -> No
 async def test_alias_cleanup_uses_the_pre_install_snapshot() -> None:
     """A Passport outage after the install must not strand the alias's program."""
     service, agentpass, container, _ = _service()
+    service._market.error = AcliMarketUnavailableError()
     real_read = agentpass.current_passport_cli_items
     reads = {"n": 0}
 
