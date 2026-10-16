@@ -974,7 +974,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         """删除 bot 在共享 PVC 中的 subPath 目录。
 
         当 ``LOCAL_K8S_SHARED_PVC_HOST_MOUNT_PATH`` 未配置时，插件没有共享 PVC
-        的文件系统入口，退化为幂等 no-op（与 local_proc/local_docker 保持一致）。
+        的文件系统入口，退化为幂等 no-op（与 local_proc 保持一致）。
         配置后，会删除 ``{host_mount_path}/{storage_id}`` 目录。
         """
         if not storage_id:

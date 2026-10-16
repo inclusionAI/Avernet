@@ -97,7 +97,6 @@ class ArcaSandboxPlugin(Protocol):
     Implementations:
     - ArcaSdkSandboxPlugin: wraps the real Arca SDK (SandboxFactory + SyncSandbox)
     - StubArcaSandboxPlugin: in-memory mock for unit tests
-    - DockerArcaSandboxPlugin: local Docker containers with Arca-compatible API
 
     Note:
         This is a SYNC factory (mirroring Arca SDK's sync API).

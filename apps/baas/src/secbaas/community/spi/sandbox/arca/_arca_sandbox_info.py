@@ -3,7 +3,7 @@
 Single, community-owned model for ``ArcaSandbox.get_info()`` return values,
 derived from the Arca SDK ``SandboxInfo`` surface. All Arca sandbox
 implementations (enterprise SDK-backed, community stub, community
-local-process, community local-docker) return this model so the SPI has one
+local-process) return this model so the SPI has one
 source of truth for the sandbox info shape.
 """
 
@@ -62,10 +62,10 @@ class ArcaSandboxInfo:
     ``storage`` (optional; owned by all backends)
         ``Storage | None``. NAS storage binding; ``None`` when unset.
 
-    ``is_ready`` (optional; owned by local-process + local-docker)
+    ``is_ready`` (optional; owned by local-process)
         ``bool``. Ready flag; ``False`` on backends that do not model it.
 
-    ``container_id`` (optional; owned by local-docker)
+    ``container_id`` (optional; kept on the unified model — no community backend currently populates it)
         ``str | None``. Docker container ID; ``None`` elsewhere.
 
     ``bot_id`` (optional; owned by local-process)
