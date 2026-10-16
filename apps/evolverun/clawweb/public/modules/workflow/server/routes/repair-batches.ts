@@ -1,3 +1,4 @@
+import { projectTaskHistory } from '../services/repair-task-history.js';
 import { Router, type Request, type Response } from 'express';
 import type { RepairInboxFilter, RepairWorkbenchService } from '../contracts/repair-workbench.js';
 import type { RepairReleaseService } from '../contracts/repair-release.js';
@@ -137,9 +138,9 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
   }));
   router.get('/:taskId', handle(async (req, res) => {
     const selected = await taskAccess(req, res, 'view');
-    if (selected) res.json({ ...selected.task,
+    if (selected) res.json(projectTaskHistory({ ...selected.task,
       ...(input.release ? { release: await input.release.detail(selected.task.taskId),
-        capabilities: { ...selected.task.capabilities, publication: input.release.configured && selected.actor.canEdit } } : {}) });
+        capabilities: { ...selected.task.capabilities, publication: input.release.configured && selected.actor.canEdit } } : {}) }, positive(req.query.revisionPage, 'revisionPage', 1), positive(req.query.revisionPageSize, 'revisionPageSize', 20, 20)));
   }));
   function release() {
     if (!input.release) throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '当前宿主未接入候选审阅和部署服务');

@@ -21,12 +21,14 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
   const scopeRef = useRef(scope); scopeRef.current = scope
   const panel = useRef<HTMLElement>(null)
   const revision = detail.latestSuccessful
-  const isCurrent = revision?.revision === selectedRevision && detail.latestAttempt.phase !== 'drafting'
+  const automatic = !!detail.latestAttempt.input?.automation?.roundId
+  const automaticReady = automatic && detail.automaticProgress?.publishable === true && detail.latestAttempt.revision === selectedRevision
+  const isCurrent = revision?.revision === selectedRevision && detail.latestAttempt.phase !== 'drafting' && (!automatic || automaticReady)
   const deployment = detail.release?.deployments.find(row => row.revision === selectedRevision && row.status !== 'failed')
     ?? detail.release?.deployments.find(row => row.revision === selectedRevision)
   const pending = !!deployment && ['created', 'dispatching', 'running', 'uncertain'].includes(deployment.status)
   const succeeded = deployment?.status === 'succeeded'
-  const canPublish = canEdit && isCurrent && detail.capabilities.publication && revision?.phase === 'review'
+  const canPublish = canEdit && isCurrent && detail.capabilities.publication && (revision?.phase === 'review' || automaticReady && revision?.phase === 'no_change')
   useEffect(() => { setDialog(false); setTarget(null); setAck(false); setError(''); request.current = null }, [scope])
   async function reconcile() {
     if (!deployment || !canEdit || submitting.current) return
@@ -73,8 +75,8 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
   }
   const title = succeeded ? `已生效 #${deployment.receipt?.deployNumber}，系统自动观察效果`
     : pending ? '发布结果待核对' : deployment?.status === 'failed' ? '发布未完成，候选已保留' : '审阅并确认发布'
-  const selected = detail.revisions.find(row => row.revision === selectedRevision)
-  if (selected && ['failed', 'no_change', 'drafting', 'cancelled'].includes(selected.phase) && !succeeded && !pending) return <section aria-label="候选发布状态" className="rounded-xl border border-input bg-card p-5 text-sm text-muted-foreground">
+  const selected = detail.revisions.find(row => row.revision === selectedRevision) ?? (detail.latestAttempt.revision === selectedRevision ? detail.latestAttempt : detail.latestSuccessful?.revision === selectedRevision ? detail.latestSuccessful : undefined)
+  if (selected && (['failed', 'drafting', 'cancelled'].includes(selected.phase) || selected.phase === 'no_change' && !automaticReady) && !succeeded && !pending) return <section aria-label="候选发布状态" className="rounded-xl border border-input bg-card p-5 text-sm text-muted-foreground">
     <h3 className="font-semibold text-foreground">{selected.phase === 'failed' ? '所选版本生成失败，尚无可发布候选' : selected.phase === 'no_change' ? '本轮无需重新发布' : selected.phase === 'cancelled' ? '任务已取消' : '正在生成候选，暂不进入发布'}</h3>
     <p className="mt-2">{selected.phase === 'failed' ? '查看本版本错误和最近任务状态；历史失败版本不会因后续成功而变为成功。' : '查看本版本范围与逐项结果；此入口不执行生成或发布。'}</p>
     {!!detail.release?.deployments.some(row => row.status === 'succeeded') && <p className="mt-2">已有生效版本的发布与观察记录保留，切换对应候选版本查看。</p>}
@@ -84,6 +86,7 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
     <p className="mt-2 text-sm leading-6 text-muted-foreground">{succeeded ? '仅以生效版本、相关节点及可判定样本验证；证据不足时持续观察。'
       : pending ? '先核对同一个发布请求，结果未明确前不重复发布。'
       : '发布已审阅的完整 Pack，作用于此工作流在当前环境的后续新运行。已有运行保留原版本。'}</p>
+    {automatic && !automaticReady && !succeeded && <p className="mt-3 text-sm text-muted-foreground">本轮尚未完整校验，暂不可发布；保留各项进度与结果。</p>}
     {!isCurrent && !succeeded && <p className="mt-3 text-sm text-muted-foreground">当前查看的是历史候选，请切回最新可用候选。</p>}
     {!detail.capabilities.publication && <p role="alert">发布能力未启用，请检查宿主配置。</p>}
     {deployment?.error && <p className="mt-3 text-sm text-destructive">{deployment.error}</p>}

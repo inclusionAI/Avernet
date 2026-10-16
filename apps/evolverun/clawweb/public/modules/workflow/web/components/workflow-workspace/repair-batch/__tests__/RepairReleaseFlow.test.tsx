@@ -43,3 +43,19 @@ it('freezes the entire publish request across an approval-only commit and lost r
   await userEvent.click(screen.getByRole('button', { name: '确认发布', exact: true }))
   expect(api.publish.mock.calls[1]).toEqual(api.publish.mock.calls[0])
 })
+it('publishes the complete automatic round when its final batch needs no additional change', () => {
+  const final = { ...revision, phase: 'no_change', input: { automation: { roundId: 'round' } } } as unknown as RepairTaskDetail['latestAttempt'];
+  render(<RepairReleaseFlow detail={{ ...detail, latestAttempt: final, latestSuccessful: final, revisions: [final],
+    automaticProgress: { completedBatches: 3, totalBatches: 3, changedItems: 225, publishable: true } }} selectedRevision={1} canEdit onRefresh={() => {}} />);
+  expect(screen.getByRole('button', { name: '发布此版本' })).toBeEnabled();
+  expect(screen.queryByText('本轮无需重新发布')).not.toBeInTheDocument();
+});
+it('keeps intermediate automatic candidates and failed-round fallbacks non-executable', () => {
+  const intermediate = { ...revision, input: { automation: { roundId: 'round' } } } as unknown as RepairTaskDetail['latestAttempt'];
+  const view = render(<RepairReleaseFlow detail={{ ...detail, latestAttempt: intermediate, latestSuccessful: intermediate, revisions: [intermediate],
+    automaticProgress: { completedBatches: 1, totalBatches: 3, changedItems: 100, publishable: false } }} selectedRevision={1} canEdit onRefresh={() => {}} />);
+  expect(screen.getByRole('button', { name: '发布此版本' })).toBeDisabled();
+  view.rerender(<RepairReleaseFlow detail={{ ...detail, latestAttempt: { ...intermediate, revision: 2, phase: 'failed' }, latestSuccessful: intermediate, revisions: [intermediate],
+    automaticProgress: { completedBatches: 1, totalBatches: 3, changedItems: 100, publishable: false } }} selectedRevision={1} canEdit onRefresh={() => {}} />);
+  expect(screen.getByRole('button', { name: '发布此版本' })).toBeDisabled();
+});

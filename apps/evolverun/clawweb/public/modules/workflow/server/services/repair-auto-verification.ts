@@ -1,3 +1,4 @@
+import { changedChainItems } from '../contracts/repair-automatic-chain.js';
 import { randomUUID } from 'node:crypto';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { fillRepairSampleAnalyses } from './repair-sample-analyses.js';
@@ -35,12 +36,13 @@ export function decideRepairEffect(rule: RepairEffectRule | null, deployNumber: 
 export function createRepairAutoVerification(db: IDatabase, publication?: RepairPublicationPort) {
   async function decisions(d: RepairDeployment) {
     const revision = await new RepairBatchRepository(db).getRevision(d.workflowId, d.taskId, d.revision);
-    const changed = new Set(Array.isArray(revision?.draft?.itemResults) ? revision.draft.itemResults.filter(row => row.status === 'changed').map(row => row.itemId) : []);
+    const items = revision ? changedChainItems(await new RepairBatchRepository(db).listRevisions(d.workflowId, d.taskId), revision) : [];
+    const changed = new Set(items.map(item => item.itemId));
     const result: Array<RepairEffectDecision & { itemId: string }> = [];
     const active = changed.size ? (await db.query<{ deploy_number: number }>('SELECT deploy_number FROM workflow_deploy_history WHERE workflow_id = ? AND is_active = 1', [d.workflowId]))[0] : null;
     const versionChanged = changed.size > 0 && Number(active?.deploy_number) !== d.receipt!.deployNumber;
     const applied = versionChanged && publication?.appliedState ? await publication.appliedState(d) : null;
-    for (const item of revision?.input.items ?? []) {
+    for (const item of items) {
       if (!changed.has(item.itemId)) continue;
       const rule = effectRule(item);
       if (versionChanged && applied?.status !== 'unchanged' && applied?.itemStates?.[item.itemId] !== 'unchanged') { result.push({ itemId: item.itemId, ...decideRepairEffect(rule, d.receipt!.deployNumber, []), reason: '当前生效版本已变化；重新核对已应用修改，旧版本证据不形成当前效果结论' }); continue; }

@@ -24,6 +24,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
   const editorRevision = useRef('')
   const [busy, setBusy] = useState(false)
   const [refresh, setRefresh] = useState(0)
+  const [historyPage, setHistoryPage] = useState(1)
   const [mode, setMode] = useState<'detail' | 'feedback' | 'cancel'>('detail')
   const [instructions, setInstructions] = useState('')
   const [feedback, setFeedback] = useState('')
@@ -45,11 +46,12 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
       pollTimer = setTimeout(() => { if (current) setRefresh(value => value + 1) }, 2_000)
     }
     setLoading(detail == null); setTaskError('')
-    repairBatches.task(taskId).then(result => {
+    const read = historyPage === 1 ? repairBatches.task(taskId) : repairBatches.task(taskId, historyPage)
+    read.then(result => {
       if (!current) return
       if (result.workflowId !== workflowId || result.taskId !== taskId) { activeTask.current = { taskId, active: false }; setTaskError('此任务不属于当前工作流'); return }
       setDetail(result)
-      const active = ['drafting', 'publishing'].includes(result.latestAttempt.phase)
+      const active = ['drafting', 'publishing'].includes(result.latestAttempt.phase) || !!result.automaticProgress && result.automaticProgress.completedBatches < result.automaticProgress.totalBatches && ['review', 'no_change'].includes(result.latestAttempt.phase)
       activeTask.current = { taskId, active }
       if (active) schedulePoll()
     }).catch(reason => {
@@ -59,7 +61,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     })
       .finally(() => { if (current) setLoading(false) })
     return () => { current = false; if (pollTimer) clearTimeout(pollTimer) }
-  }, [workflowId, taskId, refresh])
+  }, [workflowId, taskId, refresh, historyPage])
 
   useEffect(() => {
     if (mode !== 'feedback') return
@@ -260,7 +262,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     {taskError && <p role="alert" className="text-xs text-destructive">{taskError} <button type="button" className={button} disabled={busy} onClick={reload}>重试读取任务</button></p>}
     {(error || notice || recoveryAction) && <div className="flex flex-wrap items-center gap-3 rounded-lg border border-input bg-card p-4"><p role={error ? 'alert' : 'status'} className="text-xs text-muted-foreground">{error || notice || dispatchError}</p>{recoveryButton}</div>}
     {detail && <RepairTaskPanel key={`${detail.taskId}:${detail.latestSuccessful?.revision ?? detail.latestAttempt.revision}`}
-      detail={detail} canEdit={canEdit && !taskError && !loading && !recoveryAction} busy={busy} dispatchError={recoveryAction ? '' : dispatchError}
+      detail={detail} onHistoryPageChange={setHistoryPage} canEdit={canEdit && !taskError && !loading && !recoveryAction} busy={busy} dispatchError={recoveryAction ? '' : dispatchError}
       onFeedback={openSelection}
       onCancel={() => { setError(''); setMode('cancel') }} onRetryDispatch={() => void retryDispatch()} onRetryGeneration={() => void retryGeneration()} onRefresh={reload} />}
   </RepairWorkspace>

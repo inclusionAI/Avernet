@@ -36,6 +36,20 @@ const history = Array.from({ length: 8 }, (_, index) => ({
 }))
 
 describe('workflow management version history', () => {
+  it('shows server provenance and preserves unknown old release origins', () => {
+    historyQuery.mockReturnValue({ data: { history: [
+      { ...history[0], source: { kind: 'auto_optimization' } },
+      { ...history[1], source: { kind: 'manual_optimization' } },
+      { ...history[2], source: { kind: 'rollback', restoredFromDeployNumber: 8, restoredSource: { kind: 'auto_optimization' } } },
+      history[3],
+    ] }, isLoading: false, isError: false, refetch: vi.fn() });
+    render(<ManagementTab workflowId="wf-1" workflowTitle="Workflow 1" onDeleted={vi.fn()} />);
+    expect(screen.getByText('自动优化 · 人工确认发布')).toBeVisible();
+    expect(screen.getByText('手动优化 · 人工确认发布')).toBeVisible();
+    expect(screen.getByText('回滚至 #8 · 自动优化 · 人工确认发布')).toBeVisible();
+    expect(screen.getByText('来源未知')).toBeVisible();
+  });
+
   it('exposes automatic analysis in workflow settings', async () => {
     historyQuery.mockReturnValue({
       data: { history: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn(),

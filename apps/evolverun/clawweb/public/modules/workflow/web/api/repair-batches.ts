@@ -36,7 +36,7 @@ export const repairBatches = {
     return readOnlyJson<RepairCandidatesResponse>(`${base}/candidates?${params}`)
   },
   item: (workflowId: string, itemId: string) => readOnlyJson<RepairInboxItem>(`${base}/items/${segment(itemId)}?workflowId=${segment(workflowId)}`),
-  task: (taskId: string) => readOnlyJson<RepairTaskDetail>(`${base}/${segment(taskId)}`),
+  task: (taskId: string, revisionPage = 1) => readOnlyJson<RepairTaskDetail>(`${base}/${segment(taskId)}${revisionPage > 1 ? `?revisionPage=${revisionPage}` : ''}`),
   create: (request: RepairSelectionRequest) => post<RepairRevision>(base, request),
   revise: (taskId: string, request: RepairFeedbackRequest) => post<RepairRevision>(`${base}/${segment(taskId)}/revisions`, request),
   disposition: (itemId: string, request: { workflowId: string; inputDigest: string; expectedStateVersion: number; contentRevision: number; untilMs?: number; action: 'no_action' | 'restore'; reason: string; requestId: string; includeHistorical?: boolean }) =>

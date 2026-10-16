@@ -36,6 +36,9 @@ export type RepairTaskDetail = {
   workflowId: string; taskId: string; latestAttempt: RepairRevision;
   latestSuccessful: RepairRevision | null; revisions: RepairRevision[]; capabilities: RepairCapabilities;
   release?: RepairReleaseDetail;
+  revisionPage?: { page: number; pageSize: number; total: number; totalPages: number };
+  scopeItemCount?: number;
+  automaticProgress?: { completedBatches: number; totalBatches: number; changedItems?: number; publishable?: boolean };
   execution?: { status: 'created' | 'dispatching' | 'dispatch_uncertain' | 'dispatched' | 'running' | 'dispatch_failed' | 'succeeded' | 'failed' | 'cancelled';
     errorCode: string | null; jobId: string | null; attempt: number; executionId: string | null; rawStatus: string | null };
 };
@@ -82,6 +85,7 @@ export interface RepairWorkbenchService {
   candidates(workflowId: string, query?: RepairCandidatesQuery): Promise<Omit<RepairCandidatesResponse, 'canEdit'>>;
   item(workflowId: string, itemId: string): Promise<RepairInboxItem>;
   task(taskId: string): Promise<RepairTaskDetail>;
+  items(workflowId: string, itemIds: string[]): Promise<RepairInboxItem[]>;
   request(workflowId: string, requestId: string): Promise<RepairRevision | null>;
   create(actorId: string, request: RepairSelectionRequest): Promise<RepairRevision>;
   revise(actorId: string, taskId: string, request: RepairFeedbackRequest): Promise<RepairRevision>;

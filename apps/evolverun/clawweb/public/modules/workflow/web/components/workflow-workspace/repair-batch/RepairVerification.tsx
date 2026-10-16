@@ -12,6 +12,10 @@ export default function RepairVerification({ detail, deployment }: {
   const frozen = detail.revisions.find(row => row.revision === deployment.revision)
   return <div className="mt-5 space-y-3 border-t border-input pt-4">
     <h4 className="font-semibold">自动效果观察</h4>
+    {deployment.status === 'succeeded' && deployment.receipt && deployment.baselineDeployNumber > 0 && <p className="text-sm text-muted-foreground">
+      已生效部署 #{deployment.receipt.deployNumber}，相对发布前基线 #{deployment.baselineDeployNumber} 继续观察。
+      {' '}<a className="text-primary underline" href={`/workflows/workspace?workflowId=${encodeURIComponent(detail.workflowId)}&tab=overview&view=version-comparison&baseline=${deployment.baselineDeployNumber}&current=${deployment.receipt.deployNumber}`}>查看版本对比</a>
+    </p>}
     {query.isPending && <p role="status">正在读取实际运行证据…</p>}
     {query.error && <p role="alert">{repairReadError(query.error)} <button className="text-primary underline" onClick={() => void query.refetch()}>重试</button></p>}
     {evidence && <>

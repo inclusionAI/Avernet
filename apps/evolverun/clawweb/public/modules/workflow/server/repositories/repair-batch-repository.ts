@@ -1,3 +1,4 @@
+import { automaticAdvance, isAutomaticBatch } from '../contracts/repair-automatic-chain.js';
 import { repairEvidenceFacts, repairEvidenceFlows } from '../contracts/repair-batch.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import {
@@ -187,11 +188,12 @@ export class RepairBatchRepository {
       return revisionFromRow(retry);
     }
     const previous = await this.latest(tx, workflowId, input.taskId);
+    automaticAdvance(await new RepairBatchRepository(tx).listRevisions(workflowId, input.taskId), input);
     if ((await tx.query('SELECT 1 FROM workflow_repair_revisions WHERE task_id = ? AND phase = ? LIMIT 1', [input.taskId, 'published'])).length) conflict('STATE_CONFLICT', '已部署任务不能再生成候选；请依据效果结论创建新基线任务');
     if (request.expectedAttemptRevision !== (previous?.revision ?? 0) || input.revision !== (previous?.revision ?? 0) + 1
-      || (previous && !['review', 'blocked', 'failed'].includes(previous.phase))) conflict('STATE_CONFLICT', 'Revision is not editable or latest attempt changed');
+      || (previous && !['review', 'blocked', 'failed', ...(isAutomaticBatch(input) ? ['no_change'] : [])].includes(previous.phase))) conflict('STATE_CONFLICT', 'Revision is not editable or latest attempt changed');
     if (previous && canonicalRepairJson(previous.input.baseline) !== canonicalRepairJson(input.baseline)) conflict('CONTENT_MISMATCH', 'A task cannot change its frozen baseline');
-    const successful = await this.latest(tx, workflowId, input.taskId, true);
+    const successful = isAutomaticBatch(input) ? (await new RepairBatchRepository(tx).listRevisions(workflowId, input.taskId)).find(r => r.draft !== null && r.phase !== 'failed') : await this.latest(tx, workflowId, input.taskId, true);
     if (input.parentCandidateCommit !== (successful?.draft?.candidateCommit ?? null)) conflict('CONTENT_MISMATCH', 'Parent must be the task last successful candidate');
     const claims = [];
     for (const frozenItem of input.items) {
@@ -205,7 +207,7 @@ export class RepairBatchRepository {
     await this.claimItems(tx, { workflowId, taskId: input.taskId, revision: input.revision, items: claims });
     const selected = new Set(input.items.map(item => item.itemId));
     const owned = await tx.query<Row>('SELECT item_id FROM workflow_repair_items WHERE workflow_id = ? AND active_task_id = ?', [workflowId, input.taskId]);
-    for (const row of owned) if (!selected.has(row.item_id)) {
+    for (const row of owned) if (!selected.has(row.item_id) && !isAutomaticBatch(input)) {
       await tx.exec(`UPDATE workflow_repair_items SET state = 'pending', active_task_id = NULL, active_revision = NULL,
         state_version = state_version + 1, updated_at_ms = ? WHERE workflow_id = ? AND item_id = ? AND active_task_id = ? AND state = 'processing'`,
       [Date.now(), workflowId, row.item_id, input.taskId]);
@@ -246,7 +248,7 @@ export class RepairBatchRepository {
     [input.phase, draftJson, checksJson, digestRepairJson(input.draft), digestRepairJson(input.checks), Date.now(),
       input.workflowId, input.taskId, input.revision, input.expectedStateVersion, current.phase]);
     if (result.affectedRows !== 1) conflict('STATE_CONFLICT', 'Draft result was already settled');
-    if (input.phase === 'no_change') {
+    if (input.phase === 'no_change' && !isAutomaticBatch(current.input)) {
       await tx.exec(`UPDATE workflow_repair_items SET state = 'pending', active_task_id = NULL, active_revision = NULL,
         state_version = state_version + 1, updated_at_ms = ? WHERE workflow_id = ? AND active_task_id = ? AND state = 'processing'`,
       [Date.now(), input.workflowId, input.taskId]);

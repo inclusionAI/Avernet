@@ -1,3 +1,4 @@
+import { changedChainItems } from '../contracts/repair-automatic-chain.js';
 import { createRepairAutoVerification } from './repair-auto-verification.js';
 import { randomUUID } from 'node:crypto';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
@@ -33,7 +34,8 @@ export function createRepairVerificationService(db: IDatabase, publication?: Rep
       const current = counts.find(row => Number(row.deployment) === number), baseline = counts.find(row => Number(row.deployment) === d.baselineDeployNumber);
       const unknown = (await db.query<{ total: number }>('SELECT COUNT(*) AS total FROM flow_runs WHERE workflow_id = ? AND workflow_deploy_number IS NULL', [d.workflowId]))[0];
       const revision = await new RepairBatchRepository(db).getRevision(d.workflowId, taskId, d.revision);
-      const signatures = [...new Set((revision?.input.items ?? []).map(item => item.context?.signature).filter((signature): signature is string => typeof signature === 'string'))];
+      const items = revision ? changedChainItems(await new RepairBatchRepository(db).listRevisions(d.workflowId, taskId), revision) : [];
+      const signatures = [...new Set(items.map(item => item.context?.signature).filter((signature): signature is string => typeof signature === 'string'))];
       const diagnoses = !signatures.length ? [] : await db.query<{ failure_signature: string; matching_runs: number }>(
         `SELECT hd.failure_signature, COUNT(DISTINCT hd.flow_id) AS matching_runs
           FROM workflow_healing_diagnoses hd JOIN flow_runs fr ON fr.flow_id = hd.flow_id AND fr.workflow_id = hd.workflow_id
@@ -43,7 +45,7 @@ export function createRepairVerificationService(db: IDatabase, publication?: Rep
         JOIN flow_runs fr ON fr.flow_id = hd.flow_id AND fr.workflow_id = hd.workflow_id WHERE fr.workflow_id = ? AND fr.workflow_deploy_number = ?`, [d.workflowId, number]))[0];
       const timeouts = (await db.query<{ total: number }>(`SELECT COUNT(DISTINCT hd.flow_id) AS total FROM workflow_healing_diagnoses hd
         JOIN flow_runs fr ON fr.flow_id = hd.flow_id AND fr.workflow_id = hd.workflow_id WHERE fr.workflow_id = ? AND fr.workflow_deploy_number = ? AND hd.failure_mode = 'timeout'`, [d.workflowId, number]))[0];
-      const recurrence = (revision?.input.items ?? []).map(item => {
+      const recurrence = items.map(item => {
         const signature = typeof item.context?.signature === 'string' ? item.context.signature : null;
         return { itemId: item.itemId, signature, matchingRuns: signature ? diagnoses.filter(row => row.failure_signature === signature).reduce((total, row) => total + Number(row.matching_runs), 0) : null,
           diagnosedRuns: Number(diagnosed?.total ?? 0) };

@@ -110,6 +110,11 @@ export function validateRepairItem(value: unknown): RepairItem {
 export function validateAutomationOrigin(value: unknown): AutomationOrigin {
   valid(object(value) && value.kind === 'daily' && digest(value.intentId)
     && integer(value.policyVersion, 1) && integer(value.evidenceCutoffMs, 1), 'automation origin');
+  if (value.roundId !== undefined || value.batchIndex !== undefined || value.batchCount !== undefined) {
+    valid(digest(value.roundId) && integer(value.batchCount, 1) && integer(value.batchIndex)
+      && Number(value.batchIndex) < Number(value.batchCount), 'automatic round batch');
+  }
+  if (value.totalItems !== undefined) valid(integer(value.totalItems, 1) && value.roundId !== undefined, 'automatic scope size');
   return value as AutomationOrigin;
 }
 export function validateRepairBatchInput(value: unknown): RepairBatchInput {

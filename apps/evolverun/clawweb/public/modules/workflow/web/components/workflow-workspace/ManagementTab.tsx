@@ -1,3 +1,5 @@
+import { workflowVersionSourceLabel } from '../../utils/workflow-version-source'
+import type { WorkflowVersionSource } from '../../../server/contracts/workflow-version-source'
 import { useState } from 'react'
 import { useWorkflowHistory, useDeleteWorkflow, useRestoreWorkflowVersion, useFacadeBindings, useWorkflowAccess } from '../../api/hooks'
 import { formatTimeShort } from '../../utils/time'
@@ -121,6 +123,7 @@ export default function ManagementTab({ workflowId, workflowTitle, onDeleted }: 
                         {item.action}
                       </span>
                     </div>
+                    {item.action !== 'edit' && <p className="text-xs text-gray-600">{workflowVersionSourceLabel((item as typeof item & { source?: WorkflowVersionSource }).source)}</p>}
                     <p className="truncate text-xs text-gray-500">
                       {item.note || '无备注'} · {formatTimeShort(item.gmtCreate)}
                     </p>

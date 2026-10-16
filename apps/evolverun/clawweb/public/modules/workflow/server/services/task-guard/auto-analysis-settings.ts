@@ -23,17 +23,21 @@ export function createAutoAnalysisSettings(input: { repo: AutoAnalysisConfigRepo
       if (raw && raw.workflowId !== id) throw new Error('AUTOMATION_POLICY_IDENTITY_MISMATCH');
       const dailyConfigured = raw?.schemaVersion === 'workflow-automation/v1';
       if (dailyConfigured && (typeof raw.autoDraft !== 'boolean' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(raw.dailyTime))) throw new Error('INVALID_AUTOMATION_POLICY');
-      return { workflowId: id, enabled: row ? row.enabled === 1 : inherited.has('*') || inherited.has(id),
+      if (raw?.minimumImpact !== undefined && !['medium', 'high'].includes(raw.minimumImpact)) throw new Error('INVALID_AUTOMATION_POLICY');
+      return { minimumImpact: raw?.minimumImpact ?? 'medium', scopeVersion: raw?.minimumImpact ? 'all-qualified/v1' : 'legacy', workflowId: id, enabled: row ? row.enabled === 1 : inherited.has('*') || inherited.has(id),
         autoDraft: dailyConfigured ? raw.autoDraft : false, dailyTime: dailyConfigured ? raw.dailyTime : '09:00', timezone: 'Asia/Shanghai',
         updatedAtMs: dailyConfigured ? Number(raw.updatedAtMs ?? 0) : 0, version: row?.version ?? 0, dailyConfigured, source: row ? 'database' : inherited.has('*') || inherited.has(id) ? 'environment' : 'default' };
     },
     async save(workflowId, value, actor) {
       if (!input.repo) throw new Error('Task Guard 配置存储不可用');
       const id = workflowId.trim();
+      if (value.minimumImpact !== undefined && !['medium', 'high'].includes(value.minimumImpact)) throw new Error('INVALID_AUTOMATION_POLICY');
       if (!id || typeof value.enabled !== 'boolean' || typeof value.autoDraft !== 'boolean'
         || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value.dailyTime) || !Number.isSafeInteger(value.expectedVersion) || value.expectedVersion < 0) throw new Error('INVALID_AUTOMATION_POLICY');
+      const prior = await this.get(id);
+      const minimumImpact = value.minimumImpact ?? (prior.scopeVersion === 'all-qualified/v1' ? prior.minimumImpact : undefined);
       await input.repo.compareAndSet(configKey(id), { configYaml: JSON.stringify({ schemaVersion: 'workflow-automation/v1',
-        workflowId: id, updatedAtMs: Date.now(), autoDraft: value.autoDraft, dailyTime: value.dailyTime, timezone: 'Asia/Shanghai' }),
+        workflowId: id, ...(minimumImpact ? { minimumImpact } : {}), updatedAtMs: Date.now(), autoDraft: value.autoDraft, dailyTime: value.dailyTime, timezone: 'Asia/Shanghai' }),
         enabled: value.enabled, expectedVersion: value.expectedVersion, updatedBy: actor });
       return this.get(id);
     },

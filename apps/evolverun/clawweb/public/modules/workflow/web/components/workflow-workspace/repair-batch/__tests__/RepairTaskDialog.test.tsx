@@ -120,13 +120,14 @@ it('explains the latest no-change attempt without calling it historical or askin
 it('lets a read-only user revisit a published scope and candidate without editing or publishing', async () => {
   const detail = taskDetail('review', '已审阅的候选', ['item-1'])
   detail.capabilities.publication = true
-  detail.release = { deployments: [{ id: 'deploy-1', revision: 1, status: 'succeeded', receipt: { deployNumber: 160 } }] } as never
+  detail.release = { deployments: [{ id: 'deploy-1', revision: 1, status: 'succeeded', baselineDeployNumber: 157, receipt: { deployNumber: 160 } }] } as never
   repairApi.task.mockResolvedValue(detail)
   const scroll = vi.fn()
   Element.prototype.scrollIntoView = scroll
   repairApi.verification.mockResolvedValue({ evidence: null, conclusions: [] })
   render(<QueryClientProvider client={new QueryClient()}><RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit={false} onClose={() => {}} onChanged={() => {}} /></QueryClientProvider>)
   await screen.findByText('候选 Pack · v1')
+  expect(screen.getByRole('link', { name: '查看版本对比' })).toHaveAttribute('href', '/workflows/workspace?workflowId=wf-1&tab=overview&view=version-comparison&baseline=157&current=160')
   await userEvent.click(screen.getByRole('button', { name: '生成优化草稿', exact: true }))
   expect(screen.getByRole('heading', { name: '本轮冻结范围' })).toBeVisible()
   expect(screen.queryByRole('button', { name: '确认生成下一版' })).not.toBeInTheDocument()
@@ -446,3 +447,18 @@ describe('RepairTaskDialog', () => {
   });
 
 })
+
+it('pages older candidate history while preserving the full current attempt and round scope', async () => {
+  const user = userEvent.setup();
+  const first = { ...taskDetail('review', '最新候选', ['last-batch-item']), scopeItemCount: 225,
+    automaticProgress: { completedBatches: 3, totalBatches: 3 }, revisionPage: { page: 1, pageSize: 20, total: 25, totalPages: 2 } };
+  const old = { ...first.latestAttempt, revision: 0, draft: null };
+  const second = { ...first, revisions: [old], revisionPage: { ...first.revisionPage, page: 2 } };
+  repairApi.task.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+  repairApi.diff.mockResolvedValue({ files: [], truncated: false });
+  render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit onClose={vi.fn()} onChanged={vi.fn()} />);
+  expect(await screen.findByText(/本轮已纳入 225 项/)).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: '较早记录' }));
+  await waitFor(() => expect(repairApi.task).toHaveBeenLastCalledWith('FIX-1', 2));
+  expect(await screen.findByText('历史记录第 2/2 页 · 共 25 次')).toBeInTheDocument();
+});
