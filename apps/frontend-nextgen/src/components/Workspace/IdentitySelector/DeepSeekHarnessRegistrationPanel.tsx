@@ -47,7 +47,11 @@ export function DeepSeekHarnessRegistrationPanel({ open }: { open: boolean }) {
   const displayName = identity?.displayName?.trim();
   const botName =
     editedBotName ??
-    (displayName ? `${displayName.slice(0, 64 - nameSuffix.length)}${nameSuffix}` : '我的Deepseek harness');
+    (displayName
+      ? `${Array.from(displayName)
+          .slice(0, 64 - Array.from(nameSuffix).length)
+          .join('')}${nameSuffix}`
+      : '我的Deepseek harness');
   const [profile, setProfile] = useState('web');
   const inputError = getDeepSeekHarnessInputError({ botName, profile });
   const command =
@@ -65,7 +69,7 @@ export function DeepSeekHarnessRegistrationPanel({ open }: { open: boolean }) {
         <h3 className="font-medium">1. 安装插件并接入</h3>
         <label className="block">
           Bot 名称
-          <Input value={botName} maxLength={64} onChange={(event) => setEditedBotName(event.target.value)} />
+          <Input value={botName} onChange={(event) => setEditedBotName(event.target.value)} />
         </label>
         <label className="block">
           DSH Profile
