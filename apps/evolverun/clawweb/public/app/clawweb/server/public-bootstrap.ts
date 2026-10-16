@@ -42,6 +42,7 @@ import { createWorkflowRepairRuntime } from "./repair-workbench-runtime.js";
 import { AistudioService, resolveAistudioConfig } from "@avernet/clawinsight/server/services/aistudio-service";
 import { createRepairAisExecution, resolveRepairAisConfiguration } from "./repair-ais-execution.js";
 import { createAutoHealTriggerRun } from "./auto-heal-trigger-run.js";
+import { resolveAutoHealGitConfigFromDb } from "./auto-heal-config.js";
 
 export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecoveryRuntime } = {}): ClawWebBootstrap {
   return {
@@ -123,15 +124,16 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
 
       // AutoHeal composition
       const autoHealConfig = resolveAutoHealConfig();
+      const dbGitConfig = await resolveAutoHealGitConfigFromDb(db);
       const autoHealGitConfig = {
-        remoteUrl: autoHealConfig.clawflowsRemoteUrl,
-        username: autoHealConfig.gitUsername,
-        email: autoHealConfig.gitAuthorEmail,
-        token: autoHealConfig.gitToken,
+        remoteUrl: dbGitConfig.remoteUrl || autoHealConfig.clawflowsRemoteUrl,
+        username: dbGitConfig.username || autoHealConfig.gitUsername,
+        email: dbGitConfig.email || autoHealConfig.gitAuthorEmail,
+        token: dbGitConfig.token || autoHealConfig.gitToken,
       };
       const autoHealAuthor = {
-        name: autoHealConfig.gitAuthorName,
-        email: autoHealConfig.gitAuthorEmail,
+        name: dbGitConfig.authorName || autoHealConfig.gitAuthorName,
+        email: dbGitConfig.authorEmail || autoHealConfig.gitAuthorEmail,
       };
       const botPermRepo = new BotWorkflowPermissionRepository(db);
       const deployHistoryRepo = new WorkflowDeployHistoryRepository(db);
