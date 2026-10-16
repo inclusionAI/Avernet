@@ -210,6 +210,7 @@ export const defaultCapabilities: AppCapabilities = {
     value: true,
   }),
   getAdditionalBotRegistrationPanels: () => ({ status: 'available', value: [] }),
+  getDeepSeekHarnessRegistrationGuideUrl: () => ({ status: 'available', value: null }),
   getQwenWorkBotRegistrationConfig: (bcsEndpoint) => {
     const runtime =
       typeof window === 'undefined'

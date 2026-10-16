@@ -475,6 +475,8 @@ export interface AppCapabilities {
    * 同步签名，组件仅消费可见性，不感知部署环境。
    */
   getBotRegistrationEnabled: () => CapabilityResult<boolean>;
+  /** Deployment-owned DSH guide link; null uses the public guide. */
+  getDeepSeekHarnessRegistrationGuideUrl: () => CapabilityResult<string | null>;
   /** Additional deployment-owned onboarding panels; public deployments default to none. */
   getAdditionalBotRegistrationPanels: () => CapabilityResult<
     {
