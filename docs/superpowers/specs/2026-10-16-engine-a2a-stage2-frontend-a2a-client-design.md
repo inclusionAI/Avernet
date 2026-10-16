@@ -27,12 +27,14 @@ d998d24）；桌面（Rust/Tauri，主设计已预留阶段 3 C 方案转换层�
 
 **基线钉死**（实现启动时必须重新核验并回填实际 commit）：
 
-| 仓 | 角色 | 基线 |
+| 仓 | 角色 | 基线（2026-10-16 B0 实核） |
 |----|------|------|
-| Avernet（本仓） | 引擎 A2A 面（已合入 dev）；P0 小前置交付载体 | dev（含 PR#2743） |
-| ocb | 全部前端改造落点 `apps/frontend` | 探索期实锚 `REL20261015_avernet_env_param` @ `2420af82a` |
-| — | 前端协议契约包 | `@alipay/aix-chat-adapters`（版本以 lockfile 为准），仓内蓝本 `apps/frontend/src/adapters/aicoding/AICodingProvider.ts` |
+| Avernet（本仓） | 引擎 A2A 面（已合入 dev）；P0 小前置交付载体 | dev（含 PR#2743）；P0 工作分支 `feat/engine-a2a-protocol-replacement`（P0 完成于 `f5e08d8d1..c0b657876`） |
+| ocb | 全部前端改造落点 `apps/frontend` | **实核 `origin/dev` @ `754d4b333`**；工作 worktree `~/IdeaProjects/ocb-a2a-stage2` 分支 `feat/a2a-frontend-client`；注入点 `useMultiSessionChat.ts:1027` 实锚 |
+| — | 前端协议契约包 | `@alipay/aix-chat-adapters` **`^1.0.9`**（apps/frontend/package.json:39；仓内无独立 lockfile 匹配，以声明的 range 为准），仓内蓝本 `apps/frontend/src/adapters/aicoding/AICodingProvider.ts` |
 | — | 配置载体 | 基线实际存在的 `@umijs/max` defineConfig 契约（config.ts 为 bigfish 条件桥接，不预设 Bigfish 专属面）；开关唯一读取入口 = `capability.ts`，默认 off |
+
+**M1 测试环境注记**（B0 实录）：本机无内部 npm registry，M1 测试以公共 registry 独立沙箱（jest@29/ts-jest@29/typescript@5.4，`~/ocb-a2a-nodeenv` 符链）+ 最小 `.umi/tsconfig.json` 占位（git-ignored 生成目录）运行；**套件级既有测试回归（含 SDK 依赖用例）移交 ocb CI**（其具备内部 registry 环境）——M1 退出线的"既有测试无回归"以 CI 为准。
 
 "唯一消费方改动"为**待配置验证的主张**而非承诺：注入点 =
 `useMultiSessionChat.ts` 的 `specialProvider ?? new OpenClawProvider(providerConfig)`
