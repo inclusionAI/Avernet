@@ -6,7 +6,7 @@ const api=vi.hoisted(()=>({verification:vi.fn()}));vi.mock('../../../../api/repa
 import RepairVerification from '../RepairVerification'
 const deployment={id:'deployment-ui',revision:1,status:'succeeded',baselineDeployNumber:159,receipt:{deployNumber:160}} as never
 const detail={taskId:'verify-ui',workflowId:'wf',revisions:[{revision:1,input:{baseline:{activeDeployNumber:159},items:[{itemId:'item',proposal:{summary:'修复超时'}}]}}]} as never
-function mount(){render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><RepairVerification detail={detail} deployment={deployment} canEdit={false}/></QueryClientProvider>)}
+function mount(onSummary?: (summary:string)=>void){render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><RepairVerification detail={detail} deployment={deployment} canEdit={false} onSummary={onSummary}/></QueryClientProvider>)}
 const evidence=(automatic:unknown[]=[],total=0)=>({evidence:{deployNumber:160,total,excludedUnknownVersions:0,samples:[],automatic},conclusions:[]})
 beforeEach(()=>vi.clearAllMocks())
 it('distinguishes no samples from having no verifier',async()=>{
@@ -31,4 +31,19 @@ it('surfaces a read failure with a read-only retry',async()=>{
 it('reports recurrence separately from a sample success rate',async()=>{
  api.verification.mockResolvedValue(evidence([{itemId:'item',result:'ineffective',rule:null,eligibleSamples:0,reason:'same issue recurred'}],1));mount();
  expect(await screen.findByText('原问题复现，需继续优化。')).toBeVisible();expect(screen.queryByText(/成功率提升/)).not.toBeInTheDocument();
+});
+
+it.each([
+ ['verified',5,5,'现有逐项验证规则已满足，结论仅限这些问题。','符合现有验证规则'],
+ ['observing',2,3,'观察中，尚未满足判定条件。','观察中'],
+] as const)('uses newer assessment samples for %s despite zero original runs',async(result,eligibleSamples,related,conclusion,summary)=>{
+ const onSummary=vi.fn();
+ api.verification.mockResolvedValue(evidence([{itemId:'item',result,observedDeployNumber:161,rule:{version:'node-timeout/v1',nodeId:'query',signature:'timeout',windowDays:7,minimumSamples:5},eligibleSamples,reason:'unchanged files',sampleSummary:{related,complete:eligibleSamples,missingAnalysis:related-eligibleSamples,unsuccessfulNode:0}}]));mount(onSummary);
+ expect(await screen.findByText(conclusion)).toBeVisible();
+ expect(screen.queryByText('暂无新版本运行样本，暂不能判断效果。')).not.toBeInTheDocument();
+ expect(screen.getByText(/当前观察部署 #161/)).toBeVisible();expect(onSummary).toHaveBeenLastCalledWith(summary);
+});
+it('does not use original runs as samples for an empty newer assessment deployment',async()=>{
+ api.verification.mockResolvedValue(evidence([{itemId:'item',result:'observing',observedDeployNumber:161,rule:{version:'node-timeout/v1',nodeId:'query',signature:'timeout',windowDays:7,minimumSamples:5},eligibleSamples:0,reason:'no newer runs',sampleSummary:{related:0,complete:0,missingAnalysis:0,unsuccessfulNode:0}}],8));mount();
+ expect(await screen.findByText('暂无新版本运行样本，暂不能判断效果。')).toBeVisible();
 });

@@ -6,7 +6,11 @@ function impact(items:RepairItem[]) {
  return [...new Set(values)].join('、')||'未知'
 }
 export default function RepairTaskScope({revision}:{revision:RepairRevision}) {
- const flows=new Set(revision.input.items.flatMap(item=>item.sources.flatMap(source=>source.kind==='diagnosis_candidate'?[source.flowId]:[])))
+ const flows=new Set(revision.input.items.flatMap(item=>[
+  ...item.sources.flatMap(source=>source.kind==='diagnosis_candidate'?[source.flowId]:[]),
+  ...(Array.isArray(item.context?.diagnoses)?item.context.diagnoses:[]).flatMap(row=>[row?.flowId,...(Array.isArray(row?.flowIds)?row.flowIds:[])]),
+  ...(Array.isArray(item.context?.suggestions)?item.context.suggestions:[]).flatMap(row=>Array.isArray(row?.runIds)?row.runIds:Array.isArray(row?.impactRunIds)?row.impactRunIds:[]),
+ ]).filter((id):id is string=>typeof id==='string'&&!!id))
  const plans=revision.input.integration?.plans
  return <section aria-label="所选版本处理范围" className="rounded-lg border border-input bg-card p-5">
   <h3 className="text-base font-semibold">本版处理范围</h3>

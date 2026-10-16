@@ -113,3 +113,12 @@ it('shows provided diagnostic impact and folded cause certainty without inventin
  await userEvent.click(screen.getByText('原因与依据',{selector:'summary'}));
  expect(screen.getByText('推测：输入缺失')).toBeVisible();expect(screen.getByText('待确认：缺少边界样本')).toBeVisible();
 });
+
+it('counts distinct frozen runs from suggestion and diagnosis context alongside direct sources',async()=>{
+ const detail=fixture(),item=detail.latestAttempt.input.items[0];
+ item.sources=[{kind:'suggestion',suggestionId:'suggestion'}] as never;
+ item.context={diagnoses:[{flowId:'run-a',flowIds:['run-a','run-b','',null]}],suggestions:[{runIds:['run-b','run-c',42]},{impactRunIds:['run-d','']},null]};
+ detail.latestAttempt.input.items.push({...item,itemId:'direct',sources:[{kind:'diagnosis_candidate',flowId:'run-d'}] as never,context:{}});
+ mount(detail);await userEvent.click(screen.getByRole('tab',{name:'问题与方案'}));
+ expect(screen.getByText(/依据覆盖 4 个运行/)).toBeVisible();expect(screen.queryByText(/来源运行数未知/)).not.toBeInTheDocument();
+});

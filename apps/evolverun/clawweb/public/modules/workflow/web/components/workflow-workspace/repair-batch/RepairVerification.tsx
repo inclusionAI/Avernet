@@ -12,11 +12,13 @@ export default function RepairVerification({ detail, deployment, onSummary }: {
  const frozen=detail.revisions.find(row=>row.revision===deployment.revision)??(detail.latestSuccessful?.revision===deployment.revision?detail.latestSuccessful:null)
  const evidenceId=useId(),evidenceRef=useRef<HTMLDetailsElement>(null)
  const assessments=evidence?.automatic??[]
+ const hasSamples=assessments.length?assessments.some(row=>row.result==='verified'||row.eligibleSamples>0||(row.sampleSummary?.related??0)>0
+  ||((!row.observedDeployNumber||row.observedDeployNumber===evidence?.deployNumber)&&(evidence?.total??0)>0)):(evidence?.total??0)>0
  const conclusion=assessments.some(row=>row.result==='ineffective')?'原问题复现，需继续优化。'
-  : !evidence?.total?'暂无新版本运行样本，暂不能判断效果。'
+  : !hasSamples?'暂无新版本运行样本，暂不能判断效果。'
   : !assessments.length||assessments.every(row=>!row.rule)?'暂无适用验证规则，暂不能判断效果。'
   : assessments.every(row=>row.result==='verified')?'现有逐项验证规则已满足，结论仅限这些问题。':'观察中，尚未满足判定条件。'
- const summary=query.error?'观察读取失败':query.isPending?'观察证据读取中':!evidence?'观察证据未知':assessments.some(row=>row.result==='ineffective')?'原问题复现':assessments.length&&assessments.every(row=>row.result==='verified')?'符合现有验证规则':evidence.total>0&&(!assessments.length||assessments.every(row=>!row.rule))?'尚无适用验证规则':'观察中'
+ const summary=query.error?'观察读取失败':query.isPending?'观察证据读取中':!evidence?'观察证据未知':assessments.some(row=>row.result==='ineffective')?'原问题复现':assessments.length&&assessments.every(row=>row.result==='verified')?'符合现有验证规则':hasSamples&&(!assessments.length||assessments.every(row=>!row.rule))?'尚无适用验证规则':'观察中'
  useEffect(()=>{onSummary?.(summary)},[onSummary,summary])
  return <div className="min-w-0 space-y-4">
   <h3 className="text-base font-semibold">效果观察</h3>
