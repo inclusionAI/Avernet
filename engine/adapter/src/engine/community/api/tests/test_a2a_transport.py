@@ -747,6 +747,81 @@ async def test_resolve_interaction_conflict_and_not_found(monkeypatch):
     assert fake.calls == []                        # 引擎收到 0 次二次执行
 
 
+# ══════════ R7-F3: resolve 契约能力门控（无 resolve 契约的引擎不硬炸）══════════
+
+
+@pytest.mark.asyncio
+async def test_resolve_on_engine_without_resolve_contract_is_structured_unsupported(
+    monkeypatch,
+):
+    """R7-F3 主复现：OpenClaw 形态的引擎被灰度选中后审批 resolve——
+    `_forward_resolve` 不得按 Claude Code 专用契约硬调（AttributeError →
+    HTTP 500、审批静默挂死），必须按能力门控出结构化 resolve_unsupported，
+    pending 保持（决策未确认），run 不回 WORKING。"""
+    from unittest.mock import MagicMock
+
+    from engine.community.core.adapters.openclaw.chat import OpenClawChatAdapter
+
+    # 契约钉：真实 adapter（Protocol 面之上）确实没有 Claude Code 专用
+    # 的三个 resolve 方法——门控依赖的事实本身被测试钉住。
+    real_chat = OpenClawChatAdapter(port=MagicMock())
+    for method in ("resolve_exec_approval", "resolve_interaction",
+                   "resolve_mode_transition"):
+        assert not hasattr(real_chat, method), (
+            f"OpenClawChatAdapter 长出了 {method}？契约门控依据已过期，需复查"
+        )
+
+    R = _install_resolve_bridge(monkeypatch, real_chat)
+    R._kernel = kernel_mod.A2aKernel()
+    k = R._kernel
+
+    rid, _ = await k.open_run("openclaw-ctx", "k3", "first", "d")
+    await k.publish_interaction_requested(
+        rid, "i-oc", {"kind": "exec", "prompt": "rm test?"})
+
+    out = await R._resolve_interaction(
+        {"interactionId": "i-oc",
+         "resolution": {"decision": "approve", "kind": "exec"}}, 1, None)
+
+    # 结构化拒绝（非 500/AttributeError 泄漏）——调用方可按 reason 分诊
+    assert "error" in out, out
+    assert out["error"]["code"] == -32000
+    assert out["error"]["data"]["reason"] == "resolve_unsupported", out
+    assert "AttributeError" not in out["error"]["message"]
+    assert "resolve_exec_approval" in out["error"]["message"], (
+        "错误必须点名缺失的契约方法，便于分诊"
+    )
+    # 决策未确认：pending 不得被洗掉，run 不得回 WORKING
+    assert k.interaction_pending(rid, "i-oc") is True
+    assert k.runs[rid].state != "TASK_STATE_WORKING"
+
+
+@pytest.mark.asyncio
+async def test_resolve_unsupported_kinds_route_gates_per_kind(monkeypatch):
+    """R7-F3 分 kind 门控：ask_user / mode_switch / 缺省各自按所需方法判定
+    ——缺失哪个方法就报哪个方法，不替调用方猜语义。"""
+    class _OnlyExecChat:
+        async def resolve_exec_approval(self, session_key, interaction_id,
+                                        decision, message=None):
+            return {"success": True, "payload": {}}
+
+    fake = _OnlyExecChat()
+    R = _install_resolve_bridge(monkeypatch, fake)
+    R._kernel = kernel_mod.A2aKernel()
+    k = R._kernel
+
+    rid, _ = await k.open_run("mixed-ctx", "k4", "first", "d")
+    await k.publish_interaction_requested(rid, "i-ask", {"kind": "ask_user"})
+
+    out = await R._resolve_interaction(
+        {"interactionId": "i-ask",
+         "resolution": {"decision": "submit", "answer": "y"}}, 1, None)
+    assert out["error"]["data"]["reason"] == "resolve_unsupported"
+    assert "resolve_interaction" in out["error"]["message"]
+    # exec 侧不受殃及：同 fake 的 exec 方法照常可用
+    assert hasattr(fake, "resolve_exec_approval")
+
+
 @pytest.mark.asyncio
 async def test_resolve_engine_rejection_and_internal_error(monkeypatch):
     fake = _FakeResolveChat(fail_once=True, fail_code="INTERNAL_ERROR")

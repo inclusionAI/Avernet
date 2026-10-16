@@ -761,6 +761,28 @@ class _ResolveRejected(Exception):
         self.code = code
 
 
+class _ResolveUnsupported(Exception):
+    """R7-F3: active engine lacks the resolve-contract method for this kind.
+
+    The three ``resolve_*`` methods are Claude Code-specific extensions over
+    the ``ChatService`` Protocol — OpenClawChatAdapter has no equivalents
+    (its approval resolution rides RelayService.forward_request instead).
+    Gate per-kind BEFORE dispatch so the failure surfaces as a structured
+    ``resolve_unsupported`` JSON-RPC error, never as a bare AttributeError
+    leaking through the handler (HTTP 500 with the approval left pending).
+    """
+
+
+# R7-F3：resolve kind → 所需的 ChatService 契约方法（None kind = ask_user
+# 缺省分支，与 _forward_resolve 的分发梯子同源）。
+_KIND_RESOLVE_METHOD = {
+    "exec": "resolve_exec_approval",
+    "ask_user": "resolve_interaction",
+    None: "resolve_interaction",
+    "mode_switch": "resolve_mode_transition",
+}
+
+
 def _validated_resolution(resolution: dict[str, Any]) -> dict[str, Any]:
     """resolution 载荷的边界规范化（PR #2743 R3-1）。
 
@@ -823,6 +845,18 @@ async def _forward_resolve(*, session_key: str,
     chat = _chat_plugin()
     kind = resolution.get("kind")
     decision = resolution.get("decision")
+
+    # R7-F3：per-kind 契约能力门控——三类 ``resolve_*`` 是 Claude Code 专属
+    # 扩展（ChatService Protocol 之上），OpenClaw 等形态没有（其审批决议走
+    # RelayService.forward_request）。硬调只会 AttributeError 泄漏成 HTTP
+    # 500、审批静默挂 pending；门控出结构化 resolve_unsupported 供分诊。
+    required_method = _KIND_RESOLVE_METHOD.get(kind)
+    if required_method is None:
+        raise _ParamError(f"unsupported resolution kind: {kind!r}")
+    if getattr(chat, required_method, None) is None:
+        raise _ResolveUnsupported(
+            f"active engine ChatService has no {required_method} "
+            f"(resolve contract not implemented for this engine)")
 
     if kind == "exec":
         coro = chat.resolve_exec_approval(
@@ -903,6 +937,12 @@ async def _resolve_interaction(params: dict[str, Any], req_id: Any,
                               "data": {"reason": "unknown_outcome"}}}
         return {"error": {"code": -32000, "message": str(e)[:200],
                           "data": {"reason": "resolve_forward_failed"}}}
+    except _ResolveUnsupported as e:
+        # R7-F3：引擎无 resolve 契约（如 OpenClaw）——决策未被引擎接受：
+        # pending 保持、run 不回 WORKING（同 resolve_forward_failed 口径），
+        # 调用方按 reason=resolve_unsupported 分诊，而非面对 HTTP 500。
+        return {"error": {"code": -32000, "message": str(e)[:200],
+                          "data": {"reason": "resolve_unsupported"}}}
     except asyncio.TimeoutError:
         return {"error": {"code": -32000,
                           "message": "resolve outcome unknown (timeout)",
