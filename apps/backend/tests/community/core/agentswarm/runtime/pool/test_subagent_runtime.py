@@ -132,6 +132,7 @@ class FakeFactory:
         self.created_specs = []
         self.created_runs = []
         self.created_subs = []
+        self.created_attempts = []
         self.tracker = {
             "setup": 0, "run_task": 0, "teardown": 0, "halt": 0,
             "cancelled": 0, "concurrent": 0, "max_concurrent": 0,
@@ -139,10 +140,12 @@ class FakeFactory:
         }
 
     def create(self, spec: AgentSpec, run: Run,
-                 agent_id: AgentId | None = None) -> ScriptedSubagent:
+                  agent_id: AgentId | None = None,
+                  attempt: int = 1) -> ScriptedSubagent:
         self.creates += 1
         self.created_specs.append(spec)
         self.created_runs.append(run)
+        self.created_attempts.append(attempt)
         script = self.scripts.get(spec.name)
         if script is None:
             script = self.scripts.get("*", deque())
@@ -298,7 +301,7 @@ class TestRetryAndExhaustion:
         # surface and the run would hang to its slice budget.
         async def main():
             class ExplodingFactory(FakeFactory):
-                def create(self, spec, run, agent_id=None):
+                def create(self, spec, run, agent_id=None, attempt=1):
                     self.creates += 1
                     raise TypeError("spec malformed")
 
@@ -861,7 +864,8 @@ class TestTeardownFailureLogging:
                 }
 
             def create(self, spec: AgentSpec, run: Run,
-                       agent_id: AgentId | None = None) -> TeardownBoomSubagent:
+                       agent_id: AgentId | None = None,
+                       attempt: int = 1) -> TeardownBoomSubagent:
                 self.creates += 1
                 return TeardownBoomSubagent(spec, self.tracker)
 

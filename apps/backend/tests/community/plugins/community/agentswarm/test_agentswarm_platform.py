@@ -25,6 +25,7 @@ import types
 import pytest
 
 import agentclaw.community.plugins.community.agentswarm.host as host_module
+from agentclaw.community.plugins.community.agentswarm.host import _idem_digest
 from agentclaw.community.core.agentswarm.domain.models import (
     BotCreateSpec, BotState,
 )
@@ -255,6 +256,31 @@ class TestCreate:
         spec = BotCreateSpec(name="scout", description="a surveyor")
         adopted = platform.create_bot(spec=spec, idempotency_key="run-1:scout")
         assert adopted.startswith("ac_") and len(adopted) == 19
+
+    def test_adopt_leg_unchanged_under_a_per_attempt_key(self, monkeypatch):
+        # D-J only changes the CALLER-side key string; the create/adopt code
+        # digests whatever key arrives. A per-attempt key replays the same
+        # adopt resolution: refusal, live row under the SAME derived id,
+        # one persona — never a duplicate create.
+        from agentclaw.community.core.bot_management.services.bot_service import (
+            BotNameExistsError,
+        )
+
+        derived = f"ac_{_idem_digest('run-1:agent-9:2', 16)}"
+
+        def refuse(**kwargs):
+            raise BotNameExistsError(
+                f" Bot name '{kwargs['spec'].bot_name}' already exists")
+
+        monkeypatch.setattr(create_flow, "submit_bot_creation_with_manifest",
+                             refuse)
+        platform = _mk(repo=_Repo(bot={"bot_id": derived}))
+        spec = BotCreateSpec(name="scout", description="a surveyor")
+        first = platform.create_bot(spec=spec,
+                                    idempotency_key="run-1:agent-9:2")
+        again = platform.create_bot(spec=spec,
+                                    idempotency_key="run-1:agent-9:2")
+        assert first == again == derived
 
     def test_name_refusal_without_our_row_reraises(self, monkeypatch):
         # Same-name row that is NOT our derived identity cannot exist

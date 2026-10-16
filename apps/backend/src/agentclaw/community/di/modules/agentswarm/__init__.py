@@ -34,6 +34,9 @@ from agentclaw.community.plugins.local.agentswarm.artifacts import (
     FilesystemArtifactStore,
 )
 from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
+from agentclaw.community.core.agentswarm.repository.agent_attempt import (
+    AgentAttemptRepository,
+)
 from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
 from agentclaw.community.core.agentswarm.repository.job import JobRepository
 from agentclaw.community.core.agentswarm.repository.message import MessageRepository
@@ -45,6 +48,7 @@ from agentclaw.community.core.agentswarm.runtime.pool import (
 )
 from agentclaw.community.core.agentswarm.runtime.handler import SwarmRunHandler
 from agentclaw.community.core.agentswarm.runtime.worker import AgentSwarmWorker
+from agentclaw.community.core.agentswarm.runtime.store import SliceStore
 from agentclaw.community.plugin_api.agentswarm.bot import BotPlatform
 from agentclaw.community.plugin_api.agentswarm.llm import LLMProvider
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -225,6 +229,12 @@ class AgentSwarmModule(Module):
     @provider
     @singleton
     @inject
+    def provide_attempt_repo(self, db: DatabasePlugin) -> AgentAttemptRepository:
+        return AgentAttemptRepository(db)
+
+    @provider
+    @singleton
+    @inject
     def provide_orchestrator(
         self,
         llm: LLMProvider,
@@ -326,8 +336,22 @@ class AgentSwarmModule(Module):
                 "factory"
             )
             platform = None
-        factory = DefaultSubagentFactory(llm, platform)
+        attempt_repo = injector.get(AgentAttemptRepository)
+        factory = DefaultSubagentFactory(llm, platform, attempt_repo=attempt_repo)
         store = FilesystemArtifactStore(config.artifact_store_root)
+        # The pool's binding-journal SliceStore (D-L): the same repos, its
+        # own probe — the journal write's authority is the D28 claim fence
+        # evaluated inside the insert, and this store never touches the
+        # message/shard plane the handler's own store drives.
+        binding_store = SliceStore(
+            config,
+            injector.get(AgentRepository),
+            injector.get(MessageRepository),
+            injector.get(ResultShardRepository),
+            injector.get(RoundRepository),
+            lost_probe=lambda: False,
+            attempt_repo=attempt_repo,
+        )
         return SubagentRuntime(
             factory=factory,
             artifact_store=store,
@@ -339,6 +363,7 @@ class AgentSwarmModule(Module):
                 failure_threshold=config.upstream_breaker.failure_threshold,
                 open_seconds=config.upstream_breaker.open_seconds,
             ),
+            binding_store=binding_store,
         )
 
     @provider

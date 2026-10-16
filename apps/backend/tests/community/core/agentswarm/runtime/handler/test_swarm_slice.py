@@ -150,7 +150,8 @@ class FakeFactory:
         self.tracker: dict[str, int] = {}
 
     def create(self, spec: dm.AgentSpec, run: dm.Run,
-                 agent_id: dm.AgentId | None = None):
+                 agent_id: dm.AgentId | None = None,
+                 attempt: int = 1):
         seen = self.creates.get(spec.name, 0)
         self.creates[spec.name] = seen + 1
         return FakeSubagent(

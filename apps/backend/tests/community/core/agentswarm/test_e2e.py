@@ -119,7 +119,8 @@ class _FakeFactory:
         self.created: list[str] = []
 
     def create(self, spec: dm.AgentSpec, run: dm.Run,
-                 agent_id: dm.AgentId | None = None) -> _FakeSubagent:
+                 agent_id: dm.AgentId | None = None,
+                 attempt: int = 1) -> _FakeSubagent:
         self.created.append(spec.name)
         return _FakeSubagent(spec.name)
 

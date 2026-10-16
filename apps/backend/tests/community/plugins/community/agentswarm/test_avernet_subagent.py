@@ -20,8 +20,8 @@ import pytest
 
 from agentclaw.community.core.agentswarm.domain import models as dm
 from agentclaw.community.core.agentswarm.domain.models import (
-    AgentSpec, EpochMillis, ProviderKind, RequestMetadata, Run, RunId,
-    RunStatus, TaskEnvelope, TenantId,
+    AgentId, AgentSpec, EpochMillis, ProviderKind, RequestMetadata, Run,
+    RunId, RunStatus, TaskEnvelope, TenantId,
 )
 from agentclaw.community.plugins.community.agentswarm.avernet_subagent import (
     AvernetSubagent,
@@ -124,7 +124,7 @@ class TestLifecycle:
             assert spec.description == "worker"
             assert spec.instructions == ""
             assert spec.model is None
-            assert idem == "run-42:agent-1"
+            assert idem == "run-42:agent-1:1"
             assert gw.status_queries == ["bot-42", "bot-42", "bot-42"]
 
         asyncio.run(main())
@@ -165,7 +165,7 @@ class TestLifecycle:
             assert create_spec.instructions == "File weekly."
             assert create_spec.model == "clerk-7b"
             assert create_spec.metadata == {"tier": "1"}
-            assert idem == "run-42:agent-1"
+            assert idem == "run-42:agent-1:1"
 
         asyncio.run(main())
 
@@ -203,7 +203,7 @@ class TestLifecycle:
             await first.setup()
             await second.setup()
             idems = [idem for _, idem in gw.created]
-            assert idems == ["run-42:agent-one", "run-42:agent-two"]
+            assert idems == ["run-42:agent-one:1", "run-42:agent-two:1"]
 
         asyncio.run(main())
 
@@ -231,7 +231,7 @@ class TestLifecycle:
             await sub.teardown()
             await sub.setup()
             assert [idem for _, idem in gw.created] == [
-                "run-42:agent-1", "run-42:agent-1"]
+                "run-42:agent-1:1", "run-42:agent-1:1"]
 
         asyncio.run(main())
 
@@ -254,6 +254,62 @@ class TestLifecycle:
             assert gw.status_queries == []
 
         asyncio.run(main())
+
+
+class TestPerAttemptIdentity:
+    """D-J: attempt enters the persona idempotency key and the exposed
+    executor surfaces — a same-slice retry mints a fresh identity, a
+    cross-slice replay re-derives the crashed slice's (adopt input)."""
+
+    def _sub(self, platform, attempt=1, agent_id="agent-1", spec=None):
+        return AvernetSubagent(spec or _mk_spec(), _mk_run(), platform,
+                               dm.AgentId(agent_id), attempt=attempt)
+
+    def test_attempt_two_mints_a_distinct_identity(self):
+        async def main():
+            platform = FakePlatform()
+            first = self._sub(platform, attempt=1)
+            retry = self._sub(platform, attempt=2)
+            await first.setup()
+            await retry.setup()
+            return platform
+
+        platform = asyncio.run(main())
+        keys = [key for _, key in platform.created]
+        assert keys == ["run-42:agent-1:1", "run-42:agent-1:2"]
+        assert keys[0] != keys[1]
+
+    def test_same_attempt_replay_rederives_the_adopt_identity(self):
+        async def main():
+            platform = FakePlatform()
+            first = self._sub(platform, attempt=2)
+            replay = self._sub(platform, attempt=2)
+            await first.setup()
+            await first.teardown()
+            await replay.setup()
+            return platform
+
+        platform = asyncio.run(main())
+        keys = [key for _, key in platform.created]
+        assert keys == ["run-42:agent-1:2", "run-42:agent-1:2"]
+
+    def test_executor_surfaces_exposed_only_after_setup(self):
+        async def main():
+            platform = FakePlatform(bot_id="ac_alive234567890ab")
+            sub = self._sub(platform, attempt=1)
+            pre_id, pre_name = sub.executor_id, sub.executor_name
+            await sub.setup()
+            return sub, pre_id, pre_name
+
+        sub, pre_id, pre_name = asyncio.run(main())
+        assert pre_id == ""
+        assert pre_name == "scout"
+        assert sub.executor_id == "ac_alive234567890ab"
+        from agentclaw.community.core.agentswarm.domain.models import (
+            spawn_digest,
+        )
+        assert sub.executor_name == (
+            f"scout-{spawn_digest('run-42', 'agent-1', 1, 8)}")
 
 
 class TestRunTask:

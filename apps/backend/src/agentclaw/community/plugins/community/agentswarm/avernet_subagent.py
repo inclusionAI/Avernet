@@ -30,7 +30,7 @@ import time
 
 from agentclaw.community.core.agentswarm.domain.models import (
     AgentId, AgentSpec, BotCreateSpec, BotState, IdempotencyKey, Run,
-    SubagentResult, TaskEnvelope,
+    SubagentResult, TaskEnvelope, spawn_digest,
 )
 from agentclaw.community.plugin_api.agentswarm.bot import BotPlatform
 from agentclaw.community.log import get_logger
@@ -59,6 +59,7 @@ class AvernetSubagent:
     def __init__(self, spec: AgentSpec, run: Run,
                  platform: BotPlatform,
                  agent_id: AgentId, *,
+                 attempt: int = 1,
                  create_call_timeout: float = _CREATE_CALL_TIMEOUT_SECONDS,
                  status_call_timeout: float = _STATUS_CALL_TIMEOUT_SECONDS,
                  delete_call_timeout: float = _DELETE_CALL_TIMEOUT_SECONDS,
@@ -67,8 +68,15 @@ class AvernetSubagent:
         self._run = run
         self._platform = platform
         self._agent_id = agent_id
+        self._attempt = attempt
         self._bot_id: str | None = None
         self.name = spec.name
+        # Executor surfaces (D-J, additive SPI): the per-attempt platform
+        # persona of this spawn — the minted identity after setup returns,
+        # empty before. A same-slice retry constructs a fresh subagent with
+        # a different attempt and therefore a different persona id.
+        self.executor_id = ""
+        self.executor_name = spec.name
         self._create_call_timeout = create_call_timeout
         self._status_call_timeout = status_call_timeout
         self._delete_call_timeout = delete_call_timeout
@@ -78,8 +86,12 @@ class AvernetSubagent:
         self._active_chat_cancel: threading.Event | None = None
 
     async def setup(self) -> None:
-        # One persona per (run, spec): retries rebind the same platform
-        # identity instead of leaking duplicates (D23 fresh context).
+        # Per-attempt persona (D-J): the idempotency key carries the in-slice
+        # retry index, so a torn-down attempt's row (live or soft-deleted)
+        # can never collide with the retry's create; a cross-slice replay of
+        # the same attempt number re-derives the crashed slice's key and the
+        # host's adopt leg resolves the live row. One persona per attempt,
+        # fresh context per attempt (D23).
         self._bot_id = await asyncio.wait_for(
             asyncio.to_thread(
                 self._platform.create_bot,
@@ -93,14 +105,13 @@ class AvernetSubagent:
                     identity_file=self._spec.identity_file,
                     metadata=dict(self._spec.metadata),
                 ),
-                # Platform identity follows the spawn's durable identity:
-                # agent_id is stable across attempts AND across D16
-                # respawns (rebind, not duplicate), and unique between two
-                # same-named spawns (each spawns its own bot; one's
-                # teardown can never delete the other's). spec.name would
-                # collide same-named spawns, so there is no name fallback.
+                # Platform identity follows the spawn's durable identity and
+                # the attempt: agent_id is stable across D16 respawns (rebind
+                # via adopt, not duplicate) and unique between two same-named
+                # spawns; attempt fresh-mints retries. spec.name would collide
+                # same-named spawns, so there is no name fallback.
                 idempotency_key=IdempotencyKey(
-                    f"{self._run.run_id}:{self._agent_id}"),
+                    f"{self._run.run_id}:{self._agent_id}:{self._attempt}"),
                 owner_id=self._run.owner_id,
             ),
             timeout=self._create_call_timeout,
@@ -113,6 +124,14 @@ class AvernetSubagent:
         state = await self._poll_ready(self._bot_id)
         if state != BotState.READY.value:
             raise RuntimeError(f"bot {self._bot_id} did not reach READY: {state}")
+        self.executor_id = self._bot_id
+        # The platform derives the persona name from the same key digest
+        # (f"{spec.name}-{digest8}"); mirror it so the journaled executor
+        # name is the identity the host actually provisioned under.
+        self.executor_name = (
+            f"{self._spec.name}-"
+            f"{spawn_digest(str(self._run.run_id), str(self._agent_id), self._attempt, 8)}"
+        )
 
     async def run_task(self, envelope: TaskEnvelope) -> SubagentResult:
         if self._bot_id is None:

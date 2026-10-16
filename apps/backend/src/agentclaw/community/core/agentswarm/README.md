@@ -121,6 +121,7 @@ All tables carry `id`, `env`, `tenant`, `is_deleted`, `gmt_create`,
 |---|---|
 | `ac_agent_swarm_run` | `run_id`, `goal`, `agent_catalog`, `provider`, `request_metadata`, `status`, `termination_reason`, `root_agent_id`, `final_answer`, `error`, `active_idempotency_key`, `started_at`, `ended_at` |
 | `ac_agent_swarm_agent` | `agent_id`, `run_id`, `parent_agent_id`, `depth`, `name`, `role`, `kind`, `task_spec`, `spawn_round`, `status`, `attempts`, `idempotency_key`, `output`, `error`, `bot_id`, `bot_state`, `started_at`, `ended_at` |
+| `ac_agent_swarm_agent_attempt` | `agent_id`, `run_id`, `claim_epoch`, `attempt`, `executor_kind`, `executor_id`, `executor_name`, `executor_state`, `started_at`, `ended_at` — per-attempt executor ledger (D-K): one row per attempt per slice, journaled at spawn through the D28 fence; terminal destroy consumes it, with the pre-change deterministic derivation retained as the legacy belt |
 | `ac_agent_swarm_message` | `message_id`, `run_id`, `agent_id`, `seq`, `role`, `content`, `decision`, `token_usage`, `artifact_key` |
 | `ac_agent_swarm_result_shard` | `shard_id`, `run_id`, `source_agent_id`, `payload`, `artifact_key`, `routed_at` |
 | `ac_agent_swarm_round` | `round_id`, `run_id`, `stage_index`, `orchestrator_steps`, `max_subagent_steps`, `cohort_agent_ids`, `started_at`, `ended_at` |

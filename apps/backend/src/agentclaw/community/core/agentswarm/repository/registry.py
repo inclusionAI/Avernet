@@ -13,6 +13,9 @@ from agentclaw.community.core.agentswarm.repository.run.model import (
 from agentclaw.community.core.agentswarm.repository.agent.model import (
     AcAgentSwarmAgentModel,
 )
+from agentclaw.community.core.agentswarm.repository.agent_attempt.model import (
+    AcAgentSwarmAgentAttemptModel,
+)
 from agentclaw.community.core.agentswarm.repository.message.model import (
     AcAgentSwarmMessageModel,
 )
@@ -35,6 +38,7 @@ from agentclaw.community.core.agentswarm.repository.audit.model import (
 ALL_MODELS = (
     AcAgentSwarmRunModel,
     AcAgentSwarmAgentModel,
+    AcAgentSwarmAgentAttemptModel,
     AcAgentSwarmMessageModel,
     AcAgentSwarmResultShardModel,
     AcAgentSwarmRoundModel,

@@ -26,7 +26,6 @@ chat round trips, the shard lands, the orchestrator finishes the run.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import threading
 import time
@@ -45,6 +44,7 @@ from agentclaw.community.core.agentswarm.config.settings import (
     AgentSwarmConfig, AgentSwarmOrchestrationConfig, LlmConfig,
 )
 from agentclaw.community.core.agentswarm.domain import models as dm
+from agentclaw.community.core.agentswarm.domain.models import spawn_digest
 from agentclaw.community.core.agentswarm.orchestration.guards import GuardService
 from agentclaw.community.core.agentswarm.orchestration.orchestrator import (
     Orchestrator,
@@ -518,15 +518,14 @@ class TestAvernetKindEndToEnd:
         seam = world.get(ManifestCreationSeam)
         assert len(created) == 1
         bot = created[0]
-        # The platform identity is the SPAWN's identity: the runtime-minted
-        # agent_id, not the persona name — stable across D16 respawns (rebind
-        # keyed), unique between same-named spawns (no shared bot, no
-        # teardown-under-the-other). The e2e asserts the exact derivation
-        # against the agent row the swarm itself just persisted.
+        # The platform identity is the SPAWN's identity per attempt: the
+        # runtime-minted agent_id plus the in-slice attempt index (D-J)
+        # — a same-slice retry would mint a fresh persona instead of
+        # colliding with the torn-down attempt's row. The e2e asserts
+        # the exact derivation through the canonical helper against the
+        # agent row the swarm itself just persisted.
         spawned_agent = agents[0].agent_id
-        expected_id = "ac_" + hashlib.sha1(
-            f"{run_id}:{spawned_agent}".encode("utf-8")
-        ).hexdigest()[:16]
+        expected_id = "ac_" + spawn_digest(run_id, spawned_agent, 1, 16)
         assert bot["bot_id"] == expected_id
         assert bot["status"] == "ACTIVE"
         assert bot["owner_id"] == OWNER

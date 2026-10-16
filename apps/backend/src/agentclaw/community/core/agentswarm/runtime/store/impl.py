@@ -7,15 +7,19 @@ from typing import Any, Callable
 
 from agentclaw.community.core.agentswarm.config.settings import AgentSwarmConfig
 from agentclaw.community.core.agentswarm.domain.models import (
-    Agent, AgentId, AgentStatus, EpochMillis, Message, MessageId, MessageRole, ResultShard, Round, RoundId, Run, RunId, ShardId, TenantId, EventId, GuardEvent, GuardKind, EpochMillis,
+    Agent, AgentId, AgentKind, AgentStatus, BotState, EpochMillis, Message, MessageId, MessageRole, ResultShard, Round, RoundId, Run, RunId, ShardId, TenantId, EventId, GuardEvent, GuardKind, EpochMillis,
 )
 from agentclaw.community.core.agentswarm.orchestration.state import RunState
 from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
+from agentclaw.community.core.agentswarm.repository.agent_attempt import (
+    AgentAttemptRepository,
+)
 from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
 from agentclaw.community.core.agentswarm.repository.message import MessageRepository
 from agentclaw.community.core.agentswarm.repository.shard import ResultShardRepository
 from agentclaw.community.core.agentswarm.repository.round import RoundRepository
 from agentclaw.community.core.agentswarm.runtime.offload import run_blocking
+from agentclaw.community.core.agentswarm.runtime.slice_lost import SliceLost
 from agentclaw.community.log import get_logger
 
 logger = get_logger(__name__)
@@ -40,7 +44,8 @@ class SliceStore:
 
     Owns every repository write driven by slice execution: completion
     materialization (agent status + result shard + assistant message, D24
-    exactly-once), orchestrator decision messages (D18/D30), round rows,
+    exactly-once), the per-attempt executor binding journal (D-K, D28
+    claim-fenced), orchestrator decision messages (D18/D30), round rows,
     and terminal retention (D13). All writes are short sync repo calls —
     no await inside any orm_session (D19). Repo calls on the worker
     loop's async paths go through runtime.offload.run_blocking (a thread
@@ -59,6 +64,7 @@ class SliceStore:
         round_repo: RoundRepository,
         lost_probe: Callable[[], bool],
         guard_repo: "GuardEventRepository | None" = None,
+        attempt_repo: "AgentAttemptRepository | None" = None,
     ) -> None:
         self._config = config
         self._agent_repo = agent_repo
@@ -67,6 +73,7 @@ class SliceStore:
         self._round_repo = round_repo
         self._lost_probe = lost_probe
         self._guard_repo = guard_repo
+        self._attempt_repo = attempt_repo
         self._last_seq = 0
 
     def next_seq(self) -> int:
@@ -114,14 +121,11 @@ class SliceStore:
             claim_epoch=claim_epoch,
         )
         if not updated:
-            # Handler imports this module at load time: resolve the signal
-            # lazily to keep the module cycle broken.
-            from agentclaw.community.core.agentswarm.runtime.handler.impl import _SliceLost
             logger.info(
                 "[agentswarm][swarm] claim fence rejected completion agent=%s "
                 "claim_epoch=%d", agent_id, claim_epoch,
             )
-            raise _SliceLost()
+            raise SliceLost()
         if status is AgentStatus.COMPLETED:
             await self._record_injection(run_id, tenant, agent_id, payload)
             await self._create_shard(run_id, tenant, agent_id, payload,
@@ -139,6 +143,63 @@ class SliceStore:
             self._new_message(run_id, tenant, agent_id, MessageRole.ASSISTANT,
                               content, completion["token_usage"]),
         )
+
+    async def record_agent_binding(self, run: Run, agent_id: AgentId,
+                                    claim_epoch: int, attempt: int,
+                                    executor_kind: str, executor_id: str,
+                                    executor_name: str) -> None:
+        """Journal one started attempt into the durable ledger (D-K/D-L).
+
+        Write ordering is D-L: the call happens after ``subagent.setup()``
+        returned, so the executor identity is real. Fencing mirrors
+        ``persist_completion`` exactly — the ledger insert rides the D28
+        claim fence (the job row's CURRENT claim_epoch), and a fenced-out
+        stale slice unwinds as ``SliceLost`` instead of corrupting the
+        journal. After the ledger row lands, the legacy
+        ``ac_agent_swarm_agent.bot_id/bot_state`` columns get the LATEST
+        persona (bot kind only; llm leaves them NULL as today) — that
+        same-transaction-style update is best-effort by design: the ledger
+        remains the source of truth for destroy, and the agent row may
+        legitimately not exist yet when the pool worker races the
+        handler's spawn-path ``create_agent``.
+        """
+        if self._lost_probe():
+            return
+        if self._attempt_repo is None:
+            # Same no-op contract as a missing guard_repo: compositions
+            # without the ledger (embedded/test uses) simply do not
+            # journal; the DI root always binds one.
+            return
+        journaled = await run_blocking(
+            self._attempt_repo.record_agent_binding,
+            run.run_id, run.tenant, agent_id, claim_epoch, attempt,
+            executor_kind, executor_id, executor_name,
+        )
+        if not journaled:
+            logger.info(
+                "[agentswarm][swarm] claim fence rejected binding journal "
+                "agent=%s attempt=%d claim_epoch=%d", agent_id, attempt,
+                claim_epoch,
+            )
+            raise SliceLost()
+        if executor_kind != AgentKind.BOT.value:
+            return
+        updated = await run_blocking(
+            self._agent_repo.update_status,
+            run.run_id, agent_id, run.tenant, AgentStatus.QUEUED.value,
+            bot_id=executor_id, bot_state=BotState.READY.value,
+            claim_epoch=claim_epoch,
+        )
+        if not updated:
+            # Not an error: the spawn is mid-create (the handler's
+            # create_agent races this journal on the same loop) or the
+            # claim epoch moved on. The ledger row is the authoritative
+            # destroy record; the legacy column is a LATEST convenience.
+            logger.info(
+                "[agentswarm][swarm] legacy persona columns not updated "
+                "agent=%s executor=%s (row absent or fenced)",
+                agent_id, executor_id,
+            )
 
     async def _record_injection(self, run_id: RunId, tenant: TenantId,
                                 agent_id: AgentId, payload: Any) -> None:

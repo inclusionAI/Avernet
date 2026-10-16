@@ -14,7 +14,7 @@ from __future__ import annotations
 from agentclaw.community.core.agentswarm.domain.models.ids import (
     AgentId, ArtifactKey, BotId, EpochMillis, EventId, IdempotencyKey,
     JobId, MessageId, ModelId, RoundId, RunId, SecretRef,
-    ShardId, TenantId,
+    ShardId, TenantId, spawn_digest,
 )
 from agentclaw.community.core.agentswarm.domain.models.enums import (
     AgentKind, AgentStatus, BotState, DecisionKind, FinishReason, GuardKind,
@@ -40,7 +40,7 @@ from agentclaw.community.core.agentswarm.domain.models.entities import (
 __all__ = [
     "RunId", "AgentId", "TenantId", "JobId", "MessageId", "ShardId",
     "RoundId", "EventId", "ArtifactKey", "ProviderKind", "ModelId", "BotId",
-    "IdempotencyKey", "SecretRef", "EpochMillis",
+    "IdempotencyKey", "SecretRef", "EpochMillis", "spawn_digest",
     "StructuredOutput", "FinalAnswer", "MessageContent", "GuardDetails",
     "RunStatus", "AgentStatus", "AgentKind", "BotState", "MessageRole",
     "GuardKind", "TerminationReason", "DecisionKind", "WaitMode",

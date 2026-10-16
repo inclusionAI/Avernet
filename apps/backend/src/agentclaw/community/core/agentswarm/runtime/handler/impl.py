@@ -25,14 +25,17 @@ from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepos
 from agentclaw.community.core.agentswarm.repository.job import JobRepository
 from agentclaw.community.core.agentswarm.runtime.pool import SubagentRuntime
 from agentclaw.community.core.agentswarm.runtime.offload import run_blocking
+from agentclaw.community.core.agentswarm.runtime.slice_lost import SliceLost
 from agentclaw.community.core.agentswarm.runtime.store import SliceStore
 from agentclaw.community.log import get_logger
 
 logger = get_logger(__name__)
 
 
-class _SliceLost(Exception):
-    """Cooperative abort: the slice's claim was lost mid-flight (D28)."""
+# Back-compat alias: the lost-claim signal moved to runtime/slice_lost.py
+# when the pool (which imports the store) started needing the type; every
+# pre-existing import of _SliceLost from this module keeps working.
+_SliceLost = SliceLost
 
 
 class SwarmRunHandler:
@@ -179,6 +182,9 @@ class SwarmRunHandler:
         self._active_run_id = run_id
         self._active_tenant = tenant
         self.set_slice_lost(False, run_id)
+        # The slice's fencing token for spawn-time journaling (D-K/D-L):
+        # every WorkItem the pool enqueues in this slice snapshots it.
+        self._runtime.set_claim_epoch(claim_epoch)
 
         if cancel_requested:
             run = await run_blocking(self._run_repo.get, run_id, tenant)

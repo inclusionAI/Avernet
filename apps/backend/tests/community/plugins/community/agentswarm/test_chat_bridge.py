@@ -340,9 +340,21 @@ class TestSessionAddressing:
         assert list(platform.sessions) == [None]
         assert platform.session_keys == [None, None, None]
 
-    def test_the_attempt_session_machinery_is_gone(self):
-        # The removal is surgical, not a parked-off flag: reaching for the
-        # old per-attempt widening fails loudly instead of silently
-        # minting novel engine keys again.
+    def test_attempt_widens_identity_not_session_addressing(self):
+        # The per-attempt SESSION machinery stays gone: ``attempt`` enters
+        # the persona idempotency key only (D-J) — the chat leg still
+        # addresses the engine-served default conversation and no caller
+        # session key ever crosses the seam, whatever the attempt index.
+        # Junk widenings keep failing loudly instead of silently minting
+        # novel engine keys.
+        platform = _SessionModelPlatform()
+
+        async def main():
+            sub = _ready_subagent(platform, attempt=7)
+            await sub.run_task(_mk_envelope())
+
+        asyncio.run(main())
+        assert list(platform.sessions) == [None]
+        assert platform.session_keys == [None]
         with pytest.raises(TypeError):
-            _ready_subagent(_SessionModelPlatform(), attempt=7)
+            _ready_subagent(_SessionModelPlatform(), session_key="agent:7")

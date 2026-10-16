@@ -191,7 +191,7 @@ class TestLLMBackedSubagent:
         llm = StubLLMProvider(script=['{"a": 1}', "plain-text-not-json"])
         run = _mk_run()
         spec = dm.AgentSpec(name="s1", role="research", model="m-1")
-        return LLMBackedSubagent(spec, run, llm), llm
+        return LLMBackedSubagent(spec, run, llm, dm.AgentId("agent-s1")), llm
 
     @pytest.mark.asyncio
     async def test_run_task_parses_json_response(self):
@@ -781,7 +781,8 @@ class _RecordingFactory:
         self.created_specs: list[str] = []
 
     def create(self, spec: dm.AgentSpec, run: dm.Run,
-                 agent_id: dm.AgentId | None = None) -> _InstantSubagent:
+                 agent_id: dm.AgentId | None = None,
+                 attempt: int = 1) -> _InstantSubagent:
         self.created_specs.append(spec.name)
         return _InstantSubagent(spec.name)
 
@@ -1102,7 +1103,7 @@ class TestRuntimeEdges:
                 raise RuntimeError("run exploded")
 
         class FailingFactory:
-            def create(self, spec, run, agent_id=None):
+            def create(self, spec, run, agent_id=None, attempt=1):
                 return FailingSubagent()
 
         runtime = SubagentRuntime(

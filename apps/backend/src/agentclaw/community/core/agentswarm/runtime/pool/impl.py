@@ -8,7 +8,7 @@ from typing import Any
 
 from agentclaw.community.core.agentswarm.domain.models import (
     AgentId, AgentStatus, IdempotencyKey, Run,
-    SubagentResult, TaskEnvelope, TenantId, AgentSpec,
+    SubagentResult, TaskEnvelope, TenantId, AgentSpec, AgentKind,
 )
 from dataclasses import dataclass
 
@@ -17,6 +17,8 @@ from agentclaw.community.plugin_api.agentswarm.artifact import ArtifactStore
 from agentclaw.community.core.agentswarm.runtime.breaker import (
     UpstreamBreaker,
 )
+from agentclaw.community.core.agentswarm.runtime.slice_lost import SliceLost
+from agentclaw.community.core.agentswarm.runtime.store import SliceStore
 from agentclaw.community.log import get_logger
 
 logger = get_logger(__name__)
@@ -43,6 +45,7 @@ class _WorkItem:
     agent_id: AgentId
     idempotency_key: IdempotencyKey
     tenant: TenantId
+    claim_epoch: int = 0
 
 
 def _now_ms() -> int:
@@ -72,6 +75,7 @@ class SubagentRuntime:
         per_task_timeout: float = 120.0,
         artifact_inline_threshold: int = 16384,
         upstream_breaker: UpstreamBreaker | None = None,
+        binding_store: "SliceStore | None" = None,
     ) -> None:
         self._factory = factory
         self._artifact_store = artifact_store
@@ -80,6 +84,8 @@ class SubagentRuntime:
         self._per_task_timeout = per_task_timeout
         self._artifact_inline_threshold = artifact_inline_threshold
         self._upstream_breaker = upstream_breaker
+        self._binding_store = binding_store
+        self._claim_epoch = 0
         self._work: asyncio.Queue = asyncio.Queue(maxsize=max_width)
         self._completions: asyncio.Queue = asyncio.Queue()
         self._workers: list[asyncio.Task] = []
@@ -96,6 +102,16 @@ class SubagentRuntime:
             self._slice_lost.set()
         else:
             self._slice_lost.clear()
+
+    def set_claim_epoch(self, claim_epoch: int) -> None:
+        """Current slice's fencing token (D28) for spawn-time journaling.
+
+        One pod executes at most one slice at a time; the handler sets
+        this at slice start and every WorkItem enqueued during the slice
+        snapshots it, so a terminal cleanup journaling decision and the
+        fenced binding write both see the epoch the slice owns.
+        """
+        self._claim_epoch = claim_epoch
 
     def _validator_for(self, schema: dict[str, Any]) -> Any:
         from jsonschema import Draft202012Validator
@@ -156,6 +172,7 @@ class SubagentRuntime:
             agent_id=minted,
             idempotency_key=idempotency_key or IdempotencyKey(f"{run.run_id}:{minted}"),
             tenant=run.tenant,
+            claim_epoch=self._claim_epoch,
         )
         await self._work.put(item)
         return minted
@@ -254,8 +271,14 @@ class SubagentRuntime:
                 # inside the attempt's guard so a malformed spec degrades to
                 # a FAILED result instead of killing the worker task
                 # (its exception would never surface in a fire-and-forget loop).
-                subagent = self._factory.create(spec, item.run, item.agent_id)
+                # ``attempt`` rides in so the spawn's persona identity is
+                # per-attempt (D-J) — a retry mints a fresh executor and
+                # can never collide with the torn-down attempt's row.
+                subagent = self._factory.create(
+                    spec, item.run, item.agent_id, attempt,
+                )
                 await subagent.setup()
+                await self._journal_binding(subagent, spec, item, attempt)
                 raw = await asyncio.wait_for(
                     subagent.run_task(item.envelope),
                     timeout=self._per_task_timeout,
@@ -283,6 +306,20 @@ class SubagentRuntime:
                 logger.warning("[agentswarm][runtime] agent=%s attempt=%d timeout", item.agent_id, attempt)
             except asyncio.CancelledError:
                 raise
+            except SliceLost:
+                # The fenced binding journal rejected this slice's claim —
+                # that is authoritative evidence the claim is gone, so set
+                # the cooperative-unwind event: never feed the breaker
+                # (lost claim ≠ upstream failure), never mint a fresh
+                # persona for a slice whose completions can never persist.
+                # The persona's own teardown (finally below) still runs
+                # and the next attempt's top-of-loop check ends the item.
+                self.set_slice_lost(True)
+                last_error = "slice_lost"
+                logger.info(
+                    "[agentswarm][runtime] agent=%s attempt=%d binding journal fenced out",
+                    item.agent_id, attempt,
+                )
             except Exception as exc:
                 last_error = str(exc)
                 self._record_upstream_failure()
@@ -300,6 +337,33 @@ class SubagentRuntime:
                         )
 
         return self._mk_result(item, AgentStatus.FAILED, None, last_error, self._max_attempts)
+
+    async def _journal_binding(self, subagent: Any, spec: AgentSpec,
+                                item: _WorkItem, attempt: int) -> None:
+        """Journal the attempt's executor identity after setup (D-L).
+
+        The read is additive SPI getattr: subagent doubles without the
+        executor surfaces journal nothing (a pre-D-J double must not mint
+        a blank ledger row), and a blank executor_id skips the write the
+        same way. ``executor_state`` is journal-time SPAWNED; the per
+        attempt teardown never marks ledger rows — only the terminal
+        destroy sweep writes DESTROYED.
+        """
+        if self._binding_store is None or self._slice_lost.is_set():
+            return
+        executor_id = str(getattr(subagent, "executor_id", "") or "")
+        executor_name = str(getattr(subagent, "executor_name", "") or spec.name)
+        if not executor_id.strip():
+            return
+        await self._binding_store.record_agent_binding(
+            item.run, item.agent_id, item.claim_epoch, attempt,
+            self._executor_kind(spec), executor_id, executor_name,
+        )
+
+    @staticmethod
+    def _executor_kind(spec: AgentSpec) -> str:
+        kind = spec.kind if isinstance(spec.kind, AgentKind) else AgentKind.LLM
+        return kind.value
 
     def _record_upstream_failure(self) -> None:
         if self._upstream_breaker is not None:
