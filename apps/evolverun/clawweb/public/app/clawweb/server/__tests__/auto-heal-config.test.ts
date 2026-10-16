@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import Database from "better-sqlite3";
 import { sqliteDialect } from "@avernet/clawweb-shared/server/db/dialect";
 import { AppConfigRepository } from "@avernet/workflow/server/repositories/app-config-repository";
-import { resolveAutoHealGitConfigFromDb } from "../auto-heal-config.js";
+import { resolveAutoHealGitConfigFromDb, resolveAutoHealGitSettings } from "../auto-heal-config.js";
+import * as sharedGitConfig from "@avernet/workflow/server/config/auto-heal-git-config";
 
 function createTestDb() {
   const raw = new Database(":memory:");
@@ -38,6 +39,13 @@ function createTestDb() {
   };
   return { db: db as never };
 }
+
+describe("auto-heal config compatibility exports", () => {
+  it("re-exports the shared resolver implementations without wrapping them", () => {
+    expect(resolveAutoHealGitConfigFromDb).toBe(sharedGitConfig.resolveAutoHealGitConfigFromDb);
+    expect(resolveAutoHealGitSettings).toBe(sharedGitConfig.resolveAutoHealGitSettings);
+  });
+});
 
 describe("resolveAutoHealGitConfigFromDb", () => {
   let ctx: ReturnType<typeof createTestDb>;
@@ -78,23 +86,23 @@ describe("resolveAutoHealGitConfigFromDb", () => {
     await repo.create({
       config_key: "git",
       config_yaml: `
-remoteUrl: "https://code.alipay.com/ClawMind/clawflows.git"
-username: "mohan.wy"
+remoteUrl: "https://git.example.com/clawflows.git"
+username: "operator"
 token: "secret-token"
-email: "mohan.wy@antgroup.com"
-authorName: "Mohan"
-authorEmail: "mohan.wy@antgroup.com"
+email: "operator@example.com"
+authorName: "Operator"
+authorEmail: "operator@example.com"
       `.trim(),
     });
 
     const config = await resolveAutoHealGitConfigFromDb(ctx.db as never);
     expect(config).toEqual({
-      remoteUrl: "https://code.alipay.com/ClawMind/clawflows.git",
-      username: "mohan.wy",
-      email: "mohan.wy@antgroup.com",
+      remoteUrl: "https://git.example.com/clawflows.git",
+      username: "operator",
+      email: "operator@example.com",
       token: "secret-token",
-      authorName: "Mohan",
-      authorEmail: "mohan.wy@antgroup.com",
+      authorName: "Operator",
+      authorEmail: "operator@example.com",
     });
   });
 

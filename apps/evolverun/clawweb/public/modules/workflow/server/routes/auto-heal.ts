@@ -13,6 +13,7 @@ import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import { resolveWorkflowActorId } from "@avernet/clawweb-shared/server/services/workflow-access";
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
+import { resolveAutoHealGitSettings } from "../config/auto-heal-git-config.js";
 import { WorkflowSpecRepository } from "../repositories/workflow-spec-repository.js";
 import { WorkflowDeployHistoryRepository } from "../repositories/workflow-deploy-history-repository.js";
 import { AutoHealSaveService } from "../services/auto-heal-save-service.js";
@@ -24,6 +25,7 @@ export interface AutoHealRouteDependencies {
   workflowSpecRepo: WorkflowSpecRepository;
   deployHistoryRepo: WorkflowDeployHistoryRepository;
   botPermRepo: BotWorkflowPermissionRepository | null;
+  /** Bootstrap fallbacks; enabled DB Git settings are resolved per request. */
   gitConfig: ClawFlowsGitConfig;
   gitAuthor: GitAuthor;
   triggerRun?: (workflowId: string, actorId: string) => Promise<string | null>;
@@ -35,23 +37,6 @@ function getActor(req: Request): string {
 
 export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
   const router = Router();
-  const saveService = new AutoHealSaveService(
-    deps.db,
-    deps.workflowSpecRepo,
-    deps.deployHistoryRepo,
-    deps.botPermRepo,
-    deps.gitConfig,
-    deps.gitAuthor,
-  );
-  const deployService = new AutoHealDeployService(
-    deps.db,
-    deps.workflowSpecRepo,
-    deps.deployHistoryRepo,
-    deps.botPermRepo,
-    deps.gitConfig,
-    deps.gitAuthor,
-    deps.triggerRun,
-  );
 
   router.post(
     "/save",
@@ -73,6 +58,15 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
           res.status(401).json({ error: "Unauthorized", message: "Actor is required" });
           return;
         }
+        const { gitConfig, gitAuthor } = await resolveAutoHealGitSettings(deps.db, deps.gitConfig, deps.gitAuthor);
+        const saveService = new AutoHealSaveService(
+          deps.db,
+          deps.workflowSpecRepo,
+          deps.deployHistoryRepo,
+          deps.botPermRepo,
+          gitConfig,
+          gitAuthor,
+        );
         const result = await saveService.save({
           workflowId,
           spec: spec as never,
@@ -111,6 +105,16 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
           res.status(401).json({ error: "Unauthorized", message: "Actor is required" });
           return;
         }
+        const { gitConfig, gitAuthor } = await resolveAutoHealGitSettings(deps.db, deps.gitConfig, deps.gitAuthor);
+        const deployService = new AutoHealDeployService(
+          deps.db,
+          deps.workflowSpecRepo,
+          deps.deployHistoryRepo,
+          deps.botPermRepo,
+          gitConfig,
+          gitAuthor,
+          deps.triggerRun,
+        );
         const result = await deployService.deploy({
           workflowId,
           packId: packId ?? null,
