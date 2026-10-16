@@ -117,7 +117,6 @@ html[lang|="zh"] .en-only { display: none; }
   color: var(--paper);
 }
 .star-link:hover, .lang-toggle:hover { border-color: rgba(242, 247, 255, 0.5); }
-.stars { padding-left: 8px; margin-left: 2px; border-left: 1px solid rgba(242, 247, 255, 0.18); color: var(--soft); }
 .star-link { font: 500 14px/1 var(--font-display); text-decoration: none; white-space: nowrap; }
 .star-link > svg { flex: none; }
 .lang-toggle {
@@ -501,6 +500,8 @@ h2 { font-size: clamp(30px, 3.7vw, 46px); line-height: 1.1; letter-spacing: -0.0
 .footer-base::before { content: ""; position: absolute; top: 0; left: var(--gutter); right: var(--gutter); border-top: 1px solid var(--ink-line); }
 .footer-base .lang-toggle { color: var(--paper); }
 .footer-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.footer-actions .star-link { border: 0; padding: 7px 0; color: var(--mist); }
+.footer-actions .star-link:hover { color: var(--paper); text-decoration: underline; }
 
 /* ---------- Demo dialog ---------- */
 dialog.demo {
@@ -581,9 +582,6 @@ dialog.demo video { display: block; width: 100%; aspect-ratio: 16 / 9; backgroun
 /* Phones: the hero button carries the Playground link. */
 @media (max-width: 510px) {
   .nav-playground { display: none; }
-}
-@media (max-width: 440px) {
-  .nav .stars { display: none; }
 }
 @media (max-width: 380px) {
   .brand img { height: 24px; }
