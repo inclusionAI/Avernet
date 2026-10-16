@@ -568,7 +568,7 @@ describe('BotTable bot 标签列', () => {
     expect(within(containersCell()).getByText('—')).toBeInTheDocument();
   });
 
-  test('标签列三个 chip 统一 outline 描边,不占用蓝/绿/灰填充', () => {
+  test('标签列按引擎、部署方式和服务化枚举展示语义色', () => {
     const bot = mapBotDto({
       bot_id: 'tone-tag',
       bot_name: '配色 Bot',
@@ -579,14 +579,9 @@ describe('BotTable bot 标签列', () => {
 
     renderTable(bot);
 
-    for (const label of ['openclaw', '云端', '服务化']) {
-      expect(within(tagsCell()).getByText(label)).toHaveClass('border-border', 'text-foreground');
-    }
-    // 蓝(primary)被信息列与操作按钮占用;绿(success)是状态列语义色;灰(neutral)明确排除
-    const html = tagsCell().innerHTML;
-    expect(html).not.toContain('bg-primary/10');
-    expect(html).not.toContain('bg-success/10');
-    expect(html).not.toContain('bg-muted');
+    expect(within(tagsCell()).getByText('openclaw')).toHaveClass('bg-primary/10', 'text-primary');
+    expect(within(tagsCell()).getByText('云端')).toHaveClass('bg-primary/10', 'text-primary');
+    expect(within(tagsCell()).getByText('服务化')).toHaveClass('bg-purple/10', 'text-purple');
   });
 });
 

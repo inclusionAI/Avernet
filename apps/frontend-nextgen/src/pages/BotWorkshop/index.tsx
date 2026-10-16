@@ -106,6 +106,7 @@ const BotWorkshopPage: React.FC = () => {
                     canOpenTaskInstances={workshop.canOpenTaskInstances}
                     onOpenContainers={setContainerBot}
                     canViewContainers={workshop.canViewContainers}
+                    containerUserId={workshop.containerUserId}
                     onChangeSpace={(bot) => {
                       if (workshop.canChangeSpace(bot)) workshop.openSpaceChange(bot);
                     }}
@@ -181,6 +182,7 @@ const BotWorkshopPage: React.FC = () => {
         <BotBasicInfoDrawer bot={basicInfoBot} onClose={() => setBasicInfoBot(undefined)} />
         <ContainerInstancesModal
           bot={containerBot}
+          userId={workshop.containerUserId}
           canRestart={containerBot ? workshop.canRestartContainer(containerBot) : false}
           onClose={() => setContainerBot(undefined)}
         />

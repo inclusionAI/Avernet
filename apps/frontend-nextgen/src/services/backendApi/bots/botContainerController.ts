@@ -22,15 +22,16 @@ export interface BotContainerListDto {
   instances: BotContainerDto[];
 }
 
-export function listBotContainers(botId: string) {
+export function listBotContainers(botId: string, userId: string) {
   return backendRequest<BackendApiEnvelope<BotContainerListDto>>(
     `/openapi/v1/bots/${encodeURIComponent(botId)}/containers`,
+    { params: { user_id: userId } },
   );
 }
 
-export function restartBotContainer(botId: string, instanceId: string) {
+export function restartBotContainer(botId: string, instanceId: string, userId: string) {
   return backendRequest<BackendApiEnvelope<{ accepted: boolean }>>(
     `/openapi/v1/bots/${encodeURIComponent(botId)}/containers/${encodeURIComponent(instanceId)}/restart`,
-    { method: 'POST' },
+    { method: 'POST', params: { user_id: userId } },
   );
 }

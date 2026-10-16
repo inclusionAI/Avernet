@@ -11,7 +11,6 @@ import BotTagsCell from './BotTagsCell';
 import BotVersionCell from './BotVersionCell';
 import type { BotCardManagementAction } from './config';
 import { DesktopOfflineNotice, DesktopStartProgress } from './DesktopStartProgress';
-
 export type BotInventoryActions = Partial<Record<'view' | 'chat' | 'edit', BotActionAvailability>>;
 
 export interface BotTableProps {
@@ -32,6 +31,8 @@ export interface BotTableProps {
   canOpenTaskInstances?: (bot: BotDomain) => boolean;
   onOpenContainers?: (bot: BotDomain) => void;
   canViewContainers?: (bot: BotDomain) => boolean;
+  /** 容器接口所需的已解析请求身份。 */
+  containerUserId?: string;
   onHealthCheck?: (bot: BotDomain) => void;
   onChangeSpace?: (bot: BotDomain) => void;
   onAuthorize?: (bot: BotDomain) => void;
@@ -64,6 +65,7 @@ const BotTable: React.FC<BotTableProps> = ({
   canOpenTaskInstances,
   onOpenContainers,
   canViewContainers,
+  containerUserId,
   onHealthCheck,
   onChangeSpace,
   onAuthorize,
@@ -145,7 +147,12 @@ const BotTable: React.FC<BotTableProps> = ({
         width: 'w-[clamp(108px,9vw,128px)]',
         cell: (bot) =>
           onOpenContainers ? (
-            <BotContainerInfo bot={bot} canView={canViewContainers?.(bot) ?? true} onOpen={onOpenContainers} />
+            <BotContainerInfo
+              bot={bot}
+              userId={containerUserId}
+              canView={canViewContainers?.(bot) ?? true}
+              onOpen={onOpenContainers}
+            />
           ) : (
             <span>—</span>
           ),
@@ -229,6 +236,7 @@ const BotTable: React.FC<BotTableProps> = ({
       canOpenTaskInstances,
       onOpenContainers,
       canViewContainers,
+      containerUserId,
       onHealthCheck,
       onChangeSpace,
       onAuthorize,

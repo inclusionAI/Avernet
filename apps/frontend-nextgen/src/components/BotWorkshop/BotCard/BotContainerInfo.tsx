@@ -6,6 +6,8 @@ import React from 'react';
 
 export interface BotContainerInfoProps {
   bot: BotDomain;
+  /** 已解析的请求身份；缺失时不发起容器接口请求。 */
+  userId?: string;
   /** 列表库存声明的 Owner/协作者容器查看资格。 */
   canView?: boolean;
   onOpen: (bot: BotDomain) => void;
@@ -21,10 +23,10 @@ function isEligible(bot: BotDomain) {
  * 老版本只在独立列内展示“活跃数 / 实例总数”，并通过悬浮文案提示点击查看详情。
  * 列表接口未携带 summary 时，仅为当前页合格 Bot 请求一次容器快照。
  */
-export function BotContainerInfo({ bot, canView = true, onOpen }: BotContainerInfoProps) {
+export function BotContainerInfo({ bot, userId, canView = true, onOpen }: BotContainerInfoProps) {
   const [snapshot, setSnapshot] = React.useState<ContainerSnapshot>();
   const [failed, setFailed] = React.useState(false);
-  const eligible = canView && isEligible(bot);
+  const eligible = Boolean(userId) && canView && isEligible(bot);
 
   React.useEffect(() => {
     if (!eligible) return undefined;
@@ -32,7 +34,7 @@ export function BotContainerInfo({ bot, canView = true, onOpen }: BotContainerIn
     setSnapshot(undefined);
     setFailed(false);
     void botContainerService
-      .list(bot.id)
+      .list(bot.id, userId!)
       .then((next) => {
         if (active) setSnapshot(next);
       })
@@ -42,7 +44,7 @@ export function BotContainerInfo({ bot, canView = true, onOpen }: BotContainerIn
     return () => {
       active = false;
     };
-  }, [bot.id, eligible]);
+  }, [bot.id, eligible, userId]);
 
   if (!eligible) return <span className="select-none text-sm text-muted-foreground">—</span>;
   const summary = snapshot?.summary;

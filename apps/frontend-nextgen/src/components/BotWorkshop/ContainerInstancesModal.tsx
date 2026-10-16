@@ -10,6 +10,8 @@ import { toast } from 'sonner';
 
 export interface ContainerInstancesModalProps {
   bot?: BotDomain;
+  /** 容器接口要求显式携带的当前用户 ID。 */
+  userId?: string;
   canRestart?: boolean;
   onClose: () => void;
 }
@@ -28,35 +30,35 @@ const statusClass: Record<ContainerInstance['status'], string> = {
   unknown: 'border-warning/40 bg-warning/10 text-warning',
 };
 
-export function ContainerInstancesModal({ bot, canRestart = false, onClose }: ContainerInstancesModalProps) {
+export function ContainerInstancesModal({ bot, userId, canRestart = false, onClose }: ContainerInstancesModalProps) {
   const [snapshot, setSnapshot] = React.useState<ContainerSnapshot>();
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
   const [restartingId, setRestartingId] = React.useState<string>();
   const [copiedId, setCopiedId] = React.useState<string>();
   const load = React.useCallback(async () => {
-    if (!bot) return;
+    if (!bot || !userId) return;
     setLoading(true);
     setError('');
     try {
-      setSnapshot(await botContainerService.list(bot.id));
+      setSnapshot(await botContainerService.list(bot.id, userId));
     } catch (cause) {
       setSnapshot(undefined);
       setError(cause instanceof Error ? cause.message : '容器实例加载失败');
     } finally {
       setLoading(false);
     }
-  }, [bot]);
+  }, [bot, userId]);
 
   React.useEffect(() => {
     if (bot) void load();
   }, [bot, load]);
 
   const restart = async (instance: ContainerInstance) => {
-    if (!bot || instance.status !== 'abnormal' || !canRestart) return;
+    if (!bot || !userId || instance.status !== 'abnormal' || !canRestart) return;
     setRestartingId(instance.id);
     try {
-      await botContainerService.restart(bot.id, instance.id);
+      await botContainerService.restart(bot.id, instance.id, userId);
       toast.success(`实例 ${instance.id} 已开始重启`);
       await load();
     } catch (cause) {
@@ -81,6 +83,7 @@ export function ContainerInstancesModal({ bot, canRestart = false, onClose }: Co
           <ModalDescription>查看运行态服务 Bot 的实例健康状态；仅 Owner 可以重启异常实例。</ModalDescription>
         </ModalHeader>
         <div className="min-h-40 px-6 py-5">
+          {bot && !userId ? <Spin tip="正在获取当前用户身份…" /> : null}
           {loading && !snapshot ? <Spin tip="正在加载容器实例…" /> : null}
           {error ? (
             <Empty
