@@ -1,8 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import MonitoringPanel from '../MonitoringPanel';
 import { beijingDateRange } from '../MonitoringControls';
 import type { BotOption, DiagnosisItem, DiagnosisPage } from '../../../../types/monitoring';
+import { sessionRecoveryApi } from '../../../../api/session-recovery';
+vi.mock('../../../../api/session-recovery', () => ({ sessionRecoveryApi: { list: vi.fn() } }));
 
 const api = vi.hoisted(() => ({ options: vi.fn(), targetStatus: vi.fn(), targetDiagnoses: vi.fn(), enroll: vi.fn() }));
 vi.mock('../../../../api/monitoring', async importOriginal => ({ ...await importOriginal<object>(), monitoringApi: api }));
@@ -22,6 +25,7 @@ const page = (botId = 'bot-te'): DiagnosisPage => ({ botId, page: 1, pageSize: 2
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(sessionRecoveryApi.list).mockResolvedValue({ items: [] });
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
   api.options.mockResolvedValue({ items: [option('bot-te'), option('bot-oc')], nextCursor: null });
   api.targetStatus.mockImplementation(async botId => option(botId));
@@ -30,6 +34,29 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('MonitoringPanel', () => {
+  it('links the diagnosis to its recovery task and shows its current status without creating a task', async () => {
+    vi.mocked(sessionRecoveryApi.list).mockResolvedValue({ items: [
+      { task_id: 'SR-first', status: 'waiting_owner', phase: 'plan', effect: 'unknown' },
+    ] });
+    render(<MemoryRouter><MonitoringPanel /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /外部服务异常/ }));
+    const first = await screen.findByRole('link', { name: /查看自愈任务.*等待方案确认.*SR-first/ });
+    expect(first).toHaveAttribute('href', '/insight?module=monitoring&recoveryTaskId=SR-first');
+    expect(screen.getAllByRole('link', { name: /查看自愈任务/ })).toHaveLength(1);
+    expect(first).toHaveAttribute('title', 'SR-first');
+    expect(sessionRecoveryApi.list).toHaveBeenCalledWith('diag-1', expect.any(AbortSignal));
+  });
+  it('retries failed recovery-link reads instead of presenting the error as no task', async () => {
+    vi.mocked(sessionRecoveryApi.list).mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ items: [
+      { task_id: 'SR-retried', status: 'running', phase: 'assess', effect: 'unknown' },
+    ] });
+    render(<MemoryRouter><MonitoringPanel /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /外部服务异常/ }));
+    await screen.findByText('自愈任务暂时无法读取。');
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    await screen.findByRole('link', { name: /查看自愈任务.*执行中.*SR-retried/ });
+    expect(sessionRecoveryApi.list).toHaveBeenCalledTimes(2);
+  });
   it('preserves the full TC label text and tooltip when CSS truncates the summary', async () => {
     const label = 'TC.TOOL.EXTERNAL_SERVICE.RESPONSE_TIMEOUT_WITH_EXTENDED_LABEL';
     api.targetDiagnoses.mockResolvedValue({ ...page(), items: [{ ...item, tcFaultLabel: label }] });
@@ -170,6 +197,7 @@ describe('MonitoringPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '监控 Bot bot-te' }));
     fireEvent.click(await screen.findByRole('button', { name: /^bot-new.*监控中/ }));
     await waitFor(() => expect(api.targetStatus.mock.lastCall?.[0]).toBe('bot-new'));
+    await waitFor(() => expect(screen.getByRole('button', { name: '刷新' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '刷新' }));
     await waitFor(() => expect(api.options).toHaveBeenCalledTimes(3));
     expect(screen.getByRole('button', { name: '监控 Bot bot-new' })).toBeInTheDocument();

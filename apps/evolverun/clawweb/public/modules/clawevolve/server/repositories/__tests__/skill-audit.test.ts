@@ -283,4 +283,13 @@ describe('persisted Skill operation audit', () => {
     expect(events.filter(e => e.event_type === 'optimization')).toHaveLength(1);
     expect(events.find(e => e.event_type === 'optimization')).toMatchObject({ status: 'completed', outcome: 'no_cases' });
   });
+
+  it.each(['failed', 'canceled'])('records an auxiliary execution as %s without ending its business task', async (status) => {
+    await tasks.createTask({ ...task, taskType: 'session_recovery', configJson: '{}' });
+    await tasks.updateTaskState({ taskId: 'task', status: 'waiting_owner' });
+    await tasks.createStep({ stepId: 'execution', taskId: 'task', stepType: 'agent_execution', stepNo: -1, command: 'agent_execution' });
+    await tasks.updateStepStatus('execution', { status, errorCode: 'AIS_RESULT_MISSING' });
+    expect((await tasks.findStep('execution'))!.status).toBe(status);
+    expect((await tasks.findTask('task'))!.status).toBe('waiting_owner');
+  });
 });

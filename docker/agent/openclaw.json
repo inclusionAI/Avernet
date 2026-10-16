@@ -169,7 +169,7 @@
           "production"
         ]
       },
-      "heartbeatIntervalMs": 60000,
+      "heartbeatIntervalMs": 20000,
       "reconnectIntervalMs": 5000,
       "connectionTimeoutMs": 30000
     }

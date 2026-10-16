@@ -41,6 +41,11 @@ const scopeDescriptions: Record<PublicAudience, Record<PublicScope, string>> = {
 interface PublicationEditorProps {
   open: boolean;
   audience: PublicAudience;
+  /**
+   * 外部 Bot：限定组织可申请按外部合同始终提供（不受受限选项能力开关影响），
+   * 提交按钮按保存语义（PATCH 直改），不出现审批话术。
+   */
+  isExternalBot?: boolean;
   initialConfig: PublicConfig;
   onSearch: (keyword: string, signal?: AbortSignal) => Promise<OrganizationSearchEntry[]>;
   loading?: boolean;
@@ -51,6 +56,7 @@ interface PublicationEditorProps {
 export function PublicationEditor({
   open,
   audience,
+  isExternalBot = false,
   initialConfig,
   onSearch,
   loading,
@@ -58,33 +64,35 @@ export function PublicationEditor({
   onSubmit,
 }: PublicationEditorProps) {
   const restrictedScopeEnabled = getCapabilities().getRestrictedPublicationScopeEnabled().value;
+  // 外部 Bot 的限定组织可申请来自用户合同，与 TC 的能力开关解耦，不放宽 TC 默认形态。
+  const scopeSelectionEnabled = restrictedScopeEnabled || isExternalBot;
   const [scope, setScope] = useState<PublicScope>(() =>
-    !restrictedScopeEnabled && initialConfig.scope === 'restricted' ? 'none' : initialConfig.scope,
+    !scopeSelectionEnabled && initialConfig.scope === 'restricted' ? 'none' : initialConfig.scope,
   );
   const [selected, setSelected] = useState<OrganizationPath[]>(() =>
-    restrictedScopeEnabled ? initialConfig.organizationPaths : [],
+    scopeSelectionEnabled ? initialConfig.organizationPaths : [],
   );
   const [selectedEntries, setSelectedEntries] = useState<OrganizationSearchEntry[]>(() =>
-    restrictedScopeEnabled
+    scopeSelectionEnabled
       ? initialConfig.organizationEntries ?? initialConfig.organizationPaths.map((path) => ({ deptNo: '', path }))
       : [],
   );
   useEffect(() => {
     if (open) {
-      setScope(!restrictedScopeEnabled && initialConfig.scope === 'restricted' ? 'none' : initialConfig.scope);
-      setSelected(restrictedScopeEnabled ? initialConfig.organizationPaths : []);
+      setScope(!scopeSelectionEnabled && initialConfig.scope === 'restricted' ? 'none' : initialConfig.scope);
+      setSelected(scopeSelectionEnabled ? initialConfig.organizationPaths : []);
       setSelectedEntries(
-        restrictedScopeEnabled
+        scopeSelectionEnabled
           ? initialConfig.organizationEntries ?? initialConfig.organizationPaths.map((path) => ({ deptNo: '', path }))
           : [],
       );
     }
-  }, [open, initialConfig, restrictedScopeEnabled]);
+  }, [open, initialConfig, scopeSelectionEnabled]);
 
   const availableScopeOptions: Array<{ value: PublicScope; label: string }> = [
     { value: 'none', label: visibilityScopeLabels.none },
     { value: 'all', label: visibilityScopeLabels.all },
-    ...(restrictedScopeEnabled ? [{ value: 'restricted' as const, label: visibilityScopeLabels.restricted }] : []),
+    ...(scopeSelectionEnabled ? [{ value: 'restricted' as const, label: visibilityScopeLabels.restricted }] : []),
   ];
 
   const wrappedSearch = async (keyword: string, signal?: AbortSignal): Promise<OrganizationSearchEntry[]> => {
@@ -146,9 +154,9 @@ export function PublicationEditor({
             }))}
             ariaLabel="Bot 可见性"
             onChange={setScope}
-            className={restrictedScopeEnabled ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}
+            className={scopeSelectionEnabled ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}
           />
-          {!restrictedScopeEnabled && initialConfig.scope === 'restricted' && (
+          {!scopeSelectionEnabled && initialConfig.scope === 'restricted' && (
             <p className="text-xs text-muted-foreground">
               当前可见性“限定组织可申请”已下线，请重新选择“不可见”或“全部可见”。
             </p>
@@ -168,14 +176,18 @@ export function PublicationEditor({
               {invalid && <p className="mt-2 text-xs text-destructive">选择限定组织可申请时，请至少选择一个组织范围</p>}
             </section>
           )}
-          {unchanged && !invalid && <p className="text-xs text-muted-foreground">可见性未发生变化，无需提交审批</p>}
+          {unchanged && !invalid && (
+            <p className="text-xs text-muted-foreground">
+              {isExternalBot ? '可见性未发生变化，无需保存' : '可见性未发生变化，无需提交审批'}
+            </p>
+          )}
         </div>
         <ModalFooter>
           <Button variant="secondary" disabled={loading} onClick={onClose}>
             取消
           </Button>
           <Button loading={loading} disabled={invalid || unchanged} onClick={handleSubmit}>
-            提交审批
+            {isExternalBot ? '保存' : '提交审批'}
           </Button>
         </ModalFooter>
       </ModalContent>

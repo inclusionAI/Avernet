@@ -64,6 +64,7 @@ export function CapabilityPickerModal({
   const [selected, setSelected] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string>();
   const searchMcpRef = useRef(onSearchMcp);
   searchMcpRef.current = onSearchMcp;
   const remoteSearch = kind === 'skill' && source === 'market' && marketSource === 'skillcenter-market';
@@ -94,6 +95,20 @@ export function CapabilityPickerModal({
     return () => clearTimeout(timer);
   }, [kind, keyword, mcpMarketSource, open]);
   const canPickDirectory = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+  /** 「我的 Skill」未添加卡片可删除（DELETE /openapi/v1/bots/{bot_id}/skills/{skill_id}，onLocalDelete 由页面层实现并刷新列表）。 */
+  const canDeleteMine = kind === 'skill' && source === 'mine' && editable && Boolean(onLocalDelete);
+  const deleteMySkill = async (id: string) => {
+    if (!onLocalDelete || deletingId) return; // 有删除进行中时忽略新请求，避免并发重复 DELETE
+    setDeletingId(id);
+    try {
+      await onLocalDelete(id);
+      setSelected((current) => current.filter((value) => value !== id)); // 删除成功后同步清除勾选，避免提交已删项
+    } catch {
+      // 页面层 act 失败时已 toast，吞掉重抛避免未处理拒绝
+    } finally {
+      setDeletingId(undefined);
+    }
+  };
   const close = () => {
     setSelected([]);
     setKeyword('');
@@ -242,6 +257,8 @@ export function CapabilityPickerModal({
                     active={active}
                     alreadyAdded={alreadyAdded}
                     selectionDisabled={alreadyAdded || (remoteSearch && selected.length >= 20 && !active)}
+                    onDelete={canDeleteMine ? () => void deleteMySkill(id) : undefined}
+                    deleting={deletingId === id}
                     onSelect={() =>
                       setSelected((current) => (active ? current.filter((value) => value !== id) : [...current, id]))
                     }

@@ -27,10 +27,13 @@ pub async fn serve_managed(
             let listener = tokio::net::TcpListener::bind(listen).await?;
             tracing::info!(%listen, state_path = %state.config.state_path.display(), "bcs-bridge gateway listening");
             if let Some(ready) = ready { let _ = ready.send(()); }
-            axum::serve(listener, app).with_graceful_shutdown(async move {
+            let stopping = state.clone();
+            let result = axum::serve(listener, app).with_graceful_shutdown(async move {
                 tokio::select! { _ = shutdown_signal() => {}, _ = shutdown.cancelled() => {} }
-                state.runs.abort_all("shutdown").await;
-            }).await?;
+                stopping.runs.abort_all("shutdown").await;
+            }).await;
+            state.shutdown_engines().await;
+            result?;
         }
         ConnectionMode::Plugin => {
             let signal = shutdown.clone();

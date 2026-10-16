@@ -22,6 +22,18 @@ class SystemConfigKey(StrEnum):
         {module}.{purpose} - e.g., "arca.dft_tenant"
     """
 
+    # A2A v1.0 client-side grey-release switch (1b migration)
+    A2A_CLIENT_MODE = "bot_run.a2a_client_mode"
+    """BaaS→engine adapter 传输灰度开关。
+
+    Value: "off" (default) | "grey" | "on"
+    - off:  整组件走 v3 WS——生产默认，行为与迁移前一致
+    - grey: 引擎容器 Agent Card 声明 JSONRPC 1.x 时走 A2A，否则回退 v3
+    - on:   强制 A2A，能力探测失败直接抛错（fail-fast，不静默降级）
+    Grey boundary: 附件与 HITL resolve 流程尚在 1b 范围外（A2A 路径对
+    附件显式报错、resolve 需 E4 引擎面），启用 grey 前须确认业务流不含两者。
+    """
+
     # Arca PaaS platform configuration
     ARCA_DFT_TENANT = "arca.dft_tenant"
     """Default tenant ID for Arca PaaS platform (per environment).

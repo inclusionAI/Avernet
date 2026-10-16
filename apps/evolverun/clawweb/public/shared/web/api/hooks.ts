@@ -15,6 +15,7 @@ export function useFlowRuns(params?: {
   botOwnerId?: string
   botId?: string
   inputQuery?: string
+  purpose?: 'production' | 'trial' | 'all'
   enabled?: boolean
 }) {
   const { enabled, ...queryParams } = params ?? {}
@@ -1265,6 +1266,31 @@ export function useAutoHealApply() {
   return useMutation({
     mutationFn: (params: { workflowId: string; spec: WorkflowSpec; packId?: string; diagnosisId?: string; autoRun?: boolean }) =>
       api.autoHeal.apply(params),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['db-workflows'] })
+      void queryClient.invalidateQueries({ queryKey: ['workflow-types'] })
+      void queryClient.invalidateQueries({ queryKey: ['runs'] })
+    },
+  })
+}
+
+export function useAutoHealSave() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (params: { workflowId: string; spec: WorkflowSpec; packId?: string; diagnosisId?: string; note?: string }) =>
+      api.autoHeal.save(params),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['db-workflows'] })
+      void queryClient.invalidateQueries({ queryKey: ['workflow-types'] })
+    },
+  })
+}
+
+export function useAutoHealDeploy() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (params: { workflowId: string; packId?: string; diagnosisId?: string; note?: string; autoRun?: boolean }) =>
+      api.autoHeal.deploy(params),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['db-workflows'] })
       void queryClient.invalidateQueries({ queryKey: ['workflow-types'] })

@@ -4,7 +4,7 @@
 import { ConversationBotItem } from '@/pages/Workspace/Chat/components/ConversationBotItem';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const bot: ChatBotView = {
   botId: 'bot-1',
@@ -16,11 +16,13 @@ const bot: ChatBotView = {
 
 const noop = () => undefined;
 
-function renderBotItem(overrides: { expanded?: boolean; onToggle?: () => void } = {}) {
+function renderBotItem(
+  overrides: { expanded?: boolean; onToggle?: () => void; bot?: Partial<ChatBotView> } = {},
+) {
   const onToggle = overrides.onToggle ?? jest.fn();
   const utils = render(
     <ConversationBotItem
-      bot={bot}
+      bot={{ ...bot, ...overrides.bot }}
       section="managed"
       expanded={overrides.expanded ?? false}
       selectedSessionId={null}
@@ -241,5 +243,63 @@ describe('ConversationBotItem 会话ID检索入口', () => {
     fireEvent.change(input, { target: { value: '' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(onSearchSession).toHaveBeenCalledWith('');
+  });
+});
+
+describe('ConversationBotItem Bot 可用状态(FAILED/PENDING 整行禁用)', () => {
+  it('FAILED Bot:整行置灰禁用,点击不触发展开,操作区/箭头/展开区不渲染', () => {
+    const { onToggle } = renderBotItem({ bot: { status: 'FAILED' }, expanded: true });
+    // 行容器:置灰 + aria-disabled。
+    const row = document.querySelector('div[aria-disabled="true"]') as HTMLElement;
+    expect(row).toBeTruthy();
+    expect(row.className).toContain('opacity-60');
+    // 点击主按钮不触发展开。
+    fireEvent.click(screen.getByRole('button', { name: '测试 Bot' }));
+    expect(onToggle).not.toHaveBeenCalled();
+    // 操作区(新建/检索/筛选)与展开箭头不渲染;展开区即使 expanded 也不渲染。
+    expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument();
+    expect(document.querySelector('button[aria-hidden="true"]')).toBeNull();
+    expect(screen.queryByLabelText('会话列表：测试 Bot')).not.toBeInTheDocument();
+  });
+
+  it('PENDING Bot:同样整行禁用,点击不触发展开', () => {
+    const { onToggle } = renderBotItem({ bot: { status: 'PENDING' } });
+    fireEvent.click(screen.getByRole('button', { name: '测试 Bot' }));
+    expect(onToggle).not.toHaveBeenCalled();
+    expect(document.querySelector('div[aria-disabled="true"]')).toBeTruthy();
+  });
+
+  it('不可用 Bot 悬停显示原因 tooltip(FAILED 与 PENDING 文案区分)', async () => {
+    const { unmount } = renderBotItem({ bot: { status: 'FAILED' } });
+    const failedRow = document.querySelector('div[aria-disabled="true"]') as HTMLElement;
+    fireEvent.pointerMove(failedRow, { pointerType: 'mouse' });
+    fireEvent.focusIn(failedRow);
+    await waitFor(() =>
+      expect(
+        screen.getByText('该 Bot 因创建或运行异常暂时无法使用；可在 Bot 管理中尝试运维恢复'),
+      ).toBeInTheDocument(),
+    );
+    unmount();
+
+    renderBotItem({ bot: { status: 'PENDING' } });
+    const pendingRow = document.querySelector('div[aria-disabled="true"]') as HTMLElement;
+    fireEvent.pointerMove(pendingRow, { pointerType: 'mouse' });
+    fireEvent.focusIn(pendingRow);
+    await waitFor(() =>
+      expect(screen.getByText('该 Bot 正在创建中，暂时无法使用，完成后可刷新重试')).toBeInTheDocument(),
+    );
+  });
+
+  it('ACTIVE Bot 行为不变:可展开,无禁用属性', () => {
+    const { onToggle } = renderBotItem({ bot: { status: 'ACTIVE' } });
+    fireEvent.click(screen.getByRole('button', { name: '测试 Bot' }));
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('div[aria-disabled="true"]')).toBeNull();
+  });
+
+  it('缺省 status(好友关系等无状态数据源)行为不变:可展开', () => {
+    const { onToggle } = renderBotItem();
+    fireEvent.click(screen.getByRole('button', { name: '测试 Bot' }));
+    expect(onToggle).toHaveBeenCalledTimes(1);
   });
 });

@@ -24,7 +24,7 @@ export class RepairReleaseRepository {
       digestRepairJson([value.taskId, kind, (request as { requestId: string }).requestId]), digestRepairJson(request),
       boundedRepairJson(value, MAX_RESULT_BYTES), value.createdAtMs, Date.now()]);
   }
-  async update(value: ReleaseRecord, expected: number): Promise<void> {
+  async update<T extends ReleaseRecord>(value: T, expected: number): Promise<void> {
     const result = await this.db.exec(`UPDATE workflow_repair_release_records SET body_json = ?, state_version = ?, updated_at_ms = ?
       WHERE record_id = ? AND state_version = ?`, [boundedRepairJson(value, MAX_RESULT_BYTES), value.stateVersion, Date.now(), value.id, expected]);
     if (result.affectedRows !== 1) throw new RepairBatchError('STATE_CONFLICT', '部署状态已变化，请刷新后核对');

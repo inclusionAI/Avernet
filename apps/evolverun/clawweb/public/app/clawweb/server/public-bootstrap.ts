@@ -10,18 +10,38 @@ import { createApprovalRouter } from "@avernet/workflow/server/routes/approval";
 import { createInternalApprovalCardsRouter } from "@avernet/workflow/server/routes/internal/approval-cards";
 import { ApprovalCardRepository } from "@avernet/workflow/server/repositories/approval-card-repository";
 import {
+  createAutoHealRouter,
+  createRunsRouter,
+  createWorkflowsRouter,
+} from "@avernet/workflow/server";
+import { createWorkflowNodeStatsRouter } from "@avernet/workflow/server/routes/workflow-node-stats";
+import { createWorkflowVersionComparisonService } from "@avernet/workflow/server/services/workflow-version-comparison-service";
+import { createWorkflowVersionSourceService } from "@avernet/workflow/server/services/workflow-version-source-service";
+import { WorkflowSpecRepository } from "@avernet/workflow/server/repositories/workflow-spec-repository";
+import { WorkflowDeployHistoryRepository } from "@avernet/workflow/server/repositories/workflow-deploy-history-repository";
+import { FlowRunRepository } from "@avernet/workflow/server/repositories/flow-run-repository";
+import { NodeExecutionRepository } from "@avernet/workflow/server/repositories/node-execution-repository";
+import { FlowEventRepository } from "@avernet/workflow/server/repositories/event-repository";
+import { MetricsRepository } from "@avernet/workflow/server/repositories/metrics-repository";
+import { AlertRepository } from "@avernet/workflow/server/repositories/alert-repository";
+import { FlowControlRepository } from "@avernet/workflow/server/repositories/flow-control-repository";
+import { ExecutionStepLogRepository } from "@avernet/workflow/server/repositories/execution-step-log-repository";
+import {
   closeDatabase,
   initDatabase,
   resolveAdminConfigFrom,
   resolveDynamicAdminConfig,
+  resolveAutoHealConfig,
 } from "@avernet/clawweb-shared/server/db";
 import { adminAuthMiddleware } from "@avernet/clawweb-shared/server/middleware/admin-auth";
 import { AdminUserRepository } from "@avernet/clawweb-shared/server/repositories/admin-user-repository";
+import { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import type { ClawWebBootstrap } from "./bootstrap.js";
 import { createAuthMeHandler, resolveAuthMeIdentity } from "./auth-me.js";
 import { createWorkflowRepairRuntime } from "./repair-workbench-runtime.js";
 import { AistudioService, resolveAistudioConfig } from "@avernet/clawinsight/server/services/aistudio-service";
 import { createRepairAisExecution, resolveRepairAisConfiguration } from "./repair-ais-execution.js";
+import { createAutoHealTriggerRun } from "./auto-heal-trigger-run.js";
 
 export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecoveryRuntime } = {}): ClawWebBootstrap {
   return {
@@ -100,6 +120,62 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
         },
       }));
       app.use("/api/approval-cards", createInternalApprovalCardsRouter(approvalCardRepo));
+
+      // AutoHeal composition
+      const autoHealConfig = resolveAutoHealConfig();
+      const autoHealGitConfig = {
+        remoteUrl: autoHealConfig.clawflowsRemoteUrl,
+        username: autoHealConfig.gitUsername,
+        email: autoHealConfig.gitAuthorEmail,
+        token: autoHealConfig.gitToken,
+      };
+      const autoHealAuthor = {
+        name: autoHealConfig.gitAuthorName,
+        email: autoHealConfig.gitAuthorEmail,
+      };
+      const botPermRepo = new BotWorkflowPermissionRepository(db);
+      const deployHistoryRepo = new WorkflowDeployHistoryRepository(db);
+      const workflowSpecRepo = new WorkflowSpecRepository(db, deployHistoryRepo);
+      const flowRunRepo = new FlowRunRepository(db);
+      const nodeExecRepo = new NodeExecutionRepository(db);
+      const eventRepo = new FlowEventRepository(db);
+      const metricsRepo = new MetricsRepository(db);
+      const alertRepo = new AlertRepository(db);
+      const flowControlRepo = new FlowControlRepository(db);
+      const execStepLogRepo = new ExecutionStepLogRepository(db);
+      app.use("/api/workflows", createWorkflowsRouter(
+        workflowSpecRepo,
+        null,
+        botPermRepo,
+        null,
+        deployHistoryRepo,
+        null,
+        createWorkflowVersionSourceService(db),
+      ));
+      app.use("/api/workflows", createWorkflowNodeStatsRouter(
+        null, null, createWorkflowVersionComparisonService(db), botPermRepo,
+      ));
+      app.use("/api/runs", createRunsRouter(
+        flowRunRepo,
+        nodeExecRepo,
+        eventRepo,
+        metricsRepo,
+        alertRepo,
+        flowControlRepo,
+        botPermRepo,
+        workflowSpecRepo,
+        execStepLogRepo,
+      ));
+      app.use("/api/auto-heal", createAutoHealRouter({
+        db,
+        workflowSpecRepo,
+        deployHistoryRepo,
+        botPermRepo,
+        gitConfig: autoHealGitConfig,
+        gitAuthor: autoHealAuthor,
+        triggerRun: createAutoHealTriggerRun(),
+      }));
+
       const staticDir = resolve(dirname(fileURLToPath(import.meta.url)), "../web");
       if (existsSync(staticDir)) {
         app.use(express.static(staticDir));

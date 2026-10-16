@@ -36,7 +36,7 @@ describe('ContainerInstancesModal', () => {
       display_state: 'service_online',
     }).item;
 
-    render(<ContainerInstancesModal bot={bot} canRestart={false} onClose={jest.fn()} />);
+    render(<ContainerInstancesModal bot={bot} userId="user-1" canRestart={false} onClose={jest.fn()} />);
 
     await waitFor(() =>
       expect(getSummaryText('共 2 个实例')).toBeInTheDocument(),

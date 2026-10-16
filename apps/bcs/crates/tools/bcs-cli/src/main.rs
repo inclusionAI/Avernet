@@ -445,10 +445,9 @@ fn parse_json_arg(raw: &str) -> Result<serde_json::Value> {
         if path.is_empty() {
             return Err(anyhow!("'@' must be followed by a file path"));
         }
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| anyhow!("Failed to read {}: {}", path, e))?;
-        serde_json::from_str(&content)
-            .map_err(|e| anyhow!("Invalid JSON in {}: {}", path, e))
+        let content =
+            std::fs::read_to_string(path).map_err(|e| anyhow!("Failed to read {}: {}", path, e))?;
+        serde_json::from_str(&content).map_err(|e| anyhow!("Invalid JSON in {}: {}", path, e))
     } else {
         serde_json::from_str(raw).map_err(|e| anyhow!("Invalid JSON literal: {}", e))
     }
@@ -542,10 +541,7 @@ fn merge_baas_session_id_into_meta(
 /// Split a service session id at its canonical `{group_id}:<session_suffix>` boundary into its
 /// `(group_id, session_id)` parts. `group_arg` always wins when supplied;
 /// otherwise the colon split must succeed.
-fn split_service_sid<'a>(
-    sid: &'a str,
-    group_arg: Option<&'a str>,
-) -> Result<(&'a str, &'a str)> {
+fn split_service_sid<'a>(sid: &'a str, group_arg: Option<&'a str>) -> Result<(&'a str, &'a str)> {
     if let Some(group) = group_arg {
         return Ok((group, sid));
     }
@@ -574,9 +570,7 @@ async fn wait_for_service_completion(
     let mut delay_ms: u64 = 500;
 
     loop {
-        let session = client
-            .service_session_status(group_id, session_id)
-            .await?;
+        let session = client.service_session_status(group_id, session_id).await?;
 
         let is_done = session
             .get("status")
@@ -866,9 +860,9 @@ fn parse_custom_group_bindings(
 ) -> Result<BTreeMap<String, bcs_protocol::ParticipantBindingInfo>> {
     let mut bindings = BTreeMap::new();
     for value in values {
-        let (raw_binding, raw_bot_id) = value.split_once('=').ok_or_else(|| {
-            anyhow!("Invalid --binding '{}'; expected ROLE=BOT_UUID", value)
-        })?;
+        let (raw_binding, raw_bot_id) = value
+            .split_once('=')
+            .ok_or_else(|| anyhow!("Invalid --binding '{}'; expected ROLE=BOT_UUID", value))?;
         let binding = raw_binding.trim();
         let bot_id = raw_bot_id.trim();
         if binding.is_empty() || bot_id.is_empty() {
@@ -957,7 +951,9 @@ fn validate_custom_group_bindings(
         .collect::<BTreeSet<_>>();
     for binding in bindings.keys() {
         if !declared.contains(binding.as_str()) {
-            return Err(anyhow!("--binding references undeclared participant role: {binding}"));
+            return Err(anyhow!(
+                "--binding references undeclared participant role: {binding}"
+            ));
         }
     }
     for slot in slots {
@@ -1001,35 +997,67 @@ fn emit_collaboration_validation(validation: &serde_json::Value, structured_mode
         println!("VALID");
         println!(
             "  Participants: {}",
-            summary.get("participants").and_then(serde_json::Value::as_u64).unwrap_or(0)
+            summary
+                .get("participants")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0)
         );
         println!(
             "  Nodes: {}",
-            summary.get("nodes").and_then(serde_json::Value::as_u64).unwrap_or(0)
+            summary
+                .get("nodes")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0)
         );
         if let Some(graph) = validation.get("graph") {
             if graph.get("execution_graph_mode").is_some() {
                 print!("{}", collaboration_output::render(graph));
             }
         }
-    } else if let Some(errors) = validation.get("errors").and_then(serde_json::Value::as_array) {
+    } else if let Some(errors) = validation
+        .get("errors")
+        .and_then(serde_json::Value::as_array)
+    {
         for error in errors {
             println!(
                 "{} {}: {}",
-                error.get("code").and_then(serde_json::Value::as_str).unwrap_or("INVALID"),
-                error.get("path").and_then(serde_json::Value::as_str).unwrap_or("$"),
-                error.get("message").and_then(serde_json::Value::as_str).unwrap_or("validation failed")
+                error
+                    .get("code")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("INVALID"),
+                error
+                    .get("path")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("$"),
+                error
+                    .get("message")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("validation failed")
             );
         }
     }
-    if let Some(warnings) = validation.get("warnings").and_then(serde_json::Value::as_array) {
+    if let Some(warnings) = validation
+        .get("warnings")
+        .and_then(serde_json::Value::as_array)
+    {
         for warning in warnings {
-            println!("WARNING {} {}: {}", warning.get("code").and_then(serde_json::Value::as_str).unwrap_or("WARNING"),
-                warning.get("path").and_then(serde_json::Value::as_str).unwrap_or("$"),
-                warning.get("message").and_then(serde_json::Value::as_str).unwrap_or(""));
+            println!(
+                "WARNING {} {}: {}",
+                warning
+                    .get("code")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("WARNING"),
+                warning
+                    .get("path")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("$"),
+                warning
+                    .get("message")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+            );
         }
     }
-
 }
 
 /// Skill→BCS interactive debug
@@ -1424,6 +1452,16 @@ enum Commands {
         group: String,
     },
 
+    /// Manage Group Context entries through the BCN-compatible HTTP API.
+    GroupContext {
+        /// Authentication credential (auto-discovered if not provided)
+        #[arg(short = 'a', long = "auth", value_name = "AUTH")]
+        auth: Option<String>,
+
+        #[command(subcommand)]
+        command: GroupContextCommands,
+    },
+
     /// Manage bot friendships (request, accept, reject, list)
     Friend {
         /// Authentication token (auto-discovered if not provided)
@@ -1480,9 +1518,101 @@ enum Commands {
 #[derive(Debug, Subcommand)]
 enum ChatRunCommands {
     /// Read the run and its queue status.
-    Status { #[arg(long)] run_id: String },
+    Status {
+        #[arg(long)]
+        run_id: String,
+    },
     /// Request cancellation; a downstream abort may remain unconfirmed.
-    Cancel { #[arg(long)] run_id: String },
+    Cancel {
+        #[arg(long)]
+        run_id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum GroupContextCommands {
+    /// Add a new active context.
+    Add {
+        #[arg(long)]
+        group_id: String,
+        #[arg(long)]
+        session_id: Option<String>,
+        #[arg(long)]
+        round_id: Option<String>,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        scope_level: String,
+        #[arg(long)]
+        content: String,
+        #[arg(long, default_value = r#"{"userIds":[]}"#)]
+        visible_to: String,
+        #[arg(long)]
+        collect_from: String,
+        #[arg(long)]
+        valid_from: Option<String>,
+        #[arg(long)]
+        valid_to: Option<String>,
+    },
+    /// Supersede the active context version.
+    Update {
+        #[arg(long)]
+        group_id: String,
+        #[arg(long)]
+        session_id: Option<String>,
+        #[arg(long)]
+        round_id: Option<String>,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        scope_level: String,
+        #[arg(long)]
+        content: Option<String>,
+        #[arg(long)]
+        visible_to: Option<String>,
+        #[arg(long)]
+        collect_from: Option<String>,
+        #[arg(long)]
+        valid_from: Option<String>,
+        #[arg(long)]
+        valid_to: Option<String>,
+        #[arg(long)]
+        change_reason: String,
+    },
+    /// List visible or writable active contexts.
+    List {
+        #[arg(long)]
+        group_id: String,
+        #[arg(long)]
+        session_id: Option<String>,
+        #[arg(long)]
+        round_id: Option<String>,
+        /// Scope level filter. Repeat to pass multiple levels.
+        #[arg(long = "scope-level")]
+        scope_level: Vec<String>,
+        /// Scope level filters as a comma-separated list, e.g. group,session.
+        #[arg(long = "scope-levels", value_delimiter = ',')]
+        scope_levels: Vec<String>,
+    },
+    /// Get visible active contexts ordered round/session/group.
+    Get {
+        #[arg(long)]
+        group_id: String,
+        #[arg(long)]
+        session_id: Option<String>,
+        #[arg(long)]
+        round_id: Option<String>,
+        #[arg(long)]
+        name: String,
+        /// Scope level filter. Repeat to pass multiple levels.
+        #[arg(long = "scope-level")]
+        scope_level: Vec<String>,
+        /// Scope level filters as a comma-separated list, e.g. group,session.
+        #[arg(long = "scope-levels", value_delimiter = ',')]
+        scope_levels: Vec<String>,
+        #[arg(long, default_value_t = 3)]
+        limit: u32,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1683,7 +1813,8 @@ fn build_channel_bind_payload(command: &ChannelCommands) -> Result<serde_json::V
         send_mode,
         card_template_id,
         message_type,
-    } = command else {
+    } = command
+    else {
         return Err(anyhow!("channel bind payload requires bind command"));
     };
 
@@ -2006,40 +2137,59 @@ enum SessionCommands {
 enum SessionFileCommands {
     /// Upload a local file (auto three-stage: prepare -> PUT -> complete).
     Upload {
-        #[arg(short, long)] session: String,
-        #[arg(long)] path: String,
-        #[arg(long)] name: Option<String>,
-        #[arg(long)] mime: Option<String>,
+        #[arg(short, long)]
+        session: String,
+        #[arg(long)]
+        path: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        mime: Option<String>,
     },
     /// List files in the session workspace.
     List {
-        #[arg(short, long)] session: String,
-        #[arg(long)] prefix: Option<String>,
-        #[arg(long)] status: Option<String>,
-        #[arg(long)] limit: Option<u32>,
-        #[arg(long)] offset: Option<u32>,
+        #[arg(short, long)]
+        session: String,
+        #[arg(long)]
+        prefix: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        offset: Option<u32>,
     },
     /// Download a file's bytes (follows presigned redirect or streams).
     Download {
-        #[arg(short, long)] session: String,
-        #[arg(long)] file_id: String,
-        #[arg(long)] out: Option<String>,
-        #[arg(long)] ttl: Option<u64>,
+        #[arg(short, long)]
+        session: String,
+        #[arg(long)]
+        file_id: String,
+        #[arg(long)]
+        out: Option<String>,
+        #[arg(long)]
+        ttl: Option<u64>,
     },
     /// Delete a file or cancel an in-progress upload.
     Delete {
-        #[arg(short, long)] session: String,
-        #[arg(long)] file_id: String,
+        #[arg(short, long)]
+        session: String,
+        #[arg(long)]
+        file_id: String,
     },
     /// Generate a no-auth share link (valid until ttl expiry).
     Share {
-        #[arg(short, long)] session: String,
-        #[arg(long)] file_id: String,
-        #[arg(long)] ttl: Option<u64>,
+        #[arg(short, long)]
+        session: String,
+        #[arg(long)]
+        file_id: String,
+        #[arg(long)]
+        ttl: Option<u64>,
     },
     /// Query backend capabilities (storage / presign / max_size).
     Capabilities {
-        #[arg(short, long)] session: String,
+        #[arg(short, long)]
+        session: String,
     },
 }
 
@@ -2114,6 +2264,138 @@ enum ServiceCommands {
     },
 }
 
+fn parse_group_context_policy(raw: &str, flag: &str) -> Result<serde_json::Value> {
+    let value: serde_json::Value =
+        serde_json::from_str(raw).map_err(|error| anyhow!("Invalid --{} JSON: {}", flag, error))?;
+    if !value.is_object() {
+        return Err(anyhow!("--{} must be a JSON object", flag));
+    }
+    Ok(value)
+}
+
+fn group_context_query(
+    group_id: &str,
+    session_id: Option<&str>,
+    round_id: Option<&str>,
+) -> Vec<(String, String)> {
+    let mut query = vec![("groupId".to_string(), group_id.to_string())];
+    if let Some(value) = session_id {
+        query.push(("sessionId".to_string(), value.to_string()));
+    }
+    if let Some(value) = round_id {
+        query.push(("roundId".to_string(), value.to_string()));
+    }
+    query
+}
+
+fn group_context_insert_optional_string(
+    body: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<String>,
+) {
+    if let Some(value) = value {
+        body.insert(key.to_string(), serde_json::Value::String(value));
+    }
+}
+
+fn group_context_insert_optional_timestamp(
+    body: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<String>,
+) {
+    if let Some(value) = value {
+        if let Ok(n) = value.parse::<i64>() {
+            body.insert(
+                key.to_string(),
+                serde_json::Value::Number(serde_json::value::Number::from(n)),
+            );
+        } else {
+            body.insert(key.to_string(), serde_json::Value::String(value));
+        }
+    }
+}
+
+fn resolve_group_context_scope_levels(
+    scope_level: Vec<String>,
+    scope_levels: Vec<String>,
+) -> Result<Vec<String>> {
+    if !scope_level.is_empty() && !scope_levels.is_empty() {
+        return Err(anyhow!(
+            "--scope-level and --scope-levels cannot be used together"
+        ));
+    }
+    if scope_levels.is_empty() {
+        Ok(scope_level)
+    } else {
+        Ok(scope_levels)
+    }
+}
+
+fn group_context_add_body(
+    name: String,
+    scope_level: String,
+    content: String,
+    visible_to: String,
+    collect_from: String,
+    valid_from: Option<String>,
+    valid_to: Option<String>,
+) -> Result<serde_json::Value> {
+    let mut body = serde_json::Map::new();
+    body.insert("name".to_string(), serde_json::Value::String(name));
+    body.insert(
+        "scope_level".to_string(),
+        serde_json::Value::String(scope_level),
+    );
+    body.insert("content".to_string(), serde_json::Value::String(content));
+    body.insert(
+        "visible_to".to_string(),
+        parse_group_context_policy(&visible_to, "visible-to")?,
+    );
+    body.insert(
+        "collect_from".to_string(),
+        parse_group_context_policy(&collect_from, "collect-from")?,
+    );
+    group_context_insert_optional_timestamp(&mut body, "valid_from", valid_from);
+    group_context_insert_optional_timestamp(&mut body, "valid_to", valid_to);
+    Ok(serde_json::Value::Object(body))
+}
+
+fn group_context_update_body(
+    name: String,
+    scope_level: String,
+    content: Option<String>,
+    visible_to: Option<String>,
+    collect_from: Option<String>,
+    valid_from: Option<String>,
+    valid_to: Option<String>,
+    change_reason: Option<String>,
+) -> Result<serde_json::Value> {
+    let mut body = serde_json::Map::new();
+    body.insert("name".to_string(), serde_json::Value::String(name));
+    body.insert(
+        "scope_level".to_string(),
+        serde_json::Value::String(scope_level),
+    );
+    group_context_insert_optional_string(&mut body, "content", content);
+    if let Some(visible_to) = visible_to {
+        body.insert(
+            "visible_to".to_string(),
+            parse_group_context_policy(&visible_to, "visible-to")?,
+        );
+    }
+    if let Some(collect_from) = collect_from {
+        body.insert(
+            "collect_from".to_string(),
+            parse_group_context_policy(&collect_from, "collect-from")?,
+        );
+    }
+    group_context_insert_optional_timestamp(&mut body, "valid_from", valid_from);
+    group_context_insert_optional_timestamp(&mut body, "valid_to", valid_to);
+    group_context_insert_optional_string(&mut body, "change_reason", change_reason);
+    Ok(serde_json::Value::Object(body))
+}
+
+
 /// Binary entry. Delegates to [`run`] so the internal overlay can reuse this
 /// module (`#[path]`) and call `run()` directly under its own runtime.
 fn main() -> Result<()> {
@@ -2172,9 +2454,7 @@ pub async fn run() -> Result<()> {
     let bcs_url = resolve_bcs_url(&cli).unwrap_or_default();
 
     // Determine cookie: CLI arg > env var
-    let bcs_cookie = cli
-        .cookie
-        .or_else(|| std::env::var("BCS_COOKIE").ok());
+    let bcs_cookie = cli.cookie.or_else(|| std::env::var("BCS_COOKIE").ok());
 
     // Debug mode: print all HTTP communications (only available in debug builds)
     #[cfg(debug_assertions)]
@@ -2384,8 +2664,16 @@ pub async fn run() -> Result<()> {
             };
             if structured_mode {
                 let result = StructuredResult {
-                    status: if healthy { "healthy".to_string() } else { "unhealthy".to_string() },
-                    message: Some(format!("BCS is {} at {}", if healthy { "healthy" } else { "unhealthy" }, bcs_url)),
+                    status: if healthy {
+                        "healthy".to_string()
+                    } else {
+                        "unhealthy".to_string()
+                    },
+                    message: Some(format!(
+                        "BCS is {} at {}",
+                        if healthy { "healthy" } else { "unhealthy" },
+                        bcs_url
+                    )),
                     ..Default::default()
                 };
                 emit_structured_result(&result);
@@ -3090,7 +3378,8 @@ pub async fn run() -> Result<()> {
                         "Group {} was created, but the server did not honor --no-session \
                          (created Session {}). Upgrade the server before using this option; \
                          the group and session have not been deleted.",
-                        result.id, session_id
+                        result.id,
+                        session_id
                     ));
                 }
                 None
@@ -3190,8 +3479,9 @@ pub async fn run() -> Result<()> {
                             .and_then(serde_json::Value::as_str)
                             .unwrap_or("unknown")
                     );
-                    if let Some(message) =
-                        permission.get("message").and_then(serde_json::Value::as_str)
+                    if let Some(message) = permission
+                        .get("message")
+                        .and_then(serde_json::Value::as_str)
                     {
                         println!("  Message: {message}");
                     }
@@ -3286,22 +3576,52 @@ pub async fn run() -> Result<()> {
                 }
             }
 
-            CollaborationCommands::Query { run, node, graph, pending } => {
+            CollaborationCommands::Query {
+                run,
+                node,
+                graph,
+                pending,
+            } => {
                 let token = get_token(token.as_deref())?;
-                let client = create_client(&bcs_url, &token, bcs_cookie.as_deref(), oauth_headers.as_ref());
-                let suffix = if let Some(node) = node.as_deref() { vec!["nodes", node] }
-                    else if graph { vec!["graph"] } else if pending { vec!["pending-human-nodes"] } else { vec![] };
+                let client = create_client(
+                    &bcs_url,
+                    &token,
+                    bcs_cookie.as_deref(),
+                    oauth_headers.as_ref(),
+                );
+                let suffix = if let Some(node) = node.as_deref() {
+                    vec!["nodes", node]
+                } else if graph {
+                    vec!["graph"]
+                } else if pending {
+                    vec!["pending-human-nodes"]
+                } else {
+                    vec![]
+                };
                 let result = client.query_collaboration_run(&run, &suffix).await?;
-                if structured_mode { println!("{}", serde_json::to_string(&result)?); }
-                else { print!("{}", collaboration_output::render(&result)); }
+                if structured_mode {
+                    println!("{}", serde_json::to_string(&result)?);
+                } else {
+                    print!("{}", collaboration_output::render(&result));
+                }
             }
 
             CollaborationCommands::Respond { run, node, content } => {
                 let token = get_token(token.as_deref())?;
-                let client = create_client(&bcs_url, &token, bcs_cookie.as_deref(), oauth_headers.as_ref());
-                let result = client.respond_collaboration_node(&run, &node, &content).await?;
-                if structured_mode { println!("{}", serde_json::to_string(&result)?); }
-                else { print!("{}", collaboration_output::render(&result)); }
+                let client = create_client(
+                    &bcs_url,
+                    &token,
+                    bcs_cookie.as_deref(),
+                    oauth_headers.as_ref(),
+                );
+                let result = client
+                    .respond_collaboration_node(&run, &node, &content)
+                    .await?;
+                if structured_mode {
+                    println!("{}", serde_json::to_string(&result)?);
+                } else {
+                    print!("{}", collaboration_output::render(&result));
+                }
             }
 
             CollaborationCommands::Validate { file } => {
@@ -3368,11 +3688,7 @@ pub async fn run() -> Result<()> {
                     .validate_collaboration_definition(&definition_yaml)
                     .await?;
                 debug_response!(debug, "200", &validation);
-                if validation
-                    .get("valid")
-                    .and_then(serde_json::Value::as_bool)
-                    != Some(true)
-                {
+                if validation.get("valid").and_then(serde_json::Value::as_bool) != Some(true) {
                     emit_collaboration_validation(&validation, structured_mode);
                     std::process::exit(1);
                 }
@@ -3420,14 +3736,13 @@ pub async fn run() -> Result<()> {
                     })
                 );
 
-                if no_session
-                    && let Some(session_id) = &result.session_id
-                {
+                if no_session && let Some(session_id) = &result.session_id {
                     return Err(anyhow!(
                         "Group {} was created, but the server did not honor --no-session \
                          (created Session {}). Upgrade the server before using this option; \
                          the group and session have not been deleted.",
-                        result.id, session_id
+                        result.id,
+                        session_id
                     ));
                 }
                 if structured_mode {
@@ -3605,11 +3920,7 @@ pub async fn run() -> Result<()> {
             })?;
             let returned = groups.len() as u64;
             let has_more = !all && returned > 0 && next_offset < total;
-            let next_offset = if has_more {
-                Some(next_offset)
-            } else {
-                None
-            };
+            let next_offset = if has_more { Some(next_offset) } else { None };
             let next_command = next_offset.map(|next_offset| {
                 format!(
                     "bcs-cli list-groups --offset {} --batch-size {}",
@@ -3631,7 +3942,10 @@ pub async fn run() -> Result<()> {
             if structured_mode {
                 println!("{}", serde_json::to_string(&output)?);
             } else {
-                println!("Groups for current actor {} ({}/{}):", actor_id, returned, total);
+                println!(
+                    "Groups for current actor {} ({}/{}):",
+                    actor_id, returned, total
+                );
                 for group in &output.items {
                     let id = group
                         .get("id")
@@ -3841,7 +4155,11 @@ pub async fn run() -> Result<()> {
                 "chat outcome"
             );
 
-            let success = if detach { outcome.admission_succeeded() } else { outcome.delivered };
+            let success = if detach {
+                outcome.admission_succeeded()
+            } else {
+                outcome.delivered
+            };
             if json_mode {
                 // stdout = EXACTLY one JSON object (jq-parseable).
                 let json_value = if detach {
@@ -3886,10 +4204,7 @@ pub async fn run() -> Result<()> {
                         );
                     }
                 }
-                println!(
-                    "Run: {}",
-                    outcome.run_id.as_deref().unwrap_or("none")
-                );
+                println!("Run: {}", outcome.run_id.as_deref().unwrap_or("none"));
                 println!(
                     "Session: {}",
                     outcome.session_id.as_deref().unwrap_or("none")
@@ -3897,7 +4212,9 @@ pub async fn run() -> Result<()> {
                 println!("State: {}", outcome.state);
                 if let Some(delivery) = &outcome.delivery {
                     println!("Delivery: {}", delivery.status);
-                    if let Some(reason) = &delivery.wait_reason { println!("Waiting: {}", reason); }
+                    if let Some(reason) = &delivery.wait_reason {
+                        println!("Waiting: {}", reason);
+                    }
                 }
                 if let Some(err) = &outcome.error_message {
                     println!("Error: {}", err);
@@ -3907,25 +4224,41 @@ pub async fn run() -> Result<()> {
             if !success {
                 std::process::exit(1);
             }
-        },
+        }
 
         Commands::ChatRun { token, command } => {
             let token = get_token(token.as_deref())?;
-            let client = create_client(&bcs_url, &token, bcs_cookie.as_deref(), oauth_headers.as_ref());
+            let client = create_client(
+                &bcs_url,
+                &token,
+                bcs_cookie.as_deref(),
+                oauth_headers.as_ref(),
+            );
             let result = match command {
-                ChatRunCommands::Status { run_id } => serde_json::to_value(client.chat_run_status(&run_id, None, None).await?)?,
-                ChatRunCommands::Cancel { run_id } => serde_json::to_value(client.chat_run_cancel(&run_id).await?)?,
+                ChatRunCommands::Status { run_id } => {
+                    serde_json::to_value(client.chat_run_status(&run_id, None, None).await?)?
+                }
+                ChatRunCommands::Cancel { run_id } => {
+                    serde_json::to_value(client.chat_run_cancel(&run_id).await?)?
+                }
             };
-            if structured_mode { println!("{}", serde_json::to_string(&result)?); }
-            else {
+            if structured_mode {
+                println!("{}", serde_json::to_string(&result)?);
+            } else {
                 println!("Run: {}", result["run_id"].as_str().unwrap_or("unknown"));
                 println!("State: {}", result["state"].as_str().unwrap_or("unknown"));
-                if let Some(status) = result.get("delivery").and_then(|d| d.get("status")).and_then(|v| v.as_str()) {
+                if let Some(status) = result
+                    .get("delivery")
+                    .and_then(|d| d.get("status"))
+                    .and_then(|v| v.as_str())
+                {
                     println!("Delivery: {}", status);
-                    if matches!(status, "cancelling" | "cancel_unknown") { println!("Cancellation is not confirmed; query status again."); }
+                    if matches!(status, "cancelling" | "cancel_unknown") {
+                        println!("Cancellation is not confirmed; query status again.");
+                    }
                 }
             }
-        },
+        }
 
         Commands::GroupStatus {
             token,
@@ -3996,6 +4329,117 @@ pub async fn run() -> Result<()> {
                 println!("  Group: {}", group);
                 println!("  Status: completed");
             }
+        }
+
+        Commands::GroupContext { auth, command } => {
+            let auth_value = get_token(auth.as_deref())?;
+            let client = create_client(
+                &bcs_url,
+                &auth_value,
+                bcs_cookie.as_deref(),
+                oauth_headers.as_ref(),
+            );
+            let (operation, group_id, session_id, round_id, body) = match command {
+                GroupContextCommands::Add {
+                    group_id,
+                    session_id,
+                    round_id,
+                    name,
+                    scope_level,
+                    content,
+                    visible_to,
+                    collect_from,
+                    valid_from,
+                    valid_to,
+                } => (
+                    "add",
+                    group_id,
+                    session_id,
+                    round_id,
+                    group_context_add_body(
+                        name,
+                        scope_level,
+                        content,
+                        visible_to,
+                        collect_from,
+                        valid_from,
+                        valid_to,
+                    )?,
+                ),
+                GroupContextCommands::Update {
+                    group_id,
+                    session_id,
+                    round_id,
+                    name,
+                    scope_level,
+                    content,
+                    visible_to,
+                    collect_from,
+                    valid_from,
+                    valid_to,
+                    change_reason,
+                } => (
+                    "update",
+                    group_id,
+                    session_id,
+                    round_id,
+                    group_context_update_body(
+                        name,
+                        scope_level,
+                        content,
+                        visible_to,
+                        collect_from,
+                        valid_from,
+                        valid_to,
+                        Some(change_reason),
+                    )?,
+                ),
+                GroupContextCommands::List {
+                    group_id,
+                    session_id,
+                    round_id,
+                    scope_level,
+                    scope_levels,
+                } => {
+                    let resolved_scope_levels =
+                        resolve_group_context_scope_levels(scope_level, scope_levels)?;
+                    (
+                        "list",
+                        group_id,
+                        session_id,
+                        round_id,
+                        json!({"scope_levels": if resolved_scope_levels.is_empty() { json!(null) } else { json!(resolved_scope_levels) }}),
+                    )
+                }
+                GroupContextCommands::Get {
+                    group_id,
+                    session_id,
+                    round_id,
+                    name,
+                    scope_level,
+                    scope_levels,
+                    limit,
+                } => {
+                    let resolved_scope_levels =
+                        resolve_group_context_scope_levels(scope_level, scope_levels)?;
+                    (
+                        "get",
+                        group_id,
+                        session_id,
+                        round_id,
+                        json!({"name": name, "scope_levels": if resolved_scope_levels.is_empty() { json!(null) } else { json!(resolved_scope_levels) }, "limit": limit}),
+                    )
+                }
+            };
+            let query = group_context_query(&group_id, session_id.as_deref(), round_id.as_deref());
+            let query_refs = query
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str()))
+                .collect::<Vec<_>>();
+            let result = client
+                .group_context_request(operation, &query_refs, body)
+                .await?;
+            println!("{}", serde_json::to_string(&result)?);
         }
 
         Commands::Friend { token, command } => {
@@ -4453,11 +4897,11 @@ pub async fn run() -> Result<()> {
                             .get("session_kind")
                             .and_then(|v| v.as_str())
                             .unwrap_or("chat");
-                        let status = result
-                            .get("status")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("?");
-                        println!("✓ Session created: {} (kind={}, status={})", sid, kind, status);
+                        let status = result.get("status").and_then(|v| v.as_str()).unwrap_or("?");
+                        println!(
+                            "✓ Session created: {} (kind={}, status={})",
+                            sid, kind, status
+                        );
                     }
                 }
 
@@ -4510,10 +4954,7 @@ pub async fn run() -> Result<()> {
                                 .or_else(|| item.get("id"))
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("?");
-                            let st = item
-                                .get("status")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("?");
+                            let st = item.get("status").and_then(|v| v.as_str()).unwrap_or("?");
                             let title = item
                                 .get("session_title")
                                 .and_then(|v| v.as_str())
@@ -4559,9 +5000,7 @@ pub async fn run() -> Result<()> {
                             .and_then(|v| v.as_u64())
                             .unwrap_or(0);
                         println!("✓ Delivered to {} (failed {})", delivered, failed);
-                        if let Some(mentions) =
-                            result.get("mentions").and_then(|v| v.as_array())
-                        {
+                        if let Some(mentions) = result.get("mentions").and_then(|v| v.as_array()) {
                             if !mentions.is_empty() {
                                 let names: Vec<String> = mentions
                                     .iter()
@@ -4686,7 +5125,8 @@ pub async fn run() -> Result<()> {
 
                     if cli.json {
                         println!("{}", serde_json::to_string(&result)?);
-                    } else if result.get("already_completed").and_then(|v| v.as_bool()) == Some(true)
+                    } else if result.get("already_completed").and_then(|v| v.as_bool())
+                        == Some(true)
                     {
                         println!("↺ Already completed: {}", session);
                     } else {
@@ -4726,8 +5166,9 @@ pub async fn run() -> Result<()> {
                             .get("participants")
                             .and_then(|v| v.as_array())
                             .and_then(|arr| {
-                                arr.iter()
-                                    .find(|p| p.get("bot_uuid").and_then(|v| v.as_str()) == Some(&bot_uuid))
+                                arr.iter().find(|p| {
+                                    p.get("bot_uuid").and_then(|v| v.as_str()) == Some(&bot_uuid)
+                                })
                             })
                             .and_then(|p| p.get("role").and_then(|v| v.as_str()))
                             .unwrap_or("?");
@@ -4738,10 +5179,7 @@ pub async fn run() -> Result<()> {
                     }
                 }
 
-                SessionCommands::RemoveMember {
-                    session,
-                    bot_uuid,
-                } => {
+                SessionCommands::RemoveMember { session, bot_uuid } => {
                     debug_request!(
                         debug,
                         "DELETE",
@@ -4749,9 +5187,7 @@ pub async fn run() -> Result<()> {
                         json!({})
                     );
 
-                    let result = client
-                        .remove_session_member(&session, &bot_uuid)
-                        .await?;
+                    let result = client.remove_session_member(&session, &bot_uuid).await?;
 
                     debug_response!(debug, "200", &result);
 
@@ -4810,7 +5246,9 @@ pub async fn run() -> Result<()> {
                         if let Some(link) = result.get("link").and_then(|v| v.as_str()) {
                             println!("✓ Invite link created:");
                             println!("  {}", link);
-                            if let Some(expires_at) = result.get("expires_at").and_then(|v| v.as_u64()) {
+                            if let Some(expires_at) =
+                                result.get("expires_at").and_then(|v| v.as_u64())
+                            {
                                 println!("  Expires: {} (Unix ms)", expires_at);
                             }
                         } else {
@@ -4819,189 +5257,198 @@ pub async fn run() -> Result<()> {
                     }
                 }
 
-                SessionCommands::File { command } => {
-                    match command {
-                        SessionFileCommands::Upload { session, path, name, mime } => {
-                            debug_request!(
-                                debug,
-                                "POST",
-                                &format!("/sessions/{}/files", &session),
-                                json!({ "path": &path, "name": &name, "mime": &mime })
+                SessionCommands::File { command } => match command {
+                    SessionFileCommands::Upload {
+                        session,
+                        path,
+                        name,
+                        mime,
+                    } => {
+                        debug_request!(
+                            debug,
+                            "POST",
+                            &format!("/sessions/{}/files", &session),
+                            json!({ "path": &path, "name": &name, "mime": &mime })
+                        );
+
+                        let result = client
+                            .upload_session_file(&session, &path, name.as_deref(), mime.as_deref())
+                            .await?;
+
+                        debug_response!(debug, "200", &result);
+
+                        if cli.json {
+                            println!("{}", serde_json::to_string(&result)?);
+                        } else {
+                            let fid = result
+                                .get("file_id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("?");
+                            let size = result.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+                            println!("✓ Uploaded: {} ({})", fid, size);
+                        }
+                    }
+                    SessionFileCommands::List {
+                        session,
+                        prefix,
+                        status,
+                        limit,
+                        offset,
+                    } => {
+                        debug_request!(
+                            debug,
+                            "GET",
+                            &format!("/sessions/{}/files", &session),
+                            json!({ "prefix": &prefix, "status": &status, "limit": &limit, "offset": &offset })
+                        );
+
+                        let result = client
+                            .list_session_files(
+                                &session,
+                                prefix.as_deref(),
+                                status.as_deref(),
+                                limit,
+                                offset,
+                            )
+                            .await?;
+
+                        debug_response!(debug, "200", &result);
+
+                        if cli.json {
+                            println!("{}", serde_json::to_string(&result)?);
+                        } else {
+                            let items = result
+                                .get("items")
+                                .or_else(|| result.get("files"))
+                                .and_then(|v| v.as_array())
+                                .cloned()
+                                .unwrap_or_default();
+                            let total = result
+                                .get("total")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(items.len() as u64);
+                            println!(
+                                "Files in session {} ({} of {}):",
+                                session,
+                                items.len(),
+                                total
                             );
-
-                            let result = client
-                                .upload_session_file(&session, &path, name.as_deref(), mime.as_deref())
-                                .await?;
-
-                            debug_response!(debug, "200", &result);
-
-                            if cli.json {
-                                println!("{}", serde_json::to_string(&result)?);
-                            } else {
-                                let fid = result
+                            for item in items {
+                                let id = item
                                     .get("file_id")
+                                    .or_else(|| item.get("id"))
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("?");
-                                let size = result
-                                    .get("size")
-                                    .and_then(|v| v.as_u64())
-                                    .unwrap_or(0);
-                                println!("✓ Uploaded: {} ({})", fid, size);
+                                let name = item
+                                    .get("file_name")
+                                    .or_else(|| item.get("name"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                let size = item.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+                                let status =
+                                    item.get("status").and_then(|v| v.as_str()).unwrap_or("?");
+                                println!("  - {} \"{}\" ({} bytes) [{}]", id, name, size, status);
                             }
                         }
-                        SessionFileCommands::List { session, prefix, status, limit, offset } => {
-                            debug_request!(
-                                debug,
-                                "GET",
-                                &format!("/sessions/{}/files", &session),
-                                json!({ "prefix": &prefix, "status": &status, "limit": &limit, "offset": &offset })
-                            );
+                    }
+                    SessionFileCommands::Download {
+                        session,
+                        file_id,
+                        out,
+                        ttl,
+                    } => {
+                        debug_request!(
+                            debug,
+                            "GET",
+                            &format!("/sessions/{}/files/{}/content", &session, &file_id),
+                            json!({ "out": &out, "ttl": &ttl })
+                        );
 
-                            let result = client
-                                .list_session_files(&session, prefix.as_deref(), status.as_deref(), limit, offset)
-                                .await?;
+                        let out_path = client
+                            .download_session_file(&session, &file_id, out.as_deref(), ttl)
+                            .await?;
 
-                            debug_response!(debug, "200", &result);
+                        debug_response!(debug, "200", json!({ "out": &out_path }));
 
-                            if cli.json {
-                                println!("{}", serde_json::to_string(&result)?);
-                            } else {
-                                let items = result
-                                    .get("items")
-                                    .or_else(|| result.get("files"))
-                                    .and_then(|v| v.as_array())
-                                    .cloned()
-                                    .unwrap_or_default();
-                                let total = result
-                                    .get("total")
-                                    .and_then(|v| v.as_u64())
-                                    .unwrap_or(items.len() as u64);
-                                println!(
-                                    "Files in session {} ({} of {}):",
-                                    session,
-                                    items.len(),
-                                    total
-                                );
-                                for item in items {
-                                    let id = item
-                                        .get("file_id")
-                                        .or_else(|| item.get("id"))
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("?");
-                                    let name = item
-                                        .get("file_name")
-                                        .or_else(|| item.get("name"))
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("");
-                                    let size = item
-                                        .get("size")
-                                        .and_then(|v| v.as_u64())
-                                        .unwrap_or(0);
-                                    let status = item
-                                        .get("status")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("?");
-                                    println!("  - {} \"{}\" ({} bytes) [{}]", id, name, size, status);
+                        if cli.json {
+                            println!("{}", json!({ "out": out_path }));
+                        } else {
+                            println!("✓ Downloaded to {}", out_path);
+                        }
+                    }
+                    SessionFileCommands::Delete { session, file_id } => {
+                        debug_request!(
+                            debug,
+                            "DELETE",
+                            &format!("/sessions/{}/files/{}", &session, &file_id),
+                            json!({})
+                        );
+
+                        let result = client.delete_session_file(&session, &file_id).await?;
+
+                        debug_response!(debug, "200", &result);
+
+                        if cli.json {
+                            println!("{}", serde_json::to_string(&result)?);
+                        } else {
+                            println!("✓ Deleted: {}", file_id);
+                        }
+                    }
+                    SessionFileCommands::Share {
+                        session,
+                        file_id,
+                        ttl,
+                    } => {
+                        debug_request!(
+                            debug,
+                            "POST",
+                            &format!("/sessions/{}/files/{}/share", &session, &file_id),
+                            json!({ "ttl": &ttl })
+                        );
+
+                        let result = client.share_session_file(&session, &file_id, ttl).await?;
+
+                        debug_response!(debug, "200", &result);
+
+                        if cli.json {
+                            println!("{}", serde_json::to_string(&result)?);
+                        } else {
+                            if let Some(link) = result.get("share_url").and_then(|v| v.as_str()) {
+                                println!("✓ Share link:");
+                                println!("  {}", link);
+                                if let Some(expires) =
+                                    result.get("expires_at").and_then(|v| v.as_u64())
+                                {
+                                    println!("  Expires: {} (Unix ms)", expires);
                                 }
-                            }
-                        }
-                        SessionFileCommands::Download { session, file_id, out, ttl } => {
-                            debug_request!(
-                                debug,
-                                "GET",
-                                &format!("/sessions/{}/files/{}/content", &session, &file_id),
-                                json!({ "out": &out, "ttl": &ttl })
-                            );
-
-                            let out_path = client
-                                .download_session_file(&session, &file_id, out.as_deref(), ttl)
-                                .await?;
-
-                            debug_response!(debug, "200", json!({ "out": &out_path }));
-
-                            if cli.json {
-                                println!("{}", json!({ "out": out_path }));
-                            } else {
-                                println!("✓ Downloaded to {}", out_path);
-                            }
-                        }
-                        SessionFileCommands::Delete { session, file_id } => {
-                            debug_request!(
-                                debug,
-                                "DELETE",
-                                &format!("/sessions/{}/files/{}", &session, &file_id),
-                                json!({})
-                            );
-
-                            let result = client
-                                .delete_session_file(&session, &file_id)
-                                .await?;
-
-                            debug_response!(debug, "200", &result);
-
-                            if cli.json {
-                                println!("{}", serde_json::to_string(&result)?);
-                            } else {
-                                println!("✓ Deleted: {}", file_id);
-                            }
-                        }
-                        SessionFileCommands::Share { session, file_id, ttl } => {
-                            debug_request!(
-                                debug,
-                                "POST",
-                                &format!("/sessions/{}/files/{}/share", &session, &file_id),
-                                json!({ "ttl": &ttl })
-                            );
-
-                            let result = client
-                                .share_session_file(&session, &file_id, ttl)
-                                .await?;
-
-                            debug_response!(debug, "200", &result);
-
-                            if cli.json {
-                                println!("{}", serde_json::to_string(&result)?);
-                            } else {
-                                if let Some(link) = result.get("share_url").and_then(|v| v.as_str()) {
-                                    println!("✓ Share link:");
-                                    println!("  {}", link);
-                                    if let Some(expires) = result.get("expires_at").and_then(|v| v.as_u64()) {
-                                        println!("  Expires: {} (Unix ms)", expires);
-                                    }
-                                } else {
-                                    println!("{}", serde_json::to_string_pretty(&result)?);
-                                }
-                            }
-                        }
-                        SessionFileCommands::Capabilities { session } => {
-                            debug_request!(
-                                debug,
-                                "GET",
-                                &format!("/sessions/{}/files/capabilities", &session),
-                                json!({})
-                            );
-
-                            let result = client
-                                .session_file_capabilities(&session)
-                                .await?;
-
-                            debug_response!(debug, "200", &result);
-
-                            if cli.json {
-                                println!("{}", serde_json::to_string(&result)?);
                             } else {
                                 println!("{}", serde_json::to_string_pretty(&result)?);
                             }
                         }
                     }
-                }
+                    SessionFileCommands::Capabilities { session } => {
+                        debug_request!(
+                            debug,
+                            "GET",
+                            &format!("/sessions/{}/files/capabilities", &session),
+                            json!({})
+                        );
+
+                        let result = client.session_file_capabilities(&session).await?;
+
+                        debug_response!(debug, "200", &result);
+
+                        if cli.json {
+                            println!("{}", serde_json::to_string(&result)?);
+                        } else {
+                            println!("{}", serde_json::to_string_pretty(&result)?);
+                        }
+                    }
+                },
             }
         }
 
-        Commands::Service {
-            token,
-            command,
-        } => {
+        Commands::Service { token, command } => {
             let token = get_token(token.as_deref())?;
             let client = create_client(
                 &bcs_url,
@@ -5032,11 +5479,9 @@ pub async fn run() -> Result<()> {
                         .map(parse_json_arg)
                         .transpose()
                         .map_err(|e| anyhow!("--meta: {}", e))?;
-                    let meta_json = merge_baas_session_id_into_meta(
-                        meta_json,
-                        baas_session_id.as_deref(),
-                    )
-                    .map_err(|e| anyhow!("--baas-session-id: {}", e))?;
+                    let meta_json =
+                        merge_baas_session_id_into_meta(meta_json, baas_session_id.as_deref())
+                            .map_err(|e| anyhow!("--baas-session-id: {}", e))?;
 
                     debug_request!(
                         debug,
@@ -5078,10 +5523,8 @@ pub async fn run() -> Result<()> {
                         }
                     } else {
                         let budget = timeout_ms.unwrap_or(1_800_000);
-                        let final_session = wait_for_service_completion(
-                            &client, &group, &sid, budget,
-                        )
-                        .await?;
+                        let final_session =
+                            wait_for_service_completion(&client, &group, &sid, budget).await?;
                         if cli.json {
                             println!("{}", serde_json::to_string(&final_session)?);
                         } else {
@@ -5116,10 +5559,8 @@ pub async fn run() -> Result<()> {
                 } => {
                     let (gid, sid_ref) = split_service_sid(&sid, group.as_deref())?;
                     let budget = timeout_ms.unwrap_or(1_800_000);
-                    let final_session = wait_for_service_completion(
-                        &client, gid, sid_ref, budget,
-                    )
-                    .await?;
+                    let final_session =
+                        wait_for_service_completion(&client, gid, sid_ref, budget).await?;
                     if cli.json {
                         println!("{}", serde_json::to_string(&final_session)?);
                     } else {
@@ -5159,6 +5600,187 @@ mod tests {
         unsafe {
             std::env::remove_var(key);
         }
+    }
+
+    #[test]
+    fn group_context_add_parses_valid_range_flags() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "group-context",
+            "add",
+            "--group-id",
+            "game-room-7",
+            "--name",
+            "game_rule",
+            "--scope-level",
+            "group",
+            "--content",
+            "rules",
+            "--collect-from",
+            r#"{"userIds":["judge_bot"]}"#,
+            "--valid-from",
+            "2026-10-12T14:56:08+08:00",
+            "--valid-to",
+            "1791797768000",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::GroupContext {
+                command:
+                    GroupContextCommands::Add {
+                        valid_from,
+                        valid_to,
+                        ..
+                    },
+                ..
+            } => {
+                assert_eq!(valid_from.as_deref(), Some("2026-10-12T14:56:08+08:00"));
+                assert_eq!(valid_to.as_deref(), Some("1791797768000"));
+            }
+            _ => panic!("expected group-context add command"),
+        }
+    }
+
+    #[test]
+    fn group_context_add_rejects_change_reason_flag() {
+        let err = match Cli::try_parse_from([
+            "bcs-cli",
+            "group-context",
+            "add",
+            "--group-id",
+            "game-room-7",
+            "--name",
+            "game_rule",
+            "--scope-level",
+            "group",
+            "--content",
+            "rules",
+            "--collect-from",
+            r#"{"userIds":["judge_bot"]}"#,
+            "--change-reason",
+            "not allowed",
+        ]) {
+            Ok(_) => panic!("expected parse error"),
+            Err(err) => err,
+        };
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn group_context_update_requires_change_reason_flag() {
+        let err = match Cli::try_parse_from([
+            "bcs-cli",
+            "group-context",
+            "update",
+            "--group-id",
+            "game-room-7",
+            "--name",
+            "player_state",
+            "--scope-level",
+            "session",
+            "--content",
+            "updated",
+        ]) {
+            Ok(_) => panic!("expected parse error"),
+            Err(err) => err,
+        };
+        assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn group_context_list_parses_plural_scope_levels_flag() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "group-context",
+            "list",
+            "--group-id",
+            "game-room-7",
+            "--scope-levels",
+            "group,session",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::GroupContext {
+                command:
+                    GroupContextCommands::List {
+                        scope_level,
+                        scope_levels,
+                        ..
+                    },
+                ..
+            } => {
+                assert!(scope_level.is_empty());
+                assert_eq!(scope_levels, vec!["group", "session"]);
+            }
+            _ => panic!("expected group-context list command"),
+        }
+    }
+
+    #[test]
+    fn group_context_scope_level_flags_are_mutually_exclusive() {
+        let err = resolve_group_context_scope_levels(
+            vec!["group".to_string()],
+            vec!["session".to_string()],
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("--scope-level and --scope-levels cannot be used together")
+        );
+    }
+
+    #[test]
+    fn group_context_add_body_includes_valid_fields_only_when_provided() {
+        let with_valid = group_context_add_body(
+            "game_rule".to_string(),
+            "group".to_string(),
+            "rules".to_string(),
+            r#"{"userIds":[]}"#.to_string(),
+            r#"{"userIds":["judge_bot"]}"#.to_string(),
+            Some("2026-10-12T14:56:08+08:00".to_string()),
+            Some("1791797768000".to_string()),
+        )
+        .unwrap();
+        assert_eq!(with_valid["valid_from"], "2026-10-12T14:56:08+08:00");
+        assert_eq!(with_valid["valid_to"], serde_json::json!(1791797768000i64));
+
+        let without_valid = group_context_add_body(
+            "game_rule".to_string(),
+            "group".to_string(),
+            "rules".to_string(),
+            r#"{"userIds":[]}"#.to_string(),
+            r#"{"userIds":["judge_bot"]}"#.to_string(),
+            None,
+            None,
+        )
+        .unwrap();
+        let object = without_valid.as_object().unwrap();
+        assert!(!object.contains_key("valid_from"));
+        assert!(!object.contains_key("valid_to"));
+    }
+
+    #[test]
+    fn group_context_update_body_omits_unprovided_patch_fields() {
+        let body = group_context_update_body(
+            "player_state".to_string(),
+            "session".to_string(),
+            None,
+            None,
+            None,
+            Some("2026-10-12 14:56:08".to_string()),
+            None,
+            Some("extend validity".to_string()),
+        )
+        .unwrap();
+        let object = body.as_object().unwrap();
+        assert_eq!(object.get("valid_from").unwrap(), "2026-10-12 14:56:08");
+        assert_eq!(object.get("change_reason").unwrap(), "extend validity");
+        assert!(!object.contains_key("content"));
+        assert!(!object.contains_key("visible_to"));
+        assert!(!object.contains_key("collect_from"));
+        assert!(!object.contains_key("valid_to"));
     }
 
     fn write_session_file(temp_dir: &TempDir, value: serde_json::Value) {
@@ -5218,15 +5840,11 @@ mod tests {
 
     #[test]
     fn test_create_group_requires_driver_or_manager() {
-        let error = match Cli::try_parse_from([
-            "bcs-cli",
-            "create-group",
-            "--participants",
-            "worker-1",
-        ]) {
-            Ok(_) => panic!("expected create-group to require a lead bot"),
-            Err(error) => error,
-        };
+        let error =
+            match Cli::try_parse_from(["bcs-cli", "create-group", "--participants", "worker-1"]) {
+                Ok(_) => panic!("expected create-group to require a lead bot"),
+                Err(error) => error,
+            };
 
         assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
     }
@@ -5300,13 +5918,9 @@ mod tests {
 
     #[test]
     fn collaboration_validate_command_parses_yaml_path() {
-        let cli = Cli::try_parse_from([
-            "bcs-cli",
-            "collaboration",
-            "validate",
-            "/tmp/workflow.yaml",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["bcs-cli", "collaboration", "validate", "/tmp/workflow.yaml"])
+                .unwrap();
 
         match cli.command {
             Commands::Collaboration {
@@ -5540,8 +6154,8 @@ mod tests {
         validate_custom_group_bindings(&bindings, &validation, "bot-driver").unwrap();
 
         let missing = parse_custom_group_bindings(&["planner=bot-driver".to_string()]).unwrap();
-        let error = validate_custom_group_bindings(&missing, &validation, "bot-driver")
-            .unwrap_err();
+        let error =
+            validate_custom_group_bindings(&missing, &validation, "bot-driver").unwrap_err();
         assert!(error.to_string().contains("writer"));
     }
 
@@ -6251,14 +6865,8 @@ mod tests {
 
     #[test]
     fn test_channel_unbind_command_parses_id() {
-        let cli = Cli::try_parse_from([
-            "bcs-cli",
-            "channel",
-            "unbind",
-            "--id",
-            "binding_1",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["bcs-cli", "channel", "unbind", "--id", "binding_1"]).unwrap();
 
         match cli.command {
             Commands::Channel {
@@ -6356,10 +6964,7 @@ mod tests {
         match cli.command {
             Commands::Discover { query, skills, .. } => {
                 assert_eq!(query.as_deref(), Some("deployment"));
-                assert_eq!(
-                    skills,
-                    vec!["code_review".to_string(), "sql".to_string()]
-                );
+                assert_eq!(skills, vec!["code_review".to_string(), "sql".to_string()]);
             }
             _ => panic!("expected discover command"),
         }
@@ -6389,7 +6994,9 @@ mod tests {
         .unwrap();
 
         match cli.command {
-            Commands::Chat { organization_code, .. } => {
+            Commands::Chat {
+                organization_code, ..
+            } => {
                 assert_eq!(organization_code.as_deref(), Some("promo-2026"));
             }
             _ => panic!("expected chat command"),
@@ -6529,14 +7136,7 @@ mod tests {
 
     #[test]
     fn test_session_create_parses_minimal_args() {
-        let cli = Cli::try_parse_from([
-            "bcs-cli",
-            "session",
-            "create",
-            "--group",
-            "g-1",
-        ])
-        .unwrap();
+        let cli = Cli::try_parse_from(["bcs-cli", "session", "create", "--group", "g-1"]).unwrap();
 
         match cli.command {
             Commands::Session {
@@ -6665,8 +7265,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
 
         // Provided sid round-trips.
-        let cli =
-            Cli::try_parse_from(["bcs-cli", "session", "get", "g-1:abcdef01"]).unwrap();
+        let cli = Cli::try_parse_from(["bcs-cli", "session", "get", "g-1:abcdef01"]).unwrap();
         match cli.command {
             Commands::Session {
                 command: SessionCommands::Get { session },
@@ -6751,11 +7350,7 @@ mod tests {
 
         match cli.command {
             Commands::Session {
-                command:
-                    SessionCommands::Patch {
-                        session,
-                        title,
-                    },
+                command: SessionCommands::Patch { session, title },
                 ..
             } => {
                 assert_eq!(session, "g-1:aabb0011");
@@ -6798,20 +7393,11 @@ mod tests {
         }
 
         // minimal (no optional args)
-        let cli2 = Cli::try_parse_from([
-            "bcs-cli",
-            "session",
-            "complete",
-            "g-1:aabb0011",
-        ])
-        .unwrap();
+        let cli2 = Cli::try_parse_from(["bcs-cli", "session", "complete", "g-1:aabb0011"]).unwrap();
 
         match cli2.command {
             Commands::Session {
-                command:
-                    SessionCommands::Complete {
-                        output, error, ..
-                    },
+                command: SessionCommands::Complete { output, error, .. },
                 ..
             } => {
                 assert!(output.is_none());
@@ -6906,11 +7492,7 @@ mod tests {
 
         match cli.command {
             Commands::Session {
-                command:
-                    SessionCommands::RemoveMember {
-                        session,
-                        bot_uuid,
-                    },
+                command: SessionCommands::RemoveMember { session, bot_uuid },
                 ..
             } => {
                 assert_eq!(session, "g-1:aabb0011");
@@ -6985,10 +7567,7 @@ mod tests {
 
     #[test]
     fn test_service_invoke_parses_minimal_args() {
-        let cli = Cli::try_parse_from([
-            "bcs-cli", "service", "invoke", "--group", "g-1",
-        ])
-        .unwrap();
+        let cli = Cli::try_parse_from(["bcs-cli", "service", "invoke", "--group", "g-1"]).unwrap();
 
         match cli.command {
             Commands::Service {
@@ -7087,7 +7666,10 @@ mod tests {
                 assert_eq!(input.as_deref(), Some(r#"{"q":"hi"}"#));
                 assert_eq!(meta.as_deref(), Some(r#"{"trace":"abc"}"#));
                 assert_eq!(session_id.as_deref(), Some("g-1:00000001"));
-                assert_eq!(baas_session_id.as_deref(), Some("agent:main:baas-session-1"));
+                assert_eq!(
+                    baas_session_id.as_deref(),
+                    Some("agent:main:baas-session-1")
+                );
                 assert_eq!(caller_id.as_deref(), Some("client-a"));
                 assert_eq!(title.as_deref(), Some("demo"));
                 assert!(detach);
@@ -7127,12 +7709,9 @@ mod tests {
             }
         }));
 
-        let merged = merge_baas_session_id_into_meta(
-            meta,
-            Some("agent:main:baas-session-1"),
-        )
-        .unwrap()
-        .expect("meta should exist after merge");
+        let merged = merge_baas_session_id_into_meta(meta, Some("agent:main:baas-session-1"))
+            .unwrap()
+            .expect("meta should exist after merge");
 
         assert_eq!(merged["trace"], "abc");
         assert_eq!(merged["callback_target"]["source"], "cli");
@@ -7156,13 +7735,7 @@ mod tests {
 
     #[test]
     fn test_service_status_parses_positional_sid() {
-        let cli = Cli::try_parse_from([
-            "bcs-cli",
-            "service",
-            "status",
-            "g-1:abcdef01",
-        ])
-        .unwrap();
+        let cli = Cli::try_parse_from(["bcs-cli", "service", "status", "g-1:abcdef01"]).unwrap();
 
         match cli.command {
             Commands::Service {
@@ -7297,5 +7870,44 @@ mod tests {
     fn test_parse_json_arg_rejects_bare_at_sign() {
         let err = parse_json_arg("@").unwrap_err();
         assert!(err.to_string().contains("must be followed by a file path"));
+    }
+
+    #[test]
+    fn group_context_insert_optional_timestamp_converts_numeric_strings() {
+        let mut body = serde_json::Map::new();
+        group_context_insert_optional_timestamp(&mut body, "valid_from", Some("1791797768".into()));
+        group_context_insert_optional_timestamp(
+            &mut body,
+            "valid_to",
+            Some("2026-10-12T14:56:08+08:00".into()),
+        );
+        group_context_insert_optional_timestamp(&mut body, "missing", None);
+
+        assert_eq!(body["valid_from"], serde_json::json!(1791797768i64));
+        assert_eq!(
+            body["valid_to"],
+            serde_json::json!("2026-10-12T14:56:08+08:00")
+        );
+        assert!(!body.contains_key("missing"));
+    }
+
+    #[test]
+    fn group_context_add_body_sends_timestamps_as_numbers() {
+        let body = group_context_add_body(
+            "test".into(),
+            "session".into(),
+            "content".into(),
+            r#"{"userIds":["bot1"]}"#.into(),
+            r#"{"userIds":["bot2"]}"#.into(),
+            Some("1791797768".into()),
+            Some("2026-10-12T14:56:08+08:00".into()),
+        )
+        .expect("build add body");
+
+        assert_eq!(body["valid_from"], serde_json::json!(1791797768i64));
+        assert_eq!(
+            body["valid_to"],
+            serde_json::json!("2026-10-12T14:56:08+08:00")
+        );
     }
 }

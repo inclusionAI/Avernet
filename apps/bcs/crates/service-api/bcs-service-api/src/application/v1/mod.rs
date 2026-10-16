@@ -12,9 +12,10 @@ pub mod collaboration_definition;
 pub mod collaboration_template;
 pub mod error;
 pub mod event_subscription;
-pub mod friendship;
 pub mod friend_connection;
+pub mod friendship;
 pub mod group;
+pub mod group_context;
 pub mod group_session_connection;
 pub mod identity;
 pub mod internal_bot_attributes;
@@ -37,9 +38,10 @@ pub use collaboration_definition::*;
 pub use collaboration_template::*;
 pub use error::*;
 pub use event_subscription::*;
-pub use friendship::*;
 pub use friend_connection::*;
+pub use friendship::*;
 pub use group::*;
+pub use group_context::*;
 pub use group_session_connection::*;
 pub use identity::{
     AuthenticatedAccessKeyIdentity, AuthenticatedAppIdentity, AuthenticatedBotIdentity,

@@ -10,27 +10,39 @@ same server for its UI. An ordinary desktop installation is not guaranteed to
 expose this interface. Check the host's actual socket before registering. This
 mode does not configure or restart the desktop host, and successful RPC access
 alone does not prove that a particular desktop UI displays the created thread.
-The daemon's raw `codex app-server proxy` control channel is a different interface.
+Detection uses `$CODEX_HOME/app-server-control/app-server-control.sock`, or
+`~/.codex/app-server-control/app-server-control.sock` when CODEX_HOME is unset.
+This is the native `--listen unix://` location. Bridge verifies a user-owned
+socket without group/world write access, checks the peer UID, performs
+the WebSocket upgrade and validates the Codex initialization response. Checks are
+bounded, create no thread/turn, and disconnect only the probing client.
+Native shortened-socket aliases are accepted only when both the alias and target
+are in current-user private directories; untrusted aliases are rejected.
+The private desktop `ipc/ipc.sock` is never used. A raw control proxy is not
+assumed compatible merely because its path matches: the wire protocol must pass.
 
 Register using a Provider-scoped v2 token:
 
 ```sh
 bcs-bridge register --engine codex-desktop \
-  --engine-option socket=/absolute/path/to/desktop-app-server.sock \
   --token '<registration-token>' --bot-name 'Desktop Codex' \
   --cwd /absolute/project --api-url https://bcs.example.com \
   --upstream-url wss://bcs.example.com/ws/bot && bcs-bridge start
 ```
 
-Do not pass `--engine-bin`. Registration validates the socket option's shape;
-the socket connection is attempted when a task runs. Saved configuration uses:
+Do not pass `--engine-bin`. Registration and CLI startup perform detection before
+registering a Bot or starting Bridge. Missing, stale, unsafe and incompatible
+endpoints fail explicitly, without creating a replacement server or falling back
+to CLI mode. Each turn reconnects to the selected listener so host restarts do not
+leave a cached dead connection. Advanced hosts may override discovery using
+`--engine-option socket=/absolute/path/to/desktop-app-server.sock`; validation and
+protocol checks still apply. Saved automatic configuration needs no socket:
 
 ```toml
 [[bot]]
 provider_bot_ref = "desktop-agent"
 engine = "codex-desktop"
 cwd = "/absolute/project"
-engine_options = { socket = "/absolute/path/to/desktop-app-server.sock" }
 ```
 
 Each BCS session gets its own Codex thread. Its id is persisted before starting
@@ -56,3 +68,27 @@ resume, event ownership, cancellation and server lifetime. Native compatibility
 was checked with the desktop-bundled Codex binary's `--listen unix://PATH`:
 the direct WebSocket `initialize` succeeded and disconnecting the client left
 the server running. These checks do not establish desktop UI visibility.
+
+## Switch workspaces without changing the Bot
+
+The registered directory is the default. Override it for a single run:
+
+```sh
+bcs-bridge stop &&
+bcs-bridge --profile codex-desktop-pre start --cwd /absolute/project-b --daemon
+```
+
+The same option is available for the native Codex CLI engine. Omit `--cwd` to
+return to the configured default. The configuration and Bot credentials remain
+unchanged; stop the active Bridge before starting another workspace. Only a
+configuration containing one native Codex Bot supports this override.
+
+Codex thread mappings and queued context are isolated by canonical directory.
+Switching back resumes that project's thread. Existing SQLite v1/v2 mappings,
+receipts and reconnect credentials migrate transactionally to schema v3.
+
+New registrations record their selected identity policy in
+`[registration].provider_auth`. For a legacy configuration, first record the
+policy that registered the existing Bot (for example `static-bearer`); this does
+not require creating another Bot. Distributions validate workspace identity
+through that policy before connecting.

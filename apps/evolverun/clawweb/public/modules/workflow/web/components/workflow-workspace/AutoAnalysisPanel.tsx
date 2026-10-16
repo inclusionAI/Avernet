@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { retryAutomationFailures, useAutomationPolicy, useAutomationStatus, useSaveAutomationPolicy } from '../../api/workflow-automation'
 const reasons: Record<string, string> = {
+  AUTOMATIC_CHAIN_INCOMPLETE: '批次链有未解决项，保留完整任务等待处理',
+  SOURCE_CHANGED: '证据已变化，原范围保留，需重新核对', BASELINE_REASSESSMENT_REQUIRED: '基线已变化，原建议保留待重评估', NO_ELIGIBLE_SCOPE: '当前没有可安全自动纳入的达标项，保留项可在问题页核对',
   OWNER_MISSING: '当前工作流没有有效负责人，保留进度等待恢复', OWNER_PERMISSION_DENIED: '负责人权限已变化，尚未派发',
   OWNER_OR_POLICY_CHANGED: '负责人或策略已变化，请人工核对原任务', AUTOMATION_DISABLED: '自动分析已关闭；已派发任务继续核对',
   ANALYSIS_FAILED: '分析未完成，可重试已明确失败的部分', PARTIAL_ANALYSIS: '分析包含未知项，未视为完整覆盖',
@@ -12,12 +14,13 @@ const kinds: Record<string, string> = { auto_cycle: '每日扫描', auto_run: '�
 const statuses: Record<string, string> = { pending: '待处理', dispatching: '正在提交', waiting: '核对中', retryable: '等待重试', uncertain: '待核对', done: '已完成', blocked: '需要处理' }
 export default function AutoAnalysisPanel({ workflowId }: { workflowId: string }) {
   const setting = useAutomationPolicy(workflowId), update = useSaveAutomationPolicy(workflowId), status = useAutomationStatus(workflowId)
+  const [impact, setImpact] = useState<'medium' | 'high'>('medium')
   const [time, setTime] = useState('09:00'), [message, setMessage] = useState(''), [retrying, setRetrying] = useState(false)
-  useEffect(() => { if (setting.data) setTime(setting.data.dailyTime) }, [setting.data?.version, workflowId])
+  useEffect(() => { if (setting.data) { setTime(setting.data.dailyTime); setImpact(setting.data.minimumImpact ?? 'medium') } }, [setting.data?.version, workflowId])
   if (setting.isLoading) return <p className="py-3 text-sm text-muted-foreground">正在读取自动分析配置…</p>
   if (setting.isError || !setting.data) return <div role="alert" className="text-sm text-destructive">配置加载失败。<button className="ml-2 underline" onClick={() => void setting.refetch()}>重试</button></div>
   const policy = setting.data
-  const save = (changes: Partial<{ enabled: boolean; autoDraft: boolean; dailyTime: string }>) => {
+  const save = (changes: Partial<{ enabled: boolean; autoDraft: boolean; dailyTime: string; minimumImpact: 'medium' | 'high' }>) => {
     setMessage('')
     update.mutate({ enabled: policy.enabled, autoDraft: policy.autoDraft, dailyTime: time, expectedVersion: policy.version, ...changes },
       { onSuccess: () => setMessage('策略已保存'), onError: error => { setMessage(error.message); void setting.refetch() } })
@@ -29,11 +32,13 @@ export default function AutoAnalysisPanel({ workflowId }: { workflowId: string }
         onClick={() => save({ enabled: !policy.enabled })} className={`shrink-0 rounded-full border px-4 py-2 text-sm ${policy.enabled ? 'border-primary bg-primary text-primary-foreground' : 'border-input bg-background text-muted-foreground'}`}>
         {policy.enabled ? '已开启' : '已关闭'}</button>
     </div>
+    {policy.scopeVersion !== 'all-qualified/v1' && <p className="text-sm text-muted-foreground">原策略保持原选择范围。保存执行范围后，处理上海时间前一自然日及历史未处理的全部达标建议。</p>}
     {policy.enabled && !policy.dailyConfigured && <p className="text-sm text-muted-foreground">原失败事件设置继续有效。请保存每日时间，明确启用每日增量调度。</p>}
     <div className="flex flex-wrap items-end gap-3 border-t border-border pt-4">
       <label className="text-sm text-foreground">每日执行时间 <span className="text-muted-foreground">Asia/Shanghai</span>
         <input type="time" aria-label="每日执行时间" value={time} disabled={!policy.enabled || update.isPending} onChange={event => setTime(event.target.value)} className="mt-2 block rounded-md border border-input bg-background px-3 py-2 text-foreground" /></label>
-      <button type="button" disabled={!policy.enabled || update.isPending || !time} onClick={() => save({ dailyTime: time })} className="rounded-md border border-input px-3 py-2 text-sm">保存时间</button>
+      <label className="text-sm text-foreground">最低影响<select aria-label="最低影响" value={impact} onChange={event => setImpact(event.target.value as 'medium' | 'high')} disabled={!policy.enabled || update.isPending} className="mt-2 block rounded-md border border-input bg-background px-3 py-2"><option value="medium">中等及以上</option><option value="high">高等及以上</option></select></label>
+      <button type="button" disabled={!policy.enabled || update.isPending || !time} onClick={() => save({ dailyTime: time, minimumImpact: impact })} className="rounded-md border border-input px-3 py-2 text-sm">保存执行范围</button>
     </div>
     <label className="flex items-start gap-3 rounded-lg bg-muted p-4 text-sm text-foreground">
       <input type="checkbox" aria-label="自动生成优化草稿" checked={policy.autoDraft} disabled={!policy.enabled || update.isPending} onChange={event => save({ autoDraft: event.target.checked })} className="mt-1 accent-primary" />
@@ -43,6 +48,7 @@ export default function AutoAnalysisPanel({ workflowId }: { workflowId: string }
     {message && <p role="status" className="text-sm text-foreground">{message}</p>}
     <section aria-label="自动分析执行状态" className="border-t border-border pt-4 text-sm">
       <h4 className="font-medium text-foreground">最近执行</h4>
+      {status.data?.round && <p className="mt-2 text-muted-foreground">本轮纳入 {status.data.round.total} 项；已完成 {status.data.round.completedBatches}/{status.data.round.batches} 批。保留待处理 {Object.values(status.data.round.deferred).reduce((a, b) => a + b, 0)} 项。<span className="block text-xs">按运行发生时间纳入前一自然日及历史未处理项；证据截至 {new Date(status.data.round.evidenceCutoffMs).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。</span></p>}
       {status.data?.pauseReason && <p className="mt-2 text-muted-foreground">{reasons[status.data.pauseReason] ?? '请核对策略和当前负责人'}</p>}
       {status.isError ? <p className="mt-2 text-muted-foreground">{status.error.message}</p> : <>
         <p className="mt-2 text-muted-foreground">{status.data?.lastScannedAtMs ? `扫描进度：${new Date(status.data.lastScannedAtMs).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}` : '尚未执行每日扫描'}</p>

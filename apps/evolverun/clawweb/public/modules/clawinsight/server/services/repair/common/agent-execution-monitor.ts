@@ -3,6 +3,7 @@ import type { EvolveRepository } from "@avernet/clawevolve/server/repositories/e
 import type { AisExecutor } from "@avernet/clawevolve/server/contracts/ais-executor";
 import type { AisStatusHandler } from "@avernet/clawevolve/server/services/ais/status-handler";
 import { aisContractForStep } from "@avernet/clawevolve/server/services/ais/ais-artifact-contract";
+import { redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
 
 /** Recover missing Base callbacks through the same injected business lifecycle handlers. */
 export async function reconcileAgentExecutions(deps: {
@@ -29,15 +30,20 @@ export async function reconcileAgentExecutions(deps: {
         const expired = current && execution.state !== "ended" && execution.leaseExpiresAt <= (deps.nowSeconds?.() ?? Math.floor(Date.now() / 1000));
         const provider = deps.providers[name];
         let reason = expired ? "AGENT_LEASE_EXPIRED" : "";
+        let errorMessage = "已保存业务进度与操作审计", retryable = true;
         if (step.bot_run_id) {
           // A temporary query failure is not evidence of business failure.
           const remote = await provider.getJobStatusDetail(step.bot_run_id);
-          if (remote.status === "stopped" || remote.status === "success" || (remote.status === "failed" && remote.rawStatus !== "notfound")) reason = "AIS_RESULT_MISSING";
+          if (remote.status === "stopped" || remote.status === "success" || (remote.status === "failed" && remote.rawStatus !== "notfound")) {
+            reason = "AIS_RESULT_MISSING";
+            retryable = remote.status !== "stopped" || expired;
+          }
+          if (remote.errorMessage) errorMessage = redactPersistableText(remote.errorMessage, 1500);
           if (expired && remote.status === "running") await provider.stopExecution(step.bot_run_id);
         }
         if (!reason) continue;
         await deps.handlers[name]({ task, step, report: { status: "failed", summary: "本次 Agent 容器执行中断，未收到有效运行回报",
-          errorCode: reason, errorMessage: "已保存业务进度与操作审计", retryable: true } });
+          errorCode: reason, errorMessage, retryable } });
       } catch { console.error("[agent-execution] reconciliation failed; will retry", row.task_id, row.step_id); }
     }
   }

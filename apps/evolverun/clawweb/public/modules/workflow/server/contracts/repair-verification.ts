@@ -5,7 +5,8 @@ export type RepairVerificationEvidence = { deploymentId: string; deployNumber: n
   samples: RepairVerificationSample[]; total: number; baseline: { deployNumber: number; total: number; succeeded: number; failed: number;
     successRate: number | null; averageDurationMs: number | null; averageTokens: number | null; window: { from: number | null; to: number | null } };
   status: 'waiting' | 'collecting' | 'ready'; note: string;
-  automatic?: Array<{ itemId: string; result: 'observing' | 'verified' | 'ineffective'; reason: string; eligibleSamples: number; observedDeployNumber?: number; rule: RepairEffectRule | null }>;
+  automatic?: Array<{ itemId: string; result: 'observing' | 'verified' | 'ineffective'; reason: string; eligibleSamples: number; observedDeployNumber?: number; rule: RepairEffectRule | null;
+    sampleSummary?: { related: number; complete: number; missingAnalysis: number; unsuccessfulNode: number } }>;
   excludedUnknownVersions: number;
   metrics: { window: { from: number | null; to: number | null }; succeeded: number; failed: number; completed: number;
     successRate: number | null; averageDurationMs: number | null; averageTokens: number | null; diagnosedTimeoutRuns: number; diagnosedRuns: number };

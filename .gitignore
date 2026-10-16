@@ -39,6 +39,7 @@ singlebox/.dependencies/
 .openclaw-host-bcn/
 .standalone-openclaw/
 test-bots/
+apps/bcs/logs/
 
 # Databases
 *.db

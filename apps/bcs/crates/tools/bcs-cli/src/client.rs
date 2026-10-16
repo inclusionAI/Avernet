@@ -780,6 +780,34 @@ impl BcsClient {
         Ok(result.updated)
     }
 
+    /// Call a Group Context endpoint using BCN query-string context.
+    ///
+    /// The CLI follows the same direct-BCS auth path as `bcs-cli chat`: the
+    /// request carries the normal bot token/OAuth headers and the server
+    /// resolves the effective actor from trusted headers. The actor id is not
+    /// sent in either the URL query or JSON body.
+    pub async fn group_context_request(
+        &self,
+        operation: &str,
+        query: &[(&str, &str)],
+        body: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let mut url = reqwest::Url::parse(&format!("{}/groupcontext/{}", self.base_url, operation))
+            .context("invalid BCS URL")?;
+        {
+            let mut pairs = url.query_pairs_mut();
+            for (key, value) in query {
+                pairs.append_pair(key, value);
+            }
+        }
+        let response = self
+            .add_auth(self.http_client.post(url).json(&body))
+            .send()
+            .await
+            .with_context(|| format!("Failed to call group context {}", operation))?;
+        Self::ensure_success(response, &format!("Group Context {}", operation)).await
+    }
+
     // ========================================================================
     // Bot Discovery
     // ========================================================================
@@ -910,7 +938,10 @@ impl BcsClient {
         if let Some(collab) = collaborate_bot {
             params.push(format!("collaborate_bot={}", urlencoding::encode(collab)));
         }
-        if let Some(code) = organization_code.map(str::trim).filter(|code| !code.is_empty()) {
+        if let Some(code) = organization_code
+            .map(str::trim)
+            .filter(|code| !code.is_empty())
+        {
             params.push(format!("organization_code={}", urlencoding::encode(code)));
         }
         if let Some(role) = role.map(str::trim).filter(|role| !role.is_empty()) {
@@ -1136,7 +1167,10 @@ impl BcsClient {
                 serde_json::Value::String(mode.to_string()),
             );
         }
-        if let Some(code) = organization_code.map(str::trim).filter(|code| !code.is_empty()) {
+        if let Some(code) = organization_code
+            .map(str::trim)
+            .filter(|code| !code.is_empty())
+        {
             if let Some(object) = payload.as_object_mut() {
                 object.insert(
                     "organization_code".to_string(),
@@ -1285,8 +1319,7 @@ impl BcsClient {
                         ChatRunState::Failed | ChatRunState::Cancelled => {
                             return Ok(Self::terminal_outcome(&status));
                         }
-                        ChatRunState::Pending | ChatRunState::Submitted
-                        | ChatRunState::Unknown => {
+                        ChatRunState::Pending | ChatRunState::Submitted | ChatRunState::Unknown => {
                             if status.is_terminal() {
                                 return Ok(Self::terminal_outcome(&status));
                             }
@@ -1532,34 +1565,77 @@ impl BcsClient {
 
     fn collaboration_run_url(&self, run_id: &str, suffix: &[&str]) -> Result<reqwest::Url> {
         let mut url = reqwest::Url::parse(&self.base_url)?;
-        url.path_segments_mut().map_err(|_| anyhow!("BCS URL cannot contain path segments"))?
-            .pop_if_empty().push("state-machine-runs").push(run_id).extend(suffix.iter().copied());
+        url.path_segments_mut()
+            .map_err(|_| anyhow!("BCS URL cannot contain path segments"))?
+            .pop_if_empty()
+            .push("state-machine-runs")
+            .push(run_id)
+            .extend(suffix.iter().copied());
         Ok(url)
     }
 
-    pub async fn query_collaboration_run(&self, run_id: &str, suffix: &[&str]) -> Result<serde_json::Value> {
-        let response = self.add_auth(self.http_client.get(self.collaboration_run_url(run_id, suffix)?))
-            .send().await.context("Failed to query state-machine Run")?;
+    pub async fn query_collaboration_run(
+        &self,
+        run_id: &str,
+        suffix: &[&str],
+    ) -> Result<serde_json::Value> {
+        let response = self
+            .add_auth(
+                self.http_client
+                    .get(self.collaboration_run_url(run_id, suffix)?),
+            )
+            .send()
+            .await
+            .context("Failed to query state-machine Run")?;
         Self::collaboration_response(response).await
     }
 
-    pub async fn respond_collaboration_node(&self, run_id: &str, node_id: &str, content: &str) -> Result<serde_json::Value> {
-        if content.trim().is_empty() { return Err(anyhow!("Human response must not be empty")); }
-        let pending = self.query_collaboration_run(run_id, &["pending-human-nodes"]).await?;
-        let matches = pending.as_array().is_some_and(|nodes| nodes.iter().any(|node|
-            node.get("node_id").and_then(serde_json::Value::as_str) == Some(node_id)));
-        if !matches { return Err(anyhow!("Execution node is not pending for the authenticated Human; query --pending again")); }
-        let response = self.add_auth(self.http_client.post(self.collaboration_run_url(run_id, &["nodes", node_id, "respond"])?))
-            .json(&serde_json::json!({"content": content})).send().await.context("Failed to respond to Human node")?;
+    pub async fn respond_collaboration_node(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        content: &str,
+    ) -> Result<serde_json::Value> {
+        if content.trim().is_empty() {
+            return Err(anyhow!("Human response must not be empty"));
+        }
+        let pending = self
+            .query_collaboration_run(run_id, &["pending-human-nodes"])
+            .await?;
+        let matches = pending.as_array().is_some_and(|nodes| {
+            nodes.iter().any(|node| {
+                node.get("node_id").and_then(serde_json::Value::as_str) == Some(node_id)
+            })
+        });
+        if !matches {
+            return Err(anyhow!(
+                "Execution node is not pending for the authenticated Human; query --pending again"
+            ));
+        }
+        let response = self
+            .add_auth(
+                self.http_client
+                    .post(self.collaboration_run_url(run_id, &["nodes", node_id, "respond"])?),
+            )
+            .json(&serde_json::json!({"content": content}))
+            .send()
+            .await
+            .context("Failed to respond to Human node")?;
         Self::collaboration_response(response).await
     }
 
     async fn collaboration_response(response: reqwest::Response) -> Result<serde_json::Value> {
         if !response.status().is_success() {
             let status = response.status();
-            return Err(anyhow!("State-machine request failed ({status}): {}", response.text().await?));
+            return Err(anyhow!(
+                "State-machine request failed ({status}): {}",
+                response.text().await?
+            ));
         }
-        let value: serde_json::Value = response.json().await.context("Invalid state-machine response")?;
+        let value: serde_json::Value = response
+            .json()
+            .await
+            .context("Invalid state-machine response")?;
         Ok(value.get("data").cloned().unwrap_or(value))
     }
 
@@ -1682,7 +1758,8 @@ impl BcsClient {
         driver_bot: &str,
         participants: Vec<ParticipantInfo>,
     ) -> Result<CreateGroupResponse> {
-        self.create_group_with_context(driver_bot, participants, None, None).await
+        self.create_group_with_context(driver_bot, participants, None, None)
+            .await
     }
 
     /// Create a group with optional context and topic.
@@ -1693,14 +1770,8 @@ impl BcsClient {
         context: Option<&str>,
         topic: Option<&str>,
     ) -> Result<CreateGroupResponse> {
-        self.create_group_with_strategy_and_context(
-            driver_bot,
-            participants,
-            context,
-            topic,
-            None,
-        )
-        .await
+        self.create_group_with_strategy_and_context(driver_bot, participants, context, topic, None)
+            .await
     }
 
     /// Create a group with optional context, topic, and group strategy.
@@ -1842,10 +1913,7 @@ impl BcsClient {
             .add_auth(self.http_client.get(&url).query(&[
                 ("offset", offset.to_string()),
                 ("limit", limit.to_string()),
-                (
-                    "include_session_groups",
-                    include_session_groups.to_string(),
-                ),
+                ("include_session_groups", include_session_groups.to_string()),
             ]))
             .send()
             .await
@@ -1869,10 +1937,11 @@ impl BcsClient {
         let url = format!("{}/groups/my", self.base_url);
 
         let response = self
-            .add_auth(self.http_client.get(&url).query(&[
-                ("offset", offset.to_string()),
-                ("limit", limit.to_string()),
-            ]))
+            .add_auth(
+                self.http_client
+                    .get(&url)
+                    .query(&[("offset", offset.to_string()), ("limit", limit.to_string())]),
+            )
             .send()
             .await
             .context("Failed to list current actor groups")?;
@@ -2311,7 +2380,11 @@ impl BcsClient {
         }
 
         let response = self
-            .add_auth(self.http_client.post(&url).json(&serde_json::Value::Object(payload)))
+            .add_auth(
+                self.http_client
+                    .post(&url)
+                    .json(&serde_json::Value::Object(payload)),
+            )
             .send()
             .await
             .context("Failed to create session")?;
@@ -2322,8 +2395,10 @@ impl BcsClient {
             return Err(anyhow!("Create session failed ({}): {}", status, body));
         }
 
-        let result: serde_json::Value =
-            response.json().await.context("Invalid create session response")?;
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .context("Invalid create session response")?;
         Ok(result)
     }
 
@@ -2374,8 +2449,10 @@ impl BcsClient {
             return Err(anyhow!("List sessions failed ({}): {}", status, body));
         }
 
-        let result: serde_json::Value =
-            response.json().await.context("Invalid list sessions response")?;
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .context("Invalid list sessions response")?;
         Ok(result)
     }
 
@@ -2396,19 +2473,21 @@ impl BcsClient {
             return Err(anyhow!("Get session failed ({}): {}", status, body));
         }
 
-        let result: serde_json::Value =
-            response.json().await.context("Invalid get session response")?;
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .context("Invalid get session response")?;
         Ok(result)
     }
 
     /// Send a chat message into a session.
     /// `POST /sessions/{sid}/chat`. Caller is resolved from the bearer token.
-    pub async fn session_chat(
-        &self,
-        sid: &str,
-        message: &str,
-    ) -> Result<serde_json::Value> {
-        let url = format!("{}/sessions/{}/chat", self.base_url, urlencoding::encode(sid));
+    pub async fn session_chat(&self, sid: &str, message: &str) -> Result<serde_json::Value> {
+        let url = format!(
+            "{}/sessions/{}/chat",
+            self.base_url,
+            urlencoding::encode(sid)
+        );
         let payload = serde_json::json!({ "message": message });
 
         let response = self
@@ -2423,8 +2502,10 @@ impl BcsClient {
             return Err(anyhow!("Session chat failed ({}): {}", status, body));
         }
 
-        let result: serde_json::Value =
-            response.json().await.context("Invalid session chat response")?;
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .context("Invalid session chat response")?;
         Ok(result)
     }
 
@@ -2448,7 +2529,11 @@ impl BcsClient {
             params.push(format!("before={}", b));
         }
 
-        let mut url = format!("{}/sessions/{}/messages", self.base_url, urlencoding::encode(sid));
+        let mut url = format!(
+            "{}/sessions/{}/messages",
+            self.base_url,
+            urlencoding::encode(sid)
+        );
         if !params.is_empty() {
             url.push('?');
             url.push_str(&params.join("&"));
@@ -2463,26 +2548,24 @@ impl BcsClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Get session messages failed ({}): {}", status, body));
+            return Err(anyhow!(
+                "Get session messages failed ({}): {}",
+                status,
+                body
+            ));
         }
 
-        let result: serde_json::Value =
-            response.json().await.context("Invalid session messages response")?;
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .context("Invalid session messages response")?;
         Ok(result)
     }
 
     /// Update session title.
     /// `PATCH /sessions/{sid}`
-    pub async fn patch_session(
-        &self,
-        sid: &str,
-        title: &str,
-    ) -> Result<serde_json::Value> {
-        let url = format!(
-            "{}/sessions/{}",
-            self.base_url,
-            urlencoding::encode(sid)
-        );
+    pub async fn patch_session(&self, sid: &str, title: &str) -> Result<serde_json::Value> {
+        let url = format!("{}/sessions/{}", self.base_url, urlencoding::encode(sid));
         let payload = serde_json::json!({ "session_title": title });
 
         let response = self
@@ -2497,8 +2580,10 @@ impl BcsClient {
             return Err(anyhow!("Patch session failed ({}): {}", status, body));
         }
 
-        let result: serde_json::Value =
-            response.json().await.context("Invalid patch session response")?;
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .context("Invalid patch session response")?;
         Ok(result)
     }
 
@@ -2539,8 +2624,10 @@ impl BcsClient {
             return Err(anyhow!("Complete session failed ({}): {}", status, body));
         }
 
-        let result: serde_json::Value =
-            response.json().await.context("Invalid complete session response")?;
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .context("Invalid complete session response")?;
         Ok(result)
     }
 
@@ -2574,8 +2661,10 @@ impl BcsClient {
             return Err(anyhow!("Add session member failed ({}): {}", status, body));
         }
 
-        let result: serde_json::Value =
-            response.json().await.context("Invalid add session member response")?;
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .context("Invalid add session member response")?;
         Ok(result)
     }
 
@@ -2602,11 +2691,17 @@ impl BcsClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Remove session member failed ({}): {}", status, body));
+            return Err(anyhow!(
+                "Remove session member failed ({}): {}",
+                status,
+                body
+            ));
         }
 
-        let result: serde_json::Value =
-            response.json().await.context("Invalid remove session member response")?;
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .context("Invalid remove session member response")?;
         Ok(result)
     }
 
@@ -2642,8 +2737,10 @@ impl BcsClient {
             ));
         }
 
-        let result: serde_json::Value =
-            response.json().await.context("Invalid set member mode response")?;
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .context("Invalid set member mode response")?;
         Ok(result)
     }
 
@@ -2708,7 +2805,11 @@ impl BcsClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Create channel binding failed ({}): {}", status, body));
+            return Err(anyhow!(
+                "Create channel binding failed ({}): {}",
+                status,
+                body
+            ));
         }
 
         let result: serde_json::Value = response
@@ -2731,7 +2832,11 @@ impl BcsClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("List channel bindings failed ({}): {}", status, body));
+            return Err(anyhow!(
+                "List channel bindings failed ({}): {}",
+                status,
+                body
+            ));
         }
 
         let result: serde_json::Value = response
@@ -2792,7 +2897,11 @@ impl BcsClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Delete channel binding failed ({}): {}", status, body));
+            return Err(anyhow!(
+                "Delete channel binding failed ({}): {}",
+                status,
+                body
+            ));
         }
 
         let result: serde_json::Value = response
@@ -2860,8 +2969,10 @@ impl BcsClient {
             return Err(anyhow!("Service invoke failed ({}): {}", status, body));
         }
 
-        let result: serde_json::Value =
-            response.json().await.context("Invalid service invoke response")?;
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .context("Invalid service invoke response")?;
         Ok(result)
     }
 
@@ -2888,11 +2999,17 @@ impl BcsClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Service session status failed ({}): {}", status, body));
+            return Err(anyhow!(
+                "Service session status failed ({}): {}",
+                status,
+                body
+            ));
         }
 
-        let result: serde_json::Value =
-            response.json().await.context("Invalid service session response")?;
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .context("Invalid service session response")?;
         Ok(result)
     }
 
@@ -2901,10 +3018,23 @@ impl BcsClient {
     // ========================================================================
 
     /// Prepare a file upload. POST /sessions/{sid}/files
-    pub async fn prepare_session_file(&self, sid: &str, file_name: &str, size: u64, mime: &str) -> Result<serde_json::Value> {
-        let url = format!("{}/sessions/{}/files", self.base_url, urlencoding::encode(sid));
+    pub async fn prepare_session_file(
+        &self,
+        sid: &str,
+        file_name: &str,
+        size: u64,
+        mime: &str,
+    ) -> Result<serde_json::Value> {
+        let url = format!(
+            "{}/sessions/{}/files",
+            self.base_url,
+            urlencoding::encode(sid)
+        );
         let body = serde_json::json!({ "file_name": file_name, "size": size, "mime_type": mime });
-        let resp = self.add_auth(self.http_client.post(&url).json(&body)).send().await
+        let resp = self
+            .add_auth(self.http_client.post(&url).json(&body))
+            .send()
+            .await
             .context("prepare session file")?;
         Self::ensure_success(resp, "prepare session file").await
     }
@@ -2919,13 +3049,18 @@ impl BcsClient {
         bytes: reqwest::Body,
         content_type: &str,
     ) -> Result<()> {
-        let bcs_host = reqwest::Url::parse(&self.base_url).ok().and_then(|u| u.host_str().map(String::from));
-        let target_host = reqwest::Url::parse(upload_url).ok().and_then(|u| u.host_str().map(String::from));
+        let bcs_host = reqwest::Url::parse(&self.base_url)
+            .ok()
+            .and_then(|u| u.host_str().map(String::from));
+        let target_host = reqwest::Url::parse(upload_url)
+            .ok()
+            .and_then(|u| u.host_str().map(String::from));
         let cross_host = match (bcs_host.as_deref(), target_host.as_deref()) {
             (Some(a), Some(b)) => a != b,
             _ => false,
         };
-        let mut req = self.http_client
+        let mut req = self
+            .http_client
             .put(upload_url)
             .header(reqwest::header::CONTENT_TYPE, content_type)
             .body(bytes);
@@ -2937,9 +3072,21 @@ impl BcsClient {
     }
 
     /// Complete a file upload. POST /sessions/{sid}/files/{id}/complete
-    pub async fn complete_session_file(&self, sid: &str, file_id: &str) -> Result<serde_json::Value> {
-        let url = format!("{}/sessions/{}/files/{}/complete", self.base_url, urlencoding::encode(sid), file_id);
-        let resp = self.add_auth(self.http_client.post(&url).json(&serde_json::json!({}))).send().await
+    pub async fn complete_session_file(
+        &self,
+        sid: &str,
+        file_id: &str,
+    ) -> Result<serde_json::Value> {
+        let url = format!(
+            "{}/sessions/{}/files/{}/complete",
+            self.base_url,
+            urlencoding::encode(sid),
+            file_id
+        );
+        let resp = self
+            .add_auth(self.http_client.post(&url).json(&serde_json::json!({})))
+            .send()
+            .await
             .context("complete session file")?;
         Self::ensure_success(resp, "complete session file").await
     }
@@ -2953,30 +3100,33 @@ impl BcsClient {
             .extension()?
             .to_str()?
             .to_ascii_lowercase();
-        Some(match ext.as_str() {
-            "txt" => "text/plain",
-            "md" => "text/markdown",
-            "csv" => "text/csv",
-            "json" => "application/json",
-            "xml" => "application/xml",
-            "pdf" => "application/pdf",
-            "zip" => "application/zip",
-            "gz" => "application/gzip",
-            "tar" => "application/x-tar",
-            "html" | "htm" => "text/html",
-            "css" => "text/css",
-            "js" => "text/javascript",
-            "png" => "image/png",
-            "jpg" | "jpeg" => "image/jpeg",
-            "gif" => "image/gif",
-            "webp" => "image/webp",
-            "svg" => "image/svg+xml",
-            "wav" => "audio/wav",
-            "mp3" => "audio/mpeg",
-            "mp4" => "video/mp4",
-            "bin" => "application/octet-stream",
-            _ => return None,
-        }.to_string())
+        Some(
+            match ext.as_str() {
+                "txt" => "text/plain",
+                "md" => "text/markdown",
+                "csv" => "text/csv",
+                "json" => "application/json",
+                "xml" => "application/xml",
+                "pdf" => "application/pdf",
+                "zip" => "application/zip",
+                "gz" => "application/gzip",
+                "tar" => "application/x-tar",
+                "html" | "htm" => "text/html",
+                "css" => "text/css",
+                "js" => "text/javascript",
+                "png" => "image/png",
+                "jpg" | "jpeg" => "image/jpeg",
+                "gif" => "image/gif",
+                "webp" => "image/webp",
+                "svg" => "image/svg+xml",
+                "wav" => "audio/wav",
+                "mp3" => "audio/mpeg",
+                "mp4" => "video/mp4",
+                "bin" => "application/octet-stream",
+                _ => return None,
+            }
+            .to_string(),
+        )
     }
 
     /// Whether a MIME type is textual and therefore eligible for a `charset`
@@ -2984,7 +3134,12 @@ impl BcsClient {
     /// never get a charset — appending one would mislabel the octet payload.
     fn is_text_mime(mime: &str) -> bool {
         // Normalize to the type before any `;` parameter for the check.
-        let base = mime.split(';').next().unwrap_or(mime).trim().to_ascii_lowercase();
+        let base = mime
+            .split(';')
+            .next()
+            .unwrap_or(mime)
+            .trim()
+            .to_ascii_lowercase();
         base == "text/plain"
             || base == "text/csv"
             || base == "text/markdown"
@@ -3002,7 +3157,7 @@ impl BcsClient {
     /// `None` if the bytes are pure ASCII (charset adds no value there) or
     /// detection has no confident guess. Reads at most `max_bytes` of the path.
     async fn guess_charset(path: &str, max_bytes: usize) -> Option<String> {
-        use tokio::io::{AsyncReadExt as _};
+        use tokio::io::AsyncReadExt as _;
         let mut file = tokio::fs::File::open(path).await.ok()?;
         let mut buf = vec![0u8; max_bytes];
         let n = file.read(&mut buf).await.ok()?;
@@ -3032,10 +3187,19 @@ impl BcsClient {
     /// High-level three-stage upload: prepare -> PUT (single or multipart) -> complete.
     /// Serial multipart PUTs (no parallelism for v1). Best-effort delete on failure.
     pub async fn upload_session_file(
-        &self, sid: &str, path: &str, name_override: Option<&str>, mime: Option<&str>,
+        &self,
+        sid: &str,
+        path: &str,
+        name_override: Option<&str>,
+        mime: Option<&str>,
     ) -> Result<serde_json::Value> {
-        let file_name = name_override.map(String::from)
-            .unwrap_or_else(|| std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string());
+        let file_name = name_override.map(String::from).unwrap_or_else(|| {
+            std::path::Path::new(path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("file")
+                .to_string()
+        });
         let metadata = tokio::fs::metadata(path).await?;
         let size = metadata.len();
         let mut mime = match mime {
@@ -3057,25 +3221,49 @@ impl BcsClient {
                 mime = format!("{mime}; charset={charset}");
             }
         }
-        let prepared = self.prepare_session_file(sid, &file_name, size, &mime).await?;
+        let prepared = self
+            .prepare_session_file(sid, &file_name, size, &mime)
+            .await?;
         let mode = prepared["mode"].as_str().unwrap_or("single");
-        let file_id = prepared["file_id"].as_str().context("missing file_id")?.to_string();
+        let file_id = prepared["file_id"]
+            .as_str()
+            .context("missing file_id")?
+            .to_string();
         match mode {
             "single" => {
-                let url = prepared["upload_url"].as_str().context("missing upload_url")?.to_string();
+                let url = prepared["upload_url"]
+                    .as_str()
+                    .context("missing upload_url")?
+                    .to_string();
                 let file = tokio::fs::File::open(path).await?;
-                self.put_session_file_bytes(&url, reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file)), &mime).await?;
+                self.put_session_file_bytes(
+                    &url,
+                    reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file)),
+                    &mime,
+                )
+                .await?;
             }
             "multipart" => {
-                let part_size = prepared["part_size"].as_u64().context("missing part_size")? as usize;
+                let part_size = prepared["part_size"]
+                    .as_u64()
+                    .context("missing part_size")? as usize;
                 let parts = prepared["parts"].as_array().context("missing parts")?;
                 for (i, p) in parts.iter().enumerate() {
-                    let url = p["upload_url"].as_str().context("missing part url")?.to_string();
+                    let url = p["upload_url"]
+                        .as_str()
+                        .context("missing part url")?
+                        .to_string();
                     let mut f = tokio::fs::File::open(path).await?;
                     use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
-                    f.seek(std::io::SeekFrom::Start((i as u64) * part_size as u64)).await?;
+                    f.seek(std::io::SeekFrom::Start((i as u64) * part_size as u64))
+                        .await?;
                     let take = f.take(part_size as u64);
-                    self.put_session_file_bytes(&url, reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(take)), &mime).await?;
+                    self.put_session_file_bytes(
+                        &url,
+                        reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(take)),
+                        &mime,
+                    )
+                    .await?;
                 }
             }
             _ => return Err(anyhow!("unknown mode {}", mode)),
@@ -3092,7 +3280,12 @@ impl BcsClient {
 
     /// List files in the session workspace. GET /sessions/{sid}/files
     pub async fn list_session_files(
-        &self, sid: &str, prefix: Option<&str>, status: Option<&str>, limit: Option<u32>, offset: Option<u32>,
+        &self,
+        sid: &str,
+        prefix: Option<&str>,
+        status: Option<&str>,
+        limit: Option<u32>,
+        offset: Option<u32>,
     ) -> Result<serde_json::Value> {
         let mut params: Vec<String> = Vec::new();
         if let Some(p) = prefix {
@@ -3107,28 +3300,51 @@ impl BcsClient {
         if let Some(o) = offset {
             params.push(format!("offset={}", o));
         }
-        let mut url = format!("{}/sessions/{}/files", self.base_url, urlencoding::encode(sid));
+        let mut url = format!(
+            "{}/sessions/{}/files",
+            self.base_url,
+            urlencoding::encode(sid)
+        );
         if !params.is_empty() {
             url.push('?');
             url.push_str(&params.join("&"));
         }
-        let resp = self.add_auth(self.http_client.get(&url)).send().await
+        let resp = self
+            .add_auth(self.http_client.get(&url))
+            .send()
+            .await
             .context("list session files")?;
         Self::ensure_success(resp, "list session files").await
     }
 
     /// Delete a file or cancel an in-progress upload. DELETE /sessions/{sid}/files/{id}
     pub async fn delete_session_file(&self, sid: &str, file_id: &str) -> Result<serde_json::Value> {
-        let url = format!("{}/sessions/{}/files/{}", self.base_url, urlencoding::encode(sid), file_id);
-        let resp = self.add_auth(self.http_client.delete(&url)).send().await
+        let url = format!(
+            "{}/sessions/{}/files/{}",
+            self.base_url,
+            urlencoding::encode(sid),
+            file_id
+        );
+        let resp = self
+            .add_auth(self.http_client.delete(&url))
+            .send()
+            .await
             .context("delete session file")?;
         Self::ensure_success(resp, "delete session file").await
     }
 
     /// Get file metadata. GET /sessions/{sid}/files/{id}
     pub async fn get_session_file(&self, sid: &str, file_id: &str) -> Result<serde_json::Value> {
-        let url = format!("{}/sessions/{}/files/{}", self.base_url, urlencoding::encode(sid), file_id);
-        let resp = self.add_auth(self.http_client.get(&url)).send().await
+        let url = format!(
+            "{}/sessions/{}/files/{}",
+            self.base_url,
+            urlencoding::encode(sid),
+            file_id
+        );
+        let resp = self
+            .add_auth(self.http_client.get(&url))
+            .send()
+            .await
             .context("get session file")?;
         Self::ensure_success(resp, "get session file").await
     }
@@ -3136,17 +3352,34 @@ impl BcsClient {
     /// Download file bytes. GET /sessions/{sid}/files/{id}/content?ttl=...
     /// Follows presigned redirect or streams directly, writes to --out file.
     pub async fn download_session_file(
-        &self, sid: &str, file_id: &str, out: Option<&str>, ttl: Option<u64>,
+        &self,
+        sid: &str,
+        file_id: &str,
+        out: Option<&str>,
+        ttl: Option<u64>,
     ) -> Result<String> {
-        let mut url = format!("{}/sessions/{}/files/{}/content", self.base_url, urlencoding::encode(sid), file_id);
-        if let Some(t) = ttl { url.push_str(&format!("?ttl={}", t)); }
-        let resp = self.add_auth(self.http_client.get(&url)).send().await
+        let mut url = format!(
+            "{}/sessions/{}/files/{}/content",
+            self.base_url,
+            urlencoding::encode(sid),
+            file_id
+        );
+        if let Some(t) = ttl {
+            url.push_str(&format!("?ttl={}", t));
+        }
+        let resp = self
+            .add_auth(self.http_client.get(&url))
+            .send()
+            .await
             .context("download session file")?;
         if !resp.status().is_success() {
-            let s = resp.status(); let b = resp.text().await.unwrap_or_default();
+            let s = resp.status();
+            let b = resp.text().await.unwrap_or_default();
             return Err(anyhow!("download failed ({}): {}", s, b));
         }
-        let out_path = out.map(String::from).unwrap_or_else(|| format!("./{}", file_id));
+        let out_path = out
+            .map(String::from)
+            .unwrap_or_else(|| format!("./{}", file_id));
         let mut f = tokio::fs::File::create(&out_path).await?;
         use futures::StreamExt;
         let mut stream = resp.bytes_stream();
@@ -3158,9 +3391,17 @@ impl BcsClient {
 
     /// Generate a no-auth share link. POST /sessions/{sid}/files/{id}/share
     pub async fn share_session_file(
-        &self, sid: &str, file_id: &str, ttl: Option<u64>,
+        &self,
+        sid: &str,
+        file_id: &str,
+        ttl: Option<u64>,
     ) -> Result<serde_json::Value> {
-        let url = format!("{}/sessions/{}/files/{}/share", self.base_url, urlencoding::encode(sid), file_id);
+        let url = format!(
+            "{}/sessions/{}/files/{}/share",
+            self.base_url,
+            urlencoding::encode(sid),
+            file_id
+        );
         let mut body = serde_json::Map::new();
         if let Some(t) = ttl {
             // The HTTP `ShareRequest` DTO deserializes `ttl_seconds` (unknown
@@ -3169,15 +3410,29 @@ impl BcsClient {
             // default, ignoring the caller's requested expiry.
             body.insert("ttl_seconds".to_string(), serde_json::json!(t));
         }
-        let resp = self.add_auth(self.http_client.post(&url).json(&serde_json::Value::Object(body))).send().await
+        let resp = self
+            .add_auth(
+                self.http_client
+                    .post(&url)
+                    .json(&serde_json::Value::Object(body)),
+            )
+            .send()
+            .await
             .context("share session file")?;
         Self::ensure_success(resp, "share session file").await
     }
 
     /// Query backend capabilities. GET /sessions/{sid}/files/capabilities
     pub async fn session_file_capabilities(&self, sid: &str) -> Result<serde_json::Value> {
-        let url = format!("{}/sessions/{}/files/capabilities", self.base_url, urlencoding::encode(sid));
-        let resp = self.add_auth(self.http_client.get(&url)).send().await
+        let url = format!(
+            "{}/sessions/{}/files/capabilities",
+            self.base_url,
+            urlencoding::encode(sid)
+        );
+        let resp = self
+            .add_auth(self.http_client.get(&url))
+            .send()
+            .await
             .context("session file capabilities")?;
         Self::ensure_success(resp, "session file capabilities").await
     }
@@ -3189,14 +3444,38 @@ mod tests {
 
     #[test]
     fn guess_mime_from_extension_known_types() {
-        assert_eq!(BcsClient::guess_mime_from_extension("report.pdf"), Some("application/pdf".into()));
-        assert_eq!(BcsClient::guess_mime_from_extension("DATA.CSV"), Some("text/csv".into()));
-        assert_eq!(BcsClient::guess_mime_from_extension("pic.jpeg"), Some("image/jpeg".into()));
-        assert_eq!(BcsClient::guess_mime_from_extension("pic.jpg"), Some("image/jpeg".into()));
-        assert_eq!(BcsClient::guess_mime_from_extension("notes.md"), Some("text/markdown".into()));
-        assert_eq!(BcsClient::guess_mime_from_extension("data.json"), Some("application/json".into()));
-        assert_eq!(BcsClient::guess_mime_from_extension("archive.zip"), Some("application/zip".into()));
-        assert_eq!(BcsClient::guess_mime_from_extension("model.bin"), Some("application/octet-stream".into()));
+        assert_eq!(
+            BcsClient::guess_mime_from_extension("report.pdf"),
+            Some("application/pdf".into())
+        );
+        assert_eq!(
+            BcsClient::guess_mime_from_extension("DATA.CSV"),
+            Some("text/csv".into())
+        );
+        assert_eq!(
+            BcsClient::guess_mime_from_extension("pic.jpeg"),
+            Some("image/jpeg".into())
+        );
+        assert_eq!(
+            BcsClient::guess_mime_from_extension("pic.jpg"),
+            Some("image/jpeg".into())
+        );
+        assert_eq!(
+            BcsClient::guess_mime_from_extension("notes.md"),
+            Some("text/markdown".into())
+        );
+        assert_eq!(
+            BcsClient::guess_mime_from_extension("data.json"),
+            Some("application/json".into())
+        );
+        assert_eq!(
+            BcsClient::guess_mime_from_extension("archive.zip"),
+            Some("application/zip".into())
+        );
+        assert_eq!(
+            BcsClient::guess_mime_from_extension("model.bin"),
+            Some("application/octet-stream".into())
+        );
     }
 
     #[test]
@@ -3228,7 +3507,10 @@ mod tests {
         tokio::fs::write(&path, b"plain ascii text, no non-ascii bytes")
             .await
             .unwrap();
-        assert_eq!(BcsClient::guess_charset(path.to_str().unwrap(), 4096).await, None);
+        assert_eq!(
+            BcsClient::guess_charset(path.to_str().unwrap(), 4096).await,
+            None
+        );
     }
 
     #[tokio::test]
@@ -3259,7 +3541,10 @@ mod tests {
             cs_gbk.contains("gb") || cs_gbk.contains("big5") || cs_gbk.contains("replacement"),
             "expected a CJK/legacy label, got {cs_gbk}"
         );
-        assert!(!cs_gbk.contains("utf-8"), "GBK must not be misdetected as utf-8: {cs_gbk}");
+        assert!(
+            !cs_gbk.contains("utf-8"),
+            "GBK must not be misdetected as utf-8: {cs_gbk}"
+        );
     }
 
     #[tokio::test]
@@ -3325,7 +3610,9 @@ mod tests {
         // carries one. Express via the composing helpers.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("cn.md");
-        tokio::fs::write(&path, "你好，世界".as_bytes()).await.unwrap();
+        tokio::fs::write(&path, "你好，世界".as_bytes())
+            .await
+            .unwrap();
 
         // 1) Explicit text MIME without charset → eligible (textual + no existing charset).
         let explicit = "text/markdown";
@@ -3489,7 +3776,11 @@ mod tests {
     fn test_chat_headers_include_chat_version() {
         let client = BcsClient::new("http://localhost:21000");
         let request = client
-            .add_chat_headers(client.http_client.get("http://localhost:21000/chat/runs/run-1"))
+            .add_chat_headers(
+                client
+                    .http_client
+                    .get("http://localhost:21000/chat/runs/run-1"),
+            )
             .build()
             .unwrap();
 
@@ -3511,7 +3802,9 @@ mod tests {
 
         let request = client
             .add_chat_dispatch_headers(
-                client.http_client.post("http://localhost:21000/bots/bot-1/chat-async"),
+                client
+                    .http_client
+                    .post("http://localhost:21000/bots/bot-1/chat-async"),
                 true,
                 1_800_000,
             )
@@ -3549,7 +3842,11 @@ mod tests {
             .unwrap();
 
         let request = client
-            .add_chat_headers(client.http_client.get("http://localhost:21000/chat/runs/run-1"))
+            .add_chat_headers(
+                client
+                    .http_client
+                    .get("http://localhost:21000/chat/runs/run-1"),
+            )
             .build()
             .unwrap();
 
@@ -3576,7 +3873,9 @@ mod tests {
             client.set_traceparent(value).unwrap();
             let request = client
                 .add_chat_dispatch_headers(
-                    client.http_client.post("http://localhost:21000/bots/bot-1/chat-async"),
+                    client
+                        .http_client
+                        .post("http://localhost:21000/bots/bot-1/chat-async"),
                     true,
                     1_800_000,
                 )
@@ -3717,13 +4016,17 @@ mod tests {
             let _ = stream.read(&mut buf).unwrap_or(0);
             // 204 with no body — reqwest must accept it as a success.
             stream
-                .write_all(b"HTTP/1.1 204 No Content\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+                .write_all(
+                    b"HTTP/1.1 204 No Content\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                )
                 .unwrap();
             stream.flush().unwrap();
         });
 
         let client = BcsClient::with_token(format!("http://{}", addr), "bot-token");
-        let result = client.delete_session_file("g1:abcd1234", "01KYFILEID").await;
+        let result = client
+            .delete_session_file("g1:abcd1234", "01KYFILEID")
+            .await;
         server.join().unwrap();
         assert!(result.is_ok(), "delete should succeed on 204: {result:?}");
         assert_eq!(result.unwrap(), serde_json::Value::Null);
@@ -3792,7 +4095,8 @@ mod tests {
                         "status": "submitted",
                         "expires_at_ms": 9_999_999_u64
                     })
-                } else if first_line.starts_with("GET ") && first_line.contains("/chat/runs/run-1") {
+                } else if first_line.starts_with("GET ") && first_line.contains("/chat/runs/run-1")
+                {
                     let count = served_get_count.fetch_add(1, Ordering::SeqCst) + 1;
                     let state = if count == 1 { "submitted" } else { "running" };
                     serde_json::json!({
@@ -3828,7 +4132,17 @@ mod tests {
 
         let client = BcsClient::new(format!("http://{}", addr));
         let submit = client
-            .chat_async("bot-target", "hello", None, None, &[], None, None, 2_000, true)
+            .chat_async(
+                "bot-target",
+                "hello",
+                None,
+                None,
+                &[],
+                None,
+                None,
+                2_000,
+                true,
+            )
             .await
             .expect("chat_async submit should succeed");
         let outcome = client
@@ -3895,7 +4209,17 @@ mod tests {
             .set_traceparent("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
             .unwrap();
         let submit = client
-            .chat_async("bot-target", "hello", None, None, &[], None, None, 20, false)
+            .chat_async(
+                "bot-target",
+                "hello",
+                None,
+                None,
+                &[],
+                None,
+                None,
+                20,
+                false,
+            )
             .await
             .expect("chat_async submit should succeed");
         let outcome = client
@@ -3941,9 +4265,11 @@ mod tests {
         let payload: serde_json::Value = serde_json::from_slice(&submit_req.body).unwrap();
         assert!(payload.get("timeout_ms").is_none());
         assert!(payload.get("caller_wait_mode").is_none());
-        assert!(requests
-            .iter()
-            .all(|request| request.url.path() != "/chat/runs/run-local-timeout/cancel"));
+        assert!(
+            requests
+                .iter()
+                .all(|request| request.url.path() != "/chat/runs/run-local-timeout/cancel")
+        );
     }
 
     #[tokio::test]
@@ -3986,7 +4312,17 @@ mod tests {
 
         let client = BcsClient::new(server.uri());
         let submit = client
-            .chat_async("bot-target", "hello", None, None, &[], None, None, 60_000, true)
+            .chat_async(
+                "bot-target",
+                "hello",
+                None,
+                None,
+                &[],
+                None,
+                None,
+                60_000,
+                true,
+            )
             .await
             .expect("chat_async submit should succeed");
         let outcome = client
@@ -4012,7 +4348,17 @@ mod tests {
             .build()
             .unwrap();
         let result = client
-            .chat_async("bot-target", "hello", None, None, &[], None, None, 2_000, false)
+            .chat_async(
+                "bot-target",
+                "hello",
+                None,
+                None,
+                &[],
+                None,
+                None,
+                2_000,
+                false,
+            )
             .await;
         assert!(
             matches!(result, Err(ChatAsyncError::Transport(_))),
@@ -4045,7 +4391,17 @@ mod tests {
 
         let client = BcsClient::new(server.uri());
         let result = client
-            .chat_async("bot-target", "hello", None, None, &[], None, None, 2_000, false)
+            .chat_async(
+                "bot-target",
+                "hello",
+                None,
+                None,
+                &[],
+                None,
+                None,
+                2_000,
+                false,
+            )
             .await;
         assert!(
             matches!(result, Err(ChatAsyncError::InvalidResponse(_))),
@@ -4076,15 +4432,24 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/chat/runs/run-1"))
             .respond_with(
-                ResponseTemplate::new(500)
-                    .set_body_json(serde_json::json!({"error": "internal"})),
+                ResponseTemplate::new(500).set_body_json(serde_json::json!({"error": "internal"})),
             )
             .mount(&server)
             .await;
 
         let client = BcsClient::new(server.uri());
         let submit = client
-            .chat_async("bot-target", "hello", None, None, &[], None, None, 5_000, false)
+            .chat_async(
+                "bot-target",
+                "hello",
+                None,
+                None,
+                &[],
+                None,
+                None,
+                5_000,
+                false,
+            )
             .await
             .expect("chat_async submit should succeed");
         let outcome = client
@@ -4144,7 +4509,17 @@ mod tests {
 
         let client = BcsClient::new(server.uri());
         let submit = client
-            .chat_async("bot-target", "hello", None, None, &[], None, None, 5_000, false)
+            .chat_async(
+                "bot-target",
+                "hello",
+                None,
+                None,
+                &[],
+                None,
+                None,
+                5_000,
+                false,
+            )
             .await
             .expect("chat_async submit should succeed");
         let outcome = client
@@ -4351,8 +4726,7 @@ mod tests {
             .and(query_param("bcs_session_id", "group 1:session/1"))
             .and(query_param("channel_type", "dingtalk"))
             .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({ "items": [] })),
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "items": [] })),
             )
             .mount(&server)
             .await;
@@ -4365,7 +4739,6 @@ mod tests {
 
         assert_eq!(response, serde_json::json!({ "items": [] }));
     }
-
 
     #[test]
     fn test_chat_async_payload_omits_cli_wait_controls() {
@@ -4384,32 +4757,21 @@ mod tests {
 
     #[test]
     fn test_chat_async_payload_includes_organization_code_when_present() {
-        let payload = BcsClient::chat_async_payload(
-            "hi",
-            None,
-            None,
-            &[],
-            None,
-            Some(" promo-2026 "),
-        );
+        let payload =
+            BcsClient::chat_async_payload("hi", None, None, &[], None, Some(" promo-2026 "));
 
-        assert_eq!(payload["organization_code"], serde_json::json!("promo-2026"));
+        assert_eq!(
+            payload["organization_code"],
+            serde_json::json!("promo-2026")
+        );
     }
 
     #[test]
     fn test_chat_async_payload_omits_blank_organization_code() {
-        let payload = BcsClient::chat_async_payload(
-            "hi",
-            None,
-            None,
-            &[],
-            None,
-            Some("  "),
-        );
+        let payload = BcsClient::chat_async_payload("hi", None, None, &[], None, Some("  "));
 
         assert!(payload.get("organization_code").is_none());
     }
-
 
     // ========================================================================
     // Cross-host Authorization isolation regression test
@@ -4438,8 +4800,7 @@ mod tests {
             let request = String::from_utf8_lossy(&buf[..size]);
             *server_headers.lock().unwrap() = request.to_string();
 
-            let response =
-                "HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+            let response = "HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
             let _ = stream.write_all(response.as_bytes());
             let _ = stream.flush();
         });
@@ -4451,7 +4812,9 @@ mod tests {
         );
         let upload_url = format!("http://127.0.0.1:{}/put", addr.port());
         let body = reqwest::Body::from("test-body");
-        let result = client.put_session_file_bytes(&upload_url, body, "application/octet-stream").await;
+        let result = client
+            .put_session_file_bytes(&upload_url, body, "application/octet-stream")
+            .await;
 
         server.join().unwrap();
         assert!(result.is_ok(), "PUT should succeed: {:?}", result.err());
@@ -4477,12 +4840,10 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/groups/g-1/sessions"))
-            .respond_with(
-                ResponseTemplate::new(201).set_body_json(serde_json::json!({
-                    "id": "g-1:abcdef12",
-                    "session_id": "g-1:abcdef12",
-                })),
-            )
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": "g-1:abcdef12",
+                "session_id": "g-1:abcdef12",
+            })))
             .mount(&server)
             .await;
 
@@ -4512,18 +4873,19 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/sessions/s1/files/f1/share"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "share_url": "http://bcs/sessions/shared-file?token=x",
-                    "share_token": "x",
-                    "expires_at": 0u64,
-                })),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "share_url": "http://bcs/sessions/shared-file?token=x",
+                "share_token": "x",
+                "expires_at": 0u64,
+            })))
             .mount(&server)
             .await;
 
         let client = BcsClient::with_token(&server.uri(), "bot-token");
-        let _ = client.share_session_file("s1", "f1", Some(120)).await.unwrap();
+        let _ = client
+            .share_session_file("s1", "f1", Some(120))
+            .await
+            .unwrap();
 
         let requests = server.received_requests().await.expect("captured requests");
         let req = requests
@@ -4531,7 +4893,10 @@ mod tests {
             .find(|r| r.method.as_str() == "POST" && r.url.path() == "/sessions/s1/files/f1/share")
             .expect("share POST request");
         let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
-        assert_eq!(body["ttl_seconds"], 120, "body must carry ttl_seconds, was: {body}");
+        assert_eq!(
+            body["ttl_seconds"], 120,
+            "body must carry ttl_seconds, was: {body}"
+        );
         assert!(
             body.get("ttl").is_none(),
             "legacy `ttl` key must not be sent (silently ignored by the DTO), was: {body}"

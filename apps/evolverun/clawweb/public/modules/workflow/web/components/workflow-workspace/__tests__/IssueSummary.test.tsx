@@ -3,6 +3,14 @@ import { describe, it, expect } from 'vitest';
 import IssueSummary from '../IssueSummary';
 
 describe('IssueSummary', () => {
+  it('identifies retained summary content separately from a new aggregation that has not run', () => {
+    render(<IssueSummary group={{ aggregationStatus: 'not_generated', stale: true, flowIds: ['old','new'],
+      summarySources: [{ sourceId: 'old', flowId: 'old' }], sources: [],
+      summary: { summary: '保留的旧结论', causes: [], unknowns: [] } } as never} />)
+    expect(screen.getByRole('status')).toHaveTextContent('展示上轮摘要')
+    expect(screen.getByRole('status')).toHaveTextContent('本轮尚未聚合')
+    expect(screen.getByRole('status')).not.toHaveTextContent('摘要尚未生成')
+  })
   it('shows each original diagnosis when aggregation failed, without presenting a shared conclusion', () => {
     render(<IssueSummary group={{ aggregationStatus: 'failed', summary: null, stale: false, summarySources: [],
       sources: [

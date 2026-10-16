@@ -1,5 +1,5 @@
 import type { CollaborationBot, PublicAudience, PublicConfig } from '@/domain/collaborationPrivacy/types';
-import type { DirectSetting } from '@/services/collaborationPrivacy';
+import type { DirectSetting, PublicationCommand } from '@/services/collaborationPrivacy';
 
 export interface Confirmation {
   bot: CollaborationBot;
@@ -26,6 +26,24 @@ export function publicationSuccessMessage(config: PublicConfig): string {
   return config.scope === 'none'
     ? 'Bot 可见性已更新为不可见，当前立即生效'
     : '可见性变更申请已提交，当前可见性保持不变';
+}
+
+/** 外部 Bot 保存即生效（PATCH 直改无审批），成功文案不出现审批话术。 */
+export const externalPublicationSaveMessage = 'Bot 可见性已保存，当前立即生效';
+
+export interface PublicationCommandInput {
+  botId: string;
+  audience: PublicAudience;
+  config: PublicConfig;
+  deptEntries?: Array<{ deptNo: string; deptName: string }>;
+  /** 仅由外部 Bot 通用配置入口显式置 true（不按 Bot ID 猜测）；TC 命令保持原形态不携带该字段。 */
+  isExternalBot?: boolean;
+}
+
+/** 组装可见性提交指令：外部 Bot 走 PATCH 直改路由，TC 走既有 publish 审批路由。 */
+export function buildPublicationCommand(input: PublicationCommandInput): PublicationCommand {
+  const { isExternalBot, ...command } = input;
+  return isExternalBot ? { ...command, isExternalBot } : command;
 }
 
 export function directSettingLabel(setting: DirectSetting, value: Confirmation['value']): string {

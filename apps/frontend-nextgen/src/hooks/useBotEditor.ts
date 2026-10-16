@@ -45,9 +45,10 @@ export function useBotEditor(
   const [callerContextEditable, setCallerContextEditable] = useState(false);
   const [updatingCallType, setUpdatingCallType] = useState<string>();
   const [loading, setLoading] = useState(Boolean(botId));
-  const load = useCallback(async () => {
+  // silent 模式跳过 setLoading(true/false)：后台数据照刷，但编辑区不闪 Spin、不卸载弹窗（用于删除等就地操作）。
+  const load = useCallback(async (options?: { silent?: boolean }) => {
     if (!botId || !enabled) return;
-    setLoading(true);
+    if (!options?.silent) setLoading(true);
     try {
       const data = await botEditorService.load(botId, ownerId, deployment, engine);
       setSkills(data.skills);
@@ -69,18 +70,18 @@ export function useBotEditor(
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '编辑配置加载失败');
     } finally {
-      setLoading(false);
+      if (!options?.silent) setLoading(false);
     }
   }, [botId, enabled, serviceBot, spaceId, ownerId, deployment, engine]);
   useEffect(() => {
     void load();
   }, [botId, load]);
   const act = useCallback(
-    async (work: () => Promise<unknown>, message: string) => {
+    async (work: () => Promise<unknown>, message: string, options?: { silent?: boolean }) => {
       try {
         await work();
         toast.success(message);
-        await load();
+        await load(options);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : '操作失败');
         throw error;
@@ -106,7 +107,16 @@ export function useBotEditor(
     reload: load,
     toggleSkill: (skill: BotEditorSkill) =>
       act(() => botEditorService.toggleSkill(botId!, skill), skill.active ? 'Skill 已停用' : 'Skill 已启用'),
-    deleteSkill: (id: string) => act(() => botEditorService.deleteSkill(botId!, id), 'Skill 已删除'),
+    deleteSkill: (id: string) =>
+      act(
+        async () => {
+          await botEditorService.deleteSkill(botId!, id);
+          // 乐观移除卡片，避免静默全量重载期间卡片滞留(~1s)
+          setSkills((current) => current.filter((skill) => skill.id !== id));
+        },
+        'Skill 已删除',
+        { silent: true },
+      ),
     uploadSkill: (file: File) => act(() => botEditorService.uploadSkill(botId!, file), 'Skill 已上传'),
     setMcpActive: (mcp: BotEditorMcp, active: boolean) =>
       act(() => botEditorService.setMcpActive(botId!, mcp, active), active ? 'MCP 已添加' : 'MCP 已移除'),

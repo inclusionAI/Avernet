@@ -1,3 +1,4 @@
+import { automaticChain, changedChainItems, isAutomaticBatch } from '../contracts/repair-automatic-chain.js';
 import { randomUUID } from 'node:crypto';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { RepairBatchError, digestRepairJson, type RepairRevision } from '../contracts/repair-batch.js';
@@ -79,9 +80,9 @@ export function createRepairReleaseService(input: {
         if (!revision || revision.draft?.candidateCommit !== latest.candidateCommit) conflict('发布候选与任务记录不一致');
         await tx.exec(`UPDATE workflow_repair_revisions SET phase = 'published', state_version = state_version + 1, updated_at_ms = ?
           WHERE task_id = ? AND revision = ?`, [Date.now(), latest.taskId, latest.revision]);
-        const outcomes = revision.draft?.itemResults;
-        if (Array.isArray(outcomes)) for (const outcome of outcomes) {
-          if (outcome?.status === 'changed') {
+        const chain = await new RepairBatchRepository(tx).listRevisions(latest.workflowId, latest.taskId);
+        for (const outcome of changedChainItems(chain, revision)) {
+          {
             const updated = await tx.exec(`UPDATE workflow_repair_items SET state = 'awaiting_verification', active_task_id = ?, active_revision = ?,
             state_version = state_version + 1, updated_at_ms = ? WHERE item_id = ? AND workflow_id = ?
             AND ((state = 'processing' AND active_task_id = ?) OR (state = 'pending' AND active_task_id IS NULL))`, [latest.taskId, latest.revision, Date.now(), outcome.itemId, latest.workflowId, latest.taskId]);
@@ -118,13 +119,14 @@ export function createRepairReleaseService(input: {
       if (prior) return prior;
       const task = await workbench.task(taskId);
       const revision = task.revisions.find(r => r.revision === request.revision);
-      if (!revision || task.latestSuccessful?.revision !== request.revision || revision.phase !== 'review'
+      if (!revision || task.latestSuccessful?.revision !== request.revision || !['review', ...(isAutomaticBatch(revision.input) ? ['no_change'] : [])].includes(revision.phase)
         || !['review', 'failed', 'no_change', 'blocked'].includes(task.latestAttempt.phase) || revision.stateVersion !== request.expectedStateVersion) conflict('候选已变化或不是当前可审阅版本，请刷新');
+      const scope = changedChainItems(task.revisions, revision, true);
       const c = candidate(revision);
       if ((revision.checks?.static as { status?: string })?.status !== 'passed'
         || !Array.isArray(revision.draft?.itemResults)
         || revision.draft.itemResults.some(item => item.status === 'unresolved')
-        || !revision.draft.itemResults.some(item => item.status === 'changed')) conflict('候选检查失败、存在未解决问题或没有实际修改，不能确认');
+        || !scope.length) conflict('候选检查失败、存在未解决问题或没有实际修改，不能确认');
       const target = await authorized(actor, task.workflowId, request.targetId);
       const diff = await workbench.diff(taskId, request.revision, 'baseline');
       if (diff.truncated || !diff.files.length || diff.files.some(f => f.truncated || !f.binary && !f.patch)) conflict('完整行级差异尚不可用，不能确认候选', 'DIFF_INCOMPLETE');
@@ -137,9 +139,10 @@ export function createRepairReleaseService(input: {
         const retry = await locked.records.retry<RepairApproval>(taskId, 'approval', { actor, ...request });
         if (retry) return retry;
         const fresh = locked.revisions.find(r => r.revision === request.revision);
-        if (!fresh || fresh.stateVersion !== request.expectedStateVersion || fresh.phase !== 'review'
+        if (!fresh || fresh.stateVersion !== request.expectedStateVersion || !['review', ...(isAutomaticBatch(fresh.input) ? ['no_change'] : [])].includes(fresh.phase)
           || fresh.candidateDigest !== revision.candidateDigest || locked.revisions[0].phase === 'drafting'
-          || locked.revisions.find(r => r.draft !== null && r.phase !== 'no_change')?.revision !== request.revision) conflict('审核期间候选已变化，请重新审阅');
+          || locked.revisions.find(r => r.draft !== null && (r.phase !== 'no_change' || isAutomaticBatch(r.input)))?.revision !== request.revision) conflict('审核期间候选已变化，请重新审阅');
+        automaticChain(locked.revisions, fresh, true);
         const priorApprovals = await locked.records.list<RepairApproval>(taskId, 'approval');
         const approval: RepairApproval = { id: randomUUID(), taskId, workflowId: task.workflowId, revision: request.revision,
           stateVersion: Math.max(0, ...priorApprovals.map(a => a.stateVersion)) + 1, requestId: request.requestId, actorId: actor,
@@ -192,12 +195,11 @@ export function createRepairReleaseService(input: {
         if (repeated) return { value: repeated, dispatch: false };
         const freshApproval = (await records.list<RepairApproval>(taskId, 'approval')).sort((a, b) => b.stateVersion - a.stateVersion)[0];
         const selected = revisions.find(r => r.revision === request.revision);
-        if (!freshApproval || freshApproval.id !== approval.id || !selected || selected.phase !== 'review'
+        if (!freshApproval || freshApproval.id !== approval.id || !selected || !['review', ...(isAutomaticBatch(selected.input) ? ['no_change'] : [])].includes(selected.phase)
           || selected.draft?.candidateCommit !== approval.candidateCommit || selected.draft?.packDigest !== approval.packDigest
           || digestRepairJson(selected.draft) !== approval.candidateDigest || digestRepairJson(selected.checks) !== approval.checksDigest || revisions[0].phase === 'drafting'
-          || revisions.find(r => r.draft !== null && r.phase !== 'no_change')?.revision !== request.revision) conflict('部署前候选或审核确认已变化');
-        for (const item of selected.input.items) {
-          if (!Array.isArray(selected.draft?.itemResults) || !selected.draft.itemResults.some(outcome => outcome.itemId === item.itemId && outcome.status === 'changed')) continue;
+          || revisions.find(r => r.draft !== null && (r.phase !== 'no_change' || isAutomaticBatch(r.input)))?.revision !== request.revision) conflict('部署前候选或审核确认已变化');
+        for (const item of changedChainItems(revisions, selected, true)) {
           const current = await new RepairBatchRepository(tx).getItem(approval.workflowId, item.itemId);
           if (!current || !(current.state === 'processing' && current.activeTaskId === taskId || current.state === 'pending' && current.activeTaskId === null)) conflict('此候选的处理项已被移出、处置或占用，请重新核对修复范围');
           // Reserve the full reviewed scope before any external publication.

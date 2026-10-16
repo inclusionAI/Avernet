@@ -10,6 +10,16 @@ from typing import Any
 
 from ..constants import DEFAULT_TIMEOUT_SECONDS, clawweb_base_url
 from .. import logger
+from .bench_upload_metadata import (
+    _body,
+    _body_list,
+    _imported_template_names,
+    _scanned_template_names,
+    _template_hashes,
+    _publish_candidate_names,
+    _created_owner_user_id,
+    _published_template_names,
+)
 
 _MAX_JSON_RESPONSE_BYTES = 10 * 1024 * 1024
 
@@ -542,11 +552,19 @@ class ClawWebClient:
             )
         return parsed
 
-    def create_domain(self, domain_id: str, description: str) -> dict[str, Any]:
+    def create_domain(
+        self, domain_id: str, description: str, *,
+        source_task_id: str = "", source_step_id: str = "",
+    ) -> dict[str, Any]:
+        context: dict[str, str] = {}
+        if source_task_id or source_step_id:
+            if not source_task_id or not source_step_id:
+                raise ValueError("Domain source requires both task and step IDs")
+            context = {"sourceTaskId": source_task_id, "sourceStepId": source_step_id}
         result = self._request_json(
             "POST",
             "/api/bench/domains",
-            {"domainId": domain_id, "name": domain_id, "description": description},
+            {"domainId": domain_id, "name": domain_id, "description": description, **context},
         )
         _require_domain_response(result, "POST", "/api/bench/domains")
         return result
@@ -670,114 +688,6 @@ def _require_domain_response(
     return effective
 
 
-def _body(result: dict[str, Any]) -> dict[str, Any]:
-    body = result.get("body")
-    if not isinstance(body, dict):
-        return {}
-    data = body.get("data")
-    return data if isinstance(data, dict) else body
-
-
-def _body_list(result: dict[str, Any]) -> list[Any]:
-    body = result.get("body")
-    if isinstance(body, list):
-        return body
-    if not isinstance(body, dict):
-        return []
-    for key in ("items", "templates"):
-        if isinstance(body.get(key), list):
-            return body[key]
-    data = body.get("data")
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        for key in ("items", "templates"):
-            if isinstance(data.get(key), list):
-                return data[key]
-    return []
-
-
-def _imported_template_names(upload_result: dict[str, Any]) -> list[str]:
-    names: list[str] = []
-    for item in _body_list(upload_result):
-        if not isinstance(item, dict):
-            continue
-        if not item.get("imported"):
-            continue
-        name = str(item.get("templateName") or "").strip()
-        if name and name not in names:
-            names.append(name)
-    return names
-
-
-def _scanned_template_names(upload_result: dict[str, Any]) -> list[str]:
-    """Return every template name recognized by the upload scan.
-
-    Scan actions describe whether ClawWeb imported, skipped, or conflicted with a
-    template. They do not change the identity of the local package. Exact-set
-    validation therefore uses all recognized names, while publish selection
-    remains action-aware.
-    """
-    names: list[str] = []
-    for item in _body_list(upload_result):
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get("templateName") or "").strip()
-        if name and name not in names:
-            names.append(name)
-    return names
-
-
-def _template_hashes(result: dict[str, Any]) -> dict[str, str]:
-    hashes: dict[str, str] = {}
-    for item in _body_list(result):
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get("templateName") or "").strip()
-        source_hash = str(item.get("sourceHash") or "").strip().lower()
-        if name and source_hash:
-            hashes[name] = source_hash
-    return hashes
-
-
-def _publish_candidate_names(upload_result: dict[str, Any]) -> list[str]:
-    """Names that should be published after uploads/scan.
-
-    A re-run after a successful scan but failed publish can return action=skip
-    because the identical draft already exists. Those skipped items still need a
-    batch-publish attempt, otherwise the flow gets stuck at uploaded_no_imports.
-    Conflicts are excluded because ClawWeb intentionally did not import them.
-    """
-    names: list[str] = []
-    for item in _body_list(upload_result):
-        if not isinstance(item, dict):
-            continue
-        action = str(item.get("action") or "")
-        if action == "conflict":
-            continue
-        if not item.get("imported") and action != "skip":
-            continue
-        name = str(item.get("templateName") or "").strip()
-        if name and name not in names:
-            names.append(name)
-    return names
-
-
-def _created_owner_user_id(create_result: dict[str, Any], fallback: str) -> str:
-    return str(_body(create_result).get("ownerUserId") or fallback)
-
-
-def _published_template_names(list_result: dict[str, Any]) -> list[str]:
-    names: list[str] = []
-    for item in _body_list(list_result):
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get("templateName") or "").strip()
-        if name and name not in names:
-            names.append(name)
-    return names
-
-
 def upload_templates(
     domain_id: str,
     zip_path: Path,
@@ -786,6 +696,8 @@ def upload_templates(
     *,
     expected_template_names: list[str] | None = None,
     expected_template_hashes: dict[str, str] | None = None,
+    source_task_id: str = "",
+    source_step_id: str = "",
 ) -> dict[str, Any]:
     # Single-user-id mode: the same user_id is used as X-User-Id and URL ownerUserId.
     client = ClawWebClient(user_id=user_id)
@@ -818,9 +730,12 @@ def upload_templates(
 
     try:
         logger.info("clawweb create domain start", domain_id=domain_id, user_id=user_id)
+        source_context = ({"source_task_id": source_task_id, "source_step_id": source_step_id}
+                          if source_task_id or source_step_id else {})
         created = client.create_domain(
             domain_id,
             f"Auto-generated Bench Domain for clawevolve-plan run {domain_id}",
+            **source_context,
         )
         logger.info(
             "clawweb create domain done",

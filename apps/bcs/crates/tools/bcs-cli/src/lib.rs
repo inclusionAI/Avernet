@@ -157,10 +157,7 @@ fn resolve_distribution_default_url_for_env(
         }
     };
 
-    let is_pre = matches!(
-        runtime_env.to_ascii_lowercase().as_str(),
-        "pre" | "prepub"
-    );
+    let is_pre = matches!(runtime_env.to_ascii_lowercase().as_str(), "pre" | "prepub");
     let (url, source) = if is_pre {
         (pre_url, "compiled default (pre-release)")
     } else {
@@ -214,11 +211,7 @@ fn resolve_bcs_url_with_distribution_defaults(
 }
 
 fn resolve_bcs_url(args: &GlobalArgs) -> Result<String> {
-    resolve_bcs_url_with_distribution_defaults(
-        args,
-        COMPILED_PRE_BCS_URL,
-        COMPILED_PROD_BCS_URL,
-    )
+    resolve_bcs_url_with_distribution_defaults(args, COMPILED_PRE_BCS_URL, COMPILED_PROD_BCS_URL)
 }
 
 /// Discover authentication token from various sources.
@@ -573,10 +566,7 @@ mod tests {
             "REAL_SERVER_ENV",
             "ALIPAY_APP_ENV",
         ];
-        let originals: Vec<_> = keys
-            .iter()
-            .map(|key| std::env::var(key).ok())
-            .collect();
+        let originals: Vec<_> = keys.iter().map(|key| std::env::var(key).ok()).collect();
 
         safe_set_var("AGENTCLAW_ENV", "prod");
         safe_set_var("env", "prepub");
@@ -609,13 +599,10 @@ mod tests {
 
     #[test]
     fn test_distribution_default_rejects_partial_compiled_configuration() {
-        let pre_only = resolve_distribution_default_url_for_env(
-            "pre",
-            Some("https://pre.example.com"),
-            None,
-        )
-        .unwrap_err()
-        .to_string();
+        let pre_only =
+            resolve_distribution_default_url_for_env("pre", Some("https://pre.example.com"), None)
+                .unwrap_err()
+                .to_string();
         let prod_only = resolve_distribution_default_url_for_env(
             "prod",
             None,

@@ -604,7 +604,11 @@ bcs_cli() {
         else
             ensure_cli_token "$bot" >/dev/null || { BCS_CLI_STDOUT=""; BCS_CLI_STDERR=""; BCS_CLI_EXIT=126; return 126; }
         fi
-        args+=(--token "$BCS_CLI_TOKEN")
+        if [[ "$sub" == "group-context" ]]; then
+            args+=(--auth "$BCS_CLI_TOKEN")
+        else
+            args+=(--token "$BCS_CLI_TOKEN")
+        fi
     fi
     shift
     args+=("$@")
@@ -623,7 +627,7 @@ bcs_cli() {
     fi
     command_path="$sub"
     case "$sub" in
-        friend|channel|visibility|session|service|collaboration|collaborate|chat-run)
+        friend|channel|visibility|session|service|collaboration|collaborate|chat-run|group-context)
             [[ -n "$nested" && "$nested" != -* ]] && command_path="$sub $nested"
             ;;
     esac

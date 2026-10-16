@@ -150,6 +150,10 @@ jobs:
         if: steps.changes.outputs.skip-bcs != 'true'
         run: cargo test -p bcs-admin full_mysql_migration_chain_applies_and_preserves_history -- --ignored --nocapture
 
+      - name: Run MySQL Group Context contract
+        if: steps.changes.outputs.skip-bcs != 'true'
+        run: cargo test -p bcs-group-context-store --test conformance_group_context_repo_mysql -- --ignored
+
       - name: Run MySQL DB plugin contract
         if: steps.changes.outputs.skip-bcs != 'true'
         run: cargo test -p bcs-db-mysql --test conformance_db_plugin -- --ignored

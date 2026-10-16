@@ -72,7 +72,7 @@ pub(super) async fn update(
     }
     document.insert("bot".into(), toml::Value::Array(vec![toml::Value::Table(bot)]));
     config::runtime(&document, path, webhook_token)?;
-    let settings = config::RegistrationSettings { api_url: Some(api.into()), webhook_url: webhook.map(str::to_owned) };
+    let settings = config::RegistrationSettings { api_url: Some(api.into()), webhook_url: webhook.map(str::to_owned), provider_auth: source.settings.provider_auth.clone() };
     document.insert("registration".into(), toml::Value::try_from(settings)?);
     let text = toml::to_string_pretty(&document)?;
     let prepared = PreparedConfig::new(path, source.original.clone())?;

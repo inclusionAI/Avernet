@@ -1,3 +1,4 @@
+import { teamclawScope, teamclawCanManageDomainOwner } from "../services/evolve/teamclaw-scope.js";
 /**
  * Bench API routes — domain-aware template management, upload, run tracking.
  */
@@ -69,7 +70,7 @@ export function createBenchRouter(
   }
 
   function requireOwner(res: Response, currentUserId: string, ownerUserId: string): boolean {
-    if (currentUserId !== ownerUserId) {
+    if (currentUserId !== ownerUserId && !teamclawCanManageDomainOwner(res.req, ownerUserId)) {
       res.status(403).json({ error: "Forbidden", message: "You can only modify your own domains" });
       return false;
     }
@@ -472,7 +473,9 @@ export function createBenchRouter(
       if (!requireAuth(res, currentUserId)) return;
       const includeArchived = String(req.query.includeArchived ?? "").toLowerCase() === "true";
       const status = req.query.status ? String(req.query.status) : undefined;
-      const rows = await domainRepo.listAll(currentUserId, { status, includeArchived });
+      const scope = teamclawScope(req);
+      const rows = scope ? await domainRepo.listInSpace(scope.space.id, scope.space.type === "PERSONAL" ? scope.identity.userId : undefined, {status,includeArchived})
+        : await domainRepo.listAll(currentUserId, { status, includeArchived });
       const withCounts = await Promise.all(
         rows.map(async (d) => {
           const ownerUserId = dbText(d.owner_user_id);
@@ -500,7 +503,7 @@ export function createBenchRouter(
       const existing = await domainRepo.findByOwnerAndDomainId(currentUserId, normalizedDomainId);
       if (existing) { res.status(409).json({ error: "Domain already exists" }); return; }
 
-      const row = await domainRepo.create({ domainId: normalizedDomainId, name: String(name), description, ownerUserId: currentUserId });
+      const row = await domainRepo.create({ domainId: normalizedDomainId, name: String(name), description, ownerUserId: currentUserId, ...(teamclawScope(req) ? {spaceId:teamclawScope(req)!.space.id} : {}) });
       res.status(201).json(domainRowToApi(row));
     } catch (err) { handleError(res, err); }
   }));
@@ -619,7 +622,7 @@ export function createBenchRouter(
       const parsed = parseBenchMarkdown(String(contentMd));
       const result = await upsertTemplateAndVersion({
         domainRepo, templateRepo, versionRepo,
-        ownerUserId: currentUserId,
+        ownerUserId: teamclawScope(req) ? resolved.ownerUserId : currentUserId,
         domainId: resolved.domainId, templateName: String(templateName),
         displayName: displayName ?? String(templateName),
         description, category, targetType, gradingType,
@@ -645,7 +648,7 @@ export function createBenchRouter(
       const parsed = contentMd ? parseBenchMarkdown(String(contentMd)) : null;
       const result = await upsertTemplateAndVersion({
         domainRepo, templateRepo, versionRepo,
-        ownerUserId: currentUserId,
+        ownerUserId: teamclawScope(req) ? resolved.ownerUserId : currentUserId,
         domainId: resolved.domainId, templateName,
         displayName, description, category, targetType, gradingType,
         contentMd: contentMd ? String(contentMd) : undefined,
@@ -813,7 +816,7 @@ export function createBenchRouter(
 
         const parsedFiles = await parseUploadedFiles(files);
         const scanResult = await scanUploadedFiles({
-          ownerUserId: currentUserId,
+          ownerUserId: teamclawScope(req) ? resolved.ownerUserId : currentUserId,
           domainId: resolved.domainId,
           parsedFiles,
           templateRepo,
@@ -824,7 +827,7 @@ export function createBenchRouter(
           templateRepo,
           versionRepo,
           db,
-          ownerUserId: currentUserId,
+          ownerUserId: teamclawScope(req) ? resolved.ownerUserId : currentUserId,
           domainId: resolved.domainId,
           parsedFiles,
           scanItems: scanResult.items,
@@ -929,7 +932,7 @@ export function createBenchRouter(
       const currentUserId = getCurrentUserId(req);
       if (!requireAuth(res, currentUserId)) return;
       const ownerUserId = req.query.ownerUserId ? String(req.query.ownerUserId) : currentUserId;
-      if (currentUserId !== ownerUserId && !req.isAdmin && !req.isBenchAdmin) {
+      if (currentUserId !== ownerUserId && !teamclawScope(req) && !req.isAdmin && !req.isBenchAdmin) {
         res.status(403).json({ error: "Forbidden", message: "You can only view your own runs" });
         return;
       }

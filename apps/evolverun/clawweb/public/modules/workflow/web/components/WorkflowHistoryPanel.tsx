@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { stringify as stringifyYaml } from 'yaml'
 import { api } from '@avernet/clawweb-shared/web/api/client'
 import type { DeployHistoryItem, VersionSnapshot } from '@avernet/clawweb-shared/web/types'
+import { workflowVersionSourceLabel } from '../utils/workflow-version-source'
 import { useWorkflowAccess } from '../api/hooks'
 import WorkflowVersionDiff from './WorkflowVersionDiff'
 
@@ -42,7 +43,7 @@ function specJsonToText(specJson: string): string {
 }
 
 export default function WorkflowHistoryPanel({ workflowId, onActiveVersionChange, onClose }: WorkflowHistoryPanelProps) {
-  const [history, setHistory] = useState<DeployHistoryItem[]>([])
+  const [history, setHistory] = useState<(DeployHistoryItem & { source?: import('../../server/contracts/workflow-version-source').WorkflowVersionSource | null })[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -187,6 +188,7 @@ export default function WorkflowHistoryPanel({ workflowId, onActiveVersionChange
                           <div className="flex items-baseline gap-2"><span className="font-mono text-sm font-semibold text-slate-800">v{h.version}</span><span className="font-mono text-[11px] text-slate-400">#{h.deployNumber}</span></div>
                           {h.isActive ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">线上生效</span> : <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${actionClass(h.action)}`}>{h.action}</span>}
                         </div>
+                        {h.action !== 'edit' && <p className="mt-1 text-[11px] text-slate-600">{workflowVersionSourceLabel(h.source)}</p>}
                         <div className="mt-1 truncate text-[11px] text-slate-500" title={actor}>{actor} · {formatTime(h.gmtCreate)}</div>
                         {canEdit && !h.isActive && h.action === 'deploy' && <button onClick={(e) => { e.stopPropagation(); void handleActivateVersion(h.deployNumber, h.version) }} disabled={activating === h.version} className="mt-2 text-[11px] font-medium text-blue-600 hover:text-blue-800 disabled:opacity-50" title={`将 v${h.version} 设置为线上生效版本`}>{activating === h.version ? '设置中…' : '设为线上生效版本'}</button>}
                       </div>

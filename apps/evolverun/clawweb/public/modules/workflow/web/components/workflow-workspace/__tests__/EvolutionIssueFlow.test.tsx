@@ -133,7 +133,7 @@ describe('issue and optimization flow', () => {
 
     const issue = screen.getByText('fetch-data', { selector: 'span' }).closest('article')
     expect(issue).not.toBeNull()
-    expect(within(issue!).getByText('影响、频率与覆盖率待评估')).toBeInTheDocument()
+    expect(within(issue!).getByText('统计暂不可用')).toBeInTheDocument()
 
     await userEvent.click(within(issue!).getByRole('button', { name: '问题详情' }))
     const drawer = screen.getByRole('dialog', { name: '问题详情' })
@@ -230,14 +230,14 @@ describe('issue and optimization flow', () => {
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
     await waitFor(() => expect(repairApi.candidates).toHaveBeenCalled())
 
-    expect(await screen.findByRole('region', { name: '处理任务' })).toHaveTextContent('FIX-1')
+    expect(await screen.findByRole('region', { name: '问题与优化任务入口' })).toHaveTextContent('优化 1 项问题')
     const issue = screen.getByText('fetch-data', { selector: 'span' }).closest('article')!
     expect(within(issue).queryByRole('checkbox')).not.toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: '查看任务' }))
+    await userEvent.click(screen.getByRole('button', { name: '查看本轮任务' }))
     const taskDialog = await screen.findByRole('region', { name: 'Workflow 修复工作区' })
     expect(within(taskDialog).getByText('候选修复已生成')).toBeInTheDocument()
-    expect(within(taskDialog).getByText(/尚未应用到工作流或部署/)).toBeInTheDocument()
+    expect(within(taskDialog).getByText(/尚无成功发布回执/)).toBeInTheDocument()
     await userEvent.click(within(taskDialog).getByRole('button', { name: /返回问题与优化/ }))
 
     expect(screen.getByRole('button', { name: '生成优化草稿（0）' })).toBeDisabled()

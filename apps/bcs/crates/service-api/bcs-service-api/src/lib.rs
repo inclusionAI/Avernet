@@ -49,8 +49,8 @@ pub use application::message_delivery::{
 pub use application::v1::{
     BindInviteCode, BindInviteCodeResult, BotInternalAttributes, FriendCheckInStrategy,
     GetMyInviteCodeBinding, InitInviteCodes, InitInviteCodesResult,
-    InviteCodeBindingView, InviteCodeService, InternalBotAttributesService,
-    PatchBotInternalAttributes, UserVisibility,
+    GroupContextApplicationService, InviteCodeBindingView, InviteCodeService,
+    InternalBotAttributesService, PatchBotInternalAttributes, UserVisibility,
 };
 pub use application::system_message::resolve_session_topic;
 pub use application::interaction::{

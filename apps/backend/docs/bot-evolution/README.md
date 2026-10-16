@@ -61,6 +61,7 @@ which names the documents to read first.
 | [10-meta-evolution.md](10-meta-evolution.md) | Service (later) | Level 3: improving the mechanism, mechanism verification, bounds |
 | [research.md](research.md) | Appendix | Industry survey and codebase evidence |
 | [work-items.md](work-items.md) | Appendix | Work items for follow-up sessions, with dependencies |
+| [integration-guide.md](integration-guide.md) | Guide | How callers and strategies use the platform: the two API layers, where orchestration lives, one API rather than two, worked examples, who builds what |
 
 Draft decision records (status `proposed`). They live here while under
 discussion; once accepted, each is promoted to `docs/adr/` with the next free

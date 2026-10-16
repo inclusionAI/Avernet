@@ -255,6 +255,7 @@ function enabledWorkflowSet(value: string | string[] | undefined): Set<string> {
 
 export function createFailedRunAutoAnalysisObserver(input: {
   flowRunRepo: {
+    isTrialRun(flowId: string): Promise<boolean>;
     findByFlowId(flowId: string): Promise<{
       workflow_id: string;
       origin_bot_id: string | null;
@@ -268,6 +269,7 @@ export function createFailedRunAutoAnalysisObserver(input: {
   const enabled = enabledWorkflowSet(input.enabledWorkflows ?? process.env.TASK_GUARD_AUTO_ANALYZE_FAILED_WORKFLOWS);
   return async ({ flowId, status }) => {
     if (status !== "failed") return;
+    if (await input.flowRunRepo.isTrialRun(flowId)) return;
     const run = await input.flowRunRepo.findByFlowId(flowId);
     if (!run) return;
     const isEnabled = input.isWorkflowEnabled

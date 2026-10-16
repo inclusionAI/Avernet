@@ -1,3 +1,5 @@
+import { changedChainItems } from '../contracts/repair-automatic-chain.js';
+import { productionRunsSql } from "@avernet/clawweb-shared/server/services/run-purpose";
 import { randomUUID } from 'node:crypto';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { fillRepairSampleAnalyses } from './repair-sample-analyses.js';
@@ -8,7 +10,8 @@ import type { RepairEffectRule, RepairVerificationConclusion } from '../contract
 import { RepairBatchRepository } from '../repositories/repair-batch-repository.js';
 import { RepairReleaseRepository } from '../repositories/repair-release-repository.js';
 export type EffectSample = { flowId: string; deployNumber: number; completed: boolean; nodeStatus: string; analysisComplete: boolean; signatures: string[] };
-export type RepairEffectDecision = { result: 'observing' | 'verified' | 'ineffective'; reason: string; eligibleSamples: number; flowIds: string[]; rule: RepairEffectRule | null; observedDeployNumber?: number };
+export type RepairEffectDecision = { result: 'observing' | 'verified' | 'ineffective'; reason: string; eligibleSamples: number; flowIds: string[]; rule: RepairEffectRule | null; observedDeployNumber?: number;
+  sampleSummary?: { related: number; complete: number; missingAnalysis: number; unsuccessfulNode: number } };
 /** v1 intentionally handles objectively diagnosed node timeouts only. Quality, cost,
  * absent node identity and arbitrary text have no automatic success verifier. */
 export function effectRule(item: RepairItem): RepairEffectRule | null {
@@ -20,11 +23,13 @@ export function effectRule(item: RepairItem): RepairEffectRule | null {
 export function decideRepairEffect(rule: RepairEffectRule | null, deployNumber: number, input: EffectSample[]): RepairEffectDecision {
   const samples = [...new Map(input.filter(row => row.deployNumber === deployNumber && row.completed
     && ['succeeded', 'failed', 'timeout', 'timed_out'].includes(row.nodeStatus)).map(row => [row.flowId, row])).values()];
-  const base = { rule, eligibleSamples: samples.length, flowIds: samples.map(row => row.flowId).sort() };
+  const clean = samples.filter(row => row.nodeStatus === 'succeeded' && row.analysisComplete && (!rule || !row.signatures.includes(rule.signature)));
+  const base = { rule, eligibleSamples: clean.length, flowIds: samples.map(row => row.flowId).sort(),
+    sampleSummary: { related: samples.length, complete: clean.length, missingAnalysis: samples.filter(row => !row.analysisComplete).length,
+      unsuccessfulNode: samples.filter(row => row.nodeStatus !== 'succeeded').length } };
   if (!rule) return { ...base, result: 'observing', reason: '缺少适用于此问题的自动验证规则' };
   const recurring = samples.filter(row => row.signatures.includes(rule.signature));
   if (recurring.length) return { ...base, result: 'ineffective', flowIds: recurring.map(row => row.flowId).sort(), reason: '生效版本的相关节点诊断明确复现原问题' };
-  const clean = samples.filter(row => row.nodeStatus === 'succeeded' && row.analysisComplete);
   if (clean.length < rule.minimumSamples || clean.length !== samples.length) return { ...base, result: 'observing', reason: `相关节点有效且已分析样本 ${clean.length}/${rule.minimumSamples}，继续观察；失败或未分析不视为通过` };
   return { ...base, result: 'verified', reason: `${rule.version}：7天内至少${rule.minimumSamples}次相关节点成功且完整分析未发现原签名；仅证明此超时问题满足规则` };
 }
@@ -32,12 +37,13 @@ export function decideRepairEffect(rule: RepairEffectRule | null, deployNumber: 
 export function createRepairAutoVerification(db: IDatabase, publication?: RepairPublicationPort) {
   async function decisions(d: RepairDeployment) {
     const revision = await new RepairBatchRepository(db).getRevision(d.workflowId, d.taskId, d.revision);
-    const changed = new Set(Array.isArray(revision?.draft?.itemResults) ? revision.draft.itemResults.filter(row => row.status === 'changed').map(row => row.itemId) : []);
+    const items = revision ? changedChainItems(await new RepairBatchRepository(db).listRevisions(d.workflowId, d.taskId), revision) : [];
+    const changed = new Set(items.map(item => item.itemId));
     const result: Array<RepairEffectDecision & { itemId: string }> = [];
     const active = changed.size ? (await db.query<{ deploy_number: number }>('SELECT deploy_number FROM workflow_deploy_history WHERE workflow_id = ? AND is_active = 1', [d.workflowId]))[0] : null;
     const versionChanged = changed.size > 0 && Number(active?.deploy_number) !== d.receipt!.deployNumber;
     const applied = versionChanged && publication?.appliedState ? await publication.appliedState(d) : null;
-    for (const item of revision?.input.items ?? []) {
+    for (const item of items) {
       if (!changed.has(item.itemId)) continue;
       const rule = effectRule(item);
       if (versionChanged && applied?.status !== 'unchanged' && applied?.itemStates?.[item.itemId] !== 'unchanged') { result.push({ itemId: item.itemId, ...decideRepairEffect(rule, d.receipt!.deployNumber, []), reason: '当前生效版本已变化；重新核对已应用修改，旧版本证据不形成当前效果结论' }); continue; }
@@ -46,7 +52,7 @@ export function createRepairAutoVerification(db: IDatabase, publication?: Repair
       const nowSeconds = Date.now() / 1000;
       const startedAtSeconds = 'CASE WHEN fr.started_at >= 1000000000000 THEN fr.started_at / 1000.0 ELSE fr.started_at END';
       const rows = await db.query<{ flow_id: string; status: string; completed_at: number | null; node_status: string }>(
-        `SELECT fr.flow_id, fr.status, fr.completed_at, ne.status AS node_status FROM flow_runs fr
+        `SELECT fr.flow_id, fr.status, fr.completed_at, ne.status AS node_status FROM ${productionRunsSql()} fr
          JOIN node_executions ne ON ne.flow_id = fr.flow_id AND ne.node_id = ?
          WHERE fr.workflow_id = ? AND fr.workflow_deploy_number = ? AND ${startedAtSeconds} >= ? AND ${startedAtSeconds} <= ?
          ORDER BY ${startedAtSeconds} DESC, ne.started_at DESC LIMIT 2000`,

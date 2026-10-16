@@ -1,6 +1,9 @@
 import type { IssueGroup } from './issue-aggregation.js';
-export type IssueRun = { flowId: string; startedAtMs: number; nodes: string[]; analyzed: boolean };
-export type IssueWindow = { affected: number; related: number; analyzed: number; sampleHitRate: number | null; occurrenceRate: number | null };
+export type IssueCoverage = { at: number; id: number; completed: boolean; complete: boolean };
+export type IssueRun = { flowId: string; startedAtMs: number; nodes: string[]; analyzed: boolean;
+  coverage?: { whole: IssueCoverage | null; nodes: Record<string, IssueCoverage>; legacyNodes: string[] } };
+export type IssueWindow = { affected: number; related: number; analyzed: number; complete?: number; legacyDiagnosed?: number; sampleHits?: number;
+  sampleHitRate: number | null; occurrenceRate: number | null };
 export type IssuePriority = { severity: 'low' | 'medium' | 'high' | 'critical' | null; severitySources: string[];
   day: IssueWindow; week: IssueWindow; previousWeek: IssueWindow; trend: 'worsening' | 'improving' | 'stable' | null;
   lastOccurredAtMs: number | null; missingRunTimes: number; nodes: string[]; sortReason: string };
@@ -16,11 +19,24 @@ export function issuePriority(group: IssueGroup, input: IssueRun[], now = Date.n
   const window = (from: number, to: number): IssueWindow => {
     const relevant = runs.filter(run => run.startedAtMs >= from && run.startedAtMs < to
       && (affected.has(run.flowId) || !nodes.length || nodes.some(node => run.nodes.includes(node))));
-    const analyzed = relevant.filter(run => run.analyzed), hits = relevant.filter(run => affected.has(run.flowId));
-    const analyzedHits = analyzed.filter(run => affected.has(run.flowId));
+    const coverage = (run: IssueRun) => {
+      if (!run.coverage) return { completed: run.analyzed, complete: run.analyzed, legacy: false };
+      const applicable = nodes.filter(node => run.nodes.includes(node));
+      const targets = applicable.length ? applicable : nodes;
+      const latest = targets.length ? targets.map(node => {
+        const full = run.coverage!.whole, local = run.coverage!.nodes[node];
+        return !local || full && (full.at > local.at || full.at === local.at && full.id > local.id) ? full : local;
+      }) : [run.coverage.whole];
+      return { completed: latest.every(row => row?.completed), complete: latest.every(row => row?.complete),
+        legacy: run.coverage.legacyNodes.some(node => !targets.length || targets.includes(node)) };
+    };
+    const analyzed = relevant.filter(run => coverage(run).completed), hits = relevant.filter(run => affected.has(run.flowId));
+    const complete = relevant.filter(run => coverage(run).complete);
+    const analyzedHits = complete.filter(run => affected.has(run.flowId));
     return { related: relevant.length, analyzed: analyzed.length, affected: hits.length,
-      sampleHitRate: analyzed.length ? analyzedHits.length / analyzed.length : null,
-      occurrenceRate: relevant.length && analyzed.length === relevant.length ? hits.length / relevant.length : null };
+      complete: complete.length, sampleHits: analyzedHits.length, legacyDiagnosed: relevant.filter(run => !coverage(run).completed && coverage(run).legacy).length,
+      sampleHitRate: complete.length ? analyzedHits.length / complete.length : null,
+      occurrenceRate: relevant.length && complete.length === relevant.length ? hits.length / relevant.length : null };
   };
   const day = window(now - DAY, now), week = window(now - 7 * DAY, now), previousWeek = window(now - 14 * DAY, now - 7 * DAY);
   const trend = week.occurrenceRate == null || previousWeek.occurrenceRate == null ? null

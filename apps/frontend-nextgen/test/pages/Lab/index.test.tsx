@@ -31,7 +31,10 @@ describe('LabLandingPage', () => {
     expect(card.getByRole('heading', { name: '社区' })).toHaveClass('text-base');
     // 齿轮「Bot 访问社区配置」位于社区卡右上角（进入社区前可见）。
     expect(card.getByRole('button', { name: '设置 Bot 访问社区' })).toBeInTheDocument();
-    expect(card.getByRole('button', { name: '开始体验' })).toBeInTheDocument();
+    const startButton = card.getByRole('button', { name: '开始体验' });
+    expect(startButton).toBeInTheDocument();
+    expect(startButton).toHaveClass('bg-primary', 'text-primary-foreground');
+    expect(startButton).not.toHaveClass('bg-foreground');
     const feedbackButton = card.getByRole('button', { name: /我要反馈/ });
     const actions = feedbackButton.parentElement;
     expect(actions?.className).toContain('justify-between');

@@ -131,6 +131,16 @@ Owner 等待（包括到期释放容器）、阶段变化、审批、通知和�
 
 结果回传使用 ClawWeb 已有服务地址和上述固定接口路径。接收接口尚未就绪或回传失败时，任务仍可创建、执行并在任务页面查看；结果保留为待回传。接收接口成功响应后才记录为已回传。
 
+## AIS 执行恢复
+
+CW 控制面负责 AIS 派发、启动与执行中断后的有限恢复。同一个自愈 Task 内最多自动重试两次，分别退避 20 秒、60 秒；失败次数和下次重试时间保存在现有 Task 配置中，服务重启不重置预算。每次重试创建新的 execution 和辅助 `agent_execution` Step，保留业务阶段、完整方案、Owner 决策、证据和操作审计。辅助执行失败不直接改变业务 Task 的终态。
+
+已取得 AIS 作业编号时，先确认旧作业结束，再创建替代执行；查询失败或状态未确认时保持待重试，不并行启动。租约过期的运行中作业先请求停止，并等待终态。未取得派发回执时不推断作业未创建：先撤销旧执行票据，使旧执行不能继续调用受控工具。旧回调不能推进或终止替代执行。
+
+恢复前等待尚在执行的工具调用回执；租约到期仍无回执的写操作记为 `unknown`，未派发的调用取消。新 Agent 读取已保存进度，未知写入必须通过现有读取和 `reconcile_write` 核实，不能从头重放消息或方案操作。
+
+重试过程只记录任务时间线，不逐次回传上游。重试成功后继续原流程；预算耗尽或 Base 明确回报不可重试时，结束任务并回传 `failed + unknown`，`result_text` 保留脱敏失败原因、作业编号（已取得时）及重试情况。方案执行失败、Agent 明确回报受阻仍按原业务流程结束，不自动增加修复方案。等待 Owner、等待效果或已结束任务不会因 AIS 退出而变为失败；外部停止未过期的作业不自动重建。
+
 ## 继续等待效果的任务
 
 `POST /api/insight/v1/internal/monitoring/session-recoveries/:taskId/continue`
@@ -141,15 +151,24 @@ Owner 等待（包括到期释放容器）、阶段变化、审批、通知和�
 
 任务入口：`/insight?module=monitoring&recoveryTaskId=<task_id>`。
 
-页面查询、决策和人工标注使用现有用户登录身份，操作只允许该任务 Owner。
+页面查询、分享设置、决策和人工标注使用现有用户登录身份。默认仅任务 Owner 或管理员可查看；Owner 或管理员可开启分享，开启后其他登录用户可通过任务链接只读查看方案、时间线、效果和工具调用证据。方案确认、配合事项确认、人工标注和修改分享设置仍仅允许 Owner 或管理员。Agent 原始会话日志下载沿用现有日志接口的 Owner／管理员权限。
+
+分享开关沿用自进化的 `ce_tasks.config_json.shared`，未设置视为关闭，不新增表或迁移。详情响应的 `shared / canOperate / canManageShare` 表达当前分享状态及当前用户的操作权限。关闭分享后，共享访客的详情和证据读取立即返回 `403`。分享设置不推进任务阶段、不重新执行 Agent、不触发上游结果回传。
+
+详情的 `executions` 从现有 `agent_execution` Step 只读生成，按执行次数升序返回 `executionId / attempt / status / jobId / jobUrl`，不包含执行票据或归档上传地址。`jobUrl` 由 Host 的现有 AIS 服务生成；未取得作业编号或 Host 未提供链接时相应字段为 `null`。页面以时间线事件的 `payload.execution_id` 关联具体执行，在该条记录旁展示对应 AIS 作业链接；派发失败未取得编号时明确展示，不指向其他轮次的作业。读取不补写历史事件，也不改变任务状态或回传结果。
+
+监控页面展开诊断记录后，在记录顶部展示对应自愈任务的当前状态和一个查看入口。通过诊断的 `diagnosisId`（即 `event_id`）关联，任务编号悬停可见；没有可查看任务时不显示入口。
 
 ```text
 GET  /api/insight/v1/monitoring/session-recoveries?event_id=…
 GET  /api/insight/v1/monitoring/session-recoveries/:taskId
+PATCH /api/insight/v1/monitoring/session-recoveries/:taskId/share
 GET  /api/insight/v1/monitoring/session-recoveries/:taskId/tool-calls/:toolCallId
 POST /api/insight/v1/monitoring/session-recoveries/:taskId/decision
 POST /api/insight/v1/monitoring/session-recoveries/:taskId/annotations
 ```
+
+分享设置请求：`{ "shared": true }`（关闭为 `false`），返回更新后的任务详情。仅布尔值合法；重复设置同一状态幂等。
 
 方案确认请求：`{ "plan_digest": "…", "approved": true, "cooperation_done": true, "feedback": "已处理所需配合事项" }`。配合事项不为空时必须确认完成；决策绑定完整方案摘要，不能改写已确认的决策。
 

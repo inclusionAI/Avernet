@@ -228,13 +228,15 @@ impl Drop for PendingChild {
     }
 }
 
-pub async fn start_daemon(config_path: &Path, runtime_dir: &Path) -> anyhow::Result<()> {
+pub async fn start_daemon(config_path: &Path, runtime_dir: &Path, cwd: Option<&Path>) -> anyhow::Result<()> {
     let paths = Paths::new(runtime_dir);
     if paths.is_locked()? { bail!("A bridge instance is already starting or running; use bcs-bridge status or stop"); }
     paths.create()?;
     let log = private_file(&paths.file("bridge.log"), true, true)?;
-    let child = Command::new(std::env::current_exe().context("Cannot locate the bridge executable")?)
-        .args(["start", "--daemon-child", "--config"]).arg(config_path)
+    let mut command = Command::new(std::env::current_exe().context("Cannot locate the bridge executable")?);
+    command.args(["start", "--daemon-child", "--config"]).arg(config_path);
+    if let Some(cwd) = cwd { command.arg("--cwd").arg(cwd.canonicalize().context("Cannot resolve working directory")?); }
+    let child = command
         .stdin(Stdio::null()).stdout(log.try_clone()?).stderr(log).spawn()
         .context("Cannot launch background bridge")?;
     let pid = child.id();

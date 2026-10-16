@@ -13,7 +13,6 @@ from secbaas.community.spi.sandbox.arca import ArcaSandboxPlugin
     [
         ("_stub", "StubArcaSandboxPlugin"),
         ("aliyun_ack._sandbox_plugin", "AliyunAckSandboxPlugin"),
-        ("local_docker._sandbox_plugin", "LocalDockerArcaSandboxPlugin"),
         ("local_proc._sandbox_plugin", "LocalProcessArcaSandboxPlugin"),
     ],
 )

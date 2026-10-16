@@ -22,8 +22,10 @@ members = [
     "crates/services/bcs-group",
     "crates/application/v1/bcs-app-group",
     "crates/application/v1/bcs-app-bot",
+    "crates/application/v1/bcs-app-group-context",
     "crates/application/v1/bcs-app-invite-code",
     "crates/services/bcs-group-store",
+    "crates/services/bcs-group-context-store",
     "crates/services/bcs-interaction",
     "crates/services/bcs-message",
     "crates/services/bcs-message-flow",
@@ -191,7 +193,7 @@ regex = "1"
 
 # Time
 time = { version = "0.3", features = ["local-offset", "macros", "formatting"] }
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
@@ -265,7 +267,9 @@ bcs-jwt = { path = "crates/services/bcs-jwt" }
 bcs-group      = { path = "crates/services/bcs-group" }
 bcs-app-bot   = { path = "crates/application/v1/bcs-app-bot" }
 bcs-app-group   = { path = "crates/application/v1/bcs-app-group" }
+bcs-app-group-context = { path = "crates/application/v1/bcs-app-group-context" }
 bcs-group-store = { path = "crates/services/bcs-group-store" }
+bcs-group-context-store = { path = "crates/services/bcs-group-context-store" }
 bcs-message = { path = "crates/services/bcs-message" }
 bcs-message-flow = { path = "crates/services/bcs-message-flow" }
 bcs-interaction = { path = "crates/services/bcs-interaction" }

@@ -88,7 +88,7 @@ export function CommunityPage() {
             className="h-9"
           />
           <Button
-            className="ml-auto h-9 bg-foreground px-4 text-xs text-background hover:opacity-90"
+            className="ml-auto h-9 px-4 text-xs"
             leftIcon={<Plus className="size-3.5" aria-hidden />}
             onClick={() => setPublishOpen(true)}
           >

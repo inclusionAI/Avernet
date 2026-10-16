@@ -1,3 +1,5 @@
+import { projectTaskHistory } from '../services/repair-task-history.js';
+import type { createRepairTrialService } from '../services/repair-trial-service.js';
 import { Router, type Request, type Response } from 'express';
 import type { RepairInboxFilter, RepairWorkbenchService } from '../contracts/repair-workbench.js';
 import type { RepairReleaseService } from '../contracts/repair-release.js';
@@ -33,7 +35,7 @@ function boolean(value: unknown, field: string, fallback = false): boolean {
  * No unsigned callback or publication route is exposed here.
  */
 export function createRepairBatchesRouter(input: { service: RepairWorkbenchService; authorize: RepairAuthorize; release?: RepairReleaseService;
-  verification?: ReturnType<typeof createRepairVerificationService> }): Router {
+  trials?: ReturnType<typeof createRepairTrialService>; verification?: ReturnType<typeof createRepairVerificationService> }): Router {
   const router = Router();
   const { service, authorize } = input;
   router.use((request, response, next) => repairRequestDiagnostic(context => {
@@ -137,9 +139,9 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
   }));
   router.get('/:taskId', handle(async (req, res) => {
     const selected = await taskAccess(req, res, 'view');
-    if (selected) res.json({ ...selected.task,
+    if (selected) res.json(projectTaskHistory({ ...selected.task,
       ...(input.release ? { release: await input.release.detail(selected.task.taskId),
-        capabilities: { ...selected.task.capabilities, publication: input.release.configured && selected.actor.canEdit } } : {}) });
+        capabilities: { ...selected.task.capabilities, publication: input.release.configured && selected.actor.canEdit } } : {}) }, positive(req.query.revisionPage, 'revisionPage', 1), positive(req.query.revisionPageSize, 'revisionPageSize', 20, 20)));
   }));
   function release() {
     if (!input.release) throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '当前宿主未接入候选审阅和部署服务');
@@ -150,6 +152,26 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
     const actor = await access(req, res, workflowId, 'edit');
     if (!actor) return;
     res.json({ revision: await service.request(workflowId, text(req.query.requestId, 'requestId')) });
+  }));
+  router.get('/:taskId/trials/options', handle(async (req, res) => {
+    const selected = await taskAccess(req, res, 'edit');
+    if (!selected) return;
+    if (!input.trials) throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '试跑尚未接入');
+    res.json(await input.trials.options(selected.actor.actorId, selected.task.taskId, revision(req.query.revision)));
+  }));
+  router.get('/:taskId/trials', handle(async (req, res) => {
+    const selected = await taskAccess(req, res, 'view');
+    if (!selected) return;
+    const offset = req.query.offset === undefined ? 0 : Number(req.query.offset);
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new RepairBatchError('INVALID_INPUT', 'Invalid trial offset');
+    const trials = input.trials ? await input.trials.list(selected.task.taskId, offset) : [];
+    res.json({ trials, nextOffset: trials.length === 20 ? offset + 20 : null, configured: !!input.trials?.configured });
+  }));
+  router.post('/:taskId/trials', handle(async (req, res) => {
+    const selected = await taskAccess(req, res, 'edit');
+    if (!selected) return;
+    if (!input.trials) throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '试跑尚未接入');
+    res.status(202).json(await input.trials.start(selected.actor.actorId, selected.task.taskId, req.body));
   }));
   router.get('/:taskId/deployment-targets', handle(async (req, res) => {
     const selected = await taskAccess(req, res, 'edit');

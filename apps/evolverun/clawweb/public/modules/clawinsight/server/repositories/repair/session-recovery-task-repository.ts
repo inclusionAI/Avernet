@@ -72,7 +72,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
   private eventRemark(eventId: string): string { return `session-recovery-event:${createHash("sha256").update(eventId).digest("hex")}`; }
   async listForEvent(eventId: string, ownerId: string): Promise<RecoveryStoredTask[]> {
     const rows = await this.db.query<{ task_id: string }>(
-      "SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery' AND remark = ? AND user_id = ? ORDER BY id DESC LIMIT 100", [this.eventRemark(eventId), ownerId]);
+      "SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery' AND remark = ? AND (user_id = ? OR JSON_EXTRACT(config_json, '$.shared') = true) ORDER BY id DESC LIMIT 100", [this.eventRemark(eventId), ownerId]);
     return (await Promise.all(rows.map(row => this.find(row.task_id)))).filter((task): task is RecoveryStoredTask => !!task);
   }
   async update(taskId: string, expectedVersion: number, change: (current: RecoveryStoredTask) => RecoveryStoredTask): Promise<RecoveryStoredTask | null> {

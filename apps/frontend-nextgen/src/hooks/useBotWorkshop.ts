@@ -23,7 +23,6 @@ import { toast } from 'sonner';
 import { useBotWorkshopAccess } from './useBotWorkshopAccess';
 import { useBotWorkshopCreateFlow } from './useBotWorkshopCreateFlow';
 import { useBotWorkshopLocks } from './useBotWorkshopLocks';
-
 export function useBotWorkshop() {
   const state = useBotWorkshopStore();
   const requestIdentity = useBotWorkshopRequestIdentity();
@@ -195,6 +194,8 @@ export function useBotWorkshop() {
     // 不应显示受协作者权限保护的任务实例入口。
     canOpenTaskInstances: (bot: BotDomain) =>
       Boolean(currentOpenApiUserId && (bot.ownerId === currentOpenApiUserId || bot.actions.includes('edit'))),
+    containerUserId: requestIdentity.userId,
+    canViewContainers: (bot: BotDomain) => Boolean(currentOpenApiUserId && (bot.ownerId === currentOpenApiUserId || bot.actions.includes('edit'))),
     canRestartContainer: (bot: BotDomain) => Boolean(currentOpenApiUserId && bot.ownerId === currentOpenApiUserId),
     creating: createFlow.creating,
     createAuthorization: createFlow.authorization,

@@ -1687,6 +1687,43 @@ export interface AutoHealRunRequest {
   params?: Record<string, unknown>
 }
 
+export interface AutoHealSaveRequest {
+  workflowId: string
+  spec: WorkflowSpec
+  packId?: string | null
+  diagnosisId?: string | null
+  note?: string | null
+}
+
+export interface AutoHealSaveResult {
+  ok: boolean
+  saved: boolean
+  workflowId: string
+  packId: string
+  branch: string
+  commit: string
+  version: number
+}
+
+export interface AutoHealDeployRequest {
+  workflowId: string
+  packId?: string | null
+  diagnosisId?: string | null
+  note?: string | null
+  autoRun?: boolean
+}
+
+export interface AutoHealDeployResult {
+  ok: boolean
+  deployed: boolean
+  workflowId: string
+  packId: string
+  deployNumber: number
+  version: number
+  tagName: string
+  runId?: string | null
+}
+
 export interface AutoHealErrorChainItem {
   nodeId: string
   nodeTitle: string | null

@@ -13,12 +13,15 @@ pub struct RegistrationSettings {
     /// Registration API prefix; `--api-url` or the deploy profile default when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_url: Option<String>,
+    /// Identity policy selected at registration, for runtime workspace validation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_auth: Option<String>,
     /// Persisted gateway delivery endpoint, used to verify profile reuse.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webhook_url: Option<String>,
 }
 impl Default for RegistrationSettings {
-    fn default() -> Self { Self { api_url: None, webhook_url: None } }
+    fn default() -> Self { Self { api_url: None, webhook_url: None, provider_auth: None } }
 }
 
 fn parse(text: &str) -> anyhow::Result<(RegistrationSettings, toml::Table)> {
@@ -31,8 +34,12 @@ fn parse(text: &str) -> anyhow::Result<(RegistrationSettings, toml::Table)> {
 }
 
 pub fn load_runtime(path: &Path, credentials: &dyn CredentialSource) -> anyhow::Result<ProviderConfig> {
+    Ok(load_runtime_with_settings(path, credentials)?.1)
+}
+
+pub(crate) fn load_runtime_with_settings(path: &Path, credentials: &dyn CredentialSource) -> anyhow::Result<(RegistrationSettings, ProviderConfig)> {
     let text = fs::read_to_string(path).context("Cannot read bridge configuration")?;
-    let (_, table) = parse(&text)?;
+    let (settings, table) = parse(&text)?;
     let webhook_token = if table.get("mode").and_then(toml::Value::as_str) == Some("plugin") {
         None
     } else {
@@ -40,7 +47,7 @@ pub fn load_runtime(path: &Path, credentials: &dyn CredentialSource) -> anyhow::
             .context("Gateway configuration requires provider_id")?;
         Some(credentials.webhook_token(provider)?)
     };
-    runtime(&table, path, webhook_token.as_deref())
+    Ok((settings, runtime(&table, path, webhook_token.as_deref())?))
 }
 
 /// Supply the resolved webhook credential in memory; never persist the runtime copy.

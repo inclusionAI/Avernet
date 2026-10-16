@@ -14,14 +14,14 @@ from agentclaw.community.core.devices.services.baas_container_init import (
 @pytest.mark.parametrize("props,expected", [({}, "BOT-current"), ({"client_id": "explicit-current"}, "explicit-current")])
 def test_initializer_uses_binding_device_identity_when_legacy_props_omit_client_id(props, expected):
     initializer = BaasContainerInitializer(MagicMock())
-    for method in ("_run_baas_bootstrap", "_run_baas_install_engine", "_run_baas_setup_sync_service", "_ensure_baas_engine_dirs", "_create_baas_skill_symlink_conf", "_write_codefuse_token", "_start_baas_sandbox_service"):
+    for method in ("_run_baas_bootstrap", "_run_baas_install_engine", "_run_baas_setup_sync_service", "_ensure_baas_engine_dirs", "_create_baas_skill_symlink_conf", "_apply_baas_skill_symlinks", "_write_codefuse_token", "dispatch_watchdog"):
         setattr(initializer, method, MagicMock())
     initializer.run(
         bot_uuid="BOT-current", device=AllocatedDevice(device_id="BOT-current", device_provider="baas", device_props=props),
         engine="openclaw", bot_type="personal", bot_id="bot-1", owner_id="owner-1",
         callback_token="callback-fixture", startup_identity="publish-1", admins=None,
     )
-    assert initializer._start_baas_sandbox_service.call_args.kwargs["client_id"] == expected
+    assert initializer.dispatch_watchdog.call_args.kwargs["client_id"] == expected
 
 
 @pytest.mark.parametrize("user", ["root", "admin"])

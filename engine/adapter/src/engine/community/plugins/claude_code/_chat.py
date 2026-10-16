@@ -175,14 +175,20 @@ class _ChatPortMixin:
     async def resolve_exec_approval(
         self,
         session_key: str,
-        run_id: str,
+        interaction_id: str,
         decision: str,
         message: str | None = None,
         token: str | None = None,
     ) -> dict[str, Any]:
-        """Resolve a pending exec approval via ``interaction.resolve``."""
+        """Resolve a pending exec approval via ``interaction.resolve``.
+
+        ``interaction_id`` is the engine-issued interaction identifier carried
+        by the ``interaction.requested`` event (gateway-generated, e.g.
+        ``int:<uuid>``) — the gateway's pending registry keys on it. It is NOT
+        a run id: substituting one makes the resolve miss the pending entry.
+        """
         params: dict[str, Any] = {
-            "interactionId": run_id,
+            "interactionId": interaction_id,
             "decision": decision,
         }
         if message is not None:
@@ -193,29 +199,61 @@ class _ChatPortMixin:
     async def resolve_interaction(
         self,
         session_key: str,
-        run_id: str,
-        response: str | None = None,
+        interaction_id: str,
+        decision: str = "submit",
+        answer: str | None = None,
+        message: str | None = None,
+        answers: dict[str, str] | None = None,
+        values: dict[str, Any] | None = None,
+        selected_options: list[list[str]] | None = None,
         token: str | None = None,
     ) -> dict[str, Any]:
-        """Resolve a pending AskUserQuestion via ``interaction.resolve`` (submit)."""
+        """Resolve a pending AskUserQuestion via ``interaction.resolve``.
+
+        Wire shape mirrors the v3 builder (``build_interaction_resolve_request``):
+
+        - ``decision`` — ``submit`` / ``cancel``. A cancel is forwarded as a
+          cancel; it must never be laundered into a "submit" action.
+        - ``answer`` / ``message`` — free-text reply (``answer`` is the
+          payload the gateway surfaces to the SDK resume).
+        - ``answers`` / ``values`` — structured multi-question maps.
+        - ``selected_options`` — multi-select choices; converted at this
+          boundary to the wire key ``selectedOptions`` (list of string
+          lists).
+
+        ``interaction_id`` — see ``resolve_exec_approval``: the pending
+        interaction's own identifier, never a run id.
+        """
         params: dict[str, Any] = {
-            "interactionId": run_id,
-            "action": "submit",
+            "interactionId": interaction_id,
+            "decision": decision,
         }
-        if response is not None:
-            params["message"] = response
+        if answer is not None:
+            params["answer"] = answer
+        if message is not None:
+            params["message"] = message
+        if answers is not None:
+            params["answers"] = answers
+        if values is not None:
+            params["values"] = values
+        if selected_options is not None:
+            params["selectedOptions"] = [list(o) for o in selected_options]
         return await self._resolve_with_events(
             "interaction.resolve", params, "interaction.resolved")
 
     async def resolve_mode_transition(
         self,
         session_key: str,
-        run_id: str,
+        interaction_id: str,
         decision: str,
         token: str | None = None,
     ) -> dict[str, Any]:
-        """Resolve a pending ExitPlanMode via ``mode_transition.resolve``."""
-        params = {"transitionId": run_id, "decision": decision}
+        """Resolve a pending ExitPlanMode via ``mode_transition.resolve``.
+
+        ``interaction_id`` is the pending transition's identifier (the
+        gateway's ``mt:<uuid>``) — sent on the wire as ``transitionId``.
+        """
+        params = {"transitionId": interaction_id, "decision": decision}
         return await self._resolve_with_events(
             "mode_transition.resolve", params, "mode_transition.resolved")
 

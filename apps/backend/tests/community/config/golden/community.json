@@ -124,6 +124,9 @@
         "secure": true
       }
     },
+    "openapi": {
+      "user_id_bypass": []
+    },
     "openapi_bot": {
       "api_key_prefix": "${api_key_prefix:-}",
       "api_key_secret": "${api_key_secret:-}",

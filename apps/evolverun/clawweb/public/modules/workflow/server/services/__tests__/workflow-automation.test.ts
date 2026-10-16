@@ -13,7 +13,7 @@ import { WorkflowAutomationRepository } from '../../repositories/workflow-automa
 import type { WorkflowAutomationPorts, WorkflowAutomationService, AnalysisObservation } from '../../contracts/workflow-automation.js';
 const fixtures: Awaited<ReturnType<typeof repairFixture>>[] = [];
 afterEach(async () => { for (const f of fixtures.splice(0)) await f.db.close(); });
-async function fixture(autoDraft = false, count = 3) {
+async function fixture(autoDraft = false, count = 3, full = false) {
   const f = await repairFixture(count); fixtures.push(f);
   for (const m of repairReleaseMigrations) for (const sql of m.sql) await f.db.exec(f.db.dialect.renderDdl(sql));
   f.raw.exec(`CREATE TABLE cm_app_config (id INTEGER PRIMARY KEY, config_key TEXT UNIQUE, config_yaml TEXT, version INTEGER, enabled INTEGER,
@@ -30,7 +30,7 @@ async function fixture(autoDraft = false, count = 3) {
   let owner: string | null = 'owner'; let permitted = true;
   const observations = new Map<string, AnalysisObservation>();
   const settings = createAutoAnalysisSettings({ repo: new AppConfigRepository(f.db), environmentDefault: '' });
-  await settings.save('wf-1', { enabled: true, autoDraft, dailyTime: '09:00', expectedVersion: 0 }, 'owner');
+  await settings.save('wf-1', { enabled: true, autoDraft, dailyTime: '09:00', expectedVersion: 0, ...(full ? { minimumImpact: 'medium' as const } : {}) }, 'owner');
   const baseline = { ...await f.executionPort.resolveBaseline('wf-1'), activeDeployNumber: 7 };
   f.executionPort.resolveBaseline = async () => baseline;
   f.executionPort.diff = async input => ({ ...input, files: [{ path: 'workflows/wf-1.yaml', status: 'M', before: 'old', after: 'new', patch: '@@ -1 +1 @@\n-old\n+new', binary: false, truncated: false }], truncated: false });
@@ -46,6 +46,10 @@ async function fixture(autoDraft = false, count = 3) {
       summary: `修复节点 ${i}`, operations: [{ op: 'replace', nodeId: `n-${i}`, path: '/executor/timeoutSeconds', value: 60 }] };
     f.items[i].proposal = proposal;
     f.items[i].context = { signature: `timeout-${i}`, failureMode: 'timeout', nodeId: `n-${i}`, diagnoses: [{ flowIds: [`known-${i}`] }] };
+    if (full) {
+      f.items[i].context!.diagnoses = [{ flowId: `known-${i}`, severity: 'high', completedAtMs: clock - 1000 }];
+      f.raw.prepare('INSERT INTO flow_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(100 + i, `known-${i}`, 'wf-1', 'failed', (clock - 86400000) / 1000, (clock - 86300000) / 1000, (clock - 86400000) / 1000, (clock - 86300000) / 1000);
+    }
     analyze(`known-${i}`, [{ diagnosisId: `diag-${i}`, flowIds: [`known-${i}`], nodeId: `n-${i}`, failureSignature: `timeout-${i}`,
       failureMode: 'timeout', severity: 'high', reasoning: 'observed timeout', evidenceEventIds: [], proposal }]);
   }
@@ -199,4 +203,115 @@ it('preserves historical pending items and explicit analysis failures without cl
   expect(f.ports.analysis.start).toHaveBeenCalledTimes(3);
   expect((await f.service.status('wf-1')).jobs.find(job => job.kind === 'auto_run')).toMatchObject({ status: 'blocked', reason: 'ANALYSIS_FAILED' });
   expect((await f.workbench.candidates('wf-1')).counts.pending).toBe(3);
+});
+
+it('processes every qualified item through bounded batches in one restart-safe round and task', async () => {
+  const f = await fixture(true, 105, true);
+  for (let i = 0; i < 10; i++) {
+    await f.restart().tick(); f.advance();
+    if ((await f.service.status('wf-1')).jobs.some(job => job.kind === 'auto_draft' && job.taskId)) break;
+  }
+  const firstJob = (await f.service.status('wf-1')).jobs.find(job => job.kind === 'auto_draft')!;
+  const id = firstJob.taskId!;
+  expect(id).toBeTruthy();
+  let task = await f.workbench.task(id);
+  expect(task.latestAttempt.input.items).toHaveLength(100);
+  expect(task.scopeItemCount).toBe(105);
+  for (let batch = 0; batch < 2; batch++) {
+    task = await f.workbench.task(id);
+    const draft = { candidateCommit: String(batch + 1).repeat(40), parentCandidateCommit: task.latestAttempt.input.parentCandidateCommit ?? f.baseline.packCommit,
+      packDigest: 'e'.repeat(40), itemResults: task.latestAttempt.input.items.map(item => ({ itemId: item.itemId, status: 'changed', reason: 'controlled generation' })) };
+    await f.workbench.report({ workflowId: 'wf-1', taskId: id, revision: task.latestAttempt.revision, expectedStateVersion: 0, status: 'succeeded', draft,
+      checks: { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit, packDigest: draft.packDigest, candidateDigest: digestRepairJson(draft),
+        static: { status: 'passed' }, mock: { status: 'not_covered' }, coverage: task.latestAttempt.input.items.map(item => ({ itemId: item.itemId })) } });
+    f.advance(); await f.restart().tick();
+    if (!batch) { f.advance(); await f.restart().tick(); }
+  }
+  task = await f.workbench.task(id);
+  expect(task.revisions).toHaveLength(2);
+  expect(task.latestAttempt.input.items).toHaveLength(5);
+  expect(task.latestAttempt.input.parentCandidateCommit).toBe('1'.repeat(40));
+  expect(new Set(task.revisions.flatMap(rev => rev.input.items.map(item => item.itemId))).size).toBe(105);
+  expect((await f.service.status('wf-1')).round).toMatchObject({ total: 105, batches: 2, completedBatches: 2 });
+  expect(f.calls).toHaveLength(2);
+  expect((await f.workbench.candidates('wf-1')).counts.processing).toBe(105);
+});
+it('legacy strategy keeps old scope until an explicit minimum impact save', async () => {
+  const f = await fixture(true);
+  expect(await f.settings.get('wf-1')).toMatchObject({ scopeVersion: 'legacy', minimumImpact: 'medium' });
+  await f.settings.set('wf-1', false, 'owner');
+  expect((await f.settings.get('wf-1')).scopeVersion).toBe('legacy');
+  const current = await f.settings.get('wf-1');
+  await f.settings.save('wf-1', { enabled: false, autoDraft: true, dailyTime: '09:00', minimumImpact: 'high', expectedVersion: current.version }, 'owner');
+  expect(await f.settings.get('wf-1')).toMatchObject({ scopeVersion: 'all-qualified/v1', minimumImpact: 'high' });
+  await f.settings.set('wf-1', true, 'owner');
+  expect((await f.settings.get('wf-1')).minimumImpact).toBe('high');
+});
+it('recovers a confirmed failed automatic batch using a durable request key after restart', async () => {
+  const f = await fixture(true, 6, true);
+  await f.service.tick(); f.advance(); await f.service.tick();
+  const job = (await f.service.status('wf-1')).jobs.find(job => job.kind === 'auto_draft')!;
+  const task = await f.workbench.task(job.taskId!);
+  f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: 'controlled failure' });
+  await f.workbench.report({ workflowId: 'wf-1', taskId: task.taskId, revision: 1, expectedStateVersion: 0, status: 'failed', error: { code: 'AIS_FAILED' } });
+  f.advance(); await f.service.tick();
+  await f.service.retryFailures('wf-1'); f.advance(); await f.restart().tick();
+  const retried = await f.workbench.task(task.taskId);
+  expect(retried.latestAttempt.revision).toBe(2);
+  expect(retried.latestAttempt.input.automation).toEqual(task.latestAttempt.input.automation);
+  expect(retried.latestAttempt.input.items).toEqual(task.latestAttempt.input.items);
+  expect(f.calls).toHaveLength(2);
+  f.advance(); await f.restart().tick();
+  expect(f.calls).toHaveLength(2);
+});
+it('does not lose today runs when the incremental watermark advances before tomorrow scope', async () => {
+  const f = await fixture(false, 1, true);
+  const started = Date.parse('2026-11-01T00:00:00Z') / 1000;
+  f.raw.prepare('INSERT INTO flow_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(999, 'today-run', 'wf-1', 'failed', started, started + 60, started, started + 60);
+  await f.service.tick();
+  expect(vi.mocked(f.ports.analysis.start).mock.calls.some(([value]) => value.flowId === 'today-run')).toBe(false);
+  f.advance(86400000); await f.restart().tick(); f.advance(); await f.service.tick();
+  expect(vi.mocked(f.ports.analysis.start).mock.calls.some(([value]) => value.flowId === 'today-run')).toBe(true);
+});
+it.each([true, false])('notifies a final no_change round only when prior batches have publishable changes: %s', async priorChanged => {
+  const f = await fixture(true, 101, true);
+  for (let i = 0; i < 10; i++) {
+    await f.restart().tick(); f.advance();
+    if ((await f.service.status('wf-1')).jobs.some(job => job.kind === 'auto_draft' && job.taskId)) break;
+  }
+  const id = (await f.service.status('wf-1')).jobs.find(job => job.kind === 'auto_draft')!.taskId!;
+  for (let index = 0; index < 2; index++) {
+    const task = await f.workbench.task(id);
+    const changed = index === 0 && priorChanged;
+    const draft = { candidateCommit: priorChanged ? 'd'.repeat(40) : f.baseline.packCommit,
+      parentCandidateCommit: task.latestAttempt.input.parentCandidateCommit ?? f.baseline.packCommit,
+      packDigest: priorChanged ? 'e'.repeat(40) : f.baseline.packDigest,
+      itemResults: task.latestAttempt.input.items.map(item => ({ itemId: item.itemId, status: changed ? 'changed' : 'not_needed', reason: 'controlled result' })) };
+    await f.workbench.report({ workflowId: 'wf-1', taskId: id, revision: task.latestAttempt.revision, expectedStateVersion: 0,
+      status: changed ? 'succeeded' : 'no_change', draft, checks: { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit,
+        packDigest: draft.packDigest, candidateDigest: digestRepairJson(draft), static: { status: 'passed' }, mock: { status: 'not_covered' },
+        coverage: task.latestAttempt.input.items.map(item => ({ itemId: item.itemId })) } });
+    f.advance(); await f.restart().tick();
+    if (!index) { f.advance(); await f.restart().tick(); }
+  }
+  const task = await f.workbench.task(id);
+  expect(task.latestAttempt.phase).toBe('no_change');
+  expect(task.automaticProgress?.publishable).toBe(priorChanged);
+  const notices = () => vi.mocked(f.ports.notify).mock.calls.filter(([notice]) => notice.title.includes('草稿'));
+  // Issue notices may precede the round notice in the durable queue.
+  for (let i = 0; i < 40 && !notices().length; i++) { f.advance(); await f.restart().tick(); }
+  expect(notices()).toHaveLength(priorChanged ? 1 : 0);
+  if (priorChanged) expect(notices()[0][0].path).toContain(`repairTaskId=${id}`);
+  f.advance(); await f.restart().tick();
+  expect(notices()).toHaveLength(priorChanged ? 1 : 0);
+  expect(f.calls).toHaveLength(2);
+});
+it('excludes trials from terminal analysis and daily jobs', async () => {
+  const f = await fixture(false, 0);
+  await f.db.exec("INSERT INTO workflow_repair_release_records (record_kind, record_id, workflow_id, task_id, revision, request_key, request_digest, body_json, state_version, created_at_ms, updated_at_ms) VALUES ('trial', 'late-run', 'wf-1', 'task', 1, 'trial-request', 'digest', '{}', 1, 1, 1)");
+  await f.service.onRunTerminal({ flowId: 'late-run', status: 'failed' });
+  await f.service.tick();
+  expect(f.ports.analysis.start).not.toHaveBeenCalled();
+  expect(f.ports.notify).not.toHaveBeenCalled();
+  expect((await f.service.status('wf-1')).jobs.filter(job => job.kind === 'auto_run')).toEqual([]);
 });

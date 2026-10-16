@@ -79,6 +79,9 @@
     "health_check": {
       "bcs_url": "http://localhost:21000"
     },
+    "openapi": {
+      "user_id_bypass": []
+    },
     "openclaw": {
       "skills_repo_url": ""
     },

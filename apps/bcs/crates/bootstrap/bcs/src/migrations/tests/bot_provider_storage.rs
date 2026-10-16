@@ -6,12 +6,9 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
         .iter()
         .map(|migration| migration.version)
         .collect::<Vec<_>>();
-    assert_eq!(sqlite, (1..=33).collect::<Vec<_>>());
+    assert_eq!(sqlite, (1..=34).collect::<Vec<_>>());
     assert_eq!(SQLITE_VERSIONED_MIGRATIONS[28].name, "fixed_loop_runtime");
-    assert_eq!(
-        SQLITE_VERSIONED_MIGRATIONS[29].name,
-        "bot_provider_storage"
-    );
+    assert_eq!(SQLITE_VERSIONED_MIGRATIONS[29].name, "bot_provider_storage");
     // The new Group migration owns SQLite version 31 (Provider storage keeps
     // version 30).
     assert_eq!(
@@ -36,17 +33,15 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
         .collect::<Vec<_>>();
     // MySQL Provider storage remains version 029; the new Group migration is
     // MySQL version 030.
-    assert_eq!(versions, (1..=32).collect::<Vec<_>>());
+    assert_eq!(versions, (1..=33).collect::<Vec<_>>());
     assert_eq!(mysql[27], "028_fixed_loop_runtime.sql");
     assert_eq!(mysql[28], "029_bot_provider_storage.sql");
-    assert_eq!(
-        mysql[29],
-        "030_group_human_mention_notify_mode.sql"
-    );
+    assert_eq!(mysql[29], "030_group_human_mention_notify_mode.sql");
 }
 
 #[tokio::test]
-async fn bot_provider_storage_upgrades_29_without_new_tables_or_rewriting_history() -> DbResult<()> {
+async fn bot_provider_storage_upgrades_29_without_new_tables_or_rewriting_history() -> DbResult<()>
+{
     let db = LocalSqliteDbPlugin::new()?;
     run_sqlite_bootstrap_tables(&db).await?;
     for migration in SQLITE_VERSIONED_MIGRATIONS
@@ -63,58 +58,69 @@ async fn bot_provider_storage_upgrades_29_without_new_tables_or_rewriting_histor
     let original_tables = db.query(DbStatement::new(tables_sql)).await?;
     let pending = check_sqlite_migrations(&db).await?.pending_versions;
     // The upgrade path stays focused on Provider storage: pending versions
-    // begin with the Provider storage step (the version-31 Group migration
-    // tail follows, asserted by the final runner assertions below).
+    // begin with the Provider storage step (the version-31 Group migration and later tails
+    // follow, asserted by the final runner assertions below).
     assert_eq!(
         pending
             .iter()
             .map(|migration| migration.version)
             .collect::<Vec<_>>(),
-        vec![30, 31, 32, 33]
+        vec![30, 31, 32, 33, 34]
     );
 
     run_sqlite_migrations(&db).await?;
     // The full runner includes the Session registry migration.
-    assert_eq!(current_sqlite_version(&db, true).await?, Some(sqlite_target_version()));
+    assert_eq!(
+        current_sqlite_version(&db, true).await?,
+        Some(sqlite_target_version())
+    );
     let storage = applied_sqlite_migration(&db, 30).await?.unwrap();
     assert_eq!(storage.name, "bot_provider_storage");
     assert_eq!(
         applied_sqlite_migration(&db, 29).await?.unwrap().name,
         "fixed_loop_runtime"
     );
-    assert!(
-        column_names(&db, "bcs_state_machine_node_runs")
-            .await?
-            .iter()
-            .any(|column| column == "failure_action")
-    );
-    assert!(
-        column_names(&db, "bcs_bots")
-            .await?
-            .iter()
-            .any(|column| column == "connection_mode")
-    );
+    assert!(column_names(&db, "bcs_state_machine_node_runs")
+        .await?
+        .iter()
+        .any(|column| column == "failure_action"));
+    assert!(column_names(&db, "bcs_bots")
+        .await?
+        .iter()
+        .any(|column| column == "connection_mode"));
     run_sqlite_migrations(&db).await?;
     assert_eq!(db.query(DbStatement::new(history_sql)).await?, original);
-    let tables = db.query(DbStatement::new("SELECT name FROM sqlite_master WHERE type = 'table' AND name <> 'bcs_session_registry' ORDER BY name")).await?;
+    let tables = db.query(DbStatement::new("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('bcs_session_registry', 'bcs_group_contexts') ORDER BY name")).await?;
     assert_eq!(tables, original_tables);
     Ok(())
 }
 
 #[tokio::test]
 async fn bot_provider_expansion_resumes_every_partial_step() -> DbResult<()> {
-    let statements = include_str!("../../../../../../migrations/sqlite/030_bot_provider_storage.sql")
-        .split(';').map(str::trim).filter(|sql| !sql.is_empty()).collect::<Vec<_>>();
+    let statements =
+        include_str!("../../../../../../migrations/sqlite/030_bot_provider_storage.sql")
+            .split(';')
+            .map(str::trim)
+            .filter(|sql| !sql.is_empty())
+            .collect::<Vec<_>>();
     for completed in 0..=statements.len() {
         let db = LocalSqliteDbPlugin::new()?;
         run_sqlite_bootstrap_tables(&db).await?;
-        for migration in SQLITE_VERSIONED_MIGRATIONS.iter().filter(|migration| migration.version <= 29) {
+        for migration in SQLITE_VERSIONED_MIGRATIONS
+            .iter()
+            .filter(|migration| migration.version <= 29)
+        {
             apply_sqlite_migration(&db, migration).await?;
         }
-        for statement in &statements[..completed] { db.execute(DbStatement::new(*statement)).await?; }
+        for statement in &statements[..completed] {
+            db.execute(DbStatement::new(*statement)).await?;
+        }
         run_sqlite_migrations(&db).await?;
         run_sqlite_migrations(&db).await?;
-        assert_eq!(current_sqlite_version(&db, true).await?, Some(sqlite_target_version()));
+        assert_eq!(
+            current_sqlite_version(&db, true).await?,
+            Some(sqlite_target_version())
+        );
         assert!(index_exists(&db, "uk_bcs_bots_provider_ref_env").await?);
     }
     Ok(())

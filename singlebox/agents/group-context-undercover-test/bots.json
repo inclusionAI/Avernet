@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "name": "GroupContext 谁是卧底测试局",
+  "port_start": 30901,
+  "port_step": 10,
+  "scopes": "local,groupcontext-test,undercover-game,social-deduction",
+  "bots": [
+    {
+      "source": "referee",
+      "profile": "groupcontext-undercover-referee",
+      "name": "裁判Bot",
+      "summary": "谁是卧底裁判，通过 GroupContext KV 存储管理所有游戏状态：发牌（add）、更新状态（update/supersede）、查询状态（list/get）。所有游戏信息隔离靠 GroupContext visible_to.collect_from 权限模型实现。",
+      "domains": "groupcontext-test,undercover-game,state-management,game-hosting,manager-worker",
+      "skills": "groupcontext-api,game-hosting,secret-dealing,round-orchestration,vote-tallying,win-condition-judging"
+    },
+    {
+      "source": "player-zhangsan",
+      "profile": "groupcontext-undercover-player-zhangsan",
+      "name": "玩家张三",
+      "summary": "谁是卧底玩家·活泼冲动型。发言直接大胆，投票凭直觉，是潜在卧底（身份不告知本人，通过 GroupContext visible_to 隔离）。通过 GroupContext get 获取自己的底牌词。",
+      "domains": "groupcontext-test,undercover-game,social-deduction,party-game,impulsive-play",
+      "skills": "groupcontext-get,one-line-word-description,gut-feel-voting,speech-reading"
+    },
+    {
+      "source": "player-lisi",
+      "profile": "groupcontext-undercover-player-lisi",
+      "name": "玩家李四",
+      "summary": "谁是卧底玩家·谨慎分析型。发言留余地用条件句，投票要逻辑比对，是平民（身份不告知本人，通过 GroupContext visible_to 隔离）。",
+      "domains": "groupcontext-test,undercover-game,social-deduction,party-game,cautious-play",
+      "skills": "groupcontext-get,one-line-word-description,logical-voting,speech-reading"
+    },
+    {
+      "source": "player-wangwu",
+      "profile": "groupcontext-undercover-player-wangwu",
+      "name": "玩家王五",
+      "summary": "谁是卧底玩家·佛系随和型。发言温和带比喻，投票跟多数、回避冲突，是平民。通过 GroupContext get 获取自己的底牌词。",
+      "domains": "groupcontext-test,undercover-game,social-deduction,party-game,consensus-play",
+      "skills": "groupcontext-get,one-line-word-description,consensus-voting,speech-reading"
+    },
+    {
+      "source": "player-zhaoliu",
+      "profile": "groupcontext-undercover-player-zhaoliu",
+      "name": "玩家赵六",
+      "summary": "谁是卧底玩家·冷峻推理型。发言精炼用属性描述、逐轮收窄，投票在心里走推理链，是潜在卧底（身份不告知本人，通过 GroupContext visible_to 隔离）。",
+      "domains": "groupcontext-test,undercover-game,social-deduction,party-game,deductive-play",
+      "skills": "groupcontext-get,one-line-word-description,deductive-voting,speech-reading"
+    },
+    {
+      "source": "player-qianqi",
+      "profile": "groupcontext-undercover-player-qianqi",
+      "name": "玩家钱七",
+      "summary": "谁是卧底玩家·戏精型。发言有画面感、带情境描述，投票敢第一个指认，是平民。通过 GroupContext get 获取自己的底牌词。",
+      "domains": "groupcontext-test,undercover-game,social-deduction,party-game,expressive-play",
+      "skills": "groupcontext-get,one-line-word-description,aggressive-voting,speech-reading"
+    }
+  ]
+}

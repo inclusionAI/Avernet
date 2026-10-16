@@ -129,6 +129,10 @@ impl TraceContext {
         Self { store, engine: engine.into(), run_id: run_id.into() }
     }
 
+    pub(super) fn shared_process(&self) -> Self {
+        Self { store: self.store.clone(), engine: self.engine.clone(), run_id: "app-server".into() }
+    }
+
     pub fn record_raw(&self, line: &str) {
         self.store.raw(self, line);
     }

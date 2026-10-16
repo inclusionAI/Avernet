@@ -1,3 +1,5 @@
+import { changedChainItems } from '../contracts/repair-automatic-chain.js';
+import { productionRunsSql } from "@avernet/clawweb-shared/server/services/run-purpose";
 import { createRepairAutoVerification } from './repair-auto-verification.js';
 import { randomUUID } from 'node:crypto';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
@@ -21,29 +23,30 @@ export function createRepairVerificationService(db: IDatabase, publication?: Rep
     async evidence(taskId: string, id: string): Promise<RepairVerificationEvidence> {
       const d = await deployment(taskId, id), number = d.receipt!.deployNumber;
       const samples = await db.query<{ flow_id: string; status: string; started_at: number; completed_at: number | null }>(
-        'SELECT flow_id, status, started_at, completed_at FROM flow_runs WHERE workflow_id = ? AND workflow_deploy_number = ? ORDER BY started_at DESC LIMIT 50', [d.workflowId, number]);
+        `SELECT flow_id, status, started_at, completed_at FROM ${productionRunsSql()} flow_runs WHERE workflow_id = ? AND workflow_deploy_number = ? ORDER BY started_at DESC LIMIT 50`, [d.workflowId, number]);
       const counts = await db.query<{ total: number; succeeded: number; failed: number; deployment: number; completed: number;
         first_started: number | null; last_started: number | null; average_duration: number | null; average_tokens: number | null }>(
         `SELECT workflow_deploy_number AS deployment, COUNT(*) AS total,
           MIN(started_at) AS first_started, MAX(started_at) AS last_started, AVG(total_duration_ms) AS average_duration,
           AVG(total_token_usage) AS average_tokens, SUM(CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END) AS completed,
           SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded,
-          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed FROM flow_runs
+          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed FROM ${productionRunsSql()} flow_runs
           WHERE workflow_id = ? AND workflow_deploy_number IN (?, ?) GROUP BY workflow_deploy_number`, [d.workflowId, number, d.baselineDeployNumber]);
       const current = counts.find(row => Number(row.deployment) === number), baseline = counts.find(row => Number(row.deployment) === d.baselineDeployNumber);
-      const unknown = (await db.query<{ total: number }>('SELECT COUNT(*) AS total FROM flow_runs WHERE workflow_id = ? AND workflow_deploy_number IS NULL', [d.workflowId]))[0];
+      const unknown = (await db.query<{ total: number }>(`SELECT COUNT(*) AS total FROM ${productionRunsSql()} flow_runs WHERE workflow_id = ? AND workflow_deploy_number IS NULL`, [d.workflowId]))[0];
       const revision = await new RepairBatchRepository(db).getRevision(d.workflowId, taskId, d.revision);
-      const signatures = [...new Set((revision?.input.items ?? []).map(item => item.context?.signature).filter((signature): signature is string => typeof signature === 'string'))];
+      const items = revision ? changedChainItems(await new RepairBatchRepository(db).listRevisions(d.workflowId, taskId), revision) : [];
+      const signatures = [...new Set(items.map(item => item.context?.signature).filter((signature): signature is string => typeof signature === 'string'))];
       const diagnoses = !signatures.length ? [] : await db.query<{ failure_signature: string; matching_runs: number }>(
         `SELECT hd.failure_signature, COUNT(DISTINCT hd.flow_id) AS matching_runs
-          FROM workflow_healing_diagnoses hd JOIN flow_runs fr ON fr.flow_id = hd.flow_id AND fr.workflow_id = hd.workflow_id
+          FROM workflow_healing_diagnoses hd JOIN ${productionRunsSql()} fr ON fr.flow_id = hd.flow_id AND fr.workflow_id = hd.workflow_id
           WHERE fr.workflow_id = ? AND fr.workflow_deploy_number = ? AND hd.failure_signature IN (${signatures.map(() => '?').join(',')})
           GROUP BY hd.failure_signature`, [d.workflowId, number, ...signatures]);
       const diagnosed = (await db.query<{ total: number }>(`SELECT COUNT(DISTINCT hd.flow_id) AS total FROM workflow_healing_diagnoses hd
-        JOIN flow_runs fr ON fr.flow_id = hd.flow_id AND fr.workflow_id = hd.workflow_id WHERE fr.workflow_id = ? AND fr.workflow_deploy_number = ?`, [d.workflowId, number]))[0];
+        JOIN ${productionRunsSql()} fr ON fr.flow_id = hd.flow_id AND fr.workflow_id = hd.workflow_id WHERE fr.workflow_id = ? AND fr.workflow_deploy_number = ?`, [d.workflowId, number]))[0];
       const timeouts = (await db.query<{ total: number }>(`SELECT COUNT(DISTINCT hd.flow_id) AS total FROM workflow_healing_diagnoses hd
-        JOIN flow_runs fr ON fr.flow_id = hd.flow_id AND fr.workflow_id = hd.workflow_id WHERE fr.workflow_id = ? AND fr.workflow_deploy_number = ? AND hd.failure_mode = 'timeout'`, [d.workflowId, number]))[0];
-      const recurrence = (revision?.input.items ?? []).map(item => {
+        JOIN ${productionRunsSql()} fr ON fr.flow_id = hd.flow_id AND fr.workflow_id = hd.workflow_id WHERE fr.workflow_id = ? AND fr.workflow_deploy_number = ? AND hd.failure_mode = 'timeout'`, [d.workflowId, number]))[0];
+      const recurrence = items.map(item => {
         const signature = typeof item.context?.signature === 'string' ? item.context.signature : null;
         return { itemId: item.itemId, signature, matchingRuns: signature ? diagnoses.filter(row => row.failure_signature === signature).reduce((total, row) => total + Number(row.matching_runs), 0) : null,
           diagnosedRuns: Number(diagnosed?.total ?? 0) };
@@ -113,7 +116,7 @@ export function createRepairVerificationService(db: IDatabase, publication?: Rep
           || Number(item.state_version) !== request.expectedStateVersion) throw new RepairBatchError('STATE_CONFLICT', '处理项或验证版本已变化，请刷新后核对');
         const flowIds = [...new Set(request.flowIds)];
         if (flowIds.length) {
-          const valid = await tx.query<{ flow_id: string }>(`SELECT flow_id FROM flow_runs WHERE workflow_id = ? AND workflow_deploy_number = ?
+          const valid = await tx.query<{ flow_id: string }>(`SELECT flow_id FROM ${productionRunsSql()} flow_runs WHERE workflow_id = ? AND workflow_deploy_number = ?
             AND completed_at IS NOT NULL AND flow_id IN (${flowIds.map(() => '?').join(',')})`, [d.workflowId, d.receipt!.deployNumber, ...flowIds]);
           if (valid.length !== flowIds.length) throw new RepairBatchError('STATE_CONFLICT', '样本不是此部署的已完成运行，不能用于效果结论');
         }

@@ -37,11 +37,13 @@ export function CapabilityPanel({
 }: CapabilityPanelProps) {
   return (
     <>
+      {/* onLocalDelete 不按 desktop 掩蔽：云端 Bot 的「我的 Skill」卡片也支持删除
+          （DELETE /bots/{bot_id}/skills/{skill_id}）；本地管理面板(toggle+upload)仍仅本地 Bot */}
       <CapabilitySetManager
         {...actions}
         compact={compact}
         onLocalToggle={desktop ? onLocalToggle : undefined}
-        onLocalDelete={desktop ? onLocalDelete : undefined}
+        onLocalDelete={onLocalDelete}
         onLocalUpload={desktop ? onLocalUpload : undefined}
         sets={skillSets}
         mySkills={mySkills}

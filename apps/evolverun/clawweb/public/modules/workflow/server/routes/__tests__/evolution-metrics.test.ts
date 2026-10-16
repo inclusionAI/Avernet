@@ -15,6 +15,10 @@ type DbSync = InstanceType<typeof Database>;
 function createTestDb(): { db: any } {
   const raw = new Database(":memory:") as DbSync;
   raw.exec(`
+    CREATE TABLE workflow_repair_release_records (
+      record_id VARCHAR(64) PRIMARY KEY,
+      record_kind VARCHAR(32) NOT NULL
+    );
     CREATE TABLE repair_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       flow_id VARCHAR(255) NOT NULL, node_id VARCHAR(255) NOT NULL,
@@ -210,7 +214,27 @@ describe("createEvolutionMetricsRouter — §10.3 dashboard widgets (G5)", () =>
   it("GET /failure-rate-by-version still passes (back-compat with T10 anchor)", async () => {
     // We don't seed diagnosis_cards/flow_runs here — endpoint must 200 with empty array
     // when no data (robust against missing join target).
-    const body = await (await fetch(`${baseUrl}/api/evolution-metrics/failure-rate-by-version`)).json() as { items: any[] };
-    expect(Array.isArray(body.items)).toBe(true);
+    const response = await fetch(`${baseUrl}/api/evolution-metrics/failure-rate-by-version`);
+    expect(response.status).toBe(200);
+    const body = await response.json() as { items: any[] };
+    expect(body.items).toEqual([]);
   });
+  it("failure-rate-by-version excludes trials and keeps legacy formal versions and unlinked diagnoses", async () => {
+    const signature = "legacy-version-regression";
+    for (const [flowId, version] of [["formal-null", null], ["formal-minus", -1], ["candidate-run", -1]] as const) {
+      await db.exec("INSERT INTO flow_runs (flow_id, workflow_version) VALUES (?, ?)", [flowId, version]);
+    }
+    await db.exec("INSERT INTO workflow_repair_release_records (record_id, record_kind) VALUES ('candidate-run', 'trial_run')");
+    for (const flowId of ["formal-null", "formal-minus", "candidate-run", "legacy-unlinked"]) {
+      await db.exec("INSERT INTO diagnosis_cards (flow_id, workflow_id, node_id, failure_signature, error_text) VALUES (?, 'wf', 'node', ?, 'timeout')", [flowId, signature]);
+    }
+    const response = await fetch(`${baseUrl}/api/evolution-metrics/failure-rate-by-version?signature=${signature}`);
+    expect(response.status).toBe(200);
+    const body = await response.json() as { items: Array<{ workflow_version: number | null; occurrence_count: number }> };
+    expect(body.items.map(({ workflow_version, occurrence_count }) => ({ workflow_version, occurrence_count }))).toEqual([
+      { workflow_version: null, occurrence_count: 2 },
+      { workflow_version: -1, occurrence_count: 1 },
+    ]);
+  });
+
 });

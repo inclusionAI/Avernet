@@ -51,13 +51,13 @@ function mapSnapshot(dto: BotContainerListDto): ContainerSnapshot {
 }
 
 export const botContainerService = {
-  async list(botId: string): Promise<ContainerSnapshot> {
-    const response = await listBotContainers(botId);
+  async list(botId: string, userId: string): Promise<ContainerSnapshot> {
+    const response = await listBotContainers(botId, userId);
     if (!response.data) throw new Error('容器实例数据不可用');
     return mapSnapshot(response.data);
   },
-  async restart(botId: string, instanceId: string) {
-    const response = await restartBotContainer(botId, instanceId);
+  async restart(botId: string, instanceId: string, userId: string) {
+    const response = await restartBotContainer(botId, instanceId, userId);
     if (!response.data?.accepted) throw new Error('实例重启未被接受');
   },
 };

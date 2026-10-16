@@ -33,6 +33,9 @@ const resolveBcsEndpointMock = resolveBcsEndpoint as jest.MockedFunction<typeof 
 
 describe('BotRegistrationDialog Poolab Tab 门控', () => {
   beforeEach(() => {
+    extendCapabilities({
+      getAdditionalBotRegistrationPanels: () => ({ status: 'available', value: [] }),
+    });
     getRegistrationTokenMock.mockReset();
     resolveBcsEndpointMock.mockReset();
     resolveBcsEndpointMock.mockReturnValue('https://bcs.example.com');
@@ -98,5 +101,24 @@ describe('BotRegistrationDialog Poolab Tab 门控', () => {
     fireEvent.click(screen.getByRole('button', { name: '千问办公' }));
     // QwenWorkRegistrationPanel 存在：渲染「接入千问 Bot」分组标题
     expect(screen.getByText(/接入千问 Bot/)).toBeInTheDocument();
+  });
+
+  it('deployment panels mount only when selected and leave default tabs available', () => {
+    const Panel = jest.fn(({ open }: { open: boolean }) => <p>Example onboarding: {String(open)}</p>);
+    extendCapabilities({
+      getAdditionalBotRegistrationPanels: () => ({
+        status: 'available',
+        value: [{ id: 'example-engine', label: 'Example engine', Panel }],
+      }),
+    });
+    render(<BotRegistrationDialog open onClose={() => {}} />);
+    expect(Panel).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Codex' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Example engine' }));
+    expect(screen.getByText('Example onboarding: true')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'OpenClaw' }));
+    expect(screen.queryByText('Example onboarding: true')).not.toBeInTheDocument();
+    expect(screen.getByText(/如何接入 OpenClaw/)).toBeInTheDocument();
   });
 });

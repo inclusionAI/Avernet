@@ -85,6 +85,28 @@ cwd = "/home/me/workspace"
 api_url = "https://bcs.example.com/prefix"
 ```
 
+## Codex process and thread lifecycle
+
+For `engine = "codex"`, each Bot owns one long-running `codex app-server`
+process, started lazily on its first request. Different conversations use
+separate threads and can run concurrently. Follow-up turns reuse the loaded
+thread with `turn/start`; they do not repeatedly call `thread/resume`.
+
+Bridge persists the thread mapping before sending the first turn. After a Bridge
+or app-server restart, the next request resumes that saved thread. An app-server
+failure fails in-flight requests and does not replay prompts or start a restart
+loop. Cancellation interrupts only the affected turn, including cancellation
+before `turn/start` returns. A rejected/unacknowledged interrupt or a broken
+protocol connection shuts down the owned server; affected work fails explicitly.
+Stopping Bridge reaps its owned app-server and child processes, including when
+all conversations are idle. Raw stdout trace records follow their current run;
+shared process stderr uses `runId = "app-server"`.
+
+Codex still permits only one writer process per thread. A separate desktop
+process cannot take over a Bridge-held thread. Stop Bridge before handing it
+over; if another process already holds the thread, Bridge reports the error
+without stealing the lock or silently creating a different thread.
+
 ## Extending: plugins
 
 For `--engine qwenwork`, no executable or Python service is needed. Configure

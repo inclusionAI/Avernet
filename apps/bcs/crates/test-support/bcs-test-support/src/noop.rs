@@ -5,6 +5,10 @@ use bcs_domain::{
     ChannelBinding, Organization, OrganizationMember, SystemGroupMessage, SystemMessageEvent,
     SystemMessageEventKind,
 };
+use bcs_service_api::application::v1::{
+    AddGroupContext, ApplicationError, GetGroupContext, GroupContextAck, GroupContextGetResponse,
+    GroupContextListResponse, ListGroupContexts, SystemSetGroupContext, UpdateGroupContext,
+};
 use bcs_service_api::core::{
     SystemMessageDispatchOutcome, SystemMessageDispatcherService, SystemMessageProducerService,
     WorkerProfile, WorkerProfileCoreService, WorkerRecommendCommand, WorkerRecommendResult,
@@ -346,7 +350,10 @@ impl ProviderCoreService for NoopProviderCoreService {
         Err(service_not_configured("provider core service"))
     }
 
-    async fn get_downlink_credential(&self, _provider_id: &str) -> ServiceResult<ProviderCredential> {
+    async fn get_downlink_credential(
+        &self,
+        _provider_id: &str,
+    ) -> ServiceResult<ProviderCredential> {
         Err(service_not_configured("provider core service"))
     }
 
@@ -693,11 +700,7 @@ impl OrganizationManagementService for NoopOrganizationManagementService {
         Err(service_not_configured("organization service"))
     }
 
-    async fn get(
-        &self,
-        _auth: OrganizationMemberAuth,
-        _code: &str,
-    ) -> ServiceResult<Organization> {
+    async fn get(&self, _auth: OrganizationMemberAuth, _code: &str) -> ServiceResult<Organization> {
         Err(service_not_configured("organization service"))
     }
 
@@ -1185,10 +1188,7 @@ impl BotRuntimeConnectionService for NoopBotRuntimeConnectionService {
         Err(service_not_configured("bot runtime connection service").into())
     }
 
-    async fn resolve_delivery_target(
-        &self,
-        bot_id: &str,
-    ) -> ServiceResult<BotDeliveryTarget> {
+    async fn resolve_delivery_target(&self, bot_id: &str) -> ServiceResult<BotDeliveryTarget> {
         Ok(BotDeliveryTarget::WebSocket {
             bot_id: bot_id.to_string(),
         })
@@ -1993,17 +1993,11 @@ pub struct NoopChannelService;
 
 #[async_trait]
 impl ChannelService for NoopChannelService {
-    async fn handle_inbound(
-        &self,
-        _msg: InboundMessage,
-    ) -> Result<(), ChannelInboundError> {
+    async fn handle_inbound(&self, _msg: InboundMessage) -> Result<(), ChannelInboundError> {
         Ok(())
     }
 
-    async fn try_outbound(
-        &self,
-        _msg: OutboundMessage,
-    ) -> Result<(), ChannelUseCaseError> {
+    async fn try_outbound(&self, _msg: OutboundMessage) -> Result<(), ChannelUseCaseError> {
         Ok(())
     }
 
@@ -2113,11 +2107,63 @@ impl SystemMessageProducerService for NoopSystemMessageProducer {
 }
 
 #[derive(Debug, Default)]
+pub struct NoopGroupContextService;
+
+#[async_trait]
+impl GroupContextApplicationService for NoopGroupContextService {
+    async fn add(&self, _command: AddGroupContext) -> Result<GroupContextAck, ApplicationError> {
+        Err(ApplicationError::Internal(
+            "group context service is not configured".into(),
+        ))
+    }
+
+    async fn update(
+        &self,
+        _command: UpdateGroupContext,
+    ) -> Result<GroupContextAck, ApplicationError> {
+        Err(ApplicationError::Internal(
+            "group context service is not configured".into(),
+        ))
+    }
+
+    async fn list(
+        &self,
+        _query: ListGroupContexts,
+    ) -> Result<GroupContextListResponse, ApplicationError> {
+        Ok(GroupContextListResponse {
+            contexts: Vec::new(),
+        })
+    }
+
+    async fn get(
+        &self,
+        _query: GetGroupContext,
+    ) -> Result<GroupContextGetResponse, ApplicationError> {
+        Ok(GroupContextGetResponse { items: Vec::new() })
+    }
+
+    async fn systemset(
+        &self,
+        _command: SystemSetGroupContext,
+    ) -> Result<GroupContextAck, ApplicationError> {
+        Err(ApplicationError::Internal(
+            "group context service is not configured".into(),
+        ))
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct NoopSystemMessageService;
 
 #[async_trait]
 impl SystemMessageService for NoopSystemMessageService {
-    async fn notify(&self, _group_id: &str, _event: SystemMessageEvent, _session_id: &str, _session_participants: &[Participant]) -> ServiceResult<usize> {
+    async fn notify(
+        &self,
+        _group_id: &str,
+        _event: SystemMessageEvent,
+        _session_id: &str,
+        _session_participants: &[Participant],
+    ) -> ServiceResult<usize> {
         Ok(0)
     }
 }
@@ -2138,10 +2184,7 @@ pub struct NoopSecretService;
 
 #[async_trait]
 impl SecretService for NoopSecretService {
-    async fn get_secret(
-        &self,
-        name: &str,
-    ) -> Result<SecretView, SecretServiceError> {
+    async fn get_secret(&self, name: &str) -> Result<SecretView, SecretServiceError> {
         Err(SecretServiceError::Unavailable(format!(
             "noop secret service ({name})"
         )))

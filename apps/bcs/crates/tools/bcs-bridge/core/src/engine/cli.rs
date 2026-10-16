@@ -15,6 +15,7 @@ pub struct CliSession {
     /// child is unreaped (even as a zombie) the kernel cannot recycle its
     /// pid, so the group address still belongs to this session's tree only.
     reaped: bool,
+    stdout_buffer: Vec<u8>,
 }
 
 impl CliSession {
@@ -80,8 +81,12 @@ impl CliSession {
             stdout: BufReader::new(stdout),
             trace,
             reaped: false,
+            stdout_buffer: Vec::new(),
         })
     }
+
+    /// A multiplexed process traces stdout after assigning messages to runs.
+    pub(super) fn disable_raw_trace(&mut self) { self.trace = None; }
 
     pub async fn write_line(&mut self, line: &str) -> std::io::Result<()> {
         let stdin = self
@@ -104,11 +109,12 @@ impl CliSession {
     }
 
     pub async fn next_line(&mut self) -> std::io::Result<Option<String>> {
-        let mut line = String::new();
-        let n = self.stdout.read_line(&mut line).await?;
-        if n == 0 {
+        let n = self.stdout.read_until(b'\n', &mut self.stdout_buffer).await?;
+        if n == 0 && self.stdout_buffer.is_empty() {
             return Ok(None);
         }
+        let line = String::from_utf8(std::mem::take(&mut self.stdout_buffer))
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
         if let Some(trace) = &self.trace {
             trace.record_raw(line.trim_end_matches(['\n', '\r']));
         }
@@ -291,6 +297,18 @@ mod tests {
         cli.write_line("hello").await.unwrap();
         let line = cli.next_line().await.unwrap().unwrap();
         assert_eq!(line, "ack:hello");
+        cli.kill().await;
+    }
+
+    #[tokio::test]
+    async fn cancelled_read_preserves_partial_stdout_line() {
+        let mut cli = CliSession::spawn(
+            Path::new("bash"),
+            &["-c".into(), "printf prefix; sleep 0.15; printf 'suffix\\n'; sleep 1".into()],
+            Path::new("."), &[], None,
+        ).await.unwrap();
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(70), cli.next_line()).await.is_err());
+        assert_eq!(cli.next_line().await.unwrap().as_deref(), Some("prefixsuffix"));
         cli.kill().await;
     }
 

@@ -20,6 +20,12 @@ describe('botEditorController', () => {
       'GET',
     ],
     [
+      'skill delete',
+      () => botEditorController.deleteSkill('bot-1', 'skill-9'),
+      '/openapi/v1/bots/bot-1/skills/skill-9',
+      'DELETE',
+    ],
+    [
       'resources',
       () => botEditorController.listResources('bot-1', 'docs'),
       '/openapi/v1/bots/bot-1/resources?path=docs&page=1&page_size=100',

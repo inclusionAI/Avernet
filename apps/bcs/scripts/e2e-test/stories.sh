@@ -22,6 +22,7 @@ E2E_TESTS_STORIES=(
     "story_cli_operator_builds_collaboration_team"
     "story_cli_operator_runs_sessions_and_services"
     "story_cli_operator_validates_channel_management"
+    "story_cli_operator_manages_group_context"
     "story_session_file_workspace"
 )
 if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then

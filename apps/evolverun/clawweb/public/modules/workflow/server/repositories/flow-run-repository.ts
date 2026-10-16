@@ -1,3 +1,5 @@
+import { registerRunRequest } from '../services/run-request-registration.js';
+import { productionRunSql, trialRunSql, productionRunsSql, isTrialRun, type RunPurpose } from "@avernet/clawweb-shared/server/services/run-purpose";
 /**
  * FlowRunRepository — reads and writes flow_runs table via raw SQL.
  * No dependency on ClawFlow; shares the same database schema.
@@ -83,6 +85,7 @@ export type FlowRunCompletion = {
 };
 
 export type FindFlowRunsOptions = {
+  purpose?: RunPurpose | "all";
   workflowId?: string;
   /** Permission scope: undefined is unrestricted; an empty list denies all. */
   allowedWorkflowIds?: string[];
@@ -126,6 +129,12 @@ export type FindWorkflowTypesPageResult = {
 
 export class FlowRunRepository {
   constructor(private db: IDatabase) {}
+
+  insertForRequest(body: Record<string, unknown>, run: FlowRunInsert): Promise<'created' | 'existing' | null> {
+    return registerRunRequest(this.db, body, async tx => {
+      if (!await new FlowRunRepository(tx).insert(run)) throw new Error('Run persistence failed');
+    });
+  }
 
   // ── Read methods ──
 
@@ -179,10 +188,12 @@ export class FlowRunRepository {
     }
   }
 
+  isTrialRun(flowId: string): Promise<boolean> { return isTrialRun(this.db, flowId); }
+
   private _buildWhere(
     options: FindFlowRunsOptions,
   ): { sql: string; params: unknown[] } {
-    const conds: string[] = [];
+    const conds: string[] = options.purpose && options.purpose !== "all" ? [options.purpose === "trial" ? trialRunSql("flow_runs.flow_id") : productionRunSql("flow_runs.flow_id")] : [];
     const params: unknown[] = [];
     if (options.workflowId) { conds.push("workflow_id = ?"); params.push(options.workflowId); }
     if (options.allowedWorkflowIds !== undefined) {
@@ -660,7 +671,7 @@ export class FlowRunRepository {
 
   /** Count runs grouped by status for accurate success-rate calculation (avoids pagination skew). */
   async countByStatus(options: FindFlowRunsOptions = {}): Promise<Record<string, number>> {
-    const { sql, params } = this._buildWhere(options);
+    const { sql, params } = this._buildWhere({ ...options, purpose: options.purpose ?? "production" });
     try {
       const rows = await this.db.query<{ status: string; cnt: number }>(
         `SELECT status, COUNT(*) AS cnt FROM flow_runs${sql} GROUP BY status`,
@@ -688,13 +699,13 @@ export class FlowRunRepository {
                 COUNT(*) AS run_count,
                 latest.status AS last_status,
                 MAX(fr.started_at) AS last_run_at
-         FROM flow_runs fr
+         FROM ${productionRunsSql()} fr
          LEFT JOIN (
            SELECT fr2.workflow_id, fr2.status
-           FROM flow_runs fr2
+           FROM ${productionRunsSql()} fr2
            INNER JOIN (
              SELECT workflow_id, MAX(started_at) AS max_started
-             FROM flow_runs
+             FROM ${productionRunsSql()} flow_runs
              GROUP BY workflow_id
            ) latest2 ON latest2.workflow_id = fr2.workflow_id AND latest2.max_started = fr2.started_at
          ) latest ON latest.workflow_id = fr.workflow_id
@@ -732,7 +743,7 @@ export class FlowRunRepository {
       }
       if (options.status) {
         whereClauses.push(
-          "workflow_id IN (SELECT workflow_id FROM flow_runs WHERE status = ?)",
+          `workflow_id IN (SELECT workflow_id FROM ${productionRunsSql()} flow_runs WHERE status = ?)`,
         );
         params.push(options.status);
       }
@@ -741,7 +752,7 @@ export class FlowRunRepository {
         ? `WHERE ${whereClauses.join(" AND ")}`
         : "";
       const countRows = await this.db.query<{ cnt: number }>(
-        `SELECT COUNT(DISTINCT workflow_id) AS cnt FROM flow_runs ${whereSql}`,
+        `SELECT COUNT(DISTINCT workflow_id) AS cnt FROM ${productionRunsSql()} flow_runs ${whereSql}`,
         params,
       );
       const total = countRows[0]?.cnt ?? 0;
@@ -753,7 +764,7 @@ export class FlowRunRepository {
                   MAX(workflow_title) AS workflow_title,
                   COUNT(*) AS run_count,
                   MAX(started_at) AS last_run_at
-           FROM flow_runs
+           FROM ${productionRunsSql()} flow_runs
            ${whereSql}
            GROUP BY workflow_id
          ),
@@ -763,7 +774,7 @@ export class FlowRunRepository {
                     PARTITION BY workflow_id
                     ORDER BY started_at DESC, id DESC
                   ) AS last_status
-           FROM flow_runs
+           FROM ${productionRunsSql()} flow_runs
            ${whereSql}
          )
          SELECT s.workflow_id,

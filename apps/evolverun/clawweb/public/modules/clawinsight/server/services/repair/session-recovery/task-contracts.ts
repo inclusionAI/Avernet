@@ -49,6 +49,8 @@ export type RecoveryTaskState = {
   status: RecoveryTaskStatus;
   phase: RecoveryPhase;
   version: number;
+  /** Absent on legacy tasks; only true enables read-only sharing. */
+  shared?: boolean;
   observationDeadlineAt: number | null;
   ownerDeadlineAt: number | null;
   plan: (RecoveryPlan & { digest: string; approvedAt: number | null }) | null;
@@ -60,6 +62,8 @@ export type RecoveryTaskState = {
   current?: { stepId: string };
   execution?: AgentExecution;
   executionNo?: number;
+  /** Task-wide infrastructure failure budget; retryAt is zero while an attempt is active. */
+  executionRetry?: { failures: number; retryAt: number };
   aisExecution?: AisArtifactContract;
   requiresFreshObservation?: boolean;
 };

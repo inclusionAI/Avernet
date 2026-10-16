@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="740" viewBox="0 0 1180 740" font-family="system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" role="img" aria-label="Who builds what: platform infrastructure, ClawEvolve migration, evaluation and verification">
+<title>Who builds what: platform infrastructure, ClawEvolve migration, evaluation and verification</title>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#475569"/></marker><marker id="ahl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/></marker><marker id="ahp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#7c3aed"/></marker></defs>
+<rect width="1180" height="740" fill="#ffffff"/>
+<rect x="30" y="16" width="360" height="50" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="210.0" y="33.58" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Platform infrastructure</text>
+<text x="210.0" y="49.75" font-size="11" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">the pluggable evolution system</text>
+<rect x="30" y="78" width="360" height="40" rx="6" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+<text x="40" y="98" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">apps/evolution skeleton · composition root</text>
+<text x="382" y="98" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-08</text>
+<rect x="30" y="124" width="360" height="40" rx="6" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+<text x="40" y="144" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Evolution Run: bindings, triggers, runs, leases</text>
+<text x="382" y="144" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-06 · 08</text>
+<rect x="30" y="170" width="360" height="40" rx="6" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+<text x="40" y="190" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Strategy port, capability catalog, Job Protocol</text>
+<text x="382" y="190" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-06</text>
+<rect x="30" y="216" width="360" height="40" rx="6" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+<text x="40" y="236" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Strategy Registry · conformance kit · Strategy SDK</text>
+<text x="382" y="236" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-09</text>
+<rect x="30" y="262" width="360" height="40" rx="6" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+<text x="40" y="282" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Evolution API: OpenAPI docs, gateway routing</text>
+<text x="382" y="282" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-07</text>
+<rect x="30" y="308" width="360" height="40" rx="6" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+<text x="40" y="328" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Genome Registry in Backend · Manifest changes</text>
+<text x="382" y="328" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-03 · 04</text>
+<rect x="30" y="354" width="360" height="40" rx="6" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+<text x="40" y="374" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Promotion: floor, gate, review queue, promote</text>
+<text x="382" y="374" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-12</text>
+<rect x="30" y="400" width="360" height="40" rx="6" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+<text x="40" y="420" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">platform/manual-patch reference strategy</text>
+<text x="382" y="420" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-08</text>
+<rect x="410" y="16" width="360" height="50" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="590.0" y="33.58" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">ClawEvolve migration</text>
+<text x="590.0" y="49.75" font-size="11" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">the primary default strategy</text>
+<rect x="410" y="78" width="360" height="40" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+<text x="420" y="98" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Strategy project: strategy.json, Dockerfile, run(ctx)</text>
+<text x="762" y="98" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-13</text>
+<rect x="410" y="124" width="360" height="40" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+<text x="420" y="144" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Black-box adapter: stage skills on a sandbox workspace</text>
+<text x="762" y="144" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-13</text>
+<rect x="410" y="170" width="360" height="40" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+<text x="420" y="190" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Agent definitions shipped with the strategy</text>
+<text x="762" y="190" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-13</text>
+<rect x="410" y="216" width="360" height="40" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+<text x="420" y="236" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Own progress store keyed by run id · idempotency keys</text>
+<text x="762" y="236" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-13</text>
+<rect x="410" y="262" width="360" height="40" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+<text x="420" y="282" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">OpenClaw session export → experience.sessions@1</text>
+<text x="762" y="282" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-10</text>
+<rect x="410" y="308" width="360" height="40" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+<text x="420" y="328" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Own submission filter; pack/restore/deploy removed</text>
+<text x="762" y="328" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-13</text>
+<rect x="410" y="354" width="360" height="40" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+<text x="420" y="374" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">params_schema: window_days, max_rounds, goal, skill</text>
+<text x="762" y="374" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-13</text>
+<rect x="410" y="400" width="360" height="40" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+<text x="420" y="420" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">AgentEvolve UI as the interim Layer A caller</text>
+<text x="762" y="420" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-20</text>
+<rect x="790" y="16" width="360" height="50" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="970.0" y="33.58" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Evaluation and verification</text>
+<text x="970.0" y="49.75" font-size="11" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">the platform-owned verifier</text>
+<rect x="790" y="78" width="360" height="40" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="800" y="98" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Verification: suites, splits, profiles, comparator</text>
+<text x="1142" y="98" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-11</text>
+<rect x="790" y="124" width="360" height="40" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="800" y="144" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Graders: platform/clawbench from lib_grading</text>
+<text x="1142" y="144" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-11</text>
+<rect x="790" y="170" width="360" height="40" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="800" y="190" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Executors: local sandbox · eval bot via eval_env</text>
+<text x="1142" y="190" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-11</text>
+<rect x="790" y="216" width="360" height="40" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="800" y="236" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">evaluation.train@1: train eval + add_train_cases</text>
+<text x="1142" y="236" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-11</text>
+<rect x="790" y="262" width="360" height="40" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="800" y="282" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Verdict policy; ClawEvolve gates as blocking rules</text>
+<text x="1142" y="282" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-11</text>
+<rect x="790" y="308" width="360" height="40" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="800" y="328" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Gate calibration and replay · holdout audits</text>
+<text x="1142" y="328" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-11 · 23</text>
+<rect x="790" y="354" width="360" height="40" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="800" y="374" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Verify gate on service-bot publish, Quality Task</text>
+<text x="1142" y="374" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-22</text>
+<rect x="790" y="400" width="360" height="40" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="800" y="420" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Suite registry seeded from ClawWeb Bench store</text>
+<text x="1142" y="420" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-11</text>
+<path d="M 392 160 L 408 160" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)" marker-start="url(#ahl)"/>
+<path d="M 772 160 L 788 160" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)" marker-start="url(#ahl)"/>
+<path d="M 392 298 L 408 298" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)" marker-start="url(#ahl)"/>
+<path d="M 772 298 L 788 298" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)" marker-start="url(#ahl)"/>
+<path d="M 392 436 L 408 436" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)" marker-start="url(#ahl)"/>
+<path d="M 772 436 L 788 436" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)" marker-start="url(#ahl)"/>
+<rect x="30" y="456" width="1120" height="128" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="46" y="476" font-size="13" font-weight="600" fill="#334155" text-anchor="start" dominant-baseline="middle">Contracts between the workstreams, and the doc that owns each</text>
+<text x="40" y="498" font-size="11.5" font-weight="700" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Platform ↔ ClawEvolve</text>
+<text x="40" y="518" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">strategy port run(ctx) and the Job Protocol — 03 §2, 06 §9</text>
+<text x="40" y="534" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">registration record, params_schema, agent definitions — 03 §2.2</text>
+<text x="40" y="550" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">Episode schema and the session-export contract — 02 §5</text>
+<text x="40" y="566" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">conformance kit, both sides of the port — 03 §8.4</text>
+<text x="420" y="498" font-size="11.5" font-weight="700" fill="#0f172a" text-anchor="start" dominant-baseline="middle">ClawEvolve ↔ Evaluation</text>
+<text x="420" y="518" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">evaluation.train@1: add cases, scores, critiques — 03 §4.2, 07 §5</text>
+<text x="420" y="534" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">Verdict view: status and aggregates only — 07 §2.6</text>
+<text x="420" y="550" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">case format clawbench-md@1 — 07 §2.2</text>
+<text x="420" y="566" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">ClawBench graders and gates extracted — 04 §4.5</text>
+<text x="800" y="498" font-size="11.5" font-weight="700" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Platform ↔ Evaluation</text>
+<text x="800" y="518" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">verify(candidate, profile) and train evaluation — 06 §5.4, 07 §9</text>
+<text x="800" y="534" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">FloorCheck and GateDecision — 08 §4</text>
+<text x="800" y="550" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">eval traces into the Experience Store — 02 §1</text>
+<text x="800" y="566" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">deployed executor via eval_publish / eval_env — 07 §2.3</text>
+<rect x="30" y="600" width="1120" height="124" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="46" y="620" font-size="12" font-weight="700" fill="#0f172a" text-anchor="start" dominant-baseline="middle">To settle together before coding against each other</text>
+<text x="46" y="642" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">RSI-01  accept or revise DR-1 (the genome is the unit of evolution) and DR-2 (promotion is platform-owned)</text>
+<text x="46" y="659" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">DS-6  one ClawEvolve strategy with params, or three (bot_evolution, skill_evolution, skill_hardening)</text>
+<text x="46" y="676" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">ER-10 / S-8  how a sandboxed job worker reaches the strategy's own progress store</text>
+<text x="46" y="693" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">DS-2  ClawBench as the default grader or one of several · DS-1  long-term host of the ClawEvolve strategy code</text>
+<text x="46" y="710" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">OP-4 (this guide §7)  mid-run human input: ClawEvolve stages can ask the user; platform runs are unattended</text>
+</svg>

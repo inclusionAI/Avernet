@@ -59,12 +59,45 @@ Unknown analysis/generation outcomes look up the original identity first. The
 legacy notification provider has no idempotency/lookup API: unknown delivery
 requires manual verification and is never blindly resent.
 
-Draft selection considers the first 20 priority groups, at most 100 proposals,
-five selected items, and 100 KB of selected input. Candidates require diagnoses,
-validated structured patches, and an exact current baseline digest. Ambiguous
-conflicts remain manual. Each due day plans at most one frozen scope; its stable
-fingerprint prevents the same scope/evidence/baseline from regenerating on later
-days. Existing tasks retain their frozen items, version, and evidence cutoff.
+Policies without `minimumImpact` retain the legacy first-20/100/five selection.
+A switch toggle or old API client does not expand their scope. The management
+page labels this compatibility state. Saving execution scope explicitly opts
+into `minimumImpact: medium | high` (new form default: medium), stored in the
+same configuration row; no environment variable or schema change is needed.
+
+For opted-in policies, the scope is the previous Asia/Shanghai natural day
+[00:00,24:00) plus unresolved older items. Run `started_at` determines the
+occurrence date; analysis completion only gates evidence availability at the
+frozen cutoff. Runs crossing midnight become eligible after completion; late
+analyses trigger reevaluation by analysis revision. Each scan also rereads the
+whole preceding natural day so a previously excluded today's run is not lost
+behind the modification watermark. Historical unhandled evidence is retained.
+Only each candidate's own dated diagnoses establish severity, never its issue's
+all-time maximum. Unknown impact, unavailable evidence, stale baseline,
+conflicts and oversized evidence remain individually recorded with reasons in
+the round journal; they do not count as optimized.
+
+Candidate enumeration pages through the entire historical pending inbox. A
+round freezes baseline, source digest, item evidence digests, cutoff and all
+batch item IDs in the existing auto_draft journal. Every AIS request remains
+bounded by MAX_ITEMS=100 and the existing model-input byte contract (64 KiB
+reserved for envelope overhead). Batches advance serially as revisions of one
+task, with the exact previous validated candidate as parent and the same
+original baseline. Prior item reservations persist. The Host checks that later
+candidates preserve prior changed operations and runs full Pack checks.
+Intermediate candidates cannot publish. One final review covers the full
+baseline-to-final diff and all actually changed items; incomplete/failed chains
+cannot fall back to an earlier candidate for publication. Review history is
+paged and byte bounded independently of the trusted internal complete chain.
+
+The round identity deduplicates the same scope/evidence/baseline within the
+saved policy version. Competing Hosts share workflow locks and leases; no new
+round is planned while one is progressing. Disabled or changed policies stop
+new dispatch. Requests of unknown outcome reconcile their stable key without
+blind replay. A manual retry of confirmed generation failure persists a new
+retry key and preserves the exact failed batch; unresolved conflicts and user
+cancellation require review rather than automatic retry. Source/baseline drift
+stops the round with an explicit reason and retains its frozen record.
 
 Disabling automation stops new dispatches while preserving lookup of dispatched
 work. Current Owner permissions and candidate revision are checked again before
@@ -85,6 +118,23 @@ services with controlled external ports. They cover duplicate Hosts, restart,
 missed days, late runs, disable-before-dispatch, manual coexistence, conflicts,
 partial analysis, notification recovery, and next-round selection after partial
 publication. They do not prove production MySQL/OceanBase locking, external AIS
-quality, provider delivery, or deployed behavior. Full browser acceptance of the
-second-batch journey remains a release prerequisite. No production automation is
+quality, provider delivery, or deployed behavior. Local browser acceptance covers the version comparison card against controlled
+API fixtures; real AIS and OceanBase remain unexecuted integration boundaries. No production automation is
 enabled by adding this code.
+
+## Version provenance and comparison
+
+See [workflow-version-provenance.md](workflow-version-provenance.md). The existing
+success-trend card offers a version comparison tab, backed by
+`GET /api/workflows/:id/version-comparison?baseline=N&current=M&days=7`.
+The workflow view permission check runs before reading records. The injected
+Host DB defines the same environment for both sides. Only actual releases are
+selectable; drafts/edits are excluded. Default baseline comes from the trusted
+publication record, otherwise the user chooses. Each exact deploy number is a
+separate group, including repeated spec versions and rollbacks. Observation
+windows have the same elapsed duration after each release, clipped to available
+time (up to seven days by default). Success rate uses terminal samples only;
+failed includes failed/aborted/cancelled/canceled, matching the existing overview.
+Unknown deployment samples are counted separately. Zero samples produce null,
+not 0%; differences are percentage points, and observations do not establish
+causation. The task summary links the exact two deployment numbers.

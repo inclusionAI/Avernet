@@ -61,6 +61,24 @@ export class WorkflowAutomationRepository {
       AND CAST(${this.json('nextAtMs')} AS SIGNED) <= ? ORDER BY updated_at_ms, record_id LIMIT ?`, [taskScope(workflowId), kind, now, limit]))
       .map(row => JSON.parse(row.body_json));
   }
+  async failedDrafts(workflowId: string): Promise<AutomationJob[]> {
+    return (await this.db.query<{ body_json: string }>(`SELECT body_json FROM workflow_repair_release_records WHERE task_id = ? AND record_kind = 'auto_draft'
+      AND ${this.json('status')} = 'blocked' AND ${this.json('reason')} = 'DRAFT_REQUIRES_MANUAL_REVIEW' ORDER BY updated_at_ms`, [taskScope(workflowId)])).map(row => JSON.parse(row.body_json));
+  }
+  async recoverDraft(job: AutomationJob, data: AutomationJob['data'], now: number) {
+    await this.db.transaction(async tx => {
+      await new RepairBatchRepository(tx).lockWorkflow(tx, job.workflowId);
+      const current = await new WorkflowAutomationRepository(tx).get(job.id);
+      if (!current || current.stateVersion !== job.stateVersion || current.leaseUntilMs > now || current.status !== 'blocked') return;
+      const next: AutomationJob = { ...current, status: 'pending', attempts: 0, reason: null, nextAtMs: now, data, stateVersion: current.stateVersion + 1 };
+      await new RepairReleaseRepository(tx).update(next, current.stateVersion);
+    });
+  }
+  async activeDraft(workflowId: string): Promise<AutomationJob | null> {
+    const rows = await this.db.query<{ body_json: string }>(`SELECT body_json FROM workflow_repair_release_records
+      WHERE task_id = ? AND record_kind = 'auto_draft' AND ${this.json('status')} NOT IN ('done', 'blocked') ORDER BY updated_at_ms LIMIT 1`, [taskScope(workflowId)]);
+    return rows[0] ? JSON.parse(rows[0].body_json) : null;
+  }
   async recent(workflowId: string): Promise<AutomationJob[]> {
     return (await this.db.query<{ body_json: string }>(`SELECT body_json FROM workflow_repair_release_records WHERE task_id = ?
       AND record_kind IN ('auto_cycle', 'auto_run', 'auto_draft', 'auto_notice')

@@ -247,6 +247,10 @@ fn build_api_routes() -> Router<HttpAppState> {
             "/collaboration/definitions/validate",
             post(routes::collaboration_definitions::validate_collaboration_definition_yaml),
         )
+        .route("/groupcontext/add", post(routes::group_context::add))
+        .route("/groupcontext/update", post(routes::group_context::update))
+        .route("/groupcontext/list", post(routes::group_context::list))
+        .route("/groupcontext/get", post(routes::group_context::get))
         .route("/groups/request", post(routes::group_requests::group_request))
         .route(
             "/groups/{token}/confirm",

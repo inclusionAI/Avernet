@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { RepairCandidatesResponse, RepairInboxItem, RepairInboxFilter } from '../../../../server/contracts/repair-workbench'
 import { repairBatches } from '../../../api/repair-batches'
 import { repairReadError } from '../../../api/repair-read-error'
-import { exclusion, itemTitle, states } from './repair-view'
+import { exclusion, itemTitle, itemHeading, states } from './repair-view'
 import { changeSummary, sourceRunCount } from './RepairItemDetail'
 
 /** Compare and select suggestions within one issue; evidence is fetched only on expansion. */
@@ -46,14 +46,14 @@ export default function IssueRepairSuggestions({ workflowId, signature, includeH
         const reason = exclusion(item)
         const checked = selected.includes(item.itemId)
         const runs = sourceRunCount(item)
-        return <article key={item.itemId} className={`rounded-lg border p-3 ${checked ? 'border-blue-300 bg-blue-50/30' : 'border-slate-200'}`}>
+        return <article id={`repair-suggestion-${item.itemId}`} key={item.itemId} className={`rounded-lg border p-3 ${checked ? 'border-blue-300 bg-blue-50/30' : 'border-slate-200'}`}>
           <div className="flex items-start gap-3">
             <input type="checkbox" aria-label={`选择 ${itemTitle(item)}`} checked={checked}
               disabled={!canEdit || !data.canEdit || !!reason || !checked && selected.length >= limit}
               onChange={() => onToggle?.(item.itemId)} className="mt-1 h-4 w-4 shrink-0 accent-blue-600" />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold leading-6 text-slate-900">{itemTitle(item)}</p>
-              <p className="mt-1 text-xs leading-5 text-slate-600">{changeSummary(item)}</p>
+              <p className="text-sm font-semibold leading-6 text-slate-900">{itemHeading(item)}</p>
+              <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-600">{changeSummary(item)}</p>
               <p className="mt-1 text-xs text-slate-500">{states[item.state]} · {runs === null ? '来源运行数未知' : `依据覆盖 ${runs} 个运行`}</p>
               {reason && <p className="mt-1 text-xs text-amber-700">{reason}</p>}
               <button type="button" aria-expanded={expanded === item.itemId} className="mt-2 text-xs font-medium text-blue-700 hover:underline focus-visible:outline"

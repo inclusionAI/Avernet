@@ -2641,6 +2641,10 @@ impl Default for BcsServerState {
             provider_bot_events_impl.clone();
         let provider_bot_events: Arc<dyn ProviderBotEventService> = provider_bot_events_impl;
         provider_transport.set_ingest(provider_event_ingest, bot_run_context.clone());
+        let group_context_service: Arc<dyn bcs_service_api::GroupContextApplicationService> =
+            Arc::new(bcs_app_group_context::GroupContextApplicationServiceImpl::new(
+                Arc::new(bcs_group_context_store::MemoryGroupContextRepo::new()),
+            ));
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())
             .group(sessions)
@@ -2655,6 +2659,7 @@ impl Default for BcsServerState {
             .message_flow(message_flow)
             .interactions(interactions)
             .group_message_history(group_message_history)
+            .group_context(group_context_service)
             .a2a_chat(a2a_chat)
             .a2a_chat_runs(a2a_chat_runs)
             .collaboration_runtime(collaboration_runtime)
@@ -4250,6 +4255,10 @@ impl BcsServer {
             provider_bot_events_impl.clone();
         let provider_bot_events: Arc<dyn ProviderBotEventService> = provider_bot_events_impl;
         provider_transport.set_ingest(provider_event_ingest, bot_run_context.clone());
+        let group_context_service: Arc<dyn bcs_service_api::GroupContextApplicationService> =
+            Arc::new(bcs_app_group_context::GroupContextApplicationServiceImpl::new(
+                Arc::new(bcs_group_context_store::MemoryGroupContextRepo::new()),
+            ));
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())
             .group(sessions)
@@ -4264,6 +4273,7 @@ impl BcsServer {
             .message_flow(message_flow)
             .interactions(interactions)
             .group_message_history(group_message_history)
+            .group_context(group_context_service)
             .a2a_chat(a2a_chat)
             .a2a_chat_runs(a2a_chat_runs)
             .collaboration_runtime(collaboration_runtime)
@@ -5161,6 +5171,24 @@ impl BcsServer {
             provider_bot_events_impl.clone();
         let provider_bot_events: Arc<dyn ProviderBotEventService> = provider_bot_events_impl;
         provider_transport.set_ingest(provider_event_ingest, bot_run_context.clone());
+        let group_context_repo: Arc<dyn bcs_group_context_store::GroupContextRepo> = match db_kind {
+            DbPluginKind::LocalSqlite => {
+                Arc::new(bcs_group_context_store::SqlGroupContextStore::sqlite(db_plugin.clone()))
+            }
+            DbPluginKind::Mysql => {
+                Arc::new(bcs_group_context_store::SqlGroupContextStore::oceanbase(db_plugin.clone()))
+            }
+            DbPluginKind::External(provider) => {
+                panic!(
+                    "external database plugin '{}' has no group-context store wiring",
+                    provider
+                )
+            }
+        };
+        let group_context_service: Arc<dyn bcs_service_api::GroupContextApplicationService> =
+            Arc::new(bcs_app_group_context::GroupContextApplicationServiceImpl::new(
+                group_context_repo,
+            ));
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())
             .group(sessions)
@@ -5175,6 +5203,7 @@ impl BcsServer {
             .message_flow(message_flow)
             .interactions(interactions)
             .group_message_history(group_message_history)
+            .group_context(group_context_service)
             .a2a_chat(a2a_chat)
             .a2a_chat_runs(a2a_chat_runs)
             .collaboration_runtime(collaboration_runtime)

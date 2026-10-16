@@ -3,6 +3,13 @@ import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { Bot, Terminal } from 'lucide-react';
 
 describe('Open Core default capabilities', () => {
+  test('additional onboarding panels default to empty in Open Core', () => {
+    expect(defaultCapabilities.getAdditionalBotRegistrationPanels()).toEqual({
+      status: 'available',
+      value: [],
+    });
+  });
+
   test('健康检查默认只开放配置健康度，不展示内部多维视图', () => {
     const r = defaultCapabilities.getBotHealthCapability();
     expect(r.status).toBe('available');

@@ -10,8 +10,7 @@ import BotStatusCell from './BotStatusCell';
 import BotTagsCell from './BotTagsCell';
 import BotVersionCell from './BotVersionCell';
 import type { BotCardManagementAction } from './config';
-import { DesktopStartProgress } from './DesktopStartProgress';
-
+import { DesktopOfflineNotice, DesktopStartProgress } from './DesktopStartProgress';
 export type BotInventoryActions = Partial<Record<'view' | 'chat' | 'edit', BotActionAvailability>>;
 
 export interface BotTableProps {
@@ -31,6 +30,9 @@ export interface BotTableProps {
   onOpenTaskInstances?: (bot: BotDomain) => void;
   canOpenTaskInstances?: (bot: BotDomain) => boolean;
   onOpenContainers?: (bot: BotDomain) => void;
+  canViewContainers?: (bot: BotDomain) => boolean;
+  /** 容器接口所需的已解析请求身份。 */
+  containerUserId?: string;
   onHealthCheck?: (bot: BotDomain) => void;
   onChangeSpace?: (bot: BotDomain) => void;
   onAuthorize?: (bot: BotDomain) => void;
@@ -62,6 +64,8 @@ const BotTable: React.FC<BotTableProps> = ({
   onOpenTaskInstances,
   canOpenTaskInstances,
   onOpenContainers,
+  canViewContainers,
+  containerUserId,
   onHealthCheck,
   onChangeSpace,
   onAuthorize,
@@ -77,6 +81,8 @@ const BotTable: React.FC<BotTableProps> = ({
   onGeneralConfig,
 }) => {
   const showOwner = bots.some((bot) => bot.spaceKind === 'team');
+  // 短描述在 Bot 信息下以一行摘要展示；只有存在较长描述时才保留独立列，避免空白列吞掉表格空间。
+  const showDescriptionColumn = bots.some((bot) => (bot.description?.trim().length ?? 0) > 28);
   const [expandedProgressIds, setExpandedProgressIds] = React.useState<Set<string>>(() => new Set());
   const toggleProgress = React.useCallback((botId: string) => {
     setExpandedProgressIds((current) => {
@@ -91,15 +97,26 @@ const BotTable: React.FC<BotTableProps> = ({
       {
         id: 'info',
         header: '机器人信息',
-        width: 'w-[clamp(192px,16vw,240px)]',
-        cell: (bot) => <BotInfoCell bot={bot} onClaimLock={onClaimLock} onReleaseLock={onReleaseLock} />,
+        width: showDescriptionColumn ? 'w-[clamp(192px,16vw,240px)]' : 'w-[clamp(224px,19vw,320px)]',
+        cell: (bot) => (
+          <BotInfoCell
+            bot={bot}
+            compactDescription={!showDescriptionColumn}
+            onClaimLock={onClaimLock}
+            onReleaseLock={onReleaseLock}
+          />
+        ),
       },
-      {
-        id: 'description',
-        header: '描述',
-        // 描述列吸收可用空间；窄屏优先保留主要操作，完整描述仍可通过 Tooltip 查看。
-        cell: (bot) => <BotDescriptionCell bot={bot} />,
-      },
+      ...(showDescriptionColumn
+        ? [
+            {
+              id: 'description',
+              header: '描述',
+              width: 'w-[clamp(160px,14vw,240px)]',
+              cell: (bot: BotDomain) => <BotDescriptionCell bot={bot} />,
+            },
+          ]
+        : []),
       {
         id: 'status',
         header: '状态',
@@ -128,7 +145,17 @@ const BotTable: React.FC<BotTableProps> = ({
         id: 'containers',
         header: '容器信息',
         width: 'w-[clamp(108px,9vw,128px)]',
-        cell: (bot) => (onOpenContainers ? <BotContainerInfo bot={bot} onOpen={onOpenContainers} /> : <span>—</span>),
+        cell: (bot) =>
+          onOpenContainers ? (
+            <BotContainerInfo
+              bot={bot}
+              userId={containerUserId}
+              canView={canViewContainers?.(bot) ?? true}
+              onOpen={onOpenContainers}
+            />
+          ) : (
+            <span>—</span>
+          ),
       },
       ...(showOwner
         ? [
@@ -199,6 +226,7 @@ const BotTable: React.FC<BotTableProps> = ({
     ],
     [
       showOwner,
+      showDescriptionColumn,
       onView,
       onEdit,
       onConversation,
@@ -207,6 +235,8 @@ const BotTable: React.FC<BotTableProps> = ({
       onOpenTaskInstances,
       canOpenTaskInstances,
       onOpenContainers,
+      canViewContainers,
+      containerUserId,
       onHealthCheck,
       onChangeSpace,
       onAuthorize,
@@ -227,6 +257,7 @@ const BotTable: React.FC<BotTableProps> = ({
 
   const handleRowClick = React.useCallback(
     (bot: BotDomain) => {
+      if (!getBotEntryAvailability(bot).enabled) return;
       if (onRowClick) {
         onRowClick(bot);
         return;
@@ -252,16 +283,16 @@ const BotTable: React.FC<BotTableProps> = ({
       rows={bots}
       getRowKey={(bot) => bot.cardId ?? bot.entityKey}
       onRowClick={handleRowClick}
-      isRowClickable={(bot) => (canEnterDetail && !canEnterDetail(bot)) || getBotEntryAvailability(bot).enabled}
+      isRowClickable={(bot) => getBotEntryAvailability(bot).enabled}
       renderExpandedRow={(bot) =>
         bot.deployment === 'local' &&
-        ['deploying', 'failed'].includes(bot.lifecycle) &&
+        ['deploying', 'failed', 'offline'].includes(bot.lifecycle) &&
         expandedProgressIds.has(bot.id) ? (
-          <DesktopStartProgress botId={bot.id} />
+          bot.lifecycle === 'offline' ? <DesktopOfflineNotice botId={bot.id} /> : <DesktopStartProgress botId={bot.id} />
         ) : null
       }
       ariaLabel={ariaLabel}
-      minWidth={showOwner ? 'min-w-[1260px]' : 'min-w-[1180px]'}
+      minWidth={showOwner ? (showDescriptionColumn ? 'min-w-[1260px]' : 'min-w-[1080px]') : showDescriptionColumn ? 'min-w-[1180px]' : 'min-w-[1000px]'}
     />
   );
 };

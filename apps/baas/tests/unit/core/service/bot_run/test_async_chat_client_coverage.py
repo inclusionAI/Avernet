@@ -23,6 +23,7 @@ from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.service.bot_interaction import InteractionDispatch
 from secbaas.community.core.service.bot_run._async_chat_client import (
     AsyncChatClient,
+    BotSessionError,
     ConcurrentSessionError,
     NotConnectedError,
     SessionState,
@@ -1939,3 +1940,1205 @@ async def test_mode_switch_dispatch_marks_accepted_rpc_resolved(mock_bot_ws):
         interaction_id="int-mode-1",
         envelope=engine_response,
     )
+
+
+# ══════════ P1-1: proxypass 路由前缀保留（_a2a_base_url_from_ws）══════════
+
+
+class TestA2aBaseUrlFromWs:
+    """ws(s):// URL → A2A HTTP base：只剥 WS endpoint 后缀，保留代理前缀。
+
+    WS 后缀词汇集（_claw_service._build_ws_url / adapter.ws_path()）：
+      /api/openclaw/ws       — openclaw adapter + DEFAULT_WS_PATH
+      /api/claude_code/ws    — claude_code adapter
+      /api/ws                — aicoding adapter
+      /api/{engine}/ws      — 无 adapter 引擎的默认
+      /ws                    — 直连形态（无前缀）
+    """
+
+    def test_proxypass_shape_keeps_route_prefix_wss(self):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            _a2a_base_url_from_ws,
+        )
+
+        uri = "wss://proxy.example/proxypass/sbx-1:20003/api/openclaw/ws"
+        assert (
+            _a2a_base_url_from_ws(uri) == "https://proxy.example/proxypass/sbx-1:20003"
+        )
+
+    def test_proxypass_shape_keeps_route_prefix_ws(self):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            _a2a_base_url_from_ws,
+        )
+
+        uri = "ws://proxy.example/proxypass/sbx-1/api/claude_code/ws"
+        assert _a2a_base_url_from_ws(uri) == "http://proxy.example/proxypass/sbx-1"
+
+    def test_aicoding_custom_adapter_ws_path_shape(self):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            _a2a_base_url_from_ws,
+        )
+
+        # aicoding adapter 的 ws_path=/api/ws：剥后不得把 /api 留在 base 上
+        uri = "wss://proxy.example/proxypass/sbx-1/api/ws"
+        assert _a2a_base_url_from_ws(uri) == "https://proxy.example/proxypass/sbx-1"
+
+    def test_default_engine_path_shape(self):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            _a2a_base_url_from_ws,
+        )
+
+        uri = "ws://proxy.example/proxypass/sbx-1/api/teclaw/ws"
+        assert _a2a_base_url_from_ws(uri) == "http://proxy.example/proxypass/sbx-1"
+
+    def test_direct_shape_no_prefix_strips_to_bare_base(self):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            _a2a_base_url_from_ws,
+        )
+
+        assert _a2a_base_url_from_ws("ws://host:20003/ws") == "http://host:20003"
+
+    def test_direct_shape_no_path(self):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            _a2a_base_url_from_ws,
+        )
+
+        assert _a2a_base_url_from_ws("ws://host:20003") == "http://host:20003"
+
+    def test_non_ws_scheme_returns_none(self):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            _a2a_base_url_from_ws,
+        )
+
+        assert _a2a_base_url_from_ws("http://host/api/openclaw/ws") is None
+        assert _a2a_base_url_from_ws("not-a-url") is None
+        assert _a2a_base_url_from_ws("") is None
+
+
+# ══════════ P1-4: 附件 v3 回退 run 的 HITL 答复归属路由 ══════════
+
+
+def _make_exchange(request_id="e-1", accepted=True) -> EngineInteractionResolveExchange:
+    request = {
+        "type": "req",
+        "id": request_id,
+        "method": "interaction.resolve",
+        "params": {"interactionId": "int-1", "decision": "allow-once"},
+    }
+    response = {"type": "res", "id": request_id, "ok": accepted}
+    if not accepted:
+        response["ok"] = False
+        response["error"] = {"code": "UNAVAILABLE", "message": "rejected"}
+    return EngineInteractionResolveExchange.from_frames(
+        request=request, response=response
+    )
+
+
+def _claim_service_for(resolution: InteractionResolution) -> MagicMock:
+    service = MagicMock()
+    service.claim_for_dispatch.return_value = InteractionDispatch(
+        session_key="sk1",
+        interaction_id="int-1",
+        resolution=resolution,
+    )
+    return service
+
+
+class TestInteractionAnswerTransportAttribution:
+    """B3 附件 run 建在 v3 专用连接上——它的 ResolveInteraction 也必须走
+    v3：A2A kernel 注册表里没有该 run，错发 A2A 得 not_found、审批永不
+    恢复。正常 A2A session 的答复走 A2A 客户端，并带 session 标识（供
+    run 上下文取 IAM token，P1-5）。off/v3 模式恒走 self._client 且签名
+    原样（现行契约）。"""
+
+    @pytest.mark.asyncio
+    async def test_rerouted_session_answer_goes_to_v3_fallback(self, mock_bot_ws):
+        resolution = InteractionResolution(kind="exec", decision="allow-once")
+        service = _claim_service_for(resolution)
+        acc = AsyncChatClient(
+            uri="ws://host/ws", max_retries=0, interaction_service=service
+        )
+        acc._transport = "a2a"
+        a2a_client = MagicMock(name="a2a")
+        a2a_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
+        v3_client = MagicMock(name="v3")
+        v3_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
+        acc._client = a2a_client
+        acc._v3_fallback = v3_client
+        acc._v3_routed_sessions["sk1"] = "v3"  # B3 归属：附件 reroute 过
+
+        await acc._dispatch_interaction_answer(
+            session_key="sk1", interaction_id="int-1", deadline_ms=None
+        )
+
+        v3_client.interaction_resolve.assert_awaited_once_with(
+            interaction_id="int-1", resolution=resolution
+        )
+        a2a_client.interaction_resolve.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_normal_a2a_session_answer_goes_to_a2a_with_session_key(
+        self, mock_bot_ws
+    ):
+        resolution = InteractionResolution(kind="exec", decision="allow-once")
+        service = _claim_service_for(resolution)
+        acc = AsyncChatClient(
+            uri="ws://host/ws", max_retries=0, interaction_service=service
+        )
+        acc._transport = "a2a"
+        a2a_client = MagicMock(name="a2a")
+        a2a_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
+        v3_client = MagicMock(name="v3")
+        v3_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
+        acc._client = a2a_client
+        acc._v3_fallback = v3_client
+
+        await acc._dispatch_interaction_answer(
+            session_key="sk1", interaction_id="int-1", deadline_ms=None
+        )
+
+        a2a_client.interaction_resolve.assert_awaited_once_with(
+            interaction_id="int-1", resolution=resolution, session_key="sk1"
+        )
+        v3_client.interaction_resolve.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_rerouted_session_without_fallback_marks_failed(self, mock_bot_ws):
+        resolution = InteractionResolution(kind="exec", decision="allow-once")
+        service = _claim_service_for(resolution)
+        acc = AsyncChatClient(
+            uri="ws://host/ws", max_retries=0, interaction_service=service
+        )
+        acc._transport = "a2a"
+        acc._client = MagicMock(name="a2a")
+        acc._v3_routed_sessions["sk1"] = "v3"
+        acc._v3_fallback = None  # fallback 已收口
+
+        await acc._dispatch_interaction_answer(
+            session_key="sk1", interaction_id="int-1", deadline_ms=None
+        )
+
+        service.mark_failed.assert_called_once()
+        assert service.mark_failed.call_args.kwargs["session_key"] == "sk1"
+
+    @pytest.mark.asyncio
+    async def test_off_mode_signature_stays_unchanged(self, mock_bot_ws):
+        """off/v3 模式：恒走 self._client、签名不带 session_key（现行契约
+        test_interaction_dispatch_uses_typed_claim_command 的精确钉）。"""
+        resolution = InteractionResolution(kind="exec", decision="allow-once")
+        service = _claim_service_for(resolution)
+        acc = AsyncChatClient(
+            uri="ws://host/ws", max_retries=0, interaction_service=service
+        )
+        engine_client = MagicMock()
+        engine_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
+        acc._client = engine_client  # off 模式 v3-ws，脏归属表也不得干扰
+        acc._v3_routed_sessions["sk1"] = "v3"
+
+        await acc._dispatch_interaction_answer(
+            session_key="sk1", interaction_id="int-1", deadline_ms=None
+        )
+
+        engine_client.interaction_resolve.assert_awaited_once_with(
+            interaction_id="int-1", resolution=resolution
+        )
+        assert (
+            engine_client.interaction_resolve.await_args.kwargs.get("session_key")
+            is None
+        )
+
+
+# ==================== a2a_mode construct validation ====================
+
+
+class TestA2aModeValidation:
+    def test_invalid_a2a_mode_is_rejected_at_construct(self, mock_bot_ws):
+        """非法灰度模式在构造期即拒——不落到中途探测时才炸。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient as _ACC,
+        )
+
+        with pytest.raises(ValueError, match="invalid a2a_mode"):
+            _ACC(uri="ws://host/ws", a2a_mode="bogus")
+
+    @pytest.mark.parametrize("mode", ["off", "grey", "on"])
+    def test_valid_modes_are_accepted(self, mode, mock_bot_ws):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient as _ACC,
+        )
+
+        client = _ACC(uri="ws://host/ws", a2a_mode=mode)
+        assert client._a2a_mode == mode
+
+
+# ==================== A2A base URL: unknown custom ws path ====================
+
+
+class TestA2aBaseUrlUnknownWsPath:
+    def test_unknown_custom_ws_path_falls_back_to_bare_host(self):
+        """末段非 ``ws`` 的自定义 ws_path：不猜前缀归属——base 维持 host 根，
+        由能力探测诚实回退（portal 前缀只在词汇表内剥）。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            _a2a_base_url_from_ws,
+        )
+
+        assert (
+            _a2a_base_url_from_ws("ws://host:20003/custom/endpoint")
+            == "http://host:20003"
+        )
+
+
+# ==================== B3: A2A 传输上的附件注入 → v3 重路由 ====================
+
+
+class _StubV3Transport:
+    """BotWebSocketClient 的 duck 替身——仅测试注入重路由消费的面。
+
+    R3-2 扩展：记录断连处理器并可模拟 recv_loop finally 的断连通知
+    （connected=False + 回调），供 fallback 断连收口/重建场景使用。
+    """
+
+    instances: list["_StubV3Transport"] = []
+
+    def __init__(self, uri, client_id=None, client_version="1.0.0", headers=None):
+        self.uri = uri
+        self.connected = True
+        self._event_handlers: dict = {}
+        self.inject_calls: list[tuple[str, tuple, dict]] = []
+        self.chat_send_calls: list[tuple[str, tuple, dict]] = []
+        self.chat_abort_calls: list[tuple[str, dict]] = []
+        self.close_calls = 0
+        self.disconnect_handler = None
+        _StubV3Transport.instances.append(self)
+
+    async def connect(self) -> dict:
+        return {"ok": True, "payload": {"server": {}}}
+
+    def on_event(self, name: str, handler) -> None:
+        self._event_handlers[name] = handler
+
+    def on_disconnect(self, handler) -> None:
+        self.disconnect_handler = handler
+
+    def simulate_disconnect(self) -> None:
+        """模拟 recv_loop finally：连接失效 + 触发断连处理器。"""
+        self.connected = False
+        if self.disconnect_handler is not None:
+            self.disconnect_handler("disconnect", {})
+
+    async def chat_inject(self, session_key: str, *args, **kwargs) -> dict:
+        self.inject_calls.append((session_key, args, kwargs))
+        return {"ok": True}
+
+    async def chat_send(self, session_key: str, *args, **kwargs) -> dict:
+        self.chat_send_calls.append((session_key, args, kwargs))
+        return {"ok": True}
+
+    async def chat_abort(self, session_key: str, run_id=None) -> dict:
+        self.chat_abort_calls.append((session_key, {"run_id": run_id}))
+        return {"ok": True}
+
+    async def close(self) -> None:
+        self.close_calls += 1
+        self.connected = False
+
+
+@pytest.fixture
+def stub_v3_patch():
+    _StubV3Transport.instances = []
+    with patch(
+        "secbaas.community.core.service.bot_run._bot_websocket_client."
+        "BotWebSocketClient",
+        _StubV3Transport,
+    ):
+        yield
+    _StubV3Transport.instances = []
+
+
+def _a2a_acc_with_stub_main_client() -> AsyncChatClient:
+    """transport=a2a + 可收口的替身主连接（close 可 await）。"""
+    acc = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+    acc._client = MagicMock()
+    acc._client.connected = True
+    acc._client.close = AsyncMock()
+    acc._transport = "a2a"
+    return acc
+
+
+class TestInjectAttachmentsV3Reroute:
+    """16-5 双入口的另一侧：注入带附件同样必须重路由到 v3 专用连接。"""
+
+    @pytest.mark.asyncio
+    async def test_a2a_inject_with_attachments_reroutes_to_v3(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        acc = _a2a_acc_with_stub_main_client()
+
+        await acc.inject_message(
+            "with files", session_key="sk-att", attachments=[{"kind": "screenshot"}]
+        )
+
+        fallback = acc._v3_fallback
+        assert fallback is not None, "附件注入必须懒建 v3 专用连接"
+        assert fallback is _StubV3Transport.instances[-1]
+        assert fallback.inject_calls, "chat_inject 未打到 v3 fallback"
+        session_key, args, kwargs = fallback.inject_calls[0]
+        assert session_key == "sk-att"
+        assert args == (), f"参数应全关键字转 v3: {args}"
+        assert kwargs["message"] == "with files", f"message 必须原样转 v3: {kwargs}"
+        assert kwargs["attachments"] == [{"kind": "screenshot"}]
+
+        await acc.close()
+        assert acc._v3_fallback is None, "注入收口后 fallback 随 close 清空"
+
+    @pytest.mark.asyncio
+    async def test_second_a2a_inject_reuses_cached_v3_fallback(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """fallback 懒建一次后必须缓存复用——不得逐请求重建连接。"""
+        acc = _a2a_acc_with_stub_main_client()
+
+        await acc.inject_message("first", session_key="sk-1", attachments=[{"k": 1}])
+        first_fallback = acc._v3_fallback
+        await acc.inject_message("second", session_key="sk-2", attachments=[{"k": 2}])
+
+        assert acc._v3_fallback is first_fallback, "second 注入必须复用同一 fallback"
+        created = len(_StubV3Transport.instances)
+        assert created == 1, f"fallback 被重建 {created} 次（应为 1）"
+        assert len(first_fallback.inject_calls) == 2
+
+        await acc.close()
+        assert first_fallback.close_calls == 1, "收口必须关唯一的 fallback"
+
+    @pytest.mark.asyncio
+    async def test_bridge_snapshot_is_empty_without_client(self, mock_bot_ws):
+        """快照从当前传输取 handlers——无传输时空表（fallback 不注册假面）。"""
+        acc = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        assert acc._event_bridge_snapshot() == {}
+
+    @pytest.mark.asyncio
+    async def test_close_swallows_v3_fallback_close_failure(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """fallback close 抛错必须吞掉——主连接收口不得被旁支拖死。"""
+        acc = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        await acc.connect()
+
+        bad_fallback = MagicMock()
+        bad_fallback.close = AsyncMock(side_effect=RuntimeError("fallback boom"))
+        acc._v3_fallback = bad_fallback
+
+        await acc.close()  # 不得上抛
+
+        bad_fallback.close.assert_awaited_once()
+        assert acc._v3_fallback is None, "close 后 fallback 必须清空"
+        mock_bot_ws_instance.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_close_cleans_normal_v3_fallback(
+        self, mock_bot_ws, mock_bot_ws_instance, stub_v3_patch
+    ):
+        acc = _a2a_acc_with_stub_main_client()
+
+        await acc.inject_message("m", session_key="sk-1", attachments=[{"k": 1}])
+        fallback = acc._v3_fallback
+        assert fallback is not None
+
+        await acc.close()
+
+        assert fallback.close_calls == 1, "fallback 随 close 收口"
+        assert acc._v3_fallback is None
+        assert acc._v3_routed_sessions == {}
+
+
+class TestV3FallbackDisconnectRecovery:
+    """PR #2743 R3-2：fallback 断连的隔离收口与连接恢复。
+
+    回归钉：fallback WS 断连此前既不通知等待方（ACK 后上层悬挂等自身
+    超时）、也不失效坏连接（后续附件请求继续复用）。现在断连处理器只
+    终结归属 fallback 的会话——A2A 主连接的在途请求不受影响。
+    """
+
+    async def _wait_until(self, predicate, timeout_s: float = 2.0) -> None:
+        deadline = asyncio.get_running_loop().time() + timeout_s
+        while not predicate():
+            if asyncio.get_running_loop().time() > deadline:
+                raise AssertionError("condition not reached in time")
+            await asyncio.sleep(0.005)
+
+    def _acc_with_awaitable_main(self) -> AsyncChatClient:
+        acc = _a2a_acc_with_stub_main_client()
+        acc._client.chat_send = AsyncMock(return_value={"ok": True})
+        return acc
+
+    @pytest.mark.asyncio
+    async def test_ack_then_disconnect_terminates_waiter(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """验收 1+2 组合（非流式）：ACK 后断连——无超时等待方及时收到
+        明确 error，不悬挂；且不自动重发已 ACK 的请求。"""
+        acc = self._acc_with_awaitable_main()
+
+        task = asyncio.create_task(
+            acc.send_message(
+                "hi",
+                session_key="sk-att-1",
+                attachments=[{"kind": "screenshot"}],
+            )
+        )
+        await self._wait_until(
+            lambda: (
+                bool(_StubV3Transport.instances)
+                and len(_StubV3Transport.instances[-1].chat_send_calls) >= 1
+            )
+        )
+        fallback = acc._v3_fallback
+        assert fallback is not None
+
+        fallback.simulate_disconnect()
+
+        with pytest.raises(BotSessionError, match="fallback connection lost"):
+            await asyncio.wait_for(task, 2)
+        # 不自动重发：断连后 fallback/主连接都没有第二次 chat.send
+        assert len(fallback.chat_send_calls) == 1
+        assert acc._client.chat_send.await_count == 0
+        # 坏连接不再被持有；归属路由表收口
+        assert acc._v3_fallback is None
+        assert acc._v3_routed_sessions == {}
+
+    @pytest.mark.asyncio
+    async def test_ack_then_disconnect_terminates_stream_waiter(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """验收 2（流式）：断连后流式消费者收到 error chunk 并结束迭代。"""
+        acc = self._acc_with_awaitable_main()
+
+        async def consume() -> list[StreamChunk]:
+            chunks: list[StreamChunk] = []
+            async for chunk in acc.send_message_stream(
+                "hi",
+                session_key="sk-att-2",
+                attachments=[{"kind": "screenshot"}],
+            ):
+                chunks.append(chunk)
+            return chunks
+
+        task = asyncio.create_task(consume())
+        await self._wait_until(
+            lambda: (
+                bool(_StubV3Transport.instances)
+                and len(_StubV3Transport.instances[-1].chat_send_calls) >= 1
+            )
+        )
+        acc._v3_fallback.simulate_disconnect()
+
+        chunks = await asyncio.wait_for(task, 2)
+        errs = [c for c in chunks if c.type == "error"]
+        assert errs, f"stream ended without error chunk: {chunks}"
+        assert "fallback connection lost" in errs[-1].content
+
+    @pytest.mark.asyncio
+    async def test_disconnect_spares_inflight_a2a_requests(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """验收 3：fallback 断连只终结归属会话——A2A 主连接上 ACK 已过、
+        仍在等回复的请求不被误杀（R17-5 隔离裁决）。"""
+        acc = self._acc_with_awaitable_main()
+
+        a2a_task = asyncio.create_task(acc.send_message("plain", session_key="sk-a2a"))
+        att_task = asyncio.create_task(
+            acc.send_message(
+                "hi",
+                session_key="sk-att-3",
+                attachments=[{"kind": "screenshot"}],
+            )
+        )
+        await self._wait_until(
+            lambda: (
+                bool(_StubV3Transport.instances)
+                and len(_StubV3Transport.instances[-1].chat_send_calls) >= 1
+            )
+        )
+        await self._wait_until(lambda: acc._client.chat_send.await_count == 1)
+
+        acc._v3_fallback.simulate_disconnect()
+
+        with pytest.raises(BotSessionError):
+            await asyncio.wait_for(att_task, 2)
+        # A2A 请求不受影响：仍在等待
+        await asyncio.sleep(0.1)
+        assert not a2a_task.done(), "fallback 断连误杀了 A2A 侧在途请求"
+        # 收尾：A2A 会话正常自然结束（chat_complete 置位）
+        state = acc._sessions.get("sk-a2a")
+        state.chat_complete.set()
+        await asyncio.wait_for(a2a_task, 2)
+
+    @pytest.mark.asyncio
+    async def test_attachment_after_disconnect_rebuilds_connection(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """验收 4：断连后再次发送附件——建立新连接并正常发送，不缺
+        不重用旧连接。"""
+        acc = self._acc_with_awaitable_main()
+
+        async def send_att(sk: str, min_count: int):
+            task = asyncio.create_task(
+                acc.send_message(
+                    "hi", session_key=sk, attachments=[{"kind": "screenshot"}]
+                )
+            )
+            await self._wait_until(
+                lambda: (
+                    bool(_StubV3Transport.instances)
+                    and len(_StubV3Transport.instances[-1].chat_send_calls) >= min_count
+                )
+            )
+            return task
+
+        task1 = await send_att("sk-att-4a", 1)
+        first = acc._v3_fallback
+        first.simulate_disconnect()
+        with pytest.raises(BotSessionError):
+            await asyncio.wait_for(task1, 2)
+
+        created = len(_StubV3Transport.instances)
+        task2 = asyncio.create_task(
+            acc.send_message(
+                "hi", session_key="sk-att-4b", attachments=[{"kind": "screenshot"}]
+            )
+        )
+        await self._wait_until(
+            lambda: (
+                len(_StubV3Transport.instances) > created
+                and len(_StubV3Transport.instances[-1].chat_send_calls) >= 1
+            )
+        )
+        second = acc._v3_fallback
+        assert second is not None and second is not first, "复用了已断开连接"
+        assert len(_StubV3Transport.instances) == created + 1
+        assert second in _StubV3Transport.instances
+        assert len(second.chat_send_calls) == 1
+
+        # 收尾：第二连接存活；旧连接的迟到断连通知（验收 5）不
+        # 清新连接、不误杀其等待方
+        first.simulate_disconnect()
+        assert acc._v3_fallback is second, "旧连接迟到通知清掉了新连接"
+        await asyncio.sleep(0.05)
+        assert not task2.done(), "旧连接迟到通知误杀了新连接的等待方"
+        second.simulate_disconnect()
+        with pytest.raises(BotSessionError):
+            await asyncio.wait_for(task2, 2)
+
+    @pytest.mark.asyncio
+    async def test_dead_fallback_is_judged_unhealthy_without_notification(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """复用健康检查：连接已死但断连通知尚未送达（recv_loop 还在
+        finally 路径上）时，_ensure_v3_fallback 不得返回死连接——就地
+        失效收口（归属表清理）并重建。"""
+        acc = self._acc_with_awaitable_main()
+        await acc.inject_message("m", session_key="sk-att-5", attachments=[{"k": 1}])
+        first = acc._v3_fallback
+        assert first is not None
+        first.connected = False  # 死连接，未触发断连处理器
+
+        await acc.inject_message("m2", session_key="sk-att-5", attachments=[{"k": 1}])
+
+        second = acc._v3_fallback
+        assert second is not first, "死连接被复用"
+        assert len(_StubV3Transport.instances) == 2
+        assert len(second.inject_calls) == 1
+        await acc.close()
+
+
+class TestAttachFallbackRunOwnershipLifecycle:
+    """R7-F2：附件 v3 fallback run 的归属锚定 run 生命周期，不随等待方
+    收口。wait_result=False 的 ACK 返回不等于 run 结束——abort/resolve 仍
+    必须路由 v3、池归属查询/sweep 保护仍必须认账；标记由后台终态帧
+    （chat final/error）释放，而非 send_message 的 finally。"""
+
+    async def _wait_until(self, predicate, timeout_s: float = 2.0) -> None:
+        deadline = asyncio.get_event_loop().time() + timeout_s
+        while asyncio.get_event_loop().time() < deadline:
+            if predicate():
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError("condition not met within timeout")
+
+    def _acc_with_owned_a2a_main(self) -> AsyncChatClient:
+        """transport=a2a + 显式诚实面主连接（归属查询/abort 不误报）。"""
+        acc = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        acc._transport = "a2a"
+        acc._client = MagicMock()
+        acc._client.connected = True
+        acc._client.close = AsyncMock()
+        acc._client.chat_abort = AsyncMock(return_value={"ok": False})
+        acc._client.tracks_session = MagicMock(return_value=False)
+        acc._client.has_running_runs = False
+        # 桥面快照从主连接 _event_handlers 复刻——挂编排器真实 chat
+        # 处理器，fallback 收引擎帧走真分发路径（非 mock）。
+        acc._client._event_handlers = {"chat": acc._on_chat}
+        return acc
+
+    @pytest.mark.asyncio
+    async def test_ack_return_keeps_v3_ownership_alive(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """主复现：send_message(wait_result=False, attachments) ACK 返回后
+        ——标记存活、abort 随 run 走 v3、池两查询认账、不误发 A2A。"""
+        acc = self._acc_with_owned_a2a_main()
+
+        await acc.send_message(
+            "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
+        )
+
+        fallback = acc._v3_fallback
+        assert fallback is not None and fallback.chat_send_calls, "未重路由 v3"
+        # ACK 后归属标记不得被等待方 finally 收口
+        assert "sk-att" in acc._v3_routed_sessions, "ACK 后归属标记被误清"
+        # 池归属路由查询：找到持 run 的连接
+        assert acc.tracks_session("sk-att") is True, "池归属查询不认后台附件 run"
+        # sweep 排空判断：连接不得当空闲收口
+        assert acc.has_active_sessions is True, "sweep 判断不认后台附件 run"
+        # abort 必须发到 v3 fallback（A2A 客户端没有该 run）
+        await acc.chat_abort("sk-att")
+        assert fallback.chat_abort_calls == [("sk-att", {"run_id": None})], (
+            "abort 未随 run 走 v3"
+        )
+        acc._client.chat_abort.assert_not_awaited()  # 被误发 A2A 主连接即失败
+        await acc.close()
+
+    @pytest.mark.asyncio
+    async def test_background_terminal_frame_releases_ownership(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """后台终态帧（chat final——等待方已收口、state 为 None 的帧）是
+        标记的释放点：归属随 run 终止结束，连接可被 sweep 收口。"""
+        acc = self._acc_with_owned_a2a_main()
+
+        await acc.send_message(
+            "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
+        )
+
+        fallback = acc._v3_fallback
+        chat_handler = fallback._event_handlers["chat"]
+        # 引擎经 v3 连接推 final——此时 orchestrator 的 session state 已被
+        # ACK 方 finally pop（state=None 分支是归属标记唯一见证者）
+        chat_handler(
+            {
+                "sessionKey": "sk-att",
+                "state": "final",
+                "message": {"content": [{"type": "text", "text": "ok"}]},
+            }
+        )
+
+        assert "sk-att" not in acc._v3_routed_sessions, "终态帧后标记泄漏"
+        assert acc.tracks_session("sk-att") is False, "终态后归属查询仍认账"
+        assert acc.has_active_sessions is False, "终态后连接仍不可收口"
+        await acc.close()
+
+    @pytest.mark.asyncio
+    async def test_waiter_timeout_keeps_v3_ownership(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """wait_result=True 超时：等待方虽收口，engine 侧 run 仍在执行
+        ——归属必须存活（abort 仍路由 v3），由后台终态帧释放。"""
+        acc = self._acc_with_owned_a2a_main()
+
+        with pytest.raises(TimeoutError):
+            await acc.send_message(
+                "m",
+                session_key="sk-att",
+                attachments=[{"k": 1}],
+                wait_result=True,
+                timeout=0.05,
+            )
+
+        assert "sk-att" in acc._v3_routed_sessions, "超时后归属标记被误清"
+        await acc.chat_abort("sk-att")
+        assert acc._v3_fallback.chat_abort_calls == [("sk-att", {"run_id": None})]
+        acc._client.chat_abort.assert_not_awaited()
+        await acc.close()
+
+    @pytest.mark.asyncio
+    async def test_engine_error_terminal_releases_ownership(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """等待中的 run 以 error 终态收口=生命周期结束——归属随释放。"""
+        acc = self._acc_with_owned_a2a_main()
+
+        task = asyncio.create_task(
+            acc.send_message(
+                "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=True
+            )
+        )
+        await self._wait_until(lambda: acc._v3_fallback is not None
+                               and bool(acc._v3_fallback.chat_send_calls))
+        chat_handler = acc._v3_fallback._event_handlers["chat"]
+        chat_handler(
+            {
+                "sessionKey": "sk-att",
+                "state": "error",
+                "errorMessage": "engine boom",
+                "errorCode": "E_BOOM",
+            }
+        )
+
+        with pytest.raises(BotSessionError):
+            await task
+        assert "sk-att" not in acc._v3_routed_sessions, "error 终态后标记泄漏"
+        await acc.close()
+
+    @pytest.mark.asyncio
+    async def test_send_failure_clears_ownership_no_stale_marker(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """chat_send 被引擎拒（run 从未开始）——不得残留归属标记（否则
+        后续该 session 的 abort/resolve 会被误路由 v3）。"""
+        acc = self._acc_with_owned_a2a_main()
+
+        with patch.object(
+            _StubV3Transport,
+            "chat_send",
+            AsyncMock(
+                return_value={
+                    "ok": False,
+                    "error": {"code": "REJECTED", "message": "no"},
+                }
+            ),
+        ):
+            from secbaas.community.core.service.bot_run._async_chat_client import (
+                ChatRequestError,
+            )
+
+            with pytest.raises(ChatRequestError):
+                await acc.send_message(
+                    "m",
+                    session_key="sk-att",
+                    attachments=[{"k": 1}],
+                    wait_result=False,
+                )
+
+        assert "sk-att" not in acc._v3_routed_sessions, "失败发送残留归属标记"
+        acc._client.chat_abort.assert_not_awaited()
+        await acc.close()
+
+    # ─────────── R8：归属释放必须锚定真实终态，不枚举等待方退出方式 ───────────
+
+    @pytest.mark.asyncio
+    async def test_inject_final_does_not_release_background_ownership(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """R8-F1：后台附件 run 在途时，同 session 的注入 final（runId 带
+        inject- 前缀 / stopReason=inject）不是主 run 终态——不得释放归属，
+        否则主 run 的 abort 会被误路由 A2A 主连接。"""
+        acc = self._acc_with_owned_a2a_main()
+        await acc.send_message(
+            "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
+        )
+        fallback = acc._v3_fallback
+        chat_handler = fallback._event_handlers["chat"]
+
+        # 两种注入终态形态，主 run 都必须在途认账
+        chat_handler(
+            {
+                "sessionKey": "sk-att",
+                "state": "final",
+                "runId": "inject-sidecar",
+                "message": {"content": [{"type": "text", "text": "injected"}]},
+            }
+        )
+        chat_handler(
+            {
+                "sessionKey": "sk-att",
+                "state": "final",
+                "stopReason": "inject",
+                "message": {"content": [{"type": "text", "text": "injected"}]},
+            }
+        )
+
+        assert "sk-att" in acc._v3_routed_sessions, "注入 final 误释放主 run 归属"
+        assert acc.tracks_session("sk-att") is True, "归属查询因注入误翻"
+        await acc.chat_abort("sk-att")
+        assert fallback.chat_abort_calls == [("sk-att", {"run_id": None})], (
+            "主 run 的 abort 被注入误导到错误连接"
+        )
+        acc._client.chat_abort.assert_not_awaited()
+        await acc.close()
+
+    @pytest.mark.asyncio
+    async def test_waiter_cancellation_keeps_ownership(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """R8-F2a：取消本地等待协程（调用方 task.cancel() / 外层 wait_for
+        超时都是 CancelledError 进 finally）不会取消已发到引擎的 run
+        ——归属必须保留，abort 仍路由 v3。"""
+        acc = self._acc_with_owned_a2a_main()
+
+        task = asyncio.create_task(
+            acc.send_message(
+                "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=True
+            )
+        )
+        await self._wait_until(
+            lambda: acc._v3_fallback is not None
+            and bool(acc._v3_fallback.chat_send_calls)
+        )
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert "sk-att" in acc._v3_routed_sessions, "取消等待方误删在途 run 归属"
+        await acc.chat_abort("sk-att")
+        acc._client.chat_abort.assert_not_awaited()
+        await acc.close()
+
+    @pytest.mark.asyncio
+    async def test_stream_early_close_keeps_ownership(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """R8-F2b：流式消费方在终态 chunk 之前提前关闭（break/超时/异常）
+        ——引擎侧 run 仍在执行，finally 不得清归属。"""
+        acc = self._acc_with_owned_a2a_main()
+
+        chunks: list[StreamChunk] = []
+
+        async def consume():
+            agen = acc.send_message_stream(
+                "m",
+                session_key="sk-att",
+                attachments=[{"k": 1}],
+                timeout=5.0,
+            )
+            async for chunk in agen:
+                chunks.append(chunk)
+                break  # 终态前提前关闭
+            # 显式收口：否则 async-gen finalizer 延迟执行，finally 时序
+            # 不确定（假绿）——R8 的确定性形态必须当场触发 finally。
+            await agen.aclose()
+
+        t = asyncio.create_task(consume())
+        await self._wait_until(
+            lambda: acc._v3_fallback is not None
+            and bool(acc._v3_fallback.chat_send_calls)
+        )
+        acc._v3_fallback._event_handlers["chat"](
+            {
+                "sessionKey": "sk-att",
+                "state": "delta",
+                "deltaText": "部分响应",
+                "message": {"content": [{"type": "text", "text": "部分响应"}]},
+            }
+        )
+        await t
+        assert chunks, "未消费到任何 chunk 就提前结束（fixture 失效）"
+
+        assert "sk-att" in acc._v3_routed_sessions, "流式提前关闭误删在途 run 归属"
+        await acc.chat_abort("sk-att")
+        acc._client.chat_abort.assert_not_awaited()
+        await acc.close()
+
+    @pytest.mark.asyncio
+    async def test_terminal_before_send_returns_releases_ownership(
+        self, mock_bot_ws
+    ):
+        """R8-F3：终态帧在 chat_send() 等待方恢复前被 WS 接收循环分派
+        （state 仍在、终态走有 state 分支）——归属释放不得依赖"state
+        已被等待方 pop"的形态，否则此后再无终态可触发清理，标记永久残留
+        （连接无法排空、owner 悬挂）。"""
+        with patch(
+            "secbaas.community.core.service.bot_run._bot_websocket_client."
+            "BotWebSocketClient",
+            _TerminalOnSendV3,
+        ):
+            acc = self._acc_with_owned_a2a_main()
+            await acc.send_message(
+                "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
+            )
+
+        assert "sk-att" not in acc._v3_routed_sessions, (
+            "终态已到达但归属永久残留"
+        )
+        assert acc.tracks_session("sk-att") is False, "终态后归属查询仍认账"
+        assert acc.has_active_sessions is False, "终态后连接仍不可排空"
+        await acc.close()
+
+    # ─────────── R9：归属释放的时序/key 规范化/终态通道三面 ───────────
+
+    @pytest.mark.asyncio
+    async def test_stream_disconnect_while_enqueued_raises_notconnected(
+        self, mock_bot_ws
+    ):
+        """R9-F1：流式请求通过入口连接检查后在并发/同 session 排队期间
+        断连——恢复执行必须抛 NotConnectedError，不得被 finally 里未初始化
+        变量的 UnboundLocalError 吞掉真实断连原因。"""
+        acc = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        acc._transport = "v3-ws"  # 该缺陷与传输无关，普通 v3 模式同样成立
+        acc._transport = "a2a"
+        acc._client = MagicMock()
+        acc._client.connected = True
+        acc._client.close = AsyncMock()
+
+        # 先占住同 session 让生成器排队（入口检查此时已通过）
+        async with acc._condition:
+            acc._active_sessions.add("sk-att")
+
+        async def consume():
+            agen = acc.send_message_stream(
+                "m", session_key="sk-att", attachments=[{"k": 1}], timeout=5.0
+            )
+            async for chunk in agen:
+                pass
+
+        t = asyncio.create_task(consume())
+        await asyncio.sleep(0.1)  # t 已在 condition 排队
+        acc._client.connected = False  # 排队期间断连
+        async with acc._condition:
+            acc._active_sessions.discard("sk-att")
+            acc._condition.notify_all()
+
+        with pytest.raises(NotConnectedError):
+            await t
+        await acc.close()
+
+    @pytest.mark.asyncio
+    async def test_decorated_terminal_key_still_releases_ownership(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """R9-F2：引擎终态帧的 sessionKey 是发送 key 的前后缀装饰形态
+        （SessionKeyMatcher 语义）——释放必须能从装饰 key 归并回发送时的
+        登记键，等待中与后台两态都不许残留。"""
+        acc = self._acc_with_owned_a2a_main()
+        decorated = "agent:claude-code-ws:session:sk-att:user:claude-code-ws"
+        final_frame = {
+            "sessionKey": decorated,
+            "state": "final",
+            "message": {"content": [{"type": "text", "text": "done"}]},
+        }
+
+        # 后台态：等待方已收口，state=None 分支收帧
+        await acc.send_message(
+            "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
+        )
+        assert "sk-att" in acc._v3_routed_sessions
+        acc._v3_fallback._event_handlers["chat"](final_frame)
+        assert "sk-att" not in acc._v3_routed_sessions, (
+            "装饰 key 的后台终态未释放归属"
+        )
+        assert acc.has_active_sessions is False
+
+        # 等待中态：装饰 key 终态唤醒等待方，归属同样释放
+        task = asyncio.create_task(
+            acc.send_message(
+                "m2", session_key="sk-att", attachments=[{"k": 1}], wait_result=True
+            )
+        )
+        await self._wait_until(lambda: len(acc._v3_fallback.chat_send_calls) == 2)
+        acc._v3_fallback._event_handlers["chat"](final_frame)
+        content, _payloads = await task
+        assert content == "done"
+        assert "sk-att" not in acc._v3_routed_sessions, "装饰 key 的等待中终态未释放归属"
+        await acc.close()
+
+    @pytest.mark.asyncio
+    async def test_agent_and_error_terminal_channels_release_ownership(
+        self, mock_bot_ws
+    ):
+        """R9-F3a：终态不保证走 chat 通道（_derive_event_name 可派发为
+        agent，WS 转发层遇终态直接结束）——agent final/error 与 error 通道
+        必须同样释放归属，后台态（state=None）不许漏。"""
+        acc = self._acc_with_owned_a2a_main()
+        acc._client._event_handlers = {
+            "chat": acc._on_chat,
+            "agent": acc._on_agent,
+            "error": acc._on_error,
+        }
+        with patch(
+            "secbaas.community.core.service.bot_run._bot_websocket_client."
+            "BotWebSocketClient",
+            _StubV3Transport,
+        ):
+            # agent final 通道（后台态）
+            await acc.send_message(
+                "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
+            )
+            acc._v3_fallback._event_handlers["agent"](
+                {"sessionKey": "sk-att", "stream": "assistant", "state": "final"}
+            )
+            assert "sk-att" not in acc._v3_routed_sessions, (
+                "agent final 通道未释放归属"
+            )
+
+            # error 通道（后台态）
+            await acc.send_message(
+                "m2", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
+            )
+            acc._v3_fallback._event_handlers["error"](
+                {"sessionKey": "sk-att", "state": "error", "errorMessage": "boom"}
+            )
+            assert "sk-att" not in acc._v3_routed_sessions, "error 通道未释放归属"
+        await acc.close()
+
+    @pytest.mark.asyncio
+    async def test_agent_final_wake_releases_ownership_in_wait(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """R9-F3b：等待方被 agent final 唤醒（仅 agent 通道终结、无 chat
+        final）——run 已终结，归属必须释放。"""
+        acc = self._acc_with_owned_a2a_main()
+        acc._client._event_handlers = {
+            "chat": acc._on_chat,
+            "agent": acc._on_agent,
+            "error": acc._on_error,
+        }
+
+        task = asyncio.create_task(
+            acc.send_message(
+                "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=True
+            )
+        )
+        await self._wait_until(
+            lambda: acc._v3_fallback is not None
+            and bool(acc._v3_fallback.chat_send_calls)
+        )
+        acc._v3_fallback._event_handlers["agent"](
+            {
+                "sessionKey": "sk-att",
+                "stream": "assistant",
+                "state": "final",
+                "message": {"content": [{"text": "agent done"}]},
+            }
+        )
+        await task
+        assert "sk-att" not in acc._v3_routed_sessions, (
+            "agent final 唤醒后归属未释放"
+        )
+        assert acc.has_active_sessions is False
+        await acc.close()
+
+    # ─────────── R10：归属释放只认 v3 fallback 来源帧 ───────────
+
+    @pytest.mark.asyncio
+    async def test_a2a_terminal_spares_fallback_ownership_of_prefix_session(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """R10：A2A 主连接与 v3 fallback 共用事件 handler，但归属标记只属
+        于 fallback 上的 run——A2A session（裸 key，自身是另一 fallback
+        session 的超串，如 chat-10 ⊃ chat-1）的终态经主连接分发时，不得
+        在归属子表 contains 误中前缀 session 而清掉 fallback 的归属。"""
+        acc = self._acc_with_owned_a2a_main()
+        acc._client._event_handlers["chat"] = acc._on_chat  # 双注册同形
+
+        # chat-1：附件 run，后台在途于 v3 fallback
+        await acc.send_message(
+            "m1", session_key="chat-1", attachments=[{"k": 1}], wait_result=False
+        )
+        assert "chat-1" in acc._v3_routed_sessions
+        fallback = acc._v3_fallback
+
+        # chat-10：A2A 主连接 run（裸 key，包含 chat-1 为前缀）终结
+        acc._client._event_handlers["chat"](
+            {
+                "sessionKey": "chat-10",
+                "state": "final",
+                "message": {"content": [{"type": "text", "text": "done"}]},
+            }
+        )
+
+        assert "chat-1" in acc._v3_routed_sessions, (
+            "A2A session 终态误清了 fallback 前缀 session 的归属"
+        )
+        assert acc.tracks_session("chat-1") is True
+        # chat-1 的取消仍必须路由到持有 run 的 v3 fallback
+        await acc.chat_abort("chat-1")
+        assert fallback.chat_abort_calls == [("chat-1", {"run_id": None})], (
+            "跨 session 误清理后 abort 被错发 A2A 主连接"
+        )
+        acc._client.chat_abort.assert_not_awaited()
+        await acc.close()
+
+
+class _GatedV3Transport(_StubV3Transport):
+    """慢建连替身：connect 闸在类级事件上——复现并发首发都看到
+    `_v3_fallback is None` 的竞态窗口（R7-F4）。"""
+
+    release: asyncio.Event
+    gated_instances: list["_GatedV3Transport"] = []
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _GatedV3Transport.gated_instances.append(self)
+
+    async def connect(self) -> dict:
+        await self.release.wait()
+        self.connected = True
+        return {"ok": True, "payload": {"server": {}}}
+
+
+class _TerminalOnSendV3(_StubV3Transport):
+    """终态先于 ACK 替身：chat_send 在返回前就让 WS 接收循环把主 run
+    的 final 帧分派出去——复现"终态在 chat_send() 等待方恢复前到达"
+    的时序（R8-F3）。"""
+
+    async def chat_send(self, session_key, *args, **kwargs):
+        self._event_handlers["chat"](
+            {
+                "sessionKey": session_key,
+                "state": "final",
+                "message": {"content": [{"type": "text", "text": "all done"}]},
+            }
+        )
+        self.chat_send_calls.append((session_key, args, kwargs))
+        return {"ok": True}
+
+
+class TestV3FallbackConcurrentInit:
+    """R7-F4：不同 session 并发首发附件——fallback 的检查/建连/发布必须
+    互斥且锁内重查，连接唯一；否则两条连接下场是身份守卫吞掉首连断连
+    （等待者悬挂）、末连断连误杀另一条连接的全部归属 run。"""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_first_attachments_share_single_connection(
+        self, mock_bot_ws
+    ):
+        gated = asyncio.Event()
+        _GatedV3Transport.gated_instances = []
+        _GatedV3Transport.release = gated
+        with patch(
+            "secbaas.community.core.service.bot_run._bot_websocket_client."
+            "BotWebSocketClient",
+            _GatedV3Transport,
+        ):
+            acc = _a2a_acc_with_stub_main_client()
+
+            t1 = asyncio.create_task(
+                acc.send_message(
+                    "m1", session_key="sk-1", attachments=[{"k": 1}], wait_result=False
+                )
+            )
+            t2 = asyncio.create_task(
+                acc.send_message(
+                    "m2", session_key="sk-2", attachments=[{"k": 1}], wait_result=False
+                )
+            )
+            # 两个任务都进入 _ensure_v3_fallback、闸在 connect 上——
+            # 此时构造数即建连竞态的仲裁点（必须只建一条）。
+            await asyncio.sleep(0.1)
+            constructed = len(_GatedV3Transport.gated_instances)
+            gated.set()
+            await t1
+            await t2
+
+        assert constructed == 1, (
+            f"并发首发构造了 {constructed} 条连接（互斥缺失，应为 1）"
+        )
+        single = acc._v3_fallback
+        assert single is not None, "fallback 未发布"
+        # 两个 run 都必须走这唯一的连接，归属都指向它
+        assert len(single.chat_send_calls) == 2, "并发首发被分散到多条连接"
+        assert "sk-1" in acc._v3_routed_sessions
+        assert "sk-2" in acc._v3_routed_sessions
+        # 唯一连接断连 → 归属按预期整体收口（不再有"各连各的"误杀面）
+        single.simulate_disconnect()
+        assert acc._v3_routed_sessions == {}, "断连后归属未整体收口"
+        await acc.close()

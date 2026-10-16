@@ -6,16 +6,12 @@ from secbaas.community.plugins.sandbox.arca import (
     LocalProcessArcaSandboxPlugin,
     StubArcaSandboxPlugin,
 )
-from secbaas.community.plugins.sandbox.arca.local_docker import (
-    LocalDockerArcaSandboxPlugin,
-)
 
 
 @pytest.mark.parametrize(
     "plugin_factory",
     [
         StubArcaSandboxPlugin,
-        LocalDockerArcaSandboxPlugin,
         LocalProcessArcaSandboxPlugin,
     ],
 )

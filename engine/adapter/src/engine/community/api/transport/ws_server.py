@@ -1459,10 +1459,15 @@ class EngineWebSocketServer:
             session_key_hash,
         )
         acknowledged = False
+        ack_failed = False
 
         async def acknowledge(ack: OpenClawChatAck) -> None:
-            nonlocal acknowledged
+            nonlocal acknowledged, ack_failed
             acknowledged = True
+            # Negative ACKs deliver the request-level outcome to the client
+            # themselves — the exhaustion guard below must not re-report.
+            if not ack.ok:
+                ack_failed = True
             await on_ack(ack)
 
         async def send_error(payload: dict[str, Any], **event_options: Any) -> None:
@@ -1708,6 +1713,7 @@ class EngineWebSocketServer:
                     websocket, conn_id, session_key, stream, materialized_paths,
                     on_ack is not None, lambda: acknowledged, send_error,
                     resume_run=resume_run,
+                    ack_failed=(lambda: ack_failed) if on_ack is not None else None,
                 )
 
         except WebSocketDisconnect:
@@ -1730,8 +1736,12 @@ class EngineWebSocketServer:
         self, websocket, conn_id, session_key, stream, materialized_paths,
         expects_ack, acknowledged, send_error,
         *, resume_run: OpenClawResumeRun | None = None,
+        ack_failed: Callable[[], bool] | None = None,
     ) -> None:
         event_count = 0
+        terminal_seen = False
+        reply_delivered = False
+        synth_run_id: str = ""
         session_key_hash = hashlib.sha256(session_key.encode("utf-8")).hexdigest()[:16]
         async for event_frame in stream:
             if expects_ack and not acknowledged():
@@ -1742,6 +1752,14 @@ class EngineWebSocketServer:
             event_data = event_frame.payload
             state = event_data.get("state", "")
             run_id = event_data.get("runId", "")
+            if (
+                isinstance(run_id, str)
+                and run_id
+                and not run_id.startswith("inject-")
+            ):
+                # Sticky engine runId for the synthesized terminal below
+                # (per-frame run_id keeps its original inject semantics).
+                synth_run_id = run_id
             event_data.setdefault("sessionKey", session_key)
 
             # The live listener already delivers inject frames to this connection.
@@ -1756,14 +1774,59 @@ class EngineWebSocketServer:
                 websocket, event_name, event_data, materialized_paths=materialized_paths,
                 resume_run=resume_run,
             )
+            if event_name == "message":
+                # Local-echo reply shape: a bare "message" event carries the
+                # full assistant reply — the run did complete, it just never
+                # speaks the delta/final vocabulary.
+                reply_delivered = True
             if state in ("final", "error", "aborted"):
                 if isinstance(run_id, str) and run_id.startswith("inject-"):
                     continue
+                terminal_seen = True
                 log.info(
                     "[stream] chat stream ended: conn=%s session_key_hash=%s reason=%s total_events=%s",
                     conn_id, session_key_hash, state, event_count,
                 )
                 break
+        if terminal_seen or reply_delivered:
+            return
+        # The engine stream ended without ever delivering final/error/aborted
+        # (observed live: model-provider death after full retry exhaustion —
+        # the stream simply closed). Synthesize the missing terminal error
+        # here so every client sees an explicit end state instead of hanging
+        # to its own timeout. Already-terminal runs never reach this branch
+        # (the loop breaks on the first terminal frame).
+        if expects_ack and ack_failed is not None and ack_failed():
+            # A negative ACK already delivered this request's outcome — the
+            # failed ACK is the client's terminal; don't double-report.
+            log.debug(
+                "[stream] stream exhausted after a failed ACK: conn=%s "
+                "session_key_hash=%s total_events=%s",
+                conn_id, session_key_hash, event_count,
+            )
+            return
+        payload: dict[str, Any] = {
+            "sessionKey": session_key,
+            "state": "error",
+            "errorCode": "STREAM_TERMINATED_WITHOUT_FINAL",
+            "errorMessage": (
+                "The engine chat stream ended before a final result was "
+                "produced; the run did not complete."
+            ),
+        }
+        if synth_run_id:
+            payload["runId"] = synth_run_id
+        elif resume_run is not None and resume_run.run_id:
+            payload["runId"] = resume_run.run_id
+        await send_error(
+            payload, resume_run=resume_run,
+            materialized_paths=materialized_paths,
+        )
+        log.warning(
+            "[stream] chat stream exhausted without a terminal frame: "
+            "conn=%s session_key_hash=%s total_events=%s",
+            conn_id, session_key_hash, event_count,
+        )
 
     # ── chat.abort ─────────────────────────────────────────────────────────
 

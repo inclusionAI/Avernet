@@ -5,7 +5,7 @@ export default function RepairWorkspace({ stage, title, subtitle, onBack, backLa
   stage: 1 | 2 | 3 | 4; title: string; subtitle: string; onBack: () => void; backLabel?: string; onSelect?: () => void; onReview?: () => void; onDeploy?: () => void; onVerify?: () => void; busy?: boolean; children: ReactNode
 }) {
   const currentStage = stage === 4 ? 3 : stage === 3 ? 2 : stage
-  const handlers = [onSelect, onDeploy ?? onReview, onVerify]
+  const handlers = [onSelect, onReview ?? onDeploy, onVerify]
   return <section aria-label="Workflow 修复工作区" className="mx-auto max-w-[96rem] space-y-6 pb-8">
     <button type="button" disabled={busy} onClick={onBack} className="text-xs text-muted-foreground enabled:cursor-pointer hover:text-primary disabled:cursor-not-allowed">← {backLabel}</button>
     <header><h2 className="text-2xl font-semibold tracking-tight text-foreground">{title}</h2>

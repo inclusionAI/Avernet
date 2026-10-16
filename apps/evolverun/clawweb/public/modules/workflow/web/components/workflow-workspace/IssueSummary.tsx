@@ -14,7 +14,7 @@ export default function IssueSummary({ group }: { group: IssueGroupView }) {
     <h4 className="text-sm font-semibold text-slate-900">问题原因</h4>
     <div role="status" className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
       <p className={group.stale || group.aggregationStatus !== 'completed' ? 'font-medium text-amber-800' : 'font-medium'}>
-        {statusText}{group.stale ? ' · 摘要待更新' : ''}
+        {group.summary && (group.stale || group.aggregationStatus !== 'completed') ? '展示上轮摘要 · ' : ''}{group.summary && group.aggregationStatus === 'not_generated' ? '本轮尚未聚合' : statusText}{group.stale ? ' · 摘要待更新' : ''}
       </p>
       {group.summary && <p>摘要依据 {coveredRuns} 个运行 · 当前关联 {currentRuns} 个运行</p>}
       <details className="mt-1"><summary className="cursor-pointer">摘要说明</summary>

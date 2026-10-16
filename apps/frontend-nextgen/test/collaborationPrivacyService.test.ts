@@ -119,6 +119,10 @@ class FakeGateway implements CollaborationPrivacyGateway {
   async submitPublication(command: PublicationCommand, signal?: AbortSignal) {
     this.signals.push(signal);
     this.publicationCommands.push(command);
+    // 外部 Bot 合同只有直改成功（completed）一种结果；TC 仍按审批 pending 返回。
+    if (command.isExternalBot) {
+      return { status: 'completed' as const, config: command.config };
+    }
     const pending: PendingPublication = {
       id: `MOCK-${command.audience}`,
       audience: command.audience,
@@ -376,6 +380,68 @@ describe('CollaborationPrivacyService', () => {
     expect(gateway.directCommands).toHaveLength(1);
     gateway.directResolvers.splice(0).forEach((resolve) => resolve(false));
     await request;
+  });
+
+  test('外部 Bot 维度提交不被遗留 pending 拦截，直接完成生效并清空审批态', async () => {
+    const gateway = new FakeGateway();
+    gateway.overview = createOverview();
+    gateway.overview.bots[0] = {
+      ...gateway.overview.bots[0],
+      publication: {
+        ...gateway.overview.bots[0].publication,
+        bot: { scope: 'all', organizationPaths: [] },
+      },
+      pendingPublications: {
+        bot: {
+          id: 'FAKE-PENDING',
+          audience: 'bot',
+          target: { scope: 'none', organizationPaths: [] },
+          submittedAt: '2026-08-18T00:00:00.000Z',
+          approvalUrl: 'https://example.com/approval',
+        },
+      },
+    };
+    const service = new CollaborationPrivacyService(gateway);
+    await service.loadOverview('900004');
+
+    const next = await service.submitPublication({
+      botId: 'joined',
+      audience: 'bot',
+      isExternalBot: true,
+      config: { scope: 'restricted', organizationPaths: [['蚂蚁集团-CRO线-大安全技术部']] },
+      deptEntries: [{ deptNo: 'A4195', deptName: '蚂蚁集团-CRO线-大安全技术部' }],
+    });
+
+    expect(gateway.publicationCommands).toEqual([
+      {
+        botId: 'joined',
+        audience: 'bot',
+        isExternalBot: true,
+        config: { scope: 'restricted', organizationPaths: [['蚂蚁集团-CRO线-大安全技术部']] },
+        deptEntries: [{ deptNo: 'A4195', deptName: '蚂蚁集团-CRO线-大安全技术部' }],
+      },
+    ]);
+    expect(next.publication.bot).toEqual({
+      scope: 'restricted',
+      organizationPaths: [['蚂蚁集团-CRO线-大安全技术部']],
+    });
+    expect(next.pendingPublications.bot).toBeUndefined();
+  });
+
+  test('外部 Bot 配置无变化时提示无需保存且不触达 Gateway', async () => {
+    const gateway = new FakeGateway();
+    const service = new CollaborationPrivacyService(gateway);
+    await service.loadOverview('900004');
+
+    await expect(
+      service.submitPublication({
+        botId: 'joined',
+        audience: 'bot',
+        isExternalBot: true,
+        config: { scope: 'restricted', organizationPaths: [['示例集团', '平台团队']] },
+      }),
+    ).rejects.toThrow('可见性未发生变化，无需保存');
+    expect(gateway.publicationCommands).toHaveLength(0);
   });
 
   test('所有接口用例向 Gateway 透传取消信号', async () => {

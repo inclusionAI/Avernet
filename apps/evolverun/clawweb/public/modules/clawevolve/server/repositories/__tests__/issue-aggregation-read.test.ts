@@ -7,6 +7,7 @@ let db: SqliteDatabase;
 let raw: Database.Database;
 beforeEach(() => {
   raw = new Database(':memory:');
+  raw.exec("CREATE TABLE workflow_repair_release_records (record_id TEXT, record_kind TEXT, workflow_id TEXT)");
   db = new SqliteDatabase(raw);
   raw.exec(`CREATE TABLE workflow_evolution_analysis_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, analysis_id TEXT, workflow_id TEXT, flow_id TEXT,
@@ -16,6 +17,55 @@ beforeEach(() => {
       failure_signature TEXT, failure_mode TEXT, node_id TEXT, weak_node_id TEXT, error_text TEXT, gmt_modified INTEGER);`);
 });
 afterEach(async () => { vi.restoreAllMocks(); await db.close(); });
+
+function coverageFixture() {
+  raw.exec(`ALTER TABLE workflow_evolution_analysis_runs ADD COLUMN state_version INTEGER DEFAULT 0;
+    CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, workflow_id TEXT, started_at INTEGER);
+    CREATE TABLE node_executions (flow_id TEXT, node_id TEXT);`);
+  const now = Date.now();
+  raw.prepare("INSERT INTO flow_runs VALUES ('covered', 'wf', ?)").run(now - 10000);
+  raw.exec("INSERT INTO node_executions VALUES ('covered', 'node-0')");
+  const add = (id: string, at: number, scope: object, unknowns: string[] = [], broken = false) => {
+    const result = { schemaVersion: 'workflow-evolution-analysis/v1', analysisId: id, facts: [], inferences: [], unknowns,
+      diagnoses: [{ diagnosisId: id, flowIds: ['covered'], nodeId: 'node-0', failureSignature: 'issue-0',
+        failureMode: 'timeout', severity: 'high', reasoning: 'Observed timeout', evidenceEventIds: [] }] };
+    raw.prepare(`INSERT INTO workflow_evolution_analysis_runs (analysis_id, workflow_id, flow_id, scope_type,
+      scope_json, status, result_json, requested_at_ms, completed_at_ms) VALUES (?, 'wf', 'covered', 'single_run', ?, 'completed', ?, ?, NULL)`)
+      .run(id, JSON.stringify(scope), broken ? '{}' : JSON.stringify(result), at);
+  };
+  return { now, add, repository: new IssueAggregationRepository(db) };
+}
+
+it('counts completed analysis for the issue node separately from complete coverage and legacy diagnosis evidence', async () => {
+  const { now, add, repository } = coverageFixture();
+  add('node-analysis', now - 9000, { flowIds: ['covered'], nodeId: 'node-0' }, ['External evidence missing']);
+  let page = await repository.listPage('wf', { page: 1, pageSize: 20 });
+  expect(page.groups[0].priority?.week).toMatchObject({ related: 1, analyzed: 1, complete: 0, sampleHitRate: null, occurrenceRate: null });
+  add('node-complete', now - 8000, { flowIds: ['covered'], nodeIds: ['node-0'] });
+  add('unrelated-node', now - 7000, { flowIds: ['covered'], nodeId: 'other' });
+  page = await repository.listPage('wf', { page: 1, pageSize: 20 });
+  expect(page.groups[0].priority?.week).toMatchObject({ analyzed: 1, complete: 1, sampleHitRate: 1, occurrenceRate: 1 });
+  raw.prepare("INSERT INTO flow_runs VALUES ('legacy-run', 'wf', ?)").run(now - 10000);
+  raw.exec("INSERT INTO node_executions VALUES ('legacy-run', 'node-0')");
+  raw.prepare("INSERT INTO workflow_healing_diagnoses VALUES ('legacy-d', 'wf', 'legacy-run', 'issue-0', 'timeout', 'node-0', NULL, 'old evidence', ?)").run(now);
+  page = await repository.listPage('wf', { page: 1, pageSize: 20 });
+  expect(page.groups[0].priority?.week).toMatchObject({ related: 2, analyzed: 1, complete: 1, legacyDiagnosed: 1, occurrenceRate: null });
+});
+
+it('uses latest applicable effective time, including NULL completion, and does not replace invalid latest evidence with older clean analysis', async () => {
+  const { now, add, repository } = coverageFixture();
+  add('new-partial', now - 1000, { flowIds: ['covered'], nodeId: 'node-0' }, ['Missing evidence']);
+  add('old-clean-inserted-later', now - 9000, { flowIds: ['covered'] });
+  let page = await repository.listPage('wf', { page: 1, pageSize: 20 });
+  expect(page.groups[0].priority?.week).toMatchObject({ analyzed: 1, complete: 0, occurrenceRate: null });
+  add('new-invalid', now - 500, { flowIds: ['covered'], nodeIds: ['node-0'] }, [], true);
+  page = await repository.listPage('wf', { page: 1, pageSize: 20 });
+  expect(page.groups[0].priority?.week).toMatchObject({ analyzed: 0, complete: 0, occurrenceRate: null });
+  raw.exec(`UPDATE workflow_evolution_analysis_runs SET flow_id = NULL, scope_json = '{}',
+    result_json = '{"schemaVersion":"unsupported","diagnoses":[{"flowIds":["covered"]}]}' WHERE analysis_id = 'new-invalid'`);
+  page = await repository.listPage('wf', { page: 1, pageSize: 20 });
+  expect(page.groups[0].priority?.week).toMatchObject({ analyzed: 0, complete: 0, occurrenceRate: null });
+});
 
 async function seed(groupCount = 8, revisions = 10, sources = 2) {
   const insert = raw.prepare(`INSERT INTO workflow_evolution_analysis_runs
@@ -185,7 +235,18 @@ it('bounds priority analysis reads by the statistics window and retains multi-ru
   const page = await repository.listPage('wf', { page: 1, pageSize: 20 });
   expect(page.groups[0].priority?.week).toMatchObject({ related: 2, analyzed: 2 });
   const analysisBatches = await Promise.all(query.mock.calls.flatMap(([sql], i) =>
-    /SELECT id, flow_id, scope_json, result_json FROM workflow_evolution_analysis_runs/.test(sql)
+    /SELECT id, flow_id, scope_json, result_json, completed_at_ms, requested_at_ms FROM workflow_evolution_analysis_runs/.test(sql)
       ? [query.mock.results[i].value] : []));
   expect(analysisBatches.flat()).toHaveLength(2);
+});
+
+it('removes trial evidence from model and legacy issue frequency sources', async () => {
+  const { now, add, repository } = coverageFixture();
+  add('trial-analysis', now - 1000, { flowIds: ['covered'] });
+  raw.exec("INSERT INTO workflow_repair_release_records VALUES ('covered', 'trial_run', 'wf')");
+  raw.exec("INSERT INTO workflow_healing_diagnoses VALUES ('legacy-trial', 'wf', 'covered', 'trial-only', 'timeout', 'node-0', NULL, 'timeout', 1)");
+  expect(await repository.listSources('wf')).toEqual([]);
+  const result = await repository.listPage('wf', { page: 1, pageSize: 20 });
+  expect(result.groups).toEqual([]);
+  expect(result.page.total).toBe(0);
 });

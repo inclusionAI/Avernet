@@ -209,6 +209,7 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: true,
   }),
+  getAdditionalBotRegistrationPanels: () => ({ status: 'available', value: [] }),
   getQwenWorkBotRegistrationConfig: (bcsEndpoint) => {
     const runtime =
       typeof window === 'undefined'

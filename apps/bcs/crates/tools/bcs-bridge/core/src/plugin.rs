@@ -84,6 +84,7 @@ pub async fn serve(state: Arc<AppState>, shutdown: CancellationToken) -> anyhow:
             }
         }
     }
+    state.shutdown_engines().await;
     match first_error { Some(error) => Err(error), None => Ok(()) }
 }
 

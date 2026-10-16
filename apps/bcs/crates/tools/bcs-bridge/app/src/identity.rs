@@ -8,6 +8,7 @@
 use anyhow::{Result, bail};
 
 use crate::registration::{Mode, RegistrationClient};
+pub use bcs_bridge_core::config::BotConfig;
 
 /// Registration inputs available to an identity resolver.
 pub struct IdentityContext<'a> {
@@ -34,6 +35,10 @@ pub trait IdentityResolver: Send + Sync {
     async fn registration_client(&self, client: RegistrationClient, _explicit_ref: Option<&str>) -> Result<RegistrationClient> {
         Ok(client)
     }
+    /// Persist only the selected authentication policy, never its credentials.
+    fn runtime_auth(&self) -> &str { self.id() }
+    /// Validate a runtime workspace before connecting the registered Bot.
+    async fn validate_workspace(&self, _bot: &BotConfig, _api_url: Option<&str>) -> Result<()> { Ok(()) }
     /// The Bot's stable identity within its Provider. Called after local
     /// validation, immediately before the registration request.
     async fn provider_bot_ref(&self, ctx: &IdentityContext<'_>) -> Result<String>;

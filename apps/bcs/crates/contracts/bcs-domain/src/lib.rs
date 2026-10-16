@@ -18,6 +18,7 @@ pub mod edge_permission;
 pub mod friend;
 pub mod fusion;
 pub mod group;
+pub mod group_context;
 pub mod group_id;
 pub mod invite;
 pub mod message;
@@ -65,6 +66,9 @@ pub use friend::{FriendRequest, FriendRequestDirection, FriendRequestStatus, Fri
 pub use fusion::{
     ContextBotSummary, ContextConflict, ContextConflictPosition, ContextFusionRequest,
     ContextFusionResponse, ContextParticipantPerspective,
+};
+pub use group_context::{
+    GroupContextEntry, GroupContextEntryMeta, GroupContextPermission, GroupContextPolicy, GroupContextTime, ScopeLevel,
 };
 pub use group::{
     DefaultDelivery, Group, GroupKind, GroupStatus, GroupStrategy, HumanMentionNotifyMode,

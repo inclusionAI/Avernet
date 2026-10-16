@@ -1,3 +1,4 @@
+import { productionRunsSql, isTrialRun } from "@avernet/clawweb-shared/server/services/run-purpose";
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { IssueAggregationRepository } from '@avernet/clawevolve/server/repositories/issue-aggregation-repository';
 import type { AutoAnalysisSettings } from './task-guard/auto-analysis-settings.js';
@@ -6,7 +7,8 @@ import { RepairAutomationDeniedError } from '../contracts/workflow-automation.js
 import type { RepairSelectionRequest } from '../contracts/repair-workbench.js';
 import { digestRepairJson } from '../contracts/repair-batch.js';
 import { WorkflowAutomationRepository, type AutomationJob } from '../repositories/workflow-automation-repository.js';
-import { selectAutomaticScope } from './workflow-automation-selection.js';
+import { runAutomaticRound } from './workflow-automation-round.js';
+import { previousShanghaiDay, selectAutomaticScope } from './workflow-automation-selection.js';
 const DAY = 86400000;
 export function automationDue(now: number, dailyTime: string) {
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(now));
@@ -35,6 +37,9 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
   }
   async function runAnalysis(record: AutomationJob) {
     let job = await repo.claim(record.id, now()); if (!job) return;
+    if (await isTrialRun(input.db, job.data.flowId)) {
+      await repo.patch(job, { status: 'blocked', reason: 'CANDIDATE_TRIAL' }, now(), true); return;
+    }
     const observed = await bounded(input.ports.analysis.lookup(job.data.flowId));
     if (observed.status === 'completed') {
       await repo.patch(job, { status: 'done', reason: observed.complete === false ? 'PARTIAL_ANALYSIS' : null,
@@ -59,35 +64,63 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
   async function scan(job: AutomationJob, policy: WorkflowAutomationPolicy) {
     const due = automationDue(now(), policy.dailyTime);
     if (!job.data.openDue && (!policy.dailyConfigured || due.at < policy.updatedAtMs || job.data.completedDue === due.key)) return job;
-    if (!job.data.openDue) job = await repo.patch(job, { data: { ...job.data, openDue: due.key, cutoffMs: now() - 2000, cursor: null } }, now());
-    const sinceMs = Number(job.data.scannedThroughMs ?? job.data.scanFromMs ?? now() - DAY) - 60000;
+    if (!job.data.openDue) job = await repo.patch(job, { data: { ...job.data, openDue: due.key, cutoffMs: now() - 2000, scopeUntilMs: previousShanghaiDay(due.at).untilMs, cursor: null } }, now());
+    const watermark = Number(job.data.scannedThroughMs ?? job.data.scanFromMs ?? now() - DAY);
+    // Re-read the whole preceding natural day: today's completed runs were
+    // deliberately excluded by the previous scan even if already modified.
+    const sinceMs = (policy.scopeVersion === 'all-qualified/v1' ? Math.min(watermark, Number(job.data.scopeUntilMs) - DAY) : watermark) - 60000;
     const cursor = job.data.cursor as { modified: number | string; id: number } | null;
-    const rows = await input.db.query<{ id: number; flow_id: string; modified: number | string }>(`SELECT id, flow_id, COALESCE(gmt_modified, gmt_create) AS modified FROM flow_runs
+    const rows = await input.db.query<{ id: number; flow_id: string; modified: number | string }>(`SELECT id, flow_id, COALESCE(gmt_modified, gmt_create) AS modified FROM ${productionRunsSql()} flow_runs
       WHERE workflow_id = ? AND completed_at IS NOT NULL AND status IN ('succeeded', 'failed', 'cancelled')
+      ${policy.scopeVersion === 'all-qualified/v1' ? 'AND started_at > 0 AND ((started_at < 1000000000000 AND started_at < ?) OR (started_at >= 1000000000000 AND started_at < ?))' : ''}
       AND COALESCE(gmt_modified, gmt_create) >= ? AND COALESCE(gmt_modified, gmt_create) <= ?
       ${cursor ? 'AND (COALESCE(gmt_modified, gmt_create) > ? OR (COALESCE(gmt_modified, gmt_create) = ? AND id > ?))' : ''}
-      ORDER BY COALESCE(gmt_modified, gmt_create), id LIMIT 20`, [job.workflowId, input.db.dialect.epochToDb(Math.floor(sinceMs / 1000)),
+      ORDER BY COALESCE(gmt_modified, gmt_create), id LIMIT 20`, [job.workflowId, ...(policy.scopeVersion === 'all-qualified/v1' ? [job.data.scopeUntilMs / 1000, job.data.scopeUntilMs] : []), input.db.dialect.epochToDb(Math.floor(sinceMs / 1000)),
         input.db.dialect.epochToDb(Math.floor(job.data.cutoffMs / 1000)), ...(cursor ? [cursor.modified, cursor.modified, cursor.id] : [])]);
     for (const row of rows) await repo.ensure(job.workflowId, 'auto_run', row.flow_id, { flowId: row.flow_id, evidenceCutoffMs: job.data.cutoffMs }, now());
     const last = rows.at(-1);
     return repo.patch(job, { data: rows.length === 20 ? { ...job.data, cursor: { modified: last!.modified, id: last!.id } }
       : { ...job.data, completedDue: job.data.openDue, openDue: null, cursor: null, scannedThroughMs: job.data.cutoffMs } }, now());
   }
-  async function queueIssues(workflowId: string) {
-    const ranked = await issues.listPage(workflowId, { page: 1, pageSize: 20, sort: 'priority' });
-    for (const group of ranked.groups) {
-      if (!['high', 'critical'].includes(group.priority?.severity ?? '')) continue;
-      const key = digestRepairJson([group.signature, group.priority?.severity, [...new Set(group.flowIds)].sort()]);
-      await repo.ensure(workflowId, 'auto_notice', `issue:${key}`, { title: '工作流发现重点问题',
-        text: `影响程度：${group.priority!.severity}；受影响运行 ${group.flowIds.length} 次。请审阅证据和处理方案。`,
-        path: `/workflows/workspace?workflowId=${encodeURIComponent(workflowId)}&tab=evolution`, kind: 'issue' }, now());
+  async function queueIssues(workflowId: string, policy: WorkflowAutomationPolicy) {
+    for (let page = 1;; page++) {
+      const ranked = await issues.listPage(workflowId, { page, pageSize: 20, sort: 'priority' });
+      for (const group of ranked.groups) {
+        if (!['high', 'critical'].includes(group.priority?.severity ?? '')) continue;
+        const key = digestRepairJson([group.signature, group.priority?.severity, [...new Set(group.flowIds)].sort()]);
+        await repo.ensure(workflowId, 'auto_notice', `issue:${key}`, { title: '工作流发现重点问题',
+          text: `影响程度：${group.priority!.severity}；受影响运行 ${group.flowIds.length} 次。请审阅证据和处理方案。`,
+          path: `/workflows/workspace?workflowId=${encodeURIComponent(workflowId)}&tab=evolution`, kind: 'issue' }, now());
+      }
+      if (policy.scopeVersion !== 'all-qualified/v1' || page >= ranked.page.totalPages) break;
     }
   }
   async function planDraft(cycle: AutomationJob) {
     const { actorId, policy } = await authority(cycle.workflowId, true);
-    if (cycle.data.draftDue === cycle.data.completedDue || !cycle.data.completedDue) return cycle;
+    if (!cycle.data.completedDue || policy.scopeVersion !== 'all-qualified/v1' && cycle.data.draftDue === cycle.data.completedDue) return cycle;
+    if (policy.scopeVersion === 'all-qualified/v1' && await repo.activeDraft(cycle.workflowId)) return cycle;
     const baseline = await input.ports.baseline(cycle.workflowId);
-    const selected = await selectAutomaticScope(input.workbench, issues, cycle.workflowId, baseline);
+    const selected = await selectAutomaticScope(input.workbench, issues, cycle.workflowId, baseline, policy.scopeVersion === 'all-qualified/v1'
+      ? { db: input.db, minimumImpact: policy.minimumImpact ?? 'medium', evidenceCutoffMs: now() } : undefined);
+    if (selected?.batches) {
+      if (!selected.items.length && cycle.data.round) return cycle;
+      const deferred = Object.values(selected.deferred ?? {}).reduce<Record<string, number>>((out, reason) => { out[reason] = (out[reason] ?? 0) + 1; return out; }, {});
+      const round = await repo.ensure(cycle.workflowId, 'auto_draft', digestRepairJson([selected.fingerprint, policy.version]), { actorId, fingerprint: selected.fingerprint, baseline,
+        total: selected.items.length, batches: selected.batches, revisions: selected.revisions, deferredItems: selected.deferred,
+        completedBatches: 0, window: selected.window, evidenceCutoffMs: now() }, now());
+      if (!round.data.request && selected.batches.length) {
+        const claimed = await repo.claim(round.id, now());
+        if (claimed) {
+          const request: RepairSelectionRequest = { workflowId: cycle.workflowId, itemIds: selected.batches[0], inputDigest: selected.inputDigest,
+            includeHistorical: true, instructions: '', requestId: `${round.id}:0`, automation: { kind: 'daily', intentId: round.id, roundId: round.id,
+              policyVersion: policy.version, evidenceCutoffMs: round.data.evidenceCutoffMs, batchIndex: 0, batchCount: selected.batches.length, totalItems: selected.items.length } };
+          await repo.patch(claimed, { data: { ...claimed.data, request } }, now(), true);
+        }
+      }
+      if (!selected.batches.length) { const claimed = await repo.claim(round.id, now()); if (claimed) await repo.patch(claimed, { status: 'blocked', reason: 'NO_ELIGIBLE_SCOPE' }, now(), true); }
+      return repo.patch(cycle, { data: { ...cycle.data, round: { id: round.id, total: selected.items.length, batches: selected.batches.length,
+        completedBatches: round.data.completedBatches ?? 0, deferred, ...selected.window, evidenceCutoffMs: round.data.evidenceCutoffMs } } }, now());
+    }
     if (!selected) return cycle;
     const intent = await repo.ensure(cycle.workflowId, 'auto_draft', selected.fingerprint, { actorId, fingerprint: selected.fingerprint }, now());
     const existing = intent.data.request;
@@ -103,6 +136,7 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
   }
   async function runDraft(record: AutomationJob) {
     let job = await repo.claim(record.id, now()); if (!job || !job.data.request) return;
+    if (job.data.batches) return runAutomaticRound({ job, repo, workbench: input.workbench, ports: input.ports, now, authority: () => authority(job!.workflowId, true) });
     const request = job.data.request as RepairSelectionRequest;
     const existing = await input.workbench.request(job.workflowId, request.requestId);
     let taskId = existing?.taskId ?? job.data.realTaskId;
@@ -146,7 +180,9 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
     const { actorId } = access;
     if (job.data.kind === 'draft') {
       const task = await input.workbench.task(job.data.taskId);
-      if (task.latestAttempt.revision !== job.data.revision || task.latestAttempt.phase !== 'review') {
+      const reviewable = task.latestAttempt.phase === 'review'
+        || task.latestAttempt.phase === 'no_change' && task.automaticProgress?.publishable === true;
+      if (task.latestAttempt.revision !== job.data.revision || !reviewable) {
         await repo.patch(job, { status: 'done', reason: 'CANDIDATE_SUPERSEDED' }, now(), true); return;
       }
     }
@@ -159,7 +195,7 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
       nextAtMs: now() + 60000, data: { ...job.data, receipt: result.receipt ?? null } }, now(), true);
   }
   async function workflow(policy: WorkflowAutomationPolicy) {
-    const initial = await repo.ensure(policy.workflowId, 'auto_cycle', 'state', { scanFromMs: now() - DAY, scannedThroughMs: null, completedDue: null }, now());
+    const initial = await repo.ensure(policy.workflowId, 'auto_cycle', 'state', { scanFromMs: policy.scopeVersion === 'all-qualified/v1' ? previousShanghaiDay(now()).fromMs : now() - DAY, scannedThroughMs: null, completedDue: null }, now());
     let cycle = await repo.claim(initial.id, now()); if (!cycle) return;
     try {
       if (policy.enabled && policy.dailyConfigured) {
@@ -179,7 +215,7 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
         const active = await input.db.query('SELECT deploy_number FROM workflow_deploy_history WHERE workflow_id = ? AND is_active = 1', [policy.workflowId]);
         const evaluated = digestRepairJson([analysisVersion, active, current.version, cycle.data.completedDue]);
         if (cycle.data.evaluated !== evaluated) {
-          await queueIssues(policy.workflowId);
+          await queueIssues(policy.workflowId, current);
           if (current.autoDraft) cycle = await planDraft(cycle);
           cycle = await repo.patch(cycle, { data: { ...cycle.data, evaluated } }, now());
         }
@@ -201,7 +237,7 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
     },
     async onRunTerminal(event) {
       if (event.status !== 'failed') return;
-      const row = (await input.db.query<{ workflow_id: string }>('SELECT workflow_id FROM flow_runs WHERE flow_id = ?', [event.flowId]))[0];
+      const row = (await input.db.query<{ workflow_id: string }>(`SELECT workflow_id FROM ${productionRunsSql()} flow_runs WHERE flow_id = ?`, [event.flowId]))[0];
       if (!row) return;
       try { await authority(row.workflow_id); } catch (error) { if (error instanceof RepairAutomationDeniedError) return; throw error; }
       const job = await repo.ensure(row.workflow_id, 'auto_run', event.flowId, { flowId: event.flowId, evidenceCutoffMs: now() }, now());
@@ -210,10 +246,24 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
     async status(workflowId) {
       const jobs = await repo.recent(workflowId);
       return { schemaVersion: 'workflow-automation/v1', workflowId, coverage: await repo.coverage(workflowId), pauseReason: jobs.find(job => job.kind === 'auto_cycle')?.reason ?? null, lastScannedAtMs: jobs.find(job => job.kind === 'auto_cycle')?.data.scannedThroughMs ?? null,
+        ...(jobs.find(job => job.kind === 'auto_cycle')?.data.round ? { round: { ...jobs.find(job => job.kind === 'auto_cycle')!.data.round,
+          completedBatches: (await repo.get(jobs.find(job => job.kind === 'auto_cycle')!.data.round.id))?.data.completedBatches ?? 0 } } : {}),
         jobs: jobs.map(job => ({ id: job.id, kind: job.kind, status: job.status, attempts: job.attempts, reason: job.reason,
           ...(job.data.realTaskId ? { taskId: job.data.realTaskId } : {}) })) };
     },
-    async retryFailures(workflowId) { await repo.retryFailures(workflowId, now()); },
+    async retryFailures(workflowId) {
+      await repo.retryFailures(workflowId, now());
+      const failures = await repo.failedDrafts(workflowId);
+      if (!failures.length) return;
+      const access = await authority(workflowId, true);
+      for (const job of failures) {
+        if (!job.data.batches || !job.data.realTaskId || job.data.request?.automation?.policyVersion !== access.policy.version) continue;
+        const task = await input.workbench.task(job.data.realTaskId);
+        if (task.latestAttempt.phase !== 'failed' || task.latestAttempt.requestId !== job.data.request.requestId) continue;
+        const recovery = { expectedRevision: task.latestAttempt.revision, requestId: `${job.id}:retry:${task.latestAttempt.revision}` };
+        await repo.recoverDraft(job, { ...job.data, recovery, request: { ...job.data.request, requestId: recovery.requestId } }, now());
+      }
+    },
     async authorizeDraft(request) {
       const job = await repo.get(request.origin.intentId);
       const access = await authority(request.workflowId, true);

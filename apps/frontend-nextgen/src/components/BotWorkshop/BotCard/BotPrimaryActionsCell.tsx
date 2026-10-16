@@ -60,6 +60,7 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
   healthCheckAvailability,
   logAction,
 }) => {
+  if (bot.lifecycle === 'deploying') return null;
   const isAgentCodingBot = bot.runtime.isAgentCodingBot;
   const lockedByOther = bot.lock?.status === 'other';
   // Coding Bot 在 Bot 管理页固定展示「去使用」和「任务实例」，

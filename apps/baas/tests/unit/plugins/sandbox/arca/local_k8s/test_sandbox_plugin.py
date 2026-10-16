@@ -156,9 +156,17 @@ class TestLocalK8sPluginCreate:
         assert sidecar.env[0].value == "/etc/sidecar/header-rules/header-rules.yaml"
         assert sidecar.volume_mounts[0].mount_path == "/etc/sidecar/header-rules"
         assert not sidecar.volume_mounts[0].sub_path
+
+        bot_container = deployment.spec.template.spec.containers[0]
+        assert bot_container.security_context.capabilities.add == ["SYS_ADMIN"]
+        assert bot_container.volume_mounts[0].name == "fuse-device"
+        assert bot_container.volume_mounts[0].mount_path == "/opt/dev/fuse"
+
         volumes = deployment.spec.template.spec.volumes
-        assert len(volumes) == 1
+        assert len(volumes) == 2
         assert volumes[0].config_map.name.startswith("envoy-header-rules-")
+        assert volumes[1].host_path.path == "/dev/fuse"
+        assert volumes[1].host_path.type == "CharDevice"
 
     @patch("kubernetes.client.AppsV1Api")
     @patch("kubernetes.client.CoreV1Api")
@@ -379,19 +387,25 @@ class TestLocalK8sPluginCreate:
         assert pvc.spec.access_modes == ["ReadWriteOnce"]
         assert pvc.spec.resources.requests["storage"] == "10Gi"
 
-        # Deployment 挂载了共享 PVC
+        # Deployment 挂载了共享 PVC 和 fuse 设备
         deployment = mock_apps.create_namespaced_deployment.call_args[1]["body"]
         volumes = deployment.spec.template.spec.volumes
-        assert len(volumes) == 2
+        assert len(volumes) == 3
         assert volumes[0].name == "header-rules"
         assert volumes[1].name == "bot-data"
         assert volumes[1].persistent_volume_claim.claim_name == expected_pvc_name
+        assert volumes[2].name == "fuse-device"
+        assert volumes[2].host_path.path == "/dev/fuse"
+        assert volumes[2].host_path.type == "CharDevice"
 
         # bot-runtime 容器以 storage_id 为 subPath 挂载到 /home/admin
         bot_container = deployment.spec.template.spec.containers[0]
-        assert bot_container.volume_mounts[0].name == "bot-data"
-        assert bot_container.volume_mounts[0].mount_path == "/home/admin"
-        assert bot_container.volume_mounts[0].sub_path == bot_id
+        assert bot_container.security_context.capabilities.add == ["SYS_ADMIN"]
+        assert bot_container.volume_mounts[0].name == "fuse-device"
+        assert bot_container.volume_mounts[0].mount_path == "/opt/dev/fuse"
+        assert bot_container.volume_mounts[1].name == "bot-data"
+        assert bot_container.volume_mounts[1].mount_path == "/home/admin"
+        assert bot_container.volume_mounts[1].sub_path == bot_id
 
         # Deployment 和 Pod 模板带有 storage-id 注解
         expected_annotations = {"secbaas.local-k8s.io/storage-id": bot_id}
@@ -451,7 +465,8 @@ class TestLocalK8sPluginCreate:
 
         deployment = mock_apps.create_namespaced_deployment.call_args[1]["body"]
         bot_container = deployment.spec.template.spec.containers[0]
-        assert bot_container.volume_mounts[0].sub_path == storage_id
+        assert bot_container.volume_mounts[0].name == "fuse-device"
+        assert bot_container.volume_mounts[1].sub_path == storage_id
         assert deployment.metadata.annotations == {
             "secbaas.local-k8s.io/storage-id": storage_id
         }
@@ -484,8 +499,9 @@ class TestLocalK8sPluginCreate:
         mock_core.create_namespaced_persistent_volume_claim.assert_not_called()
         deployment = mock_apps.create_namespaced_deployment.call_args[1]["body"]
         volumes = deployment.spec.template.spec.volumes
-        assert len(volumes) == 1
+        assert len(volumes) == 2
         assert volumes[0].name == "header-rules"
+        assert volumes[1].name == "fuse-device"
         assert deployment.metadata.annotations is None
         assert sandbox.get_info().storage is None
 

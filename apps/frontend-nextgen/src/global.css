@@ -114,6 +114,10 @@
 
   /* 聊天面板 bot 回复气泡底色(rgb 246,249,255)。 */
   --color-chat-bubble-bot: hsl(var(--brand) / 0.04);
+
+  /* 系统消息详情提示：固定深灰实底，保持长文本的阅读对比度。 */
+  --color-system-message-tooltip: rgb(76, 76, 77);
+  --color-system-message-tooltip-foreground: hsl(0deg 0% 98%);
   --shell-header-height: 56px;
   --shell-sidebar-width: 224px; /* SVG 稿 rail 实宽 200（restore-design-v2 精修）；品牌锁版换新版后加宽至 224（单行预算 200px：图标组 96px + 锁版 ≤104px），见 AppSidebar 品牌区注释 */
 

@@ -378,6 +378,9 @@ it('retains conflicting sources for candidate review without silently choosing a
   await user.click(within(screen.getByRole('dialog', { name: '问题详情' })).getByRole('button', { name: '关闭' }))
   expect(screen.getByRole('button', { name: '生成优化草稿（2）' })).toBeDisabled()
   expect(screen.getByRole('alert')).toHaveTextContent('冲突')
+  expect(screen.getByRole('alert')).toHaveTextContent('fetch · /executor/timeoutMs')
+  expect(screen.getByRole('alert')).toHaveTextContent('600')
+  expect(screen.getByRole('alert')).toHaveTextContent('90')
   await user.click(screen.getByRole('checkbox', { name: '选择 90' }))
   await user.click(screen.getByRole('button', { name: '生成优化草稿（1）' }))
   const confirmation = screen.getByRole('region', { name: 'Workflow 修复工作区' })
@@ -419,4 +422,20 @@ it('pages suggestions independently and preserves explicit selections without se
   await user.click(choices().getByRole('checkbox', { name: '选择 suggestion-20' }))
   await user.click(screen.getByRole('button', { name: '上一页建议' }))
   expect(await choices().findByRole('checkbox', { name: '选择 suggestion-0' })).toBeChecked()
+})
+
+it('blocks generation inside the selection workspace itself while a selected conflict remains', async () => {
+  const items = [600, 90].map(value => ({ ...item(String(value)),
+    proposal: { summary: `超时${value}`, operations: [{ nodeId: 'fetch', path: '/executor/timeoutMs', value }] } }))
+  const generate = vi.fn()
+  render(<RepairSelectionWorkspace workflowId="wf" includeHistorical={false} refreshToken={0} selected={items.map(i => i.itemId)} selectedItems={items}
+    instructions="" busy={false} reason="" error="" onInstructions={vi.fn()} onToggle={vi.fn()} onResult={vi.fn()}
+    onDetail={vi.fn()} onGenerate={generate} onBack={vi.fn()} />)
+  await screen.findByRole('button', { name: '生成 Pack 草稿' })
+  await waitFor(() => expect(screen.queryByText('读取建议…')).not.toBeInTheDocument())
+  const button = screen.getByRole('button', { name: '生成 Pack 草稿' })
+  expect(button).toBeDisabled()
+  await userEvent.click(button)
+  expect(generate).not.toHaveBeenCalled()
+  expect(screen.getByRole('alert')).toHaveTextContent('fetch · /executor/timeoutMs')
 })
