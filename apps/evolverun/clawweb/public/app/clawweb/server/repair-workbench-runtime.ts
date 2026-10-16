@@ -1,3 +1,6 @@
+import { resolveAnalysisConfig } from '@avernet/clawweb-shared/server/db';
+import { createProposalModel } from './repair-proposal-model.js';
+import { createProposalCoordinator, type ProposalModelPort } from '@avernet/workflow/server/services/repair-proposal-integration';
 import { createRepairTrialService } from '@avernet/workflow/server/services/repair-trial-service';
 import type { RepairTrialPort } from '@avernet/workflow/server/contracts/repair-trial';
 /** Shared composition root for the public and internal ClawWeb Hosts.
@@ -24,6 +27,8 @@ import type { AutoAnalysisSettings } from '@avernet/workflow/server/services/tas
 
 export function createWorkflowRepairRuntime(db: IDatabase, options: {
   principal: RepairPrincipalResolver;
+  environment?: string;
+  proposalModel?: ProposalModelPort;
   execution?: RepairExecutionPort;
   publication?: RepairPublicationPort;
   trial?: RepairTrialPort;
@@ -76,13 +81,24 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
     }
     return options.execution!.dispatch(request);
   } } : undefined;
-  const service = createRepairWorkbenchService(db, sources, execution);
+  const proposals = execution && options.environment ? createProposalCoordinator({ db, scopeKey: options.environment, hydrate: async (workflowId, items) => {
+    const hydrated = sources.hydrate ? await sources.hydrate(db, workflowId, items) : items;
+    for (const item of hydrated) for (const diagnosis of (Array.isArray(item.context?.diagnoses) ? item.context.diagnoses : []) as Array<Record<string, unknown>>) {
+      const row = (await db.query<{workflow_deploy_number:number}>('SELECT workflow_deploy_number FROM flow_runs WHERE workflow_id = ? AND flow_id = ?', [workflowId,diagnosis.flowId]))[0];
+      diagnosis.observedDeployNumber = row?.workflow_deploy_number ?? null;
+    }
+    return hydrated as import('@avernet/workflow/server/contracts/repair-workbench').RepairInboxItem[];
+  }, read: workflowId => service.proposalSnapshot(workflowId),
+    model: options.proposalModel ?? createProposalModel(resolveAnalysisConfig()) }) : undefined;
+  const service = createRepairWorkbenchService(db, sources, execution, proposals);
   if (options.automation) automation = createWorkflowAutomation({ db, workbench: service, ...options.automation });
   const release = createRepairReleaseService({ db, workbench: service, publisher: options.publication });
   const trials = createRepairTrialService({ db, workbench: service, port: options.trial });
   const authorize = createRepairAuthorizer(options.principal, new BotWorkflowPermissionRepository(db));
   const verification = createRepairVerificationService(db, options.publication);
   const monitor = { async reconcile() {
+    // Aggregation is an independent durable worker, never part of single-case dispatch.
+    void proposals?.tick().catch(() => console.warn('[workflow-repair] proposal aggregation worker will retry'));
     const count = await service.reconcile();
     let after = '';
     const status = db.dialect.driver === 'better-sqlite3' ? "JSON_EXTRACT(body_json, '$.status')"

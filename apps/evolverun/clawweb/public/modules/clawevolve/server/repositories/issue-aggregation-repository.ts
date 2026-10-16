@@ -52,7 +52,7 @@ export class IssueAggregationRepository {
         try {
           const result = validateWorkflowEvolutionAnalysisResult(JSON.parse(row.result_json ?? 'null'));
           const scope = JSON.parse(row.scope_json) as { flowIds?: unknown };
-          analyses.push({ analysisId: row.analysis_id, flowId: row.flow_id, flowIds: Array.isArray(scope.flowIds) ? scope.flowIds.map(String) : [], completedAtMs: row.completed_at_ms ?? row.requested_at_ms, diagnoses: result.diagnoses });
+          analyses.push({ analysisId: row.analysis_id, flowId: row.flow_id, flowIds: Array.isArray(scope.flowIds) ? scope.flowIds.map(String) : [], completedAtMs: row.completed_at_ms ?? row.requested_at_ms, diagnoses: result.diagnoses, analysisContext: { facts: result.facts, inferences: result.inferences, unknowns: result.unknowns, evidenceStatus: 'evidenceStatus' in result ? result.evidenceStatus : null } });
         } catch (error) {
           if (!options.tolerateInvalid) throw error;
           console.warn('[workflow-repair] skipped incompatible analysis source', { workflowId, analysisId: row.analysis_id });

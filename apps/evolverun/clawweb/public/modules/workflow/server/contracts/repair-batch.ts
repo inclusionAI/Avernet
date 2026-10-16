@@ -38,6 +38,7 @@ export type RepairBatchInput = {
   schemaVersion: typeof REPAIR_BATCH_SCHEMA; taskId: string; revision: number; baseline: RepairBaseline;
   items: RepairItem[]; excludedSources: { count: number; digest: string }; instructions: string;
   automation?: AutomationOrigin;
+  integration?: { schemaVersion: 'workflow-proposal-plan/v1'; baselineSpecDigest: string; plans: Array<{ id: string; originalItemIds: string[]; goals: string[]; relation: string; causes?: import('./repair-proposal.js').ProposalCause[]; unknowns?: string[] }> };
   parentCandidateCommit: string | null; feedback: string; previousReportRef: string | null; taskBranch: string;
 };
 export type RepairRevisionPhase = 'drafting' | 'review' | 'blocked' | 'publishing' | 'published' | 'no_change' | 'failed' | 'cancelled';
@@ -124,6 +125,20 @@ export function validateRepairBatchInput(value: unknown): RepairBatchInput {
   valid(Array.isArray(value.items) && value.items.length > 0 && value.items.length <= MAX_ITEMS, 'items');
   value.items.forEach(validateRepairItem);
   if (value.automation !== undefined) validateAutomationOrigin(value.automation);
+  if (value.integration !== undefined) {
+    const integration = value.integration;
+    valid(object(integration) && integration.schemaVersion === 'workflow-proposal-plan/v1' && integration.baselineSpecDigest === (value.baseline as Record<string, unknown>)?.specDigest
+      && Array.isArray(integration.plans) && integration.plans.length > 0 && integration.plans.length <= MAX_ITEMS, 'proposal integration');
+    const ids: string[] = [];
+    for (const plan of integration.plans) {
+      valid(object(plan) && text(plan.id,64) && Array.isArray(plan.originalItemIds) && plan.originalItemIds.length > 0
+        && plan.originalItemIds.every((id:unknown) => text(id,64)) && Array.isArray(plan.goals) && plan.goals.every((goal:unknown)=>text(goal,400))
+        && ['exact','equivalent','complementary','uncertain'].includes(String(plan.relation)), 'integration plan');
+      ids.push(...plan.originalItemIds as string[]);
+    }
+    valid(new Set(ids).size === ids.length && canonicalRepairJson([...ids].sort()) === canonicalRepairJson(value.items.map((item:any)=>item.itemId).sort()), 'integration coverage');
+  }
+
   valid(new Set(value.items.map(item => item.itemId)).size === value.items.length, 'duplicate items');
   valid(object(value.excludedSources) && integer(value.excludedSources.count) && digest(value.excludedSources.digest), 'excludedSources');
   valid(text(value.instructions, MAX_INSTRUCTIONS_CHARS, true) && text(value.feedback, MAX_INSTRUCTIONS_CHARS, true), 'instructions/feedback');
@@ -145,7 +160,8 @@ export function validateRepairBatchInput(value: unknown): RepairBatchInput {
 export function repairEvidenceFlows(item: RepairItem): string[] {
   const diagnoses = Array.isArray(item.context?.diagnoses) ? item.context.diagnoses : [];
   return [...new Set([...item.sources.flatMap(source => source.kind === 'diagnosis_candidate' ? [source.flowId] : []),
-    ...diagnoses.flatMap((entry: any) => [entry?.flowId, ...(Array.isArray(entry?.flowIds) ? entry.flowIds : [])])]
+    ...diagnoses.flatMap((entry: any) => [entry?.flowId, ...(Array.isArray(entry?.flowIds) ? entry.flowIds : [])]),
+    ...(Array.isArray(item.context?.suggestions) ? item.context.suggestions : []).flatMap((entry:any)=>Array.isArray(entry?.runIds)?entry.runIds:Array.isArray(entry?.impactRunIds)?entry.impactRunIds:[])]
     .filter((id): id is string => typeof id === 'string' && !!id))].sort();
 }
 

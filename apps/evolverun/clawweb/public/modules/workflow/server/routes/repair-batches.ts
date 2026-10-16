@@ -79,6 +79,11 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
     const actor = await access(request, response, task.workflowId, mode);
     return actor ? { task, actor } : null;
   }
+  router.post('/proposal-integration/retry', handle(async (req, res) => {
+    const workflowId = text(req.body?.workflowId, 'workflowId');
+    if (!await access(req, res, workflowId, 'edit')) return;
+    await service.retryProposalIntegration?.(workflowId); res.json({ ok: true });
+  }));
   router.get('/:taskId/deployment/:deploymentId/verification', handle(async (req, res) => {
     const access = await taskAccess(req, res, 'view');
     if (!access) return;

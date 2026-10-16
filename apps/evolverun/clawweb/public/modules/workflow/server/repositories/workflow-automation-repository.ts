@@ -3,7 +3,7 @@ import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { digestRepairJson } from '../contracts/repair-batch.js';
 import { RepairBatchRepository } from './repair-batch-repository.js';
 import { RepairReleaseRepository } from './repair-release-repository.js';
-export type AutomationKind = 'auto_cycle' | 'auto_run' | 'auto_draft' | 'auto_notice';
+export type AutomationKind = 'auto_cycle' | 'auto_run' | 'auto_draft' | 'auto_notice' | 'proposal_scan' | 'proposal_group' | 'proposal_budget';
 export type AutomationJob = {
   id: string; workflowId: string; taskId: string; revision: number; stateVersion: number; createdAtMs: number;
   kind: AutomationKind; status: 'pending' | 'waiting' | 'dispatching' | 'retryable' | 'uncertain' | 'done' | 'blocked';
@@ -60,6 +60,12 @@ export class WorkflowAutomationRepository {
       WHERE task_id = ? AND record_kind = ? AND ${this.json('status')} NOT IN ('done', 'blocked')
       AND CAST(${this.json('nextAtMs')} AS SIGNED) <= ? ORDER BY updated_at_ms, record_id LIMIT ?`, [taskScope(workflowId), kind, now, limit]))
       .map(row => JSON.parse(row.body_json));
+  }
+  async readyAcross(kind: AutomationKind, now: number, limit: number, scopeKey: string): Promise<AutomationJob[]> {
+    return (await this.db.query<{ body_json: string }>(`SELECT body_json FROM workflow_repair_release_records
+      WHERE record_kind = ? AND ${this.json('data.scopeKey')} = ? AND ${this.json('status')} NOT IN ('done','blocked')
+      AND CAST(${this.json('nextAtMs')} AS SIGNED) <= ? AND CAST(${this.json('leaseUntilMs')} AS SIGNED) <= ?
+      ORDER BY updated_at_ms, record_id LIMIT ?`, [kind,scopeKey,now,now,limit])).map(row => JSON.parse(row.body_json));
   }
   async failedDrafts(workflowId: string): Promise<AutomationJob[]> {
     return (await this.db.query<{ body_json: string }>(`SELECT body_json FROM workflow_repair_release_records WHERE task_id = ? AND record_kind = 'auto_draft'

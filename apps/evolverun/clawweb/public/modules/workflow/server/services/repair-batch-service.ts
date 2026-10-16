@@ -1,3 +1,5 @@
+import { prepareProposalEvidence } from './repair-proposal-evidence.js';
+import type { ProposalCoordinator } from './repair-proposal-integration.js';
 import { automaticChain, isAutomaticBatch } from '../contracts/repair-automatic-chain.js';
 import { RepairAutomationDeniedError } from '../contracts/workflow-automation.js';
 import { repairEvidenceFacts, repairEvidenceFlows, validateAutomationOrigin } from '../contracts/repair-batch.js';
@@ -68,6 +70,7 @@ function itemFacets(item: RepairInboxItem) {
   return { node: typeof node === 'string' && node ? node : '未知节点', mode: typeof mode === 'string' ? mode : '' };
 }
 function matchesScope(item: RepairInboxItem, query: RepairCandidatesQuery): boolean {
+  if (item.aggregation) return item.aggregation.originals.some(original => matchesScope(original, query));
   if (query.signature && item.context?.signature !== query.signature) return false;
   const { node, mode } = itemFacets(item);
   return (!query.nodeId || node === query.nodeId)
@@ -89,7 +92,7 @@ export type TrustedRepairReport = {
 
 class WorkflowRepairWorkbench implements RepairWorkbenchService {
   private readonly readSnapshots = new Map<string, { version: string; at: number; value: Awaited<ReturnType<WorkflowRepairWorkbench['snapshot']>> }>();
-  constructor(private readonly db: IDatabase, private readonly sources: RepairSourcePort, private readonly execution?: RepairExecutionPort) {}
+  constructor(private readonly db: IDatabase, private readonly sources: RepairSourcePort, private readonly execution?: RepairExecutionPort, private readonly proposals?: ProposalCoordinator) {}
   private capabilities(): RepairCapabilities {
     return { generation: !!this.execution, diff: !!this.execution?.diff, publication: false,
       reason: this.execution ? null : 'Repair generation provider is unavailable' };
@@ -216,6 +219,12 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     if (!rows.length) return null;
     return new RepairBatchRepository(this.db).getRevision(workflowId, rows[0].task_id, Number(rows[0].revision));
   }
+  async proposalSnapshot(workflowId: string) {
+    if (!this.execution) fail('CAPABILITY_UNAVAILABLE', '基线读取不可用');
+    return serial(this.db, async () => ({ items: (await this.readSnapshot(workflowId, true)).items,
+      baseline: await this.execution!.resolveBaseline(workflowId) }));
+  }
+  async retryProposalIntegration(workflowId: string) { await this.proposals?.retry(workflowId); }
   async candidates(workflowId: string, query: RepairCandidatesQuery = {}): Promise<Omit<RepairCandidatesResponse, 'canEdit'>> {
     return serial(this.db, async () => {
       const state = query.state ?? 'all';
@@ -233,10 +242,15 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         fail('INVALID_INPUT', 'Invalid issue preview scope');
       }
       const snapshot = await this.readSnapshot(workflowId, includeHistorical);
-      const visibleItems = snapshot.items.filter(item => matchesScope(item, { signature: query.signature }) && (includeHistorical ||
+      let presentation = snapshot.items;
+      if (!query.rawItems && this.proposals && this.execution) {
+        try { presentation = await this.proposals.present(workflowId, snapshot.items, await this.execution.resolveBaseline(workflowId)); }
+        catch { /* A failed aggregation/read never removes original suggestions or breaks the issue list. */ }
+      }
+      const visibleItems = presentation.filter(item => matchesScope(item, { signature: query.signature }) && (includeHistorical ||
         item.sourceAvailable || item.state === 'processing' || item.state === 'awaiting_verification'));
-      const facets = { nodes: [...new Set(visibleItems.map(item => itemFacets(item).node))].sort(),
-        failureModes: [...new Set(visibleItems.map(item => itemFacets(item).mode).filter(Boolean))].sort() };
+      const facets = { nodes: [...new Set(visibleItems.flatMap(item => (item.aggregation?.originals ?? [item]).map(original => itemFacets(original).node)))].sort(),
+        failureModes: [...new Set(visibleItems.flatMap(item => (item.aggregation?.originals ?? [item]).map(original => itemFacets(original).mode)).filter(Boolean))].sort() };
       const scopedItems = visibleItems.filter(item => matchesScope(item, query));
       const revisions = await repairStage('revisions', () => new RepairBatchRepository(this.db).listRevisions(workflowId));
       const heads = new Map<string, RepairRevision>();
@@ -246,7 +260,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         .map(key => [key, scopedItems.filter(item => inboxMatch(item, key)).length])) as Record<RepairInboxFilter, number>;
       const filtered = scopedItems.filter(item => inboxMatch(item, state));
       const repairSignatureKeys = [...new Set(scopedItems.flatMap(item =>
-        typeof item.context?.signature === 'string' && item.context.signature.trim() ? [repairSignatureKey(item.context.signature)] : []))].sort();
+        (item.aggregation?.originals ?? [item]).flatMap(original => typeof original.context?.signature === 'string' && original.context.signature.trim() ? [repairSignatureKey(original.context.signature)] : [])))].sort();
       const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
       const selectedPage = Math.min(page, totalPages);
       const items = filtered.slice((selectedPage - 1) * pageSize, selectedPage * pageSize);
@@ -262,7 +276,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         capabilities: this.capabilities(), limits: { maxItems: MAX_ITEMS, maxRequestBytes: MAX_REQUEST_BYTES } };
       if (query.previewSignatures) {
         const groups = [...new Set(query.previewSignatures)].map(signature => ({ signature,
-          matches: filtered.filter(item => item.context?.signature === signature)
+          matches: filtered.filter(item => matchesScope(item, { signature }))
             .sort((a, b) => Number(b.state === 'pending' && b.sourceAvailable) - Number(a.state === 'pending' && a.sourceAvailable)
               || a.itemId.localeCompare(b.itemId)) }));
         response.issuePreviews = groups.map(({ signature, matches }) => ({ signature, total: matches.length, items: [] }));
@@ -296,6 +310,15 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         item = (await this.snapshot(this.db, workflowId, 'full', { itemIds: [itemId], includeHistorical: true })).items.find(candidate => candidate.itemId === itemId);
       }
       if (!item) fail('ITEM_NOT_FOUND', 'Repair item does not exist');
+      if (this.proposals && this.execution) {
+        const all = (await this.readSnapshot(workflowId, true)).items;
+        const cards = await this.proposals.present(workflowId, all, await this.execution.resolveBaseline(workflowId));
+        const card = cards.find(value => value.itemId === itemId);
+        if (card?.aggregation) {
+          const originals = this.sources.hydrate ? await this.sources.hydrate(this.db, workflowId, card.aggregation.originals) : card.aggregation.originals;
+          item = { ...item, aggregation: { ...card.aggregation, originals: originals.map(value => ({ ...card.aggregation!.originals.find(i => i.itemId === value.itemId)!, ...value })) } };
+        }
+      }
       boundedRepairJson(item, MAX_TASK_READ_BYTES);
       return item;
     });
@@ -360,6 +383,9 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       const baseline = taskId ? (await this.task(taskId)).latestAttempt.input.baseline : await this.execution.resolveBaseline(request.workflowId);
       if (taskId && request.automation?.roundId && canonicalRepairJson(await this.execution.resolveBaseline(request.workflowId)) !== canonicalRepairJson(baseline)) fail('STATE_CONFLICT', '自动优化的生效基线已变化，请重新评估', { reasonCode: 'BASELINE_STALE' });
       if (baseline.workflowId !== request.workflowId) fail('CONTENT_MISMATCH', 'Provider resolved a different workflow');
+      const integrated = this.proposals ? await this.proposals.prepare(request.workflowId, await this.items(request.workflowId, request.itemIds), baseline) : { instructions: '' };
+      const frozenInstructions = [request.instructions, integrated.instructions].filter(Boolean).join('\n\n');
+      if (frozenInstructions.length > MAX_INSTRUCTIONS_CHARS) fail('PAYLOAD_TOO_LARGE', '整合目标与说明过长，请缩小本次选择范围');
       revision = await this.tx(async tx => {
         const repo = new RepairBatchRepository(tx);
         await repo.lockWorkflow(tx, request.workflowId);
@@ -398,10 +424,11 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         const excludedSourceRefs = snapshot.items.filter(item => !request.itemIds.includes(item.itemId) && item.sourceAvailable)
           .flatMap(item => item.sources).sort((a, b) => canonicalRepairJson(a).localeCompare(canonicalRepairJson(b)));
         const input: RepairBatchInput = { schemaVersion: 'workflow-repair/v2', taskId: id,
-          revision: (previous?.latestAttempt.revision ?? 0) + 1, baseline, items: selected,
+          revision: (previous?.latestAttempt.revision ?? 0) + 1, baseline, items: this.proposals ? prepareProposalEvidence(selected, true) : selected,
           excludedSources: { count: excludedSourceRefs.length, digest: digestRepairJson(excludedSourceRefs) },
           ...(request.automation ? { automation: request.automation } : {}),
-          instructions: request.instructions, parentCandidateCommit, feedback,
+          ...('integration' in integrated && integrated.integration ? { integration: integrated.integration } : {}),
+          instructions: frozenInstructions, parentCandidateCommit, feedback,
           previousReportRef: previous?.latestSuccessful ? `${id}/revisions/${previous.latestSuccessful.revision}` : null,
           taskBranch: `repair/${request.workflowId}/${id}` };
         const created = await repo.createRevision(tx, { input, requestId: request.requestId, requestDigest: digest,
@@ -675,6 +702,6 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
   }
 }
 
-export function createRepairWorkbenchService(db: IDatabase, sourcePort: RepairSourcePort, executionPort?: RepairExecutionPort): RepairWorkbenchService & { report(input: TrustedRepairReport): Promise<RepairRevision> } {
-  return new WorkflowRepairWorkbench(db, sourcePort, executionPort);
+export function createRepairWorkbenchService(db: IDatabase, sourcePort: RepairSourcePort, executionPort?: RepairExecutionPort, proposals?: ProposalCoordinator): RepairWorkbenchService & { report(input: TrustedRepairReport): Promise<RepairRevision>; proposalSnapshot(workflowId: string): Promise<import('./repair-proposal-integration.js').ProposalSnapshot>; retryProposalIntegration(workflowId: string): Promise<void> } {
+  return new WorkflowRepairWorkbench(db, sourcePort, executionPort, proposals);
 }

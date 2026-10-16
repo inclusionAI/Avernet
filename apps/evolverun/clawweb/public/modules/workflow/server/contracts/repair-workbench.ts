@@ -5,7 +5,7 @@ import type { AutomationOrigin } from './workflow-automation.js';
 import type { RepairReleaseDetail } from './repair-release.js';
 
 export type RepairCapabilities = { generation: boolean; diff: boolean; publication: boolean; reason: string | null };
-export type RepairInboxItem = StoredRepairItem & { sourceAvailable: boolean };
+export type RepairInboxItem = StoredRepairItem & { sourceAvailable: boolean; aggregation?: import('./repair-proposal.js').ProposalAggregation };
 export function repairSignatureKey(signature: string): string {
   const bytes = new TextEncoder().encode(signature);
   const hash = (seed: bigint) => {
@@ -17,7 +17,7 @@ export function repairSignatureKey(signature: string): string {
 }
 export type RepairInboxFilter = 'pending' | 'processing' | 'awaiting_verification' | 'closed' | 'no_action' | 'all';
 export type RepairCandidatesQuery = { state?: RepairInboxFilter; page?: number; pageSize?: number; includeHistorical?: boolean;
-  nodeId?: string; failureMode?: string; signature?: string; previewSignatures?: string[] };
+  nodeId?: string; failureMode?: string; signature?: string; previewSignatures?: string[]; rawItems?: boolean };
 export type RepairTaskSummary = { taskId: string; revision: number; phase: RepairRevision['phase']; updatedAtMs: number; itemCount: number; title?: string };
 export type RepairCandidatesResponse = {
   schemaVersion: 'workflow-repair/v2'; workflowId: string; inputDigest: string;
@@ -95,6 +95,7 @@ export interface RepairWorkbenchService {
   retryResult(actorId: string, taskId: string, expectedRevision: number): Promise<void>;
   retryGeneration(actorId: string, taskId: string, request: { expectedRevision: number; requestId: string }): Promise<RepairRevision>;
   retryDispatch(actorId: string, taskId: string, expectedRevision: number): Promise<void>;
+  retryProposalIntegration?(workflowId: string): Promise<void>;
   reconcile(limit?: number): Promise<number>;
   diff(taskId: string, revision: number, base: 'baseline' | 'parent'): Promise<RepairDiff>;
 }

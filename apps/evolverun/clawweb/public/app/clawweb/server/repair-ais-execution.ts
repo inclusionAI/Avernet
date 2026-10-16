@@ -221,7 +221,7 @@ export function createRepairAisExecution(db: IDatabase, ais: AistudioService,
     async dispatch(request) {
       const envelope = { schemaVersion: 'clawevolve-task/v1', taskType: 'workflow_repair',
         taskId: request.input.taskId, stepId: request.identity.stepId, attempt: request.identity.attempt,
-        execution: { executor: 'ais', executionId: request.identity.executionId, action: 'generate_candidate' },
+        execution: { executor: 'ais', executionId: request.identity.executionId, action: request.input.integration ? 'integrate_candidate_v1' : 'generate_candidate' },
         input: request.input };
       const jobId = await ais.execute(request.actorId, { '${clawevolve_params}': JSON.stringify(envelope) }, snapshotId);
       return { jobId };

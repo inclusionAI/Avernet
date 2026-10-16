@@ -1,3 +1,4 @@
+import { expandProposalCards, proposalMembers, proposalChecked, proposalConflicts, proposalPending, proposalSelection } from '../../../server/contracts/repair-proposal'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -26,7 +27,6 @@ import RepairSelectionWorkspace from './repair-batch/RepairSelectionWorkspace'
 import RepairProposalChoices from './repair-batch/RepairProposalChoices'
 import { exclusion, itemTitle, phases, primary, RepairDialog } from './repair-batch/repair-view'
 import IssuePrioritySummary from './IssuePrioritySummary'
-import { selectionConflicts } from './repair-batch/repair-selection'
 import Pagination from '../Pagination'
 import ApplySuggestionModal from './ApplySuggestionModal'
 import RemediesPanel from './RemediesPanel'
@@ -194,7 +194,7 @@ function DiagnosisPanel({
     if (result && !repairQuery.error) {
       const firstLoad = !initializedDigest.current
       const changed = !firstLoad && initializedDigest.current !== result.inputDigest
-      const visibleItems = [...result.items, ...(result.issuePreviews ?? []).flatMap(preview => preview.items)]
+      const visibleItems = expandProposalCards([...result.items, ...(result.issuePreviews ?? []).flatMap(preview => preview.items)])
       const control = JSON.stringify([result.tasks, result.capabilities, result.canEdit])
       const states = visibleItems.map(item => [item.itemId,
         JSON.stringify([item.state, item.stateVersion, item.contentRevision, item.sourceAvailable])] as const)
@@ -274,8 +274,8 @@ function DiagnosisPanel({
   const activeRepairTask = [...(repairData?.tasks ?? [])].sort((a, b) => b.updatedAtMs - a.updatedAtMs).find(task => ['drafting', 'review', 'blocked', 'publishing', 'failed'].includes(task.phase))
   const selectedItems = selectedRepairIds.flatMap(id => selectionItems[id] ? [selectionItems[id]] : [])
   const selectedIssueCount = new Set(selectedItems.map(item => item.context?.signature ?? item.groupKey)).size
-  const conflicts = selectionConflicts(selectedItems)
-  const generationReason = conflicts.length ? '所选方案存在冲突，请在列表取消互斥方案后生成。' : draftNeedsCheck ? '提交结果尚未确认，请先核对任务状态。'
+  const conflicts = proposalConflicts(selectedItems)
+  const generationReason = proposalPending(selectedItems) ? '所选目标尚待整合，可保留单项或等待整理完成。' : conflicts.length ? '所选方案存在冲突，请在列表取消互斥方案后生成。' : draftNeedsCheck ? '提交结果尚未确认，请先核对任务状态。'
     : repairError ? '修复数据读取失败，请重试后再生成。'
     : repairLoading || !repairData ? '正在读取修复权限与任务状态…'
     : !canEdit || !repairData.canEdit ? '你只有查看权限，不能生成修复草稿。'
@@ -295,9 +295,13 @@ function DiagnosisPanel({
     setDrawerEntry('repairs')
   }
   const closeDetail = () => { setSelectedSignature(null); setSelectedRepairItemId(null) }
-  const toggleRepairItem = (id: string) => setSelectedRepairIds(current => current.includes(id)
-    ? current.filter(item => item !== id)
-    : current.length < Math.min(100, repairData?.limits.maxItems ?? 100) ? [...current, id] : current)
+  const toggleRepairItem = (id: string) => setSelectedRepairIds(current => {
+    const item = selectionItems[id]
+    const ids = item ? proposalMembers(item).map(member => member.itemId) : [id]
+    if (ids.every(value => current.includes(value))) return current.filter(value => !ids.includes(value))
+    const next = [...new Set([...current, ...ids])]
+    return next.length <= Math.min(100, repairData?.limits.maxItems ?? 100) ? next : current
+  })
   const resetRequestId = () => { requestId.current = ''; requestPayloadKey.current = '' }
   const openDraft = () => {
     if (generationReason) return
@@ -427,14 +431,14 @@ function DiagnosisPanel({
         }
         const unavailable = new Set(result.items.filter(item => exclusion(item)).map(item => item.itemId))
         setSelectedRepairIds(previous => previous.filter(id => !unavailable.has(id)))
-        setSelectionItems(previous => ({ ...previous, ...Object.fromEntries(result.items.map(item => [item.itemId, item])) }))
+        setSelectionItems(previous => ({ ...previous, ...Object.fromEntries(expandProposalCards(result.items).map(item => [item.itemId, item])) }))
       }
 
   const renderRepairItem = (item: RepairInboxItem, scopeCanEdit = true) => <RepairItemDetail key={`${item.itemId}:${initializedDigest.current}`} item={item}
       showSelection={!!selectedRepairItemId || !selectedSignature && !historyOpen}
       embedded={!selectedRepairItemId && (!!selectedSignature || historyOpen)}
       detail={repairDetails[item.itemId]} loading={repairDetailLoading[item.itemId]} error={repairDetailErrors[item.itemId]}
-      onLoad={itemId => void loadRepairDetail(itemId)} selected={selectedRepairIds.includes(item.itemId)} onToggle={toggleRepairItem}
+      onLoad={itemId => void loadRepairDetail(itemId)} selected={proposalChecked(item, selectedRepairIds)} onToggle={toggleRepairItem}
       canEdit={scopeCanEdit && canEdit && repairData?.canEdit === true && !repairLoading && !repairError && !repairBusy}
       limitReached={selectedRepairIds.length >= Math.min(100, repairData?.limits.maxItems ?? 100)}
       onDisposition={(item, action) => { resetRequestId(); setRepairActionError(''); setDisposition({ item, action }); setDispositionReason('') }} />
@@ -602,7 +606,7 @@ function DiagnosisPanel({
         <Pagination page={issuePage.page} pageSize={issuePage.pageSize} total={issuePage.total}
           onChange={(page, pageSize) => { setRepairPage(page); setRepairPageSize(pageSize) }} />
       </section>}
-      {!selectedSignature && !selectedRepairItemId && !historyOpen && !selectionOpen && !draftOpen && <RepairSelectionBar fixed count={selectedRepairIds.length} issueCount={selectedIssueCount} reason={generationReason}
+      {!selectedSignature && !selectedRepairItemId && !historyOpen && !selectionOpen && !draftOpen && <RepairSelectionBar fixed count={proposalSelection(selectedItems).length} issueCount={selectedIssueCount} reason={generationReason}
         onGenerate={openDraft} onView={() => setSelectionOpen(true)}
         onClear={repairBusy ? undefined : () => setSelectedRepairIds([])}
         onTask={activeRepairTask ? () => openTask(activeRepairTask.taskId) : undefined} />}
@@ -618,7 +622,7 @@ function DiagnosisPanel({
           limit={Math.min(100, repairData?.limits.maxItems ?? 100)}
           onResult={acceptRepairPage}
           renderItem={renderRepairItem} />
-        <RepairSelectionBar count={selectedRepairIds.length} issueCount={selectedIssueCount} reason={generationReason}
+        <RepairSelectionBar count={proposalSelection(selectedItems).length} issueCount={selectedIssueCount} reason={generationReason}
           onGenerate={() => { if (!generationReason) { setHistoryOpen(false); openDraft() } }} />
       </RepairDialog>}
 
@@ -654,7 +658,7 @@ function DiagnosisPanel({
         initialTab={drawerEntry}
         cluster={selectedIssue.cluster}
         repairContent={repairContent}
-        repairFooter={<RepairSelectionBar count={selectedRepairIds.length} issueCount={selectedIssueCount} reason={generationReason}
+        repairFooter={<RepairSelectionBar count={proposalSelection(selectedItems).length} issueCount={selectedIssueCount} reason={generationReason}
           onGenerate={openDraft} onTask={activeRepairTask ? () => { closeDetail(); openTask(activeRepairTask.taskId) } : undefined} />}
         suggestion={selectedIssue.suggestion}
         task={selectedIssue.suggestion ? applyTaskMap[selectedIssue.suggestion.id] : undefined}
@@ -677,7 +681,7 @@ function DiagnosisPanel({
       </DetailDrawer>}
       {!selectedSignature && selectedRepairItemId && selectedRepairItem && <DetailDrawer title="建议详情" onClose={closeDetail}
         header={<h3 className="text-base font-semibold text-slate-900">建议详情</h3>}
-        footer={<RepairSelectionBar count={selectedRepairIds.length} issueCount={selectedIssueCount} reason={generationReason} onGenerate={openDraft} />}>
+        footer={<RepairSelectionBar count={proposalSelection(selectedItems).length} issueCount={selectedIssueCount} reason={generationReason} onGenerate={openDraft} />}>
         {repairContent}</DetailDrawer>}
 
       {selectionOpen && <RepairDialog title="已选修复建议" onClose={() => setSelectionOpen(false)}>

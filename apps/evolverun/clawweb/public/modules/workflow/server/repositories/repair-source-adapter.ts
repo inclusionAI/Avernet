@@ -6,6 +6,7 @@ import type { RepairSourcePort } from '../contracts/repair-workbench.js';
 
 type RecordValue = Record<string, unknown>;
 type DiagnosisSource = {
+  analysisContext?: RecordValue;
   severity?: 'low' | 'medium' | 'high' | 'critical' | null;
   diagnosisId: string; flowId: string; analysisId: string; failureSignature: string;
   failureMode: string; nodeId: string | null; reasoning: string; evidenceEventIds: string[];
@@ -50,7 +51,7 @@ function proposal(value: unknown, workflowId: string): RecordValue | null {
 }
 export function structuredRepairProposalIdentity(value: Record<string, unknown> | null): unknown | null {
   if (value && Array.isArray(value.operations) && value.operations.length) return {
-    schemaVersion: value.schemaVersion ?? null, workflowId: value.workflowId ?? null, operations: value.operations,
+    schemaVersion: value.schemaVersion ?? null, workflowId: value.workflowId ?? null, baseSpecDigest: value.baseSpecDigest ?? null, operations: value.operations,
   };
   return null;
 }
@@ -125,6 +126,7 @@ export function createRepairSourcePort(readers: RepairSourceReaders): RepairSour
       severity: source.severity ?? null, analysisId: source.analysisId, diagnosisId: source.diagnosisId, flowId: source.flowId,
       nodeId: source.nodeId, failureMode: source.failureMode, reasoning: source.reasoning, completedAtMs: source.completedAtMs,
       evidenceEventIds: source.evidenceEventIds, evidenceCount: source.evidenceEventIds.length,
+      ...(source.analysisContext ? { analysisContext: source.analysisContext } : {}),
     });
     const items = new Map<string, SourceItem>();
     const groupMetadata = new Map(groups.map(group => [group.signature, group.sources[0]]));

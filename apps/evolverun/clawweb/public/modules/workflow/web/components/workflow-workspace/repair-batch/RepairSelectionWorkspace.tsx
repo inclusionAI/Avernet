@@ -5,7 +5,8 @@ import type { RepairCandidatesResponse, RepairInboxItem } from '../../../../serv
 import RepairWorkspace from './RepairWorkspace'
 import { changeSummary, sourceRunCount } from './RepairItemDetail'
 import { button, exclusion, itemTitle, itemHeading, primary, states } from './repair-view'
-import { selectionConflicts } from './repair-selection'
+import { proposalChecked, proposalConflicts, proposalPending, proposalMembers, proposalSelection } from '../../../../server/contracts/repair-proposal'
+import ProposalEvidence from './ProposalEvidence'
 import RepairProposalChoices from './RepairProposalChoices'
 
 export default function RepairSelectionWorkspace({ workflowId, includeHistorical, refreshToken, selected, selectedItems, instructions, busy, reason, error,
@@ -35,11 +36,11 @@ export default function RepairSelectionWorkspace({ workflowId, includeHistorical
   }, [workflowId, includeHistorical, refreshToken, page, node, failureMode, reload])
   const rows = (data?.items ?? []).filter(item => !query || `${itemTitle(item)} ${item.context?.nodeId ?? ''}`.toLowerCase().includes(query.toLowerCase()))
   const selectable = rows.filter(item => !exclusion(item))
-  const allSelected = selectable.length > 0 && selectable.every(item => selected.includes(item.itemId))
+  const allSelected = selectable.length > 0 && selectable.every(item => proposalChecked(item, selected))
   const nodes = data?.facets?.nodes ?? []
   const modes = data?.facets?.failureModes ?? []
-  const conflicts = selectionConflicts(selectedItems)
-  const blocker = conflicts.length ? '所选方案存在冲突，请保留其中一项后生成。' : reason || (readError ? '建议读取失败，请重试后生成。' : loading ? '正在核对建议来源…' : !data?.canEdit ? '当前只有查看权限。' : !selected.length ? '请至少选择一条建议；修复要求可以留空。' : '')
+  const conflicts = proposalConflicts(selectedItems)
+  const blocker = proposalPending(selectedItems) ? '所选目标尚待整合，请保留单项或等待整理。' : conflicts.length ? '所选方案存在冲突，请保留其中一项后生成。' : reason || (readError ? '建议读取失败，请重试后生成。' : loading ? '正在核对建议来源…' : !data?.canEdit ? '当前只有查看权限。' : !selected.length ? '请至少选择一条建议；修复要求可以留空。' : '')
   return <RepairWorkspace stage={1} title="把多条建议，变成一次修复" subtitle={`${workflowId} · 选择独立建议，生成完整 Pack 候选`} onBack={onBack} busy={busy}>
     <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]">
       <section className="overflow-hidden rounded-lg border border-input bg-card">
@@ -53,20 +54,20 @@ export default function RepairSelectionWorkspace({ workflowId, includeHistorical
         {loading && <p role="status" className="px-5 py-3 text-xs text-muted-foreground">读取建议…</p>}
         {readError && <p role="alert" className="px-5 py-3 text-xs text-destructive">{readError} <button onClick={() => setReload(v => v + 1)} className="underline">重试读取</button></p>}
         <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead className="bg-muted/50 text-muted-foreground"><tr><th className="px-4 py-3"><input type="checkbox" aria-label="全选本页可用建议" checked={allSelected} disabled={busy || loading || !data?.canEdit || !selectable.length}
-          onChange={() => { const targets = allSelected ? selectable : selectable.filter(item => !selected.includes(item.itemId)).slice(0, Math.max(0, 100 - selected.length)); targets.forEach(item => onToggle(item.itemId)) }} className="h-4 w-4 accent-primary" /></th><th>问题与修复建议</th><th className="px-4">来源</th><th className="px-4">处理提示</th></tr></thead>
-          <tbody>{rows.map(item => { const checked = selected.includes(item.itemId); const unavailable = exclusion(item); return <tr key={item.itemId} className={`border-t border-border/50 ${checked ? 'bg-primary/5' : ''}`}>
+          onChange={() => { const targets = allSelected ? selectable : selectable.filter(item => !proposalChecked(item, selected)).slice(0, Math.max(0, 100 - selected.length)); targets.forEach(item => onToggle(item.itemId)) }} className="h-4 w-4 accent-primary" /></th><th>问题与修复建议</th><th className="px-4">来源</th><th className="px-4">处理提示</th></tr></thead>
+          <tbody>{rows.map(item => { const checked = proposalChecked(item, selected); const unavailable = exclusion(item); return <tr key={item.itemId} className={`border-t border-border/50 ${checked ? 'bg-primary/5' : ''}`}>
             <td className="px-4 py-4 align-top"><input type="checkbox" aria-label={`选择 ${itemTitle(item)}`} checked={checked} disabled={busy || loading || !data?.canEdit || !!unavailable || !checked && selected.length >= 100} onChange={() => onToggle(item.itemId)} className="h-4 w-4 accent-primary" /></td>
-            <td className="min-w-64 py-4 pr-4"><p className="font-semibold leading-5 text-foreground">{itemHeading(item)}</p><p className="mt-1 font-mono text-[10px] text-muted-foreground">{String(item.context?.nodeId ?? '')}</p><p className="mt-1 leading-5 text-muted-foreground">{changeSummary(item)}</p><button onClick={() => onDetail(item)} className="mt-1 text-primary hover:underline">查看问题与证据 ↗</button></td>
+            <td className="min-w-64 py-4 pr-4"><p className="font-semibold leading-5 text-foreground">{itemHeading(item)}</p><ProposalEvidence item={item} canEdit={!busy && !!data?.canEdit} /><p className="mt-1 font-mono text-[10px] text-muted-foreground">{String(item.context?.nodeId ?? '')}</p><p className="mt-1 leading-5 text-muted-foreground">{changeSummary(item)}</p><button onClick={() => onDetail(item)} className="mt-1 text-primary hover:underline">查看问题与证据 ↗</button></td>
             <td className="px-4 py-4 align-top text-muted-foreground">{sourceRunCount(item) ?? '未知'} 个运行</td><td className="px-4 py-4 align-top text-muted-foreground">{unavailable || states[item.state]}</td>
           </tr> })}</tbody></table></div>
         {!loading && !readError && !rows.length && <p className="p-5 text-xs text-muted-foreground">当前范围没有匹配建议。</p>}
         {data && <div className="flex justify-between border-t border-input px-5 py-3 text-xs text-muted-foreground"><button disabled={loading || page <= 1} onClick={() => setPage(v => v - 1)}>上一页</button><span>建议第 {data.page.page}/{data.page.totalPages || 1} 页 · {data.page.total} 条</span><button disabled={loading || page >= data.page.totalPages} onClick={() => setPage(v => v + 1)}>下一页</button></div>}
       </section>
       <aside className="space-y-4 xl:sticky xl:top-4">
-        <section className="rounded-lg border border-input bg-card p-5"><p className="text-xs text-muted-foreground">本次修复范围</p><p className="mt-3 text-4xl font-semibold text-foreground">{selected.length}<span className="ml-2 text-xs font-normal text-muted-foreground">条独立建议</span></p>
+        <section className="rounded-lg border border-input bg-card p-5"><p className="text-xs text-muted-foreground">本次修复范围</p><p className="mt-3 text-4xl font-semibold text-foreground">{selected.length}<span className="ml-2 text-xs font-normal text-muted-foreground">条原始建议 · {proposalSelection(selectedItems).length} 个方案</span></p>
           <p className="mt-3 text-xs text-muted-foreground">涉及节点：{new Set(selectedItems.map(item => item.context?.nodeId ?? '未知节点')).size} 个</p>
           <p className="mt-4 border-t border-border/50 pt-3 text-xs text-muted-foreground">生成方式：AIS · 完整 Pack</p><p className="mt-2 text-xs text-muted-foreground">基线由服务端在首次生成时冻结。</p>
-          <details className="mt-4 text-xs"><summary className="cursor-pointer text-primary">查看全部已选（{selected.length}）</summary><ul className="mt-2 max-h-64 space-y-2 overflow-auto">{selectedItems.map(item => <li key={item.itemId} className="flex gap-2"><span className="flex-1 leading-5">{itemHeading(item)}</span><button disabled={busy} onClick={() => onToggle(item.itemId)} className="shrink-0 text-primary">移除</button></li>)}</ul></details>
+          <details className="mt-4 text-xs"><summary className="cursor-pointer text-primary">查看全部已选（{selected.length}）</summary><ul className="mt-2 max-h-64 space-y-2 overflow-auto">{proposalSelection(selectedItems).map(item => <li key={item.itemId} className="flex gap-2"><span className="flex-1 leading-5">{itemHeading(item)}</span><button disabled={busy} onClick={() => onToggle(item.itemId)} className="shrink-0 text-primary">移除</button></li>)}</ul></details>
         </section>
         <label className="block rounded-lg border border-input bg-card p-5 text-sm font-semibold text-foreground">本次修复要求（选填）<textarea aria-label="本次修复要求" rows={5} maxLength={20_000} value={instructions} disabled={busy} onChange={e => onInstructions(e.target.value)} placeholder="例如：保持原业务分支，不放宽高风险规则。" className="mt-3 w-full rounded border border-input bg-background text-foreground p-3 text-xs font-normal leading-5" /></label>
       </aside>

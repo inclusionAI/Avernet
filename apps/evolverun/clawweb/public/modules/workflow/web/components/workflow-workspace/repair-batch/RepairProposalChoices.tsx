@@ -1,5 +1,5 @@
 import type { RepairInboxItem } from '../../../../server/contracts/repair-workbench'
-import { selectionConflicts } from './repair-selection'
+import { proposalConflicts } from '../../../../server/contracts/repair-proposal'
 import { itemHeading } from './repair-view'
 
 const pathOf = (path: string) => path.startsWith('/') ? path : '/' + path.replaceAll('.', '/')
@@ -20,12 +20,12 @@ function modification(operation: Record<string, unknown>) {
 export default function RepairProposalChoices({ items, onRemove, disabled = false }: {
   items: RepairInboxItem[]; onRemove?: (id: string) => void; disabled?: boolean
 }) {
-  const conflicts = selectionConflicts(items)
+  const conflicts = proposalConflicts(items)
   if (!conflicts.length) return null
   return <section role="alert" aria-label="已选建议冲突" className="space-y-3 rounded-lg border border-destructive/30 p-3 text-xs text-destructive">
     <p className="font-semibold">所选方案有 {conflicts.length} 处冲突，请保留其中一项后生成。</p>
     {conflicts.map(conflict => <div key={conflict.itemIds.join(':')}>
-      <p className="font-medium break-all">{conflict.nodeId} · {conflict.path}</p>
+      <p className="font-medium break-all">{conflict.nodeId} · {conflict.path}</p><p>{conflict.reason}</p>
       {conflict.itemIds.map(id => {
         const item = items.find(item => item.itemId === id)!
         const operations = operationsAt(item, conflict.nodeId, conflict.path)
