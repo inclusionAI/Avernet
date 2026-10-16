@@ -1,0 +1,188 @@
+"""Closed-set StrEnums and value objects for the agentswarm domain (D18 vocabulary)."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import StrEnum
+
+
+class RunStatus(StrEnum):
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+    TIMED_OUT = "TIMED_OUT"
+    GUARD_KILLED = "GUARD_KILLED"
+    STUCK = "STUCK"
+
+
+class AgentStatus(StrEnum):
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    KILLED = "KILLED"
+
+
+class AgentKind(StrEnum):
+    LLM = "llm"
+    BOT = "bot"
+
+
+class BotState(StrEnum):
+    PROVISIONING = "PROVISIONING"
+    READY = "READY"
+    AUTHORIZATION_REJECTED = "AUTHORIZATION_REJECTED"
+    AUTHORIZATION_EXPIRED = "AUTHORIZATION_EXPIRED"
+    CREATE_FAILED = "CREATE_FAILED"
+    APPLY_FAILED = "APPLY_FAILED"
+
+
+class MessageRole(StrEnum):
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
+    TOOL = "tool"
+    DECISION = "decision"
+
+
+class GuardKind(StrEnum):
+    SERIAL_COLLAPSE = "serial_collapse"
+    SPURIOUS_PARALLELISM = "spurious_parallelism"
+    DEDUPE_REJECT = "dedupe_reject"
+    DEPTH_EXCEEDED = "depth_exceeded"
+    WIDTH_EXCEEDED = "width_exceeded"
+    TIMEOUT = "timeout"
+    KILL = "kill"
+    STUCK = "stuck"
+    PROMPT_INJECTION = "prompt_injection"
+
+
+class TerminationReason(StrEnum):
+    FINISH = "finish"
+    NO_DECISION = "no_decision"
+    NO_PROGRESS = "no_progress"
+    TURN_BUDGET = "turn_budget"
+    MAX_AGENTS = "max_agents"
+    WALL_CLOCK = "wall_clock"
+    CANCELLED = "cancelled"
+    STUCK = "stuck"
+    ERROR = "error"
+    GUARD = "guard"
+
+
+class DecisionKind(StrEnum):
+    SPAWN_AGENT = "spawn_agent"
+    WAIT = "wait"
+    HANDOFF = "handoff"
+    FINISH = "finish"
+
+
+class WaitMode(StrEnum):
+    ALL = "all"
+    ANY = "any"
+
+
+class LlmCallKind(StrEnum):
+    ORCHESTRATOR = "orchestrator"
+    SUBAGENT = "subagent"
+
+
+class WorkerOutcomeKind(StrEnum):
+    COMPLETE = "complete"
+    RESCHEDULE = "reschedule"
+    RETRY = "retry"
+    FAIL = "fail"
+
+
+class TaskQueueStatus(StrEnum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    TIMED_OUT = "TIMED_OUT"
+
+
+class FinishReason(StrEnum):
+    STOP = "stop"
+    LENGTH = "length"
+    CONTENT_FILTER = "content_filter"
+    ERROR = "error"
+
+
+class StreamEventKind(StrEnum):
+    AGENT_SPAWN = "agent_spawn"
+    AGENT_STATE = "agent_state"
+    ROUND = "round"
+    TERMINAL = "terminal"
+
+class ProviderKind(StrEnum):
+    """Which serving substrate backs the run (wire + ac_agent_swarm_run.provider)."""
+
+    DEFAULT = "default"
+    STUB = "stub"
+    AVENET = "avernet"
+
+    @classmethod
+    def coerce(cls, value: str | None) -> "ProviderKind":
+        """Boundary coercion for wire/row strings, failing safe to DEFAULT."""
+        try:
+            return cls(value or "")
+        except ValueError:
+            return cls.DEFAULT
+
+@dataclass(frozen=True)
+class RunOptions:
+    """Per-run operational parameters — the run's own execution contract.
+
+    Every field is a client-visible request parameter; None falls to
+    the deployment config. Lives here (domain models) so guards, handler,
+    orchestrator, and pool can import it without service-layer coupling."""
+
+    model_name: str | None = None
+    slice_max_seconds: float | None = None
+    per_subagent_timeout_seconds: float | None = None
+    max_turns: int | None = None
+    max_total_agents: int | None = None
+    max_width: int | None = None
+
+    @classmethod
+    def from_dto(cls, dto) -> "RunOptions":
+        if dto is None:
+            return cls()
+        return cls(
+            model_name=dto.model_name,
+            slice_max_seconds=dto.slice_max_seconds,
+            per_subagent_timeout_seconds=dto.per_subagent_timeout_seconds,
+            max_turns=dto.max_turns,
+            max_total_agents=dto.max_total_agents,
+            max_width=dto.max_width,
+        )
+
+    @classmethod
+    def from_metadata(cls, md) -> "RunOptions":
+        ext = (getattr(md, "extend", None) or {}) if md else {}
+        ext = ext if isinstance(ext, dict) else {}
+        prefix = "agentswarm.options"
+
+        def val(key, cast):
+            raw = ext.get(f"{prefix}.{key}")
+            return cast(raw) if raw is not None else None
+
+        return cls(
+            slice_max_seconds=val("slice_max_seconds", float),
+            per_subagent_timeout_seconds=val("per_subagent_timeout_seconds", float),
+            max_turns=val("max_turns", int),
+            max_total_agents=val("max_total_agents", int),
+            max_width=val("max_width", int),
+        )
+
+    def to_metadata(self, md) -> None:
+        for key, v in {
+            "slice_max_seconds": self.slice_max_seconds,
+            "per_subagent_timeout_seconds": self.per_subagent_timeout_seconds,
+            "max_turns": self.max_turns,
+            "max_total_agents": self.max_total_agents,
+            "max_width": self.max_width,
+        }.items():
+            if v is not None:
+                md.extend[f"agentswarm.options.{key}"] = str(v)

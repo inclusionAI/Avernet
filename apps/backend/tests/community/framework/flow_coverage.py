@@ -261,6 +261,14 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "with one). Drain this when singlebox can provision a container."
     ),
     "channel": _EXEMPT_REASON,
+    "agentswarm": (
+        "Emergent agent-swarm module. A real singlebox flow needs a working LLM "
+        "provider and the swarm worker running end to end; reachable routes are "
+        "covered meanwhile by tests/community/core/agentswarm/service/test_service.py "
+        "and tests/community/adapters/http/agentswarm/test_http_adapter.py (submit/list/cancel plus the router DTO and "
+        "error mapping through the assembled FastAPI app). Drain this when "
+        "singlebox binds an LLM config and drives a full run through the router."
+    ),
     "caller_identity": (
         "Agent Principal and BaaS outbound-rule calls require remote credentials; "
         "covered by local API/core tests until a singlebox-compatible external seam exists."
