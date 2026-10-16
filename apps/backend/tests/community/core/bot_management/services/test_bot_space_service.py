@@ -24,6 +24,7 @@ from agentclaw.community.core.spaces.errors import (
     SpaceNotFoundError,
 )
 from agentclaw.community.core.spaces.models import SpaceRecord, SpaceType
+from agentclaw.community.utils.env_utils import get_current_env
 
 pytestmark = pytest.mark.unit
 
@@ -73,7 +74,9 @@ def test_teclaw_transfer_skips_quota_not_membership(space_type):
     quota.guard_add.side_effect = AssertionError("must not check quota")
     assert service.change_space(bot_id="b1", owner_id="u1", space_id=42).changed
     quota.guard_add.assert_not_called()
-    access.require_space_member.assert_called_once_with(space_id=42, user_id="u1")
+    access.require_space_member.assert_called_once_with(
+        space_id=42, user_id="u1", env=get_current_env()
+    )
     repository.update_space_by_owner.reset_mock()
     access.require_space_member.side_effect = SpaceAccessDeniedError("not a member")
     with pytest.raises(SpaceAccessDeniedError):
@@ -91,9 +94,11 @@ def test_moves_owned_cloud_bot_to_joined_team_space():
     assert result.changed is True
     assert result.space == target
     assert result.bot["space_id"] == 42
-    access.require_space_member.assert_called_once_with(space_id=42, user_id="u1")
+    access.require_space_member.assert_called_once_with(
+        space_id=42, user_id="u1", env=get_current_env()
+    )
     repository.update_space_by_owner.assert_called_once_with(
-        bot_id="b1", owner_id="u1", space_id=42
+        bot_id="b1", owner_id="u1", space_id=42, env=get_current_env()
     )
     quota.guard_add.assert_called_once()
 
@@ -111,7 +116,7 @@ def test_moves_bot_back_to_owners_numeric_personal_space():
 
     assert result.changed is True
     repository.update_space_by_owner.assert_called_once_with(
-        bot_id="b1", owner_id="u1", space_id=8
+        bot_id="b1", owner_id="u1", space_id=8, env=get_current_env()
     )
     quota.guard_add.assert_called_once()
 
@@ -130,7 +135,7 @@ def test_normalizing_legacy_personal_space_does_not_consume_new_capacity():
 
     assert result.changed is True
     repository.update_space_by_owner.assert_called_once_with(
-        bot_id="b1", owner_id="u1", space_id=8
+        bot_id="b1", owner_id="u1", space_id=8, env=get_current_env()
     )
     quota.guard_add.assert_not_called()
 
@@ -237,4 +242,40 @@ def test_full_target_space_blocks_the_move_before_the_write():
         service.change_space(bot_id="b1", owner_id="u1", space_id=42)
 
     repository.update_space_by_owner.assert_not_called()
-    quota.guard_add.assert_called_once_with(owner_id="u1", space_id=42)
+    quota.guard_add.assert_called_once_with(
+        owner_id="u1", space_id=42, env=get_current_env()
+    )
+
+
+def test_explicit_env_threaded_to_every_collaborator():
+    bot = {"bot_id": "b1", "bot_type": "personal", "space_id": 7}
+    target = _space(space_id=42)
+    service, repository, access, quota = _service(bot=bot, space=target)
+
+    service.change_space(bot_id="b1", owner_id="u1", space_id=42, env="prod")
+
+    repository.get_by_id_and_owner.assert_called_once_with("b1", "u1", env="prod")
+    access.require_space_member.assert_called_once_with(
+        space_id=42, user_id="u1", env="prod"
+    )
+    quota.guard_add.assert_called_once_with(owner_id="u1", space_id=42, env="prod")
+    repository.update_space_by_owner.assert_called_once_with(
+        bot_id="b1", owner_id="u1", space_id=42, env="prod"
+    )
+
+
+def test_default_env_falls_back_to_runtime_everywhere():
+    from agentclaw.community.utils.env_utils import get_current_env
+
+    bot = {"bot_id": "b1", "bot_type": "personal", "space_id": 7}
+    target = _space(space_id=42)
+    service, repository, access, quota = _service(bot=bot, space=target)
+
+    service.change_space(bot_id="b1", owner_id="u1", space_id=42)
+
+    access.require_space_member.assert_called_once_with(
+        space_id=42, user_id="u1", env=get_current_env()
+    )
+    repository.update_space_by_owner.assert_called_once_with(
+        bot_id="b1", owner_id="u1", space_id=42, env=get_current_env()
+    )
