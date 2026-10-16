@@ -18,7 +18,7 @@ import { RecoverySessionReader } from "./session-reader.js";
 import { savedRecoveryHandbook } from "./handbook.js";
 import { recoveryResult } from "./result.js";
 import type { RecoveryAgentExecutor } from "./task-service.js";
-import type { SessionRecoveryTaskApi, SessionRecoveryAgentApi } from "./contracts.js";
+import type { RecoveryExecutionView, SessionRecoveryTaskApi, SessionRecoveryAgentApi } from "./contracts.js";
 import type { RecoveryStoredTask, RecoveryTaskStore, RecoveryJudgment, RecoveryPlan } from "./task-contracts.js";
 
 function fail(status: number, message: string): never { throw new SessionRecoveryError(status, "recovery_execution_conflict", message); }
@@ -110,6 +110,15 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     }, task.execution.executionId);
     // The wrapper sees ended on its next control poll and exits for Base to archive.
     // Forced cancellation is reserved for expired leases / the outer hard timeout.
+  }
+  async listExecutions(taskId: string): Promise<RecoveryExecutionView[]> {
+    const steps = await this.deps.repo.listSteps(taskId);
+    return steps.filter(step => step.step_type === "agent_execution").flatMap(step => {
+      const executionId = JSON.parse(step.ext_json ?? "{}").executionId;
+      if (typeof executionId !== "string") return [];
+      return [{ executionId, attempt: -step.step_no, status: step.status, jobId: step.bot_run_id,
+        jobUrl: step.bot_run_id ? this.deps.ais.jobUrl?.(step.bot_run_id) ?? null : null }];
+    }).sort((left, right) => left.attempt - right.attempt);
   }
   private async settleInterruptedTools(task: RecoveryStoredTask): Promise<boolean> {
     // An interrupted HTTP request may still finish. Wait for its existing lease before

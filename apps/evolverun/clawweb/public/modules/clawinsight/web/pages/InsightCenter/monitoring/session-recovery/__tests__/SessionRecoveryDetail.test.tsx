@@ -114,6 +114,37 @@ it('renders an explicit error without silently presenting an empty timeline', as
   expect(await screen.findByRole('alert')).toBeVisible(); expect(screen.getByRole('button', { name: '重新加载' })).toBeVisible();
 });
 
+it('shows each retry reason beside the AIS link for that exact execution', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'running', phase: 'assess', plan: null, evidence: [], executions: [
+    { executionId: 'exec-1', attempt: 1, status: 'failed', jobId: '101', jobUrl: 'https://ais.example.test/jobs/101' },
+    { executionId: 'exec-2', attempt: 2, status: 'failed', jobId: '202', jobUrl: 'https://ais.example.test/jobs/202' },
+    { executionId: 'exec-3', attempt: 3, status: 'dispatched', jobId: '303', jobUrl: 'https://ais.example.test/jobs/303' },
+  ], timeline: [
+    { event_id: 'retry-1', at_ms: 1, kind: 'execution', actor: 'service', summary: '容器创建失败，20 秒后重试', payload: { execution_id: 'exec-1' } },
+    { event_id: 'retry-2', at_ms: 2, kind: 'execution', actor: 'service', summary: '启动超时，60 秒后重试', payload: { execution_id: 'exec-2' } },
+    { event_id: 'start-3', at_ms: 3, kind: 'execution', actor: 'service', summary: '启动自愈 Agent', payload: { execution_id: 'exec-3' } },
+  ] } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  const first = (await screen.findByRole('heading', { name: '容器创建失败，20 秒后重试' })).closest('article')!;
+  const second = screen.getByRole('heading', { name: '启动超时，60 秒后重试' }).closest('article')!;
+  expect(within(first).getByRole('link', { name: '查看 AIS 作业 101' })).toHaveAttribute('href', 'https://ais.example.test/jobs/101');
+  expect(within(second).getByRole('link', { name: '查看 AIS 作业 202' })).toHaveAttribute('href', 'https://ais.example.test/jobs/202');
+  expect(screen.getByRole('link', { name: '查看 AIS 作业 303' })).toHaveAttribute('target', '_blank');
+  expect(within(first).queryByRole('link', { name: /202|303/ })).toBeNull();
+});
+
+it('distinguishes a failed dispatch from a pending allocation and never renders an unsafe job URL', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'running', phase: 'assess', plan: null, evidence: [], executions: [
+    { executionId: 'failed', attempt: 1, status: 'failed', jobId: null, jobUrl: null },
+    { executionId: 'pending', attempt: 2, status: 'created', jobId: null, jobUrl: null },
+    { executionId: 'unsafe', attempt: 3, status: 'dispatched', jobId: '303', jobUrl: 'javascript:alert(1)' },
+  ], timeline: ['failed', 'pending', 'unsafe'].map((executionId, index) => ({ event_id: executionId, at_ms: index, kind: 'execution', actor: 'service', summary: `执行 ${index + 1}`, payload: { execution_id: executionId } })) } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  expect(await screen.findByText('未取得 AIS 作业编号')).toBeVisible();
+  expect(screen.getByText('AIS 作业分配中')).toBeVisible();
+  expect(screen.queryByRole('link', { name: /查看 AIS 作业/ })).toBeNull();
+});
+
 it('shows the business adjustment and defaults all technical execution detail to collapsed', async () => {
   const user = userEvent.setup();
   const value = { ...task, plan: { ...task.plan, actions: [task.plan.actions[0], { actionId: 'api', summary: '调整定时任务配置', risk: '保留正常任务', verification: '核对任务列表', rollback: '恢复原配置', engineOperation: { method: 'PUT', path: '/api/cron/daily', body: { enabled: false } } }] } };

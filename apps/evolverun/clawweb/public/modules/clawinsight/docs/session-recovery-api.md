@@ -155,6 +155,8 @@ CW 控制面负责 AIS 派发、启动与执行中断后的有限恢复。同一
 
 分享开关沿用自进化的 `ce_tasks.config_json.shared`，未设置视为关闭，不新增表或迁移。详情响应的 `shared / canOperate / canManageShare` 表达当前分享状态及当前用户的操作权限。关闭分享后，共享访客的详情和证据读取立即返回 `403`。分享设置不推进任务阶段、不重新执行 Agent、不触发上游结果回传。
 
+详情的 `executions` 从现有 `agent_execution` Step 只读生成，按执行次数升序返回 `executionId / attempt / status / jobId / jobUrl`，不包含执行票据或归档上传地址。`jobUrl` 由 Host 的现有 AIS 服务生成；未取得作业编号或 Host 未提供链接时相应字段为 `null`。页面以时间线事件的 `payload.execution_id` 关联具体执行，在该条记录旁展示对应 AIS 作业链接；派发失败未取得编号时明确展示，不指向其他轮次的作业。读取不补写历史事件，也不改变任务状态或回传结果。
+
 监控页面展开诊断记录后，在记录顶部展示对应自愈任务的当前状态和一个查看入口。通过诊断的 `diagnosisId`（即 `event_id`）关联，任务编号悬停可见；没有可查看任务时不显示入口。
 
 ```text

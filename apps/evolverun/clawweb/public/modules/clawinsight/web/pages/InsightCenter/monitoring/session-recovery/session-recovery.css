@@ -624,6 +624,8 @@
   color:#8a95a5;
   font-family:"SFMono-Regular",Consolas,monospace;
 }
+.sr-timeline-meta a { color:var(--blue); text-decoration:none }
+.sr-timeline-meta a:hover { text-decoration:underline }
 
 .sr-evidence-card { padding:10px 0 }
 .sr-evidence-card+.sr-evidence-card { border-top:1px solid var(--line) }

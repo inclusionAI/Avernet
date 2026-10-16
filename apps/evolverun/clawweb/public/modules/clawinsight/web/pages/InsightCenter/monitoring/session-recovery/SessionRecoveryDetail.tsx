@@ -274,6 +274,8 @@ function eventEvidenceIds(event: RecoveryEvent): unknown[] {
 
 function ProcessAction({ task, event, index, rawEvidence, loadEvidence, onViewAction }: { task: SessionRecoveryTask; event: RecoveryEvent; index: number; rawEvidence: Record<string, unknown>; loadEvidence: (id: string) => void; onViewAction: (id: string) => void }) {
   if (['plan', 'notification', 'owner_decision', 'created', 'execution', 'waiting', 'resumed', 'result', 'annotation'].includes(event.kind)) {
+    const execution = event.kind === 'execution' ? task.executions?.find(item => item.executionId === event.payload.execution_id) : undefined;
+    const jobUrl = execution?.jobUrl && /^https?:\/\//i.test(execution.jobUrl) ? execution.jobUrl : null;
     const submitted = record(event.payload.plan);
     const counts = [Array.isArray(submitted.actions) ? `Agent 操作 ${submitted.actions.length} 项` : '', Array.isArray(submitted.owner_cooperation) ? `Owner 事项 ${submitted.owner_cooperation.length} 项` : ''].filter(Boolean).join(' · ');
     const outcome = event.kind === 'plan' ? `方案已提交${counts ? ` · ${counts}` : ''}`
@@ -288,6 +290,12 @@ function ProcessAction({ task, event, index, rawEvidence, loadEvidence, onViewAc
       <div className="sr-process-index">{index + 1}</div>
       <article>
       <div className="sr-process-header"><h3>{eventTitles[event.kind] || outcome}</h3>{status && <StatusPill status={status}>{actionStatusLabels[status] || status}</StatusPill>}</div>
+      {execution && <div className="sr-timeline-meta"><span>第 {execution.attempt} 次执行</span>
+        {execution.jobId ? jobUrl
+          ? <a href={jobUrl} target="_blank" rel="noreferrer" aria-label={`查看 AIS 作业 ${execution.jobId}`}>查看 AIS 作业 {execution.jobId} ↗</a>
+          : <span>AIS 作业：{execution.jobId}（链接暂不可用）</span>
+          : <span>{['failed', 'succeeded', 'canceled'].includes(execution.status) ? '未取得 AIS 作业编号' : 'AIS 作业分配中'}</span>}
+      </div>}
       {(eventTitles[event.kind] && outcome !== eventTitles[event.kind]) && <div className="sr-process-result"><span>结果：</span><PlanMarkdown text={outcome} /></div>}
       {typeof event.payload.feedback === 'string' && event.payload.feedback.trim() && <PlanMarkdown text={event.payload.feedback} />}
       {event.kind === 'annotation' && typeof event.payload.reason === 'string' && <PlanMarkdown text={event.payload.reason} />}

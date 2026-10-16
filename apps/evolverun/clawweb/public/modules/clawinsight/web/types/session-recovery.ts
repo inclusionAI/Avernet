@@ -16,5 +16,6 @@ export type SessionRecoveryTask = {
   judgment: null | { delivery?: 'confirmed' | 'unconfirmed'; response?: 'acted' | 'replied' | 'none' | 'unknown'; effect: 'recovered' | 'not_recovered' | 'unknown' | 'not_intervened'; summary: string; evidence_ids: string[] };
   evidence: Array<{ evidence_id: string; tool_call_id: string; source: string; location: string; excerpt: string }>;
   timeline: Array<{ event_id: string; at_ms: number; kind: string; actor: 'service' | 'agent' | 'owner'; summary: string; payload: Record<string, unknown> }>;
+  executions?: Array<{ executionId: string; attempt: number; status: string; jobId: string | null; jobUrl: string | null }>;
 };
 export type SessionRecoverySummary = { task_id: string; status: SessionRecoveryTask['status']; phase: SessionRecoveryTask['phase']; effect: string };

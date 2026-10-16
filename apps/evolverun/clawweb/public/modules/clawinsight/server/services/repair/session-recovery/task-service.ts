@@ -5,7 +5,7 @@ import { SessionRecoveryError } from "./errors.js";
 import { parseRequest } from "./validation.js";
 import { recoveryHandbook } from "./handbook.js";
 import { decideRecoveryPlan, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan } from "./task-state.js";
-import type { RecoveryActor, RecoveryAcknowledgment, RecoveryRequest, RecoveryResult, RecoveryTaskView, SessionRecoveryTaskApi } from "./contracts.js";
+import type { RecoveryActor, RecoveryAcknowledgment, RecoveryExecutionView, RecoveryRequest, RecoveryResult, RecoveryTaskView, SessionRecoveryTaskApi } from "./contracts.js";
 import type { RecoveryEvidence, RecoveryJudgment, RecoveryLevel, RecoveryPlan, RecoveryTaskResult, RecoveryTimelineEvent, RecoveryStoredTask, RecoveryTaskStore } from "./task-contracts.js";
 
 const EXECUTION_RETRY_DELAYS_MS = [20000, 60000] as const;
@@ -13,6 +13,7 @@ const EXECUTION_RETRY_DELAYS_MS = [20000, 60000] as const;
 export interface RecoveryAgentExecutor {
   start(task: RecoveryStoredTask): Promise<void>;
   release(task: RecoveryStoredTask): Promise<void>;
+  listExecutions(taskId: string): Promise<RecoveryExecutionView[]>;
 }
 export interface RecoveryTaskNotifier {
   notify(input: { ownerId: string; taskId: string; kind: "plan" | "result"; summary: string }): Promise<void>;
@@ -156,7 +157,8 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     const canOperate = this.canOperate(task, actor);
     if (!canOperate && task.shared !== true) this.fail(403, "权限不足，请联系任务 Owner 开启分享");
     const { pending_results: _pending, execution: _execution, authorizationScopeDigest: _scope, aisExecution: _ais, ...view } = task;
-    return { ...view, pending_results: [], shared: task.shared === true, canOperate, canManageShare: canOperate };
+    return { ...view, pending_results: [], shared: task.shared === true, canOperate, canManageShare: canOperate,
+      executions: await this.deps.agent.listExecutions(taskId) };
   }
   async setTaskShared(taskId: string, shared: boolean, actor: RecoveryActor): Promise<RecoveryTaskView> {
     if (typeof shared !== "boolean") this.fail(422, "shared 必须为布尔值");

@@ -375,6 +375,29 @@ it("a successful AIS retry continues the original workflow and sends only its fi
   expect(submissions).toHaveLength(2); expect(runtime.sendMessage).toHaveBeenCalledTimes(1);
   expect(callbacks).toHaveLength(1); expect(callbacks[0]).toMatchObject({ task_id: task.taskId, status: "completed", effect: "recovered" });
 });
+it("projects every AIS attempt and Host-provided job link without exposing execution credentials", async () => {
+  ais.jobUrl = vi.fn((id: string) => `https://ais.example.test/jobs/${id}`);
+  let task = await create(); const firstId = task.execution!.executionId;
+  ais.getJobStatusDetail.mockResolvedValue({ status: "failed", rawStatus: "failed", errorMessage: "container startup canceled" });
+  await reconcileAgentExecutions({ db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
+  now += 20000; await service.maintenance(); task = await current(task.taskId);
+  const view = await service.detail(task.taskId, actor);
+  expect(view.executions).toEqual([
+    { executionId: firstId, attempt: 1, status: "failed", jobId: "job-1", jobUrl: "https://ais.example.test/jobs/job-1" },
+    { executionId: task.execution!.executionId, attempt: 2, status: "dispatched", jobId: "job-2", jobUrl: "https://ais.example.test/jobs/job-2" },
+  ]);
+  expect(view.timeline.find(event => event.summary.includes("container startup canceled"))!.payload.execution_id).toBe(firstId);
+  expect(JSON.stringify(view.executions)).not.toMatch(/ticket|credentials|toolsBaseUrl/);
+  delete ais.jobUrl;
+  expect((await service.detail(task.taskId, actor)).executions.map(item => item.jobUrl)).toEqual([null, null]);
+});
+it("shows a failed dispatch without inventing an AIS job number or URL", async () => {
+  ais.execute.mockRejectedValueOnce(new Error("dispatch unavailable"));
+  const ack = await service.create(request, actor); await flush();
+  expect((await service.detail(ack.task_id, actor)).executions).toEqual([
+    { executionId: expect.any(String), attempt: 1, status: "failed", jobId: null, jobUrl: null },
+  ]);
+});
 it("waits for an in-flight write lease and retains an abandoned write as unknown before retrying AIS", async () => {
   let task = await toPlan(await create("automatic"));
   await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId);

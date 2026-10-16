@@ -15,7 +15,9 @@ export type RecoveryAcknowledgment = { event_id: string; delivery_key: string; s
 export type { MessageReceipt as DeliveryReceipt } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import type { MessageReceipt as DeliveryReceipt } from "@avernet/clawweb-shared/server/services/bot-runtime";
 export type RecoveryActor = { userId: string; isAdmin: boolean };
-export type RecoveryTaskView = RecoveryStoredTask & { shared: boolean; canOperate: boolean; canManageShare: boolean };
+/** Read-only projection of existing auxiliary Steps; never contains workload credentials. */
+export type RecoveryExecutionView = { executionId: string; attempt: number; status: string; jobId: string | null; jobUrl: string | null };
+export type RecoveryTaskView = RecoveryStoredTask & { shared: boolean; canOperate: boolean; canManageShare: boolean; executions: RecoveryExecutionView[] };
 export interface SessionRecoveryApi { create(body: unknown, actor: RecoveryActor): Promise<RecoveryAcknowledgment> }
 /** Task Service API, independent of the HTTP delivery adapter and implementation. */
 export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
