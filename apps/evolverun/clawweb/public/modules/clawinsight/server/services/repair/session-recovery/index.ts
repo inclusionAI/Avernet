@@ -40,7 +40,7 @@ export function createSessionRecoveryRuntime(options: {
     audit: new AgentToolCallRepository(options.db, "session_recovery"), ais: options.ais, runtime: options.runtime,
     targets: options.targets, trajectory: options.trajectory, logs: options.logs, runtimeTool: options.runtimeTool, business: () => tasks, publicBaseUrl: options.publicBaseUrl,
     snapshotId: options.snapshotId, nasRoots: options.nasRoots, leaseSeconds: options.leaseSeconds ?? 120,
-    launchGraceSeconds: options.launchGraceSeconds ?? 1800, observationMs });
+    launchGraceSeconds: options.launchGraceSeconds ?? 600, observationMs });
   tasks = new SessionRecoveryTaskService({ tasks: store, agent, notifier, reporter, observationMs,
     resolveTarget: async request => {
       const expected = { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[request.target.engine];
