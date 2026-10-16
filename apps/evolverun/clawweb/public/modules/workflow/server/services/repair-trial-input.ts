@@ -1,11 +1,22 @@
 import Ajv from 'ajv';
+import { containsSecret } from '@avernet/clawweb-shared/server/services/redaction';
 import { RepairBatchError, boundedRepairJson } from '../contracts/repair-batch.js';
 const sensitiveField = /password|passwd|secret|token|credential|authorization|cookie|api.?key|private.?key/i;
+function redactText(value: string): string {
+  return value.replace(/\b(Bearer\s+)\S+|\b(?:sk-|ghp_|github_pat_)[A-Za-z0-9_-]+/gi, '[REDACTED]')
+    .replace(/((?:password|secret|token|api[_-]?key|authorization|cookie)\s*[=:]\s*)[^\s,;]+/gi, '$1[REDACTED]');
+}
+/** Check the complete bounded input, independently of history preview limits. */
+export function hasSensitiveTrialInput(value: unknown): boolean {
+  if (containsSecret(value)) return true;
+  if (typeof value === 'string') return redactText(value) !== value;
+  if (Array.isArray(value)) return value.some(hasSensitiveTrialInput);
+  return !!value && typeof value === 'object' && Object.entries(value).some(([key, item]) => sensitiveField.test(key) || hasSensitiveTrialInput(item));
+}
 /** History is always text, capped, and strips sensitive keys plus exact input values from output. */
 export function redactTrial(value: unknown, sensitiveValues: string[] = []): unknown {
   if (typeof value === 'string') {
-    let text = value.replace(/\b(Bearer\s+)\S+|\b(?:sk-|ghp_|github_pat_)[A-Za-z0-9_-]+/gi, '[REDACTED]')
-      .replace(/((?:password|secret|token|api[_-]?key|authorization|cookie)\s*[=:]\s*)[^\s,;]+/gi, '$1[REDACTED]');
+    let text = redactText(value);
     for (const raw of sensitiveValues.sort((a, b) => b.length - a.length)) if (raw) text = text.split(raw).join('[REDACTED]');
     return text.slice(0, 8192);
   }

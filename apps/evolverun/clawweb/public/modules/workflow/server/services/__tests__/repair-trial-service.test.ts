@@ -5,6 +5,17 @@ import { repairFixture } from './repair-batch-fixtures.js';
 import { repairReleaseMigrations } from '@avernet/clawweb-shared/server/schema-repair-release';
 import { createRepairTrialService } from '../repair-trial-service.js';
 import { digestRepairJson } from '../../contracts/repair-batch.js';
+import { hasSensitiveTrialInput, redactTrial } from '../repair-trial-input.js';
+
+it('checks sensitive input beyond preview limits without treating bulk input as a secret', () => {
+  const safe = { query: 'ordinary text '.repeat(700), items: Array.from({ length: 101 }, (_, i) => i) };
+  expect(hasSensitiveTrialInput(safe)).toBe(false);
+  expect(redactTrial(safe)).not.toEqual(safe);
+  expect(hasSensitiveTrialInput({ items: [...safe.items, { credentials: { value: 'test-only' } }] })).toBe(true);
+  expect(hasSensitiveTrialInput({ query: safe.query + ' Bearer test-only-value' })).toBe(true);
+  expect(hasSensitiveTrialInput({ accessKey: 'test-only' })).toBe(true);
+  expect(hasSensitiveTrialInput({ executionTicket: 'test-only' })).toBe(true);
+});
 
 it('freezes the reviewed Pack, validates input, deduplicates dispatch and binds once through ordinary run registration; preserves review', async () => {
   const f = await repairFixture();
@@ -70,7 +81,10 @@ it('freezes the reviewed Pack, validates input, deduplicates dispatch and binds 
     await expect(registerRunRequest(f.db, { ...child, flow_id: 'late-child' }, insert)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
     await expect(service.start('actor', rev.taskId, { ...request, mode: 'saved', requestId: 'sensitive-legacy' })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
     await expect(service.start('actor', rev.taskId, { ...request, mode: 'saved', requestId: 'nested-sensitive-legacy', input: { query: 'ordinary', credentials: { value: 'test-only' } } })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
-    const legacy = await service.start('actor', rev.taskId, { ...request, mode: 'saved', requestId: 'legacy', input: { query: 'ordinary saved input' } });
+    for (const key of ['accessKey', 'executionTicket']) await expect(service.start('actor', rev.taskId, { ...request, mode: 'saved', requestId: `sensitive-${key}`, input: { query: 'ordinary', [key]: 'test-only' } })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    const bulkInput = { query: 'ordinary text '.repeat(700), items: Array.from({ length: 101 }, (_, i) => i), fields: Object.fromEntries(Array.from({ length: 101 }, (_, i) => [`field${i}`, i])) };
+    const legacy = await service.start('actor', rev.taskId, { ...request, mode: 'saved', requestId: 'legacy', input: bulkInput });
+    expect(legacy.inputDigest).toBe(digestRepairJson(bulkInput));
     expect(legacy.mode).toBe('saved'); expect(saves).toBe(1);
     await expect(service.resolveRunRequest(legacy.id, { botId: 'bot', ownerId: 'owner' })).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
     const ordinary = { flow_id: 'legacy-root', workflow_id: 'wf-1',

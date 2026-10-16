@@ -5,7 +5,7 @@ import type { RepairWorkbenchService } from '../contracts/repair-workbench.js';
 import type { RepairTrial, RepairTrialCandidate, RepairTrialOptions, RepairTrialPort, RepairTrialRequest } from '../contracts/repair-trial.js';
 import { RepairReleaseRepository } from '../repositories/repair-release-repository.js';
 import { RepairBatchRepository } from '../repositories/repair-batch-repository.js';
-import { redactTrial, trialSensitiveValues, validateTrialInput } from './repair-trial-input.js';
+import { hasSensitiveTrialInput, redactTrial, trialSensitiveValues, validateTrialInput } from './repair-trial-input.js';
 
 function conflict(message: string): never { throw new RepairBatchError('STATE_CONFLICT', message); }
 function candidate(workflowId: string, taskId: string, revision: RepairRevision): RepairTrialCandidate {
@@ -87,7 +87,7 @@ export function createRepairTrialService(input: { db: IDatabase; workbench: Repa
       if (request.mode === 'saved') {
         const reserved = new Set(['local', 'debug', 'remote', 'version', 'tag', 'file', 'chat-inject-level', 'chatInjectLevel']);
         if (Object.keys(request.input).some(key => !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(key) || reserved.has(key))) throw new RepairBatchError('INVALID_INPUT', '旧插件兼容模式的参数名不能是运行选项');
-        if (digestRepairJson(redactTrial(request.input)) !== digestRepairJson(request.input)) throw new RepairBatchError('INVALID_INPUT', '旧插件兼容不能通过命令传递敏感参数，请使用 Bot 已有凭据或升级插件');
+        if (hasSensitiveTrialInput(request.input)) throw new RepairBatchError('INVALID_INPUT', '旧插件兼容不能通过命令传递敏感参数，请使用 Bot 已有凭据或升级插件');
       }
       const target = (await port().targets(task.workflowId, actorId)).find(t => t.id === request.targetId && t.environment === 'prod');
       if (!target) conflict('请选择已授权且支持试跑的生产 Bot');
