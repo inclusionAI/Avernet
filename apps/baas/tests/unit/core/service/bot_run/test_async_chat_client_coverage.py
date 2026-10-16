@@ -2723,6 +2723,146 @@ class TestAttachFallbackRunOwnershipLifecycle:
         acc._client.chat_abort.assert_not_awaited()
         await acc.close()
 
+    # ─────────── R8：归属释放必须锚定真实终态，不枚举等待方退出方式 ───────────
+
+    @pytest.mark.asyncio
+    async def test_inject_final_does_not_release_background_ownership(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """R8-F1：后台附件 run 在途时，同 session 的注入 final（runId 带
+        inject- 前缀 / stopReason=inject）不是主 run 终态——不得释放归属，
+        否则主 run 的 abort 会被误路由 A2A 主连接。"""
+        acc = self._acc_with_owned_a2a_main()
+        await acc.send_message(
+            "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
+        )
+        fallback = acc._v3_fallback
+        chat_handler = fallback._event_handlers["chat"]
+
+        # 两种注入终态形态，主 run 都必须在途认账
+        chat_handler(
+            {
+                "sessionKey": "sk-att",
+                "state": "final",
+                "runId": "inject-sidecar",
+                "message": {"content": [{"type": "text", "text": "injected"}]},
+            }
+        )
+        chat_handler(
+            {
+                "sessionKey": "sk-att",
+                "state": "final",
+                "stopReason": "inject",
+                "message": {"content": [{"type": "text", "text": "injected"}]},
+            }
+        )
+
+        assert "sk-att" in acc._v3_routed_sessions, "注入 final 误释放主 run 归属"
+        assert acc.tracks_session("sk-att") is True, "归属查询因注入误翻"
+        await acc.chat_abort("sk-att")
+        assert fallback.chat_abort_calls == [("sk-att", {"run_id": None})], (
+            "主 run 的 abort 被注入误导到错误连接"
+        )
+        acc._client.chat_abort.assert_not_awaited()
+        await acc.close()
+
+    @pytest.mark.asyncio
+    async def test_waiter_cancellation_keeps_ownership(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """R8-F2a：取消本地等待协程（调用方 task.cancel() / 外层 wait_for
+        超时都是 CancelledError 进 finally）不会取消已发到引擎的 run
+        ——归属必须保留，abort 仍路由 v3。"""
+        acc = self._acc_with_owned_a2a_main()
+
+        task = asyncio.create_task(
+            acc.send_message(
+                "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=True
+            )
+        )
+        await self._wait_until(
+            lambda: acc._v3_fallback is not None
+            and bool(acc._v3_fallback.chat_send_calls)
+        )
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert "sk-att" in acc._v3_routed_sessions, "取消等待方误删在途 run 归属"
+        await acc.chat_abort("sk-att")
+        acc._client.chat_abort.assert_not_awaited()
+        await acc.close()
+
+    @pytest.mark.asyncio
+    async def test_stream_early_close_keeps_ownership(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """R8-F2b：流式消费方在终态 chunk 之前提前关闭（break/超时/异常）
+        ——引擎侧 run 仍在执行，finally 不得清归属。"""
+        acc = self._acc_with_owned_a2a_main()
+
+        chunks: list[StreamChunk] = []
+
+        async def consume():
+            agen = acc.send_message_stream(
+                "m",
+                session_key="sk-att",
+                attachments=[{"k": 1}],
+                timeout=5.0,
+            )
+            async for chunk in agen:
+                chunks.append(chunk)
+                break  # 终态前提前关闭
+            # 显式收口：否则 async-gen finalizer 延迟执行，finally 时序
+            # 不确定（假绿）——R8 的确定性形态必须当场触发 finally。
+            await agen.aclose()
+
+        t = asyncio.create_task(consume())
+        await self._wait_until(
+            lambda: acc._v3_fallback is not None
+            and bool(acc._v3_fallback.chat_send_calls)
+        )
+        acc._v3_fallback._event_handlers["chat"](
+            {
+                "sessionKey": "sk-att",
+                "state": "delta",
+                "deltaText": "部分响应",
+                "message": {"content": [{"type": "text", "text": "部分响应"}]},
+            }
+        )
+        await t
+        assert chunks, "未消费到任何 chunk 就提前结束（fixture 失效）"
+
+        assert "sk-att" in acc._v3_routed_sessions, "流式提前关闭误删在途 run 归属"
+        await acc.chat_abort("sk-att")
+        acc._client.chat_abort.assert_not_awaited()
+        await acc.close()
+
+    @pytest.mark.asyncio
+    async def test_terminal_before_send_returns_releases_ownership(
+        self, mock_bot_ws
+    ):
+        """R8-F3：终态帧在 chat_send() 等待方恢复前被 WS 接收循环分派
+        （state 仍在、终态走有 state 分支）——归属释放不得依赖"state
+        已被等待方 pop"的形态，否则此后再无终态可触发清理，标记永久残留
+        （连接无法排空、owner 悬挂）。"""
+        with patch(
+            "secbaas.community.core.service.bot_run._bot_websocket_client."
+            "BotWebSocketClient",
+            _TerminalOnSendV3,
+        ):
+            acc = self._acc_with_owned_a2a_main()
+            await acc.send_message(
+                "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
+            )
+
+        assert "sk-att" not in acc._v3_routed_sessions, (
+            "终态已到达但归属永久残留"
+        )
+        assert acc.tracks_session("sk-att") is False, "终态后归属查询仍认账"
+        assert acc.has_active_sessions is False, "终态后连接仍不可排空"
+        await acc.close()
+
 
 class _GatedV3Transport(_StubV3Transport):
     """慢建连替身：connect 闸在类级事件上——复现并发首发都看到
@@ -2739,6 +2879,23 @@ class _GatedV3Transport(_StubV3Transport):
         await self.release.wait()
         self.connected = True
         return {"ok": True, "payload": {"server": {}}}
+
+
+class _TerminalOnSendV3(_StubV3Transport):
+    """终态先于 ACK 替身：chat_send 在返回前就让 WS 接收循环把主 run
+    的 final 帧分派出去——复现"终态在 chat_send() 等待方恢复前到达"
+    的时序（R8-F3）。"""
+
+    async def chat_send(self, session_key, *args, **kwargs):
+        self._event_handlers["chat"](
+            {
+                "sessionKey": session_key,
+                "state": "final",
+                "message": {"content": [{"type": "text", "text": "all done"}]},
+            }
+        )
+        self.chat_send_calls.append((session_key, args, kwargs))
+        return {"ok": True}
 
 
 class TestV3FallbackConcurrentInit:

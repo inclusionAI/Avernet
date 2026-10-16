@@ -511,9 +511,13 @@ class AsyncChatClient:
                     state = SessionState(trace_context=trace_ctx)
                     self._sessions[session_key] = state
 
-            # R7-F2：归属标记是否随 run 存活（等待方收口后 run 仍在 v3
-            # fallback 连接上执行：ACK 返回 / 等待超时两种离开方式）
-            keep_routed_marker = False
+            # R7-F2/R8：归属释放不在等待侧做生命周期判定——唯一在此清理的情形是
+            # "run 从未开始"（chat_send 被引擎拒）。其余任何等待方离开方式
+            # （ACK 返回/超时/取消/流式提前关）run 都可能仍在 v3 连接上执行，
+            # 标记由终态处理（_release_v3_ownership_if_terminal）、断连、
+            # close 释放。R7 按"枚举退出方式保标记"的方案在 inject 帧/
+            # CancelledError/终态先于恢复到达三个缝上全部漏判，R8 收敛于此。
+            send_failed = False
             try:
                 # 3. 检查连接状态
                 if not self.is_connected:
@@ -533,32 +537,15 @@ class AsyncChatClient:
                     )
                 except ChatRequestError:
                     state.chat_complete.set()
+                    send_failed = True
                     raise
 
                 if not wait_result:
-                    # R7-F2：ACK 已返回≠run 结束——B3 附件 run 在 v3 专用
-                    # 连接上继续执行，归属标记随 run 存活（由后台终态帧/
-                    # 断连/close 释放），等待方的 finally 不得收口它。
-                    keep_routed_marker = (
-                        self._transport == "a2a"
-                        and session_key in self._v3_routed_sessions
-                    )
                     return state.content, state.agent_payloads
 
                 # 5. 等待主对话事件完成
                 if timeout:
-                    try:
-                        await asyncio.wait_for(
-                            state.chat_complete.wait(), timeout=timeout
-                        )
-                    except TimeoutError:
-                        # R7-F2：超时=等待方收口但 engine 侧 run 仍在执行
-                        # ——归属随 run 存活，同 wait_result=False 口径。
-                        keep_routed_marker = (
-                            self._transport == "a2a"
-                            and session_key in self._v3_routed_sessions
-                        )
-                        raise
+                    await asyncio.wait_for(state.chat_complete.wait(), timeout=timeout)
                 else:
                     # 无超时等待
                     await state.chat_complete.wait()
@@ -582,10 +569,8 @@ class AsyncChatClient:
                     self._active_sessions.discard(session_key)
                     self._sessions.pop(session_key, None)
                     self._condition.notify_all()
-                # B3（1c）/R7-F2：归属随 run 生命周期，不随等待方收口——
-                # keep_routed_marker 仅在 run 可能仍在 v3 连接上执行时为真
-                # （ACK 返回/等待超时），其余离开方式都意味着 run 已终结。
-                if not keep_routed_marker:
+                # B3（1c）/R7-F2/R8：只有 run 从未开始才在等待侧释放归属
+                if send_failed:
                     self._v3_routed_sessions.pop(session_key, None)
 
         finally:
@@ -699,6 +684,10 @@ class AsyncChatClient:
                 if not self.is_connected:
                     raise NotConnectedError("Connection lost before sending message.")
 
+                # R7-F2/R8：同 send_message 口径——等待侧只清理"run 从未
+                # 开始"；提前 break/超时/收口时 run 仍在引擎侧执行，归属由
+                # 终态处理/断连/close 释放。
+                stream_send_failed = False
                 try:
                     await self._send_chat_request(
                         session_key=session_key,
@@ -712,6 +701,7 @@ class AsyncChatClient:
                     )
                 except ChatRequestError as e:
                     state.chat_complete.set()
+                    stream_send_failed = True
                     yield StreamChunk(
                         type="error",
                         content=f"chat.send failed: {e.error_code} - {e.error_message}",
@@ -727,8 +717,9 @@ class AsyncChatClient:
                     self._active_sessions.discard(session_key)
                     self._sessions.pop(session_key, None)
                     self._condition.notify_all()
-                # B3（1c）：session 收口——归属路由表同步去标记
-                self._v3_routed_sessions.pop(session_key, None)
+                # B3（1c）/R7-F2/R8：只有 run 从未开始才在等待侧释放归属
+                if stream_send_failed:
+                    self._v3_routed_sessions.pop(session_key, None)
 
         finally:
             if self._concurrency_sem is not None:
@@ -1077,6 +1068,37 @@ class AsyncChatClient:
             state, StreamChunk(type="error", content=msg)
         )
 
+    def _release_v3_ownership_if_terminal(
+        self, session_key: str, chat_state: Any, payload: dict[str, Any]
+    ) -> None:
+        """R7-F2/R8：run 终态统一释放 v3 fallback 归属标记。
+
+        生命周期唯一事实源=引擎侧 run 结束。与等待面彻底解耦：
+        等待方可能早已返回（wait_result=False / 超时）、可能仍在等
+        （终态先于 ACK 恢复到达，R8-F3）、可能被中途取消（R8-F2）——
+        本方法只看帧本身，不枚举等待方形态，也不依赖 session state
+        是否已被 pop。
+
+        注入帧不算主 run 终态（注入前后主 run 仍在执行，R8-F1）：
+        沿用正常 final 分支的注入排除口径（runId inject- 前缀 /
+        stopReason==inject）。无标记/非 a2a 时为 no-op（off 路径零变化）。
+        """
+        if chat_state not in ("final", "error"):
+            return
+        run_id = payload.get("runId") or payload.get("run_id")
+        if isinstance(run_id, str) and run_id.startswith("inject-"):
+            return
+        if payload.get("stopReason") == "inject":
+            return
+        if session_key not in self._v3_routed_sessions:
+            return
+        self._v3_routed_sessions.pop(session_key, None)
+        logger.debug(
+            "[chat] v3 routed run terminal: sessionKey=%s state=%s，归属释放",
+            session_key,
+            chat_state,
+        )
+
     @_with_session_trace("_on_chat")
     def _on_chat(
         self,
@@ -1107,22 +1129,12 @@ class AsyncChatClient:
                 text = content.get("text")
                 break
 
+        # R7-F2/R8：归属释放锚定真实终态——先于 state 判定执行，
+        # state 有无（等待方是否已收口）不影响释放（R8-F3 的缝正在于此）。
+        self._release_v3_ownership_if_terminal(session_key, chat_state, payload)
+
         # No state associated with this session key
         if state is None:
-            # R7-F2：wait_result=False/超时后的后台终态帧——等待方已把
-            # session state pop 收口，本分支是 v3 fallback run 归属标记的
-            # 唯一见证者：final/error 即 run 生命周期终点，随释归属
-            # （无标记/非 a2a 时为 no-op，off 路径零变化）。
-            if (
-                chat_state in ("final", "error")
-                and session_key in self._v3_routed_sessions
-            ):
-                self._v3_routed_sessions.pop(session_key, None)
-                logger.debug(
-                    "[chat] background v3 run terminal: sessionKey=%s state=%s",
-                    session_key,
-                    chat_state,
-                )
             logger.warning(
                 f"[chat] No session state for sessionKey={session_key}, "
                 f"state={chat_state}, text_len={len(text)}, ignore_case={self._ignore_case}"
