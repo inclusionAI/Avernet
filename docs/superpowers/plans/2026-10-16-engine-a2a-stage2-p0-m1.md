@@ -1028,6 +1028,15 @@ git push -u origin feat/a2a-frontend-client
 
 A2AProvider 接线、SendStreamingMessage 恢复/取消/禁发规则、HITL 结构化事件、M2 的禁发-恢复预算测试（终审约束 3）、企业代理链映射。
 
+**M2 接线前必须补（终审复审 2026-10-16 发现，APPROVE 附带）**：`streamRpc` 对"流面鉴权拒绝"不可见——引擎 AuthGate 拒绝经 `_rpc_error_response` 返回 HTTP 200 + 紧凑 JSON（无 `data:` 行、无 `\n\n`），M1 的 SSE 解析会静默零事件完成，既不出 `auth` 失败也不触发 locked-v3 升级。修法：流结束且零 SSE 事件（或 content-type 为 application/json）时对累积 buffer 跑 `parseRpcMessage` + `classifyFailure`。
+
+## 执行状态（2026-10-16 收官）
+
+- P0 ✅ Avernet `f5e08d8d1..ee3167f69`（card 条件声明 + 引擎真值 + 终审加固，模块 96 passed）
+- M1 ✅ ocb `feat/a2a-frontend-client` `ab17a98dbe..5e3cc3a84f`（6 模块+3 修复 commit，44 passed，UNWIRED grep 双证，已推 origin，基线 origin/dev@754d4b333）
+- 终审：APPROVE_WITH_NITS → 修复轮 6 findings（F1 鉴权分类对引擎现实升格/F2 中段失败 typed/F3 畸形卡守卫/F7 scheme fail-fast/F8 seq null/F5 降级测试/F9 顺序钉住/F10 取值加固）→ 聚焦复审 APPROVE
+- 测试环境配方见 spec §1 M1 注记（公共 registry jest 沙箱 + .umi 占位）；套件级回归移交 ocb CI
+
 ## Self-Review 记录
 
 - **Spec 覆盖**：P0=spec §5 全文；M1=spec §1（开关默认 off/唯一入口）、§2（地址映射/缓存身份/sticky）、§3.3（失败分类）。M1 按定义不含 §3 恢复/§4 流程（M2）✓
