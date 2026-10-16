@@ -240,6 +240,9 @@ fn decode_delivery(row: &DbRow) -> Result<PersistedMessageDelivery, MessageDeliv
         } else if name.ends_with("_json") {
             match value {
                 DbValue::Null => serde_json::Value::Null,
+                // MySQL JSON columns may carry binary metadata even when the
+                // returned bytes contain ordinary UTF-8 JSON text.
+                DbValue::Bytes(bytes) => serde_json::from_slice(bytes).map_err(storage)?,
                 _ => serde_json::from_str(
                     value
                         .as_str()
@@ -261,6 +264,10 @@ fn decode_delivery(row: &DbRow) -> Result<PersistedMessageDelivery, MessageDeliv
     }
     serde_json::from_value(map.into()).map_err(storage)
 }
+
+#[cfg(test)]
+#[path = "delivery_decode_tests.rs"]
+mod delivery_decode_tests;
 
 fn values(row: &PersistedMessageDelivery) -> Result<Vec<DbValue>, MessageDeliveryRepoError> {
     let json = serde_json::to_value(row).map_err(storage)?;
