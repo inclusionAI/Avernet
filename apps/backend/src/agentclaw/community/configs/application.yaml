@@ -210,8 +210,8 @@ user_config:
   # public operation, whoever the authenticated person is — the "must name
   # yourself" 403 is skipped for them. Empty = no exemption (the default).
   # MUST stay empty in pre/prod: the backend refuses to boot there when this
-  # list is non-empty (OpenApiUserIdBypassConfigModule + the eager binding
-  # check), and tests pin the shipped value to empty.
+  # list is non-empty (OpenApiUserIdBypassConfigModule, resolved by
+  # build_injector on every profile), and tests pin the shipped value to empty.
   openapi:
     user_id_bypass: []
 

@@ -5,9 +5,9 @@ the 1000-line architecture cap). Mirrors the ``DesktopSkillRecoveryConfigModule`
 pattern: a small ``Module`` with one ``@singleton @provider`` that reads the
 ``openapi`` block of ``user_config`` (via ``config_module.read_user_config``),
 validates it strictly, and returns an ``OpenApiUserIdBypassConfig``. Registered
-in ``di/container.py`` alongside ``ConfigModule`` and resolved by the pre/prod
-eager binding check, so a bad value fails the rollout rather than the first
-request.
+in ``di/container.py`` alongside ``ConfigModule`` and resolved there
+unconditionally — on every profile, not only under the pre/prod eager check —
+so a bad value fails the boot rather than the first request.
 
 YAML shape under ``user_config.openapi``::
 

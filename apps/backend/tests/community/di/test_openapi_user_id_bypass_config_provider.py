@@ -10,8 +10,9 @@ operation, so three things are pinned here:
   silently reading as empty;
 - **every shipped configuration leaves it empty** — the base and every overlay,
   and the merged result of every deploy profile;
-- **``pre`` and ``prod`` refuse a non-empty list** — the provider raises, and the
-  startup eager check turns that into a failed boot. The corp pre/prod overlays
+- **``pre`` and ``prod`` refuse a non-empty list** — the provider raises, and
+  ``build_injector`` resolves it on every profile, so that is a failed boot
+  rather than a 500 on the first request. The corp pre/prod overlays
   live outside this repository, so this rule, not a file, is what keeps those
   environments empty; the tests here cover the rule on every spelling
   ``get_current_env()`` normalizes to those two.
@@ -23,7 +24,6 @@ import yaml
 
 from agentclaw.community.di import DeployProfile, build_injector
 from agentclaw.community.di import config as cfg
-from agentclaw.community.di.container import eager_check_critical_bindings
 from agentclaw.community.di.modules import config_module
 from agentclaw.community.di.modules.openapi_user_id_bypass_config_module import (
     BLOCK,
@@ -144,27 +144,39 @@ def test_the_protected_environments_are_exactly_pre_and_prod():
     assert validate_for_environment(OpenApiUserIdBypassConfig(), "prod").user_ids == frozenset()
 
 
-@pytest.mark.unit
-def test_the_startup_eager_check_turns_the_refusal_into_a_failed_boot(monkeypatch):
-    """``pre``/``prod`` boot runs ``eager_check_critical_bindings``; the config is in it.
-
-    Without this entry the provider would still raise, but only on the first
-    user-scoped request — a 500 on a deployment that reported healthy.
-    """
+def _boot_with(monkeypatch, block: dict, env: str):
+    """Build the real injector against the shipped config plus one ``openapi`` block."""
     real = config_module.read_user_config
-    monkeypatch.setattr(
-        config_module,
-        "read_user_config",
-        lambda: {**real(), BLOCK: {KEY: _ENTRIES}},
-    )
-    injector = build_injector(profile=DeployProfile.TEST)
+    monkeypatch.setattr(config_module, "read_user_config", lambda: {**real(), BLOCK: block})
+    monkeypatch.setenv("SERVER_ENV", env)
+    return build_injector(profile=DeployProfile.TEST)
 
-    monkeypatch.setenv("SERVER_ENV", "prod")
-    with pytest.raises(RuntimeError, match="DI eager-check failed") as excinfo:
-        eager_check_critical_bindings(injector)
 
-    assert OpenApiUserIdBypassConfig.__name__ in str(excinfo.value)
-    assert f"{BLOCK}.{KEY} must be empty" in str(excinfo.value)
+@pytest.mark.unit
+@pytest.mark.parametrize("env", sorted(PROTECTED_ENVS))
+def test_a_non_empty_bypass_fails_the_boot_in_pre_and_prod(monkeypatch, env):
+    """``build_injector`` resolves the config, so the refusal is a failed boot.
+
+    Not merely a provider that raises: left lazy, the raise would be swallowed
+    by lifecycle discovery and come back as a 500 on the first user-scoped
+    request of a deployment that reported healthy.
+    """
+    with pytest.raises(ValueError, match=f"{BLOCK}.{KEY} must be empty"):
+        _boot_with(monkeypatch, {KEY: _ENTRIES}, env)
+
+
+@pytest.mark.unit
+def test_a_malformed_bypass_fails_the_boot_on_a_dev_profile(monkeypatch):
+    """The same holds outside pre/prod, where no eager check runs: a bad block is a boot failure."""
+    with pytest.raises(ValueError, match=f"{BLOCK}.{KEY} must be a list"):
+        _boot_with(monkeypatch, {KEY: "shared-account"}, "dev")
+
+
+@pytest.mark.unit
+def test_a_dev_profile_boots_with_a_bypass(monkeypatch):
+    injector = _boot_with(monkeypatch, {KEY: _ENTRIES}, "dev")
+
+    assert injector.get(OpenApiUserIdBypassConfig).user_ids == frozenset(_ENTRIES)
 
 
 # ── what ships ─────────────────────────────────────────────────────────────

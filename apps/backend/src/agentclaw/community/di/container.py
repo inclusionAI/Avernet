@@ -74,6 +74,9 @@ from agentclaw.community.di.modules.mcp_module import McpModule
 from agentclaw.community.di.modules.openapi_user_id_bypass_config_module import (
     OpenApiUserIdBypassConfigModule,
 )
+from agentclaw.community.di.openapi_user_id_bypass_config import (
+    OpenApiUserIdBypassConfig,
+)
 from agentclaw.community.di.modules.bot_message_feedback_module import BotMessageFeedbackModule
 from agentclaw.community.di.modules.quality_module import QualityModule
 from agentclaw.community.di.modules.runtime_projection_recovery_module import (
@@ -153,7 +156,8 @@ def build_injector(
         TaskTrajectoryConfigModule(),
         # Public-API ``user_id`` bypass list (``openapi`` user_config block).
         # Own module for the same headroom reason; its provider refuses a
-        # non-empty list in pre/prod, surfaced at boot by the eager check.
+        # malformed block anywhere and a non-empty list in pre/prod, and is
+        # resolved unconditionally below so that refusal fails the boot.
         OpenApiUserIdBypassConfigModule(),
         InstallationReadConfigModule(),
         SkillCenterModule(),
@@ -242,6 +246,14 @@ def build_injector(
     _app_injector.get(DraftContentStoreConfig)
     _app_injector.get(DesktopSkillRecoveryConfig)
     _app_injector.get(McpRuntimeCredentialsConfig)
+    # The public-API ``user_id`` bypass list is the same shape of risk with a
+    # sharper edge: its provider refuses a malformed block, and a non-empty
+    # list in pre/prod. Left lazy, that refusal would be swallowed here on a
+    # dev / singlebox / community boot and come back as a 500 on the first
+    # user-scoped /openapi/v1 request (``resolve_user_id_bypass`` does not
+    # read a raising provider as "no bypass"). Resolving it here makes the
+    # refusal a failed boot on every profile, pre/prod included.
+    _app_injector.get(OpenApiUserIdBypassConfig)
 
     return _app_injector
 
@@ -265,9 +277,6 @@ def eager_check_critical_bindings(injector: Injector) -> None:
     """
     from agentclaw.community.di.modules_bootstrap import get_eager_check_keys
     from agentclaw.community.api.bot_chat_service import OpenBotChatServiceProtocol
-    from agentclaw.community.di.openapi_user_id_bypass_config import (
-        OpenApiUserIdBypassConfig,
-    )
     from agentclaw.community.plugin_api.auth import AuthPlugin
     from agentclaw.community.plugin_api.database import DatabasePlugin
 
@@ -284,11 +293,6 @@ def eager_check_critical_bindings(injector: Injector) -> None:
         # rather than at the first outbound call. This entry only ensures the
         # pre/prod aggregate names it alongside the other critical bindings.
         HttpClientPoolConfig,
-        # Resolving it is what enforces "empty in pre/prod": the provider
-        # raises on a non-empty ``openapi.user_id_bypass`` there, and this is
-        # the step that turns that into a failed rollout instead of a 500 on
-        # the first user-scoped /openapi/v1 request.
-        OpenApiUserIdBypassConfig,
         *get_eager_check_keys(),
     ]
 
