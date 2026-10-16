@@ -84,13 +84,9 @@ fi
 onboarding_token="${BCN_ONBOARDING_TOKEN:-}"
 unset BCN_ONBOARDING_TOKEN
 
-dsh_version="$(dsh --version)"
-if [[ "$dsh_version" != "0.2.1-alpha.2" ]]; then
-  echo "This plugin requires the tested DSH version 0.2.1-alpha.2; found $dsh_version." >&2
-  echo "Upgrade first: npm install --global ${dsh_package}" >&2
-  exit 1
-fi
-
+# DSH's plugin manager validates the package's peer compatibility range and
+# rejects incompatible runtimes before activation. Keep one version policy in
+# package.json instead of pinning a second policy in this installer.
 dsh plugin --profile "$profile" add -- "$package_spec"
 dsh plugin --profile "$profile" exec dsh-bcn-configure -- \
   --profile "$profile" \
