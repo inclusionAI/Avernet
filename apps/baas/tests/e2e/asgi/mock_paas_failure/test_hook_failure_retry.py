@@ -81,7 +81,11 @@ class TestHookFailureRetry:
         assert (await approve_publish(api, publish_id)) == 200
 
         status = await wait_for_publish_status(
-            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=5.0
+            api,
+            publish_id,
+            {"SUCCESS", "FAILED"},
+            timeout_seconds=5.0,
+            treat_not_found_as_success=False,
         )
         assert status == "FAILED"
 
@@ -106,7 +110,11 @@ class TestHookFailureRetry:
         assert (await approve_publish(api, publish_id)) == 200
 
         status = await wait_for_publish_status(
-            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=5.0
+            api,
+            publish_id,
+            {"SUCCESS", "FAILED"},
+            timeout_seconds=5.0,
+            treat_not_found_as_success=False,
         )
         assert status == "FAILED"
 
