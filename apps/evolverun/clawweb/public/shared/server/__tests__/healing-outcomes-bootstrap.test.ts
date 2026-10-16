@@ -1,17 +1,34 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { mysqlDialect, sqliteDialect, zdasDialect } from '../db/dialect.js';
-import { repairBatchMigrations } from '../schema-repair-batch.js';
+import { healingBootstrapSql, repairBatchMigrations } from '../schema-repair-batch.js';
 import { migrations } from '../schema.js';
+import type { IDatabase } from '../db.js';
 
 const repairMigration = repairBatchMigrations.find(m => m.version === 136)!;
 const createPrefix = 'CREATE TABLE IF NOT EXISTS workflow_healing_outcomes (';
 
 describe('healing outcomes bootstrap', () => {
+  it('precreates ZDAS healing tables with bounded lookup indexes and full-signature identity keys', async () => {
+    const statements: string[] = [];
+    const db = { dbType: 'zdas', dialect: zdasDialect, exec: async (sql: string) => { statements.push(sql); } } as unknown as IDatabase;
+    await repairMigration.migrate!(db);
+    const lesson = statements.find(sql => sql.includes('CREATE TABLE IF NOT EXISTS workflow_healing_lessons'))!;
+    expect(lesson).toContain('INDEX idx_workflow_healing_lessons_signature (failure_signature(127), failure_mode)');
+    for (const table of ['workflow_healing_suggestions', 'workflow_healing_suggestion_actions']) {
+      const ddl = statements.find(sql => sql.includes(`CREATE TABLE IF NOT EXISTS ${table} (`))!;
+      expect(ddl).toContain('signature_identity BINARY(32) GENERATED ALWAYS AS');
+      expect(ddl).toContain('UNIQUE (signature_identity)');
+      expect(ddl).not.toMatch(/UNIQUE \(workflow_id, (?:failure_)?signature\)/);
+    }
+    expect(statements.find(sql => sql.includes('CREATE TABLE IF NOT EXISTS workflow_healing_suggestions (')))
+      .toContain('INDEX idx_wh_suggestions_signature (workflow_id, failure_signature(127))');
+  });
+
   it('provisions the skipped healing sources and verification fields used by the repair runtime', () => {
     const db = new Database(':memory:');
     try {
-      for (const sql of repairMigration.sql) db.exec(sqliteDialect.renderDdl(sql));
+      for (const sql of [...healingBootstrapSql, ...repairMigration.sql]) db.exec(sqliteDialect.renderDdl(sql));
       // Match the runtime version reads: both sources must exist even with no history.
       for (const table of ['workflow_healing_diagnoses', 'workflow_healing_suggestions']) {
         expect(db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(id), 0) AS v, MAX(gmt_modified) AS t
@@ -50,7 +67,7 @@ describe('healing outcomes bootstrap', () => {
         suggestions: db.prepare('SELECT * FROM workflow_healing_suggestions').all(),
       });
       const before = snapshot();
-      const creates = repairMigration.sql.filter(sql => sql.startsWith('CREATE TABLE IF NOT EXISTS workflow_healing_'));
+      const creates = healingBootstrapSql;
       expect(creates).toHaveLength(5);
       for (let attempt = 0; attempt < 2; attempt++) {
         for (const sql of creates) db.exec(sqliteDialect.renderDdl(sql));
@@ -62,7 +79,7 @@ describe('healing outcomes bootstrap', () => {
   it('creates a missing outcomes table before repair audit columns are added', () => {
     const db = new Database(':memory:');
     try {
-      for (const sql of repairMigration.sql) db.exec(sqliteDialect.renderDdl(sql));
+      for (const sql of [...healingBootstrapSql, ...repairMigration.sql]) db.exec(sqliteDialect.renderDdl(sql));
       db.prepare(`INSERT INTO workflow_healing_outcomes
         (outcome_id, lesson_id, action, repair_item_id, evidence_json, event_key)
         VALUES ('new', 'lesson', 'verify', 'item', '{}', 'event')`).run();
@@ -85,7 +102,7 @@ describe('healing outcomes bootstrap', () => {
         VALUES ('existing', NULL, 'suggestion', 'suggestion_apply', 'keep this', 123, 456)`);
       const rows = db.prepare('SELECT * FROM workflow_healing_outcomes').all();
       const schema = db.prepare("SELECT type, name, sql FROM sqlite_master WHERE tbl_name = 'workflow_healing_outcomes' ORDER BY name").all();
-      const bootstrap = repairMigration.sql.find(sql => sql.startsWith(createPrefix));
+      const bootstrap = healingBootstrapSql.find(sql => sql.startsWith(createPrefix));
       expect(bootstrap).toBeDefined();
       db.exec(sqliteDialect.renderDdl(bootstrap!));
       db.exec(sqliteDialect.renderDdl(bootstrap!));
@@ -95,7 +112,7 @@ describe('healing outcomes bootstrap', () => {
   });
 
   it.each([mysqlDialect, zdasDialect])('renders the missing-table bootstrap and inline lesson index for $name', dialect => {
-    const statements = repairMigration.sql.map(sql => dialect.renderDdl(sql));
+    const statements = [...healingBootstrapSql, ...repairMigration.sql].map(sql => dialect.renderDdl(sql));
     const bootstrapIndex = statements.findIndex(sql => sql.startsWith(createPrefix));
     const alterIndex = statements.findIndex(sql => sql.startsWith('ALTER TABLE workflow_healing_outcomes'));
     expect(bootstrapIndex).toBeGreaterThanOrEqual(0);
