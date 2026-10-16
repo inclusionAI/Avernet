@@ -54,6 +54,9 @@ if mode == "crash":
 if mode == "fail":
     print(json.dumps({{"success": False, "error": "no such cli password=hunter2"}})); sys.exit(1)
 if args[0] == "install":
+    if mode == "slow_install":
+        import time; time.sleep(1)
+        _save(_installed() + [args[1] + ":di"])
     print()
     print(json.dumps({{"success": True, "name": args[1], "command": "di", "version": "1.0.9",
                        "cli": {{"name": args[1], "command": "di", "description": "DeepInsight"}}}}))
@@ -62,6 +65,8 @@ elif args[:2] == ["tool", "list"]:
         print(json.dumps({{"success": True}})); sys.exit(0)
     if mode == "list_entry":
         print(json.dumps({{"success": True, "tools": [json.loads(os.environ["FAKE_ACLI_ENTRY"])]}})); sys.exit(0)
+    if mode == "relist_fail" and os.path.exists(_STATE):
+        print(json.dumps({{"success": False, "error": "registry busy"}})); sys.exit(1)
     if mode == "list_null_tools":
         print(json.dumps({{"success": True, "tools": None}})); sys.exit(0)
     tools = []
@@ -334,6 +339,40 @@ async def test_uninstall_confirms_the_tool_is_gone(fake_acli, install_dir, monke
     assert caught.value.code == "uninstall_failed"
     assert [c["args"][:2] for c in calls()] == [
         ["tool", "list"], ["tool", "uninstall"], ["tool", "list"],
+    ]
+
+
+async def test_an_unconfirmable_uninstall_is_uncertain_not_failed(
+    fake_acli, install_dir, monkeypatch
+):
+    """The program may already be gone, so the platform must not re-grant it."""
+    runner, calls = fake_acli
+    monkeypatch.setenv("FAKE_ACLI_INSTALLED", "dataphin")
+    monkeypatch.setenv("FAKE_ACLI_MODE", "relist_fail")
+
+    with pytest.raises(AcliError) as caught:
+        await runner.uninstall("dataphin")
+
+    assert caught.value.code == "bad_output"
+    assert "registry busy" in caught.value.message
+    assert [c["args"][:2] for c in calls()] == [
+        ["tool", "list"], ["tool", "uninstall"], ["tool", "list"],
+    ]
+
+
+async def test_an_uninstall_waits_for_an_install_in_flight(fake_acli, install_dir, monkeypatch):
+    """A cleanup sent while an abandoned install still runs must see what it installed."""
+    runner, calls = fake_acli
+    monkeypatch.setenv("FAKE_ACLI_MODE", "slow_install")
+
+    install = asyncio.create_task(runner.install("deepinsight-cli"))
+    await asyncio.sleep(0.2)
+    result = await runner.uninstall("deepinsight-cli")
+    await install
+
+    assert (result.name, result.uninstalled) == ("deepinsight-cli", True)
+    assert [c["args"][:2] for c in calls()] == [
+        ["install", "deepinsight-cli"], ["tool", "list"], ["tool", "uninstall"], ["tool", "list"],
     ]
 
 

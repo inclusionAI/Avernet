@@ -185,7 +185,7 @@ def _parse_json(stdout: str) -> dict[str, Any] | None:
 
 
 class AcliRunner:
-    """Run acli. Stateless; safe to share."""
+    """Run acli. Safe to share; installs and uninstalls run one at a time."""
 
     def __init__(
         self, *, environ: Mapping[str, str], install_dir: str, executable: str = "acli"
@@ -204,17 +204,22 @@ class AcliRunner:
         # root so this core module never reads runtime configuration itself.
         self._environ = environ
         self._executable = executable
+        # A request the platform abandoned keeps running here, so a cleanup
+        # uninstall could otherwise list the tools before that install lands
+        # and miss it. One change at a time makes the cleanup see its result.
+        self._changes = asyncio.Lock()
 
     async def install(self, name: str) -> AcliTool:
         """Install ``name`` into the engine's install directory and describe it."""
         validate_name(name)
         directory = self._install_dir
-        payload = await self._run(
-            ["install", name, "--install-dir", str(directory), "--yes"],
-            env=self._env_for(directory, failure_code="install_failed"),
-            timeout=INSTALL_TIMEOUT_SECONDS,
-            failure_code="install_failed",
-        )
+        async with self._changes:
+            payload = await self._run(
+                ["install", name, "--install-dir", str(directory), "--yes"],
+                env=self._env_for(directory, failure_code="install_failed"),
+                timeout=INSTALL_TIMEOUT_SECONDS,
+                failure_code="install_failed",
+            )
         cli = payload.get("cli") if isinstance(payload.get("cli"), Mapping) else {}
         installed = AcliTool(
             name=str(payload.get("name") or cli.get("name") or ""),
@@ -230,22 +235,33 @@ class AcliRunner:
         """Uninstall ``name`` if acli installed it; a tool acli never installed is success."""
         validate_name(name)
         directory = self._install_dir
-        env = self._env_for(directory, failure_code="uninstall_failed")
-        target = _installed_tool(await self._list_installed(env), name)
-        if target is None:
-            log.info("[acli] uninstall name=%s result=not_installed", name)
-            return AcliUninstallResult(name=name, uninstalled=False)
-        await self._run(
-            ["tool", "uninstall", target, "--yes"],
-            env=env,
-            timeout=INSTALL_TIMEOUT_SECONDS,
-            failure_code="uninstall_failed",
-        )
-        # acli's uninstall reply carries no reliable result, so the listing is
-        # the evidence: the tool must be gone, or the uninstall did not happen.
-        if _installed_tool(await self._list_installed(env), target) is not None:
-            raise AcliError("uninstall_failed", "acli reported success but the tool is still installed")
-        return AcliUninstallResult(name=target, uninstalled=True)
+        async with self._changes:
+            env = self._env_for(directory, failure_code="uninstall_failed")
+            target = _installed_tool(await self._list_installed(env), name)
+            if target is None:
+                log.info("[acli] uninstall name=%s result=not_installed", name)
+                return AcliUninstallResult(name=name, uninstalled=False)
+            await self._run(
+                ["tool", "uninstall", target, "--yes"],
+                env=env,
+                timeout=INSTALL_TIMEOUT_SECONDS,
+                failure_code="uninstall_failed",
+            )
+            # acli's uninstall reply carries no reliable result, so the listing
+            # is the evidence: the tool must be gone, or the uninstall did not
+            # happen. A listing that fails here leaves that unknown, not failed:
+            # the program may already be gone, so it must not be re-granted.
+            try:
+                remaining = await self._list_installed(env)
+            except AcliError as error:
+                if error.code in ("timeout", "bad_output"):
+                    raise
+                raise AcliError(
+                    "bad_output", f"acli uninstall ran but could not be confirmed: {error.message}"
+                ) from error
+            if _installed_tool(remaining, target) is not None:
+                raise AcliError("uninstall_failed", "acli reported success but the tool is still installed")
+            return AcliUninstallResult(name=target, uninstalled=True)
 
     async def _list_installed(self, env: dict[str, str]) -> list[Mapping[str, Any]]:
         """Every tool acli has installed here, each with a usable ``name``."""

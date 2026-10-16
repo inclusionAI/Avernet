@@ -47,14 +47,20 @@ New `core/acli/runner.py` — `AcliRunner`, the only code that executes acli:
   configurable: the agent image puts only this directory on `PATH`.
 - `install(name)` → `acli install <name> --install-dir <dir> --yes --json`;
   returns `{name, command, description, version}` from the JSON.
-- `uninstall(name)` → first `acli tool list --json`; if `name` is
-  absent, success with `uninstalled: false` (nothing of ours to delete);
-  otherwise `acli tool uninstall <name> --yes --json`.
+- `uninstall(name)` → first `acli tool list --json`; if `name` (or a
+  tool whose command is `name`) is absent, success with `uninstalled: false`
+  (nothing of ours to delete); otherwise `acli tool uninstall <name> --yes
+  --json`, then `acli tool list --json` again to confirm it is gone. Still
+  listed → `uninstall_failed`; a confirmation listing that fails →
+  `bad_output`, because the program may already be gone and must not be
+  re-granted.
+- Installs and uninstalls run one at a time. A request the platform
+  abandoned keeps running in the engine, so its cleanup uninstall waits for
+  it and then sees what it installed.
 - `acli_home` is `<parent of the install directory>/acli-home`, so acli's record sits
   beside the programs on persisted storage.
-- Inputs validated before any process starts: `name` and `keyword` against
-  `^[A-Za-z0-9@][A-Za-z0-9._@/-]{0,255}$` (`keyword` may be empty);
-  page bounds 1–100.
+- Inputs validated before any process starts: `name` against
+  `^[A-Za-z0-9@][A-Za-z0-9._@/-]{0,255}$`.
 - Failure → `AcliError(code, message)` with `code ∈ {acli_unavailable,
   not_found, install_failed, uninstall_failed, timeout, bad_output}`.
   `message` is acli's `error` field, credential-masked, at most 512 chars.
