@@ -1,5 +1,6 @@
 use bcs_services_container::{BuilderError, ServicesBuilder};
 use bcs_test_support::{
+    NoopBotAuthorityHook, NoopBotAuthorityService,
     NoopA2aChatRunService, NoopA2aChatService, NoopActorDirectoryService, NoopBotDeliveryPort,
     NoopBotDiscoveryService, NoopBotManagementService, NoopBotOnboardingService,
     NoopBotQueryService, NoopBotRegistryCoreService, NoopBotRunContextPort,
@@ -80,6 +81,8 @@ fn build_succeeds_when_all_required_services_set() {
         .channel(Arc::new(NoopChannelService))
         .secret(Arc::new(NoopSecretService))
         .session_files(Arc::new(NoopSessionFileService))
+        .bot_authority(Arc::new(NoopBotAuthorityService))
+        .bot_authority_hook(Arc::new(NoopBotAuthorityHook))
         .build()
         .expect("all required services are wired");
     assert!(Arc::ptr_eq(&services.registry, &services.registry));

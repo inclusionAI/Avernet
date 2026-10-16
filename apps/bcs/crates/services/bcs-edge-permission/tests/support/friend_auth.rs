@@ -32,7 +32,7 @@ pub async fn assemble() -> (
             originator_policy_data TEXT, \
             gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
             gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
-            UNIQUE (from_id, to_id, env, grant_ref_id))",
+            UNIQUE (from_id, to_id, env, grant_kind, grant_ref_id))",
     ))
     .await
     .expect("create edge_grants");

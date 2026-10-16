@@ -206,10 +206,13 @@ impl WorkbenchSessionService for GroupManagement {
                 .iter()
                 .filter(|participant| participant.is_bot())
             {
-                let Some(bot) = self.registry.get(&participant.bot_uuid).await else {
-                    continue;
-                };
-                if bot_belongs_to_staff(&participant.bot_uuid, bot.created_by.as_deref(), staff_no)
+                // Row 14: the current `can_manage` edge is the
+                // only Human→Bot control leg. A read failure
+                // propagates — never a deny-as-false.
+                if self
+                    .human_controls_bot(staff_no, &participant.bot_uuid)
+                    .await
+                    .map_err(WorkbenchUseCaseError::Group)?
                 {
                     may_operate_session = true;
                     break;
@@ -262,10 +265,13 @@ impl CanResolveInteraction for GroupManagement {
             if !participant.is_bot() {
                 continue;
             }
-            let Some(bot) = self.registry.get(&participant.bot_uuid).await else {
-                continue;
-            };
-            if bot_belongs_to_staff(&participant.bot_uuid, bot.created_by.as_deref(), staff_no) {
+            // Row 14: the current `can_manage` edge is the
+            // only Human→Bot control leg.
+            if self
+                .human_controls_bot(staff_no, &participant.bot_uuid)
+                .await
+                .map_err(|e| ServiceError::InternalError(e.to_string()))?
+            {
                 return Ok(true);
             }
         }

@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bcs_db_api::{
-    DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement, DbTransactionStep,
-    DbTransactionStepResult, DbValue,
+    DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement,
+    DbTransactionOptions, DbTransactionStep, DbTransactionStepResult, DbValue,
 };
 use rusqlite::types::{Value as SqliteValue, ValueRef};
 use rusqlite::{Connection, params_from_iter};
@@ -250,11 +250,23 @@ impl DbPlugin for LocalSqliteDbPlugin {
         &self,
         steps: Vec<DbTransactionStep>,
     ) -> DbResult<Vec<DbTransactionStepResult>> {
+        self.transaction_with_options(steps, DbTransactionOptions::unbounded()).await
+    }
+
+    async fn transaction_with_options(
+        &self,
+        steps: Vec<DbTransactionStep>,
+        options: DbTransactionOptions,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
         steps.iter().try_for_each(DbTransactionStep::validate)?;
+        let deadline = options.deadline();
         self.with_connection(move |connection| {
         let transaction_started = profile_start();
         // Reserve the write lock before any reads to avoid DEFERRED transaction
         // snapshot-upgrade failures when another pooled connection commits.
+        // Note: acquiring the write lock is bounded by
+        // `PRAGMA busy_timeout`, not by the between-step
+        // deadline below.
         let behavior = if steps.iter().all(|step| matches!(step, DbTransactionStep::Query(_))) {
             rusqlite::TransactionBehavior::Deferred
         } else {
@@ -265,6 +277,7 @@ impl DbPlugin for LocalSqliteDbPlugin {
             .map_err(|err| DbError::Backend(format!("begin sqlite transaction: {}", err)))?;
         profile_elapsed("sqlite.begin", transaction_started);
         let transaction_started = profile_start();
+        let deadline_started = std::time::Instant::now();
         let mut results = Vec::with_capacity(steps.len());
 
         for (step_index, step) in steps.into_iter().enumerate() {
@@ -283,6 +296,9 @@ impl DbPlugin for LocalSqliteDbPlugin {
                     let stop = statement.stops_transaction_on_no_rows() && result.affected_rows == 0;
                     results.push(DbTransactionStepResult::Executed(result));
                     if stop {
+                        // Early success skips the REMAINING steps
+                        // only; the pre-commit deadline check below
+                        // still gates this commit path like any other.
                         break;
                     }
                 }
@@ -296,6 +312,26 @@ impl DbPlugin for LocalSqliteDbPlugin {
                     }
                     results.push(DbTransactionStepResult::Executed(result));
                 }
+            }
+            // Between-step deadline check (Task-0 方案 A): stop
+            // before the next step, roll the whole transaction
+            // back through the Err path. A single statement that
+            // is still running is not interruptible — the overrun
+            // is only observable here, after it finished.
+            if let Some(deadline) = deadline {
+                if deadline_started.elapsed() > deadline {
+                    return Err(DbError::Timeout);
+                }
+            }
+        }
+        // Pre-commit deadline check (plugin contract: "between
+        // two steps and before commit"): every success path —
+        // including a stop-on-no-rows early exit — commits only
+        // inside the deadline, otherwise the whole transaction
+        // rolls back through the Err path.
+        if let Some(deadline) = deadline {
+            if deadline_started.elapsed() > deadline {
+                return Err(DbError::Timeout);
             }
         }
 

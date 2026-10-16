@@ -25,33 +25,64 @@ use bcs_bot::{Bot, BotCore, ProviderCore};
 
 struct RegistryFixture {
     registry: Arc<BotCore>,
+    authority: Arc<bcs_test_support::LazySeedAuthorityHook>,
     _data_dir: TempDir,
 }
 
 impl RegistryFixture {
     fn new() -> Self {
         let data_dir = tempfile::tempdir().expect("temp data dir");
-        let registry = Arc::new(BotCore::with_base_dir(data_dir.path().to_path_buf()));
+        // ONE shared memory store: the authority hook sees the
+        // edges it seeds AND the registry's store-level
+        // retirement re-verifies the same operator edge in its
+        // atomic span (store 事务内复验 cannot consult a
+        // second store).
+        let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(
+            data_dir.path().to_path_buf(),
+        ));
+        let chain =
+            bcs_test_support::lazy_authority_chain_with_repo(bot_repo.clone());
+        let registry = Arc::new(BotCore::with_repo(bot_repo));
         Self {
             registry,
+            authority: chain.hook,
             _data_dir: data_dir,
         }
     }
 
     fn service(&self) -> Bot {
         let registry: Arc<dyn BotRegistryCoreService> = self.registry.clone();
-        Bot::new(registry).with_bot_core(self.registry.clone())
+        // 删除/配置/状态 consult the authority hook
+        // (row 28 family); the lazy chain is seeded
+        // per test via `seed_owner`.
+        Bot::new(registry)
+            .with_bot_core(self.registry.clone())
+            .with_bot_authority(self.authority.clone())
     }
 
     fn service_with_friends(&self, friends: Vec<(&str, &str)>) -> Bot {
         let registry: Arc<dyn BotRegistryCoreService> = self.registry.clone();
         Bot::new_with_friend(registry, Arc::new(StaticFriendCoreService::new(friends)))
+            .with_bot_authority(self.authority.clone())
+    }
+
+    /// Seed the CURRENT owner edge for one Bot
+    /// (the row-28-family fixture fact).
+    fn seed_owner(&self, bot_id: &str, user: &str) {
+        self.authority.seed_owner(bot_id, user);
+    }
+
+    /// Seed the CURRENT manager edge for one
+    /// Bot (the row-28-family fixture fact).
+    fn seed_manager(&self, bot_id: &str, user: &str) {
+        self.authority.seed_manager(bot_id, user);
     }
 }
 
 struct ProviderRegistryFixture {
     registry: Arc<BotCore>,
     provider: ProviderCore,
+    authority: Arc<bcs_test_support::LazySeedAuthorityHook>,
     _data_dir: TempDir,
 }
 
@@ -78,13 +109,16 @@ impl ProviderRegistryFixture {
         Self {
             registry,
             provider,
+            authority: bcs_test_support::lazy_authority_chain().hook,
             _data_dir: data_dir,
         }
     }
 
     fn service(&self) -> Bot {
         let registry: Arc<dyn BotRegistryCoreService> = self.registry.clone();
-        Bot::new(registry).with_bot_core(self.registry.clone())
+        Bot::new(registry)
+            .with_bot_core(self.registry.clone())
+            .with_bot_authority(self.authority.clone())
     }
 
     async fn register_provider_bot(&self, owner: &str) -> String {
@@ -436,6 +470,7 @@ async fn list_bots_filters_paginates_and_maps_dtos() {
 #[tokio::test]
 async fn get_bot_returns_detail_dto_and_not_found_error() {
     let fixture = RegistryFixture::new();
+    fixture.seed_owner("detail-bot", "alice");
     let service = fixture.service();
 
     register_bot(
@@ -517,6 +552,7 @@ async fn get_bot_rejects_private_bot_owned_by_other_user() {
 #[tokio::test]
 async fn get_bot_reports_effective_active_status_for_connected_online_bot() {
     let fixture = RegistryFixture::new();
+    fixture.seed_owner("active-bot", "alice");
     let service = fixture.service();
 
     register_bot(
@@ -546,8 +582,12 @@ async fn get_bot_reports_effective_active_status_for_connected_online_bot() {
 #[tokio::test]
 async fn provider_http_bot_query_views_are_active_without_ws_connection() {
     let fixture = ProviderRegistryFixture::new();
+    let bot_id = fixture
+        .register_provider_bot("11111111")
+        .await
+        .clone();
+    fixture.authority.seed_owner(&bot_id, "11111111");
     let service = fixture.service();
-    let bot_id = fixture.register_provider_bot("11111111").await;
 
     assert!(!fixture.registry.is_connected(&bot_id).await);
 
@@ -730,6 +770,76 @@ async fn my_bots_active_only_filters_runtime_active_and_ignores_hidden() {
     assert_eq!(active.total, 1);
     assert_eq!(active.items[0].bot_uuid, "connected-hidden");
     assert_eq!(active.items[0].dynamic_status.status, "active");
+}
+
+#[tokio::test]
+async fn legacy_my_bots_expose_the_sampled_access_relation() {
+    // The legacy mine page (control-plane-wired Bot)
+    // labels every union entry with its sampled
+    // authority relation (spec §8 mine row: 逐项
+    // `access_relation=owner|manager`; the Human
+    // self entry keeps `self`).
+    let data_dir = tempfile::tempdir().expect("temp data dir");
+    let repo = Arc::new(MemoryBotRepo::with_base_dir(
+        data_dir.path().to_path_buf(),
+    ));
+    let core = Arc::new(BotCore::with_repo(repo.clone()));
+    let providers = Arc::new(MemoryProviderStore::new());
+    let control_plane =
+        Arc::new(bcs_bot::BotControlPlaneCore::new(
+            repo.clone(),
+            providers.clone(),
+            providers,
+        ));
+    let service =
+        Bot::new(core.clone() as Arc<dyn bcs_service_api::BotRegistryCoreService>)
+            .with_control_plane(
+                control_plane
+                    as Arc<dyn bcs_service_api::BotControlPlaneCoreService>,
+            );
+
+    core
+        .register(
+            "bot-owned".to_string(),
+            caps(Some("Owned"), Some("owned bot"), "public"),
+        )
+        .await
+        .expect("register owned bot");
+    core
+        .register(
+            "bot-managed".to_string(),
+            caps(Some("Managed"), Some("managed bot"), "public"),
+        )
+        .await
+        .expect("register managed bot");
+    core
+        .ensure_human_actor("alice", "alice")
+        .await
+        .expect("self row");
+    bcs_test_support::grant_owner_edge(&repo, "bot-owned", "alice").await;
+    bcs_test_support::grant_manager_edge(&repo, "bot-managed", "alice").await;
+
+    let mine = service
+        .list_my_bots(bcs_service_api::MyBotsCommand {
+            staff_no: "alice".to_string(),
+            offset: 0,
+            limit: 10,
+            active_only: false,
+        })
+        .await
+        .expect("my bots");
+    let relation_of = |bot_uuid: &str| {
+        mine.items
+            .iter()
+            .find(|entry| entry.bot_uuid == bot_uuid)
+            .and_then(|entry| entry.access_relation.clone())
+            .unwrap_or_else(|| {
+                panic!("'{bot_uuid}' missing from the mine page")
+            })
+    };
+    assert_eq!(relation_of("bot-owned"), "owner");
+    assert_eq!(relation_of("bot-managed"), "manager");
+    assert_eq!(relation_of("human_alice"), "self");
 }
 
 #[tokio::test]
@@ -1312,6 +1422,8 @@ async fn organization_scoped_discovery_keeps_members_after_provider_state_change
 #[tokio::test]
 async fn get_visibility_applies_read_policy_and_normalizes_visibility() {
     let fixture = RegistryFixture::new();
+    fixture.seed_owner("private-bot", "alice");
+    fixture.seed_owner("protected-bot", "alice");
     let service = fixture.service();
 
     register_bot(
@@ -1724,6 +1836,7 @@ async fn update_status_rejects_caller_mismatch() {
         Some("alice"),
     )
     .await;
+    fixture.seed_owner("status-bot", "alice");
 
     let result = service
         .update_status(BotStatusUpdateCommand {
@@ -1739,7 +1852,85 @@ async fn update_status_rejects_caller_mismatch() {
     assert!(matches!(
         result,
         Err(BotUseCaseError::Forbidden(message))
-            if message.contains("not the owner")
+            if message.contains("owner or manager role required")
+    ));
+}
+
+#[tokio::test]
+async fn business_writes_admit_the_current_manager() {
+    // 删除/配置/状态 are §8 BUSINESS operations
+    // ("Bot 配置、状态、删除 | 使用当前角色"): the
+    // current manager holds the same rights as the
+    // owner (spec §1 goal 1) — never the stale
+    // created_by (spec §3.3).
+    let fixture = RegistryFixture::new();
+    let service = fixture.service();
+
+    register_bot(
+        &fixture.registry,
+        "managed-bot",
+        caps(Some("Managed"), Some("Managed bot"), "protected"),
+        Some("alice"),
+    )
+    .await;
+    fixture.seed_owner("managed-bot", "alice");
+    fixture.seed_manager("managed-bot", "morgan");
+
+    let status_update = service
+        .update_status(BotStatusUpdateCommand {
+            caller_actor_id: Some("human_morgan".to_string()),
+            bot_id: "managed-bot".to_string(),
+            status: bcs_service_api::BotDynamicStatus {
+                status: "busy".to_string(),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("the current manager updates status");
+    assert_eq!(status_update.bot_uuid, "managed-bot");
+
+    let visibility = service
+        .set_visibility(BotVisibilityCommand {
+            caller_actor_id: Some("human_morgan".to_string()),
+            bot_id: "managed-bot".to_string(),
+            visibility: "public".to_string(),
+        })
+        .await
+        .expect("the current manager sets visibility");
+    assert_eq!(visibility.visibility, "public");
+
+    let left = service
+        .leave_bot(BotLeaveCommand {
+            caller_actor_id: Some("human_morgan".to_string()),
+            human_actor_id: Some("human_morgan".to_string()),
+            bot_id: "managed-bot".to_string(),
+        })
+        .await
+        .expect("the current manager deletes (§8 删除)");
+    assert!(left.left);
+    assert!(fixture.registry.get("managed-bot").await.is_none());
+
+    // The stale creator — no CURRENT edge at all —
+    // never regains the rights the edges used to
+    // imply (spec §3.3).
+    register_bot(
+        &fixture.registry,
+        "stale-creator-bot",
+        caps(Some("Stale"), Some("Stale creator bot"), "protected"),
+        Some("alice"),
+    )
+    .await;
+    let stale = service
+        .set_visibility(BotVisibilityCommand {
+            caller_actor_id: Some("human_alice".into()),
+            bot_id: "stale-creator-bot".to_string(),
+            visibility: "public".to_string(),
+        })
+        .await;
+    assert!(matches!(
+        stale,
+        Err(BotUseCaseError::Forbidden(message))
+            if message.contains("owner or manager role required")
     ));
 }
 
@@ -1755,6 +1946,7 @@ async fn leave_bot_allows_owner_soft_delete_for_unmanaged_bot() {
         Some("alice"),
     )
     .await;
+    fixture.seed_owner("leave-bot", "alice");
     register_bot(
         &fixture.registry,
         "other-owner-bot",
@@ -1773,7 +1965,7 @@ async fn leave_bot_allows_owner_soft_delete_for_unmanaged_bot() {
     assert!(matches!(
         non_owner,
         Err(BotUseCaseError::Forbidden(message))
-            if message.contains("not the creator")
+            if message.contains("owner or manager role required")
     ));
     assert!(fixture.registry.get("leave-bot").await.is_some());
 
@@ -1796,7 +1988,13 @@ async fn leave_bot_rejects_bot_token_provider_managed_and_tc_style_deletes() {
     let fixture = ProviderRegistryFixture::new();
     let service = fixture.service();
     let provider_bot_id = fixture.register_provider_bot("alice").await;
+    fixture
+        .authority
+        .seed_owner(&provider_bot_id, "alice");
 
+    fixture
+        .authority
+        .seed_owner("teamclaw-bot:alice", "alice");
     register_bot(
         &fixture.registry,
         "teamclaw-bot:alice",
@@ -1815,7 +2013,7 @@ async fn leave_bot_rejects_bot_token_provider_managed_and_tc_style_deletes() {
     assert!(matches!(
         bot_token_delete,
         Err(BotUseCaseError::Forbidden(message))
-            if message.contains("owner delete")
+            if message.contains("bot delete")
     ));
 
     let provider_managed = service
@@ -1852,6 +2050,7 @@ async fn set_visibility_rejects_invalid_values() {
     let fixture = RegistryFixture::new();
     let service = fixture.service();
 
+    fixture.seed_owner("visibility-bot", "alice");
     register_bot(
         &fixture.registry,
         "visibility-bot",
@@ -1885,6 +2084,7 @@ async fn set_visibility_updates_registry_for_valid_value() {
     let fixture = RegistryFixture::new();
     let service = fixture.service();
 
+    fixture.seed_owner("visibility-bot", "alice");
     register_bot(
         &fixture.registry,
         "visibility-bot",
@@ -1918,6 +2118,7 @@ async fn set_visibility_rejects_non_owner_when_owner_is_known() {
     let fixture = RegistryFixture::new();
     let service = fixture.service();
 
+    fixture.seed_owner("visibility-bot", "alice");
     register_bot(
         &fixture.registry,
         "visibility-bot",
@@ -1937,7 +2138,7 @@ async fn set_visibility_rejects_non_owner_when_owner_is_known() {
     assert!(matches!(
         result,
         Err(BotUseCaseError::Forbidden(message))
-            if message.contains("not the owner")
+            if message.contains("owner or manager role required")
     ));
     let stored = fixture
         .registry
@@ -1952,6 +2153,7 @@ async fn set_visibility_rejects_missing_caller() {
     let fixture = RegistryFixture::new();
     let service = fixture.service();
 
+    fixture.seed_owner("visibility-bot", "alice");
     register_bot(
         &fixture.registry,
         "visibility-bot",
@@ -1999,7 +2201,7 @@ async fn set_visibility_rejects_ownerless_bot_for_non_self_caller() {
     assert!(matches!(
         result,
         Err(BotUseCaseError::Forbidden(message))
-            if message.contains("not the owner")
+            if message.contains("owner or manager role required")
     ));
     let stored = fixture
         .registry

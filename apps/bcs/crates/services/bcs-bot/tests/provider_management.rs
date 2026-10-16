@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use bcs_bot::application::ProviderManagement;
 use bcs_bot::core::{BotCore, ProviderCore};
 use bcs_bot_store::MemoryBotRepo;
-use bcs_bot_store::provider::MemoryProviderStore;
+use bcs_bot_store::provider::{MemoryBotProviderStore, MemoryProviderStore};
 use bcs_service_api::{
     BotCapabilities, BotCatalogCleanupPort, BotRegistryCoreService, ChannelBindingCleanupPort,
     DeleteProviderBotCommand,
@@ -72,6 +72,14 @@ fn test_context() -> TestContext {
     let provider_credentials: Arc<dyn ProviderCredentialRepoPort> = provider_store.clone();
     let provider_bindings: Arc<dyn ProviderBotBindingRepoPort> = provider_store.clone();
     let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
+    // The production composition ALWAYS wires the Bot
+    // Provider metadata (the same atomic state); the
+    // retirement contract tests accordingly run on the
+    // real wiring.
+    let bot_providers = Arc::new(MemoryBotProviderStore::new(
+        bot_repo.clone(),
+        provider_store.clone(),
+    ));
     let registry: Arc<dyn BotRegistryCoreService> = Arc::new(BotCore::with_provider_repos(
         bot_repo,
         provider_repo.clone(),
@@ -83,7 +91,8 @@ fn test_context() -> TestContext {
         provider_credentials,
         provider_bindings,
         registry.clone(),
-    ));
+    )
+    .with_bot_provider_repo(bot_providers));
     let provider_bot_core: Arc<dyn ProviderBotCoreService> = provider_core.clone();
     let cleanup = Arc::new(RecordingCleanup::default());
     let catalog_cleanup = Arc::new(RecordingCatalogCleanup::default());
@@ -124,18 +133,31 @@ async fn unbound_legacy_delete_retries_catalog_cleanup_after_transient_failure()
         ..delete_command(&provider_id, &admin_token, bot_uuid)
     };
 
+    // The retirement commit precedes the cleanup: a cleanup
+    // failure is the pinned `retirement_cleanup_pending` — the
+    // tombstone is durable and the runtime caches are
+    // invalidated (no stale-cache resurrection).
     let first = ctx.management.delete_provider_bot(command.clone()).await;
-    assert!(first.is_err());
-    assert!(ctx.registry.get(bot_uuid).await.is_some());
+    let error = first.expect_err("cleanup failure is the pending error");
+    assert!(
+        format!("{error:?}").contains("retirement_cleanup_pending"),
+        "the stable cleanup-pending code must surface"
+    );
+    assert!(ctx.registry.get(bot_uuid).await.is_none(),
+        "the tombstone committed; no cache resurrection");
+    assert_eq!(ctx.catalog_cleanup.deleted_bot_ids.lock().await.len(), 0);
 
     *ctx.catalog_cleanup.fail.lock().await = false;
     let retried = ctx
         .management
         .delete_provider_bot(command)
         .await
-        .expect("retry must reach catalog cleanup for the tombstoned legacy bot");
+        .expect("retry re-derives the identity from the tombstone");
 
+    // Idempotent: changed = false, no resurrected Bot, and the
+    // cleanup ran exactly once.
     assert_eq!(retried.bot_uuid, bot_uuid);
+    assert!(!retried.deleted);
     assert_eq!(
         ctx.catalog_cleanup.deleted_bot_ids.lock().await.as_slice(),
         &[bot_uuid.to_string()]

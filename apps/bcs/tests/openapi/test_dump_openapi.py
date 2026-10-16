@@ -117,7 +117,10 @@ class DumpOpenApiTests(unittest.TestCase):
             for method in path_item
             if method.lower() in HTTP_METHODS
         ]
-        self.assertEqual(len(operations), 24)
+        # 23 pre-existing internal operations + the provider-discovery
+        # operation (dev) + the 11 bot-authority operations
+        # (spec §5.1/§6.1 unified /api/v1/collaboration/ surface).
+        self.assertEqual(len(operations), 35)
         self.assertTrue(
             all(path.startswith("/api/v1/collaboration/") for _, path in operations)
         )

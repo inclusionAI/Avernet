@@ -245,26 +245,6 @@ impl GroupManagement {
         }
     }
 
-    pub(crate) async fn relation_has_creator_edge(
-        &self,
-        human_actor_id: &str,
-        bot_id: &str,
-    ) -> Result<bool, GroupUseCaseError> {
-        match self
-            .relation
-            .get_edge(human_actor_id, bot_id, &self.config.relation_env)
-            .await
-        {
-            Ok(Some(edge)) => Ok(edge.is_creator),
-            Ok(None) => Ok(false),
-            Err(error) => Err(ServiceError::InternalError(format!(
-                "Failed to verify owner relation: {}",
-                error
-            ))
-            .into()),
-        }
-    }
-
     pub(crate) async fn has_bidirectional_relation_or_friendship(
         &self,
         actor_id: &str,
@@ -299,11 +279,11 @@ impl GroupManagement {
             GroupUseCaseError::InvalidProposal("caller actor_id must use human_ prefix".to_string())
         })?;
 
-        if target.created_by.as_deref() == Some(staff_no)
-            || self
-                .relation_has_creator_edge(human_actor_id, &target.bot_uuid)
-                .await?
-        {
+        // Row 14 DM leg (spec §8.1): the Human sponsorship of
+        // the Bot goes through its CURRENT `can_manage`
+        // edge; the historical `created_by` and the legacy
+        // creator relation edge no longer sponsor.
+        if self.human_controls_bot(staff_no, &target.bot_uuid).await? {
             return Ok(());
         }
 
@@ -345,15 +325,27 @@ impl GroupManagement {
         let staff_no = human_actor_id
             .strip_prefix("human_")
             .unwrap_or(human_actor_id);
-        let bot = self.registry.get(bot_id).await.ok_or_else(|| {
-            GroupUseCaseError::Forbidden(format!("Not authorized as bot '{}'", bot_id))
-        })?;
-        if bot
-            .created_by
-            .as_deref()
-            .map(|owner| owner == staff_no)
-            .unwrap_or(true)
-        {
+        let bot = self
+            .registry
+            .get(bot_id)
+            .await
+            .ok_or_else(|| {
+                GroupUseCaseError::Forbidden(format!(
+                    "Not authorized as bot '{}'",
+                    bot_id
+                ))
+            })?;
+        if bot.actor_kind != ActorKind::Bot {
+            // A Human actor authorization is their own
+            // self; the group coordinator check takes
+            // over from there.
+            return Ok(());
+        }
+        // Row 14: the acting THROUGH-a-controlled-Bot leg
+        // requires the CURRENT `can_manage` edge; the
+        // historical `created_by` (and its `None` legacy
+        // auto-claim) no longer authorizes.
+        if self.human_controls_bot(staff_no, bot_id).await? {
             return Ok(());
         }
 
@@ -424,22 +416,18 @@ impl GroupManagement {
             return Ok(());
         }
 
-        match self
-            .relation
-            .get_edge(caller_actor_id, actor_id, &self.config.relation_env)
-            .await
-        {
-            Ok(Some(edge)) if edge.is_creator => Ok(()),
-            Ok(_) => Err(GroupUseCaseError::Forbidden(format!(
-                "Caller '{}' is not the actor itself nor a creator of '{}'",
-                caller_actor_id, actor_id
-            ))),
-            Err(error) => Err(ServiceError::InternalError(format!(
-                "Failed to verify creator relation: {}",
-                error
-            ))
-            .into()),
+        // Row 14: act-for-another-actor through the CURRENT
+        // `can_manage` edge; the legacy creator relation
+        // edge no longer authorizes (spec §3.2).
+        if let Some(staff_no) = caller_actor_id.strip_prefix("human_") {
+            if self.human_controls_bot(staff_no, actor_id).await? {
+                return Ok(());
+            }
         }
+        Err(GroupUseCaseError::Forbidden(format!(
+            "Caller '{}' is not the actor itself nor a creator of '{}'",
+            caller_actor_id, actor_id
+        )))
     }
 
     pub(crate) async fn authorize_workbench_group_access(
@@ -450,7 +438,10 @@ impl GroupManagement {
         let actor_id = bound_actor_id.ok_or(WorkbenchUseCaseError::Unauthorized)?;
         let staff_no = staff_no_from_bound_actor(Some(actor_id))?;
 
-        if human_has_group_access(self.registry.as_ref(), group, actor_id, staff_no).await {
+        if human_has_group_access(self, group, actor_id, staff_no)
+            .await
+            .map_err(WorkbenchUseCaseError::Group)?
+        {
             return Ok(WorkbenchAuthorizedHuman {
                 actor_id: actor_id.to_string(),
                 staff_no: staff_no.to_string(),
@@ -480,7 +471,11 @@ impl GroupManagement {
         if bot.actor_kind != ActorKind::Bot {
             return Err(WorkbenchUseCaseError::ForbiddenSender);
         }
-        if bot_belongs_to_staff(from_actor_id, bot.created_by.as_deref(), &auth.staff_no) {
+        if self
+            .human_controls_bot(&auth.staff_no, from_actor_id)
+            .await
+            .map_err(WorkbenchUseCaseError::Group)?
+        {
             return Ok(());
         }
 

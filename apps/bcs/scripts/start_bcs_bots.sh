@@ -1278,9 +1278,16 @@ get_bot_token() {
     jq -r 'if (.token | type) == "string" then .token else empty end' "$session_file" 2>/dev/null | head -n 1
 }
 
+
 # ============================================================================
 # Bot Onboarding
 # ============================================================================
+
+#==============================================================================
+# Trusted-registration seeding helper: seeds the local 5bot ownership
+# through the GET /register/token -> POST /register chain so the mock
+# story human controls these bots (see the helper file for details).
+source "${SCRIPT_DIR}/bots_trusted_seed.sh"
 
 cmd_onboard() {
     info "Completing bot onboarding..."
@@ -1755,6 +1762,13 @@ case "${1:-start}" in
             echo ""
             info "Starting BCS server..."
             start_bcs || exit 1
+        fi
+
+        if [ "${BCS_TRUSTED_SEED_BOTS:-1}" = "1" ]; then
+            seed_trusted_registrations || exit 1
+        else
+            warn "BCS_TRUSTED_SEED_BOTS=0: skipping trusted registration seeding;"
+            warn "bots will stay human-unowned and Human->Bot story ops will 403"
         fi
 
         echo ""

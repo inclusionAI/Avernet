@@ -6,7 +6,7 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
         .iter()
         .map(|migration| migration.version)
         .collect::<Vec<_>>();
-    assert_eq!(sqlite, (1..=33).collect::<Vec<_>>());
+    assert_eq!(sqlite, (1..=34).collect::<Vec<_>>());
     assert_eq!(SQLITE_VERSIONED_MIGRATIONS[28].name, "fixed_loop_runtime");
     assert_eq!(
         SQLITE_VERSIONED_MIGRATIONS[29].name,
@@ -19,8 +19,18 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
         "group_human_mention_notify_mode"
     );
 
-    let directory =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../migrations/mysql");
+    // Suites that include this file from crates at other
+    // depths (e.g. `crates/application/v1/*`) share the
+    // repository layout: the SQL directory sits above
+    // `crates/`, so try the known manifest-relative roots.
+    let directory = [
+        "../../../migrations/mysql",
+        "../../../../migrations/mysql",
+    ]
+    .iter()
+    .map(|base| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(base))
+    .find(|candidate| candidate.is_dir())
+    .expect("migrations/mysql directory resolves");
     let mut mysql = std::fs::read_dir(directory)
         .unwrap()
         .map(|entry| {
@@ -34,9 +44,10 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
         .iter()
         .map(|name| name.split('_').next().unwrap().parse::<i64>().unwrap())
         .collect::<Vec<_>>();
-    // MySQL Provider storage remains version 029; the new Group migration is
-    // MySQL version 030.
-    assert_eq!(versions, (1..=32).collect::<Vec<_>>());
+    // MySQL Provider storage remains version 029; the Group
+    // migration is MySQL version 030 and bot authority is MySQL
+    // version 033.
+    assert_eq!(versions, (1..=33).collect::<Vec<_>>());
     assert_eq!(mysql[27], "028_fixed_loop_runtime.sql");
     assert_eq!(mysql[28], "029_bot_provider_storage.sql");
     assert_eq!(
@@ -70,7 +81,7 @@ async fn bot_provider_storage_upgrades_29_without_new_tables_or_rewriting_histor
             .iter()
             .map(|migration| migration.version)
             .collect::<Vec<_>>(),
-        vec![30, 31, 32, 33]
+        vec![30, 31, 32, 33, 34]
     );
 
     run_sqlite_migrations(&db).await?;
@@ -96,7 +107,10 @@ async fn bot_provider_storage_upgrades_29_without_new_tables_or_rewriting_histor
     );
     run_sqlite_migrations(&db).await?;
     assert_eq!(db.query(DbStatement::new(history_sql)).await?, original);
-    let tables = db.query(DbStatement::new("SELECT name FROM sqlite_master WHERE type = 'table' AND name <> 'bcs_session_registry' ORDER BY name")).await?;
+    // The version-30+ tail legitimately adds: the Session-registry
+    // table (32) and the bot-authority tables (34); the Provider
+    // storage upgrade itself adds no tables.
+    let tables = db.query(DbStatement::new("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('bcs_session_registry', 'bot_ownership_transfers', 'bot_authority_changes') ORDER BY name")).await?;
     assert_eq!(tables, original_tables);
     Ok(())
 }

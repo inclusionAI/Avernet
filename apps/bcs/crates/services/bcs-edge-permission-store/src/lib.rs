@@ -8,6 +8,17 @@
 //! Implements [`EdgeGrantRepoPort`] (installment 1) for [`DbEdgeGrantStore`]
 //! and [`PermissionProfileRepoPort`] (T8) for [`DbPermissionProfileStore`].
 //! `PermissionRequestRepoPort` (T9) will be added to this same crate later.
+//!
+//! The bot-authority store ([`DbBotAuthorityStore`]) lives in the
+//! `authority` module; it implements `BotAuthorityRepoPort` over
+//! `edge_grants` / `bcs_bots` / the two authority tables.
+
+pub mod authority;
+
+pub use authority::DbBotAuthorityStore;
+/// Pure SQL lifecycle step builders (Task 4): reused by
+/// `bcs-bot-store`'s registration composites, never executed here.
+pub use authority::lifecycle;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -89,8 +100,13 @@ impl DbEdgeGrantStore {
     }
 
     /// INSERT with idempotent behavior on the unique key
-    /// `(from_id, to_id, env, grant_ref_id)`: SQLite `ON CONFLICT DO NOTHING`
-    /// vs MySQL `INSERT IGNORE`.
+    /// `(from_id, to_id, env, grant_kind, grant_ref_id)`: SQLite
+    /// `ON CONFLICT DO NOTHING` vs MySQL `INSERT IGNORE`.
+    ///
+    /// Since the 033/034 bot-authority migration the unique key
+    /// carries `grant_kind`: owner/manager management edges use
+    /// `grant_ref_id = 0` for the same (from, to) pair as runtime
+    /// profile/rules edges, and owner/manager must coexist.
     fn insert_grant_sql(&self) -> &'static str {
         match self.flavor {
             EdgeGrantSqlFlavor::Mysql => {
@@ -104,7 +120,7 @@ impl DbEdgeGrantStore {
                  (env, from_id, to_id, grant_kind, grant_ref_id, rules, \
                   status, originator_policy_type, originator_policy_data) \
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) \
-                 ON CONFLICT(from_id, to_id, env, grant_ref_id) DO NOTHING"
+                 ON CONFLICT(from_id, to_id, env, grant_kind, grant_ref_id) DO NOTHING"
             }
         }
     }
@@ -116,11 +132,16 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
         let rows = self
             .query(
                 "list_active_grants",
+                // Runtime grants only: owner/manager are
+                // metadata edges and must never surface as
+                // runtime authorization (spec §3.2.5 / A16;
+                // no-op until Task 2 writes such rows).
                 DbStatement::with_params(
                     "SELECT id, env, from_id, to_id, grant_kind, grant_ref_id, \
                             rules, status, originator_policy_type, originator_policy_data \
                      FROM edge_grants \
-                     WHERE from_id = ? AND to_id = ? AND env = ? AND status = 'approved'",
+                     WHERE from_id = ? AND to_id = ? AND env = ? AND status = 'approved' \
+                       AND grant_kind IN ('permission_profile', 'rules')",
                     vec![
                         DbValue::from(from),
                         DbValue::from(to),
@@ -336,12 +357,21 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
         }
         self.query(
             "insert_grant_lookup",
+            // The check-back must be scoped by grant_kind too: with the
+            // bot-authority unique key
+            // (from_id, to_id, env, grant_kind, grant_ref_id), owner
+            // and manager edges share `grant_ref_id = 0` with runtime
+            // edges of the same (from, to) pair, so a kind-blind
+            // lookup would return the wrong row's id.
             DbStatement::with_params(
-                "SELECT id FROM edge_grants WHERE from_id = ? AND to_id = ? AND env = ? AND grant_ref_id = ? LIMIT 1",
+                "SELECT id FROM edge_grants \
+                 WHERE from_id = ? AND to_id = ? AND env = ? \
+                   AND grant_kind = ? AND grant_ref_id = ? LIMIT 1",
                 vec![
                     DbValue::from(from_id),
                     DbValue::from(to_id),
                     DbValue::from(env),
+                    DbValue::from(grant_kind_str(grant_kind)),
                     DbValue::from(grant_ref_id),
                 ],
             ),
@@ -1287,6 +1317,8 @@ fn parse_grant_kind(value: &str) -> ServiceResult<GrantKind> {
     match value {
         "permission_profile" => Ok(GrantKind::PermissionProfile),
         "rules" => Ok(GrantKind::Rules),
+        "owner" => Ok(GrantKind::Owner),
+        "manager" => Ok(GrantKind::Manager),
         other => Err(ServiceError::InternalError(format!(
             "unknown grant_kind: {}",
             other
@@ -1364,6 +1396,8 @@ fn grant_kind_str(kind: GrantKind) -> &'static str {
     match kind {
         GrantKind::PermissionProfile => "permission_profile",
         GrantKind::Rules => "rules",
+        GrantKind::Owner => "owner",
+        GrantKind::Manager => "manager",
     }
 }
 
@@ -1550,7 +1584,7 @@ mod tests {
                 originator_policy_data TEXT, \
                 gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
                 gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
-                UNIQUE (from_id, to_id, env, grant_ref_id))",
+                UNIQUE (from_id, to_id, env, grant_kind, grant_ref_id))",
         ))
         .await
         .expect("create edge_grants");

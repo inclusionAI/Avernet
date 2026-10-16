@@ -1,12 +1,11 @@
 //! Strict Bot creation, separate from the legacy registration/upsert path.
 
-use bcs_db_api::DbError;
+use bcs_config::resolve_env_str as resolve_env;
+use bcs_db_api::{DbError, DbSqlFlavor, DbValue as Value, db_get_column};
 use bcs_service_api::bot_provider::BotConnectionMode;
-
-use super::{
-    BotCapabilities, BotInfo, DbSqlFlavor, PersistentBotRepo, ServiceError, ServiceResult, Value,
-    db_get_column, resolve_env,
-};
+use bcs_service_api::{BotCapabilities, ServiceError, ServiceResult};
+use super::PersistentBotRepo;
+use crate::BotInfo;
 
 impl PersistentBotRepo {
     pub(super) async fn load_registration_token(
@@ -95,7 +94,7 @@ impl PersistentBotRepo {
     }
 }
 
-fn identity_duplicate(error: &DbError, flavor: DbSqlFlavor) -> bool {
+pub(super) fn identity_duplicate(error: &DbError, flavor: DbSqlFlavor) -> bool {
     let DbError::Backend(message) = error else {
         return false;
     };

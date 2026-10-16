@@ -1,3 +1,4 @@
+mod bot_authority;
 mod migrate;
 mod seed;
 mod seed_loader;
@@ -49,6 +50,14 @@ enum Commands {
     Template {
         #[command(subcommand)]
         command: TemplateCommands,
+    },
+
+    /// Bot ownership governance backfill
+    /// (inspect dry-run / per-Bot initialize).
+    #[command(name = "bot-authority")]
+    BotAuthority {
+        #[command(subcommand)]
+        command: bot_authority::BotAuthorityCommand,
     },
 }
 
@@ -104,6 +113,15 @@ async fn main() -> Result<()> {
                 }
             }
         },
+
+        Commands::BotAuthority { command } => {
+            let env_args = bot_authority::BotAuthorityEnvArgs {
+                config_dir: cli.global.config_dir.clone(),
+                config_file: cli.global.config.clone(),
+                sqlite_path: None,
+            };
+            bot_authority::run_bot_authority(&command, &env_args).await
+        }
     }
 }
 

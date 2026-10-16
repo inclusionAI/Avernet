@@ -333,8 +333,11 @@ impl ChatRunEventPort for BootstrapRunChannelPort {
             parent_span_id = %parent_span_id,
             "Chat run trace context registration evaluated"
         );
+        // The internal HTTP Run port registers an INTERNAL
+        // sink only: the public Workbench writer can never
+        // consume this String sender.
         self.run_channels
-            .register_with_trace_parent(
+            .register_internal_with_trace_parent(
                 run_id,
                 session_key,
                 sender,
@@ -755,6 +758,8 @@ mod tests {
             bot_connections: Arc::new(BotConnectionRegistry::new()),
             frontend_connections: Arc::new(WorkbenchConnectionRegistry::new()),
             frontend_run_channels: Arc::new(RunChannelManager::new()),
+            session_authorization_core: v1_state.session_authorization_core.clone(),
+            delivery_authorization: v1_state.delivery_authorization.clone(),
             coordination_processed: Arc::new(Mutex::new(HashMap::new())),
             leader_election: Arc::new(StandaloneLeaderElection::local()),
             lifecycle: Arc::new(Mutex::new(crate::lifecycle::LifecycleOrchestrator::new())),

@@ -10,9 +10,11 @@
 //! separate resource-authorization rules.
 
 mod connection;
+mod delivery_authorization;
 mod file;
 
 pub use connection::GroupSessionConnectionServiceImpl;
+pub use delivery_authorization::{DeliveryAuthorizationServiceImpl, ERROR_INTERNAL_READ};
 pub use file::SessionFileApplicationServiceImpl;
 
 use std::collections::HashSet;
@@ -23,7 +25,7 @@ use bcs_service_api::application::session::{SessionManagementService, SessionUse
 use bcs_service_api::application::system_message::SystemMessageService;
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedCaller, DeleteResult, HumanPrincipal, IdentityPolicy, Page,
-    Principal,
+    Principal, resolve_authorized_principal,
     message::{ListSessionMessages, SessionMessageService},
     require_authenticated_user, require_human, select_principal,
     session::{
@@ -34,6 +36,8 @@ use bcs_service_api::application::v1::{
         UpdateSession, UpdateSessionParticipant,
     },
 };
+use bcs_service_api::core::SessionAuthorizationCoreService;
+use bcs_service_api::port::bot_authority::BotAuthorityHook;
 use bcs_service_api::port::repo::SessionRepoPort;
 use bcs_service_api::port::{NoopParticipantViewBindingPort, ParticipantViewBindingPort};
 use bcs_service_api::types::{HumanMessageView, MessageViewScope};
@@ -42,19 +46,12 @@ use bcs_service_api::{
     CollaborationRuntimeService, CreateSessionLaunch, FriendCoreService, Group as DomainGroup,
     GroupCoreService, GroupMessage, GroupMessageHistoryService, GroupStrategy, GroupUseCaseError,
     HumanActor, MessageHistoryOptions, Participant, ParticipantMode, ParticipantRole,
-    RegisteredBot, RelationCoreService, RequestedSessionRole, ServiceError, Session,
+    RegisteredBot, RequestedSessionRole, ServiceError, Session,
+    SessionCaller,
     SessionHistoryCommand, SessionKind, SessionLaunchError, SessionLaunchRequest,
     SessionLaunchService, SessionStatus as DomainSessionStatus, StateMachineRunView,
     SystemMessageEvent, backfill_participant_names,
 };
-
-#[derive(Debug, Clone)]
-pub struct SessionServiceConfig {
-    /// Relation environment tag retained for parity with the sibling Group V1
-    /// facade; used by the collaboration-eligibility creator-edge check
-    /// (`ensure_collaboration_eligible`).
-    pub relation_env: String,
-}
 
 /// OpenAPI v1 Session facade.
 ///
@@ -67,13 +64,21 @@ pub struct SessionServiceImpl {
     groups: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
     friends: Arc<dyn FriendCoreService>,
-    relation: Arc<dyn RelationCoreService>,
     session_repo: Arc<dyn SessionRepoPort>,
     history: Arc<dyn GroupMessageHistoryService>,
     collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
     system_message: Arc<dyn SystemMessageService>,
     participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
-    config: SessionServiceConfig,
+    /// The narrow authority hook (bot-authority plan Task
+    /// 6.3): every Human→Bot control judgment consults it
+    /// live; a missing wiring fails closed.
+    bot_authority: Option<Arc<dyn BotAuthorityHook>>,    /// The strict Session authorization-fact Core
+    /// (bot-authority plan §3, spec §8.3): the
+    /// resource-role legs of Session detail reads
+    /// consume its snapshot — never this
+    /// instance's display fetch. A missing wiring
+    /// fails closed.
+    session_snapshots: Option<Arc<dyn SessionAuthorizationCoreService>>,
 }
 
 impl SessionServiceImpl {
@@ -84,12 +89,10 @@ impl SessionServiceImpl {
         groups: Arc<dyn GroupCoreService>,
         registry: Arc<dyn BotRegistryCoreService>,
         friends: Arc<dyn FriendCoreService>,
-        relation: Arc<dyn RelationCoreService>,
         session_repo: Arc<dyn SessionRepoPort>,
         history: Arc<dyn GroupMessageHistoryService>,
         collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
         system_message: Arc<dyn SystemMessageService>,
-        config: SessionServiceConfig,
     ) -> Self {
         Self {
             launch,
@@ -97,13 +100,109 @@ impl SessionServiceImpl {
             groups,
             registry,
             friends,
-            relation,
             session_repo,
             history,
             collaboration_runtime,
             system_message,
             participant_view_bindings: Arc::new(NoopParticipantViewBindingPort),
-            config,
+            bot_authority: None,
+            session_snapshots: None,
+        }
+    }
+
+    /// Wire the strict Session authorization-snapshot
+    /// Core (spec §8.3).
+    pub fn with_session_authorization_core(
+        mut self,
+        session_snapshots: Arc<dyn SessionAuthorizationCoreService>,
+    ) -> Self {
+        self.session_snapshots = Some(session_snapshots);
+        self
+    }
+
+    /// Wire the authority hook (bot-authority plan Task 6.3).
+    pub fn with_bot_authority_hook(
+        mut self,
+        bot_authority: Arc<dyn BotAuthorityHook>,
+    ) -> Self {
+        self.bot_authority = Some(bot_authority);
+        self
+    }
+
+    /// The wired authority hook; failing to wire one is a
+    /// composition error and must fail closed (never deny-as-Ok).
+    fn authority(&self) -> Result<&dyn BotAuthorityHook, ApplicationError> {
+        self.bot_authority
+            .as_deref()
+            .ok_or_else(|| {
+                ApplicationError::internal(
+                    "bot authority hook is not wired",
+                )
+            })
+    }
+
+    /// The CURRENT Human→Bot control judgment (rows 4/6/7,
+    /// bot-authority plan Task 6.3): a live `can_manage`
+    /// edge for the verified User id. The historical
+    /// `created_by` fact and the legacy creator relation
+    /// edge no longer authorize anything here.
+    async fn human_controls_bot(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> Result<bool, ApplicationError> {
+        self.authority()?
+            .can_manage(user_id, bot_id)
+            .await
+            .map_err(map_authority_error)
+    }
+
+    /// Hybrid identity resolution (rows 4/7): replaces the
+    /// claim-local `HumanOrOwnedBot` selection with
+    /// `resolve_authorized_principal` for the authenticated
+    /// Bot under the live management edge; pure Bot / pure
+    /// Human credentials keep their existing selection.
+    async fn resolve_principal(
+        &self,
+        caller: &AuthenticatedCaller,
+    ) -> Result<Principal, ApplicationError> {
+        match &caller.bot {
+            Some(bot) => {
+                resolve_authorized_principal(
+                    caller,
+                    IdentityPolicy::HumanOrAuthorizedBot {
+                        bot_id: bot.bot_uuid.clone(),
+                    },
+                    self.authority()?,
+                )
+                .await
+            }
+            None => select_principal(caller, IdentityPolicy::HumanOrOwnedBot),
+        }
+    }
+
+    /// Project the authenticated caller of a V1 create onto
+    /// the launch contract's `SessionCaller` (row 4). The
+    /// Bot caller choice for hybrid credentials happens
+    /// HERE, through the LIVE authority edge; the adapter
+    /// keeps protocol adaptation only.
+    async fn launch_caller_from_principal(
+        &self,
+        caller: &AuthenticatedCaller,
+    ) -> Result<SessionCaller, ApplicationError> {
+        match self.resolve_principal(caller).await? {
+            Principal::Bot(bot) => Ok(SessionCaller::Bot {
+                bot_uuid: bot.bot_uuid.clone(),
+            }),
+            Principal::Human(human) => Ok(SessionCaller::Human {
+                actor_id: format!("human_{}", human.subject.id),
+                owner_id: human.subject.id.clone(),
+                display_name: human
+                    .subject
+                    .display_name
+                    .clone()
+                    .or_else(|| human.subject.full_name.clone()),
+            }),
         }
     }
 
@@ -116,22 +215,6 @@ impl SessionServiceImpl {
     }
 
     // ── authorization helpers ──────────────────────────────────────────
-
-    /// Manager of the parent group (driver / originator / manager participant).
-    /// Mirrors `bcs-app-group`'s targeted Human-to-actor authority semantics.
-    fn group_management_actor_ids(group: &DomainGroup) -> Vec<String> {
-        let mut actor_ids = vec![group.driver_bot.clone(), group.originator().to_string()];
-        if group.group_strategy == GroupStrategy::ManagerWorker {
-            actor_ids.extend(
-                group
-                    .participants
-                    .iter()
-                    .filter(|participant| participant.role == ParticipantRole::Manager)
-                    .map(|participant| participant.bot_uuid.clone()),
-            );
-        }
-        actor_ids
-    }
 
     async fn human_can_act_as_any(
         &self,
@@ -161,15 +244,14 @@ impl SessionServiceImpl {
             if bot.actor_kind != ActorKind::Bot {
                 continue;
             }
-            if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
-                return Ok(true);
-            }
-            let creator_edge = self
-                .relation
-                .get_edge(&human_actor_id, &actor_id, &self.config.relation_env)
-                .await
-                .map_err(map_service_error)?;
-            if creator_edge.is_some_and(|edge| edge.is_creator) {
+            // Row 4: the CURRENT `can_manage` edge decides;
+            // the historical `created_by` and the legacy
+            // creator relation edge no longer authorize
+            // (spec §3.2).
+            if self
+                .human_controls_bot(&human.subject.id, &actor_id)
+                .await?
+            {
                 return Ok(true);
             }
         }
@@ -202,7 +284,23 @@ impl SessionServiceImpl {
         group: &DomainGroup,
     ) -> Result<bool, ApplicationError> {
         let actor_id = principal.actor_id();
-        let candidates = Self::group_management_actor_ids(group);
+        // Spec §8.3: the Group's management anchors are
+        // snapshot facts re-read at the decision — the
+        // display copy this process fetched never
+        // elevates.
+        let candidates = self
+            .groups
+            .read_authorization_snapshot(&group.id)
+            .await
+            .map_err(map_service_error)?
+            .map(|snapshot| {
+                snapshot
+                    .management_actor_ids()
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         if candidates.iter().any(|candidate| candidate == &actor_id) {
             return Ok(true);
         }
@@ -333,20 +431,26 @@ impl SessionServiceImpl {
         participant: &str,
     ) -> Result<Session, ApplicationError> {
         let user = require_authenticated_user(caller)?;
-        // The participant must be owned by the authenticated Human: one of the
-        // Human's own bots, OR the Human's own actor entry. `ensure_human_actor`
-        // registers the latter as `human_{staff_no}` with `created_by` =
-        // `staff_no` and `actor_kind = Human`. The legacy
-        // `resolve_collector_bot` admits both via `list_bots_by_creator`, which
-        // does not filter by actor kind — so a Human can collect a Session as
-        // itself, not only through an owned bot. Match that contract by keying
-        // ownership on `created_by` alone.
-        let owned = self
+        // Row 6: the participant must be under the
+        // authenticated Human's CURRENT control — its own
+        // `human_{id}` actor entry, or a Bot with a live
+        // `can_manage` edge. The historical `created_by`
+        // no longer admits anything.
+        let human_actor_id = format!("human_{}", user.id);
+        let owned = match self
             .registry
             .try_get(participant)
             .await
             .map_err(map_service_error)?
-            .is_some_and(|bot| bot.created_by.as_deref() == Some(user.id.as_str()));
+        {
+            Some(actor) if actor.actor_kind == ActorKind::Human => {
+                actor.bot_uuid == human_actor_id
+            }
+            Some(_) => {
+                self.human_controls_bot(&user.id, participant).await?
+            }
+            None => false,
+        };
         if !owned {
             return Err(ApplicationError::forbidden(
                 "The target participant is not owned by the authenticated Human",
@@ -407,7 +511,9 @@ impl SessionServiceImpl {
                 }
                 other => other,
             })?;
-        if bot.actor_kind == ActorKind::Bot && bot.created_by.as_deref() == Some(user.id.as_str()) {
+        if bot.actor_kind == ActorKind::Bot
+            && self.human_controls_bot(&user.id, requested).await?
+        {
             Ok(requested.to_string())
         } else {
             Err(ApplicationError::forbidden(
@@ -416,34 +522,67 @@ impl SessionServiceImpl {
         }
     }
 
+    /// The strict Session authorization-fact snapshot
+    /// (spec §8.3); the resource-role legs of detail
+    /// reads consume it, never this instance's
+    /// display fetch. An unwired Core is a
+    /// composition error (fail closed).
+    async fn session_authorization_snapshot(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<bcs_service_api::types::authorization_snapshot::SessionAuthorizationSnapshot>, ApplicationError>
+    {
+        self.session_snapshots
+            .as_deref()
+            .ok_or_else(|| {
+                ApplicationError::internal(
+                    "session authorization snapshot core is not wired",
+                )
+            })?
+            .read_authorization_snapshot(session_id)
+            .await
+            .map_err(map_service_error)
+    }
+
     async fn can_read_session_detail(
         &self,
         principal: &Principal,
         session: &Session,
     ) -> Result<bool, ApplicationError> {
-        if session
-            .participants
+        // Spec §8.3: the resource roles come from the
+        // strict snapshot read (another instance's
+        // participant change invalidates a cached
+        // pass).
+        let participants = self
+            .session_authorization_snapshot(&session.id)
+            .await?
+            .map(|snapshot| snapshot.participants)
+            .unwrap_or_default();
+        if participants
             .iter()
-            .any(|participant| participant.bot_uuid == principal.actor_id())
+            .any(|participant| participant.actor_id == principal.actor_id())
         {
             return Ok(true);
         }
         let Principal::Human(human) = principal else {
             return Ok(false);
         };
-        let owned_bot_ids = self
-            .registry
-            .try_list_bots_by_creator(&human.subject.id)
-            .await
-            .map_err(map_service_error)?
-            .into_iter()
-            .filter(|bot| bot.actor_kind == ActorKind::Bot)
-            .map(|bot| bot.bot_uuid)
-            .collect::<HashSet<_>>();
-        Ok(session.participants.iter().any(|participant| {
-            participant.actor_kind == ActorKind::Bot
-                && owned_bot_ids.contains(&participant.bot_uuid)
-        }))
+        // Row 6 view leg: the Human reads a Session through
+        // a participant Bot it CURRENTLY controls (live
+        // `can_manage` per participant, never a
+        // creator-list whitelist).
+        for participant in participants
+            .iter()
+            .filter(|participant| participant.actor_kind == ActorKind::Bot)
+        {
+            if self
+                .human_controls_bot(&human.subject.id, &participant.actor_id)
+                .await?
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     async fn load_session_for_detail(
@@ -451,7 +590,7 @@ impl SessionServiceImpl {
         caller: &AuthenticatedCaller,
         session_id: &str,
     ) -> Result<Session, ApplicationError> {
-        let principal = select_principal(caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let principal = self.resolve_principal(caller).await?;
         let session = self.load_session(session_id).await?;
         self.load_group(&session.group_id).await?;
         if !self.can_read_session_detail(&principal, &session).await? {
@@ -539,18 +678,15 @@ impl SessionServiceImpl {
         if anchor_id == bot.bot_uuid {
             return Ok(true);
         }
-        if let Some(staff_no) = anchor_id.strip_prefix("human_") {
-            if bot.created_by.as_deref() == Some(staff_no) {
-                return Ok(true);
-            }
-            let creator_edge = self
-                .relation
-                .get_edge(anchor_id, &bot.bot_uuid, &self.config.relation_env)
-                .await
-                .map_err(map_service_error)?;
-            if creator_edge.is_some_and(|edge| edge.is_creator) {
-                return Ok(true);
-            }
+        // Row 6 anchor leg (spec §8.1): a Human anchor
+        // sponsors a controlled, non-hidden Bot through its
+        // CURRENT `can_manage` edge — friendship is not
+        // required for this leg, and the legacy `created_by`
+        // fact / creator relation edge no longer sponsor.
+        if let Some(staff_no) = anchor_id.strip_prefix("human_")
+            && self.human_controls_bot(staff_no, &bot.bot_uuid).await?
+        {
+            return Ok(true);
         }
         if self
             .friends
@@ -623,11 +759,23 @@ impl SessionService for SessionServiceImpl {
         &self,
         command: CreateSession,
     ) -> Result<CreateSessionOutcome, ApplicationError> {
+        // Row 4 (resolve before the launch): the effective
+        // SessionCaller comes from the LIVE hybrid rule —
+        // `resolve_authorized_principal` for the
+        // authenticated Bot. A hybrid User+Bot credential
+        // becomes the Bot caller ONLY through the CURRENT
+        // management edge; a revoked historical owner is a
+        // 403 here, and a current manager is admitted. Pure
+        // Bot / pure Human credentials keep their existing
+        // selection (the hook is not consulted).
+        let caller = self
+            .launch_caller_from_principal(&command.caller)
+            .await?;
         let outcome = self
             .launch
             .create(CreateSessionLaunch {
                 request: SessionLaunchRequest {
-                    caller: command.caller,
+                    caller,
                     group_id: command.group_id,
                     requested_creator: command.acting_bot_id,
                     title: command.title,
@@ -731,7 +879,7 @@ impl SessionService for SessionServiceImpl {
     }
 
     async fn update(&self, command: UpdateSession) -> Result<SessionDetail, ApplicationError> {
-        let principal = select_principal(&command.caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let principal = self.resolve_principal(&command.caller).await?;
         // Only `title` is mutable in phase one; a request carrying no field is
         // rejected (mirrors the sibling Group V1 facade).
         if command.title.is_none() {
@@ -751,7 +899,7 @@ impl SessionService for SessionServiceImpl {
     }
 
     async fn delete(&self, command: DeleteSession) -> Result<DeleteResult, ApplicationError> {
-        let principal = select_principal(&command.caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let principal = self.resolve_principal(&command.caller).await?;
         // Idempotent: a missing session yields `deleted: false` rather than a
         // 404 so repeat deletes converge. Non-managers still get 403.
         let session = match self
@@ -777,7 +925,23 @@ impl SessionService for SessionServiceImpl {
                     ));
                 }
             };
-            let management_actor_ids = Self::group_management_actor_ids(&group);
+            // Spec §8.3: management anchors as
+            // snapshot facts, re-read at the
+            // decision — the display copy never
+            // authorizes.
+            let management_actor_ids = self
+                .groups
+                .read_authorization_snapshot(&group.id)
+                .await
+                .map_err(map_service_error)?
+                .map(|snapshot| {
+                    snapshot
+                        .management_actor_ids()
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             management_actor_ids
                 .iter()
                 .any(|actor_id| actor_id == &acting_actor_id)
@@ -1594,6 +1758,19 @@ fn map_launch_error(error: SessionLaunchError) -> ApplicationError {
         }
         SessionLaunchError::Runtime(error) => map_runtime_error(error),
         SessionLaunchError::Internal(error) => map_service_error(error),
+    }
+}
+
+/// Map one authority read to application errors: a strict
+/// deny (`Forbidden`) is 403; every other read failure
+/// propagates as an internal error (spec §3.2: 存储错误
+/// 返回错误 — never a deny-as-false).
+fn map_authority_error(error: ServiceError) -> ApplicationError {
+    match error {
+        ServiceError::Forbidden(message) => ApplicationError::forbidden(message),
+        other => ApplicationError::internal(format!(
+            "bot authority lookup failed: {other}"
+        )),
     }
 }
 

@@ -9,6 +9,7 @@ pub mod permission_profile;
 pub mod permission_request;
 
 pub use edge_grant::run_edge_grant_repo_contract;
+pub use permission_profile::permission_profile_repo_port_contract_tests;
 pub use permission_profile::run_permission_profile_repo_contract;
 pub use permission_request::run_permission_request_repo_contract;
 

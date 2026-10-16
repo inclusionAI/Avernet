@@ -75,17 +75,34 @@ pub async fn provider_bot_binding_repo_port_contract_tests(repo: &dyn ProviderBo
     assert!(repo.update_binding_disabled("projection", false, 4000).await.is_err());
 }
 
-/// The caller supplies one active Bot-owned Provider identity to delete.
+/// The caller supplies one active Bot-owned Provider identity to retire.
 pub async fn provider_bot_core_service_contract_tests(
     core: &dyn bcs_service_api::ProviderBotCoreService,
     provider_id: &str, admin_token: &str, provider_bot_ref: &str,
 ) {
-    assert!(core.delete_registered_provider_bot(provider_id, "invalid-admin-token", provider_bot_ref).await.is_err());
-    assert!(core.delete_registered_provider_bot("other-provider", admin_token, provider_bot_ref).await.is_err());
-    let first = core.delete_registered_provider_bot(provider_id, admin_token, provider_bot_ref).await.unwrap().unwrap();
-    assert!(first.deleted);
-    let repeated = core.delete_registered_provider_bot(provider_id, admin_token, provider_bot_ref).await.unwrap().unwrap();
-    assert_eq!(first.bot_uuid, repeated.bot_uuid);
-    assert!(!repeated.deleted);
-    assert!(core.delete_registered_provider_bot(provider_id, admin_token, "unknown-ref").await.unwrap().is_none());
+    use bcs_service_api::core::RetireProviderBotParams;
+    let params = |token: &str, reference: &str| RetireProviderBotParams {
+        provider_id: provider_id.to_string(),
+        provider_admin_token: token.to_string(),
+        provider_bot_ref: reference.to_string(),
+        allow_unbound_owner_suffixed_bot: false,
+    };
+    // The token is verification-only: a wrong token never retires.
+    assert!(core.retire_registered_bot(params("invalid-admin-token", provider_bot_ref)).await.is_err());
+    // A foreign provider never re-interprets the identity:
+    // its branch resolution finds nothing to retire.
+    assert!(core.retire_registered_bot(
+        params("other-provider", provider_bot_ref)
+    ).await.is_err());
+    let first = core.retire_registered_bot(params(admin_token, provider_bot_ref)).await.unwrap();
+    assert!(first.changed);
+    assert_eq!(first.provider_id, provider_id);
+    assert_eq!(first.provider_bot_ref, provider_bot_ref);
+    // A repeated retire is idempotent: changed = false, the SAME
+    // identity/location data (never a resurrected Bot).
+    let repeated = core.retire_registered_bot(params(admin_token, provider_bot_ref)).await.unwrap();
+    assert_eq!(first.bot_id, repeated.bot_id);
+    assert!(first.branch == repeated.branch);
+    assert!(!repeated.changed);
+    assert!(core.retire_registered_bot(params(admin_token, "unknown-ref")).await.is_err());
 }

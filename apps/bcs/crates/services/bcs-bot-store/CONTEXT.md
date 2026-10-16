@@ -72,3 +72,22 @@ projection writes are unchanged. No separate registration table is created or
 queried. Upstream migrations remain
 unchanged; this PR's unused drafts were consolidated before its first deployment.
 See docs/provider-bot-storage-migration.md for rollout limitations.
+
+Bot authority state (bot-authority spec, plan Tasks 3–4) joins the SAME
+atomic shared state for Memory (`MemoryBotState`) and the SQL chain: the
+owner/manager edge projection, `bcs_bots.ownership_version`, the
+`bot_ownership_transfers` current-round row (one pending per
+`(env, bot_id, target_owner_actor_id)`) and the `bot_authority_changes`
+permission-scope audit. Registration commits the owner identity, the owner
+edge, `ownership_version` and the default runtime profile in one command
+(`register_with_ownership` → `CommittedBotRegistration`); owner transfer
+acceptance moves owner/manager edges and bumps the version inside one
+transaction, restoring the ex-owner as a plain manager. Manager sync is a
+set replacement in one transaction (input ≤1,000 deduped known Humans,
+stock cap 10,000, bounded retry for deterministic local rollbacks only);
+the owner is never a sync operand. Provider retirement (three branches),
+cleanup-pending retry and retire audits share the same atomic command
+boundary; a failed post-commit cleanup returns
+`retirement_cleanup_pending` and stays retriable without new audit rows.
+The authority read-side same-record pin (profile port, memory mode) holds
+for both dialects.

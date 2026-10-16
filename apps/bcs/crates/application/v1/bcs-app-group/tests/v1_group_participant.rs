@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bcs_bot::BotCore;
+use bcs_bot_store::MemoryBotRepo;
 use bcs_friend::FriendCore;
 use bcs_group::{GroupConfig, GroupCore, GroupManagement, MemoryGroupRepo};
 use bcs_relation::RelationCore;
@@ -35,6 +36,7 @@ struct Fixture {
     groups: Arc<GroupCore>,
     bots: Arc<BotCore>,
     participant_view_bindings: Arc<RecordingParticipantViewBindings>,
+    authority_repo: Arc<MemoryBotRepo>,
 }
 
 #[derive(Default)]
@@ -87,6 +89,7 @@ impl Fixture {
         let system_message: Arc<dyn SystemMessageService> = Arc::new(NoopSystemMessageService);
         let participant_view_bindings =
             Arc::new(RecordingParticipantViewBindings::default());
+        let authority_repo = Arc::new(MemoryBotRepo::new());
         let management = Arc::new(
             GroupManagement::new(
                 groups.clone(),
@@ -97,18 +100,20 @@ impl Fixture {
                 sessions.clone(),
                 system_message,
             )
+            .with_bot_authority(bcs_test_support::authority_hook_for(
+                authority_repo.clone(),
+            ))
             .for_v1_openapi(),
         );
         let service = GroupServiceImpl::new(
             groups.clone(),
             bots.clone(),
             friends,
-            relation.clone(),
             sessions,
             management,
-            GroupServiceConfig {
-                relation_env: "dev".to_string(),
-            },
+        )
+        .with_bot_authority_hook(
+            bcs_test_support::authority_hook_for(authority_repo.clone()),
         )
         .with_participant_view_bindings(participant_view_bindings.clone());
         Self {
@@ -116,6 +121,7 @@ impl Fixture {
             groups,
             bots,
             participant_view_bindings,
+            authority_repo,
         }
     }
 
@@ -137,6 +143,14 @@ impl Fixture {
             .save_created_by(bot_uuid, staff_no, true)
             .await
             .expect("assign Bot owner");
+        // The CURRENT owner edge replaces the historical
+        // `created_by` fact (bot-authority plan Task 6.2).
+        bcs_test_support::grant_owner_edge(
+            &self.authority_repo,
+            bot_uuid,
+            staff_no,
+        )
+        .await;
     }
 }
 

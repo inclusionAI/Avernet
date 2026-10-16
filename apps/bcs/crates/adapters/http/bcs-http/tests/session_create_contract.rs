@@ -73,6 +73,8 @@ async fn create_session_rejects_human_who_does_not_own_any_participant() {
 
     let sessions = Arc::new(MockSessions::default());
 
+    let authority = bcs_test_support::lazy_authority_chain().hook;
+    authority.seed_owner("driver-bot", "alice");
     let mut services = Services::noop();
     services.registry = registry.clone();
     services.group = group_store.clone();
@@ -83,7 +85,8 @@ async fn create_session_rejects_human_who_does_not_own_any_participant() {
         sessions.clone(),
         services.collaboration_runtime.clone(),
         services.system_message.clone(),
-    ));
+    )
+    .with_bot_authority_hook(authority.clone()));
 
     let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
         staff_no: Some("mallory".to_string()),
@@ -143,7 +146,9 @@ async fn create_session_allows_human_who_owns_a_participant_bot() {
 
     let sessions = Arc::new(MockSessions::default());
 
+    let authority = bcs_test_support::lazy_authority_chain().hook;
     let mut services = Services::noop();
+    authority.seed_owner("driver-bot", "alice");
     services.registry = registry.clone();
     services.group = group_store.clone();
     services.session_management = sessions.clone();
@@ -154,7 +159,8 @@ async fn create_session_allows_human_who_owns_a_participant_bot() {
         sessions.clone(),
         services.collaboration_runtime.clone(),
         services.system_message.clone(),
-    ));
+    )
+    .with_bot_authority_hook(authority.clone()));
 
     let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
         staff_no: Some("alice".to_string()),
@@ -213,8 +219,10 @@ async fn legacy_session_id_reactivates_through_the_shared_service() {
         .unwrap();
 
     let sessions = Arc::new(MockSessions::default());
+    let authority = bcs_test_support::lazy_authority_chain().hook;
     let mut services = Services::noop();
     services.registry = registry.clone();
+    authority.seed_owner("driver-bot", "alice");
     services.group = group_store.clone();
     services.session_management = sessions.clone();
     services.session_launch = Arc::new(SessionLaunchApplication::new(
@@ -223,7 +231,8 @@ async fn legacy_session_id_reactivates_through_the_shared_service() {
         sessions.clone(),
         services.collaboration_runtime.clone(),
         services.system_message.clone(),
-    ));
+    )
+    .with_bot_authority_hook(authority.clone()));
 
     let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
         staff_no: Some("alice".to_string()),
@@ -304,9 +313,11 @@ async fn state_machine_group_session_creation_starts_run_with_created_session() 
     let sessions = Arc::new(MockSessions::default());
     let collaboration = Arc::new(RecordingCollaborationRuntime::default());
 
+    let authority = bcs_test_support::lazy_authority_chain().hook;
     let mut services = Services::noop();
     services.registry = registry.clone();
     services.group = group_store.clone();
+    authority.seed_owner("driver-bot", "alice");
     services.session_management = sessions.clone();
     services.collaboration_runtime = collaboration.clone();
     services.session_launch = Arc::new(SessionLaunchApplication::new(
@@ -315,7 +326,8 @@ async fn state_machine_group_session_creation_starts_run_with_created_session() 
         sessions.clone(),
         collaboration.clone(),
         services.system_message.clone(),
-    ));
+    )
+    .with_bot_authority_hook(authority.clone()));
 
     let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
         staff_no: Some("alice".to_string()),
@@ -429,17 +441,20 @@ async fn legacy_private_human_creator_membership_matches_the_pre_pr_contract() {
         Arc::new(MemoryGroupRepo::new()),
     ));
 
+    let authority = bcs_test_support::lazy_authority_chain().hook;
     let mut services = Services::noop();
     services.registry = registry.clone();
     services.group = group_store.clone();
     services.session_management = sessions.clone();
+    authority.seed_owner("driver-bot", "alice");
     services.session_launch = Arc::new(SessionLaunchApplication::new(
         registry,
         group_store.clone(),
         sessions.clone(),
         services.collaboration_runtime.clone(),
         services.system_message.clone(),
-    ));
+    )
+    .with_bot_authority_hook(authority.clone()));
 
     let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
         staff_no: Some("alice".to_string()),
@@ -900,6 +915,7 @@ async fn public_group_session_includes_non_member_human_in_participants() {
 
     let sessions = Arc::new(MockSessions::default());
 
+    let authority = bcs_test_support::lazy_authority_chain().hook;
     let mut services = Services::noop();
     services.registry = registry.clone();
     services.group = group_store.clone();
@@ -910,7 +926,8 @@ async fn public_group_session_includes_non_member_human_in_participants() {
         sessions.clone(),
         services.collaboration_runtime.clone(),
         services.system_message.clone(),
-    ));
+    )
+    .with_bot_authority_hook(authority.clone()));
 
     // Human "bob" is NOT a member of the group and does NOT own driver-bot
     let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {

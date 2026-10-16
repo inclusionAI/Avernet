@@ -33,6 +33,14 @@ struct Fixture {
     groups: Arc<GroupCore>,
     sessions: Arc<SessionManagementServiceImpl>,
     bots: Arc<BotCore>,
+    /// The REAL authority chain backing the
+    /// invite-issuance control legs; the A→B
+    /// handover and edge-withdrawal tests drive
+    /// it directly.
+    authority_repo: Arc<bcs_bot_store::MemoryBotRepo>,
+    authority: Arc<
+        dyn bcs_service_api::core::bot_authority::BotAuthorityCoreService,
+    >,
 }
 
 impl Fixture {
@@ -47,6 +55,14 @@ impl Fixture {
             session_repo.clone(),
             group_repo.clone(),
         ));
+        // The invite-issuance control legs resolve
+        // the REAL authority chain (a revoked or
+        // transferred creator no longer mints NEW
+        // invitation links).
+        let authority_repo = Arc::new(bcs_bot_store::MemoryBotRepo::new());
+        let authority = bcs_test_support::authority_hook_for(
+            authority_repo.clone(),
+        );
         let service = InviteServiceImpl {
             registry: bots.clone(),
             group: groups.clone(),
@@ -57,12 +73,15 @@ impl Fixture {
             base_url: None,
             group_link_url: None,
             session_link_url: None,
+            bot_authority: Some(authority.clone()),
         };
         Self {
             service,
             groups,
             sessions,
             bots,
+            authority_repo,
+            authority,
         }
     }
 
@@ -82,6 +101,27 @@ impl Fixture {
             .save_created_by(bot_uuid, owner_staff_no, true)
             .await
             .expect("assign test Bot owner");
+        // Row-12 cutover: the CURRENT owner edge
+        // (the historical `created_by` no longer
+        // authorizes NEW invite issuance).
+        bcs_test_support::grant_owner_edge(
+            &self.authority_repo,
+            bot_uuid,
+            owner_staff_no,
+        )
+        .await;
+    }
+
+    async fn transfer_bot(&self, bot_uuid: &str, from: &str, to: &str) {
+        bcs_test_support::grant_owner_edge(&self.authority_repo, bot_uuid, to)
+            .await;
+        bcs_test_support::revoke_authority_edge(
+            &self.authority_repo,
+            bot_uuid,
+            from,
+            bcs_bot_store::memory_authority::MemoryAuthorityEdgeKind::Manager,
+        )
+        .await;
     }
 
     async fn store_group(&self, group_id: &str, driver: &str) {
@@ -526,4 +566,144 @@ async fn pre_field_legacy_token_still_joins_both_paths() {
         .await
         .expect("pre-field token still joins the session path");
     assert!(joined.joined);
+}
+
+// ── Row-12 cutover: NEW invite issuance follows
+//    the CURRENT authority edge; the `created_by`
+//    claim (including a revoked one) mints
+//    nothing. Previously-issued URLs keep
+//    working through the join paths (out of
+//    scope here). ──
+
+#[tokio::test]
+async fn group_invite_issuance_follows_the_current_edge() {
+    let fx = Fixture::new().await;
+    fx.add_owned_bot("bot-a", "staff-owner").await;
+    // NO Human originator: the ONLY Human path into
+    // group-invite minting is the CURRENT control
+    // edge on driver/originator.
+    let mut group = Group::new(
+        "grp-1",
+        "bot-a",
+        vec![Participant::bot("bot-a", ParticipantRole::Driver)],
+    );
+    group.originator = None;
+    group.label = Some("grp-1".to_string());
+    group.group_strategy = GroupStrategy::Chat;
+    fx.groups.upsert(group).await.expect("store group");
+    let staff_cmd = |staff_no: &str| CreateInviteTokenCommand {
+        caller_actor_id: None,
+        caller_staff_no: Some(staff_no.to_string()),
+        target_id: "grp-1".to_string(),
+        ttl_seconds: None,
+    };
+
+    // A (the CURRENT controller) mints.
+    fx.service
+        .create_group_invite_token(staff_cmd("staff-owner"))
+        .await
+        .expect("the controller mints");
+
+    // A→B handover: B's owner grant REPLACES A's and
+    // A's edges are withdrawn — the same staff that
+    // minted above is now denied.
+    bcs_test_support::grant_owner_edge(
+        &fx.authority_repo,
+        "bot-a",
+        "staff-bob",
+    )
+    .await;
+    bcs_test_support::revoke_authority_edge(
+        &fx.authority_repo,
+        "bot-a",
+        "staff-owner",
+        bcs_bot_store::memory_authority::MemoryAuthorityEdgeKind::Owner,
+    )
+    .await;
+    let denied = fx
+        .service
+        .create_group_invite_token(staff_cmd("staff-owner"))
+        .await
+        .expect_err("the revoked creator mints nothing");
+    assert!(
+        matches!(denied, InviteUseCaseError::Forbidden(_)),
+        "expected Forbidden, got {denied:?}"
+    );
+
+    // B (the CURRENT controller) mints.
+    fx.service
+        .create_group_invite_token(staff_cmd("staff-bob"))
+        .await
+        .expect("the new controller mints");
+
+    // Manager polarity: a current MANAGER of the
+    // originator/driver Bot mints NEW invites.
+    bcs_test_support::grant_manager_edge(
+        &fx.authority_repo,
+        "bot-a",
+        "staff-carol",
+    )
+    .await;
+    fx.service
+        .create_group_invite_token(staff_cmd("staff-carol"))
+        .await
+        .expect("the current manager mints");
+}
+
+#[tokio::test]
+async fn session_invite_issuance_follows_the_current_edge() {
+    let fx = Fixture::new().await;
+    fx.add_owned_bot("bot-b", "staff-9").await;
+    fx.store_group("grp-1", "bot-a").await;
+    let session_id = fx
+        .create_session_with_participants(
+            "grp-1",
+            "bot-a",
+            vec![
+                Participant::bot("bot-a", ParticipantRole::Driver),
+                Participant::bot("bot-b", ParticipantRole::Consultant),
+            ],
+        )
+        .await;
+    let staff_cmd = |staff_no: &str| CreateInviteTokenCommand {
+        caller_actor_id: None,
+        caller_staff_no: Some(staff_no.to_string()),
+        target_id: session_id.clone(),
+        ttl_seconds: None,
+    };
+
+    // A (CURRENT controller of participant bot-b) mints.
+    fx.service
+        .create_session_invite_token(staff_cmd("staff-9"))
+        .await
+        .expect("the controller of a participant mints");
+
+    // A→B handover of bot-b; A's edges withdrawn: the
+    // Historical creator claim mints nothing, B mints.
+    bcs_test_support::grant_owner_edge(
+        &fx.authority_repo,
+        "bot-b",
+        "staff-bob",
+    )
+    .await;
+    bcs_test_support::revoke_authority_edge(
+        &fx.authority_repo,
+        "bot-b",
+        "staff-9",
+        bcs_bot_store::memory_authority::MemoryAuthorityEdgeKind::Owner,
+    )
+    .await;
+    let denied = fx
+        .service
+        .create_session_invite_token(staff_cmd("staff-9"))
+        .await
+        .expect_err("the revoked creator mints nothing");
+    assert!(
+        matches!(denied, InviteUseCaseError::Forbidden(_)),
+        "expected Forbidden, got {denied:?}"
+    );
+    fx.service
+        .create_session_invite_token(staff_cmd("staff-bob"))
+        .await
+        .expect("the new controller mints");
 }

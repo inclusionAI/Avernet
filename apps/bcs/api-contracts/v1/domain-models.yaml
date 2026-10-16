@@ -172,6 +172,17 @@ PhysicalBot:
       minLength: 1
       description: >-
         Immutable creator staff_no. Omitted when a legacy row has no creator.
+    access_relation:
+      type: string
+      enum:
+        - owner
+        - manager
+      description: >-
+        Sampled authority relation of the calling Human on this row
+        (bot-authority spec §8 mine row). Present only on the mine
+        (`GET /bots/mine`) projection; every other projection omits
+        the field, and the sampled value is never an authorization
+        result.
     descriptor:
       $ref: "#/BotDescriptor"
     reachability:
@@ -247,6 +258,15 @@ HumanBot:
       minLength: 1
       description: >-
         Immutable creator staff_no. Omitted when a legacy row has no creator.
+    access_relation:
+      type: string
+      const: self
+      description: >-
+        Relation of the calling Human's OWN Human self row (bot-authority
+        spec §8 mine row: "Human 自身条目保持 self 语义"), always `self` —
+        a Human→Human owner edge never exists. Present only on the mine
+        (`GET /bots/mine`) projection; every other projection omits the
+        field.
     user_visibility:
       $ref: "#/UserVisibility"
     friend_ext:

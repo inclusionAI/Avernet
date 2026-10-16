@@ -18,6 +18,18 @@
 - Opaque, per-connection identities and pinned send/abort operations. Selection
   checks the original identity under the registry lock and never redirects to
   a replacement connection. Tokens are not connection identities.
+- Protected delivery (bot-authority spec §8.2): workbench connects may
+  explicitly select a view (`view_actor_id`: Human self default, another
+  Human rejected, a Bot id is a selection parameter re-authorized by the
+  application); a protected per-connection frame queue and
+  `OutboundFrame::Protected` bindings carry identity + view + resource
+  scope + connection instance. The final writer consults
+  `DeliveryAuthorizationService` per frame and enforces
+  Deliver / SkipMessage / InvalidateBinding (fail-closed on errors); frame
+  fanout collects candidates under the write lock and authorizes each
+  (connection, frame) after dropping it. Revocation closes with the
+  existing `view_scope_changed` protocol and removes the binding; no
+  further authorization queries happen after unbinding.
 
 ## Consumes
 

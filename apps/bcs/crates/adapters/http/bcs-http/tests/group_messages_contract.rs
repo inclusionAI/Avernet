@@ -852,6 +852,10 @@ async fn build_group_app_with_identity_and_session_status(
     let group_store = Arc::new(GroupStore::new());
     group_store.upsert(group).await.unwrap();
 
+    // LIVE authority chain mirroring the fixture
+    // `created_by` rows (bot-authority plan Task 6.5).
+    let authority = bcs_test_support::lazy_authority_chain().hook;
+    authority.seed_owner("owner-bot", "123");
     let routing = Arc::new(RecordingRouting::default());
     let bot_delivery = Arc::new(RecordingBotDelivery::default());
     let frontend_delivery = Arc::new(RecordingFrontendDelivery::default());
@@ -889,6 +893,7 @@ async fn build_group_app_with_identity_and_session_status(
         )))
         .group_query(group_use_cases)
         .group_message_history(group_message_history.clone())
+        .bot_authority_hook(authority as _)
         .build_for_test();
     let app = build_router(
         HttpAppState::new(services)
@@ -1578,6 +1583,15 @@ async fn scoped_session_history_app(
     services.session_management = Arc::new(StaticSessionManagement::new(session));
     services.group_message_history = history.clone();
     services.collaboration_runtime = runtime.clone();
+    // LIVE authority chain mirroring the fixture
+    // `created_by` rows (bot-authority plan Task 6.5):
+    // the adapter probes consult it instead of
+    // `list_bots_by_creator`.
+    let authority = bcs_test_support::lazy_authority_chain().hook;
+    authority.seed_owner("owner-bot", "123");
+    authority.seed_owner("other-bot", "456");
+    authority.seed_owner("outside-bot", "123");
+    services.bot_authority_hook = authority;
     let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
         ChainUserIdentityPort::new(static_auth_chain("123", "Owner")),
     )));
@@ -1727,6 +1741,9 @@ async fn state_machine_session_messages_non_session_human_returns_forbidden() {
     services.group = group_store;
     services.session_management = Arc::new(StaticSessionManagement::new(session));
     services.collaboration_runtime = collaboration_runtime.clone();
+    // LIVE authority chain with NO seeded edges: the
+    // intruding Human controls nothing.
+    services.bot_authority_hook = bcs_test_support::lazy_authority_chain().hook;
     let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
         ChainUserIdentityPort::new(static_auth_chain("456", "Intruder")),
     )));

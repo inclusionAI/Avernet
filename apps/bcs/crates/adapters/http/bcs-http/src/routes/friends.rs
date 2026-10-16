@@ -48,6 +48,9 @@ pub async fn create_friend_request(
                     format!("Forbidden: not authorized to act as bot '{}'", actor_id),
                 );
             }
+            Err(ResolveCallerError::AuthorityFailed) => {
+                return authority_failed_response();
+            }
         };
 
     match state
@@ -126,6 +129,9 @@ pub async fn list_friend_requests(
                     StatusCode::FORBIDDEN,
                     format!("Forbidden: not authorized to act as bot '{}'", actor_id),
                 );
+            }
+            Err(ResolveCallerError::AuthorityFailed) => {
+                return authority_failed_response();
             }
         };
 
@@ -265,6 +271,16 @@ enum ResolveCallerError {
     NoUserIdentity,
     BotNotFound(String),
     OwnershipDenied(String),
+    AuthorityFailed,
+}
+
+/// The live authority read failed; internal, never a
+/// deny-masquerading 403.
+fn authority_failed_response() -> Response {
+    error_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "bot authority lookup failed",
+    )
 }
 
 #[derive(Debug)]
@@ -272,6 +288,10 @@ enum ActorOwnershipError {
     NoUserIdentity,
     BotNotFound,
     Denied,
+    /// The live authority read failed — surfaced as an
+    /// internal error, never a deny-as-403 (bot-authority
+    /// plan Task 6.5).
+    AuthorityFailed,
 }
 
 struct ResolvedRequestReceiverCaller {
@@ -297,6 +317,9 @@ async fn resolve_caller(
             }
             Err(ActorOwnershipError::BotNotFound) => {
                 return Err(ResolveCallerError::BotNotFound(actor_id.to_string()));
+            }
+            Err(ActorOwnershipError::AuthorityFailed) => {
+                return Err(ResolveCallerError::AuthorityFailed);
             }
             Err(ActorOwnershipError::Denied) => {}
         }
@@ -350,6 +373,9 @@ async fn resolve_request_receiver_caller(
                 action, request_to_bot
             ),
         )),
+        Err(ActorOwnershipError::AuthorityFailed) => {
+            Err(authority_failed_response())
+        }
     }
 }
 
@@ -377,6 +403,9 @@ async fn resolve_friends_list_caller(
             StatusCode::FORBIDDEN,
             format!("Not authorized to access bot '{}'", target_actor_id),
         )),
+        Err(ActorOwnershipError::AuthorityFailed) => {
+            Err(authority_failed_response())
+        }
     }
 }
 
@@ -405,16 +434,30 @@ async fn check_actor_ownership(
         })
         .await
     {
-        Ok(bot) => {
-            if bot
-                .created_by
-                .as_deref()
-                .map(|owner| owner == staff_no)
-                .unwrap_or(true)
+        Ok(_bot) => {
+            // Control rule (bot-authority plan Task 6.5):
+            // the Human→Bot leg is the CURRENT `can_manage`
+            // edge through the live authority hook — the
+            // historical `created_by` claim (including its
+            // `None` auto-claim) no longer authorizes
+            // acting as a Bot here. A failing read is an
+            // internal error, never a deny-as-403.
+            match state
+                .services
+                .bot_authority_hook
+                .can_manage(&staff_no, actor_id)
+                .await
             {
-                Ok(())
-            } else {
-                Err(ActorOwnershipError::Denied)
+                Ok(true) => Ok(()),
+                Ok(false) => Err(ActorOwnershipError::Denied),
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        actor_id = %actor_id,
+                        "bot authority lookup failed on friends route"
+                    );
+                    Err(ActorOwnershipError::AuthorityFailed)
+                }
             }
         }
         Err(BotUseCaseError::Service(

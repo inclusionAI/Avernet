@@ -1,12 +1,16 @@
 //! Versioned Bot control-plane application facade for the BCN V1 API.
 
+pub mod authority;
+pub mod authority_policy;
 mod bot_self;
+pub use authority::BotAuthorityServiceImpl;
 pub use bot_self::BotSelfServiceImpl;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bcs_service_api::application::v1::bot_authority::ERROR_BOT_LIST_CHANGED;
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedUserIdentity, Bot, BotCandidate, BotCandidatePurpose,
     BotCandidateSearchItem, BotCandidateSearchMode, BotCandidateSearchResult, BotDescriptor,
@@ -16,12 +20,15 @@ use bcs_service_api::application::v1::{
     require_authenticated_user,
 };
 use bcs_service_api::application::ConnectService;
+use bcs_service_api::port::bot_authority::BotAuthorityHook;
+use bcs_service_api::types::bot_authority::BotAccessRelation;
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateSearchCoreService,
     BotCandidateSearchMode as CoreCandidateSearchMode, BotCandidateSearchQuery,
     BotCandidateVisibility, BotControlPlaneCoreService, BotControlPlaneDescriptorPatch,
-    BotControlPlaneOwnedQuery, BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneView,
-    BotRegistryCoreService, FriendCoreService, ServiceError,
+    BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneView,
+    BotRegistryCoreService, ControllableCandidateQuery, ControlledBotCandidate,
+    FriendCoreService, RuntimeActivitySnapshot, ServiceError,
 };
 
 #[derive(Debug, Clone)]
@@ -35,7 +42,26 @@ pub struct BotServiceImpl {
     friends: Arc<dyn FriendCoreService>,
     connect_service: Arc<dyn ConnectService>,
     candidate_search: Arc<dyn BotCandidateSearchCoreService>,
+    /// The narrow authority hook (bot-authority plan Task 6.3):
+    /// every Human→Bot control judgment in this facade consults
+    /// it live; a missing wiring fails closed.
+    bot_authority: Option<Arc<dyn BotAuthorityHook>>,
     config: BotServiceConfig,
+}
+
+/// Map one authority read to application errors: a strict deny
+/// (`Forbidden`) is 403 at the entry's own conventions; every
+/// other read failure propagates as an internal error (spec §3.2:
+/// 存储错误返回错误 — never a deny-as-false).
+pub(crate) fn map_authority_error(error: ServiceError) -> ApplicationError {
+    match error {
+        ServiceError::Forbidden(message) => {
+            ApplicationError::forbidden(message)
+        }
+        other => ApplicationError::internal(format!(
+            "bot authority lookup failed: {other}"
+        )),
+    }
 }
 
 pub struct InternalBotAttributesServiceImpl {
@@ -152,8 +178,30 @@ impl BotServiceImpl {
             friends,
             connect_service,
             candidate_search,
+            bot_authority: None,
             config,
         }
+    }
+
+    /// Wire the authority hook (bot-authority plan Task 6.3).
+    pub fn with_bot_authority_hook(
+        mut self,
+        bot_authority: Arc<dyn BotAuthorityHook>,
+    ) -> Self {
+        self.bot_authority = Some(bot_authority);
+        self
+    }
+
+    /// The wired authority hook; failing to wire one is a
+    /// composition error and must fail closed (never deny-as-Ok).
+    fn authority(&self) -> Result<&dyn BotAuthorityHook, ApplicationError> {
+        self.bot_authority
+            .as_deref()
+            .ok_or_else(|| {
+                ApplicationError::internal(
+                    "bot authority hook is not wired",
+                )
+            })
     }
 
     fn human_staff_no(
@@ -247,7 +295,21 @@ impl BotServiceImpl {
             .await
             .into_iter()
             .collect::<HashSet<_>>();
+        self.project_records_with_activity(records, &runtime_active)
+            .await
+    }
 
+    /// Project records onto the public Bot shapes using an
+    /// ALREADY-OBSERVED runtime-activity sampling. The mine
+    /// page shares the one `try_runtime_activity_for`
+    /// observation with its reachability total (spec §8.0:
+    /// 页内 total/items 使用同一采样) instead of
+    /// re-observing per page.
+    async fn project_records_with_activity(
+        &self,
+        records: Vec<BotControlPlaneView>,
+        runtime_active: &HashSet<String>,
+    ) -> Result<Vec<Bot>, ApplicationError> {
         records
             .into_iter()
             .map(|bot| {
@@ -268,6 +330,12 @@ impl BotServiceImpl {
                         friend_check_in_strategy: record.friend_check_in_strategy,
                         created_at: record.created_at,
                         updated_at: record.updated_at,
+                        // The mine page stamps its
+                        // sampled relation afterwards;
+                        // other projections stay
+                        // relation-less (spec §8 mine
+                        // row only).
+                        access_relation: None,
                     }));
                 }
 
@@ -314,6 +382,11 @@ impl BotServiceImpl {
                     friend_check_in_strategy: record.friend_check_in_strategy,
                     created_at: record.created_at,
                     updated_at: record.updated_at,
+                    // The mine page stamps its sampled
+                    // relation afterwards; other
+                    // projections stay relation-less
+                    // (spec §8 mine row only).
+                    access_relation: None,
                 }))
             })
             .collect()
@@ -327,6 +400,189 @@ impl BotServiceImpl {
             .ok_or_else(|| ApplicationError::internal("Bot projection returned no record"))
     }
 
+    /// The candidate query of §8.0, built once per
+    /// attempt (the sampling and its backfill
+    /// re-derivation share the same persistent shape).
+    fn controllable_query(
+        &self,
+        staff_no: &str,
+        command: &ListMyBots,
+    ) -> ControllableCandidateQuery {
+        ControllableCandidateQuery {
+            user_id: staff_no.to_string(),
+            env: self.config.env.clone(),
+            kind: command.kind.map(|kind| match kind {
+                BotKind::Bot => ActorKind::Bot,
+                BotKind::Human => ActorKind::Human,
+            }),
+            name: normalize_optional_name(command.name.clone()),
+            status: command.status.map(domain_status),
+        }
+    }
+
+    /// ONE sampled mine attempt (bot-authority spec §8.0):
+    /// 1. ONE persistent candidate snapshot (`list_controllable` —
+    ///    the owner|manager union + the Human self entry, persistent
+    ///    filtering only, no pagination);
+    /// 2. ONE `try_runtime_activity_for` observation over ALL
+    ///    candidates (failed reads propagate — never a fake
+    ///    unreachable);
+    /// 3. the reachability filter over ALL candidates (existing
+    ///    semantics: `status = Online && (WS active || HTTP
+    ///    Provider routable)`; a specified reachability keeps
+    ///    excluding the Human self entry, per the pre-existing
+    ///    behavior);
+    /// 4. `total` AFTER the filter, then offset/limit;
+    /// 5. the batch page backfill through the same Core, sharing
+    ///    the observation from step 2 for the reachability
+    ///    projection;
+    /// 6. the page roles RE-DERIVED store-side (one fresh
+    ///    `list_controllable`, no new WS observation and no
+    ///    new provider batch): a page target that got deleted
+    ///    OR whose owner/manager relation changed since the
+    ///    sampling is page drift (spec §8.0 point 4 literal
+    ///    删除或角色变化).
+    async fn mine_attempt(
+        &self,
+        staff_no: &str,
+        command: &ListMyBots,
+    ) -> Result<MineAttempt, ApplicationError> {
+        let candidates = self
+            .control_plane
+            .list_controllable(self.controllable_query(staff_no, command))
+            .await
+            .map_err(map_service_error)?;
+
+        let candidate_ids = candidates
+            .iter()
+            .map(|candidate| candidate.id.clone())
+            .collect::<Vec<_>>();
+        let snapshot = self
+            .registry
+            .try_runtime_activity_for(&candidate_ids)
+            .await
+            .map_err(map_service_error)?;
+
+        let filtered: Vec<ControlledBotCandidate> = candidates
+            .into_iter()
+            .filter(|candidate| match command.reachability {
+                None => true,
+                Some(requested) => {
+                    // Any reachability filter keeps the
+                    // Human self entry excluded (existing
+                    // behavior); physical bots are compared
+                    // against the ONE observation.
+                    candidate.kind == ActorKind::Bot
+                        && (requested == BotReachability::Reachable)
+                            == candidate_is_reachable(candidate, &snapshot)
+                }
+            })
+            .collect();
+        // total BEFORE pagination, AFTER the reachability
+        // filter — never the truncated-head assumption
+        // (spec §8.0).
+        let total = filtered.len() as u64;
+        let offset = usize::try_from(command.offset).unwrap_or(usize::MAX);
+        let limit = usize::try_from(command.limit).unwrap_or(usize::MAX);
+        let page = filtered
+            .iter()
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect::<Vec<_>>();
+        let composition = page
+            .iter()
+            .map(|candidate: &ControlledBotCandidate| {
+                (candidate.id.clone(), candidate.access_relation)
+            })
+            .collect::<Vec<_>>();
+        // The mine page exposes the sampled relation per
+        // item (spec §8 mine row: 逐项
+        // `access_relation=owner|manager` — Human 自身
+        // 条目保持 self 语义). The label comes from the
+        // SAME candidates as the page; it is a display
+        // fact, never an authorization result.
+        let relations: HashMap<String, String> = page
+            .iter()
+            .map(|candidate| {
+                (
+                    candidate.id.clone(),
+                    mine_relation_label(candidate),
+                )
+            })
+            .collect();
+
+        let page_ids = page
+            .iter()
+            .map(|candidate| candidate.id.clone())
+            .collect::<Vec<_>>();
+        let mut drift = false;
+        let items = if page_ids.is_empty() {
+            Vec::new()
+        } else {
+            // Batch page backfill; the provider
+            // hydration inside `get_by_ids` stays
+            // batched (no per-bot provider lookup).
+            let views = self
+                .control_plane
+                .get_by_ids(&page_ids, &self.config.env)
+                .await
+                .map_err(map_service_error)?;
+            let mut views_by_id = views
+                .into_iter()
+                .map(|view| (view.record.bot_id.clone(), view))
+                .collect::<HashMap<_, _>>();
+            // Store-side role re-derivation for the
+            // page ids (spec §8.0 point 4: 补页发现
+            // 目标删除或角色变化). ONE fresh candidate
+            // snapshot — no new WS observation, no new
+            // provider batch loop.
+            let fresh = self
+                .control_plane
+                .list_controllable(self.controllable_query(staff_no, command))
+                .await
+                .map_err(map_service_error)?;
+            let fresh_by_id = fresh
+                .iter()
+                .map(|candidate| (candidate.id.clone(), candidate.access_relation))
+                .collect::<HashMap<_, _>>();
+            drift = page
+                .iter()
+                .any(|candidate| {
+                    !views_by_id.contains_key(&candidate.id)
+                        || fresh_by_id
+                            .get(&candidate.id)
+                            .is_none_or(|fresh_relation| {
+                                *fresh_relation != candidate.access_relation
+                            })
+                });
+            let ordered = page_ids
+                .iter()
+                .filter_map(|bot_id| views_by_id.remove(bot_id))
+                .collect::<Vec<_>>();
+            self.project_records_with_activity(ordered, &snapshot.active_bot_ids)
+                .await?
+        };
+        let items = items
+            .into_iter()
+            .map(|bot| {
+                let relation = relations.get(bot.bot_id()).cloned();
+                bot.with_mine_access_relation(relation)
+            })
+            .collect::<Vec<_>>();
+        Ok(MineAttempt {
+            items,
+            total,
+            drift,
+            composition,
+        })
+    }
+
+    /// Bot-authority plan Task 6.3 (row 1 of the mounted-entry
+    /// table): a Human uses a Bot as its candidate perspective
+    /// through the CURRENT control judgment — a live
+    /// `can_manage` edge — never the historical `created_by`.
+    /// The Human self entry keeps the `human_{staff_no}` rule.
     async fn authorize_candidate_perspective(
         &self,
         staff_no: &str,
@@ -334,7 +590,17 @@ impl BotServiceImpl {
     ) -> Result<BotControlPlaneRecord, ApplicationError> {
         let acting = self.load_record(bot_id).await?;
         match acting.kind {
-            ActorKind::Bot if acting.created_by.as_deref() == Some(staff_no) => Ok(acting),
+            ActorKind::Bot => match self
+                .authority()?
+                .can_manage(staff_no, bot_id)
+                .await
+            {
+                Ok(true) => Ok(acting),
+                Ok(false) => Err(ApplicationError::forbidden(format!(
+                    "Current Human cannot use Bot '{bot_id}' as the candidate perspective"
+                ))),
+                Err(error) => Err(map_authority_error(error)),
+            },
             ActorKind::Human if acting.bot_id == format!("human_{staff_no}") => Ok(acting),
             _ => Err(ApplicationError::forbidden(format!(
                 "Current Human cannot use Bot '{bot_id}' as the candidate perspective"
@@ -563,11 +829,35 @@ impl BotService for BotServiceImpl {
             ));
         }
         let record = self.load_record(&command.bot_id).await?;
-        if record.created_by.as_deref() != Some(staff_no.as_str()) {
-            return Err(ApplicationError::forbidden(format!(
-                "Current Human does not own Bot '{}'",
-                command.bot_id
-            )));
+        // Bot-authority plan Task 6.3 (row 2 of the mounted-entry
+        // table): the descriptor patch is a §8 BUSINESS operation
+        // ("Bot 配置 … 使用当前角色"), so the CURRENT ROLE gate
+        // admits owner OR manager (`require_manage`, spec §1 goal
+        // 1: manager 获得相同的 Bot 业务操作权限) — never the
+        // historical `created_by` (spec §3.3: 旧创建者在失去
+        // manager 后不再有特权). Only the ownership-transfer
+        // commands stay owner-exclusive.
+        //
+        // Human-kind rows carry NO authority edges (spec §3.2.4
+        // 管理边不把 Human 当 Bot): the gate narrows to ACTOR
+        // SELF — the calling Human may patch only its OWN
+        // `human_{staff_no}` row (the legacy created_by fact was
+        // exactly that self row) — every other Human row is 403.
+        match record.kind {
+            ActorKind::Bot => {
+                self.authority()?
+                    .require_manage(&staff_no, &command.bot_id)
+                    .await
+                    .map_err(map_authority_error)?;
+            }
+            ActorKind::Human
+                if record.bot_id == format!("human_{staff_no}") => {}
+            ActorKind::Human => {
+                return Err(ApplicationError::forbidden(format!(
+                    "Current Human does not own Bot '{}'",
+                    command.bot_id
+                )));
+            }
         }
         if record.kind == ActorKind::Human
             && (command.patch.descriptor.is_some()
@@ -660,37 +950,94 @@ impl BotService for BotServiceImpl {
             .ensure_human_actor(&staff_no, &display_name)
             .await
             .map_err(map_service_error)?;
-        let records = self
-            .control_plane
-            .list_by_creator(BotControlPlaneOwnedQuery {
-                created_by: staff_no,
-                env: self.config.env.clone(),
-                kind: command.kind.map(|kind| match kind {
-                    BotKind::Bot => ActorKind::Bot,
-                    BotKind::Human => ActorKind::Human,
-                }),
-                name: normalize_optional_name(command.name),
-                status: command.status.map(domain_status),
-            })
-            .await
-            .map_err(map_service_error)?;
-        let mut bots = self.project_records(records).await?;
-        if let Some(reachability) = command.reachability {
-            bots.retain(|bot| {
-                matches!(bot, Bot::Physical(physical) if physical.reachability == reachability)
+
+        // Bot-authority spec §8.0 dynamic mine: persistent
+        // candidates first, then ONE runtime observation,
+        // then reachable/unreachable over ALL candidates,
+        // total AFTER the filter, offset/limit, and the
+        // batch page backfill (page fields, same sampling).
+        let first = self
+            .mine_attempt(&staff_no, &command)
+            .await?;
+        if !first.drift {
+            return Ok(Page {
+                items: first.items,
+                total: first.total,
+                offset: command.offset,
+                limit: command.limit,
             });
         }
-        let total = bots.len() as u64;
-        let offset = usize::try_from(command.offset).unwrap_or(usize::MAX);
-        let limit = usize::try_from(command.limit).unwrap_or(usize::MAX);
-        let items = bots.into_iter().skip(offset).take(limit).collect();
-        Ok(Page {
-            items,
-            total,
-            offset: command.offset,
-            limit: command.limit,
-        })
+
+        // Page drift (a page target deleted or its role
+        // changed since the sampling): retry the WHOLE
+        // sampling once; a page that still does not
+        // reproduce is `bot_list_changed` — never a
+        // silently shifted page pretending to be exact
+        // (spec §8.0 point 4).
+        let second = self
+            .mine_attempt(&staff_no, &command)
+            .await?;
+        if !second.drift && second.composition == first.composition {
+            return Ok(Page {
+                items: second.items,
+                total: second.total,
+                offset: command.offset,
+                limit: command.limit,
+            });
+        }
+        Err(ApplicationError::conflict(
+            ERROR_BOT_LIST_CHANGED,
+            "the controllable Bot list changed while the page \
+             was sampled; re-request the page",
+        ))
     }
+}
+
+/// One sampled mine attempt (spec §8.0): candidates → ONE
+/// runtime observation → reachability over ALL candidates →
+/// total → offset/limit → batch page backfill.
+///
+/// `drift` reports whether the page backfill discovered a
+/// page target missing from the same store (deleted or
+/// otherwise unresolvable since the candidate sampling).
+struct MineAttempt {
+    items: Vec<Bot>,
+    total: u64,
+    drift: bool,
+    composition: Vec<(String, BotAccessRelation)>,
+}
+
+/// The public mine item label for one sampled candidate
+/// (spec §8 mine row): physical Bots carry their edge
+/// relation (`owner` | `manager`), and the Human self
+/// entry keeps the `self` semantics — the edge-less
+/// candidate's internal Owner DISPLAY tag never becomes a
+/// public `owner` claim.
+fn mine_relation_label(
+    candidate: &ControlledBotCandidate,
+) -> String {
+    match candidate.kind {
+        ActorKind::Human => "self".to_string(),
+        ActorKind::Bot => match candidate.access_relation {
+            BotAccessRelation::Owner => "owner".to_string(),
+            BotAccessRelation::Manager => "manager".to_string(),
+        },
+    }
+}
+
+/// Existing reachability semantics of a candidate against the
+/// ONE §8.0 observation: `status = Online && (WS active ||
+/// HTTP Provider routable)`. The Human kind has no
+/// reachability semantics and stays excluded under any
+/// specified filter; the page total is computed from the
+/// same sampling, never from a truncated head.
+fn candidate_is_reachable(
+    candidate: &ControlledBotCandidate,
+    snapshot: &RuntimeActivitySnapshot,
+) -> bool {
+    candidate.kind == ActorKind::Bot
+        && candidate.status == ActorStatus::Online
+        && snapshot.active_bot_ids.contains(&candidate.id)
 }
 
 fn normalize_optional_name(name: Option<String>) -> Option<String> {

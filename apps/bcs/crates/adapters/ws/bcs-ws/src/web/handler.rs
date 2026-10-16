@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::extract::ws::{Message, WebSocket};
+use bcs_service_api::application::v1::DeliveryDecision;
 use bcs_service_api::{
     WsCloseReason, WsErrorKind, WsLifecycleInstrumentationHook, WsPeer,
 };
@@ -10,8 +11,10 @@ use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
+use crate::shared::OutboundFrame;
 use crate::web::{
     dispatch_client_frame, WebClientConnectionState, WebDispatchOutcome, WebDispatchState,
     WebWsDispatchError, WorkbenchConnectionAuth,
@@ -36,6 +39,9 @@ pub async fn handle_client_connection(
     let leadership_shutdown = state.frontend_connections.connection_epoch.subscribe();
     let (mut ws_tx, mut ws_rx) = socket.split();
     let (client_tx, mut client_rx) = mpsc::channel::<String>(256);
+    let mut connection_state = WebClientConnectionState::default();
+    let mut protected_rx = connection_state.open_protected_queue();
+    let connection_shutdown = connection_state.shutdown.clone();
 
     let connected_at = Instant::now();
     let client_id = CLIENT_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -48,7 +54,15 @@ pub async fn handle_client_connection(
 
     let write_send_error = send_error_seen.clone();
     let write_shutdown = leadership_shutdown.clone();
+    let write_state = state.clone();
+    let write_app_shutdown = connection_shutdown.clone();
+    let write_client_tx = client_tx.clone();
     let mut write_handle = tokio::spawn(async move {
+        // Set once the final check invalidated the binding: the close
+        // notification is still drained and sent, but no further
+        // protected frame is authorized (解绑后查询0 — the queue is
+        // dropped without any further consult).
+        let mut revoked = false;
         loop {
             let msg = tokio::select! {
                 biased;
@@ -57,6 +71,38 @@ pub async fn handle_client_connection(
                     Some(msg) => msg,
                     None => break,
                 },
+                frame = protected_rx.recv() => {
+                    // The FINAL writer: protected frames are
+                    // re-authorized against current authorization facts
+                    // once more right before the socket send. There is
+                    // no connection-time scope and no enqueue-time
+                    // decision; every frame's decision is independent.
+                    let frame = match frame {
+                        Some(frame) if !revoked => frame,
+                        _ => break,
+                    };
+                    match finalize_protected_frame(
+                        &write_state,
+                        client_id,
+                        &write_client_tx,
+                        frame,
+                        &write_app_shutdown,
+                    )
+                    .await
+                    {
+                        ProtectedOutcome::Send(payload) => payload,
+                        ProtectedOutcome::Skip => {
+                            debug!(client_id = client_id, "protected frame skipped for current view");
+                            continue;
+                        }
+                        ProtectedOutcome::Revoked => {
+                            // The close notification was enqueued
+                            // best-effort; drain the queue and end.
+                            revoked = true;
+                            continue;
+                        }
+                    }
+                }
             };
             let close_after_send = is_view_scope_changed_event(&msg);
             let sent = tokio::select! {
@@ -83,9 +129,6 @@ pub async fn handle_client_connection(
             let _ = ws_tx.send(Message::Close(None)).await;
         }
     });
-
-    let mut connection_state = WebClientConnectionState::default();
-    let connection_shutdown = connection_state.shutdown.clone();
 
     info!(
         client_id = client_id,
@@ -289,6 +332,115 @@ pub async fn handle_client_connection(
             connected_at.elapsed(),
         )
         .await;
+}
+
+/// Outcome of the per-frame final authorization used by the socket
+/// writer.
+enum ProtectedOutcome {
+    /// Authorized: send this payload.
+    Send(String),
+    /// Invisible to the current view only — drop this frame, other
+    /// frames and subscriptions are untouched.
+    Skip,
+    /// The binding lost its authority or resource qualification: the
+    /// connection is shutting down (cancel + unbind always); the
+    /// close notification is delivered best-effort through the
+    /// writer's own control queue.
+    Revoked,
+}
+
+/// The FINAL per-frame check (bot-authority spec §8.2):
+/// `Deliver` → payload, `SkipMessage` → drop this frame only,
+/// `InvalidateBinding` → revoke the whole binding (drop queued
+/// frames, unregister this connection's runs, remove its
+/// subscriptions, notify with the existing close protocol). Every
+/// call is an independent check; no registry lock is held across
+/// the authorization await.
+///
+/// The application error is already application-level and
+/// desensitized: it is treated exactly like an invalidated binding,
+/// never guessed into a delivery.
+async fn finalize_protected_frame(
+    state: &Arc<WebDispatchState>,
+    client_id: u64,
+    client_tx: &mpsc::Sender<String>,
+    frame: OutboundFrame,
+    connection_shutdown: &CancellationToken,
+) -> ProtectedOutcome {
+    match frame {
+        OutboundFrame::ConnectionControl { payload } => {
+            // The public socket carries connection-control frames
+            // WITHOUT a passing delivery authorization; protected
+            // data never flows through them.
+            ProtectedOutcome::Send(payload)
+        }
+        OutboundFrame::Protected {
+            binding,
+            visibility,
+            payload,
+        } => {
+            match state
+                .delivery_authorization
+                .authorize_delivery(&binding, &visibility)
+                .await
+            {
+                Ok(DeliveryDecision::Deliver) => ProtectedOutcome::Send(payload),
+                Ok(DeliveryDecision::SkipMessage) => ProtectedOutcome::Skip,
+                Ok(DeliveryDecision::InvalidateBinding) | Err(_) => {
+                    warn!(
+                        request_id = %bcs_observability::CurrentRequestId,
+                        client_id = client_id,
+                        view_actor_id = %binding.view_actor_id,
+                        session_id = ?binding.session_id,
+                        "protected delivery binding invalidated; revoking connection"
+                    );
+                    // Cancel FIRST: the revocation (unregister the
+                    // runs, remove the subscriptions, close the
+                    // socket) must never depend on enqueueing into
+                    // the writer's OWN control queue — this call
+                    // runs ON that writer, and the sole consumer of
+                    // `client_tx` is the writer itself, so an
+                    // awaited send into a full queue would deadlock
+                    // the writer against its own queue.
+                    connection_shutdown.cancel();
+                    // Notify with the existing close protocol on a
+                    // best-effort basis: only when the control
+                    // queue has space. When it is full the writer
+                    // still drains its queued traffic, and the
+                    // socket closes through the normal revoked
+                    // teardown — a dropped notification leaks no
+                    // unauthorized frame and loses no unbinding.
+                    let close = serde_json::json!({
+                        "type": "event",
+                        "event": "close",
+                        "payload": {
+                            "reason": "view_scope_changed",
+                            "message": "Session access is no longer authorized; reconnect required"
+                        }
+                    })
+                    .to_string();
+                    match client_tx.try_send(close) {
+                        Ok(()) => {}
+                        Err(mpsc::error::TrySendError::Full(_)) => {
+                            warn!(
+                                request_id = %bcs_observability::CurrentRequestId,
+                                client_id = client_id,
+                                "revocation close notification dropped: writer control queue full"
+                            );
+                        }
+                        Err(mpsc::error::TrySendError::Closed(_)) => {
+                            debug!(
+                                request_id = %bcs_observability::CurrentRequestId,
+                                client_id = client_id,
+                                "revocation close notification skipped: writer already gone"
+                            );
+                        }
+                    }
+                    ProtectedOutcome::Revoked
+                }
+            }
+        }
+    }
 }
 
 fn is_view_scope_changed_event(message: &str) -> bool {

@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use bcs_app_session::{SessionServiceConfig, SessionServiceImpl};
+use bcs_app_session::SessionServiceImpl;
 use bcs_bot::BotCore;
-use bcs_bot_store::PersistentBotRepo;
+use bcs_bot_store::{MemoryBotRepo, PersistentBotRepo};
 use bcs_db_api::{
     DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement, DbTransactionStep,
     DbTransactionStepResult,
@@ -342,6 +342,18 @@ fn rich_group_message() -> GroupMessage {
     }
 }
 
+/// A live Human ACTOR row on the shared bots registry (the
+/// authority guards' Human existence source).
+async fn ensure_human_actor(fixture: &Fixture, user_id: &str) {
+    use bcs_service_api::port::repo::BotRepoPort;
+
+    fixture
+        .authority_repo
+        .ensure_human_actor(user_id, user_id)
+        .await
+        .expect("ensure fixture Human actor row");
+}
+
 struct Fixture {
     service: SessionServiceImpl,
     groups: Arc<GroupCore>,
@@ -351,6 +363,9 @@ struct Fixture {
     runtime: Arc<RecordingRuntime>,
     system_messages: Arc<RecordingSystemMessageService>,
     session_repo: Arc<dyn SessionRepoPort>,
+    /// The authority store backing the Session
+    /// facade's hook (CURRENT control edges).
+    authority_repo: Arc<MemoryBotRepo>,
 }
 
 impl Fixture {
@@ -380,20 +395,37 @@ impl Fixture {
             runtime.clone(),
             Arc::new(NoopSystemMessageService),
         ));
+        let authority_repo = Arc::new(MemoryBotRepo::new());
+        let authority_hook =
+            bcs_test_support::authority_hook_for(authority_repo.clone());
+        let launch = Arc::new(
+            SessionLaunchApplication::new(
+                bots.clone(),
+                groups.clone(),
+                sessions.clone(),
+                runtime.clone(),
+                Arc::new(NoopSystemMessageService),
+            )
+            .with_bot_authority_hook(authority_hook.clone()),
+        );
         let service = SessionServiceImpl::new(
             launch,
             sessions,
             groups.clone(),
             bots.clone(),
             friends,
-            relation,
             session_repo.clone(),
             history.clone(),
             runtime.clone(),
             system_messages.clone(),
-            SessionServiceConfig {
-                relation_env: "dev".to_string(),
-            },
+        )
+        .with_bot_authority_hook(authority_hook)
+        // §8.3: the detail resource-role legs read
+        // the strict Session snapshot core.
+        .with_session_authorization_core(
+            Arc::new(bcs_session::SessionAuthorizationCoreImpl::new(
+                session_repo.clone(),
+            )),
         );
         Self {
             service,
@@ -404,6 +436,7 @@ impl Fixture {
             runtime,
             system_messages,
             session_repo,
+            authority_repo,
         }
     }
 
@@ -415,6 +448,14 @@ impl Fixture {
             .service
             .with_participant_view_bindings(participant_view_bindings);
         self
+    }
+
+    /// Grant the CURRENT owner edge in place of the
+    /// historical `created_by` (bot-authority plan
+    /// Task 6.2 fixture).
+    async fn grant_owner(&self, bot_uuid: &str, user: &str) {
+        bcs_test_support::grant_owner_edge(&self.authority_repo, bot_uuid, user)
+            .await;
     }
 
     async fn add_bot(&self, bot_uuid: &str) {
@@ -433,6 +474,7 @@ impl Fixture {
             .save_created_by(bot_uuid, bot_uuid, true)
             .await
             .expect("assign test Bot owner");
+        self.grant_owner(bot_uuid, bot_uuid).await;
     }
 
     /// Register a Bot with explicit `visibility` and `created_by` owner, for
@@ -455,6 +497,9 @@ impl Fixture {
             .save_created_by(bot_uuid, created_by, true)
             .await
             .expect("assign test Bot owner");
+        if !created_by.is_empty() {
+            self.grant_owner(bot_uuid, created_by).await;
+        }
     }
 
     /// Establish a bidirectional friendship between two Bots in the fixture's
@@ -604,20 +649,6 @@ fn app_only_caller() -> AuthenticatedCaller {
     }
 }
 
-fn launch_caller(caller: AuthenticatedCaller) -> SessionCaller {
-    if let Some(bot) = caller.bot {
-        return SessionCaller::Bot {
-            bot_uuid: bot.bot_uuid,
-        };
-    }
-    let user = caller.user.expect("launch test caller identity");
-    SessionCaller::Human {
-        actor_id: format!("human_{}", user.id),
-        owner_id: user.id,
-        display_name: user.display_name.or(user.full_name),
-    }
-}
-
 fn participant_input(bot_uuid: &str, _mode: Option<ParticipantMode>) -> SessionParticipantInput {
     SessionParticipantInput {
         bot_uuid: bot_uuid.to_string(),
@@ -636,7 +667,7 @@ async fn create_session(
     fixture
         .service
         .create(CreateSession {
-            caller: launch_caller(caller),
+            caller,
             group_id: group_id.to_string(),
             title: title.map(str::to_string),
             kind: None,
@@ -745,7 +776,7 @@ async fn state_machine_service_create_projects_raw_fields_and_run() {
     let outcome = fixture
         .service
         .create(CreateSession {
-            caller: launch_caller(bot_principal("driver")),
+            caller: bot_principal("driver"),
             group_id: "g1".into(),
             title: Some("Invocation".into()),
             kind: Some(SessionKind::ServiceInvocation),
@@ -792,7 +823,7 @@ async fn create_as_non_manager_is_forbidden() {
     let error = fixture
         .service
         .create(CreateSession {
-            caller: launch_caller(bot_principal("outsider")),
+            caller: bot_principal("outsider"),
             group_id: "g1".into(),
             title: None,
             kind: None,
@@ -819,7 +850,7 @@ async fn create_with_unknown_group_is_not_found() {
     let error = fixture
         .service
         .create(CreateSession {
-            caller: launch_caller(bot_principal("driver")),
+            caller: bot_principal("driver"),
             group_id: "missing-group".into(),
             title: None,
             kind: None,
@@ -918,6 +949,12 @@ async fn session_list_uses_only_the_selected_authorized_view_actor() {
         .save_created_by("owned", "alice", true)
         .await
         .expect("assign Alice's Bot ownership");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "owned",
+            "alice",
+        )
+        .await;
     fixture.store_group("g1", "driver", None).await;
     let group = fixture.groups.get("g1").await.expect("group exists");
     for participant in ["human_alice", "owned", "unowned"] {
@@ -982,6 +1019,12 @@ async fn session_detail_accepts_human_or_exact_owned_bot_participation_only() {
         .save_created_by("owned", "alice", true)
         .await
         .expect("assign Alice's Bot ownership");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "owned",
+            "alice",
+        )
+        .await;
     fixture.store_group("g1", "driver", None).await;
     let group = fixture.groups.get("g1").await.expect("group exists");
     let mut ids = Vec::new();
@@ -1064,12 +1107,59 @@ async fn session_detail_preserves_legacy_json_input_and_metadata() {
 }
 
 #[tokio::test]
-async fn session_detail_propagates_owned_bot_lookup_database_failure() {
+async fn session_detail_propagates_authority_read_failure_as_internal() {
+    // Bot-authority plan Task 6.3: the Human
+    // participant view consults the authority hook;
+    // an authority READ failure surfaces as an
+    // internal error — never as a forbidden
+    // (deny-as-false masquerade). The read failure
+    // is staged as a duplicated approved-owner edge
+    // (an authority integrity error).
     let bots = Arc::new(BotCore::with_repo(Arc::new(
         PersistentBotRepo::new(Arc::new(FailingDb)),
     )));
     let fixture = Fixture::new_with_bots(bots).await;
     fixture.store_group("g1", "driver", None).await;
+    fixture.grant_owner("owned", "alice").await;
+    // A second approved owner on one Bot is an
+    // authority integrity failure for every reader:
+    // insert the duplicate corrupting edge DIRECTLY
+    // (grant_owner_edge deduplicates owners by
+    // design).
+    {
+        use bcs_bot_store::memory_authority::{
+            MemoryAuthorityEdgeKind, MemoryAuthorityEdgeStatus,
+        };
+        // take the FIRST approved owner edge's env
+        // prefix (the fixture env).
+        let existing = fixture
+            .authority_repo
+            .authority_state()
+            .try_read()
+            .expect("authority state lock");
+        let env = existing
+            .edges
+            .keys()
+            .find_map(|key| {
+                (key.1 == "owned").then(|| key.0.clone())
+            })
+            .expect("first owner edge");
+        drop(existing);
+        ensure_human_actor(&fixture, "bob").await;
+        let authority = fixture.authority_repo.authority_state();
+        let mut authority = authority
+            .try_write()
+            .expect("authority state lock");
+        authority.edges.insert(
+            (
+                env,
+                "owned".to_string(),
+                "human_bob".to_string(),
+                MemoryAuthorityEdgeKind::Owner,
+            ),
+            (MemoryAuthorityEdgeStatus::Approved, 0),
+        );
+    }
     let group = fixture.groups.get("g1").await.expect("group exists");
     let session = fixture
         .session_repo
@@ -1091,12 +1181,12 @@ async fn session_detail_propagates_owned_bot_lookup_database_failure() {
             session_id: session.id,
         })
         .await
-        .expect_err("owned-Bot lookup failure must not be reported as forbidden");
+        .expect_err("authority failure must not be reported as forbidden");
 
     assert!(matches!(
         error,
         bcs_service_api::application::v1::ApplicationError::Internal(message)
-            if message.contains("bot database unavailable")
+            if message.contains("bot authority lookup failed")
     ));
 }
 
@@ -1421,6 +1511,12 @@ async fn human_collects_and_uncollects_for_owned_participant_bot_idempotently() 
         .save_created_by("bot-1", "owner-1", true)
         .await
         .expect("assign Bot ownership");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "bot-1",
+            "owner-1",
+        )
+        .await;
     fixture
         .store_group_with_originator("g1", "bot-1", "human_owner-1", None)
         .await;
@@ -1621,6 +1717,12 @@ async fn list_surfaces_per_session_collected_for_explicit_view_actor() {
         .save_created_by("bot-1", "owner-1", true)
         .await
         .expect("assign Bot ownership");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "bot-1",
+            "owner-1",
+        )
+        .await;
     fixture
         .store_group_with_originator("g1", "bot-1", "human_owner-1", None)
         .await;
@@ -1718,6 +1820,12 @@ async fn session_collection_rejects_an_unowned_bot() {
         .save_created_by("bot-1", "owner-1", true)
         .await
         .expect("assign Bot ownership");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "bot-1",
+            "owner-1",
+        )
+        .await;
 
     let error = fixture
         .service
@@ -1745,6 +1853,12 @@ async fn session_collection_hides_an_owned_bot_membership_miss() {
         .save_created_by("bot-1", "owner-1", true)
         .await
         .expect("assign Bot ownership");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "bot-1",
+            "owner-1",
+        )
+        .await;
     fixture.store_group("g1", "driver", None).await;
     let group = fixture.groups.get("g1").await.expect("group exists");
     let session = fixture
@@ -1781,6 +1895,12 @@ async fn session_collection_returns_not_found_for_a_missing_session() {
         .save_created_by("bot-1", "owner-1", true)
         .await
         .expect("assign Bot ownership");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "bot-1",
+            "owner-1",
+        )
+        .await;
 
     let error = fixture
         .service
@@ -1803,6 +1923,12 @@ async fn session_collection_accepts_only_a_human_identity() {
         .save_created_by("bot-1", "owner-1", true)
         .await
         .expect("assign Bot ownership");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "bot-1",
+            "owner-1",
+        )
+        .await;
 
     for caller in [bot_only_caller("bot-1"), app_only_caller()] {
         let error = fixture
@@ -2143,6 +2269,12 @@ async fn human_owner_of_group_driver_can_add_session_participant_without_human_m
         .save_created_by("driver", "staff-driver", true)
         .await
         .expect("assign driver owner");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "driver",
+            "staff-driver",
+        )
+        .await;
     fixture
         .store_group_with_originator("g1", "driver", "human_other", None)
         .await;
@@ -2204,6 +2336,12 @@ async fn human_owner_of_session_creator_can_update_session_without_group_managem
         .save_created_by("creator-bot", "staff-creator", true)
         .await
         .expect("assign creator owner");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "creator-bot",
+            "staff-creator",
+        )
+        .await;
     fixture
         .store_group_with_originator("g1", "driver", "human_other", None)
         .await;
@@ -2260,6 +2398,12 @@ async fn chat_manager_role_does_not_grant_session_management_to_human_owner() {
         .save_created_by("manager", "staff-manager-owner", true)
         .await
         .expect("assign manager owner");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "manager",
+            "staff-manager-owner",
+        )
+        .await;
     fixture
         .store_group_with_originator("g1", "driver", "human_other", None)
         .await;
@@ -2947,6 +3091,12 @@ async fn readable_session_auto_adds_missing_human_with_selected_scope() {
         .save_created_by("owned-bot", "staff-1", true)
         .await
         .expect("assign owned Bot");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "owned-bot",
+            "staff-1",
+        )
+        .await;
     fixture
         .store_group_with_originator("g1", "driver", "human_other", None)
         .await;
@@ -3023,6 +3173,12 @@ async fn readable_session_auto_adds_missing_human_as_absent_observer() {
         .save_created_by("owned-bot", "staff-1", true)
         .await
         .expect("assign owned Bot");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "owned-bot",
+            "staff-1",
+        )
+        .await;
     fixture
         .store_group_with_originator("g1", "driver", "human_other", None)
         .await;
@@ -3086,6 +3242,12 @@ async fn readable_session_auto_add_inherits_group_human_scope() {
         .save_created_by("owned-bot", "staff-1", true)
         .await
         .expect("assign owned Bot");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "owned-bot",
+            "staff-1",
+        )
+        .await;
     fixture
         .store_group_with_originator("g1", "driver", "human_other", None)
         .await;
@@ -3242,6 +3404,12 @@ async fn session_manager_cannot_update_another_human_mode() {
         .save_created_by("driver", "staff-manager", true)
         .await
         .expect("assign driver owner");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "driver",
+            "staff-manager",
+        )
+        .await;
     fixture
         .store_group_with_originator("g1", "driver", "human_other", None)
         .await;
@@ -3293,6 +3461,12 @@ async fn session_manager_can_update_another_human_scope_without_changing_mode() 
         .save_created_by("driver", "staff-manager", true)
         .await
         .expect("assign driver owner");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "driver",
+            "staff-manager",
+        )
+        .await;
     fixture
         .store_group_with_originator("g1", "driver", "human_other", None)
         .await;
@@ -3368,6 +3542,12 @@ async fn session_manager_cannot_auto_add_another_human() {
         .save_created_by("driver", "staff-manager", true)
         .await
         .expect("assign driver owner");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "driver",
+            "staff-manager",
+        )
+        .await;
     fixture
         .store_group_with_originator("g1", "driver", "human_other", None)
         .await;
@@ -3517,6 +3697,12 @@ async fn bot_mode_does_not_auto_add_a_missing_human() {
         .save_created_by("owned-bot", "staff-1", true)
         .await
         .expect("assign owned Bot");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "owned-bot",
+            "staff-1",
+        )
+        .await;
     fixture
         .store_group_with_originator("g1", "driver", "human_other", None)
         .await;
@@ -3624,6 +3810,12 @@ async fn owned_bot_removal_is_owner_self_leave_not_management() {
         .save_created_by("bot-a", "staff-1", true)
         .await
         .expect("save owner");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "bot-a",
+            "staff-1",
+        )
+        .await;
     fixture.store_group("g1", "driver", None).await;
     let group = fixture.groups.get("g1").await.expect("group exists");
     // Seed the session directly so bot-a is an actual session participant
@@ -3688,6 +3880,12 @@ async fn owned_bot_does_not_grant_session_participant_update_permission() {
         .save_created_by("bot-a", "staff-1", true)
         .await
         .expect("save owner");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "bot-a",
+            "staff-1",
+        )
+        .await;
     fixture.store_group("g1", "driver", None).await;
     let outcome = create_session(
         &fixture,
@@ -3976,7 +4174,7 @@ async fn create_session_inherits_parent_group_participants_without_request_roste
     let outcome = fixture
         .service
         .create(CreateSession {
-            caller: launch_caller(bot_principal("driver")),
+            caller: bot_principal("driver"),
             group_id: "g1".into(),
             title: None,
             kind: None,
@@ -4248,6 +4446,12 @@ async fn human_view_session_messages_as_owned_bot() {
         .save_created_by("worker-a", "staff-1", true)
         .await
         .expect("save owner");
+        bcs_test_support::grant_owner_edge(
+            &fixture.authority_repo,
+            "worker-a",
+            "staff-1",
+        )
+        .await;
     fixture
         .store_manager_worker_group_with_originator(
             "g1",
