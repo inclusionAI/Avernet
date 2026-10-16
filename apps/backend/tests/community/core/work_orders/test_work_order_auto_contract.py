@@ -57,11 +57,11 @@ def _configured():
     return service, repo, callbacks
 
 
-@pytest.mark.parametrize("approvers", [[], [""], [" ", "\t"]])
-@pytest.mark.parametrize("recipients", [[], ["cannot-be-fallback"]])
-def test_auto_requires_nonblank_approvers_before_any_write(approvers, recipients):
+@pytest.mark.parametrize("recipients", [[], [""], [" ", "\t"]])
+@pytest.mark.parametrize("approvers", [[], ["cannot-be-fallback"]])
+def test_auto_requires_nonblank_recipients_before_any_write(approvers, recipients):
     service, repo, callbacks = _configured()
-    with pytest.raises(WorkOrderInvalidEventError, match="approver_user_ids"):
+    with pytest.raises(WorkOrderInvalidEventError, match="recipient_user_ids"):
         _create(service, approvers=approvers, recipients=recipients)
     repo.create_work_order_event.assert_not_called()
     callbacks.dispatch.assert_not_called()
@@ -69,8 +69,8 @@ def test_auto_requires_nonblank_approvers_before_any_write(approvers, recipients
 
 @pytest.mark.parametrize("skill", [False, True])
 @pytest.mark.parametrize("fails", [False, True])
-@pytest.mark.parametrize("recipients", [[], ["unrelated-recipient"]])
-def test_auto_uses_only_normalized_approvers_for_all_results(skill, fails, recipients):
+@pytest.mark.parametrize("approvers", [[], ["unrelated-approver"]])
+def test_auto_uses_only_normalized_recipients_for_all_results(skill, fails, approvers):
     service, repo, callbacks = _configured()
     completion = (
         repo.apply_auto_skill_editor_request if skill else repo.complete_auto_approval
@@ -82,13 +82,13 @@ def test_auto_uses_only_normalized_approvers_for_all_results(skill, fails, recip
             callbacks.dispatch.side_effect = RuntimeError("sensitive external response")
     result = _create(
         service,
-        approvers=[" first ", "", "second", "first", "  "],
-        recipients=recipients,
+        approvers=approvers,
+        recipients=[" first ", "", "second", "first", "  "],
         skill=skill,
     )
     expected = ["first", "second"]
     created = repo.create_work_order_event.call_args.kwargs
-    assert created["approver_user_ids"] == expected
+    assert created["approver_user_ids"] == []
     assert created["recipient_user_ids"] == expected
     terminal = repo.fail_auto_approval if fails else completion
     assert terminal.call_args.kwargs["recipient_user_ids"] == expected
@@ -118,7 +118,7 @@ def test_friend_callback_finishes_before_local_completion():
         return [31]
 
     repo.complete_auto_approval.side_effect = complete
-    _create(service, approvers=["recipient"], recipients=[])
+    _create(service, approvers=[], recipients=["recipient"])
     assert order == ["callback", "complete"]
     callbacks.dispatch.assert_called_once()
 
@@ -126,7 +126,7 @@ def test_friend_callback_finishes_before_local_completion():
 def test_friend_without_registered_callback_cannot_complete():
     service, repo, callbacks = _configured()
     callbacks.requires_callback.return_value = False
-    result = _create(service, approvers=["recipient"], recipients=[])
+    result = _create(service, approvers=[], recipients=["recipient"])
     assert result.status is WorkOrderEventStatus.FAILED
     repo.complete_auto_approval.assert_not_called()
     callbacks.dispatch.assert_not_called()
@@ -141,7 +141,7 @@ def test_already_processed_never_attempts_failure_transition(skill):
     else:
         repo.get_approval_context.side_effect = failure
     with pytest.raises(WorkOrderAlreadyProcessedError) as caught:
-        _create(service, approvers=["recipient"], recipients=[], skill=skill)
+        _create(service, approvers=[], recipients=["recipient"], skill=skill)
     assert caught.value is failure
     repo.fail_auto_approval.assert_not_called()
     callbacks.dispatch.assert_not_called()
@@ -153,7 +153,7 @@ def test_failure_persistence_error_is_not_hidden():
     failure = RuntimeError("failure recording unavailable")
     repo.fail_auto_approval.side_effect = failure
     with pytest.raises(RuntimeError, match="failure recording unavailable") as caught:
-        _create(service, approvers=["recipient"], recipients=[])
+        _create(service, approvers=[], recipients=["recipient"])
     assert caught.value is failure
     callbacks.dispatch.assert_called_once()
     repo.complete_auto_approval.assert_not_called()

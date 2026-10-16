@@ -9,6 +9,13 @@ pub struct CliSession {
     stdin: Option<ChildStdin>,
     stdout: BufReader<tokio::process::ChildStdout>,
     trace: Option<TraceContext>,
+    /// Set once the child has been reaped (`wait` returned). Later Drops must
+    /// not signal the process group: the reaped pid is recyclable and
+    /// `kill(-pgid)` could then hit an unrelated process group. While the
+    /// child is unreaped (even as a zombie) the kernel cannot recycle its
+    /// pid, so the group address still belongs to this session's tree only.
+    reaped: bool,
+    stdout_buffer: Vec<u8>,
 }
 
 impl CliSession {
@@ -26,6 +33,15 @@ impl CliSession {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
+        // Engine CLIs are wrapper runtimes (e.g. cfuse → node agent → claude →
+        // MCP servers): the spawned process is only the top of a tree. Make it
+        // a process-group leader so teardown can SIGKILL the whole tree at
+        // once; descendants that do not `setsid` (deliberately detached
+        // daemons) inherit the group and die with it.
+        #[cfg(unix)]
+        {
+            cmd.process_group(0);
+        }
         for (k, v) in env {
             cmd.env(k, v);
         }
@@ -64,8 +80,13 @@ impl CliSession {
             stdin: Some(stdin),
             stdout: BufReader::new(stdout),
             trace,
+            reaped: false,
+            stdout_buffer: Vec::new(),
         })
     }
+
+    /// A multiplexed process traces stdout after assigning messages to runs.
+    pub(super) fn disable_raw_trace(&mut self) { self.trace = None; }
 
     pub async fn write_line(&mut self, line: &str) -> std::io::Result<()> {
         let stdin = self
@@ -88,24 +109,123 @@ impl CliSession {
     }
 
     pub async fn next_line(&mut self) -> std::io::Result<Option<String>> {
-        let mut line = String::new();
-        let n = self.stdout.read_line(&mut line).await?;
-        if n == 0 {
+        let n = self.stdout.read_until(b'\n', &mut self.stdout_buffer).await?;
+        if n == 0 && self.stdout_buffer.is_empty() {
             return Ok(None);
         }
+        let line = String::from_utf8(std::mem::take(&mut self.stdout_buffer))
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
         if let Some(trace) = &self.trace {
             trace.record_raw(line.trim_end_matches(['\n', '\r']));
         }
         Ok(Some(line.trim_end_matches(['\n', '\r']).to_string()))
     }
 
-    pub async fn kill(&mut self) {
+    /// SIGKILL the engine's whole process group. The spawned engine leads its
+    /// own group (`process_group(0)` at spawn), and the group only ever
+    /// contains this session's tree, so the negative-pid signal cannot reach
+    /// unrelated processes. Falls back to killing the direct child alone when
+    /// group signaling fails (e.g. non-unix, or the group is already gone).
+    ///
+    /// Callers that can `.await` should prefer `graceful_kill_process_group`,
+    /// which SIGTERMs first and gives the CLI a bounded window to flush
+    /// undelivered queue notifications before this hard kill.
+    #[allow(unsafe_code)]
+    fn kill_process_group(&mut self) {
+        if self.reaped {
+            return;
+        }
+        #[cfg(unix)]
+        if let Some(pid) = self.child.id().filter(|pid| *pid > 0) {
+            let pgid = pid as libc::pid_t;
+            if unsafe { libc::kill(-pgid, libc::SIGKILL) } == 0 {
+                return;
+            }
+        }
         if let Err(e) = self.child.start_kill() {
             tracing::debug!(target: "bcs_bridge_core::engine", "kill failed: {e}");
         }
+    }
+
+    /// Graceful teardown: close stdin first, SIGTERM the whole process group,
+    /// wait up to `GRACE_WINDOW` for the group to empty, only then SIGKILL.
+    /// This lets the CLI flush undelivered task notifications out of its
+    /// internal queue before dying — same-sequence kills without this window
+    /// freeze those notifications in the transcript and crash resume-of-turn
+    /// after resume (observed in production).
+    #[allow(unsafe_code)]
+    async fn graceful_kill_process_group(&mut self) {
+        if self.reaped {
+            return;
+        }
+        // 1. Close stdin — signals the CLI there will be no more input and it
+        //    can begin its shutdown path.
+        self.close_stdin();
+        // 2. SIGTERM the group (catchable — the CLI can flush queues).
+        #[cfg(unix)]
+        if let Some(pid) = self.child.id().filter(|pid| *pid > 0) {
+            let pgid = pid as libc::pid_t;
+            let _ = unsafe { libc::kill(-pgid, libc::SIGTERM) };
+        }
+        // 3. Wait for the group to empty. `receiver_count()==0` on the child
+        //    means the leader exited; background-task descendants (node
+        //    workers) may still linger — a short bounded sleep covers them.
+        let deadline = std::time::Instant::now() + GRACE_WINDOW;
+        while std::time::Instant::now() < deadline {
+            if let Ok(Some(_)) = self.child.try_wait() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        // 4. Whatever's left gets SIGKILL.
+        self.kill_process_group();
+    }
+
+    pub async fn kill(&mut self) {
+        self.graceful_kill_process_group().await;
         let _ = self.child.wait().await;
+        self.reaped = true;
     }
 }
+
+impl Drop for CliSession {
+    /// Teardown by drop is the bridge's Final path (run_turn returns on the
+    /// engine's result line and drops the session), so it must reap the whole
+    /// tree too — a single-child kill_on_drop orphans every descendant, which
+    /// is how orphaned engine/claude/MCP trees accumulated until the host
+    /// OOM'd. The graceful sequence runs synchronously here (can't `.await`):
+    /// close stdin → SIGTERM group → short bounded spin → SIGKILL. The spin
+    /// is proportional to what's still alive — a CLI that exits on SIGTERM
+    /// in 50ms spends 50ms here, not the full 2 s.
+    ///
+    /// `kill_on_drop` stays enabled as a belt-and-braces fallback: it covers
+    /// the direct child if anything in this synchronous path panics.
+    #[allow(unsafe_code)]
+    fn drop(&mut self) {
+        if self.reaped {
+            return;
+        }
+        self.close_stdin();
+        #[cfg(unix)]
+        if let Some(pid) = self.child.id().filter(|pid| *pid > 0) {
+            let pgid = pid as libc::pid_t;
+            let _ = unsafe { libc::kill(-pgid, libc::SIGTERM) };
+            let deadline = std::time::Instant::now() + GRACE_WINDOW;
+            while std::time::Instant::now() < deadline {
+                if let Ok(Some(_)) = self.child.try_wait() {
+                    break; // leader exited — SIGKILL below sweeps the rest.
+                }
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+        }
+        self.kill_process_group();
+    }
+}
+
+/// Graceful-kill window: how long the CLI gets between SIGTERM and SIGKILL
+/// to flush internal queues (undelivered task notifications) and exit.
+/// Same order multica uses for its engine teardown.
+const GRACE_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Give the engine stdout pipe enough room for a complete JSONL event.
 ///
@@ -181,6 +301,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancelled_read_preserves_partial_stdout_line() {
+        let mut cli = CliSession::spawn(
+            Path::new("bash"),
+            &["-c".into(), "printf prefix; sleep 0.15; printf 'suffix\\n'; sleep 1".into()],
+            Path::new("."), &[], None,
+        ).await.unwrap();
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(70), cli.next_line()).await.is_err());
+        assert_eq!(cli.next_line().await.unwrap().as_deref(), Some("prefixsuffix"));
+        cli.kill().await;
+    }
+
+    #[tokio::test]
     async fn cli_session_close_stdin_blocks_further_writes() {
         let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/mock_engine.sh");
         let mut cli = CliSession::spawn(
@@ -245,5 +377,82 @@ mod tests {
         assert!(line.contains("\"type\":\"item.completed\""));
         assert_eq!(line.len(), 7068, "long JSONL event was truncated");
         drop(cli);
+    }
+
+    /// An engine that forks a long-lived grandchild, announcing its pid on
+    /// the first stdout line. Both engine-tree tests below use it: an
+    /// orphaned grandchild surviving the engine's death is exactly the leak
+    /// that OOM'd the bridge host (engine → claude → MCP descendants were
+    /// reparented to init and kept running).
+    #[cfg(target_os = "linux")]
+    async fn engine_with_grandchild() -> (CliSession, i32) {
+        let mut cli = CliSession::spawn(
+            Path::new("bash"),
+            &["-c".into(), "sleep 60 & echo $!; sleep 55".into()],
+            Path::new("."),
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        let line = cli
+            .next_line()
+            .await
+            .unwrap()
+            .expect("engine must announce its grandchild pid");
+        let pid: i32 = line.trim().parse().expect("engine announces a numeric pid");
+        assert!(pid > 0);
+        (cli, pid)
+    }
+
+    /// Whether `pid` still names a live (non-zombie) process. A zombie still
+    /// owns its pid until reaped, so `kill(pid, 0)` alone would report dead
+    /// children as alive; /proc state must agree.
+    #[cfg(target_os = "linux")]
+    fn process_alive(pid: i32) -> bool {
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            return false;
+        };
+        // "pid (comm) state ..." — comm may contain ')' so parse after the last one.
+        let after_comm = stat.rsplit(')').next().unwrap_or_default();
+        !after_comm.trim_start().starts_with('Z')
+    }
+
+    /// Poll until `pid` is gone; returns true if it is STILL alive at timeout.
+    #[cfg(target_os = "linux")]
+    async fn still_alive_after(pid: i32, timeout: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        while std::time::Instant::now() < deadline {
+            if !process_alive(pid) {
+                return false;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        process_alive(pid)
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn kill_terminates_the_whole_engine_process_tree() {
+        let (mut cli, grandchild) = engine_with_grandchild().await;
+        cli.kill().await;
+        assert!(
+            !still_alive_after(grandchild, std::time::Duration::from_secs(5)).await,
+            "grandchild must not outlive the engine's kill"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn drop_terminates_the_whole_engine_process_tree() {
+        // The bridge's Final path relies on Drop alone (no explicit kill):
+        // cfuse spawns claude/MCP as descendants of the direct child, so a
+        // single-pid kill_on_drop orphans the whole runtime tree.
+        let (cli, grandchild) = engine_with_grandchild().await;
+        drop(cli);
+        assert!(
+            !still_alive_after(grandchild, std::time::Duration::from_secs(5)).await,
+            "grandchild must not survive CliSession drop"
+        );
     }
 }

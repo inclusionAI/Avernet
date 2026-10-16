@@ -11,6 +11,7 @@ import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/se
 describe("run history keyword filtering", () => {
   it("searches identifiers and callers across history with consistent counts and pagination", async () => {
     const raw = new Database(":memory:");
+  raw.exec("CREATE TABLE workflow_repair_release_records (record_id TEXT, record_kind TEXT, workflow_id TEXT)");
     const db = new SqliteDatabase(raw);
     const repo = new FlowRunRepository(db);
     raw.exec(`CREATE TABLE flow_runs (

@@ -47,3 +47,18 @@ pub(crate) fn conversation(
         .and_then(|id| id.strip_prefix(&prefix))
         .map(str::to_owned))
 }
+
+/// One bounded, read-only metadata lookup per submitted question.
+pub(crate) fn task(database: &Path, session: &str, bot: &str, conversation: &str) -> Result<String, String> {
+    let db = Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e| e.to_string())?;
+    db.busy_timeout(std::time::Duration::from_millis(200)).map_err(|e| e.to_string())?;
+    let mut query = db.prepare("SELECT c.id, c.ext FROM sub_chats s JOIN chats c ON c.id=s.chat_id WHERE s.session_id=?1 AND c.deleted_at IS NULL LIMIT 2").map_err(|e| e.to_string())?;
+    let rows = query.query_map([session], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    if rows.len() != 1 { return Err("Ambiguous or missing question task mapping".into()); }
+    let ext: serde_json::Value = serde_json::from_str(&rows[0].1).map_err(|e| e.to_string())?;
+    if ext["channelPlatform"] != "wecom-bot" || ext["imConversationId"] != format!("wecom-bot:{bot}:{conversation}") {
+        return Err("Question task belongs to another conversation".into());
+    }
+    Ok(rows[0].0.clone())
+}

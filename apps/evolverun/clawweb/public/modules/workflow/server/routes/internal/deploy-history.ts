@@ -18,6 +18,7 @@ import type { WorkflowSpecRepository } from "@avernet/workflow/server/repositori
 export function createInternalDeployHistoryRouter(
   wfdhRepo: WorkflowDeployHistoryRepository | null,
   workflowSpecRepo: WorkflowSpecRepository | null,
+  reviewedGuard?: (input: Record<string, unknown>) => Promise<boolean>,
 ): Router {
   const router = Router();
 
@@ -29,6 +30,7 @@ export function createInternalDeployHistoryRouter(
       version: number; tagName?: string | null; action: string; fromDeployNumber?: number;
       specJson: string; note?: string; botId?: string; ownerId?: string;
       isActive?: boolean;
+      expectedActiveDeployNumber?: number;
     };
     if (!b.packId || !b.workflowId || typeof b.deployNumber !== "number"
         || typeof b.version !== "number" || !b.action || !b.specJson) {
@@ -39,6 +41,11 @@ export function createInternalDeployHistoryRouter(
     const version = b.version;
     {
       try {
+        if (b.expectedActiveDeployNumber !== undefined) {
+          if (!reviewedGuard || !await reviewedGuard(b)) { res.status(403).json({ error: 'Forbidden', message: 'Reviewed publication identity could not be verified' }); return; }
+          await wfdhRepo.publishReviewed({ ...b, tagName: b.tagName ?? null, action: 'deploy' }, b.expectedActiveDeployNumber, () => reviewedGuard(b));
+          res.json({ success: true, version }); return;
+        }
         await wfdhRepo.insert({
           packId: b.packId, workflowId: b.workflowId, deployNumber: b.deployNumber,
           version, tagName: b.tagName ?? null, action: b.action as "deploy" | "rollback" | "pull" | "migration" | "edit",

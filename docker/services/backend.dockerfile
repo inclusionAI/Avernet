@@ -31,6 +31,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 ########## Runtime ##########
 FROM python:3.12-slim-bookworm AS runtime
 
+ARG TARGET_ENGINE_VERSION
+ENV TARGET_ENGINE_VERSION=${TARGET_ENGINE_VERSION}
+
 # DEPLOY_PROFILE is mandatory (DeployProfile.detect raises when it is unset) and
 # ``community`` is the profile this image exists to run — it selects the
 # application-community.yaml overlay. Override it only to boot a different

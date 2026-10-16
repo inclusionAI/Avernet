@@ -8,6 +8,7 @@ import {
   getBot,
   listBotInventory,
   pollBotAuthStatus,
+  refetchBotEngine,
   restartBot,
   restartBotEngine,
   restartLocalBot,
@@ -95,7 +96,16 @@ export const botWorkshopService = {
     const dto = response.data;
     if (!dto) return undefined;
     const result = mapBotDto(dto as BackendUnknownRecord, id);
-    return result.item.runtime.visibleInOpenCore ? result.item : undefined;
+    if (!result.item.runtime.visibleInOpenCore) return undefined;
+    if (result.item.avatarUrl) return result.item;
+    // 详情接口尚未稳定回传 avatar_url；复用头像资源接口，保证编辑页与列表展示同一份 Bot 头像。
+    try {
+      const avatarUrl = await botAvatarService.get(id);
+      return avatarUrl.trim() ? { ...result.item, avatarUrl } : result.item;
+    } catch {
+      // 头像接口不可用不应阻塞编辑页加载，交由 BotAvatar 使用既有兜底样式。
+      return result.item;
+    }
   },
   getCreateSpaces(
     scenario: BotCreateInput['scenario'],
@@ -258,6 +268,9 @@ export const botWorkshopService = {
   },
   async restartEngine(id: string) {
     await restartBotEngine(id);
+  },
+  async refetchEngine(id: string) {
+    await refetchBotEngine(id);
   },
   /**
    * 重启发布的服务 runtime（`POST /bots/{id}/lifecycle/restart`，复用 botEditorService 既有封装）。

@@ -66,6 +66,11 @@ impl AppState {
         })
     }
 
+    /// Reap owned persistent processes before the service returns.
+    pub async fn shutdown_engines(&self) {
+        futures::future::join_all(self.engines.values().map(|engine| engine.shutdown())).await;
+    }
+
     /// The engine configured for a bot of this provider.
     pub fn engine(&self, provider_bot_ref: &str) -> Option<Arc<dyn crate::engine::Engine>> {
         self.engines.get(provider_bot_ref).cloned()

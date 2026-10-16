@@ -1,8 +1,9 @@
+import { productionRunSql, trialRunSql, type RunPurpose } from "@avernet/clawweb-shared/server/services/run-purpose";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import type { RunViewPermissions } from "@avernet/clawweb-shared/server/services/run-view-permissions";
 
 export type RunReadScope = { botId: string; ownerId: string };
-export type RunListQuery = RunReadScope & { scope?: "bot" | "session" | "all"; userId?: string; sessionKey?: string; sessionId?: string; limit?: number; beforeId?: number; workflowId?: string; status?: string; identityKey?: string; includeHidden?: boolean };
+export type RunListQuery = RunReadScope & { purpose?: RunPurpose | "all"; scope?: "bot" | "session" | "all"; userId?: string; sessionKey?: string; sessionId?: string; limit?: number; beforeId?: number; workflowId?: string; status?: string; identityKey?: string; includeHidden?: boolean };
 export type RunLogQuery = RunReadScope & { flowId: string; limit?: number; afterId?: number; nodeId?: string; level?: string };
 export type ReadPage = { items: Record<string, unknown>[]; nextCursor: number | null };
 
@@ -31,7 +32,7 @@ export class RunReadRepository {
     const key = scopeKey(q); const limit = pageLimit(q.limit); cursor(q.beforeId);
     const scope = q.scope ?? "bot";
     if (!["bot", "session", "all"].includes(scope)) throw new Error("Invalid run scope");
-    const where: string[] = []; const args: unknown[] = [];
+    const where: string[] = q.purpose && q.purpose !== "all" ? [q.purpose === "trial" ? trialRunSql("flow_runs.flow_id") : productionRunSql("flow_runs.flow_id")] : []; const args: unknown[] = [];
     let grants: { sql: string; args: unknown[] }[] | undefined;
     if (scope === "all") {
       if (!q.userId?.trim()) throw new Error("Missing userId for all scope");

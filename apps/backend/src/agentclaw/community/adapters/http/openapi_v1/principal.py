@@ -85,6 +85,7 @@ from typing import Annotated
 
 from fastapi import Depends, Query, Request
 from fastapi.exceptions import RequestValidationError
+from injector import UnsatisfiedRequirement
 from starlette.requests import HTTPConnection
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
@@ -104,6 +105,9 @@ from agentclaw.community.api.user_app_grant_service import (
     UserAppGrantServiceProtocol,
 )
 from agentclaw.community.core.gateway_principal import PrincipalType
+from agentclaw.community.di.openapi_user_id_bypass_config import (
+    OpenApiUserIdBypassConfig,
+)
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -206,6 +210,36 @@ def caller_app_name(principal: Principal) -> str | None:
     return None
 
 
+def resolve_user_id_bypass(connection: HTTPConnection) -> frozenset[str]:
+    """The ``user_id`` values this deployment accepts without the caller check.
+
+    Read from the injector bound to the app (``OpenApiUserIdBypassConfig``, the
+    ``openapi.user_id_bypass`` block), the way :func:`_grant_reader` reaches the
+    grant service: a lookup rather than an ``Injected(...)`` parameter so that an
+    app with no injector — every probe app in the tests, and any surface that
+    mounts these routers without a composition root — resolves to the **empty
+    set** and keeps the comparison, instead of failing to build the dependency.
+
+    Only "not wired" is tolerated. A provider that *raises* (a malformed list,
+    or a non-empty one in ``pre``/``prod``) propagates: a misconfigured bypass
+    must be loud, never read as "no bypass".
+
+    An :class:`HTTPConnection` rather than a ``Request`` so the dependency is
+    valid on both planes of the surface, as :func:`resolve_caller` is.
+    """
+    injector = getattr(connection.app.state, "injector", None)
+    if injector is None:
+        return frozenset()
+    try:
+        return injector.get(OpenApiUserIdBypassConfig).user_ids
+    except UnsatisfiedRequirement:
+        return frozenset()
+
+
+#: What :func:`require_user_id` consults before comparing ids.
+UserIdBypassDep = Annotated[frozenset[str], Depends(resolve_user_id_bypass)]
+
+
 async def require_user_id(
     principal: Annotated[Principal, Depends(require_principal)],
     user_id: Annotated[
@@ -225,6 +259,7 @@ async def require_user_id(
             description=USER_ID_DESCRIPTION,
         ),
     ],
+    bypass: UserIdBypassDep,
 ) -> str:
     """Return the end user this request acts for, or raise.
 
@@ -252,6 +287,13 @@ async def require_user_id(
     an operation without also taking the grant-checked dependency would be
     unauthorized, which is exactly what the route inventory test refuses to
     allow — see ``admission.py``.
+
+    **One configured exception.** A ``user_id`` listed in ``bypass`` (the
+    ``openapi.user_id_bypass`` block, see :func:`resolve_user_id_bypass`) is
+    accepted as-is for a caller that names a person, without the comparison.
+    It is consulted *after* the 401 — a credential is still required — and it
+    ships empty; the provider refuses a non-empty list in ``pre``/``prod``, so
+    there the behaviour is exactly the comparison above.
     """
     if caller_app_id(principal) is not None and not caller_names_a_user(principal):
         # An application acting alone. It names the user it acts for; whether it
@@ -265,6 +307,19 @@ async def require_user_id(
         # unrecognised principal falls to ``caller_owner_id`` and its 401.
         return user_id
     caller = caller_owner_id(principal)
+    if user_id != caller and user_id in bypass:
+        # Logged at the same level as a refusal, for the same reason: the
+        # response carries nothing, and a caller acting as a listed user is
+        # exactly what an operator auditing this deployment wants a record of.
+        # The value is a configured one, not caller-chosen, so it is safe raw.
+        logger.warning(
+            "%s=%s is on the configured bypass list; accepted for caller %s "
+            "without the identity comparison",
+            USER_ID_QUERY,
+            user_id,
+            caller,
+        )
+        return user_id
     if user_id != caller:
         # Both ids are logged because the response cannot carry them: it is a
         # fixed "Forbidden", so this line is an operator's only record of which

@@ -2,7 +2,7 @@
 import { useBotRegistrationToken } from '@/pages/Workspace/hooks/useBotRegistrationToken';
 import { botRegistrationService, resolveBcsEndpoint } from '@/services/workspace/botRegistrationService';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 
 jest.mock('@/services/workspace/botRegistrationService');
 
@@ -37,6 +37,30 @@ describe('useBotRegistrationToken', () => {
 
     rerender({ open: false });
     expect(result.current.token).toBeNull();
+  });
+
+  it('clears the OpenClaw token immediately when switching to Codex and ignores stale responses', async () => {
+    let resolveScoped!: (value: Awaited<ReturnType<typeof botRegistrationService.getRegistrationToken>>) => void;
+    getRegistrationTokenMock
+      .mockResolvedValueOnce({ ok: true, data: { token: 'openclaw-token', expiresAt: 1788272686000 } })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveScoped = resolve;
+          }),
+      );
+    const { result, rerender } = renderHook(({ scope }: { scope?: string }) => useBotRegistrationToken(true, scope), {
+      initialProps: { scope: undefined as string | undefined },
+    });
+    await waitFor(() => expect(result.current.token).toBe('openclaw-token'));
+    rerender({ scope: 'local' });
+    expect(result.current.token).toBeNull();
+    expect(result.current.isLoading).toBe(true);
+    expect(getRegistrationTokenMock).toHaveBeenLastCalledWith(expect.any(AbortSignal), 'local');
+    await act(async () => {
+      resolveScoped({ ok: true, data: { token: 'codex-token', expiresAt: 1788272686000 } });
+    });
+    await waitFor(() => expect(result.current.token).toBe('codex-token'));
   });
 
   it('exposes retry for failed requests', async () => {

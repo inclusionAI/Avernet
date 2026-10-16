@@ -1,27 +1,12 @@
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import type { BackendApiPage, BackendUnknownRecord } from '@/services/backendApi/types';
-import { getServiceBotCapability } from './agentCodingTemplateService';
-import type { BotDomain, BotLifecycle, BotRuntimeDomain } from './types';
+import { getBcnCapability, getServiceBotCapability } from './agentCodingTemplateService';
+import { resolveBotLifecycle } from './botLifecycleResolver';
+import type { BotDomain, BotRuntimeDomain } from './types';
 
 const PUBLIC_ENGINES = new Set(['openclaw', 'hermes', 'teclaw']);
 const INTERNAL_ENGINES = new Set(['claude_code', 'aicoding', 'claudeCode', 'applicationCoding']);
 const VISIBLE_ENGINES = new Set([...PUBLIC_ENGINES, ...INTERNAL_ENGINES]);
-const DISPLAY_STATE_LIFECYCLE: Record<string, BotLifecycle> = {
-  running: 'running',
-  pending: 'deploying',
-  failed: 'failed',
-  dormant: 'offline',
-  local_running: 'running',
-  local_offline: 'offline',
-  local_pending: 'deploying',
-  local_failed: 'failed',
-  service_draft: 'draft',
-  service_deploying: 'deploying',
-  service_prestable: 'prestable',
-  service_staging: 'prestable',
-  service_online: 'running',
-  service_offline: 'offline',
-};
 const asString = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : undefined);
 const asNumber = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : undefined);
 const asRecord = (value: unknown): BackendUnknownRecord =>
@@ -74,10 +59,23 @@ function templateNameFrom(dto: BackendUnknownRecord, templateType?: string) {
 function runtimeFrom(dto: BackendUnknownRecord, warnings: string[]): BotRuntimeDomain {
   const rawEngine = asString(dto.active_engine) ?? asString(dto.engine_type) ?? asString(dto.engine);
   const templateType = templateTypeFrom(dto);
+  const bcnEnabled = getBcnCapability({ config: dto, raw: dto });
+  const config = templateConfigFrom(dto);
+  const ext = asRecord(dto.ext);
+  const engineForm =
+    asString(dto.engine_form) ??
+    asString(config.engineProperties.engine_form) ??
+    asString(config.engineTemplateConfig.engine_form) ??
+    asString(config.directTemplateConfig.engine_form) ??
+    asString(config.botTemplateConfig.engine_form) ??
+    asString(config.directBotTemplateConfig.engine_form) ??
+    asString(config.engineBotTemplateConfig.engine_form) ??
+    asString(ext.engine_form);
   const runtime = resolveBotRuntime({
     engine: rawEngine,
     templateType,
     templateName: templateNameFrom(dto, templateType),
+    engineForm,
     botType: asString(dto.bot_type),
     botId: asString(dto.bot_id),
   });
@@ -89,6 +87,7 @@ function runtimeFrom(dto: BackendUnknownRecord, warnings: string[]): BotRuntimeD
   }
   return {
     ...runtime,
+    bcnEnabled: runtime.isAgentCodingBot ? bcnEnabled === true : undefined,
     engine,
     capabilityProfile: {
       canPublish: PUBLIC_ENGINES.has(engine),
@@ -101,29 +100,9 @@ function runtimeFrom(dto: BackendUnknownRecord, warnings: string[]): BotRuntimeD
 }
 
 function lifecycle(dto: BackendUnknownRecord, warnings: string[]) {
-  const displayState = asString(dto.display_state)?.toLowerCase();
-  if (displayState && DISPLAY_STATE_LIFECYCLE[displayState]) {
-    return DISPLAY_STATE_LIFECYCLE[displayState];
-  }
-  const status = asString(dto.status)?.toUpperCase();
-  const publish = asString(dto.publish_status)?.toLowerCase();
   const isService =
     asString(dto.kind)?.toLowerCase() === 'service' || asString(dto.bot_type)?.toLowerCase() === 'service';
-  if (!status && !publish) {
-    warnings.push('缺少生命周期状态');
-    return 'unknown' as const;
-  }
-  if (status === 'PENDING') return 'deploying' as const;
-  if (status === 'FAILED') return 'failed' as const;
-  if (status === 'OFFLINE' || status === 'RELEASED' || status === 'RECYCLED') return 'offline' as const;
-  // Bot 详情接口没有 inventory 的 display_state / publication 状态。服务 Bot 的草稿运行时
-  // 同样会返回 ACTIVE，不能把它当成 online；只有明确发布状态或 inventory 展示态才能判定已上线。
-  if (status === 'ACTIVE' && !publish) return isService ? ('draft' as const) : ('running' as const);
-  if (status === 'ACTIVE' && ['validating', 'validate_pub'].includes(publish ?? '')) return 'prestable' as const;
-  if (status === 'ACTIVE' && ['success', 'online_pub', 'upgraded', 'built'].includes(publish ?? ''))
-    return 'running' as const;
-  if (publish === 'draft') return 'draft' as const;
-  return 'unknown' as const;
+  return resolveBotLifecycle(dto, isService, warnings);
 }
 
 export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, currentUserId?: string) {
@@ -136,6 +115,7 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
   const spaceId = asString(dto.space_id) ?? asString(space?.space_id) ?? asString(dto.owner_entity_id);
   const spaceName = asString(dto.space_name) ?? asString(space?.space_name) ?? asString(space?.name);
   const entityId = asString(dto.entity_id) ?? asString(dto.owner_entity_id) ?? spaceId;
+  const avatarUrl = asString(dto.avatar_url) ?? asString(asRecord(dto.ext).avatar_url);
   const botType = asString(dto.bot_type) ?? 'personal';
   const inventoryKind = asString(dto.kind);
   const entityType = asString(dto.entity_type);
@@ -172,8 +152,8 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
   const item: BotDomain = {
     id,
     cardId: asString(dto.card_id),
-    avatarUrl: asString(dto.avatar_url),
-    publicationVersion: asNumber(dto.publication_version),
+    avatarUrl,
+    publicationVersion: asNumber(dto.publication_version) ?? asNumber(asRecord(dto.publish).version),
     liveVersion: asNumber(dto.live_version),
     ownerId,
     ownerName: asString(dto.owner_name),
@@ -189,13 +169,14 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
     canUpgradeToService,
     lifecycle: lifecycle(dto, warnings),
     rawStatus: asString(dto.status),
-    rawPublishStatus: asString(dto.publish_status),
+    rawPublishStatus: asString(asRecord(dto.publish).status) ?? asString(dto.publish_status),
     runtime,
     harnessContext: entityId
       ? {
           entityType: entityType ?? (ownership === 'team' ? 'team' : 'staff'),
           entityId,
-          botPublishId: asString(dto.bot_publish_id) ?? asString(dto.publish_id),
+          botPublishId:
+            asString(dto.bot_publish_id) ?? asString(dto.publish_id) ?? asString(asRecord(dto.publish).id),
         }
       : undefined,
     healthScore: asNumber(dto.health_score),

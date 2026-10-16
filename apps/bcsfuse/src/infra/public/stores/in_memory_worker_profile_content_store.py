@@ -184,6 +184,15 @@ class InMemoryWorkerProfileContentStore:
             if (content := self.get(worker_id, profile_id)) is not None
         ]
 
+    def get_active_by_workers(self, worker_ids: list[str]) -> list[WorkerProfileContent]:
+        """Retain active-record ordering while reading only the requested owners."""
+        owners = set(worker_ids)
+        return [
+            content
+            for worker_id, profile_id in self._active_profiles.items()
+            if worker_id in owners and (content := self.get(worker_id, profile_id)) is not None
+        ]
+
     def get_active_profiles(self, worker_ids: Optional[List[str]] = None) -> List[dict]:
         """
         Get all active profiles.

@@ -1,0 +1,35 @@
+@startuml
+!theme plain
+title Proposed task skill readiness admission (DRAFT)
+participant "Task caller" as T
+participant "Runtime routing / admission" as A
+participant "Skill readiness service" as S
+participant "Canonical reader / projector" as P
+participant "Selected Engine instance" as E
+T -> A : task instruction + required skill + execution request id
+A -> A : authenticate and select target generation
+A -> S : ensure ready on selected runtime target
+S -> P : resolve stage-authorized effective skill
+P --> S : exact identity / content revision / requirements
+S -> E : probe active entry and content
+E --> S : runtime evidence
+alt explicitly repairable drift
+  S -> S : acquire projection lease; re-read and re-probe
+  S -> P : apply full legal plan to same target
+  P -> E : existing engine-specific delivery
+  E --> P : receipt / projection diagnostics
+  S -> E : read back on same target generation
+  E --> S : target readiness evidence
+end
+S --> A : runtime evidence or blocker
+alt runtime ready
+  A -> E : prepare actual session snapshot
+  E --> A : session revision and skill evidence
+  A -> A : validate generation, effective policy and receipt
+  A -> E : idempotent start on same target/session
+  E --> A : business run acknowledgment
+  A --> T : delivery accepted
+else not ready / unsupported / policy blocked
+  A --> T : no business run; structured blocker
+end
+@enduml

@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from injector import Binder, Module, inject, provider, singleton
 
+from agentclaw.community.api.cron_admin_service import CronAdminServiceProtocol
+from agentclaw.community.core.cron.services.cron_admin import CronAdminService
 from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.core.cron.services.cron_auto_setup_listener import (
     CronAutoSetupListener,
@@ -30,6 +32,7 @@ class CronModule(Module):
 
     def configure(self, binder: Binder) -> None:
         binder.bind(CronRelayService, to=CronRelayService, scope=singleton)
+        binder.bind(CronAdminServiceProtocol, to=CronAdminService, scope=singleton)
         # The HTTP-to-adapter boundary (``DeviceAdapterTransport``) is a device
         # concern, bound per-profile by the device column (B6 T26): corp →
         # ``CorpDevicesModule`` (HttpDeviceAdapterTransport); test →

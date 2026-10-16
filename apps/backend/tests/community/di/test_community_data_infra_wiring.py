@@ -11,6 +11,9 @@ import pytest
 
 from agentclaw.community.di import config_community as cfg
 from agentclaw.community.di.container import build_injector
+from agentclaw.community.di.local_skill_security_config import (
+    LocalSkillSecurityObservationConfig,
+)
 from agentclaw.community.di.modules.infrastructure.community.database import (
     CommunityDatabaseModule,
 )
@@ -105,7 +108,9 @@ def test_mysql_backend_builds_a_pooled_engine(monkeypatch):
         },
     )
     config = CommunityDatabaseModule().database_config()
-    plugin = CommunityDatabaseModule().database(config)
+    plugin = CommunityDatabaseModule().database(
+        config, LocalSkillSecurityObservationConfig(enabled=False)
+    )
     assert isinstance(plugin, CommunityDatabase)
     assert plugin._engine.pool._pre_ping is True
     assert plugin._engine.pool._recycle == 3600

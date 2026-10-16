@@ -1,0 +1,118 @@
+# A draft-review loop nested inside an overall delivery loop. Bind logical roles when creating a group.
+# Creation and execution require Loop execution, nested Loop execution, and an LLM Judge.
+name: Nested Delivery Review Loops
+
+metadata:
+  description: Each delivery cycle allows up to three draft reviews. After the inner loop approves or exhausts, overall acceptance either releases the result or starts another outer delivery cycle.
+
+participants:
+  author:
+    display_name: Solution Author
+    description: Prepares the complete solution using the user request, prior delivery acceptance, and editorial feedback.
+    required: true
+  reviewer:
+    display_name: Content Reviewer
+    description: Reviews the draft within each delivery cycle and explicitly approves it or requests revisions.
+    required: true
+  owner:
+    display_name: Delivery Owner
+    description: Evaluates the editorial status and delivery goals as a whole, then releases the result or requests another cycle.
+    required: true
+
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 2
+    graph_mode: hierarchical
+    defaults:
+      node_timeout_ms: 120000
+      max_attempts: 2
+    nodes:
+      delivery_cycles:
+        kind: loop
+        display_name: Delivery Cycles
+        loop:
+          mode: fixed
+          max_iterations: 2
+          entry_node: prepare
+          result_node: acceptance
+          continue_outcomes: [retry_cycle]
+          continue_display_name: Start the Next Delivery Cycle
+          break_outcomes: [ready]
+          exhausted_outcome: delivery_exhausted
+          nodes:
+            prepare:
+              kind: bot_task
+              display_name: Prepare This Delivery
+              assignee: {type: bot_binding, binding: author}
+              instruction: |
+                Prepare a complete solution for the user goal, including conclusions, evidence, risks, and next steps.
+                Start from the user request in the first cycle. In later outer cycles, use the previous overall acceptance result and address every rejection reason.
+                Always return a self-contained solution and explain which issues this delivery cycle resolves.
+              transitions:
+                complete: {display_name: Begin Draft Review, targets: [review_rounds]}
+            review_rounds:
+              kind: loop
+              display_name: Draft Review Rounds
+              loop:
+                mode: fixed
+                max_iterations: 3
+                entry_node: draft
+                result_node: editorial_review
+                continue_outcomes: [revise]
+                continue_display_name: Revise the Draft Again
+                break_outcomes: [approved]
+                exhausted_outcome: review_exhausted
+                nodes:
+                  draft:
+                    kind: bot_task
+                    display_name: Write or Revise the Complete Draft
+                    assignee: {type: bot_binding, binding: author}
+                    instruction: |
+                      Write a complete draft from this cycle's delivery solution. Use the upstream solution in the first inner round and this draft-review loop's previous result in later rounds.
+                      Address each review item while preserving evidence, limitations, and risks. Return the full draft, never only a diff.
+                    transitions:
+                      complete: {display_name: Submit for Content Review, targets: [editorial_review]}
+                  editorial_review:
+                    kind: bot_task
+                    display_name: Review This Draft
+                    assignee: {type: bot_binding, binding: reviewer}
+                    instruction: |
+                      Check whether the draft fully answers the request, has reliable support, explains risks, and offers actionable advice.
+                      Return the complete draft, an explicit approval or revision decision, and required fixes ordered by priority.
+                      Approve as soon as it meets the standard; never request revisions merely to use every round or omit the complete draft.
+                    judge:
+                      type: llm
+                      criteria:
+                        - Choose approved when the reviewer explicitly approves, preserves the complete draft, and leaves no required fixes unresolved.
+                        - Choose revise when the reviewer requests revisions, leaves required fixes unresolved, or gives no explicit approval.
+                      outcomes: [approved, revise]
+              transitions:
+                approved: {display_name: Draft Approved, targets: [acceptance]}
+                review_exhausted: {display_name: Accept with Open Issues, targets: [acceptance]}
+            acceptance:
+              kind: bot_task
+              display_name: Accept This Delivery as a Whole
+              assignee: {type: bot_binding, binding: owner}
+              instruction: |
+                Evaluate the user goal, complete draft, and editorial status as one delivery.
+                Return the complete deliverable, an explicit ready or retry decision, and all unresolved issues.
+                Mark it ready only when editorial review approved the draft and every delivery goal is met. Exhausting the inner loop never implies approval.
+              judge:
+                type: llm
+                criteria:
+                  - Choose ready when the owner explicitly accepts delivery, editorial review approved the draft, and no blocking issue remains.
+                  - Choose retry_cycle when the owner requests another cycle, editorial review did not approve, or a blocking issue remains.
+                outcomes: [ready, retry_cycle]
+        transitions:
+          ready: {display_name: Delivery Accepted, targets: [finalize]}
+          delivery_exhausted: {display_name: Delivery Cycle Limit Reached, targets: [finalize]}
+      finalize:
+        kind: bot_task
+        display_name: Produce the Final Delivery
+        assignee: {type: bot_binding, binding: author}
+        instruction: |
+          Produce the complete final result from the last overall acceptance and preserve its acceptance status.
+          When accepted, deliver the confirmed content. When the outer limit is reached, explicitly list unresolved issues and recommended follow-up actions.
+          Never treat inner or outer exhaustion as approval or invent a delivery cycle that did not run.
+        final_output: true

@@ -296,7 +296,11 @@ coordination profile 由 BCS 服务端管理，至少包含：
 - coordination tool 的 exact canonical name；
 - 支持的 coordination call versions。
 
-客户端在 connect 中通过 `client_kind` 选择内置 profile，不能上传或覆盖 tool allowlist。
+客户端在 connect 中通过 `client_kind` 声明能力，不能上传或覆盖 tool allowlist。
+已归属 Provider 的 Bot（包括无 HTTP binding 的 plugin Bot）从服务端保存的
+Bot–Provider 关系读取 Provider 的 coordination 模式与精确工具映射；匹配模式和显式 V3
+共同决定 task intent 能力，不继承全局上行授权。Provider 禁用、归属已删除或配置无效时拒绝，
+重新连接时读取当前配置。以下部署级内置 profile 规则仅适用于没有 Provider 归属的 Bot。
 本阶段不持久化逐 Bot profile，也不提供管理 API。生产来源为启动配置
 `[uplink] allowed_profiles = ["native_mcp", "mcporter_mcp"]`，默认空列表，
 未启用或未知 kind 关闭 task intent；V1/V2 不支持该模式。

@@ -149,7 +149,7 @@ describe('useManagedBotOthers', () => {
 
     act(() => result.current.toggleFriend('bot-a:2088', '447147'));
 
-    await waitFor(() => expect(listOtherSessions).toHaveBeenCalledWith(managedBot.bot, '447147'));
+    await waitFor(() => expect(listOtherSessions).toHaveBeenCalledWith(managedBot.bot, '447147', 1, 10, ''));
     const view = await waitFor(() => {
       const current = useConversationStore.getState().sessionsByBotId['bot-a:2088'];
       expect(current.friendGroups['447147'].state).toBe('loaded');
@@ -310,7 +310,7 @@ describe('useManagedBotOthers', () => {
 
     await act(async () => result.current.loadMoreFriendSessions('bot-a:2088', '447147'));
 
-    expect(listOtherSessions).toHaveBeenLastCalledWith(managedBot.bot, '447147', 2);
+    expect(listOtherSessions).toHaveBeenLastCalledWith(managedBot.bot, '447147', 2, 10, '');
     const group = useConversationStore.getState().sessionsByBotId['bot-a:2088'].friendGroups['447147'];
     expect(group.sessions.items.map((item) => item.sessionId)).toEqual(['s1', 's2']);
     expect(group.sessions.page).toBe(2);

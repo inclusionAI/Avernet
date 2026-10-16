@@ -94,6 +94,7 @@ def _make_service(
         mcp_sync=MagicMock(),
         template_resolver=template_resolver,
         vault=vault,
+        layout_confirmation=MagicMock(),
         task_queue_service=task_queue_service,
         template_service=template_service,
     )
@@ -725,6 +726,7 @@ class TestDoAllocate:
         # 本地拼装 id 留 props.local_device_id 备查。回归守护:trace
         # 0b446a4d17822154217278160e3e69(staff_ 查 BaaS 404 BOT_NOT_FOUND)。
         assert allocated.device_id == "BAAS-CTR-xxx"
+        assert allocated.device_props["client_id"] == allocated.device_id
         assert allocated.device_props["local_device_id"] == "staff_staff_u001_default_abc"
         assert allocated.device_provider == BAAS_DEVICE_PROVIDER
         assert allocated.device_props["bot_uuid"] == "BAAS-CTR-xxx"
@@ -1294,10 +1296,10 @@ class TestStartServiceInitSteps:
         assert "install_engine.sh" in cmds[1]
         assert "setup_supervisor_sync_service.sh" in cmds[2]
         assert "setup_engine_dirs.sh" in cmds[3]
-        assert "start_service.sh" in cmds[-2]
+        assert not any("/start_service.sh " in cmd for cmd in cmds)
         assert "starting_watchdog.sh" in cmds[-1]
 
-    def test_no_su_admin_in_commands(self):
+    def test_startup_user_selection_is_limited_to_service_and_watchdog(self):
         svc, baas = self._make_success_svc()
 
         with patch(
@@ -1308,7 +1310,10 @@ class TestStartServiceInitSteps:
 
         for call in baas.exec_command_on_bot.call_args_list:
             cmd = call.kwargs.get("cmd", "")
-            assert "su admin" not in cmd, f"BaaS container should not use su admin: {cmd}"
+            if "start_service.sh" in cmd or "starting_watchdog.sh" in cmd:
+                assert '"$(id -un)" = admin' in cmd
+            else:
+                assert "su admin" not in cmd
 
     def test_init_uses_correct_bot_uuid(self):
         svc, baas = self._make_success_svc()
@@ -1342,7 +1347,7 @@ class TestStartServiceInitSteps:
         assert "init failed" in msg.lower() or "bootstrap" in msg.lower()
         svc.report_device_alive.assert_not_called()
 
-    def test_start_service_passes_bot_type(self):
+    def test_post_publish_does_not_repeat_startup_for_coding_bot_type(self):
         svc, baas = self._make_success_svc()
 
         with patch(
@@ -1359,8 +1364,11 @@ class TestStartServiceInitSteps:
             c for c in baas.exec_command_on_bot.call_args_list
             if "start_service.sh" in c.kwargs.get("cmd", "")
         ]
-        assert len(start_cmd_calls) == 1
-        assert "--bot_type personalCoding" in start_cmd_calls[0].kwargs["cmd"]
+        assert start_cmd_calls == []
+        assert any(
+            "starting_watchdog.sh" in call.kwargs.get("cmd", "")
+            for call in baas.exec_command_on_bot.call_args_list
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1543,6 +1551,7 @@ class TestInitStepEdgeCases:
         svc = _make_service(baas_service=baas)
 
         symbol = json.dumps([{"source": "./skill_a", "target": "/opt/skills/a"}])
+        baas.exec_command_on_bot.return_value = {"exit_code": 0}
         svc._create_baas_skill_symlink_conf(bot_uuid="BOT-1", symbol=symbol)
 
         baas.exec_command_on_bot.assert_called_once()
@@ -1568,6 +1577,7 @@ class TestInitStepEdgeCases:
             entity_type="staff",
             stage="dev",
             admins="admin1",
+            startup_identity="publish-1001",
         )
 
         cmd = baas.exec_command_on_bot.call_args_list[0].kwargs["cmd"]
@@ -1575,6 +1585,77 @@ class TestInitStepEdgeCases:
         assert "--bot_id b123" in cmd
         assert "--owner_id u001" in cmd
         assert "--admins admin1" in cmd
+        assert "--startup_identity publish-1001" in cmd
+        watchdog_cmd = baas.exec_command_on_bot.call_args_list[1].kwargs["cmd"]
+        assert "--startup_identity publish-1001" in watchdog_cmd
+        assert '"$(id -un)" = admin' in cmd
+        assert '"$(id -un)" = admin' in watchdog_cmd
+        assert "su admin -c" in cmd
+        assert "su admin -c" in watchdog_cmd
+
+    def test_legacy_startup_preserves_old_watchdog_wire(self):
+        baas = MagicMock()
+        svc = _make_service(baas_service=baas)
+
+        svc._start_baas_sandbox_service(
+            bot_uuid="BOT-1",
+            client_id="c1",
+            engine="openclaw",
+            token="tok",
+            bot_type="personal",
+            bot_id="b123",
+            owner_id="u001",
+            entity_id="e001",
+            entity_type="staff",
+            stage="dev",
+            admins=None,
+            startup_identity=None,
+        )
+
+        assert all(
+            "--startup_identity" not in call.kwargs["cmd"]
+            for call in baas.exec_command_on_bot.call_args_list
+        )
+
+    def test_pool_restart_dispatches_current_publish_identity(self):
+        baas = MagicMock()
+        svc = _make_service(baas_service=baas)
+        binding = _make_binding_record(
+            device_props={
+                "bot_uuid": "BOT-1",
+                "client_id": "client-1",
+                "callback_token": "token-1",
+                "restart_publish_id": "2002",
+                "envs": {
+                    "AGENTCLAW_SKILLS_LAYOUT": "pool",
+                    "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": (
+                        "skills-pool-p3-v1"
+                    ),
+                },
+            }
+        )
+
+        ok, message = svc.dispatch_restart_layout_confirmation(
+            binding=binding,
+            publish_id=2002,
+        )
+
+        assert ok is True
+        assert message == "Skills Pool restart callback dispatched"
+        command = baas.exec_command_on_bot.call_args.kwargs["cmd"]
+        assert "starting_watchdog.sh" in command
+        assert "--startup_identity 2002" in command
+
+    def test_legacy_restart_does_not_dispatch_layout_confirmation(self):
+        baas = MagicMock()
+        svc = _make_service(baas_service=baas)
+        binding = _make_binding_record(device_props={"envs": {}})
+
+        assert svc.dispatch_restart_layout_confirmation(
+            binding=binding,
+            publish_id=2002,
+        ) == (True, "layout confirmation not required")
+        baas.exec_command_on_bot.assert_not_called()
 
     def test_deserialize_symbol_invalid_json(self):
         """Lines 540-544: invalid JSON returns empty list."""
@@ -1799,6 +1880,7 @@ class TestBaasCreateTaskHelpers:
 
         assert ok is False
         assert "report_device_alive failed: alive boom" in message
+        assert svc._run_container_init.call_args.kwargs["startup_identity"] == "1001"
 
 
 class TestAfterBindingPersisted:
@@ -1829,6 +1911,10 @@ class TestAfterBindingPersisted:
         assert payload["publish_id"] == 12372
         assert "started_at_epoch_s" in payload
         assert task_queue.enqueue.call_args.kwargs["deadline_seconds"] == 86400
+        assert (
+            task_queue.enqueue.call_args.kwargs["idempotency_key"]
+            == "baas-create-poll:1357:12372"
+        )
 
     def test_baas_after_binding_persisted_marks_failed_when_task_queue_missing(self):
         svc = _make_service(task_queue_service=None)

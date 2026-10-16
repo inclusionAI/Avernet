@@ -7,7 +7,7 @@
 // 禁 antd/裸 button，用项目 Popover/IconButton。≤200 行。
 import type { HelpLink } from '@/capabilities';
 import { getCapabilities } from '@/capabilities';
-import { IconButton, Popover, PopoverContent, PopoverTrigger } from '@/components/ui';
+import { Button, IconButton, Popover, PopoverContent, PopoverTrigger } from '@/components/ui';
 import { useReleaseNotes } from '@/hooks/useReleaseNotes';
 import { cn } from '@/utils/cn';
 import {
@@ -67,11 +67,11 @@ function ActionRow({
   trailing?: React.ReactNode;
 }) {
   return (
-    <button type="button" onClick={onClick} className={ROW_CLASS}>
+    <Button variant="ghost" type="button" onClick={onClick} className={ROW_CLASS}>
       {icon}
       <span className="flex-1 text-left">{label}</span>
       {trailing}
-    </button>
+    </Button>
   );
 }
 
@@ -80,14 +80,14 @@ function ProductSubmenu({ items }: { items: HelpLink[] }) {
   const [open, setOpen] = useState(false);
   return (
     <div>
-      <button type="button" onClick={() => setOpen((v) => !v)} className={ROW_CLASS}>
+      <Button variant="ghost" type="button" onClick={() => setOpen((v) => !v)} className={ROW_CLASS}>
         <PackageOpen className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
         <span className="flex-1 text-left">产品获取</span>
         <ChevronRight
           className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')}
           aria-hidden
         />
-      </button>
+      </Button>
       {open && (
         <div className="mt-0.5 space-y-0.5 border-l border-border pl-2 ml-3">
           {items.map((l) => (
@@ -134,7 +134,9 @@ export function HelpMenu({ variant = 'help' }: { variant?: 'help' | 'more' } = {
                   icon={<ScrollText className="h-4 w-4 shrink-0 text-muted-foreground" />}
                   label="ReleaseNote"
                   trailing={
-                    release.hasNew ? <span className="h-2 w-2 rounded-full bg-red-500" aria-label="有新版本" /> : null
+                    release.hasNew ? (
+                      <span className="h-2 w-2 rounded-full bg-destructive" aria-label="有新版本" />
+                    ) : null
                   }
                   onClick={() => {
                     setOpen(false);

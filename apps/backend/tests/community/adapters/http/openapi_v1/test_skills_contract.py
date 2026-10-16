@@ -2,7 +2,10 @@
 
 from fastapi import FastAPI
 
-from agentclaw.community.adapters.http.openapi_v1.skills.router import readme_router, router
+from agentclaw.community.adapters.http.openapi_v1.skills.router import (
+    readme_router,
+    router,
+)
 
 
 def _schema() -> dict:
@@ -31,12 +34,38 @@ def test_skill_readme_is_skill_addressed_and_uses_openapi_envelope() -> None:
     assert set(components["SkillContent"]["properties"]) == {"content"}
 
 
+def test_local_security_observations_have_bounded_bot_scoped_contract() -> None:
+    schema = _schema()
+    operation = schema["paths"][
+        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/security-observations"
+    ]["get"]
+    params = {item["name"]: item for item in operation["parameters"]}
+    assert {"bot_id", "skill_id", "page", "page_size", "owner_id"} <= set(params)
+    assert params["bot_id"]["in"] == params["skill_id"]["in"] == "path"
+    assert params["page"]["schema"]["default"] == 1
+    assert params["page_size"]["schema"]["maximum"] == 100
+    success = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    assert success["$ref"].endswith("Envelope_SkillSecurityObservations_")
+    components = schema["components"]["schemas"]
+    assert set(components["SkillSecurityObservations"]["properties"]) == {
+        "provider_skill_id",
+        "current",
+        "current_status",
+        "current_failure",
+        "history",
+    }
+    assert {"processing_status", "risk_status", "check_id", "report"} <= set(
+        components["SkillSecurityObservation"]["properties"]
+    )
+
+
 def test_openapi_exposes_local_compatibility_and_skill_asset_operations() -> None:
     schema = _schema()
     skill_paths = {
         path: set(operations)
         for path, operations in schema["paths"].items()
-        if "/skills" in path and path.startswith("/openapi/v1/bots/{bot_id}")
+        if "/skills" in path
+        and path.startswith("/openapi/v1/bots/{bot_id}")
         or path.startswith("/openapi/v1/bots/{bot_id}/skills")
     }
 
@@ -48,6 +77,7 @@ def test_openapi_exposes_local_compatibility_and_skill_asset_operations() -> Non
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate": {"post"},
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content": {"get"},
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters": {"get", "put"},
+        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/security-observations": {"get"},
     }
 
 
@@ -65,7 +95,9 @@ def test_collection_and_upload_are_bot_addressed_contracts() -> None:
     assert list_parameters["active"]["required"] is False
     assert list_parameters["keyword"]["required"] is False
     assert list_parameters["source"]["required"] is False
-    assert {item.get("const") for item in list_parameters["source"]["schema"]["anyOf"]} == {
+    assert {
+        item.get("const") for item in list_parameters["source"]["schema"]["anyOf"]
+    } == {
         "LOCAL",
         None,
     }
@@ -110,7 +142,9 @@ def test_operation_responses_use_the_ratified_local_skill_models() -> None:
         ].endswith("Envelope_SkillUpload_")
 
     for action in ("activate", "deactivate"):
-        operation = paths[f"/openapi/v1/bots/{{bot_id}}/skills/{{skill_id}}/{action}"]["post"]
+        operation = paths[f"/openapi/v1/bots/{{bot_id}}/skills/{{skill_id}}/{action}"][
+            "post"
+        ]
         assert operation["responses"]["200"]["content"]["application/json"]["schema"][
             "$ref"
         ].endswith("Envelope_SkillState_")

@@ -190,11 +190,12 @@ class TeClawBotPlugin(Protocol):
         ...
 
     async def append_session_outbound_rule(
-        self, session_key: str, rule: dict[str, Any]
+        self, bot_id: str, session_key: str, rule: dict[str, Any]
     ) -> bool:
         """Append a session-scoped outbound operation rule for a bot.
 
         Args:
+            bot_id: The teclaw_bot_id for the target device.
             session_key: Raw session key. Implementations encode it before
                 constructing the TeClaw URL.
             rule: Single header operation rule in TeClaw session API format.

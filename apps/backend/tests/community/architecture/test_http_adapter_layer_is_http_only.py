@@ -61,6 +61,10 @@ _NON_ENDPOINT_FILES: frozenset[str] = frozenset({
     # Named in full rather than as a short pattern so this entry cannot
     # exempt anything else.
     "rule_shape_audit.py",
+    # The collaboration-task half of that table, split from authorization_rules
+    # at the 1000-line module cap. Same keystroke — policy rows only, no HTTP
+    # stack; concrete-service imports remain checked.
+    "authorization_rules_task.py",
     "__init__.py",
 })
 
@@ -74,6 +78,16 @@ _NON_ENDPOINT_FILES: frozenset[str] = frozenset({
 # in the layering guard. Matching by stem is deliberately loose (any module's
 # ``schemas.py`` qualifies); that looseness is only safe because it cannot
 # disable the import check.
+# Import-light helpers that are named exactly like same-purpose files in other
+# modules still need a path-specific exemption; this keeps unexpected files with
+# the same basename from inheriting the policy accidentally.
+_NON_ENDPOINT_PATHS: frozenset[str] = frozenset({
+    # Relay execution-generation guard. It compares the incoming relay token
+    # with the current node generation, deliberately without importing FastAPI,
+    # so the guard is testable without instantiating the HTTP stack.
+    "task/relay_guard.py",
+})
+
 _NON_ENDPOINT_NAME_PATTERNS: tuple[str, ...] = (
     "schemas",       # schemas.py, schemas_publish.py, etc.
     "dependencies",  # router-local DI helpers
@@ -127,6 +141,15 @@ _NON_ENDPOINT_NAME_PATTERNS: tuple[str, ...] = (
                      # this entry cannot exempt anything else.
     "tc_resource_ready_publisher",
                      # outbound HTTP client adapter; it is not a FastAPI route.
+    "trajectory_html",
+                     # trajectory route dispatch target for display=html; pure DTO to HTML
+                     # render with no FastAPI import, tested without a client.
+    "relay_callback_guard",
+                     # inbound relay-callback guard + failure trajectory logging; imports the
+                     # adapter translator, so it cannot move to core and stays here.
+    "author_enricher",
+                     # BBS read-side BOT author display-name fill; resolves the bot service off
+                     # the request injector, so it stays in the adapter layer.
 )
 
 
@@ -137,6 +160,8 @@ def _is_endpoint_file(file: pathlib.Path) -> bool:
     exempt from *looking like* endpoints, never from the layering rule.
     """
     if file.name in _NON_ENDPOINT_FILES:
+        return False
+    if file.relative_to(_HTTP_ROOT).as_posix() in _NON_ENDPOINT_PATHS:
         return False
     stem = file.stem
     for pattern in _NON_ENDPOINT_NAME_PATTERNS:

@@ -1,6 +1,9 @@
 /** @jest-environment jsdom */
 import { deriveTaskTitle, useTaskExecuteFromCard } from '@/hooks/useTaskExecuteFromCard';
-import type { TaskComposerContext } from '@/services/tasks/taskMapper';
+import type {
+  RelayModeCoverageSmokeState,
+  TaskComposerContext,
+} from '@/services/tasks/taskMapper';
 import { buildTaskLaunchMessage } from '@/services/tasks/taskPanelMessage';
 import { executeTaskService } from '@/services/tasks/taskService';
 import { setTaskExecuteHandler } from '@/services/workspace/chatBridge';
@@ -17,11 +20,13 @@ jest.mock('@/services/tasks/taskService', () => ({
 }));
 jest.mock('@/services/tasks/taskPanelMessage', () => ({
   buildTaskPanelAixUI: jest.fn().mockReturnValue('<AixUI-panel/>'),
-  buildTaskLaunchMessage: jest.fn(
-    (panel: string, record: { task_info?: { execution_config?: { orchestration_mode?: string } } }) =>
-      record.task_info?.execution_config?.orchestration_mode === 'relay'
-        ? { content: `${panel}\n[relay-root-execution]`, shouldTriggerBot: true }
-        : { content: panel, shouldTriggerBot: false },
+  buildTaskLaunchMessage: jest.fn((panel: string, record: { task_info?: { execution_config?: Record<string, unknown> } }) =>
+    record.task_info?.execution_config?.orchestration_mode === 'relay'
+      ? {
+          content: `${panel}\n${String(record.task_info.execution_config.root_execution_instruction)}`,
+          shouldTriggerBot: true,
+        }
+      : { content: panel, shouldTriggerBot: false },
   ),
 }));
 
@@ -56,6 +61,40 @@ describe('useTaskExecuteFromCard 卡片执行', () => {
     });
   });
 
+  it('确认烟测任务时保留 hidden_flags 并传给 execute service', async () => {
+    const smokeState: RelayModeCoverageSmokeState = {
+      version: 3,
+      current_phase: 'plan_single_bot',
+      planned_modes: [],
+    };
+    const submitPanelMessage = jest.fn();
+
+    renderHook(() =>
+      useTaskExecuteFromCard({
+        panelRef: { current: null } as never,
+        context,
+        submitPanelMessage,
+      }),
+    );
+
+    await act(async () => {
+      registeredHandler?.({
+        ...task,
+        hidden_flags: { relay_mode_coverage_smoke: smokeState },
+      });
+    });
+    await waitFor(() => expect(mockedExecute).toHaveBeenCalled());
+
+    expect(mockedExecute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        form: expect.objectContaining({
+          hidden_flags: { relay_mode_coverage_smoke: smokeState },
+        }),
+        ctx: context,
+      }),
+    );
+  });
+
   it('点击确认后直接调用 executeTaskService 并发送副屏面板消息', async () => {
     const submitPanelMessage = jest.fn();
 
@@ -76,7 +115,6 @@ describe('useTaskExecuteFromCard 卡片执行', () => {
     expect(mockedBuildTaskLaunchMessage).toHaveBeenCalledWith(
       '<AixUI-panel/>',
       expect.objectContaining({ task_id: 't-1' }),
-      expect.any(Object),
     );
   });
 
@@ -86,7 +124,11 @@ describe('useTaskExecuteFromCard 卡片执行', () => {
       create_time: 1,
       finish_time: null,
       task_info: {
-        execution_config: { orchestration_mode: 'relay', root_node_id: 'root-relay' },
+        execution_config: {
+          orchestration_mode: 'relay',
+          root_node_id: 'root-relay',
+          root_execution_instruction: '[task-execute]\nbackend_url=https://backend.example',
+        },
       },
     });
     const submitPanelMessage = jest.fn();
@@ -109,9 +151,11 @@ describe('useTaskExecuteFromCard 卡片执行', () => {
     expect(mockedBuildTaskLaunchMessage).toHaveBeenCalledWith(
       '<AixUI-panel/>',
       expect.objectContaining({ task_id: 't-relay' }),
-      expect.objectContaining({ holderId: 'b1', objective: task.goal }),
     );
-    expect(submitTaskExecutionMessage).toHaveBeenCalledWith('<AixUI-panel/>\n[relay-root-execution]', 'b1');
+    expect(submitTaskExecutionMessage).toHaveBeenCalledWith(
+      '<AixUI-panel/>\n[task-execute]\nbackend_url=https://backend.example',
+      'b1',
+    );
     expect(submitPanelMessage).not.toHaveBeenCalled();
   });
 });

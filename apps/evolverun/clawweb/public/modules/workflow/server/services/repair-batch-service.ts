@@ -1,3 +1,6 @@
+import { automaticChain, isAutomaticBatch } from '../contracts/repair-automatic-chain.js';
+import { RepairAutomationDeniedError } from '../contracts/workflow-automation.js';
+import { repairEvidenceFacts, repairEvidenceFlows, validateAutomationOrigin } from '../contracts/repair-batch.js';
 import { randomUUID } from 'node:crypto';
 import { repairStage } from '../observability/repair-diagnostics.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
@@ -10,7 +13,7 @@ import type {
   RepairWorkbenchService, RepairSourcePort, RepairExecutionPort, RepairSelectionRequest,
   RepairFeedbackRequest, RepairCandidatesResponse, RepairTaskDetail, RepairInboxItem, RepairCapabilities, RepairCandidatesQuery, RepairInboxFilter,
 } from '../contracts/repair-workbench.js';
-import { repairSignatureKey } from '../contracts/repair-workbench.js';
+import { repairSignatureKey, RepairResultAbsentError } from '../contracts/repair-workbench.js';
 import { RepairBatchRepository } from '../repositories/repair-batch-repository.js';
 import { RepairTaskRepository } from '../repositories/repair-task-repository.js';
 import { REPAIR_ACTIVE_LOOKBACK_DAYS, structuredRepairProposalIdentity } from '../repositories/repair-source-adapter.js';
@@ -26,7 +29,7 @@ function serial<T>(db: IDatabase, fn: () => Promise<T>): Promise<T> {
   sqliteQueues.set(db, result.then(() => undefined, () => undefined));
   return result;
 }
-function fail(code: ConstructorParameters<typeof RepairBatchError>[0], message: string): never { throw new RepairBatchError(code, message); }
+function fail(code: ConstructorParameters<typeof RepairBatchError>[0], message: string, details: Record<string, unknown> = {}): never { throw new RepairBatchError(code, message, details); }
 function requiredText(value: unknown, max: number, empty = false): value is string { return typeof value === 'string' && value.length <= max && (empty || value.trim().length > 0); }
 function identity(value: unknown, max: number): value is string { return requiredText(value, max) && /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(value); }
 function safeInteger(value: unknown, min = 0): value is number { return Number.isSafeInteger(value) && Number(value) >= min; }
@@ -38,6 +41,7 @@ function selection(raw: RepairSelectionRequest): RepairSelectionRequest {
     || !/^[a-f0-9]{64}$/.test(raw.inputDigest) || !requiredText(raw.instructions, MAX_INSTRUCTIONS_CHARS, true)) fail('INVALID_INPUT', 'Invalid repair selection');
   if (raw.includeHistorical !== undefined && typeof raw.includeHistorical !== 'boolean') fail('INVALID_INPUT', 'Invalid history scope');
   return { workflowId: raw.workflowId, itemIds: [...raw.itemIds].sort(), inputDigest: raw.inputDigest,
+    ...(raw.automation ? { automation: validateAutomationOrigin(raw.automation) } : {}),
     instructions: raw.instructions, requestId: raw.requestId, includeHistorical: raw.includeHistorical === true };
 }
 function identityKey(item: RepairItem, episodeKey: string): string {
@@ -56,13 +60,17 @@ function preferredStored(left: StoredRepairItem, right: StoredRepairItem): Store
 function inboxMatch(item: RepairInboxItem, state: RepairInboxFilter): boolean {
   return state === 'all' || (state === 'closed' ? item.state === 'verified' || item.state === 'ineffective' : item.state === state);
 }
-function matchesScope(item: RepairInboxItem, query: RepairCandidatesQuery): boolean {
-  if (query.signature && item.context?.signature !== query.signature) return false;
+function itemFacets(item: RepairInboxItem) {
   const diagnoses = Array.isArray(item.context?.diagnoses) ? item.context.diagnoses as Record<string, unknown>[] : [];
   const suggestions = Array.isArray(item.context?.suggestions) ? item.context.suggestions as Record<string, unknown>[] : [];
   const node = item.context?.nodeId ?? diagnoses[0]?.nodeId ?? suggestions[0]?.nodeId;
   const mode = item.context?.failureMode ?? diagnoses[0]?.failureMode;
-  return (!query.nodeId || node === query.nodeId || query.nodeId === '未知节点' && !node)
+  return { node: typeof node === 'string' && node ? node : '未知节点', mode: typeof mode === 'string' ? mode : '' };
+}
+function matchesScope(item: RepairInboxItem, query: RepairCandidatesQuery): boolean {
+  if (query.signature && item.context?.signature !== query.signature) return false;
+  const { node, mode } = itemFacets(item);
+  return (!query.nodeId || node === query.nodeId)
     && (!query.failureMode || mode === query.failureMode);
 }
 function sourceDigest(current: Awaited<ReturnType<RepairSourcePort['load']>>): string {
@@ -76,7 +84,7 @@ function sourceDigest(current: Awaited<ReturnType<RepairSourcePort['load']>>): s
 
 export type TrustedRepairReport = {
   workflowId: string; taskId: string; revision: number; expectedStateVersion: number;
-} & ({ status: 'succeeded'; draft: Record<string, unknown>; checks: Record<string, unknown> }
+} & ({ status: 'succeeded' | 'blocked' | 'no_change'; draft: Record<string, unknown>; checks: Record<string, unknown> }
   | { status: 'failed'; error: Record<string, unknown> });
 
 class WorkflowRepairWorkbench implements RepairWorkbenchService {
@@ -134,6 +142,42 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       }).map(source => source.item.itemId) };
     }
     const current = await repairStage(`sources_${mode}`, () => this.sources.load(db, workflowId, this.sources.hydrate ? 'summary' : mode, sourceScope));
+    // An automatic recurrence opens a new phase with a new proposal identity.
+    // Do not carry the previously applied operations into another generation.
+    const derived = new Set(current.map(source => source.item.itemId));
+    const maximumEpisodes = current.length + stored.length + 1;
+    for (let index = 0; index < current.length && index < maximumEpisodes; index++) {
+      const source = current[index];
+      const previous = byIdentity.get(identityKey(source.item, source.episodeKey));
+      if (previous?.state === 'no_action' && previous.disposition?.action === 'no_action') {
+        const disposition = previous.disposition;
+        const flows = repairEvidenceFlows(source.item);
+        const facts = repairEvidenceFacts(source.item);
+        const major = facts.severity >= 3;
+        const fresh = disposition.evidenceFlowIds && (flows.some(id => !disposition.evidenceFlowIds!.includes(id))
+          || facts.eventIds.some(id => !disposition.evidenceEventIds?.includes(id)) || facts.severity > (disposition.evidenceSeverity ?? 0));
+        const expired = disposition.untilMs !== undefined && disposition.untilMs <= Date.now();
+        if (expired || major && fresh) {
+          const episodeKey = digestRepairJson(['resume-disposition', previous.itemId, expired ? disposition.untilMs : [flows, facts]]);
+          const itemId = digestRepairJson([workflowId, previous.groupKey, previous.proposalKey, episodeKey]);
+          if (!derived.has(itemId)) {
+            derived.add(itemId);
+            current.push({ episodeKey, initialState: 'pending', item: { ...source.item, itemId, previousItemId: previous.itemId,
+              context: { ...source.item.context, dispositionResume: { reason: expired ? 'expired' : 'new_evidence', previousItemId: previous.itemId } } } });
+          }
+        }
+      }
+      const recurrence = previous?.context?.recurrence as { episodeKey?: string; flowIds?: string[]; reason?: string } | undefined;
+      if (!previous || !recurrence?.episodeKey || previous.state !== 'ineffective' && recurrence.reason !== 'baseline_changed') continue;
+      const proposalKey = digestRepairJson(['reassess', previous.itemId, recurrence.episodeKey]);
+      const itemId = digestRepairJson([workflowId, previous.groupKey, proposalKey, recurrence.episodeKey]);
+      if (derived.has(itemId)) continue;
+      derived.add(itemId);
+      current.push({ episodeKey: recurrence.episodeKey, initialState: 'pending', item: { ...source.item, itemId,
+        previousItemId: previous.itemId, proposalKey, proposal: null,
+        instruction: `${recurrence.reason === 'baseline_changed' ? '当前生效 Pack 已变化，请重新核对原修改的适用性。' : '原修改在生效版本明确复现。'}请依据新证据重新诊断并调整方案，不得原样重复已应用修改。关联运行：${(recurrence.flowIds ?? []).join(', ')}`,
+        context: { ...source.item.context, recurrence } } });
+    }
     current.forEach(source => validateRepairItem(source.item));
     const ordered = [...current].sort((a, b) => a.item.itemId.localeCompare(b.item.itemId));
     const inputDigest = sourceDigest(ordered);
@@ -165,6 +209,13 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     }
     return { items: [...items.values()], inputDigest, materializable };
   }
+  async request(workflowId: string, requestId: string): Promise<RepairRevision | null> {
+    if (!identity(workflowId, 190) || !requiredText(requestId, 128)) fail('INVALID_INPUT', 'Invalid request lookup');
+    const rows = await this.db.query<{ task_id: string; revision: number }>(
+      'SELECT task_id, revision FROM workflow_repair_revisions WHERE workflow_id = ? AND request_id = ?', [workflowId, requestId]);
+    if (!rows.length) return null;
+    return new RepairBatchRepository(this.db).getRevision(workflowId, rows[0].task_id, Number(rows[0].revision));
+  }
   async candidates(workflowId: string, query: RepairCandidatesQuery = {}): Promise<Omit<RepairCandidatesResponse, 'canEdit'>> {
     return serial(this.db, async () => {
       const state = query.state ?? 'all';
@@ -182,11 +233,15 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         fail('INVALID_INPUT', 'Invalid issue preview scope');
       }
       const snapshot = await this.readSnapshot(workflowId, includeHistorical);
-      const scopedItems = snapshot.items.filter(item => matchesScope(item, query) && (includeHistorical ||
+      const visibleItems = snapshot.items.filter(item => matchesScope(item, { signature: query.signature }) && (includeHistorical ||
         item.sourceAvailable || item.state === 'processing' || item.state === 'awaiting_verification'));
+      const facets = { nodes: [...new Set(visibleItems.map(item => itemFacets(item).node))].sort(),
+        failureModes: [...new Set(visibleItems.map(item => itemFacets(item).mode).filter(Boolean))].sort() };
+      const scopedItems = visibleItems.filter(item => matchesScope(item, query));
       const revisions = await repairStage('revisions', () => new RepairBatchRepository(this.db).listRevisions(workflowId));
       const heads = new Map<string, RepairRevision>();
       for (const revision of revisions) if (!heads.has(revision.taskId)) heads.set(revision.taskId, revision);
+      for (const revision of revisions) if (revision.phase === 'published') heads.set(revision.taskId, revision);
       const counts = Object.fromEntries((['pending', 'processing', 'awaiting_verification', 'closed', 'no_action', 'all'] as RepairInboxFilter[])
         .map(key => [key, scopedItems.filter(item => inboxMatch(item, key)).length])) as Record<RepairInboxFilter, number>;
       const filtered = scopedItems.filter(item => inboxMatch(item, state));
@@ -196,8 +251,12 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       const selectedPage = Math.min(page, totalPages);
       const items = filtered.slice((selectedPage - 1) * pageSize, selectedPage * pageSize);
       const response: Omit<RepairCandidatesResponse, 'canEdit'> = { schemaVersion: 'workflow-repair/v2', workflowId, inputDigest: snapshot.inputDigest, items,
-        tasks: [...heads.values()].map(r => ({ taskId: r.taskId, revision: r.revision, phase: r.phase, updatedAtMs: r.updatedAtMs, itemCount: r.input.items.length })),
-        repairSignatureKeys,
+        tasks: [...heads.values()].map(r => {
+          const itemCount = isAutomaticBatch(r.input) ? r.input.automation!.totalItems ?? new Set(revisions.filter(v => v.taskId === r.taskId).flatMap(v => v.input.items.map(item => item.itemId))).size : r.input.items.length;
+          return { taskId: r.taskId, revision: r.revision, phase: r.phase, updatedAtMs: r.updatedAtMs, itemCount,
+            title: isAutomaticBatch(r.input) ? `自动优化 ${itemCount} 项建议` : (r.input.items.map(item => item.proposal?.summary || item.instruction).find(value => typeof value === 'string' && value.trim()) as string | undefined)?.trim().split('\n')[0].slice(0, 72) || `优化 ${itemCount} 项问题` };
+        }),
+        repairSignatureKeys, facets,
         counts, page: { page: selectedPage, pageSize, total: filtered.length, totalPages },
         includeHistorical, activeLookbackDays: REPAIR_ACTIVE_LOOKBACK_DAYS,
         capabilities: this.capabilities(), limits: { maxItems: MAX_ITEMS, maxRequestBytes: MAX_REQUEST_BYTES } };
@@ -241,6 +300,17 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       return item;
     });
   }
+  async items(workflowId: string, itemIds: string[]): Promise<RepairInboxItem[]> {
+    if (!Array.isArray(itemIds) || !itemIds.length || itemIds.length > MAX_ITEMS || itemIds.some(id => !requiredText(id, 64)) || new Set(itemIds).size !== itemIds.length) fail('INVALID_INPUT', 'Invalid item scope');
+    return serial(this.db, async () => {
+      const snapshot = await this.snapshot(this.db, workflowId, 'full', { itemIds, includeHistorical: true });
+      return itemIds.map(id => {
+        const item = snapshot.items.find(candidate => candidate.itemId === id);
+        if (!item) fail('ITEM_NOT_FOUND', 'Repair item does not exist');
+        return item;
+      });
+    });
+  }
   private async readTask(db: IDatabase, taskId: string): Promise<RepairTaskDetail> {
     if (!identity(taskId, 64)) fail('INVALID_INPUT', 'Invalid taskId');
     const repo = new RepairBatchRepository(db);
@@ -248,9 +318,20 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     if (!workflowId) fail('TASK_NOT_FOUND', 'Repair task does not exist');
     const revisions = await repo.listRevisions(workflowId, taskId);
     const execution = await new RepairTaskRepository(db).execution(taskId, revisions[0].revision);
-    const response: RepairTaskDetail = { workflowId, taskId, latestAttempt: revisions[0], latestSuccessful: revisions.find(r => r.draft !== null) ?? null,
+    const response: RepairTaskDetail = { workflowId, taskId, latestAttempt: revisions[0], latestSuccessful: revisions.find(r => r.draft !== null && (r.phase !== 'no_change' || isAutomaticBatch(r.input))) ?? null,
       revisions, capabilities: this.capabilities(), ...(execution ? { execution } : {}) };
-    boundedRepairJson(response, MAX_TASK_READ_BYTES);
+    response.scopeItemCount = isAutomaticBatch(revisions[0].input) ? revisions[0].input.automation!.totalItems ?? new Set(revisions.flatMap(r => r.input.items.map(item => item.itemId))).size : revisions[0].input.items.length;
+    if (isAutomaticBatch(revisions[0].input)) response.automaticProgress = {
+      completedBatches: new Set(revisions.filter(r => ['review', 'no_change', 'publishing', 'published'].includes(r.phase)
+        && (r.checks?.static as { status?: string })?.status === 'passed').map(r => r.input.automation!.batchIndex)).size,
+      totalBatches: revisions[0].input.automation!.batchCount!,
+      changedItems: new Set(revisions.filter(r => ['review', 'no_change', 'publishing', 'published'].includes(r.phase)).flatMap(r => Array.isArray(r.draft?.itemResults) ? r.draft.itemResults.filter(outcome => outcome.status === 'changed').map(outcome => outcome.itemId) : [])).size,
+      publishable: false,
+    };
+    if (response.automaticProgress) {
+      try { automaticChain(revisions, revisions[0], true); response.automaticProgress.publishable = response.automaticProgress.changedItems! > 0; }
+      catch (error) { if (!(error instanceof RepairBatchError)) throw error; }
+    }
     return response;
   }
   task(taskId: string): Promise<RepairTaskDetail> { return serial(this.db, () => this.readTask(this.db, taskId)); }
@@ -266,6 +347,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     if (!identity(taskId, 64) || !safeInteger(raw.expectedAttemptRevision, 1)
       || !requiredText(raw.feedback, MAX_INSTRUCTIONS_CHARS, true)
       || !(raw.parentCandidateCommit === null || /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(raw.parentCandidateCommit))) fail('INVALID_INPUT', 'Invalid feedback request');
+    if (this.execution && await this.requireStoppedAttempt(await this.task(taskId), actorId)) fail('STATE_CONFLICT', 'The original candidate was recovered; refresh it before submitting feedback', { recoveryAction: 'refresh-task', reasonCode: 'RESULT_RECOVERED' });
     return this.generate(actorId, taskId, { ...base, expectedAttemptRevision: raw.expectedAttemptRevision, parentCandidateCommit: raw.parentCandidateCommit, feedback: raw.feedback });
   }
   private async generate(actorId: string, taskId: string | null, request: RepairSelectionRequest | RepairFeedbackRequest): Promise<RepairRevision> {
@@ -276,6 +358,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     let revision = prior;
     if (!revision) {
       const baseline = taskId ? (await this.task(taskId)).latestAttempt.input.baseline : await this.execution.resolveBaseline(request.workflowId);
+      if (taskId && request.automation?.roundId && canonicalRepairJson(await this.execution.resolveBaseline(request.workflowId)) !== canonicalRepairJson(baseline)) fail('STATE_CONFLICT', '自动优化的生效基线已变化，请重新评估', { reasonCode: 'BASELINE_STALE' });
       if (baseline.workflowId !== request.workflowId) fail('CONTENT_MISMATCH', 'Provider resolved a different workflow');
       revision = await this.tx(async tx => {
         const repo = new RepairBatchRepository(tx);
@@ -289,6 +372,15 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
           itemIds: request.itemIds, includeHistorical: request.includeHistorical === true,
         });
         if (snapshot.inputDigest !== request.inputDigest) fail('SOURCE_CHANGED', 'Repair sources changed; refresh the issue inbox');
+        if (!taskId) {
+          const occupied = snapshot.items.filter(item => request.itemIds.includes(item.itemId));
+          const taskIds = [...new Set(occupied.map(item => item.activeTaskId).filter((id): id is string => !!id))];
+          if (occupied.length === request.itemIds.length && occupied.every(item => item.state === 'processing') && taskIds.length === 1) {
+            const active = await this.readTask(tx, taskIds[0]);
+            if (canonicalRepairJson(active.latestAttempt.input.items.map(item => item.itemId).sort()) === canonicalRepairJson([...request.itemIds].sort())
+              && active.latestAttempt.input.instructions === request.instructions) return active.latestAttempt;
+          }
+        }
         const selected: RepairItem[] = [];
         for (const itemId of request.itemIds) {
           const item = snapshot.items.find(item => item.itemId === itemId);
@@ -308,6 +400,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         const input: RepairBatchInput = { schemaVersion: 'workflow-repair/v2', taskId: id,
           revision: (previous?.latestAttempt.revision ?? 0) + 1, baseline, items: selected,
           excludedSources: { count: excludedSourceRefs.length, digest: digestRepairJson(excludedSourceRefs) },
+          ...(request.automation ? { automation: request.automation } : {}),
           instructions: request.instructions, parentCandidateCommit, feedback,
           previousReportRef: previous?.latestSuccessful ? `${id}/revisions/${previous.latestSuccessful.revision}` : null,
           taskBranch: `repair/${request.workflowId}/${id}` };
@@ -329,14 +422,98 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       return new RepairTaskRepository(tx).claimDispatch(revision.taskId, revision.revision, executionId);
     });
     if (!claimed) return;
-    let failed = false; let jobId: string | null = null;
+    let failure: 'rejected' | 'uncertain' | null = null; let jobId: string | null = null;
     try {
       const identity = { stepId: claimed.stepId, attempt: claimed.attempt, executionId: claimed.executionId };
       const receipt = await this.execution.dispatch({ input: revision.input, actorId: actorId ?? claimed.actorId, identity });
       if (!receipt?.jobId?.trim() || receipt.jobId.length > 255) throw new Error('Invalid AIS job id');
       jobId = receipt.jobId;
-    } catch { failed = true; }
-    await this.tx(tx => new RepairTaskRepository(tx).finishDispatch(revision.taskId, revision.revision, jobId, failed));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      failure = error instanceof RepairAutomationDeniedError || /^AIS executeSnapshot HTTP (?:400|401|403|404|422):/u.test(message) || message.startsWith('AIS executeSnapshot 失败:')
+        || message.includes('token/projectName 未配置') ? 'rejected' : 'uncertain';
+    }
+    await this.tx(tx => new RepairTaskRepository(tx).finishDispatch(revision.taskId, revision.revision, jobId, failure));
+  }
+  async retryResult(actorId: string, taskId: string, expectedRevision: number): Promise<void> {
+    this.actor(actorId);
+    if (!this.execution) fail('CAPABILITY_UNAVAILABLE', 'Repair generation provider is unavailable');
+    const task = await this.task(taskId);
+    if (task.revisions.some(revision => revision.phase === 'published')) fail('STATE_CONFLICT', '此任务已有部署，请先验证效果；需要继续修复时创建新基线任务');
+    if (!safeInteger(expectedRevision, 1) || task.latestAttempt.revision !== expectedRevision) fail('STATE_CONFLICT', 'Result is no longer current');
+    if (task.latestAttempt.draft) return;
+    const run = task.execution;
+    if (task.latestAttempt.phase === 'failed' && ['AIS_FAILED', 'AIS_STOPPED', 'AIS_TIMEOUT'].includes(String(task.latestAttempt.error?.code)) && run?.jobId && run.executionId) {
+      // Result-only recovery: a trusted absence permits a later explicit revision,
+      // but this action itself must never create a revision or dispatch a Job.
+      await this.requireStoppedAttempt(task, actorId);
+      return;
+    }
+    if (task.latestAttempt.phase !== 'failed' || task.latestAttempt.error?.code !== 'GIT_RESULT_UNAVAILABLE'
+      || !run?.jobId || !run.executionId) fail('STATE_CONFLICT', 'Only an unavailable Git result can be reread');
+    const result = await this.execution.readResult({ input: task.latestAttempt.input, actorId, jobId: run.jobId,
+      identity: { stepId: new RepairTaskRepository(this.db).stepId(taskId, expectedRevision), attempt: run.attempt, executionId: run.executionId } });
+    if (result.status === 'failed') fail('STATE_CONFLICT', 'No successful candidate is available');
+    await this.report({ workflowId: task.workflowId, taskId, revision: expectedRevision,
+      expectedStateVersion: task.latestAttempt.stateVersion, ...result }, true);
+  }
+  private async requireStoppedAttempt(task: RepairTaskDetail, actorId: string): Promise<RepairRevision | null> {
+    const run = task.execution;
+    if (task.latestAttempt.phase === 'failed' && task.latestAttempt.error?.code === 'GIT_RESULT_UNAVAILABLE') fail('STATE_CONFLICT', 'Reread the original Git result before generating again', { recoveryAction: 'retry-result', reasonCode: 'RESULT_READ_UNKNOWN' });
+    if (task.latestAttempt.phase !== 'failed' || !run?.jobId || !run.executionId) return null;
+    let remote: Awaited<ReturnType<RepairExecutionPort['status']>>;
+    try {
+      remote = await this.execution!.status({ input: task.latestAttempt.input, actorId, jobId: run.jobId,
+        identity: { stepId: new RepairTaskRepository(this.db).stepId(task.taskId, task.latestAttempt.revision),
+          attempt: run.attempt, executionId: run.executionId } });
+    } catch { fail('STATE_CONFLICT', 'Remote execution state is unknown; reconcile before generating again', { recoveryAction: 'retry-result', reasonCode: 'EXECUTION_UNKNOWN' }); }
+    if (remote.status === 'running') fail('STATE_CONFLICT', 'Previous AIS execution is still running; stop or reconcile it first', { recoveryAction: 'retry-result', reasonCode: 'EXECUTION_RUNNING' });
+    if (!['AIS_FAILED', 'AIS_STOPPED', 'AIS_TIMEOUT'].includes(String(task.latestAttempt.error?.code))) return null;
+    // A Job can fail after its result has already been pushed. Recover the exact
+    // execution before deciding its branch is safe for another generation.
+    let result: Awaited<ReturnType<RepairExecutionPort['readResult']>>;
+    try {
+      result = await this.execution!.readResult({ input: task.latestAttempt.input, actorId, jobId: run.jobId,
+        identity: { stepId: new RepairTaskRepository(this.db).stepId(task.taskId, task.latestAttempt.revision),
+          attempt: run.attempt, executionId: run.executionId } });
+    } catch (error) {
+      if (remote.status !== 'success' && error instanceof RepairResultAbsentError) return null;
+      fail('STATE_CONFLICT', 'Original Git result could not be confirmed; retry its read before generating again', { recoveryAction: 'retry-result', reasonCode: 'RESULT_READ_UNKNOWN' });
+    }
+    if (result.status === 'failed') return null;
+    return this.report({ workflowId: task.workflowId, taskId: task.taskId, revision: task.latestAttempt.revision,
+      expectedStateVersion: task.latestAttempt.stateVersion, ...result }, true);
+  }
+  async retryGeneration(actorId: string, taskId: string, request: { expectedRevision: number; requestId: string }): Promise<RepairRevision> {
+    this.actor(actorId);
+    if (!this.execution) fail('CAPABILITY_UNAVAILABLE', 'Repair generation provider is unavailable');
+    if (!safeInteger(request.expectedRevision, 1) || !requiredText(request.requestId, 128)) fail('INVALID_INPUT', 'Invalid retry request');
+    const task = await this.task(taskId);
+    if (task.revisions.some(revision => revision.phase === 'published')) fail('STATE_CONFLICT', '此任务已有部署，请先验证效果；需要继续修复时创建新基线任务');
+    if (task.latestAttempt.revision === request.expectedRevision && task.latestAttempt.draft
+      && ['AIS_FAILED', 'AIS_STOPPED', 'AIS_TIMEOUT'].includes(String(task.latestAttempt.error?.code))) return task.latestAttempt;
+    const digest = digestRepairJson({ actorId, taskId, retry: request });
+    let next = await serial(this.db, () => new RepairBatchRepository(this.db).findRequest(task.workflowId, request.requestId, digest));
+    if (!next) {
+      if (task.latestAttempt.phase !== 'failed' || task.latestAttempt.revision !== request.expectedRevision) fail('STATE_CONFLICT', 'Only the latest failed attempt can be regenerated');
+      const recovered = await this.requireStoppedAttempt(task, actorId);
+      if (recovered) return recovered;
+      next = await this.tx(async tx => {
+        const repo = new RepairBatchRepository(tx);
+        await repo.lockWorkflow(tx, task.workflowId);
+        const committed = await repo.findRequest(task.workflowId, request.requestId, digest);
+        if (committed) return committed;
+        const input = { ...task.latestAttempt.input, revision: request.expectedRevision + 1,
+          parentCandidateCommit: typeof task.latestSuccessful?.draft?.candidateCommit === 'string' ? task.latestSuccessful.draft.candidateCommit : null,
+          previousReportRef: task.latestSuccessful ? `${taskId}/revisions/${task.latestSuccessful.revision}` : null };
+        const created = await repo.createRevision(tx, { input, requestId: request.requestId, requestDigest: digest,
+          expectedAttemptRevision: request.expectedRevision });
+        await new RepairTaskRepository(tx).append(created, actorId);
+        return created;
+      });
+    }
+    await this.dispatch(next, actorId);
+    return (await this.task(taskId)).revisions.find(r => r.revision === next!.revision)!;
   }
   async retryDispatch(actorId: string, taskId: string, expectedRevision: number): Promise<void> {
     this.actor(actorId);
@@ -350,6 +527,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
   async reconcile(limit = 50): Promise<number> {
     if (!this.execution) return 0;
     if (!safeInteger(limit, 1) || limit > 200) fail('INVALID_INPUT', 'Invalid reconcile limit');
+    await serial(this.db, () => new RepairTaskRepository(this.db).expireStaleDispatches(Date.now() - 120_000));
     const executions = await serial(this.db, () => new RepairTaskRepository(this.db).active(limit));
     let settled = 0;
     for (const active of executions) {
@@ -357,9 +535,17 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       const revision = task.revisions.find(item => item.revision === active.revision);
       if (!revision || revision.phase !== 'drafting') continue;
       const request = { input: revision.input, actorId: active.actorId, identity: active.identity, jobId: active.jobId };
+      if (Date.now() - active.requestedAtMs > 2_400_000) {
+        try { await this.execution.stop?.(request); } catch { /* Persist timeout even if remote stop is unavailable. */ }
+        const expectedStateVersion = revision.stateVersion;
+        await this.report({ workflowId: revision.workflowId, taskId: revision.taskId, revision: revision.revision,
+          expectedStateVersion, status: 'failed', error: { code: 'AIS_TIMEOUT', message: 'AIS repair exceeded the 40-minute deadline' } });
+        settled += 1;
+        continue;
+      }
       let remote: Awaited<ReturnType<RepairExecutionPort['status']>>;
       try { remote = await this.execution.status(request); } catch { continue; }
-      if (!await serial(this.db, () => new RepairTaskRepository(this.db).updateRemoteStatus(active.taskId, active.revision, active.identity, remote.rawStatus))) continue;
+      if (!await serial(this.db, () => new RepairTaskRepository(this.db).updateRemoteStatus(active.taskId, active.revision, active.identity, remote.rawStatus, remote.status === 'success'))) continue;
       if (remote.status === 'running') continue;
       const expectedStateVersion = (await this.task(active.taskId)).revisions.find(item => item.revision === active.revision)?.stateVersion;
       if (expectedStateVersion === undefined) continue;
@@ -369,7 +555,15 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
           await this.report({ workflowId: revision.workflowId, taskId: revision.taskId, revision: revision.revision,
             expectedStateVersion, ...result });
           settled += 1;
-        } catch { /* Git publication may lag job success; retry on the next poll. */ }
+        } catch {
+          // Git publication may lag AIS success, but never leave a task spinning forever.
+          if (active.successObservedAtMs && Date.now() - active.successObservedAtMs > 300_000) {
+            await this.report({ workflowId: revision.workflowId, taskId: revision.taskId, revision: revision.revision,
+              expectedStateVersion, status: 'failed', error: { code: 'GIT_RESULT_UNAVAILABLE',
+                message: 'AIS completed, but no valid result appeared on the repair branch within five minutes' } });
+            settled += 1;
+          }
+        }
       } else {
         await this.report({ workflowId: revision.workflowId, taskId: revision.taskId, revision: revision.revision,
           expectedStateVersion, status: 'failed', error: { code: remote.status === 'stopped' ? 'AIS_STOPPED' : 'AIS_FAILED',
@@ -410,6 +604,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     const before = await this.task(taskId);
     await this.tx(async tx => {
       const task = await this.readTask(tx, taskId);
+      if (task.revisions.some(revision => revision.phase === 'published')) fail('STATE_CONFLICT', '已部署任务不能取消或隐式回滚，请在效果验证中记录结论');
       if (task.latestAttempt.revision === expectedRevision && task.latestAttempt.phase === 'cancelled') return;
       await new RepairBatchRepository(tx).cancelTask(tx, { workflowId: task.workflowId, taskId, expectedAttemptRevision: expectedRevision, expectedStateVersion: task.latestAttempt.stateVersion });
       await new RepairTaskRepository(tx).cancel(taskId);
@@ -441,8 +636,8 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     return result;
   }
   /** Trusted Host call only. The AIS owner must verify the execution ticket before invoking. */
-  async report(input: TrustedRepairReport): Promise<RepairRevision> {
-    if (!input || !['succeeded', 'failed'].includes(input.status) || !identity(input.workflowId, 190) || !identity(input.taskId, 64)
+  async report(input: TrustedRepairReport, recoverRead = false): Promise<RepairRevision> {
+    if (!input || !['succeeded', 'blocked', 'no_change', 'failed'].includes(input.status) || !identity(input.workflowId, 190) || !identity(input.taskId, 64)
       || !safeInteger(input.revision, 1) || !safeInteger(input.expectedStateVersion)) fail('INVALID_INPUT', 'Invalid report identity');
     return this.tx(async tx => {
       const repo = new RepairBatchRepository(tx);
@@ -468,7 +663,11 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         const staticStatus = (checks.static as { status?: string })?.status;
         const mockStatus = (checks.mock as { status?: string })?.status;
         if (!['passed', 'failed'].includes(staticStatus ?? '') || !['passed', 'failed', 'not_covered'].includes(mockStatus ?? '')) fail('INVALID_INPUT', 'Invalid check status');
-        settled = await repo.completeDraft(tx, { ...input, phase: staticStatus === 'failed' || mockStatus === 'failed' ? 'blocked' : 'review' });
+        const checkFailed = staticStatus === 'failed' || mockStatus === 'failed';
+        if ((input.status === 'blocked') !== checkFailed || (input.status === 'no_change' && itemResults.some(item => item.status !== 'not_needed')))
+          fail('INVALID_INPUT', 'AIS status does not match checks or item results');
+        settled = await repo.completeDraft(tx, { ...input, recoverRead, phase: input.status === 'blocked' ? 'blocked'
+          : input.status === 'no_change' ? 'no_change' : 'review' });
       }
       await new RepairTaskRepository(tx).settle(settled);
       return settled;

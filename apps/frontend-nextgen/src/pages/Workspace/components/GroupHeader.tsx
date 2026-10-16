@@ -1,100 +1,143 @@
 import { IconButton } from '@/components/ui';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
+import { ChatConnectionStatus } from '@/components/Workspace/ChatConnectionStatus';
 import type { GroupView, SessionView } from '@/domain/collaboration';
-import type { PolicyResult } from '@/services/workspace/groupService';
+import type { GroupChatFavoritesModel } from '@/pages/Workspace/hooks/useGroupChatHeaderPanels';
 import type { DomainResult } from '@/services/workspace/identityService';
+import { cn } from '@/utils/cn';
 import type { ProviderConnectionStatus } from '@tc-chat/adapters';
-import { ChevronRight, FolderOpen, RefreshCw, Settings2, Share2 } from 'lucide-react';
-import { useState } from 'react';
-import { KIND_LABEL } from './GroupSidebar/GroupItem.types';
-import { ShareDialog } from './ManagePanel/ShareDialog';
+import {
+  Bot,
+  ChevronRight,
+  Copy,
+  FolderOpen,
+  History,
+  Monitor,
+  Settings2,
+  Share2,
+  SlidersHorizontal,
+  Star,
+  Users,
+} from 'lucide-react';
+import { useRef, useState } from 'react';
+import { toast } from 'sonner';
+import { GroupAvatarStack } from './GroupSidebar/GroupItem';
+import { SharePopover } from './ManagePanel/SharePopover';
 
-export type GroupPanelKind = 'none' | 'members' | 'manage' | 'sessionManage' | 'resources';
+export type GroupPanelKind = 'none' | 'members' | 'manage' | 'sessionManage' | 'resources' | 'history';
+
+const CONNECTION_COPY = {
+  connected: { label: '已连接', tone: 'success' },
+  connecting: { label: '连接中', tone: 'warning' },
+  reconnecting: { label: '重连中', tone: 'warning' },
+  error: { label: '连接失败', tone: 'error' },
+  disconnected: { label: '已断开', tone: 'neutral' },
+} as const;
 
 export interface GroupHeaderProps {
   selectedGroup: GroupView | null;
   selectedSession: SessionView | null;
   connectionStatus: ProviderConnectionStatus;
-  onReconnect: () => void;
   onOpenSessionList?: () => void;
-  canManageGroup: PolicyResult;
+  canManageGroup?: unknown;
   activePanel: GroupPanelKind;
   onTogglePanel: (panel: GroupPanelKind) => void;
-  onRequestDissolve: () => void;
-  onRequestShareGroup: () => Promise<DomainResult<{ invitationUrl: string }>>;
-  onRequestShareSession: () => Promise<DomainResult<{ invitationUrl: string }>>;
+  /** 收藏模型（useGroupChatHeaderPanels 提供；无会话时 disabled 渲染，chat 同构语义）。 */
+  favorites: GroupChatFavoritesModel;
+  /** 副屏镜像开合态（PanelHandle 无 isOpen 查询，上层 hook 本地镜像）。 */
+  sidePaneOpen: boolean;
+  /** 会话无 <AixUI type="panel"> 副屏内容时禁用（openPanel 会被 autoCloseWhenEmpty 弹回）。 */
+  sidePaneDisabled?: boolean;
+  onToggleSidePane: () => void;
+  onRequestDissolve?: () => void;
+  onRequestShareGroup: (expiresInSeconds?: number) => Promise<DomainResult<{ invitationUrl: string }>>;
+  onRequestShareSession: (expiresInSeconds?: number) => Promise<DomainResult<{ invitationUrl: string }>>;
 }
 
-/** 连接状态文字色：保留色调语义，去除胶囊底（轻文字与顶栏风格一致）。 */
-const CONNECTION_TONE_TEXT: Record<'success' | 'warning' | 'error' | 'neutral', string> = {
-  success: 'text-success',
-  warning: 'text-warning',
-  error: 'text-destructive',
-  neutral: 'text-muted-foreground',
-};
-
 /**
- * 连接状态文案映射：输入为 useSessionDisplayStatus 合成显示语义（Spec:
- * docs/specs/workspace-session-connection-display.md），不再消费业务 phase——
- * 「准备中 / 加载历史」等实现细节在合成层已收敛为 connecting，顶栏无 phase 分支。
+ * header chip（dmore artboard-003 群对话标题栏，48px 顶栏）：群身份 chip（头像堆/群名/会话 ID
+ * 胶囊/用户与 Bot 计数）+ 右侧 28px 图标钮列。六槽位按设计稿 x=0/32/64/96/128/160 全量落地：
+ * 收藏会话 / 分享 / 会话管理 / 历史消息 / 资源管理 / 副屏——其中五枚与 chat 页 ChatHeaderActions
+ * 同构（Star/SlidersHorizontal/History/FolderOpen/Monitor），分享为协作群特有（SharePopover 气泡）。
+ * 历史消息由右缘 GroupHistorySidebar 承载；顶栏连接状态与对话页同形，输入帽条保留重连操作。
  */
-function connectionCopy(status: ProviderConnectionStatus) {
-  switch (status) {
-    case 'connected':
-      return { label: '已连接', tone: 'success' as const };
-    case 'connecting':
-      return { label: '连接中', tone: 'warning' as const };
-    case 'reconnecting':
-      return { label: '重连中', tone: 'warning' as const };
-    case 'error':
-      return { label: '连接失败', tone: 'error' as const };
-    default:
-      return { label: '已断开', tone: 'neutral' as const };
-  }
+function HeaderIcon({
+  label,
+  icon,
+  active,
+  onClick,
+  disabled,
+  className,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  active: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <IconButton
+      label={label}
+      icon={icon}
+      size="sm"
+      disabled={disabled}
+      aria-pressed={active}
+      data-workspace-panel-trigger
+      onClick={onClick}
+      className={cn('rounded-md text-muted-foreground', active && 'bg-selected text-foreground', className)}
+    />
+  );
 }
 
 export function GroupHeader({
   selectedGroup,
   selectedSession,
   connectionStatus,
-  onReconnect,
   onOpenSessionList,
   activePanel,
   onTogglePanel,
+  favorites,
+  sidePaneOpen,
+  sidePaneDisabled,
+  onToggleSidePane,
   onRequestShareGroup,
   onRequestShareSession,
 }: GroupHeaderProps) {
+  // 打开即止：生成流程收敛在 SharePopover 气泡（有效期 → 生成链接），入口只选目标；
+  // 气泡经 ref 锚定在分享图标正下方（2026-10-13 走查反馈：不用弹窗用气泡）。
   const [shareOpen, setShareOpen] = useState(false);
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const [sharing, setSharing] = useState(false);
-  const [shareTitle, setShareTitle] = useState('会话');
-  const copy = connectionCopy(connectionStatus);
-  const showReconnect =
-    connectionStatus === 'disconnected' || connectionStatus === 'error' || connectionStatus === 'reconnecting';
-  const memberCount = selectedGroup?.participants?.length || selectedGroup?.participantCount || 0;
-  const subtitleLabel = [
-    selectedSession && selectedGroup ? selectedGroup.name : null,
-    memberCount > 0 ? `${memberCount} 个成员` : null,
-    selectedGroup ? KIND_LABEL[selectedGroup.kind] : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  const [shareTarget, setShareTarget] = useState<'session' | 'group'>('session');
+  const shareAnchorRef = useRef<HTMLSpanElement | null>(null);
 
-  const handleShare = async (title: string, request: () => Promise<DomainResult<{ invitationUrl: string }>>) => {
+  const participants = selectedGroup?.participants ?? [];
+  const humans = participants.filter((participant) => participant.kind === 'human').length;
+  const bots = participants.filter((participant) => participant.kind === 'bot').length;
+  // 计数兜底：participants 未回填时退回列表接口的 participantCount 单计数。
+  const totalCount = selectedGroup?.participantCount || participants.length;
+
+  const handleShareSession = () => {
+    setShareTarget('session');
     setShareOpen(true);
-    setShareTitle(title);
-    setSharing(true);
-    setShareUrl(null);
-    const res = await request();
-    setSharing(false);
-    if (res.ok) setShareUrl(res.data.invitationUrl);
+  };
+  const handleShareGroup = () => {
+    setShareTarget('group');
+    setShareOpen(true);
   };
 
-  const handleShareSession = () => handleShare('会话', onRequestShareSession);
-  const handleShareGroup = () => handleShare('协作群', onRequestShareGroup);
+  const copySessionKey = async () => {
+    if (!selectedSession?.sessionId) return;
+    try {
+      await navigator.clipboard.writeText(selectedSession.sessionId);
+      toast.success('会话 ID 已复制');
+    } catch {
+      toast.error('复制失败，请手动复制。');
+    }
+  };
 
   return (
     <>
-      <header className="flex h-16 items-center gap-3 border-b border-border bg-card px-5">
+      <header className="flex h-12 items-center gap-2 border-b border-border bg-card px-3 sm:px-4">
         {onOpenSessionList ? (
           <IconButton
             label="打开会话列表"
@@ -104,83 +147,128 @@ export function GroupHeader({
             onClick={onOpenSessionList}
           />
         ) : null}
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <h2 className="m-0 truncate text-sm font-semibold text-foreground">
-              {selectedSession?.title ?? selectedGroup?.name ?? '未选择协作群'}
-            </h2>
-            {/* v1.4：连接状态不收缩不换行——超长标题截断由 h2 独占，状态恒一行。 */}
-            <span className={`shrink-0 whitespace-nowrap text-xs ${CONNECTION_TONE_TEXT[copy.tone]}`}>
-              {copy.label}
-            </span>
-          </div>
-          <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">{subtitleLabel}</p>
-        </div>
 
-        <div className="flex items-center gap-1">
-          {selectedSession && (
-            <IconButton
-              label={activePanel === 'resources' ? '关闭会话文件' : '会话文件'}
-              icon={<FolderOpen className="h-4 w-4" aria-hidden />}
-              size="sm"
-              variant={activePanel === 'resources' ? 'primary' : 'ghost'}
-              onClick={() => onTogglePanel(activePanel === 'resources' ? 'none' : 'resources')}
+        {selectedGroup ? (
+          /* 群身份 chip：rounded-10 描边胶囊，白底悬空于顶栏（artboard-010 358×32 实测）。 */
+          <div className="flex min-w-0 max-w-full flex-1 items-center gap-2">
+            <div
+              role="group"
+              className="flex h-8 min-w-0 items-center gap-2 rounded-[10px] border border-border bg-card px-2.5"
+              aria-label={`协作群 ${selectedGroup.name}`}
+            >
+              <GroupAvatarStack participants={participants} totalCount={totalCount} />
+              <span className="truncate text-[13px] leading-[18px] text-content-strong">{selectedGroup.name}</span>
+              {selectedSession ? (
+                <TooltipProvider>
+                  <span className="flex h-5 max-w-[180px] shrink-0 items-center gap-1 rounded-full bg-secondary px-2">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="truncate text-[11px] leading-[16.5px] text-foreground/85">
+                          {selectedSession.sessionId}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>{selectedSession.sessionId}</TooltipContent>
+                    </Tooltip>
+                    <IconButton
+                      label="复制会话 ID"
+                      icon={<Copy className="h-3 w-3" aria-hidden />}
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void copySessionKey()}
+                      className="h-5 w-5 rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                    />
+                  </span>
+                </TooltipProvider>
+              ) : null}
+              {participants.length > 0 || totalCount > 0 ? (
+                <>
+                  <span aria-hidden className="h-3 w-px shrink-0 bg-foreground/10" />
+                  <span className="flex shrink-0 items-center gap-1" aria-label={`${humans || totalCount} 用户`}>
+                    <Users className="h-3 w-3 text-zinc-400" aria-hidden />
+                    <span className="text-xs leading-4 text-zinc-400">{humans || totalCount}</span>
+                  </span>
+                  {bots > 0 ? (
+                    <span className="flex shrink-0 items-center gap-1" aria-label={`${bots} Bot`}>
+                      <Bot className="h-3 w-3 text-zinc-400" aria-hidden />
+                      <span className="text-xs leading-4 text-zinc-400">{bots}</span>
+                    </span>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+            {selectedSession ? <ChatConnectionStatus {...CONNECTION_COPY[connectionStatus]} /> : null}
+          </div>
+        ) : null}
+
+        <div className="flex shrink-0 items-center justify-end gap-1">
+          {selectedSession || selectedGroup ? (
+            /* 收藏会话：chat 同构禁用态（无会话渲染 disabled 而非隐藏）；收藏态星标填充。 */
+            <HeaderIcon
+              label={favorites.favorite ? '取消收藏当前会话' : '收藏当前会话'}
+              icon={<Star className={cn('size-4', favorites.favorite && 'fill-star text-star')} aria-hidden />}
+              active={favorites.favorite}
+              disabled={favorites.disabled}
+              onClick={favorites.onToggle}
             />
-          )}
-          {selectedSession && (
-            <IconButton
-              label="分享会话"
-              icon={<Share2 className="h-4 w-4" aria-hidden />}
-              size="sm"
-              variant="ghost"
-              onClick={() => void handleShareSession()}
-            />
-          )}
-          {!selectedSession && selectedGroup && (
-            <IconButton
-              label="分享协作群"
-              icon={<Share2 className="h-4 w-4" aria-hidden />}
-              size="sm"
-              variant="ghost"
-              onClick={() => void handleShareGroup()}
-            />
-          )}
-          {/* 管理按钮：选中会话时进入「会话管理」(对会话成员可见,与侧栏会话「…」菜单一致);
-              未选会话时回退「协作群管理」——群详情（含权限判定）在打开管理面板时按需拉取，
-              非管理者打开后展示只读视图，避免选中群即触发 GET /groups/{id} 详情请求。 */}
+          ) : null}
+          {selectedSession || selectedGroup ? (
+            /* 气泡锚点：包住分享图标的空 span（SharePopover 经 virtualRef 定位其下）。 */
+            <span ref={shareAnchorRef} className="flex shrink-0">
+              <HeaderIcon
+                label={selectedSession ? '分享会话' : '分享协作群'}
+                icon={<Share2 className="size-4" aria-hidden />}
+                active={shareOpen}
+                onClick={selectedSession ? handleShareSession : handleShareGroup}
+              />
+            </span>
+          ) : null}
           {selectedSession && selectedGroup ? (
-            <IconButton
+            <HeaderIcon
               label={activePanel === 'sessionManage' ? '关闭会话管理' : '管理会话'}
-              icon={<Settings2 className="h-4 w-4" aria-hidden />}
-              size="sm"
-              variant={activePanel === 'sessionManage' ? 'primary' : 'ghost'}
+              icon={<SlidersHorizontal className="size-4" aria-hidden />}
+              active={activePanel === 'sessionManage'}
               onClick={() => onTogglePanel(activePanel === 'sessionManage' ? 'none' : 'sessionManage')}
             />
           ) : selectedGroup ? (
-            <IconButton
+            <HeaderIcon
               label={activePanel === 'manage' ? '关闭管理面板' : '管理协作群'}
-              icon={<Settings2 className="h-4 w-4" aria-hidden />}
-              size="sm"
-              variant={activePanel === 'manage' ? 'primary' : 'ghost'}
+              icon={<Settings2 className="size-4" aria-hidden />}
+              active={activePanel === 'manage'}
               onClick={() => onTogglePanel(activePanel === 'manage' ? 'none' : 'manage')}
             />
           ) : null}
-          {showReconnect && (
-            <IconButton
-              label="点击重新连接"
-              icon={<RefreshCw className="h-4 w-4" aria-hidden />}
-              size="sm"
-              variant="ghost"
-              onClick={onReconnect}
+          {selectedSession ? (
+            <HeaderIcon
+              label={activePanel === 'history' ? '关闭历史消息' : '历史消息'}
+              icon={<History className="size-4" aria-hidden />}
+              active={activePanel === 'history'}
+              onClick={() => onTogglePanel(activePanel === 'history' ? 'none' : 'history')}
             />
-          )}
+          ) : null}
+          {selectedSession ? (
+            <HeaderIcon
+              label={activePanel === 'resources' ? '关闭资源管理' : '资源管理'}
+              icon={<FolderOpen className="size-4" aria-hidden />}
+              active={activePanel === 'resources'}
+              onClick={() => onTogglePanel(activePanel === 'resources' ? 'none' : 'resources')}
+            />
+          ) : null}
+          <HeaderIcon
+            label="副屏"
+            icon={<Monitor className="size-4" aria-hidden />}
+            active={sidePaneOpen}
+            disabled={sidePaneDisabled}
+            onClick={onToggleSidePane}
+          />
         </div>
       </header>
-      <ShareDialog
+      <SharePopover
         open={shareOpen}
-        title={shareTitle}
-        inviting={sharing}
-        invitationUrl={shareUrl}
+        anchorRef={shareAnchorRef}
+        title={shareTarget === 'session' ? '会话' : '协作群'}
+        onCreate={(expiresInSeconds) =>
+          shareTarget === 'session' ? onRequestShareSession(expiresInSeconds) : onRequestShareGroup(expiresInSeconds)
+        }
         onClose={() => setShareOpen(false)}
       />
     </>

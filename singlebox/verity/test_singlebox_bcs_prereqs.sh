@@ -88,8 +88,22 @@ test_setup_skips_debug_build_when_requested() {
   grep -F "BUILD_BCS_CALLED" <<<"$output" >/dev/null || fail "stale binaries should still trigger the debug cargo build by default"
 }
 
+test_bot_recovery_hint_uses_current_singlebox_entrypoint() (
+  # Extract only the hint builder; do not start gateways or load local secrets.
+  eval "$(sed -n '/^singlebox_cmd()/,/^}/p' "${ROOT}/apps/bcs/scripts/start_bcs_bots.sh")"
+
+  local mode command
+  for mode in "" local standalone; do
+    SINGLEBOX_MODE="$mode"
+    command="$(singlebox_cmd clean bots)"
+    [ "$command" = "./singlebox/singlebox.sh clean bots" ] \
+      || fail "bot recovery hint must not require a removed mode flag: ${command}"
+  done
+)
+
 test_cargo_hint_when_rustup_cargo_exists_outside_path
 test_cargo_hint_when_cargo_is_not_installed
 test_setup_skips_debug_build_when_requested
+test_bot_recovery_hint_uses_current_singlebox_entrypoint
 
 printf 'PASS: singlebox BCS prereq tests\n'

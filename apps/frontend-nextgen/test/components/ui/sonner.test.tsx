@@ -13,15 +13,16 @@ describe('global Toaster', () => {
     mockSonnerToaster.mockClear();
   });
 
-  it('renders toast messages at the top center of the page', () => {
+  it('renders toast messages at the top center of the page without a close button', () => {
     renderToStaticMarkup(<Toaster />);
 
-    expect(mockSonnerToaster).toHaveBeenCalledWith(
+    const props = mockSonnerToaster.mock.calls[0][0] as Record<string, unknown>;
+    expect(props).toEqual(
       expect.objectContaining({
         position: 'top-center',
         richColors: true,
-        closeButton: true,
       }),
     );
+    expect(props.closeButton).toBeUndefined();
   });
 });

@@ -283,14 +283,16 @@ def test_skill_editor_request_auto_failure_is_not_success_on_wire(
     assert response.json()["data"] is None
 
 
-def test_skill_editor_approval_policy_is_owner_scoped_on_wire(
+def test_skill_editor_approval_policy_read_and_write_wire_contract(
     client, skill_editor_request_service
 ) -> None:
     skill_editor_request_service.get_approval_policy.return_value = False
     skill_editor_request_service.update_approval_policy.return_value = True
     path = "/openapi/v1/bots/spaces/7/skills/9/editor-approval-policy"
 
-    read = client.get(path)
+    client.app.dependency_overrides[require_principal] = lambda: {"user_id": "member-1"}
+    read = user_scoped_client(client.app, "member-1").get(path)
+    client.app.dependency_overrides[require_principal] = lambda: {"user_id": "owner-1"}
     updated = client.put(path, json={"auto_approve_editor_requests": True})
 
     assert read.status_code == 200
@@ -298,7 +300,7 @@ def test_skill_editor_approval_policy_is_owner_scoped_on_wire(
     assert updated.status_code == 200
     assert updated.json()["data"] == {"auto_approve_editor_requests": True}
     skill_editor_request_service.get_approval_policy.assert_called_once_with(
-        space_id=7, skill_id=9, actor_id="owner-1"
+        space_id=7, skill_id=9, actor_id="member-1"
     )
     skill_editor_request_service.update_approval_policy.assert_called_once_with(
         space_id=7,

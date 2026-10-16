@@ -1,9 +1,10 @@
 import asyncio
+import uuid
 
 import httpx
 
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskSpec,
+    AcceptanceCriteria, Context, Goal, RuntimeInfo, Status, TaskNode, TaskSpec,
 )
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
@@ -11,7 +12,7 @@ from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
 )
 from agentclaw.community.core.task.task_runner.client.prompt_formatter import PromptFormatterImpl
 from agentclaw.community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
-from agentclaw.community.core.task.task_runner.client.double.double_bcs_bot_identity_resolver import (
+from tests.community.core.task.support.double.double_bcs_bot_identity_resolver import (
     _DoubleBcsBotIdentityResolver,
 )
 
@@ -62,8 +63,7 @@ def test_get_state_machine_run():
 
 def _node(group_id="g1"):
     return TaskNode(node_id="n1", task_id="t1", status=Status.RUNNING,
-                    task_spec=TaskSpec(Metadata("t1", "T", "do"), Context("bg"),
-                                       Goal("O", [AcceptanceCriteria("a1", "d")])),
+                    task_spec=TaskSpec(context=Context("bg", title="T"), goal=Goal("O", [AcceptanceCriteria("a1", "d")])),
                     run_info=RuntimeInfo(run_mode="coop_group", assignee=group_id),
                     node_run_graph=None)  # type: ignore[arg-type]
 
@@ -146,6 +146,10 @@ class _Graph:
 
     def update_task_node_info(self, patch):
         self.patches.append(patch)
+
+    def report(self, data):
+        assert data.data["report_type"] == "NODE_PATCH"
+        return self.update_task_node_info(data.data["payload"]["patch"])
 
 
 def test_dispatch_state_machine_persists_group_run_ids_to_node_extend_props():
@@ -262,6 +266,29 @@ def test_form_coop_group_adds_binding_targets_to_participants():
     }
     assert req.participant_bindings["editor"]["bot_ids"] == ["default:146836:double-owner"]
     assert req.participant_bindings["writer"]["bot_ids"] == ["default:153364:double-owner"]
+
+
+def test_form_coop_group_relay_uses_stable_node_scoped_idempotency_key():
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["mgr", "worker"],
+        collab_mode="manager_worker",
+        members_info=[{"bot_id": "mgr", "role": "manager"}, {"bot_id": "worker", "role": "worker"}],
+        extend_props={
+            "relay_execution": True,
+            "loop_task_id": "task-1::node-group",
+            "task_id": "task-1",
+            "node_id": "node-group",
+            "manager_bot_id": "mgr",
+        },
+    )))
+
+    expected = str(uuid.uuid5(
+        uuid.NAMESPACE_URL, "avernet-relay-group:task-1::node-group"
+    ))
+    assert bcs.created_req.idempotency_key == expected
 
 
 def test_form_coop_group_manager_worker_attaches_event_subscriptions():

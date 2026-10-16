@@ -248,7 +248,7 @@ def _handle_existing_plan(
             "agent_context": {},
         }
         upload_result = upload_bench_domains(
-            plan=plan_context, manifest=manifest, task_id=task_id
+            plan=plan_context, manifest=manifest, task_id=task_id, step_id=step_id
         )
         upload_result["required"] = True
         _write_json(output_dir / "clawweb_upload_result.json", upload_result)

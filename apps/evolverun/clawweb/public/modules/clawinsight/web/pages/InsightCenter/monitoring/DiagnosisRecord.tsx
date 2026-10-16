@@ -1,3 +1,4 @@
+import { RecoveryTaskLinks } from "./session-recovery/RecoveryTaskLinks";
 import { useId, useState } from 'react';
 import type { DiagnosisItem } from '../../../types/monitoring';
 import { MonitoringIcon as Icon } from './MonitoringIcon';
@@ -39,6 +40,7 @@ export function DiagnosisRecord({ item, open, toggle }: { item: DiagnosisItem; o
       <Icon name="chevron" className="expand-icon" />
     </button>
     {open && <div id={detailId} className="record-detail">
+      <RecoveryTaskLinks eventId={item.diagnosisId} />
       <div className="diagnosis-narratives">{[['业务诊断', item.businessDiagnosis, 'text'], ['系统诊断', item.systemDiagnosis, 'code']].map(([label, text, icon]) => <section key={label} className="narrative"><h3 className="narrative-label"><Icon name={icon as 'text' | 'code'} />{label}</h3><p>{text ?? '—'}</p></section>)}</div>
       <dl className="detail-grid">
         <Field label="TC 故障标签" value={item.tcFaultLabel} /><Field label="诊断置信度" value={item.confidence === null ? null : `${(item.confidence * 100).toFixed(1)}%`} emphasis />

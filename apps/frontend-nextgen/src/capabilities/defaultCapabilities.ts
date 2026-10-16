@@ -9,8 +9,10 @@ import type {
   AppCapabilities,
   BotEngineOption,
   CapabilityResult,
+  ConversationInstanceScopeCapability,
   HumanIdentity,
   InviteCodeGatePolicy,
+  LegacyVersionSwitchSpec,
   LoginStrategy,
   MetricsDashboardSpec,
   OpenSourceExperienceNoticeSpec,
@@ -40,6 +42,9 @@ export const defaultCapabilities: AppCapabilities = {
   }),
   // Open Core 默认不暴露内部帮助链接，避免内部 URL 泄漏。
   getHelpLinks: () => ({ status: 'available', value: [] }),
+  // Open Core 无旧版可切回：不提供版本切换能力，壳层「返回旧版」入口不渲染、启动不发请求不打点。
+  getLegacyVersionSwitch: (): CapabilityResult<LegacyVersionSwitchSpec | null> =>
+    unsupported(null, '当前部署形态不提供版本切换'),
   openExternal: () => unsupported(null, '当前运行环境暂不支持打开外部链接'),
   // Open Core 默认路由重定向：当前无收敛项——/space-admin、/ticket-center 由页面级 getAdminSections
   // 守卫（阿里云形态 spaces=false 时 SpaceAdmin 页 replace 回落 /ticket-center），不在运行期重定向。
@@ -127,6 +132,8 @@ export const defaultCapabilities: AppCapabilities = {
       codefuseTokenUrl: null,
       antCodeProjectsApiUrl: null,
       antCodeProjectBaseUrl: null,
+      xiaojinCodeProjectsApiUrl: null,
+      xiaojinCodeProjectBaseUrl: null,
     },
   }),
   // Open Core 无内网 antwork 照片服务数据源 → 成员头像返回 null，成员行 UI 回退首字母占位。
@@ -145,9 +152,14 @@ export const defaultCapabilities: AppCapabilities = {
   // Open Core（开源部署）task 接口走 openapi 公开面 /openapi/v1/collaboration/tasks/*（后端 openapi_v1/task router + gateway spanner 鉴权）。
   // internal overlay 覆盖为内面 /api/v1/collaboration/tasks（不经 spanner，内部网关直连 task 引擎）。
   getTaskApiBase: (): CapabilityResult<string> => ({ status: 'available', value: '/openapi/v1/collaboration/tasks' }),
-  // 社区 BBS 预发阶段走内部 /api Unified 面 /api/v1/bbs/topics（agentclawengine-pre 已发布；teamclawgw-pre 网关未合并 /openapi/v1/bbs 转发，故 dev 直连 engine）。
-  // Open Core 默认同为 /api/v1/bbs/topics。内容/逛论坛订阅列表均在 /api/v1/bbs 下；逛论坛 §3.1/§3.2 走 /api/v1/bots/{id}/bbs/browse-subscription。
-  getBbsApiBase: (): CapabilityResult<string> => ({ status: 'available', value: '/api/v1/bbs/topics' }),
+  // 社区 BBS 已发布到 collaboration task 公开面：
+  // Topic 前缀为 /openapi/v1/collaboration/tasks/bbs/topics；订阅列表为
+  // /openapi/v1/collaboration/tasks/bbs/browse-subscriptions；单 Bot CRUD 为
+  // /openapi/v1/collaboration/tasks/bots/{id}/bbs/browse-subscription。
+  getBbsApiBase: (): CapabilityResult<string> => ({
+    status: 'available',
+    value: '/openapi/v1/collaboration/tasks/bbs/topics',
+  }),
   // Open Core / 开源部署:api-key 直发消息,无 secbaas per-bot 授权闭环 → grant/revoke 短路 no-op,开关只写 BCS task_claim_mode。
   // internal overlay 覆盖为 'secbaas-relay'(经 secbaas 透传人类 Cookie 授权 api-key 调某 bot)。
   getTaskClaimGrantStrategy: (): CapabilityResult<TaskClaimGrantStrategy> => ({ status: 'available', value: 'skip' }),
@@ -197,6 +209,24 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: true,
   }),
+  getAdditionalBotRegistrationPanels: () => ({ status: 'available', value: [] }),
+  getQwenWorkBotRegistrationConfig: (bcsEndpoint) => {
+    const runtime =
+      typeof window === 'undefined'
+        ? undefined
+        : (window as { AVERNET_RUNTIME_CONFIG?: { QWENWORK_PROVIDER_SLUG?: string } }).AVERNET_RUNTIME_CONFIG;
+    const providerSlug = (
+      runtime?.QWENWORK_PROVIDER_SLUG ?? (typeof QWENWORK_PROVIDER_SLUG === 'string' ? QWENWORK_PROVIDER_SLUG : '')
+    ).trim();
+    return {
+      status: providerSlug && bcsEndpoint ? 'available' : 'unsupported',
+      value: { providerSlug, apiUrl: bcsEndpoint },
+    };
+  },
+  getQwenWorkBridgeInstallation: () => ({ status: 'available', value: null }),
+  // Open Core（外部部署）不启用 Poolab 接入：返回 null → BotRegistrationDialog 不渲染 Poolab Tab，
+  // PoolabRegistrationPanel 也不会被触及。internal overlay 覆盖为真实脚本/指南 URL。
+  getPoolabBridgeInstallation: () => ({ status: 'available', value: null }),
   // Open Core（外部部署）暂不提供群高级配置与内部渠道绑定能力，避免展示不可用配置并发起无效请求。
   getGroupAdvancedConfigEnabled: (): CapabilityResult<boolean> => ({
     status: 'available',
@@ -231,5 +261,10 @@ export const defaultCapabilities: AppCapabilities = {
   getAdminSections: (): CapabilityResult<AdminSections> => ({
     status: 'available',
     value: { spaces: false, workOrders: true },
+  }),
+  // Open Core 无多实例范围概念:对话菜单不渲染实例行,会话取数不限定实例(行为不变)。
+  getConversationInstanceScope: (): CapabilityResult<ConversationInstanceScopeCapability | null> => ({
+    status: 'available',
+    value: null,
   }),
 };

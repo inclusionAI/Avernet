@@ -234,6 +234,17 @@ pub async fn run_with_resolved_config(mut config: BcsConfig) -> Result<()> {
             "MySQL/OceanBase database backend selected; remote migrations are not auto-applied at service startup"
         );
     }
+    // Resolve an ephemeral port before services capture it in their public URLs.
+    // Keep the listener open until it is handed to the HTTP server.
+    let listener = if config.port == 0 {
+        let listener = tokio::net::TcpListener::bind(format!("{}:0", config.bind))
+            .await
+            .map_err(BcsError::IoError)?;
+        config.port = listener.local_addr().map_err(BcsError::IoError)?.port();
+        Some(listener)
+    } else {
+        None
+    };
     let group_logger = config.group_logger.take();
     let server = BcsServer::new_with_storage(config).await?;
 
@@ -251,5 +262,5 @@ pub async fn run_with_resolved_config(mut config: BcsConfig) -> Result<()> {
         }
     }
 
-    server.run().await
+    server.run_with_listener(listener).await
 }

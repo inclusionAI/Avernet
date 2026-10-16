@@ -40,10 +40,10 @@ So ``TODO(#960)`` is *narrowed* by this rule, from seven operations to four, and
 stays open — see ``principal.py`` and ``admission.SKILL_SCOPED_OPERATIONS``.
 
 The account-level operations are the ones with no single bot to name: creating
-a bot, listing owned or collaborating bots, checking a name, the ``authorized``
-groups, the tenant-wide MCP catalogue, the trace query (which reads *across*
-bots), and the load-test endpoints. They keep a literal where a bot id would
-otherwise be read, and they are the only things that do.
+a bot, listing them, checking a name, the ``authorized`` groups, the tenant-wide
+MCP catalogue, the trace query (which reads *across* bots), and the load-test
+endpoints. They keep a literal where a bot id would otherwise be read, and they
+are the only things that do.
 
 Because ``{bot_id}`` is a single wildcard segment, a bot whose id equals a
 literal served in that position is unreachable at that address. Bot-first
@@ -171,10 +171,91 @@ edit would get wrong.
 
 from __future__ import annotations
 
+from fastapi import APIRouter, Depends
+
+from .authorized_apps import app_view_router as authorized_bots_router
+from .authorized_apps import router as authorized_apps_router
+from .authorized_apps import user_router as user_authorized_apps_router
+from .bots import router as bots_router
+from .bots.classification import router as classification_router
+from .collaboration_bots import public_router as collaboration_public_router
+from .collaborating_bots import router as collaborating_bots_router
+from .task import task_router
+from .bots.engine_version import router as engine_version_router
+from .bots.engine_config import router as engine_config_router
+from .bots.cli_tools import router as cli_tools_router
+from .bots.config_manifest import router as config_manifest_router
+from .bots.config_manifest_apply import router as config_manifest_apply_router
+from .bots.create_with_manifest import router as create_with_manifest_router
+from .org import dept_router as org_dept_router
+from .org import router as org_router
+from .channels import router as channels_router
+from .caller_identity import router as caller_identity_router
+from .containers import router as containers_router
+from .desktop_metadata import router as desktop_metadata_router
+from .diagnostics import router as diagnostics_router
+from .dormant import router as dormant_router
+from .editors import router as editors_router
+from .deprecated import (
+    ADDRESSED_GROUPS as _LEGACY_ADDRESSED,
+    ENGINE_RUNTIME_GROUPS as _LEGACY_ENGINE_RUNTIME,
+    GRANT_CHECKED_GROUPS as _LEGACY_GRANT_CHECKED,
+    SELF_CHECKED_GROUPS as _LEGACY_SELF_CHECKED,
+)
+from .contracts import (
+    ENGINE_RUNTIME_ERROR_RESPONSES,
+    ERROR_RESPONSES,
+    USER_SCOPED_ERROR_RESPONSES,
+    SPACE_SCOPED_ERROR_RESPONSES,
+)
+from .dependencies import require_principal
+from .principal import require_granted_addressed_bot, require_granted_own_bot
+from .engine_runtime.approvals import router as engine_approvals_router
+from .engine_runtime.connection import router as engine_connection_router
+from .engine_runtime.engine import router as engine_engine_router
+from .engine_runtime.models import router as engine_models_router
+from .engine_runtime.nodes import router as engine_nodes_router
+from .engine_runtime.sessions import router as engine_sessions_router
+from .harness import harness_router
+from .identity import router as identity_router
+from .local import router as local_router
+from .loadtest import router as loadtest_router
+from .market import router as market_router
+from .mcp import router as mcp_router
+from .mcp.router import bot_mcp_router
+from .bot_logs import router as logs_router
+from .bot_chats import router as chats_router
+from .task.bbs import read_router as bbs_read_router
+from .task.bbs import browse_open_router
+from .task.feedback import read_router as feedback_read_router
+from .bot_public import router as bot_public_router
+from .resources import router as resources_router
+from .render_screens import router as render_screens_router
+from .repository_catalog import router as repository_catalog_router
+from .routines import router as routines_router
+from .routines.owner_router import router as routines_owner_router
+from .skills import (
+    publish_status_router as skill_publish_status_router,
+    readme_router as skill_readme_router,
+)
+from .skills import router as skills_router
+from .skill_sets import router as skill_sets_router
+from .skill_sets.skill_center_references import router as skill_center_references_router
+from .service_publications import (
+    edit_lock_router as service_edit_lock_router,
+    router as service_lifecycle_router,
+)
+from .spaces import router as spaces_router
+from .spaces.skill_routes import router as space_skill_router
+from .spaces.publication_routes import router as space_skill_publication_router
+from .work_orders import router as work_orders_router
+from .source_credentials import router as source_credentials_router
 from agentclaw.community.adapters.http.openapi_v1.authorization import (
     PublicAPIRoute,
     assert_every_route_authorized,
 )
+from .token import token_router
+from .digital_employee import router as digital_employee_router
 
 # Every public route lives under this prefix. Exported so app-level handlers can
 # tell a public request from an internal one (e.g. to envelope validation errors
@@ -185,92 +266,6 @@ from agentclaw.community.adapters.http.openapi_v1.authorization import (
 from agentclaw.community.adapters.http.openapi_v1.contracts import (  # noqa: E402
     PUBLIC_API_PREFIX,
 )
-from fastapi import APIRouter, Depends
-
-from .authorized_apps import app_view_router as authorized_bots_router
-from .authorized_apps import router as authorized_apps_router
-from .authorized_apps import user_router as user_authorized_apps_router
-from .bot_chats import router as chats_router
-from .bot_logs import router as logs_router
-from .bot_public import router as bot_public_router
-from .bots import router as bots_router
-from .bots.cli_tools import router as cli_tools_router
-from .bots.config_manifest import router as config_manifest_router
-from .bots.config_manifest_apply import router as config_manifest_apply_router
-from .bots.create_with_manifest import router as create_with_manifest_router
-from .bots.engine_config import router as engine_config_router
-from .caller_identity import router as caller_identity_router
-from .channels import router as channels_router
-from .collaborating_bots import router as collaborating_bots_router
-from .collaboration_bots import public_router as collaboration_public_router
-from .containers import router as containers_router
-from .contracts import (
-    ENGINE_RUNTIME_ERROR_RESPONSES,
-    ERROR_RESPONSES,
-    SPACE_SCOPED_ERROR_RESPONSES,
-    USER_SCOPED_ERROR_RESPONSES,
-)
-from .dependencies import require_principal
-from .deprecated import (
-    ADDRESSED_GROUPS as _LEGACY_ADDRESSED,
-)
-from .deprecated import (
-    ENGINE_RUNTIME_GROUPS as _LEGACY_ENGINE_RUNTIME,
-)
-from .deprecated import (
-    GRANT_CHECKED_GROUPS as _LEGACY_GRANT_CHECKED,
-)
-from .deprecated import (
-    SELF_CHECKED_GROUPS as _LEGACY_SELF_CHECKED,
-)
-from .desktop_metadata import router as desktop_metadata_router
-from .diagnostics import router as diagnostics_router
-from .digital_employee import router as digital_employee_router
-from .dormant import router as dormant_router
-from .editors import router as editors_router
-from .engine_runtime.approvals import router as engine_approvals_router
-from .engine_runtime.connection import router as engine_connection_router
-from .engine_runtime.engine import router as engine_engine_router
-from .engine_runtime.models import router as engine_models_router
-from .engine_runtime.nodes import router as engine_nodes_router
-from .engine_runtime.sessions import router as engine_sessions_router
-from .harness import harness_router
-from .identity import router as identity_router
-from .loadtest import router as loadtest_router
-from .local import router as local_router
-from .market import router as market_router
-from .mcp import router as mcp_router
-from .mcp.router import bot_mcp_router
-from .org import dept_router as org_dept_router
-from .org import router as org_router
-from .principal import require_granted_addressed_bot, require_granted_own_bot
-from .render_screens import router as render_screens_router
-from .repository_catalog import router as repository_catalog_router
-from .resources import router as resources_router
-from .routines import router as routines_router
-from .routines.owner_router import router as routines_owner_router
-from .service_publications import (
-    edit_lock_router as service_edit_lock_router,
-)
-from .service_publications import (
-    router as service_lifecycle_router,
-)
-from .skill_sets import router as skill_sets_router
-from .skill_sets.skill_center_references import router as skill_center_references_router
-from .skills import (
-    publish_status_router as skill_publish_status_router,
-)
-from .skills import (
-    readme_router as skill_readme_router,
-)
-from .skills import router as skills_router
-from .source_credentials import router as source_credentials_router
-from .spaces import router as spaces_router
-from .spaces.publication_routes import router as space_skill_publication_router
-from .spaces.skill_routes import router as space_skill_router
-from .task import task_router
-from .token import token_router
-from .work_orders import router as work_orders_router
 
 # The groups that answer no 403, because no route in them is scoped by the
 # *caller's* user: Bot Logs never derived a user from the credential at all, and
@@ -308,6 +303,18 @@ _MIXED_GROUPS = [
 # about which *response table* each gets; it does not change that they all
 # precede `bots`.
 _OPEN_SUBGROUPS = [
+    classification_router,
+    # BBS Topics are tenant-wide content, not scoped to one addressed bot.
+    bbs_read_router,
+    # BBS Browse-Loop per-Bot reads + manual triggers: same /bots/{bot_id}/bbs
+    # prefix as the addressed-bot toggle group, but these take only a verified
+    # principal (no owner on the wire), so admission is OPEN and there is no
+    # addressed-owner grant to check. Mounted here -- before the
+    # {bot_id} wildcard -- so the GET/feed/trigger paths resolve to the OPEN
+    # group rather than being captured by the addressed-bot group mounting.
+    browse_open_router,
+    # Feedback is tenant-wide: any verified principal may report on any module.
+    feedback_read_router,
     # Skill Workbench status is tenant-identical and app-admissible.
     skill_publish_status_router,
 ]
@@ -324,10 +331,9 @@ _SUBGROUPS = [
     token_router,
     # Creating a bot with its manifest (W13, #1696). Here rather than with the
     # config-manifest groups below: those may address a shared bot and take the
-    # addressed-owner grant, while these two are a creation and its poll — the
-    # creation admits an application on the user-level delegation, since for
-    # most of a creation's life there is no bot record for a grant to be about,
-    # and grants it the bot so the poll can take the own-bot grant.
+    # addressed-owner grant, while these two are a creation and its poll —
+    # refused to an application caller outright, and for most of a creation's
+    # life there is no bot record for a grant to be about.
     #
     # Its order relative to `bots` is load-bearing. `POST .../bots/with-manifest`
     # is a top-level literal under the `{bot_id}` wildcard that group
@@ -376,6 +382,7 @@ _SUBGROUPS = [
 # declares it explicitly so the admission rule is visible where the public
 # surface is assembled. FastAPI caches the shared dependency per request.
 _ADDRESSED_BOT_SUBGROUPS = [
+    engine_version_router,
     # The config manifest is collaborator-scoped (MEMBER to read, ADMIN to
     # write), so it may address a shared bot and takes the addressed-owner
     # grant rather than the own-bot one.

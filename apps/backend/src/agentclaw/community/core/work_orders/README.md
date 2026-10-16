@@ -62,32 +62,51 @@ reconciliation rather than falsely reporting FAILED. An external side effect
 cannot be rolled back by the local database transaction.
 Unregistered event types keep the existing local-only approval behavior.
 
-## Trusted AUTO events
+## AUTO events and result recipients
 
-Both user-facing `POST /openapi/v1/bots/work-orders/events` and
-`POST /api/v1/work-orders/events` accept MANUAL and NOTICE events but reject
-caller-selected `approval_mode=AUTO`. They also reject Skill collaborator
-APPROVAL events before reaching the WorkOrder Service; applicants must use the
-Skill editor-request endpoint, which owns membership, Grant, and duplicate
-request checks. Skill result NOTICE events remain available through generic
-delivery. This is a user-facing ingress rule, not a Skill qualification rule
-inside the generic WorkOrder Service. A qualified
-business module may call `WorkOrderService.create_work_order_event` in-process
-with `approval_mode=AUTO` and nonempty `approver_user_ids`. The service trims,
-removes blanks and deduplicates these IDs; an empty result is rejected even if
-`recipient_user_ids` is populated. AUTO ignores `recipient_user_ids` and uses
-only the approver-derived list for both success and failure notices (including
-Skill). These recipients have no manual approval rights or tasks. AUTO creates
-no human approver row. For Skill requests,
-the creation transaction calls Skill-owned admission while holding the binding
-lock; it rejects an existing active Grant or PENDING/PROCESSING request before
-inserting the order. WorkOrder then creates the order as PROCESSING and completes
-the local business effect, APPROVED /
-SYSTEM state, and result notices in one transaction. The response includes the
-created result-notification IDs. The Skill business module validates the
-applicant before requesting AUTO, while the Skill Grant step rechecks the
-binding and membership inside WorkOrder's transaction. Failure cannot be
-reported to the Skill applicant as a successful approval.
+Both `POST /openapi/v1/bots/work-orders/events` and
+`POST /api/v1/work-orders/events` accept MANUAL, AUTO and NOTICE events.
+Existing authentication and user delegation remain required. There is no new
+module whitelist or AUTO authorization check: callers must validate business
+eligibility before choosing AUTO. A delegated user can also request AUTO on
+these routes, so deployments must control access at the business/gateway boundary
+if direct user-selected AUTO is undesirable.
+
+MANUAL requires `approver_user_ids` and empty `recipient_user_ids`. AUTO uses only
+nonempty `recipient_user_ids` for success/failure notices; IDs are trimmed, blanks
+removed and duplicates removed before writing. `approver_user_ids` is ignored
+for AUTO; send `[]`. No human approver row, task or approval right is created.
+NOTICE still requires recipients and no applicant or approvers.
+
+```json
+{
+  "event_category": "APPROVAL",
+  "approval_mode": "AUTO",
+  "biz_type": "BOT_FRIEND",
+  "biz_id": "friend-1",
+  "event_type": "HUMAN2BOT_FRIEND_APPLIED",
+  "applicant_user_id": "user-001",
+  "approver_user_ids": [],
+  "recipient_user_ids": ["user-001", "user-002"],
+  "title": "Friend request",
+  "biz_data": {"request_ids": ["request-1"]}
+}
+```
+
+The applicant must match the authenticated/delegated user. A registered friend
+callback runs before local completion and result notices. Return status is
+APPROVED or FAILED, with the created result-notification IDs; local persistence
+failure after confirmed remote success raises an error instead of a false FAILED.
+Migration: old AUTO callers must move notification IDs from `approver_user_ids`
+to `recipient_user_ids`; empty recipients fail before any write. There is no
+legacy-field fallback.
+
+Generic routes still reject Skill collaborator APPROVAL events in both modes;
+use the Skill editor-request endpoint, which owns qualification, Grant and
+duplicate checks. Its internal AUTO call now sends recipients in the same field.
+Skill creation checks admission in its transaction; completion rechecks binding
+and membership and commits the Grant, terminal state and notices atomically.
+Skill NOTICE delivery remains available through generic events.
 
 ## Bot editor request auto-approval
 
@@ -241,7 +260,7 @@ refactor.
 
 - Repository creation returns PROCESSING, matching the stored row. The service
   does not claim that row again. The event-status PROCESSING value is internal;
-  public event routes still reject AUTO and their response enum is unchanged.
+  public event routes return terminal APPROVED/FAILED, never PROCESSING.
 - Skill and non-Skill wrappers lock and validate the row before business writes,
   then share `_finish_auto_approval_in_session` for APPROVED/SYSTEM/timestamps
   and result notices. It uses the caller's transaction, does not commit, and

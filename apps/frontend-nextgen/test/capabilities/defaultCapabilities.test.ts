@@ -3,6 +3,13 @@ import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { Bot, Terminal } from 'lucide-react';
 
 describe('Open Core default capabilities', () => {
+  test('additional onboarding panels default to empty in Open Core', () => {
+    expect(defaultCapabilities.getAdditionalBotRegistrationPanels()).toEqual({
+      status: 'available',
+      value: [],
+    });
+  });
+
   test('健康检查默认只开放配置健康度，不展示内部多维视图', () => {
     const r = defaultCapabilities.getBotHealthCapability();
     expect(r.status).toBe('available');
@@ -206,6 +213,12 @@ describe('Open Core default capabilities', () => {
     const r = defaultCapabilities.getHumanIdentity();
     expect(r.value).toBeNull();
     useExternalAuthStore.getState().reset();
+  });
+
+  test('getBbsApiBase 默认 /openapi/v1/collaboration/tasks/bbs/topics（BBS 已发布公开面）', () => {
+    const r = defaultCapabilities.getBbsApiBase();
+    expect(r.status).toBe('available');
+    expect(r.value).toBe('/openapi/v1/collaboration/tasks/bbs/topics');
   });
 
   test('getTaskClaimGrantStrategy 默认 skip（Open Core api-key 直发,secbaas grant 短路 no-op）', () => {

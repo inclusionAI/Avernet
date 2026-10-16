@@ -28,7 +28,7 @@ const REFRESH_THROTTLE_MS = 60_000;
 function SpaceIcon({ type, className }: { type: Space['spaceType']; className?: string }) {
   // 个人=紫 User(text-brand)，团队=蓝 Users(text-primary)，与 SpaceCard 图标配色一致
   if (type === 'PERSONAL') return <User className={cn('shrink-0 text-brand', className)} aria-hidden />;
-  return <Users className={cn('shrink-0 text-[var(--color-primary)]', className)} aria-hidden />;
+  return <Users className={cn('shrink-0 text-brand', className)} aria-hidden />;
 }
 
 function SpaceAvatar({ type, loading }: { type: Space['spaceType']; loading: boolean }) {
@@ -49,21 +49,19 @@ function SpaceAvatar({ type, loading }: { type: Space['spaceType']; loading: boo
 
 function SpaceRow({ space, active, onSelect }: { space: Space; active: boolean; onSelect: (id: number) => void }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       className={cn(
-        'flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[13px] transition-colors',
-        'hover:bg-[var(--color-primary-soft)]',
-        active
-          ? 'bg-[var(--color-primary-soft)] font-semibold text-[var(--color-primary)]'
-          : 'font-normal text-[var(--color-fg)]',
+        'flex w-full items-center justify-start gap-2 rounded-md px-3 py-2 text-left text-[13px]',
+        'hover:bg-primary/10',
+        active ? 'bg-primary/10 font-semibold text-brand hover:bg-primary/10' : 'font-normal text-foreground',
       )}
       onClick={() => onSelect(space.spaceId)}
     >
       <SpaceIcon type={space.spaceType} className="h-4 w-4" />
       <span className="min-w-0 flex-1 truncate">{space.spaceName}</span>
-      {active && <CheckCircle className="ml-auto h-3.5 w-3.5 shrink-0 text-[var(--color-primary)]" aria-hidden />}
-    </button>
+      {active && <CheckCircle className="ml-auto h-3.5 w-3.5 shrink-0 text-brand" aria-hidden />}
+    </Button>
   );
 }
 
@@ -99,8 +97,9 @@ export function SpaceSwitcher({ compact = false, collapsed = false }: { compact?
   const popoverHeader = (
     <div className="flex items-center justify-between px-3 pb-2 pt-2 text-xs font-semibold text-muted-foreground">
       <span>空间切换</span>
+      {/* size=icon 提供 p-0：沿用 default 尺寸的 px-4 会在 w-7(28px) 定宽下把 flex 内容区挤成 0，图标缩到不可见 */}
       {spacesManageable && (
-        <Button variant="ghost" aria-label="空间管理" className="h-7 w-7" onClick={goSpaceAdmin}>
+        <Button variant="ghost" size="icon" aria-label="空间管理" className="h-7 w-7" onClick={goSpaceAdmin}>
           <Settings className="h-3.5 w-3.5" aria-hidden />
         </Button>
       )}

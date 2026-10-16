@@ -11,6 +11,8 @@ pub struct HumanInputReadyEvent {
     pub session_id: String,
     pub run_id: String,
     pub node_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<bcs_domain::StateMachineNodeExecutionMetadata>,
     pub display_name: String,
     pub instruction: String,
     pub assignee_actor_id: String,

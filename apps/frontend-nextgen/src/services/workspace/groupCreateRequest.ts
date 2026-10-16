@@ -8,7 +8,7 @@ export interface CreateGroupInput {
   definitionYaml?: string;
   driverBotUuid: string;
   originator: string;
-  participants: Array<{ actor_id: string; message_view_scope?: MessageViewScope }>;
+  participants: Array<{ actor_id: string; tags?: string[]; message_view_scope?: MessageViewScope }>;
   context?: string;
   participantBindings?: Array<{ binding: string; actor_ids: string[] }>;
 }
@@ -17,6 +17,7 @@ export function buildCreateGroupBody(input: CreateGroupInput): CreateGroupBody {
   const actorIds = Array.from(new Set(input.participants.map((participant) => participant.actor_id)));
   const participants = input.participants.map((participant) => ({
     actor_id: participant.actor_id,
+    ...(participant.tags?.length ? { tags: participant.tags } : {}),
     role:
       participant.actor_id === input.driverBotUuid
         ? input.strategy === 'manager_worker'

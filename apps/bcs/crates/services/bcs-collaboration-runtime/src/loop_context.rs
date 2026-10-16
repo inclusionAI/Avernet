@@ -19,6 +19,8 @@ pub fn build_loop_context(
     let loop_id = meta.loop_id.clone().ok_or_else(|| invalid("missing Loop ID"))?;
     let iteration = meta.iteration.ok_or_else(|| invalid("missing iteration"))?;
     let max_iterations = meta.max_iterations.ok_or_else(|| invalid("missing max iterations"))?;
+    let loop_path = crate::definition::node_loop_path(plan, meta)
+        .map_err(|error| invalid(&error.to_string()))?;
     if iteration == 0 || iteration > max_iterations {
         return Err(invalid("invalid iteration"));
     }
@@ -31,9 +33,13 @@ pub fn build_loop_context(
         let expected_id = meta.previous_result_node_id.as_ref().ok_or_else(|| invalid("missing previous result mapping"))?;
         let source = previous.ok_or_else(|| invalid("missing previous result Node Run"))?;
         let source_meta = plan.node_metadata.get(expected_id).ok_or_else(|| invalid("missing result node mapping"))?;
+        let source_path = crate::definition::node_loop_path(plan, source_meta)
+            .map_err(|error| invalid(&error.to_string()))?;
+        let mut expected_path = loop_path.clone();
+        expected_path.last_mut().ok_or_else(|| invalid("Loop entry has no path"))?.iteration -= 1;
         if source.run_id != run_id || &source.node_id != expected_id || source.status != StateMachineNodeStatus::Completed
             || !source_meta.is_loop_result || source_meta.loop_id.as_ref() != Some(&loop_id)
-            || source_meta.iteration != Some(iteration - 1)
+            || source_meta.iteration != Some(iteration - 1) || source_path != expected_path
         {
             return Err(invalid("previous result identity or completion mismatch"));
         }
@@ -54,7 +60,10 @@ pub fn build_loop_context(
             completed_at: source.completed_at.ok_or_else(|| invalid("previous result has no completion time"))?,
         })
     };
-    Ok(Some(LoopContext { loop_id, iteration, max_iterations, previous_result }))
+    Ok(Some(LoopContext {
+        loop_id, iteration, max_iterations,
+        loop_path: meta.loop_path.clone(), previous_result,
+    }))
 }
 
 pub fn render_loop_context(context: &LoopContext) -> String {
@@ -65,9 +74,14 @@ pub fn render_loop_context(context: &LoopContext) -> String {
         ),
         None => "(none - this is the first iteration)".into(),
     };
+    let loop_path = context.loop_path.as_ref().map(|path| format!(
+        "[Loop Path]\n{}\n\n",
+        path.iter().map(|frame| format!("{}: {}/{}", frame.loop_id, frame.iteration, frame.max_iterations))
+            .collect::<Vec<_>>().join("\n"),
+    )).unwrap_or_default();
     format!(
-        "[Loop Context]\nloop_id: {}\niteration: {}\nmax_iterations: {}\n\n[Previous Iteration Result]\n{}",
-        context.loop_id, context.iteration, context.max_iterations, previous
+        "{}[Loop Context]\nloop_id: {}\niteration: {}\nmax_iterations: {}\n\n[Previous Iteration Result]\n{}",
+        loop_path, context.loop_id, context.iteration, context.max_iterations, previous
     )
 }
 

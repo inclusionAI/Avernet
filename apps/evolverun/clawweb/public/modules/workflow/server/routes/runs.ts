@@ -187,7 +187,10 @@ export function createRunsRouter(
         }
       }
 
+      const purpose = _req.query.purpose ?? "production";
+      if (purpose !== undefined && !["all", "production", "trial"].includes(String(purpose))) { res.status(400).json({ error: "Invalid run purpose" }); return; }
       const countOptions = {
+        purpose: purpose as "all" | "production" | "trial",
         allowedWorkflowIds,
         allowedBotIds,
         status: statuses.length === 0 ? status : undefined,

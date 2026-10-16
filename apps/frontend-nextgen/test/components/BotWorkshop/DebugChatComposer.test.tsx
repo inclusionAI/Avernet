@@ -54,3 +54,30 @@ it('上传完成后以文件引用发送调试消息', async () => {
     fileRefDisplay: [{ insert_id: 'debug_file_1', name: '需求说明.md' }],
   });
 });
+
+it('将模型切换放在发送按钮左侧', () => {
+  mockedUpload.mockReturnValue({
+    tasks: [],
+    isUploading: false,
+    stageFiles: jest.fn(),
+    removeTask: jest.fn(),
+    cancelAll: jest.fn(),
+    submit: jest.fn(),
+  });
+
+  render(
+    <DebugChatComposer
+      botId="bot-1"
+      sessionId="session-1"
+      userId="user-1"
+      isRequesting={false}
+      modelSelector={<span data-testid="debug-model-selector">模型选择</span>}
+      onSend={jest.fn()}
+      onStop={jest.fn()}
+    />,
+  );
+
+  const selector = screen.getByTestId('debug-model-selector');
+  const sendButton = screen.getByRole('button', { name: '发送' });
+  expect(selector.compareDocumentPosition(sendButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});

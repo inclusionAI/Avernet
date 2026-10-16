@@ -7,7 +7,9 @@ from src.infra.config.feature_flags import FeatureFlags
 from tests.fixtures.runtime_acceptance import acceptance_run
 from tests.integration.test_isolated_runtime_acceptance import (
     TOKEN,
-    isolated_app_factory,  # noqa: F401 - shared disposable app fixture
+)
+from tests.integration.test_isolated_runtime_acceptance import (
+    isolated_app_factory as isolated_app_factory,  # noqa: PLC0414 - re-export shared pytest fixture
 )
 
 
@@ -22,6 +24,81 @@ def _assert_active(registry, worker_id):
     assert registry.require("worker_profile_content_store").get_active(worker_id).profile_id == "release"
     assert registry.require("worker_registry_store").get_by_id(worker_id).active_profile_key == f"{worker_id}:release"
     assert registry.require("worker_profile_binding_store").get_active_binding(worker_id).profile_key == f"{worker_id}:release"
+
+
+def test_activation_indexes_selected_content_and_applies_removals(isolated_app_factory):
+    with (
+        isolated_app_factory() as (client, registry, embedding),
+        acceptance_run(client, TOKEN) as acceptance,
+    ):
+        worker_id, path = _prepare(acceptance)
+        workers = registry.require("worker_registry_store")
+        worker = workers.get_by_id(worker_id)
+        worker.responsibilities = ["REGISTRY_ONLY " * 100]
+        worker.capabilities = [
+            worker.capabilities[0].model_copy(update={"name": name})
+            for name in ("registry-skill-one", "registry-skill-two", "registry-skill-three")
+        ]
+        workers.update(worker)
+        store = registry.require("vector_store")
+        profile_key = f"{worker_id}:release"
+
+        for contents, skills, expected, removed in (
+            (
+                {"profile": "SELECTED_PERSONA with detailed responsibilities",
+                 "capabilities": "selected-capability"},
+                [{"name": "selected-skill"}],
+                ("SELECTED_PERSONA", "selected-capability", "selected-skill"),
+                (),
+            ),
+            (
+                {"profile": "SHORT_PERSONA"}, [], ("SHORT_PERSONA",),
+                ("SELECTED_PERSONA", "selected-capability", "selected-skill"),
+            ),
+            (
+                {}, [], (),
+                ("SHORT_PERSONA", "SELECTED_PERSONA", "selected-capability", "selected-skill"),
+            ),
+        ):
+            acceptance.request("PUT", path.removesuffix("/activate"), json={
+                "contents": contents, "skill_sets": skills,
+            })
+            # The same activation must reread replacements, including empty fields.
+            for _ in range(2):
+                embedding.calls.clear()
+                acceptance.request("PUT", path)
+                _assert_active(registry, worker_id)
+                assert embedding.calls
+                embedded = "\n".join(embedding.calls)
+                for text in expected:
+                    assert text in embedded
+                for text in (*removed, "REGISTRY_ONLY", "registry-skill", "Skills: python"):
+                    assert text not in embedded
+
+                local = {
+                    vector_id: store.get(vector_id).payload
+                    for vector_id in store.get_vector_ids()
+                    if store.get(vector_id).payload.get("profile_key") == profile_key
+                }
+                full = local[f"{profile_key}:full"]
+                assert full["worker_id"] == worker_id
+                assert full["runtime_state"] == "online"
+                for text in expected:
+                    assert text in full["content"]
+                for payload in local.values():
+                    assert payload["content"] in embedding.calls
+                    for text in (*removed, "REGISTRY_ONLY", "registry-skill", "Skills: python"):
+                        assert text not in payload["content"]
+                if not contents:
+                    assert set(local) == {f"{profile_key}:full"}
+                elif "capabilities" not in contents:
+                    assert not any(p["fragment_type"] == "capabilities" for p in local.values())
+                store.rebuild_from_backend()
+                assert {
+                    vector_id: store.get(vector_id).payload
+                    for vector_id in store.get_vector_ids()
+                    if store.get(vector_id).payload.get("profile_key") == profile_key
+                } == local
 
 
 def test_activation_preserves_old_profile_vectors_and_repeat_is_searchable(isolated_app_factory):

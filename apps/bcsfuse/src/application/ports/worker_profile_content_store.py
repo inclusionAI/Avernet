@@ -43,4 +43,11 @@ class WorkerProfileContentStore(Protocol):
     def get_all_active(self) -> list[WorkerProfileContent]: ...
 
 
-__all__ = ["WorkerProfileContentStore"]
+@runtime_checkable
+class WorkerScopedProfileContentStore(Protocol):
+    """Optional active-record lookup bounded to exact Worker IDs."""
+
+    def get_active_by_workers(self, worker_ids: list[str]) -> list[WorkerProfileContent]: ...
+
+
+__all__ = ["WorkerProfileContentStore", "WorkerScopedProfileContentStore"]

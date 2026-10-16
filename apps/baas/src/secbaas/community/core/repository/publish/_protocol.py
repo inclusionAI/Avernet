@@ -65,6 +65,20 @@ class PublishRepository(Protocol):
         self, bot_id: int, tenant: str, env: str
     ) -> PublishRecord | None: ...
 
+    def list_active_by_bot_ids(
+        self, bot_ids: list[int], tenant: str, env: str
+    ) -> list[PublishRecord]:
+        """List ALL non-terminal publishes whose bot_id is in ``bot_ids``.
+
+        Same contract as ``get_active_by_bot_id`` extended across a
+        generation id list: filters ``tenant``, ``env``, ``is_deleted=0``
+        and the exact non-terminal status literal (NOT IN
+        SUCCESS/FAILED/REJECTED/REVOKED, kept in lockstep with
+        ``get_active_by_bot_id``), ordered id descending. An empty
+        ``bot_ids`` returns an empty list without querying.
+        """
+        ...
+
     def soft_delete(
         self, *, publish_id: int, tenant: str, env: str, modifier: str
     ) -> None: ...

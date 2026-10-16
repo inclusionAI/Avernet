@@ -18,6 +18,7 @@ bench 原始数据在 clawbench_results/{bench_run_id}/，不再拷贝/归一化
 watchdog 已默认启用：步骤失败自动重试/兜底并上报 ClawWeb，loop 不因单轮失败而终止。
 """
 
+
 import argparse
 import hashlib
 import json
@@ -43,6 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "platform"))
 from clawevolve_runtime.runner_environment import resolve_runner_environment
 from clawevolve_runtime.agent_registry import registration_lock
+from bench_resource_owner import bench_owner
 from lib_clawevolve_bench import run_clawevolve_bench
 from lib_artifact_url_client import ArtifactUrlClient
 from lib_business_core import CoreWaiting, select_business_core, run_business_call, resolve_runtime_path, is_waiting as _business_is_waiting
@@ -3664,7 +3666,7 @@ def _evaluation_identity(args, paths: dict, *, kind: str, artifact_path: str | P
         "kind": kind,
         "artifact_sha256": _sha256(artifact) if artifact and artifact.is_file() else str(legacy.get("artifact_sha256") or ""),
         "domain_id": str(domain_id or ""),
-        "domain_owner_id": str(getattr(args, "owner_id", "") or _env("CLAWBENCH_OWNER_ID", "")),
+        "domain_owner_id": bench_owner(args, "train" if kind == "optimization" else "test") or _env("CLAWBENCH_OWNER_ID", ""),
         "optimization_fixture_sha256": str(((legacy.get("optimization_fixture") or {}).get("sha256")) or (fixture.get("sha256") if kind == "optimization" else "") or ""),
         "validation_fixture_sha256": str(((legacy.get("validation_fixture") or {}).get("sha256")) or (fixture.get("sha256") if kind == "validation" else "") or ""),
         "benchmark_version": benchmark_version,
@@ -3863,7 +3865,7 @@ def _persist_baseline_bench_report(args, paths: dict, *, role: str, bench_record
     durable["baselineRole"] = role
     durable["producerStepId"] = str(getattr(args, "step_id", "") or "")
     durable["domainId"] = str(getattr(args, "train_bench_domain_id" if role == "train" else "test_bench_domain_id", "") or "")
-    durable["domainOwnerId"] = str(getattr(args, "owner_id", "") or "")
+    durable["domainOwnerId"] = bench_owner(args, role)
     durable["persistedAt"] = _now()
     (output_dir.parent / "baseline_result.json").write_text(
         json.dumps(durable, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -6179,7 +6181,7 @@ def _adapter_bench(args, kind: str, *, step_name_override: str | None = None, st
         or _env("CLAWEVOLVE_CLAWWEB_URL") or _env("CLAWWEB_URL") or _env("CLAWWEBURL")
         or "http://127.0.0.1:5173/"
     )
-    owner_id = args.owner_id or _env("CLAWBENCH_OWNER_ID", "")
+    owner_id = bench_owner(args, "train" if kind == "optimization" else "test") or _env("CLAWBENCH_OWNER_ID", "")
     step_name = step_name_override or ("bench-opt" if kind == "optimization" else "bench-val")
     record_key = state_key or kind
     work_dir = Path(paths["round_dir"]) / "bench" / record_key
@@ -7191,8 +7193,8 @@ def action_upload_clawweb(args):
     baseline_test_score = _finite_number((baseline_validation.get("summary") or {}).get("score"))
     owner_id = str(getattr(args, "owner_id", "") or "")
     metrics_list = [
-        {"key": metric_key, "name": f"训练 Bench {metric_name}", "role": "candidate_train", "value": train_score, "unit": metric_unit, "target": target_score, "passed": score_target_passed(train_score), "baselineValue": baseline_train_score, "delta": train_score - baseline_train_score if baseline_train_score is not None else None, "ownerUserId": owner_id, "domainId": str(getattr(args, "train_bench_domain_id", "") or ""), "benchRunId": (bench.get("optimization") or {}).get("benchRunId") or ""},
-        {"key": metric_key, "name": f"测试 Bench {metric_name}", "role": "candidate_test", "value": test_score, "unit": metric_unit, "target": target_score, "passed": score_target_passed(test_score), "baselineValue": baseline_test_score, "delta": test_score - baseline_test_score if baseline_test_score is not None else None, "ownerUserId": owner_id, "domainId": str(getattr(args, "test_bench_domain_id", "") or ""), "benchRunId": (bench.get("validation") or {}).get("benchRunId") or ""},
+        {"key": metric_key, "name": f"训练 Bench {metric_name}", "role": "candidate_train", "value": train_score, "unit": metric_unit, "target": target_score, "passed": score_target_passed(train_score), "baselineValue": baseline_train_score, "delta": train_score - baseline_train_score if baseline_train_score is not None else None, "ownerUserId": bench_owner(args, "train"), "domainId": str(getattr(args, "train_bench_domain_id", "") or ""), "benchRunId": (bench.get("optimization") or {}).get("benchRunId") or ""},
+        {"key": metric_key, "name": f"测试 Bench {metric_name}", "role": "candidate_test", "value": test_score, "unit": metric_unit, "target": target_score, "passed": score_target_passed(test_score), "baselineValue": baseline_test_score, "delta": test_score - baseline_test_score if baseline_test_score is not None else None, "ownerUserId": bench_owner(args, "test"), "domainId": str(getattr(args, "test_bench_domain_id", "") or ""), "benchRunId": (bench.get("validation") or {}).get("benchRunId") or ""},
     ]
 
     def baseline_output(role: str, registry: dict, cache_record: dict) -> dict:
@@ -7203,7 +7205,7 @@ def action_upload_clawweb(args):
             "producerStepId": producer_step_id,
             "source": "generated" if producer_step_id == str(step_id) else "reused",
             "cacheStatus": str(cache_record.get("cacheStatus") or ""),
-            "ownerUserId": str(registry.get("domain_owner_id") or owner_id),
+            "ownerUserId": str(registry.get("domain_owner_id") or bench_owner(args, role)),
             "domainId": str(registry.get("domain_id") or getattr(args, "train_bench_domain_id" if role == "train" else "test_bench_domain_id", "") or ""),
             "benchRunId": str(registry.get("bench_run_id") or ""),
             "metrics": {
@@ -9876,6 +9878,8 @@ def main():
     parser.add_argument("--train-bench-domain-id")
     parser.add_argument("--test-bench-domain-id")
     parser.add_argument("--owner-id")
+    parser.add_argument("--train-bench-owner-id")
+    parser.add_argument("--test-bench-owner-id")
     parser.add_argument("--clawweb-url")
     parser.add_argument("--clawweb-url-legacy", "--clawweb-url-camel", dest="clawweb_url_camel", help="遗留兼容参数，对应历史字段 clawwebUrl")
     parser.add_argument("--bench-run-id")

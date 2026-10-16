@@ -9,6 +9,9 @@
       "collaborator_admin": [
         "100000"
       ],
+      "cron_admin": [
+        "100000"
+      ],
       "device_admin": [
         "100000"
       ],
@@ -62,6 +65,14 @@
     },
     "bcn": {
       "base_url": "http://localhost:21000"
+    },
+    "bcs_client": {
+      "base_url": "http://localhost:21000",
+      "base_url_pre": "http://localhost:21000",
+      "secret_secret": "local-noop",
+      "task_callback_url": "http://localhost:8888",
+      "task_callback_url_pre": "http://localhost:8888",
+      "token_secret": "local-noop"
     },
     "bcsfuse": {
       "base_url": "https://bcsfuse-pre.teamclaw.com"
@@ -172,6 +183,15 @@
     },
     "mock_tcauth": true,
     "nas_mount_root": "/home/admin/.bot_shared_nas/arca/arcaagentclaw",
+    "openapi": {
+      "user_id_bypass": []
+    },
+    "openapi_bot": {
+      "api_key_prefix": "${api_key_prefix:-}",
+      "api_key_secret": "${api_key_secret:-}",
+      "base_url": "http://localhost:8890",
+      "base_url_pre": "http://localhost:8890"
+    },
     "openclaw": {
       "skills_repo_url": ""
     },
@@ -210,6 +230,9 @@
       "card_template_id": "dummy-card-template-id.schema",
       "frontend_url": "http://localhost:8000",
       "robot_code": "dummy-robot-code"
+    },
+    "task_dispatch": {
+      "backend_url": "http://localhost:8888"
     },
     "task_queue_worker": {
       "enabled": true,

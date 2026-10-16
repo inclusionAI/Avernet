@@ -3,6 +3,8 @@ import Database from 'better-sqlite3';
 import express from 'express';
 import { SqliteDatabase, runMigrations } from '@avernet/clawweb-shared/server/db';
 import { createWorkflowRepairRuntime } from '../repair-workbench-runtime.js';
+import { RepairReleaseRepository } from '@avernet/workflow/server/repositories/repair-release-repository';
+import type { RepairDeployment } from '@avernet/workflow/server/contracts/repair-release';
 import type { RepairDispatchRequest } from '@avernet/workflow/server/contracts/repair-workbench';
 
 const cleanup: Array<() => Promise<unknown>> = [];
@@ -95,4 +97,32 @@ describe('real repair Host composition', () => {
     expect(after.counts.pending).toBe(38);
     expect(after.tasks[0].phase).toBe('cancelled');
   });
+});
+
+
+it('loads only actionable publications before keyset paging settled history', async () => {
+  const { db, runtime } = await fixture();
+  const records = new RepairReleaseRepository(db);
+  const make = (id: string, status: RepairDeployment['status']) => ({ id, workflowId: 'wf', taskId: 'task', revision: 1,
+    stateVersion: 0, createdAtMs: 1, actorId: 'editor', status } as RepairDeployment);
+  for (let i = 0; i < 250; i++) {
+    const id = `settled-${i}`;
+    await records.insert('deployment', { requestId: id }, make(id, i % 2 ? 'succeeded' : 'failed'));
+  }
+  const statuses = ['dispatching', 'running', 'uncertain'] as const;
+  for (let i = 0; i < 101; i++) {
+    const id = `pending-${String(i).padStart(3, '0')}`;
+    await records.insert('deployment', { requestId: id }, make(id, statuses[i % 3]));
+  }
+  const reconcile = vi.spyOn(runtime.release, 'reconcile').mockImplementation(async (_actor, _task, id) => make(id, 'running'));
+  const query = vi.spyOn(db, 'query');
+  await runtime.monitor.reconcile();
+  expect(reconcile).toHaveBeenCalledTimes(101);
+  expect(new Set(reconcile.mock.calls.map(call => call[2])).size).toBe(101);
+  const pages = await Promise.all(query.mock.calls.flatMap(([sql], i) =>
+    sql.includes('SELECT record_id, body_json FROM workflow_repair_release_records') ? [query.mock.results[i].value] : []));
+  expect(pages.map(page => page.length)).toEqual([100, 1, 0]);
+  reconcile.mockClear();
+  await runtime.monitor.reconcile();
+  expect(reconcile).toHaveBeenCalledTimes(101);
 });

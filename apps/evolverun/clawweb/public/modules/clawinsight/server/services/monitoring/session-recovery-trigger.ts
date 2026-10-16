@@ -1,0 +1,84 @@
+import { createHash } from "node:crypto";
+import type { SessionRecoveryApi } from "../repair/session-recovery/contracts.js";
+import { SessionRecoveryError } from "../repair/session-recovery/errors.js";
+import { parseRequest } from "../repair/session-recovery/validation.js";
+import {
+  MonitoringError, type MonitoringRecoveryConfigStore, type MonitoringRecoveryTrigger, type MonitoringTarget,
+} from "./contracts.js";
+import { target, targetKey } from "./target.js";
+
+export const SESSION_RECOVERY_ALLOWLIST_KEY = "session_recovery_allowlist";
+
+function record(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseAllowlist(value: unknown): MonitoringTarget[] {
+  if (!record(value) || Object.keys(value).some(key => key !== "allowed_bots") || !Array.isArray(value.allowed_bots)) {
+    throw new Error("Invalid recovery allowlist");
+  }
+  const seen = new Set<string>();
+  return value.allowed_bots.map(item => {
+    if (!record(item) || Object.keys(item).length !== 3
+      || Object.keys(item).some(key => !["bot_id", "entity_id", "env"].includes(key))
+      || typeof item.bot_id !== "string" || !/^[A-Za-z0-9_-]+$/.test(item.bot_id)
+      || typeof item.entity_id !== "string" || !/^[A-Za-z0-9_.@+-]+$/.test(item.entity_id) || item.entity_id.includes("..")
+      || (item.env !== "pre" && item.env !== "prod")) throw new Error("Invalid recovery target");
+    const entry = target({ botId: item.bot_id, entityId: item.entity_id, env: item.env });
+    const key = targetKey(entry);
+    if (seen.has(key)) throw new Error("Duplicate recovery target");
+    seen.add(key);
+    return entry;
+  });
+}
+
+export function createMonitoringRecoveryTrigger(input: {
+  config: MonitoringRecoveryConfigStore;
+  service: SessionRecoveryApi | null;
+}): MonitoringRecoveryTrigger {
+  return {
+    async trigger(event) {
+      if (event.decision !== "ALERT" || event.handlerName !== "NOT_COMPLETED") return;
+      let allowed: MonitoringTarget[];
+      try {
+        const row = await input.config.findByKey(SESSION_RECOVERY_ALLOWLIST_KEY);
+        if (!row || row.enabled === 0) return;
+        if (row.enabled !== 1) throw new Error("Invalid recovery configuration state");
+        allowed = parseAllowlist(JSON.parse(row.config_json));
+      } catch {
+        console.error("[monitoring] recovery unavailable", { eventId: event.eventId, reason: "allowlist_unavailable" });
+        throw new MonitoringError("NOT_READY", "自愈内测白名单暂不可用或格式无效。");
+      }
+      if (!allowed.some(entry => targetKey(entry) === targetKey(event))) return;
+      let request;
+      try {
+        const diagnosis = [
+          event.businessDiagnosis?.trim() ? `业务诊断：${event.businessDiagnosis}` : "",
+          event.systemDiagnosis?.trim() ? `系统诊断：${event.systemDiagnosis}` : "",
+        ].filter(Boolean).join("\n");
+        request = parseRequest({
+          event_id: event.eventId, tc_fault_label: event.tcFaultLabel,
+          target: { bot_id: event.botId, entity_id: event.entityId, env: event.env, engine: event.engine },
+          session_key: event.sessionKey,
+          delivery_key: `monitoring-${createHash("sha256").update(event.eventId).digest("hex")}`,
+          diagnosis,
+        });
+      } catch (error) {
+        if (!(error instanceof SessionRecoveryError) || error.status !== 422) throw error;
+        console.warn("[monitoring] recovery skipped", { eventId: event.eventId, reason: "invalid_recovery_input", detail: error.message });
+        return;
+      }
+      if (!input.service) throw new MonitoringError("NOT_READY", "自愈服务尚未就绪。");
+      try {
+        await input.service.create(request, { userId: event.entityId, isAdmin: false });
+      } catch (error) {
+        console.error("[monitoring] recovery creation failed", { eventId: event.eventId,
+          code: error instanceof SessionRecoveryError ? error.code : "recovery_unavailable" });
+        if (error instanceof SessionRecoveryError && error.status < 500) {
+          throw new MonitoringError(error.status === 409 ? "EVENT_CONFLICT" : "INVALID_EVENT", "自愈创建请求被拒绝，诊断记录已保存。");
+        }
+        throw new MonitoringError("NOT_READY", "诊断记录已保存，自愈任务尚未确认创建，请重试上报。");
+      }
+    },
+  };
+}

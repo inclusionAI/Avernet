@@ -8,7 +8,7 @@ tags: [task, loop, orchestrate, task-recognition, task-planning, task-search, ta
 
 # task-loop
 
-预装到所有 bot 的任务目标驱动执行闭环 skill。本 skill 内含七段,**只执行被触发词命中的那一段**,其余段不参与;给任一 bot 预装本 skill 等同把对应段单独安装到该 bot。
+预装到所有 bot 的任务目标驱动执行闭环 skill。新版分布式接力以 `[task-execute]` 命中 S1–S6；旧任务继续按原有七段触发。**只执行被触发词命中的那一段**，其余段不参与。
 
 - 任务识别(recognition):对话 bot 用户面——`/task` 或平台 `[RESUME_TASK]` 回传或仅副屏标签
 - 任务规划(planning):owner bot——框架 prompt 头部 `[planning]`(非 arch 场景)
@@ -26,6 +26,7 @@ tags: [task, loop, orchestrate, task-recognition, task-planning, task-search, ta
 
 | 触发 / 上下文 | 命中段 | 执行要点 |
 |---|---|---|
+| prompt 头部为 `[task-execute]`，且包含 `task_id`、`node_id`、`relay_token` | 新版分布式接力 S1–S6 | 严格按该次任务指令执行；使用 `scripts/relay_http.py` 调用 Gateway，S1 读节点上下文、S4b 报执行、S5.5 报规划、S6 投递下一棒；不得退回旧 S1–S8 callback 协议 |
 | 用户消息以 `/task` 开头;或上下文含 `[RESUME_TASK]`;或消息仅 `<AixUI type="panel" component="taskPanel.TaskLoopView" ...>` 副屏标签 | 段1 任务识别 | 出 AixUI 卡片(cardId 固定 card_3e31e1f1),到 task_ready 为止;执行由平台层调 POST /api/v1/collaboration/tasks/execute |
 | prompt 头部标记 `[planning]`,含目标节点 node_id 与任务态快照,**且 prompt 不含「某某某公司」**(非 arch 场景) | 段2 任务规划 | 返回 JSON 对象 {tasks: List[TaskSpec], has_gap, gap_detail};tasks 为空即 gap 闭=验收通过 |
 | prompt 头部标记 `[planning]`,**且 prompt 含「某某某公司」**(arch 场景;交付物含架构师名册/技术栈概览/双视角分析等) | 段7 任务规划·arch 场景 | 同段2 输出契约;按根验收交付物集合 + done_children 确定式查表产 N_tech_stack / N_dual_view / N_architects |
@@ -34,7 +35,7 @@ tags: [task, loop, orchestrate, task-recognition, task-planning, task-search, ta
 | 收到引擎主动发的 BBS 任务消息(含 task_id + 后端 base url + 自身 bot_id,且引擎已替你占根) | 段5 BBS 接力 | 跳过 scan / claim / 自判,直接 attach -> 执行 -> result |
 | 叶子执行输入(instruction)含关键词「某某某公司」,且非框架 `[planning]`/`[search]` 头 | 段6 架构师名册 mock | 不联网,直接返 mock 伪造架构师名册 JSON(domain/architects[]/note) |
 
-**优先级**(实际多互斥,显式定义避免歧义):段5(引擎 BBS 通知) > 段7/段2/段3(框架 `[planning]`/`[search]` 头;arch 场景「某某某公司」命中段7,优先于段2) > 段4(协作群 driver/owner 验收+push) > 段1(`/task` / `[RESUME_TASK]` / 副屏标签) > 段6(叶子 instruction 含「某某某公司」)。
+**优先级**(实际多互斥,显式定义避免歧义):新版 `[task-execute]` > 段5(引擎 BBS 通知) > 段7/段2/段3(框架 `[planning]`/`[search]` 头;arch 场景「某某某公司」命中段7,优先于段2) > 段4(协作群 driver/owner 验收+push) > 段1(`/task` / `[RESUME_TASK]` / 副屏标签) > 段6(叶子 instruction 含「某某某公司」)。
 
 **段5 ↔ 段6 并用(arch 接力链路唯一例外)**:段5 命中(BBS 通知)时,其 attach 的 scoped 叶子若 instruction 含「某某某公司」,叶子产出按**段6 arch-analysis** 规则(mock 名册),段5 仍管 attach / result 协议。除此之外严格"只跑命中段"。
 

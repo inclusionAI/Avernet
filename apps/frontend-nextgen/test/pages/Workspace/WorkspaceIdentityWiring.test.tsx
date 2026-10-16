@@ -134,7 +134,7 @@ it('全局工作身份是 Bot 时,/workspace/chat 仍用登录 Human 目录(不�
 
   // 目录按登录用户 userId 加载(Human 固定视角),而非 Bot 工作身份。
   await waitFor(() => expect(mockListDirectory).toHaveBeenCalledWith('101'));
-  expect(await screen.findByText('张三管理的 Bot')).toBeInTheDocument();
+  expect(await screen.findByText('我的 Bot')).toBeInTheDocument();
 });
 
 it('全局工作身份是 Bot 时,/workspace/chat 不渲染 Bot 身份只读好友区域', async () => {
@@ -148,7 +148,7 @@ it('全局工作身份是 Bot 时,/workspace/chat 不渲染 Bot 身份只读好�
 
   render(<ConversationPage />);
 
-  expect(await screen.findByText('张三管理的 Bot')).toBeInTheDocument();
+  expect(await screen.findByText('我的 Bot')).toBeInTheDocument();
   expect(screen.queryByTestId('bot-friend-workspace-area')).not.toBeInTheDocument();
   expect(screen.queryByText('请选择一个好友用户会话')).not.toBeInTheDocument();
 });

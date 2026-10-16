@@ -15,14 +15,17 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskInfo,
     TaskNode,
     TaskSpec,
 )
-from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatcher
+from agentclaw.community.core.task.task_dispatch.dispatcher import (
+    CentralizedDispatchModeStrategy,
+    RelayHandoffDispatchModeStrategy,
+    TaskDispatcher,
+)
 from agentclaw.community.core.task.task_dispatch.strategies import (
     GroupFormation,
     SearchBasedDispatchStrategy,
@@ -39,23 +42,12 @@ def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
-class _ClaimBcn:
-    """Fake BcnService: 返回 task_claim_mode=true & visibility=public 的 product:owner 池,供 rule 派发。"""
-
-    def list_bots_by_task_modes(self, *, claim=None, dream=None, match="any", visibility=None):
-        return [
-            {"bot_id": "rule-a:1"},
-            {"bot_id": "rule-b:2"},
-            {"bot_id": "rule-c:3"},
-            {"bot_id": "rule-d:4"},
-        ]
-
 
 def _task_info(task_id: str = "t1") -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(objective="目标任务", acceptances=[AcceptanceCriteria(id="ac1", description="d")]),
         ),
         source_type="bot",
@@ -107,7 +99,7 @@ def svc() -> TaskGraphService:
 class TestFourStates:
     def test_hit_single(self, svc):
         d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="bot_market"))
-        out = _run(d.dispatch([_node("c1")]))
+        out = _run(d.select_batch([_node("c1")]))
         assert out[0].run_info.run_mode == "single_bot"
         assert out[0].run_info.assignee == "bot_market"
 
@@ -119,21 +111,21 @@ class TestFourStates:
             owner_id="146836",
             owner_name="栖真",
         ))
-        out = _run(d.dispatch([_node("c1")]))
+        out = _run(d.select_batch([_node("c1")]))
         assert out[0].run_info.extend_props["assignee_name"] == "默认Bot"
         assert out[0].run_info.extend_props["assignee_owner_id"] == "146836"
         assert out[0].run_info.extend_props["assignee_owner_name"] == "栖真"
 
     def test_hit_group(self, svc):
         d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_GROUP, group_id="grp_tech"))
-        out = _run(d.dispatch([_node("c1")]))
+        out = _run(d.select_batch([_node("c1")]))
         assert out[0].run_info.run_mode == "coop_group"
         assert out[0].run_info.assignee == "grp_tech"
 
     def test_hit_multi_bots_marks_pending_group(self, svc):
         gf = GroupFormation(bot_ids=["bot_a", "bot_b"], collab_mode="manager_worker")
         d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_MULTI_BOTS, group_formation=gf))
-        out = _run(d.dispatch([_node("c1")]))
+        out = _run(d.select_batch([_node("c1")]))
         assert out[0].run_info.run_mode == "coop_group"
         assert out[0].run_info.assignee is None  # 拉群归编排核,留空
         assert out[0].run_info.extend_props.get("pending_group_formation") is gf
@@ -141,7 +133,7 @@ class TestFourStates:
 
     def test_miss_no_assignee_marks_events(self, svc):
         d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_bot_match"))
-        out = _run(d.dispatch([_node("c1")]))
+        out = _run(d.select_batch([_node("c1")]))
         assert out[0].run_info.run_mode is None
         assert out[0].run_info.assignee is None
         assert out[0].run_info.extend_props.get("miss_events") == ["no_bot_match"]
@@ -151,7 +143,7 @@ class TestBbsDegradation:
     def test_bbs_node_skips_search(self, svc):
         d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.MISS))
         node = _node("c1", run_mode="bbs", assignee="bot_bbs")
-        out = _run(d.dispatch([node]))
+        out = _run(d.select_batch([node]))
         assert out[0].run_info.run_mode == "bbs"
         assert out[0].run_info.assignee == "bot_bbs"
         assert len(strat.search_calls) == 0
@@ -159,7 +151,7 @@ class TestBbsDegradation:
 
 class TestExecRetryReplay:
     """exec_error/SLA-timeout 重试节点(harness_retries>0 + 已有 run_mode/assignee)原样重跑:
-    跳过搜推、不覆写模式/执行者,避免 mode_coverage/候选抖动在重试时翻转模态或换 bot。
+    跳过搜推、不覆写模式/执行者,避免候选抖动在重试时翻转模态或换 bot。
     harness_retries 达 MAX_HARNESS→HUNG→升 BBS 的兜底在编排核侧,不在此测。"""
 
     def test_single_bot_retry_preserves_mode_and_assignee(self, svc):
@@ -167,7 +159,7 @@ class TestExecRetryReplay:
         d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="bot_other"))
         node = _node("c1", run_mode="single_bot", assignee="bot_orig")
         node.run_info.extend_props["harness_retries"] = 1
-        out = _run(d.dispatch([node]))
+        out = _run(d.select_batch([node]))
         assert out[0].run_info.run_mode == "single_bot"
         assert out[0].run_info.assignee == "bot_orig"
         assert len(strat.search_calls) == 0
@@ -179,7 +171,7 @@ class TestExecRetryReplay:
         ))
         node = _node("c1", run_mode="coop_group", assignee="grp_exist")
         node.run_info.extend_props["harness_retries"] = 1
-        out = _run(d.dispatch([node]))
+        out = _run(d.select_batch([node]))
         assert out[0].run_info.run_mode == "coop_group"
         assert out[0].run_info.assignee == "grp_exist"
         assert out[0].run_info.extend_props.get("pending_group_formation") is None  # 不重新拉群
@@ -188,7 +180,7 @@ class TestExecRetryReplay:
     def test_fresh_dispatch_not_replayed(self, svc):
         # harness_retries=0(首次派发)→ 正常搜推覆写
         d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="bot_market"))
-        out = _run(d.dispatch([_node("c1")]))
+        out = _run(d.select_batch([_node("c1")]))
         assert out[0].run_info.run_mode == "single_bot"
         assert out[0].run_info.assignee == "bot_market"
         assert len(strat.search_calls) == 1
@@ -198,7 +190,7 @@ class TestExecRetryReplay:
         d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="bot_market"))
         node = _node("c1", run_mode="single_bot", assignee=None)
         node.run_info.extend_props["harness_retries"] = 1
-        out = _run(d.dispatch([node]))
+        out = _run(d.select_batch([node]))
         assert out[0].run_info.assignee == "bot_market"
         assert len(strat.search_calls) == 1
 
@@ -207,7 +199,7 @@ class TestExecRetryReplay:
         d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.MISS))
         node = _node("c1", run_mode="bbs", assignee="bot_bbs")
         node.run_info.extend_props["harness_retries"] = 1
-        out = _run(d.dispatch([node]))
+        out = _run(d.select_batch([node]))
         assert out[0].run_info.run_mode == "bbs"
         assert out[0].run_info.assignee == "bot_bbs"
         assert len(strat.search_calls) == 0
@@ -218,14 +210,66 @@ class TestNoWriteGraph:
     def test_dispatch_returns_filled_nodes_only(self, svc):
         # dispatcher 持 graph 只读 config;不写图(不调 add/update/patch)。验证仅填充入参返回。
         d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="b1"))
-        out = _run(d.dispatch([_node("c1"), _node("c2")]))
+        out = _run(d.select_batch([_node("c1"), _node("c2")]))
         assert len(out) == 2
 
 
 class TestEmpty:
     def test_empty_list(self, svc):
         d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.MISS))
-        assert _run(d.dispatch([])) == []
+        assert _run(d.select_batch([])) == []
+
+
+class TestAtomicDispatch:
+    class _Runner:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def start_run(self, node):
+            self.calls.append(node.node_id)
+            return True
+
+        async def form_coop_group(self, group):
+            return "group-1"
+
+    def test_centralized_dispatch_selects_and_delivers_once(self, svc):
+        runner = self._Runner()
+        strategy = _StubDispatchStrategy(SearchResult(
+            outcome=SearchOutcome.HIT_SINGLE,
+            bot_id="bot-1",
+        ))
+        dispatcher = TaskDispatcher(
+            svc,
+            pool=[strategy],
+            runner=runner,
+            mode_strategies={"default": CentralizedDispatchModeStrategy()},
+        )
+
+        result = _run(dispatcher.dispatch(_node("c1")))
+
+        assert result.run_info.assignee == "bot-1"
+        assert runner.calls == ["c1"]
+
+    def test_relay_dispatch_preserves_executor_and_delivers_once(self, svc):
+        graph = svc.query_task_dashboard("t1")
+        graph.extend_props["execution_config"] = {"orchestration_mode": "relay"}
+        graph.extend_props["runtime_profile"] = {
+            "dispatcher_strategy": "relay_handoff",
+        }
+        runner = self._Runner()
+        dispatcher = TaskDispatcher(
+            svc,
+            runner=runner,
+            mode_strategies={
+                "relay_handoff": RelayHandoffDispatchModeStrategy(),
+            },
+        )
+        node = _node("c1", run_mode="single_bot", assignee="bot-1")
+
+        result = _run(dispatcher.dispatch(node))
+
+        assert result.run_info.assignee == "bot-1"
+        assert runner.calls == ["c1"]
 
 
 class TestSearchBasedDispatchStrategy:
@@ -258,12 +302,15 @@ class TestSearchBasedDispatchStrategy:
         assert strategy._bot.calls == []
 
 
-def test_search_strategy_default_rule_single_for_one_or_two_joined():
-    """off-path(rule,task_settings=None):2 joined(候选∩池)→ HIT_SINGLE(joined[0]),无随机。"""
+def test_search_strategy_default_rule_single_for_one_or_two_candidates():
+    """off-path(rule):2 unrestricted candidates → HIT_SINGLE(candidate[0])."""
 
     class _Discover:
         def search_by_keyword(self, **kwargs):
-            return {"items": [{"bot_id": "rule-a"}, {"bot_id": "rule-b"}]}
+            return {"items": [
+            {"bot_id": "rule-a", "bot_uuid": "rule-a:1"},
+            {"bot_id": "rule-b", "bot_uuid": "rule-b:2"},
+        ]}
 
     class _Bot:
         def __init__(self):
@@ -282,7 +329,7 @@ def test_search_strategy_default_rule_single_for_one_or_two_joined():
         extend_props={"owner_bot_id": "owner"},
     )
     bot = _Bot()
-    result = _run(SearchBasedDispatchStrategy(bot, _Discover(), bcn=_ClaimBcn()).apply(_node("c1"), graph))
+    result = _run(SearchBasedDispatchStrategy(bot, _Discover()).apply(_node("c1"), graph))
 
     assert result.outcome == SearchOutcome.HIT_SINGLE
     assert result.bot_id == "rule-a:1"
@@ -290,12 +337,16 @@ def test_search_strategy_default_rule_single_for_one_or_two_joined():
     assert bot.calls == []
 
 
-def test_search_strategy_default_rule_group_capped_at_three_for_more_than_two_joined():
-    """off-path(rule,task_settings=None):3 joined → HIT_MULTI_BOTS(前 3,manager_worker),确定性。"""
+def test_search_strategy_default_rule_group_capped_at_three_for_more_than_two_candidates():
+    """off-path(rule):3 unrestricted candidates → HIT_MULTI_BOTS(前 3)."""
 
     class _Discover:
         def search_by_keyword(self, **kwargs):
-            return {"items": [{"bot_id": "rule-a"}, {"bot_id": "rule-b"}, {"bot_id": "rule-c"}]}
+            return {"items": [
+            {"bot_id": "rule-a", "bot_uuid": "rule-a:1"},
+            {"bot_id": "rule-b", "bot_uuid": "rule-b:2"},
+            {"bot_id": "rule-c", "bot_uuid": "rule-c:3"},
+        ]}
 
     class _Bot:
         async def send_and_wait_async(self, **kwargs):
@@ -309,7 +360,7 @@ def test_search_strategy_default_rule_group_capped_at_three_for_more_than_two_jo
         status=Status.PENDING,
         extend_props={"owner_bot_id": "owner"},
     )
-    result = _run(SearchBasedDispatchStrategy(_Bot(), _Discover(), bcn=_ClaimBcn()).apply(_node("c1"), graph))
+    result = _run(SearchBasedDispatchStrategy(_Bot(), _Discover()).apply(_node("c1"), graph))
 
     assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
     assert result.group_formation is not None
@@ -320,12 +371,12 @@ def test_search_strategy_default_rule_group_capped_at_three_for_more_than_two_jo
     ]
 
 
-def test_search_strategy_default_rule_no_intersection_misses_without_fallback():
-    """off-path:候选与 claim 池无交集 → MISS(no_candidates),不回退池。"""
+def test_search_strategy_default_rule_accepts_candidate_outside_bbs_claim_roster():
+    """Rule dispatch does not consult task_claim_mode; an unmatched BBS roster is irrelevant."""
 
     class _Discover:
         def search_by_keyword(self, **kwargs):
-            return {"items": [{"bot_id": "stranger"}]}
+            return {"items": [{"bot_id": "stranger", "bot_uuid": "stranger:owner"}]}
 
     class _Bot:
         async def send_and_wait_async(self, **kwargs):
@@ -339,136 +390,240 @@ def test_search_strategy_default_rule_no_intersection_misses_without_fallback():
         status=Status.PENDING,
         extend_props={"owner_bot_id": "owner"},
     )
-    result = _run(SearchBasedDispatchStrategy(_Bot(), _Discover(), bcn=_ClaimBcn()).apply(_node("c1"), graph))
+    result = _run(SearchBasedDispatchStrategy(_Bot(), _Discover()).apply(_node("c1"), graph))
 
-    assert result.outcome == SearchOutcome.MISS
-    assert result.miss_reason == "no_candidates"
-
-
-class _ModeCoverageSettings:
-    """task_settings stub:仅 mode_coverage 可配(其余 False),供 on-path 覆盖路由测试。"""
-
-    def __init__(self, mode_coverage: bool) -> None:
-        self._mc = mode_coverage
-
-    def is_enabled(self, setting_type: str) -> bool:
-        return self._mc if setting_type == "mode_coverage" else False
+    assert result.outcome == SearchOutcome.HIT_SINGLE
+    assert result.bot_id == "stranger:owner"
 
 
-def test_search_strategy_rule_mode_coverage_forces_single_group_bbs_then_normal(monkeypatch):
-    """on-path(mode_coverage ON):同 run 连续派发 → single→group→bbs 依次覆盖,全覆盖后兜底+随机(single/group 平均分配)。
-    engine 负责写 graph 标记;此处手动推进 extend_props["mode_coverage"] 模拟 engine 写回。"""
+def test_search_strategy_rule_rationale_samples_keywords_and_selection():
+    """搜推三问采样(rule,2 候选):关键词命中事实 + hit_single_takes_first 丢第 2 位。"""
 
     class _Discover:
         def search_by_keyword(self, **kwargs):
-            return {"items": [{"bot_id": "rule-a"}, {"bot_id": "rule-b"}, {"bot_id": "rule-c"}]}
+            return {"items": [
+                {"bot_id": "rule-a", "bot_uuid": "rule-a:1", "bot_name": "A", "owner_name": "O1",
+                 "recommend": {"score": 0.9, "reasons": ["近线存储"], "short_profile": "pA"}},
+                {"bot_id": "rule-b", "bot_uuid": "rule-b:2", "bot_name": "B", "owner_name": "O2",
+                 "recommend": {"score": 0.5, "short_profile": "pB"}},
+            ]}
 
     class _Bot:
         async def send_and_wait_async(self, **kwargs):
-            raise AssertionError("rule path must not call search skill")
-
-    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
-
-    graph = TaskExecutionGraph(
-        run_id=1,
-        loop_round=0,
-        status=Status.PENDING,
-        extend_props={"owner_bot_id": "owner", "mode_coverage": []},
-    )
-    strat = SearchBasedDispatchStrategy(
-        _Bot(), _Discover(), bcn=_ClaimBcn(),
-        task_settings=_ModeCoverageSettings(True),
-    )
-    node = _node("c1")
-
-    r1 = _run(strat.apply(node, graph))
-    assert r1.outcome == SearchOutcome.HIT_SINGLE
-    assert r1.bot_id == "rule-a:1"
-    graph.extend_props["mode_coverage"] = ["single"]  # 模拟 engine 写回
-
-    r2 = _run(strat.apply(node, graph))
-    assert r2.outcome == SearchOutcome.HIT_MULTI_BOTS
-    assert r2.group_formation.bot_ids == ["rule-a:1", "rule-b:2", "rule-c:3"]
-    graph.extend_props["mode_coverage"] = ["group", "single"]
-
-    r3 = _run(strat.apply(node, graph))
-    assert r3.outcome == SearchOutcome.MISS
-    assert r3.miss_reason == "mode_coverage_bbs"
-    graph.extend_props["mode_coverage"] = ["bbs", "group", "single"]  # 全覆盖
-
-    # 全覆盖后:兜底+随机(single/group 平均分配),不回落 off-path
-    monkeypatch.setattr(
-        "agentclaw.community.core.task.task_dispatch.strategies.random.random",
-        lambda: 0.6,
-    )
-    r4 = _run(strat.apply(node, graph))
-    assert r4.outcome == SearchOutcome.HIT_MULTI_BOTS
-    assert r4.group_formation.bot_ids == ["rule-a:1", "rule-b:2", "rule-c:3"]
-    monkeypatch.setattr(
-        "agentclaw.community.core.task.task_dispatch.strategies.random.random",
-        lambda: 0.3,
-    )
-    r5 = _run(strat.apply(node, graph))
-    assert r5.outcome == SearchOutcome.HIT_SINGLE
-    assert r5.bot_id == "rule-a:1"
-
-
-def test_search_strategy_rule_mode_coverage_pool_fallback_when_join_empty():
-    """on-path:关键词候选与 claim 池无交集(join 空)→ 覆盖路由用 claim 池兜底命中 single。"""
-
-    class _Discover:
-        def search_by_keyword(self, **kwargs):
-            return {"items": [{"bot_id": "stranger"}]}  # 不在 claim 池 → join 空
-
-    class _Bot:
-        async def send_and_wait_async(self, **kwargs):
-            raise AssertionError("rule path must not call search skill")
+            raise AssertionError("rule dispatch must not call search skill")
 
     from agentclaw.community.core.task.domain.models import TaskExecutionGraph
 
     graph = TaskExecutionGraph(
         run_id=1, loop_round=0, status=Status.PENDING,
-        extend_props={"owner_bot_id": "owner", "mode_coverage": []},
+        extend_props={"owner_bot_id": "owner"},
     )
-    strat = SearchBasedDispatchStrategy(
-        _Bot(), _Discover(), bcn=_ClaimBcn(),
-        task_settings=_ModeCoverageSettings(True),
-    )
-    result = _run(strat.apply(_node("c1"), graph))
+    result = _run(SearchBasedDispatchStrategy(_Bot(), _Discover()).apply(_node("c1"), graph))
 
-    # join 空 → claim 池兜底 single(_ClaimBcn 首条 rule-a:1)
     assert result.outcome == SearchOutcome.HIT_SINGLE
-    assert result.bot_id == "rule-a:1"
+    rat = result.rationale
+    assert rat is not None
+    assert rat.decision_mode == "rule"
+    assert rat.miss_reason is None
+    assert rat.skill_response_excerpt is None  # rule 模式无 skill 回包
+    # 候选投影扩展:bot_name/owner_name/reasons(有则全量,无则 None)
+    c0, c1 = rat.candidates
+    assert (c0.bot_id, c0.recommend_score) == ("rule-a", 0.9)
+    assert (c0.bot_name, c0.owner_name, c0.reasons) == ("A", "O1", ["近线存储"])
+    assert (c1.bot_name, c1.owner_name, c1.reasons) == ("B", "O2", None)
+    # 关键词命中事实(问题一/二):每词命中的 identity + 原始命中量,无失败词
+    sampling = rat.search_sampling
+    assert sampling is not None
+    assert sampling.keywords and all(k.failed is False for k in sampling.keywords)
+    for k in sampling.keywords:
+        assert k.bot_ids == ["rule-a:1", "rule-b:2"]
+    assert sampling.raw_item_count == 2 * len(sampling.keywords)
+    assert sampling.failed_keywords == []
+    # 最终选择(rule,问题三):取第一个、丢第二个
+    assert sampling.selected_bot_ids == ["rule-a:1"]
+    assert sampling.dropped_bot_ids == ["rule-b:2"]
+    assert sampling.rule_selection_note == "hit_single_takes_first"
 
 
-def test_search_strategy_rule_mode_coverage_off_falls_back_to_offpath():
-    """mode_coverage OFF(task_settings False)→ 走 off-path 正常 join+candidate-count。"""
+def test_search_strategy_rule_group_rationale_drops_beyond_cap():
+    """搜推三问采样(rule,4 候选):hit_multi_capped_at_3 → selected 前 3 + dropped 第 4。"""
 
     class _Discover:
         def search_by_keyword(self, **kwargs):
-            return {"items": [{"bot_id": "rule-a"}, {"bot_id": "rule-b"}]}
+            return {"items": [
+                {"bot_id": f"rule-{i}", "bot_uuid": f"rule-{i}:{i}",
+                 "recommend": {"score": 1.0 - 0.1 * i}}
+                for i in range(1, 5)
+            ]}
 
     class _Bot:
         async def send_and_wait_async(self, **kwargs):
-            raise AssertionError("rule path must not call search skill")
+            raise AssertionError("rule dispatch must not call search skill")
 
     from agentclaw.community.core.task.domain.models import TaskExecutionGraph
 
     graph = TaskExecutionGraph(
-        run_id=1,
-        loop_round=0,
-        status=Status.PENDING,
-        extend_props={"owner_bot_id": "owner", "mode_coverage": []},
+        run_id=1, loop_round=0, status=Status.PENDING,
+        extend_props={"owner_bot_id": "owner"},
     )
-    strat = SearchBasedDispatchStrategy(
-        _Bot(), _Discover(), bcn=_ClaimBcn(),
-        task_settings=_ModeCoverageSettings(False),
-    )
-    result = _run(strat.apply(_node("c1"), graph))
+    result = _run(SearchBasedDispatchStrategy(_Bot(), _Discover()).apply(_node("c1"), graph))
 
-    # 2 joined → single(off-path),不由覆盖路由强制
+    assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
+    sampling = result.rationale.search_sampling
+    assert sampling is not None
+    assert sampling.selected_bot_ids == ["rule-1:1", "rule-2:2", "rule-3:3"]
+    assert sampling.dropped_bot_ids == ["rule-4:4"]
+    assert sampling.rule_selection_note == "hit_multi_capped_at_3"
+
+
+def test_search_strategy_skill_rationale_records_response_excerpt():
+    """搜推三问采样(skill):最终选择 = owner bot 决策回包原文摘录;不做机械推导。"""
+
+    class _Discover:
+        def search_by_keyword(self, **kwargs):
+            return {"items": [
+                {"bot_id": "rule-a", "bot_uuid": "rule-a:1",
+                 "recommend": {"score": 0.9, "short_profile": "pA"}},
+            ]}
+
+    class _Bot:
+        async def send_and_wait_async(self, **kwargs):
+            return {
+                "status": "COMPLETED",
+                "result": {"content": '{"outcome":"HIT_SINGLE","bot_id":"rule-a:1"}'},
+            }
+
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    graph = TaskExecutionGraph(
+        run_id=1, loop_round=0, status=Status.PENDING,
+        extend_props={"owner_bot_id": "owner"},
+    )
+    strategy = SearchBasedDispatchStrategy(_Bot(), _Discover(), use_search_skill=True)
+    result = _run(strategy.apply(_node("c1"), graph))
+
     assert result.outcome == SearchOutcome.HIT_SINGLE
-    assert result.bot_id == "rule-a:1"
+    rat = result.rationale
+    assert rat is not None
+    assert rat.decision_mode == "skill"
+    assert rat.skill_prompt_digest is not None
+    assert (
+        rat.skill_response_excerpt
+        == '{"outcome":"HIT_SINGLE","bot_id":"rule-a:1"}'
+    )
+    # skill 模式:关键词命中事实照采,但 rule 截断证据不做机械推导
+    assert rat.search_sampling is not None
+    assert rat.search_sampling.keywords
+    assert rat.search_sampling.selected_bot_ids == []
+    assert rat.search_sampling.dropped_bot_ids == []
+    assert rat.search_sampling.rule_selection_note is None
+
+
+def test_search_strategy_skill_response_excerpt_truncated_at_2000():
+    """超长 skill 回包摘录截断到 2000 字符(payload 写源头收紧);digest 照常计算。"""
+    import hashlib
+
+    long_content = "A" * 3000
+
+    class _Discover:
+        def search_by_keyword(self, **kwargs):
+            return {"items": [
+                {"bot_id": "rule-a", "bot_uuid": "rule-a:1",
+                 "recommend": {"score": 0.9}},
+            ]}
+
+    class _Bot:
+        async def send_and_wait_async(self, **kwargs):
+            return {"status": "COMPLETED", "result": {"content": long_content}}
+
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    graph = TaskExecutionGraph(
+        run_id=1, loop_round=0, status=Status.PENDING,
+        extend_props={"owner_bot_id": "owner"},
+    )
+    strategy = SearchBasedDispatchStrategy(_Bot(), _Discover(), use_search_skill=True)
+    result = _run(strategy.apply(_node("c1"), graph))
+
+    # 非 JSON 回包 → MISS(parse_error),但采样侧仍留摘录(最终选择证据)
+    assert result.outcome == SearchOutcome.MISS
+    rat = result.rationale
+    assert rat is not None
+    assert rat.miss_reason == "parse_error"
+    assert rat.skill_response_excerpt == "A" * 2000
+    assert rat.skill_response_digest == hashlib.sha256(b"A" * 500).hexdigest()
+
+
+def test_search_strategy_no_candidates_early_exit_still_samples_keywords():
+    """no_candidates 早退照传关键词采样:关键词全失败/全空时诊断素材仍有价值。"""
+
+    class _FailingDiscover:
+        def search_by_keyword(self, **kwargs):
+            raise RuntimeError("catalog down")
+
+    class _Bot:
+        async def send_and_wait_async(self, **kwargs):
+            raise AssertionError("no candidates → owner bot must not be called")
+
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    graph = TaskExecutionGraph(
+        run_id=1, loop_round=0, status=Status.PENDING,
+        extend_props={"owner_bot_id": "owner"},
+    )
+    node = _node("c1")
+    node.task_spec.goal.objective = "存储系统网络架构计算"
+    result = _run(
+        SearchBasedDispatchStrategy(_Bot(), _FailingDiscover()).apply(node, graph)
+    )
+
+    assert result.outcome == SearchOutcome.MISS
+    assert result.miss_reason == "no_candidates"
+    rat = result.rationale
+    assert rat is not None
+    assert rat.miss_reason == "no_candidates"
+    sampling = rat.search_sampling
+    assert sampling is not None
+    assert sampling.keywords and all(k.failed for k in sampling.keywords)
+    assert set(sampling.failed_keywords) == set(sampling.keywords[i].keyword for i in range(len(sampling.keywords)))
+    assert sampling.raw_item_count == 0
+
+
+def test_candidate_search_keyword_hits_per_keyword_facts():
+    """search_candidates 逐关键词命中事实:失败标记/同序/跨词去重/aggregation。"""
+
+    class _FlakyDiscover:
+        def search_by_keyword(self, **kwargs):
+            keyword = kwargs.get("keyword")
+            if keyword == "网络":
+                raise RuntimeError("catalog down")
+            return {"items": [{"bot_id": f"b-{keyword}", "bot_uuid": f"b-{keyword}:o"}]}
+
+    from agentclaw.community.core.task.task_runner.client import (
+        candidate_search as cs,
+    )
+
+    _Flaky = _FlakyDiscover()
+    # monkeypatch 固定关键词(tokenize 依赖 jieba 可用性,固定后测试环境无关)
+    tokens = ["存储", "网络", "架构"]
+    original = cs.search_tokens
+    cs.search_tokens = lambda *a, **k: list(tokens)
+    try:
+        result = _run(cs.search_candidates(_Flaky, "任意 query", user_id="u"))
+    finally:
+        cs.search_tokens = original
+    # keyword_hits 与 tokens 同序(gather 保序)
+    assert [k.keyword for k in result.keyword_hits] == tokens
+    hit0, hit1, hit2 = result.keyword_hits
+    assert (hit0.item_count, hit0.bot_ids, hit0.failed) == (1, ("b-存储:o",), False)
+    assert (hit1.item_count, hit1.bot_ids, hit1.failed) == (0, (), True)
+    assert (hit2.item_count, hit2.bot_ids, hit2.failed) == (1, ("b-架构:o",), False)
+    assert result.failed_keywords == ["网络"]
+    assert result.raw_item_count == 2
+    assert [c.get("bot_uuid") for c in result.candidates] == ["b-存储:o", "b-架构:o"]
+    # discover=None / 无 token → keyword_hits 空
+    empty = _run(cs.search_candidates(None, "x", user_id="u"))
+    assert empty.keyword_hits == () and empty.candidates == []
 
 
 def test_search_strategy_composes_owner_identity_for_openapi_call():
@@ -567,8 +722,70 @@ def test_prefetch_caps_tokens_to_max():
     node = _node("c1")
     node.task_spec.goal.objective = "存储系统网络架构计算资源安全策略数据备份监控运维容量"
     discover = _CountingDiscover()
-    cands = _run(_prefetch_candidates(discover, node, graph))
+    result = _run(_prefetch_candidates(discover, node, graph))
     # token 上限:search_by_keyword 调用次数恰为 _PREFETCH_MAX_TOKENS(9→5)
     assert len(discover.keywords) == _PREFETCH_MAX_TOKENS
     # 每 token 返回独立 bot_id → 候选数 == 调用数
-    assert len(cands) == _PREFETCH_MAX_TOKENS
+    assert len(result.candidates) == _PREFETCH_MAX_TOKENS
+    # 召回事实随 result 整体保留(搜推三问采样素材):
+    # keyword_hits 与 tokens 同序、每词命中 1 条、无失败词、原始命中量 == 调用数
+    tokens = result.tokens
+    assert [k.keyword for k in result.keyword_hits] == tokens
+    assert all(len(k.bot_ids) == 1 for k in result.keyword_hits)
+    assert result.failed_keywords == []
+    assert result.raw_item_count == _PREFETCH_MAX_TOKENS
+
+
+class TestDispatchExceptionCarrier:
+    """搜推异常 / rationale 装配失败 的诊断 carrier(per REQ-P1 dispatch-failure 可见性):
+
+    dispatcher 顶层 ``except`` 吞搜推异常时写 ``dispatch_error``(短状态串,供 harness 路由)
+    + ``_dispatch_failure``(含异常消息,供引擎 dispatch_fail 闸门发射带
+    ``error_type=DISPATCH_STUCK`` 的 ``dispatch`` 轨迹事件);rationale 装配抛错时在
+    ``sr.assembly_error`` 回填原因(经 ``_dispatch_failure`` 透传到 hit/miss 事件 ``ext_info``
+    备注)。``_one`` 入口清上一轮残留 ``_dispatch_failure`` 防重投污染本轮 hit 事件。"""
+
+    def test_search_exception_writes_dispatch_failure_carrier(self, svc):
+        class _RaisingStrategy(_StubDispatchStrategy):
+            def __init__(self) -> None:
+                super().__init__(SearchResult(outcome=SearchOutcome.MISS))
+
+            async def apply(self, node, graph):  # mirrors a search/recommend blow-up
+                raise RuntimeError("search/recommend blew up")
+
+        d = TaskDispatcher(svc)
+        d.set_strategies([_RaisingStrategy()])
+        node = _run(d.select_batch([_node("c1")]))[0]
+
+        # node 留 PENDING(无执行者)+ dispatch_error 短状态串(harness 路由用,类型级)
+        assert node.run_info.extend_props.get("dispatch_error") == "dispatch_exception:RuntimeError"
+        # 失败 carrier 含异常消息 —— 引擎 dispatch_fail 闸门据此发射轨迹事件(Step 1)
+        fail = node.run_info.extend_props.get("_dispatch_failure")
+        assert isinstance(fail, dict)
+        assert fail["error_type"] == "dispatch_exception"
+        assert "RuntimeError" in fail["error_msg"]
+        assert "blew up" in fail["error_msg"]
+
+    def test_stale_dispatch_failure_cleared_on_clean_redispatch(self, svc):
+        """重投命中时,上一轮残留的 ``_dispatch_failure`` 必须被清掉,避免旧降级备注粘到
+        本轮 hit_single 轨迹事件(引擎 hit 闸门据此决定是否附 ``ext_info`` 备注)。"""
+        node = _node("c1")
+        node.run_info.extend_props["_dispatch_failure"] = {"error_type": "stale", "error_msg": "old"}
+        d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="bot1"))
+        out = _run(d.select_batch([node]))
+        assert out[0].run_info.extend_props.get("_dispatch_failure") is None
+
+    def test_rationale_assembly_failure_sets_assembly_error(self):
+        """rationale 装配抛错(malformed score 不可 ``float()``)→ ``_build_search_rationale``
+        返回 None 且在 ``sr`` 上回填 ``assembly_error``(Step 2 的 carrier 源头);派发决策不受影响。"""
+        from agentclaw.community.core.task.task_dispatch.rationale import _build_search_rationale
+
+        sr = SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="b1")
+        candidates = [{"bot_id": "b1", "recommend": {"score": ["not", "a", "number"]}}]
+        result = _build_search_rationale(
+            node=_node("c1"), candidates=candidates, sr=sr, use_skill=False,
+            prompt_text=None, response_text=None, filter_ran=False, prefetch_tokens=[],
+        )
+        assert result is None
+        assert sr.assembly_error is not None
+        assert sr.assembly_error.startswith("rationale_assembly_failed")

@@ -2,58 +2,42 @@
 // 展开区按 section/origin 分流:
 // - managed+mine / friend:交互式 Session 列表(选中 / 新建 / 加载更多走 Hook 回调);
 // - managed+others:好友用户分组只读视图(分组渲染在 ConversationFriendGroup)。
-// 同一时刻仅一个 Bot 展开(跨管理/好友分组，由 Store 统一互斥)。
-import { Badge, Button, IconButton, Skeleton } from '@/components/ui';
+// 同一时刻仅一个 Bot 展开(跨我的/团队/好友分组,由 Store 单键替换统一互斥)。
+import { Badge, Button, IconButton } from '@/components/ui';
 import { getBotEngineLabel, supportsBotSessionFavorites } from '@/domain/botEngine';
-import { getBotTypeLabel } from '@/domain/botType';
 import type {
   ConversationBotSection,
-  ConversationFriendDirectoryState,
-  ConversationFriendGroupView,
   ConversationOrigin,
   ConversationSessionListState,
   ConversationSessionScope,
 } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
+import { useConversationInstanceRow } from '../hooks/useConversationInstanceScope';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { cn } from '@/utils/cn';
-import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Search } from 'lucide-react';
 import React from 'react';
 import { AvatarTile } from '../../components/AvatarTile';
-import { ListErrorState } from '../../components/ListErrorState';
 import type { ConversationSessionListActions } from '../hooks/useConversationSessionActions';
-import { ConversationFriendGroup } from './ConversationFriendGroup';
+import { ConversationBotUnavailableTooltip, resolveBotUnavailable } from './ConversationBotUnavailableTooltip';
+import { OthersArea, type ConversationBotItemOthers } from './ConversationBotOthersArea';
 import { ConversationOriginFilter } from './ConversationOriginFilter';
+import { ConversationSessionIdSearchInput } from './ConversationSessionIdSearchInput';
 import { ConversationSessionList } from './ConversationSessionList';
 
-export interface ConversationBotItemOthers {
-  directory: ConversationFriendDirectoryState;
-  /** Store 中是否已有 others 缓存(false 表示尚未加载过,不能判空)。 */
-  hasCache: boolean;
-  /** 按好友目录顺序排序的分组视图。 */
-  friendGroups: ConversationFriendGroupView[];
-  /** 跨好友分组的当前选中只读 Session。 */
-  selectedSessionId: string | null;
-  /** 展开的好友用户(key 为纯用户 ID),来自 Store expandedFriendUserIdsByBotId。 */
-  expandedFriendUserIds: Record<string, true>;
-  onToggleFriend(friendUserId: string): void;
-  onSelectSession(sessionId: string, friendUserId: string): void;
-  onRetryDirectory(): void;
-  onRetryFriendSessions(friendUserId: string): void;
-  onLoadMoreFriendSessions(friendUserId: string): void;
-}
+export type { ConversationBotItemOthers } from './ConversationBotOthersArea';
 
 export interface ConversationBotItemProps {
-  sessionActions?: ConversationSessionListActions;
   bot: ChatBotView;
   section: ConversationBotSection;
   expanded: boolean;
-  selected: boolean;
   /** 当前 Bot 下选中的 Session(跨 origin 高亮)。 */
   selectedSessionId: string | null;
   origin: ConversationOrigin;
-  /** 生效读取范围(managed mine 用;friend 恒 all)。 */
+  /** 生效读取范围(managed mine 用;friend 读 scopeByFriendBotId)。 */
   scope: ConversationSessionScope;
+  /** 该 Bot 已生效的 sessionKey 条件(空串 = 未生效);仅 all 范围下允许提交新条件。 */
+  sessionKey: string;
   /** mine / friend 交互会话列表;undefined 视为未加载(不判空)。 */
   sessions?: ConversationSessionListState;
   /** 仅 managed 传入:others 好友分组区数据。 */
@@ -61,72 +45,33 @@ export interface ConversationBotItemProps {
   onToggle(): void;
   onOriginChange(origin: ConversationOrigin): void;
   onScopeChange(scope: ConversationSessionScope): void;
+  /** 提交 sessionKey 搜索(组件内已 trim;空串清除条件);装配层写 Store 并展开该 Bot。 */
+  onSearchSession(sessionKey: string): void;
   onCreateSession(): void;
   onSelectSession(sessionId: string): void;
   onLoadMore(): void;
   onToggleFavorite(sessionId: string): void;
   isFavoritePending(sessionId: string): boolean;
-  /** AgentCoding Bot 直接进入 coding-chat;不展开普通会话树。 */
+  /** AgentCoding Bot 专用入口:与 Bot 工坊「去使用」一致,跳 /coding/coding-chat。 */
   onOpenAgentCodingBot(bot: ChatBotView): void;
-}
-
-// AC-9:全部好友分组均成功且零会话(整组隐藏)→ 整区空态;
-// unloaded/loading/error 的分组隐藏 ≠ 空,不算空。
-function allFriendGroupsEmpty(groups: ConversationFriendGroupView[]): boolean {
-  return (
-    groups.length > 0 &&
-    groups.every((group) => group.state === 'loaded' && group.sessions.items.length === 0 && !group.sessions.error)
-  );
-}
-
-/** origin=others 展开区:好友目录 / 好友分组的 loading / error / empty 状态。 */
-function OthersArea({ others }: { others?: ConversationBotItemOthers }) {
-  if (!others || !others.hasCache || others.directory.loading) {
-    return (
-      <div className="py-1">
-        {[1, 2].map((i) => (
-          <Skeleton.Block key={i} className="mx-4 h-12 rounded-lg" />
-        ))}
-      </div>
-    );
-  }
-  if (others.directory.error) {
-    return <ListErrorState message={others.directory.error} onRetry={others.onRetryDirectory} />;
-  }
-  if (others.friendGroups.length === 0 || allFriendGroupsEmpty(others.friendGroups)) {
-    return <div className="px-4 py-3 text-xs text-muted-foreground">暂无他人发起的会话</div>;
-  }
-  return (
-    <>
-      {others.friendGroups.map((group) => (
-        <ConversationFriendGroup
-          key={group.friend.userId}
-          group={group}
-          expanded={others.expandedFriendUserIds[group.friend.userId] === true}
-          selectedSessionId={others.selectedSessionId}
-          onToggle={() => others.onToggleFriend(group.friend.userId)}
-          onSelectSession={(sessionId) => others.onSelectSession(sessionId, group.friend.userId)}
-          onRetry={() => others.onRetryFriendSessions(group.friend.userId)}
-          onLoadMore={() => void others.onLoadMoreFriendSessions(group.friend.userId)}
-        />
-      ))}
-    </>
-  );
+  /** 恢复的单聊会话操作(编辑标题/清除上下文/删除会话);只读/好友分组区不消费。 */
+  sessionActions?: ConversationSessionListActions;
 }
 
 export const ConversationBotItem = React.memo(function ConversationBotItem({
   bot,
   section,
   expanded,
-  selected,
   selectedSessionId,
   origin,
   scope,
+  sessionKey,
   sessions,
   others,
   onToggle,
   onOriginChange,
   onScopeChange,
+  onSearchSession,
   onCreateSession,
   onSelectSession,
   onLoadMore,
@@ -137,111 +82,203 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
 }: ConversationBotItemProps) {
   const isManaged = isManagedConversationSection(section);
   const isOthers = isManaged && origin === 'others';
-  // AgentCoding Bot 是可点击入口，但普通会话树操作仍只属于普通 Bot。
-  const hasNormalSessions = !bot.isAgentCodingBot && bot.chatable;
-  const engineLabel = getBotEngineLabel(bot.engine);
-  const runtimeLabel = bot.isAgentCodingBot ? bot.templateName || 'AgentCoding' : engineLabel;
-  const typeLabel = getBotTypeLabel(bot.botType);
+  const isAgentCodingBot = Boolean(bot.isAgentCodingBot);
+  const hasSessionControls = !isAgentCodingBot && bot.chatable;
+  const interactive = isAgentCodingBot || bot.chatable;
+  // Bot 可用状态(bots 接口 status):FAILED/PENDING 整行禁用并悬停提示原因(判定与文案见包装器)。
+  const { reason: statusUnavailableReason, unavailable } = resolveBotUnavailable(bot.status);
+  // AgentCoding 行徽标展示模板名(区分多个 AgentCoding Bot);普通 Bot 展示引擎名,dmore「至多一枚」不变。
+  const runtimeLabel = bot.isAgentCodingBot ? bot.templateName || 'AgentCoding' : getBotEngineLabel(bot.engine);
   const canFavorite = supportsBotSessionFavorites(bot.engine);
-  const filterActive = hasNormalSessions && isManaged && (origin === 'others' || (canFavorite && scope === 'favorite'));
+  // 筛选/搜索的激活与可见:归属 others 或 favorite 范围点亮筛选;归属+范围筛选对管理 Bot 开放,
+  // 好友 Bot 仅在有收藏能力时暴露「会话」范围(TEClaw 无收藏接口,不发收藏请求)。
+  const filterActive = (isManaged && origin === 'others') || (canFavorite && scope === 'favorite');
+  const searchActive = sessionKey !== '';
+  // 不可用 Bot 操作区不渲染,展开/筛选/检索激活态的让位与钉住一并抑制。
+  const actionsPinned = !unavailable && (expanded || filterActive || searchActive);
+  // 搜索入口仅在有效范围 all 下展示:favorite 清空并隐藏(切回 all 不恢复),others 强制 all 保留。
+  const searchVisible = scope === 'all';
+  const showFilter = isManaged || canFavorite;
+  // 🔍 开关式输入框:显隐为组件本地态;过滤词已生效时强制可见,激活的入口不因开关丢失。
+  const [searchInputOpen, setSearchInputOpen] = React.useState(false);
+  const searchInputVisible = expanded && searchVisible && (searchInputOpen || searchActive);
+  // 多实例服务 Bot 实例范围聚合视图(能力缺省 null → 零渲染零激活):实例行判定/检索输入禁用/圆点口径。
+  const { scope: instanceScope, row: instanceRow, inputDisabled: instanceInputDisabled, marked: searchMarked } =
+    useConversationInstanceRow(bot, searchActive);
+  const handleSearchToggle = () => {
+    if (!expanded) onToggle();
+    setSearchInputOpen((current) => !current);
+  };
   const handleToggle = () => {
-    if (!bot.chatable) return;
-    // AgentCoding Bot 使用专用 Coding 对话入口，不创建/展开普通 session。
+    if (unavailable) return;
+    // AgentCoding Bot 是可点击入口,但不建普通 session:直接进专用 coding 对话页(与工坊「去使用」一致)。
     if (bot.isAgentCodingBot) {
       onOpenAgentCodingBot(bot);
       return;
     }
+    if (!bot.chatable) return;
     onToggle();
   };
 
-  return (
-    <div>
-      <div
-        className={cn(
-          'group relative flex min-h-14 items-center gap-2 px-4 py-2.5 transition-colors',
-          selected || expanded ? 'bg-muted' : 'hover:bg-accent/50',
-        )}
-      >
-        {(selected || expanded) && (
-          <span aria-hidden="true" className="absolute bottom-2 left-0 top-2 w-[3px] rounded-r-sm bg-primary" />
-        )}
+/* 一级行与协作群统一为 52px：固定头像槽位，头像和操作相对两行文字整体居中。 */
+  const row = (
+    <div
+      aria-disabled={unavailable || undefined}
+      className={cn(
+        'group relative mx-2 flex min-h-13 items-center gap-2 rounded-md px-2 transition-colors',
+        'hover:bg-muted/60',
+        unavailable && 'opacity-60',
+      )}
+    >
         <Button
           variant="ghost"
           aria-label={bot.displayName}
-          aria-expanded={hasNormalSessions ? expanded : false}
-          aria-current={selected ? 'page' : undefined}
+          aria-expanded={interactive && !unavailable ? expanded : false}
           onClick={handleToggle}
           className={cn(
-            'flex h-auto min-w-0 flex-1 items-center justify-start gap-3 rounded-none px-0 py-1 text-left hover:bg-transparent',
-            !bot.chatable && 'cursor-not-allowed opacity-50',
+'flex h-auto min-h-13 min-w-0 flex-1 items-center justify-start gap-2 rounded-none px-0 py-1 text-left hover:bg-transparent',
+            (!interactive || unavailable) && 'cursor-not-allowed',
+            !interactive && 'opacity-50',
           )}
         >
-          <AvatarTile
-            src={bot.avatarUrl}
-            label={bot.displayName}
-            className={selected || expanded ? 'bg-primary/15 text-primary ring-1 ring-primary/30' : undefined}
-            fallbackContent={<span className="text-[10px] font-semibold tracking-[0.08em]">BOT</span>}
-          />
-          <div className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium text-foreground">{bot.displayName}</span>
-            <div className="mt-1 flex min-w-0 items-center gap-1 truncate text-xs leading-4 text-muted-foreground group-hover:pr-24">
-              {runtimeLabel && (
-                <Badge tone="primary" className="shrink-0 rounded px-1.5 py-0 text-[10px] leading-4">
-                  {runtimeLabel}
-                </Badge>
-              )}
-              {typeLabel && (
-                <Badge tone="primary" className="shrink-0 rounded px-1.5 py-0 text-[10px] leading-4">
-                  {typeLabel}
-                </Badge>
-              )}
-            </div>
-          </div>
-        </Button>
-        {hasNormalSessions && (
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center">
+            <AvatarTile
+              src={bot.avatarUrl}
+              label={bot.displayName}
+              className="h-6 w-6 rounded-full"
+              fallbackContent={
+                <span className="text-[10px] font-semibold leading-none tracking-[0.06em]">
+                  {bot.displayName.slice(0, 1)}
+                </span>
+              }
+            />
+          </span>
           <div
             className={cn(
-              'absolute inset-y-0 right-[30px] z-10 flex items-center gap-0.5 pl-5',
-              'mask-[linear-gradient(to_right,transparent,black_20px)]',
-              selected || expanded ? 'sidebar-actions-cover-selected' : 'sidebar-actions-cover-hover',
-              'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100',
-              (selected || expanded || filterActive) && 'opacity-100',
+              'flex min-w-0 flex-1 flex-col items-start gap-0.5',
+              // 文字让位与操作区实际覆盖等宽:悬停/键盘聚焦弹出操作区,或任一筛选(归属/范围/检索)钉住可见。
+              // 新建/检索/筛选全在时让位 96px(pr-24)且悬停/聚焦不可回缩(2026-10-14 对齐设计稿顺序:新建、检索、筛选);
+              // 非钉住时仅悬停/键盘聚焦临时让位。
+              hasSessionControls && (actionsPinned ? 'pr-24' : 'group-hover:pr-24 group-focus-within:pr-24'),
             )}
           >
-            {isManaged && (
-              <ConversationOriginFilter
-                botId={bot.botId}
-                origin={origin}
-                scope={scope}
-                supportsFavorites={canFavorite}
-                othersDisabled={section === 'team'}
-                onOriginChange={onOriginChange}
-                onScopeChange={onScopeChange}
-              />
+            <span className="w-full min-w-0 truncate text-sm font-semibold leading-5 text-content-strong">
+              {bot.displayName}
+            </span>
+            {runtimeLabel && (
+              <Badge
+                tone="neutral"
+                className="block max-w-full shrink-0 truncate rounded px-1.5 py-0.5 text-[10px] font-normal leading-3"
+              >
+                {runtimeLabel}
+              </Badge>
             )}
+          </div>
+        </Button>
+        {hasSessionControls && !unavailable && (
+          <div
+            className={cn(
+              'absolute top-1/2 right-[34px] z-10 flex -translate-y-1/2 items-center gap-0.5 pl-5',
+              'mask-[linear-gradient(to_right,transparent,black_20px)]',
+              // 遮盖底撤除:按钮 hover 自带 muted 底,操作区不再叠一层与行底不一致的底色;
+              // right-[34px] 使行尾箭头与操作区最右按钮(设计稿顺序 新建/检索/筛选,最右为筛选)之间
+              // 保持与按钮间(gap-0.5)一致的 2px 等宽间隙。
+              'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100',
+              // 展开或任一筛选(归属/范围/会话ID检索)激活时钉住可见;
+              // 生效中的检索在 Bot 收起时仍可见(🔍 按钮激活态圆点)。
+              actionsPinned && 'opacity-100',
+            )}
+          >
             {!isOthers && (
               <IconButton
                 label="新建会话"
                 size="sm"
                 icon={<Plus className="h-3.5 w-3.5" />}
-                className="h-6 w-6 rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                 onClick={(event) => {
                   event.stopPropagation();
                   onCreateSession();
                 }}
               />
             )}
+            {searchVisible && (
+              <IconButton
+                label="会话ID检索"
+                size="sm"
+                icon={
+                  <span className="relative flex items-center justify-center">
+                    <Search className="h-3.5 w-3.5" aria-hidden="true" />
+                    {searchMarked && (
+                      <span
+                        className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-primary"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </span>
+                }
+                className={cn(
+                  'h-6 w-6 rounded-md hover:bg-muted',
+                  searchMarked ? 'text-primary hover:text-primary' : 'text-muted-foreground hover:text-foreground',
+                )}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleSearchToggle();
+                }}
+              />
+            )}
+            {showFilter && (
+              <ConversationOriginFilter
+                botId={bot.botId}
+                origin={origin}
+                scope={scope}
+                supportsOrigin={isManaged}
+                supportsFavorites={canFavorite}
+                othersDisabled={section === 'team'}
+                onOriginChange={onOriginChange}
+                onScopeChange={onScopeChange}
+              />
+            )}
           </div>
         )}
-        {hasNormalSessions &&
-          (expanded ? (
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-          ))}
+        {/* 展开箭头:鼠标可点的折叠入口(点击转发同一 toggle)。语义与键盘仍由
+            主按钮承载,故不参与 Tab 序、对读屏隐藏,避免一行两个等价控件。 */}
+        {hasSessionControls && !unavailable && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-hidden="true"
+            tabIndex={-1}
+            onClick={handleToggle}
+            className="h-6 w-6 shrink-0 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            {expanded ? (
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+          </Button>
+        )}
       </div>
-      {expanded && hasNormalSessions && (
-        <div aria-label={`会话列表：${bot.displayName}`} className="pl-6">
+  );
+  return (
+    <div>
+      {/* 不可用 Bot 整行悬停提示原因(可用时包装器原样透传,不挂 Tooltip)。 */}
+      <ConversationBotUnavailableTooltip reason={statusUnavailableReason}>{row}</ConversationBotUnavailableTooltip>
+      {expanded && hasSessionControls && !unavailable && (
+        // 展开区不再整体缩进:session 行(dmore 平齐化 1:1)自带全宽行槽,交互热区在行内部分级。
+        <div aria-label={`会话列表：${bot.displayName}`}>
+          {searchInputVisible && (
+            <>
+              {instanceRow && <instanceRow.capability.InstancePicker botId={bot.botId} />}
+              <ConversationSessionIdSearchInput
+                value={sessionKey}
+                onSearch={onSearchSession}
+                disabled={instanceInputDisabled}
+                preserveDraftOnExternalClear={Boolean(instanceScope?.state.multiInstance)}
+              />
+            </>
+          )}
           {isOthers ? (
             <OthersArea others={others} />
           ) : (
@@ -257,6 +294,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           )}
         </div>
       )}
+      <div aria-hidden="true" className="mx-4 mt-1 border-b border-border/60" />
     </div>
   );
 });

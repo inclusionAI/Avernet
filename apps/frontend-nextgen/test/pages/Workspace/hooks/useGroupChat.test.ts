@@ -1,7 +1,9 @@
 /** @jest-environment jsdom */
 import type { SessionView } from '@/domain/collaboration';
+import type { GroupQuestionInteraction, GroupQuestionResolution } from '@/domain/collaboration/groupQuestions';
 import { useGroupChat } from '@/pages/Workspace/hooks/useGroupChat';
 import { createGroupChatProvider } from '@/services/workspace/groupChatProvider';
+import type { GroupQuestionSnapshot } from '@/services/workspace/groupQuestionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 import { act, renderHook, waitFor } from '@testing-library/react';
@@ -136,6 +138,10 @@ beforeEach(() => {
     subscribeToSupportState: jest.fn<any>(() => jest.fn<any>()),
     subscribeToConnectionStatus: jest.fn<any>(() => jest.fn<any>()),
     subscribeToViewScopeChanged: jest.fn<any>(() => jest.fn<any>()),
+    // ask_user 问答接线（GroupQuestionsProvider 结构面）：Hook 经 useGroupChatQuestions 订阅。
+    isConnected: false,
+    subscribeToQuestions: jest.fn<any>(() => jest.fn<any>()),
+    resolveQuestion: jest.fn<any>(() => Promise.resolve(undefined)),
   };
   mockedProviderFactory.mockReturnValue(mockProvider);
 
@@ -492,4 +498,61 @@ it('useChatBridge 集中注册一次,bridge=全局单例/panelRef/chat/inputRef 
   expect(call.chat).toBeDefined();
   // inputRef 透传(SenderRef ref,供卡片填输入框);群聊经 GroupChatComposer 绑定原生 Sender(forwardRef)
   expect(call.inputRef).toBe(result.current.inputRef);
+});
+
+// ============ ask_user 问答接线（specs/2026-10-13-bcs-ask-user-question Task5）============
+
+it('暴露 questions 模型：订阅 Provider 问答快照，resolve 委托 provider.resolveQuestion', async () => {
+  let questionsListener: ((snapshot: GroupQuestionSnapshot) => void) | null = null;
+  mockProvider.subscribeToQuestions.mockImplementation((cb: (snapshot: GroupQuestionSnapshot) => void) => {
+    questionsListener = cb;
+    return () => {
+      questionsListener = null;
+    };
+  });
+  mockProvider.isConnected = true;
+
+  const { result } = renderHook(() => useGroupChat(session));
+
+  // 订阅发生在当前 Provider 上（快照订阅即回放当前待处理列表）
+  expect(questionsListener).not.toBeNull();
+
+  const interaction: GroupQuestionInteraction = {
+    key: JSON.stringify(['run-1', 'i1']),
+    runId: 'run-1',
+    interactionId: 'i1',
+    botId: 'bot-a',
+    questions: [
+      {
+        questionId: 'q1',
+        question: '要部署到哪个环境？',
+        multiSelect: false,
+        allowOther: false,
+        options: [{ value: 'stage', label: '预发布' }],
+      },
+    ],
+  };
+  act(() => {
+    questionsListener?.({ reason: 'update', interactions: [interaction] });
+  });
+
+  expect(result.current.questions).toBeDefined();
+  expect(result.current.questions.interactions).toEqual([interaction]);
+  expect(result.current.questions.connected).toBe(true);
+
+  // resolve 委托 provider.resolveQuestion；成功返回 true
+  const resolution: GroupQuestionResolution = { action: 'cancel' };
+  let resolveOk: boolean | null = null;
+  await act(async () => {
+    resolveOk = await result.current.questions.resolve(interaction.key, resolution);
+  });
+  expect(resolveOk).toBe(true);
+  expect(mockProvider.resolveQuestion).toHaveBeenCalledWith(interaction.key, resolution);
+});
+
+it('isConnected=false 时 questions.connected 初始为 false（真实连接状态口径）', () => {
+  const { result } = renderHook(() => useGroupChat(session));
+  expect(result.current.questions).toBeDefined();
+  expect(result.current.questions.connected).toBe(false);
+  expect(result.current.questions.interactions).toEqual([]);
 });

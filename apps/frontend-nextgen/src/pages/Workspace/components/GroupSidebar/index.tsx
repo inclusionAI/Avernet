@@ -1,4 +1,4 @@
-import { Button, Empty, Input, Skeleton } from '@/components/ui';
+import { Button, Empty, Input } from '@/components/ui';
 import type { GroupView, IdentityView, MessageViewScope, SessionView } from '@/domain/collaboration/types';
 import type { DomainResult } from '@/services/workspace/identityService';
 import { Search } from 'lucide-react';
@@ -6,10 +6,13 @@ import { CollaborationIdentityHeader } from '../CollaborationIdentityHeader';
 import { ListErrorState } from '../ListErrorState';
 import { ResizableWorkspaceSidebar } from '../ResizableWorkspaceSidebar';
 import { GroupItem } from './GroupItem';
-import { GroupSidebarFilters, type KindFilter, type Membership } from './GroupSidebarFilters';
+import { GroupSidebarCollapsedRail } from './GroupSidebarCollapsedRail';
+import { GroupSidebarSearchRow, type KindFilter, type Membership } from './GroupSidebarSearchRow';
+import { GroupRowsSkeleton } from './GroupSidebarSkeletons';
 
 export type SortMode = 'lastActivity' | 'createdAt';
 export type SessionTab = 'all' | 'favorite';
+export type { KindFilter, Membership };
 
 export interface GroupSidebarProps {
   /** 单群入口不展示身份切换或跨群工具。 */
@@ -60,7 +63,7 @@ export interface GroupSidebarProps {
   /** 会话列表菜单：删除会话。 */
   onDeleteSession?: (sessionId: string) => Promise<boolean>;
   /** 会话列表菜单：生成会话邀请链接。 */
-  onShareSession?: (sessionId: string) => Promise<DomainResult<{ invitationUrl: string }>>;
+  onShareSession?: (sessionId: string, expiresInSeconds?: number) => Promise<DomainResult<{ invitationUrl: string }>>;
   /** 当前身份（会话编辑/删除权限判断：创建者或 driver/manager）。 */
   activeIdentity?: IdentityView | null;
   /** 分享群。 */
@@ -124,8 +127,8 @@ export function GroupSidebarList(props: GroupSidebarProps) {
       <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto bg-muted/20">
         {/* 跨模块切换收口到 App Shell 一级导航,二级侧栏不再渲染视图切换 Tab。 */}
         {!props.restricted && (
-          <div className="sticky top-0 z-20 border-b border-border/70 bg-muted/20 pt-1 backdrop-blur-sm">
-            <GroupSidebarFilters
+          <div className="sticky top-0 z-20 border-b border-border/70 bg-muted/20 backdrop-blur-sm">
+            <GroupSidebarSearchRow
               groupSearchText={groupSearchText}
               onSearchTextChange={onSearchTextChange}
               kindFilter={kindFilter}
@@ -147,10 +150,10 @@ export function GroupSidebarList(props: GroupSidebarProps) {
               </Button>
             </div>
             <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-              {/* 与群搜索框一致：侧栏搜索统一 h-9（PR255 视觉规范），基础 Input 默认 h-8 */}
+              <Search className="pointer-events-none absolute left-2.5 top-2 h-4 w-4 text-content-icon" />
+              {/* v2：侧栏搜索统一 h-8（dmore artboard-010 搜索行实测），与群搜索框同规格。 */}
               <Input
-                className="h-9 pl-9"
+                className="h-8 rounded-lg border border-input bg-background pl-8 text-xs text-foreground placeholder:text-content-hint"
                 value={sessionSearchText}
                 onChange={(event) => onSessionSearchTextChange(event.target.value)}
                 placeholder="搜索会话标题"
@@ -162,12 +165,8 @@ export function GroupSidebarList(props: GroupSidebarProps) {
 
         {/* 列表区 */}
         {isLoading ? (
-          /* 验收微调：加载骨架去边框与行底，与列表通透风格一致。 */
-          <div className="overflow-hidden">
-            {[1, 2, 3].map((i) => (
-              <Skeleton.Block key={i} className="h-14 w-full rounded-none" />
-            ))}
-          </div>
+          /* 群列表加载骨架：对齐对话侧「回声」语言，逐行复刻群收起行几何（真列表换入零横跳）。 */
+          <GroupRowsSkeleton />
         ) : groups.length === 0 ? (
           groupsError ? null : props.restricted ? (
             <Empty title="指定协作群不可用" />
@@ -238,7 +237,22 @@ export function GroupSidebarList(props: GroupSidebarProps) {
 /** 内流协作群列表外壳。≥lg 在流内；<lg hidden，由 Workspace 抽屉呈现同一 GroupSidebarList。 */
 export function GroupSidebar(props: GroupSidebarProps) {
   return (
-    <ResizableWorkspaceSidebar ariaLabel="协作群列表">
+    <ResizableWorkspaceSidebar
+      ariaLabel="协作群列表"
+      collapsedContent={(expand) => (
+        // 4.2 群头像竖轨：头像直达 = 选中该群并展开侧栏；顶部 + 发起协作、底部展开。
+        <GroupSidebarCollapsedRail
+          groups={props.groups}
+          selectedGroupId={props.selectedGroupId}
+          onOpenGroup={(groupId) => {
+            props.onSelectGroup(groupId);
+            expand();
+          }}
+          onCreateGroup={props.restricted ? undefined : props.onCreateGroup}
+          onExpand={expand}
+        />
+      )}
+    >
       <GroupSidebarList {...props} />
     </ResizableWorkspaceSidebar>
   );

@@ -1,0 +1,11 @@
+{
+  "groupId": "game-room-7",
+  "sessionId": "sess-001",
+  "admin": "admin",
+  "judgeBot": "judge_bot",
+  "players": ["张三", "李四", "王五", "赵六", "钱七"],
+  "undercoverPlayers": ["张三", "赵六"],
+  "civilianPlayers": ["李四", "王五", "钱七"],
+  "undercoverWord": "香蕉",
+  "civilianWord": "苹果"
+}

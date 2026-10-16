@@ -5,7 +5,7 @@ import { useBotSessionFileStore } from '@/stores/botSessionFileStore';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 
 const mockLoadReady = jest.fn();
 const mockToastError = jest.fn();
@@ -33,19 +33,27 @@ function readyFiles(): string[] {
 describe('useBotSessionFiles（单聊会话文件 hook）', () => {
   beforeEach(() => {
     mockLoadReady.mockReset();
+    mockToastError.mockClear();
     useBotSessionFileStore.getState().resetForSession();
     useBotSessionFileStore.setState({ isLoadingList: false });
   });
 
-  it('refresh 拉取列表并写入 store', async () => {
+  it('进入会话即加载文件,无需先打开文件面板;缓存变化不重复请求,仍支持手动刷新', async () => {
     mockLoadReady.mockResolvedValueOnce({ ok: true, data: { items: [makeFile('r1', 'a.json')], total: 1 } });
-    const { result } = renderHook(({ sid }: { sid: string }) => useBotSessionFiles('bot-1', sid, 'u1'), {
+    const { result } = renderHook(({ sid }: { sid: string }) => useBotSessionFiles('bot-1', sid, 'u1', 'owner-1'), {
       initialProps: { sid: 's1' },
     });
+    await waitFor(() => expect(result.current.readyFiles.map((file) => file.resourceId)).toEqual(['r1']));
+    expect(mockLoadReady).toHaveBeenCalledTimes(1);
+    expect(mockLoadReady).toHaveBeenCalledWith('bot-1', 's1', 'u1', 'owner-1');
+    act(() => result.current.addReadyFile(makeFile('uploaded', 'new.txt')));
+    expect(mockLoadReady).toHaveBeenCalledTimes(1);
+    mockLoadReady.mockResolvedValueOnce({ ok: true, data: { items: [makeFile('r2', 'b.json')], total: 1 } });
     await act(async () => {
       await result.current.refresh();
     });
-    expect(readyFiles()).toEqual(['r1']);
+    expect(readyFiles()).toEqual(['r2']);
+    expect(mockLoadReady).toHaveBeenCalledTimes(2);
     expect(useBotSessionFileStore.getState().isLoadingList).toBe(false);
   });
 
@@ -67,19 +75,14 @@ describe('useBotSessionFiles（单聊会话文件 hook）', () => {
           }),
       );
 
-    const { result, rerender } = renderHook(({ sid }: { sid: string }) => useBotSessionFiles('bot-1', sid, 'u1'), {
+    const { rerender } = renderHook(({ sid }: { sid: string }) => useBotSessionFiles('bot-1', sid, 'u1'), {
       initialProps: { sid: 's1' },
     });
 
-    // s1 刷新发起（慢，不 await——模拟在途）。
-    act(() => {
-      void result.current.refresh();
-    });
-    // 切到 s2：reset 清空旧列表，发起第二请求。
+    // 进入 s1 自动发起慢请求;切到 s2 自动清空旧列表并发起第二请求。
+    expect(mockLoadReady).toHaveBeenCalledTimes(1);
     rerender({ sid: 's2' });
-    act(() => {
-      void result.current.refresh();
-    });
+    expect(mockLoadReady).toHaveBeenCalledTimes(2);
 
     // s2 先返回 → store 列表为 s2 的文件。
     await act(async () => {
@@ -105,21 +108,13 @@ describe('useBotSessionFiles（单聊会话文件 hook）', () => {
         }),
     );
 
-    const { result, rerender } = renderHook(
-      ({ sid }: { sid: string | null }) => useBotSessionFiles('bot-1', sid, 'u1'),
-      { initialProps: { sid: 's1' as string | null } },
-    );
-
-    // s1 刷新发起（在途）。
-    act(() => {
-      void result.current.refresh();
+    const { rerender } = renderHook(({ sid }: { sid: string | null }) => useBotSessionFiles('bot-1', sid, 'u1'), {
+      initialProps: { sid: 's1' as string | null },
     });
 
-    // 切到无会话：refresh 早退——应作废在途请求并收尾加载态（reset 保留 loading 后由早退收尾）。
+    // 退出会话应自动作废在途请求,不依赖手动刷新。
     rerender({ sid: null });
-    act(() => {
-      void result.current.refresh();
-    });
+    expect(mockLoadReady).toHaveBeenCalledTimes(1);
     expect(useBotSessionFileStore.getState().isLoadingList).toBe(false);
 
     // s1 晚到：守卫丢弃，store 保持清空。
@@ -128,5 +123,22 @@ describe('useBotSessionFiles（单聊会话文件 hook）', () => {
     });
     expect(readyFiles()).toEqual([]);
     expect(useBotSessionFileStore.getState().isLoadingList).toBe(false);
+  });
+
+  it('卸载后旧响应不能覆盖新挂载会话的文件', async () => {
+    let resolveOld!: (value: unknown) => void;
+    mockLoadReady.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveOld = resolve;
+        }),
+    );
+    const old = renderHook(() => useBotSessionFiles('bot-1', 's1', 'u1'));
+    old.unmount();
+    mockLoadReady.mockResolvedValueOnce({ ok: true, data: { items: [makeFile('new', 'new.txt')], total: 1 } });
+    renderHook(() => useBotSessionFiles('bot-1', 's2', 'u1'));
+    await waitFor(() => expect(readyFiles()).toEqual(['new']));
+    await act(async () => resolveOld({ ok: true, data: { items: [makeFile('old', 'old.txt')], total: 1 } }));
+    expect(readyFiles()).toEqual(['new']);
   });
 });

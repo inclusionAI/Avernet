@@ -1,6 +1,6 @@
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
-import { Segmented } from '@/components/ui/Segmented';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import type { BotSearchMode } from '@/domain/collaborationSquare/types';
 import { cn } from '@/utils/cn';
 import { Search, X } from 'lucide-react';
@@ -34,29 +34,46 @@ export default function SquareSearchBar({
     if (nextMode !== mode) onQueryChange('');
     onModeChange?.(nextMode);
   };
+  const hasModeSelect = resource === 'bot' && Boolean(onModeChange);
+  const framed = hasModeSelect || resource === 'group';
   return (
     <div className={cn('flex min-h-8 min-w-0 flex-col gap-3', className)}>
-      {resource === 'bot' && onModeChange && (
-        <Segmented
-          aria-label="Bot 搜索模式"
-          value={mode}
-          options={[
-            { value: 'name', label: '名称搜索' },
-            { value: 'smart', label: '智能搜索' },
-          ]}
-          onChange={handleModeChange}
-          className="w-full md:w-56"
-          inactiveOptionClassName="text-muted-foreground hover:text-foreground"
-        />
-      )}
-      <div className="relative h-8 w-full max-w-md">
-        <Search aria-hidden className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <div className={cn(
+        'relative flex w-full max-w-md items-center',
+        framed ? 'h-9 rounded-lg border border-input bg-background' : 'h-8',
+      )}>
+        {hasModeSelect && (
+          <div className="relative flex h-5 shrink-0 items-center border-r border-input">
+            <Select value={mode} onValueChange={(value) => handleModeChange(value as BotSearchMode)}>
+              <SelectTrigger
+                aria-label="Bot 搜索模式"
+                className="h-8 w-auto gap-2 rounded-lg border-0 bg-transparent px-3 font-normal text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="start" className="min-w-36 rounded-lg p-1 shadow-lg">
+                <SelectItem value="name" className="min-h-9 font-normal text-muted-foreground focus:text-muted-foreground data-[state=checked]:bg-accent data-[state=checked]:text-muted-foreground [&>span:first-child]:text-primary">
+                  名称搜索
+                </SelectItem>
+                <SelectItem value="smart" className="min-h-9 font-normal text-muted-foreground focus:text-muted-foreground data-[state=checked]:bg-accent data-[state=checked]:text-muted-foreground [&>span:first-child]:text-primary">
+                  智能搜索
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        <Search aria-hidden className={cn(
+          'h-4 w-4 text-muted-foreground',
+          framed ? 'ml-3 shrink-0' : 'absolute left-3 top-1/2 -translate-y-1/2',
+        )} />
         <Input
           aria-label={label}
           value={query}
           placeholder={label}
           onChange={(event) => onQueryChange(event.target.value)}
-          className="h-8 pl-9 pr-10"
+          className={cn('h-8 min-w-0 pr-10', framed
+            ? 'flex-1 border-0 bg-transparent pl-2 shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0'
+            : 'pl-9')}
         />
         {query && (
           <IconButton

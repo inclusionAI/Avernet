@@ -80,3 +80,16 @@ describe("Task Guard automatic analysis settings", () => {
     expect(response.status).toBe(403);
   });
 });
+
+it('saves one versioned daily policy and rejects stale or invalid writes', async () => {
+  const url = `${baseUrl}/api/task-guard/workflows/wf-1/auto-analysis`;
+  const headers = { 'Content-Type': 'application/json', 'X-User-Id': 'editor-1' };
+  const policy = { enabled: true, autoDraft: true, dailyTime: '10:30', expectedVersion: 0 };
+  const saved = await fetch(url, { method: 'PUT', headers, body: JSON.stringify(policy) });
+  expect(saved.status).toBe(200);
+  expect(await saved.json()).toMatchObject({ enabled: true, autoDraft: true, dailyTime: '10:30', timezone: 'Asia/Shanghai', version: 1, dailyConfigured: true });
+  expect((await fetch(url, { method: 'PUT', headers, body: JSON.stringify(policy) })).status).toBe(409);
+  expect((await fetch(url, { method: 'PUT', headers, body: JSON.stringify({ ...policy, dailyTime: '24:00', expectedVersion: 1 }) })).status).toBe(400);
+  const off = await fetch(url, { method: 'PUT', headers, body: JSON.stringify({ ...policy, enabled: false, expectedVersion: 1 }) });
+  expect(await off.json()).toMatchObject({ enabled: false, autoDraft: true, version: 2 });
+});

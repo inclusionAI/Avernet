@@ -11,7 +11,7 @@ import type { BcnWsClient } from '../src/ws-client.js';
 import { dshSessionIdForV2 } from '../src/session-identity.js';
 import { testConfig } from './fixtures.js';
 
-type Listener = (...args: unknown[]) => void;
+type Listener = (...args: unknown[]) => unknown;
 type RequestHandler = (frame: RequestFrame) => Promise<void>;
 type EventHandler = (frame: EventFrame) => Promise<void>;
 
@@ -129,7 +129,7 @@ class FakeHarness {
         sessionId: SessionId;
         meta?: { cwd?: string; agentPreset?: string };
         agentOptions?: AgentOptions;
-        setup?: (ctx: Context) => unknown;
+        setup?: (ctx: Context, agent: Agent) => unknown;
       }): Promise<AgentHandle> => this.createAgent(
         options.sessionId,
         options.meta,
@@ -139,7 +139,7 @@ class FakeHarness {
       resume: async (options: {
         resumeSessionId: SessionId;
         agentOptions?: AgentOptions;
-        setup?: (ctx: Context) => unknown;
+        setup?: (ctx: Context, agent: Agent) => unknown;
       }): Promise<AgentHandle> => this.createAgent(
         options.resumeSessionId,
         persisted.get(String(options.resumeSessionId))?.meta,
@@ -165,11 +165,14 @@ class FakeHarness {
       },
       agents: registry,
       sessionPersistence: {
-        list: async () => [...persisted.values()].map(item => item.meta),
-        inspect: async (id: SessionId) => {
+        stat: async (id: SessionId) => {
+          const item = persisted.get(String(id));
+          return item ? { header: item.meta } : undefined;
+        },
+        open: async (id: SessionId) => {
           const inspection = persisted.get(String(id));
           if (!inspection) throw new Error(`missing persisted session ${String(id)}`);
-          return inspection;
+          return { header: inspection.meta, read: async () => ({ events: inspection.events }), close: async () => {} };
         },
       },
     } as unknown as Context;
@@ -189,7 +192,7 @@ class FakeHarness {
     sessionId: SessionId,
     meta: { cwd?: string; agentPreset?: string } | undefined,
     agentOptions: AgentOptions | undefined,
-    setup: ((ctx: Context) => unknown) | undefined,
+    setup: ((ctx: Context, agent: Agent) => unknown) | undefined,
   ): Promise<AgentHandle> {
     const followups: UserMessage[] = [];
     const injections: UserMessage[] = [];
@@ -198,9 +201,15 @@ class FakeHarness {
     const scopedEvents: string[] = [];
     const promptVariables = new Map<string, () => string | undefined>();
     const agentContext = {
-      on: (event: string) => {
+      userQuestions: {
+        attachWait: async function* () { yield { remainingMs: 1 }; },
+      },
+      on: (event: string, listener: Listener) => {
         scopedEvents.push(event);
-        return () => {};
+        const listeners = this.listeners.get(event) ?? new Set<Listener>();
+        listeners.add(listener);
+        this.listeners.set(event, listeners);
+        return () => listeners.delete(listener);
       },
       systemPrompt: {
         variable: (name: string, provider: () => string | undefined) => {
@@ -228,7 +237,12 @@ class FakeHarness {
       ctx: agentContext,
       status: 'idle',
       options: agentOptions ?? {},
-      inbox: {},
+      inbox: { remove: (id: unknown) => {
+        const index = followups.findIndex(message => message.id === id);
+        if (index < 0) return false;
+        followups.splice(index, 1);
+        return true;
+      } },
       followup: (message: UserMessage) => followups.push(message),
       inject: (message: UserMessage) => injections.push(message),
       cancel: (cause: { kind: string }) => cancels.push(cause.kind),
@@ -238,7 +252,7 @@ class FakeHarness {
       steer: () => {},
     } as unknown as Agent;
     Object.assign(agentContext, { agent });
-    await setup?.(agentContext);
+    await setup?.(agentContext, agent);
     const state = { agent, followups, injections, cancels, tools, scopedEvents, promptVariables };
     this.agents.set(String(sessionId), state);
     return {
@@ -261,7 +275,8 @@ test('creates BCN agents with the DSH default model and scoped model selection',
     provider: harness.defaultSelection.provider,
     model: harness.defaultSelection.model,
   });
-  assert.deepEqual(state.scopedEvents, ['system-prompt/assemble', 'agent/request']);
+  assert.ok(state.scopedEvents.includes('session/event'));
+  assert.ok(state.scopedEvents.includes('agent/request'));
   assert.equal(state.agent.session.header.cwd, process.cwd());
   assert.equal(state.agent.session.header.agentPreset, 'standard');
   assert.equal(state.promptVariables.get('cwd')?.(), process.cwd());
@@ -346,13 +361,13 @@ test('isolates V3 sessions that share a legacy group-level session_key and reuse
   await bridge.dispose();
 });
 
-test('does not register chat.abort or chat.history in the initial release', async () => {
+test('registers chat.abort but not chat.history', async () => {
   const harness = new FakeHarness();
   const client = new FakeClient();
   const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
   bridge.start();
 
-  assert.equal(client.requestHandlers.has('chat.abort'), false);
+  assert.equal(client.requestHandlers.has('chat.abort'), true);
   assert.equal(client.eventHandlers.has('chat.abort'), false);
   assert.equal(client.requestHandlers.has('chat.history'), false);
   await bridge.dispose();
@@ -423,7 +438,157 @@ function toolEvents(client: FakeClient): Array<Record<string, unknown>> {
   return client.events.filter(item => item.event === 'agent').map(item => item.payload);
 }
 
-test('maps live DSH text and durable tool events to BCN with one terminal event', async () => {
+test('chat.abort validates scope, removes only queued work, and is terminal-idempotent', async () => {
+  const harness = new FakeHarness();
+  const client = new FakeClient();
+  const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
+  bridge.start();
+  await client.deliverRequest('chat.send', 'send-a', chatParams('session-abort', 'a'));
+  await client.deliverRequest('chat.send', 'send-b', chatParams('session-abort', 'b'));
+  const state = harness.state('session-abort');
+  emitClaim(harness, state, state.followups[0]!, 1);
+  harness.emit('agent/assistant-stream', { agent: state.agent, frame: { type: 'start', attemptId: 'attempt', revision: 1, turn: 1, step: 1 } });
+  harness.emit('agent/assistant-stream', { agent: state.agent, frame: { type: 'chunk', attemptId: 'attempt', revision: 1, index: 0, time: 1, chunk: { type: 'text-delta', text: 'partial' } } });
+  await client.deliverRequest('chat.abort', 'scope', { session_key: 'other', run_id: 'a' });
+  assert.equal(client.responses.at(-1)?.error?.code, 'SCOPE_MISMATCH');
+  await client.deliverRequest('chat.abort', 'missing', { session_key: 'session-abort', run_id: 'unknown' });
+  assert.equal(client.responses.at(-1)?.error?.code, 'RUN_NOT_FOUND');
+  await client.deliverRequest('chat.abort', 'queued', { session_key: 'session-abort', run_id: 'b' });
+  assert.equal(state.followups.length, 1);
+  assert.deepEqual(state.cancels, []);
+  await client.deliverRequest('chat.abort', 'active', { session_key: 'session-abort', run_id: 'a' });
+  assert.deepEqual(state.cancels, ['user']);
+  assert.equal(chatEvents(client).find(e => e.runId === 'a' && e.state === 'aborted')?.content, 'partial');
+  await client.deliverRequest('chat.abort', 'repeat', { session_key: 'session-abort', run_id: 'a' });
+  assert.deepEqual(client.responses.at(-1)?.payload, { aborted: false, aborted_run_ids: [] });
+  assert.equal(chatEvents(client).filter(e => e.state === 'aborted').length, 2);
+  await bridge.dispose();
+});
+
+test('chat.abort during asynchronous agent creation prevents later delivery', async () => {
+  const harness = new FakeHarness();
+  const client = new FakeClient();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const stat = harness.context.sessionPersistence.stat;
+  harness.context.sessionPersistence.stat = async (...args) => { await gate; return stat(...args); };
+  const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
+  bridge.start();
+  const delivery = client.deliverRequest('chat.send', 'send', chatParams('creating', 'creating-run'));
+  await client.deliverRequest('chat.abort', 'abort', { session_key: 'creating', run_id: 'creating-run' });
+  release();
+  await delivery;
+  assert.equal(harness.state('creating').followups.length, 0);
+  assert.equal(chatEvents(client).filter(e => e.state === 'aborted').length, 1);
+  await bridge.dispose();
+});
+
+test('V3 inject rejects missing canonical session identity', async () => {
+  const harness = new FakeHarness();
+  const client = new FakeClient();
+  const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
+  bridge.start();
+  const params = chatParams();
+  delete params.bcs_session_id;
+  await client.deliverRequest('chat.inject', 'inject-invalid', params);
+  assert.equal(client.responses.at(-1)?.error?.code, 'INVALID_REQUEST');
+  assert.equal(harness.agents.size, 0);
+  await bridge.dispose();
+});
+
+test('bridges single-use approval, rejects cross-run resolution, and handles duplicate acknowledgement', async () => {
+  const harness = new FakeHarness();
+  const client = new FakeClient();
+  const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
+  bridge.start();
+  await client.deliverRequest('chat.send', 'send', chatParams('approval', 'approval-run'));
+  const state = harness.state('approval');
+  emitClaim(harness, state, state.followups[0]!);
+  emitSession(harness, state, event({
+    type: 'tool/call', seq: 1, time: 1,
+    data: { turn: 1, step: 1, callId: 'bash-call', name: 'bash', arguments: '{"command":"pwd"}' },
+  }));
+  const listener = [...harness.listeners.get('approval/request')!][0]!;
+  const outcome = listener({ agent: state.agent, toolName: 'bash', callId: 'bash-call', reason: 'Needs permission' }, async () => 'unavailable');
+  const request = client.events.find(e => e.event === 'interaction')!.payload;
+  assert.equal(request.kind, 'exec');
+  assert.equal(request.command, 'pwd');
+  const params = { runId: 'wrong-run', interactionId: request.interactionId, kind: 'exec', idempotencyKey: 'key', decision: 'allow_once' };
+  await client.deliverRequest('interaction.resolve', 'wrong', params);
+  assert.equal(client.responses.at(-1)?.error?.code, 'SCOPE_MISMATCH');
+  params.runId = 'approval-run';
+  await client.deliverRequest('interaction.resolve', 'valid', params);
+  assert.equal(await outcome, 'allowed-once');
+  await client.deliverRequest('interaction.resolve', 'duplicate', params);
+  assert.equal(client.responses.at(-1)?.ok, true);
+  assert.equal(client.events.filter(e => e.event === 'interaction' && e.payload.phase === 'resolved').length, 1);
+  await bridge.dispose();
+});
+
+test('maps structured questions and custom answers and cancels approval on chat.abort', async () => {
+  const harness = new FakeHarness();
+  const client = new FakeClient();
+  const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
+  bridge.start();
+  await client.deliverRequest('chat.send', 'send', chatParams('questions', 'question-run'));
+  const state = harness.state('questions');
+  emitClaim(harness, state, state.followups[0]!);
+  const listener = [...harness.listeners.get('user-questions/request')!][0]!;
+  const outcome = listener({ agent: state.agent, questions: [{ id: 'target', question: 'Where?', options: [{ label: 'local' }], multiSelect: true }] }, async () => ({ answers: [] }));
+  const requested = client.events.find(e => e.event === 'interaction')!.payload;
+  await client.deliverRequest('interaction.resolve', 'invalid', { runId: 'question-run', interactionId: requested.interactionId, kind: 'ask_user', idempotencyKey: 'key', action: 'submit', answers: {} });
+  assert.equal(client.responses.at(-1)?.ok, false);
+  await client.deliverRequest('interaction.resolve', 'answer', { runId: 'question-run', interactionId: requested.interactionId, kind: 'ask_user', idempotencyKey: 'key', action: 'submit', answers: { target: { values: ['local', 'staging'] } } });
+  assert.deepEqual(await outcome, { answers: [{ id: 'target', selected: ['local'], custom: 'staging' }] });
+  const approval = [...harness.listeners.get('approval/request')!][0]!({ agent: state.agent, toolName: 'bash' }, async () => 'unavailable');
+  await client.deliverRequest('chat.abort', 'abort', { session_key: 'questions', run_id: 'question-run' });
+  assert.equal(await approval, 'cancelled');
+  assert.equal(client.events.at(-1)?.payload.state, 'aborted');
+  await bridge.dispose();
+});
+
+test('timed questions expire using the DSH wait duration and reject late resolutions', async () => {
+  const harness = new FakeHarness();
+  const client = new FakeClient();
+  const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
+  bridge.start();
+  await client.deliverRequest('chat.send', 'send', chatParams('timed', 'timed-run'));
+  const state = harness.state('timed');
+  emitClaim(harness, state, state.followups[0]!);
+  const listener = [...harness.listeners.get('user-questions/request')!][0]!;
+  const answer = Promise.resolve(listener({
+    agent: state.agent, questions: [{ id: 'target', question: 'Where?' }],
+    wait: { callId: 'question-call', timed: true },
+  }, async () => ({ answers: [] })));
+  await assert.rejects(answer, { code: 'ASK_TIMED_OUT' });
+  const requested = client.events.find(e => e.event === 'interaction' && e.payload.phase === 'requested')!.payload;
+  await client.deliverRequest('interaction.resolve', 'late', {
+    runId: 'timed-run', interactionId: requested.interactionId, kind: 'ask_user',
+    idempotencyKey: 'late-key', action: 'submit', answers: { target: { values: ['local'] } },
+  });
+  assert.equal(client.responses.at(-1)?.error?.code, 'INTERACTION_NOT_FOUND');
+  assert.equal(client.events.filter(e => e.event === 'interaction' && e.payload.phase === 'resolved').length, 1);
+  await bridge.dispose();
+});
+
+test('unloading cancels approval waits and emits exactly one aborted terminal', async () => {
+  const harness = new FakeHarness();
+  const client = new FakeClient();
+  const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
+  bridge.start();
+  await client.deliverRequest('chat.send', 'send', chatParams('unload', 'unload-run'));
+  const state = harness.state('unload');
+  emitClaim(harness, state, state.followups[0]!);
+  const outcome = [...harness.listeners.get('approval/request')!][0]!({ agent: state.agent, toolName: 'bash' }, async () => 'unavailable');
+  await bridge.dispose();
+  await bridge.dispose();
+  assert.equal(await outcome, 'cancelled');
+  assert.equal(chatEvents(client).filter(e => e.state === 'aborted').length, 1);
+  assert.equal(harness.agents.size, 0);
+  assert.equal(client.requestHandlers.size, 0);
+});
+
+test('maps committed DSH text and durable tool events, excluding failed attempts and reasoning', async () => {
   const harness = new FakeHarness();
   const client = new FakeClient();
   const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
@@ -435,8 +600,8 @@ test('maps live DSH text and durable tool events to BCN with one terminal event'
   emitClaim(harness, state, state.followups[0] as UserMessage);
 
   emitSession(harness, state, event({
-    type: 'assistant/chunk', seq: 1, time: 1,
-    data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'Hello ' } },
+    type: 'assistant/message', seq: 1, time: 1,
+    data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: 'Hello ' }] } },
   }));
   emitSession(harness, state, event({
     type: 'assistant/chunk', seq: 2, time: 2,
@@ -449,7 +614,7 @@ test('maps live DSH text and durable tool events to BCN with one terminal event'
       step: 1,
       message: {
         id: 'message-result', role: 'user', source: { kind: 'tool', callId: 'call-1' },
-        content: [{ type: 'tool-result', toolCallId: 'call-1', content: [{ type: 'text', text: 'ok' }], isError: false }],
+        toolCallId: 'call-1', content: [{ type: 'text', text: 'ok' }], isError: false,
       },
     },
   }));
@@ -464,13 +629,13 @@ test('maps live DSH text and durable tool events to BCN with one terminal event'
       step: 1,
       message: {
         id: 'duplicate-result', role: 'user', source: { kind: 'tool', callId: 'call-1' },
-        content: [{ type: 'tool-result', toolCallId: 'call-1', content: [{ type: 'text', text: 'duplicate' }] }],
+        toolCallId: 'call-1', content: [{ type: 'text', text: 'duplicate' }],
       },
     },
   }));
   emitSession(harness, state, event({
-    type: 'assistant/chunk', seq: 6, time: 6,
-    data: { turn: 1, step: 2, chunk: { type: 'text-delta', index: 0, text: 'world' } },
+    type: 'assistant/attempt', seq: 6, time: 6,
+    data: { turn: 1, step: 2, message: { content: [{ type: 'text', text: 'discarded attempt' }] } },
   }));
   emitSession(harness, state, event({
     type: 'assistant/message', seq: 7, time: 7, surfaceOp: { op: 'append' },
@@ -528,10 +693,8 @@ test('preserves raw tool arguments, parallel call identity, error results, and c
         step: 1,
         message: {
           id: `result-${runId}`, role: 'user', source: { kind: 'tool', callId: 'shared-call-id' },
-          content: [{
-            type: 'tool-result', toolCallId: 'shared-call-id', isError: true,
-            content: [{ type: 'text', text: `failed-${runId}` }],
-          }],
+          toolCallId: 'shared-call-id', isError: true,
+          content: [{ type: 'text', text: `failed-${runId}` }],
         },
         error: { name: 'ToolCallError', code: 'FAILED' },
       },
@@ -592,10 +755,8 @@ test('captures bcs_route once, emits its normal tool telemetry, and attaches rou
       step: 1,
       message: {
         id: 'route-result', role: 'user', source: { kind: 'tool', callId: 'route-call' },
-        content: [{
-          type: 'tool-result', toolCallId: 'route-call',
-          content: [{ type: 'text', text: JSON.stringify(result) }],
-        }],
+        toolCallId: 'route-call',
+        content: [{ type: 'text', text: JSON.stringify(result) }],
       },
     },
   }));
@@ -647,7 +808,7 @@ test('registers manager task tools instead of bcs_route and forwards task reques
     {
       method: 'task.dispatch',
       params: {
-        group_id: 'bcs_grp_test',
+        group_id: 'bcs_grp_test:manager-session',
         target_bot: 'Worker',
         message: 'Investigate the database',
         response_mode: 'after-last-tool-call',
@@ -655,7 +816,7 @@ test('registers manager task tools instead of bcs_route and forwards task reques
     },
     {
       method: 'task.complete',
-      params: { group_id: 'bcs_grp_test', summary: 'All work is done.' },
+      params: { group_id: 'bcs_grp_test:manager-session', summary: 'All work is done.' },
     },
   ]);
   await bridge.dispose();
@@ -683,7 +844,7 @@ test('registers only the worker task-message tool for a manager-worker worker', 
   });
   assert.deepEqual(client.requests, [{
     method: 'task.message',
-    params: { group_id: 'bcs_grp_test', message: 'Blocked on credentials.' },
+    params: { group_id: 'bcs_grp_test:worker-session', message: 'Blocked on credentials.' },
   }]);
   await bridge.dispose();
 });

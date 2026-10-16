@@ -6,6 +6,13 @@ fn text<'a>(value: &'a Value, key: &str) -> &'a str {
     value.get(key).and_then(Value::as_str).unwrap_or("-")
 }
 
+fn render_loop_path(output: &mut String, value: &Value) {
+    let Some(path) = value.get("loop_path").and_then(Value::as_array) else { return; };
+    let frames = path.iter().map(|frame| format!("{} {}/{}", text(frame, "loop_id"),
+        frame["iteration"], frame["max_iterations"])).collect::<Vec<_>>();
+    let _ = writeln!(output, "  Loop path: {}", frames.join(" → "));
+}
+
 pub fn render(value: &Value) -> String {
     let mut output = String::new();
     if let Some(run) = value.get("run") {
@@ -24,10 +31,12 @@ pub fn render(value: &Value) -> String {
         let _ = writeln!(output, "Node {id} · {} · {} · attempt {}", text(node, "display_name"), text(node, "status"), node.get("attempt").map_or("-".into(), Value::to_string));
         if let Some(execution) = execution {
             let _ = writeln!(output, "  Logical {} · Loop {} · iteration {}/{}", text(execution, "definition_node_id"), text(execution, "loop_id"), execution["iteration"], execution["max_iterations"]);
+            render_loop_path(&mut output, execution);
         }
         if let Some(outcome) = node.get("outcome") { let _ = writeln!(output, "  Actual outcome: {outcome}"); }
         if let Some(context) = node.get("loop_context") {
             let _ = writeln!(output, "  Loop {} · iteration {}/{}", text(context, "loop_id"), context["iteration"], context["max_iterations"]);
+            render_loop_path(&mut output, context);
             let previous = &context["previous_result"];
             if previous.is_null() { output.push_str("  First iteration: no previous result\n"); }
             else {

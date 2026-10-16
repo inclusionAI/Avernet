@@ -1,3 +1,4 @@
+import { productionRunsSql, productionNodesSql, productionDiagnosesSql } from "@avernet/clawweb-shared/server/services/run-purpose";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 
 // --- Types ---
@@ -269,17 +270,17 @@ export class DashboardRepository {
       const toDb = this.db.dialect.epochToDb(to);
       const [diagnoses, diagnosedRuns, issueClusters, suggestions, applications] = await Promise.all([
         this.db.query<{ cnt: number }>(
-          "SELECT COUNT(*) AS cnt FROM workflow_healing_diagnoses WHERE gmt_create BETWEEN ? AND ?",
+          `SELECT COUNT(*) AS cnt FROM ${productionDiagnosesSql()} workflow_healing_diagnoses WHERE gmt_create BETWEEN ? AND ?`,
           [fromDb, toDb],
         ),
         this.db.query<{ cnt: number }>(
-          "SELECT COUNT(DISTINCT flow_id) AS cnt FROM workflow_healing_diagnoses WHERE gmt_create BETWEEN ? AND ?",
+          `SELECT COUNT(DISTINCT flow_id) AS cnt FROM ${productionDiagnosesSql()} workflow_healing_diagnoses WHERE gmt_create BETWEEN ? AND ?`,
           [fromDb, toDb],
         ),
         this.db.query<{ cnt: number }>(
           `SELECT COUNT(*) AS cnt FROM (
              SELECT workflow_id, failure_signature
-             FROM workflow_healing_diagnoses
+             FROM ${productionDiagnosesSql()} workflow_healing_diagnoses
              WHERE gmt_create BETWEEN ? AND ?
              GROUP BY workflow_id, failure_signature
            ) issue_clusters`,
@@ -371,28 +372,28 @@ export class DashboardRepository {
         dauRows, wauRows, prevDauRows,
       ] = await Promise.all([
         this.db.query<{ cnt: number }>(
-          `SELECT COUNT(DISTINCT workflow_id) AS cnt FROM flow_runs WHERE started_at BETWEEN ? AND ?`,
+          `SELECT COUNT(DISTINCT workflow_id) AS cnt FROM ${productionRunsSql()} flow_runs WHERE started_at BETWEEN ? AND ?`,
           [from, to],
         ),
         this.db.query<{ status: string; cnt: number }>(
-          `SELECT status, COUNT(*) AS cnt FROM flow_runs WHERE started_at BETWEEN ? AND ? GROUP BY status`,
+          `SELECT status, COUNT(*) AS cnt FROM ${productionRunsSql()} flow_runs WHERE started_at BETWEEN ? AND ? GROUP BY status`,
           [from, to],
         ),
         this.db.query<{ succeeded_count: number; failed_count: number }>(
           `SELECT
             SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded_count,
             SUM(CASE WHEN status IN (${unsuccessfulTerminalSql}) THEN 1 ELSE 0 END) AS failed_count
-           FROM flow_runs WHERE started_at BETWEEN ? AND ?
+           FROM ${productionRunsSql()} flow_runs WHERE started_at BETWEEN ? AND ?
              AND status IN (${terminalSql})`,
           [prevFrom, prevTo],
         ),
         this.db.query<{ avg_ms: number | null }>(
-          `SELECT AVG(${normalizedDurationSql}) AS avg_ms FROM flow_runs
+          `SELECT AVG(${normalizedDurationSql}) AS avg_ms FROM ${productionRunsSql()} flow_runs
            WHERE status = 'succeeded' AND started_at BETWEEN ? AND ? AND total_duration_ms IS NOT NULL`,
           [from, to],
         ),
         this.db.query<{ total_tokens: number }>(
-          `SELECT COALESCE(SUM(total_token_usage), 0) AS total_tokens FROM flow_runs WHERE started_at BETWEEN ? AND ?`,
+          `SELECT COALESCE(SUM(total_token_usage), 0) AS total_tokens FROM ${productionRunsSql()} flow_runs WHERE started_at BETWEEN ? AND ?`,
           [from, to],
         ),
         // 长程完成率(当前窗口)
@@ -400,7 +401,7 @@ export class DashboardRepository {
           `SELECT
             SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS s,
             SUM(CASE WHEN status IN (${terminalSql}) THEN 1 ELSE 0 END) AS t
-           FROM flow_runs WHERE ${longRunClause} AND started_at BETWEEN ? AND ?`,
+           FROM ${productionRunsSql()} flow_runs WHERE ${longRunClause} AND started_at BETWEEN ? AND ?`,
           [...longRunParams, from, to],
         ),
         // 长程完成率(上一周期,用于环比)
@@ -408,34 +409,34 @@ export class DashboardRepository {
           `SELECT
             SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS s,
             SUM(CASE WHEN status IN (${terminalSql}) THEN 1 ELSE 0 END) AS t
-           FROM flow_runs WHERE ${longRunClause} AND started_at BETWEEN ? AND ?`,
+           FROM ${productionRunsSql()} flow_runs WHERE ${longRunClause} AND started_at BETWEEN ? AND ?`,
           [...longRunParams, prevFrom, prevTo],
         ),
         // 完成耗时原始值(当前,client-side 分位)
         this.db.query<{ d: number }>(
-          `SELECT ${normalizedDurationSql} AS d FROM flow_runs
+          `SELECT ${normalizedDurationSql} AS d FROM ${productionRunsSql()} flow_runs
            WHERE status = 'succeeded' AND total_duration_ms IS NOT NULL AND started_at BETWEEN ? AND ?`,
           [from, to],
         ),
         // 完成耗时原始值(上一周期,取 P50 环比)
         this.db.query<{ d: number }>(
-          `SELECT ${normalizedDurationSql} AS d FROM flow_runs
+          `SELECT ${normalizedDurationSql} AS d FROM ${productionRunsSql()} flow_runs
            WHERE status = 'succeeded' AND total_duration_ms IS NOT NULL AND started_at BETWEEN ? AND ?`,
           [prevFrom, prevTo],
         ),
         // DAU / WAU / prevDau(distinct user_id;v34 起有该列,空值不计)
         this.db.query<{ cnt: number }>(
-          `SELECT COUNT(DISTINCT user_id) AS cnt FROM flow_runs
+          `SELECT COUNT(DISTINCT user_id) AS cnt FROM ${productionRunsSql()} flow_runs
            WHERE user_id IS NOT NULL AND started_at BETWEEN ? AND ?`,
           [dauFrom, to],
         ),
         this.db.query<{ cnt: number }>(
-          `SELECT COUNT(DISTINCT user_id) AS cnt FROM flow_runs
+          `SELECT COUNT(DISTINCT user_id) AS cnt FROM ${productionRunsSql()} flow_runs
            WHERE user_id IS NOT NULL AND started_at BETWEEN ? AND ?`,
           [wauFrom, to],
         ),
         this.db.query<{ cnt: number }>(
-          `SELECT COUNT(DISTINCT user_id) AS cnt FROM flow_runs
+          `SELECT COUNT(DISTINCT user_id) AS cnt FROM ${productionRunsSql()} flow_runs
            WHERE user_id IS NOT NULL AND started_at BETWEEN ? AND ?`,
           [prevDauFrom, prevDauTo],
         ),
@@ -611,7 +612,7 @@ export class DashboardRepository {
             COALESCE(SUM(total_token_usage), 0) AS token_usage,
             SUM(CASE WHEN (node_count >= ${LONG_RUN_NODE_COUNT} OR (${normalizedDurationSql}) >= ${LONG_RUN_DURATION_MS}) AND status = 'succeeded' THEN 1 ELSE 0 END) AS lr_s,
             SUM(CASE WHEN (node_count >= ${LONG_RUN_NODE_COUNT} OR (${normalizedDurationSql}) >= ${LONG_RUN_DURATION_MS}) AND status IN (${terminalSql}) THEN 1 ELSE 0 END) AS lr_t
-           FROM flow_runs
+           FROM ${productionRunsSql()} flow_runs
            WHERE started_at BETWEEN ? AND ? AND started_at IS NOT NULL
            GROUP BY ${dayExpr}
            ORDER BY day ASC`,
@@ -619,7 +620,7 @@ export class DashboardRepository {
         ),
         // per-day 耗时 P50:原始值拉出,client 分位(跨库)
         this.db.query<{ day: string; d: number }>(
-          `SELECT ${dayExpr} AS day, ${normalizedDurationSql} AS d FROM flow_runs
+          `SELECT ${dayExpr} AS day, ${normalizedDurationSql} AS d FROM ${productionRunsSql()} flow_runs
            WHERE status = 'succeeded' AND total_duration_ms IS NOT NULL
              AND started_at BETWEEN ? AND ? AND started_at IS NOT NULL`,
           [from, to],
@@ -667,7 +668,7 @@ export class DashboardRepository {
     try {
       // Fetch raw durations and bin client-side to avoid string interpolation in SQL
       const rows = await this.db.query<{ duration_ms: number }>(
-        `SELECT ${normalizedDurationSql} AS duration_ms FROM flow_runs
+        `SELECT ${normalizedDurationSql} AS duration_ms FROM ${productionRunsSql()} flow_runs
          WHERE started_at BETWEEN ? AND ? AND total_duration_ms IS NOT NULL`,
         [from, to],
       );
@@ -728,7 +729,7 @@ export class DashboardRepository {
           SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded_count,
           SUM(CASE WHEN status IN (${unsuccessfulTerminalSql}) THEN 1 ELSE 0 END) AS failed_count,
           AVG(CASE WHEN status = 'succeeded' THEN ${normalizedDurationSql} END) AS avg_duration_ms
-         FROM flow_runs
+         FROM ${productionRunsSql()} flow_runs
          WHERE started_at BETWEEN ? AND ?
          GROUP BY workflow_id
          ORDER BY run_count DESC
@@ -760,7 +761,7 @@ export class DashboardRepository {
   async getRunningCount(): Promise<number> {
     try {
       const rows = await this.db.query<{ cnt: number }>(
-        `SELECT COUNT(*) AS cnt FROM flow_runs WHERE status = 'running'`,
+        `SELECT COUNT(*) AS cnt FROM ${productionRunsSql()} flow_runs WHERE status = 'running'`,
       );
       return rows[0]?.cnt ?? 0;
     } catch (error) {
@@ -801,10 +802,10 @@ export class DashboardRepository {
           MAX(fr.workflow_title) AS workflow_title,
           MAX(COALESCE(d.error_text, d.failure_mode)) AS example_error,
           COUNT(*) AS cnt
-         FROM workflow_healing_diagnoses d
+         FROM ${productionDiagnosesSql()} d
          LEFT JOIN (
            SELECT workflow_id, MAX(workflow_title) AS workflow_title
-           FROM flow_runs GROUP BY workflow_id
+           FROM ${productionRunsSql()} flow_runs GROUP BY workflow_id
          ) fr ON fr.workflow_id = d.workflow_id
          WHERE d.gmt_create BETWEEN ? AND ?
          GROUP BY d.workflow_id, d.failure_signature
@@ -850,10 +851,10 @@ export class DashboardRepository {
           MAX(fr.workflow_title) AS workflow_title,
           MAX(ne.error_text) AS example_error,
           COUNT(*) AS cnt
-         FROM node_executions ne
+         FROM ${productionNodesSql()} ne
          LEFT JOIN (
            SELECT workflow_id, MAX(workflow_title) AS workflow_title
-           FROM flow_runs GROUP BY workflow_id
+           FROM ${productionRunsSql()} flow_runs GROUP BY workflow_id
          ) fr ON fr.workflow_id = ne.workflow_id
          WHERE ne.status = 'failed'
            AND ne.error_text IS NOT NULL
@@ -954,7 +955,7 @@ export class DashboardRepository {
 
         // deploy 后该工作流前 10 条 run
         const runRows = await this.db.query<{ status: string }>(
-          `SELECT status FROM flow_runs
+          `SELECT status FROM ${productionRunsSql()} flow_runs
            WHERE workflow_id = ? AND started_at > ?
            ORDER BY started_at ASC LIMIT 10`,
           [d.workflow_id, d.deploy_ts],
@@ -1040,7 +1041,7 @@ export class DashboardRepository {
           SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_count,
           SUM(CASE WHEN status IN (${terminalSql}) THEN 1 ELSE 0 END) AS terminal_count,
           AVG(CASE WHEN status = 'succeeded' THEN ${normalizedDurationSql} END) AS avg_ms
-         FROM flow_runs
+         FROM ${productionRunsSql()} flow_runs
          WHERE started_at BETWEEN ? AND ? AND started_at IS NOT NULL
          GROUP BY workflow_id
          ORDER BY run_count DESC
@@ -1050,7 +1051,7 @@ export class DashboardRepository {
 
       // 每工作流 succeeded 耗时原始值 → client-side P50(一次查询,TS 分组)
       const durRows = await this.db.query<{ workflow_id: string; d: number }>(
-        `SELECT workflow_id, ${normalizedDurationSql} AS d FROM flow_runs
+        `SELECT workflow_id, ${normalizedDurationSql} AS d FROM ${productionRunsSql()} flow_runs
          WHERE status = 'succeeded' AND total_duration_ms IS NOT NULL AND started_at BETWEEN ? AND ?`,
         [from, to],
       );
@@ -1166,7 +1167,7 @@ export class DashboardRepository {
 
       // 该 deploy 后该工作流前 10 条 run → 发布成功率样本
       const runRows = await this.db.query<{ status: string }>(
-        `SELECT status FROM flow_runs
+        `SELECT status FROM ${productionRunsSql()} flow_runs
          WHERE workflow_id = ? AND started_at > ?
          ORDER BY started_at ASC LIMIT 10`,
         [d.workflow_id, d.ts],
@@ -1313,7 +1314,7 @@ export class DashboardRepository {
         let nAll = 0;
         for (const ts of tsList) {
           const runRows = await this.db.query<{ status: string }>(
-            `SELECT status FROM flow_runs
+            `SELECT status FROM ${productionRunsSql()} flow_runs
              WHERE workflow_id = ? AND started_at > ?
              ORDER BY started_at ASC LIMIT 10`,
             [r.workflow_id, ts],
@@ -1416,7 +1417,7 @@ export class DashboardRepository {
       // ── machineP50:per-bucket client 分位 ──
       if (metric === "machineP50") {
         const rows = await this.db.query<{ b: string; d: number }>(
-          `SELECT ${bExpr} AS b, ${normalizedDurationSql} AS d FROM flow_runs
+          `SELECT ${bExpr} AS b, ${normalizedDurationSql} AS d FROM ${productionRunsSql()} flow_runs
            WHERE status = 'succeeded' AND total_duration_ms IS NOT NULL
              AND started_at BETWEEN ? AND ? AND started_at IS NOT NULL`,
           [from, to],
@@ -1449,7 +1450,7 @@ export class DashboardRepository {
       const extraCond = metric === "dau" ? "AND user_id IS NOT NULL" : "";
       const rows = await this.db.query<{ b: string; v: number | null }>(
         `SELECT ${bExpr} AS b, ${valueExpr} AS v
-         FROM flow_runs
+         FROM ${productionRunsSql()} flow_runs
          WHERE started_at BETWEEN ? AND ? AND started_at IS NOT NULL ${extraCond}
          GROUP BY ${bExpr}
          ORDER BY b ASC`,

@@ -168,7 +168,11 @@ jest.mock('@/pages/Workspace/hooks/useGroupSessions', () => ({
     deleteSession: jest.fn(),
   }),
 }));
-jest.mock('@/pages/Workspace/hooks/useGroupChat', () => ({ useGroupChat: () => ({}) }));
+// GroupWorkspaceArea 直接读 chat.chat.messages / chat.panelRef（头部图标域编排），
+// 桩件需提供最小 chat 契约（其余 chat.* 字段仅作为 props 透传给已 mock 的 GroupChatPane）。
+jest.mock('@/pages/Workspace/hooks/useGroupChat', () => ({
+  useGroupChat: () => ({ chat: { messages: [] }, panelRef: { current: null } }),
+}));
 jest.mock('@/pages/Workspace/hooks/useGroupManagement', () => ({ useGroupManagement: () => ({}) }));
 jest.mock('@/pages/Workspace/hooks/useSessionManagement', () => ({
   useSessionManagement: () => ({}),
@@ -219,8 +223,8 @@ describe('ConversationPage(Task 8 组合页)', () => {
   it('ConversationPage uses Human identity and renders no Workspace identity tabs', async () => {
     render(<ConversationPage />);
     expect(screen.queryByRole('tab', { name: '协作群' })).not.toBeInTheDocument();
-    // Human 登录身份用于目录分组标题(而非旧工作身份)。
-    await screen.findByText('张三管理的 Bot');
+    // Human 登录身份用于目录加载(而非旧工作身份);组名按 v2 设计稿固定为「我的 Bot」。
+    await screen.findByText('我的 Bot');
   });
 
   it('点击 AgentCoding Bot 直接进入专用 coding-chat', async () => {
@@ -238,9 +242,7 @@ describe('ConversationPage(Task 8 组合页)', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'AgentCoding Bot' }));
 
     expect(history.push).toHaveBeenCalledTimes(1);
-    expect(history.push).toHaveBeenCalledWith(
-      '/coding/coding-chat?botId=coding-bot%3A2088&space_id=73&space_name=%E6%B5%8B%E8%AF%95%E7%A9%BA%E9%97%B4',
-    );
+    expect(history.push).toHaveBeenCalledWith('/coding/coding-chat?botId=coding-bot');
   });
 
   it('origin=mine 选中会话渲染交互舞台(不渲染只读面板)', async () => {

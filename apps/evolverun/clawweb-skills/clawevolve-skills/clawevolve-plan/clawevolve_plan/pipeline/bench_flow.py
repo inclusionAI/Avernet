@@ -114,7 +114,10 @@ def _ensure_clawweb_domains(
         )
         return existing
 
-    result = upload_bench_domains(plan=plan, manifest=manifest, task_id=task_id)
+    result = upload_bench_domains(
+        plan=plan, manifest=manifest, task_id=task_id,
+        step_id=str(getattr(args, "step_id", "") or ""),
+    )
     result["required"] = True
     logger.info(
         "clawweb dual-domain upload complete",

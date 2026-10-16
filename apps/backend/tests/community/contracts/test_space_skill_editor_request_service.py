@@ -106,7 +106,7 @@ def test_space_skill_editor_request_service_falls_back_to_work_no_when_profile_l
     )
 
 
-def test_space_skill_editor_request_service_routes_owner_policy() -> None:
+def test_space_skill_editor_request_service_routes_member_read_owner_write() -> None:
     repository = MagicMock()
     policy_repository = MagicMock()
     policy_repository.get_editor_approval_policy.return_value = False
@@ -116,7 +116,7 @@ def test_space_skill_editor_request_service_routes_owner_policy() -> None:
     )
 
     assert (
-        service.get_approval_policy(space_id=7, skill_id=9, actor_id="owner") is False
+        service.get_approval_policy(space_id=7, skill_id=9, actor_id="member") is False
     )
     assert (
         service.update_approval_policy(
@@ -128,7 +128,7 @@ def test_space_skill_editor_request_service_routes_owner_policy() -> None:
         is True
     )
     policy_repository.get_editor_approval_policy.assert_called_once_with(
-        space_id=7, skill_id=9, actor_id="owner", env="test"
+        space_id=7, skill_id=9, actor_id="member", env="test"
     )
     policy_repository.update_editor_approval_policy.assert_called_once_with(
         space_id=7,
@@ -170,8 +170,8 @@ def test_enabled_policy_uses_trusted_auto_work_order_and_no_owner_todo() -> None
         biz_id="9",
         event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
         applicant_user_id="200177",
-        approver_user_ids=['200177'],
-        recipient_user_ids=[],
+        approver_user_ids=[],
+        recipient_user_ids=["200177"],
         title=WorkOrderMessageTitle.SKILL_COLLABORATOR_PENDING.value,
         content=None,
         apply_reason="共同维护",

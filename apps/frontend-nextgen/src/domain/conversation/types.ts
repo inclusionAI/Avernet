@@ -4,6 +4,10 @@
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import type { ChatMessage } from '@tc-chat/core';
 
+// 会话 View 类型经本域收口再导出:Store 层禁止直连 Service(含 type import),
+// 快照等 Store 侧类型统一从这里取(仅 type 依赖,不引入运行时耦合)。
+export type { BotChatSessionView };
+
 export type ConversationOrigin = 'mine' | 'others';
 export type ConversationSessionScope = 'all' | 'favorite';
 export type ConversationBotSection = 'managed' | 'team' | 'friend';
@@ -49,6 +53,14 @@ export interface ConversationSessionListState {
   error: string | null;
   isLoadingMore: boolean;
   loadMoreError: string | null;
+}
+
+/** 多实例服务 Bot 的会话请求范围:按实例(device UUID)与发布阶段取数;缺省不传 = 不限定(现状行为)。 */
+export interface ConversationSessionRequestRange {
+  /** 实例标识(containers 接口返回的实例 id,即 device UUID)。 */
+  deviceUuid: string;
+  /** 发布阶段;缺省由服务端默认。 */
+  stage?: 'draft' | 'verify' | 'online';
 }
 
 export interface ConversationFriendGroupView {

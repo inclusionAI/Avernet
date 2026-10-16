@@ -25,7 +25,7 @@ pub fn validate_authoring_definition_yaml_with_limits(
     cmd: ValidateCollaborationDefinitionYamlCommand,
     limits: &FixedLoopLimits,
 ) -> CollaborationDefinitionValidationOutcome {
-    validate_authoring_definition_yaml_with_instrumentation(cmd, limits, None, false)
+    validate_authoring_definition_yaml_with_instrumentation(cmd, limits, None, false, false)
 }
 
 pub(crate) fn validate_authoring_definition_yaml_with_instrumentation(
@@ -33,6 +33,7 @@ pub(crate) fn validate_authoring_definition_yaml_with_instrumentation(
     limits: &FixedLoopLimits,
     hook: Option<&dyn bcs_service_api::StateMachineLoopInstrumentationHook>,
     loop_execution_enabled: bool,
+    nested_loop_execution_enabled: bool,
 ) -> CollaborationDefinitionValidationOutcome {
     if cmd.definition_yaml.len() > MAX_COLLABORATION_DEFINITION_YAML_BYTES {
         return invalid_outcome(diagnostic(
@@ -129,11 +130,16 @@ pub(crate) fn validate_authoring_definition_yaml_with_instrumentation(
     let mut graph = graph_preview(projection);
     graph.loops = crate::loop_graph::loop_graph_descriptors(&compiled.definition);
     if let Some(plan) = &compiled.plan {
-        if !loop_execution_enabled {
+        let nested = plan.compiler_version == crate::fixed_loop::NESTED_FIXED_LOOP_COMPILER_VERSION;
+        if !loop_execution_enabled || (nested && !nested_loop_execution_enabled) {
             outcome.warnings.push(diagnostic(
                 "VALIDATION_ONLY_FEATURE",
-                "$.runtime.state_machine.version",
-                "fixed-loop validation and preview are available; version 2 execution is not enabled",
+                if nested { "$.runtime.state_machine.nodes" } else { "$.runtime.state_machine.version" },
+                if nested {
+                    "nested fixed-loop validation and preview are available; state_machine.loop.nesting execution is not enabled"
+                } else {
+                    "fixed-loop validation and preview are available; version 2 execution is not enabled"
+                },
             ));
         }
         graph.graph_mode = bcs_domain::StateMachineGraphMode::Hierarchical;
@@ -398,9 +404,6 @@ fn validate_nodes_shape(
         let node_path = format!("{nodes_path}.{node_id}");
         let is_loop = mapping_get(node, "kind").and_then(Value::as_str) == Some("loop");
         if is_loop {
-            if inside_loop {
-                return Err(diagnostic("INVALID_DEFINITION", &node_path, "nested loops are unsupported"));
-            }
             ensure_allowed_keys(node, &["kind", "display_name", "loop", "transitions", "extensions"], &node_path)?;
             validate_loop_shape(node, &node_path)?;
         } else {

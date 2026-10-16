@@ -15,6 +15,7 @@ import http from "node:http";
 import express from "express";
 import type { WorkflowDeployHistoryRepository } from "../../repositories/workflow-deploy-history-repository.js";
 import type { WorkflowDeployHistoryRow } from "../../repositories/workflow-deploy-history-repository.js";
+import type { WorkflowVersionSourceService } from "../../contracts/workflow-version-source.js";
 import { createWorkflowsRouter } from "../workflows.js";
 
 type HistoryRow = Omit<WorkflowDeployHistoryRow, "spec_json"> & { spec_json: string };
@@ -125,12 +126,12 @@ let app: express.Express;
 let server: http.Server;
 let baseUrl: string;
 
-function startApp(repo: WorkflowDeployHistoryRepository | null) {
+function startApp(repo: WorkflowDeployHistoryRepository | null, source: WorkflowVersionSourceService | null = null) {
   return new Promise<void>((resolve) => {
     server = http.createServer((app = express()));
     app.use(express.json());
     // Only wfdhRepo is exercised by the history routes; pass null for the rest.
-    app.use("/api/workflows", createWorkflowsRouter(null, null, null, null, repo, null));
+    app.use("/api/workflows", createWorkflowsRouter(null, null, null, null, repo, null, source));
     server.listen(0, () => {
       const addr = server.address();
       baseUrl = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
@@ -146,6 +147,18 @@ async function stopApp() {
 describe("workflow version history (read-only)", () => {
   afterEach(async () => {
     if (server.listening) await stopApp();
+  });
+
+  it("attaches trusted source only to the exact deploy including separately selected active release", async () => {
+    const source = { kind: 'auto_optimization', deployNumber: 3, baselineDeployNumber: 2, taskId: 'task', revision: 1,
+      automationRoundId: 'round', actorId: 'owner', effectiveAtMs: 1719000000000, restoredFromDeployNumber: null } as const;
+    await startApp(makeFakeRepo([row({ deploy_number: 3, version: 2, is_active: 1 }), row({ deploy_number: 4, version: 2 })]), {
+      forWorkflow: async () => new Map([[3, source]]), getSource: async () => source,
+    });
+    const body = await (await fetch(`${baseUrl}/api/workflows/tech-research/history`)).json();
+    expect(body.history.find((item: { deployNumber: number }) => item.deployNumber === 3).source).toEqual(source);
+    expect(body.history.find((item: { deployNumber: number }) => item.deployNumber === 4).source).toBeNull();
+    expect(body.active.source).toEqual(source);
   });
 
   describe("GET /api/workflows/:wf/history", () => {

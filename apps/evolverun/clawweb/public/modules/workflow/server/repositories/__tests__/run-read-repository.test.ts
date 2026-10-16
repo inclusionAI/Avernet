@@ -10,6 +10,7 @@ import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 
 function fixture() {
   const raw = new Database(":memory:");
+  raw.exec("CREATE TABLE workflow_repair_release_records (record_id TEXT, record_kind TEXT, workflow_id TEXT)");
   raw.exec(`CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, flow_id TEXT, workflow_id TEXT, status TEXT, origin_bot_id TEXT, identity_key TEXT, started_at INTEGER, gmt_modified INTEGER, state_json TEXT);
   INSERT INTO flow_runs VALUES (1,'f1','wf','failed','bot:owner','identity',1,2,NULL),(2,'f2','wf','failed','bot:owner','identity',1,2,NULL),(3,'other','wf','failed','bot:other','identity',1,2,NULL),(4,'legacy','wf','failed',NULL,'identity',1,2,NULL);
   CREATE TABLE run_logs (id INTEGER PRIMARY KEY,flow_id TEXT,node_id TEXT,level TEXT,source TEXT,message TEXT,timestamp INTEGER,seq INTEGER);

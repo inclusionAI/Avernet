@@ -19,10 +19,11 @@ export default defineConfig({
   codeSplitting: { jsStrategy: 'granularChunks' },
   esbuildMinifyIIFE: true,
   // Open（Avernet）形态的标签页标题/favicon；Internal 事实在核心 config/config.ts，两处同 PR 成对修改。
-  // /avernet-favicon.svg 为方版 mark 衍生的简化矢量（16px 可读，见 public/avernet-favicon.svg）。
-  favicons: ['/avernet-favicon.svg'],
+  // /favicon.png 为新版品牌 mark（墨黑笔画 + 蓝绿节点，透明底）位图直出，浅/深标签栏均可读。
+  favicons: ['/favicon.png'],
   title: 'Avernet',
   define: {
+    QWENWORK_PROVIDER_SLUG: process.env.QWENWORK_PROVIDER_SLUG || '',
     BCS_ENDPOINT_PRE: bcsEndpointPre,
     BCS_ENDPOINT_PROD: bcsEndpointProd,
   },

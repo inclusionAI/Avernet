@@ -1,3 +1,4 @@
+import type { GroupQuestionResolution } from '@/domain/collaboration/groupQuestions';
 import {
   createSessionToken,
   type SessionMessageAttachment,
@@ -16,6 +17,7 @@ import {
   isViewScopeChangedFrame,
   parseDeliveryStatusView,
 } from './groupChatProviderHelpers';
+import { GroupQuestionService, type GroupQuestionSnapshot } from './groupQuestionService';
 
 /** 透出 WS URL 构造器，保持既有 import 路径稳定（历史分页等纯函数已下沉到独立模块）。 */
 export { buildGroupWsUrl } from './groupChatProviderHelpers';
@@ -103,6 +105,18 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
   private initializePromise: Promise<SdkGroupChatProvider> | null = null;
   /** reconnect in-flight 守卫：并发重连共享同一 promise（只重拉一次 token）。 */
   private reconnectPromise: Promise<void> | null = null;
+  /**
+   * ask_user 交互生命周期 service——本 Provider 实例私有（快照/等待/幂等缓存随实例隔离）。
+   * 组件只经 subscribeToQuestions/resolveQuestion 消费，不接触 transport 或协议帧。
+   */
+  private readonly questionService: GroupQuestionService;
+  /**
+   * 拥有问答状态的连接周期（inner 身份校验）：只有当前周期的 inner 能驱动 questionService。
+   * 断开、替换或异步初始化被 disconnect 废弃时置 null——旧回调迟到也不更新新连接状态。
+   */
+  private questionScopeInner: SdkGroupChatProvider | null = null;
+  /** 连接生命周期序号：connect()/disconnect() 递增，用于废立在途异步初始化的问答 scope 认领。 */
+  private lifecycleSeq = 0;
   private connectionListeners = new Set<(event: ConnectionStatusEvent) => void>();
   private stateListeners = new Set<(state: GroupChatState) => void>();
   private viewScopeListeners = new Set<() => void>();
@@ -121,6 +135,14 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
   constructor(options: GroupChatProviderOptions) {
     this.options = options;
     this.historyPaginator = new GroupChatHistoryPaginator(options.sessionId, options.identityId);
+    this.questionService = new GroupQuestionService({
+      groupId: options.groupId,
+      bcsSessionId: options.sessionId,
+      // 动态发送：经当前 inner 的 transport 出站（替换后即刻切到新连接）；真实连接状态 getter，
+      // 不使用 UI 展示状态（displayStatus），断线下 resolve 在 service 层立即拒绝。
+      send: (frame) => this.sendQuestionFrame(frame),
+      isConnected: () => this.isConnected,
+    });
   }
 
   get isConnected(): boolean {
@@ -174,6 +196,22 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     return () => {
       this.deliveryListeners.delete(listener);
     };
+  }
+
+  /**
+   * 订阅当前群/会话的 ask_user 交互快照（委托 questionService，订阅即回放当前状态）。
+   * reason 区分 update/terminal/reset：reset 表示连接周期重置，业务侧暂存草稿等待重放。
+   */
+  subscribeToQuestions(listener: (snapshot: GroupQuestionSnapshot) => void): () => void {
+    return this.questionService.subscribe(listener);
+  }
+
+  /**
+   * 提交问答答案 / 取消整组（委托 questionService）。
+   * Promise 在匹配 ACK 或终态竞态时成功；失败拒绝结构化 GroupQuestionResolveError。
+   */
+  resolveQuestion(key: string, resolution: GroupQuestionResolution): Promise<void> {
+    return this.questionService.resolve(key, resolution);
   }
 
   private emitViewScopeChanged(): void {
@@ -245,6 +283,11 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
       if (event.status === 'error') {
         this.setState({ phase: 'error', error: event.error?.message || '连接失败' });
       }
+      // 断线（含 SDK 内部重连失败）立即结束问答响应等待并清空快照；connected 通知不重置——
+      // connect ACK 后服务端重放的 Pending 必须保留（协议 §7.3），快照重建只发生在下一次真实握手。
+      if (event.status === 'disconnected' && this.questionScopeInner === inner) {
+        this.questionService.resetConnection();
+      }
       this.emitConnection(event);
     });
 
@@ -257,6 +300,10 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
    *
    * 该适配只作用于当前 Provider 的出站帧，不改 API 合同、领域模型或 SDK 包；
    * 新版 SDK 若自行生成 session 字段，也统一覆盖为当前会话，避免重连沿用 main。
+   *
+   * 同时在每个真实 connect 握手 START（出站 connect 帧，覆盖显式连接与 SDK 自动
+   * 重连重发）开启新的问答连接周期：上链路前重置快照与等待，由服务端 ACK 后重放的
+   * Pending 重建（协议 §7.3）。
    */
   private patchSessionFrames(inner: SdkGroupChatProvider): void {
     const transport = (inner as unknown as { transport?: SessionFrameTransport }).transport;
@@ -265,6 +312,11 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     const originalSend = transport.send.bind(transport);
     const { sessionId } = this.options;
     transport.send = (frame: unknown) => {
+      const isConnectHandshake =
+        !!frame && typeof frame === 'object' && (frame as SessionFrame).method === 'connect';
+      if (isConnectHandshake && this.questionScopeInner === inner) {
+        this.questionService.resetConnection();
+      }
       if (!frame || typeof frame !== 'object') return originalSend(frame);
       const target = frame as SessionFrame;
       if (!target.params || typeof target.params !== 'object') return originalSend(frame);
@@ -278,8 +330,9 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
   }
 
   /**
-   * 拦截入站帧识别 view_scope_changed 关闭事件与 message.delivery.updated 投递状态变更事件：
-   * view_scope_changed 通知订阅者并整体重连；delivery.updated 通知订阅者。
+   * 拦截入站帧：问答消费优先——仅当前连接周期的 ask_user 交互事件与等待中请求的响应
+   * 被 questionService 吃掉（已替换/废弃的旧 inner 回调不触碰问答状态，也不会把帧吞掉）。
+   * 其余帧按既有链路处理：view_scope_changed 通知并整体重连、delivery.updated 通知订阅者；
    * 事件帧不透传给 SDK parser。
    */
   private patchIncomingFrames(inner: SdkGroupChatProvider): void {
@@ -287,6 +340,9 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     if (!transport || typeof transport.onMessage !== 'function') return;
     const originalOnMessage = transport.onMessage.bind(transport);
     transport.onMessage = (msg: unknown) => {
+      if (this.questionScopeInner === inner && this.questionService.handleFrame(msg)) {
+        return;
+      }
       if (isViewScopeChangedFrame(msg)) {
         this.emitViewScopeChanged();
         void this.reconnect();
@@ -302,9 +358,13 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
   }
 
   async connect(): Promise<void> {
+    // lifecycle 序号：初始化在途期间发生 disconnect 时，该 connect 的问答 scope 认领作废——
+    // 后续完成的旧连接不得重新激活交互状态（transport 层既有的建链行为保持不变）。
+    const lifecycleSeq = ++this.lifecycleSeq;
     this.emitConnection({ status: 'connecting', retryCount: 0 });
     try {
       const inner = await this.ensureInitialized();
+      if (this.lifecycleSeq === lifecycleSeq) this.questionScopeInner = inner;
       await inner.connect({ groupId: this.options.groupId, sessionId: this.options.sessionId });
       this.assertConnected(inner);
     } catch (error) {
@@ -316,6 +376,10 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
   }
 
   disconnect(): void {
+    // 废立在途的 connect/初始化 scope 认领；旧连接帧即刻失效；立即结束问答在途等待与定时器。
+    this.lifecycleSeq += 1;
+    this.questionScopeInner = null;
+    this.questionService.resetConnection();
     this.inner?.disconnect();
     this.emitConnection({ status: 'disconnected', retryCount: 0 });
   }
@@ -325,8 +389,10 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
   }
 
   async request(params: GroupChatRequest, messageId?: string): Promise<void> {
+    const lifecycleSeq = ++this.lifecycleSeq;
     const inner = await this.ensureInitialized();
     if (!inner.isConnected) {
+      if (this.lifecycleSeq === lifecycleSeq) this.questionScopeInner = inner;
       await inner.connect({ groupId: this.options.groupId, sessionId: this.options.sessionId });
       this.assertConnected(inner);
     }
@@ -345,8 +411,10 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
 
   /** 只接收目标 Bot；group/session scope 固定取 Provider 构造参数，组件无法跨会话伪造。 */
   async abortBot(botId: string): Promise<GroupChatAbortResult> {
+    const lifecycleSeq = ++this.lifecycleSeq;
     const inner = await this.ensureInitialized();
     if (!inner.isConnected) {
+      if (this.lifecycleSeq === lifecycleSeq) this.questionScopeInner = inner;
       await inner.connect({ groupId: this.options.groupId, sessionId: this.options.sessionId });
     }
     return (inner as SdkGroupChatProvider & BotAbortCapableProvider).abortBot({
@@ -354,6 +422,18 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
       sessionId: this.options.sessionId,
       botId,
     });
+  }
+
+  /**
+   * interaction.resolve 出站：动态经当前 inner 的 transport 发送（替换连接后自动指向新链路）。
+   * inner 缺失（首次建链前 / 已释放）视为发送失败，由 service 归一为可重试错误。
+   */
+  private sendQuestionFrame(frame: unknown): Promise<unknown> {
+    const transport = (this.inner as unknown as { transport?: SessionFrameTransport } | null)?.transport;
+    if (!transport || typeof transport.send !== 'function') {
+      return Promise.reject(new Error('协作会话 WebSocket 尚未建立。'));
+    }
+    return transport.send(frame);
   }
 
   async loadHistory(): Promise<ChatMessage[]> {
@@ -407,6 +487,10 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
   private async reconnectInner(): Promise<void> {
     this.unsubscribeInnerConnection?.();
     this.unsubscribeInnerConnection = undefined;
+    // 替换连接即刻完成旧周期：旧 inner 帧失效，问答在途等待立即结束（不等待下一次握手）；
+    // 新快照由新 connect 握手后服务端重放的 Pending 重建。
+    this.questionScopeInner = null;
+    this.questionService.resetConnection();
     this.inner?.disconnect();
     this.inner = null;
     this.initializePromise = null;

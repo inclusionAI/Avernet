@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 
 from fastapi import HTTPException, Request, status
+from starlette.concurrency import run_in_threadpool
 
 from src.application.services.worker_sync_merge import (
     save_merged_worker,
@@ -240,14 +241,22 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
 
                     # Sync runtime_state + availability to vector store payloads (Faiss + Qdrant)
                     try:
-                        vector_sync._sync_runtime_state_to_vector_store(worker_id, effective_runtime_state)
+                        await run_in_threadpool(
+                            vector_sync._sync_runtime_state_to_vector_store,
+                            worker_id,
+                            effective_runtime_state,
+                        )
                         if isinstance(current_worker, dict):
                             avail = (current_worker.get("state") or {}).get("availability", "protected")
                         else:
                             avail = getattr(getattr(current_worker, 'state', None), 'availability', 'protected')
                             if hasattr(avail, 'value'):
                                 avail = avail.value
-                        vector_sync._sync_availability_to_vector_store(worker_id, avail)
+                        await run_in_threadpool(
+                            vector_sync._sync_availability_to_vector_store,
+                            worker_id,
+                            avail,
+                        )
                     except Exception as sync_err:
                         logger.warning(f"[Workers R3 Sync] Vector payload sync failed: {sync_err}")
 
@@ -255,7 +264,11 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                 logger.info(f"[Workers R3 Sync] Runtime state preserved: {worker_id} -> {effective_runtime_state}")
                 # Availability still changed even though runtime state did not.
                 try:
-                    vector_sync._sync_availability_to_vector_store(worker_id, availability.value)
+                    await run_in_threadpool(
+                        vector_sync._sync_availability_to_vector_store,
+                        worker_id,
+                        availability.value,
+                    )
                 except Exception as sync_err:
                     logger.warning(f"[Workers R3 Sync] Vector availability sync failed: {sync_err}")
             else:
@@ -493,7 +506,9 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                     import time
                     start_time = time.time()
 
-                    index_success = _build_vector_index_for_worker(worker_id)
+                    index_success = await run_in_threadpool(
+                        _build_vector_index_for_worker, worker_id
+                    )
 
                     elapsed_ms = int((time.time() - start_time) * 1000)
 

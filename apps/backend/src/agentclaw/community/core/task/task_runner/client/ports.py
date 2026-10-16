@@ -32,10 +32,29 @@ class OpenApiBotPort(Protocol):
 
     async def ensure_grant(self, bot_id: str) -> None: ...
     async def send_message(
-        self, *, bot_id: str, message: str, metadata: dict[str, Any]
+        self, *, bot_id: str, message: str, metadata: dict[str, Any],
+        message_id: str | None = None,
     ) -> BotSendResult: ...
     async def get_run(self, run_id: str) -> dict[str, Any]: ...
     async def cancel_run(self, run_id: str) -> None: ...
+    async def get_session_messages(
+        self,
+        session_id: str,
+        *,
+        limit: int = 50,
+        bot_id: str | None = None,
+    ) -> list[Any]:
+        """读引擎侧会话(OpenClaw 等)的消息列表。
+
+        BaaS Open API ``GET /openapi/v1/sessions/{session_id}/messages``(Bearer
+        api_key,与 ``send_message`` 同款 base_url+key——会话即该链创建,鉴权面=
+        派发面:同一个 ``validate_policy`` gate,凡派发成功过的 bot 读回必过)。
+        ``bot_id`` 可选 query(复合 ``bot_id:owner_id`` 形态,同 ``send_message``
+        寻址);``None`` → BaaS 按 api_key 默认解析(仅 app_type=bot 的 key)。
+        返回 ``data.messages`` 原始 dict 列表(每条带 role/content,由服务端
+        excerpt builder 统一裁形)。注意 BaaS 对引擎 list 做 head-slice,
+        「最近 N 条」的方向性以引擎实际排序为准(联调验证项)。"""
+        ...
     async def send_and_wait_async(
         self,
         *,
@@ -70,8 +89,13 @@ class BcsClientPort(Protocol):
     ) -> str: ...
     async def get_group(self, group_id: str) -> dict[str, Any]: ...
     async def get_session_messages(
-        self, session_id: str, *, limit: int = 50, since_msg_id: str | None = None
+        self, session_id: str, *, limit: int = 50, since_msg_id: str | None = None,
+        caller_bearer: str | None = None,
     ) -> list[Any]: ...
+    # ``caller_bearer``:会话历史读口有参与者级 ACL("valid Human identity or
+    # Bot token is required")——服务 HMAC 签名不足。传入持有者 bot 的
+    # session_token 时 HTTP 实现携带 ``Authorization: Bearer``(同 ``create_group``
+    # 的 caller 身份手法);``None`` → 仅服务签名(旧语义,401 由调用方降级)。
     async def start_state_machine_run(
         self,
         group_id: str,
@@ -83,6 +107,32 @@ class BcsClientPort(Protocol):
     ) -> str: ...
     async def get_state_machine_run(self, run_id: str) -> dict[str, Any]: ...
     async def validate_definition(self, definition_yaml: str) -> None: ...
+    async def send_message_a2a(
+        self,
+        *,
+        target_bot_id: str,
+        target_user_id: str,
+        message: str,
+        session_id: str | None = None,
+        caller_bearer: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> BotSendResult:
+        """BCS A2A(bot↔bot 1:1)异步消息:``POST /bots/{target_bot_id}:{target_user_id}/chat-async``。
+
+        发送方身份由 ``caller_bearer``(发起 bot 的 BCS session_token,作
+        ``Authorization: Bearer``,BCS 据此把 caller 解析成该 bot)表达——与
+        ``create_group.caller_bot_token`` / ``get_session_messages.caller_bearer`` 同一手法;
+        目标用 ``bot_id:owner_id`` 寻址。``session_id`` 原样作 BCS session_key(多轮复用)。
+        """
+        ...
+    async def get_chat_run(
+        self,
+        run_id: str,
+        *,
+        since_version: int = 0,
+        wait_ms: int = 0,
+        caller_bearer: str | None = None,
+    ) -> dict[str, Any]: ...
     def task_callback_url(self) -> str:
         """Return the callback origin used by task event subscriptions."""
         ...

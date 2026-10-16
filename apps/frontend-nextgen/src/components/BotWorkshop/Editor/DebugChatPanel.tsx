@@ -1,4 +1,5 @@
 import BotAvatar from '@/components/BotWorkshop/BotAvatar';
+import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
 import { DebugChatComposer } from '@/components/BotWorkshop/Editor/DebugChatComposer';
 import { BotModelSelector } from '@/components/Workspace/ChatPanel/BotModelSelector';
 import { Badge } from '@/components/ui/Badge';
@@ -8,13 +9,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Spin } from '@/components/ui/Spin';
 import type { BotDomain, BotRuntimeStage } from '@/domain/botWorkshop';
 import { useBotChat } from '@/pages/Workspace/hooks/useBotChat';
+import { useBotCapabilitySets } from '@/pages/Workspace/hooks/useBotCapabilitySets';
 import { useBotModels } from '@/pages/Workspace/hooks/useBotModels';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
 import { parseDebugChatMessageContent } from '@/services/botWorkshop/debugChatFiles';
 import { botSessionService, type BotChatSessionView, type ChatBotView } from '@/services/workspace/botSessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { FileText, Loader2, Plus, RefreshCw } from 'lucide-react';
+import { FileText, Loader2, Maximize2, Minimize2, Plus, RefreshCw, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -68,11 +70,18 @@ export function DebugChatPanel({
   bot,
   runtimeStage,
   ownerId,
+  fullscreen = false,
+  onClose,
+  onToggleFullscreen,
 }: {
   bot: BotDomain;
   runtimeStage?: BotRuntimeStage;
   ownerId?: string;
+  fullscreen?: boolean;
+  onClose?: () => void;
+  onToggleFullscreen?: () => void;
 }) {
+  const avatarUrl = bot.avatarUrl || generateBotAvatar(bot.id || bot.name);
   const identityId = useWorkspaceStore((state) => state.activeIdentityId);
   const [sessions, setSessions] = useState<BotChatSessionView[]>([]);
   const [session, setSession] = useState<BotChatSessionView | null>(null);
@@ -100,6 +109,7 @@ export function DebugChatPanel({
     setSession((current) => (current?.sessionId === sessionId ? { ...current, model } : current));
   }, []);
   const botModels = useBotModels(chatBot, session, identityId, handleSessionModelChange);
+  const capabilitySets = useBotCapabilitySets(chatBot, identityId);
   const loadSessions = useCallback(async () => {
     if (!identityId) {
       setLoading(false);
@@ -143,12 +153,12 @@ export function DebugChatPanel({
       : { text: '未连接', tone: 'neutral' as const };
 
   return (
-    <aside className="flex h-full min-w-0 flex-1 flex-col border-l border-border bg-card">
-      <div className="flex items-center gap-3 border-b border-border p-4">
-        <BotAvatar name={bot.name} avatarUrl={bot.avatarUrl} />
+    <aside className="flex h-full min-w-0 flex-1 flex-col bg-card">
+      <div className="flex min-h-14 items-center gap-3 border-b border-border px-5 py-3">
+        <BotAvatar name={bot.name} avatarUrl={avatarUrl} className="size-7 rounded-full" />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <p className="m-0 truncate text-sm font-semibold">调试对话</p>
+            <p className="m-0 truncate text-base font-semibold">调试对话</p>
             <Badge tone={connection.tone}>{connection.text}</Badge>
           </div>
           <p className="m-0 mt-1 truncate text-xs text-muted-foreground">
@@ -156,13 +166,6 @@ export function DebugChatPanel({
             {chatBot.runtimeStage === 'online' ? '线上' : chatBot.runtimeStage === 'verify' ? '预发' : '草稿'}环境
           </p>
         </div>
-        <BotModelSelector
-          models={botModels.models}
-          activeModelId={botModels.activeModelId}
-          loading={botModels.isLoadingModels}
-          disabled={!session}
-          onSelect={(modelId) => void botModels.selectModel(modelId)}
-        />
         <Button
           variant="ghost"
           size="icon"
@@ -197,8 +200,27 @@ export function DebugChatPanel({
             ))}
           </SelectContent>
         </Select>
+        {onToggleFullscreen ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={fullscreen ? '还原调试对话窗口' : '全屏调试对话窗口'}
+            aria-pressed={fullscreen}
+            leftIcon={fullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            onClick={onToggleFullscreen}
+          />
+        ) : null}
+        {onClose ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="关闭调试对话"
+            leftIcon={<X className="size-4" />}
+            onClick={onClose}
+          />
+        ) : null}
       </div>
-      <div className="app-scrollbar min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
+      <div className="app-scrollbar min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5">
         {loading ? (
           <Spin tip="加载调试会话…" />
         ) : !session ? (
@@ -244,6 +266,16 @@ export function DebugChatPanel({
         userId={identityId}
         ownerId={chatBot.ownerId}
         isRequesting={debug.chat.isRequesting}
+        capabilitySets={capabilitySets}
+        modelSelector={
+          <BotModelSelector
+            models={botModels.models}
+            activeModelId={botModels.activeModelId}
+            loading={botModels.isLoadingModels}
+            disabled={!session}
+            onSelect={(modelId) => void botModels.selectModel(modelId)}
+          />
+        }
         onSend={debug.send}
         onStop={debug.stop}
       />

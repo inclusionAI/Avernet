@@ -49,7 +49,7 @@ afterEach(async () => {
   await db?.close();
 });
 
-async function startHost(configured = true) {
+async function startHost(configured = true, separateTeamclawSpaces = false) {
   module = createClawevolveModule({ db, dispatch,
     artifactStore: { putObject, getObject, createSignedUrl },
     hostLocalSkills: {
@@ -57,6 +57,7 @@ async function startHost(configured = true) {
       replaceLocalSkill: vi.fn(async () => { throw new Error("Unexpected live Skill write"); }),
     },
     ...(configured ? { hostSpaces: { listAccessibleSpaces } } : {}),
+    ...(separateTeamclawSpaces ? {hostTeamclawSpaces:{listAccessibleSpaces:async()=>[{id:"42",name:"Pre",type:"TEAM" as const,role:"MEMBER" as const}]},hostTeamclawBots:async()=>[]} : {}),
   });
   const app = express();
   app.use(express.json());
@@ -165,4 +166,14 @@ describe("ClawEvolve module space errors under a generic-500 host", () => {
     expect(hostErrors).toHaveBeenCalledTimes(endpoints.length);
     await expectUnchanged(before);
   });
+});
+
+
+it("uses the new frontend space directory without redirecting old Stage/Skill space lookups",async()=>{
+  await startHost(true,true);
+  const response=await fetch(`${baseUrl}/teamclaw/tasks?space_id=42`,{headers:{"X-User-Id":actor}});
+  expect(response.status).toBe(200);expect((await response.json()).tasks).toEqual([]);
+  expect(listAccessibleSpaces).not.toHaveBeenCalled();
+  const old=await fetch(`${baseUrl}/spaces`,{headers:{"X-User-Id":actor}});
+  expect(old.status).toBe(200);expect(listAccessibleSpaces).toHaveBeenCalledTimes(1);
 });

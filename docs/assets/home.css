@@ -106,16 +106,19 @@ html[lang|="zh"] .en-only { display: none; }
   padding: 10px 0;
 }
 .nav a:hover { color: var(--paper); }
-.nav .nav-github, .lang-toggle {
+/* Nav items never shrink: a squeezed item drops the Star icon or breaks 文档 onto two lines.
+   The breakpoints in the Responsive section hide items before the row runs out of room. */
+.nav > * { flex-shrink: 0; white-space: nowrap; }
+.nav .star-link, .star-link, .lang-toggle {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 7px 12px;
   border: 1px solid rgba(242, 247, 255, 0.18);
   border-radius: 8px;
   color: var(--paper);
 }
-.nav .nav-github:hover, .lang-toggle:hover { border-color: rgba(242, 247, 255, 0.5); }
-.stars { padding-left: 8px; margin-left: 2px; border-left: 1px solid rgba(242, 247, 255, 0.18); color: var(--soft); }
-.stars::before { content: "\2605"; margin-right: 4px; color: var(--green); }
+.star-link:hover, .lang-toggle:hover { border-color: rgba(242, 247, 255, 0.5); }
+.star-link { font: 500 14px/1 var(--font-display); text-decoration: none; white-space: nowrap; }
+.star-link > svg { flex: none; }
 .lang-toggle {
   background: transparent;
   font: 500 13px/1 var(--font-display);
@@ -178,6 +181,9 @@ html[lang|="zh"] .en-only { display: none; }
 .hero-category { display: block; max-width: 17em; }
 .hero-sub { margin-top: 24px; max-width: 31em; font: 500 20px/1.55 var(--font-display); color: #C9D5E6; text-wrap: balance; }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 36px; }
+.hero-links { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 24px; margin-top: 18px; }
+.hero-links a, .hero-links .link-button { font: 500 15px/1.4 var(--font-display); color: var(--link-dark); }
+.hero-links a:hover, .hero-links .link-button:hover { color: var(--paper); }
 .hero-proof { margin-top: 30px; max-width: 36em; font-size: 14px; line-height: 1.6; color: var(--mist); }
 .hero-net { margin: 0; justify-self: end; width: 100%; max-width: 600px; }
 .net { display: block; width: 100%; height: auto; overflow: visible; }
@@ -493,6 +499,9 @@ h2 { font-size: clamp(30px, 3.7vw, 46px); line-height: 1.1; letter-spacing: -0.0
 .footer-base { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 48px; padding-top: 24px; font-size: 13.5px; }
 .footer-base::before { content: ""; position: absolute; top: 0; left: var(--gutter); right: var(--gutter); border-top: 1px solid var(--ink-line); }
 .footer-base .lang-toggle { color: var(--paper); }
+.footer-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.footer-actions .star-link { border: 0; padding: 7px 0; color: var(--mist); }
+.footer-actions .star-link:hover { color: var(--paper); text-decoration: underline; }
 
 /* ---------- Demo dialog ---------- */
 dialog.demo {
@@ -526,10 +535,14 @@ dialog.demo video { display: block; width: 100%; aspect-ratio: 16 / 9; backgroun
   .footer-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .footer-brand { grid-column: 1 / -1; }
 }
+/* The full nav (section anchors + Playground) needs about 870px. */
+@media (max-width: 870px) {
+  .nav-anchor { display: none; }
+}
 @media (max-width: 760px) {
   :root { --gutter: 16px; }
   .nav { gap: 10px; }
-  .nav-anchor { display: none; }
+  .nav .star-label-detail { display: none; }
   .section { padding: 72px 0; }
   .hero { padding: 44px 0 150px; }
   .hero h1 { font-size: clamp(24px, 6.6vw, 30px); }
@@ -565,10 +578,18 @@ dialog.demo video { display: block; width: 100%; aspect-ratio: 16 / 9; backgroun
   .matrix-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .footer-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .footer-base { flex-direction: column; align-items: flex-start; }
+  .footer-actions { align-self: flex-end; }
+}
+/* Phones: the hero button carries the Playground link. */
+@media (max-width: 510px) {
+  .nav-playground { display: none; }
 }
 @media (max-width: 380px) {
   .brand img { height: 24px; }
-  .nav .nav-github span:first-of-type { display: none; }
+}
+@media (max-width: 345px) {
+  .nav { gap: 6px; }
+  .nav .star-link, .nav .lang-toggle { padding-inline: 8px; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }

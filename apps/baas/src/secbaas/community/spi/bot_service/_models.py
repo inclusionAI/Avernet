@@ -31,7 +31,7 @@ class BotBindingData:
     engine_type: str
     publish_id: int | None = None
     publish_status: str | None = None
-    binding_id: int = 0
+    binding_id: int | None = None
     device_provider: str = ""
     device_id: str = ""
     template_type: str | None = None

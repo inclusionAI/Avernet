@@ -27,6 +27,49 @@ beforeEach(() => {
 });
 
 describe('useGroupWorkspace', () => {
+  it('列表缺成员的群按详情补拉头像堆名单，缓存命中后刷新不重复拉取', async () => {
+    const p = (i: number) => ({
+      actorId: `a${i}`,
+      kind: 'bot' as const,
+      name: `成员${i}`,
+      role: 'member' as const,
+      mode: 'auto' as const,
+    });
+    const base = {
+      kind: 'free_chat' as const,
+      status: 'active' as const,
+      sessions: [],
+      lastMessageAt: 1,
+      createdAt: 1,
+      isPublic: false,
+      deliveryPolicy: 'send_to_driver' as const,
+    };
+    // 列表接口只回 participant_count（BCS NormalGroupSummary 无 participants），members 由补拉喂。
+    gs.loadGroups.mockResolvedValue({
+      ok: true,
+      data: [
+        { ...base, groupId: 'g-empty', name: '空名单群', participantCount: 3, participants: [] },
+        { ...base, groupId: 'g-full', name: '全量群', participantCount: 2, participants: [p(1), p(2)] },
+      ],
+    });
+    gs.loadGroupParticipants.mockResolvedValue([p(1), p(2), p(3)]);
+    const { result } = renderHook(() => useGroupWorkspace());
+    // 只有缺成员的 g-empty 被补拉（g-full 已有成员名单，零请求）。
+    await waitFor(() => expect(gs.loadGroupParticipants).toHaveBeenCalledTimes(1));
+    expect(gs.loadGroupParticipants).toHaveBeenCalledWith('g-empty', 'bot-1');
+    await waitFor(() =>
+      expect(result.current.groups.find((g) => g.groupId === 'g-empty')?.participants).toHaveLength(3),
+    );
+    expect(result.current.groups.find((g) => g.groupId === 'g-empty')?.participants[0].name).toBe('成员1');
+    // 刷新列表：g-empty 从缓存播种（participants 已非空），不再对其发详情补拉。
+    gs.loadGroupParticipants.mockClear();
+    await act(async () => {
+      await result.current.refreshGroups();
+    });
+    expect(gs.loadGroupParticipants).not.toHaveBeenCalled();
+    expect(result.current.groups.find((g) => g.groupId === 'g-empty')?.participants).toHaveLength(3);
+  });
+
   it('searches group list with 300ms debounce per identity', async () => {
     jest.useFakeTimers();
     gs.loadGroups.mockResolvedValue({

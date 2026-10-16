@@ -7,6 +7,7 @@ let db: SqliteDatabase;
 let raw: Database.Database;
 beforeEach(() => {
   raw = new Database(':memory:');
+  raw.exec("CREATE TABLE workflow_repair_release_records (record_id TEXT, record_kind TEXT, workflow_id TEXT)");
   db = new SqliteDatabase(raw);
   raw.exec(`CREATE TABLE workflow_evolution_analysis_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, analysis_id TEXT, workflow_id TEXT, flow_id TEXT,
@@ -16,6 +17,55 @@ beforeEach(() => {
       failure_signature TEXT, failure_mode TEXT, node_id TEXT, weak_node_id TEXT, error_text TEXT, gmt_modified INTEGER);`);
 });
 afterEach(async () => { vi.restoreAllMocks(); await db.close(); });
+
+function coverageFixture() {
+  raw.exec(`ALTER TABLE workflow_evolution_analysis_runs ADD COLUMN state_version INTEGER DEFAULT 0;
+    CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, workflow_id TEXT, started_at INTEGER);
+    CREATE TABLE node_executions (flow_id TEXT, node_id TEXT);`);
+  const now = Date.now();
+  raw.prepare("INSERT INTO flow_runs VALUES ('covered', 'wf', ?)").run(now - 10000);
+  raw.exec("INSERT INTO node_executions VALUES ('covered', 'node-0')");
+  const add = (id: string, at: number, scope: object, unknowns: string[] = [], broken = false) => {
+    const result = { schemaVersion: 'workflow-evolution-analysis/v1', analysisId: id, facts: [], inferences: [], unknowns,
+      diagnoses: [{ diagnosisId: id, flowIds: ['covered'], nodeId: 'node-0', failureSignature: 'issue-0',
+        failureMode: 'timeout', severity: 'high', reasoning: 'Observed timeout', evidenceEventIds: [] }] };
+    raw.prepare(`INSERT INTO workflow_evolution_analysis_runs (analysis_id, workflow_id, flow_id, scope_type,
+      scope_json, status, result_json, requested_at_ms, completed_at_ms) VALUES (?, 'wf', 'covered', 'single_run', ?, 'completed', ?, ?, NULL)`)
+      .run(id, JSON.stringify(scope), broken ? '{}' : JSON.stringify(result), at);
+  };
+  return { now, add, repository: new IssueAggregationRepository(db) };
+}
+
+it('counts completed analysis for the issue node separately from complete coverage and legacy diagnosis evidence', async () => {
+  const { now, add, repository } = coverageFixture();
+  add('node-analysis', now - 9000, { flowIds: ['covered'], nodeId: 'node-0' }, ['External evidence missing']);
+  let page = await repository.listPage('wf', { page: 1, pageSize: 20 });
+  expect(page.groups[0].priority?.week).toMatchObject({ related: 1, analyzed: 1, complete: 0, sampleHitRate: null, occurrenceRate: null });
+  add('node-complete', now - 8000, { flowIds: ['covered'], nodeIds: ['node-0'] });
+  add('unrelated-node', now - 7000, { flowIds: ['covered'], nodeId: 'other' });
+  page = await repository.listPage('wf', { page: 1, pageSize: 20 });
+  expect(page.groups[0].priority?.week).toMatchObject({ analyzed: 1, complete: 1, sampleHitRate: 1, occurrenceRate: 1 });
+  raw.prepare("INSERT INTO flow_runs VALUES ('legacy-run', 'wf', ?)").run(now - 10000);
+  raw.exec("INSERT INTO node_executions VALUES ('legacy-run', 'node-0')");
+  raw.prepare("INSERT INTO workflow_healing_diagnoses VALUES ('legacy-d', 'wf', 'legacy-run', 'issue-0', 'timeout', 'node-0', NULL, 'old evidence', ?)").run(now);
+  page = await repository.listPage('wf', { page: 1, pageSize: 20 });
+  expect(page.groups[0].priority?.week).toMatchObject({ related: 2, analyzed: 1, complete: 1, legacyDiagnosed: 1, occurrenceRate: null });
+});
+
+it('uses latest applicable effective time, including NULL completion, and does not replace invalid latest evidence with older clean analysis', async () => {
+  const { now, add, repository } = coverageFixture();
+  add('new-partial', now - 1000, { flowIds: ['covered'], nodeId: 'node-0' }, ['Missing evidence']);
+  add('old-clean-inserted-later', now - 9000, { flowIds: ['covered'] });
+  let page = await repository.listPage('wf', { page: 1, pageSize: 20 });
+  expect(page.groups[0].priority?.week).toMatchObject({ analyzed: 1, complete: 0, occurrenceRate: null });
+  add('new-invalid', now - 500, { flowIds: ['covered'], nodeIds: ['node-0'] }, [], true);
+  page = await repository.listPage('wf', { page: 1, pageSize: 20 });
+  expect(page.groups[0].priority?.week).toMatchObject({ analyzed: 0, complete: 0, occurrenceRate: null });
+  raw.exec(`UPDATE workflow_evolution_analysis_runs SET flow_id = NULL, scope_json = '{}',
+    result_json = '{"schemaVersion":"unsupported","diagnoses":[{"flowIds":["covered"]}]}' WHERE analysis_id = 'new-invalid'`);
+  page = await repository.listPage('wf', { page: 1, pageSize: 20 });
+  expect(page.groups[0].priority?.week).toMatchObject({ analyzed: 0, complete: 0, occurrenceRate: null });
+});
 
 async function seed(groupCount = 8, revisions = 10, sources = 2) {
   const insert = raw.prepare(`INSERT INTO workflow_evolution_analysis_runs
@@ -131,4 +181,72 @@ describe('issue group read cost', () => {
     expect(group.aggregationStatus).toBe('completed');
     expect(group.summary?.summary).toBe('summary-issue-0-1');
   });
+});
+
+
+it('limits priority run reads to two weeks and affected IDs even beyond 50000 lifetime runs', async () => {
+  const { repository } = await seed(1, 1, 1);
+  raw.exec(`ALTER TABLE workflow_evolution_analysis_runs ADD COLUMN state_version INTEGER DEFAULT 0;
+    CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, workflow_id TEXT, started_at INTEGER);
+    CREATE TABLE node_executions (flow_id TEXT, node_id TEXT);`);
+  const now = Date.now();
+  const insert = raw.prepare("INSERT INTO flow_runs VALUES (?, 'wf', ?)");
+  raw.transaction(() => {
+    for (let i = 0; i < 50001; i++) insert.run(`old-${i}`, Math.floor((now - 30 * 86400000) / 1000));
+    insert.run('run-0-0', now - 20 * 86400000);
+    insert.run('recent-seconds', Math.floor((now - 3600000) / 1000));
+    insert.run('recent-millis', now - 3600000);
+    insert.run('previous-week', Math.floor((now - 10 * 86400000) / 1000));
+  })();
+  raw.exec("INSERT INTO node_executions VALUES ('recent-seconds', 'node-0'), ('recent-millis', 'node-0'), ('previous-week', 'node-0')");
+  const query = vi.spyOn(db, 'query');
+  const page = await repository.listPage('wf', { page: 1, pageSize: 20 });
+  expect(page.groups).toHaveLength(1);
+  expect(page.groups[0].priority).toMatchObject({
+    week: { related: 2, affected: 0, analyzed: 0 }, previousWeek: { related: 1 },
+    lastOccurredAtMs: now - 20 * 86400000, missingRunTimes: 0,
+  });
+  const runBatches = await Promise.all(query.mock.calls.flatMap(([sql], i) =>
+    /FROM flow_runs/.test(sql) ? [query.mock.results[i].value] : []));
+  expect(runBatches.flat()).toHaveLength(4);
+});
+
+
+it('bounds priority analysis reads by the statistics window and retains multi-run coverage', async () => {
+  const { repository } = await seed(1, 1, 1);
+  raw.exec(`ALTER TABLE workflow_evolution_analysis_runs ADD COLUMN state_version INTEGER DEFAULT 0;
+    CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, workflow_id TEXT, started_at INTEGER);
+    CREATE TABLE node_executions (flow_id TEXT, node_id TEXT);`);
+  const now = Date.now();
+  raw.prepare("INSERT INTO flow_runs VALUES ('single', 'wf', ?), ('multi', 'wf', ?)").run(now - 3600000, now - 3600000);
+  raw.exec("INSERT INTO node_executions VALUES ('single', 'node-0'), ('multi', 'node-0')");
+  const insert = raw.prepare(`INSERT INTO workflow_evolution_analysis_runs
+    (analysis_id, workflow_id, flow_id, scope_type, scope_json, status, result_json, requested_at_ms, completed_at_ms)
+    VALUES (?, 'wf', ?, 'single_run', ?, 'completed', ?, ?, ?)`);
+  const result = (id: string) => JSON.stringify({ schemaVersion: 'workflow-evolution-analysis/v1', analysisId: id,
+    facts: [], inferences: [], unknowns: [], diagnoses: [] });
+  raw.transaction(() => {
+    for (let i = 0; i < 1000; i++) insert.run(`history-${i}`, 'old', '{}', result(`history-${i}`), 1, 1);
+    insert.run('single', 'single', '{}', result('single'), now - 1000, now - 1000);
+    insert.run('multi', null, JSON.stringify({ flowIds: ['multi'] }), result('multi'), now - 1000, now - 1000);
+    insert.run('future', 'single', '{}', result('future'), now + 86400000, now + 86400000);
+  })();
+  const query = vi.spyOn(db, 'query');
+  const page = await repository.listPage('wf', { page: 1, pageSize: 20 });
+  expect(page.groups[0].priority?.week).toMatchObject({ related: 2, analyzed: 2 });
+  const analysisBatches = await Promise.all(query.mock.calls.flatMap(([sql], i) =>
+    /SELECT id, flow_id, scope_json, result_json, completed_at_ms, requested_at_ms FROM workflow_evolution_analysis_runs/.test(sql)
+      ? [query.mock.results[i].value] : []));
+  expect(analysisBatches.flat()).toHaveLength(2);
+});
+
+it('removes trial evidence from model and legacy issue frequency sources', async () => {
+  const { now, add, repository } = coverageFixture();
+  add('trial-analysis', now - 1000, { flowIds: ['covered'] });
+  raw.exec("INSERT INTO workflow_repair_release_records VALUES ('covered', 'trial_run', 'wf')");
+  raw.exec("INSERT INTO workflow_healing_diagnoses VALUES ('legacy-trial', 'wf', 'covered', 'trial-only', 'timeout', 'node-0', NULL, 'timeout', 1)");
+  expect(await repository.listSources('wf')).toEqual([]);
+  const result = await repository.listPage('wf', { page: 1, pageSize: 20 });
+  expect(result.groups).toEqual([]);
+  expect(result.page.total).toBe(0);
 });

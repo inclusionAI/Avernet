@@ -1,10 +1,10 @@
 import { useState, useCallback, useEffect } from 'react'
-import { useAutoHealDiagnose, useAutoHealApply, useAutoHealRun } from '@avernet/workflow/web/api/hooks'
+import { useAutoHealDiagnose, useAutoHealSave, useAutoHealDeploy, useAutoHealRun } from '@avernet/workflow/web/api/hooks'
 import StatusBadge from '@avernet/workflow/web/components/StatusBadge'
 import type { FlowRun, AutoHealDiagnosisResult, AutoHealDiffItem, AutoHealErrorChainItem, AutoHealFixSuggestion } from '@avernet/clawweb-shared/web/types'
 import { formatDuration } from '@avernet/workflow/web/utils/time'
 
-type Phase = 'idle' | 'diagnosing' | 'diagnosed' | 'applying' | 'applied' | 'running' | 'error'
+type Phase = 'idle' | 'diagnosing' | 'diagnosed' | 'saving' | 'saved' | 'deploying' | 'deployed' | 'running' | 'error'
 
 interface AutoHealPanelProps {
   run: FlowRun
@@ -21,9 +21,12 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
   const [diffExpanded, setDiffExpanded] = useState(true)
   const [errorChainExpanded, setErrorChainExpanded] = useState(true)
   const [suggestionsExpanded, setSuggestionsExpanded] = useState(true)
+  const [autoRun, setAutoRun] = useState(true)
+  const [saveResult, setSaveResult] = useState<{ packId: string } | null>(null)
 
   const diagnoseMutation = useAutoHealDiagnose()
-  const applyMutation = useAutoHealApply()
+  const saveMutation = useAutoHealSave()
+  const deployMutation = useAutoHealDeploy()
   const runMutation = useAutoHealRun()
 
   // Close on Escape
@@ -79,30 +82,62 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
     return () => clearInterval(timer)
   }, [phase])
 
-  const handleApply = useCallback(() => {
+  const handleSave = useCallback(() => {
     if (!diagnosisResult?.fixedSpec) return
 
-    setPhase('applying')
+    setPhase('saving')
     setErrorMessage(null)
+    setSaveResult(null)
 
-    applyMutation.mutate(
+    saveMutation.mutate(
       {
         workflowId: diagnosisResult.workflowId,
         spec: diagnosisResult.fixedSpec,
         diagnosisId: diagnosisResult.diagnosisId,
-        autoRun: false,
+        note: 'auto-heal save',
       },
       {
-        onSuccess: () => {
-          setPhase('applied')
+        onSuccess: (result) => {
+          setSaveResult({ packId: result.packId })
+          setPhase('saved')
         },
         onError: (err) => {
           setPhase('error')
-          setErrorMessage(extractErrorMessage(err, '应用修复失败'))
+          setErrorMessage(extractErrorMessage(err, '保存修复失败'))
         },
       },
     )
-  }, [diagnosisResult, applyMutation])
+  }, [diagnosisResult, saveMutation])
+
+  const handleDeploy = useCallback(() => {
+    if (!diagnosisResult) return
+
+    setPhase('deploying')
+    setErrorMessage(null)
+
+    deployMutation.mutate(
+      {
+        workflowId: diagnosisResult.workflowId,
+        packId: saveResult?.packId ?? null,
+        diagnosisId: diagnosisResult.diagnosisId,
+        note: 'auto-heal deploy',
+        autoRun,
+      },
+      {
+        onSuccess: (deployResult) => {
+          if (autoRun && deployResult.runId) {
+            setPhase('running')
+          } else {
+            setPhase('deployed')
+          }
+        },
+        onError: (err) => {
+          setPhase('error')
+          setErrorMessage(extractErrorMessage(err, '部署修复失败'))
+        },
+      },
+    )
+  }, [diagnosisResult, saveResult, deployMutation, autoRun])
 
   const handleRerun = useCallback(() => {
     if (!diagnosisResult) return
@@ -180,7 +215,7 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
           {phase === 'diagnosing' && <DiagnosingContent elapsed={diagnosingElapsed} />}
 
           {/* Diagnosed: Results */}
-          {(phase === 'diagnosed' || phase === 'error') && diagnosisResult && (
+          {(phase === 'diagnosed' || phase === 'saving' || phase === 'saved' || phase === 'deploying' || phase === 'deployed' || phase === 'error') && diagnosisResult && (
             <DiagnosisResults
               result={diagnosisResult}
               diffExpanded={diffExpanded}
@@ -192,14 +227,58 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
             />
           )}
 
-          {/* Applied: Success state */}
-          {phase === 'applied' && (
+          {/* Saving state */}
+          {phase === 'saving' && (
+            <div className="flex flex-col items-center py-12 text-gray-400">
+              <div className="mb-3 h-10 w-10 animate-spin rounded-full border-3 border-gray-300 border-t-blue-600" />
+              <p className="font-medium text-gray-600 text-sm">正在保存修复…</p>
+              <p className="text-xs">git commit + push saved/分支</p>
+            </div>
+          )}
+
+          {/* Saved: deploy preview + autoRun toggle */}
+          {phase === 'saved' && (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-blue-200 bg-blue-50 px-5 py-4">
+                <h3 className="font-semibold text-blue-800">修复已保存</h3>
+                <p className="mt-1 text-blue-700 text-sm">
+                  工作流已保存到 git 的 <code className="rounded bg-blue-100 px-1">saved/{diagnosisResult?.workflowId}</code> 分支。
+                </p>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-white px-5 py-4">
+                <label className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-700">部署后自动重新运行</span>
+                  <input
+                    type="checkbox"
+                    checked={autoRun}
+                    onChange={(e) => setAutoRun(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                </label>
+                <p className="mt-1 text-xs text-gray-500">
+                  开启后，部署成功会自动触发一次新的 flow run 来验证修复。
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Deploying state */}
+          {phase === 'deploying' && (
+            <div className="flex flex-col items-center py-12 text-gray-400">
+              <div className="mb-3 h-10 w-10 animate-spin rounded-full border-3 border-gray-300 border-t-blue-600" />
+              <p className="font-medium text-gray-600 text-sm">正在部署修复…</p>
+              <p className="text-xs">git tag + push wf/分支</p>
+            </div>
+          )}
+
+          {/* Deployed: Success state */}
+          {phase === 'deployed' && (
             <div className="rounded-lg border border-green-200 bg-green-50 px-5 py-4 text-center">
               <svg className="mx-auto mb-2 h-10 w-10 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <h3 className="font-semibold text-green-800">修复已应用</h3>
-              <p className="mt-1 text-green-700 text-sm">工作流 YAML 已更新。你可以重新运行工作流来验证修复效果。</p>
+              <h3 className="font-semibold text-green-800">修复已部署</h3>
+              <p className="mt-1 text-green-700 text-sm">工作流已保存并部署到生产。你可以重新运行工作流来验证修复效果。</p>
             </div>
           )}
 
@@ -219,11 +298,13 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
           isFailed={isFailed}
           hasFixedSpec={!!diagnosisResult?.fixedSpec}
           onDiagnose={handleDiagnose}
-          onApply={handleApply}
+          onSave={handleSave}
+          onDeploy={handleDeploy}
           onRerun={handleRerun}
           onReset={handleReset}
           isDiagnosing={diagnoseMutation.isPending}
-          isApplying={applyMutation.isPending}
+          isSaving={saveMutation.isPending}
+          isDeploying={deployMutation.isPending}
           isRunning={runMutation.isPending}
         />
       </div>
@@ -269,10 +350,18 @@ function PanelHeader({ run, onClose }: { run: FlowRun; onClose: () => void }) {
 
 function PhaseIndicator({ phase }: { phase: Phase }) {
   const steps = [
-    { key: 'diagnose', label: '诊断', active: phase === 'diagnosing', done: ['diagnosed', 'applying', 'applied', 'running'].includes(phase) },
-    { key: 'apply', label: '修复', active: phase === 'applying', done: ['applied', 'running'].includes(phase) },
+    { key: 'diagnose', label: '诊断', active: phase === 'diagnosing', done: ['diagnosed', 'saving', 'saved', 'deploying', 'deployed', 'running'].includes(phase) },
+    { key: 'save', label: '保存', active: phase === 'saving', done: ['saved', 'deploying', 'deployed', 'running'].includes(phase) },
+    { key: 'deploy', label: '部署', active: phase === 'deploying', done: ['deployed', 'running'].includes(phase) },
     { key: 'rerun', label: '重跑', active: phase === 'running', done: phase === 'running' },
   ]
+
+  const activeLabel =
+    phase === 'saving' ? '保存中…' :
+    phase === 'saved' ? '等待部署…' :
+    phase === 'deploying' ? '部署中…' :
+    phase === 'deployed' ? '部署完成' :
+    phase === 'running' ? '运行中…' : null
 
   return (
     <div className="flex items-center gap-3 border-b border-gray-100 bg-gray-50 px-6 py-2.5 text-xs">
@@ -286,7 +375,7 @@ function PhaseIndicator({ phase }: { phase: Phase }) {
         </span>
       ))}
       {phase === 'error' && <span className="ml-auto font-medium text-red-500">失败</span>}
-      {phase === 'applied' && <span className="ml-auto font-medium text-green-600">修复已应用</span>}
+      {activeLabel && <span className="ml-auto font-medium text-blue-600">{activeLabel}</span>}
     </div>
   )
 }
@@ -651,20 +740,22 @@ interface PanelFooterProps {
   isFailed: boolean
   hasFixedSpec: boolean
   onDiagnose: () => void
-  onApply: () => void
+  onSave: () => void
+  onDeploy: () => void
   onRerun: () => void
   onReset: () => void
   isDiagnosing: boolean
-  isApplying: boolean
+  isSaving: boolean
+  isDeploying: boolean
   isRunning: boolean
 }
 
-function PanelFooter({ phase, isFailed, hasFixedSpec, onDiagnose, onApply, onRerun, onReset, isDiagnosing, isApplying, isRunning }: PanelFooterProps) {
+function PanelFooter({ phase, isFailed, hasFixedSpec, onDiagnose, onSave, onDeploy, onRerun, onReset, isDiagnosing, isSaving, isDeploying, isRunning }: PanelFooterProps) {
   return (
     <div className="border-t border-gray-200 bg-gray-50 px-6 py-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          {(phase === 'diagnosed' || phase === 'applied' || phase === 'error') && (
+          {(phase === 'diagnosed' || phase === 'deployed' || phase === 'error') && (
             <button
               onClick={onReset}
               className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50"
@@ -688,22 +779,36 @@ function PanelFooter({ phase, isFailed, hasFixedSpec, onDiagnose, onApply, onRer
             </button>
           )}
 
-          {/* Apply button */}
+          {/* Save button */}
           {(phase === 'diagnosed' || (phase === 'error' && hasFixedSpec)) && (
             <button
-              onClick={onApply}
-              disabled={isApplying || !hasFixedSpec}
+              onClick={onSave}
+              disabled={isSaving || !hasFixedSpec}
               className="inline-flex items-center gap-2 rounded-md bg-orange-600 px-5 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                <path strokeLinecap="round" stroke-linejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
-              {isApplying ? '应用中…' : '应用修复'}
+              {isSaving ? '保存中…' : '保存修复'}
+            </button>
+          )}
+
+          {/* Deploy button */}
+          {phase === 'saved' && (
+            <button
+              onClick={onDeploy}
+              disabled={isDeploying}
+              className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-5 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.59 14.37a6 6 0 01-5.84 7.38v-4.8m5.84 2.58a14.98 14.98 0 006.16-12.7A14.98 14.98 0 009.631 8.41m5.96 5.04a14.92 14.92 0 00-6.16-12.7A14.98 14.98 0 003.151 8.41m5.96 5.04v4.8m-5.96-5.04a6 6 0 0010.03 4.18" />
+              </svg>
+              {isDeploying ? '部署中…' : '部署修复'}
             </button>
           )}
 
           {/* Rerun button */}
-          {phase === 'applied' && (
+          {phase === 'deployed' && (
             <button
               onClick={onRerun}
               disabled={isRunning}

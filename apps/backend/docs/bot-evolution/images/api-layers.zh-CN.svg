@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="770" viewBox="0 0 1120 770" font-family="system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" role="img" aria-label="两层 API：面向调用方的公共进化 API，和面向进化策略的策略端口">
+<title>两层 API：面向调用方的公共进化 API，和面向进化策略的策略端口</title>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#475569"/></marker><marker id="ahl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/></marker><marker id="ahp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#7c3aed"/></marker></defs>
+<rect width="1120" height="770" fill="#ffffff"/>
+<rect x="140" y="16" width="840" height="46" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+<text x="560.0" y="39.0" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">调用方：业务线的流水线与 CI · 产品后端 · UI 后端 · 通过 UI 操作的人</text>
+<path d="M 560 62 L 560 90" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="574" y="76" font-size="11.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">HTTPS · JSON · 已发布的 OpenAPI 文档 · 前缀 /openapi/v1</text>
+<rect x="40" y="92" width="1040" height="150" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="56" y="112" font-size="13" font-weight="600" fill="#334155" text-anchor="start" dominant-baseline="middle">A 层 —— 进化 API（公共）。调用方做的事：配置、启动、观察、评审、晋升。</text>
+<text x="1064" y="112" font-size="11" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle" font-style="italic">完全不知道 stage、轮次或流程</text>
+<rect x="50" y="134" width="196" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="148.0" y="147.7" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">/bots/{id}/evolution/bindings</text>
+<text x="148.0" y="160.3" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">绑定</text>
+<rect x="256" y="134" width="196" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="354.0" y="147.7" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">…/evolution/runs</text>
+<text x="354.0" y="160.3" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">运行：启动、状态、取消</text>
+<rect x="462" y="134" width="196" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="560.0" y="147.7" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">…/evolution/candidates</text>
+<text x="560.0" y="160.3" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">报告 · 评审队列 · 审批</text>
+<rect x="668" y="134" width="196" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="766.0" y="147.7" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">…/genome/revisions · refs</text>
+<text x="766.0" y="160.3" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">修订版 · diff · 晋升</text>
+<rect x="874" y="134" width="196" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="972.0" y="147.7" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">…/experience/episodes</text>
+<text x="972.0" y="160.3" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">片段 · 反馈</text>
+<rect x="51" y="184" width="247" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="174.5" y="197.7" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">/evolution/suites · …/evaluations</text>
+<text x="174.5" y="210.3" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">套件 · 临时评估</text>
+<rect x="308" y="184" width="247" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="431.5" y="197.7" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">…/evolution/ledger</text>
+<text x="431.5" y="210.3" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">每次运行、判定、晋升</text>
+<rect x="565" y="184" width="247" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="688.5" y="197.7" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">/evolution/strategies · capabilities</text>
+<text x="688.5" y="210.3" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">注册版本 · 能力目录</text>
+<rect x="822" y="184" width="247" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="945.5" y="197.7" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">…/evolution/operations/{id}</text>
+<text x="945.5" y="210.3" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">按 id 查询长时工作</text>
+<text x="560" y="236" font-size="10.5" font-weight="400" fill="#64748b" text-anchor="middle" dominant-baseline="middle">约定：响应信封 · Idempotency-Key · ETag / If-Match · 分页 · 202 + 操作 id（09）</text>
+<path d="M 560 242 L 560 270" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="40" y="272" width="1040" height="176" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="56" y="292" font-size="13" font-weight="600" fill="#334155" text-anchor="start" dominant-baseline="middle">平台 —— 两层 API 背后的服务</text>
+<text x="1064" y="292" font-size="11" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle" font-style="italic">Backend 提供基因组与晋升；其余由 apps/evolution 提供</text>
+<rect x="46" y="308" width="140" height="72" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="116.0" y="329.82" font-size="12.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">进化运行</text>
+<text x="116.0" y="344.72" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">绑定 · 触发</text>
+<text x="116.0" y="358.9" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">运行 · 租约 · 预算</text>
+<rect x="194" y="308" width="140" height="72" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="264.0" y="329.82" font-size="12.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">验证</text>
+<text x="264.0" y="344.72" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">套件 · 评分器</text>
+<text x="264.0" y="358.9" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">配对运行 · 判定</text>
+<rect x="342" y="308" width="140" height="72" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="412.0" y="329.82" font-size="12.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">晋升</text>
+<text x="412.0" y="344.72" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">底线 · 门禁 · 评审</text>
+<text x="412.0" y="358.9" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">移动 active</text>
+<rect x="490" y="308" width="140" height="72" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="560.0" y="329.82" font-size="12.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">基因组注册中心</text>
+<text x="560.0" y="344.72" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">修订版 · 引用</text>
+<text x="560.0" y="358.9" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">补丁 · 内容</text>
+<rect x="638" y="308" width="140" height="72" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="708.0" y="329.82" font-size="12.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">经验存储</text>
+<text x="708.0" y="344.72" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">片段 · 反馈</text>
+<text x="708.0" y="358.9" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">已脱敏、标注版本</text>
+<rect x="786" y="308" width="140" height="72" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="856.0" y="329.82" font-size="12.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">实验记录</text>
+<text x="856.0" y="344.72" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">只追加记录</text>
+<text x="856.0" y="358.9" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">谱系 · 审计</text>
+<rect x="934" y="308" width="140" height="72" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="1004.0" y="329.82" font-size="12.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">策略注册中心</text>
+<text x="1004.0" y="344.72" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">注册记录</text>
+<text x="1004.0" y="358.9" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">能力目录 · 一致性</text>
+<text x="560" y="400" font-size="10.5" font-weight="400" fill="#64748b" text-anchor="middle" dominant-baseline="middle">一个公共前缀、两份 OpenAPI 文档（bots.openapi.json、evolution.openapi.json），由 gateway 路由（09 §11）。</text>
+<text x="560" y="418" font-size="10.5" font-weight="400" fill="#64748b" text-anchor="middle" dominant-baseline="middle">进化策略从不调用 A 层，调用方从不调用 B 层。</text>
+<path d="M 560 448 L 560 476" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="574" y="462" font-size="11.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">每次运行构建 ctx，只包含被授予的能力</text>
+<rect x="40" y="478" width="1040" height="176" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="56" y="498" font-size="13" font-weight="600" fill="#334155" text-anchor="start" dominant-baseline="middle">B 层 —— 策略端口（插件）。进化策略能用的东西：进程内的 run(ctx)，或走 HTTP 的作业协议（/evolution/v1，内部）。</text>
+<text x="1064" y="516" font-size="11" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle" font-style="italic">不能晋升、不能碰线上 bot、看不到隐藏划分</text>
+<text x="56" y="538" font-size="11" font-weight="700" fill="#64748b" text-anchor="start" dominant-baseline="middle">始终授予</text>
+<rect x="56" y="548" width="72" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="92.0" y="563.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">parent</text>
+<rect x="136" y="548" width="86" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="179.0" y="563.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">workspace</text>
+<rect x="230" y="548" width="88" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="274.0" y="563.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">operations</text>
+<rect x="326" y="548" width="66" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="359.0" y="563.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">budget</text>
+<rect x="400" y="548" width="160" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="480.0" y="563.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">log · artifacts · cancelled</text>
+<rect x="568" y="548" width="100" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="618.0" y="563.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">candidates@1</text>
+<rect x="676" y="548" width="82" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="717.0" y="563.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">models@1</text>
+<text x="56" y="596" font-size="11" font-weight="700" fill="#64748b" text-anchor="start" dominant-baseline="middle">仅在 needs 中声明后授予</text>
+<rect x="56" y="606" width="150" height="30" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="131.0" y="621.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">experience.sessions@1</text>
+<rect x="214" y="606" width="150" height="30" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="289.0" y="621.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">experience.feedback@1</text>
+<rect x="372" y="606" width="150" height="30" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="447.0" y="621.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">agents@1  {definitions}</text>
+<rect x="530" y="606" width="130" height="30" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="595.0" y="621.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">evaluation.train@1</text>
+<text x="690" y="621" font-size="10.5" font-weight="400" fill="#64748b" text-anchor="start" dominant-baseline="middle">新需求 → 新的目录条目，是一次经评审的平台变更（03 §4）</text>
+<path d="M 560 654 L 560 682" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="574" y="668" font-size="11.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">进程内 run(ctx) · 或用任意语言走 HTTP 领取带租约的作业</text>
+<rect x="40" y="684" width="330" height="66" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="205.0" y="709.91" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">clawevolve/bot-evolution</text>
+<text x="205.0" y="725.12" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">job_worker 容器（TS + Python）· 自己掌握流程</text>
+<rect x="395" y="684" width="330" height="66" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="560.0" y="709.91" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">platform/consolidate-memory</text>
+<text x="560.0" y="725.12" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">in_process · 只改记忆基因 · 每次运行一个补丁</text>
+<rect x="750" y="684" width="330" height="66" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="915.0" y="709.91" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">team-x/…（任何团队）</text>
+<text x="915.0" y="725.12" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">任意语言走 HTTP · 同一端口、同一规则</text>
+</svg>

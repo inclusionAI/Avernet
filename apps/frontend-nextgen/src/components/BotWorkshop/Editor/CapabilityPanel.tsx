@@ -1,5 +1,6 @@
 import type { BotCapabilitySet, BotEditorMcp, BotEditorSkill } from '@/domain/botEditor';
-import { CapabilitySetManager, type CapabilitySetManagerProps } from './CapabilitySetManager';
+import { CapabilitySetManager } from './CapabilitySetManager';
+import type { CapabilitySetManagerProps } from './capabilitySetManagerTypes';
 
 interface CapabilityPanelProps
   extends Omit<
@@ -7,6 +8,8 @@ interface CapabilityPanelProps
     'sets' | 'marketSkills' | 'skillCenterSkills' | 'workshopSkills' | 'marketMcps'
   > {
   desktop?: boolean;
+  /** 调试面板打开时，编辑区域较窄，成员卡片保持单列。 */
+  compact?: boolean;
   onLocalToggle?: (skill: BotEditorSkill) => Promise<void>;
   onLocalDelete?: (id: string) => Promise<void>;
   onLocalUpload?: (file: File) => Promise<void>;
@@ -20,6 +23,7 @@ interface CapabilityPanelProps
 
 export function CapabilityPanel({
   desktop,
+  compact,
   onLocalToggle,
   onLocalDelete,
   onLocalUpload,
@@ -33,10 +37,13 @@ export function CapabilityPanel({
 }: CapabilityPanelProps) {
   return (
     <>
+      {/* onLocalDelete 不按 desktop 掩蔽：云端 Bot 的「我的 Skill」卡片也支持删除
+          （DELETE /bots/{bot_id}/skills/{skill_id}）；本地管理面板(toggle+upload)仍仅本地 Bot */}
       <CapabilitySetManager
         {...actions}
+        compact={compact}
         onLocalToggle={desktop ? onLocalToggle : undefined}
-        onLocalDelete={desktop ? onLocalDelete : undefined}
+        onLocalDelete={onLocalDelete}
         onLocalUpload={desktop ? onLocalUpload : undefined}
         sets={skillSets}
         mySkills={mySkills}

@@ -39,12 +39,14 @@ consumes:
   - "CachePlugin quota lock"
   - "CapabilityDesiredStateRepositoryProtocol"
 internal_dependencies:
+  - agentclaw.community.core.engine_runtime
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.identity    # MCP execution identity carried into the restart Passport refresh
   - agentclaw.community.core.repository.protocols.platform    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.skills_pool    # persisted initial layout and restart selection
   - agentclaw.community.core.repository.protocols.capability_desired_state    # explicit Skill/MCP Installation purge during Bot deletion
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_app_grant.protocols    # sweep contract: deletion withdraws the bot's app authorizations
@@ -67,6 +69,8 @@ internal_dependencies:
   - agentclaw.community.core.spaces.models    # SpaceRecord/SpaceType used by Bot Space assignment
   - agentclaw.community.core.spaces.protocols    # Space lookup used by quota configuration
   - agentclaw.community.core.skill_center
+  - agentclaw.community.core.skills_pool.native_creation
+  - agentclaw.community.core.skills_pool.types
   - agentclaw.community.core.task_queue
   - agentclaw.community.core.workspace
   - agentclaw.community.di
@@ -134,3 +138,10 @@ and receipt verification. An empty or unqueryable BaaS inventory and backup
 failures still block replacement. This change adds no API, schema, configuration,
 or frontend migration; it only removes the backup dependency from direct ARCA
 restart. Normal stop/start failures continue to propagate.
+
+## Engine release inspection
+
+`engine_version/` exposes an authorized, read-only Service API for personal and
+service draft Bot release checks. It consumes existing repositories, the
+DeviceContextResolver and DeviceAdapterTransport and never invokes lifecycle or
+publish-policy writes. See its README for the contract and deployment boundary.

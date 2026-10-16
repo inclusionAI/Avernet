@@ -79,7 +79,12 @@ async fn child(path: &str, case: &str, prepare: bool) {
             "judge" => runs.fail_judge_claim.store(true, Ordering::SeqCst),
             "retry" => runs.fail_retry.store(true, Ordering::SeqCst),
             "failed" => runs.fail_run_failure.store(true, Ordering::SeqCst),
-            "break" => runs.fail_skip_after.store(2, Ordering::SeqCst),
+            "break" => {
+                let snapshot = store.get_run_snapshot(&run.run_id).await.unwrap().unwrap();
+                let plan = snapshot.execution_plan.unwrap().plan;
+                store.skip_node(&run.run_id, &iteration_id(&plan, 2), 100).await.unwrap();
+                runs.fail_skip_after.store(1, Ordering::SeqCst);
+            }
             "finalize" => {
                 send_terminal(&runtime, &delivery, 0, &run.session_id, "iteration-result").await.unwrap();
                 runs.fail_finalize.store(true, Ordering::SeqCst);

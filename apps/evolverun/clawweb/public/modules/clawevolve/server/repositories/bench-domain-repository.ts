@@ -21,6 +21,7 @@ export type CreateBenchDomainInput = {
   description?: string | null;
   createdBy?: string | null;
   ownerUserId?: string;
+  spaceId?: string | null;
 };
 
 export type UpdateBenchDomainInput = {
@@ -59,6 +60,20 @@ export class BenchDomainRepository {
     );
   }
 
+  async listInSpace(spaceId: string, personalOwner?: string, filters?: {status?: string; includeArchived?: boolean}): Promise<BenchDomainRow[]> {
+    const where = [personalOwner ? "(space_id = ? OR (COALESCE(space_id, '') = '' AND owner_user_id = ?))" : "space_id = ?"];
+    const values: unknown[] = personalOwner ? [spaceId, personalOwner] : [spaceId];
+    if (filters?.status || !filters?.includeArchived) { where.push("status = ?"); values.push(filters?.status ?? "active"); }
+    return this.db.query<BenchDomainRow>(`SELECT ${SELECT_COLUMNS} FROM cm_bench_domains WHERE ${where.join(" AND ")} ORDER BY name`, values);
+  }
+
+  async findInSpace(owner: string, domain: string, spaceId: string, personalOwner?: string): Promise<BenchDomainRow | null> {
+    const ownership = personalOwner ? "(space_id = ? OR (COALESCE(space_id, '') = '' AND owner_user_id = ?))" : "space_id = ?";
+    const rows = await this.db.query<BenchDomainRow>(`SELECT ${SELECT_COLUMNS} FROM cm_bench_domains WHERE owner_user_id = ? AND domain_id = ? AND ${ownership}`,
+      personalOwner ? [owner,domain,spaceId,personalOwner] : [owner,domain,spaceId]);
+    return rows[0] ?? null;
+  }
+
   async findByOwnerAndDomainId(ownerUserId: string, domainId: string): Promise<BenchDomainRow | null> {
     const rows = await this.db.query<BenchDomainRow>(
       `SELECT ${SELECT_COLUMNS} FROM cm_bench_domains WHERE owner_user_id = ? AND domain_id = ?`,
@@ -71,8 +86,8 @@ export class BenchDomainRepository {
     const now = this.db.dialect.now();
     const ownerUserId = input.ownerUserId ?? input.createdBy ?? "";
     await this.db.exec(
-      `INSERT INTO cm_bench_domains (domain_id, name, description, status, created_by, owner_user_id, gmt_create, gmt_modified)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO cm_bench_domains (domain_id, name, description, status, created_by, owner_user_id, gmt_create, gmt_modified${input.spaceId == null ? "" : ", space_id"})
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?${input.spaceId == null ? "" : ", ?"})`,
       [
         input.domainId,
         input.name,
@@ -82,6 +97,7 @@ export class BenchDomainRepository {
         ownerUserId,
         now,
         now,
+        ...(input.spaceId == null ? [] : [input.spaceId]),
       ],
     );
     const result = await this.findByOwnerAndDomainId(ownerUserId, input.domainId);

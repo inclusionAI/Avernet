@@ -28,6 +28,10 @@ from typing import Any, Callable, TYPE_CHECKING
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.bot_management.data_init_service_protocol import DataInitServiceProtocol
+from agentclaw.community.core.devices.repository.record import DataInitExecutionClaim
+from agentclaw.community.core.bot_management.services.claimed_data_init_state import (
+    ClaimedDataInitBotState, DataInitClaimLostError,
+)
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -117,6 +121,8 @@ class DataInitService(DataInitServiceProtocol):
         entity_type: str,
         force: bool = False,
         iam_token: str | None = None,
+        resume_stale_in_progress: bool = False,
+        execution_claim: DataInitExecutionClaim | None = None,
     ) -> dict[str, str]:
         """触发 Bot 数据初始化流程。
 
@@ -133,6 +139,10 @@ class DataInitService(DataInitServiceProtocol):
             entity_type: 关联实体类型（staff/proj/team）
             force: 是否强制重新初始化（忽略 completed 状态）
             iam_token: HTTP 边界传入的临时 IAM 凭证；仅在本次初始化需要时暂存
+            resume_stale_in_progress: 调用方已持有当前启动实例的过期 claim，
+                允许越过第二次 in_progress 并发保护；普通入口必须保持 False
+            execution_claim: Pool 自动初始化 worker 的持久 claim；所有状态写入
+                均以它做 fencing。普通/手动入口不提供，保留原链路。
 
         Returns:
             dict with keys: status, message
@@ -143,6 +153,12 @@ class DataInitService(DataInitServiceProtocol):
         )
 
         bot_service = self._bot_service_provider()
+        if execution_claim is not None:
+            bot_service = ClaimedDataInitBotState(
+                bot_service=bot_service, device_service=self._device_service, claim=execution_claim,
+            )
+            # Outside read/idempotency catches: DB write failures are not skips.
+            bot_service.assert_current(bot_id, owner_id)
 
         # 1. 幂等检查（force=True 时跳过）
         if not self._should_run_init(bot_id, owner_id, bot_service, force=force):
@@ -178,7 +194,18 @@ class DataInitService(DataInitServiceProtocol):
                 except json.JSONDecodeError:
                     ext = {}
             current_init_status = ext.get("data_init_status")
-            if current_init_status == "in_progress":
+            if current_init_status == "completed" and not force:
+                logger.info(
+                    f"bot_id={bot_id} trigger_init skipped already_completed"
+                )
+                return {"status": "skipped", "message": "初始化已完成"}
+            if (
+                current_init_status == "in_progress"
+                and (
+                    not resume_stale_in_progress
+                    or not self._in_progress_is_stale(ext)
+                )
+            ):
                 logger.info(
                     f"bot_id={bot_id} trigger_init skipped already_in_progress"
                 )
@@ -256,11 +283,15 @@ class DataInitService(DataInitServiceProtocol):
         """
         logger.info(f"bot_id={bot_id} execute_with_retry start")
         for attempt in range(1, self.MAX_RETRIES + 1):
+            if isinstance(bot_service, ClaimedDataInitBotState):
+                bot_service.assert_current(bot_id, owner_id)
             try:
                 logger.info(f"bot_id={bot_id} execute_with_retry attempt={attempt}/{self.MAX_RETRIES}")
                 await self._execute_init(bot_id, owner_id, entity_id, entity_type, bot_service)
                 logger.info(f"bot_id={bot_id} execute_with_retry success")
                 return True
+            except DataInitClaimLostError:
+                raise
             except Exception as exc:
                 logger.warning(
                     f"bot_id={bot_id} execute_with_retry attempt={attempt}/{self.MAX_RETRIES} failed exc={exc}",
@@ -307,27 +338,8 @@ class DataInitService(DataInitServiceProtocol):
 
         # in_progress 时检查是否超时卡死
         if status == "in_progress":
-            started_at_str = ext.get("data_init_started_at")
-            if started_at_str:
-                try:
-                    started_at = datetime.fromisoformat(started_at_str)
-                    if started_at.tzinfo is None:
-                        started_at = started_at.replace(tzinfo=timezone.utc)
-                    elapsed_seconds = (datetime.now(timezone.utc) - started_at).total_seconds()
-                    if elapsed_seconds > self._IN_PROGRESS_TIMEOUT_SECONDS:
-                        logger.warning(
-                            f"bot_id={bot_id} should_run_init in_progress_timeout "
-                            f"elapsed={elapsed_seconds:.0f}s limit={self._IN_PROGRESS_TIMEOUT_SECONDS}s "
-                            f"re_executing=true"
-                        )
-                        return True
-                except (ValueError, TypeError) as parse_exc:
-                    logger.warning(
-                        f"bot_id={bot_id} should_run_init parse_started_at_failed "
-                        f"started_at={started_at_str} exc={parse_exc} re_executing=true"
-                    )
-                    return True
-
+            if self._in_progress_is_stale(ext):
+                return True
             logger.info(
                 f"bot_id={bot_id} should_run_init skipped data_init_status=in_progress"
             )
@@ -341,6 +353,31 @@ class DataInitService(DataInitServiceProtocol):
             return False
 
         return True
+
+    def _in_progress_is_stale(self, ext: dict[str, Any]) -> bool:
+        started_at_str = ext.get("data_init_started_at")
+        if not started_at_str:
+            return False
+        try:
+            started_at = datetime.fromisoformat(started_at_str)
+            if started_at.tzinfo is None:
+                started_at = started_at.replace(tzinfo=timezone.utc)
+            elapsed_seconds = (datetime.now(timezone.utc) - started_at).total_seconds()
+            if elapsed_seconds > self._IN_PROGRESS_TIMEOUT_SECONDS:
+                logger.warning(
+                    "data_init in_progress timeout: "
+                    f"elapsed={elapsed_seconds:.0f}s "
+                    f"limit={self._IN_PROGRESS_TIMEOUT_SECONDS}s "
+                    "re_executing=true"
+                )
+                return True
+        except (ValueError, TypeError) as parse_exc:
+            logger.warning(
+                "data_init parse_started_at_failed: "
+                f"started_at={started_at_str} exc={parse_exc} re_executing=true"
+            )
+            return True
+        return False
 
     async def _execute_init(
         self,
@@ -399,6 +436,12 @@ class DataInitService(DataInitServiceProtocol):
 
         summary = llm_result.get("summary", {})
 
+        # A long-running LLM may outlive its dispatch lease. Discard a
+        # superseded result before any downstream effect, and renew a current
+        # lease for the bounded downstream HTTP calls.
+        if isinstance(bot_service, ClaimedDataInitBotState):
+            bot_service.assert_current(bot_id, owner_id)
+
         # 3. 同步到 ECB + BCS Fuse（fire-and-forget）
         # 下游同步失败不影响初始化状态，只打日志 + 写入 ext 供查询
         downstream_sync = {
@@ -412,7 +455,7 @@ class DataInitService(DataInitServiceProtocol):
                 owner_id,
                 summary,
                 self._resource_repo,
-                self._bot_service_provider(),
+                bot_service,
                 bcsfuse_base_url=self._bcsfuse_base_url,
                 ecb_base_url=self._ecb_base_url,
             )

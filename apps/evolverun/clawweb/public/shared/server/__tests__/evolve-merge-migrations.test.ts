@@ -39,6 +39,22 @@ async function applyHistory(db: SqliteDatabase, history: HistoricalMigration[], 
     await db.exec('INSERT INTO schema_version (version, description) VALUES (?, ?)',
       [migration.version, migration.description]);
   }
+  // The captured Evolve-only history omits the existing Workflow run table.
+  // Later global migrations still need its pre-existing baseline.
+  await db.exec('CREATE TABLE IF NOT EXISTS flow_runs (flow_id TEXT PRIMARY KEY, status TEXT)');
+  // Bench predates these Evolve histories too. Model its pre-v143 table;
+  // the fixture ledger skips that earlier global DDL during upgrades.
+  await db.exec(`CREATE TABLE cm_bench_domains (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, domain_id TEXT NOT NULL,
+    name TEXT NOT NULL, description TEXT, source_root TEXT,
+    created_by TEXT, owner_user_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    gmt_create INTEGER NOT NULL DEFAULT (unixepoch()),
+    gmt_modified INTEGER NOT NULL DEFAULT (unixepoch()),
+    UNIQUE(owner_user_id, domain_id))`);
+  await db.exec(`INSERT INTO cm_bench_domains
+    (domain_id, name, owner_user_id, created_by, gmt_create, gmt_modified)
+    VALUES ('bench-keep', 'Keep Bench', 'bench-owner', 'bench-owner', 100, 101)`);
 }
 
 async function columns(db: SqliteDatabase, table: string) {
@@ -125,6 +141,13 @@ function migratedSeed(table: string, seed: Row): Row {
 }
 
 async function assertMergedSchema(db: SqliteDatabase) {
+  const benchColumns = await db.query<{ name: string; notnull: number }>('PRAGMA table_info(cm_bench_domains)');
+  expect(benchColumns.filter(column => column.name === 'space_id')).toEqual([
+    expect.objectContaining({ name: 'space_id', notnull: 0 }),
+  ]);
+  expect(await db.query('SELECT space_id FROM cm_bench_domains')).toEqual(
+    (await db.query('SELECT id FROM cm_bench_domains')).map(() => ({ space_id: null })),
+  );
   expect(await columns(db, 'workflow_specs')).toContain('owner_id');
   expect(await db.query('PRAGMA index_info(idx_workflow_specs_owner_id)')).toEqual([
     expect.objectContaining({ name: 'owner_id' }),
@@ -150,7 +173,7 @@ async function assertMergedSchema(db: SqliteDatabase) {
 }
 
 async function assertIdempotent(db: SqliteDatabase) {
-  const tables = ['schema_version', 'workflow_specs', 'run_archive_records', ...stageTables];
+  const tables = ['schema_version', 'workflow_specs', 'run_archive_records', 'cm_bench_domains', ...stageTables];
   const before = await rows(db, tables);
   const schema = await db.query('SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name');
   await runMigrations(db, 'sqlite');
@@ -202,7 +225,7 @@ describe('Evolve merge migration compatibility (real SQLite)', () => {
           (archive_id, flow_id, workflow_id, run_status, created_at, run_process_json)
           VALUES ('archive-keep', 'flow-keep', 'workflow-keep', 'completed', '2026-09-22', '{"keep":true}')`);
         const ledger = await db.query('SELECT * FROM schema_version ORDER BY id');
-        const dataTables = featureLine ? ['workflow_specs', ...stageTables] : ['workflow_specs', 'run_archive_records'];
+        const dataTables = featureLine ? ['workflow_specs', 'cm_bench_domains', ...stageTables] : ['workflow_specs', 'cm_bench_domains', 'run_archive_records'];
         const before = await rows(db, dataTables);
         await runMigrations(db, 'sqlite');
         expect(await db.query('SELECT * FROM schema_version WHERE version <= ? ORDER BY id',
@@ -252,7 +275,7 @@ describe('Evolve merge migration compatibility (real SQLite)', () => {
       expect(await db.query('SELECT MAX(version) AS version FROM schema_version')).toEqual([{ version: through }]);
       const workflowColumns = await columns(db, 'workflow_specs');
       expect(workflowColumns.includes('owner_id')).toBe(!isFeature);
-      const historicalTables = ['workflow_specs'];
+      const historicalTables = ['workflow_specs', 'cm_bench_domains'];
       await seedWorkflow(db, !isFeature);
       if (isFeature) {
         expect((await columns(db, 'ce_stage_skill_implementations')).includes('integration_test_status')).toBe(through >= 121);

@@ -46,18 +46,24 @@ export function useConversationSessionCreation(userId: string | null, botByBotId
         store.selectedScope === selectionAtStart.selectedScope &&
         store.selectedSessionId === selectionAtStart.selectedSessionId;
       const created = result.data;
-      const scope = isManagedConversationSection(view.section) ? effectiveScopeOf(botId) : 'all';
+      const scope = isManagedConversationSection(view.section)
+        ? effectiveScopeOf(botId)
+        : store.scopeByFriendBotId[botId] ?? 'all';
+      const sessionKey = store.sessionKeyByBotId[botId] ?? '';
       const managedCache = isManagedConversationSection(view.section) ? store.sessionsByBotId[botId] : undefined;
       const cachedList =
         managedCache?.sessions ?? (view.section === 'friend' ? store.friendBotSessionsByBotId[botId] : undefined);
-      // 仅当缓存即当前读取范围(all)的列表时前置新会话;favorite 列表与
-      // 范围不符的缓存交给展开后的重新加载。
-      if (
-        (view.section === 'friend' || (store.originByManagedBotId[botId] ?? 'mine') === 'mine') &&
-        cachedList &&
+      // 仅当缓存即当前读取范围(all)且无生效搜索时前置新会话;favorite 列表与
+      // 过滤列表不混入新会话,交给按当前条件的重新加载。
+      const canPrepend =
+        Boolean(cachedList) &&
+        !sessionKey &&
+        scope === 'all' &&
         (view.section === 'friend' ||
-          (scope === 'all' && managedCache?.origin === 'mine' && managedCache?.scope === scope))
-      ) {
+          ((store.originByManagedBotId[botId] ?? 'mine') === 'mine' &&
+            managedCache?.origin === 'mine' &&
+            managedCache?.scope === 'all'));
+      if (canPrepend && cachedList) {
         writeSessionState(botId, view.section, scope, {
           ...cachedList,
           total: cachedList.total + (cachedList.items.some((item) => item.sessionId === created.sessionId) ? 0 : 1),
@@ -69,11 +75,23 @@ export function useConversationSessionCreation(userId: string | null, botByBotId
       }
       if (selectionUnchanged) {
         if (!store.expandedBotIds[botId]) store.setExpandedBot(botId, true);
+        // 好友 Bot 的主选中范围恒 'all'(与行选择/URL 投影语义一致),好友筛选只作用于侧栏列表。
+        const selectionScope = isManagedConversationSection(view.section) ? scope : 'all';
+        // 创建结果成为主会话但不过滤列表(spec: 新会话不能混入过滤结果),保留快照使舞台可解析。
+        store.setSelectedSessionSnapshot({
+          section: view.section,
+          botId,
+          origin: 'mine',
+          scope: selectionScope,
+          friendUserId: null,
+          session: created,
+          friend: null,
+        });
         store.selectConversation({
           botId,
           section: view.section,
           origin: 'mine',
-          scope,
+          scope: selectionScope,
           friendUserId: null,
           sessionId: created.sessionId,
         });

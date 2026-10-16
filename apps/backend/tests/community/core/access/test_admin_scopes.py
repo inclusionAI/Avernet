@@ -6,6 +6,7 @@ with a fail-closed empty frozenset on missing/blank/non-list/absent config.
 """
 from agentclaw.community.core.access.admin_scopes import (
     collaborator_admin,
+    cron_admin,
     device_admin,
     disk_usage_admin,
     harness_admin,
@@ -122,3 +123,13 @@ def test_config_read_exception_fails_closed(monkeypatch):
     )
     assert super_admin() == frozenset()
     assert skill_admin() == frozenset()
+
+
+def test_cron_admin_is_independent_and_fail_closed(monkeypatch):
+    _patch_config(monkeypatch, {"admin": {"super_admin": ["100000"]}})
+    assert cron_admin() == frozenset()
+    _patch_config(monkeypatch, {"admin": {"cron_admin": ["100001"]}})
+    assert cron_admin() == frozenset({"100001"})
+    assert super_admin() == frozenset()
+    _patch_config(monkeypatch, {"admin": {"cron_admin": "100001"}})
+    assert cron_admin() == frozenset()

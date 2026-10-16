@@ -96,6 +96,17 @@ from agentclaw.community.core.workspace.path_factory import (
 )
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.core.skills_pool.native_creation import (
+    SkillsPoolNativeCreationPolicy,
+)
+from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolLayoutRepositoryProtocol,
+)
+from agentclaw.community.core.skills_pool.types import (
+    BotSkillLayoutScope,
+    SkillLayout,
+    SkillLayoutPhase,
+)
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
     apply_default_image_to_ext,
     clear_image_policy_from_ext,
@@ -116,6 +127,7 @@ from agentclaw.community.core.devices.errors import (
     DeviceLimitExceededError,
     ResourceInsufficientError,
     DeviceAllocateError,
+    DeviceServiceError,
 )
 from agentclaw.community.core.devices.models import AllocatedDevice, DeviceAllocationMode, DeviceBindingStatus, OperatorContext, SynlinkMappingInfo
 from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
@@ -356,6 +368,8 @@ class BotService(BotServiceProtocol):
         cron_auto_setup_service_provider: "Callable[[], CronAutoSetupService]",
         drm_reader: DRMReaderPlugin,
         caller_identity_repo: "CallerIdentityRepositoryProtocol",
+        skills_pool_native_creation_policy: SkillsPoolNativeCreationPolicy,
+        skill_layout_repository: SkillsPoolLayoutRepositoryProtocol,
         workspace_hosting_config: "cfg.WorkspaceHostingConfig | None" = None,
         policy_service: "PolicyServiceProtocol | None" = None,
         baas_template_resolver: "BaasTemplateResolverProtocol | None" = None,
@@ -368,6 +382,8 @@ class BotService(BotServiceProtocol):
         bot_storage_policy: BotStoragePolicyProtocol | None = None,
     ) -> None:
         self._repository = repository
+        self._skills_pool_native_creation_policy = skills_pool_native_creation_policy
+        self._skill_layout_repository = skill_layout_repository
         self._bot_storage_policy = bot_storage_policy
         self._allocation_config = allocation_config
         if workspace_hosting_config is None:
@@ -586,6 +602,35 @@ class BotService(BotServiceProtocol):
             )
             return None
 
+    def _skills_layout_env(
+        self,
+        *,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+    ) -> dict[str, str]:
+        state = self._skill_layout_repository.get(
+            BotSkillLayoutScope(env=env, entity_id=entity_id, bot_id=bot_id)
+        )
+        if state.active_layout is not SkillLayout.POOL:
+            return {"AGENTCLAW_SKILLS_LAYOUT": SkillLayout.LEGACY.value}
+        contract = state.layout_contract_version
+        if not isinstance(contract, str) or not contract:
+            raise BotServiceError("Pool layout has no contract version")
+        return {
+            "AGENTCLAW_SKILLS_LAYOUT": SkillLayout.POOL.value,
+            "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": contract,
+            "AGENTCLAW_SKILLS_LAYOUT_PHASE": (
+                state.phase.value
+                if state.phase
+                in {
+                    SkillLayoutPhase.POOL_INITIALIZING,
+                    SkillLayoutPhase.POOL_ACTIVE,
+                }
+                else "recovery_required"
+            ),
+        }
+
     def _extract_engine_runtime_token(
         self,
         *,
@@ -682,6 +727,28 @@ class BotService(BotServiceProtocol):
                 e,
             )
             return template_type == "applicationCoding" and on_create
+
+    def resolve_bot_template_uid(self, *, bot_id: str, user_id: str, env: str) -> str:
+        """Resolve a stored bot's template identity without selecting a template UUID.
+
+        Lookup/resolution failures propagate: callers must not mistake an unknown
+        template for one eligible for the legacy ARCA image Pin.
+        """
+        bot = self._repository.get_by_id_and_owner(bot_id, user_id)
+        if not bot:
+            raise BotNotFoundError(f"Bot not found: {bot_id}")
+        # Unlike get_bot's best-effort enrichment, propagate template read errors.
+        # Identity lookup does not need device bindings.
+        template_config = self._template_service.get_template_config_strict(bot_id)
+        return self._baas_template_resolver.resolve_template_uid(
+            bot_id=bot_id,
+            user_id=user_id,
+            env=env,
+            bot_type=str(bot.get("bot_type") or "service"),
+            engine_type=bot.get("active_engine"),
+            template_type=bot.get("template_type"),
+            template_config=template_config if isinstance(template_config, dict) else None,
+        )
 
     def _attach_template_uid_context(
         self,
@@ -1409,22 +1476,47 @@ class BotService(BotServiceProtocol):
         if bot_id is not None:
             existing_bot = self._repository.get_by_id_and_owner(bot_id, user_id)
             if existing_bot:
-                # A prior create can have persisted the Bot and failed before
-                # capability initialization.  Retrying must converge that
-                # recoverable state instead of reporting a false success.
+                existing_bot_type = str(existing_bot.get("bot_type") or "personal")
+                existing_template_type = template_type or existing_bot.get(
+                    "template_type"
+                )
+                existing_status = str(existing_bot.get("status") or "")
+                if existing_bot.get("binding_id") or existing_status not in {
+                    "PENDING",
+                    "PROVISIONING",
+                }:
+                    if provision and existing_bot.get("binding_id"):
+                        self._retry_creation_confirmation(existing_bot["binding_id"])
+                    if existing_bot_type == "service":
+                        self._backfill_service_publish_record(
+                            bot_id=bot_id, user_id=user_id, bot=existing_bot
+                        )
+                    logger.info(
+                        "[bot_service.create_bot] Bot %s already exists for user "
+                        "%s, returning existing bot",
+                        bot_id,
+                        user_id,
+                    )
+                    return existing_bot
                 self._initialize_capability_installations(
                     bot_id=bot_id, owner_id=user_id, bot=existing_bot
                 )
-                if existing_bot.get("bot_type") == "service":
-                    # 直接创建即服务的补齐路径：发布单创建失败曾使 create 抛错
-                    # （重试时软删行一般不存在、走全新创建），但并发窗口或历史
-                    # 存量可能留下"service bot 无发布单"的可恢复状态——重放在
-                    # 此收敛，使同一 bot 的重试不必重建。
-                    self._backfill_service_publish_record(
-                        bot_id=bot_id, user_id=user_id, bot=existing_bot
+                if not provision or existing_bot_type == "desktop":
+                    logger.info(
+                        "[bot_service.create_bot] Bot %s already recorded for user "
+                        "%s, returning pending bot",
+                        bot_id,
+                        user_id,
                     )
-                logger.info(f"[bot_service.create_bot] Bot {bot_id} already exists for user {user_id}, returning existing bot")
-                return existing_bot
+                    return existing_bot
+                return self.provision_bot(
+                    bot_id=bot_id,
+                    user_id=user_id,
+                    nick_name=nick_name,
+                    template_type=existing_template_type,
+                    template_config=template_config,
+                    cookie=cookie,
+                )
             # 不存在，继续创建流程，使用传入的 bot_id
             logger.info(f"[bot_service.create_bot] Using provided bot_id={bot_id} for user {user_id}")
         else:
@@ -1526,86 +1618,41 @@ class BotService(BotServiceProtocol):
                 "template_type": template_type,  # Template type (e.g., "applicationCoding")
                 "space_id": space_id,  # Business-space ownership: NULL -> personal fallback
             }
+            initial_layout = self._skills_pool_native_creation_policy.select(
+                env=get_current_env(),
+                owner_id=user_id,
+                bot_id=str(bot_id),
+                engine_type=resolved_active_engine,
+                bot_type=resolved_bot_type,
+            )
 
             if not space_quota or quota_exempt:
-                bot_record = self._repository.insert(bot_data)
+                bot_record = self._repository.insert_with_initial_skill_layout(
+                    bot_data,
+                    layout=initial_layout,
+                )
             else:
                 # Serialize only the final count + row insert. Passport and
                 # device provisioning stay outside this short quota lease.
                 with self._require_bot_quota_service().guard_add(
                     owner_id=user_id, space_id=space_id
                 ):
-                    bot_record = self._repository.insert(bot_data)
+                    bot_record = self._repository.insert_with_initial_skill_layout(
+                        bot_data,
+                        layout=initial_layout,
+                    )
             logger.info(f"[bot_service.create_bot] Bot {bot_id} created with PENDING status")
 
-            # Step 1.5: Create template record if template_config is provided
-            if template_type and template_config is not None:
-                # 托管工作空间的资格校验与开通由引擎策略决定（aicoding 独有的开通动作）：
-                # 策略基类已提供默认（非编码引擎直接 no-op 返回 None），BotService 单次直调
-                # 即可，无需 getattr 探测能力；非 aicoding 不感知该概念。开通底层抛错原样
-                # 冒泡，未拿到 id 由引擎抛专用信号，两种情况都由 BotService 统一回滚已落库的
-                # bot 行并报错。
-                from agentclaw.community.core.bot_management.engines import (
-                    HostedWorkspaceProvisioningError,
-                    resolve_provisioning,
-                )
-                _provision_ctx, _provision_strategy = resolve_provisioning(
+            if not provision:
+                self._prepare_creation_template(
                     bot_id=bot_id,
-                    owner_id=user_id,
+                    user_id=user_id,
+                    bot_name=resolved_bot_name,
                     bot_type=resolved_bot_type,
                     active_engine=resolved_active_engine,
                     template_type=template_type,
                     template_config=template_config,
                 )
-                workspace_id = None
-                try:
-                    workspace_id = _provision_strategy.provision_hosted_workspace(
-                        _provision_ctx,
-                        bot_name=resolved_bot_name,
-                        workspace_hosting_provider=self._require_workspace_hosting,
-                    )
-                except HostedWorkspaceProvisioningError:
-                    logger.error(
-                        "[bot_service.create_bot] hosted workspace creation returned "
-                        "no id bot_id=%s",
-                        bot_id,
-                    )
-                    self._repository.soft_delete_by_owner(bot_id, user_id)
-                    raise BotServiceError(
-                        "applicationCoding workspace creation returned no id"
-                    )
-                except Exception as exc:
-                    logger.exception(
-                        "[bot_service.create_bot] hosted workspace creation failed bot_id=%s",
-                        bot_id,
-                    )
-                    self._repository.soft_delete_by_owner(bot_id, user_id)
-                    raise BotServiceError(
-                        "applicationCoding workspace creation failed"
-                    ) from exc
-                try:
-                    logger.info(
-                        "[bot_service.create_bot] Creating template for bot %s, template_type=%s",
-                        bot_id, template_type,
-                    )
-                    self._template_service.create_template(
-                        bot_id=bot_id,
-                        template_config=template_config,
-                        template_type=template_type,
-                        active_engine=resolved_active_engine,
-                    )
-                    logger.info(f"[bot_service.create_bot] Template created for bot {bot_id}")
-                except Exception as e:
-                    logger.error(f"[bot_service.create_bot] Failed to create template for bot {bot_id}: {e}", exc_info=True)
-                    if workspace_id:
-                        # 已开通托管工作空间（dima_space_id）的 template 记录必须成功：
-                        # workspace 开通成功但本地持久化失败时回滚 bot 行并报错。
-                        self._repository.soft_delete_by_owner(bot_id, user_id)
-                        raise BotServiceError(
-                            "applicationCoding template creation failed"
-                        ) from e
-                    # Keep the historical best-effort behavior for non-coding
-                    # template creation.
 
             # This is deliberately DB-only and precedes both early returns.
             # New Bots must not depend on a later effective read or Runtime
@@ -1634,18 +1681,10 @@ class BotService(BotServiceProtocol):
                 )
                 return bot_record
 
-            return self._provision_created_bot(
-                bot_record,
+            return self.provision_bot(
                 bot_id=bot_id,
                 user_id=user_id,
                 nick_name=nick_name,
-                bot_desc=bot_desc,
-                resolved_bot_name=resolved_bot_name,
-                resolved_entity_id=resolved_entity_id,
-                resolved_entity_type=resolved_entity_type,
-                resolved_engine_types=resolved_engine_types,
-                resolved_active_engine=resolved_active_engine,
-                resolved_bot_type=resolved_bot_type,
                 template_type=template_type,
                 template_config=template_config,
                 cookie=cookie,
@@ -1656,6 +1695,82 @@ class BotService(BotServiceProtocol):
         except Exception as e:
             logger.error(f"[bot_service.create_bot] Failed to create bot record: {e}")
             raise BotServiceError(f"Failed to create bot record: {e}")
+
+    def _prepare_creation_template(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        bot_name: str,
+        bot_type: str,
+        active_engine: str,
+        template_type: str | None,
+        template_config: dict[str, Any] | None,
+    ) -> None:
+        """Idempotently finish the pre-provision template step for retries."""
+
+        if template_type is None or template_config is None:
+            return
+        if self._template_service.exists_template(bot_id):
+            return
+        from agentclaw.community.core.bot_management.engines import (
+            HostedWorkspaceNotEligibleError,
+            HostedWorkspaceProvisioningError,
+            resolve_provisioning,
+        )
+
+        provision_ctx, provision_strategy = resolve_provisioning(
+            bot_id=bot_id,
+            owner_id=user_id,
+            bot_type=bot_type,
+            active_engine=active_engine,
+            template_type=template_type,
+            template_config=template_config,
+        )
+        hosted_workspace_eligible = True
+        try:
+            workspace_id = provision_strategy.ensure_hosted_workspace(
+                provision_ctx,
+                bot_name=bot_name,
+                template_config=template_config,
+                template_service=self._template_service,
+                workspace_hosting_provider=self._require_workspace_hosting,
+            )
+        except HostedWorkspaceNotEligibleError:
+            hosted_workspace_eligible = False
+            workspace_id = None
+        except HostedWorkspaceProvisioningError as exc:
+            raise BotServiceError(
+                "applicationCoding workspace creation returned no id"
+            ) from exc
+        except Exception as exc:
+            raise BotServiceError(
+                "applicationCoding workspace creation failed"
+            ) from exc
+        if hosted_workspace_eligible and not workspace_id:
+            raise BotServiceError(
+                "applicationCoding workspace creation returned no id"
+            )
+        if workspace_id and self._template_service.exists_template(bot_id):
+            return
+        try:
+            self._template_service.create_template(
+                bot_id=bot_id,
+                template_config=template_config,
+                template_type=template_type,
+                active_engine=active_engine,
+            )
+        except Exception as exc:
+            logger.error(
+                "[bot_service.create_bot] Failed to create template for bot %s: %s",
+                bot_id,
+                exc,
+                exc_info=True,
+            )
+            if workspace_id:
+                raise BotServiceError(
+                    "applicationCoding template creation failed"
+                ) from exc
 
     def provision_bot(
         self,
@@ -1692,6 +1807,7 @@ class BotService(BotServiceProtocol):
         if not record:
             raise BotServiceError(f"Bot {bot_id} not found for user {user_id}")
         if record.get("binding_id"):
+            self._retry_creation_confirmation(record["binding_id"])
             logger.info(
                 f"[bot_service.provision_bot] Bot {bot_id} already provisioned "
                 f"(binding_id={record.get('binding_id')})"
@@ -1715,6 +1831,15 @@ class BotService(BotServiceProtocol):
         if active_engine not in engine_types:
             engine_types.append(active_engine)
         try:
+            self._prepare_creation_template(
+                bot_id=bot_id,
+                user_id=user_id,
+                bot_name=record.get("bot_name") or bot_id,
+                bot_type=str(record.get("bot_type") or "personal"),
+                active_engine=active_engine,
+                template_type=template_type or record.get("template_type"),
+                template_config=template_config,
+            )
             return self._provision_created_bot(
                 dict(record),
                 bot_id=bot_id,
@@ -1738,6 +1863,13 @@ class BotService(BotServiceProtocol):
             logger.error(f"[bot_service.provision_bot] Failed to provision bot {bot_id}: {e}")
             self._release_provisioning_claim(bot_id, user_id)
             raise BotServiceError(f"Failed to provision bot: {e}")
+
+    def _retry_creation_confirmation(self, binding_id: int) -> None:
+        """Retry only the retained startup callback, not device provisioning."""
+        try:
+            self._device_service_provider().retry_creation_confirmation(binding_id=binding_id)
+        except DeviceServiceError as exc:
+            raise BotServiceError(f"Failed to confirm provisioned bot: {exc}") from exc
 
     def _release_provisioning_claim(self, bot_id: str, user_id: str) -> None:
         """Best effort: a record the failed step 2 left behind goes back to
@@ -1893,6 +2025,15 @@ class BotService(BotServiceProtocol):
                     template_config=template_config,
                     log_context="bot_service.create_bot",
                 )
+                if resolved_active_engine == "openclaw":
+                    extra_envs = {
+                        **(extra_envs or {}),
+                        **self._skills_layout_env(
+                            env=get_current_env(),
+                            entity_id=resolved_entity_id,
+                            bot_id=str(bot_id),
+                        ),
+                    }
 
                 create_kwargs = dict(
                     apply_reason=f"Create bot: {resolved_bot_name or bot_id}",
@@ -1965,13 +2106,12 @@ class BotService(BotServiceProtocol):
                     # 发布单是服务化治理的载体，直接创建即服务的口径依赖它存在；
                     # 持久化失败不能静默返回成功（那会留下一个无法发布、无法被
                     # 编排推进的"服务 bot"）。与 workspace-hosting 失败同惯例：
-                    # 软删除已插入行并上抛。auth-status 的重放会为同一 bot 补建
-                    # 缺失的发布单（见幂等重入分支）。
+                    # 保留已插入 Bot/layout 选择并上抛；重试通过 provision claim
+                    # 复用同一选择并补建缺失发布单。
                     logger.exception(
                         "[bot_service.create_bot] Failed to create publish record for service bot %s",
                         bot_id,
                     )
-                    self._repository.soft_delete_by_owner(bot_id, user_id)
                     raise BotServiceError(
                         f"Failed to create publish record for service bot {bot_id}"
                     ) from e
@@ -2026,21 +2166,14 @@ class BotService(BotServiceProtocol):
 
             return bot_record
         except BotServiceError:
-            # 内部路径（workspace-hosting 失败、发布单持久化失败等）已完成各自的
-            # 清理并给出了语义准确的错误；这里透传，不再二次软删，也避免"设备
-            # 申请失败"文案误读真实失败源。
+            # The caller releases the provisioning claim.  The Bot/layout
+            # choice remains durable so a retry cannot re-evaluate rollout.
             raise
         except (ResourceInsufficientError, DeviceAllocateError, DeviceLimitExceededError) as e:
-            # 设备申请失败，删除 bot 记录并立即抛出错误（default bot 除外）
             logger.error(f"[bot_service.create_bot] Device allocation failed for bot {bot_id}: {e}")
-            if bot_id != "default":
-                self._repository.soft_delete_by_owner(bot_id, user_id)
             raise BotServiceError(f"设备申请失败: {e}")
         except Exception as e:
-            # 其他异常（default bot 除外，不删除）
             logger.exception(f"[bot_service.create_bot] Unexpected error during device allocation for bot {bot_id}: {e}")
-            if bot_id != "default":
-                self._repository.soft_delete_by_owner(bot_id, user_id)
             raise BotServiceError(f"设备申请失败: {e}")
 
     def _allocate_device_async(
@@ -2164,6 +2297,15 @@ class BotService(BotServiceProtocol):
                     template_config=resolved_template_config,
                     log_context="bot_service._allocate_device_async",
                 )
+                if active_engine == "openclaw":
+                    extra_envs = {
+                        **(extra_envs or {}),
+                        **self._skills_layout_env(
+                            env=get_current_env(),
+                            entity_id=entity_id,
+                            bot_id=str(bot_id),
+                        ),
+                    }
 
                 # Call device service to allocate device
                 # This creates a record in ac_entity_device_binding table
@@ -5097,6 +5239,15 @@ class BotService(BotServiceProtocol):
             template_config=resolved_template_config,
             log_context="bot_service._restart_bot_baas",
         )
+        if active_engine == "openclaw":
+            extra_envs = {
+                **(extra_envs or {}),
+                **self._skills_layout_env(
+                    env=get_current_env(),
+                    entity_id=str(bot.get("entity_id") or f"staff_{user_id}"),
+                    bot_id=bot_id,
+                ),
+            }
         # 与 _allocate_device_async 对齐：BaaS 原地重启也必须透传模板快照。
         # template_config.envs / image / resource_spec 是独立的沙箱覆写能力，
         # 不能被 extra_envs（引擎策略环境变量）是否命中门控影响。否则非
@@ -5221,6 +5372,7 @@ class BotService(BotServiceProtocol):
                     RESTART_WORKFLOW_BASELINE_KEY: workflow_baseline,
                     "restart_publish_id": None,
                     RESTART_IMAGE_POLICY_ON_SUCCESS_KEY: image_policy_on_success,
+                    "envs": extra_envs,
                 },
             )
             self._device_binding_repo.update_status(

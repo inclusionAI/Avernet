@@ -1,3 +1,4 @@
+import { recoveryTaskContextMigration } from "./schema-session-recovery.js";
 import type { IDatabase } from './db.js';
 import { cleanupEvolveSchema } from './migrations/evolve-schema-cleanup.js';
 /**
@@ -23,6 +24,7 @@ import { cleanupEvolveSchema } from './migrations/evolve-schema-cleanup.js';
  */
 
 import { repairBatchMigrations } from "./schema-repair-batch.js";
+import { repairReleaseMigrations } from "./schema-repair-release.js";
 
 export type DbType = "sqlite" | "mysql" | "zdas";
 
@@ -3301,5 +3303,17 @@ END`,
     version: 139,
     description: "Preserve the selected Bot environment for Skill assets",
     sql: [`ALTER TABLE ce_skill_assets ADD COLUMN bot_env VARCHAR(32) DEFAULT NULL COMMENT '来源Bot环境；历史未记录时为空'`],
+  },
+  {
+    version: 140,
+    description: "Fence workflow completion and timeout writes by manual retry epoch",
+    sql: [`ALTER TABLE flow_runs ADD COLUMN retry_epoch INTEGER DEFAULT 0`],
+  },
+  recoveryTaskContextMigration,
+  ...repairReleaseMigrations,
+  {
+    version: 143,
+    description: "Bind Bench Domains to host spaces while preserving personal history",
+    sql: [`ALTER TABLE cm_bench_domains ADD COLUMN space_id VARCHAR(128) DEFAULT NULL COMMENT '所属空间ID；NULL保留原Owner个人归属'`],
   },
 ];

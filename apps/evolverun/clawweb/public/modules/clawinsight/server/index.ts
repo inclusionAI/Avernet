@@ -13,3 +13,8 @@ export { configureMonitoringIntegration } from './services/monitoring/monitoring
 export type { MonitoringIntegration } from './services/monitoring/monitoring-runtime.js';
 export type { MonitoringBotDirectory, MonitoringPrincipal } from './services/monitoring/directory-contracts.js';
 export { SqlMonitoringBotDirectory } from './repositories/monitoring-bot-directory.js';
+
+export { createSessionRecoveryRouter } from "./routes/session-recovery.js";
+export type { SessionRecoveryRuntime } from "./services/repair/session-recovery/contracts.js";
+export type { SessionRecoveryRouterOptions } from "./routes/session-recovery.js";
+export { SessionRecoveryTaskService } from "./services/repair/session-recovery/task-service.js";

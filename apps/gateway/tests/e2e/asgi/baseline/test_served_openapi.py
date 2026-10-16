@@ -21,6 +21,10 @@ class TestServedOpenAPI:
         paths = schema.get("paths", {})
         bots = [p for p in paths if p.startswith("/openapi/v1/bots")]
         assert len(bots) > 0, "bots.openapi.json must be loaded by schema catalog"
+        observations = (
+            "/openapi/v1/bots/{bot_id}/skills/{skill_id}/security-observations"
+        )
+        assert "get" in paths[observations]
 
     def test_baas_domain_served(self, app_no_lifespan: FastAPI) -> None:
         schema = app_no_lifespan.openapi()

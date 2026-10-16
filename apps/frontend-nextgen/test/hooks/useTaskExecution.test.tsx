@@ -32,7 +32,19 @@ function taskRecord(mode?: 'centralized' | 'relay') {
   return {
     task_id: 'task-1',
     task_info: {
-      execution_config: mode === 'relay' ? { orchestration_mode: 'relay', root_node_id: 'root-1' } : {},
+      execution_config:
+        mode === 'relay'
+          ? {
+              orchestration_mode: 'relay',
+              root_node_id: 'root-1',
+              root_execution_instruction: [
+                '[task-execute]',
+                'task_id=task-1; node_id=root-1',
+                'relay_token=x',
+                'backend_url=https://backend.example',
+              ].join('\n'),
+            }
+          : {},
     },
     create_time: '2026-09-17T00:00:00Z',
     finish_time: null,
@@ -84,9 +96,68 @@ describe('useTaskExecution relay bootstrap', () => {
     });
 
     expect(submitTaskExecutionMessage).toHaveBeenCalledWith(
-      expect.stringContaining('task_id=task-1; node_id=root-1; holder_id=bot-main'),
+      expect.stringContaining('backend_url=https://backend.example'),
       'bot-main',
     );
     expect(submitPanelMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('useTaskExecution selections（多胶囊叠加态）', () => {
+  const resolveWorkflowCommand = jest.requireMock('@/services/tasks/taskService').resolveWorkflowCommand as jest.Mock;
+  beforeEach(() => {
+    jest.clearAllMocks();
+    resolveWorkflowCommand.mockResolvedValue({ command: 'cmd-x', title: '工作流X' });
+  });
+
+  function renderExecution() {
+    return renderHook(() =>
+      useTaskExecution({
+        panelRef: { current: null } as never,
+        context,
+        submitPanelMessage: jest.fn(),
+      }),
+    );
+  }
+
+  it('多工作流可叠加、同一工作流按 workflowId 去重', () => {
+    const { result } = renderExecution();
+    act(() => {
+      result.current.selectWorkflow({ workflowId: 'wf-1', title: '工作流A' });
+      result.current.selectWorkflow({ workflowId: 'wf-2', title: '工作流B' });
+      result.current.selectWorkflow({ workflowId: 'wf-1', title: '工作流A-重复' });
+    });
+    expect(result.current.selections).toHaveLength(2);
+    expect(result.current.selections.map((s) => (s.kind === 'workflow' ? s.workflow.workflowId : s.kind))).toEqual([
+      'wf-1',
+      'wf-2',
+    ]);
+  });
+
+  it('动态任务全场至多一个，可与工作流共存', () => {
+    const { result } = renderExecution();
+    act(() => {
+      result.current.selectDynamic();
+      result.current.selectDynamic();
+    });
+    expect(result.current.selections).toEqual([{ kind: 'dynamic' }]);
+    act(() => {
+      result.current.selectWorkflow({ workflowId: 'wf-1', title: '工作流A' });
+    });
+    expect(result.current.selections).toEqual([{ kind: 'dynamic' }, expect.objectContaining({ kind: 'workflow' })]);
+  });
+
+  it('removeSelection 按 key 单独清除，clearSelection 全清', () => {
+    const { result } = renderExecution();
+    act(() => {
+      result.current.selectDynamic();
+      result.current.selectWorkflow({ workflowId: 'wf-1', title: '工作流A' });
+      result.current.removeSelection('wf-1');
+    });
+    expect(result.current.selections).toEqual([{ kind: 'dynamic' }]);
+    act(() => {
+      result.current.clearSelection();
+    });
+    expect(result.current.selections).toEqual([]);
   });
 });

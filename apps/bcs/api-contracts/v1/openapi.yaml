@@ -24,6 +24,8 @@ tags:
     description: Channel bindings between IM accounts and BCS bots/groups.
   - name: Collaboration / Event Subscriptions
     description: Durable Event Subscription and Webhook delivery management.
+  - name: Group Context
+    description: Versioned, permission-tagged KV store for bot teams within a group.
 paths:
   /openapi/v1/auth/url:
     $ref: ./openapi/auth.yaml#/AuthUrlPath
@@ -119,6 +121,8 @@ paths:
     $ref: ./openapi/channel-bindings.yaml#/ChannelsBindingsByTargetPath
   /openapi/v1/collaboration/channels/bindings/{id}:
     $ref: ./openapi/channel-bindings.yaml#/ChannelsBindingsIdPath
+  /openapi/v1/collaboration/channels/conversations/by-session:
+    $ref: ./openapi/channel-conversations.yaml#/ChannelConversationsBySessionPath
   /openapi/v1/collaboration/event-subscriptions:
     $ref: ./openapi/event-subscriptions.yaml#/EventSubscriptionsPath
   /openapi/v1/collaboration/event-subscriptions/{subscription_id}:

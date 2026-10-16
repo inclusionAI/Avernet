@@ -577,7 +577,7 @@ describe('collaboration privacy runtime wiring', () => {
       '900004',
       {
         public_scope: 'user',
-        visibility: 'public',
+        visibility: 'protected',
         view_depts: [{ deptNo: 'A4195', deptName: '蚂蚁集团-大安全-协作平台' }],
       },
       signal,

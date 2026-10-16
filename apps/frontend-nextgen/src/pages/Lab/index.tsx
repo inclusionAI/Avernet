@@ -4,7 +4,7 @@ import { FeedbackModal } from '@/components/Community/FeedbackModal';
 import { Button } from '@/components/ui/Button';
 import { history } from '@umijs/max';
 import type { LucideIcon } from 'lucide-react';
-import { ArrowRight, Megaphone, MessagesSquare } from 'lucide-react';
+import { ArrowRight, MessagesSquare } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 
@@ -40,24 +40,28 @@ function LabFeatureCard({
 }) {
   const Icon = feature.icon;
   return (
-    <article className="flex flex-col gap-5 rounded-xl border border-border bg-card p-6">
+    <article className="flex flex-col gap-5 rounded-xl border border-border bg-card p-6 shadow-sm transition-shadow hover:shadow-md">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <span className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary" aria-hidden>
+          <span className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary" aria-hidden>
             <Icon className="size-5" />
           </span>
-          <h2 className="m-0 text-lg font-semibold text-foreground">{feature.title}</h2>
+          <h3 className="m-0 text-base font-semibold text-foreground">{feature.title}</h3>
         </div>
         {feature.headerExtra ? <div className="flex items-center gap-2">{feature.headerExtra}</div> : null}
       </div>
       <p className="m-0 text-sm leading-6 text-muted-foreground">{feature.description}</p>
-      <div className="mt-auto flex flex-wrap items-center gap-3 pt-1">
-        <Button onClick={() => history.push(feature.href)} rightIcon={<ArrowRight className="size-4" aria-hidden />}>
+      <div className="flex items-center justify-between">
+        <Button
+          className="h-9 px-4 text-xs"
+          onClick={() => history.push(feature.href)}
+          rightIcon={<ArrowRight className="size-3.5" aria-hidden />}
+        >
           开始体验
         </Button>
         <Button
           variant="ghost"
-          leftIcon={<Megaphone className="size-4" aria-hidden />}
+          className="h-6 px-0 text-xs font-medium text-muted-foreground hover:text-primary"
           onClick={() => setFeedbackOpen(true)}
         >
           我要反馈
@@ -75,14 +79,17 @@ function LabFeatureCard({
 export default function LabLandingPage() {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   return (
-    <div className="flex h-full flex-col bg-muted">
+    <div className="flex h-full flex-col bg-background">
       <main className="app-scrollbar min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 sm:p-6 lg:p-8">
+        <div className="flex w-full flex-col gap-6 px-4 py-6 sm:px-6 lg:px-10">
           <PageHeader
             title="实验室"
             description="展示平台正在探索期的功能，体验后欢迎反馈。功能可能不稳定或随版本调整。"
           />
-          <section aria-label="实验室功能" className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <section
+            aria-label="实验室功能"
+            className="grid grid-cols-1 gap-4 xl:grid-cols-[repeat(auto-fill,minmax(420px,1fr))]"
+          >
             {FEATURES.map((feature) => (
               <LabFeatureCard key={feature.id} feature={feature} setFeedbackOpen={setFeedbackOpen} />
             ))}

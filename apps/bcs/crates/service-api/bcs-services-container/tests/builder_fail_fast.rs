@@ -1,21 +1,20 @@
 use bcs_services_container::{BuilderError, ServicesBuilder};
+use bcs_test_support::NoopInteractionService;
 use bcs_test_support::{
     NoopA2aChatRunService, NoopA2aChatService, NoopActorDirectoryService, NoopBotDeliveryPort,
     NoopBotDiscoveryService, NoopBotManagementService, NoopBotOnboardingService,
     NoopBotQueryService, NoopBotRegistryCoreService, NoopBotRunContextPort,
     NoopBotRuntimeConnectionService, NoopChannelService, NoopCollaborationRuntimeService,
-    NoopCollaborationTemplateService, NoopFriendCoreService,
-    NoopFriendService, NoopFrontendDeliveryPort,
-    NoopFusionCoreService, NoopGroupCoreService, NoopGroupFusionService,
-    NoopGroupManagementService, NoopGroupMessageHistoryService, NoopGroupProposalService,
-    NoopGroupQueryService, NoopHumanActorService, NoopMessageFlowService,
-    NoopOrganizationManagementService, NoopProposalCoreService,
-    NoopProviderBotCoreService, NoopProviderBotEventService, NoopProviderCoreService,
-    NoopProviderManagementService, NoopRelationCoreService, NoopRoutingCoreService,
-    NoopSecretService, NoopSessionFileService, NoopSessionLaunchService,
-    NoopSessionManagementService, NoopSystemMessageService, NoopWorkbenchSessionService,
+    NoopCollaborationTemplateService, NoopFriendCoreService, NoopFriendService,
+    NoopFrontendDeliveryPort, NoopFusionCoreService, NoopGroupContextService, NoopGroupCoreService,
+    NoopGroupFusionService, NoopGroupManagementService, NoopGroupMessageHistoryService,
+    NoopGroupProposalService, NoopGroupQueryService, NoopHumanActorService, NoopMessageFlowService,
+    NoopOrganizationManagementService, NoopProposalCoreService, NoopProviderBotCoreService,
+    NoopProviderBotEventService, NoopProviderCoreService, NoopProviderManagementService,
+    NoopRelationCoreService, NoopRoutingCoreService, NoopSecretService, NoopSessionFileService,
+    NoopSessionLaunchService, NoopSessionManagementService, NoopSystemMessageService,
+    NoopWorkbenchSessionService,
 };
-use bcs_test_support::NoopInteractionService;
 use std::sync::Arc;
 
 #[test]
@@ -73,6 +72,7 @@ fn build_succeeds_when_all_required_services_set() {
         .workbench_sessions(Arc::new(NoopWorkbenchSessionService))
         .group_proposals(Arc::new(NoopGroupProposalService))
         .group_message_history(Arc::new(NoopGroupMessageHistoryService))
+        .group_context(Arc::new(NoopGroupContextService))
         .system_message(Arc::new(NoopSystemMessageService))
         .group_fusion(Arc::new(NoopGroupFusionService))
         .session_management(Arc::new(NoopSessionManagementService))
@@ -120,6 +120,7 @@ fn fully_wired_builder_without_organization_management() -> ServicesBuilder {
         .workbench_sessions(Arc::new(NoopWorkbenchSessionService))
         .group_proposals(Arc::new(NoopGroupProposalService))
         .group_message_history(Arc::new(NoopGroupMessageHistoryService))
+        .group_context(Arc::new(NoopGroupContextService))
         .system_message(Arc::new(NoopSystemMessageService))
         .group_fusion(Arc::new(NoopGroupFusionService))
         .session_management(Arc::new(NoopSessionManagementService))

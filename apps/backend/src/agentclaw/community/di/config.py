@@ -9,11 +9,19 @@ clusters with sub-blocks (e.g. ``arca_sandbox.alt``) that aren't yet
 worth fully typing. The hatch lets us pull the typed extraction work
 forward without blocking on every nested field.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
+
+from agentclaw.community.di.task_dispatch_config import (
+    TaskDispatchConfig as TaskDispatchConfig,
+)
+from agentclaw.community.di.openapi_user_id_bypass_config import (
+    OpenApiUserIdBypassConfig as OpenApiUserIdBypassConfig,
+)
 
 from agentclaw.community.core.bot_config_manifest.delivery_mode import (
     TeclawDeliveryMode,
@@ -101,16 +109,17 @@ class OpenApiBotConfig:
     """``openapi_bot`` block — BaaS Open API single-bot dispatch (task ``single_bot``).
     Drives the community ``OpenApiBotAdapter`` (Bearer ``api_key`` against
     ``/openapi/v1/messages`` + ``/api/v1/api-keys/<prefix>/allowed-bots``).
-    ``base_url`` is the host (non-secret) of the BaaS Open API this deployment
-    talks to — one canonical value, supplied by the deployment overlay (mirrors
-    the ``bcn`` block convention). ``api_key_secret`` is the LITERAL
+    ``base_url`` / ``base_url_pre`` are env-aware hosts (non-secret), selected
+    per ``get_current_env()`` — mirrors the ``bcn`` block convention
+    (``base_url``=prod, ``base_url_pre``=pre). ``api_key_secret`` is the LITERAL
     Bearer ``api_key`` (env-injected, no Mist in the community build); empty
     -> the OpenApiBotPort stays None (fail-closed; ``single_bot`` dispatch
     degrades). ``api_key_prefix`` is the optional allowed-bots grant path
     segment; empty -> the adapter falls back to ``api_key[:10]``.
     """
 
-    base_url: str = ""  # BaaS Open API host for this deployment
+    base_url: str = ""  # env-aware resolved prod host
+    base_url_pre: str = ""  # env-aware pre host
     api_key_secret: str = ""  # LITERAL Bearer api_key (no Mist in community)
     api_key_prefix: str = ""
 
@@ -124,21 +133,24 @@ class BcsClientConfig:
     (Bearer ``provider_admin_token``); this block feeds the coordination plane
     (HMAC, group/session lifecycle) consumed by the coop-group task runner. The
     ``provider_id`` / ``provider_admin_token`` pair REUSES the ``bcn`` block
-    identity for the task-mode roster path — empty bcn -> provider_id
+    identity (env-aware) for the task-mode roster path — empty bcn -> provider_id
     empty -> roster degrades (HMAC group creation still works).
 
     ``token_secret`` / ``secret_secret`` are the LITERAL HMAC key/secret
     (env-injected, no Mist in the community build); BOTH required or the port
     stays None (fail-closed; ``coop_group`` degrades, ``single_bot``
-    unaffected). ``task_callback_url`` is the callback host (the endpoint BCS
-    posts task results back to) for this deployment — non-secret, stays literal
-    in YAML; empty -> the callback URL is not surfaced (callback off).
+    unaffected). ``task_callback_url`` / ``task_callback_url_pre`` are
+    env-aware callback hosts (the endpoint BCS posts task results back to) —
+    non-secret, stay literal in YAML; empty -> the callback URL is not
+    surfaced (callback off).
     """
 
-    base_url: str = ""  # BCS coordinator host for this deployment
+    base_url: str = ""  # prod BCS coordinator host
+    base_url_pre: str = ""  # pre BCS coordinator host
     token_secret: str = ""  # LITERAL HMAC key (no Mist in community)
     secret_secret: str = ""  # LITERAL HMAC secret (no Mist in community)
-    task_callback_url: str = ""  # task-result callback host (BCS -> endpoint)
+    task_callback_url: str = ""  # prod task-result callback host (BCS -> endpoint)
+    task_callback_url_pre: str = ""  # pre task-result callback host (BCS -> endpoint)
 
 
 @dataclass(frozen=True)
@@ -154,6 +166,7 @@ class MerchantTaskBotBindingsConfig:
     matching ``${...}`` in a plan), so content routing/materialize stays green on a
     bare/CI build (placeholders stay literal) and only a real dispatch degrades.
     """
+
     bot_id_by_role: Mapping[str, str] = field(default_factory=dict)
 
 
@@ -828,18 +841,14 @@ class TaskQueueConfig:
     app: str = DEFAULT_APP
 
 
-@dataclass(frozen=True)
-class TaskDispatchConfig:
-    """Task dispatch policy switches (``task_dispatch`` user_config block).
+# Note: TrajectoryAnalysisConfig lives in ``di/task_trajectory_config.py`` (moved
+# out to keep this monolith under the 1000-line architecture cap); its DI provider
+# is ``di/modules/task_trajectory_config_module.py::TaskTrajectoryConfigModule``.
 
-    The deterministic candidate-count rule is the safe default. Set
-    ``task_search_skill_enabled: true`` only when the owner Bot task-search
-    round-trip should decide the dispatch shape. ``skill_report_enabled``
-    selects the unified task result Push/Pull protocol and defaults to true.
-    """
 
-    task_search_skill_enabled: bool = False
-    skill_report_enabled: bool = True
+# Note: TrajectoryAnalysisConfig lives in ``di/task_trajectory_config.py`` (moved
+# out to keep this monolith under the 1000-line architecture cap); its DI provider
+# is ``di/modules/task_trajectory_config_module.py::TaskTrajectoryConfigModule``.
 
 
 @dataclass(frozen=True)

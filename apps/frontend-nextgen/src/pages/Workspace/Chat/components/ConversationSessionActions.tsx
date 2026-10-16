@@ -12,26 +12,30 @@ export function ConversationSessionActions({
   createdAt,
   favorite,
   actions,
+  withMeta = true,
 }: {
   title: string;
   createdAt: string;
   favorite?: { value?: boolean; pending: boolean; toggle(): void };
   actions?: ConversationSessionRowActions;
+  /** 平齐化会话行(dmore)不展示右侧时间列,只出 hover「…」菜单;缺省包含时间槽。 */
+  withMeta?: boolean;
 }) {
   const menu = useConversationSessionMenu(title, actions);
-  return (
-    <>
-      <ConversationSessionMeta createdAt={createdAt} menuOpen={menu.menuOpen}>
-        <Popover open={menu.menuOpen} onOpenChange={menu.setMenuOpen}>
+  const menuPopover = (
+    <Popover open={menu.menuOpen} onOpenChange={menu.setMenuOpen}>
           {/* 选中仅绑定标题按钮；click 须冒泡，让其他会话菜单识别外部点击并关闭。 */}
           <PopoverTrigger asChild>
             <IconButton
               label={menu.busy ? '会话操作或列表加载中，请稍候' : '会话更多操作'}
               ariaLabel="会话更多操作"
               size="sm"
-              icon={<MoreHorizontal className="h-4 w-4" />}
+              icon={<MoreHorizontal className={withMeta ? 'h-4 w-4' : 'h-3.5 w-3.5'} />}
               disabled={menu.busy || favorite?.pending}
-              className="shrink-0"
+              className={cn(
+                'shrink-0',
+                !withMeta && 'h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground',
+              )}
             />
           </PopoverTrigger>
           <PopoverContent
@@ -97,7 +101,25 @@ export function ConversationSessionActions({
             )}
           </PopoverContent>
         </Popover>
-      </ConversationSessionMeta>
+      );
+      return (
+        <>
+      {withMeta ? (
+        <ConversationSessionMeta createdAt={createdAt} menuOpen={menu.menuOpen}>
+          {menuPopover}
+        </ConversationSessionMeta>
+      ) : (
+        // 平齐化行内形态:与星标同款 hover/focus 显现,菜单打开期间钉住可见(定位由行提供)。
+        <span
+          data-session-meta-actions
+          className={cn(
+            'opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100',
+            menu.menuOpen && 'opacity-100',
+          )}
+        >
+          {menuPopover}
+        </span>
+      )}
       <Modal
         open={menu.dialog === 'rename'}
         onOpenChange={(open) => {

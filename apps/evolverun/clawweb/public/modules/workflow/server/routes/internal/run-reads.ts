@@ -24,6 +24,7 @@ export function createInternalRunReadsRouter(repo: RunReadRepository): Router {
         if (q.scope !== undefined && (kind !== "runs" || !["bot", "session", "all"].includes(q.scope))) {
           res.status(400).json({success:false,message:"Invalid run scope"}); return;
         }
+        if (q.purpose !== undefined && !["all", "production", "trial"].includes(q.purpose)) { res.status(400).json({ success: false, message: "Invalid run purpose" }); return; }
         const data = kind === "runs" ? await repo.listRuns(q) : await repo.readLogs(q);
         res.json({ success: true, data: kind === "runs" ? { ...data, scope: q.scope ?? "bot" } : data });
       } catch (error) {

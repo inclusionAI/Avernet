@@ -47,7 +47,8 @@ describe('SquareBotCard', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: '已是好友' })).toBeDisabled();
+    expect(screen.getByText('好友Bot')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '申请好友权限' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '立即开始对话' })).not.toBeInTheDocument();
   });
 
@@ -62,6 +63,69 @@ describe('SquareBotCard', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: '当前 Bot' })).toBeDisabled();
+    expect(screen.getByText('当前 Bot')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '申请好友权限' })).not.toBeInTheDocument();
   });
+  test('紧凑卡片保留加好友和分享操作及可访问名称', async () => {
+    const user = userEvent.setup();
+    const onPrimaryAction = jest.fn();
+    const onShare = jest.fn();
+    render(
+      <SquareBotCard
+        bot={bot}
+        activeActor={{ type: 'human', id: 'viewer' }}
+        busy={false}
+        onShare={onShare}
+        onPrimaryAction={onPrimaryAction}
+      />,
+    );
+    expect(screen.getByText(bot.ownerName)).toBeInTheDocument();
+    expect(screen.getByText(bot.id)).toBeInTheDocument();
+    const shareButton = screen.getByRole('button', { name: `分享 ${bot.name}` });
+    expect(shareButton).toHaveClass('text-foreground');
+    const primaryButton = screen.getByRole('button', { name: '申请好友权限' });
+    expect(shareButton.parentElement).toBe(primaryButton.parentElement);
+    expect(shareButton.parentElement).toHaveClass('mt-auto', 'justify-end');
+    expect(shareButton.parentElement?.parentElement?.lastElementChild).toBe(shareButton.parentElement);
+    expect(shareButton).not.toHaveClass('absolute', 'md:opacity-0');
+    await user.click(primaryButton);
+    expect(onPrimaryAction).toHaveBeenCalledWith(bot);
+    await user.click(screen.getByRole('button', { name: `分享 ${bot.name}` }));
+    expect(onShare).toHaveBeenCalledWith(bot);
+  });
+
+  test('好友显示对话图标入口；申请中和忙碌状态禁止重复操作', async () => {
+    const user = userEvent.setup();
+    const onPrimaryAction = jest.fn();
+    const props = {
+      activeActor: { type: 'human' as const, id: 'viewer' },
+      busy: false,
+      onShare: jest.fn(),
+      onPrimaryAction,
+    };
+    const { rerender } = render(<SquareBotCard {...props} bot={{ ...bot, relationshipStatus: 'friend' }} />);
+    expect(screen.getByText('好友Bot')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '立即开始对话' }));
+    expect(onPrimaryAction).toHaveBeenCalledTimes(1);
+    rerender(<SquareBotCard {...props} bot={{ ...bot, relationshipStatus: 'applying' }} />);
+    expect(screen.getByText('申请中')).toBeInTheDocument();
+    expect(screen.getByText('申请中').parentElement).toHaveClass('ml-auto', 'justify-end');
+    expect(screen.queryByRole('button', { name: '申请好友权限' })).not.toBeInTheDocument();
+    rerender(<SquareBotCard {...props} bot={bot} busy />);
+    expect(screen.getByRole('button', { name: '申请好友权限' })).toBeDisabled();
+  });
+});
+
+
+test.each(['name', 'ownerName', 'id', 'shortProfile'] as const)('%s 悬浮展示完整内容', async (field) => {
+  const user = userEvent.setup();
+  const text = `${field}非常长的完整内容用于验证省略文字展示1234567890`;
+  const cardBot = { ...bot, [field]: text };
+  const { unmount } = render(
+    <SquareBotCard bot={cardBot} activeActor={{ type: 'human', id: 'viewer' }} busy={false}
+      onShare={jest.fn()} onPrimaryAction={jest.fn()} />,
+  );
+  await user.hover(screen.getByText(text, { exact: field !== 'shortProfile' }));
+  expect(await screen.findByRole('tooltip')).toHaveTextContent(text);
+  unmount();
 });

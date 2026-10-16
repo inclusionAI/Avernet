@@ -279,7 +279,7 @@ class ClaudeCodeChatAdapter(ChatService):
     async def resolve_exec_approval(
         self,
         session_key: str,
-        run_id: str,
+        interaction_id: str,
         decision: str,
         message: str | None = None,
         auth: AuthContext | None = None,
@@ -288,7 +288,7 @@ class ClaudeCodeChatAdapter(ChatService):
         token = auth.token if auth is not None else None
         return await self._port.resolve_exec_approval(
             session_key=session_key,
-            run_id=run_id,
+            interaction_id=interaction_id,
             decision=decision,
             message=message,
             token=token,
@@ -297,23 +297,33 @@ class ClaudeCodeChatAdapter(ChatService):
     async def resolve_interaction(
         self,
         session_key: str,
-        run_id: str,
-        response: str | None = None,
+        interaction_id: str,
+        decision: str = "submit",
+        answer: str | None = None,
+        message: str | None = None,
+        answers: dict[str, str] | None = None,
+        values: dict[str, Any] | None = None,
+        selected_options: list[list[str]] | None = None,
         auth: AuthContext | None = None,
     ) -> dict[str, Any]:
         """Resolve a pending AskUserQuestion interaction via the port."""
         token = auth.token if auth is not None else None
         return await self._port.resolve_interaction(
             session_key=session_key,
-            run_id=run_id,
-            response=response,
+            interaction_id=interaction_id,
+            decision=decision,
+            answer=answer,
+            message=message,
+            answers=answers,
+            values=values,
+            selected_options=selected_options,
             token=token,
         )
 
     async def resolve_mode_transition(
         self,
         session_key: str,
-        run_id: str,
+        interaction_id: str,
         decision: str,
         auth: AuthContext | None = None,
     ) -> dict[str, Any]:
@@ -321,7 +331,7 @@ class ClaudeCodeChatAdapter(ChatService):
         token = auth.token if auth is not None else None
         return await self._port.resolve_mode_transition(
             session_key=session_key,
-            run_id=run_id,
+            interaction_id=interaction_id,
             decision=decision,
             token=token,
         )

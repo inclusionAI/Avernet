@@ -23,7 +23,6 @@ import { toast } from 'sonner';
 import { useBotWorkshopAccess } from './useBotWorkshopAccess';
 import { useBotWorkshopCreateFlow } from './useBotWorkshopCreateFlow';
 import { useBotWorkshopLocks } from './useBotWorkshopLocks';
-
 export function useBotWorkshop() {
   const state = useBotWorkshopStore();
   const requestIdentity = useBotWorkshopRequestIdentity();
@@ -165,7 +164,15 @@ export function useBotWorkshop() {
     ...state,
     spaceId,
     currentSpaceKind: currentSpace?.spaceType === 'TEAM' ? 'team' : 'personal',
-    canOpenConversation: (bot: BotDomain) => Boolean(currentOpenApiUserId && bot.ownerId === currentOpenApiUserId),
+    // Only Agent Coding Bot extends the workbench conversational route to explicit
+    // collaborators. Other engines keep the original Owner-only workbench entry so
+    // this fix remains scoped to Coding Bot behavior.
+    canOpenConversation: (bot: BotDomain) =>
+      Boolean(
+        currentOpenApiUserId &&
+          (bot.ownerId === currentOpenApiUserId ||
+            (Boolean(bot.runtime?.isAgentCodingBot) && bot.actions.includes('edit'))),
+      ),
     canEnterDetail,
     loading: requestIdentity.loading || spaceLoading || !spaceInitialized || state.loading,
     error: requestIdentity.error ?? spaceError ?? state.error,
@@ -179,6 +186,17 @@ export function useBotWorkshop() {
       if (bot.ownerId) params.set('owner_id', bot.ownerId);
       history.push(`/bot-workshop/logs?${params.toString()}`);
     },
+    openTaskInstances: (bot: BotDomain) => {
+      const params = new URLSearchParams({ bot_id: bot.id, bot_name: bot.name });
+      history.push(`/bot-workshop/task-instances?${params.toString()}`);
+    },
+    // inventory 仅在 Owner 或显式协作者时暴露 edit；空间普通成员只有 view/chat，
+    // 不应显示受协作者权限保护的任务实例入口。
+    canOpenTaskInstances: (bot: BotDomain) =>
+      Boolean(currentOpenApiUserId && (bot.ownerId === currentOpenApiUserId || bot.actions.includes('edit'))),
+    containerUserId: requestIdentity.userId,
+    canViewContainers: (bot: BotDomain) => Boolean(currentOpenApiUserId && (bot.ownerId === currentOpenApiUserId || bot.actions.includes('edit'))),
+    canRestartContainer: (bot: BotDomain) => Boolean(currentOpenApiUserId && bot.ownerId === currentOpenApiUserId),
     creating: createFlow.creating,
     createAuthorization: createFlow.authorization,
     createSpaces: state.createScenario

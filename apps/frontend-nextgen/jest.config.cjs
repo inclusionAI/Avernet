@@ -28,9 +28,13 @@ const moduleNameMapper = {
 // 无法像 ui 那样重定向，只能放开默认的 node_modules 忽略让 babel 转译它们。
 // 这三个包的 dist 不含 .css/.less 导入，转译后可直接在 node 环境跑。
 // tc-chat/ui's CJS MarkdownRenderer still imports @ant-design/colors/es from a
-// nested dependency. Transform that small ESM package as well; the rest of
+// nested dependency. DiceBear likewise ships ESM-only packages used by the bot
+// avatar generator. Transform these package namespaces; the rest of
 // node_modules stays ignored.
-const transformIgnorePatterns = ['/node_modules/(?!@tc-chat/|@ant-design/colors/)', '\\.pnp\\.[^\\\\/]+$'];
+const transformIgnorePatterns = [
+  '/node_modules/(?!@tc-chat/|@ant-design/colors/|@dicebear/)',
+  '\\.pnp\\.[^\\\\/]+$',
+];
 
 const testMatch = ['<rootDir>/test/**/*.(test|spec|e2e).(ts|tsx|js|jsx)'];
 

@@ -59,7 +59,7 @@ def test_failed_or_unknown_results_block_and_do_not_log_raw_output(result, caplo
     caplog.set_level(logging.INFO, logger=backup.logger.name)
     with pytest.raises(RuntimeError):
         prepare(Mock(return_value=result))
-    assert 'phase=prepare status=blocked' in caplog.text
+    assert 'phase=prepare status=failed' in caplog.text
     assert 'secret-output' not in caplog.text
 
 
@@ -121,27 +121,29 @@ def test_empty_inventory_logs_raw_summary(caplog):
     caplog.set_level(logging.INFO, logger=backup.logger.name)
     runtime = Mock()
     runtime.list_devices_by_bot_uuid.return_value = []
-    with pytest.raises(RuntimeError, match='清单为空'):
-        AicodingProvisioningStrategy('aicoding')._prepare_restart(
-            BotProvisioningContext(
-                bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
-            ),
-            device_id='caller-uuid', target_runtime=runtime,
-        )
+    verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
+        BotProvisioningContext(
+            bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
+        ),
+        device_id='caller-uuid', target_runtime=runtime,
+    )
+    verify()
+    runtime.post_bots_api.assert_not_called()
     assert 'raw_device_count=0' in caplog.text
     assert 'raw_status_counts={}' in caplog.text
 
 
-def test_active_empty_inventory_fails_closed():
+def test_active_empty_inventory_continues_without_claiming_backup_success():
     runtime = Mock()
     runtime.list_devices_by_bot_uuid.return_value = []
-    with pytest.raises(RuntimeError, match='清单为空'):
-        AicodingProvisioningStrategy('aicoding')._prepare_restart(
-            BotProvisioningContext(
-                bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
-            ),
-            device_id='caller-uuid', target_runtime=runtime,
-        )
+    verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
+        BotProvisioningContext(
+            bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
+        ),
+        device_id='caller-uuid', target_runtime=runtime,
+    )
+    verify()
+    runtime.post_bots_api.assert_not_called()
 
 
 def test_all_stopped_inventory_skips_backup_but_verifies_again():
@@ -185,20 +187,19 @@ def test_all_released_inventory_skips_backup():
     runtime.post_bots_api.assert_not_called()
 
 
-def test_no_live_target_recheck_blocks_if_device_reappears():
+def test_no_live_target_recheck_continues_if_device_reappears():
     runtime = Mock()
     runtime.list_devices_by_bot_uuid.side_effect = [state['devices'] for state in [
         {'devices': [{'provider_device_id': 'physical-1', 'status': 'STOPPED'}]},
         {'devices': [{'provider_device_id': 'physical-1', 'status': 'ACTIVE'}]},
     ]]
-    with pytest.raises(RuntimeError, match='清单变化'):
-        verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
-            BotProvisioningContext(
-                bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
-            ),
-            device_id='caller-uuid', target_runtime=runtime,
-        )
-        verify()
+    verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
+        BotProvisioningContext(
+            bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
+        ),
+        device_id='caller-uuid', target_runtime=runtime,
+    )
+    verify()
 
 
 def test_operation_id_is_fresh_per_restart_request():
@@ -223,9 +224,8 @@ async def test_instance_targets_are_pinned_and_inventory_is_rechecked():
         {'devices': [{'provider_device_id': 'physical-2', 'status': 'ACTIVE'}]},
     ]]
     with patch.object(backup, 'prepare_backup', return_value=Mock()) as prepared:
-        with pytest.raises(RuntimeError, match='清单变化'):
-            await prepare_instance_restart(bot={'bot_id': 'b', 'owner_id': 'o', 'active_engine': 'aicoding'},
-                                           device_id='caller-uuid', target_runtime=runtime)
+        await prepare_instance_restart(bot={'bot_id': 'b', 'owner_id': 'o', 'active_engine': 'aicoding'},
+                                       device_id='caller-uuid', target_runtime=runtime)
     prepared.call_args.kwargs['execute']('probe')
     runtime.post_bots_api.assert_called_once_with(
         path='/api/v1/paas/devices/physical-1/commands',
@@ -253,8 +253,8 @@ def test_only_confirmed_absence_is_legacy(capsys):
 
 
 @pytest.mark.parametrize('phase', ['prepare', 'verify'])
-@pytest.mark.parametrize('provider', ['baas'])
-def test_original_lock_and_binding_survive_backup_failure(phase, provider):
+@pytest.mark.parametrize('provider', ['arca', 'baas'])
+def test_backup_failure_continues_original_restart_and_lock_ownership(phase, provider):
     from tests.community.core.bot_management.services.test_bot_service_restart_idempotency import (
         FakeRestartLockRepo, _make_service, _make_bot, _stateful_bot_repository,
     )
@@ -281,18 +281,18 @@ def test_original_lock_and_binding_survive_backup_failure(phase, provider):
     with patch.object(backup, 'prepare_backup', side_effect=prepare_check), \
          patch.object(svc, 'stop_bot') as stop, patch.object(svc, 'start_bot') as start, \
          patch.object(svc, '_restart_bot_baas') as update:
-        # prepare fails BEFORE the caller's lock exists (raw error, no lock to
-        # clean up); verify fails INSIDE the caller's try (wrapped by the
-        # existing restart error path, lock released by its finally).
-        from agentclaw.community.core.bot_management.services.bot_service import BotServiceError
-        expected = RuntimeError if phase == 'prepare' else BotServiceError
-        with pytest.raises(expected, match='backup failed'):
-            svc.restart_bot(bot_id='bot001', user_id='user001')
-    stop.assert_not_called()
-    start.assert_not_called()
-    update.assert_not_called()
+        assert svc.restart_bot(bot_id='bot001', user_id='user001') is not None
     assert state['binding_id'] == 42 and state['status'] == 'ACTIVE'
-    assert not locks.rows
+    if provider == 'baas':
+        update.assert_called_once()
+        stop.assert_not_called()
+        start.assert_not_called()
+        assert not locks.rows
+    else:
+        stop.assert_called_once()
+        start.assert_called_once()
+        update.assert_not_called()
+        assert locks.rows  # Original ARCA allocation owns the lock hand-off.
 
 
 def test_wait_logs_are_throttled_but_keep_progress(caplog):
@@ -695,53 +695,42 @@ def test_arca_skips_all_backup_io_but_still_verifies_binding(engine, status, rec
 
 
 @pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
-@pytest.mark.parametrize('status', ['ACTIVE', 'PENDING'])
-def test_other_provider_keeps_backup_probe_and_verification(engine, status):
+@pytest.mark.parametrize('status', ['ACTIVE', 'PENDING', 'FAILED', 'STOPPED'])
+@pytest.mark.parametrize('provider', ['local', 'unknown'])
+@pytest.mark.parametrize('failure', [None, 'prepare', 'verify'])
+def test_non_baas_provider_retains_backup_attempt_and_binding_guard(engine, status, provider, failure):
     ctx = BotProvisioningContext(
         bot_id='bot', owner_id='owner', bot_type='personal', active_engine=engine,
     )
     device = Mock()
     device.get_device.return_value = {
-        'device_id': 'container-1', 'device_provider': 'local', 'status': status,
+        'device_id': 'container-1', 'device_provider': provider, 'status': status,
     }
-    device.exec_shell_new.return_value = response('not_mounted')
+    device.exec_shell_new.side_effect = (
+        ConnectionError('unavailable') if failure == 'prepare' else
+        [response('not_mounted'), ConnectionError('unavailable')] if failure == 'verify' else
+        [response('not_mounted'), response('not_mounted')]
+    )
     runtime_provider = Mock(side_effect=AssertionError('must not resolve BaaS'))
     repository = Mock()
     repository.get_by_id_and_owner.return_value = {'binding_id': 42}
-
     verify = AicodingProvisioningStrategy(engine).prepare_restart(
         ctx, binding_id=42, device_service_provider=lambda: device,
         target_runtime_provider=runtime_provider, bot_repository=repository,
         operation_id=OPERATION,
     )
-    assert device.exec_shell_new.call_count == 1
-    verify()
-    assert device.exec_shell_new.call_count == 2
-    assert all(call.kwargs['device_id'] == 'container-1'
-               for call in device.exec_shell_new.call_args_list)
-    runtime_provider.assert_not_called()
-    repository.update_by_owner.assert_not_called()
-
-
-@pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
-@pytest.mark.parametrize('status', ['FAILED', 'STOPPED'])
-def test_other_provider_recovery_still_blocks_without_backup(engine, status):
-    ctx = BotProvisioningContext(
-        bot_id='bot', owner_id='owner', bot_type='personal', active_engine=engine,
-    )
-    device = Mock()
-    device.get_device.return_value = {
-        'device_id': 'container-1', 'device_provider': 'local', 'status': status,
-    }
-    runtime_provider = Mock(side_effect=AssertionError('must not resolve BaaS'))
-    repository = Mock()
-    with patch.object(backup, 'prepare_backup') as prepared:
-        with pytest.raises(backup.RestartBackupError, match='无法定位待恢复容器'):
-            AicodingProvisioningStrategy(engine).prepare_restart(
-                ctx, binding_id=42, device_service_provider=lambda: device,
-                target_runtime_provider=runtime_provider, bot_repository=repository,
-            )
-    prepared.assert_not_called()
-    device.exec_shell_new.assert_not_called()
+    verify()  # Backup failures must not block restart.
+    expected_calls = 0 if status in {'FAILED', 'STOPPED'} else 1 if failure == 'prepare' else 2
+    assert device.exec_shell_new.call_count == expected_calls
+    if expected_calls:
+        assert all(call.kwargs['device_id'] == 'container-1'
+                   for call in device.exec_shell_new.call_args_list)
+    repository.get_by_id_and_owner.return_value = {'binding_id': 43}
+    with pytest.raises(backup.RestartBackupError) as caught:
+        verify()
+    assert caught.value.reason == 'binding_changed'
+    repository.get_by_id_and_owner.side_effect = RuntimeError('database unavailable')
+    with pytest.raises(RuntimeError, match='database unavailable'):
+        verify()
     runtime_provider.assert_not_called()
     repository.update_by_owner.assert_not_called()

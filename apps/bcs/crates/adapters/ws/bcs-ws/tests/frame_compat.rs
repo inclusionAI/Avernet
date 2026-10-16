@@ -35,6 +35,9 @@ use tokio::sync::{Mutex, mpsc};
 use tracing::instrument::WithSubscriber;
 use tracing_subscriber::prelude::*;
 
+#[path = "support/task_rpc_scope.rs"]
+mod task_rpc_scope;
+
 #[derive(Default)]
 struct RecordingMessageFlow {
     bot_events: Mutex<Vec<BotEventCommand>>,

@@ -173,8 +173,22 @@ impl SessionService for NoopSessionService {
         Err(ApplicationError::internal("session not configured"))
     }
 
-    async fn get(&self, _query: GetSession) -> Result<SessionDetail, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
+    async fn get(&self, query: GetSession) -> Result<SessionDetail, ApplicationError> {
+        use bcs_service_api::application::v1::{select_principal, IdentityPolicy, SessionKind, SessionStatus};
+        select_principal(&query.caller, IdentityPolicy::HumanOrOwnedBot)?;
+        match query.session_id.as_str() {
+            "denied" => return Err(ApplicationError::forbidden("not a participant")),
+            "missing" => return Err(ApplicationError::not_found("session_not_found", "missing")),
+            "unavailable" => return Err(ApplicationError::internal("session read failed")),
+            _ => {}
+        }
+        Ok(SessionDetail {
+            session_id: query.session_id,
+            version: 1, group_id: "group-1".into(), status: SessionStatus::Running,
+            kind: SessionKind::Chat, title: None, input: None, meta: None,
+            participants: vec![], caller_principal: None, created_by: None,
+            created_at: 1, updated_at: 2, state_machine_run_id: None, state_machine_run: None,
+        })
     }
 
     async fn update(&self, _command: UpdateSession) -> Result<SessionDetail, ApplicationError> {
@@ -339,6 +353,9 @@ struct FakeChannel {
     created: Arc<Mutex<Option<CreateBindingCommand>>>,
     next_create_error: Arc<Mutex<Option<ChannelUseCaseError>>>,
     list_calls: Arc<Mutex<u32>>,
+    conversation_calls: Mutex<Vec<(String, Option<ChannelType>)>>,
+    conversation_mappings: Vec<ConversationSessionMap>,
+    conversation_error: Mutex<Option<ChannelUseCaseError>>,
     set_status: Arc<Mutex<Option<(String, bool)>>>,
     deleted: Arc<Mutex<Option<String>>>,
 }
@@ -390,10 +407,14 @@ impl ChannelService for FakeChannel {
 
     async fn list_conversations_by_session(
         &self,
-        _: &str,
-        _: Option<ChannelType>,
+        session_id: &str,
+        channel_type: Option<ChannelType>,
     ) -> Result<Vec<ConversationSessionMap>, ChannelUseCaseError> {
-        Ok(Vec::new())
+        self.conversation_calls.lock().unwrap().push((session_id.to_string(), channel_type));
+        if let Some(error) = self.conversation_error.lock().unwrap().take() {
+            return Err(error);
+        }
+        Ok(self.conversation_mappings.clone())
     }
 
     async fn set_binding_status(
@@ -584,4 +605,105 @@ async fn delete_binding_returns_200_and_records_id() {
         service.deleted.lock().expect("deleted lock").clone(),
         Some("b-1".to_string())
     );
+}
+
+
+const CONVERSATIONS: &str = "/openapi/v1/collaboration/channels/conversations/by-session";
+
+fn conversation_fixture() -> Arc<FakeChannel> {
+    Arc::new(FakeChannel {
+        conversation_mappings: ["binding-1", "binding-2"].into_iter().map(|binding| ConversationSessionMap {
+            binding_id: binding.into(), im_conversation_id: "cid-1".into(),
+            im_conversation_type: "2".into(), session_scope: bcs_domain::SessionScope::Conversation,
+            im_user_id: Some("private-user".into()), bcs_session_id: "session:1".into(),
+            last_active_at: 123,
+        }).collect(),
+        ..FakeChannel::default()
+    })
+}
+
+#[tokio::test]
+async fn conversation_lookup_projects_all_mappings_and_normalizes_query() {
+    let service = conversation_fixture();
+    let response = test_router(service.clone(), caller()).oneshot(authenticated_request(
+        "GET", &format!("{CONVERSATIONS}?bcs_session_id=%20session%3A1%20&channel_type=%20dingtalk%20"), json!(null),
+    )).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["code"], 20000);
+    assert_eq!(body["request_id"], "request-123");
+    let items = body["data"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["conversation_id"], "cid-1");
+    assert_eq!(items[0]["session_scope"], "conversation");
+    assert_eq!(items[0]["last_active_at"], 123);
+    assert!(items[0].get("im_user_id").is_none());
+    assert_eq!(*service.conversation_calls.lock().unwrap(), vec![("session:1".into(), Some("dingtalk".into()))]);
+}
+
+#[tokio::test]
+async fn conversation_lookup_accepts_bot_principal_and_empty_mappings() {
+    let mut bot = caller_no_user();
+    bot.bot = Some(bcs_service_api::application::v1::AuthenticatedBotIdentity {
+        bot_uuid: "b1".into(), owner_id: "staff-1".into(), app_id: 1, agent_code: "agent-1".into(),
+    });
+    let service = fixture();
+    let response = test_router(service.clone(), bot).oneshot(authenticated_request(
+        "GET", &format!("{CONVERSATIONS}?bcs_session_id=session-1"), json!(null),
+    )).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response_json(response).await["data"]["items"], json!([]));
+    assert_eq!(*service.conversation_calls.lock().unwrap(), vec![("session-1".into(), None)]);
+}
+
+#[tokio::test]
+async fn conversation_lookup_denials_never_query_mappings() {
+    for (identity, session, status) in [
+        (caller_no_user(), "session-1", StatusCode::FORBIDDEN),
+        (caller(), "denied", StatusCode::FORBIDDEN),
+        (caller(), "missing", StatusCode::NOT_FOUND),
+        (caller(), "unavailable", StatusCode::INTERNAL_SERVER_ERROR),
+    ] {
+        let service = fixture();
+        let response = test_router(service.clone(), identity).oneshot(authenticated_request(
+            "GET", &format!("{CONVERSATIONS}?bcs_session_id={session}"), json!(null),
+        )).await.unwrap();
+        assert_eq!(response.status(), status);
+        assert!(service.conversation_calls.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn conversation_lookup_rejects_invalid_query_and_missing_principal() {
+    for query in ["", "?bcs_session_id=%20", "?bcs_session_id=s&channel_type=%20", "?bcs_session_id=s&unknown=x"] {
+        let service = fixture();
+        let response = test_router(service.clone(), caller()).oneshot(authenticated_request(
+            "GET", &format!("{CONVERSATIONS}{query}"), json!(null),
+        )).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(service.conversation_calls.lock().unwrap().is_empty());
+    }
+    let service = fixture();
+    let response = test_router(service.clone(), caller()).oneshot(Request::builder()
+        .uri(format!("{CONVERSATIONS}?bcs_session_id=s")).body(Body::empty()).unwrap()
+    ).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(service.conversation_calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn conversation_lookup_propagates_storage_failure() {
+    let service = Arc::new(FakeChannel {
+        conversation_error: Mutex::new(Some(ChannelUseCaseError::Internal(
+            bcs_service_api::ServiceError::InternalError("storage unavailable".into()),
+        ))),
+        ..FakeChannel::default()
+    });
+    let response = test_router(service.clone(), caller()).oneshot(authenticated_request(
+        "GET", &format!("{CONVERSATIONS}?bcs_session_id=s"), json!(null),
+    )).await.unwrap();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["error_code"], "internal_error");
+    assert_eq!(service.conversation_calls.lock().unwrap().len(), 1);
 }

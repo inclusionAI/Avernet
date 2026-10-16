@@ -26,4 +26,31 @@ describe('TaskCards shared normalization', () => {
     expect(task.constraints).toEqual(['需引用最近三个月信息']);
     expect(task.resources).toEqual(['https://example.com/report']);
   });
+
+  it('normalizes task_ready hidden smoke flags without rendering them as business fields', () => {
+    const task = normalizeReadyTask({
+      type: 'task_ready',
+      hidden_flags: {
+        relay_mode_coverage_smoke: {
+          version: 3,
+          current_phase: 'plan_single_bot',
+          planned_modes: [],
+        },
+      },
+      task: {
+        goal: '完成尽调',
+        deliverables: ['一份尽调报告'],
+        acceptance_criteria: ['明确投资价值'],
+        constraints: ['全球市场'],
+      },
+    });
+
+    expect(task.hidden_flags).toEqual({
+      relay_mode_coverage_smoke: {
+        version: 3,
+        current_phase: 'plan_single_bot',
+        planned_modes: [],
+      },
+    });
+  });
 });

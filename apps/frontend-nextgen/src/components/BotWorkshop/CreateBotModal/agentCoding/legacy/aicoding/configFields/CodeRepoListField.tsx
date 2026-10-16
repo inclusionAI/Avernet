@@ -1,5 +1,7 @@
 import AntCodeProjectSelect from '@/components/BotWorkshop/CreateBotModal/agentCoding/legacy/appcoding/AntCodeProjectSelect';
+import { CodeRepositoryTenantSwitch } from '@/components/BotWorkshop/CreateBotModal/agentCoding/legacy/appcoding/CodeRepositoryTenantSwitch';
 import { Button } from '@/components/ui/Button';
+import type { CodeRepositoryTenant } from '@/services/botWorkshop/agentCodingLegacyService';
 import { cn } from '@/utils/cn';
 import { Plus, Trash2 } from 'lucide-react';
 import React from 'react';
@@ -17,6 +19,10 @@ export interface CodeRepoListFieldProps {
   description?: string;
   allowMultiple?: boolean;
   duplicateUrls?: Set<string>;
+  /** 当前仓库租户；同一表单项的多行仓库共享。 */
+  tenant?: CodeRepositoryTenant;
+  /** 切换当前代码仓库表单项的搜索租户。 */
+  onTenantChange?: (tenant: CodeRepositoryTenant) => void;
   className?: string;
 }
 
@@ -31,10 +37,24 @@ export const CodeRepoListField: React.FC<CodeRepoListFieldProps> = ({
   description,
   allowMultiple = true,
   duplicateUrls,
+  tenant,
+  onTenantChange,
   className,
 }) => {
   const items = normalizeCodeRepoItems(value);
   const displayItems = items.length ? items : [{ repo_url: '' }];
+  const normalizedTenant: CodeRepositoryTenant = tenant === 'xiaojin' ? 'xiaojin' : 'ant';
+  const labelNode = label ? (
+    <label className="block text-xs font-semibold text-slate-600">
+      {label}
+      {required ? (
+        <span className="ml-0.5 text-red-500">*</span>
+      ) : (
+        <span className="ml-1 font-normal text-slate-400">（可选）</span>
+      )}
+      {allowMultiple && <span className="ml-1 font-normal text-slate-400">（可添加多个）</span>}
+    </label>
+  ) : null;
 
   const updateAt = (index: number, repoUrl: string) => {
     const next = [...displayItems];
@@ -49,16 +69,13 @@ export const CodeRepoListField: React.FC<CodeRepoListFieldProps> = ({
 
   return (
     <div className={cn('space-y-2', className)}>
-      {label && (
-        <label className="block text-xs font-semibold text-slate-600">
-          {label}
-          {required ? (
-            <span className="ml-0.5 text-red-500">*</span>
-          ) : (
-            <span className="ml-1 font-normal text-slate-400">（可选）</span>
-          )}
-          {allowMultiple && <span className="ml-1 font-normal text-slate-400">（可添加多个）</span>}
-        </label>
+      {labelNode && (
+        <div className="flex items-center justify-between gap-2">
+          {labelNode}
+          {onTenantChange ? (
+            <CodeRepositoryTenantSwitch value={normalizedTenant} onChange={onTenantChange} disabled={disabled} />
+          ) : null}
+        </div>
       )}
       {displayItems.map((repo, index) => {
         const repoUrl = repo.repo_url || '';
@@ -71,6 +88,7 @@ export const CodeRepoListField: React.FC<CodeRepoListFieldProps> = ({
               disabled={disabled}
               placeholder={placeholder}
               className="min-w-0 flex-1"
+              tenant={normalizedTenant}
               error={hasDuplicate}
             />
             {allowMultiple && !removeDisabled && displayItems.length > 1 && (

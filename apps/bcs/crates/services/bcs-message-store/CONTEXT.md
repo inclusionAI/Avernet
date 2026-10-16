@@ -28,6 +28,8 @@ external delivery. Memory, SQLite and MySQL Text/Prepared share this contract.
 
 Delivery decoding failures emit rate-limited column names/types and a fixed error
 category, never row values or serde errors that could include message/header data.
+Delivery JSON columns accept either strings or UTF-8 JSON bytes returned by DB
+plugins; SQL NULL handling and rejection of malformed JSON remain unchanged.
 
 Application-supplied admission rejections commit as unsent Failed rows (Send or
 Inject), with a fixed last_error_code, alongside other admitted recipients.

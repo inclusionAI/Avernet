@@ -54,6 +54,17 @@ export function WorkOrderTabs() {
   const { unreadCount, markAllRead, refreshUnread } = useNotifications();
   const [detail, setDetail] = useState<WorkOrder | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  // 全部已读 in-flight 态：按钮 loading 防抖，避免连点重复调用 markAllRead 接口。
+  const [markingAll, setMarkingAll] = useState(false);
+  const handleMarkAllRead = async () => {
+    if (markingAll) return;
+    setMarkingAll(true);
+    try {
+      await markAllRead();
+    } finally {
+      setMarkingAll(false);
+    }
+  };
 
   const openDetail = async (wo: WorkOrder) => {
     setDetail(wo);
@@ -152,8 +163,9 @@ export function WorkOrderTabs() {
                 variant="secondary"
                 size="sm"
                 leftIcon={<CheckCircle size={14} />}
-                disabled={unreadCount === 0}
-                onClick={() => void markAllRead()}
+                disabled={unreadCount === 0 || markingAll}
+                loading={markingAll}
+                onClick={() => void handleMarkAllRead()}
               >
                 全部标记为已读
               </Button>
@@ -214,7 +226,7 @@ export function WorkOrderTabs() {
                 <WorkOrderCard
                   key={`${wo.itemId}-${wo.workOrderId}`}
                   workOrder={wo}
-                  onApprove={(id) => void approve(id)}
+                  onApprove={(id) => approve(id)}
                   onReject={(id, remark) => void reject(id, remark)}
                   onView={openDetail}
                 />

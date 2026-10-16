@@ -1,24 +1,27 @@
-import { Button, Empty, Skeleton } from '@/components/ui';
+import { Empty } from '@/components/ui';
+import { ChatLayoutPanelSlot } from '@/components/Workspace/ChatLayoutPanelSlot';
+import { SidePanelCollapseButton } from '@/components/Workspace/SidePanelCollapseButton';
 import { filterVisibleGroupMessages } from '@/pages/Workspace/hooks/groupChatHistoryUtils';
 import { useCollabPanel } from '@/pages/Workspace/hooks/useCollabPanel';
 import { useGroupTaskExecution } from '@/pages/Workspace/hooks/useGroupTaskExecution';
 import { useMessageAreaSkeleton } from '@/pages/Workspace/hooks/useMessageAreaSkeleton';
 import { useMessageEdit } from '@/pages/Workspace/hooks/useMessageEdit';
-import { buildExplainPrompt, useMessageInteractions } from '@/pages/Workspace/hooks/useMessageInteractions';
-import type { SessionMessageAttachment } from '@/services/workspace/groupChatAttachmentService';
-import type { PanelAction } from '@tc-chat/core';
+import { useMessageInteractions } from '@/pages/Workspace/hooks/useMessageInteractions';
 import type { MentionConfig } from '@tc-chat/ui';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
-import { RefreshCw, Sparkles } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { GroupHeader } from '../GroupHeader';
+import { ComposerStatusBar } from './ComposerStatusBar';
 import { FuseSlot } from './FuseSlot';
 import { GroupChatCollabPanel } from './GroupChatCollabPanel';
 import { GroupChatComposer } from './GroupChatComposer';
-import { GroupChatMessageList } from './GroupChatMessageList';
+import { GroupChatMessageArea } from './GroupChatMessageArea';
 import type { GroupChatPaneProps } from './GroupChatPane.types';
+import { GroupQuestionPanel } from './GroupQuestionPanel';
 import { buildGroupMentionConfig, isHumanOnlyMention } from './mentionHelpers';
 import { resolveSender } from './messageHelpers';
+import { useGroupChatPaneActions } from './useGroupChatPaneActions';
 export { resolveSender };
 export function GroupChatPane(props: GroupChatPaneProps) {
   const {
@@ -32,6 +35,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     updateMemberMode,
     updateMemberScope,
     chat,
+    questions,
     supportState,
     connectionStatus,
     groupBootstrapProcessing = false,
@@ -51,6 +55,12 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     canManageGroup,
     activePanel,
     onTogglePanel,
+    favorites,
+    sidePaneOpen,
+    sidePaneDisabled,
+    onToggleSidePane,
+    onSidePaneIsOpenChange,
+    highlightMessageId,
     onRequestDissolve,
     onRequestShareGroup,
     onRequestShareSession,
@@ -115,51 +125,22 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     setLastSentMentions([]);
     panelRef.current?.closePanelForce();
   }, [session?.sessionId, panelRef]);
-  const handlePanelAction = (action: PanelAction) => {
-    if (action.type === 'fill_input') {
-      setDraft(action.content);
-      return;
-    }
-    send(action.content);
-  };
-  const quoteSelectedMessage = (text: string) => {
-    const selectedMessage = messages.find((message) => message.id === messageInteractions.selection?.messageId);
-    if (!selectedMessage) return;
-    const sender = resolveSender(
-      selectedMessage,
+  // 引用/解释/发送/空态点名写入/副屏面板动作：同目录 useGroupChatPaneActions 下沉装配。
+  const { insertDraft, handlePanelAction, quoteSelectedMessage, explainSelectedMessage, handleGroupSend } =
+    useGroupChatPaneActions({
       group,
-      session?.participants,
+      session,
+      messages,
+      interactions: messageInteractions,
+      onDraftChange: setDraft,
+      onSend: send,
+      onLastSentMentionsChange: setLastSentMentions,
+      finishEdit,
+      inputRef,
       userAvatarUrl,
       userIdentityId,
       userIdentityName,
-    );
-    messageInteractions.quoteMessage(selectedMessage.id, sender?.name ?? '未命名成员', text);
-  };
-
-  const explainSelectedMessage = (text: string) => {
-    const selectedMessage = messages.find((message) => message.id === messageInteractions.selection?.messageId);
-    if (!selectedMessage) return;
-    const sender = resolveSender(
-      selectedMessage,
-      group,
-      session?.participants,
-      userAvatarUrl,
-      userIdentityId,
-      userIdentityName,
-    );
-    setDraft(buildExplainPrompt(sender?.name ?? '未命名成员', text));
-    messageInteractions.clearQuote();
-    messageInteractions.setSelection(null);
-    finishEdit();
-    inputRef?.current?.focus();
-  };
-  const handleGroupSend = (content: string, mentions?: string[], attachments?: SessionMessageAttachment[]) => {
-    messageInteractions.markRead();
-    messageInteractions.clearQuote();
-    finishEdit();
-    setLastSentMentions(mentions ?? []);
-    send(content, mentions, attachments);
-  };
+    });
   if (!group) {
     return (
       <section className="flex min-w-0 flex-1 items-center justify-center bg-background">
@@ -174,83 +155,58 @@ export function GroupChatPane(props: GroupChatPaneProps) {
 
   const showError = supportState.phase === 'error';
   const isWaitingForBot = !isHumanOnlyMention(lastSentMentions, session?.participants ?? []);
-  const showReconnectToolbar =
-    connectionStatus === 'error' || connectionStatus === 'disconnected' || connectionStatus === 'reconnecting';
+
+  // 输入框可见性（与下方 GroupChatComposer 渲染条件同源）：空态行动区仅在可发送视角提供。
+  const composerVisible = !!session && activeIdentity?.kind !== 'bot' && !collabPanel.humanAbsentOnly;
+  // 帽条可见性与 composer 分离：「退出会话」仅在 human 视角已加入（present）时有意义（同原 LeaveBar）。
+  const statusBarVisible = composerVisible && collabPanel.humanJoined && !collabPanel.botActorId;
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col bg-background">
+    // relative 供副屏右上「收起」悬浮钮绝对定位（SidePanelCollapseButton）。
+    <section className="relative flex min-w-0 flex-1 flex-col bg-background">
       <ChatLayout className="min-h-0 flex-1">
         <GroupHeader
           selectedGroup={group}
           selectedSession={session}
           connectionStatus={connectionStatus}
           onOpenSessionList={onOpenSessionList}
-          onReconnect={() => {
-            void reconnect();
-          }}
           canManageGroup={canManageGroup}
           activePanel={activePanel}
           onTogglePanel={onTogglePanel}
+          favorites={favorites}
+          sidePaneOpen={sidePaneOpen}
+          sidePaneDisabled={sidePaneDisabled}
+          onToggleSidePane={onToggleSidePane}
           onRequestDissolve={onRequestDissolve}
           onRequestShareGroup={onRequestShareGroup}
           onRequestShareSession={onRequestShareSession}
         />
 
-        {!session ? (
-          <div className="flex min-h-0 flex-1 items-center justify-center px-3 py-3 sm:px-6 sm:py-4">
-            <Empty
-              title="请选择或创建一个会话"
-              description="从左侧选择一个会话，或为当前协作群创建新会话后再发送消息。"
-              icon={<Sparkles className="h-5 w-5" />}
-            />
-          </div>
-        ) : (
-          <div className="flex min-h-0 flex-1 flex-col bg-background">
-            {isLoadingHistory && !groupBootstrapProcessing ? (
-              <div className="flex min-h-0 flex-1 flex-col space-y-3 px-3 py-6 sm:px-6" aria-label="加载协作群会话历史">
-                <Skeleton.Block className="h-12 w-3/4 rounded-xl" />
-                <Skeleton.Block className="h-12 w-2/3 rounded-xl" />
-                <Skeleton.Block className="h-12 w-5/6 rounded-xl" />
-              </div>
-            ) : showError ? (
-              <div className="flex min-h-0 flex-1 items-center justify-center px-3 py-3 sm:px-6 sm:py-4">
-                <Empty
-                  title="加载会话历史失败"
-                  description={supportState.error ?? '协作群连接出现异常，请重试。'}
-                  action={
-                    <Button
-                      size="sm"
-                      leftIcon={<RefreshCw className="h-3.5 w-3.5" />}
-                      onClick={() => {
-                        void reloadHistory();
-                      }}
-                    >
-                      重新加载历史
-                    </Button>
-                  }
-                />
-              </div>
-            ) : (
-              <GroupChatMessageList
-                messages={messages}
-                group={group}
-                session={session}
-                isRequesting={isRequesting && isWaitingForBot}
-                groupBootstrapProcessing={groupBootstrapProcessing}
-                hasMoreHistory={hasMoreHistory}
-                isLoadingMoreHistory={isLoadingMoreHistory}
-                onLoadMoreHistory={onLoadMoreHistory}
-                interactions={messageInteractions}
-                userAvatarUrl={userAvatarUrl}
-                userIdentityId={userIdentityId}
-                userIdentityName={userIdentityName}
-                onQuoteSelected={quoteSelectedMessage}
-                onExplainSelected={explainSelectedMessage}
-                onEditMessage={editMessage}
-              />
-            )}
-          </div>
-        )}
+        <GroupChatMessageArea
+          session={session}
+          group={group}
+          isLoadingHistory={isLoadingHistory && !groupBootstrapProcessing}
+          groupBootstrapProcessing={groupBootstrapProcessing}
+          showError={showError}
+          supportError={supportState.error}
+          reloadHistory={reloadHistory}
+          messages={messages}
+          isBotResponding={isRequesting && isWaitingForBot}
+          hasMoreHistory={hasMoreHistory}
+          isLoadingMoreHistory={isLoadingMoreHistory}
+          onLoadMoreHistory={onLoadMoreHistory}
+          highlightMessageId={highlightMessageId}
+          interactions={messageInteractions}
+          userAvatarUrl={userAvatarUrl}
+          userIdentityId={userIdentityId}
+          userIdentityName={userIdentityName}
+          viewerKind={activeIdentity?.kind ?? null}
+          canMention={!!mentionConfig}
+          onQuoteSelected={quoteSelectedMessage}
+          onExplainSelected={explainSelectedMessage}
+          onEditMessage={editMessage}
+          onInsertDraft={composerVisible ? insertDraft : undefined}
+        />
         <GroupChatCollabPanel
           panel={collabPanel}
           session={session}
@@ -262,29 +218,57 @@ export function GroupChatPane(props: GroupChatPaneProps) {
           cancellingDeliveryIds={cancellingDeliveryIds}
           onCancelDelivery={cancelDelivery}
         />
-        {/* 输入框仅在 human 视角显示：Bot 视角由协作面板控制发言；Human absent 时由「加入」条接管。 */}
-        {session && activeIdentity?.kind !== 'bot' && !collabPanel.humanAbsentOnly ? (
-          <GroupChatComposer
-            session={session}
-            connectionStatus={connectionStatus}
-            mentionConfig={mentionConfig}
-            showReconnectToolbar={showReconnectToolbar}
-            onSend={handleGroupSend}
-            onReconnect={() => {
-              void reconnect();
-            }}
-            draft={draft}
-            onDraftChange={setDraft}
-            inputRef={inputRef}
-            execution={taskExecution}
-            quote={messageInteractions.quote}
-            onClearQuote={messageInteractions.clearQuote}
-            editingMessageId={editingMessageId}
-            onCancelEdit={cancelEdit}
-          />
+        {/* ask_user 问答面板：仅 Human 视角挂载（Bot 不代答）。不参与 composerVisible 的
+            humanAbsentOnly 条件——Human 未加入但其拥有的 Bot 仍在会话内时仍可作答，授权由 BCS 校验。
+            Spec：面板位于输入区域上方，不替代、也不随问答待处理禁用普通聊天输入框。 */}
+        {session && activeIdentity?.kind === 'user' && questions ? (
+          <GroupQuestionPanel model={questions} participants={session.participants} />
         ) : null}
-        <ChatLayout.Panel ref={panelRef} onAction={handlePanelAction} bridge={chatBridge} />
+        {/* 输入框仅在 human 视角显示：Bot 视角由协作面板控制发言；Human absent 时由「加入」条接管。
+            帽条（发言模式/连接状态）与输入卡同层紧贴渲染（design 决策 7/8），与 humanAbsentOnly 互斥；
+            横向 padding 收敛到本容器（GroupChatComposer 根节点不再自带 px），保证帽条 w-[calc(100%-26px)]
+            以输入卡实际宽度为基准每侧窄 13px，且 py 零残留使帽条紧贴卡片顶。 */}
+        {composerVisible ? (
+          <div className="flex flex-col px-3 pb-2 sm:px-6 sm:pb-2.5">
+            {/* 帽条承载「退出会话」，仅 human 视角已加入（present）时渲染（同原 LeaveBar 可见条件）。 */}
+            {statusBarVisible ? (
+              <ComposerStatusBar
+                connectionStatus={connectionStatus}
+                humanName={collabPanel.humanName}
+                viewScope={collabPanel.humanViewScope}
+                switchingViewScope={collabPanel.switchingViewScope}
+                onViewScopeChange={(scope) => void collabPanel.setViewScope(scope)}
+                onLeave={() => collabPanel.leaveSession()}
+                onReconnect={() => {
+                  void reconnect();
+                }}
+              />
+            ) : null}
+            <GroupChatComposer
+              session={session}
+              connectionStatus={connectionStatus}
+              mentionConfig={mentionConfig}
+              onSend={handleGroupSend}
+              draft={draft}
+              onDraftChange={setDraft}
+              inputRef={inputRef}
+              execution={taskExecution}
+              quote={messageInteractions.quote}
+              onClearQuote={messageInteractions.clearQuote}
+              editingMessageId={editingMessageId}
+              onCancelEdit={cancelEdit}
+            />
+          </div>
+        ) : null}
+        <ChatLayoutPanelSlot
+          ref={panelRef}
+          onAction={handlePanelAction}
+          bridge={chatBridge}
+          onOpenStateChange={onSidePaneIsOpenChange}
+        />
       </ChatLayout>
+      {/* 副屏右上「收起」钮：真实开合态开时悬于副屏 TopBar 右侧，点按关闭。 */}
+      {sidePaneOpen && onToggleSidePane ? <SidePanelCollapseButton onClick={onToggleSidePane} /> : null}
       {session && (
         <FuseSlot
           group={group}

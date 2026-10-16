@@ -42,13 +42,13 @@ export function MoreConfigPanel({
   if (tab === 'node')
     return (
       <div className="flex min-h-full flex-col bg-card">
-        <div className="flex items-center justify-between gap-4 border-b border-border px-5 py-4">
-          <h2 className="m-0 text-sm font-semibold">运行节点</h2>
+        <div className="flex items-center justify-between gap-4 border-b border-border px-7 py-5">
+          <h2 className="m-0 text-lg font-semibold tracking-tight">运行节点</h2>
           <Badge tone={engineStatus?.running ? 'success' : 'neutral'}>
             {engineStatus?.running ? '运行中' : '未运行'}
           </Badge>
         </div>
-        <div className="grid gap-4 px-5 py-4 sm:grid-cols-2">
+        <div className="grid gap-4 px-7 py-5 sm:grid-cols-2">
           <div className="rounded-lg border border-border p-4">
             <p className="text-xs text-[var(--color-muted)]">引擎</p>
             <p className="mt-1 font-medium">{engineStatus?.engine || '—'}</p>
@@ -63,10 +63,10 @@ export function MoreConfigPanel({
   if (tab !== 'engine')
     return (
       <div className="flex min-h-full flex-col bg-card">
-        <div className="border-b border-border px-5 py-4">
-          <h2 className="m-0 text-sm font-semibold">{labels[tab]}</h2>
+        <div className="border-b border-border px-7 py-5">
+          <h2 className="m-0 text-lg font-semibold tracking-tight">{labels[tab]}</h2>
         </div>
-        <div className="px-5 py-4">
+        <div className="px-7 py-5">
           <Empty
             title={`${labels[tab]}配置待接入`}
             description="PRD 页面入口已保留；Avernet 当前缺少与该配置一一对应的公开 OpenAPI，本期不会模拟保存成功。"
@@ -76,10 +76,10 @@ export function MoreConfigPanel({
     );
   return (
     <div className="flex min-h-full flex-col bg-card">
-      <div className="flex items-center justify-between gap-4 border-b border-border px-5 py-4">
+      <div className="flex items-center justify-between gap-4 border-b border-border px-7 py-5">
         <div>
-          <h2 className="m-0 text-sm font-semibold">引擎配置</h2>
-          <p className="m-0 mt-1 text-xs text-muted-foreground">直接读写 Bot 草稿态的自由 JSON 配置。</p>
+          <h2 className="m-0 text-lg font-semibold tracking-tight">引擎配置</h2>
+          <p className="m-0 mt-1 text-sm text-muted-foreground">直接读写 Bot 草稿态的自由 JSON 配置。</p>
         </div>
         <div className="flex items-center gap-2">
           <ConfirmDialog
@@ -109,22 +109,28 @@ export function MoreConfigPanel({
           </Button>
         </div>
       </div>
-      <div className="px-5 py-4">
-        <Textarea
-          className="min-h-[440px] font-mono text-xs"
-          value={text}
-          disabled={!editable}
-          onChange={(e) => {
-            setText(e.target.value);
-            try {
-              const value = JSON.parse(e.target.value) as BotEngineConfig;
-              setError('');
-              onConfigChange(value);
-            } catch {
-              setError('请输入合法 JSON');
-            }
-          }}
-        />
+      <div className="px-7 py-5">
+        <div className="relative min-h-[440px] overflow-hidden rounded-xl border border-border bg-foreground">
+          <pre aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-12 overflow-hidden border-r border-background/10 py-4 text-right font-mono text-xs leading-5 text-background/60">
+            {text.split('\n').map((_, index) => `${index + 1}\n`)}
+          </pre>
+          <Textarea
+            aria-label="引擎 JSON 配置"
+            className="relative min-h-[440px] resize-y border-0 bg-transparent py-4 pl-16 font-mono text-xs leading-5 text-background placeholder:text-background/50 focus-visible:ring-0"
+            value={text}
+            disabled={!editable}
+            onChange={(e) => {
+              setText(e.target.value);
+              try {
+                const value = JSON.parse(e.target.value) as BotEngineConfig;
+                setError('');
+                onConfigChange(value);
+              } catch {
+                setError('请输入合法 JSON');
+              }
+            }}
+          />
+        </div>
         {error ? <p className="mt-2 text-xs text-[var(--color-danger)]">{error}</p> : null}
       </div>
     </div>

@@ -15,6 +15,15 @@ import {
   buildTaskPanelAixUI,
 } from '@/services/tasks/taskPanelMessage';
 
+const backendRelayInstruction = [
+  '[task-execute]',
+  'task_id=task-1; node_id=task-1',
+  'relay_token=generation-1',
+  'backend_url=https://backend.example',
+  'S1 读取上下文：GET /api/v1/collaboration/tasks/task-1/nodes/task-1/context',
+  'S6 POST /api/v1/collaboration/tasks/dispatch',
+].join('\n');
+
 describe('buildTaskPanelAixUI', () => {
   const parse = (raw: string) => {
     // 抠 tab='...' 与 params='...' 单引号属性
@@ -77,54 +86,26 @@ describe('buildTaskPanelAixUI', () => {
 });
 
 describe('buildRelayRootExecutionMessage', () => {
-  const input = {
-    taskId: 'task-1',
-    nodeId: 'task-1',
-    holderId: 'bot-main',
-    instruction: '完成需求实现',
-    objective: '交付可运行功能',
-    acceptances: ['测试通过'],
-  };
-
-  it('保留副屏声明并给当前主 Bot 注入首棒执行上下文', () => {
+  it('保留副屏声明并原样转发 Backend 生成的首棒执行指令', () => {
     const panel = buildTaskPanelAixUI('task-1', '接力任务', { taskId: 'task-1' });
-    const raw = buildRelayRootExecutionMessage(panel, input);
+    const raw = buildRelayRootExecutionMessage(panel, backendRelayInstruction);
 
     expect(raw).toContain(panel);
     expect(raw).toContain(`${panel}\n<!--\n`);
     expect(raw).toMatch(/\n-->$/);
     expect(raw).toContain('[task-execute]');
-    expect(raw).toContain('orchestration_mode=relay');
-    expect(raw).toContain('task_id=task-1; node_id=task-1; holder_id=bot-main');
-    expect(raw).not.toContain('backend=https://backend.example');
-    expect(raw).toContain('RELAY_BACKEND_BASE_URL');
-    expect(raw).toContain('不要等待 TaskService 派发根节点');
-    expect(raw).toContain('严格按固定 S1-S8 执行');
-    for (const stage of [
-      'S1/8 解析任务最新上下文',
-      'S2/8 计算当前GAP',
-      'S3/8 Bot能力匹配',
-      'S4/8 任务执行并统一上报',
-      'S5/8 更新GAP',
-      'S6/8 解析下一棒',
-      'S7/8 搜推并指定执行者',
-      'S8/8 实际交接',
-    ]) {
-      expect(raw).toContain(stage);
-    }
-    expect(raw).toContain('之后不得重复 GET context');
-    expect(raw).toContain('禁止调用上报接口');
-    expect(raw).toContain('禁止输出步骤0、步骤0确认、S2-S3 合并编号或协议章节号');
-    expect(raw).toContain('正常有 GAP 链路最多 6 次调用');
-    expect(raw).toContain('无 GAP 链路不得调用 search、DISPATCH_RESULT 或 dispatch');
+    expect(raw).toContain('task_id=task-1; node_id=task-1');
+    expect(raw).toContain('relay_token=generation-1');
+    expect(raw).toContain('backend_url=https://backend.example');
+    expect(raw).toContain('/nodes/task-1/context');
+    expect(raw).not.toContain('holder_id');
+    expect(raw).not.toContain('RELAY_BACKEND_BASE_URL');
+    expect(raw).not.toContain('S1/8');
   });
 
   it('转义用户内容中的 HTML comment 终止序列，避免隐藏指令提前结束', () => {
     const panel = buildTaskPanelAixUI('task-1', '接力任务', { taskId: 'task-1' });
-    const raw = buildRelayRootExecutionMessage(panel, {
-      ...input,
-      instruction: '先执行 --> 再验收 --!> 收尾',
-    });
+    const raw = buildRelayRootExecutionMessage(panel, `${backendRelayInstruction}\n先执行 --> 再验收 --!> 收尾`);
     const hiddenPart = raw.slice(panel.length);
     const host = document.createElement('div');
     host.innerHTML = raw;
@@ -141,26 +122,43 @@ describe('buildTaskLaunchMessage', () => {
   const record = (mode?: 'centralized' | 'relay'): TaskRecord =>
     ({
       task_id: 'task-1',
-      task_info: { execution_config: mode ? { orchestration_mode: mode, root_node_id: 'root-1' } : {} },
+      task_info: {
+        execution_config:
+          mode === 'relay'
+            ? {
+                orchestration_mode: mode,
+                root_node_id: 'root-1',
+                root_execution_instruction: backendRelayInstruction,
+              }
+            : mode
+              ? { orchestration_mode: mode }
+              : {},
+      },
     } as TaskRecord);
-  const input = {
-    holderId: 'bot-main',
-    instruction: '执行任务',
-    objective: '完成目标',
-    acceptances: ['通过验收'],
-  };
 
   it.each([undefined, 'centralized'] as const)('%s 模式保持原副屏消息且不触发 Bot', (mode) => {
-    expect(buildTaskLaunchMessage('<AixUI-panel/>', record(mode), input)).toEqual({
+    expect(buildTaskLaunchMessage('<AixUI-panel/>', record(mode))).toEqual({
       content: '<AixUI-panel/>',
       shouldTriggerBot: false,
     });
   });
 
-  it('relay 模式生成根节点执行消息并要求触发 holder', () => {
-    const result = buildTaskLaunchMessage('<AixUI-panel/>', record('relay'), input);
+  it('relay 模式转发 Backend 根节点指令并要求触发当前 Bot', () => {
+    const result = buildTaskLaunchMessage('<AixUI-panel/>', record('relay'));
 
     expect(result.shouldTriggerBot).toBe(true);
-    expect(result.content).toContain('node_id=root-1; holder_id=bot-main');
+    expect(result.content).toContain('relay_token=generation-1');
+    expect(result.content).toContain('backend_url=https://backend.example');
+  });
+
+  it('relay 响应缺少 Backend 根节点指令时拒绝发送旧协议', () => {
+    const invalid = {
+      ...record('relay'),
+      task_info: { execution_config: { orchestration_mode: 'relay', root_node_id: 'root-1' } },
+    } as TaskRecord;
+
+    expect(() => buildTaskLaunchMessage('<AixUI-panel/>', invalid)).toThrow(
+      'Backend 未返回 relay 根节点执行指令',
+    );
   });
 });

@@ -231,8 +231,11 @@ tree changes are outside the natural boundary of a pre-push hook.
 The unified `singlebox/ci/singlebox_coverage.sh` starts one standalone product
 stack and reuses it for Backend acceptance and BCS user-story E2E. BCS runs as
 an LLVM-instrumented server; the gate requires all BCS E2E stories to pass,
-runtime line coverage of at least 40%, method coverage of at least 36%, and
-100% HTTP endpoint and bcs-cli leaf-command coverage. Its canonical artifacts
+runtime line coverage of at least 41%, method coverage of at least 36%,
+100% HTTP endpoint and bcs-cli leaf-command coverage, and E2E changed-line
+coverage above 60% for changes with at least 20 instrumentable changed lines in
+the BCS E2E scope (no exemption; smaller or out-of-scope changes are reported
+only). Its canonical artifacts
 are copied to `singlebox/.dependencies/coverage/singlebox/reports/bcs/` and are
 included in `summary.json`, `summary.md`, and `dashboard.html`. Keep pre-push
 and `.github/workflows/singlebox-coverage.yml` pointed at this same entrypoint,
@@ -365,6 +368,22 @@ Work items live in GitHub Issues for `inclusionAI/Avernet`. See
 Avernet uses a multi-context domain-document layout. Start at
 `CONTEXT-MAP.md`; it identifies the relevant glossary, ADRs, and module-local
 context for the work. See `docs/agents/domain.md`.
+
+## Frontend Design Tokens
+
+The workbench frontend anchors its primary brand hue to a single canonical
+color. New UI must reuse the shadcn semantic classes built on these tokens
+instead of hardcoded palette colors or raw `text-white` / `bg-white` as a
+primary surface.
+
+- Canonical primary brand color: `#2563eb`, HSL `221.2 83.2% 53.3%`; consume it
+  through the `--primary` / `--brand` semantic tokens in
+  `apps/frontend-nextgen/src/global.css` rather than inlining hex or palette
+  hues in component code.
+- Prefer shadcn semantic classes (`bg-primary`, `text-primary-foreground`,
+  `bg-secondary`, `bg-muted`, `text-muted-foreground`, `border-input`,
+  `bg-background`, `bg-card`, `bg-destructive`, `bg-success/10`,
+  `text-success`) over direct color literals.
 
 # Code Review
 

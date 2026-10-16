@@ -88,21 +88,27 @@ export function ReadOnlyConversationPanel({
     kind: 'single',
   };
 
+  // dmore 复测：消息区头像 24px 圆（与交互式面板 resolveSingleSender 一致）。
   const resolveSender = (message: ChatMessage) =>
     message.role === 'assistant'
       ? {
           name: bot.displayName,
-          avatar: <Avatar name={bot.displayName} src={bot.avatarUrl} size={32} />,
+          avatar: <Avatar name={bot.displayName} src={bot.avatarUrl} size={24} />,
         }
       : {
           name: friend.displayName,
-          avatar: <Avatar name={friend.displayName} size={32} />,
+          avatar: <Avatar name={friend.displayName} size={24} />,
         };
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
       <ChatLayout className="min-h-0 flex-1">
-        <ChatPanelHeader target={target} sessionTitle={session.title} onOpenSessionList={onOpenSessionList} />
+        <ChatPanelHeader
+        target={target}
+        sessionTitle={session.title}
+        sessionCode={session.sessionId}
+        onOpenSessionList={onOpenSessionList}
+      />
         {loadMoreError ? (
           <div className="flex items-center justify-center gap-2 border-b border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             <span>{loadMoreError}</span>

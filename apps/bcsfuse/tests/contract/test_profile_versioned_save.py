@@ -111,6 +111,61 @@ def test_same_sqlite_profile_store_serializes_delete_until_versioned_save_commit
     assert store.get("bot:owner", "default") is None
 
 
+def test_scoped_sqlite_profile_read_waits_for_versioned_save_commit(tmp_path):
+    store = SQLiteWorkerProfileContentStore(db_path=str(tmp_path / "profiles.sqlite"))
+    initial = store.save(WorkerProfileContent(
+        worker_id="bot:owner", profile_id="default", soul_md="Original",
+        is_active=True,
+    ))
+    changed = initial.model_copy(update={"soul_md": "Updated"})
+    first_updated = Event()
+    release_first = Event()
+    read_started = Event()
+
+    class PausingCursor:
+        def __init__(self, actual):
+            self.actual = actual
+
+        def execute(self, sql, parameters=()):
+            result = self.actual.execute(sql, parameters)
+            if sql.startswith("UPDATE bcsfuse_worker_profile_contents SET") and not first_updated.is_set():
+                first_updated.set()
+                assert release_first.wait(timeout=5)
+            return result
+
+        def __getattr__(self, name):
+            return getattr(self.actual, name)
+
+    class PausingConnection:
+        def __init__(self, actual):
+            self.actual = actual
+
+        def cursor(self):
+            return PausingCursor(self.actual.cursor())
+
+        def __getattr__(self, name):
+            return getattr(self.actual, name)
+
+    store._conn = PausingConnection(store._conn)
+
+    def read_after_start():
+        read_started.set()
+        return store.get_active_by_workers(["bot:owner"])
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        saved_result = executor.submit(store.save_if_version, changed, initial.version)
+        assert first_updated.wait(timeout=5)
+        read_result = executor.submit(read_after_start)
+        assert read_started.wait(timeout=5)
+        try:
+            with pytest.raises(FutureTimeoutError):
+                read_result.result(timeout=0.5)
+        finally:
+            release_first.set()
+        assert saved_result.result(timeout=5).soul_md == "Updated"
+        assert [item.soul_md for item in read_result.result(timeout=5)] == ["Updated"]
+
+
 @pytest.mark.parametrize("backend", ["memory", "sqlite"])
 def test_concurrent_sparse_merges_keep_both_supplied_fields(tmp_path, monkeypatch, backend):
     if backend == "memory":

@@ -228,23 +228,31 @@ async def test_concurrent_submissions_dedup_before_backup(setup):
 
 
 @pytest.mark.asyncio
-async def test_enqueue_failure_does_not_write_pending(setup):
+@pytest.mark.parametrize("original_status", ["ACTIVE", "FAILED", "PENDING"])
+async def test_enqueue_failure_leaves_pending_and_allows_retry(setup, original_status):
+    setup.repo.bot["status"] = original_status
     setup.queue.fail = True
     with pytest.raises(RuntimeError, match="queue unavailable"):
         await submit(setup)
-    assert setup.repo.bot["status"] == "ACTIVE"
+    assert setup.repo.bot["status"] == "PENDING"
     assert KEY not in setup.repo.bot["ext"]
+    assert task(setup) is None
     setup.service.restart_bot.assert_not_called()
+    setup.queue.fail = False
+    assert (await submit(setup))["status"] == "PENDING"
+    assert task(setup) is not None
+    mock_lifecycle(setup)
+    assert isinstance(setup.handler.handle(task(setup).payload), Reschedule)
+    assert journal(setup.repo.bot)["phase"] == "WAITING_READY"
 
 
 @pytest.mark.asyncio
 async def test_worker_repairs_enqueue_before_journal_crash(setup):
     s = setup
-    s.repo.failed_write = True
-    with pytest.raises(RuntimeError, match="database unavailable"):
-        await submit(s)
+    with patch.object(s.repo, "compare_and_set_ext", side_effect=RuntimeError("database unavailable")):
+        with pytest.raises(RuntimeError, match="database unavailable"):
+            await submit(s)
     assert task(s) is not None and KEY not in s.repo.bot["ext"]
-    s.repo.failed_write = False
     mock_lifecycle(s)
     assert isinstance(s.handler.handle(task(s).payload), Reschedule)
     assert journal(s.repo.bot)["phase"] == "WAITING_READY"
@@ -651,6 +659,77 @@ async def test_process_loss_after_mutation_is_not_replayed(setup):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('failure', [ConnectionError('old container unavailable'), TimeoutError('backup timed out')])
+async def test_real_backup_failure_keeps_durable_restart_running_without_failed_bot(setup, failure):
+    s = setup
+    await submit(s)
+    runtime = Mock()
+    runtime.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical', 'status': 'ACTIVE'}]
+    runtime.post_bots_api.side_effect = failure
+    devices = Mock()
+    devices.get_device.return_value = s.binding
+
+    def restart(**kwargs):
+        verify = s.strategy.prepare_restart(
+            s.ctx, binding_id=7, device_service=devices, bot_repository=s.repo,
+            target_runtime_provider=lambda: runtime,
+        )
+        verify()
+        assert not current_restart.get().fenced
+        s.strategy.before_restart_submission(s.ctx)  # Fence immediately before POST.
+        assert current_restart.get().fenced
+        s.binding['device_props'] = {
+            'restart_request_id': 'request', 'restart_publish_id': '12',
+            'restart_workflow_baseline': 10,
+        }
+        return deepcopy(s.repo.bot)
+
+    s.service.restart_bot.side_effect = restart
+    assert isinstance(s.handler.handle(task(s).payload), Reschedule)
+    assert journal(s.repo.bot)['phase'] == 'WAITING_READY'
+    assert s.repo.bot['status'] == 'PENDING'
+    assert s.repo.bot['ext'].get('start_status') != 'FAILED'
+    s.service.restart_bot.assert_called_once()
+    # Redelivery observes the existing workflow instead of retrying backup/restart.
+    assert isinstance(s.handler.handle(task(s).payload), Reschedule)
+    s.service.restart_bot.assert_called_once()
+    runtime.post_bots_api.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', ['database', 'superseded'])
+async def test_backup_degradation_does_not_swallow_mutation_fence_failure(setup, failure):
+    s = setup
+    await submit(s)
+    payload = task(s).payload
+    state = RestartState(s.repo, 'b', 'o', payload['operation_id'])
+    state.update({'QUEUED'}, phase='BACKING_UP')
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_state import RestartExecution
+    execution = RestartExecution(state, payload)
+    context_reset_handle = current_restart.set(execution)
+    runtime = Mock()
+    runtime.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical', 'status': 'ACTIVE'}]
+    runtime.post_bots_api.side_effect = ConnectionError('unavailable')
+    devices = Mock()
+    devices.get_device.return_value = s.binding
+    try:
+        verify = s.strategy.prepare_restart(s.ctx, binding_id=7, device_service=devices,
+                                            bot_repository=s.repo, target_runtime_provider=lambda: runtime)
+        verify()
+        if failure == 'database':
+            s.repo.failed_write = True
+            expected = RuntimeError
+        else:
+            state.update({'BACKING_UP'}, phase='RESTARTING')
+            expected = RestartSuperseded
+        with pytest.raises(expected):
+            s.strategy.before_restart_submission(s.ctx)
+        assert not execution.fenced
+    finally:
+        current_restart.reset(context_reset_handle)
+
+
+@pytest.mark.asyncio
 async def test_reclaimed_submission_adopts_handoff_without_reissuing(setup):
     s = setup
     await submit(s)
@@ -721,3 +800,100 @@ async def test_duplicate_during_rebuild_never_starts_another_backup(
     preflight.assert_not_called()
     backup.assert_not_called()
     s.service.restart_bot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_immediate_worker_cannot_repeat_pending_or_be_reset_by_admission(setup, monkeypatch):
+    s = setup
+    mock_lifecycle(s)
+    enqueue = s.queue.enqueue
+    with patch.object(s.repo, "update_by_owner", wraps=s.repo.update_by_owner) as update:
+        def wake_worker(*args, **kwargs):
+            assert s.repo.bot["status"] == "PENDING"
+            result = enqueue(*args, **kwargs)
+            assert isinstance(s.handler.handle(result.record.payload), Reschedule)
+            s.repo.bot["status"] = "ACTIVE"
+            return result
+
+        monkeypatch.setattr(s.queue, "enqueue", wake_worker)
+        result = await submit(s)
+    assert result["status"] == "ACTIVE"
+    update.assert_called_once_with("b", "o", {"status": "PENDING"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("write_applied", [False, True])
+async def test_empty_pending_update_keeps_existing_failure_contract(setup, monkeypatch, write_applied):
+    from agentclaw.community.core.bot_management.services.bot_service import BotServiceError
+
+    s = setup
+    update = s.repo.update_by_owner
+
+    def empty_result(*args):
+        if write_applied:
+            update(*args)
+        return None
+
+    monkeypatch.setattr(s.repo, "update_by_owner", empty_result)
+    with pytest.raises(BotServiceError, match="Bot not found while preparing restart: b"):
+        await submit(s)
+    assert task(s) is None
+    assert s.repo.bot["status"] == ("PENDING" if write_applied else "ACTIVE")
+    s.service.restart_bot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_enqueue_lost_response_keeps_pending_and_worker_recovery(setup, monkeypatch):
+    s = setup
+    enqueue = s.queue.enqueue
+
+    def lost_response(*args, **kwargs):
+        enqueue(*args, **kwargs)
+        raise ConnectionError("enqueue response lost")
+
+    monkeypatch.setattr(s.queue, "enqueue", lost_response)
+    with pytest.raises(ConnectionError, match="response lost"):
+        await submit(s)
+    assert s.repo.bot["status"] == "PENDING"
+    assert task(s) is not None and KEY not in s.repo.bot["ext"]
+    mock_lifecycle(s)
+    assert isinstance(s.handler.handle(task(s).payload), Reschedule)
+    assert journal(s.repo.bot)["phase"] == "WAITING_READY"
+
+
+@pytest.mark.asyncio
+async def test_retry_after_exit_before_enqueue_is_not_stuck_in_orphan_journal(setup, monkeypatch):
+    s = setup
+    enqueue = s.queue.enqueue
+
+    class AdmissionExit(BaseException):
+        pass
+
+    def process_exit(*args, **kwargs):
+        raise AdmissionExit()
+
+    monkeypatch.setattr(s.queue, "enqueue", process_exit)
+    with pytest.raises(AdmissionExit):
+        await submit(s)
+    assert task(s) is None and KEY not in s.repo.bot["ext"]
+    assert s.repo.bot["status"] == "PENDING"
+    monkeypatch.setattr(s.queue, "enqueue", enqueue)
+    assert (await submit(s))["status"] == "PENDING"
+    assert task(s) is not None
+
+
+@pytest.mark.asyncio
+async def test_lost_enqueue_response_does_not_undo_completed_task_status(setup, monkeypatch):
+    s = setup
+    enqueue = s.queue.enqueue
+
+    def completed_before_response(*args, **kwargs):
+        result = enqueue(*args, **kwargs)
+        result.record.status = TaskStatus.FAILED
+        s.repo.bot["status"] = "FAILED"
+        raise ConnectionError("enqueue response lost")
+
+    monkeypatch.setattr(s.queue, "enqueue", completed_before_response)
+    with pytest.raises(ConnectionError):
+        await submit(s)
+    assert s.repo.bot["status"] == "FAILED"

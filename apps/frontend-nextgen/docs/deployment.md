@@ -13,8 +13,8 @@ The container refuses to start until all variables are provided:
 | Variable                           | Existing frontend route responsibility                                       |
 | ---------------------------------- | ---------------------------------------------------------------------------- |
 | `BCS_AUTH_UPSTREAM`                | BCS `/auth/*` OAuth routes                                                   |
-| `TASK_ENGINE_UPSTREAM`             | `/openapi/v1/collaboration/tasks/*` task execute/dashboard/list/grant/revoke |
-| `TEAMCLAW_GATEWAY_UPSTREAM`        | `/openapi/*` and non-task `/api/v1/collaboration/*`                          |
+| `TASK_ENGINE_UPSTREAM`             | Non-BBS `/openapi/v1/collaboration/tasks/*` task execute/dashboard/list/grant/revoke |
+| `TEAMCLAW_GATEWAY_UPSTREAM`        | BBS `/openapi/v1/collaboration/tasks/bbs/*`, bot-scoped BBS routes, other `/openapi/*`, and non-task `/api/v1/collaboration/*` |
 | `TEAMCLAW_ADMIN_UPSTREAM`          | Reserved for the separately deployed admin service; see note below           |
 | `PRIVATE_CHAT_MANAGEMENT_UPSTREAM` | `/api/*` private-chat management                                             |
 | `PRIVATE_CHAT_SESSION_UPSTREAM`    | `/proxypass/*` and WebSocket                                                 |

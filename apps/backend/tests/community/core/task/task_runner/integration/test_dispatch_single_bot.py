@@ -6,7 +6,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskExecutionGraph,
@@ -15,7 +14,7 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatcher
 from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
-from agentclaw.community.core.task.task_plan.static_plan_runtime import StaticPlanRuntime
+from agentclaw.community.core.task.task_plan.static_plan import StaticPlanRuntime
 from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import (
     OpenApiAuthError,
     OpenApiBadRequestError,
@@ -29,7 +28,7 @@ from agentclaw.community.core.task.task_runner.modal_executor.task_executor impo
 from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
     BcsCreateGroupResult,
 )
-from agentclaw.community.core.task.task_runner.client.double.double_bcs_bot_identity_resolver import (
+from tests.community.core.task.support.double.double_bcs_bot_identity_resolver import (
     _DoubleBcsBotIdentityResolver,
 )
 
@@ -39,11 +38,7 @@ def _node(assignee="bot9:ent1", extend_props=None):
         node_id="c1",
         task_id="t1",
         status=Status.RUNNING,
-        task_spec=TaskSpec(
-            Metadata("t1", "T", "do"),
-            Context("bg"),
-            Goal("O", [AcceptanceCriteria("a1", "d")]),
-        ),
+        task_spec=TaskSpec(context=Context("bg", title="T"), goal=Goal("O", [AcceptanceCriteria("a1", "d")])),
         run_info=RuntimeInfo(
             run_mode="single_bot", assignee=assignee, extend_props=extend_props or {}
         ),
@@ -83,6 +78,10 @@ class _Graph:
 
     def update_task_node_info(self, patch):
         self.patches.append(patch)
+
+    def report(self, data):
+        assert data.data["report_type"] == "NODE_PATCH"
+        return self.update_task_node_info(data.data["payload"]["patch"])
 
     def query_task_dashboard(self, task_id, node_id=None):
         return None
@@ -240,8 +239,8 @@ def test_prompt_formatter_uses_context_and_node_spec():
     assert '"task_id"' in s
     assert '"acceptance_result"' in s
     assert '"verdict": "DONE"' in s
-    assert '"acceptances_metric"' in s
-    assert '"gaps": []' in s
+    assert '"done_items"' in s
+    assert '"gap_items": []' in s
 
 
 def test_prompt_formatter_disabled_report_does_not_inject_platform_protocol():
@@ -275,7 +274,7 @@ def test_prompt_formatter_skill_report_on_uses_http_post():
     assert '"status": "SUCCESS"' in s
     assert '"success": true' not in s
     assert '"verdict": "DONE"' in s
-    assert '"acceptances_metric"' in s
+    assert '"done_items"' in s
     assert "每位执行者（包括 driver）完成分内真实业务推理并给出可复核产出" in s
     assert "HTTP 200 且响应明确表示成功，才算回投成功" in s
     assert "不得重贴完整输出" in s
@@ -285,12 +284,12 @@ def test_prompt_formatter_skill_report_on_uses_http_post():
 def test_prompt_formatter_relay_appends_protocol_and_chinese_constraint():
     """# 接自 接力分支(static_plan):交接正文 + 执行闭环(禁联网/平台回收/接力交接,不含 HTTP 上报协议)+ 中文输出约束。"""
     from agentclaw.community.core.task.domain.models import (
-        Goal, Metadata, Context, TaskSpec, TaskNode, RuntimeInfo, Status,
+        Goal, Context, TaskSpec, TaskNode, RuntimeInfo, Status,
     )
     fmt = PromptFormatterImpl()
     relay = "# 接自:上游Bot\n## 上游产出正文\n上游摘要\n## 本角色任务\n执行投放"
     n = TaskNode(node_id="n1", task_id="t1", status=Status.RUNNING,
-                 task_spec=TaskSpec(Metadata("t1", "T", relay), Context("bg"), Goal("O", [])),
+                 task_spec=TaskSpec(context=Context("bg", title="T"), goal=Goal("O", [])),
                  run_info=RuntimeInfo(), node_run_graph=None)  # type: ignore[arg-type]
     s = fmt.format_execute({
         "mode": "execute", "node_instruction": relay,
@@ -321,6 +320,48 @@ def test_prompt_formatter_relay_appends_protocol_and_chinese_constraint():
     assert "必须使用中文" in s
 
 
+def test_prompt_formatter_relay_mode_injects_event_protocol_only():
+    """Relay prompt must not carry the centralized terminal callback protocol."""
+    graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.RUNNING,
+        task_id="t1",
+        extend_props={"execution_config": {"orchestration_mode": "relay"}},
+    )
+    node = _node()
+    node.node_run_graph = graph
+    node.run_info.extend_props["relay_token"] = "attempt-1"
+
+    prompt = PromptFormatterImpl().format_execute(
+        {
+            "mode": "execute",
+            "node_instruction": "分析行业",
+            "execution_mode": "single_bot",
+            "skill_report_enabled": True,
+            "backend": "http://backend",
+            "task_id": "t1",
+            "node_id": "c1",
+        },
+        node,
+    )
+
+    assert "【分布式接力执行 S1-S6】" in prompt
+    assert "backend_url=http://backend" in prompt
+    assert "--backend-url" in prompt
+    assert "/api/v1/collaboration/tasks/t1/nodes/c1/context" in prompt
+    assert "event_type=EXECUTION_RESULT" in prompt
+    assert "PLAN_RESULT" in prompt and "DISPATCH_RESULT" not in prompt
+    assert "relay_token" in prompt
+    assert "S6" in prompt
+    assert '"status": "SUCCESS"' not in prompt
+    assert "唯一允许的节点回投" not in prompt
+    assert "holder_id" not in prompt
+    assert "relay_turn" not in prompt
+    assert "target_node_id" in prompt
+    assert "TaskDispatcher.dispatch(target_node)" in prompt
+
+
 def test_static_relay_prompt_waits_for_every_member_and_preserves_markdown():
     """静态协作接力必须在全员完成后唯一汇总，并要求结构化 Markdown 产出。"""
     relay = (
@@ -330,7 +371,7 @@ def test_static_relay_prompt_waits_for_every_member_and_preserves_markdown():
         "## 本角色任务\n联合完成评审"
     )
     node = _node()
-    node.task_spec.metadata.instruction = relay
+    node.run_info.extend_props["execution_prompt"] = relay
 
     prompt = PromptFormatterImpl().format_execute(
         {"mode": "execute", "node_instruction": relay},
@@ -420,11 +461,7 @@ def test_static_plan_owner_reaches_final_openapi_bot_identity():
         node_id="t1",
         task_id="t1",
         status=Status.PLANNING,
-        task_spec=TaskSpec(
-            Metadata("t1", "root", "root"),
-            Context(""),
-            Goal("root", []),
-        ),
+        task_spec=TaskSpec(context=Context("", title="root"), goal=Goal("root", [])),
         run_info=RuntimeInfo(),
         node_run_graph=graph,
     )
@@ -438,7 +475,7 @@ def test_static_plan_owner_reaches_final_openapi_bot_identity():
             assert task_id == "t1"
             return graph
 
-    dispatched = _run(TaskDispatcher(_GraphView()).dispatch(ready))
+    dispatched = _run(TaskDispatcher(_GraphView()).select_batch(ready))
     bot = _Bot()
     executor = TaskExecutor(
         bot=bot,
@@ -513,32 +550,40 @@ class _Bcs2:
 
 
 class _Dash:
-    def __init__(self, execution_config):
-        self.extend_props = {"execution_config": execution_config, "owner_user_id": "35983"}
+    def __init__(self, execution_config, owner_user_id="35983"):
+        self.extend_props = {"execution_config": execution_config}
+        if owner_user_id is not None:
+            self.extend_props["owner_user_id"] = owner_user_id
 
 
 class _Graph2:
     """query_task_dashboard 返带 execution_config 的快照;update_task_node_info 捕获 patch。"""
 
-    def __init__(self, execution_config=None):
+    def __init__(self, execution_config=None, owner_user_id="35983"):
         self._ec = execution_config if execution_config is not None else {}
+        self._owner_user_id = owner_user_id
         self.patches = []
 
     def update_task_node_info(self, patch):
         self.patches.append(patch)
 
+    def report(self, data):
+        assert data.data["report_type"] == "NODE_PATCH"
+        return self.update_task_node_info(data.data["payload"]["patch"])
+
     def query_task_dashboard(self, task_id, node_id=None):
-        return _Dash(self._ec)
+        return _Dash(self._ec, self._owner_user_id)
 
 
-def _exe2(*, execution_config=None):
+def _exe2(*, execution_config=None, owner_user_id="35983"):
     bot = _Bot()
     bcs = _Bcs2()
     poller = _Poller()
-    graph = _Graph2(execution_config)
+    graph = _Graph2(execution_config, owner_user_id)
     exe = TaskExecutor(
         bot=bot, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
         poller=poller, graph=graph, identity_resolver=_DoubleBcsBotIdentityResolver(),
+        api_base_url="https://backend.example",
     )
     return exe, bot, bcs, poller, graph
 
@@ -563,6 +608,23 @@ def test_dispatch_single_bot_2_group_bypass_creates_two_person_group():
     assert flip and flip[0].extend_props_patch.get("actual_run_mode") == "single_bot"
 
 
+def test_dispatch_single_bot_2_group_uses_relay_protocol_in_relay_mode():
+    """Relay HIT_SINGLE converts to a human-observer group but still uses Relay baton protocol."""
+    exe, bot, bcs, poller, graph = _exe2(execution_config={"orchestration_mode": "relay"})
+    ok = _run(exe.dispatch([_node("drv", {"assignee_owner_id": "35983", "relay_token": "attempt-1"})]))
+
+    assert ok == [True]
+    assert bot.sent == []
+    context = bcs.created[0].context
+    assert "【分布式接力执行 S1-S6】" in context
+    assert "backend_url=https://backend.example" in context
+    assert "EXECUTION_RESULT" in context
+    assert "PLAN_RESULT" in context and "DISPATCH_RESULT" not in context
+    assert "【业务节点执行协议】" not in context
+    assert '"status": "SUCCESS"' not in context
+    assert "唯一允许的节点回投" not in context
+
+
 def test_dispatch_single_bot_2_group_disabled_falls_back_to_send():
     """singlebot_2_group=false(owner+bcs 在场)→ 走老链路:send_message + SingleBotHandle,不建群。"""
     exe, bot, bcs, poller, graph = _exe2(execution_config={"singlebot_2_group": False})
@@ -571,12 +633,23 @@ def test_dispatch_single_bot_2_group_disabled_falls_back_to_send():
     assert bot.sent and bot.sent[0][0] == "drv:35983"  # 老链路直发
     assert bcs.created == []
     assert poller.registered == []  # 默认 Push，不注册 poller
+def test_dispatch_single_bot_2_group_uses_task_human_owner_without_assignee_owner():
+    """Relay 只有纯 assignee bot_id 时,仍按任务图谱 Human owner 建群并追加 observer。"""
+    exe, bot, bcs, poller, graph = _exe2()  # 默认 true, graph owner_user_id=35983
+    ok = _run(exe.dispatch([_node("drv")]))  # 无执行 Bot assignee_owner_id
+    assert ok == [True]
+    assert bot.sent == []
+    assert len(bcs.created) == 1
+    req = bcs.created[0]
+    assert {"bot_uuid": "human_35983", "bot_name": "35983", "role": "observer"} in req.participants
+    assert req.routing_policy == {"default_bot_final_delivery": "inject_observers"}
+    assert poller.registered == []
 
 
-def test_dispatch_single_bot_2_group_no_owner_falls_back_to_send():
-    """owner 缺失 → 即便 singlebot_2_group 默认 true,也回退老链路(二人群需要人类)。"""
-    exe, bot, bcs, poller, graph = _exe2()  # 默认 true
-    ok = _run(exe.dispatch([_node("drv")]))  # 无 assignee_owner_id
+def test_dispatch_single_bot_2_group_no_task_human_owner_falls_back_to_send():
+    """任务图谱没有提交任务 Human owner 时,才回退老链路。"""
+    exe, bot, bcs, poller, graph = _exe2(owner_user_id=None)  # 默认 true
+    ok = _run(exe.dispatch([_node("drv")]))
     assert ok == [True]
     assert bot.sent  # 老链路
     assert bcs.created == []

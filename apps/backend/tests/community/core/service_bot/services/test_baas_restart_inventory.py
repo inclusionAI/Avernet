@@ -52,11 +52,11 @@ def test_historical_groups_are_not_flattened():
 
 
 @pytest.mark.parametrize('groups', [[], [{'items': []}], [{'items': None}]])
-def test_empty_or_invalid_inventory_blocks(groups, caplog):
+def test_inventory_parser_rejects_empty_or_invalid_inventory(groups, caplog):
     service, http = setup_service(groups)
     with pytest.raises((RuntimeError, BaasServiceError)):
         query(service)
-    assert ('inventory=blocked' in caplog.text or 'inventory=query_failed' in caplog.text)
+    assert ('inventory=unavailable' in caplog.text or 'inventory=query_failed' in caplog.text)
     http.post.assert_not_called()
 
 

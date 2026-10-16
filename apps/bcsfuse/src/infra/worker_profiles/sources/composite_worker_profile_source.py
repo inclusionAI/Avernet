@@ -23,7 +23,7 @@ from src.domain.models.worker_profile import (
     WorkerProfileScanResult,
     WorkerProfileWarning,
 )
-from src.domain.services.worker_profile_source import WorkerProfileSource
+from src.domain.services.worker_profile_source import WorkerProfileSource, WorkerScopedProfileSource
 
 
 logger = logging.getLogger(__name__)
@@ -105,6 +105,13 @@ class CompositeWorkerProfileSource:
         Returns:
             WorkerProfileScanResult
         """
+        return self._scan()
+
+    def scan_for_workers(self, worker_ids: list[str]) -> WorkerProfileScanResult:
+        """Apply the same source priority and merging to the requested Workers."""
+        return self._scan(worker_ids)
+
+    def _scan(self, worker_ids: list[str] | None = None) -> WorkerProfileScanResult:
         # Phase G6H Fix: Clear cache before every scan to ensure fresh data
         self._clear_cache()
 
@@ -126,10 +133,22 @@ class CompositeWorkerProfileSource:
         api_profiles: dict[str, "WorkerProfile"] = {}
         file_profiles: dict[str, "WorkerProfile"] = {}
 
+        api_worker_ids = None
+        if worker_ids is not None:
+            # scan() can merge API content through the legacy bot_ alias.
+            # Query both equivalent spellings while retaining exact output ownership.
+            api_worker_ids = []
+            for worker_id in worker_ids:
+                normalized = self._normalize_staff_id(worker_id)
+                aliases = [worker_id, f"bot_{normalized}"]
+                if not normalized.startswith("bot_"):
+                    aliases.append(normalized)
+                api_worker_ids.extend(alias for alias in aliases if alias not in api_worker_ids)
+
         # 1. 加载 Registry 来源（从已注册 Worker 构建）
         if self._registry_source:
             try:
-                registry_result = self._registry_source.scan()
+                registry_result = self._scan_source(self._registry_source, worker_ids)
                 for profile in registry_result.profiles:
                     profile_key = profile.profile_key
                     profile_map[profile_key] = profile
@@ -148,7 +167,7 @@ class CompositeWorkerProfileSource:
         # 2. 加载 API 来源的活跃 Profile (用于合并)
         if self._api_source:
             try:
-                api_result = self._api_source.scan()
+                api_result = self._scan_source(self._api_source, api_worker_ids)
                 for profile in api_result.profiles:
                     profile_key = profile.profile_key
                     api_profiles[profile_key] = profile
@@ -167,7 +186,7 @@ class CompositeWorkerProfileSource:
         # 3. 加载 FILE 来源 (用于补充)
         if self._file_source:
             try:
-                file_result = self._file_source.scan()
+                file_result = self._scan_source(self._file_source, worker_ids)
                 for profile in file_result.profiles:
                     profile_key = profile.profile_key
                     file_profiles[profile_key] = profile
@@ -231,11 +250,26 @@ class CompositeWorkerProfileSource:
 
         # Phase G6H Fix: Return result directly without caching
         # This ensures newly created workers are visible in subsequent scans
+        if worker_ids is not None:
+            profiles = [profile for profile in profiles if profile.staff_id in worker_ids]
         return WorkerProfileScanResult(
             profiles=profiles,
             scan_warnings=scan_warnings,
             source_roots=source_roots,
         )
+
+    def _scan_source(
+        self, source: WorkerProfileSource, worker_ids: list[str] | None,
+    ) -> WorkerProfileScanResult:
+        if worker_ids is not None and isinstance(source, WorkerScopedProfileSource):
+            result = source.scan_for_workers(worker_ids)
+        else:
+            result = source.scan()
+        if worker_ids is None:
+            return result
+        return result.model_copy(update={
+            "profiles": [profile for profile in result.profiles if profile.staff_id in worker_ids],
+        })
 
     def _find_matching_api_profile(
         self,

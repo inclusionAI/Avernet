@@ -15,14 +15,14 @@ import type {
   RepairSemanticConclusionInput,
   RepairTerminateInput,
   RepairWorkloadIdentity,
-} from "../services/repair/contracts.js";
-import { RepairError } from "../services/repair/errors.js";
-import type { RepairTaskService } from "../services/repair/repair-runtime.js";
+} from "../services/repair/full-repair/contracts.js";
+import { AgentToolError as RepairError } from "../services/repair/common/agent-tools/errors.js";
+import type { RepairTaskService } from "../services/repair/full-repair/repair-runtime.js";
 import {
   resolveRepairRequestActor,
   type VerifiedRequestActor,
-} from "../services/repair/request-actor.js";
-import type { RepairWorkloadVerifier } from "../services/repair/workload-verifier.js";
+} from "../services/repair/common/request-actor.js";
+import type { RepairWorkloadVerifier } from "../services/repair/full-repair/workload-verifier.js";
 
 export type RepairRouterDeps = {
   service: RepairTaskService | null;

@@ -1,8 +1,4 @@
-"""Unit tests for create_bot default bot soft-delete protection.
-
-When bot_id == 'default', soft_delete_by_owner MUST NOT be called
-during device allocation failure rollback.
-"""
+"""Creation failures preserve the Bot row for sticky, retryable provisioning."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -15,7 +11,6 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
 )
 from agentclaw.community.core.devices.errors import (
-    DeviceAllocateError,
     DeviceLimitExceededError,
     ResourceInsufficientError,
 )
@@ -23,10 +18,22 @@ from agentclaw.community.core.devices.errors import (
 
 def _make_service() -> BotService:
     svc = BotService.__new__(BotService)
+    svc._skills_pool_native_creation_policy = MagicMock(
+        select=MagicMock(return_value=None)
+    )
+    svc._skill_layout_repository = MagicMock()
     svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._repository.count_by_owner.return_value = 0
     svc._repository.get_by_id_and_owner.return_value = None
+
+    def _insert_with_layout(data, *, layout):
+        record = {"id": 1, **data}
+        svc._repository.get_by_id_and_owner.return_value = record
+        return record
+
+    svc._repository.insert_with_initial_skill_layout.side_effect = _insert_with_layout
+    svc._repository.claim_provisioning.return_value = True
     svc._repository.create.return_value = {
         "id": 1,
         "bot_id": "default",
@@ -70,8 +77,8 @@ def _patch_create_bot_dependencies():
     )
 
 
-class TestDefaultBotSoftDeleteProtection:
-    """When bot_id == 'default', soft_delete_by_owner must NOT be called on error."""
+class TestCreationFailurePreservesBot:
+    """Allocation failures never discard the Bot/layout rollout decision."""
 
     @pytest.fixture
     def svc(self) -> BotService:
@@ -113,8 +120,8 @@ class TestDefaultBotSoftDeleteProtection:
 
         svc._repository.soft_delete_by_owner.assert_not_called()
 
-    def test_known_error_non_default_bot_still_soft_deletes(self, svc):
-        """ResourceInsufficientError + bot_id != 'default' → soft_delete_by_owner IS called."""
+    def test_known_error_non_default_bot_is_preserved(self, svc):
+        """Known allocation failures preserve non-default Bots for retry."""
         mock_device_service = MagicMock()
         mock_device_service.apply_device.side_effect = DeviceLimitExceededError("limit exceeded")
         svc._device_service_provider = lambda: mock_device_service
@@ -127,10 +134,10 @@ class TestDefaultBotSoftDeleteProtection:
                     bot_id="my-custom-bot",
                 )
 
-        svc._repository.soft_delete_by_owner.assert_called_once_with("my-custom-bot", "user001")
+        svc._repository.soft_delete_by_owner.assert_not_called()
 
-    def test_unknown_error_non_default_bot_still_soft_deletes(self, svc):
-        """Generic Exception + bot_id != 'default' → soft_delete_by_owner IS called."""
+    def test_unknown_error_non_default_bot_is_preserved(self, svc):
+        """Unexpected allocation failures preserve non-default Bots for retry."""
         mock_device_service = MagicMock()
         mock_device_service.apply_device.side_effect = RuntimeError("boom")
         svc._device_service_provider = lambda: mock_device_service
@@ -143,4 +150,4 @@ class TestDefaultBotSoftDeleteProtection:
                     bot_id="my-custom-bot",
                 )
 
-        svc._repository.soft_delete_by_owner.assert_called_once_with("my-custom-bot", "user001")
+        svc._repository.soft_delete_by_owner.assert_not_called()

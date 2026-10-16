@@ -58,6 +58,12 @@ export function ResourcePanel({
   const uploadRef = useRef<HTMLInputElement>(null);
   const uploadDirectoryRef = useRef('');
   const visibleResources = useMemo(() => buildVisibleResourceTree(resources, expanded), [expanded, resources]);
+  const resourceIconClassName = (item: BotEditorResource) => {
+    if (item.type === 'folder') return 'text-warning';
+    if (/\.json$/i.test(item.name)) return 'text-violet-500';
+    if (/\.(md|mdx)$/i.test(item.name)) return 'text-emerald-500';
+    return 'text-muted-foreground';
+  };
   const uploadToDirectory = async (target: string, file: File) => {
     await onUpload(target ? `${target}/${file.name}` : file.name, file);
     if (target) await onLoadDirectory(target);
@@ -77,11 +83,11 @@ export function ResourcePanel({
     }
   };
   return (
-    <div className="flex min-h-full flex-col bg-card">
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border px-5 py-4">
+    <div className="flex min-h-full flex-col bg-background">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border bg-card px-8 py-5 lg:px-10">
         <div>
-          <h2 className="m-0 text-sm font-semibold">资源目录</h2>
-          <p className="m-0 mt-1 text-xs text-muted-foreground">
+          <h2 className="m-0 text-lg font-semibold tracking-tight">资源目录</h2>
+          <p className="m-0 mt-1 text-sm text-muted-foreground">
             展示 Bot 工作区根目录；列表、建目录和删除均使用资源 OpenAPI。
           </p>
         </div>
@@ -104,7 +110,7 @@ export function ResourcePanel({
             }}
           />
           <Button
-            variant="secondary"
+            variant="outline"
             size="sm"
             disabled={!editable}
             leftIcon={<Upload className="size-4" />}
@@ -128,120 +134,127 @@ export function ResourcePanel({
           </Button>
         </div>
       </div>
-      <div className="px-5 py-4">
-        <div className="mb-3 text-xs text-muted-foreground">
-          当前上传位置：/{directory || '根目录'}（点击目录可切换）
+      <div className="mx-auto w-full max-w-5xl px-6 py-6 lg:px-10">
+        <div className="mb-3 flex min-h-10 items-center rounded-lg border border-border bg-card px-3 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">当前路径：/{directory || '根目录'}</span>
+          <span className="ml-1">（点击文件夹可切换上传位置）</span>
         </div>
         {resources.length ? (
-          <div className="divide-y divide-border rounded-lg border border-border">
-            {visibleResources.map(({ item, depth }) => (
-              <div
-                key={item.path}
-                className="flex items-center gap-3 p-3"
-                style={{ paddingLeft: `${12 + depth * 24}px` }}
-              >
-                {item.type === 'folder' ? (
-                  // 热区 = 三角 + 文件夹图标 + 名称/路径整段（原仅三角 icon 可点）。
-                  // 负 margin 抵消自身 padding，使布局占位与改造前逐像素一致：行高、缩进、
-                  // 与右侧操作区的间距均不变，hover 背景向外扩张 8px/6px 作为可视热区反馈。
-                  <Button
-                    variant="ghost"
-                    className="-mx-2 -my-1.5 h-auto min-w-0 flex-1 shrink justify-start gap-1 rounded-lg px-2 py-1.5 text-left font-normal"
-                    aria-label={`${expanded.includes(item.path) ? '收起' : '展开'}${item.name}`}
-                    aria-expanded={expanded.includes(item.path)}
-                    onClick={() => toggleDirectory(item.path)}
-                  >
-                    {loadingPaths.includes(item.path) ? (
-                      <Loader2 className="size-4 shrink-0 animate-spin" />
-                    ) : expanded.includes(item.path) ? (
-                      <ChevronDown className="size-4 shrink-0" />
-                    ) : (
-                      <ChevronRight className="size-4 shrink-0" />
-                    )}
-                    <Folder className="size-4 shrink-0 text-warning" />
-                    <span className="ml-2 min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">{item.name}</span>
-                      <span className="block truncate text-xs text-muted-foreground">{item.path}</span>
-                    </span>
-                  </Button>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    className="-mx-2 -my-1.5 h-auto min-w-0 flex-1 justify-start gap-3 px-2 py-1.5 text-left font-normal"
-                    aria-label={`预览${item.name}`}
-                    disabled={desktop && (item.size ?? 0) > 1048576}
-                    onClick={() => void onPreview(item.path).then((result) => setPreview({ path: item.path, result }))}
-                  >
-                    <File className="size-4 text-muted-foreground" />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{item.name}</div>
-                      <div className="truncate text-xs text-muted-foreground">
-                        {item.path}
-                        {item.type === 'file' && item.size !== undefined ? ` · ${formatResourceBytes(item.size)}` : ''}
-                      </div>
-                    </div>
-                  </Button>
-                )}
-                {item.type === 'folder' ? (
-                  <>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      disabled={!editable}
-                      aria-label={`向${item.name}添加文件`}
-                      leftIcon={<FilePlus className="size-4" />}
-                      onClick={() => {
-                        uploadDirectoryRef.current = item.path;
-                        uploadRef.current?.click();
-                      }}
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      disabled={!editable}
-                      aria-label={`在${item.name}中新建子目录`}
-                      leftIcon={<FolderPlus className="size-4" />}
-                      onClick={() => {
-                        setCreateParent(item.path);
-                        setCreateOpen(true);
-                      }}
-                    />
-                  </>
-                ) : null}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`复制路径${item.name}`}
-                  leftIcon={<Copy className="size-4" />}
-                  onClick={() => void onCopyPath(item.path)}
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  disabled={desktop && item.type === 'folder'}
-                  aria-label={`下载${item.type === 'folder' ? '文件夹' : '文件'}${item.name}`}
-                  leftIcon={<Download className="size-4" />}
-                  onClick={() => void onDownload(item.path, item.type)}
-                />
-                <ConfirmDialog
-                  title="删除资源"
-                  description={`确认递归删除「${item.path}」？`}
-                  confirmVariant="destructive"
-                  onConfirm={() => onDelete(item.path)}
-                  disabled={!editable}
+          <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+            {visibleResources.map(({ item, depth }) => {
+              const selected = directory === item.path || preview?.path === item.path;
+              return (
+                <div
+                  key={item.path}
+                  className={`group flex min-h-10 items-center gap-1 rounded-lg px-3 py-1 transition-colors ${
+                    selected ? 'bg-primary/5' : 'hover:bg-muted/60'
+                  }`}
+                  style={{ paddingLeft: `${12 + depth * 24}px` }}
                 >
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`删除${item.name}`}
-                    leftIcon={<Trash2 className="size-4" />}
-                  />
-                </ConfirmDialog>
-              </div>
-            ))}
+                  {item.type === 'folder' ? (
+                    <Button
+                      variant="ghost"
+                      className="-mx-2 -my-1 h-auto min-w-0 flex-1 shrink justify-start gap-1 rounded-md px-2 py-1 text-left font-normal hover:bg-transparent"
+                      aria-label={`${expanded.includes(item.path) ? '收起' : '展开'}${item.name}`}
+                      aria-expanded={expanded.includes(item.path)}
+                      onClick={() => toggleDirectory(item.path)}
+                    >
+                      {loadingPaths.includes(item.path) ? (
+                        <Loader2 className="size-4 shrink-0 animate-spin" />
+                      ) : expanded.includes(item.path) ? (
+                        <ChevronDown className="size-4 shrink-0" />
+                      ) : (
+                        <ChevronRight className="size-4 shrink-0" />
+                      )}
+                      <Folder className={`ml-2 size-5 shrink-0 ${resourceIconClassName(item)}`} />
+                      <span className="ml-2 min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span>
+                      <span className="sr-only">{item.path}</span>
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      className="-mx-2 -my-1 h-auto min-w-0 flex-1 justify-start gap-3 rounded-md px-2 py-1 text-left font-normal hover:bg-transparent"
+                      aria-label={`预览${item.name}`}
+                      disabled={desktop && (item.size ?? 0) > 1048576}
+                      onClick={() => void onPreview(item.path).then((result) => setPreview({ path: item.path, result }))}
+                    >
+                      <File className={`size-5 shrink-0 ${resourceIconClassName(item)}`} />
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span>
+                      <span className="sr-only">
+                        {item.path}
+                        {item.size !== undefined ? ` · ${formatResourceBytes(item.size)}` : ''}
+                      </span>
+                    </Button>
+                  )}
+                  <div
+                    className={`flex shrink-0 items-center gap-0.5 transition-opacity ${
+                      selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+                    }`}
+                  >
+                    {item.type === 'folder' ? (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          disabled={!editable}
+                          aria-label={`向${item.name}添加文件`}
+                          leftIcon={<FilePlus className="size-4" />}
+                          onClick={() => {
+                            uploadDirectoryRef.current = item.path;
+                            uploadRef.current?.click();
+                          }}
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          disabled={!editable}
+                          aria-label={`在${item.name}中新建子目录`}
+                          leftIcon={<FolderPlus className="size-4" />}
+                          onClick={() => {
+                            setCreateParent(item.path);
+                            setCreateOpen(true);
+                          }}
+                        />
+                      </>
+                    ) : null}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`复制路径${item.name}`}
+                      leftIcon={<Copy className="size-4" />}
+                      onClick={() => void onCopyPath(item.path)}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      disabled={desktop && item.type === 'folder'}
+                      aria-label={`下载${item.type === 'folder' ? '文件夹' : '文件'}${item.name}`}
+                      leftIcon={<Download className="size-4" />}
+                      onClick={() => void onDownload(item.path, item.type)}
+                    />
+                    <ConfirmDialog
+                      title="删除资源"
+                      description={`确认递归删除「${item.path}」？`}
+                      confirmVariant="destructive"
+                      onConfirm={() => onDelete(item.path)}
+                      disabled={!editable}
+                    >
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`删除${item.name}`}
+                        leftIcon={<Trash2 className="size-4" />}
+                      />
+                    </ConfirmDialog>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         ) : (
-          <Empty compact title="工作区为空" description="当前目录没有文件或文件夹。" />
+          <div className="rounded-xl border border-dashed border-border bg-card py-12">
+            <Empty compact title="工作区为空" description="当前目录没有文件或文件夹。" />
+          </div>
         )}
       </div>
       <ResourcePreviewDrawer preview={preview} onClose={() => setPreview(undefined)} />

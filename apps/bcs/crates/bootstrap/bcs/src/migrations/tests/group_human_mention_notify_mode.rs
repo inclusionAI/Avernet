@@ -23,11 +23,9 @@ async fn fresh_sqlite_schema_contains_group_human_mention_notify_mode() -> DbRes
 
     run_sqlite_migrations(&db).await?;
     let columns = column_names(&db, "bcs_groups").await?;
-    assert!(
-        columns
-            .iter()
-            .any(|column| column == "human_mention_notify_mode")
-    );
+    assert!(columns
+        .iter()
+        .any(|column| column == "human_mention_notify_mode"));
     Ok(())
 }
 
@@ -42,12 +40,10 @@ async fn sqlite_version_30_upgrade_adds_default_all_and_is_repeatable() -> DbRes
         apply_sqlite_migration(&db, migration).await?;
     }
     run_sqlite_bootstrap_indexes(&db).await?;
-    assert!(
-        !column_names(&db, "bcs_groups")
-            .await?
-            .iter()
-            .any(|name| name == "human_mention_notify_mode")
-    );
+    assert!(!column_names(&db, "bcs_groups")
+        .await?
+        .iter()
+        .any(|name| name == "human_mention_notify_mode"));
     db.execute(DbStatement::new(
         "INSERT INTO bcs_groups (group_id, status, driver_bot, env) VALUES ('notify-upgrade', 'active', 'driver', 'test')",
     ))
@@ -67,23 +63,27 @@ async fn sqlite_version_30_upgrade_adds_default_all_and_is_repeatable() -> DbRes
     );
     let history = db.query(DbStatement::new(history_sql)).await?;
     assert_eq!(&history[..30], old_history.as_slice());
-    assert_eq!(history.len(), 33);
+    assert_eq!(history.len(), 34);
     let record = applied_sqlite_migration(&db, 31)
         .await?
         .expect("version 31 must be recorded");
     assert_eq!(record.name, "group_human_mention_notify_mode");
-    assert_eq!(current_sqlite_version(&db, true).await?, Some(sqlite_target_version()));
-    let columns = column_names(&db, "bcs_groups").await?;
-    assert!(
-        columns
-            .iter()
-            .any(|column| column == "human_mention_notify_mode")
+    assert_eq!(
+        current_sqlite_version(&db, true).await?,
+        Some(sqlite_target_version())
     );
+    let columns = column_names(&db, "bcs_groups").await?;
+    assert!(columns
+        .iter()
+        .any(|column| column == "human_mention_notify_mode"));
 
     // A second runner invocation must be a no-op: new checksums stay valid and
     // no additional history rows appear.
     run_sqlite_migrations(&db).await?;
-    assert_eq!(current_sqlite_version(&db, true).await?, Some(sqlite_target_version()));
+    assert_eq!(
+        current_sqlite_version(&db, true).await?,
+        Some(sqlite_target_version())
+    );
     assert_eq!(db.query(DbStatement::new(history_sql)).await?, history);
     Ok(())
 }

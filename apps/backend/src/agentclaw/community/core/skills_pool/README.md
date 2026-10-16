@@ -17,6 +17,10 @@ Mapping/DeviceSync 兼容路线，超时、5xx、普通 404 或 501 不会触发
 
 - `(env, entity_id, bot_id)` 没有状态行时，等价于非持久化
   `LEGACY_ACTIVE`，新 Backend 不会改变既有 Bot。
+- Pool-native Bot 使用 `POOL_INITIALIZING` 表达已经选择 Pool、但当前
+  启动实例尚未回报根级初始化完成。该状态没有 migration generation、
+  preparation identity 或 target layout；有效的当前启动证据通过独立 CAS
+  晋升 `POOL_ACTIVE`，不会进入 migration reconcile 或 quarantine。
 - 首次认领同时写入 Pool 目标、初始阶段、唯一
   `migration_generation`、lease 和白名单审计证据。
 - Admission Policy 仅控制首次认领。认领成功后状态具有粘性，移除 allow
@@ -156,7 +160,9 @@ provides:
   - "LegacyMappingApplyRequired"
   - "SkillsPoolLayoutRepositoryProtocol"
   - "SkillsPoolRolloutGate"
+  - "SkillsPoolNativeCreationPolicy"
   - "SkillsPoolMigrationClaimService"
+  - "SkillsPoolNativeLayoutConfirmationService"
   - "SkillsPoolReconcileService"
   - "SkillsPoolReconcileOutcome"
   - "SkillsPoolReconcileResult"

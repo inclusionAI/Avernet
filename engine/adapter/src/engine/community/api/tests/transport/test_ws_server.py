@@ -33,6 +33,7 @@ from engine.community.kernel.frames import (
     ResponseFrame,
 )
 from engine.community.manager import EngineManager
+from engine.community.plugin_api.openclaw.chat import OpenClawChatAck
 from engine.community.api.transport.ws_server import (
     EngineWebSocketServer,
     _ENGINE_LOCAL_CHAT_SCOPE_KEY_HASH,
@@ -1964,3 +1965,175 @@ class TestChatInjectDispatch:
 
         assert response.ok is False
         assert response.error.code == "INTERNAL_ERROR"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 终态收口：流尽无终态必须合成 error 终态（cluster E2E 2026-10-15）
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestStreamExhaustedWithoutTerminal:
+    """引擎流结束时从未送达 final/error/aborted（provider 重试耗尽上游
+    静默断流，simulator E2E 两次复现）：流消费边界必须给客户端合成
+    结构化 error 终态，不得让 v3 客户端挂满自身超时。"""
+
+    @pytest.mark.asyncio
+    async def test_exhausted_stream_emits_synthesized_error_terminal(
+        self, server, fake_engine,
+    ):
+        websocket = MagicMock()
+        websocket.send_text = AsyncMock()
+
+        async def stream(*_args, **_kwargs):
+            yield EventFrame(event="chat", payload={
+                "runId": "nat-1", "state": "delta", "deltaText": "开头"})
+            # provider 死亡：无 final/error/aborted，流直接结束
+        fake_engine.chat.stream = stream
+
+        await server._stream_chat_events(
+            websocket, "conn-1", "sk-1", "hello", timeout_ms=None,
+        )
+
+        frames = [
+            json.loads(call.args[0])
+            for call in websocket.send_text.call_args_list
+        ]
+        assert [f["payload"]["state"] for f in frames] == ["delta", "error"]
+        error_frame = frames[-1]
+        assert error_frame["event"] == "chat"
+        assert error_frame["payload"]["sessionKey"] == "sk-1"
+        assert error_frame["payload"]["runId"] == "nat-1"
+        assert error_frame["payload"]["errorCode"] == \
+            "STREAM_TERMINATED_WITHOUT_FINAL"
+        assert error_frame["payload"]["errorMessage"]
+        assert "seq" in error_frame["payload"]
+        assert "ts" in error_frame["payload"]
+
+    @pytest.mark.asyncio
+    async def test_terminal_frame_stops_relay_without_synthesized_error(
+        self, server, fake_engine,
+    ):
+        """正常 final 先到：relay 即刻收口，后续迟到帧不转发、无 error 合成。"""
+        websocket = MagicMock()
+        websocket.send_text = AsyncMock()
+
+        async def stream(*_args, **_kwargs):
+            yield EventFrame(event="chat", payload={
+                "runId": "nat-1", "state": "final",
+                "message": {"content": [{"type": "text", "text": "终稿"}]}})
+            # relay 在首个终态帧即 break（ws_server.py:1790），生成器不会再
+            # 被拉取——final 之后的 yield 永不执行，不写永不运行的防御帧。
+        fake_engine.chat.stream = stream
+
+        await server._stream_chat_events(
+            websocket, "conn-1", "sk-1", "hello", timeout_ms=None,
+        )
+
+        frames = [
+            json.loads(call.args[0])
+            for call in websocket.send_text.call_args_list
+        ]
+        assert [f["payload"]["state"] for f in frames] == ["final"]
+        assert all(
+            "errorCode" not in f["payload"] for f in frames
+        ), "终态先到的流不得追发合成的 error 终态"
+
+    @pytest.mark.asyncio
+    async def test_exhausted_stream_during_interaction_still_terminates(
+        self, server, fake_engine,
+    ):
+        """HITL 交互挂起中流断：原样转发的 interaction 帧之后仍然必须有
+        error 终态——客户端不能在 INPUT_REQUIRED 等待面上无限悬挂。"""
+        websocket = MagicMock()
+        websocket.send_text = AsyncMock()
+
+        async def stream(*_args, **_kwargs):
+            yield EventFrame(event="interaction.requested", payload={
+                "runId": "nat-1", "state": "interaction.requested",
+                "interactionId": "i-1", "questions": ["继续?"]})
+            # 交互等待中上游死亡
+        fake_engine.chat.stream = stream
+
+        await server._stream_chat_events(
+            websocket, "conn-1", "sk-1", "hello", timeout_ms=None,
+        )
+
+        frames = [
+            json.loads(call.args[0])
+            for call in websocket.send_text.call_args_list
+        ]
+        assert [f["payload"]["state"] for f in frames] == [
+            "interaction.requested", "error",
+        ]
+        assert frames[-1]["payload"]["errorCode"] == \
+            "STREAM_TERMINATED_WITHOUT_FINAL"
+
+    @pytest.mark.asyncio
+    async def test_ack_stream_exhausted_before_any_frame_fails_the_ack(
+        self, server, fake_engine,
+    ):
+        """ACK 模式下零帧流尽：未 acknowledge 即断流 → 启动失败 ACK 直接
+        用合成错误码拒绝请求（客户端拿到可解释失败，不悬挂）。"""
+        websocket = MagicMock()
+        websocket.send_text = AsyncMock()
+
+        async def stream(*_args, **_kwargs):
+            if False:  # pragma: no cover — zero-frame async generator
+                yield
+        fake_engine.chat.stream = stream
+
+        await server._run_ack_chat(
+            websocket, "conn-1", "req-1", "sk-1", "hello", None, "idem-1",
+        )
+
+        frames = [
+            json.loads(call.args[0])
+            for call in websocket.send_text.call_args_list
+        ]
+        assert len(frames) == 1
+        assert frames[0]["type"] == "res"
+        assert frames[0]["id"] == "req-1"
+        assert frames[0]["ok"] is False
+        assert frames[0]["error"]["code"] == "STREAM_TERMINATED_WITHOUT_FINAL"
+        assert frames[0]["error"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_resumable_stream_exhaustion_emits_single_error_terminal(
+        self, server, fake_engine,
+    ):
+        """resume 面：流尽兜底必须恰好一个终态事件——不能既走新合成分支
+        又触发 _run_resumable_chat 的旧"无终态结束"守卫造成 error 双发。"""
+        created = server._openclaw_resume.create(
+            session_key="sk-1", run_id="rk-1")
+        assert created is not None
+        run, ticket = created
+
+        websocket = MagicMock()
+        websocket.send_text = AsyncMock()
+
+        async def stream(request, auth=None, on_ack=None):
+            await on_ack(OpenClawChatAck(
+                True, {"runId": "nat-5", "status": "started"}))
+            yield EventFrame(event="chat", payload={
+                "state": "delta", "deltaText": "开头"})
+            # provider 死亡：无终态流尽
+        fake_engine.chat.stream = stream
+
+        await server._run_resumable_chat(
+            run, websocket, "conn-1", "sk-1", "hello", None, "rk-1",
+            AuthContext(token="tok-a"),
+            request_id="req-r", resume_ticket=ticket,
+        )
+
+        events = [json.loads(event) for event in run._events]
+        assert [event["payload"]["state"] for event in events] == [
+            "delta", "error",
+        ], "终态必须只有一次：delta + 合成 error，无守卫重复帧"
+        error_event = events[-1]
+        assert error_event["event"] == "chat"
+        assert error_event["payload"]["errorCode"] == \
+            "STREAM_TERMINATED_WITHOUT_FINAL"
+        assert "Chat stream ended without a terminal event." not in \
+            error_event["payload"]["errorMessage"]
+        # 帧没带 runId 时由 resume run 的 ack 侧 runId 兜底
+        assert error_event["payload"]["runId"] == "nat-5"
+        assert run.state == "error"

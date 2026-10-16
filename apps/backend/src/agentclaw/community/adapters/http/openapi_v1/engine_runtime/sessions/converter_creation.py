@@ -48,6 +48,7 @@ async def reconcile_created_session(
     *, relay: EngineRuntimeRelayProtocol, facts: BotFacts, bot_id: str,
     owner_id: str, user_id: str, stage: RuntimeStage,
     created_item: dict[str, Any], requested_title: str | None,
+    device_uuid: str | None = None,
 ) -> dict[str, Any]:
     """Recover OpenClaw's canonical list row after a successful create."""
     if facts.active_engine.lower() != "openclaw":
@@ -61,6 +62,7 @@ async def reconcile_created_session(
             await asyncio.sleep(delay)
         try:
             listed = await relay.call(
+                **({"device_uuid": device_uuid} if device_uuid is not None else {}),
                 bot_id=bot_id, owner_id=owner_id, facts=facts,
                 stage=stage.value, method="GET", path="/api/sessions",
                 params={"offset": 0, "limit": _LIMIT, "user_id": user_id},

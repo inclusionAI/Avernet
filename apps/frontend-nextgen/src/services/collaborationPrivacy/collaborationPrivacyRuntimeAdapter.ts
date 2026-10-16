@@ -41,6 +41,7 @@ import {
   readDepartmentScopeReferences,
   type DepartmentScopeReference,
 } from './mappers';
+import { applyExternalBotDtoToDomain, stripExternalAgentViewScopeDeps, submitExternalPublication } from './externalBotPublication';
 
 export interface CollaborationPrivacyRuntimeDependencies {
   apiAdapter: CollaborationPrivacyApiAdapter;
@@ -127,7 +128,13 @@ function toPublicationRequest(command: PublicationCommand): BcsPublicRequest {
 
   return {
     public_scope: command.audience === 'user' ? 'user' : 'agent',
-    visibility: command.config.scope === 'none' ? 'private' : 'public',
+    // 限定组织可申请 → protected；全部可见 → public；不可见 → private。对用户与对 Bot 受众一致。
+    visibility:
+      command.config.scope === 'none'
+        ? 'private'
+        : command.config.scope === 'restricted'
+          ? 'protected'
+          : 'public',
     view_depts: viewDepts?.length ? viewDepts : null,
   };
 }
@@ -392,6 +399,8 @@ export function createCollaborationPrivacyRuntimeAdapter(
       }
       const managedBots = await dependencies.apiAdapter.listManagedBots({ kind: 'bot', user_id: rawUserId }, signal);
       const physicalBots = managedBots.items.filter((item) => item.kind === 'bot');
+      // 外部 Bot 通用配置弹窗：对 Bot 可见性按外部合同归一（名称字符串、无审批态），由 loadScope 显式声明。
+      const isExternalLoad = loadScope.target === 'activeBot' && loadScope.external === true;
       // Bot 身份入口只渲染命中的那一张卡，故 hydrate 前先收敛读取范围：避免为不渲染的 Bot 付部门搜索与
       // config 调用（慢 Bot 会拖长当前卡首屏，非 404 失败还会为无关 Bot 弹 toast）。命中不到时按空列表处理，
       // 页面沿用既有局部空态，不升级为整页加载失败。
@@ -402,18 +411,25 @@ export function createCollaborationPrivacyRuntimeAdapter(
       // 部门回显和画像公开配置是两条独立链路；并行启动，避免部门搜索慢/失败时看不到 BCSFuse 请求。
       const baseBots = hydratableBots.map(mapBotDtoToDomain);
       const [botsWithDepartments, botsWithProfile] = await Promise.all([
-        hydrateDepartmentScopes(hydratableBots, dependencies.listOrgDepts, signal),
+        hydrateDepartmentScopes(
+          isExternalLoad ? hydratableBots.map(stripExternalAgentViewScopeDeps) : hydratableBots,
+          dependencies.listOrgDepts,
+          signal,
+        ),
         hydrateProfilePublic(baseBots, dependencies.getWorkerConfig, signal),
       ]);
       const profileByBotId = new Map(botsWithProfile.map((bot) => [bot.id, bot]));
       const nextOverview: CollaborationPrivacyOverview = {
         currentUser,
         organizationOptions: [],
-        bots: botsWithDepartments.map((bot) => {
+        bots: botsWithDepartments.map((bot, index) => {
+          const scopeBot = isExternalLoad
+            ? applyExternalBotDtoToDomain(bot, hydratableBots[index])
+            : bot;
           const profile = profileByBotId.get(bot.id);
           return profile
-            ? { ...bot, profilePublic: profile.profilePublic, profilePublicStatus: profile.profilePublicStatus }
-            : bot;
+            ? { ...scopeBot, profilePublic: profile.profilePublic, profilePublicStatus: profile.profilePublicStatus }
+            : scopeBot;
         }),
       };
       if (loadId === latestLoadId) {
@@ -490,6 +506,13 @@ export function createCollaborationPrivacyRuntimeAdapter(
 
     async submitPublication(command, signal) {
       if (!overview || !activeRawUserId) throw new Error('协作权限数据尚未加载');
+      // 外部 Bot 直改路由：显式由指令声明选中，绝不从 Bot ID 猜测；TC 走既有审批链路（不加 GET、不动快照）。
+      if (command.isExternalBot) {
+        const { result, patchedBot } = await submitExternalPublication(dependencies.apiAdapter, command, signal);
+        // 直改已落库：用校验过的响应 DTO 刷新快照，后续好友审批等 friend_ext 整体替换写不会用加载时旧值覆盖新可见性范围。
+        managedBotSnapshots.set(command.botId, structuredClone(patchedBot));
+        return result;
+      }
       const result = assertPublicationResponse(
         await dependencies.publishBotPublic(command.botId, activeRawUserId, toPublicationRequest(command), signal),
       );

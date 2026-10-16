@@ -5,11 +5,11 @@ Collaboration Network (BCN).
 
 ## Compatibility
 
-- DeepSeek Harness baseline: `@deepseek-ai/dsh 0.1.1-rc.2`
+- DeepSeek Harness tested baseline: `@deepseek-ai/dsh 0.2.1-alpha.2`
 - BCN Bot WebSocket protocol: V3
 - Node.js: `>=22.19.0`
 
-This release requires BCN V3. Every `chat.send` must carry the canonical
+This release requires BCN V3. Every `chat.send` and `chat.inject` must carry the canonical
 `bcs_session_id`; uplink events use the shared Run Event envelope with
 `runId`, `sessionId`, `seq`, and `ts`. The adapter still keeps the historical
 session-key mapping helper for persisted sessions created by older releases.
@@ -18,7 +18,7 @@ session-key mapping helper for persisted sessions created by older releases.
 
 - Automatic registration and descriptor onboarding through DSH Credentials
 - Persistent Bot Session storage through the official `ctx.credentials` seam
-- `chat.send` and `chat.inject` downlink handling
+- `chat.send`, `chat.inject`, and exact-run `chat.abort` downlink handling
 - Isolated DSH Agent/Session reuse for each BCN conversation, including
   multiple sessions that share one group-level `session_key`
 - DSH Agent preset composition matching Web sessions; new BCN sessions use the
@@ -30,13 +30,43 @@ session-key mapping helper for persisted sessions created by older releases.
 - `bcs_route` capture with routing metadata attached to the final chat event
 - Manager-worker `task.dispatch`, `task.message`, and `task.complete` support
 - Heartbeat, exponential reconnect, token rotation, and lifecycle cleanup
+- Agent-scoped execution approvals and structured questions through BCN
+  `interaction` events and authenticated `interaction.resolve` requests
 
 The plugin does not create an OpenClaw-style `.bcs/session.json` file or any
 other private session directory.
 
-The initial release does not implement `chat.abort` or `chat.history`.
+This release does not implement `chat.history`.
 Unsupported BCN requests receive the WebSocket client's standard `NOT_FOUND`
 response, and unsolicited unsupported events are ignored.
+
+`chat.abort` requires `session_key` (the canonical BCN session ID) and
+`run_id`. It cancels only that run: pending agent creation cannot deliver after
+the abort, queued input is removed by message ID, and active turns use
+`cancel({ kind: 'user' }, { keepInbox: true })`. Other queued runs survive.
+Repeated aborts acknowledge an empty `aborted_run_ids`; unknown runs and
+cross-session requests fail. Terminal events are emitted once.
+
+DSH 0.2 uses scoped live events and V4 tool-result messages. This adapter
+subscribes in each owned Agent's setup, reads tool identity from the message's
+top-level `toolCallId`, and never subscribes to replayed history. Assistant
+text is forwarded as deltas after each durable `assistant/message` commit,
+including interrupted prefixes. Failed/retried `assistant/attempt` output and
+raw reasoning are excluded; this deliberately buffers text until a step
+commits because BCN's append-only delta stream cannot retract a failed attempt.
+The scoped `agent/assistant-stream` feed retains only the current attempt's
+visible text so an explicit abort can preserve its partial answer.
+The historical `bcn-v2-*` DSH session IDs remain unchanged. DSH's own storage
+migration handles old session formats; the plugin never rewrites session logs.
+
+Execution approvals offer only `allow_once` and `deny`. Question options use
+their DSH labels as wire values; free-text answers return as `custom`.
+Cancellation and unload settle pending waits without granting approval.
+Timed questions attach to DSH's official foreground wait and respect its
+remaining duration. Late answers after that foreground wait closes are not
+accepted by this adapter. Mode-switch interactions are not implemented.
+These hooks are installed only on BCN-owned Agents and do not intercept Web
+sessions or subagents.
 
 BCN messages run in a dedicated in-process DSH Agent created through
 `ctx.agents.create` or restored through `ctx.agents.resume`; they do not reuse a
@@ -56,6 +86,9 @@ The manager/worker decision uses only the server-delivered
 participants, environment variables, or model input. A manager receives its
 task tools even before workers join the group, but `bcs_assign_task` can only
 succeed after its `target_bot` resolves to a worker accepted by BCS.
+Task RPCs carry the canonical `group:session` identity in their existing
+`group_id` wire field, which BCS unwraps into group and conversation scope.
+They do not fall back to a shared group's default conversation.
 
 With DSH's default `standard` preset the base tool set includes the Bash,
 filesystem, search, Skills, planning, subagent, and workflow capabilities
@@ -82,12 +115,16 @@ missing, it exits without consuming the registration Token and prints the
 matching CLI installation command:
 
 ```bash
-npm install --global @deepseek-ai/dsh@0.1.1-rc.2
+npm install --global @deepseek-ai/dsh@0.2.1-alpha.2
 ```
 
 Run the generated onboarding command again after installing the CLI. When DSH
 is present, the same command installs this plugin, configures the `web` profile,
 and starts DSH so the plugin can complete onboarding with the injected Token.
+The installer rejects other DSH versions before installing or changing a
+profile. Existing `0.1.1-rc.2` installations must be upgraded first; the pinned
+alpha baseline is intentionally not advertised as compatible with the stable
+`latest` dist-tag.
 
 The registration Token is removed from the package-manager and configuration
 helper environments and is passed only to the final DSH process. The installer
@@ -122,13 +159,13 @@ To exercise the exact prebuilt artifact that will be published:
 ```bash
 mkdir -p /tmp/dsh-bcn-pack
 npm pack --pack-destination /tmp/dsh-bcn-pack
-dsh plugin --profile bcn-tarball add /tmp/dsh-bcn-pack/avernet-plugin-deepseek-harness-channel-bcn-0.1.0.tgz
+dsh plugin --profile bcn-tarball add /tmp/dsh-bcn-pack/avernet-plugin-deepseek-harness-channel-bcn-0.2.0.tgz
 ```
 
 After publication, the installation command will be:
 
 ```bash
-dsh plugin --profile <profile> add @avernet-plugin/deepseek-harness-channel-bcn
+dsh plugin --profile <profile> add @avernet-plugin/deepseek-harness-channel-bcn@0.2.0
 ```
 
 The bundle patch adds the plugin in a disabled state, so installing it never

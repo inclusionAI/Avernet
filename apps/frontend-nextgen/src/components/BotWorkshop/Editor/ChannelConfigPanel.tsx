@@ -11,6 +11,7 @@ import { ChannelFormModal } from './ChannelFormModal';
 export function ChannelConfigPanel({
   channels,
   editable,
+  serviceBot = false,
   onCreate,
   onUpdate,
   onToggle,
@@ -18,6 +19,7 @@ export function ChannelConfigPanel({
 }: {
   channels: BotChannel[];
   editable: boolean;
+  serviceBot?: boolean;
   onCreate: (input: BotChannelInput) => Promise<void>;
   onUpdate: (id: number, input: BotChannelInput) => Promise<void>;
   onToggle: (channel: BotChannel) => Promise<void>;
@@ -28,18 +30,19 @@ export function ChannelConfigPanel({
   const [bindingMode, setBindingMode] = useState<ChannelBindingMode>('plugin');
   const visibleChannels = channels.filter((channel) => channel.bindingMode === bindingMode);
   const modeLabel = bindingMode === 'plugin' ? '基于开源插件' : '基于BCN';
+  const showPluginStage = serviceBot && bindingMode === 'plugin';
   return (
     <div className="flex min-h-full flex-col bg-card">
-      <div className="flex items-center justify-between gap-4 border-b border-border px-5 py-4">
+      <div className="flex items-center justify-between gap-4 border-b border-border px-7 py-5">
         <div>
-          <h2 className="m-0 text-sm font-semibold">渠道管理</h2>
-          <p className="m-0 mt-1 text-xs text-muted-foreground">分别查看和管理基于开源插件或 BCN 的钉钉机器人。</p>
+          <h2 className="m-0 text-lg font-semibold tracking-tight">渠道管理</h2>
+          <p className="m-0 mt-1 text-sm text-muted-foreground">分别查看和管理基于开源插件或 BCN 的钉钉机器人。</p>
         </div>
         <Button size="sm" disabled={!editable} leftIcon={<Plus className="size-4" />} onClick={() => setOpen(true)}>
           新建配置
         </Button>
       </div>
-      <div className="space-y-4 px-5 py-4">
+      <div className="space-y-5 px-7 py-5">
         <section className="rounded-xl border border-border bg-background p-4">
           <div className="mb-3 flex items-start justify-between gap-4">
             <div>
@@ -78,7 +81,7 @@ export function ChannelConfigPanel({
           <div className="overflow-x-auto rounded-lg border border-border">
             <div className="grid min-w-[780px] grid-cols-[minmax(150px,1.4fr)_90px_minmax(150px,1.2fr)_100px_150px_100px] gap-3 border-b border-border bg-muted px-4 py-2 text-xs font-medium text-muted-foreground">
               <span>场景描述</span>
-              <span>绑定环境</span>
+              <span>{showPluginStage ? '生效环境' : '绑定环境'}</span>
               <span>{bindingMode === 'plugin' ? '机器人 ID' : 'Robot Code'}</span>
               <span>状态</span>
               <span>创建时间</span>
@@ -95,7 +98,11 @@ export function ChannelConfigPanel({
                     流式输出：{channel.enableStreamingCards ? '已开启' : '已关闭'}
                   </p>
                 </div>
-                <Badge tone="neutral">草稿态</Badge>
+                <Badge tone="neutral">
+                  {showPluginStage
+                    ? { draft: '草稿', verify: '预发', online: '线上' }[channel.stage ?? 'draft']
+                    : '草稿态'}
+                </Badge>
                 <span className="truncate">
                   {bindingMode === 'plugin' ? channel.clientId : channel.robotCode || '未配置'}
                 </span>
@@ -150,6 +157,7 @@ export function ChannelConfigPanel({
         open={open}
         channel={editing}
         bindingMode={bindingMode}
+        serviceBot={serviceBot}
         onOpenChange={(next) => {
           setOpen(next);
           if (!next) setEditing(undefined);

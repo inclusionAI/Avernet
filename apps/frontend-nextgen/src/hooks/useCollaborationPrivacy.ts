@@ -1,5 +1,5 @@
 import { notifyError, notifySuccess } from '@/components/ui/notify';
-import { matchesBotIdentity, resolvePrivacyLoadScope } from '@/domain/collaborationPrivacy/loadScope';
+import { matchesBotIdentity, resolveFixedBotLoadScope, resolvePrivacyLoadScope } from '@/domain/collaborationPrivacy/loadScope';
 import type {
   CollaborationBot,
   FriendApprovalConfig,
@@ -13,8 +13,10 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildDirectConfirmation,
+  buildPublicationCommand,
   directSettingLabel,
   errorMessage,
+  externalPublicationSaveMessage,
   publicationSuccessMessage,
   type Confirmation,
   type PublicationEditorState,
@@ -22,9 +24,8 @@ import {
 } from './collaborationPrivacyHelpers';
 import { useCopyBotId } from './useCopyBotId';
 
-/** 协作权限编排 Hook：默认按工作身份推导加载范围；传 fixedBotId 时按指定 Bot 弹窗加载（collab-permission-entry-migration）。 */
-export function useCollaborationPrivacy(options?: { fixedBotId?: string }) {
-  const fixedBotId = options?.fixedBotId;
+/** 协作权限编排 Hook：默认按工作身份推导加载范围；传 fixedBotId 时按指定 Bot 弹窗加载（collab-permission-entry-migration）。isExternalBot 由外部 Bot 入口显式传入。 */
+export function useCollaborationPrivacy({ fixedBotId, isExternalBot = false }: { fixedBotId?: string; isExternalBot?: boolean } = {}) {
   const store = useCollaborationPrivacyStore();
   const { identity, status: identityStatus, error: identityError } = useHumanIdentity();
   const activeIdentityId = useWorkspaceStore((state) => state.activeIdentityId);
@@ -52,7 +53,7 @@ export function useCollaborationPrivacy(options?: { fixedBotId?: string }) {
       store.setError(null);
       try {
         const loadScope = fixedBotId
-          ? ({ target: 'activeBot', botId: fixedBotId } as const)
+          ? resolveFixedBotLoadScope(fixedBotId, isExternalBot)
           : resolvePrivacyLoadScope(activeIdentity);
         const overview = await collaborationPrivacyService.loadOverview(userId, signal, loadScope);
         if (loadId === latestLoadId.current && !signal?.aborted) store.setOverview(overview);
@@ -63,7 +64,7 @@ export function useCollaborationPrivacy(options?: { fixedBotId?: string }) {
         if (loadId === latestLoadId.current) store.setLoading(false);
       }
     },
-    [activeIdentity, fixedBotId, identityError, store.setError, store.setLoading, store.setOverview, userId],
+    [activeIdentity, fixedBotId, identityError, isExternalBot, store.setError, store.setLoading, store.setOverview, userId],
   );
   useEffect(() => {
     const controller = new AbortController();
@@ -143,17 +144,14 @@ export function useCollaborationPrivacy(options?: { fixedBotId?: string }) {
       const succeeded = await runBotAction(
         `${bot.id}:publication:${publicationEditor.audience}`,
         () =>
-          collaborationPrivacyService.submitPublication({
-            botId: bot.id,
-            audience: publicationEditor.audience,
-            config,
-            deptEntries,
-          }),
-        publicationSuccessMessage(config),
+          collaborationPrivacyService.submitPublication(
+            buildPublicationCommand({ botId: bot.id, audience: publicationEditor.audience, config, deptEntries, isExternalBot }),
+          ),
+        isExternalBot ? externalPublicationSaveMessage : publicationSuccessMessage(config),
       );
       if (succeeded) setPublicationEditor(null);
     },
-    [publicationEditor, runBotAction, store.overview],
+    [isExternalBot, publicationEditor, runBotAction, store.overview],
   );
 
   const submitFriendApproval = useCallback(

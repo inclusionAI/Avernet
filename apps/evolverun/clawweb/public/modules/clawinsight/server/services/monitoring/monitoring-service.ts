@@ -1,9 +1,10 @@
-import { MonitoringError, type MonitoringApi, type MonitoringStore, type MonitoringTarget } from "./contracts.js";
+import { MonitoringError, type MonitoringApi, type MonitoringStore, type MonitoringTarget, type MonitoringRecoveryTrigger } from "./contracts.js";
 import type { MonitoringTargetResolver } from "./directory-contracts.js";
 import { id, parseCheck, parseDiagnosis, parseQuery } from "./validation.js";
 
 export function createMonitoringService(
   store: MonitoringStore, resolver: MonitoringTargetResolver, now: () => number = Date.now,
+  recovery?: MonitoringRecoveryTrigger,
 ): MonitoringApi {
   async function observedBot(botId: string) {
     const target = await resolver.resolve(id(botId));
@@ -26,6 +27,7 @@ export function createMonitoringService(
     async reportDiagnosis(input, key) {
       const event = parseDiagnosis(input, key);
       const inserted = await store.insertDiagnosis({ wire: event, target: await resolver.resolveReport(event, event.engine) }, now());
+      await recovery?.trigger(event);
       return { accepted: true, stored: true, eventId: event.eventId, botId: event.botId, entityId: event.entityId, env: event.env, duplicate: !inserted };
     },
     async reportCheck(input) {

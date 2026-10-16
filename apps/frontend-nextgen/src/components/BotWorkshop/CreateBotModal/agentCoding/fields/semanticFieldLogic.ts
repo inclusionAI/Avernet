@@ -6,6 +6,7 @@ import {
   validateYuqueKbRepoItems,
 } from '@/components/BotWorkshop/CreateBotModal/agentCoding/legacy/aicoding/configFields';
 import type { ModelOption } from '@/components/BotWorkshop/CreateBotModal/agentCoding/legacy/appcoding/CodingModelConfigField';
+import type { CodeRepositoryTenant } from '@/services/botWorkshop/agentCodingLegacyService';
 import type { BotTemplateField } from '@/services/botWorkshop/agentCodingTemplateService';
 import { isTemplateFieldRequired } from './fieldUtils';
 type TemplateConfig = Record<string, any>;
@@ -34,6 +35,10 @@ export interface SemanticFieldRendererProps {
   modelsLoadError?: string | null;
   botId?: string;
   onReloadModels?: () => void | Promise<void>;
+  /** 动态代码仓库字段的搜索租户，按 field_key 隔离。 */
+  codeRepoTenants?: Record<string, CodeRepositoryTenant>;
+  /** 切换动态代码仓库字段的搜索租户。 */
+  onCodeRepoTenantChange?: (fieldKey: string, tenant: CodeRepositoryTenant) => void;
 }
 
 function normalizeSemanticFieldName(value?: string): string {

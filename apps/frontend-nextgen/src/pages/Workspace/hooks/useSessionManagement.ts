@@ -11,7 +11,7 @@ export interface UseSessionManagementResult {
   removeMember: (actorId: string) => Promise<boolean>;
   leaveSession: (actorId: string) => Promise<boolean>;
   /** 生成会话邀请链接；缺省作用于当前选中会话，列表菜单可显式传 sessionId 分享未选中会话。 */
-  createShare: (sessionId?: string) => Promise<DomainResult<{ invitationUrl: string }>>;
+  createShare: (sessionId?: string, expiresInSeconds?: number) => Promise<DomainResult<{ invitationUrl: string }>>;
 }
 
 function notifyError(res: { ok: false; error: { friendlyMessage: string } }): void {
@@ -76,7 +76,7 @@ export function useSessionManagement(
   );
 
   const createShare = useCallback(
-    async (sessionId?: string) => {
+    async (sessionId?: string, expiresInSeconds?: number) => {
       const targetId = sessionId ?? session?.sessionId;
       if (!targetId) {
         return {
@@ -84,7 +84,10 @@ export function useSessionManagement(
           error: { code: 'SESSION_MISSING', friendlyMessage: '未选择会话', canRetry: false },
         };
       }
-      const res = await invitationService.createSessionShare(targetId);
+      const res = await invitationService.createSessionShare(
+        targetId,
+        expiresInSeconds,
+      );
       if (!res.ok) notifyError(res);
       return res;
     },

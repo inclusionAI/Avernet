@@ -4,6 +4,9 @@
       "collaborator_admin": [
         "100000"
       ],
+      "cron_admin": [
+        "100000"
+      ],
       "device_admin": [
         "100000"
       ],
@@ -76,6 +79,9 @@
     "health_check": {
       "bcs_url": "http://localhost:21000"
     },
+    "openapi": {
+      "user_id_bypass": []
+    },
     "openclaw": {
       "skills_repo_url": ""
     },
@@ -86,6 +92,9 @@
       "mist_mode": "dev",
       "scan_interval_hours": 1,
       "storage_dir": "./data/skills_scan"
+    },
+    "task_dispatch": {
+      "backend_url": "http://localhost:8888"
     },
     "task_queue_worker": {
       "enabled": true

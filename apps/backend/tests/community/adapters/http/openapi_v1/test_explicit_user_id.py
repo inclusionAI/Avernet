@@ -24,9 +24,13 @@ import asyncio
 import logging
 
 import pytest
+from fastapi import FastAPI, Request
+from fastapi.testclient import TestClient
+
 from agentclaw.community.adapters.http.openapi_v1 import (
     PUBLIC_API_PREFIX,
 )
+from tests.community.adapters.http.openapi_v1.conftest import public_document
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     ERROR_RESPONSES,
     USER_SCOPED_ERROR_RESPONSES,
@@ -45,12 +49,10 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
 )
-from fastapi import FastAPI, Request
-from fastapi.testclient import TestClient
-
-from tests.community.adapters.http.openapi_v1.conftest import public_document
 
 _CALLER = "u-42"
+#: What the seam sees when no bypass is configured — the shipped default.
+_NO_BYPASS: frozenset[str] = frozenset()
 _PROBE = f"{PUBLIC_API_PREFIX}/bots/_probe"
 
 
@@ -189,7 +191,11 @@ def test_a_rejected_id_cannot_choose_how_much_it_logs(caplog):
 
     with caplog.at_level(logging.WARNING):
         with pytest.raises(UserIdMismatchError):
-            asyncio.run(require_user_id(principal={"user_id": _CALLER}, user_id=flood))
+            asyncio.run(
+                require_user_id(
+                    principal={"user_id": _CALLER}, user_id=flood, bypass=_NO_BYPASS
+                )
+            )
 
     logged = "\n".join(record.getMessage() for record in caplog.records)
     assert len(logged) < 500, "a caller must not choose the size of the log line"
@@ -201,7 +207,9 @@ def test_a_rejected_id_cannot_choose_how_much_it_logs(caplog):
 
 @pytest.mark.asyncio
 async def test_the_dependency_returns_the_request_user_id():
-    resolved = await require_user_id(principal={"user_id": _CALLER}, user_id=_CALLER)
+    resolved = await require_user_id(
+        principal={"user_id": _CALLER}, user_id=_CALLER, bypass=_NO_BYPASS
+    )
 
     assert resolved == _CALLER
 
@@ -209,14 +217,16 @@ async def test_the_dependency_returns_the_request_user_id():
 @pytest.mark.asyncio
 async def test_the_dependency_refuses_a_mismatch():
     with pytest.raises(UserIdMismatchError):
-        await require_user_id(principal={"user_id": _CALLER}, user_id="someone-else")
+        await require_user_id(
+            principal={"user_id": _CALLER}, user_id="someone-else", bypass=_NO_BYPASS
+        )
 
 
 @pytest.mark.asyncio
 async def test_the_dependency_refuses_an_unverifiable_caller():
     """Fail-closed on the principal before the parameter is even compared."""
     with pytest.raises(MissingPrincipalError):
-        await require_user_id(principal=None, user_id=_CALLER)
+        await require_user_id(principal=None, user_id=_CALLER, bypass=_NO_BYPASS)
 
 
 @pytest.mark.asyncio
@@ -231,7 +241,9 @@ async def test_the_mismatch_logs_both_ids(caplog):
     with caplog.at_level(logging.WARNING):
         with pytest.raises(UserIdMismatchError):
             await require_user_id(
-                principal={"user_id": _CALLER}, user_id="someone-else"
+                principal={"user_id": _CALLER},
+                user_id="someone-else",
+                bypass=_NO_BYPASS,
             )
 
     logged = "\n".join(record.getMessage() for record in caplog.records)
@@ -268,6 +280,8 @@ def _without_request_id(response) -> dict:
 #: between "this operation has no user dimension" and "somebody found the
 #: parameter inconvenient".
 _NO_USER_DIMENSION = {
+    # The minimal classification is tenant-wide, not owner-scoped.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/classification"),
     # Name uniqueness is checked across the tenant, not within one user's bots.
     ("get", f"{PUBLIC_API_PREFIX}/bots/check-name"),
     # Source credentials (W3, #1471): tenant-level named objects on an
@@ -282,6 +296,63 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers/{{server_code}}"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/tenants"),
+    # BBS Topics and replies are tenant-wide content. The authenticated
+    # principal may be a person, Bot, or application; no end-user axis exists.
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics"),
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}"),
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}/posts"),
+    # BBS Browse-Loop per-owner list: filtered by the explicit ``owner_id``
+    # query, never by a ``user_id`` axis -- a backend read keyed on the
+    # declared owner, so it sits in the no-user-dimension set.
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/browse-subscriptions"),
+    # BBS Browse-Loop per-Bot reads + writes + manual triggers, exposed on the
+    # public surface: they address a bot by path but take only a verified
+    # principal (+ the declared owner_user_id query on join); the principal
+    # authorises the call and the owner names whose Bot is toggled, neither
+    # acts as an end user, so there is no user_id axis on the wire.
+    (
+        "get",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription",
+    ),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription",
+    ),
+    (
+        "delete",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription",
+    ),
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/feed"),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/trigger-framework",
+    ),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/trigger-self",
+    ),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/cron-register",
+    ),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/cron-remove",
+    ),
+    # BBS unified writes name the author in the request body (author_type +
+    # author_id); they are backend-API writes reachable by humans, Bots and
+    # app-to-app callers, so there is no user_id axis on the wire.
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics"),
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}/posts"),
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}/close"),
+    # BBS Browse-Loop runtime reporting: one bot reports a single Browse Run's
+    # outcome; tenant-wide write, no user-id axis and no bot-id axis.
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/browse-reports"),
+    # General feedback is tenant-wide; the reporter is declared in the body
+    # (POST) or used as an optional caller-selected filter (GET), so there is
+    # no user_id axis on the wire.
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/feedback"),
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/feedback"),
     # The department directory is a tenant-wide catalogue — not the caller's.
     ("get", f"{PUBLIC_API_PREFIX}/org/dept"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/search"),
@@ -316,6 +387,9 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/list"),
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/grant"),
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/revoke"),
+    # trajectory reads by task_id (the do_analysis=true trigger is a deployment-
+    # configured bot, not a caller-chosen one) — no caller-supplied user_id dim.
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/trajectory"),
 }
 
 # Read-only operations that accept a user_id as a caller-selected filter rather
@@ -467,21 +541,32 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: sit beside, so ``path`` 156 → 159 and nothing else moves.
 #: Dormant lifecycle adds one new bot-path operation (recycle); activate and
 #: status keep their existing paths while gaining addressed-owner scope.
-#: The digital-employee metadata catalogue adds two tenant-level reads that
-#: address no bot, so ``none`` 104 → 106.
 #:
-#: The user-level delegation (``/openapi/v1/bots/authorized-apps``: grant, list,
-#: withdraw) adds three account-level operations that address no bot — that is
-#: the record's meaning, not an omission — so ``none`` 106 → 109.
-#:
-#: Bot editor-request policy GET/PATCH adds two bot-path operations: 167 → 169.
-#: Scoped MCP Header-group GET/PUT address a user's full Bot fleet, not one
-#: Bot, so ``none`` 109 → 111.
-#:
-#: The engine default-config read (#2525) is bot-path-addressed like the rest of
-#: its group: ``path`` 169 → 170. The collaborating-Bot collection adds one
-#: account-level operation, so ``none`` 113 → 114.
-_BOT_ID_PLACEMENT = {"path": 170, "query": 1, "none": 114}
+#: Task trajectory (GET /collaboration/tasks/trajectory) is a task_id-keyed read
+#: with no bot_id dimension — adds one to ``none`` (104→105).
+# Addressed-Bot BBS Topic close carries ``bot_id`` in the path like the bot
+#: write routes beside it: ``path`` 162 → 163.
+# BBS unify (this commit): three addressed-Bot writes deprecated (path -3),
+# three Human writes folded into unified routes whose bot_id is a *query*
+# parameter (query +3); the prev刀's three account-level Human writes that
+# showed up in ``none`` left with them (none 113 -> 110).
+# BBS explicit-author (this edit): the three unified writes no longer take
+# ``bot_id`` as a query parameter -- the author is declared in the request
+# body -- so they drop from ``query`` and land in ``none`` (query 4 -> 1,
+# none 110 -> 113).
+# BBS browse-subscription addressed-bot toggle (this edit): the two writes
+# under /openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription name the bot in the
+# path, so ``path`` grows 160 -> 162; ``query`` and ``none`` are unchanged.
+# BBS public per-Bot reads + manual triggers (this edit): six new
+# /bots/{bot_id}/bbs routes (single-bot GET browse-subscription, GET feed,
+# and the four browse-loop triggers) name their bot in the path, so
+# ``path`` grows 162 -> 168; ``query`` and ``none`` are unchanged.
+# Desktop-metadata mount (Q1 in this iteration): the avatar/links surface
+# (/openapi/v1/bots/{bot_id}/avatar and /openapi/v1/bots/{bot_id}/links[/{resource_id}],
+# six path-addressed user-scoped operations) joins the public schema, so
+# ``path`` grows 172 -> 178. Classification and the Local Skill security read
+# each add another path-addressed operation.
+_BOT_ID_PLACEMENT = {"path": 181, "query": 1, "none": 125}
 
 
 def _schema() -> dict:
@@ -633,18 +718,57 @@ def test_the_pinned_number_of_operations_take_it():
     # config-manifest group beside them is: they may address a *shared* bot, so
     # the owner arrives on the wire while the caller stays the acting user —
     # which is what ``installed_by`` records: 230 → 233. Dormant recycle adds
-    # one more user-scoped operation: 233 → 234. The user-level delegation
-    # (``/openapi/v1/bots/authorized-apps``: grant, list, withdraw) adds three
-    # account-level operations that name the user they act for — the same
-    # shape as the bot-scoped group one level down: 234 → 237.
-    # Bot editor-request policy adds Owner-scoped GET and PATCH: 244 → 246.
-    # Scoped MCP Header-group GET/PUT add two more user-scoped operations:
-    # 246 → 248. The engine default-config read (#2525) is user-scoped with
-    # its bot on the path, like every other operation in its group:
-# 248 → 249. The collaborating-Bot collection adds one user-scoped
-    # account-level read: 249 → 250. Team Skill editor-approval policy adds
-    # Owner-scoped GET/PUT: 250 → 252; both address a Space Skill, not a Bot.
-    assert len(taking) == 252
+    # one more user-scoped operation: 233 → 234. The two addressed-Bot BBS
+    # write routes add two more user-scoped operations; the three tenant-wide
+    # BBS reads deliberately have no user dimension: 234 → 236.
+    # The three public Human BBS write routes (Topic create, reply, close) also
+    # name an end user — the principal seam (``ActingCallerDep`` → ``UserIdDep``)
+    # exposes ``user_id`` as a query param, and the handler authors Topic and
+    # reply through that caller — bringing the count to 239. The addressed-Bot
+    # BBS Topic close route shares the same owner→user_id seam (``OwnerIdDep``
+    # depends on ``ActingCallerDep``), so it also names the operating user:
+    # 239 → 240.
+    # The BBS unify (this commit) deprecated the three addressed-Bot BBS writes
+    # beneath /bots/{bot_id}/bbs and folded the three Human writes into three
+    # unified routes under /openapi/v1/collaboration/tasks/bbs that all declare caller + optional
+    # bot_id; the user_id seam still names an end user, so the three unified
+    # writes stay counted, but the three deprecated routes drop out of
+    # _current_operations: 240 -> 237.
+    # BBS explicit-author (this edit): the three unified writes now declare
+    # the author in the body instead of carrying ``ActingCallerDep``, so
+    # they no longer expose ``user_id`` as a query parameter and drop out
+    # of ``taking`` (237 -> 234); they moved to ``_NO_USER_DIMENSION``.
+    # BBS legacy removal: the three deprecated /bots/{bot_id}/bbs writes
+    # were later deleted entirely from the openapi surface -- every write
+    # now goes through /openapi/v1/collaboration/tasks/bbs/* with the author in the body.
+    # Counts are unchanged here: _current_operations already excluded
+    # those routes via ``deprecated=True`` before deletion.
+    # General feedback adds two tenant-wide operations (GET/POST /feedback)
+    # with no bot_id; they sit in _NO_USER_DIMENSION (no user_id axis), so
+    # ``taking`` is unchanged while ``none`` grows 113 -> 115.
+    # BBS browse-subscription toggle: the two addressed-Bot writes
+    # /openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription take user_id (UserIdDep)
+    # like the rest of the user-scoped addressed surface, so ``taking`` grows
+    # 234 -> 236. The per-owner list GET /openapi/v1/collaboration/tasks/bbs/browse-subscriptions is
+    # declared (owner_id), not user-scoped, so it does not add to ``taking``.
+    # BBS browse-subscription unification (this edit): the two addressed-Bot
+    # toggle writes no longer derive the owner from the logged-in caller via
+    # ``UserIdDep`` -- they declare the owner with the required ``owner_user_id``
+    # query and join the OPEN / NoCheck tier that the per-Bot reads already sit
+    # in, mirroring the unified BBS writes under /bbs (which declared the author
+    # in the body). The owner is named on the wire rather than resolved from the
+    # principal, so neither write names an end user and both drop out of
+    # ``taking`` while moving into ``_NO_USER_DIMENSION``: 236 -> 234.
+    # Merge from dev `193256c75` (Caller token per session): the
+    # collaborating-Bot collection adds one user-scoped account-level read and
+    # desktop-metadata awareness stays path-addressed; counts grow 1 here.
+    # Desktop-metadata mount (Q1 in this iteration): avatar/links surface joins
+    # the public schema -- six path-addressed user-scoped operations take
+    # user_id like the rest of the {bot_id}-path tier, so ``taking`` grows
+    # 246 -> 252 (and mirrors _BOT_ID_PLACEMENT["path"] 172 -> 178).
+    # The Local Skill security read adds one user-scoped path operation.
+    # Engine release inspection adds one Bot-addressed read.
+    assert len(taking) == 254
 
 
 def test_the_exempt_operations_take_none():

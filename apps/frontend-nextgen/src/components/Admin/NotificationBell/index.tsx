@@ -15,10 +15,21 @@ function categoryFromItemType(itemType: NotificationSummary['itemType']): WorkOr
   return itemType === 'APPROVAL' ? 'APPROVAL' : itemType === 'NOTIFICATION' ? 'NOTIFICATION' : 'ALL';
 }
 
-export function NotificationBell() {
+export function NotificationBell({ size = 'md', className }: { size?: 'sm' | 'md'; className?: string }) {
   const navigate = useNavigate();
   const { unreadCount, recent, loadingRecent, loadRecent, markAllRead } = useNotifications();
   const [open, setOpen] = useState(false);
+  // 全部已读 in-flight 态：按钮 loading 防抖，避免连点重复调用 markAllRead 接口。
+  const [markingAll, setMarkingAll] = useState(false);
+  const handleMarkAllRead = async () => {
+    if (markingAll) return;
+    setMarkingAll(true);
+    try {
+      await markAllRead();
+    } finally {
+      setMarkingAll(false);
+    }
+  };
 
   // 悬停/打开时懒拉最近 3 条（once-ish：每次打开都拉一次保证新鲜）。
   useEffect(() => {
@@ -38,6 +49,9 @@ export function NotificationBell() {
         <span className="relative inline-flex">
           <IconButton
             label="通知中心"
+            // size/className 透传：折叠态工具簇经此收 28px + muted 色阶，bell-wiggle 等行为不受影响。
+            size={size}
+            className={className}
             icon={<Bell className={cn('h-4 w-4', unreadCount > 0 && 'bell-wiggle')} aria-hidden />}
           />
           {unreadCount > 0 && (
@@ -57,7 +71,7 @@ export function NotificationBell() {
         <div className="flex items-center justify-between px-4 pt-3 pb-2">
           <p className="m-0 text-sm font-semibold text-foreground">最近通知</p>
           {unreadCount > 0 && (
-            <Button variant="ghost" size="sm" onClick={() => void markAllRead()}>
+            <Button variant="ghost" size="sm" disabled={markingAll} loading={markingAll} onClick={() => void handleMarkAllRead()}>
               全部已读
             </Button>
           )}

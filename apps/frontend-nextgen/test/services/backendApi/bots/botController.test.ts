@@ -4,6 +4,7 @@ import {
   getBot,
   listBotInventory,
   listBots,
+  refetchBotEngine,
   restartBot,
   restartBotEngine,
   upgradeBotToService,
@@ -72,6 +73,15 @@ describe('botController OpenAPI contracts', () => {
       expect.objectContaining({ method: 'GET' }),
     );
   });
+  test('refetch engine uses the Coding refetch contract and force semantics', async () => {
+    const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => response());
+    await refetchBotEngine('bot-1');
+    expect(spy).toHaveBeenCalledWith(
+      '/openapi/v1/bots/bot-1/engine/refetch',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ force: true }) }),
+    );
+  });
+
   test.each([
     ['detail as collaborator', () => getBot('bot-1', 'owner-1'), '/openapi/v1/bots/bot-1?owner_id=owner-1', 'GET'],
     ['change space', () => changeBotSpace('bot-1', 12, 'u1'), '/openapi/v1/bots/bot-1/space?user_id=u1', 'PUT'],

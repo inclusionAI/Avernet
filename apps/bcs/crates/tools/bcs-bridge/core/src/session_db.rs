@@ -92,7 +92,7 @@ impl SessionDb {
         connection.pragma_update(None, "synchronous", "FULL")?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
         let version: i64 = connection.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if !matches!(version, 0 | 1 | 2) {
+        if !matches!(version, 0 | 1 | 2 | 3) {
             return Err(SessionError::Schema(version));
         }
         let tx = connection.transaction()?;
@@ -126,9 +126,41 @@ impl SessionDb {
                 PRAGMA user_version = 2;
             ")?;
         }
+        tx.execute("UPDATE injects SET state = 'pending', run_id = NULL WHERE state = 'inflight'", [])?;
+        if version < 3 {
+            // Rebuild parent and child together: retain mappings, receipts and
+            // sequence numbers while making the working directory a durable key.
+            tx.execute_batch("
+                CREATE TABLE sessions_v3 (
+                    provider TEXT NOT NULL, bot TEXT NOT NULL, session TEXT NOT NULL,
+                    engine TEXT NOT NULL, cwd TEXT NOT NULL, engine_session_id TEXT,
+                    PRIMARY KEY (provider, bot, session, engine, cwd)
+                );
+                INSERT INTO sessions_v3 SELECT * FROM sessions;
+                CREATE TABLE injects_v3 (
+                    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                    provider TEXT NOT NULL, id TEXT NOT NULL,
+                    bot TEXT NOT NULL, session TEXT NOT NULL, engine TEXT NOT NULL, cwd TEXT NOT NULL,
+                    fingerprint TEXT NOT NULL, from_name TEXT, text TEXT NOT NULL,
+                    state TEXT NOT NULL CHECK (state IN ('pending','inflight','delivered')), run_id TEXT,
+                    UNIQUE (provider, id),
+                    FOREIGN KEY (provider,bot,session,engine,cwd)
+                        REFERENCES sessions_v3(provider,bot,session,engine,cwd)
+                );
+                INSERT INTO injects_v3
+                    SELECT i.seq,i.provider,i.id,i.bot,i.session,s.engine,s.cwd,
+                           i.fingerprint,i.from_name,i.text,i.state,i.run_id
+                    FROM injects i JOIN sessions s USING (provider,bot,session);
+                DROP TABLE injects;
+                DROP TABLE sessions;
+                ALTER TABLE sessions_v3 RENAME TO sessions;
+                ALTER TABLE injects_v3 RENAME TO injects;
+                CREATE INDEX injects_pending ON injects(provider,bot,session,engine,cwd,state,seq);
+                PRAGMA user_version = 3;
+            ")?;
+        }
         // No other Bridge owns this database. Interrupted attempts are retried
         // on the next send, never by starting an engine during recovery.
-        tx.execute("UPDATE injects SET state = 'pending', run_id = NULL WHERE state = 'inflight'", [])?;
         tx.commit()?;
         Ok(Self { connection: Mutex::new(connection), _owner: owner })
     }
@@ -154,14 +186,24 @@ pub(crate) fn save_identity(conn: &mut Connection, provider: &str, server: &str,
 }
 
 fn ensure_session(tx: &Transaction<'_>, key: &SessionKey) -> Result<Option<String>, SessionError> {
+    // The first indexed row fixes the engine; native Codex may have many
+    // directories. LIMIT 1 keeps validation bounded as projects accumulate.
+    let binding: Option<(String, String)> = tx.query_row(
+        "SELECT engine,cwd FROM sessions WHERE provider=?1 AND bot=?2 AND session=?3 LIMIT 1",
+        params![key.provider, key.bot, key.session], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).optional()?;
+    if binding.is_some_and(|(engine, cwd)| engine != key.engine
+        || (cwd != key.cwd && !matches!(key.engine.as_str(), "codex" | "codex-desktop"))) {
+        return Err(SessionError::BindingChanged);
+    }
     tx.execute(
         "INSERT INTO sessions(provider, bot, session, engine, cwd) VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT(provider, bot, session) DO NOTHING",
+         ON CONFLICT(provider, bot, session, engine, cwd) DO NOTHING",
         params![key.provider, key.bot, key.session, key.engine, key.cwd],
     )?;
     let (engine, cwd, sid): (String, String, Option<String>) = tx.query_row(
-        "SELECT engine, cwd, engine_session_id FROM sessions WHERE provider=?1 AND bot=?2 AND session=?3",
-        params![key.provider, key.bot, key.session],
+        "SELECT engine, cwd, engine_session_id FROM sessions WHERE provider=?1 AND bot=?2 AND session=?3 AND engine=?4 AND cwd=?5",
+        params![key.provider, key.bot, key.session, key.engine, key.cwd],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
     )?;
     if engine != key.engine || cwd != key.cwd {
@@ -189,8 +231,8 @@ pub(crate) fn record_session(conn: &mut Connection, key: &SessionKey, sid: &str)
         return Err(SessionError::SessionChanged);
     }
     tx.execute(
-        "UPDATE sessions SET engine_session_id=?4 WHERE provider=?1 AND bot=?2 AND session=?3",
-        params![key.provider, key.bot, key.session, sid],
+        "UPDATE sessions SET engine_session_id=?4 WHERE provider=?1 AND bot=?2 AND session=?3 AND engine=?5 AND cwd=?6",
+        params![key.provider, key.bot, key.session, sid, key.engine, key.cwd],
     )?;
     tx.commit()?;
     Ok(())
@@ -201,19 +243,19 @@ pub(crate) fn enqueue(
 ) -> Result<(), SessionError> {
     let tx = conn.transaction()?;
     ensure_session(&tx, key)?;
-    let previous: Option<(String, String, String)> = tx.query_row(
-        "SELECT bot, session, fingerprint FROM injects WHERE provider=?1 AND id=?2",
-        params![key.provider, msg.run_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    let previous: Option<(String, String, String, String, String)> = tx.query_row(
+        "SELECT bot, session, fingerprint, engine, cwd FROM injects WHERE provider=?1 AND id=?2",
+        params![key.provider, msg.run_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
     ).optional()?;
-    if let Some((bot, session, fp)) = previous {
-        if bot != key.bot || session != key.session || fp != fingerprint {
+    if let Some((bot, session, fp, engine, cwd)) = previous {
+        if bot != key.bot || session != key.session || fp != fingerprint || engine != key.engine || cwd != key.cwd {
             return Err(SessionError::Conflict);
         }
     } else {
         tx.execute(
-            "INSERT INTO injects(provider, id, bot, session, fingerprint, from_name, text, state)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending')",
-            params![key.provider, msg.run_id, key.bot, key.session, fingerprint, msg.from_name, msg.text],
+            "INSERT INTO injects(provider, id, bot, session, fingerprint, from_name, text, state, engine, cwd)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8, ?9)",
+            params![key.provider, msg.run_id, key.bot, key.session, fingerprint, msg.from_name, msg.text, key.engine, key.cwd],
         )?;
     }
     tx.commit()?;
@@ -228,16 +270,16 @@ pub(crate) fn claim(conn: &mut Connection, key: &SessionKey, run: &str) -> Resul
     let messages = {
         let mut stmt = tx.prepare(
             "SELECT id, from_name, text FROM injects
-             WHERE provider=?1 AND bot=?2 AND session=?3 AND state!='delivered' ORDER BY seq",
+             WHERE provider=?1 AND bot=?2 AND session=?3 AND engine=?4 AND cwd=?5 AND state!='delivered' ORDER BY seq",
         )?;
-        stmt.query_map(params![key.provider, key.bot, key.session], |r| {
+        stmt.query_map(params![key.provider, key.bot, key.session, key.engine, key.cwd], |r| {
             Ok(InjectedMessage { run_id: r.get(0)?, from_name: r.get(1)?, text: r.get(2)? })
         })?.collect::<Result<Vec<_>, _>>()?
     };
     tx.execute(
         "UPDATE injects SET state='inflight', run_id=?4
-         WHERE provider=?1 AND bot=?2 AND session=?3 AND state!='delivered'",
-        params![key.provider, key.bot, key.session, run],
+         WHERE provider=?1 AND bot=?2 AND session=?3 AND engine=?5 AND cwd=?6 AND state!='delivered'",
+        params![key.provider, key.bot, key.session, run, key.engine, key.cwd],
     )?;
     tx.commit()?;
     Ok(messages)
@@ -247,8 +289,8 @@ pub(crate) fn finish_batch(conn: &mut Connection, key: &SessionKey, run: &str, d
     let tx = conn.transaction()?;
     tx.execute(
         "UPDATE injects SET state=?5, run_id=NULL
-         WHERE provider=?1 AND bot=?2 AND session=?3 AND state='inflight' AND run_id=?4",
-        params![key.provider, key.bot, key.session, run, if delivered { "delivered" } else { "pending" }],
+         WHERE provider=?1 AND bot=?2 AND session=?3 AND state='inflight' AND run_id=?4 AND engine=?6 AND cwd=?7",
+        params![key.provider, key.bot, key.session, run, if delivered { "delivered" } else { "pending" }, key.engine, key.cwd],
     )?;
     tx.commit()?;
     Ok(())

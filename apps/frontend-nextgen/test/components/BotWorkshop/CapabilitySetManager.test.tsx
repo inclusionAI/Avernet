@@ -191,3 +191,38 @@ test('非默认能力集仍展示 Skill 和 MCP 的添加入口', () => {
 
   expect(screen.getAllByRole('button', { name: '添加' })).toHaveLength(2);
 });
+
+test('成员卡片按设计稿展示来源标签与紧凑三列样式', () => {
+  render(
+    <CapabilitySetManager
+      sets={[{
+        id: 'default-set',
+        name: '默认能力集',
+        isDefault: true,
+        active: true,
+        skills: [{ id: 'skill-1', name: '市场 Skill', version: 'V1.0', source: 'teamclaw-market', active: true }],
+        mcps: [{ serverCode: 'mcp-1', name: '空间 MCP', source: 'workshop', active: true }],
+        clis: [{ code: 'cli-1', name: 'DataPhin' }],
+      }]}
+      mySkills={[]}
+      marketSkills={[]}
+      skillCenterSkills={[]}
+      workshopSkills={[]}
+      marketMcps={[]}
+      editable
+      onCreate={jest.fn()}
+      onDelete={jest.fn()}
+      onActive={jest.fn()}
+      onSkill={jest.fn()}
+      onSkillCenterReferences={jest.fn()}
+      onMcp={jest.fn()}
+      onUploadSkillFolder={jest.fn()}
+      onLoadCandidates={jest.fn()}
+    />,
+  );
+
+  expect(screen.getByText('市场')).toBeInTheDocument();
+  expect(screen.getByText('空间')).toBeInTheDocument();
+  expect(screen.getByText('V1.0')).toBeInTheDocument();
+  expect(screen.getByText('市场 Skill').parentElement).toHaveClass('h-10');
+});

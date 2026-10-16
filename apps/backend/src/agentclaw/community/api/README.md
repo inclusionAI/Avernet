@@ -114,6 +114,8 @@ provides:
   - SkillMetadataParserProtocol
   - ServiceArtifactLineageReaderProtocol
   - ServiceEditLockServiceProtocol
+  - ForumServiceProtocol
+  - FeedbackServiceProtocol
   - BotQuotaServiceProtocol
   - SpaceSkillOfflineServiceProtocol
   - TcResourceReadyObserverProtocol
@@ -121,6 +123,7 @@ consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
+  - agentclaw.community.core.bot_management.engine_version.protocol
   - agentclaw.community.core.bot_inventory.local_progress
   - agentclaw.community.core.resources.link_workflow
   - agentclaw.community.core.service_bot.file_count_service_protocol
@@ -172,7 +175,9 @@ internal_dependencies:
   - agentclaw.community.core.skill_center            # Local Skill recoverable deletion lifecycle contract
   - agentclaw.community.core.task.domain.models      # TaskInfo, TaskExecutionGraph, TaskOpResult, TaskCallbackData — typed in task_service.py and task_loop_callback.py
   - agentclaw.community.core.task.domain.requests    # TaskInfoRequest — typed in task_service.py Protocol execute signature
+  - agentclaw.community.core.task.task_service_protocol # TaskServiceProtocol authority re-exported by api/task/task_service.py
   - agentclaw.community.core.task.repository.types   # TaskInfoRecord — typed in task_service.py Protocol list_tasks signature
+  - agentclaw.community.core.task.task_context  # TaskContextServiceProtocol re-exported by api/task/task_context_service.py + TaskTrajectory type referenced by its get_trajectory signature
   - agentclaw.community.kernel.device_dto            # OutBoundOperationRule — typed in baas_service.py Protocol (B6)
   - agentclaw.community.plugin_api.auth              # AuthRequestContext — typed in caller_iam_token_service.py
   - agentclaw.community.plugin_api.passport          # PassportPlugin — typed in caller_identity_service.py
@@ -215,6 +220,7 @@ internal_dependencies:
   - agentclaw.community.core.common_config.beta_quota_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.common_config.common_config_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.common_config.bot_config_protocol  # Protocol + BotCommonConfigEntry defined in their owning core module, re-exported here
+  - agentclaw.community.core.cron.cron_admin_service_protocol
   - agentclaw.community.core.cron.cron_relay_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.desktop_bot.desktop_bot_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.devices.device_service_protocol  # Protocol defined in its owning core module, re-exported here
@@ -225,6 +231,8 @@ internal_dependencies:
   - agentclaw.community.core.engine_runtime.engine_runtime_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.expert_chat.expert_chat_instance_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.expert_chat.expert_chat_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.task.forum.service_protocol  # ForumServiceProtocol — defined in its owning core module, re-exported here
+  - agentclaw.community.core.task.feedback.service_protocol  # FeedbackServiceProtocol — defined in its owning core module, re-exported here
   - agentclaw.community.core.harness.content_scanner_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.harness.health_diagnosis_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.harness.patch_engine_service_protocol  # Protocol defined in its owning core module, re-exported here

@@ -75,6 +75,10 @@ import type {
   AutoHealDiagnosisPollResult,
   AutoHealApplyRequest,
   AutoHealApplyResult,
+  AutoHealSaveRequest,
+  AutoHealSaveResult,
+  AutoHealDeployRequest,
+  AutoHealDeployResult,
   AutoHealRunRequest,
   AutoHealRunResult,
   BotPermission,
@@ -662,7 +666,7 @@ export type RepairIssue = {
 
 export type RepairPlanAction = {
   actionId: string
-  type: 'container_command' | 'ocb_operation'
+  type: 'container_command' | 'ocb_operation' | 'engine_operation'
   summary: string
   risk: string
   verification: string
@@ -671,6 +675,12 @@ export type RepairPlanAction = {
   rollbackActionId?: string | null
   command?: string
   operation?: { type: string; params?: Record<string, unknown> }
+  engineOperation?: {
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+    path: string
+    body?: unknown
+    upload?: { targetPath: string; content: string; filename?: string; encoding?: 'utf8' | 'base64'; fields?: Record<string, string> }
+  }
 }
 
 export type RepairPlan = {
@@ -1274,6 +1284,7 @@ export const api = {
         method: 'POST', body: '{}',
       })
     },
+    /** Owner/admin only. Includes uploaded AIS Agent session archives from fixed execution Steps, newest first. */
     listTaskLogArchives(taskId: string): Promise<{ items: EvolveTaskLogArchive[] }> {
       return fetchJson(`${BASE}/evolve/tasks/${encodeURIComponent(taskId)}/log-archives`)
     },
@@ -1626,8 +1637,10 @@ export const api = {
       botOwnerId?: string
       botId?: string
       inputQuery?: string
+      purpose?: 'production' | 'trial' | 'all'
     }): Promise<FlowRunsResponse> {
       const sp = new URLSearchParams()
+      if (params?.purpose) sp.set('purpose', params.purpose)
       if (params?.status) sp.set('status', params.status)
       if (params?.statuses?.length) sp.set('statuses', params.statuses.join(','))
       if (params?.query) sp.set('query', params.query)
@@ -2641,6 +2654,20 @@ export const api = {
 
     apply(params: AutoHealApplyRequest): Promise<AutoHealApplyResult> {
       return fetchJson<AutoHealApplyResult>(`${BASE}/auto-heal/apply`, {
+        method: 'POST',
+        body: JSON.stringify(params),
+      })
+    },
+
+    save(params: AutoHealSaveRequest): Promise<AutoHealSaveResult> {
+      return fetchJson<AutoHealSaveResult>(`${BASE}/auto-heal/save`, {
+        method: 'POST',
+        body: JSON.stringify(params),
+      })
+    },
+
+    deploy(params: AutoHealDeployRequest): Promise<AutoHealDeployResult> {
+      return fetchJson<AutoHealDeployResult>(`${BASE}/auto-heal/deploy`, {
         method: 'POST',
         body: JSON.stringify(params),
       })

@@ -14,6 +14,7 @@ pub mod identity;
 #[cfg(unix)]
 mod instance;
 pub mod profile;
+mod profiles;
 pub mod registration;
 pub mod utils;
 

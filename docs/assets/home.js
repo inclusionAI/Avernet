@@ -1,5 +1,5 @@
 /* avernet.cc landing page behaviour: language, hero network, lifecycle tabs,
-   copy buttons, demo dialog and the GitHub star count. No dependencies. */
+   copy buttons and demo dialog. No dependencies. */
 (function () {
   "use strict";
 
@@ -194,31 +194,5 @@
     dialog.addEventListener("click", function (event) { if (event.target === dialog) dialog.close(); });
     dialog.addEventListener("close", function () { if (video) video.pause(); });
     if (video) video.addEventListener("error", function () { dialog.classList.add("is-error"); });
-  }
-
-  /* ---------- GitHub stars ---------- */
-  var starTargets = all("[data-stars]");
-  function showStars(count) {
-    var text = count >= 1000 ? (count / 1000).toFixed(1).replace(/\.0$/, "") + "k" : String(count);
-    starTargets.forEach(function (el) {
-      el.textContent = text;
-      el.hidden = false;
-    });
-  }
-  if (starTargets.length && window.fetch) {
-    var cached = null;
-    try { cached = JSON.parse(localStorage.getItem("avernet-stars") || "null"); } catch (e) {}
-    if (cached && typeof cached.n === "number" && Date.now() - cached.t < 6 * 3600 * 1000) {
-      showStars(cached.n);
-    } else {
-      fetch("https://api.github.com/repos/inclusionAI/Avernet", { headers: { Accept: "application/vnd.github+json" } })
-        .then(function (response) { return response.ok ? response.json() : null; })
-        .then(function (data) {
-          if (!data || typeof data.stargazers_count !== "number") return;
-          showStars(data.stargazers_count);
-          try { localStorage.setItem("avernet-stars", JSON.stringify({ n: data.stargazers_count, t: Date.now() })); } catch (e) {}
-        })
-        .catch(function () {});
-    }
   }
 })();

@@ -12,6 +12,7 @@ pub mod event_metrics;
 pub mod event_recording;
 pub mod friend_connect_notification;
 pub mod friend_auth_sync;
+pub mod friendship_writeback;
 pub mod group_context;
 pub mod group_session_token;
 pub mod human_notify;
@@ -19,14 +20,14 @@ pub mod interaction;
 pub mod judge;
 pub mod leader_election;
 pub mod metrics;
-pub mod state_machine_metrics;
-pub mod pending_group_message;
 pub mod participant_view_binding;
+pub mod pending_group_message;
 pub mod provider_stream_gray;
 pub mod repo;
 pub mod secret;
 pub mod session_callback;
 pub mod session_channel_outbound;
+pub mod state_machine_metrics;
 pub mod state_machine_result;
 
 pub use bot_catalog_cleanup::{BotCatalogCleanupPort, NoopBotCatalogCleanupPort};
@@ -50,12 +51,8 @@ pub use delivery::{
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget,
     ProviderTransportPreference, RunFallbackDelivery,
 };
-pub use human_notify::{
-    HumanMentionNotifyPort, MentionNotification, MentionedHuman, NoopHumanMentionNotifyPort,
-};
 pub use event_delivery::*;
 pub use event_metrics::*;
-pub use state_machine_metrics::*;
 pub use event_recording::*;
 pub use friend_connect_notification::{
     FriendConnectNotificationCommand, FriendConnectNotificationKind, FriendConnectNotificationPort,
@@ -64,10 +61,14 @@ pub use friend_connect_notification::{
 pub use friend_auth_sync::{
     FriendAuthSyncAction, FriendAuthSyncCommand, FriendAuthSyncPort, NoopFriendAuthSyncPort,
 };
+pub use friendship_writeback::{FriendshipWritebackPort, NoopFriendshipWritebackPort};
 pub use group_context::{GroupDispatchContextPort, GroupHistoryBotRequestPort};
 pub use group_session_token::{
     GROUP_SESSION_TOKEN_MAX_COMPACT_LEN, GroupSessionTokenClaims, GroupSessionTokenError,
     GroupSessionTokenPort, GroupSessionTokenScope, IssuedGroupSessionToken,
+};
+pub use human_notify::{
+    HumanMentionNotifyPort, MentionNotification, MentionedHuman, NoopHumanMentionNotifyPort,
 };
 pub use interaction::{
     CanResolveInteraction, CanResolveInteractionCommand, CanResolveInteractionPort,
@@ -88,37 +89,36 @@ pub use metrics::{
     GroupSessionMetricsSnapshotPort, MetricsResult, WsCloseReason, WsErrorKind,
     WsLifecycleInstrumentationHook, WsPeer,
 };
+pub use participant_view_binding::{
+    NoopParticipantViewBindingPort, ParticipantViewBindingPort, ParticipantViewScopeChangeLease,
+};
 pub use pending_group_message::{
     PendingGroupMessage, PendingGroupMessageKind, PendingGroupMessagePort,
 };
-pub use participant_view_binding::{
-    NoopParticipantViewBindingPort, ParticipantViewBindingPort,
-    ParticipantViewScopeChangeLease,
-};
 pub use provider_stream_gray::ProviderStreamGrayList;
 pub use repo::{
-    FailStateMachineNodeAttempt, StateMachineFailureAction, StateMachineNodeAttemptFailure,
-    FinishStateMachineJudge, StateMachineJudgeClaim, StateMachineJudgeResult,
-    StateMachineOpeningPayload, StateMachineOpeningCheckpoint,
-    StateMachineDispatchPayload, StateMachineDispatchTarget, StateMachineDispatchStatus,
-    StateMachineDispatchCheckpoint, StateMachineDispatchClaim, StateMachineDispatchResult,
     BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
     BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneRepoPort, BotRepoPort,
     ChannelBindingRepoPort, CollaborationDefinitionRecord, CollaborationEventRecord,
     CollaborationEventRepoPort, CollaborationTemplateEntry, CollaborationTemplateRepoPort,
     ConversationSessionRepoPort, CreateOrganizationRecord, CreateStateMachineRerun,
-    CreateStateMachineRerunOutcome, EventRepoPort, FriendRepoPort, FriendRequestRepoPort,
-    GroupRepoPort, GroupRuntimeBindingRepoPort, HumanInputEnqueueDisposition,
-    HumanInputRequestRepoPort, ImParticipantRepoPort, ListOrganizationMembersPageQuery,
-    ListOrganizationMembersQuery, ListOrganizationsQuery, MarkHumanNodeRunningCommand,
-    NewSessionParams, OrganizationCandidateReadPage, OrganizationCandidateReadPort,
-    OrganizationCandidateReadQuery, OrganizationMemberPage, OrganizationRepoPort,
-    ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord, ProviderBotDiscoverySelector,
-    ProviderCredentialRepoPort, ProviderRepoPort, RelationRepoPort, SessionRepoPort,
-    StateMachineDefinitionRepoPort, StateMachineRunRepoPort, UpdateOrganizationRecord,
-    UpdateSessionParticipantMessageViewScopeWithEvent,
-    UpsertOrganizationMemberRecord, UserIdentity, UserIdentityRepoPort,
+    CreateStateMachineRerunOutcome, EventRepoPort, FailStateMachineNodeAttempt,
+    FinishStateMachineJudge, FriendRepoPort, FriendRequestRepoPort, GroupRepoPort,
+    GroupRuntimeBindingRepoPort, HumanInputEnqueueDisposition, HumanInputRequestRepoPort,
+    ImParticipantRepoPort, ListOrganizationMembersPageQuery, ListOrganizationMembersQuery,
+    ListOrganizationsQuery, MarkHumanNodeRunningCommand, NewSessionParams,
+    OrganizationCandidateReadPage, OrganizationCandidateReadPort, OrganizationCandidateReadQuery,
+    OrganizationMemberPage, OrganizationRepoPort, ProviderBotBindingRepoPort,
+    ProviderBotDiscoveryRecord, ProviderBotDiscoverySelector, ProviderCredentialRepoPort,
+    ProviderRepoPort, RelationRepoPort, SessionRepoPort, StateMachineDefinitionRepoPort,
+    StateMachineDispatchCheckpoint, StateMachineDispatchClaim, StateMachineDispatchPayload,
+    StateMachineDispatchResult, StateMachineDispatchStatus, StateMachineDispatchTarget,
+    StateMachineFailureAction, StateMachineJudgeClaim, StateMachineJudgeResult,
+    StateMachineNodeAttemptFailure, StateMachineOpeningCheckpoint, StateMachineOpeningPayload,
+    StateMachineRunRepoPort, UpdateOrganizationRecord,
+    UpdateSessionParticipantMessageViewScopeWithEvent, UpsertOrganizationMemberRecord,
+    UserIdentity, UserIdentityRepoPort,
 };
 pub use secret::{SecretAccessError, SecretAccessPort, SecretRecord};
 pub use session_callback::SessionCallbackDispatchPort;
@@ -126,5 +126,6 @@ pub use session_channel_outbound::{
     HumanInputReadyEvent, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
     StateMachineTerminalEvent, StateMachineTerminalStatus,
 };
+pub use state_machine_metrics::*;
 pub use state_machine_result::{StateMachineResultPublishCommand, StateMachineResultPublisherPort};
 pub mod agent_identity;

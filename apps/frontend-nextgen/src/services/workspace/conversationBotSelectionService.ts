@@ -55,7 +55,11 @@ export const conversationBotSelectionService = {
       const list = getList(target);
       if (!list || list.loading || list.error) return false;
       const first = list.items[0];
-      if (first) state.selectConversation({ ...target, friendUserId: null, sessionId: first.sessionId });
+      if (first) {
+        // 自动首选同样保留快照:后续过滤把首条移出列表时,主会话不关闭。
+        state.setSelectedSessionSnapshot({ ...target, friendUserId: null, session: first, friend: null });
+        state.selectConversation({ ...target, friendUserId: null, sessionId: first.sessionId });
+      }
       return Boolean(first) || !list.hasMore;
     }
     // 他人视角仍按现有展开好友分组懒加载，不额外遍历/请求所有好友的会话。
@@ -67,13 +71,25 @@ export const conversationBotSelectionService = {
       if (!group || group.state !== 'loaded' || group.sessions.loading || group.sessions.error) return false;
       const first = group.sessions.items[0];
       if (!first) continue;
+      state.setSelectedSessionSnapshot({
+        botId: target.botId,
+        section: target.section,
+        origin: 'others',
+        scope: 'all',
+        friendUserId: friend.userId,
+        session: first,
+        friend: group.friend,
+      });
       state.selectConversation({ ...target, friendUserId: friend.userId, sessionId: first.sessionId });
       return true;
     }
     return cache.friendDirectory.items.length === 0;
   },
 
-  showAll(botId: string): void {
-    useConversationStore.getState().setManagedBotScope(botId, 'all');
+  showAll(botId: string, section: ConversationBotSection): void {
+    // 「查看全部会话」按分区路由:好友 Bot 写好友范围(不投影主选中/URL);管理/团队沿用管理范围。
+    const store = useConversationStore.getState();
+    if (section === 'friend') store.setFriendBotScope(botId, 'all');
+    else store.setManagedBotScope(botId, 'all');
   },
 };

@@ -55,6 +55,17 @@ describe('botMapper', () => {
     expect(result.warnings).toEqual([]);
   });
 
+  test('详情接口的 ext.avatar_url 也映射为 Bot 头像', () => {
+    const result = mapBotDto({
+      bot_id: 'avatar-bot',
+      bot_name: '头像 Bot',
+      engine: 'openclaw',
+      ext: { avatar_url: 'data:image/svg+xml;base64,avatar' },
+    });
+
+    expect(result.item.avatarUrl).toBe('data:image/svg+xml;base64,avatar');
+  });
+
   test('Coding Bot 卡片画像保留模板名称', () => {
     const result = mapBotDto({
       bot_id: 'architect-1',
@@ -89,6 +100,73 @@ describe('botMapper', () => {
     });
 
     expect(result.item.runtime.templateName).toBe('个人 Coding Bot');
+  });
+
+  test('Coding Bot 从模板快照解析 BCN 能力并写入 runtime', () => {
+    const result = mapBotDto({
+      bot_id: 'coding-bcn',
+      engine_type: 'claude_code',
+      template_type: 'generalCC',
+      engine_properties: {
+        template_config: {
+          capabilities: { enable_bcn_network: true },
+        },
+      },
+    });
+
+    expect(result.item.runtime.bcnEnabled).toBe(true);
+  });
+
+  test('Coding Bot 读取结构化 BCN 能力', () => {
+    const result = mapBotDto({
+      bot_id: 'coding-bcn-structured',
+      engine_type: 'claude_code',
+      template_type: 'generalCC',
+      engine_properties: {
+        template_config: {
+          capabilities: { bcn: { enabled: true } },
+        },
+      },
+    });
+
+    expect(result.item.runtime.bcnEnabled).toBe(true);
+  });
+
+  test('Coding Bot 读取 capability_tags 中的 BCN', () => {
+    const result = mapBotDto({
+      bot_id: 'coding-bcn-tag',
+      engine_type: 'claude_code',
+      template_type: 'generalCC',
+      engine_properties: {
+        template_config: {
+          capability_tags: ['BCN', '成员协作'],
+        },
+      },
+    });
+
+    expect(result.item.runtime.bcnEnabled).toBe(true);
+  });
+
+  test('Coding Bot 未声明或明确关闭 BCN 时不开放协作能力', () => {
+    const missing = mapBotDto({
+      bot_id: 'coding-bcn-missing',
+      engine_type: 'claude_code',
+      template_type: 'generalCC',
+      engine_properties: {
+        template_config: { capabilities: { member_management: true } },
+      },
+    });
+    const disabled = mapBotDto({
+      bot_id: 'coding-bcn-disabled',
+      engine_type: 'claude_code',
+      template_type: 'generalCC',
+      engine_properties: {
+        template_config: { capabilities: { enable_bcn_network: false } },
+      },
+    });
+
+    expect(missing.item.runtime.bcnEnabled).toBe(false);
+    expect(disabled.item.runtime.bcnEnabled).toBe(false);
   });
 
   test('普通 Claude Code 不把模板名称作为卡片模板标签', () => {
@@ -212,6 +290,51 @@ describe('botMapper', () => {
     expect(result.item.lifecycle).toBe('failed');
   });
 
+  test.each([
+    [
+      'Bot 初始化优先于草稿发布态',
+      { status: 'PENDING', publish: { id: 1, status: 'DRAFT', version: 1 }, display_state: 'service_draft' },
+      'deploying',
+    ],
+    [
+      '没有发布记录的服务 Bot 初始化中',
+      { status: 'PROVISIONING', publish: null, display_state: 'service_draft' },
+      'deploying',
+    ],
+    [
+      '发布失败优先于旧部署中展示态',
+      { status: 'ACTIVE', publish: { id: 1, status: 'FAILED', version: 1 }, display_state: 'service_deploying' },
+      'failed',
+    ],
+    [
+      '发布成功优先于旧草稿展示态',
+      { status: 'ACTIVE', publish: { id: 1, status: 'SUCCESS', version: 1 }, display_state: 'service_draft' },
+      'running',
+    ],
+  ])('%s', (_label, fields, expected) => {
+    const result = mapBotDto({
+      bot_id: 'service-structured-status',
+      bot_type: 'service',
+      kind: 'service',
+      engine: 'openclaw',
+      ...fields,
+    });
+
+    expect(result.item.lifecycle).toBe(expected);
+  });
+
+  test('个人 Bot 仍使用原 display_state 兼容语义', () => {
+    const result = mapBotDto({
+      bot_id: 'personal-legacy-status',
+      bot_type: 'personal',
+      engine: 'openclaw',
+      status: 'ACTIVE',
+      display_state: 'running',
+    });
+
+    expect(result.item.lifecycle).toBe('running');
+  });
+
   test('库存 kind=service 时识别为服务化，不受底层 bot_type 影响', () => {
     const result = mapBotDto({
       bot_id: 'service-card-1',
@@ -278,6 +401,32 @@ describe('Agent Coding Bot runtime classification', () => {
     expect(
       mapBotDto({ bot_id: 'legacy', engine: 'aicoding', template_type: 'anything' }).item.runtime.isAgentCodingBot,
     ).toBe(true);
+  });
+
+  test('服务管理的 engine_form=AICODING 标记识别为 Agent Coding Bot', () => {
+    const result = mapBotDto({
+      bot_id: 'engine-form-marked',
+      engine: 'claude_code',
+      template_config: { engine_form: 'AICODING' },
+    });
+
+    expect(result.item.runtime.isAgentCodingBot).toBe(true);
+  });
+
+  test('Bot 管理详情的嵌套 engine_form=AICODING 标记识别为 Agent Coding Bot', () => {
+    const result = mapBotDto({
+      bot_id: 'nested-engine-form-marked',
+      engine: 'claude_code',
+      engine_properties: { template_config: { engine_form: 'aicoding' } },
+    });
+
+    expect(result.item.runtime.isAgentCodingBot).toBe(true);
+  });
+
+  test('applicationCoding 引擎值识别为 Agent Coding Bot', () => {
+    const result = mapBotDto({ bot_id: 'application-engine', engine: 'applicationCoding', template_type: '' });
+
+    expect(result.item.runtime.isAgentCodingBot).toBe(true);
   });
 
   test('applicationCoding 识别为 Agent Coding Bot', () => {

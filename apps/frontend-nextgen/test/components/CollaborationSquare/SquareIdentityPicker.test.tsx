@@ -43,7 +43,7 @@ describe('SquareIdentityPicker', () => {
     mockedSelector.mockClear();
   });
 
-  it('默认渲染身份选择器，选中项为登录用户身份，头部标签定制为「为 Ta 加好友：」', () => {
+  it('默认渲染身份选择器，选中项为登录用户身份，不展示头部标签', () => {
     render(<SquareIdentityPicker />);
 
     expect(screen.getByTestId('identity-selector')).toBeInTheDocument();
@@ -51,10 +51,14 @@ describe('SquareIdentityPicker', () => {
     expect(props.identities).toHaveLength(2);
     expect(props.activeId).toBe('human_900003');
     expect(props.identityStatus).toBe('ready');
-    expect(props.headerLabel).toBe('为 Ta 加好友：');
-    expect(props.headerTooltip).toBe('每个身份（用户或 Bot）都拥有各自独立的好友关系。');
-    expect(props.layout).toBe('collaboration');
+    expect(props.headerLabel).toBeUndefined();
+    expect(props.headerTooltip).toBeUndefined();
+    expect(props.layout).toBe('inline');
     expect(props.triggerClassName).toContain('bg-background');
+    // 弹层文案定制:公开Bot Tab 为模块级身份,标题/副提示写本 Tab 实际用途,说明图标隐藏。
+    expect(props.popoverTitle).toBe('切换协作身份');
+    expect(props.popoverHint).toBe('选择浏览公开Bot与发起好友申请的身份');
+    expect(props.hidePopoverInfo).toBe(true);
   });
 
   it('模块级选择 Bot 身份后选中项切换为该 Bot', () => {

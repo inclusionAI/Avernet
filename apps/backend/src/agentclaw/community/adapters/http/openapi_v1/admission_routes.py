@@ -2,6 +2,10 @@
 
 from .admission_modes import AdmissionMode
 from .admission_account_routes import ACCOUNT_ADMISSION
+from .admission_task_routes import (
+    TASK_BBS_ADMISSION,
+    TASK_PUBLIC_ADMISSION,
+)
 
 _SPACE_SKILL_BASE = "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}"
 _SPACE_SKILL_PUBLICATION = f"{_SPACE_SKILL_BASE}/publications"
@@ -21,6 +25,9 @@ _SPACE_SKILL_PUBLICATION = f"{_SPACE_SKILL_BASE}/publications"
 #: what ``gateway/core/paths/_pattern.py`` exists to prevent. Change ``REFUSED``
 #: here and that test is the one that will fail.
 ADMISSION: dict[tuple[str, str], AdmissionMode] = {
+    ("GET", "/openapi/v1/bots/{bot_id}/engine-version"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    # Minimal classification requires a verified human, but no Bot grant.
+    ("GET", "/openapi/v1/bots/{bot_id}/classification"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/bots/{bot_id}/avatar"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("PUT", "/openapi/v1/bots/{bot_id}/avatar"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/links"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
@@ -161,6 +168,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "GET",
         "/openapi/v1/bots/{bot_id}/config-manifest/last-apply",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    **TASK_BBS_ADMISSION,
     # W9's CLI tools sit beside the config manifest and for the same reason:
     # collaborator-scoped (MEMBER to read, ADMIN to write), so the owner arrives
     # on the wire and the grant is checked against that addressed owner.
@@ -377,6 +385,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/security-observations",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "DELETE",
@@ -667,21 +679,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # New-version bcs publish-to-users: auth baseline only, no grant check; authz deferred.
     # Served at the external contract path the gateway verbatim-forwards here.
     ("POST", "/openapi/v1/collaboration/bots/{bot_uuid}/public"): AdmissionMode.OPEN,
-    # Task public surface (execute/dashboard/list) — mounted together with the
-    # gateway `collaboration-tasks` domain → backend. Tasks are not bot-scoped
-    # (no grant), and the public face is open to any authenticated app caller
-    # (a human principal is admitted regardless); `list` still scopes its answer
-    # by the `user_id` it receives. OPEN is the contract label — at the
-    # require_principal gate it behaves the same as USER_GATED.
-    ("POST", "/openapi/v1/collaboration/tasks/execute"): AdmissionMode.OPEN,
-    ("GET", "/openapi/v1/collaboration/tasks/dashboard"): AdmissionMode.OPEN,
-    ("GET", "/openapi/v1/collaboration/tasks/list"): AdmissionMode.OPEN,
-    ("GET", "/openapi/v1/collaboration/tasks/bbs/list"): AdmissionMode.OPEN,
-    # Grant/revoke are stateless relays to secbaas (api-key server-side; the
-    # human Cookie/Referer authorizes the action) — OPEN at the gate, secbaas
-    # authorizes. Same shape as the other task public operations.
-    ("POST", "/openapi/v1/collaboration/tasks/grant"): AdmissionMode.OPEN,
-    ("POST", "/openapi/v1/collaboration/tasks/revoke"): AdmissionMode.OPEN,
+    **TASK_PUBLIC_ADMISSION,
     # Department directory search — a tenant-wide catalogue read, not a user's.
     # ── Source credentials (W3, #1471) — OPEN, application-operated ─────────
     # These are machine operations, and the *edge* is what makes them so:

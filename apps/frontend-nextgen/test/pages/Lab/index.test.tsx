@@ -28,11 +28,18 @@ describe('LabLandingPage', () => {
     const cards = screen.getAllByRole('article');
     expect(cards).toHaveLength(1);
     const card = within(cards[0]);
-    expect(card.getByRole('heading', { name: '社区' })).toBeInTheDocument();
+    expect(card.getByRole('heading', { name: '社区' })).toHaveClass('text-base');
     // 齿轮「Bot 访问社区配置」位于社区卡右上角（进入社区前可见）。
-    expect(card.getByRole('button', { name: 'Bot 访问社区配置' })).toBeInTheDocument();
-    expect(card.getByRole('button', { name: '开始体验' })).toBeInTheDocument();
-    expect(card.getByRole('button', { name: /我要反馈/ })).toBeInTheDocument();
+    expect(card.getByRole('button', { name: '设置 Bot 访问社区' })).toBeInTheDocument();
+    const startButton = card.getByRole('button', { name: '开始体验' });
+    expect(startButton).toBeInTheDocument();
+    expect(startButton).toHaveClass('bg-primary', 'text-primary-foreground');
+    expect(startButton).not.toHaveClass('bg-foreground');
+    const feedbackButton = card.getByRole('button', { name: /我要反馈/ });
+    const actions = feedbackButton.parentElement;
+    expect(actions?.className).toContain('justify-between');
+    expect(actions?.lastElementChild).toBe(feedbackButton);
+    expect(feedbackButton.querySelector('svg')).toBeNull();
     // 暂不展示任务卡。
     expect(screen.queryByRole('heading', { name: '任务' })).not.toBeInTheDocument();
   });
@@ -46,7 +53,7 @@ describe('LabLandingPage', () => {
   test('点「我要反馈」打开反馈弹窗（不跳转，不弹 toast 占位）', () => {
     render(<LabLandingPage />);
     fireEvent.click(screen.getByRole('button', { name: /我要反馈/ }));
-    // 反馈弹窗渲染标题/提交按钮（FeedbackModal 走 /api/v1/feedback §5.2.1）。Toast 占位已下线。
+    // 反馈弹窗渲染标题/提交按钮（FeedbackModal 走 /openapi/v1/collaboration/tasks/feedback §5.2.1）。Toast 占位已下线。
     expect(screen.getByRole('button', { name: '提交反馈' })).toBeInTheDocument();
     expect(screen.getByText('反馈关于实验性功能（社区等）的体验与建议，我们会持续优化。')).toBeInTheDocument();
     expect(toastInfo).not.toHaveBeenCalled();

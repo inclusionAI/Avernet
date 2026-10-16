@@ -42,6 +42,28 @@ export function isReservedWorkflowId(id: string | null | undefined): boolean {
 const RESERVED_ID_MESSAGE =
   "workflowId 使用了系统保留前缀（以 __ 开头并以 __ 结尾），请改用普通 workflow id";
 
+/** Defensive JSON array parser for DB JSON columns. */
+function parseJsonArray(raw: string | null | undefined): unknown[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Defensive JSON object parser for DB JSON columns. */
+function parseJsonObject(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Map a raw http_callback_configs row (snake_case, notify_on as JSON string)
  * to the camelCase DTO the frontend expects (notifyOn as string[]).
@@ -75,6 +97,8 @@ function mapCallbackRow(row: HttpCallbackConfigRow) {
 
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import type { WorkflowNotificationConfigRepository } from "../repositories/workflow-notification-config-repository.js";
+import { registerWorkflowHistoryListRoute } from "./workflow-history-list.js";
+import type { WorkflowVersionSourceService } from "../contracts/workflow-version-source.js";
 import type { WorkflowDeployHistoryRepository } from "../repositories/workflow-deploy-history-repository.js";
 import type { HttpCallbackConfigRepository, HttpCallbackConfigRow } from "../repositories/http-callback-config-repository.js";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
@@ -93,6 +117,7 @@ export function createWorkflowsRouter(
   notificationConfigRepo: WorkflowNotificationConfigRepository | null,
   wfdhRepo: WorkflowDeployHistoryRepository | null,
   httpCallbackConfigRepo: HttpCallbackConfigRepository | null = null,
+  versionSource: WorkflowVersionSourceService | null = null,
 ): Router {
   const router = Router();
 
@@ -325,44 +350,7 @@ export function createWorkflowsRouter(
 
   registerWorkflowListRoutes(router, workflowSpecRepo, botPermRepo, toEpochMs);
 
-  /** GET /:workflowId/history — deploy history list (no spec_json) */
-  router.get("/:workflowId/history", asyncHandler(async (req: Request, res: Response) => {
-    if (!wfdhRepo) { res.status(503).json({ error: "Service Unavailable" }); return; }
-    const workflowId = String(req.params.workflowId);
-    if (!await requireWorkflowAccess(req, res, botPermRepo, workflowId, "view")) return;
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string ?? "20", 10)));
-    if (isNaN(limit)) { res.status(400).json({ error: "Bad Request" }); return; }
-    const releaseOnly = String(req.query.releaseOnly ?? "") === "true";
-    const rows = await wfdhRepo.listHistory(workflowId, limit, { releaseOnly });
-    const toHistoryItem = (r: {
-      deploy_number: number;
-      version: number;
-      tag_name: string | null;
-      action: string;
-      from_deploy_number?: number | null;
-      note?: string | null;
-      bot_id?: string | null;
-      owner_id?: string | null;
-      gmt_create: Date | string | number | null;
-    }, isActive = false) => ({
-      deployNumber: r.deploy_number,
-      version: r.version,
-      tagName: r.tag_name,
-      action: r.action,
-      fromDeployNumber: r.from_deploy_number,
-      note: r.note,
-      botId: r.bot_id,
-      ownerId: r.owner_id,
-      isActive,
-      gmtCreate: toEpochSec(r.gmt_create),
-    });
-    const history = rows.map((r) => toHistoryItem(r, !!r.is_active));
-    // `history` is a bounded page, while an explicitly selected online version
-    // may be older than that page. Return it separately so clients do not
-    // accidentally compare against the newest release instead.
-    const active = await wfdhRepo.findActiveByWorkflowId(workflowId);
-    res.json({ workflowId, history, active: active ? toHistoryItem(active, true) : null });
-  }));
+  registerWorkflowHistoryListRoute(router, wfdhRepo, botPermRepo, versionSource, toEpochSec);
 
   /** GET /:workflowId/history/diff — compare two deploy records (returns both spec_json; frontend renders diff).
    *  Accepts ?fromDeploy=&toDeploy= (deploy_number, precise, recommended) or ?from=&to= (version, legacy:
@@ -764,6 +752,8 @@ export function createWorkflowsRouter(
         onFailureGroups: JSON.parse(row.on_failure_groups),
         onFailureMessageTitle: row.on_failure_message_title,
         onFailureMessageIncludeRunLink: row.on_failure_message_include_run_link === 1,
+        notifyOn: parseJsonArray(row.notify_on),
+        eventOptions: parseJsonObject(row.event_options),
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -780,13 +770,18 @@ export function createWorkflowsRouter(
       return;
     }
     try {
-      const { robotCode, appSecret, onFailureUsers, onFailureGroups, onFailureMessageTitle, onFailureMessageIncludeRunLink } = req.body as {
+      const {
+        robotCode, appSecret, onFailureUsers, onFailureGroups,
+        onFailureMessageTitle, onFailureMessageIncludeRunLink, notifyOn, eventOptions,
+      } = req.body as {
         robotCode?: string;
         appSecret?: string;
         onFailureUsers?: Array<{ userId: string; name?: string }>;
         onFailureGroups?: Array<{ openConversationId: string; name?: string }>;
         onFailureMessageTitle?: string | null;
         onFailureMessageIncludeRunLink?: boolean;
+        notifyOn?: string[];
+        eventOptions?: Record<string, unknown>;
       };
 
       if (!robotCode || !appSecret) {
@@ -806,6 +801,8 @@ export function createWorkflowsRouter(
         onFailureGroups,
         onFailureMessageTitle: onFailureMessageTitle ?? null,
         onFailureMessageIncludeRunLink: onFailureMessageIncludeRunLink !== false,
+        notifyOn: notifyOn && notifyOn.length > 0 ? (notifyOn as import("../repositories/workflow-notification-config-repository.js").DingTalkNotifyEvent[]) : undefined,
+        eventOptions: eventOptions && Object.keys(eventOptions).length > 0 ? eventOptions : undefined,
       });
 
       workflowsCache.invalidate();

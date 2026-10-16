@@ -1,5 +1,6 @@
 import type { BotEditorSkill } from '@/domain/botEditor';
 import type { BotHealthCapability } from '@/domain/botHealthCheck';
+import type { ConversationSessionRequestRange } from '@/domain/conversation';
 import type { NavigationItem } from '@/shell/navigation';
 import type { RouteMeta } from '@/shell/routeMeta';
 import type { ComponentType } from 'react';
@@ -57,7 +58,7 @@ export interface HelpLink {
 /**
  * 版本发布说明数据（用户须知 + 新版本内容）。由 ReleaseNotesCapability.load 异步拉取，
  * 数据源为内部雨燕配置（teamclaw-release-note_*）。富文本 HTML 来自受信运营平台，UI 用
- * dangerouslySetInnerHTML 渲染。Open Core 无此数据源 → capability 返回 null（菜单不展示该项）。
+ * 受约束的富文本渲染器展示。Open Core 无此数据源 → capability 返回 null（菜单不展示该项）。
  */
 export interface ReleaseNotesData {
   version?: string;
@@ -179,6 +180,8 @@ export interface AgentCodingInternalResources {
   codefuseTokenUrl: string | null;
   antCodeProjectsApiUrl: string | null;
   antCodeProjectBaseUrl: string | null;
+  xiaojinCodeProjectsApiUrl: string | null;
+  xiaojinCodeProjectBaseUrl: string | null;
 }
 
 /**
@@ -190,8 +193,12 @@ export interface AgentCodingInternalResources {
 export interface ProductBrand {
   /** 产品名；运行时品牌文案（弹窗标题/欢迎语/toast）以插值消费。 */
   name: string;
-  /** 页头品牌视觉组件（接收 className 控制尺寸）。 */
-  Logo: ComponentType<{ className?: string }>;
+  /**
+   * 页头品牌视觉组件（接收 className 控制尺寸）。
+   * compact：侧栏 rail 等窄容器的紧凑锁版（约 24px mark + 小字号字标）；
+   * 不消费该语义的形态实现可安全忽略（可选参数，不影响赋值兼容）。
+   */
+  Logo: ComponentType<{ className?: string; compact?: boolean }>;
   /** 登录态/空态视觉组件（可选，如方版 mark）；缺省时 UI 回退 Logo。 */
   loginWordmark?: ComponentType<{ className?: string }>;
 }
@@ -248,9 +255,93 @@ export interface OpenSourceExperienceNoticeSpec {
   acknowledgeLabel: string;
 }
 
+/**
+ * 「返回旧版」入口的灰度决策数据（OpenSpec add-gray-release-nextgen-switch 跨版本切流）。
+ * 由 capability 实现方（internal overlay）拉取并附带打点副作用；Open Core 无旧版形态不提供。
+ */
+export interface LegacyVersionDecision {
+  /** 旧版入口 URL；空串表示当前不可切回（不渲染入口）。 */
+  oldUrl: string;
+  /** 命中的灰度规则类型（preference / user_whitelist / dept_whitelist / percent / default / fail_open），供启动打点。 */
+  hitRule: string;
+}
+
+/**
+ * 版本切换（逃生舱）能力。「体验新版 / 返回旧版」跨版本切流的数据源与写口收口：
+ * - Open Core 默认 null（无旧版可切回，壳层不渲染入口、启动不发请求不打点）；
+ * - internal overlay 经 `src/extensions/internal.ts` 注入灰度判定实现（agentclaw
+ *   `/api/v1/gray/**` 判定接口；内部域名/信封细节只存在 overlay，不进 Open Core 产物）。
+ * UI（shell/LegacyVersionSwitch）只知道「拉取决策 + 写偏好 + 成功才跳转」，零后端知识。
+ */
+export interface LegacyVersionSwitchSpec {
+  /**
+   * 启动只读拉取灰度判定（含打点副作用：记录 hitRule；任何失败静默返回 null——
+   * 不弹错误提示、不影响任何渲染）。同会话内幂等缓存，避免重复请求。
+   */
+  loadLegacyVersionDecision(): Promise<LegacyVersionDecision | null>;
+  /**
+   * 写逃生舱偏好（幂等）；返回是否成功。协议层默认失败提示已由实现方静默取消，
+   * 失败文案与是否阻断跳转由调用方决定。
+   */
+  saveLegacyVersionPreference(version: 'old' | 'new'): Promise<boolean>;
+}
+
+/**
+ * 实例范围 Bot 入参:capability 依赖的最小 Bot 结构(ChatBotView 结构满足,类型不跨层引用 Service)。
+ */
+export interface ConversationInstanceScopeBot {
+  /** 会话键(复合形态,Store 域键)。 */
+  botId: string;
+  /** 容器接口调用的真实 Bot ID(复合形态头段)。 */
+  realBotId: string;
+  /** Bot 类型('service' 触发实例范围链路)。 */
+  botType?: string;
+  /** 好友 Bot 不支持实例选择(后端既有约束,f_user_id 场景不限定实例)。 */
+  isFriendBot?: boolean;
+}
+
+/**
+ * 对话菜单多实例服务 Bot 的实例范围状态快照(见 `getConversationInstanceScope`)。
+ */
+export interface ConversationInstanceScopeState {
+  /** 服务 Bot(botType=service 且非好友 Bot)。 */
+  service: boolean;
+  /** 多实例(实例清单数 ≥2,已确认)。 */
+  multiInstance: boolean;
+  /** 实例范围已就绪:清单已解析(单实例/无实例无需选择)或多实例已有选中实例;
+   *  未就绪(清单加载中/失败)时检索输入禁用。 */
+  ready: boolean;
+}
+
+/**
+ * 会话实例范围能力:对话菜单多实例服务 Bot 的实例选择与按实例取数。
+ * Open Core 默认 null(对话菜单无实例概念,会话查看与检索行为不变);
+ * internal overlay 注入实现(实例清单拉取/自动选中/实例下拉组件/请求范围推导)。
+ * 选中实例值经 conversationStore.setBotInstanceSelection 写入(复用过滤代次与列表缓存失效机制),
+ * 本能力实现只读 Store 选择值与自管的实例清单状态;多实例解析经代次变化驱动重拉,
+ * 单实例/无实例服务 Bot 与好友 Bot 维持现状行为。
+ */
+export interface ConversationInstanceScopeCapability {
+  /** 实例选择行组件:渲染于检索输入行上方;内部承载加载/失败态与实例下拉(按 botId 从实现侧 Store 取数)。 */
+  InstancePicker: ComponentType<{ botId: string }>;
+  /** 同步读取该 Bot 的实例范围状态。 */
+  getState(bot: ConversationInstanceScopeBot): ConversationInstanceScopeState;
+  /** 订阅实例范围状态变化(返回取消函数)。 */
+  subscribe(botId: string, listener: () => void): () => void;
+  /** 幂等触发实例清单加载(服务 Bot 专用,其余 no-op);失败后不自动重试(由实例行的显式重试发起)。 */
+  ensureInstancesLoaded(bot: ConversationInstanceScopeBot): void;
+  /** 会话请求范围(device_uuid 与 stage);无选中实例时返回 null。 */
+  getSessionRange(bot: ConversationInstanceScopeBot): ConversationSessionRequestRange | null;
+}
+
 export interface AppCapabilities {
   /** Open Core 返回版本化提示配置；Internal 返回 null，且不得访问知悉状态。 */
   getOpenSourceExperienceNotice: () => CapabilityResult<OpenSourceExperienceNoticeSpec | null>;
+  /**
+   * 版本切换（逃生舱）能力。Open Core 默认 null（无旧版可切回，壳层入口不渲染）；
+   * internal overlay 注入灰度判定实现（agentclaw /api/v1/gray/**）。
+   */
+  getLegacyVersionSwitch: () => CapabilityResult<LegacyVersionSwitchSpec | null>;
   getHelpLinks: () => CapabilityResult<HelpLink[]>;
   openExternal: (href: string) => CapabilityResult<null>;
   getRuntimeRouteRedirect: (context: RuntimeRouteContext) => CapabilityResult<string | null>;
@@ -314,16 +405,16 @@ export interface AppCapabilities {
    */
   getInviteCodeGatePolicy: () => CapabilityResult<InviteCodeGatePolicy>;
   /**
-   * 任务模块 API 路径前缀（execute/dashboard/list/grant/revoke 共用；bbs/list 暂不纳入，后端 openapi 面未开放）。
+   * 任务模块内部写接口 API 路径前缀（execute/grant/revoke 共用；dashboard/list/bbs/list 读接口统一走 TASK_READ_API_BASE，不纳入本 capability）。
    * Open Core 默认 `/openapi/v1/collaboration/tasks`（后端 openapi_v1/task 公开面，经 gateway spanner 鉴权；admission 已 OPEN execute/dashboard/list/grant/revoke）；
    * internal overlay 覆盖为 `/api/v1/collaboration/tasks`（内面，不经 spanner，内部网关直连 task 引擎）。
    * 同步签名：不发请求；taskController/taskGrantController 拼端点路径时读取（请求期调用，避免启动期 capability 未装填）。
    */
   getTaskApiBase: () => CapabilityResult<string>;
   /**
-   * 社区 BBS API 路径前缀（list/get/posts/create/close 共用）。
-   * 预发阶段统一走内部 /api Unified 面 `/api/v1/bbs/topics`（agentclawengine-pre；teamclawgw-pre 网关尚未合并
-   * /openapi/v1/bbs 转发，故 dev 直连 engine）；写口契约与 openapi §2.1–§2.6 一致（body 携 author_type+author_id、list 支持 author_id 过滤）。
+   * 社区 BBS Topic API 前缀（list/get/posts/create/close 共用）。
+   * 当前部署已切换公开 task 域 `/openapi/v1/collaboration/tasks/bbs/topics`；
+   * 写口 body 声明 author_type/author_id，列表支持 author_id 过滤。
    * 同步签名：不发请求；communityController 拼端点路径时读取（请求期调用，避免启动期 capability 未装填）。
    */
   getBbsApiBase: () => CapabilityResult<string>;
@@ -335,8 +426,9 @@ export interface AppCapabilities {
   getTaskClaimGrantStrategy: () => CapabilityResult<TaskClaimGrantStrategy>;
   /**
    * 内部专属侧栏一级导航项（Open Core 不应展示的内部入口）。
-   * 返回项 MUST 携带 `section`（'collab' | 'bot' | 'legacy'），合并点按同名分组末尾追加
-   * （`getMergedNavigationItems`，refactor-global-nav-shell）。
+   * 返回项 MUST 携带 `section`（'collab' | 'bot'），合并点按同名产品分组末尾追加
+   * （`getMergedNavigationItems`，refactor-global-nav-shell）。存量页面只保留直接 URL 访问，
+   * 不得借由该 capability 重新进入产品侧栏。
    * Open Core 默认 `[]`（不渲染任何内部导航项，符合 open-core-export-plan §5.2
    * 「导航中的内部入口」必须按开源模式分隔的强约束）；
    * internal overlay 经 `src/extensions/internal.ts` 注入「能力管理」「能力市场」两项（section: 'bot'），
@@ -383,6 +475,25 @@ export interface AppCapabilities {
    * 同步签名，组件仅消费可见性，不感知部署环境。
    */
   getBotRegistrationEnabled: () => CapabilityResult<boolean>;
+  /** Additional deployment-owned onboarding panels; public deployments default to none. */
+  getAdditionalBotRegistrationPanels: () => CapabilityResult<
+    {
+      id: string;
+      label: string;
+      Panel: ComponentType<{ open: boolean }>;
+    }[]
+  >;
+  getQwenWorkBotRegistrationConfig: (bcsEndpoint: string) => CapabilityResult<{ providerSlug: string; apiUrl: string }>;
+  /** Optional deployment-managed installer and executable; null uses the public release installer. */
+  getQwenWorkBridgeInstallation: () => CapabilityResult<{ installCommand: string; binary: string; profiles?: boolean; guideUrl?: string; personalizeBotName?: boolean } | null>;
+  /**
+   * Poolab 一键接入脚本与公开指南地址（部署差异）。Open Core 默认 `null`，表示该部署未启用
+   * Poolab 接入；internal overlay 覆盖为 `{ oneClickScriptUrl, guideUrl }` 以开放 Poolab Tab。
+   * `null` 同时也向 BotRegistrationDialog 表明 Poolab 选项不应渲染。
+   * 同步签名，不发请求。
+   */
+  getPoolabBridgeInstallation: () => CapabilityResult<{ oneClickScriptUrl: string; guideUrl: string } | null>;
+
   /**
    * 协作群高级配置（当前为钉钉绑定）。Open Core 默认关闭；internal overlay 覆盖为 true。
    * 同步签名，面板与渠道绑定加载均消费本能力，不感知部署环境。
@@ -420,4 +531,10 @@ export interface AppCapabilities {
    * 消费方（`src/pages/Admin/index.tsx`）按本结果过滤 Tab、选择默认 Tab 并对隐藏/非法 `?tab=` 深链回落首项。
    */
   getAdminSections: () => CapabilityResult<AdminSections>;
+  /**
+   * 对话菜单多实例服务 Bot 的实例范围能力。Open Core 默认 null(无实例选择,
+   * 会话取数与检索行为不变);internal overlay 注入实例清单/下拉与按实例取数实现,
+   * 选中实例经 conversationStore.setBotInstanceSelection 写入(代次/缓存失效走 Store 既有机制)。
+   */
+  getConversationInstanceScope: () => CapabilityResult<ConversationInstanceScopeCapability | null>;
 }

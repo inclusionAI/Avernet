@@ -3,7 +3,7 @@
 
 use std::{collections::HashMap, path::{Path, PathBuf}, process::Output, sync::{Arc, Mutex}};
 
-use axum::{Router, extract::{Query, State}, http::StatusCode, response::IntoResponse, routing::post};
+use axum::{Router, extract::{Query, State}, http::{StatusCode, HeaderMap}, response::IntoResponse, routing::post};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde_json::json;
 use tokio::{net::TcpListener, process::Command, task::JoinHandle};
@@ -15,23 +15,37 @@ const PREFIX: &str = "/bcs";
 type Calls = Arc<Mutex<Vec<HashMap<String, String>>>>;
 
 /// Registration API that mirrors the requested binding, as BCS does on success.
-struct Api { base: String, calls: Calls, task: JoinHandle<()> }
+struct Api { base: String, calls: Calls, patches: Calls, task: JoinHandle<()> }
 impl Drop for Api { fn drop(&mut self) { self.task.abort(); } }
 impl Api {
     async fn new() -> Self {
         let calls: Calls = Arc::default();
+        let patches: Calls = Arc::default();
         async fn register(State(calls): State<Calls>, Query(query): Query<HashMap<String, String>>) -> impl IntoResponse {
-            calls.lock().unwrap().push(query.clone());
+            let mut calls = calls.lock().unwrap();
+            let duplicate = calls.iter().any(|old| old["provider_bot_ref"] == query["provider_bot_ref"]);
+            calls.push(query.clone());
+            if duplicate { return (StatusCode::CONFLICT, axum::Json(json!({"error":"duplicate binding"}))); }
             let body = json!({"code":20100,"message":"Created","data":{"bot_uuid":"bot_new","bot_token":BOT_TOKEN,
                 "registration":{"provider_id":"prv_test","provider_bot_ref":query["provider_bot_ref"],"mode":query["mode"]}}});
             (StatusCode::CREATED, axum::Json(body))
+        }
+        async fn patch_webhook(State(patches): State<Calls>, headers: HeaderMap, axum::Json(body): axum::Json<serde_json::Value>) -> impl IntoResponse {
+            let webhook = body["webhook_url"].as_str().unwrap();
+            let auth = headers.get("authorization").and_then(|v| v.to_str().ok()).unwrap_or("");
+            patches.lock().unwrap().push(HashMap::from([("webhook".into(), webhook.into()), ("authorization".into(), auth.into())]));
+            if auth != "Bearer test-admin" || webhook.ends_with("/fail") {
+                return (StatusCode::FORBIDDEN, axum::Json(json!({"error":"forbidden"})));
+            }
+            (StatusCode::OK, axum::Json(json!({"bot_uuid":"bot_new","provider_id":"prv_test","provider_bot_ref":"worker-a","webhook_url":webhook})))
         }
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}{PREFIX}", listener.local_addr().unwrap());
         let app = Router::new().route(&format!("{PREFIX}/openapi/v1/collaboration/register"), post(register))
             .with_state(calls.clone());
+        let app = app.merge(Router::new().route(&format!("{PREFIX}/providers/prv_test/bots/worker-a"), axum::routing::patch(patch_webhook)).with_state(patches.clone()));
         let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap(); });
-        Self { base, calls, task }
+        Self { base, calls, patches, task }
     }
     fn calls(&self) -> Vec<HashMap<String, String>> { self.calls.lock().unwrap().clone() }
 }
@@ -58,7 +72,7 @@ fn register(home: &Path, args: &[&str]) -> Command {
     for name in ["claude", "codex"] { install_engine(home, name); }
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_bcs-bridge"));
     cmd.env("HOME", home).current_dir(home).env("PATH", home.join("bin"))
-        .env_remove("BRIDGE_CONFIG").env_remove("BRIDGE_REGISTER_TOKEN")
+        .env_remove("BRIDGE_CONFIG").env_remove("BRIDGE_REGISTER_TOKEN").env_remove("BRIDGE_PROVIDER_ADMIN_TOKEN")
         .env("BCS_BRIDGE_PROVIDER_TOKENS", json!({"prv_test": WEBHOOK_TOKEN}).to_string())
         .env("NO_PROXY", "127.0.0.1,localhost").env("no_proxy", "127.0.0.1,localhost");
     for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"] { cmd.env_remove(key); }
@@ -116,6 +130,68 @@ async fn plugin_registration_generates_a_provider_bot_ref_when_none_is_given() {
     assert_eq!(document["plugin"]["url"].as_str(), Some("ws://127.0.0.1:21000/ws/bot"));
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn desktop_registration_persists_socket_and_rejects_invalid_options_before_network() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let directory = home.path().join("app-server-control");
+    std::fs::create_dir(&directory).unwrap();
+    let socket = directory.join("app-server-control.sock");
+    let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+    let peer = tokio::spawn(async move {
+        use futures::{SinkExt, StreamExt};
+        for _ in 0..2 {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let request: serde_json::Value = serde_json::from_str(ws.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
+            assert_eq!(request["method"], "initialize");
+            ws.send(json!({"id":request["id"],"result":{"userAgent":"codex/test"}}).to_string().into()).await.unwrap();
+            while let Some(frame) = ws.next().await {
+                let frame = frame.unwrap();
+                if frame.is_close() { break; }
+                let value: serde_json::Value = serde_json::from_str(frame.to_text().unwrap()).unwrap();
+                assert_eq!(value["method"], "initialized");
+            }
+        }
+    });
+    let option = format!("socket={}", socket.display());
+    let output = register(home.path(), &["--mode", "plugin", "--api-url", &api.base,
+        "--upstream-url", "ws://127.0.0.1:21000/ws/bot", "--engine", "codex-desktop",
+        "--engine-option", &option])
+        .output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let document = saved(home.path());
+    assert_eq!(document["bot"][0]["engine"].as_str(), Some("codex-desktop"));
+    assert_eq!(document["bot"][0]["engine_options"]["socket"].as_str(), socket.to_str());
+    for option in ["socket=relative.sock", "socket=/tmp/a", "unknown=value", "missing-separator"] {
+        let other = tempfile::tempdir().unwrap();
+        let args = if option == "socket=/tmp/a" {
+            vec!["--engine-option", option, "--engine-option", option]
+        } else { vec!["--engine-option", option] };
+        let output = register(other.path(), &["--mode", "plugin", "--api-url", &api.base,
+            "--upstream-url", "ws://127.0.0.1:21000/ws/bot", "--engine", "codex-desktop"])
+            .args(args).output().await.unwrap();
+        assert!(!output.status.success(), "{option}");
+        assert!(!config_path(other.path()).exists());
+    }
+    let automatic = tempfile::tempdir().unwrap();
+    let output = register(automatic.path(), &["--mode", "plugin", "--api-url", &api.base,
+        "--upstream-url", "ws://127.0.0.1:21000/ws/bot", "--engine", "codex-desktop"])
+        .env("CODEX_HOME", home.path()).env("PATH", "").output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    assert!(saved(automatic.path())["bot"][0].get("engine_options").is_none());
+    peer.await.unwrap();
+    let absent = tempfile::tempdir().unwrap();
+    let output = register(absent.path(), &["--mode", "plugin", "--api-url", &api.base,
+        "--upstream-url", "ws://127.0.0.1:21000/ws/bot", "--engine", "codex-desktop"])
+        .env("CODEX_HOME", absent.path()).output().await.unwrap();
+    assert!(!output.status.success());
+    assert!(diagnostic(&output).contains("desktop detection failed"));
+    assert!(!config_path(absent.path()).exists());
+    assert_eq!(api.calls().len(), 2);
+}
+
 #[tokio::test]
 async fn missing_explicit_inputs_are_rejected_before_registration() {
     let api = Api::new().await;
@@ -165,4 +241,344 @@ async fn desktop_engine_registration_needs_no_executable_and_rejects_engine_bin(
     assert!(!output.status.success());
     assert!(diagnostic(&output).contains("--engine-bin does not apply"));
     assert_eq!(api.calls().len(), 1);
+}
+
+
+#[tokio::test]
+async fn named_profiles_keep_separate_configs_and_reuse_existing_registration() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    for profile in ["local", "pre", "prod"] {
+        let args = ["--profile", profile, "--mode", "plugin", "--engine", "qwenwork",
+            "--api-url", &api.base, "--upstream-url", "ws://127.0.0.1:21000/ws/bot"];
+        let output = register(home.path(), &args).output().await.unwrap();
+        assert!(output.status.success(), "{}", diagnostic(&output));
+        let path = home.path().join(format!(".bcn-bridge/profiles/{profile}/bridge.toml"));
+        let original = std::fs::read(&path).unwrap();
+        let calls = api.calls().len();
+        let repeated = register(home.path(), &args).output().await.unwrap();
+        assert!(repeated.status.success(), "{}", diagnostic(&repeated));
+        assert!(diagnostic(&repeated).contains("already registered"));
+        assert_eq!(api.calls().len(), calls);
+        assert_eq!(std::fs::read(path).unwrap(), original);
+    }
+    assert!(!config_path(home.path()).exists());
+}
+
+#[tokio::test]
+async fn named_profile_refuses_changed_endpoint_without_registration_or_overwrite() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let args = ["--profile", "pre", "--mode", "plugin", "--engine", "qwenwork", "--api-url", &api.base];
+    let output = register(home.path(), &args).args(["--upstream-url", "ws://127.0.0.1:21000/ws/bot"])
+        .output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let path = home.path().join(".bcn-bridge/profiles/pre/bridge.toml");
+    let original = std::fs::read(&path).unwrap();
+    let output = register(home.path(), &args).args(["--upstream-url", "ws://127.0.0.1:22000/ws/bot"])
+        .output().await.unwrap();
+    assert!(!output.status.success());
+    assert_eq!(api.calls().len(), 1);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[tokio::test]
+async fn replacement_retains_a_private_backup_identity_and_state() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let args = ["--mode", "plugin", "--engine", "qwenwork", "--api-url", &api.base,
+        "--upstream-url", "ws://127.0.0.1:21000/ws/bot"];
+    let output = register(home.path(), &args).output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let original = std::fs::read(config_path(home.path())).unwrap();
+    let original_state = saved(home.path())["state_path"].as_str().unwrap().to_owned();
+    std::fs::write(config_path(home.path()).parent().unwrap().join(&original_state), "existing state").unwrap();
+    let output = register(home.path(), &args).arg("--replace-existing").output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    assert_eq!(saved(home.path())["state_path"].as_str().unwrap(), original_state);
+    assert_eq!(api.calls().len(), 1);
+    assert_eq!(saved(home.path())["bot"][0]["token"].as_str(), Some(BOT_TOKEN));
+    let parent = config_path(home.path()).parent().unwrap().to_owned();
+    assert_eq!(std::fs::read_to_string(parent.join(&original_state)).unwrap(), "existing state");
+    let backup = std::fs::read_dir(parent).unwrap().map(|entry| entry.unwrap().path())
+        .find(|path| path.file_name().unwrap().to_string_lossy().starts_with(".bridge-backup-")).unwrap();
+    assert_eq!(std::fs::read(&backup).unwrap(), original);
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(backup).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+}
+
+
+#[tokio::test]
+async fn profile_reuse_rejects_a_changed_explicit_provider_bot_reference() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let args = ["--profile", "pre", "--mode", "plugin", "--engine", "qwenwork", "--api-url", &api.base,
+        "--upstream-url", "ws://127.0.0.1:21000/ws/bot"];
+    let output = register(home.path(), &args).args(["--provider-bot-ref", "worker-a"]).output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let path = home.path().join(".bcn-bridge/profiles/pre/bridge.toml");
+    let original = std::fs::read(&path).unwrap();
+    let same = register(home.path(), &args).args(["--provider-bot-ref", "worker-a"]).output().await.unwrap();
+    assert!(same.status.success(), "{}", diagnostic(&same));
+    let changed = register(home.path(), &args).args(["--provider-bot-ref", "worker-b"]).output().await.unwrap();
+    assert!(!changed.status.success());
+    assert!(diagnostic(&changed).contains("different provider Bot reference"));
+    assert_eq!(api.calls().len(), 1);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[tokio::test]
+async fn gateway_profile_reuse_verifies_the_saved_webhook_endpoint() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let args = ["--profile", "pre", "--mode", "gateway", "--engine", "qwenwork", "--api-url", &api.base,
+        "--provider-bot-ref", "worker-a"];
+    let output = register(home.path(), &args).args(["--webhook-url", "https://hook.example/webhook"]).output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let path = home.path().join(".bcn-bridge/profiles/pre/bridge.toml");
+    let original = std::fs::read(&path).unwrap();
+    let document: toml::Value = toml::from_str(std::str::from_utf8(&original).unwrap()).unwrap();
+    assert_eq!(document["registration"]["webhook_url"].as_str(), Some("https://hook.example/webhook"));
+    let repeated = register(home.path(), &args).args(["--webhook-url", "https://hook.example/webhook"]).output().await.unwrap();
+    assert!(repeated.status.success(), "{}", diagnostic(&repeated));
+    let omitted = register(home.path(), &args).output().await.unwrap();
+    assert!(omitted.status.success(), "{}", diagnostic(&omitted));
+    for webhook in ["https://hook.example/new", "https://hook.example/webhook/", "https://hook.example/webhook?key=changed"] {
+        let changed = register(home.path(), &args).args(["--webhook-url", webhook]).output().await.unwrap();
+        assert!(!changed.status.success());
+        assert!(diagnostic(&changed).contains("different BCS endpoint or gateway webhook"));
+    }
+    assert_eq!(api.calls().len(), 1);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[tokio::test]
+async fn legacy_gateway_profile_without_webhook_metadata_requires_replacement() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let args = ["--profile", "pre", "--mode", "gateway", "--engine", "qwenwork", "--api-url", &api.base,
+        "--provider-bot-ref", "worker-a", "--webhook-url", "https://hook.example/webhook"];
+    let output = register(home.path(), &args).output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let path = home.path().join(".bcn-bridge/profiles/pre/bridge.toml");
+    let mut document: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    document["registration"].as_table_mut().unwrap().remove("webhook_url");
+    std::fs::write(&path, toml::to_string(&document).unwrap()).unwrap();
+    let original = std::fs::read(&path).unwrap();
+    let repeated = register(home.path(), &args).output().await.unwrap();
+    assert!(!repeated.status.success());
+    assert!(diagnostic(&repeated).contains("Cannot verify this profile's gateway webhook"));
+    assert!(diagnostic(&repeated).contains("--replace-existing"));
+    assert_eq!(api.calls().len(), 1);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+
+#[tokio::test]
+async fn profile_reuse_checks_explicit_executable_paths_without_resolving_symlink_identity() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    install_engine(home.path(), "codex-next");
+    let old_bin = home.path().join("bin/codex");
+    let next_bin = home.path().join("bin/codex-next");
+    let args = ["--profile", "pre", "--mode", "plugin", "--engine", "codex", "--api-url", &api.base,
+        "--upstream-url", "ws://127.0.0.1:21000/ws/bot"];
+    let output = register(home.path(), &args).args(["--engine-bin", old_bin.to_str().unwrap()]).output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let path = home.path().join(".bcn-bridge/profiles/pre/bridge.toml");
+    // Legacy configs may retain a directory alias instead of the normalized parent.
+    let mut legacy: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    legacy["bot"][0]["engine_bin"] = old_bin.to_str().unwrap().into();
+    std::fs::write(&path, toml::to_string(&legacy).unwrap()).unwrap();
+    let original = std::fs::read(&path).unwrap();
+    let repeated = register(home.path(), &args).args(["--engine-bin", "bin/codex"]).output().await.unwrap();
+    assert!(repeated.status.success(), "{}", diagnostic(&repeated));
+    let omitted = register(home.path(), &args).output().await.unwrap();
+    assert!(omitted.status.success(), "{}", diagnostic(&omitted));
+    let changed = register(home.path(), &args).args(["--engine-bin", next_bin.to_str().unwrap()]).output().await.unwrap();
+    assert!(!changed.status.success());
+    assert!(diagnostic(&changed).contains("different engine executable"));
+    #[cfg(unix)] {
+        let alias = home.path().join("bin/codex-alias");
+        std::os::unix::fs::symlink(&old_bin, &alias).unwrap();
+        let changed = register(home.path(), &args).args(["--engine-bin", alias.to_str().unwrap()]).output().await.unwrap();
+        assert!(!changed.status.success());
+        assert!(diagnostic(&changed).contains("different engine executable"));
+    }
+    assert_eq!(api.calls().len(), 1);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[tokio::test]
+async fn gateway_profile_reuse_checks_only_explicit_listener_changes_including_default_value() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let args = ["--profile", "pre", "--mode", "gateway", "--engine", "qwenwork", "--api-url", &api.base,
+        "--provider-bot-ref", "worker-a", "--webhook-url", "https://hook.example/webhook"];
+    let output = register(home.path(), &args).args(["--listen", "127.0.0.1:18001"]).output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let path = home.path().join(".bcn-bridge/profiles/pre/bridge.toml");
+    let original = std::fs::read(&path).unwrap();
+    let same = register(home.path(), &args).args(["--listen", "127.0.0.1:18001"]).output().await.unwrap();
+    assert!(same.status.success(), "{}", diagnostic(&same));
+    let omitted = register(home.path(), &args).output().await.unwrap();
+    assert!(omitted.status.success(), "{}", diagnostic(&omitted));
+    for address in ["127.0.0.1:18002", "0.0.0.0:8322"] {
+        let changed = register(home.path(), &args).args(["--listen", address]).output().await.unwrap();
+        assert!(!changed.status.success());
+        assert!(diagnostic(&changed).contains("different gateway listener"));
+    }
+    assert_eq!(api.calls().len(), 1);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[tokio::test]
+async fn replacement_updates_local_settings_without_duplicate_registration() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let args = ["--profile", "pre", "--mode", "plugin", "--api-url", &api.base,
+        "--upstream-url", "ws://127.0.0.1:21000/ws/bot", "--provider-bot-ref", "worker-a"];
+    assert!(register(home.path(), &args).output().await.unwrap().status.success());
+    let path = home.path().join(".bcn-bridge/profiles/pre/bridge.toml");
+    let before: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    install_engine(home.path(), "claude-next");
+    let output = register(home.path(), &args).args(["--replace-existing", "--model", "changed-model", "--engine-bin", "bin/claude-next"]).output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let after: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    for key in ["bot_id", "token", "provider_bot_ref"] { assert_eq!(after["bot"][0][key], before["bot"][0][key]); }
+    assert_eq!(after["state_path"], before["state_path"]);
+    assert_eq!(after["bot"][0]["model"].as_str(), Some("changed-model"));
+    assert!(after["bot"][0]["engine_bin"].as_str().unwrap().ends_with("bin/claude-next"));
+    let repeated = register(home.path(), &args).arg("--replace-existing").output().await.unwrap();
+    assert!(repeated.status.success(), "{}", diagnostic(&repeated));
+    let retained: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(retained["bot"][0]["engine_bin"], after["bot"][0]["engine_bin"]);
+    assert_eq!(retained["bot"][0]["model"], after["bot"][0]["model"]);
+    assert_eq!(api.calls().len(), 1);
+}
+
+#[tokio::test]
+async fn gateway_replacement_patches_webhook_with_admin_auth_and_preserves_identity() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let args = ["--profile", "pre", "--mode", "gateway", "--engine", "qwenwork", "--api-url", &api.base,
+        "--provider-bot-ref", "worker-a"];
+    assert!(register(home.path(), &args).args(["--webhook-url", "https://hook.example/old"]).output().await.unwrap().status.success());
+    let path = home.path().join(".bcn-bridge/profiles/pre/bridge.toml");
+    let before = std::fs::read(&path).unwrap();
+    let missing = register(home.path(), &args).args(["--replace-existing", "--webhook-url", "https://hook.example/new"]).output().await.unwrap();
+    assert!(!missing.status.success());
+    assert!(diagnostic(&missing).contains("--provider-admin-token"));
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert!(api.patches.lock().unwrap().is_empty());
+    let rejected = register(home.path(), &args).args(["--replace-existing", "--webhook-url", "https://hook.example/fail"])
+        .env("BRIDGE_PROVIDER_ADMIN_TOKEN", "test-admin").output().await.unwrap();
+    assert!(!rejected.status.success());
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    let updated = register(home.path(), &args).args(["--replace-existing", "--webhook-url", "https://hook.example/new", "--listen", "127.0.0.1:18001"])
+        .env("BRIDGE_PROVIDER_ADMIN_TOKEN", "test-admin").output().await.unwrap();
+    assert!(updated.status.success(), "{}", diagnostic(&updated));
+    let after: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(after["registration"]["webhook_url"].as_str(), Some("https://hook.example/new"));
+    assert_eq!(after["listen"].as_str(), Some("127.0.0.1:18001"));
+    assert_eq!(after["bot"][0]["bot_id"].as_str(), Some("bot_new"));
+    assert_eq!(after["bot"][0]["token"].as_str(), Some(BOT_TOKEN));
+    assert!(!std::fs::read_to_string(&path).unwrap().contains("test-admin"));
+    assert!(!diagnostic(&updated).contains("test-admin"));
+    assert_eq!(api.calls().len(), 1);
+    assert_eq!(api.patches.lock().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn replacement_with_new_reference_creates_new_identity_and_fresh_state() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let args = ["--mode", "plugin", "--engine", "qwenwork", "--api-url", &api.base,
+        "--upstream-url", "ws://127.0.0.1:21000/ws/bot"];
+    assert!(register(home.path(), &args).args(["--provider-bot-ref", "worker-a"]).output().await.unwrap().status.success());
+    let before = saved(home.path());
+    let output = register(home.path(), &args).args(["--replace-existing", "--provider-bot-ref", "worker-b"]).output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let after = saved(home.path());
+    assert_eq!(after["bot"][0]["provider_bot_ref"].as_str(), Some("worker-b"));
+    assert_ne!(after["state_path"], before["state_path"]);
+    assert_eq!(api.calls().len(), 2);
+}
+
+#[tokio::test]
+async fn gateway_local_replacement_retains_omitted_webhook_without_admin_or_registration() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let args = ["--profile", "pre", "--mode", "gateway", "--engine", "qwenwork", "--api-url", &api.base,
+        "--provider-bot-ref", "worker-a"];
+    assert!(register(home.path(), &args).args(["--webhook-url", "https://hook.example/old"]).output().await.unwrap().status.success());
+    let path = home.path().join(".bcn-bridge/profiles/pre/bridge.toml");
+    let output = register(home.path(), &args).args(["--replace-existing", "--listen", "127.0.0.1:18003"]).output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let after: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(after["listen"].as_str(), Some("127.0.0.1:18003"));
+    assert_eq!(after["registration"]["webhook_url"].as_str(), Some("https://hook.example/old"));
+    assert_eq!(api.calls().len(), 1);
+    assert!(api.patches.lock().unwrap().is_empty());
+    let bytes = std::fs::read(&path).unwrap();
+    let changed = register(home.path(), &args).args(["--replace-existing", "--provider-bot-ref", "worker-b"]).output().await.unwrap();
+    assert!(!changed.status.success());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert_eq!(api.calls().len(), 1);
+}
+
+#[tokio::test]
+async fn stopped_qwen_profiles_reuse_shared_desktop_settings_and_reject_ambiguous_legacy_settings() {
+    let home = tempfile::tempdir().unwrap();
+    let old_api = Api::new().await;
+    let args = ["--mode", "plugin", "--engine", "qwenwork", "--upstream-url", "ws://127.0.0.1:21000/ws/bot"];
+    assert!(register(home.path(), &args).args(["--profile", "local", "--api-url", &old_api.base]).output().await.unwrap().status.success());
+    let db_path = home.path().join("agents.db");
+    let settings = home.path().join("settings.json");
+    let db = rusqlite::Connection::open(&db_path).unwrap();
+    db.execute_batch("CREATE TABLE chats(id TEXT, ext TEXT, deleted_at INTEGER); CREATE TABLE sub_chats(session_id TEXT, chat_id TEXT);").unwrap();
+    let initialized = Command::new(env!("CARGO_BIN_EXE_bcs-bridge")).env("HOME", home.path())
+        .args(["--profile", "local", "init", "--engine", "qwenwork", "--option"])
+        .arg(format!("database_path={}", db_path.display())).arg("--option")
+        .arg(format!("settings_path={}", settings.display())).output().await.unwrap();
+    assert!(initialized.status.success(), "{}", diagnostic(&initialized));
+    let directory = home.path().join(".bcn-bridge");
+    let old_path = directory.join("profiles/local/bridge.toml");
+    let original = std::fs::read_to_string(&old_path).unwrap();
+    let old: toml::Value = toml::from_str(&original).unwrap();
+    let hooks = std::fs::read(&settings).unwrap();
+    // No runtime record or process exists; only saved configuration remains.
+    assert!(!directory.join("bridge.pid.json").exists());
+    let api = Api::new().await;
+    let registered = register(home.path(), &args).args(["--profile", "pre", "--api-url", &api.base]).output().await.unwrap();
+    assert!(registered.status.success(), "{}", diagnostic(&registered));
+    let pre_path = directory.join("profiles/pre/bridge.toml");
+    let pre: toml::Value = toml::from_str(&std::fs::read_to_string(&pre_path).unwrap()).unwrap();
+    assert_eq!(pre["bot"][0]["engine_options"], old["bot"][0]["engine_options"]);
+    assert_ne!(pre["bot"][0]["provider_bot_ref"], old["bot"][0]["provider_bot_ref"]);
+    let initialized = Command::new(env!("CARGO_BIN_EXE_bcs-bridge")).env("HOME", home.path())
+        .args(["--profile", "pre", "init", "--engine", "qwenwork"]).output().await.unwrap();
+    assert!(initialized.status.success(), "{}", diagnostic(&initialized));
+    assert_eq!(std::fs::read(&settings).unwrap(), hooks);
+    assert_eq!(std::fs::read_to_string(&old_path).unwrap(), original);
+    // The legacy --config location is also discoverable; differing credentials must not be guessed.
+    std::fs::write(directory.join("qwenwork.toml"), &original).unwrap();
+    let prod_api = Api::new().await;
+    assert!(register(home.path(), &args).args(["--profile", "prod", "--api-url", &prod_api.base]).output().await.unwrap().status.success());
+    let mut conflict = old.clone();
+    conflict["bot"][0]["engine_options"]["hook_secret"] = "different-hook-secret".into();
+    std::fs::write(directory.join("qwenwork.toml"), toml::to_string(&conflict).unwrap()).unwrap();
+    let migrated = register(home.path(), &args).args(["--profile", "other", "--api-url", &prod_api.base]).output().await.unwrap();
+    assert!(migrated.status.success(), "{}", diagnostic(&migrated));
+    let other: toml::Value = toml::from_str(&std::fs::read_to_string(directory.join("profiles/other/bridge.toml")).unwrap()).unwrap();
+    assert_eq!(other["bot"][0]["engine_options"], old["bot"][0]["engine_options"]);
+    std::fs::remove_file(settings.with_file_name("bcs-bridge.toml")).unwrap();
+    let rejected = register(home.path(), &args).args(["--profile", "ambiguous", "--api-url", &prod_api.base]).output().await.unwrap();
+    assert!(!rejected.status.success());
+    assert!(diagnostic(&rejected).contains("conflicting desktop settings"));
+    assert_eq!(prod_api.calls().len(), 2);
+    assert!(!directory.join("profiles/ambiguous/bridge.toml").exists());
+    assert_eq!(std::fs::read(&settings).unwrap(), hooks);
 }

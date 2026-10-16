@@ -57,15 +57,20 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
         pending: sessions.actions.isPending(botId, view.section),
       }}
       expanded={store.expandedBotIds[botId] === true}
-      selected={selectedBot}
       selectedSessionId={selectedBot ? store.selectedSessionId : null}
       origin={origin}
       scope={scope}
+      sessionKey={store.sessionKeyByBotId[botId] ?? ''}
       sessions={mineSessions}
       others={othersArea}
       onToggle={() => sessions.toggleBot(botId, view.section)}
       onOriginChange={(next) => store.setManagedBotOrigin(botId, next)}
       onScopeChange={(next) => store.setManagedBotScope(botId, next)}
+      onSearchSession={(nextKey) => {
+        // 提交只落该 Bot 的过滤并展开其列表(mine/others 均按新条件重拉);不制造主舞台选中。
+        store.setSessionKeyFilter(botId, nextKey);
+        store.setExpandedBot(botId, true);
+      }}
       onCreateSession={() => void sessions.createSession(botId)}
       onSelectSession={(sessionId) => sessions.selectMineSession(botId, sessionId)}
       onLoadMore={() => void sessions.loadMoreSessions(botId, view.section, scope)}
@@ -76,10 +81,11 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
   );
 }
 
-/** 好友 Bot 行:无归属概念,交互会话一律走好友 Bot 模型回调。 */
+/** 好友 Bot 行:无归属概念,交互会话一律走好友 Bot 模型回调;会话范围读 scopeByFriendBotId。 */
 export function FriendItem({ view, props }: { view: ConversationBotView; props: ConversationSidebarProps }) {
   const botId = view.bot.botId;
   const { store, sessions, onOpenAgentCodingBot } = props;
+  const scope = store.scopeByFriendBotId[botId] ?? 'all';
   const selectedBot = store.selectedBotId === botId && store.selectedSection === 'friend';
   return (
     <ConversationBotItem
@@ -90,17 +96,22 @@ export function FriendItem({ view, props }: { view: ConversationBotView; props: 
         pending: sessions.actions.isPending(botId, 'friend'),
       }}
       expanded={store.expandedBotIds[botId] === true}
-      selected={selectedBot}
       selectedSessionId={selectedBot ? store.selectedSessionId : null}
       origin="mine"
-      scope="all"
+      scope={scope}
+      sessionKey={store.sessionKeyByBotId[botId] ?? ''}
       sessions={store.friendBotSessionsByBotId[botId]}
       onToggle={() => sessions.toggleBot(botId, 'friend')}
       onOriginChange={() => undefined}
-      onScopeChange={() => undefined}
+      onScopeChange={(next) => store.setFriendBotScope(botId, next)}
+      onSearchSession={(nextKey) => {
+        // 提交只落好友 Bot 的过滤并展开其列表;不制造主舞台选中。
+        store.setSessionKeyFilter(botId, nextKey);
+        store.setExpandedBot(botId, true);
+      }}
       onCreateSession={() => void sessions.createSession(botId)}
       onSelectSession={(sessionId) => sessions.selectFriendBotSession(botId, sessionId)}
-      onLoadMore={() => void sessions.loadMoreSessions(botId, 'friend', 'all')}
+      onLoadMore={() => void sessions.loadMoreSessions(botId, 'friend', scope)}
       onToggleFavorite={(sessionId) => void sessions.favorites.toggleFavorite(botId, 'friend', sessionId)}
       isFavoritePending={(sessionId) => sessions.favorites.isPending(botId, 'friend', sessionId)}
       onOpenAgentCodingBot={onOpenAgentCodingBot}

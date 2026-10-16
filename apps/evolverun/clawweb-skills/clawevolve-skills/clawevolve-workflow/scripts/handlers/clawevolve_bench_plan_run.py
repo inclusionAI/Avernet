@@ -9,6 +9,7 @@ existing clawevolve_optimize_run.py workflow.
 
 from __future__ import annotations
 
+
 import argparse
 import ast
 import hashlib
@@ -28,6 +29,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from bench_resource_owner import bench_owner, frozen_templates
 from lib_clawevolve_bench import run_clawevolve_bench
 from lib_http_retry import retry_http
 
@@ -200,11 +202,13 @@ def _load_frozen_input(args: argparse.Namespace, run_dir: Path) -> tuple[str, di
     pinned = config.get("pinnedBenchDomains") if isinstance(config.get("pinnedBenchDomains"), dict) else {}
     owner_id = _clean(config.get("ownerUserId")) or _resolve_owner_id(args)
     for role, domain_id in expected.items():
-        templates = pinned.get(domain_id) if isinstance(pinned, dict) else None
+        role_owner = _clean(config.get(f"{role}BenchOwnerUserId")) or owner_id
+        setattr(args, f"{role}_bench_owner_id", role_owner)
+        templates = frozen_templates(pinned, role_owner, domain_id, scoped=config.get("entryPoint") == "teamclaw")
         if not isinstance(templates, list) or not templates:
             raise RuntimeError(f"frozen templates missing for {role} Domain {domain_id}")
         _write_json(run_dir / "bench/context" / role / "bench_context.json", {
-            "schemaVersion": "clawbench.context.v1", "ownerId": owner_id,
+            "schemaVersion": "clawbench.context.v1", "ownerId": role_owner,
             "domainId": domain_id, "templates": templates,
         })
     return objective, config
@@ -655,7 +659,7 @@ def _run_benchmark(args: argparse.Namespace, workspace: Path, skill_base: Path, 
     domain_id = _clean(args.train_domain_id if role == "train" else args.test_domain_id)
     invocation_id = _clean(args.step_id) or "local"
     result = run_clawevolve_bench(
-        owner_id=_resolve_owner_id(args),
+        owner_id=bench_owner(args, role) or _resolve_owner_id(args),
         domain_id=domain_id,
         work_dir=run_dir / "bench" / "baseline" / invocation_id / role,
         context_dir=run_dir / "bench" / "context" / role,
@@ -679,7 +683,7 @@ def _run_benchmark(args: argparse.Namespace, workspace: Path, skill_base: Path, 
         "baselineRole": role,
         "producerStepId": _clean(args.step_id),
         "domainId": domain_id,
-        "domainOwnerId": _resolve_owner_id(args),
+        "domainOwnerId": bench_owner(args, role) or _resolve_owner_id(args),
         "persistedAt": _now(),
     }
     _write_json(report_path.parent.parent / "baseline_result.json", baseline_result)
@@ -741,7 +745,7 @@ def _main() -> int:
 
     train_report_path, train_report, train_result = _run_benchmark(args, workspace, skill_base, run_dir, "train")
     test_report_path, test_report, test_result = _run_benchmark(args, workspace, skill_base, run_dir, "test")
-    validation_independent = _clean(args.train_domain_id) != _clean(args.test_domain_id)
+    validation_independent = (bench_owner(args, "train"), _clean(args.train_domain_id)) != (bench_owner(args, "test"), _clean(args.test_domain_id))
     validation_mode = "isolated_train_test" if validation_independent else "shared_train_domain"
     train_source = Path(str(train_result["inputPath"])).expanduser().resolve()
     _copy_tree(train_source, plan_opt)
@@ -854,7 +858,7 @@ def _main() -> int:
                 "train": {
                     "role": "train", "producerStepId": _clean(args.step_id),
                     "source": "generated", "cacheStatus": "generated",
-                    "ownerUserId": _resolve_owner_id(args),
+                    "ownerUserId": bench_owner(args, "train") or _resolve_owner_id(args),
                     "benchRunId": train_result.get("benchRunId"),
                     "domainId": args.train_domain_id,
                     "metrics": train_result.get("metrics") or {},
@@ -862,7 +866,7 @@ def _main() -> int:
                 "test": {
                     "role": "test", "producerStepId": _clean(args.step_id),
                     "source": "generated", "cacheStatus": "generated",
-                    "ownerUserId": _resolve_owner_id(args),
+                    "ownerUserId": bench_owner(args, "test") or _resolve_owner_id(args),
                     "benchRunId": test_result.get("benchRunId"),
                     "domainId": args.test_domain_id,
                     "metrics": test_result.get("metrics") or {},

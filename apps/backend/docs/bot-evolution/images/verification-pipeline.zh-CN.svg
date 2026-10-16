@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="270" viewBox="0 0 1000 270" font-family="&apos;PingFang SC&apos;,&apos;Hiragino Sans GB&apos;,&apos;Microsoft YaHei&apos;,&apos;Noto Sans CJK SC&apos;,&apos;Source Han Sans SC&apos;,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" role="img" aria-label="验证流水线与划分">
+<title>验证流水线与划分</title>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#475569"/></marker><marker id="ahl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/></marker></defs>
+<rect width="1000" height="270" fill="#ffffff"/>
+<rect x="20" y="30" width="140" height="80" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="90.0" y="54.475" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">请求</text>
+<text x="90.0" y="71.6875" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">被测对象 + 基线</text>
+<text x="90.0" y="87.2125" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">验证配置</text>
+<path d="M 160 70 L 180 70" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="182" y="30" width="140" height="80" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="252.0" y="54.475" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">计划</text>
+<text x="252.0" y="71.6875" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">各划分的用例</text>
+<text x="252.0" y="87.2125" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">种子 · 预算</text>
+<path d="M 322 70 L 342 70" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="344" y="30" width="140" height="80" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="414.0" y="54.475" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">执行</text>
+<text x="414.0" y="71.6875" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">成对运行</text>
+<text x="414.0" y="87.2125" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">在沙箱中</text>
+<path d="M 484 70 L 504 70" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="506" y="30" width="140" height="80" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="576.0" y="54.475" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">评分</text>
+<text x="576.0" y="71.6875" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">按用例、按评分器</text>
+<text x="576.0" y="87.2125" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">分数 + 评语</text>
+<path d="M 646 70 L 666 70" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="668" y="30" width="140" height="80" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="738.0" y="54.475" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">比较</text>
+<text x="738.0" y="71.6875" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">成对 Δ · 置信区间</text>
+<text x="738.0" y="87.2125" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">胜率 · 成本</text>
+<path d="M 808 70 L 828 70" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="830" y="30" width="140" height="80" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+<text x="900.0" y="54.475" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">判定</text>
+<text x="900.0" y="71.6875" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">接纳 · 拒绝</text>
+<text x="900.0" y="87.2125" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">无定论</text>
+<text x="20" y="140" font-size="13" font-weight="700" fill="#334155" text-anchor="start" dominant-baseline="middle">划分 — 由平台分配，绝不由策略分配</text>
+<rect x="20" y="160" width="182" height="70" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="111.0" y="187.23749999999998" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">训练集</text>
+<text x="111.0" y="204.45" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">提议器可见失败用例</text>
+<rect x="214" y="160" width="182" height="70" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="305.0" y="187.23749999999998" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">验证集</text>
+<text x="305.0" y="204.45" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">提议器仅见汇总</text>
+<rect x="408" y="160" width="182" height="70" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="499.0" y="187.23749999999998" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">封存集</text>
+<text x="499.0" y="204.45" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">封存 · 终验 + 定期</text>
+<rect x="602" y="160" width="182" height="70" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+<text x="693.0" y="187.23749999999998" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">回归集</text>
+<text x="693.0" y="204.45" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">必过 · 从线上持续补充</text>
+<rect x="796" y="160" width="182" height="70" rx="8" fill="#fce7f3" stroke="#db2777" stroke-width="1.5"/>
+<text x="887.0" y="187.23749999999998" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">安全集</text>
+<text x="887.0" y="204.45" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">必过 · 零容忍</text>
+<text x="500" y="254" font-size="12" font-weight="400" fill="#64748b" text-anchor="middle" dominant-baseline="middle" font-style="italic">只有验证集决定是否改进；回归集与安全集只能否决。</text>
+</svg>

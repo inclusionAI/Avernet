@@ -14,6 +14,9 @@
 app_name: "agentclaw"
 
 user_config:
+  task_discovery:
+    frontend_url: "${FRONTEND_URL:-http://localhost:8000}"
+
   # ── Neutral application policy ────────────────────────────────────────────
 
   # Bot workspace filesystem layout (consumed by WorkspaceConfig). Neutral
@@ -48,7 +51,7 @@ user_config:
   # Per-owner device allocation policy (neutral knobs only).
   device_allocation:
     mode: "multi"
-    max_devices_per_entity: 5
+    max_devices_per_entity: 2
 
   # OSS↔NAS migration mount roots (host-side paths, deployment-neutral).
   # NOTE: the OssToNasConfig provider reads these as FLAT user_config keys
@@ -314,6 +317,12 @@ user_config:
     token_secret: "${token_secret:-}"
     secret_secret: "${secret_secret:-}"
     task_callback_url: "${BACKEND_URL:-}"
+
+  # Backend self origin used in task execution instructions. Runtime code reads
+  # this typed YAML setting; it never selects a deployment profile or reads an
+  # environment variable directly. Each deploy overlay supplies its own value.
+  task_dispatch:
+    backend_url: ""
 
   # merchant_task_bot_bindings → static-plan template bot binding (role_key ->
   #   bot uuid). Public profile: a SINGLE env-injected JSON string

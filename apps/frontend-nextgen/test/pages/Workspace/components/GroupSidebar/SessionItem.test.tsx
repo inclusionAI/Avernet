@@ -64,7 +64,12 @@ function openMenu() {
 describe('SessionItem 会话操作菜单（验收微调：对齐管理面板与 Bot 单聊能力）', () => {
   it('管理者菜单四项齐备且顺序为 管理会话→编辑标题→分享会话→删除会话，删除项为危险色', () => {
     renderSessionItem();
+    const actions = screen.getByRole('button', { name: '会话更多操作' }).parentElement;
+    expect(actions).toHaveClass('opacity-0', 'group-hover/row:opacity-100', 'group-focus-within/row:opacity-100');
+    expect(actions).not.toHaveClass('opacity-100');
     openMenu();
+    // 菜单开启后不依赖 hover，避免鼠标移入浮层时触发钮消失。
+    expect(actions).toHaveClass('opacity-100');
 
     const labels = ['管理会话', '编辑标题', '分享会话', '删除会话'];
     labels.forEach((label) => {
@@ -117,16 +122,20 @@ describe('SessionItem 会话操作菜单（验收微调：对齐管理面板与 
     expect(handlers.onDeleteSession).toHaveBeenCalledWith('s1');
   });
 
-  it('分享会话：打开分享弹窗并请求该会话的邀请链接', async () => {
+  it('分享会话：打开气泡后按所选有效期点「生成链接」才发起请求（v2 流程）', async () => {
     const handlers = makeHandlers();
     renderSessionItem(handlers);
     openMenu();
 
     fireEvent.click(screen.getByRole('button', { name: '分享会话' }));
-    expect(handlers.onShareSession).toHaveBeenCalledWith('s1');
-    // 链接生成是异步流程，等待 ShareDialog 回显。
+    // v2：打开不自动生成，先呈现「链接有效期」选择与「生成链接」。
+    expect(handlers.onShareSession).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('链接有效期')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '生成链接' }));
+    // 默认有效期 1 天 = 86400 秒透传（spec: collaboration-session-share）。
+    expect(handlers.onShareSession).toHaveBeenCalledWith('s1', 86400);
     await waitFor(() => {
-      expect(screen.getByDisplayValue('http://example.com/invite/s1')).toBeInTheDocument();
+      expect(screen.getByLabelText('邀请链接')).toHaveTextContent('http://example.com/invite/s1');
     });
   });
 

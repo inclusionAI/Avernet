@@ -6,7 +6,6 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 
 import { baseGroup, makeProps, setupResizeObserverMock } from './GroupSidebar.testUtils';
 
@@ -30,18 +29,21 @@ describe('GroupSidebar', () => {
     expect(onRetryGroups).toHaveBeenCalledTimes(1);
   });
 
-  it('协作群搜索工具行触发发起协作', () => {
+  it('v2：发起协作「+」常驻搜索行（设计稿 x=251），无「协作群」组标题行', () => {
     const onCreateGroup = jest.fn();
     render(<GroupSidebar {...makeProps({ onCreateGroup })} />);
     const actionButton = screen.getByRole('button', { name: '发起协作' });
     const searchInput = screen.getByRole('textbox', { name: '搜索协作群' });
-    const toolRow = searchInput.parentElement?.parentElement;
+    // 「+」位于搜索工具行（input 的 relative 包裹层的父行）。
+    const toolRow = searchInput.closest('div.relative')?.parentElement;
     expect(toolRow).toContainElement(actionButton);
+    // 设计稿搜索行下直接是群列表，无组标题行。
+    expect(screen.queryByText('协作群')).not.toBeInTheDocument();
     fireEvent.click(actionButton);
     expect(onCreateGroup).toHaveBeenCalled();
   });
 
-  it('群行将公开标签置于辅助信息首位，并移除成员数量展示', () => {
+  it('群行 52px 双行形态，仅保留 kind 标签（公开/参与方式徽章移除）', () => {
     render(
       <GroupSidebar
         {...makeProps({
@@ -51,68 +53,65 @@ describe('GroupSidebar', () => {
     );
 
     const groupTrigger = screen.getByRole('button', { name: '主站群' });
-    expect(screen.getByText('主站群')).toHaveClass('text-sm', 'font-medium');
-    expect(screen.getByText('主站群')).not.toHaveClass('font-semibold');
-    expect(groupTrigger.textContent).toMatch(/主站群.*公开.*任务协作.*固定群成员/);
+    expect(groupTrigger.textContent).toMatch(/主站群.*任务协作/);
+    expect(groupTrigger.textContent).not.toContain('公开');
+    expect(groupTrigger.textContent).not.toContain('固定群成员');
     expect(groupTrigger.textContent).not.toContain('6 个成员');
-    expect(screen.queryByLabelText('6 个成员')).not.toBeInTheDocument();
+    // 名称和类型分两行，与对话 Bot 行统一为 52px。
+    expect(groupTrigger).toHaveClass('min-h-13');
   });
 
-  it('协作群标签保留 aria 语义，不再提供 hover 提示（2026-09-13 用户决策移除徽标 Tooltip）', async () => {
-    render(
+  it('v2.1：群行首恒为成员头像堆（≤2 + 溢出徽标），无文件夹图标（用户反馈还原设计稿）', () => {
+    const participants = Array.from({ length: 5 }, (_, i) => ({
+      actorId: `actor-${i}`,
+      kind: 'bot' as const,
+      name: `成员${i}`,
+      role: 'member' as const,
+      mode: 'auto' as const,
+    }));
+    const first = render(
       <GroupSidebar
         {...makeProps({
-          groups: [{ ...baseGroup, isPublic: true, kind: 'task_dag' as const, membership: 'session_only' as const }],
+          groups: [{ ...baseGroup, participants: [...participants], participantCount: 8, sessions: [] }],
+          expandedGroupIds: { g1: true },
+          sessionsByGroupId: { g1: [] },
         })}
       />,
     );
+    // 展开态：≤2 个头像 + 8-2=6 溢出徽标「6+」（设计稿 artboard-010「运营协作」行同款）。
+    const expandedTrigger = screen.getByRole('button', { name: '主站群' });
+    const stack = expandedTrigger.querySelector('[aria-label="成员 8 人"]');
+    expect(stack?.children).toHaveLength(3);
+    expect(stack?.lastElementChild).toHaveTextContent('6+');
+    expect(expandedTrigger.querySelector('svg.lucide-folder')).not.toBeInTheDocument();
+    first.unmount();
 
-    // aria-label 保留无障碍语义；hover 后不出现 tooltip 气泡
-    const metadata = screen.getByLabelText('协作群标签：公开 · 自定义协同 · 仅参与临时会话');
-    expect(metadata).toHaveClass('truncate');
-    await userEvent.setup().hover(metadata);
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
-  });
-
-  it('v1.5：操作区绝对定位满行遮盖悬浮（badge/群名用满行宽），工具类底与行零色差', () => {
-    render(
+    // 收起态：行首同样渲染头像堆（设计稿「群目录一级_收起」行行首即头像堆，非文件夹）。
+    const second = render(
       <GroupSidebar
         {...makeProps({
-          groups: [{ ...baseGroup, isPublic: true, kind: 'task_dag' as const, membership: 'session_only' as const }],
+          groups: [{ ...baseGroup, participants: [...participants], participantCount: 8, sessions: [] }],
+          expandedGroupIds: {},
+          sessionsByGroupId: { g1: [] },
         })}
       />,
     );
+    const collapsedTrigger = screen.getByRole('button', { name: '主站群' });
+    expect(collapsedTrigger.querySelector('[aria-label="成员 8 人"]')).toBeInTheDocument();
+    expect(collapsedTrigger.querySelector('svg.lucide-folder')).not.toBeInTheDocument();
+    // 收起态无 chevron（设计稿：仅展开态行内展示 chevron-down）。
+    expect(collapsedTrigger.querySelector('svg.lucide-chevron-down')).not.toBeInTheDocument();
+    second.unmount();
 
-    // 操作区脱离文档流（absolute）满行覆盖：inset-y-0 撑满行高（遮全 badge 文字），
-    // 右缘止于箭头左缘；遮盖底走 global.css 工具类（真实合成零色差不透字）。
-    // fixture 为展开态断 selected 分支；左缘 20px mask 渐隐；显隐语义保留（v1.4）。
-    const actions = screen.getByRole('button', { name: '协作群操作' }).parentElement;
-    expect(actions).toHaveClass('absolute', 'inset-y-0', 'right-[30px]', 'z-10');
-    expect(actions).toHaveClass(
-      'mask-[linear-gradient(to_right,transparent,black_20px)]',
-      'sidebar-actions-cover-selected',
-    );
-    expect(actions).toHaveClass(
-      'group-hover:opacity-100',
-      'group-focus-within:opacity-100',
-      '[@media(hover:none)]:opacity-100',
-    );
-  });
-
-  it('v1.5：badge 行悬浮避让——hover 时右移让位操作区，单行 truncate 行高恒定', () => {
+    // participants 未回填（列表补拉未完成/失败）：不渲染任何行首占位，也不用文件夹兜底。
     render(
       <GroupSidebar
-        {...makeProps({
-          groups: [{ ...baseGroup, isPublic: true, kind: 'task_dag' as const, membership: 'session_only' as const }],
-        })}
+        {...makeProps({ groups: [{ ...baseGroup, sessions: [] }], expandedGroupIds: {}, sessionsByGroupId: { g1: [] } })}
       />,
     );
-
-    // 避让契约：badge 行保持单行 truncate（行高恒定不跳），行 hover 时右缘让出操作区宽度，
-    // 悬浮按钮不再半透明叠在 badge 文字上（用户预览决策：换行展开观感乱，弃用）。
-    const metadata = screen.getByLabelText('协作群标签：公开 · 自定义协同 · 仅参与临时会话');
-    expect(metadata).toHaveClass('truncate', 'group-hover:pr-20');
-    expect(metadata).not.toHaveClass('group-hover:flex-wrap');
+    const emptyTrigger = screen.getByRole('button', { name: '主站群' });
+    expect(emptyTrigger.querySelector('svg.lucide-folder')).not.toBeInTheDocument();
+    expect(emptyTrigger.querySelector('[aria-label^="成员"]')).not.toBeInTheDocument();
   });
 
   it('clicking the group card toggles collapse (not only the chevron)', () => {
@@ -133,20 +132,20 @@ describe('GroupSidebar', () => {
     }
   });
 
-  it('群卡片移除展开箭头，新增入口与管理入口均不触发展开或选中', () => {
+  it('群行 dots 菜单操作不触发展开或选中，展开态 chevron-down 可见', () => {
     const onCreateSession = jest.fn();
     const onManageGroup = jest.fn();
     const onToggleGroupExpanded = jest.fn();
-    render(<GroupSidebar {...makeProps({ onCreateSession, onManageGroup, onToggleGroupExpanded })} />);
-    expect(screen.getByRole('button', { name: '协作群操作' })).toHaveClass(
-      'rounded-md',
-      'hover:bg-primary/10',
-      'hover:text-primary',
+    render(
+      <GroupSidebar
+        {...makeProps({ onCreateSession, onManageGroup, onToggleGroupExpanded, sessionsByGroupId: { g1: [] } })}
+      />,
     );
-    expect(
-      screen.getByRole('button', { name: '主站群' }).querySelector('svg.lucide-chevron-right'),
-    ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '协作群操作' }));
+    const dots = screen.getByRole('button', { name: '协作群操作' });
+    expect(dots).toHaveClass('h-6', 'w-6', 'rounded-md');
+    // 展开态行内展示 chevron-down（v2 设计稿）；收起态无箭头（上一用例断言）。
+    expect(screen.getByRole('button', { name: '主站群' }).querySelector('svg.lucide-chevron-down')).toBeInTheDocument();
+    fireEvent.click(dots);
     fireEvent.click(screen.getByRole('button', { name: '管理协作群' }));
     expect(onManageGroup).toHaveBeenCalledWith('g1');
     expect(onToggleGroupExpanded).not.toHaveBeenCalled();
@@ -184,14 +183,18 @@ describe('GroupSidebar', () => {
     expect(searchInput.parentElement?.parentElement).toHaveClass('px-4');
   });
 
-  it('群名称搜索框、筛选按钮与发起协作按钮等高', () => {
+  it('v2：搜索框 h-8 视觉规范，筛选与发起协作图标按钮 32px 等高（收起走 shell 边缘 chevron）', () => {
     render(<GroupSidebar {...makeProps()} />);
-    expect(screen.getByRole('textbox', { name: '搜索协作群' })).toHaveClass('h-9');
-    expect(screen.getByRole('button', { name: '筛选' })).toHaveClass('h-9');
-    expect(screen.getByRole('button', { name: '发起协作' })).toHaveClass('h-9');
+    expect(screen.getByRole('textbox', { name: '搜索协作群' })).toHaveClass('h-8');
+    expect(screen.getByRole('button', { name: '筛选协作群' })).toHaveClass('h-8', 'w-8');
+    // 发起协作「+」：白底描边方块，与搜索框同一视觉语言（artboard-010 x=251）。
+    const createButton = screen.getByRole('button', { name: '发起协作' });
+    expect(createButton).toHaveClass('h-8', 'w-8', 'rounded-lg', 'border-input', 'bg-background');
+    // 搜索行内不再有收起按钮。
+    expect(screen.queryByRole('button', { name: '收起侧边栏' })).not.toBeInTheDocument();
   });
 
-  it('协作身份区位于群搜索工具行之前，群卡片保留可读间距并降低标题字重', () => {
+  it('协作身份区位于群搜索工具行之前（v2 行几何与身份行同壳）', () => {
     render(<GroupSidebar {...makeProps()} />);
     const identityRegion = screen.getByRole('region', { name: '当前协作身份' });
     const searchInput = screen.getByRole('textbox', { name: '搜索协作群' });
@@ -204,41 +207,44 @@ describe('GroupSidebar', () => {
     expect(identityWrapper?.parentElement).toBe(scrollContainer?.parentElement);
     expect(scrollContainer).toHaveClass('app-scrollbar', 'min-h-0', 'flex-1', 'overflow-y-auto');
     expect(scrollContainer?.firstElementChild).not.toBe(identityRegion);
-    const groupTrigger = screen.getByRole('button', { name: /主站群/ });
-    expect(groupTrigger.parentElement).toHaveClass('min-h-16', 'bg-muted', 'px-4', 'py-2.5');
-    expect(groupTrigger).toHaveClass('px-0', 'py-1');
-    expect(screen.getByText('主站群')).toHaveClass('text-sm', 'font-medium');
-    expect(screen.getByText('主站群')).not.toHaveClass('font-semibold');
-    expect(screen.getByText('自由聊天').parentElement).toHaveClass('text-xs', 'leading-4');
+    // 群一级行：52px 双行布局，行背景胶囊与按钮热区分离。
+    const groupRow = screen.getByRole('button', { name: /主站群/ }).closest('.group\\/row');
+    expect(groupRow).toHaveClass('relative', 'flex', 'min-h-13');
+    expect(screen.getByRole('button', { name: /主站群/ })).toHaveClass('min-h-13');
   });
 
-  it('v1.4：展开/选中群行头像品牌浅底弱化强调', () => {
-    const { unmount } = render(<GroupSidebar {...makeProps()} />);
-    const groupTrigger = screen.getByRole('button', { name: /主站群/ });
-    const avatar = groupTrigger.querySelector('svg.lucide-users')?.parentElement as HTMLElement;
-    expect(avatar).toHaveClass('bg-primary/15', 'text-primary', 'ring-primary/30');
-    unmount();
+  it('v2.1：群行无选中态（用户反馈移除）——选中群胶囊恒为 hover 弱底，不再落 bg-selected', () => {
+    const { rerender } = render(<GroupSidebar {...makeProps({ expandedGroupIds: {} })} />);
+    const capsule = screen.getByRole('button', { name: /主站群/ }).previousElementSibling as HTMLElement;
+    expect(capsule).toHaveClass('left-2', 'right-2', 'rounded-md', 'bg-muted/60', 'opacity-0');
+    expect(capsule).not.toHaveClass('opacity-100');
+    expect(capsule).not.toHaveClass('w-[3px]', 'rounded-r-sm');
 
-    render(<GroupSidebar {...makeProps({ expandedGroupIds: {}, selectedGroupId: null })} />);
-    const idleTrigger = screen.getByRole('button', { name: /主站群/ });
-    const idleAvatar = idleTrigger.querySelector('svg.lucide-users')?.parentElement as HTMLElement;
-    expect(idleAvatar).toHaveClass('bg-secondary', 'text-secondary-foreground', 'ring-border');
+    rerender(<GroupSidebar {...makeProps({ selectedGroupId: 'g1', expandedGroupIds: {} })} />);
+    const capsuleSelected = screen.getByRole('button', { name: /主站群/ }).previousElementSibling as HTMLElement;
+    expect(capsuleSelected).not.toHaveClass('bg-selected');
+    expect(capsuleSelected).toHaveClass('opacity-0');
   });
 
-  it('v1.4：群行操作区默认透明隐藏，悬停/键盘聚焦可显现，选中或展开时常显', () => {
+  it('v2.1：群行操作区默认透明隐藏，悬停/键盘聚焦可显现；常显（展开/收藏 Tab）须与标题让位同步防重叠，选中不再常显', () => {
     const { rerender } = render(<GroupSidebar {...makeProps({ expandedGroupIds: {}, selectedGroupId: null })} />);
-    const actions = screen.getByRole('button', { name: '协作群操作' }).parentElement as HTMLElement;
-    expect(actions).toHaveClass(
-      'opacity-0',
-      'transition-opacity',
-      'group-hover:opacity-100',
-      'group-focus-within:opacity-100',
-    );
+    const actions = screen.getByRole('button', { name: '协作群操作' }).parentElement?.parentElement as HTMLElement;
+    expect(actions).toHaveClass('opacity-0', 'transition-opacity');
+    expect(actions.className).toContain('group-hover/row:opacity-100');
+    expect(actions.className).toContain('group-focus-within/row:opacity-100');
     expect(actions).not.toHaveClass('opacity-100');
 
+    // 选中态已移除（用户反馈）：不常显、标题不让位。
     rerender(<GroupSidebar {...makeProps({ expandedGroupIds: {}, selectedGroupId: 'g1' })} />);
-    const actionsSelected = screen.getByRole('button', { name: '协作群操作' }).parentElement as HTMLElement;
-    expect(actionsSelected).toHaveClass('opacity-100');
+    const actionsSelected = screen.getByRole('button', { name: '协作群操作' }).parentElement?.parentElement as HTMLElement;
+    expect(actionsSelected).not.toHaveClass('opacity-100');
+    expect(screen.getByRole('button', { name: /主站群/ })).not.toHaveClass('pr-[88px]');
+
+    // 展开时常显，且标题同步让出 88px——常显按钮不与群名称重叠。
+    rerender(<GroupSidebar {...makeProps({ expandedGroupIds: { g1: true }, selectedGroupId: 'g1' })} />);
+    const actionsExpanded = screen.getByRole('button', { name: '协作群操作' }).parentElement?.parentElement as HTMLElement;
+    expect(actionsExpanded).toHaveClass('opacity-100');
+    expect(screen.getByRole('button', { name: /主站群/ })).toHaveClass('pr-[88px]');
 
     rerender(
       <GroupSidebar
@@ -249,17 +255,46 @@ describe('GroupSidebar', () => {
         })}
       />,
     );
-    const actionsFavorite = screen.getByRole('button', { name: '协作群操作' }).parentElement as HTMLElement;
+    const actionsFavorite = screen.getByRole('button', { name: '协作群操作' }).parentElement?.parentElement as HTMLElement;
     expect(actionsFavorite).toHaveClass('opacity-100');
+    expect(screen.getByRole('button', { name: /主站群/ })).toHaveClass('pr-[88px]');
   });
 
-  it('协作群列表头部筛选行保持吸顶(视图切换收口到 App Shell)', () => {
+  it('协作群列表头部搜索行保持吸顶(视图切换收口到 App Shell)', () => {
     render(<GroupSidebar {...makeProps()} />);
 
-    const toolRow = screen.getByRole('textbox', { name: '搜索协作群' }).parentElement?.parentElement?.parentElement
-      ?.parentElement;
+    // v2：搜索行（input → relative wrapper → GroupSidebarSearchRow 行 → sticky 容器）。
+    const toolRow = screen.getByRole('textbox', { name: '搜索协作群' }).parentElement?.parentElement
+      ?.parentElement as HTMLElement;
     expect(toolRow).toHaveClass('sticky', 'top-0', 'z-20', 'bg-muted/20');
     expect(toolRow?.parentElement).toHaveClass('app-scrollbar', 'overflow-y-auto');
+  });
+
+  it('v2：shell 边缘 chevron 收起侧栏，竖轨群头像直达（选中+反展开），顶部 + 发起协作', () => {
+    const onSelectGroup = jest.fn();
+    const onCreateGroup = jest.fn();
+    render(<GroupSidebar {...makeProps({ onSelectGroup, onCreateGroup })} />);
+    const aside = screen.getByRole('complementary', { name: '协作群列表' });
+    expect(aside).toHaveAttribute('data-collapsed', 'false');
+    // 搜索行「+」发起协作不承担收起；收起统一走 shell 边缘 chevron（与 restricted 用例同通道）。
+    fireEvent.click(screen.getByRole('button', { name: '收起对话协作左栏' }));
+    expect(aside).toHaveAttribute('data-collapsed', 'true');
+    // 竖轨：+ 发起协作入口存在（展开态搜索行内容已随 aria-hidden 移出可达树）；群头像直达 = 选中该群并展开侧栏。
+    expect(screen.getByRole('button', { name: '发起协作' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '打开协作群 主站群' }));
+    expect(onSelectGroup).toHaveBeenCalledWith('g1');
+    expect(aside).toHaveAttribute('data-collapsed', 'false');
+  });
+
+  it('v2 竖轨：restricted 单群视图无「+」发起协作入口，底部按钮仅展开', () => {
+    const onCreateGroup = jest.fn();
+    render(<GroupSidebar {...makeProps({ restricted: true, onCreateGroup })} />);
+    // restricted 无搜索行（其中「+」发起协作也不渲染），经 shell 边缘 chevron 收起。
+    fireEvent.click(screen.getByRole('button', { name: '收起对话协作左栏' }));
+    expect(screen.queryByRole('button', { name: '发起协作' })).not.toBeInTheDocument();
+    // 竖轨底部按钮仅展开，不携带跨群入口。
+    fireEvent.click(screen.getByRole('button', { name: '展开协作群列表' }));
+    expect(screen.getByRole('complementary', { name: '协作群列表' })).toHaveAttribute('data-collapsed', 'false');
   });
 });
 
@@ -268,7 +303,8 @@ it('restricted group list retains group sessions without cross-group search, fil
   expect(screen.getByText('主站群')).toBeInTheDocument();
   expect(screen.getByText('会话一')).toBeInTheDocument();
   expect(screen.queryByRole('textbox', { name: '搜索协作群' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: '筛选' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '筛选协作群' })).not.toBeInTheDocument();
+  expect(screen.queryByText('协作群')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '发起协作' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '切换工作身份' })).not.toBeInTheDocument();
 });

@@ -8,11 +8,11 @@ and migration from #2533 remain authoritative; this change adds no second flag.
 ## Public contract
 
 `GET/PUT /openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-approval-policy`
-read or replace `{"auto_approve_editor_requests": boolean}`. Only the active
-OWNER Grant of a live Team Space Skill may read or write. Other users and
-Personal Space Skills cannot manage this policy. PUT requires a strict boolean
-and rejects unknown fields. New and existing bindings default to false after
-the binding migration is applied.
+read or replace `{"auto_approve_editor_requests": boolean}`. Active Team Space
+members may read the policy of a live Skill; only its active OWNER Grant may
+replace it. Non-members and Personal Space Skills cannot read or manage this
+policy. PUT requires a strict boolean and rejects unknown fields. New and
+existing bindings default to false after the binding migration is applied.
 
 `POST /openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-requests`
 remains the Skill product's application entry. Its response fields are
@@ -20,9 +20,11 @@ unchanged; status is PENDING for manual review or APPROVED after AUTO succeeds.
 The Skill module checks the applicant, Team binding, live Skill, Owner, active
 membership, existing Grant, and pending request before selecting the mode.
 The MANUAL path retains the Owner's approval task and notification. AUTO calls
-the WorkOrder Service in-process with `approver_user_ids=[applicant_user_id]`
-and `recipient_user_ids=[]`. AUTO interprets the required, normalized approver
-list only as result recipients, creating no human approver rows; both user-facing generic events routes reject AUTO.
+the WorkOrder Service in-process with `approver_user_ids=[]`
+and `recipient_user_ids=[applicant_user_id]`. AUTO uses normalized recipients
+only for result notices, creating no human approver rows. Updated October 13, 2026:
+generic events routes accept AUTO with existing authentication; business callers
+own AUTO eligibility. Generic Skill APPROVAL remains forbidden.
 The applicant cannot choose the approval mode. An AUTO failure is an error, not
 a successful editor-request response.
 

@@ -4,7 +4,15 @@ import { Spin } from '@/components/ui/Spin';
 import { appExtension } from '@/extensions';
 import { useBotAvatar } from '@/hooks/useBotAvatar';
 import { Suspense } from 'react';
-export function AvatarSettings({ botId, editable }: { botId: string; editable: boolean }) {
+export function AvatarSettings({
+  botId,
+  editable,
+  onSaved,
+}: {
+  botId: string;
+  editable: boolean;
+  onSaved?: (url: string) => void;
+}) {
   const avatar = useBotAvatar(botId);
   const Editor = appExtension.avatarEditor;
   return (
@@ -28,7 +36,14 @@ export function AvatarSettings({ botId, editable }: { botId: string; editable: b
             disabled={!editable || avatar.loading || avatar.saving}
           />
         </Suspense>
-        <Button disabled={!editable || avatar.loading || avatar.saving} onClick={() => void avatar.save()}>
+        <Button
+          disabled={!editable || avatar.loading || avatar.saving}
+          onClick={() => {
+            void avatar.save().then((url) => {
+              if (url) onSaved?.(url);
+            });
+          }}
+        >
           保存头像
         </Button>
       </PopoverContent>

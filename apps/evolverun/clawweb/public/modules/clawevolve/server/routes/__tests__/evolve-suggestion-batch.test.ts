@@ -44,7 +44,7 @@ beforeEach(async () => {
     id INTEGER PRIMARY KEY, device_provider TEXT, device_id TEXT, device_props TEXT, status TEXT, env TEXT
   )`);
   await db.exec(`CREATE TABLE IF NOT EXISTS ac_bots (
-    id INTEGER PRIMARY KEY, bot_id TEXT NOT NULL, bot_name TEXT, owner_id TEXT, entity_id TEXT,
+    id INTEGER PRIMARY KEY, bot_id TEXT NOT NULL, bot_name TEXT, owner_id TEXT, entity_id TEXT, entity_type TEXT DEFAULT 'staff',
     is_delete INTEGER NOT NULL DEFAULT 0, active_engine TEXT, bot_type TEXT, status TEXT,
     binding_id INTEGER, env TEXT
   )`);

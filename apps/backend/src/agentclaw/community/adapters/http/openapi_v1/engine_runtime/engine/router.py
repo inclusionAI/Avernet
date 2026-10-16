@@ -50,6 +50,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
     RuntimeStage,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    DeviceUuidQuery,
     OwnerIdDep,
     StageQuery,
 )
@@ -92,6 +93,7 @@ async def get_engine_status(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[EngineStatus]:
     """Runtime state of the bot's engine."""
@@ -107,6 +109,7 @@ async def get_engine_status(
     # no `success` key and no `data` wrapper. The only such route wrapped here.
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         method="GET", path="/api/engine/status",
         enveloped=False,
     )
@@ -132,6 +135,7 @@ async def get_engine_capabilities(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[EngineCapabilities]:
     """What this bot can do.
@@ -149,6 +153,7 @@ async def get_engine_capabilities(
     )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         method="GET",
         path="/api/engine/capabilities",
     )
@@ -175,6 +180,7 @@ async def get_engine_default_config(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[EngineDefaultConfig]:
     """Factory-default configuration of the bot's engine.
@@ -197,6 +203,7 @@ async def get_engine_default_config(
     # the same endpoint the legacy console reached through the proxypass.
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         method="GET", path="/api/openclaw/default-config",
     )
     raw = result.data if isinstance(result.data, dict) else {}
@@ -217,6 +224,7 @@ async def list_available_engines(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[list[EngineInfo]]:
     """Engines available on this bot, with the active one marked."""
@@ -231,6 +239,7 @@ async def list_available_engines(
     )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         method="GET", path="/api/engine/list",
     )
     raw = result.data
@@ -263,6 +272,7 @@ async def restart_bot_engine(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[EngineRestartResult]:
     """Restart the bot's engine process.
@@ -289,6 +299,7 @@ async def restart_bot_engine(
     )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         method="POST", path="/api/engine/restart",
         # The device endpoint is typed ``engine_restart(request:
         # EngineRestartRequest)``: FastAPI rejects a bodyless POST with 422

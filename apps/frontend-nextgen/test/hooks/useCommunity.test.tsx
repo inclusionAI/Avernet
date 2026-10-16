@@ -77,7 +77,8 @@ describe('useCommunity', () => {
     jest.useRealTimers();
   });
 
-  test('进入页面后防抖加载主题，按 query/scope 请求（limit=COMMUNITY_PAGE_SIZE）', async () => {
+  test('进入页面后防抖加载主题，按 query/scope 请求（limit=10）', async () => {
+    expect(COMMUNITY_PAGE_SIZE).toBe(10);
     useCommunityStore.setState({ query: '  Bot  ', scope: 'mine' });
     const { result } = renderHook(() => useCommunity());
 

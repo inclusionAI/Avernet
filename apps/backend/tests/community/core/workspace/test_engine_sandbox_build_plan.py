@@ -54,6 +54,9 @@ class TestEngineBuildPlanExtraSync:
 
 
 @pytest.mark.unit
-def test_aicoding_build_plan_extra_includes_cron_tasks_only():
-    assert _AICODING_BUILD_PLAN.extra_include_files == ["sessions/cron-tasks.json"]
+def test_aicoding_build_plan_extra_includes():
+    assert _AICODING_BUILD_PLAN.extra_include_files == [
+        "sessions/cron-tasks.json",
+        "/home/admin/.codefuse/fuse/codefuse.json",
+    ]
     assert "sessions" in _AICODING_BUILD_PLAN.rsync_excludes

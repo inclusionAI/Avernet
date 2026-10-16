@@ -105,7 +105,8 @@ class RestartState:
 
         Queue dedup is the admission authority. The monotonic task row ID prevents
         a delayed submitter overwriting a subsequent operation or its outcome.
-        Journal CAS and Bot status use separate existing repository methods.
+        Admission writes PENDING before enqueue; ensure only repairs the journal
+        and terminal FAILED status, never initializes PENDING.
         """
         for _ in range(12):
             bot = self.read()
@@ -157,7 +158,7 @@ class RestartState:
         """
         record = journal(bot)
         phase = record.get("phase")
-        if phase not in {"QUEUED", "FAILED"}:
+        if phase != "FAILED":
             return bot
         target = record.get("failed_binding_id", record.get("binding_id"))
         current = self.read()
@@ -170,7 +171,7 @@ class RestartState:
             or current.get("active_engine") != record.get("engine")
         ):
             return current
-        status = "FAILED" if phase == "FAILED" else "PENDING"
+        status = "FAILED"
         # A rejected admission has no matching public failure marker.
         if phase == "FAILED" and (
             (current.get("ext") or {}).get("start_status") != "FAILED"

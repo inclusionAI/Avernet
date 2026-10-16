@@ -10,7 +10,7 @@ import { AgentCodingGuide } from '@/pages/Workspace/components/AgentCodingGuide'
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import type { PanelHandle } from '@tc-chat/core';
 import type { SenderRef } from '@tc-chat/ui/es/Sender';
-import type { RefObject } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import type { ConversationInteractiveChatModel } from './hooks/useConversationInteractiveChat';
 
 /** ChatPanel 以非空 RefObject 声明 ref prop;实际均为 useRef<T>(null) 形态的静态换形。 */
@@ -21,8 +21,28 @@ export function ConversationInteractiveStage(props: {
   model: ConversationInteractiveChatModel;
   onOpenSessionList(): void;
   onOpenAgentCodingBot(bot: ChatBotView): void;
+  /** 头部五图标列（chat-header-panels）：页面装配，取代原「会话文件」单图标位。 */
+  headerActions?: ReactNode;
+  /** 头部右缘面板（会话详情/历史消息）：由页面按开合态装配（chat-header-panels）。 */
+  headerRightPanels?: ReactNode;
+  /** 历史面板结果点击的定位高亮消息 id（透传消息列表滚动定位）。 */
+  highlightMessageId?: string | null;
+  /** 副屏开合态 + toggle + 真实态同步入口（chat-header-panels）：供 ChatPanel 渲染副屏右上「收起」悬浮钮。 */
+  sidePaneOpen?: boolean;
+  onToggleSidePane?: () => void;
+  onSidePaneIsOpenChange?: (open: boolean) => void;
 }): JSX.Element {
-  const { model, onOpenSessionList, onOpenAgentCodingBot } = props;
+  const {
+    model,
+    onOpenSessionList,
+    onOpenAgentCodingBot,
+    headerActions,
+    headerRightPanels,
+    highlightMessageId,
+    sidePaneOpen,
+    onToggleSidePane,
+    onSidePaneIsOpenChange,
+  } = props;
   const { botChat, fileFeature, taskExecution } = model;
   return (
     <>
@@ -33,10 +53,16 @@ export function ConversationInteractiveStage(props: {
           target={model.target}
           viewer={model.viewer}
           sessionTitle={model.selectedSession?.title}
+          sessionCode={model.selectedSession?.sessionId}
           authenticatedUserId={model.authenticatedUserId}
           authenticatedUserName={model.authenticatedUserName}
           userAvatarUrl={model.userAvatarUrl}
           messages={botChat.chat.messages}
+          headerActions={headerActions}
+          highlightMessageId={highlightMessageId}
+          sidePaneOpen={sidePaneOpen}
+          onToggleSidePane={onToggleSidePane}
+          onSidePaneIsOpenChange={onSidePaneIsOpenChange}
           isRequesting={botChat.chat.isRequesting}
           isLoadingMessages={botChat.chat.isDefaultMessagesRequesting}
           connectionStatus={botChat.connectionStatus}
@@ -56,7 +82,6 @@ export function ConversationInteractiveStage(props: {
             isLoading: botChat.isLoadingMoreHistory,
             onLoadMore: () => void botChat.loadMoreHistory(),
           }}
-          onManageFiles={model.desktopFileFeaturesHidden ? undefined : fileFeature.openFileDrawer}
           modelSelector={
             <BotModelSelectorContainer
               chatBots={model.chatBots}
@@ -72,11 +97,12 @@ export function ConversationInteractiveStage(props: {
               onUpload={model.desktopFileFeaturesHidden ? undefined : fileFeature.openUpload}
               disabled={model.taskComposerDisabled}
               disabledReason={model.taskComposerDisabledReason}
-              selectedWorkflow={taskExecution.selectedWorkflow}
-              pendingDynamic={taskExecution.pendingDynamic}
+              selections={taskExecution.selections}
               onWorkflowSelected={taskExecution.selectWorkflow}
               onDynamicSelected={taskExecution.selectDynamic}
-              onClearSelection={taskExecution.clearSelection}
+              onRemoveSelection={taskExecution.removeSelection}
+              /* 能力集只读查看：我的/团队 Bot 装配（好友 Bot 为 null 不渲染文案区）。 */
+              capabilitySets={fileFeature.capabilitySets}
             />
           }
           fileChip={model.desktopFileFeaturesHidden ? undefined : fileFeature.fileChip}
@@ -89,6 +115,7 @@ export function ConversationInteractiveStage(props: {
         />
       )}
       {fileFeature.featureNode}
+      {headerRightPanels}
     </>
   );
 }

@@ -51,6 +51,21 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     expect((await f.request(`/${created.body.taskId}/revisions/1`, undefined, 'viewer')).status).toBe(200);
     expect((await f.request(`/${created.body.taskId}/revisions/999`)).status).toBe(404);
   });
+  it('authorizes frozen-input retry and returns the same revision for duplicate requests', async () => {
+    const f = await setup();
+    const inbox = await f.request('/candidates?workflowId=wf-1');
+    const created = await f.request('/', { workflowId: 'wf-1', inputDigest: inbox.body.inputDigest,
+      itemIds: ['item-0'], instructions: 'Keep rules', requestId: 'first' });
+    f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: 'model failed' });
+    await f.service.reconcile();
+    const path = `/${created.body.taskId}/retry-generation`;
+    const input = { expectedRevision: 1, requestId: 'retry-first' };
+    expect((await f.request(path, input, 'viewer')).status).toBe(403);
+    const [first, repeated] = await Promise.all([f.request(path, input), f.request(path, input)]);
+    expect(first.status).toBe(202); expect(repeated.status).toBe(202);
+    expect(first.body.revision).toBe(2); expect(repeated.body).toEqual(first.body);
+    expect(f.calls).toHaveLength(2);
+  });
   it('validates and forwards server-side inbox pagination', async () => {
     const f = await setup();
     const page = await f.request('/candidates?workflowId=wf-1&state=pending&page=1&pageSize=1');
@@ -131,7 +146,7 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     await f.service.report({ workflowId: 'wf-1', taskId: created.taskId, revision: 1, expectedStateVersion: 0, status: 'succeeded', draft, checks });
     const diff = await f.request(`/${created.taskId}/revisions/1/diff?base=baseline&candidateCommit=forged`);
     expect(diff).toMatchObject({ status: 200, body: { candidateCommit: draft.candidateCommit, baseCommit: created.input.baseline.packCommit } });
-    f.executionPort.dispatch = async () => { throw new Error('uncertain'); };
+    f.executionPort.dispatch = async () => { throw new Error('AIS executeSnapshot HTTP 400: invalid request'); };
     const revised = await f.request(`/${created.taskId}/revisions`, { ...input, requestId: 'revision-2', feedback: 'Improve further', expectedAttemptRevision: 1, parentCandidateCommit: draft.candidateCommit });
     expect(revised).toMatchObject({ status: 202, body: { revision: 2, phase: 'drafting' } });
     expect((await f.request(`/${created.taskId}`)).body.execution.status).toBe('dispatch_failed');
@@ -140,4 +155,28 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     expect(await f.request(`/${created.taskId}/retry-dispatch`, { expectedRevision: 2 })).toEqual({ status: 202, body: { ok: true } });
     expect((await f.request(`/${created.taskId}/retry-dispatch`, { expectedRevision: 1 })).status).toBe(409);
   });
+  it('returns a recovery action and rechecks failed results without dispatching before an optional-text revision', async () => {
+    const f = await setup();
+    const inbox = (await f.request('/candidates?workflowId=wf-1')).body;
+    const input = { workflowId: 'wf-1', inputDigest: inbox.inputDigest, itemIds: ['item-0'], instructions: '', requestId: 'first' };
+    const created = (await f.request('/', input)).body;
+    f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: 'failed' });
+    await f.service.reconcile();
+    const originalRead = f.executionPort.readResult;
+    f.executionPort.readResult = async () => { throw new Error('Git transport unavailable'); };
+    const revised = { ...input, requestId: 'revision-two', expectedAttemptRevision: 1, parentCandidateCommit: null, feedback: '' };
+    expect(await f.request(`/${created.taskId}/revisions`, revised)).toMatchObject({ status: 409,
+      body: { code: 'STATE_CONFLICT', recoveryAction: 'retry-result', reasonCode: 'RESULT_READ_UNKNOWN' } });
+    expect(f.calls).toHaveLength(1);
+    expect(await f.request(`/${created.taskId}/retry-result`, { expectedRevision: 1 })).toMatchObject({ status: 409,
+      body: { recoveryAction: 'retry-result' } });
+    f.executionPort.readResult = originalRead;
+    expect(await f.request(`/${created.taskId}/retry-result`, { expectedRevision: 1 })).toEqual({ status: 202, body: { ok: true } });
+    expect(f.calls).toHaveLength(1);
+    expect((await f.service.task(created.taskId)).latestAttempt.phase).toBe('failed');
+    expect(await f.request(`/${created.taskId}/revisions`, revised)).toMatchObject({ status: 202,
+      body: { revision: 2, input: { instructions: '', feedback: '' } } });
+    expect(f.calls).toHaveLength(2);
+  });
+
 });

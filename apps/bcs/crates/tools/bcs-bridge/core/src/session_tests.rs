@@ -88,7 +88,7 @@ async fn v1_migration_preserves_session_mapping_and_recovers_inflight_injects() 
     create_v1_database(&fixture);
     let store = fixture.open("provider-a");
     let version = store.access(|conn| Ok(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?)).await.unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
     assert_eq!(store.mapping("worker-a", "s-1").await.unwrap().engine_session_id.as_deref(), Some("engine-original"));
     let batch = store.claim_injects("worker-a", "s-1", "after-migration").await.unwrap();
     assert_eq!(ids(&batch), ["inject-original"]);
@@ -479,4 +479,54 @@ async fn failed_completion_or_release_keeps_the_claimed_batch_retryable() {
     drop(store);
     let reopened = fixture.open("provider-a");
     assert!(reopened.claim_injects("worker-a", "s-1", "after-restart").await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn codex_workspaces_resume_independently_and_keep_injects_in_their_project() {
+    for engine in ["codex", "codex-desktop"] {
+        let fixture = Fixture::new();
+        let mut bots = fixture.bots.clone();
+        bots[0].engine = engine.into();
+        let b = fixture.dir.path().join("project-b");
+        std::fs::create_dir(&b).unwrap();
+        let a = SessionStore::open(&fixture.path, "provider-a", &bots).unwrap();
+        a.set_engine_session_id("worker-a", "s-1", "thread-a").await.unwrap();
+        let identity = ConnectionIdentity { bot_id: "same-bot".into(), token: "same-token".into() };
+        a.save_identity("same-server", "worker-a", identity.clone()).await.unwrap();
+        a.enqueue_inject("worker-a", "s-1", InjectedMessage { run_id: "inject-a".into(), from_name: None, text: "project a only".into() }, "fp-a".into()).await.unwrap();
+        drop(a);
+        bots[0].cwd = b;
+        let other = SessionStore::open(&fixture.path, "provider-a", &bots).unwrap();
+        assert!(other.mapping("worker-a", "s-1").await.unwrap().engine_session_id.is_none());
+        assert_eq!(other.load_identity("same-server", "worker-a").await.unwrap(), Some(identity));
+        assert!(other.claim_injects("worker-a", "s-1", "run-b").await.unwrap().is_empty());
+        other.set_engine_session_id("worker-a", "s-1", "thread-b").await.unwrap();
+        assert!(matches!(other.enqueue_inject("worker-a", "s-1", InjectedMessage { run_id: "inject-a".into(), from_name: None, text: "project a only".into() }, "fp-a".into()).await, Err(SessionError::Conflict)));
+        drop(other);
+        bots[0].cwd = fixture.dir.path().to_owned();
+        let original = SessionStore::open(&fixture.path, "provider-a", &bots).unwrap();
+        assert_eq!(original.mapping("worker-a", "s-1").await.unwrap().engine_session_id.as_deref(), Some("thread-a"));
+        assert_eq!(ids(&original.claim_injects("worker-a", "s-1", "run-a").await.unwrap()), vec!["inject-a"]);
+    }
+}
+
+#[tokio::test]
+async fn v2_codex_migration_keeps_original_project_thread_and_receipts() {
+    let fixture = Fixture::new();
+    create_v1_database(&fixture);
+    let conn = rusqlite::Connection::open(&fixture.path).unwrap();
+    conn.execute_batch("UPDATE sessions SET engine='codex'; CREATE TABLE connection_identities (
+        provider TEXT NOT NULL, server TEXT NOT NULL, bot TEXT NOT NULL, bot_id TEXT NOT NULL,
+        token TEXT NOT NULL, PRIMARY KEY(provider,server,bot)); PRAGMA user_version=2;").unwrap();
+    drop(conn);
+    let mut bots = fixture.bots.clone();
+    bots[0].engine = "codex".into();
+    let store = SessionStore::open(&fixture.path, "provider-a", &bots).unwrap();
+    assert_eq!(store.mapping("worker-a", "s-1").await.unwrap().engine_session_id.as_deref(), Some("engine-original"));
+    assert_eq!(ids(&store.claim_injects("worker-a", "s-1", "resumed").await.unwrap()), vec!["inject-original"]);
+    store.access(|conn| {
+        let violations = conn.prepare("PRAGMA foreign_key_check")?.query_map([], |_| Ok(()))?.count();
+        assert_eq!(violations, 0);
+        Ok(())
+    }).await.unwrap();
 }

@@ -24,6 +24,7 @@ export type InsightRuntime = {
   providerMode: string;
   providerDescription: string;
   dingTalkNotificationEnabled: boolean;
+  notificationSender?: Pick<DingTalkSender, "sendNotification"> | null;
   evidenceAccessEnabled: boolean;
   ruleProvider: GovernanceRuleProvider | null;
 };
@@ -109,6 +110,7 @@ export function createInsightRuntime(
       providerMode: "disabled",
       providerDescription: "disabled by INSIGHT_READ_PROVIDER",
       dingTalkNotificationEnabled: dingTalkSender.enabled,
+      notificationSender: dingTalkSender.enabled ? dingTalkSender : null,
       evidenceAccessEnabled: false,
       ruleProvider,
     };
@@ -132,6 +134,7 @@ export function createInsightRuntime(
       providerMode,
       providerDescription: `fixture root=${evidenceRoot}`,
       dingTalkNotificationEnabled: dingTalkSender.enabled,
+      notificationSender: dingTalkSender.enabled ? dingTalkSender : null,
       evidenceAccessEnabled: true,
       ruleProvider,
     };
@@ -171,6 +174,7 @@ export function createInsightRuntime(
         providerMode,
         providerDescription: `db metrics/task index, unsupported evidence provider: ${evidenceMode}`,
         dingTalkNotificationEnabled: dingTalkSender.enabled,
+      notificationSender: dingTalkSender.enabled ? dingTalkSender : null,
         evidenceAccessEnabled: false,
         ruleProvider,
       };
@@ -190,6 +194,7 @@ export function createInsightRuntime(
       providerMode,
       providerDescription: `db metric snapshot/task index, evidence=${evidenceDescription}`,
       dingTalkNotificationEnabled: dingTalkSender.enabled,
+      notificationSender: dingTalkSender.enabled ? dingTalkSender : null,
       evidenceAccessEnabled: true,
       ruleProvider,
     };
@@ -204,6 +209,7 @@ export function createInsightRuntime(
     providerMode,
     providerDescription: `unsupported provider: ${providerMode}`,
     dingTalkNotificationEnabled: dingTalkSender.enabled,
+      notificationSender: dingTalkSender.enabled ? dingTalkSender : null,
     evidenceAccessEnabled: false,
     ruleProvider,
   };

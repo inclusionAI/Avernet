@@ -73,16 +73,16 @@ test('Owner 行与上方说明使用相同字号', () => {
   expect(ownerRow).not.toHaveClass('text-sm');
 });
 
-test.each([2, 120])('成员入口 %s 位位于标题栏群类型左侧，点击与键盘仍打开当前群', async (memberCount) => {
+test.each([2, 120])('成员入口 %s 位位于底部左侧，点击与键盘仍打开当前群', async (memberCount) => {
   const onOpenMembers = jest.fn();
   const currentGroup = { ...group, memberCount };
   render(<GroupCard group={currentGroup} {...actions} onOpenMembers={onOpenMembers} />);
   const button = screen.getByRole('button', { name: `${memberCount} 位成员` });
-  const header = screen.getByRole('heading', { name: group.name }).parentElement?.parentElement;
+  const header = screen.getByRole('heading', { name: group.name }).parentElement;
   const type = screen.getByText(group.typeLabel);
-  expect(header).toContainElement(button);
-  expect(button.parentElement).toContainElement(type);
-  expect(button.compareDocumentPosition(type) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(header).not.toContainElement(button);
+  expect(header).toContainElement(type);
+  expect(button.parentElement).toHaveClass('mt-auto', 'justify-between');
   expect(screen.getAllByRole('button', { name: `${memberCount} 位成员` })).toHaveLength(1);
   await userEvent.click(button);
   expect(onOpenMembers).toHaveBeenLastCalledWith(currentGroup);
@@ -91,25 +91,29 @@ test.each([2, 120])('成员入口 %s 位位于标题栏群类型左侧，点击�
   expect(onOpenMembers).toHaveBeenCalledTimes(2);
 });
 
-test('成员入口复用群类型的 Badge 字号、颜色、圆角和间距，图标缩小到 12px', () => {
-  render(<GroupCard group={{ ...group, memberCount: 2 }} {...actions} />);
-  const members = screen.getByText('2 位成员');
-  const type = screen.getByText(group.typeLabel);
-  for (const token of [
-    'text-[11px]',
-    'font-medium',
-    'bg-muted',
-    'text-muted-foreground',
-    'rounded-full',
-    'px-2',
-    'py-0.5',
-  ]) {
-    expect(type).toHaveClass(token);
-    expect(members).toHaveClass(token);
-  }
-  expect(members.querySelector('svg')).toHaveClass('size-3');
-  const button = screen.getByRole('button', { name: '2 位成员' });
-  expect(button).toHaveClass('h-auto', 'border-0', 'p-0', 'leading-normal');
+test('群卡采用圆角浅灰底、右上类型标签和底部图标操作', async () => {
+  const onShare = jest.fn();
+  const onCreateSession = jest.fn();
+  render(<GroupCard group={{ ...group, memberCount: 2 }} {...actions} onShare={onShare} onCreateSession={onCreateSession} />);
+  expect(screen.getByText(group.typeLabel)).toHaveClass('bg-success/10');
+  const memberButton = screen.getByRole('button', { name: '2 位成员' });
+  expect(memberButton).toHaveTextContent('成员 · 2');
+  const share = screen.getByRole('button', { name: `分享 ${group.name}` });
+  expect(share).toHaveClass('text-foreground');
+  const create = screen.getByRole('button', { name: '创建新会话' });
+  expect(share.parentElement).toBe(create.parentElement);
+  expect(memberButton.parentElement).toContainElement(create);
+  await userEvent.click(share);
+  await userEvent.click(create);
+  expect(onShare).toHaveBeenCalled();
+  expect(onCreateSession).toHaveBeenCalled();
+});
+
+test('群卡仍限制不可创建会话及忙碌状态', () => {
+  const { rerender } = render(<GroupCard group={{ ...group, canCreateSession: false }} {...actions} />);
+  expect(screen.getByRole('button', { name: '创建新会话' })).toBeDisabled();
+  rerender(<GroupCard group={group} {...actions} busy />);
+  expect(screen.getByRole('button', { name: '创建新会话' })).toBeDisabled();
 });
 
 test('Owner 与说明位于同一无额外间距区块，按正常行距连续展示', () => {

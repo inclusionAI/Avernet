@@ -1,5 +1,8 @@
 {
   "raw_user_config": {
+    "admin": {
+      "cron_admin": []
+    },
     "app": {
       "description": "Custom SOFAPy application",
       "local_debug": true,
@@ -74,7 +77,7 @@
       "task_deadline_seconds": 600
     },
     "device_allocation": {
-      "max_devices_per_entity": 5,
+      "max_devices_per_entity": 2,
       "mode": "multi"
     },
     "device_provider": "local",
@@ -121,6 +124,9 @@
         "secure": true
       }
     },
+    "openapi": {
+      "user_id_bypass": []
+    },
     "openapi_bot": {
       "api_key_prefix": "${api_key_prefix:-}",
       "api_key_secret": "${api_key_secret:-}",
@@ -154,6 +160,12 @@
       "mist_mode": "dev",
       "scan_interval_hours": 1,
       "storage_dir": "./data/skills_scan"
+    },
+    "task_discovery": {
+      "frontend_url": "${FRONTEND_URL:-http://localhost:8000}"
+    },
+    "task_dispatch": {
+      "backend_url": ""
     },
     "task_queue_worker": {
       "enabled": true
@@ -225,7 +237,7 @@
     },
     "device_allocation": {
       "arca_legacy_tenant": "legacy",
-      "max_devices_per_entity": 5,
+      "max_devices_per_entity": 2,
       "mode": "multi"
     },
     "device_provider": {

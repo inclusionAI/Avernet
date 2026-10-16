@@ -14,7 +14,7 @@ export interface CreateGroupInput {
   definitionYaml?: string;
   driverBotUuid: string;
   originator: string;
-  participants: Array<{ actor_id: string; message_view_scope?: MessageViewScope }>;
+  participants: Array<{ actor_id: string; tags?: string[]; message_view_scope?: MessageViewScope }>;
   context?: string;
   participantBindings?: Array<{ binding: string; actor_ids: string[] }>;
 }

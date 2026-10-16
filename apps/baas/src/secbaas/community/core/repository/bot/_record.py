@@ -33,3 +33,19 @@ class BotRecord:
     auto_scaling_enabled: int
     sla_grade: str
     extra_config: dict[str, Any]
+
+
+@dataclass(slots=True)
+class RestoredBotRecord:
+    """Snapshot returned by ``restore_bot_record_by_id``.
+
+    Carries the post-transaction ``BotRecord`` (``is_deleted=0``,
+    ``status=ACTIVE``) plus the target's captured pre-state and the number
+    of live siblings retired in the same transaction — everything the
+    service layer needs to audit-log and build the API result.
+    """
+
+    record: BotRecord
+    previous_status: str
+    previous_is_deleted: int
+    retired_sibling_count: int

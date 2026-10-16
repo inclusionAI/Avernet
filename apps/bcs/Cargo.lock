@@ -255,7 +255,7 @@ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
 name = "bcs"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -267,6 +267,7 @@ dependencies = [
  "bcs-app-collaboration-definition",
  "bcs-app-collaboration-template",
  "bcs-app-group",
+ "bcs-app-group-context",
  "bcs-app-invitation",
  "bcs-app-invite-code",
  "bcs-app-register",
@@ -309,6 +310,7 @@ dependencies = [
  "bcs-fuse-client",
  "bcs-fusion",
  "bcs-group",
+ "bcs-group-context-store",
  "bcs-group-store",
  "bcs-http",
  "bcs-human-notify-api",
@@ -401,7 +403,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-admin"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "anyhow",
  "bcs",
@@ -429,7 +431,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-api-http"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
@@ -458,7 +460,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-app-bot"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-bot",
@@ -477,7 +479,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-app-collaboration-definition"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-service-api",
@@ -486,7 +488,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-app-collaboration-template"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-service-api",
@@ -495,7 +497,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-app-group"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-bot",
@@ -517,8 +519,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-app-group-context"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-domain",
+ "bcs-group-context-store",
+ "bcs-service-api",
+ "chrono",
+ "serde_json",
+ "tokio",
+ "ulid",
+]
+
+[[package]]
 name = "bcs-app-invitation"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-bot",
@@ -536,7 +552,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-app-invite-code"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-service-api",
@@ -550,7 +566,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-app-register"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
@@ -565,7 +581,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-app-session"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-bot",
@@ -592,7 +608,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-auth-alipay"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -615,7 +631,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-auth-api"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
@@ -629,7 +645,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-auth-github"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
@@ -649,7 +665,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-auth-google"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
@@ -669,7 +685,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-auth-local"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
@@ -680,7 +696,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-auth-oauth"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
@@ -692,7 +708,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-auth-session"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
@@ -703,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-auth-wechat"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-auth-api",
@@ -718,7 +734,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-bot"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-bot-store",
@@ -746,7 +762,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-bot-store"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-config",
@@ -766,10 +782,11 @@ dependencies = [
 
 [[package]]
 name = "bcs-bridge-app"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum",
  "base64 0.22.1",
  "bcs-bridge-core",
  "clap",
@@ -789,24 +806,26 @@ dependencies = [
 
 [[package]]
 name = "bcs-bridge-cli"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "axum",
  "base64 0.22.1",
  "bcs-bridge-app",
  "bcs-bridge-qwenwork",
+ "futures",
  "libc",
  "reqwest",
  "rusqlite",
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-tungstenite 0.26.2",
  "toml",
 ]
 
 [[package]]
 name = "bcs-bridge-core"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -835,12 +854,14 @@ dependencies = [
 
 [[package]]
 name = "bcs-bridge-qwenwork"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
+ "anyhow",
  "async-trait",
  "axum",
  "bcs-bridge-core",
  "bcs-protocol",
+ "dirs",
  "futures",
  "reqwest",
  "rusqlite",
@@ -857,7 +878,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-cache-api"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "thiserror 2.0.20",
@@ -865,7 +886,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-cache-local"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-cache-api",
@@ -875,7 +896,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-cache-redis"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-cache-api",
@@ -888,7 +909,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-callback"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-observability",
@@ -904,7 +925,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-channel"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-channel-api",
@@ -923,7 +944,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-channel-api"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-service-api",
@@ -936,7 +957,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-channel-store"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-config-api",
@@ -955,7 +976,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-chat-run-store"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-cache-api",
@@ -971,7 +992,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-cli"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1003,7 +1024,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-collaboration-runtime"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-callback",
@@ -1038,7 +1059,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-collaboration-store"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-config-api",
@@ -1060,7 +1081,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-collaboration-template"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-domain",
@@ -1075,7 +1096,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-config"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "bcs-config-api",
  "serde_yaml",
@@ -1086,7 +1107,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-config-api"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "ipnet",
  "secrecy",
@@ -1099,7 +1120,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-coordination-store"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-cache-api",
@@ -1114,7 +1135,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-db-api"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "thiserror 2.0.20",
@@ -1122,7 +1143,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-db-local"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-db-api",
@@ -1135,7 +1156,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-db-mysql"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-config-api",
@@ -1148,7 +1169,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-domain"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -1164,13 +1185,14 @@ dependencies = [
 
 [[package]]
 name = "bcs-edge-permission"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-db-api",
  "bcs-db-local",
  "bcs-domain",
  "bcs-edge-permission-store",
+ "bcs-friend",
  "bcs-service-api",
  "bcs-test-support",
  "bcs-user-directory-api",
@@ -1182,7 +1204,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-edge-permission-store"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-db-api",
@@ -1198,7 +1220,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-event-store"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-config-api",
@@ -1219,7 +1241,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-eventing"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-config-api",
@@ -1245,7 +1267,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-friend"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-config",
@@ -1263,7 +1285,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-friend-store"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-config",
@@ -1282,7 +1304,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-fuse-client"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "bcs-config-api",
  "bcs-observability",
@@ -1296,7 +1318,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-fusion"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-config-api",
@@ -1313,7 +1335,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-group"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-bot",
@@ -1337,8 +1359,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-group-context-store"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-config-api",
+ "bcs-db-api",
+ "bcs-db-local",
+ "bcs-db-mysql",
+ "bcs-domain",
+ "chrono",
+ "mysql_async",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
 name = "bcs-group-store"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-db-api",
@@ -1360,7 +1399,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-http"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
@@ -1397,6 +1436,7 @@ dependencies = [
  "bcs-test-support",
  "bcs-user-directory-api",
  "bytes",
+ "chrono",
  "futures",
  "hex",
  "opentelemetry",
@@ -1434,7 +1474,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-human-notify-dummy"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-config-api",
@@ -1448,7 +1488,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-human-notify-work-order"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-config-api",
@@ -1466,7 +1506,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-interaction"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-domain",
@@ -1481,7 +1521,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-invite-code-store"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-config",
@@ -1500,7 +1540,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-judge"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-llm-api",
@@ -1513,7 +1553,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-jwt"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "base64 0.22.1",
  "bcs-service-api",
@@ -1528,7 +1568,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-leader-election"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-service-api",
@@ -1540,7 +1580,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-llm-anthropic"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-config-api",
@@ -1556,7 +1596,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-llm-api"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "serde",
@@ -1566,7 +1606,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-llm-openai-compatible"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-config-api",
@@ -1582,7 +1622,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-message"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-bot",
@@ -1601,7 +1641,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-message-flow"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-bot",
@@ -1638,7 +1678,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-message-store"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-config-api",
@@ -1662,7 +1702,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-observability"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -1674,7 +1714,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-organization"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-bot",
@@ -1690,7 +1730,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-organization-store"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-db-api",
@@ -1706,7 +1746,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-proposal"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-proposal-store",
@@ -1721,7 +1761,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-proposal-store"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-service-api",
@@ -1733,7 +1773,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-protocol"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "bcs-domain",
  "serde",
@@ -1743,7 +1783,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-provider-http"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
@@ -1769,7 +1809,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-relation"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-db-local",
@@ -1781,7 +1821,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-relation-store"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-db-api",
@@ -1794,7 +1834,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-route-security"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "bcs-config-api",
  "bcs-observability",
@@ -1806,7 +1846,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-routing"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-security-gateway-api",
@@ -1824,7 +1864,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-rule-bot"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "anyhow",
  "bcs-protocol",
@@ -1845,7 +1885,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-secret"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-service-api",
@@ -1854,7 +1894,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-secret-api"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "bcs-config-api",
  "bcs-service-api",
@@ -1865,7 +1905,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-secret-local"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-service-api",
@@ -1879,14 +1919,14 @@ dependencies = [
 
 [[package]]
 name = "bcs-security-gateway-api"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
 ]
 
 [[package]]
 name = "bcs-security-gateway-local"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-security-gateway-api",
@@ -1917,9 +1957,11 @@ dependencies = [
 
 [[package]]
 name = "bcs-services-container"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "bcs-app-group-context",
+ "bcs-group-context-store",
  "bcs-service-api",
  "bcs-test-support",
  "thiserror 2.0.20",
@@ -1928,7 +1970,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-session"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-bot",
@@ -1950,7 +1992,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-session-file"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1970,7 +2012,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-session-file-store"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-db-api",
@@ -1987,7 +2029,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-session-store"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-db-api",
@@ -2007,7 +2049,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-storage-api"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2042,7 +2084,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-storage-local"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2060,7 +2102,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-system-message"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-domain",
@@ -2077,14 +2119,14 @@ dependencies = [
 
 [[package]]
 name = "bcs-telemetry"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "bcs-test-support"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
@@ -2107,7 +2149,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-user-directory-api"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "thiserror 2.0.20",
@@ -2115,7 +2157,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-user-identity"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-db-api",
@@ -2129,7 +2171,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-webhook-client"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-config-api",
@@ -2146,7 +2188,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-ws"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
@@ -2386,6 +2428,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -2720,7 +2763,7 @@ dependencies = [
 
 [[package]]
 name = "ding-logger"
-version = "0.1.3"
+version = "0.1.4-beta.3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

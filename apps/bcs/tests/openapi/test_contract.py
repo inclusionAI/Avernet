@@ -78,6 +78,7 @@ EXPECTED_OPERATIONS = {
     ("post", "/openapi/v1/collaboration/channels/bindings"),
     ("get", "/openapi/v1/collaboration/channels/bindings"),
     ("get", "/openapi/v1/collaboration/channels/bindings/by-target"),
+    ("get", "/openapi/v1/collaboration/channels/conversations/by-session"),
     ("patch", "/openapi/v1/collaboration/channels/bindings/{id}"),
     ("delete", "/openapi/v1/collaboration/channels/bindings/{id}"),
     ("post", "/openapi/v1/collaboration/event-subscriptions"),
@@ -124,6 +125,7 @@ def test_operations_use_the_approved_gateway_security_boundary() -> None:
         ("delete", "/openapi/v1/collaboration/groups/{group_id}"),
         ("post", "/openapi/v1/collaboration/groups/{group_id}/sessions"),
         ("get", "/openapi/v1/collaboration/sessions/{session_id}"),
+        ("get", "/openapi/v1/collaboration/channels/conversations/by-session"),
         ("patch", "/openapi/v1/collaboration/sessions/{session_id}"),
         ("delete", "/openapi/v1/collaboration/sessions/{session_id}"),
     }

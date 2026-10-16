@@ -22,6 +22,8 @@ parsed, which ``delivery_mode``'s own tests cover.
 """
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 import pytest
 
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (
@@ -36,6 +38,15 @@ from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     TeclawPlatformDelivery,
 )
 from agentclaw.community.di import config as cfg
+from agentclaw.community.core.skill_center.local_skill_security_upload_hook import (
+    LocalSkillSecurityUploadHook,
+)
+from agentclaw.community.core.skill_center.services.local_skill_security_upload_observer import (
+    NoopLocalSkillSecurityUploadHook,
+)
+from agentclaw.community.di.local_skill_security_config import (
+    LocalSkillSecurityObservationConfig,
+)
 
 #: The strategy each mode is expected to put in the family map. One row per
 #: mode, and the test below asserts the enum has no member this table misses —
@@ -141,6 +152,25 @@ def test_the_two_port_bundles_are_not_the_same_binding(test_injector) -> None:
 
     assert device is not platform
     assert DevicePorts != PlatformPorts
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_platform_manifest_deletion_uses_observation_hook_only_when_enabled(
+    test_injector, enabled: bool,
+) -> None:
+    real_hook = Mock(spec=LocalSkillSecurityUploadHook)
+    test_injector.binder.bind(LocalSkillSecurityUploadHook, to=real_hook)
+    test_injector.binder.bind(
+        LocalSkillSecurityObservationConfig,
+        to=LocalSkillSecurityObservationConfig(enabled=enabled),
+    )
+
+    upload = test_injector.get(PlatformPorts)().upload_service
+
+    if enabled:
+        assert upload._security_hook is real_hook
+    else:
+        assert isinstance(upload._security_hook, NoopLocalSkillSecurityUploadHook)
 
 
 @pytest.mark.parametrize("mode", list(TeclawDeliveryMode))

@@ -9,7 +9,7 @@ use bcs_service_api::{
     A2aChatRunService, A2aChatService, ActorDirectoryService, BotDeliveryPort, BotDiscoveryService,
     BotManagementService, BotOnboardingService, BotQueryService, BotRegistryCoreService,
     BotRunContextPort, BotRuntimeConnectionService, ChannelService, CollaborationRuntimeService,
-    CollaborationTemplateService,
+    CollaborationTemplateService, GroupContextApplicationService,
     FriendCoreService, FriendService, FrontendDeliveryPort,
     FusionCoreService, Group, GroupCoreService, GroupFusionService, GroupManagementService,
     GroupMessageHistoryService, GroupProposalService, GroupQueryService, HumanActorService,
@@ -100,6 +100,8 @@ pub struct Services {
     pub group_proposals: Arc<dyn GroupProposalService>,
     /// Group message-history application service.
     pub group_message_history: Arc<dyn GroupMessageHistoryService>,
+    /// Group Context V1 application service.
+    pub group_context: Arc<dyn GroupContextApplicationService>,
     /// System message service.
     pub system_message: Arc<dyn SystemMessageService>,
     /// Group-aware fusion application service.
@@ -165,6 +167,7 @@ pub struct ServicesBuilder {
     workbench_sessions: Option<Arc<dyn WorkbenchSessionService>>,
     group_proposals: Option<Arc<dyn GroupProposalService>>,
     group_message_history: Option<Arc<dyn GroupMessageHistoryService>>,
+    group_context: Option<Arc<dyn GroupContextApplicationService>>,
     system_message: Option<Arc<dyn SystemMessageService>>,
     group_fusion: Option<Arc<dyn GroupFusionService>>,
     session_management: Option<Arc<dyn SessionManagementService>>,
@@ -392,6 +395,12 @@ impl ServicesBuilder {
         self
     }
 
+    /// Set the Group Context V1 application service.
+    pub fn group_context(mut self, service: Arc<dyn GroupContextApplicationService>) -> Self {
+        self.group_context = Some(service);
+        self
+    }
+
     /// Set the system message service.
     pub fn system_message(mut self, service: Arc<dyn SystemMessageService>) -> Self {
         self.system_message = Some(service);
@@ -477,6 +486,7 @@ impl ServicesBuilder {
             workbench_sessions: required(self.workbench_sessions, "workbench_sessions")?,
             group_proposals: required(self.group_proposals, "group_proposals")?,
             group_message_history: required(self.group_message_history, "group_message_history")?,
+            group_context: required(self.group_context, "group_context")?,
             system_message: required(self.system_message, "system_message")?,
             group_fusion: required(self.group_fusion, "group_fusion")?,
             session_management: required(self.session_management, "session_management")?,
@@ -609,6 +619,11 @@ impl ServicesBuilder {
             group_message_history: self
                 .group_message_history
                 .unwrap_or_else(|| Arc::new(NoopGroupMessageHistoryService)),
+            group_context: self.group_context.unwrap_or_else(|| {
+                Arc::new(bcs_app_group_context::GroupContextApplicationServiceImpl::new(
+                    Arc::new(bcs_group_context_store::MemoryGroupContextRepo::new()),
+                ))
+            }),
             system_message: self
                 .system_message
                 .unwrap_or_else(|| Arc::new(NoopSystemMessageService)),

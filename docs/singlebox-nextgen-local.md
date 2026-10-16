@@ -3,7 +3,7 @@
 Singlebox defaults to `apps/frontend` (legacy). Updating `apps/frontend-nextgen`
 by itself does not change the running UI. Select `FRONTEND_VARIANT=nextgen`
 for **every** setup/start/stop/status invocation, or persist it in the checkout's
-untracked `.env.local`. Do not copy secrets between worktrees.
+untracked `singlebox/.env.local`. Do not copy secrets between worktrees.
 
 ## FRONTEND_VARIANT=teamclaw: the external internal-UI checkout
 
@@ -14,7 +14,7 @@ the **full internal frontend** (the product UI under development), use the
 Gateway composition:
 
 ```bash
-# .env.local of the Avernet checkout:
+# singlebox/.env.local of the Avernet checkout:
 FRONTEND_VARIANT=teamclaw
 TEAMCLAW_DIR=~/IdeaProjects/teamClawPre/teamclaw   # path to the internal checkout
 # TEAMCLAW_FRONTEND_AUTOUPDATE=0                    # default 1; see below
@@ -183,7 +183,7 @@ Nextgen defaults are configured at the Singlebox composition root:
 | `BCS_ENDPOINT_PRE` / `BCS_ENDPOINT_PROD` | `http://127.0.0.1:${BCS_PORT:-21000}` |
 
 Explicit environment settings take precedence over these generated defaults.
-Singlebox loads `.env.local` before composing them. Changes require a frontend
+Singlebox loads `singlebox/.env.local` before composing them. Changes require a frontend
 restart because the local Umi proxy and `define` settings are startup inputs.
 Gateway's upstream configuration must separately agree with any custom backend
 ports; changing a frontend proxy does not reconfigure Gateway.

@@ -1,5 +1,16 @@
 # Coding-only restart backup
 
+## Best-effort policy (2026-10-12)
+
+Backup is attempted, but backup-only failures log sanitized warnings and do not
+block restart. This includes inventory, command, timeout, receipt and physical
+identity failures. Warnings carry `action=continue_restart` and
+`data_loss_risk=true`; they are not successful backup receipts. Binding/engine
+checks, database failures and durable operation fences remain blocking.
+Restart can lose data newer than the last durable backup; a timeout does not
+cancel the old helper, and replacement may interrupt it. No runtime-script,
+shared service, frontend or restore-protocol changes are part of this policy.
+
 ## Boundary
 
 This is an aicoding/claude_code provisioning policy, not a generic lifecycle or
@@ -13,8 +24,8 @@ Ordinary Bot restart calls `strategy.prepare_restart` immediately BEFORE its
 existing lock acquisition, then runs the returned verifier immediately AFTER
 acquiring that same lock. The strategy never sees, acquires, or releases the
 lock: acquire/release/async hand-off ownership stays entirely in the original
-caller, so a prepare failure leaves no lock to clean up and a verify failure
-flows through the caller's existing `finally` release. The default strategy
+caller, backup-only failures warn and continue, while lifecycle failures
+retain the caller's existing lock-release behavior. The default strategy
 returns no verifier and never probes devices. The synchronous stop/start/update and allocation lock hand-off remain in
 BotService. Ordinary HTTP coding restart now admits a durable task before this
 precondition; its persisted pending state and operation journal are owned by the
@@ -23,38 +34,40 @@ coding strategy. No restart-lock repository or TTL changes are required.
 Async HTTP entrypoints call `BotServiceProtocol.restart_bot_async`. BotService
 resolves the strategy and calls its `execute_restart` contract; explicit
 `aicoding` / `claude_code` engines with an eligible existing binding enqueue
-durable work and persist PENDING before returning. Unbound recovery and existing
+persist PENDING synchronously before enqueueing durable work. Workers
+initialize/recover the operation journal, not initial PENDING. Unbound recovery and existing
 activation-in-progress cases retain their original threaded, awaited lifecycle
-so that admission does not erase their original FAILED/ACTIVE state. Default engines execute inline. The coding worker calls the original
-synchronous restart method with the original callback signature. The worker
+so that admission does not erase their original FAILED/ACTIVE state. Default engines execute inline. The coding worker retains the original direct-ARCA stop/start flow;
+ordinary BaaS uses the coding BaaS orchestrator. The worker
 supplies a stable backup operation ID and a CAS mutation fence through the
-coding-owned execution context; direct synchronous callers retain their gate.
+coding-owned execution context; direct synchronous callers use the same best-effort backup policy.
 See `apps/backend/specs/2026-10-08-aicoding-durable-restart/spec.md`. Published restart
 and caller upgrade each invoke the coding precondition before replacement.
 Ordinary publication, instance creation/reuse and workflow adoption are not
 backup operations. Instance consumers call `prepare_restart_async`, which delegates to the same
 `prepare_restart` precondition and runs its returned verifier (they hold no
 restart lock). Default engines do not probe or offload; coding offloads both
-phases to a worker thread. Failure propagates before the original replacement.
+phases to a worker thread. Backup failures warn and continue the original replacement; lifecycle failures propagate.
 The registry adapter is shared dispatch, not an independent lifecycle pipeline.
 
 ## Existing transports only
 
-- Active/Pending ARCA bindings use the original `exec_shell_new` API unchanged.
+- Direct ARCA bindings skip backup and retain their original stop/start flow.
+  Other non-BaaS providers retain their existing `exec_shell_new` backup attempts;
+  unavailable FAILED/STOPPED containers warn and continue without execution.
 - Coding restart calls the existing `list_devices_by_bot_uuid` client and
   `GET /bots/{uuid}/devices` for both prepare and verification. The endpoint
   returns device groups in descending Bot record ID order (excluding deleted
   records); the existing client selects the first/current group, not historical
   groups. It supplies status and physical provider ID without health probes.
   Empty inventories require terminal-state confirmation as described below;
-  malformed inventories and lookup failures block replacement. No change
+  malformed inventories and lookup failures warn and continue replacement. No change
   to the shared `get_bot` contract or non-coding restart flow is required.
 - BaaS inventory identifies every live physical target. Commands use the
   existing public `post_bots_api` API and existing PaaS command endpoint, pinned
   to that target rather than randomly selecting a replica.
-- Recovering FAILED/STOPPED ARCA bindings use their stored physical sandbox ID
-  with the same PaaS command endpoint. This is engine-owned recovery handling;
-  the shared DeviceService ACTIVE/PENDING execution restriction is unchanged.
+- BaaS-managed ARCA containers still use BaaS physical-target backup.
+  The shared DeviceService ACTIVE/PENDING execution restriction is unchanged.
 - No `allow_recovery` or `paas_device_id` parameter is added to shared APIs.
   Missing identity and transport errors are not treated as successful backup.
 - A non-empty BaaS inventory whose devices are all explicitly `STOPPED`/`RELEASED`
@@ -64,11 +77,11 @@ The registry adapter is shared dispatch, not an independent lifecycle pipeline.
   with the matching `bot_uuid`, or `RELEASED` (including the client's existing
   not-found contract), and a second inventory read is still empty. An explicitly mismatched Bot
   UUID is rejected even for RELEASED. If a device appears during confirmation,
-  abort without running backup against the newly observed container. The same
+  warn and continue without running backup against the newly observed container. The same
   confirmation is repeated by the verifier before replacement. Local Bot
   `FAILED` alone is not sufficient; durable admission may already have changed
   it to `PENDING`. Active/pending/unknown BaaS states, malformed inventories and
-  lookup failures remain fail-closed. Non-empty inventories always retain the
+  lookup failures degrade backup without blocking restart. Non-empty inventories always retain the
   physical-target backup checks, even for FAILED Bots. This coding-only policy
   also applies to published/caller instance preconditions; shared BaaS APIs,
   direct ARCA restarts and other engine policies are unchanged by this change.
@@ -84,7 +97,8 @@ new `/opt/agentclaw/restart-backup-v1` installation and the restart barrier are
 absent. The older `.fastdisk.ready` marker is not a backup capability marker.
 A permission error is not absence. Once installed, the runtime helper checks
 actual mounts; `not_mounted` skips backup. Mounted runtimes must stop writers and
-return a committed generation/operation receipt before replacement is allowed.
+return a committed generation/operation receipt for backup to count as successful.
+Unconfirmed backup still allows restart, with a data-loss warning.
 
 Inventory logs include `source=baas_devices`, query start/failure, device count,
 status distribution, resolved target count, operation ID and elapsed time.
@@ -104,7 +118,8 @@ with the paired scripts. No test here restarts a production Bot.
 
 The helper CLI is `restart_backup start|status OPERATION_ID`. Platform exec must
 return exit code zero and stdout containing one JSON object. Unknown versions,
-unknown states, malformed output and nonzero/missing exit codes block replacement.
+unknown states, malformed output and nonzero/missing exit codes invalidate the
+backup result, but the best-effort policy allows replacement.
 Additional JSON fields are ignored to allow additive v1 changes.
 
 | Field | v1 requirement |
@@ -120,8 +135,9 @@ capability markers are absent; it is not a fallback for transport errors.
 `not_mounted` means the installed helper found no canonical data mounts.
 `running` requires polling; it must not transition to a skip state. `committed`
 means writers have been stopped and the backup generation is durable. `failed`
-blocks replacement. Before replacement, the status, boot identity and committed
-generation are checked again; a changed identity/receipt blocks replacement.
+degrades backup but allows replacement. Before replacement, the status, boot
+identity and committed generation are checked again; changes warn and continue.
+Changed physical inventories stop receipt probing against those targets.
 
 The paired script repository must implement this same v1 contract. Rollout must
 install the root-owned helper and admin sudo permission before enabling mounts.

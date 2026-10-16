@@ -27,38 +27,34 @@ function toneFor(lifecycle: BotDomain['lifecycle']): 'success' | 'error' | 'warn
 
 const BotStatusCell: React.FC<BotStatusCellProps> = ({ bot, progressExpanded, onToggleProgress }) => {
   const failureReason = bot.lifecycle === 'failed' ? bot.disabledActions.restart : undefined;
-  const badge = <Badge tone={toneFor(bot.lifecycle)}>{lifecycleLabel[bot.lifecycle]}</Badge>;
+  const statusLabel = bot.serviceMode === 'service' && bot.lifecycle === 'failed' ? '部署失败' : lifecycleLabel[bot.lifecycle];
+  const badge = <Badge tone={toneFor(bot.lifecycle)}>{statusLabel}</Badge>;
 
-  if (bot.deployment === 'local' && ['deploying', 'failed'].includes(bot.lifecycle))
+  if (bot.deployment === 'local' && ['deploying', 'failed', 'offline'].includes(bot.lifecycle))
     return (
       <div className="flex items-center gap-1">
         {badge}
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-expanded={progressExpanded}
-          aria-controls={`desktop-progress-${bot.id}`}
-          leftIcon={progressExpanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-          onClick={(event) => {
-            event.stopPropagation();
-            onToggleProgress?.();
-          }}
-        >
-          进度
-        </Button>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={progressExpanded ? '收起桌面 Bot 状态详情' : '展开桌面 Bot 状态详情'}
+                aria-expanded={progressExpanded}
+                aria-controls={`desktop-progress-${bot.id}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onToggleProgress?.();
+                }}
+              >
+                {progressExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{progressExpanded ? '收起详情' : '查看详情'}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
-    );
-  if (bot.deployment === 'local' && bot.lifecycle === 'offline')
-    return (
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => {
-          window.location.href = 'teamclaw://open';
-        }}
-      >
-        设备离线 · 打开客户端
-      </Button>
     );
   if (!failureReason) {
     return badge;

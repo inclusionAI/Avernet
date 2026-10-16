@@ -15,31 +15,36 @@ import type { CollabPanelState } from '@/pages/Workspace/hooks/useCollabPanel';
 import { Loader2, UserPlus } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { BotControlRow } from './BotControlRow';
-import { LeaveBar } from './LeaveBar';
 
-/** 「未加入当前会话」提示条（human absent / 用户协作未加入态共用,对齐 open-claw 图三样式）。 */
+/**
+ * 「未加入」底卡（dmore artboard-010 底区 96px：896×72 rounded-8 #FBFBFB 卡 + 112×32 白底钮）：
+ * 13px/600 标题 + 11px 副文案（稿件原文），点击走既有 JoinConfirmDialog 二次确认，状态机零改动。
+ */
 function JoinBar({ joining, onJoin, humanName }: { joining: boolean; onJoin: () => void; humanName: string }) {
   return (
-    <div className="flex items-center justify-between py-1.5">
-      <div className="flex items-center gap-2.5">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-          <UserPlus className="h-4 w-4 text-muted-foreground" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm font-medium leading-tight text-foreground">未加入当前会话</p>
-          <p className="mt-0.5 text-xs leading-tight text-muted-foreground">
-            以用户身份加入当前会话后，{humanName}可直接发言
-          </p>
-        </div>
+    <div
+      role="status"
+      aria-label={`${humanName} 暂未加入当前会话`}
+      className="flex h-[72px] w-full items-center justify-between rounded-lg bg-muted/40 px-4"
+    >
+      <div className="min-w-0">
+        <p className="m-0 text-[13px] font-semibold leading-[13px] text-foreground">用户暂未加入当前会话</p>
+        <p className="m-0 mt-1.5 text-[11px] leading-4 text-zinc-500">以用户身份加入后，可直接发送消息，参与讨论</p>
       </div>
-      <Button size="sm" variant="default" disabled={joining} onClick={onJoin} className="shrink-0">
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={joining}
+        onClick={onJoin}
+        className="h-8 w-28 shrink-0 rounded-lg bg-card text-[13px] font-semibold"
+      >
         {joining ? <Loader2 className="h-4 w-4 animate-spin" /> : '加入当前会话'}
       </Button>
     </div>
   );
 }
 
-/** 「用户协作」已加入态(bot 视角):用户名 + 提示 + 右侧「去发言」。 */
+/** 「用户协作」已加入态(bot 视角):用户名 + 提示 + 右侧「去发言」；卡式跟随未加入底卡视觉基调(change task 4.4)。 */
 function HumanJoinedRow({
   humanName,
   canSwitchToHuman,
@@ -50,19 +55,25 @@ function HumanJoinedRow({
   onSwitchToHuman: () => void;
 }) {
   return (
-    <div className="flex items-center justify-between py-1.5">
-      <div className="flex items-center gap-2.5">
+    <div className="flex min-h-[72px] w-full items-center justify-between gap-4 rounded-lg bg-muted/40 px-4">
+      <div className="flex min-w-0 items-center gap-2.5">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
           <UserPlus className="h-4 w-4 text-primary" />
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-medium leading-tight text-foreground">{humanName}</p>
-          <p className="mt-0.5 line-clamp-2 text-xs leading-tight text-muted-foreground">
+          <p className="m-0 text-[13px] font-semibold leading-tight text-foreground">{humanName}</p>
+          <p className="m-0 mt-1.5 text-[11px] leading-4 text-zinc-500">
             当前为 Bot 视角，{humanName}已加入当前会话；点击右侧“去发言”切换到该身份继续发言。
           </p>
         </div>
       </div>
-      <Button size="sm" variant="default" disabled={!canSwitchToHuman} onClick={onSwitchToHuman} className="shrink-0">
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={!canSwitchToHuman}
+        onClick={onSwitchToHuman}
+        className="h-8 w-20 shrink-0 rounded-lg bg-card text-[13px] font-semibold"
+      >
         去发言
       </Button>
     </div>
@@ -127,36 +138,25 @@ export interface CollabPanelProps {
 export function CollabPanel({ panel, activeRuns }: CollabPanelProps) {
   const [tab, setTab] = useState<'bot' | 'human'>('bot');
   const [confirmJoin, setConfirmJoin] = useState(false);
-  const [leaving, setLeaving] = useState(false);
 
   if (!panel.visible) return null;
 
-  // human 视角 present:仅显示「在会话中隐身」条，聊天输入框仍正常渲染。
+  // human 视角 present：发言模式/连接状态已迁 index 的 ComposerStatusBar 帽条（design 决策 7/8）；
+  // 本面板仅保留活动 Bot 终止行——「终止入口固定在消息列表外、输入框上方」的既有约束不变。
   const isHumanViewer = !panel.humanAbsentOnly && panel.humanJoined && !panel.botActorId;
   if (isHumanViewer) {
-    const handleLeave = () => {
-      setLeaving(true);
-      void panel.leaveSession().finally(() => setLeaving(false));
-    };
+    if (!activeRuns) return null;
     return (
-      <div className="border-t border-border bg-background px-3 pb-2 pt-2 sm:px-6" data-testid="collab-panel">
-        <LeaveBar
-          humanName={panel.humanName}
-          onLeave={handleLeave}
-          leaving={leaving}
-          viewScope={panel.humanViewScope}
-          switchingViewScope={panel.switchingViewScope}
-          onViewScopeChange={(scope) => void panel.setViewScope(scope)}
-          activeRuns={activeRuns}
-        />
+      <div className="border-t border-border bg-background px-3 pb-1 pt-1.5 sm:px-6" data-testid="collab-panel">
+        <div className="mx-auto w-[calc(100%-64px)] pl-3 pr-1.5">{activeRuns}</div>
       </div>
     );
   }
 
-  // human 视角 absent:仅显示加入条(第三张设计图)。
+  // human 视角 absent:未加入底卡接管 composer 区（dmore artboard-010 底区，96px≈py-3+72 卡）。
   if (panel.humanAbsentOnly) {
     return (
-      <div className="border-t border-border bg-background px-3 pb-3 pt-2 sm:px-6">
+      <div className="border-t border-border bg-background px-3 pb-3 pt-3 sm:px-6">
         <JoinBar joining={panel.joining} onJoin={() => setConfirmJoin(true)} humanName={panel.humanName} />
         <JoinConfirmDialog
           open={confirmJoin}

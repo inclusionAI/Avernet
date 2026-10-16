@@ -119,7 +119,8 @@ it('keeps the bot list readable when many selected bots wrap into multiple rows'
   expect(screen.getByTestId('group-participant-list')).toHaveClass('min-h-[180px]');
 });
 
-it('shows selected member bots by name only and uses a compact list typography', () => {
+it('keeps named selected member chips removable and uses compact list typography', () => {
+  const onToggle = jest.fn();
   render(
     <GroupParticipantPicker
       picker={makePicker([
@@ -136,12 +137,15 @@ it('shows selected member bots by name only and uses a compact list typography',
       selectedIds={['selected-1']}
       selectedOptions={[{ id: 'selected-1', name: 'Selected Bot' }]}
       showMineTab={false}
-      onToggle={jest.fn()}
+      onToggle={onToggle}
     />,
   );
 
-  expect(screen.getByTestId('group-participant-selected').querySelector('span.flex.h-5')).toBeNull();
-  expect(screen.getByText('Selected Bot').parentElement).toHaveClass('rounded-md', 'py-0.5');
+  expect(screen.getByRole('group', { name: 'Selected Bot已选成员' })).toContainElement(
+    screen.getByText('Selected Bot'),
+  );
+  fireEvent.click(screen.getByRole('button', { name: '移除Selected Bot' }));
+  expect(onToggle).toHaveBeenCalledWith('selected-1');
   expect(screen.getByText('Candidate 1')).toHaveClass('text-xs');
 });
 

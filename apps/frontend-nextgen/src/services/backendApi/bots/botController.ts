@@ -45,6 +45,8 @@ export interface BotMetadataDto {
   bot_name: string;
   bot_desc?: string;
   engine?: string;
+  template_type?: string;
+  template_name?: string;
   bot_type?: string;
   status?: string;
 }
@@ -84,6 +86,7 @@ export const BOT_ENDPOINTS = {
   status: (bot_id: string) => `/openapi/v1/bots/${bot_id}/status`,
   restart: (bot_id: string) => `/openapi/v1/bots/${bot_id}/restart`,
   restartEngine: (bot_id: string) => `/openapi/v1/bots/${bot_id}/engine/restart`,
+  refetchEngine: (bot_id: string) => `/openapi/v1/bots/${bot_id}/engine/refetch`,
   upgradeService: (bot_id: string) => `/openapi/v1/bots/${bot_id}/lifecycle/upgrade`,
   lifecycle: (bot_id: string) => `/openapi/v1/bots/${bot_id}/lifecycle`,
   local: (bot_id: string) => `/openapi/v1/bots/${bot_id}/local`,
@@ -180,6 +183,15 @@ export function restartBotEngine(bot_id: string) {
   return backendRequest<BackendApiEnvelope<BackendUnknownRecord>>(BOT_ENDPOINTS.restartEngine(bot_id), {
     method: 'POST',
     params: userScopedParams(),
+  });
+}
+
+// Coding Bot 的引擎重启预设为 Relay refetch 语义：重新拉取二进制并重启运行时。
+export function refetchBotEngine(bot_id: string) {
+  return backendRequest<BackendApiEnvelope<BackendUnknownRecord>>(BOT_ENDPOINTS.refetchEngine(bot_id), {
+    method: 'POST',
+    params: userScopedParams(),
+    data: { force: true },
   });
 }
 

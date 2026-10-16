@@ -1,8 +1,10 @@
 // Browser-safe boundary: type-only dependencies; no database, HTTP or AIS implementation.
 import type { RepairBaseline, RepairBatchInput, RepairItem, RepairItemState, RepairRevision, StoredRepairItem } from './repair-batch.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
+import type { AutomationOrigin } from './workflow-automation.js';
+import type { RepairReleaseDetail } from './repair-release.js';
 
-export type RepairCapabilities = { generation: boolean; diff: boolean; publication: false; reason: string | null };
+export type RepairCapabilities = { generation: boolean; diff: boolean; publication: boolean; reason: string | null };
 export type RepairInboxItem = StoredRepairItem & { sourceAvailable: boolean };
 export function repairSignatureKey(signature: string): string {
   const bytes = new TextEncoder().encode(signature);
@@ -16,7 +18,7 @@ export function repairSignatureKey(signature: string): string {
 export type RepairInboxFilter = 'pending' | 'processing' | 'awaiting_verification' | 'closed' | 'no_action' | 'all';
 export type RepairCandidatesQuery = { state?: RepairInboxFilter; page?: number; pageSize?: number; includeHistorical?: boolean;
   nodeId?: string; failureMode?: string; signature?: string; previewSignatures?: string[] };
-export type RepairTaskSummary = { taskId: string; revision: number; phase: RepairRevision['phase']; updatedAtMs: number; itemCount: number };
+export type RepairTaskSummary = { taskId: string; revision: number; phase: RepairRevision['phase']; updatedAtMs: number; itemCount: number; title?: string };
 export type RepairCandidatesResponse = {
   schemaVersion: 'workflow-repair/v2'; workflowId: string; inputDigest: string;
   items: RepairInboxItem[]; tasks: RepairTaskSummary[]; capabilities: RepairCapabilities;
@@ -24,6 +26,8 @@ export type RepairCandidatesResponse = {
   issuePreviews?: Array<{ signature: string; total: number; items: RepairInboxItem[] }>;
   includeHistorical: boolean; activeLookbackDays: number;
   repairSignatureKeys: string[];
+  /** Complete visible scope, independent of node/type filters and pagination. */
+  facets: { nodes: string[]; failureModes: string[] };
   counts: Record<RepairInboxFilter, number>;
   page: { page: number; pageSize: number; total: number; totalPages: number };
   limits: { maxItems: number; maxRequestBytes: number }; canEdit: boolean;
@@ -31,10 +35,15 @@ export type RepairCandidatesResponse = {
 export type RepairTaskDetail = {
   workflowId: string; taskId: string; latestAttempt: RepairRevision;
   latestSuccessful: RepairRevision | null; revisions: RepairRevision[]; capabilities: RepairCapabilities;
-  execution?: { status: 'created' | 'dispatching' | 'dispatched' | 'running' | 'dispatch_failed' | 'succeeded' | 'failed' | 'cancelled';
+  release?: RepairReleaseDetail;
+  revisionPage?: { page: number; pageSize: number; total: number; totalPages: number };
+  scopeItemCount?: number;
+  automaticProgress?: { completedBatches: number; totalBatches: number; changedItems?: number; publishable?: boolean };
+  execution?: { status: 'created' | 'dispatching' | 'dispatch_uncertain' | 'dispatched' | 'running' | 'dispatch_failed' | 'succeeded' | 'failed' | 'cancelled';
     errorCode: string | null; jobId: string | null; attempt: number; executionId: string | null; rawStatus: string | null };
 };
 export type RepairSelectionRequest = {
+  automation?: AutomationOrigin;
   workflowId: string; itemIds: string[]; inputDigest: string; instructions: string; requestId: string; includeHistorical?: boolean;
 };
 export type RepairFeedbackRequest = RepairSelectionRequest & {
@@ -42,7 +51,7 @@ export type RepairFeedbackRequest = RepairSelectionRequest & {
 };
 export type RepairDiff = {
   baseCommit: string; candidateCommit: string;
-  files: Array<{ path: string; status: string; before: string | null; after: string | null; binary: boolean; truncated: boolean }>;
+  files: Array<{ path: string; status: string; before: string | null; after: string | null; binary: boolean; truncated: boolean; patch?: string }>;
   truncated: boolean;
 };
 
@@ -57,7 +66,7 @@ export interface RepairSourcePort {
 export type RepairExecutionIdentity = { stepId: string; attempt: number; executionId: string };
 export type RepairDispatchRequest = { actorId: string; identity: RepairExecutionIdentity; input: RepairBatchInput };
 export type RepairGeneratedResult =
-  | { status: 'succeeded'; draft: Record<string, unknown>; checks: Record<string, unknown> }
+  | { status: 'succeeded' | 'blocked' | 'no_change'; draft: Record<string, unknown>; checks: Record<string, unknown> }
   | { status: 'failed'; error: Record<string, unknown> };
 export type RepairJobStatus = { status: 'running' | 'success' | 'failed' | 'stopped'; rawStatus: string; errorMessage: string | null };
 export type RepairExecutionReadRequest = RepairDispatchRequest & { jobId: string };
@@ -76,12 +85,18 @@ export interface RepairWorkbenchService {
   candidates(workflowId: string, query?: RepairCandidatesQuery): Promise<Omit<RepairCandidatesResponse, 'canEdit'>>;
   item(workflowId: string, itemId: string): Promise<RepairInboxItem>;
   task(taskId: string): Promise<RepairTaskDetail>;
+  items(workflowId: string, itemIds: string[]): Promise<RepairInboxItem[]>;
+  request(workflowId: string, requestId: string): Promise<RepairRevision | null>;
   create(actorId: string, request: RepairSelectionRequest): Promise<RepairRevision>;
   revise(actorId: string, taskId: string, request: RepairFeedbackRequest): Promise<RepairRevision>;
   disposition(actorId: string, input: { workflowId: string; itemId: string; inputDigest: string; expectedStateVersion: number;
-    contentRevision: number; action: 'no_action' | 'restore'; reason: string; requestId: string; includeHistorical?: boolean }): Promise<StoredRepairItem>;
+    contentRevision: number; untilMs?: number; action: 'no_action' | 'restore'; reason: string; requestId: string; includeHistorical?: boolean }): Promise<StoredRepairItem>;
   cancel(actorId: string, taskId: string, expectedRevision: number): Promise<void>;
+  retryResult(actorId: string, taskId: string, expectedRevision: number): Promise<void>;
+  retryGeneration(actorId: string, taskId: string, request: { expectedRevision: number; requestId: string }): Promise<RepairRevision>;
   retryDispatch(actorId: string, taskId: string, expectedRevision: number): Promise<void>;
   reconcile(limit?: number): Promise<number>;
   diff(taskId: string, revision: number, base: 'baseline' | 'parent'): Promise<RepairDiff>;
 }
+/** Trusted adapter has positively confirmed there is no result for this execution. */
+export class RepairResultAbsentError extends Error {}
