@@ -3311,4 +3311,9 @@ END`,
   },
   recoveryTaskContextMigration,
   ...repairReleaseMigrations,
+  {
+    version: 143,
+    description: "Bind Bench Domains to host spaces while preserving personal history",
+    sql: [`ALTER TABLE cm_bench_domains ADD COLUMN space_id VARCHAR(128) DEFAULT NULL COMMENT '所属空间ID；NULL保留原Owner个人归属'`],
+  },
 ];

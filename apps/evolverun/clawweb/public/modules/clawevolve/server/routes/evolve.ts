@@ -1,3 +1,4 @@
+import { teamclawScope, teamclawTaskConfig, matchesSpaceBot } from "../services/evolve/teamclaw-scope.js";
 import type { AisStatusHandler } from "../services/ais/status-handler.js";
 import { aisSessionLogArchives } from "../services/ais/session-log-archives.js";
 import { SkillPackageStorage } from "../services/object-storage/skill-package-storage.js";
@@ -815,6 +816,7 @@ function botCallbackUrl(req: Request, taskId: string, stepId: string): string {
   return `${req.protocol}://${req.get("host")}/api/evolve/internal/tasks/${encodeURIComponent(taskId)}/steps/${encodeURIComponent(stepId)}/bot-callback`;
 }
 function resolveRequestUserId(req: Request): string | null {
+  if (teamclawScope(req)) return teamclawScope(req)!.identity.userId;
   const cookies = req.cookies as Record<string, string> | undefined;
   const userId = [
     req.header("X-Staff-Id"),
@@ -866,16 +868,22 @@ function isTaskShared(task: { config_json: string }): boolean {
   return config?.shared === true;
 }
 function canReadTask(req: Request, task: EvolveTaskRow): boolean {
+  const scope = teamclawScope(req);
+  if (scope) return scope.taskIds.has(String(task.task_id));
   const actor = resolveRequestUserId(req);
   return Boolean(actor && (actor === "dev_local" || task.user_id === actor || task.created_by === actor
     || req.isClawEvolveAdmin || isTaskShared(task)));
 }
 function canManageTask(req: Request, task: EvolveTaskRow): boolean {
+  const scope = teamclawScope(req);
+  if (scope) return scope.taskIds.has(String(task.task_id));
   const actor = resolveRequestUserId(req);
   return Boolean(actor && (actor === "dev_local" || task.created_by === actor
     || req.isClawEvolveAdmin));
 }
 function canManageTaskLogs(req: Request, task: EvolveTaskRow): boolean {
+  const scope = teamclawScope(req);
+  if (scope) return scope.taskIds.has(String(task.task_id));
   const actor = resolveRequestUserId(req);
   return Boolean(actor && (actor === "dev_local" || actor === task.user_id || actor === task.created_by
     || req.isClawEvolveAdmin));
@@ -1306,7 +1314,7 @@ async function createOptimizeStep(
     };
   }
   const config = parseJson(task.config_json) as {
-    dispatchMode?: "message" | "run"; trainBenchDomainId?: string; testBenchDomainId?: string;
+    dispatchMode?: "message" | "run"; trainBenchDomainId?: string; testBenchDomainId?: string; trainBenchOwnerUserId?: string; testBenchOwnerUserId?: string;
     ownerUserId?: string; model?: string; nodeCommands?: NodeCommandYamls; forceMessage?: boolean; runtimeMaintenance?: boolean; clawwebUrl?: string; openclawExecutionMode?: "local" | "gateway";
     targetSkill?: FrozenSkillTarget;
   } | null;
@@ -1327,6 +1335,8 @@ async function createOptimizeStep(
   if (config?.model && !readNodeCommandOption(nodeOptimize, "model")) {
     optimizeSystemArgs.push(["model", safeBenchCommandValue("model", config.model)]);
   }
+  if (config?.trainBenchOwnerUserId) optimizeSystemArgs.push(["train-bench-owner-id", safeBenchCommandValue("trainOwner", config.trainBenchOwnerUserId)]);
+  if (config?.testBenchOwnerUserId) optimizeSystemArgs.push(["test-bench-owner-id", safeBenchCommandValue("testOwner", config.testBenchOwnerUserId)]);
   const command = renderCommand(nodeOptimize, {}, optimizeSystemArgs);
   const ownerUserId = safeBenchCommandValue("ownerId", config?.ownerUserId ?? task.user_id);
   const commandWithOwner = `${command} --owner-id ${ownerUserId}`;
@@ -1955,7 +1965,7 @@ async function createBenchEvolutionOptimizeStep(
   const existing = existingSteps.find((item) => item.step_type === "optimize" && item.round_no === 1);
   if (existing) return { stepId: existing.step_id, stepType: "optimize" as const, roundNo: 1 };
   const config = parseJson(task.config_json) as {
-    dispatchMode?: "message" | "run"; trainBenchDomainId?: string; testBenchDomainId?: string;
+    dispatchMode?: "message" | "run"; trainBenchDomainId?: string; testBenchDomainId?: string; trainBenchOwnerUserId?: string; testBenchOwnerUserId?: string;
     ownerUserId?: string; model?: string; nodeCommands?: NodeCommandYamls; forceMessage?: boolean; runtimeMaintenance?: boolean; clawwebUrl?: string; openclawExecutionMode?: "local" | "gateway";
   } | null;
   const stepId = id("STEP");
@@ -1971,6 +1981,8 @@ async function createBenchEvolutionOptimizeStep(
   if (config?.model && !readNodeCommandOption(optimizeTemplate, "model")) {
     optimizeSystemArgs.push(["model", safeBenchCommandValue("model", config.model)]);
   }
+  if (config?.trainBenchOwnerUserId) optimizeSystemArgs.push(["train-bench-owner-id", safeBenchCommandValue("trainOwner", config.trainBenchOwnerUserId)]);
+  if (config?.testBenchOwnerUserId) optimizeSystemArgs.push(["test-bench-owner-id", safeBenchCommandValue("testOwner", config.testBenchOwnerUserId)]);
   const command = renderCommand(optimizeTemplate, {
     train_bench_domain_id: config?.trainBenchDomainId,
     test_bench_domain_id: config?.testBenchDomainId,
@@ -2233,16 +2245,17 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const ownerUserId = String(userId);
     const actorUserId = resolveRequestUserId(req);
     if (!actorUserId) { res.status(401).json({ error: "无法识别当前登录用户" }); return; }
-    if (actorUserId !== ownerUserId) {
+    if (actorUserId !== ownerUserId && !teamclawScope(req)) {
       res.status(403).json({ error: "Bench 任务只能在当前登录用户空间发起" }); return;
     }
     if (await rejectUnsupportedBotEngine(repo, res, ownerUserId, String(botId), String(botEnv ?? ""))) return;
+    const domainOwner = teamclawScope(req) ? String(req.body.benchDomainOwnerUserId ?? ownerUserId) : ownerUserId;
     const selectedDomainId = String(benchDomainId).trim();
-    const domain = await benchDomainRepo.findByOwnerAndDomainId(ownerUserId, selectedDomainId);
+    const domain = await benchDomainRepo.findByOwnerAndDomainId(domainOwner, selectedDomainId);
     if (!domain || domain.status !== "active") {
       res.status(422).json({ error: "Bench Domain 不存在、无权访问或已归档" }); return;
     }
-    const templates = await benchTemplateRepo.listAll({ ownerUserId, domainId: selectedDomainId });
+    const templates = await benchTemplateRepo.listAll({ ownerUserId: domainOwner, domainId: selectedDomainId });
     const requestedTemplateName = String(templateName).trim();
     const selectedTemplates = requestedTemplateName
       ? templates.filter((item) => item.template_name === requestedTemplateName)
@@ -2287,7 +2300,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       if (value) safeBenchCommandValue(name, value);
     }
     const bench = {
-      domainId: selectedDomainId, ownerUserId,
+      domainId: selectedDomainId, ownerUserId: domainOwner,
       templateName: String(templateName).trim(),
       templateVersion: templateVersion == null ? null : Number(templateVersion),
       model: commandModel, suite: commandSuite, scene: String(scene),
@@ -2310,7 +2323,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       const systemArgs: Array<[string, string | number]> = [
         ["task-id", taskId], ["step-id", stepId],
         ["domain-id", safeBenchCommandValue("domainId", selectedDomainId)],
-        ["owner-id", safeBenchCommandValue("ownerId", ownerUserId)],
+        ["owner-id", safeBenchCommandValue("ownerId", domainOwner)],
         ["scene", safeBenchCommandValue("scene", scene)],
         ["clawweb-url", clawwebUrl],
         ["openclaw-execution-mode", openclawExecutionMode],
@@ -2330,7 +2343,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     await repo.createTask({
       taskId, taskType: "bench", userId: ownerUserId, botId: String(botId),
       taskName: String(taskName).trim(), remark: String(remark ?? "").trim() || null,
-      configJson: JSON.stringify(config), createdBy: String(req.header("X-User-Id") || ownerUserId),
+      configJson: JSON.stringify(teamclawTaskConfig(req, config)), createdBy: String(req.header("X-User-Id") || ownerUserId),
     });
     const step = await repo.createStep({ stepId, taskId, stepType: "bench", stepNo: 1, command });
     const runtime = await repo.resolveEvolveBotRuntime(ownerUserId, String(botId), String(botEnv ?? ""));
@@ -2743,7 +2756,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     await repo.createTask({
       taskId, taskType, userId: String(userId), botId: String(botId),
       taskName: String(taskName).trim(), remark: String(remark ?? "").trim() || null,
-      configJson: JSON.stringify(config), createdBy: improvementActorUserId ?? String(req.header("X-User-Id") || userId),
+      configJson: JSON.stringify(teamclawTaskConfig(req, config)), createdBy: improvementActorUserId ?? String(req.header("X-User-Id") || userId),
       auditActorId: improvementActorUserId ?? resolveRequestUserId(req) ?? String(userId),
     });
     if (improvementId !== null && improvementRequestId && improvementActorUserId && improvementRepo) {
@@ -3081,13 +3094,13 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     await repo.createTask({
       taskId, taskType: "optimize", userId: String(userId), botId: String(botId),
       taskName: String(taskName).trim(), remark: String(remark ?? "").trim() || null,
-      configJson: JSON.stringify({
+      configJson: JSON.stringify(teamclawTaskConfig(req, {
         sourceDiagnosisTaskIds: sourceIds,
         trainBenchDomainId: primaryBenchDomains?.trainBenchDomainId,
         testBenchDomainId: primaryBenchDomains?.testBenchDomainId,
         model: selectedModel, maxRounds: rounds, dispatchMode, forceMessage, runtimeMaintenance: rawRuntimeMaintenance !== false, clawwebUrl, openclawExecutionMode, botEnv: String(botEnv ?? ""),
         nodeCommands: { optimize: optimizeTemplate },
-      }),
+      })),
       createdBy: String(req.header("X-User-Id") || userId),
     });
     const task = await repo.findTask(taskId);
@@ -3127,22 +3140,24 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); return; }
     const actorUserId = resolveRequestUserId(req);
     if (!actorUserId) { res.status(401).json({ error: "无法识别当前登录用户" }); return; }
-    if (actorUserId !== ownerUserId) {
+    if (actorUserId !== ownerUserId && !teamclawScope(req)) {
       res.status(403).json({ error: "Bench 进化只能在当前登录用户空间发起" }); return;
     }
     if (await rejectUnsupportedBotEngine(repo, res, ownerUserId, String(botId), String(botEnv ?? ""))) return;
+    const trainOwner = teamclawScope(req) ? String(req.body.trainBenchOwnerUserId ?? ownerUserId) : ownerUserId;
+    const testOwner = teamclawScope(req) ? String(req.body.testBenchOwnerUserId ?? ownerUserId) : ownerUserId;
     const pinnedDomains: Record<string, Array<{ templateName: string; templateVersion: number }>> = {};
-    for (const domainId of [...new Set([trainDomainId, testDomainId])]) {
-      const domain = await benchDomainRepo.findByOwnerAndDomainId(ownerUserId, domainId);
+    for (const [domainOwner, domainId] of [[trainOwner,trainDomainId],[testOwner,testDomainId]]) {
+      const domain = await benchDomainRepo.findByOwnerAndDomainId(domainOwner, domainId);
       if (!domain || domain.status !== "active") {
         res.status(422).json({ error: `Bench Domain 不存在、无权访问或已归档: ${domainId}` }); return;
       }
-      const templates = (await benchTemplateRepo.listAll({ ownerUserId, domainId }))
+      const templates = (await benchTemplateRepo.listAll({ ownerUserId: domainOwner, domainId }))
         .filter((item) => item.status === "published" && item.published_version != null);
       if (!templates.length) {
         res.status(422).json({ error: `Bench Domain 没有已发布模板: ${domainId}` }); return;
       }
-      pinnedDomains[domainId] = templates.map((item) => ({
+      pinnedDomains[teamclawScope(req) ? JSON.stringify([domainOwner,domainId]) : domainId] = templates.map((item) => ({
         templateName: item.template_name, templateVersion: Number(item.published_version),
       }));
     }
@@ -3172,15 +3187,15 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     await repo.createTask({
       taskId, taskType: "bench_optimize", userId: ownerUserId, botId: String(botId),
       taskName: String(taskName).trim(), remark: String(remark ?? "").trim() || null,
-      configJson: JSON.stringify({
+      configJson: JSON.stringify(teamclawTaskConfig(req, {
         objective: objectiveText, ownerUserId, trainBenchDomainId: trainDomainId, testBenchDomainId: testDomainId,
-        pinnedBenchDomains: pinnedDomains, model: selectedModel, maxRounds: rounds,
+        pinnedBenchDomains: pinnedDomains, ...(teamclawScope(req) ? {trainBenchOwnerUserId:trainOwner, testBenchOwnerUserId:testOwner} : {}), model: selectedModel, maxRounds: rounds,
         nodeCommands: {
           bench_plan: commandTemplate,
           optimize: optimizeTemplate,
         },
         dispatchMode, forceMessage, runtimeMaintenance, clawwebUrl, openclawExecutionMode, botEnv: String(botEnv ?? ""),
-      }),
+      })),
       createdBy: actorUserId,
     });
     const step = await repo.createStep({ stepId, taskId, stepType: "bench_plan", stepNo: 1, command });
@@ -3205,14 +3220,14 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const { taskName, remark, userId, botId, botEnv, forceMessage: rawForceMessage } = req.body ?? {};
     const actor = resolveRequestUserId(req);
     if (!taskName || !userId || !botId) { res.status(400).json({ error: "taskName、userId、botId 为必填项" }); return; }
-    if (!actor || actor !== String(userId)) { res.status(403).json({ error: "只能为自己的 Bot 创建 Pack" }); return; }
+    if (!actor || (actor !== String(userId) && !teamclawScope(req))) { res.status(403).json({ error: "只能为自己的 Bot 创建 Pack" }); return; }
     if (await rejectUnsupportedBotEngine(repo, res, String(userId), String(botId), String(botEnv ?? ""))) return;
     const taskId = evolveTaskId(), stepId = id("STEP");
     const clawwebUrl = getClawWebPublicBaseUrl();
     const dispatchMode = await repo.resolveBotDispatchMode(String(userId), String(botId), String(botEnv ?? ""));
     const forceMessage = rawForceMessage === true;
     const command = `/clawevolve-pack --mode pack --task-id ${taskId} --step-id ${stepId} --clawweb-url ${clawwebUrl}`;
-    await repo.createTask({ taskId, taskType: "pack", userId: String(userId), botId: String(botId), taskName: String(taskName).trim(), remark: String(remark ?? "").trim() || null, configJson: JSON.stringify({ dispatchMode, forceMessage, runtimeMaintenance: false, clawwebUrl, botEnv: String(botEnv ?? "") }), createdBy: actor });
+    await repo.createTask({ taskId, taskType: "pack", userId: String(userId), botId: String(botId), taskName: String(taskName).trim(), remark: String(remark ?? "").trim() || null, configJson: JSON.stringify(teamclawTaskConfig(req, { dispatchMode, forceMessage, runtimeMaintenance: false, clawwebUrl, botEnv: String(botEnv ?? "") })), createdBy: actor });
     const step = await repo.createStep({ stepId, taskId, stepType: "pack", stepNo: 1, command });
     const runtime = await repo.resolveEvolveBotRuntime(String(userId), String(botId), String(botEnv ?? ""));
     await startInitialEvolveStep({
@@ -3239,7 +3254,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!taskName || !userId || !botId || (!requestedPackId && !requestedSourceTaskId)) {
       res.status(400).json({ error: "恢复参数不合法" }); return;
     }
-    if (!actor || actor !== String(userId)) { res.status(403).json({ error: "只能恢复自己的 Bot" }); return; }
+    if (!actor || (actor !== String(userId) && !teamclawScope(req))) { res.status(403).json({ error: "只能恢复自己的 Bot" }); return; }
     let registeredPack: EvolvePackRow | null | undefined;
     if (requestedPackId) {
       registeredPack = await repo.findPack(requestedPackId);
@@ -3292,7 +3307,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const clawwebUrl = getClawWebPublicBaseUrl();
     const dispatchMode = await repo.resolveBotDispatchMode(String(userId), String(botId), targetBotEnv); const forceMessage = rawForceMessage === true;
     const command = `/clawevolve-pack --mode restore --task-id ${taskId} --step-id ${stepId} --source-task-id ${effectiveSourceTaskId} --source-kind ${effectiveSourceKind}${effectiveSourceKind === "round" ? ` --source-round ${effectiveSourceRound}` : ""} --clawweb-url ${clawwebUrl}`;
-    await repo.createTask({ taskId, taskType: "pack_restore", userId: String(userId), botId: String(botId), taskName: String(taskName).trim(), remark: String(remark ?? "").trim() || null, configJson: JSON.stringify({ packId: registeredPack.pack_id, sourceTaskId: effectiveSourceTaskId, sourceStepId: selected.stepId, sourceKind: effectiveSourceKind, sourceRound: effectiveSourceKind === "round" ? effectiveSourceRound : null, artifact: selected.artifact, dispatchMode, forceMessage, runtimeMaintenance: false, clawwebUrl, botEnv: targetBotEnv }), createdBy: actor });
+    await repo.createTask({ taskId, taskType: "pack_restore", userId: String(userId), botId: String(botId), taskName: String(taskName).trim(), remark: String(remark ?? "").trim() || null, configJson: JSON.stringify(teamclawTaskConfig(req, { packId: registeredPack.pack_id, sourceTaskId: effectiveSourceTaskId, sourceStepId: selected.stepId, sourceKind: effectiveSourceKind, sourceRound: effectiveSourceKind === "round" ? effectiveSourceRound : null, artifact: selected.artifact, dispatchMode, forceMessage, runtimeMaintenance: false, clawwebUrl, botEnv: targetBotEnv })), createdBy: actor });
     const step = await repo.createStep({ stepId, taskId, stepType: "restore", stepNo: 1, command });
     const runtime = await repo.resolveEvolveBotRuntime(String(userId), String(botId), targetBotEnv);
     await startInitialEvolveStep({
@@ -3385,10 +3400,10 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const actor = resolveRequestUserId(req); const botId = String(req.query.botId ?? "").trim();
     if (!actor) { res.status(401).json({ error: "无法识别当前用户" }); return; }
     const scope = String(req.query.scope ?? "mine") === "all" ? "all" : "mine";
-    if (scope === "all" && !req.isClawEvolveAdmin) { res.status(403).json({ error: "Forbidden", message: "ClawEvolve 管理员权限不足" }); return; }
+    if (scope === "all" && !req.isClawEvolveAdmin && !teamclawScope(req)) { res.status(403).json({ error: "Forbidden", message: "ClawEvolve 管理员权限不足" }); return; }
     const ownerUserId = String(req.query.ownerUserId ?? "").trim();
-    const packs = await repo.listPacks(scope === "all" ? (ownerUserId || null) : actor, botId || undefined);
-    const applicationCounts = await repo.countPackApplications(packs);
+    const packs = await repo.listPacks(teamclawScope(req) ? null : scope === "all" ? (ownerUserId || null) : actor, botId || undefined, teamclawScope(req)?.bots);
+    const applicationCounts = await repo.countPackApplications(packs, teamclawScope(req)?.bots);
     res.json({ items: packs.map((pack) => ({
       packId: pack.pack_id, taskId: pack.source_task_id, stepId: pack.source_step_id,
       userId: pack.user_id, botId: pack.bot_id,
@@ -3405,14 +3420,14 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const botId = String(req.query.botId ?? "").trim();
     if (!actor) { res.status(401).json({ error: "无法识别当前用户" }); return; }
     const scope = String(req.query.scope ?? "mine") === "all" ? "all" : "mine";
-    if (scope === "all" && !req.isClawEvolveAdmin) {
+    if (scope === "all" && !req.isClawEvolveAdmin && !teamclawScope(req)) {
       res.status(403).json({ error: "Forbidden", message: "ClawEvolve 管理员权限不足" }); return;
     }
     const ownerUserId = String(req.query.ownerUserId ?? "").trim();
-    const visibleOwner = scope === "all" ? (ownerUserId || null) : actor;
+    const visibleOwner = teamclawScope(req) ? null : scope === "all" ? (ownerUserId || null) : actor;
     const [packs, optimizeSteps] = await Promise.all([
-      repo.listPacks(visibleOwner, botId || undefined),
-      repo.listCompletedOptimizeVersions(visibleOwner, botId || undefined),
+      repo.listPacks(visibleOwner, botId || undefined, teamclawScope(req)?.bots, teamclawScope(req) ? String(req.query.taskId ?? "") || undefined : undefined),
+      repo.listCompletedOptimizeVersions(visibleOwner, botId || undefined, teamclawScope(req)?.bots, teamclawScope(req) ? String(req.query.taskId ?? "") || undefined : undefined),
     ]);
     const roundPackByStep = new Map(packs
       .filter((pack) => pack.source_kind === "round")
@@ -3557,9 +3572,9 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
   router.get("/packs/:packId", asyncHandler(async (req: Request, res: Response) => {
     if (!repo) { res.status(503).json({ error: "数据库不可用" }); return; }
     const actor = resolveRequestUserId(req); const pack = await repo.findPack(String(req.params.packId));
-    if (!pack || !actor || (pack.user_id !== actor && !req.isClawEvolveAdmin)) { res.status(404).json({ error: "Pack 不存在" }); return; }
+    if (!pack || !actor || (pack.user_id !== actor && !req.isClawEvolveAdmin && !teamclawScope(req))) { res.status(404).json({ error: "Pack 不存在" }); return; }
     const sourceTask = await repo.findTask(pack.source_task_id);
-    const applications = await repo.listPackApplications(pack);
+    const applications = (await repo.listPackApplications(pack)).filter(task => !teamclawScope(req) || matchesSpaceBot(teamclawScope(req)!,task));
     res.json({
       pack: {
         packId: pack.pack_id, userId: pack.user_id, botId: pack.bot_id,
@@ -3596,12 +3611,13 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const category = requestedCategory === "all" || Object.hasOwn(categories, requestedCategory)
       ? requestedCategory
       : "all";
-    if (scope === "all" && !req.isClawEvolveAdmin) {
+    if (scope === "all" && !req.isClawEvolveAdmin && !teamclawScope(req)) {
       res.status(403).json({ error: "Forbidden", message: "ClawEvolve 管理员权限不足" }); return;
     }
     const actor = resolveRequestUserId(req);
     if (!actor) { res.status(401).json({ error: "Unauthorized" }); return; }
     let taskTypes = categories[category];
+    if (teamclawScope(req)) taskTypes = ["diagnose","bench","bench_optimize","optimize","full"].filter(t=>!taskTypes||taskTypes.includes(t));
     if (req.query.taskTypes !== undefined) {
       const allowed = new Set(["diagnose", "bench", "bench_optimize", "optimize", "full"]);
       const raw = req.query.taskTypes;
@@ -3616,7 +3632,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
     const status = String(req.query.status ?? "all");
     const result = await repo.listTasksPage({
-      createdBy: scope === "all" ? null : actor,
+      createdBy: teamclawScope(req) ? null : scope === "all" ? null : actor,
+      authorizedBots: teamclawScope(req)?.bots,
       ownerUserId: scope === "all" ? String(req.query.ownerUserId ?? "").trim() || null : null,
       page,
       pageSize,
@@ -3630,7 +3647,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       publicTask(row as unknown as Record<string, unknown>, await repo.listSteps(row.task_id)),
       row,
       taskSourceService,
-    ))), page, pageSize, total: result.total, totalPages: Math.max(1, Math.ceil(result.total / pageSize)), scope, canViewAll: req.isClawEvolveAdmin === true });
+    ))), page, pageSize, total: result.total, totalPages: Math.max(1, Math.ceil(result.total / pageSize)), scope: teamclawScope(req) ? "space" : scope, canViewAll: !teamclawScope(req) && req.isClawEvolveAdmin === true });
   }));
 
   router.use("/tasks/:taskId", asyncHandler(async (req, res, next) => {
@@ -5813,7 +5830,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       const task = await repo.findTask(step.task_id);
       if (!task) { res.status(409).json({ error: "step 关联任务不存在" }); return; }
       const config = (parseJson(task.config_json) as {
-        ownerUserId?: string; trainBenchDomainId?: string; testBenchDomainId?: string;
+        ownerUserId?: string; trainBenchDomainId?: string; testBenchDomainId?: string; trainBenchOwnerUserId?: string; testBenchOwnerUserId?: string;
       } | null) ?? {};
       const baseline = (output as { baseline: {
         train: { benchRunId: string; domainId: string; ownerUserId: string; producerStepId: string };
@@ -5830,9 +5847,10 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         const runConfig = run ? (parseJson(run.run_config_json) as {
           evolveTaskId?: string; evolveStepId?: string; role?: string; templates?: unknown;
         } | null) : null;
+        const expectedOwnerId = role === "train" ? config.trainBenchOwnerUserId ?? config.ownerUserId : config.testBenchOwnerUserId ?? config.ownerUserId;
         const actualOwnerId = dbText(run?.owner_user_id).trim();
         const actualDomainId = dbText(run?.domain_id).trim();
-        if (!run || run.status !== "succeeded" || actualOwnerId !== String(config.ownerUserId ?? "").trim()
+        if (!run || run.status !== "succeeded" || actualOwnerId !== String(expectedOwnerId ?? "").trim()
           || actualDomainId !== expectedDomainId || reported.domainId !== expectedDomainId
           || reported.ownerUserId !== actualOwnerId || reported.producerStepId !== step.step_id
           || runConfig?.evolveTaskId !== task.task_id || runConfig?.evolveStepId !== step.step_id
@@ -5840,7 +5858,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
           res.status(422).json({
             code: "BENCH_PLAN_RUN_MISMATCH",
             error: `${role} Baseline Bench Run 与冻结的 owner/domain 或终态不一致`,
-            benchRunId: reported.benchRunId, expectedOwnerId: config.ownerUserId,
+            benchRunId: reported.benchRunId, expectedOwnerId,
             expectedDomainId, actualOwnerId, actualDomainId,
             actualStatus: run?.status,
           }); return;

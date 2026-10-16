@@ -1,4 +1,5 @@
 import { productionRunsSql, productionDiagnosesSql } from "@avernet/clawweb-shared/server/services/run-purpose";
+import { spaceBotPredicate, type SpaceBot } from "../services/evolve/teamclaw-scope.js";
 import { randomUUID } from "node:crypto";
 import { recordSkillTaskEvent, skillAuditTransaction, skillTestBenchSnapshot, type SkillTaskEventUpdate } from './skill-audit.js';
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
@@ -185,6 +186,7 @@ export type EvolveTaskLogArchiveRow = {
 };
 
 export type EvolveTaskPageQuery = {
+  authorizedBots?: SpaceBot[];
   createdBy: string | null;
   ownerUserId?: string | null;
   page: number;
@@ -420,22 +422,33 @@ export class EvolveRepository {
     return (await this.db.query<EvolvePackRow>("SELECT * FROM ce_packs WHERE pack_id = ?", [packId]))[0] ?? null;
   }
 
-  async listPacks(userId: string | null, botId?: string): Promise<EvolvePackRow[]> {
+  async listPacks(userId: string | null, botId?: string, authorizedBots?: SpaceBot[], taskId?: string): Promise<EvolvePackRow[]> {
     const clauses: string[] = [];
     const params: unknown[] = [];
+    if (authorizedBots) {
+      const filter = spaceBotPredicate(authorizedBots, "t", this.db.dbType === "sqlite");
+      clauses.push(filter.sql); params.push(...filter.values);
+    }
+    if (taskId) { clauses.push("t.task_id = ?"); params.push(taskId); }
     if (userId) { clauses.push("p.user_id = ?"); params.push(userId); }
     if (botId) { clauses.push("p.bot_id = ?"); params.push(botId); }
     return this.db.query<EvolvePackRow>(
       `SELECT p.* FROM ce_packs p
+       ${authorizedBots || taskId ? "INNER JOIN ce_tasks t ON t.task_id = p.source_task_id" : ""}
        ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""}
        ORDER BY p.gmt_create DESC, p.id DESC`,
       params,
     );
   }
 
-  async listCompletedOptimizeVersions(userId: string | null, botId?: string): Promise<EvolveOptimizeVersionRow[]> {
+  async listCompletedOptimizeVersions(userId: string | null, botId?: string, authorizedBots?: SpaceBot[], taskId?: string): Promise<EvolveOptimizeVersionRow[]> {
     const clauses = ["s.step_type = 'optimize'", "s.status IN ('succeeded', 'completed')"];
     const params: unknown[] = [];
+    if (authorizedBots) {
+      const filter = spaceBotPredicate(authorizedBots, "t", this.db.dbType === "sqlite");
+      clauses.push(filter.sql); params.push(...filter.values);
+    }
+    if (taskId) { clauses.push("t.task_id = ?"); params.push(taskId); }
     if (userId) { clauses.push("t.user_id = ?"); params.push(userId); }
     if (botId) { clauses.push("t.bot_id = ?"); params.push(botId); }
     return this.db.query<EvolveOptimizeVersionRow>(
@@ -469,12 +482,13 @@ export class EvolveRepository {
     return tasks.filter((task) => this.taskUsesPack(task, pack));
   }
 
-  async countPackApplications(packs: EvolvePackRow[]): Promise<Record<string, number>> {
+  async countPackApplications(packs: EvolvePackRow[], authorizedBots?: SpaceBot[]): Promise<Record<string, number>> {
     if (packs.length === 0) return {};
     const ownerUserIds = [...new Set(packs.map((pack) => pack.user_id))];
+    const filter = authorizedBots ? spaceBotPredicate(authorizedBots,"",this.db.dbType === "sqlite") : null;
     const tasks = await this.db.query<EvolveTaskRow>(
-      `SELECT * FROM ce_tasks WHERE task_type = 'pack_restore' AND user_id IN (${ownerUserIds.map(() => "?").join(",")})`,
-      ownerUserIds,
+      `SELECT * FROM ce_tasks WHERE task_type = 'pack_restore' AND user_id IN (${ownerUserIds.map(() => "?").join(",")})${filter ? ` AND ${filter.sql}` : ""}`,
+      [...ownerUserIds,...(filter?.values ?? [])],
     );
     return Object.fromEntries(packs.map((pack) => [
       pack.pack_id, tasks.filter((task) => task.bot_id === pack.bot_id && this.taskUsesPack(task, pack)).length,
@@ -1556,6 +1570,10 @@ export class EvolveRepository {
   async listTasksPage(input: EvolveTaskPageQuery): Promise<{ rows: EvolveTaskRow[]; total: number }> {
     const clauses: string[] = [];
     const params: unknown[] = [];
+    if (input.authorizedBots) {
+      const filter = spaceBotPredicate(input.authorizedBots, "", this.db.dbType === "sqlite");
+      clauses.push(filter.sql); params.push(...filter.values);
+    }
     if (input.createdBy) { clauses.push("created_by = ?"); params.push(input.createdBy); }
     if (input.ownerUserId) { clauses.push("user_id = ?"); params.push(input.ownerUserId); }
     if (input.taskTypes && input.taskTypes.length === 0) return { rows: [], total: 0 };
