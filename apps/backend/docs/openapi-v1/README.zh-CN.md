@@ -968,7 +968,7 @@ Spec：`apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`。
 **全部成功或全部不变。** 添加先安装后授权，授权失败则卸载回去；删除先撤销后卸载，卸载失败则以原身份重新授权。
 若回滚本身也失败（或卸载结果未知），返回 `500`，`data.state` 说明 bot 停留的状态：
 `installed_not_granted`、`install_unknown_not_granted`、`grant_unknown_installed`、`revoked_still_installed`、
-`revoked_install_unknown`、`revoke_unknown_installed` 或 `removed_caller_override_kept`（已删除，但再次添加会以 `caller` 身份回来）。
+`revoked_install_unknown` 或 `revoke_unknown_installed`。
 安装结果未知时，会先卸载再返回错误；Passport 写入报错但实际已生效时，按成功处理。
 
 | 状态码 | 场景 | `data` |
@@ -981,10 +981,10 @@ Spec：`apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`。
 | 501 | bot 的引擎不支持 acli（仅 openclaw 与 claude_code 支持） | — |
 | 502 | acli 或容器调用失败；Passport 写入失败或未持久化 | acli 场景为 `{code, reason}` |
 
-工具安装到 manifest 的 `managed_bin_dir`（`/home/admin/.agentclaw/bin`），位于持久化存储且在引擎 `PATH` 上，
-因此重启后仍在、也无需重启即可使用。删除 CLI 时会清除其 caller 覆盖，使再次添加从 `owner` 开始——
-除非它是 bot 最后一个 caller 资源（bot 不会从 `caller` 回退为 `owner`）。默认 CLI 每次启动都会重新授权，
-不能删除。开源镜像不带 acli：添加、删除与搜索返回 `502`，`code` 为 `acli_unavailable`。
+安装目录由引擎决定（两种引擎均为 `/home/admin/.agentclaw/bin`），位于持久化存储且在引擎 `PATH` 上，
+因此重启后仍在、也无需重启即可使用；平台只给出工具名。删除 CLI 时保留其 caller/owner 选择，再次添加会恢复
+owner 上次设定的身份。默认 CLI 每次启动都会重新授权，不能删除。开源镜像不带 acli：添加、删除与搜索返回
+`502`，`code` 为 `acli_unavailable`。
 同一 bot 的添加与删除在单个 backend 实例内串行执行。
 
 ### 🟩 lucas-xzp · P1 —— resources（7 个端点）· `openapi_v1/resources/router.py`

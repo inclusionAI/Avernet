@@ -12,7 +12,6 @@ from agentclaw.community.core.mcp.services.cli_capabilities import (
 from agentclaw.community.core.mcp.services.cli_passport_scope import (
     CliPassportScopeReconciler,
 )
-from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
 from agentclaw.community.core.repository.protocols.bot import (
     BotCollabLockRepositoryProtocol,
     BotRepository,
@@ -35,7 +34,6 @@ class AcliClisModule(Module):
         bot_repository: BotRepository,
         lock_repository: BotCollabLockRepositoryProtocol,
         identity_repository: CallerIdentityRepositoryProtocol,
-        mcp_provider: BotMCPProvider,
         passport_plugin: PassportPlugin,
         transport: DeviceAdapterTransport,
         injector: Injector,
@@ -50,7 +48,6 @@ class AcliClisModule(Module):
             bot_repository=bot_repository,
             lock_repository=lock_repository,
             identity_repository=identity_repository,
-            mcp_provider=mcp_provider,
             scope_reconciler=CliPassportScopeReconciler(
                 passport_plugin=passport_plugin,
                 identity_repository=identity_repository,

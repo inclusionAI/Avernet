@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha256
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import re
 from typing import Any
 
@@ -32,7 +32,6 @@ class CliCapabilityManifest:
     version: int
     manifest_version: str
     digest: str
-    managed_bin_dir: str
     profiles: tuple[dict[str, Any], ...]
     catalog: Mapping[str, CliItem]
 
@@ -51,15 +50,6 @@ class CliCapabilityManifestResolver:
     @property
     def manifest_digest(self) -> str:
         return self._manifest.digest
-
-    @property
-    def managed_bin_dir(self) -> str:
-        """Where acli-managed tools are installed in a bot container.
-
-        The container start-up puts this directory on the engine's ``PATH``,
-        so a tool installed here is runnable without a restart.
-        """
-        return self._manifest.managed_bin_dir
 
     def required_cli_items(
         self,
@@ -106,14 +96,12 @@ class CliCapabilityManifestResolver:
         manifest_version = document.get("manifest_version")
         if version != 1 or not isinstance(manifest_version, str) or not manifest_version.strip():
             raise ValueError("CLI capability manifest version is invalid")
-        managed_bin_dir = _parse_managed_bin_dir(document.get("managed_bin_dir"))
         catalog = _parse_catalog(document.get("catalog"))
         profiles = _parse_profiles(document.get("profiles"), catalog)
         return CliCapabilityManifest(
             version=version,
             manifest_version=manifest_version,
             digest=sha256(raw).hexdigest(),
-            managed_bin_dir=managed_bin_dir,
             profiles=tuple(profiles),
             catalog=catalog,
         )
@@ -139,18 +127,6 @@ def merge_cli_scope(
         if override is not None:
             item["identity_mode"] = _normalize_identity_mode(override)
     return merged
-
-
-def _parse_managed_bin_dir(raw: object) -> str:
-    """An absolute ``…/bin`` path with no ``..``.
-
-    acli puts binary tools directly in it and treats its parent as the prefix
-    for npm tools, so both kinds land in this one ``PATH`` entry.
-    """
-    path = PurePosixPath(raw) if isinstance(raw, str) else None
-    if path is None or not path.is_absolute() or ".." in path.parts or path.name != "bin":
-        raise ValueError("CLI capability manifest managed_bin_dir is invalid")
-    return str(path)
 
 
 def _parse_catalog(raw: object) -> dict[str, CliItem]:

@@ -9,8 +9,8 @@ Backend paths are relative to `apps/backend/`; engine paths to
 - **Goal:** Run acli install / uninstall / market safely and turn its JSON into results or typed errors.
 - **Files:** `core/acli/__init__.py`, `core/acli/runner.py`, `core/acli/tests/test_runner.py`
 - **Done when:**
-  - [x] Each operation runs the exact argv in the plan with `HOME=<parent of install_dir>/acli-home`, via `create_subprocess_exec`.
-  - [x] Bad `name`, `keyword`, `install_dir` or page bounds are refused before any process starts.
+  - [x] Each operation runs the exact argv in the plan with `HOME=<parent of the engine's install directory>/acli-home`, via `create_subprocess_exec`.
+  - [x] Bad `name`, `keyword` or page bounds are refused before any process starts; a misconfigured install directory stops the runner being built.
   - [x] Uninstall of a name absent from `acli tool list` succeeds with `uninstalled: false`.
   - [x] Tests with a fake `acli` cover success, every error code, timeout and missing acli.
   - [x] Output is masked and truncated in logs and never returned raw.
@@ -25,11 +25,10 @@ Backend paths are relative to `apps/backend/`; engine paths to
   - [x] Router tests cover success, refusal and bad input.
 - **Depends on:** Task 1
 
-## Task 3: [x] Backend — install directory and AgentPass add/remove
-- **Goal:** Read and validate the install directory; add `add_cli` / `remove_cli` to `CliPassportScopeReconciler`, the existing class that is the only code allowed to write a bot's AgentPass CLI list (it rebuilds the whole MCP + CLI list and writes it in one call, because AgentPass replaces the list on every update).
-- **Files:** `src/agentclaw/community/core/mcp/services/cli_capabilities.py`, `.../cli_passport_scope.py`, `tests/community/core/mcp/services/test_cli_capabilities.py`, the reconciler's test module
+## Task 3: [x] Backend — AgentPass add/remove
+- **Goal:** Add `add_cli` / `remove_cli` to `CliPassportScopeReconciler`, the existing class that is the only code allowed to write a bot's AgentPass CLI list (it rebuilds the whole MCP + CLI list and writes it in one call, because AgentPass replaces the list on every update).
+- **Files:** `src/agentclaw/community/core/mcp/services/cli_passport_scope.py`, the reconciler's test module
 - **Done when:**
-  - [x] The resolver exposes `managed_bin_dir`; an invalid value fails loading.
   - [x] `add_cli` / `remove_cli` carry the full MCP scope and all other CLI identities.
   - [x] `reconcile` behaviour and log lines unchanged (existing tests pass).
 - **Depends on:** —

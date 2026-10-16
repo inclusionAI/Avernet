@@ -29,11 +29,23 @@ class AcliPortError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class AcliTool:
-    """One acli market tool, as acli describes it."""
+    """One acli market tool, as acli describes it.
 
+    Example, from ``acli install deepinsight-cli --json`` (acli 2.0.7)::
+
+        AcliTool(name="deepinsight-cli", command="di",
+                 description="DeepInsight", version="1.0.9")
+    """
+
+    #: The market name, e.g. ``deepinsight-cli``. It is also the tool's code in
+    #: Passport, and what ``DELETE …/clis/{cli_code}`` takes.
     name: str
+    #: The executable acli puts on ``PATH``, e.g. ``di``. acli accepts it as an
+    #: alias on install; the API refuses it in favour of ``name``.
     command: str
+    #: Free text from the market, e.g. ``DeepInsight``; may be empty.
     description: str
+    #: The installed or latest version, e.g. ``1.0.9``; may be empty.
     version: str
 
 
@@ -50,14 +62,14 @@ class AcliPort(Protocol):
 
     @abstractmethod
     async def install(
-        self, *, bot_id: str, owner_id: str, name: str, install_dir: str
+        self, *, bot_id: str, owner_id: str, name: str
     ) -> AcliTool:
         """Install ``name``; raises :class:`AcliPortError` on any refusal."""
         ...
 
     @abstractmethod
     async def uninstall(
-        self, *, bot_id: str, owner_id: str, name: str, install_dir: str
+        self, *, bot_id: str, owner_id: str, name: str
     ) -> bool:
         """Uninstall ``name``. ``False`` means acli had nothing installed."""
         ...

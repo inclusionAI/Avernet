@@ -14,7 +14,9 @@ with ``-`` would be read by acli as a flag.
 installed in ``$HOME/.acli/tools`` and appends a ``PATH`` line to
 ``$HOME/.profile``. The container's real ``HOME`` (``/root``) does not survive
 a restart, while ``/home/admin`` does, so every install and uninstall runs with
-``HOME`` set to ``<parent of install_dir>/acli-home``. That keeps acli's record
+``HOME`` set to ``<parent of install_dir>/acli-home``. The install directory
+itself is the engine's choice (``engine.community.config.load_acli_install_dir``);
+the platform names only the tool. That keeps acli's record
 beside the programs it describes, so an uninstall after a restart still finds
 the tool, and keeps the ``.profile`` edit out of the real home.
 
@@ -144,6 +146,13 @@ def validate_install_dir(install_dir: str) -> Path:
 
 
 def acli_home_for(install_dir: Path) -> Path:
+    """The ``HOME`` acli runs with: ``<parent of install_dir>/acli-home``.
+
+    For ``/home/admin/.agentclaw/bin`` that is ``/home/admin/.agentclaw/acli-home``.
+    acli records what it installed under ``$HOME/.acli/tools``; keeping that on
+    persisted storage beside the programs lets an uninstall after a container
+    restart still find the tool. Nothing else configures this path.
+    """
     return install_dir.parent / ACLI_HOME_NAME
 
 
@@ -196,16 +205,28 @@ def _tool_from(payload: Mapping[str, Any]) -> AcliTool:
 class AcliRunner:
     """Run acli. Stateless; safe to share."""
 
-    def __init__(self, *, environ: Mapping[str, str], executable: str = "acli") -> None:
+    def __init__(
+        self, *, environ: Mapping[str, str], install_dir: str, executable: str = "acli"
+    ) -> None:
+        """``environ`` and ``install_dir`` come from the composition root.
+
+        ``install_dir`` is where every tool is installed: the engine owns that
+        placement, and callers never choose it. A value that is not an
+        absolute ``…/bin`` path is a deployment error and fails here, at start.
+        """
+        try:
+            self._install_dir = validate_install_dir(install_dir)
+        except AcliError as error:
+            raise ValueError(error.message) from error
         # The process environment acli inherits, supplied by the composition
         # root so this core module never reads runtime configuration itself.
         self._environ = environ
         self._executable = executable
 
-    async def install(self, name: str, install_dir: str) -> AcliTool:
-        """Install ``name`` into ``install_dir`` and describe what was installed."""
+    async def install(self, name: str) -> AcliTool:
+        """Install ``name`` into the engine's install directory and describe it."""
         validate_name(name)
-        directory = validate_install_dir(install_dir)
+        directory = self._install_dir
         payload = await self._run(
             ["install", name, "--install-dir", str(directory), "--yes"],
             env=self._env_for(directory, failure_code="install_failed"),
@@ -223,10 +244,10 @@ class AcliRunner:
             raise AcliError("bad_output", "acli install reported no name or command")
         return installed
 
-    async def uninstall(self, name: str, install_dir: str) -> AcliUninstallResult:
+    async def uninstall(self, name: str) -> AcliUninstallResult:
         """Uninstall ``name`` if acli installed it; a tool acli never installed is success."""
         validate_name(name)
-        directory = validate_install_dir(install_dir)
+        directory = self._install_dir
         env = self._env_for(directory, failure_code="uninstall_failed")
         listing = await self._run(
             ["tool", "list"],

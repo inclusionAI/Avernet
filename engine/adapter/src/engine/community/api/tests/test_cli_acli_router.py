@@ -29,7 +29,6 @@ ACLI_CAPS = {
     Capability.CLI_ACLI_UNINSTALL,
     Capability.CLI_ACLI_MARKET,
 }
-INSTALL_DIR = "/home/admin/.agentclaw/bin"
 #: The module, not the ``router`` object the package re-exports under that name.
 router_module = importlib.import_module("engine.community.api.cli.router")
 
@@ -39,14 +38,14 @@ class _FakeRunner:
         self.error: AcliError | None = None
         self.calls: list[tuple] = []
 
-    async def install(self, name: str, install_dir: str) -> AcliTool:
-        self.calls.append(("install", name, install_dir))
+    async def install(self, name: str) -> AcliTool:
+        self.calls.append(("install", name))
         if self.error:
             raise self.error
         return AcliTool(name=name, command="di", description="desc", version="1.0.9")
 
-    async def uninstall(self, name: str, install_dir: str) -> AcliUninstallResult:
-        self.calls.append(("uninstall", name, install_dir))
+    async def uninstall(self, name: str) -> AcliUninstallResult:
+        self.calls.append(("uninstall", name))
         if self.error:
             raise self.error
         return AcliUninstallResult(name=name, uninstalled=True)
@@ -111,21 +110,21 @@ def client():
 
 def test_install_returns_what_acli_installed(client, runner):
     body = client.post(
-        "/api/cli/acli/install", json={"name": "deepinsight-cli", "install_dir": INSTALL_DIR}
+        "/api/cli/acli/install", json={"name": "deepinsight-cli"}
     ).json()
 
     assert body["success"] is True
     assert body["data"] == {
         "name": "deepinsight-cli", "command": "di", "description": "desc", "version": "1.0.9",
     }
-    assert runner.calls == [("install", "deepinsight-cli", INSTALL_DIR)]
+    assert runner.calls == [("install", "deepinsight-cli")]
 
 
 def test_install_refusal_is_200_with_error_code(client, runner):
     runner.error = AcliError("install_failed", "no such cli")
 
     response = client.post(
-        "/api/cli/acli/install", json={"name": "nope", "install_dir": INSTALL_DIR}
+        "/api/cli/acli/install", json={"name": "nope"}
     )
 
     assert response.status_code == 200
@@ -139,7 +138,7 @@ def test_invalid_input_is_400(client, runner):
     runner.error = AcliError("invalid_input", "bad name")
 
     response = client.post(
-        "/api/cli/acli/install", json={"name": "-x", "install_dir": INSTALL_DIR}
+        "/api/cli/acli/install", json={"name": "-x"}
     )
 
     assert response.status_code == 400
@@ -147,7 +146,7 @@ def test_invalid_input_is_400(client, runner):
 
 def test_uninstall_reports_whether_anything_was_removed(client, runner):
     body = client.post(
-        "/api/cli/acli/uninstall", json={"name": "dataphin", "install_dir": INSTALL_DIR}
+        "/api/cli/acli/uninstall", json={"name": "dataphin"}
     ).json()
 
     assert body["success"] is True
@@ -158,7 +157,7 @@ def test_uninstall_refusal(client, runner):
     runner.error = AcliError("uninstall_failed", "busy")
 
     body = client.post(
-        "/api/cli/acli/uninstall", json={"name": "dataphin", "install_dir": INSTALL_DIR}
+        "/api/cli/acli/uninstall", json={"name": "dataphin"}
     ).json()
 
     assert (body["success"], body["error"], body["message"]) == (False, "uninstall_failed", "busy")
@@ -199,9 +198,9 @@ def test_engine_without_the_capability_refuses_with_501(runner):
     try:
         for method, path, kwargs in (
             ("post", "/api/cli/acli/install",
-             {"json": {"name": "x", "install_dir": INSTALL_DIR}}),
+             {"json": {"name": "x"}}),
             ("post", "/api/cli/acli/uninstall",
-             {"json": {"name": "x", "install_dir": INSTALL_DIR}}),
+             {"json": {"name": "x"}}),
             ("get", "/api/cli/acli/market", {}),
         ):
             assert getattr(client, method)(path, **kwargs).status_code == 501, path
@@ -212,3 +211,19 @@ def test_engine_without_the_capability_refuses_with_501(runner):
 
 def test_default_runner_is_the_shared_instance():
     assert router_module._acli() is router_module._ACLI_RUNNER
+
+
+def test_callers_cannot_choose_the_install_directory(client, runner):
+    """The engine owns placement; an ``install_dir`` in the body is ignored."""
+    client.post("/api/cli/acli/install", json={"name": "dataphin", "install_dir": "/tmp/bin"})
+
+    assert runner.calls == [("install", "dataphin")]
+
+
+def test_install_directory_comes_from_engine_config(monkeypatch):
+    from engine.community.config import DEFAULT_ACLI_INSTALL_DIR, load_acli_install_dir
+
+    monkeypatch.delenv("ENGINE_ACLI_INSTALL_DIR", raising=False)
+    assert load_acli_install_dir() == DEFAULT_ACLI_INSTALL_DIR == "/home/admin/.agentclaw/bin"
+    monkeypatch.setenv("ENGINE_ACLI_INSTALL_DIR", " /opt/tools/bin ")
+    assert load_acli_install_dir() == "/opt/tools/bin"

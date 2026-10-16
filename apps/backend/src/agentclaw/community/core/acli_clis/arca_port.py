@@ -59,21 +59,21 @@ class ArcaAcliPort(AcliPort):
         self._transport = transport
 
     async def install(
-        self, *, bot_id: str, owner_id: str, name: str, install_dir: str
+        self, *, bot_id: str, owner_id: str, name: str
     ) -> AcliTool:
         data = await self._invoke(
             bot_id, owner_id, "POST", INSTALL_PATH,
-            body={"name": name, "install_dir": install_dir},
+            body={"name": name},
             timeout=INSTALL_TIMEOUT_SECONDS,
         )
         return _tool(data)
 
     async def uninstall(
-        self, *, bot_id: str, owner_id: str, name: str, install_dir: str
+        self, *, bot_id: str, owner_id: str, name: str
     ) -> bool:
         data = await self._invoke(
             bot_id, owner_id, "POST", UNINSTALL_PATH,
-            body={"name": name, "install_dir": install_dir},
+            body={"name": name},
             timeout=UNINSTALL_TIMEOUT_SECONDS,
         )
         return bool(data.get("uninstalled"))

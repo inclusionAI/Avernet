@@ -82,7 +82,7 @@ def _alive(pid: int) -> bool:
 
 
 @pytest.fixture
-def fake_acli(tmp_path, monkeypatch):
+def fake_acli(tmp_path, install_dir, monkeypatch):
     script = tmp_path / "acli"
     script.write_text(_FAKE.format(python=sys.executable))
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
@@ -94,7 +94,7 @@ def fake_acli(tmp_path, monkeypatch):
             return []
         return [json.loads(line) for line in log.read_text().splitlines()]
 
-    return AcliRunner(environ=os.environ, executable=str(script)), calls
+    return AcliRunner(environ=os.environ, install_dir=install_dir, executable=str(script)), calls
 
 
 @pytest.fixture
@@ -105,7 +105,7 @@ def install_dir(tmp_path) -> str:
 async def test_install_runs_fixed_argv_under_persisted_home(fake_acli, install_dir):
     runner, calls = fake_acli
 
-    tool = await runner.install("deepinsight-cli", install_dir)
+    tool = await runner.install("deepinsight-cli")
 
     assert (tool.name, tool.command, tool.description, tool.version) == (
         "deepinsight-cli", "di", "DeepInsight", "1.0.9",
@@ -124,7 +124,7 @@ async def test_install_failure_carries_masked_acli_error(fake_acli, install_dir,
     monkeypatch.setenv("FAKE_ACLI_MODE", "fail")
 
     with pytest.raises(AcliError) as caught:
-        await runner.install("nope", install_dir)
+        await runner.install("nope")
 
     assert caught.value.code == "install_failed"
     assert "no such cli" in caught.value.message
@@ -136,7 +136,7 @@ async def test_crash_without_json_reports_stderr_masked(fake_acli, install_dir, 
     monkeypatch.setenv("FAKE_ACLI_MODE", "crash")
 
     with pytest.raises(AcliError) as caught:
-        await runner.install("dataphin", install_dir)
+        await runner.install("dataphin")
 
     assert caught.value.code == "install_failed"
     assert "abc123" not in caught.value.message
@@ -148,7 +148,7 @@ async def test_success_exit_without_json_is_bad_output(fake_acli, install_dir, m
     monkeypatch.setenv("FAKE_ACLI_MODE", "garbage")
 
     with pytest.raises(AcliError) as caught:
-        await runner.install("dataphin", install_dir)
+        await runner.install("dataphin")
 
     assert caught.value.code == "bad_output"
 
@@ -158,7 +158,7 @@ async def test_unparseable_json_is_bad_output(fake_acli, install_dir, monkeypatc
     monkeypatch.setenv("FAKE_ACLI_MODE", "badjson")
 
     with pytest.raises(AcliError) as caught:
-        await runner.install("dataphin", install_dir)
+        await runner.install("dataphin")
 
     assert caught.value.code == "bad_output"
 
@@ -169,7 +169,9 @@ async def test_install_without_name_or_command_is_bad_output(tmp_path, install_d
     script.chmod(0o755)
 
     with pytest.raises(AcliError) as caught:
-        await AcliRunner(environ=os.environ, executable=str(script)).install("dataphin", install_dir)
+        await AcliRunner(
+            environ=os.environ, install_dir=install_dir, executable=str(script)
+        ).install("dataphin")
 
     assert caught.value.code == "bad_output"
 
@@ -180,7 +182,7 @@ async def test_timeout_kills_and_reports(fake_acli, install_dir, monkeypatch):
     monkeypatch.setattr("engine.community.core.acli.runner.INSTALL_TIMEOUT_SECONDS", 0.2)
 
     with pytest.raises(AcliError) as caught:
-        await runner.install("dataphin", install_dir)
+        await runner.install("dataphin")
 
     assert caught.value.code == "timeout"
 
@@ -221,25 +223,29 @@ async def test_cancelled_request_kills_acli(fake_acli, install_dir, monkeypatch)
 
 
 async def test_unwritable_install_dir_is_a_refusal_not_a_crash(fake_acli, tmp_path):
-    runner, calls = fake_acli
+    good, calls = fake_acli
     blocker = tmp_path / "file"
     blocker.write_text("")
-    install_dir = str(blocker / "x" / "bin")
+    runner = AcliRunner(
+        environ=os.environ, install_dir=str(blocker / "x" / "bin"), executable=good._executable
+    )
 
     with pytest.raises(AcliError) as caught:
-        await runner.install("dataphin", install_dir)
+        await runner.install("dataphin")
     assert caught.value.code == "install_failed"
     with pytest.raises(AcliError) as caught:
-        await runner.uninstall("dataphin", install_dir)
+        await runner.uninstall("dataphin")
     assert caught.value.code == "uninstall_failed"
     assert calls() == []
 
 
 async def test_missing_acli_is_unavailable(tmp_path, install_dir):
-    runner = AcliRunner(environ=os.environ, executable=str(tmp_path / "no-such-acli"))
+    runner = AcliRunner(
+        environ=os.environ, install_dir=install_dir, executable=str(tmp_path / "no-such-acli")
+    )
 
     with pytest.raises(AcliError) as caught:
-        await runner.install("dataphin", install_dir)
+        await runner.install("dataphin")
 
     assert caught.value.code == "acli_unavailable"
 
@@ -248,7 +254,7 @@ async def test_uninstall_removes_a_tool_acli_installed(fake_acli, install_dir, m
     runner, calls = fake_acli
     monkeypatch.setenv("FAKE_ACLI_INSTALLED", "yuntu-cli,deepinsight-cli")
 
-    result = await runner.uninstall("deepinsight-cli", install_dir)
+    result = await runner.uninstall("deepinsight-cli")
 
     assert result.uninstalled is True
     list_call, uninstall_call = calls()
@@ -263,7 +269,7 @@ async def test_uninstall_of_unknown_tool_is_success_without_uninstall_call(
     runner, calls = fake_acli
     monkeypatch.setenv("FAKE_ACLI_INSTALLED", "yuntu-cli")
 
-    result = await runner.uninstall("dataphin", install_dir)
+    result = await runner.uninstall("dataphin")
 
     assert result.uninstalled is False
     assert [c["args"][:2] for c in calls()] == [["tool", "list"]]
@@ -275,7 +281,7 @@ async def test_uninstall_refuses_a_listing_without_tools(fake_acli, install_dir,
     monkeypatch.setenv("FAKE_ACLI_MODE", "list_no_tools")
 
     with pytest.raises(AcliError) as caught:
-        await runner.uninstall("dataphin", install_dir)
+        await runner.uninstall("dataphin")
 
     assert caught.value.code == "bad_output"
     assert [c["args"][:2] for c in calls()] == [["tool", "list"]]
@@ -285,7 +291,7 @@ async def test_uninstall_reads_a_null_listing_as_empty(fake_acli, install_dir, m
     runner, _ = fake_acli
     monkeypatch.setenv("FAKE_ACLI_MODE", "list_null_tools")
 
-    result = await runner.uninstall("dataphin", install_dir)
+    result = await runner.uninstall("dataphin")
 
     assert result.uninstalled is False
 
@@ -296,7 +302,7 @@ async def test_uninstall_failure_raises(fake_acli, install_dir, monkeypatch):
     monkeypatch.setenv("FAKE_ACLI_MODE", "uninstall_fail")
 
     with pytest.raises(AcliError) as caught:
-        await runner.uninstall("dataphin", install_dir)
+        await runner.uninstall("dataphin")
 
     assert caught.value.code == "uninstall_failed"
     assert caught.value.message == "busy"
@@ -347,13 +353,20 @@ def test_bad_install_dirs_are_refused(path):
         validate_install_dir(path)
 
 
+@pytest.mark.parametrize("path", ["relative/bin", "/home/admin/.agentclaw/lib"])
+def test_a_misconfigured_install_dir_fails_at_start(path):
+    """The install directory is deployment config, so a bad one stops the runner being built."""
+    with pytest.raises(ValueError):
+        AcliRunner(environ=os.environ, install_dir=path)
+
+
 async def test_bad_input_starts_no_process(fake_acli, install_dir):
     runner, calls = fake_acli
 
     with pytest.raises(AcliError):
-        await runner.install("-x", install_dir)
+        await runner.install("-x")
     with pytest.raises(AcliError):
-        await runner.uninstall("ok", "/not/a/binary-dir")
+        await runner.uninstall("../x")
     with pytest.raises(AcliError):
         await runner.market("--keyword", 1, 10)
     with pytest.raises(AcliError):

@@ -9,8 +9,14 @@ from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousErr
 from agentclaw.community.core.caller_identity.contracts import (
     CallerIdentityAmbiguousError,
     CallerIdentityNotFoundError,
+    CallerIdentityPermissionError,
+    CallerIdentityReadOnlyError,
 )
-from agentclaw.community.core.caller_identity.guard import load_bot, lock_epoch_matches
+from agentclaw.community.core.caller_identity.guard import (
+    load_bot,
+    lock_epoch_matches,
+    require_owner_of_active_service_bot,
+)
 
 
 class _Bots:
@@ -59,5 +65,27 @@ def test_missing_bot_is_not_found() -> None:
     ],
 )
 def test_lock_epoch_must_name_the_lock_the_actor_holds(lock, epoch, ok) -> None:
-    locks = SimpleNamespace(get_by_key=lambda key: lock)
-    assert lock_epoch_matches(locks, bot_id="b", actor_id="u", lock_epoch=epoch) is ok  # type: ignore[arg-type]
+    keys: list[str] = []
+    locks = SimpleNamespace(get_by_key=lambda key: keys.append(key) or lock)
+    assert lock_epoch_matches(  # type: ignore[arg-type]
+        locks, bot_id="b", owner_id="o", actor_id="u", lock_epoch=epoch
+    ) is ok
+    assert keys == ["b:o"]
+
+
+@pytest.mark.parametrize(
+    ("bot", "actor", "error"),
+    [
+        ({"owner_id": "o", "bot_type": "service", "status": "STOPPED"}, "x", CallerIdentityReadOnlyError),
+        ({"owner_id": "o", "bot_type": "personal", "status": "ACTIVE"}, "o", CallerIdentityReadOnlyError),
+        ({"owner_id": "o", "bot_type": "service", "status": "ACTIVE"}, "x", CallerIdentityPermissionError),
+        ({"owner_id": "o", "bot_type": "service", "status": "ACTIVE"}, "o", None),
+    ],
+)
+def test_the_bot_is_checked_before_the_actor(bot, actor, error) -> None:
+    """A read-only bot is read-only for everyone; only then must the actor be its owner."""
+    if error is None:
+        require_owner_of_active_service_bot(bot, actor)
+    else:
+        with pytest.raises(error):
+            require_owner_of_active_service_bot(bot, actor)

@@ -20,7 +20,6 @@ from agentclaw.community.core.acli_clis.errors import (
     AcliDefaultCliError,
     AcliEngineUnsupportedError,
     AcliGrantSyncError,
-    AcliIdentityCleanupError,
     AcliOperationFailedError,
     AcliRequestRejectedError,
     AcliRollbackFailedError,
@@ -32,7 +31,6 @@ from agentclaw.community.core.acli_clis.port import (
 )
 from agentclaw.community.core.acli_clis.service import AcliCliService
 from agentclaw.community.core.caller_identity.contracts import (
-    CallerIdentityIrreversibleError,
     CallerIdentityPermissionError,
     CallerIdentityReadOnlyError,
     CallerLockEpochError,
@@ -41,7 +39,6 @@ from agentclaw.community.core.caller_identity.models import McpCallType
 
 pytestmark = pytest.mark.asyncio
 
-DIR = "/home/admin/.agentclaw/bin"
 OWNER = "owner-1"
 
 
@@ -95,11 +92,6 @@ class _Identities:
         self.overrides.pop(kwargs["cli_code"], None)
 
 
-class _Mcps:
-    def collect_bot_active_mcps(self, **kwargs: Any):
-        return [{"server_code": "mcp.a"}, "junk"]
-
-
 class _AgentPass:
     """The bot's grant list, written through ``add_cli`` / ``remove_cli``."""
 
@@ -130,8 +122,6 @@ class _AgentPass:
 
 
 class _Manifest:
-    managed_bin_dir = DIR
-
     def required_cli_items(self, engine_type, template_type):
         return [{"cli_code": "dataphin"}] if engine_type == "openclaw" else []
 
@@ -147,16 +137,16 @@ class _Container:
         self.resolves_to: dict[str, str] = {"di": "deepinsight-cli"}
         self.calls: list[tuple] = []
 
-    async def install(self, *, bot_id, owner_id, name, install_dir):
-        self.calls.append(("install", name, install_dir, owner_id))
+    async def install(self, *, bot_id, owner_id, name):
+        self.calls.append(("install", name, owner_id))
         if self.install_error:
             raise self.install_error
         market_name = self.resolves_to.get(name, name)
         self.installed.add(market_name)
         return AcliTool(market_name, "cmd", f"{market_name} from market", "1.0.0")
 
-    async def uninstall(self, *, bot_id, owner_id, name, install_dir):
-        self.calls.append(("uninstall", name, install_dir))
+    async def uninstall(self, *, bot_id, owner_id, name):
+        self.calls.append(("uninstall", name))
         if self.uninstall_errors:
             raise self.uninstall_errors.pop(0)
         present = name in self.installed
@@ -185,7 +175,6 @@ def _service(
         bot_repository=_Bots(_bot() if bot is None else bot),  # type: ignore[arg-type]
         lock_repository=_Locks(lock),  # type: ignore[arg-type]
         identity_repository=identities,  # type: ignore[arg-type]
-        mcp_provider=_Mcps(),  # type: ignore[arg-type]
         scope_reconciler=agentpass,  # type: ignore[arg-type]
         manifest_resolver=_Manifest(),  # type: ignore[arg-type]
         port=container,  # type: ignore[arg-type]
@@ -257,7 +246,7 @@ async def test_add_installs_then_grants_as_owner() -> None:
     tool = await _add(service)
 
     assert tool.name == "yuque-cli"
-    assert container.calls == [("install", "yuque-cli", DIR, OWNER)]
+    assert container.calls == [("install", "yuque-cli", OWNER)]
     assert agentpass.items[-1] == {
         "cli_code": "yuque-cli",
         "cli_name": "yuque-cli",
@@ -409,7 +398,7 @@ async def test_remove_of_a_tool_never_installed_through_the_api_just_revokes() -
     await _remove(service, "adev-cli")
 
     assert agentpass.codes == ["dataphin"]
-    assert container.calls == [("uninstall", "adev-cli", DIR)]
+    assert container.calls == [("uninstall", "adev-cli")]
 
 
 async def test_failed_uninstall_regrants_with_the_same_identity() -> None:
@@ -469,53 +458,45 @@ async def test_removing_a_tool_the_bot_lacks_is_not_found() -> None:
         await _remove(service, "yuque-cli")
 
 
-async def test_remove_clears_a_caller_override_so_readd_starts_at_owner() -> None:
+async def test_remove_keeps_the_identity_and_readd_restores_it() -> None:
+    """The owner's caller/owner choice outlives a remove; re-adding brings it back."""
     identities = _Identities({"yuque-cli": "caller"})
-    service, _, _, identities = _service(granted=["dataphin", "yuque-cli"], identities=identities)
-
-    await _remove(service)
-
-    [call] = identities.replaced
-    assert call["call_type"] is McpCallType.OWNER
-    assert call["effective_cli_codes"] == {"dataphin"}
-    assert call["effective_server_codes"] == {"mcp.a"}
-    assert call["lock_key"] == f"bot-1:{OWNER}"
-    assert identities.overrides == {}
-
-
-async def test_override_kept_when_the_bot_cannot_fall_back_to_owner() -> None:
-    """The platform's caller->owner rule keeps the override; the remove succeeds."""
-    identities = _Identities({"yuque-cli": "caller"})
-    identities.error = CallerIdentityIrreversibleError()
-    service, agentpass, _, _ = _service(granted=["dataphin", "yuque-cli"], identities=identities)
-
-    await _remove(service)
-
-    assert agentpass.codes == ["dataphin"]
-
-
-async def test_failed_override_clear_is_reported_not_swallowed() -> None:
-    identities = _Identities({"yuque-cli": "caller"})
-    identities.error = RuntimeError("db write failed")
-    service, agentpass, container, _ = _service(
-        granted=["dataphin", "yuque-cli"], identities=identities,
-        container=_Container({"yuque-cli"}),
+    service, agentpass, _, identities = _service(
+        granted=["dataphin", "yuque-cli"], identities=identities
     )
 
-    with pytest.raises(AcliIdentityCleanupError) as caught:
-        await _remove(service)
-
-    assert caught.value.state == "removed_caller_override_kept"
-    assert agentpass.codes == ["dataphin"]
-    assert "yuque-cli" not in container.installed
-
-
-async def test_remove_without_override_does_not_write_identity() -> None:
-    service, _, _, identities = _service(granted=["dataphin", "yuque-cli"])
-
     await _remove(service)
-
     assert identities.replaced == []
+    assert identities.overrides == {"yuque-cli": "caller"}
+
+    await _add(service)
+    [item] = [i for i in agentpass.items if i["cli_code"] == "yuque-cli"]
+    assert item["identity_mode"] == "caller"
+
+
+async def test_add_without_a_kept_identity_grants_as_owner() -> None:
+    service, agentpass, _, _ = _service()
+
+    await _add(service)
+
+    [item] = [i for i in agentpass.items if i["cli_code"] == "yuque-cli"]
+    assert item["identity_mode"] == "owner"
+
+
+async def test_unreadable_identity_stops_the_add_before_installing() -> None:
+    identities = _Identities()
+    identities.list_draft_cli_call_types = _raise  # type: ignore[method-assign]
+    service, agentpass, container, _ = _service(identities=identities)
+
+    with pytest.raises(RuntimeError):
+        await _add(service)
+
+    assert container.calls == []
+    assert agentpass.codes == ["dataphin"]
+
+
+def _raise(*_args, **_kwargs):
+    raise RuntimeError("identity table down")
 
 
 # ── shared checks ────────────────────────────────────────────────────────

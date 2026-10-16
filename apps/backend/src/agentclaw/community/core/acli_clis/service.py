@@ -29,7 +29,6 @@ from agentclaw.community.core.acli_clis.errors import (
     AcliDefaultCliError,
     AcliEngineUnsupportedError,
     AcliGrantSyncError,
-    AcliIdentityCleanupError,
     AcliOperationFailedError,
     AcliRequestRejectedError,
     AcliRollbackFailedError,
@@ -41,16 +40,12 @@ from agentclaw.community.core.acli_clis.port import (
     AcliPortError,
     AcliTool,
 )
-from agentclaw.community.core.caller_identity.contracts import (
-    CallerIdentityIrreversibleError,
-    CallerLockEpochError,
-)
+from agentclaw.community.core.caller_identity.contracts import CallerLockEpochError
 from agentclaw.community.core.caller_identity.guard import (
     load_bot,
     lock_epoch_matches,
     require_owner_of_active_service_bot,
 )
-from agentclaw.community.core.caller_identity.models import McpCallType
 from agentclaw.community.core.errors import DomainError
 from agentclaw.community.core.mcp.services.cli_capabilities import (
     CliCapabilityManifestResolver,
@@ -58,7 +53,6 @@ from agentclaw.community.core.mcp.services.cli_capabilities import (
 from agentclaw.community.core.mcp.services.cli_passport_scope import (
     CliPassportScopeReconciler,
 )
-from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
 from agentclaw.community.core.repository.protocols.bot import (
     BotCollabLockRepositoryProtocol,
     BotRepository,
@@ -83,7 +77,6 @@ class AcliCliService(AcliCliServiceProtocol):
         bot_repository: BotRepository,
         lock_repository: BotCollabLockRepositoryProtocol,
         identity_repository: CallerIdentityRepositoryProtocol,
-        mcp_provider: BotMCPProvider,
         scope_reconciler: CliPassportScopeReconciler,
         manifest_resolver: CliCapabilityManifestResolver,
         port: AcliPort,
@@ -91,7 +84,6 @@ class AcliCliService(AcliCliServiceProtocol):
         self._bots = bot_repository
         self._locks = lock_repository
         self._identities = identity_repository
-        self._mcp_provider = mcp_provider
         self._reconciler = scope_reconciler
         self._manifest = manifest_resolver
         self._port = port
@@ -104,7 +96,7 @@ class AcliCliService(AcliCliServiceProtocol):
 
     # ── reads ────────────────────────────────────────────────────────────
 
-    def list_bot_clis(self, *, bot_id: str, entity_id: str | None) -> list[BotCli]:
+    def list_bot_clis(self, *, bot_id: str, entity_id: str) -> list[BotCli]:
         """Every CLI in the bot's Passport grant, however it got there."""
         bot = load_bot(self._bots, bot_id=bot_id, entity_id=entity_id)
         defaults = self._default_codes(bot)
@@ -128,7 +120,7 @@ class AcliCliService(AcliCliServiceProtocol):
         self,
         *,
         bot_id: str,
-        entity_id: str | None,
+        entity_id: str,
         keyword: str,
         page_no: int,
         page_size: int,
@@ -153,7 +145,7 @@ class AcliCliService(AcliCliServiceProtocol):
         self,
         *,
         bot_id: str,
-        entity_id: str | None,
+        entity_id: str,
         actor_id: str,
         cli_code: str,
         lock_epoch: int | None,
@@ -169,7 +161,7 @@ class AcliCliService(AcliCliServiceProtocol):
         self,
         *,
         bot_id: str,
-        entity_id: str | None,
+        entity_id: str,
         actor_id: str,
         cli_code: str,
         lock_epoch: int | None,
@@ -180,6 +172,10 @@ class AcliCliService(AcliCliServiceProtocol):
         granted_before = self._granted_codes(bot)
         if cli_code in granted_before:
             raise AcliCliAlreadyGrantedError(cli_code)
+        # A tool removed earlier keeps the identity its owner chose, so a
+        # re-add restores it. Read before installing, so a failed read
+        # changes nothing.
+        identity_mode = self._kept_identity(bot, cli_code)
         logger.info(
             "acli_cli_add_requested bot_id=%s cli_code=%s actor_id=%s", bot_id, cli_code, actor_id
         )
@@ -187,7 +183,6 @@ class AcliCliService(AcliCliServiceProtocol):
         try:
             tool = await self._port.install(
                 bot_id=bot_id, owner_id=owner_id, name=cli_code,
-                install_dir=self._manifest.managed_bin_dir,
             )
         except AcliPortError as error:
             logger.warning(
@@ -214,6 +209,7 @@ class AcliCliService(AcliCliServiceProtocol):
                 await self._undo_install(bot_id, owner_id, tool.name, reason="name_mismatch")
             raise AcliCliNameMismatchError(cli_code, tool.name)
 
+        write_error: Exception | None = None
         try:
             self._reconciler.add_cli(
                 bot=bot,
@@ -221,7 +217,7 @@ class AcliCliService(AcliCliServiceProtocol):
                     "cli_code": cli_code,
                     "cli_name": cli_code,
                     "cli_desc": tool.description,
-                    "identity_mode": "owner",
+                    "identity_mode": identity_mode,
                 },
             )
         except Exception as error:
@@ -229,49 +225,19 @@ class AcliCliService(AcliCliServiceProtocol):
                 "acli_cli_add_failed bot_id=%s cli_code=%s phase=grant error_type=%s",
                 bot_id, cli_code, type(error).__name__,
             )
-            granted = self._grant_state(bot, cli_code)
-            if granted:
-                # The write failed on the way back (a timeout, say) after
-                # Passport had applied it: the add actually succeeded.
-                logger.info(
-                    "acli_cli_add_succeeded bot_id=%s cli_code=%s grant=landed_despite_error",
-                    bot_id, cli_code,
-                )
-                return tool
-            if granted is None:
-                # Passport cannot say whether the grant landed. Uninstalling
-                # could leave a granted-but-missing tool, so keep the program
-                # and report that the grant is unknown.
-                logger.error(
-                    "acli_cli_rollback_failed bot_id=%s cli_code=%s "
-                    "state=grant_unknown_installed",
-                    bot_id, cli_code,
-                )
-                raise AcliRollbackFailedError(cli_code, "grant_unknown_installed") from error
-            await self._undo_install(bot_id, owner_id, cli_code, reason="grant_failed")
-            raise AcliGrantSyncError from error
-
-        granted = self._grant_state(bot, cli_code)
-        if granted is None:
-            # The write was accepted but cannot be confirmed. Uninstalling
-            # could strand a granted tool, so keep the program and say so.
-            logger.error(
-                "acli_cli_rollback_failed bot_id=%s cli_code=%s "
-                "state=grant_unknown_installed phase=grant_readback",
-                bot_id, cli_code,
+            write_error = error
+        # Read the grant back even after a clean write: a Passport can accept
+        # a write it does not keep (the community self-issued one), or another
+        # whole-scope write can overwrite it. Only a confirmed grant succeeds.
+        if not self._passport_shows(
+            bot, cli_code, granted=True, unknown_state="grant_unknown_installed",
+            cause=write_error,
+        ):
+            await self._undo_install(
+                bot_id, owner_id, cli_code,
+                reason="grant_failed" if write_error else "grant_not_persisted",
             )
-            raise AcliRollbackFailedError(cli_code, "grant_unknown_installed")
-        if not granted:
-            # The write was accepted but Passport does not hold the grant —
-            # a Passport that stores no scope (the community self-issued one)
-            # or a concurrent whole-scope write that overwrote it. Undo the
-            # install rather than report a grant that does not exist.
-            logger.error(
-                "acli_cli_add_failed bot_id=%s cli_code=%s phase=grant_readback",
-                bot_id, cli_code,
-            )
-            await self._undo_install(bot_id, owner_id, cli_code, reason="grant_not_persisted")
-            raise AcliGrantSyncError
+            raise AcliGrantSyncError from write_error
 
         logger.info(
             "acli_cli_add_succeeded bot_id=%s cli_code=%s version=%s duration_ms=%s",
@@ -283,7 +249,7 @@ class AcliCliService(AcliCliServiceProtocol):
         self,
         *,
         bot_id: str,
-        entity_id: str | None,
+        entity_id: str,
         actor_id: str,
         cli_code: str,
         lock_epoch: int | None,
@@ -299,11 +265,27 @@ class AcliCliService(AcliCliServiceProtocol):
         self,
         *,
         bot_id: str,
-        entity_id: str | None,
+        entity_id: str,
         actor_id: str,
         cli_code: str,
         lock_epoch: int | None,
     ) -> None:
+        """Revoke the grant, then uninstall the program; all or nothing.
+
+        Refused up front: a tool the bot lacks (``AcliCliNotGrantedError``) and
+        a default tool (``AcliDefaultCliError``). Then:
+
+        * revoke fails → re-read Passport. Still granted → ``AcliGrantSyncError``
+          (nothing changed); revoked after all → carry on; unreadable →
+          ``revoke_unknown_installed``.
+        * uninstall fails → re-grant with the same identity and return the
+          container error; if that re-grant fails too → ``revoked_still_installed``
+          (or ``revoke_unknown_installed`` when Passport cannot be read).
+        * uninstall's answer never arrives (timeout, unreachable, bad output) →
+          stay revoked, the safe side, and report ``revoked_install_unknown``.
+
+        A state is reported as ``AcliRollbackFailedError`` (``500``, ``data.state``).
+        """
         started = time.monotonic()
         bot = self._writable_bot(bot_id, entity_id, actor_id, lock_epoch)
         owner_id = str(bot["owner_id"])
@@ -327,17 +309,13 @@ class AcliCliService(AcliCliServiceProtocol):
                 "acli_cli_remove_failed bot_id=%s cli_code=%s phase=revoke error_type=%s",
                 bot_id, cli_code, type(error).__name__,
             )
-            granted = self._grant_state(bot, cli_code)
-            if granted is None:
-                logger.error(
-                    "acli_cli_rollback_failed bot_id=%s cli_code=%s "
-                    "state=revoke_unknown_installed",
-                    bot_id, cli_code,
-                )
-                raise AcliRollbackFailedError(cli_code, "revoke_unknown_installed") from error
-            if granted:
+            # Nothing is uninstalled yet, so an unreadable Passport leaves the
+            # program installed with the grant in an unknown state.
+            if not self._passport_shows(
+                bot, cli_code, granted=False, unknown_state="revoke_unknown_installed",
+                cause=error,
+            ):
                 raise AcliGrantSyncError from error
-            # The revoke landed despite the error: finish the removal.
             logger.info(
                 "acli_cli_remove_continues bot_id=%s cli_code=%s revoke=landed_despite_error",
                 bot_id, cli_code,
@@ -346,7 +324,6 @@ class AcliCliService(AcliCliServiceProtocol):
         try:
             await self._port.uninstall(
                 bot_id=bot_id, owner_id=owner_id, name=cli_code,
-                install_dir=self._manifest.managed_bin_dir,
             )
         except AcliPortError as error:
             logger.warning(
@@ -366,7 +343,6 @@ class AcliCliService(AcliCliServiceProtocol):
             self._undo_revoke(bot, cli_code, held[cli_code])
             raise _container_error(error) from error
 
-        self._clear_identity_override(bot, cli_code, actor_id, lock_epoch, set(held) - {cli_code})
         logger.info(
             "acli_cli_remove_succeeded bot_id=%s cli_code=%s duration_ms=%s",
             bot_id, cli_code, int((time.monotonic() - started) * 1000),
@@ -397,7 +373,6 @@ class AcliCliService(AcliCliServiceProtocol):
         try:
             await self._port.uninstall(
                 bot_id=bot_id, owner_id=owner_id, name=name,
-                install_dir=self._manifest.managed_bin_dir,
             )
         except AcliPortError as error:
             logger.error(
@@ -408,92 +383,47 @@ class AcliCliService(AcliCliServiceProtocol):
             raise AcliRollbackFailedError(name, state) from error
 
     def _undo_revoke(self, bot: Mapping[str, Any], cli_code: str, item: Mapping[str, Any]) -> None:
-        # The caller/owner override lives in its own table and the revoke did
-        # not touch it, so re-granting restores the same identity.
+        """Re-grant ``item`` after a failed uninstall, so the bot is as before the remove.
+
+        The caller/owner override lives in its own table and the revoke did not
+        touch it, so re-granting restores the same identity.
+        """
         try:
             self._reconciler.add_cli(bot=bot, item=item)
         except Exception as error:
-            granted = self._grant_state(bot, cli_code)
-            if granted:
-                # The re-grant landed despite the error: granted and installed,
-                # exactly as before the remove.
-                return
-            state = "revoke_unknown_installed" if granted is None else "revoked_still_installed"
-            logger.error(
-                "acli_cli_rollback_failed bot_id=%s cli_code=%s state=%s error_type=%s",
-                bot["bot_id"], cli_code, state, type(error).__name__,
-            )
-            raise AcliRollbackFailedError(cli_code, state) from error
-
-    def _clear_identity_override(
-        self,
-        bot: Mapping[str, Any],
-        cli_code: str,
-        actor_id: str,
-        lock_epoch: int | None,
-        remaining_cli_codes: set[str],
-    ) -> None:
-        """Drop a removed CLI's caller override so a later re-add starts at owner.
-
-        Runs after the removal itself succeeded. The platform does not let a
-        bot fall back from ``caller`` to ``owner``, so when this CLI was the
-        bot's only caller resource the override is deliberately kept and a
-        re-add comes back as ``caller``, as the bot already is. Any other
-        failure is raised as :class:`AcliIdentityCleanupError`.
-        """
-        engine_type = str(bot["active_engine"])
-        overrides = self._identities.list_draft_cli_call_types(int(bot["id"]), engine_type)
-        if _mode(overrides.get(cli_code)) != "caller":
-            return
-        try:
-            active_mcps = self._mcp_provider.collect_bot_active_mcps(
-                entity_id=str(bot["entity_id"]),
-                bot_id=str(bot["bot_id"]),
-                user_id=actor_id,
-                entity_type=str(bot.get("entity_type") or "staff"),
-                engine_type=engine_type,
-            )
-            self._identities.replace_draft_cli_call_type(
-                bot_pk=int(bot["id"]),
-                engine_type=engine_type,
-                cli_code=cli_code,
-                call_type=McpCallType.OWNER,
-                modifier_id=actor_id,
-                lock_key=f"{bot['bot_id']}:{actor_id}",
-                lock_holder_user_id=actor_id,
-                lock_epoch=lock_epoch,
-                effective_server_codes={
-                    str(item["server_code"])
-                    for item in active_mcps
-                    if isinstance(item, Mapping) and item.get("server_code")
-                },
-                effective_cli_codes=remaining_cli_codes,
-            )
-        except CallerIdentityIrreversibleError:
-            logger.info(
-                "acli_cli_override_kept bot_id=%s cli_code=%s reason=caller_irreversible",
-                bot["bot_id"], cli_code,
-            )
-        except Exception as error:
-            # Removed, but the caller override persisted: a later re-add would
-            # silently come back as caller. Surface it rather than report success.
-            logger.error(
-                "acli_cli_rollback_failed bot_id=%s cli_code=%s "
-                "state=removed_caller_override_kept error_type=%s",
-                bot["bot_id"], cli_code, type(error).__name__,
-            )
-            raise AcliIdentityCleanupError(cli_code) from error
+            if not self._passport_shows(
+                bot, cli_code, granted=True, unknown_state="revoke_unknown_installed",
+                cause=error,
+            ):
+                logger.error(
+                    "acli_cli_rollback_failed bot_id=%s cli_code=%s "
+                    "state=revoked_still_installed error_type=%s",
+                    bot["bot_id"], cli_code, type(error).__name__,
+                )
+                raise AcliRollbackFailedError(cli_code, "revoked_still_installed") from error
 
     # ── shared checks ────────────────────────────────────────────────────
 
     def _writable_bot(
-        self, bot_id: str, entity_id: str | None, actor_id: str, lock_epoch: int | None
+        self, bot_id: str, entity_id: str, actor_id: str, lock_epoch: int | None
     ) -> Mapping[str, Any]:
+        """The bot, if ``actor_id`` may change its CLIs right now.
+
+        It must exist for ``entity_id``, be an active service bot, be owned by
+        ``actor_id``, run an engine that has acli, and ``lock_epoch`` must name
+        the edit lock ``actor_id`` holds (or be ``None`` while no lock exists).
+        The edit lock decides who may edit; it does not serialize one holder's
+        concurrent requests (see ``_serialized``).
+        """
         bot = load_bot(self._bots, bot_id=bot_id, entity_id=entity_id)
         require_owner_of_active_service_bot(bot, actor_id)
         self._require_acli_engine(bot)
         if not lock_epoch_matches(
-            self._locks, bot_id=bot_id, actor_id=actor_id, lock_epoch=lock_epoch
+            self._locks,
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            actor_id=actor_id,
+            lock_epoch=lock_epoch,
         ):
             raise CallerLockEpochError
         return bot
@@ -502,6 +432,48 @@ class AcliCliService(AcliCliServiceProtocol):
     def _require_acli_engine(bot: Mapping[str, Any]) -> None:
         if str(bot.get("active_engine") or "") not in ACLI_ENGINES:
             raise AcliEngineUnsupportedError
+
+    def _kept_identity(self, bot: Mapping[str, Any], cli_code: str) -> str:
+        """``caller`` if the owner set this tool to caller before, else ``owner``.
+
+        A remove leaves the per-tool override row alone, so this is the
+        identity the owner last chose for the tool.
+        """
+        overrides = self._identities.list_draft_cli_call_types(
+            int(bot["id"]), str(bot["active_engine"])
+        )
+        return _mode(overrides.get(cli_code)) or "owner"
+
+    def _passport_shows(
+        self,
+        bot: Mapping[str, Any],
+        cli_code: str,
+        *,
+        granted: bool,
+        unknown_state: str,
+        cause: Exception | None,
+    ) -> bool:
+        """Re-read Passport after a write: does it show ``cli_code`` as ``granted``?
+
+        Every grant or revoke ends here, whether its write raised or not, so
+        the outcome always follows what Passport actually holds rather than
+        what the write call reported. When Passport cannot be read, nothing
+        safe can be undone, so this raises :class:`AcliRollbackFailedError`
+        naming ``unknown_state``.
+        """
+        state = self._grant_state(bot, cli_code)
+        if state is None:
+            logger.error(
+                "acli_cli_rollback_failed bot_id=%s cli_code=%s state=%s",
+                bot["bot_id"], cli_code, unknown_state,
+            )
+            raise AcliRollbackFailedError(cli_code, unknown_state) from cause
+        if cause is not None and state is granted:
+            logger.info(
+                "acli_cli_passport_write_landed_despite_error bot_id=%s cli_code=%s granted=%s",
+                bot["bot_id"], cli_code, granted,
+            )
+        return state is granted
 
     def _grant_state(self, bot: Mapping[str, Any], cli_code: str) -> bool | None:
         """Whether Passport now grants ``cli_code``; ``None`` when it cannot say."""

@@ -18,7 +18,6 @@ from agentclaw.community.core.acli_clis.errors import (
     AcliDefaultCliError,
     AcliEngineUnsupportedError,
     AcliGrantSyncError,
-    AcliIdentityCleanupError,
     AcliOperationFailedError,
     AcliRequestRejectedError,
     AcliRollbackFailedError,
@@ -30,24 +29,33 @@ from agentclaw.community.core.acli_clis.port import AcliMarketPage, AcliTool
 class BotCli:
     """One CLI a bot holds in Passport."""
 
+    #: The tool's code in Passport, its acli market name, e.g. ``deepinsight-cli``.
     cli_code: str
+    #: Display name stored with the grant; the code when none was stored.
     cli_name: str
+    #: Description stored with the grant; may be empty.
     cli_desc: str
+    #: ``owner`` or ``caller``: whether the tool runs as the bot's owner or as
+    #: the user calling the bot. The per-tool override row wins over the value
+    #: stored in Passport.
     identity_mode: str
+    #: ``True`` only for tools from the bot's default profile in
+    #: ``cli-capabilities.yaml``. Computed on read, never stored; a default
+    #: tool is re-granted at every start and cannot be removed.
     default: bool
 
 
 @runtime_checkable
 class AcliCliServiceProtocol(Protocol):
     @abstractmethod
-    def list_bot_clis(self, *, bot_id: str, entity_id: str | None) -> list[BotCli]: ...
+    def list_bot_clis(self, *, bot_id: str, entity_id: str) -> list[BotCli]: ...
 
     @abstractmethod
     async def search_market(
         self,
         *,
         bot_id: str,
-        entity_id: str | None,
+        entity_id: str,
         keyword: str,
         page_no: int,
         page_size: int,
@@ -58,7 +66,7 @@ class AcliCliServiceProtocol(Protocol):
         self,
         *,
         bot_id: str,
-        entity_id: str | None,
+        entity_id: str,
         actor_id: str,
         cli_code: str,
         lock_epoch: int | None,
@@ -69,7 +77,7 @@ class AcliCliServiceProtocol(Protocol):
         self,
         *,
         bot_id: str,
-        entity_id: str | None,
+        entity_id: str,
         actor_id: str,
         cli_code: str,
         lock_epoch: int | None,
@@ -86,7 +94,6 @@ __all__ = [
     "AcliDefaultCliError",
     "AcliEngineUnsupportedError",
     "AcliGrantSyncError",
-    "AcliIdentityCleanupError",
     "AcliMarketPage",
     "AcliOperationFailedError",
     "AcliRequestRejectedError",

@@ -1716,8 +1716,7 @@ re-grants with the same identity. When the undo fails too — or an uninstall's
 answer never arrives — the call answers `500` with `data.state` naming where the
 bot was left: `installed_not_granted`, `install_unknown_not_granted`,
 `grant_unknown_installed`, `revoked_still_installed`, `revoked_install_unknown`,
-`revoke_unknown_installed`, or `removed_caller_override_kept` (removed, but a
-re-add would come back as `caller`). An install whose answer never arrives is
+or `revoke_unknown_installed`. An install whose answer never arrives is
 uninstalled again before the error is returned; a Passport write that reports an
 error but landed counts as done.
 
@@ -1731,13 +1730,13 @@ error but landed counts as done.
 | 501 | The bot's engine has no acli (only openclaw and claude_code do) | — |
 | 502 | acli or the container hop failed; the Passport write failed or did not persist | `{code, reason}` for acli |
 
-Tools install into the manifest's `managed_bin_dir` (`/home/admin/.agentclaw/bin`),
-on persisted storage and on the engine's `PATH`, so they survive restarts and
-need none. A removed CLI's caller override is cleared so a re-add starts at
-`owner` — except when it was the bot's last caller resource, since a bot never
-falls back from `caller` to `owner`. Default CLIs are re-granted at every start
-and cannot be removed. The open-source image ships no acli: there, add, remove
-and search answer `502` with `code: acli_unavailable`.
+Where tools are installed is the engine's choice (`/home/admin/.agentclaw/bin`
+in both engines), on persisted storage and on the engine's `PATH`, so tools
+survive restarts and need none; the platform names only the tool. A removed
+CLI's caller/owner choice is kept, so re-adding it restores the identity the
+owner last set. Default CLIs are re-granted at every start and cannot be
+removed. The open-source image ships no acli: there, add, remove and search
+answer `502` with `code: acli_unavailable`.
 Adds and removes on one bot run one at a time within a backend instance.
 
 ### 🟩 lucas-xzp · P1 — resources (7 endpoints) · `openapi_v1/resources/router.py`

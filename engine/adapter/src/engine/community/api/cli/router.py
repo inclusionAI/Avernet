@@ -36,6 +36,7 @@ from engine.community.api.cli.schemas import (
     ReplaceRequest,
 )
 from engine.community.api.response import ApiResponse
+from engine.community.config import load_acli_install_dir
 from engine.community.core.acli.runner import AcliError, AcliRunner
 from engine.community.core.cli_tools.models import CliToolPayload
 from engine.community.core.cli_tools.service import InvalidCliToolNameError
@@ -211,8 +212,9 @@ async def download_cli_tool(name: str = Query(...)) -> ApiResponse:
 # 200 with ``success: false`` and ``error`` set to the runner's code, and 404
 # stays reserved for "this engine build has no such endpoint".
 
-# This module wires the runner, so it hands acli the process environment.
-_ACLI_RUNNER = AcliRunner(environ=os.environ)
+# This module wires the runner: it hands acli the process environment and the
+# engine's install directory, so neither is chosen by core code or by a caller.
+_ACLI_RUNNER = AcliRunner(environ=os.environ, install_dir=load_acli_install_dir())
 
 
 def _acli() -> AcliRunner:
@@ -229,10 +231,10 @@ def _acli_refusal(error: AcliError, warning: str | None) -> ApiResponse:
 
 @router.post("/acli/install", response_model=ApiResponse)
 async def install_acli_tool(request: AcliInstallRequest) -> ApiResponse:
-    """Install one acli market tool into ``install_dir``."""
+    """Install one acli market tool into the engine's install directory."""
     warning = check_capability(Capability.CLI_ACLI_INSTALL)
     try:
-        tool = await _acli().install(request.name, request.install_dir)
+        tool = await _acli().install(request.name)
     except AcliError as error:
         return _acli_refusal(error, warning)
     return ApiResponse(
@@ -252,7 +254,7 @@ async def uninstall_acli_tool(request: AcliUninstallRequest) -> ApiResponse:
     """Uninstall an acli tool. One acli never installed here is success."""
     warning = check_capability(Capability.CLI_ACLI_UNINSTALL)
     try:
-        result = await _acli().uninstall(request.name, request.install_dir)
+        result = await _acli().uninstall(request.name)
     except AcliError as error:
         return _acli_refusal(error, warning)
     return ApiResponse(

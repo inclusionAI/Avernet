@@ -16,7 +16,6 @@ from agentclaw.community.core.acli_clis.errors import (
     AcliDefaultCliError,
     AcliEngineUnsupportedError,
     AcliGrantSyncError,
-    AcliIdentityCleanupError,
     AcliOperationFailedError,
     AcliRequestRejectedError,
     AcliRollbackFailedError,
@@ -35,7 +34,6 @@ ACLI_CLI_ERROR_STATUS: dict[type[DomainError], int] = {
     AcliContainerError: 502,
     AcliGrantSyncError: 502,
     AcliRollbackFailedError: 500,
-    AcliIdentityCleanupError: 500,
 }
 
 __all__ = ["ACLI_CLI_ERROR_STATUS"]

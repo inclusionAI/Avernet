@@ -42,17 +42,20 @@ New `core/acli/runner.py` — `AcliRunner`, the only code that executes acli:
 - Every call is `asyncio.create_subprocess_exec` with a fixed argv (never a
   shell), `--json`, a timeout (300 s install/uninstall, 30 s market/list), and
   `HOME=<acli_home>` added to the inherited environment.
-- `install(name, install_dir)` → `acli install <name> --install-dir <dir> --yes --json`;
+- The runner is built with the engine's install directory (`load_acli_install_dir`,
+  `/home/admin/.agentclaw/bin` by default, `ENGINE_ACLI_INSTALL_DIR` overrides);
+  a value that is not an absolute `…/bin` path stops it being built.
+- `install(name)` → `acli install <name> --install-dir <dir> --yes --json`;
   returns `{name, command, description, version}` from the JSON.
-- `uninstall(name, acli_home)` → first `acli tool list --json`; if `name` is
+- `uninstall(name)` → first `acli tool list --json`; if `name` is
   absent, success with `uninstalled: false` (nothing of ours to delete);
   otherwise `acli tool uninstall <name> --yes --json`.
 - `market(keyword, page_no, page_size)` → `acli list …`; returns the page.
-- `acli_home` is `<parent of install_dir>/acli-home`, so acli's record sits
+- `acli_home` is `<parent of the install directory>/acli-home`, so acli's record sits
   beside the programs on persisted storage.
 - Inputs validated before any process starts: `name` and `keyword` against
   `^[A-Za-z0-9@][A-Za-z0-9._@/-]{0,255}$` (`keyword` may be empty);
-  `install_dir` absolute, no `..`, last component `bin`; page bounds 1–100.
+  page bounds 1–100.
 - Failure → `AcliError(code, message)` with `code ∈ {acli_unavailable,
   not_found, install_failed, uninstall_failed, timeout, bad_output}`.
   `message` is acli's `error` field, credential-masked, at most 512 chars.
@@ -63,8 +66,8 @@ New `core/acli/runner.py` — `AcliRunner`, the only code that executes acli:
 
 | Endpoint | Body / query |
 | --- | --- |
-| `POST /api/cli/acli/install` | `{name, install_dir}` |
-| `POST /api/cli/acli/uninstall` | `{name, install_dir}` |
+| `POST /api/cli/acli/install` | `{name}` |
+| `POST /api/cli/acli/uninstall` | `{name}` |
 | `GET /api/cli/acli/market` | `?keyword=&page_no=&page_size=` |
 
 New capabilities `CLI_ACLI_INSTALL`, `CLI_ACLI_UNINSTALL`, `CLI_ACLI_MARKET`,
@@ -72,12 +75,10 @@ declared supported by the openclaw and claude_code engines.
 
 ### Backend — install directory
 
-`install_dir` is the manifest's `managed_bin_dir`
-(`/home/admin/.agentclaw/bin`), read by `CliCapabilityManifestResolver` and
-sent on every engine call. It is the directory the production start-up script
-already puts on the engine's `PATH`, so a tool installed there is runnable
-without a restart. The resolver validates it (absolute, no `..`, ends in `bin`).
-No other part of the YAML is used by this feature.
+The backend does not know or send an install directory. The engine owns where
+tools are installed (see the runner above); both engines use
+`/home/admin/.agentclaw/bin`, the directory the start-up already puts on the
+engine's `PATH`, so a tool installed there is runnable without a restart.
 
 ### Backend — reconciler (`core/mcp/services/cli_passport_scope.py`, 333 lines)
 
@@ -126,9 +127,9 @@ route does.
 3. port `uninstall`. Failure → `add_cli` with the remembered identity; return
    the uninstall error. If that re-grant fails → `500 cli_rollback_failed`
    with state `revoked_still_installed`.
-4. On success, clear the tool's caller override row (the existing
-   `replace_draft_cli_call_type(... owner)` path), so a later re-add starts
-   at `owner`.
+4. The tool's caller/owner override row is left alone, so a later re-add
+   restores the identity its owner last chose (add writes that identity,
+   `owner` when there is none).
 
 **List:** `current_passport_cli_items` + `default` from the profile
 (`required_cli_items`). **Search:** port `market`.
@@ -165,7 +166,7 @@ device modules.
   shapes above; covers success, each error code, timeout, missing acli, bad
   input, `HOME` override, and uninstall of a tool acli does not know.
 - **Engine router:** contract tests in the style of `test_cli_router.py`.
-- **Resolver / reconciler:** `install_dir` validation; `add_cli` keeps MCP
+- **Reconciler:** `add_cli` keeps MCP
   items and other CLI identities; `remove_cli` drops only the target;
   `reconcile` unchanged.
 - **Port:** fake transport, one test per response class.

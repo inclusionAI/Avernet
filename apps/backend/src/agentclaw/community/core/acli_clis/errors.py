@@ -103,16 +103,6 @@ class AcliRollbackFailedError(InternalError):
         self.state = state
 
 
-class AcliIdentityCleanupError(AcliRollbackFailedError):
-    """The CLI was removed, but its caller override could not be cleared.
-
-    A later re-add would come back as ``caller`` instead of ``owner``.
-    """
-
-    def __init__(self, cli_code: str) -> None:
-        super().__init__(cli_code, "removed_caller_override_kept")
-
-
 __all__ = [
     "AcliBotNotRunningError",
     "AcliCliAlreadyGrantedError",
@@ -122,7 +112,6 @@ __all__ = [
     "AcliDefaultCliError",
     "AcliEngineUnsupportedError",
     "AcliGrantSyncError",
-    "AcliIdentityCleanupError",
     "AcliOperationFailedError",
     "AcliRequestRejectedError",
     "AcliRollbackFailedError",

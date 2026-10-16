@@ -39,6 +39,12 @@ DEFAULT_MCPORTER_CONFIG_PATH = "~/.mcporter/mcporter.json"
 # 默认最大连接数（0 表示不限制）
 DEFAULT_MAX_CONNECTIONS = 0
 
+#: Where acli installs market tools. Shared by every engine and by the default
+#: CLIs the image installs at boot, so one acli record covers them all. It is
+#: on persisted storage (``/home/admin``) and on the engine's ``PATH``.
+DEFAULT_ACLI_INSTALL_DIR = "/home/admin/.agentclaw/bin"
+ACLI_INSTALL_DIR_ENV_VAR = "ENGINE_ACLI_INSTALL_DIR"
+
 
 @dataclass(frozen=True)
 class MCPTokenSettings:
@@ -105,6 +111,12 @@ def is_agentbox_runtime() -> bool:
     """Return whether this process uses Desktop's downloaded repo delivery."""
 
     return os.getenv(AGENTBOX_ENV_VAR, "").strip().lower() in {"1", "true"}
+
+
+def load_acli_install_dir() -> str:
+    """The directory acli installs market tools into; the engine owns it."""
+
+    return os.getenv(ACLI_INSTALL_DIR_ENV_VAR, "").strip() or DEFAULT_ACLI_INSTALL_DIR
 
 
 class RepoDelivery(StrEnum):

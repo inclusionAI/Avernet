@@ -62,8 +62,9 @@ without waiting for a release each time a new tool is published.
       it is computed when the list is read and never stored.
 
 **Add**
-- [x] Adding a market tool grants it to the bot with identity `owner`, installs
-      it in the running container, and succeeds only if both succeed.
+- [x] Adding a market tool grants it to the bot with identity `owner` (or the
+      identity its owner chose before an earlier remove), installs it in the
+      running container, and succeeds only if both succeed.
 - [x] If the install fails, the grant is removed again and the add returns an
       error saying why. The bot ends up as it was before the request.
 - [x] Adding to a bot with no running container is refused, and nothing
@@ -102,10 +103,9 @@ without waiting for a release each time a new tool is published.
 - [x] Removing a granted tool that was never installed through this API (for
       example, one granted at bot creation) revokes the grant and succeeds;
       there is no program of ours to delete.
-- [x] After a successful remove, re-adding the same tool starts again at
-      identity `owner` — unless the tool was the bot's last `caller`
-      resource: the platform never lets a bot fall back from `caller` to
-      `owner`, so the override is kept and a re-add comes back as `caller`.
+- [x] After a successful remove, re-adding the same tool restores the
+      identity (`owner` or `caller`) its owner last chose; a tool that never
+      had one starts at `owner`.
 - [x] Removing a tool never changes the bot's other tools or MCP servers.
 
 **Rollback failures**

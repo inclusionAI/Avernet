@@ -40,27 +40,35 @@ def load_bot(
 
 
 def require_owner_of_active_service_bot(bot: Mapping[str, Any], actor_id: str) -> None:
-    """Only the owner may change an active service bot's CLIs."""
+    """Only the owner may change an active service bot's CLIs.
+
+    The bot is checked first (an inactive or non-service bot is read-only for
+    everyone), then the actor (only its owner may change it).
+    """
+    if bot.get("bot_type") != "service" or bot.get("status") != "ACTIVE":
+        raise CallerIdentityReadOnlyError
     # COSEC: entity-scoped lookup identifies the Bot; only its owner can mutate it.
     if str(bot.get("owner_id") or "") != actor_id:
         raise CallerIdentityPermissionError
-    if bot.get("bot_type") != "service" or bot.get("status") != "ACTIVE":
-        raise CallerIdentityReadOnlyError
 
 
 def lock_epoch_matches(
     lock_repository: BotCollabLockRepositoryProtocol,
     *,
     bot_id: str,
+    owner_id: str,
     actor_id: str,
     lock_epoch: int | None,
 ) -> bool:
     """Whether the caller's collaboration-lock epoch is current.
 
-    No epoch is valid only while no lock exists; a supplied epoch must name
-    the lock the actor holds.
+    The collaboration lock is one database row per bot, keyed
+    ``{bot_id}:{owner_id}`` (as ``CollaboratorLockService`` builds it) and held
+    by one user at a time; ``lock_epoch`` is that row's id. No epoch is valid
+    only while no lock exists; a supplied epoch must name the lock the actor
+    holds, so a client acting on a lock it has since lost is refused.
     """
-    lock = lock_repository.get_by_key(f"{bot_id}:{actor_id}")
+    lock = lock_repository.get_by_key(f"{bot_id}:{owner_id}")
     if lock_epoch is None:
         return lock is None
     return lock is not None and lock.holder_user_id == actor_id and lock.id == lock_epoch

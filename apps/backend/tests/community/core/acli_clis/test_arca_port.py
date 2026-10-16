@@ -22,7 +22,6 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 pytestmark = pytest.mark.asyncio
 
 CONN = {"url": "http://engine"}
-DIR = "/home/admin/.agentclaw/bin"
 
 
 class _Resolver:
@@ -59,7 +58,7 @@ async def test_install_posts_name_and_dir_and_reads_the_tool() -> None:
     }})
 
     tool = await _port(transport).install(
-        bot_id="bot-1", owner_id="owner-1", name="deepinsight-cli", install_dir=DIR
+        bot_id="bot-1", owner_id="owner-1", name="deepinsight-cli"
     )
 
     assert (tool.name, tool.command, tool.description, tool.version) == (
@@ -67,7 +66,7 @@ async def test_install_posts_name_and_dir_and_reads_the_tool() -> None:
     )
     [(conn, method, path, body, params, timeout)] = transport.calls
     assert (conn, method, path, body, params) == (
-        CONN, "POST", INSTALL_PATH, {"name": "deepinsight-cli", "install_dir": DIR}, None,
+        CONN, "POST", INSTALL_PATH, {"name": "deepinsight-cli"}, None,
     )
     assert timeout > 300
 
@@ -76,7 +75,7 @@ async def test_uninstall_reports_whether_anything_was_removed() -> None:
     transport = _Transport({"success": True, "data": {"name": "x", "uninstalled": False}})
 
     removed = await _port(transport).uninstall(
-        bot_id="bot-1", owner_id="owner-1", name="x", install_dir=DIR
+        bot_id="bot-1", owner_id="owner-1", name="x"
     )
 
     assert removed is False
@@ -129,7 +128,7 @@ async def test_market_without_total_counts_items() -> None:
 async def test_every_failure_becomes_a_coded_port_error(resolver_error, transport, code) -> None:
     with pytest.raises(AcliPortError) as caught:
         await _port(transport, _Resolver(resolver_error)).install(
-            bot_id="bot-1", owner_id="owner-1", name="x", install_dir=DIR
+            bot_id="bot-1", owner_id="owner-1", name="x"
         )
 
     assert caught.value.code == code
@@ -141,7 +140,7 @@ async def test_engine_message_is_carried_through() -> None:
     transport = _Transport({"success": False, "error": "install_failed", "message": "no such cli"})
 
     with pytest.raises(AcliPortError) as caught:
-        await _port(transport).install(bot_id="bot-1", owner_id="owner-1", name="x", install_dir=DIR)
+        await _port(transport).install(bot_id="bot-1", owner_id="owner-1", name="x")
 
     assert caught.value.message == "no such cli"
 
@@ -150,7 +149,7 @@ async def test_success_without_data_reads_as_empty() -> None:
     transport = _Transport({"success": True})
 
     removed = await _port(transport).uninstall(
-        bot_id="bot-1", owner_id="owner-1", name="x", install_dir=DIR
+        bot_id="bot-1", owner_id="owner-1", name="x"
     )
 
     assert removed is False

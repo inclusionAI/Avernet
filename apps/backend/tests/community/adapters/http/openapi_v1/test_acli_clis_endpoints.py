@@ -29,7 +29,6 @@ from agentclaw.community.api.acli_cli_service import (
     AcliDefaultCliError,
     AcliEngineUnsupportedError,
     AcliGrantSyncError,
-    AcliIdentityCleanupError,
     AcliMarketPage,
     AcliOperationFailedError,
     AcliRequestRejectedError,
@@ -169,7 +168,6 @@ async def test_remove_answers_deleted() -> None:
         (AcliGrantSyncError(), 502, None),
         (AcliRollbackFailedError("x", "installed_not_granted"), 500,
          {"state": "installed_not_granted"}),
-        (AcliIdentityCleanupError("x"), 500, {"state": "removed_caller_override_kept"}),
     ],
 )
 async def test_domain_errors_map_to_their_status_and_data(error, status, data) -> None:

@@ -306,7 +306,11 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         }
         lock_key = f"{bot_id}:{actor_id}"
         if not lock_epoch_matches(
-            self._lock_repository, bot_id=bot_id, actor_id=actor_id, lock_epoch=lock_epoch
+            self._lock_repository,
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            actor_id=actor_id,
+            lock_epoch=lock_epoch,
         ):
             logger.warning(
                 "cli_call_type_update_failed bot_id=%s cli_code=%s actor_id=%s "

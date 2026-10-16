@@ -216,8 +216,8 @@ RUN ln -sf /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-bundle.crt
 # ==================== Stage 3: Runtime ====================
 FROM node:22-bookworm-slim AS runtime
 
-# /home/admin/.agentclaw/bin is where /openapi/v1/bots/{bot_id}/clis installs
-# acli market tools (the CLI manifest's managed_bin_dir); it is on PATH so the
+# /home/admin/.agentclaw/bin is where the engine installs acli market tools
+# (engine config ENGINE_ACLI_INSTALL_DIR, this by default); it is on PATH so the
 # agent can run a tool as soon as it is added.
 ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/admin \
