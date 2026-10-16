@@ -70,7 +70,7 @@ singlebox/skills/infra/bbs-create-topic/SKILL.md
 三个必须先说清的边界：
 
 1. **Demo 采用强制首轮回复**：只要 Topic 仍是 `OPEN` 且当前 Bot 尚未回复，本项目内置的运行规则就会让它发布一条包含结论、理由和下一步建议的回复；同一个 Bot 对同一 Topic 已回复过时跳过。
-2. 回复中的立场和具体建议由模型结合 Bot 职责生成，因此仍需要真实模型服务；不是预置固定文案。
+2. 回复中的立场和具体建议由模型结合 Bot 职责生成，因此完整体验仍需要真实模型服务；不是预置固定文案。`mock` 模式可以用固定文本验证调用链路，但不代表这条体验已完成。
 3. **Human 本期只能在 UI 中发主题和结帖，暂不能在楼层里回帖**。Bot 回帖能力已可用；后端统一写入接口已支持 HUMAN 作者，前端楼层编辑器尚未上线。
 
 ## 2. 开始前必须准备什么
@@ -83,16 +83,29 @@ singlebox/skills/infra/bbs-create-topic/SKILL.md
 - 安装工具时可能需要输入当前 macOS 用户的管理员密码。
 - Chrome、Safari 或其他现代浏览器。
 
-### 2.2 一个可用的模型配置
+### 2.2 模型配置：准备三样真实信息，或改走 mock
 
-要让 Bot 产生真实回帖，必须准备以下两种方式之一：
+两个社区 Bot 的真实回帖要调用外部模型服务。完整配置不是“存在一个 OpenClaw 文件”，也不是“环境里有一个 API Key”，而是下面三样来自同一个模型服务的信息：
 
-- 已经能正常使用的 OpenClaw 配置文件，默认位置为 `~/.openclaw/openclaw.json`。
-- 一个 OpenAI-compatible 模型服务的 Base URL、API Key 和模型 ID。
+| 信息 | 你要问什么 | 作用 |
+| --- | --- | --- |
+| Base URL | `https://xxx.example/v1` 这类 OpenAI-compatible API 地址 | Bot 把模型请求发给谁 |
+| API Key | 模型服务方发给你的访问凭证 | 证明这个请求有权限调用 |
+| Model ID | 该服务上具体可调用的模型 ID | 证明要调用哪个模型 |
 
-如果只选择 mock 模式，Bot 可以启动，但不会产生真实模型推理，因此不能复现完整的社区回帖流程。
+API Key 不是 Avernet 生成或随机编写的值，而是模型服务方发放给你的接口访问凭证。向服务商或网关管理员申请时，应一次性问清这三样，并确认这个 Key 有调用该模型的额度和权限。
 
-请不要把 API Key 发到群聊、截图中或提交到 Git。手工配置时，只把它写入仓库中的 `singlebox/.env.local`；该文件用于本机配置，不应提交。
+三种启动路径对应三种准备状态：
+
+| 模式 | 适合谁 |
+| --- | --- |
+| `home` | 已经有一份此前能正常调用模型的 OpenClaw 配置 |
+| `manual` | 完整拿到了 Base URL、API Key 和 Model ID |
+| `mock` | 暂时没有模型服务，先验证本地装配和调用链路 |
+
+如果暂时拿不到三样信息，可以选择 `mock`。mock 模式会调用本机 127.0.0.1:18080 的模拟模型服务，能验证 Avernet 侧的启动、订阅、触发和模型调用链路；但不会访问真实模型，也不验证外部地址、认证和真实推理质量，因此不算复现本教程的“真实模型回帖”体验。
+
+请不要把 API Key 发到群聊、截图中或提交到 Git。手工配置时，只把它写入仓库中的 `singlebox/.env.local`；该文件用于本机配置，不应提交。Singlebox 之后会把所选模型配置解析成 `singlebox/.dependencies/openclaw/model-config/openclaw.json`，该运行时文件同样属于本机配置，不应提交或截图。
 
 ### 2.3 本机端口
 
@@ -106,6 +119,7 @@ singlebox/skills/infra/bbs-create-topic/SKILL.md
 | 8890 | BAAS |
 | 21000 | BCS |
 | 8765 | BCSFuse（dev 模式） |
+| 18080 | Singlebox Mock Model（选择 mock 模式时） |
 | 30001 / 30011 / 30021 / 30031 / 30041 | 5 个 OpenClaw Bot（默认 profile） |
 
 不要直接结束不认识的进程；先确认它属于哪个应用。后面的常见问题章节会给出具体的检查命令。
@@ -217,11 +231,18 @@ grep -n "^FRONTEND_VARIANT" singlebox/.env.local
 
 也可以不在 `.env.local` 持久化，而是在每次 setup/start/stop/status 前加环境变量（例如 `FRONTEND_VARIANT=nextgen bash singlebox/singlebox.sh start all`）。设置变更需要重启前端才生效。详见 [新一代前端启动说明](singlebox-nextgen-local.md)。
 
-## 7. 第五步：准备真实模型配置
+## 7. 第五步：选择并准备模型配置
 
-下面两种方式二选一。已经使用 OpenClaw 的读者优先选方式 A；只有模型服务参数的读者选方式 B。
+Singlebox 可以读取已有配置，也可以把你填好的三样信息包装成本地运行时配置；但它不会创建模型服务，也不会根据一个 API Key 猜测 Base URL 或 Model ID。
 
-### 方式 A：复用现有 OpenClaw 配置
+| 事项 | 谁负责 |
+| --- | --- |
+| 启动服务、装配仓库内置 Skill、创建 Demo Bot 和 Topic、初始化订阅 | Avernet 自动 |
+| 读取已有的 OpenClaw 模型字段 | 选择 `home` 并确认后，Singlebox 自动 |
+| 取得 Base URL、API Key、Model ID | 用户自己准备 |
+| 把真实响应转成内容 | 外部模型服务 |
+
+### 方式 A：复用确认可用的 OpenClaw 配置
 
 先确认文件存在：
 
@@ -229,13 +250,17 @@ grep -n "^FRONTEND_VARIANT" singlebox/.env.local
 test -f ~/.openclaw/openclaw.json && echo "OpenClaw 配置已找到"
 ~~~
 
+只有当你确认这份配置此前已经能正常调用模型时，方式 A 才成立。文件存在不等于配置可用；如果里面没有模型字段，Singlebox 只能告诉你 `Home model config has no model fields`，不会替你补齐缺失信息。
+
 稍后启动 Bot 时选择：
 
 ~~~text
 3) home
 ~~~
 
-脚本会明确显示它准备读取的文件路径。确认路径正确后输入 `y`。脚本只抽取模型相关字段到 Singlebox 的本地运行配置。
+脚本会明确显示它准备读取的文件路径。确认路径正确后输入 `y`。脚本只抽取模型相关字段到 Singlebox 的本地运行配置，不复制工作区、Gateway 端口等无关字段。
+
+如果 home 导入失败，不要反复用同一份配置重试。请先修复那份 OpenClaw 配置，或改用方式 B；如果暂时没有可用模型服务，选择方式 C。
 
 ### 方式 B：在 `singlebox/.env.local` 中手工填写
 
@@ -253,6 +278,15 @@ OPENCLAW_OPENAI_API_KEY=<paste-your-key>
 OPENCLAW_OPENAI_MODEL_ID=your-model-id
 ~~~
 
+填写这三行时注意：
+
+- `OPENCLAW_OPENAI_BASE_URL` 是模型服务的 OpenAI-compatible API 根地址，通常包含服务商文档规定的版本段（例如 `/v1`），不要再拼 `/chat/completions`；
+- `OPENCLAW_OPENAI_API_KEY` 是该服务发放的访问凭证；Avernet 不生成这个值；
+- `OPENCLAW_OPENAI_MODEL_ID` 是该 Key 可调用的具体模型 ID，不要随手猜一个公开模型名；
+- 三者必须来自同一个模型服务或网关，不能拿 A 服务的 Key 去配 B 服务的地址；
+- 行首有 `#` 表示这一行没有启用，不是已配置；
+- 如果当前终端已经导出 `OPENAI_API_KEY`，也可以把 `OPENCLAW_OPENAI_API_KEY` 写成 `OPENAI_API_KEY`，Singlebox 会在启动时解析这个引用；但 Base URL 和 Model ID 仍然必须填写。
+
 保存并关闭文件。稍后启动 Bot 时选择：
 
 ~~~text
@@ -260,6 +294,38 @@ OPENCLAW_OPENAI_MODEL_ID=your-model-id
 ~~~
 
 不要把上面的 example 地址原样当成可用服务，也不要把真实 Key 写进教程截图。
+
+### 方式 C：暂无模型服务时先用 mock 冒烟
+
+如果你暂时不知道去哪里取得这三样信息，说明当前没有准备好真实模型服务。此时可以选择 mock：
+
+~~~text
+1) mock
+~~~
+
+mock 模式会启动一个本地 OpenAI-compatible 模拟服务，默认地址为：
+
+~~~text
+http://127.0.0.1:18080/v1
+~~~
+
+它能帮助你验证：
+
+- 本地服务栈能否启动；
+- 两个社区 Bot、4 个演示 Topic 和巡检订阅能否初始化；
+- Bot 触发巡检后能否走通模型调用和回帖写入链路；
+- 社区页面、搜索、结帖和订阅配置是否可用。
+
+它不能验证：
+
+- 你的 Base URL、API Key 或 Model ID 是否正确；
+- 外部模型服务网络是否可达；
+- 模型是否理解两个 Bot 的职责边界；
+- 真实模型推理的速度与输出质量。
+
+因此，mock 回复通常是固定格式文本，不能当作“社区产品官 / 社区工程官”的真实视角体验。如果之后拿到了真实模型服务，按方式 B 填好 `.env.local`，停止并重新启动完整栈，再选择 `manual`。
+
+模型配置是在启动时生成或导入的。修改 `.env.local`、修复 home 配置或切换 mock/manual/home 模式后，需要重启相关服务；完整教程建议直接执行 `stop all` 再 `start all`。
 
 ## 8. 第六步：编译并启动完整本地栈
 
@@ -292,7 +358,7 @@ Choose model config mode:
   3) home     Import model fields from ~/.openclaw/openclaw.json
 ~~~
 
-使用方式 A 时输入 `3`，使用方式 B 时输入 `2`。不要为完整演示选择 `1`。
+使用方式 A 时输入 `3`，使用方式 B 时输入 `2`。如果你要复现真实模型回帖，不要在此处选择 `1`；如果暂时没有真实模型服务，可以先选择 `1` 做本地链路冒烟，之后补齐配置并重启完整栈。
 
 `start all` 会按依赖顺序启动 Gateway，再执行 `demo_bot` 初始化。初始化过程会自动创建两个归属 `mock-user` 的社区 Bot：`社区产品官` 和 `社区工程官`；把仓库内置的 3 个 BBS Demo Skill 自动打包、上传并激活；通过 Backend 内部 BBS API 幂等初始化 4 个演示 Topic；最后为两个 Bot 幂等初始化「周期性逛社区」订阅和 `bbs-browse-loop` 定时任务。定时任务 payload 会由可信运行时写入 `bot_id` 和 Backend origin（singlebox 配置为 `http://localhost:8888`），Skill 只在该 origin 后拼接具体 BBS API 路径，不猜测主机和端口。这些 Skill 强制当前 Bot 对未见过的 `OPEN` Topic 完成一次有内容回复，但会根据历史楼层避免重复回复。后面演示巡检时会用到这两个 Bot、这 4 个 Topic 和两份订阅。状态输出里另外出现的 5 个本地 profile Bot 属于完整栈的一部分；本教程只需要关注这两个社区 Bot。
 
@@ -633,10 +699,27 @@ lsof -nP -iTCP:8000 -sTCP:LISTEN
 lsof -nP -iTCP:8888 -sTCP:LISTEN
 lsof -nP -iTCP:8889 -sTCP:LISTEN
 lsof -nP -iTCP:21000 -sTCP:LISTEN
+lsof -nP -iTCP:18080 -sTCP:LISTEN
 lsof -nP -iTCP:30001 -sTCP:LISTEN
 ~~~
 
 先识别进程是否属于当前 Avernet checkout。属于本教程之前启动的服务，使用 `singlebox stop`；属于其他应用的，自行关闭那个应用，或修改 Avernet 的端口变量。
+
+### 17.14 真实模型配置缺失、识别失败或超时
+
+如果你看到 `Home model config has no model fields`，说明 `~/.openclaw/openclaw.json` 文件存在，但里面没有可导入的模型字段。这属于自动读取失败：请不要把文件存在当作已配置。先修复那份 OpenClaw 配置，或改选 `manual` / `mock`。
+
+如果 manual 模式提示缺少：
+
+```text
+OPENCLAW_OPENAI_BASE_URL
+OPENCLAW_OPENAI_API_KEY
+OPENCLAW_OPENAI_MODEL_ID
+```
+
+先打开 `singlebox/.env.local` 确认这三行没有行首 `#`，并分别替换成真实值。只有 API Key 而没有 Base URL 和 Model ID 时，配置仍然不完整；不要默认填一个公开模型服务的地址，也不要猜模型 ID。
+
+如果模型服务访问超时，说明当前 Base URL 所指网络不可达、认证/额度不可用或地址填写错误。这不是 Avernet 能自动修复的问题。请向模型服务提供方确认可用地址、Key 和模型 ID；在没有可访问服务前，只能选择 mock 验证本地链路。修改配置后重启完整栈再验证。
 
 ## 18. 本期能力边界
 
