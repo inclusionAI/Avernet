@@ -145,11 +145,31 @@ async def test_engine_message_is_carried_through() -> None:
     assert caught.value.message == "no such cli"
 
 
-async def test_success_without_data_reads_as_empty() -> None:
-    transport = _Transport({"success": True})
+@pytest.mark.parametrize(
+    ("operation", "reply"),
+    [
+        ("uninstall", {"success": True}),
+        ("uninstall", {"success": True, "data": None}),
+        ("uninstall", {"success": True, "data": {}}),
+        ("uninstall", {"success": True, "data": {"uninstalled": "yes"}}),
+        ("install", {"success": True}),
+        ("install", {"success": True, "data": {"name": "x"}}),
+        ("install", {"success": True, "data": {"command": "x"}}),
+    ],
+)
+async def test_a_success_without_the_needed_fields_is_bad_output(operation, reply) -> None:
+    """A malformed success must not pass for "not installed" or for an install."""
+    port = _port(_Transport(reply))
 
-    removed = await _port(transport).uninstall(
-        bot_id="bot-1", owner_id="owner-1", name="x"
-    )
+    with pytest.raises(AcliPortError) as caught:
+        await getattr(port, operation)(bot_id="bot-1", owner_id="owner-1", name="x")
+
+    assert caught.value.code == "bad_output"
+
+
+async def test_uninstall_of_a_tool_acli_never_installed_is_false() -> None:
+    transport = _Transport({"success": True, "data": {"name": "x", "uninstalled": False}})
+
+    removed = await _port(transport).uninstall(bot_id="bot-1", owner_id="owner-1", name="x")
 
     assert removed is False

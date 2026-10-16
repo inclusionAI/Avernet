@@ -66,7 +66,12 @@ class ArcaAcliPort(AcliPort):
             body={"name": name},
             timeout=INSTALL_TIMEOUT_SECONDS,
         )
-        return _tool(data)
+        tool = _tool(data)
+        if not tool.name or not tool.command:
+            # Without the installed name the service could neither check it
+            # nor undo the install, so a reply without it is not a success.
+            raise AcliPortError("bad_output", "the engine's install reply names no tool")
+        return tool
 
     async def uninstall(
         self, *, bot_id: str, owner_id: str, name: str
@@ -76,7 +81,12 @@ class ArcaAcliPort(AcliPort):
             body={"name": name},
             timeout=UNINSTALL_TIMEOUT_SECONDS,
         )
-        return bool(data.get("uninstalled"))
+        uninstalled = data.get("uninstalled")
+        if not isinstance(uninstalled, bool):
+            # "Not installed" is a real answer; a missing one must not pass
+            # for it, or a remove would succeed without evidence.
+            raise AcliPortError("bad_output", "the engine's uninstall reply has no result")
+        return uninstalled
 
     async def market(
         self, *, bot_id: str, owner_id: str, keyword: str, page_no: int, page_size: int
@@ -156,7 +166,12 @@ class ArcaAcliPort(AcliPort):
                 str(response.get("message") or "the engine refused the request"),
             )
         data = response.get("data")
-        return data if isinstance(data, Mapping) else {}
+        if not isinstance(data, Mapping):
+            # A success with no payload is a version-skewed or broken engine,
+            # not an empty result. ``bad_output`` is an uncertain outcome to
+            # the service, so nothing is assumed about the container.
+            raise AcliPortError("bad_output", "the engine answered success with no data")
+        return data
 
 
 def _tool(data: Mapping[str, Any]) -> AcliTool:
