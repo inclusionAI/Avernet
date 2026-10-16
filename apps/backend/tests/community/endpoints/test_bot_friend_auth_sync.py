@@ -41,17 +41,19 @@ def _principal() -> str:
 
 def _bcs_readdressed_principal() -> str:
     # The envelope BCN's re-signer emits for this endpoint: the approver's
-    # claims, re-addressed as iss=bcs with a short lifetime. The ordinary-HTTP
-    # seam must accept this issuer — it is the only shape a friend work-order
-    # callback approval can arrive in (the backend's own iss=backend copy is
-    # answered 401 when echoed back verbatim).
+    # claims, re-addressed as iss=bcs. The ordinary-HTTP seam must accept this
+    # issuer — it is the only shape a friend work-order callback approval can
+    # arrive in (the backend's own iss=backend copy is answered 401 when
+    # echoed back verbatim). Unlike the 60s production envelope, this token is
+    # minted at import time and the full CI suite may run the case many
+    # minutes later, so it carries the file's long-lived 3600s window.
     now = int(time.time())
     return jwt.encode(
         {
             "iss": "bcs",
             "aud": "backend",
             "iat": now,
-            "exp": now + 60,
+            "exp": now + 3600,
             "principals": [{"type": "user", "subject": {"id": "85020", "username": "owner"}}],
         },
         _SIGNING_KEY,

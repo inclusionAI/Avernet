@@ -16,6 +16,11 @@ class MockState:
         self.lock = threading.Lock()
         self.provider_requests: list[dict[str, Any]] = []
         self.event_webhook_requests: list[dict[str, Any]] = []
+        # Friend work-order surface: BCS re-addresses the forwarded principal
+        # (iss=bcs) and posts TC friend grants to the bot-friend-auth endpoint;
+        # the create/accept event notifications come in on the work-order path.
+        self.friend_auth_sync_requests: list[dict[str, Any]] = []
+        self.work_order_event_requests: list[dict[str, Any]] = []
         self.judge_started = threading.Event()
         self.judge_release = threading.Event()
         self.judge_outcomes: list[str] | None = None
@@ -24,6 +29,8 @@ class MockState:
         with self.lock:
             self.provider_requests.clear()
             self.event_webhook_requests.clear()
+            self.friend_auth_sync_requests.clear()
+            self.work_order_event_requests.clear()
             self.judge_outcomes = None
         self.judge_started.clear()
         self.judge_release.clear()
@@ -65,6 +72,11 @@ class Handler(BaseHTTPRequestHandler):
                 requests = list(STATE.event_webhook_requests)
             self.send_json(200, {"requests": requests})
             return
+        if self.path == "/control/friend-auth-sync/requests":
+            with STATE.lock:
+                requests = list(STATE.friend_auth_sync_requests)
+            self.send_json(200, {"requests": requests})
+            return
         if self.path == "/control/judge/status":
             self.send_json(
                 200,
@@ -89,6 +101,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/control/event-webhook/clear":
             with STATE.lock:
                 STATE.event_webhook_requests.clear()
+            self.send_json(200, {"ok": True})
+            return
+        if self.path == "/control/friend-auth-sync/clear":
+            with STATE.lock:
+                STATE.friend_auth_sync_requests.clear()
             self.send_json(200, {"ok": True})
             return
         if self.path == "/control/judge/release":
@@ -126,6 +143,32 @@ class Handler(BaseHTTPRequestHandler):
                     }
                 )
             self.send_json(200, {"ok": True})
+            return
+        if self.path == "/api/v1/work-orders/events":
+            # BCS friend-connect notification port: any 2xx means delivered.
+            body = self.read_json()
+            with STATE.lock:
+                STATE.work_order_event_requests.append(
+                    {
+                        "principal": self.headers.get("x-avernet-principal"),
+                        "body": body,
+                    }
+                )
+            self.send_json(200, {"ok": True})
+            return
+        if self.path == "/api/internal/bot-friend-auth/sync":
+            # The TC friend grant sync point: BCS arrives with the inbound
+            # principal re-addressed as iss=bcs. BCS treats {"synced": true}
+            # as confirmation anything else is reported as not applied.
+            body = self.read_json()
+            with STATE.lock:
+                STATE.friend_auth_sync_requests.append(
+                    {
+                        "principal": self.headers.get("x-avernet-principal"),
+                        "body": body,
+                    }
+                )
+            self.send_json(200, {"synced": True, "reason": "created", "auth_id": 1})
             return
         if self.path == "/v1/chat/completions":
             self.read_json()

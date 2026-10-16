@@ -166,6 +166,29 @@ prepare_bcs_runtime_config() {
             "-e" "/^\[security.outbound_url\]/,/^\[/{s|^block_private_networks = .*|block_private_networks = false|;s|^allow_loopback = .*|allow_loopback = true|;}"
         )
         log_info "Enabling local Provider/Judge mock for BCS E2E"
+        # E2E also drives the friend work-order ports against the same mock:
+        # BCS notifies friend events at /api/v1/work-orders/events and posts
+        # TC friend grants to /api/internal/bot-friend-auth/sync with the
+        # forwarded principal re-addressed as iss=bcs — the runtime contract
+        # the changed-line coverage gate measures. The template never carries
+        # this key (empty would fail friend_work_order_base_url validation),
+        # so inject it as a new top-level entry just before the first
+        # [section]; awk is used (not sed) so the insertion stays portable
+        # across BSD/GNU sed line-insert syntax.
+        local escaped_e2e_friend_url
+        escaped_e2e_friend_url="$(toml_sed_replacement "${BCS_E2E_MOCK_BASE_URL}")"
+        for config_file in "$base_config" "$local_config"; do
+            tmp_file="${config_file}.friend.tmp"
+            if ! awk -v entry="friend_work_order_base_url = \"${escaped_e2e_friend_url}\"" '
+                BEGIN { inserted = 0 }
+                !inserted && /^\[/ { print entry; print ""; inserted = 1 }
+                { print }
+            ' "$config_file" > "$tmp_file"; then
+                rm -f "$tmp_file"
+                return 1
+            fi
+            mv "$tmp_file" "$config_file" || return 1
+        done
     elif [ "${BCS_SERVER_ENV:-}" = "local" ]; then
         local bcs_llm_env_count=0
         local bcs_llm_missing=()
