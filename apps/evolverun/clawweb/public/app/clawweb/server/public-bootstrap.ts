@@ -14,6 +14,9 @@ import {
   createRunsRouter,
   createWorkflowsRouter,
 } from "@avernet/workflow/server";
+import { createWorkflowNodeStatsRouter } from "@avernet/workflow/server/routes/workflow-node-stats";
+import { createWorkflowVersionComparisonService } from "@avernet/workflow/server/services/workflow-version-comparison-service";
+import { createWorkflowVersionSourceService } from "@avernet/workflow/server/services/workflow-version-source-service";
 import { WorkflowSpecRepository } from "@avernet/workflow/server/repositories/workflow-spec-repository";
 import { WorkflowDeployHistoryRepository } from "@avernet/workflow/server/repositories/workflow-deploy-history-repository";
 import { FlowRunRepository } from "@avernet/workflow/server/repositories/flow-run-repository";
@@ -146,8 +149,12 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
         null,
         botPermRepo,
         null,
+        deployHistoryRepo,
         null,
-        null,
+        createWorkflowVersionSourceService(db),
+      ));
+      app.use("/api/workflows", createWorkflowNodeStatsRouter(
+        null, null, createWorkflowVersionComparisonService(db), botPermRepo,
       ));
       app.use("/api/runs", createRunsRouter(
         flowRunRepo,
