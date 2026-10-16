@@ -273,3 +273,36 @@ it('does not lose today runs when the incremental watermark advances before tomo
   f.advance(86400000); await f.restart().tick(); f.advance(); await f.service.tick();
   expect(vi.mocked(f.ports.analysis.start).mock.calls.some(([value]) => value.flowId === 'today-run')).toBe(true);
 });
+it.each([true, false])('notifies a final no_change round only when prior batches have publishable changes: %s', async priorChanged => {
+  const f = await fixture(true, 101, true);
+  for (let i = 0; i < 10; i++) {
+    await f.restart().tick(); f.advance();
+    if ((await f.service.status('wf-1')).jobs.some(job => job.kind === 'auto_draft' && job.taskId)) break;
+  }
+  const id = (await f.service.status('wf-1')).jobs.find(job => job.kind === 'auto_draft')!.taskId!;
+  for (let index = 0; index < 2; index++) {
+    const task = await f.workbench.task(id);
+    const changed = index === 0 && priorChanged;
+    const draft = { candidateCommit: priorChanged ? 'd'.repeat(40) : f.baseline.packCommit,
+      parentCandidateCommit: task.latestAttempt.input.parentCandidateCommit ?? f.baseline.packCommit,
+      packDigest: priorChanged ? 'e'.repeat(40) : f.baseline.packDigest,
+      itemResults: task.latestAttempt.input.items.map(item => ({ itemId: item.itemId, status: changed ? 'changed' : 'not_needed', reason: 'controlled result' })) };
+    await f.workbench.report({ workflowId: 'wf-1', taskId: id, revision: task.latestAttempt.revision, expectedStateVersion: 0,
+      status: changed ? 'succeeded' : 'no_change', draft, checks: { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit,
+        packDigest: draft.packDigest, candidateDigest: digestRepairJson(draft), static: { status: 'passed' }, mock: { status: 'not_covered' },
+        coverage: task.latestAttempt.input.items.map(item => ({ itemId: item.itemId })) } });
+    f.advance(); await f.restart().tick();
+    if (!index) { f.advance(); await f.restart().tick(); }
+  }
+  const task = await f.workbench.task(id);
+  expect(task.latestAttempt.phase).toBe('no_change');
+  expect(task.automaticProgress?.publishable).toBe(priorChanged);
+  const notices = () => vi.mocked(f.ports.notify).mock.calls.filter(([notice]) => notice.title.includes('草稿'));
+  // Issue notices may precede the round notice in the durable queue.
+  for (let i = 0; i < 40 && !notices().length; i++) { f.advance(); await f.restart().tick(); }
+  expect(notices()).toHaveLength(priorChanged ? 1 : 0);
+  if (priorChanged) expect(notices()[0][0].path).toContain(`repairTaskId=${id}`);
+  f.advance(); await f.restart().tick();
+  expect(notices()).toHaveLength(priorChanged ? 1 : 0);
+  expect(f.calls).toHaveLength(2);
+});

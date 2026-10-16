@@ -176,7 +176,9 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
     const { actorId } = access;
     if (job.data.kind === 'draft') {
       const task = await input.workbench.task(job.data.taskId);
-      if (task.latestAttempt.revision !== job.data.revision || task.latestAttempt.phase !== 'review') {
+      const reviewable = task.latestAttempt.phase === 'review'
+        || task.latestAttempt.phase === 'no_change' && task.automaticProgress?.publishable === true;
+      if (task.latestAttempt.revision !== job.data.revision || !reviewable) {
         await repo.patch(job, { status: 'done', reason: 'CANDIDATE_SUPERSEDED' }, now(), true); return;
       }
     }
