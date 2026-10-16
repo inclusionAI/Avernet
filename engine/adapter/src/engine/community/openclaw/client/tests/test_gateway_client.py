@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any, Dict, Optional
 
 import pytest
 
+from engine.community.openclaw.client import gateway_client as gateway_client_module
 from engine.community.openclaw.client.gateway_client import OpenClawGatewayClient
 from engine.community.openclaw.config import OpenClawConfig
 from engine.community.openclaw.protocol import (
@@ -25,6 +27,67 @@ def _make_client() -> OpenClawGatewayClient:
 def test_openclaw_gateway_protocol_version_matches_current_gateway():
     assert PROTOCOL_VERSION == 3
     assert OPENCLAW_GATEWAY_PROTOCOL_VERSION == 4
+
+
+@pytest.mark.asyncio
+async def test_connect_negotiates_supporting_v3_and_v4_gateways(monkeypatch):
+    client = OpenClawGatewayClient(
+        config=OpenClawConfig(
+            gateway_url="ws://127.0.0.1:18789",
+            gateway_token="",
+        )
+    )
+    messages = iter([
+        json.dumps({
+            "type": "event",
+            "event": "connect.challenge",
+            "payload": {"nonce": "nonce"},
+        }),
+        json.dumps({
+            "type": "res",
+            "id": "connect",
+            "ok": True,
+            "payload": {
+                "protocol": 3,
+                "server": {"version": "2026.3.13", "connId": "conn"},
+                "features": {"methods": [], "events": []},
+                "policy": {},
+            },
+        }),
+    ])
+    sent: list[dict[str, Any]] = []
+
+    class FakeGatewaySocket:
+        async def send(self, data: str) -> None:
+            sent.append(json.loads(data))
+
+        async def recv(self) -> str:
+            return next(messages)
+
+        async def close(self) -> None:
+            return None
+
+    async def fake_connect(*_args: object, **_kwargs: object) -> FakeGatewaySocket:
+        return FakeGatewaySocket()
+
+    async def fake_recv_loop() -> None:
+        return None
+
+    monkeypatch.setattr(gateway_client_module, "OPENCLAW_GATEWAY_PROTOCOL_VERSION", 4)
+    monkeypatch.setattr(
+        gateway_client_module,
+        "_load_or_create_device_keypair",
+        lambda *_args, **_kwargs: (None, None, None),
+    )
+    monkeypatch.setattr(gateway_client_module.websockets, "connect", fake_connect)
+    monkeypatch.setattr(client, "_recv_loop", fake_recv_loop)
+
+    await client.connect()
+    await client.disconnect()
+
+    params = sent[0]["params"]
+    assert params["minProtocol"] == PROTOCOL_VERSION
+    assert params["maxProtocol"] == 4
 
 
 def _fire_event(

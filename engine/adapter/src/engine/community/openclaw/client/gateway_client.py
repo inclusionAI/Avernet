@@ -40,6 +40,7 @@ from engine.community.openclaw.protocol import (
     EventFrame,
     HelloOk,
     OPENCLAW_GATEWAY_PROTOCOL_VERSION,
+    PROTOCOL_VERSION,
     RequestFrame,
     ResponseFrame,
 )
@@ -365,8 +366,11 @@ class OpenClawGatewayClient:
             )
             log.info(f"[connect] 已生成设备签名: device_id={self._device_id}")
 
+        # The wire envelope is v3; newer OpenClaw gateways can negotiate v4
+        # extensions. Advertise the supported range so both local 2026.3.x and
+        # 2026.5+ gateways connect without environment-specific version pins.
         connect_params = ConnectParams(
-            min_protocol=OPENCLAW_GATEWAY_PROTOCOL_VERSION,
+            min_protocol=PROTOCOL_VERSION,
             max_protocol=OPENCLAW_GATEWAY_PROTOCOL_VERSION,
             client=ClientInfo(
                 id="gateway-client",

@@ -157,7 +157,7 @@ claude_code's gateway, it is **not vendored** here — but it is a public npm
 package, so you install and run it yourself:
 
 ```bash
-npm i -g openclaw            # use >= 2026.5.x — see the version note below
+npm i -g openclaw            # 2026.3.x and 2026.5+ gateways are supported — see the version note below
 openclaw gateway run --dev --allow-unconfigured    # binds ws://127.0.0.1:18789
 ```
 
@@ -170,11 +170,12 @@ python start.py --port 20003
 # -> "Connected to OpenClaw Gateway: protocol=4"
 ```
 
-> **Gateway version matters (verified).** The shipped client speaks the OpenClaw
-> connect protocol **v4**, which requires **openclaw ≥ 2026.5.x**. An older
-> gateway (e.g. 2026.3.x, protocol v3) rejects the handshake with
-> `Handshake failed: protocol mismatch`. If you need to target a different
-> gateway protocol, override `OPENCLAW_GATEWAY_PROTOCOL_VERSION` (default `4`).
+> **Gateway version matters (verified).** The shipped client advertises the
+> OpenClaw connect protocol range **v3-v4**, so both openclaw 2026.3.x
+> (which negotiates v3) and ≥ 2026.5.x (which negotiates v4) gateways are
+> supported. `OPENCLAW_GATEWAY_PROTOCOL_VERSION` (default `4`) is the maximum
+> protocol the client supports; the minimum comes from the adapter's v3 wire
+> envelope.
 
 > As with claude_code, the gateway drives the model on your behalf, so it needs
 > OpenClaw's own model/credential configuration for a full chat. The

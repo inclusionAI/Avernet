@@ -835,10 +835,6 @@ class LocalProcessManager:
             # WebSocket handshakes when localhost is not in the bypass list.
             env["OPENCLAW_GATEWAY_URL"] = f"ws://127.0.0.1:{engine_port}"
             env["OPENCLAW_GATEWAY_TOKEN"] = ""
-            # The singlebox OpenClaw runtime speaks gateway protocol v3. The
-            # adapter global default is v4 for OpenClaw 2026.5.x, so pin it
-            # here for per-bot local gateways.
-            env["OPENCLAW_GATEWAY_PROTOCOL_VERSION"] = "3"
 
             # Disable adapter's built-in engine process management.
             # Empty START_CMD → EngineProcessSettings.enabled=False (config.py:78)

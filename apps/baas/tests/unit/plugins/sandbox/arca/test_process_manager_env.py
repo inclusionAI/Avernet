@@ -84,6 +84,35 @@ def test_spawn_adapter_source_injects_workspace_dir_env():
     assert "workspace_dir" in src, "注入值应该是 workspace_dir 参数"
 
 
+def test_spawn_adapter_does_not_force_openclaw_gateway_protocol(monkeypatch, tmp_path):
+    """OpenClaw 2026.5.x rejects a forced v3 handshake; keep the adapter default."""
+    manager = pm.LocalProcessManager()
+    captured = {}
+
+    class FakeProcess:
+        pid = 12345
+
+    def fake_popen(*args, **kwargs):
+        captured["env"] = kwargs["env"]
+        return FakeProcess()
+
+    monkeypatch.delenv("OPENCLAW_GATEWAY_PROTOCOL_VERSION", raising=False)
+    monkeypatch.setattr(manager, "_resolve_engine_src_dir", lambda: tmp_path)
+    monkeypatch.setattr(manager, "_resolve_engine_python", lambda _: "/usr/bin/python3")
+    monkeypatch.setattr(manager, "_wait_for_health", lambda *args, **kwargs: True)
+    monkeypatch.setattr(pm.subprocess, "Popen", fake_popen)
+
+    manager._spawn_adapter(
+        adapter_port=20010,
+        engine_port=18888,
+        config_dir=tmp_path,
+        workspace_dir=tmp_path / "workspace",
+        engine="openclaw",
+    )
+
+    assert "OPENCLAW_GATEWAY_PROTOCOL_VERSION" not in captured["env"]
+
+
 @pytest.mark.parametrize(
     ("engine", "env_key", "expected_url"),
     [
