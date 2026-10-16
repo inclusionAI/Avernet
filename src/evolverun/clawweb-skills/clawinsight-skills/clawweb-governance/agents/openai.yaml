@@ -1,0 +1,4 @@
+interface:
+  display_name: "ClawInsight 治理分析"
+  short_description: "按数量确定排查顺序，依据真实证据生成效果中心待审批治理方案"
+  default_prompt: "Use $clawweb-governance to analyze the supplied evidence bundle and return a grounded JSON proposal; let the configured program handle deduplication and pending-admin submission without pausing for conversational confirmation."
