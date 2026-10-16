@@ -348,3 +348,20 @@ Chat/ManagerWorker × queue on/off × 原服务/metrics 装饰器共八种组合
 核验原始 owner 历史身份、owner 的 Send admission、重建的 chat.send 帧和实际下行接受。
 `cargo test --manifest-path apps/bcs/Cargo.toml -p bcs --lib state_machine_result_tests`
 共 19 项通过；八种 owner 组合均通过，无需修改生产路由。
+
+## 16. 公开 API 队列发布 E2E（2026-10-16）
+
+Singlebox CI 的原有场景没有功能断言失败，但本次变更行覆盖率为
+90/215（41.86%），低于该次 CI 的 50% 门槛。原有 one-shot 场景只验证了
+队列关闭时的结果发布，未覆盖实际队列 admission 和字符串 payload 重建。
+
+新增 `result_queue_story.py` 并注册到标准 stories：通过公开 HTTP API 创建
+两个隔离的 Provider Bot 和 Chat Session，只为这两个 Bot 启用队列，然后由
+driver 发起并完成 one-shot Run。断言结果具有 owner Send、observer Inject
+两条持久化 delivery，真实 scheduler 下发的内容包含原始结果；完成 owner
+回调后，Human 点名 observer，确认其下一次请求包含该结果上下文，并将原
+Inject 标记为 Consumed。两次历史读取均只显示一条最终结果。
+
+测试清理删除测试资源并恢复原队列策略。该场景已在真实 SQLite BCS 进程上
+分别以 metrics 开启和关闭运行通过，策略恢复检查通过。未修改覆盖率门槛或
+统计范围；完整 Singlebox 覆盖率结果由新 head 的 CI 验证。
