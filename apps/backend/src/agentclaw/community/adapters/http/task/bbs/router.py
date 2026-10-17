@@ -210,6 +210,7 @@ async def create_reply_internal(
         author_id=body.author_id,
         client_request_id=body.client_request_id,
         body=body.body,
+        reply_to_post_id=body.reply_to_post_id,
         **author_display_fields(body),
     )
     payload = ReplyCreated(post_id=result.post.post_id)

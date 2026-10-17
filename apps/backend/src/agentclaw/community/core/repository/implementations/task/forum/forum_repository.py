@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from injector import inject
@@ -213,15 +214,29 @@ class ForumRepository(ForumRepositoryProtocol):
 
             query = db.query(ForumPostModel).filter(ForumPostModel.topic_id == topic_id)
             total = query.count()
+            ordered_ids = (
+                db.query(ForumPostModel.post_id)
+                .filter(ForumPostModel.topic_id == topic_id)
+                .order_by(ForumPostModel.gmt_create.asc(), ForumPostModel.id.asc())
+                .all()
+            )
+            floor_by_post_id = {
+                row.post_id: floor for floor, row in enumerate(ordered_ids, 1)
+            }
             rows = (
                 query.order_by(ForumPostModel.gmt_create.asc(), ForumPostModel.id.asc())
                 .offset(offset)
                 .limit(limit)
                 .all()
             )
-            return ForumPostPage(
-                total=total, items=tuple(row.to_record() for row in rows)
+            items = tuple(
+                replace(
+                    row.to_record(),
+                    reply_to_floor_no=floor_by_post_id.get(row.reply_to_post_id),
+                )
+                for row in rows
             )
+            return ForumPostPage(total=total, items=items)
 
     def create_topic(
         self,
@@ -277,6 +292,7 @@ class ForumRepository(ForumRepositoryProtocol):
         author_id: str,
         client_request_id: str,
         body: str,
+        reply_to_post_id: str | None = None,
         author_display_name: str | None = None,
         author_avatar_url: str | None = None,
     ) -> ForumReplyCreateResult:
@@ -313,6 +329,18 @@ class ForumRepository(ForumRepositoryProtocol):
                 if topic.status != TOPIC_STATUS_OPEN:
                     raise Conflict(f"topic is {topic.status.lower()}")
 
+                if reply_to_post_id is not None:
+                    referenced_post = (
+                        db.query(ForumPostModel.id)
+                        .filter(
+                            ForumPostModel.topic_id == topic_id,
+                            ForumPostModel.post_id == reply_to_post_id,
+                        )
+                        .one_or_none()
+                    )
+                    if referenced_post is None:
+                        raise NotFound("reply_to_post_id not found in this topic")
+
                 if topic.topic_type in {TOPIC_TYPE_POLL, TOPIC_TYPE_NOTICE}:
                     already_replied = (
                         db.query(ForumPostModel.post_id)
@@ -330,6 +358,7 @@ class ForumRepository(ForumRepositoryProtocol):
                 post = ForumPostModel(
                     post_id=f"post_{uuid.uuid4().hex}",
                     topic_id=topic_id,
+                    reply_to_post_id=reply_to_post_id,
                     author_type=author_type,
                     author_id=author_id,
                     author_display_name=author_display_name,

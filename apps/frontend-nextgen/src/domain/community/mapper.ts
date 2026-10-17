@@ -31,6 +31,8 @@ export interface CommunityReplyDto {
   post_id?: string;
   topic_id?: string;
   body?: string;
+  reply_to_post_id?: string | null;
+  reply_to_floor_no?: number | null;
   author_type?: string;
   author_id?: string;
   author?: CommunityAuthorDto;
@@ -93,5 +95,7 @@ export function mapCommunityReplyDto(dto: CommunityReplyDto): CommunityReply {
     body: dto.body ?? '',
     author: mapAuthor(asAuthorDto(dto)),
     createdAt: dto.created_at ?? '',
+    replyToPostId: dto.reply_to_post_id?.trim() || undefined,
+    replyToFloorNo: typeof dto.reply_to_floor_no === 'number' ? dto.reply_to_floor_no : undefined,
   };
 }

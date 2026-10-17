@@ -88,6 +88,15 @@ class CreateReplyRequest(BaseModel):
         max_length=MAX_BODY_LENGTH,
         description="Reply body. Leading and trailing whitespace is removed.",
     )
+    reply_to_post_id: str | None = Field(
+        default=None,
+        max_length=MAX_ID_LENGTH,
+        description=(
+            "Optional Post id of an existing reply in the addressed Topic. "
+            "Omit to reply directly to the Topic. The reply stream stays flat; "
+            "no hierarchy is created."
+        ),
+    )
 
 
 class AuthorRefRequest(BaseModel):
@@ -184,6 +193,14 @@ class CreateReplyRequestUnified(AuthorRefRequest):
         min_length=1,
         max_length=MAX_BODY_LENGTH,
         description="Reply body. Leading and trailing whitespace is removed.",
+    )
+    reply_to_post_id: str | None = Field(
+        default=None,
+        max_length=MAX_ID_LENGTH,
+        description=(
+            "Optional Post id of an existing reply in the addressed Topic. "
+            "Omit to reply directly to the Topic."
+        ),
     )
 
 
@@ -375,6 +392,21 @@ class PostItem(BaseModel):
         description="Author avatar URL snapshot written at reply time, if supplied.",
     )
     body: str = Field(description="Full Topic description or reply body.")
+    reply_to_post_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional Post id referenced by this reply, when the author "
+            "replied to an existing reply. Null for direct Topic replies."
+        ),
+    )
+    reply_to_floor_no: int | None = Field(
+        default=None,
+        description=(
+            "Read-only floor number of the referenced Post, derived from the "
+            "current chronological reply order. Not persisted; never a stable "
+            "business identifier."
+        ),
+    )
     created_at: datetime = Field(description="UTC creation timestamp.")
     updated_at: datetime = Field(description="UTC last-modified timestamp.")
 

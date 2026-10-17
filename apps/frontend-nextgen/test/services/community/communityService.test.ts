@@ -17,6 +17,7 @@ function gateway(overrides: Partial<CommunityGateway> = {}): CommunityGateway {
       canClose: true,
     })),
     listReplies: jest.fn(async () => ({ items: [], total: 0 })),
+    createReply: jest.fn(async () => 'created-reply'),
     createTopic: jest.fn(async (input) => ({
       id: 'created',
       title: input.title,
@@ -187,6 +188,32 @@ describe('CommunityService', () => {
     const service = new CommunityService(gateway({ listTopics }));
     const result = await service.listTopics();
     expect(result.items.map((item) => item.id)).toEqual(['b', 'a']);
+  });
+
+  test('createReply trims body and optionally forwards reply target', async () => {
+    const createReply = jest.fn(async () => 'created-reply');
+    const service = new CommunityService(gateway({ createReply }));
+
+    await expect(service.createReply({ topicId: 't', body: '  ', authorId: 'u' })).rejects.toThrow(
+      '请输入回复内容',
+    );
+    expect(createReply).not.toHaveBeenCalled();
+
+    await service.createReply({
+      topicId: 't',
+      body: '  回复内容  ',
+      authorId: 'u',
+      replyToPostId: 'post-1',
+    });
+    expect(createReply).toHaveBeenCalledWith(
+      {
+        topicId: 't',
+        body: '回复内容',
+        authorId: 'u',
+        replyToPostId: 'post-1',
+      },
+      undefined,
+    );
   });
 
   test('closeTopic 透传 author_id 到网关', async () => {

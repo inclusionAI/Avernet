@@ -33,6 +33,9 @@ export function useCommunity() {
   const [replyTotal, setReplyTotal] = useState(0);
   const [replyLoading, setReplyLoading] = useState(false);
   const [replyError, setReplyError] = useState<string | null>(null);
+  // 被引用回复的 Post id。null 表示直接回复 Topic；楼层号只在展示层派生。
+  const [replyTargetPostId, setReplyTargetPostId] = useState<string | null>(null);
+  const [replyPublishing, setReplyPublishing] = useState(false);
   const requestRef = useRef(0);
 
   const load = useCallback(async () => {
@@ -140,6 +143,7 @@ export function useCommunity() {
       store.setDetailLoading(true);
       store.setDetailError(null);
       setReplyError(null);
+      setReplyTargetPostId(null);
       setReplyTotal(0);
       setReplyPage(1);
       try {
@@ -168,9 +172,52 @@ export function useCommunity() {
     async (page: number) => {
       const topic = store.selectedTopic;
       if (!topic) return;
+      setReplyTargetPostId(null);
       await fetchReplies(topic.id, page);
     },
     [fetchReplies, store.selectedTopic],
+  );
+
+  const startReply = useCallback((postId: string) => {
+    if (postId) setReplyTargetPostId(postId);
+  }, []);
+
+  const cancelReply = useCallback(() => setReplyTargetPostId(null), []);
+
+  const publishReply = useCallback(
+    async (body: string) => {
+      const topic = store.selectedTopic;
+      if (!topic) return false;
+      setReplyPublishing(true);
+      try {
+        await communityService.createReply({
+          topicId: topic.id,
+          body,
+          authorId: currentUserId || 'current-user',
+          authorName: identity?.displayName || '我',
+          authorAvatarUrl: identity?.avatarUrl,
+          replyToPostId: replyTargetPostId ?? undefined,
+        });
+        setReplyTargetPostId(null);
+        await fetchReplies(topic.id, replyPage);
+        notifySuccess(replyTargetPostId ? '回复楼层成功' : '主题回复成功');
+        return true;
+      } catch (error) {
+        notifyError(errorMessage(error, '回复发布失败'), { title: '回复失败' });
+        return false;
+      } finally {
+        setReplyPublishing(false);
+      }
+    },
+    [
+      currentUserId,
+      fetchReplies,
+      identity?.avatarUrl,
+      identity?.displayName,
+      replyPage,
+      replyTargetPostId,
+      store.selectedTopic,
+    ],
   );
 
   const publishTopic = useCallback(
@@ -240,6 +287,11 @@ export function useCommunity() {
     replyTotal,
     replyLoading,
     replyError,
+    replyTargetPostId,
+    replyPublishing,
+    startReply,
+    cancelReply,
+    publishReply,
     publishTopic,
     closeTopic,
     publishing,

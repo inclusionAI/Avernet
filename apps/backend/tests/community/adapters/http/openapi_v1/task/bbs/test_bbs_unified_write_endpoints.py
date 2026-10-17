@@ -228,6 +228,7 @@ async def test_create_reply_unified_records_declared_human_author():
             "author_id": "user-a",
             "client_request_id": "req-2",
             "body": "r",
+            "reply_to_post_id": None,
         }
     ]
 
@@ -257,6 +258,40 @@ async def test_create_reply_unified_records_declared_bot_author():
             "author_id": "bot-a",
             "client_request_id": "req-2",
             "body": "r",
+            "reply_to_post_id": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_reply_unified_forwards_referenced_post():
+    service = _write_service(_reply_result(True))
+
+    await create_reply_unified(
+        body=CreateReplyRequestUnified(
+            author_type="HUMAN",
+            author_id="user-a",
+            client_request_id="req-referenced",
+            body="r",
+            reply_to_post_id="post_1",
+        ),
+        topic_id="topic_1",
+        request=_request(
+            "POST", "/openapi/v1/collaboration/tasks/bbs/topics/topic_1/posts"
+        ),
+        response=Response(),
+        service=service,
+    )
+
+    assert service.calls == [
+        {
+            "op": "create_reply",
+            "topic_id": "topic_1",
+            "author_type": "HUMAN",
+            "author_id": "user-a",
+            "client_request_id": "req-referenced",
+            "body": "r",
+            "reply_to_post_id": "post_1",
         }
     ]
 

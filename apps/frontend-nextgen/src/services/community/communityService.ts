@@ -1,4 +1,9 @@
-import type { CommunityReplyPager, CommunityTopicQuery, CreateCommunityTopicInput } from '@/domain/community/types';
+import type {
+  CommunityReplyPager,
+  CommunityTopicQuery,
+  CreateCommunityReplyInput,
+  CreateCommunityTopicInput,
+} from '@/domain/community/types';
 import type { CommunityGateway } from './communityGateway';
 
 function byNewestActivity(left: { latestActivityAt?: string }, right: { latestActivityAt?: string }) {
@@ -36,6 +41,12 @@ export class CommunityService {
     if (!normalized.title) return Promise.reject(new Error('请输入主题标题'));
     if (!normalized.body) return Promise.reject(new Error('请输入主题正文'));
     return this.gateway.createTopic(normalized, signal);
+  }
+
+  createReply(input: CreateCommunityReplyInput, signal?: AbortSignal) {
+    const normalized = { ...input, body: input.body.trim() };
+    if (!normalized.body) return Promise.reject(new Error('请输入回复内容'));
+    return this.gateway.createReply(normalized, signal);
   }
 
   closeTopic(topicId: string, authorId: string, signal?: AbortSignal) {

@@ -12,6 +12,7 @@ jest.mock('@/services/community', () => ({
     listTopics: jest.fn(),
     getTopic: jest.fn(),
     listReplies: jest.fn(),
+    createReply: jest.fn(),
     createTopic: jest.fn(),
     closeTopic: jest.fn(),
   },
@@ -161,6 +162,69 @@ describe('useCommunity', () => {
     });
     expect(closed).toBe(false);
     expect(mockedService.closeTopic).not.toHaveBeenCalled();
+  });
+
+  test('普通回复不携带 replyToPostId，成功后刷新当前页', async () => {
+    mockedService.getTopic.mockResolvedValue(topic);
+    mockedService.createReply.mockResolvedValue('reply-created');
+    const { result } = renderHook(() => useCommunity());
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.openTopic(topic);
+    });
+
+    let created = false;
+    await act(async () => {
+      created = await result.current.publishReply('  继续讨论  ');
+    });
+
+    expect(created).toBe(true);
+    expect(mockedService.createReply).toHaveBeenCalledWith({
+      topicId: topic.id,
+      body: '  继续讨论  ',
+      authorId: '900003',
+      authorName: '当前用户',
+      authorAvatarUrl: 'avatar.png',
+      replyToPostId: undefined,
+    });
+    expect(result.current.replyTargetPostId).toBeNull();
+    expect(mockedService.listReplies).toHaveBeenLastCalledWith(topic.id, {
+      page: 1,
+      pageSize: COMMUNITY_REPLY_PAGE_SIZE,
+    });
+    expect(notifySuccess).toHaveBeenCalledWith('主题回复成功');
+  });
+
+  test('点击楼层回复时记录 Post id，并提交 replyToPostId', async () => {
+    mockedService.getTopic.mockResolvedValue(topic);
+    mockedService.createReply.mockResolvedValue('reply-created');
+    const { result } = renderHook(() => useCommunity());
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.openTopic(topic);
+    });
+    act(() => {
+      result.current.startReply('reply-1');
+    });
+
+    expect(result.current.replyTargetPostId).toBe('reply-1');
+
+    let created = false;
+    await act(async () => {
+      created = await result.current.publishReply('给楼层的回复');
+    });
+
+    expect(created).toBe(true);
+    expect(mockedService.createReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        replyToPostId: 'reply-1',
+      }),
+    );
+    expect(notifySuccess).toHaveBeenCalledWith('回复楼层成功');
   });
 
   test('goToReplyPage 切换回帖分页', async () => {

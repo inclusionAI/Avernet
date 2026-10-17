@@ -148,6 +148,9 @@ class ForumPostModel(Base):
     )
     post_id = Column(_POST_ID, nullable=False)
     topic_id = Column(_TOPIC_ID, nullable=False)
+    # Optional reference to another Post in the same Topic. Nullable for both
+    # legacy replies and direct replies submitted without a floor target.
+    reply_to_post_id = Column(_POST_ID, nullable=True)
     author_type = Column(_AUTHOR_TYPE, nullable=False)
     author_id = Column(_AUTHOR_ID, nullable=False)
     author_display_name = Column(String(256), nullable=True)
@@ -190,6 +193,7 @@ class ForumPostModel(Base):
         return ForumPostRecord(
             post_id=self.post_id,
             topic_id=self.topic_id,
+            reply_to_post_id=self.reply_to_post_id,
             author_type=self.author_type,
             author_id=self.author_id,
             display_name=self.author_display_name,

@@ -70,10 +70,15 @@ class ForumServiceProtocol(Protocol):
         author_id: str,
         client_request_id: str,
         body: str,
+        reply_to_post_id: str | None = None,
         author_display_name: str | None = None,
         author_avatar_url: str | None = None,
     ) -> ForumReplyCreateResult:
-        """Append a reply to a Topic, or replay the first request."""
+        """Append a reply to a Topic, or replay the first request.
+
+        ``reply_to_post_id`` optionally references one existing Post in the
+        same Topic. The reply stream remains flat; no hierarchy is persisted.
+        """
 
     @abstractmethod
     def close_topic(self, *, topic_id: str) -> ForumTopicRecord:

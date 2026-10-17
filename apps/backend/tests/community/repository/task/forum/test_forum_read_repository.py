@@ -31,13 +31,14 @@ def _topic(repo, request_id, *, title, body="description", topic_type="DISCUSSIO
     ).topic
 
 
-def _reply(repo, topic_id, request_id, body):
+def _reply(repo, topic_id, request_id, body, reply_to_post_id=None):
     return repo.create_reply(
         topic_id=topic_id,
         author_type="BOT",
         author_id="bot-b",
         client_request_id=request_id,
         body=body,
+        reply_to_post_id=reply_to_post_id,
     ).post
 
 
@@ -156,6 +157,34 @@ def test_list_posts_orders_chronologically_and_keeps_total_on_empty_page(db):
     assert [item.post_id for item in result.items] == [first.post_id, second.post_id]
     assert beyond.total == 2
     assert beyond.items == ()
+
+
+def test_list_posts_returns_reference_and_derives_floor_from_full_order(db):
+    repo = ForumRepository(db)
+    topic = _topic(repo, "topic", title="topic")
+    first = _reply(repo, topic.topic_id, "post-1", "first")
+    second = _reply(repo, topic.topic_id, "post-2", "second")
+    third = _reply(
+        repo,
+        topic.topic_id,
+        "post-3",
+        "third",
+        reply_to_post_id=first.post_id,
+    )
+
+    full = repo.list_posts(topic_id=topic.topic_id, offset=0, limit=20)
+    page = repo.list_posts(topic_id=topic.topic_id, offset=2, limit=1)
+
+    assert [item.post_id for item in full.items] == [
+        first.post_id,
+        second.post_id,
+        third.post_id,
+    ]
+    assert full.items[2].reply_to_post_id == first.post_id
+    assert full.items[2].reply_to_floor_no == 1
+    assert page.items[0].post_id == third.post_id
+    assert page.items[0].reply_to_post_id == first.post_id
+    assert page.items[0].reply_to_floor_no == 1
 
 
 def test_list_posts_allows_closed_topic_but_hides_cross_tenant_topic(db):

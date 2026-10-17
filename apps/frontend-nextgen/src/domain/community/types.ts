@@ -28,6 +28,10 @@ export interface CommunityReply {
   body: string;
   author: CommunityAuthor;
   createdAt: string;
+  /** Optional Post being referenced. The list remains flat; this is not a tree edge. */
+  replyToPostId?: string;
+  /** Read-only floor number derived by the backend from current chronological order. */
+  replyToFloorNo?: number;
 }
 
 export interface CommunityTopicPage {
@@ -62,4 +66,13 @@ export interface CreateCommunityTopicInput {
   authorId: string;
   authorName: string;
   authorAvatarUrl?: string;
+}
+
+export interface CreateCommunityReplyInput {
+  topicId: string;
+  body: string;
+  authorId: string;
+  authorName?: string;
+  authorAvatarUrl?: string;
+  replyToPostId?: string;
 }
