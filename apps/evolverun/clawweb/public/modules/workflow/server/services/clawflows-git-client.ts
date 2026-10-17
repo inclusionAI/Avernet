@@ -143,6 +143,12 @@ export async function cloneClawflows(
 ): Promise<void> {
   if (!config.remoteUrl) throw new Error("clawflowsRemoteUrl is not configured");
 
+  // Configure credentials before cloning so that the clone operation can
+  // authenticate against the remote (e.g. code.alipay.com).
+  if (config.token) {
+    await configureGitCredential(repoDir, config.remoteUrl, config.username, config.token);
+  }
+
   git(repoDir, ["clone", "--quiet", config.remoteUrl, "."], {
     env: isolatedGitEnvironment(process.env),
     timeout: 120_000,
@@ -150,10 +156,6 @@ export async function cloneClawflows(
 
   git(repoDir, ["config", "user.name", config.username || "clawweb"]);
   git(repoDir, ["config", "user.email", config.email || `${config.username || "clawweb"}@antgroup.com`]);
-
-  if (config.token) {
-    await configureGitCredential(repoDir, config.remoteUrl, config.username, config.token);
-  }
 }
 
 function specPath(repoDir: string, packId: string, workflowId: string): string {
