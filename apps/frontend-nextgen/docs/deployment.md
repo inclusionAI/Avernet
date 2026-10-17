@@ -29,6 +29,12 @@ The current frontend development proxy proves that space, work-order and work-or
 
 ## Build
 
+`DSH_REGISTRATION_GUIDE_URL` optionally supplies the DeepSeek Harness guide through
+runtime configuration. Set it to an HTTP(S) guide for the plugin version deployed
+with this release, using an immutable revision when hosting documentation in Git.
+When absent, the optional guide link is hidden; all inline onboarding steps remain
+available. Internal overlays can override the guide capability independently.
+
 ```bash
 docker build -t <ACR_REGISTRY>/<NAMESPACE>/avernet-frontend-nextgen:<VERSION> .
 docker push <ACR_REGISTRY>/<NAMESPACE>/avernet-frontend-nextgen:<VERSION>

@@ -42,7 +42,13 @@ export function QwenWorkRegistrationPanel({ open }: { open: boolean }) {
   const endpoint = resolveBcsEndpoint();
   const installation = getCapabilities().getQwenWorkBridgeInstallation().value;
   const environment = getCapabilities().getRuntimeEnvironment().value;
-  const profile = installation?.profiles ? (environment === 'LOCAL' ? 'local' : environment === 'PROD' ? 'prod' : 'pre') : undefined;
+  const profile = installation?.profiles
+    ? environment === 'LOCAL'
+      ? 'local'
+      : environment === 'PROD'
+      ? 'prod'
+      : 'pre'
+    : undefined;
   const capability = getCapabilities().getQwenWorkBotRegistrationConfig(endpoint ?? '');
   const {
     token,
@@ -68,6 +74,10 @@ export function QwenWorkRegistrationPanel({ open }: { open: boolean }) {
       : '';
   return (
     <div className="space-y-4 text-xs leading-5">
+      <p>
+        千问办公通过 bcs-bridge 接入协作网络。请先在千问办公所在设备的终端安装 Bridge，再填写 Bot
+        信息并执行接入命令，完成注册与启动。
+      </p>
       <p>支持 macOS 13+（Apple Silicon / Intel）。先安装并打开千问办公；Bridge 运行期间请保持桌面端在线。</p>
       <section className="space-y-2" aria-label="安装 Bridge">
         <h3 className="font-medium">1. 安装 Bridge</h3>
@@ -79,7 +89,8 @@ export function QwenWorkRegistrationPanel({ open }: { open: boolean }) {
         ) : (
           <>
             <p>
-              推荐版本：{VERIFIED_BRIDGE_BETA.version}（Beta）。先下载安装脚本和校验文件，再执行安装脚本；无需安装 Rust。
+              推荐版本：{VERIFIED_BRIDGE_BETA.version}（Beta）。先下载安装脚本和校验文件，再执行安装脚本；无需安装
+              Rust。
             </p>
             <div className="flex flex-wrap gap-3">
               <a
@@ -90,7 +101,12 @@ export function QwenWorkRegistrationPanel({ open }: { open: boolean }) {
               >
                 下载安装脚本
               </a>
-              <a href={VERIFIED_BRIDGE_BETA.checksumUrl} target="_blank" rel="noopener noreferrer" className="underline">
+              <a
+                href={VERIFIED_BRIDGE_BETA.checksumUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+              >
                 下载校验文件
               </a>
               <a href={BRIDGE_RELEASES_URL} target="_blank" rel="noopener noreferrer" className="underline">
@@ -112,7 +128,8 @@ export function QwenWorkRegistrationPanel({ open }: { open: boolean }) {
           <Input value={botName} maxLength={64} onChange={(e) => setBotName(e.target.value)} />
         </label>
         <p>
-          {profile ? `配置由 Bridge 保存在 profile ${profile} 中。重复执行注册命令会复用该环境已有的 Bot；若凭据所属 Provider 或 BCS 地址不一致，会拒绝覆盖。`
+          {profile
+            ? `配置由 Bridge 保存在 profile ${profile} 中。重复执行注册命令会复用该环境已有的 Bot；若凭据所属 Provider 或 BCS 地址不一致，会拒绝覆盖。`
             : '配置保存在 ~/.bcn-bridge/qwenwork.toml。已有千问 Bot 请复用现有配置，不要重复注册。'}
           实际模型和执行目录由千问办公控制，当前使用千问办公自动创建的会话工作区。
         </p>
@@ -137,7 +154,9 @@ export function QwenWorkRegistrationPanel({ open }: { open: boolean }) {
         ) : null}
         {!installation?.guideUrl && (
           <>
-            <p>复制接入命令，在终端执行一次即可完成注册、初始化和启动。任一步失败都会停止，请根据终端提示处理后重试。</p>
+            <p>
+              复制接入命令，在终端执行一次即可完成注册、初始化和启动。任一步失败都会停止，请根据终端提示处理后重试。
+            </p>
             {!installation && (
               <p className="text-muted-foreground">
                 推荐的 0.1.4-beta.2 已包含 init 命令。若本机仍是旧版本，请先执行上面的安装命令。
@@ -147,11 +166,14 @@ export function QwenWorkRegistrationPanel({ open }: { open: boolean }) {
               在千问办公的企业微信 Bot 渠道中填写命令输出的 WebSocket URL、Bot ID 和
               Secret，并启用渠道。密钥只在本机显示，不要发送给其他人。
             </p>
-            <p>按千问版本要求重新加载 Hooks。无需手工编辑 TOML 或复制 Hooks 模板；重复初始化会保留原密钥及其他 Hooks。</p>
+            <p>
+              按千问版本要求重新加载 Hooks。无需手工编辑 TOML 或复制 Hooks 模板；重复初始化会保留原密钥及其他 Hooks。
+            </p>
             <details>
               <summary className="cursor-pointer font-medium">数据库无法自动识别时</summary>
               <p>
-                在接入命令的 <code>init --engine qwenwork</code> 后加 <code>--option database_path=/实际路径/agents.db</code>。可用{' '}
+                在接入命令的 <code>init --engine qwenwork</code> 后加{' '}
+                <code>--option database_path=/实际路径/agents.db</code>。可用{' '}
                 <code>--option settings_path=/实际路径/settings.json</code> 指定设置文件。若已有其他 Bridge Hooks
                 占用同一地址，复用原 Bridge 配置或选择不同的本机端口。
               </p>
@@ -166,7 +188,8 @@ export function QwenWorkRegistrationPanel({ open }: { open: boolean }) {
             </a>
 
             <p>
-              {profile ? `接入命令在注册和初始化成功后，会先停止当前 Bridge（正在执行的任务会中止），再启动 profile ${profile}；其他环境的配置和状态保留。`
+              {profile
+                ? `接入命令在注册和初始化成功后，会先停止当前 Bridge（正在执行的任务会中止），再启动 profile ${profile}；其他环境的配置和状态保留。`
                 : '同一用户只能运行一个 Bridge；已有实例需先停止，再执行接入命令。'}
               停止命令：<code>{installation ? `${installation.binary} stop` : '~/.local/bin/bcs-bridge stop'}</code>。
             </p>
