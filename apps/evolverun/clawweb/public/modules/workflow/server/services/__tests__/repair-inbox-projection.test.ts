@@ -60,6 +60,11 @@ it('retains every member and frozen original when a real exact plan contains lar
   const card=page.items[0],selected=expandProposalCards([card]);
   expect(selected.map(row=>row.itemId).sort()).toEqual(f.items.map(row=>row.itemId).sort());
   expect(card.readSummary?.runCount).toBe(10);expect(proposalChecked(card,selected.map(row=>row.itemId))).toBe(true);
+  expect(card.aggregation?.runCount).toBe(10);
+  expect(inboxSummary(card).aggregation?.runCount).toBe(10);
+  const detail=await service.item('wf-1',card.itemId);
+  expect(detail.readSummary).toBeUndefined();
+  expect(detail.aggregation?.runCount).toBe(10);
   expect(proposalPending(selected)).toBe(false);
   const revision=await service.create('test',{workflowId:'wf-1',inputDigest:page.inputDigest,itemIds:selected.map(row=>row.itemId),instructions:'',requestId:'complete'});
   expect(revision.input.items).toHaveLength(10);

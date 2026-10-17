@@ -33,10 +33,18 @@ the read if source or metadata digests change during assembly. External callers
 must follow this metadata pagination separately from item pagination.
 
 The legacy server-only `rawItems` query remains an unprojected trusted read for
-automatic selection. New automatic selection resolves selected original IDs
+automatic selection. Its caller traverses all byte pages, retains the 32 KB
+per-item eligibility guard and deduplicates original identities before choosing
+bounded units. A raw-page snapshot digest detects changes in evidence, lifecycle
+or page boundaries as well as the existing source digest; mixed snapshots are
+discarded. New automatic selection resolves selected original IDs
 through `items()` before inspecting diagnostic severity or freezing a task.
 Neither path freezes the browser's summary. Original proposal/evidence reads,
 source-change detection and generation remain server-owned.
+
+An aggregation's `runCount` is the exact distinct plan-wide run count. Both list
+and full-member detail retain that bounded number when flow ID arrays are omitted;
+a member's smaller original count is not substituted for the plan's count.
 
 The POST query body limit remains 256 KiB, the list response limit remains 4 MiB,
 the full item response limit remains 8 MiB and generation item/batch limits remain

@@ -45,13 +45,14 @@ export function inboxSummary(item: RepairInboxItem): RepairInboxItem {
   const summary = originalSummary(item);
   if (!item.aggregation) return summary;
   const plan = item.aggregation;
+  const runCount = plan.runCount ?? new Set(plan.flowIds).size;
   return { ...summary, aggregation: { ...plan, title: inboxText(plan.title), changes: plan.changes.map(text => inboxText(text)),
-    originals: plan.originals.map(original => originalSummary(original, true)), flowIds: [],
+    originals: plan.originals.map(original => originalSummary(original, true)), flowIds: [], runCount,
     ...(plan.causes ? { causes: plan.causes.map(cause => ({ ...cause, title: inboxText(cause.title) })) } : {}),
     ...(plan.unknowns ? { unknowns: plan.unknowns.map(text => inboxText(text)) } : {}),
     conflicts: plan.conflicts.map(conflict => ({ ...conflict, reason: inboxText(conflict.reason) })) },
     readSummary: { sourceCount: summary.readSummary?.sourceCount ?? item.sources.length,
-      runCount: plan.flowIds.length, diagnosisCount: summary.readSummary?.diagnosisCount ?? 0,
+      runCount, diagnosisCount: summary.readSummary?.diagnosisCount ?? 0,
       originalBytes: bytes(item), operations: summary.readSummary?.operations ?? [],
       conflictsComplete: summary.readSummary?.conflictsComplete ?? true } };
 }

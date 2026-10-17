@@ -109,3 +109,47 @@ it('does not select the remaining members of a partly unavailable legacy plan',a
     expect(selected?.items.map(item=>item.itemId)).toEqual(['item-6']);
   } finally {await f.db.close();}
 });
+
+it('traverses raw byte pages past an oversized item without selecting or dispatching it',async()=>{
+  const f=await repairFixture(7);
+  try {
+    const baseline=await f.executionPort.resolveBaseline('wf-1');
+    f.items.forEach((item,i)=>{
+      item.proposal={schemaVersion:'workflow-patch/v1',workflowId:'wf-1',baseSpecDigest:baseline.specDigest,summary:'fix',operations:[{op:'replace',nodeId:`n-${i}`,path:'/executor/prompt',value:'safe'}]};
+      item.context={signature:'issue',diagnoses:[{flowId:`run-${i}`,severity:'high'}],...(i===0?{details:'x'.repeat(2*1024*1024)}:{})};
+    });
+    const workbench=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort);
+    expect((await workbench.candidates('wf-1',{rawItems:true,pageSize:100})).page.totalPages).toBe(2);
+    const issues={listPage:async()=>({groups:[{signature:'issue',priority:{severity:'high'}},{signature:'issue',priority:{severity:'high'}}]})} as unknown as IssueAggregationRepository;
+    const selected=await selectAutomaticScope(workbench,issues,'wf-1',baseline);
+    expect(selected?.items.map(item=>item.itemId)).toEqual(['item-1','item-2','item-3','item-4','item-5']);
+    expect(new Set(selected?.items.map(item=>item.itemId)).size).toBe(5);
+    expect(f.calls).toHaveLength(0);
+  } finally {await f.db.close();}
+});
+
+it('abandons a legacy selection when sources change on a later raw page',async()=>{
+  const {f,workbench,issues,baseline}=await legacyPlanFixture();
+  try {
+    const read=workbench.candidates.bind(workbench);
+    workbench.candidates=async(wf,query)=>{
+      const page=await read(wf,query);
+      return {...page,inputDigest:query?.page===2?'changed':page.inputDigest,page:{...page.page,page:query?.page??1,totalPages:2}};
+    };
+    expect(await selectAutomaticScope(workbench,issues,'wf-1',baseline)).toBeNull();
+    expect(f.calls).toHaveLength(0);
+  } finally {await f.db.close();}
+});
+
+it('abandons a legacy selection when byte-page boundaries change without a proposal identity change',async()=>{
+  const {f,workbench,issues,baseline}=await legacyPlanFixture();
+  try {
+    const read=workbench.candidates.bind(workbench);
+    workbench.candidates=async(wf,query)=>{
+      const result=await read(wf,query);
+      return {...result,page:{...result.page,page:query?.page??1,totalPages:2,snapshotDigest:query?.page===2?'new-evidence':'old-evidence'}};
+    };
+    expect(await selectAutomaticScope(workbench,issues,'wf-1',baseline)).toBeNull();
+    expect(f.calls).toHaveLength(0);
+  } finally {await f.db.close();}
+});

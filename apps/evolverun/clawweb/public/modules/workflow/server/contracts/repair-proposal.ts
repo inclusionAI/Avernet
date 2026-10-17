@@ -9,7 +9,7 @@ export type ProposalAggregation = {
   id: string; fingerprint: string; itemIds: string[]; title: string; changes: string[]; relation: ProposalRelation;
   status: 'ready' | 'queued' | 'organizing' | 'retryable' | 'unavailable' | 'uncertain' | 'stale';
   causes?: ProposalCause[]; unknowns?: string[];
-  flowIds: string[]; originals: RepairInboxItem[]; conflicts: ProposalConflict[];
+  flowIds: string[]; runCount?: number; originals: RepairInboxItem[]; conflicts: ProposalConflict[];
 };
 /** Expand the displayed selection into original identities without selecting hidden alternatives. */
 export function proposalMembers(item: RepairInboxItem): RepairInboxItem[] {

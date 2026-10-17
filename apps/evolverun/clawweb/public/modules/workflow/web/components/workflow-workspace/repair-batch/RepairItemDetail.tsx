@@ -26,8 +26,8 @@ export function changeSummary(item: RepairInboxItem) {
   }).join('；') + (operations.length > 3 ? `；另 ${operations.length - 3} 项` : '')
 }
 export function sourceRunCount(item: RepairInboxItem): number | null {
+  if (item.aggregation) return (item.aggregation.runCount ?? new Set(item.aggregation.flowIds).size) || null
   if (item.readSummary) return item.readSummary.runCount || null
-  if (item.aggregation) return item.aggregation.flowIds.length || null
   return new Set(item.sources.flatMap(source => source.kind === 'diagnosis_candidate' ? [source.flowId] : [])).size || null
 }
 function ChangeValue({ value }: { value: unknown }) {

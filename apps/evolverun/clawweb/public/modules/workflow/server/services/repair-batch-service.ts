@@ -277,7 +277,8 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
             title: isAutomaticBatch(r.input) ? `自动优化 ${itemCount} 项建议` : (r.input.items.map(item => item.proposal?.summary || item.instruction).find(value => typeof value === 'string' && value.trim()) as string | undefined)?.trim().split('\n')[0].slice(0, 72) || `优化 ${itemCount} 项问题` };
         }),
         repairSignatureKeys, facets,
-        counts, page: { page: selectedPage, pageSize, total: filtered.length, totalPages },
+        counts, page: { page: selectedPage, pageSize, total: filtered.length, totalPages,
+          ...(query.rawItems ? { snapshotDigest: digestRepairJson(filtered) } : {}) },
         includeHistorical, activeLookbackDays: REPAIR_ACTIVE_LOOKBACK_DAYS,
         capabilities: this.capabilities(), limits: { maxItems: MAX_ITEMS, maxRequestBytes: MAX_REQUEST_BYTES } };
       // Complete metadata is independently pageable; callers must not treat the first page as all tasks/facets.

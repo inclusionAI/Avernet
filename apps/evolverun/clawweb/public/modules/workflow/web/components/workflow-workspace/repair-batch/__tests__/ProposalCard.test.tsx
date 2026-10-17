@@ -3,6 +3,7 @@ import { expect,it,vi } from 'vitest';
 import IssueRepairPreview from '../IssueRepairPreview';
 import { expandProposalCards,proposalChecked,proposalConflicts,proposalPending } from '../../../../../server/contracts/repair-proposal';
 import type { RepairInboxItem } from '../../../../../server/contracts/repair-workbench';
+import { sourceRunCount } from '../RepairItemDetail';
 const api=vi.hoisted(()=>({item:vi.fn()}));
 vi.mock('../../../../api/repair-batches',()=>({repairBatches:api}));
 const raw=(id:string,value:string):RepairInboxItem=>({itemId:id,workflowId:'wf',groupKey:'g',proposalKey:id,contentRevision:1,previousItemId:null,
@@ -26,6 +27,13 @@ it('distinguishes queued/failed aggregation from business conflicts',()=>{
  render(<IssueRepairPreview items={[queued]} total={1} selected={[]} canEdit limit={100} onToggle={vi.fn()} onDetail={vi.fn()} onMore={vi.fn()}/>);
  expect(screen.getByText('整理待重试')).toBeVisible();expect(proposalConflicts(expandProposalCards([queued]))).toEqual([]);
  expect(proposalPending(expandProposalCards([queued]))).toBe(true);
+});
+it('keeps the complete plan run count on a full member detail without using its smaller original count',()=>{
+ const aggregation={...card.aggregation!,flowIds:[],runCount:2};
+ const detail={...originals[0],aggregation};
+ expect(detail).not.toHaveProperty('readSummary');
+ expect(sourceRunCount(detail)).toBe(2);
+ expect(sourceRunCount({...detail,readSummary:{sourceCount:1,runCount:1,diagnosisCount:1,originalBytes:100,operations:[],conflictsComplete:true}})).toBe(2);
 });
 it('loads full original evidence explicitly while retaining one complete plan selection',async()=>{
  const summary={...originals[0],proposal:{summary:'原建议a'},instruction:'摘要',sources:[],context:{},readSummary:{sourceCount:110,runCount:110,diagnosisCount:110,originalBytes:1110714,operations:[],conflictsComplete:true}};

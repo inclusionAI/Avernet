@@ -34,7 +34,7 @@ export type RepairCandidatesResponse = {
   /** Visible scope before filters/item pagination, paged by metadata.page. Browser API assembles all metadata pages. */
   facets: { nodes: string[]; failureModes: string[] };
   counts: Record<RepairInboxFilter, number>;
-  page: { page: number; pageSize: number; total: number; totalPages: number };
+  page: { page: number; pageSize: number; total: number; totalPages: number; snapshotDigest?: string };
   limits: { maxItems: number; maxRequestBytes: number }; canEdit: boolean;
 };
 export type RepairTaskDetail = {

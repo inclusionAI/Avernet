@@ -13,22 +13,29 @@ async function legacyAutomaticScope(workbench: AutomationWorkbench, issues: Issu
   let inputDigest = '';
   for (const group of ranked.groups) {
     if (!group.priority?.severity) continue;
-    const page = await workbench.candidates(workflowId, { state: 'pending', signature: group.signature, pageSize: 100, rawItems: true });
-    if (!page.capabilities.generation) return null;
-    if (inputDigest && inputDigest !== page.inputDigest) return null;
-    inputDigest = page.inputDigest;
-    for (const item of expandProposalCards(page.items)) {
-      const { aggregation: _projection, ...raw } = item;
-      if (item.state !== 'pending' || !item.sourceAvailable || (!Array.isArray(item.context?.diagnoses) || !item.context.diagnoses.length) || Buffer.byteLength(JSON.stringify(raw)) > 32000) continue;
-      try {
-        const proposal = validateWorkflowPatchProposal(item.proposal);
-        if (proposal.workflowId !== workflowId || proposal.baseSpecDigest !== baseline.specDigest) continue;
-        candidates.push(item);
-      } catch { /* Unstructured, stale or ungrounded proposals remain available for manual selection. */ }
+    let number = 1;
+    let scopeDigest: string | undefined, totalPages: number | undefined;
+    for (;;) {
+      const page = await workbench.candidates(workflowId, { state: 'pending', signature: group.signature, page: number, pageSize: 100, rawItems: true });
+      if (!page.capabilities.generation) return null;
+      if (inputDigest && inputDigest !== page.inputDigest) return null;
+      if (number > 1 && (scopeDigest !== page.page.snapshotDigest || totalPages !== page.page.totalPages)) return null;
+      scopeDigest = page.page.snapshotDigest; totalPages = page.page.totalPages;
+      inputDigest = page.inputDigest;
+      for (const item of expandProposalCards(page.items)) {
+        const { aggregation: _projection, ...raw } = item;
+        if (item.state !== 'pending' || !item.sourceAvailable || (!Array.isArray(item.context?.diagnoses) || !item.context.diagnoses.length) || Buffer.byteLength(JSON.stringify(raw)) > 32000) continue;
+        try {
+          const proposal = validateWorkflowPatchProposal(item.proposal);
+          if (proposal.workflowId !== workflowId || proposal.baseSpecDigest !== baseline.specDigest) continue;
+          candidates.push(item);
+        } catch { /* Unstructured, stale or ungrounded proposals remain available for manual selection. */ }
+      }
+      if (number >= page.page.totalPages) break;
+      number++;
     }
-    if (candidates.length >= 100) break;
   }
-  const shortlist = [...new Map(candidates.slice(0, 100).map(item => [item.itemId, item])).values()];
+  const shortlist = [...new Map(candidates.map(item => [item.itemId, item])).values()];
   const ambiguous = new Set(proposalConflicts(shortlist).flatMap(conflict => conflict.itemIds));
   const items: RepairInboxItem[] = [];
   const units = new Map<string, RepairInboxItem[]>();
