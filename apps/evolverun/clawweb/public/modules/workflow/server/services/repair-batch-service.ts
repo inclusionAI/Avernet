@@ -284,12 +284,13 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       // Complete metadata is independently pageable; callers must not treat the first page as all tasks/facets.
       const metadataPage = query.metadataPage ?? 1;
       if (!safeInteger(metadataPage, 1)) fail('INVALID_INPUT', 'Invalid metadata page');
+      response.tasks.sort((a,b)=>b.updatedAtMs-a.updatedAtMs||a.taskId.localeCompare(b.taskId));
       const metadataArrays = [response.tasks, response.repairSignatureKeys, response.facets.nodes, response.facets.failureModes];
       response.metadata = { page: metadataPage, totalPages: Math.max(1, ...metadataArrays.map(rows => Math.ceil(rows.length / 50))),
         digest: digestRepairJson(metadataArrays),
         tasks: response.tasks.length, signatureKeys: repairSignatureKeys.length, nodes: facets.nodes.length, failureModes: facets.failureModes.length };
       const start = (metadataPage - 1) * 50;
-      response.tasks = response.tasks.sort((a,b)=>b.updatedAtMs-a.updatedAtMs||a.taskId.localeCompare(b.taskId)).slice(start,start+50);
+      response.tasks = response.tasks.slice(start,start+50);
       response.repairSignatureKeys = repairSignatureKeys.slice(start,start+50);
       response.facets = { nodes: facets.nodes.slice(start,start+50), failureModes: facets.failureModes.slice(start,start+50) };
       if (query.previewSignatures) {

@@ -77,7 +77,12 @@ it('pages complete metadata and retains trusted raw reads for legacy automatic s
   f.items.forEach((row,i)=>{row.context={signature:`issue-${i}`,nodeId:`node-${i}`,failureMode:`mode-${i}`,diagnoses:[{severity:'critical',flowId:`run-${i}`,reasoning:'x'.repeat(5000)}]};});
   const service=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort);
   f.items[0].proposal!.summary='中文'.repeat(100000);
-  vi.spyOn(RepairBatchRepository.prototype,'listRevisions').mockResolvedValue(Array.from({length:180},(_,i)=>({taskId:`task-${i}`,revision:1,phase:'review',updatedAtMs:i,input:{items:[f.items[0]]}})) as RepairRevision[]);
+  const revisions=Array.from({length:180},(_,i)=>({taskId:`task-${i}`,revision:1,phase:'review',updatedAtMs:i,input:{items:[f.items[0]]}})) as RepairRevision[];
+  let reversed=false;
+  vi.spyOn(RepairBatchRepository.prototype,'listRevisions').mockImplementation(async()=>{
+    reversed=!reversed;
+    return reversed?[...revisions].reverse():[...revisions];
+  });
   const pages=await Promise.all([1,2,3,4].map(metadataPage=>service.candidates('wf-1',{metadataPage,pageSize:1})));
   expect(pages[0].metadata).toMatchObject({totalPages:4,tasks:180,nodes:125,failureModes:125,signatureKeys:125});
   expect(new Set(pages.flatMap(page=>page.tasks.map(task=>task.taskId))).size).toBe(180);
