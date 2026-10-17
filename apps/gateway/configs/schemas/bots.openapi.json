@@ -2102,9 +2102,13 @@
             "type": "string"
           },
           "stage": {
-            "const": "draft",
             "default": "draft",
-            "description": "Configuration stage; the public API exposes draft only.",
+            "description": "Configuration stage the row belongs to. verify/online rows exist only as publish inputs for service Bots; other bots expose draft.",
+            "enum": [
+              "draft",
+              "verify",
+              "online"
+            ],
             "title": "Stage",
             "type": "string"
           },
@@ -2178,6 +2182,17 @@
             ],
             "description": "Optional human-readable purpose of the Channel.",
             "title": "Description"
+          },
+          "stage": {
+            "default": "draft",
+            "description": "Which configuration stage the row belongs to; the legacy UI's '生效环境' selector. verify/online rows are publish-flow inputs for service Bots, exist only for 'plugin' channels (the legacy BCN page has no stage concept), and are rejected for other bot types. Immutable after creation.",
+            "enum": [
+              "draft",
+              "verify",
+              "online"
+            ],
+            "title": "Stage",
+            "type": "string"
           },
           "type": {
             "const": "dingding",
@@ -4111,6 +4126,19 @@
             "title": "Enable Streaming Cards",
             "type": "boolean"
           },
+          "forward_sender_identity": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether inbound messages forward the DingTalk sender identity when binding_mode is 'bcn_gateway'; null otherwise.",
+            "title": "Forward Sender Identity"
+          },
           "group_chat_scope": {
             "anyOf": [
               {
@@ -4244,6 +4272,19 @@
             "description": "Whether DingTalk cards update while output streams.",
             "title": "Enable Streaming Cards",
             "type": "boolean"
+          },
+          "forward_sender_identity": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether inbound messages forward the DingTalk sender identity to the Bot's context; only valid when binding_mode is 'bcn_gateway'.",
+            "title": "Forward Sender Identity"
           },
           "group_chat_scope": {
             "anyOf": [
@@ -4412,6 +4453,19 @@
             ],
             "description": "Enable or disable streaming cards; omit to keep.",
             "title": "Enable Streaming Cards"
+          },
+          "forward_sender_identity": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether inbound messages forward the DingTalk sender identity; omit to keep. bcn_gateway channels only.",
+            "title": "Forward Sender Identity"
           },
           "group_chat_scope": {
             "anyOf": [

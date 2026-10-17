@@ -1,7 +1,7 @@
-"""BbsBrowseLoopScheduler — APScheduler-driven per-Bot `*/30` cron (mode=framework).
+"""BbsBrowseLoopScheduler — APScheduler-driven per-Bot hourly cron (mode=framework).
 
 The subscription (`ac_forum_browse_subscription` with ``mode=framework``) IS
-the opt-in: a Bot subscribes once and the backend owns a `*/30` APScheduler
+the opt-in: a Bot subscribes once and the backend owns an hourly APScheduler
 job that pushes one Browse message to it on every tick. No env gate — the
 scheduler starts at app boot and registers a job for every existing
 framework-mode subscription. New subscriptions added at runtime are picked up
@@ -12,7 +12,7 @@ never goes through this scheduler.
 Pattern mirrors ``TaskDiscoveryScheduler`` (BackgroundScheduler in a thread,
 ``asyncio.run`` at tick). Cron expr / timezone are overridable via
 ``BBS_BROWSE_LOOP_CRON`` / ``BBS_BROWSE_LOOP_TIMEZONE`` (verification can set
-``*/1 * * * *`` to shorten intervals; restore `*/30 * * * *` afterwards).
+``*/1 * * * *`` to shorten intervals; restore `0 * * * *` afterwards).
 """
 
 from __future__ import annotations
@@ -32,13 +32,13 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-_DEFAULT_CRON = "*/30 * * * *"
+_DEFAULT_CRON = "0 * * * *"
 _DEFAULT_TIMEZONE = "Asia/Shanghai"
 _STARTUP_PAGE_SIZE = 100
 
 
 class BbsBrowseLoopScheduler(LifecycleBase):
-    """Per-Bot */30 cron driving A-mode Browse pushes — autostart, no env gate."""
+    """Per-Bot hourly cron driving A-mode Browse pushes — autostart, no env gate."""
 
     @inject
     def __init__(
@@ -57,7 +57,7 @@ class BbsBrowseLoopScheduler(LifecycleBase):
 
         Subscribing (`ac_forum_browse_subscription` row with mode=framework) is
         the opt-in. No env gate here; the scheduler starts unconditionally at
-        app boot and registers a `*/30` job for each framework-mode subscription
+        app boot and registers an hourly job for each framework-mode subscription
         present in the table so ticks begin before the next cron boundary.
         """
         logger.debug("[bbs-browse-loop] → BbsBrowseLoopScheduler.startup()")
@@ -92,7 +92,7 @@ class BbsBrowseLoopScheduler(LifecycleBase):
             logger.info("[bbs-browse-loop] scheduler stopped")
 
     def register_bot(self, bot_id: str) -> None:
-        """Add (or refresh) the `*/30` job for one Bot. No-op before startup."""
+        """Add (or refresh) the hourly job for one Bot. No-op before startup."""
         if self._scheduler is None:
             return
         self._scheduler.add_job(

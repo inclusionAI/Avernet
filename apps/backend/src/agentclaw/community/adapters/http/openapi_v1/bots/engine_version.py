@@ -52,7 +52,9 @@ async def get_engine_version(
     """Inspect the Engine release and return advisory workspace restart guidance.
 
     Personal Bots and service-Bot drafts only. Published runtimes require the
-    publication workflow. The query performs no lifecycle or image-policy writes.
+    publication workflow. Only OpenClaw/Hermes are probed; other engines return
+    not_applicable without device access. Advice is independent of provider and
+    image policy. The query performs no lifecycle or image-policy writes.
     """
     result = await service.inspect(
         bot_id=bot_id,

@@ -15,7 +15,6 @@ from typing import Protocol, runtime_checkable
 class LocalSkillSecurityUploadHook(Protocol):
     def record_deletion(
         self, *, bot_id: str, owner_id: str, actor_id: str, skill_id: int,
-        incarnation_id: str | None,
     ) -> None:
         """Record a successful formal delete for independent metadata sync."""
         ...
@@ -23,7 +22,7 @@ class LocalSkillSecurityUploadHook(Protocol):
     def current_incarnation_id(
         self, *, bot_id: str, owner_id: str, skill_id: int
     ) -> str | None:
-        """Read or bind the formal asset's UUID after upload succeeds."""
+        """Reuse the observed identity or propose one for the first scan."""
         ...
 
     def observe(

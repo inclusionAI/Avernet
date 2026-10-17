@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
+from functools import partial
 
 from secbaas.community.api.config_manage import SystemConfigManageService
 from secbaas.community.core.service.config import SystemConfigKey
@@ -27,6 +28,10 @@ from ..bot_interaction import BotInteractionService
 from ._async_chat_client import AsyncChatClient
 
 logger = get_logger("core-bot-run")
+
+# 敏感日志豁免片段的 TTL 缓存时长（秒）：过期后重新查 DB，
+# 配置变更无需重启即可生效
+_BYPASS_KEYS_TTL_SECONDS = 60.0
 
 
 @dataclass
@@ -84,6 +89,11 @@ class AsyncChatClientPool:
         self._retry_base_backoff = retry_base_backoff
         self._system_config_service = system_config_service
         self._interaction_service = interaction_service
+        # 敏感日志豁免片段缓存：(loaded_at, keys)；-inf 表示未加载
+        self._bypass_keys_cache: tuple[float, tuple[str, ...]] = (
+            float("-inf"),
+            (),
+        )
         # sandbox_id -> 连接列表
         self._clients: dict[str, list[_ConnEntry]] = {}
         # per-key lock，保护同一 sandbox_id 的并发创建
@@ -220,6 +230,10 @@ class AsyncChatClientPool:
                 interaction_service=self._interaction_service
                 if self._enable_process_interaction(self._system_config_service)
                 else None,
+                sensitive_bypass_keys_loader=partial(
+                    self._load_sensitive_bypass_keys,
+                    self._system_config_service,
+                ),
             )
             await new_client.connect()
 
@@ -308,6 +322,48 @@ class AsyncChatClientPool:
         if resp is None:
             return False
         return (resp.conf_value or "").strip().lower() == "true"
+
+    def _load_sensitive_bypass_keys(
+        self,
+        system_config_service: SystemConfigManageService | None,
+    ) -> tuple[str, ...]:
+        """读取敏感日志过滤豁免的 session_key 片段（TTL 缓存）。
+
+        配置 ``bot_run.sensitive_bypass_session_keys``：逗号/换行
+        分隔的片段列表；_log_event 的 sessionKey 包含任一片段时，
+        兜底事件日志不做敏感字段过滤（全量打印 payload）。
+
+        结果（含空列表与读取失败）缓存
+        ``_BYPASS_KEYS_TTL_SECONDS`` 秒，过期后重新查询 DB
+        （配置变更无需重启，分钟级生效）；
+        未配置或读取失败期间返回空元组，默认仍做过滤。
+        """
+        now = time.monotonic()
+        loaded_at, cached = self._bypass_keys_cache
+        if now - loaded_at < _BYPASS_KEYS_TTL_SECONDS:
+            return cached
+        if system_config_service is None:
+            return ()
+        try:
+            resp = system_config_service.get_config(
+                SystemConfigKey.SENSITIVE_BYPASS_SESSION_KEYS
+            )
+            raw = (resp.conf_value or "") if resp is not None else ""
+            keys = tuple(
+                part.strip()
+                for part in raw.replace("\n", ",").split(",")
+                if part.strip()
+            )
+        except Exception:
+            logger.warning(
+                "failed to read sensitive_bypass_session_keys, "
+                "sensitive log filtering stays enabled",
+                exc_info=True,
+            )
+            keys = ()
+        # 空结果/读取失败同样缓存，避免未配置时每条日志事件查 DB
+        self._bypass_keys_cache = (now, keys)
+        return keys
 
     @staticmethod
     def _enable_process_interaction(

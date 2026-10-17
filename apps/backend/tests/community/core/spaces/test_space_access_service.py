@@ -151,3 +151,37 @@ def test_require_space_creator_accepts_creator_and_rejects_other_user() -> None:
     assert service.require_space_creator(space_id=7, user_id="owner-1").id == 7
     with pytest.raises(SpaceAccessDeniedError, match="creator required"):
         service.require_space_creator(space_id=7, user_id="owner-2")
+
+
+def test_require_space_and_member_use_explicit_env() -> None:
+    repository = MagicMock()
+    space = _space()
+    member = _member()
+    repository.get_space.return_value = space
+    repository.get_member.return_value = member
+
+    space_, member_ = SpaceAccessService(repository).require_space_member(
+        space_id=7, user_id="member-1", env="prod"
+    )
+
+    assert space_ == space
+    assert member_ == member
+    repository.get_space.assert_called_once_with(space_id=7, env="prod")
+    repository.get_member.assert_called_once_with(
+        space_id=7, user_id="member-1", env="prod"
+    )
+
+
+def test_require_space_member_defaults_to_runtime_env() -> None:
+    from agentclaw.community.utils.env_utils import get_current_env
+
+    repository = MagicMock()
+    repository.get_space.return_value = _space()
+    repository.get_member.return_value = _member()
+
+    SpaceAccessService(repository).require_space_member(space_id=7, user_id="member-1")
+
+    repository.get_space.assert_called_once_with(space_id=7, env=get_current_env())
+    repository.get_member.assert_called_once_with(
+        space_id=7, user_id="member-1", env=get_current_env()
+    )

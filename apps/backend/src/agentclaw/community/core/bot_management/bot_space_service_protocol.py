@@ -14,5 +14,10 @@ class BotSpaceServiceProtocol(Protocol):
     """Move an owned Bot to a Space the acting user may use."""
 
     def change_space(
-        self, *, bot_id: str, owner_id: str, space_id: int
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        space_id: int,
+        env: str | None = None,
     ) -> BotSpaceAssignmentResult: ...

@@ -94,11 +94,19 @@ def test_end_to_end_inbox_and_initiated_projection(world, kind, mode):
             if mode == "reject"
             else WorkOrderDecision.APPROVED,
         )
-    for actor in ("owner-1", "applicant-1"):
-        assert listing(w, actor, WorkOrderQueryType.PENDING_FOR_ME)[0] == 0
     recipient = "owner-1" if kind == "friend" and auto else "applicant-1"
+    for actor in ("owner-1", "applicant-1"):
+        assert listing(w, actor, WorkOrderQueryType.PENDING_FOR_ME)[0] == int(
+            actor == recipient
+        )
+    assert (
+        listing(
+            w, recipient, WorkOrderQueryType.PROCESSED_BY_ME, WorkOrderItemType.NOTICE
+        )[0]
+        == 0
+    )
     total, notices = listing(
-        w, recipient, WorkOrderQueryType.PROCESSED_BY_ME, WorkOrderItemType.NOTICE
+        w, recipient, WorkOrderQueryType.PENDING_FOR_ME, WorkOrderItemType.NOTICE
     )
     assert total == 1
     notice = notices[0]
@@ -144,12 +152,12 @@ def test_end_to_end_inbox_and_initiated_projection(world, kind, mode):
     assert w.path.is_file()
 
 
-def test_auto_failure_is_processed_even_when_notice_unread(world):
+def test_auto_failure_notice_stays_pending_until_read(world):
     w = world
     w.http.post.side_effect = TimeoutError("unknown external outcome")
     order_id = friend(w, True).work_order_id
-    assert listing(w, "owner-1", WorkOrderQueryType.PENDING_FOR_ME)[0] == 0
-    _, rows = listing(w, "owner-1", WorkOrderQueryType.PROCESSED_BY_ME)
+    assert listing(w, "owner-1", WorkOrderQueryType.PROCESSED_BY_ME)[0] == 0
+    _, rows = listing(w, "owner-1", WorkOrderQueryType.PENDING_FOR_ME)
     assert len(rows) == 1 and rows[0].status.value == "FAILED"
     assert rows[0].is_read is False and rows[0].can_approve is False
     assert "失败" in rows[0].title and "自动审批" in rows[0].title
@@ -288,8 +296,8 @@ def test_space_join_manual_lifecycle_remains_consistent(world, decision):
     assert listing(w, "owner-1", WorkOrderQueryType.PENDING_FOR_ME)[1][0].can_approve
     review(w, order.id, decision)
     assert listing(w, "owner-1", WorkOrderQueryType.PENDING_FOR_ME)[0] == 0
-    assert listing(w, "new-member", WorkOrderQueryType.PENDING_FOR_ME)[0] == 0
-    _, rows = listing(w, "new-member", WorkOrderQueryType.PROCESSED_BY_ME)
+    assert listing(w, "new-member", WorkOrderQueryType.PROCESSED_BY_ME)[0] == 0
+    _, rows = listing(w, "new-member", WorkOrderQueryType.PENDING_FOR_ME)
     assert rows[0].status.value == decision.value and rows[0].is_read is False
     assert (
         listing(

@@ -229,7 +229,6 @@ async def test_security_deletion_handoff_runs_only_after_formal_delete():
     await service.delete_local_skill(skill_id="9", owner_id="owner", user_id="owner")
     assert calls == [{
         "bot_id": "bot", "owner_id": "owner", "actor_id": "owner", "skill_id": 9,
-        "incarnation_id": "security-uuid-9",
     }]
 
 

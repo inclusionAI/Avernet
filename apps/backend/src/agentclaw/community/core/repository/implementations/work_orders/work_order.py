@@ -255,7 +255,9 @@ class WorkOrderRepository(
 
                 space = (
                     db.query(self._Space)
-                    .filter(self._Space.id == space_id, self._Space.env == env)
+                    .filter(self._Space.id == space_id, self._Space.env == env,
+                            self._Space.deleted_at.is_(None))
+                    .with_for_update()
                     .one_or_none()
                 )
                 if space is None:
@@ -716,7 +718,9 @@ class WorkOrderRepository(
             space_id = int(work_order.biz_id)
             space = (
                 db.query(self._Space)
-                .filter(self._Space.id == space_id, self._Space.env == env)
+                .filter(self._Space.id == space_id, self._Space.env == env,
+                        self._Space.deleted_at.is_(None))
+                .with_for_update()
                 .one_or_none()
             )
             if space is None:

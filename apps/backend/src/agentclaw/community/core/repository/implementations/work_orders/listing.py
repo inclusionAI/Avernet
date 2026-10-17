@@ -86,6 +86,7 @@ class _WorkOrderListingRepository:
                         or_(self._WorkOrder.env == env, self._WorkOrder.id.is_(None)),
                     )
                 )
+                # Notice inbox membership follows reading, not order completion.
                 if query_type is WorkOrderQueryType.PENDING_FOR_ME:
                     query = query.filter(
                         or_(
@@ -98,10 +99,6 @@ class _WorkOrderListingRepository:
                                 self._Notification.notification_category
                                 == NotificationCategory.NOTICE.value,
                                 self._Notification.is_read.is_(False),
-                                or_(
-                                    self._WorkOrder.id.is_(None),
-                                    self._WorkOrder.status.notin_(finished_statuses),
-                                ),
                             ),
                         )
                     )
@@ -116,10 +113,7 @@ class _WorkOrderListingRepository:
                             and_(
                                 self._Notification.notification_category
                                 == NotificationCategory.NOTICE.value,
-                                or_(
-                                    self._Notification.is_read.is_(True),
-                                    self._WorkOrder.status.in_(finished_statuses),
-                                ),
+                                self._Notification.is_read.is_(True),
                             ),
                         ),
                     )

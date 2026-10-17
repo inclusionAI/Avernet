@@ -1283,8 +1283,8 @@ class TestRestartGuardOrchestration:
         baas.upgrade_bot.assert_called_once()
         assert call_order == ["bcn", "upgrade"]
 
-    def test_restart_baas_ineligible_template_does_not_register_bcn(self):
-        """applicationCoding 不在 BCN Provider 注册范围内。"""
+    def test_restart_baas_application_template_registers_bcn(self):
+        """applicationCoding 重启也自动注册 BCN Provider。"""
         repo = FakeRestartLockRepo()
         svc = _make_service(repo)
         svc._drm_reader.read.return_value = "true"
@@ -1307,7 +1307,7 @@ class TestRestartGuardOrchestration:
 
         svc.restart_bot(bot_id="bot001", user_id="user001")
 
-        svc._bcn_service.register_provider_bot.assert_not_called()
+        svc._bcn_service.register_provider_bot.assert_called_once()
         baas.upgrade_bot.assert_called_once()
 
     def test_restart_baas_bcn_registration_failure_does_not_block_upgrade(self):

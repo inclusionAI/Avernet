@@ -270,7 +270,6 @@ class PlatformSkillPackageUpload(_StorePort, SkillPackageUploadPort):
         # before deleting bytes, then repeat the check under the repository's
         # row lock in ``delete_bot_local_skill`` after physical cleanup.
         self._skills.require_unreferenced_for_delete(skill_id)
-        formal = self._skills.get_by_id(skill_id)
         scope = self._scope(OWNER_ENTITY_TYPE, owner_id, bot_id)
         prefix = _skill_prefix(name)
         for row in self._store.list(scope, category=CATEGORY_SKILLS):
@@ -285,7 +284,6 @@ class PlatformSkillPackageUpload(_StorePort, SkillPackageUploadPort):
             self._security_hook.record_deletion(
                 bot_id=bot_id, owner_id=owner_id,
                 actor_id=actor_id, skill_id=int(skill_id),
-                incarnation_id=formal.get("skill_uuid") if formal else None,
             )
         except Exception:
             logger.exception(

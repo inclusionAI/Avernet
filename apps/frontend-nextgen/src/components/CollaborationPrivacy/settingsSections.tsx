@@ -71,9 +71,9 @@ interface BotAbilitySettingsProps {
   bot: CollaborationBot;
   busyAction: string | null | undefined;
   onToggleDirect: (bot: CollaborationBot, setting: DirectSetting, value: boolean | 'online' | 'hidden') => void;
-  /** 通用配置弹窗 2×2 网格布局；缺省为页面列表布局（divide-y）。 */
+  /** 通用配置弹窗两列网格布局；缺省为页面列表布局（divide-y）。 */
   grid?: boolean;
-  /** 仅展示指定能力项；缺省展示全部。Coding Bot 由通用配置弹窗按模板能力裁剪。 */
+  /** 仅展示指定能力项；通用配置弹窗按入口规则裁剪，协作权限页缺省展示全部。 */
   visibleSettings?: readonly DirectSetting[];
 }
 

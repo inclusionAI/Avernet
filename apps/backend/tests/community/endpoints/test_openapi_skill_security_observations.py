@@ -53,7 +53,7 @@ class _Query:
 
 
 class _Repository:
-    def get_formal_incarnation_id(self, **_kwargs):
+    def get_observed_incarnation_id(self, **_kwargs):
         return None
 
     def get_latest_handoff_for_asset(self, **_kwargs):

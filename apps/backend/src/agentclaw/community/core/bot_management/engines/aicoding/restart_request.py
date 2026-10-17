@@ -113,7 +113,7 @@ class AicodingBaasPreparation:
         bot_type = bot.get("bot_type") or "personal"
         bot_template_type = (bot.get("template_type") or "").strip()
 
-        # 先读取模板快照：BCN 能力门控与后续 BaaS restart 均使用同一份 resolved config。
+        # 先读取模板快照，供后续 BaaS restart 复用。
         try:
             resolved_template_config = service._template_service.get_template_config(
                 bot_id
@@ -128,41 +128,35 @@ class AicodingBaasPreparation:
 
         # BaaS 原地重启不会经过 start_bot，这里补齐启动链路的 BCN Provider 注册。
         # 注册接口幂等：已注册时直接返回，也能重试创建阶段失败的注册。
-        should_register_bcn = service._should_register_bcn_provider(
-            active_engine=active_engine,
-            bot_type=bot_type,
-            template_type=bot_template_type,
-            template_config=resolved_template_config,
-        )
         connection_mode = service._resolve_bcn_provider_connection_mode(
             active_engine=active_engine,
             bot_type=bot_type,
         )
-        if should_register_bcn:
-            logger.info(
-                "[bot_service._restart_bot_baas] register bot to BCN as provider: "
-                "bot_id=%s active_engine=%s bot_type=%s template_type=%s connection_mode=%s",
-                bot_id,
-                active_engine,
-                bot_type,
-                bot_template_type,
-                connection_mode,
-            )
-            service._register_bot_to_bcn_as_provider(
-                bot_id=bot_id,
-                user_id=user_id,
-                owner_workno=bot.get("owner_id") or user_id,
-                bot_name=bot.get("bot_name") or bot_id,
-                bot_summary=bot.get("bot_desc") or "",
-                connection_mode=connection_mode,
-            )
+        logger.info(
+            "[bot_service._restart_bot_baas] register bot to BCN as provider: "
+            "bot_id=%s active_engine=%s bot_type=%s template_type=%s connection_mode=%s",
+            bot_id,
+            active_engine,
+            bot_type,
+            bot_template_type,
+            connection_mode,
+        )
+        service._register_bot_to_bcn_as_provider(
+            bot_id=bot_id,
+            user_id=user_id,
+            owner_workno=bot.get("owner_id") or user_id,
+            bot_name=bot.get("bot_name") or bot_id,
+            bot_summary=bot.get("bot_desc") or "",
+            connection_mode=connection_mode,
+            respect_drm=False,
+        )
 
         # 普通 restart 入口只重启当前 bot，不使用发布态 build 产物目录。
         # 发布态 verify/online 的重启由 PublishFlowService.restart_bot(publish_id) 处理。
         mig: Optional[str] = None
         restart_stage = PublishStage.DRAFT.value if bot_type == "service" else None
 
-        # resolved_template_config 已在 BCN 能力门控前读取，后续 BaaS restart 复用同一快照。
+        # resolved_template_config 已在 BCN 注册前读取，后续 BaaS restart 复用同一快照。
         # 与 _allocate_device_async（create / arca-restart 路径）同口径构造
         # extra_envs，并独立透传 template_config。extra_envs 提供引擎策略
         # 变量（BOT_TYPE / RELAY_DEFAULT_* / AIX_DEVFLOW_INFO / GIT_ADDRESSES），

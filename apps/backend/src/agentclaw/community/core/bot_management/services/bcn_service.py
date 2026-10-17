@@ -322,23 +322,25 @@ class BcnService:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {provider_admin_token}",
         }
-        logger.info(
-            f"[BcnService.register_provider_bot] POST {path} "
+        # Project only documented business fields; runtime/admin tokens stay private.
+        context = (
+            f"system=BCN direction=outbound operation=register_provider_bot "
+            f"method=POST path={path} provider_id={provider_id} "
             f"provider_bot_ref={provider_bot_ref} connection_mode={connection_mode}"
         )
-
+        logger.info(
+            "[BcnService.register_provider_bot] event=request %s payload=%s",
+            context, payload,
+        )
+        started = time.monotonic()
+        response = None
         try:
             response = self._http.post(
                 path, json=payload, headers=headers, timeout=self._timeout
             )
 
-            # 409 = 同一 (provider_id, provider_bot_ref) 已绑过, 视作幂等成功
+            # 409 remains an idempotent success, including non-JSON responses.
             if response.status_code == 409:
-                logger.warning(
-                    f"[BcnService.register_provider_bot] 409 idempotent: "
-                    f"provider_bot_ref={provider_bot_ref} connection_mode={connection_mode} "
-                    f"already registered"
-                )
                 body: Dict[str, Any] = {}
                 try:
                     body = response.json() or {}
@@ -347,39 +349,46 @@ class BcnService:
                 body.setdefault("provider_id", provider_id)
                 body.setdefault("provider_bot_ref", provider_bot_ref)
                 body["idempotent_replay"] = True
-                return body
+            else:
+                response.raise_for_status()
+                body = response.json()
 
-            response.raise_for_status()
-            response_data = response.json()
             logger.info(
-                f"[BcnService.register_provider_bot] OK "
-                f"bot_uuid={response_data.get('bot_uuid')} "
-                f"provider_bot_ref={provider_bot_ref} connection_mode={connection_mode}"
+                "[BcnService.register_provider_bot] event=success %s "
+                "status=%s elapsed_ms=%.2f bot_uuid=%s name=%s summary=%s "
+                "owners=%s idempotent_replay=%s runtime_token_present=%s",
+                context, response.status_code, (time.monotonic() - started) * 1000,
+                body.get("bot_uuid"), body.get("name"), body.get("summary"),
+                body.get("owners"), bool(body.get("idempotent_replay")),
+                bool(body.get("bot_runtime_token")),
             )
-            return response_data
+            return body
 
         except httpx.HTTPStatusError as e:
             error_body = e.response.text[:500] if e.response else "No response"
             status = e.response.status_code if e.response else "N/A"
             logger.error(
-                f"[BcnService.register_provider_bot] HTTP error: "
-                f"status={status} "
-                f"provider_bot_ref={provider_bot_ref} connection_mode={connection_mode}"
+                "[BcnService.register_provider_bot] event=failure %s "
+                "status=%s elapsed_ms=%.2f error_type=%s reason=http_status_error",
+                context, status, (time.monotonic() - started) * 1000,
+                type(e).__name__,
             )
             raise BcnServiceError(
                 f"BCN register_provider_bot HTTP error: {status} - {error_body}"
             )
         except httpx.TimeoutException as e:
             logger.error(
-                f"[BcnService.register_provider_bot] Timeout: "
-                f"provider_bot_ref={provider_bot_ref} connection_mode={connection_mode}"
+                "[BcnService.register_provider_bot] event=failure %s "
+                "status=timeout elapsed_ms=%.2f error_type=%s reason=request_timeout",
+                context, (time.monotonic() - started) * 1000, type(e).__name__,
             )
             raise BcnServiceError(f"BCN register_provider_bot timeout: {e}")
         except Exception as e:
             logger.error(
-                f"[BcnService.register_provider_bot] Unexpected error: "
-                f"error_type={type(e).__name__} provider_bot_ref={provider_bot_ref} "
-                f"connection_mode={connection_mode}"
+                "[BcnService.register_provider_bot] event=failure %s "
+                "status=%s elapsed_ms=%.2f error_type=%s reason=unexpected_error",
+                context, response.status_code if response is not None else "unavailable",
+                (time.monotonic() - started) * 1000, type(e).__name__,
             )
             raise BcnServiceError(f"BCN register_provider_bot error: {e}")
 

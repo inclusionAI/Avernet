@@ -2,10 +2,11 @@ import { randomUUID } from 'node:crypto';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { RepairBatchError, digestRepairJson, type RepairRevision } from '../contracts/repair-batch.js';
 import type { RepairWorkbenchService } from '../contracts/repair-workbench.js';
-import type { RepairTrial, RepairTrialCandidate, RepairTrialOptions, RepairTrialPort, RepairTrialRequest } from '../contracts/repair-trial.js';
+import type { RepairTrial, RepairTrialCandidate, RepairTrialPort, RepairTrialRequest } from '../contracts/repair-trial.js';
 import { RepairReleaseRepository } from '../repositories/repair-release-repository.js';
 import { RepairBatchRepository } from '../repositories/repair-batch-repository.js';
-import { hasSensitiveTrialInput, redactTrial, trialSensitiveValues, validateTrialInput } from './repair-trial-input.js';
+import { redactTrial, redactTrialInput, trialSensitiveValues, validateTrialInput } from './repair-trial-input.js';
+import { normalizeTrialInputDefinition } from '../contracts/repair-trial-input-definition.js';
 
 function conflict(message: string): never { throw new RepairBatchError('STATE_CONFLICT', message); }
 function candidate(workflowId: string, taskId: string, revision: RepairRevision): RepairTrialCandidate {
@@ -17,6 +18,11 @@ function candidate(workflowId: string, taskId: string, revision: RepairRevision)
 export function createRepairTrialService(input: { db: IDatabase; workbench: RepairWorkbenchService; port?: RepairTrialPort }) {
   const { db, workbench } = input, records = new RepairReleaseRepository(db);
   const port = () => { if (!input.port) throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '宿主尚未接入精确候选试跑'); return input.port; };
+  async function inspect(frozen: RepairTrialCandidate) {
+    const options = await port().inspect(frozen);
+    return { ...options, ...normalizeTrialInputDefinition({ schema: options.inputSchema }),
+      ...(options.inputDefinition ? { inputDefinition: options.inputDefinition } : {}) };
+  }
   async function lock(tx: IDatabase, taskId: string) {
     const batches = new RepairBatchRepository(tx), workflowId = await batches.taskWorkflow(taskId);
     if (!workflowId) throw new RepairBatchError('TASK_NOT_FOUND', '修复任务不存在');
@@ -33,8 +39,9 @@ export function createRepairTrialService(input: { db: IDatabase; workbench: Repa
   }
   async function view(trial: RepairTrial) {
     const { input: rawInput, ...rest } = trial;
-    const values = trialSensitiveValues(rawInput);
-    const result: RepairTrial = { ...rest, input: redactTrial(rawInput) as Record<string, unknown> };
+    const values = trialSensitiveValues(rawInput, trial.options.inputSchema);
+    // History needs only the schema digest, never defaults that may contain private values.
+    const result: RepairTrial = { ...rest, options: { ...rest.options, inputSchema: null }, input: redactTrialInput(rawInput, trial.options.inputSchema) as Record<string, unknown> };
     // Only the atomically registered flowId can prove progress; never infer from chat or latest workflow run.
     const row = trial.flowId ? (await db.query<{ workflow_id: string; origin_bot_id: string; status: string; result_json: string | null; total_duration_ms: number | null }>(
       'SELECT workflow_id, origin_bot_id, status, result_json, total_duration_ms FROM flow_runs WHERE flow_id = ?', [trial.flowId]))[0] : null;
@@ -57,7 +64,7 @@ export function createRepairTrialService(input: { db: IDatabase; workbench: Repa
     async options(actorId: string, taskId: string, number: number) {
       const task = await workbench.task(taskId), revision = task.revisions.find(row => row.revision === number);
       if (!revision) conflict('候选不存在');
-      const options = await port().inspect(candidate(task.workflowId, taskId, revision));
+      const options = await inspect(candidate(task.workflowId, taskId, revision));
       return { ...options, inputSchemaDigest: digestRepairJson(options.inputSchema), targets: (await port().targets(task.workflowId, actorId)).filter(t => t.environment === 'prod') };
     },
     async list(taskId: string, offset = 0) {
@@ -67,32 +74,22 @@ export function createRepairTrialService(input: { db: IDatabase; workbench: Repa
     async start(actorId: string, taskId: string, request: RepairTrialRequest) {
       if (!request || typeof request.requestId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(request.requestId)
         || !Number.isSafeInteger(request.revision) || !Number.isSafeInteger(request.expectedStateVersion)) throw new RepairBatchError('INVALID_INPUT', '试跑请求身份无效');
-      if (request.mode !== undefined && !['pinned', 'saved'].includes(request.mode)) throw new RepairBatchError('INVALID_INPUT', '执行方式无效');
       const key = { actorId, ...request }, retry = await records.retry<RepairTrial>(taskId, 'trial', key);
       if (retry) return view(retry);
       const task = await workbench.task(taskId), revision = task.latestSuccessful;
       if (!revision || revision.revision !== request.revision || revision.phase !== 'review' || revision.stateVersion !== request.expectedStateVersion || task.latestAttempt.phase === 'drafting'
         || (revision.checks?.static as { status?: string })?.status !== 'passed') conflict('候选已变化或静态检查未通过，请刷新后重试');
       const frozen = candidate(task.workflowId, taskId, revision);
-      let options: RepairTrialOptions;
-      try { options = await port().inspect(frozen, request.mode === 'saved' ? 'saved' : undefined); }
-      catch (error) {
-        if (request.mode !== 'saved') throw error;
-        throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '无法确认远端保存版参数定义，旧插件兼容不可用；请升级插件精确执行');
+      const options = await inspect(frozen);
+      if (digestRepairJson(options.inputSchema) !== request.inputSchemaDigest) conflict('参数定义已变化，请重新填写');
+      if (!port().prepare) throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '宿主尚不能核验 Bot 插件能力，请更新宿主后重试');
+      const target = await port().prepare!(frozen, actorId, request.targetId);
+      if (target.id !== request.targetId || target.environment !== 'prod' || target.executionMode !== 'pinned' || !target.capabilityId) {
+        throw new RepairBatchError('CAPABILITY_UNAVAILABLE', target.unavailableReason ?? '所选 Bot 无法固定当前候选，请升级 ClawMind 并重启 Bot 后重试');
       }
-      if (request.mode === 'saved' && options.source !== 'saved') throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '宿主尚未接入保存版参数校验');
-      if (digestRepairJson(options.inputSchema) !== request.inputSchemaDigest) conflict(request.mode === 'saved'
-        ? '远端保存版与候选参数定义不同，旧插件兼容不可用；请升级插件精确执行' : '参数定义已变化，请重新填写');
       validateTrialInput(request.input, options.inputSchema);
-      if (request.mode === 'saved') {
-        const reserved = new Set(['local', 'debug', 'remote', 'version', 'tag', 'file', 'chat-inject-level', 'chatInjectLevel']);
-        if (Object.keys(request.input).some(key => !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(key) || reserved.has(key))) throw new RepairBatchError('INVALID_INPUT', '旧插件兼容模式的参数名不能是运行选项');
-        if (hasSensitiveTrialInput(request.input)) throw new RepairBatchError('INVALID_INPUT', '旧插件兼容不能通过命令传递敏感参数，请使用 Bot 已有凭据或升级插件');
-      }
-      const target = (await port().targets(task.workflowId, actorId)).find(t => t.id === request.targetId && t.environment === 'prod');
-      if (!target) conflict('请选择已授权且支持试跑的生产 Bot');
       // Save is content-addressed and never moves the active deployment or a Bot workspace.
-      if (request.mode !== 'saved') await port().save(frozen, options);
+      await port().save(frozen, options);
       const created = await db.transaction(async tx => {
         const locked = await lock(tx, taskId), repeated = await locked.records.retry<RepairTrial>(taskId, 'trial', key);
         if (repeated) return { trial: repeated, dispatch: false };
@@ -103,20 +100,21 @@ export function createRepairTrialService(input: { db: IDatabase; workbench: Repa
         const active = (await locked.records.list<RepairTrial>(taskId, 'trial')).find(t => t.revision === request.revision && ['dispatching', 'awaiting_run', 'unknown'].includes(t.status) && !t.flowId);
         if (active) conflict('同一候选存在待核对的试跑，请先核对该请求');
         const id = randomUUID();
-        const trial: RepairTrial = { ...frozen, mode: request.mode ?? 'pinned', id, flowId: null, requestId: request.requestId, actorId, target,
+        const trial: RepairTrial = { ...frozen, mode: 'pinned', id, flowId: null, requestId: request.requestId, actorId, target,
           stateVersion: 1, status: 'dispatching', input: request.input, inputDigest: digestRepairJson(request.input), inputSchemaDigest: request.inputSchemaDigest,
           options, error: null, createdAtMs: Date.now(), updatedAtMs: Date.now() };
         await locked.records.insert('trial', key, trial);
         return { trial, dispatch: true };
       });
       if (created.dispatch) {
-        let status: RepairTrial['status'];
-        try { const receipt = await port().dispatch(created.trial); status = receipt.status === 'accepted' ? 'awaiting_run' : receipt.status === 'failed' ? 'failed' : 'unknown'; }
+        let status: RepairTrial['status'], error: string | null = null;
+        try { const receipt = await port().dispatch(created.trial); status = receipt.status === 'accepted' ? 'awaiting_run' : receipt.status === 'failed' ? 'failed' : 'unknown';
+          if (receipt.status === 'failed') error = receipt.error ?? 'Bot 权限或插件能力已变化，本次未下发，请重新检查所选 Bot'; }
         catch { status = 'unknown'; }
         await db.transaction(async tx => {
           const locked = await lock(tx, taskId), latest = await find(created.trial.id, tx);
           // A late message receipt must never overwrite a registered execution/result.
-          if (latest.status === 'dispatching' && !latest.flowId) await locked.records.update({ ...latest, status, stateVersion: latest.stateVersion + 1, updatedAtMs: Date.now() }, latest.stateVersion);
+          if (latest.status === 'dispatching' && !latest.flowId) await locked.records.update({ ...latest, status, error, stateVersion: latest.stateVersion + 1, updatedAtMs: Date.now() }, latest.stateVersion);
         });
       }
       return view(await find(created.trial.id));

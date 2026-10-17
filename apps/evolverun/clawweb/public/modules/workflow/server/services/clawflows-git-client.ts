@@ -91,6 +91,17 @@ function getHostFromRemoteUrl(remoteUrl: string): string {
   return hostMatch?.[1] ?? "";
 }
 
+function getAuthenticatedRemoteUrl(
+  remoteUrl: string,
+  username: string,
+  token: string | undefined,
+): string {
+  if (!token) return remoteUrl;
+  const encodedUsername = encodeURIComponent(username || "");
+  const encodedToken = encodeURIComponent(token);
+  return remoteUrl.replace(/^https:\/\//, `https://${encodedUsername}:${encodedToken}@`);
+}
+
 async function configureGitCredential(
   repoDir: string,
   remoteUrl: string,
@@ -143,14 +154,21 @@ export async function cloneClawflows(
 ): Promise<void> {
   if (!config.remoteUrl) throw new Error("clawflowsRemoteUrl is not configured");
 
-  git(repoDir, ["clone", "--quiet", config.remoteUrl, "."], {
+  const cloneUrl = getAuthenticatedRemoteUrl(config.remoteUrl, config.username, config.token);
+
+  git(repoDir, ["clone", "--quiet", cloneUrl, "."], {
     env: isolatedGitEnvironment(process.env),
     timeout: 120_000,
   });
 
+  // Prevent the token from being persisted in the local repo's remote URL.
+  git(repoDir, ["remote", "set-url", "origin", config.remoteUrl]);
+
   git(repoDir, ["config", "user.name", config.username || "clawweb"]);
   git(repoDir, ["config", "user.email", config.email || `${config.username || "clawweb"}@antgroup.com`]);
 
+  // Keep credential helper as a fallback for subsequent git operations
+  // (e.g. fetch/push) in case they are needed.
   if (config.token) {
     await configureGitCredential(repoDir, config.remoteUrl, config.username, config.token);
   }
