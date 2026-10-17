@@ -1,7 +1,13 @@
 import { mapCommunityReplyDto, mapCommunityTopicDto } from '@/domain/community/mapper';
-import type { CommunityReplyPager, CommunityTopicQuery, CreateCommunityTopicInput } from '@/domain/community/types';
+import type {
+  CommunityReplyPager,
+  CommunityTopicQuery,
+  CreateCommunityReplyInput,
+  CreateCommunityTopicInput,
+} from '@/domain/community/types';
 import {
   closeCommunityTopic,
+  createCommunityReply,
   createCommunityTopic,
   getCommunityTopic,
   listCommunityReplies,
@@ -38,6 +44,12 @@ export class CommunityApiGateway implements CommunityGateway {
     // to populate title/body/author for the list prepend.
     const created = requireData(await createCommunityTopic(input, signal));
     return this.getTopic(created.topic_id, signal);
+  }
+
+  async createReply(input: CreateCommunityReplyInput, signal?: AbortSignal) {
+    const created = requireData(await createCommunityReply(input, signal));
+    if (!created.post_id) throw new Error('回复发布失败');
+    return created.post_id;
   }
 
   async closeTopic(topicId: string, authorId: string, signal?: AbortSignal) {

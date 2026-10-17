@@ -10,6 +10,7 @@ instead of deferring the failure to first request. ``dev`` / local
 boots skip it to keep startup snappy and to tolerate the prod-only
 deps (ZDAS handle, Arca sandbox) that aren't reachable locally.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -29,6 +30,8 @@ from agentclaw.community.di.config import (
 
 from agentclaw.community.di.modules.access_module import AccessModule
 from agentclaw.community.di.modules.aicoding_module import AICodingModule
+from agentclaw.community.di.modules.bbs_config_module import BbsConfigModule
+from agentclaw.community.di.modules.bbs_digest_module import BbsDigestModule
 from agentclaw.community.di.modules.bot_app_grant_module import BotAppGrantModule
 from agentclaw.community.di.modules.bot_chat_open_module import BotChatOpenModule
 from agentclaw.community.di.modules.bot_collaborator_module import BotCollaboratorModule
@@ -53,12 +56,16 @@ from agentclaw.community.di.modules.desktop_skill_recovery_config_module import 
     DesktopSkillRecoveryConfigModule,
 )
 from agentclaw.community.di.modules.devices_module import DevicesModule
-from agentclaw.community.di.modules.economy_governance_module import EconomyGovernanceModule
+from agentclaw.community.di.modules.economy_governance_module import (
+    EconomyGovernanceModule,
+)
 from agentclaw.community.di.modules.engine_version_module import EngineVersionModule
 from agentclaw.community.di.modules.engine_config_module import EngineConfigModule
 from agentclaw.community.di.modules.engine_runtime_module import EngineRuntimeModule
 from agentclaw.community.di.modules.expert_chat_module import ExpertChatModule
-from agentclaw.community.di.modules.execution_identity_module import ExecutionIdentityModule
+from agentclaw.community.di.modules.execution_identity_module import (
+    ExecutionIdentityModule,
+)
 from agentclaw.community.di.modules.digital_employee_module import DigitalEmployeeModule
 from agentclaw.community.di.modules.grt_chat_module import GrtChatModule
 from agentclaw.community.di.modules.harness_module import HarnessModule
@@ -77,19 +84,25 @@ from agentclaw.community.di.modules.openapi_user_id_bypass_config_module import 
 from agentclaw.community.di.openapi_user_id_bypass_config import (
     OpenApiUserIdBypassConfig,
 )
-from agentclaw.community.di.modules.bot_message_feedback_module import BotMessageFeedbackModule
+from agentclaw.community.di.modules.bot_message_feedback_module import (
+    BotMessageFeedbackModule,
+)
 from agentclaw.community.di.modules.quality_module import QualityModule
 from agentclaw.community.di.modules.runtime_projection_recovery_module import (
     RuntimeProjectionRecoveryModule,
 )
 from agentclaw.community.di.modules.resources_module import ResourcesModule
 from agentclaw.community.di.modules.service_bot_module import ServiceBotModule
-from agentclaw.community.di.modules.session_resources_module import SessionResourcesModule
+from agentclaw.community.di.modules.session_resources_module import (
+    SessionResourcesModule,
+)
 from agentclaw.community.di.modules.tc_file_upload_integration_module import (
     TcFileUploadIntegrationModule,
 )
 from agentclaw.community.di.modules.skill_center_module import SkillCenterModule
-from agentclaw.community.di.modules.skill_center_group4_module import SkillCenterGroup4Module
+from agentclaw.community.di.modules.skill_center_group4_module import (
+    SkillCenterGroup4Module,
+)
 from agentclaw.community.di.modules.skill_version_module import SkillVersionModule
 from agentclaw.community.di.modules.skills_pool_module import SkillsPoolModule
 from agentclaw.community.di.modules.spaces_module import SpacesModule
@@ -213,6 +226,8 @@ def build_injector(
         HttpClientModule(),
         EconomyGovernanceModule(),
         TaskDiscoveryModule(),
+        BbsConfigModule(),
+        BbsDigestModule(),
     ]
 
     modules.extend(modules_for(profile))
@@ -260,6 +275,7 @@ def build_injector(
 
 # ── Eager bootstrap check ───────────────────────────────────────────────
 
+
 def eager_check_critical_bindings(injector: Injector) -> None:
     """Resolve a small allowlist of critical bindings to surface
     misconfiguration at startup rather than first request.
@@ -306,9 +322,6 @@ def eager_check_critical_bindings(injector: Injector) -> None:
     if missing:
         raise RuntimeError(
             "DI eager-check failed: the following critical bindings did "
-            "not resolve. Fix the bindings before deploying.\n  "
-            + "\n  ".join(missing)
+            "not resolve. Fix the bindings before deploying.\n  " + "\n  ".join(missing)
         )
-    logger.info(
-        "[DI] eager-check OK: resolved %s critical bindings", len(critical)
-    )
+    logger.info("[DI] eager-check OK: resolved %s critical bindings", len(critical))

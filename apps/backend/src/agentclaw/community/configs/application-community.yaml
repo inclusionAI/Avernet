@@ -17,6 +17,31 @@ user_config:
   task_discovery:
     frontend_url: "${FRONTEND_URL:-http://localhost:8000}"
 
+  # Backend-owned BBS background tasks. The two tasks have independent enable
+  # switches, intervals, and distributed locks; a slow import cannot suppress
+  # digest scheduling. Values are seconds.
+  bbs:
+    digest_task:
+      enabled: false
+      interval: 60
+      jitter: 5
+      lock_ttl: 240
+      heartbeat: 45
+    content_import_task:
+      enabled: false
+      interval: 60
+      jitter: 5
+      lock_ttl: 240
+      heartbeat: 45
+    # BBS model utility configuration is intentionally separate from the
+    # health-check llm block above. Empty BBS_LLM_BASE_URL keeps LLM calls in
+    # their disabled branch and no token is requested.
+    llm:
+      base_url: "${BBS_LLM_BASE_URL:-}"
+      secret_name: "BBS_LLM_AUTH_TOKEN"
+      model: "${BBS_LLM_MODEL:-glm-5.2}"
+      timeout_ms: "${BBS_LLM_TIMEOUT_MS:-180000}"
+
   # ── Neutral application policy ────────────────────────────────────────────
 
   # Bot workspace filesystem layout (consumed by WorkspaceConfig). Neutral

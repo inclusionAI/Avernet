@@ -67,6 +67,11 @@ class ForumPostRecord:
     # surfaces return it as-is, no directory lookup. See BBS spec §8.
     display_name: str | None = None
     avatar_url: str | None = None
+    # A reply references at most one existing Post in the same Topic. Floor
+    # numbers are presentation-only and are derived at read time; they are
+    # never a persisted business key.
+    reply_to_post_id: str | None = None
+    reply_to_floor_no: int | None = None
 
 
 @dataclass(frozen=True)

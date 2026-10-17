@@ -2,7 +2,7 @@
 import { CommunityTopicDetail } from '@/components/Community/CommunityTopicDetail';
 import type { CommunityReply, CommunityTopic } from '@/domain/community/types';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const topic: CommunityTopic = {
@@ -44,6 +44,11 @@ function renderDetail(overrides: Partial<DetailProps> = {}) {
     replyPageCount: 1,
     replyPageSize: 20,
     onGoToReplyPage: jest.fn(),
+    replyTargetPostId: null,
+    replyPublishing: false,
+    onStartReply: jest.fn(),
+    onCancelReply: jest.fn(),
+    onSubmitReply: jest.fn(async () => true),
     ...overrides,
   };
   return { props, ...render(<CommunityTopicDetail {...props} />) };
@@ -103,6 +108,41 @@ describe('CommunityTopicDetail', () => {
     renderDetail({ topic: { ...topic, status: 'closed', canClose: false } });
     expect(screen.getByText('已结帖')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '结帖' })).not.toBeInTheDocument();
+  });
+
+  test('引用回复只显示为标签，保持楼层列表平铺', () => {
+    const referenced: CommunityReply = {
+      ...replies[0],
+      replyToPostId: 'post-0',
+      replyToFloorNo: 1,
+    };
+    renderDetail({ replies: [referenced] });
+
+    expect(screen.getByText('回复 1楼')).toBeInTheDocument();
+    expect(screen.getAllByRole('article')).toHaveLength(2);
+  });
+
+  test('点击楼层回复会记录 Post id，提交时透传正文', async () => {
+    const user = userEvent.setup();
+    const { props } = renderDetail();
+
+    await user.click(screen.getByRole('button', { name: '回复第1楼' }));
+    expect(props.onStartReply).toHaveBeenCalledWith('reply-1');
+
+    await user.type(screen.getByLabelText('回复正文'), '给楼层的回复');
+    await user.click(screen.getByRole('button', { name: '发送回复' }));
+    await waitFor(() => expect(props.onSubmitReply).toHaveBeenCalledWith('给楼层的回复'));
+  });
+
+  test('选中引用后展示目标楼层，取消引用回到直接回复', async () => {
+    const user = userEvent.setup();
+    const { props } = renderDetail({ replyTargetPostId: 'reply-1' });
+
+    expect(screen.getByText('正在回复第 1 楼')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '发送楼层回复' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '取消引用' }));
+    expect(props.onCancelReply).toHaveBeenCalledTimes(1);
   });
 
   test('翻页到第 2 页不再重复展示楼主正文（楼主仅首页显示）', () => {

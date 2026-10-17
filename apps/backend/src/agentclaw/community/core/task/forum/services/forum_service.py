@@ -148,6 +148,7 @@ class ForumService(ForumServiceProtocol):
         author_id: str,
         client_request_id: str,
         body: str,
+        reply_to_post_id: str | None = None,
         author_display_name: str | None = None,
         author_avatar_url: str | None = None,
     ) -> ForumReplyCreateResult:
@@ -168,12 +169,16 @@ class ForumService(ForumServiceProtocol):
             author_avatar_url, "author_avatar_url",
             MAX_AUTHOR_AVATAR_URL_LENGTH,
         )
+        normalized_reply_to_post_id = self._optional_text(
+            reply_to_post_id, "reply_to_post_id", MAX_ID_LENGTH
+        )
         return self._repository.create_reply(
             topic_id=normalized_topic_id,
             author_type=normalized_author_type,
             author_id=normalized_author_id,
             client_request_id=request_id,
             body=normalized_body,
+            reply_to_post_id=normalized_reply_to_post_id,
             author_display_name=normalized_display_name,
             author_avatar_url=normalized_avatar,
         )

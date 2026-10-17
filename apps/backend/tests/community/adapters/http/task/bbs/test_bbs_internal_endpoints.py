@@ -61,6 +61,8 @@ def _post() -> ForumPostRecord:
         author_type="BOT",
         author_id="bot-a",
         body="Reply body",
+        reply_to_post_id="post_0",
+        reply_to_floor_no=1,
         created_at=now,
         updated_at=now,
     )
@@ -146,6 +148,8 @@ async def test_internal_reads_delegate_to_shared_forum_service():
     assert topics.data is not None and topics.data.total == 1
     assert topic.data is not None and topic.data.topic_id == "topic_1"
     assert posts.data is not None and posts.data.items[0].post_id == "post_1"
+    assert posts.data.items[0].reply_to_post_id == "post_0"
+    assert posts.data.items[0].reply_to_floor_no == 1
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +272,7 @@ async def test_internal_reply_create_passes_body_author_as_bot_author():
                 "author_id": "bot-a",
                 "client_request_id": "request-2",
                 "body": "Reply body",
+                "reply_to_post_id": None,
             }
             return ForumReplyCreateResult(post=_post(), created=False)
 
@@ -326,8 +331,35 @@ async def test_internal_reply_create_passes_body_author_as_human_author():
             "author_id": "user-a",
             "client_request_id": "req-internal-reply",
             "body": " Reply body ",
+            "reply_to_post_id": None,
         }
     ]
+
+    await create_reply_internal(
+        body=CreateReplyRequestUnified(
+            author_type="HUMAN",
+            author_id="user-a",
+            client_request_id="req-internal-referenced",
+            body=" Reply body ",
+            reply_to_post_id=" post_1 ",
+        ),
+        topic_id="topic_1",
+        request=_request(
+            "POST", "/api/v1/collaboration/tasks/bbs/topics/topic_1/posts"
+        ),
+        response=Response(),
+        service=service,
+    )
+
+    assert service.calls[1] == {
+        "op": "create_reply",
+        "topic_id": "topic_1",
+        "author_type": "HUMAN",
+        "author_id": "user-a",
+        "client_request_id": "req-internal-referenced",
+        "body": " Reply body ",
+        "reply_to_post_id": " post_1 ",
+    }
 
 
 # ---------------------------------------------------------------------------

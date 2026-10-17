@@ -47,6 +47,7 @@ def _create_reply(
     author_id="bot-b",
     request_id="req-reply-1",
     body="First reply",
+    reply_to_post_id=None,
 ):
     return repo.create_reply(
         topic_id=topic_id,
@@ -54,6 +55,7 @@ def _create_reply(
         author_id=author_id,
         client_request_id=request_id,
         body=body,
+        reply_to_post_id=reply_to_post_id,
     )
 
 
@@ -119,8 +121,53 @@ def test_create_reply_persists_author_without_tenant_or_environment_columns(db):
     assert result.post.topic_id == topic.topic_id
     assert result.post.author_type == "HUMAN"
     assert result.post.author_id == "user-b"
+    assert result.post.reply_to_post_id is None
     assert "env" not in ForumPostModel.__table__.columns
     assert "avernet_tenant" not in ForumPostModel.__table__.columns
+
+
+def test_create_reply_persists_reference_to_a_post_in_the_same_topic(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(repo).topic
+    first = _create_reply(repo, topic.topic_id).post
+
+    second = _create_reply(
+        repo,
+        topic.topic_id,
+        request_id="reply-to-first",
+        body="Referenced reply",
+        reply_to_post_id=first.post_id,
+    )
+
+    assert second.post.reply_to_post_id == first.post_id
+    with db.orm_session() as session:
+        row = session.query(ForumPostModel).filter_by(post_id=second.post.post_id).one()
+        assert row.reply_to_post_id == first.post_id
+
+
+def test_create_reply_rejects_unknown_reference(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(repo).topic
+
+    with pytest.raises(NotFound, match="reply_to_post_id not found"):
+        _create_reply(repo, topic.topic_id, reply_to_post_id="missing-post")
+
+    with db.orm_session() as session:
+        assert session.query(ForumPostModel).count() == 0
+
+
+def test_create_reply_rejects_reference_from_another_topic(db):
+    repo = ForumRepository(db)
+    first_topic = _create_topic(repo, request_id="topic-1").topic
+    second_topic = _create_topic(repo, request_id="topic-2").topic
+    first_reply = _create_reply(repo, first_topic.topic_id).post
+
+    with pytest.raises(NotFound, match="reply_to_post_id not found"):
+        _create_reply(
+            repo,
+            second_topic.topic_id,
+            reply_to_post_id=first_reply.post_id,
+        )
 
 
 def test_create_reply_is_idempotent_per_topic_author_and_request(db):
@@ -210,6 +257,26 @@ def test_create_reply_rejects_non_open_topic(db, status):
 
     with pytest.raises(Conflict, match=status.lower()):
         _create_reply(repo, topic.topic_id)
+
+
+def test_idempotent_reply_replay_skips_reference_validation_after_topic_is_locked(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(repo).topic
+    first = _create_reply(repo, topic.topic_id).post
+    with db.orm_session() as session:
+        session.query(ForumTopicModel).filter_by(
+            topic_id=topic.topic_id
+        ).one().status = TOPIC_STATUS_LOCKED
+
+    replay = _create_reply(
+        repo,
+        topic.topic_id,
+        body="ignored",
+        reply_to_post_id="missing-post",
+    )
+
+    assert replay.created is False
+    assert replay.post.post_id == first.post_id
 
 
 def test_idempotent_reply_replay_still_succeeds_after_topic_is_locked(db):

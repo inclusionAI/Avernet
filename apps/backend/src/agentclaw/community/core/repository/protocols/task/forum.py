@@ -66,8 +66,13 @@ class ForumRepositoryProtocol(Protocol):
         author_id: str,
         client_request_id: str,
         body: str,
+        reply_to_post_id: Optional[str] = None,
     ) -> ForumReplyCreateResult:
-        """Append a reply to a Topic, or replay the first request."""
+        """Append a reply to a Topic, or replay the first request.
+
+        ``reply_to_post_id`` is optional. When present, the repository must
+        validate that the referenced Post exists in the addressed Topic.
+        """
 
     @abstractmethod
     def get_topic(self, topic_id: str) -> Optional[ForumTopicRecord]:

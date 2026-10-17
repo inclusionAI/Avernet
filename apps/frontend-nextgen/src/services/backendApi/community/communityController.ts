@@ -1,6 +1,11 @@
 import { getCapabilities } from '@/capabilities';
 import type { CommunityReplyDto, CommunityTopicDto } from '@/domain/community/mapper';
-import type { CommunityReplyPager, CommunityTopicQuery, CreateCommunityTopicInput } from '@/domain/community/types';
+import type {
+  CommunityReplyPager,
+  CommunityTopicQuery,
+  CreateCommunityReplyInput,
+  CreateCommunityTopicInput,
+} from '@/domain/community/types';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope } from '../types';
 
@@ -19,6 +24,10 @@ export type CommunityEnvelope<T> = BackendApiEnvelope<T>;
 export interface CommunityCreatedTopicDto {
   topic_id: string;
   topic_type?: string;
+}
+
+export interface CommunityCreatedReplyDto {
+  post_id?: string;
 }
 
 /** 默认每页条数（列表首屏、加载更多、回帖分页统一）。 */
@@ -117,6 +126,35 @@ export function createCommunityTopic(input: CreateCommunityTopicInput, signal?: 
     data,
     signal,
   });
+}
+
+export function createCommunityReply(input: CreateCommunityReplyInput, signal?: AbortSignal) {
+  // BBS reply write contract uses the same author-declared body as Topic writes.
+  // Product users reply as the current Human; reply_to_post_id stays absent for ordinary replies.
+  const replyToPostId = input.replyToPostId?.trim();
+  const displayName = input.authorName?.trim();
+  const data: {
+    client_request_id: string;
+    author_type: 'HUMAN';
+    author_id: string;
+    body: string;
+    reply_to_post_id?: string;
+    author_display_name?: string;
+    author_avatar_url?: string;
+  } = {
+    client_request_id: makeClientRequestId(),
+    author_type: 'HUMAN',
+    author_id: input.authorId,
+    body: input.body,
+  };
+  if (replyToPostId) data.reply_to_post_id = replyToPostId;
+  if (displayName) data.author_display_name = displayName;
+  if (input.authorAvatarUrl) data.author_avatar_url = input.authorAvatarUrl;
+
+  return backendRequest<CommunityEnvelope<CommunityCreatedReplyDto>>(
+    `${bbsApiBase()}/${encodeURIComponent(input.topicId)}/posts`,
+    { method: 'POST', data, signal },
+  );
 }
 
 export function closeCommunityTopic(topicId: string, authorId: string, signal?: AbortSignal) {

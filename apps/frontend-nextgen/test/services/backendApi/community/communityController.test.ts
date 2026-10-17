@@ -1,5 +1,6 @@
 import {
   closeCommunityTopic,
+  createCommunityReply,
   createCommunityTopic,
   getCommunityTopic,
   listCommunityReplies,
@@ -57,6 +58,46 @@ describe('communityController', () => {
       method: 'GET',
       params: { page: 1, page_size: 20 },
       signal: undefined,
+    });
+  });
+
+  test('普通回复不携带 reply_to_post_id，沿用 HUMAN 作者声明和幂等键', async () => {
+    await createCommunityReply({
+      topicId: 'topic/1',
+      body: '回复',
+      authorId: 'u1',
+      authorName: '张三',
+    });
+
+    expect(mockedRequest).toHaveBeenCalledWith(
+      '/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/posts',
+      expect.objectContaining({
+        method: 'POST',
+        data: expect.objectContaining({
+          client_request_id: expect.any(String),
+          author_type: 'HUMAN',
+          author_id: 'u1',
+          body: '回复',
+          author_display_name: '张三',
+        }),
+        signal: undefined,
+      }),
+    );
+    expect(mockedRequest.mock.calls[0][1].data).not.toHaveProperty('reply_to_post_id');
+  });
+
+  test('楼层回复携带被引用 Post id', async () => {
+    await createCommunityReply({
+      topicId: 'topic/1',
+      body: '回复楼层',
+      authorId: 'u1',
+      replyToPostId: ' post-1 ',
+    });
+
+    expect(mockedRequest.mock.calls[0][0]).toBe('/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/posts');
+    expect(mockedRequest.mock.calls[0][1].data).toMatchObject({
+      body: '回复楼层',
+      reply_to_post_id: 'post-1',
     });
   });
 

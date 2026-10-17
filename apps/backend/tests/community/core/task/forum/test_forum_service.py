@@ -118,10 +118,26 @@ def test_create_reply_supports_human_author():
             "author_id": "user-1",
             "client_request_id": "req-2",
             "body": "Reply",
+            "reply_to_post_id": None,
             "author_display_name": None,
             "author_avatar_url": None,
         }
     ]
+
+
+def test_create_reply_normalizes_optional_reference():
+    repo = FakeForumRepository()
+
+    ForumService(repo).create_reply(
+        topic_id="topic-1",
+        author_type="HUMAN",
+        author_id="user-1",
+        client_request_id="req-referenced",
+        body="Reply",
+        reply_to_post_id=" post-1 ",
+    )
+
+    assert repo.calls[0]["reply_to_post_id"] == "post-1"
 
 
 @pytest.mark.parametrize(

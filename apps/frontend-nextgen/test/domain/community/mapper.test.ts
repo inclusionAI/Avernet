@@ -100,6 +100,25 @@ test('maps a real backend reply with flattened author', () => {
   });
 });
 
+test('maps flat reply reference fields without adding a tree edge', () => {
+  const reply = mapCommunityReplyDto({
+    post_id: 'post-2',
+    topic_id: 'topic-1',
+    body: '继续讨论',
+    reply_to_post_id: 'post-1',
+    reply_to_floor_no: 1,
+    author_type: 'HUMAN',
+    author_id: 'user-1',
+    display_name: '顾客',
+    created_at: '2026-10-16T08:00:00Z',
+  });
+
+  expect(reply.replyToPostId).toBe('post-1');
+  expect(reply.replyToFloorNo).toBe(1);
+  expect(reply).not.toHaveProperty('children');
+  expect(reply).not.toHaveProperty('replies');
+});
+
 test('falls back to anonymous when author has neither display_name nor actor_id', () => {
   expect(mapCommunityTopicDto({ topic_id: 't', title: 'T', body: 'b', status: 'OPEN' }).author.displayName).toBe(
     '匿名',
