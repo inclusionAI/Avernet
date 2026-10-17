@@ -44,6 +44,7 @@ impl SessionObserver for NoopObserver {
     }
 }
 
+
 /// 跑一轮“弹窗审批”turn：等待 `interaction/requested`，模拟人在
 /// `human_latency` 后点“允许”，然后等 turn 收尾并返回其结局。
 async fn drive_approval(human_latency: Duration, idle_window: Duration) -> Result<TurnOutcome, TurnError> {
