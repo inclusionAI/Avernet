@@ -466,3 +466,85 @@ it.each([{ type: 'integer', value: 0 }, { type: 'boolean', value: false }])('kee
   expect(input).toEqual({ business: value })
   expect(new Ajv({ strict: false }).compile(schema)(input)).toBe(true)
 })
+
+it('combines declared fields with typed dynamic fields at root and nested object levels', async () => {
+  const schema = { type: 'object', properties: {
+    fixed: { type: 'string', default: 'root' }, details: { type: 'object', properties: { fixed: { type: 'string', default: 'nested' } }, additionalProperties: { type: 'boolean' }, minProperties: 2 },
+  }, additionalProperties: { type: 'number' }, minProperties: 3 }
+  api.trialOptions.mockResolvedValue({ inputSchema: schema, inputSchemaDigest: 'schema', targets: [{ id: 'prod:owner:bot', label: 'Production Bot' }] })
+  api.startTrial.mockResolvedValue(trial)
+  render(panel())
+  await userEvent.selectOptions(await screen.findByRole('combobox', { name: '执行 Bot' }), 'prod:owner:bot')
+  await userEvent.type(screen.getByRole('textbox', { name: '参数名 1' }), 'count')
+  await userEvent.clear(screen.getByRole('spinbutton', { name: '参数值 1' }))
+  await userEvent.type(screen.getByRole('spinbutton', { name: '参数值 1' }), '2')
+  await userEvent.type(screen.getByRole('textbox', { name: 'details 新字段名' }), 'enabled')
+  await userEvent.click(screen.getByRole('checkbox', { name: 'details 新字段值' }))
+  await userEvent.click(screen.getByRole('button', { name: 'details 添加字段' }))
+  await userEvent.click(screen.getByRole('button', { name: '开始试跑' }))
+  const input = api.startTrial.mock.calls[0][1].input
+  expect(input).toEqual({ fixed: 'root', details: { fixed: 'nested', enabled: true }, count: 2 })
+  expect(new Ajv({ strict: false }).compile(schema)(input)).toBe(true)
+})
+
+it('preserves and removes dynamic values after JSON round-trip without overwriting declared fields', async () => {
+  const schema = { type: 'object', properties: { fixed: { type: 'string', default: 'root' } }, patternProperties: { '^count': { type: 'integer' } }, additionalProperties: false }
+  api.trialOptions.mockResolvedValue({ inputSchema: schema, inputSchemaDigest: 'schema', targets: [{ id: 'prod:owner:bot', label: 'Production Bot' }] })
+  api.startTrial.mockResolvedValue(trial)
+  render(panel())
+  await userEvent.selectOptions(await screen.findByRole('combobox', { name: '执行 Bot' }), 'prod:owner:bot')
+  await userEvent.click(screen.getByRole('button', { name: '高级：编辑 JSON' }))
+  await userEvent.clear(screen.getByRole('textbox', { name: '输入参数 JSON' }))
+  await userEvent.paste('{"fixed":"edited","count":2}')
+  await userEvent.click(screen.getByRole('button', { name: '返回业务表单' }))
+  expect(screen.getByRole('textbox', { name: 'fixed' })).toHaveValue('edited')
+  expect(screen.getByRole('spinbutton', { name: '参数值 1' })).toHaveValue(2)
+  await userEvent.click(screen.getByRole('button', { name: '移除参数 1' }))
+  await userEvent.click(screen.getByRole('button', { name: '添加参数' }))
+  await userEvent.type(screen.getByRole('textbox', { name: '参数名 1' }), 'fixed')
+  await userEvent.click(screen.getByRole('button', { name: '开始试跑' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('参数名已声明')
+  expect(api.startTrial).not.toHaveBeenCalled()
+  await userEvent.click(screen.getByRole('button', { name: '移除参数 1' }))
+  await userEvent.click(screen.getByRole('button', { name: '开始试跑' }))
+  expect(api.startTrial.mock.calls[0][1].input).toEqual({ fixed: 'edited' })
+})
+
+it('omits cleared optional constrained strings while preserving allowed empty and required strings', async () => {
+  const schema = { type: 'object', required: ['required', 'nullableRequired'], properties: {
+    minimum: { type: 'string', minLength: 1 }, patterned: { type: 'string', pattern: '^.+$' }, allowed: { type: 'string' }, required: { type: 'string' },
+    choice: { type: 'string', enum: ['nonempty'] }, nullableRequired: { type: ['string', 'null'], minLength: 1, default: 'initial' },
+    details: { type: 'object', properties: { note: { type: 'string', minLength: 1, default: 'nested' } } },
+  } }
+  api.trialOptions.mockResolvedValue({ inputSchema: schema, inputSchemaDigest: 'schema', targets: [{ id: 'prod:owner:bot', label: 'Production Bot' }] })
+  api.startTrial.mockResolvedValue(trial)
+  render(panel())
+  await userEvent.selectOptions(await screen.findByRole('combobox', { name: '执行 Bot' }), 'prod:owner:bot')
+  for (const name of ['minimum', 'patterned', 'allowed', 'required']) {
+    await userEvent.type(screen.getByRole('textbox', { name }), 'entered')
+    await userEvent.clear(screen.getByRole('textbox', { name }))
+  }
+  await userEvent.clear(screen.getByRole('textbox', { name: 'details.note' }))
+  await userEvent.clear(screen.getByRole('textbox', { name: 'nullableRequired' }))
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'choice' }), JSON.stringify('nonempty'))
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'choice' }), '')
+  await userEvent.click(screen.getByRole('button', { name: '开始试跑' }))
+  const input = api.startTrial.mock.calls[0][1].input
+  expect(input).toEqual({ allowed: '', required: '', nullableRequired: null, details: {} })
+  expect(new Ajv({ strict: false }).compile(schema)(input)).toBe(true)
+})
+
+it('omits a cleared constrained dynamic string while retaining declared fields', async () => {
+  const schema = { type: 'object', properties: { fixed: { type: 'string', default: 'fixed' } }, additionalProperties: { type: 'string', minLength: 1 } }
+  api.trialOptions.mockResolvedValue({ inputSchema: schema, inputSchemaDigest: 'schema', targets: [{ id: 'prod:owner:bot', label: 'Production Bot' }] })
+  api.startTrial.mockResolvedValue(trial)
+  render(panel())
+  await userEvent.selectOptions(await screen.findByRole('combobox', { name: '执行 Bot' }), 'prod:owner:bot')
+  await userEvent.type(screen.getByRole('textbox', { name: '参数名 1' }), 'optional')
+  await userEvent.type(screen.getByRole('textbox', { name: '参数值 1' }), 'entered')
+  await userEvent.clear(screen.getByRole('textbox', { name: '参数值 1' }))
+  await userEvent.click(screen.getByRole('button', { name: '开始试跑' }))
+  const input = api.startTrial.mock.calls[0][1].input
+  expect(input).toEqual({ fixed: 'fixed' })
+  expect(new Ajv({ strict: false }).compile(schema)(input)).toBe(true)
+})

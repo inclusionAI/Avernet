@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { RepairRevision } from '../../../../server/contracts/repair-batch'
 import { normalizeTrialInputDefinition, TrialInputDefinitionError } from '../../../../server/contracts/repair-trial-input-definition'
-import RepairTrialInputs, { parseTrialJson, readTrialFormInput, trialInputDefaults, type TrialParameterEntry } from './RepairTrialInputs'
+import RepairTrialInputs, { parseTrialJson, readTrialFormInput, trialInputDefaults, trialInputEntries, type TrialParameterEntry } from './RepairTrialInputs'
 import type { RepairTrial, RepairTrialOptions, RepairTrialRequest, RepairTrialTarget } from '../../../../server/contracts/repair-trial'
 import { repairBatches } from '../../../api/repair-batches'
 import { repairReleaseError } from '../../../api/repair-release-error'
@@ -73,7 +73,7 @@ export default function RepairTrialPanel({ taskId, revision, enabled, open, onCl
       if (initialized.current !== mine) {
         const defaults = trialInputDefaults(next.inputSchema)
         setParams(defaults); setJson(JSON.stringify(defaults, null, 2)); initialized.current = mine
-        if (Object.keys(defaults).length) setEntries(Object.entries(defaults).map(([key, value]) => ({ key, value })))
+        setEntries(trialInputEntries(next.inputSchema, defaults))
       }
       setOptions(next)
     }).catch(reason => { if (active && current.current === mine) setLoadError(reason instanceof TrialInputDefinitionError ? reason.message : '无法读取候选参数和授权 Bot，请重试。') })
@@ -88,7 +88,7 @@ export default function RepairTrialPanel({ taskId, revision, enabled, open, onCl
     try {
       if (advanced) {
         const input = parseTrialJson(json)
-        setParams(input); setEntries(Object.entries(input).map(([key, value]) => ({ key, value })))
+        setParams(input); setEntries(trialInputEntries(definition.inputSchema, input))
       } else setJson(JSON.stringify(readTrialFormInput(definition, params, entries, false), null, 2))
       setAdvanced(!advanced); setError('')
     } catch (reason) { setError(reason instanceof SyntaxError ? '参数 JSON 格式无效，请检查对象、逗号和引号。' : (reason as Error).message) }

@@ -98,6 +98,57 @@ describe('normalizeTrialInputDefinition', () => {
     expect(() => validateTrialInput({ dependencies: 'business', const: 'manual' }, normalized.inputSchema)).not.toThrow();
     expect(() => validateTrialInput({ dependencies: 42, const: 'other' }, normalized.inputSchema)).toThrow(/参数校验失败/);
   });
+  it.each(['additionalProperties', 'not'])('preserves a required business field named %s with its original boolean type', key => {
+    const schema = { [key]: { type: 'boolean' } };
+    const normalized = normalize({ schema, requiredParams: [key] });
+    expect(normalized).toEqual({ inputDefinition: 'defined', inputSchema: { type: 'object', properties: schema, required: [key] } });
+    expect(normalize({ schema }, [key])).toEqual(normalized);
+    expect(() => validateTrialInput({ [key]: false }, normalized.inputSchema)).not.toThrow();
+    expect(() => validateTrialInput({ [key]: 'false' }, normalized.inputSchema)).toThrow(/参数校验失败/);
+    expect(() => validateTrialInput({}, normalized.inputSchema)).toThrow(/参数校验失败/);
+  });
+  it('uses the required-field evidence for the whole field map without dropping neighboring keyword-named fields', () => {
+    const schema = { additionalProperties: { type: 'boolean' }, not: { type: 'integer' }, userId: { type: 'string' } };
+    const normalized = normalize({ schema, requiredParams: ['additionalProperties'] });
+    expect(normalized.inputSchema).toEqual({ type: 'object', properties: schema, required: ['additionalProperties'] });
+    expect(() => validateTrialInput({ additionalProperties: false, not: 0, userId: 'user' }, normalized.inputSchema)).not.toThrow();
+    expect(() => validateTrialInput({ additionalProperties: false, not: '0' }, normalized.inputSchema)).toThrow(/参数校验失败/);
+  });
+  it('retains the root meaning of untyped additionalProperties without required-field evidence', () => {
+    const schema = { additionalProperties: { type: 'boolean' } };
+    const normalized = normalize({ schema });
+    expect(normalized.inputSchema).toEqual({ ...schema, type: 'object', properties: {} });
+    expect(() => validateTrialInput({ flag: false }, normalized.inputSchema)).not.toThrow();
+    expect(() => validateTrialInput({ flag: 'false' }, normalized.inputSchema)).toThrow(/参数校验失败/);
+  });
+  it.each([true, false, { type: 'boolean' }])('keeps explicit root type authoritative for additionalProperties=%j', additionalProperties => {
+    const schema = { type: 'object', additionalProperties };
+    const normalized = normalize({ schema, requiredParams: ['additionalProperties'] });
+    expect(normalized.inputSchema).toEqual({ ...schema, properties: { additionalProperties: { type: 'string' } }, required: ['additionalProperties'] });
+    expect(() => validateTrialInput({ additionalProperties: 'declared' }, normalized.inputSchema)).not.toThrow();
+    expect(() => validateTrialInput({ additionalProperties: false }, normalized.inputSchema)).toThrow(/参数校验失败/);
+  });
+  it.each([true, false])('keeps untyped additionalProperties=%j as a root keyword rather than a business-field descriptor', additionalProperties => {
+    const normalized = normalize({ schema: { additionalProperties }, requiredParams: ['additionalProperties'] });
+    expect(normalized.inputSchema).toEqual({ type: 'object', additionalProperties, properties: { additionalProperties: { type: 'string' } }, required: ['additionalProperties'] });
+    expect(() => validateTrialInput({ additionalProperties: 'declared' }, normalized.inputSchema)).not.toThrow();
+    expect(() => validateTrialInput({ additionalProperties: false }, normalized.inputSchema)).toThrow(/参数校验失败/);
+  });
+  it('keeps explicit root conditionals authoritative when requiredParams also names an ambiguous keyword', () => {
+    const schema = { additionalProperties: { type: 'boolean' }, if: { required: ['trigger'] }, then: { required: ['billingAddress'] } };
+    const normalized = normalize({ schema, requiredParams: ['additionalProperties'] });
+    expect(normalized.inputSchema).toEqual({ ...schema, type: 'object', properties: { additionalProperties: { type: 'string' } }, required: ['additionalProperties'] });
+    expect(() => validateTrialInput({ additionalProperties: 'declared', trigger: false }, normalized.inputSchema)).toThrow(/参数校验失败/);
+    expect(() => validateTrialInput({ additionalProperties: 'declared', trigger: false, billingAddress: false }, normalized.inputSchema)).not.toThrow();
+  });
+  it('keeps explicit root properties authoritative even without a root type', () => {
+    const schema = { properties: { additionalProperties: { type: 'boolean' } }, additionalProperties: false };
+    const normalized = normalize({ schema, requiredParams: ['additionalProperties'] });
+    expect(normalized.inputSchema).toEqual({ ...schema, type: 'object', required: ['additionalProperties'] });
+    expect(() => validateTrialInput({ additionalProperties: false }, normalized.inputSchema)).not.toThrow();
+    expect(() => validateTrialInput({ additionalProperties: 'false' }, normalized.inputSchema)).toThrow(/参数校验失败/);
+    expect(() => validateTrialInput({ additionalProperties: false, unexpected: true }, normalized.inputSchema)).toThrow(/参数校验失败/);
+  });
   it.each([
     { schema: [] }, { schema: 'text' }, { schema: { query: 'string' } }, { schema: { properties: [] } },
     { schema: { properties: { query: 3 } } }, { requiredParams: 'query' }, { requiredParams: [3] }, { params: [] },

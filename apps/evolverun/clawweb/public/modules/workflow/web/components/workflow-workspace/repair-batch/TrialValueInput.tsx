@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Ajv from 'ajv'
 import { button } from './repair-view'
 
 export type TrialValueSchema = {
@@ -29,6 +30,9 @@ export function trialPropertySchema(schema: TrialValueSchema, key: string): Tria
   if (matched.includes(false)) return false
   return Object.assign({}, ...matched.filter(child => typeof child !== 'boolean'))
 }
+export function trialAllowsDynamicFields(schema: TrialValueSchema): boolean {
+  return schema.additionalProperties !== false || Object.keys(schema.patternProperties ?? {}).length > 0
+}
 export function trialPropertyValue(schema: TrialValueSchema, previousKey: string, key: string, value: unknown): unknown {
   const previous = trialPropertySchema(schema, previousKey), next = trialPropertySchema(schema, key)
   return value === undefined || value === '' || trialValueType(previous, value) !== trialValueType(next, value) ? newValue(next) : value
@@ -56,6 +60,13 @@ function newValue(schema: TrialValueSchema | boolean): unknown {
     default: return ''
   }
 }
+function clearedString(schema: TrialValueSchema, required: boolean | undefined): unknown {
+  try {
+    const validate = new Ajv({ strict: false, ownProperties: true, logger: false }).compile(schema)
+    if (validate('')) return ''
+    return required ? validate(null) ? null : '' : undefined
+  } catch { return required ? '' : undefined }
+}
 /** Remove cleared optional fields before hashing/submission; untouched required checkboxes represent false. */
 export function completeTrialValue(schema: TrialValueSchema | boolean, value: unknown): unknown {
   if (typeof schema === 'boolean') return value
@@ -75,7 +86,7 @@ function OpenObjectInput({ schema, name, value, disabled, sensitive, onChange }:
   const [error, setError] = useState('')
   const current = record(value) ? value : {}
   return <div className="space-y-2">
-    {Object.entries(current).map(([key, item]) => <div key={key} className="space-y-1 rounded border border-input p-2">
+    {Object.entries(current).filter(([key]) => !Object.hasOwn(properties(schema), key)).map(([key, item]) => <div key={key} className="space-y-1 rounded border border-input p-2">
       <TrialValueInput schema={trialPropertySchema(schema, key)} name={`${name}.${key}`} value={item} required={schema.required?.includes(key)} disabled={disabled} sensitive={sensitive} onChange={next => onChange({ ...current, [key]: next })} />
       <button type="button" aria-label={`移除 ${name}.${key}`} className={button} disabled={disabled} onClick={() => onChange(Object.fromEntries(Object.entries(current).filter(([other]) => other !== key)))}>移除字段</button>
     </div>)}
@@ -85,7 +96,7 @@ function OpenObjectInput({ schema, name, value, disabled, sensitive, onChange }:
       }} />
       <TrialValueInput schema={trialPropertySchema(schema, key.trim())} name={`${name} 新字段值`} value={newItem} disabled={disabled} sensitive={sensitive || /password|token|secret|key/i.test(key)} onChange={setNewItem} />
       <button type="button" aria-label={`${name} 添加字段`} className={button} disabled={disabled || !key.trim()} onClick={() => {
-        if (Object.hasOwn(current, key.trim())) { setError('字段名不能重复。'); return }
+        if (Object.hasOwn(properties(schema), key.trim()) || Object.hasOwn(current, key.trim())) { setError('字段名不能重复。'); return }
         onChange({ ...current, [key.trim()]: newItem }); setKey(''); setNewItem(''); setError('')
       }}>添加字段</button>
     </div>
@@ -102,8 +113,8 @@ export default function TrialValueInput({ schema, name, value, disabled, require
   if (!spec.enum && type === 'object') {
     const fields = properties(spec), current = record(value) ? value : {}
     return <fieldset aria-label={name} className="min-w-0 space-y-3 rounded border border-input p-3"><legend className="px-1 text-sm">{label}</legend>
-      {Object.keys(fields).length ? Object.entries(fields).map(([key, child]) => <TrialValueInput key={key} schema={Object.hasOwn(spec.properties ?? {}, key) ? trialPropertySchema(spec, key) : child} name={`${name}.${key}`} value={current[key]} required={spec.required?.includes(key)} disabled={disabled} sensitive={masked} onChange={next => onChange({ ...current, [key]: next })} />)
-        : <OpenObjectInput schema={spec} name={name} value={current} disabled={disabled} sensitive={masked} onChange={onChange} />}
+      {Object.entries(fields).map(([key, child]) => <TrialValueInput key={key} schema={Object.hasOwn(spec.properties ?? {}, key) ? trialPropertySchema(spec, key) : child} name={`${name}.${key}`} value={current[key]} required={spec.required?.includes(key)} disabled={disabled} sensitive={masked} onChange={next => onChange({ ...current, [key]: next })} />)}
+      {(trialAllowsDynamicFields(spec) || Object.keys(current).some(key => !Object.hasOwn(fields, key))) && <OpenObjectInput schema={spec} name={name} value={current} disabled={disabled} sensitive={masked} onChange={onChange} />}
       {description}
     </fieldset>
   }
@@ -119,14 +130,14 @@ export default function TrialValueInput({ schema, name, value, disabled, require
     </fieldset>
   }
   return <label className="block break-words text-sm">{label}
-    {spec.enum ? <select aria-label={name} className={control} disabled={disabled} value={value === undefined ? '' : JSON.stringify(value)} onChange={event => onChange(JSON.parse(event.target.value))}>
-      <option value="" disabled>请选择</option>{spec.enum.map((item, index) => <option key={JSON.stringify(item)} value={JSON.stringify(item)}>{typeof item === 'object' ? `选项 ${index + 1}` : String(item)}</option>)}
+    {spec.enum ? <select aria-label={name} className={control} disabled={disabled} value={value === undefined ? '' : JSON.stringify(value)} onChange={event => onChange(event.target.value === '' ? undefined : JSON.parse(event.target.value))}>
+      <option value="" disabled={required}>请选择</option>{spec.enum.map((item, index) => <option key={JSON.stringify(item)} value={JSON.stringify(item)}>{typeof item === 'object' ? `选项 ${index + 1}` : String(item)}</option>)}
     </select> : type === 'boolean' ? <input aria-label={name} type="checkbox" checked={value === true} disabled={disabled} onChange={event => onChange(event.target.checked)} />
       : <input aria-label={name} type={masked ? 'password' : ['number', 'integer'].includes(type) ? 'number' : 'text'} step={type === 'integer' ? 1 : 'any'} className={control} disabled={disabled} value={value == null ? '' : String(value)}
         onChange={event => {
           const text = event.target.value
           onChange(['number', 'integer'].includes(type) ? text !== '' ? Number(text)
-            : Array.isArray(spec.type) && spec.type.includes('null') ? null : required ? '' : undefined : text)
+            : Array.isArray(spec.type) && spec.type.includes('null') ? null : required ? '' : undefined : text === '' ? clearedString(spec, required) : text)
         }} />}
     {description}
   </label>

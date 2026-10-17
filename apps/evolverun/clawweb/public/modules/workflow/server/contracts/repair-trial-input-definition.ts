@@ -29,6 +29,10 @@ function fieldDescriptor(value: unknown): boolean {
     || ['minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'minProperties', 'maxProperties'].some(key => typeof value[key] === 'number')
     || Object.hasOwn(value, 'default') && !record(value.default);
 }
+function validFieldDescriptor(value: unknown): boolean {
+  if (!fieldDescriptor(value)) return false;
+  try { field(value); return true; } catch { return false; }
+}
 const rootConstraintKeywords = ['dependencies', 'if', 'then', 'else', 'propertyNames', 'enum', 'const'];
 function rootConstraintKeyword(schema: Record<string, unknown>, key: string): boolean {
   const value = schema[key];
@@ -36,8 +40,7 @@ function rootConstraintKeyword(schema: Record<string, unknown>, key: string): bo
   if (key === 'propertyNames') return typeof value === 'boolean' || record(value);
   // These values can also be legacy business-field descriptors. Preserve that
   // meaning when valid; e.g. dependencies.type = ['billingAddress'] is not one.
-  let descriptor = false;
-  if (fieldDescriptor(value)) { try { field(value); descriptor = true; } catch { /* Check the root-keyword shape instead. */ } }
+  const descriptor = validFieldDescriptor(value);
   if (key === 'const') return !descriptor;
   if (key === 'dependencies') return record(value) && !descriptor;
   return typeof value === 'boolean' || record(value) && (!descriptor || ['if', 'then', 'else'].filter(branch => Object.hasOwn(schema, branch)).length > 1);
@@ -62,13 +65,17 @@ export function normalizeTrialInputDefinition(definition: TrialInputDefinition |
   let schema: Record<string, unknown> = { type: 'object' };
   let properties: Record<string, Record<string, unknown> | boolean> = {};
   if (record(raw)) {
+    // A required business parameter disambiguates these schema-shaped field
+    // names. Other root markers (type/properties/conditionals) stay authoritative.
+    const keywordFields = ['additionalProperties', 'not'].some(key => required.includes(key) && validFieldDescriptor(raw[key]))
+      && Object.values(raw).every(value => record(value) || typeof value === 'boolean');
     const jsonSchema = typeof raw.type === 'string' || Array.isArray(raw.type) || 'properties' in raw && !fieldDescriptor(raw.properties)
       || Array.isArray(raw.required) || ['$schema', '$id', '$ref'].some(key => typeof raw[key] === 'string')
       || ['allOf', 'anyOf', 'oneOf'].some(key => Array.isArray(raw[key]))
       || ['minProperties', 'maxProperties'].some(key => typeof raw[key] === 'number')
       || rootConstraintKeywords.some(key => Object.hasOwn(raw, key) && rootConstraintKeyword(raw, key))
       || ['$defs', 'definitions', 'patternProperties'].some(key => record(raw[key]) && !fieldDescriptor(raw[key]))
-      || ['additionalProperties', 'not'].some(key => typeof raw[key] === 'boolean' || record(raw[key]));
+      || !keywordFields && ['additionalProperties', 'not'].some(key => typeof raw[key] === 'boolean' || record(raw[key]));
     if (jsonSchema) {
       if (raw.type !== undefined && raw.type !== 'object') invalid();
       if (raw.properties !== undefined && !record(raw.properties)) invalid();
