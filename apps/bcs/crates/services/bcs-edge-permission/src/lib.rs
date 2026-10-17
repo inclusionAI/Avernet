@@ -213,6 +213,42 @@ fn is_private_visibility(value: &str) -> bool {
     matches!(normalize_policy_value(value).as_str(), "private")
 }
 
+/// 部门范围名单条目的匹配标签。条目兼容两种格式：
+/// - 旧格式：纯字符串（存量数据，语义由写入方约定），trim 后原样保留；
+/// - 新格式：{deptNo, deptName} 对象（兼容 dept_no/dept_name/name 形态），
+///   匹配按部门名称口径，取部门名称；名称缺失时回退部门编码。
+fn friend_ext_scope_entry_match_label(item: &serde_json::Value) -> Option<String> {
+    if let Some(value) = item.as_str() {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        return Some(trimmed.to_owned());
+    }
+    let object = item.as_object()?;
+    for key in ["deptName", "dept_name", "name"] {
+        if let Some(label) = object
+            .get(key)
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+        {
+            return Some(label.to_owned());
+        }
+    }
+    for key in ["deptNo", "dept_no"] {
+        if let Some(label) = object
+            .get(key)
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+        {
+            return Some(label.to_owned());
+        }
+    }
+    None
+}
+
 fn bot_friend_ext_scope_friend_deps(
     friend_ext: &serde_json::Map<String, serde_json::Value>,
     key: &str,
@@ -223,11 +259,8 @@ fn bot_friend_ext_scope_friend_deps(
         .map(|items| {
             items
                 .iter()
-                .filter_map(|item| item.as_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToOwned::to_owned)
-                .collect()
+                .filter_map(friend_ext_scope_entry_match_label)
+                .collect::<HashSet<String>>()
         })
         .unwrap_or_default()
 }
@@ -2418,6 +2451,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn human_protected_view_scope_user_friend_deps_object_entry_allows_matching_department() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        let mut target_friend_ext = serde_json::Map::new();
+        target_friend_ext.insert(
+            "view_scope_user_friend_deps".to_string(),
+            serde_json::Value::Array(vec![serde_json::json!({
+                "deptNo": "TECH-001",
+                "deptName": "示例集团-技术事业部-平台团队"
+            })]),
+        );
+        seed_bot_with_friend_ext(
+            &db,
+            "x:user_scope_object_hit",
+            "protected",
+            "protected",
+            "OPEN",
+            "online",
+            Some("85020"),
+            target_friend_ext,
+        )
+        .await;
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::from([(
+                "1".to_string(),
+                "示例集团-技术事业部-平台团队-系统组".to_string(),
+            )])),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
+        let res = svc
+            .create_connect("human_1", "x:user_scope_object_hit", None, None)
+            .await
+            .expect("protected user scope object entry hit should auto-approve when OPEN");
+        assert_eq!(res.status, ConnectStatus::Approved);
+        assert!(res.auto_accepted);
+        assert_eq!(res.edge_ids.len(), 1);
+        assert_eq!(res.request_ids.len(), 1);
+    }
+
+    #[tokio::test]
     async fn human_protected_view_scope_user_friend_deps_blocks_out_of_scope_department() {
         let (eg, pp, rq, bc, db) = assemble().await;
         let mut target_friend_ext = serde_json::Map::new();
@@ -2737,6 +2809,105 @@ mod tests {
         assert_eq!(res.request_ids.len(), 1);
         let req = rq.get(&res.request_ids[0], "dev").await.expect("approved req");
         assert_eq!(req.status, RequestStatus::Approved);
+    }
+
+    #[tokio::test]
+    async fn dept_free_object_entry_auto_approves_when_human_department_matches() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(
+            &db,
+            "human_1",
+            "protected",
+            "protected",
+            "APPROVAL",
+            "online",
+            Some("85020"),
+        )
+        .await;
+        let mut target_friend_ext = serde_json::Map::new();
+        target_friend_ext.insert(
+            "no_check_scope_friend_deps".to_string(),
+            serde_json::Value::Array(vec![serde_json::json!({
+                "deptNo": "TECH-001",
+                "deptName": "示例集团-技术事业部-平台团队"
+            })]),
+        );
+        seed_bot_with_friend_ext(
+            &db,
+            "x:dept_object",
+            "protected",
+            "protected",
+            "DEPT_FREE",
+            "online",
+            Some("85020"),
+            target_friend_ext,
+        )
+        .await;
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::from([(
+                "1".to_string(),
+                "示例集团-技术事业部-平台团队-系统组".to_string(),
+            )])),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
+        let res = svc
+            .create_connect("human_1", "x:dept_object", None, None)
+            .await
+            .expect("dept_free object entry hit → Approved");
+        assert_eq!(res.status, ConnectStatus::Approved);
+        assert!(res.auto_accepted);
+        assert_eq!(res.edge_ids.len(), 1);
+        assert_eq!(res.request_ids.len(), 1);
+        let req = rq.get(&res.request_ids[0], "dev").await.expect("approved req");
+        assert_eq!(req.status, RequestStatus::Approved);
+    }
+
+    #[tokio::test]
+    async fn dept_free_object_entry_falls_back_to_dept_no_without_name() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(
+            &db,
+            "human_1",
+            "protected",
+            "protected",
+            "APPROVAL",
+            "online",
+            Some("85020"),
+        )
+        .await;
+        let mut target_friend_ext = serde_json::Map::new();
+        target_friend_ext.insert(
+            "no_check_scope_friend_deps".to_string(),
+            serde_json::Value::Array(vec![serde_json::json!({
+                "deptNo": "TECH-201"
+            })]),
+        );
+        seed_bot_with_friend_ext(
+            &db,
+            "x:dept_object_fallback",
+            "protected",
+            "protected",
+            "DEPT_FREE",
+            "online",
+            Some("85020"),
+            target_friend_ext,
+        )
+        .await;
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::from([(
+                "1".to_string(),
+                "TECH-201".to_string(),
+            )])),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
+        let res = svc
+            .create_connect("human_1", "x:dept_object_fallback", None, None)
+            .await
+            .expect("dept_free object entry deptNo fallback hit → Approved");
+        assert_eq!(res.status, ConnectStatus::Approved);
+        assert!(res.auto_accepted);
+        assert_eq!(res.edge_ids.len(), 1);
+        assert_eq!(res.request_ids.len(), 1);
     }
 
     #[tokio::test]
