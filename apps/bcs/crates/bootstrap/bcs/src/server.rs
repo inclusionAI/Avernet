@@ -73,7 +73,6 @@ use bcs_collaboration_store::{
 };
 use bcs_collaboration_template::{CollaborationTemplateServiceImpl, FileCollaborationTemplateRepo};
 use bcs_db_api::DbSqlFlavor;
-use bcs_domain::{MessageAudience, MessageVisibilityDomain, NewMessage, SenderType};
 use bcs_friend::{FriendCore, FriendRequestCore, FriendshipWritebackService};
 use bcs_friend_store::{
     DbFriendRequestStore, DbFriendStore, MemoryFriendRepo, MemoryFriendRequestRepo,
@@ -115,11 +114,11 @@ use bcs_service_api::port::{
     EventRecordFactoryPort, EventRecorderPort, GroupSessionTokenPort, SecretAccessPort,
 };
 use bcs_service_api::{
-    A2aChatRunService, A2aChatService, BotActor, BotCandidateSearchCoreService,
+    A2aChatRunService, A2aChatService, BotCandidateSearchCoreService,
     BotCatalogCleanupPort,
     BotControlPlaneCoreService, BotControlPlaneRepoPort, BotDeliveryPort, BotDeliveryTarget,
     BotMetricsSnapshotPort, BotRegistryCoreService, BotRunContextPort, BotTerminalEvent,
-    BotTerminalObserverPort, BotTerminalState, CallerContext, CanResolveInteraction,
+    BotTerminalObserverPort, BotTerminalState, CanResolveInteraction,
     ChannelBindingCleanupPort, ChannelService, CollaborationRuntimeService,
     CollaborationTemplateService, CompositeBotTerminalObserver, DirectChatClientKind,
     DirectChatRunEvent, DirectChatRunLifecycleHook, DirectChatRunReason, DirectChatRunSnapshotPort,
@@ -135,7 +134,7 @@ use bcs_service_api::{
     ServiceError, ServiceResult,
     SessionChannelDeliveryOutcome, SessionChannelOutboundPort, SessionManagementService,
     StateMachineResultPublishCommand, StateMachineResultPublisherPort, StateMachineTerminalEvent,
-    SystemMessageService, WebSendCommand, WsCloseReason, WsErrorKind,
+    SystemMessageService, WsCloseReason, WsErrorKind,
     WsLifecycleInstrumentationHook, WsPeer,
     port::repo::{
         ChannelBindingRepoPort, ConversationSessionRepoPort, HumanInputRequestRepoPort,
@@ -486,18 +485,11 @@ fn deferred_session_channel_outbound() -> (
 
 struct MessageFlowStateMachineResultPublisher {
     message_flow: Arc<dyn MessageFlowService>,
-    message_repo: Arc<dyn MessageRepoPort>,
 }
 
 impl MessageFlowStateMachineResultPublisher {
-    fn new(
-        message_flow: Arc<dyn MessageFlowService>,
-        message_repo: Arc<dyn MessageRepoPort>,
-    ) -> Self {
-        Self {
-            message_flow,
-            message_repo,
-        }
+    fn new(message_flow: Arc<dyn MessageFlowService>) -> Self {
+        Self { message_flow }
     }
 }
 
@@ -507,56 +499,7 @@ impl StateMachineResultPublisherPort for MessageFlowStateMachineResultPublisher 
         &self,
         cmd: StateMachineResultPublishCommand,
     ) -> ServiceResult<()> {
-        let idempotency_key = format!("state-machine-result:{}", cmd.run_id);
-        let saved = self.message_repo
-            .append_message_with_id(idempotency_key.clone(), NewMessage {
-                group_id: cmd.group_id.clone(),
-                session_id: cmd.session_id.clone(),
-                sender_id: cmd.sender_bot_id.clone(),
-                sender_type: SenderType::Bot,
-                message_type: "chat".to_string(),
-                content: serde_json::Value::String(cmd.content.clone()),
-                client_msg_id: Some(idempotency_key.clone()),
-                owner_bot_id: None,
-                created_at: cmd.created_at_ms,
-                run_id: cmd.run_id.clone(),
-                visibility_domain: MessageVisibilityDomain::StateMachine,
-                audience: Some(MessageAudience::Public),
-            })
-            .await
-            .map_err(|error| {
-                bcs_service_api::ServiceError::InternalError(format!(
-                    "persist state-machine result before delivery: {error}"
-                ))
-            })?;
-        if saved.group_id != cmd.group_id || saved.session_id != cmd.session_id || saved.run_id != cmd.run_id
-            || saved.sender_id != cmd.sender_bot_id || saved.sender_type != SenderType::Bot
-            || saved.message_type != "chat" || saved.content != serde_json::Value::String(cmd.content.clone())
-            || saved.client_msg_id.as_ref() != Some(&idempotency_key) || saved.created_at != cmd.created_at_ms
-            || saved.visibility_domain != Some(MessageVisibilityDomain::StateMachine) || saved.audience != Some(MessageAudience::Public) {
-            return Err(bcs_service_api::ServiceError::Conflict("Chat result history conflicts with saved publication".into()));
-        }
-        self.message_flow
-            .handle_web_send(WebSendCommand {
-                caller: CallerContext::Bot(BotActor {
-                    bot_uuid: cmd.sender_bot_id.clone(),
-                }),
-                group_id: cmd.group_id,
-                session_id: Some(cmd.session_id),
-                from_actor_id: cmd.sender_bot_id,
-                from_name: None,
-                message: cmd.content,
-                mentions: Vec::new(),
-                attachments: None,
-                thinking: None,
-                idempotency_key: Some(idempotency_key),
-                source_im_message_id: None,
-                channel_sender_identity: None,
-                sender_conn_id: None,
-                provider_bypass_headers: Vec::new(),
-            })
-            .await?;
-        Ok(())
+        self.message_flow.publish_state_machine_result(cmd).await
     }
 }
 
@@ -2554,7 +2497,6 @@ impl Default for BcsServerState {
             .with_session_channel_outbound(session_channel_outbound)
             .with_result_publisher(Arc::new(MessageFlowStateMachineResultPublisher::new(
                 message_flow.clone(),
-                message_repo.clone(),
             )))
             .with_message_repo(message_repo.clone())
             .with_frontend_delivery(frontend_delivery.clone())
@@ -4179,7 +4121,6 @@ impl BcsServer {
             .with_session_channel_outbound(session_channel_outbound)
             .with_result_publisher(Arc::new(MessageFlowStateMachineResultPublisher::new(
                 message_flow.clone(),
-                message_repo.clone(),
             )))
             .with_message_repo(message_repo.clone())
             .with_frontend_delivery(frontend_delivery.clone())
@@ -5089,7 +5030,6 @@ impl BcsServer {
                 .with_session_channel_outbound(session_channel_outbound)
                 .with_result_publisher(Arc::new(MessageFlowStateMachineResultPublisher::new(
                     message_flow.clone(),
-                    message_repo.clone(),
                 )))
                 .with_message_repo(message_repo.clone())
                 .with_frontend_delivery(frontend_delivery.clone())

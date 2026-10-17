@@ -68,11 +68,20 @@ pub(crate) fn validate_admission(
             ));
         }
     }
+    // One-shot Group results retain the immutable history string rather than
+    // the ordinary inbound {text, mentions} envelope.
+    let state_machine_result = command.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::Group
+        && command.message.message_type == "chat"
+        && command.message.visibility_domain == bcs_domain::MessageVisibilityDomain::StateMachine
+        && command.message.audience == Some(bcs_domain::MessageAudience::Public)
+        && command.message.sender_type == bcs_domain::SenderType::Bot
+        && !command.message.run_id.is_empty()
+        && command.message.content.is_string();
     if command.message_id.is_empty()
         || command.message.session_id.is_empty()
         || (!direct && command.message.group_id.is_empty())
         || command.now_ms < 0
-        || (command.message.message_type != bcs_domain::CHAT_ERROR_MESSAGE_TYPE && command
+        || (!state_machine_result && command.message.message_type != bcs_domain::CHAT_ERROR_MESSAGE_TYPE && command
             .message
             .content
             .get("text")
