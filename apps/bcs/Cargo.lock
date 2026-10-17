@@ -768,6 +768,7 @@ dependencies = [
  "bcs-config",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-domain",
  "bcs-observability",
  "bcs-service-api",
  "bcs-test-support",

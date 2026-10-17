@@ -12,6 +12,7 @@ bcs-observability = { workspace = true }
 async-trait = { workspace = true }
 bcs-config = { workspace = true }
 bcs-db-api = { workspace = true }
+bcs-domain = { workspace = true }
 bcs-service-api = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
