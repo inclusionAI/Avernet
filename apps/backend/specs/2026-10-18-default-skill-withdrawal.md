@@ -68,3 +68,17 @@ MySQL migration. Rollout order: additive schema, Engine image, then Backend.
 The lease is bounded isolation, not an Engine fencing token. Normal delayed
 snapshots are rejected; an arbitrarily suspended remote worker outliving the
 lease is not proven terminated. Engine runtime serialization still applies.
+
+
+## Simulator verification
+
+The OCB simulator used the modified Backend against its real MariaDB and an
+isolated Arca Engine container carrying both repositories' current sources.
+Production Installation UoW/resolver and Backend mapping client delivered full
+snapshots over the real Engine HTTP route. File readback verified Default
+withdrawal with Direct retained, Legacy/Pool Repo and canonical Center pruning,
+Adapter restart with an injected stale link, valid empty snapshots, Local and
+external preservation, and explicit Local retirement without deleting bytes.
+Only dedicated test metadata was changed, then removed. This verifies Skill
+projection and Adapter restart; it does not claim a new BaaS/Gateway allocation,
+model conversation or published Service release was exercised.
