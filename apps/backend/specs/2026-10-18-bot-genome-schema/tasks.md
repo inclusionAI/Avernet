@@ -91,8 +91,8 @@
 ## Task 10: Verification
 - **Goal:** Ensure the work meets every spec acceptance criterion.
 - **Done when:**
-  - [ ] Contract test passes; repo pre-push lint gate passes.
-  - [ ] Every acceptance criterion in spec.md checks off.
+  - [x] Contract test passes; repo pre-push lint gate passes.
+  - [x] Every acceptance criterion in spec.md checks off.
 - **Depends on:** Task 9
 
 ---

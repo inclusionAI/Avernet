@@ -71,7 +71,7 @@
 <path d="M 158 463 L 170 463" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
 <rect x="170" y="426" width="122" height="74" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
 <text x="231.0" y="448.82" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">floor</text>
-<text x="231.0" y="464.04" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">schema · locked genes</text>
+<text x="231.0" y="464.04" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">schema · genes &amp; pins</text>
 <text x="231.0" y="478.21" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">secret / PII scan</text>
 <path d="M 292 463 L 304 463" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
 <rect x="304" y="426" width="122" height="74" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>

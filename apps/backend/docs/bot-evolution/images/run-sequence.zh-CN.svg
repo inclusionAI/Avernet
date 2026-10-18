@@ -73,7 +73,7 @@
 <path d="M 660 578 L 1080 578" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
 <text x="870.0" y="570" font-size="10.5" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle">记录 r42 = candidate/run_7f3/1</text>
 <path d="M 660 606 L 950 606" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
-<text x="805.0" y="598" font-size="10.5" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle">底线检查（schema、锁定基因、扫描）</text>
+<text x="805.0" y="598" font-size="10.5" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle">底线检查（schema、基因与固定项、扫描）</text>
 <path d="M 660 634 L 810 634" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
 <text x="735.0" y="626" font-size="10.5" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle">verify(c41e, default@1)</text>
 <path d="M 810 662 L 950 662" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>

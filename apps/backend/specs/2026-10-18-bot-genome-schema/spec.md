@@ -50,77 +50,77 @@ start until these are fixed.
 ## Acceptance Criteria
 
 Revision format:
-- [ ] A Genome Revision has a published schema covering `spec`, `policy`, and
+- [x] A Genome Revision has a published schema covering `spec`, `policy`, and
       the platform-written `revision` metadata; every example revision in the
       deliverable validates against it.
-- [ ] Every entry in `spec` is a stable **key** (the field that names it:
+- [x] Every entry in `spec` is a stable **key** (the field that names it:
       persona file type, skill name, resource path, MCP server code) plus a
       **value**: a digest when the entry has stored bytes, inline fields when
       it has none (MCP config, a Center skill's pinned version).
-- [ ] File content is always referenced by digest, including content a
+- [x] File content is always referenced by digest, including content a
       Manifest declared inline.
-- [ ] A directory (a skill, or a directory resource) is referenced by the
+- [x] A directory (a skill, or a directory resource) is referenced by the
       digest of its `acm-tree-v1` encoding; the encoding's rules, including
       what it does not preserve, are stated (closes G-1).
-- [ ] The revision id is defined as SHA-256 over the RFC 8785 canonical form
+- [x] The revision id is defined as SHA-256 over the RFC 8785 canonical form
       of `{spec, policy}`, with no floats anywhere in hashed content, and the
       rule is backed by published test vectors that a second implementation
       can check itself against.
 
 Policy:
-- [ ] The policy has exactly `mutable_genes`, `pins`, and `risk_overrides`;
+- [x] The policy has exactly `mutable_genes`, `pins`, and `risk_overrides`;
       anything not listed in `mutable_genes` is off limits, and `policy`
       itself is never reachable by a patch.
-- [ ] Default policy: mutable `persona`, `skills`, `memory`, `resources`;
+- [x] Default policy: mutable `persona`, `skills`, `memory`, `resources`;
       pinned `persona/SAFETY.md`; `script` and `tools/mcp` not mutable
       (closes G-3).
-- [ ] `risk_overrides` may only raise a tier (closes G-7).
+- [x] `risk_overrides` may only raise a tier (closes G-7).
 
 Gene paths:
-- [ ] One slash-separated gene path grammar is defined and used by policy
+- [x] One slash-separated gene path grammar is defined and used by policy
       entries, binding `allowed_genes`, patch targets, and diff output;
       prefix matching works on whole segments only, so a rule for skill `pdf`
       never covers skill `pdf.tools`.
 
 Patch format:
-- [ ] A Genome Patch has a published schema; the op set is `file.edit` (kinds
+- [x] A Genome Patch has a published schema; the op set is `file.edit` (kinds
       `replace_section`, `insert_after`, `diff`), `skill.add`, `skill.update`,
       `skill.remove`, `persona.add`, `persona.remove`, `resource.add`,
       `resource.remove`, `memory.add`, `memory.update`, `memory.retire`,
       `memory.set_mode` (closes G-2, G-10).
-- [ ] Any change to a text file can be expressed as a patch (the `diff` kind
+- [x] Any change to a text file can be expressed as a patch (the `diff` kind
       guarantees it), so turning a sandbox's edits into a patch never fails
       for lack of an op.
-- [ ] MCP and script changes cannot be expressed as a patch; they change only
+- [x] MCP and script changes cannot be expressed as a patch; they change only
       when an owner records a whole Manifest document.
-- [ ] Every op has a defined default risk tier, carried as data next to the
+- [x] Every op has a defined default risk tier, carried as data next to the
       schema together with the rewrite threshold (40% of a file's lines); the
       tier tables in `01-genome.md` and `08-promotion.md` are identical to
       that data, and a test fails if they drift.
 
 Manifest mapping:
-- [ ] A compatibility table lists every Manifest v1 field with one outcome:
+- [x] A compatibility table lists every Manifest v1 field with one outcome:
       maps to a revision field, resolved at record time, kept only in the
       provenance copy of the original document, refused, or ignored.
-- [ ] "Round-trip" is defined as: recording a Manifest document M as a
+- [x] "Round-trip" is defined as: recording a Manifest document M as a
       revision and compiling that revision to M′ gives a document that
       applies to the same bot as M did when it was recorded.
-- [ ] The complete example document and every example fragment in
+- [x] The complete example document and every example fragment in
       `docs/bot-config-manifest/examples.zh-CN.md` are worked through
       M → revision → M′ and satisfy that definition on paper, with the stated
       exceptions (cli_tools ignored, engine_config refused).
-- [ ] Recording rules are stated for placeholders (resolved once, with the
+- [x] Recording rules are stated for placeholders (resolved once, with the
       recording bot's values), the first revision's capture from the bot's
       current state, and the platform-written AGENTS.md reference block
       (removed on capture, with the reason documented).
 
 Documentation and tracking:
-- [ ] `01-genome.md`, `03-strategy.md`, `06-evolution-run.md`,
+- [x] `01-genome.md`, `03-strategy.md`, `06-evolution-run.md`,
       `08-promotion.md` and their `zh-CN` versions match the new format.
-- [ ] `work-items.md` (and `zh-CN`) marks RSI-02 done and adds to RSI-04: a
+- [x] `work-items.md` (and `zh-CN`) marks RSI-02 done and adds to RSI-04: a
       Center-skill source in the Manifest, and a dependency on resource
       removal (#2162).
-- [ ] Known limitations are documented with their tracking issues: effective
+- [x] Known limitations are documented with their tracking issues: effective
       MCP config is not fully pinned (#2859); MCP header values are stored as
       written (#2860); `engine_config` is refused until #2858.
 
