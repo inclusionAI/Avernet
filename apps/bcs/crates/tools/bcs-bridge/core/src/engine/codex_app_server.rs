@@ -992,13 +992,20 @@ fn extract_delta(value: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Extract the final assistant text from a `turn/completed` notification.
+///
+/// Empirically verified contract (2026-10-18, 438 task_complete payloads
+/// across cfuse codex 0.161 and vanilla codex rollouts on this host): the
+/// engine always emits the answer under `params.last_agent_message`; the
+/// legacy probe keys `text` / `finalText` / `final_text` never occur and are
+/// deliberately not read. Turns that instead streamed `agentMessage/delta`
+/// never reach this fallback.
 fn completed_text(value: &Value) -> Option<String> {
     let params = value.get("params")?;
     params
-        .get("text")
+        .get("last_agent_message")
         .and_then(Value::as_str)
-        .or_else(|| params.get("finalText").and_then(Value::as_str))
-        .or_else(|| params.get("final_text").and_then(Value::as_str))
+        .filter(|text| !text.trim().is_empty())
         .map(str::to_string)
 }
 
@@ -1108,6 +1115,26 @@ mod tests {
 
     fn table(pairs: &[(&str, toml::Value)]) -> toml::Table {
         pairs.iter().cloned().map(|(k, v)| (k.to_owned(), v)).collect()
+    }
+
+    #[test]
+    fn completed_text_reads_last_agent_message_from_turn_end() {
+        let value = json!({"method":"turn/completed","params":{
+            "threadId":"t-1","turnId":"turn-1",
+            "last_agent_message":"review done"
+        }});
+        assert_eq!(completed_text(&value).as_deref(), Some("review done"));
+        let legacy = json!({"method":"turn/completed","params":{
+            "text":"legacy fallback never delivered by this engine",
+            "finalText":"also unverified",
+            "final_text":"ditto"
+        }});
+        assert_eq!(completed_text(&legacy), None,
+            "speculative legacy keys must stay unread, matching the verified wire contract");
+        let empty = json!({"method":"turn/completed","params":{
+            "last_agent_message":"   "
+        }});
+        assert_eq!(completed_text(&empty), None, "whitespace-only tail text is not a real final");
     }
 
     #[test]
