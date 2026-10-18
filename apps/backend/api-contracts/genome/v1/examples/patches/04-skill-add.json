@@ -1,0 +1,17 @@
+{
+  "patch_schema": 1,
+  "base": "sha256:937c25e5349fafff9a345b8b94b0d99f119448cdfe4eb8417d73159a1571d49d",
+  "ops": [
+    {
+      "op": "skill.add",
+      "name": "invoice-lookup",
+      "files": {
+        "SKILL.md": "---\nname: invoice-lookup\ndescription: Look up an invoice by order id.\n---\nCall the orders MCP with the order id.\n"
+      }
+    }
+  ],
+  "rationale": "Example of one op; see README §6.1.",
+  "evidence": [
+    "episode:ep_91"
+  ]
+}

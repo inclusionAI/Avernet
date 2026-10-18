@@ -1,0 +1,18 @@
+{
+  "schema": "patch",
+  "check": "schema",
+  "reason": "a directory resource is added by the digest of an uploaded tree",
+  "record": {
+    "patch_schema": 1,
+    "base": "sha256:937c25e5349fafff9a345b8b94b0d99f119448cdfe4eb8417d73159a1571d49d",
+    "ops": [
+      {
+        "op": "resource.add",
+        "path": "data/faq/",
+        "content": "inline text"
+      }
+    ],
+    "rationale": "invalid example",
+    "evidence": []
+  }
+}

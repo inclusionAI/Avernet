@@ -1,0 +1,23 @@
+{
+  "schema": "patch",
+  "check": "schema",
+  "reason": "no op reaches tools; MCP changes only through a whole Manifest document",
+  "record": {
+    "patch_schema": 1,
+    "base": "sha256:937c25e5349fafff9a345b8b94b0d99f119448cdfe4eb8417d73159a1571d49d",
+    "ops": [
+      {
+        "op": "file.edit",
+        "target": "tools/mcp/mcp.x.meet",
+        "edits": [
+          {
+            "kind": "diff",
+            "diff": "@@ -1 +1 @@\n-a\n+b\n"
+          }
+        ]
+      }
+    ],
+    "rationale": "invalid example",
+    "evidence": []
+  }
+}

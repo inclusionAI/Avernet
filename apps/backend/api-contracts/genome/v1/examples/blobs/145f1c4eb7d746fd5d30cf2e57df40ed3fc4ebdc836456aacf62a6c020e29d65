@@ -1,0 +1,7 @@
+acm-tree-v1
+8:SKILL.md143:---
+name: quality-check
+description: Check a reply against the service rules before sending it.
+---
+Read RULES.md, then check the draft reply.
+16:scripts/check.py12:print('ok')

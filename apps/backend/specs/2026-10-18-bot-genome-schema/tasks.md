@@ -46,10 +46,10 @@
 - **Goal:** Real, verifiable examples for every schema.
 - **Files:** `apps/backend/api-contracts/genome/v1/examples/{blobs,revisions,patches,invalid}/`
 - **Done when:**
-  - [ ] Revisions cover a personal bot, a Center skill, a directory resource, MCP with and without config, a script, and the default policy.
-  - [ ] One valid patch per op plus one mixed patch.
-  - [ ] Every invalid case named in plan.md's Test Strategy, each with its expected failure.
-  - [ ] Every digest referenced exists under `examples/blobs/` and every revision id is real.
+  - [x] Revisions cover a personal bot, a Center skill, a directory resource, MCP with and without config, a script, and the default policy.
+  - [x] One valid patch per op plus one mixed patch.
+  - [x] Every invalid case named in plan.md's Test Strategy, each with its expected failure.
+  - [x] Every digest referenced exists under `examples/blobs/` and every revision id is real.
 - **Depends on:** Tasks 2, 3, 4
 
 ## Task 6: Manifest v1 compatibility table and round-trip cases

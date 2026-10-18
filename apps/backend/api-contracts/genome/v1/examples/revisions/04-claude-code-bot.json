@@ -1,0 +1,50 @@
+{
+  "genome_schema": 1,
+  "revision": {
+    "id": "sha256:8a2df272e4d11af7f36dfa5d812997247d6677c092e851b2456a76f142f40784",
+    "seq": 1,
+    "bot": {
+      "owner_id": "user_owner_5",
+      "bot_id": "bot_123"
+    },
+    "parent": null,
+    "created_by": {
+      "kind": "user",
+      "actor": "user_owner_5"
+    },
+    "created_at": "2026-10-18T09:00:00Z",
+    "status": "draft",
+    "patch_digest": null,
+    "evidence": [],
+    "evaluations": [],
+    "annotations": {}
+  },
+  "spec": {
+    "persona": [
+      {
+        "type": "CLAUDE.md",
+        "digest": "sha256:df0a4f6f8b2318d621cc091f4d04c9a6ad6d48ec5db47a95c0c3e12eeb8b98e5"
+      }
+    ],
+    "skills": [],
+    "memory": null,
+    "resources": [],
+    "tools": {
+      "mcp": []
+    },
+    "engine_config": {},
+    "script": null
+  },
+  "policy": {
+    "mutable_genes": [
+      "memory",
+      "persona",
+      "resources",
+      "skills"
+    ],
+    "pins": [
+      "persona/SAFETY.md"
+    ],
+    "risk_overrides": {}
+  }
+}

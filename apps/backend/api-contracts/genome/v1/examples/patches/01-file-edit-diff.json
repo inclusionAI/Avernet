@@ -1,0 +1,20 @@
+{
+  "patch_schema": 1,
+  "base": "sha256:937c25e5349fafff9a345b8b94b0d99f119448cdfe4eb8417d73159a1571d49d",
+  "ops": [
+    {
+      "op": "file.edit",
+      "target": "resources/data/kb/shipping.md",
+      "edits": [
+        {
+          "kind": "diff",
+          "diff": "@@ -1,2 +1,2 @@\n # Shipping\n-Standard shipping takes 3-5 working days.\n+Standard shipping takes 2-4 working days.\n"
+        }
+      ]
+    }
+  ],
+  "rationale": "Example of one op; see README §6.1.",
+  "evidence": [
+    "episode:ep_91"
+  ]
+}

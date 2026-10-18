@@ -1,0 +1,20 @@
+{
+  "schema": "patch",
+  "check": "schema",
+  "reason": "SKILL.md cannot be deleted",
+  "record": {
+    "patch_schema": 1,
+    "base": "sha256:937c25e5349fafff9a345b8b94b0d99f119448cdfe4eb8417d73159a1571d49d",
+    "ops": [
+      {
+        "op": "skill.update",
+        "name": "quality-check",
+        "files": {
+          "SKILL.md": null
+        }
+      }
+    ],
+    "rationale": "invalid example",
+    "evidence": []
+  }
+}

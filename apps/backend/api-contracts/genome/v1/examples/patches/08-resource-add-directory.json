@@ -1,0 +1,17 @@
+{
+  "patch_schema": 1,
+  "base": "sha256:937c25e5349fafff9a345b8b94b0d99f119448cdfe4eb8417d73159a1571d49d",
+  "ops": [
+    {
+      "op": "resource.add",
+      "path": "data/faq/",
+      "content": {
+        "digest": "sha256:4958f7d5e43a9a0722ae9715d78b7df95979e110947d0691edb2d464143f5ce7"
+      }
+    }
+  ],
+  "rationale": "Example of one op; see README §6.1.",
+  "evidence": [
+    "episode:ep_91"
+  ]
+}
