@@ -26,11 +26,11 @@
 - **Goal:** `genome-revision.schema.json` for `spec`, `policy`, and `revision` metadata.
 - **Files:** `apps/backend/api-contracts/genome/v1/genome-revision.schema.json`
 - **Done when:**
-  - [ ] Spec entries follow key + value; `tools` has `mcp` only; `engine_config` is `{}`; `memory` is `null` or `{mode, items_digest}`; skills `origin` is `local`/`center`.
-  - [ ] Persona types are the identity whitelist minus `MEMORY.md`/`IDENTITY.md`.
-  - [ ] MCP `config` mirrors the Manifest's closed set and limits.
-  - [ ] Policy is `mutable_genes`, `pins`, `risk_overrides`; gene path pattern enforced.
-  - [ ] Revision metadata matches 01-genome.md §2.4 (provenance kinds `user`, `strategy_run`).
+  - [x] Spec entries follow key + value; `tools` has `mcp` only; `engine_config` is `{}`; `memory` is `null` or `{mode, items_digest}`; skills `origin` is `local`/`center`.
+  - [x] Persona types are the identity whitelist minus `MEMORY.md`/`IDENTITY.md`.
+  - [x] MCP `config` mirrors the Manifest's closed set and limits.
+  - [x] Policy is `mutable_genes`, `pins`, `risk_overrides`; gene path pattern enforced.
+  - [x] Revision metadata matches 01-genome.md §2.4 (provenance kinds `user`, `strategy_run`).
 - **Depends on:** Task 1
 
 ## Task 4: Patch schema and risk tiers

@@ -1,0 +1,233 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://avernet/api-contracts/genome/v1/genome-revision.schema.json",
+  "title": "GenomeRevision",
+  "description": "One immutable version of a bot's definition. Only spec and policy are hashed into revision.id (README §3.2). Rules that JSON Schema cannot express (list order, uniqueness of keys, engine-specific persona types, nesting of resources) are stated in README §3–§4 and checked by the Genome Registry.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["genome_schema", "revision", "spec", "policy"],
+  "properties": {
+    "genome_schema": {"const": 1},
+    "revision": {"$ref": "#/definitions/revisionMetadata"},
+    "spec": {"$ref": "#/definitions/spec"},
+    "policy": {"$ref": "#/definitions/policy"}
+  },
+  "definitions": {
+    "digest": {
+      "description": "Address of stored bytes in the manifest content store.",
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "revisionId": {
+      "description": "sha256 of JCS({spec, policy}) (README §3.2).",
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "safeInteger": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "riskTier": {"type": "string", "enum": ["T0", "T1", "T2", "T3"]},
+    "genePath": {
+      "description": "README §2. Categories, then '/'-separated segments; '%' and '/' inside a segment are %25 and %2F.",
+      "type": "string",
+      "pattern": "^(persona|skills|memory|resources|tools|engine_config|script)(/(?!\\.{1,2}(/|$))([A-Za-z0-9._-]|%25|%2F)+)*$"
+    },
+    "personaType": {
+      "type": "string",
+      "enum": [
+        "AGENTS.md", "BOOTSTRAP.md", "CLAUDE.md", "GREETING.md", "HEARTBEAT.md", "KNOWLEDGE.md", "OKR.md",
+        "OUTPUT.md", "README.md", "RULES.md", "SAFETY.md", "SOUL.md", "TOOLS.md", "USER.md"
+      ]
+    },
+    "skillName": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$", "maxLength": 255},
+    "resourcePath": {
+      "description": "Workspace-relative; trailing '/' marks a directory entry. No empty, '.' or '..' segment.",
+      "type": "string",
+      "maxLength": 1024,
+      "pattern": "^(?![/~])(?!.*(^|/)\\.{1,2}(/|$))(?!.*//)[A-Za-z0-9._/-]+$"
+    },
+    "memoryKey": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$", "maxLength": 128},
+    "evidenceRef": {"type": "string", "pattern": "^(episode|feedback|eval):[A-Za-z0-9_-]+$"},
+    "sortedUniqueStrings": {
+      "description": "Sorted ascending in code-point order (README §3.1).",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string"}
+    },
+    "personaFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "digest"],
+      "properties": {"type": {"$ref": "#/definitions/personaType"}, "digest": {"$ref": "#/definitions/digest"}}
+    },
+    "skillEntry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "origin", "digest"],
+          "properties": {
+            "name": {"$ref": "#/definitions/skillName"},
+            "origin": {"const": "local"},
+            "digest": {"$ref": "#/definitions/digest", "description": "acm-tree-v1 of the skill's files; must contain SKILL.md."}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "origin", "center_version"],
+          "properties": {
+            "name": {"$ref": "#/definitions/skillName"},
+            "origin": {"const": "center"},
+            "center_version": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"}
+          }
+        }
+      ]
+    },
+    "memorySpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "items_digest"],
+      "properties": {
+        "mode": {"type": "string", "enum": ["seed", "merge", "replace"]},
+        "items_digest": {"$ref": "#/definitions/digest", "description": "JCS of the item list (README §4.4)."}
+      }
+    },
+    "memoryItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "text", "tags", "source"],
+      "properties": {
+        "key": {"$ref": "#/definitions/memoryKey"},
+        "text": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "tags": {"$ref": "#/definitions/sortedUniqueStrings"},
+        "source": {"allOf": [{"$ref": "#/definitions/sortedUniqueStrings"}, {"items": {"$ref": "#/definitions/evidenceRef"}}]}
+      }
+    },
+    "memoryItems": {
+      "description": "The stored list items_digest points at; sorted by key.",
+      "type": "array",
+      "items": {"$ref": "#/definitions/memoryItem"}
+    },
+    "resourceEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "digest"],
+      "properties": {
+        "path": {"$ref": "#/definitions/resourcePath"},
+        "digest": {"$ref": "#/definitions/digest", "description": "File bytes, or acm-tree-v1 for a directory entry."}
+      }
+    },
+    "mcpConfig": {
+      "description": "The bot-level override, the Manifest's closed set. Header names lower-cased; transport upper-cased.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url": {"type": "string", "pattern": "^https?://[^\\s/?#]+([/?#][^\\s]*)?$", "maxLength": 2048},
+        "headers": {
+          "type": "object",
+          "propertyNames": {"pattern": "^[^A-Z\\r\\n]{1,256}$"},
+          "additionalProperties": {"type": "string", "maxLength": 2000, "pattern": "^[^\\r\\n]*$"}
+        },
+        "endpoint_env": {"type": "string", "enum": ["PROD", "PRE"]},
+        "transport_protocol": {"type": "string", "enum": ["SSE", "STREAMABLE_HTTP"]}
+      }
+    },
+    "mcpServerEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["server_code"],
+      "properties": {
+        "server_code": {"type": "string", "minLength": 1, "maxLength": 256},
+        "config": {"$ref": "#/definitions/mcpConfig"}
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["persona", "skills", "memory", "resources", "tools", "engine_config", "script"],
+      "properties": {
+        "persona": {"type": "array", "maxItems": 50, "items": {"$ref": "#/definitions/personaFile"}},
+        "skills": {"type": "array", "maxItems": 50, "items": {"$ref": "#/definitions/skillEntry"}},
+        "memory": {"oneOf": [{"type": "null"}, {"$ref": "#/definitions/memorySpec"}]},
+        "resources": {"type": "array", "maxItems": 50, "items": {"$ref": "#/definitions/resourceEntry"}},
+        "tools": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mcp"],
+          "properties": {"mcp": {"type": "array", "maxItems": 50, "items": {"$ref": "#/definitions/mcpServerEntry"}}}
+        },
+        "engine_config": {
+          "description": "Always {} in v1, until #2858 defines keys and value types.",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "script": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["digest"],
+              "properties": {"digest": {"$ref": "#/definitions/digest"}}
+            }
+          ]
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mutable_genes", "pins", "risk_overrides"],
+      "properties": {
+        "mutable_genes": {"allOf": [{"$ref": "#/definitions/sortedUniqueStrings"}, {"items": {"$ref": "#/definitions/genePath"}}]},
+        "pins": {"allOf": [{"$ref": "#/definitions/sortedUniqueStrings"}, {"items": {"$ref": "#/definitions/genePath"}}]},
+        "risk_overrides": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/definitions/genePath"},
+          "additionalProperties": {"$ref": "#/definitions/riskTier"}
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "actor"],
+      "properties": {
+        "kind": {"type": "string", "enum": ["user", "strategy_run"]},
+        "actor": {"type": "string", "minLength": 1, "description": "A user id, or a strategy 'id@version'."},
+        "run_id": {"type": "string", "minLength": 1},
+        "step": {"type": "string", "minLength": 1}
+      },
+      "if": {"properties": {"kind": {"const": "strategy_run"}}},
+      "then": {"required": ["run_id"]},
+      "else": {"not": {"anyOf": [{"required": ["run_id"]}, {"required": ["step"]}]}}
+    },
+    "revisionMetadata": {
+      "description": "Platform-written; not hashed (01-genome.md §2.4).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "seq", "bot", "parent", "created_by", "created_at", "status", "patch_digest", "evidence", "evaluations", "annotations"],
+      "properties": {
+        "id": {"$ref": "#/definitions/revisionId"},
+        "seq": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "bot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["owner_id", "bot_id"],
+          "properties": {"owner_id": {"type": "string", "minLength": 1}, "bot_id": {"type": "string", "minLength": 1}}
+        },
+        "parent": {"oneOf": [{"type": "null"}, {"$ref": "#/definitions/revisionId"}]},
+        "created_by": {"$ref": "#/definitions/provenance"},
+        "created_at": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$"},
+        "status": {"type": "string", "enum": ["draft", "candidate", "accepted", "rejected", "promoted", "archived"]},
+        "patch_digest": {"oneOf": [{"type": "null"}, {"$ref": "#/definitions/digest"}]},
+        "evidence": {"type": "array", "items": {"$ref": "#/definitions/evidenceRef"}},
+        "evaluations": {"type": "array", "items": {"type": "string", "pattern": "^ev_[A-Za-z0-9]+$"}},
+        "annotations": {"type": "object", "additionalProperties": {"type": "string"}}
+      }
+    }
+  }
+}
