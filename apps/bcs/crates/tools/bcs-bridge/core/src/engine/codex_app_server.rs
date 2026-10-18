@@ -154,19 +154,24 @@ impl CodexApprovalReview {
 
 /// Per-bot Codex engine policy, parsed from `bot.engine_options`.
 /// Defaults (policy decision 2026-10-18): `workspace-write` sandbox,
-/// outbound network allowed, approvals never requested.
+/// outbound network allowed, approvals never requested, and no reasoning
+/// effort override (the engine's config-level default applies).
 #[derive(Clone, Copy, Debug)]
 pub struct CodexOptions {
     pub sandbox: CodexSandbox,
     pub network_access: bool,
     pub approval_policy: CodexApprovalPolicy,
     pub approval_review: CodexApprovalReview,
+    /// `thread.*`/`turn.start` `effort`; None leaves the engine's own default
+    /// (cfuse config.toml `model_reasoning_effort`, currently `xhigh`).
+    pub reasoning_effort: Option<&'static str>,
 }
 
 impl Default for CodexOptions {
     fn default() -> Self {
         Self { sandbox: CodexSandbox::WorkspaceWrite, network_access: true,
-            approval_policy: CodexApprovalPolicy::Never, approval_review: CodexApprovalReview::User }
+            approval_policy: CodexApprovalPolicy::Never, approval_review: CodexApprovalReview::User,
+            reasoning_effort: None }
     }
 }
 
@@ -175,11 +180,15 @@ impl CodexOptions {
     const KEY_NETWORK_ACCESS: &'static str = "network_access";
     const KEY_APPROVAL_POLICY: &'static str = "approval_policy";
     const KEY_APPROVAL_REVIEW: &'static str = "approval_review";
+    const KEY_REASONING_EFFORT: &'static str = "reasoning_effort";
+
+    // `effort` wire values, mirroring the cfuse model catalog reasoning levels.
+    const EFFORTS: [&'static str; 5] = ["minimal", "low", "medium", "high", "xhigh"];
 
     fn parse(options: &toml::Table) -> Result<Self, String> {
         let mut parsed = Self { sandbox: CodexSandbox::WorkspaceWrite,
             network_access: true, approval_policy: CodexApprovalPolicy::Never,
-            approval_review: CodexApprovalReview::User };
+            approval_review: CodexApprovalReview::User, reasoning_effort: None };
         for (key, value) in options {
             match (key.as_str(), value) {
                 (Self::KEY_SANDBOX, toml::Value::String(sandbox)) => {
@@ -194,6 +203,12 @@ impl CodexOptions {
                 (Self::KEY_APPROVAL_REVIEW, toml::Value::String(review)) => {
                     parsed.approval_review = CodexApprovalReview::parse(review).ok_or_else(||
                         format!("engine_options.approval_review must be one of 'user' | 'auto'"))?;
+                }
+                (Self::KEY_REASONING_EFFORT, toml::Value::String(effort)) => {
+                    let trimmed = effort.trim();
+                    parsed.reasoning_effort = Some(Self::EFFORTS.iter().copied().find(|candidate| *candidate == trimmed)
+                        .ok_or_else(|| format!("engine_options.reasoning_effort must be one of {}",
+                            Self::EFFORTS.map(|e| format!("'{e}'")).join(" | ")))?);
                 }
                 _ => return Err(format!("unsupported engine_options key '{key}'")),
             }
@@ -219,6 +234,7 @@ impl CodexOptions {
         tracing::warn!(target: "bcs_bridge_core::engine",
             sandbox = parsed.sandbox.wire(), network_access = parsed.network_access,
             approval_policy = parsed.approval_policy.wire(), approvals_reviewer = parsed.approval_review.wire(),
+            reasoning_effort = parsed.reasoning_effort.unwrap_or("(engine default)"),
             "bot policy posture (codex engine)");
         Ok(parsed)
     }
@@ -226,6 +242,7 @@ impl CodexOptions {
     fn wire_thread_sandbox(self) -> &'static str { self.sandbox.wire() }
     fn wire_approval_policy(self) -> &'static str { self.approval_policy.wire() }
     fn wire_approvals_reviewer(self) -> &'static str { self.approval_review.wire() }
+    fn wire_reasoning_effort(self) -> Option<&'static str> { self.reasoning_effort }
     fn wire_sandbox_policy(self) -> Value {
         match self.sandbox {
             // danger-full-access disables sandboxing entirely; network is inherent.
@@ -835,6 +852,13 @@ async fn respond_server_request(cli: &mut CodexConnection, request: &Value) -> R
     .await
 }
 
+fn with_reasoning_effort(mut params: Value, options: CodexOptions) -> Value {
+    if let Some(effort) = options.wire_reasoning_effort() {
+        params["effort"] = json!(effort);
+    }
+    params
+}
+
 fn thread_start_params(req: &TurnRequest, options: CodexOptions) -> Value {
     let mut params = json!({
         "cwd": req.cwd,
@@ -847,7 +871,7 @@ fn thread_start_params(req: &TurnRequest, options: CodexOptions) -> Value {
     if let Some(model) = req.model.as_deref().filter(|model| !model.is_empty()) {
         params["model"] = json!(model);
     }
-    params
+    with_reasoning_effort(params, options)
 }
 
 fn thread_resume_params(req: &TurnRequest, thread_id: &str, options: CodexOptions) -> Value {
@@ -861,7 +885,7 @@ fn thread_resume_params(req: &TurnRequest, thread_id: &str, options: CodexOption
     if let Some(model) = req.model.as_deref().filter(|model| !model.is_empty()) {
         params["model"] = json!(model);
     }
-    params
+    with_reasoning_effort(params, options)
 }
 
 fn turn_start_params(req: &TurnRequest, thread_id: &str, options: CodexOptions) -> Value {
@@ -881,7 +905,7 @@ fn turn_start_params(req: &TurnRequest, thread_id: &str, options: CodexOptions) 
     if let Some(model) = req.model.as_deref().filter(|model| !model.is_empty()) {
         params["model"] = json!(model);
     }
-    params
+    with_reasoning_effort(params, options)
 }
 
 fn extract_thread_id(value: &Value) -> Option<String> {
@@ -1117,9 +1141,26 @@ mod tests {
             table(&[("network_access", "true".into())]),
             table(&[("approval_policy", "auto".into())]),
             table(&[("approval_review", "everyone".into())]),
+            table(&[("reasoning_effort", "bogus".into())]),
+            table(&[("reasoning_effort", 3.into())]),
         ] {
             assert!(CodexOptions::parse(&invalid).is_err(), "accepted {invalid:?}");
         }
+    }
+
+    #[test]
+    fn codex_options_reasoning_effort_only_sends_when_set() {
+        let options = CodexOptions::parse(&toml::Table::new()).unwrap();
+        assert_eq!(options.reasoning_effort, None, "defaults leave the engine-level effort untouched");
+        for (value, expected) in [
+            ("minimal", "minimal"), ("low", "low"), ("medium", "medium"),
+            ("high", "high"), ("xhigh", "xhigh"),
+        ] {
+            let parsed = CodexOptions::parse(&table(&[("reasoning_effort", value.into())])).unwrap();
+            assert_eq!(parsed.reasoning_effort, Some(expected));
+        }
+        let parsed = CodexOptions::parse(&table(&[("reasoning_effort", " high ".into())])).unwrap();
+        assert_eq!(parsed.reasoning_effort, Some("high"), "surrounding whitespace is trimmed");
     }
 
     #[test]
@@ -1186,5 +1227,22 @@ mod tests {
         assert_eq!(turn_start_params(&req, "t-1", banned)["sandboxPolicy"],
             json!({"type": "dangerFullAccess"}));
         assert_eq!(thread_start_params(&req, banned)["sandbox"], "danger-full-access");
+    }
+
+    #[test]
+    fn wire_params_carry_reasoning_effort_only_when_configured() {
+        let defaults = CodexOptions::parse(&toml::Table::new()).unwrap();
+        let req = options_req("/tmp/x");
+        for params in [thread_start_params(&req, defaults),
+            thread_resume_params(&req, "t-1", defaults), turn_start_params(&req, "t-1", defaults)] {
+            assert!(params.get("effort").is_none(), "no effort key without an override: {params}");
+        }
+        let with_effort = CodexOptions::parse(&table(&[
+            ("reasoning_effort", "medium".into()),
+        ])).unwrap();
+        for params in [thread_start_params(&req, with_effort),
+            thread_resume_params(&req, "t-1", with_effort), turn_start_params(&req, "t-1", with_effort)] {
+            assert_eq!(params["effort"], "medium");
+        }
     }
 }
