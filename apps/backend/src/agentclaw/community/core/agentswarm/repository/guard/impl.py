@@ -1,0 +1,78 @@
+"""GuardEventRepository — ac_agent_swarm_guard_event persistence (D19 no-await-in-session)."""
+from __future__ import annotations
+
+from sqlalchemy import delete, select
+
+from agentclaw.community.core.agentswarm.domain import models as dm
+from agentclaw.community.core.agentswarm.repository.guard import model as om
+from agentclaw.community.core.agentswarm.repository.guard.protocol import (
+    GuardEventRepositoryProtocol,
+)
+from agentclaw.community.core.agentswarm.repository.decode import _decode_guard_kind
+from agentclaw.community.core.agentswarm.repository.types import _dumps, _loads
+from agentclaw.community.plugin_api.database import DatabasePlugin
+
+
+class GuardEventRepository(GuardEventRepositoryProtocol):
+
+    def __init__(self, db: DatabasePlugin) -> None:
+        self._db = db
+
+    def create(self, event: dm.GuardEvent) -> dm.GuardEvent:
+        with self._db.orm_session() as session:
+            row = om.AcAgentSwarmGuardEventModel(
+                event_id=event.id,
+                run_id=event.run_id,
+                tenant=event.tenant,
+                agent_id=event.agent_id,
+                kind=event.kind.value,
+                details=_dumps(event.details),
+            )
+            session.add(row)
+        return event
+
+    def list_by_run(self, run_id: dm.RunId, tenant: dm.TenantId) -> list[dm.GuardEvent]:
+        with self._db.orm_session() as session:
+            rows = session.execute(
+                select(om.AcAgentSwarmGuardEventModel).where(
+                    om.AcAgentSwarmGuardEventModel.run_id == run_id,
+                    om.AcAgentSwarmGuardEventModel.tenant == tenant,
+                    om.AcAgentSwarmGuardEventModel.is_deleted.is_(False),
+                ).order_by(om.AcAgentSwarmGuardEventModel.id)
+            ).scalars().all()
+            return [self._to_domain(r) for r in rows]
+
+    def list_by_run_with_rows(self, run_id: dm.RunId,
+                              tenant: dm.TenantId) -> list[tuple[int, dm.GuardEvent]]:
+        with self._db.orm_session() as session:
+            rows = session.execute(
+                select(om.AcAgentSwarmGuardEventModel.id,
+                       om.AcAgentSwarmGuardEventModel).where(
+                    om.AcAgentSwarmGuardEventModel.run_id == run_id,
+                    om.AcAgentSwarmGuardEventModel.tenant == tenant,
+                    om.AcAgentSwarmGuardEventModel.is_deleted.is_(False),
+                ).order_by(om.AcAgentSwarmGuardEventModel.id)
+            ).all()
+            return [(r[0], self._to_domain(r[1])) for r in rows]
+
+    def purge_run(self, run_id: dm.RunId, tenant: dm.TenantId) -> int:
+        with self._db.orm_session() as session:
+            result = session.execute(
+                delete(om.AcAgentSwarmGuardEventModel).where(
+                    om.AcAgentSwarmGuardEventModel.run_id == run_id,
+                    om.AcAgentSwarmGuardEventModel.tenant == tenant,
+                )
+            )
+        return result.rowcount
+
+    @staticmethod
+    def _to_domain(row: om.AcAgentSwarmGuardEventModel) -> dm.GuardEvent:
+        return dm.GuardEvent(
+            id=dm.EventId(row.event_id),
+            run_id=dm.RunId(row.run_id),
+            tenant=row.tenant,
+            agent_id=dm.AgentId(row.agent_id) if row.agent_id else None,
+            kind=_decode_guard_kind(row.kind),
+            details=_loads(row.details) or {},
+            created_at=dm.EpochMillis(0),
+        )

@@ -31,6 +31,10 @@
     "agentclawproxy": {
       "base_url": "http://127.0.0.1:9999"
     },
+    "agentswarm": {
+      "artifact_store_root": "${AGENTSWARM_ARTIFACT_ROOT:-/tmp/agentswarm/artifacts}",
+      "enabled": true
+    },
     "aidesktop_root": "~/.aidesktop",
     "antcode": {
       "base_url": "https://code.teamclaw.com",
@@ -59,10 +63,10 @@
       "desktop_template_uuid": "TEMPLATE-f996ecc77d224ef7bd80757d8d2bcd0d",
       "eval_template_uuid": "TEMPLATE-2e3192faa8994fe8bb8bc7be8671b431",
       "personal_bot_template_uuid": "TEMPLATE-54942a40aa794eaaae2be166f94890ed",
+      "runtime_identity_metadata": true,
       "teclaw_template_uuid": "TEMPLATE-3106e731ffb04e0285e27c387e153737",
       "template_uuid": "TEMPLATE-4d0e2849d7004111836333de782b95d8",
-      "tenant": "team_claw",
-      "runtime_identity_metadata": true
+      "tenant": "team_claw"
     },
     "bcn": {
       "base_url": "http://localhost:21000"
@@ -269,10 +273,10 @@
       "desktop_ttl_minutes": 0,
       "eval_template_uuid": "TEMPLATE-2e3192faa8994fe8bb8bc7be8671b431",
       "personal_bot_template_uuid": "TEMPLATE-54942a40aa794eaaae2be166f94890ed",
+      "runtime_identity_metadata": true,
       "teclaw_template_uuid": "TEMPLATE-3106e731ffb04e0285e27c387e153737",
       "template_uuid": "TEMPLATE-4d0e2849d7004111836333de782b95d8",
-      "tenant": "team_claw",
-      "runtime_identity_metadata": true
+      "tenant": "team_claw"
     },
     "bcn": {
       "base_url": "http://localhost:21000",
