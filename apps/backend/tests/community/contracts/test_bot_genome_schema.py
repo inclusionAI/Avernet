@@ -287,12 +287,16 @@ def _assert_skill_package(name: str, members: list[tuple[str, bytes]]) -> None:
 
 
 def _assert_resource_paths(entries: list[dict[str, Any]]) -> None:
-    """Each resource names its own workspace path: no file/directory alias, no nesting (README §4.2)."""
+    """No resource path is a whole-segment prefix of another, and the files they write can coexist (README §4.2)."""
     names = [e["path"].rstrip("/") for e in entries]
     assert len(set(names)) == len(names), f"resource paths alias one workspace path: {names}"
-    for directory in (e["path"] for e in entries if e["path"].endswith("/")):
-        nested = [e["path"] for e in entries if e["path"] != directory and e["path"].startswith(directory)]
-        assert not nested, f"{nested} lie inside the directory resource {directory}"
+    nested = sorted((n, m) for n in names for m in names if m.startswith(n + "/"))
+    assert not nested, f"resource paths lie beneath other resource paths: {nested}"
+    written = [
+        f"{e['path']}{member}" for e in entries if e["path"].endswith("/") for member, _ in _tree_members(_blob(e["digest"]))
+    ] + [e["path"] for e in entries if not e["path"].endswith("/")]
+    colliding = sorted({n for n in written for m in written if m.startswith(n + "/")})
+    assert not colliding, f"workspace files {colliding} are also directories of other files"
 
 
 def _assert_resource_admitted(entry: dict[str, Any]) -> None:

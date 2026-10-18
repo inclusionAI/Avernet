@@ -265,13 +265,17 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
   or `replace` (01-genome.md §2.2).
 - **`resources`.** `path` is workspace-relative: characters
   `A–Z a–z 0–9 . _ - /`, no leading `/` or `~`, no empty, `.` or `..`
-  segment. A trailing `/` makes it a directory entry. No entry may lie inside
-  another directory entry (the Manifest refuses nesting too), and no two
-  entries may name the same path once the trailing `/` is removed: `foo.md`
-  and `foo.md/` would both be written to the workspace path `foo.md` (apply
-  writes the file, then cannot write the directory's members under it) and
-  would share the gene path `resources/foo.md`. The Manifest does not refuse
-  this pair; recording does. The Manifest
+  segment. A trailing `/` makes it a directory entry. With the trailing `/`
+  removed, resource paths are unique and none is a whole-segment prefix of
+  another, whether or not the shorter one is a directory entry. So these are
+  all refused: `foo.md` with `foo.md/` (one workspace path, and one gene path
+  `resources/foo.md`), `data/` with `data/a.md` (nesting, which the Manifest
+  refuses too), and `foo.md` with `foo.md/b.csv` (a file beneath a file).
+  Apply writes the shorter path first and cannot then write beneath it. The
+  Manifest checks only nesting beneath a directory entry, so recording
+  refuses the other two. More generally, the files the resources write (each
+  file resource, and each member of a directory resource under its path) must
+  be able to coexist: none may be a whole-segment prefix of another. The Manifest
   accepts empty and `.` segments (`./faq.csv`, `a//b`); recording removes
   them, so each path has one spelling. Every file a resource puts in the
   workspace (a file resource, or each member of a directory resource) must
@@ -477,7 +481,7 @@ denominator).
   | `persona` | `IdentityMaterialiser`, `legal_identity_types` | UTF-8 bytes (including content given by digest); a type the bot's engine accepts |
   | `skills` (`local`) | `SkillPackageValidator`, skills materialiser | One root `SKILL.md` with front matter `name` equal to the entry name and a non-empty `description`; Skill Center limits and path rules |
   | `resources` | `admission_refusal` (`core/resources/services/file_service.py`) | Every file, and every member of a directory: an allowed extension, at most 500 MB |
-  | `resources` | resources materialiser (`apply/materialisers/resources.py`) | Paths unique once a trailing `/` is removed (no `foo.md` with `foo.md/`); no entry inside a directory entry |
+  | `resources` | resources materialiser (`apply/materialisers/resources.py`) | With trailing `/` removed, paths unique and none a whole-segment prefix of another (`foo.md` with `foo.md/`, `data/` with `data/a.md`, `foo.md` with `foo.md/b.csv`) |
   | `tools.mcp` | Manifest MCP validation (`schema/entries.py`) | `url` parses with a hostname; header names unique case-insensitively, no CR or LF |
   | `tools.mcp` | `McpMaterialiser.resolve`: `_permitted` (`check_mcp_permission_detail`) and `MCPConfigService.validate_bot_override` | The server exists and the recording actor may enable it; its `config`, if any, is a valid bot override for that server and the bot's engine (for example no remote config on a `LOCAL` server, no platform-managed header, an `endpoint_env` and `transport_protocol` with a matching endpoint) |
   | text files a patch edits | `file.edit`, `skill.update` diffs | Valid UTF-8 before and after |
