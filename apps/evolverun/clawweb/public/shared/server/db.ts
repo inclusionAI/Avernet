@@ -196,14 +196,20 @@ async function ensureSchemaVersionTable(db: IDatabase): Promise<boolean> {
 async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
   const canDdl = await ensureSchemaVersionTable(db);
   if (!canDdl) {
-    console.warn("[clawweb] DDL denied — skipping migrations, assuming schema exists in managed DB");
-    return;
+    // Managed MySQL denies DDL to the runtime account, so `schema_version`
+    // stays empty and the version gate below would skip every migration.
+    // Self-healing migrations exist precisely for that case: they repair a
+    // physical schema that drifted from the declared one, and they are
+    // idempotent, so they are still attempted here.
+    console.warn("[clawweb] DDL denied — assuming schema exists in managed DB");
   }
 
-  const current = await getSchemaVersion(db);
+  const current = canDdl ? await getSchemaVersion(db) : 0;
 
   for (const migration of migrations) {
-    if (migration.version <= current) continue;
+    // Self-healing migrations bypass the version gate: on managed MySQL the
+    // gate is meaningless because no progress row is ever written.
+    if (!migration.selfHealing && migration.version <= current) continue;
     if (migration.sqliteOnly && dbType !== "sqlite") continue;
     if (migration.mysqlOnly && dbType !== "mysql" && dbType !== "zdas") continue;
     if (migration.migrate) await migration.migrate(db);
@@ -233,10 +239,12 @@ async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
         }
       }
     }
-    await db.exec(
-      "INSERT INTO schema_version (version, description) VALUES (?, ?)",
-      [migration.version, migration.description]
-    );
+    if (canDdl) {
+      await db.exec(
+        "INSERT INTO schema_version (version, description) VALUES (?, ?)",
+        [migration.version, migration.description]
+      );
+    }
     console.log(`[clawweb] Migration v${migration.version}: ${migration.description}`);
   }
 

@@ -24,6 +24,7 @@ import { cleanupEvolveSchema } from './migrations/evolve-schema-cleanup.js';
  */
 
 import { repairBatchMigrations } from "./schema-repair-batch.js";
+import { repairDeployTagMigrations } from "./schema-repair-deploy-tag.js";
 import { repairReleaseMigrations } from "./schema-repair-release.js";
 
 export type DbType = "sqlite" | "mysql" | "zdas";
@@ -101,7 +102,22 @@ export const sqliteTriggers: string[] = [
  * OceanBase/MySQL cannot index TEXT columns. SQLite treats VARCHAR
  * identically to TEXT so this is fully compatible.
  */
-export const migrations: ReadonlyArray<{ version: number; description: string; sql: string[]; sqliteOnly?: boolean; mysqlOnly?: boolean; migrate?: (db: IDatabase) => Promise<void> }> = [
+export const migrations: ReadonlyArray<{
+  version: number;
+  description: string;
+  sql: string[];
+  sqliteOnly?: boolean;
+  mysqlOnly?: boolean;
+  /**
+   * Run even when `schema_version` reports the migration as already applied,
+   * and even when the progress table is unavailable (managed MySQL denies DDL,
+   * so the table stays empty and every version looks "already applied").
+   * The migration must therefore be idempotent. Reserved for repairing a
+   * physical schema that drifted from the declared one.
+   */
+  selfHealing?: boolean;
+  migrate?: (db: IDatabase) => Promise<void>;
+}> = [
   {
     version: 1,
     description: "ClawFlow: flow_events, flow_metrics, triggered_alerts",
@@ -3316,4 +3332,5 @@ END`,
     description: "Bind Bench Domains to host spaces while preserving personal history",
     sql: [`ALTER TABLE cm_bench_domains ADD COLUMN space_id VARCHAR(128) DEFAULT NULL COMMENT '所属空间ID；NULL保留原Owner个人归属'`],
   },
+  ...repairDeployTagMigrations,
 ];

@@ -56,6 +56,17 @@ function isReservedWorkflowId(id: string): boolean {
   return /^__.+__$/.test(id);
 }
 
+/**
+ * Deterministic git tag name for a deploy number.
+ *
+ * Must stay in sync with `commitAndPushDeploy` in clawflows-git-client.ts.
+ * Used to satisfy the NOT NULL constraint on `workflow_deploy_history.tag_name`
+ * when reserving the deploy row, before the git push reveals the real tag.
+ */
+function buildDeployTagName(workflowId: string, deployNumber: number): string {
+  return `deploy/${workflowId}/#${deployNumber}`;
+}
+
 function makeError(status: number, error: string, message: string): Error & { status: number; error: string } {
   const err = new Error(message) as Error & { status: number; error: string };
   err.status = status;
@@ -141,7 +152,11 @@ export class AutoHealDeployService {
           workflowId,
           deployNumber: next,
           version: newVersion,
-          tagName: null,
+          // The real tag name is only known after the git push, but
+          // workflow_deploy_history.tag_name is NOT NULL on managed MySQL. Use
+          // the deterministic tag this deploy will produce; the activation step
+          // overwrites it with the authoritative value from gitResult.
+          tagName: buildDeployTagName(workflowId, next),
           action: "deploy",
           specJson,
           note: input.note ?? "auto-heal deploy",
