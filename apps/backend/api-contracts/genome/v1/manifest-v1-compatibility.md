@@ -90,6 +90,7 @@ derived from the revision field by field as below.
 | Manifest field | Outcome | Revision / M′ |
 | --- | --- | --- |
 | `path` | normalized | `spec.resources[].path` (the key). Empty and `.` segments are removed (`./faq.csv` → `faq.csv`); a trailing `/` (directory) is kept |
+| a file (or directory member) the workspace does not admit | refused (*recording only*) | An extension outside `ALLOWED_EXTENSIONS` (for example `.sh`, `.toml`, none) or over 500 MB: apply's `admission_refusal` would refuse it |
 | paths that collide or nest only after normalization | refused (*recording only*) | e.g. `faq.csv` with `./faq.csv`, or `data/` with `./data/a.md`: the Manifest's duplicate and nesting checks compare the raw strings |
 | a file entry's bytes | resolved | `digest` of the bytes |
 | a directory entry's files | resolved | `digest` of the `acm-tree-v1` tree; M′: content-store source |

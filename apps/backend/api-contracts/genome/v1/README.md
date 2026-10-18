@@ -257,7 +257,12 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
   segment. A trailing `/` makes it a directory entry. No entry may lie inside
   another directory entry (the Manifest refuses nesting too). The Manifest
   accepts empty and `.` segments (`./faq.csv`, `a//b`); recording removes
-  them, so each path has one spelling. A document whose paths collide or nest
+  them, so each path has one spelling. Every file a resource puts in the
+  workspace (a file resource, or each member of a directory resource) must
+  pass the workspace admission rule apply uses, `admission_refusal` in
+  `core/resources/services/file_service.py`: an allowed extension
+  (`ALLOWED_EXTENSIONS`, for example `.md`, `.csv`, `.json`, `.py`, `.png`;
+  not `.sh`, `.toml` or no extension) and at most 500 MB. A document whose paths collide or nest
   only after this normalization (`faq.csv` with `./faq.csv`, or `data/` with
   `./data/a.md`) is accepted by `PUT /config-manifest` but refused when
   recorded.
@@ -444,12 +449,22 @@ denominator).
   be motivated by the rationale alone.
 - The resulting revision is valid against
   [`genome-revision.schema.json`](genome-revision.schema.json), including the
-  sort rules of §3.1, and every rule of §3.4 and §4.2 the schema cannot
-  express: unique tree member paths, a valid skill package for every `local`
-  skill (after `skill.add` or `skill.update`), persona files that are valid
-  UTF-8 (including content added by digest), text files edited by
-  `file.edit` or a diff that are valid UTF-8 before and after, and an MCP URL
-  whose host parses. A candidate that apply would refuse is never recorded.
+  sort rules of §3.1 and the tree rules of §3.4 (canonical order, unique
+  member paths).
+- **Anything apply would refuse is refused when recording.** A recorded
+  candidate must be applicable, so the recorder runs the same per-entry
+  predicates apply runs before it writes, on the resulting revision's
+  content, and does not rely on the schema for them. They are:
+
+  | Category | Predicate apply uses | Checks |
+  | --- | --- | --- |
+  | `persona` | `IdentityMaterialiser`, `legal_identity_types` | UTF-8 bytes (including content given by digest); a type the bot's engine accepts |
+  | `skills` (`local`) | `SkillPackageValidator`, skills materialiser | One root `SKILL.md` with front matter `name` equal to the entry name and a non-empty `description`; Skill Center limits and path rules |
+  | `resources` | `admission_refusal` (`core/resources/services/file_service.py`) | Every file, and every member of a directory: an allowed extension, at most 500 MB |
+  | `tools.mcp` | Manifest MCP validation (`schema/entries.py`) | `url` parses with a hostname; header names unique case-insensitively, no CR or LF |
+  | text files a patch edits | `file.edit`, `skill.update` diffs | Valid UTF-8 before and after |
+
+  When apply gains a new refusal, it belongs in this table too.
 - Limits mirror the Manifest: 50 entries per category, 64 KiB of UTF-8 per
   inline content value,
   and the fetch-time size limits for skills (100 MiB), files (100 MiB) and

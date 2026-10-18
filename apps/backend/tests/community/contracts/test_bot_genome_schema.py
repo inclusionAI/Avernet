@@ -189,6 +189,10 @@ def test_every_invalid_example_fails_its_stated_check(path: Path) -> None:
         with pytest.raises(UnicodeDecodeError):
             for entry in record["spec"]["persona"]:
                 _blob(entry["digest"]).decode("utf-8")
+    elif check == "admission":
+        with pytest.raises(AssertionError):
+            for entry in record["spec"]["resources"]:
+                _assert_resource_admitted(entry)
     elif check == "identity":
         assert record["revision"]["id"] != revision_id(record["spec"], record["policy"]), case["reason"]
     else:
@@ -209,9 +213,7 @@ def test_example_revision_ids_and_digests_are_real(path: Path) -> None:
     for entry in spec["persona"]:
         _blob(entry["digest"]).decode("utf-8")  # apply refuses a persona file that is not UTF-8
     for entry in spec["resources"]:
-        data = _blob(entry["digest"])
-        if entry["path"].endswith("/"):
-            _tree_members(data)
+        _assert_resource_admitted(entry)
     for entry in spec["skills"]:
         if entry["origin"] == "local":
             _assert_skill_package(entry["name"], _tree_members(_blob(entry["digest"])))
@@ -242,9 +244,9 @@ def test_patch_digest_references_are_real(path: Path) -> None:
     for op in _load(path)["ops"]:
         content = op.get("content")
         if isinstance(content, dict):
-            data = _blob(content["digest"])
-            if op["op"] == "resource.add" and op["path"].endswith("/"):
-                _tree_members(data)
+            _blob(content["digest"])
+            if op["op"] == "resource.add":
+                _assert_resource_admitted({"path": op["path"], "digest": content["digest"]})
         for value in (op.get("files") or {}).values():
             if isinstance(value, dict):
                 _blob(value["digest"])
@@ -276,6 +278,17 @@ def _assert_skill_package(name: str, members: list[tuple[str, bytes]]) -> None:
     metadata = yaml.safe_load(text.split("---\n", 2)[1])
     assert metadata.get("name") == name, f"SKILL.md names its skill {metadata.get('name')!r}, not {name!r}"
     assert str(metadata.get("description") or "").strip(), "SKILL.md needs a description"
+
+
+def _assert_resource_admitted(entry: dict[str, Any]) -> None:
+    """Every file a resource writes passes apply's workspace admission rule (README §4.2, §6.4)."""
+    from agentclaw.community.core.resources.services.file_service import admission_refusal
+
+    data = _blob(entry["digest"])
+    files = _tree_members(data) if entry["path"].endswith("/") else [(entry["path"], data)]
+    for path, content in files:
+        refusal = admission_refusal(path.rsplit("/", 1)[-1], content)
+        assert refusal is None, f"{entry['path']}: {path}: {refusal}"
 
 
 def _assert_memory_item_order(item: dict[str, Any]) -> None:
