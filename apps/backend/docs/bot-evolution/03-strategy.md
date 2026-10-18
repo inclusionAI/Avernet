@@ -44,7 +44,7 @@ It does not own:
 | --- | --- |
 | The concrete default strategies (ClawEvolve, memory consolidation) and the full ClawEvolve code sketch | [04-default-strategies.md](04-default-strategies.md) |
 | Bindings, run lifecycle, leases and re-dispatch, budgets and kill switches, the runtimes and the Job Protocol wire format, the platform side of operations, sandboxing | [06-evolution-run.md](06-evolution-run.md) |
-| What a Genome Patch can express, revisions, locked genes | [01-genome.md](01-genome.md) |
+| What a Genome Patch can express, revisions, the genome policy | [01-genome.md](01-genome.md) |
 | The `Episode` and `Feedback` schemas, redaction, retention | [02-experience.md](02-experience.md) |
 | Suites, splits, graders, verification profiles, how a verdict is reached | [07-verification.md](07-verification.md) |
 | The gate, risk tiers, review, promotion | [08-promotion.md](08-promotion.md) |
@@ -711,7 +711,7 @@ configuration time, not partway through a paid run:
 - the bot's engine must be among the `engine` values of the strategy's
   `agents@1` definitions;
 - (from the binding, not the registration) `allowed_genes` must stay within
-  the bot's `policy`; locked genes stay locked;
+  the bot's `policy.mutable_genes`;
 - if the registration has a `params_schema`, the binding's `params` must
   validate against it.
 

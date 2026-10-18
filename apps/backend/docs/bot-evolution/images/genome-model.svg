@@ -30,10 +30,10 @@
 <rect x="515" y="175" width="190" height="195" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5"/>
 <text x="610.0" y="230.0" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">policy: GenomePolicy</text>
 <text x="610.0" y="247.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">owner only, hashed</text>
-<text x="610.0" y="264.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">locked_genes</text>
-<text x="610.0" y="281.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">mutable_genes</text>
-<text x="610.0" y="298.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">pins</text>
-<text x="610.0" y="315.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">risk_overrides</text>
+<text x="610.0" y="264.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">mutable_genes</text>
+<text x="610.0" y="281.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">pins</text>
+<text x="610.0" y="298.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">risk_overrides</text>
+<text x="610.0" y="315.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">copied forward unchanged</text>
 <rect x="780" y="50" width="190" height="130" rx="8" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.5"/>
 <text x="875.0" y="81.0" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">GenomeRef</text>
 <text x="875.0" y="98.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">names, moved by CAS</text>

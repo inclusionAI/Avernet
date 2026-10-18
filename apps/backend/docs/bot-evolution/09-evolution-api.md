@@ -585,7 +585,7 @@ the shared ones and the **families** callers branch on:
 | `409020` | Action conflicts with the resource's state (e.g. approving a rejected candidate, cancelling a finished run) | No |
 | `412000` | `If-Match` does not match the current `ETag` | After re-reading |
 | `428000` | `If-Match` required but missing | After adding it |
-| `403xxx` / `422xxx` (policy family) | The request violates the bot's bindings, its genome policy, or a platform rule: locked gene, gene outside a binding's `allowed_genes`, binding check failed, evolution frozen by a kill switch, strategy disabled, candidate not promotable under the gate | No |
+| `403xxx` / `422xxx` (policy family) | The request violates the bot's bindings, its genome policy, or a platform rule: gene outside the bot's `mutable_genes` or a binding's `allowed_genes`, binding check failed, evolution frozen by a kill switch, strategy disabled, candidate not promotable under the gate | No |
 | `403100`-range (budget family) | A budget ceiling refuses the request (per-bot or per-tenant daily or monthly ceiling, max promotions per day) | Not until the ceiling resets |
 | `429000` | Rate limited | Yes, after `Retry-After` |
 | `502000`, `503000`, `504000` | Upstream or service unavailable | Yes, same key |
@@ -593,7 +593,7 @@ the shared ones and the **families** callers branch on:
 
 The precise subcodes inside the policy and budget families are set by the
 owning docs ([06-evolution-run.md](06-evolution-run.md) for budgets, kill
-switches, and binding checks; [01-genome.md](01-genome.md) for locked genes;
+switches, and binding checks; [01-genome.md](01-genome.md) for the genome policy;
 [08-promotion.md](08-promotion.md) for the gate).
 
 A **rejected candidate is not an error.** Verification rejecting a

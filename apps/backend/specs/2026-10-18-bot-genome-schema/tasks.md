@@ -83,9 +83,9 @@
 - **Goal:** Remove stale references elsewhere and record the RSI-04 additions.
 - **Files:** `03-strategy.md`, `04-default-strategies.md`, `06-evolution-run.md`, `work-items.md`, and each `zh-CN` version
 - **Done when:**
-  - [ ] No `locked_genes`, dotted gene paths, or `tools.cli_tools` remain in bot-evolution docs.
-  - [ ] RSI-02 marked done; RSI-04 gains the Center-skill source item and the #2162 dependency.
-  - [ ] Spec dir links to the contract files.
+  - [x] No `locked_genes`, dotted gene paths, or `tools.cli_tools` remain in bot-evolution docs.
+  - [x] RSI-02 marked done; RSI-04 gains the Center-skill source item and the #2162 dependency.
+  - [x] Spec dir links to the contract files.
 - **Depends on:** Task 8
 
 ## Task 10: Verification

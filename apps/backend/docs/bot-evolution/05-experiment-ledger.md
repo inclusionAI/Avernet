@@ -133,8 +133,7 @@ class GeneCategory(StrEnum):
     SKILLS = "skills"
     MEMORY = "memory"
     RESOURCES = "resources"
-    TOOLS_MCP = "tools.mcp"
-    TOOLS_CLI_TOOLS = "tools.cli_tools"
+    TOOLS = "tools"                 # MCP servers; CLI tools are not part of genome v1
     ENGINE_CONFIG = "engine_config"
     SCRIPT = "script"
 

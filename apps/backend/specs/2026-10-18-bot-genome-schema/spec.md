@@ -1,5 +1,10 @@
 # Bot Genome schema and patch format (RSI-02)
 
+> Deliverables: the contract in
+> [`apps/backend/api-contracts/genome/v1/`](../../api-contracts/genome/v1/README.md)
+> (schemas, risk tiers, vectors, examples, Manifest v1 compatibility) and the
+> contract test `tests/community/contracts/test_bot_genome_schema.py`.
+
 ## Summary
 
 Fix the normative, machine-checkable format of the Bot Genome: what a Genome

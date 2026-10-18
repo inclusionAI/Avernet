@@ -500,7 +500,7 @@ Bot 使用不同的策略，一个 Bot 也可以使用多个策略（例如每�
 | `strategy` | 已注册策略版本的 `<id>@<version>` | 必须已注册并通过一致性测试套件（[03-strategy.zh-CN.md](03-strategy.zh-CN.md)）；未被紧急停止开关禁用 |
 | `trigger` | 何时创建运行（[§4](#4-触发器)） | 定时、手动、事件三者之一 |
 | `parent` | 运行从哪个修订版开始 | 第一次迭代中为 `active`。其他选择器（latest-best、Pareto 前沿、MAP-Elites 生态位、clade 得分）是之后查询实验记录的可选项（[05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md)） |
-| `allowed_genes` | 该策略在此 Bot 上可以修改什么 | 必须保持在 Bot 基因组的 `policy` 之内：锁定基因保持锁定（[01-genome.zh-CN.md](01-genome.zh-CN.md)） |
+| `allowed_genes` | 该策略在此 Bot 上可以修改什么 | 必须保持在 Bot 基因组的 `policy.mutable_genes` 之内（[01-genome.zh-CN.md](01-genome.zh-CN.md)） |
 | `verification_profile` | 由哪个验证配置评判候选 | 所有者可以选择比平台默认更严格的配置，但不能更宽松（[07-verification.zh-CN.md](07-verification.zh-CN.md)） |
 | `budget` | 单次运行上限 | 必须落在 Bot 级和租户级上限之内（[§11](#11-预算与紧急停止开关)） |
 | `params` | 策略参数 | 若注册中存在 `params_schema` 则据其校验（检查 8，§3.2），并由策略自行校验 |
@@ -517,8 +517,8 @@ Bot 使用不同的策略，一个 Bot 也可以使用多个策略（例如每�
    OpenClaw 提供 `experience.sessions`）。
 3. 如果策略声明了 `agents@1`，则该 Bot 的引擎位于其智能体定义的 `engine` 值
    之中。没有单独的 `supports_engines` 列表；引擎兼容性由 `needs` 推导得出。
-4. `allowed_genes` 在 Bot 基因组的 `policy` 之内：不含锁定基因，不含固定
-   （pinned）项。
+4. `allowed_genes` 在 Bot 基因组的 `policy.mutable_genes` 之内，且不与任何固定
+   （pinned）项重叠。
 5. `verification_profile` 存在，且不比平台默认更宽松。
 6. `budget` 落在 Bot 级和租户级上限之内。
 7. `trigger` 格式正确：有效的 cron 表达式，或一个 `EventName`
@@ -1149,7 +1149,7 @@ GET /openapi/v1/bots/bot_123/evolution/bindings
     "code": "binding_check_failed",
     "message": "binding bind_01 is not valid for bot_123",
     "details": [
-      {"binding": "bind_01", "check": "allowed_genes", "detail": "gene 'tools.mcp' is locked by the bot's genome policy"},
+      {"binding": "bind_01", "check": "allowed_genes", "detail": "gene 'tools/mcp' is not in the bot's mutable_genes"},
       {"binding": "bind_01", "check": "engine", "detail": "agents@1 definitions target engine 'openclaw'; bot engine is 'hermes'"}
     ]
   }
@@ -1418,7 +1418,7 @@ Evolution-Fencing-Token: ft_7f3_2_b81c
     "skills": [{"name": "refund-policy", "files": [{"path": "skills/refund-policy/SKILL.md", "digest": "sha256:3c4d…"}]}],
     "memory": {"items": []}
   },
-  "policy": {"locked_genes": ["script", "tools.mcp", "policy"], "pins": []}
+  "policy": {"mutable_genes": ["memory", "persona", "resources", "skills"], "pins": ["persona/SAFETY.md"], "risk_overrides": {}}
 }
 ```
 
@@ -1858,7 +1858,7 @@ Evolution-Fencing-Token: ft_7f3_2_b81c
 ```
 
 错误：`422` `patch_invalid`（schema）、`base_mismatch` 或 `gene_not_allowed`（op
-超出运行的 `allowed_genes`、涉及锁定基因或固定项）。
+超出运行的 `allowed_genes` 或 Bot 的 `mutable_genes`，或与固定项重叠）。
 
 ### GET /evolution/v1/runs/{run}/candidates/{id}
 
@@ -2089,7 +2089,7 @@ ClawEvolve 自身的代码见 [04-default-strategies.zh-CN.md](04-default-strate
 | 其他部分 | 方向 | 流转内容 |
 | --- | --- | --- |
 | [01-genome.zh-CN.md](01-genome.zh-CN.md) Genome Registry | 运行 → 基因组 | 运行开始时的漂移检查；将 `active` 解析为冻结的父版本；为 `ctx.parent`、工作区和 `content/{digest}` 读取修订版与内容；从 `{base, patch}` 创建候选修订版；移动 `candidate/<run>/<n>` 引用 |
-| [01-genome.zh-CN.md](01-genome.zh-CN.md) | 基因组 → 运行 | 用于绑定检查的 Bot 基因组 `policy`（锁定基因、固定项） |
+| [01-genome.zh-CN.md](01-genome.zh-CN.md) | 基因组 → 运行 | 用于绑定检查的 Bot 基因组 `policy`（可变基因、固定项） |
 | [02-experience.zh-CN.md](02-experience.zh-CN.md) 经验 | 运行 → 经验 | `experience.sessions` / `experience.feedback` 背后的查询，已脱敏 |
 | [03-strategy.zh-CN.md](03-strategy.zh-CN.md) Strategy Registry | Registry → 运行 | 注册记录、一致性状态、各引擎的能力提供方、按摘要的智能体定义、策略紧急停止开关 |
 | [03-strategy.zh-CN.md](03-strategy.zh-CN.md) 策略实现 | 运行 ↔ 策略 | 进程内的 `run(ctx)`，或作业协议；候选、操作、模型调用、预算费用 |

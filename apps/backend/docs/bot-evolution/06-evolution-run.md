@@ -526,7 +526,7 @@ binding fields owned by the bot owner. They are not strategy code.
 | `strategy` | `<id>@<version>` of a registered strategy version | Must be registered and have passed the conformance kit ([03-strategy.md](03-strategy.md)); not disabled by a kill switch |
 | `trigger` | When runs are created ([§4](#4-triggers)) | One of schedule, manual, event |
 | `parent` | Which revision a run starts from | `active` in the first iteration. Other selectors (latest-best, Pareto front, MAP-Elites niches, clade scores) are later options that query the ledger ([05-experiment-ledger.md](05-experiment-ledger.md)) |
-| `allowed_genes` | What this strategy may change on this bot | Must stay within the bot's genome `policy`: locked genes stay locked ([01-genome.md](01-genome.md)) |
+| `allowed_genes` | What this strategy may change on this bot | Must stay within the bot's genome `policy.mutable_genes` ([01-genome.md](01-genome.md)) |
 | `verification_profile` | Which verification profile judges candidates | Owners may pick a stricter profile than the platform default, never a looser one ([07-verification.md](07-verification.md)) |
 | `budget` | Per-run limits | Must fit within per-bot and per-tenant ceilings ([§11](#11-budgets-and-kill-switches)) |
 | `params` | Strategy parameters | Validated against the registration's `params_schema` when present (check 8, §3.2), and by the strategy |
@@ -546,8 +546,8 @@ paid run:
 3. If the strategy declares `agents@1`, the bot's engine is among the
    `engine` values of its agent definitions. There is no separate
    `supports_engines` list; engine compatibility is derived from `needs`.
-4. `allowed_genes` is within the bot's genome `policy`: no locked gene, no
-   pinned item.
+4. `allowed_genes` is within the bot's genome `policy.mutable_genes` and
+   overlaps no pinned item.
 5. `verification_profile` exists and is not looser than the platform
    default.
 6. `budget` fits within the per-bot and per-tenant ceilings.
@@ -1264,7 +1264,7 @@ Error example `422` (binding check failed):
     "code": "binding_check_failed",
     "message": "binding bind_01 is not valid for bot_123",
     "details": [
-      {"binding": "bind_01", "check": "allowed_genes", "detail": "gene 'tools.mcp' is locked by the bot's genome policy"},
+      {"binding": "bind_01", "check": "allowed_genes", "detail": "gene 'tools/mcp' is not in the bot's mutable_genes"},
       {"binding": "bind_01", "check": "engine", "detail": "agents@1 definitions target engine 'openclaw'; bot engine is 'hermes'"}
     ]
   }
@@ -1544,7 +1544,7 @@ Response `200`:
     "skills": [{"name": "refund-policy", "files": [{"path": "skills/refund-policy/SKILL.md", "digest": "sha256:3c4d…"}]}],
     "memory": {"items": []}
   },
-  "policy": {"locked_genes": ["script", "tools.mcp", "policy"], "pins": []}
+  "policy": {"mutable_genes": ["memory", "persona", "resources", "skills"], "pins": ["persona/SAFETY.md"], "risk_overrides": {}}
 }
 ```
 
@@ -2005,8 +2005,8 @@ Response `200` (same body on a repeat):
 ```
 
 Errors: `422` `patch_invalid` (schema), `base_mismatch`, or
-`gene_not_allowed` (an op outside the run's `allowed_genes`, a locked gene,
-or a pinned item).
+`gene_not_allowed` (an op outside the run's `allowed_genes` or the bot's
+`mutable_genes`, or overlapping a pinned item).
 
 ### GET /evolution/v1/runs/{run}/candidates/{id}
 
@@ -2245,7 +2245,7 @@ queue ([08-promotion.md](08-promotion.md)); the run itself never moves
 | Other part | Direction | What flows |
 | --- | --- | --- |
 | [01-genome.md](01-genome.md) Genome Registry | Run → Genome | Drift check at run start; resolve `active` to the frozen parent; read revisions and content for `ctx.parent`, workspaces, and `content/{digest}`; create candidate revisions from `{base, patch}`; move `candidate/<run>/<n>` refs |
-| [01-genome.md](01-genome.md) | Genome → Run | The bot's genome `policy` (locked genes, pins) for binding checks |
+| [01-genome.md](01-genome.md) | Genome → Run | The bot's genome `policy` (mutable genes, pins) for binding checks |
 | [02-experience.md](02-experience.md) Experience | Run → Experience | Queries behind `experience.sessions` / `experience.feedback`, redacted |
 | [03-strategy.md](03-strategy.md) Strategy Registry | Registry → Run | Registration records, conformance status, capability providers per engine, agent definitions by digest, strategy kill switch |
 | [03-strategy.md](03-strategy.md) Strategy implementations | Run ↔ Strategy | `run(ctx)` in process, or the Job Protocol; candidates, operations, model calls, budget charges |

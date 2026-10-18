@@ -649,7 +649,8 @@ persona 的内容都会进入评审（T2）。该策略从不使用记忆的 `re
 
 **引擎记忆投影契约落地之前的过渡方案（RSI-05）。**
 在引擎能够投影精选记忆条目之前，记忆进化仅限于
-一个由平台管理的 persona 文件（例如 `LESSONS.md`）。在该
+一个由平台管理的 persona 文件（一个现有的身份文件类型，例如 `KNOWLEDGE.md`；新的
+`LESSONS.md` 需要先扩展 Manifest 的身份文件白名单，见 [01-genome.zh-CN.md](01-genome.zh-CN.md) §7）。在该
 过渡期内，策略对该文件发出 `file.edit` 操作，而不是
 `memory.*` 操作。这些属于 persona 编辑，因此属于 T2 并进入评审，
 且绑定必须允许它们（见待定决策 DS-5，§14）。该策略
@@ -1004,8 +1005,7 @@ schema 使用 JSON Schema draft 2020-12。各项限制（minimum、maximum）为
 进行到一半时）：Bot 的引擎没有 `needs` 中某个能力的提供方时返回 `422`
 （例如在非 OpenClaw Bot 上使用 ClawEvolve，
 因为其智能体定义仅适用于 OpenClaw）；`allowed_genes` 超出 Bot 基因组 `policy`
-时返回 `422`（锁定基因保持
-锁定）；`If-Match` 过期时返回 `412`。
+（即超出 `policy.mutable_genes`）时返回 `422`；`If-Match` 过期时返回 `412`。
 
 ### `POST /bots/{bot_id}/evolution/runs`
 
@@ -1395,8 +1395,8 @@ ClawEvolve 自己的训练 bench（`bench-full-opt`）。仅限训练划分。
 ```
 
 主要错误：补丁未通过 schema 校验、其 base 不是
-当前修订版，或某个操作触及绑定 `allowed_genes` 之外的基因或
-锁定基因时，返回 `422`。
+当前修订版，或某个操作触及绑定 `allowed_genes` 或 Bot 的 `mutable_genes`
+之外的基因或固定项时，返回 `422`。
 
 ### `GET /evolution/v1/runs/{run}/candidates/{id}`
 
@@ -1684,10 +1684,10 @@ class ConsolidateMemoryStrategy(EvolutionStrategy):
   `BatchRunAnalyzer` / `LessonExpireScheduler` 代码应当要么接入
   策略，要么移除。
 - **DS-5：过渡期记忆绑定。** 在 RSI-05 之前，consolidate-memory
-  写入一个 persona 文件（`LESSONS.md`），但其绑定只允许
+  写入一个 persona 文件（例如 `KNOWLEDGE.md`），但其绑定只允许
   `memory`。可选方案：为过渡期绑定允许 `persona`（比所需范围
   更宽），或者如果基因组策略配置支持条目级目标，则让 `allowed_genes` 指定单个条目（例如
-  `persona/LESSONS.md`）。
+  `persona/KNOWLEDGE.md`）。
   建议：如果 [01-genome.zh-CN.md](01-genome.zh-CN.md) 能够表达条目级目标，
   则采用条目级目标。
 - **DS-6：一个 ClawEvolve 策略还是三个。** `bot_evolution`、
