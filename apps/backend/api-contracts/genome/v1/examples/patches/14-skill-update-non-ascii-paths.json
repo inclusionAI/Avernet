@@ -1,0 +1,20 @@
+{
+  "patch_schema": 1,
+  "base": "sha256:9e21ea360e6d4bdb63a151d280a7f1802402a8294b5033c92239731bd1e8d1fe",
+  "ops": [
+    {
+      "op": "skill.update",
+      "name": "quality-check",
+      "files": {
+        "docs/how to.md": "# How to\nRun the check before sending.\n",
+        "assets/图.png": {
+          "digest": "sha256:4c4b6a3be1314ab86138bef4314dde022e600960d8689a2c8f8631802d20dab6"
+        }
+      }
+    }
+  ],
+  "rationale": "Example of one op; see README §6.1.",
+  "evidence": [
+    "episode:ep_91"
+  ]
+}

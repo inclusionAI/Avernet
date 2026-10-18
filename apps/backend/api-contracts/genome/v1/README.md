@@ -76,11 +76,13 @@ pct-encoded = "%" HEXDIG HEXDIG                                     ; uppercase;
 
 - **Dots are part of names.** `/` is the only separator, so `SOUL.md` and
   `mcp.x.meet` are single segments.
-- **Encoding.** Persona types, skill names, memory keys and resource paths
-  only use the characters `A–Z a–z 0–9 . _ -` inside one name, so they are
-  written as they are. An MCP `server_code` comes from the MCP registry and is
-  only required to be non-empty, so it can contain anything. Inside a gene
-  path, every UTF-8 byte of a name outside `A–Z a–z 0–9 . _ -` is written
+- **Encoding.** Persona types, skill names, memory keys and resource entry
+  paths only use the characters `A–Z a–z 0–9 . _ -` inside one name, so they
+  are written as they are. An MCP `server_code` (only required to be
+  non-empty) and a file path inside a skill or a directory resource (any
+  characters a skill package accepts, such as `docs/how to.md`) can contain
+  anything. Inside a gene path, every UTF-8 byte of a segment outside
+  `A–Z a–z 0–9 . _ -` is written
   `%XX` with uppercase hex, and a name that is exactly `.` or `..` is written
   `%2E` or `%2E%2E`. Bytes in the allowed set are never encoded, so every
   name has exactly one spelling: `mcp:x` is `tools/mcp/mcp%3Ax`.
@@ -229,7 +231,10 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
   `GREETING.md`, `HEARTBEAT.md`, `KNOWLEDGE.md`, `OKR.md`, `OUTPUT.md`,
   `README.md`, `RULES.md`, `SAFETY.md`, `SOUL.md`, `TOOLS.md`, `USER.md`:
   `VALID_IDENTITY_FILES` (`core/services/identity.py`) minus the reserved
-  `MEMORY.md` and `IDENTITY.md`. The set an engine accepts is narrower
+  `MEMORY.md` and `IDENTITY.md`. A persona file's bytes must be valid UTF-8:
+  apply refuses anything else (`IdentityMaterialiser`), and content given by
+  digest is not checked on upload, because the upload endpoint also takes
+  binary skill and resource files. The set an engine accepts is narrower
   (`claude_code`: `CLAUDE.md` only) and is checked at record time against the
   bot's engine.
 - **`skills`.** `name` follows the Skill Center package rule
@@ -441,8 +446,10 @@ denominator).
   [`genome-revision.schema.json`](genome-revision.schema.json), including the
   sort rules of §3.1, and every rule of §3.4 and §4.2 the schema cannot
   express: unique tree member paths, a valid skill package for every `local`
-  skill (after `skill.add` or `skill.update`), and an MCP URL whose host
-  parses. A candidate that apply would refuse is never recorded.
+  skill (after `skill.add` or `skill.update`), persona files that are valid
+  UTF-8 (including content added by digest), text files edited by
+  `file.edit` or a diff that are valid UTF-8 before and after, and an MCP URL
+  whose host parses. A candidate that apply would refuse is never recorded.
 - Limits mirror the Manifest: 50 entries per category, 64 KiB of UTF-8 per
   inline content value,
   and the fetch-time size limits for skills (100 MiB), files (100 MiB) and

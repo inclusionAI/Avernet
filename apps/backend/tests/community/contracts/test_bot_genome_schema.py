@@ -185,6 +185,10 @@ def test_every_invalid_example_fails_its_stated_check(path: Path) -> None:
             for entry in record["spec"]["skills"]:
                 if entry["origin"] == "local":
                     _assert_skill_package(entry["name"], _tree_members(_blob(entry["digest"])))
+    elif check == "utf8":
+        with pytest.raises(UnicodeDecodeError):
+            for entry in record["spec"]["persona"]:
+                _blob(entry["digest"]).decode("utf-8")
     elif check == "identity":
         assert record["revision"]["id"] != revision_id(record["spec"], record["policy"]), case["reason"]
     else:
@@ -203,7 +207,7 @@ def test_example_revision_ids_and_digests_are_real(path: Path) -> None:
     assert record["revision"]["id"] == expected, f"revision.id should be {expected}"
 
     for entry in spec["persona"]:
-        _blob(entry["digest"])
+        _blob(entry["digest"]).decode("utf-8")  # apply refuses a persona file that is not UTF-8
     for entry in spec["resources"]:
         data = _blob(entry["digest"])
         if entry["path"].endswith("/"):

@@ -58,10 +58,10 @@
       "pattern": "^@@ -[0-9]+(,[0-9]+)? \\+[0-9]+(,[0-9]+)? @@"
     },
     "skillFilePath": {
-      "description": "Relative path inside a skill; no empty, '.' or '..' segment.",
+      "description": "Relative path inside a skill, as SkillPackageValidator accepts it (any characters, including spaces and non-ASCII), in canonical form: no leading '/', no drive letter, no backslash, no control character, no empty, '.' or '..' segment, no trailing '/'.",
       "type": "string",
       "maxLength": 256,
-      "pattern": "^(?![/~])(?!.*(^|/)\\.{1,2}(/|(?![\\s\\S])))(?!.*//)(?!.*/(?![\\s\\S]))[A-Za-z0-9._/-]+(?![\\s\\S])"
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*(^|/)\\.{1,2}(/|(?![\\s\\S])))(?!.*//)(?!.*/(?![\\s\\S]))[^\\u0000-\\u001f\\u007f]+(?![\\s\\S])"
     },
     "textEdit": {
       "oneOf": [

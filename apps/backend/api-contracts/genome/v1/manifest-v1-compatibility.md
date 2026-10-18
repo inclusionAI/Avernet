@@ -70,7 +70,7 @@ derived from the revision field by field as below.
 | Manifest field | Outcome | Revision / M′ |
 | --- | --- | --- |
 | `type` | maps | `spec.persona[].type` (the key). `MEMORY.md` and `IDENTITY.md` are refused by the Manifest already; the engine-specific set (`claude_code`: `CLAUDE.md` only) is checked at record time |
-| the file's bytes | resolved | `spec.persona[].digest`; M′: `source: {protocol: content_store, …}` |
+| the file's bytes | resolved | `spec.persona[].digest`; M′: `source: {protocol: content_store, …}`. Must be valid UTF-8; apply refuses anything else, so recording does too |
 | the AGENTS.md reference block | normalized | Removed when capturing a bot's current state, then the file becomes `content.rstrip() + "\n"`; apply re-adds the block, so only trailing whitespace at the end of AGENTS.md can change (README §7) |
 | `identity: []` | maps | `persona: []`; M′ `identity: []` |
 
@@ -125,7 +125,8 @@ derived from the revision field by field as below.
 | Manifest field | Outcome | Revision / M′ |
 | --- | --- | --- |
 | `body` | resolved | Placeholders substituted as apply would, then `spec.script.digest`; M′: `script: {body: …}` with the stored body |
-| absent, or `script: null` | maps | `spec.script: null`; M′ `script: null`. Apply reads `null` as "absent" today, so M′ cannot remove an existing script ([#2862](https://github.com/inclusionAI/Avernet/issues/2862)) |
+| `script` absent | resolved | Filled like any omitted category: from the parent revision, or the bot's current state for a first revision |
+| `script: null` | maps | `spec.script: null` (no script); M′ `script: null`. Apply reads `null` as "absent" today, so M′ cannot remove an existing script ([#2862](https://github.com/inclusionAI/Avernet/issues/2862)) |
 
 ## Revision fields with no Manifest counterpart
 
