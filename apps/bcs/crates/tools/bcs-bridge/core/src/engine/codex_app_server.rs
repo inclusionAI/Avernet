@@ -94,11 +94,16 @@ impl CodexSandbox {
 /// Codex approval policy, decides whether the engine may request approvals at all.
 /// `never` (bridge default) means no approval channel: operations outside the
 /// sandbox are denied outright instead of prompting.
+///
+/// Verified against a live cfuse codex 0.161 app-server (2026-10-18): the wire
+/// enum accepts `never | on-request | untrusted | granular`; the legacy
+/// `on-failure` value is rejected outright ("unknown variant"), so the bridge
+/// whitelist never offers it. `granular` exists upstream but stays unexposed
+/// until its per-command semantics are reviewed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum CodexApprovalPolicy {
     #[default]
     Never,
-    OnFailure,
     OnRequest,
     Untrusted,
 }
@@ -107,7 +112,6 @@ impl CodexApprovalPolicy {
     fn parse(value: &str) -> Option<Self> {
         match value {
             "never" => Some(Self::Never),
-            "on-failure" => Some(Self::OnFailure),
             "on-request" => Some(Self::OnRequest),
             "untrusted" => Some(Self::Untrusted),
             _ => None,
@@ -116,7 +120,6 @@ impl CodexApprovalPolicy {
     fn wire(self) -> &'static str {
         match self {
             Self::Never => "never",
-            Self::OnFailure => "on-failure",
             Self::OnRequest => "on-request",
             Self::Untrusted => "untrusted",
         }
@@ -198,7 +201,7 @@ impl CodexOptions {
                 (Self::KEY_NETWORK_ACCESS, toml::Value::Boolean(network)) => parsed.network_access = *network,
                 (Self::KEY_APPROVAL_POLICY, toml::Value::String(policy)) => {
                     parsed.approval_policy = CodexApprovalPolicy::parse(policy).ok_or_else(||
-                        format!("engine_options.approval_policy must be one of 'never' | 'on-failure' | 'on-request' | 'untrusted'"))?;
+                        format!("engine_options.approval_policy must be one of 'never' | 'on-request' | 'untrusted'"))?;
                 }
                 (Self::KEY_APPROVAL_REVIEW, toml::Value::String(review)) => {
                     parsed.approval_review = CodexApprovalReview::parse(review).ok_or_else(||
@@ -217,7 +220,7 @@ impl CodexOptions {
             // `never` closes the approval channel entirely; an auto reviewer
             // never fires. The combo usually means the author wanted engine-side
             // auto-approvals — fail fast instead of silently keeping the denial.
-            (false, CodexApprovalReview::Auto) => return Err("engine_options.approval_review='auto' requires approval_policy 'on-failure' or 'on-request'; with 'never' escalations are denied without a reviewer".into()),
+            (false, CodexApprovalReview::Auto) => return Err("engine_options.approval_review='auto' requires approval_policy 'on-request' or 'untrusted'; with 'never' escalations are denied without a reviewer".into()),
             // Human approval via BCS HITL needs codex→interaction routing that this
             // driver does not implement yet; asking would hit the -32000 rejector.
             (true, CodexApprovalReview::User) => return Err("engine_options.approval_review='user' with a non-'never' approval_policy requires codex HITL routing, which this driver does not implement yet; use approval_policy='never' or approval_review='auto'".into()),
@@ -309,11 +312,13 @@ impl CodexAppServer {
         args
     }
 
-    /// Warn when Codex has no sandbox launcher (bubblewrap) for a sandboxed
-    /// mode: either `bwrap` on PATH or a bundled `codex-resources/bwrap` beside
-    /// the engine binary. The engine itself reports the failure per command at
-    /// turn time; this warning makes it visible at start instead.
-    #[cfg(unix)]
+    /// Warn when Codex has no sandbox launcher for a sandboxed mode, on Linux:
+    /// exec commands run through bubblewrap (`bwrap` on PATH or a bundled
+    /// `codex-resources/bwrap` beside the engine binary). The engine itself
+    /// reports the failure per command at turn time; this warning makes it
+    /// visible at start instead. Other platforms use other launchers (e.g.
+    /// macOS sandbox-exec) and need a different probe.
+    #[cfg(target_os = "linux")]
     fn warn_sandbox_host(&self) {
         if let Some(parent) = self.bin.parent()
             && parent.join("codex-resources").join("bwrap").exists() { return; }
@@ -324,7 +329,7 @@ impl CodexAppServer {
              Install bubblewrap (yum/apt install bubblewrap) or set engine_options {{ sandbox = 'danger-full-access' }} for a sandbox-less bot");
     }
 
-    #[cfg(not(unix))]
+    #[cfg(not(target_os = "linux"))]
     fn warn_sandbox_host(&self) {}
 
     async fn abort_turn(&self, cli: &mut CodexConnection, thread_id: &str, turn_id: &str) -> Result<(), TurnError> {
@@ -1124,12 +1129,12 @@ mod tests {
         let options = CodexOptions::parse(&table(&[
             ("sandbox", "read-only".into()),
             ("network_access", false.into()),
-            ("approval_policy", "on-failure".into()),
+            ("approval_policy", "on-request".into()),
             ("approval_review", "auto".into()),
         ])).unwrap();
         assert_eq!(options.sandbox, CodexSandbox::ReadOnly);
         assert!(!options.network_access);
-        assert_eq!(options.approval_policy, CodexApprovalPolicy::OnFailure);
+        assert_eq!(options.approval_policy, CodexApprovalPolicy::OnRequest);
         assert_eq!(options.approval_review, CodexApprovalReview::Auto);
         assert_eq!(options.wire_approvals_reviewer(), "auto_review");
         assert_eq!(options.wire_sandbox_policy(),
@@ -1174,7 +1179,7 @@ mod tests {
         let error = CodexOptions::parse(&user_asks).unwrap_err();
         assert!(error.contains("HITL") && error.contains("does not implement"), "{error}");
         // unset review on a non-never policy defaults to user and must fail the same way
-        let unset_review = table(&[("approval_policy", "on-failure".into())]);
+        let unset_review = table(&[("approval_policy", "on-request".into())]);
         let error = CodexOptions::parse(&unset_review).unwrap_err();
         assert!(error.contains("HITL"), "{error}");
         assert!(CodexOptions::parse(&table(&[
