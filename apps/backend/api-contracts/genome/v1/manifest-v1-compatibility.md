@@ -108,6 +108,7 @@ derived from the revision field by field as below.
 | `config.headers` | maps | Names and values as written ([#2860](https://github.com/inclusionAI/Avernet/issues/2860)). Names are not case-folded: the stored spelling is what reaches the device, and not every apply-time merge compares names case-insensitively |
 | `config.endpoint_env` | maps | |
 | `config.transport_protocol` | normalized | Upper-cased (the Manifest validator already does this) |
+| a server the recording actor may not enable, or a `config` that is not a valid bot override | refused | Apply's `McpMaterialiser.resolve` refuses it (`_permitted`, `validate_bot_override`); recording runs the same checks with the recording bot's context (README §6.4) |
 | user-level MCP config, Center defaults | not in the revision | Read at apply time ([#2859](https://github.com/inclusionAI/Avernet/issues/2859)) |
 
 ## `manifest.cli_tools`

@@ -476,9 +476,25 @@ denominator).
   | `resources` | `admission_refusal` (`core/resources/services/file_service.py`) | Every file, and every member of a directory: an allowed extension, at most 500 MB |
   | `resources` | resources materialiser (`apply/materialisers/resources.py`) | Paths unique once a trailing `/` is removed (no `foo.md` with `foo.md/`); no entry inside a directory entry |
   | `tools.mcp` | Manifest MCP validation (`schema/entries.py`) | `url` parses with a hostname; header names unique case-insensitively, no CR or LF |
+  | `tools.mcp` | `McpMaterialiser.resolve`: `_permitted` (`check_mcp_permission_detail`) and `MCPConfigService.validate_bot_override` | The server exists and the recording actor may enable it; its `config`, if any, is a valid bot override for that server and the bot's engine (for example no remote config on a `LOCAL` server, no platform-managed header, an `endpoint_env` and `transport_protocol` with a matching endpoint) |
   | text files a patch edits | `file.edit`, `skill.update` diffs | Valid UTF-8 before and after |
 
   When apply gains a new refusal, it belongs in this table too.
+
+  Some of these predicates read state outside the revision: the bot's engine
+  (`legal_identity_types`, `validate_bot_override`), the tenant's MCP
+  permissions and the MCP registry. The recorder runs them with the
+  recording bot's context (its owner, engine, and the actor recording), the
+  same context apply would use at that moment. So a recorded revision is one
+  that applied when it was recorded; it can still be refused later if that
+  state changes (a permission is revoked, a server is retired), and apply
+  re-runs every predicate, so such a refusal is an ordinary apply failure,
+  not a corrupt revision. Patches cannot change `tools/mcp` (§6.1), so a
+  candidate's MCP entries are its parent's, checked when the parent was
+  recorded; apply re-checks them at promotion.
+  These context checks have no offline negative examples in `examples/`,
+  because they need a tenant and an MCP registry; RSI-03 covers them with
+  fakes of those services.
 - Limits mirror the Manifest: 50 entries per category, 64 KiB of UTF-8 per
   inline content value,
   and the fetch-time size limits for skills (100 MiB), files (100 MiB) and
