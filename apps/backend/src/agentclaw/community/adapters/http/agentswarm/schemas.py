@@ -55,9 +55,9 @@ class RunOptionsDTO(BaseModel):
     slice_max_seconds: float | None = Field(
         default=None, gt=0, le=3600,
         description="Orchestrator deadline per slice (seconds).")
-    per_subagent_timeout_seconds: float | None = Field(
+    per_attempt_timeout_seconds: float | None = Field(
         default=None, gt=0, le=600,
-        description="Upper bound for one subagent task (seconds).")
+        description="Upper bound for one attempt task (seconds).")
     max_turns: int | None = Field(
         default=None, ge=1, le=50,
         description="Orchestrator decision-turn budget.")

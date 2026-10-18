@@ -23,10 +23,10 @@ from agentclaw.community.core.agentswarm.domain import models as dm
 from agentclaw.community.core.agentswarm.repository import registry as om
 from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
 from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
-from agentclaw.community.core.agentswarm.repository.job import JobRepository
+from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
 from agentclaw.community.core.agentswarm.repository.round import RoundRepository
 from agentclaw.community.core.agentswarm.repository.message import MessageRepository
-from agentclaw.community.core.agentswarm.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentswarm.repository.agent_result import AgentResultRepository
 from agentclaw.community.core.agentswarm.repository.run import RunRepository
 from agentclaw.community.core.agentswarm.service import AgentSwarmService
 from agentclaw.community.core.agentswarm.service.protocols import (
@@ -63,10 +63,10 @@ def db():
         om.AcAgentSwarmRunModel.__table__,
         om.AcAgentSwarmAgentModel.__table__,
         om.AcAgentSwarmMessageModel.__table__,
-        om.AcAgentSwarmResultShardModel.__table__,
+        om.AcAgentSwarmAgentResultModel.__table__,
         om.AcAgentSwarmRoundModel.__table__,
         om.AcAgentSwarmGuardEventModel.__table__,
-        om.AcAgentSwarmJobModel.__table__,
+        om.AcAgentSwarmRunDispatchModel.__table__,
     ])
     yield _TestDB(engine)
     engine.dispose()
@@ -86,19 +86,19 @@ def _config(max_concurrent_runs: int = 8,
 def service(db) -> AgentSwarmService:
     return AgentSwarmService(
         run_repo=RunRepository(db),
-        job_repo=JobRepository(db),
+        dispatch_repo=RunDispatchRepository(db),
         agent_repo=AgentRepository(db),
         message_repo=MessageRepository(db),
         round_repo=RoundRepository(db),
         guard_repo=GuardEventRepository(db),
-        shard_repo=ResultShardRepository(db),
+        result_repo=AgentResultRepository(db),
         config=_config(),
     )
 
 
 @pytest.fixture()
-def job_repo(db) -> JobRepository:
-    return JobRepository(db)
+def dispatch_repo(db) -> RunDispatchRepository:
+    return RunDispatchRepository(db)
 
 
 @pytest.fixture()
@@ -137,8 +137,8 @@ def _mk_run(status: dm.RunStatus = dm.RunStatus.RUNNING,
     )
 
 
-def _claim_one_job(job_repo: JobRepository, tenant: dm.TenantId, run_id: dm.RunId) -> int:
-    claimed = job_repo.claim_batch("w1", [tenant], 10, 60)
+def _claim_one_job(dispatch_repo: RunDispatchRepository, tenant: dm.TenantId, run_id: dm.RunId) -> int:
+    claimed = dispatch_repo.claim_batch("w1", [tenant], 10, 60)
     entry = next(c for c in claimed if c["run_id"] == run_id)
     return entry["claim_epoch"]
 
@@ -153,21 +153,21 @@ class TestProtocolConformance:
 class TestIdempotentSubmit:
 
     @pytest.mark.asyncio
-    async def test_duplicate_submit_joins_same_run(self, service, job_repo):
+    async def test_duplicate_submit_joins_same_run(self, service, dispatch_repo):
         req = _req("tenant-a", idempotency_key="idem-1")
         first = await service.submit_async(req)
         second = await service.submit_async(
             _req("tenant-a", idempotency_key="idem-1")
         )
         assert first == second
-        assert _db_count(job_repo._db, om.AcAgentSwarmRunModel, "tenant-a") == 1
-        assert _db_count(job_repo._db, om.AcAgentSwarmJobModel, "tenant-a") == 1
+        assert _db_count(dispatch_repo._db, om.AcAgentSwarmRunModel, "tenant-a") == 1
+        assert _db_count(dispatch_repo._db, om.AcAgentSwarmRunDispatchModel, "tenant-a") == 1
 
     @pytest.mark.asyncio
-    async def test_different_keys_create_new_runs(self, service, job_repo):
+    async def test_different_keys_create_new_runs(self, service, dispatch_repo):
         await service.submit_async(_req("tenant-a", idempotency_key="k1"))
         await service.submit_async(_req("tenant-a", idempotency_key="k2"))
-        assert _db_count(job_repo._db, om.AcAgentSwarmJobModel, "tenant-a") == 2
+        assert _db_count(dispatch_repo._db, om.AcAgentSwarmRunDispatchModel, "tenant-a") == 2
 
 
 class TestTenantLimits:
@@ -175,10 +175,10 @@ class TestTenantLimits:
     @pytest.mark.asyncio
     async def test_limit_refuses_second_concurrent_run(self, db):
         service = AgentSwarmService(
-            run_repo=RunRepository(db), job_repo=JobRepository(db),
+            run_repo=RunRepository(db), dispatch_repo=RunDispatchRepository(db),
             agent_repo=AgentRepository(db), message_repo=MessageRepository(db),
             round_repo=RoundRepository(db), guard_repo=GuardEventRepository(db),
-            shard_repo=ResultShardRepository(db),
+            result_repo=AgentResultRepository(db),
             config=_config(max_concurrent_runs=1),
         )
         first = await service.submit_async(_req("tenant-a"))
@@ -191,10 +191,10 @@ class TestTenantLimits:
     @pytest.mark.asyncio
     async def test_other_tenant_unaffected_by_tenant_a_limit(self, db):
         service = AgentSwarmService(
-            run_repo=RunRepository(db), job_repo=JobRepository(db),
+            run_repo=RunRepository(db), dispatch_repo=RunDispatchRepository(db),
             agent_repo=AgentRepository(db), message_repo=MessageRepository(db),
             round_repo=RoundRepository(db), guard_repo=GuardEventRepository(db),
-            shard_repo=ResultShardRepository(db),
+            result_repo=AgentResultRepository(db),
             config=_config(max_concurrent_runs=1),
         )
         await service.submit_async(_req("tenant-a"))
@@ -202,16 +202,16 @@ class TestTenantLimits:
         assert service.get_run(second, "tenant-b") is not None
 
     @pytest.mark.asyncio
-    async def test_limit_recovers_after_terminal_status(self, db, run_repo, job_repo):
+    async def test_limit_recovers_after_terminal_status(self, db, run_repo, dispatch_repo):
         service = AgentSwarmService(
-            run_repo=RunRepository(db), job_repo=JobRepository(db),
+            run_repo=RunRepository(db), dispatch_repo=RunDispatchRepository(db),
             agent_repo=AgentRepository(db), message_repo=MessageRepository(db),
             round_repo=RoundRepository(db), guard_repo=GuardEventRepository(db),
-            shard_repo=ResultShardRepository(db),
+            result_repo=AgentResultRepository(db),
             config=_config(max_concurrent_runs=1),
         )
         run_id = await service.submit_async(_req("tenant-a"))
-        epoch = _claim_one_job(job_repo, dm.TenantId("tenant-a"), dm.RunId(run_id))
+        epoch = _claim_one_job(dispatch_repo, dm.TenantId("tenant-a"), dm.RunId(run_id))
         assert run_repo.update_status(
             dm.RunId(run_id), dm.TenantId("tenant-a"), dm.RunStatus.COMPLETED,
             termination_reason=dm.TerminationReason.FINISH, final_answer="done",
@@ -223,7 +223,7 @@ class TestTenantLimits:
 
 class TestListRuns:
 
-    def _seed_runs(self, run_repo: RunRepository, job_repo: JobRepository,
+    def _seed_runs(self, run_repo: RunRepository, dispatch_repo: RunDispatchRepository,
                    count: int, status: dm.RunStatus) -> list[dm.RunId]:
         ids = []
         for i in range(count):
@@ -239,15 +239,15 @@ class TestListRuns:
                 started_at=dm.EpochMillis(int(time.time() * 1000)),
             )
             run_repo.create(run)
-            job_repo.enqueue(
+            dispatch_repo.enqueue(
                 run_id=run_id, tenant=dm.TenantId("tenant-a"), deadline_seconds=60,
             )
             ids.append(run_id)
         return ids
 
-    def test_pagination_over_real_repository(self, service, run_repo, job_repo):
-        self._seed_runs(run_repo, job_repo, 3, dm.RunStatus.COMPLETED)
-        self._seed_runs(run_repo, job_repo, 2, dm.RunStatus.FAILED)
+    def test_pagination_over_real_repository(self, service, run_repo, dispatch_repo):
+        self._seed_runs(run_repo, dispatch_repo, 3, dm.RunStatus.COMPLETED)
+        self._seed_runs(run_repo, dispatch_repo, 2, dm.RunStatus.FAILED)
         page1 = service.list_runs("tenant-a", page=1, page_size=4)
         assert page1.total == 5
         assert len(page1.items) == 4
@@ -257,40 +257,40 @@ class TestListRuns:
             {r.run_id for r in page2.items}
         )
 
-    def test_status_filter_is_typed(self, service, run_repo, job_repo):
-        self._seed_runs(run_repo, job_repo, 2, dm.RunStatus.COMPLETED)
-        self._seed_runs(run_repo, job_repo, 1, dm.RunStatus.FAILED)
+    def test_status_filter_is_typed(self, service, run_repo, dispatch_repo):
+        self._seed_runs(run_repo, dispatch_repo, 2, dm.RunStatus.COMPLETED)
+        self._seed_runs(run_repo, dispatch_repo, 1, dm.RunStatus.FAILED)
         failed = service.list_runs("tenant-a", dm.RunStatus.FAILED)
         assert failed.total == 1
         assert all(r.status is dm.RunStatus.FAILED for r in failed.items)
 
-    def test_list_is_tenant_scoped(self, service, run_repo, job_repo):
-        self._seed_runs(run_repo, job_repo, 2, dm.RunStatus.COMPLETED)
+    def test_list_is_tenant_scoped(self, service, run_repo, dispatch_repo):
+        self._seed_runs(run_repo, dispatch_repo, 2, dm.RunStatus.COMPLETED)
         assert service.list_runs("tenant-b").total == 0
 
 
 class TestConfigFailClear:
 
     @pytest.mark.asyncio
-    async def test_missing_llm_config_refuses_submit(self, db, job_repo):
+    async def test_missing_llm_config_refuses_submit(self, db, dispatch_repo):
         service = AgentSwarmService(
-            run_repo=RunRepository(db), job_repo=JobRepository(db),
+            run_repo=RunRepository(db), dispatch_repo=RunDispatchRepository(db),
             agent_repo=AgentRepository(db), message_repo=MessageRepository(db),
             round_repo=RoundRepository(db), guard_repo=GuardEventRepository(db),
-            shard_repo=ResultShardRepository(db),
+            result_repo=AgentResultRepository(db),
             config=AgentSwarmConfig(),
         )
         with pytest.raises(AgentSwarmConfigError, match="llm config missing"):
             await service.submit_async(_req("tenant-a"))
-        assert _db_count(job_repo._db, om.AcAgentSwarmJobModel, "tenant-a") == 0
+        assert _db_count(dispatch_repo._db, om.AcAgentSwarmRunDispatchModel, "tenant-a") == 0
 
     @pytest.mark.asyncio
     async def test_empty_base_url_refuses_submit(self, db):
         service = AgentSwarmService(
-            run_repo=RunRepository(db), job_repo=JobRepository(db),
+            run_repo=RunRepository(db), dispatch_repo=RunDispatchRepository(db),
             agent_repo=AgentRepository(db), message_repo=MessageRepository(db),
             round_repo=RoundRepository(db), guard_repo=GuardEventRepository(db),
-            shard_repo=ResultShardRepository(db),
+            result_repo=AgentResultRepository(db),
             config=_config(llm=LlmConfig(base_url="", api_key="k")),
         )
         with pytest.raises(AgentSwarmConfigError, match="base_url/api_key"):
@@ -310,17 +310,17 @@ class TestCancelFlow:
 
     @pytest.mark.asyncio
     async def test_cancel_after_terminal_reports_terminal_status(
-        self, db, run_repo, job_repo,
+        self, db, run_repo, dispatch_repo,
     ):
         service = AgentSwarmService(
-            run_repo=RunRepository(db), job_repo=JobRepository(db),
+            run_repo=RunRepository(db), dispatch_repo=RunDispatchRepository(db),
             agent_repo=AgentRepository(db), message_repo=MessageRepository(db),
             round_repo=RoundRepository(db), guard_repo=GuardEventRepository(db),
-            shard_repo=ResultShardRepository(db),
+            result_repo=AgentResultRepository(db),
             config=_config(),
         )
         run_id = await service.submit_async(_req("tenant-a"))
-        epoch = _claim_one_job(job_repo, dm.TenantId("tenant-a"), dm.RunId(run_id))
+        epoch = _claim_one_job(dispatch_repo, dm.TenantId("tenant-a"), dm.RunId(run_id))
         run_repo.update_status(
             dm.RunId(run_id), dm.TenantId("tenant-a"), dm.RunStatus.COMPLETED,
             termination_reason=dm.TerminationReason.FINISH,
@@ -358,7 +358,7 @@ def _mk_round(run_id: dm.RunId, cohort: tuple[dm.AgentId, ...]) -> dm.Round:
         tenant="tenant-a",
         stage_index=0,
         orchestrator_steps=1,
-        max_subagent_steps=0,
+        slowest_attempt_steps=0,
         cohort_agent_ids=cohort,
         started_at=dm.EpochMillis(0),
     )
@@ -379,22 +379,22 @@ def _mk_guard_event(run_id: dm.RunId, kind: dm.GuardKind) -> dm.GuardEvent:
 class TestEnqueueFailureCompensation:
     """Orphan-run prevention: when enqueue raises AFTER this call created
     the run row, the RUNNING row would hold the tenant admission slot and
-    the active idempotency key forever with no job for a worker to claim.
+    the active idempotency key forever with no dispatch for a worker to claim.
     The service must compensate (terminal FAILED frees both) and re-raise
     the original error — never swallow it."""
 
     @pytest.mark.asyncio
     async def test_enqueue_raise_marks_run_failed_frees_key_and_reraises(
-            self, service, job_repo, monkeypatch):
-        real_enqueue = job_repo.enqueue
+            self, service, dispatch_repo, monkeypatch):
+        real_enqueue = dispatch_repo.enqueue
 
         def enqueue_then_glitch(**kwargs):
-            # DB glitch with an ambiguous commit: the job INSERT lands,
+            # DB glitch with an ambiguous commit: the dispatch INSERT lands,
             # but the call surfaces an error to the submit plane anyway.
             real_enqueue(**kwargs)
             raise RuntimeError("db glitch during enqueue")
 
-        monkeypatch.setattr(service._job_repo, "enqueue", enqueue_then_glitch)
+        monkeypatch.setattr(service._dispatch_repo, "enqueue", enqueue_then_glitch)
         with pytest.raises(RuntimeError, match="db glitch"):
             await service.submit_async(
                 _req("tenant-a", idempotency_key="idem-enq")
@@ -411,8 +411,8 @@ class TestEnqueueFailureCompensation:
         # Admission freed: the orphan no longer occupies a tenant slot.
         assert service._run_repo.count_active_runs(dm.TenantId("tenant-a")) == 0
         # Functional proof both: the same key opens a fresh run once the
-        # job plane recovers.
-        monkeypatch.setattr(service._job_repo, "enqueue", real_enqueue)
+        # dispatch plane recovers.
+        monkeypatch.setattr(service._dispatch_repo, "enqueue", real_enqueue)
         retry = await service.submit_async(
             _req("tenant-a", idempotency_key="idem-enq")
         )
@@ -422,9 +422,9 @@ class TestEnqueueFailureCompensation:
     @pytest.mark.asyncio
     async def test_enqueue_raise_without_job_row_fails_run_frees_slots_and_reraises(
             self, service, db, monkeypatch):
-        # The common failure shape: enqueue raised BEFORE the job row
+        # The common failure shape: enqueue raised BEFORE the dispatch row
         # committed (DB down / disk full / deadlock → rollback), so NO
-        # job row exists and the D28-fenced update_status(claim_epoch=0)
+        # dispatch row exists and the D28-fenced update_status(claim_epoch=0)
         # would match zero rows. The submit plane must still reclaim the
         # run it just created through the unfenced fail_unclaimed seam:
         # run FAILED, key freed, admission freed — and the original
@@ -432,12 +432,12 @@ class TestEnqueueFailureCompensation:
         def enqueue_glitch(**kwargs):
             raise RuntimeError("db down before insert")
 
-        monkeypatch.setattr(service._job_repo, "enqueue", enqueue_glitch)
+        monkeypatch.setattr(service._dispatch_repo, "enqueue", enqueue_glitch)
         with pytest.raises(RuntimeError, match="db down"):
             await service.submit_async(
                 _req("tenant-a", idempotency_key="idem-orphan")
             )
-        assert _db_count(db, om.AcAgentSwarmJobModel, "tenant-a") == 0
+        assert _db_count(db, om.AcAgentSwarmRunDispatchModel, "tenant-a") == 0
         (run,) = service.list_runs("tenant-a").items
         assert run.status is dm.RunStatus.FAILED
         assert run.ended_at is not None
@@ -453,10 +453,10 @@ class TestEnqueueFailureCompensation:
 
     @pytest.mark.asyncio
     async def test_failed_compensation_write_does_not_mask_original_error(
-            self, service, job_repo, monkeypatch):
+            self, service, dispatch_repo, monkeypatch):
         # The compensation write can fail on the same broken DB; it must
         # not replace or hide the original enqueue exception.
-        real_enqueue = job_repo.enqueue
+        real_enqueue = dispatch_repo.enqueue
 
         def enqueue_then_glitch(**kwargs):
             real_enqueue(**kwargs)
@@ -465,7 +465,7 @@ class TestEnqueueFailureCompensation:
         def broken_fail_unclaimed(*args, **kwargs):
             raise ValueError("compensation path also broken")
 
-        monkeypatch.setattr(service._job_repo, "enqueue", enqueue_then_glitch)
+        monkeypatch.setattr(service._dispatch_repo, "enqueue", enqueue_then_glitch)
         monkeypatch.setattr(
             service._run_repo, "fail_unclaimed", broken_fail_unclaimed,
         )
@@ -476,9 +476,9 @@ class TestEnqueueFailureCompensation:
 class TestFailUnclaimedSeam:
     """Repository-level contract of fail_unclaimed — the unfenced
     submit-plane seam the service's enqueue-failure compensation uses.
-    Unlike the D28-fenced update_status (which requires a job row at the
+    Unlike the D28-fenced update_status (which requires a dispatch row at the
     caller's claim_epoch), fail_unclaimed reclaims a RUNNING run with NO
-    job row at all: the job INSERT may never have committed. The
+    dispatch row at all: the dispatch INSERT may never have committed. The
     status==RUNNING predicate is the only clobber guard — an already
     terminal or deleted run refuses the write."""
 
@@ -585,9 +585,9 @@ class TestRunEvents:
 
     @pytest.mark.asyncio
     async def test_terminal_run_reports_run_status_and_terminal(self, service, db,
-                                                                run_repo, job_repo):
+                                                                run_repo, dispatch_repo):
         run_id = await service.submit_async(_req("tenant-a"))
-        epoch = _claim_one_job(job_repo, dm.TenantId("tenant-a"), dm.RunId(run_id))
+        epoch = _claim_one_job(dispatch_repo, dm.TenantId("tenant-a"), dm.RunId(run_id))
         run_repo.update_status(
             dm.RunId(run_id), dm.TenantId("tenant-a"), dm.RunStatus.COMPLETED,
             termination_reason=dm.TerminationReason.FINISH,

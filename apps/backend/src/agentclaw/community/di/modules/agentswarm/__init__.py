@@ -38,9 +38,9 @@ from agentclaw.community.core.agentswarm.repository.agent_attempt import (
     AgentAttemptRepository,
 )
 from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
-from agentclaw.community.core.agentswarm.repository.job import JobRepository
+from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
 from agentclaw.community.core.agentswarm.repository.message import MessageRepository
-from agentclaw.community.core.agentswarm.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentswarm.repository.agent_result import AgentResultRepository
 from agentclaw.community.core.agentswarm.repository.round import RoundRepository
 from agentclaw.community.core.agentswarm.repository.run import RunRepository
 from agentclaw.community.core.agentswarm.runtime.pool import (
@@ -102,22 +102,22 @@ class AgentSwarmModule(Module):
     def agent_swarm_service(
         self,
         run_repo: RunRepository,
-        job_repo: JobRepository,
+        dispatch_repo: RunDispatchRepository,
         agent_repo: AgentRepository,
         message_repo: MessageRepository,
         round_repo: RoundRepository,
         guard_repo: GuardEventRepository,
-        shard_repo: ResultShardRepository,
+        result_repo: AgentResultRepository,
         config: AgentSwarmConfig,
     ) -> AgentSwarmService:
         return AgentSwarmService(
             run_repo=run_repo,
-            job_repo=job_repo,
+            dispatch_repo=dispatch_repo,
             agent_repo=agent_repo,
             message_repo=message_repo,
             round_repo=round_repo,
             guard_repo=guard_repo,
-            shard_repo=shard_repo,
+            result_repo=result_repo,
             config=config,
         )
 
@@ -205,8 +205,8 @@ class AgentSwarmModule(Module):
     @provider
     @singleton
     @inject
-    def provide_shard_repo(self, db: DatabasePlugin) -> ResultShardRepository:
-        return ResultShardRepository(db)
+    def provide_result_repo(self, db: DatabasePlugin) -> AgentResultRepository:
+        return AgentResultRepository(db)
 
     @provider
     @singleton
@@ -223,8 +223,8 @@ class AgentSwarmModule(Module):
     @provider
     @singleton
     @inject
-    def provide_job_repo(self, db: DatabasePlugin) -> JobRepository:
-        return JobRepository(db)
+    def provide_dispatch_repo(self, db: DatabasePlugin) -> RunDispatchRepository:
+        return RunDispatchRepository(db)
 
     @provider
     @singleton
@@ -301,9 +301,9 @@ class AgentSwarmModule(Module):
         llm: LLMProvider,
         config: AgentSwarmConfig,
     ) -> SubagentRuntime:
-        # The avernet BotPlatform is a host binding, not an agentswarm one:
+        # The bot BotPlatform is a host binding, not an agentswarm one:
         # profiles that run the platform side bind BotPlatform (the
-        # in-process seam); others resolve no platform and avernet-kind
+        # in-process seam); others resolve no platform and bot-kind
         # spawns fail clear at the factory.
         try:
             platform: BotPlatform | None = injector.get(BotPlatform)
@@ -311,11 +311,11 @@ class AgentSwarmModule(Module):
             # A config-family error raised inside the platform's
             # construction chain (a mis-parsed knob deep in a
             # platform-side dependency): precise, logged, and degraded
-            # to the same fail-clear mode; avernet-kind spawns fail
+            # to the same fail-clear mode; bot-kind spawns fail
             # clear at the factory.
             logger.warning(
                 "[agentswarm] BotPlatform construction failed: %s "
-                "(avernet-kind spawns will fail clear at the factory)", exc,
+                "(bot-kind spawns will fail clear at the factory)", exc,
             )
             platform = None
         except Exception:
@@ -324,7 +324,7 @@ class AgentSwarmModule(Module):
             # degrade is observable, then the same fail-clear mode.
             logger.exception(
                 "[agentswarm] BotPlatform resolution failed — degrading to "
-                "none-platform mode; avernet-kind spawns fail clear at the "
+                "none-platform mode; bot-kind spawns fail clear at the "
                 "factory"
             )
             platform = None
@@ -337,12 +337,12 @@ class AgentSwarmModule(Module):
         # The pool's binding-journal SliceStore (D-L): the same repos, its
         # own probe — the journal write's authority is the D28 claim fence
         # evaluated inside the insert, and this store never touches the
-        # message/shard plane the handler's own store drives.
+        # message/result plane the handler's own store drives.
         binding_store = SliceStore(
             config,
             injector.get(AgentRepository),
             injector.get(MessageRepository),
-            injector.get(ResultShardRepository),
+            injector.get(AgentResultRepository),
             injector.get(RoundRepository),
             lost_probe=lambda: False,
             attempt_repo=attempt_repo,
@@ -351,8 +351,8 @@ class AgentSwarmModule(Module):
             factory=factory,
             artifact_store=store,
             max_width=config.orchestration.max_width,
-            max_attempts=config.orchestration.subagent_max_attempts,
-            per_task_timeout=config.orchestration.per_subagent_timeout,
+            max_attempts=config.orchestration.agent_max_attempts,
+            per_task_timeout=config.orchestration.per_attempt_timeout,
             setup_timeout=config.orchestration.setup_timeout,
             artifact_inline_threshold=config.artifact_inline_threshold,
             upstream_breaker=UpstreamBreaker(
@@ -374,10 +374,10 @@ class AgentSwarmModule(Module):
         run_repo: RunRepository,
         agent_repo: AgentRepository,
         message_repo: MessageRepository,
-        shard_repo: ResultShardRepository,
+        result_repo: AgentResultRepository,
         round_repo: RoundRepository,
         guard_repo: GuardEventRepository,
-        job_repo: JobRepository,
+        dispatch_repo: RunDispatchRepository,
     ) -> SwarmRunHandler:
         from agentclaw.community.core.agentswarm.orchestration.termination import (
             TerminationEvaluator,
@@ -395,10 +395,10 @@ class AgentSwarmModule(Module):
             run_repo=run_repo,
             agent_repo=agent_repo,
             message_repo=message_repo,
-            shard_repo=shard_repo,
+            result_repo=result_repo,
             round_repo=round_repo,
             guard_repo=guard_repo,
-            job_repo=job_repo,
+            dispatch_repo=dispatch_repo,
             termination=termination,
             guards=guards,
         )
@@ -410,7 +410,7 @@ class AgentSwarmModule(Module):
         self,
         config: AgentSwarmConfig,
         handler: SwarmRunHandler,
-        job_repo: JobRepository,
+        dispatch_repo: RunDispatchRepository,
         run_repo: RunRepository,
         guard_repo: GuardEventRepository,
         attempt_repo: AgentAttemptRepository,
@@ -420,7 +420,7 @@ class AgentSwarmModule(Module):
         # workers sweep; constructor defaults keep embedded uses opt-out.
         # attempt_repo backs the terminal-cleanup reconciliation leg.
         return AgentSwarmWorker(
-            config=config, handler=handler, job_repo=job_repo,
+            config=config, handler=handler, dispatch_repo=dispatch_repo,
             run_repo=run_repo, guard_repo=guard_repo,
             attempt_repo=attempt_repo,
         )

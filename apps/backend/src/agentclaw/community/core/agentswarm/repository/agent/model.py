@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy import Column, Index, Integer, String, Text, BigInteger
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.agentswarm.repository.base import (
@@ -17,13 +18,13 @@ class AcAgentSwarmAgentModel(_AgentSwarmBase, Base):
     name = Column(String(128), nullable=False)
     role = Column(String(256), nullable=True)
     kind = Column(String(16), nullable=False)
-    task_spec = Column(Text, nullable=True)
+    task_spec = Column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
     spawn_round = Column(Integer, nullable=False, default=0)
     status = Column(String(32), nullable=False)
     attempts = Column(Integer, nullable=False, default=0)
     idempotency_key = Column(_ID190, nullable=False)
-    output = Column(Text, nullable=True)
-    error = Column(Text, nullable=True)
+    output = Column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
+    error = Column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
     bot_id = Column(_ID128, nullable=True)
     bot_state = Column(String(32), nullable=True)
     started_at = Column(BigInteger, nullable=True)

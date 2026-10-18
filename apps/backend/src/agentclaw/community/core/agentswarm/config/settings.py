@@ -105,8 +105,8 @@ class AgentSwarmOrchestrationConfig:
     max_width: int = 8
     max_depth: int = 5
     repair_max: int = 2
-    subagent_max_attempts: int = 3
-    per_subagent_timeout: float = 300.0
+    agent_max_attempts: int = 3
+    per_attempt_timeout: float = 300.0
     setup_timeout: float = 300.0
     orchestrator_turn_interval: float = 1.0
     slice_max_seconds: float = 900.0
@@ -130,8 +130,8 @@ class AgentSwarmOrchestrationConfig:
             max_width=_as_int(block, "max_width", d.max_width, minimum=1),
             max_depth=_as_int(block, "max_depth", d.max_depth, minimum=1),
             repair_max=_as_int(block, "repair_max", d.repair_max, minimum=0),
-            subagent_max_attempts=_as_int(block, "subagent_max_attempts", d.subagent_max_attempts, minimum=1),
-            per_subagent_timeout=_as_float(block, "per_subagent_timeout", d.per_subagent_timeout),
+            agent_max_attempts=_as_int(block, "agent_max_attempts", d.agent_max_attempts, minimum=1),
+            per_attempt_timeout=_as_float(block, "per_attempt_timeout", d.per_attempt_timeout),
             setup_timeout=_as_float(block, "setup_timeout", d.setup_timeout),
             orchestrator_turn_interval=_as_float(block, "orchestrator_turn_interval", d.orchestrator_turn_interval),
             slice_max_seconds=_as_float(block, "slice_max_seconds", d.slice_max_seconds, exclusive=True),
@@ -154,24 +154,24 @@ class AgentSwarmOrchestrationConfig:
         # not fit inside one slice, the slice cancels the attempt mid-phase,
         # no completion is produced, and the agent wedges non-terminal
         # forever. Fail clear at config load rather than wedge at runtime.
-        if (cfg.setup_timeout + cfg.per_subagent_timeout) > cfg.slice_max_seconds:
+        if (cfg.setup_timeout + cfg.per_attempt_timeout) > cfg.slice_max_seconds:
             raise ValueError(
-                "orchestration.setup_timeout + per_subagent_timeout "
-                f"({cfg.setup_timeout} + {cfg.per_subagent_timeout} = "
-                f"{cfg.setup_timeout + cfg.per_subagent_timeout}s) exceeds "
+                "orchestration.setup_timeout + per_attempt_timeout "
+                f"({cfg.setup_timeout} + {cfg.per_attempt_timeout} = "
+                f"{cfg.setup_timeout + cfg.per_attempt_timeout}s) exceeds "
                 f"slice_max_seconds ({cfg.slice_max_seconds}s): an attempt "
                 "cannot finish inside a slice and every agent would wedge."
             )
         # The worker renews a held lease every lease_seconds/3 on a dedicated
         # wall-clock thread (starvation-proof), so the lease need not outlast
         # a whole slice. Very small leases still leave no room for a single
-        # renewal round-trip plus jitter, and a lapsed lease hands the job to
+        # renewal round-trip plus jitter, and a lapsed lease hands the dispatch to
         # a peer's reclaim — fail clear at config load.
         if cfg.lease_seconds < 30:
             raise ValueError(
                 f"orchestration.lease_seconds ({cfg.lease_seconds}) too low; "
                 "the heartbeat renews every lease/3 and a lost lease reclaims "
-                "the job — use >= 30"
+                "the dispatch — use >= 30"
             )
         return cfg
 
@@ -192,7 +192,7 @@ class AgentSwarmTenantLimits:
 @dataclass(frozen=True)
 class AgentSwarmAdmissionConfig:
     max_global_concurrent_runs: int = 64
-    max_pending_jobs: int = 500
+    max_pending_dispatches: int = 500
 
     @classmethod
     def from_block(cls, block: dict) -> "AgentSwarmAdmissionConfig":
@@ -200,7 +200,7 @@ class AgentSwarmAdmissionConfig:
         block = block or {}
         return cls(
             max_global_concurrent_runs=_as_int(block, "max_global_concurrent_runs", d.max_global_concurrent_runs, minimum=1),
-            max_pending_jobs=_as_int(block, "max_pending_jobs", d.max_pending_jobs, minimum=1),
+            max_pending_dispatches=_as_int(block, "max_pending_dispatches", d.max_pending_dispatches, minimum=1),
         )
 
 
@@ -240,7 +240,7 @@ class AgentSwarmMaintenanceConfig:
 
     The orphan reaper (async-run-and-resume D-C) is the block's tenant: a
     jittered sweep at ``reaper_interval_seconds`` cadence that re-enqueues
-    a fresh PENDING job for queue-orphans and forces fenced TIMED_OUT on
+    a fresh READY dispatch for queue-orphans and forces fenced TIMED_OUT on
     runs past their wall-clock deadline. ``enabled`` is the single-knob
     rollback — false stops the loop without touching the worker or the
     queue itself.
@@ -269,7 +269,7 @@ class AgentSwarmExecutorConfig:
     carries the sync ``BotPlatform`` legs (create/status/delete/chat) off
     the event loop (async-run-and-resume D-B): the pool caps how many
     platform calls one pod may have in flight, below and independently of
-    ``max_width`` subagent slots.
+    ``max_width`` agent slots.
     """
 
     max_platform_workers: int = 4

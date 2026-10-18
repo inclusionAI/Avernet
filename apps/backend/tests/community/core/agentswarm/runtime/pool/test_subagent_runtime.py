@@ -597,7 +597,7 @@ class TestArtifactRouting:
     def test_oversize_output_without_store_stays_inline(self):
         # NOTE: found-vs-expected — with artifact_inline_threshold exceeded and
         # no artifact store configured, current source keeps the output inline
-        # (shard XOR carrier, D31) instead of dropping it.
+        # (result XOR carrier, D31) instead of dropping it.
         async def main():
             big_output = {"pad": "y" * 100}
             factory = FakeFactory(
@@ -903,7 +903,7 @@ class TestTeardownFailureLogging:
 
 class TestArtifactSpillFailure:
     """An artifact put failure must not discard a completed (schema-valid)
-    result: falling back inline keeps the shard XOR carrier intact and the
+    result: falling back inline keeps the result XOR carrier intact and the
     finished subagent is never re-run. No false upstream-breaker failure.
     """
 
@@ -978,7 +978,7 @@ class TestBoundedInlineFallback:
 
     Round-4 capped artifacts at 8 MiB (_MAX_ARTIFACT_BYTES), so an oversize
     output can no longer spill — and the unconditional inline fallback would
-    write an unbounded payload into the persisted shard ``payload`` column,
+    write an unbounded payload into the persisted result ``payload`` column,
     turning the bounded-disk vector into an unbounded-DB-write vector.
     Above ``_MAX_INLINE_RESULT_CHARS`` the payload becomes a bounded
     truncated marker; the D31 XOR invariant stays intact (payload set,
@@ -1014,7 +1014,7 @@ class TestBoundedInlineFallback:
     def test_over_cap_no_store_persists_bounded_marker(self, caplog):
         # (a) inline fallback over the cap with NO store: bounded marker,
         # never the raw huge object; the completion still flows to the
-        # shard handler so the shard persists (D31 XOR: payload set,
+        # result handler so the result persists (D31 XOR: payload set,
         # artifact_key None); size records the true serialized length.
         async def main():
             big = self._oversize_output()
@@ -1025,24 +1025,24 @@ class TestBoundedInlineFallback:
                 factory=factory, artifact_store=None,
                 artifact_inline_threshold=10,
             )
-            shards = []
-            rt.set_shard_handler(shards.append)
+            results = []
+            rt.set_result_handler(results.append)
             await rt.start()
             try:
                 await rt.spawn(_mk_run(), _mk_envelope())
                 results = await rt.wait_for_completions()
             finally:
                 await rt.stop()
-            return results, big, shards
+            return results, big, results
 
         with caplog.at_level(
             logging.WARNING,
             logger="agentclaw.community.core.agentswarm.runtime.pool.impl",
         ):
-            results, big, shards = asyncio.run(main())
+            results, big, results = asyncio.run(main())
 
         (r,) = results
-        assert shards == [r]                       # the completion reached the shard path
+        assert results == [r]                       # the completion reached the result path
         assert r["status"] is AgentStatus.COMPLETED
         payload = r["result"]
         assert payload is not big                   # never the raw huge object
@@ -1088,7 +1088,7 @@ class TestBoundedInlineFallback:
     def test_spill_failure_over_cap_persists_bounded_marker(self, caplog):
         # (c) artifact spill failure (store raises, e.g. the round-4 8 MiB
         # cap) with an oversize output: bounded marker, no unbounded
-        # payload, shard XOR intact.
+        # payload, result XOR intact.
         async def main():
             big = self._oversize_output()
             factory = FakeFactory(
@@ -1099,24 +1099,24 @@ class TestBoundedInlineFallback:
                 factory=factory, artifact_store=store,
                 artifact_inline_threshold=10,
             )
-            shards = []
-            rt.set_shard_handler(shards.append)
+            results = []
+            rt.set_result_handler(results.append)
             await rt.start()
             try:
                 await rt.spawn(_mk_run(), _mk_envelope())
                 results = await rt.wait_for_completions()
             finally:
                 await rt.stop()
-            return results, big, shards, store
+            return results, big, results, store
 
         with caplog.at_level(
             logging.WARNING,
             logger="agentclaw.community.core.agentswarm.runtime.pool.impl",
         ):
-            results, big, shards, store = asyncio.run(main())
+            results, big, results, store = asyncio.run(main())
 
         (r,) = results
-        assert shards == [r]
+        assert results == [r]
         assert r["status"] is AgentStatus.COMPLETED
         assert store.puts == 1                        # the spill was attempted
         payload = r["result"]

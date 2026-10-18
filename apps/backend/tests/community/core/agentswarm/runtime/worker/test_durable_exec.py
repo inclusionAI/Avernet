@@ -49,26 +49,26 @@ def db():
     engine.dispose()
 
 
-def _job_state(db, run_id):
+def _dispatch_state(db, run_id):
     with db.orm_session() as session:
         row = session.execute(
-            select(om.AcAgentSwarmJobModel).where(
-                om.AcAgentSwarmJobModel.run_id == run_id,
+            select(om.AcAgentSwarmRunDispatchModel).where(
+                om.AcAgentSwarmRunDispatchModel.run_id == run_id,
             )
         ).scalar_one()
         return {
             "status": row.status,
             "claim_epoch": row.claim_epoch,
-            "attempts": row.attempts,
+            "claims": row.claims,
             "reclaims": row.reclaims,
             "progress_marker": row.progress_marker,
             "last_error": row.last_error,
         }
 
 
-def _routed_shard(env, run: dm.Run, index: int) -> None:
-    # One routed result shard via the existing agent+shard helper: each
-    # call grows the run's routed-shard count by one — the progress
+def _routed_result(env, run: dm.Run, index: int) -> None:
+    # One routed agent result via the existing agent+result helper: each
+    # call grows the run's routed-result count by one — the progress
     # signal the 4.5 breaker compares.
     _agent_with(env, run, f"a{index}", f"goal-a{index}",
                 dm.AgentStatus.COMPLETED)
@@ -92,15 +92,15 @@ class TestClaimIdempotency:
         env = _build_env(db, [_finish_decision("x")], factory)
         run = _mk_run()
         env.run_repo.create(run)
-        env.job_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
+        env.dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
 
-        first = env.job_repo.claim_batch(WORKER, [TENANT], 1, 60)
-        second = env.job_repo.claim_batch("worker-2", [TENANT], 1, 60)
+        first = env.dispatch_repo.claim_batch(WORKER, [TENANT], 1, 60)
+        second = env.dispatch_repo.claim_batch("worker-2", [TENANT], 1, 60)
 
         assert len(first) == 1
         assert second == []
-        assert env.job_repo.claim_batch(WORKER, [TENANT], 1, 60) == []
-        assert _job_state(db, run.run_id)["attempts"] == 1
+        assert env.dispatch_repo.claim_batch(WORKER, [TENANT], 1, 60) == []
+        assert _dispatch_state(db, run.run_id)["claims"] == 1
 
     def test_reschedule_then_reclaim_bumps_epoch(self, db):
         factory = FakeFactory()
@@ -109,10 +109,10 @@ class TestClaimIdempotency:
         claim = _enqueue_and_claim(env, run)
         epoch1 = claim["claim_epoch"]
 
-        assert env.job_repo.reschedule(run.run_id, TENANT, WORKER, 0.0, None, epoch1)
+        assert env.dispatch_repo.reschedule(run.run_id, TENANT, WORKER, 0.0, None, epoch1)
         import time as _t
         _t.sleep(0.05)
-        next_claim = env.job_repo.claim_batch("worker-2", [TENANT], 1, 60)
+        next_claim = env.dispatch_repo.claim_batch("worker-2", [TENANT], 1, 60)
         assert len(next_claim) == 1
         assert next_claim[0]["claim_epoch"] == epoch1 + 1
 
@@ -126,10 +126,10 @@ class TestClaimEpochFencing:
         old_epoch = claim["claim_epoch"]
 
         # Simulate the leasing pod dying: lease expires, another worker reclaims.
-        assert env.job_repo.renew_lease(
+        assert env.dispatch_repo.renew_lease(
             run.run_id, TENANT, WORKER, -1, old_epoch,
         )
-        reclaimed = env.job_repo.reclaim_batch("worker-2", 10, 60)
+        reclaimed = env.dispatch_repo.reclaim_batch("worker-2", 10, 60)
         assert len(reclaimed) == 1
         new_epoch = reclaimed[0]["claim_epoch"]
         assert new_epoch == old_epoch + 1
@@ -168,81 +168,81 @@ class TestReclaimCircuitBreaker:
         run = _mk_run()
         _spin_ref(env, run)
         first = _enqueue_and_claim(env, run)
-        env.job_repo.renew_lease(
+        env.dispatch_repo.renew_lease(
             run.run_id, TENANT, WORKER, -1, first["claim_epoch"],
         )
         worker = AgentSwarmWorker(
-            config=env.cfg, handler=env.handler, job_repo=env.job_repo,
+            config=env.cfg, handler=env.handler, dispatch_repo=env.dispatch_repo,
         )
 
         for _ in range(6):
-            job = _job_state(db, run.run_id)
+            dispatch = _dispatch_state(db, run.run_id)
             if env.run_repo.get(run.run_id, TENANT).status is dm.RunStatus.STUCK:
                 break
-            if job["status"] == "PENDING":
-                victim = env.job_repo.claim_batch("victim", [TENANT], 1, 60)
-                assert victim, "job should be claimable between cycles"
-                env.job_repo.renew_lease(
+            if dispatch["status"] == "READY":
+                victim = env.dispatch_repo.claim_batch("victim", [TENANT], 1, 60)
+                assert victim, "dispatch should be claimable between cycles"
+                env.dispatch_repo.renew_lease(
                     run.run_id, TENANT, "victim", -1, victim[0]["claim_epoch"],
                 )
             asyncio.run(worker.run_once())
 
         stored = env.run_repo.get(run.run_id, TENANT)
-        job = _job_state(db, run.run_id)
+        dispatch = _dispatch_state(db, run.run_id)
         assert stored.status is dm.RunStatus.STUCK
         assert stored.termination_reason == dm.TerminationReason.STUCK
         assert "reclaim circuit breaker" in stored.error
-        assert job["reclaims"] == 3
-        assert job["status"] == "SUCCEEDED"
+        assert dispatch["reclaims"] == 3
+        assert dispatch["status"] == "DONE"
         assert stored.ended_at is not None
-        # 4.5 mixed-version pin: the flat shard count stayed the claim
+        # 4.5 mixed-version pin: the flat result count stayed the claim
         # baseline throughout — the breaker never saw growth and the
         # marker never reset anything.
-        assert job["progress_marker"] == 0
+        assert dispatch["progress_marker"] == 0
 
 
 class TestProgressAwareReclaimBreaker:
     """4.5 on the repository surface: the claim/reclaim UPDATE persists
-    the run's routed-shard count into progress_marker; growth across a
+    the run's routed-result count into progress_marker; growth across a
     crash window resets reclaims, a flat count increments exactly as
     before, and the -1 sentinel (a row from a pre-marker version) is a
     never-progress baseline."""
 
-    def test_claim_persists_routed_shard_count_as_baseline(self, db):
+    def test_claim_persists_routed_result_count_as_baseline(self, db):
         factory = FakeFactory()
         env = _build_env(db, [], factory, config=_tight_config())
         run = _mk_run()
         env.run_repo.create(run)
-        _routed_shard(env, run, 1)
-        _routed_shard(env, run, 2)
-        env.job_repo.enqueue(run_id=run.run_id, tenant=TENANT,
+        _routed_result(env, run, 1)
+        _routed_result(env, run, 2)
+        env.dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT,
                              deadline_seconds=3600)
 
-        claim = env.job_repo.claim_batch(WORKER, [TENANT], 1, 60)[0]
+        claim = env.dispatch_repo.claim_batch(WORKER, [TENANT], 1, 60)[0]
 
         assert claim["progress_marker"] == 2
-        assert _job_state(db, run.run_id)["progress_marker"] == 2
+        assert _dispatch_state(db, run.run_id)["progress_marker"] == 2
 
-    def test_reclaim_with_shard_growth_resets_reclaims(self, db):
+    def test_reclaim_with_result_growth_resets_reclaims(self, db):
         factory = FakeFactory()
         env = _build_env(db, [], factory, config=_tight_config())
         run = _mk_run()
         claim = _enqueue_and_claim(env, run)
-        assert _job_state(db, run.run_id)["progress_marker"] == 0
+        assert _dispatch_state(db, run.run_id)["progress_marker"] == 0
 
-        _routed_shard(env, run, 1)
-        env.job_repo.renew_lease(
+        _routed_result(env, run, 1)
+        env.dispatch_repo.renew_lease(
             run.run_id, TENANT, WORKER, -1, claim["claim_epoch"],
         )
-        first = env.job_repo.reclaim_batch("worker-2", 1, 60)[0]
+        first = env.dispatch_repo.reclaim_batch("worker-2", 1, 60)[0]
         assert first["reclaims"] == 0
         assert first["progress_marker"] == 1
 
         # No further growth: the next reclaim increments again.
-        env.job_repo.renew_lease(
+        env.dispatch_repo.renew_lease(
             run.run_id, TENANT, "worker-2", -1, first["claim_epoch"],
         )
-        second = env.job_repo.reclaim_batch("worker-3", 1, 60)[0]
+        second = env.dispatch_repo.reclaim_batch("worker-3", 1, 60)[0]
         assert second["reclaims"] == 1
 
     def test_reclaim_without_growth_increments_as_before(self, db):
@@ -251,16 +251,16 @@ class TestProgressAwareReclaimBreaker:
         run = _mk_run()
         claim = _enqueue_and_claim(env, run)
 
-        env.job_repo.renew_lease(
+        env.dispatch_repo.renew_lease(
             run.run_id, TENANT, WORKER, -1, claim["claim_epoch"],
         )
-        first = env.job_repo.reclaim_batch("worker-2", 1, 60)[0]
+        first = env.dispatch_repo.reclaim_batch("worker-2", 1, 60)[0]
         assert first["reclaims"] == 1
 
-        env.job_repo.renew_lease(
+        env.dispatch_repo.renew_lease(
             run.run_id, TENANT, "worker-2", -1, first["claim_epoch"],
         )
-        second = env.job_repo.reclaim_batch("worker-3", 1, 60)[0]
+        second = env.dispatch_repo.reclaim_batch("worker-3", 1, 60)[0]
         assert second["reclaims"] == 2
 
     def test_minus_one_marker_row_is_baseline_never_progress(self, db):
@@ -268,23 +268,23 @@ class TestProgressAwareReclaimBreaker:
         env = _build_env(db, [], factory, config=_tight_config())
         run = _mk_run()
         env.run_repo.create(run)
-        _routed_shard(env, run, 1)
-        env.job_repo.enqueue(run_id=run.run_id, tenant=TENANT,
+        _routed_result(env, run, 1)
+        env.dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT,
                              deadline_seconds=3600)
         # Simulate a claim by a pre-marker version: RUNNING with an
         # expired lease, progress_marker still at its -1 default.
         with db.orm_session() as session:
             session.execute(
-                om.AcAgentSwarmJobModel.__table__.update().where(
-                    om.AcAgentSwarmJobModel.run_id == run.run_id,
+                om.AcAgentSwarmRunDispatchModel.__table__.update().where(
+                    om.AcAgentSwarmRunDispatchModel.run_id == run.run_id,
                 ).values(
-                    status=dm.TaskQueueStatus.RUNNING.value,
+                    status=dm.DispatchStatus.LEASED.value,
                     claim_epoch=1,
                     lease_expires_at=datetime(2020, 1, 1),
                 )
             )
 
-        reclaimed = env.job_repo.reclaim_batch("worker-2", 1, 60)[0]
+        reclaimed = env.dispatch_repo.reclaim_batch("worker-2", 1, 60)[0]
 
         # First observation = baseline: growth vs -1 is NOT progress.
         assert reclaimed["reclaims"] == 1
@@ -293,11 +293,11 @@ class TestProgressAwareReclaimBreaker:
 
 
 class TestRollingRestartWithProgressSurvivesBreaker:
-    """4.6 (i): a crash-looping run whose routed-shard count grows
+    """4.6 (i): a crash-looping run whose routed-result count grows
     between reclaims survives past reclaim_max — the exact rolling
     restart of a long bot run D40 used to kill."""
 
-    def test_shard_growth_between_reclaims_survives_past_reclaim_max(self, db):
+    def test_result_growth_between_reclaims_survives_past_reclaim_max(self, db):
         factory = FakeFactory()
         env = _build_env(
             db, [], factory, config=_tight_config(),
@@ -307,50 +307,50 @@ class TestRollingRestartWithProgressSurvivesBreaker:
         run = _mk_run()
         _spin_ref(env, run)
         claim = _enqueue_and_claim(env, run)
-        env.job_repo.renew_lease(
+        env.dispatch_repo.renew_lease(
             run.run_id, TENANT, WORKER, -1, claim["claim_epoch"],
         )
         worker = AgentSwarmWorker(
-            config=env.cfg, handler=env.handler, job_repo=env.job_repo,
+            config=env.cfg, handler=env.handler, dispatch_repo=env.dispatch_repo,
         )
 
         # reclaim_max is 2 in _tight_config: three growth cycles plus a
         # flat one all stay under the breaker (0 or 1 <= 2).
         for cycle in range(3):
-            job = _job_state(db, run.run_id)
-            if job["status"] == "PENDING":
-                victim = env.job_repo.claim_batch("victim", [TENANT], 1, 60)
+            dispatch = _dispatch_state(db, run.run_id)
+            if dispatch["status"] == "READY":
+                victim = env.dispatch_repo.claim_batch("victim", [TENANT], 1, 60)
                 assert victim
-                env.job_repo.renew_lease(
+                env.dispatch_repo.renew_lease(
                     run.run_id, TENANT, "victim", -1, victim[0]["claim_epoch"],
                 )
             # Growth lands BETWEEN claim and reclaim (mid-flight crash
             # after routing) — the reclaimer-visible window.
-            _routed_shard(env, run, cycle)
+            _routed_result(env, run, cycle)
             asyncio.run(worker.run_once())
             assert env.run_repo.get(run.run_id, TENANT).status \
                 is dm.RunStatus.RUNNING
-        assert _job_state(db, run.run_id)["reclaims"] == 0
+        assert _dispatch_state(db, run.run_id)["reclaims"] == 0
 
         # One no-growth reclaims cycle does not trip it either.
-        job = _job_state(db, run.run_id)
-        if job["status"] == "PENDING":
-            victim = env.job_repo.claim_batch("victim", [TENANT], 1, 60)
+        dispatch = _dispatch_state(db, run.run_id)
+        if dispatch["status"] == "READY":
+            victim = env.dispatch_repo.claim_batch("victim", [TENANT], 1, 60)
             assert victim
-            env.job_repo.renew_lease(
+            env.dispatch_repo.renew_lease(
                 run.run_id, TENANT, "victim", -1, victim[0]["claim_epoch"],
             )
         asyncio.run(worker.run_once())
         stored = env.run_repo.get(run.run_id, TENANT)
-        stored_job = _job_state(db, run.run_id)
+        stored_dispatch = _dispatch_state(db, run.run_id)
         assert stored.status is dm.RunStatus.RUNNING
-        assert stored_job["reclaims"] == 1
-        assert stored_job["progress_marker"] == 3
+        assert stored_dispatch["reclaims"] == 1
+        assert stored_dispatch["progress_marker"] == 3
 
 
 class TestClaimPastDeadline:
     """4.4/4.6 (vi): `deadline_at` never joins the claim predicate — a
-    past-deadline job still claims, and the rehydrated slice's
+    past-deadline dispatch still claims, and the rehydrated slice's
     TerminationEvaluator fires the fenced TIMED_OUT through the normal
     path."""
 
@@ -365,17 +365,17 @@ class TestClaimPastDeadline:
         run = _mk_run()
         run.started_at = dm.EpochMillis(int(time.time() * 1000) - 1_000)
         env.run_repo.create(run)
-        env.job_repo.enqueue(run_id=run.run_id, tenant=TENANT,
+        env.dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT,
                              deadline_seconds=3600)
         # Push the row's deadline_at into the past: a claim must ignore it.
         with db.orm_session() as session:
             session.execute(
-                om.AcAgentSwarmJobModel.__table__.update().where(
-                    om.AcAgentSwarmJobModel.run_id == run.run_id,
+                om.AcAgentSwarmRunDispatchModel.__table__.update().where(
+                    om.AcAgentSwarmRunDispatchModel.run_id == run.run_id,
                 ).values(deadline_at=datetime(2020, 1, 1))
             )
 
-        claimed = env.job_repo.claim_batch(WORKER, [TENANT], 1, 60)
+        claimed = env.dispatch_repo.claim_batch(WORKER, [TENANT], 1, 60)
 
         # 4.4: past-deadline rows REMAIN claimable.
         assert len(claimed) == 1
@@ -387,11 +387,11 @@ class TestClaimPastDeadline:
         stored = env.run_repo.get(run.run_id, TENANT)
         assert stored.status is dm.RunStatus.TIMED_OUT
         assert stored.termination_reason is dm.TerminationReason.WALL_CLOCK
-        assert _job_state(db, run.run_id)["status"] == "SUCCEEDED"
+        assert _dispatch_state(db, run.run_id)["status"] == "DONE"
 
 
 def _agent_with(env, run: dm.Run, name: str, objective: str, status: dm.AgentStatus,
-                attempts: int = 0, *, shard: bool = True) -> dm.Agent:
+                attempts: int = 0, *, result: bool = True) -> dm.Agent:
     agent = dm.Agent(
         agent_id=dm.AgentId(uuid.uuid4().hex),
         run_id=run.run_id,
@@ -412,9 +412,9 @@ def _agent_with(env, run: dm.Run, name: str, objective: str, status: dm.AgentSta
         output={},
     )
     env.agent_repo.create(agent)
-    if shard:
-        env.shard_repo.create(dm.ResultShard(
-            id=dm.ShardId(uuid.uuid4().hex),
+    if result:
+        env.result_repo.create(dm.AgentResult(
+            id=dm.ResultId(uuid.uuid4().hex),
             run_id=run.run_id,
             tenant=TENANT,
             source_agent_id=agent.agent_id,
@@ -426,7 +426,7 @@ def _agent_with(env, run: dm.Run, name: str, objective: str, status: dm.AgentSta
 
 
 class TestResumeNeverRerunCompleted:
-    def test_completed_agent_with_shard_is_never_re_spawned(self, db):
+    def test_completed_agent_with_result_is_never_re_spawned(self, db):
         script = [
             _spawn_decision("a1", "goal-a1"),
             _finish_decision("done-2"),
@@ -435,7 +435,7 @@ class TestResumeNeverRerunCompleted:
         env = _build_env(db, script, factory)
         run = _mk_run()
         done = _agent_with(env, run, "a1", "goal-a1", dm.AgentStatus.COMPLETED,
-                           attempts=1, shard=True)
+                           attempts=1, result=True)
         claim = _enqueue_and_claim(env, run)
 
         outcome = asyncio.run(env.handler.handle_slice(
@@ -451,16 +451,16 @@ class TestResumeNeverRerunCompleted:
         stored_run = env.run_repo.get(run.run_id, TENANT)
         assert stored_run.status is dm.RunStatus.COMPLETED
         assert stored_run.final_answer == "done-2"
-        # Exactly one shard for this agent — no duplicate side effects.
-        assert len(env.shard_repo.list_by_run(run.run_id, TENANT)) == 1
+        # Exactly one result for this agent — no duplicate side effects.
+        assert len(env.result_repo.list_by_run(run.run_id, TENANT)) == 1
 
-    def test_running_agent_with_existing_shard_flips_completed_idempotently(self, db):
+    def test_running_agent_with_existing_result_flips_completed_idempotently(self, db):
         script = [_finish_decision("done-3")]
         factory = FakeFactory()
         env = _build_env(db, script, factory)
         run = _mk_run()
         done = _agent_with(env, run, "a1", "goal-a1", dm.AgentStatus.RUNNING,
-                           attempts=2, shard=True)
+                           attempts=2, result=True)
         claim = _enqueue_and_claim(env, run)
 
         outcome = asyncio.run(env.handler.handle_slice(
@@ -471,10 +471,10 @@ class TestResumeNeverRerunCompleted:
         stored = env.agent_repo.get(run.run_id, done.agent_id, TENANT)
         assert stored.status is dm.AgentStatus.COMPLETED
         assert factory.creates == {}
-        assert _job_state(db, run.run_id)["status"] == "SUCCEEDED"
+        assert _dispatch_state(db, run.run_id)["status"] == "DONE"
 
-    def test_interrupted_agent_without_shard_resumes_same_identity(self, db):
-        # D16: an interrupted (no shard) agent is re-instantiated under its
+    def test_interrupted_agent_without_result_resumes_same_identity(self, db):
+        # D16: an interrupted (no result) agent is re-instantiated under its
         # existing AgentId so the resume produces exactly one persistent agent.
         script = [
             _spawn_decision("a1", "goal-a1"),
@@ -485,7 +485,7 @@ class TestResumeNeverRerunCompleted:
         env = _build_env(db, script, factory)
         run = _mk_run()
         _agent_with(env, run, "a1", "goal-a1", dm.AgentStatus.QUEUED,
-                    attempts=1, shard=False)
+                    attempts=1, result=False)
         claim = _enqueue_and_claim(env, run)
 
         outcome = asyncio.run(env.handler.handle_slice(
@@ -530,7 +530,7 @@ class TestPersonaReplayAcrossSlices:
         # Slice B on a fresh claim rehydrates the persona from the persisted
         # decision message; its USER prompt must reflect it (D30 replay).
         env_a.llm.set_script([_finish_decision("persona done")])
-        claim_b = env_a.job_repo.claim_batch(WORKER, [TENANT], 1, 60)
+        claim_b = env_a.dispatch_repo.claim_batch(WORKER, [TENANT], 1, 60)
         outcome_b = asyncio.run(env_a.handler.handle_slice(
             run.run_id, TENANT, claim_b[0]["claim_epoch"], worker_id=WORKER,
         ))
@@ -549,8 +549,8 @@ class TestTerminationOnDedupKnownObjective:
         env = _build_env(db, [_finish_decision("x")], FakeFactory())
         run = _mk_run()
         env.run_repo.create(run)
-        env.job_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
-        claim = env.job_repo.claim_batch(WORKER, [TENANT], 1, 60)[0]
+        env.dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
+        claim = env.dispatch_repo.claim_batch(WORKER, [TENANT], 1, 60)[0]
         env.run_repo.update_status(
             run.run_id, TENANT, dm.RunStatus.CANCELLED,
             termination_reason=dm.TerminationReason.CANCELLED,
@@ -559,15 +559,15 @@ class TestTerminationOnDedupKnownObjective:
         outcome = asyncio.run(env.handler.handle_slice(
             run.run_id, TENANT, claim["claim_epoch"], worker_id=WORKER,
         ))
-        # Already-terminal runs no-op: the job is completed, nothing re-runs.
+        # Already-terminal runs no-op: the dispatch is completed, nothing re-runs.
         assert outcome == "complete"
-        assert _job_state(db, run.run_id)["status"] == "SUCCEEDED"
+        assert _dispatch_state(db, run.run_id)["status"] == "DONE"
 
 
 class _FencedFailingHandler:
     """Stub SwarmRunHandler: handle_slice always raises and force_fail is
     fenced (returns False, as after a D28 claim-loss), so the worker's
-    job_repo.fail fallback leg is the behavior on trial."""
+    dispatch_repo.fail fallback leg is the behavior on trial."""
 
     def __init__(self, error: Exception) -> None:
         self.slice_error = error
@@ -591,7 +591,7 @@ class _FencedFailingHandler:
 
 
 class _RecordingJobRepo:
-    """Minimal JobRepository spy — only the fallback `fail` can land."""
+    """Minimal RunDispatchRepository spy — only the fallback `fail` can land."""
 
     def __init__(self) -> None:
         self.fails: list = []
@@ -617,22 +617,22 @@ class TestWorkerFencedFailureFallsBackToJobFail:
         handler = _FencedFailingHandler(error)
         repo = _RecordingJobRepo()
         worker = AgentSwarmWorker(
-            config=_tight_config(), handler=handler, job_repo=repo,
+            config=_tight_config(), handler=handler, dispatch_repo=repo,
         )
         worker._worker_id = "w-fenced"
-        job = {
+        dispatch = {
             "run_id": dm.RunId("fenced-run"), "tenant": TENANT,
             "claim_epoch": 7, "reclaims": 0, "cancel_requested": False,
         }
 
-        asyncio.run(worker._run_job(job, reclaimed=False))
+        asyncio.run(worker._run_dispatch(dispatch, reclaimed=False))
 
         # force_fail was attempted first, carrying the slice error and this
         # worker's identity...
         assert ("force-fail", dm.RunId("fenced-run"), 7,
                 "storage exploded mid-slice", "w-fenced") in handler.calls
         # ...and came back fenced, so the fallback must mark the durable
-        # job failed with exactly (run_id, tenant, error, worker_id, epoch).
+        # dispatch failed with exactly (run_id, tenant, error, worker_id, epoch).
         assert repo.fails == [
             (dm.RunId("fenced-run"), TENANT, "storage exploded mid-slice",
              "w-fenced", 7),

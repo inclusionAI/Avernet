@@ -1,8 +1,8 @@
 """Single-process end-to-end integration test (OpenSpec 10.11):
 
-submit (service + idempotency) -> durable job -> worker claim (fenced
+submit (service + idempotency) -> durable dispatch -> worker claim (fenced
 epoch) -> orchestrator decisions (scripted LLM) -> subagent execution
-(fake factory) -> shard/message/round persistence -> terminal publish +
+(fake factory) -> result/message/round persistence -> terminal publish +
 retention, all against one real in-memory SQLite store.
 
 No network, no FastAPI: this exercises the assembled core pipeline —
@@ -42,9 +42,9 @@ from agentclaw.community.plugins.local.agentswarm.llm_stub import StubLLMProvide
 from agentclaw.community.core.agentswarm.repository import registry as om
 from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
 from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
-from agentclaw.community.core.agentswarm.repository.job import JobRepository
+from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
 from agentclaw.community.core.agentswarm.repository.message import MessageRepository
-from agentclaw.community.core.agentswarm.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentswarm.repository.agent_result import AgentResultRepository
 from agentclaw.community.core.agentswarm.repository.round import RoundRepository
 from agentclaw.community.core.agentswarm.repository.run import RunRepository
 from agentclaw.community.core.agentswarm.runtime.pool import (
@@ -146,7 +146,7 @@ def _config(**orch_overrides) -> AgentSwarmConfig:
         slice_max_seconds=3.0,
         slice_interval=0.0,
         orchestrator_turn_interval=0.01,
-        subagent_max_attempts=1,
+        agent_max_attempts=1,
         batch_size=4,
     )
     if orch_overrides:
@@ -164,10 +164,10 @@ def _build_env(db, script: list[str]) -> tuple:
         "run": RunRepository(db),
         "agent": AgentRepository(db),
         "message": MessageRepository(db),
-        "shard": ResultShardRepository(db),
+        "result": AgentResultRepository(db),
         "round": RoundRepository(db),
         "guard": GuardEventRepository(db),
-        "job": JobRepository(db),
+        "dispatch": RunDispatchRepository(db),
     }
     llm = StubLLMProvider(script=script)
     orchestrator = Orchestrator(
@@ -182,27 +182,27 @@ def _build_env(db, script: list[str]) -> tuple:
     runtime = SubagentRuntime(
         factory=_FakeFactory(),
         max_width=cfg.orchestration.max_width,
-        max_attempts=cfg.orchestration.subagent_max_attempts,
-        per_task_timeout=cfg.orchestration.per_subagent_timeout,
+        max_attempts=cfg.orchestration.agent_max_attempts,
+        per_task_timeout=cfg.orchestration.per_attempt_timeout,
         artifact_inline_threshold=cfg.artifact_inline_threshold,
     )
     handler = SwarmRunHandler(
         config=cfg, orchestrator=orchestrator, runtime=runtime,
         run_repo=repos["run"], agent_repo=repos["agent"],
-        message_repo=repos["message"], shard_repo=repos["shard"],
+        message_repo=repos["message"], result_repo=repos["result"],
         round_repo=repos["round"], guard_repo=repos["guard"],
-        job_repo=repos["job"],
+        dispatch_repo=repos["dispatch"],
         termination=TerminationEvaluator(max_turns=cfg.orchestration.max_turns),
         guards=GuardService(),
     )
     worker = AgentSwarmWorker(
-        config=cfg, handler=handler, job_repo=repos["job"],
+        config=cfg, handler=handler, dispatch_repo=repos["dispatch"],
     )
     service = AgentSwarmService(
-        run_repo=repos["run"], job_repo=repos["job"],
+        run_repo=repos["run"], dispatch_repo=repos["dispatch"],
         agent_repo=repos["agent"], message_repo=repos["message"],
         round_repo=repos["round"], guard_repo=repos["guard"],
-        shard_repo=repos["shard"], config=cfg,
+        result_repo=repos["result"], config=cfg,
     )
     return service, worker, repos, handler
 
@@ -239,17 +239,17 @@ def _count_rows(db, model, tenant: str) -> int:
         ).scalar_one()
 
 
-def _job_state(db, run_id: str) -> dict:
+def _dispatch_state(db, run_id: str) -> dict:
     with db.orm_session() as session:
         row = session.execute(
-            select(om.AcAgentSwarmJobModel).where(
-                om.AcAgentSwarmJobModel.run_id == run_id,
+            select(om.AcAgentSwarmRunDispatchModel).where(
+                om.AcAgentSwarmRunDispatchModel.run_id == run_id,
             )
         ).scalar_one()
         return {
             "status": row.status,
             "claim_epoch": row.claim_epoch,
-            "attempts": row.attempts,
+            "claims": row.claims,
             "reclaims": row.reclaims,
         }
 
@@ -278,12 +278,12 @@ class TestSingleProcessEndToEnd:
         assert all(a.status is dm.AgentStatus.COMPLETED for a in agents)
         assert all(a.attempts == 1 for a in agents)
 
-        shards = repos["shard"].list_by_run(dm.RunId(run_id), TENANT)
-        assert len(shards) == 2
-        for shard in shards:
-            assert (shard.payload is not None) != (shard.artifact_key is not None)
+        results = repos["result"].list_by_run(dm.RunId(run_id), TENANT)
+        assert len(results) == 2
+        for result in results:
+            assert (result.payload is not None) != (result.artifact_key is not None)
         payloads = {repos["agent"].get(dm.RunId(run_id), s.source_agent_id, TENANT).name: s.payload
-                    for s in shards}
+                    for s in results}
         assert payloads == {
             "a1": {"answer": "done-a1"},
             "a2": {"answer": "done-a2"},
@@ -312,10 +312,10 @@ class TestSingleProcessEndToEnd:
             for msgs in per_agent.values()
         )
 
-        job = _job_state(db, run_id)
-        assert job["status"] == "SUCCEEDED"
-        assert job["claim_epoch"] >= 1
-        assert job["reclaims"] == 0
+        dispatch = _dispatch_state(db, run_id)
+        assert dispatch["status"] == "DONE"
+        assert dispatch["claim_epoch"] >= 1
+        assert dispatch["reclaims"] == 0
 
     @pytest.mark.asyncio
     async def test_duplicate_submit_joins_same_durable_run(self, db):
@@ -332,7 +332,7 @@ class TestSingleProcessEndToEnd:
         assert run.status is dm.RunStatus.COMPLETED
 
         assert _count_rows(db, om.AcAgentSwarmRunModel, TENANT) == 1
-        assert _count_rows(db, om.AcAgentSwarmJobModel, TENANT) == 1
+        assert _count_rows(db, om.AcAgentSwarmRunDispatchModel, TENANT) == 1
         assert _count_rows(db, om.AcAgentSwarmAgentModel, TENANT) == 2
-        assert _count_rows(db, om.AcAgentSwarmResultShardModel, TENANT) == 2
+        assert _count_rows(db, om.AcAgentSwarmAgentResultModel, TENANT) == 2
         assert _count_rows(db, om.AcAgentSwarmMessageModel, TENANT) == 4

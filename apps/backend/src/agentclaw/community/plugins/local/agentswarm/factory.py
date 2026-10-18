@@ -47,16 +47,16 @@ class DefaultSubagentFactory:
 
     def create(self, spec: AgentSpec, run: Run,
                agent_id: AgentId, attempt: int = 1) -> Subagent:
-        # No default for ``agent_id``: the avernet kind derives the
+        # No default for ``agent_id``: the bot kind derives the
         # platform idempotency key from it, and a name fallback would let
         # one same-named spawn's teardown delete the other's bot.
         if spec.kind is AgentKind.BOT:
-            # Fail clear at spawn time: an avernet-kind agent needs the host's
+            # Fail clear at spawn time: a bot-kind agent needs the host's
             # in-process BotPlatform binding; silently skipping to the LLM
             # flavor (or to a removed HTTP loop) would misrun the work.
             if self._platform is None:
                 raise AgentSwarmConfigError(
-                    "agentswarm avernet agent requested but no "
+                    "agentswarm bot agent requested but no "
                     "BotPlatform is bound in this profile"
                 )
             # Bots provision under the run's authenticated caller (P0-9
@@ -64,10 +64,10 @@ class DefaultSubagentFactory:
             # what it creates.
             if not (run.owner_id or "").strip():
                 raise AgentSwarmConfigError(
-                    "agentswarm avernet agent requested but the run "
+                    "agentswarm bot agent requested but the run "
                     "carries no caller identity to provision bots under"
                 )
-            from agentclaw.community.plugins.community.agentswarm.avernet_subagent import AvernetSubagent
+            from agentclaw.community.plugins.community.agentswarm.bot_subagent import AvernetSubagent
             return AvernetSubagent(spec, run, self._platform,
                                    agent_id=agent_id, attempt=attempt)
         return LLMBackedSubagent(spec, run, self._llm, agent_id,
@@ -131,7 +131,7 @@ class DefaultSubagentFactory:
                     else:
                         self._attempt_repo.mark_intent_binding_destroyed(
                             run.run_id, run.tenant,
-                            AgentId(row["agent_id"]), int(row["attempt"]),
+                            AgentId(row["agent_id"]), int(row["slice_retry_index"]),
                         )
                 except Exception as exc:
                     # A concurrent settle on the same row can win the
@@ -154,7 +154,7 @@ class DefaultSubagentFactory:
                 # persona is still addressable.
                 executor_id = "agent_swarm_" + spawn_digest(
                     str(run.run_id), str(row["agent_id"]),
-                    int(row["attempt"]), 16,
+                    int(row["slice_retry_index"]), 16,
                 )
             if executor_id in seen_ids:
                 continue
@@ -180,7 +180,7 @@ class DefaultSubagentFactory:
                         # them by their (run, agent, attempt) correlation.
                         self._attempt_repo.mark_intent_binding_destroyed(
                             run.run_id, run.tenant,
-                            AgentId(row["agent_id"]), int(row["attempt"]),
+                            AgentId(row["agent_id"]), int(row["slice_retry_index"]),
                         )
                 except Exception as exc:
                     # A concurrent settle on the same row can win the ledger
@@ -242,7 +242,7 @@ class DefaultSubagentFactory:
             logger.info(
                 "[agentswarm][factory] persona not yet materialized, "
                 "deferring ledger destroy run=%s executor=%s attempt=%s",
-                run.run_id, derived_id, row["attempt"],
+                run.run_id, derived_id, row["slice_retry_index"],
             )
             return True
         try:
@@ -260,7 +260,7 @@ class DefaultSubagentFactory:
             # by their (run, agent, attempt) correlation.
             self._attempt_repo.mark_intent_binding_destroyed(
                 run.run_id, run.tenant,
-                AgentId(row["agent_id"]), int(row["attempt"]),
+                AgentId(row["agent_id"]), int(row["slice_retry_index"]),
             )
         except Exception as exc:
             logger.warning(

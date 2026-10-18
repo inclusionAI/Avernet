@@ -2,7 +2,7 @@
 
 A fenced-off update_status (claim lost to a reclaimer) must persist
 nothing further and unwind as the handler's lost-claim signal, so the
-shard/message exactly-once convergence (D24) stays with the new owner.
+result/message exactly-once convergence (D24) stays with the new owner.
 
 Conventions follow the pool suite: sync test defs, hand-written fakes
 (no MagicMock), real SQLite StaticPool via the handler-suite _TestDB.
@@ -23,11 +23,11 @@ from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
 from agentclaw.community.core.agentswarm.repository.agent_attempt import (
     AgentAttemptRepository,
 )
-from agentclaw.community.core.agentswarm.repository.job import JobRepository
+from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
 from agentclaw.community.core.agentswarm.repository.message import MessageRepository
 from agentclaw.community.core.agentswarm.repository.round import RoundRepository
 from agentclaw.community.core.agentswarm.repository.run import RunRepository
-from agentclaw.community.core.agentswarm.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentswarm.repository.agent_result import AgentResultRepository
 from agentclaw.community.core.agentswarm.config.settings import (
     AgentSwarmConfig,
 )
@@ -60,15 +60,15 @@ class TestPersistCompletionClaimFence:
         return SliceStore(
             AgentSwarmConfig(),
             AgentRepository(db), MessageRepository(db),
-            ResultShardRepository(db), RoundRepository(db),
+            AgentResultRepository(db), RoundRepository(db),
             lost_probe=lambda: False,
         )
 
     def _claim(self, db, run) -> int:
-        job_repo = JobRepository(db)
-        job_repo.enqueue(run_id=run.run_id, tenant=run.tenant,
+        dispatch_repo = RunDispatchRepository(db)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=run.tenant,
                          deadline_seconds=3600)
-        return job_repo.claim_batch(
+        return dispatch_repo.claim_batch(
             FENCE_WORKER, [run.tenant], 1, 0,
         )[0]["claim_epoch"]
 
@@ -88,9 +88,9 @@ class TestPersistCompletionClaimFence:
         agent = _mk_agent(run, "a1")
         AgentRepository(db).create(agent)
         lost_epoch = self._claim(db, run)
-        # the reclaimer takes the job over between renewal ticks
+        # the reclaimer takes the dispatch over between renewal ticks
         time.sleep(0.02)
-        reclaims = JobRepository(db).reclaim_batch(RECLAIMER, 1, 60)
+        reclaims = RunDispatchRepository(db).reclaim_batch(RECLAIMER, 1, 60)
         assert [r["run_id"] for r in reclaims] == [run.run_id]
 
         store = self._store(db)
@@ -101,14 +101,14 @@ class TestPersistCompletionClaimFence:
 
         stored = AgentRepository(db).get(run.run_id, agent.agent_id, TENANT)
         assert stored.status is dm.AgentStatus.QUEUED
-        assert ResultShardRepository(db).get_by_run_agent(
+        assert AgentResultRepository(db).get_by_run_agent(
             run.run_id, agent.agent_id, TENANT,
         ) is None
         assert MessageRepository(db).list_by_agent(
             run.run_id, agent.agent_id, TENANT,
         ) == []
 
-    def test_matching_epoch_persists_shard_and_message(self, db):
+    def test_matching_epoch_persists_result_and_message(self, db):
         run = _mk_run(goal="fence-open")
         RunRepository(db).create(run)
         agent = _mk_agent(run, "a1")
@@ -121,10 +121,10 @@ class TestPersistCompletionClaimFence:
             claim_epoch=epoch,
         ))
 
-        shard = ResultShardRepository(db).get_by_run_agent(
+        result = AgentResultRepository(db).get_by_run_agent(
             run.run_id, agent.agent_id, TENANT,
         )
-        assert shard is not None and shard.payload == {"r": 1}
+        assert result is not None and result.payload == {"r": 1}
         (message,) = MessageRepository(db).list_by_agent(
             run.run_id, agent.agent_id, TENANT,
         )
@@ -154,16 +154,16 @@ class TestRecordAgentBindingJournal:
         return SliceStore(
             AgentSwarmConfig(),
             AgentRepository(db), MessageRepository(db),
-            ResultShardRepository(db), RoundRepository(db),
+            AgentResultRepository(db), RoundRepository(db),
             lost_probe=lambda: False,
             attempt_repo=AgentAttemptRepository(db),
         )
 
     def _claim(self, db, run) -> int:
-        job_repo = JobRepository(db)
-        job_repo.enqueue(run_id=run.run_id, tenant=run.tenant,
+        dispatch_repo = RunDispatchRepository(db)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=run.tenant,
                          deadline_seconds=3600)
-        return job_repo.claim_batch(FENCE_WORKER, [run.tenant], 1, 0)[0][
+        return dispatch_repo.claim_batch(FENCE_WORKER, [run.tenant], 1, 0)[0][
             "claim_epoch"]
 
     def test_matching_epoch_journals_row_and_updates_legacy_latest(self, db):
@@ -183,7 +183,7 @@ class TestRecordAgentBindingJournal:
         (row,) = AgentAttemptRepository(db).list_agent_bindings(
             run.run_id, TENANT)
         assert row["executor_id"] == "ac_personaid"
-        assert row["attempt"] == 2
+        assert row["slice_retry_index"] == 2
         assert row["claim_epoch"] == epoch
         stored = AgentRepository(db).get(run.run_id, agent.agent_id, TENANT)
         # The legacy pair carries the LATEST persona: same write, bot kind.
@@ -198,7 +198,7 @@ class TestRecordAgentBindingJournal:
         AgentRepository(db).create(agent)
         lost_epoch = self._claim(db, run)
         time.sleep(0.02)
-        JobRepository(db).reclaim_batch(RECLAIMER, 1, 60)
+        RunDispatchRepository(db).reclaim_batch(RECLAIMER, 1, 60)
 
         with pytest.raises(_SliceLost):
             asyncio.run(self._store(db).record_agent_binding(
@@ -281,7 +281,7 @@ class TestRecordAgentBindingJournal:
         asyncio.run(SliceStore(
             AgentSwarmConfig(),
             AgentRepository(db), MessageRepository(db),
-            ResultShardRepository(db), RoundRepository(db),
+            AgentResultRepository(db), RoundRepository(db),
             lost_probe=lambda: False,
         ).record_agent_binding(
             run, dm.AgentId("agent-x"), epoch, attempt=1,
@@ -316,16 +316,16 @@ class TestWriteAheadIntentAndSettle:
         return SliceStore(
             AgentSwarmConfig(),
             AgentRepository(db), MessageRepository(db),
-            ResultShardRepository(db), RoundRepository(db),
+            AgentResultRepository(db), RoundRepository(db),
             lost_probe=lambda: False,
             attempt_repo=AgentAttemptRepository(db),
         )
 
     def _claim(self, db, run) -> int:
-        job_repo = JobRepository(db)
-        job_repo.enqueue(run_id=run.run_id, tenant=run.tenant,
+        dispatch_repo = RunDispatchRepository(db)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=run.tenant,
                          deadline_seconds=3600)
-        return job_repo.claim_batch(FENCE_WORKER, [run.tenant], 1, 0)[0][
+        return dispatch_repo.claim_batch(FENCE_WORKER, [run.tenant], 1, 0)[0][
             "claim_epoch"]
 
     def test_intent_row_exists_on_setup_failure_settled_on_success(self, db):
@@ -346,14 +346,14 @@ class TestWriteAheadIntentAndSettle:
         (intent,) = AgentAttemptRepository(db).list_agent_bindings(
             run.run_id, TENANT)
         assert intent["executor_id"] == ""
-        assert intent["executor_state"] == "SPAWNED"
-        assert intent["attempt"] == 1
+        assert intent["binding_state"] == "SPAWNED"
+        assert intent["slice_retry_index"] == 1
         assert intent["claim_epoch"] == epoch
 
         # Setup failed: no settle — the row stays attempted-but-blank, the
         # state the terminal destroy sweep reconciles by derived identity.
         rows = AgentAttemptRepository(db).list_agent_bindings(run.run_id, TENANT)
-        assert len(rows) == 1 and rows[0]["executor_state"] == "SPAWNED"
+        assert len(rows) == 1 and rows[0]["binding_state"] == "SPAWNED"
 
         # A successful attempt: the settle updates the SAME row to BOUND.
         asyncio.run(store.record_agent_binding(
@@ -364,8 +364,8 @@ class TestWriteAheadIntentAndSettle:
         (settled,) = AgentAttemptRepository(db).list_agent_bindings(
             run.run_id, TENANT)
         assert settled["executor_id"] == "ac_personaid"
-        assert settled["executor_state"] == "BOUND"
-        assert settled["attempt"] == 1
+        assert settled["binding_state"] == "BOUND"
+        assert settled["slice_retry_index"] == 1
 
     def test_stale_epoch_intent_is_inert_and_unwinds(self, db):
         run = _mk_run(goal="intent-fenced")
@@ -374,7 +374,7 @@ class TestWriteAheadIntentAndSettle:
         AgentRepository(db).create(agent)
         lost_epoch = self._claim(db, run)
         time.sleep(0.02)
-        JobRepository(db).reclaim_batch(RECLAIMER, 1, 60)
+        RunDispatchRepository(db).reclaim_batch(RECLAIMER, 1, 60)
 
         with pytest.raises(_SliceLost):
             asyncio.run(self._store(db).journal_attempt_intent(
@@ -412,7 +412,7 @@ class TestWriteAheadIntentAndSettle:
             executor_id="ac_personaid", executor_name="scout-ab12cd34",
         ))
         rows = AgentAttemptRepository(db).list_agent_bindings(run.run_id, TENANT)
-        assert len(rows) == 1 and rows[0]["executor_state"] == "BOUND"
+        assert len(rows) == 1 and rows[0]["binding_state"] == "BOUND"
 
     def test_missing_attempt_repo_intent_is_a_no_op_composition(self, db):
         run = _mk_run(goal="intent-norepo")
@@ -422,7 +422,7 @@ class TestWriteAheadIntentAndSettle:
         asyncio.run(SliceStore(
             AgentSwarmConfig(),
             AgentRepository(db), MessageRepository(db),
-            ResultShardRepository(db), RoundRepository(db),
+            AgentResultRepository(db), RoundRepository(db),
             lost_probe=lambda: False,
         ).journal_attempt_intent(
             run, dm.AgentId("agent-x"), epoch, attempt=1,
@@ -434,7 +434,7 @@ class TestWriteAheadIntentAndSettle:
 
 
 class TestFirstFailedWaitRef:
-    """The shared fail-fast predicate: only FAILED+shardless blocking refs."""
+    """The shared fail-fast predicate: only FAILED+resultless blocking refs."""
 
     @pytest.fixture()
     def db(self):
@@ -451,14 +451,14 @@ class TestFirstFailedWaitRef:
         return SliceStore(
             AgentSwarmConfig(),
             AgentRepository(db), MessageRepository(db),
-            ResultShardRepository(db), RoundRepository(db),
+            AgentResultRepository(db), RoundRepository(db),
             lost_probe=lambda: False,
         )
 
     def _claim(self, db, run) -> int:
-        job_repo = JobRepository(db)
-        job_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
-        return job_repo.claim_batch(FENCE_WORKER, [TENANT], 1, 0)[0][
+        dispatch_repo = RunDispatchRepository(db)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
+        return dispatch_repo.claim_batch(FENCE_WORKER, [TENANT], 1, 0)[0][
             "claim_epoch"]
 
     def _fail_agent(self, db, run, agent, error: str = "boom") -> None:
@@ -468,7 +468,7 @@ class TestFirstFailedWaitRef:
             attempts=3, error=error, claim_epoch=epoch,
         )
 
-    def test_failed_agent_with_shard_and_running_agent_stay_quiet(self, db):
+    def test_failed_agent_with_result_and_running_agent_stay_quiet(self, db):
         run = _mk_run(goal="predicate-quiet")
         RunRepository(db).create(run)
         failed = _mk_agent(run, "a1")
@@ -484,9 +484,9 @@ class TestFirstFailedWaitRef:
         assert asyncio.run(store.first_failed_wait_ref(
             run.run_id, TENANT, ("a2",),
         )) is None
-        # A FAILED agent that delivered a shard cannot block the ref.
-        ResultShardRepository(db).create(dm.ResultShard(
-            id=dm.ShardId("sh-1"), run_id=run.run_id, tenant=TENANT,
+        # A FAILED agent that delivered a result cannot block the ref.
+        AgentResultRepository(db).create(dm.AgentResult(
+            id=dm.ResultId("sh-1"), run_id=run.run_id, tenant=TENANT,
             source_agent_id=failed.agent_id, payload={"ok": True},
             artifact_key=None, routed_at=dm.EpochMillis(int(time.time() * 1000)),
         ))
@@ -494,7 +494,7 @@ class TestFirstFailedWaitRef:
             run.run_id, TENANT, ("a1",),
         )) is None
 
-    def test_failed_shardless_agent_is_the_blocking_ref(self, db):
+    def test_failed_resultless_agent_is_the_blocking_ref(self, db):
         run = _mk_run(goal="predicate-fire")
         RunRepository(db).create(run)
         failed = _mk_agent(run, "a1")
@@ -521,7 +521,7 @@ class TestFirstFailedWaitRef:
             run.run_id, TENANT, ("a1",),
         )) is None
 
-    def test_slice_lost_shardless_agent_is_the_reschedule_signal(self, db):
+    def test_slice_lost_resultless_agent_is_the_reschedule_signal(self, db):
         run = _mk_run(goal="predicate-slice-lost-signal")
         RunRepository(db).create(run)
         failed = _mk_agent(run, "a1")
@@ -541,14 +541,14 @@ class TestFirstFailedWaitRef:
             "attempts": 3, "error": "slice_lost",
         }
 
-    def test_slice_lost_agent_with_shard_is_not_the_signal(self, db):
-        run = _mk_run(goal="predicate-slice-lost-shard")
+    def test_slice_lost_agent_with_result_is_not_the_signal(self, db):
+        run = _mk_run(goal="predicate-slice-lost-result")
         RunRepository(db).create(run)
         failed = _mk_agent(run, "a1")
         AgentRepository(db).create(failed)
         self._fail_agent(db, run, failed, error="slice_lost")
-        ResultShardRepository(db).create(dm.ResultShard(
-            id=dm.ShardId("sh-sl"), run_id=run.run_id, tenant=TENANT,
+        AgentResultRepository(db).create(dm.AgentResult(
+            id=dm.ResultId("sh-sl"), run_id=run.run_id, tenant=TENANT,
             source_agent_id=failed.agent_id, payload={"ok": True},
             artifact_key=None, routed_at=dm.EpochMillis(int(time.time() * 1000)),
         ))
@@ -575,7 +575,7 @@ class TestUnspawnedWaitRefs:
         return SliceStore(
             AgentSwarmConfig(),
             AgentRepository(db), MessageRepository(db),
-            ResultShardRepository(db), RoundRepository(db),
+            AgentResultRepository(db), RoundRepository(db),
             lost_probe=lambda: False,
         )
 
@@ -617,15 +617,15 @@ class TestRehydrate:
         return SliceStore(
             AgentSwarmConfig(),
             AgentRepository(db), MessageRepository(db),
-            ResultShardRepository(db), RoundRepository(db),
+            AgentResultRepository(db), RoundRepository(db),
             lost_probe=lambda: False,
             attempt_repo=attempt_repo,
         )
 
     def _claim(self, db, run) -> int:
-        job_repo = JobRepository(db)
-        job_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
-        return job_repo.claim_batch(FENCE_WORKER, [TENANT], 1, 0)[0][
+        dispatch_repo = RunDispatchRepository(db)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
+        return dispatch_repo.claim_batch(FENCE_WORKER, [TENANT], 1, 0)[0][
             "claim_epoch"]
 
     def _fail_agent(self, db, run, agent, error: str = "boom") -> int:
@@ -636,7 +636,7 @@ class TestRehydrate:
         )
         return epoch
 
-    def test_slice_lost_failed_shardless_agent_is_revived_and_reset_to_running(self, db):
+    def test_slice_lost_failed_resultless_agent_is_revived_and_reset_to_running(self, db):
         run = _mk_run(goal="rehydrate-slice-lost")
         RunRepository(db).create(run)
         failed = _mk_agent(run, "a1")
@@ -668,7 +668,7 @@ class TestRehydrate:
         AgentRepository(db).create(failed)
         stale_epoch = self._fail_agent(db, run, failed, error="slice_lost")
         time.sleep(0.02)
-        current = JobRepository(db).reclaim_batch(RECLAIMER, 1, 60)[0][
+        current = RunDispatchRepository(db).reclaim_batch(RECLAIMER, 1, 60)[0][
             "claim_epoch"]
         assert current != stale_epoch
 
@@ -684,7 +684,7 @@ class TestRehydrate:
         assert stored.error == "slice_lost"
         assert stored.attempts == 3
 
-    def test_other_error_failed_shardless_agent_stays_terminal(self, db):
+    def test_other_error_failed_resultless_agent_stays_terminal(self, db):
         run = _mk_run(goal="rehydrate-boom")
         RunRepository(db).create(run)
         failed = _mk_agent(run, "a1")
@@ -697,7 +697,7 @@ class TestRehydrate:
 
     def test_revive_cap_stops_respawn_after_burned_budget(self, db):
         # The ledger rows are the DB-recorded retry history: once an agent
-        # burned subagent_max_attempts provisionings, a later claim's
+        # burned agent_max_attempts provisionings, a later claim's
         # revive must be refused so the failed run terminalizes instead of
         # minting personas forever.
         run = _mk_run(goal="rehydrate-retry-cap")
@@ -707,14 +707,14 @@ class TestRehydrate:
         epoch = self._fail_agent(db, run, failed, error="slice_lost")
 
         attempt_repo = AgentAttemptRepository(db)
-        for burned in range(AgentSwarmConfig().orchestration.subagent_max_attempts):
+        for burned in range(AgentSwarmConfig().orchestration.agent_max_attempts):
             assert attempt_repo.record_agent_attempt_intent(
                 run.run_id, TENANT, failed.agent_id, epoch, burned + 1,
                 dm.AgentKind.BOT.value, f"persona-{burned}", "a1",
             )
         assert attempt_repo.count_agent_provisionings(
             run.run_id, TENANT, failed.agent_id,
-        ) == AgentSwarmConfig().orchestration.subagent_max_attempts
+        ) == AgentSwarmConfig().orchestration.agent_max_attempts
 
         store = self._store(db, attempt_repo=attempt_repo)
         _, _, interrupted = asyncio.run(store.rehydrate(run, epoch))
@@ -742,15 +742,15 @@ class TestRehydrate:
         assert [a.agent_id for a in interrupted] == [failed.agent_id]
 
     def test_completed_agent_objective_seeds_the_dedup_set(self, db):
-        # An already-COMPLETED row (shard delivered) must still contribute
+        # An already-COMPLETED row (result delivered) must still contribute
         # its objective to last_spawn_objectives, so the dedup guard blocks
         # a re-spawn of a finished name (the duplicate-row bug fix).
         run = _mk_run(goal="rehydrate-dedup")
         RunRepository(db).create(run)
         done = _mk_agent(run, "w1_everyone")
         AgentRepository(db).create(done)
-        ResultShardRepository(db).create(dm.ResultShard(
-            id=dm.ShardId("sh-done"), run_id=run.run_id, tenant=TENANT,
+        AgentResultRepository(db).create(dm.AgentResult(
+            id=dm.ResultId("sh-done"), run_id=run.run_id, tenant=TENANT,
             source_agent_id=done.agent_id, payload={"ok": True},
             artifact_key=None, routed_at=dm.EpochMillis(int(time.time() * 1000)),
         ))

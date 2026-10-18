@@ -1,4 +1,4 @@
-"""Avernet-kind end-to-end: a real swarm run over the real host platform.
+"""Bot-kind end-to-end: a real swarm run over the real host platform.
 
 The two existing e2e batteries (test_e2e, test_wire_e2e) drive LLM-kind
 agents only — until the host adapter landed there was nothing to bind, so
@@ -21,7 +21,7 @@ turns (the endpoint harness's ``_Worker``: claim, dispatch the real
 ``BotCreateWithManifestHandler``, settle the row) while the swarm's slice
 loop runs, because creation is asynchronous: the subagent polls
 ``bot_status``, the pump completes the job, a later poll sees READY, one
-chat round trips, the shard lands, the orchestrator finishes the run.
+chat round trips, the result lands, the orchestrator finishes the run.
 """
 from __future__ import annotations
 
@@ -61,11 +61,11 @@ from agentclaw.community.core.agentswarm.orchestration.decision_parser import (
 from agentclaw.community.plugins.local.agentswarm.llm_stub import StubLLMProvider
 from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
 from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
-from agentclaw.community.core.agentswarm.repository.job import JobRepository
+from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
 from agentclaw.community.core.agentswarm.repository.message import MessageRepository
 from agentclaw.community.core.agentswarm.repository.round import RoundRepository
 from agentclaw.community.core.agentswarm.repository.run import RunRepository
-from agentclaw.community.core.agentswarm.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentswarm.repository.agent_result import AgentResultRepository
 from agentclaw.community.core.agentswarm.runtime.handler import SwarmRunHandler
 from agentclaw.community.core.agentswarm.runtime.pool import SubagentRuntime
 from agentclaw.community.core.agentswarm.runtime.worker import AgentSwarmWorker
@@ -102,8 +102,8 @@ from agentclaw.community.core.task_queue.types import (
 from agentclaw.community.plugins.community.agentswarm.host import AvernetBotPlatform
 from agentclaw.community.utils.env_utils import get_current_env
 
-TENANT = "avernet-e2e-tenant"
-OWNER = "avernet-e2e-owner"
+TENANT = "bot-e2e-tenant"
+OWNER = "bot-e2e-owner"
 
 
 class _TestDB:
@@ -162,7 +162,7 @@ def _config() -> AgentSwarmConfig:
         slice_max_seconds=5.0,
         slice_interval=0.0,
         orchestrator_turn_interval=0.01,
-        subagent_max_attempts=1,
+        agent_max_attempts=1,
         batch_size=4,
     )
     return AgentSwarmConfig(
@@ -176,9 +176,9 @@ def _build_swarm(db, script, platform):
     cfg = _config()
     repos = {
         "run": RunRepository(db), "agent": AgentRepository(db),
-        "message": MessageRepository(db), "shard": ResultShardRepository(db),
+        "message": MessageRepository(db), "result": AgentResultRepository(db),
         "round": RoundRepository(db), "guard": GuardEventRepository(db),
-        "job": JobRepository(db),
+        "dispatch": RunDispatchRepository(db),
     }
     llm = StubLLMProvider(script=script)
     orchestrator = Orchestrator(
@@ -193,25 +193,25 @@ def _build_swarm(db, script, platform):
     runtime = SubagentRuntime(
         factory=DefaultSubagentFactory(llm=llm, platform=platform),
         max_width=cfg.orchestration.max_width,
-        max_attempts=cfg.orchestration.subagent_max_attempts,
-        per_task_timeout=cfg.orchestration.per_subagent_timeout,
+        max_attempts=cfg.orchestration.agent_max_attempts,
+        per_task_timeout=cfg.orchestration.per_attempt_timeout,
         artifact_inline_threshold=cfg.artifact_inline_threshold,
     )
     handler = SwarmRunHandler(
         config=cfg, orchestrator=orchestrator, runtime=runtime,
         run_repo=repos["run"], agent_repo=repos["agent"],
-        message_repo=repos["message"], shard_repo=repos["shard"],
+        message_repo=repos["message"], result_repo=repos["result"],
         round_repo=repos["round"], guard_repo=repos["guard"],
-        job_repo=repos["job"],
+        dispatch_repo=repos["dispatch"],
         termination=TerminationEvaluator(max_turns=cfg.orchestration.max_turns),
         guards=GuardService(),
     )
-    worker = AgentSwarmWorker(config=cfg, handler=handler, job_repo=repos["job"])
+    worker = AgentSwarmWorker(config=cfg, handler=handler, dispatch_repo=repos["dispatch"])
     service = AgentSwarmService(
-        run_repo=repos["run"], job_repo=repos["job"],
+        run_repo=repos["run"], dispatch_repo=repos["dispatch"],
         agent_repo=repos["agent"], message_repo=repos["message"],
         round_repo=repos["round"], guard_repo=repos["guard"],
-        shard_repo=repos["shard"], config=cfg,
+        result_repo=repos["result"], config=cfg,
     )
     return service, worker, repos
 
@@ -369,7 +369,7 @@ class _TaskQueuePump(threading.Thread):
     come back immediately — the job's five-second poll delay is latency,
     not sequencing."""
 
-    _WORKER = "avernet-e2e-worker"
+    _WORKER = "bot-e2e-worker"
 
     def __init__(self, world) -> None:
         super().__init__(daemon=True)
@@ -429,10 +429,10 @@ class _TaskQueuePump(threading.Thread):
         assert not self.is_alive(), "the task-queue pump thread did not stop"
 
 
-class TestAvernetKindEndToEnd:
+class TestBotKindEndToEnd:
 
     @pytest.mark.asyncio
-    async def test_avernet_agent_runs_a_real_swarm_round(
+    async def test_bot_agent_runs_a_real_swarm_round(
             self, world, swarm_db, tmp_path, monkeypatch):
         from agentclaw.community.core.config.provider import load_config
         load_config().user_config["aidesktop_root"] = str(tmp_path)
@@ -463,12 +463,12 @@ class TestAvernetKindEndToEnd:
         script = [
             _spawn_decision(("surveyor", "survey the incident")),
             _wait_decision("surveyor"),
-            _finish_decision("e2e-avernet-done"),
+            _finish_decision("e2e-bot-done"),
         ]
         service, worker, repos = _build_swarm(swarm_db, script, platform)
         req = SubmitRunRequest(
             tenant=TENANT,
-            goal="e2e: an avernet-kind agent answers through the platform",
+            goal="e2e: a bot-kind agent answers through the platform",
             owner_id=OWNER,
             agents=(
                 dm.AgentSpec(
@@ -504,15 +504,15 @@ class TestAvernetKindEndToEnd:
         assert run is not None, "run row vanished"
         assert run.status is dm.RunStatus.COMPLETED
         assert run.termination_reason is dm.TerminationReason.FINISH
-        assert run.final_answer == "e2e-avernet-done"
+        assert run.final_answer == "e2e-bot-done"
 
         agents = repos["agent"].list_by_run(dm.RunId(run_id), TENANT)
         assert [a.name for a in agents] == ["surveyor"]
         assert all(a.status is dm.AgentStatus.COMPLETED for a in agents)
 
-        shards = repos["shard"].list_by_run(dm.RunId(run_id), TENANT)
-        assert len(shards) == 1
-        assert shards[0].payload == {"answer": "survey ok"}
+        results = repos["result"].list_by_run(dm.RunId(run_id), TENANT)
+        assert len(results) == 1
+        assert results[0].payload == {"answer": "survey ok"}
 
         seam = world.get(ManifestCreationSeam)
         assert len(created) == 1

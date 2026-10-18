@@ -24,13 +24,13 @@ from agentclaw.community.core.agentswarm.repository import registry as om
 from agentclaw.community.core.agentswarm.repository.agent_attempt import (
     AgentAttemptRepository,
 )
-from agentclaw.community.core.agentswarm.repository.job import JobRepository
+from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
 from agentclaw.community.core.agentswarm.repository.run import RunRepository
 from agentclaw.community.core.agentswarm.domain.models import (
     AgentSpec, EpochMillis, ProviderKind, RequestMetadata, Run, RunId,
     RunStatus, TenantId,
 )
-from agentclaw.community.plugins.community.agentswarm.avernet_subagent import (
+from agentclaw.community.plugins.community.agentswarm.bot_subagent import (
     AvernetSubagent,
 )
 from agentclaw.community.plugins.local.agentswarm.factory import (
@@ -103,9 +103,9 @@ class TestFactorySignature:
         run = _mk_run()
         llm_sub = factory.create(_LLM_SPEC, run, dm.AgentId("agent-s1"))
         assert isinstance(llm_sub, LLMBackedSubagent)
-        avernet_sub = factory.create(
+        bot_sub = factory.create(
             _AVENET_SPEC, run, dm.AgentId("agent-scout"))
-        assert isinstance(avernet_sub, AvernetSubagent)
+        assert isinstance(bot_sub, AvernetSubagent)
 
     def test_factory_requires_agent_id_protocol_conformance(self):
         # The runtime_checkable protocol must accept the concrete factory —
@@ -121,7 +121,7 @@ class TestFactorySignature:
 
 class TestSpawnIdentity:
 
-    def test_same_named_avernet_spawns_get_distinct_idempotency_keys(self):
+    def test_same_named_bot_spawns_get_distinct_idempotency_keys(self):
         platform = _RecordingPlatform()
         factory = DefaultSubagentFactory(llm=None, platform=platform)
         run = _mk_run()
@@ -284,10 +284,10 @@ def _seed_run_and_claim(db, run_id) -> int:
         status=dm.RunStatus.RUNNING,
         started_at=dm.EpochMillis(int(time.time() * 1000)),
     ))
-    job_repo = JobRepository(db)
-    job_repo.enqueue(run_id=dm.RunId(run_id), tenant=TenantId("tenant-a"),
+    dispatch_repo = RunDispatchRepository(db)
+    dispatch_repo.enqueue(run_id=dm.RunId(run_id), tenant=TenantId("tenant-a"),
                      deadline_seconds=3600)
-    return job_repo.claim_batch(
+    return dispatch_repo.claim_batch(
         "sweep-worker", [TenantId("tenant-a")], 1, 0,
     )[0]["claim_epoch"]
 
@@ -342,7 +342,7 @@ class TestDestroyRunAgentsBotsSweep:
         assert _journal(db, "run-sweep", "agent-1", epoch, 2,
                         dm.AgentKind.BOT.value, "ac_attempt2", "scout-a2")
         time.sleep(0.02)
-        later = JobRepository(db).reclaim_batch(
+        later = RunDispatchRepository(db).reclaim_batch(
             "sweep-worker-2", 1, 60)[0]["claim_epoch"]
         assert _journal(db, "run-sweep", "agent-1", later, 1,
                         dm.AgentKind.BOT.value, "ac_replayed", "scout-a3")
@@ -351,7 +351,7 @@ class TestDestroyRunAgentsBotsSweep:
             _mk_run("run-sweep"), [])
         assert sorted(destroyed) == [
             "ac_attempt1", "ac_attempt2", "ac_replayed"]
-        assert {r["executor_state"] for r in self._rows(db)} == {"DESTROYED"}
+        assert {r["binding_state"] for r in self._rows(db)} == {"DESTROYED"}
 
     def test_cross_slice_adopt_replay_dedupes_delete_but_marks_both(self):
         db = _sqlite_db()
@@ -359,7 +359,7 @@ class TestDestroyRunAgentsBotsSweep:
         assert _journal(db, "run-sweep", "agent-1", epoch, 1,
                         dm.AgentKind.BOT.value, "ac_adopted", "scout-a")
         time.sleep(0.02)
-        replay_epoch = JobRepository(db).reclaim_batch(
+        replay_epoch = RunDispatchRepository(db).reclaim_batch(
             "sweep-worker-2", 1, 60)[0]["claim_epoch"]
         # Crash-resume adopt shape: the reclaimer replays the SAME
         # attempt number and re-derives the SAME persona (adopt), then
@@ -373,7 +373,7 @@ class TestDestroyRunAgentsBotsSweep:
         assert destroyed == ["ac_adopted"]
         rows = self._rows(db)
         assert len(rows) == 2 and all(
-            r["executor_state"] == "DESTROYED" for r in rows)
+            r["binding_state"] == "DESTROYED" for r in rows)
 
     def test_llm_kind_rows_settle_ledger_without_platform_calls(self):
         db = _sqlite_db()
@@ -390,7 +390,7 @@ class TestDestroyRunAgentsBotsSweep:
         assert destroyed == []
         assert platform.deleted == []
         (row,) = self._rows(db)
-        assert row["executor_state"] == "DESTROYED"
+        assert row["binding_state"] == "DESTROYED"
 
     def test_blank_llm_intent_rows_settle_by_correlation(self):
         db = _sqlite_db()
@@ -405,7 +405,7 @@ class TestDestroyRunAgentsBotsSweep:
         assert destroyed == []
         assert platform.deleted == []
         (row,) = self._rows(db)
-        assert row["executor_state"] == "DESTROYED"
+        assert row["binding_state"] == "DESTROYED"
 
     def test_legacy_belt_destroys_derived_and_recorded_ids(self):
         from agentclaw.community.plugins.community.agentswarm.host import (
@@ -447,9 +447,9 @@ class TestDestroyRunAgentsBotsSweep:
         # are marked only after destroy success, so only ac_ok flips.
         assert destroyed == ["ac_ok"]
         rows = {r["executor_id"]: r for r in self._rows(db)}
-        assert rows["ac_ok"]["executor_state"] == "DESTROYED"
-        assert rows["ac_boom"]["executor_state"] == "SPAWNED"
-        assert rows["ac_gone"]["executor_state"] == "SPAWNED"
+        assert rows["ac_ok"]["binding_state"] == "DESTROYED"
+        assert rows["ac_boom"]["binding_state"] == "SPAWNED"
+        assert rows["ac_gone"]["binding_state"] == "SPAWNED"
 
     def test_without_attempt_repo_the_belt_still_runs(self):
         from agentclaw.community.plugins.community.agentswarm.host import (
@@ -552,7 +552,7 @@ class TestBlankIntentMaterializationGrace:
         assert platform.status_probes == [derived]
         assert platform.deleted == []
         (row,) = self._rows(db)
-        assert row["executor_state"] == "SPAWNED"
+        assert row["binding_state"] == "SPAWNED"
 
     def test_unmaterialized_probe_failure_defers_like_provisioning(self):
         db = _sqlite_db()
@@ -570,7 +570,7 @@ class TestBlankIntentMaterializationGrace:
         assert platform.status_probes == [derived]
         assert platform.deleted == []
         (row,) = self._rows(db)
-        assert row["executor_state"] == "SPAWNED"
+        assert row["binding_state"] == "SPAWNED"
 
     def test_unmaterialized_past_grace_gives_up_and_settles(self):
         db = _sqlite_db()
@@ -595,7 +595,7 @@ class TestBlankIntentMaterializationGrace:
         assert platform.status_probes == [derived]
         assert platform.deleted == [derived]
         (row,) = self._rows(db)
-        assert row["executor_state"] == "DESTROYED"
+        assert row["binding_state"] == "DESTROYED"
 
     def test_materialized_by_status_destroyed_as_today(self):
         db = _sqlite_db()
@@ -613,7 +613,7 @@ class TestBlankIntentMaterializationGrace:
         assert platform.status_probes == [derived]
         assert platform.deleted == [derived]
         (row,) = self._rows(db)
-        assert row["executor_state"] == "DESTROYED"
+        assert row["binding_state"] == "DESTROYED"
 
     def test_settled_executor_rows_bypass_the_grace_probe(self):
         # Regression pin: the materialization gate exists ONLY for
@@ -632,7 +632,7 @@ class TestBlankIntentMaterializationGrace:
         assert platform.status_probes == []
         assert platform.deleted == ["ac_settled"]
         (row,) = self._rows(db)
-        assert row["executor_state"] == "DESTROYED"
+        assert row["binding_state"] == "DESTROYED"
 
     def test_setup_timeout_threads_to_the_grace_horizon(self):
         # The horizon is row.started_at + 2 x setup_timeout: a tiny
@@ -654,4 +654,4 @@ class TestBlankIntentMaterializationGrace:
         assert destroyed == []
         assert platform.deleted == [derived]
         (row,) = self._rows(db)
-        assert row["executor_state"] == "DESTROYED"
+        assert row["binding_state"] == "DESTROYED"

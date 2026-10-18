@@ -1,10 +1,10 @@
 """Fatal-outcome slice handling (uncovered-branch audit): the
 orchestrator's unhandled-decision-type fallthrough is the in-model
 producer of outcome["fatal"]; it must flow through
-SwarmRunHandler._finalize_failure — terminal FAILED run row, durable job
+SwarmRunHandler._finalize_failure — terminal FAILED run row, durable dispatch
 failed with the fatal text, retention applied (13.6 degradation) — while
 a fenced (stale-epoch) fatal unwinds as a lost slice and a fenced
-force_fail touches neither run nor job (D28 claim fencing).
+force_fail touches neither run nor dispatch (D28 claim fencing).
 """
 from __future__ import annotations
 
@@ -39,11 +39,11 @@ def db():
     engine.dispose()
 
 
-def _job_row(db, run_id):
+def _dispatch_row(db, run_id):
     with db.orm_session() as session:
         row = session.execute(
-            select(om.AcAgentSwarmJobModel).where(
-                om.AcAgentSwarmJobModel.run_id == run_id,
+            select(om.AcAgentSwarmRunDispatchModel).where(
+                om.AcAgentSwarmRunDispatchModel.run_id == run_id,
             )
         ).scalar_one()
         return {
@@ -58,7 +58,7 @@ class _RogueDecision:
     """A decision type the orchestrator has no handler for.
 
     The parser's closed DecisionKind set can never produce it and the
-    orchestrator's isinstance chain cannot match it, so run_slice falls
+    orchestrator's isinstance chain cannot match it, so decide_turn falls
     through to the fatal "unhandled decision type" leg.
     """
 
@@ -111,23 +111,23 @@ class TestFatalOutcomeFinalizesFailedRun:
         assert stored.error == FATAL_TEXT
         assert stored.ended_at is not None
 
-        job = _job_row(db, run.run_id)
-        assert job["status"] == "FAILED"
-        assert job["last_error"] == FATAL_TEXT
+        dispatch = _dispatch_row(db, run.run_id)
+        assert dispatch["status"] == "FAILED"
+        assert dispatch["last_error"] == FATAL_TEXT
 
         # Retention/finalize ran exactly once, for this run.
         assert retention_calls == [(run.run_id, TENANT)]
-        # A fatal slice leaves no work behind: no agents, no shards.
+        # A fatal slice leaves no work behind: no agents, no results.
         assert env.agent_repo.list_by_run(run.run_id, TENANT) == []
-        assert env.shard_repo.list_by_run(run.run_id, TENANT) == []
+        assert env.result_repo.list_by_run(run.run_id, TENANT) == []
 
     def test_fenced_fatal_unwinds_as_lost_slice(self, db):
         env = _fatal_env(db)
         run = _mk_run()
         claim = _enqueue_and_claim(env, run)
         stale_epoch = claim["claim_epoch"]
-        env.job_repo.renew_lease(run.run_id, TENANT, WORKER, -1, stale_epoch)
-        (reclaimed,) = env.job_repo.reclaim_batch("worker-2", 10, 60)
+        env.dispatch_repo.renew_lease(run.run_id, TENANT, WORKER, -1, stale_epoch)
+        (reclaimed,) = env.dispatch_repo.reclaim_batch("worker-2", 10, 60)
         assert reclaimed["claim_epoch"] > stale_epoch
 
         outcome = asyncio.run(env.handler.handle_slice(
@@ -149,8 +149,8 @@ class TestStaleEpochForceFailIsFenced:
         run = _mk_run()
         claim = _enqueue_and_claim(env, run)
         stale_epoch = claim["claim_epoch"]
-        env.job_repo.renew_lease(run.run_id, TENANT, WORKER, -1, stale_epoch)
-        env.job_repo.reclaim_batch("worker-2", 10, 60)
+        env.dispatch_repo.renew_lease(run.run_id, TENANT, WORKER, -1, stale_epoch)
+        env.dispatch_repo.reclaim_batch("worker-2", 10, 60)
 
         ok = env.handler.force_fail(run.run_id, TENANT, stale_epoch, "boom", WORKER)
 
@@ -159,9 +159,9 @@ class TestStaleEpochForceFailIsFenced:
         stored = env.run_repo.get(run.run_id, TENANT)
         assert stored.status is dm.RunStatus.RUNNING
         assert stored.error is None
-        # ...and the job was neither completed nor failed out from under
+        # ...and the dispatch was neither completed nor failed out from under
         # the worker that now owns the claim.
-        job = _job_row(db, run.run_id)
-        assert job["status"] == "RUNNING"
-        assert job["last_error"] is None
-        assert job["claimed_by"] == "worker-2"
+        dispatch = _dispatch_row(db, run.run_id)
+        assert dispatch["status"] == "LEASED"
+        assert dispatch["last_error"] is None
+        assert dispatch["claimed_by"] == "worker-2"

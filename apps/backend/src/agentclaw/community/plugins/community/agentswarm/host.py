@@ -253,7 +253,7 @@ class AvernetBotPlatform(BotPlatform):
     """Host-side BotPlatform over the backend's own creation and chat flows.
 
     The seam's methods are synchronous by contract. The async caller
-    (avernet_subagent.AvernetSubagent) offloads every platform leg to a
+    (bot_subagent.AvernetSubagent) offloads every platform leg to a
     thread: create/status/delete via ``asyncio.to_thread``, and chat —
     the one leg measured in minutes — via the module-scoped bounded
     ``chat_bridge_executor`` + ``asyncio.futures.wrap_future`` so a

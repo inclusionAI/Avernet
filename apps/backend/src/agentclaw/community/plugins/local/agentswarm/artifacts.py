@@ -14,7 +14,7 @@ _TEMP_PREFIX = ".agentswarm-tmp-"
 
 # Upper bound on a single stored artifact (8 MiB). Subagent results spill
 # here once past the inline threshold, and an engine reply is untrusted in
-# size — an ``avernet``-kind subagent can return an arbitrarily large
+# size — a ``bot``-kind subagent can return an arbitrarily large
 # payload. Without a cap, a single run can exhaust the disk backing the
 # artifact root (default ``/tmp/agentswarm/artifacts``). Oversize writes
 # raise ValueError before any filesystem mutation; the runtime treats

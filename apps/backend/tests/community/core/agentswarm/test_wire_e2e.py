@@ -9,7 +9,7 @@ tenant contract (P0-3) resolves the tenant from the authenticated
 principal only and never reads a client-supplied ``X-Tenant-Id``, so
 the battery's auth seam must carry one the way a tenant-aware OIDC
 profile would. It then drives the public surface exactly the way an
-operator would: submit over HTTP, advance the durable job with the real
+operator would: submit over HTTP, advance the durable dispatch with the real
 worker, poll status, stream SSE to the terminal event, and re-check
 persistence through the repositories.
 
@@ -292,9 +292,9 @@ class TestOverTheWire:
         assert status == 422
 
     def test_async_job_full_cycle_over_wire(self, wire):
-        from agentclaw.community.core.agentswarm.repository.job import JobRepository
+        from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
         svc = wire.get(AgentSwarmService)
-        jobs = wire.get(JobRepository)
+        jobs = wire.get(RunDispatchRepository)
         status, submit = _post("/openapi/v1/agentswarm/runs",
                                _submit_body(goal="async cycle"))
         assert status == 200
@@ -316,18 +316,18 @@ class TestOverTheWire:
         else:
             from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
             from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
-            from agentclaw.community.core.agentswarm.repository.shard import ResultShardRepository
+            from agentclaw.community.core.agentswarm.repository.agent_result import AgentResultRepository
             from agentclaw.community.core.agentswarm.repository.round import RoundRepository
             rid = dm.RunId(run_id)
             agents = wire.get(AgentRepository).list_by_run(rid, dm.TenantId(TENANT))
-            shards = wire.get(ResultShardRepository).list_by_run(rid, dm.TenantId(TENANT))
+            results = wire.get(AgentResultRepository).list_by_run(rid, dm.TenantId(TENANT))
             rounds = wire.get(RoundRepository).list_by_run(rid, dm.TenantId(TENANT))
             guards = wire.get(GuardEventRepository).list_by_run(rid, dm.TenantId(TENANT))
             agents_s = [(a.name, a.status.value, a.error) for a in agents]
             guard_s = [(g.kind.value, g.details) for g in guards]
             pytest.fail(
-                f"no terminal: pending={jobs.count_pending_jobs()} "
-                f"agents={agents_s} shards={len(shards)} "
+                f"no terminal: pending={jobs.count_pending_dispatches()} "
+                f"agents={agents_s} results={len(results)} "
                 f"rounds={len(rounds)} guards={guard_s}"
             )
         stored = svc.get_run(run_id, TENANT)

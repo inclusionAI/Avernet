@@ -22,7 +22,7 @@ from agentclaw.community.core.agentswarm.repository import registry as om
 from agentclaw.community.core.agentswarm.repository.agent_attempt import (
     AgentAttemptRepository,
 )
-from agentclaw.community.core.agentswarm.repository.job import JobRepository
+from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
 from agentclaw.community.core.agentswarm.repository.run import RunRepository
 from agentclaw.community.plugins.local.agentswarm.factory import (
     DefaultSubagentFactory,
@@ -87,10 +87,10 @@ def _run_row(run_id="run-sweep"):
 
 def _seed(db, run) -> int:
     RunRepository(db).create(run)
-    job_repo = JobRepository(db)
-    job_repo.enqueue(run_id=run.run_id, tenant=run.tenant,
+    dispatch_repo = RunDispatchRepository(db)
+    dispatch_repo.enqueue(run_id=run.run_id, tenant=run.tenant,
                       deadline_seconds=3600)
-    return job_repo.claim_batch(
+    return dispatch_repo.claim_batch(
         "sweep-worker", [run.tenant], 1, 0)[0]["claim_epoch"]
 
 
@@ -127,7 +127,7 @@ class TestSweepReconcilesWriteAheadIntentRows:
         rows = AgentAttemptRepository(db).list_agent_bindings(
             run.run_id, run.tenant)
         assert len(rows) == 2
-        assert all(r["executor_state"] == "DESTROYED" for r in rows)
+        assert all(r["binding_state"] == "DESTROYED" for r in rows)
         # The blank id itself never leaked into the platform surface.
         assert "" not in platform.deleted
 
@@ -154,7 +154,7 @@ class TestSweepReconcilesWriteAheadIntentRows:
         ])
         rows = AgentAttemptRepository(db).list_agent_bindings(
             run.run_id, run.tenant)
-        assert all(r["executor_state"] == "DESTROYED" for r in rows)
+        assert all(r["binding_state"] == "DESTROYED" for r in rows)
         by_agent = {r["agent_id"]: r["executor_id"] for r in rows}
         assert by_agent["agent-1"] == ""
         assert by_agent["agent-2"] == "ac_settled"
@@ -206,7 +206,7 @@ class TestSweepDefersUntilMaterialization:
         assert platform.deleted == []
         (row,) = AgentAttemptRepository(db).list_agent_bindings(
             run.run_id, run.tenant)
-        assert row["executor_state"] == "SPAWNED"
+        assert row["binding_state"] == "SPAWNED"
 
         # The persona materializes (task-queue completes) and the
         # reaper's next cycle re-attempts the row: destroy + settle.
@@ -217,4 +217,4 @@ class TestSweepDefersUntilMaterialization:
         assert platform.deleted == [derived]
         (row,) = AgentAttemptRepository(db).list_agent_bindings(
             run.run_id, run.tenant)
-        assert row["executor_state"] == "DESTROYED"
+        assert row["binding_state"] == "DESTROYED"

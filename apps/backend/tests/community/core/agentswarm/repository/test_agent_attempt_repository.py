@@ -1,8 +1,8 @@
 """AgentAttemptRepository ledger tests (D-K/D-L): fence, converge, list, mark.
 
 Every scenario runs on a real SQLite engine (StaticPool, registry ALL_MODELS
-create_all) with the same JobRepository claim ladder the runtime uses, so the
-fence behavior is exercised against the actual uk_job_run/claim_epoch table
+create_all) with the same RunDispatchRepository claim ladder the runtime uses, so the
+fence behavior is exercised against the actual uk_dispatch_run/claim_epoch table
 shape instead of a double.
 
 Conventions follow test_slice_store.py: hand-written helpers, no MagicMock.
@@ -25,9 +25,9 @@ from agentclaw.community.core.agentswarm.repository.agent_attempt import (
     AgentAttemptRepository,
 )
 from agentclaw.community.core.agentswarm.repository.agent_attempt.impl import (
-    EXECUTOR_STATE_BOUND, EXECUTOR_STATE_DESTROYED, EXECUTOR_STATE_SPAWNED,
+    BINDING_STATE_BOUND, BINDING_STATE_DESTROYED, BINDING_STATE_SPAWNED,
 )
-from agentclaw.community.core.agentswarm.repository.job import JobRepository
+from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
 from agentclaw.community.core.agentswarm.repository.run import RunRepository
 
 TENANT = dm.TenantId("tenant-a")
@@ -77,14 +77,14 @@ def run(db) -> dm.Run:
 
 
 def _claim(db, record: dm.Run) -> int:
-    job_repo = JobRepository(db)
-    job_repo.enqueue(run_id=record.run_id, tenant=TENANT, deadline_seconds=3600)
-    return job_repo.claim_batch(WORKER, [TENANT], 1, 0)[0]["claim_epoch"]
+    dispatch_repo = RunDispatchRepository(db)
+    dispatch_repo.enqueue(run_id=record.run_id, tenant=TENANT, deadline_seconds=3600)
+    return dispatch_repo.claim_batch(WORKER, [TENANT], 1, 0)[0]["claim_epoch"]
 
 
 def _reclaim(db, record: dm.Run) -> int:
     time.sleep(0.02)
-    return JobRepository(db).reclaim_batch(RECLAIMER, 1, 60)[0]["claim_epoch"]
+    return RunDispatchRepository(db).reclaim_batch(RECLAIMER, 1, 60)[0]["claim_epoch"]
 
 
 def _record(db, run_, agent_id="agent-1", claim_epoch=1, attempt=1,
@@ -98,7 +98,7 @@ def _record(db, run_, agent_id="agent-1", claim_epoch=1, attempt=1,
 
 class TestRecordFence:
     def test_no_job_row_fences_out_inert(self, db, run):
-        # No job row: there is no live claim to fence against, so the
+        # No dispatch row: there is no live claim to fence against, so the
         # journal write must be inert — nothing lands, False returns.
         assert _record(db, run, claim_epoch=0) is False
         assert AgentAttemptRepository(db).list_agent_bindings(run.run_id, TENANT) == []
@@ -111,11 +111,11 @@ class TestRecordFence:
         assert row == {
             "agent_id": "agent-1",
             "claim_epoch": epoch,
-            "attempt": 3,
+            "slice_retry_index": 3,
             "executor_kind": dm.AgentKind.BOT.value,
             "executor_id": "ac_personaid",
             "executor_name": "scout-ab12cd34",
-            "executor_state": EXECUTOR_STATE_SPAWNED,
+            "binding_state": BINDING_STATE_SPAWNED,
             "started_at": row["started_at"],
             "result_status": None,
             "result_message": None,
@@ -152,7 +152,7 @@ class TestReplayConvergence:
         _record(db, run, claim_epoch=epoch, attempt=2, executor_id="ac_a2")
         rows = AgentAttemptRepository(db).list_agent_bindings(run.run_id, TENANT)
         assert [r["executor_id"] for r in rows] == ["ac_a1", "ac_a2"]
-        assert sorted(r["attempt"] for r in rows) == [1, 2]
+        assert sorted(r["slice_retry_index"] for r in rows) == [1, 2]
 
 
 class TestListShape:
@@ -182,7 +182,7 @@ class TestListShape:
                         executor_id="0123456789abcdef") is True
         (row,) = AgentAttemptRepository(db).list_agent_bindings(run.run_id, TENANT)
         assert row["executor_kind"] == dm.AgentKind.LLM.value
-        assert row["executor_state"] == EXECUTOR_STATE_SPAWNED
+        assert row["binding_state"] == BINDING_STATE_SPAWNED
 
 
 class TestMarkDestroyed:
@@ -196,8 +196,8 @@ class TestMarkDestroyed:
         repo = AgentAttemptRepository(db)
         assert repo.mark_binding_destroyed(run.run_id, TENANT, "ac_adopted") == 2
         by_id = {r["executor_id"]: r for r in repo.list_agent_bindings(run.run_id, TENANT)}
-        assert by_id["ac_adopted"]["executor_state"] == EXECUTOR_STATE_DESTROYED
-        assert by_id["ac_other"]["executor_state"] == EXECUTOR_STATE_SPAWNED
+        assert by_id["ac_adopted"]["binding_state"] == BINDING_STATE_DESTROYED
+        assert by_id["ac_other"]["binding_state"] == BINDING_STATE_SPAWNED
 
     def test_already_destroyed_rows_are_not_recounted(self, db, run):
         epoch = _claim(db, run)
@@ -270,7 +270,7 @@ class TestRecordAttemptResult:
             "FAILED", "after destroy")
         assert rowcount == 0
         (row,) = repo.list_agent_bindings(run.run_id, TENANT)
-        assert row["executor_state"] == EXECUTOR_STATE_DESTROYED
+        assert row["binding_state"] == BINDING_STATE_DESTROYED
         assert row["result_status"] is None
 
     def test_unknown_attempt_or_agent_returns_zero(self, db, run):
@@ -313,11 +313,11 @@ class TestWriteAheadIntent:
         assert row == {
             "agent_id": "agent-1",
             "claim_epoch": epoch,
-            "attempt": 1,
+            "slice_retry_index": 1,
             "executor_kind": dm.AgentKind.BOT.value,
             "executor_id": "",
             "executor_name": "scout",
-            "executor_state": EXECUTOR_STATE_SPAWNED,
+            "binding_state": BINDING_STATE_SPAWNED,
             "started_at": row["started_at"],
             "result_status": None,
             "result_message": None,
@@ -337,21 +337,21 @@ class TestWriteAheadIntent:
                        executor_id="ac_real", executor_name="scout-real") is True
         (row,) = AgentAttemptRepository(db).list_agent_bindings(run.run_id, TENANT)
         assert row["executor_id"] == "ac_real"
-        assert row["executor_state"] == EXECUTOR_STATE_BOUND
+        assert row["binding_state"] == BINDING_STATE_BOUND
 
     def test_fenced_settle_returns_false_without_touching_the_row(self, db, run):
         epoch = _claim(db, run)
         self._intent(db, run, claim_epoch=epoch)
         stale = _reclaim(db, run)
         assert stale != epoch
-        # The settle carries the ROW's (now dead) epoch: the job row's
+        # The settle carries the ROW's (now dead) epoch: the dispatch row's
         # CURRENT claim_epoch is the reclaimer's, so the fence rejects
         # the UPDATE and the blank intent row stays untouched.
         assert _record(db, run, claim_epoch=epoch, attempt=1,
                        executor_id="ac_wrong") is False
         (row,) = AgentAttemptRepository(db).list_agent_bindings(run.run_id, TENANT)
         assert row["executor_id"] == ""
-        assert row["executor_state"] == EXECUTOR_STATE_SPAWNED
+        assert row["binding_state"] == BINDING_STATE_SPAWNED
 
     def test_destroyed_intent_row_is_never_resurrected(self, db, run):
         epoch = _claim(db, run)
@@ -362,7 +362,7 @@ class TestWriteAheadIntent:
         assert _record(db, run, claim_epoch=epoch, attempt=1,
                        executor_id="ac_late") is False
         (row,) = repo.list_agent_bindings(run.run_id, TENANT)
-        assert row["executor_state"] == EXECUTOR_STATE_DESTROYED
+        assert row["binding_state"] == BINDING_STATE_DESTROYED
 
 
 class TestMarkIntentDestroyed:
@@ -379,10 +379,10 @@ class TestMarkIntentDestroyed:
 
         assert repo.mark_intent_binding_destroyed(
             run.run_id, TENANT, dm.AgentId("agent-1"), 1) == 1
-        by_attempt = {r["attempt"]: r
+        by_attempt = {r["slice_retry_index"]: r
                       for r in repo.list_agent_bindings(run.run_id, TENANT)}
-        assert by_attempt[1]["executor_state"] == EXECUTOR_STATE_DESTROYED
-        assert by_attempt[2]["executor_state"] == EXECUTOR_STATE_SPAWNED
+        assert by_attempt[1]["binding_state"] == BINDING_STATE_DESTROYED
+        assert by_attempt[2]["binding_state"] == BINDING_STATE_SPAWNED
 
     def test_marks_blank_rows_across_claim_epochs(self, db, run):
         # A crash-resume replays the same attempt number under a new
@@ -401,7 +401,7 @@ class TestMarkIntentDestroyed:
         assert repo.mark_intent_binding_destroyed(
             run.run_id, TENANT, dm.AgentId("agent-1"), 1) == 2
         assert all(
-            r["executor_state"] == EXECUTOR_STATE_DESTROYED
+            r["binding_state"] == BINDING_STATE_DESTROYED
             for r in repo.list_agent_bindings(run.run_id, TENANT)
         )
 
@@ -477,7 +477,7 @@ class TestSettleTransientRetry:
         (row,) = AgentAttemptRepository(db).list_agent_bindings(
             run.run_id, TENANT)
         assert row["executor_id"] == "ac_personaid"
-        assert row["executor_state"] == EXECUTOR_STATE_BOUND
+        assert row["binding_state"] == BINDING_STATE_BOUND
 
     def test_persistent_deadlock_exhausts_bounded_retries(self, db, run):
         epoch = _claim(db, run)
@@ -493,7 +493,7 @@ class TestSettleTransientRetry:
         (row,) = AgentAttemptRepository(db).list_agent_bindings(
             run.run_id, TENANT)
         assert row["executor_id"] == ""
-        assert row["executor_state"] == EXECUTOR_STATE_SPAWNED
+        assert row["binding_state"] == BINDING_STATE_SPAWNED
 
     def test_non_transient_error_returns_false_without_retry(self, db, run):
         epoch = _claim(db, run)
@@ -507,4 +507,4 @@ class TestSettleTransientRetry:
         (row,) = AgentAttemptRepository(db).list_agent_bindings(
             run.run_id, TENANT)
         assert row["executor_id"] == ""
-        assert row["executor_state"] == EXECUTOR_STATE_SPAWNED
+        assert row["binding_state"] == BINDING_STATE_SPAWNED

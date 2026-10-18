@@ -20,8 +20,8 @@ class RunRepositoryProtocol(Protocol):
                       claim_epoch: int = 0) -> bool: ...
 
     # Unfenced submit-plane compensation (D28 carve-out): flips a still
-    # RUNNING run to FAILED without the job-epoch EXISTS fence — the
-    # caller owns a run whose job may never have committed. The
+    # RUNNING run to FAILED without the dispatch-epoch EXISTS fence — the
+    # caller owns a run whose dispatch may never have committed. The
     # status==RUNNING predicate is the only clobber guard.
     def fail_unclaimed(self, run_id: RunId, tenant: TenantId,
                        error: str) -> bool: ...

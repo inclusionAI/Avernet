@@ -106,14 +106,14 @@ _PENDING_EXEMPT_TABLES: dict[str, str] = {
 }
 
 # The one OceanBase modifier that is load-bearing for this schema today:
-# the job queue dedups one job per (env, tenant, run_id) and is the claim
+# the dispatch table dedups one dispatch per (env, tenant, run_id) and is the claim
 # source — a partition-LOCAL unique key would allow the same run_id once
 # per partition and double-claim slices, exactly the task_queue rationale
 # (its exemplar file documents GLOBAL as load-bearing). Other unique
 # indexes carry LOCAL or no modifier in the current DDL and are not
 # required to gain one.
 _REQUIRED_UNIQUE_MODIFIERS: dict[str, dict[str, str]] = {
-    "ac_agent_swarm_job": {"uk_job_run": "GLOBAL"},
+    "ac_agent_swarm_run_dispatch": {"uk_dispatch_run": "GLOBAL"},
 }
 
 
@@ -312,7 +312,7 @@ class TestMigrationPolicy:
         """GLOBAL stays on exactly the indexes whose dedup spans partitions.
 
         A partition-LOCAL unique key allows one entry per partition, which
-        silently defeats queue dedup; `uk_job_run` is this schema's claim
+        silently defeats queue dedup; `uk_dispatch_run` is this schema's claim
         source. No index is required to gain a modifier it does not have
         today — the rest are LOCAL or bare by current provisioning choice.
         """

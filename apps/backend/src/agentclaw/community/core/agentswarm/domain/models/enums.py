@@ -94,12 +94,11 @@ class WorkerOutcomeKind(StrEnum):
     FAIL = "fail"
 
 
-class TaskQueueStatus(StrEnum):
-    PENDING = "PENDING"
-    RUNNING = "RUNNING"
-    SUCCEEDED = "SUCCEEDED"
+class DispatchStatus(StrEnum):
+    READY = "READY"
+    LEASED = "LEASED"
+    DONE = "DONE"
     FAILED = "FAILED"
-    TIMED_OUT = "TIMED_OUT"
 
 
 class FinishReason(StrEnum):
@@ -140,7 +139,7 @@ class RunOptions:
 
     model_name: str | None = None
     slice_max_seconds: float | None = None
-    per_subagent_timeout_seconds: float | None = None
+    per_attempt_timeout_seconds: float | None = None
     max_turns: int | None = None
     max_total_agents: int | None = None
     max_width: int | None = None
@@ -153,7 +152,7 @@ class RunOptions:
         return cls(
             model_name=dto.model_name,
             slice_max_seconds=dto.slice_max_seconds,
-            per_subagent_timeout_seconds=dto.per_subagent_timeout_seconds,
+            per_attempt_timeout_seconds=dto.per_attempt_timeout_seconds,
             max_turns=dto.max_turns,
             max_total_agents=dto.max_total_agents,
             max_width=dto.max_width,
@@ -179,7 +178,7 @@ class RunOptions:
         return cls(
             model_name=ext.get(f"{prefix}.model_name"),
             slice_max_seconds=val("slice_max_seconds", float),
-            per_subagent_timeout_seconds=val("per_subagent_timeout_seconds", float),
+            per_attempt_timeout_seconds=val("per_attempt_timeout_seconds", float),
             max_turns=val("max_turns", int),
             max_total_agents=val("max_total_agents", int),
             max_width=val("max_width", int),
@@ -190,7 +189,7 @@ class RunOptions:
         for key, v in {
             "model_name": self.model_name,
             "slice_max_seconds": self.slice_max_seconds,
-            "per_subagent_timeout_seconds": self.per_subagent_timeout_seconds,
+            "per_attempt_timeout_seconds": self.per_attempt_timeout_seconds,
             "max_turns": self.max_turns,
             "max_total_agents": self.max_total_agents,
             "max_width": self.max_width,

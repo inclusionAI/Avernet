@@ -29,7 +29,7 @@ class EnvelopeSchemaInvalid(Exception):
 
 
 # Hard cap on a result the runtime keeps inline in a completion (and so in
-# the persisted shard ``payload`` column). Since round-4 capped artifacts at
+# the persisted result ``payload`` column). Since round-4 capped artifacts at
 # 8 MiB, an oversize output can no longer spill; the inline fallback that
 # catches the spill failure used to write the raw output — of unbounded
 # size — into the DB, converting the bounded-disk vector into an
@@ -94,11 +94,11 @@ class SubagentRuntime:
         self._workers: list[asyncio.Task] = []
         self._running: set[asyncio.Task] = set()
         self._slice_lost = asyncio.Event()
-        self._shard_handler: Any = None
+        self._result_handler: Any = None
         self._validator_cache: dict[str, Any] = {}
 
-    def set_shard_handler(self, handler: Any) -> None:
-        self._shard_handler = handler
+    def set_result_handler(self, handler: Any) -> None:
+        self._result_handler = handler
 
     def set_slice_lost(self, lost: bool) -> None:
         if lost:
@@ -233,12 +233,12 @@ class SubagentRuntime:
             try:
                 result = await self._execute_with_retry(item)
                 await self._completions.put(result)
-                if self._shard_handler is not None:
+                if self._result_handler is not None:
                     try:
-                        self._shard_handler(result)
+                        self._result_handler(result)
                     except Exception as exc:
                         logger.warning(
-                            "[agentswarm][runtime] shard handler failed for agent=%s: %s",
+                            "[agentswarm][runtime] result handler failed for agent=%s: %s",
                             item.agent_id, exc,
                         )
             except asyncio.CancelledError:
@@ -428,7 +428,7 @@ class SubagentRuntime:
         The store call is insert-or-settle by the attempt UK: with the
         write-ahead intent row already landed it becomes the fenced
         UPDATE that fills in the provisioned persona's executor id and
-        flips ``executor_state`` to BOUND; every attempt still converges
+        flips ``binding_state`` to BOUND; every attempt still converges
         on exactly one row. The read stays additive SPI getattr: a blank
         executor_id (a pre-D-J double, or a setup that surfaced no
         identity) skips the settle — the intent row the destroy sweep
@@ -451,7 +451,7 @@ class SubagentRuntime:
         """Best-effort per-attempt outcome write on the ledger.
 
         Every terminal outcome of an attempt (COMPLETED/FAILED/SLICE_LOST/
-        TIMEOUT) is recorded so the ledger's ``executor_state`` — which is
+        TIMEOUT) is recorded so the ledger's ``binding_state`` — which is
         provisioning-only — no longer hides a failed attempt behind a
         SPAWNED row. The write is diagnostic: a journal failure must never
         raise or change the attempt's control flow, and the store call is
@@ -486,7 +486,7 @@ class SubagentRuntime:
 
         Under ``_MAX_INLINE_RESULT_CHARS`` the raw output is kept inline
         exactly as before. Above it, the raw output would be written
-        verbatim into the persisted shard ``payload`` column — an
+        verbatim into the persisted result ``payload`` column — an
         unbounded-DB-write vector once the round-4 8 MiB artifact cap made
         oversize results unspillable. The alternative — hard-fail the agent
         so the orchestrator can react — was rejected: it discards a
@@ -528,7 +528,7 @@ class SubagentRuntime:
                     # Spilling is best-effort: never discard a completed
                     # (schema-valid) result — that would re-run the task and
                     # double its side effects. Keep the result inline; the
-                    # shard XOR contract (D31) still has exactly one carrier.
+                    # result XOR contract (D31) still has exactly one carrier.
                     logger.exception(
                         "[agentswarm][runtime] agent=%s artifact put failed for key=%s; keeping result inline",
                         item.agent_id, key,
@@ -536,7 +536,7 @@ class SubagentRuntime:
                     result_payload = self._inline_fallback(item, _raw.output, output_str)
             else:
                 # No artifact store configured: keep the result inline so the
-                # shard XOR contract (D31) still has exactly one carrier.
+                # result XOR contract (D31) still has exactly one carrier.
                 result_payload = self._inline_fallback(item, _raw.output, output_str)
 
         return {

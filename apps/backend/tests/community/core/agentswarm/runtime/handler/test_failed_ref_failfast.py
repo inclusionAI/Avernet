@@ -28,7 +28,7 @@ from agentclaw.community.core.agentswarm.repository import registry as om
 from tests.community.core.agentswarm.runtime.handler.test_swarm_slice import (
     TENANT, WORKER, _TestDB, FakeFactory, RepeatingLLMProvider, _build_env,
     _enqueue_and_claim, _mk_run, _spawn_decision, _wait_decision,
-    _finish_decision, _job_row,
+    _finish_decision, _dispatch_row,
 )
 from tests.community.core.agentswarm.test_coverage_gaps import _mk_agent
 
@@ -132,7 +132,7 @@ class TestFailFastOnFailedBlockingRef:
 
         # StubLLMProvider consumes decisions one per LLM call; the spawn
         # pair decision spawns both in one cohort, then the run follows
-        # the scripted wait(a2)/finish and converges on a2's shard.
+        # the scripted wait(a2)/finish and converges on a2's result.
         assert outcome == "complete"
         stored = env.run_repo.get(run.run_id, TENANT)
         assert stored.status is dm.RunStatus.COMPLETED
@@ -201,7 +201,7 @@ class TestRehydrateFailFast:
         assert "boom forever" in stored.error
 
     def test_satisfied_wait_refs_never_abort_on_resume(self, db):
-        # The same crash shape, but the waited ref delivered its shard
+        # The same crash shape, but the waited ref delivered its result
         # before the crash: the predicate stays quiet and the resumed
         # slice proceeds to the orchestrator's next decision.
         env = _build_env(db, [], FakeFactory(),
@@ -211,8 +211,8 @@ class TestRehydrateFailFast:
         agent = _mk_agent(run, "a1")
         agent.name = "a1"
         env.agent_repo.create(agent)
-        env.shard_repo.create(dm.ResultShard(
-            id=dm.ShardId("shard-1"), run_id=run.run_id, tenant=TENANT,
+        env.result_repo.create(dm.AgentResult(
+            id=dm.ResultId("result-1"), run_id=run.run_id, tenant=TENANT,
             source_agent_id=agent.agent_id, payload={"done": True},
             artifact_key=None, routed_at=dm.EpochMillis(int(time.time() * 1000)),
         ))
@@ -305,13 +305,13 @@ def _seed_slice_lost_agent(env, run, claim, name="sl1", error="slice_lost"):
 async def _bump(env, run, claim) -> int | None:
     from agentclaw.community.core.agentswarm.runtime.offload import run_blocking
     return await run_blocking(
-        env.job_repo.bump_reclaim, run.run_id, TENANT, WORKER,
+        env.dispatch_repo.bump_reclaim, run.run_id, TENANT, WORKER,
         claim["claim_epoch"],
     )
 
 
-class TestSliceLostShardlessReschedule:
-    """A shardless FAILED slice_lost agent on an in-slice wait ref must
+class TestSliceLostResultlessReschedule:
+    """A resultless FAILED slice_lost agent on an in-slice wait ref must
     trigger an immediate reschedule, not block to the slice deadline."""
 
     def test_reschedules_immediately_and_counts_one_reclaim(self, db):
@@ -332,7 +332,7 @@ class TestSliceLostShardlessReschedule:
             assert sentinel["_reschedule_slice_lost"]["agent_id"] == agent.agent_id
             bumped = await _bump(env, run, claim)
             await env.handler._release_claim(
-                run.run_id, TENANT, claim["claim_epoch"], "slice_lost shardless ref",
+                run.run_id, TENANT, claim["claim_epoch"], "slice_lost resultless ref",
             )
             return elapsed, bumped
 
@@ -340,9 +340,9 @@ class TestSliceLostShardlessReschedule:
 
         assert elapsed < 5.0
         assert bumped == 1
-        job = _job_row(db, run.run_id)
-        assert job["status"] == "PENDING"
-        assert job["reclaims"] == 1
+        dispatch = _dispatch_row(db, run.run_id)
+        assert dispatch["status"] == "READY"
+        assert dispatch["reclaims"] == 1
         assert env.run_repo.get(run.run_id, TENANT).status is dm.RunStatus.RUNNING
 
     def test_repeated_slice_lost_trips_stuck_after_reclaim_max(self, db):
@@ -362,11 +362,11 @@ class TestSliceLostShardlessReschedule:
                 reclaims = await _bump(env, run, claim)
                 assert reclaims is not None
                 if reclaims > reclaim_max:
-                    return await env.handler._finalize_stuck_slice_lost(
+                    return await env.handler._finalize_stuck_dispatch(
                         run.run_id, TENANT, claim["claim_epoch"], ref,
                     )
             # One more no-progress reschedule pushes past reclaim_max.
-            return await env.handler._finalize_stuck_slice_lost(
+            return await env.handler._finalize_stuck_dispatch(
                 run.run_id, TENANT, claim["claim_epoch"], ref,
             )
 
@@ -378,10 +378,10 @@ class TestSliceLostShardlessReschedule:
         assert stored.termination_reason is dm.TerminationReason.STUCK
         assert "slice_lost reclaim circuit breaker" in (stored.error or "")
         assert str(agent.agent_id) in (stored.error or "")
-        assert _job_row(db, run.run_id)["status"] == "SUCCEEDED"
+        assert _dispatch_row(db, run.run_id)["status"] == "DONE"
 
-    def test_non_slice_lost_shardless_failed_still_fails(self, db):
-        """Regression pin: a genuine FAILED shardless agent still fails."""
+    def test_non_slice_lost_resultless_failed_still_fails(self, db):
+        """Regression pin: a genuine FAILED resultless agent still fails."""
         script = [
             _spawn_decision("a1", "objective-a1"),
             _wait_decision("a1"),
@@ -415,7 +415,7 @@ class TestAwaitRefsCancelAbort:
             run.run_id, killed.agent_id, TENANT, dm.AgentStatus.KILLED.value,
             claim_epoch=claim["claim_epoch"],
         )
-        assert env.job_repo.request_cancel(run.run_id, TENANT)
+        assert env.dispatch_repo.request_cancel(run.run_id, TENANT)
 
         async def main():
             started = time.monotonic()

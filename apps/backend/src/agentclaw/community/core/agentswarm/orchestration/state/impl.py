@@ -13,7 +13,7 @@ class RunState:
     turn_count: int = 0
     total_agents_spawned: int = 0
     last_spawn_objectives: list[str] = field(default_factory=list)
-    routed_shard_count: int = 0
+    routed_result_count: int = 0
     recent_decision: Any = None
     active_persona: AgentSpec | None = None
     # Refs of the LAST persisted wait decision — a resumed slice owes

@@ -95,7 +95,7 @@ class GlobalRunLimitExceeded(Exception):
 
     Raised from submit before any row is created: admission is strictly
     accept-or-reject, so a rejected submit leaves no run and no durable
-    job behind. Protects the worker fleet (all tenants combined) from
+    dispatch behind. Protects the worker fleet (all tenants combined) from
     oversubscription; per-tenant fairness stays in TenantRunLimitExceeded.
     """
 
@@ -107,10 +107,10 @@ class GlobalRunLimitExceeded(Exception):
 
 
 class QueueDepthExceeded(Exception):
-    """Pending-job queue-depth cap reached (429-class, task 12.1).
+    """Pending-dispatch queue-depth cap reached (429-class, task 12.1).
 
     Rejects submits while the durable queue is saturated at
-    ``admission.max_pending_jobs`` — before any row is created — so a
+    ``admission.max_pending_dispatches`` — before any row is created — so a
     backlog manifests as synchronous backpressure to callers rather
     than unbounded enqueue latency.
     """
@@ -118,7 +118,7 @@ class QueueDepthExceeded(Exception):
     def __init__(self, limit: int) -> None:
         self.limit = limit
         super().__init__(
-            f"queue depth reached max_pending_jobs={limit}"
+            f"queue depth reached max_pending_dispatches={limit}"
         )
 
 

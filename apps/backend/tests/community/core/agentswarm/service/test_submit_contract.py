@@ -1,11 +1,11 @@
 """Async-submit contract conformance gates (tasks 3.1-3.3):
 
 Submit must never execute the run: it hands a durable run row plus a
-PENDING job to the queue and returns only the run_id, in well under two
+READY dispatch to the queue and returns only the run_id, in well under two
 seconds, even for a goal that would take dozens of orchestrator turns.
 Admission failures (tenant cap, missing LLM config) raise synchronously
 in the submit call and persist nothing. Once accepted, the run converges
-through the durable job queue alone — the submitting client can vanish
+through the durable dispatch queue alone — the submitting client can vanish
 immediately and nothing changes, and the idempotency-join semantics
 survive the disconnect (same key joins while RUNNING; a terminal write
 nulls `active_idempotency_key`, so the same key later opens a FRESH run).
@@ -50,14 +50,14 @@ from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
 from agentclaw.community.core.agentswarm.repository.guard import (
     GuardEventRepository,
 )
-from agentclaw.community.core.agentswarm.repository.job import JobRepository
+from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
 from agentclaw.community.core.agentswarm.repository.message import (
     MessageRepository,
 )
 from agentclaw.community.core.agentswarm.repository.round import RoundRepository
 from agentclaw.community.core.agentswarm.repository.run import RunRepository
-from agentclaw.community.core.agentswarm.repository.shard import (
-    ResultShardRepository,
+from agentclaw.community.core.agentswarm.repository.agent_result import (
+    AgentResultRepository,
 )
 from agentclaw.community.core.agentswarm.runtime.handler import SwarmRunHandler
 from agentclaw.community.core.agentswarm.runtime.pool import SubagentRuntime
@@ -104,7 +104,7 @@ def _paused_config(*, tenant_limit: int = 8) -> AgentSwarmConfig:
             slice_max_seconds=8.0,
             slice_interval=0.0,
             orchestrator_turn_interval=0.01,
-            subagent_max_attempts=1,
+            agent_max_attempts=1,
             batch_size=4,
         ),
         tenant_limits=AgentSwarmTenantLimits(max_concurrent_runs=tenant_limit),
@@ -121,10 +121,10 @@ def _build_env(db, script: list[str], *,
         "run": RunRepository(db),
         "agent": AgentRepository(db),
         "message": MessageRepository(db),
-        "shard": ResultShardRepository(db),
+        "result": AgentResultRepository(db),
         "round": RoundRepository(db),
         "guard": GuardEventRepository(db),
-        "job": JobRepository(db),
+        "dispatch": RunDispatchRepository(db),
     }
     llm = StubLLMProvider(script=script)
     orchestrator = Orchestrator(
@@ -139,43 +139,43 @@ def _build_env(db, script: list[str], *,
     runtime = SubagentRuntime(
         factory=FakeFactory(),
         max_width=cfg.orchestration.max_width,
-        max_attempts=cfg.orchestration.subagent_max_attempts,
-        per_task_timeout=cfg.orchestration.per_subagent_timeout,
+        max_attempts=cfg.orchestration.agent_max_attempts,
+        per_task_timeout=cfg.orchestration.per_attempt_timeout,
         artifact_inline_threshold=cfg.artifact_inline_threshold,
     )
     handler = SwarmRunHandler(
         config=cfg, orchestrator=orchestrator, runtime=runtime,
         run_repo=repos["run"], agent_repo=repos["agent"],
-        message_repo=repos["message"], shard_repo=repos["shard"],
+        message_repo=repos["message"], result_repo=repos["result"],
         round_repo=repos["round"], guard_repo=repos["guard"],
-        job_repo=repos["job"],
+        dispatch_repo=repos["dispatch"],
         termination=TerminationEvaluator(max_turns=cfg.orchestration.max_turns),
         guards=GuardService(),
     )
     worker = AgentSwarmWorker(
-        config=cfg, handler=handler, job_repo=repos["job"],
+        config=cfg, handler=handler, dispatch_repo=repos["dispatch"],
     )
     service = AgentSwarmService(
-        run_repo=repos["run"], job_repo=repos["job"],
+        run_repo=repos["run"], dispatch_repo=repos["dispatch"],
         agent_repo=repos["agent"], message_repo=repos["message"],
         round_repo=repos["round"], guard_repo=repos["guard"],
-        shard_repo=repos["shard"], config=cfg,
+        result_repo=repos["result"], config=cfg,
     )
     return SimpleNamespace(
         cfg=cfg, llm=llm, handler=handler, worker=worker, service=service,
         run_repo=repos["run"], agent_repo=repos["agent"],
-        message_repo=repos["message"], shard_repo=repos["shard"],
+        message_repo=repos["message"], result_repo=repos["result"],
         round_repo=repos["round"], guard_repo=repos["guard"],
-        job_repo=repos["job"],
+        dispatch_repo=repos["dispatch"],
     )
 
 
 def _service_with(db, config: AgentSwarmConfig) -> AgentSwarmService:
     return AgentSwarmService(
-        run_repo=RunRepository(db), job_repo=JobRepository(db),
+        run_repo=RunRepository(db), dispatch_repo=RunDispatchRepository(db),
         agent_repo=AgentRepository(db), message_repo=MessageRepository(db),
         round_repo=RoundRepository(db), guard_repo=GuardEventRepository(db),
-        shard_repo=ResultShardRepository(db), config=config,
+        result_repo=AgentResultRepository(db), config=config,
     )
 
 
@@ -199,12 +199,12 @@ def _tenant_rows(db, model) -> int:
         ).scalar_one()
 
 
-def _job_status(db, run_id: str) -> str:
+def _dispatch_status(db, run_id: str) -> str:
     with db.orm_session() as session:
         row = session.execute(
-            select(om.AcAgentSwarmJobModel).where(
-                om.AcAgentSwarmJobModel.run_id == dm.RunId(run_id),
-                om.AcAgentSwarmJobModel.tenant == TID,
+            select(om.AcAgentSwarmRunDispatchModel).where(
+                om.AcAgentSwarmRunDispatchModel.run_id == dm.RunId(run_id),
+                om.AcAgentSwarmRunDispatchModel.tenant == TID,
             )
         ).scalar_one()
         return row.status
@@ -231,7 +231,7 @@ class TestNonBlockingSubmit:
             self, db):
         # A goal that would take 30 orchestrator turn-decisions to run:
         # spawn+wait over 15 agents (every wait blocks the turn on a
-        # routed shard, so the turn battery is genuinely long).
+        # routed result, so the turn battery is genuinely long).
         script: list[str] = []
         for i in range(1, 16):
             script.append(_spawn_decision(f"a{i}", f"objective-a{i}"))
@@ -262,19 +262,19 @@ class TestNonBlockingSubmit:
         assert run is not None
         assert run.status is dm.RunStatus.RUNNING
         # The durable pair the contract requires: a run row plus one
-        # PENDING job for the paused worker's queue — and that is ALL.
-        assert env.job_repo.count_pending_jobs() == 1
+        # READY dispatch for the paused worker's queue — and that is ALL.
+        assert env.dispatch_repo.count_pending_dispatches() == 1
         assert _tenant_rows(db, om.AcAgentSwarmRunModel) == 1
-        assert _tenant_rows(db, om.AcAgentSwarmJobModel) == 1
+        assert _tenant_rows(db, om.AcAgentSwarmRunDispatchModel) == 1
         assert _tenant_rows(db, om.AcAgentSwarmAgentModel) == 0
-        assert _tenant_rows(db, om.AcAgentSwarmResultShardModel) == 0
+        assert _tenant_rows(db, om.AcAgentSwarmAgentResultModel) == 0
         assert _tenant_rows(db, om.AcAgentSwarmMessageModel) == 0
         assert env.agent_repo.list_by_run(rid, TID) == []
-        assert env.shard_repo.list_by_run(rid, TID) == []
+        assert env.result_repo.list_by_run(rid, TID) == []
         assert env.round_repo.list_by_run(rid, TID) == []
         assert env.guard_repo.list_by_run(rid, TID) == []
 
-        # Unpause: drive worker slices manually — the durable job queue
+        # Unpause: drive worker slices manually — the durable dispatch queue
         # is the only execution driver — until the run converges.
         run = await _drive_to_terminal(env.worker, env.run_repo, run_id)
         assert run is not None, "run row vanished"
@@ -282,16 +282,16 @@ class TestNonBlockingSubmit:
         assert run.termination_reason is dm.TerminationReason.FINISH
         assert run.final_answer == "converged after unpause"
         assert run.ended_at is not None
-        assert _job_status(db, run_id) == "SUCCEEDED"
+        assert _dispatch_status(db, run_id) == "DONE"
 
         # Rows materialized by the converged turns: 15 completed agents,
-        # 15 routed shards, decision + per-agent messages.
+        # 15 routed results, decision + per-agent messages.
         agents = env.agent_repo.list_by_run(rid, TID)
         assert len(agents) == 15
         assert all(a.status is dm.AgentStatus.COMPLETED for a in agents)
-        shards = env.shard_repo.list_by_run(rid, TID)
-        assert len(shards) == 15
-        assert all(s.payload is not None for s in shards)
+        results = env.result_repo.list_by_run(rid, TID)
+        assert len(results) == 15
+        assert all(s.payload is not None for s in results)
         decisions = env.message_repo.list_by_agent(
             rid, dm.AgentId(run_id), TID,
         )
@@ -326,11 +326,11 @@ class TestAdmissionErrorsAreSynchronous:
         assert caught.value.limit == 1
 
         # Only the admitted run's rows persist: the rejected submit added
-        # no run, job, agent, shard, or message row anywhere.
+        # no run, dispatch, agent, result, or message row anywhere.
         assert _tenant_rows(db, om.AcAgentSwarmRunModel) == 1
-        assert _tenant_rows(db, om.AcAgentSwarmJobModel) == 1
+        assert _tenant_rows(db, om.AcAgentSwarmRunDispatchModel) == 1
         assert _tenant_rows(db, om.AcAgentSwarmAgentModel) == 0
-        assert _tenant_rows(db, om.AcAgentSwarmResultShardModel) == 0
+        assert _tenant_rows(db, om.AcAgentSwarmAgentResultModel) == 0
         assert _tenant_rows(db, om.AcAgentSwarmMessageModel) == 0
         # The rejected request's idempotency key holds no slot either.
         assert env.run_repo.get_by_idempotency("rejected-key", TID) is None
@@ -348,9 +348,9 @@ class TestAdmissionErrorsAreSynchronous:
             # Fail-clear keeps it fail-EMPTY: over a shared store, the
             # both-rejected pass still leaves every table at zero rows.
             assert _tenant_rows(db, om.AcAgentSwarmRunModel) == 0
-            assert _tenant_rows(db, om.AcAgentSwarmJobModel) == 0
+            assert _tenant_rows(db, om.AcAgentSwarmRunDispatchModel) == 0
             assert _tenant_rows(db, om.AcAgentSwarmAgentModel) == 0
-            assert _tenant_rows(db, om.AcAgentSwarmResultShardModel) == 0
+            assert _tenant_rows(db, om.AcAgentSwarmAgentResultModel) == 0
             assert _tenant_rows(db, om.AcAgentSwarmMessageModel) == 0
             assert _tenant_rows(db, om.AcAgentSwarmRoundModel) == 0
             assert _tenant_rows(db, om.AcAgentSwarmGuardEventModel) == 0
@@ -383,28 +383,28 @@ class TestSubmitterDetach:
         )
 
         # The keyed duplicate (a second client with the same key) joins
-        # the live run — same run_id, still exactly one durable job.
+        # the live run — same run_id, still exactly one durable dispatch.
         joined = await env.service.submit_async(
             _req(idempotency_key="detach-42", goal="detach goal"),
         )
         assert joined == run_id
-        assert env.job_repo.count_pending_jobs() == 1
+        assert env.dispatch_repo.count_pending_dispatches() == 1
 
         run = await _drive_to_terminal(env.worker, env.run_repo, run_id)
         assert run is not None, "run row vanished"
         assert run.status is dm.RunStatus.COMPLETED
         assert run.final_answer == "detach done"
-        assert _job_status(db, run_id) == "SUCCEEDED"
+        assert _dispatch_status(db, run_id) == "DONE"
         rid = dm.RunId(run_id)
         agents = env.agent_repo.list_by_run(rid, TID)
         assert [a.name for a in agents] == ["a1"]
         assert agents[0].status is dm.AgentStatus.COMPLETED
-        assert len(env.shard_repo.list_by_run(rid, TID)) == 1
+        assert len(env.result_repo.list_by_run(rid, TID)) == 1
         assert any(
             m.role is dm.MessageRole.DECISION for m in
             env.message_repo.list_by_agent(rid, dm.AgentId(run_id), TID)
         )
-        assert _tenant_rows(db, om.AcAgentSwarmJobModel) == 1
+        assert _tenant_rows(db, om.AcAgentSwarmRunDispatchModel) == 1
 
         # Terminal write nulls the active idempotency key
         # (repository/run/impl.py TerminationEvaluator fence and slot

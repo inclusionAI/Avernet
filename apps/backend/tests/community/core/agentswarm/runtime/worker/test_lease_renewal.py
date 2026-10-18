@@ -1,6 +1,6 @@
 """Lease-renewal decoupling tests (root-cause fix): renewal runs on a
 dedicated wall-clock thread, so a CPU-bound slice starving the asyncio loop
-cannot lapse the lease and hand the job to a peer's reclaim (the
+cannot lapse the lease and hand the dispatch to a peer's reclaim (the
 ``slice_lost`` failure). Mirrors the drain-harness fakes in
 ``test_drain_breaker.py``.
 """
@@ -18,7 +18,7 @@ from agentclaw.community.core.agentswarm.config.settings import (
 from agentclaw.community.core.agentswarm.runtime.worker import AgentSwarmWorker
 
 from tests.community.core.agentswarm.runtime.worker.test_drain_breaker import (
-    DrainHandler, DrainJobRepo, TENANT, _drain_config, _stub_job,
+    DrainHandler, DrainDispatchRepo, TENANT, _drain_config, _stub_dispatch,
 )
 
 
@@ -33,7 +33,7 @@ def _lease_config(lease: int) -> AgentSwarmConfig:
     )
 
 
-class _RenewingRepo(DrainJobRepo):
+class _RenewingRepo(DrainDispatchRepo):
     """Records renewals; returns a scripted verdict per run_id."""
 
     def __init__(self) -> None:
@@ -62,9 +62,9 @@ class TestLeaseRenewalThread:
 
     def test_inflight_run_is_renewed_and_non_inflight_is_not(self):
         repo = _RenewingRepo()
-        repo.enqueue_job(_stub_job(run_id="leased-run", epoch=1))
+        repo.enqueue_dispatch(_stub_dispatch(run_id="leased-run", epoch=1))
         worker = _FastRenewalWorker(
-            config=_lease_config(lease=30), handler=DrainHandler(), job_repo=repo,
+            config=_lease_config(lease=30), handler=DrainHandler(), dispatch_repo=repo,
         )
         try:
             repo.renewed.clear()
@@ -73,7 +73,7 @@ class TestLeaseRenewalThread:
             )
             worker._lease_stop.clear()
             worker._running = True
-            worker._mark_inflight("leased-run", _stub_job(run_id="leased-run"))
+            worker._mark_inflight("leased-run", _stub_dispatch(run_id="leased-run"))
             worker._lease_thread.start()
             assert repo.renewed.wait(timeout=15.0)
         finally:
@@ -90,12 +90,12 @@ class TestLeaseRenewalThread:
             repo.verdicts["fenced-run"] = False
             handler = DrainHandler()
             worker = _FastRenewalWorker(
-                config=_lease_config(lease=30), handler=handler, job_repo=repo,
+                config=_lease_config(lease=30), handler=handler, dispatch_repo=repo,
             )
             worker._loop_ref = asyncio.get_running_loop()
             worker._lease_stop.clear()
             worker._running = True
-            worker._mark_inflight("fenced-run", _stub_job(run_id="fenced-run"))
+            worker._mark_inflight("fenced-run", _stub_dispatch(run_id="fenced-run"))
             worker._lease_thread = threading.Thread(
                 target=worker._lease_renewal_loop, daemon=True,
             )
@@ -117,18 +117,18 @@ class TestLeaseRenewalThread:
         assert "fenced-run" not in worker._inflight_snapshot()
 
     def test_renewal_continues_while_event_loop_blocked(self):
-        # No job enqueued: the poll loop claims nothing and never parks in
+        # No dispatch enqueued: the poll loop claims nothing and never parks in
         # handle_slice, leaving the lease thread as the only moving part.
         repo = _RenewingRepo()
         handler = DrainHandler()
         worker = _FastRenewalWorker(
-            config=_lease_config(lease=30), handler=handler, job_repo=repo,
+            config=_lease_config(lease=30), handler=handler, dispatch_repo=repo,
             interval=0.1,
         )
 
         async def run():
             await worker.startup()
-            worker._mark_inflight("blocked-run", _stub_job(run_id="blocked-run"))
+            worker._mark_inflight("blocked-run", _stub_dispatch(run_id="blocked-run"))
             await asyncio.to_thread(repo.renewed.wait, 15.0)
             repo.leases.clear()
             return worker
@@ -156,7 +156,7 @@ class TestLeaseThreadLifecycle:
             repo = _RenewingRepo()
             worker = _FastRenewalWorker(
                 config=_lease_config(lease=30), handler=DrainHandler(),
-                job_repo=repo,
+                dispatch_repo=repo,
             )
             await worker.startup()
             started = worker._lease_thread is not None and worker._lease_thread.is_alive()

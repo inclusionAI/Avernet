@@ -32,11 +32,11 @@ from agentclaw.community.core.agentswarm.domain import models as dm
 from agentclaw.community.core.agentswarm.repository import registry as om
 from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
 from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
-from agentclaw.community.core.agentswarm.repository.job import JobRepository
+from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
 from agentclaw.community.core.agentswarm.repository.message import MessageRepository
 from agentclaw.community.core.agentswarm.repository.round import RoundRepository
 from agentclaw.community.core.agentswarm.repository.run import RunRepository
-from agentclaw.community.core.agentswarm.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentswarm.repository.agent_result import AgentResultRepository
 from agentclaw.community.core.agentswarm.service import AgentSwarmService
 from agentclaw.community.core.agentswarm.service.protocols import (
     AgentSwarmRunNotPurgeableError, AgentSwarmSyncTimeoutError,
@@ -84,10 +84,10 @@ def _service(db, *, slice_max_seconds: float = 300.0) -> AgentSwarmService:
         ),
     )
     return AgentSwarmService(
-        run_repo=RunRepository(db), job_repo=JobRepository(db),
+        run_repo=RunRepository(db), dispatch_repo=RunDispatchRepository(db),
         agent_repo=AgentRepository(db), message_repo=MessageRepository(db),
         round_repo=RoundRepository(db), guard_repo=GuardEventRepository(db),
-        shard_repo=ResultShardRepository(db), config=config,
+        result_repo=AgentResultRepository(db), config=config,
     )
 
 
@@ -100,8 +100,8 @@ def _req(idempotency_key: str | None = None) -> SubmitRunRequest:
     )
 
 
-def _claim_one(job_repo: JobRepository, run_id: str) -> int:
-    claimed = job_repo.claim_batch("w1", [dm.TenantId(TENANT)], 10, 60)
+def _claim_one(dispatch_repo: RunDispatchRepository, run_id: str) -> int:
+    claimed = dispatch_repo.claim_batch("w1", [dm.TenantId(TENANT)], 10, 60)
     entry = next(c for c in claimed if c["run_id"] == dm.RunId(run_id))
     return entry["claim_epoch"]
 
@@ -182,7 +182,7 @@ class TestPurgeRunGuard:
     async def test_running_run_with_live_lease_is_refused(self, db):
         svc = _service(db)
         run_id = await svc.submit_async(_req(idempotency_key="purge-live"))
-        _claim_one(svc._job_repo, run_id)
+        _claim_one(svc._dispatch_repo, run_id)
 
         with pytest.raises(AgentSwarmRunNotPurgeableError) as caught:
             svc.purge_run(run_id, TENANT)
@@ -191,13 +191,13 @@ class TestPurgeRunGuard:
 
         assert svc.get_run(run_id, TENANT) is not None
         assert _count(db, om.AcAgentSwarmRunModel, run_id) == 1
-        assert _count(db, om.AcAgentSwarmJobModel, run_id) == 1
+        assert _count(db, om.AcAgentSwarmRunDispatchModel, run_id) == 1
 
     @pytest.mark.asyncio
     async def test_terminal_run_still_erases_rows(self, db):
         svc = _service(db)
         run_id = await svc.submit_async(_req(idempotency_key="purge-dead"))
-        epoch = _claim_one(svc._job_repo, run_id)
+        epoch = _claim_one(svc._dispatch_repo, run_id)
         assert svc._run_repo.update_status(
             dm.RunId(run_id), dm.TenantId(TENANT), dm.RunStatus.COMPLETED,
             termination_reason=dm.TerminationReason.FINISH,
@@ -206,8 +206,8 @@ class TestPurgeRunGuard:
 
         counts = svc.purge_run(run_id, TENANT)
         assert counts == {
-            "agents": 0, "messages": 0, "shards": 0, "rounds": 0,
-            "guards": 0, "jobs": 1, "run": 1,
+            "agents": 0, "messages": 0, "results": 0, "rounds": 0,
+            "guards": 0, "dispatches": 1, "run": 1,
         }
         assert svc.get_run(run_id, TENANT) is None
         assert svc.purge_run(run_id, TENANT) is None

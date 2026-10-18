@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from agentclaw.community.core.agentswarm.config.settings import AgentSwarmConfig
 from agentclaw.community.core.agentswarm.domain.models import (
-    Agent, AgentId, AgentKind, AgentStatus, BotState, DecisionKind, EpochMillis, Message, MessageId, MessageRole, ResultShard, Round, RoundId, Run, RunId, ShardId, TenantId, EventId, GuardEvent, GuardKind, EpochMillis,
+    Agent, AgentId, AgentKind, AgentStatus, BotState, DecisionKind, EpochMillis, Message, MessageId, MessageRole, AgentResult, Round, RoundId, Run, RunId, ResultId, TenantId, EventId, GuardEvent, GuardKind, EpochMillis,
 )
 from agentclaw.community.core.agentswarm.orchestration.state import RunState
 from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
@@ -16,7 +16,7 @@ from agentclaw.community.core.agentswarm.repository.agent_attempt import (
 )
 from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
 from agentclaw.community.core.agentswarm.repository.message import MessageRepository
-from agentclaw.community.core.agentswarm.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentswarm.repository.agent_result import AgentResultRepository
 from agentclaw.community.core.agentswarm.repository.round import RoundRepository
 from agentclaw.community.core.agentswarm.runtime.offload import run_blocking
 from agentclaw.community.core.agentswarm.runtime.slice_lost import SliceLost
@@ -47,14 +47,14 @@ class SliceStore:
     """Durable-slice persistence companion for SwarmRunHandler.
 
     Owns every repository write driven by slice execution: completion
-    materialization (agent status + result shard + assistant message, D24
+    materialization (agent status + agent result + assistant message, D24
     exactly-once), the per-attempt executor binding journal (D-K, D28
     claim-fenced), orchestrator decision messages (D18/D30), round rows,
     and terminal retention (D13). All writes are short sync repo calls —
     no await inside any orm_session (D19). Repo calls on the worker
     loop's async paths go through runtime.offload.run_blocking (a thread
     hop around each complete, session-scoped repo call — never inside a
-    session). ``get_shards`` and ``record_llm_exchange`` stay synchronous:
+    session). ``get_results`` and ``record_llm_exchange`` stay synchronous:
     the orchestrator invokes them through sync callbacks on the loop
     thread, so they cannot be awaited here.
     """
@@ -64,7 +64,7 @@ class SliceStore:
         config: AgentSwarmConfig,
         agent_repo: AgentRepository,
         message_repo: MessageRepository,
-        shard_repo: ResultShardRepository,
+        result_repo: AgentResultRepository,
         round_repo: RoundRepository,
         lost_probe: Callable[[], bool],
         guard_repo: "GuardEventRepository | None" = None,
@@ -73,7 +73,7 @@ class SliceStore:
         self._config = config
         self._agent_repo = agent_repo
         self._message_repo = message_repo
-        self._shard_repo = shard_repo
+        self._result_repo = result_repo
         self._round_repo = round_repo
         self._lost_probe = lost_probe
         self._guard_repo = guard_repo
@@ -98,7 +98,7 @@ class SliceStore:
             tenant=run.tenant,
             stage_index=stage_index,
             orchestrator_steps=1,
-            max_subagent_steps=0,
+            slowest_attempt_steps=0,
             cohort_agent_ids=tuple(cohort),
             started_at=EpochMillis(_now_ms()),
         ))
@@ -132,7 +132,7 @@ class SliceStore:
             raise SliceLost()
         if status is AgentStatus.COMPLETED:
             await self._record_injection(run_id, tenant, agent_id, payload)
-            await self._create_shard(run_id, tenant, agent_id, payload,
+            await self._create_result(run_id, tenant, agent_id, payload,
                                      artifact_key, state)
 
         content: dict[str, Any] = {"status": status.value}
@@ -155,7 +155,7 @@ class SliceStore:
         """Write-ahead the attempt's binding INTENT, before setup().
 
         Fencing mirrors ``persist_completion`` exactly: the intent insert
-        rides the D28 claim fence (the job row's CURRENT claim_epoch) and
+        rides the D28 claim fence (the dispatch row's CURRENT claim_epoch) and
         a fenced-out stale slice unwinds as ``SliceLost`` instead of
         journaling for a dead claim — so a lost claim never provisions a
         persona either. ``record_agent_binding`` (post-setup) is the
@@ -220,7 +220,7 @@ class SliceStore:
         Write ordering is D-L: the call happens after ``subagent.setup()``
         returned, so the executor identity is real. Fencing mirrors
         ``persist_completion`` exactly — the settlement rides the D28
-        claim fence (the job row's CURRENT claim_epoch), and a fenced-out
+        claim fence (the dispatch row's CURRENT claim_epoch), and a fenced-out
         stale slice unwinds as ``SliceLost`` instead of corrupting the
         journal. After the ledger row lands, the legacy
         ``ac_agent_swarm_agent.bot_id/bot_state`` columns get the LATEST
@@ -292,23 +292,23 @@ class SliceStore:
                 ),
             )
 
-    async def _create_shard(self, run_id: RunId, tenant: TenantId, agent_id: AgentId,
+    async def _create_result(self, run_id: RunId, tenant: TenantId, agent_id: AgentId,
                             payload: Any, artifact_key: Any,
                             state: RunState | None) -> None:
         if (payload is None) == (artifact_key is None):
-            # D31 XOR violated upstream; refuse to persist a malformed shard.
+            # D31 XOR violated upstream; refuse to persist a malformed result.
             logger.error(
-                "[agentswarm][swarm] refusing shard agent=%s: payload/artifact_key not XOR",
+                "[agentswarm][swarm] refusing result agent=%s: payload/artifact_key not XOR",
                 agent_id,
             )
             return
         if await run_blocking(
-            self._shard_repo.get_by_run_agent, run_id, agent_id, tenant,
+            self._result_repo.get_by_run_agent, run_id, agent_id, tenant,
         ) is not None:
-            # D24: exactly-once side effects — never duplicate a persisted shard.
+            # D24: exactly-once side effects — never duplicate a persisted result.
             return
-        await run_blocking(self._shard_repo.create, ResultShard(
-            id=ShardId(uuid.uuid4().hex),
+        await run_blocking(self._result_repo.create, AgentResult(
+            id=ResultId(uuid.uuid4().hex),
             run_id=run_id,
             tenant=tenant,
             source_agent_id=agent_id,
@@ -317,7 +317,7 @@ class SliceStore:
             routed_at=EpochMillis(_now_ms()),
         ))
         if state is not None:
-            state.routed_shard_count += 1
+            state.routed_result_count += 1
 
     def _new_message(self, run_id: RunId, tenant: TenantId, agent_id: AgentId,
                      role: MessageRole, content: Any,
@@ -355,7 +355,7 @@ class SliceStore:
                             decision_dict, token_usage=token_usage)
 
     def apply_run_retention_blocking(self, run_id: RunId, tenant: TenantId) -> None:
-        # D13: on terminal, keep the per-agent tail plus shard-referenced rows.
+        # D13: on terminal, keep the per-agent tail plus result-referenced rows.
         # Sync core: the worker's force_stuck/force_fail run on a to_thread
         # worker thread already, off the event loop.
         tail = self._config.message_retention_tail
@@ -370,28 +370,28 @@ class SliceStore:
 
     async def unsatisfied_refs(self, run_id: RunId, tenant: TenantId,
                                 refs: tuple[str, ...]) -> tuple[str, ...]:
-        shard_names = set()
+        result_names = set()
         for agent in await run_blocking(self._agent_repo.list_by_run, run_id, tenant):
             if await run_blocking(
-                self._shard_repo.get_by_run_agent,
+                self._result_repo.get_by_run_agent,
                 run_id, agent.agent_id, tenant,
             ) is not None:
-                shard_names.add(agent.name)
-        return tuple(ref for ref in refs if ref not in shard_names)
+                result_names.add(agent.name)
+        return tuple(ref for ref in refs if ref not in result_names)
 
     async def first_failed_wait_ref(self, run_id: RunId, tenant: TenantId,
                                     refs: tuple[str, ...]) -> dict[str, Any] | None:
         """The first unsatisfiable wait ref: its agent is terminal FAILED.
 
         An agent blocks a wait ref when its row is terminal FAILED and no
-        shard exists for it — FAILED rows never grow a shard
+        result exists for it — FAILED rows never grow a result
         (``persist_completion``), so every such ref can only be satisfied
         by a spawn that will never be scheduled (no respawn/supersede
         exists). The one exception is ``error='slice_lost'``: that FAILED
         row is a reclaimed claim (a transient reclaim artifact, not a dead
         branch), and ``rehydrate`` revives it so the rescheduled slice
         respawns the agent under its D16 identity — the ref stays
-        satisfiable and must not fail the run. A shard-checked
+        satisfiable and must not fail the run. A result-checked
         COMPLETE-side agent and any non-FAILED agent stay quiet: a dead
         optional branch must not kill a would-succeed run.
 
@@ -416,7 +416,7 @@ class SliceStore:
                 # satisfiable and must not fail the run.
                 continue
             if await run_blocking(
-                self._shard_repo.get_by_run_agent,
+                self._result_repo.get_by_run_agent,
                 run_id, agent.agent_id, tenant,
             ) is not None:
                 continue
@@ -430,18 +430,18 @@ class SliceStore:
 
     async def first_slice_lost_wait_ref(self, run_id: RunId, tenant: TenantId,
                                         refs: tuple[str, ...]) -> dict[str, Any] | None:
-        """The first unsatisfied wait ref whose agent is a shardless FAILED
+        """The first unsatisfied wait ref whose agent is a resultless FAILED
         ``slice_lost`` row — the in-slice-wait deadlock signal.
 
         Mirror of ``first_failed_wait_ref`` with the ONE predicate inverted:
-        fires ONLY on ``error == 'slice_lost'`` shardless FAILED rows. Such a
+        fires ONLY on ``error == 'slice_lost'`` resultless FAILED rows. Such a
         row is revivable by the *rehydrate prologue* (D16), but the IN-SLICE
         wait can never satisfy it (the respawn re-fences at the current claim
         epoch). Returning this ref lets ``_await_refs`` force an immediate
         reschedule instead of blocking to the slice deadline.
 
         Returns ``{"agent_id", "name", "attempts", "error"}`` of the first
-        shardless FAILED slice_lost agent on a waited ref, else None.
+        resultless FAILED slice_lost agent on a waited ref, else None.
         """
         if not refs:
             return None
@@ -453,7 +453,7 @@ class SliceStore:
                     or agent.error != _SLICE_LOST_ERROR):
                 continue
             if await run_blocking(
-                self._shard_repo.get_by_run_agent,
+                self._result_repo.get_by_run_agent,
                 run_id, agent.agent_id, tenant,
             ) is not None:
                 continue
@@ -478,17 +478,17 @@ class SliceStore:
         }
         return tuple(r for r in refs if r not in known)
 
-    def get_shards(self, run_id: RunId, tenant: TenantId) -> list[dict[str, Any]]:
-        # Sync path: the orchestrator invokes shard_getter as a sync
+    def get_results(self, run_id: RunId, tenant: TenantId) -> list[dict[str, Any]]:
+        # Sync path: the orchestrator invokes result_getter as a sync
         # callback on the loop thread.
         agents = {a.agent_id: a.name for a in self._agent_repo.list_by_run(run_id, tenant)}
-        shards = self._shard_repo.list_by_run(run_id, tenant)
+        results = self._result_repo.list_by_run(run_id, tenant)
         return [
             {
                 "agent": agents.get(s.source_agent_id, s.source_agent_id),
                 "result": s.payload if s.payload is not None else f"artifact://{s.artifact_key}",
             }
-            for s in shards
+            for s in results
         ]
 
     async def rehydrate(self, run: Run, claim_epoch: int = 0) -> tuple[RunState, set[tuple[str, str]], list[Agent]]:
@@ -500,18 +500,18 @@ class SliceStore:
             self._agent_repo.list_by_run, run.run_id, run.tenant,
         )
         state.total_agents_spawned = len(agents)
-        state.routed_shard_count = len(
-            await run_blocking(self._shard_repo.list_by_run, run.run_id, run.tenant)
+        state.routed_result_count = len(
+            await run_blocking(self._result_repo.list_by_run, run.run_id, run.tenant)
         )
 
         done_pairs: set[tuple[str, str]] = set()
         interrupted: list[Agent] = []
         for agent in agents:
-            shard = await run_blocking(
-                self._shard_repo.get_by_run_agent,
+            result = await run_blocking(
+                self._result_repo.get_by_run_agent,
                 run.run_id, agent.agent_id, run.tenant,
             )
-            if shard is None:
+            if result is None:
                 # A FAILED slice_lost row is a reclaim artifact the peer
                 # must respawn; a FAILED row with any other error stays
                 # terminal (genuine failure -> run fails, no wedge).
@@ -527,7 +527,7 @@ class SliceStore:
                                 self._attempt_repo.count_agent_provisionings,
                                 run.run_id, run.tenant, agent.agent_id,
                             )
-                            if burned >= self._config.orchestration.subagent_max_attempts:
+                            if burned >= self._config.orchestration.agent_max_attempts:
                                 # A poison agent that already burned its
                                 # whole provisioning budget (the ledger rows
                                 # ARE the DB-recorded retry history) must
@@ -539,17 +539,17 @@ class SliceStore:
                                     "[agentswarm][swarm] revive cap reached "
                                     "agent=%s name=%s burned=%d max=%d",
                                     agent.agent_id, agent.name, burned,
-                                    self._config.orchestration.subagent_max_attempts,
+                                    self._config.orchestration.agent_max_attempts,
                                 )
                                 continue
                         # Un-poison the row before this slice waits on it:
                         # left FAILED, the in-slice wait classifies the very
-                        # ref this slice respawned as shardless slice_lost,
+                        # ref this slice respawned as resultless slice_lost,
                         # fires the reschedule sentinel on it, and loops the
                         # run to D40 before the respawn can complete. Flip
                         # the row back to a RUNNING in-flight state under
                         # the claim fence (same fenced idempotent-write
-                        # shape as the shard-present QUEUED->COMPLETED
+                        # shape as the result-present QUEUED->COMPLETED
                         # flip); error=None is update_status's
                         # leave-unchanged contract — the status flip is
                         # what un-classifies the ref.
@@ -580,8 +580,8 @@ class SliceStore:
                     run.run_id, agent.agent_id, run.tenant,
                     AgentStatus.COMPLETED.value,
                     output=agent_output(
-                        shard.payload if shard.payload is not None else None,
-                        shard.artifact_key,
+                        result.payload if result.payload is not None else None,
+                        result.artifact_key,
                     ),
                     claim_epoch=claim_epoch,
                 )

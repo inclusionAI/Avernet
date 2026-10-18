@@ -3,8 +3,8 @@
 Retention is store-scoped on purpose: the sweeper never reads the database,
 so it inherits no tenancy rules — artifact keys already embed the run identity
 (``{run_id}/{agent_id}/result``, the only format
-``SubagentRuntime._mk_result`` writes today), and a result shard older than
-the TTL can no longer be resumed by any slice (D34 rehydration reads shards
+``SubagentRuntime._mk_result`` writes today), and an agent result older than
+the TTL can no longer be resumed by any slice (D34 rehydration reads results
 while runs are live, so the TTL must cover the active-run horizon generously
 relative to a run's deadline). Age comes from the store's own listing and mtime
 seam (:class:`RetentionScanner`), deletion from the store's own guard-raised
@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 _DAY_SECONDS = 86400.0
 
 # The only conformant artifact-key format today: SubagentRuntime writes
-# ``{run_id}/{agent_id}/result`` for spilled subagent results. Anything else
+# ``{run_id}/{agent_id}/result`` for spilled results. Anything else
 # in the root is foreign state (temp/inflight files, operator residue) and
 # must be skipped, not guessed at.
 _KEY_FORMAT = re.compile(r"^[^/]+/[^/]+/result$")

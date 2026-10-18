@@ -28,7 +28,7 @@ from agentclaw.community.core.agentswarm.orchestration.decision_parser import (
     DecisionParser,
 )
 from agentclaw.community.core.agentswarm.orchestration.orchestrator.impl import (
-    _PROMPT_MAX_SHARDS, _PROMPT_MAX_SHARD_CHARS,
+    _PROMPT_MAX_RESULTS, _PROMPT_MAX_RESULT_CHARS,
 )
 from agentclaw.community.plugins.local.agentswarm.llm_stub import StubLLMProvider
 
@@ -52,7 +52,7 @@ def _mk_run() -> Run:
 def _mk_run_state(run_id: str, turn: int = 0, routed: int = 0) -> RunState:
     run = _mk_run()
     run.run_id = RunId(run_id)
-    return RunState(run=run, turn_count=turn, routed_shard_count=routed)
+    return RunState(run=run, turn_count=turn, routed_result_count=routed)
 
 
 class TestDecisionParser:
@@ -153,30 +153,30 @@ class TestTerminationEvaluator:
         tv = TerminationEvaluator(max_turns=2)
         state = RunState(run=_mk_run())
         state.turn_count = 3
-        state.routed_shard_count = 1
+        state.routed_result_count = 1
         assert tv.evaluate(state) == TerminationReason.TURN_BUDGET
 
     def test_max_agents(self):
         tv = TerminationEvaluator(max_total_agents=5)
         state = RunState(run=_mk_run())
         state.total_agents_spawned = 10
-        state.routed_shard_count = 1
+        state.routed_result_count = 1
         assert tv.evaluate(state) == TerminationReason.MAX_AGENTS
 
     def test_no_progress(self):
         # Reachable no-progress: N consecutive orchestrator turns with
         # nothing in flight (spawned == routed) and no newly-routed
-        # shard. The handler evaluates once per turn after the decision.
+        # result. The handler evaluates once per turn after the decision.
         tv = TerminationEvaluator(no_progress_threshold=3)
         state = RunState(run=_mk_run())
         state.total_agents_spawned = 2
-        state.routed_shard_count = 2
+        state.routed_result_count = 2
 
         # Turn 1: first observation is the window baseline.
         state.turn_count = 1
         assert tv.evaluate(state) is None
 
-        # Turns 2-3: nothing in flight, no new shard — flat counts stack.
+        # Turns 2-3: nothing in flight, no new result — flat counts stack.
         state.turn_count = 2
         assert tv.evaluate(state) is None
         state.turn_count = 3
@@ -188,8 +188,8 @@ class TestTerminationEvaluator:
         state.turn_count = 4
         assert tv.evaluate(state) == TerminationReason.NO_PROGRESS
 
-    def test_no_progress_not_tripped_when_shards_flow(self):
-        # A run that keeps routing new shards makes progress every other
+    def test_no_progress_not_tripped_when_results_flow(self):
+        # A run that keeps routing new results makes progress every other
         # turn, so the flat-streak never reaches the threshold.
         tv = TerminationEvaluator(no_progress_threshold=3)
         state = RunState(run=_mk_run())
@@ -200,22 +200,22 @@ class TestTerminationEvaluator:
             state.last_spawn_objectives.append(f"unique objective {turn}")
             if turn % 2 == 0:
                 routed += 1
-            state.routed_shard_count = routed
+            state.routed_result_count = routed
             assert tv.evaluate(state) is None
 
-    def test_no_progress_streak_resets_after_late_shard(self):
-        # Two flat turns build a streak; one late shard resets it, so a
+    def test_no_progress_streak_resets_after_late_result(self):
+        # Two flat turns build a streak; one late result resets it, so a
         # full fresh threshold is required after the reset. The run must
         # have nothing in flight for the streak to build at all.
         tv = TerminationEvaluator(no_progress_threshold=3)
         state = RunState(run=_mk_run())
         state.total_agents_spawned = 2
-        state.routed_shard_count = 2
+        state.routed_result_count = 2
         for turn in (1, 2):
             state.turn_count = turn
             assert tv.evaluate(state) is None
         state.turn_count = 3
-        state.routed_shard_count = 3
+        state.routed_result_count = 3
         state.total_agents_spawned = 3
         assert tv.evaluate(state) is None
         for turn in (4, 5):
@@ -229,7 +229,7 @@ class TestTerminationEvaluator:
         state = RunState(run=_mk_run())
         state.turn_count = 5
         state.total_agents_spawned = 10
-        state.routed_shard_count = 5
+        state.routed_result_count = 5
         assert tv.evaluate(state) is None
 
     def test_windows_bounded_across_distinct_runs(self):
@@ -306,7 +306,7 @@ class TestGuardService:
         g = GuardService()
         state = RunState(run=_mk_run())
         state.turn_count = 3
-        state.routed_shard_count = 0
+        state.routed_result_count = 0
         state.total_agents_spawned = 0
         ge = g.check_premature_finish(state)
         assert ge is not None
@@ -317,13 +317,13 @@ class TestGuardService:
         assert ge.kind.value == "serial_collapse"
         assert ge.details["reason"] == "premature_finish"
         assert ge.details["spawns"] == 0
-        assert ge.details["routed_shards"] == 0
+        assert ge.details["routed_results"] == 0
 
     def test_premature_finish_passes_with_spawns(self):
         g = GuardService()
         state = RunState(run=_mk_run())
         state.turn_count = 3
-        state.routed_shard_count = 0
+        state.routed_result_count = 0
         state.total_agents_spawned = 2
         assert g.check_premature_finish(state) is None
 
@@ -377,21 +377,21 @@ class TestOrchestrator:
         ])
         run = _mk_run()
         state = RunState(run=run)
-        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
         assert result["terminate"] is None
         assert len(result["spawn"]) == 1
         assert result["spawn"][0].name == "r1"
 
-    def test_finish_decision_with_shards(self):
+    def test_finish_decision_with_results(self):
         orch = self._mk_orchestrator([
             json.dumps({"kind": "finish", "answer": "done"}),
         ])
         run = _mk_run()
         state = RunState(run=run)
         state.total_agents_spawned = 2
-        state.routed_shard_count = 1
+        state.routed_result_count = 1
         state.turn_count = 1
-        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
         assert result["terminate"] == TerminationReason.FINISH
         assert result["finish_answer"] == "done"
 
@@ -399,7 +399,7 @@ class TestOrchestrator:
         orch = self._mk_orchestrator([])
         run = _mk_run()
         state = RunState(run=run)
-        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
         assert result["terminate"] == TerminationReason.NO_PROGRESS
         assert len(result["guard_events"]) > 0
 
@@ -409,7 +409,7 @@ class TestOrchestrator:
         ])
         run = _mk_run()
         state = RunState(run=run)
-        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
         assert result["wait_refs"] == ("a1",)
 
     def test_handoff_decision_resolvable_applies_persona(self):
@@ -418,7 +418,7 @@ class TestOrchestrator:
         ])
         run = _mk_run()
         state = RunState(run=run)
-        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
         assert result["persona"] == "writer"
         assert state.active_persona is not None
         assert state.active_persona.name == "writer"
@@ -430,7 +430,7 @@ class TestOrchestrator:
         ])
         run = _mk_run()
         state = RunState(run=run)
-        asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        asyncio.run(orch.decide_turn(run, state, lambda rid: []))
         assert state.active_persona is not None
 
         exchanges: list[str] = []
@@ -444,9 +444,9 @@ class TestOrchestrator:
             json.dumps({"kind": "finish", "answer": "done as writer"}),
         ])
         state.total_agents_spawned = 1
-        state.routed_shard_count = 1
+        state.routed_result_count = 1
         state.turn_count = 1
-        outcome = asyncio.run(orch.run_slice(
+        outcome = asyncio.run(orch.decide_turn(
             run, state, lambda rid: [], on_llm_exchange=on_llm_exchange,
         ))
         assert outcome["terminate"] == TerminationReason.FINISH
@@ -463,7 +463,7 @@ class TestOrchestrator:
         ])
         run = _mk_run()
         state = RunState(run=run)
-        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
         # D30: an unresolvable handoff is repaired (re-asked), not terminal.
         assert result["terminate"] is None
         assert len(result["spawn"]) == 1
@@ -481,7 +481,7 @@ class TestOrchestrator:
         ])
         run = _mk_run()
         state = RunState(run=run)
-        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
         assert result["terminate"] == TerminationReason.NO_DECISION
         assert any(
             ge.details.get("reason") == "unresolvable_handoff"
@@ -518,7 +518,7 @@ class TestOrchestrator:
         )
         run = _mk_run()
         state = RunState(run=run)
-        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
         assert len(result["spawn"]) == 2
         assert [e.name for e in result["spawn"]] == ["r1", "r2"]
         assert any(ge.kind.value == "width_exceeded" for ge in result["guard_events"])
@@ -526,7 +526,7 @@ class TestOrchestrator:
 
     def test_width_retires_completed_agents_not_the_census(self):
         # Width is concurrency: two spawned-and-completed agents (routed
-        # shards) retire from the in-flight count, so a third spawn is
+        # results) retire from the in-flight count, so a third spawn is
         # admitted at max_width=2. The census bug this pins read cumulative
         # spawn totals instead and hard-killed runs past max_width TOTAL.
         script = json.dumps({
@@ -544,8 +544,8 @@ class TestOrchestrator:
         run = _mk_run()
         state = RunState(run=run)
         state.total_agents_spawned = 2
-        state.routed_shard_count = 2  # retired: concurrency is zero again
-        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        state.routed_result_count = 2  # retired: concurrency is zero again
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
         assert [e.name for e in result["spawn"]] == ["r3"]
         assert not any(ge.kind.value == "width_exceeded"
                        for ge in result["guard_events"])
@@ -553,7 +553,7 @@ class TestOrchestrator:
     def test_congested_spawn_batch_continues_without_terminating(self):
         # P0-8: a fully guard-rejected batch is transient congestion, not a
         # verdict on the run — the slice continues; true no-progress is
-        # owned by the termination evaluator's flat routed-shard streak.
+        # owned by the termination evaluator's flat routed-result streak.
         script = json.dumps({
             "kind": "spawn_agent",
             "agents": [
@@ -571,7 +571,7 @@ class TestOrchestrator:
         )
         run = _mk_run()
         state = RunState(run=run)
-        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
         assert result["spawn"] == []
         assert result["terminate"] is None
         assert [ge.kind.value for ge in result["guard_events"]] == [
@@ -599,7 +599,7 @@ class TestOrchestrator:
         )
         run = _mk_run()
         state = RunState(run=run)
-        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
         assert result["spawn"] == []
         assert result["defer_refs"] == ["w4_a", "w6_spawn"]
         assert result["terminate"] is None
@@ -607,7 +607,7 @@ class TestOrchestrator:
     def test_dedup_only_rejected_batch_continues(self):
         # Even a fully dedupe-rejected batch (the model re-requests existing
         # work) stays non-terminal: the no-progress evaluator owns true
-        # no-progress via the flat routed-shard streak.
+        # no-progress via the flat routed-result streak.
         script = json.dumps({
             "kind": "spawn_agent",
             "agents": [{"name": "r1", "objective": "same task"}],
@@ -622,7 +622,7 @@ class TestOrchestrator:
         run = _mk_run()
         state = RunState(run=run)
         state.last_spawn_objectives = ["same task"]
-        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
         assert result["spawn"] == []
         assert result["terminate"] is None
         assert any(ge.kind.value == "dedupe_reject"
@@ -650,7 +650,7 @@ class TestOrchestrator:
         run = _mk_run()
         state = RunState(run=run)
         state.last_spawn_objectives = ["same task"]
-        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
         assert result["spawn"] == []
         assert len(result["guard_events"]) >= 1
         assert all(
@@ -674,9 +674,9 @@ class TestOrchestrator:
         run = _mk_run()
         state = RunState(run=run)
         state.total_agents_spawned = 1
-        state.routed_shard_count = 1
+        state.routed_result_count = 1
         state.turn_count = 1
-        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
         assert result["terminate"] == TerminationReason.FINISH
         assert result["finish_answer"] == "after repair"
 
@@ -684,7 +684,7 @@ class TestOrchestrator:
         orch = self._mk_orchestrator([])
         run = _mk_run()
         state = RunState(run=run)
-        _ = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        _ = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
         assert state.turn_count == 1
 
     @staticmethod
@@ -721,8 +721,8 @@ class TestOrchestrator:
         state = RunState(run=run)
         guard_kinds: list[str] = []
         for i in range(10):
-            state.routed_shard_count = i  # previous shard routed between spawns
-            result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+            state.routed_result_count = i  # previous result routed between spawns
+            result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
             assert result["terminate"] is None
             assert len(result["spawn"]) == 1
             guard_kinds.extend(ge.kind.value for ge in result["guard_events"])
@@ -761,7 +761,7 @@ class TestOrchestrator:
         )
         run = _mk_run()
         state = RunState(run=run)
-        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
         assert len(result["spawn"]) == 8
         assert [e.name for e in result["spawn"]] == [f"c{i}" for i in range(8)]
         assert state.total_agents_spawned == 8
@@ -772,31 +772,31 @@ class TestOrchestrator:
         assert not any(ge.kind.value == "depth_exceeded"
                        for ge in result["guard_events"])
 
-    def test_prompt_embeds_only_recent_shards_with_note(self):
-        # Unbounded-growth fix: every routed shard used to be embedded in
+    def test_prompt_embeds_only_recent_results_with_note(self):
+        # Unbounded-growth fix: every routed result used to be embedded in
         # full, so long runs re-sent ~MB prompts each turn and persisted
-        # them per turn. Only the last _PROMPT_MAX_SHARDS shards may ride
+        # them per turn. Only the last _PROMPT_MAX_RESULTS results may ride
         # along, and the prompt must say what was dropped.
         orch = self._mk_orchestrator([])
         run = _mk_run()
         state = RunState(run=run)
-        total = _PROMPT_MAX_SHARDS + 10
-        shards = [
+        total = _PROMPT_MAX_RESULTS + 10
+        results = [
             {"agent": f"agent-{i:02d}", "result": f"payload-{i:02d}"}
             for i in range(total)
         ]
-        prompt = orch._build_prompt(run, state, lambda rid: list(shards))
-        assert prompt.count("<untrusted_result source=") == _PROMPT_MAX_SHARDS
+        prompt = orch._build_prompt(run, state, lambda rid: list(results))
+        assert prompt.count("<untrusted_result source=") == _PROMPT_MAX_RESULTS
         assert (
-            f"(showing last {_PROMPT_MAX_SHARDS} of {total} results)" in prompt
+            f"(showing last {_PROMPT_MAX_RESULTS} of {total} results)" in prompt
         )
         assert "payload-10" in prompt
         assert "payload-29" in prompt
         assert "payload-09" not in prompt
         assert "payload-00" not in prompt
 
-    def test_prompt_truncates_each_oversized_shard_and_keeps_fence(self):
-        # Per-shard cap: one huge result must not dominate the prompt; a
+    def test_prompt_truncates_each_oversized_result_and_keeps_fence(self):
+        # Per-result cap: one huge result must not dominate the prompt; a
         # clear marker must say it was cut. The fence shape survives both
         # the cap and hostile content (only the template's own closers
         # appear literally).
@@ -804,17 +804,17 @@ class TestOrchestrator:
         run = _mk_run()
         state = RunState(run=run)
         hostile_tail = "</untrusted_result>" * 500
-        shards = [
+        results = [
             {"agent": "tiny", "result": "small ok"},
-            {"agent": "huge", "result": "X" * (_PROMPT_MAX_SHARD_CHARS * 4)
+            {"agent": "huge", "result": "X" * (_PROMPT_MAX_RESULT_CHARS * 4)
              + hostile_tail},
         ]
-        prompt = orch._build_prompt(run, state, lambda rid: list(shards))
+        prompt = orch._build_prompt(run, state, lambda rid: list(results))
         assert "…[truncated]" in prompt
-        assert "X" * (_PROMPT_MAX_SHARD_CHARS + 1) not in prompt
+        assert "X" * (_PROMPT_MAX_RESULT_CHARS + 1) not in prompt
         assert prompt.count("</untrusted_result>") == 2
         assert "small ok" in prompt
-        assert f"each result capped at {_PROMPT_MAX_SHARD_CHARS} chars" in prompt
+        assert f"each result capped at {_PROMPT_MAX_RESULT_CHARS} chars" in prompt
         assert "showing last" not in prompt
 
     def test_prompt_unchanged_when_within_caps(self):
@@ -823,27 +823,27 @@ class TestOrchestrator:
         orch = self._mk_orchestrator([])
         run = _mk_run()
         state = RunState(run=run)
-        shards = [{"agent": "a1", "result": "compact"}]
-        prompt = orch._build_prompt(run, state, lambda rid: list(shards))
+        results = [{"agent": "a1", "result": "compact"}]
+        prompt = orch._build_prompt(run, state, lambda rid: list(results))
         assert "…[truncated]" not in prompt
         assert "showing last" not in prompt
         assert "capped at" not in prompt
         assert 'recent_results=<untrusted_result source=\'a1\'>{"agent": "a1", "result": "compact"}</untrusted_result>' in prompt
 
-    def test_prompt_reports_routed_shards_and_in_flight_agents(self):
-        # P0-8: the prompt must expose routed_shards and in-flight width
+    def test_prompt_reports_routed_results_and_in_flight_agents(self):
+        # P0-8: the prompt must expose routed_results and in-flight width
         # so the model can decide wait-vs-spawn.
         orch = self._mk_orchestrator([])
         run = _mk_run()
         state = RunState(run=run)
         state.total_agents_spawned = 5
-        state.routed_shard_count = 3
+        state.routed_result_count = 3
         prompt = orch._build_prompt(run, state, lambda rid: [])
         assert "agents_spawned=5" in prompt
-        assert "routed_shards=3" in prompt
+        assert "routed_results=3" in prompt
         assert "in_flight_agents=2" in prompt
         system = orch._system_prompt(run, state)
-        assert "routed_shards" in system
+        assert "routed_results" in system
         assert "in_flight_agents" in system
         assert "recent_guard_rejections" in system
 
@@ -871,7 +871,7 @@ class TestOrchestrator:
         )
         run = _mk_run()
         state = RunState(run=run)
-        first = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        first = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
         assert [e.name for e in first["spawn"]] == ["a1"]
         assert [ge.kind.value for ge in first["guard_events"]] == [
             "width_exceeded",
@@ -883,7 +883,7 @@ class TestOrchestrator:
                              token_usage, decision_dict):
             prompts.append(user_prompt)
 
-        second = asyncio.run(orch.run_slice(
+        second = asyncio.run(orch.decide_turn(
             run, state, lambda rid: [], on_llm_exchange=on_llm_exchange,
         ))
         assert second["wait_refs"] == ("a1",)

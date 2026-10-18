@@ -5,7 +5,7 @@
   and on a host outside the configured allowlist.
 - PII classification: family patterns detect, dedupe and redact.
 - Prompt injection: markers detect; a poisoned subagent output is
-  persisted as a shard AND recorded as a prompt_injection guard event;
+  persisted as a result AND recorded as a prompt_injection guard event;
   the orchestrator prompt carries the untrusted-result data fence.
 - Hard erasure: purge_run physically deletes every row of the run
   across the six content tables while the append-only audit trail is
@@ -33,9 +33,9 @@ from agentclaw.community.plugins.local.agentswarm.llm_openai import OpenAICompat
 from agentclaw.community.core.agentswarm.repository import registry as om
 from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
 from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
-from agentclaw.community.core.agentswarm.repository.job import JobRepository
+from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
 from agentclaw.community.core.agentswarm.repository.message import MessageRepository
-from agentclaw.community.core.agentswarm.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentswarm.repository.agent_result import AgentResultRepository
 from agentclaw.community.core.agentswarm.repository.round import RoundRepository
 from agentclaw.community.core.agentswarm.runtime.store import SliceStore
 from agentclaw.community.core.agentswarm.runtime.security import (
@@ -151,7 +151,7 @@ class TestPromptInjectionDetection:
         db = _db()
         agent_repo = AgentRepository(db)
         message_repo = MessageRepository(db)
-        shard_repo = ResultShardRepository(db)
+        result_repo = AgentResultRepository(db)
         round_repo = RoundRepository(db)
         guard_repo = GuardEventRepository(db)
         store = SliceStore(
@@ -160,7 +160,7 @@ class TestPromptInjectionDetection:
                 orchestration=AgentSwarmOrchestrationConfig(),
                 drain=AgentSwarmDrainConfig(),
             ),
-            agent_repo, message_repo, shard_repo, round_repo,
+            agent_repo, message_repo, result_repo, round_repo,
             lost_probe=lambda: False,
             guard_repo=guard_repo,
         )
@@ -177,12 +177,12 @@ class TestPromptInjectionDetection:
             idempotency_key=dm.IdempotencyKey("k"), output={},
         )
         agent_repo.create(agent)
-        # persist_completion is claim-fenced (D28): claim the durable job
-        # row so the completion write lands on the job's current epoch.
-        JobRepository(db).enqueue(
+        # persist_completion is claim-fenced (D28): claim the durable dispatch
+        # row so the completion write lands on the dispatch's current epoch.
+        RunDispatchRepository(db).enqueue(
             run_id=run.run_id, tenant=TENANT, deadline_seconds=3600,
         )
-        claim_epoch = JobRepository(db).claim_batch(
+        claim_epoch = RunDispatchRepository(db).claim_batch(
             "security-worker", [TENANT], 1, 60,
         )[0]["claim_epoch"]
         poison = (
@@ -196,8 +196,8 @@ class TestPromptInjectionDetection:
             "idempotency_key": "k", "result": poison, "artifact_key": None,
             "token_usage": dm.TokenUsage(),
         }, claim_epoch=claim_epoch))
-        shard = shard_repo.get_by_run_agent(run.run_id, agent.agent_id, TENANT)
-        assert shard is not None and shard.payload == poison
+        result = result_repo.get_by_run_agent(run.run_id, agent.agent_id, TENANT)
+        assert result is not None and result.payload == poison
         markers = {g.details.get("marker") for g in guard_repo.list_by_run(
             run.run_id, TENANT)}
         assert "ignore_instructions" in markers
@@ -235,10 +235,10 @@ class TestHardErasureAndClassification:
 
     def _svc(self, db, env):
         return AgentSwarmService(
-            run_repo=env.run_repo, job_repo=env.job_repo,
+            run_repo=env.run_repo, dispatch_repo=env.dispatch_repo,
             agent_repo=env.agent_repo, message_repo=env.message_repo,
             round_repo=env.round_repo, guard_repo=env.guard_repo,
-            shard_repo=env.shard_repo, config=env.cfg,
+            result_repo=env.result_repo, config=env.cfg,
         )
 
     def test_purge_run_erases_every_row_and_missing_stays_none(self):
@@ -276,28 +276,28 @@ class TestHardErasureAndClassification:
             agent_id=agent.agent_id, seq=0, role=dm.MessageRole.ASSISTANT,
             content="contact a@b.com",
         ))
-        env.shard_repo.create(dm.ResultShard(
-            id=dm.ShardId("s-1"), run_id=run.run_id, tenant=TENANT,
+        env.result_repo.create(dm.AgentResult(
+            id=dm.ResultId("s-1"), run_id=run.run_id, tenant=TENANT,
             source_agent_id=agent.agent_id, payload={"done": True},
             artifact_key=None, routed_at=dm.EpochMillis(1),
         ))
         env.round_repo.create(dm.Round(
             id=dm.RoundId("r-1"), run_id=run.run_id, tenant=TENANT,
-            stage_index=0, orchestrator_steps=1, max_subagent_steps=1,
+            stage_index=0, orchestrator_steps=1, slowest_attempt_steps=1,
             cohort_agent_ids=(agent.agent_id,),
             started_at=dm.EpochMillis(1),
         ))
-        env.job_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=60)
+        env.dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=60)
 
         counts = svc.purge_run(run.run_id, TENANT)
         assert counts == {
-            "agents": 1, "messages": 1, "shards": 1, "rounds": 1,
-            "guards": 0, "jobs": 1, "run": 1,
+            "agents": 1, "messages": 1, "results": 1, "rounds": 1,
+            "guards": 0, "dispatches": 1, "run": 1,
         }
         assert env.run_repo.get(run.run_id, TENANT) is None
         assert env.agent_repo.list_by_run(run.run_id, TENANT) == []
-        assert env.shard_repo.list_by_run(run.run_id, TENANT) == []
-        assert env.job_repo.count_pending_jobs() == 0
+        assert env.result_repo.list_by_run(run.run_id, TENANT) == []
+        assert env.dispatch_repo.count_pending_dispatches() == 0
         assert svc.purge_run(run.run_id, TENANT) is None
 
     def test_content_classification_counts_without_exposing_content(self):

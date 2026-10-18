@@ -1,6 +1,6 @@
 """Graceful drain (task 12.2) and upstream circuit breaker (task 12.5)
 tests: the worker drains within its grace window; over-grace slices are
-released to a reclaimable job state through the existing D34 slice_lost
+released to a reclaimable dispatch state through the existing D34 slice_lost
 cooperative path, never cancelled mid-persist. The breaker trips OPEN on
 consecutive upstream failures, expires to a probe window, and while OPEN
 the runtime fails fast without constructing a subagent. Real _TestDB for
@@ -280,28 +280,28 @@ class TestBreakerRuntimeIntegration:
 # Drain (12.2) against the worker: deterministic stub handler state machine.
 # ---------------------------------------------------------------------------
 
-def _stub_job(run_id="drain-run-1", epoch=1) -> dict:
+def _stub_dispatch(run_id="drain-run-1", epoch=1) -> dict:
     return {
         "run_id": run_id, "tenant": TENANT, "claim_epoch": epoch,
         "reclaims": 0, "cancel_requested": False,
     }
 
 
-class DrainJobRepo:
+class DrainDispatchRepo:
     """One-shot claim; records leases, failures, reschedules, claim ticks."""
 
     def __init__(self, pending: int = 0) -> None:
-        self._jobs: list[dict] = []
+        self._dispatches: list[dict] = []
         self.leases: list = []
         self.fails: list = []
         self.reschedules: list = []
         self.claim_ticks = 0
         self.pending = pending
 
-    def enqueue_job(self, job: dict) -> None:
-        self._jobs.append(job)
+    def enqueue_dispatch(self, dispatch: dict) -> None:
+        self._dispatches.append(dispatch)
 
-    def count_pending_jobs(self) -> int:
+    def count_pending_dispatches(self) -> int:
         return self.pending
 
     def reclaim_batch(self, worker_id, limit, lease_seconds):
@@ -309,7 +309,7 @@ class DrainJobRepo:
 
     def claim_batch(self, worker_id, tenant_filter, limit, lease_seconds):
         self.claim_ticks += 1
-        claimed, self._jobs = self._jobs[:limit], []
+        claimed, self._dispatches = self._dispatches[:limit], []
         return claimed
 
     def renew_lease(self, run_id, tenant, worker_id, lease_seconds, claim_epoch):
@@ -381,13 +381,13 @@ class TestWorkerDrain:
 
     def test_within_grace_completes_without_slice_lost(self):
         async def main():
-            job = _stub_job()
-            repo = DrainJobRepo(pending=3)
-            repo.enqueue_job(job)
+            dispatch = _stub_dispatch()
+            repo = DrainDispatchRepo(pending=3)
+            repo.enqueue_dispatch(dispatch)
             handler = DrainHandler()
             worker = AgentSwarmWorker(
                 config=_drain_config(grace=2.0, lease=0.06),
-                handler=handler, job_repo=repo,
+                handler=handler, dispatch_repo=repo,
             )
             await worker.startup()
             await asyncio.sleep(0.05)   # slice is parked in-flight
@@ -414,12 +414,12 @@ class TestWorkerDrain:
 
     def test_over_grace_signals_slice_lost_and_unwinds_cleanly(self):
         async def main():
-            repo = DrainJobRepo()
-            repo.enqueue_job(_stub_job())
+            repo = DrainDispatchRepo()
+            repo.enqueue_dispatch(_stub_dispatch())
             handler = DrainHandler()
             worker = AgentSwarmWorker(
                 config=_drain_config(grace=0.05),
-                handler=handler, job_repo=repo,
+                handler=handler, dispatch_repo=repo,
             )
             await worker.startup()
             await asyncio.sleep(0.05)   # slice parked; grace cannot cover it
@@ -437,19 +437,19 @@ class TestWorkerDrain:
         assert ("set-slice-lost", True, "drain-run-1") in handler.calls
         assert handler.outcomes["drain-run-1"] == "retry"
         # Cooperative unwind: the loop task finished normally, nothing was
-        # cancelled mid-slice and no job was dropped on the floor.
+        # cancelled mid-slice and no dispatch was dropped on the floor.
         assert worker._task.done() and not worker._task.cancelled()
         assert repo.fails == []
         assert repo.claim_ticks == 1
 
     def test_heartbeats_renew_while_draining(self):
         async def main():
-            repo = DrainJobRepo()
-            repo.enqueue_job(_stub_job())
+            repo = DrainDispatchRepo()
+            repo.enqueue_dispatch(_stub_dispatch())
             handler = DrainHandler()
             worker = AgentSwarmWorker(
                 config=_drain_config(grace=30.0, lease=0.06),
-                handler=handler, job_repo=repo,
+                handler=handler, dispatch_repo=repo,
             )
             await worker.startup()
             await asyncio.sleep(0.05)
@@ -471,7 +471,7 @@ class TestWorkerDrain:
     def test_shutdown_without_started_worker_is_noop(self):
         worker = AgentSwarmWorker(
             config=_drain_config(grace=0.01),
-            handler=DrainHandler(), job_repo=DrainJobRepo(),
+            handler=DrainHandler(), dispatch_repo=DrainDispatchRepo(),
         )
 
         asyncio.run(worker.shutdown())
@@ -481,8 +481,8 @@ class TestWorkerDrain:
 
 
 # ---------------------------------------------------------------------------
-# Drain through the REAL SwarmRunHandler + durable job rows: over-grace
-# slices release to a reclaimable PENDING job; within-grace slices finish
+# Drain through the REAL SwarmRunHandler + durable dispatch rows: over-grace
+# slices release to a reclaimable READY dispatch; within-grace slices finish
 # and complete the run. StaticPool SQLite because the worker drives repos
 # from asyncio.to_thread.
 # ---------------------------------------------------------------------------
@@ -514,8 +514,8 @@ def _real_drain_config(grace: float) -> AgentSwarmConfig:
 def _job_state(db, run_id):
     with db.orm_session() as session:
         row = session.execute(
-            select(om.AcAgentSwarmJobModel).where(
-                om.AcAgentSwarmJobModel.run_id == run_id,
+            select(om.AcAgentSwarmRunDispatchModel).where(
+                om.AcAgentSwarmRunDispatchModel.run_id == run_id,
             )
         ).scalar_one()
         return {
@@ -540,11 +540,11 @@ class TestRealHandlerDrain:
         run = _mk_run()
         _spin_ref(env, run)
         env.run_repo.create(run)
-        env.job_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
+        env.dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
 
         async def main():
             worker = AgentSwarmWorker(
-                config=env.cfg, handler=env.handler, job_repo=env.job_repo,
+                config=env.cfg, handler=env.handler, dispatch_repo=env.dispatch_repo,
             )
             await worker.startup()
             await asyncio.sleep(0.08)   # the real slice is mid-loop
@@ -558,13 +558,13 @@ class TestRealHandlerDrain:
         assert elapsed < 3.0
         stored_run = env.run_repo.get(run.run_id, TENANT)
         state = _job_state(real_db, run.run_id)
-        # Released through the slice-lost path: job PENDING again, another
+        # Released through the slice-lost path: dispatch READY again, another
         # worker can immediately reclaim it with epoch fencing — the run
         # was never cancelled mid-write.
         assert stored_run.status is dm.RunStatus.RUNNING
-        assert state["status"] == "PENDING"
+        assert state["status"] == "READY"
         assert state["last_error"] == "slice lost"
-        reclaim = env.job_repo.claim_batch("worker-2", None, 1, 60)
+        reclaim = env.dispatch_repo.claim_batch("worker-2", None, 1, 60)
         assert [j["run_id"] for j in reclaim] == [run.run_id]
         assert reclaim[0]["claim_epoch"] == state["claim_epoch"] + 1
 
@@ -581,11 +581,11 @@ class TestRealHandlerDrain:
         )
         run = _mk_run()
         env.run_repo.create(run)
-        env.job_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
+        env.dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
 
         async def main():
             worker = AgentSwarmWorker(
-                config=env.cfg, handler=env.handler, job_repo=env.job_repo,
+                config=env.cfg, handler=env.handler, dispatch_repo=env.dispatch_repo,
             )
             await worker.startup()
             await asyncio.sleep(0.03)   # the real slice holds the turn loop
@@ -597,7 +597,7 @@ class TestRealHandlerDrain:
         state = _job_state(real_db, run.run_id)
         assert stored_run.status is dm.RunStatus.COMPLETED
         assert stored_run.final_answer == "drained"
-        assert state["status"] == "SUCCEEDED"
+        assert state["status"] == "DONE"
         assert state["last_error"] is None
 
 class TestHeartbeatDuringDrain:
@@ -611,11 +611,11 @@ class TestHeartbeatDuringDrain:
 
     def test_heartbeat_survives_empty_inflight_gap(self):
         async def main():
-            repo = DrainJobRepo()
+            repo = DrainDispatchRepo()
             handler = DrainHandler()
             worker = AgentSwarmWorker(
                 config=_drain_config(grace=30.0, lease=0.06),
-                handler=handler, job_repo=repo,
+                handler=handler, dispatch_repo=repo,
             )
             # Drain under way: claiming stopped, no slice in flight this
             # instant, but the poll task is alive with claimed jobs queued.

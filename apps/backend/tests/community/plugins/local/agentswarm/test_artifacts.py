@@ -160,7 +160,7 @@ class TestSizeCap:
     """Oversize writes must raise before any filesystem mutation.
 
     A result spills here only after exceeding the inline threshold, and
-    an ``avernet``-kind engine reply is untrusted in size — the guard is
+    a ``bot``-kind engine reply is untrusted in size — the guard is
     what keeps one run from exhausting the disk under the artifact root.
     The runtime catches the raise and keeps the result inline, so raising
     is the safe contract.

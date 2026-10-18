@@ -1,6 +1,6 @@
 """Content-safety and egress controls (task 12.9).
 
-- PII classification of stored swarm content (goal, messages, shards):
+- PII classification of stored swarm content (goal, messages, results):
   pattern families for the classes an operator must report on, with a
   redactor for export surfaces.
 - Egress allowlist: the single outbound surface (the LLM endpoint) is

@@ -114,7 +114,7 @@ class TestDefensiveParsing:
     def test_valid_values_parse(self):
         cfg = AgentSwarmConfig.from_block({
             "orchestration": {"max_turns": 3, "slice_max_seconds": 12.5,
-                              "setup_timeout": 5, "per_subagent_timeout": 5},
+                              "setup_timeout": 5, "per_attempt_timeout": 5},
             "retention": {"artifact_ttl_days": 30},
             "message_retention_tail": 10,
             "artifact_store_root": "/var/agentswarm",
@@ -168,7 +168,7 @@ class TestDefensiveParsing:
                               "slice_interval": -0.5},
             "drain": {"grace_seconds": -1},
             "retention": {"sweep_interval_seconds": -1},
-            "admission": {"max_pending_jobs": 0},
+            "admission": {"max_pending_dispatches": 0},
         })
         bare = AgentSwarmConfig()
         assert cfg.orchestration.poll_interval == bare.orchestration.poll_interval
@@ -176,24 +176,24 @@ class TestDefensiveParsing:
         assert cfg.orchestration.slice_interval == bare.orchestration.slice_interval
         assert cfg.drain.grace_seconds == bare.drain.grace_seconds
         assert cfg.retention.sweep_interval_seconds == bare.retention.sweep_interval_seconds
-        assert cfg.admission.max_pending_jobs == bare.admission.max_pending_jobs
+        assert cfg.admission.max_pending_dispatches == bare.admission.max_pending_dispatches
 
     def test_small_positive_budget_knobs_still_parse(self):
         # strict positivity must not clamp legitimate sub-second cadences
         cfg = AgentSwarmConfig.from_block({
             "orchestration": {"poll_interval": 0.25, "slice_interval": 0.1,
                               "slice_max_seconds": 1,
-                              "setup_timeout": 0.4, "per_subagent_timeout": 0.4},
+                              "setup_timeout": 0.4, "per_attempt_timeout": 0.4},
             "drain": {"grace_seconds": 0.5},
             "retention": {"sweep_interval_seconds": 1},
-            "admission": {"max_pending_jobs": 1},
+            "admission": {"max_pending_dispatches": 1},
         })
         assert cfg.orchestration.poll_interval == 0.25
         assert cfg.orchestration.slice_interval == 0.1
         assert cfg.orchestration.slice_max_seconds == 1
         assert cfg.drain.grace_seconds == 0.5
         assert cfg.retention.sweep_interval_seconds == 1
-        assert cfg.admission.max_pending_jobs == 1
+        assert cfg.admission.max_pending_dispatches == 1
 
     def test_blank_artifact_store_root_takes_default(self):
         # an env-expanded ${AGENTSWARM_ARTIFACT_ROOT:-} that comes up blank

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy import Column, Index, Text, String, BigInteger
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.agentswarm.repository.base import (
@@ -11,15 +12,15 @@ class AcAgentSwarmRunModel(_AgentSwarmBase, Base):
     __tablename__ = "ac_agent_swarm_run"
 
     run_id = Column(_ID128, nullable=False)
-    goal = Column(Text, nullable=False)
-    agent_catalog = Column(Text, nullable=True)
+    goal = Column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=False)
+    agent_catalog = Column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
     provider = Column(String(64), nullable=True)
-    request_metadata = Column(Text, nullable=True)
+    request_metadata = Column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
     status = Column(String(32), nullable=False)
     termination_reason = Column(String(32), nullable=True)
     root_agent_id = Column(_ID128, nullable=True)
-    final_answer = Column(Text, nullable=True)
-    error = Column(Text, nullable=True)
+    final_answer = Column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
+    error = Column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
     active_idempotency_key = Column(_ID190, nullable=True)
     owner_id = Column(String(64), nullable=False, default="")
     model = Column(String(128), nullable=False, default="")

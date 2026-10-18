@@ -29,7 +29,7 @@ from agentclaw.community.core.agentswarm.domain.models import (
     AgentSpec, EpochMillis, ProviderKind, RequestMetadata, Run, RunId,
     RunStatus, TaskEnvelope, TenantId,
 )
-from agentclaw.community.plugins.community.agentswarm.avernet_subagent import (
+from agentclaw.community.plugins.community.agentswarm.bot_subagent import (
     AvernetSubagent,
 )
 

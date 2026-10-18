@@ -7,7 +7,7 @@ from sqlalchemy import delete, select, update
 
 from agentclaw.community.core.agentswarm.domain import models as dm
 from agentclaw.community.core.agentswarm.repository.agent import model as om
-from agentclaw.community.core.agentswarm.repository.job import model as om_job
+from agentclaw.community.core.agentswarm.repository.run_dispatch import model as om_dispatch
 from agentclaw.community.core.agentswarm.repository.agent.protocol import (
     AgentRepositoryProtocol,
 )
@@ -108,17 +108,17 @@ class AgentRepository(AgentRepositoryProtocol):
         if bot_state is not None:
             values["bot_state"] = bot_state
         values["ended_at"] = _now_ms() if status in ("COMPLETED", "FAILED", "KILLED") else None
-        # D28 fencing, the run row's own rule: a subagent's terminal state is
+        # D28 fencing, the run row's own rule: an agent's terminal state is
         # slice-owned, and a stale pod (lease lost, epoch bumped by the
         # reclaimer) must not overwrite the agent row the new owner is
         # executing against. claim_epoch mirrors RunRepository.update_status
-        # exactly — the write lands only on the job row's CURRENT epoch.
-        job_epoch_current = (
-            select(om_job.AcAgentSwarmJobModel.job_id).where(
-                om_job.AcAgentSwarmJobModel.run_id == run_id,
-                om_job.AcAgentSwarmJobModel.tenant == tenant,
-                om_job.AcAgentSwarmJobModel.claim_epoch == claim_epoch,
-                om_job.AcAgentSwarmJobModel.is_deleted.is_(False),
+        # exactly — the write lands only on the dispatch row's CURRENT epoch.
+        dispatch_epoch_current = (
+            select(om_dispatch.AcAgentSwarmRunDispatchModel.dispatch_id).where(
+                om_dispatch.AcAgentSwarmRunDispatchModel.run_id == run_id,
+                om_dispatch.AcAgentSwarmRunDispatchModel.tenant == tenant,
+                om_dispatch.AcAgentSwarmRunDispatchModel.claim_epoch == claim_epoch,
+                om_dispatch.AcAgentSwarmRunDispatchModel.is_deleted.is_(False),
             ).exists()
         )
         with self._db.orm_session() as session:
@@ -128,7 +128,7 @@ class AgentRepository(AgentRepositoryProtocol):
                     om.AcAgentSwarmAgentModel.agent_id == agent_id,
                     om.AcAgentSwarmAgentModel.tenant == tenant,
                     om.AcAgentSwarmAgentModel.is_deleted.is_(False),
-                    job_epoch_current,
+                    dispatch_epoch_current,
                 ).values(**values)
             )
         return result.rowcount > 0

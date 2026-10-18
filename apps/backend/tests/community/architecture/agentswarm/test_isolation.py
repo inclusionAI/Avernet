@@ -9,7 +9,7 @@ Two invariants of the agentswarm swarm module:
    transport/test framework imports (``fastapi`` / ``httpx`` /
    ``pytest``) anywhere under the module: implementations moved to
    ``plugins/{local,community}/agentswarm`` (httpx is a plugin detail
-   of the LLM client and the avernet subagent; D18 keeps core
+   of the LLM client and the bot subagent; D18 keeps core
    transport-agnostic), so core must stay transport-free outright.
 
 2. Typed boundary (D18, change task 1.2c): Protocol surface
@@ -86,7 +86,7 @@ _STR_DEFAULT_ALLOWLIST: frozenset[str] = frozenset({
 # StrEnums in the Protocol/service path.
 _ENUM_NAMES: frozenset[str] = frozenset({
     "RunStatus", "AgentStatus", "AgentKind", "WaitMode", "TerminationReason",
-    "MessageRole", "GuardKind", "TaskQueueStatus", "BotState",
+    "MessageRole", "GuardKind", "DispatchStatus", "BotState",
 })
 _CLOSED_SET_PARAMS: frozenset[str] = frozenset({
     "status", "kind", "mode", "termination_reason", "role",

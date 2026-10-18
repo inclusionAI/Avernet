@@ -1,4 +1,4 @@
-"""agentswarm concrete service — runs the swarm job lifecycle."""
+"""agentswarm concrete service — runs the swarm dispatch lifecycle."""
 from __future__ import annotations
 
 import asyncio
@@ -13,11 +13,11 @@ from agentclaw.community.core.agentswarm.domain.models import (
 )
 from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
 from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
-from agentclaw.community.core.agentswarm.repository.job import JobRepository
+from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
 from agentclaw.community.core.agentswarm.repository.message import MessageRepository
 from agentclaw.community.core.agentswarm.repository.round import RoundRepository
 from agentclaw.community.core.agentswarm.repository.run import RunRepository
-from agentclaw.community.core.agentswarm.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentswarm.repository.agent_result import AgentResultRepository
 from agentclaw.community.core.agentswarm.service.protocols import (
     AgentSwarmConfigError, AgentSwarmRunNotFoundError,
     AgentSwarmRunNotPurgeableError, AgentSwarmServiceProtocol,
@@ -30,19 +30,19 @@ logger = logging.getLogger(__name__)
 
 class AgentSwarmService(AgentSwarmServiceProtocol):
 
-    def __init__(self, run_repo: RunRepository, job_repo: JobRepository,
+    def __init__(self, run_repo: RunRepository, dispatch_repo: RunDispatchRepository,
                  agent_repo: AgentRepository, message_repo: MessageRepository,
                  round_repo: RoundRepository, guard_repo: GuardEventRepository,
-                 shard_repo: ResultShardRepository,
+                 result_repo: AgentResultRepository,
                  config: AgentSwarmConfig,
 ) -> None:
         self._run_repo = run_repo
-        self._job_repo = job_repo
+        self._dispatch_repo = dispatch_repo
         self._agent_repo = agent_repo
         self._message_repo = message_repo
         self._round_repo = round_repo
         self._guard_repo = guard_repo
-        self._shard_repo = shard_repo
+        self._result_repo = result_repo
         self._config = config
         slice_max = config.orchestration.slice_max_seconds
         # Float deadline with a one-poll-cycle floor: int() truncated a
@@ -74,8 +74,8 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
         global_limit = self._config.admission.max_global_concurrent_runs
         if self._run_repo.count_active_runs_global() >= global_limit:
             raise GlobalRunLimitExceeded(limit=global_limit)
-        pending_limit = self._config.admission.max_pending_jobs
-        if self._job_repo.count_pending_jobs() >= pending_limit:
+        pending_limit = self._config.admission.max_pending_dispatches
+        if self._dispatch_repo.count_pending_dispatches() >= pending_limit:
             raise QueueDepthExceeded(limit=pending_limit)
         run_id = uuid.uuid4().hex
         run = Run(
@@ -96,11 +96,11 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
         if created.run_id != RunId(run_id):
             # Lost the submit race: create() converged onto the winner's
             # existing run (uk_run_idem collision). Join it — returning
-            # this run_id WITHOUT enqueueing a second job for the same
+            # this run_id WITHOUT enqueueing a second dispatch for the same
             # run, exactly like the early get_by_idempotency join above.
             return created.run_id
         try:
-            self._job_repo.enqueue(
+            self._dispatch_repo.enqueue(
                 run_id=RunId(run_id),
                 tenant=TenantId(req.tenant),
                 deadline_seconds=self._deadline,
@@ -109,7 +109,7 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
             # Orphan-run compensation: the run row THIS call just created
             # is already committed RUNNING and holds the tenant admission
             # slot plus the active idempotency key. If enqueue raised, no
-            # worker ever owned this run. The common case is that the job
+            # worker ever owned this run. The common case is that the dispatch
             # row never committed either (DB down / disk full / deadlock
             # rollback), so the D28-fenced update_status would match zero
             # rows and strand the run RUNNING forever; fail_unclaimed is
@@ -120,7 +120,7 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
             try:
                 freed = self._run_repo.fail_unclaimed(
                     RunId(run_id), TenantId(req.tenant),
-                    error=f"job enqueue failed: {type(exc).__name__}: "
+                    error=f"dispatch enqueue failed: {type(exc).__name__}: "
                           f"{str(exc)[:160]}",
                 )
             except Exception:
@@ -168,7 +168,7 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
         )
 
     async def cancel(self, run_id: str, tenant: str) -> str:
-        ok = self._job_repo.request_cancel(RunId(run_id), TenantId(tenant))
+        ok = self._dispatch_repo.request_cancel(RunId(run_id), TenantId(tenant))
         if not ok:
             return "not_found"
         run = self.get_run(run_id, tenant)
@@ -233,10 +233,10 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
         counts = {
             "agents": self._agent_repo.purge_run(rid, tid),
             "messages": self._message_repo.purge_run(rid, tid),
-            "shards": self._shard_repo.purge_run(rid, tid),
+            "results": self._result_repo.purge_run(rid, tid),
             "rounds": self._round_repo.purge_run(rid, tid),
             "guards": self._guard_repo.purge_run(rid, tid),
-            "jobs": self._job_repo.purge_run(rid, tid),
+            "dispatches": self._dispatch_repo.purge_run(rid, tid),
             "run": self._run_repo.purge_run(rid, tid),
         }
         return counts

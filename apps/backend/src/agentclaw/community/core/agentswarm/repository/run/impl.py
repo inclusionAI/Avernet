@@ -15,7 +15,7 @@ from agentclaw.community.core.agentswarm.repository.run.protocol import (
 from agentclaw.community.core.agentswarm.repository.decode import (
     _decode_run_status, _decode_termination_reason,
 )
-from agentclaw.community.core.agentswarm.repository.job import model as om_job
+from agentclaw.community.core.agentswarm.repository.run_dispatch import model as om_dispatch
 from agentclaw.community.core.agentswarm.repository.types import (
     _dumps, _loads, _now_ms,
 )
@@ -127,12 +127,12 @@ class RunRepository(RunRepositoryProtocol):
             # key then creates a fresh run instead of IntegrityError-ing
             # against the completed row.
             values["active_idempotency_key"] = None
-        job_epoch_current = (
-            select(om_job.AcAgentSwarmJobModel.job_id).where(
-                om_job.AcAgentSwarmJobModel.run_id == run_id,
-                om_job.AcAgentSwarmJobModel.tenant == tenant,
-                om_job.AcAgentSwarmJobModel.claim_epoch == claim_epoch,
-                om_job.AcAgentSwarmJobModel.is_deleted.is_(False),
+        dispatch_epoch_current = (
+            select(om_dispatch.AcAgentSwarmRunDispatchModel.dispatch_id).where(
+                om_dispatch.AcAgentSwarmRunDispatchModel.run_id == run_id,
+                om_dispatch.AcAgentSwarmRunDispatchModel.tenant == tenant,
+                om_dispatch.AcAgentSwarmRunDispatchModel.claim_epoch == claim_epoch,
+                om_dispatch.AcAgentSwarmRunDispatchModel.is_deleted.is_(False),
             ).exists()
         )
         with self._db.orm_session() as session:
@@ -143,7 +143,7 @@ class RunRepository(RunRepositoryProtocol):
                     om.AcAgentSwarmRunModel.run_id == run_id,
                     om.AcAgentSwarmRunModel.tenant == tenant,
                     om.AcAgentSwarmRunModel.is_deleted.is_(False),
-                    job_epoch_current,
+                    dispatch_epoch_current,
                 ).values(**values)
             )
         return result.rowcount > 0
@@ -152,10 +152,10 @@ class RunRepository(RunRepositoryProtocol):
                        error: str) -> bool:
         """Submit-plane compensation for a failed enqueue.
 
-        Deliberately NOT behind the D28 job-epoch fence: that fence
+        Deliberately NOT behind the D28 dispatch-epoch fence: that fence
         guards worker-owned writes against stale claimers, but this
         method exists precisely for the case where `enqueue` raised
-        BEFORE the job row committed — no job row exists at any epoch,
+        BEFORE the dispatch row committed — no dispatch row exists at any epoch,
         so a fenced UPDATE would match zero rows and strand the run
         RUNNING forever (holding the tenant admission slot and the
         active idempotency key). The caller is the submit plane
@@ -210,7 +210,7 @@ class RunRepository(RunRepositoryProtocol):
 
         Mirrors list_page's shape but always status-filtered and env-bound:
         a multi-env single-DB deployment must not cross-sweep another
-        env's runs — the job-repo claim surfaces the reaper pairs with
+        env's runs — the dispatch-repo claim surfaces the reaper pairs with
         bind the same way.
         """
         offset = max(0, (page - 1)) * page_size

@@ -1,10 +1,10 @@
 """Slice-level integration tests for SwarmRunHandler (task 10.7 Stage A core):
-end-to-end decide -> spawn -> drain -> shard -> terminal with a real _TestDB,
+end-to-end decide -> spawn -> drain -> result -> terminal with a real _TestDB,
 scripted StubLLMProvider decisions, and a hand-fake SubagentFactory.
 
-Covers 3.10 (shard persistence precedes terminal publish), 4.7b/D42
+Covers 3.10 (result persistence precedes terminal publish), 4.7b/D42
 (schema validation), 6.1b/D24 (completed subagents never re-run),
-D16/D34 (slice-lost retry + resume), D31 (shard XOR via artifact routing).
+D16/D34 (slice-lost retry + resume), D31 (result XOR via artifact routing).
 """
 from __future__ import annotations
 
@@ -29,9 +29,9 @@ from agentclaw.community.core.agentswarm.repository.agent_attempt import (
     AgentAttemptRepository,
 )
 from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
-from agentclaw.community.core.agentswarm.repository.job import JobRepository
+from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
 from agentclaw.community.core.agentswarm.repository.message import MessageRepository
-from agentclaw.community.core.agentswarm.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentswarm.repository.agent_result import AgentResultRepository
 from agentclaw.community.core.agentswarm.repository.round import RoundRepository
 from agentclaw.community.core.agentswarm.repository.run import RunRepository
 from agentclaw.community.core.agentswarm.config.settings import (
@@ -200,7 +200,7 @@ def _wait_decision(*refs) -> str:
 
 
 def _spin_ref(env, run: dm.Run, name: str = "ghost") -> None:
-    # A permanently-unsatisfied wait ref WITH a row: a shardless KILLED agent
+    # A permanently-unsatisfied wait ref WITH a row: a resultless KILLED agent
     # is neither respawned by rehydrate (not QUEUED/RUNNING) nor fail-fast
     # (not FAILED), so _await_refs blocks to the slice budget. The post-fix
     # spin driver: a never-spawned name would now YIELD instead of spinning.
@@ -226,7 +226,7 @@ def _config(**overrides) -> AgentSwarmConfig:
         slice_max_seconds=8.0,
         slice_interval=0.0,
         orchestrator_turn_interval=0.01,
-        subagent_max_attempts=3,
+        agent_max_attempts=3,
         max_width=8,
     )
     if overrides:
@@ -265,10 +265,10 @@ def _build_env(db, script: list[str], factory: FakeFactory, *,
     run_repo = RunRepository(db)
     agent_repo = AgentRepository(db)
     message_repo = MessageRepository(db)
-    shard_repo = ResultShardRepository(db)
+    result_repo = AgentResultRepository(db)
     round_repo = RoundRepository(db)
     guard_repo = GuardEventRepository(db)
-    job_repo = JobRepository(db)
+    dispatch_repo = RunDispatchRepository(db)
     attempt_repo = AgentAttemptRepository(db)
     llm = llm or StubLLMProvider(script=script)
     orchestrator = Orchestrator(
@@ -283,20 +283,20 @@ def _build_env(db, script: list[str], factory: FakeFactory, *,
         factory=factory,
         artifact_store=artifact_store,
         max_width=cfg.orchestration.max_width,
-        max_attempts=cfg.orchestration.subagent_max_attempts,
-        per_task_timeout=cfg.orchestration.per_subagent_timeout,
+        max_attempts=cfg.orchestration.agent_max_attempts,
+        per_task_timeout=cfg.orchestration.per_attempt_timeout,
         artifact_inline_threshold=inline_threshold,
     )
     handler = SwarmRunHandler(
         config=cfg, orchestrator=orchestrator, runtime=runtime,
         run_repo=run_repo, agent_repo=agent_repo, message_repo=message_repo,
-        shard_repo=shard_repo, round_repo=round_repo, guard_repo=guard_repo,
-        job_repo=job_repo, termination=termination, guards=GuardService(),
+        result_repo=result_repo, round_repo=round_repo, guard_repo=guard_repo,
+        dispatch_repo=dispatch_repo, termination=termination, guards=GuardService(),
     )
     return SimpleNamespace(
         cfg=cfg, run_repo=run_repo, agent_repo=agent_repo,
-        message_repo=message_repo, shard_repo=shard_repo, round_repo=round_repo,
-        guard_repo=guard_repo, job_repo=job_repo, llm=llm,
+        message_repo=message_repo, result_repo=result_repo, round_repo=round_repo,
+        guard_repo=guard_repo, dispatch_repo=dispatch_repo, llm=llm,
         orchestrator=orchestrator, runtime=runtime, handler=handler,
         attempt_repo=attempt_repo,
     )
@@ -304,15 +304,15 @@ def _build_env(db, script: list[str], factory: FakeFactory, *,
 
 def _enqueue_and_claim(env, run: dm.Run) -> dict:
     env.run_repo.create(run)
-    env.job_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
-    return env.job_repo.claim_batch(WORKER, [TENANT], 1, 60)[0]
+    env.dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
+    return env.dispatch_repo.claim_batch(WORKER, [TENANT], 1, 60)[0]
 
 
-def _job_row(db, run_id):
+def _dispatch_row(db, run_id):
     with db.orm_session() as session:
         row = session.execute(
-            select(om.AcAgentSwarmJobModel).where(
-                om.AcAgentSwarmJobModel.run_id == run_id,
+            select(om.AcAgentSwarmRunDispatchModel).where(
+                om.AcAgentSwarmRunDispatchModel.run_id == run_id,
             )
         ).scalar_one()
         return {
@@ -352,14 +352,14 @@ class TestEndToEndSlice:
         assert stored.final_answer == "the answer"
         assert stored.ended_at is not None
 
-        shards = env.shard_repo.list_by_run(run.run_id, TENANT)
-        assert len(shards) == 2
+        results = env.result_repo.list_by_run(run.run_id, TENANT)
+        assert len(results) == 2
         agents = env.agent_repo.list_by_run(run.run_id, TENANT)
-        assert all(s.payload is None or s.artifact_key is None for s in shards)
-        assert all(s.payload is not None or s.artifact_key is not None for s in shards)
-        inline = next(s for s in shards if s.payload is not None)
+        assert all(s.payload is None or s.artifact_key is None for s in results)
+        assert all(s.payload is not None or s.artifact_key is not None for s in results)
+        inline = next(s for s in results if s.payload is not None)
         assert inline.payload == {"n": 1}
-        spilled = next(s for s in shards if s.artifact_key is not None)
+        spilled = next(s for s in results if s.artifact_key is not None)
         assert spilled.artifact_key in store.records
         assert all(
             agent.status is dm.AgentStatus.COMPLETED
@@ -395,10 +395,10 @@ class TestEndToEndSlice:
             assert history[0].role is dm.MessageRole.ASSISTANT
 
         assert env.guard_repo.list_by_run(run.run_id, TENANT) == []
-        job = _job_row(db, run.run_id)
-        assert job["status"] == "SUCCEEDED"
+        dispatch = _dispatch_row(db, run.run_id)
+        assert dispatch["status"] == "DONE"
 
-    def test_wait_any_satisfied_by_single_shard(self, db):
+    def test_wait_any_satisfied_by_single_result(self, db):
         script = [
             _spawn_decision("a1", "goal-any-1"),
             _spawn_decision("a2", "goal-any-2"),
@@ -426,7 +426,7 @@ class TestCongestedBatchNoProgress:
         # P0-8 contract: a fully guard-rejected batch (here: dedupe, the
         # spawned objective already exists) never terminalizes the run at
         # the first rejection; the slice keeps deciding and only the
-        # turn-based no-progress evaluator (flat routed-shard streak)
+        # turn-based no-progress evaluator (flat routed-result streak)
         # ends the run.
         factory = FakeFactory()
         llm = RepeatingLLMProvider(_spawn_decision("a1", "goal-cong"))
@@ -447,15 +447,15 @@ class TestCongestedBatchNoProgress:
             if g.kind is dm.GuardKind.DEDUPE_REJECT
         ]
         assert len(dedupes) >= 3
-        # the first accepted spawn completed and routed its shard
+        # the first accepted spawn completed and routed its result
         agents = env.agent_repo.list_by_run(run.run_id, TENANT)
         assert len(agents) == 1
         assert agents[0].status is dm.AgentStatus.COMPLETED
-        assert env.shard_repo.list_by_run(run.run_id, TENANT)
+        assert env.result_repo.list_by_run(run.run_id, TENANT)
 
 
 class TestSliceLostMidFlight:
-    def test_no_shard_no_terminate_job_pending_resume_ok(self, db):
+    def test_no_result_no_terminate_dispatch_pending_resume_ok(self, db):
         script = [_spawn_decision("sl1", "goal-sl1"), _wait_decision("sl1")]
         gate = asyncio.Event()
         factory = FakeFactory(scripts={"sl1": [{"blocked": True}]}, gate=gate)
@@ -477,28 +477,28 @@ class TestSliceLostMidFlight:
 
         asyncio.run(main())
 
-        assert env.shard_repo.list_by_run(run.run_id, TENANT) == []
+        assert env.result_repo.list_by_run(run.run_id, TENANT) == []
         agents = env.agent_repo.list_by_run(run.run_id, TENANT)
         assert len(agents) == 1
         assert agents[0].status is not dm.AgentStatus.COMPLETED
-        job = _job_row(db, run.run_id)
-        assert job["status"] == "PENDING"
+        dispatch = _dispatch_row(db, run.run_id)
+        assert dispatch["status"] == "READY"
         assert env.run_repo.get(run.run_id, TENANT).status is dm.RunStatus.RUNNING
 
         gate.set()
         resume_script = [_wait_decision("sl1"), _finish_decision("resumed")]
         env.llm.set_script(resume_script)
-        reclaimer = env.job_repo.claim_batch(WORKER, [TENANT], 1, 60)[0]
+        reclaimer = env.dispatch_repo.claim_batch(WORKER, [TENANT], 1, 60)[0]
         outcome = asyncio.run(env.handler.handle_slice(
             run.run_id, TENANT, reclaimer["claim_epoch"], worker_id=WORKER,
         ))
         assert outcome == "complete"
-        shards = env.shard_repo.list_by_run(run.run_id, TENANT)
-        assert len(shards) == 1
+        results = env.result_repo.list_by_run(run.run_id, TENANT)
+        assert len(results) == 1
         stored = env.run_repo.get(run.run_id, TENANT)
         assert stored.status is dm.RunStatus.COMPLETED
         assert stored.final_answer == "resumed"
-        resumed_agent = env.agent_repo.get(run.run_id, shards[0].source_agent_id,
+        resumed_agent = env.agent_repo.get(run.run_id, results[0].source_agent_id,
                                            TENANT)
         assert resumed_agent.status is dm.AgentStatus.COMPLETED
         assert resumed_agent.agent_id == agents[0].agent_id
@@ -520,10 +520,10 @@ class TestOutputSchemaValidation:
             run.run_id, TENANT, claim["claim_epoch"], worker_id=WORKER,
         ))
         assert outcome == "complete"
-        shards = env.shard_repo.list_by_run(run.run_id, TENANT)
-        assert len(shards) == 1
-        assert shards[0].payload == {"ok": True}
-        agent = env.agent_repo.get(run.run_id, shards[0].source_agent_id, TENANT)
+        results = env.result_repo.list_by_run(run.run_id, TENANT)
+        assert len(results) == 1
+        assert results[0].payload == {"ok": True}
+        agent = env.agent_repo.get(run.run_id, results[0].source_agent_id, TENANT)
         assert agent.status is dm.AgentStatus.COMPLETED
         assert agent.attempts == 2
         assert factory.run_effects.count(("a1", "not an object")) == 1
@@ -536,7 +536,7 @@ class TestOutputSchemaValidation:
             _finish_decision("never reached"),
         ]
         factory = FakeFactory(scripts={"a1": ["still not an object"]})
-        config = _config(subagent_max_attempts=2, slice_max_seconds=0.3)
+        config = _config(agent_max_attempts=2, slice_max_seconds=0.3)
         env = _build_env(db, script, factory, config=config)
         run = _mk_run()
         claim = _enqueue_and_claim(env, run)
@@ -546,7 +546,7 @@ class TestOutputSchemaValidation:
         ))
 
         # The failed agent blocks the awaited ref and can never grow a
-        # shard, so the wait aborts the whole run terminally (fail-fast)
+        # result, so the wait aborts the whole run terminally (fail-fast)
         # instead of parking the slice to its budget.
         assert outcome == "fail"
         agents = env.agent_repo.list_by_run(run.run_id, TENANT)
@@ -554,7 +554,7 @@ class TestOutputSchemaValidation:
         assert agents[0].status is dm.AgentStatus.FAILED
         assert agents[0].attempts == 2
         assert agents[0].error.startswith("schema_validation:")
-        assert env.shard_repo.list_by_run(run.run_id, TENANT) == []
+        assert env.result_repo.list_by_run(run.run_id, TENANT) == []
         stored = env.run_repo.get(run.run_id, TENANT)
         assert stored.status is dm.RunStatus.FAILED
         assert stored.termination_reason is dm.TerminationReason.ERROR
@@ -570,7 +570,7 @@ class TestOutputSchemaValidation:
         ]
         factory = FakeFactory(scripts={"a1": [{"anything": 1}]})
         env = _build_env(db, script, factory,
-                         config=_config(subagent_max_attempts=3,
+                         config=_config(agent_max_attempts=3,
                                         slice_max_seconds=0.3))
         run = _mk_run()
         claim = _enqueue_and_claim(env, run)
@@ -578,7 +578,7 @@ class TestOutputSchemaValidation:
         outcome = asyncio.run(env.handler.handle_slice(
             run.run_id, TENANT, claim["claim_epoch"], worker_id=WORKER,
         ))
-        # The agent fails without a shard; the wait on it aborts the run
+        # The agent fails without a result; the wait on it aborts the run
         # through the fail-fast path rather than parking to the budget.
         assert outcome == "fail"
         agents = env.agent_repo.list_by_run(run.run_id, TENANT)
@@ -661,7 +661,7 @@ class TestMidSliceCancel:
         late_llm = _LateCancelLLM(script)
         env = _build_env(db, script, factory, llm=late_llm)
         run = _mk_run(goal="mid-slice cancel")
-        late_llm.arm(env.job_repo, run.run_id, TENANT)
+        late_llm.arm(env.dispatch_repo, run.run_id, TENANT)
         claim = _enqueue_and_claim(env, run)
 
         outcome = asyncio.run(env.handler.handle_slice(
@@ -674,7 +674,7 @@ class TestMidSliceCancel:
         assert stored.termination_reason is dm.TerminationReason.CANCELLED
         agents = env.agent_repo.list_by_run(run.run_id, TENANT)
         assert [a.name for a in agents] == ["a1"]
-        assert _job_row(db, run.run_id)["status"] == "SUCCEEDED"
+        assert _dispatch_row(db, run.run_id)["status"] == "DONE"
 
 
 class _LateCancelLLM:
@@ -689,12 +689,12 @@ class _LateCancelLLM:
         self._inner = StubLLMProvider(script=script)
         self._armed = None
 
-    def arm(self, job_repo, run_id, tenant) -> None:
-        self._armed = (job_repo, run_id, tenant)
+    def arm(self, dispatch_repo, run_id, tenant) -> None:
+        self._armed = (dispatch_repo, run_id, tenant)
 
     async def complete(self, request):
         response = await self._inner.complete(request)
         if self._armed is not None and self._inner.call_count == 1:
-            job_repo, run_id, tenant = self._armed
-            assert job_repo.request_cancel(run_id, tenant)
+            dispatch_repo, run_id, tenant = self._armed
+            assert dispatch_repo.request_cancel(run_id, tenant)
         return response

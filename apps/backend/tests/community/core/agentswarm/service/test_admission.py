@@ -21,9 +21,9 @@ from agentclaw.community.core.agentswarm.domain import models as dm
 from agentclaw.community.core.agentswarm.repository import registry as om
 from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
 from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
-from agentclaw.community.core.agentswarm.repository.job import JobRepository
+from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
 from agentclaw.community.core.agentswarm.repository.message import MessageRepository
-from agentclaw.community.core.agentswarm.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentswarm.repository.agent_result import AgentResultRepository
 from agentclaw.community.core.agentswarm.repository.round import RoundRepository
 from agentclaw.community.core.agentswarm.repository.run import RunRepository
 from agentclaw.community.core.agentswarm.config.settings import (
@@ -93,17 +93,17 @@ def _service(db, *, tenant_limit: int = 8, global_limit: int = 64,
         tenant_limits=AgentSwarmTenantLimits(max_concurrent_runs=tenant_limit),
         admission=AgentSwarmAdmissionConfig(
             max_global_concurrent_runs=global_limit,
-            max_pending_jobs=pending_limit,
+            max_pending_dispatches=pending_limit,
         ),
     )
     return AgentSwarmService(
         run_repo=RunRepository(db),
-        job_repo=JobRepository(db),
+        dispatch_repo=RunDispatchRepository(db),
         agent_repo=AgentRepository(db),
         message_repo=MessageRepository(db),
         round_repo=RoundRepository(db),
         guard_repo=GuardEventRepository(db),
-        shard_repo=ResultShardRepository(db),
+        result_repo=AgentResultRepository(db),
         config=cfg,
     )
 
@@ -115,7 +115,7 @@ class TestSubmitIdempotencyRace:
         # The TOCTOU window itself: both submits miss get_by_idempotency
         # (delete the early join), both reach run create(); uk_run_idem
         # makes the loser converge onto the winner's run, and the loser
-        # must NOT enqueue a second job row for the same run.
+        # must NOT enqueue a second dispatch row for the same run.
         svc = _service(db)
         real_lookup = svc._run_repo.get_by_idempotency
         checks = {"misses": 0}
@@ -136,18 +136,18 @@ class TestSubmitIdempotencyRace:
         second = asyncio.run(svc.submit_async(_mk_req("t1", idem="race-42")))
         assert second == first
         assert svc._run_repo.count_active_runs(dm.TenantId("t1")) == 1
-        assert svc._job_repo.count_pending_jobs() == 1
+        assert svc._dispatch_repo.count_pending_dispatches() == 1
 
     def test_early_join_still_skips_enqueue(self, db):
         # Un-patched join path: a duplicate submit found by
-        # get_by_idempotency returns the same run_id and adds no job
+        # get_by_idempotency returns the same run_id and adds no dispatch
         # row (no IntegrityError window is even reached).
         svc = _service(db)
         first = asyncio.run(svc.submit_async(_mk_req("t1", idem="join-42")))
         second = asyncio.run(svc.submit_async(_mk_req("t1", idem="join-42")))
         assert second == first
         assert svc._run_repo.count_active_runs(dm.TenantId("t1")) == 1
-        assert svc._job_repo.count_pending_jobs() == 1
+        assert svc._dispatch_repo.count_pending_dispatches() == 1
 
 
 class TestAdmissionControl:
@@ -166,7 +166,7 @@ class TestAdmissionControl:
         assert exc_info.value.limit == 2
         assert svc._run_repo.count_active_runs(dm.TenantId("t1")) == 2
         assert svc._run_repo.count_active_runs_global() == 2
-        assert svc._job_repo.count_pending_jobs() == 2
+        assert svc._dispatch_repo.count_pending_dispatches() == 2
 
     def test_global_reject_typed_and_creates_no_rows(self, db):
         # Three tenants each below their own cap saturate the global cap:
@@ -180,7 +180,7 @@ class TestAdmissionControl:
 
         assert exc_info.value.limit == 3
         assert svc._run_repo.count_active_runs_global() == 3
-        assert svc._job_repo.count_pending_jobs() == 3
+        assert svc._dispatch_repo.count_pending_dispatches() == 3
 
     def test_queue_depth_reject_typed_and_creates_no_rows(self, db):
         svc = _service(db, pending_limit=2)
@@ -191,7 +191,7 @@ class TestAdmissionControl:
             asyncio.run(svc.submit_async(_mk_req("t3")))
 
         assert exc_info.value.limit == 2
-        assert svc._job_repo.count_pending_jobs() == 2
+        assert svc._dispatch_repo.count_pending_dispatches() == 2
         assert svc._run_repo.count_active_runs_global() == 2
 
     def test_idempotency_join_survives_all_saturation(self, db):
@@ -209,7 +209,7 @@ class TestAdmissionControl:
         assert join_global == first
         assert join_queue == second
         assert svc._run_repo.count_active_runs_global() == 2
-        assert svc._job_repo.count_pending_jobs() == 2
+        assert svc._dispatch_repo.count_pending_dispatches() == 2
         joining = svc._run_repo.get_by_idempotency(
             "inc-43", dm.TenantId("t2"),
         )
@@ -235,16 +235,16 @@ class TestAdmissionControl:
             llm=None,
             tenant_limits=AgentSwarmTenantLimits(max_concurrent_runs=1),
             admission=AgentSwarmAdmissionConfig(
-                max_global_concurrent_runs=1, max_pending_jobs=1,
+                max_global_concurrent_runs=1, max_pending_dispatches=1,
             ),
         )
         svc = AgentSwarmService(
-            run_repo=run_repo, job_repo=JobRepository(db),
+            run_repo=run_repo, dispatch_repo=RunDispatchRepository(db),
             agent_repo=AgentRepository(db),
             message_repo=MessageRepository(db),
             round_repo=RoundRepository(db),
             guard_repo=GuardEventRepository(db),
-            shard_repo=ResultShardRepository(db), config=cfg,
+            result_repo=AgentResultRepository(db), config=cfg,
         )
 
         # Fail-clear config rejection keeps precedence over 429-class caps.

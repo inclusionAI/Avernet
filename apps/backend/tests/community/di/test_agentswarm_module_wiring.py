@@ -283,8 +283,8 @@ class TestConfiguredOrchestration:
             config=config, orchestrator=orchestrator, runtime=runtime,
             guards=guards,
             run_repo=object(), agent_repo=object(),
-            message_repo=object(), shard_repo=object(),
-            round_repo=object(), guard_repo=object(), job_repo=object(),
+            message_repo=object(), result_repo=object(),
+            round_repo=object(), guard_repo=object(), dispatch_repo=object(),
         )
         assert orchestrator._guards is guards
         assert handler._guards is guards
@@ -327,8 +327,8 @@ class TestConfiguredOrchestration:
             config=config, orchestrator=orchestrator, runtime=runtime,
             guards=module.provide_guards(config),
             run_repo=object(), agent_repo=object(),
-            message_repo=object(), shard_repo=object(),
-            round_repo=object(), guard_repo=object(), job_repo=object(),
+            message_repo=object(), result_repo=object(),
+            round_repo=object(), guard_repo=object(), dispatch_repo=object(),
         )
         evaluator = handler._termination
         assert evaluator._max_turns == 11

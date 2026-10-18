@@ -1,4 +1,4 @@
-"""In-process seam for driving avernet-kind bots through the host platform.
+"""In-process seam for driving bot-kind personas through the host platform.
 
 The subagent's job (provision a transient bot persona, drive it to READY,
 chat one objective, delete it) is platform work this backend cannot do
@@ -12,12 +12,12 @@ identity of any kind — the provisioning owner is per-run and per-call
 exclusively (the authenticated submitter the run carries; the platform
 refuses a blank per-call ``owner_id`` rather than falling back), while
 profiles whose platform-side dependencies that provider cannot resolve
-keep the designed failure — avernet-kind spawns fail
+keep the designed failure — bot-kind spawns fail
 clear at the factory — and
 the swarm defines the seam and the
 composition root binds the host's in-process BotPlatform adapter; nothing
 in agentswarm opens a socket, and a missing BotPlatform binding means
-avernet-kind spawns fail clear at the factory (the failure mode of the
+bot-kind spawns fail clear at the factory (the failure mode of the
 removed HTTP implementation was hitting a 404 endpoint).
 
 The seam carries a structured create request, not a platform document:

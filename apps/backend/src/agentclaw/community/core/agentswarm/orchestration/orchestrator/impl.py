@@ -25,13 +25,13 @@ _TRACKED_RUNS = 64
 _ORCHESTRATOR_SPAWN_DEPTH = 1
 # Prompt-embedding caps: the orchestrator prompt is re-sent every turn
 # and persisted per turn (record_llm_exchange), so embedding every routed
-# shard in full grows it without bound (∼100 shards × the 16KB inline
-# threshold ≈ 1.6MB). Keep only the most recent shards — the tail is the
-# freshest context — and cap each shard's encoded text with an explicit
+# result in full grows it without bound (∼100 results × the 16KB inline
+# threshold ≈ 1.6MB). Keep only the most recent results — the tail is the
+# freshest context — and cap each result's encoded text with an explicit
 # truncation marker.
-_PROMPT_MAX_SHARDS = 20
-_PROMPT_MAX_SHARD_CHARS = 2000
-_SHARD_TRUNCATION_MARKER = "…[truncated]"
+_PROMPT_MAX_RESULTS = 20
+_PROMPT_MAX_RESULT_CHARS = 2000
+_RESULT_TRUNCATION_MARKER = "…[truncated]"
 
 
 def _now_ms() -> int:
@@ -97,15 +97,16 @@ class Orchestrator:
         # mopped by the wholesale bound).
         self._rejection_notes: dict[str, list[dict[str, str]]] = {}
 
-    async def run_slice(
+    async def decide_turn(
         self,
         run: Run,
         state: RunState,
-        shard_getter: Any,
+        result_getter: Any,
         on_progress: Any = None,
         on_llm_exchange: Any = None,
     ) -> dict[str, Any]:
-        """Run one bounded slice of orchestration decisions.
+        """Decide one orchestration turn (a planning turn inside the
+        run's bounded slice).
 
         Returns a dict with keys:
           - "terminate": TerminationReason | None
@@ -132,7 +133,7 @@ class Orchestrator:
         }
 
         parse: DecisionParse = await self._decide_with_repair(
-            run, state, shard_getter, on_llm_exchange, result["guard_events"],
+            run, state, result_getter, on_llm_exchange, result["guard_events"],
         )
         if parse.decision is None:
             result["terminate"] = TerminationReason.NO_DECISION
@@ -147,7 +148,7 @@ class Orchestrator:
             premature = self._guards.check_premature_finish(state)
             if premature is not None:
                 # The only genuine nothing-to-do signal:
-                # finishing with zero routed shards AND zero spawns.
+                # finishing with zero routed results AND zero spawns.
                 result["guard_events"].append(premature)
                 result["terminate"] = TerminationReason.NO_PROGRESS
                 self._rejection_notes.pop(run.run_id, None)
@@ -176,11 +177,11 @@ class Orchestrator:
                 # depth 1 and the depth guard stays dormant unless
                 # recursive spawning is ever added — while width owns
                 # in-flight concurrency via this spawn's 0-based cohort
-                # position (a routed shard retires an agent from the
+                # position (a routed result retires an agent from the
                 # count, so a run of 20 sequential agents runs fine at
                 # max_width=8 / max_depth=5). The total-spawn census is
                 # owned by max_total_agents in the termination evaluator.
-                cohort_position = state.total_agents_spawned - state.routed_shard_count
+                cohort_position = state.total_agents_spawned - state.routed_result_count
                 guard = self._guards.check_dedup(state, envelope.objective)
                 if guard is None:
                     guard = self._guards.check_depth(state, _ORCHESTRATOR_SPAWN_DEPTH)
@@ -216,7 +217,7 @@ class Orchestrator:
             # (width/depth) or overlap (dedupe), not a verdict on the run:
             # leave terminate=None so the run continues — the turn-based
             # no-progress evaluator owns true no-progress via the flat
-            # routed_shard_count streak.
+            # routed_result_count streak.
             return result
 
         result["terminate"] = TerminationReason.ERROR
@@ -239,10 +240,10 @@ class Orchestrator:
         del notes[:-_REJECTION_NOTES_PER_RUN]
 
     async def _decide_with_repair(
-        self, run: Run, state: RunState, shard_getter: Any,
+        self, run: Run, state: RunState, result_getter: Any,
         on_llm_exchange: Any = None, guard_events: list[GuardEvent] | None = None,
     ) -> DecisionParse:
-        prompt = self._build_prompt(run, state, shard_getter)
+        prompt = self._build_prompt(run, state, result_getter)
         last_parse: DecisionParse | None = None
         for attempt in range(self._config.orchestration.repair_max + 1):
             request = CompletionRequest(
@@ -260,7 +261,7 @@ class Orchestrator:
                     attempt + 1, parse.error,
                 )
                 last_parse = parse
-                prompt = self._repair_prompt(run, state, shard_getter, parse.error)
+                prompt = self._repair_prompt(run, state, result_getter, parse.error)
                 continue
 
             handoff_failed = None
@@ -302,7 +303,7 @@ class Orchestrator:
                     error=f"handoff target not in catalog: {handoff_failed}",
                 )
                 prompt = self._repair_prompt(
-                    run, state, shard_getter, last_parse.error,
+                    run, state, result_getter, last_parse.error,
                 )
                 continue
 
@@ -316,35 +317,35 @@ class Orchestrator:
 
         return last_parse or DecisionParse(decision=None, error="repair exhausted")
 
-    def _build_prompt(self, run: Run, state: RunState, shard_getter: Any) -> str:
-        shards = list(shard_getter(run.run_id)) if shard_getter else []
-        # Bounded embedding (get_shards itself is owned elsewhere; the cap
-        # lives here at the embed site): older shards beyond the window are
-        # dropped wholesale, and any single shard whose encoded text passes
-        # the per-shard cap is cut with an explicit marker.
-        dropped = max(0, len(shards) - _PROMPT_MAX_SHARDS)
-        shard_parts = []
+    def _build_prompt(self, run: Run, state: RunState, result_getter: Any) -> str:
+        results = list(result_getter(run.run_id)) if result_getter else []
+        # Bounded embedding (get_results itself is owned elsewhere; the cap
+        # lives here at the embed site): older results beyond the window are
+        # dropped wholesale, and any single result whose encoded text passes
+        # the per-result cap is cut with an explicit marker.
+        dropped = max(0, len(results) - _PROMPT_MAX_RESULTS)
+        result_parts = []
         truncated = False
-        for shard in shards[dropped:]:
+        for result in results[dropped:]:
             encoded = _neutralize_fence_breaks(
-                json.dumps(shard, default=str, ensure_ascii=False))
-            if len(encoded) > _PROMPT_MAX_SHARD_CHARS:
-                encoded = encoded[:_PROMPT_MAX_SHARD_CHARS] + _SHARD_TRUNCATION_MARKER
+                json.dumps(result, default=str, ensure_ascii=False))
+            if len(encoded) > _PROMPT_MAX_RESULT_CHARS:
+                encoded = encoded[:_PROMPT_MAX_RESULT_CHARS] + _RESULT_TRUNCATION_MARKER
                 truncated = True
             source = _neutralize_fence_breaks(
-                repr(str(shard.get("agent", "unknown"))))
-            shard_parts.append(
+                repr(str(result.get("agent", "unknown"))))
+            result_parts.append(
                 f"<untrusted_result source={source}>"
                 f"{encoded}</untrusted_result>"
             )
-        shard_text = "\n".join(shard_parts) if shard_parts else "(no results yet)"
+        result_text = "\n".join(result_parts) if result_parts else "(no results yet)"
         cap_notes = []
         if dropped:
             cap_notes.append(
-                f"showing last {len(shard_parts)} of {len(shards)} results")
+                f"showing last {len(result_parts)} of {len(results)} results")
         if truncated:
             cap_notes.append(
-                f"each result capped at {_PROMPT_MAX_SHARD_CHARS} chars")
+                f"each result capped at {_PROMPT_MAX_RESULT_CHARS} chars")
         cap_note_line = f"({'; '.join(cap_notes)})\n" if cap_notes else ""
         persona_line = ""
         if state.active_persona is not None:
@@ -360,17 +361,17 @@ class Orchestrator:
                 for r in rejections
             )
             rejection_line = f"recent_guard_rejections={rendered}\n"
-        in_flight = state.total_agents_spawned - state.routed_shard_count
+        in_flight = state.total_agents_spawned - state.routed_result_count
         return (
             f"goal={run.goal!r}\n"
             f"turns_used={state.turn_count}\n"
             f"agents_spawned={state.total_agents_spawned}\n"
-            f"routed_shards={state.routed_shard_count}\n"
+            f"routed_results={state.routed_result_count}\n"
             f"in_flight_agents={in_flight}\n"
             f"available_agents={[a.name for a in run.agent_catalog]}\n"
             f"{persona_line}"
             f"{rejection_line}"
-            f"recent_results={shard_text}\n"
+            f"recent_results={result_text}\n"
             f"{cap_note_line}"
             f"\n"
             f"Respond with one JSON decision only.\n"
@@ -380,9 +381,9 @@ class Orchestrator:
             f'{{"kind":"finish","answer":"..."}}'
         )
 
-    def _repair_prompt(self, run: Run, state: RunState, shard_getter: Any,
+    def _repair_prompt(self, run: Run, state: RunState, result_getter: Any,
                        error: str | None) -> str:
-        base = self._build_prompt(run, state, shard_getter)
+        base = self._build_prompt(run, state, result_getter)
         return (
             f"Your previous response failed to parse.\n"
             f"Error: {error}\n\n"
@@ -403,7 +404,7 @@ class Orchestrator:
             "Decompose the goal "
             "into sub-tasks, spawn agents to execute them in parallel, wait for their "
             "results, and finish with a coherent answer. The user prompt reports "
-            "routed_shards (results delivered), in_flight_agents (spawned agents "
+            "routed_results (results delivered), in_flight_agents (spawned agents "
             "still running), and recent_guard_rejections (spawn entries the safety "
             "guards skipped — those agents were dropped, not scheduled). Decide "
             "wait-vs-spawn from that state: when agents are in flight or recent "

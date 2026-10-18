@@ -2,7 +2,7 @@
 (D19 no-await-in-session).
 
 The per-attempt executor ledger (D-K): one row per provisioning success,
-keyed by (env, tenant, run, agent, claim epoch, attempt). Written by the
+keyed by (env, tenant, run, agent, claim epoch, slice retry index). Written by the
 pool through the D28 claim fence (a stale slice's journal insert is
 inert), read by the terminal destroy sweep, and marked DESTROYED per
 ledger row as personas are cleaned.
@@ -16,7 +16,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 
 from agentclaw.community.core.agentswarm.domain import models as dm
 from agentclaw.community.core.agentswarm.repository.agent_attempt import model as om
-from agentclaw.community.core.agentswarm.repository.job import model as om_job
+from agentclaw.community.core.agentswarm.repository.run_dispatch import model as om_dispatch
 from agentclaw.community.log import get_logger
 
 _logger = get_logger(__name__)
@@ -26,9 +26,9 @@ from agentclaw.community.core.agentswarm.repository.agent_attempt.protocol impor
 from agentclaw.community.core.agentswarm.repository.types import _now_ms
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
-EXECUTOR_STATE_SPAWNED = "SPAWNED"
-EXECUTOR_STATE_BOUND = "BOUND"
-EXECUTOR_STATE_DESTROYED = "DESTROYED"
+BINDING_STATE_SPAWNED = "SPAWNED"
+BINDING_STATE_BOUND = "BOUND"
+BINDING_STATE_DESTROYED = "DESTROYED"
 
 # A transient MariaDB lock fault on the settle UPDATE is a retry, not a
 # lost claim (live-proven: a 1213 deadlock was misread as "claim lost"
@@ -76,7 +76,7 @@ class AgentAttemptRepository(AgentAttemptRepositoryProtocol):
 
     def record_agent_attempt_intent(self, run_id: dm.RunId, tenant: dm.TenantId,
                                           agent_id: dm.AgentId, claim_epoch: int,
-                                          attempt: int, executor_kind: str,
+                                          slice_retry_index: int, executor_kind: str,
                                           executor_id: str,
                                           executor_name: str) -> bool:
         """Write-ahead intent insert: fenced and idempotent like
@@ -87,18 +87,18 @@ class AgentAttemptRepository(AgentAttemptRepositoryProtocol):
         blank executor_id (the persona id does not exist yet) and the
         terminal destroy sweep derives the with-attempt identity from
         the row's own correlation columns. The fence is the same
-        job-row CURRENT claim_epoch predicate as ``record_agent_binding``;
+        dispatch-row CURRENT claim_epoch predicate as ``record_agent_binding``;
         a UK replay (crash-resume re-running the same attempt leg)
         converges to True instead of surfacing the race.
         """
         try:
             with self._db.orm_session() as session:
                 claim_alive = session.execute(
-                    select(om_job.AcAgentSwarmJobModel.job_id).where(
-                        om_job.AcAgentSwarmJobModel.run_id == run_id,
-                        om_job.AcAgentSwarmJobModel.tenant == tenant,
-                        om_job.AcAgentSwarmJobModel.claim_epoch == claim_epoch,
-                        om_job.AcAgentSwarmJobModel.is_deleted.is_(False),
+                    select(om_dispatch.AcAgentSwarmRunDispatchModel.dispatch_id).where(
+                        om_dispatch.AcAgentSwarmRunDispatchModel.run_id == run_id,
+                        om_dispatch.AcAgentSwarmRunDispatchModel.tenant == tenant,
+                        om_dispatch.AcAgentSwarmRunDispatchModel.claim_epoch == claim_epoch,
+                        om_dispatch.AcAgentSwarmRunDispatchModel.is_deleted.is_(False),
                     )
                 ).first()
                 if claim_alive is None:
@@ -108,11 +108,11 @@ class AgentAttemptRepository(AgentAttemptRepositoryProtocol):
                     run_id=run_id,
                     tenant=tenant,
                     claim_epoch=claim_epoch,
-                    attempt=attempt,
+                    slice_retry_index=slice_retry_index,
                     executor_kind=executor_kind,
                     executor_id=executor_id,
                     executor_name=executor_name,
-                    executor_state=EXECUTOR_STATE_SPAWNED,
+                    binding_state=BINDING_STATE_SPAWNED,
                     started_at=_now_ms(),
                 ))
         except IntegrityError:
@@ -121,32 +121,32 @@ class AgentAttemptRepository(AgentAttemptRepositoryProtocol):
 
     def record_agent_binding(self, run_id: dm.RunId, tenant: dm.TenantId,
                                agent_id: dm.AgentId, claim_epoch: int,
-                               attempt: int, executor_kind: str,
+                               slice_retry_index: int, executor_kind: str,
                                executor_id: str, executor_name: str) -> bool:
         """Fence-gated insert-or-settle (D28).
 
-        Fresh UK: the insert is allowed only while the job row's CURRENT
+        Fresh UK: the insert is allowed only while the dispatch row's CURRENT
         claim_epoch matches the caller's — the same EXISTS predicate
         AgentRepository.update_status applies to its UPDATE, evaluated
         in the same session/transaction as the insert. A stale slice's
         write is inert (rowcount-gate returns False, nothing lands). A
-        UK replay — the same (env, tenant, run, agent, epoch, attempt)
+        UK replay — the same (env, tenant, run, agent, epoch, slice_retry_index)
         row already landed — converges instead of surfacing the race
         (idempotent journal, requeue_orphan's convergence idiom): the
         replays are the write-ahead INTENT row (or a settle replay), so
         the convergence leg is the fenced settlement below — same row,
-        provisioned persona, ``executor_state`` BOUND. A DESTROYED row
+        provisioned persona, ``binding_state`` BOUND. A DESTROYED row
         is never resurrected; a fenced settlement returns False and the
         caller unwinds as a lost slice.
         """
         try:
             with self._db.orm_session() as session:
                 claim_alive = session.execute(
-                    select(om_job.AcAgentSwarmJobModel.job_id).where(
-                        om_job.AcAgentSwarmJobModel.run_id == run_id,
-                        om_job.AcAgentSwarmJobModel.tenant == tenant,
-                        om_job.AcAgentSwarmJobModel.claim_epoch == claim_epoch,
-                        om_job.AcAgentSwarmJobModel.is_deleted.is_(False),
+                    select(om_dispatch.AcAgentSwarmRunDispatchModel.dispatch_id).where(
+                        om_dispatch.AcAgentSwarmRunDispatchModel.run_id == run_id,
+                        om_dispatch.AcAgentSwarmRunDispatchModel.tenant == tenant,
+                        om_dispatch.AcAgentSwarmRunDispatchModel.claim_epoch == claim_epoch,
+                        om_dispatch.AcAgentSwarmRunDispatchModel.is_deleted.is_(False),
                     )
                 ).first()
                 if claim_alive is None:
@@ -156,11 +156,11 @@ class AgentAttemptRepository(AgentAttemptRepositoryProtocol):
                     run_id=run_id,
                     tenant=tenant,
                     claim_epoch=claim_epoch,
-                    attempt=attempt,
+                    slice_retry_index=slice_retry_index,
                     executor_kind=executor_kind,
                     executor_id=executor_id,
                     executor_name=executor_name,
-                    executor_state=EXECUTOR_STATE_SPAWNED,
+                    binding_state=BINDING_STATE_SPAWNED,
                     started_at=_now_ms(),
                 ))
         except IntegrityError:
@@ -168,14 +168,14 @@ class AgentAttemptRepository(AgentAttemptRepositoryProtocol):
             # same-identity settle replay already landed — settle THAT row
             # under the same claim fence instead of surfacing the collision.
             return self._settle_binding_locked(
-                run_id, tenant, agent_id, claim_epoch, attempt,
+                run_id, tenant, agent_id, claim_epoch, slice_retry_index,
                 executor_id, executor_name,
             )
         return True
 
     def _settle_binding_locked(self, run_id: dm.RunId, tenant: dm.TenantId,
                                agent_id: dm.AgentId, claim_epoch: int,
-                               attempt: int, executor_id: str,
+                               slice_retry_index: int, executor_id: str,
                                executor_name: str) -> bool:
         """Fenced UK settlement: SPAWNED intent -> BOUND with the real
         persona. False means the claim is gone or the row is DESTROYED —
@@ -188,15 +188,15 @@ class AgentAttemptRepository(AgentAttemptRepositoryProtocol):
         in-flight attempt FAILED as a poison pill. Rowcount 0 keeps the
         immediate False of the unfenced contract — including the
         destroy-sweep race, whose signal is semantic (the retried
-        UPDATE's ``executor_state != DESTROYED`` predicate matches no
+        UPDATE's ``binding_state != DESTROYED`` predicate matches no
         row), not an exception to retry.
         """
-        job_epoch_current = (
-            select(om_job.AcAgentSwarmJobModel.job_id).where(
-                om_job.AcAgentSwarmJobModel.run_id == run_id,
-                om_job.AcAgentSwarmJobModel.tenant == tenant,
-                om_job.AcAgentSwarmJobModel.claim_epoch == claim_epoch,
-                om_job.AcAgentSwarmJobModel.is_deleted.is_(False),
+        dispatch_epoch_current = (
+            select(om_dispatch.AcAgentSwarmRunDispatchModel.dispatch_id).where(
+                om_dispatch.AcAgentSwarmRunDispatchModel.run_id == run_id,
+                om_dispatch.AcAgentSwarmRunDispatchModel.tenant == tenant,
+                om_dispatch.AcAgentSwarmRunDispatchModel.claim_epoch == claim_epoch,
+                om_dispatch.AcAgentSwarmRunDispatchModel.is_deleted.is_(False),
             ).exists()
         )
         for settle_attempt in range(1, _SETTLE_MAX_ATTEMPTS + 1):
@@ -208,15 +208,15 @@ class AgentAttemptRepository(AgentAttemptRepositoryProtocol):
                             om.AcAgentSwarmAgentAttemptModel.tenant == tenant,
                             om.AcAgentSwarmAgentAttemptModel.agent_id == agent_id,
                             om.AcAgentSwarmAgentAttemptModel.claim_epoch == claim_epoch,
-                            om.AcAgentSwarmAgentAttemptModel.attempt == attempt,
-                            om.AcAgentSwarmAgentAttemptModel.executor_state
-                            != EXECUTOR_STATE_DESTROYED,
+                            om.AcAgentSwarmAgentAttemptModel.slice_retry_index == slice_retry_index,
+                            om.AcAgentSwarmAgentAttemptModel.binding_state
+                            != BINDING_STATE_DESTROYED,
                             om.AcAgentSwarmAgentAttemptModel.is_deleted.is_(False),
-                            job_epoch_current,
+                            dispatch_epoch_current,
                         ).values(
                             executor_id=executor_id,
                             executor_name=executor_name,
-                            executor_state=EXECUTOR_STATE_BOUND,
+                            binding_state=BINDING_STATE_BOUND,
                         )
                     )
                     if result.rowcount == 0:
@@ -232,7 +232,7 @@ class AgentAttemptRepository(AgentAttemptRepositoryProtocol):
                     _logger.warning(
                         "[agentswarm][attempt] settle hit a transient lock "
                         "fault, retrying run=%s caller_epoch=%s attempt=%s "
-                        "try=%d/%d code=%r", run_id, claim_epoch, attempt,
+                        "try=%d/%d code=%r", run_id, claim_epoch, slice_retry_index,
                         settle_attempt, _SETTLE_MAX_ATTEMPTS,
                         _driver_error_code(exc),
                     )
@@ -241,7 +241,7 @@ class AgentAttemptRepository(AgentAttemptRepositoryProtocol):
                 _logger.warning(
                     "[agentswarm][attempt] settle failed run=%s "
                     "caller_epoch=%s attempt=%s code=%r exc=%r",
-                    run_id, claim_epoch, attempt, _driver_error_code(exc), exc,
+                    run_id, claim_epoch, slice_retry_index, _driver_error_code(exc), exc,
                 )
                 return False
         return False
@@ -288,11 +288,11 @@ class AgentAttemptRepository(AgentAttemptRepositoryProtocol):
                 {
                     "agent_id": r.agent_id,
                     "claim_epoch": r.claim_epoch,
-                    "attempt": r.attempt,
+                    "slice_retry_index": r.slice_retry_index,
                     "executor_kind": r.executor_kind,
                     "executor_id": r.executor_id,
                     "executor_name": r.executor_name,
-                    "executor_state": r.executor_state,
+                    "binding_state": r.binding_state,
                     "result_status": r.result_status,
                     "result_message": r.result_message,
                     "started_at": r.started_at,
@@ -302,26 +302,26 @@ class AgentAttemptRepository(AgentAttemptRepositoryProtocol):
 
     def record_attempt_result(self, run_id: dm.RunId, tenant: dm.TenantId,
                               agent_id: dm.AgentId, claim_epoch: int,
-                              attempt: int, result_status: str,
+                              slice_retry_index: int, result_status: str,
                               result_message: str | None) -> int:
         """Record the attempt's own outcome, fenced by its claim epoch.
 
-        The ledger's ``executor_state`` only tracks the provisioning
+        The ledger's ``binding_state`` only tracks the provisioning
         lifecycle (SPAWNED/BOUND/DESTROYED), so a FAILED attempt looked
         like a SPAWNED one. This diagnostic UPDATE keys the attempt row on
-        (run_id, tenant, agent_id, claim_epoch, attempt) under the same
-        job-row CURRENT claim_epoch fence as the settle, writes
+        (run_id, tenant, agent_id, claim_epoch, slice_retry_index) under the same
+        dispatch-row CURRENT claim_epoch fence as the settle, writes
         ``result_status``/``result_message``, and stamps ``ended_at``.
         Best-effort by contract: a fenced-out or DESTROYED row (rowcount 0)
         is returned to the caller, never raised — a lost diagnostic write
         must not fail a completion.
         """
-        job_epoch_current = (
-            select(om_job.AcAgentSwarmJobModel.job_id).where(
-                om_job.AcAgentSwarmJobModel.run_id == run_id,
-                om_job.AcAgentSwarmJobModel.tenant == tenant,
-                om_job.AcAgentSwarmJobModel.claim_epoch == claim_epoch,
-                om_job.AcAgentSwarmJobModel.is_deleted.is_(False),
+        dispatch_epoch_current = (
+            select(om_dispatch.AcAgentSwarmRunDispatchModel.dispatch_id).where(
+                om_dispatch.AcAgentSwarmRunDispatchModel.run_id == run_id,
+                om_dispatch.AcAgentSwarmRunDispatchModel.tenant == tenant,
+                om_dispatch.AcAgentSwarmRunDispatchModel.claim_epoch == claim_epoch,
+                om_dispatch.AcAgentSwarmRunDispatchModel.is_deleted.is_(False),
             ).exists()
         )
         with self._db.orm_session() as session:
@@ -332,11 +332,11 @@ class AgentAttemptRepository(AgentAttemptRepositoryProtocol):
                         om.AcAgentSwarmAgentAttemptModel.tenant == tenant,
                         om.AcAgentSwarmAgentAttemptModel.agent_id == agent_id,
                         om.AcAgentSwarmAgentAttemptModel.claim_epoch == claim_epoch,
-                        om.AcAgentSwarmAgentAttemptModel.attempt == attempt,
-                        om.AcAgentSwarmAgentAttemptModel.executor_state
-                        != EXECUTOR_STATE_DESTROYED,
+                        om.AcAgentSwarmAgentAttemptModel.slice_retry_index == slice_retry_index,
+                        om.AcAgentSwarmAgentAttemptModel.binding_state
+                        != BINDING_STATE_DESTROYED,
                         om.AcAgentSwarmAgentAttemptModel.is_deleted.is_(False),
-                        job_epoch_current,
+                        dispatch_epoch_current,
                     ).values(
                         result_status=result_status,
                         result_message=result_message,
@@ -354,7 +354,7 @@ class AgentAttemptRepository(AgentAttemptRepositoryProtocol):
         executor_id-level addressing across the whole run: one persona id
         can sit on more than one row (the cross-slice replay case above),
         and the sweep marks each of them as its own record. Post-terminal
-        by contract — no claim fence applies (the job row is already
+        by contract — no claim fence applies (the dispatch row is already
         complete); rows already marked stay untouched, so the count is
         the rows this call transitioned.
         """
@@ -364,23 +364,23 @@ class AgentAttemptRepository(AgentAttemptRepositoryProtocol):
                     om.AcAgentSwarmAgentAttemptModel.run_id == run_id,
                     om.AcAgentSwarmAgentAttemptModel.tenant == tenant,
                     om.AcAgentSwarmAgentAttemptModel.executor_id == executor_id,
-                    om.AcAgentSwarmAgentAttemptModel.executor_state
-                    != EXECUTOR_STATE_DESTROYED,
+                    om.AcAgentSwarmAgentAttemptModel.binding_state
+                    != BINDING_STATE_DESTROYED,
                     om.AcAgentSwarmAgentAttemptModel.is_deleted.is_(False),
-                ).values(executor_state=EXECUTOR_STATE_DESTROYED)
+                ).values(binding_state=BINDING_STATE_DESTROYED)
             )
             return result.rowcount
 
     def mark_intent_binding_destroyed(self, run_id: dm.RunId,
                                       tenant: dm.TenantId,
-                                      agent_id: dm.AgentId, attempt: int) -> int:
+                                      agent_id: dm.AgentId, slice_retry_index: int) -> int:
         """Mark blank-id INTENT rows DESTROYED, by attempt correlation.
 
         Post-terminal like ``mark_binding_destroyed`` (no claim fence
         applies). Addresses exactly the rows the executor_id-level
         method cannot see: write-ahead intent rows whose ``setup()``
         never settled, i.e. ``executor_id`` still blank. The
-        (run_id, agent_id, attempt) correlation is epoch-independent on
+        (run_id, agent_id, slice_retry_index) correlation is epoch-independent on
         purpose — a crash-resume replays the same attempt number under
         a new epoch, and every blank row of that attempt shares the
         one derived persona the sweep just destroyed.
@@ -391,11 +391,11 @@ class AgentAttemptRepository(AgentAttemptRepositoryProtocol):
                     om.AcAgentSwarmAgentAttemptModel.run_id == run_id,
                     om.AcAgentSwarmAgentAttemptModel.tenant == tenant,
                     om.AcAgentSwarmAgentAttemptModel.agent_id == agent_id,
-                    om.AcAgentSwarmAgentAttemptModel.attempt == attempt,
+                    om.AcAgentSwarmAgentAttemptModel.slice_retry_index == slice_retry_index,
                     om.AcAgentSwarmAgentAttemptModel.executor_id == "",
-                    om.AcAgentSwarmAgentAttemptModel.executor_state
-                    != EXECUTOR_STATE_DESTROYED,
+                    om.AcAgentSwarmAgentAttemptModel.binding_state
+                    != BINDING_STATE_DESTROYED,
                     om.AcAgentSwarmAgentAttemptModel.is_deleted.is_(False),
-                ).values(executor_state=EXECUTOR_STATE_DESTROYED)
+                ).values(binding_state=BINDING_STATE_DESTROYED)
             )
             return result.rowcount

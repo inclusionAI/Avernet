@@ -79,7 +79,7 @@ class TestRejectionNotesWholesaleClear:
         observed_max = 0
         for index in range(_TRACKED_RUNS + 6):
             run = _mk_run(index)
-            result = asyncio.run(orch.run_slice(
+            result = asyncio.run(orch.decide_turn(
                 run, RunState(run=run), lambda rid: [],
             ))
 

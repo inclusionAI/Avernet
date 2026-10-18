@@ -1,3 +1,8 @@
+"""AgentSwarmWorker — claims dispatches off ac_agent_swarm_run_dispatch and
+runs each as a bounded slice. Concept map: Run 1:1 run_dispatch row; one
+dispatch row hosts N claim_epoch incarnations (each = one slice episode);
+Agent 1:1 agent_result.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -24,13 +29,12 @@ _ABORT_JOIN_MAX_SECONDS = 5.0
 # bounded chunks so a large fleet never holds one oversized session.
 _SWEEP_PAGE_SIZE = 100
 
-# 4.1/4.2: job statuses the claim/reclaim predicates can never match —
+# 4.1/4.2: dispatch statuses the claim/reclaim predicates can never match —
 # a RUNNING run whose row sits here (or has no row at all) is a queue
 # orphan: no worker will ever pick it up again without the reaper.
-_DEAD_JOB_STATUSES = frozenset((
-    dm.TaskQueueStatus.SUCCEEDED.value,
-    dm.TaskQueueStatus.FAILED.value,
-    dm.TaskQueueStatus.TIMED_OUT.value,
+_DEAD_DISPATCH_STATUSES = frozenset((
+    dm.DispatchStatus.DONE.value,
+    dm.DispatchStatus.FAILED.value,
 ))
 
 # Terminal run statuses: a run here can never be claimed again, so its
@@ -46,7 +50,7 @@ _TERMINAL_RUN_STATUSES = (
     dm.RunStatus.STUCK,
 )
 
-_EXECUTOR_STATE_DESTROYED = "DESTROYED"
+_BINDING_STATE_DESTROYED = "DESTROYED"
 
 # Lease-renewal thread: bounded join on shutdown. The thread only does a
 # short sync DB update per in-flight run, so 5s is generous headroom; a
@@ -64,7 +68,7 @@ class AgentSwarmWorker(LifecycleBase):
         self,
         config: AgentSwarmConfig,
         handler: SwarmRunHandler,
-        job_repo: Any,
+        dispatch_repo: Any,
         run_repo: Any = None,
         guard_repo: Any = None,
         attempt_repo: Any = None,
@@ -77,7 +81,7 @@ class AgentSwarmWorker(LifecycleBase):
         # skips only that leg.
         self._config = config
         self._handler = handler
-        self._job_repo = job_repo
+        self._dispatch_repo = dispatch_repo
         self._run_repo = run_repo
         self._guard_repo = guard_repo
         self._attempt_repo = attempt_repo
@@ -88,7 +92,7 @@ class AgentSwarmWorker(LifecycleBase):
         self._maintenance_task: asyncio.Task | None = None
         self._inflight: dict[str, dict] = {}
         # Lease renewal runs on a dedicated wall-clock thread so slice work
-        # starving the asyncio loop cannot lapse a lease and hand the job to
+        # starving the asyncio loop cannot lapse a lease and hand the dispatch to
         # a peer's reclaim. Every _inflight access is serialized by _inflight_lock.
         self._inflight_lock = threading.Lock()
         self._lease_thread: threading.Thread | None = None
@@ -132,7 +136,7 @@ class AgentSwarmWorker(LifecycleBase):
         State machine:
 
         1. stop claiming — ``_running=False``: the poll loop exits after
-           its current iteration; jobs already claimed by that iteration
+           its current iteration; dispatches already claimed by that iteration
            still complete normally.
         2. grace wait — up to ``config.drain.grace_seconds`` for in-flight
            ``handle_slice`` calls to finish. The dedicated lease-renewal
@@ -142,7 +146,7 @@ class AgentSwarmWorker(LifecycleBase):
            Tracked via ``self._inflight``.
         3. cooperative abort — grace expired with slices still in flight:
            signal ``set_slice_lost(True)`` per in-flight run so the slice
-           unwinds through its checkpoint+release path (the job is
+           unwinds through its checkpoint+release path (the dispatch is
            rescheduled for reclaim, no partial writes persisted), then
            join a bounded short window.
         4. hard cancel — anything still unwinding after the abort window
@@ -224,35 +228,35 @@ class AgentSwarmWorker(LifecycleBase):
         lease = self._config.orchestration.lease_seconds
         batch = self._config.orchestration.batch_size
         reclaimed = await asyncio.to_thread(
-            self._job_repo.reclaim_batch, self._worker_id, batch * 2, lease
+            self._dispatch_repo.reclaim_batch, self._worker_id, batch * 2, lease
         )
         processed = 0
-        for job in reclaimed:
-            await self._run_job(job, reclaimed=True)
+        for dispatch in reclaimed:
+            await self._run_dispatch(dispatch, reclaimed=True)
             processed += 1
         claimed = await asyncio.to_thread(
-            self._job_repo.claim_batch, self._worker_id, None, batch, lease
+            self._dispatch_repo.claim_batch, self._worker_id, None, batch, lease
         )
-        for job in claimed:
-            await self._run_job(job, reclaimed=False)
+        for dispatch in claimed:
+            await self._run_dispatch(dispatch, reclaimed=False)
             processed += 1
         return processed
 
-    async def _run_job(self, job: dict, *, reclaimed: bool) -> None:
-        run_id = job["run_id"]
-        tenant = job["tenant"]
-        epoch = job["claim_epoch"]
-        cancel = job.get("cancel_requested", False)
-        if reclaimed and job.get("reclaims", 0) > self._config.orchestration.reclaim_max:
+    async def _run_dispatch(self, dispatch: dict, *, reclaimed: bool) -> None:
+        run_id = dispatch["run_id"]
+        tenant = dispatch["tenant"]
+        epoch = dispatch["claim_epoch"]
+        cancel = dispatch.get("cancel_requested", False)
+        if reclaimed and dispatch.get("reclaims", 0) > self._config.orchestration.reclaim_max:
             # D40 circuit breaker: reclaim_max no-progress reclaims -> STUCK.
             await asyncio.to_thread(
                 self._handler.force_stuck,
                 run_id, tenant, epoch,
-                f"reclaim circuit breaker: {job['reclaims']} no-progress reclaims",
+                f"reclaim circuit breaker: {dispatch['reclaims']} no-progress reclaims",
                 self._worker_id,
             )
             return
-        self._mark_inflight(run_id, job)
+        self._mark_inflight(run_id, dispatch)
         try:
             outcome = await self._handler.handle_slice(
                     run_id, tenant, epoch, cancel, worker_id=self._worker_id,
@@ -268,15 +272,15 @@ class AgentSwarmWorker(LifecycleBase):
             )
             if not fenced:
                 await asyncio.to_thread(
-                    self._job_repo.fail,
+                    self._dispatch_repo.fail,
                     run_id, tenant, str(exc), self._worker_id, epoch,
                 )
         finally:
             self._clear_inflight(run_id)
 
-    def _mark_inflight(self, run_id: str, job: dict) -> None:
+    def _mark_inflight(self, run_id: str, dispatch: dict) -> None:
         with self._inflight_lock:
-            self._inflight[run_id] = job
+            self._inflight[run_id] = dispatch
 
     def _clear_inflight(self, run_id: str) -> None:
         with self._inflight_lock:
@@ -316,7 +320,7 @@ class AgentSwarmWorker(LifecycleBase):
     def _lease_renewal_loop(self) -> None:
         # Runs on a dedicated thread: renews leases on wall-clock time so a
         # CPU-bound slice starving the asyncio loop cannot let the lease lapse
-        # and hand the job to a peer's reclaim (the slice_lost root cause).
+        # and hand the dispatch to a peer's reclaim (the slice_lost root cause).
         lease = self._config.orchestration.lease_seconds
         while not self._lease_stop.is_set() and self._lease_should_run():
             self._renew_inflight_leases(lease)
@@ -329,11 +333,11 @@ class AgentSwarmWorker(LifecycleBase):
         return lease / 3.0
 
     def _renew_inflight_leases(self, lease: int) -> None:
-        for run_id, job in self._inflight_snapshot().items():
+        for run_id, dispatch in self._inflight_snapshot().items():
             try:
-                ok = self._job_repo.renew_lease(
-                    run_id, job["tenant"], self._worker_id, lease,
-                    job["claim_epoch"],
+                ok = self._dispatch_repo.renew_lease(
+                    run_id, dispatch["tenant"], self._worker_id, lease,
+                    dispatch["claim_epoch"],
                 )
             except Exception:
                 logger.exception(
@@ -344,7 +348,7 @@ class AgentSwarmWorker(LifecycleBase):
             if not ok:
                 logger.warning(
                     "[agentswarm][worker] lease lost for run=%s (epoch=%d)",
-                    run_id, job["claim_epoch"],
+                    run_id, dispatch["claim_epoch"],
                 )
                 self._notify_slice_lost(run_id)
 
@@ -364,7 +368,7 @@ class AgentSwarmWorker(LifecycleBase):
     async def _heartbeat_loop(self) -> None:
         # Lifecycle keeper for the drain contract (12.2): it lives as long as
         # there is anything to keep alive — running, in-flight slices
-        # unwinding, or the poll task holding claimed-but-unstarted jobs —
+        # unwinding, or the poll task holding claimed-but-unstarted dispatches —
         # so a healthy drain does not exit early and strand leases. Actual
         # lease renewal happens on _lease_renewal_loop, off this event loop,
         # so a CPU-bound slice cannot starve it into a reclaim.
@@ -451,17 +455,17 @@ class AgentSwarmWorker(LifecycleBase):
             self._attempt_repo.list_agent_bindings, run_id, tenant,
         )
         return any(
-            row.get("executor_state") != _EXECUTOR_STATE_DESTROYED
+            row.get("binding_state") != _BINDING_STATE_DESTROYED
             for row in bindings
         )
 
     def _fresh_run(self, run: dm.Run) -> bool:
         """One lease window of submit grace: run.create commits before the
-        job enqueue does, so a run inside this window may simply not have
-        its job row yet — re-enqueueing against it would race the
+        dispatch enqueue does, so a run inside this window may simply not have
+        its dispatch row yet — re-enqueueing against it would race the
         submitter's own enqueue (whose failure compensates by failing the
         run). The grace is also the minimum time a healthy fleet needs to
-        surface any job row at all.
+        surface any dispatch row at all.
         """
         if not run.started_at:
             return False
@@ -474,7 +478,7 @@ class AgentSwarmWorker(LifecycleBase):
         TerminationEvaluator enforces
         (``orchestration.wall_clock_seconds``), so the reaper's forced
         TIMED_OUT and a rehydrated slice's own termination can never
-        disagree. The job row's ``deadline_at`` is deliberately NOT
+        disagree. The dispatch row's ``deadline_at`` is deliberately NOT
         consulted: it mirrors the submit-sync wait budget
         (``max(slice_max_seconds, 1)`` computed at enqueue), not the
         run's wall clock — using it would kill healthy long runs
@@ -489,18 +493,18 @@ class AgentSwarmWorker(LifecycleBase):
         try:
             if self._fresh_run(run):
                 return 0
-            job = await run_blocking(
-                self._job_repo.get_run_job, run.run_id, run.tenant,
+            dispatch = await run_blocking(
+                self._dispatch_repo.get_run_dispatch, run.run_id, run.tenant,
             )
-            if job is not None and job["status"] not in _DEAD_JOB_STATUSES:
+            if dispatch is not None and dispatch["status"] not in _DEAD_DISPATCH_STATUSES:
                 # Claimable, interpreted exactly like the claim
-                # predicates: PENDING claims once run_at is due; RUNNING
+                # predicates: READY claims once ready_at is due; LEASED
                 # is held by a live owner or reclaimable on lease expiry
                 # (the D40 breaker owns crash loops). The queue will act
                 # without the reaper — stay silent.
                 return 0
             if self._wall_clock_expired(run):
-                return await self._expire_deadline_orphan(run, job)
+                return await self._expire_deadline_orphan(run, dispatch)
             return await self._requeue_orphan(run)
         except asyncio.CancelledError:
             raise
@@ -513,7 +517,7 @@ class AgentSwarmWorker(LifecycleBase):
 
     async def _requeue_orphan(self, run: dm.Run) -> int:
         acted = await run_blocking(
-            self._job_repo.requeue_orphan, run.run_id, run.tenant,
+            self._dispatch_repo.requeue_orphan, run.run_id, run.tenant,
             self._submit_deadline_seconds(),
         )
         if acted:
@@ -524,37 +528,37 @@ class AgentSwarmWorker(LifecycleBase):
             )
         return 1 if acted else 0
 
-    async def _expire_deadline_orphan(self, run: dm.Run, job: dict | None) -> int:
+    async def _expire_deadline_orphan(self, run: dm.Run, dispatch: dict | None) -> int:
         """4.2 deadline leg: past-wall-clock orphans go terminal TIMED_OUT
         through the fenced ``update_status`` path (the same write
         force_stuck/force_fail use), freeing the tenant admission slot
         and the active idempotency key via the terminal-status handling.
         A no-row orphan gets the guarded requeue FIRST: the D28 fence
-        only matches a job row at the caller's epoch, so the reaper
+        only matches a dispatch row at the caller's epoch, so the reaper
         provisions its own fence. A claiming worker racing us bumps the
         epoch and our write matches nothing — the claimant's slice
         fires and owns the same TIMED_OUT through 4.4's
         past-deadline-still-claimable path. Bot teardown and message
         retention stay with the slice's terminal paths: the orphaned
-        job row is (re)marked terminal by a claim's already-terminal
+        dispatch row is (re)marked terminal by a claim's already-terminal
         fast path, never re-runs.
         """
-        if job is None:
+        if dispatch is None:
             await run_blocking(
-                self._job_repo.requeue_orphan, run.run_id, run.tenant,
+                self._dispatch_repo.requeue_orphan, run.run_id, run.tenant,
                 self._submit_deadline_seconds(),
             )
-            job = await run_blocking(
-                self._job_repo.get_run_job, run.run_id, run.tenant,
+            dispatch = await run_blocking(
+                self._dispatch_repo.get_run_dispatch, run.run_id, run.tenant,
             )
-            if job is None:
+            if dispatch is None:
                 return 0
         ok = await run_blocking(
             self._run_repo.update_status,
             run.run_id, run.tenant, dm.RunStatus.TIMED_OUT,
             termination_reason=dm.TerminationReason.WALL_CLOCK,
             error="orphan reaper: wall-clock deadline expired",
-            claim_epoch=job["claim_epoch"],
+            claim_epoch=dispatch["claim_epoch"],
         )
         if not ok:
             logger.info(

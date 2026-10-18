@@ -19,13 +19,13 @@ def _now_ms() -> int:
 class _NoProgressWindow:
     """Per-run no-progress tracking keyed by run_id.
 
-    turn_count and routed_shard_count are durable (rebuilt from rows on
+    turn_count and routed_result_count are durable (rebuilt from rows on
     every slice), so a window survives rescheduled slices in this
     worker; a reclaim by a different worker just restarts its baseline.
     """
 
     last_turn: int = -1
-    last_routed_shard_count: int = -1
+    last_routed_result_count: int = -1
     last_spawn_count: int = -1
     flat_streak: int = 0
 
@@ -76,21 +76,21 @@ class TerminationEvaluator:
         if window.last_turn != state.turn_count:
             # One observation per orchestrator turn (the handler evaluates
             # once after each decision). A turn is FLAT only when nothing
-            # is in flight AND nothing new landed: routed shards are real
+            # is in flight AND nothing new landed: routed results are real
             # progress, newly dispatched spawns are progress, and spawned-
-            # but-unsharded agents are IN FLIGHT — a mid-provisioning cohort
+            # but-unrouted agents are IN FLIGHT — a mid-provisioning cohort
             # (a BaaS persona takes ~90-120s) with spawned > routed is
             # activity by definition; a repeated WAIT on already-satisfied
             # refs during that window must not stack the streak.
-            in_flight = state.total_agents_spawned - state.routed_shard_count
-            if state.routed_shard_count > window.last_routed_shard_count >= 0:
+            in_flight = state.total_agents_spawned - state.routed_result_count
+            if state.routed_result_count > window.last_routed_result_count >= 0:
                 window.flat_streak = 0
             elif in_flight > 0:
                 window.flat_streak = 0
-            elif window.last_routed_shard_count >= 0:
+            elif window.last_routed_result_count >= 0:
                 window.flat_streak += 1
             window.last_turn = state.turn_count
-            window.last_routed_shard_count = state.routed_shard_count
+            window.last_routed_result_count = state.routed_result_count
             window.last_spawn_count = state.total_agents_spawned
         return window.flat_streak >= self._no_progress_threshold
 

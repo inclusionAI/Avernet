@@ -18,9 +18,9 @@ from agentclaw.community.core.agentswarm.domain import models as dm
 from agentclaw.community.core.agentswarm.repository import registry as om
 from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
 from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
-from agentclaw.community.core.agentswarm.repository.job import JobRepository
+from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
 from agentclaw.community.core.agentswarm.repository.message import MessageRepository
-from agentclaw.community.core.agentswarm.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentswarm.repository.agent_result import AgentResultRepository
 from agentclaw.community.core.agentswarm.repository.round import RoundRepository
 from agentclaw.community.core.agentswarm.repository.run import RunRepository
 from agentclaw.community.utils.env_utils import get_current_env
@@ -54,10 +54,10 @@ def db():
         om.AcAgentSwarmRunModel.__table__,
         om.AcAgentSwarmAgentModel.__table__,
         om.AcAgentSwarmMessageModel.__table__,
-        om.AcAgentSwarmResultShardModel.__table__,
+        om.AcAgentSwarmAgentResultModel.__table__,
         om.AcAgentSwarmRoundModel.__table__,
         om.AcAgentSwarmGuardEventModel.__table__,
-        om.AcAgentSwarmJobModel.__table__,
+        om.AcAgentSwarmRunDispatchModel.__table__,
     ])
     yield _TestDB(engine)
     engine.dispose()
@@ -79,8 +79,8 @@ def msg_repo(db):
 
 
 @pytest.fixture()
-def shard_repo(db):
-    return ResultShardRepository(db)
+def result_repo(db):
+    return AgentResultRepository(db)
 
 
 @pytest.fixture()
@@ -94,8 +94,8 @@ def guard_repo(db):
 
 
 @pytest.fixture()
-def job_repo(db):
-    return JobRepository(db)
+def dispatch_repo(db):
+    return RunDispatchRepository(db)
 
 
 TENANT_A = dm.TenantId("tenant-a")
@@ -144,9 +144,9 @@ def _mk_agent(run: dm.Run, name="a1") -> dm.Agent:
     )
 
 
-def _mk_shard(run: dm.Run, agent: dm.Agent) -> dm.ResultShard:
-    return dm.ResultShard(
-        id=dm.ShardId(uuid.uuid4().hex),
+def _mk_result(run: dm.Run, agent: dm.Agent) -> dm.AgentResult:
+    return dm.AgentResult(
+        id=dm.ResultId(uuid.uuid4().hex),
         run_id=run.run_id,
         tenant=TENANT_A,
         source_agent_id=agent.agent_id,
@@ -156,15 +156,15 @@ def _mk_shard(run: dm.Run, agent: dm.Agent) -> dm.ResultShard:
     )
 
 
-def _insert_foreign_env_job(job_repo, status="PENDING", lease_expires_at=None):
-    """Raw job row in a foreign env — enqueue's ORM default stamps the current
+def _insert_foreign_env_dispatch(dispatch_repo, status="READY", lease_expires_at=None):
+    """Raw dispatch row in a foreign env — enqueue's ORM default stamps the current
     env, so only a direct insert can make a row claim_batch must never see."""
-    with db_session(job_repo) as session:
-        session.add(om.AcAgentSwarmJobModel(
-            job_id=uuid.uuid4().hex,
+    with db_session(dispatch_repo) as session:
+        session.add(om.AcAgentSwarmRunDispatchModel(
+            dispatch_id=uuid.uuid4().hex,
             run_id=uuid.uuid4().hex,
             status=status,
-            run_at=datetime(2020, 1, 1),
+            ready_at=datetime(2020, 1, 1),
             deadline_at=datetime(2030, 1, 1),
             lease_expires_at=lease_expires_at,
             tenant=str(TENANT_A),
@@ -218,11 +218,11 @@ class TestRunRepository:
         assert run_repo.get(run.run_id, TENANT_B) is None
         assert run_repo.get(run.run_id, TENANT_A) is not None
 
-    def test_update_status(self, run_repo, job_repo):
+    def test_update_status(self, run_repo, dispatch_repo):
         run = _mk_run()
         run_repo.create(run)
-        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
-        claimed = job_repo.claim_batch("w1", None, 1, 60)[0]
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)[0]
         ok = run_repo.update_status(
             run.run_id, TENANT_A,
             dm.RunStatus.COMPLETED,
@@ -235,13 +235,13 @@ class TestRunRepository:
         assert fetched.status == dm.RunStatus.COMPLETED
         assert fetched.ended_at is not None
 
-    def test_get_by_idempotency_running_only(self, run_repo, job_repo):
+    def test_get_by_idempotency_running_only(self, run_repo, dispatch_repo):
         run = _mk_run()
         run.active_idempotency_key = dm.IdempotencyKey("idem-key-1")
         run_repo.create(run)
         assert run_repo.get_by_idempotency("idem-key-1", TENANT_A) is not None
-        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
-        claimed = job_repo.claim_batch("w1", None, 1, 60)[0]
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)[0]
         assert run_repo.update_status(
             run.run_id, TENANT_A, dm.RunStatus.COMPLETED,
             claim_epoch=claimed["claim_epoch"],
@@ -343,11 +343,11 @@ class TestRunRepository:
     def test_get_nonexistent(self, run_repo):
         assert run_repo.get("nope", TENANT_A) is None
 
-    def test_update_status_fenced_by_claim_epoch(self, run_repo, job_repo):
+    def test_update_status_fenced_by_claim_epoch(self, run_repo, dispatch_repo):
         run = _mk_run()
         run_repo.create(run)
-        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
-        claimed = job_repo.claim_batch("w1", None, 1, 60)[0]
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)[0]
         epoch = claimed["claim_epoch"]
         assert run_repo.update_status(run.run_id, TENANT_A, dm.RunStatus.COMPLETED,
                                       claim_epoch=epoch + 100) is False
@@ -356,11 +356,11 @@ class TestRunRepository:
         assert run_repo.update_status(run.run_id, TENANT_A, dm.RunStatus.COMPLETED,
                                       claim_epoch=epoch) is True
 
-    def test_terminal_update_sets_ended_at(self, run_repo, job_repo):
+    def test_terminal_update_sets_ended_at(self, run_repo, dispatch_repo):
         run = _mk_run()
         run_repo.create(run)
-        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
-        claimed = job_repo.claim_batch("w1", None, 1, 60)[0]
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)[0]
         run_repo.update_status(run.run_id, TENANT_A, dm.RunStatus.COMPLETED,
                               termination_reason=dm.TerminationReason.FINISH,
                               final_answer="done",
@@ -369,17 +369,17 @@ class TestRunRepository:
         assert fetched.ended_at is not None
         assert fetched.final_answer == "done"
 
-    def test_list_page_pagination_and_status_filter(self, run_repo, job_repo):
+    def test_list_page_pagination_and_status_filter(self, run_repo, dispatch_repo):
         for _ in range(5):
             run = _mk_run()
             run_repo.create(run)
-            job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+            dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
         page1 = run_repo.list_page(TENANT_A, page=1, page_size=2)
         assert page1.total == 5
         assert len(page1.items) == 2
         page3 = run_repo.list_page(TENANT_A, page=3, page_size=2)
         assert len(page3.items) == 1
-        claims = {c["run_id"]: c for c in job_repo.claim_batch("w1", None, 10, 60)}
+        claims = {c["run_id"]: c for c in dispatch_repo.claim_batch("w1", None, 10, 60)}
         for r in page1.items:
             c = claims[r.run_id]
             assert run_repo.update_status(r.run_id, TENANT_A, dm.RunStatus.COMPLETED,
@@ -395,7 +395,7 @@ class TestRunRepository:
         assert for_tenant_a.total == 1
         assert all(r.tenant == TENANT_A for r in for_tenant_a.items)
 
-    def test_count_active_runs(self, run_repo, job_repo):
+    def test_count_active_runs(self, run_repo, dispatch_repo):
         run_a1 = _mk_run(tenant=TENANT_A)
         run_a2 = _mk_run(tenant=TENANT_A)
         run_a3 = _mk_run(tenant=TENANT_A)
@@ -404,8 +404,8 @@ class TestRunRepository:
         run_repo.create(run_a3)
         run_repo.create(_mk_run(tenant=TENANT_B))
         assert run_repo.count_active_runs(TENANT_A) == 3
-        job_repo.enqueue(run_id=run_a1.run_id, tenant=TENANT_A, deadline_seconds=3600)
-        claimed = job_repo.claim_batch("w1", None, 1, 60)[0]
+        dispatch_repo.enqueue(run_id=run_a1.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)[0]
         assert run_repo.update_status(run_a1.run_id, TENANT_A, dm.RunStatus.COMPLETED,
                                       claim_epoch=claimed["claim_epoch"])
         assert run_repo.count_active_runs(TENANT_A) == 2
@@ -419,18 +419,18 @@ class TestRunRepository:
         run_repo.create(completed)
         assert run_repo.count_active_runs_global() == 2
 
-    def test_count_pending_jobs(self, run_repo, job_repo):
+    def test_count_pending_dispatches(self, run_repo, dispatch_repo):
         run_one = _mk_run()
         run_two = _mk_run(tenant=TENANT_B)
         run_repo.create(run_one)
         run_repo.create(run_two)
         assert run_repo.count_active_runs_global() == 2
-        assert job_repo.count_pending_jobs() == 0
-        job_repo.enqueue(run_id=run_one.run_id, tenant=TENANT_A, deadline_seconds=3600)
-        job_repo.enqueue(run_id=run_two.run_id, tenant=TENANT_B, deadline_seconds=3600)
-        assert job_repo.count_pending_jobs() == 2
-        job_repo.claim_batch("w1", None, 1, 60)
-        assert job_repo.count_pending_jobs() == 1
+        assert dispatch_repo.count_pending_dispatches() == 0
+        dispatch_repo.enqueue(run_id=run_one.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        dispatch_repo.enqueue(run_id=run_two.run_id, tenant=TENANT_B, deadline_seconds=3600)
+        assert dispatch_repo.count_pending_dispatches() == 2
+        dispatch_repo.claim_batch("w1", None, 1, 60)
+        assert dispatch_repo.count_pending_dispatches() == 1
 
 
 class TestAgentRepository:
@@ -453,18 +453,18 @@ class TestAgentRepository:
         agents = agent_repo.list_by_run(run.run_id, TENANT_A)
         assert len(agents) == 2
 
-    def _claimed_run(self, run_repo, job_repo):
+    def _claimed_run(self, run_repo, dispatch_repo):
         # The agent fence is the run fence (D28): an update must carry the
-        # job row's CURRENT claim epoch to land, so every writing test first
+        # dispatch row's CURRENT claim epoch to land, so every writing test first
         # enqueues + claims its run the way a worker would.
         run = _mk_run()
         run_repo.create(run)
-        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
-        claimed = job_repo.claim_batch("w1", None, 1, 60)[0]
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)[0]
         return run, claimed["claim_epoch"]
 
-    def test_update_status_running(self, run_repo, agent_repo, job_repo):
-        run, epoch = self._claimed_run(run_repo, job_repo)
+    def test_update_status_running(self, run_repo, agent_repo, dispatch_repo):
+        run, epoch = self._claimed_run(run_repo, dispatch_repo)
         agent = _mk_agent(run)
         agent_repo.create(agent)
         ok = agent_repo.update_status(
@@ -475,8 +475,8 @@ class TestAgentRepository:
         fetched = agent_repo.get(run.run_id, agent.agent_id, TENANT_A)
         assert fetched.status == dm.AgentStatus.RUNNING
 
-    def test_update_status_fenced_by_claim_epoch(self, run_repo, agent_repo, job_repo):
-        run, epoch = self._claimed_run(run_repo, job_repo)
+    def test_update_status_fenced_by_claim_epoch(self, run_repo, agent_repo, dispatch_repo):
+        run, epoch = self._claimed_run(run_repo, dispatch_repo)
         agent = _mk_agent(run)
         agent_repo.create(agent)
         assert agent_repo.update_status(
@@ -504,8 +504,8 @@ class TestAgentRepository:
         assert agent_repo.get(run.run_id, agent.agent_id, TENANT_A).status \
             == dm.AgentStatus.QUEUED
 
-    def test_update_output_and_error(self, run_repo, agent_repo, job_repo):
-        run, epoch = self._claimed_run(run_repo, job_repo)
+    def test_update_output_and_error(self, run_repo, agent_repo, dispatch_repo):
+        run, epoch = self._claimed_run(run_repo, dispatch_repo)
         agent = _mk_agent(run)
         agent_repo.create(agent)
         agent_repo.update_status(
@@ -526,42 +526,42 @@ class TestAgentRepository:
         assert agent_repo.list_by_run(run.run_id, TENANT_B) == []
 
 
-class TestResultShardXOR:
+class TestAgentResultXOR:
 
-    def test_shard_double_insert_converges_to_the_survivor(
-            self, run_repo, agent_repo, shard_repo):
-        # The unique pair (uk_shard_agent) is the exactly-once invariant; a
+    def test_result_double_insert_converges_to_the_survivor(
+            self, run_repo, agent_repo, result_repo):
+        # The unique pair (uk_result_agent) is the exactly-once invariant; a
         # racing pod that loses the double-insert must converge to the
         # surviving row rather than surface an IntegrityError.
         run = _mk_run()
         run_repo.create(run)
         agent = _mk_agent(run)
         agent_repo.create(agent)
-        first = _mk_shard(run, agent)
-        created = shard_repo.create(first)
-        again = shard_repo.create(_mk_shard(run, agent))
-        shards = shard_repo.list_by_run(run.run_id, TENANT_A)
-        assert len(shards) == 1
+        first = _mk_result(run, agent)
+        created = result_repo.create(first)
+        again = result_repo.create(_mk_result(run, agent))
+        results = result_repo.list_by_run(run.run_id, TENANT_A)
+        assert len(results) == 1
         assert created.source_agent_id == again.source_agent_id
 
-    def test_shard_with_payload(self, run_repo, agent_repo, shard_repo):
+    def test_result_with_payload(self, run_repo, agent_repo, result_repo):
         run = _mk_run()
         run_repo.create(run)
         agent = _mk_agent(run)
         agent_repo.create(agent)
-        shard = _mk_shard(run, agent)
-        shard_repo.create(shard)
-        fetched = shard_repo.get_by_run_agent(run.run_id, agent.agent_id, TENANT_A)
+        result = _mk_result(run, agent)
+        result_repo.create(result)
+        fetched = result_repo.get_by_run_agent(run.run_id, agent.agent_id, TENANT_A)
         assert fetched is not None
         assert fetched.payload == {"result": "done"}
 
-    def test_shard_with_artifact_key(self, run_repo, agent_repo, shard_repo):
+    def test_result_with_artifact_key(self, run_repo, agent_repo, result_repo):
         run = _mk_run()
         run_repo.create(run)
         agent = _mk_agent(run)
         agent_repo.create(agent)
-        shard = dm.ResultShard(
-            id=dm.ShardId(uuid.uuid4().hex),
+        result = dm.AgentResult(
+            id=dm.ResultId(uuid.uuid4().hex),
             run_id=run.run_id,
             tenant=TENANT_A,
             source_agent_id=agent.agent_id,
@@ -569,18 +569,18 @@ class TestResultShardXOR:
             artifact_key=dm.ArtifactKey("run/agent/result"),
             routed_at=dm.EpochMillis(_now_ms()),
         )
-        shard_repo.create(shard)
-        fetched = shard_repo.get_by_run_agent(run.run_id, agent.agent_id, TENANT_A)
+        result_repo.create(result)
+        fetched = result_repo.get_by_run_agent(run.run_id, agent.agent_id, TENANT_A)
         assert fetched is not None
         assert fetched.artifact_key == dm.ArtifactKey("run/agent/result")
 
-    def test_shard_both_rejected(self, run_repo, agent_repo, shard_repo):
+    def test_result_both_rejected(self, run_repo, agent_repo, result_repo):
         run = _mk_run()
         run_repo.create(run)
         agent = _mk_agent(run)
         agent_repo.create(agent)
-        bad = dm.ResultShard(
-            id=dm.ShardId(uuid.uuid4().hex),
+        bad = dm.AgentResult(
+            id=dm.ResultId(uuid.uuid4().hex),
             run_id=run.run_id,
             tenant=TENANT_A,
             source_agent_id=agent.agent_id,
@@ -589,15 +589,15 @@ class TestResultShardXOR:
             routed_at=dm.EpochMillis(_now_ms()),
         )
         with pytest.raises(ValueError):
-            shard_repo.create(bad)
+            result_repo.create(bad)
 
-    def test_shard_neither_rejected(self, run_repo, agent_repo, shard_repo):
+    def test_result_neither_rejected(self, run_repo, agent_repo, result_repo):
         run = _mk_run()
         run_repo.create(run)
         agent = _mk_agent(run)
         agent_repo.create(agent)
-        bad = dm.ResultShard(
-            id=dm.ShardId(uuid.uuid4().hex),
+        bad = dm.AgentResult(
+            id=dm.ResultId(uuid.uuid4().hex),
             run_id=run.run_id,
             tenant=TENANT_A,
             source_agent_id=agent.agent_id,
@@ -606,22 +606,22 @@ class TestResultShardXOR:
             routed_at=dm.EpochMillis(_now_ms()),
         )
         with pytest.raises(ValueError):
-            shard_repo.create(bad)
+            result_repo.create(bad)
 
-    def test_shard_tenant_isolation(self, run_repo, agent_repo, shard_repo):
+    def test_result_tenant_isolation(self, run_repo, agent_repo, result_repo):
         run = _mk_run(tenant=TENANT_A)
         run_repo.create(run)
         agent = _mk_agent(run)
         agent_repo.create(agent)
-        shard = _mk_shard(run, agent)
-        shard_repo.create(shard)
-        assert shard_repo.get_by_run_agent(run.run_id, agent.agent_id, TENANT_B) is None
+        result = _mk_result(run, agent)
+        result_repo.create(result)
+        assert result_repo.get_by_run_agent(run.run_id, agent.agent_id, TENANT_B) is None
 
     def test_list_by_run_orders_oldest_to_newest(
-            self, run_repo, agent_repo, shard_repo):
+            self, run_repo, agent_repo, result_repo):
         # list_by_run must pin ascending-insertion order: the orchestrator
         # prompt keeps the tail as "most recent" — reordering would embed
-        # stale shards and drop fresh ones.
+        # stale results and drop fresh ones.
         run = _mk_run()
         run_repo.create(run)
         other_run = _mk_run()
@@ -630,17 +630,17 @@ class TestResultShardXOR:
         for agent in agents:
             agent_repo.create(agent)
         # Persist out of agent-creation order, interleaved with a foreign
-        # run's shard: land order is a2, a0, <foreign>, a1, a3.
+        # run's result: land order is a2, a0, <foreign>, a1, a3.
         inserted = [agents[2], agents[0], agents[1], agents[3]]
-        shard_repo.create(_mk_shard(run, inserted[0]))
-        shard_repo.create(_mk_shard(run, inserted[1]))
-        shard_repo.create(_mk_shard(other_run, _mk_agent(other_run, "x")))
-        shard_repo.create(_mk_shard(run, inserted[2]))
-        shard_repo.create(_mk_shard(run, inserted[3]))
+        result_repo.create(_mk_result(run, inserted[0]))
+        result_repo.create(_mk_result(run, inserted[1]))
+        result_repo.create(_mk_result(other_run, _mk_agent(other_run, "x")))
+        result_repo.create(_mk_result(run, inserted[2]))
+        result_repo.create(_mk_result(run, inserted[3]))
 
-        shards = shard_repo.list_by_run(run.run_id, TENANT_A)
-        assert len(shards) == 4  # foreign-run interleave excluded
-        assert [s.source_agent_id for s in shards] == [
+        results = result_repo.list_by_run(run.run_id, TENANT_A)
+        assert len(results) == 4  # foreign-run interleave excluded
+        assert [s.source_agent_id for s in results] == [
             a.agent_id for a in inserted
         ]
 
@@ -733,7 +733,7 @@ class TestRoundRepository:
                 tenant=TENANT_A,
                 stage_index=i,
                 orchestrator_steps=1,
-                max_subagent_steps=2,
+                slowest_attempt_steps=2,
                 cohort_agent_ids=(dm.AgentId("a"),),
                 started_at=dm.EpochMillis(_now_ms()),
             )
@@ -761,161 +761,161 @@ class TestGuardEventRepository:
         assert events[0].kind == dm.GuardKind.SERIAL_COLLAPSE
 
 
-class TestJobRepository:
-    def test_enqueue_returns_none(self, run_repo, job_repo):
+class TestRunDispatchRepository:
+    def test_enqueue_returns_none(self, run_repo, dispatch_repo):
         run = _mk_run()
         run_repo.create(run)
-        assert job_repo.enqueue(
+        assert dispatch_repo.enqueue(
             run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600,
         ) is None
-        (claim,) = job_repo.claim_batch("w1", None, 10, 60)
+        (claim,) = dispatch_repo.claim_batch("w1", None, 10, 60)
         assert claim["run_id"] == run.run_id
 
-    def test_claim_batch_and_count_scope_to_current_env(self, run_repo, job_repo):
+    def test_claim_batch_and_count_scope_to_current_env(self, run_repo, dispatch_repo):
         run = _mk_run()
         run_repo.create(run)
-        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
-        _insert_foreign_env_job(job_repo, status="PENDING")
-        assert job_repo.count_pending_jobs() == 1
-        claimed = job_repo.claim_batch("w1", None, 10, 60)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        _insert_foreign_env_dispatch(dispatch_repo, status="READY")
+        assert dispatch_repo.count_pending_dispatches() == 1
+        claimed = dispatch_repo.claim_batch("w1", None, 10, 60)
         assert [c["run_id"] for c in claimed] == [run.run_id]
-        assert job_repo.count_pending_jobs() == 0
+        assert dispatch_repo.count_pending_dispatches() == 0
 
-    def test_reclaim_batch_scopes_to_current_env(self, run_repo, job_repo):
+    def test_reclaim_batch_scopes_to_current_env(self, run_repo, dispatch_repo):
         run = _mk_run()
         run_repo.create(run)
-        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
-        (claim,) = job_repo.claim_batch("w1", None, 1, 60)
-        job_repo.renew_lease(run.run_id, TENANT_A, "w1", -1, claim["claim_epoch"])
-        _insert_foreign_env_job(
-            job_repo, status="RUNNING", lease_expires_at=datetime(2020, 1, 1),
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        (claim,) = dispatch_repo.claim_batch("w1", None, 1, 60)
+        dispatch_repo.renew_lease(run.run_id, TENANT_A, "w1", -1, claim["claim_epoch"])
+        _insert_foreign_env_dispatch(
+            dispatch_repo, status="LEASED", lease_expires_at=datetime(2020, 1, 1),
         )
-        reclaimed = job_repo.reclaim_batch("w2", 10, 60)
+        reclaimed = dispatch_repo.reclaim_batch("w2", 10, 60)
         assert [c["run_id"] for c in reclaimed] == [run.run_id]
 
-    def test_enqueue_and_claim(self, run_repo, job_repo):
+    def test_enqueue_and_claim(self, run_repo, dispatch_repo):
         run = _mk_run()
         run_repo.create(run)
-        job_repo.enqueue(
+        dispatch_repo.enqueue(
             run_id=run.run_id,
             tenant=TENANT_A,
             deadline_seconds=3600,
         )
-        claimed = job_repo.claim_batch("worker-1", None, 1, 60)
+        claimed = dispatch_repo.claim_batch("worker-1", None, 1, 60)
         assert len(claimed) == 1
         assert claimed[0]["run_id"] == run.run_id
         assert claimed[0]["claim_epoch"] == 1
-        assert claimed[0]["attempts"] == 1
+        assert claimed[0]["claims"] == 1
 
-    def test_claim_increments_epoch(self, run_repo, job_repo):
+    def test_claim_increments_epoch(self, run_repo, dispatch_repo):
         run = _mk_run()
         run_repo.create(run)
-        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
-        c1 = job_repo.claim_batch("w1", None, 1, 60)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        c1 = dispatch_repo.claim_batch("w1", None, 1, 60)
         assert c1[0]["claim_epoch"] == 1
-        job_repo.reschedule(run.run_id, TENANT_A, "w1", 0.1, None, 1)
+        dispatch_repo.reschedule(run.run_id, TENANT_A, "w1", 0.1, None, 1)
         import time as t
         t.sleep(0.2)
-        c2 = job_repo.claim_batch("w2", None, 1, 60)
+        c2 = dispatch_repo.claim_batch("w2", None, 1, 60)
         assert c2[0]["claim_epoch"] == 2
 
-    def test_renew_lease_by_valid_holder(self, run_repo, job_repo):
+    def test_renew_lease_by_valid_holder(self, run_repo, dispatch_repo):
         run = _mk_run()
         run_repo.create(run)
-        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
-        claimed = job_repo.claim_batch("w1", None, 1, 60)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)
         epoch = claimed[0]["claim_epoch"]
-        ok = job_repo.renew_lease(run.run_id, TENANT_A, "w1", 60, epoch)
+        ok = dispatch_repo.renew_lease(run.run_id, TENANT_A, "w1", 60, epoch)
         assert ok
 
-    def test_renew_lease_rejected_by_stale_epoch(self, run_repo, job_repo):
+    def test_renew_lease_rejected_by_stale_epoch(self, run_repo, dispatch_repo):
         run = _mk_run()
         run_repo.create(run)
-        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
-        claimed = job_repo.claim_batch("w1", None, 1, 60)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)
         real_epoch = claimed[0]["claim_epoch"]
         stale_epoch = real_epoch + 100
-        assert not job_repo.renew_lease(run.run_id, TENANT_A, "w1", 60, stale_epoch)
+        assert not dispatch_repo.renew_lease(run.run_id, TENANT_A, "w1", 60, stale_epoch)
 
-    def test_complete(self, run_repo, job_repo):
+    def test_complete(self, run_repo, dispatch_repo):
         run = _mk_run()
         run_repo.create(run)
-        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
-        claimed = job_repo.claim_batch("w1", None, 1, 60)
-        ok = job_repo.complete(run.run_id, TENANT_A, "w1", claimed[0]["claim_epoch"])
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)
+        ok = dispatch_repo.complete(run.run_id, TENANT_A, "w1", claimed[0]["claim_epoch"])
         assert ok
 
-    def test_fail(self, run_repo, job_repo):
+    def test_fail(self, run_repo, dispatch_repo):
         run = _mk_run()
         run_repo.create(run)
-        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
-        claimed = job_repo.claim_batch("w1", None, 1, 60)
-        ok = job_repo.fail(run.run_id, TENANT_A, "error", "w1", claimed[0]["claim_epoch"])
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)
+        ok = dispatch_repo.fail(run.run_id, TENANT_A, "error", "w1", claimed[0]["claim_epoch"])
         assert ok
 
-    def test_cancel_flow(self, run_repo, job_repo):
+    def test_cancel_flow(self, run_repo, dispatch_repo):
         run = _mk_run()
         run_repo.create(run)
-        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
-        assert not job_repo.is_cancel_requested(run.run_id, TENANT_A)
-        job_repo.request_cancel(run.run_id, TENANT_A)
-        assert job_repo.is_cancel_requested(run.run_id, TENANT_A)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        assert not dispatch_repo.is_cancel_requested(run.run_id, TENANT_A)
+        dispatch_repo.request_cancel(run.run_id, TENANT_A)
+        assert dispatch_repo.is_cancel_requested(run.run_id, TENANT_A)
 
-    def test_claim_dict_reflects_the_committed_row(self, run_repo, job_repo):
+    def test_claim_dict_reflects_the_committed_row(self, run_repo, dispatch_repo):
         # The CAS claim advances epoch/attempts IN the UPDATE, so the dict a
         # worker receives must equal what the row now says — never the stale
         # read the racer-API once returned (both pods minting epoch N+1).
         run = _mk_run()
         run_repo.create(run)
-        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
-        (claim,) = job_repo.claim_batch("w1", None, 5, 60)
-        with db_session(job_repo) as session:  # fresh raw read, same engine
-            from agentclaw.community.core.agentswarm.repository.job import (
-                model as om_job,
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        (claim,) = dispatch_repo.claim_batch("w1", None, 5, 60)
+        with db_session(dispatch_repo) as session:  # fresh raw read, same engine
+            from agentclaw.community.core.agentswarm.repository.run_dispatch import (
+                model as om_dispatch,
             )
             row = session.execute(
-                select(om_job.AcAgentSwarmJobModel).where(
-                    om_job.AcAgentSwarmJobModel.run_id == run.run_id)
+                select(om_dispatch.AcAgentSwarmRunDispatchModel).where(
+                    om_dispatch.AcAgentSwarmRunDispatchModel.run_id == run.run_id)
             ).scalar_one()
-            assert row.status == "RUNNING"
+            assert row.status == "LEASED"
             assert row.claim_epoch == claim["claim_epoch"]
-            assert row.attempts == claim["attempts"]
-        assert job_repo.claim_batch("w2", None, 5, 60) == []  # the race answer
+            assert row.claims == claim["claims"]
+        assert dispatch_repo.claim_batch("w2", None, 5, 60) == []  # the race answer
 
-    def test_claim_visible_in_batch(self, run_repo, job_repo):
+    def test_claim_visible_in_batch(self, run_repo, dispatch_repo):
         run_repo.create(_mk_run())
         run_repo.create(_mk_run())
-        job_repo.enqueue(run_id=_mk_run().run_id, tenant=TENANT_A, deadline_seconds=3600)
-        job_repo.enqueue(run_id=_mk_run().run_id, tenant=TENANT_A, deadline_seconds=3600)
-        claimed = job_repo.claim_batch("w1", None, 10, 60)
+        dispatch_repo.enqueue(run_id=_mk_run().run_id, tenant=TENANT_A, deadline_seconds=3600)
+        dispatch_repo.enqueue(run_id=_mk_run().run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 10, 60)
         assert len(claimed) >= 1
 
-    def test_reclaim_batch_picks_up_expired_leases(self, run_repo, job_repo):
+    def test_reclaim_batch_picks_up_expired_leases(self, run_repo, dispatch_repo):
         run = _mk_run()
         run_repo.create(run)
-        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
-        claimed = job_repo.claim_batch("w1", None, 1, 60)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)
         assert claimed[0]["claim_epoch"] == 1
-        assert job_repo.reclaim_batch("w2", 10, 60) == []
-        job_repo.renew_lease(run.run_id, TENANT_A, "w1", -1, claimed[0]["claim_epoch"])
-        reclaimed = job_repo.reclaim_batch("w2", 10, 60)
+        assert dispatch_repo.reclaim_batch("w2", 10, 60) == []
+        dispatch_repo.renew_lease(run.run_id, TENANT_A, "w1", -1, claimed[0]["claim_epoch"])
+        reclaimed = dispatch_repo.reclaim_batch("w2", 10, 60)
         assert len(reclaimed) == 1
         assert reclaimed[0]["claim_epoch"] == 2
         assert reclaimed[0]["reclaims"] == 1
-        again = job_repo.claim_batch("w3", None, 10, 60)
+        again = dispatch_repo.claim_batch("w3", None, 10, 60)
         assert again == []
 
-    def test_reclaim_increments_reclaims_per_recovery(self, run_repo, job_repo):
+    def test_reclaim_increments_reclaims_per_recovery(self, run_repo, dispatch_repo):
         run = _mk_run()
         run_repo.create(run)
-        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
-        claimed = job_repo.claim_batch("w1", None, 1, 60)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)
         epoch = claimed[0]["claim_epoch"]
-        job_repo.renew_lease(run.run_id, TENANT_A, "w1", -1, epoch)
-        r1 = job_repo.reclaim_batch("w2", 10, 60)
+        dispatch_repo.renew_lease(run.run_id, TENANT_A, "w1", -1, epoch)
+        r1 = dispatch_repo.reclaim_batch("w2", 10, 60)
         assert r1[0]["reclaims"] == 1
-        job_repo.renew_lease(run.run_id, TENANT_A, "w2", -1, r1[0]["claim_epoch"])
-        r2 = job_repo.reclaim_batch("w3", 10, 60)
+        dispatch_repo.renew_lease(run.run_id, TENANT_A, "w2", -1, r1[0]["claim_epoch"])
+        r2 = dispatch_repo.reclaim_batch("w3", 10, 60)
         assert r2[0]["reclaims"] == 2
         assert r2[0]["claim_epoch"] == r1[0]["claim_epoch"] + 1
 
@@ -928,10 +928,10 @@ class TestMandatoryColumns:
             om.AcAgentSwarmRunModel.__table__,
             om.AcAgentSwarmAgentModel.__table__,
             om.AcAgentSwarmMessageModel.__table__,
-            om.AcAgentSwarmResultShardModel.__table__,
+            om.AcAgentSwarmAgentResultModel.__table__,
             om.AcAgentSwarmRoundModel.__table__,
             om.AcAgentSwarmGuardEventModel.__table__,
-            om.AcAgentSwarmJobModel.__table__,
+            om.AcAgentSwarmRunDispatchModel.__table__,
             om.AcAgentSwarmAuditModel.__table__,
         ])
         insp = sa.inspect(engine)
@@ -1001,6 +1001,6 @@ class TestMandatoryColumns:
             for required in ("env", "tenant", "is_deleted"):
                 assert required in cols, f"{table_name}: {required} missing in DDL"
 
-def db_session(job_repo):
+def db_session(dispatch_repo):
     """The fixture DB's orm_session — for raw reads independent of the repo."""
-    return job_repo._db.orm_session()
+    return dispatch_repo._db.orm_session()

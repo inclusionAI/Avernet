@@ -92,7 +92,7 @@ class GuardService:
         return None
 
     def check_premature_finish(self, state: RunState) -> GuardEvent | None:
-        if state.routed_shard_count == 0 and state.total_agents_spawned == 0 and state.turn_count > 0:
+        if state.routed_result_count == 0 and state.total_agents_spawned == 0 and state.turn_count > 0:
             # The closed GuardKind set has no dedicated premature-finish
             # member: SERIAL_COLLAPSE is the accurate family (the
             # orchestrator ends the run alone with zero spawn activity),
@@ -107,7 +107,7 @@ class GuardService:
                     "reason": "premature_finish",
                     "turns": state.turn_count,
                     "spawns": state.total_agents_spawned,
-                    "routed_shards": state.routed_shard_count,
+                    "routed_results": state.routed_result_count,
                 },
                 created_at=EpochMillis(_now_ms()),
             )

@@ -42,9 +42,11 @@ class TestEnums:
             dm.DecisionKind.HANDOFF, dm.DecisionKind.FINISH,
         }
 
-    def test_task_queue_status(self):
-        assert dm.TaskQueueStatus.PENDING == "PENDING"
-        assert dm.TaskQueueStatus.TIMED_OUT == "TIMED_OUT"
+    def test_dispatch_status(self):
+        assert dm.DispatchStatus.READY == "READY"
+        assert dm.DispatchStatus.LEASED == "LEASED"
+        assert dm.DispatchStatus.DONE == "DONE"
+        assert dm.DispatchStatus.FAILED == "FAILED"
 
     def test_agent_kind(self):
         assert dm.AgentKind.LLM == "llm"

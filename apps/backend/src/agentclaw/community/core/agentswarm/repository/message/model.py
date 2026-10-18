@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy import Column, Index, String, Text
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.agentswarm.repository.base import (
@@ -18,9 +19,9 @@ class AcAgentSwarmMessageModel(_AgentSwarmBase, Base):
     # the shared base alias.
     seq = Column(AutoIncrementBigInteger, nullable=False)
     role = Column(String(16), nullable=False)
-    content = Column(Text, nullable=True)
-    decision = Column(Text, nullable=True)
-    token_usage = Column(Text, nullable=True)
+    content = Column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
+    decision = Column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
+    token_usage = Column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
     artifact_key = Column(String(512), nullable=True)
 
     __table_args__ = (

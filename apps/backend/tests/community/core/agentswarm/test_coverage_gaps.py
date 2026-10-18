@@ -35,7 +35,7 @@ from agentclaw.community.core.agentswarm.orchestration.state import RunState
 from agentclaw.community.core.agentswarm.orchestration.termination import (
     TerminationEvaluator,
 )
-from agentclaw.community.plugins.community.agentswarm.avernet_subagent import (
+from agentclaw.community.plugins.community.agentswarm.bot_subagent import (
     AvernetSubagent,
 )
 from agentclaw.community.plugins.local.agentswarm.factory import (
@@ -62,9 +62,9 @@ from agentclaw.community.core.agentswarm.repository.decode import _decode_termin
 from agentclaw.community.core.agentswarm.repository.run.impl import _dumps_valid_json
 from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
 from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
-from agentclaw.community.core.agentswarm.repository.job import JobRepository
+from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
 from agentclaw.community.core.agentswarm.repository.message import MessageRepository
-from agentclaw.community.core.agentswarm.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentswarm.repository.agent_result import AgentResultRepository
 from agentclaw.community.core.agentswarm.repository.round import RoundRepository
 from agentclaw.community.core.agentswarm.repository.run import RunRepository
 from agentclaw.community.core.agentswarm.repository.types import _dumps, _loads
@@ -157,7 +157,7 @@ class TestDefaultSubagentFactory:
         await sub.teardown()
 
     @pytest.mark.asyncio
-    async def test_avernet_kind_creates_avernet_subagent(self):
+    async def test_bot_kind_creates_bot_subagent(self):
         factory = DefaultSubagentFactory(StubLLMProvider(), platform=object())
         # Bots provision under the run's authenticated caller (P0-9
         # no-service-account stance); a callerless run fails clear at
@@ -171,7 +171,7 @@ class TestDefaultSubagentFactory:
         )
         assert isinstance(sub, AvernetSubagent)
 
-    def test_avernet_kind_without_platform_fails_clear(self):
+    def test_bot_kind_without_platform_fails_clear(self):
         from agentclaw.community.core.agentswarm.service.protocols import (
             AgentSwarmConfigError,
         )
@@ -256,7 +256,7 @@ class TestAvernetSubagentTeardown:
             )
 
     def test_factory_builds_bot_subagent_with_platform(self):
-        from agentclaw.community.plugins.community.agentswarm import avernet_subagent as bot_pkg
+        from agentclaw.community.plugins.community.agentswarm import bot_subagent as bot_pkg
         from agentclaw.community.plugins.local.agentswarm.factory import (
             DefaultSubagentFactory,
         )
@@ -345,12 +345,12 @@ class TestTerminationEvaluatorGaps:
         state = RunState(run=_mk_run())
         state.turn_count = 1
         state.total_agents_spawned = 0
-        state.routed_shard_count = 0
+        state.routed_result_count = 0
         assert evaluator.evaluate(state) is None
 
         state.turn_count = 2
         state.total_agents_spawned = 3
-        state.routed_shard_count = 0
+        state.routed_result_count = 0
         assert evaluator.evaluate(state) is None
 
         for turn in range(3, 8):
@@ -361,7 +361,7 @@ class TestTerminationEvaluatorGaps:
         evaluator = TerminationEvaluator(no_progress_threshold=3)
         state = RunState(run=_mk_run())
         state.total_agents_spawned = 2
-        state.routed_shard_count = 2
+        state.routed_result_count = 2
         for turn in range(1, 5):
             state.turn_count = turn
             reason = evaluator.evaluate(state)
@@ -402,7 +402,7 @@ class TestSliceStoreGaps:
         cfg = config or AgentSwarmConfig()
         return SliceStore(
             cfg, AgentRepository(db), MessageRepository(db),
-            ResultShardRepository(db), RoundRepository(db), lost_probe,
+            AgentResultRepository(db), RoundRepository(db), lost_probe,
         )
 
     def _mk_run(self, db) -> dm.Run:
@@ -413,12 +413,12 @@ class TestSliceStoreGaps:
     @staticmethod
     def _claim_job(db, run: dm.Run) -> int:
         # persist_completion is claim-epoch fenced (D28): its agent-status
-        # write only lands on the CURRENT job epoch, so the test must stand
-        # up the durable job row a real slice would hold.
-        job_repo = JobRepository(db)
-        job_repo.enqueue(run_id=run.run_id, tenant=run.tenant,
+        # write only lands on the CURRENT dispatch epoch, so the test must stand
+        # up the durable dispatch row a real slice would hold.
+        dispatch_repo = RunDispatchRepository(db)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=run.tenant,
                          deadline_seconds=3600)
-        return job_repo.claim_batch(
+        return dispatch_repo.claim_batch(
             WORKER, [run.tenant], 1, 60,
         )[0]["claim_epoch"]
 
@@ -458,7 +458,7 @@ class TestSliceStoreGaps:
         stored = AgentRepository(db).get(run.run_id, agent.agent_id, TENANT)
         assert stored.status is dm.AgentStatus.QUEUED
 
-    def test_persist_completion_refuses_malformed_shard_xor(self, db):
+    def test_persist_completion_refuses_malformed_result_xor(self, db):
         store = self._store(db)
         run = self._mk_run(db)
         agent = _mk_agent(run, "a1")
@@ -467,10 +467,10 @@ class TestSliceStoreGaps:
             self._completion(run, agent.agent_id, dm.AgentStatus.COMPLETED),
             claim_epoch=self._claim_job(db, run),
         ))
-        shard = ResultShardRepository(db).get_by_run_agent(
+        result = AgentResultRepository(db).get_by_run_agent(
             run.run_id, agent.agent_id, TENANT,
         )
-        assert shard is None
+        assert result is None
 
     def test_persist_completion_failed_error_message(self, db):
         store = self._store(db)
@@ -488,7 +488,7 @@ class TestSliceStoreGaps:
         (message,) = messages
         assert message.content == {"status": "FAILED", "error": "boom"}
 
-    def test_persist_completion_artifact_carried_shard(self, db):
+    def test_persist_completion_artifact_carried_result(self, db):
         store = self._store(db)
         run = self._mk_run(db)
         agent = _mk_agent(run, "a1")
@@ -498,11 +498,11 @@ class TestSliceStoreGaps:
                              artifact_key="run/artifact"),
             claim_epoch=self._claim_job(db, run),
         ))
-        shard = ResultShardRepository(db).get_by_run_agent(
+        result = AgentResultRepository(db).get_by_run_agent(
             run.run_id, agent.agent_id, TENANT,
         )
-        assert shard is not None and shard.payload is None
-        assert shard.artifact_key == "run/artifact"
+        assert result is not None and result.payload is None
+        assert result.artifact_key == "run/artifact"
         (message,) = MessageRepository(db).list_by_agent(
             run.run_id, agent.agent_id, TENANT,
         )
@@ -532,10 +532,10 @@ class TestSubmitSync:
     def _service(self, db, config: AgentSwarmConfig) -> tuple:
         repos = self._repos(db)
         service = AgentSwarmService(
-            run_repo=repos["run"], job_repo=repos["job"],
+            run_repo=repos["run"], dispatch_repo=repos["dispatch"],
             agent_repo=repos["agent"], message_repo=repos["message"],
             round_repo=repos["round"], guard_repo=repos["guard"],
-            shard_repo=repos["shard"], config=config,
+            result_repo=repos["result"], config=config,
         )
         return service, repos
 
@@ -546,7 +546,7 @@ class TestSubmitSync:
         )
         req = _req(idempotency_key="sync-1")
         run_id = await service.submit_async(req)
-        (claimed,) = repos["job"].claim_batch(WORKER, [TENANT], 1, 60)
+        (claimed,) = repos["dispatch"].claim_batch(WORKER, [TENANT], 1, 60)
         epoch = claimed["claim_epoch"]
 
         async def flip_terminal():
@@ -596,11 +596,11 @@ class TestSubmitSync:
 
     def _repos(self, db) -> dict:
         return {
-            "run": RunRepository(db), "job": JobRepository(db),
+            "run": RunRepository(db), "dispatch": RunDispatchRepository(db),
             "agent": AgentRepository(db), "round": RoundRepository(db),
             "guard": GuardEventRepository(db),
             "message": MessageRepository(db),
-            "shard": ResultShardRepository(db),
+            "result": AgentResultRepository(db),
         }
 
 
@@ -618,7 +618,7 @@ class TestWorkerLifecycle:
     def test_disabled_worker_does_not_start(self):
         worker = AgentSwarmWorker(
             config=self._config(enabled=False),
-            handler=StubHandler(), job_repo=StubJobRepo(),
+            handler=StubHandler(), dispatch_repo=StubDispatchRepo(),
         )
         asyncio.run(worker.startup())
         assert worker._running is False
@@ -628,7 +628,7 @@ class TestWorkerLifecycle:
     async def test_startup_then_shutdown_drains(self):
         worker = AgentSwarmWorker(
             config=self._config(), handler=StubHandler(),
-            job_repo=StubJobRepo(claim=[_job_dict()]),
+            dispatch_repo=StubDispatchRepo(claim=[_dispatch_dict()]),
         )
         await worker.startup()
         assert worker._running is True
@@ -640,10 +640,10 @@ class TestWorkerLifecycle:
 
     @pytest.mark.asyncio
     async def test_loop_survives_poll_exceptions(self):
-        repo = StubJobRepo()
+        repo = StubDispatchRepo()
         repo.reclaim_error = ValueError("reclaim exploded")
         worker = AgentSwarmWorker(
-            config=self._config(), handler=StubHandler(), job_repo=repo,
+            config=self._config(), handler=StubHandler(), dispatch_repo=repo,
         )
         await worker.startup()
         await asyncio.sleep(0.05)
@@ -654,7 +654,7 @@ class TestWorkerLifecycle:
     async def test_heartbeat_lease_loss_marks_slice_lost_and_pops_inflight(self):
         handler = StubHandler()
         worker = AgentSwarmWorker(
-            config=self._config(), handler=handler, job_repo=StubJobRepo(),
+            config=self._config(), handler=handler, dispatch_repo=StubDispatchRepo(),
         )
         worker._loop_ref = asyncio.get_running_loop()
         worker._inflight["run-x"] = {"tenant": TENANT, "claim_epoch": 1}
@@ -678,14 +678,14 @@ class TestWorkerLifecycle:
         await thread
 
     @pytest.mark.asyncio
-    async def test_run_job_failure_force_fails_the_run_and_clears_inflight(self):
+    async def test_run_dispatch_failure_force_fails_the_run_and_clears_inflight(self):
         handler = StubHandler(slice_error=ValueError("slice gone wrong"))
-        repo = StubJobRepo()
+        repo = StubDispatchRepo()
         worker = AgentSwarmWorker(
-            config=self._config(), handler=handler, job_repo=repo,
+            config=self._config(), handler=handler, dispatch_repo=repo,
         )
-        job = _job_dict()
-        await worker._run_job(job, reclaimed=False)
+        dispatch = _dispatch_dict()
+        await worker._run_dispatch(dispatch, reclaimed=False)
         assert handler.calls == [
             ("handle-slice", "run-1", 1),
             ("force-fail", "run-1", 1, "slice gone wrong"),
@@ -694,7 +694,7 @@ class TestWorkerLifecycle:
         assert "run-1" not in worker._inflight
 
 
-def _job_dict(run_id="run-1", epoch=1, reclaims=0, cancel=False) -> dict:
+def _dispatch_dict(run_id="run-1", epoch=1, reclaims=0, cancel=False) -> dict:
     return {
         "run_id": dm.RunId(run_id), "tenant": TENANT, "claim_epoch": epoch,
         "reclaims": reclaims, "cancel_requested": cancel,
@@ -726,7 +726,7 @@ class StubHandler:
         return True
 
 
-class StubJobRepo:
+class StubDispatchRepo:
 
     def __init__(self, claim: list | None = None) -> None:
         self.claim = claim or []
@@ -845,9 +845,9 @@ def _handler_env(db, script: list[str] | None = None, *,
     )
     repos = {
         "run": RunRepository(db), "agent": AgentRepository(db),
-        "message": MessageRepository(db), "shard": ResultShardRepository(db),
+        "message": MessageRepository(db), "result": AgentResultRepository(db),
         "round": RoundRepository(db), "guard": GuardEventRepository(db),
-        "job": JobRepository(db),
+        "dispatch": RunDispatchRepository(db),
     }
     llm = llm or StubLLMProvider(script=script or [])
     orchestrator = Orchestrator(
@@ -859,16 +859,16 @@ def _handler_env(db, script: list[str] | None = None, *,
     runtime = SubagentRuntime(
         factory=_RecordingFactory(),
         max_width=cfg.orchestration.max_width,
-        max_attempts=cfg.orchestration.subagent_max_attempts,
-        per_task_timeout=cfg.orchestration.per_subagent_timeout,
+        max_attempts=cfg.orchestration.agent_max_attempts,
+        per_task_timeout=cfg.orchestration.per_attempt_timeout,
         artifact_inline_threshold=cfg.artifact_inline_threshold,
     )
     handler = SwarmRunHandler(
         config=cfg, orchestrator=orchestrator, runtime=runtime,
         run_repo=repos["run"], agent_repo=repos["agent"],
-        message_repo=repos["message"], shard_repo=repos["shard"],
+        message_repo=repos["message"], result_repo=repos["result"],
         round_repo=repos["round"], guard_repo=repos["guard"],
-        job_repo=repos["job"],
+        dispatch_repo=repos["dispatch"],
         termination=TerminationEvaluator(max_turns=cfg.orchestration.max_turns),
         guards=GuardService(),
     )
@@ -894,7 +894,7 @@ def _handoff_decision(target) -> str:
 
 
 def _spin_ref(repos, run: dm.Run, name: str = "ghost") -> None:
-    # A permanently-unsatisfied wait ref WITH a row: a shardless KILLED agent
+    # A permanently-unsatisfied wait ref WITH a row: a resultless KILLED agent
     # is neither respawned by rehydrate (not QUEUED/RUNNING) nor fail-fast
     # (not FAILED), so _await_refs blocks to the slice budget. The post-fix
     # spin driver: a never-spawned name would now YIELD instead of spinning.
@@ -913,8 +913,8 @@ def _spin_ref(repos, run: dm.Run, name: str = "ghost") -> None:
 
 def _enqueue_claim(repos, run: dm.Run, worker: str = WORKER) -> dict:
     repos["run"].create(run)
-    repos["job"].enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
-    return repos["job"].claim_batch(worker, [TENANT], 1, 60)[0]
+    repos["dispatch"].enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
+    return repos["dispatch"].claim_batch(worker, [TENANT], 1, 60)[0]
 
 
 class TestSwarmHandlerEdges:
@@ -923,7 +923,7 @@ class TestSwarmHandlerEdges:
     def db(self):
         return _engine_db()
 
-    def test_missing_run_slice_fails(self, db):
+    def test_missing_decide_turn_fails(self, db):
         handler, _, _ = _handler_env(db)
         outcome = asyncio.run(handler.handle_slice(dm.RunId("ghost"), TENANT, 0))
         assert outcome == "fail"
@@ -990,11 +990,11 @@ class TestSwarmHandlerEdges:
         from sqlalchemy import select as _select
         with db.orm_session() as session:
             status = session.execute(
-                _select(om.AcAgentSwarmJobModel.status).where(
-                    om.AcAgentSwarmJobModel.run_id == run.run_id,
+                _select(om.AcAgentSwarmRunDispatchModel.status).where(
+                    om.AcAgentSwarmRunDispatchModel.run_id == run.run_id,
                 )
             ).scalar_one()
-        assert status == "PENDING"
+        assert status == "READY"
         assert repos["run"].get(run.run_id, TENANT).status is dm.RunStatus.RUNNING
 
     def test_force_stuck_missing_run_completes_job_and_returns_false(self, db):
@@ -1016,8 +1016,8 @@ class TestSwarmHandlerEdges:
         run = _mk_run()
         claim = _enqueue_claim(repos, run)
         stale_epoch = claim["claim_epoch"]
-        repos["job"].renew_lease(run.run_id, TENANT, WORKER, -1, stale_epoch)
-        reclaimed = repos["job"].reclaim_batch("worker-2", 10, 60)
+        repos["dispatch"].renew_lease(run.run_id, TENANT, WORKER, -1, stale_epoch)
+        reclaimed = repos["dispatch"].reclaim_batch("worker-2", 10, 60)
         assert reclaimed[0]["claim_epoch"] == stale_epoch + 1
 
         outcome = asyncio.run(handler.handle_slice(
@@ -1094,7 +1094,7 @@ class TestOrchestratorEdges:
         )
         run = _mk_run()
         state = RunState(run=run)
-        outcome = await orchestrator.run_slice(run, state, None)
+        outcome = await orchestrator.decide_turn(run, state, None)
         assert outcome["terminate"] is dm.TerminationReason.NO_DECISION
         assert outcome["guard_events"], "unresolvable handoff must record a guard"
         # Closed-set note: GuardKind has no invalid-decision member, so the
@@ -1120,9 +1120,9 @@ class TestRuntimeEdges:
         )
 
     @pytest.mark.asyncio
-    async def test_shard_handler_receives_each_completion(self, runtime):
+    async def test_result_handler_receives_each_completion(self, runtime):
         seen: list[dict] = []
-        runtime.set_shard_handler(seen.append)
+        runtime.set_result_handler(seen.append)
         await runtime.start()
         await runtime.spawn(_mk_run(), _envelope("a1"))
         await runtime.wait_for_completions(timeout=0.5)

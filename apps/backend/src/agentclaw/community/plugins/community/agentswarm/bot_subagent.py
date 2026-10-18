@@ -1,4 +1,4 @@
-"""Avernet-kind subagent driven through the in-process BotPlatform.
+"""Bot-kind subagent driven through the in-process BotPlatform.
 
 No socket leaves this module: the composition root binds the platform's
 platform adapter, the subagent talks to it directly. This replaces the
@@ -196,7 +196,7 @@ class AvernetSubagent:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.warning("[agentswarm][avernet] bot delete failed: %s", exc)
+                logger.warning("[agentswarm][bot] bot delete failed: %s", exc)
             finally:
                 self._bot_id = None
 

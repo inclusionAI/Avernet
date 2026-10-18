@@ -19,8 +19,8 @@ from agentclaw.community.core.agentswarm.repository.agent_attempt.model import (
 from agentclaw.community.core.agentswarm.repository.message.model import (
     AcAgentSwarmMessageModel,
 )
-from agentclaw.community.core.agentswarm.repository.shard.model import (
-    AcAgentSwarmResultShardModel,
+from agentclaw.community.core.agentswarm.repository.agent_result.model import (
+    AcAgentSwarmAgentResultModel,
 )
 from agentclaw.community.core.agentswarm.repository.round.model import (
     AcAgentSwarmRoundModel,
@@ -28,8 +28,8 @@ from agentclaw.community.core.agentswarm.repository.round.model import (
 from agentclaw.community.core.agentswarm.repository.guard.model import (
     AcAgentSwarmGuardEventModel,
 )
-from agentclaw.community.core.agentswarm.repository.job.model import (
-    AcAgentSwarmJobModel,
+from agentclaw.community.core.agentswarm.repository.run_dispatch.model import (
+    AcAgentSwarmRunDispatchModel,
 )
 from agentclaw.community.core.agentswarm.repository.audit.model import (
     AcAgentSwarmAuditModel,
@@ -40,9 +40,9 @@ ALL_MODELS = (
     AcAgentSwarmAgentModel,
     AcAgentSwarmAgentAttemptModel,
     AcAgentSwarmMessageModel,
-    AcAgentSwarmResultShardModel,
+    AcAgentSwarmAgentResultModel,
     AcAgentSwarmRoundModel,
     AcAgentSwarmGuardEventModel,
-    AcAgentSwarmJobModel,
+    AcAgentSwarmRunDispatchModel,
     AcAgentSwarmAuditModel,
 )

@@ -9,7 +9,7 @@ from agentclaw.community.core.agentswarm.domain.models.enums import (
 )
 from agentclaw.community.core.agentswarm.domain.models.ids import (
     AgentId, ArtifactKey, BotId, EpochMillis, EventId, IdempotencyKey,
-    MessageId, RoundId, RunId, ShardId, TenantId,
+    MessageId, ResultId, RoundId, RunId, TenantId,
 )
 from agentclaw.community.core.agentswarm.domain.models.specs import (
     AgentSpec, Decision, FinalAnswer, GuardDetails, MessageContent,
@@ -84,8 +84,8 @@ class Message:
 
 
 @dataclass
-class ResultShard:
-    id: ShardId
+class AgentResult:
+    id: ResultId
     run_id: RunId
     tenant: str
     source_agent_id: AgentId
@@ -101,7 +101,7 @@ class Round:
     tenant: str
     stage_index: int
     orchestrator_steps: int
-    max_subagent_steps: int
+    slowest_attempt_steps: int
     cohort_agent_ids: tuple[AgentId, ...]
     started_at: EpochMillis
     ended_at: EpochMillis | None = None
