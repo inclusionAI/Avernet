@@ -7,10 +7,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from agentclaw.community.core.devices.services.device_context import DeviceContext, DeviceOfflineError
+from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import PerDomainRuntimeProjection
+from agentclaw.community.core.skill_center.services.runtime_projections.skill_runtime_delivery import SkillRuntimeDelivery
 from agentclaw.community.core.skill_center.services.runtime_projections.skill_projection_guard import SkillProjectionGuard
-from agentclaw.community.core.skill_center.runtime_projection_contract import ResolvedSkillPlan, RuntimeProjectionResult, RuntimeProjectionStatus
+from agentclaw.community.core.skill_center.runtime_projection_contract import ProjectionScope, ResolvedSkillPlan, RuntimeProjectionResult, RuntimeProjectionStatus
 from agentclaw.community.core.skill_center.runtime_resolver import RuntimeProjectionResolver
-from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+from agentclaw.community.core.skills_pool.models import MappingApplyResult, MappingProjectionStatus, RegisteredSkillAsset
 from agentclaw.community.plugins.local.cache import MemoryCachePlugin
 from agentclaw.community.plugin_api.cache import CacheLockInfrastructureError
 
@@ -121,6 +124,39 @@ async def test_unknown_timeout_keeps_lease_instead_of_admitting_overlap():
     send = AsyncMock(side_effect=TimeoutError)
     assert (await guard.deliver(plan=plan, send=send)).issues[0].code == "SKILL_PROJECTION_TIMEOUT"
     assert (await guard.deliver(plan=plan, send=send)).issues[0].code == "SKILL_PROJECTION_BUSY"
+
+
+@pytest.mark.asyncio
+async def test_confirmed_offline_releases_lease_for_immediate_reconnect():
+    state, _, guard, plan, _, _ = setup_guard()
+    state.bot = {**state.bot, "bot_type": "desktop"}
+    plan = replace(plan, bot=state.bot)
+    state.online = False
+
+    def resolve(*_):
+        if not state.online:
+            raise DeviceOfflineError("no active devices")
+        return DeviceContext(
+            provider="baas", conn_info={}, binding_id=1,
+            bot_id="bot", user_id="owner", bot_type="desktop",
+        )
+
+    apply = AsyncMock(return_value=MappingApplyResult(status=MappingProjectionStatus.CONVERGED))
+    projection = PerDomainRuntimeProjection(skill_delivery=SkillRuntimeDelivery(
+        guard=guard, pool_runtime=SimpleNamespace(apply_mappings=apply),
+        pool_layouts=SimpleNamespace(get=lambda _: None),
+        device_contexts=SimpleNamespace(resolve_for_bot=resolve),
+        center_content=SimpleNamespace(),
+    ))
+    kwargs = dict(plan=plan, scope=ProjectionScope(skills=True), service_factory=SimpleNamespace())
+
+    offline = await projection.apply(**kwargs)
+    assert offline.issues[0].code == "DESKTOP_DEVICE_OFFLINE"
+    apply.assert_not_awaited()
+
+    state.online = True
+    assert (await projection.apply(**kwargs)).status is RuntimeProjectionStatus.CONVERGED
+    apply.assert_awaited_once()
 
 
 @pytest.mark.asyncio

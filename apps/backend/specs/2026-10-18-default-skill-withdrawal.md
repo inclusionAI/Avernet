@@ -64,6 +64,9 @@ Lock contention/outages and incomplete reads fail closed. The delivery budget
 is bounded inside the lease; a canceled/timed-out unknown request retains the
 lease until expiry. Multi-process deployments require the shared Redis/ZCache
 implementation; the local in-memory test plugin is process-local only.
+Confirmed device-offline errors from connection resolution release the lease:
+no mapping request was sent, so a reconnect can project immediately. Unknown
+transport outcomes continue to retain the isolation window.
 Existing Desktop recovery tasks classify guard contention, stale snapshots,
 lock/read failures and delivery timeout as transient failures with backoff;
 they do not complete solely because a guard deferred the attempt. The existing

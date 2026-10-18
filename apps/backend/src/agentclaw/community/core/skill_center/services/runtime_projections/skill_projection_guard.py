@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 
 from injector import inject
 
+from agentclaw.community.core.devices.services.device_context import DeviceOfflineError
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.capability_state_contract import BotCapabilityStateReaderProtocol
 from agentclaw.community.core.skill_center.runtime_projection_contract import ResolvedSkillPlan, RuntimeProjectionResult
@@ -82,6 +83,10 @@ class SkillProjectionGuard:
                 # the unknown outcome until the bounded lease expires.
                 release = False
                 return self._pending("SKILL_PROJECTION_TIMEOUT")
+            except DeviceOfflineError:
+                # Connection resolution confirmed offline before mapping I/O.
+                # A reconnect must not wait behind an unknown-outcome lease.
+                raise
             except BaseException:
                 release = False
                 raise
