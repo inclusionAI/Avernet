@@ -34,3 +34,15 @@ it('retains current complementary-plan authorization without introducing false c
   expect(changed.retained).toEqual(['a', 'b']);expect(changed.planReview).toBe(true)
   expect(changed.retained).not.toContain('unseen')
 })
+it('keeps a single unchanged original independent of unrelated queued or expanded group plans', () => {
+  const b = item('b')
+  const oldPlan = { id: 'old', fingerprint: 'old', itemIds: ['b'], title: 'b', changes: [], relation: 'exact' as const, status: 'queued' as const, conflicts: [], originals: [b], flowIds: [] }
+  for (const plan of [
+    { ...oldPlan, id: 'new', fingerprint: 'unselected-change' },
+    { ...oldPlan, id: 'expanded', fingerprint: 'expanded', itemIds: ['b', 'unselected'], relation: 'complementary' as const, status: 'ready' as const },
+  ]) {
+    const result = reviewedSelection(['b'], { b: { ...b, aggregation: oldPlan } }, { items: [b], plans: [plan], missing: [], inputDigest: 'new', canEdit: true })
+    expect(result.retained).toEqual(['b']);expect(result.planReview).toBe(false)
+    expect(proposalPending(Object.values(result.current))).toBe(false)
+  }
+})

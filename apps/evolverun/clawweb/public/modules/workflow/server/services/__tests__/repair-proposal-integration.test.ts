@@ -71,6 +71,19 @@ it('queues stale original groups for current-baseline classification, then reeva
  expect(result.input.items.every(item=>item.proposal!.baseSpecDigest==='e'.repeat(64))).toBe(true);
  expect(f.calls).toHaveLength(1);
 });
+it('reevaluates a single reviewed original without inheriting an unselected complementary member',async()=>{
+ const {c,advance}=await setup(2);
+ f.items.forEach(item=>{item.proposal!.baseSpecDigest='e'.repeat(64)});
+ await c.tick();advance(3000);await c.tick();
+ const service=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort,c);
+ const state=await service.selectionState('wf-1',['item-1'],false);
+ expect(state.plans[0].itemIds).toEqual(['item-0','item-1']);
+ const result=await service.create('human',{workflowId:'wf-1',itemIds:['item-1'],inputDigest:state.inputDigest,selection:{'item-1':state.items[0].selectionDigest!},instructions:'keep the original goal',requestId:'one-original'});
+ expect(result.input.items.map(item=>item.itemId)).toEqual(['item-1']);
+ expect(result.input.integration?.plans).toHaveLength(1);
+ expect(result.input.integration?.plans[0]).toMatchObject({relation:'exact',originalItemIds:['item-1']});
+ expect(f.calls).toHaveLength(1);
+});
 it.each([false,true])('never lets a model combine contradictory scalars or omit originals (stale=%s)',async(stale)=>{
  const {c,read,classify,advance}=await setup(2);
  f.items.forEach((x,i)=>{if(stale)x.proposal!.baseSpecDigest='e'.repeat(64);x.proposal!.operations=[{op:'replace',nodeId:'query',path:'/timeout',value:i?240:120}]});

@@ -168,6 +168,13 @@ until recovery. Awaiting-verification/verified/ineffective protections remain;
 an owning unpublished task can continue its own frozen processing original after
 the live source disappears.
 
+A single explicitly reviewed original remains its own generation scope, even if
+unselected suggestions change or a newer group also contains that original. It
+does not implicitly accept the other members or the combined goals. Independent
+non-overlapping exact originals likewise do not wait on an unrelated group job.
+Multiple overlapping originals still require validated compatible-plan coverage;
+real conflicts and unknown relationships are never auto-authorized.
+
 TaskGuard consumes each plan once, exposing original proposals, sources, evidence
 packets and integrated goals to the writer. It generates complete file content
 against the current candidate, never concatenates or sequentially replaces source

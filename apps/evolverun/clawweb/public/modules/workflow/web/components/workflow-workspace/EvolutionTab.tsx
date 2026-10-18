@@ -135,6 +135,7 @@ function DiagnosisPanel({
   const [selectionOpen, setSelectionOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [selectionNotice, setSelectionNotice] = useState('')
+  const selectionRemovalNotice = useRef('')
   const [selectionChecking, setSelectionChecking] = useState(false)
   const [selectionReviewError, setSelectionReviewError] = useState(false)
   const [selectionPlanReview, setSelectionPlanReview] = useState(false)
@@ -311,14 +312,17 @@ function DiagnosisPanel({
     setDrawerEntry('repairs')
   }
   const closeDetail = () => { setSelectedSignature(null); setSelectedRepairItemId(null) }
-  const toggleRepairItem = (id: string) => setSelectedRepairIds(current => {
-    if (selectionChecking || draftNeedsCheck) return current
+  const toggleRepairItem = (id: string) => {
+    if (selectionChecking || draftNeedsCheck) return
+    selectionRemovalNotice.current = ''; setSelectionNotice('')
+    setSelectedRepairIds(current => {
     const item = selectionItems[id]
     const ids = item ? proposalMembers(item).map(member => member.itemId) : [id]
     if (ids.every(value => current.includes(value))) return current.filter(value => !ids.includes(value))
     const next = [...new Set([...current, ...ids])]
     return next.length <= Math.min(100, repairData?.limits.maxItems ?? 100) ? next : current
-  })
+    })
+  }
   const resetRequestId = () => { requestId.current = ''; requestPayloadKey.current = '' }
   const reviewCurrentSelection = async (confirmPlans = false) => {
     const { ids, items } = currentSelection.current
@@ -332,7 +336,9 @@ function DiagnosisPanel({
       const result = reviewedSelection(ids, items, fresh, confirmPlans)
       setSelectedRepairIds(result.retained); setSelectionItems(previous => ({ ...previous, ...result.current }))
       setSelectionPlanReview(result.planReview)
-      setSelectionNotice(previous => result.affected || confirmPlans || !previous || previous.startsWith('默认不选择') ? result.notice : previous)
+      if (confirmPlans) selectionRemovalNotice.current = ''
+      if (result.removalNotice) selectionRemovalNotice.current = result.removalNotice
+      setSelectionNotice(selectionRemovalNotice.current ? selectionRemovalNotice.current + result.planNotice : result.notice)
       setRepairActionError('')
     } catch (error) {
       if (epoch === selectionReviewEpoch.current) { setSelectionReviewError(true); setRepairActionError('已选建议核对失败，原选择与要求保留。请重试核对；不会提交或重复派发。') }
@@ -341,6 +347,7 @@ function DiagnosisPanel({
   const startNextRound = (publishedRevision: number) => {
     if (!selectedTaskId || repairBusy || !canEdit || !repairData?.canEdit) return
     setPreviousRoundTaskId(selectedTaskId)
+    selectionRemovalNotice.current = ''
     setRoundChildTaskId('')
     selectionReviewEpoch.current += 1; setSelectionChecking(false); setSelectionReviewError(false); setSelectionPlanReview(false)
     previousRoundRevision.current = publishedRevision
@@ -365,6 +372,7 @@ function DiagnosisPanel({
     closeDetail(); resetRequestId(); clearRoundLineage(); setRepairActionError(''); setDraftOpen(true)
   }
   const changeHistoryScope = (next: boolean) => {
+    selectionRemovalNotice.current = ''
     initializedDigest.current = ''
     resetRequestId()
     setSelectedRepairIds([])
