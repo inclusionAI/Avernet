@@ -13,6 +13,7 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.capability_state_contract import BotCapabilityStateReaderProtocol
 from agentclaw.community.core.skill_center.runtime_projection_contract import ResolvedSkillPlan, RuntimeProjectionResult
 from agentclaw.community.core.skill_center.runtime_resolver import RuntimeProjectionResolver
+from agentclaw.community.core.workspace.skill_layout import runtime_layout_engine_for_bot
 from agentclaw.community.plugin_api.cache import CacheLockInfrastructureError, CachePlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
@@ -54,6 +55,8 @@ class SkillProjectionGuard:
                     str(bot.get(field) or "") != str(plan.bot.get(field) or "")
                     for field in ("env", "active_engine", "entity_id", "binding_id")
                 ):
+                    return self._pending("SKILL_PROJECTION_STALE")
+                if runtime_layout_engine_for_bot(bot) != runtime_layout_engine_for_bot(plan.bot):
                     return self._pending("SKILL_PROJECTION_STALE")
                 assets = self._reader.active_skill_assets(bot_id=plan.bot_id, owner_id=plan.owner_id)
                 current = RuntimeProjectionResolver().resolve_skills(tuple(assets))

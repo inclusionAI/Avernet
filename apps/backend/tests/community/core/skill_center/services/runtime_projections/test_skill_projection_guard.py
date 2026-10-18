@@ -83,6 +83,39 @@ async def test_failed_reads_locks_or_changed_runtime_never_send(failure, monkeyp
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("template", [
+    {"template_type": "coding"},
+    {"template_config": {"engine_form": "aicoding"}},
+])
+@pytest.mark.parametrize("reverse", [False, True])
+async def test_changed_physical_runtime_rejects_old_plan(template, reverse):
+    state, _, guard, plan, _, _ = setup_guard()
+    claude = {**state.bot, "active_engine": "claude_code", "template_type": "normalCC"}
+    aicoding = {**claude, **template}
+    old, current = (aicoding, claude) if reverse else (claude, aicoding)
+    plan = replace(plan, bot=old, engine="claude_code")
+    state.bot = current
+    send = AsyncMock()
+
+    result = await guard.deliver(plan=plan, send=send)
+
+    assert result.issues[0].code == "SKILL_PROJECTION_STALE"
+    send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_template_change_with_same_physical_runtime_can_deliver():
+    state, _, guard, plan, _, _ = setup_guard()
+    bot = {**state.bot, "active_engine": "claude_code", "template_type": "coding"}
+    plan = replace(plan, bot=bot, engine="claude_code")
+    state.bot = {**bot, "template_type": "another-coding-template"}
+    send = AsyncMock(return_value=RuntimeProjectionResult.converged())
+
+    assert (await guard.deliver(plan=plan, send=send)).status is RuntimeProjectionStatus.CONVERGED
+    send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_unknown_timeout_keeps_lease_instead_of_admitting_overlap():
     _, _, guard, plan, _, _ = setup_guard()
     send = AsyncMock(side_effect=TimeoutError)

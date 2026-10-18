@@ -58,10 +58,16 @@ empty snapshots, failed preparation, validation and unlink failures.
 Steady-state filesystem delivery serializes across Backends using the shared
 Cache strict lease scoped to tenant/env/owner/Bot, then rechecks the current Bot
 identity and Reader snapshot. Superseded plans return PENDING without writes.
+Runtime identity includes the resolved filesystem engine, so Claude Code and
+AICoding template changes cannot deliver a plan against the previous roots.
 Lock contention/outages and incomplete reads fail closed. The delivery budget
 is bounded inside the lease; a canceled/timed-out unknown request retains the
 lease until expiry. Multi-process deployments require the shared Redis/ZCache
 implementation; the local in-memory test plugin is process-local only.
+Existing Desktop recovery tasks classify guard contention, stale snapshots,
+lock/read failures and delivery timeout as transient failures with backoff;
+they do not complete solely because a guard deferred the attempt. The existing
+task deadline and device-reconnect semantics remain unchanged.
 Operator-managed PostgreSQL/SQLite use the matching dialect SQL beside the
 MySQL migration. Rollout order: additive schema, Engine image, then Backend.
 
@@ -82,3 +88,9 @@ external preservation, and explicit Local retirement without deleting bytes.
 Only dedicated test metadata was changed, then removed. This verifies Skill
 projection and Adapter restart; it does not claim a new BaaS/Gateway allocation,
 model conversation or published Service release was exercised.
+
+Review follow-up rebuilt the OCB simulator Backend and matched installed source
+hashes. A controlled probe using its real Redis cache verified a cache fault
+returns Retry and the next attempt converges; template_type and template_config
+physical-identity changes reject old plans in both directions without sending.
+This probe uses controlled Bot/asset reads and transport, not a new live Bot.
