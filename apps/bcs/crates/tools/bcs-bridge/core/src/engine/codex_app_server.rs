@@ -34,16 +34,222 @@ use crate::engine::codex_transport::CodexConnection;
 use crate::engine::{Engine, TurnError, TurnOutcome, TurnRequest};
 use crate::sse;
 
+/// Codex engine sandbox mode, forwarded into every `thread/*` and`turn/start`
+/// wire parameter. `workspace-write` is the bridge default: the bot works
+/// within its configured working directory, matching the cfuse interactive
+/// (TUI) capability surface instead of the legacy read-only lockdown.
+///
+/// The wire serialization normalizes to the engine's recorded form
+/// (kebab-case, echo of the rollout `turn_context.sandbox_policy.type`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CodexSandbox {
+    #[default]
+    WorkspaceWrite,
+    ReadOnly,
+    DangerFullAccess,
+}
+
+// Wire values as the codex app-server records them in rollout context.
+const SANDBOX_READ_ONLY: &str = "read-only";
+const SANDBOX_WORKSPACE_WRITE: &str = "workspace-write";
+const SANDBOX_DANGER_FULL_ACCESS: &str = "danger-full-access";
+
+// `turn/start` sandboxPolicy.type is a strict camelCase enum on the wire; the
+// server rejects kebab-case ("unknown variant ..., expected one of
+// `dangerFullAccess`, `readOnly`, `externalSandbox`, `workspaceWrite`").
+const SANDBOX_TURN_READ_ONLY: &str = "readOnly";
+const SANDBOX_TURN_WORKSPACE_WRITE: &str = "workspaceWrite";
+const SANDBOX_TURN_DANGER_FULL_ACCESS: &str = "dangerFullAccess";
+
+impl CodexSandbox {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            SANDBOX_READ_ONLY => Some(Self::ReadOnly),
+            SANDBOX_WORKSPACE_WRITE => Some(Self::WorkspaceWrite),
+            SANDBOX_DANGER_FULL_ACCESS => Some(Self::DangerFullAccess),
+            _ => None,
+        }
+    }
+    /// Kebab-case form used by `thread/start` / `thread/resume` `sandbox`
+    /// (accepted there and echoed back in rollout turn_context records).
+    fn wire(self) -> &'static str {
+        match self {
+            Self::ReadOnly => SANDBOX_READ_ONLY,
+            Self::WorkspaceWrite => SANDBOX_WORKSPACE_WRITE,
+            Self::DangerFullAccess => SANDBOX_DANGER_FULL_ACCESS,
+        }
+    }
+
+    /// CamelCase form required by `turn/start` `sandboxPolicy.type`; the
+    /// server-side enum rejects kebab variants at request time.
+    fn turn_wire(self) -> &'static str {
+        match self {
+            Self::ReadOnly => SANDBOX_TURN_READ_ONLY,
+            Self::WorkspaceWrite => SANDBOX_TURN_WORKSPACE_WRITE,
+            Self::DangerFullAccess => SANDBOX_TURN_DANGER_FULL_ACCESS,
+        }
+    }
+}
+
+/// Codex approval policy, decides whether the engine may request approvals at all.
+/// `never` (bridge default) means no approval channel: operations outside the
+/// sandbox are denied outright instead of prompting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CodexApprovalPolicy {
+    #[default]
+    Never,
+    OnFailure,
+    OnRequest,
+    Untrusted,
+}
+
+impl CodexApprovalPolicy {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "never" => Some(Self::Never),
+            "on-failure" => Some(Self::OnFailure),
+            "on-request" => Some(Self::OnRequest),
+            "untrusted" => Some(Self::Untrusted),
+            _ => None,
+        }
+    }
+    fn wire(self) -> &'static str {
+        match self {
+            Self::Never => "never",
+            Self::OnFailure => "on-failure",
+            Self::OnRequest => "on-request",
+            Self::Untrusted => "untrusted",
+        }
+    }
+    fn asks_approvals(self) -> bool { !matches!(self, Self::Never) }
+}
+
+/// Who answers codex approval requests when `approval_policy` enables them.
+/// - `user` (default): a human reviewer via BCS HITL (requires the codex HITL
+///   wiring; not yet available in this driver).
+/// - `auto`: cfuse `auto_review`, the engine's programmatic policy engine
+///   (TUI parity: escalations are approved without human involvement).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CodexApprovalReview {
+    #[default]
+    User,
+    Auto,
+}
+
+impl CodexApprovalReview {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "user" => Some(Self::User),
+            "auto" => Some(Self::Auto),
+            _ => None,
+        }
+    }
+    fn wire(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Auto => "auto_review",
+        }
+    }
+}
+
+/// Per-bot Codex engine policy, parsed from `bot.engine_options`.
+/// Defaults (policy decision 2026-10-18): `workspace-write` sandbox,
+/// outbound network allowed, approvals never requested.
+#[derive(Clone, Copy, Debug)]
+pub struct CodexOptions {
+    pub sandbox: CodexSandbox,
+    pub network_access: bool,
+    pub approval_policy: CodexApprovalPolicy,
+    pub approval_review: CodexApprovalReview,
+}
+
+impl Default for CodexOptions {
+    fn default() -> Self {
+        Self { sandbox: CodexSandbox::WorkspaceWrite, network_access: true,
+            approval_policy: CodexApprovalPolicy::Never, approval_review: CodexApprovalReview::User }
+    }
+}
+
+impl CodexOptions {
+    const KEY_SANDBOX: &'static str = "sandbox";
+    const KEY_NETWORK_ACCESS: &'static str = "network_access";
+    const KEY_APPROVAL_POLICY: &'static str = "approval_policy";
+    const KEY_APPROVAL_REVIEW: &'static str = "approval_review";
+
+    fn parse(options: &toml::Table) -> Result<Self, String> {
+        let mut parsed = Self { sandbox: CodexSandbox::WorkspaceWrite,
+            network_access: true, approval_policy: CodexApprovalPolicy::Never,
+            approval_review: CodexApprovalReview::User };
+        for (key, value) in options {
+            match (key.as_str(), value) {
+                (Self::KEY_SANDBOX, toml::Value::String(sandbox)) => {
+                    parsed.sandbox = CodexSandbox::parse(sandbox).ok_or_else(||
+                        format!("engine_options.sandbox must be one of '{SANDBOX_READ_ONLY}' | '{SANDBOX_WORKSPACE_WRITE}' | '{SANDBOX_DANGER_FULL_ACCESS}'"))?;
+                }
+                (Self::KEY_NETWORK_ACCESS, toml::Value::Boolean(network)) => parsed.network_access = *network,
+                (Self::KEY_APPROVAL_POLICY, toml::Value::String(policy)) => {
+                    parsed.approval_policy = CodexApprovalPolicy::parse(policy).ok_or_else(||
+                        format!("engine_options.approval_policy must be one of 'never' | 'on-failure' | 'on-request' | 'untrusted'"))?;
+                }
+                (Self::KEY_APPROVAL_REVIEW, toml::Value::String(review)) => {
+                    parsed.approval_review = CodexApprovalReview::parse(review).ok_or_else(||
+                        format!("engine_options.approval_review must be one of 'user' | 'auto'"))?;
+                }
+                _ => return Err(format!("unsupported engine_options key '{key}'")),
+            }
+        }
+        match (parsed.approval_policy.asks_approvals(), parsed.approval_review) {
+            // `never` closes the approval channel entirely; an auto reviewer
+            // never fires. The combo usually means the author wanted engine-side
+            // auto-approvals — fail fast instead of silently keeping the denial.
+            (false, CodexApprovalReview::Auto) => return Err("engine_options.approval_review='auto' requires approval_policy 'on-failure' or 'on-request'; with 'never' escalations are denied without a reviewer".into()),
+            // Human approval via BCS HITL needs codex→interaction routing that this
+            // driver does not implement yet; asking would hit the -32000 rejector.
+            (true, CodexApprovalReview::User) => return Err("engine_options.approval_review='user' with a non-'never' approval_policy requires codex HITL routing, which this driver does not implement yet; use approval_policy='never' or approval_review='auto'".into()),
+            _ => {}
+        }
+        if parsed.sandbox == CodexSandbox::DangerFullAccess && options.contains_key(Self::KEY_NETWORK_ACCESS) {
+            tracing::warn!(target: "bcs_bridge_core::engine",
+                "engine_options.network_access is a no-op with sandbox='danger-full-access'; the sandbox already permits everything");
+        }
+        if parsed.approval_review == CodexApprovalReview::Auto {
+            tracing::warn!(target: "bcs_bridge_core::engine",
+                "bot grants escalated unsandboxed execution via engine auto-review (cfuse auto_review); escalations may leave the declared sandbox without human approval");
+        }
+        tracing::warn!(target: "bcs_bridge_core::engine",
+            sandbox = parsed.sandbox.wire(), network_access = parsed.network_access,
+            approval_policy = parsed.approval_policy.wire(), approvals_reviewer = parsed.approval_review.wire(),
+            "bot policy posture (codex engine)");
+        Ok(parsed)
+    }
+
+    fn wire_thread_sandbox(self) -> &'static str { self.sandbox.wire() }
+    fn wire_approval_policy(self) -> &'static str { self.approval_policy.wire() }
+    fn wire_approvals_reviewer(self) -> &'static str { self.approval_review.wire() }
+    fn wire_sandbox_policy(self) -> Value {
+        match self.sandbox {
+            // danger-full-access disables sandboxing entirely; network is inherent.
+            CodexSandbox::DangerFullAccess => json!({"type": CodexSandbox::DangerFullAccess.turn_wire()}),
+            CodexSandbox::ReadOnly => json!({"type": CodexSandbox::ReadOnly.turn_wire(), "networkAccess": self.network_access}),
+            CodexSandbox::WorkspaceWrite => json!({"type": CodexSandbox::WorkspaceWrite.turn_wire(), "networkAccess": self.network_access}),
+        }
+    }
+}
+
 /// Codex app-server JSON-RPC driver.
 ///
-/// Known limitation: threads run with `approvalPolicy: never`, a read-only
-/// sandbox and no network access, and app-server requests are rejected rather
-/// than routed to HITL interactions.
+/// Known limitation: threads default to `approvalPolicy: never` with no HITL
+/// approval routing (app-server server requests are rejected rather than routed
+/// to interactions), while the sandbox/network posture is now configurable per
+/// bot via `bot.engine_options` (see [`CodexOptions`]; default
+/// `workspace-write` + `network_access: true`), replacing the previous hardcoded
+/// read-only/no-network lockdown.
 pub struct CodexAppServer {
     bin: PathBuf,
     prefix_args: Vec<String>,
     desktop: bool,
     socket: Option<PathBuf>,
+    options: CodexOptions,
     native: super::codex_persistent::NativeServer,
 }
 
@@ -51,12 +257,17 @@ impl CodexAppServer {
     /// `prefix_args` are placed before `app-server`, for launchers that select
     /// Codex through a subcommand or flag.
     pub fn new(bin: PathBuf, prefix_args: Vec<String>) -> Self {
-        Self { bin, prefix_args, desktop: false, socket: None, native: Default::default() }
+        Self::with_options(bin, prefix_args, CodexOptions::default())
+    }
+
+    fn with_options(bin: PathBuf, prefix_args: Vec<String>, options: CodexOptions) -> Self {
+        Self { bin, prefix_args, desktop: false, socket: None, options, native: Default::default() }
     }
 
     /// Connect over Unix WebSocket; never start, restart or stop the shared server.
     pub fn desktop(socket: PathBuf) -> Self {
-        Self { bin: PathBuf::new(), prefix_args: Vec::new(), desktop: true, socket: Some(socket), native: Default::default() }
+        Self { bin: PathBuf::new(), prefix_args: Vec::new(), desktop: true, socket: Some(socket),
+            options: CodexOptions::default(), native: Default::default() }
     }
 
     pub(super) async fn initialize(&self, cli: &mut CodexConnection, next_id: &mut u64,
@@ -80,6 +291,24 @@ impl CodexAppServer {
         args.extend(["app-server".into(), "--listen".into(), "stdio://".into()]);
         args
     }
+
+    /// Warn when Codex has no sandbox launcher (bubblewrap) for a sandboxed
+    /// mode: either `bwrap` on PATH or a bundled `codex-resources/bwrap` beside
+    /// the engine binary. The engine itself reports the failure per command at
+    /// turn time; this warning makes it visible at start instead.
+    #[cfg(unix)]
+    fn warn_sandbox_host(&self) {
+        if let Some(parent) = self.bin.parent()
+            && parent.join("codex-resources").join("bwrap").exists() { return; }
+        if executable_on_path("bwrap") { return; }
+        tracing::warn!(target: "bcs_bridge_core::engine",
+            sandbox = self.options.sandbox.wire(), engine_bin = %self.bin.display(),
+            "codex sandbox unavailable: bubblewrap is missing on this host; every sandboxed exec_command will panic at runtime. \
+             Install bubblewrap (yum/apt install bubblewrap) or set engine_options {{ sandbox = 'danger-full-access' }} for a sandbox-less bot");
+    }
+
+    #[cfg(not(unix))]
+    fn warn_sandbox_host(&self) {}
 
     async fn abort_turn(&self, cli: &mut CodexConnection, thread_id: &str, turn_id: &str) -> Result<(), TurnError> {
         if self.desktop {
@@ -122,8 +351,7 @@ impl crate::engine::EngineFactory for CodexAppServerFactory {
     fn id(&self) -> &str { &self.id }
     fn default_bin(&self) -> &str { &self.default_bin }
     fn build(&self, bin: PathBuf, options: &toml::Table) -> Result<Arc<dyn Engine>, String> {
-        crate::engine::reject_engine_options(options)?;
-        Ok(Arc::new(CodexAppServer::new(bin, self.prefix_args.clone())))
+        Ok(Arc::new(CodexAppServer::with_options(bin, self.prefix_args.clone(), CodexOptions::parse(options)?)))
     }
 }
 
@@ -132,7 +360,16 @@ impl Engine for CodexAppServer {
     async fn shutdown(&self) { self.native.shutdown().await; }
 
     async fn preflight(&self) -> Result<(), TurnError> {
-        if !self.desktop { return Ok(()); }
+        if !self.desktop {
+            // The Codex Linux sandbox executes every exec_command through bwrap
+            // (or the bundled codex-resources/bwrap next to the engine binary).
+            // Without it every command panics at runtime — warn loudly here, in
+            // lieu of failing business startup on hosts that cannot provide it.
+            if self.options.sandbox != CodexSandbox::DangerFullAccess {
+                self.warn_sandbox_host();
+            }
+            return Ok(());
+        }
         let socket = self.socket.as_deref().ok_or_else(|| TurnError::Protocol("Missing desktop socket".into()))?;
         let mut connection = CodexConnection::connect(socket, None).await?;
         let result = self.initialize(&mut connection, &mut 1, &mut VecDeque::new(), &CancellationToken::new()).await;
@@ -170,7 +407,7 @@ impl Engine for CodexAppServer {
                 &mut next_id,
                 &mut backlog,
                 "thread/resume",
-                thread_resume_params(&req, session_id),
+                thread_resume_params(&req, session_id, self.options),
                 &abort,
             )
             .await?
@@ -180,7 +417,7 @@ impl Engine for CodexAppServer {
                 &mut next_id,
                 &mut backlog,
                 "thread/start",
-                thread_start_params(&req),
+                thread_start_params(&req, self.options),
                 &abort,
             )
             .await?
@@ -202,7 +439,7 @@ impl Engine for CodexAppServer {
             &mut next_id,
             &mut backlog,
             "turn/start",
-            turn_start_params(&req, &thread_id),
+            turn_start_params(&req, &thread_id, self.options),
             &start_abort,
         );
         let turn = if self.desktop {
@@ -598,12 +835,12 @@ async fn respond_server_request(cli: &mut CodexConnection, request: &Value) -> R
     .await
 }
 
-fn thread_start_params(req: &TurnRequest) -> Value {
+fn thread_start_params(req: &TurnRequest, options: CodexOptions) -> Value {
     let mut params = json!({
         "cwd": req.cwd,
-        "approvalPolicy": "never",
-        "approvalsReviewer": "user",
-        "sandbox": "read-only",
+        "approvalPolicy": options.wire_approval_policy(),
+        "approvalsReviewer": options.wire_approvals_reviewer(),
+        "sandbox": options.wire_thread_sandbox(),
         "ephemeral": false,
         "threadSource": "bridge-provider",
     });
@@ -613,13 +850,13 @@ fn thread_start_params(req: &TurnRequest) -> Value {
     params
 }
 
-fn thread_resume_params(req: &TurnRequest, thread_id: &str) -> Value {
+fn thread_resume_params(req: &TurnRequest, thread_id: &str, options: CodexOptions) -> Value {
     let mut params = json!({
         "threadId": thread_id,
         "cwd": req.cwd,
-        "approvalPolicy": "never",
-        "approvalsReviewer": "user",
-        "sandbox": "read-only",
+        "approvalPolicy": options.wire_approval_policy(),
+        "approvalsReviewer": options.wire_approvals_reviewer(),
+        "sandbox": options.wire_thread_sandbox(),
     });
     if let Some(model) = req.model.as_deref().filter(|model| !model.is_empty()) {
         params["model"] = json!(model);
@@ -627,7 +864,7 @@ fn thread_resume_params(req: &TurnRequest, thread_id: &str) -> Value {
     params
 }
 
-fn turn_start_params(req: &TurnRequest, thread_id: &str) -> Value {
+fn turn_start_params(req: &TurnRequest, thread_id: &str, options: CodexOptions) -> Value {
     let mut params = json!({
         "threadId": thread_id,
         "clientUserMessageId": req.run_id,
@@ -637,12 +874,9 @@ fn turn_start_params(req: &TurnRequest, thread_id: &str) -> Value {
             "text_elements": [],
         }],
         "cwd": req.cwd,
-        "approvalPolicy": "never",
-        "approvalsReviewer": "user",
-        "sandboxPolicy": {
-            "type": "readOnly",
-            "networkAccess": false,
-        },
+        "approvalPolicy": options.wire_approval_policy(),
+        "approvalsReviewer": options.wire_approvals_reviewer(),
+        "sandboxPolicy": options.wire_sandbox_policy(),
     });
     if let Some(model) = req.model.as_deref().filter(|model| !model.is_empty()) {
         params["model"] = json!(model);
@@ -656,6 +890,18 @@ fn extract_thread_id(value: &Value) -> Option<String> {
         .and_then(Value::as_str)
         .or_else(|| value.get("threadId").and_then(Value::as_str))
         .map(str::to_string)
+}
+
+/// Locate an executable named `name` on PATH without launching it.
+#[cfg(unix)]
+fn executable_on_path(name: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|paths| std::env::split_paths(&paths).any(|directory| {
+        let candidate = directory.join(name);
+        std::fs::metadata(&candidate).is_ok_and(|metadata| {
+            use std::os::unix::fs::PermissionsExt;
+            metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+        })
+    }))
 }
 
 fn extract_turn_id(value: &Value) -> Option<String> {
@@ -829,5 +1075,116 @@ mod tests {
                 assert!(!matches_turn(&value, "t-1", "turn-1", shared));
             }
         }
+    }
+
+    fn table(pairs: &[(&str, toml::Value)]) -> toml::Table {
+        pairs.iter().cloned().map(|(k, v)| (k.to_owned(), v)).collect()
+    }
+
+    #[test]
+    fn codex_options_default_to_workspace_write_network_never() {
+        let options = CodexOptions::parse(&toml::Table::new()).unwrap();
+        assert_eq!(options.sandbox, CodexSandbox::WorkspaceWrite);
+        assert!(options.network_access);
+        assert_eq!(options.approval_policy, CodexApprovalPolicy::Never);
+        assert_eq!(options.approval_review, CodexApprovalReview::User);
+        assert_eq!(options.wire_thread_sandbox(), "workspace-write");
+        assert_eq!(options.wire_approval_policy(), "never");
+        assert_eq!(options.wire_approvals_reviewer(), "user");
+        assert_eq!(options.wire_sandbox_policy(),
+            json!({"type": "workspaceWrite", "networkAccess": true}));
+    }
+
+    #[test]
+    fn codex_options_parse_each_supported_key_and_reject_others() {
+        let options = CodexOptions::parse(&table(&[
+            ("sandbox", "read-only".into()),
+            ("network_access", false.into()),
+            ("approval_policy", "on-failure".into()),
+            ("approval_review", "auto".into()),
+        ])).unwrap();
+        assert_eq!(options.sandbox, CodexSandbox::ReadOnly);
+        assert!(!options.network_access);
+        assert_eq!(options.approval_policy, CodexApprovalPolicy::OnFailure);
+        assert_eq!(options.approval_review, CodexApprovalReview::Auto);
+        assert_eq!(options.wire_approvals_reviewer(), "auto_review");
+        assert_eq!(options.wire_sandbox_policy(),
+            json!({"type": "readOnly", "networkAccess": false}));
+        for invalid in [
+            table(&[("bogus", "x".into())]),
+            table(&[("sandbox", "bogus".into())]),
+            table(&[("sandbox", 1.into())]),
+            table(&[("network_access", "true".into())]),
+            table(&[("approval_policy", "auto".into())]),
+            table(&[("approval_review", "everyone".into())]),
+        ] {
+            assert!(CodexOptions::parse(&invalid).is_err(), "accepted {invalid:?}");
+        }
+    }
+
+    #[test]
+    fn codex_options_reject_dead_approval_combinations() {
+        let auto_never = table(&[("approval_policy", "never".into()),
+            ("approval_review", "auto".into())]);
+        let error = CodexOptions::parse(&auto_never).unwrap_err();
+        assert!(error.contains("approval_review='auto' requires") && error.contains("never"), "{error}");
+        let user_asks = table(&[("approval_policy", "on-request".into()),
+            ("approval_review", "user".into())]);
+        let error = CodexOptions::parse(&user_asks).unwrap_err();
+        assert!(error.contains("HITL") && error.contains("does not implement"), "{error}");
+        // unset review on a non-never policy defaults to user and must fail the same way
+        let unset_review = table(&[("approval_policy", "on-failure".into())]);
+        let error = CodexOptions::parse(&unset_review).unwrap_err();
+        assert!(error.contains("HITL"), "{error}");
+        assert!(CodexOptions::parse(&table(&[
+            ("approval_policy", "on-request".into()), ("approval_review", "auto".into()),
+        ])).is_ok());
+    }
+
+    #[test]
+    fn codex_options_danger_full_access_wire_omits_network() {
+        let options = CodexOptions::parse(&table(&[("sandbox", "danger-full-access".into())])).unwrap();
+        assert_eq!(options.sandbox, CodexSandbox::DangerFullAccess);
+        assert_eq!(options.wire_sandbox_policy(), json!({"type": "dangerFullAccess"}));
+        assert!(CodexOptions::parse(&table(&[
+            ("sandbox", "danger-full-access".into()), ("network_access", false.into()),
+        ])).is_ok(), "explicit network_access normalizes with a warning");
+    }
+
+    fn options_req(cwd: &str) -> TurnRequest {
+        struct TestObserver;
+        #[async_trait::async_trait]
+        impl crate::engine::SessionObserver for TestObserver {
+            async fn established(&self, _: &str) -> Result<(), String> { Ok(()) }
+        }
+        TurnRequest::new("run-1", "prompt", cwd, Arc::new(TestObserver))
+    }
+
+    #[test]
+    fn wire_params_follow_resolved_options_and_keep_bridge_identifiers() {
+        let options = CodexOptions::parse(&toml::Table::new()).unwrap();
+        let req = options_req("/tmp/x");
+        let thread = thread_start_params(&req, options);
+        assert_eq!(thread["sandbox"], "workspace-write");
+        assert_eq!(thread["approvalPolicy"], "never");
+        assert_eq!(thread["approvalsReviewer"], "user");
+        assert_eq!(thread["threadSource"], "bridge-provider");
+        assert_eq!(thread["ephemeral"], false);
+        assert!(thread.get("model").is_none());
+        let resume = thread_resume_params(&req, "t-1", options);
+        assert_eq!(resume["sandbox"], "workspace-write");
+        assert_eq!(resume["threadId"], "t-1");
+        let turn = turn_start_params(&req, "t-1", options);
+        assert_eq!(turn["sandboxPolicy"], json!({"type": "workspaceWrite", "networkAccess": true}));
+        assert_eq!(turn["approvalPolicy"], "never");
+        assert_eq!(turn["clientUserMessageId"], "run-1");
+        let read_only = CodexOptions::parse(&table(&[("sandbox", "read-only".into()),
+            ("network_access", false.into())])).unwrap();
+        let turn = turn_start_params(&req, "t-1", read_only);
+        assert_eq!(turn["sandboxPolicy"], json!({"type": "readOnly", "networkAccess": false}));
+        let banned = CodexOptions::parse(&table(&[("sandbox", "danger-full-access".into())])).unwrap();
+        assert_eq!(turn_start_params(&req, "t-1", banned)["sandboxPolicy"],
+            json!({"type": "dangerFullAccess"}));
+        assert_eq!(thread_start_params(&req, banned)["sandbox"], "danger-full-access");
     }
 }

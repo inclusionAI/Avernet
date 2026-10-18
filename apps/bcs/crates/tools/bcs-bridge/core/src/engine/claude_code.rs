@@ -71,6 +71,8 @@ impl Default for ClaudeCodeFactory {
 impl crate::engine::EngineFactory for ClaudeCodeFactory {
     fn id(&self) -> &str { &self.id }
     fn default_bin(&self) -> &str { &self.default_bin }
+    /// The Claude driver forwards `permission_mode` as its protocol flag.
+    fn ignores_permission_mode(&self) -> bool { false }
     fn build(&self, bin: PathBuf, options: &toml::Table) -> Result<Arc<dyn Engine>, String> {
         crate::engine::reject_engine_options(options)?;
         Ok(Arc::new(ClaudeCode::new(bin, self.prefix_args.clone())))
