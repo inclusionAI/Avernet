@@ -104,6 +104,35 @@ for raw in sys.stdin:
                 },
             })
             continue
+        progress_final = text.startswith("PROGRESS_FINAL:")
+        if progress_final:
+            # Progress commentary streams first, then the real answer arrives
+            # inside turn.completed.items. Exercises that an in-flight delta
+            # never shadows the authoritative final message.
+            send({
+                "jsonrpc": "2.0",
+                "method": "item/agentMessage/delta",
+                "params": {
+                    "threadId": "t-1", "turnId": turn_id,
+                    "delta": "Checking the PR...",
+                },
+            })
+            send({
+                "jsonrpc": "2.0",
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "t-1",
+                    "turnId": turn_id,
+                    "turn": {
+                        "status": "completed",
+                        "items": [
+                            {"type": "agentMessage", "phase": "final_answer",
+                             "text": text[len("PROGRESS_FINAL:"):].lstrip()},
+                        ],
+                    },
+                },
+            })
+            continue
         send({
             "jsonrpc": "2.0",
             "method": "item/agentMessage/delta",

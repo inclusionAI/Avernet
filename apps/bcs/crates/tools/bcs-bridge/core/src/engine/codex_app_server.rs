@@ -562,11 +562,15 @@ impl Engine for CodexAppServer {
                     if let Some(message) = completed_failure_message(&value) {
                         return Err(TurnError::EngineExited(message));
                     }
-                    let final_text = if deltas.is_empty() {
-                        completed_text(&value).unwrap_or_default()
-                    } else {
-                        deltas
-                    };
+                    // The completed turn's own structured items are the
+                    // authoritative final message — a preceding streamed
+                    // `agentMessage/delta` may only be progress commentary
+                    // (e.g. "Checking the PR...") or a partial prefix of the
+                    // real answer. Prefer the authoritative snapshot; fall
+                    // back to accumulated deltas only when the snapshot
+                    // carries no answer (e.g. legacy engines that stream
+                    // everything).
+                    let final_text = completed_text(&value).unwrap_or(deltas);
                     cli.finish().await;
                     return Ok(TurnOutcome {
                         engine_session_id: Some(thread_id),
