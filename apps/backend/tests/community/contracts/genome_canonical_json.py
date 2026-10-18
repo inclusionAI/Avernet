@@ -72,6 +72,42 @@ def tree_digest(files: list[tuple[str, bytes]]) -> str:
     return sha256_digest(canonical_tree_bytes(files))
 
 
+_SEGMENT_SAFE = frozenset(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-")
+
+
+def encode_segment(name: str) -> str:
+    """One gene-path segment in its canonical spelling (README §2)."""
+    if name in (".", ".."):
+        return "%2E" * len(name)
+    return "".join(chr(b) if b in _SEGMENT_SAFE else f"%{b:02X}" for b in name.encode("utf-8"))
+
+
+def is_canonical_gene_path(path: str) -> bool:
+    """True when every segment decodes as UTF-8 and re-encodes to itself."""
+    category, *segments = path.split("/")
+    for segment in segments:
+        try:
+            decoded = _percent_decode(segment)
+        except (ValueError, UnicodeDecodeError):
+            return False
+        if encode_segment(decoded) != segment:
+            return False
+    return bool(category)
+
+
+def _percent_decode(segment: str) -> str:
+    out = bytearray()
+    i = 0
+    while i < len(segment):
+        if segment[i] == "%":
+            out.append(int(segment[i + 1 : i + 3], 16))
+            i += 3
+        else:
+            out += segment[i].encode("utf-8")
+            i += 1
+    return out.decode("utf-8")
+
+
 def _serialize(value: Any) -> str:
     # ``bool`` first: it is a subclass of ``int`` and must not print as 1/0.
     if value is None:

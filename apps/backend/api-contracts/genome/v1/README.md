@@ -84,6 +84,11 @@ pct-encoded = "%" HEXDIG HEXDIG                                     ; uppercase;
   `%XX` with uppercase hex, and a name that is exactly `.` or `..` is written
   `%2E` or `%2E%2E`. Bytes in the allowed set are never encoded, so every
   name has exactly one spelling: `mcp:x` is `tools/mcp/mcp%3Ax`.
+- **Only the canonical spelling is valid.** A gene path is valid only when
+  decoding every segment (as UTF-8) and encoding it again by the rule above
+  gives the same string. `persona/SAFETY%2Emd`, `skills/%61bc` and `%FF`
+  match the schema's pattern but are refused: covering compares strings, so a
+  pin written in another spelling would protect nothing.
 - **A directory resource's gene path has no trailing slash.** The entry
   declared as `data/kb/` is `resources/data/kb`.
 - **Covering.** A gene path `P` *covers* a gene path `X` when `X == P` or `X`
@@ -407,6 +412,8 @@ denominator).
 
 - `base` equals the revision it is applied to; every op applies exactly, or
   the patch is rejected (no fuzzy merge).
+- Every gene path in the policy and in the patch is in its canonical
+  spelling (§2).
 - Every op's gene path is covered by `mutable_genes`, overlaps no pin, and,
   for a patch recorded for an Evolution Run, is covered by the run's
   `allowed_genes`.
@@ -475,13 +482,16 @@ while capturing:
 > so the same owner content would get different digests on different bots.
 > Capture therefore strips it with `IdentityService._remove_reference_section`,
 > the same function `sync_agents_md` uses before re-adding it, and then
-> normalizes the end of the file to exactly one `\n`. The normalization is
-> needed because `sync_agents_md` writes `content.rstrip()` before the block:
-> once the block has been added, the owner's original trailing whitespace is
-> gone, so a bot with the block and a bot without it would otherwise capture
-> the same owner content with different digests. It is applied to every
-> captured AGENTS.md, block or not. Applying the revision re-adds the block
-> exactly as today, so the running bot is unchanged.
+> replaces the content with `content.rstrip() + "\n"` (Python's `rstrip()`:
+> every trailing space, tab and newline removed, then one `\n`). The
+> normalization is needed because `sync_agents_md` writes `content.rstrip()`
+> before the block: once the block has been added, the owner's original
+> trailing whitespace is gone, so a bot with the block and a bot without it
+> would otherwise capture the same owner content with different digests. It
+> is applied to every captured AGENTS.md, block or not. Applying the revision
+> re-adds the block exactly as today. The running bot is unchanged except
+> that, on a bot without the block, trailing whitespace at the end of
+> AGENTS.md is trimmed to one newline.
 
 **Ignored and refused.**
 
