@@ -6,11 +6,11 @@
 - **Goal:** Write the normative prose the schemas rely on.
 - **Files:** `apps/backend/api-contracts/genome/v1/README.md`
 - **Done when:**
-  - [ ] Versioning rule (`genome_schema`, `patch_schema`, what bumps them).
-  - [ ] Gene path grammar, segment encoding, and segment-boundary prefix rule, with the path table.
-  - [ ] Canonicalisation: RFC 8785 subset (no floats, safe integers), list sort keys and uniqueness, revision id and every digest formula, `acm-tree-v1` rules and what it does not preserve.
-  - [ ] Recording rules: fetch details resolved away, inline content stored by digest, placeholders resolved once with the recording bot's values, first-revision capture from current state, the AGENTS.md reference block removed on capture with the full reason, `cli_tools` ignored, `engine_config` refused (#2858).
-  - [ ] Known limitations with issues: #2859, #2860; directory re-store cost (G-1).
+  - [x] Versioning rule (`genome_schema`, `patch_schema`, what bumps them).
+  - [x] Gene path grammar, segment encoding, and segment-boundary prefix rule, with the path table.
+  - [x] Canonicalisation: RFC 8785 subset (no floats, safe integers), list sort keys and uniqueness, revision id and every digest formula, `acm-tree-v1` rules and what it does not preserve.
+  - [x] Recording rules: fetch details resolved away, inline content stored by digest, placeholders resolved once with the recording bot's values, first-revision capture from current state, the AGENTS.md reference block removed on capture with the full reason, `cli_tools` ignored, `engine_config` refused (#2858).
+  - [x] Known limitations with issues: #2859, #2860; directory re-store cost (G-1).
 - **Depends on:** —
 
 ## Task 2: Canonical JSON reference and vectors

@@ -122,9 +122,10 @@ how the archive was compressed.
 ```
 
 `locked_genes` is removed: anything not in `mutable_genes` is off limits, and
-`policy` is never a valid gene path. A `risk_overrides` value lower than the
-default tier for that gene is a schema-valid but record-time-rejected policy
-(the check needs `risk-tiers.json`, so it is stated as a rule in the README).
+`policy` is never a valid gene path. An op's tier is the higher of its
+default tier and every `risk_overrides` value covering its gene path, so an
+override can only raise a tier by construction; a lower value has no effect
+and needs no separate check.
 
 ### Gene path grammar
 
