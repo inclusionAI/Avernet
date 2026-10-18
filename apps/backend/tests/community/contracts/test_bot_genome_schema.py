@@ -1,0 +1,408 @@
+"""Contract: the Bot Genome contract files agree with each other and with the docs.
+
+The contract lives in ``apps/backend/api-contracts/genome/v1/`` (work item
+RSI-02). Nothing in Backend reads it yet: the Genome Registry (RSI-03) will
+validate every revision and patch against it, and ``apps/evolution`` reads the
+same files. Until then this suite is what keeps the files honest:
+
+- every example validates, and every invalid example fails for the stated reason;
+- every digest and revision id in the examples is real (the bytes are in
+  ``examples/blobs/``);
+- the canonical JSON vectors reproduce;
+- every patch op has a risk tier, and the tier tables in the design docs equal
+  ``risk-tiers.json``;
+- every Manifest v1 example in ``docs/bot-config-manifest/examples.zh-CN.md``
+  has a round-trip case, and each case's document gets the outcome it states
+  from the real Manifest validator.
+"""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Any, Iterator
+
+import jsonschema
+import pytest
+import yaml
+from referencing import Registry, Resource
+
+from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import decode_tree_bytes
+from tests.community.contracts.genome_canonical_json import (
+    NotCanonicalizable,
+    canonicalize,
+    is_canonical_gene_path,
+    loads_strict,
+    revision_id,
+    sha256_digest,
+)
+
+_BACKEND = Path(__file__).resolve().parents[3]
+_CONTRACT = _BACKEND / "api-contracts" / "genome" / "v1"
+_EXAMPLES = _CONTRACT / "examples"
+_BLOBS = _EXAMPLES / "blobs"
+_CASES = _EXAMPLES / "manifest-v1"
+_EVOLUTION_DOCS = _BACKEND / "docs" / "bot-evolution"
+_MANIFEST_EXAMPLES_DOC = _BACKEND / "docs" / "bot-config-manifest" / "examples.zh-CN.md"
+_DIGEST = re.compile(r"\Asha256:[0-9a-f]{64}\Z")
+
+
+def _load(path: Path) -> Any:
+    return loads_strict(path.read_text(encoding="utf-8"))
+
+
+_REVISION_SCHEMA = _load(_CONTRACT / "genome-revision.schema.json")
+_PATCH_SCHEMA = _load(_CONTRACT / "genome-patch.schema.json")
+_RISK_TIERS = _load(_CONTRACT / "risk-tiers.json")
+_REGISTRY = Registry().with_resources(
+    (schema["$id"], Resource.from_contents(schema)) for schema in (_REVISION_SCHEMA, _PATCH_SCHEMA)
+)
+_VALIDATORS = {
+    "revision": jsonschema.Draft7Validator(_REVISION_SCHEMA, registry=_REGISTRY),
+    "patch": jsonschema.Draft7Validator(_PATCH_SCHEMA, registry=_REGISTRY),
+}
+_MEMORY_ITEMS = jsonschema.Draft7Validator(
+    {"$ref": _REVISION_SCHEMA["$id"] + "#/definitions/memoryItems"}, registry=_REGISTRY
+)
+
+
+def _files(pattern: str) -> list[Path]:
+    return sorted(_EXAMPLES.glob(pattern))
+
+
+def _ids(paths: list[Path]) -> list[str]:
+    return [str(path.relative_to(_EXAMPLES)) for path in paths]
+
+
+_REVISIONS = _files("revisions/*.json") + _files("manifest-v1/*/revision.json")
+_PATCHES = _files("patches/*.json")
+_INVALID = _files("invalid/*.json")
+
+
+def _blob(digest: str) -> bytes:
+    path = _BLOBS / digest.split(":", 1)[1]
+    assert path.is_file(), f"no blob for {digest}"
+    data = path.read_bytes()
+    assert sha256_digest(data) == digest, f"blob {path.name} does not hash to its name"
+    return data
+
+
+# --------------------------------------------------------------------------------------------
+# Rules JSON Schema cannot express (README §2, §3.1): list order and uniqueness, canonical paths.
+
+
+_SORTED_BY = {
+    "persona": "type",
+    "skills": "name",
+    "resources": "path",
+}
+
+
+def order_violations(record: dict[str, Any]) -> list[str]:
+    """Every breach of README §3.1's sort and uniqueness rules in one revision."""
+    spec, policy = record["spec"], record["policy"]
+    problems: list[str] = []
+
+    def check(name: str, keys: list[str]) -> None:
+        if keys != sorted(keys):
+            problems.append(f"{name} is not sorted")
+        if len(keys) != len(set(keys)):
+            problems.append(f"{name} has duplicate keys")
+
+    for category, key in _SORTED_BY.items():
+        check(f"spec.{category}", [entry[key] for entry in spec[category]])
+    check("spec.tools.mcp", [entry["server_code"] for entry in spec["tools"]["mcp"]])
+    check("policy.mutable_genes", list(policy["mutable_genes"]))
+    check("policy.pins", list(policy["pins"]))
+    return problems
+
+
+def gene_paths(record: dict[str, Any]) -> Iterator[str]:
+    policy = record["policy"]
+    yield from policy["mutable_genes"]
+    yield from policy["pins"]
+    yield from policy["risk_overrides"]
+
+
+def _patch_gene_paths(patch: dict[str, Any]) -> Iterator[str]:
+    for op in patch["ops"]:
+        if "target" in op:
+            yield op["target"]
+
+
+# --------------------------------------------------------------------------------------------
+# Schemas and examples
+
+
+def test_schemas_are_valid_draft_07() -> None:
+    for schema in (_REVISION_SCHEMA, _PATCH_SCHEMA):
+        jsonschema.Draft7Validator.check_schema(schema)
+
+
+@pytest.mark.parametrize("path", _REVISIONS, ids=_ids(_REVISIONS))
+def test_every_example_revision_is_valid(path: Path) -> None:
+    record = _load(path)
+    errors = [error.message for error in _VALIDATORS["revision"].iter_errors(record)]
+    assert not errors, errors
+    assert not order_violations(record)
+    assert all(is_canonical_gene_path(gene) for gene in gene_paths(record))
+
+
+@pytest.mark.parametrize("path", _PATCHES, ids=_ids(_PATCHES))
+def test_every_example_patch_is_valid(path: Path) -> None:
+    patch = _load(path)
+    errors = [error.message for error in _VALIDATORS["patch"].iter_errors(patch)]
+    assert not errors, errors
+    assert all(is_canonical_gene_path(gene) for gene in _patch_gene_paths(patch))
+    canonicalize(patch)  # a patch is hashed into its candidate id, so it must be canonicalizable
+
+
+@pytest.mark.parametrize("path", _INVALID, ids=_ids(_INVALID))
+def test_every_invalid_example_fails_its_stated_check(path: Path) -> None:
+    case = _load(path)
+    record = case["record"]
+    check = case["check"]
+    if check == "schema":
+        assert list(_VALIDATORS[case["schema"]].iter_errors(record)), case["reason"]
+        return
+    # The other checks run on records that are schema-valid, so each case fails only its own rule.
+    assert not list(_VALIDATORS[case["schema"]].iter_errors(record)), "expected a schema-valid record"
+    if check == "order":
+        assert order_violations(record), case["reason"]
+    elif check == "canonical-path":
+        assert not all(is_canonical_gene_path(gene) for gene in gene_paths(record)), case["reason"]
+    elif check == "identity":
+        assert record["revision"]["id"] != revision_id(record["spec"], record["policy"]), case["reason"]
+    else:
+        pytest.fail(f"unknown check {check!r}")
+
+
+# --------------------------------------------------------------------------------------------
+# Identity and digests
+
+
+@pytest.mark.parametrize("path", _REVISIONS, ids=_ids(_REVISIONS))
+def test_example_revision_ids_and_digests_are_real(path: Path) -> None:
+    record = _load(path)
+    spec = record["spec"]
+    expected = revision_id(spec, record["policy"])
+    assert record["revision"]["id"] == expected, f"revision.id should be {expected}"
+
+    for entry in spec["persona"]:
+        _blob(entry["digest"])
+    for entry in spec["resources"]:
+        data = _blob(entry["digest"])
+        if entry["path"].endswith("/"):
+            assert decode_tree_bytes(data) is not None, f"{entry['path']} is not an acm-tree-v1 blob"
+    for entry in spec["skills"]:
+        if entry["origin"] == "local":
+            members = decode_tree_bytes(_blob(entry["digest"]))
+            assert members is not None and "SKILL.md" in dict(members), entry["name"]
+    if spec["memory"] is not None:
+        raw = _blob(spec["memory"]["items_digest"])
+        items = loads_strict(raw.decode("utf-8"))
+        assert not list(_MEMORY_ITEMS.iter_errors(items))
+        assert canonicalize(items) == raw, "memory items must be stored as their canonical JSON"
+        keys = [item["key"] for item in items]
+        assert keys == sorted(set(keys))
+    if spec["script"] is not None:
+        _blob(spec["script"]["digest"]).decode("utf-8")
+
+
+def test_candidate_records_the_patch_that_made_it() -> None:
+    base = _load(_EXAMPLES / "revisions" / "01-support-bot.json")
+    candidate = _load(_EXAMPLES / "revisions" / "02-support-bot-candidate.json")
+    patch = _load(_EXAMPLES / "patches" / "00-mixed-r1-to-r2.json")
+    assert patch["base"] == base["revision"]["id"] == candidate["revision"]["parent"]
+    assert candidate["revision"]["patch_digest"] == sha256_digest(canonicalize(patch))
+    assert candidate["policy"] == base["policy"], "a patch never changes the policy"
+
+
+@pytest.mark.parametrize("path", _PATCHES, ids=_ids(_PATCHES))
+def test_patch_digest_references_are_real(path: Path) -> None:
+    for op in _load(path)["ops"]:
+        content = op.get("content")
+        if isinstance(content, dict):
+            data = _blob(content["digest"])
+            if op["op"] == "resource.add" and op["path"].endswith("/"):
+                assert decode_tree_bytes(data) is not None
+
+
+# --------------------------------------------------------------------------------------------
+# Canonical JSON vectors
+
+_VECTORS = _load(_CONTRACT / "canonical-json-vectors.json")
+
+
+@pytest.mark.parametrize("vector", _VECTORS["canonical"], ids=lambda v: v["name"])
+def test_canonical_json_vectors(vector: dict[str, Any]) -> None:
+    canonical = canonicalize(loads_strict(vector["input"]))
+    assert canonical.decode("utf-8") == vector["canonical"]
+    assert sha256_digest(canonical) == vector["sha256"]
+
+
+@pytest.mark.parametrize("vector", _VECTORS["rejected"], ids=lambda v: v["name"])
+def test_canonical_json_rejections(vector: dict[str, Any]) -> None:
+    with pytest.raises(NotCanonicalizable):
+        canonicalize(loads_strict(vector["input"]))
+
+
+@pytest.mark.parametrize("vector", _VECTORS["revision_ids"], ids=lambda v: v["name"])
+def test_revision_id_vectors(vector: dict[str, Any]) -> None:
+    assert canonicalize({"spec": vector["spec"], "policy": vector["policy"]}).decode() == vector["canonical"]
+    assert revision_id(vector["spec"], vector["policy"]) == vector["revision_id"]
+
+
+# --------------------------------------------------------------------------------------------
+# Risk tiers
+
+_OPS = _PATCH_SCHEMA["definitions"]["op"]["properties"]["op"]["enum"]
+
+
+def test_every_op_in_the_schema_has_a_risk_tier() -> None:
+    rule_ops = [rule["op"] for rule in _RISK_TIERS["rules"]]
+    assert set(rule_ops) == set(_OPS)
+    # First match wins, so for each (op, target) the unconditional rule must come last.
+    for op, target in {(rule["op"], rule["target"]) for rule in _RISK_TIERS["rules"]}:
+        rules = [rule for rule in _RISK_TIERS["rules"] if rule["op"] == op and rule["target"] == target]
+        assert "when" not in rules[-1], f"{op} on {target}: the last rule must have no condition"
+        assert all("when" in rule for rule in rules[:-1]), f"{op} on {target}: an unconditional rule shadows later ones"
+
+
+def _tier_rows() -> list[tuple[str, str, str, str]]:
+    rows = []
+    for rule in _RISK_TIERS["rules"]:
+        when = rule.get("when")
+        condition = "—" if when is None else ", ".join(f"{key}={value}".replace("=True", "") for key, value in when.items())
+        rows.append((rule["op"], rule["target"], condition, rule["tier"]))
+    return rows
+
+
+def _doc_tier_rows(text: str) -> list[tuple[str, str, str, str]]:
+    block = re.search(r"<!-- risk-tiers:begin -->(.*?)<!-- risk-tiers:end -->", text, re.S)
+    assert block, "no <!-- risk-tiers:begin --> … <!-- risk-tiers:end --> table"
+    rows = []
+    for line in block.group(1).splitlines():
+        cells = [cell.strip().strip("`") for cell in line.strip().strip("|").split("|")]
+        if len(cells) != 4 or set(cells[0]) <= {"-", " "} or not re.match(r"[a-z_]+\.[a-z_]+\Z", cells[0]):
+            continue
+        rows.append(tuple(cells))
+    return rows
+
+
+@pytest.mark.parametrize(
+    "doc", ["01-genome.md", "01-genome.zh-CN.md", "08-promotion.md", "08-promotion.zh-CN.md"]
+)
+def test_risk_tables_in_design_docs_match_risk_tiers_json(doc: str) -> None:
+    text = (_EVOLUTION_DOCS / doc).read_text(encoding="utf-8")
+    assert _doc_tier_rows(text) == _tier_rows()
+
+
+# --------------------------------------------------------------------------------------------
+# Manifest v1 round-trip cases
+
+# The YAML blocks of examples.zh-CN.md that are Manifest documents or fragments, by section,
+# and the case that works each one. A new example in that doc fails here until it has a case.
+_DOC_SECTIONS = {
+    "1.2": ["01-complete", "02-complete-without-engine-config"],
+    "2": ["03-sources-only"],
+    "3": ["04-engine-config"],
+    "4": ["05-identity"],
+    "5": ["06-resources-file-and-directory", "07-resources-git-and-archive"],
+    "6": ["08-skills"],
+    "7": ["09-cli-tools"],
+    "8": ["10-mcp"],
+    "9": ["11-script"],
+}
+_YAML_BLOCKS_PER_SECTION = {"1.2": 1, "2": 1, "3": 1, "4": 1, "5": 2, "6": 1, "7": 1, "8": 1, "9": 1}
+
+
+def _yaml_blocks_by_section(text: str) -> dict[str, int]:
+    """Count ```yaml blocks per section; §1's subsections count separately (only §1.2 is a document)."""
+    counts: dict[str, int] = {}
+    section = ""
+    in_block = False
+    for line in text.splitlines():
+        if line.startswith("```"):
+            if not in_block and line.startswith("```yaml") and section in _YAML_BLOCKS_PER_SECTION:
+                counts[section] = counts.get(section, 0) + 1
+            in_block = not in_block
+            continue
+        heading = None if in_block else re.match(r"(#{2,3}) (\d+(?:\.\d+)?)[ .]", line)
+        if heading:
+            level, number = heading.groups()
+            if level == "##" or number.startswith("1."):
+                section = number
+    return counts
+
+
+def test_manifest_v1_cases_cover_every_examples_doc_fragment() -> None:
+    counts = _yaml_blocks_by_section(_MANIFEST_EXAMPLES_DOC.read_text(encoding="utf-8"))
+    assert counts == _YAML_BLOCKS_PER_SECTION, "examples.zh-CN.md changed: add or update a manifest-v1 case"
+    cases = sorted(path.name for path in _CASES.iterdir() if path.is_dir() and path.name != "sources")
+    assert cases == sorted(name for names in _DOC_SECTIONS.values() for name in names)
+
+
+_CASE_DIRS = [path for path in sorted(_CASES.iterdir()) if path.is_dir() and path.name != "sources"]
+
+
+@pytest.mark.parametrize("case", _CASE_DIRS, ids=[path.name for path in _CASE_DIRS])
+def test_manifest_v1_case_gets_its_stated_outcome(case: Path) -> None:
+    from agentclaw.community.core.bot_config_manifest.capabilities import resolve_capabilities
+    from agentclaw.community.core.bot_config_manifest.schema import (
+        ManifestValidationError,
+        validate_document,
+    )
+
+    capabilities = resolve_capabilities(active_engine="openclaw", bot_type="personal", is_teclaw=lambda _: False)
+    document = (case / "manifest.yaml").read_text(encoding="utf-8")
+    expected = case / "expected.json"
+    if expected.exists():
+        with pytest.raises(ManifestValidationError) as refused:
+            validate_document(document, capabilities)
+        got = sorted((v.location, v.code) for v in refused.value.violations)
+        assert got == sorted((v["location"], v["code"]) for v in _load(expected)["violations"])
+        assert not (case / "revision.json").exists()
+        return
+
+    validate_document(document, capabilities)
+    revision = _load(case / "revision.json")
+    compiled = yaml.safe_load((case / "compiled.yaml").read_text(encoding="utf-8"))
+    assert compiled == _compile(revision["spec"]), "compiled.yaml must be derived from revision.json"
+
+
+def _store(digest: str) -> dict[str, str]:
+    _blob(digest)
+    return {"protocol": "content_store", "digest": digest}
+
+
+def _compile(spec: dict[str, Any]) -> dict[str, Any]:
+    """M′ from a revision, by manifest-v1-compatibility.md (proposed RSI-04 source spellings)."""
+    skills = []
+    for entry in spec["skills"]:
+        source = (
+            {"protocol": "center", "version": entry["center_version"]}
+            if entry["origin"] == "center"
+            else _store(entry["digest"])
+        )
+        skills.append({"name": entry["name"], "source": source})
+    mcp = []
+    for entry in spec["tools"]["mcp"]:
+        mcp.append({key: value for key, value in entry.items()})
+    script = None
+    if spec["script"] is not None:
+        script = {"body": _blob(spec["script"]["digest"]).decode("utf-8")}
+    return {
+        "schema_version": 1,
+        "manifest": {
+            "identity": [{"type": e["type"], "source": _store(e["digest"])} for e in spec["persona"]],
+            "skills": skills,
+            "resources": [{"path": e["path"], "source": _store(e["digest"])} for e in spec["resources"]],
+            "mcp": mcp,
+        },
+        "script": script,
+    }
+
+
+def test_example_digests_are_well_formed() -> None:
+    for path in _BLOBS.iterdir():
+        assert _DIGEST.match("sha256:" + path.name), path.name

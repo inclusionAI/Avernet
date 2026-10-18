@@ -65,9 +65,9 @@
 - **Goal:** One suite that keeps the contract files consistent with each other and with the docs.
 - **Files:** `apps/backend/tests/community/contracts/test_bot_genome_schema.py`
 - **Done when:**
-  - [ ] All tests listed in plan.md pass; negative cases fail for their stated reason.
+  - [x] All tests listed in plan.md pass; negative cases fail for their stated reason.
   - [ ] The design-doc tier-table check reads the marked tables (passes after Task 8).
-  - [ ] File stays under 1,000 lines.
+  - [x] File stays under 1,000 lines.
 - **Depends on:** Tasks 2–6
 
 ## Task 8: Update 01-genome.md and 08-promotion.md
