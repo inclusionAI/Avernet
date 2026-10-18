@@ -7,7 +7,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agentclaw.community.core.devices.services.device_context import DeviceContext, DeviceOfflineError
+from agentclaw.community.core.devices.services.device_context import (
+    ConnInfoBuildError, DeviceConnectionUnavailableError, DeviceContext, DeviceOfflineError,
+)
 from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import PerDomainRuntimeProjection
 from agentclaw.community.core.skill_center.services.runtime_projections.skill_runtime_delivery import SkillRuntimeDelivery
 from agentclaw.community.core.skill_center.services.runtime_projections.skill_projection_guard import SkillProjectionGuard
@@ -127,7 +129,12 @@ async def test_unknown_timeout_keeps_lease_instead_of_admitting_overlap():
 
 
 @pytest.mark.asyncio
-async def test_confirmed_offline_releases_lease_for_immediate_reconnect():
+@pytest.mark.parametrize(("failure", "code"), [
+    (DeviceOfflineError, "DESKTOP_DEVICE_OFFLINE"),
+    (DeviceConnectionUnavailableError, "SKILL_RUNTIME_UNAVAILABLE"),
+    (ConnInfoBuildError, "SKILL_RUNTIME_UNAVAILABLE"),
+])
+async def test_connection_resolution_failure_releases_lease_for_immediate_recovery(failure, code):
     state, _, guard, plan, _, _ = setup_guard()
     state.bot = {**state.bot, "bot_type": "desktop"}
     plan = replace(plan, bot=state.bot)
@@ -135,7 +142,7 @@ async def test_confirmed_offline_releases_lease_for_immediate_reconnect():
 
     def resolve(*_):
         if not state.online:
-            raise DeviceOfflineError("no active devices")
+            raise failure("connection resolution failed before mapping send")
         return DeviceContext(
             provider="baas", conn_info={}, binding_id=1,
             bot_id="bot", user_id="owner", bot_type="desktop",
@@ -151,7 +158,7 @@ async def test_confirmed_offline_releases_lease_for_immediate_reconnect():
     kwargs = dict(plan=plan, scope=ProjectionScope(skills=True), service_factory=SimpleNamespace())
 
     offline = await projection.apply(**kwargs)
-    assert offline.issues[0].code == "DESKTOP_DEVICE_OFFLINE"
+    assert offline.issues[0].code == code
     apply.assert_not_awaited()
 
     state.online = True
