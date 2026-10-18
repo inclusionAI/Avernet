@@ -1,0 +1,248 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://avernet/api-contracts/genome/v1/genome-patch.schema.json",
+  "title": "GenomePatch",
+  "description": "A typed, itemized change against a base revision (README §6). The schema checks shape only; whether each op applies to its base and stays inside the policy is checked when the patch is recorded (README §6.4).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["patch_schema", "base", "ops", "rationale", "evidence"],
+  "properties": {
+    "patch_schema": {"const": 1},
+    "base": {"$ref": "genome-revision.schema.json#/definitions/revisionId"},
+    "ops": {"type": "array", "minItems": 1, "maxItems": 200, "items": {"$ref": "#/definitions/op"}},
+    "rationale": {"type": "string", "minLength": 1, "maxLength": 8192},
+    "evidence": {"type": "array", "items": {"$ref": "genome-revision.schema.json#/definitions/evidenceRef"}}
+  },
+  "definitions": {
+    "op": {
+      "type": "object",
+      "required": ["op"],
+      "properties": {
+        "op": {
+          "type": "string",
+          "enum": [
+            "file.edit", "persona.add", "persona.remove", "skill.add", "skill.update", "skill.remove",
+            "resource.add", "resource.remove", "memory.add", "memory.update", "memory.retire", "memory.set_mode"
+          ]
+        }
+      },
+      "oneOf": [
+        {"$ref": "#/definitions/fileEdit"},
+        {"$ref": "#/definitions/personaAdd"},
+        {"$ref": "#/definitions/personaRemove"},
+        {"$ref": "#/definitions/skillAdd"},
+        {"$ref": "#/definitions/skillUpdate"},
+        {"$ref": "#/definitions/skillRemove"},
+        {"$ref": "#/definitions/resourceAdd"},
+        {"$ref": "#/definitions/resourceRemove"},
+        {"$ref": "#/definitions/memoryAdd"},
+        {"$ref": "#/definitions/memoryUpdate"},
+        {"$ref": "#/definitions/memoryRetire"},
+        {"$ref": "#/definitions/memorySetMode"}
+      ]
+    },
+    "digestRef": {
+      "description": "Bytes uploaded first with PUT …/genome/content.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["digest"],
+      "properties": {"digest": {"$ref": "genome-revision.schema.json#/definitions/digest"}}
+    },
+    "content": {
+      "description": "Inline UTF-8 text (at most 64 KiB once encoded), or a digest of uploaded bytes.",
+      "oneOf": [{"type": "string", "maxLength": 65536}, {"$ref": "#/definitions/digestRef"}]
+    },
+    "unifiedDiff": {
+      "description": "Hunks only, starting at '@@'; no ---/+++ headers; no fuzz (README §6.2).",
+      "type": "string",
+      "pattern": "^@@ -\\d+(,\\d+)? \\+\\d+(,\\d+)? @@"
+    },
+    "skillFilePath": {
+      "description": "Relative path inside a skill; no empty, '.' or '..' segment.",
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^(?![/~])(?!.*(^|/)\\.{1,2}(/|$))(?!.*//)(?!.*/$)[A-Za-z0-9._/-]+$"
+    },
+    "textEdit": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "heading", "content"],
+          "properties": {
+            "kind": {"const": "replace_section"},
+            "heading": {"type": "string", "pattern": "^#{1,6} [^\\n]+$"},
+            "content": {"type": "string", "maxLength": 65536}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "anchor", "content"],
+          "properties": {
+            "kind": {"const": "insert_after"},
+            "anchor": {"type": "string", "minLength": 1, "pattern": "^[^\\n]+$"},
+            "content": {"type": "string", "minLength": 1, "maxLength": 65536}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "diff"],
+          "properties": {
+            "kind": {"const": "diff"},
+            "diff": {"$ref": "#/definitions/unifiedDiff"}
+          }
+        }
+      ]
+    },
+    "fileEdit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "target", "edits"],
+      "properties": {
+        "op": {"const": "file.edit"},
+        "target": {
+          "description": "A persona file, a file inside a skill, a file resource, or a file inside a directory resource.",
+          "allOf": [
+            {"$ref": "genome-revision.schema.json#/definitions/genePath"},
+            {"type": "string", "pattern": "^(persona/[^/]+|skills/[^/]+/.+|resources/.+)$"}
+          ]
+        },
+        "edits": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"$ref": "#/definitions/textEdit"}}
+      }
+    },
+    "personaAdd": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "type", "content"],
+      "properties": {
+        "op": {"const": "persona.add"},
+        "type": {"$ref": "genome-revision.schema.json#/definitions/personaType"},
+        "content": {"$ref": "#/definitions/content"}
+      }
+    },
+    "personaRemove": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "type"],
+      "properties": {
+        "op": {"const": "persona.remove"},
+        "type": {"$ref": "genome-revision.schema.json#/definitions/personaType"}
+      }
+    },
+    "skillAdd": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "name", "files"],
+      "properties": {
+        "op": {"const": "skill.add"},
+        "name": {"$ref": "genome-revision.schema.json#/definitions/skillName"},
+        "files": {
+          "type": "object",
+          "required": ["SKILL.md"],
+          "maxProperties": 500,
+          "propertyNames": {"$ref": "#/definitions/skillFilePath"},
+          "additionalProperties": {"$ref": "#/definitions/content"}
+        }
+      }
+    },
+    "skillUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "name"],
+      "anyOf": [{"required": ["file_diffs"]}, {"required": ["files"]}],
+      "properties": {
+        "op": {"const": "skill.update"},
+        "name": {"$ref": "genome-revision.schema.json#/definitions/skillName"},
+        "file_diffs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "diff"],
+            "properties": {
+              "path": {"$ref": "#/definitions/skillFilePath"},
+              "diff": {"$ref": "#/definitions/unifiedDiff"}
+            }
+          }
+        },
+        "files": {
+          "description": "Path -> new content, or null to delete the file. SKILL.md cannot be deleted.",
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {"$ref": "#/definitions/skillFilePath"},
+          "properties": {"SKILL.md": {"$ref": "#/definitions/content"}},
+          "additionalProperties": {"oneOf": [{"type": "null"}, {"$ref": "#/definitions/content"}]}
+        }
+      }
+    },
+    "skillRemove": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "name"],
+      "properties": {
+        "op": {"const": "skill.remove"},
+        "name": {"$ref": "genome-revision.schema.json#/definitions/skillName"}
+      }
+    },
+    "resourceAdd": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "path", "content"],
+      "properties": {
+        "op": {"const": "resource.add"},
+        "path": {"$ref": "genome-revision.schema.json#/definitions/resourcePath"},
+        "content": {"$ref": "#/definitions/content"}
+      },
+      "if": {"properties": {"path": {"pattern": "/$"}}},
+      "then": {"properties": {"content": {"$ref": "#/definitions/digestRef", "description": "A directory resource is added from an uploaded acm-tree-v1 blob."}}}
+    },
+    "resourceRemove": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "path"],
+      "properties": {
+        "op": {"const": "resource.remove"},
+        "path": {"$ref": "genome-revision.schema.json#/definitions/resourcePath"}
+      }
+    },
+    "memoryAdd": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "item"],
+      "properties": {
+        "op": {"const": "memory.add"},
+        "item": {"$ref": "genome-revision.schema.json#/definitions/memoryItem"}
+      }
+    },
+    "memoryUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "item"],
+      "properties": {
+        "op": {"const": "memory.update"},
+        "item": {"$ref": "genome-revision.schema.json#/definitions/memoryItem"}
+      }
+    },
+    "memoryRetire": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "key"],
+      "properties": {
+        "op": {"const": "memory.retire"},
+        "key": {"$ref": "genome-revision.schema.json#/definitions/memoryKey"}
+      }
+    },
+    "memorySetMode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "mode"],
+      "properties": {
+        "op": {"const": "memory.set_mode"},
+        "mode": {"type": "string", "enum": ["seed", "merge", "replace"]}
+      }
+    }
+  }
+}

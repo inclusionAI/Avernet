@@ -37,9 +37,9 @@
 - **Goal:** `genome-patch.schema.json` with every op, and `risk-tiers.json`.
 - **Files:** `apps/backend/api-contracts/genome/v1/genome-patch.schema.json`, `apps/backend/api-contracts/genome/v1/risk-tiers.json`
 - **Done when:**
-  - [ ] All 12 ops from plan.md, discriminated by `op`; `file.edit` has kinds `replace_section`, `insert_after`, `diff`.
-  - [ ] Targets use the gene path grammar; no op can target `tools`, `script`, `engine_config`, `policy`.
-  - [ ] `risk-tiers.json` has a rule for every op, the two raises, and the rewrite threshold as an integer ratio with the exact LCS definition in the README.
+  - [x] All 12 ops from plan.md, discriminated by `op`; `file.edit` has kinds `replace_section`, `insert_after`, `diff`.
+  - [x] Targets use the gene path grammar; no op can target `tools`, `script`, `engine_config`, `policy`.
+  - [x] `risk-tiers.json` has a rule for every op, the two raises, and the rewrite threshold as an integer ratio with the exact LCS definition in the README.
 - **Depends on:** Task 1
 
 ## Task 5: Example records and blobs
