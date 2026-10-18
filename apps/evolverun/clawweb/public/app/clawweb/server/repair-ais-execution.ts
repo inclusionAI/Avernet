@@ -7,7 +7,7 @@ import { parse as parseYaml } from 'yaml';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { WorkflowDeployHistoryRepository } from '@avernet/workflow/server/repositories/workflow-deploy-history-repository';
 import type { RepairBaseline } from '@avernet/workflow/server/contracts/repair-batch';
-import { canonicalRepairJson } from '@avernet/workflow/server/contracts/repair-batch';
+import { repairProposalSpecDigest } from '@avernet/workflow/server/contracts/repair-baseline-identity';
 import type { RepairExecutionPort, RepairExecutionReadRequest, RepairGeneratedResult } from '@avernet/workflow/server/contracts/repair-workbench';
 import { RepairResultAbsentError } from '@avernet/workflow/server/contracts/repair-workbench';
 import type { AistudioService } from '@avernet/clawinsight/server/services/aistudio-service';
@@ -85,12 +85,10 @@ export class RepairGitStore {
     const spec = await this.git(['show', `${commit}:${specPath}`]);
     const deployedSpec = parseYaml(row.specJson) as unknown;
     const taggedSpec = parseYaml(spec) as unknown;
-    if (canonicalRepairJson(taggedSpec) !== canonicalRepairJson(deployedSpec)) {
-      throw new Error('Active deployment spec differs from the tagged ClawFlows Pack');
-    }
+    const proposalSpecDigest = repairProposalSpecDigest(taggedSpec, deployedSpec);
     return { workflowId: row.workflowId, packId: row.packId, releaseRevision: row.version,
       activeDeployNumber: row.deployNumber, specDigest: createHash('sha256').update(spec).digest('hex'),
-      repoId: 'clawflows', specPath, packCommit: commit, packDigest: tree };
+      proposalSpecDigest, repoId: 'clawflows', specPath, packCommit: commit, packDigest: tree };
   }
 
   async result(request: RepairExecutionReadRequest): Promise<RepairGeneratedResult> {

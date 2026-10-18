@@ -110,34 +110,33 @@ apply the old full Prompt replacements. Single original legacy inputs retain
 `generate_candidate`. Deploy paired producer/consumer revisions before enabling
 integrated generation; this change does not build or activate a Snapshot.
 
-### Reevaluate historical suggestions on the effective Pack
+### Compare deployment configuration and Git integrity separately
 
-A pending original whose structured operations/patches target an older or unknown
-spec digest remains selectable. Even one such original uses the existing
-`workflow-proposal-plan/v1` / `integrate_candidate_v1` consumer. Its proposal,
-`baseSpecDigest`, source identities and complete evidence remain frozen unchanged
-as historical evidence. The batch baseline and integration digest refer to the
-effective Pack resolved at submission. Neither the old digest nor old file content
-is rewritten to impersonate a current proposal.
+`baseline.specDigest` remains SHA-256 of the exact tagged Git file bytes;
+`packCommit` and `packDigest` retain commit/tree integrity. The optional
+`baseline.proposalSpecDigest` is canonical JSON SHA-256 of the existing active
+deployment's stored spec. Before producing it, the Host verifies that stored
+configuration against the actual tagged YAML. Only scalar root `version` and
+`updatedAt` metadata follow the existing deployment-history serialization rule;
+unknown fields, nested metadata, business values and array order remain significant.
+The original stored JSON is hashed unchanged, matching analysis input identity.
 
-Multi-original historical groups enter the same bounded background classifier as
-current groups. The classifier sees the current target baseline and complete
-original evidence, preserves old digests, and may return complementary/equivalent,
-uncertain or conflicting goals. Being historical alone does not leave a group in
-an unserviceable waiting state. Only validated classification can authorize
-overlapping goals; contradictory scalars remain blocked even if the model calls
-them complementary. Classification failure/unavailability is visible with an
-explicit recovery or single-original path, rather than an infinite refresh loop.
+New Host adapters provide both identities. Legacy frozen inputs without the
+optional field preserve their prior digest interpretation. This additive metadata
+does not change TaskGuard actions, prompts, input schema or Git verification.
+Original `proposal.baseSpecDigest` is never rewritten. A matching fresh proposal
+uses the existing generation path, including a single original without integration.
+A genuinely different or unknown structured proposal baseline is rejected before
+task creation/dispatch with `PROPOSAL_BASELINE_CHANGED` or
+`BASELINE_IDENTITY_UNKNOWN`; classification/model output cannot override this.
+The earlier automatic historical-reevaluation fallback is removed.
 
-The consumer generates from current Pack files once per plan, with old proposals
-as untrusted evidence only. Every original/goal needs a changed, not-needed or
-unresolved outcome with reasons. Already satisfied or inapplicable goals cannot
-justify fabricated success. Original scope, complete coverage, candidate/Git
-binding and existing checks remain enforced. A second baseline change during
-preparation rejects the request before freezing a new task. A coordinator fallback
-cannot apply conflicting old edits in sequential plans. All integrated inputs,
-including this fallback, use strict evidence packaging, redaction and unchanged
-frozen-size limits.
+`BASELINE_CONTENT_MISMATCH` distinguishes a deployment-record/Git content mismatch.
+The UI retains the specific baseline error and reviewed selection/requirements.
+It also recognizes the exact legacy `SOURCE_CHANGED` baseline error from existing
+servers without treating it as list mutation. A baseline changing during
+preparation still rejects before freezing a new task. Evidence, byte limits,
+candidate checks and publication binding retain their existing enforcement.
 
 ### Precisely revalidate selected originals
 

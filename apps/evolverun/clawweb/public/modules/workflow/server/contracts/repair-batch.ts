@@ -33,6 +33,8 @@ export type StoredRepairItem = RepairItem & {
 export type RepairBaseline = {
   workflowId: string; packId: string; releaseRevision: number; activeDeployNumber: number | null;
   specDigest: string; repoId: string; specPath: string; packCommit: string; packDigest: string;
+  /** Canonical deployed JSON, verified against the tagged configuration; specDigest remains raw Git bytes. */
+  proposalSpecDigest?: string;
 };
 export type RepairBatchInput = {
   schemaVersion: typeof REPAIR_BATCH_SCHEMA; taskId: string; revision: number; baseline: RepairBaseline;
@@ -162,6 +164,7 @@ export function validateRepairBatchInput(value: unknown): RepairBatchInput {
   valid(gitIdentity(baseline.workflowId, 190) && text(baseline.packId, 255) && text(baseline.repoId, 255), 'baseline identity');
   valid(integer(baseline.releaseRevision) && (baseline.activeDeployNumber === null || integer(baseline.activeDeployNumber, 1)), 'baseline revision');
   valid(digest(baseline.specDigest) && gitObject(baseline.packCommit) && gitObject(baseline.packDigest), 'baseline digests');
+  valid(baseline.proposalSpecDigest === undefined || digest(baseline.proposalSpecDigest), 'baseline proposalSpecDigest');
   valid(text(baseline.specPath, 1024) && !baseline.specPath.startsWith('/') && !baseline.specPath.includes('\\')
     && !baseline.specPath.split('/').some(part => part === '..' || part === '.' || part === ''), 'specPath');
   valid(value.taskBranch === `repair/${baseline.workflowId}/${value.taskId}`, 'taskBranch');

@@ -1,7 +1,7 @@
 import { inboxSummary, inboxPages } from './repair-inbox-projection.js';
 import { prepareProposalEvidence } from './repair-proposal-evidence.js';
 import type { ProposalCoordinator } from './repair-proposal-integration.js';
-import { selectedContentDigest, reviewSelected, reevaluationPlan } from './repair-selection-review.js';
+import { selectedContentDigest, reviewSelected, assertProposalBaseline } from './repair-selection-review.js';
 import { automaticChain, isAutomaticBatch } from '../contracts/repair-automatic-chain.js';
 import { RepairAutomationDeniedError } from '../contracts/workflow-automation.js';
 import { repairEvidenceFacts, repairEvidenceFlows, validateAutomationOrigin } from '../contracts/repair-batch.js';
@@ -438,7 +438,8 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         reviewSelected(request, snapshot.items, snapshot.inputDigest, taskId);
         return snapshot.items.filter(item => request.itemIds.includes(item.itemId));
       }) : await this.items(request.workflowId, request.itemIds);
-      const integrated = this.proposals ? await this.proposals.prepare(request.workflowId, selected, baseline) : { instructions: '', integration: reevaluationPlan(selected, baseline) };
+      assertProposalBaseline(selected, baseline);
+      const integrated = this.proposals ? await this.proposals.prepare(request.workflowId, selected, baseline) : { instructions: '', integration: undefined };
       const frozenInstructions = [request.instructions, integrated.instructions].filter(Boolean).join('\n\n');
       if (frozenInstructions.length > MAX_INSTRUCTIONS_CHARS) fail('PAYLOAD_TOO_LARGE', '整合目标与说明过长，请缩小本次选择范围');
       if (!taskId && canonicalRepairJson(await this.execution.resolveBaseline(request.workflowId)) !== canonicalRepairJson(baseline)) fail('STATE_CONFLICT', '生效版本在准备期间再次变化，选择与要求保留', { reasonCode: 'BASELINE_STALE' });

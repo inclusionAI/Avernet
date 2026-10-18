@@ -40,7 +40,8 @@ it('deduplicates exact patches but never merges another baseline or loses source
  f.items[2].proposal!.baseSpecDigest='e'.repeat(64);
  const {items,baseline}=await read('wf-1');const cards=await c.present('wf-1',items,baseline);
  expect(cards).toHaveLength(2);expect(cards[0].aggregation?.itemIds).toEqual(['item-0','item-1']);
- expect((await c.prepare('wf-1',[items[2]],baseline)).integration?.plans[0].originalItemIds).toEqual(['item-2']);
+ await expect(c.prepare('wf-1',[items[2]],baseline)).rejects.toMatchObject({details:{reasonCode:'PROPOSAL_BASELINE_CHANGED'}});
+ expect(items[2].proposal?.baseSpecDigest).toBe('e'.repeat(64));
 });
 it('returns bounded current-plan authorization when rechecking selected original identities',async()=>{
  const {c,read,advance,classify}=await setup(2);
@@ -54,7 +55,7 @@ it('returns bounded current-plan authorization when rechecking selected original
  expect(classify).toHaveBeenCalledTimes(1);
  expect(await f.db.query('SELECT * FROM workflow_repair_revisions')).toHaveLength(0);
 });
-it('queues stale original groups for current-baseline classification, then reevaluates complementary goals in one plan',async()=>{
+it('does not let complementary classification authorize a changed baseline',async()=>{
  const {c,advance,classify}=await setup(2);
  f.items.forEach(item=>{item.proposal!.baseSpecDigest='e'.repeat(64)});
  await c.tick();advance(3000);await c.tick();
@@ -65,30 +66,25 @@ it('queues stale original groups for current-baseline classification, then reeva
  const page=await service.candidates('wf-1');
  expect(page.items[0].aggregation).toMatchObject({status:'ready',relation:'complementary',reevaluation:true,itemIds:['item-0','item-1']});
  const state=await service.selectionState('wf-1',['item-0','item-1'],false);
- const result=await service.create('human',{workflowId:'wf-1',itemIds:['item-0','item-1'],inputDigest:page.inputDigest,selection:Object.fromEntries(state.items.map(item=>[item.itemId,item.selectionDigest!])),instructions:'preserve current constraints',requestId:'stale-pair'});
- expect(result.input.integration?.plans).toHaveLength(1);
- expect(result.input.integration?.plans[0].originalItemIds).toEqual(['item-0','item-1']);
- expect(result.input.items.every(item=>item.proposal!.baseSpecDigest==='e'.repeat(64))).toBe(true);
- expect(f.calls).toHaveLength(1);
+ await expect(service.create('human',{workflowId:'wf-1',itemIds:['item-0','item-1'],inputDigest:page.inputDigest,selection:Object.fromEntries(state.items.map(item=>[item.itemId,item.selectionDigest!])),instructions:'preserve current constraints',requestId:'stale-pair'})).rejects.toMatchObject({details:{reasonCode:'PROPOSAL_BASELINE_CHANGED',itemIds:['item-0','item-1']}});
+ expect(f.items.every(item=>item.proposal!.baseSpecDigest==='e'.repeat(64))).toBe(true);
+ expect(f.calls).toHaveLength(0);
 });
-it('reevaluates a single reviewed original without inheriting an unselected complementary member',async()=>{
+it('rejects a changed single baseline without dispatching or inheriting an unselected member',async()=>{
  const {c,advance}=await setup(2);
  f.items.forEach(item=>{item.proposal!.baseSpecDigest='e'.repeat(64)});
  await c.tick();advance(3000);await c.tick();
  const service=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort,c);
  const state=await service.selectionState('wf-1',['item-1'],false);
  expect(state.plans[0].itemIds).toEqual(['item-0','item-1']);
- const result=await service.create('human',{workflowId:'wf-1',itemIds:['item-1'],inputDigest:state.inputDigest,selection:{'item-1':state.items[0].selectionDigest!},instructions:'keep the original goal',requestId:'one-original'});
- expect(result.input.items.map(item=>item.itemId)).toEqual(['item-1']);
- expect(result.input.integration?.plans).toHaveLength(1);
- expect(result.input.integration?.plans[0]).toMatchObject({relation:'exact',originalItemIds:['item-1']});
- expect(f.calls).toHaveLength(1);
+ await expect(service.create('human',{workflowId:'wf-1',itemIds:['item-1'],inputDigest:state.inputDigest,selection:{'item-1':state.items[0].selectionDigest!},instructions:'keep the original goal',requestId:'one-original'})).rejects.toMatchObject({details:{reasonCode:'PROPOSAL_BASELINE_CHANGED',itemIds:['item-1']}});
+ expect(f.calls).toHaveLength(0);
 });
 it.each([false,true])('never lets a model combine contradictory scalars or omit originals (stale=%s)',async(stale)=>{
  const {c,read,classify,advance}=await setup(2);
  f.items.forEach((x,i)=>{if(stale)x.proposal!.baseSpecDigest='e'.repeat(64);x.proposal!.operations=[{op:'replace',nodeId:'query',path:'/timeout',value:i?240:120}]});
  await c.tick();advance(3000);await c.tick();const {items,baseline}=await read('wf-1');
- await expect(c.prepare('wf-1',items,baseline)).rejects.toThrow(/取舍/);
+ await expect(c.prepare('wf-1',items,baseline)).rejects.toThrow(stale?/基线/:/取舍/);
  expect((await c.present('wf-1',items,baseline))).toHaveLength(2);
 });
 it('retries 429 after Retry-After across instances, but blocks permanent failure without a hot loop',async()=>{

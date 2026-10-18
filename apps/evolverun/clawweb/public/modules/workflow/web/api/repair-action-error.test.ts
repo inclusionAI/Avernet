@@ -19,3 +19,9 @@ it('keeps unknown write outcomes distinct from a confirmed result-read conflict'
   expect(repairActionFailure(new Error('private network diagnostics'))).toMatchObject({ action: 'refresh-task' })
   expect(repairActionFailure({ status: 502, body: '<html>private proxy</html>' }).message).not.toContain('private')
 })
+it('preserves the real baseline error without treating it as source mutation', () => {
+  const result = repairActionFailure({ status: 409, body: JSON.stringify({ error: '原建议基线已变化，请重新评估', code: 'SOURCE_CHANGED', requestId: '20023274-6e68-4535-a90a-e36a7c10df49' }) })
+  expect(result.action).toBeNull()
+  expect(result.message).toContain('原建议基线已变化')
+  expect(result.message).toContain('保留')
+})

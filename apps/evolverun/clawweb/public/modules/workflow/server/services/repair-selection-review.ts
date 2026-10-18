@@ -1,6 +1,5 @@
-import { digestRepairJson, RepairBatchError, type RepairItem, type RepairBaseline, type RepairBatchInput } from '../contracts/repair-batch.js';
+import { digestRepairJson, RepairBatchError, type RepairItem, type RepairBaseline } from '../contracts/repair-batch.js';
 import type { RepairInboxItem, RepairSelectionRequest } from '../contracts/repair-workbench.js';
-import { selectionConflicts } from '../contracts/repair-selection.js';
 
 export function selectedContentDigest(item: RepairItem): string {
   return digestRepairJson({ itemId: item.itemId, groupKey: item.groupKey, proposalKey: item.proposalKey,
@@ -8,14 +7,14 @@ export function selectedContentDigest(item: RepairItem): string {
 }
 export function needsReevaluation(item: RepairItem, baseline: RepairBaseline): boolean {
   return ((Array.isArray(item.proposal?.operations) && item.proposal.operations.length > 0)
-    || (Array.isArray(item.proposal?.patches) && item.proposal.patches.length > 0)) && item.proposal?.baseSpecDigest !== baseline.specDigest;
+    || (Array.isArray(item.proposal?.patches) && item.proposal.patches.length > 0)) && item.proposal?.baseSpecDigest !== (baseline.proposalSpecDigest ?? baseline.specDigest);
 }
-export function reevaluationPlan(items: RepairItem[], baseline: RepairBaseline): RepairBatchInput['integration'] {
-  if (!items.some(item => needsReevaluation(item, baseline))) return undefined;
-  if (selectionConflicts(items).length) throw new RepairBatchError('INVALID_INPUT', '重叠旧建议需要整合或取舍，不能逐项覆盖', { reasonCode: 'PLAN_CONFLICT' });
-  return { schemaVersion: 'workflow-proposal-plan/v1', baselineSpecDigest: baseline.specDigest,
-    plans: items.map(item => ({ id: digestRepairJson(['reevaluate', item.itemId, baseline.specDigest]), originalItemIds: [item.itemId], relation: 'exact',
-      goals: ['基于当前 Pack 重新评估原建议目标；旧 operations/patches 仅作证据，不直接套用。已满足或不再适用的目标须逐项说明。'] })) };
+export function assertProposalBaseline(items: RepairItem[], baseline: RepairBaseline): void {
+  const incompatible = items.filter(item => needsReevaluation(item, baseline));
+  if (!incompatible.length) return;
+  const missing = incompatible.some(item => typeof item.proposal?.baseSpecDigest !== 'string' || !/^[a-f0-9]{64}$/.test(item.proposal.baseSpecDigest));
+  throw new RepairBatchError('SOURCE_CHANGED', missing ? '原建议缺少可核对的配置摘要，无法确认基线' : '原建议基线已变化，请核对配置差异',
+    { reasonCode: missing ? 'BASELINE_IDENTITY_UNKNOWN' : 'PROPOSAL_BASELINE_CHANGED', itemIds: incompatible.map(item => item.itemId) });
 }
 export function reviewSelected(request: RepairSelectionRequest, items: RepairInboxItem[], inputDigest: string, taskId: string | null) {
   if (!request.selection) {

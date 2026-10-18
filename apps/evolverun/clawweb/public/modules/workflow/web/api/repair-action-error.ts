@@ -13,6 +13,9 @@ export function repairActionFailure(error: unknown): { message: string; action: 
       : '上一轮候选结果尚未确认，请先核对原结果；不会重复派发任务。', action: 'retry-result',
   }
   if (body.reasonCode === 'RESULT_RECOVERED') return { message: '原候选已恢复，请返回审核后再确认本轮调整。', action: 'refresh-task' }
+  if (body.reasonCode === 'PROPOSAL_BASELINE_CHANGED' || body.code === 'SOURCE_CHANGED' && body.error === '原建议基线已变化，请重新评估') return { message: '原建议基线已变化，请核对配置差异。原选择与要求已保留，不会自动提交或派发。', action: null }
+  if (body.reasonCode === 'BASELINE_IDENTITY_UNKNOWN') return { message: '原建议缺少可核对的配置摘要，无法确认基线。选择与要求已保留。', action: null }
+  if (body.reasonCode === 'BASELINE_CONTENT_MISMATCH') return { message: '生效部署记录与 Git Pack 配置不一致。选择与要求已保留，请核对部署记录。', action: null }
   if (body.reasonCode === 'BASELINE_STALE') return { message: '生效版本在准备期间再次变化。选择与要求已保留，请确认最新版本后再次提交。', action: null }
   if (body.reasonCode === 'PLAN_SELECTION_INCOMPLETE') return { message: '整合方案的成员已变化。原始选择已保留，请确认受影响方案的范围；不会自动纳入新建议。', action: null }
   if (body.reasonCode === 'PLAN_SCOPE_INCOMPLETE') return { message: '部分文字建议缺少明确修改范围，请单独处理或补充方案后再整合。选择与要求已保留。', action: null }

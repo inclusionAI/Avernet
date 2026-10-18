@@ -27,7 +27,7 @@ async function legacyAutomaticScope(workbench: AutomationWorkbench, issues: Issu
         if (item.state !== 'pending' || !item.sourceAvailable || (!Array.isArray(item.context?.diagnoses) || !item.context.diagnoses.length) || Buffer.byteLength(JSON.stringify(raw)) > 32000) continue;
         try {
           const proposal = validateWorkflowPatchProposal(item.proposal);
-          if (proposal.workflowId !== workflowId || proposal.baseSpecDigest !== baseline.specDigest) continue;
+          if (proposal.workflowId !== workflowId || proposal.baseSpecDigest !== (baseline.proposalSpecDigest ?? baseline.specDigest)) continue;
           candidates.push(item);
         } catch { /* Unstructured, stale or ungrounded proposals remain available for manual selection. */ }
       }
@@ -119,7 +119,7 @@ export async function selectAutomaticScope(workbench: AutomationWorkbench, issue
       if (!reason && !grounded) reason = 'RUN_TIME_NOT_IN_SCOPE';
       if (!reason) try {
         const proposal = validateWorkflowPatchProposal(item.proposal);
-        if (proposal.workflowId !== workflowId || proposal.baseSpecDigest !== baseline.specDigest) reason = 'BASELINE_REASSESSMENT_REQUIRED';
+        if (proposal.workflowId !== workflowId || proposal.baseSpecDigest !== (baseline.proposalSpecDigest ?? baseline.specDigest)) reason = 'BASELINE_REASSESSMENT_REQUIRED';
       } catch { reason = 'PROPOSAL_REASSESSMENT_REQUIRED'; }
       if (reason) deferred[item.itemId] = reason;
       else { items.push(item); revisions[item.itemId] = automaticItemDigest(item); }

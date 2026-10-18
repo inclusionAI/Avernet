@@ -1,5 +1,5 @@
 import { prepareProposalEvidence } from './repair-proposal-evidence.js';
-import { needsReevaluation, reevaluationPlan } from './repair-selection-review.js';
+import { needsReevaluation, assertProposalBaseline } from './repair-selection-review.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { canonicalRepairJson, digestRepairJson, repairEvidenceFlows, RepairBatchError, type RepairBaseline, type RepairItem } from '../contracts/repair-batch.js';
 import type { RepairInboxItem } from '../contracts/repair-workbench.js';
@@ -194,12 +194,12 @@ export function createProposalCoordinator(input:{db:IDatabase;read:(workflowId:s
     async prepare(wf:string,selected:RepairItem[],baseline:RepairBaseline){
       const snapshot=await input.read(wf);
       if(canonicalRepairJson(snapshot.baseline)!==canonicalRepairJson(baseline))throw new RepairBatchError('STATE_CONFLICT','生效版本在准备期间再次变化，请确认新版本后提交；选择与要求保留',{reasonCode:'BASELINE_STALE'});
+      assertProposalBaseline(selected, baseline);
       const ids=new Set(selected.map(i=>i.itemId));
       // One explicitly selected original is its own scope, not a partial
       // acceptance of a different plan containing unselected suggestions.
-      if(selected.length===1)return {integration:reevaluationPlan(selected,baseline),instructions:''};
+      if(selected.length===1)return {integration:undefined,instructions:''};
       if(selected.length>1 && selected.some(item=>!operations(item).length && !Array.isArray(item.proposal?.patches)))throw new RepairBatchError('INVALID_INPUT','多条文字建议缺少明确修改范围，可单独处理或补充方案后再整合',{reasonCode:'PLAN_SCOPE_INCOMPLETE'});
-      const reevaluate=selected.some(i=>!current(i,baseline));
       const plans: NonNullable<import('../contracts/repair-batch.js').RepairBatchInput['integration']>['plans'] = [];
       const applicable = snapshot.items.map(item => ids.has(item.itemId) && item.state === 'processing' ? { ...item, state: 'pending' as const, sourceAvailable: true } : item);
       for(const g of groups(applicable,baseline)){
@@ -211,13 +211,13 @@ export function createProposalCoordinator(input:{db:IDatabase;read:(workflowId:s
           if(!plan||plan.relation==='uncertain'||plan.relation!=='exact'&&status!=='ready')throw new RepairBatchError('INVALID_INPUT','重叠修改尚待整合，请等待或只选择一项原建议',{reasonCode:'PLAN_NOT_READY'});}
         for(const plan of result.plans){const members=plan.itemIds.filter(id=>ids.has(id));if(!members.length)continue;
           if(plan.relation!=='exact'&&members.length!==plan.itemIds.length)throw new RepairBatchError('SOURCE_CHANGED','方案成员已变化，请确认受影响范围；原始选择保留',{reasonCode:'PLAN_SELECTION_INCOMPLETE'});
-          plans.push({id:digestRepairJson([fp,plan.itemIds]),originalItemIds:members,goals:reevaluate?['基于当前 Pack 重新评估原目标；旧 operations/patches 仅作证据，禁止直接套用；已满足或不适用须逐项说明。',...plan.changes]:plan.changes,relation:plan.relation,...(result.causes?{causes:result.causes.filter(c=>c.itemIds.some(id=>members.includes(id)))}:{}),...(result.unknowns?{unknowns:result.unknowns}:{})});
+          plans.push({id:digestRepairJson([fp,plan.itemIds]),originalItemIds:members,goals:plan.changes,relation:plan.relation,...(result.causes?{causes:result.causes.filter(c=>c.itemIds.some(id=>members.includes(id)))}:{}),...(result.unknowns?{unknowns:result.unknowns}:{})});
           }
       }
       // Check across issue groups too: group-local model suggestions cannot authorize cross-group overwrites.
       const all=selected as RepairInboxItem[];
       for(const conflict of selectionConflicts(all))if(!groups(applicable,baseline).some(g=>conflict.itemIds.every(id=>g.items.some(i=>i.itemId===id))))throw new RepairBatchError('INVALID_INPUT','跨问题重叠修改尚待整合，请分别取舍',{reasonCode:'PLAN_NOT_READY'});
-      return { integration: plans.length && (selected.length>1||reevaluate) ? {schemaVersion:'workflow-proposal-plan/v1' as const,baselineSpecDigest:baseline.specDigest,plans}:undefined, instructions:''};
+      return { integration: plans.length && selected.length>1 ? {schemaVersion:'workflow-proposal-plan/v1' as const,baselineSpecDigest:baseline.specDigest,plans}:undefined, instructions:''};
     },
   };
 }
