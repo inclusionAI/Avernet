@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests.community.helpers.skill_projection_guard import PassThroughSkillProjectionGuard
+
 import importlib
 import inspect
 import json
@@ -678,6 +680,7 @@ def _registry(*, pool_runtime, pool_layouts):
     return EngineRuntimeProjectionRegistry(
         default=PerDomainRuntimeProjection(
             skill_delivery=SkillRuntimeDelivery(
+        guard=PassThroughSkillProjectionGuard(),
                 pool_runtime=pool_runtime,
                 pool_layouts=pool_layouts,
                 device_contexts=_Contexts(),

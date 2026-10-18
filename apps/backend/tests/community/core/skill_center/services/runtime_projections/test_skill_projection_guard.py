@@ -1,0 +1,90 @@
+"""Stale or concurrent snapshots cannot authorize shared-link deletion."""
+
+import asyncio
+from dataclasses import replace
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+
+from agentclaw.community.core.skill_center.services.runtime_projections.skill_projection_guard import SkillProjectionGuard
+from agentclaw.community.core.skill_center.runtime_projection_contract import ResolvedSkillPlan, RuntimeProjectionResult, RuntimeProjectionStatus
+from agentclaw.community.core.skill_center.runtime_resolver import RuntimeProjectionResolver
+from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+from agentclaw.community.plugins.local.cache import MemoryCachePlugin
+from agentclaw.community.plugin_api.cache import CacheLockInfrastructureError
+
+
+def setup_guard():
+    bot = {"env": "pre", "active_engine": "openclaw", "entity_id": "owner", "binding_id": 1}
+    state = SimpleNamespace(assets=(), bot=bot)
+    reader = SimpleNamespace(active_skill_assets=lambda **_: state.assets)
+    bots = SimpleNamespace(get_by_id_and_owner=lambda *_: state.bot)
+    cache = MemoryCachePlugin()
+    guard = SkillProjectionGuard(cache=cache, reader=reader, bots=bots)
+    plan = ResolvedSkillPlan(
+        bot_id="bot", owner_id="owner", bot=bot, engine="openclaw",
+        projection=RuntimeProjectionResolver().resolve_skills(()),
+    )
+    return state, cache, guard, plan, reader, bots
+
+
+@pytest.mark.asyncio
+async def test_new_direct_projection_wins_over_delayed_old_snapshot():
+    state, _, guard, old, _, _ = setup_guard()
+    state.assets = (RegisteredSkillAsset(
+        skill_id=1, name="direct", git_path="git://infra/direct",
+    ),)
+    new = replace(old, projection=RuntimeProjectionResolver().resolve_skills(state.assets))
+    send = AsyncMock(return_value=RuntimeProjectionResult.converged())
+    assert (await guard.deliver(plan=new, send=send)).status is RuntimeProjectionStatus.CONVERGED
+    assert (await guard.deliver(plan=old, send=send)).issues[0].code == "SKILL_PROJECTION_STALE"
+    assert send.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_two_backend_instances_share_the_same_bot_lease():
+    _, cache, first, plan, reader, bots = setup_guard()
+    second = SkillProjectionGuard(cache=cache, reader=reader, bots=bots)
+    started, finish = asyncio.Event(), asyncio.Event()
+
+    async def blocked():
+        started.set()
+        await finish.wait()
+        return RuntimeProjectionResult.converged()
+
+    task = asyncio.create_task(first.deliver(plan=plan, send=blocked))
+    await started.wait()
+    send = AsyncMock(return_value=RuntimeProjectionResult.converged())
+    assert (await second.deliver(plan=plan, send=send)).issues[0].code == "SKILL_PROJECTION_BUSY"
+    send.assert_not_awaited()
+    finish.set()
+    await task
+    assert (await second.deliver(plan=plan, send=send)).status is RuntimeProjectionStatus.CONVERGED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["reader", "cache", "identity"])
+async def test_failed_reads_locks_or_changed_runtime_never_send(failure, monkeypatch):
+    state, cache, guard, plan, reader, _ = setup_guard()
+
+    def unavailable(*_, **__):
+        raise CacheLockInfrastructureError("unavailable")
+
+    if failure == "cache":
+        monkeypatch.setattr(cache, "acquire_lock_strict", unavailable)
+    elif failure == "reader":
+        reader.active_skill_assets = unavailable
+    else:
+        state.bot = {**state.bot, "binding_id": 2}
+    send = AsyncMock()
+    assert (await guard.deliver(plan=plan, send=send)).status is RuntimeProjectionStatus.PENDING
+    send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unknown_timeout_keeps_lease_instead_of_admitting_overlap():
+    _, _, guard, plan, _, _ = setup_guard()
+    send = AsyncMock(side_effect=TimeoutError)
+    assert (await guard.deliver(plan=plan, send=send)).issues[0].code == "SKILL_PROJECTION_TIMEOUT"
+    assert (await guard.deliver(plan=plan, send=send)).issues[0].code == "SKILL_PROJECTION_BUSY"

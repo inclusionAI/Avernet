@@ -243,6 +243,7 @@ class BotSkillSetInstallations:
                 session,
                 bot_id=bot_id,
                 owner_id=owner_id,
+                env=env,
                 engine_type=engine_type,
                 default_engine_types=default_engine_types,
             )
@@ -268,6 +269,7 @@ class BotSkillSetInstallations:
                 session,
                 bot_id=bot_id,
                 owner_id=owner_id,
+                env=env,
                 engine_type=engine_type,
                 default_engine_types=default_engine_types,
                 locked=True,
@@ -331,10 +333,10 @@ class BotSkillSetInstallations:
         raise ValueError("installation plan has no active source")
 
     @staticmethod
-    def _default_withdrawals(session, *, bot_id, owner_id, active_ids, locked: bool) -> set[int]:
+    def _default_withdrawals(session, *, bot_id, owner_id, active_ids, env: str, locked: bool) -> set[int]:
         return {
             skill_id for skill_id, (kind, _) in skill_installations.sources(
-                session, bot_id=bot_id, owner_id=owner_id, env=get_current_env(), locked=locked,
+                session, bot_id=bot_id, owner_id=owner_id, env=env, locked=locked,
             ).items()
             if kind == SkillInstallationSourceKind.DEFAULT and skill_id not in active_ids
         }
@@ -376,6 +378,7 @@ class BotSkillSetInstallations:
         *,
         bot_id: str,
         owner_id: str,
+        env: str,
         engine_type: str | None,
         default_engine_types: tuple[str, ...] | None,
         locked: bool = False,
@@ -396,10 +399,10 @@ class BotSkillSetInstallations:
         ordinary_active_skills: set[int] = set()
         ordinary_active_mcps: set[str] = set()
         installed_skills = skill_installations.installed_ids(
-            session, bot_id=bot_id, owner_id=owner_id, env=get_current_env()
+            session, bot_id=bot_id, owner_id=owner_id, env=env
         )
         installed_mcps = mcp_installations.installed_codes(
-            session, bot_id=bot_id, owner_id=owner_id, env=get_current_env()
+            session, bot_id=bot_id, owner_id=owner_id, env=env
         )
         for row in bot_sets:
             skill_ids = set_member_skill_ids(
@@ -434,7 +437,7 @@ class BotSkillSetInstallations:
                 (excluded_skills - ordinary_active_skills)
                 | self._default_withdrawals(
                     session, bot_id=bot_id, owner_id=owner_id,
-                    active_ids=default_skills | ordinary_active_skills, locked=locked,
+                    active_ids=default_skills | ordinary_active_skills, env=env, locked=locked,
                 )
             ),
             mcps_to_install=frozenset(default_mcps),
@@ -447,6 +450,7 @@ class BotSkillSetInstallations:
         *,
         bot_id: str,
         owner_id: str,
+        env: str,
         engine_type: str | None,
         default_engine_types: tuple[str, ...] | None,
         locked: bool = False,
@@ -462,10 +466,10 @@ class BotSkillSetInstallations:
         active_mcps: set[str] = set()
         inactive_mcps: set[str] = set()
         installed_skills = skill_installations.installed_ids(
-            session, bot_id=bot_id, owner_id=owner_id, env=get_current_env()
+            session, bot_id=bot_id, owner_id=owner_id, env=env
         )
         installed_mcps = mcp_installations.installed_codes(
-            session, bot_id=bot_id, owner_id=owner_id, env=get_current_env()
+            session, bot_id=bot_id, owner_id=owner_id, env=env
         )
         for row in self._bot_sets(
             session,
@@ -523,7 +527,7 @@ class BotSkillSetInstallations:
             skills_to_uninstall=frozenset(
                 (inactive_skills - active_skills)
                 | self._default_withdrawals(
-                    session, bot_id=bot_id, owner_id=owner_id, active_ids=active_skills, locked=locked,
+                    session, bot_id=bot_id, owner_id=owner_id, active_ids=active_skills, env=env, locked=locked,
                 )
             ),
             mcps_to_install=frozenset(active_mcps),

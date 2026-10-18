@@ -53,3 +53,18 @@ Targeted tests cover Default removal in both reader modes, Direct conversion,
 UNKNOWN preservation, owner/tenant scoping, transaction rollback, source restore,
 Legacy/Pool layouts, explicit Local removal, dangling and external entries,
 empty snapshots, failed preparation, validation and unlink failures.
+
+
+Steady-state filesystem delivery serializes across Backends using the shared
+Cache strict lease scoped to tenant/env/owner/Bot, then rechecks the current Bot
+identity and Reader snapshot. Superseded plans return PENDING without writes.
+Lock contention/outages and incomplete reads fail closed. The delivery budget
+is bounded inside the lease; a canceled/timed-out unknown request retains the
+lease until expiry. Multi-process deployments require the shared Redis/ZCache
+implementation; the local in-memory test plugin is process-local only.
+Operator-managed PostgreSQL/SQLite use the matching dialect SQL beside the
+MySQL migration. Rollout order: additive schema, Engine image, then Backend.
+
+The lease is bounded isolation, not an Engine fencing token. Normal delayed
+snapshots are rejected; an arbitrarily suspended remote worker outliving the
+lease is not proven terminated. Engine runtime serialization still applies.

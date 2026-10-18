@@ -133,3 +133,25 @@ def test_source_failure_rolls_back_installation(monkeypatch):
         assert installed(db) == set()
     finally:
         event.remove(BotSkillInstallationSource, "before_insert", deny_source)
+
+
+@pytest.mark.parametrize("method", ["flush_installations", "sync_default_installations"])
+def test_default_source_in_another_env_cannot_delete_direct(method):
+    from agentclaw.community.core.models.skill_installation_source import SkillInstallationSourceKind
+    from agentclaw.community.core.repository.implementations.skill_center.tables import skill_installations
+
+    db = Database()
+    skill_id, default_id = seed(db)
+    repo = CapabilityDesiredStateRepository(db)
+    repo.initialize_installations(env="dev", **SCOPE)
+    with db.orm_session() as session:
+        skill_installations.install(
+            session, bot_id="default", owner_id="owner", env="pre", skill_id=skill_id,
+            source_kind=SkillInstallationSourceKind.DIRECT,
+        )
+        session.query(SkillSetSkill).filter_by(skill_set_id=default_id).delete()
+    getattr(repo, method)(env="pre", **SCOPE)
+    with db.orm_session() as session:
+        assert skill_installations.installed_ids(
+            session, bot_id="default", owner_id="owner", env="pre",
+        ) == {skill_id}
