@@ -546,8 +546,9 @@ paid run:
 3. If the strategy declares `agents@1`, the bot's engine is among the
    `engine` values of its agent definitions. There is no separate
    `supports_engines` list; engine compatibility is derived from `needs`.
-4. `allowed_genes` is within the bot's genome `policy.mutable_genes` and
-   overlaps no pinned item.
+4. `allowed_genes` is within the bot's genome `policy.mutable_genes`. Pins
+   are checked per op when a candidate is recorded, not here, so a binding on
+   `persona` is valid even though `persona/SAFETY.md` is pinned.
 5. `verification_profile` exists and is not looser than the platform
    default.
 6. `budget` fits within the per-bot and per-tenant ceilings.

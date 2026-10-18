@@ -87,8 +87,8 @@ examples/manifest-v1/<case>/    # manifest.yaml → revision.json → compiled.y
 - **MCP `config`** is optional: absent means "no bot override". When present
   it is the closed set `{url, headers, endpoint_env, transport_protocol}` with
   the Manifest's own limits (`schema/entries.py:551`). Header names are
-  lower-cased (apply already compares them case-insensitively,
-  `apply/materialisers/mcp.py:49`); `transport_protocol` is upper-cased.
+  kept as written (review found that not every apply-time merge is
+  case-insensitive); `transport_protocol` is upper-cased.
 
 ### Digests
 

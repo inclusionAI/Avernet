@@ -116,7 +116,7 @@ from enum import IntEnum, StrEnum
 
 class RiskTier(IntEnum):     # ordered, so tiers compare; serialized by name ("T0".."T3") in JSON
     T0 = 0   # annotations only
-    T1 = 1   # memory item add/update/retire, skill description tweak, resource content update
+    T1 = 1   # memory item add/update/retire, memory mode seed/merge, skill description tweak, resource add/edit/remove
     T2 = 2   # persona edits, skill add/update/remove, any rewrite-flagged edit
     T3 = 3   # memory replace mode: always human review, never auto
 
@@ -669,7 +669,7 @@ Assigned per patch op; a patch takes the max of its ops.
 | Tier | Examples | Default promotion |
 | --- | --- | --- |
 | **T0** | Annotations only | Auto |
-| **T1** | Memory item add/update/retire; skill description tweak; resource content update | Auto if the gate passes and owner policy allows |
+| **T1** | Memory item add/update/retire; memory mode `seed`/`merge`; skill description tweak; resource add, edit and remove | Auto if the gate passes and owner policy allows |
 | **T2** | Persona file edits, additions and removals; skill add/update/remove; any `rewrite`-flagged edit | Human review (owner or delegate); the owner may raise the auto ceiling to T2 per strategy |
 | **T3** | Memory `replace` mode; any op an owner override raises to T3 | Always human review, never auto |
 

@@ -64,8 +64,8 @@ the rest.
 - **Deliverable**: `apps/backend/specs/<date>-bot-genome-schema/` with schema files,
   examples, and a compatibility table against Manifest v1.
 - **Done when**: every Manifest v1 example round-trips into a revision;
-  every patch op has a defined risk tier; reviewers agree on locked-gene
-  defaults.
+  every patch op has a defined risk tier; reviewers agree on the policy
+  defaults (`mutable_genes`, `pins`).
 
 ### RSI-06 Strategy port, capability catalog, and Job Protocol
 - **Module**: evolution (new), arch
@@ -323,7 +323,8 @@ the rest.
   amend reserved-file rule accordingly.
 - **Depends on**: RSI-02, DR-1 accepted.
 - **Interim**: until done, memory evolution uses a platform-managed persona
-  file (e.g. `LESSONS.md`).
+  file, an existing identity type such as `KNOWLEDGE.md` (`LESSONS.md` is not
+  a Manifest identity type; [01-genome.md](01-genome.md) §7).
 
 ### RSI-15 Memory consolidation strategy
 - **Module**: evolution

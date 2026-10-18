@@ -527,7 +527,7 @@ ClawBench 是否是*唯一的*平台默认评分器，还是多个评分器之�
 | --- | --- |
 | 硬编码的 `/home/admin/.openclaw/workspace` 和 `~/.openclaw/agents/*/sessions` | 编辑使用 `ctx.workspace`（物化的基因组）；会话使用 `ctx.experience.sessions()` |
 | 使用 `openclaw agent --local --agent …` 运行 tune/review/judge/bench | `ctx.agents.start()`（`agents` 能力；按 id 查询的操作），先实现 OpenClaw 提供方；bench 执行移到验证服务中的评估 Bot |
-| OpenClaw md 约定（SOUL/AGENTS/TOOLS、`skills/skills-local`、`config/mcporter.json`） | 基因组基因（`persona`、`skills`、`tools.mcp`）；由引擎投影负责路径 |
+| OpenClaw md 约定（SOUL/AGENTS/TOOLS、`skills/skills-local`、`config/mcporter.json`） | 基因组基因（`persona`、`skills`、`tools/mcp`）；由引擎投影负责路径 |
 | `singlebox/bot-runtime.ts` 中的 `active_engine='openclaw'`、`bot_type='personal'` 过滤条件 | 绑定检查：Bot 的引擎必须为 `needs` 中的所有内容提供提供方，并且属于 `agents@1` 定义的 `engine` 值之一 |
 | 直接通过 SQLite 读取 Backend 表（`ac_bots`、…） | Genome Registry / Backend API |
 | `local-execution.ts` 中的 `OPENCLAW_*` 环境变量 | 仅在配置加载中使用（原始环境访问属于 config/bootstrap） |
@@ -1686,10 +1686,9 @@ class ConsolidateMemoryStrategy(EvolutionStrategy):
 - **DS-5：过渡期记忆绑定。** 在 RSI-05 之前，consolidate-memory
   写入一个 persona 文件（例如 `KNOWLEDGE.md`），但其绑定只允许
   `memory`。可选方案：为过渡期绑定允许 `persona`（比所需范围
-  更宽），或者如果基因组策略配置支持条目级目标，则让 `allowed_genes` 指定单个条目（例如
-  `persona/KNOWLEDGE.md`）。
-  建议：如果 [01-genome.zh-CN.md](01-genome.zh-CN.md) 能够表达条目级目标，
-  则采用条目级目标。
+  更宽），或者让 `allowed_genes` 指定单个条目（例如
+  `persona/KNOWLEDGE.md`）。建议：采用条目级目标，基因路径语法支持这种写法
+  （[01-genome.zh-CN.md](01-genome.zh-CN.md) §2.1）。
 - **DS-6：一个 ClawEvolve 策略还是三个。** `bot_evolution`、
   `skill_evolution` 和 `skill_hardening` 是作为三个已注册的策略，
   还是作为一个带流程参数的策略？源材料对两者都未作定论。

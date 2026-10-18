@@ -101,7 +101,7 @@ derived from the revision field by field as below.
 | `server_code` | maps | `spec.tools.mcp[].server_code` (the key) |
 | `config` absent | maps | No `config`: no bot override |
 | `config.url` | normalized | Scheme lower-cased |
-| `config.headers` | maps | Names and values as written ([#2860](https://github.com/inclusionAI/Avernet/issues/2860)). Names are not case-folded: the merges with user-level headers at apply time are case-sensitive |
+| `config.headers` | maps | Names and values as written ([#2860](https://github.com/inclusionAI/Avernet/issues/2860)). Names are not case-folded: the stored spelling is what reaches the device, and not every apply-time merge compares names case-insensitively |
 | `config.endpoint_env` | maps | |
 | `config.transport_protocol` | normalized | Upper-cased (the Manifest validator already does this) |
 | user-level MCP config, Center defaults | not in the revision | Read at apply time ([#2859](https://github.com/inclusionAI/Avernet/issues/2859)) |

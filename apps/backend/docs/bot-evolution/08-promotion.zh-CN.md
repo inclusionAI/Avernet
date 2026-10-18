@@ -102,7 +102,7 @@ from enum import IntEnum, StrEnum
 
 class RiskTier(IntEnum):     # ordered, so tiers compare; serialized by name ("T0".."T3") in JSON
     T0 = 0   # annotations only
-    T1 = 1   # memory item add/update/retire, skill description tweak, resource content update
+    T1 = 1   # memory item add/update/retire, memory mode seed/merge, skill description tweak, resource add/edit/remove
     T2 = 2   # persona edits, skill add/update/remove, any rewrite-flagged edit
     T3 = 3   # memory replace mode: always human review, never auto
 
@@ -639,7 +639,7 @@ def decide(c: CandidateFacts, b: BindingView, bot: BotState) -> GateDecision:
 | 等级 | 示例 | 默认晋升方式 |
 | --- | --- | --- |
 | **T0** | 仅注释 | 自动 |
-| **T1** | 记忆条目新增/更新/退役；技能描述微调；资源内容更新 | 若门禁通过且所有者策略允许，则自动 |
+| **T1** | 记忆条目新增/更新/退役；记忆模式 `seed`/`merge`；技能描述微调；资源新增、编辑与删除 | 若门禁通过且所有者策略允许，则自动 |
 | **T2** | Persona 文件的编辑、新增与删除；技能新增/更新/删除；任何被标记 `rewrite` 的编辑 | 人工评审（所有者或其委派人）；所有者可按策略将自动上限提高到 T2 |
 | **T3** | 记忆 `replace` 模式；被所有者覆盖提升到 T3 的任何操作 | 始终人工评审，永不自动 |
 

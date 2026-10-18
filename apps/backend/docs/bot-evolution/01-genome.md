@@ -267,7 +267,7 @@ class ResourceEntry:
 class McpConfig:
     """The bot-level override, the Manifest's own closed set. Absent fields are not overridden."""
     url: str | None = None           # absolute http(s) URL
-    headers: dict[str, str] | None = None   # header names lower-cased; values as written (#2860)
+    headers: dict[str, str] | None = None   # header names and values as written (#2860)
     endpoint_env: str | None = None  # "PROD" | "PRE"
     transport_protocol: str | None = None   # "SSE" | "STREAMABLE_HTTP"
 

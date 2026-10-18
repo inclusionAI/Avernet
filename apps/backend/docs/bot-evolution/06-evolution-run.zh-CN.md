@@ -517,8 +517,9 @@ Bot 使用不同的策略，一个 Bot 也可以使用多个策略（例如每�
    OpenClaw 提供 `experience.sessions`）。
 3. 如果策略声明了 `agents@1`，则该 Bot 的引擎位于其智能体定义的 `engine` 值
    之中。没有单独的 `supports_engines` 列表；引擎兼容性由 `needs` 推导得出。
-4. `allowed_genes` 在 Bot 基因组的 `policy.mutable_genes` 之内，且不与任何固定
-   （pinned）项重叠。
+4. `allowed_genes` 在 Bot 基因组的 `policy.mutable_genes` 之内。固定（pinned）项
+   在记录候选时按操作检查，而不在此处检查，因此即使 `persona/SAFETY.md` 被固定，
+   针对 `persona` 的绑定仍然有效。
 5. `verification_profile` 存在，且不比平台默认更宽松。
 6. `budget` 落在 Bot 级和租户级上限之内。
 7. `trigger` 格式正确：有效的 cron 表达式，或一个 `EventName`

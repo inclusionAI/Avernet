@@ -256,9 +256,11 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
   `endpoint_env` (`PROD`, `PRE`), `transport_protocol` (`SSE`,
   `STREAMABLE_HTTP`). Absent `config` means "no bot override". Header names
   are stored as written and must be unique case-insensitively (the Manifest
-  rule); they are not case-folded, because the merges with user-level headers
-  at apply time compare names case-sensitively, so folding could change which
-  header wins. `transport_protocol` is upper-cased, as the Manifest validator
+  rule). They are not case-folded: the stored spelling is what reaches the
+  device, and not every apply-time merge is case-insensitive
+  (`mcp/services/config_service.py` merges bot and user headers by
+  case-insensitive name, but the composer and device-payload paths use plain
+  dictionary updates), so folding could change what is sent. `transport_protocol` is upper-cased, as the Manifest validator
   already does.
 - **`engine_config`.** Always `{}` in v1. The Manifest refuses the category on
   every bot because nothing applies it; the genome refuses it too until

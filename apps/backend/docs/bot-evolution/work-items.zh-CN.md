@@ -60,7 +60,7 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 - **交付物**：`apps/backend/specs/<date>-bot-genome-schema/`，包含 schema 文件、
   示例，以及与 Manifest v1 的兼容性对照表。
 - **完成标准**：每个 Manifest v1 示例都能往返转换为修订版；每种补丁操作都有
-  明确的风险等级；评审者就锁定基因的默认值达成一致。
+  明确的风险等级；评审者就策略配置默认值（`mutable_genes`、`pins`）达成一致。
 
 ### RSI-06 进化策略端口、能力目录与作业协议
 - **模块**：evolution（新增）、arch
@@ -276,8 +276,9 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 - **目标**：`export_memory` / `project_memory(mode)` 契约、能力矩阵条目、
   OpenClaw 实现、teclaw artifact 字段提案；相应修订保留文件规则。
 - **依赖**：RSI-02、DR-1 已被接受。
-- **过渡方案**：完成之前，记忆进化使用一个由平台管理的人设文件（例如
-  `LESSONS.md`）。
+- **过渡方案**：完成之前，记忆进化使用一个由平台管理的人设文件，即一个现有的
+  身份文件类型，例如 `KNOWLEDGE.md`（`LESSONS.md` 不是 Manifest 的身份文件类型；
+  见 [01-genome.zh-CN.md](01-genome.zh-CN.md) §7）。
 
 ### RSI-15 记忆整合进化策略
 - **模块**：evolution
