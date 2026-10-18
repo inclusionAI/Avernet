@@ -9,6 +9,9 @@
 
 Accepted decision: [DR-1](../../../../docs/adr/0019-bot-genome-is-the-unit-of-evolution.md).
 Builds on the Bot Config Manifest (`apps/backend/docs/bot-config-manifest/`).
+Normative format (work item RSI-02):
+[`apps/backend/api-contracts/genome/v1/`](../../api-contracts/genome/v1/README.md). Where this
+design doc and the contract differ, the contract wins.
 
 ## 1. Purpose and scope
 
@@ -32,7 +35,7 @@ The **Genome Registry** is the component that implements this. It owns:
   the structural checks run when one is recorded (it applies cleanly to its
   base and stays inside the policy, §6.2). Whether a change is *good* is not
   checked here: that is [Verification](07-verification.md);
-- the **genome policy** (locked genes, mutable genes, pins, risk overrides)
+- the **genome policy** (mutable genes, pins, risk overrides)
   and its structural enforcement when a patch is recorded;
 - content addressing: file bytes referenced by digest in the existing
   manifest content store;
@@ -95,7 +98,7 @@ How the types relate:
 | --- | --- | --- | --- |
 | `GenomeRevision` | One immutable version of a bot's definition: `spec` + `policy`, plus platform-written metadata (`revision`) | Genome Registry | Recorded once (from a patch or a Manifest document), never edited; only its `status` and annotations change; never deleted |
 | `GenomeSpec` | The evolvable content of a revision: persona, skills, memory, resources, tools, engine config, script | Genome Registry (authored by owners, proposed by strategies) | Part of a revision; hashed |
-| `GenomePolicy` | The non-evolvable section: locked genes, mutable genes, pins, risk overrides | Bot owner / tenant admin | Part of a revision; hashed; copied forward verbatim by the platform; no patch may touch it |
+| `GenomePolicy` | The non-evolvable section: mutable genes, pins, risk overrides | Bot owner / tenant admin | Part of a revision; hashed; copied forward verbatim by the platform; no patch may touch it |
 | `RevisionMetadata` | Id, per-bot `seq`, parent, provenance, status, evidence and evaluation ids, annotations | Genome Registry (platform-written) | Written at record time; status/annotations updated later; not hashed |
 | `Provenance` | Who or what created a revision (a person, a strategy run, later a bot) | Genome Registry | Written once at record time |
 | `GenomeRef` | A named, movable pointer to a revision (`active`, `previous`, `canary`, `draft`, `candidate/<run>/<n>`) | Genome Registry; each ref has exactly one kind of mover | Moved by compare-and-swap; every move is an audited event |
@@ -107,10 +110,24 @@ How the types relate:
 ### 2.1 Genes
 
 A **gene** is a named, addressable part of `spec` that the policy and
-bindings can refer to: a category (`persona`, `skills`, `memory`,
-`resources`, `tools.mcp`, `tools.cli_tools`, `engine_config`, `script`), a
-key inside one (`engine_config.reasoning_effort`), or one item
-(`skills.refund-policy`). The gene path grammar is fixed by RSI-02.
+bindings can refer to. A **gene path** names it: a category (`persona`,
+`skills`, `memory`, `resources`, `tools`, `engine_config`, `script`), then
+`/`-separated segments: `tools/mcp`, one item (`skills/refund-policy`,
+`memory/returns-window`, `tools/mcp/mcp.x.meet`), or a file inside an item
+(`skills/refund-policy/SKILL.md`, `resources/data/kb/faq.md`). The same
+grammar is used by the policy, a binding's `allowed_genes`, every patch op's
+target, and diff output.
+
+- `/` is the only separator, so names with dots (`SOUL.md`, `mcp.x.meet`) are
+  single segments.
+- A path `P` covers `X` when `X == P` or `X` starts with `P/`, so matching is
+  by whole segments: `skills/pdf` covers `skills/pdf/SKILL.md` but not
+  `skills/pdf.tools`.
+- An MCP `server_code` can contain any character; bytes outside
+  `A–Z a–z 0–9 . _ -` are percent-encoded, and only the canonical spelling is
+  valid.
+
+Full grammar: [contract README §2](../../api-contracts/genome/v1/README.md#2-gene-paths).
 
 ### 2.2 GenomeSpec
 
@@ -127,7 +144,7 @@ Digest = str       # address of stored bytes: "sha256:" + 64 hex chars of the by
                    # Example: "sha256:3f9a…" is the address of one SOUL.md file;
                    # GET …/genome/content/sha256:3f9a… returns "# Soul\nYou are a patient support agent…" (§9.1).
                    # One store and one endpoint serve every digest below (persona file, skill, memory items,
-                   # resource, MCP config, CLI tool, script); the field that holds a digest says what the bytes are.
+                   # resource, script); the field that holds a digest says what the bytes are.
 # RiskTier (T0 < T1 < T2 < T3) is defined once in 08-promotion.md §5.
 # BotRef {owner_id, bot_id}: the bot's full identity (a bot_id alone is not unique
 # across users); defined once in 09-evolution-api.md §2.6.
@@ -138,8 +155,8 @@ Persona files and skills:
 ```python
 class PersonaFileType(StrEnum):
     """The persona files a bot may have: VALID_IDENTITY_FILES in core/services/identity.py,
-    minus MEMORY.md and IDENTITY.md (reserved, §7), plus the proposed platform-managed
-    LESSONS.md (§7 interim)."""
+    minus MEMORY.md and IDENTITY.md (reserved, §7). Which of these an engine accepts is
+    checked when a revision is recorded (claude_code: CLAUDE.md only)."""
     SOUL = "SOUL.md"
     AGENTS = "AGENTS.md"
     RULES = "RULES.md"
@@ -154,30 +171,23 @@ class PersonaFileType(StrEnum):
     CLAUDE = "CLAUDE.md"
     GREETING = "GREETING.md"
     README = "README.md"
-    LESSONS = "LESSONS.md"
 
 @dataclass(frozen=True)
 class PersonaFile:
     type: PersonaFileType            # which persona file, e.g. PersonaFileType.SOUL ("SOUL.md")
     digest: Digest                   # where its bytes are, e.g. "sha256:3f9a…"
 
-class SkillOriginKind(StrEnum):
+class SkillOrigin(StrEnum):
     CENTER = "center"                # a governed skill from Skill Center: pinned by version, not copied
-    LOCAL = "local"                  # a bot-owned skill (uploaded, or created by a patch): stored by digest
-    GIT = "git"                      # fetched from a git source when the revision was recorded: stored by digest
-    OSS = "oss"                      # fetched from object storage when the revision was recorded: stored by digest
-
-@dataclass(frozen=True)
-class SkillOrigin:
-    kind: SkillOriginKind
-    version: str | None = None       # CENTER only: the pinned version, e.g. "center://refund-policy@v7"
+    LOCAL = "local"                  # the skill's files are stored (fetched from git or OSS, uploaded, or created
+                                     # by a patch); where they were fetched from is not part of the revision (§4.2)
 
 @dataclass(frozen=True)
 class SkillEntry:
-    name: str                        # the skill's name, e.g. "refund-policy"
+    name: str                        # the skill's name, the entry's key, e.g. "refund-policy"
     origin: SkillOrigin
-    digest: Digest | None = None     # where the skill's stored files are, e.g. "sha256:0c55…" for the bot-owned
-                                     # "quality-check" skill; None for CENTER skills, which Skill Center resolves by version
+    digest: Digest | None = None     # LOCAL only: the acm-tree-v1 encoding of the skill's files (§9.1), e.g. "sha256:0c55…"
+    center_version: str | None = None  # CENTER only: the pinned Skill Center version, e.g. "v7"
 ```
 
 Curated memory:
@@ -249,70 +259,74 @@ Resources, tools, and the whole spec:
 ```python
 @dataclass(frozen=True)
 class ResourceEntry:
-    path: str                        # where the resource appears in the bot's workspace, e.g. "data/kb/"
-    digest: Digest                   # where its stored bytes are (how a directory is stored: open decision G-1)
+    path: str                        # where the resource appears in the bot's workspace, the entry's key;
+                                     # a trailing "/" marks a directory, e.g. "data/kb/"
+    digest: Digest                   # a file's bytes, or the acm-tree-v1 encoding of a directory (§9.1)
+
+@dataclass(frozen=True)
+class McpConfig:
+    """The bot-level override, the Manifest's own closed set. Absent fields are not overridden."""
+    url: str | None = None           # absolute http(s) URL
+    headers: dict[str, str] | None = None   # header names lower-cased; values as written (#2860)
+    endpoint_env: str | None = None  # "PROD" | "PRE"
+    transport_protocol: str | None = None   # "SSE" | "STREAMABLE_HTTP"
 
 @dataclass(frozen=True)
 class McpServerEntry:
-    server_code: str                 # the MCP server's registered code, e.g. "mcp.x.meet"
-    digest: Digest                   # where this bot's stored config for that server is
-
-@dataclass(frozen=True)
-class CliToolEntry:
-    name: str                        # e.g. "shopctl"
-    digest: Digest                   # where the tool's stored package is
-    version: str                     # the tool's own version, e.g. "2.3.0"
+    server_code: str                 # the MCP server's registered code, the entry's key, e.g. "mcp.x.meet"
+    config: McpConfig | None = None  # inline: an MCP entry has no stored bytes; None means no bot override
 
 @dataclass(frozen=True)
 class ToolsSpec:
-    mcp: list[McpServerEntry]
-    cli_tools: list[CliToolEntry]
+    mcp: list[McpServerEntry]        # CLI tools are not part of genome v1 (acli replaces them)
 
 @dataclass(frozen=True)
 class ScriptEntry:
-    digest: Digest                   # where the bot's startup script is; locked by default (§4.5)
+    digest: Digest                   # the startup script body, after placeholder substitution; not mutable by default (§4.5)
 
 @dataclass(frozen=True)
 class GenomeSpec:
-    persona: list[PersonaFile]
+    persona: list[PersonaFile]       # every list is sorted by its key, keys unique (canonical order, §9.3)
     skills: list[SkillEntry]
     memory: MemorySpec | None        # None until RSI-05 lands (§7)
     resources: list[ResourceEntry]
     tools: ToolsSpec
-    engine_config: dict[str, str]    # allowlisted key -> value, e.g. {"reasoning_effort": "medium"};
-                                     # values are strings because hashed content has no floats (§9.3)
+    engine_config: dict[str, str]    # always {} in v1: nothing applies engine_config yet (#2858)
     script: ScriptEntry | None       # None when the bot has no startup script
 ```
 
 Every category is present in every revision. An empty list means "none";
-it never means "leave as it was" (totality, §4.3).
+it never means "leave as it was" (totality, §4.3). Each entry is a **key**
+(the field that names it: `type`, `name`, `path`, `server_code`) plus a
+**value**: a digest when the entry has stored bytes, inline fields when it has
+none (an MCP server's config, a Center skill's version). File content is always
+a digest, whether it was fetched, written inline in a Manifest, or produced by a
+patch. CLI tools built through the Manifest are not part of genome v1; acli
+replaces them before the revision feature goes live.
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// The normative schema is work item RSI-02.
+// Normative schema: apps/backend/api-contracts/genome/v1/genome-revision.schema.json.
 {
-  "persona": [                                    // == manifest.identity, but pinned
-    {"type": "SOUL.md", "digest": "sha256:3f9a…"},
-    {"type": "AGENTS.md", "digest": "sha256:81bd…"}
+  "persona": [                                    // == manifest.identity, but pinned; sorted by type
+    {"type": "AGENTS.md", "digest": "sha256:81bd…"},
+    {"type": "SOUL.md", "digest": "sha256:3f9a…"}
   ],
-  "skills": [
-    {"name": "refund-policy", "origin": {"kind": "center", "version": "center://refund-policy@v7"}},  // pinned Center version, not copied
-    {"name": "quality-check", "digest": "sha256:0c55…", "origin": {"kind": "local"}}                  // bot-owned: stored, referenced by digest
+  "skills": [                                     // sorted by name
+    {"name": "quality-check", "origin": "local", "digest": "sha256:0c55…"},   // stored: acm-tree-v1 of its files
+    {"name": "refund-policy", "origin": "center", "center_version": "v7"}     // pinned Center version, not copied
   ],
   "memory": {                                     // new category, see §7
     "mode": "seed",                               // seed | merge | replace (MemoryMode)
     "items_digest": "sha256:9e20…"                // the stored list of memory items
   },
-  "resources": [{"path": "data/kb/", "digest": "sha256:d4a7…"}],
+  "resources": [{"path": "data/kb/", "digest": "sha256:d4a7…"}],   // a directory: acm-tree-v1 of its files
   "tools": {
-    "mcp": [{"server_code": "mcp.x.meet", "digest": "sha256:52c8…"}],
-    "cli_tools": [{"name": "shopctl", "digest": "sha256:a613…", "version": "2.3.0"}]
+    "mcp": [{"server_code": "mcp.x.meet",                           // no bytes, so the config is inline
+             "config": {"endpoint_env": "PRE", "transport_protocol": "STREAMABLE_HTTP"}}]
   },
-  "engine_config": {                              // allowlisted keys only; no floats in hashed content
-    "model": "provider/model-x",
-    "reasoning_effort": "medium"
-  },
-  "script": {"digest": "sha256:e1f0…"}            // carried, but LOCKED for evolution by default
+  "engine_config": {},                            // always {} until #2858
+  "script": {"digest": "sha256:e1f0…"}            // carried, but not mutable by default
 }
 ```
 
@@ -323,57 +337,64 @@ the bot owner or tenant admin, never by a strategy, and the platform rejects
 any patch that touches it.
 
 **Why a policy.** The policy holds the owner's rules that bound evolution of
-*this* bot: which genes are locked, which are mutable, which items are
-pinned, and which genes get a higher risk tier. It lives inside the revision
+*this* bot: which genes are mutable, which items are pinned, and which genes
+get a higher risk tier. It lives inside the revision
 and is part of its hash, so every revision records the rules it was made and
 verified under; looking at an old revision tells you what automated actors
 were allowed to change at that time. Strategies can read it (to avoid
 proposing changes that would be rejected), but no patch can change it: only
 the owner can, through a normal edit that records a new revision (§4.4). An
 automated actor therefore cannot loosen its own limits. Example: on a
-customer-facing support bot, the owner pins `persona.RULES.md` (the refund
-and escalation rules legal signed off on) and keeps `tools.mcp` and
-`tools.cli_tools` locked, so a nightly strategy may improve tone in
-`SOUL.md` and add skills, but can never rewrite the rules or give the bot a
-new tool.
+customer-facing support bot, the owner pins `persona/RULES.md` (the refund
+and escalation rules legal signed off on); no patch op can reach
+`tools/mcp` at all, so a nightly strategy may improve tone in `SOUL.md` and
+add skills, but can never rewrite the rules or give the bot a new tool.
+
+There are two lists. `mutable_genes` is an allowlist: an op is allowed only
+when an entry covers its gene path, and everything not listed is off limits.
+`pins` protects single items inside a mutable gene: an op is rejected when its
+gene path overlaps a pin (either covers the other), so removing a skill is
+rejected when one of its files is pinned. The default policy of a new bot
+makes `persona`, `skills`, `memory` and `resources` mutable and pins
+`persona/SAFETY.md`; `script` and `tools/mcp` are not mutable, and `policy` is
+not a gene path at all (open decision G-3, closed).
 
 ```python
 @dataclass(frozen=True)
 class GenomePolicy:
-    locked_genes: list[str]          # gene paths (§2.1) no patch may change; default includes "script", "tools.mcp", "policy"
     mutable_genes: list[str]         # gene paths (§2.1) a patch may touch; everything else is off limits
-    pins: list[str]                  # single items inside a mutable gene that stay write-protected, e.g. "skills.refund-policy"
-    risk_overrides: dict[str, RiskTier]   # gene path -> tier to use instead of the default; may only RAISE a tier (proposed)
+    pins: list[str]                  # items inside a mutable gene that stay write-protected, e.g. "skills/refund-policy"
+    risk_overrides: dict[str, RiskTier]   # gene path -> a higher tier for ops overlapping it; can only RAISE a tier
 ```
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
-  "locked_genes": ["script", "tools.mcp", "tools.cli_tools", "policy"],
-  "mutable_genes": ["persona", "skills", "memory", "resources", "engine_config.reasoning_effort"],
-  "pins": ["skills.refund-policy", "persona.RULES.md"],
-  "risk_overrides": {"persona.SOUL.md": "T2"}     // owner raises the default tier for this file
+  "mutable_genes": ["memory", "persona", "resources", "skills"],   // the default; script and tools/mcp are not listed
+  "pins": ["persona/RULES.md", "persona/SAFETY.md", "skills/refund-policy"],   // the default pins only SAFETY.md
+  "risk_overrides": {"persona/SOUL.md": "T3"}     // owner raises the tier of ops on this file
 }
 ```
 
 How the policy is used:
 
-- **At patch record time** (§6.2): ops on locked genes, ops outside
-  `mutable_genes`, and ops on pinned items are rejected.
+- **At patch record time** (§6.2): ops outside `mutable_genes` and ops
+  overlapping a pin are rejected.
 - **At binding configuration time**: a **binding** attaches one evolution
   strategy to the bot: which strategy, when it runs, which genes it may
   change (`allowed_genes`), and its budget. A bot has a list of them (its
   bindings), e.g. ClawEvolve nightly on persona and skills. A
-  binding's `allowed_genes` must stay within the bot's policy (locked genes
-  stay locked); a mismatch is rejected before any paid run starts. Bindings
+  binding's `allowed_genes` must stay within the bot's `mutable_genes`; a
+  mismatch is rejected before any paid run starts. Bindings
   are defined in [06-evolution-run.md](06-evolution-run.md).
 - **At candidate submission**: Promotion's static floor (`FloorCheck`)
-  re-checks "no locked gene or pinned item touched" before any verification
-  is spent; see [08-promotion.md](08-promotion.md).
+  re-checks "only mutable genes, no pinned item touched" before any
+  verification is spent; see [08-promotion.md](08-promotion.md).
 
 This is where "tool and permission changes are human-only" is enforced
-**structurally** rather than by convention: tool changes live in locked
-genes by default, and the policy itself is outside what a patch can reach.
+**structurally** rather than by convention: no patch op exists for tools or
+the script, so they change only when an owner records a whole Manifest
+document, and the policy itself is outside what a patch can reach.
 Changing the policy is an owner action that records a new revision (§4.4).
 
 ### 2.4 GenomeRevision
@@ -463,10 +484,9 @@ strategy or per bot ([06-evolution-run.md](06-evolution-run.md)).
     "annotations": {"experiment": "escalation-wording"}
   },
   "spec": {"persona": [{"type": "SOUL.md", "digest": "sha256:3f9a…"}], "skills": [], "memory": null,
-           "resources": [], "tools": {"mcp": [], "cli_tools": []},
-           "engine_config": {"reasoning_effort": "medium"}, "script": null},
-  "policy": {"locked_genes": ["script", "tools.mcp", "tools.cli_tools", "policy"],
-             "mutable_genes": ["persona", "skills", "memory"], "pins": [], "risk_overrides": {}}
+           "resources": [], "tools": {"mcp": []}, "engine_config": {}, "script": null},
+  "policy": {"mutable_genes": ["memory", "persona", "resources", "skills"], "pins": ["persona/SAFETY.md"],
+             "risk_overrides": {}}
 }
 ```
 
@@ -520,16 +540,19 @@ class RefUpdate:
 ### 2.6 GenomePatch and PatchOp
 
 ```python
-class EditKind(StrEnum):             # full set fixed by RSI-02
+class EditKind(StrEnum):
     REPLACE_SECTION = "replace_section"   # replace everything under a Markdown heading; the heading line stays
     INSERT_AFTER = "insert_after"         # insert text directly below one exact line
+    DIFF = "diff"                         # a unified diff of the file: expresses any text change, so a sandbox's
+                                          # edits can always be turned into a patch (03-strategy.md, to_patch)
 
 @dataclass(frozen=True)
 class TextEdit:
     kind: EditKind
-    content: str                     # the new text to write
+    content: str | None = None       # REPLACE_SECTION, INSERT_AFTER: the new text to write
     heading: str | None = None       # REPLACE_SECTION only: the heading line, e.g. "## Escalation"
     anchor: str | None = None        # INSERT_AFTER only: the line to insert below, e.g. "## Tone"
+    diff: str | None = None          # DIFF only: hunks starting at "@@", no ---/+++ header lines
 
 @dataclass(frozen=True)
 class DigestRef:
@@ -542,9 +565,21 @@ class FileDiff:
 
 @dataclass(frozen=True)
 class FileEdit:
-    """Op "file.edit": structured edits to one text file (persona md, SKILL.md, resource text)."""
-    target: str                      # the file, e.g. "persona/SOUL.md", "skills/refund-policy/SKILL.md"
+    """Op "file.edit": edits to one existing text file (persona md, a file in a local skill, resource text)."""
+    target: str                      # the file's gene path, e.g. "persona/SOUL.md", "skills/refund-policy/SKILL.md",
+                                     # "resources/data/kb/faq.md"
     edits: list[TextEdit]
+
+@dataclass(frozen=True)
+class PersonaAdd:
+    """Op "persona.add": a persona file the bot does not have yet."""
+    type: PersonaFileType
+    content: str | DigestRef         # small text inline, or a larger file uploaded first
+
+@dataclass(frozen=True)
+class PersonaRemove:
+    """Op "persona.remove"."""
+    type: PersonaFileType
 
 @dataclass(frozen=True)
 class SkillAdd:
@@ -554,9 +589,26 @@ class SkillAdd:
 
 @dataclass(frozen=True)
 class SkillUpdate:
-    """Op "skill.update": changes files of an existing bot-owned skill."""
+    """Op "skill.update": changes files of an existing local skill (at least one of the two fields)."""
     name: str                        # the skill, e.g. "refund-policy"
-    file_diffs: list[FileDiff]
+    file_diffs: list[FileDiff] | None = None          # text changes, one unified diff per file
+    files: dict[str, str | DigestRef | None] | None = None   # whole-file writes; None deletes (never SKILL.md)
+
+@dataclass(frozen=True)
+class SkillRemove:
+    """Op "skill.remove": removes a local or Center skill."""
+    name: str
+
+@dataclass(frozen=True)
+class ResourceAdd:
+    """Op "resource.add": a file resource, or a directory resource from an uploaded acm-tree-v1 blob."""
+    path: str                        # e.g. "data/returns.md", or "data/faq/" for a directory
+    content: str | DigestRef         # a directory always takes a DigestRef
+
+@dataclass(frozen=True)
+class ResourceRemove:
+    """Op "resource.remove"."""
+    path: str
 
 @dataclass(frozen=True)
 class MemoryAdd:
@@ -565,7 +617,7 @@ class MemoryAdd:
 
 @dataclass(frozen=True)
 class MemoryUpdate:
-    """Op "memory.update" (proposed): replaces the text, tags, and source of an existing key."""
+    """Op "memory.update": replaces the text, tags, and source of an existing key."""
     item: MemoryItem
 
 @dataclass(frozen=True)
@@ -574,12 +626,14 @@ class MemoryRetire:
     key: str                         # the item to retire
 
 @dataclass(frozen=True)
-class EngineConfigSet:
-    """Op "engine_config.set": one allowlisted engine config key."""
-    key: str                         # e.g. "reasoning_effort" (allowlist: open decision G-4)
-    value: str                       # always a string, e.g. "high" (no floats in hashed content)
+class MemorySetMode:
+    """Op "memory.set_mode": T1 for seed or merge, T3 for replace."""
+    mode: MemoryMode
 
-PatchOp = FileEdit | SkillAdd | SkillUpdate | MemoryAdd | MemoryUpdate | MemoryRetire | EngineConfigSet
+# No op reaches tools, script, engine_config or the policy: MCP servers and the script change only when
+# an owner records a whole Manifest document; engine_config waits for #2858.
+PatchOp = (FileEdit | PersonaAdd | PersonaRemove | SkillAdd | SkillUpdate | SkillRemove | ResourceAdd
+           | ResourceRemove | MemoryAdd | MemoryUpdate | MemoryRetire | MemorySetMode)
 
 @dataclass(frozen=True)
 class GenomePatch:
@@ -608,19 +662,20 @@ class GenomePatch:
      "file_diffs": [{"path": "SKILL.md", "diff": "@@ -12,3 +12,4 @@ partial refunds…"}]},
     {"op": "memory.add",                                  // itemized memory, see §7
      "item": {"key": "customer-tier-rules", "text": "Gold customers get free return shipping.", "tags": ["billing"], "source": ["episode:ep_91"]}},
-    {"op": "memory.update",                               // proposed op, see §6.1
+    {"op": "memory.update",
      "item": {"key": "returns-window", "text": "Returns are accepted within 30 days.", "tags": ["returns"], "source": ["episode:ep_97"]}},
     {"op": "memory.retire", "key": "old-shipping-sla"},
-    {"op": "engine_config.set", "key": "reasoning_effort", "value": "high"}
+    {"op": "resource.add", "path": "data/returns.md", "content": {"digest": "sha256:91c0…"}}
   ],
   "rationale": "Partial-refund requests were escalated too late in 6 of 9 failing episodes.",
   "evidence": ["feedback:fb_311", "episode:ep_91"]
 }
 ```
 
-This example shows every op kind at once. Against the §2.3 policy it would
-be rejected, because `skills.refund-policy` is pinned there (§6.2); a real
-patch only touches mutable, unpinned genes.
+This example shows several op kinds at once. Against the §2.3 example policy
+it would be rejected, because `skills/refund-policy` is pinned there (§6.2); a
+real patch only touches mutable, unpinned genes. One example of every op is in
+[`api-contracts/genome/v1/examples/patches/`](../../api-contracts/genome/v1/examples/patches/).
 
 How the two `file.edit` kinds change a file, using the two edits in the
 example above:
@@ -670,20 +725,21 @@ the digest maps back to the revision (§5.5).
   "document": {
     "schema_version": 1,
     "manifest": {
-      "identity": [{"type": "SOUL.md", "source": {"content_store": "sha256:3f9a…"}}],
-      "skills": [{"name": "refund-policy", "center_version": "v7"},
-                 {"name": "quality-check", "source": {"content_store": "sha256:0c55…"}}],
-      "resources": [{"path": "data/kb/", "source": {"content_store": "sha256:d4a7…"}}],
+      "identity": [{"type": "SOUL.md", "source": {"protocol": "content_store", "digest": "sha256:3f9a…"}}],
+      "skills": [{"name": "quality-check", "source": {"protocol": "content_store", "digest": "sha256:0c55…"}},
+                 {"name": "refund-policy", "source": {"protocol": "center", "version": "v7"}}],   // §8 item 6
+      "resources": [{"path": "data/kb/", "source": {"protocol": "content_store", "digest": "sha256:d4a7…"}}],
       "mcp": [],
-      "cli_tools": [{"name": "shopctl", "source": {"content_store": "sha256:a613…"}}],
-      "memory": {"mode": "seed", "items": {"source": {"content_store": "sha256:9e20…"}}}   // new category, §8 item 3
+      "memory": {"mode": "seed", "items": {"source": {"protocol": "content_store", "digest": "sha256:9e20…"}}}   // §8 item 3
     }
   }
 }
 ```
 
 The exact Manifest field names in `document` follow Manifest schema v1 and
-the content-store source added in §8; the shape above is illustrative.
+the content-store and Center sources added in §8; the source spellings above
+are proposed and fixed by RSI-04. The mapping of every Manifest v1 field is in
+[`manifest-v1-compatibility.md`](../../api-contracts/genome/v1/manifest-v1-compatibility.md).
 
 ## 3. Why the Manifest is not enough
 
@@ -776,6 +832,14 @@ Deliberately **not** added:
 - **Pinned, not floating.** When a revision is recorded from a Manifest that
   uses `sources` with moving refs, the platform resolves them and stores the
   bytes. A floating Manifest is an *input*; a revision is a *fact*.
+- **Addresses are not hashed.** Where the bytes were fetched from (git
+  `url`, `ref`, `subpath`; OSS `bucket`, `key`; the `auth` credential name)
+  is not part of `spec`, so the same bytes from a moved repository give the
+  same revision. The recorded Manifest document keeps them as provenance.
+  `${BOT_*}` placeholders are resolved once, with the recording bot's values.
+- **Directories are one tree.** A skill or a directory resource is stored
+  and hashed as the `acm-tree-v1` encoding of its files (§9.1), so its digest
+  never depends on how an archive was compressed.
 - **Center skills are pinned, not copied.** Skill Center already stores
   immutable, governed versions (ADR 0010). A revision records the Center
   version; only bot-owned skills and git/OSS-sourced content are stored in
@@ -831,12 +895,14 @@ candidate.
 
 ### 4.5 `script` and `engine_config`
 
-- **`script` is locked by default.** Imperative startup scripts are the most
-  dangerous evolvable surface and are already rejected on teclaw. They remain
-  part of the genome so a revision is complete, but are locked unless the
-  owner unlocks them.
-- **`engine_config`** carries only allowlisted keys, with string values in
-  hashed content (for example `"temperature": "0.2"`, see §9.3).
+- **`script` is not evolvable.** Imperative startup scripts are the most
+  dangerous surface and are already rejected on teclaw. They remain part of
+  the genome so a revision is complete, but no patch op reaches them: the
+  script changes only when an owner records a whole Manifest document.
+- **`engine_config`** is always `{}` in v1, because nothing applies it yet
+  (the Manifest refuses the category on every bot). Its keys and value types
+  are decided with the Manifest in
+  [#2858](https://github.com/inclusionAI/Avernet/issues/2858).
 
 ## 5. Refs
 
@@ -1002,19 +1068,25 @@ typed, following ACE's finding that delta updates avoid context collapse
 replacement by automated actors is not supported. Humans can submit a patch
 too (through `POST …/genome/revisions`, §12), or record a whole document.
 
-Ops shown in the sources (the full op set is fixed by RSI-02):
+The op set (open decisions G-2 and G-10, closed; normative:
+[contract README §6](../../api-contracts/genome/v1/README.md#6-patches)):
 
 | Op | Changes | Notes |
 | --- | --- | --- |
-| `file.edit` | A text file: persona md, `SKILL.md`, resource text files | Structured edits: `replace_section` (by heading), `insert_after` (by anchor) |
-| `skill.add` | A new bot-owned skill | Small text inline; larger files uploaded first with `PUT …/genome/content`, referenced by digest |
-| `skill.update` | Files of an existing bot-owned skill | One unified diff (the `git diff` format) per changed file |
+| `file.edit` | One existing text file: persona md, a file in a local skill, a file resource, a file inside a directory resource | Kinds `replace_section` (by heading), `insert_after` (by anchor), and `diff` (a unified diff), which can express any text change |
+| `persona.add` / `persona.remove` | A persona file | Content inline or by digest |
+| `skill.add` | A new local skill | Small text inline; larger files uploaded first with `PUT …/genome/content`, referenced by digest |
+| `skill.update` | Files of an existing local skill | One unified diff per changed text file, or whole-file writes and deletes |
+| `skill.remove` | A local or Center skill | |
+| `resource.add` / `resource.remove` | A resource entry | A directory is added from an uploaded `acm-tree-v1` blob |
 | `memory.add` | Adds a curated memory item | Item carries `key`, `text`, `tags`, `source` evidence |
-| `memory.update` *(proposed)* | Replaces the text, tags, and source of an existing item, by key | Needed by memory consolidation ([04-default-strategies.md](04-default-strategies.md)); the earlier version stays in history |
+| `memory.update` | Replaces the text, tags, and source of an existing item, by key | Needed by memory consolidation ([04-default-strategies.md](04-default-strategies.md)); the earlier version stays in history |
 | `memory.retire` | Retires an item by key | Retired items are not deleted from history |
-| `engine_config.set` | One allowlisted engine config key | String value |
+| `memory.set_mode` | The memory mode | `replace` is T3 |
 
-Whether Genome Patch ops map onto JSON Patch (RFC 6902) is decided in RSI-02.
+No op reaches `tools`, `script`, `engine_config` or the policy. Ops do not map
+onto JSON Patch (RFC 6902): they change file contents inside stored blobs, not
+JSON values, and their risk tier depends on what each op means.
 
 ### 6.2 Rules enforced when recording a patch
 
@@ -1024,13 +1096,13 @@ secret/PII/URL scanning, is in [08-promotion.md](08-promotion.md)):
 
 - **Base must match.** `base` must equal the parent; ops must apply cleanly
   or the patch is rejected. There is no fuzzy merge in v1.
-- **Policy.** Ops on locked genes, on genes outside `mutable_genes`, or on
-  pinned items are rejected. Any op reaching `policy` is rejected.
+- **Policy.** Ops on genes outside `mutable_genes`, or overlapping a pin,
+  are rejected. No op can reach the policy.
 - **Binding scope.** When recorded for a run, ops must also stay within the
   run's `allowed_genes` (passed by [Evolution Run](06-evolution-run.md)).
-- **Rewrite detection.** A `file.edit` that changes more than a configurable
-  fraction of a file (default 40%) is flagged `rewrite` and raises the risk
-  tier.
+- **Rewrite detection.** An op that changes more than 2/5 of an existing
+  text file's lines, measured with the exact longest common subsequence of
+  lines (contract README §6.3), is flagged `rewrite` and raises the risk tier.
 - **Limits.** Patch size, file count, and file size limits mirror Manifest
   limits.
 - **Rationale and evidence.** `rationale` is required; `evidence` is
@@ -1040,29 +1112,42 @@ secret/PII/URL scanning, is in [08-promotion.md](08-promotion.md)):
 
 Each op maps to a **risk tier**; a patch takes the maximum over its ops.
 What each tier means for promotion (auto vs human review, owner ceilings) is
-defined in [08-promotion.md](08-promotion.md). The default mapping is carried
-in the patch schema as data (work item RSI-02: "every patch op has a defined
-risk tier"); the table in 08-promotion.md is the same mapping and must stay
-identical to this one:
+defined in [08-promotion.md](08-promotion.md). The normative mapping is
+[`risk-tiers.json`](../../api-contracts/genome/v1/risk-tiers.json): for each
+op, the first rule whose target covers the op's gene path and whose condition
+holds. The table below and the one in 08-promotion.md are that file, and a
+contract test fails if they drift. Annotation changes on a revision record are
+not patches (T0); no op can reach `tools`, `script` or the policy.
 
-| Op | Target | Tier |
-| --- | --- | --- |
-| annotation change on the revision record | — | T0 |
-| `memory.add`, `memory.update`, `memory.retire` (modes `seed`, `merge`) | `memory` | T1 |
-| `skill.update` touching only the skill description | `skills/<name>` | T1 |
-| `file.edit` | `resources/...` | T1 |
-| `file.edit` | `persona/*` (SOUL, AGENTS, RULES) | T2 |
-| `skill.add`, `skill.update` (content) | `skills/<name>` | T2 |
-| `engine_config.set` (allowlisted key) | `engine_config.<key>` | T2 |
-| any op on `tools.mcp`, `tools.cli_tools`, `script`; memory `replace` mode; permission changes | locked genes | T3 |
-| any op on `policy` | `policy` | rejected by the floor (never promotable) |
+<!-- risk-tiers:begin -->
+| Op | Target | Condition | Tier |
+| --- | --- | --- | --- |
+| `file.edit` | `persona` | — | T2 |
+| `file.edit` | `skills` | `description_only` | T1 |
+| `file.edit` | `skills` | — | T2 |
+| `file.edit` | `resources` | — | T1 |
+| `persona.add` | `persona` | — | T2 |
+| `persona.remove` | `persona` | — | T2 |
+| `skill.add` | `skills` | — | T2 |
+| `skill.update` | `skills` | `description_only` | T1 |
+| `skill.update` | `skills` | — | T2 |
+| `skill.remove` | `skills` | — | T2 |
+| `resource.add` | `resources` | — | T1 |
+| `resource.remove` | `resources` | — | T1 |
+| `memory.add` | `memory` | — | T1 |
+| `memory.update` | `memory` | — | T1 |
+| `memory.retire` | `memory` | — | T1 |
+| `memory.set_mode` | `memory` | `mode=replace` | T3 |
+| `memory.set_mode` | `memory` | — | T1 |
+<!-- risk-tiers:end -->
 
 Raises applied after this mapping (a `rewrite`-flagged edit and edits that
 touch guardrail-like text are at least T2) are explained in
 [08-promotion.md](08-promotion.md).
 
-`policy.risk_overrides` lets an owner raise a gene's tier (proposed: it may
-never lower it).
+`policy.risk_overrides` lets an owner raise the tier of every op whose gene
+path overlaps the override's path; it can never lower a tier (open decision
+G-7, closed).
 
 ### 6.4 Composition
 
@@ -1133,8 +1218,11 @@ class EngineMemoryProjection(Protocol):
   of evolution, so curated memory must be part of it), and must be
   confirmed with the engine owners.
 - **Interim:** until RSI-05 lands, memory evolution is limited to a
-  platform-managed file (for example `LESSONS.md`) declared as a persona
-  file. This needs no engine change; `spec.memory` stays empty until then.
+  platform-managed persona file, and `spec.memory` stays `null`. `LESSONS.md`,
+  the name proposed earlier, is not a Manifest identity type
+  (`VALID_IDENTITY_FILES`), so using it needs that whitelist extended first;
+  until then the interim can only use an existing persona file such as
+  `KNOWLEDGE.md`.
 
 ## 8. Manifest changes
 
@@ -1151,7 +1239,10 @@ is the complete list:
    Manifest schema (`schema/validator.py` validates an
    `engine_config.config` mapping), but nothing applies it today: it was
    moved out of the first wave and has no materialiser. The change is a
-   materialiser for an allowlist of keys (open decision G-4; P3/P4).
+   materialiser for an allowlist of keys, decided together with the genome's
+   value types (open decision G-4,
+   [#2858](https://github.com/inclusionAI/Avernet/issues/2858); after the RSI
+   work).
 3. **`memory` category**: curated items plus a mode, handed by apply to the
    engine adapter (`EngineMemoryProjection`, §7; P5, depends on RSI-05).
 4. **Produced-content write path.** The manifest content store accepts
@@ -1163,6 +1254,17 @@ is the complete list:
    record records the digest of the published document. This is a Manifest
    fact with no revision concept; the Genome Registry maps digests to
    revisions (§5.5) (P1).
+6. **Center-skill source.** An entry may name a pinned Skill Center version
+   (proposed spelling `source: {protocol: center, version: "v7"}`). Manifest
+   v1 cannot declare a Center skill, and apply removes every skill a `skills`
+   section omits, so without this a compiled revision would remove the bot's
+   Center skills (P1).
+
+Two Manifest bugs also break totality and must be fixed before compiled
+revisions are applied: removing a resource from a document does not remove it
+from the bot ([#2162](https://github.com/inclusionAI/Avernet/issues/2162)),
+and `script: null` is read as "absent", so a document cannot remove a script
+([#2862](https://github.com/inclusionAI/Avernet/issues/2862)).
 
 Revisions, refs, compare-and-swap, pinning, provenance, and annotations need
 no Manifest change: they live in the Genome Registry, on top of the
@@ -1177,7 +1279,12 @@ everything it fetches (`core/bot_config_manifest/content/service.py`):
 
 - **Bytes** live in a content-addressed blob directory,
   `<root>/blobs/<hex[:2]>/<hex64>`, written once and atomically and
-  hash-verified on read. The root is
+  hash-verified on read. A directory (a skill, or a directory resource) is one
+  blob: the `acm-tree-v1` encoding of its files (`canonical_tree_bytes`),
+  which is deterministic, uncompressed, and decodable back into the files.
+  Editing one file of a directory therefore stores a new blob for the whole
+  tree; per-file blobs would avoid that and are the recorded follow-up (open
+  decision G-1, closed for v1). The root is
   `user_config.bot_config_manifest.content_store_dir` (default
   `./data/manifest_content`; deployments point it at a shared volume).
 - **Provenance** lives in `ac_manifest_content`, an append-only log of store
@@ -1244,13 +1351,18 @@ outputs, verdicts, and Experiment Ledger entries.
 
 - **Canonical form.** A record is serialized with the JSON Canonicalization
   Scheme (RFC 8785) before hashing. The revision `id` is the SHA-256 of the
-  canonical form of `{spec, policy}`; `revision` metadata is excluded.
+  canonical form of `{spec, policy}`; `revision` metadata is excluded. RFC
+  8785 keeps array order, so every list in `spec` and `policy` is sorted by
+  its key and free of duplicates; rules and test vectors:
+  [contract README §3](../../api-contracts/genome/v1/README.md#3-canonical-json-and-identity).
 - **No floats in hashed content.** RFC 8785 formats numbers as IEEE doubles,
   so hashed content uses integers, strings, and enums only (for example
   `max_wall_clock_s: 7200`, `temperature: "0.2"`).
 - **Validation.** Every record type has a JSON Schema (RSI-02, RSI-06), the
   same mechanism `BotConfigArtifact` already uses (`artifact.schema.json`)
-  and the one OpenAPI is built on.
+  and the one OpenAPI is built on. The genome's are
+  [`genome-revision.schema.json`](../../api-contracts/genome/v1/genome-revision.schema.json)
+  and [`genome-patch.schema.json`](../../api-contracts/genome/v1/genome-patch.schema.json).
 - **JSON only for everything new**, both when authored and when stored.
 - **The Bot Config Manifest stays YAML.** It is an existing contract and is
   not changed. When a revision is recorded from a Manifest document, the YAML
@@ -1296,7 +1408,7 @@ class GeneChangeKind(StrEnum):
 
 @dataclass(frozen=True)
 class GeneChange:
-    gene: str                        # gene path (§2.1), e.g. "persona.SOUL.md"
+    gene: str                        # gene path (§2.1), e.g. "persona/SOUL.md"
     kind: GeneChangeKind
     diff: str | None = None          # unified diff for modified text files; None otherwise
 
@@ -1460,7 +1572,7 @@ content that already exists returns the existing one with `200`.
 ```
 
 Errors: 409 `base_mismatch` (base is not the current parent, or ops do not
-apply cleanly); 422 `patch_rejected` with reasons (`locked_gene`,
+apply cleanly); 422 `patch_rejected` with reasons (`gene_not_mutable`,
 `pinned_item`, `gene_not_allowed`, `missing_rationale`, `schema`); 413
 `limit_exceeded`.
 
@@ -1483,10 +1595,9 @@ GET /openapi/v1/bots/bot_123/genome/revisions/r41
                "created_by": {"kind": "user", "actor": "user_owner_1"}, "patch_digest": null,
                "evidence": [], "evaluations": ["ev_288"], "annotations": {}},
   "spec": {"persona": [{"type": "SOUL.md", "digest": "sha256:2b77…"}], "skills": [], "memory": null,
-           "resources": [], "tools": {"mcp": [], "cli_tools": []},
-           "engine_config": {"reasoning_effort": "medium"}, "script": null},
-  "policy": {"locked_genes": ["script", "tools.mcp", "policy"], "mutable_genes": ["persona", "skills", "memory"],
-             "pins": [], "risk_overrides": {}}
+           "resources": [], "tools": {"mcp": []}, "engine_config": {}, "script": null},
+  "policy": {"mutable_genes": ["memory", "persona", "resources", "skills"], "pins": ["persona/SAFETY.md"],
+             "risk_overrides": {}}
 }
 ```
 
@@ -1509,9 +1620,9 @@ GET /openapi/v1/bots/bot_123/genome/revisions/r42/diff?against=r41
   "risk_tier": "T2",
   "rewrite_flags": [],
   "changes": [
-    {"gene": "persona.SOUL.md", "kind": "modified",
+    {"gene": "persona/SOUL.md", "kind": "modified",
      "diff": "@@ -14,3 +14,3 @@ ## Escalation\n-Escalate when the customer asks.\n+Escalate to a human when a refund exceeds the policy limit.\n"},
-    {"gene": "skills.invoice-lookup", "kind": "added"}
+    {"gene": "skills/invoice-lookup", "kind": "added"}
   ]
 }
 ```
@@ -1727,16 +1838,16 @@ The ordering, failure handling, and service-bot publish path are owned by
 | ID | Decision | Notes |
 | --- | --- | --- |
 | D-6 | Genome storage: DB revisions + content store (recommended) vs git repository per bot | §9.2; RSI-03 |
-| G-1 | How a directory resource (`path: data/kb/` from git) is stored today: one archive blob or one blob per file | Decides how fine-grained `file.edit` patches on resources can be; must be confirmed before RSI-02 fixes the patch schema |
-| G-2 | Full patch op set and whether ops map onto JSON Patch (RFC 6902) | RSI-02 |
-| G-3 | Locked-gene defaults | RSI-02 "done when": reviewers agree on locked-gene defaults |
-| G-4 | `engine_config` key allowlist | P3/P4 |
-| G-5 | Engine memory projection contract (the engine owner signed off on amending the reserved-file rule when accepting DR-1) | RSI-05; DR-1 consequence; interim `LESSONS.md` |
+| G-1 | How a directory is stored | **Closed (RSI-02):** one `acm-tree-v1` blob per directory; per-file blobs are the follow-up if editing large trees becomes common (§9.1) |
+| G-2 | Full patch op set and whether ops map onto JSON Patch (RFC 6902) | **Closed (RSI-02):** the op set in §6.1; no JSON Patch |
+| G-3 | Policy defaults | **Closed (RSI-02):** `mutable_genes` = persona, skills, memory, resources; `pins` = `persona/SAFETY.md`; no `locked_genes` list (§2.3) |
+| G-4 | `engine_config` key allowlist and value types | [#2858](https://github.com/inclusionAI/Avernet/issues/2858), after the RSI work |
+| G-5 | Engine memory projection contract (the engine owner signed off on amending the reserved-file rule when accepting DR-1) | RSI-05; DR-1 consequence; interim: a platform-managed persona file (§7) |
 | G-6 | Lineage when a patch produces content identical to an existing revision (same id, different parent path) | Proposed: return the existing revision, record the extra derivation as a Ledger event |
-| G-7 | Whether `risk_overrides` may lower a tier | Proposed: raise only |
+| G-7 | Whether `risk_overrides` may lower a tier | **Closed (RSI-02):** raise only, by construction (§6.3) |
 | G-8 | Blob retention sweep for the archive | v1 unconditional; any sweep must keep blobs reachable from any revision, never those of `promoted` revisions |
 | G-9 | Candidate id vs revision id | Proposed: keep both identities. The candidate id is the content hash of the stored patch (§6.5); the recorded candidate revision id is the content hash of `{spec, policy}` (§4.4). Both appear in the verdict ([07-verification.md](07-verification.md)) and in ledger entries. Alternative: use only the revision id as the handle |
-| G-10 | `memory.update` op | Proposed in §6.1 for memory consolidation; tier T1 like `memory.add` / `memory.retire`. Alternative: express an update as retire + add |
+| G-10 | `memory.update` op | **Closed (RSI-02):** kept, tier T1 |
 
 Related: DR-1 was accepted in RSI-01 ([ADR 0019](../../../../docs/adr/0019-bot-genome-is-the-unit-of-evolution.md)), unblocking RSI-02 (schema and patch
 format), RSI-03 (Registry in Backend), and RSI-04 (Manifest changes for the

@@ -66,7 +66,7 @@
 - **Files:** `apps/backend/tests/community/contracts/test_bot_genome_schema.py`
 - **Done when:**
   - [x] All tests listed in plan.md pass; negative cases fail for their stated reason.
-  - [ ] The design-doc tier-table check reads the marked tables (passes after Task 8).
+  - [x] The design-doc tier-table check reads the marked tables (passes after Task 8).
   - [x] File stays under 1,000 lines.
 - **Depends on:** Tasks 2–6
 
@@ -74,9 +74,9 @@
 - **Goal:** Make the two docs that define the format match the contract.
 - **Files:** `apps/backend/docs/bot-evolution/01-genome.md`, `01-genome.zh-CN.md`, `08-promotion.md`, `08-promotion.zh-CN.md`
 - **Done when:**
-  - [ ] Every 01-genome.md edit listed in plan.md, including §7's note on `LESSONS.md`.
-  - [ ] 08-promotion.md `PatchOpName`, tier table, and policy wording updated.
-  - [ ] Tier tables wrapped in markers; English and zh-CN say the same.
+  - [x] Every 01-genome.md edit listed in plan.md, including §7's note on `LESSONS.md`.
+  - [x] 08-promotion.md `PatchOpName`, tier table, and policy wording updated.
+  - [x] Tier tables wrapped in markers; English and zh-CN say the same.
 - **Depends on:** Task 7
 
 ## Task 9: Update the other bot-evolution docs and work items

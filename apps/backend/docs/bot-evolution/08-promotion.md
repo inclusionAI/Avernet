@@ -48,7 +48,7 @@ Promotion explicitly does **not** own:
 
 | Concern | Owner |
 | --- | --- |
-| Revisions, refs, compare-and-swap (CAS) on refs, patches, content store, lineage, the `policy` section of a genome (locked genes, pins, risk overrides) | Genome Registry, [01-genome.md](01-genome.md). Promotion is the only caller allowed to move `active`, `previous`, and `canary` there |
+| Revisions, refs, compare-and-swap (CAS) on refs, patches, content store, lineage, the `policy` section of a genome (mutable genes, pins, risk overrides) | Genome Registry, [01-genome.md](01-genome.md). Promotion is the only caller allowed to move `active`, `previous`, and `canary` there |
 | How a candidate is measured: suites, splits, graders, executors, paired statistics, verification profiles, verdicts, holdout rotation, online verification metrics, anti-reward-hacking rules and verifier integrity | Verification, [07-verification.md](07-verification.md) |
 | Bindings (which strategy runs on a bot, trigger, allowed genes, verification profile, budget), runs, sandboxing, budgets and kill switches | Evolution Run, [06-evolution-run.md](06-evolution-run.md). Promotion reads the binding fields it needs and honours the kill switches |
 | Recording experiments and the audit trail | Experiment Ledger, [05-experiment-ledger.md](05-experiment-ledger.md). Promotion writes its gate decisions, approvals, rejections, and promotions there |
@@ -117,18 +117,23 @@ from enum import IntEnum, StrEnum
 class RiskTier(IntEnum):     # ordered, so tiers compare; serialized by name ("T0".."T3") in JSON
     T0 = 0   # annotations only
     T1 = 1   # memory item add/update/retire, skill description tweak, resource content update
-    T2 = 2   # persona edits, skill add/update, allowlisted engine_config, any rewrite-flagged edit
-    T3 = 3   # tools, script, memory replace mode, permissions, anything in policy: locked by default
+    T2 = 2   # persona edits, skill add/update/remove, any rewrite-flagged edit
+    T3 = 3   # memory replace mode: always human review, never auto
 
 class PatchOpName(StrEnum):
-    """The Genome Patch op names (01-genome.md §6.1; the full set is fixed by RSI-02)."""
+    """The Genome Patch op names (api-contracts/genome/v1/genome-patch.schema.json)."""
     FILE_EDIT = "file.edit"
+    PERSONA_ADD = "persona.add"
+    PERSONA_REMOVE = "persona.remove"
     SKILL_ADD = "skill.add"
     SKILL_UPDATE = "skill.update"
+    SKILL_REMOVE = "skill.remove"
+    RESOURCE_ADD = "resource.add"
+    RESOURCE_REMOVE = "resource.remove"
     MEMORY_ADD = "memory.add"
     MEMORY_UPDATE = "memory.update"
     MEMORY_RETIRE = "memory.retire"
-    ENGINE_CONFIG_SET = "engine_config.set"
+    MEMORY_SET_MODE = "memory.set_mode"
 
 class RaiseKind(StrEnum):           # why a tier was raised (§5.1)
     REWRITE = "rewrite"             # a file.edit changed more than the rewrite threshold of a file
@@ -243,7 +248,7 @@ class GateDecision:
   "risk": {"tier": "T2", "per_op": [], "raised_by": []},   // per_op elided here; see §2.1
   "auto_promote_ceiling": "T1",
   "checks": [
-    {"name": "static_floor", "result": "pass", "detail": "schema ok; no locked gene or pin touched; scan clean", "evidence": ["scan:sc_77"]},
+    {"name": "static_floor", "result": "pass", "detail": "schema ok; only mutable genes, no pin touched; scan clean", "evidence": ["scan:sc_77"]},
     {"name": "regression_floor", "result": "pass", "detail": "safety: 0 newly failing; regression: 0 newly failing", "evidence": ["eval:ev_302"]},
     {"name": "verification_verdict", "result": "pass", "detail": "accept on validation under default@1", "evidence": ["eval:ev_301"]},
     {"name": "holdout", "result": "pass", "detail": "final candidate of run scored on holdout; no drop", "evidence": ["eval:ev_305"]},
@@ -456,7 +461,7 @@ improved or by the thing doing the improving. This is the core of DR-2.
 | Change the verifier (suites, graders, profiles, protocols, thresholds) | **Humans**, through reviewed changes ([07-verification.md](07-verification.md)) | Any automated loop, including level 3 |
 | Adopt a new mechanism (level 3) | Platform mechanism gate + human approval ([10-meta-evolution.md](10-meta-evolution.md)) | Meta-strategies |
 | Decide promotion | **Platform gate** + owner/reviewer per risk tier (this doc) | Strategies, bots |
-| Change locked genes / policy | Owner, tenant admin ([01-genome.md](01-genome.md)) | Strategies, bots |
+| Change the policy (mutable genes, pins, risk overrides) | Owner, tenant admin ([01-genome.md](01-genome.md)) | Strategies, bots |
 
 What each row means in practice:
 
@@ -487,8 +492,8 @@ What each row means in practice:
   promotion happens only when every gate check passes and the risk tier is at
   or below the owner's auto-promote ceiling; anything else waits for a
   human.
-- **Change policy.** The genome `policy` section (locked genes, mutable
-  genes, pins, risk overrides) is copied forward verbatim by the platform and
+- **Change policy.** The genome `policy` section (mutable genes, pins,
+  risk overrides) is copied forward verbatim by the platform and
   changed only by the owner or a tenant admin. The floor rejects any patch
   that touches it.
 
@@ -546,10 +551,10 @@ agree*.
 
 A candidate is promotable only if **all** of these pass:
 
-1. **Static floor** (§4.2, run at submission) — schema valid; base matches; no locked gene or
-   pinned item touched; no secrets/PII introduced; size and rewrite
-   thresholds; no new outbound URLs or MCP servers unless the gene is
-   unlocked; no permission escalation; budget not exceeded.
+1. **Static floor** (§4.2, run at submission) — schema valid; base matches; only mutable
+   genes changed and no pinned item touched; no secrets/PII introduced; size
+   and rewrite thresholds; no new outbound URLs; no permission escalation;
+   budget not exceeded.
 2. **Regression floor** — on the bot's `regression` and `safety` suites the
    candidate is not worse than the parent beyond a tolerance. Default: zero
    newly failing cases on `safety` (no tolerance), at most one on
@@ -598,12 +603,12 @@ verdict `reject` without running any suite; the result is stored on the
 | --- | --- | --- |
 | Schema | The patch and the resulting revision validate against the genome and patch JSON Schemas | Candidate not recorded |
 | Base | `base` equals the parent revision; ops apply cleanly (no fuzzy merge in v1) | Candidate not recorded |
-| Locked genes and pins | No op touches a gene listed in `policy.locked_genes` or an item in `policy.pins`; no op touches `policy` | Candidate not recorded |
+| Mutable genes and pins | Every op's gene path is covered by `policy.mutable_genes` and overlaps no item in `policy.pins`; no op can reach `policy` | Candidate not recorded |
 | Allowed genes | Every op is within the binding's `allowed_genes` (which itself stays within `policy.mutable_genes`) | Candidate not recorded |
 | Secret and PII scan | No secrets or PII introduced, using the **same scanner rules as the repository pre-push hook** (private keys, recognizable provider tokens, bearer/JWT credentials, high-entropy values in credential-like fields), plus the tenant's PII policy | `not_promotable` |
-| Outbound endpoints | No new outbound URLs and no new MCP servers unless the corresponding gene is unlocked | `not_promotable` |
+| Outbound endpoints | No new outbound URLs in changed content (MCP servers cannot change through a patch at all) | `not_promotable` |
 | Permission escalation | No op widens tools, permissions, or anything in `policy` | `not_promotable` |
-| Size and rewrite | Patch size, file count, and file size within the Manifest limits; a `file.edit` that changes more than a configurable fraction of a file (default 40%) is flagged `rewrite` (raises the tier, §5.1) | Over limit: `not_promotable`; rewrite: tier raised |
+| Size and rewrite | Patch size, file count, and file size within the Manifest limits; an op that changes more than 2/5 of an existing text file's lines is flagged `rewrite` (raises the tier, §5.1) | Over limit: `not_promotable`; rewrite: tier raised |
 | Budget | The run did not exceed its budget for this candidate | `not_promotable` |
 
 **Why scan patches at all.** Experience (episodes, feedback) is untrusted
@@ -621,7 +626,7 @@ it can be promoted. (Redaction on ingest and retention of experience are in
 | --- | --- | --- |
 | `auto_promote` | All checks pass and the tier is at or below the binding's auto-promote ceiling, no incident blocks the bot, the bot's evolution is not frozen, and the daily promotion limit is not reached | Promotion moves `active` (or `canary`, §8) with actor `gate_policy` |
 | `needs_review` | Checks 1–5 pass but the tier is above the ceiling, or a soft condition sends it to review (one tolerated regression failure, a holdout incident on the bot, the daily promotion limit reached, a frozen bot) | A `ReviewItem` is opened |
-| `not_promotable` | The verdict is `reject` or `inconclusive`, or any of checks 1–5 fails, or the tier is T3 on a gene the owner has not unlocked | Revision status becomes `rejected`; it is kept, never deleted |
+| `not_promotable` | The verdict is `reject` or `inconclusive`, or any of checks 1–5 fails | Revision status becomes `rejected`; it is kept, never deleted |
 
 Rejection is a normal outcome, not an error: most candidates should fail,
 and every decision is recorded in the Experiment Ledger as evidence.
@@ -645,8 +650,6 @@ def decide(c: CandidateFacts, b: BindingView, bot: BotState) -> GateDecision:
 
     if any(ch.result == "fail" for ch in checks) or c.verdict != "accept":
         return decision(checks, risk, "not_promotable")
-    if risk.tier == RiskTier.T3 and not c.policy.unlocks(risk):
-        return decision(checks, risk, "not_promotable")
 
     soft = soft_conditions(checks, bot)        # tolerated regression failure, incident, freeze, daily limit
     within = b.auto_promote_ceiling is not None and risk.tier <= b.auto_promote_ceiling
@@ -667,31 +670,46 @@ Assigned per patch op; a patch takes the max of its ops.
 | --- | --- | --- |
 | **T0** | Annotations only | Auto |
 | **T1** | Memory item add/update/retire; skill description tweak; resource content update | Auto if the gate passes and owner policy allows |
-| **T2** | Persona edits (SOUL/AGENTS/RULES); skill add/update; `engine_config` within the allowlist; any `rewrite`-flagged edit | Human review (owner or delegate); the owner may raise the auto ceiling to T2 per strategy |
-| **T3** | MCP/CLI tool changes, script, memory `replace` mode, permissions, anything in `policy` | Locked by default; when unlocked, always human review, never auto |
+| **T2** | Persona file edits, additions and removals; skill add/update/remove; any `rewrite`-flagged edit | Human review (owner or delegate); the owner may raise the auto ceiling to T2 per strategy |
+| **T3** | Memory `replace` mode; any op an owner override raises to T3 | Always human review, never auto |
 
-Proposed default mapping from Genome Patch ops ([01-genome.md](01-genome.md))
-to tiers. The normative mapping is carried as data in the patch schema
-(work item RSI-02: "every patch op has a defined risk tier") and is listed
-in [01-genome.md](01-genome.md); the two tables must stay identical. This
-doc explains the policy behind it.
+Tools (MCP servers), the startup script, `engine_config` and the policy have
+no tier because no patch op can reach them: they change only when an owner
+records a whole Manifest document ([01-genome.md](01-genome.md) §6.1).
 
-| Op | Target | Tier |
-| --- | --- | --- |
-| annotation change on the revision record | — | T0 |
-| `memory.add`, `memory.update`, `memory.retire` (modes `seed`, `merge`) | `memory` | T1 |
-| `skill.update` touching only the skill description | `skills/<name>` | T1 |
-| `file.edit` | `resources/...` | T1 |
-| `file.edit` | `persona/*` (SOUL, AGENTS, RULES) | T2 |
-| `skill.add`, `skill.update` (content) | `skills/<name>` | T2 |
-| `engine_config.set` (allowlisted key) | `engine_config.<key>` | T2 |
-| any op on `tools.mcp`, `tools.cli_tools`, `script`; memory `replace` mode; permission changes | locked genes | T3 |
-| any op on `policy` | `policy` | rejected by the floor (never promotable) |
+The default mapping from Genome Patch ops ([01-genome.md](01-genome.md)) to
+tiers. The normative mapping is
+[`risk-tiers.json`](../../api-contracts/genome/v1/risk-tiers.json): for each op,
+the first rule whose target covers the op's gene path and whose condition holds.
+This table, the one in [01-genome.md](01-genome.md) §6.3, and that file must be
+identical; a contract test checks it. This doc explains the policy behind it.
+
+<!-- risk-tiers:begin -->
+| Op | Target | Condition | Tier |
+| --- | --- | --- | --- |
+| `file.edit` | `persona` | — | T2 |
+| `file.edit` | `skills` | `description_only` | T1 |
+| `file.edit` | `skills` | — | T2 |
+| `file.edit` | `resources` | — | T1 |
+| `persona.add` | `persona` | — | T2 |
+| `persona.remove` | `persona` | — | T2 |
+| `skill.add` | `skills` | — | T2 |
+| `skill.update` | `skills` | `description_only` | T1 |
+| `skill.update` | `skills` | — | T2 |
+| `skill.remove` | `skills` | — | T2 |
+| `resource.add` | `resources` | — | T1 |
+| `resource.remove` | `resources` | — | T1 |
+| `memory.add` | `memory` | — | T1 |
+| `memory.update` | `memory` | — | T1 |
+| `memory.retire` | `memory` | — | T1 |
+| `memory.set_mode` | `memory` | `mode=replace` | T3 |
+| `memory.set_mode` | `memory` | — | T1 |
+<!-- risk-tiers:end -->
 
 Raises applied after the per-op mapping:
 
-- **Rewrite flag.** A `file.edit` flagged `rewrite` (more than the
-  configured fraction of the file changed, default 40%) is at least T2.
+- **Rewrite flag.** An op flagged `rewrite` (more than 2/5 of an existing
+  text file's lines changed, by exact line LCS) is at least T2.
   Whole-file regeneration erodes context ("context collapse"), so large
   rewrites always get human eyes.
 - **Guardrail diff audit.** A patch that mentions or edits guardrail-like
@@ -701,8 +719,8 @@ Raises applied after the per-op mapping:
   integrity rules in [07-verification.md](07-verification.md); the tier
   consequence is applied here.
 - **Owner overrides.** `policy.risk_overrides` in the genome may raise the
-  tier of specific genes or items for that bot. Overrides never lower a
-  floor rule and can never make T3 auto-promotable.
+  tier of every op whose gene path overlaps the override's path. Overrides
+  never lower a tier or a floor rule and can never make T3 auto-promotable.
 
 ### 5.2 Why tiers are per op and use the maximum
 
@@ -806,8 +824,7 @@ open ──approve──▶ approved   (Promotion created; revision status → p
 
 The owner, a tenant admin, or a delegate the owner names. Pipelines may
 approve only within the auto-promote policy the owner configured for them
-(§3). T3 items (only possible after the owner unlocked the gene) always need
-a human. For mechanism adoption (level 3), the comparison report is
+(§3). T3 items always need a human. For mechanism adoption (level 3), the comparison report is
 mandatory ([10-meta-evolution.md](10-meta-evolution.md)).
 
 ## 7. Promotion
@@ -1023,7 +1040,7 @@ class PromotionService(Protocol):
 class FloorCheckName(StrEnum):      # one per row of §4.2
     SCHEMA = "schema"
     BASE = "base"
-    LOCKED_GENES_AND_PINS = "locked_genes_and_pins"
+    MUTABLE_GENES_AND_PINS = "mutable_genes_and_pins"
     ALLOWED_GENES = "allowed_genes"
     SECRET_PII_SCAN = "secret_pii_scan"
     OUTBOUND_ENDPOINTS = "outbound_endpoints"
@@ -1441,7 +1458,7 @@ wait in the review queue.
 | Other part | Direction | What flows |
 | --- | --- | --- |
 | Genome ([01-genome.md](01-genome.md)) | Promotion → Genome | Drift check before a promotion; CAS moves of `active`, `previous`, `canary`; revision status changes (`promoted`, `rejected`); recording which document digest an applied revision compiled to; reading patches, diffs, and `policy` |
-| Genome ([01-genome.md](01-genome.md)) | Genome → Promotion | Patch-level floor results at record time (base, locked genes, pins, rewrite flag) |
+| Genome ([01-genome.md](01-genome.md)) | Genome → Promotion | Patch-level floor results at record time (base, mutable genes, pins, rewrite flag) |
 | Experience ([02-experience.md](02-experience.md)) | Promotion → Experience (indirect) | After promotion, episodes carry the new revision id |
 | Strategy ([03-strategy.md](03-strategy.md)) | none directly | Strategies submit candidates and read verdicts only; they never see gate decisions or the queue |
 | Default strategies ([04-default-strategies.md](04-default-strategies.md)) | — | ClawEvolve's accept rule becomes an internal submission filter; its `skill-decision` approval becomes this review queue |
