@@ -265,6 +265,8 @@ def _tree_members(data: bytes) -> list[tuple[str, bytes]]:
     assert canonical_tree_bytes(members) == data, "tree members are not in canonical order"
     names = [name for name, _ in members]
     assert len(names) == len(set(names)), "tree member paths must be unique"
+    colliding = sorted({n for n in names for m in names if m.startswith(n + "/")})
+    assert not colliding, f"tree members {colliding} are files and also directories of other members"
     for name in names:
         parts = name.split("/")
         assert name and not name.startswith("/") and all(p not in ("", ".", "..") for p in parts), name
