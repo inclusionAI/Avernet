@@ -26,7 +26,8 @@ impl Api {
             let duplicate = calls.iter().any(|old| old["provider_bot_ref"] == query["provider_bot_ref"]);
             calls.push(query.clone());
             if duplicate { return (StatusCode::CONFLICT, axum::Json(json!({"error":"duplicate binding"}))); }
-            let body = json!({"code":20100,"message":"Created","data":{"bot_uuid":"bot_new","bot_token":BOT_TOKEN,
+            let bot_uuid = if calls.len() == 1 { "bot_new".to_owned() } else { format!("bot_new_{}", calls.len()) };
+            let body = json!({"code":20100,"message":"Created","data":{"bot_uuid":bot_uuid,"bot_token":BOT_TOKEN,
                 "registration":{"provider_id":"prv_test","provider_bot_ref":query["provider_bot_ref"],"mode":query["mode"]}}});
             (StatusCode::CREATED, axum::Json(body))
         }
@@ -581,4 +582,138 @@ async fn stopped_qwen_profiles_reuse_shared_desktop_settings_and_reject_ambiguou
     assert_eq!(prod_api.calls().len(), 2);
     assert!(!directory.join("profiles/ambiguous/bridge.toml").exists());
     assert_eq!(std::fs::read(&settings).unwrap(), hooks);
+}
+
+
+async fn assert_codex_replacement_updates_options(new_identity: bool) {
+    for has_saved_options in [true, false] {
+        let home = tempfile::tempdir().unwrap();
+        let api = Api::new().await;
+        let args = ["--mode", "plugin", "--engine", "codex", "--api-url", &api.base,
+            "--upstream-url", "ws://127.0.0.1:21000/ws/bot"];
+        let mut initial = register(home.path(), &args);
+        initial.args(["--provider-bot-ref", "worker-a"]);
+        if has_saved_options {
+            initial.args(["--engine-option", "sandbox=danger-full-access", "--engine-option", "reasoning_effort=high"]);
+        }
+        let output = initial.output().await.unwrap();
+        assert!(output.status.success(), "{}", diagnostic(&output));
+        let mut before = saved(home.path());
+        if has_saved_options {
+            // Keep a typed, non-default policy that the partial CLI update must not reset.
+            before["bot"][0]["engine_options"].as_table_mut().unwrap().insert("network_access".into(), false.into());
+            std::fs::write(config_path(home.path()), toml::to_string(&before).unwrap()).unwrap();
+        }
+        let reference = if new_identity { "worker-b" } else { "worker-a" };
+        let output = register(home.path(), &args).args(["--replace-existing", "--provider-bot-ref", reference,
+            "--engine-option", "sandbox=read-only"]).output().await.unwrap();
+        assert!(output.status.success(), "{}", diagnostic(&output));
+        let after = saved(home.path());
+        let options = &after["bot"][0]["engine_options"];
+        assert_eq!(options["sandbox"].as_str(), Some("read-only"));
+        if has_saved_options {
+            assert_eq!(options["network_access"].as_bool(), Some(false));
+            assert_eq!(options["reasoning_effort"].as_str(), Some("high"));
+        }
+        if new_identity {
+            assert_ne!(after["bot"][0]["bot_id"], before["bot"][0]["bot_id"]);
+            assert_ne!(after["state_path"], before["state_path"]);
+            assert_eq!(api.calls().len(), 2);
+        } else {
+            for key in ["bot_id", "token", "provider_bot_ref"] { assert_eq!(after["bot"][0][key], before["bot"][0][key]); }
+            assert_eq!(after["state_path"], before["state_path"]);
+            assert_eq!(api.calls().len(), 1);
+            assert!(diagnostic(&output).contains("Bridge settings updated"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn codex_replacement_applies_explicit_options_to_existing_identity() {
+    assert_codex_replacement_updates_options(false).await;
+}
+
+#[tokio::test]
+async fn codex_replacement_applies_explicit_options_to_new_identity() {
+    assert_codex_replacement_updates_options(true).await;
+}
+
+#[tokio::test]
+async fn codex_replacement_preserves_options_when_none_are_supplied() {
+    for new_identity in [false, true] {
+        let home = tempfile::tempdir().unwrap();
+        let api = Api::new().await;
+        let args = ["--mode", "plugin", "--engine", "codex", "--api-url", &api.base,
+            "--upstream-url", "ws://127.0.0.1:21000/ws/bot"];
+        let output = register(home.path(), &args).args(["--provider-bot-ref", "worker-a", "--engine-option",
+            "sandbox=read-only", "--engine-option", "reasoning_effort=high"]).output().await.unwrap();
+        assert!(output.status.success(), "{}", diagnostic(&output));
+        let before = saved(home.path());
+        let reference = if new_identity { "worker-b" } else { "worker-a" };
+        let output = register(home.path(), &args).args(["--replace-existing", "--provider-bot-ref", reference]).output().await.unwrap();
+        assert!(output.status.success(), "{}", diagnostic(&output));
+        assert_eq!(saved(home.path())["bot"][0]["engine_options"], before["bot"][0]["engine_options"]);
+        assert_eq!(api.calls().len(), if new_identity { 2 } else { 1 });
+    }
+}
+
+#[tokio::test]
+async fn codex_replacement_validates_explicit_options_with_retained_options() {
+    for new_identity in [false, true] {
+        let home = tempfile::tempdir().unwrap();
+        let api = Api::new().await;
+        let args = ["--mode", "plugin", "--engine", "codex", "--api-url", &api.base,
+            "--upstream-url", "ws://127.0.0.1:21000/ws/bot"];
+        let output = register(home.path(), &args).args(["--provider-bot-ref", "worker-a", "--engine-option",
+            "approval_policy=on-request", "--engine-option", "approval_review=auto"]).output().await.unwrap();
+        assert!(output.status.success(), "{}", diagnostic(&output));
+        let reference = if new_identity { "worker-b" } else { "worker-a" };
+        // This partial override is valid only together with the saved auto reviewer.
+        let output = register(home.path(), &args).args(["--replace-existing", "--provider-bot-ref", reference,
+            "--engine-option", "approval_policy=untrusted"]).output().await.unwrap();
+        assert!(output.status.success(), "{}", diagnostic(&output));
+        let after = saved(home.path());
+        assert_eq!(after["bot"][0]["engine_options"]["approval_policy"].as_str(), Some("untrusted"));
+        assert_eq!(after["bot"][0]["engine_options"]["approval_review"].as_str(), Some("auto"));
+        assert_eq!(api.calls().len(), if new_identity { 2 } else { 1 });
+    }
+}
+
+#[tokio::test]
+async fn codex_replacement_rejects_invalid_merged_options_before_saving_or_registration() {
+    for new_identity in [false, true] {
+        let home = tempfile::tempdir().unwrap();
+        let api = Api::new().await;
+        let args = ["--mode", "plugin", "--engine", "codex", "--api-url", &api.base,
+            "--upstream-url", "ws://127.0.0.1:21000/ws/bot"];
+        let output = register(home.path(), &args).args(["--provider-bot-ref", "worker-a", "--engine-option",
+            "approval_policy=on-request", "--engine-option", "approval_review=auto"]).output().await.unwrap();
+        assert!(output.status.success(), "{}", diagnostic(&output));
+        let original = std::fs::read(config_path(home.path())).unwrap();
+        let reference = if new_identity { "worker-b" } else { "worker-a" };
+        // Valid against defaults, but invalid with the saved on-request policy.
+        let output = register(home.path(), &args).args(["--replace-existing", "--provider-bot-ref", reference,
+            "--engine-option", "approval_review=user"]).output().await.unwrap();
+        assert!(!output.status.success(), "{}", diagnostic(&output));
+        assert!(diagnostic(&output).contains("Invalid engine options"), "{}", diagnostic(&output));
+        assert_eq!(std::fs::read(config_path(home.path())).unwrap(), original);
+        assert_eq!(api.calls().len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn codex_options_are_not_inherited_when_registering_a_different_engine() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let args = ["--mode", "plugin", "--api-url", &api.base, "--upstream-url", "ws://127.0.0.1:21000/ws/bot"];
+    let output = register(home.path(), &args).args(["--engine", "codex", "--provider-bot-ref", "worker-a",
+        "--engine-option", "sandbox=danger-full-access"]).output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let output = register(home.path(), &args).args(["--replace-existing", "--engine", "qwenwork",
+        "--provider-bot-ref", "worker-b"]).output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let after = saved(home.path());
+    assert_eq!(after["bot"][0]["engine"].as_str(), Some("qwenwork"));
+    assert!(after["bot"][0].get("engine_options").is_none());
+    assert_eq!(api.calls().len(), 2);
 }
