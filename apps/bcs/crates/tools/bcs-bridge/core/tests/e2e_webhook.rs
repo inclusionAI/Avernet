@@ -392,6 +392,33 @@ async fn codex_app_server_emits_thinking_and_tool_events() {
 }
 
 #[tokio::test]
+async fn bulk_final_from_turn_items_reaches_chat_final_without_streamed_deltas() {
+    // Regression: turns that end with no streamed agentMessage deltas (the
+    // whole answer presented as a single final item, e.g. long tool-heavy
+    // runs) previously completed with an empty chat.final. The driver must
+    // extract the answer from the completed turn's own items.
+    let url = support::spawn_app_with_mock("mock_codex_app_server.py", "codex").await;
+    let resp = reqwest::Client::builder().no_proxy().build().unwrap()
+        .post(format!("{url}/webhook"))
+        .bearer_auth("tok-b2p")
+        .header("X-BCN-Protocol-Version", "2.0")
+        .json(&json!({
+            "type": "req", "id": "bulk-final-run", "method": "chat.send",
+            "session_id": "bulk-final-session",
+            "to_bot": {"provider_id": "bridge-1", "provider_bot_ref": "worker-1"},
+            "message": {"role": "user", "content": [{"type": "text", "text": "BULK_FINAL: 已经全面 review 完成"}]}
+        }))
+        .send()
+        .await
+        .unwrap();
+    let text = resp.text().await.unwrap();
+    assert!(!text.contains("BULK_FINAL:"), "marker must be stripped: {text}");
+    assert!(text.contains("\"state\":\"final\""), "expected a final frame: {text}");
+    assert!(text.contains("已经全面 review 完成"),
+        "bulk-final answer must reach the final frame: {text}");
+}
+
+#[tokio::test]
 async fn trace_records_raw_converted_and_sse_events() {
     let trace_dir = tempfile::tempdir().unwrap();
     let bin = format!(

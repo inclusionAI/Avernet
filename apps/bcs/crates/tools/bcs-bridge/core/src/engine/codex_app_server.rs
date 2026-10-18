@@ -285,9 +285,22 @@ impl CodexAppServer {
     }
 
     /// Connect over Unix WebSocket; never start, restart or stop the shared server.
+    /// Desktop threads are explicitly pinned to the engine's historical
+    /// bridge-side posture — read-only sandbox, no network, approvalPolicy
+    /// never, user reviewer — regardless of the standalone Codex engine's
+    /// own configured defaults. This keeps codex-desktop author-managed:
+    /// the desktop user drives their own app-server instance; this bridge
+    /// must not widen it as a side effect of newer standalone options.
     pub fn desktop(socket: PathBuf) -> Self {
         Self { bin: PathBuf::new(), prefix_args: Vec::new(), desktop: true, socket: Some(socket),
-            options: CodexOptions::default(), native: Default::default() }
+            options: CodexOptions {
+                sandbox: CodexSandbox::ReadOnly,
+                network_access: false,
+                approval_policy: CodexApprovalPolicy::Never,
+                approval_review: CodexApprovalReview::User,
+                reasoning_effort: None,
+            },
+            native: Default::default() }
     }
 
     pub(super) async fn initialize(&self, cli: &mut CodexConnection, next_id: &mut u64,
@@ -988,19 +1001,35 @@ fn extract_delta(value: &Value) -> Option<String> {
 
 /// Extract the final assistant text from a `turn/completed` notification.
 ///
-/// Empirically verified contract (2026-10-18, 438 task_complete payloads
-/// across cfuse codex 0.161 and vanilla codex rollouts on this host): the
-/// engine always emits the answer under `params.last_agent_message`; the
-/// legacy probe keys `text` / `finalText` / `final_text` never occur and are
-/// deliberately not read. Turns that instead streamed `agentMessage/delta`
-/// never reach this fallback.
+/// Wire contract (verified live from bridge-side engine trace, 2026-10-18):
+/// the completed turn arrives as 
+/// `{threadId, turn:{items:[...]}}` with no `last_agent_message`, and the
+/// final answer lives in `params.turn.items[]` where `type == "agentMessage"`
+/// (typically `phase: "final_answer"`). Every turn that streams its answer
+/// still takes the earlier delta branch first — this path only matters when
+/// the engine delivers the answer as one whole message at turn end without
+/// streaming deltas. The engine journal uses a `last_agent_message` field in
+/// its own rollout files, so we also honor it as a legacy fallback, ordered
+/// after the wire-native shape.
 fn completed_text(value: &Value) -> Option<String> {
     let params = value.get("params")?;
-    params
-        .get("last_agent_message")
-        .and_then(Value::as_str)
-        .filter(|text| !text.trim().is_empty())
-        .map(str::to_string)
+    let mut fallback: Option<String> = None;
+    if let Some(items) = params.pointer("/turn/items").and_then(Value::as_array) {
+        for item in items.iter().rev() {
+            if item.get("type").and_then(Value::as_str) != Some("agentMessage") { continue; }
+            let Some(text) = item.get("text").and_then(Value::as_str).filter(|t| !t.trim().is_empty()) else { continue; };
+            if item.get("phase").and_then(Value::as_str) == Some("final_answer") {
+                return Some(text.to_owned());
+            }
+            if fallback.is_none() { fallback = Some(text.to_owned()); }
+        }
+    }
+    fallback.or_else(|| {
+        params.get("last_agent_message")
+            .and_then(Value::as_str)
+            .filter(|text| !text.trim().is_empty())
+            .map(str::to_string)
+    })
 }
 
 fn completed_failure_message(value: &Value) -> Option<String> {
@@ -1146,7 +1175,38 @@ mod tests {
     }
 
     #[test]
-    fn completed_text_reads_last_agent_message_from_turn_end() {
+    fn completed_text_reads_agent_message_items_before_any_legacy_fallback() {
+        // The real wire shape (verified from a live bridge-side engine trace):
+        // the final answer lives in params.turn.items[] as
+        // {type:"agentMessage", phase:"final_answer", text:"..."}.
+        let wire = json!({"method":"turn/completed","params":{
+            "threadId":"t-1",
+            "turn":{
+                "completedAt":1792320351,"durationMs":95592,"error":null,
+                "id":"turn-1","status":"completed",
+                "items":[
+                    {"type":"reasoning","id":"rs-1"},
+                    {"type":"agentMessage","phase":"thinking","text":"对不起，还在中间分析。"},
+                    {"type":"agentMessage","phase":"final_answer","text":"已将完整 Review 发布到 PR。"},
+                ],
+            },
+        }});
+        assert_eq!(completed_text(&wire).as_deref(), Some("已将完整 Review 发布到 PR。"));
+        // Without a final_answer entry, take the last agentMessage with text.
+        let wire = json!({"params":{"turn":{"items":[
+            {"type":"agentMessage","text":"first"},
+            {"type":"agentMessage","text":"second"},
+        ]}}});
+        assert_eq!(completed_text(&wire).as_deref(), Some("second"));
+        // agentMessage with empty text counts as absent.
+        let wire = json!({"params":{"turn":{"items":[
+            {"type":"agentMessage","phase":"final_answer","text":"  "},
+        ]}}});
+        assert_eq!(completed_text(&wire), None);
+    }
+
+    #[test]
+    fn completed_text_keeps_journal_shape_as_legacy_fallback() {
         let value = json!({"method":"turn/completed","params":{
             "threadId":"t-1","turnId":"turn-1",
             "last_agent_message":"review done"
@@ -1163,6 +1223,12 @@ mod tests {
             "last_agent_message":"   "
         }});
         assert_eq!(completed_text(&empty), None, "whitespace-only tail text is not a real final");
+        // Wire-shape items win over any legacy key.
+        let both = json!({"params":{
+            "last_agent_message":"journal text",
+            "turn":{"items":[{"type":"agentMessage","phase":"final_answer","text":"wire text"}]},
+        }});
+        assert_eq!(completed_text(&both).as_deref(), Some("wire text"));
     }
 
     #[test]

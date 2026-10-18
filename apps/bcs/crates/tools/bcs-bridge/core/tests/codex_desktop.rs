@@ -108,6 +108,21 @@ async fn desktop_reuses_shared_server_streams_resumes_and_interrupts_only_its_tu
     assert_eq!(methods.iter().filter(|m| *m == "thread/start").count(), 1);
     assert_eq!(methods.iter().filter(|m| *m == "thread/resume").count(), 4);
     assert_eq!(methods.iter().filter(|m| *m == "turn/interrupt").count(), 2);
+
+    // Desktop threads keep the historical bridge-side wire posture (never,
+    // read-only, network off), regardless of how the standalone Codex
+    // engine's own defaults evolve. Any change here is a deliberate,
+    // user-visible compatibility change and needs an explicit config surface.
+    let requests = requests.lock().unwrap();
+    let thread_start = requests.iter().find(|request| request["method"] == "thread/start").unwrap();
+    assert_eq!(thread_start["params"]["sandbox"], "read-only");
+    assert_eq!(thread_start["params"]["approvalPolicy"], "never");
+    assert_eq!(thread_start["params"]["approvalsReviewer"], "user");
+    let turn_start = requests.iter().find(|request| request["method"] == "turn/start").unwrap();
+    assert_eq!(turn_start["params"]["sandboxPolicy"],
+        json!({"type": "readOnly", "networkAccess": false}));
+    assert_eq!(turn_start["params"]["approvalPolicy"], "never");
+    assert_eq!(turn_start["params"]["approvalsReviewer"], "user");
 }
 
 #[tokio::test]
