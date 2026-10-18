@@ -66,7 +66,7 @@ Space 管理资产：Router → Draft / Grant / Lease / Publication / Offline
 | Set、成员和 Default exclusion | 组织/规则事实，由 UoW 物化到 Installation；不是第二套有效态读取算法 |
 | Runtime 文件、软链、MCP 配置 | 设备投影结果，不是 DB Desired State；存储内容存在也不等于 Skill 已激活 |
 
-Bot 定位必须携带 `owner_id + bot_id`，并保持 Repository 的 tenant/env 过滤。`bot_id=default` 在不同 Owner 下可重复；actor/user_id 是调用者，不能替代 Owner。旧表仍使用 `bolt_id` 字段时按现有映射处理。
+Bot 入口继续兼容 `owner_id + bot_id`，并保持 Repository 的 tenant/env 过滤；旧 `owner_id` 可匹配 Bot 的稳定 entity 或当前 Owner。Bot 解析完成后，Installation、Set、MCP config 及 Skills Pool 等纯 Bot 资源统一用 `entity_id + bot_id` 读写，即使物理列仍命名为 `owner_id`。授权和协作审计仍使用当前 Owner 与 actor。`bot_id=default` 在不同 Owner 下可重复，不能退化为裸 id 查询；actor/user_id 是调用者，不能替代资源地址。旧表仍使用 `bolt_id` 字段时按现有映射处理。
 
 ## 3. Bot 有效态：统一 Reader / Writer
 

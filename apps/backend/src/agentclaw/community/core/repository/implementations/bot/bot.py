@@ -229,6 +229,41 @@ class BotRepository(
             )
             return self._to_caller_identity_dict(bot) if bot else None
 
+    def get_by_pk(self, bot_pk: int) -> Optional[Dict[str, Any]]:
+        """Query one live Bot by the immutable ``ac_bots.id`` key."""
+        with self._db.orm_session() as db:
+            bot = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.id == bot_pk,
+                    self.Model.is_delete == 0,
+                    self._env(),
+                )
+                .first()
+            )
+            return self._to_caller_identity_dict(bot) if bot else None
+
+    def list_matches_by_legacy_locator(
+        self, bot_id: str, locator: str
+    ) -> List[Dict[str, Any]]:
+        """Return all owner/entity matches so compatibility lookup fails closed."""
+        with self._db.orm_session() as db:
+            bots = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.bot_id == bot_id,
+                    or_(
+                        self.Model.entity_id == locator,
+                        self.Model.owner_id == locator,
+                    ),
+                    self.Model.is_delete == 0,
+                    self._env(),
+                )
+                .limit(2)
+                .all()
+            )
+            return [self._to_caller_identity_dict(bot) for bot in bots]
+
     def get_unique_by_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
         """Return one live Bot by id or fail closed when callers are ambiguous."""
         with self._db.orm_session() as db:

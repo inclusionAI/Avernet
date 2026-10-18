@@ -7,6 +7,11 @@ from agentclaw.community.core.service_bot.repository.models import BotPublishRec
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.repository.protocols.publishing import PublishOperationRepository
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.addressing import (
+    BotAddressResolver,
+    stable_resource_owner_id,
+)
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
@@ -73,6 +78,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
     ):
         self._repo = bot_publish_repo
         self._bot_repo = bot_repo
+        self._bot_address_resolver = BotAddressResolver(bot_repo)
         # Lazy provider — breaks the BotPublishService ↔ PublishFlowService cycle.
         self._publish_flow_service_provider = publish_flow_service_provider
         self._bot_service = bot_service
@@ -207,7 +213,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             source_bot_id: 源 bot_id
             publish_bot_id: 发布后的 bot_id
             name: bot名称
-            owner_id: 工号
+            owner_id: 兼容入参；持久化时使用源 Bot 的 entity_id
             permission_owner: 权限归属
             description: Optional[str] = None,
             owner_name: Optional[str] = None,
@@ -221,17 +227,40 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         Raises:
             PublishAlreadyExistsError: 如果相同版本已存在
         """
-        # 检查是否已存在相同版本
-        if version is not None:
-            existing = self._repo.get_by_publish_bot_id_and_version(
-                publish_bot_id, owner_id, version, self._env
+        source_bot = self._bot_repo.get_by_pk(source_bot_pk)
+        if source_bot is None and source_bot_id == "default":
+            # Historical default publish lineages can outlive a hard-deleted
+            # ac_bots row. Owner handoff excludes default, so preserve its old
+            # owner-based recovery path. Keep the requested historical PK on
+            # any successor row: silently rebinding an old lineage to a newly
+            # created default Bot would merge two different Bot lifecycles.
+            source_bot = self._bot_repo.get_by_id_and_owner(
+                source_bot_id, owner_id
             )
+        if source_bot is None or str(source_bot["bot_id"]) != source_bot_id:
+            raise BotNotFoundError(
+                f"Bot not found: source_bot_pk={source_bot_pk}, bot_id={source_bot_id}"
+            )
+        # ``ac_bot_publish.owner_id`` remains physically unchanged in this
+        # phase, but its resource-address meaning is the immutable Bot entity.
+        owner_id = stable_resource_owner_id(source_bot)
+
+        # Transferable service Bots use source_bot_pk. Personal/default Bots
+        # retain the old publish_bot_id + owner_id path for legacy compatibility.
+        if version is not None:
+            if self._uses_source_bot_pk(source_bot):
+                existing = self._repo.get_by_source_bot_and_version(
+                    source_bot_pk, version, self._env
+                )
+            else:
+                existing = self._repo.get_by_publish_bot_id_and_version(
+                    publish_bot_id, owner_id, version, self._env
+                )
             if existing:
                 raise PublishAlreadyExistsError(
                     f"Publish record already exists: {publish_bot_id}, owner={owner_id}, v{version}"
                 )
 
-        source_bot = self._bot_repo.get_by_id_and_owner(source_bot_id, owner_id)
         source_bot_ext = (
             source_bot.get("ext") if isinstance(source_bot, dict) else None
         )
@@ -297,9 +326,16 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         Returns:
             BotPublishRecord，不存在返回 None
         """
+        bot = self._resolve_bot(bot_id=bot_id, owner_id=owner_id)
+        if self._uses_source_bot_pk(bot):
+            return self._repo.get_by_source_bot_and_version(
+                source_bot_pk=int(bot["id"]),
+                version=version,
+                env=self._env,
+            )
         return self._repo.get_by_publish_bot_id_and_version(
             publish_bot_id=bot_id,
-            owner_id=owner_id,
+            owner_id=stable_resource_owner_id(bot),
             version=version,
             env=self._env,
         )
@@ -535,9 +571,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         elif stage == PublishStage.EVAL.value:
             biz_id = stage
 
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if not bot:
-            raise BotNotFoundError(f"Bot not found: bot_id={bot_id}, owner_id={owner_id}")
+        bot = self._resolve_bot(bot_id=bot_id, owner_id=owner_id)
 
         bot_type = bot.get("bot_type", "personal")
         bot_process = self._bot_process_registry.get(bot_type)
@@ -621,9 +655,9 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
                 f"Unsupported stage for service bot binding lookup: {stage}"
             )
 
-        publish_record = self._repo.get_latest_by_source_bot_id_and_owner_and_status(
-            source_bot_id=bot_id,
-            owner_id=owner_id,
+        bot = self._resolve_bot(bot_id=bot_id, owner_id=owner_id)
+        publish_record = self._repo.get_latest_by_source_bot_and_status(
+            source_bot_pk=int(bot["id"]),
             status=target_status,
             env=self._env,
         )
@@ -839,9 +873,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         )
 
         # 1. 查询 bot
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if not bot:
-            raise BotNotFoundError(f"Bot not found: bot_id={bot_id}, owner_id={owner_id}")
+        bot = self._resolve_bot(bot_id=bot_id, owner_id=owner_id)
 
         # 2. 检查 bot_type
         bot_type = bot.get("bot_type", "personal")
@@ -851,7 +883,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             )
 
         # 3. 查询是否已存在发布单（已存在则报错）
-        existing = self._repo.get_by_publish_bot_id(bot_id, owner_id, self._env)
+        existing = self._repo.list_by_source_bot(int(bot["id"]), self._env)
         if existing:
             raise PublishAlreadyExistsError(
                 f"Publish record already exists: bot_id={bot_id}, owner_id={owner_id}"
@@ -1004,12 +1036,20 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         Returns:
             是否可以编辑
         """
-        # 查询该 bot 的发布记录
-        publish_record = self._repo.get_by_publish_bot_id(
-            publish_bot_id=bot_id,
-            owner_id=owner_id,
-            env=self._env,
-        )
+        try:
+            bot = self._resolve_bot(bot_id=bot_id, owner_id=owner_id)
+        except BotNotFoundError:
+            return False
+        if self._uses_source_bot_pk(bot):
+            publish_record = self._repo.get_latest_by_source_bot(
+                source_bot_pk=int(bot["id"]), env=self._env
+            )
+        else:
+            publish_record = self._repo.get_by_publish_bot_id(
+                publish_bot_id=bot_id,
+                owner_id=stable_resource_owner_id(bot),
+                env=self._env,
+            )
         if not publish_record:
             return False
 
@@ -1366,9 +1406,9 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         Raises: BotNotFoundError, BotAlreadyServiceTypeError, BotTypeNotSupportedError
         """
         # 1. 查询 Bot
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if not bot:
-            raise BotNotFoundError(f"Bot not found: bot_id={bot_id}, owner_id={owner_id}")
+        bot = self._resolve_bot(bot_id=bot_id, owner_id=owner_id)
+        current_owner_id = str(bot["owner_id"])
+        resource_owner_id = stable_resource_owner_id(bot)
 
         # 3. 检查当前 bot_type
         bot_type = bot.get("bot_type", "personal")
@@ -1392,15 +1432,15 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         )
 
         # 5. 调用 BCN switch_bot 接口切换绑定
-        switch_result = self._bcn_service.switch_bot(teamclaw_bot_uuid=bot_id, owner_workno=owner_id, name=bot.get("bot_name") or bot_id, summary=bot.get("bot_desc") or "")
-        logger.info(f"[upgrade_bot_to_service] BCN switch_bot succeeded: bot_id={bot_id}, owner_id={owner_id}, websocket_kicked={switch_result.get('websocket_kicked')}, idempotent_replay={switch_result.get('idempotent_replay')}")
+        switch_result = self._bcn_service.switch_bot(teamclaw_bot_uuid=bot_id, owner_workno=current_owner_id, name=bot.get("bot_name") or bot_id, summary=bot.get("bot_desc") or "")
+        logger.info(f"[upgrade_bot_to_service] BCN switch_bot succeeded: bot_id={bot_id}, owner_id={current_owner_id}, websocket_kicked={switch_result.get('websocket_kicked')}, idempotent_replay={switch_result.get('idempotent_replay')}")
 
         # 6. 更新 bot_type 为 "service"
         update_fields = {"bot_type": "service"}
         if service_ext != bot.get("ext"):
             update_fields["ext"] = service_ext
         updated_bot = self._bot_repo.update_by_owner(
-            bot_id, owner_id, update_fields
+            bot_id, current_owner_id, update_fields
         )
         if not updated_bot:
             raise BotNotFoundError(f"Failed to update bot: bot_id={bot_id}")
@@ -1419,16 +1459,18 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         else:
             def _do_restart():
                 try:
-                    self._bot_service.restart_bot(bot_id=bot_id, user_id=owner_id, nick_name=bot.get("owner_name"))
+                    self._bot_service.restart_bot(bot_id=bot_id, user_id=current_owner_id, nick_name=bot.get("owner_name"))
                 except Exception as e:
-                    logger.warning(f"[upgrade_bot_to_service] Failed to restart bot: bot_id={bot_id}, owner_id={owner_id}, error={e}")
+                    logger.warning(f"[upgrade_bot_to_service] Failed to restart bot: bot_id={bot_id}, owner_id={current_owner_id}, error={e}")
 
             threading.Thread(
                 target=bind_current_avernet_tenant(_do_restart), daemon=True
             ).start()
 
         # 8. 检查是否已有发布记录，有则不创建
-        existing = self._repo.get_by_publish_bot_id(bot_id, owner_id, self._env)
+        existing = self._repo.get_by_publish_bot_id(
+            bot_id, resource_owner_id, self._env
+        )
         if existing:
             logger.info(f"[upgrade_bot_to_service] Bot upgraded (publish exists): bot_id={bot_id}, existing_publish_id={existing.id}")
             return {
@@ -1443,7 +1485,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             source_bot_id=bot_id,
             publish_bot_id=bot_id,
             name=publish_name,
-            owner_id=owner_id,
+            owner_id=resource_owner_id,
             permission_owner="owner",
             description=bot.get("bot_desc"),
             owner_name=bot.get("owner_name"),
@@ -1485,8 +1527,10 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             )
 
         # 2. 更新 bot_type
+        bot = self._resolve_bot(bot_id=bot_id, owner_id=owner_id)
+        current_owner_id = str(bot["owner_id"])
         updated_bot = self._bot_repo.update_by_owner(
-            bot_id, owner_id, {"bot_type": bot_type}
+            bot_id, current_owner_id, {"bot_type": bot_type}
         )
         if not updated_bot:
             raise BotNotFoundError(f"Bot not found: bot_id={bot_id}, owner_id={owner_id}")
@@ -1499,3 +1543,21 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         return {
             "bot": updated_bot,
         }
+
+    def _resolve_bot(self, *, bot_id: str, owner_id: str) -> Dict[str, Any]:
+        """Resolve a legacy owner-shaped locator without using it for ACL."""
+        try:
+            return dict(
+                self._bot_address_resolver.resolve(
+                    bot_id=bot_id, legacy_owner_id=owner_id
+                ).bot
+            )
+        except BotAddressNotFoundError as exc:
+            raise BotNotFoundError(
+                f"Bot not found: bot_id={bot_id}, owner_id={owner_id}"
+            ) from exc
+
+    @staticmethod
+    def _uses_source_bot_pk(bot: Dict[str, Any]) -> bool:
+        """Use immutable publish identity only for transferable service Bots."""
+        return bot.get("bot_type") == "service" and bot.get("bot_id") != "default"

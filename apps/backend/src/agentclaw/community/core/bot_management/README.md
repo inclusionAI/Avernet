@@ -114,6 +114,19 @@ it once; BotService and both coding executors pass the same envelope rather
 than separate provider-specific backup factories. Published/Caller dispatch
 adapts its existing runtime into this envelope without changing its callers.
 
+## Stable Bot addressing
+
+`addressing.py` owns the Backend-internal compatibility boundary. A request may
+still supply the historical field named `owner_id`; repository lookup matches it
+against either the immutable `entity_id` or the current owner and rejects more
+than one live match. Internal flows resolve once to `ResolvedBotContext`, then
+use `bot_pk` or `entity_id` for Bot resources while retaining
+`current_owner_id` for authorization, notification and audit semantics.
+
+The database tenant guard and current environment remain mandatory parts of the
+lookup. A bare `bot_id` is allowed only through the explicit unique lookup and
+fails closed for repeated `default` Bots.
+
 ## Owner display name on OpenAPI creation
 
 OpenAPI creation supplies the matching verified gateway user's nonblank

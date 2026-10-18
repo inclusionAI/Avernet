@@ -118,15 +118,20 @@ class _Bots:
         if owner_id != "true-owner":
             return None
         return {
+            "id": 1,
             "bot_id": bot_id,
             "owner_id": "true-owner",
             "env": "dev",
-            "entity_id": "entity-1",
+            "entity_id": "true-owner",
             "active_engine": "openclaw",
             "bot_type": "personal",
             "entity_type": "staff",
             "status": "ACTIVE",
         }
+
+    def list_matches_by_legacy_locator(self, bot_id: str, locator: str) -> list[dict]:
+        bot = self.get_by_id_and_owner(bot_id, locator)
+        return [bot] if bot is not None else []
 
 
 class _Skills:

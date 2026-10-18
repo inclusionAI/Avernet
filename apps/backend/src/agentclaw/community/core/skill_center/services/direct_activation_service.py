@@ -13,6 +13,12 @@ from typing import Any
 
 from injector import inject
 
+from agentclaw.community.core.bot_management.addressing import (
+    BotAddressResolver,
+    stable_resource_owner_id,
+)
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
+
 from agentclaw.community.core.repository.protocols.bot import (
     BotCollabLogRepositoryProtocol,
     BotRepository,
@@ -91,6 +97,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
     ) -> None:
         self._repository = repository
         self._bot_repo = bot_repo
+        self._bot_address_resolver = BotAddressResolver(bot_repo)
         self._skill_query = skill_query
         self._authorization = authorization
         self._audit_log_repo = audit_log_repo
@@ -137,13 +144,14 @@ class DirectActivationService(DirectActivationServiceProtocol):
         skill, bot = self._resolve_skill(
             skill_id=skill_id, bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
         )
+        resource_owner_id = stable_resource_owner_id(bot)
         mutation_result = None
 
         def mutation():
             nonlocal mutation_result
             mutation_result = self._repository.claim_manifest_skill(
                 bot_id=bot_id,
-                owner_id=owner_id,
+                owner_id=resource_owner_id,
                 skill_id=str(skill["id"]),
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
@@ -164,7 +172,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 identity=skill_id, mutation=mutation_result,
             )
             self._audit(
-                bot_id=bot_id, owner_id=owner_id, actor_id=actor_id,
+                bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,
                 action="skill_manifest_direct_claim",
             )
         except Exception:
@@ -189,13 +197,14 @@ class DirectActivationService(DirectActivationServiceProtocol):
         skill, bot = self._resolve_skill(
             skill_id=skill_id, bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
         )
+        resource_owner_id = stable_resource_owner_id(bot)
         mutation_result = None
 
         def mutation():
             nonlocal mutation_result
             mutation_result = self._repository.remove_manifest_skill(
                 bot_id=bot_id,
-                owner_id=owner_id,
+                owner_id=resource_owner_id,
                 skill_id=str(skill["id"]),
                 remove_inactive_memberships=remove_inactive_memberships,
                 engine_type=bot_engine_type(bot),
@@ -217,7 +226,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 identity=skill_id, mutation=mutation_result,
             )
             self._audit(
-                bot_id=bot_id, owner_id=owner_id, actor_id=actor_id,
+                bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,
                 action="skill_manifest_remove",
             )
         except Exception:
@@ -236,6 +245,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
             skill_id=skill_id, bot_id=bot_id, owner_id=owner_id,
             actor_id=actor_id,
         )
+        resource_owner_id = stable_resource_owner_id(bot)
         command = (
             self._repository.install_skill if active
             else self._repository.uninstall_skill
@@ -252,7 +262,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 runtime_required=project,
                 mutation=lambda: command(
                     bot_id=bot_id,
-                    owner_id=owner_id,
+                    owner_id=resource_owner_id,
                     skill_id=str(skill["id"]),
                     engine_type=bot_engine_type(bot),
                     default_engine_types=bot_default_engine_types(bot),
@@ -272,7 +282,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
         except SkillSetRuntimeReconcileError as exc:
             raise LocalSkillRuntimeSyncError() from exc
         self._audit(
-            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id,
+            bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,
             action="skill_direct_activate" if active else "skill_direct_deactivate",
         )
         return {
@@ -291,17 +301,21 @@ class DirectActivationService(DirectActivationServiceProtocol):
         visibility. Reusing it here prevents Direct writes from growing a
         second source classifier or treating an Installation as permission.
         """
+        try:
+            bot = self._bot_address_resolver.resolve(
+                bot_id=bot_id, legacy_owner_id=owner_id
+            ).bot
+        except BotAddressNotFoundError:
+            raise LocalSkillNotFoundError()
+        resource_owner_id = stable_resource_owner_id(bot)
         skill = self._skill_query.resolve_skill(
             skill_id=skill_id,
             bot_id=bot_id,
-            owner_id=owner_id,
+            owner_id=resource_owner_id,
             user_id=actor_id,
         )
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is None:
-            raise LocalSkillNotFoundError()
         if not self._authorization.can_manage_bot(
-            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
+            bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id
         ):
             raise LocalSkillNotFoundError()
         return skill, bot
@@ -322,7 +336,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
             runtime_required=project,  # W8: see ``_set_skill_active``
             mutation=lambda: self._repository.install_mcp(
                 bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
+                owner_id=stable_resource_owner_id(bot),
                 server_code=server_code,
                 platform_default_codes=platform_default_codes,
                 engine_type=bot_engine_type(bot),
@@ -358,7 +372,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
             runtime_required=project,
             mutation=lambda: self._repository.set_mcp_override(
                 bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
+                owner_id=stable_resource_owner_id(bot),
                 server_code=server_code,
                 config=config,
                 platform_default_codes=platform_default_codes,
@@ -395,7 +409,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
             nonlocal mutation_result
             mutation_result = self._repository.claim_manifest_mcp(
                 bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
+                owner_id=stable_resource_owner_id(bot),
                 server_code=server_code,
                 config=config,
                 platform_default_codes=(
@@ -449,7 +463,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
             nonlocal mutation_result
             mutation_result = self._repository.remove_manifest_mcp(
                 bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
+                owner_id=stable_resource_owner_id(bot),
                 server_code=server_code,
                 platform_default_codes=(
                     self._platform_default_mcp_policy.server_codes_for(bot)
@@ -499,7 +513,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
             runtime_required=project,  # W8: see ``_set_skill_active``
             mutation=lambda: self._repository.uninstall_mcp(
                 bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
+                owner_id=stable_resource_owner_id(bot),
                 server_code=server_code,
                 platform_default_codes=platform_default_codes,
                 engine_type=bot_engine_type(bot),
@@ -519,7 +533,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
         return set(
             self._reader.active_mcp_server_codes(
-                bot_id=bot_id, owner_id=str(bot["owner_id"]), bot=bot
+                bot_id=bot_id, owner_id=stable_resource_owner_id(bot), bot=bot
             )
         )
 
@@ -528,7 +542,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
     ) -> dict[str, dict]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
         return self._repository.get_mcp_overrides(
-            bot_id=bot_id, owner_id=str(bot["owner_id"])
+            bot_id=bot_id, owner_id=stable_resource_owner_id(bot)
         )
 
     def manifest_direct_mcp_codes(
@@ -546,7 +560,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
             for code in server_codes
             if self._repository.manifest_direct_mcp_exists(
                 bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
+                owner_id=stable_resource_owner_id(bot),
                 server_code=code,
                 platform_default_codes=platform_codes,
                 engine_type=bot_engine_type(bot),
@@ -565,7 +579,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
         return self._repository.set_managed_mcp_codes(
             bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             server_codes=server_codes,
             engine_type=bot_engine_type(bot),
             default_engine_types=bot_default_engine_types(bot),
@@ -622,7 +636,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
             return codes
         if self._repository.manifest_direct_mcp_exists(
             bot_id=str(bot["bot_id"]),
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             server_code=server_code,
             platform_default_codes=codes,
             engine_type=bot_engine_type(bot),
@@ -635,11 +649,14 @@ class DirectActivationService(DirectActivationServiceProtocol):
 
     def _bot(self, *, bot_id: str, owner_id: str, actor_id: str) -> dict:
         """Resolve the exact addressed Bot; the MCP wire's error vocabulary."""
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is None:
+        try:
+            bot = self._bot_address_resolver.resolve(
+                bot_id=bot_id, legacy_owner_id=owner_id
+            ).bot
+        except BotAddressNotFoundError:
             raise SkillSetControlPlaneNotFoundError()
         if not self._authorization.can_manage_bot(
-            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
+            bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id
         ):
             raise SkillSetAccessDeniedError()
         return bot

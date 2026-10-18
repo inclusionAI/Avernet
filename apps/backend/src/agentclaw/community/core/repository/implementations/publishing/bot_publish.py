@@ -237,6 +237,55 @@ class BotPublishRepository(
             records = [r.to_record() for r in rows]
         return [self._resolve_record(r) for r in records]
 
+    def get_by_source_bot_and_version(
+        self, source_bot_pk: int, version: int, env: str
+    ) -> Optional[BotPublishRecord]:
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.source_bot_pk == source_bot_pk,
+                    self.Model.version == version,
+                    self.Model.env == env,
+                )
+                .first()
+            )
+            record = row.to_record() if row else None
+        return self._resolve_record(record)
+
+    def get_latest_by_source_bot(
+        self, source_bot_pk: int, env: str
+    ) -> Optional[BotPublishRecord]:
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.source_bot_pk == source_bot_pk,
+                    self.Model.env == env,
+                )
+                .order_by(self.Model.version.desc(), self.Model.id.desc())
+                .first()
+            )
+            record = row.to_record() if row else None
+        return self._resolve_record(record)
+
+    def get_latest_by_source_bot_and_status(
+        self, source_bot_pk: int, status: str, env: str
+    ) -> Optional[BotPublishRecord]:
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.source_bot_pk == source_bot_pk,
+                    self.Model.status == status,
+                    self.Model.env == env,
+                )
+                .order_by(self.Model.version.desc(), self.Model.id.desc())
+                .first()
+            )
+            record = row.to_record() if row else None
+        return self._resolve_record(record)
+
     def list_by_source_bots(
         self,
         source_bot_pks: Sequence[int],

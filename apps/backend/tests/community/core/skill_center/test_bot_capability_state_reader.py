@@ -18,6 +18,7 @@ from agentclaw.community.core.skill_center.services.bot_capability_state_reader 
 from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
 
 _BOT = {
+    "id": 1,
     "bot_id": "bot-1",
     "owner_id": "owner",
     "entity_id": "entity-1",
@@ -34,6 +35,12 @@ class _Bots:
     def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict | None:
         self.lookups.append((bot_id, owner_id))
         return self._bot
+
+    def list_matches_by_legacy_locator(
+        self, bot_id: str, locator: str
+    ) -> list[dict]:
+        self.lookups.append((bot_id, locator))
+        return [self._bot] if self._bot is not None else []
 
 
 class _Repository:
@@ -136,7 +143,7 @@ def _reader(
 
 _EXPECTED_FLUSH = {
     "bot_id": "bot-1",
-    "owner_id": "owner",
+    "owner_id": "entity-1",
     "env": "pre",
     "engine_type": "openclaw",
     "default_engine_types": ("openclaw",),
@@ -168,7 +175,7 @@ def test_skill_read_flushes_then_answers_from_the_installation_join():
 
     assert repository.flush_calls == [_EXPECTED_FLUSH]
     assert pool_skills.reads == [
-        {"env": "pre", "bot_id": "bot-1", "owner_id": "owner"}
+        {"env": "pre", "bot_id": "bot-1", "owner_id": "entity-1"}
     ]
     assert assets == (
         RegisteredSkillAsset(skill_id=1, name="qa", git_path="local://qa"),
@@ -190,7 +197,9 @@ def test_mcp_read_flushes_then_answers_from_installed_codes():
     codes = reader.active_mcp_server_codes(bot_id="bot-1", owner_id="owner")
 
     assert repository.flush_calls == [_EXPECTED_FLUSH]
-    assert repository.mcp_reads == [{"bot_id": "bot-1", "owner_id": "owner"}]
+    assert repository.mcp_reads == [
+        {"bot_id": "bot-1", "owner_id": "entity-1"}
+    ]
     assert codes == frozenset({"mcp.weather"})
 
 
@@ -222,7 +231,7 @@ def test_member_skill_ids_reads_the_set_membership_without_materializing():
     assert repository.flush_calls == []
     assert repository.member_reads == [{
         "bot_id": "bot-1",
-        "owner_id": "owner",
+        "owner_id": "entity-1",
         "engine_type": "openclaw",
         "default_engine_types": ("openclaw",),
     }]

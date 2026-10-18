@@ -55,7 +55,11 @@ class BotRepository(Protocol):
         execution_options: dict | None = None,
         env: str | None = None,
     ) -> Optional[Dict[str, Any]]:
-        """Get bot by bot_id and owner_id.
+        """Get bot by bot_id and its current owner_id.
+
+        This method retains its authorization-sensitive historical meaning.
+        Boundary code that accepts an old field named ``owner_id`` as either
+        an entity locator or current owner must use ``BotAddressResolver``.
 
         ``execution_options`` is forwarded to the SQLAlchemy query via
         ``Query.execution_options`` so callers can opt out of cross-cutting
@@ -102,6 +106,23 @@ class BotRepository(Protocol):
         self, bot_id: str, entity_id: str
     ) -> Optional[Dict[str, Any]]:
         """Get one live Bot by exact bot and entity identifiers in this env."""
+        ...
+
+    @abstractmethod
+    def get_by_pk(self, bot_pk: int) -> Optional[Dict[str, Any]]:
+        """Get one live Bot by its immutable database primary key in this env."""
+        ...
+
+    @abstractmethod
+    def list_matches_by_legacy_locator(
+        self, bot_id: str, locator: str
+    ) -> List[Dict[str, Any]]:
+        """List live Bots whose entity or current owner matches ``locator``.
+
+        This is the compatibility lookup for old API fields named
+        ``owner_id``.  Returning every match lets the caller reject ambiguous
+        data instead of selecting an arbitrary row with ``first()``.
+        """
         ...
 
     @abstractmethod

@@ -102,6 +102,16 @@ contract, never a BaaS mount instruction. Changes to the Skills Pool probe,
 mapping contract or historical manifest reader therefore affect publication
 compatibility and must be reviewed together with this module.
 
+Publish history is associated with its source Bot through immutable
+`ac_bot_publish.source_bot_pk`. Version duplicate checks and stage-record reads
+use this key for transferable, non-`default` service Bots. Personal Bots,
+`default`, and their legacy orphan lineages retain the old owner-shaped lookup.
+An orphan default lineage keeps its historical PK and is never rebound to a
+newly created default Bot merely because owner and bot id happen to match.
+The existing `owner_id` column remains a compatibility resource locator: new
+rows store the source Bot's immutable `entity_id` while the field name and
+response shape stay unchanged. This stage does not change SecBaaS code.
+
 ## Publish operation ledger (#197)
 
 Every BaaS mutation in the publish pipeline (verify/online release, upgrade,

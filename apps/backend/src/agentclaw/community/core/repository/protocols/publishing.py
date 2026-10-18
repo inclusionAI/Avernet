@@ -171,6 +171,27 @@ class BotPublishRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def get_by_source_bot_and_version(
+        self, source_bot_pk: int, version: int, env: str
+    ) -> Optional[BotPublishRecord]:
+        """Get one publish version through the immutable source Bot key."""
+        ...
+
+    @abstractmethod
+    def get_latest_by_source_bot(
+        self, source_bot_pk: int, env: str
+    ) -> Optional[BotPublishRecord]:
+        """Get the latest publish record through the immutable source Bot key."""
+        ...
+
+    @abstractmethod
+    def get_latest_by_source_bot_and_status(
+        self, source_bot_pk: int, status: str, env: str
+    ) -> Optional[BotPublishRecord]:
+        """Get the latest source-Bot record in one publish state."""
+        ...
+
+    @abstractmethod
     def list_by_source_bots(
         self,
         source_bot_pks: Sequence[int],

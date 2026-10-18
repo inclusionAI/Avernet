@@ -179,9 +179,11 @@ class _Bots:
     def get_unique_by_id(self, bot_id: str) -> dict:
         assert bot_id == "bot-1"
         return {
+            "id": 1,
+            "bot_id": bot_id,
             "owner_id": "true-owner",
             "env": "dev",
-            "entity_id": "entity-1",
+            "entity_id": "true-owner",
             "active_engine": "openclaw",
             "bot_type": "personal",
             "entity_type": "staff",
@@ -192,6 +194,10 @@ class _Bots:
         bot = self.get_unique_by_id(bot_id)
         return bot if owner_id == bot["owner_id"] else None
 
+    def list_matches_by_legacy_locator(self, bot_id: str, locator: str) -> list[dict]:
+        bot = self.get_by_id_and_owner(bot_id, locator)
+        return [bot] if bot is not None else []
+
 
 class _MissingBots:
     def get_unique_by_id(self, _bot_id: str):
@@ -199,6 +205,9 @@ class _MissingBots:
 
     def get_by_id_and_owner(self, _bot_id: str, _owner_id: str):
         return None
+
+    def list_matches_by_legacy_locator(self, _bot_id: str, _locator: str) -> list[dict]:
+        return []
 
 
 class _SharedDefaultBots:
@@ -216,6 +225,8 @@ class _SharedDefaultBots:
         if (bot_id, owner_id) != ("default", self.owner_id):
             return None
         return {
+            "id": 2,
+            "bot_id": bot_id,
             "owner_id": owner_id,
             "env": "pre",
             "entity_id": owner_id,
@@ -224,6 +235,10 @@ class _SharedDefaultBots:
             "entity_type": "staff",
             "status": "ACTIVE",
         }
+
+    def list_matches_by_legacy_locator(self, bot_id: str, locator: str) -> list[dict]:
+        bot = self.get_by_id_and_owner(bot_id, locator)
+        return [bot] if bot is not None else []
 
 
 class _UnsupportedBots(_Bots):
@@ -820,12 +835,17 @@ class _RuntimeBots:
         return {
             # Every persisted Bot has a primary key; identity lookups key on it.
             "id": 42,
+            "bot_id": bot_id,
+            "owner_id": owner_id,
             "entity_id": "entity-1",
             "active_engine": "openclaw",
             "bot_type": "personal",
             "entity_type": "staff",
             "env": "pre",
         }
+
+    def list_matches_by_legacy_locator(self, bot_id: str, locator: str) -> list[dict]:
+        return [self.get_by_id_and_owner(bot_id, locator)]
 
 
 class _AicodingImageRuntimeBots(_RuntimeBots):
@@ -877,7 +897,7 @@ class _McpInstallations:
             {"bot_id": bot_id, "owner_id": owner_id}
         )
         assert bot_id == "bot-1"
-        assert owner_id == "true-owner"
+        assert owner_id == "entity-1"
         return {"mcp.weather"}
 
 
@@ -894,7 +914,7 @@ class _RuntimeSkills:
         assert kwargs == {
             "env": "pre",
             "bot_id": "bot-1",
-            "owner_id": "true-owner",
+            "owner_id": "entity-1",
         }
         return self._assets
 
@@ -1964,7 +1984,7 @@ def test_resources_enriches_only_default_mcp_display_from_agentpass():
         "name": "自定义快照名称",
         "description": "自定义快照描述",
     }]
-    assert passport.calls == [("bot-1", "entity-1")]
+    assert passport.calls == [("bot-1", "true-owner")]
 
 
 def test_list_mcps_reads_global_default_projection_for_collaborator_owner_scope():
@@ -2391,7 +2411,7 @@ def test_legacy_name_or_git_path_materializes_market_repo_skill_before_membershi
     assert repository.identifiers == ["market/example"]
     assert factory.calls == [
         {
-            "entity_id": "entity-1",
+            "entity_id": "true-owner",
             "bot_id": "bot-1",
             "engine_type": "openclaw",
             "entity_type": "staff",
@@ -2467,7 +2487,7 @@ async def test_runtime_projection_flushes_installations_first():
     assert repository.flush_calls == [
         {
             "bot_id": "bot-1",
-            "owner_id": "true-owner",
+            "owner_id": "entity-1",
             "env": "pre",
             "engine_type": "openclaw",
             "default_engine_types": ("openclaw",),
@@ -2500,7 +2520,7 @@ async def test_projection_flush_prefers_the_layout_engine_for_default_sets():
     assert repository.flush_calls == [
         {
             "bot_id": "bot-1",
-            "owner_id": "true-owner",
+            "owner_id": "entity-1",
             "env": "pre",
             "engine_type": "claude_code",
             "default_engine_types": ("aicoding", "claude_code"),
@@ -2628,10 +2648,10 @@ async def test_runtime_reconcile_projects_full_mcp_desired_state():
             "user_id": "true-owner",
             "entity_type": "staff",
             "engine_type": "openclaw",
-            "strict_policy_context": True,
-            "capability_snapshot": BotCapabilitySnapshot(
-                "bot-1", "true-owner", (), frozenset({"mcp.weather"})
-            ),
+                "strict_policy_context": True,
+                "capability_snapshot": BotCapabilitySnapshot(
+                    "bot-1", "entity-1", (), frozenset({"mcp.weather"})
+                ),
         }
     ]
     assert passport.calls == [

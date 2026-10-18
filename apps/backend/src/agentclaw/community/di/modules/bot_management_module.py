@@ -117,6 +117,10 @@ from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
     GitSourceClient,
 )
 from agentclaw.community.core.bot_management.manifest_seam import ManifestCreationSeam
+from agentclaw.community.core.bot_management.addressing import (
+    BotAddressResolver,
+    BotAddressResolverProtocol,
+)
 from agentclaw.community.core.bot_app_grant.services import (
     BotAppGrantService,
 )
@@ -293,6 +297,11 @@ class BotManagementModule(Module):
         # the injector can construct them on their own. We just need to
         # declare the singleton scope.
         binder.bind(BotCleanupService, to=BotCleanupService, scope=singleton)
+        binder.bind(
+            BotAddressResolverProtocol,
+            to=BotAddressResolver,
+            scope=singleton,
+        )
         # ``BcnService`` is built by the ``bcn_service`` provider below — it needs
         # the bcn-qualified HttpClient injected.
         binder.bind(RenderScreenService, to=RenderScreenService, scope=singleton)
