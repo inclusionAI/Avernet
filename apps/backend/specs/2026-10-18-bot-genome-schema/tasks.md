@@ -17,9 +17,9 @@
 - **Goal:** A test-only RFC 8785 canonicaliser and the vectors file it is checked against.
 - **Files:** `apps/backend/tests/community/contracts/genome_canonical_json.py`, `apps/backend/api-contracts/genome/v1/canonical-json-vectors.json`
 - **Done when:**
-  - [ ] `canonicalize` refuses floats and integers outside ±(2^53−1); sorts keys by UTF-16 code units.
-  - [ ] Vectors include the RFC 8785 §3.2.3 key-ordering example and string-escaping cases, with expected canonical text and SHA-256.
-  - [ ] `revision_id` and `tree_digest` helpers exist (the latter reuses `canonical_tree_bytes`).
+  - [x] `canonicalize` refuses floats and integers outside ±(2^53−1); sorts keys by UTF-16 code units.
+  - [x] Vectors include the RFC 8785 §3.2.3 key-ordering example and string-escaping cases, with expected canonical text and SHA-256.
+  - [x] `revision_id` and `tree_digest` helpers exist (the latter reuses `canonical_tree_bytes`).
 - **Depends on:** Task 1
 
 ## Task 3: Revision schema

@@ -1,0 +1,92 @@
+{
+  "description": "Test vectors for the genome contract's canonical JSON (RFC 8785, no-float subset) and revision identity. README §3.",
+  "canonical": [
+    {
+      "name": "rfc8785-3.2.3-sorting",
+      "note": "RFC 8785 §3.2.3: members sorted by UTF-16 code units; the emoji (a surrogate pair) sorts before U+FB33",
+      "input": "{\"\\u20ac\":\"Euro Sign\",\"\\r\":\"Carriage Return\",\"\\ufb33\":\"Hebrew Letter Dalet With Dagesh\",\"1\":\"One\",\"\\ud83d\\ude00\":\"Emoji: Grinning Face\",\"\\u0080\":\"Control\",\"\\u00f6\":\"Latin Small Letter O With Diaeresis\"}",
+      "canonical": "{\"\\r\":\"Carriage Return\",\"1\":\"One\",\"\":\"Control\",\"ö\":\"Latin Small Letter O With Diaeresis\",\"€\":\"Euro Sign\",\"😀\":\"Emoji: Grinning Face\",\"דּ\":\"Hebrew Letter Dalet With Dagesh\"}",
+      "sha256": "sha256:5e321556d22018a9656991a9e94f77ec175fa193e52a2429d312f8419ec8b08c"
+    },
+    {
+      "name": "rfc8785-3.2.2-strings-and-literals",
+      "note": "RFC 8785 §3.2.2 example without its numbers array (floats are outside the subset)",
+      "input": "{\"string\":\"\\u20ac$\\u000F\\u000aA'\\u0042\\u0022\\u005c\\\\\\\"\\/\",\"literals\":[null,true,false]}",
+      "canonical": "{\"literals\":[null,true,false],\"string\":\"€$\\u000f\\nA'B\\\"\\\\\\\\\\\"/\"}",
+      "sha256": "sha256:834b0ae0dd68944f19836aa49d608aa4975f03998f927466f8b648d5f927ecee"
+    },
+    {
+      "name": "whitespace-and-nesting",
+      "note": "insignificant whitespace removed; nested objects sorted",
+      "input": "{ \"b\" : [ 1 , {\"z\":0,\"a\":-1} ], \"a\" : {} }",
+      "canonical": "{\"a\":{},\"b\":[1,{\"a\":-1,\"z\":0}]}",
+      "sha256": "sha256:05ee04a7e74a969e714e571ba91c43f942230fff8a885d6ef10cc9b7ee0257b5"
+    },
+    {
+      "name": "control-characters",
+      "note": "short escapes for b t n f r, \\u00xx lowercase for other controls below U+0020, U+007F literal",
+      "input": "{\"s\":\"\\u0000\\u0008\\u0009\\u000a\\u000b\\u000c\\u000d\\u001f\\u007f\"}",
+      "canonical": "{\"s\":\"\\u0000\\b\\t\\n\\u000b\\f\\r\\u001f\"}",
+      "sha256": "sha256:ab7c5013e16d0ae647dbe6a51d295e7cb37f6e51a77d8547f5062ccace212516"
+    },
+    {
+      "name": "safe-integer-bounds",
+      "note": "the largest integers the subset allows",
+      "input": "[9007199254740991,-9007199254740991,0]",
+      "canonical": "[9007199254740991,-9007199254740991,0]",
+      "sha256": "sha256:b80bd42d5351670aefcf3e66750d64961095073307e52f6d6b3554d97ed6578f"
+    }
+  ],
+  "rejected": [
+    {
+      "name": "float",
+      "input": "{\"temperature\":0.2}",
+      "reason": "floats are not allowed in hashed content"
+    },
+    {
+      "name": "integral-float",
+      "input": "{\"n\":1.0}",
+      "reason": "1.0 is a float in JSON text; write 1"
+    },
+    {
+      "name": "unsafe-integer",
+      "input": "[9007199254740992]",
+      "reason": "outside ±(2^53-1)"
+    },
+    {
+      "name": "lone-surrogate",
+      "input": "{\"s\":\"\\ud800\"}",
+      "reason": "a lone surrogate has no UTF-8 encoding"
+    }
+  ],
+  "revision_ids": [
+    {
+      "name": "empty-bot-default-policy",
+      "spec": {
+        "persona": [],
+        "skills": [],
+        "memory": null,
+        "resources": [],
+        "tools": {
+          "mcp": []
+        },
+        "engine_config": {},
+        "script": null
+      },
+      "policy": {
+        "mutable_genes": [
+          "memory",
+          "persona",
+          "resources",
+          "skills"
+        ],
+        "pins": [
+          "persona/SAFETY.md"
+        ],
+        "risk_overrides": {}
+      },
+      "canonical": "{\"policy\":{\"mutable_genes\":[\"memory\",\"persona\",\"resources\",\"skills\"],\"pins\":[\"persona/SAFETY.md\"],\"risk_overrides\":{}},\"spec\":{\"engine_config\":{},\"memory\":null,\"persona\":[],\"resources\":[],\"script\":null,\"skills\":[],\"tools\":{\"mcp\":[]}}}",
+      "revision_id": "sha256:f1497c5f1f31121a220789dd5727d729602af0cd373ce2d3c5eb1e544094cf6b"
+    }
+  ]
+}
