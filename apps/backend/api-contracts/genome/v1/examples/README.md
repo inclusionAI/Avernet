@@ -10,7 +10,7 @@ test (`tests/community/contracts/test_bot_genome_schema.py`) checks all of it.
 | [`blobs/`](blobs/) | Stored bytes, one file per digest: persona files, `acm-tree-v1` trees, memory item lists, script bodies, uploads |
 | [`revisions/`](revisions/) | Valid revisions: a full personal bot, a candidate produced by a patch, a bot with curated memory, a `claude_code` bot |
 | [`patches/`](patches/) | `00-mixed-r1-to-r2.json` (the patch that turns `revisions/01` into `revisions/02`), then one valid patch per op |
-| [`invalid/`](invalid/) | Records that must be refused: `{schema, check, reason, record}`, where `check` is `schema` (fails JSON Schema), `order` (fails the sort and uniqueness rules, README §3.1) or `identity` (wrong revision id) |
+| [`invalid/`](invalid/) | Records that must be refused: `{schema, check, reason, record}`, where `check` is `schema` (fails JSON Schema), `order` (fails the sort and uniqueness rules, README §3.1), `canonical-path` (a gene path not in its canonical spelling, README §2) or `identity` (wrong revision id). An `order` or `canonical-path` case is schema-valid and has a correct revision id, so it fails only its stated check |
 | [`manifest-v1/`](manifest-v1/) | Bot Config Manifest v1 round-trip cases, one per example in `docs/bot-config-manifest/examples.zh-CN.md`; see [`../manifest-v1-compatibility.md`](../manifest-v1-compatibility.md) |
 
 `revisions/02-support-bot-candidate.json` is `revisions/01-support-bot.json`

@@ -37,7 +37,7 @@ derived from the revision field by field as below.
 | **resolved** | Used at record time to fetch or compute bytes; the revision keeps only the result (a digest) |
 | **provenance** | Not needed after recording; kept only in the stored copy of M |
 | **ignored** | Not part of genome v1; M′ omits it, so apply leaves the bot's state as it is |
-| **refused** | Recording fails, as it does at `PUT /config-manifest` |
+| **refused** | Recording fails. Usually `PUT /config-manifest` refuses it too; rows marked *recording only* are accepted by the Manifest but cannot be recorded |
 
 ## Top level
 
@@ -88,6 +88,7 @@ derived from the revision field by field as below.
 | Manifest field | Outcome | Revision / M′ |
 | --- | --- | --- |
 | `path` | normalized | `spec.resources[].path` (the key). Empty and `.` segments are removed (`./faq.csv` → `faq.csv`); a trailing `/` (directory) is kept |
+| paths that collide or nest only after normalization | refused (*recording only*) | e.g. `faq.csv` with `./faq.csv`, or `data/` with `./data/a.md`: the Manifest's duplicate and nesting checks compare the raw strings |
 | a file entry's bytes | resolved | `digest` of the bytes |
 | a directory entry's files | resolved | `digest` of the `acm-tree-v1` tree; M′: content-store source |
 | `unpack`, `strip_components` | resolved | Applied before encoding |
@@ -100,7 +101,7 @@ derived from the revision field by field as below.
 | `server_code` | maps | `spec.tools.mcp[].server_code` (the key) |
 | `config` absent | maps | No `config`: no bot override |
 | `config.url` | normalized | Scheme lower-cased |
-| `config.headers` | normalized | Header names lower-cased; values as written ([#2860](https://github.com/inclusionAI/Avernet/issues/2860)) |
+| `config.headers` | maps | Names and values as written ([#2860](https://github.com/inclusionAI/Avernet/issues/2860)). Names are not case-folded: the merges with user-level headers at apply time are case-sensitive |
 | `config.endpoint_env` | maps | |
 | `config.transport_protocol` | normalized | Upper-cased (the Manifest validator already does this) |
 | user-level MCP config, Center defaults | not in the revision | Read at apply time ([#2859](https://github.com/inclusionAI/Avernet/issues/2859)) |
@@ -145,7 +146,7 @@ derived from the revision field by field as below.
 | [`07-resources-git-and-archive`](examples/manifest-v1/07-resources-git-and-archive/) | §5, second block | round-trips |
 | [`08-skills`](examples/manifest-v1/08-skills/) | §6 | round-trips |
 | [`09-cli-tools`](examples/manifest-v1/09-cli-tools/) | §7 | ignored (empty bot) |
-| [`10-mcp`](examples/manifest-v1/10-mcp/) | §8 | round-trips (header name normalized) |
+| [`10-mcp`](examples/manifest-v1/10-mcp/) | §8 | round-trips |
 | [`11-script`](examples/manifest-v1/11-script/) | §9 | round-trips |
 
 Each case directory holds `manifest.yaml` (M), `notes.md`, and either

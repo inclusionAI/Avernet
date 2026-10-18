@@ -1,7 +1,7 @@
 {
   "genome_schema": 1,
   "revision": {
-    "id": "sha256:236b903c70a41b6af9c93fe7638eaf930c617d31599dd38be4c3d23600218587",
+    "id": "sha256:54bb9aefe3af97e97c641c6e91370d655a15574e153b0d28d9437bf227953b1c",
     "seq": 1,
     "bot": {
       "owner_id": "user_owner_5",
@@ -66,7 +66,7 @@
     },
     "engine_config": {},
     "script": {
-      "digest": "sha256:1dae323207c69cf6fdb088c0e4a5d2af70f6a75a205d34b6d19477139bc71949"
+      "digest": "sha256:700dd15a8df856135b35bdeffc867a857884cf14c444a16281b70473e9abcf8d"
     }
   },
   "policy": {

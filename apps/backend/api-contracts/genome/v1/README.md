@@ -244,7 +244,10 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
   segment. A trailing `/` makes it a directory entry. No entry may lie inside
   another directory entry (the Manifest refuses nesting too). The Manifest
   accepts empty and `.` segments (`./faq.csv`, `a//b`); recording removes
-  them, so each path has one spelling.
+  them, so each path has one spelling. A document whose paths collide or nest
+  only after this normalization (`faq.csv` with `./faq.csv`, or `data/` with
+  `./data/a.md`) is accepted by `PUT /config-manifest` but refused when
+  recorded.
 - **`tools.mcp`.** `server_code` names a server in the MCP registry.
   `config`, when present, is the bot-level override with the Manifest's own
   closed set and limits: `url` (absolute `http`/`https`; recording
@@ -252,8 +255,11 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
   1–256 characters, values up to 2000 characters, no CR or LF),
   `endpoint_env` (`PROD`, `PRE`), `transport_protocol` (`SSE`,
   `STREAMABLE_HTTP`). Absent `config` means "no bot override". Header names
-  are lower-cased and `transport_protocol` is upper-cased; apply already
-  treats both case-insensitively, so this changes no behaviour.
+  are stored as written and must be unique case-insensitively (the Manifest
+  rule); they are not case-folded, because the merges with user-level headers
+  at apply time compare names case-sensitively, so folding could change which
+  header wins. `transport_protocol` is upper-cased, as the Manifest validator
+  already does.
 - **`engine_config`.** Always `{}` in v1. The Manifest refuses the category on
   every bot because nothing applies it; the genome refuses it too until
   [#2858](https://github.com/inclusionAI/Avernet/issues/2858) defines its keys

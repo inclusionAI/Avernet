@@ -82,17 +82,24 @@ def encode_segment(name: str) -> str:
     return "".join(chr(b) if b in _SEGMENT_SAFE else f"%{b:02X}" for b in name.encode("utf-8"))
 
 
+GENE_CATEGORIES = frozenset({"persona", "skills", "memory", "resources", "tools", "engine_config", "script"})
+
+
 def is_canonical_gene_path(path: str) -> bool:
-    """True when every segment decodes as UTF-8 and re-encodes to itself."""
+    """True for a gene path in the README §2 grammar whose segments are all canonically spelled."""
     category, *segments = path.split("/")
+    if category not in GENE_CATEGORIES:
+        return False
     for segment in segments:
+        if not segment:
+            return False
         try:
             decoded = _percent_decode(segment)
         except (ValueError, UnicodeDecodeError):
             return False
         if encode_segment(decoded) != segment:
             return False
-    return bool(category)
+    return True
 
 
 def _percent_decode(segment: str) -> str:

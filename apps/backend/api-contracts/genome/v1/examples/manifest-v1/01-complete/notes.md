@@ -1,4 +1,7 @@
-# examples.zh-CN.md §1.2, as published
+# examples.zh-CN.md §1.2
+
+The published document, with real digests in place of the doc's shortened
+ones (`sha256:3e7a…`, `sha256:9f2c…`), which the validator would also refuse.
 
 Refused, by the Manifest validator and therefore by recording: it declares
 `engine_config`, which nothing applies yet ([#2858](https://github.com/inclusionAI/Avernet/issues/2858)).

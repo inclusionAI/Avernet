@@ -8,7 +8,7 @@ manifest:
       config:
         endpoint_env: PRE
         headers:
-          x-project: "meeting-assistant"
+          X-Project: "meeting-assistant"
         transport_protocol: STREAMABLE_HTTP
         url: https://meeting-bot.example.com/mcp
 script: null   # see notes: Manifest v1 reads this as 'leave untouched' today

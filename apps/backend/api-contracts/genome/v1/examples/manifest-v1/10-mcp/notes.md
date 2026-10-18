@@ -1,8 +1,7 @@
 # examples.zh-CN.md §8 (`mcp`)
 
-The MCP entry has no bytes, so its `config` is stored inline. The header name is
-lower-cased (`X-Project` → `x-project`); apply compares header names
-case-insensitively, so behaviour is unchanged. Only the bot-level override is
+The MCP entry has no bytes, so its `config` is stored inline, with header names
+as written (`X-Project`). Only the bot-level override is
 pinned: user-level MCP config is read at apply time
 ([#2859](https://github.com/inclusionAI/Avernet/issues/2859)).
 

@@ -120,14 +120,14 @@
       }
     },
     "mcpConfig": {
-      "description": "The bot-level override, the Manifest's closed set. Header names lower-cased; transport upper-cased.",
+      "description": "The bot-level override, the Manifest's closed set. Header names as written (unique case-insensitively, a Registry check); transport upper-cased.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "url": {"type": "string", "pattern": "^https?://[^\\s/?#]+([/?#][^\\s]*)?(?![\\s\\S])"},
         "headers": {
           "type": "object",
-          "propertyNames": {"pattern": "^[^A-Z\\r\\n]{1,256}(?![\\s\\S])"},
+          "propertyNames": {"pattern": "^[^\\r\\n]{1,256}(?![\\s\\S])"},
           "additionalProperties": {"type": "string", "maxLength": 2000, "pattern": "^[^\\r\\n]*(?![\\s\\S])"}
         },
         "endpoint_env": {"type": "string", "enum": ["PROD", "PRE"]},

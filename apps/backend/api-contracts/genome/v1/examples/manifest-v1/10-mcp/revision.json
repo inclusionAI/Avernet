@@ -1,7 +1,7 @@
 {
   "genome_schema": 1,
   "revision": {
-    "id": "sha256:e22a62eb7cca3d70907ddf643c1e60aaeba4bee0a3654e4083e7683038536581",
+    "id": "sha256:f3affb719581c11d943ea9469bb35a86969fa276754a279fe630d743dda583d8",
     "seq": 1,
     "bot": {
       "owner_id": "user_owner_5",
@@ -31,7 +31,7 @@
           "config": {
             "endpoint_env": "PRE",
             "headers": {
-              "x-project": "meeting-assistant"
+              "X-Project": "meeting-assistant"
             },
             "transport_protocol": "STREAMABLE_HTTP",
             "url": "https://meeting-bot.example.com/mcp"

@@ -26,7 +26,10 @@ import pytest
 import yaml
 from referencing import Registry, Resource
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import decode_tree_bytes
+from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
+    canonical_tree_bytes,
+    decode_tree_bytes,
+)
 from tests.community.contracts.genome_canonical_json import (
     NotCanonicalizable,
     canonicalize,
@@ -164,8 +167,10 @@ def test_every_invalid_example_fails_its_stated_check(path: Path) -> None:
     if check == "schema":
         assert list(_VALIDATORS[case["schema"]].iter_errors(record)), case["reason"]
         return
-    # The other checks run on records that are schema-valid, so each case fails only its own rule.
+    # The other checks run on schema-valid records, so each case fails only its own rule.
     assert not list(_VALIDATORS[case["schema"]].iter_errors(record)), "expected a schema-valid record"
+    if check != "identity":
+        assert record["revision"]["id"] == revision_id(record["spec"], record["policy"]), "keep the id consistent"
     if check == "order":
         assert order_violations(record), case["reason"]
     elif check == "canonical-path":
@@ -192,11 +197,10 @@ def test_example_revision_ids_and_digests_are_real(path: Path) -> None:
     for entry in spec["resources"]:
         data = _blob(entry["digest"])
         if entry["path"].endswith("/"):
-            assert decode_tree_bytes(data) is not None, f"{entry['path']} is not an acm-tree-v1 blob"
+            _tree_members(data)
     for entry in spec["skills"]:
         if entry["origin"] == "local":
-            members = decode_tree_bytes(_blob(entry["digest"]))
-            assert members is not None and "SKILL.md" in dict(members), entry["name"]
+            assert "SKILL.md" in dict(_tree_members(_blob(entry["digest"]))), entry["name"]
     if spec["memory"] is not None:
         raw = _blob(spec["memory"]["items_digest"])
         items = loads_strict(raw.decode("utf-8"))
@@ -204,6 +208,8 @@ def test_example_revision_ids_and_digests_are_real(path: Path) -> None:
         assert canonicalize(items) == raw, "memory items must be stored as their canonical JSON"
         keys = [item["key"] for item in items]
         assert keys == sorted(set(keys))
+        for item in items:
+            _assert_memory_item_order(item)
     if spec["script"] is not None:
         _blob(spec["script"]["digest"]).decode("utf-8")
 
@@ -224,7 +230,28 @@ def test_patch_digest_references_are_real(path: Path) -> None:
         if isinstance(content, dict):
             data = _blob(content["digest"])
             if op["op"] == "resource.add" and op["path"].endswith("/"):
-                assert decode_tree_bytes(data) is not None
+                _tree_members(data)
+        for value in (op.get("files") or {}).values():
+            if isinstance(value, dict):
+                _blob(value["digest"])
+        if "item" in op:
+            _assert_memory_item_order(op["item"])
+
+
+def _tree_members(data: bytes) -> list[tuple[str, bytes]]:
+    """Decode an acm-tree-v1 blob and require its canonical form (README §3.4)."""
+    members = decode_tree_bytes(data)
+    assert members is not None, "not an acm-tree-v1 blob"
+    assert canonical_tree_bytes(members) == data, "tree members are not in canonical order"
+    for name, _ in members:
+        parts = name.split("/")
+        assert name and not name.startswith("/") and all(p not in ("", ".", "..") for p in parts), name
+    return members
+
+
+def _assert_memory_item_order(item: dict[str, Any]) -> None:
+    for field in ("tags", "source"):
+        assert item[field] == sorted(set(item[field])), f"memory item {item['key']}: {field} must be sorted"
 
 
 # --------------------------------------------------------------------------------------------
@@ -322,8 +349,8 @@ def _yaml_blocks_by_section(text: str) -> dict[str, int]:
     section = ""
     in_block = False
     for line in text.splitlines():
-        if line.startswith("```"):
-            if not in_block and line.startswith("```yaml") and section in _YAML_BLOCKS_PER_SECTION:
+        if line.strip().startswith("```"):
+            if not in_block and re.match(r"```ya?ml\b", line.strip()) and section:
                 counts[section] = counts.get(section, 0) + 1
             in_block = not in_block
             continue
@@ -337,6 +364,7 @@ def _yaml_blocks_by_section(text: str) -> dict[str, int]:
 
 def test_manifest_v1_cases_cover_every_examples_doc_fragment() -> None:
     counts = _yaml_blocks_by_section(_MANIFEST_EXAMPLES_DOC.read_text(encoding="utf-8"))
+    assert set(_DOC_SECTIONS) == set(_YAML_BLOCKS_PER_SECTION)
     assert counts == _YAML_BLOCKS_PER_SECTION, "examples.zh-CN.md changed: add or update a manifest-v1 case"
     cases = sorted(path.name for path in _CASES.iterdir() if path.is_dir() and path.name != "sources")
     assert cases == sorted(name for names in _DOC_SECTIONS.values() for name in names)
@@ -406,3 +434,99 @@ def _compile(spec: dict[str, Any]) -> dict[str, Any]:
 def test_example_digests_are_well_formed() -> None:
     for path in _BLOBS.iterdir():
         assert _DIGEST.match("sha256:" + path.name), path.name
+
+
+# --------------------------------------------------------------------------------------------
+# Recording, re-derived: each case's revision.json from manifest.yaml and the fixture sources
+
+
+_SOURCES = _CASES / "sources"
+_OSS_FIXTURES = {  # (bucket, key) -> the fixture file that object serves
+    ("artifacts", "tools/skills/order-lookup-1.4.0.zip"): "oss-artifacts-order-lookup-1.4.0.zip",
+    ("artifacts", "tools/shopctl/2.3.0/shopctl-linux-amd64"): "oss-artifacts-shopctl-linux-amd64",
+    ("cms-assets", "kb/knowledge-base.zip"): "oss-cms-assets-knowledge-base.zip",
+}
+_DEFAULT_POLICY = {"mutable_genes": ["memory", "persona", "resources", "skills"], "pins": ["persona/SAFETY.md"], "risk_overrides": {}}
+
+
+def _source(document: dict[str, Any], entry: dict[str, Any]) -> dict[str, Any]:
+    declared = document.get("sources", {})[entry["from"]] if "from" in entry else entry["source"]
+    return {**declared, "subpath": (declared.get("subpath") or "") + (entry.get("subpath") or "")}
+
+
+def _fetch_files(document: dict[str, Any], entry: dict[str, Any]) -> dict[str, bytes]:
+    """The files an entry's source serves, after unpack and strip_components (README §7)."""
+    source = _source(document, entry)
+    if source["protocol"] == "git":
+        root = _SOURCES / "git-content" / source["subpath"]
+        if root.is_file():
+            return {"": root.read_bytes()}
+        return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+    raw = (_SOURCES / _OSS_FIXTURES[(source["bucket"], source["key"])]).read_bytes()
+    if "digest" in entry:
+        assert sha256_digest(raw) == entry["digest"], "the Manifest's digest pin must match the fixture"
+    if entry.get("unpack") != "zip":
+        return {"": raw}
+    import io
+    import zipfile
+
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        files = {name: archive.read(name) for name in archive.namelist() if not name.endswith("/")}
+    strip = entry.get("strip_components", 0)
+    return {"/".join(name.split("/")[strip:]): data for name, data in files.items()}
+
+
+def _single(files: dict[str, bytes]) -> bytes:
+    assert list(files) == [""], "expected one file"
+    return files[""]
+
+
+def _record(document: dict[str, Any]) -> dict[str, Any]:
+    """A first revision on an empty bot, recorded from ``document`` against the fixtures."""
+    manifest = document.get("manifest") or {}
+    persona = []
+    for entry in manifest.get("identity", []):
+        data = entry["content"].encode() if "content" in entry else _single(_fetch_files(document, entry))
+        persona.append({"type": entry["type"], "digest": sha256_digest(data)})
+    skills = [
+        {"name": e["name"], "origin": "local", "digest": sha256_digest(canonical_tree_bytes(list(_fetch_files(document, e).items())))}
+        for e in manifest.get("skills", [])
+    ]
+    resources = []
+    for entry in manifest.get("resources", []):
+        files = _fetch_files(document, entry)
+        data = canonical_tree_bytes(list(files.items())) if entry["path"].endswith("/") else _single(files)
+        resources.append({"path": entry["path"], "digest": sha256_digest(data)})
+    for entry in manifest.get("cli_tools", []):
+        _fetch_files(document, entry)  # ignored by genome v1, but its digest pin is still checked
+    mcp = []
+    for entry in manifest.get("mcp", []):
+        config = dict(entry.get("config") or {})
+        if "transport_protocol" in config:
+            config["transport_protocol"] = config["transport_protocol"].upper()
+        mcp.append({"server_code": entry["server_code"], **({"config": config} if "config" in entry else {})})
+    script = None
+    if document.get("script"):
+        body = document["script"]["body"]
+        assert "${BOT_" not in body, "these fixtures do not exercise placeholder substitution"
+        script = {"digest": sha256_digest(body.encode())}
+    return {
+        "persona": sorted(persona, key=lambda e: e["type"]),
+        "skills": sorted(skills, key=lambda e: e["name"]),
+        "memory": None,
+        "resources": sorted(resources, key=lambda e: e["path"]),
+        "tools": {"mcp": sorted(mcp, key=lambda e: e["server_code"])},
+        "engine_config": {},
+        "script": script,
+    }
+
+
+_RECORDED_CASES = [path for path in _CASE_DIRS if (path / "revision.json").exists()]
+
+
+@pytest.mark.parametrize("case", _RECORDED_CASES, ids=[path.name for path in _RECORDED_CASES])
+def test_manifest_v1_case_revision_is_what_recording_produces(case: Path) -> None:
+    document = yaml.safe_load((case / "manifest.yaml").read_text(encoding="utf-8"))
+    revision = _load(case / "revision.json")
+    assert revision["spec"] == _record(document)
+    assert revision["policy"] == _DEFAULT_POLICY

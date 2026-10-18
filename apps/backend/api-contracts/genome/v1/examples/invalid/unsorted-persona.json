@@ -5,7 +5,7 @@
   "record": {
     "genome_schema": 1,
     "revision": {
-      "id": "sha256:937c25e5349fafff9a345b8b94b0d99f119448cdfe4eb8417d73159a1571d49d",
+      "id": "sha256:26111ee3023a45d0b6cf1418c42773d76b3966bee2d2dcef5879a63f993369e1",
       "seq": 41,
       "bot": {
         "owner_id": "user_owner_5",
@@ -72,7 +72,7 @@
             "config": {
               "endpoint_env": "PRE",
               "headers": {
-                "x-project": "support"
+                "X-Project": "support"
               },
               "transport_protocol": "STREAMABLE_HTTP",
               "url": "https://meet.example.com/mcp"

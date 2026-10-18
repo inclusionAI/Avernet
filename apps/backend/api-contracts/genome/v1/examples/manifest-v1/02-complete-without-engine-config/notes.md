@@ -1,5 +1,7 @@
 # examples.zh-CN.md §1.2 without `engine_config`
 
+Real digests in place of the doc's shortened ones, as in `01-complete`.
+
 - `sources`, `from`, `subpath`, `auth`, `on_fetch_failure`, `unpack`: used to fetch, then dropped;
   the provenance copy of this YAML keeps them.
 - `SAFETY.md` was inline `content`; it is stored and referenced by digest like the fetched files.

@@ -72,7 +72,7 @@
             "config": {
               "endpoint_env": "PRE",
               "headers": {
-                "x-project": "support"
+                "X-Project": "support"
               },
               "transport_protocol": "STREAMABLE_HTTP",
               "url": "https://meet.example.com/mcp"
