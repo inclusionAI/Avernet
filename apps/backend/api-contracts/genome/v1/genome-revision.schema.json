@@ -41,7 +41,7 @@
         "OUTPUT.md", "README.md", "RULES.md", "SAFETY.md", "SOUL.md", "TOOLS.md", "USER.md"
       ]
     },
-    "skillName": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?![\\s\\S])"},
+    "skillName": {"description": "The Skill Center package name rule: apply requires the SKILL.md metadata name to match it and to equal the entry name. Reserved names are refused case-insensitively.", "type": "string", "pattern": "^(?![Ss][Kk][Ii][Ll][Ll][Ss]-([Cc][Ee][Nn][Tt][Ee][Rr]|[Ll][Oo][Cc][Aa][Ll]|[Rr][Ee][Pp][Oo])(?![\\s\\S]))[A-Za-z0-9-]+(?![\\s\\S])"},
     "resourcePath": {
       "description": "Workspace-relative; trailing '/' marks a directory entry. No empty, '.' or '..' segment.",
       "type": "string",
@@ -124,7 +124,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "url": {"type": "string", "pattern": "^https?://[^\\s/?#]+([/?#][^\\s]*)?(?![\\s\\S])"},
+        "url": {"description": "Absolute http(s) URL with a non-empty host; the Registry also applies the Manifest's parse check (urlsplit with a hostname).", "type": "string", "pattern": "^https?://([^\\s/?#@]*@)?(\\[[0-9A-Fa-f:.]+\\]|[^\\s/?#:@\\[\\]]+)(:[0-9]*)?([/?#][^\\s]*)?(?![\\s\\S])"},
         "headers": {
           "type": "object",
           "propertyNames": {"pattern": "^[^\\r\\n]{1,256}(?![\\s\\S])"},

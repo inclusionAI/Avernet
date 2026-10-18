@@ -1,0 +1,9 @@
+acm-tree-v1
+8:SKILL.md67:---
+name: other-skill
+description: Not the entry's name.
+---
+Body.
+16:scripts/check.py65:import sys
+
+print('ok' if sys.stdin.read().strip() else 'empty')

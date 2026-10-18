@@ -175,6 +175,16 @@ def test_every_invalid_example_fails_its_stated_check(path: Path) -> None:
         assert order_violations(record), case["reason"]
     elif check == "canonical-path":
         assert not all(is_canonical_gene_path(gene) for gene in gene_paths(record)), case["reason"]
+    elif check == "tree":
+        with pytest.raises(AssertionError):
+            for entry in record["spec"]["resources"]:
+                if entry["path"].endswith("/"):
+                    _tree_members(_blob(entry["digest"]))
+    elif check == "skill-package":
+        with pytest.raises(AssertionError):
+            for entry in record["spec"]["skills"]:
+                if entry["origin"] == "local":
+                    _assert_skill_package(entry["name"], _tree_members(_blob(entry["digest"])))
     elif check == "identity":
         assert record["revision"]["id"] != revision_id(record["spec"], record["policy"]), case["reason"]
     else:
@@ -200,7 +210,7 @@ def test_example_revision_ids_and_digests_are_real(path: Path) -> None:
             _tree_members(data)
     for entry in spec["skills"]:
         if entry["origin"] == "local":
-            assert "SKILL.md" in dict(_tree_members(_blob(entry["digest"]))), entry["name"]
+            _assert_skill_package(entry["name"], _tree_members(_blob(entry["digest"])))
     if spec["memory"] is not None:
         raw = _blob(spec["memory"]["items_digest"])
         items = loads_strict(raw.decode("utf-8"))
@@ -243,10 +253,25 @@ def _tree_members(data: bytes) -> list[tuple[str, bytes]]:
     members = decode_tree_bytes(data)
     assert members is not None, "not an acm-tree-v1 blob"
     assert canonical_tree_bytes(members) == data, "tree members are not in canonical order"
-    for name, _ in members:
+    names = [name for name, _ in members]
+    assert len(names) == len(set(names)), "tree member paths must be unique"
+    for name in names:
         parts = name.split("/")
         assert name and not name.startswith("/") and all(p not in ("", ".", "..") for p in parts), name
     return members
+
+
+def _assert_skill_package(name: str, members: list[tuple[str, bytes]]) -> None:
+    """A local skill's tree is a package apply accepts (README §4.2, SkillPackageValidator)."""
+    files = dict(members)
+    assert "SKILL.md" in files and sum(1 for p in files if p.split("/")[-1] == "SKILL.md") == 1
+    assert len(files) <= 500 and sum(map(len, files.values())) <= 50 * 1024 * 1024
+    assert all(len(data) <= 10 * 1024 * 1024 and len(path) <= 256 for path, data in files.items())
+    text = files["SKILL.md"].decode("utf-8")
+    assert text.startswith("---\n"), "SKILL.md needs YAML front matter"
+    metadata = yaml.safe_load(text.split("---\n", 2)[1])
+    assert metadata.get("name") == name, f"SKILL.md names its skill {metadata.get('name')!r}, not {name!r}"
+    assert str(metadata.get("description") or "").strip(), "SKILL.md needs a description"
 
 
 def _assert_memory_item_order(item: dict[str, Any]) -> None:

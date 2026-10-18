@@ -74,8 +74,8 @@ pct-encoded = "%" HEXDIG HEXDIG                                     ; uppercase;
 | `tools/mcp/mcp.x.meet` | the MCP server `mcp.x.meet` |
 | `script` | the startup script |
 
-- **Dots are part of names.** `/` is the only separator, so `SOUL.md`,
-  `pdf.tools` and `mcp.x.meet` are single segments.
+- **Dots are part of names.** `/` is the only separator, so `SOUL.md` and
+  `mcp.x.meet` are single segments.
 - **Encoding.** Persona types, skill names, memory keys and resource paths
   only use the characters `A–Z a–z 0–9 . _ -` inside one name, so they are
   written as they are. An MCP `server_code` comes from the MCP registry and is
@@ -93,7 +93,7 @@ pct-encoded = "%" HEXDIG HEXDIG                                     ; uppercase;
   declared as `data/kb/` is `resources/data/kb`.
 - **Covering.** A gene path `P` *covers* a gene path `X` when `X == P` or `X`
   starts with `P + "/"`. Matching is by whole segments: `skills/pdf` covers
-  `skills/pdf/SKILL.md` but not `skills/pdf.tools`.
+  `skills/pdf/SKILL.md` but not `skills/pdf-tools`.
 - **Overlap.** Two paths *overlap* when either covers the other. Pins and
   risk overrides apply to every op whose gene path overlaps them, so an op
   that changes a whole skill is caught by a pin or override on one of its
@@ -181,7 +181,8 @@ trees (`canonical_tree_bytes` in
 
 - Files are sorted by path in code-point order; lengths are decimal ASCII
   byte counts; paths are UTF-8, relative, `/`-separated, with no empty, `.`
-  or `..` segment.
+  or `..` segment, and **unique**: a blob that lists one path twice is
+  refused, because it would not identify a single tree.
 - Only files are recorded. Not preserved: empty directories, file modes
   (including the executable bit), timestamps, symlinks. None of these is
   delivered today either: archives are unpacked with uniform `0644` files and
@@ -231,9 +232,16 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
   `MEMORY.md` and `IDENTITY.md`. The set an engine accepts is narrower
   (`claude_code`: `CLAUDE.md` only) and is checked at record time against the
   bot's engine.
-- **`skills`.** `name` follows the Manifest rule `^[A-Za-z0-9][A-Za-z0-9._-]*$`.
-  `local`: a bot-owned skill whose files are stored; its tree must contain
-  `SKILL.md`. `center`: a governed Skill Center skill pinned by version and
+- **`skills`.** `name` follows the Skill Center package rule
+  `^[A-Za-z0-9-]+$`, and `skills-center`, `skills-local` and `skills-repo`
+  are reserved (case-insensitively). The Manifest accepts a wider set (dots,
+  underscores), but apply requires the package's metadata name to match this
+  rule and to equal the entry name, so such a skill can never be applied.
+  `local`: a bot-owned skill whose files are stored. Its tree must be a valid
+  Skill Center package, as `SkillPackageValidator` checks at apply: exactly
+  one `SKILL.md`, at the root, whose YAML front matter has a `name` equal to
+  the entry's name and a non-empty `description`; at most 500 files, 10 MiB
+  per file, 50 MiB in total, 256 characters per path. `center`: a governed Skill Center skill pinned by version and
   not copied (ADR 0010); a pinned version is a reference to a published
   version, not evidence that it is active. A Manifest v1 document cannot yet
   declare a Center skill; RSI-04 adds that source.
@@ -250,8 +258,9 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
   recorded.
 - **`tools.mcp`.** `server_code` names a server in the MCP registry.
   `config`, when present, is the bot-level override with the Manifest's own
-  closed set and limits: `url` (absolute `http`/`https`; recording
-  lower-cases the scheme, which URLs treat case-insensitively), `headers` (names
+  closed set and limits: `url` (absolute `http`/`https` with a non-empty
+  host, the Manifest's own parse check; recording lower-cases the scheme,
+  which URLs treat case-insensitively), `headers` (names
   1–256 characters, values up to 2000 characters, no CR or LF),
   `endpoint_env` (`PROD`, `PRE`), `transport_protocol` (`SSE`,
   `STREAMABLE_HTTP`). Absent `config` means "no bot override". Header names
@@ -430,7 +439,10 @@ denominator).
   be motivated by the rationale alone.
 - The resulting revision is valid against
   [`genome-revision.schema.json`](genome-revision.schema.json), including the
-  sort rules of §3.1.
+  sort rules of §3.1, and every rule of §3.4 and §4.2 the schema cannot
+  express: unique tree member paths, a valid skill package for every `local`
+  skill (after `skill.add` or `skill.update`), and an MCP URL whose host
+  parses. A candidate that apply would refuse is never recorded.
 - Limits mirror the Manifest: 50 entries per category, 64 KiB of UTF-8 per
   inline content value,
   and the fetch-time size limits for skills (100 MiB), files (100 MiB) and

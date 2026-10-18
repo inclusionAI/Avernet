@@ -108,7 +108,7 @@ Bot 的变更都是对某个修订版的应用。
 
 - `/` 是唯一的分隔符，因此带点的名称（`SOUL.md`、`mcp.x.meet`）是单个段。
 - 当 `X == P` 或 `X` 以 `P/` 开头时，路径 `P` 覆盖 `X`，因此匹配按完整的段进行：
-  `skills/pdf` 覆盖 `skills/pdf/SKILL.md`，但不覆盖 `skills/pdf.tools`。
+  `skills/pdf` 覆盖 `skills/pdf/SKILL.md`，但不覆盖 `skills/pdf-tools`。
 - MCP 的 `server_code` 可以包含任意字符；`A–Z a–z 0–9 . _ -` 之外的字节使用百分号
   编码，并且只有规范写法有效。
 

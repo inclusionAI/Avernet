@@ -122,7 +122,7 @@ target, and diff output.
   single segments.
 - A path `P` covers `X` when `X == P` or `X` starts with `P/`, so matching is
   by whole segments: `skills/pdf` covers `skills/pdf/SKILL.md` but not
-  `skills/pdf.tools`.
+  `skills/pdf-tools`.
 - An MCP `server_code` can contain any character; bytes outside
   `A–Z a–z 0–9 . _ -` are percent-encoded, and only the canonical spelling is
   valid.

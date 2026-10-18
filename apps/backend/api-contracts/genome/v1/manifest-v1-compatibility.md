@@ -79,6 +79,8 @@ derived from the revision field by field as below.
 | Manifest field | Outcome | Revision / M′ |
 | --- | --- | --- |
 | `name` | maps | `spec.skills[].name` (the key) |
+| a `name` outside `^[A-Za-z0-9-]+$` (dots, underscores) | refused (*recording only*) | The Manifest accepts it, but apply requires the package metadata name to match that rule and equal the entry name, so it can never be applied |
+| a skill whose files are not a valid package | refused (*recording only*) | Missing or invalid `SKILL.md` front matter, a metadata name different from the entry name, or over the package limits (README §4.2); apply would refuse it too |
 | the skill's files (git directory or unpacked OSS zip) | resolved | `origin: local`, `digest` of the `acm-tree-v1` tree; M′: `source: {protocol: content_store, …}`, from which apply builds the skill package zip |
 | `unpack` | resolved | |
 | a Skill Center skill | maps | `origin: center`, `center_version`. Manifest v1 cannot declare one; it comes from capturing a bot's current state. M′: `source: {protocol: center, …}` (RSI-04) |
