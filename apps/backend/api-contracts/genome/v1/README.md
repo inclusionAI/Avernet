@@ -183,7 +183,10 @@ trees (`canonical_tree_bytes` in
 
 - Files are sorted by path in code-point order; lengths are decimal ASCII
   byte counts; paths are UTF-8, relative, `/`-separated, with no empty, `.`
-  or `..` segment, and **unique**: a blob that lists one path twice is
+  or `..` segment, no control character (NUL included), no backslash and no
+  drive letter (the path rule of the patch schema's `skillFilePath`; a NUL
+  or control character in a name would be recorded but fail when apply
+  writes the file), and **unique**: a blob that lists one path twice is
   refused, because it would not identify a single tree. No member path may
   be a whole-segment prefix of another (`a.md` with `a.md/b.md`): no file
   system holds both, and apply would write `a.md`, then fail on

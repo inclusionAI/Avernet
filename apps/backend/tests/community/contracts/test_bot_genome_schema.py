@@ -258,6 +258,11 @@ def test_patch_digest_references_are_real(path: Path) -> None:
             _assert_memory_item_order(op["item"])
 
 
+# Tree member paths follow the patch schema's file-path rule (README §3.4): no control character
+# (NUL included), backslash, drive letter, leading "/", or empty, "." or ".." segment.
+_SAFE_MEMBER_PATH = re.compile(_PATCH_SCHEMA["definitions"]["skillFilePath"]["pattern"])
+
+
 def _tree_members(data: bytes) -> list[tuple[str, bytes]]:
     """Decode an acm-tree-v1 blob and require its canonical form (README §3.4)."""
     members = decode_tree_bytes(data)
@@ -268,8 +273,7 @@ def _tree_members(data: bytes) -> list[tuple[str, bytes]]:
     colliding = sorted({n for n in names for m in names if m.startswith(n + "/")})
     assert not colliding, f"tree members {colliding} are files and also directories of other members"
     for name in names:
-        parts = name.split("/")
-        assert name and not name.startswith("/") and all(p not in ("", ".", "..") for p in parts), name
+        assert _SAFE_MEMBER_PATH.match(name), f"tree member path {name!r} is not a safe relative path"
     return members
 
 
