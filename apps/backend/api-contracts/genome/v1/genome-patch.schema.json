@@ -49,19 +49,19 @@
       "properties": {"digest": {"$ref": "genome-revision.schema.json#/definitions/digest"}}
     },
     "content": {
-      "description": "Inline UTF-8 text (at most 64 KiB once encoded), or a digest of uploaded bytes.",
+      "description": "Inline UTF-8 text, or a digest of uploaded bytes. maxLength bounds code points only; the 64 KiB UTF-8 byte limit is checked when the patch is recorded (README §6.4).",
       "oneOf": [{"type": "string", "maxLength": 65536}, {"$ref": "#/definitions/digestRef"}]
     },
     "unifiedDiff": {
       "description": "Hunks only, starting at '@@'; no ---/+++ headers; no fuzz (README §6.2).",
       "type": "string",
-      "pattern": "^@@ -\\d+(,\\d+)? \\+\\d+(,\\d+)? @@"
+      "pattern": "^@@ -[0-9]+(,[0-9]+)? \\+[0-9]+(,[0-9]+)? @@"
     },
     "skillFilePath": {
       "description": "Relative path inside a skill; no empty, '.' or '..' segment.",
       "type": "string",
       "maxLength": 256,
-      "pattern": "^(?![/~])(?!.*(^|/)\\.{1,2}(/|$))(?!.*//)(?!.*/$)[A-Za-z0-9._/-]+$"
+      "pattern": "^(?![/~])(?!.*(^|/)\\.{1,2}(/|(?![\\s\\S])))(?!.*//)(?!.*/(?![\\s\\S]))[A-Za-z0-9._/-]+(?![\\s\\S])"
     },
     "textEdit": {
       "oneOf": [
@@ -71,7 +71,7 @@
           "required": ["kind", "heading", "content"],
           "properties": {
             "kind": {"const": "replace_section"},
-            "heading": {"type": "string", "pattern": "^#{1,6} [^\\n]+$"},
+            "heading": {"type": "string", "pattern": "^#{1,6} [^\\n]+(?![\\s\\S])"},
             "content": {"type": "string", "maxLength": 65536}
           }
         },
@@ -81,7 +81,7 @@
           "required": ["kind", "anchor", "content"],
           "properties": {
             "kind": {"const": "insert_after"},
-            "anchor": {"type": "string", "minLength": 1, "pattern": "^[^\\n]+$"},
+            "anchor": {"type": "string", "minLength": 1, "pattern": "^[^\\n]+(?![\\s\\S])"},
             "content": {"type": "string", "minLength": 1, "maxLength": 65536}
           }
         },
@@ -106,7 +106,7 @@
           "description": "A persona file, a file inside a skill, a file resource, or a file inside a directory resource.",
           "allOf": [
             {"$ref": "genome-revision.schema.json#/definitions/genePath"},
-            {"type": "string", "pattern": "^(persona/[^/]+|skills/[^/]+/.+|resources/.+)$"}
+            {"type": "string", "pattern": "^(persona/[^/]+|skills/[^/]+/.+|resources/.+)(?![\\s\\S])"}
           ]
         },
         "edits": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"$ref": "#/definitions/textEdit"}}
@@ -196,7 +196,7 @@
         "path": {"$ref": "genome-revision.schema.json#/definitions/resourcePath"},
         "content": {"$ref": "#/definitions/content"}
       },
-      "if": {"properties": {"path": {"pattern": "/$"}}},
+      "if": {"properties": {"path": {"pattern": "/(?![\\s\\S])"}}},
       "then": {"properties": {"content": {"$ref": "#/definitions/digestRef", "description": "A directory resource is added from an uploaded acm-tree-v1 blob."}}}
     },
     "resourceRemove": {

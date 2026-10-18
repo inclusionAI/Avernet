@@ -35,6 +35,23 @@ class NotCanonicalizable(ValueError):
     """The value is outside the hashed-content subset (a float, a lone surrogate, …)."""
 
 
+def loads_strict(text: str) -> Any:
+    """Parse JSON text, refusing duplicate member names.
+
+    ``json.loads`` keeps the last of two duplicate members silently, so the
+    value it returns is not the record that was sent; RFC 8785 requires
+    unique names, and so does the genome contract (README §3.1).
+    """
+
+    def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        names = [name for name, _ in pairs]
+        if len(names) != len(set(names)):
+            raise NotCanonicalizable("duplicate object member name")
+        return dict(pairs)
+
+    return json.loads(text, object_pairs_hook=_pairs)
+
+
 def canonicalize(value: Any) -> bytes:
     """The RFC 8785 canonical form of ``value`` as UTF-8 bytes."""
     return _serialize(value).encode("utf-8")

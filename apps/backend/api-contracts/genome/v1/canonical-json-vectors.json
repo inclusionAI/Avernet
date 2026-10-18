@@ -57,6 +57,11 @@
       "name": "lone-surrogate",
       "input": "{\"s\":\"\\ud800\"}",
       "reason": "a lone surrogate has no UTF-8 encoding"
+    },
+    {
+      "name": "duplicate-member",
+      "input": "{\"a\":1,\"a\":2}",
+      "reason": "member names must be unique (RFC 8785)"
     }
   ],
   "revision_ids": [

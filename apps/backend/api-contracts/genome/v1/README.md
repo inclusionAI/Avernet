@@ -56,7 +56,7 @@ A **gene path** names one part of a bot's `spec`. The same grammar is used by
 gene-path = category *( "/" segment )
 category  = "persona" / "skills" / "memory" / "resources" / "tools" / "engine_config" / "script"
 segment   = 1*( ALPHA / DIGIT / "." / "_" / "-" / pct-encoded )   ; not "." and not ".."
-pct-encoded = "%" HEXDIG HEXDIG                                     ; used only for "%" (%25) and "/" (%2F)
+pct-encoded = "%" HEXDIG HEXDIG                                     ; uppercase; only for bytes outside the set above
 ```
 
 | Gene path | Means |
@@ -77,16 +77,22 @@ pct-encoded = "%" HEXDIG HEXDIG                                     ; used only 
 - **Dots are part of names.** `/` is the only separator, so `SOUL.md`,
   `pdf.tools` and `mcp.x.meet` are single segments.
 - **Encoding.** Persona types, skill names, memory keys and resource paths
-  cannot contain `%` or `/` inside one name. An MCP `server_code` comes from
-  the MCP registry and is only required to be non-empty, so inside a gene
-  path a `%` in it is written `%25` and a `/` is written `%2F`. Nothing else
-  is ever encoded.
+  only use the characters `A–Z a–z 0–9 . _ -` inside one name, so they are
+  written as they are. An MCP `server_code` comes from the MCP registry and is
+  only required to be non-empty, so it can contain anything. Inside a gene
+  path, every UTF-8 byte of a name outside `A–Z a–z 0–9 . _ -` is written
+  `%XX` with uppercase hex, and a name that is exactly `.` or `..` is written
+  `%2E` or `%2E%2E`. Bytes in the allowed set are never encoded, so every
+  name has exactly one spelling: `mcp:x` is `tools/mcp/mcp%3Ax`.
 - **A directory resource's gene path has no trailing slash.** The entry
   declared as `data/kb/` is `resources/data/kb`.
 - **Covering.** A gene path `P` *covers* a gene path `X` when `X == P` or `X`
   starts with `P + "/"`. Matching is by whole segments: `skills/pdf` covers
   `skills/pdf/SKILL.md` but not `skills/pdf.tools`.
-- **Overlap.** Two paths *overlap* when either covers the other.
+- **Overlap.** Two paths *overlap* when either covers the other. Pins and
+  risk overrides apply to every op whose gene path overlaps them, so an op
+  that changes a whole skill is caught by a pin or override on one of its
+  files.
 - `policy` is not a gene path. No grammar production reaches it, so no patch,
   binding or rule can name it.
 
@@ -106,7 +112,9 @@ the same bytes:
   `-(2^53 - 1) … 2^53 - 1`. A decimal value is written as a string
   (`"0.2"`). RFC 8785 formats numbers as IEEE doubles, which is where
   implementations disagree most; the subset removes the question.
-- **No duplicate object member names** (RFC 8785 requires this too).
+- **No duplicate object member names** (RFC 8785 requires this too). A
+  parser that keeps the last duplicate silently would hash a different record
+  than the one sent, so records are parsed with duplicates rejected.
 - **Lists are in canonical order.** RFC 8785 keeps array order, so two
   revisions holding the same entries in a different order would get
   different ids. Every list in `spec` and `policy` is therefore sorted and
@@ -152,7 +160,8 @@ are depends on the field:
 | persona file, file resource, file inside a skill | the file's bytes, exactly |
 | skill (`origin: local`), directory resource | the `acm-tree-v1` encoding of its files (§3.4) |
 | `memory.items_digest` | `JCS(items)`, the canonical JSON of the item list (§4.4) |
-| `script.digest` | the script body, UTF-8 encoded |
+| `script.digest` | the script body after placeholder substitution (§7), UTF-8 encoded |
+| a patch (the candidate id) | `JCS(patch)`, the canonical JSON of the whole patch |
 
 ### 3.4 `acm-tree-v1`: one byte string for a directory
 
@@ -228,10 +237,13 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
 - **`resources`.** `path` is workspace-relative: characters
   `A–Z a–z 0–9 . _ - /`, no leading `/` or `~`, no empty, `.` or `..`
   segment. A trailing `/` makes it a directory entry. No entry may lie inside
-  another directory entry (the Manifest refuses nesting too).
+  another directory entry (the Manifest refuses nesting too). The Manifest
+  accepts empty and `.` segments (`./faq.csv`, `a//b`); recording removes
+  them, so each path has one spelling.
 - **`tools.mcp`.** `server_code` names a server in the MCP registry.
   `config`, when present, is the bot-level override with the Manifest's own
-  closed set and limits: `url` (absolute `http`/`https`), `headers` (names
+  closed set and limits: `url` (absolute `http`/`https`; recording
+  lower-cases the scheme, which URLs treat case-insensitively), `headers` (names
   1–256 characters, values up to 2000 characters, no CR or LF),
   `endpoint_env` (`PROD`, `PRE`), `transport_protocol` (`SSE`,
   `STREAMABLE_HTTP`). Absent `config` means "no bot override". Header names
@@ -241,8 +253,10 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
   every bot because nothing applies it; the genome refuses it too until
   [#2858](https://github.com/inclusionAI/Avernet/issues/2858) defines its keys
   and value types.
-- **`script`.** `null`, or `{digest}` of the body. Placeholders are not
-  allowed in a script body (Manifest rule), so the body is stored as written.
+- **`script`.** `null`, or `{digest}` of the body. Apply substitutes the
+  `${BOT_*}` placeholders in a script body and leaves every other `${…}` (shell
+  variables such as `${HOME}`) alone; recording does the same substitution
+  once (§7), so the stored body is what apply would write.
 - **No `cli_tools`.** CLI tools built through the Manifest are not part of
   genome v1; acli support is added before the revision feature goes live.
 
@@ -272,9 +286,14 @@ evidence references `<episode|feedback|eval>:<id>` (01-genome.md §2.2).
   write-protected: an op is rejected when its gene path overlaps a pin. So
   removing a skill that has a pinned file is rejected too.
 - **`risk_overrides`** maps a gene path to a tier. An op's tier becomes the
-  higher of its default tier and every override covering its gene path. An
-  override can therefore only raise a tier; a lower value has no effect
-  (open decision G-7, closed).
+  higher of its default tier and every override whose path overlaps the op's
+  gene path. Overlap rather than covering matters: an override on
+  `skills/x/SKILL.md` also applies to `skill.update` and `skill.remove` of
+  `skills/x`, which change that file too. An override can therefore only raise
+  a tier; a lower value has no effect (open decision G-7, closed).
+- A pin on a memory item (`memory/<key>`) also blocks `memory.set_mode`,
+  whose gene path is `memory`: changing the mode changes how every item,
+  including the pinned one, reaches the engine.
 - The **default policy** of a new bot is the one shown above: persona, skills,
   memory and resources are mutable, `persona/SAFETY.md` is pinned, and
   `script` and `tools/mcp` are not mutable (open decision G-3, closed).
@@ -312,8 +331,10 @@ policy, copied unchanged.
 - Memory ops are rejected while `spec.memory` is `null`.
 - A Center skill's pinned version is changed by an owner recording a
   document, not by a patch.
-- Content is given inline (a UTF-8 string, at most 64 KiB, the Manifest's
-  inline limit) or as `{"digest": …}` of bytes uploaded first with
+- Content is given inline (a UTF-8 string, at most 64 KiB once encoded, the
+  Manifest's inline limit; the schema's `maxLength` can only bound code points,
+  so the byte limit is checked when the patch is recorded) or as
+  `{"digest": …}` of bytes uploaded first with
   `PUT …/genome/content`. A directory resource is always added by digest of
   an `acm-tree-v1` blob.
 
@@ -349,7 +370,7 @@ and `SKILL.md` cannot be deleted. Binary files change only through `files`.
    covers the op's gene path, and whose `when` (if any) holds.
 2. Apply the raises: an op flagged `rewrite` or `guardrail_touch` is at least
    the raise's `min_tier`.
-3. Apply `policy.risk_overrides` (§5).
+3. Apply `policy.risk_overrides` (§5, by overlap).
 
 A patch's tier is the highest tier over its ops. Annotation changes on a
 revision record are not patches (T0). The tier tables in 01-genome.md §6.3
@@ -395,7 +416,8 @@ denominator).
 - The resulting revision is valid against
   [`genome-revision.schema.json`](genome-revision.schema.json), including the
   sort rules of §3.1.
-- Limits mirror the Manifest: 50 entries per category, 64 KiB inline content,
+- Limits mirror the Manifest: 50 entries per category, 64 KiB of UTF-8 per
+  inline content value,
   and the fetch-time size limits for skills (100 MiB), files (100 MiB) and
   trees (200 MiB, 5000 files).
 
@@ -431,6 +453,8 @@ How fetch details end up:
   fetched.
 - **Inline `content`** is stored in the content store and referenced by
   digest, like fetched content.
+- **Script body.** The same placeholder substitution apply performs on a
+  script body is done once at record time, and the substituted body is stored.
 
 **First revision: capturing the bot's current state.** Categories the first
 document leaves out are captured from what the bot has now. One rule applies
@@ -450,9 +474,14 @@ while capturing:
 > and the stored AGENTS.md would differ from the AGENTS.md the owner wrote,
 > so the same owner content would get different digests on different bots.
 > Capture therefore strips it with `IdentityService._remove_reference_section`,
-> the same function `sync_agents_md` uses before re-adding it. Applying the
-> revision re-adds the block exactly as today, so the running bot is
-> unchanged.
+> the same function `sync_agents_md` uses before re-adding it, and then
+> normalizes the end of the file to exactly one `\n`. The normalization is
+> needed because `sync_agents_md` writes `content.rstrip()` before the block:
+> once the block has been added, the owner's original trailing whitespace is
+> gone, so a bot with the block and a bot without it would otherwise capture
+> the same owner content with different digests. It is applied to every
+> captured AGENTS.md, block or not. Applying the revision re-adds the block
+> exactly as today, so the running bot is unchanged.
 
 **Ignored and refused.**
 
@@ -477,3 +506,4 @@ field is in [`manifest-v1-compatibility.md`](manifest-v1-compatibility.md).
 | Removing a resource from a Manifest does not remove it from the bot, so going back to a revision without a resource leaves it in place | [#2162](https://github.com/inclusionAI/Avernet/issues/2162) |
 | Editing one file of a directory stores a new blob for the whole tree | Open decision G-1 |
 | CLI tools are not part of a revision; compiled documents leave them untouched | acli work |
+| `script: null` in a Manifest document is read as "absent" by apply, so a compiled document cannot remove a bot's script | [#2862](https://github.com/inclusionAI/Avernet/issues/2862) |
