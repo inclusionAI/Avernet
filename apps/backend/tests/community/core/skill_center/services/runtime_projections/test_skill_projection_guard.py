@@ -88,3 +88,40 @@ async def test_unknown_timeout_keeps_lease_instead_of_admitting_overlap():
     send = AsyncMock(side_effect=TimeoutError)
     assert (await guard.deliver(plan=plan, send=send)).issues[0].code == "SKILL_PROJECTION_TIMEOUT"
     assert (await guard.deliver(plan=plan, send=send)).issues[0].code == "SKILL_PROJECTION_BUSY"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unavailable", [False, True])
+async def test_lease_loss_before_transport_is_zero_write(unavailable, monkeypatch):
+    _, cache, guard, plan, _, _ = setup_guard()
+
+    def renew(*_, **__):
+        if unavailable:
+            raise CacheLockInfrastructureError("unavailable")
+        return False
+
+    monkeypatch.setattr(cache, "renew_lock_strict", renew)
+    send = AsyncMock()
+    result = await guard.deliver(plan=plan, send=send)
+    assert result.issues[0].code in {"SKILL_PROJECTION_LOCK_LOST", "SKILL_PROJECTION_LOCK_UNAVAILABLE"}
+    send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [RuntimeError("connection lost"), asyncio.CancelledError()])
+async def test_interrupted_remote_call_remains_quarantined(error):
+    _, _, guard, plan, _, _ = setup_guard()
+    send = AsyncMock(side_effect=error)
+    with pytest.raises(type(error)):
+        await guard.deliver(plan=plan, send=send)
+    assert (await guard.deliver(plan=plan, send=send)).issues[0].code == "SKILL_PROJECTION_BUSY"
+
+
+@pytest.mark.asyncio
+async def test_unknown_runtime_result_remains_quarantined():
+    _, _, guard, plan, _, _ = setup_guard()
+    send = AsyncMock(return_value=RuntimeProjectionResult.pending(
+        code="SKILL_MAPPING_RUNTIME_UNAVAILABLE", reason="remote outcome unknown",
+    ))
+    await guard.deliver(plan=plan, send=send)
+    assert (await guard.deliver(plan=plan, send=send)).issues[0].code == "SKILL_PROJECTION_BUSY"
