@@ -1,6 +1,11 @@
 import { recoveryTaskContextMigration } from "./schema-session-recovery.js";
 import type { IDatabase } from './db.js';
 import { cleanupEvolveSchema } from './migrations/evolve-schema-cleanup.js';
+import {
+  reconcilePreBaselineSkillHistory,
+  reconcileProviderNeutralSkillIdentifierColumns,
+  reconcileRunArchiveCreatedAt,
+} from './migrations/evolve-schema-reconciliation.js';
 /**
  * Schema DDL for ClawWeb.
  *
@@ -2912,6 +2917,7 @@ END`,
   {
     version: 121,
     description: "ClawWeb: run_archive_records table for persisted run archives with AI analysis",
+    migrate: reconcileRunArchiveCreatedAt,
     sql: [
       `CREATE TABLE IF NOT EXISTS run_archive_records (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2923,7 +2929,7 @@ END`,
   archive_version VARCHAR(32) NOT NULL DEFAULT '3.1.0',
   status VARCHAR(32) NOT NULL DEFAULT 'completed',
   run_status VARCHAR(32) NOT NULL,
-  created_at TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL,
   run_process_json MEDIUMTEXT,
   workflow_spec_json MEDIUMTEXT,
   workflow_deploy_history_json MEDIUMTEXT,
@@ -3112,6 +3118,7 @@ END`,
   {
     version: 128,
     description: "Normalize Skill history into one business event per task",
+    migrate: reconcilePreBaselineSkillHistory,
     sql: [
       `CREATE TABLE IF NOT EXISTS ce_skill_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3225,6 +3232,7 @@ END`,
   {
     version: 131,
     description: "Reconcile run archives for pre-rebase Evolve feature databases",
+    migrate: reconcileRunArchiveCreatedAt,
     sql: [
       `CREATE TABLE IF NOT EXISTS run_archive_records (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3236,7 +3244,7 @@ END`,
   archive_version VARCHAR(32) NOT NULL DEFAULT '3.1.0',
   status VARCHAR(32) NOT NULL DEFAULT 'completed',
   run_status VARCHAR(32) NOT NULL,
-  created_at TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL,
   run_process_json MEDIUMTEXT,
   workflow_spec_json MEDIUMTEXT,
   workflow_deploy_history_json MEDIUMTEXT,
@@ -3262,11 +3270,8 @@ END`,
   {
     version: 132,
     description: "Use provider-neutral Skill identifiers without changing stored values",
-    sql: [
-      `ALTER TABLE ce_skill_assets RENAME COLUMN ocb_skill_id TO external_skill_id`,
-      `ALTER TABLE ce_skill_audit_events RENAME COLUMN ocb_skill_id TO external_skill_id`,
-      `ALTER TABLE ce_skill_events RENAME COLUMN ocb_skill_id TO external_skill_id`,
-    ],
+    migrate: reconcileProviderNeutralSkillIdentifierColumns,
+    sql: [],
   },
   {
     version: 133,
