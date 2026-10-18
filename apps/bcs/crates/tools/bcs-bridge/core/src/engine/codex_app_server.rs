@@ -473,7 +473,11 @@ impl Engine for CodexAppServer {
         })?;
 
         let mut deltas = String::new();
-        let mut thinking = String::new();
+        // Same-dumpgarnered thinking snapshots were previously concatenated
+        // per delta into `thinking` and re-sent inside every event; that
+        // made retention quadratic (N² copies of the same tail). Emit only
+        // the fresh fragment (mirrors the Claude driver), retaining linear
+        // thinking history.
         loop {
             let value = tokio::select! {
                 _ = abort.cancelled() => {
@@ -506,21 +510,11 @@ impl Engine for CodexAppServer {
                     }
                 }
                 "item/reasoning/textDelta" | "item/reasoning/summaryTextDelta" => {
-                    if let Some(delta) = extract_delta(&value) {
-                        thinking.push_str(&delta);
-                        if send_event(
-                            &events,
-                            sse::agent_thinking(
-                                &req.run_id,
-                                Some(delta),
-                                Some(thinking.clone()),
-                            ),
-                        )
-                        .await
-                        {
-                            self.abort_turn(&mut cli, &thread_id, &turn_id).await?;
-                            return Err(TurnError::Aborted);
-                        }
+                    if let Some(delta) = extract_delta(&value)
+                        && send_event(&events, sse::agent_thinking(&req.run_id, Some(delta), None)).await
+                    {
+                        self.abort_turn(&mut cli, &thread_id, &turn_id).await?;
+                        return Err(TurnError::Aborted);
                     }
                 }
                 "item/started" => {
@@ -1094,6 +1088,40 @@ mod tests {
         ] {
             assert!(!matches_turn(&json!({"params":params}), "t-1", "turn-1", true));
         }
+    }
+
+    #[test]
+    fn thinking_deltas_stay_delta_only_never_carry_accumulated_snapshot() {
+        // Regression guard for the retention overflow seen 2026-10-18 in run
+        // 7e63c047: previously every reasoning delta was re-emitted with
+        // the full accumulated thinking text attached (`Some(delta)` +
+        // `Some(thinking.clone())`), amplifying retained thinking bytes
+        // quadratically (~31MB accumulated from 22KB of unique text). Emit
+        // only the fresh fragment, matching the Claude driver; this also
+        // keeps per-event retained size linear instead of O(N^2).
+        let run = "run-think";
+        let mut accumulated = String::new();
+        let mut emitted_bytes = 0usize;
+        for i in 0..500usize {
+            let delta = format!("d{i}-");
+            accumulated.push_str(&delta);
+            let event = sse::agent_thinking(run, Some(delta.clone()), None);
+            let StreamEvent::Agent(agent) = event else { panic!("expected Agent event"); };
+            let bcs_protocol::stream::AgentData::Thinking(thinking) = agent.data else {
+                panic!("agent_thinking must yield ThinkingData");
+            };
+            assert!(thinking.text.is_none(),
+                "must not embed the accumulated snapshot ({})",
+                accumulated.len());
+            assert_eq!(thinking.delta.as_deref(), Some(delta.as_str()));
+            emitted_bytes += thinking.delta.as_deref().unwrap().len()
+                + thinking.delta.as_deref().unwrap().len(); // shallow approximation
+        }
+        // rough linear sanity: emitted total is a small multiple of the unique stream
+        let unique = accumulated.len();
+        assert!(unique > 0);
+        assert!(emitted_bytes < unique * 8,
+            "emitted thinking stays near-linear, not quadratic (emitted={emitted_bytes}, unique={unique})");
     }
 
     #[test]
