@@ -138,6 +138,8 @@ function DiagnosisPanel({
   const [draftNeedsCheck, setDraftNeedsCheck] = useState(false)
   const [repairNotice, setRepairNotice] = useState('')
   const [selectedTaskId, setSelectedTaskId] = useState(initialRepairView.selectedTaskId)
+  const [previousRoundTaskId, setPreviousRoundTaskId] = useState('')
+  const previousRoundRevision = useRef(1)
   const returnScroll = useRef(0)
   const openTask = (id: string) => { returnScroll.current = window.scrollY; setSelectedTaskId(id) }
   const closeTask = () => { setSelectedTaskId(''); requestAnimationFrame(() => window.scrollTo?.(0, returnScroll.current)) }
@@ -227,16 +229,16 @@ function DiagnosisPanel({
       initializedDigest.current = result.inputDigest
     } else if (repairQuery.error) {
       queryClient.removeQueries({ queryKey: ['repair-issue-previews', workflowId], type: 'inactive' })
-      setSelectedRepairIds([])
-      setSelectionItems({})
+      if (!previousRoundTaskId) {
+        setSelectedRepairIds([]); setSelectionItems({}); setDraftOpen(false)
+      }
       setSelectedRepairItemId(null)
-      setDraftOpen(false)
       setDisposition(null)
       detailEpoch.current += 1
       detailRequests.current.clear()
       setRepairDetails({}); setRepairDetailLoading({}); setRepairDetailErrors({})
     }
-  }, [repairQuery.data, repairQuery.error, accessReady, queryClient, workflowId])
+  }, [repairQuery.data, repairQuery.error, accessReady, queryClient, workflowId, previousRoundTaskId])
 
   const clusters = aggregateDiagnoses(diagnoses)
   for (const cluster of clusters) cluster.aggregation = data?.groups.find(group => group.signature === cluster.signature)
@@ -303,9 +305,29 @@ function DiagnosisPanel({
     return next.length <= Math.min(100, repairData?.limits.maxItems ?? 100) ? next : current
   })
   const resetRequestId = () => { requestId.current = ''; requestPayloadKey.current = '' }
+  const startNextRound = (publishedRevision: number) => {
+    if (!selectedTaskId || repairBusy || !canEdit || !repairData?.canEdit) return
+    setPreviousRoundTaskId(selectedTaskId)
+    previousRoundRevision.current = publishedRevision
+    setSelectedTaskId(''); setSelectedRepairIds([]); setSelectionItems({}); setInstructions('')
+    closeDetail(); setDrawerEntry(undefined); setSelectionOpen(false); setHistoryOpen(false)
+    detailEpoch.current += 1; detailRequests.current.clear()
+    setRepairDetails({}); setRepairDetailLoading({}); setRepairDetailErrors({})
+    resetRequestId(); setDraftNeedsCheck(false); setRepairActionError(''); setRepairNotice(''); setSelectionNotice('')
+    setDisposition(null); setDispositionReason(''); setDispositionUntil('')
+    setRepairRefresh(value => value + 1); setDraftOpen(true)
+  }
+  const returnToPreviousRound = () => {
+    if (repairBusy || !previousRoundTaskId) return
+    try {
+      const key = `repair-workspace:${workflowId}:${previousRoundTaskId}`
+      sessionStorage.setItem(key, JSON.stringify({ ...JSON.parse(sessionStorage.getItem(key) || '{}'), view: 'observe', revision: previousRoundRevision.current, followLatest: false }))
+    } catch { /* Inspection remains available without browser storage. */ }
+    closeDetail(); setDraftOpen(false); setSelectedTaskId(previousRoundTaskId)
+  }
   const openDraft = () => {
     if (generationReason) return
-    closeDetail(); resetRequestId(); setRepairActionError(''); setDraftOpen(true)
+    closeDetail(); resetRequestId(); setPreviousRoundTaskId(''); setRepairActionError(''); setDraftOpen(true)
   }
   const changeHistoryScope = (next: boolean) => {
     initializedDigest.current = ''
@@ -420,6 +442,7 @@ function DiagnosisPanel({
   }
 
   const acceptRepairPage = (result: RepairCandidatesResponse) => {
+        if (repairError) setRepairRefresh(value => value + 1)
         if (initializedDigest.current && initializedDigest.current !== result.inputDigest) {
           setSelectedRepairIds([])
           initializedDigest.current = result.inputDigest
@@ -477,15 +500,16 @@ function DiagnosisPanel({
         </button>
       </RepairDialog>
 
-  if (selectedTaskId) return <RepairTaskDialog workflowId={workflowId} taskId={selectedTaskId} includeHistorical={includeHistorical}
-    canEdit={canEdit && repairData?.canEdit === true} onClose={closeTask} onChanged={() => setRepairRefresh(value => value + 1)} />
+  if (selectedTaskId) return <RepairTaskDialog key={selectedTaskId} workflowId={workflowId} taskId={selectedTaskId} includeHistorical={includeHistorical}
+    canEdit={canEdit && repairData?.canEdit === true} onClose={closeTask} onChanged={() => setRepairRefresh(value => value + 1)}
+    onNextRound={startNextRound} onPreviousRound={previousRoundTaskId && previousRoundTaskId !== selectedTaskId ? returnToPreviousRound : undefined} />
   if (draftOpen) return <>
     <RepairSelectionWorkspace workflowId={workflowId} includeHistorical={includeHistorical} refreshToken={repairRefresh} selected={selectedRepairIds}
       selectedItems={selectedItems} instructions={instructions} busy={repairBusy} reason={generationReason} error={repairActionError}
-      onRecover={draftNeedsCheck ? () => void recoverDraft() : undefined}
+      onRecover={draftNeedsCheck ? () => void recoverDraft() : undefined} nextRound={!!previousRoundTaskId} canEdit={canEdit && repairData?.canEdit === true}
       onInstructions={setInstructions} onToggle={toggleRepairItem} onResult={acceptRepairPage} onDetail={item => {
         setSelectionItems(current => ({ ...current, [item.itemId]: item })); setSelectedRepairItemId(item.itemId)
-      }} onGenerate={() => void submitDraft()} onBack={() => { if (!repairBusy) { setDraftOpen(false); closeDetail() } }} />
+      }} onGenerate={() => void submitDraft()} onBack={() => { if (previousRoundTaskId) returnToPreviousRound(); else if (!repairBusy) { setDraftOpen(false); closeDetail() } }} />
     {selectedRepairItem && <RepairDialog title="问题、建议与证据" onClose={() => setSelectedRepairItemId(null)}>{renderRepairItem(selectedRepairItem)}</RepairDialog>}
     {dispositionDialog}
   </>

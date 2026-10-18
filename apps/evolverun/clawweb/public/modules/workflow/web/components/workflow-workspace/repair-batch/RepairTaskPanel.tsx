@@ -15,9 +15,9 @@ function initialRevision(detail:RepairTaskDetail){
  const published=detail.release?.deployments.find(row=>row.status==='succeeded')
  return (['failed','no_change'].includes(detail.latestAttempt.phase)&&published?published.revision:detail.latestSuccessful?.revision)??detail.latestAttempt.revision
 }
-export default function RepairTaskPanel({detail,canEdit,onFeedback,onCancel,onRetryDispatch,onRetryGeneration,onRefresh,onHistoryPageChange,dispatchError,busy}:{
+export default function RepairTaskPanel({detail,canEdit,onFeedback,onNextRound,onCancel,onRetryDispatch,onRetryGeneration,onRefresh,onHistoryPageChange,dispatchError,busy}:{
  detail:RepairTaskDetail;canEdit:boolean;onFeedback:()=>void;onCancel:()=>void;busy:boolean;onRetryGeneration:()=>void;
- onRefresh:()=>void;onRetryDispatch:()=>void;dispatchError:string;onHistoryPageChange?:(page:number)=>void;
+ onRefresh:()=>void;onRetryDispatch:()=>void;dispatchError:string;onHistoryPageChange?:(page:number)=>void;onNextRound?:(publishedRevision:number)=>void;
 }){
  const storageKey=`repair-workspace:${detail.workflowId}:${detail.taskId}`
  const saved=useRef(preference(storageKey))
@@ -33,6 +33,7 @@ export default function RepairTaskPanel({detail,canEdit,onFeedback,onCancel,onRe
  const deployment=detail.release?.deployments.find(row=>row.revision===revision.revision&&row.status!=='failed')??detail.release?.deployments.find(row=>row.revision===revision.revision)
  const published=deployment?.status==='succeeded'&&!!deployment.receipt
  const alreadyPublished=detail.revisions.some(row=>row.phase==='published')||!!detail.release?.deployments.some(row=>row.status==='succeeded')
+ const publishedRevision=published?revision.revision:detail.release?.deployments.find(row=>row.status==='succeeded'&&!!row.receipt)?.revision
  const automatic=!!latest.input.automation?.roundId
  const canGenerate=canEdit&&detail.capabilities.generation&&!busy&&!alreadyPublished
  const [observations,setObservations]=useState<Record<string,string>>({})
@@ -49,6 +50,10 @@ export default function RepairTaskPanel({detail,canEdit,onFeedback,onCancel,onRe
     <label className="text-xs text-muted-foreground">候选版本<select aria-label="查看修复版本" className="ml-2 max-w-full rounded border border-input bg-background p-2 text-foreground" value={revision.revision} onChange={event=>switchRevision(Number(event.target.value))}>{revisions.map(row=><option key={row.revision} value={row.revision}>v{row.revision} · {candidateLabel(detail,row)}</option>)}</select></label>
    </div>
    {!canEdit&&<p className="mt-3 text-xs text-warning-foreground">当前只有查看权限。</p>}
+   {publishedRevision!==undefined&&onNextRound&&<div className="mt-4 space-y-2 border-t border-border pt-4">
+    <button type="button" className={primary} disabled={!canEdit||busy} onClick={()=>onNextRound(publishedRevision)}>开始下一轮优化</button>
+    <p className="text-xs text-muted-foreground">观察中也可选择其他问题与建议；提交时基于最新生效版本创建独立新任务，保留本轮观察记录。</p>
+   </div>}
    {latest.revision!==revision.revision&&<p className="mt-3 text-xs text-muted-foreground">最新尝试 v{latest.revision}：{candidateLabel(detail,latest)}；当前仍查看 v{revision.revision}。</p>}
    {latest.phase==='failed'&&<div className="mt-3 space-y-2 border-t border-border pt-3 text-sm">
     <p>{latest.error?.code==='GIT_RESULT_UNAVAILABLE'?'原候选结果尚未读取成功，请核对原结果。':detail.latestSuccessful?'最新生成失败，已有候选保留。':'首次生成失败，尚无候选。'}</p>

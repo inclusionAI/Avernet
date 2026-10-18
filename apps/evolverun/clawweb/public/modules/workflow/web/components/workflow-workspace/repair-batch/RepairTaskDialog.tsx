@@ -10,9 +10,9 @@ import { button, primary, RepairDialog } from './repair-view'
 const frozenItemTitle = (item: RepairTaskDetail['latestAttempt']['input']['items'][number]) =>
   typeof item.proposal?.summary === 'string' ? item.proposal.summary : item.instruction || item.itemId
 
-export default function RepairTaskDialog({ workflowId, taskId, includeHistorical, canEdit, onClose, onChanged }: {
+export default function RepairTaskDialog({ workflowId, taskId, includeHistorical, canEdit, onClose, onChanged, onNextRound, onPreviousRound }: {
   workflowId: string; taskId: string; includeHistorical: boolean; canEdit: boolean;
-  onClose: () => void; onChanged: () => void;
+  onClose: () => void; onChanged: () => void; onNextRound?: (publishedRevision: number) => void; onPreviousRound?: () => void;
 }) {
   const [detail, setDetail] = useState<RepairTaskDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -254,12 +254,14 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
 
   return <section aria-label="Workflow 修复工作区" className="mx-auto max-w-[96rem] space-y-5 pb-8">
     <button type="button" className="text-xs text-muted-foreground hover:text-primary" disabled={busy} onClick={onClose}>← 返回问题与优化</button>
+    {onPreviousRound && <button type="button" className={button} disabled={busy} onClick={onPreviousRound}>返回上一轮观察</button>}
     {loading && <p role="status" className="text-xs text-muted-foreground">加载修复任务…</p>}
     {taskError && <p role="alert" className="text-xs text-destructive">{taskError} <button type="button" className={button} disabled={busy} onClick={reload}>重试读取任务</button></p>}
     {(error || notice || effectiveRecoveryAction) && <div className="flex flex-wrap items-center gap-3 rounded-lg border border-input bg-card p-4"><p role={error ? 'alert' : 'status'} className="text-xs text-muted-foreground">{error || notice || dispatchError}</p>{recoveryButton}</div>}
     {detail && <RepairTaskPanel key={detail.taskId}
       detail={detail} onHistoryPageChange={setHistoryPage} canEdit={canEdit && !taskError && !loading && !recoveryAction} busy={busy} dispatchError={recoveryAction ? '' : dispatchError}
       onFeedback={openSelection}
+      onNextRound={onNextRound}
       onCancel={() => { setError(''); setMode('cancel') }} onRetryDispatch={() => void retryDispatch()} onRetryGeneration={() => void retryGeneration()} onRefresh={reload} />}
   </section>
 }

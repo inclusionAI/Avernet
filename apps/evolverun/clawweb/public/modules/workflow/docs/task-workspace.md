@@ -22,6 +22,22 @@ returning from the scope editor. Storage failures do not block inspection. Task
 records and version digests remain unchanged. Paged historical records are folded;
 there is no second sidebar version picker.
 
+## Starting another optimization task
+
+After a confirmed publication, **开始下一轮优化** opens the existing problem and
+suggestion selection workspace, including while evidence is still collecting or
+cannot be read. It remains available when published v1 is retained beside a later
+no-change/failed attempt. Viewing or entering selection performs no write. A new
+entry clears previous selections, details, requirements and request identities.
+The selection workspace and the newly created task retain **返回上一轮观察**.
+
+Submitting uses the existing create endpoint to create an independent task. The
+server resolves the latest effective baseline at submission; it does not revise
+the published task or inherit its frozen baseline. Previous publication receipts,
+observations and evidence remain attached to the previous task. Adopted items
+awaiting verification stay unavailable for selection. Existing permissions,
+capability, read-failure and idempotency gates still apply.
+
 ## Content reduction
 
 - Scope shows original problem/goal titles, selected integrated goals when provided,
