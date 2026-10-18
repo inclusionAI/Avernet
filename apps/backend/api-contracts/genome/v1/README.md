@@ -263,7 +263,12 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
 - **`resources`.** `path` is workspace-relative: characters
   `A–Z a–z 0–9 . _ - /`, no leading `/` or `~`, no empty, `.` or `..`
   segment. A trailing `/` makes it a directory entry. No entry may lie inside
-  another directory entry (the Manifest refuses nesting too). The Manifest
+  another directory entry (the Manifest refuses nesting too), and no two
+  entries may name the same path once the trailing `/` is removed: `foo.md`
+  and `foo.md/` would both be written to the workspace path `foo.md` (apply
+  writes the file, then cannot write the directory's members under it) and
+  would share the gene path `resources/foo.md`. The Manifest does not refuse
+  this pair; recording does. The Manifest
   accepts empty and `.` segments (`./faq.csv`, `a//b`); recording removes
   them, so each path has one spelling. Every file a resource puts in the
   workspace (a file resource, or each member of a directory resource) must
@@ -469,6 +474,7 @@ denominator).
   | `persona` | `IdentityMaterialiser`, `legal_identity_types` | UTF-8 bytes (including content given by digest); a type the bot's engine accepts |
   | `skills` (`local`) | `SkillPackageValidator`, skills materialiser | One root `SKILL.md` with front matter `name` equal to the entry name and a non-empty `description`; Skill Center limits and path rules |
   | `resources` | `admission_refusal` (`core/resources/services/file_service.py`) | Every file, and every member of a directory: an allowed extension, at most 500 MB |
+  | `resources` | resources materialiser (`apply/materialisers/resources.py`) | Paths unique once a trailing `/` is removed (no `foo.md` with `foo.md/`); no entry inside a directory entry |
   | `tools.mcp` | Manifest MCP validation (`schema/entries.py`) | `url` parses with a hostname; header names unique case-insensitively, no CR or LF |
   | text files a patch edits | `file.edit`, `skill.update` diffs | Valid UTF-8 before and after |
 

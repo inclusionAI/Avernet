@@ -193,6 +193,9 @@ def test_every_invalid_example_fails_its_stated_check(path: Path) -> None:
         with pytest.raises(AssertionError):
             for entry in record["spec"]["resources"]:
                 _assert_resource_admitted(entry)
+    elif check == "resource-paths":
+        with pytest.raises(AssertionError):
+            _assert_resource_paths(record["spec"]["resources"])
     elif check == "identity":
         assert record["revision"]["id"] != revision_id(record["spec"], record["policy"]), case["reason"]
     else:
@@ -212,6 +215,7 @@ def test_example_revision_ids_and_digests_are_real(path: Path) -> None:
 
     for entry in spec["persona"]:
         _blob(entry["digest"]).decode("utf-8")  # apply refuses a persona file that is not UTF-8
+    _assert_resource_paths(spec["resources"])
     for entry in spec["resources"]:
         _assert_resource_admitted(entry)
     for entry in spec["skills"]:
@@ -278,6 +282,15 @@ def _assert_skill_package(name: str, members: list[tuple[str, bytes]]) -> None:
     metadata = yaml.safe_load(text.split("---\n", 2)[1])
     assert metadata.get("name") == name, f"SKILL.md names its skill {metadata.get('name')!r}, not {name!r}"
     assert str(metadata.get("description") or "").strip(), "SKILL.md needs a description"
+
+
+def _assert_resource_paths(entries: list[dict[str, Any]]) -> None:
+    """Each resource names its own workspace path: no file/directory alias, no nesting (README §4.2)."""
+    names = [e["path"].rstrip("/") for e in entries]
+    assert len(set(names)) == len(names), f"resource paths alias one workspace path: {names}"
+    for directory in (e["path"] for e in entries if e["path"].endswith("/")):
+        nested = [e["path"] for e in entries if e["path"] != directory and e["path"].startswith(directory)]
+        assert not nested, f"{nested} lie inside the directory resource {directory}"
 
 
 def _assert_resource_admitted(entry: dict[str, Any]) -> None:

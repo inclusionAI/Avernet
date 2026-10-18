@@ -91,6 +91,7 @@ derived from the revision field by field as below.
 | --- | --- | --- |
 | `path` | normalized | `spec.resources[].path` (the key). Empty and `.` segments are removed (`./faq.csv` → `faq.csv`); a trailing `/` (directory) is kept |
 | a file (or directory member) the workspace does not admit | refused (*recording only*) | An extension outside `ALLOWED_EXTENSIONS` (for example `.sh`, `.toml`, none) or over 500 MB: apply's `admission_refusal` would refuse it |
+| a file path equal to a directory path without its `/` | refused (*recording only*) | e.g. `data/guide.md` with `data/guide.md/`: the Manifest's duplicate check compares the raw strings, but apply writes both to `data/guide.md`, and both would have the gene path `resources/data/guide.md` |
 | paths that collide or nest only after normalization | refused (*recording only*) | e.g. `faq.csv` with `./faq.csv`, or `data/` with `./data/a.md`: the Manifest's duplicate and nesting checks compare the raw strings |
 | a file entry's bytes | resolved | `digest` of the bytes |
 | a directory entry's files | resolved | `digest` of the `acm-tree-v1` tree; M′: content-store source |
