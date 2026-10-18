@@ -175,6 +175,11 @@ non-overlapping exact originals likewise do not wait on an unrelated group job.
 Multiple overlapping originals still require validated compatible-plan coverage;
 real conflicts and unknown relationships are never auto-authorized.
 
+Confirming a subset of an expanded exact-duplicate group retains only the reviewed
+raw originals and their own provenance/counts. Unselected equivalent members are
+not copied into selection metadata or frozen input. Non-exact complementary plans
+continue to require complete reviewed membership and explicit confirmation.
+
 TaskGuard consumes each plan once, exposing original proposals, sources, evidence
 packets and integrated goals to the writer. It generates complete file content
 against the current candidate, never concatenates or sequentially replaces source

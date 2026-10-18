@@ -46,3 +46,21 @@ it('keeps a single unchanged original independent of unrelated queued or expande
     expect(proposalPending(Object.values(result.current))).toBe(false)
   }
 })
+it('keeps multiple reviewed originals when an exact group gains an unselected equivalent member', () => {
+  const a = item('a'), b = item('b')
+  const pa = { id: 'a-plan', fingerprint: 'old', itemIds: ['a'], title: 'a', changes: [], relation: 'exact' as const, status: 'ready' as const, conflicts: [] }
+  const pb = { ...pa, id: 'b-plan', itemIds: ['b'], title: 'b' }
+  const previous = { a: { ...a, aggregation: { ...pa, originals: [a], flowIds: [] } }, b: { ...b, aggregation: { ...pb, originals: [b], flowIds: [] } } }
+  const fresh = { items: [a, b], plans: [{ ...pa, id: 'expanded', fingerprint: 'new', itemIds: ['a', 'new-equivalent'] }, pb], missing: [], inputDigest: 'new', canEdit: true }
+  const result = reviewedSelection(['a', 'b'], previous, fresh, true)
+  expect(result.retained).toEqual(['a', 'b']);expect(result.planReview).toBe(false)
+  expect(proposalPending(Object.values(result.current))).toBe(false)
+  expect(Object.values(result.current).flatMap(row => row.aggregation?.originals ?? [row]).every(row => row && ['a', 'b'].includes(row.itemId))).toBe(true)
+  expect(JSON.stringify(result.current)).not.toContain('new-equivalent')
+  const rechecked = reviewedSelection(result.retained, result.current, fresh)
+  expect(rechecked.retained).toEqual(['a', 'b']);expect(rechecked.planReview).toBe(false)
+  expect(proposalPending(Object.values(rechecked.current))).toBe(false)
+  expect(JSON.stringify(rechecked.current)).not.toContain('new-equivalent')
+  const complementary = reviewedSelection(['a', 'b'], previous, { ...fresh, plans: fresh.plans.map(plan => plan.id === 'expanded' ? { ...plan, relation: 'complementary' as const } : plan) }, true)
+  expect(complementary.retained).toEqual(['a', 'b']);expect(complementary.planReview).toBe(true)
+})

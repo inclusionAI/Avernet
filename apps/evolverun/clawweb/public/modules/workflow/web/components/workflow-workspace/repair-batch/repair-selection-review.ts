@@ -26,6 +26,11 @@ export function reviewedSelection(ids: string[], previous: Record<string, Repair
     const unchanged = old && plan && planContent(old) === planContent(plan)
       && (old.fingerprint === plan.fingerprint && old.id === plan.id || old.relation === 'exact' && plan.relation === 'exact')
     const complete = plan?.itemIds.every(member => retained.includes(member))
+    if (plan?.relation === 'exact' && !complete && (confirmPlans || !old)) {
+      // Exact grouping is optional presentation of identical edits. Keep the
+      // reviewed raw originals; do not import unselected members or their counts.
+      const { aggregation: _plan, ...original } = current[id]; current[id] = original; continue
+    }
     const independent = plan?.relation === 'exact' && plan.itemIds.length === 1
       && !selectionConflicts(retained.map(member => originals[member])).some(conflict => conflict.itemIds.includes(id))
     if (plan && complete && (unchanged || confirmPlans) && (independent || !['queued', 'organizing', 'retryable', 'unavailable', 'uncertain'].includes(plan.status))) {
