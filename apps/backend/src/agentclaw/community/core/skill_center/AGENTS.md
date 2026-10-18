@@ -261,6 +261,20 @@ Legacy `/api/skills`、`/api/skillsets` 位于 `community/adapters/http/skill_ce
 - 参数仍保存在 Bot Engine 的历史 name-keyed `skill_parameters.json`；它不是新数据库、原生注入或 observed-runtime 接口。只有明确缺失才能初始化为空，读取拒绝、损坏或异常必须零写；替换一个 Skill 时保留其它 Skill 与根元信息。
 - Local shared README 从 Skill 行的 `owner_id + bot_id` 精确定位，不使用全局唯一 bot_id 假设。Legacy Factory/fallback、配置迁移 gate、TaskQueue 提交窗口仍存在；上述实现不表示历史数据全量迁移、运行时全引擎验收或发布消费端都已经验证。
 
+## 默认来源撤销与共享软链收敛
+
+`ac_bot_skill_installation` 仍是生效安装事实。`ac_bot_skill_installation_source`
+在同一 UoW 记录 DIRECT、DEFAULT、SKILL_SET 来源；缺行表示历史 UNKNOWN，
+不根据当前成员关系回填。Default 同步只撤销已记录 DEFAULT 且无有效 Set 供给的安装，
+保留 DIRECT 与 UNKNOWN；合法 Direct 重复安装也会保存 DIRECT 意图。
+上线前先执行 `sql/2026_10_18_skill_installation_source.sql`，回滚应用时保留该表。
+
+默认集管理接口不逐 Bot 推送。下次有效读取及完整 Skill 投影才收敛：Engine 清理
+未被完整声明选中的 Repo／Center 生效软链，涵盖 Legacy、Pool 与描述器桥接。
+Local 保留现有显式 `retired_mappings` 卸载；真实目录、外部链接和结构目录保留。
+内容准备失败的 Center 声明仍保护其链接；只有成功解析的完整快照（包括合法空列表）
+允许自动清理。删除失败必须报告未收敛。发布 Service Bot 继续消费冻结 Artifact。
+
 ## 11. 修改后的验证与文档维护
 
 按变化范围选择现有测试，而非每次跑 Backend 全量：

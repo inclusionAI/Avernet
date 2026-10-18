@@ -31,6 +31,7 @@ from agentclaw.community.core.skill_center.errors import (
 )
 from agentclaw.community.core.skill_center.offline_policy import require_skill_online
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.core.models.skill_installation_source import SkillInstallationSourceKind
 
 
 class DefaultExclusionCommands:
@@ -202,6 +203,7 @@ class DefaultExclusionCommands:
                 skill_installations.install(
                     session, bot_id=bot_id, owner_id=owner_id,
                     env=get_current_env(), skill_id=int(skill_id),
+                    source_kind=SkillInstallationSourceKind.DEFAULT, source_set_id=int(row.id),
                 )
                 # Only a restored *member* re-enters the projection; lifting a
                 # stale exclusion on a non-member claims nothing.

@@ -28,6 +28,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneConflictError,
 )
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.core.models.skill_installation_source import SkillInstallationSourceKind
 
 
 CENTER_MEMBERSHIP_IDENTITY_MISSING = "CENTER_MEMBERSHIP_IDENTITY_MISSING"
@@ -186,12 +187,9 @@ class BotSkillSetInstallations:
     ) -> InstallationFlushPlan:
         """Materialize the current Default Set without repairing ordinary Sets.
 
-        The mode is safe only after the operator has backfilled ordinary
-        SkillSet history.  A Default membership removal is deliberately not
-        inferred from an Installation row: that row may be Direct, and Default
-        removal is an explicit operational cleanup.  Per-Bot exclusions are
-        the one supported Default removal signal.  An active ordinary claim
-        still wins over that signal for malformed historical overlap.
+        Removed Default members release only recorded Default installations.
+        Direct intent and historical unknown provenance are never inferred
+        from current membership. Active ordinary claims continue to win.
         """
         return self._reconcile_installations(
             bot_id=bot_id,
@@ -278,9 +276,13 @@ class BotSkillSetInstallations:
                 session, bot_id=bot_id, owner_id=owner_id, env=env, locked=True
             )
             for skill_id in sorted(plan.skills_to_install - installed):
+                kind, set_id = self._skill_installation_source(
+                    session, bot_id=bot_id, owner_id=owner_id, skill_id=skill_id,
+                    engine_type=engine_type, default_engine_types=default_engine_types,
+                )
                 skill_installations.install(
                     session, bot_id=bot_id, owner_id=owner_id, env=env,
-                    skill_id=skill_id,
+                    skill_id=skill_id, source_kind=kind, source_set_id=set_id,
                 )
             if allow_uninstall:
                 skill_installations.uninstall(
@@ -305,6 +307,37 @@ class BotSkillSetInstallations:
                     server_codes=plan.mcps_to_uninstall & installed_mcps,
                 )
             return plan
+
+    def _skill_installation_source(
+        self, session, *, bot_id: str, owner_id: str, skill_id: int,
+        engine_type: str | None, default_engine_types: tuple[str, ...] | None,
+    ) -> tuple[SkillInstallationSourceKind, int]:
+        for row in self._bot_sets(
+            session, bot_id=bot_id, owner_id=owner_id, engine_type=engine_type,
+            default_engine_types=default_engine_types,
+        ):
+            if not (row.is_default or row.is_active):
+                continue
+            if row.is_default and skill_id in default_exclusions.excluded_skill_ids(
+                session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id),
+            ):
+                continue
+            if skill_id in set_member_skill_ids(self._scope, session, skill_set_id=int(row.id)):
+                return (
+                    SkillInstallationSourceKind.DEFAULT if row.is_default
+                    else SkillInstallationSourceKind.SKILL_SET,
+                    int(row.id),
+                )
+        raise ValueError("installation plan has no active source")
+
+    @staticmethod
+    def _default_withdrawals(session, *, bot_id, owner_id, active_ids, locked: bool) -> set[int]:
+        return {
+            skill_id for skill_id, (kind, _) in skill_installations.sources(
+                session, bot_id=bot_id, owner_id=owner_id, env=get_current_env(), locked=locked,
+            ).items()
+            if kind == SkillInstallationSourceKind.DEFAULT and skill_id not in active_ids
+        }
 
     def list_member_skill_ids(
         self,
@@ -397,7 +430,13 @@ class BotSkillSetInstallations:
         return InstallationFlushPlan(
             member_skill_ids=frozenset(default_skills),
             skills_to_install=frozenset(default_skills),
-            skills_to_uninstall=frozenset(excluded_skills - ordinary_active_skills),
+            skills_to_uninstall=frozenset(
+                (excluded_skills - ordinary_active_skills)
+                | self._default_withdrawals(
+                    session, bot_id=bot_id, owner_id=owner_id,
+                    active_ids=default_skills | ordinary_active_skills, locked=locked,
+                )
+            ),
             mcps_to_install=frozenset(default_mcps),
             mcps_to_uninstall=frozenset(excluded_mcps - ordinary_active_mcps),
         )
@@ -481,7 +520,12 @@ class BotSkillSetInstallations:
             # An active claim wins: R3 keeps a capability in one Set, so on
             # historical malformed two-Set data the flush errs safe and never
             # uninstalls a member a live Set accounts for.
-            skills_to_uninstall=frozenset(inactive_skills - active_skills),
+            skills_to_uninstall=frozenset(
+                (inactive_skills - active_skills)
+                | self._default_withdrawals(
+                    session, bot_id=bot_id, owner_id=owner_id, active_ids=active_skills, locked=locked,
+                )
+            ),
             mcps_to_install=frozenset(active_mcps),
             mcps_to_uninstall=frozenset(inactive_mcps - active_mcps),
         )

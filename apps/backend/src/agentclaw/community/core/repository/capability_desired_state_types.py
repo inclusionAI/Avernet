@@ -24,6 +24,7 @@ class CapabilityDesiredState:
     # restore that missed them would be silently re-applied by the next read.
     skill_exclusions: frozenset[tuple[int, int]] = frozenset()
     mcp_exclusions: frozenset[tuple[int, str]] = frozenset()
+    installation_sources: dict[int, tuple[str, int | None]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
