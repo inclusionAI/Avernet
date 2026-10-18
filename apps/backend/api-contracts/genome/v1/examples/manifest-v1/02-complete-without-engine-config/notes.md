@@ -7,6 +7,8 @@ Real digests in place of the doc's shortened ones, as in `01-complete`.
 - `SAFETY.md` was inline `content`; it is stored and referenced by digest like the fetched files.
 - `data/kb/` and both skills are `acm-tree-v1` trees. `order-lookup` was an OSS zip: it is unpacked
   first, so its digest does not depend on how the zip was compressed.
+- A skill's tree is the files the Skill Center validator keeps: the zip's `order-lookup/` wrapper is
+  stripped, and the macOS files in both skills (`.DS_Store`, `__MACOSX/`, `._SKILL.md`) are dropped.
 - `cli_tools` is ignored: not in the revision, omitted from `compiled.yaml`, so apply leaves the
   bot's CLI tools as they are.
 - Equivalent: applying `compiled.yaml` gives the same identity files, skills, resources, MCP server

@@ -523,6 +523,14 @@ def _single(files: dict[str, bytes]) -> bytes:
     return files[""]
 
 
+def _skill_files(files: dict[str, bytes]) -> list[tuple[str, bytes]]:
+    """The files the skills materialiser keeps: wrapper stripped, ignored paths dropped (README §4.2)."""
+    from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
+    from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
+
+    return list(SkillPackageValidator(SkillParser()).validate_directory(list(files.items())).files)
+
+
 def _record(document: dict[str, Any]) -> dict[str, Any]:
     """A first revision on an empty bot, recorded from ``document`` against the fixtures."""
     manifest = document.get("manifest") or {}
@@ -531,7 +539,7 @@ def _record(document: dict[str, Any]) -> dict[str, Any]:
         data = entry["content"].encode() if "content" in entry else _single(_fetch_files(document, entry))
         persona.append({"type": entry["type"], "digest": sha256_digest(data)})
     skills = [
-        {"name": e["name"], "origin": "local", "digest": sha256_digest(canonical_tree_bytes(list(_fetch_files(document, e).items())))}
+        {"name": e["name"], "origin": "local", "digest": sha256_digest(canonical_tree_bytes(_skill_files(_fetch_files(document, e))))}
         for e in manifest.get("skills", [])
     ]
     resources = []

@@ -246,7 +246,15 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
   Skill Center package, as `SkillPackageValidator` checks at apply: exactly
   one `SKILL.md`, at the root, whose YAML front matter has a `name` equal to
   the entry's name and a non-empty `description`; at most 500 files, 10 MiB
-  per file, 50 MiB in total, 256 characters per path. `center`: a governed Skill Center skill pinned by version and
+  per file, 50 MiB in total, 256 characters per path. The tree is the
+  validator's output, not the files the source served: recording passes the
+  fetched files through `SkillPackageValidator` (`validate_directory`, the
+  same check the skills materialiser runs) and encodes the
+  `ValidatedSkillPackage.files` it returns. That strips a single wrapper
+  directory around the package and drops the paths the validator ignores
+  (`.DS_Store`, `._*`, `Thumbs.db`, `ehthumbs.db`, `Desktop.ini`, a root
+  `__MACOSX/`, any `.git` or `__pycache__` component, `*.pyc`, `*.pyo`), so
+  the digest is of what apply delivers. `center`: a governed Skill Center skill pinned by version and
   not copied (ADR 0010); a pinned version is a reference to a published
   version, not evidence that it is active. A Manifest v1 document cannot yet
   declare a Center skill; RSI-04 adds that source.
@@ -481,7 +489,8 @@ Manifest v1 document. The second path:
 3. **Fetch** every source once, through the Manifest's existing fetch
    machinery (named sources, credentials, placeholders, `unpack`,
    `strip_components`), and store the bytes in the content store.
-4. **Build** `spec` from the fetched bytes (§4) and copy the policy from the
+4. **Build** `spec` from the fetched bytes (§4); a skill's tree is built from
+   the files `SkillPackageValidator` keeps (§4.2). Copy the policy from the
    parent (the default policy for a first revision).
 5. **Store** the original YAML as the provenance record. It keeps the source
    addresses and comments; it is never hashed.
