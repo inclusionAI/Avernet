@@ -56,9 +56,9 @@
 - **Goal:** Account for every Manifest v1 field and work every example document through M → revision → M′.
 - **Files:** `apps/backend/api-contracts/genome/v1/manifest-v1-compatibility.md`, `apps/backend/api-contracts/genome/v1/examples/manifest-v1/<case>/`
 - **Done when:**
-  - [ ] Every top-level, source, and per-category field of Manifest v1 has one outcome: maps, resolved at record, provenance only, refused, ignored.
-  - [ ] Round-trip definition and the proposed content-store / Center-skill source syntax (marked "fixed by RSI-04").
-  - [ ] One case for the complete document (§1.2) and for each fragment in `docs/bot-config-manifest/examples.zh-CN.md` §2–§9, each with `manifest.yaml`, `revision.json`, `compiled.yaml`, `notes.md`.
+  - [x] Every top-level, source, and per-category field of Manifest v1 has one outcome: maps, resolved at record, provenance only, refused, ignored.
+  - [x] Round-trip definition and the proposed content-store / Center-skill source syntax (marked "fixed by RSI-04").
+  - [x] One case for the complete document (§1.2) and for each fragment in `docs/bot-config-manifest/examples.zh-CN.md` §2–§9, each with `manifest.yaml`, `revision.json`, `compiled.yaml`, `notes.md`.
 - **Depends on:** Task 5
 
 ## Task 7: Contract test

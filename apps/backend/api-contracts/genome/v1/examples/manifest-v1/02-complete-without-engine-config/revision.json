@@ -1,0 +1,84 @@
+{
+  "genome_schema": 1,
+  "revision": {
+    "id": "sha256:236b903c70a41b6af9c93fe7638eaf930c617d31599dd38be4c3d23600218587",
+    "seq": 1,
+    "bot": {
+      "owner_id": "user_owner_5",
+      "bot_id": "bot_123"
+    },
+    "parent": null,
+    "created_by": {
+      "kind": "user",
+      "actor": "user_owner_5"
+    },
+    "created_at": "2026-10-18T09:00:00Z",
+    "status": "draft",
+    "patch_digest": null,
+    "evidence": [],
+    "evaluations": [],
+    "annotations": {}
+  },
+  "spec": {
+    "persona": [
+      {
+        "type": "RULES.md",
+        "digest": "sha256:6d829d683523eaa904276c2fdee3f30626dd87621f62584e005cc4b1b85e5f8c"
+      },
+      {
+        "type": "SAFETY.md",
+        "digest": "sha256:7d8668bfe8d5dc68864e66cfb61688a3763fc550ee4eafe5b2b42023dfd0652f"
+      },
+      {
+        "type": "SOUL.md",
+        "digest": "sha256:6617cb3cf941478561d38b0d95d58495f1193a505a1b6fff2807a946479877cf"
+      }
+    ],
+    "skills": [
+      {
+        "name": "order-lookup",
+        "origin": "local",
+        "digest": "sha256:856a34188a0db0f72fceb2f23f7194778dfd9e986d24c63b408423f12cc94466"
+      },
+      {
+        "name": "quality-check",
+        "origin": "local",
+        "digest": "sha256:145f1c4eb7d746fd5d30cf2e57df40ed3fc4ebdc836456aacf62a6c020e29d65"
+      }
+    ],
+    "memory": null,
+    "resources": [
+      {
+        "path": "data/faq.csv",
+        "digest": "sha256:4fd6ec587a950260a8b4be21a758efa607804df5336e4c0878770239ced33ee7"
+      },
+      {
+        "path": "data/kb/",
+        "digest": "sha256:a00d9b26f594057747609ac5c1bdacb38bb42641b41b3cf5d0d36c13b4a47ce0"
+      }
+    ],
+    "tools": {
+      "mcp": [
+        {
+          "server_code": "mcp.ant.homistudio.meetmcp"
+        }
+      ]
+    },
+    "engine_config": {},
+    "script": {
+      "digest": "sha256:1dae323207c69cf6fdb088c0e4a5d2af70f6a75a205d34b6d19477139bc71949"
+    }
+  },
+  "policy": {
+    "mutable_genes": [
+      "memory",
+      "persona",
+      "resources",
+      "skills"
+    ],
+    "pins": [
+      "persona/SAFETY.md"
+    ],
+    "risk_overrides": {}
+  }
+}

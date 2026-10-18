@@ -1,0 +1,57 @@
+{
+  "genome_schema": 1,
+  "revision": {
+    "id": "sha256:e22a62eb7cca3d70907ddf643c1e60aaeba4bee0a3654e4083e7683038536581",
+    "seq": 1,
+    "bot": {
+      "owner_id": "user_owner_5",
+      "bot_id": "bot_123"
+    },
+    "parent": null,
+    "created_by": {
+      "kind": "user",
+      "actor": "user_owner_5"
+    },
+    "created_at": "2026-10-18T09:00:00Z",
+    "status": "draft",
+    "patch_digest": null,
+    "evidence": [],
+    "evaluations": [],
+    "annotations": {}
+  },
+  "spec": {
+    "persona": [],
+    "skills": [],
+    "memory": null,
+    "resources": [],
+    "tools": {
+      "mcp": [
+        {
+          "server_code": "mcp.ant.homistudio.meetmcp",
+          "config": {
+            "endpoint_env": "PRE",
+            "headers": {
+              "x-project": "meeting-assistant"
+            },
+            "transport_protocol": "STREAMABLE_HTTP",
+            "url": "https://meeting-bot.example.com/mcp"
+          }
+        }
+      ]
+    },
+    "engine_config": {},
+    "script": null
+  },
+  "policy": {
+    "mutable_genes": [
+      "memory",
+      "persona",
+      "resources",
+      "skills"
+    ],
+    "pins": [
+      "persona/SAFETY.md"
+    ],
+    "risk_overrides": {}
+  }
+}

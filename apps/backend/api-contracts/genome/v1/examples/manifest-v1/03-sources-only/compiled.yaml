@@ -1,0 +1,7 @@
+schema_version: 1
+manifest:
+  identity: []
+  skills: []
+  resources: []
+  mcp: []
+script: null   # see notes: Manifest v1 reads this as 'leave untouched' today
