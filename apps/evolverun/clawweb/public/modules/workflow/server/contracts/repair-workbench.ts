@@ -6,6 +6,8 @@ import type { RepairReleaseDetail } from './repair-release.js';
 
 export type RepairCapabilities = { generation: boolean; diff: boolean; publication: boolean; reason: string | null };
 export type RepairInboxItem = StoredRepairItem & { sourceAvailable: boolean;
+  /** Trusted identity of original executable content; independent of supporting runs and list pagination. */
+  selectionDigest?: string;
   /** Bounded display projection. Fetch item detail for original proposal/evidence; never freeze this projection. */
   readSummary?: { sourceCount: number; runCount: number; diagnosisCount: number; originalBytes: number;
     operations: Array<{nodeId: string; path: string; identity: string}>; conflictsComplete: boolean };
@@ -50,7 +52,10 @@ export type RepairTaskDetail = {
 export type RepairSelectionRequest = {
   automation?: AutomationOrigin;
   workflowId: string; itemIds: string[]; inputDigest: string; instructions: string; requestId: string; includeHistorical?: boolean;
+  selection?: Record<string, string>;
 };
+export type RepairSelectionState = { inputDigest: string; items: RepairInboxItem[]; missing: string[]; canEdit: boolean;
+  plans?: Array<Omit<import('./repair-proposal.js').ProposalAggregation, 'originals' | 'flowIds'>> };
 export type RepairFeedbackRequest = RepairSelectionRequest & {
   expectedAttemptRevision: number; parentCandidateCommit: string | null; feedback: string;
 };
@@ -87,6 +92,7 @@ export interface RepairExecutionPort {
   diff?(input: { workflowId: string; taskId: string; revision: number; baseCommit: string; candidateCommit: string }): Promise<RepairDiff>;
 }
 export interface RepairWorkbenchService {
+  selectionState(workflowId: string, itemIds: string[], includeHistorical: boolean): Promise<Omit<RepairSelectionState, 'canEdit'>>;
   candidates(workflowId: string, query?: RepairCandidatesQuery): Promise<Omit<RepairCandidatesResponse, 'canEdit'>>;
   item(workflowId: string, itemId: string, originalOnly?: boolean): Promise<RepairInboxItem>;
   task(taskId: string): Promise<RepairTaskDetail>;

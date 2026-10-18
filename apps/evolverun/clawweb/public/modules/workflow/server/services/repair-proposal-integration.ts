@@ -1,4 +1,5 @@
 import { prepareProposalEvidence } from './repair-proposal-evidence.js';
+import { needsReevaluation } from './repair-selection-review.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { canonicalRepairJson, digestRepairJson, repairEvidenceFlows, RepairBatchError, type RepairBaseline, type RepairItem } from '../contracts/repair-batch.js';
 import type { RepairInboxItem } from '../contracts/repair-workbench.js';
@@ -17,7 +18,7 @@ function operations(item: RepairItem) {
   return (Array.isArray(item.proposal?.operations) ? item.proposal.operations : []) as Array<Record<string, unknown>>;
 }
 function current(item: RepairItem, baseline: RepairBaseline) {
-  return !operations(item).length || item.proposal?.baseSpecDigest === baseline.specDigest;
+  return !needsReevaluation(item, baseline);
 }
 function eligible(items: RepairInboxItem[]) { return items.filter(item => item.sourceAvailable && item.state === 'pending'); }
 function scope(item: RepairInboxItem) { return String(item.context?.signature ?? item.groupKey); }
@@ -106,7 +107,7 @@ export function createProposalCoordinator(input:{db:IDatabase;read:(workflowId:s
       if(!wf){await repo.patch(lease,{data:{workflowCursor:'',groupCursor:''},nextAtMs:now()+15000},now(),true);return;}
       scannedWorkflow=wf.workflow_id;
       const data=await input.read(wf.workflow_id);const all=groups(data.items,data.baseline).filter(g=>g.key>(lease.data.groupCursor??''));
-      for(const g of all.slice(0,20))if(g.items.length>1&&g.items.every(i=>current(i,data.baseline))&&exact(g.items).plans.length>1){
+      for(const g of all.slice(0,20))if(g.items.length>1&&exact(g.items).plans.length>1){
         const j=await repo.ensure(wf.workflow_id,'proposal_group',key(g.fingerprint),{fingerprint:g.fingerprint,scope:g.key,scopeKey:input.scopeKey??'database'},now());
         if(j.stateVersion===0){const claim=await repo.claim(j.id,now());if(claim)await repo.patch(claim,{nextAtMs:now()+2000},now(),true);}
       }
@@ -182,7 +183,8 @@ export function createProposalCoordinator(input:{db:IDatabase;read:(workflowId:s
         const {fp,result,status}=await resolution(wf,g.items,baseline);
         for(const plan of result.plans){
           const originals=plan.itemIds.map(id=>g.items.find(i=>i.itemId===id)!);
-          const aggregation:ProposalAggregation={...plan,id:digestRepairJson([fp,plan.itemIds]),fingerprint:fp,status:current(originals[0],baseline)?plan.relation==='exact'&&(originals.length>1||g.items.length===1)?'ready':status:'stale',
+          const reevaluation=originals.some(item=>!current(item,baseline));
+          const aggregation:ProposalAggregation={...plan,id:digestRepairJson([fp,plan.itemIds]),fingerprint:fp,reevaluation,status:reevaluation&&g.items.length===1?'stale':plan.relation==='exact'&&(originals.length>1||g.items.length===1)?'ready':status,
             originals,...(result.causes?{causes:result.causes.filter(c=>c.itemIds.some(id=>plan.itemIds.includes(id)))}:{}),...(result.unknowns?{unknowns:result.unknowns}:{}),flowIds:[...new Set(originals.flatMap(repairEvidenceFlows))].sort(),conflicts:result.conflicts.filter(c=>c.itemIds.some(id=>plan.itemIds.includes(id)))};
           presented.push({...originals[0],aggregation});
         }
@@ -191,28 +193,28 @@ export function createProposalCoordinator(input:{db:IDatabase;read:(workflowId:s
     },
     async prepare(wf:string,selected:RepairItem[],baseline:RepairBaseline){
       const snapshot=await input.read(wf);
-      if(canonicalRepairJson(snapshot.baseline)!==canonicalRepairJson(baseline))throw new RepairBatchError('SOURCE_CHANGED','生效基线已变化，请刷新');
+      if(canonicalRepairJson(snapshot.baseline)!==canonicalRepairJson(baseline))throw new RepairBatchError('STATE_CONFLICT','生效版本在准备期间再次变化，请确认新版本后提交；选择与要求保留',{reasonCode:'BASELINE_STALE'});
       const ids=new Set(selected.map(i=>i.itemId));
-      if(selected.length>1 && selected.some(item=>!operations(item).length && !Array.isArray(item.proposal?.patches)))throw new RepairBatchError('INVALID_INPUT','多条文字建议缺少明确修改范围，待补充后再整合；原建议仍可单独处理');
-      if(selected.some(i=>!current(i,baseline)))throw new RepairBatchError('SOURCE_CHANGED','原建议基线已变化，请重新评估');
+      if(selected.length>1 && selected.some(item=>!operations(item).length && !Array.isArray(item.proposal?.patches)))throw new RepairBatchError('INVALID_INPUT','多条文字建议缺少明确修改范围，可单独处理或补充方案后再整合',{reasonCode:'PLAN_SCOPE_INCOMPLETE'});
+      const reevaluate=selected.some(i=>!current(i,baseline));
       const plans: NonNullable<import('../contracts/repair-batch.js').RepairBatchInput['integration']>['plans'] = [];
-      const applicable = snapshot.items.map(item => ids.has(item.itemId) && item.state === 'processing' ? { ...item, state: 'pending' as const } : item);
+      const applicable = snapshot.items.map(item => ids.has(item.itemId) && item.state === 'processing' ? { ...item, state: 'pending' as const, sourceAvailable: true } : item);
       for(const g of groups(applicable,baseline)){
         const chosen=g.items.filter(i=>ids.has(i.itemId));if(!chosen.length)continue;
         const {result,status,fp}=await resolution(wf,g.items,baseline);
-        if(result.conflicts.some(c=>c.itemIds.every(id=>ids.has(id))))throw new RepairBatchError('INVALID_INPUT','方案目标需要取舍，请保留一种选择');
+        if(result.conflicts.some(c=>c.itemIds.every(id=>ids.has(id))))throw new RepairBatchError('INVALID_INPUT','方案目标需要取舍，请保留一种选择',{reasonCode:'PLAN_CONFLICT'});
         const overlaps=selectionConflicts(chosen);
         for(const overlap of overlaps){const plan=result.plans.find(p=>overlap.itemIds.every(id=>p.itemIds.includes(id)));
-          if(!plan||plan.relation==='uncertain'||plan.relation!=='exact'&&status!=='ready')throw new RepairBatchError('INVALID_INPUT','重叠修改尚待整合，请等待或只选择一项原建议');}
+          if(!plan||plan.relation==='uncertain'||plan.relation!=='exact'&&status!=='ready')throw new RepairBatchError('INVALID_INPUT','重叠修改尚待整合，请等待或只选择一项原建议',{reasonCode:'PLAN_NOT_READY'});}
         for(const plan of result.plans){const members=plan.itemIds.filter(id=>ids.has(id));if(!members.length)continue;
-          if(plan.relation!=='exact'&&members.length!==plan.itemIds.length)throw new RepairBatchError('SOURCE_CHANGED','方案选择不完整，请重新确认范围');
-          plans.push({id:digestRepairJson([fp,plan.itemIds]),originalItemIds:members,goals:plan.changes,relation:plan.relation,...(result.causes?{causes:result.causes.filter(c=>c.itemIds.some(id=>members.includes(id)))}:{}),...(result.unknowns?{unknowns:result.unknowns}:{})});
+          if(plan.relation!=='exact'&&members.length!==plan.itemIds.length)throw new RepairBatchError('SOURCE_CHANGED','方案成员已变化，请确认受影响范围；原始选择保留',{reasonCode:'PLAN_SELECTION_INCOMPLETE'});
+          plans.push({id:digestRepairJson([fp,plan.itemIds]),originalItemIds:members,goals:reevaluate?['基于当前 Pack 重新评估原目标；旧 operations/patches 仅作证据，禁止直接套用；已满足或不适用须逐项说明。',...plan.changes]:plan.changes,relation:plan.relation,...(result.causes?{causes:result.causes.filter(c=>c.itemIds.some(id=>members.includes(id)))}:{}),...(result.unknowns?{unknowns:result.unknowns}:{})});
           }
       }
       // Check across issue groups too: group-local model suggestions cannot authorize cross-group overwrites.
       const all=selected as RepairInboxItem[];
-      for(const conflict of selectionConflicts(all))if(!groups(applicable,baseline).some(g=>conflict.itemIds.every(id=>g.items.some(i=>i.itemId===id))))throw new RepairBatchError('INVALID_INPUT','跨问题重叠修改尚待整合，请分别取舍');
-      return { integration: plans.length && selected.length>1 ? {schemaVersion:'workflow-proposal-plan/v1' as const,baselineSpecDigest:baseline.specDigest,plans}:undefined, instructions:''};
+      for(const conflict of selectionConflicts(all))if(!groups(applicable,baseline).some(g=>conflict.itemIds.every(id=>g.items.some(i=>i.itemId===id))))throw new RepairBatchError('INVALID_INPUT','跨问题重叠修改尚待整合，请分别取舍',{reasonCode:'PLAN_NOT_READY'});
+      return { integration: plans.length && (selected.length>1||reevaluate) ? {schemaVersion:'workflow-proposal-plan/v1' as const,baselineSpecDigest:baseline.specDigest,plans}:undefined, instructions:''};
     },
   };
 }

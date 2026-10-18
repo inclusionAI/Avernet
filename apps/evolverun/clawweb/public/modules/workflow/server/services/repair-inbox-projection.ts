@@ -32,6 +32,7 @@ function originalSummary(item: RepairInboxItem, force = false): RepairInboxItem 
   const relevant = operations.filter(op => op && typeof op === 'object' && typeof op.path === 'string' && op.op !== 'test');
   return { itemId: item.itemId, workflowId: item.workflowId, groupKey: item.groupKey, proposalKey: item.proposalKey,
     contentRevision: item.contentRevision, previousItemId: item.previousItemId, episodeKey: item.episodeKey,
+    ...(item.selectionDigest ? { selectionDigest: item.selectionDigest } : {}),
     state: item.state, stateVersion: item.stateVersion, sourceAvailable: item.sourceAvailable,
     activeTaskId: item.activeTaskId, activeRevision: item.activeRevision, updatedAtMs: item.updatedAtMs,
     disposition: item.disposition ? { ...item.disposition, reason: inboxText(item.disposition.reason), evidenceFlowIds: [], evidenceEventIds: [] } : null,

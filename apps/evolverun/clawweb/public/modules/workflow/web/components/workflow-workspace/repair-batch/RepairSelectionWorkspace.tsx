@@ -10,12 +10,12 @@ import ProposalEvidence from './ProposalEvidence'
 import RepairProposalChoices from './RepairProposalChoices'
 
 export default function RepairSelectionWorkspace({ workflowId, includeHistorical, refreshToken, selected, selectedItems, instructions, busy, reason, error,
-  onInstructions, onToggle, onResult, onDetail, onGenerate, onBack, onRecover, nextRound = false, canEdit = true }: {
+  onInstructions, onToggle, onResult, onDetail, onGenerate, onBack, onRecover, nextRound = false, canEdit = true, notice, onReviewSelection, onConfirmSelection, reviewPending = false }: {
   workflowId: string; includeHistorical: boolean; refreshToken: number; selected: string[]; selectedItems: RepairInboxItem[];
   instructions: string; busy: boolean; reason: string; error: string;
   onInstructions: (value: string) => void; onToggle: (id: string) => void; onResult: (result: RepairCandidatesResponse) => void;
   onDetail: (item: RepairInboxItem) => void; onGenerate: () => void; onBack: () => void
-  onRecover?: () => void; nextRound?: boolean; canEdit?: boolean
+  onRecover?: () => void; nextRound?: boolean; canEdit?: boolean; notice?: string; onReviewSelection?: () => void; onConfirmSelection?: () => void; reviewPending?: boolean
 }) {
   const [page, setPage] = useState(1)
   const [data, setData] = useState<RepairCandidatesResponse | null>(null)
@@ -34,7 +34,8 @@ export default function RepairSelectionWorkspace({ workflowId, includeHistorical
       .finally(() => { if (current) setLoading(false) })
     return () => { current = false }
   }, [workflowId, includeHistorical, refreshToken, page, node, failureMode, reload])
-  const rows = (data?.items ?? []).filter(item => !query || `${itemTitle(item)} ${item.context?.nodeId ?? ''}`.toLowerCase().includes(query.toLowerCase()))
+  const rows = (data?.items ?? []).map(item => reviewPending && selected.includes(item.itemId) ? selectedItems.find(original => original.itemId === item.itemId) ?? item : item)
+    .filter(item => !query || `${itemTitle(item)} ${item.context?.nodeId ?? ''}`.toLowerCase().includes(query.toLowerCase()))
   const selectable = rows.filter(item => !exclusion(item))
   const allSelected = selectable.length > 0 && selectable.every(item => proposalChecked(item, selected))
   const nodes = data?.facets?.nodes ?? []
@@ -44,6 +45,9 @@ export default function RepairSelectionWorkspace({ workflowId, includeHistorical
   const blocker = proposalPending(selectedItems) ? '所选目标尚待整合，请保留单项或等待整理。' : conflicts.length ? '所选方案存在冲突，请保留其中一项后生成。' : reason || (readError ? '建议读取失败，请重试后生成。' : loading ? '正在核对建议来源…' : readOnly ? '当前只有查看权限。' : !selected.length ? '请至少选择一条建议；修复要求可以留空。' : '')
   return <RepairWorkspace stage={1} title={nextRound ? '开始下一轮优化' : '把多条建议，变成一次修复'} subtitle={`${workflowId} · 选择独立建议，生成完整 Pack 候选`} onBack={onBack} backLabel={nextRound ? '返回上一轮观察' : undefined} busy={busy}>
     {nextRound && <p className="rounded-lg border border-input bg-card p-4 text-sm">将创建独立新任务，提交时读取最新生效版本作为基线；上一轮任务、发布与观察记录继续保留。已采纳且待验证的建议不能重复选择。</p>}
+    {notice && <p role="status" className="rounded-lg border border-input p-4 text-sm">{notice}</p>}
+    {onReviewSelection && <button type="button" className={button} disabled={busy} onClick={onReviewSelection}>重试核对已选建议</button>}
+    {onConfirmSelection && <button type="button" className={button} disabled={busy || !canEdit} onClick={onConfirmSelection}>确认已选原始范围</button>}
     <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]">
       <section className="overflow-hidden rounded-lg border border-input bg-card">
         <div className="border-b border-input px-5 py-4"><h3 className="text-base font-semibold text-foreground">本次准备解决哪些问题？</h3>

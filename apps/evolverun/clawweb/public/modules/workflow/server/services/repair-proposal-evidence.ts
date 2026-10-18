@@ -38,7 +38,7 @@ export function prepareProposalEvidence<T extends RepairItem>(items:T[], strict=
     }
     const safe=redacted({...context,diagnoses:examples}) as Record<string,unknown>;
     clipped=clipped||canonicalRepairJson(safe).includes('[TRUNCATED');
-    if(strict&&(missing||clipped))throw new RepairBatchError('INVALID_INPUT','关键证据缺失、摘要被裁剪或原文校验失败，请补充证据后再整合');
+    if(strict&&(missing||clipped))throw new RepairBatchError('INVALID_INPUT','关键证据缺失、摘要被裁剪或原文校验失败，请补充证据后再整合',{reasonCode:'EVIDENCE_INCOMPLETE'});
     return {...item,context:{...safe,evidencePacket:{schemaVersion:'repair-evidence-packet/v1',sourceIndex,
       originalDiagnoses:diagnoses.length,representatives:examples.length,missingEvidence:missing,clipped,
       redaction:'credentials-and-PII-redacted; exact duplicate evidence indexed; no unbounded logs or external-only payloads',

@@ -14,7 +14,7 @@ export function repairOperationIdentity(operation: Record<string, unknown>): str
 }
 
 /** A conservative preview of structural conflicts, not a replacement for Pack validation. */
-export function selectionConflicts(items: RepairInboxItem[]) {
+export function selectionConflicts(items: Array<Pick<RepairInboxItem, 'itemId' | 'proposal' | 'readSummary'>>) {
   const operations = items.flatMap(item => item.readSummary ? item.readSummary.operations.map(op => ({ ...op, itemId: item.itemId })) : (Array.isArray(item.proposal?.operations) ? item.proposal.operations : [])
     .flatMap((raw: unknown) => {
       if (!raw || typeof raw !== 'object') return []
@@ -23,7 +23,10 @@ export function selectionConflicts(items: RepairInboxItem[]) {
       return [{ itemId: item.itemId, nodeId: String(operation.nodeId ?? '工作流'),
         path: operation.path.startsWith('/') ? operation.path : '/' + operation.path.replaceAll('.', '/'),
         identity: repairOperationIdentity(operation) }]
-    }))
+    }).concat((Array.isArray(item.proposal?.patches) ? item.proposal.patches : []).flatMap((patch: unknown) => {
+      if (!patch || typeof patch !== 'object' || typeof (patch as Record<string, unknown>).file !== 'string') return []
+      return [{ itemId: item.itemId, nodeId: `file:${(patch as Record<string, unknown>).file}`, path: '/', identity: repairSignatureKey(canonical(patch)) }]
+    })))
   const conflicts: Array<{ itemIds: string[]; nodeId: string; path: string }> = []
   const seen = new Set<string>()
   for (let i = 0; i < operations.length; i++) for (let j = i + 1; j < operations.length; j++) {

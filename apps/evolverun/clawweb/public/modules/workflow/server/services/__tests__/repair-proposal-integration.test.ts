@@ -40,11 +40,40 @@ it('deduplicates exact patches but never merges another baseline or loses source
  f.items[2].proposal!.baseSpecDigest='e'.repeat(64);
  const {items,baseline}=await read('wf-1');const cards=await c.present('wf-1',items,baseline);
  expect(cards).toHaveLength(2);expect(cards[0].aggregation?.itemIds).toEqual(['item-0','item-1']);
- await expect(c.prepare('wf-1',[items[2]],baseline)).rejects.toThrow(/基线/);
+ expect((await c.prepare('wf-1',[items[2]],baseline)).integration?.plans[0].originalItemIds).toEqual(['item-2']);
 });
-it('never lets a model combine contradictory scalars or omit originals',async()=>{
+it('returns bounded current-plan authorization when rechecking selected original identities',async()=>{
+ const {c,read,advance,classify}=await setup(2);
+ await c.tick();advance(3000);await c.tick();
+ const service=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort,c);
+ const before=await read('wf-1'),cards=await c.present('wf-1',before.items,before.baseline);
+ const state=await service.selectionState('wf-1',['item-0','item-1'],false);
+ expect(state.plans[0]).toMatchObject({id:cards[0].aggregation!.id,fingerprint:cards[0].aggregation!.fingerprint,status:'ready',relation:'complementary',itemIds:['item-0','item-1']});
+ expect(state.plans[0]).not.toHaveProperty('originals');
+ expect(state.items.every(item=>!!item.selectionDigest)).toBe(true);
+ expect(classify).toHaveBeenCalledTimes(1);
+ expect(await f.db.query('SELECT * FROM workflow_repair_revisions')).toHaveLength(0);
+});
+it('queues stale original groups for current-baseline classification, then reevaluates complementary goals in one plan',async()=>{
+ const {c,advance,classify}=await setup(2);
+ f.items.forEach(item=>{item.proposal!.baseSpecDigest='e'.repeat(64)});
+ await c.tick();advance(3000);await c.tick();
+ expect(classify).toHaveBeenCalledTimes(1);
+ expect(classify.mock.calls[0][0].baseline.specDigest).toBe('a'.repeat(64));
+ expect(classify.mock.calls[0][0].items.every((item:any)=>item.proposal.baseSpecDigest==='e'.repeat(64))).toBe(true);
+ const service=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort,c);
+ const page=await service.candidates('wf-1');
+ expect(page.items[0].aggregation).toMatchObject({status:'ready',relation:'complementary',reevaluation:true,itemIds:['item-0','item-1']});
+ const state=await service.selectionState('wf-1',['item-0','item-1'],false);
+ const result=await service.create('human',{workflowId:'wf-1',itemIds:['item-0','item-1'],inputDigest:page.inputDigest,selection:Object.fromEntries(state.items.map(item=>[item.itemId,item.selectionDigest!])),instructions:'preserve current constraints',requestId:'stale-pair'});
+ expect(result.input.integration?.plans).toHaveLength(1);
+ expect(result.input.integration?.plans[0].originalItemIds).toEqual(['item-0','item-1']);
+ expect(result.input.items.every(item=>item.proposal!.baseSpecDigest==='e'.repeat(64))).toBe(true);
+ expect(f.calls).toHaveLength(1);
+});
+it.each([false,true])('never lets a model combine contradictory scalars or omit originals (stale=%s)',async(stale)=>{
  const {c,read,classify,advance}=await setup(2);
- f.items.forEach((x,i)=>{x.proposal!.operations=[{op:'replace',nodeId:'query',path:'/timeout',value:i?240:120}]});
+ f.items.forEach((x,i)=>{if(stale)x.proposal!.baseSpecDigest='e'.repeat(64);x.proposal!.operations=[{op:'replace',nodeId:'query',path:'/timeout',value:i?240:120}]});
  await c.tick();advance(3000);await c.tick();const {items,baseline}=await read('wf-1');
  await expect(c.prepare('wf-1',items,baseline)).rejects.toThrow(/取舍/);
  expect((await c.present('wf-1',items,baseline))).toHaveLength(2);

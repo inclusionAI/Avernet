@@ -541,7 +541,7 @@ describe('issue and optimization flow', () => {
 
 
 
-  it('invalidates selection on source changes without silently selecting the new page', async () => {
+  it('retains unchanged original selection on unrelated source changes without selecting the new page', async () => {
     let changed = false
     repairApi.candidates.mockImplementation((_workflowId, query) => {
       if (query.page === 2) changed = true
@@ -554,9 +554,9 @@ describe('issue and optimization flow', () => {
     await openIssueRepairs(false)
     await userEvent.click(await screen.findByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' }))
     await userEvent.click(screen.getByRole('button', { name: '下一页建议' }))
-    expect(await screen.findByText('建议来源已更新，原选择已清空，请重新确认范围。')).toBeInTheDocument()
+    expect(await screen.findByText(/原选择与文字要求均已保留/)).toBeInTheDocument()
     expect(await screen.findByRole('checkbox', { name: '选择 新来源建议' })).not.toBeChecked()
-    expect(screen.getByRole('button', { name: '生成优化草稿（0）' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '生成优化草稿（1）' })).toBeEnabled()
   })
 
 

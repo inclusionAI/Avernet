@@ -38,6 +38,22 @@ observations and evidence remain attached to the previous task. Adopted items
 awaiting verification stay unavailable for selection. Existing permissions,
 capability, read-failure and idempotency gates still apply.
 
+Source refreshes recheck selected originals instead of clearing the selection.
+Unchanged choices and requirements survive unrelated source/evidence updates.
+Changed content, unavailable historical sources and lifecycle blockers name the
+affected item and required action; that reason survives subsequent refreshes.
+Failed rechecks retain old reviewed values and offer a retry. Unknown create
+outcomes retain the request identity and require lookup before another submission.
+New aggregation members are never selected implicitly: valid plans are retained,
+while changed membership/goals need scope confirmation. Old-baseline suggestions
+explain that generation reevaluates their original proposals/evidence on the latest
+effective Pack, without promising the old edit still fits.
+
+The previous-round link persists together with the exact parent task, child task
+and published revision. Reloading that child restores the link. The relationship
+is used only within that task pair; ordinary navigation back to the issue list or
+opening another task clears it, so unrelated tasks never inherit an old parent.
+
 ## Content reduction
 
 - Scope shows original problem/goal titles, selected integrated goals when provided,

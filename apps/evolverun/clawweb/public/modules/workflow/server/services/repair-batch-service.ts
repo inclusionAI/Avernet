@@ -1,6 +1,7 @@
 import { inboxSummary, inboxPages } from './repair-inbox-projection.js';
 import { prepareProposalEvidence } from './repair-proposal-evidence.js';
 import type { ProposalCoordinator } from './repair-proposal-integration.js';
+import { selectedContentDigest, reviewSelected, reevaluationPlan } from './repair-selection-review.js';
 import { automaticChain, isAutomaticBatch } from '../contracts/repair-automatic-chain.js';
 import { RepairAutomationDeniedError } from '../contracts/workflow-automation.js';
 import { repairEvidenceFacts, repairEvidenceFlows, validateAutomationOrigin } from '../contracts/repair-batch.js';
@@ -36,6 +37,12 @@ function fail(code: ConstructorParameters<typeof RepairBatchError>[0], message: 
 function requiredText(value: unknown, max: number, empty = false): value is string { return typeof value === 'string' && value.length <= max && (empty || value.trim().length > 0); }
 function identity(value: unknown, max: number): value is string { return requiredText(value, max) && /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(value); }
 function safeInteger(value: unknown, min = 0): value is number { return Number.isSafeInteger(value) && Number(value) >= min; }
+async function sourceRead<T>(read: () => Promise<T>): Promise<T> {
+  try { return await read(); } catch (error) {
+    if (error instanceof RepairBatchError) throw error;
+    fail('CAPABILITY_UNAVAILABLE', '原始建议或证据读取失败，请重试核对；原选择与要求保留', { reasonCode: 'SOURCE_READ_UNAVAILABLE' });
+  }
+}
 function selection(raw: RepairSelectionRequest): RepairSelectionRequest {
   boundedRepairJson(raw, MAX_REQUEST_BYTES);
   if (!raw || !identity(raw.workflowId, 190) || !requiredText(raw.requestId, 128)
@@ -43,7 +50,10 @@ function selection(raw: RepairSelectionRequest): RepairSelectionRequest {
     || raw.itemIds.some(id => !requiredText(id, 64)) || new Set(raw.itemIds).size !== raw.itemIds.length
     || !/^[a-f0-9]{64}$/.test(raw.inputDigest) || !requiredText(raw.instructions, MAX_INSTRUCTIONS_CHARS, true)) fail('INVALID_INPUT', 'Invalid repair selection');
   if (raw.includeHistorical !== undefined && typeof raw.includeHistorical !== 'boolean') fail('INVALID_INPUT', 'Invalid history scope');
+  if (raw.selection !== undefined && (!raw.selection || typeof raw.selection !== 'object' || Array.isArray(raw.selection)
+    || Object.keys(raw.selection).length !== raw.itemIds.length || raw.itemIds.some(id => !Object.hasOwn(raw.selection!, id) || !/^[a-f0-9]{64}$/.test(raw.selection![id])))) fail('INVALID_INPUT', 'Invalid selected content identities');
   return { workflowId: raw.workflowId, itemIds: [...raw.itemIds].sort(), inputDigest: raw.inputDigest,
+    ...(raw.selection ? { selection: { ...raw.selection } } : {}),
     ...(raw.automation ? { automation: validateAutomationOrigin(raw.automation) } : {}),
     instructions: raw.instructions, requestId: raw.requestId, includeHistorical: raw.includeHistorical === true };
 }
@@ -139,13 +149,13 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     let sourceScope = scope;
     if (mode === 'full' && scope?.itemIds?.length && !this.sources.hydrate) {
       const selected = new Set(scope.itemIds);
-      const summaries = await repairStage('sources_summary', () => this.sources.load(db, workflowId, 'summary', { includeHistorical: scope.includeHistorical }));
+      const summaries = await repairStage('sources_summary', () => sourceRead(() => this.sources.load(db, workflowId, 'summary', { includeHistorical: scope.includeHistorical })));
       sourceScope = { ...scope, itemIds: summaries.filter(source => {
         const existing = byIdentity.get(identityKey(source.item, source.episodeKey));
         return selected.has(existing?.itemId ?? source.item.itemId);
       }).map(source => source.item.itemId) };
     }
-    const current = await repairStage(`sources_${mode}`, () => this.sources.load(db, workflowId, this.sources.hydrate ? 'summary' : mode, sourceScope));
+    const current = await repairStage(`sources_${mode}`, () => sourceRead(() => this.sources.load(db, workflowId, this.sources.hydrate ? 'summary' : mode, sourceScope)));
     // An automatic recurrence opens a new phase with a new proposal identity.
     // Do not carry the previously applied operations into another generation.
     const derived = new Set(current.map(source => source.item.itemId));
@@ -204,7 +214,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     }
     if (mode === 'full' && this.sources.hydrate) {
       const selected = [...items.values()].filter(item => !scope?.itemIds || scope.itemIds.includes(item.itemId));
-      const hydrated = await this.sources.hydrate(db, workflowId, selected);
+      const hydrated = await sourceRead(() => this.sources.hydrate!(db, workflowId, selected));
       for (const item of hydrated) {
         items.set(item.itemId, { ...items.get(item.itemId)!, ...item });
         const source = materializable.get(item.itemId);
@@ -214,7 +224,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     if (mode === 'full') for (const item of items.values()) {
       if (!scope?.itemIds || scope.itemIds.includes(item.itemId)) validateRepairItem(item);
     }
-    return { items: [...items.values()], inputDigest, materializable };
+    return { items: [...items.values()].map((item): RepairInboxItem => ({ ...item, selectionDigest: selectedContentDigest(item) })), inputDigest, materializable };
   }
   async request(workflowId: string, requestId: string): Promise<RepairRevision | null> {
     if (!identity(workflowId, 190) || !requiredText(requestId, 128)) fail('INVALID_INPUT', 'Invalid request lookup');
@@ -222,6 +232,21 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       'SELECT task_id, revision FROM workflow_repair_revisions WHERE workflow_id = ? AND request_id = ?', [workflowId, requestId]);
     if (!rows.length) return null;
     return new RepairBatchRepository(this.db).getRevision(workflowId, rows[0].task_id, Number(rows[0].revision));
+  }
+  async selectionState(workflowId: string, itemIds: string[], includeHistorical: boolean) {
+    if (!Array.isArray(itemIds) || !itemIds.length || itemIds.length > MAX_ITEMS || itemIds.some(id => !requiredText(id, 64)) || new Set(itemIds).size !== itemIds.length) fail('INVALID_INPUT', 'Invalid selected scope');
+    return serial(this.db, async () => {
+      const snapshot = await this.snapshot(this.db, workflowId, 'summary', { includeHistorical });
+      const cards = this.proposals && this.execution ? await this.proposals.present(workflowId, snapshot.items, await this.execution.resolveBaseline(workflowId)) : [];
+      const result = { inputDigest: snapshot.inputDigest, items: snapshot.items.filter(item => itemIds.includes(item.itemId)).map(inboxSummary),
+        missing: itemIds.filter(id => !snapshot.items.some(item => item.itemId === id)),
+        plans: cards.filter(card => card.aggregation?.itemIds.some(id => itemIds.includes(id))).map(card => {
+          const { originals: _originals, flowIds: _flows, ...plan } = inboxSummary(card).aggregation!;
+          return plan;
+        }) };
+      boundedRepairJson(result, MAX_TASK_READ_BYTES);
+      return result;
+    });
   }
   async proposalSnapshot(workflowId: string) {
     if (!this.execution) fail('CAPABILITY_UNAVAILABLE', '基线读取不可用');
@@ -408,9 +433,15 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       const baseline = taskId ? (await this.task(taskId)).latestAttempt.input.baseline : await this.execution.resolveBaseline(request.workflowId);
       if (taskId && request.automation?.roundId && canonicalRepairJson(await this.execution.resolveBaseline(request.workflowId)) !== canonicalRepairJson(baseline)) fail('STATE_CONFLICT', '自动优化的生效基线已变化，请重新评估', { reasonCode: 'BASELINE_STALE' });
       if (baseline.workflowId !== request.workflowId) fail('CONTENT_MISMATCH', 'Provider resolved a different workflow');
-      const integrated = this.proposals ? await this.proposals.prepare(request.workflowId, await this.items(request.workflowId, request.itemIds), baseline) : { instructions: '' };
+      const selected = request.selection ? await serial(this.db, async () => {
+        const snapshot = await this.snapshot(this.db, request.workflowId, 'full', { itemIds: request.itemIds, includeHistorical: request.includeHistorical });
+        reviewSelected(request, snapshot.items, snapshot.inputDigest, taskId);
+        return snapshot.items.filter(item => request.itemIds.includes(item.itemId));
+      }) : await this.items(request.workflowId, request.itemIds);
+      const integrated = this.proposals ? await this.proposals.prepare(request.workflowId, selected, baseline) : { instructions: '', integration: reevaluationPlan(selected, baseline) };
       const frozenInstructions = [request.instructions, integrated.instructions].filter(Boolean).join('\n\n');
       if (frozenInstructions.length > MAX_INSTRUCTIONS_CHARS) fail('PAYLOAD_TOO_LARGE', '整合目标与说明过长，请缩小本次选择范围');
+      if (!taskId && canonicalRepairJson(await this.execution.resolveBaseline(request.workflowId)) !== canonicalRepairJson(baseline)) fail('STATE_CONFLICT', '生效版本在准备期间再次变化，选择与要求保留', { reasonCode: 'BASELINE_STALE' });
       revision = await this.tx(async tx => {
         const repo = new RepairBatchRepository(tx);
         await repo.lockWorkflow(tx, request.workflowId);
@@ -422,7 +453,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         const snapshot = await this.snapshot(tx, request.workflowId, 'full', {
           itemIds: request.itemIds, includeHistorical: request.includeHistorical === true,
         });
-        if (snapshot.inputDigest !== request.inputDigest) fail('SOURCE_CHANGED', 'Repair sources changed; refresh the issue inbox');
+        reviewSelected(request, snapshot.items, snapshot.inputDigest, taskId);
         if (!taskId) {
           const occupied = snapshot.items.filter(item => request.itemIds.includes(item.itemId));
           const taskIds = [...new Set(occupied.map(item => item.activeTaskId).filter((id): id is string => !!id))];
@@ -449,7 +480,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         const excludedSourceRefs = snapshot.items.filter(item => !request.itemIds.includes(item.itemId) && item.sourceAvailable)
           .flatMap(item => item.sources).sort((a, b) => canonicalRepairJson(a).localeCompare(canonicalRepairJson(b)));
         const input: RepairBatchInput = { schemaVersion: 'workflow-repair/v2', taskId: id,
-          revision: (previous?.latestAttempt.revision ?? 0) + 1, baseline, items: this.proposals ? prepareProposalEvidence(selected, true) : selected,
+          revision: (previous?.latestAttempt.revision ?? 0) + 1, baseline, items: this.proposals || integrated.integration ? prepareProposalEvidence(selected, true) : selected,
           excludedSources: { count: excludedSourceRefs.length, digest: digestRepairJson(excludedSourceRefs) },
           ...(request.automation ? { automation: request.automation } : {}),
           ...('integration' in integrated && integrated.integration ? { integration: integrated.integration } : {}),

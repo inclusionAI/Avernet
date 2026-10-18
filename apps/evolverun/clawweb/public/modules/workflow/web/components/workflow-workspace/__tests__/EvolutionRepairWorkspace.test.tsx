@@ -41,7 +41,7 @@ describe('repair selection workspace', () => {
     expect(repairApi.create).toHaveBeenCalledTimes(1)
   })
 
-  it('reloads changed sources and requires a new selection without losing requirements', async () => {
+  it('rechecks changed sources and retains unchanged selections and requirements', async () => {
     let changed = false
     repairApi.candidates.mockImplementation(() => Promise.resolve({ ...repairPage(), inputDigest: (changed ? 'f' : 'c').repeat(64) }))
     repairApi.create.mockImplementationOnce(() => {
@@ -55,12 +55,11 @@ describe('repair selection workspace', () => {
     await userEvent.click(screen.getByRole('button', { name: '生成优化草稿（1）' }))
     await userEvent.type(screen.getByRole('textbox', { name: '本次修复要求' }), '保留原分支')
     await userEvent.click(screen.getByRole('button', { name: '生成 Pack 草稿' }))
-    await waitFor(() => expect(screen.getByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' })).not.toBeChecked())
-    expect(screen.getByRole('button', { name: '生成 Pack 草稿' })).toBeDisabled()
+    await waitFor(() => expect(repairApi.selection).toHaveBeenCalled())
+    expect(screen.getByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' })).toBeChecked()
     expect(screen.getByRole('textbox', { name: '本次修复要求' })).toHaveValue('保留原分支')
     expect(repairApi.create).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(screen.getByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' })).toBeEnabled())
-    await userEvent.click(screen.getByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' }))
     await waitFor(() => expect(screen.getByRole('button', { name: '生成 Pack 草稿' })).toBeEnabled())
     await userEvent.click(screen.getByRole('button', { name: '生成 Pack 草稿' }))
     await waitFor(() => expect(repairApi.create).toHaveBeenCalledTimes(2))

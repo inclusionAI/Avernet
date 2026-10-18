@@ -130,6 +130,11 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
   router.get('/candidates', candidates);
   // Body-bearing query only: view authorization, identical snapshot, no materialization or task writes.
   router.post('/candidates/query', candidates);
+  router.post('/selection/query', handle(async (req, res) => {
+    const workflowId = text(req.body?.workflowId, 'workflowId');
+    const actor = await access(req, res, workflowId, 'view');
+    if (actor) res.json({ ...await service.selectionState(workflowId, req.body.itemIds, boolean(req.body.includeHistorical, 'includeHistorical')), canEdit: actor.canEdit });
+  }));
   router.get('/items/:itemId', handle(async (req, res) => {
     const workflowId = text(req.query.workflowId, 'workflowId');
     const actor = await access(req, res, workflowId, 'view');

@@ -1,7 +1,7 @@
 import type { RepairTrial, RepairTrialRequest, RepairTrialOptions, RepairTrialTarget } from '../../server/contracts/repair-trial'
 import { fetchJson } from '@avernet/clawweb-shared/web/api/client'
 import { readOnlyJson } from './read-only-json'
-import type { RepairCandidatesQuery, RepairCandidatesResponse, RepairDiff, RepairFeedbackRequest, RepairInboxItem, RepairSelectionRequest, RepairTaskDetail } from '../../server/contracts/repair-workbench'
+import type { RepairCandidatesQuery, RepairCandidatesResponse, RepairDiff, RepairFeedbackRequest, RepairInboxItem, RepairSelectionRequest, RepairSelectionState, RepairTaskDetail } from '../../server/contracts/repair-workbench'
 import type { RepairRevision, StoredRepairItem } from '../../server/contracts/repair-batch'
 import type { RepairConfirmRequest, RepairDeployRequest, RepairApproval, RepairDeployment, RepairReleaseTarget } from '../../server/contracts/repair-release'
 import type { RepairVerificationEvidence, RepairVerificationConclusion } from '../../server/contracts/repair-verification'
@@ -10,6 +10,7 @@ const base = '/api/workflow-repairs'
 const segment = encodeURIComponent
 const post = <T,>(url: string, body: unknown) => fetchJson<T>(url, { method: 'POST', body: JSON.stringify(body) })
 export const repairBatches = {
+  selection: (workflowId: string, itemIds: string[], includeHistorical: boolean) => readOnlyJson<RepairSelectionState>(`${base}/selection/query`, undefined, { workflowId, itemIds, includeHistorical }),
   retryProposalIntegration: (workflowId: string) => post<{ ok: true }>(`${base}/proposal-integration/retry`, { workflowId }),
   trials: (taskId: string, offset = 0) => readOnlyJson<{ configured: boolean; nextOffset?: number | null; trials: RepairTrial[] }>(`${base}/${segment(taskId)}/trials?offset=${offset}`),
   trialOptions: (taskId: string, revision: number) => readOnlyJson<RepairTrialOptions & { inputSchemaDigest: string; targets: RepairTrialTarget[] }>(`${base}/${segment(taskId)}/trials/options?revision=${revision}`),

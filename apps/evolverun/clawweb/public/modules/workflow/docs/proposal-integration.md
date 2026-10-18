@@ -110,6 +110,64 @@ apply the old full Prompt replacements. Single original legacy inputs retain
 `generate_candidate`. Deploy paired producer/consumer revisions before enabling
 integrated generation; this change does not build or activate a Snapshot.
 
+### Reevaluate historical suggestions on the effective Pack
+
+A pending original whose structured operations/patches target an older or unknown
+spec digest remains selectable. Even one such original uses the existing
+`workflow-proposal-plan/v1` / `integrate_candidate_v1` consumer. Its proposal,
+`baseSpecDigest`, source identities and complete evidence remain frozen unchanged
+as historical evidence. The batch baseline and integration digest refer to the
+effective Pack resolved at submission. Neither the old digest nor old file content
+is rewritten to impersonate a current proposal.
+
+Multi-original historical groups enter the same bounded background classifier as
+current groups. The classifier sees the current target baseline and complete
+original evidence, preserves old digests, and may return complementary/equivalent,
+uncertain or conflicting goals. Being historical alone does not leave a group in
+an unserviceable waiting state. Only validated classification can authorize
+overlapping goals; contradictory scalars remain blocked even if the model calls
+them complementary. Classification failure/unavailability is visible with an
+explicit recovery or single-original path, rather than an infinite refresh loop.
+
+The consumer generates from current Pack files once per plan, with old proposals
+as untrusted evidence only. Every original/goal needs a changed, not-needed or
+unresolved outcome with reasons. Already satisfied or inapplicable goals cannot
+justify fabricated success. Original scope, complete coverage, candidate/Git
+binding and existing checks remain enforced. A second baseline change during
+preparation rejects the request before freezing a new task. A coordinator fallback
+cannot apply conflicting old edits in sequential plans. All integrated inputs,
+including this fallback, use strict evidence packaging, redaction and unchanged
+frozen-size limits.
+
+### Precisely revalidate selected originals
+
+View responses carry an optional server-produced `selectionDigest` for each
+original, including aggregation members. It hashes original identity, executable
+proposal/instruction and content version, excluding supporting-run additions and
+pagination. Create/feedback requests may carry a `selection` map with exactly the
+requested original IDs and reviewed digests. The server checks current trusted
+content and lifecycle before preparation and again inside the freeze transaction;
+the route still enforces workflow edit authorization. Unrelated global
+`inputDigest` changes do not invalidate these choices. Legacy callers without this
+map retain the strict whole-snapshot check. Committed retries retain their original
+request/baseline and do not resolve new inputs or redispatch uncertain execution.
+
+`POST /api/workflow-repairs/selection/query` is a read-only, view-authorized query
+for up to 100 original IDs. It returns bounded summaries, current digests, missing
+IDs, edit capability and compact current-plan authorization. It does not hydrate
+full evidence, materialize items or apply frozen-input byte limits to a read; the
+existing response budget still applies. Generation hydrates complete evidence and
+rejects oversized/partial frozen inputs before dispatch.
+
+The browser preserves unaffected original IDs and requirements across pages and
+refreshes. Only changed, unavailable or lifecycle-blocked choices are removed,
+with persistent per-item explanations. New plan members are never auto-selected.
+Valid complementary plans retain authorization; changed plans need explicit scope
+confirmation. Failed rechecks retain old reviewed values and block generation
+until recovery. Awaiting-verification/verified/ineffective protections remain;
+an owning unpublished task can continue its own frozen processing original after
+the live source disappears.
+
 TaskGuard consumes each plan once, exposing original proposals, sources, evidence
 packets and integrated goals to the writer. It generates complete file content
 against the current candidate, never concatenates or sequentially replaces source

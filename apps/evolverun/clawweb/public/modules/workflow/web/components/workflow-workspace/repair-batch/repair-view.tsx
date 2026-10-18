@@ -15,11 +15,14 @@ export const itemHeading = (item: RepairInboxItem) => {
 }
 export const isLegacyPreview = (item: RepairInboxItem) => !item.sourceAvailable && item.updatedAtMs === 0
 export function exclusion(item: RepairInboxItem, taskId?: string) {
-  if (isLegacyPreview(item)) return '历史预览，请在原处理流程查看'
-  if (!item.sourceAvailable) return '原始来源已不可用'
+  if (isLegacyPreview(item)) return '历史预览：原始建议或证据已不可用，无法重新生成；请查看历史记录'
+  if (!item.sourceAvailable) return '原始来源已不可用，无法核对原建议与证据'
   if (item.state === 'no_action') return '已暂不处理，可恢复后重新选择'
-  if (item.state === 'processing') return taskId && item.activeTaskId === taskId ? null : '已由修复任务占用'
-  if (item.state !== 'pending') return '当前状态不参与生成'
+  if (item.state === 'processing') return taskId && item.activeTaskId === taskId ? null : '已有任务正在处理，请查看该任务的生成进度'
+  if (item.state === 'awaiting_verification') return '上一轮已采纳，正在等待效果验证；请回看上一轮观察，不能重复生成'
+  if (item.state === 'verified') return '已通过现有验证规则，无需重复处理；新问题需使用新证据'
+  if (item.state === 'ineffective') return '已确认未达预期，请在上一轮观察中重新打开该问题，再基于新证据优化'
+  if (item.state !== 'pending') return '当前处理状态不允许生成，请查看任务历史'
   return null
 }
 export function JsonDetails({ title, value }: { title: string; value: unknown }) {

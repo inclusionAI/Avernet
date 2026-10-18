@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { expect, it, vi } from 'vitest'
@@ -14,11 +14,11 @@ function published(): RepairTaskDetail {
     release: { deployments: [{ id: 'dep-old', revision: 1, status: 'succeeded', receipt: { deployNumber: 160 } }] },
   } as unknown as RepairTaskDetail
 }
-function mount({ readOnly = false, items = [repairItem()] } = {}) {
+function mount({ readOnly = false, items = [repairItem()], tasks = [] as Array<{taskId:string;revision:number;phase:string;updatedAtMs:number;itemCount:number}> } = {}) {
   const detail = published()
   Object.assign(repairApi, { verification: vi.fn().mockRejectedValue(new Error('observation unavailable')) })
   repairApi.task.mockImplementation(id => id === 'FIX-old' ? Promise.resolve(detail) : new Promise(() => {}))
-  repairApi.candidates.mockResolvedValue({ ...repairPage({ items }), canEdit: !readOnly })
+  repairApi.candidates.mockResolvedValue({ ...repairPage({ items, tasks }), canEdit: !readOnly })
   sessionStorage.setItem('workflow-repair:wf-1', JSON.stringify({ selectedTaskId: 'FIX-old' }))
   return render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
 }
@@ -55,6 +55,31 @@ it('disables the new round entry for a read-only viewer', async () => {
   mount({ readOnly: true })
   expect(await screen.findByRole('button', { name: '开始下一轮优化' })).toBeDisabled()
 })
+async function createChild(tasks: Array<{taskId:string;revision:number;phase:string;updatedAtMs:number;itemCount:number}> = []) {
+  const view = mount({ tasks })
+  const entry = await screen.findByRole('button', { name: '开始下一轮优化' })
+  await waitFor(() => expect(entry).toBeEnabled());await userEvent.click(entry)
+  await userEvent.click(await screen.findByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' }))
+  await userEvent.click(screen.getByRole('button', { name: '生成 Pack 草稿' }))
+  await screen.findByRole('button', { name: '返回上一轮观察', exact: true })
+  return view
+}
+it('restores the exact parent/child observation link after reloading the child task', async () => {
+  const first = await createChild()
+  first.unmount()
+  render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+  await userEvent.click(await screen.findByRole('button', { name: '返回上一轮观察', exact: true }))
+  expect(await screen.findByText(/已发布部署 #160/)).toBeVisible()
+  expect(screen.getByRole('combobox', { name: '查看修复版本' })).toHaveValue('1')
+})
+it('clears the lineage when returning to the issue list before opening an unrelated task', async () => {
+  await createChild([{ taskId: 'FIX-unrelated', revision: 1, phase: 'review', updatedAtMs: 1, itemCount: 1 }])
+  await userEvent.click(screen.getByRole('button', { name: /返回问题与优化/ }))
+  await userEvent.click(within(await screen.findByRole('region', { name: '问题与优化任务入口' })).getByRole('button', { name: '查看本轮任务' }))
+  await waitFor(() => expect(repairApi.task).toHaveBeenCalledWith('FIX-unrelated'))
+  expect(screen.queryByRole('button', { name: '返回上一轮观察', exact: true })).not.toBeInTheDocument()
+  expect(JSON.parse(sessionStorage.getItem('workflow-repair:wf-1')!)).not.toHaveProperty('lineage')
+})
 
 it('blocks selection and submission when edit permission is revoked after entering', async () => {
   const view = mount()
@@ -68,6 +93,25 @@ it('blocks selection and submission when edit permission is revoked after enteri
   expect(item).toBeDisabled()
   expect(screen.getByRole('button', { name: '生成 Pack 草稿' })).toBeDisabled()
   expect(repairApi.create).not.toHaveBeenCalled()
+})
+it('keeps the affected-item reason visible after the automatic refresh rechecks the remaining valid selection', async () => {
+  const a = repairItem('a', '目标 A'), b = repairItem('b', '目标 B'), revised = repairItem('a', '目标 A 已变化')
+  mount({ items: [a, b] })
+  let changed = false
+  repairApi.candidates.mockImplementation(() => Promise.resolve({ ...repairPage({ items: changed ? [revised, b] : [a, b] }), inputDigest: (changed ? 'f' : 'c').repeat(64) }))
+  repairApi.selection.mockImplementation((_wf, ids: string[]) => Promise.resolve({ inputDigest: 'f'.repeat(64), items: [revised, b].filter(item => ids.includes(item.itemId)), missing: [], canEdit: true }))
+  repairApi.create.mockImplementation(() => { changed = true; return Promise.reject({ status: 409, body: JSON.stringify({ code: 'SOURCE_CHANGED', reasonCode: 'SELECTED_ITEMS_CHANGED' }) }) })
+  const entry = await screen.findByRole('button', { name: '开始下一轮优化' })
+  await waitFor(() => expect(entry).toBeEnabled());await userEvent.click(entry)
+  await userEvent.click(await screen.findByRole('checkbox', { name: '选择 目标 A' }))
+  await userEvent.click(screen.getByRole('checkbox', { name: '选择 目标 B' }))
+  await userEvent.type(screen.getByRole('textbox', { name: '本次修复要求' }), '保留要求')
+  await userEvent.click(screen.getByRole('button', { name: '生成 Pack 草稿' }))
+  await waitFor(() => expect(repairApi.selection.mock.calls.length).toBeGreaterThanOrEqual(2))
+  expect(await screen.findByText(/目标 A：建议内容已变化，请审阅后重新勾选/)).toBeVisible()
+  expect(screen.getByRole('checkbox', { name: '选择 目标 B' })).toBeChecked()
+  expect(screen.getByRole('textbox', { name: '本次修复要求' })).toHaveValue('保留要求')
+  expect(repairApi.create).toHaveBeenCalledTimes(1)
 })
 
 it.each([false, true])('keeps empty/error selection blocked and retains the return path (error=%s)', async readError => {
