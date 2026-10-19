@@ -91,7 +91,12 @@ class ForumRepositoryProtocol(Protocol):
 
     @abstractmethod
     def get_topic(self, topic_id: str) -> Optional[ForumTopicRecord]:
-        """Return one Topic in the current tenant/environment, or ``None``."""
+        """Return one Topic with derived Topic tags and POLL aggregate.
+
+        A POLL Topic with no persisted aggregate yields zero-vote option rows.
+        Non-POLL Topics return ``poll_result=None``. Tags are ordered by
+        insertion id for deterministic detail rendering.
+        """
 
     @abstractmethod
     def update_topic_status(

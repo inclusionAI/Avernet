@@ -12,10 +12,13 @@ from agentclaw.community.core.base import Base
 from agentclaw.community.core.task.forum.models import (
     BROWSE_MODE_FRAMEWORK,
     TOPIC_STATUS_OPEN,
+    TOPIC_TAG_SOURCE_LLM,
     TOPIC_TYPE_DISCUSSION,
     BrowseReportRecord,
     BrowseSubscriptionRecord,
     ForumPollConfig,
+    ForumPollResultOptionRecord,
+    ForumPollResultRecord,
     ForumPostRecord,
     ForumTopicRecord,
 )
@@ -69,6 +72,38 @@ def _poll_from_row(value: object | None) -> ForumPollConfig | None:
         options=tuple(options),
         deadline_at=None if deadline is None else datetime.fromisoformat(deadline),
     )
+
+
+def _poll_result_options_from_row(value: object) -> tuple[ForumPollResultOptionRecord, ...]:
+    """Decode the poll aggregate projection, rejecting malformed rows."""
+
+    if not isinstance(value, list):
+        raise ValueError("ac_forum_topic_poll_result.options_result must be a JSON array")
+    options: list[ForumPollResultOptionRecord] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError(
+                "ac_forum_topic_poll_result.options_result entries must be JSON objects"
+            )
+        label = item.get("label")
+        votes = item.get("votes")
+        percent = item.get("percent")
+        if not isinstance(label, str):
+            raise ValueError(
+                "ac_forum_topic_poll_result.options_result.label must be a string"
+            )
+        if not isinstance(votes, int) or isinstance(votes, bool) or votes < 0:
+            raise ValueError(
+                "ac_forum_topic_poll_result.options_result.votes must be a non-negative integer"
+            )
+        if not isinstance(percent, int) or isinstance(percent, bool) or not 0 <= percent <= 100:
+            raise ValueError(
+                "ac_forum_topic_poll_result.options_result.percent must be an integer from 0 to 100"
+            )
+        options.append(
+            ForumPollResultOptionRecord(label=label, votes=votes, percent=percent)
+        )
+    return tuple(options)
 
 
 class ForumTopicModel(Base):
@@ -240,6 +275,107 @@ class ForumPostModel(Base):
 
 
 register_avernet_tenant_guard(ForumTopicModel)
+
+
+class ForumPollResultModel(Base):
+    """Persisted derived aggregate for one POLL Topic.
+
+    The row is written by a backend aggregation task, not by the public vote
+    write path. ``options_result`` keeps each configured option's label, vote
+    count, and 0--100 integer percentage so the read API remains stable while
+    later tasks can add incremental bookkeeping.
+    """
+
+    __tablename__ = "ac_forum_topic_poll_result"
+
+    id = Column(
+        AutoIncrementBigInteger,
+        primary_key=True,
+        autoincrement=True,
+        nullable=False,
+    )
+    topic_id = Column(_TOPIC_ID, nullable=False)
+    total_votes = Column(Integer, nullable=False, default=0, server_default="0")
+    participant_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    options_result = Column(JSON, nullable=False)
+    env = Column(String(20), nullable=False, default=get_current_env)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        Index(
+            "uk_forum_topic_poll_result",
+            "avernet_tenant",
+            "env",
+            "topic_id",
+            unique=True,
+        ),
+    )
+
+    def to_record(self) -> ForumPollResultRecord:
+        return ForumPollResultRecord(
+            options=_poll_result_options_from_row(self.options_result),
+            total_votes=self.total_votes,
+            participant_count=self.participant_count,
+            updated_at=self.gmt_modified,
+        )
+
+
+class ForumTopicTagModel(Base):
+    """One derived or manually assigned label attached to a Topic."""
+
+    __tablename__ = "ac_forum_topic_tag"
+
+    id = Column(
+        AutoIncrementBigInteger,
+        primary_key=True,
+        autoincrement=True,
+        nullable=False,
+    )
+    topic_id = Column(_TOPIC_ID, nullable=False)
+    tag_text = Column(String(64), nullable=False)
+    source = Column(String(16), nullable=False, server_default=TOPIC_TAG_SOURCE_LLM)
+    env = Column(String(20), nullable=False, default=get_current_env)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        Index(
+            "uk_forum_topic_tag",
+            "avernet_tenant",
+            "env",
+            "topic_id",
+            "tag_text",
+            unique=True,
+        ),
+        Index(
+            "idx_forum_topic_tag_text",
+            "avernet_tenant",
+            "env",
+            "tag_text",
+        ),
+    )
+
+
+register_avernet_tenant_guard(ForumPollResultModel)
+register_avernet_tenant_guard(ForumTopicTagModel)
 
 
 class ForumBrowseSubscriptionModel(Base):

@@ -10,6 +10,19 @@ export interface CommunityPoll {
   deadlineAt?: string;
 }
 
+export interface CommunityPollStatsOption {
+  label: string;
+  votes: number;
+  percent: number;
+}
+
+export interface CommunityPollStats {
+  totalVotes: number;
+  participantCount: number;
+  options: CommunityPollStatsOption[];
+  updatedAt: string;
+}
+
 export interface CommunityAuthor {
   type: CommunityActorType;
   id: string;
@@ -24,6 +37,8 @@ export interface CommunityTopic {
   status: CommunityTopicStatus;
   topicType: CommunityTopicType;
   poll?: CommunityPoll;
+  pollStats?: CommunityPollStats;
+  tags?: string[];
   author: CommunityAuthor;
   replyCount?: number;
   latestActivityAt?: string;

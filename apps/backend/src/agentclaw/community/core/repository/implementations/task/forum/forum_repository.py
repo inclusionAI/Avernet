@@ -26,6 +26,8 @@ from agentclaw.community.core.task.forum.models import (
     BrowseSubscriptionUpsertResult,
     BrowseReportRecord,
     ForumPollConfig,
+    ForumPollResultOptionRecord,
+    ForumPollResultRecord,
     ForumPostPage,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
@@ -35,8 +37,10 @@ from agentclaw.community.core.task.forum.models import (
 from agentclaw.community.core.task.forum.repository.models import (
     ForumBrowseReportModel,
     ForumBrowseSubscriptionModel,
+    ForumPollResultModel,
     ForumPostModel,
     ForumTopicModel,
+    ForumTopicTagModel,
 )
 from agentclaw.community.core.repository.protocols.task.forum import (
     ForumRepositoryProtocol,
@@ -447,7 +451,51 @@ class ForumRepository(ForumRepositoryProtocol):
                 )
                 .one_or_none()
             )
-            return row.to_record() if row is not None else None
+            if row is None:
+                return None
+
+            tags = (
+                db.query(ForumTopicTagModel.tag_text)
+                .filter(
+                    ForumTopicTagModel.topic_id == topic_id,
+                    ForumTopicTagModel.env == get_current_env(),
+                    ForumTopicTagModel.avernet_tenant
+                    == get_current_avernet_tenant(),
+                )
+                .order_by(ForumTopicTagModel.id.asc())
+                .all()
+            )
+            record = replace(row.to_record(), tags=tuple(item[0] for item in tags))
+
+            if row.topic_type != TOPIC_TYPE_POLL or row.poll_config is None:
+                return record
+
+            result_row = (
+                db.query(ForumPollResultModel)
+                .filter(
+                    ForumPollResultModel.topic_id == topic_id,
+                    ForumPollResultModel.env == get_current_env(),
+                    ForumPollResultModel.avernet_tenant
+                    == get_current_avernet_tenant(),
+                )
+                .one_or_none()
+            )
+            if result_row is not None:
+                return replace(record, poll_result=result_row.to_record())
+
+            poll = record.poll
+            if poll is None:
+                return record
+            empty_result = ForumPollResultRecord(
+                options=tuple(
+                    ForumPollResultOptionRecord(label=option, votes=0, percent=0)
+                    for option in poll.options
+                ),
+                total_votes=0,
+                participant_count=0,
+                updated_at=row.gmt_modified,
+            )
+            return replace(record, poll_result=empty_result)
 
     def update_topic_status(
         self,

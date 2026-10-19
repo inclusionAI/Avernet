@@ -2,6 +2,8 @@ import type {
   CommunityAuthor,
   CommunityPoll,
   CommunityPollSelection,
+  CommunityPollStats,
+  CommunityPollStatsOption,
   CommunityReply,
   CommunityTopic,
   CommunityTopicType,
@@ -23,6 +25,8 @@ export interface CommunityTopicDto {
   status?: string;
   topic_type?: string;
   poll?: CommunityPollDto | null;
+  poll_stats?: CommunityPollStatsDto | null;
+  tags?: string[] | null;
   author_type?: string;
   author_id?: string;
   author?: CommunityAuthorDto;
@@ -68,6 +72,21 @@ function asAuthorDto(dto: {
   };
 }
 
+export interface CommunityPollStatsOptionDto {
+  label?: string | null;
+  votes?: number | null;
+  percent?: number | null;
+  [key: string]: unknown;
+}
+
+export interface CommunityPollStatsDto {
+  total_votes?: number | null;
+  participant_count?: number | null;
+  options?: CommunityPollStatsOptionDto[] | null;
+  updated_at?: string | null;
+  [key: string]: unknown;
+}
+
 export interface CommunityPollDto {
   selection?: string;
   options?: string[] | null;
@@ -97,6 +116,40 @@ function mapPoll(value: CommunityPollDto | null | undefined): CommunityPoll | un
   };
 }
 
+function mapPollStats(
+  value: CommunityPollStatsDto | null | undefined,
+): CommunityPollStats | undefined {
+  if (!value) return undefined;
+  if (typeof value.total_votes !== 'number' || typeof value.participant_count !== 'number') {
+    return undefined;
+  }
+  const rawOptions = Array.isArray(value.options) ? value.options : [];
+  const options: CommunityPollStatsOption[] = rawOptions.flatMap((option) => {
+    if (
+      typeof option.label !== 'string' ||
+      !option.label.trim() ||
+      typeof option.votes !== 'number' ||
+      typeof option.percent !== 'number'
+    ) {
+      return [];
+    }
+    return [{ label: option.label.trim(), votes: option.votes, percent: option.percent }];
+  });
+  if (!options.length) return undefined;
+  return {
+    totalVotes: value.total_votes,
+    participantCount: value.participant_count,
+    options,
+    updatedAt: value.updated_at?.trim() || '',
+  };
+}
+
+function mapTags(value: string[] | null | undefined): string[] {
+  return (Array.isArray(value) ? value : [])
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
 function mapAuthor(author: CommunityAuthorDto | undefined): CommunityAuthor {
   const trimmedId = author?.actor_id?.trim() || '';
   const trimmedName = author?.display_name?.trim();
@@ -119,6 +172,8 @@ export function mapCommunityTopicDto(dto: CommunityTopicDto): CommunityTopic {
     status: dto.status?.toUpperCase() === 'OPEN' ? 'open' : 'closed',
     topicType: mapTopicType(dto.topic_type),
     poll: mapPoll(dto.poll),
+    pollStats: mapPollStats(dto.poll_stats),
+    tags: mapTags(dto.tags),
     author: mapAuthor(asAuthorDto(dto)),
     replyCount: typeof dto.reply_count === 'number' ? dto.reply_count : undefined,
     latestActivityAt,

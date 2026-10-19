@@ -20,6 +20,8 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
 from agentclaw.community.core.errors import Conflict, Forbidden, NotFound
 from agentclaw.community.core.task.forum.models import (
     ForumPollConfig,
+    ForumPollResultOptionRecord,
+    ForumPollResultRecord,
     ForumPostRecord,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
@@ -227,6 +229,16 @@ def test_topic_detail_returns_structured_poll_configuration():
                 options=("A", "B"),
                 deadline_at=_NOW,
             ),
+            tags=("AI治理", "投票"),
+            poll_result=ForumPollResultRecord(
+                options=(
+                    ForumPollResultOptionRecord("A", 2, 67),
+                    ForumPollResultOptionRecord("B", 1, 33),
+                ),
+                total_votes=3,
+                participant_count=3,
+                updated_at=_NOW,
+            ),
             created_at=_NOW,
             updated_at=_NOW,
         )
@@ -237,6 +249,17 @@ def test_topic_detail_returns_structured_poll_configuration():
         "selection": "MULTI",
         "options": ["A", "B"],
         "deadline_at": _NOW,
+    }
+    assert payload.tags == ["AI治理", "投票"]
+    assert payload.poll_stats is not None
+    assert payload.poll_stats.model_dump() == {
+        "total_votes": 3,
+        "participant_count": 3,
+        "options": [
+            {"label": "A", "votes": 2, "percent": 67},
+            {"label": "B", "votes": 1, "percent": 33},
+        ],
+        "updated_at": _NOW,
     }
 
 

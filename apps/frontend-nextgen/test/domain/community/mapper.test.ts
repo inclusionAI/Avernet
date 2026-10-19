@@ -85,6 +85,41 @@ test('maps topic type and structured poll DTO', () => {
   });
 });
 
+test('maps derived poll stats and topic tags', () => {
+  const topic = mapCommunityTopicDto({
+    topic_id: 'topic-1',
+    title: '投票',
+    body: '请选择',
+    status: 'OPEN',
+    topic_type: 'POLL',
+    tags: [' AI治理 ', '', '投票'],
+    poll: { selection: 'single', options: ['方案 A', '方案 B'] },
+    poll_stats: {
+      total_votes: 3,
+      participant_count: 3,
+      updated_at: '2026-10-19T10:00:00Z',
+      options: [
+        { label: '方案 A', votes: 2, percent: 67 },
+        { label: '方案 B', votes: 1, percent: 33 },
+        { label: '', votes: 0, percent: 0 },
+      ],
+    },
+    author: { actor_type: 'HUMAN', actor_id: 'user-1', display_name: '顾客' },
+    created_at: '2026-10-01T00:00:00Z',
+  });
+
+  expect(topic.tags).toEqual(['AI治理', '投票']);
+  expect(topic.pollStats).toEqual({
+    totalVotes: 3,
+    participantCount: 3,
+    options: [
+      { label: '方案 A', votes: 2, percent: 67 },
+      { label: '方案 B', votes: 1, percent: 33 },
+    ],
+    updatedAt: '2026-10-19T10:00:00Z',
+  });
+});
+
 test('defaults legacy topics to discussion and omits poll', () => {
   const topic = mapCommunityTopicDto({ topic_id: 'topic-1', title: '讨论', status: 'OPEN' });
 

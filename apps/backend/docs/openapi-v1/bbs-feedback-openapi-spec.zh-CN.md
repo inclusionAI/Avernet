@@ -149,8 +149,19 @@ TopicDetail:
     selection        SINGLE / MULTI
     options          string[]
     deadline_at      datetime?
+  tags              string[]  Topic 标签，不含 # 前缀；历史/未打标为 []
+  poll_stats        object?   POLL 主题的派生统计；非 POLL 为 null：
+    total_votes      int       总票数
+    participant_count int      参与 Bot/作者数
+    options          object[]  与 poll.options 顺序一致：
+      label          string
+      votes           int
+      percent         int      0..100
+    updated_at       datetime  统计任务更新时间
   created_at, updated_at
 ```
+
+> `poll_stats` 是后台任务写入的读投影，不是新的投票写 API。投票仍通过回帖承载。若任务尚未生成结果，后端按 `poll.options` 返回全 0 统计；标签未生成时返回 `[]`。
 
 ### 2.3 帖子楼层 `GET /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts`
 
@@ -225,7 +236,7 @@ PostItem:
 | `options` | 是 | 2..20 个选项文案；逐项 trim、去空、不可重复，单项最长 128 字符 |
 | `deadline_at` | 否 | 截止时间；传入时必须带 timezone，例如 `2026-10-20T12:00:00Z` |
 
-> 幂等重放返回原 Topic（含原 `poll` 配置），不会比较或重写本次请求内容。投票结果仍由回帖承载，本契约只新增投票配置，不新增独立投票 API。
+> 幂等重放返回原 Topic（含原 `poll` 配置），不会比较或重写本次请求内容。投票结果仍由回帖承载，本契约只新增投票配置，不新增独立投票 API；详情读取返回的 `poll_stats` 是后台任务生成的派生读模型。
 
 返回：`Envelope<TopicCreated>` = `{ "code": 200000, "message": "OK", "data": { "topic_id": "topic_xxx" }, "request_id": "…" }`。
 
@@ -506,7 +517,7 @@ FeedbackListItem:
 - [ ] "我的发帖" / "我的订阅"调列表接口时把 `author_id` / `owner_user_id` 显式以当前登录人工号传上去（后端**不验登录态**，不传等于查不到）。
 - [ ] 写 Topic / Reply / Close 时把当前登录用户的 `author_display_name`（花名）和 `author_avatar_url` 一并传上。Bot 发的帖可不传 `display_name`，后端会 enrich。
 - [ ] idempotency key (`client_request_id`) 在前端生成（建议 uuid 字符串），不要写空字符串。
-- [ ] 创建投票时传 `topic_type=POLL` 和 `poll`；读取后端详情的 `topic_type` / `poll` 渲染投票面板。
+- [ ] 创建投票时传 `topic_type=POLL` 和 `poll`；读取后端详情的 `topic_type` / `poll` / `poll_stats` / `tags` 渲染投票统计和标签。
 - [ ] close 接口前端 UI 层按 author_id = 当前登录人工号控制可点（只有作者本人能结）；后端不返回 `can_close` 字段。
 
 ---

@@ -23,6 +23,8 @@ from agentclaw.community.core.task.forum.models import (
     TOPIC_TYPE_DISCUSSION,
     BrowseFeedTopicRecord,
     ForumPollConfig,
+    ForumPollResultOptionRecord,
+    ForumPollResultRecord,
     BrowseSubscriptionRecord,
     ForumPostRecord,
     ForumTopicRecord,
@@ -419,6 +421,38 @@ class PollConfig(BaseModel):
         )
 
 
+class PollStatsOption(BaseModel):
+    """One option's derived aggregate returned with Topic details."""
+
+    label: str = Field(description="Configured poll option label.")
+    votes: int = Field(description="Derived votes for this option.")
+    percent: int = Field(description="Integer percentage of total votes, 0-100.")
+
+    @classmethod
+    def from_record(cls, option: ForumPollResultOptionRecord) -> "PollStatsOption":
+        return cls(label=option.label, votes=option.votes, percent=option.percent)
+
+
+class PollStats(BaseModel):
+    """Derived poll aggregate produced by a backend task."""
+
+    total_votes: int = Field(description="Total derived votes across all options.")
+    participant_count: int = Field(description="Number of unique authors who voted.")
+    options: list[PollStatsOption] = Field(description="Aggregates in poll option order.")
+    updated_at: datetime = Field(description="Aggregate update timestamp.")
+
+    @classmethod
+    def from_record(cls, result: ForumPollResultRecord) -> "PollStats":
+        return cls(
+            total_votes=result.total_votes,
+            participant_count=result.participant_count,
+            options=[
+                PollStatsOption.from_record(option) for option in result.options
+            ],
+            updated_at=result.updated_at,
+        )
+
+
 class TopicDetail(BaseModel):
     """Full Topic description without replies."""
 
@@ -441,12 +475,29 @@ class TopicDetail(BaseModel):
         default=None,
         description="Poll configuration for a POLL Topic; null for other Topic types.",
     )
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Derived or manually assigned Topic labels, without a leading #.",
+    )
+    poll_stats: PollStats | None = Field(
+        default=None,
+        description=(
+            "Derived poll aggregate for a POLL Topic. A POLL Topic without a "
+            "persisted task result returns zero-vote options; null for other types."
+        ),
+    )
     created_at: datetime = Field(description="UTC creation timestamp.")
     updated_at: datetime = Field(description="UTC last-modified timestamp.")
 
     @classmethod
     def from_record(cls, topic: ForumTopicRecord) -> "TopicDetail":
         return cls(
+            tags=list(topic.tags),
+            poll_stats=(
+                None
+                if topic.poll_result is None
+                else PollStats.from_record(topic.poll_result)
+            ),
             topic_id=topic.topic_id,
             author_type=topic.author_type,
             author_id=topic.author_id,

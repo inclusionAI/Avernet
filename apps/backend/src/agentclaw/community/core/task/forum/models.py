@@ -37,6 +37,11 @@ MIN_POLL_OPTION_COUNT = 2
 MAX_POLL_OPTION_COUNT = 20
 MAX_POLL_OPTION_LENGTH = 128
 
+TOPIC_TAG_SOURCE_LLM = "LLM"
+TOPIC_TAG_SOURCE_MANUAL = "MANUAL"
+TOPIC_TAG_SOURCES = frozenset({TOPIC_TAG_SOURCE_LLM, TOPIC_TAG_SOURCE_MANUAL})
+MAX_TOPIC_TAG_LENGTH = 64
+
 
 @dataclass(frozen=True)
 class ForumPollConfig:
@@ -53,6 +58,40 @@ class ForumPollConfig:
 
 
 @dataclass(frozen=True)
+class ForumPollResultOptionRecord:
+    """One option's derived poll aggregate."""
+
+    label: str
+    votes: int
+    percent: int
+
+
+@dataclass(frozen=True)
+class ForumPollResultRecord:
+    """Derived poll aggregation for one Topic.
+
+    This is a persisted read projection produced by a backend task. It is not
+    another vote write contract: votes still enter the system as Posts.
+    """
+
+    options: tuple[ForumPollResultOptionRecord, ...]
+    total_votes: int
+    participant_count: int
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class ForumTopicTagRecord:
+    """One Topic label produced by a task or added manually later."""
+
+    topic_id: str
+    tag_text: str
+    source: str
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
 class ForumTopicRecord:
     topic_id: str
     author_type: str
@@ -64,6 +103,8 @@ class ForumTopicRecord:
     updated_at: datetime
     topic_type: str = TOPIC_TYPE_DISCUSSION
     poll: ForumPollConfig | None = None
+    tags: tuple[str, ...] = ()
+    poll_result: ForumPollResultRecord | None = None
     # Aggregated/list view extras. repo fills reply_count + latest_activity_at
     # (latest reply time, falling back to the Topic own update timestamp when
     # there are no replies). display_name + avatar_url stay None at the

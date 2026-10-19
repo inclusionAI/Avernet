@@ -9,10 +9,13 @@ from agentclaw.community.core.task.forum.models import (
     TOPIC_STATUS_CLOSED,
     TOPIC_TYPE_NOTICE,
     TOPIC_TYPE_POLL,
+    ForumPollConfig,
 )
 from agentclaw.community.core.task.forum.repository.models import (
+    ForumPollResultModel,
     ForumPostModel,
     ForumTopicModel,
+    ForumTopicTagModel,
 )
 from agentclaw.community.core.repository.implementations.task.forum.forum_repository import (
     ForumRepository,
@@ -139,6 +142,71 @@ def test_topic_reads_are_isolated_by_tenant_and_environment(db, monkeypatch):
         assert (
             repo.list_topics(keyword=None, status=None, offset=0, limit=20).total == 0
         )
+
+
+def test_get_topic_returns_persisted_tags_and_poll_result(db):
+    repo = ForumRepository(db)
+    topic = repo.create_topic(
+        author_type="BOT",
+        author_id="bot-a",
+        client_request_id="req-poll",
+        title="poll",
+        body="Choose one",
+        topic_type=TOPIC_TYPE_POLL,
+        poll=ForumPollConfig(selection="SINGLE", options=("Option A", "Option B")),
+    ).topic
+
+    with db.orm_session() as session:
+        session.add(
+            ForumPollResultModel(
+                topic_id=topic.topic_id,
+                total_votes=3,
+                participant_count=3,
+                options_result=[
+                    {"label": "Option A", "votes": 2, "percent": 67},
+                    {"label": "Option B", "votes": 1, "percent": 33},
+                ],
+            )
+        )
+        session.add(ForumTopicTagModel(topic_id=topic.topic_id, tag_text="AI治理"))
+        session.add(ForumTopicTagModel(topic_id=topic.topic_id, tag_text="投票"))
+
+    result = repo.get_topic(topic.topic_id)
+
+    assert result is not None
+    assert result.tags == ("AI治理", "投票")
+    assert result.poll_result is not None
+    assert result.poll_result.total_votes == 3
+    assert result.poll_result.participant_count == 3
+    assert [
+        (option.label, option.votes, option.percent)
+        for option in result.poll_result.options
+    ] == [("Option A", 2, 67), ("Option B", 1, 33)]
+
+
+def test_get_topic_returns_zero_vote_poll_result_before_task_writes_projection(db):
+    repo = ForumRepository(db)
+    topic = repo.create_topic(
+        author_type="BOT",
+        author_id="bot-a",
+        client_request_id="req-poll-empty",
+        title="poll",
+        body="Choose one",
+        topic_type=TOPIC_TYPE_POLL,
+        poll=ForumPollConfig(selection="MULTI", options=("A", "B")),
+    ).topic
+
+    result = repo.get_topic(topic.topic_id)
+
+    assert result is not None
+    assert result.tags == ()
+    assert result.poll_result is not None
+    assert result.poll_result.total_votes == 0
+    assert result.poll_result.participant_count == 0
+    assert [(option.label, option.votes, option.percent) for option in result.poll_result.options] == [
+        ("A", 0, 0),
+        ("B", 0, 0),
+    ]
 
 
 def test_list_posts_orders_chronologically_and_keeps_total_on_empty_page(db):

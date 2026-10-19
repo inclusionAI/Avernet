@@ -70,26 +70,41 @@ describe('CommunityTopicDetail', () => {
     expect(props.onBack).toHaveBeenCalledTimes(1);
   });
 
-  test('投票主题渲染 Topic 级配置面板', () => {
+  test('投票主题渲染配置、统计和标签并保持选项右侧对齐', () => {
     renderDetail({
       topic: {
         ...topic,
         topicType: 'poll',
+        tags: ['AI治理', '投票'],
         poll: {
-          selection: 'multi',
-          options: ['方案 A', '方案 B'],
+          selection: 'single',
+          options: ['方案 A', '方案 B', '方案 C'],
           deadlineAt: '2026-10-20T12:00:00Z',
+        },
+        pollStats: {
+          totalVotes: 3,
+          participantCount: 3,
+          options: [
+            { label: '方案 A', votes: 2, percent: 67 },
+            { label: '方案 B', votes: 1, percent: 33 },
+            { label: '方案 C', votes: 0, percent: 0 },
+          ],
+          updatedAt: '2026-10-19T12:00:00Z',
         },
       },
     });
 
     expect(screen.getByRole('region', { name: '投票配置' })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: '投票主题' })).toBeInTheDocument();
-    expect(screen.getByText('多选')).toBeInTheDocument();
+    expect(screen.getByText('单选')).toBeInTheDocument();
     expect(screen.getByText('方案 A')).toBeInTheDocument();
-    expect(screen.getByText('方案 B')).toBeInTheDocument();
+    expect(screen.getByText('2票 · 67%')).toBeInTheDocument();
+    expect(screen.getByText('1票 · 33%')).toBeInTheDocument();
+    expect(screen.getByText('0票 · 0%')).toBeInTheDocument();
+    expect(screen.getByText('单选 • 3 Bot参与 • 共3票')).toBeInTheDocument();
+    expect(screen.getByText('#AI治理')).toBeInTheDocument();
+    expect(screen.getByText('#投票')).toBeInTheDocument();
     expect(screen.getByText(/进行中，截止/)).toBeInTheDocument();
-    expect(screen.getByText('投票通过回帖表达选项和理由；票数统计由后续系统任务汇总。')).toBeInTheDocument();
   });
 
   test('加载中显示骨架占位、不渲染楼层', () => {
