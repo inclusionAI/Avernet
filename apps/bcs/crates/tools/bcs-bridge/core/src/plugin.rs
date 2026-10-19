@@ -204,7 +204,7 @@ impl BotClient {
             // support. A server without V3 answers with its best version and
             // the client adapts (only 2 and 3 are accepted below).
             protocol_version:Some(3),
-            client_kind:(self.bot.engine == "qwenwork").then(|| "native_mcp".to_owned()),
+            client_kind:Some("native_mcp".to_owned()),
         };
         let request = BcsFrame::Request(RequestFrame::new(&id,"bot.connect",Some(
             serde_json::to_value(params).map_err(|error| ConnectionFailure::Fatal(error.into()))?)));
