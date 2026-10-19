@@ -3,11 +3,19 @@ type MockResponse = {
   status: (code: number) => MockResponse;
 };
 
+type MockPoll = {
+  selection: 'SINGLE' | 'MULTI';
+  options: string[];
+  deadline_at?: string;
+};
+
 type MockTopic = {
   topic_id: string;
   title: string;
   body: string;
   status: 'OPEN' | 'CLOSED';
+  topic_type: 'DISCUSSION' | 'POLL' | 'NOTICE';
+  poll?: MockPoll;
   author: { actor_type: 'HUMAN' | 'BOT'; actor_id: string; display_name: string; avatar_url?: string };
   reply_count: number;
   latest_activity_at: string;
@@ -22,6 +30,7 @@ const topics: MockTopic[] = [
     title: '怎样让 Bot 更自然地参与团队协作？',
     body: '我们正在尝试让 Bot 不只是被动回答问题，而是能在合适的时机补充资料、总结共识。大家有哪些实践经验？',
     status: 'OPEN',
+    topic_type: 'DISCUSSION',
     author: { actor_type: 'HUMAN', actor_id: '900003', display_name: '顾客' },
     reply_count: 3,
     latest_activity_at: '2026-10-06T06:20:00Z',
@@ -31,9 +40,15 @@ const topics: MockTopic[] = [
   },
   {
     topic_id: 'community-topic-002',
-    title: '分享一个需求评审 Bot 的提示词结构',
-    body: '这套结构包括背景、目标、约束、验收标准四部分，适合在评审前自动检查信息缺口。',
+    title: '需求评审 Bot 更适合哪种提示词结构？',
+    body: '请选择你认为更适合的需求评审结构，并在回复中说明理由。',
     status: 'OPEN',
+    topic_type: 'POLL',
+    poll: {
+      selection: 'SINGLE',
+      options: ['背景-目标-约束-验收', '目标-场景-风险-验收'],
+      deadline_at: '2026-10-20T12:00:00Z',
+    },
     author: { actor_type: 'BOT', actor_id: 'product-helper', display_name: '产品协作助手' },
     reply_count: 2,
     latest_activity_at: '2026-10-05T12:10:00Z',
@@ -46,6 +61,7 @@ const topics: MockTopic[] = [
     title: '社区内容应该如何沉淀为团队知识？',
     body: '讨论结束后，希望能把高质量内容转成团队知识条目。哪些信息值得保留？',
     status: 'CLOSED',
+    topic_type: 'DISCUSSION',
     author: { actor_type: 'HUMAN', actor_id: 'user-lee', display_name: '李明' },
     reply_count: 4,
     latest_activity_at: '2026-10-03T09:40:00Z',
@@ -139,7 +155,17 @@ export default {
     response.send(ok({ items: list.slice(start, start + pageSize), total: list.length }));
   },
   'POST /api/v1/collaboration/tasks/bbs/topics': (
-    request: { body?: Record<string, string> },
+    request: {
+      body?: {
+        title?: string;
+        body?: string;
+        author_id?: string;
+        author_display_name?: string;
+        author_avatar_url?: string;
+        topic_type?: 'DISCUSSION' | 'POLL' | 'NOTICE';
+        poll?: Partial<MockPoll>;
+      };
+    },
     response: MockResponse,
   ) => {
     const now = new Date().toISOString();
@@ -148,11 +174,20 @@ export default {
       title: request.body?.title?.trim() || '未命名主题',
       body: request.body?.body?.trim() || '',
       status: 'OPEN',
+      topic_type: request.body?.topic_type === 'POLL' ? 'POLL' : 'DISCUSSION',
+      poll:
+        request.body?.topic_type === 'POLL'
+          ? {
+              selection: request.body?.poll?.selection === 'MULTI' ? 'MULTI' : 'SINGLE',
+              options: request.body?.poll?.options ?? ['方案A', '方案B'],
+              deadline_at: request.body?.poll?.deadline_at,
+            }
+          : undefined,
       author: {
         actor_type: 'HUMAN',
-        actor_id: request.body?.author_id || request.body?.authorId || '900003',
-        display_name: request.body?.authorName || '我',
-        avatar_url: request.body?.authorAvatarUrl || undefined,
+        actor_id: request.body?.author_id || '900003',
+        display_name: request.body?.author_display_name || '我',
+        avatar_url: request.body?.author_avatar_url || undefined,
       },
       reply_count: 0,
       latest_activity_at: now,

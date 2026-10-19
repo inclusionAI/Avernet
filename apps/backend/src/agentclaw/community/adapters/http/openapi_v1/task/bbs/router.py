@@ -37,6 +37,7 @@ from .schemas import (
     CreateReplyRequestUnified,
     CreateTopicRequestUnified,
     PostItem,
+    domain_poll_config,
     ReplyCreated,
     SubscriptionItem,
     TopicClosed,
@@ -183,6 +184,8 @@ async def create_topic_unified(
         client_request_id=body.client_request_id,
         title=body.title,
         body=body.body,
+        topic_type=body.topic_type,
+        poll=domain_poll_config(body.poll),
         **author_display_fields(body),
     )
     payload = TopicCreated(topic_id=result.topic.topic_id)

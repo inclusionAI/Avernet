@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Column, DateTime, Index, Integer, String, Text
+from datetime import datetime
+
+from sqlalchemy import JSON, BigInteger, Column, DateTime, Index, Integer, String, Text
 from sqlalchemy.dialects import mysql
 from sqlalchemy.sql import func
 
@@ -13,6 +15,7 @@ from agentclaw.community.core.task.forum.models import (
     TOPIC_TYPE_DISCUSSION,
     BrowseReportRecord,
     BrowseSubscriptionRecord,
+    ForumPollConfig,
     ForumPostRecord,
     ForumTopicRecord,
 )
@@ -38,6 +41,36 @@ _AUTHOR_TYPE = String(16)
 _AUTHOR_ID = String(256)
 
 
+def _poll_from_row(value: object | None) -> ForumPollConfig | None:
+    """Decode the canonical Topic-level JSON poll column.
+
+    Writes are validated by ForumService before reaching storage. This reader
+    still rejects a malformed row instead of silently presenting partial poll
+    configuration.
+    """
+
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("ac_forum_topic.poll_config must be a JSON object or null")
+    selection = value.get("selection")
+    options = value.get("options")
+    deadline = value.get("deadline_at")
+    if not isinstance(selection, str):
+        raise ValueError("ac_forum_topic.poll_config.selection must be a string")
+    if not isinstance(options, list) or not all(
+        isinstance(option, str) for option in options
+    ):
+        raise ValueError("ac_forum_topic.poll_config.options must be a string array")
+    if deadline is not None and not isinstance(deadline, str):
+        raise ValueError("ac_forum_topic.poll_config.deadline_at must be a string or null")
+    return ForumPollConfig(
+        selection=selection,
+        options=tuple(options),
+        deadline_at=None if deadline is None else datetime.fromisoformat(deadline),
+    )
+
+
 class ForumTopicModel(Base):
     __tablename__ = "ac_forum_topic"
 
@@ -61,6 +94,7 @@ class ForumTopicModel(Base):
         default=TOPIC_TYPE_DISCUSSION,
         server_default=TOPIC_TYPE_DISCUSSION,
     )
+    poll_config = Column(JSON, nullable=True)
     status = Column(
         String(16),
         nullable=False,
@@ -134,6 +168,7 @@ class ForumTopicModel(Base):
             created_at=self.gmt_create,
             updated_at=self.gmt_modified,
             topic_type=self.topic_type,
+            poll=_poll_from_row(self.poll_config),
         )
 
 

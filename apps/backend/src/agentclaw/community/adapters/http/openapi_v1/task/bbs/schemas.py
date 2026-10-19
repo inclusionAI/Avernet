@@ -16,13 +16,52 @@ from agentclaw.community.core.task.forum.models import (
     MAX_BROWSE_SUBSCRIPTION_NOTE_LENGTH,
     MAX_BODY_LENGTH,
     MAX_ID_LENGTH,
+    MAX_POLL_OPTION_COUNT,
+    MAX_POLL_OPTION_LENGTH,
+    MIN_POLL_OPTION_COUNT,
     MAX_TITLE_LENGTH,
     TOPIC_TYPE_DISCUSSION,
     BrowseFeedTopicRecord,
+    ForumPollConfig,
     BrowseSubscriptionRecord,
     ForumPostRecord,
     ForumTopicRecord,
 )
+
+
+class PollConfigRequest(BaseModel):
+    """Topic-level poll configuration accepted on Topic creation."""
+
+    selection: str = Field(
+        min_length=1,
+        max_length=16,
+        description="Voting rule: SINGLE (one option) or MULTI (multiple options).",
+    )
+    options: list[str] = Field(
+        min_length=MIN_POLL_OPTION_COUNT,
+        max_length=MAX_POLL_OPTION_COUNT,
+        description=(
+            f"Poll option labels, between {MIN_POLL_OPTION_COUNT} and "
+            f"{MAX_POLL_OPTION_COUNT} entries. Each entry is trimmed and must "
+            f"be no longer than {MAX_POLL_OPTION_LENGTH} characters."
+        ),
+    )
+    deadline_at: datetime | None = Field(
+        default=None,
+        description="Optional UTC deadline. Include an explicit timezone offset.",
+    )
+
+
+def domain_poll_config(poll: PollConfigRequest | None) -> ForumPollConfig | None:
+    """Translate the HTTP poll body into the transport-agnostic domain record."""
+
+    if poll is None:
+        return None
+    return ForumPollConfig(
+        selection=poll.selection,
+        options=tuple(poll.options),
+        deadline_at=poll.deadline_at,
+    )
 
 
 class CreateTopicRequest(BaseModel):
@@ -46,6 +85,10 @@ class CreateTopicRequest(BaseModel):
     topic_type: str = Field(
         default=TOPIC_TYPE_DISCUSSION,
         description="Topic type: DISCUSSION, POLL, or NOTICE.",
+    )
+    poll: PollConfigRequest | None = Field(
+        default=None,
+        description="Poll configuration. Required when topic_type=POLL; rejected otherwise.",
     )
 
 
@@ -154,9 +197,8 @@ class CreateTopicRequestUnified(AuthorRefRequest):
     """Body for `POST /openapi/v1/collaboration/tasks/bbs/topics`: create a Topic as a declared author.
 
     The author is named explicitly (`author_type` + `author_id`); the
-    declared author may be a human or a Bot. The product surface does not
-    distinguish topic kinds; the Topic is persisted as `DISCUSSION` and
-    the write body carries no `topic_type` Flag.
+    declared author may be a human or a Bot. `topic_type` is explicit;
+    `poll` is Topic-level configuration and is only valid for `POLL`.
     """
 
     client_request_id: str = Field(
@@ -173,6 +215,14 @@ class CreateTopicRequestUnified(AuthorRefRequest):
         min_length=1,
         max_length=MAX_BODY_LENGTH,
         description="Topic description. Leading and trailing whitespace is removed.",
+    )
+    topic_type: str = Field(
+        default=TOPIC_TYPE_DISCUSSION,
+        description="Topic type: DISCUSSION, POLL, or NOTICE.",
+    )
+    poll: PollConfigRequest | None = Field(
+        default=None,
+        description="Poll configuration. Required when topic_type=POLL; rejected otherwise.",
     )
 
 
@@ -350,6 +400,25 @@ class TopicListItem(BaseModel):
         )
 
 
+class PollConfig(BaseModel):
+    """Topic-level poll configuration returned with Topic details."""
+
+    selection: str = Field(description="Voting rule: SINGLE or MULTI.")
+    options: list[str] = Field(description="Poll option labels.")
+    deadline_at: datetime | None = Field(
+        default=None,
+        description="Optional configured deadline, or null.",
+    )
+
+    @classmethod
+    def from_record(cls, poll: ForumPollConfig) -> "PollConfig":
+        return cls(
+            selection=poll.selection,
+            options=list(poll.options),
+            deadline_at=poll.deadline_at,
+        )
+
+
 class TopicDetail(BaseModel):
     """Full Topic description without replies."""
 
@@ -368,12 +437,29 @@ class TopicDetail(BaseModel):
     body: str = Field(description="Full Topic description or reply body.")
     status: str = Field(description="Topic state: OPEN, CLOSED, or LOCKED.")
     topic_type: str = Field(description="Topic type: DISCUSSION, POLL, or NOTICE.")
+    poll: PollConfig | None = Field(
+        default=None,
+        description="Poll configuration for a POLL Topic; null for other Topic types.",
+    )
     created_at: datetime = Field(description="UTC creation timestamp.")
     updated_at: datetime = Field(description="UTC last-modified timestamp.")
 
     @classmethod
     def from_record(cls, topic: ForumTopicRecord) -> "TopicDetail":
-        return cls(**topic.__dict__)
+        return cls(
+            topic_id=topic.topic_id,
+            author_type=topic.author_type,
+            author_id=topic.author_id,
+            display_name=topic.display_name,
+            avatar_url=topic.avatar_url,
+            title=topic.title,
+            body=topic.body,
+            status=topic.status,
+            topic_type=topic.topic_type,
+            poll=None if topic.poll is None else PollConfig.from_record(topic.poll),
+            created_at=topic.created_at,
+            updated_at=topic.updated_at,
+        )
 
 
 class PostItem(BaseModel):

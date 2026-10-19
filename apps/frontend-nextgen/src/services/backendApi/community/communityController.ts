@@ -108,6 +108,12 @@ export function createCommunityTopic(input: CreateCommunityTopicInput, signal?: 
     author_id: string;
     title: string;
     body: string;
+    topic_type: 'DISCUSSION' | 'POLL';
+    poll?: {
+      selection: 'SINGLE' | 'MULTI';
+      options: string[];
+      deadline_at?: string;
+    };
     author_display_name?: string;
     author_avatar_url?: string;
   } = {
@@ -116,7 +122,15 @@ export function createCommunityTopic(input: CreateCommunityTopicInput, signal?: 
     author_id: input.authorId,
     title: input.title,
     body: input.body,
+    topic_type: input.topicType === 'poll' ? 'POLL' : 'DISCUSSION',
   };
+  if (input.topicType === 'poll' && input.poll) {
+    data.poll = {
+      selection: input.poll.selection === 'multi' ? 'MULTI' : 'SINGLE',
+      options: input.poll.options,
+      ...(input.poll.deadlineAt ? { deadline_at: input.poll.deadlineAt } : {}),
+    };
+  }
   // 空白 trim 后下发，避免发出空字符串快照；缺勤时不带 key，后端落 null（§2.1：不传则 null）。
   const displayName = input.authorName?.trim();
   if (displayName) data.author_display_name = displayName;

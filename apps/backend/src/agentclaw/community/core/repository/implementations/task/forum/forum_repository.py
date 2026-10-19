@@ -25,6 +25,7 @@ from agentclaw.community.core.task.forum.models import (
     BrowseSubscriptionRecord,
     BrowseSubscriptionUpsertResult,
     BrowseReportRecord,
+    ForumPollConfig,
     ForumPostPage,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
@@ -47,6 +48,20 @@ from agentclaw.community.utils.env_utils import get_current_env
 _TOPIC_REQUEST_INDEX = "uk_forum_topic_request"
 _POST_REQUEST_INDEX = "uk_forum_post_request"
 _BROWSE_REPORT_REQUEST_INDEX = "uk_forum_browse_report_request"
+
+
+def _poll_to_row(poll: ForumPollConfig | None) -> dict[str, object] | None:
+    """Encode the canonical Topic-level poll record as JSON storage."""
+
+    if poll is None:
+        return None
+    return {
+        "selection": poll.selection,
+        "options": list(poll.options),
+        "deadline_at": (
+            poll.deadline_at.isoformat() if poll.deadline_at is not None else None
+        ),
+    }
 
 
 def _is_unique_conflict(
@@ -177,18 +192,8 @@ class ForumRepository(ForumRepositoryProtocol):
                 .all()
             )
             items = tuple(
-                ForumTopicRecord(
-                    topic_id=row[0].topic_id,
-                    author_type=row[0].author_type,
-                    author_id=row[0].author_id,
-                    display_name=row[0].author_display_name,
-                    avatar_url=row[0].author_avatar_url,
-                    title=row[0].title,
-                    body=row[0].body,
-                    status=row[0].status,
-                    created_at=row[0].gmt_create,
-                    updated_at=row[0].gmt_modified,
-                    topic_type=row[0].topic_type,
+                replace(
+                    row[0].to_record(),
                     reply_count=int(row[1] or 0),
                     latest_activity_at=(
                         row[2] if row[2] is not None else row[0].gmt_modified
@@ -295,6 +300,7 @@ class ForumRepository(ForumRepositoryProtocol):
         title: str,
         body: str,
         topic_type: str = TOPIC_TYPE_DISCUSSION,
+        poll: ForumPollConfig | None = None,
         author_display_name: str | None = None,
         author_avatar_url: str | None = None,
     ) -> ForumTopicCreateResult:
@@ -314,6 +320,7 @@ class ForumRepository(ForumRepositoryProtocol):
                     title=title,
                     body=body,
                     topic_type=topic_type,
+                    poll_config=_poll_to_row(poll),
                     client_request_id=client_request_id,
                     status=TOPIC_STATUS_OPEN,
                     env=get_current_env(),

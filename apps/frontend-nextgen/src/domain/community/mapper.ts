@@ -1,4 +1,11 @@
-import type { CommunityAuthor, CommunityReply, CommunityTopic } from './types';
+import type {
+  CommunityAuthor,
+  CommunityPoll,
+  CommunityPollSelection,
+  CommunityReply,
+  CommunityTopic,
+  CommunityTopicType,
+} from './types';
 
 export interface CommunityAuthorDto {
   actor_type?: string;
@@ -15,6 +22,7 @@ export interface CommunityTopicDto {
   body_truncated?: boolean;
   status?: string;
   topic_type?: string;
+  poll?: CommunityPollDto | null;
   author_type?: string;
   author_id?: string;
   author?: CommunityAuthorDto;
@@ -60,6 +68,35 @@ function asAuthorDto(dto: {
   };
 }
 
+export interface CommunityPollDto {
+  selection?: string;
+  options?: string[] | null;
+  deadline_at?: string | null;
+  [key: string]: unknown;
+}
+
+function mapTopicType(value: string | undefined): CommunityTopicType {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === 'poll') return 'poll';
+  if (normalized === 'notice') return 'notice';
+  return 'discussion';
+}
+
+function mapPoll(value: CommunityPollDto | null | undefined): CommunityPoll | undefined {
+  if (!value) return undefined;
+  const selection: CommunityPollSelection =
+    value.selection?.trim().toLowerCase() === 'multi' ? 'multi' : 'single';
+  const options = (Array.isArray(value.options) ? value.options : [])
+    .map((option) => option.trim())
+    .filter(Boolean);
+  if (!options.length) return undefined;
+  return {
+    selection,
+    options,
+    deadlineAt: value.deadline_at?.trim() || undefined,
+  };
+}
+
 function mapAuthor(author: CommunityAuthorDto | undefined): CommunityAuthor {
   const trimmedId = author?.actor_id?.trim() || '';
   const trimmedName = author?.display_name?.trim();
@@ -80,6 +117,8 @@ export function mapCommunityTopicDto(dto: CommunityTopicDto): CommunityTopic {
     title: dto.title?.trim() || '未命名主题',
     body,
     status: dto.status?.toUpperCase() === 'OPEN' ? 'open' : 'closed',
+    topicType: mapTopicType(dto.topic_type),
+    poll: mapPoll(dto.poll),
     author: mapAuthor(asAuthorDto(dto)),
     replyCount: typeof dto.reply_count === 'number' ? dto.reply_count : undefined,
     latestActivityAt,

@@ -10,6 +10,7 @@ const topic: CommunityTopic = {
   title: '社区主题',
   body: '楼主正文',
   status: 'open',
+  topicType: 'discussion',
   author: { type: 'human', id: 'human-1', displayName: '顾客' },
   replyCount: 1,
   latestActivityAt: '',
@@ -67,6 +68,28 @@ describe('CommunityTopicDetail', () => {
     expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '返回社区列表' }));
     expect(props.onBack).toHaveBeenCalledTimes(1);
+  });
+
+  test('投票主题渲染 Topic 级配置面板', () => {
+    renderDetail({
+      topic: {
+        ...topic,
+        topicType: 'poll',
+        poll: {
+          selection: 'multi',
+          options: ['方案 A', '方案 B'],
+          deadlineAt: '2026-10-20T12:00:00Z',
+        },
+      },
+    });
+
+    expect(screen.getByRole('region', { name: '投票配置' })).toBeInTheDocument();
+    expect(screen.getAllByText('投票').length).toBeGreaterThan(0);
+    expect(screen.getByText('多选')).toBeInTheDocument();
+    expect(screen.getByText('方案 A')).toBeInTheDocument();
+    expect(screen.getByText('方案 B')).toBeInTheDocument();
+    expect(screen.getByText(/进行中，截止/)).toBeInTheDocument();
+    expect(screen.getByText('投票通过回帖表达选项和理由；票数统计由后续系统任务汇总。')).toBeInTheDocument();
   });
 
   test('加载中显示骨架占位、不渲染楼层', () => {

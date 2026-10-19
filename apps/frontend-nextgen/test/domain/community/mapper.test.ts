@@ -1,7 +1,7 @@
-import { mapCommunityReplyDto, mapCommunityTopicDto } from '../../../src/domain/community/mapper';
+import { mapCommunityReplyDto, mapCommunityTopicDto } from '@/domain/community/mapper';
 
 describe('community mapper', () => {
-  test('maps a single topic model without task/type semantics', () => {
+  test('maps topic metadata and page totals for the BBS list item', () => {
     const topic = mapCommunityTopicDto({
       topic_id: 'topic-1',
       title: '如何让 Bot 更好地参与协作？',
@@ -16,7 +16,7 @@ describe('community mapper', () => {
       topic_type: 'POLL',
     });
 
-    expect(topic).toEqual({
+    expect(topic).toMatchObject({
       id: 'topic-1',
       title: '如何让 Bot 更好地参与协作？',
       body: '分享你的实践。',
@@ -27,8 +27,9 @@ describe('community mapper', () => {
       createdAt: '2026-10-05T09:00:00Z',
       isMine: true,
       canClose: true,
+      topicType: 'poll',
     });
-    expect(topic).not.toHaveProperty('topicType');
+    expect(topic.poll).toBeUndefined();
   });
 
   test('maps bot replies and normalizes unknown topic status to closed', () => {
@@ -59,6 +60,38 @@ describe('community mapper', () => {
   });
 });
 
+test('maps topic type and structured poll DTO', () => {
+  const topic = mapCommunityTopicDto({
+    topic_id: 'topic-1',
+    title: '投票',
+    body: '请选择',
+    status: 'OPEN',
+    topic_type: 'POLL',
+    poll: {
+      selection: 'multi',
+      options: [' 方案 A ', '', '方案 B'],
+      deadline_at: '2026-10-20T12:00:00Z',
+    },
+    author_type: 'HUMAN',
+    author_id: 'u1',
+    created_at: '2026-10-01T00:00:00Z',
+  });
+
+  expect(topic.topicType).toBe('poll');
+  expect(topic.poll).toEqual({
+    selection: 'multi',
+    options: ['方案 A', '方案 B'],
+    deadlineAt: '2026-10-20T12:00:00Z',
+  });
+});
+
+test('defaults legacy topics to discussion and omits poll', () => {
+  const topic = mapCommunityTopicDto({ topic_id: 'topic-1', title: '讨论', status: 'OPEN' });
+
+  expect(topic.topicType).toBe('discussion');
+  expect(topic.poll).toBeUndefined();
+});
+
 test('maps the real backend flattened BBS DTO (no nested author, no reply count/name/avatar)', () => {
   const topic = mapCommunityTopicDto({
     topic_id: 'real-1',
@@ -76,11 +109,12 @@ test('maps the real backend flattened BBS DTO (no nested author, no reply count/
   expect(topic.id).toBe('real-1');
   expect(topic.body).toBe('正文前 500 字');
   expect(topic.latestActivityAt).toBe('2026-10-06T12:00:00Z');
+  expect(topic.topicType).toBe('discussion');
+  expect(topic.poll).toBeUndefined();
   expect(topic.author).toEqual({ type: 'human', id: '900003', displayName: '900003', avatarUrl: undefined });
   expect(topic.replyCount).toBeUndefined();
   expect(topic.isMine).toBe(false);
   expect(topic.canClose).toBe(false);
-  expect(topic).not.toHaveProperty('topicType');
 });
 
 test('maps a real backend reply with flattened author', () => {

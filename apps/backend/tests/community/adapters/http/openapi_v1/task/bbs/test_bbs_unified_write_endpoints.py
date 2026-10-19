@@ -14,9 +14,12 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     CloseTopicRequestUnified,
     CreateReplyRequestUnified,
     CreateTopicRequestUnified,
+    PollConfigRequest,
+    TopicDetail,
 )
 from agentclaw.community.core.errors import Conflict, Forbidden, NotFound
 from agentclaw.community.core.task.forum.models import (
+    ForumPollConfig,
     ForumPostRecord,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
@@ -118,6 +121,8 @@ async def test_create_topic_unified_records_declared_human_author():
             "client_request_id": "req-1",
             "title": "t",
             "body": "b",
+            "topic_type": "DISCUSSION",
+            "poll": None,
         }
     ]
     assert payload.data is not None and payload.data.topic_id == "topic_1"
@@ -148,6 +153,8 @@ async def test_create_topic_unified_records_declared_bot_author():
             "client_request_id": "req-1",
             "title": "t",
             "body": "b",
+            "topic_type": "DISCUSSION",
+            "poll": None,
         }
     ]
 
@@ -172,6 +179,65 @@ async def test_create_topic_unified_passes_author_type_through_verbatim():
     )
 
     assert service.calls[0]["author_type"] == "human"
+
+
+@pytest.mark.asyncio
+async def test_create_topic_unified_translates_poll_configuration():
+    service = _write_service(_topic_result(True))
+
+    await create_topic_unified(
+        body=CreateTopicRequestUnified(
+            author_type="HUMAN",
+            author_id="user-a",
+            client_request_id="req-poll",
+            title="poll",
+            body="Choose",
+            topic_type="POLL",
+            poll=PollConfigRequest(
+                selection=" single ",
+                options=[" Option A ", "Option B"],
+                deadline_at=_NOW,
+            ),
+        ),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics"),
+        response=Response(),
+        service=service,
+    )
+
+    assert service.calls[0]["topic_type"] == "POLL"
+    assert service.calls[0]["poll"] == ForumPollConfig(
+        selection=" single ",
+        options=(" Option A ", "Option B"),
+        deadline_at=_NOW,
+    )
+
+
+def test_topic_detail_returns_structured_poll_configuration():
+    payload = TopicDetail.from_record(
+        ForumTopicRecord(
+            topic_id="topic_1",
+            author_type="HUMAN",
+            author_id="user-a",
+            title="Poll",
+            body="Choose",
+            status="OPEN",
+            topic_type="POLL",
+            poll=ForumPollConfig(
+                selection="MULTI",
+                options=("A", "B"),
+                deadline_at=_NOW,
+            ),
+            created_at=_NOW,
+            updated_at=_NOW,
+        )
+    )
+
+    assert payload.poll is not None
+    assert payload.poll.model_dump() == {
+        "selection": "MULTI",
+        "options": ["A", "B"],
+        "deadline_at": _NOW,
+    }
 
 
 @pytest.mark.asyncio
@@ -526,6 +592,8 @@ async def test_create_topic_unified_passes_optional_author_display_when_supplied
         "client_request_id": "req-1",
         "title": "t",
         "body": "b",
+        "topic_type": "DISCUSSION",
+        "poll": None,
         "author_display_name": "国科",
         "author_avatar_url": "https://av/nk",
     }
@@ -557,4 +625,6 @@ async def test_create_topic_unified_omits_author_display_when_not_supplied():
         "client_request_id": "req-1",
         "title": "t",
         "body": "b",
+        "topic_type": "DISCUSSION",
+        "poll": None,
     }

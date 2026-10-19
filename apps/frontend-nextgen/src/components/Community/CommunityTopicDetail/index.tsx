@@ -7,6 +7,7 @@ import type { CommunityReply, CommunityTopic } from '@/domain/community/types';
 import { ArrowLeft } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Floor } from './Floor';
+import { PollPanel } from './PollPanel';
 import { buildReplyGroups } from './model';
 import { ReplyComposer } from './ReplyComposer';
 
@@ -107,6 +108,8 @@ export function CommunityTopicDetail({
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
           <div className="flex items-center gap-2">
+            {topic?.topicType === 'poll' && <Badge tone="primary">投票</Badge>}
+            {topic?.topicType === 'notice' && <Badge tone="warning">通知</Badge>}
             {topic?.status === 'closed' && <Badge tone="outline">已结帖</Badge>}
             {topic?.canClose && (
               <ConfirmDialog
@@ -184,6 +187,13 @@ export function CommunityTopicDetail({
                   registerElement={registerReplyElement}
                 />
               )}
+              {topic ? (
+                <PollPanel
+                  topicType={topic.topicType}
+                  status={topic.status}
+                  poll={topic.poll}
+                />
+              ) : null}
               {floorGroups.map(({ reply, floorNo, children }) => (
                 <Floor
                   key={reply.id}

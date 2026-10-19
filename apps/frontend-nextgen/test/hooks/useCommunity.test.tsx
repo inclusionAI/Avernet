@@ -37,6 +37,7 @@ const topic: CommunityTopic = {
   title: '社区主题',
   body: '主题正文',
   status: 'open',
+  topicType: 'discussion',
   author: { type: 'human', id: '900003', displayName: '顾客' },
   replyCount: 1,
   latestActivityAt: '2026-10-06T06:20:00Z',
@@ -106,19 +107,58 @@ describe('useCommunity', () => {
 
     let succeeded = false;
     await act(async () => {
-      succeeded = await result.current.publishTopic('标题', '正文');
+      succeeded = await result.current.publishTopic({ title: '标题', body: '正文' });
     });
 
     expect(succeeded).toBe(true);
     expect(mockedService.createTopic).toHaveBeenCalledWith({
       title: '标题',
       body: '正文',
+      topicType: undefined,
+      poll: undefined,
       authorId: '900003',
       authorName: '当前用户',
       authorAvatarUrl: 'avatar.png',
     });
     expect(result.current.topics[0]).toEqual(topic);
     expect(notifySuccess).toHaveBeenCalledWith('主题发布成功');
+  });
+
+  test('发布投票主题时透传 Topic 级 poll 配置', async () => {
+    mockedService.listTopics.mockResolvedValue({ items: [], total: 0 });
+    mockedService.createTopic.mockResolvedValue(topic);
+    const { result } = renderHook(() => useCommunity());
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let succeeded = false;
+    await act(async () => {
+      succeeded = await result.current.publishTopic({
+        title: '选择协作方案',
+        body: '请说明理由',
+        topicType: 'poll',
+        poll: {
+          selection: 'multi',
+          options: ['方案 A', '方案 B'],
+          deadlineAt: '2026-10-20T12:00:00Z',
+        },
+      });
+    });
+
+    expect(succeeded).toBe(true);
+    expect(mockedService.createTopic).toHaveBeenCalledWith({
+      title: '选择协作方案',
+      body: '请说明理由',
+      topicType: 'poll',
+      poll: {
+        selection: 'multi',
+        options: ['方案 A', '方案 B'],
+        deadlineAt: '2026-10-20T12:00:00Z',
+      },
+      authorId: '900003',
+      authorName: '当前用户',
+      authorAvatarUrl: 'avatar.png',
+    });
   });
 
   test('打开详情加载主题与第 1 页回复（page=1/pageSize=COMMUNITY_REPLY_PAGE_SIZE），结帖带 author_id：优先主题作者', async () => {
@@ -262,6 +302,7 @@ describe('useCommunity', () => {
       title: 'Bot 发的主题',
       body: '正文',
       status: 'open',
+      topicType: 'discussion',
       author: { type: 'bot', id: 'bot-x', displayName: 'bot-x' },
       replyCount: 0,
       latestActivityAt: '2026-10-08T08:00:00Z',
@@ -286,7 +327,7 @@ describe('useCommunity', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     await act(async () => {
-      expect(await result.current.publishTopic('标题', '正文')).toBe(false);
+      expect(await result.current.publishTopic({ title: '标题', body: '正文' })).toBe(false);
     });
 
     expect(result.current.topics).toEqual([topic]);

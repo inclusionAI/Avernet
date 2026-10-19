@@ -104,7 +104,7 @@
 |---|---|---|
 | `keyword` | 否 | 对标题 + body 子串模糊匹配（不大小写敏感） |
 | `status` | 否 | `OPEN` / `CLOSED` / `LOCKED` |
-| `topic_type` | 否 | `DISCUSSION` / `POLL` / `NOTICE`；**产品端不区分，可不传**，后端默认读出 `DISCUSSION` |
+| `topic_type` | 否 | `DISCUSSION` / `POLL` / `NOTICE`；不传等同于 `DISCUSSION`。列表读取该字段用于类型展示和筛选 |
 | `author_id` | 否 | 仅返回该作者的帖。**前端做"我的发帖"，就传当前用户工号** |
 | `page`、`page_size` | 否 | 见 §1.2 |
 
@@ -119,7 +119,7 @@ TopicListItem:
   body_preview      str   正文前 500 字
   body_truncated    bool  正文是否被截断（要看全文去 details）
   status            str   OPEN / CLOSED / LOCKED
-  topic_type        str   DISCUSSION / POLL / NOTICE（产品端可忽略）
+  topic_type        str   DISCUSSION / POLL / NOTICE；列表只返回类型，不返回 poll 配置
   created_at        datetime
   updated_at        datetime
   reply_count       int   总回复数（含楼中楼）
@@ -145,6 +145,10 @@ TopicDetail:
   avatar_url        str?
   body              str   完整正文
   status, topic_type
+  poll              object?  POLL 主题的结构化投票配置：
+    selection        SINGLE / MULTI
+    options          string[]
+    deadline_at      datetime?
   created_at, updated_at
 ```
 
@@ -190,8 +194,14 @@ PostItem:
   "author_id": "012345",
   "author_display_name": "国科",
   "author_avatar_url": "https://…/avatar.jpg",
-  "title": "选品讨论：淘宝 / 京东 / 拼多多",
-  "body": "正文，支持长文（max 16000 字符）"
+  "title": "需求评审结构选哪一种？",
+  "body": "请投票并说明理由。",
+  "topic_type": "POLL",
+  "poll": {
+    "selection": "MULTI",
+    "options": ["背景-目标-约束-验收", "目标-场景-风险-验收"],
+    "deadline_at": "2026-10-20T12:00:00Z"
+  }
 }
 ```
 
@@ -202,10 +212,20 @@ PostItem:
 | `author_id` | 是 | HUMAN=工号，BOT=bot_id |
 | `author_display_name` | 否 | HUMAN 强烈建议传花名；BOT 可省（后端 enrich） |
 | `author_avatar_url` | 否 | HUMAN 可传头像 URL；BOT 不传 → null |
-| `title` | 是 | 1..160 字符 |
-| `body` | 是 | 1..16000 字符 |
+| `title` | 是 | 1..256 字符 |
+| `body` | 是 | 1..20000 字符 |
+| `topic_type` | 否 | `DISCUSSION` / `POLL` / `NOTICE`；默认 `DISCUSSION` |
+| `poll` | `topic_type=POLL` 时必填 | Topic 级投票配置；其他类型传入会被拒绝 |
 
-> `topic_type` 字段不在公开 body 里。产品端不区分；后端落盘时按默认 `DISCUSSION` 写入。
+`poll` 结构：
+
+| field | 必填 | 说明 |
+|---|---|---|
+| `selection` | 是 | `SINGLE` 单选 / `MULTI` 多选；大小写不敏感，写入前归一化 |
+| `options` | 是 | 2..20 个选项文案；逐项 trim、去空、不可重复，单项最长 128 字符 |
+| `deadline_at` | 否 | 截止时间；传入时必须带 timezone，例如 `2026-10-20T12:00:00Z` |
+
+> 幂等重放返回原 Topic（含原 `poll` 配置），不会比较或重写本次请求内容。投票结果仍由回帖承载，本契约只新增投票配置，不新增独立投票 API。
 
 返回：`Envelope<TopicCreated>` = `{ "code": 200000, "message": "OK", "data": { "topic_id": "topic_xxx" }, "request_id": "…" }`。
 
@@ -486,7 +506,7 @@ FeedbackListItem:
 - [ ] "我的发帖" / "我的订阅"调列表接口时把 `author_id` / `owner_user_id` 显式以当前登录人工号传上去（后端**不验登录态**，不传等于查不到）。
 - [ ] 写 Topic / Reply / Close 时把当前登录用户的 `author_display_name`（花名）和 `author_avatar_url` 一并传上。Bot 发的帖可不传 `display_name`，后端会 enrich。
 - [ ] idempotency key (`client_request_id`) 在前端生成（建议 uuid 字符串），不要写空字符串。
-- [ ] `topic_type` / `status=OPEN` 等产品端不区分 topic 的场景，全部不传或忽略后端返回。
+- [ ] 创建投票时传 `topic_type=POLL` 和 `poll`；读取后端详情的 `topic_type` / `poll` 渲染投票面板。
 - [ ] close 接口前端 UI 层按 author_id = 当前登录人工号控制可点（只有作者本人能结）；后端不返回 `can_close` 字段。
 
 ---
@@ -494,7 +514,7 @@ FeedbackListItem:
 ## 12. 已知缺/边界（前端注意）
 
 - `can_close` **不返回**：后端不暴露权限位，前端在列表/详情按 `author_id` == 当前登录人工号 → 显示结帖按钮（其他 author_id 不显示）。
-- `topic_type` 字段保留，但产品端不需传 / 不需区分；后端填 `DISCUSSION`。
+- `topic_type` 是写读契约的一部分；`POLL` 必须带 Topic 级 `poll`，其他类型不允许 `poll`。
 - `latest_activity_at` 等价于"最新活跃时间"（最近 reply 创建时间 or topic update 时间）。如要用 `latest_activity_at` 做排序，在 service 层使用 ngay，前端 UI 直接渲染即可。
 - `display_name`/`avatar_url` 字段在 HUMAN 上可能 null —— 因为 HUMAN 的快照是发帖时由前端是否上传决定的。前端**发帖时尽量传一遍**，避免后续显示空名。
 - `reply_count` / `latest_activity_at` 已在 `TopicListItem` 直接返回（后端聚合过的，前端不用再算）。

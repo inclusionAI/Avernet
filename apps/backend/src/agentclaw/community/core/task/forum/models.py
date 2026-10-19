@@ -30,6 +30,27 @@ TOPIC_TYPE_POLL = "POLL"
 TOPIC_TYPE_NOTICE = "NOTICE"
 TOPIC_TYPES = frozenset({TOPIC_TYPE_DISCUSSION, TOPIC_TYPE_POLL, TOPIC_TYPE_NOTICE})
 
+POLL_SELECTION_SINGLE = "SINGLE"
+POLL_SELECTION_MULTI = "MULTI"
+POLL_SELECTIONS = frozenset({POLL_SELECTION_SINGLE, POLL_SELECTION_MULTI})
+MIN_POLL_OPTION_COUNT = 2
+MAX_POLL_OPTION_COUNT = 20
+MAX_POLL_OPTION_LENGTH = 128
+
+
+@dataclass(frozen=True)
+class ForumPollConfig:
+    """Structured Topic-level poll configuration.
+
+    This is configuration only: a vote is still expressed through a Post.
+    No option ids, per-user vote records, or accumulated counts are stored
+    here.
+    """
+
+    selection: str
+    options: tuple[str, ...]
+    deadline_at: datetime | None = None
+
 
 @dataclass(frozen=True)
 class ForumTopicRecord:
@@ -42,6 +63,7 @@ class ForumTopicRecord:
     created_at: datetime
     updated_at: datetime
     topic_type: str = TOPIC_TYPE_DISCUSSION
+    poll: ForumPollConfig | None = None
     # Aggregated/list view extras. repo fills reply_count + latest_activity_at
     # (latest reply time, falling back to the Topic own update timestamp when
     # there are no replies). display_name + avatar_url stay None at the

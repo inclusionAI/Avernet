@@ -36,10 +36,17 @@ export class CommunityService {
     };
   }
 
-  createTopic(input: CreateCommunityTopicInput, signal?: AbortSignal) {
+  async createTopic(input: CreateCommunityTopicInput, signal?: AbortSignal) {
     const normalized = { ...input, title: input.title.trim(), body: input.body.trim() };
-    if (!normalized.title) return Promise.reject(new Error('请输入主题标题'));
-    if (!normalized.body) return Promise.reject(new Error('请输入主题正文'));
+    if (!normalized.title) throw new Error('请输入主题标题');
+    if (!normalized.body) throw new Error('请输入主题正文');
+    if (normalized.topicType === 'poll') {
+      const options = normalized.poll?.options.map((option) => option.trim()) ?? [];
+      if (!normalized.poll || options.length < 2 || options.some((option) => !option)) {
+        throw new Error('投票主题至少需要两个有效选项');
+      }
+      if (new Set(options).size !== options.length) throw new Error('投票选项不能重复');
+    }
     return this.gateway.createTopic(normalized, signal);
   }
 

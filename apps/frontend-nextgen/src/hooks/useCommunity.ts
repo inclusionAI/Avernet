@@ -2,7 +2,7 @@ import { notifyError, notifySuccess } from '@/components/ui/notify';
 import { enrichOwnership } from '@/domain/community/ownership';
 import { communityErrorMessage } from '@/domain/community/errors';
 import { COMMUNITY_PAGE_SIZE } from '@/domain/community/constants';
-import type { CommunityAuthor, CommunityTopic } from '@/domain/community/types';
+import type { CommunityAuthor, CommunityTopic, CreateCommunityTopicDraft } from '@/domain/community/types';
 import { communityService } from '@/services/community';
 import { useCommunityStore } from '@/stores/communityStore';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -157,7 +157,7 @@ export function useCommunity() {
   const closeDetail = useCallback(() => store.setSelectedTopic(null), [store.setSelectedTopic]);
 
   const publishTopic = useCallback(
-    async (title: string, body: string) => {
+    async (draft: CreateCommunityTopicDraft) => {
       setPublishing(true);
       try {
         const author: CommunityAuthor = {
@@ -167,8 +167,7 @@ export function useCommunity() {
           avatarUrl: identity?.avatarUrl,
         };
         const topic = await communityService.createTopic({
-          title,
-          body,
+          ...draft,
           authorId: author.id,
           authorName: author.displayName,
           authorAvatarUrl: author.avatarUrl,

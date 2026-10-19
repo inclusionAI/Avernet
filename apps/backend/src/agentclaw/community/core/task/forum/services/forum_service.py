@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from injector import inject
 
 from agentclaw.community.core.errors import Conflict, NotFound, ValidationError
@@ -22,12 +24,20 @@ from agentclaw.community.core.task.forum.models import (
     MAX_AUTHOR_DISPLAY_NAME_LENGTH,
     MAX_AUTHOR_AVATAR_URL_LENGTH,
     MAX_ID_LENGTH,
+    MAX_POLL_OPTION_COUNT,
+    MAX_POLL_OPTION_LENGTH,
+    MIN_POLL_OPTION_COUNT,
     MAX_SEARCH_KEYWORD_LENGTH,
     MAX_TITLE_LENGTH,
+    POLL_SELECTIONS,
+    POLL_SELECTION_MULTI,
+    POLL_SELECTION_SINGLE,
     TOPIC_STATUSES,
     TOPIC_STATUS_CLOSED,
     TOPIC_STATUS_LOCKED,
+    TOPIC_TYPE_POLL,
     TOPIC_TYPES,
+    ForumPollConfig,
     ForumPostPage,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
@@ -108,6 +118,7 @@ class ForumService(ForumServiceProtocol):
         title: str,
         body: str,
         topic_type: str | None = None,
+        poll: ForumPollConfig | None = None,
         author_display_name: str | None = None,
         author_avatar_url: str | None = None,
     ) -> ForumTopicCreateResult:
@@ -121,6 +132,11 @@ class ForumService(ForumServiceProtocol):
         normalized_title = self._required_text(title, "title", MAX_TITLE_LENGTH)
         normalized_body = self._required_text(body, "body", MAX_BODY_LENGTH)
         normalized_topic_type = self._topic_type(topic_type) or "DISCUSSION"
+        normalized_poll = self._poll_config(poll)
+        if normalized_topic_type == TOPIC_TYPE_POLL and normalized_poll is None:
+            raise ValidationError("poll is required when topic_type is POLL")
+        if normalized_topic_type != TOPIC_TYPE_POLL and normalized_poll is not None:
+            raise ValidationError("poll is only allowed when topic_type is POLL")
         normalized_display_name = self._optional_text(
             author_display_name, "author_display_name",
             MAX_AUTHOR_DISPLAY_NAME_LENGTH,
@@ -136,6 +152,7 @@ class ForumService(ForumServiceProtocol):
             title=normalized_title,
             body=normalized_body,
             topic_type=normalized_topic_type,
+            poll=normalized_poll,
             author_display_name=normalized_display_name,
             author_avatar_url=normalized_avatar,
         )
@@ -222,6 +239,49 @@ class ForumService(ForumServiceProtocol):
                 f"{field} must contain no more than {max_length} characters"
             )
         return normalized
+
+    @classmethod
+    def _poll_config(cls, value: ForumPollConfig | None) -> ForumPollConfig | None:
+        if value is None:
+            return None
+        if not isinstance(value, ForumPollConfig):
+            raise ValidationError("poll must be a poll configuration")
+
+        selection = cls._required_text(
+            value.selection, "poll.selection", MAX_AUTHOR_TYPE_LENGTH
+        ).upper()
+        if selection not in POLL_SELECTIONS:
+            allowed = ", ".join(
+                sorted((POLL_SELECTION_MULTI, POLL_SELECTION_SINGLE))
+            )
+            raise ValidationError(f"poll.selection must be one of: {allowed}")
+
+        raw_options = value.options
+        if not isinstance(raw_options, (list, tuple)):
+            raise ValidationError("poll.options must be a list")
+        if not MIN_POLL_OPTION_COUNT <= len(raw_options) <= MAX_POLL_OPTION_COUNT:
+            raise ValidationError(
+                "poll.options must contain between "
+                f"{MIN_POLL_OPTION_COUNT} and {MAX_POLL_OPTION_COUNT} entries"
+            )
+        options = tuple(
+            cls._required_text(option, "poll.options", MAX_POLL_OPTION_LENGTH)
+            for option in raw_options
+        )
+        if len(options) != len(set(options)):
+            raise ValidationError("poll.options must not contain duplicates")
+
+        deadline = value.deadline_at
+        if deadline is not None and (
+            not isinstance(deadline, datetime) or deadline.tzinfo is None
+        ):
+            raise ValidationError("poll.deadline_at must include a timezone")
+
+        return ForumPollConfig(
+            selection=selection,
+            options=options,
+            deadline_at=deadline,
+        )
 
     @classmethod
     def _topic_type(cls, value: str | None) -> str | None:

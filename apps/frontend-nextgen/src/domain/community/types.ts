@@ -1,6 +1,14 @@
 export type CommunityActorType = 'human' | 'bot';
 export type CommunityTopicStatus = 'open' | 'closed';
+export type CommunityTopicType = 'discussion' | 'poll' | 'notice';
+export type CommunityPollSelection = 'single' | 'multi';
 export type CommunityScope = 'all' | 'mine';
+
+export interface CommunityPoll {
+  selection: CommunityPollSelection;
+  options: string[];
+  deadlineAt?: string;
+}
 
 export interface CommunityAuthor {
   type: CommunityActorType;
@@ -14,6 +22,8 @@ export interface CommunityTopic {
   title: string;
   body: string;
   status: CommunityTopicStatus;
+  topicType: CommunityTopicType;
+  poll?: CommunityPoll;
   author: CommunityAuthor;
   replyCount?: number;
   latestActivityAt?: string;
@@ -65,9 +75,20 @@ export interface CommunityTopicQuery {
   limit?: number;
 }
 
-export interface CreateCommunityTopicInput {
+export interface CreateCommunityPollInput {
+  selection: CommunityPollSelection;
+  options: string[];
+  deadlineAt?: string;
+}
+
+export interface CreateCommunityTopicDraft {
   title: string;
   body: string;
+  topicType?: Exclude<CommunityTopicType, 'notice'>;
+  poll?: CreateCommunityPollInput;
+}
+
+export interface CreateCommunityTopicInput extends CreateCommunityTopicDraft {
   authorId: string;
   authorName: string;
   authorAvatarUrl?: string;

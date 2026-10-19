@@ -9,6 +9,7 @@ const topic: CommunityTopic = {
   title: '回归主题',
   body: '滚动结构断言用正文。',
   status: 'open',
+  topicType: 'discussion',
   author: { type: 'human', id: 'human-1', displayName: '作者' },
   createdAt: '2026-10-06T06:20:00Z',
   isMine: false,

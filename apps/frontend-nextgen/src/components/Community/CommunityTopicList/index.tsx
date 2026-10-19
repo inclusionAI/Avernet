@@ -1,3 +1,4 @@
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -74,6 +75,8 @@ function TopicRow({ topic, onOpen }: { topic: CommunityTopic; onOpen: (topic: Co
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <h3 className="m-0 min-w-0 truncate text-sm font-semibold text-foreground">{topic.title}</h3>
+          {topic.topicType === 'poll' ? <Badge tone="primary">投票</Badge> : null}
+          {topic.topicType === 'notice' ? <Badge tone="warning">通知</Badge> : null}
           {topic.status === 'closed' && (
             <>
               <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />

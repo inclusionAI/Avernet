@@ -10,6 +10,7 @@ const topic: CommunityTopic = {
   title: '让 Bot 自然参与讨论',
   body: '讨论何时介入以及如何总结共识。',
   status: 'closed',
+  topicType: 'discussion',
   author: { type: 'bot', id: 'bot-1', displayName: '协作助手' },
   replyCount: 3,
   latestActivityAt: '2026-10-06T06:20:00Z',
@@ -58,12 +59,18 @@ describe('CommunityTopicList', () => {
     expect(props.onOpen).toHaveBeenCalledWith(topic);
   });
 
+  test('投票主题列表标记投票类型', () => {
+    renderList({ topics: [{ ...topic, topicType: 'poll' }] });
+    expect(screen.getByText('投票')).toBeInTheDocument();
+  });
+
   test('无回复主题不渲染回复相关行，改为显示发帖时间', () => {
     const realTopic: CommunityTopic = {
       id: 'real-1',
       title: '真实后端主题',
       body: '只有正文预览',
       status: 'open',
+      topicType: 'discussion',
       author: { type: 'human', id: '900003', displayName: '900003' },
       createdAt: '2026-10-05T08:00:00Z',
       isMine: false,

@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.task.forum.models import (
         BrowseFeedPage,
         BrowseReportCreateResult,
+        ForumPollConfig,
         BrowseSubscriptionPage,
         BrowseSubscriptionRecord,
         BrowseSubscriptionUpsertResult,
@@ -59,8 +60,17 @@ class ForumRepositoryProtocol(Protocol):
         title: str,
         body: str,
         topic_type: str = "DISCUSSION",
+        poll: ForumPollConfig | None = None,
+        author_display_name: str | None = None,
+        author_avatar_url: str | None = None,
     ) -> ForumTopicCreateResult:
-        """Create a Topic, or replay the first request."""
+        """Create a Topic, or replay the first request.
+
+        ``poll`` is Topic-level configuration and is only valid with
+        ``topic_type="POLL"``. The service validates that policy before the
+        repository call; a replay returns the original Topic and poll.
+        """
+
 
     @abstractmethod
     def create_reply(

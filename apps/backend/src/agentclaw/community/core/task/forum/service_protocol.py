@@ -11,6 +11,7 @@ from agentclaw.community.core.task.forum.models import (
     BrowseSubscriptionPage,
     BrowseSubscriptionRecord,
     BrowseSubscriptionUpsertResult,
+    ForumPollConfig,
     ForumPostPage,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
@@ -62,10 +63,12 @@ class ForumServiceProtocol(Protocol):
         title: str,
         body: str,
         topic_type: str = "DISCUSSION",
+        poll: ForumPollConfig | None = None,
         author_display_name: str | None = None,
         author_avatar_url: str | None = None,
     ) -> ForumTopicCreateResult:
         """Create a Topic, or replay the first request."""
+
 
     @abstractmethod
     def create_reply(

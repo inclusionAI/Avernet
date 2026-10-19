@@ -5,6 +5,7 @@ const topic = {
   title: '主题',
   body: '正文',
   status: 'open' as const,
+  topicType: 'discussion' as const,
   author: { type: 'human' as const, id: 'u1', displayName: '我' },
   replyCount: 1,
   latestActivityAt: '2026-10-06T10:00:00Z',

@@ -136,6 +136,30 @@ describe('communityController', () => {
     });
   });
 
+  test('创建投票主题下发 topic_type=POLL 和结构化 poll 配置', async () => {
+    await createCommunityTopic({
+      title: '投票主题',
+      body: '请选择',
+      authorId: 'u1',
+      authorName: '张三',
+      topicType: 'poll',
+      poll: {
+        selection: 'multi',
+        options: ['方案 A', '方案 B'],
+        deadlineAt: '2026-10-20T12:00:00Z',
+      },
+    });
+
+    expect(mockedRequest.mock.calls[0][1].data).toMatchObject({
+      topic_type: 'POLL',
+      poll: {
+        selection: 'MULTI',
+        options: ['方案 A', '方案 B'],
+        deadline_at: '2026-10-20T12:00:00Z',
+      },
+    });
+  });
+
   test('authorAvatarUrl 缺勤时不发 author_avatar_url 快照；author_display_name 仍下发（§2.1 不传则 null）', async () => {
     await createCommunityTopic({ title: '标题', body: '正文', authorId: 'u1', authorName: '张三' });
     const arg = mockedRequest.mock.calls[0];
