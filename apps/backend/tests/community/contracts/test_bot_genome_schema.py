@@ -347,6 +347,8 @@ def _assert_resource_paths(entries: list[dict[str, Any]]) -> None:
     ] + [e["path"] for e in entries if not e["path"].endswith("/")]
     colliding = sorted({n for n in written for m in written if m.startswith(n + "/")})
     assert not colliding, f"workspace files {colliding} are also directories of other files"
+    too_long = [path for path in written if len(path.encode()) > 1024]
+    assert not too_long, f"workspace paths over 1024 bytes: {too_long}"
 
 
 def _assert_resource_admitted(entry: dict[str, Any]) -> None:

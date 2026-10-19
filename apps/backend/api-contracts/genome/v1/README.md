@@ -283,7 +283,15 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
   file resource, and each member of a directory resource under its path) must
   be able to coexist: none may be a whole-segment prefix of another. The Manifest
   accepts empty and `.` segments (`./faq.csv`, `a//b`); recording removes
-  them, so each path has one spelling. Every file a resource puts in the
+  them, so each path has one spelling, and refuses a path that is left with
+  no segment (`./`, `.`), which would name the workspace root. Every file a
+  resource writes has a workspace-relative path (the resource path, plus the
+  member's path for a directory) of at most 1024 bytes of UTF-8: segments
+  are limited to 255 bytes (§3.4), and the whole path must also fit a file
+  system's path limit (4096 bytes on Linux) once the workspace root is in
+  front of it. The characters are the Manifest's own path rule, ASCII only:
+  a resource with any other name could not be written back through a
+  compiled document, so it cannot be recorded (§7, §8). Every file a resource puts in the
   workspace (a file resource, or each member of a directory resource) must
   pass the workspace admission rule apply uses, `admission_refusal` in
   `core/resources/services/file_service.py`: an allowed extension
@@ -601,6 +609,12 @@ How fetch details end up:
 document leaves out are captured from what the bot has now. One rule applies
 while capturing:
 
+A current-state resource whose path the Manifest's path rule refuses (any
+character outside `A–Z a–z 0–9 . _ - /`, for example `how to.md`, which the
+console upload accepts) cannot be captured, because no compiled document
+could deliver it back. Capture refuses and names the path, rather than
+dropping the resource silently; the owner renames it first (§8).
+
 > **The AGENTS.md reference block is removed.** On openclaw bots, writing any
 > of `RULES.md`, `OKR.md`, `SAFETY.md` or `OUTPUT.md` makes the platform
 > append a fixed block to `AGENTS.md` (`IdentityService.sync_agents_md`,
@@ -651,3 +665,4 @@ field is in [`manifest-v1-compatibility.md`](manifest-v1-compatibility.md).
 | Editing one file of a directory stores a new blob for the whole tree | Open decision G-1 |
 | CLI tools are not part of a revision; compiled documents leave them untouched | acli work |
 | `script: null` in a Manifest document is read as "absent" by apply, so a compiled document cannot remove a bot's script | [#2862](https://github.com/inclusionAI/Avernet/issues/2862) |
+| Resource paths use the Manifest's ASCII path rule, while the console upload accepts any name; a bot with a resource such as `how to.md` must rename it before its first revision is captured | Manifest v1 path rule (`_PATH_CHARS_RE`) |

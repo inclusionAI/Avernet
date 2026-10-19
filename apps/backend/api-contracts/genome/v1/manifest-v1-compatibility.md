@@ -90,6 +90,8 @@ derived from the revision field by field as below.
 | Manifest field | Outcome | Revision / M′ |
 | --- | --- | --- |
 | `path` | normalized | `spec.resources[].path` (the key). Empty and `.` segments are removed (`./faq.csv` → `faq.csv`); a trailing `/` (directory) is kept |
+| a path with no segment left after normalization (`./`, `.`) | refused (*recording only*) | It would name the workspace root, which no resource key can |
+| a written path over 1024 bytes (the resource path, plus the member path inside a directory) | refused (*recording only*) | Leaves room for the workspace root under a file system's 4096-byte path limit (README §4.2) |
 | a file (or directory member) the workspace does not admit | refused (*recording only*) | An extension outside `ALLOWED_EXTENSIONS` (for example `.sh`, `.toml`, none) or over 500 MB: apply's `admission_refusal` would refuse it |
 | a file path equal to a directory path without its `/` | refused (*recording only*) | e.g. `data/guide.md` with `data/guide.md/`: the Manifest's duplicate check compares the raw strings, but apply writes both to `data/guide.md`, and both would have the gene path `resources/data/guide.md` |
 | a path beneath a file entry | refused (*recording only*) | e.g. `data/guide.md` with `data/guide.md/notes.csv`: the Manifest checks nesting only beneath directory entries, but apply writes the file and then cannot write beneath it |

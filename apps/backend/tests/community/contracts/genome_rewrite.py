@@ -45,6 +45,8 @@ def strip_common(a: Sequence[str], b: Sequence[str]) -> tuple[int, Sequence[str]
 
 def lcs_length(a: Sequence[str], b: Sequence[str]) -> int:
     """Exact length of the longest common subsequence of two line lists, in O(N * M) work at most."""
+    if len(b) > len(a):
+        a, b = b, a  # LCS is symmetric; keep the table's row on the shorter side
     n, m = len(a), len(b)
     if n == 0 or m == 0:
         return 0
@@ -67,7 +69,7 @@ def lcs_length(a: Sequence[str], b: Sequence[str]) -> int:
 
 
 def _lcs_table(a: Sequence[str], b: Sequence[str]) -> int:
-    """The O(N * M) dynamic programme, one row at a time."""
+    """The O(N * M) dynamic programme, one row of len(b) + 1 cells at a time (b is the shorter side)."""
     row = [0] * (len(b) + 1)
     for line in a:
         diagonal = 0
