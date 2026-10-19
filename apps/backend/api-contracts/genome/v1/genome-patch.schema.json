@@ -55,8 +55,9 @@
       "oneOf": [{"type": "string", "maxLength": 65536}, {"$ref": "#/definitions/digestRef"}]
     },
     "unifiedDiff": {
-      "description": "Hunks only, starting at '@@'; no ---/+++ headers; no fuzz (README §6.2).",
+      "description": "Hunks only, starting at '@@'; no ---/+++ headers; no fuzz (README §6.2). Inline text like content: maxLength bounds code points, and the 64 KiB UTF-8 byte limit is checked when the patch is recorded; a larger change is sent as whole-file content by digest.",
       "type": "string",
+      "maxLength": 65536,
       "pattern": "^@@ -[0-9]+(,[0-9]+)? \\+[0-9]+(,[0-9]+)? @@"
     },
     "skillFilePath": {
@@ -165,9 +166,10 @@
         "op": {"description": "Marks this op shape.", "const": "skill.update"},
         "name": {"$ref": "genome-revision.schema.json#/definitions/skillName", "description": "The skill to change."},
         "file_diffs": {
-          "description": "Unified diffs to existing text files of the skill.",
+          "description": "Unified diffs to existing text files of the skill; at most one per file, so at most the package's 500 files.",
           "type": "array",
           "minItems": 1,
+          "maxItems": 500,
           "items": {
             "description": "One file's diff.",
             "type": "object",

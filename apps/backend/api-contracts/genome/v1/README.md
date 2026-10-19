@@ -555,7 +555,9 @@ matters for resources, whose add and remove are T1.
   because they need a tenant and an MCP registry; RSI-03 covers them with
   fakes of those services.
 - Limits mirror the Manifest: 50 entries per category, 64 KiB of UTF-8 per
-  inline content value,
+  inline content value and per unified diff (a change that needs more is
+  sent as whole-file content by digest), at most 500 `file_diffs` in a
+  `skill.update`,
   and the fetch-time size limits for skills (100 MiB), files (100 MiB) and
   trees (200 MiB, 5000 files).
 
