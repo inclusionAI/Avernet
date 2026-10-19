@@ -35,7 +35,7 @@
 {
   "bot_id": "service_bot_id",
   "runtime_stage": "online",
-  "device_id": "runtime_device_uuid",
+  "device_uuid": "runtime_device_uuid",
   "operator_id": "caller_staff_id",
   "name": "每日汇总",
   "schedule": "0 9 * * *",
@@ -45,14 +45,14 @@
 }
 ```
 
-device_id 的 API 含义明确为运行实例 UUID，对接内部 device_uuid；不是 binding_id、BaaS Bot UUID、设备表自增 ID 或 ARCA shell ID。如果调用方目前传的是其他 ID，需要在既有设备服务内明确转换，不能猜测。内部已有 device_uuid 查询契约时统一名称或作为兼容别名；同时提供且不一致应拒绝。
+device_uuid 的 API 含义明确为运行实例 UUID，对接内部 device_uuid；不是 binding_id、BaaS Bot UUID、设备表自增 ID 或 ARCA shell ID。如果调用方目前传的是其他 ID，需要在既有设备服务内明确转换，不能猜测。接口仅使用 device_uuid，不再声明第二个实例字段或别名。
 
-创建流程：真实登录用户权限校验 → 校验 operator_id → 选择服务/Caller binding → 校验 device_id 属于该 binding 和运行态 → 固定单个 CronRuntimeTarget → 原传输接口调用一次。
+创建流程：真实登录用户权限校验 → 校验 operator_id → 选择服务/Caller binding → 校验 device_uuid 属于该 binding 和运行态 → 固定单个 CronRuntimeTarget → 原传输接口调用一次。
 
-- 常规服务 Bot：通过既有发布记录选择 draft/verify/online binding，再验证并锁定一个 device_uuid。多实例创建缺少 device_id 时拒绝，不能随机选或广播。
-- Caller 服务 Bot：operator_id 作为 actor_user_id，选择该 Caller 已有实例 binding；不自动创建或唤醒 Caller 容器。device_id 必须属于该 Caller，不能拿父服务实例替代。
+- 常规服务 Bot：通过既有发布记录选择 draft/verify/online binding，再验证并锁定一个 device_uuid。多实例创建缺少 device_uuid 时拒绝，不能随机选或广播。
+- Caller 服务 Bot：operator_id 作为 actor_user_id，选择该 Caller 已有实例 binding；不自动创建或唤醒 Caller 容器。device_uuid 必须属于该 Caller，不能拿父服务实例替代。
 - operator_id 不替换真实登录用户 user.staffId，也不替换 Bot owner_id。本人创建可默认当前登录用户；代建需通过现有 Bot 管理授权，没有代建权限则拒绝。日志同时记录真实操作者和创建人。
-- 显式给出错误 stage、Caller、device_id 或不可用 binding 时明确失败，不回退到草稿或其他容器。
+- 显式给出错误 stage、Caller、device_uuid 或不可用 binding 时明确失败，不回退到草稿或其他容器。
 - 个人 Bot 和未使用新参数的旧请求保留既有草稿路径；服务 Bot 的预发/生产创建必须明确目标。前端配套提交选择的 stage 和实例。
 - RuntimeBindingResolutionService 的 Caller 分支目前按 Caller 当前实例查找，并不自动建立“每个 stage 一个 Caller 实例”的映射。必须明确所选 Caller 实例对应哪个发布运行态；若既有元数据不能证明，则拒绝不匹配请求，不声称 stage 已验证。
 
@@ -69,7 +69,7 @@ result = await service.create_cron(
     nick_name=effective_nick_name,
     body=adapter_body,
     runtime_stage=data.get("runtime_stage", "draft"),
-    device_id=data.get("device_id"),
+    device_uuid=data.get("device_uuid"),
     operator_id=data.get("operator_id") or user.staffId,
     authenticated_user_id=user.staffId,
 )
@@ -94,7 +94,7 @@ resolved = self._runtime_binding_service.resolve(
     )
 )
 # 使用既有设备 provider 验证实例属于 resolved.binding_id。
-# 将验证过的 device_id 映射成 CronRuntimeTarget.device_uuid。
+# 将验证过的 device_uuid 映射成 CronRuntimeTarget.device_uuid。
 target = replace(base_target, binding_id=resolved.binding_id,
                  device_uuid=validated_device_uuid)
 return await self._forward_runtime_target_request(
@@ -106,11 +106,11 @@ base_target 必须使用本次 resolved binding 构造，不能预先走旧草�
 
 cron_runtime_targets.py:228 的 _resolve_runtime_context 也必须沿用锁定 binding。Caller 即使 stage=draft，仍调用既有 device_context_resolver.resolve_for_binding(binding_id, authenticated_user_id, bot_id=bot_id, device_uuid=...)，不能再走父 Bot 的默认草稿 resolver。device_context_resolver.py:106 已提供此接口。
 
-创建响应保留原任务结果，并附 runtime_stage、device_id、operator_id，供后续管理定位。不扩张数据库 schema，不重写 Engine/Relay 调度器。
+创建响应保留原任务结果，并附 runtime_stage、device_uuid、operator_id，供后续管理定位。不扩张数据库 schema，不重写 Engine/Relay 调度器。
 
 ### 3. 单实例管理
 
-detail/update/delete/run/runs/running 使用相同目标字段和领域解析。显式 device_id 时只操作该容器；删除解除发布态禁止的前提是已验证单个目标。已存在的聚合列表/批量启停兼容路径保留，但不得套用到新任务的单实例操作。前端保存创建返回的目标字段并用于后续请求；列表行携带实例信息。
+detail/update/delete/run/runs/running 使用相同目标字段和领域解析。显式 device_uuid 时只操作该容器；删除解除发布态禁止的前提是已验证单个目标。已存在的聚合列表/批量启停兼容路径保留，但不得套用到新任务的单实例操作。前端保存创建返回的目标字段并用于后续请求；列表行携带实例信息。
 
 ### 4. 发布不携带任务，目标任务保持原样
 
@@ -131,7 +131,7 @@ detail/update/delete/run/runs/running 使用相同目标字段和领域解析。
 
 ## Review 与验证计划
 
-1. 本人/获授权代建/无权代建；Caller A 的 device_id 不可创建到 Caller B 或父服务；不存在/不可用 Caller 不回退。
+1. 本人/获授权代建/无权代建；Caller A 的 device_uuid 不可创建到 Caller B 或父服务；不存在/不可用 Caller 不回退。
 2. draft/verify/online 三个已存在 binding，各只调用一次目标 transport；多实例 A/B 中仅 A 获得新任务；错误设备及缺实例拒绝。
 3. create 返回目标字段，detail/update/delete/run 使用同一字段只命中原实例；没有无意广播或修改既有聚合查询语义。
 4. 草稿有任务、预发和生产各有独立任务：发布后制品无任务，目标原任务内容不变；新扩容实例无任务；旧含任务制品的 cp/rsync 安装都不会导入任务。
@@ -146,8 +146,12 @@ detail/update/delete/run/runs/running 使用相同目标字段和领域解析。
 本方案消除跨阶段、跨实例的任务复制；不保证网络重试创建的幂等性，也不保证容器内执行 exactly-once。固定容器任务不随销毁/替换自动迁移；如需容灾迁移须另定义持久化与调度语义。
 
 ## 2026-10-11 编码补充
-用户已批准编码、rebase到dev、创建PR和修复CI，且确认新建隔离worktree。Avernet编码基线使用GitHub dev 193256c75，OCB 42ace7eceb，daas 20dede54。旧无目标参数请求保留草稿父服务；显式Caller定向创建只接受online，verify/draft不伪装为Caller隔离环境。device_id映射内部device_uuid，指定实例管理走同一解析。前端位于OCB corp，独立PR；源码先GitHub，镜像可验证后再更新gitlink。
+用户已批准编码、rebase到dev、创建PR和修复CI，且确认新建隔离worktree。Avernet编码基线使用GitHub dev 193256c75，OCB 42ace7eceb，daas 20dede54。旧无目标参数请求保留草稿父服务；显式Caller定向创建只接受online，verify/draft不伪装为Caller隔离环境。device_uuid映射内部device_uuid，指定实例管理走同一解析。前端位于OCB corp，独立PR；源码先GitHub，镜像可验证后再更新gitlink。
 
 ## 2026-10-19 字段更名
 
 按用户要求，本文接口字段已统一为operator_id，替代原create_by_id；它仍表示任务创建人/Caller身份。真实登录操作者在内部单独使用authenticated_user_id，不能由请求字段覆盖。详见012-operator-id-rename.md。
+
+## 2026-10-19 实例字段统一
+
+Cron请求/响应统一device_uuid，不再输出device_id兼容字段；底层设备对象原生device_id不属于本次API改名范围。详见013-device-uuid-unification.md。

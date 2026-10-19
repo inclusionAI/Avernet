@@ -64,7 +64,7 @@ async def test_creation_locks_one_device_and_returns_target(stage):
         nick_name="Owner",
         body={"name": "Daily", "command": "Summarize"},
         runtime_stage=stage,
-        device_id="instance-a",
+        device_uuid="instance-a",
         authenticated_user_id="owner",
     )
     assert svc._transport.invoke.await_count == 1
@@ -73,9 +73,10 @@ async def test_creation_locks_one_device_and_returns_target(stage):
         99, "owner", bot_id="bot", device_uuid="instance-a"
     )
     assert result["data"]["runtime_stage"] == stage
-    assert result["data"]["device_id"] == "instance-a"
+    assert result["data"]["device_uuid"] == "instance-a"
     assert result["data"]["operator_id"] == "owner"
     assert "create_by_id" not in result["data"]
+    assert "device_id" not in result["data"]
 
 
 @pytest.mark.asyncio
@@ -88,7 +89,7 @@ async def test_caller_identity_is_not_authenticated_user_and_checks_delegation()
         nick_name="Owner",
         body={},
         runtime_stage="online",
-        device_id="instance-b",
+        device_uuid="instance-b",
         operator_id="caller",
         authenticated_user_id="admin",
     )
@@ -116,11 +117,11 @@ async def test_caller_identity_is_not_authenticated_user_and_checks_delegation()
 )
 async def test_failed_target_never_forwards_or_falls_back(failure, expected):
     svc = service(caller=failure == "caller_missing")
-    kwargs = dict(runtime_stage="online", device_id="instance-a", authenticated_user_id="owner")
+    kwargs = dict(runtime_stage="online", device_uuid="instance-a", authenticated_user_id="owner")
     if failure == "wrong_device":
-        kwargs["device_id"] = "foreign-instance"
+        kwargs["device_uuid"] = "foreign-instance"
     elif failure == "missing_device":
-        kwargs["device_id"] = None
+        kwargs["device_uuid"] = None
     elif failure == "delegation":
         kwargs["operator_id"] = "caller"
         svc._collaborators.check_permission.side_effect = PermissionError("Denied")
@@ -150,7 +151,7 @@ async def test_explicit_caller_stage_is_rejected(stage):
             nick_name="Owner",
             body={},
             runtime_stage=stage,
-            device_id="instance-a",
+            device_uuid="instance-a",
         )
     svc._runtime_bindings.resolve.assert_not_called()
     svc._transport.invoke.assert_not_called()
@@ -176,7 +177,7 @@ async def test_management_targets_original_container(operation):
         user_id="owner",
         nick_name="Owner",
         runtime_stage="online",
-        device_id="instance-a",
+        device_uuid="instance-a",
         operator_id="caller",
         authenticated_user_id="owner",
     )
@@ -204,7 +205,7 @@ async def test_single_instance_without_device_is_selected_once():
         body={},
         runtime_stage="online",
     )
-    assert result["data"]["device_id"] == "only-instance"
+    assert result["data"]["device_uuid"] == "only-instance"
     assert svc._transport.invoke.await_count == 1
 
 
@@ -234,7 +235,7 @@ async def test_transport_boundary_events_keep_session_key_and_exclude_credential
         user_id="owner",
         nick_name="Owner",
         runtime_stage="online",
-        device_id="instance-a",
+        device_uuid="instance-a",
     )
     await svc.create_cron(
         body={
@@ -277,11 +278,11 @@ async def test_single_provider_checks_device_identity(provider):
         body={},
         runtime_stage="online",
     )
-    await svc.create_cron(device_id="sandbox", **kwargs)
+    await svc.create_cron(device_uuid="sandbox", **kwargs)
     assert svc._transport.invoke.await_count == 1
     svc._device_provider.list_devices_by_runtime_binding.assert_not_called()
     with pytest.raises(CronRelayError) as exc:
-        await svc.create_cron(device_id="another-sandbox", **kwargs)
+        await svc.create_cron(device_uuid="another-sandbox", **kwargs)
     assert exc.value.error_code == 404
     assert svc._transport.invoke.await_count == 1
 
@@ -317,10 +318,10 @@ async def test_list_is_routed_to_caller_and_decorates_every_row():
         user_id="owner",
         nick_name="Owner",
         runtime_stage="online",
-        device_id="instance-a",
+        device_uuid="instance-a",
         operator_id="caller",
     )
-    assert [row["device_id"] for row in result["data"]] == ["instance-a", "instance-a"]
+    assert [row["device_uuid"] for row in result["data"]] == ["instance-a", "instance-a"]
     assert [row["operator_id"] for row in result["data"]] == ["caller", "caller"]
     assert svc._transport.invoke.await_count == 1
     with pytest.raises(CronRelayError):
@@ -329,7 +330,7 @@ async def test_list_is_routed_to_caller_and_decorates_every_row():
             user_id="owner",
             nick_name="Owner",
             runtime_stage="online",
-            device_id="instance-a",
+            device_uuid="instance-a",
         )
 
 
@@ -351,7 +352,7 @@ async def test_adapter_failure_preserves_result_and_records_failure(monkeypatch)
         nick_name="Owner",
         body={},
         runtime_stage="online",
-        device_id="instance-a",
+        device_uuid="instance-a",
     )
     assert result == {"success": False, "message": "rejected", "data": None}
     output = "\n".join(call.args[0] % call.args[1:] for call in log.mock_calls)
@@ -388,7 +389,7 @@ async def test_target_failure_does_not_claim_transport_was_called(monkeypatch):
             nick_name="Owner",
             body={},
             runtime_stage="online",
-            device_id="wrong-instance",
+            device_uuid="wrong-instance",
         )
     output = "\n".join(call.args[0] % call.args[1:] for call in log.mock_calls)
     assert "cron.failure" in output
@@ -410,10 +411,10 @@ async def test_running_rows_keep_caller_target_metadata():
         user_id="owner",
         nick_name="Owner",
         runtime_stage="online",
-        device_id="instance-a",
+        device_uuid="instance-a",
         operator_id="caller",
     )
-    assert result["data"][0]["device_id"] == "instance-a"
+    assert result["data"][0]["device_uuid"] == "instance-a"
     assert result["data"][0]["operator_id"] == "caller"
 
 

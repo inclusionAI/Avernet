@@ -228,7 +228,6 @@ class CronRuntimeTargetMixin:
             item["publish_status"] = target.publish_status
         if target.device_uuid:
             item["device_uuid"] = target.device_uuid
-            item["device_id"] = target.device_uuid
         if target.operator_id:
             item["operator_id"] = target.operator_id
 

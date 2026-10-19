@@ -36,7 +36,6 @@ _CRON_LOG_FIELDS = {
     "runtime",
     "append_message",
     "runtime_stage",
-    "device_id",
     "device_uuid",
     "operator_id",
     "sessionKey",
@@ -79,7 +78,7 @@ class CronTargetedOperationsMixin:
         bot_id: str,
         user_id: str,
         runtime_stage: str,
-        device_id: str | None,
+        device_uuid: str | None,
         operator_id: str | None,
         authenticated_user_id: str,
     ) -> tuple[dict, CronRuntimeTarget]:
@@ -141,29 +140,29 @@ class CronTargetedOperationsMixin:
             except Exception as exc:
                 raise CronRelayError("Runtime device query failed", 409) from exc
             # COSEC: Membership is checked against the resolved Caller/stage binding.
-            if device_id and device_id not in devices:
+            if device_uuid and device_uuid not in devices:
                 raise CronRelayError(
-                    "device_id does not belong to the requested runtime binding", 404
+                    "device_uuid does not belong to the requested runtime binding", 404
                 )
-            if not device_id:
+            if not device_uuid:
                 if len(devices) != 1:
                     raise CronRelayError(
-                        "device_id is required for a multi-instance runtime", 400
+                        "device_uuid is required for a multi-instance runtime", 400
                     )
-                device_id = devices[0]
-        elif device_id:
+                device_uuid = devices[0]
+        elif device_uuid:
             # Single-instance providers expose their existing device identity on the binding.
-            if device_id != self._read_field(device, "device_id"):
+            if device_uuid != self._read_field(device, "device_id"):
                 raise CronRelayError(
-                    "device_id does not belong to the requested runtime binding", 404
+                    "device_uuid does not belong to the requested runtime binding", 404
                 )
-        target = replace(target, device_uuid=device_id)
+        target = replace(target, device_uuid=device_uuid)
         logger.info(
-            "cron.target.resolved bot_id=%s stage=%s binding_id=%s device_id=%s operator_id=%s authenticated_user_id=%s",
+            "cron.target.resolved bot_id=%s stage=%s binding_id=%s device_uuid=%s operator_id=%s authenticated_user_id=%s",
             bot_id,
             runtime_stage,
             target.binding_id,
-            device_id,
+            device_uuid,
             creator,
             authenticated_user_id,
         )
@@ -175,7 +174,7 @@ class CronTargetedOperationsMixin:
         bot_id: str,
         user_id: str,
         runtime_stage: str,
-        device_id: str | None = None,
+        device_uuid: str | None = None,
         operator_id: str | None = None,
         authenticated_user_id: str | None = None,
         method: str,
@@ -189,7 +188,7 @@ class CronTargetedOperationsMixin:
         fields = dict(
             bot_id=bot_id,
             runtime_stage=runtime_stage,
-            device_id=device_id,
+            device_uuid=device_uuid,
             operator_id=operator_id or authenticated_user,
             authenticated_user_id=authenticated_user,
             method=method,
@@ -209,7 +208,7 @@ class CronTargetedOperationsMixin:
                 bot_id=bot_id,
                 user_id=user_id,
                 runtime_stage=runtime_stage,
-                device_id=device_id,
+                device_uuid=device_uuid,
                 operator_id=operator_id,
                 authenticated_user_id=authenticated_user,
             )
@@ -238,7 +237,6 @@ class CronTargetedOperationsMixin:
             if isinstance(result.get("data"), dict):
                 result["data"].update(
                     runtime_stage=target.runtime_stage,
-                    device_id=target.device_uuid,
                     device_uuid=target.device_uuid,
                     operator_id=target.operator_id,
                 )

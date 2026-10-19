@@ -20,11 +20,11 @@ from tests.community.framework import (
     "target",
     [
         {"runtime_stage": "production"},
-        {"runtime_stage": "online", "device_id": 123},
+        {"runtime_stage": "online", "device_uuid": 123},
         {"runtime_stage": "online", "operator_id": ""},
         {"runtime_stage": "online", "operator_id": 123},
-        {"runtime_stage": "online", "device_id": "a", "device_uuid": "b"},
-        {"device_id": "a"},
+        {"runtime_stage": "online", "device_uuid": ""},
+        {"device_uuid": "a"},
         {"operator_id": "caller"},
     ],
 )
@@ -33,11 +33,12 @@ def test_target_schema_rejects_invalid_fields(target):
         CronTargetRequest(**target)
 
 
-def test_target_schema_normalizes_matching_aliases():
-    target = CronTargetRequest(runtime_stage="online", device_id="a", device_uuid="a")
-    assert target.device_id == "a"
-    assert CronTargetRequest(runtime_stage="draft", device_uuid="a").device_id == "a"
-    assert CronTargetRequest().device_id is None
+def test_target_schema_accepts_canonical_uuid():
+    target = CronTargetRequest(runtime_stage="online", device_uuid="a")
+    assert target.device_uuid == "a"
+    assert CronTargetRequest(runtime_stage="draft", device_uuid="a").device_uuid == "a"
+    assert CronTargetRequest().device_uuid is None
+    assert "device_id" not in CronTargetRequest.model_json_schema()["properties"]
 
 
 @endpoint_test(
@@ -50,13 +51,14 @@ def test_target_schema_normalizes_matching_aliases():
             "bot_id": "bot_test",
             "runtime_stage": "draft",
             "operator_id": "u_owner",
+            "device_uuid": "local_dev_test",
             "name": "Daily",
             "schedule": "0 9 * * *",
             "command": "Summarize",
         },
     ),
     seed=_seed_bot_with_owner,
-    expect=ExpectSuccess(status=200, json_contains={"success": True, "data": {"operator_id": "u_owner"}}),
+    expect=ExpectSuccess(status=200, json_contains={"success": True, "data": {"operator_id": "u_owner", "device_uuid": "local_dev_test"}}),
 )
 def create_explicit_draft():
     """The actual DI service resolves the existing local binding."""
@@ -65,21 +67,20 @@ def create_explicit_draft():
 @endpoint_test(
     method="POST",
     path="/api/cron",
-    scenario="invalid_target_aliases",
+    scenario="invalid_target_uuid",
     input=CaseInput(
         headers={"x-user-id": "u_owner"},
         json_body={
             "bot_id": "bot_test",
             "runtime_stage": "online",
-            "device_id": "a",
-            "device_uuid": "b",
+            "device_uuid": 123,
         },
     ),
     seed=_seed_bot_with_owner,
     expect=ExpectError(status=200, json_contains={"success": False, "error_code": 400}),
 )
-def create_invalid_aliases():
-    """Conflicting instance aliases are rejected before domain forwarding."""
+def create_invalid_uuid():
+    """Invalid instance UUIDs are rejected before domain forwarding."""
 
 
 @endpoint_test(
@@ -108,6 +109,7 @@ def create_invalid_stage():
             "owner_id": "u_owner",
             "runtime_stage": "draft",
             "operator_id": "u_owner",
+            "device_uuid": "local_dev_test",
             "name": "Daily",
             "schedule": "0 9 * * *",
             "command": "Summarize",
@@ -143,6 +145,7 @@ def _seed_member_with_lock(world):
             "owner_id": "u_owner",
             "runtime_stage": "draft",
             "operator_id": "u_owner",
+            "device_uuid": "local_dev_test",
             "authenticated_user_id": "u_owner",
             "name": "Unauthorized delegation",
             "schedule": "0 9 * * *",
@@ -166,6 +169,7 @@ def create_operator_cannot_spoof_authenticated_user():
             "bot_id": "bot_test",
             "runtime_stage": "draft",
             "operator_id": "u_owner",
+            "device_uuid": "local_dev_test",
         },
     ),
     seed=_seed_bot_with_owner,
@@ -184,14 +188,13 @@ def list_targeted_crons():
         query_params={
             "bot_id": "bot_test",
             "runtime_stage": "draft",
-            "device_id": "a",
-            "device_uuid": "b",
+            "device_uuid": "",
         },
     ),
     seed=_seed_bot_with_owner,
     expect=ExpectError(status=200, json_contains={"success": False, "error_code": 400}),
 )
-def list_invalid_alias():
+def list_invalid_uuid():
     """Listing retains business-error status for target validation."""
 
 
@@ -206,6 +209,7 @@ def list_invalid_alias():
             "bot_id": "bot_test",
             "runtime_stage": "draft",
             "operator_id": "u_owner",
+            "device_uuid": "local_dev_test",
         },
     ),
     seed=_seed_bot_with_owner,
@@ -226,6 +230,7 @@ def detail_targeted_cron():
             "bot_id": "bot_test",
             "runtime_stage": "draft",
             "operator_id": "u_owner",
+            "device_uuid": "local_dev_test",
         },
         json_body={"name": "Updated"},
     ),
@@ -247,6 +252,7 @@ def update_targeted_cron():
             "bot_id": "bot_test",
             "runtime_stage": "draft",
             "operator_id": "u_owner",
+            "device_uuid": "local_dev_test",
         },
     ),
     seed=_seed_bot_with_owner,
@@ -267,6 +273,7 @@ def delete_targeted_cron():
             "bot_id": "bot_test",
             "runtime_stage": "draft",
             "operator_id": "u_owner",
+            "device_uuid": "local_dev_test",
             "force": True,
         },
     ),
@@ -288,6 +295,7 @@ def run_targeted_cron():
             "bot_id": "bot_test",
             "runtime_stage": "draft",
             "operator_id": "u_owner",
+            "device_uuid": "local_dev_test",
         },
     ),
     seed=_seed_bot_with_owner,
@@ -307,6 +315,7 @@ def runs_targeted_cron():
             "bot_id": "bot_test",
             "runtime_stage": "draft",
             "operator_id": "u_owner",
+            "device_uuid": "local_dev_test",
         },
     ),
     seed=_seed_bot_with_owner,
@@ -341,6 +350,7 @@ def _seed_with_adapter_failure(world):
             "bot_id": "bot_test",
             "runtime_stage": "draft",
             "operator_id": "u_owner",
+            "device_uuid": "local_dev_test",
         },
     ),
     seed=_seed_with_adapter_failure,
