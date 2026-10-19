@@ -331,6 +331,62 @@ describe('repair workbench control service', () => {
     expect((await f.service.task(created.taskId)).latestAttempt.phase).toBe('drafting');
     expect((await f.service.task(created.taskId)).execution?.status).toBe('dispatched');
   });
+  const modelInput = (taskId: string, itemId = 'item-0') => ({ itemId, coreInput: 'Exact application prompt', materials: {
+    schemaVersion: 'repair-local-materials/v1', taskId, revision: 1, root: '/ais/repair-materials/one',
+    files: [{ kind: 'item', path: 'item.json', bytes: 42, sha256: 'a'.repeat(64), purpose: 'Read original goal', itemIds: [itemId] }],
+  } });
+  const invalidModelInputs: Array<[string, (entry: ReturnType<typeof modelInput>) => unknown]> = [
+    ['non-array records', entry => entry],
+    ['null records', () => null],
+    ['missing item ID', entry => [Object.fromEntries(Object.entries(entry).filter(([key]) => key !== 'itemId'))]],
+    ['unknown item ID', entry => [{ ...entry, itemId: 'not-selected' }]],
+    ['duplicate item records', entry => [entry, entry]],
+    ['empty core prompt', entry => [{ ...entry, coreInput: '  ' }]],
+    ['partially corrupt records', entry => [entry, null]],
+    ['null material index', entry => [{ ...entry, materials: null }]],
+    ['array material index', entry => [{ ...entry, materials: [] }]],
+    ['incomplete material index', entry => [{ ...entry, materials: {} }]],
+    ['unknown material schema', entry => [{ ...entry, materials: { ...entry.materials, schemaVersion: 'unknown' } }]],
+    ['another task index', entry => [{ ...entry, materials: { ...entry.materials, taskId: 'another-task' } }]],
+    ['another revision index', entry => [{ ...entry, materials: { ...entry.materials, revision: 2 } }]],
+    ['missing material root', entry => [{ ...entry, materials: { ...entry.materials, root: '' } }]],
+    ['non-array file index', entry => [{ ...entry, materials: { ...entry.materials, files: {} } }]],
+    ['null file entry', entry => [{ ...entry, materials: { ...entry.materials, files: [null] } }]],
+    ['negative material bytes', entry => [{ ...entry, materials: { ...entry.materials, files: [{ ...entry.materials.files[0], bytes: -1 }] } }]],
+    ['invalid material hash', entry => [{ ...entry, materials: { ...entry.materials, files: [{ ...entry.materials.files[0], sha256: 'invalid' }] } }]],
+    ['unknown material source', entry => [{ ...entry, materials: { ...entry.materials, files: [{ ...entry.materials.files[0], itemIds: ['not-selected'] }] } }]],
+    ['duplicate material sources', entry => [{ ...entry, materials: { ...entry.materials, files: [{ ...entry.materials.files[0], itemIds: ['item-0', 'item-0'] }] } }]],
+    ['duplicate material paths', entry => [{ ...entry, materials: { ...entry.materials, files: [entry.materials.files[0], entry.materials.files[0]] } }]],
+  ];
+  it.each(invalidModelInputs)('rejects %s even with a matching candidate digest, leaving the revision unsettled', async (_name, corrupt) => {
+    const f = await setup();
+    const created = await f.service.create('human', f.request);
+    const draft = { candidateCommit: 'd'.repeat(40), parentCandidateCommit: created.input.baseline.packCommit, packDigest: 'e'.repeat(40),
+      itemResults: f.items.map(item => ({ itemId: item.itemId, status: 'changed', reason: 'Fixed' })), modelInputs: corrupt(modelInput(created.taskId)) };
+    const checks = { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit, packDigest: draft.packDigest,
+      candidateDigest: digestRepairJson(draft), static: { status: 'passed' }, mock: { status: 'not_covered' }, coverage: f.items.map(item => ({ itemId: item.itemId })) };
+    await expect(f.service.report({ workflowId: 'wf-1', taskId: created.taskId, revision: 1, expectedStateVersion: 0, status: 'succeeded', draft, checks })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    const task = await f.service.task(created.taskId);
+    expect(task.latestAttempt).toMatchObject({ phase: 'drafting', draft: null, checks: null, stateVersion: 0 });
+    expect(task.execution?.status).toBe('dispatched');
+  });
+  it.each(['omitted', 'empty', 'multiple', 'integrated'])('preserves %s model inputs through report validation and persistence', async mode => {
+    const f = await setup();
+    const created = await f.service.create('human', f.request);
+    const first = modelInput(created.taskId);
+    first.materials.files[0].itemIds = ['item-0', 'item-1'];
+    first.materials.files.push({ ...first.materials.files[0], kind: 'engine-reference', path: 'engine.json', itemIds: [] });
+    const records = mode === 'empty' ? [] : mode === 'multiple' ? [first, modelInput(created.taskId, 'item-1')] : [first];
+    const draft = { candidateCommit: 'd'.repeat(40), parentCandidateCommit: created.input.baseline.packCommit, packDigest: 'e'.repeat(40),
+      itemResults: f.items.map(item => ({ itemId: item.itemId, status: 'changed', reason: 'Fixed' })), ...(mode === 'omitted' ? {} : { modelInputs: records }) };
+    const checks = { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit, packDigest: draft.packDigest,
+      candidateDigest: digestRepairJson(draft), static: { status: 'passed' }, mock: { status: 'not_covered' }, coverage: f.items.map(item => ({ itemId: item.itemId })) };
+    await f.service.report({ workflowId: 'wf-1', taskId: created.taskId, revision: 1, expectedStateVersion: 0, status: 'succeeded', draft, checks });
+    const task = await f.service.task(created.taskId);
+    expect(task.latestAttempt.draft).toEqual(draft);
+    expect(task.latestAttempt.checks?.candidateDigest).toBe(digestRepairJson(draft));
+    expect(task.latestAttempt.input).toEqual(created.input);
+  });
   it('polls the stored AIS job and settles a Git-backed result without a callback', async () => {
     const f = await setup();
     const created = await f.service.create('human', f.request);

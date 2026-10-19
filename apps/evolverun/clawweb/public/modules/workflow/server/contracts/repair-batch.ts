@@ -91,6 +91,32 @@ function digest(value: unknown): value is string { return typeof value === 'stri
 function gitObject(value: unknown): value is string { return typeof value === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value); }
 function gitIdentity(value: unknown, max: number): value is string { return text(value, max) && /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(value); }
 
+/** Validate optional AIS display records against this frozen task before persisting the result. */
+export function validateRepairModelInputs(value: unknown, input: RepairBatchInput): void {
+  if (value === undefined) return;
+  valid(Array.isArray(value), 'modelInputs');
+  const itemIds = new Set(input.items.map(item => item.itemId));
+  const seen = new Set<string>();
+  for (const entry of value) {
+    valid(object(entry) && text(entry.itemId, 64) && itemIds.has(entry.itemId) && !seen.has(entry.itemId)
+      && text(entry.coreInput, MAX_RESULT_BYTES), 'modelInputs record');
+    seen.add(entry.itemId);
+    const materials = entry.materials;
+    valid(object(materials) && materials.schemaVersion === 'repair-local-materials/v1'
+      && materials.taskId === input.taskId && materials.revision === input.revision
+      && text(materials.root, 4096) && Array.isArray(materials.files), 'modelInputs materials');
+    const paths = new Set<string>();
+    for (const file of materials.files) {
+      valid(object(file) && text(file.kind, 64) && text(file.path, 4096) && !paths.has(file.path)
+        && integer(file.bytes) && digest(file.sha256) && text(file.purpose, 4000)
+        && Array.isArray(file.itemIds), 'modelInputs material file');
+      valid(file.itemIds.every(id => text(id, 64) && itemIds.has(id))
+        && new Set(file.itemIds).size === file.itemIds.length, 'modelInputs material sources');
+      paths.add(file.path);
+    }
+  }
+}
+
 export function validateSourceRef(value: unknown): SourceRef {
   valid(object(value), 'source');
   if (value.kind === 'suggestion') {

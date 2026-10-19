@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { repairStage } from '../observability/repair-diagnostics.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import {
-  RepairBatchError, boundedRepairJson, canonicalRepairJson, digestRepairJson, validateRepairItem, validateRepairItemStructure,
+  RepairBatchError, boundedRepairJson, canonicalRepairJson, digestRepairJson, validateRepairItem, validateRepairItemStructure, validateRepairModelInputs,
   MAX_ITEMS, MAX_REQUEST_BYTES, MAX_INSTRUCTIONS_CHARS, MAX_RESULT_BYTES, MAX_REPORT_BYTES,
   type RepairBatchInput, type RepairItem, type RepairRevision, type StoredRepairItem,
 } from '../contracts/repair-batch.js';
@@ -796,6 +796,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       else {
         boundedRepairJson(input.draft, MAX_RESULT_BYTES); boundedRepairJson(input.checks, MAX_REPORT_BYTES);
         const draft = input.draft; const checks = input.checks;
+        validateRepairModelInputs(draft.modelInputs, current.input);
         const ids = current.input.items.map(item => item.itemId).sort();
         const itemResults = draft.itemResults as Array<{ itemId: string; status: string; reason: string }>;
         const coverage = checks.coverage as Array<{ itemId: string }>;
