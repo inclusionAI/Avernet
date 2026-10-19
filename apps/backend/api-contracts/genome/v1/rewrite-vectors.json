@@ -1,553 +1,311 @@
 {
-  "description": "Test vectors for the rewrite measure (README §6.3), with the numerator, denominator and lcs_cell_limit of risk-tiers.json. a and b are a file's lines in the base and after the patch, written as runs [line, count] so long files stay short: [[\"x\", 3]] is three lines \"x\". lcs is given when the remaining cells are within the limit; flagged is the rewrite flag. A vector gives either a and b, or a_text and b_text, the file text before and after, which is split into lines by README §6.3's rule.",
+  "description": "Test vectors for the rewrite measure (README §6.3), using the numerator, denominator and lcs_cell_limit of risk-tiers.json. README §6.3 explains how to read this file, with a worked example.",
+  "how_to_read": {
+    "entry": "Every entry is one test: give the rewrite measure 'input' and check that it produces 'expected'. 'name' and 'note' are labels only; 'note' shows the arithmetic.",
+    "input": "The file before the patch and after it, in one of two forms. 'a' and 'b' are the lines, written as runs [line, count] so long files stay short: [[\"x\", 3]] is the three lines \"x\", \"x\", \"x\". 'a_text' and 'b_text' are the file text, which is split into lines by README §6.3's rule; these entries test the splitting.",
+    "expected": "over_cell_limit: whether, after stripping the common prefix and suffix, the lines left in a times the lines left in b exceed lcs_cell_limit, in which case the change is flagged without computing the LCS. lcs: the length of the longest common subsequence of a and b, given only when the cells are within the limit. flagged: whether the change is a rewrite."
+  },
   "vectors": [
     {
       "name": "identical",
-      "a": [
-        [
-          "line 0",
-          1
-        ],
-        [
-          "line 1",
-          1
-        ],
-        [
-          "line 2",
-          1
-        ],
-        [
-          "line 3",
-          1
-        ],
-        [
-          "line 4",
-          1
-        ],
-        [
-          "line 5",
-          1
-        ],
-        [
-          "line 6",
-          1
-        ],
-        [
-          "line 7",
-          1
-        ],
-        [
-          "line 8",
-          1
-        ],
-        [
-          "line 9",
-          1
-        ]
-      ],
-      "b": [
-        [
-          "line 0",
-          1
-        ],
-        [
-          "line 1",
-          1
-        ],
-        [
-          "line 2",
-          1
-        ],
-        [
-          "line 3",
-          1
-        ],
-        [
-          "line 4",
-          1
-        ],
-        [
-          "line 5",
-          1
-        ],
-        [
-          "line 6",
-          1
-        ],
-        [
-          "line 7",
-          1
-        ],
-        [
-          "line 8",
-          1
-        ],
-        [
-          "line 9",
-          1
-        ]
-      ],
-      "over_cell_limit": false,
-      "flagged": false,
       "note": "no line changed",
-      "lcs": 10
+      "input": {
+        "a": [
+          ["line 0", 1],
+          ["line 1", 1],
+          ["line 2", 1],
+          ["line 3", 1],
+          ["line 4", 1],
+          ["line 5", 1],
+          ["line 6", 1],
+          ["line 7", 1],
+          ["line 8", 1],
+          ["line 9", 1]
+        ],
+        "b": [
+          ["line 0", 1],
+          ["line 1", 1],
+          ["line 2", 1],
+          ["line 3", 1],
+          ["line 4", 1],
+          ["line 5", 1],
+          ["line 6", 1],
+          ["line 7", 1],
+          ["line 8", 1],
+          ["line 9", 1]
+        ]
+      },
+      "expected": {
+        "over_cell_limit": false,
+        "lcs": 10,
+        "flagged": false
+      }
     },
     {
       "name": "both-empty",
-      "a": [],
-      "b": [],
-      "over_cell_limit": false,
-      "flagged": false,
       "note": "a file empty before and after is never flagged",
-      "lcs": 0
+      "input": {
+        "a": [],
+        "b": []
+      },
+      "expected": {
+        "over_cell_limit": false,
+        "lcs": 0,
+        "flagged": false
+      }
     },
     {
       "name": "created-from-empty",
-      "a": [],
-      "b": [
-        [
-          "a",
-          1
-        ],
-        [
-          "b",
-          1
-        ],
-        [
-          "c",
-          1
-        ]
-      ],
-      "over_cell_limit": false,
-      "flagged": true,
       "note": "every line is new",
-      "lcs": 0
+      "input": {
+        "a": [],
+        "b": [
+          ["a", 1],
+          ["b", 1],
+          ["c", 1]
+        ]
+      },
+      "expected": {
+        "over_cell_limit": false,
+        "lcs": 0,
+        "flagged": true
+      }
     },
     {
       "name": "two-of-ten-replaced",
-      "a": [
-        [
-          "line 0",
-          1
-        ],
-        [
-          "line 1",
-          1
-        ],
-        [
-          "line 2",
-          1
-        ],
-        [
-          "line 3",
-          1
-        ],
-        [
-          "line 4",
-          1
-        ],
-        [
-          "line 5",
-          1
-        ],
-        [
-          "line 6",
-          1
-        ],
-        [
-          "line 7",
-          1
-        ],
-        [
-          "line 8",
-          1
-        ],
-        [
-          "line 9",
-          1
-        ]
-      ],
-      "b": [
-        [
-          "line 0",
-          1
-        ],
-        [
-          "line 1",
-          1
-        ],
-        [
-          "line 2",
-          1
-        ],
-        [
-          "new 3",
-          1
-        ],
-        [
-          "new 4",
-          1
-        ],
-        [
-          "line 5",
-          1
-        ],
-        [
-          "line 6",
-          1
-        ],
-        [
-          "line 7",
-          1
-        ],
-        [
-          "line 8",
-          1
-        ],
-        [
-          "line 9",
-          1
-        ]
-      ],
-      "over_cell_limit": false,
-      "flagged": false,
       "note": "changed 4/20 = 1/5, under 2/5",
-      "lcs": 8
+      "input": {
+        "a": [
+          ["line 0", 1],
+          ["line 1", 1],
+          ["line 2", 1],
+          ["line 3", 1],
+          ["line 4", 1],
+          ["line 5", 1],
+          ["line 6", 1],
+          ["line 7", 1],
+          ["line 8", 1],
+          ["line 9", 1]
+        ],
+        "b": [
+          ["line 0", 1],
+          ["line 1", 1],
+          ["line 2", 1],
+          ["new 3", 1],
+          ["new 4", 1],
+          ["line 5", 1],
+          ["line 6", 1],
+          ["line 7", 1],
+          ["line 8", 1],
+          ["line 9", 1]
+        ]
+      },
+      "expected": {
+        "over_cell_limit": false,
+        "lcs": 8,
+        "flagged": false
+      }
     },
     {
       "name": "four-of-ten-replaced",
-      "a": [
-        [
-          "line 0",
-          1
-        ],
-        [
-          "line 1",
-          1
-        ],
-        [
-          "line 2",
-          1
-        ],
-        [
-          "line 3",
-          1
-        ],
-        [
-          "line 4",
-          1
-        ],
-        [
-          "line 5",
-          1
-        ],
-        [
-          "line 6",
-          1
-        ],
-        [
-          "line 7",
-          1
-        ],
-        [
-          "line 8",
-          1
-        ],
-        [
-          "line 9",
-          1
-        ]
-      ],
-      "b": [
-        [
-          "line 0",
-          1
-        ],
-        [
-          "line 1",
-          1
-        ],
-        [
-          "line 2",
-          1
-        ],
-        [
-          "n3",
-          1
-        ],
-        [
-          "n4",
-          1
-        ],
-        [
-          "n5",
-          1
-        ],
-        [
-          "n6",
-          1
-        ],
-        [
-          "line 7",
-          1
-        ],
-        [
-          "line 8",
-          1
-        ],
-        [
-          "line 9",
-          1
-        ]
-      ],
-      "over_cell_limit": false,
-      "flagged": false,
       "note": "changed 8/20 = exactly 2/5: not flagged, the rule is strictly greater",
-      "lcs": 6
+      "input": {
+        "a": [
+          ["line 0", 1],
+          ["line 1", 1],
+          ["line 2", 1],
+          ["line 3", 1],
+          ["line 4", 1],
+          ["line 5", 1],
+          ["line 6", 1],
+          ["line 7", 1],
+          ["line 8", 1],
+          ["line 9", 1]
+        ],
+        "b": [
+          ["line 0", 1],
+          ["line 1", 1],
+          ["line 2", 1],
+          ["n3", 1],
+          ["n4", 1],
+          ["n5", 1],
+          ["n6", 1],
+          ["line 7", 1],
+          ["line 8", 1],
+          ["line 9", 1]
+        ]
+      },
+      "expected": {
+        "over_cell_limit": false,
+        "lcs": 6,
+        "flagged": false
+      }
     },
     {
       "name": "five-of-ten-replaced",
-      "a": [
-        [
-          "line 0",
-          1
-        ],
-        [
-          "line 1",
-          1
-        ],
-        [
-          "line 2",
-          1
-        ],
-        [
-          "line 3",
-          1
-        ],
-        [
-          "line 4",
-          1
-        ],
-        [
-          "line 5",
-          1
-        ],
-        [
-          "line 6",
-          1
-        ],
-        [
-          "line 7",
-          1
-        ],
-        [
-          "line 8",
-          1
-        ],
-        [
-          "line 9",
-          1
-        ]
-      ],
-      "b": [
-        [
-          "line 0",
-          1
-        ],
-        [
-          "line 1",
-          1
-        ],
-        [
-          "line 2",
-          1
-        ],
-        [
-          "n3",
-          1
-        ],
-        [
-          "n4",
-          1
-        ],
-        [
-          "n5",
-          1
-        ],
-        [
-          "n6",
-          1
-        ],
-        [
-          "n7",
-          1
-        ],
-        [
-          "line 8",
-          1
-        ],
-        [
-          "line 9",
-          1
-        ]
-      ],
-      "over_cell_limit": false,
-      "flagged": true,
       "note": "changed 10/20 = 1/2, over 2/5",
-      "lcs": 5
+      "input": {
+        "a": [
+          ["line 0", 1],
+          ["line 1", 1],
+          ["line 2", 1],
+          ["line 3", 1],
+          ["line 4", 1],
+          ["line 5", 1],
+          ["line 6", 1],
+          ["line 7", 1],
+          ["line 8", 1],
+          ["line 9", 1]
+        ],
+        "b": [
+          ["line 0", 1],
+          ["line 1", 1],
+          ["line 2", 1],
+          ["n3", 1],
+          ["n4", 1],
+          ["n5", 1],
+          ["n6", 1],
+          ["n7", 1],
+          ["line 8", 1],
+          ["line 9", 1]
+        ]
+      },
+      "expected": {
+        "over_cell_limit": false,
+        "lcs": 5,
+        "flagged": true
+      }
     },
     {
       "name": "overlap-prefix-and-suffix",
-      "a": [
-        [
-          "x",
-          2
-        ]
-      ],
-      "b": [
-        [
-          "x",
-          1
-        ]
-      ],
-      "over_cell_limit": false,
-      "flagged": false,
       "note": "prefix first: the prefix takes the shared x, nothing is left for the suffix; LCS 1",
-      "lcs": 1
+      "input": {
+        "a": [
+          ["x", 2]
+        ],
+        "b": [
+          ["x", 1]
+        ]
+      },
+      "expected": {
+        "over_cell_limit": false,
+        "lcs": 1,
+        "flagged": false
+      }
     },
     {
       "name": "overlap-double-count-trap",
-      "a": [
-        [
-          "x",
-          5
-        ]
-      ],
-      "b": [
-        [
-          "x",
-          1
-        ]
-      ],
-      "over_cell_limit": false,
-      "flagged": true,
       "note": "LCS 1, changed 4/6. Stripping prefix and suffix independently would count the one x twice (LCS 2, changed 2/6) and not flag it",
-      "lcs": 1
+      "input": {
+        "a": [
+          ["x", 5]
+        ],
+        "b": [
+          ["x", 1]
+        ]
+      },
+      "expected": {
+        "over_cell_limit": false,
+        "lcs": 1,
+        "flagged": true
+      }
     },
     {
       "name": "cell-limit-equal",
-      "a": [
-        [
-          "u",
-          1
-        ],
-        [
-          "x",
-          4094
-        ],
-        [
-          "w",
-          1
-        ]
-      ],
-      "b": [
-        [
-          "v",
-          1
-        ],
-        [
-          "x",
-          4094
-        ],
-        [
-          "z",
-          1
-        ]
-      ],
-      "over_cell_limit": false,
-      "flagged": false,
       "note": "nothing to strip; 4096 * 4096 = 2^24 is not over the limit, so the exact LCS (4094) decides: changed 4/8192, not flagged",
-      "lcs": 4094
+      "input": {
+        "a": [
+          ["u", 1],
+          ["x", 4094],
+          ["w", 1]
+        ],
+        "b": [
+          ["v", 1],
+          ["x", 4094],
+          ["z", 1]
+        ]
+      },
+      "expected": {
+        "over_cell_limit": false,
+        "lcs": 4094,
+        "flagged": false
+      }
     },
     {
       "name": "cell-limit-exceeded",
-      "a": [
-        [
-          "u",
-          1
+      "note": "4096 * 4097 > 2^24: flagged without computing the LCS, although the exact measure would not flag it",
+      "input": {
+        "a": [
+          ["u", 1],
+          ["x", 4094],
+          ["w", 1]
         ],
-        [
-          "x",
-          4094
-        ],
-        [
-          "w",
-          1
+        "b": [
+          ["v", 1],
+          ["x", 4095],
+          ["z", 1]
         ]
-      ],
-      "b": [
-        [
-          "v",
-          1
-        ],
-        [
-          "x",
-          4095
-        ],
-        [
-          "z",
-          1
-        ]
-      ],
-      "over_cell_limit": true,
-      "flagged": true,
-      "note": "4096 * 4097 > 2^24: flagged without computing the LCS, although the exact measure would not flag it"
+      },
+      "expected": {
+        "over_cell_limit": true,
+        "flagged": true
+      }
     },
     {
       "name": "text-empty-to-newline",
-      "a_text": "",
-      "b_text": "\n",
-      "over_cell_limit": false,
-      "flagged": true,
       "note": "\"\" is no lines and \"\\n\" is one empty line: every line is new, flagged",
-      "lcs": 0
+      "input": {
+        "a_text": "",
+        "b_text": "\n"
+      },
+      "expected": {
+        "over_cell_limit": false,
+        "lcs": 0,
+        "flagged": true
+      }
     },
     {
       "name": "text-final-newline-added",
-      "a_text": "a",
-      "b_text": "a\n",
-      "over_cell_limit": false,
-      "flagged": false,
       "note": "\"a\" and \"a\\n\" are both [\"a\"]: no line changed",
-      "lcs": 1
+      "input": {
+        "a_text": "a",
+        "b_text": "a\n"
+      },
+      "expected": {
+        "over_cell_limit": false,
+        "lcs": 1,
+        "flagged": false
+      }
     },
     {
       "name": "text-cr-is-part-of-the-line",
-      "a_text": "a\nb\n",
-      "b_text": "a\r\nb\n",
-      "over_cell_limit": false,
-      "flagged": true,
       "note": "only \\n splits; \"a\\r\" differs from \"a\": changed 2/4",
-      "lcs": 1
+      "input": {
+        "a_text": "a\nb\n",
+        "b_text": "a\r\nb\n"
+      },
+      "expected": {
+        "over_cell_limit": false,
+        "lcs": 1,
+        "flagged": true
+      }
     },
     {
       "name": "asymmetric-within-cell-limit",
-      "a": [
-        [
-          "x",
-          1
-        ]
-      ],
-      "b": [
-        [
-          "y",
-          65536
-        ]
-      ],
-      "over_cell_limit": false,
-      "flagged": true,
       "note": "1 * 65536 is within the limit, so the LCS is computed exactly (0); an implementation must stay bounded here, where Myers' D is about N + M",
-      "lcs": 0
+      "input": {
+        "a": [
+          ["x", 1]
+        ],
+        "b": [
+          ["y", 65536]
+        ]
+      },
+      "expected": {
+        "over_cell_limit": false,
+        "lcs": 0,
+        "flagged": true
+      }
     }
   ]
 }

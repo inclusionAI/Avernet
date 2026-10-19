@@ -187,13 +187,59 @@ record into the same bytes, or they compute different revision ids for the
 same bot. Reading this section is not enough to be sure of that, so
 [`canonical-json-vectors.json`](canonical-json-vectors.json) gives worked
 answers to check an implementation against. A *test vector* is one input
-with the exact output it must produce. The file has three lists:
+with the exact output it must produce.
 
-| List | Each entry gives | An implementation passes when |
-| --- | --- | --- |
-| `canonical` | `input` (any JSON text), `canonical` (its canonical form), `sha256` | Canonicalizing `input` gives exactly `canonical`, byte for byte, and hashing that gives `sha256` |
-| `rejected` | `input` that is outside the subset: a float (even `1.0`), an integer beyond ±(2^53 − 1), a lone surrogate, a duplicate member name | Canonicalizing `input` is refused |
-| `revision_ids` | a `spec` and a `policy`, their combined `canonical` form, and the `revision_id` | JCS of `{"policy", "spec"}` is exactly `canonical`, and its hash is `revision_id` |
+Every entry in the file has the same shape: `input` is what you give the
+implementation, `expected` is what it must produce, and `name` and `note` are
+only labels. The file has three lists:
+
+| List | `input` | `expected` | An implementation passes when |
+| --- | --- | --- | --- |
+| `canonical` | a JSON text, as a string | `canonical`: the canonical JSON text; `sha256`: the hash of its UTF-8 bytes | Canonicalizing `input` gives exactly `expected.canonical`, byte for byte, and hashing that gives `expected.sha256` |
+| `rejected` | a JSON text, as a string, outside the subset: a float (even `1.0`), an integer beyond ±(2^53 − 1), a lone surrogate, a duplicate member name | `rejected: true` and a `reason` | Canonicalizing `input` is refused |
+| `revision_ids` | `spec` and `policy`, as JSON values | `canonical`: the canonical JSON text of `{"policy": …, "spec": …}`; `revision_id`: its hash (§3.2) | Canonicalizing gives exactly `expected.canonical`, and the revision id is `expected.revision_id` |
+
+**Why some inputs are strings.** In `canonical` and `rejected`, `input` is a
+JSON *string* whose content is JSON text, not a JSON value. These tests are
+about how the text is written: key order, spacing, `"€"` versus `"€"`,
+`1.0` versus `1`, a key written twice. Storing the input as a parsed value
+would lose exactly those details. The cost is a second layer of escaping, so
+decode the string once to see the text the implementation reads.
+`expected.canonical` is stored the same way, because it is also text.
+
+**A worked example.** The `whitespace-and-nesting` entry in the file:
+
+```json
+{
+  "name": "whitespace-and-nesting",
+  "input": "{ \"b\" : [ 1 , {\"z\":0,\"a\":-1} ], \"a\" : {} }",
+  "expected": {
+    "canonical": "{\"a\":{},\"b\":[1,{\"a\":-1,\"z\":0}]}",
+    "sha256": "sha256:05ee04a7e74a969e714e571ba91c43f942230fff8a885d6ef10cc9b7ee0257b5"
+  }
+}
+```
+
+1. Decode `input` once. This is the text the implementation reads:
+   `{ "b" : [ 1 , {"z":0,"a":-1} ], "a" : {} }`
+2. The implementation parses it and writes it back canonically. It removes
+   the spaces and sorts every object's keys, including the nested one. It
+   does not reorder the array. The output is:
+   `{"a":{},"b":[1,{"a":-1,"z":0}]}`
+3. That output must equal `expected.canonical` once decoded, byte for byte.
+4. The SHA-256 of those bytes, encoded as UTF-8, must equal
+   `expected.sha256`.
+
+A `rejected` entry such as `{"n":1.0}` passes when step 2 refuses the input.
+A `revision_ids` entry starts from step 2: its `input.spec` and
+`input.policy` are already values. They are wrapped as
+`{"policy": …, "spec": …}`, and the hash in step 4 is the revision id.
+
+Some expected texts contain characters you cannot see. In
+`rfc8785-3.2.3-sorting`, the key whose value is `"Control"` is U+0080, and
+`control-characters` ends with U+007F. Both are written as the raw
+character, not escaped, because RFC 8785 escapes only characters below
+U+0020.
 
 The `canonical` entries include RFC 8785's own examples, such as member
 sorting by UTF-16 code units, which is where implementations most often
@@ -553,6 +599,35 @@ every implementation reaches the same answer:
 implementation must reach, including a change of exactly 2/5 (not flagged), a
 prefix and suffix that would overlap if stripped independently, and the
 products exactly at and one row over `lcs_cell_limit`.
+
+Every entry in that file has the same shape: `input` is the file before and
+after the patch, `expected` is what the measure must produce, and `name` and
+`note` are only labels. `input` gives the lines as `a` and `b`, written as
+runs `[line, count]` so long files stay short (`[["x", 3]]` is three lines
+`"x"`). A few entries give the raw text as `a_text` and `b_text` instead, to
+test the line-splitting rule. `expected` gives:
+
+- `over_cell_limit`: whether step 2 applies;
+- `lcs`: the LCS of the whole file, present only when step 3 runs;
+- `flagged`: the answer.
+
+**A worked example.** The `five-of-ten-replaced` entry in the file, with its
+`[line, 1]` runs written out as plain lines:
+
+```text
+input.a: line 0, line 1, line 2, line 3, line 4, line 5, line 6, line 7, line 8, line 9
+input.b: line 0, line 1, line 2, n3,     n4,     n5,     n6,     n7,     line 8, line 9
+expected: over_cell_limit = false, lcs = 5, flagged = true
+```
+
+1. Strip the common prefix (`line 0`–`line 2`, 3 lines) and the common
+   suffix (`line 8`, `line 9`, 2 lines). 5 lines are left on each side.
+2. 5 × 5 = 25 cells is within `lcs_cell_limit`, so `over_cell_limit` is
+   false.
+3. The 5 lines left share nothing, so their LCS is 0. The whole file's LCS is
+   0 + 3 + 2 = 5, which is `expected.lcs`.
+4. `changed` = (10 + 10 − 2 × 5) / (10 + 10) = 10/20 = 1/2. That is over
+   2/5, so `flagged` is true.
 
 **Replacement.** A patch that removes an entry and adds an entry with the
 same gene path (§2: a persona type, a skill name, or a resource path with

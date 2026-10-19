@@ -376,20 +376,22 @@ _VECTORS = _load(_CONTRACT / "canonical-json-vectors.json")
 @pytest.mark.parametrize("vector", _VECTORS["canonical"], ids=lambda v: v["name"])
 def test_canonical_json_vectors(vector: dict[str, Any]) -> None:
     canonical = canonicalize(loads_strict(vector["input"]))
-    assert canonical.decode("utf-8") == vector["canonical"]
-    assert sha256_digest(canonical) == vector["sha256"]
+    assert canonical.decode("utf-8") == vector["expected"]["canonical"]
+    assert sha256_digest(canonical) == vector["expected"]["sha256"]
 
 
 @pytest.mark.parametrize("vector", _VECTORS["rejected"], ids=lambda v: v["name"])
 def test_canonical_json_rejections(vector: dict[str, Any]) -> None:
+    assert vector["expected"]["rejected"] is True
     with pytest.raises(NotCanonicalizable):
         canonicalize(loads_strict(vector["input"]))
 
 
 @pytest.mark.parametrize("vector", _VECTORS["revision_ids"], ids=lambda v: v["name"])
 def test_revision_id_vectors(vector: dict[str, Any]) -> None:
-    assert canonicalize({"spec": vector["spec"], "policy": vector["policy"]}).decode() == vector["canonical"]
-    assert revision_id(vector["spec"], vector["policy"]) == vector["revision_id"]
+    spec, policy = vector["input"]["spec"], vector["input"]["policy"]
+    assert canonicalize({"spec": spec, "policy": policy}).decode() == vector["expected"]["canonical"]
+    assert revision_id(spec, policy) == vector["expected"]["revision_id"]
 
 
 # --------------------------------------------------------------------------------------------
@@ -405,19 +407,20 @@ def _expand(runs: list[list[Any]]) -> list[str]:
 @pytest.mark.parametrize("vector", _REWRITE["vectors"], ids=lambda v: v["name"])
 def test_rewrite_vectors(vector: dict[str, Any]) -> None:
     threshold = _RISK_TIERS["rewrite_threshold"]
-    if "a_text" in vector:
-        a, b = to_lines(vector["a_text"]), to_lines(vector["b_text"])
+    given, expected = vector["input"], vector["expected"]
+    if "a_text" in given:
+        a, b = to_lines(given["a_text"]), to_lines(given["b_text"])
     else:
-        a, b = _expand(vector["a"]), _expand(vector["b"])
+        a, b = _expand(given["a"]), _expand(given["b"])
     _, rest_a, rest_b = strip_common(a, b)
-    assert (len(rest_a) * len(rest_b) > threshold["lcs_cell_limit"]) == vector["over_cell_limit"]
-    if "lcs" in vector:
-        assert len(a) - len(rest_a) + lcs_length(rest_a, rest_b) == vector["lcs"]
+    assert (len(rest_a) * len(rest_b) > threshold["lcs_cell_limit"]) == expected["over_cell_limit"]
+    if "lcs" in expected:
+        assert len(a) - len(rest_a) + lcs_length(rest_a, rest_b) == expected["lcs"]
     flagged = rewrite_flagged(
         a, b, numerator=threshold["numerator"], denominator=threshold["denominator"],
         cell_limit=threshold["lcs_cell_limit"],
     )
-    assert flagged == vector["flagged"], vector["note"]
+    assert flagged == expected["flagged"], vector["note"]
 
 
 # --------------------------------------------------------------------------------------------
