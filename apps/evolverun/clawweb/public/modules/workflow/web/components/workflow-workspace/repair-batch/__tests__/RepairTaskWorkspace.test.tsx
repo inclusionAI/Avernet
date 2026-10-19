@@ -54,7 +54,7 @@ it('keeps latest recovery separate from a selected historical candidate and show
  expect(screen.getByText(/最新尝试 v2/)).toBeVisible();
  await userEvent.selectOptions(screen.getByRole('combobox',{name:'查看修复版本'}),'2');
  expect(screen.getByText('所选版本 v2：生成失败')).toBeVisible();
- expect(screen.queryByRole('button',{name:'发布此版本'})).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'审阅并发布'})).not.toBeInTheDocument();
  expect(api.publish).not.toHaveBeenCalled();
 });
 it('explains an intermediate automatic no-change batch without claiming the round is ready',async()=>{
@@ -62,7 +62,7 @@ it('explains an intermediate automatic no-change batch without claiming the roun
  detail.automaticProgress={completedBatches:1,totalBatches:3,changedItems:1,publishable:false};mount(detail);
  expect(screen.getByText('本批无需新增修改，整轮仍在核对。')).toBeVisible();
  expect(screen.queryByText('本轮无需重新发布')).not.toBeInTheDocument();
- expect(screen.queryByRole('button',{name:'发布此版本'})).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'审阅并发布'})).not.toBeInTheDocument();
 });
 it('summarizes real checks and outcomes before folded reports and retains diff retry',async()=>{
  api.diff.mockRejectedValueOnce(new Error('controlled diff unavailable')).mockResolvedValue({files:[],truncated:false});mount();
@@ -78,7 +78,7 @@ it('persists the inspection tab across a close and reopen without opening the sc
  expect(screen.getByRole('heading',{name:'本版处理范围'})).toBeVisible();
 });
 it('allows read-only navigation but disables publish and source editing',async()=>{
- mount(fixture(),{canEdit:false});expect(await screen.findByRole('button',{name:'发布此版本'})).toBeDisabled();
+ mount(fixture(),{canEdit:false});expect(await screen.findByRole('button',{name:'审阅并发布'})).toBeDisabled();
  await userEvent.click(screen.getByRole('tab',{name:'问题与方案'}));
  expect(screen.getByText('当前只有查看权限。')).toBeVisible();expect(screen.queryByRole('button',{name:'调整范围与要求'})).not.toBeInTheDocument();
  await userEvent.click(screen.getByRole('tab',{name:'效果观察'}));expect(screen.getByRole('button',{name:'查看候选与发布'})).toBeEnabled();
@@ -87,20 +87,20 @@ it('retains the same publication request after a lost response and inspection ta
  api.deploymentTargets.mockResolvedValue({targets:[{id:'workflow:pre:wf',scope:'workflow',label:'工作流 wf',environment:'pre'}]});
  api.publish.mockRejectedValueOnce(new Error('controlled lost response')).mockResolvedValue({status:'running'});
  mount();const user=userEvent.setup();
- await user.click(await screen.findByRole('button',{name:'发布此版本'}));
+ await user.click(await screen.findByRole('button',{name:'审阅并发布'}));
  await screen.findByText('工作流 wf');await user.click(screen.getByRole('checkbox'));
- await user.click(screen.getByRole('button',{name:'确认发布'}));await screen.findByRole('alert');
+ await user.click(screen.getByRole('button',{name:'确认审阅并发布'}));await screen.findByRole('alert');
  const request=api.publish.mock.calls[0];
  await user.click(screen.getByRole('tab',{name:'问题与方案'}));await user.click(screen.getByRole('tab',{name:'效果观察'}));await user.click(screen.getByRole('tab',{name:'候选与发布'}));
  expect(screen.getByRole('checkbox')).toBeChecked();expect(api.publish).toHaveBeenCalledTimes(1);
- await user.click(screen.getByRole('button',{name:'确认发布'}));await waitFor(()=>expect(api.publish).toHaveBeenCalledTimes(2));
+ await user.click(screen.getByRole('button',{name:'确认审阅并发布'}));await waitFor(()=>expect(api.publish).toHaveBeenCalledTimes(2));
  expect(api.publish.mock.calls[1]).toEqual(request);
 });
 it('does not attach a late publication error to a different selected revision',async()=>{
  const detail=fixture();const old={...detail.latestAttempt,revision:0};detail.revisions.push(old);
  api.deploymentTargets.mockResolvedValue({targets:[{id:'workflow:pre:wf',scope:'workflow',label:'工作流 wf',environment:'pre'}]});
  let fail!:(error:Error)=>void;api.publish.mockImplementationOnce(()=>new Promise((_resolve,reject)=>{fail=reject}));
- mount(detail);const user=userEvent.setup();await user.click(await screen.findByRole('button',{name:'发布此版本'}));await screen.findByText('工作流 wf');await user.click(screen.getByRole('checkbox'));await user.click(screen.getByRole('button',{name:'确认发布'}));
+ mount(detail);const user=userEvent.setup();await user.click(await screen.findByRole('button',{name:'审阅并发布'}));await screen.findByText('工作流 wf');await user.click(screen.getByRole('checkbox'));await user.click(screen.getByRole('button',{name:'确认审阅并发布'}));
  await user.selectOptions(screen.getByRole('combobox',{name:'查看修复版本'}),'0');
  fail(new Error('error belongs only to v1'));await waitFor(()=>expect(screen.queryByText('提交中…')).not.toBeInTheDocument());
  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
