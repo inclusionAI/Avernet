@@ -16,6 +16,10 @@
 - `SessionFileApplicationServiceImpl`, which selects a Human or owned Bot
   actor, authorizes Session membership and file mutations, enriches legacy
   file commands, and orchestrates best-effort completion notifications.
+- `GroupContextAddAccessGuard`, which resolves the Group/Session boundary,
+  verifies Group or current-Session membership, validates the
+  `{sessionId}:{round}` format, and delegates all Group Context operations to
+  the underlying application service.
 
 ## Consumes
 
@@ -59,12 +63,15 @@
 
 ## Runtime ownership
 
-This crate owns V1 Session and Session File authorization and orchestration.
-For files, it enforces membership and the owner-or-owning-Human mutation rule
-before storage mutation, and sends completion notification only after a
-successful lifecycle transition. Delivery adapters may translate HTTP and
-WebSocket requests into these contracts but must not reimplement session/file
-authorization or token policy.
+This crate owns V1 Session, Session File, and the public Group Context add
+resource-membership gate. The Group Context gate reads the persisted Session
+at request time so dynamically invited Session participants remain allowed;
+Group Context storage and field-policy semantics stay in the Group Context
+application service. For files, it enforces membership and the
+owner-or-owning-Human mutation rule before storage mutation, and sends
+completion notification only after a successful lifecycle transition. Delivery
+adapters may translate HTTP and WebSocket requests into these contracts but
+must not reimplement session/file authorization or token policy.
 
 ## Tests
 

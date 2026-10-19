@@ -15,22 +15,12 @@ pub fn resolve_scope(
     request_context: &GroupContextRequestContext,
     scope_level: ScopeLevel,
 ) -> Result<ResolvedScope, ApplicationError> {
-    require_non_empty("groupId", &request_context.group_id)?;
-    let scope = match scope_level {
-        ScopeLevel::Group => request_context.group_id.clone(),
-        ScopeLevel::Session => request_context
-            .session_id
-            .as_deref()
-            .ok_or_else(|| missing("sessionId"))
-            .and_then(|value| non_empty_value("sessionId", value))?
-            .to_string(),
-        ScopeLevel::Round => request_context
-            .round_id
-            .as_deref()
-            .ok_or_else(|| missing("roundId"))
-            .and_then(|value| non_empty_value("roundId", value))?
-            .to_string(),
+    let (field, raw_scope) = match scope_level {
+        ScopeLevel::Group => ("groupId", request_context.group_id.as_deref()),
+        ScopeLevel::Session => ("sessionId", request_context.session_id.as_deref()),
+        ScopeLevel::Round => ("roundId", request_context.round_id.as_deref()),
     };
+    let scope = non_empty_scope_value(field, raw_scope, scope_level)?.to_string();
     Ok(ResolvedScope { scope_level, scope })
 }
 
@@ -45,23 +35,43 @@ pub fn resolve_scopes(
         .collect()
 }
 
-fn require_non_empty(field: &str, value: &str) -> Result<(), ApplicationError> {
-    non_empty_value(field, value).map(|_| ())
-}
-
-fn non_empty_value<'a>(field: &str, value: &'a str) -> Result<&'a str, ApplicationError> {
+fn non_empty_scope_value<'a>(
+    field: &str,
+    value: Option<&'a str>,
+    scope_level: ScopeLevel,
+) -> Result<&'a str, ApplicationError> {
+    let Some(value) = value else {
+        return Err(missing_scope_value(field, scope_level));
+    };
     if value.trim().is_empty() {
-        return Err(missing(field));
+        return Err(missing_scope_value(field, scope_level));
     }
     if value.chars().count() > MAX_SCOPE_CHARS {
         return Err(ApplicationError::payload_too_large(
             PAYLOAD_TOO_LARGE,
-            format!("{field} exceeds {MAX_SCOPE_CHARS} characters"),
+            format!(
+                "param {field} exceeds {MAX_SCOPE_CHARS} characters when scope_level={}",
+                scope_level_name(scope_level)
+            ),
         ));
     }
     Ok(value)
 }
 
-fn missing(field: &str) -> ApplicationError {
-    ApplicationError::invalid(INVALID_PARAM, format!("{field} is required"))
+fn missing_scope_value(field: &str, scope_level: ScopeLevel) -> ApplicationError {
+    ApplicationError::invalid(
+        INVALID_PARAM,
+        format!(
+            "param {field} is required when scope_level={}",
+            scope_level_name(scope_level)
+        ),
+    )
+}
+
+fn scope_level_name(scope_level: ScopeLevel) -> &'static str {
+    match scope_level {
+        ScopeLevel::Group => "group",
+        ScopeLevel::Session => "session",
+        ScopeLevel::Round => "round",
+    }
 }

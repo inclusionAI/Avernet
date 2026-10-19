@@ -11,12 +11,14 @@
 
 mod connection;
 mod file;
+mod group_context_access;
 mod authorization;
 mod participant;
 mod message;
 
 pub use connection::GroupSessionConnectionServiceImpl;
 pub use file::SessionFileApplicationServiceImpl;
+pub use group_context_access::GroupContextAddAccessGuard;
 
 use std::collections::HashSet;
 use std::sync::Arc;

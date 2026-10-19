@@ -2638,8 +2638,12 @@ impl Default for BcsServerState {
         let provider_bot_events: Arc<dyn ProviderBotEventService> = provider_bot_events_impl;
         provider_transport.set_ingest(provider_event_ingest, bot_run_context.clone());
         let group_context_service: Arc<dyn bcs_service_api::GroupContextApplicationService> =
-            Arc::new(bcs_app_group_context::GroupContextApplicationServiceImpl::new(
-                Arc::new(bcs_group_context_store::MemoryGroupContextRepo::new()),
+            Arc::new(bcs_app_session::GroupContextAddAccessGuard::new(
+                Arc::new(bcs_app_group_context::GroupContextApplicationServiceImpl::new(
+                    Arc::new(bcs_group_context_store::MemoryGroupContextRepo::new()),
+                )),
+                sessions.clone(),
+                session_repo.clone(),
             ));
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())
@@ -4251,8 +4255,12 @@ impl BcsServer {
         let provider_bot_events: Arc<dyn ProviderBotEventService> = provider_bot_events_impl;
         provider_transport.set_ingest(provider_event_ingest, bot_run_context.clone());
         let group_context_service: Arc<dyn bcs_service_api::GroupContextApplicationService> =
-            Arc::new(bcs_app_group_context::GroupContextApplicationServiceImpl::new(
-                Arc::new(bcs_group_context_store::MemoryGroupContextRepo::new()),
+            Arc::new(bcs_app_session::GroupContextAddAccessGuard::new(
+                Arc::new(bcs_app_group_context::GroupContextApplicationServiceImpl::new(
+                    Arc::new(bcs_group_context_store::MemoryGroupContextRepo::new()),
+                )),
+                sessions.clone(),
+                session_repo.clone(),
             ));
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())
@@ -5192,8 +5200,12 @@ impl BcsServer {
             }
         };
         let group_context_service: Arc<dyn bcs_service_api::GroupContextApplicationService> =
-            Arc::new(bcs_app_group_context::GroupContextApplicationServiceImpl::new(
-                group_context_repo,
+            Arc::new(bcs_app_session::GroupContextAddAccessGuard::new(
+                Arc::new(bcs_app_group_context::GroupContextApplicationServiceImpl::new(
+                    group_context_repo,
+                )),
+                sessions.clone(),
+                session_repo.clone(),
             ));
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())

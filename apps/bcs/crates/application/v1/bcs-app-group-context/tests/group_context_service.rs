@@ -15,7 +15,7 @@ use chrono::{Duration, TimeZone, Utc};
 
 fn ctx() -> GroupContextRequestContext {
     GroupContextRequestContext {
-        group_id: "game-room-7".into(),
+        group_id: Some("game-room-7".into()),
         session_id: Some("sess-001".into()),
         round_id: Some("round-003".into()),
     }
@@ -126,6 +126,177 @@ async fn add_resolves_raw_scope_and_rejects_duplicate_active() {
 }
 
 #[tokio::test]
+async fn add_session_and_round_scope_do_not_require_group_id() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+
+    for (name, scope_level, expected_scope) in [
+        ("session_context", ScopeLevel::Session, "sess-001"),
+        ("round_context", ScopeLevel::Round, "round-003"),
+    ] {
+        let mut request_context = ctx();
+        request_context.group_id = None;
+
+        app.add(AddGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context,
+            name: name.into(),
+            scope_level,
+            content: "ok".into(),
+            visible_to: policy(&[]),
+            collect_from: policy(&["judge_bot"]),
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect("selected scope boundary is enough");
+
+        let active = repo
+            .get_active(name, expected_scope)
+            .await
+            .expect("store ok")
+            .expect("active row");
+        assert_eq!(active.scope_level, scope_level);
+        assert_eq!(active.scope, expected_scope);
+    }
+}
+
+#[tokio::test]
+async fn add_reports_missing_scope_boundary_with_scope_level() {
+    let app = service(Arc::new(MemoryGroupContextRepo::new()));
+
+    for (scope_level, mut request_context, expected_message) in [
+        (
+            ScopeLevel::Group,
+            ctx(),
+            "param groupId is required when scope_level=group",
+        ),
+        (
+            ScopeLevel::Session,
+            ctx(),
+            "param sessionId is required when scope_level=session",
+        ),
+        (
+            ScopeLevel::Round,
+            ctx(),
+            "param roundId is required when scope_level=round",
+        ),
+    ] {
+        request_context.group_id = None;
+        match scope_level {
+            ScopeLevel::Group => {
+                request_context.session_id = None;
+                request_context.round_id = None;
+            }
+            ScopeLevel::Session => request_context.session_id = None,
+            ScopeLevel::Round => request_context.round_id = None,
+        }
+
+        let error = app
+            .add(AddGroupContext {
+                actor_id: "judge_bot".into(),
+                request_context,
+                name: "boundary".into(),
+                scope_level,
+                content: "ok".into(),
+                visible_to: policy(&[]),
+                collect_from: policy(&["judge_bot"]),
+                valid_from: None,
+                valid_to: None,
+            })
+            .await
+            .expect_err("selected boundary is required");
+        assert!(
+            error.to_string().contains(&expected_message),
+            "error: {error}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn update_list_and_get_use_selected_scope_without_group_id() {
+    let app = service(Arc::new(MemoryGroupContextRepo::new()));
+
+    for (scope_level, request_context, expected_scope) in [
+        (
+            ScopeLevel::Session,
+            GroupContextRequestContext {
+                group_id: None,
+                session_id: Some("sess-001".into()),
+                round_id: None,
+            },
+            "sess-001",
+        ),
+        (
+            ScopeLevel::Round,
+            GroupContextRequestContext {
+                group_id: None,
+                session_id: None,
+                round_id: Some("round-003".into()),
+            },
+            "round-003",
+        ),
+    ] {
+        app.systemset(SystemSetGroupContext {
+            request_context: request_context.clone(),
+            name: "selected_scope".into(),
+            scope_level,
+            content: "initial".into(),
+            visible_to: policy(&[]),
+            collect_from: policy(&["judge_bot"]),
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect("seed succeeds");
+
+        app.update(UpdateGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context: request_context.clone(),
+            name: "selected_scope".into(),
+            scope_level,
+            content: Some("updated".into()),
+            change_reason: None,
+            visible_to: None,
+            collect_from: None,
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect("selected scope boundary is enough for update");
+
+        let get = app
+            .get(GetGroupContext {
+                actor_id: "张三".into(),
+                request_context: request_context.clone(),
+                name: "selected_scope".into(),
+                scope_levels: None,
+                limit: None,
+            })
+            .await
+            .expect("selected scope boundary is enough for get");
+        assert_eq!(get.items.len(), 1);
+        assert_eq!(get.items[0].content, "updated");
+
+        let list = app
+            .list(ListGroupContexts {
+                actor_id: "张三".into(),
+                request_context: request_context.clone(),
+                scope_levels: Some(vec![scope_level]),
+            })
+            .await
+            .expect("selected scope boundary is enough for list");
+        assert_eq!(
+            list.contexts
+                .iter()
+                .map(|item| item.scope.as_str())
+                .collect::<Vec<_>>(),
+            vec![expected_scope]
+        );
+    }
+}
+
+#[tokio::test]
 async fn add_validates_content_collect_from_actor_and_required_scope_params() {
     let app = service(Arc::new(MemoryGroupContextRepo::new()));
 
@@ -181,7 +352,7 @@ async fn add_validates_content_collect_from_actor_and_required_scope_params() {
         .add(AddGroupContext {
             actor_id: "judge_bot".into(),
             request_context: GroupContextRequestContext {
-                group_id: "game-room-7".into(),
+                group_id: Some("game-room-7".into()),
                 session_id: None,
                 round_id: None,
             },
@@ -207,7 +378,11 @@ fn add_for_validation(
 ) -> AddGroupContext {
     AddGroupContext {
         actor_id: actor_id.into(),
-        request_context: GroupContextRequestContext { group_id: group_id.into(), session_id: Some("sess-001".into()), round_id: Some("round-003".into()) },
+        request_context: GroupContextRequestContext {
+            group_id: Some(group_id.to_string()),
+            session_id: Some("sess-001".into()),
+            round_id: Some("round-003".into()),
+        },
         name: name.into(),
         scope_level: ScopeLevel::Group,
         content: "ok".into(),
@@ -913,7 +1088,7 @@ async fn get_without_scope_levels_queries_only_deepest_supplied_scope() {
         .get(GetGroupContext {
             actor_id: "张三".into(),
             request_context: GroupContextRequestContext {
-                group_id: "game-room-7".into(),
+                group_id: Some("game-room-7".into()),
                 session_id: None,
                 round_id: None,
             },
@@ -930,7 +1105,7 @@ async fn get_without_scope_levels_queries_only_deepest_supplied_scope() {
         .get(GetGroupContext {
             actor_id: "张三".into(),
             request_context: GroupContextRequestContext {
-                group_id: "game-room-7".into(),
+                group_id: Some("game-room-7".into()),
                 session_id: Some("sess-001".into()),
                 round_id: None,
             },
@@ -982,7 +1157,7 @@ async fn list_without_scope_levels_queries_only_deepest_supplied_scope() {
         .list(ListGroupContexts {
             actor_id: "张三".into(),
             request_context: GroupContextRequestContext {
-                group_id: "game-room-7".into(),
+                group_id: Some("game-room-7".into()),
                 session_id: None,
                 round_id: None,
             },
@@ -1003,7 +1178,7 @@ async fn list_without_scope_levels_queries_only_deepest_supplied_scope() {
         .list(ListGroupContexts {
             actor_id: "张三".into(),
             request_context: GroupContextRequestContext {
-                group_id: "game-room-7".into(),
+                group_id: Some("game-room-7".into()),
                 session_id: Some("sess-001".into()),
                 round_id: None,
             },

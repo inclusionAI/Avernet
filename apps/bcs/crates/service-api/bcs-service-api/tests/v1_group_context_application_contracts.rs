@@ -51,10 +51,19 @@ impl GroupContextApplicationService for NoopGroupContextService {
 
 fn request_context() -> GroupContextRequestContext {
     GroupContextRequestContext {
-        group_id: "game-room-7".into(),
+        group_id: Some("game-room-7".into()),
         session_id: Some("sess-001".into()),
         round_id: Some("round-1".into()),
     }
+}
+
+#[test]
+fn request_context_keeps_all_scope_ids_optional_without_a_default_value() {
+    let context = GroupContextRequestContext::default();
+
+    assert_eq!(context.group_id, None);
+    assert_eq!(context.session_id, None);
+    assert_eq!(context.round_id, None);
 }
 
 #[test]
@@ -79,12 +88,12 @@ fn scope_level_supports_exact_v1_values_and_rejects_unknown_values() {
 #[test]
 fn list_and_get_default_to_deepest_supplied_scope_level() {
     let group_only = GroupContextRequestContext {
-        group_id: "game-room-7".into(),
+        group_id: Some("game-room-7".into()),
         session_id: None,
         round_id: None,
     };
     let session_context = GroupContextRequestContext {
-        group_id: "game-room-7".into(),
+        group_id: Some("game-room-7".into()),
         session_id: Some("sess-001".into()),
         round_id: None,
     };

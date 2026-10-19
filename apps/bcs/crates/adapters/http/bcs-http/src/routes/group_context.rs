@@ -34,7 +34,7 @@ pub(crate) struct GroupContextQuery {
 impl GroupContextQuery {
     fn request_context(&self) -> GroupContextRequestContext {
         GroupContextRequestContext {
-            group_id: self.group_id.clone().unwrap_or_default(),
+            group_id: self.group_id.clone(),
             session_id: self.session_id.clone(),
             round_id: self.round_id.clone(),
         }

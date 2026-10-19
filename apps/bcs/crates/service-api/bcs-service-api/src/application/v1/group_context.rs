@@ -42,7 +42,7 @@ impl GroupContextAck {
 /// resolves `scope` from these raw ids according to the requested scope level.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct GroupContextRequestContext {
-    pub group_id: String,
+    pub group_id: Option<String>,
     pub session_id: Option<String>,
     pub round_id: Option<String>,
 }

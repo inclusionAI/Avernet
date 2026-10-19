@@ -27,10 +27,14 @@ historical rows are retained in storage.
 ## API
 
 The public HTTP/CLI surface exposes four POST endpoints: `add`, `update`,
-`list`, and `get`. `groupId` is always a required query parameter; `sessionId`
-and `roundId` are conditionally required. The current direct bcs-http path
-resolves the actor from the same trusted backend auth/header chain as
-`bcs-cli chat`; callers must not send actor id in the URL query or JSON body.
+`list`, and `get`. Requests require the boundary selected by `scope_level`:
+`groupId` for group, `sessionId` for session, and `roundId` for round. For
+session/round `add` writes, the server resolves the parent Group for resource
+authorization; a caller-supplied `groupId` is checked against that parent Group
+but is not required.
+The direct bcs-http path resolves the actor from the same trusted backend
+auth/header chain as `bcs-cli chat`; callers must not send actor id in the URL
+query or JSON body.
 
 `systemset` exists as an internal application/service operation for BCN system
 writes, but it is intentionally not mounted in the public HTTP router and is
@@ -43,7 +47,21 @@ resolved raw `scope` are limited to 255 characters, serialized policy JSON is
 limited to 4096 bytes, and `content` is limited to 4 KiB. Oversized values
 return `payload_too_large` before storage.
 
-Public write endpoints require the calling actor to be present in
+Public add requests are resource-authorized before the Group Context service
+writes a row. For `scope_level=group`, the actor must be a participant of that
+Group. For `scope_level=session`, the actor must be a participant of the parent
+Group or of the current persisted Session. For `scope_level=round`, the actor
+uses the same Group-or-Session rule after the server resolves the Session.
+
+A round id must start with `{sessionId}:`, have a non-empty round suffix, and
+contain no whitespace or control characters.
+The current Session id format is `{groupId}:suffix`, so deriving the session id
+from the first two round-id colon segments is stable. If an explicit
+`sessionId` is also supplied, it must identify the same Session as `roundId`;
+if `groupId` is supplied with a session/round write, it must match the
+Session's persisted parent Group.
+
+Public write endpoints also require the calling actor to be present in
 `collect_from.userIds`. The internal `systemset` service operation bypasses
 that check because it is invoked only from trusted BCN system/admin code.
 
